@@ -221,6 +221,13 @@ public:
         SAFE_CALL(return this->get_detail_data_by_name(name, info));
     }
 
+    tl::expected<DatasetPtr, Error>
+    GetRawVectorByIds(const int64_t* ids,
+                      int64_t count,
+                      Allocator* specified_allocator = nullptr) const override {
+        SAFE_CALL(return this->get_vectors_by_id(ids, count, specified_allocator));
+    }
+
 public:
     tl::expected<BinarySet, Error>
     Serialize() const override {
@@ -418,6 +425,9 @@ private:
 
     tl::expected<std::pair<int64_t, int64_t>, Error>
     get_min_and_max_id() const;
+
+    tl::expected<DatasetPtr, Error>
+    get_vectors_by_id(const int64_t* ids, int64_t count, Allocator* specified_allocator) const;
 
     bool
     check_id_exist(int64_t id) const;

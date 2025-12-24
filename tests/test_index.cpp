@@ -2244,84 +2244,91 @@ TestIndex::TestGetRawVectorByIds(const IndexPtr& index,
     }
 
     auto count = static_cast<int64_t>(dataset->count_);
-
-    // get with specifed memory allocator
-    {
-        vsag::DefaultAllocator allocator;
-        void* mem = nullptr;
-        {
-            auto res =
-                index->GetRawVectorByIds(dataset->base_->GetIds(), count, &allocator).value();
-
-            if (index->GetIndexType() == vsag::IndexType::SINDI or
-                index->GetIndexType() == vsag::IndexType::SPARSE) {
-                mem = (void*)res->GetSparseVectors();
-            } else {
-                mem = (void*)res->GetFloat32Vectors();
-            }
-        }
-
-        // free the vector memory after the dataset released
-        if (index->GetIndexType() == vsag::IndexType::SINDI or
-            index->GetIndexType() == vsag::IndexType::SPARSE) {
-            auto* sparse_vectors = (vsag::SparseVector*)mem;
-            for (int64_t i = 0; i < count; ++i) {
-                allocator.Deallocate(sparse_vectors[i].ids_);
-                sparse_vectors[i].ids_ = nullptr;
-                allocator.Deallocate(sparse_vectors[i].vals_);
-                sparse_vectors[i].vals_ = nullptr;
-            }
-            allocator.Deallocate(sparse_vectors);
-        } else {
-            auto* vectors = (float*)mem;
-            allocator.Deallocate(vectors);
-        }
-    }
-
-    // common case
-    auto vectors = index->GetRawVectorByIds(dataset->base_->GetIds(), count);
-    REQUIRE(vectors.has_value());
-
     vsag::IndexDetailInfo info;
     auto data_type = index->GetDetailDataByName("data_type", info).value()->GetDataScalarString();
 
-    if (data_type == vsag::DATATYPE_SPARSE) {
-        for (int i = 0; i < count; i++) {
-            // get single data
-            auto single_dataset = vsag::Dataset::Make();
-            auto sparse_vectors = vectors.value()->GetSparseVectors() + i;
-            single_dataset->SparseVectors(sparse_vectors)->NumElements(1)->Owner(false);
+    for (bool use_specific_allocator : {true, false}) {
+        // specific_allocator
+        vsag::DefaultAllocator allocator;
+        void* mem = nullptr;
+
+        // common case
+        auto vectors = index->GetRawVectorByIds(dataset->base_->GetIds(), count);
+        REQUIRE(vectors.has_value());
+
+        if (use_specific_allocator) {
+            vectors = index->GetRawVectorByIds(dataset->base_->GetIds(), count, &allocator);
+        }
+
+        if (data_type == vsag::DATATYPE_SPARSE) {
+            mem = (void*)vectors.value()->GetSparseVectors();
+            for (int i = 0; i < count; i++) {
+                // get single data
+                auto single_dataset = vsag::Dataset::Make();
+                auto sparse_vectors = vectors.value()->GetSparseVectors() + i;
+                single_dataset->SparseVectors(sparse_vectors)->NumElements(1)->Owner(false);
+                if (not expected_success) {
+                    return;
+                }
+
+                // self distance
+                auto dists_res =
+                    index->CalDistanceById(single_dataset, dataset->base_->GetIds() + i, 1);
+                REQUIRE(dists_res.has_value());
+                auto dist = dists_res.value()->GetDistances()[0];
+
+                // ground truth distance
+                float gt_dist = 0;
+                for (int j = 0; j < sparse_vectors->len_; j++) {
+                    gt_dist += sparse_vectors->vals_[j] * sparse_vectors->vals_[j];
+                }
+                gt_dist = 1 - gt_dist;
+                REQUIRE(std::abs(gt_dist - dist) < 1e-3);
+            }
+        } else if (data_type == vsag::DATATYPE_FLOAT32) {
+            auto float_vectors = vectors.value()->GetFloat32Vectors();
+            mem = (void*)float_vectors;
+            auto dim = dataset->base_->GetDim();
             if (not expected_success) {
                 return;
             }
-
-            // self distance
-            auto dists_res =
-                index->CalDistanceById(single_dataset, dataset->base_->GetIds() + i, 1);
-            REQUIRE(dists_res.has_value());
-            auto dist = dists_res.value()->GetDistances()[0];
-
-            // ground truth distance
-            float gt_dist = 0;
-            for (int j = 0; j < sparse_vectors->len_; j++) {
-                gt_dist += sparse_vectors->vals_[j] * sparse_vectors->vals_[j];
+            for (int i = 0; i < count; ++i) {
+                REQUIRE(std::memcmp(float_vectors + i * dim,
+                                    dataset->base_->GetFloat32Vectors() + i * dim,
+                                    dim * sizeof(float)) == 0);
             }
-            gt_dist = 1 - gt_dist;
-            REQUIRE(std::abs(gt_dist - dist) < 1e-3);
+        } else if (data_type == vsag::DATATYPE_INT8) {
+            auto int8_vectors = vectors.value()->GetInt8Vectors();
+            mem = (void*)int8_vectors;
+            auto dim = dataset->base_->GetDim();
+            if (not expected_success) {
+                return;
+            }
+            for (int i = 0; i < count; ++i) {
+                REQUIRE(std::memcmp(int8_vectors + i * dim,
+                                    dataset->base_->GetInt8Vectors() + i * dim,
+                                    dim) == 0);
+            }
+        } else {
+            throw std::invalid_argument("Invalid data type: " + data_type);
         }
-    } else if (data_type == vsag::DATATYPE_FLOAT32) {
-        auto float_vectors = vectors.value()->GetFloat32Vectors();
-        auto dim = dataset->base_->GetDim();
-        if (not expected_success) {
-            return;
+
+        if (use_specific_allocator) {
+            // free the vector memory after the dataset released
+            if (data_type == vsag::DATATYPE_SPARSE) {
+                auto* sparse_vectors = (vsag::SparseVector*)mem;
+                for (int64_t i = 0; i < count; ++i) {
+                    allocator.Deallocate(sparse_vectors[i].ids_);
+                    sparse_vectors[i].ids_ = nullptr;
+                    allocator.Deallocate(sparse_vectors[i].vals_);
+                    sparse_vectors[i].vals_ = nullptr;
+                }
+                allocator.Deallocate(sparse_vectors);
+            } else {
+                // data_type == vsag::DATATYPE_INT8 or data_type == vsag::DATATYPE_FLOAT32
+                allocator.Deallocate(mem);
+            }
         }
-        for (int i = 0; i < count; ++i) {
-            REQUIRE(std::memcmp(float_vectors + i * dim,
-                                dataset->base_->GetFloat32Vectors() + i * dim,
-                                dim * sizeof(float)) == 0);
-        }
-    } else {
-        throw std::invalid_argument("Invalid data type: " + data_type);
     }
 }
 void
