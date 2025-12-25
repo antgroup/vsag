@@ -210,6 +210,9 @@ Pyramid::KnnSearch(const DatasetPtr& query,
     search_param.ef = parsed_param.ef_search;
     search_param.topk = parsed_param.ef_search;
     search_param.search_mode = KNN_SEARCH;
+    if (this->label_table_->CompressDuplicateData()) {
+        search_param.consider_duplicate = true;
+    }
 
     if (parsed_param.enable_time_record) {
         search_param.time_cost = std::make_shared<Timer>();
@@ -247,6 +250,10 @@ Pyramid::RangeSearch(const DatasetPtr& query,
     if (parsed_param.enable_time_record) {
         search_param.time_cost = std::make_shared<Timer>();
         search_param.time_cost->SetThreshold(parsed_param.timeout_ms);
+    }
+
+    if (this->label_table_->CompressDuplicateData()) {
+        search_param.consider_duplicate = true;
     }
 
     if (filter != nullptr) {
@@ -342,7 +349,7 @@ Pyramid::GetNumElements() const {
 
 void
 Pyramid::Serialize(StreamWriter& writer) const {
-    StreamWriter::WriteVector(writer, label_table_->label_table_);
+    label_table_->Serialize(writer);
     base_codes_->Serialize(writer);
     if (use_reorder_) {
         precise_codes_->Serialize(writer);
@@ -369,7 +376,7 @@ Pyramid::Deserialize(StreamReader& reader) {
     BufferStreamReader buffer_reader(
         &reader, std::numeric_limits<uint64_t>::max(), this->allocator_);
 
-    StreamReader::ReadVector(buffer_reader, label_table_->label_table_);
+    label_table_->Deserialize(buffer_reader);
     base_codes_->Deserialize(buffer_reader);
     if (use_reorder_) {
         precise_codes_->Deserialize(buffer_reader);
@@ -457,7 +464,7 @@ Pyramid::resize(int64_t new_max_capacity) {
         return;
     }
     pool_ = std::make_unique<VisitedListPool>(1, allocator_, new_max_capacity, allocator_);
-    label_table_->label_table_.resize(new_max_capacity);
+    label_table_->Resize(new_max_capacity);
     base_codes_->Resize(new_max_capacity);
     if (use_reorder_) {
         precise_codes_->Resize(new_max_capacity);
@@ -642,12 +649,6 @@ Pyramid::add_one_point(const std::shared_ptr<IndexNode>& node,
                        InnerIdType inner_id,
                        const float* vector) {
     std::unique_lock graph_lock(node->mutex_);
-    InnerSearchParam search_param;
-    search_param.ef = ef_construction_;
-    search_param.topk = max_degree_;
-    search_param.search_mode = KNN_SEARCH;
-
-    auto codes = use_reorder_ ? precise_codes_ : base_codes_;
     // add one point
     if (node->status_ == IndexNode::Status::NO_INDEX) {
         node->Init();
@@ -660,6 +661,14 @@ Pyramid::add_one_point(const std::shared_ptr<IndexNode>& node,
         node->graph_->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
         node->entry_point_ = inner_id;
     } else {
+        InnerSearchParam search_param;
+        search_param.ef = ef_construction_;
+        search_param.topk = ef_construction_;
+        search_param.search_mode = KNN_SEARCH;
+        if (label_table_->CompressDuplicateData()) {
+            search_param.find_duplicate = true;
+        }
+        auto codes = use_reorder_ ? precise_codes_ : base_codes_;
         bool update_entry_point;
         {
             std::scoped_lock<std::mutex> entry_point_lock(entry_point_mutex_);
@@ -675,6 +684,12 @@ Pyramid::add_one_point(const std::shared_ptr<IndexNode>& node,
         auto results = searcher_->Search(
             node->graph_, codes, vl, vector, search_param, (LabelTablePtr) nullptr, discard_stats);
         pool_->ReturnOne(vl);
+        if (this->label_table_->CompressDuplicateData() && search_param.duplicate_id >= 0) {
+            std::unique_lock lock(this->label_lookup_mutex_);
+            label_table_->SetDuplicateId(static_cast<InnerIdType>(search_param.duplicate_id),
+                                         inner_id);
+            return;
+        }
         mutually_connect_new_element(
             inner_id, results, node->graph_, codes, points_mutex_, allocator_, alpha_);
         if (update_entry_point) {
@@ -744,7 +759,7 @@ Pyramid::search_node(const IndexNode* node,
                                     vl,
                                     query->GetFloat32Vectors(),
                                     modified_param,
-                                    (LabelTablePtr) nullptr,
+                                    label_table_,
                                     stats);
     }
 

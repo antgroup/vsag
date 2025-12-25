@@ -75,6 +75,11 @@ public:
         return this->quantizer_->DecodeOne(codes, data);
     }
 
+    bool
+    Encode(const DataType* data, uint8_t* codes) override {
+        return this->quantizer_->EncodeOne(data, codes);
+    }
+
     void
     Resize(InnerIdType new_capacity) override {
         if (new_capacity <= this->max_capacity_) {

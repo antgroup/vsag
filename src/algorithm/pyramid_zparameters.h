@@ -54,6 +54,8 @@ public:
     std::string graph_type{GRAPH_TYPE_VALUE_NSW};
     float alpha{1.2F};
     uint32_t index_min_size{0};
+
+    bool support_duplicate{true};
 };
 
 class PyramidSearchParameters : public IndexSearchParameter {
