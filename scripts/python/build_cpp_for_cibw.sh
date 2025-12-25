@@ -1,6 +1,11 @@
 #!/bin/bash
 set -eo pipefail
 
+MKL_STATIC_LINK=ON
+if [ $1 == false ]; then
+    MKL_STATIC_LINK=OFF
+fi
+
 CMAKE_BUILD_DIR="./build-release/"
 PYTHON_EXECUTABLE="${PYTHON:-$(which python3 || which python)}"
 if [ ! -x "$PYTHON_EXECUTABLE" ]; then
@@ -32,7 +37,7 @@ cmake -S. -B$CMAKE_BUILD_DIR \
     -DPython3_EXECUTABLE="$PYTHON_EXECUTABLE" \
     -DPython3_ROOT_DIR="$(dirname $(dirname $PYTHON_EXECUTABLE))" \
     -DPython3_FIND_STRATEGY=LOCATION \
-    -DMKL_STATIC_LINK=OFF
+    -DMKL_STATIC_LINK=$MKL_STATIC_LINK
 
 echo "=== Building project ==="
 cmake --build $CMAKE_BUILD_DIR --parallel $(nproc || sysctl -n hw.ncpu)
