@@ -1,3 +1,4 @@
+
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -298,37 +299,176 @@ private:
 };
 
 PYBIND11_MODULE(_pyvsag, m) {
-    m.def("set_logger_off", &SetLoggerOff, "SetLoggerOff");
-    m.def("set_logger_info", &SetLoggerInfo, "SetLoggerInfo");
-    m.def("set_logger_debug", &SetLoggerDebug, "SetLoggerDebug");
-    py::class_<Index>(m, "Index")
-        .def(py::init<std::string, std::string&>(), py::arg("name"), py::arg("parameters"))
+    m.doc() = "VSAG (Vector Search Algorithm Group) Python binding module";
+
+    m.def("set_logger_off", &SetLoggerOff, "Disable all logging output from the VSAG library.");
+
+    m.def("set_logger_info",
+          &SetLoggerInfo,
+          "Set logger level to INFO. Only important information will be logged.");
+
+    m.def("set_logger_debug",
+          &SetLoggerDebug,
+          "Set logger level to DEBUG. Detailed debug information will be logged.");
+
+    py::class_<Index>(m, "Index", R"pbdoc(
+        Vector search index class for efficient similarity search.
+        
+        This class supports both dense and sparse vector indexing and searching.
+        It provides methods for building indexes, performing k-NN and range searches,
+        and saving/loading indexes to/from disk.
+    )pbdoc")
+        .def(py::init<std::string, std::string&>(),
+             py::arg("name"),
+             py::arg("parameters"),
+             R"pbdoc(
+         Initialize a new Index instance.
+         
+         Args:
+             name (str): Name of the index type (e.g., "hgraph", "ivf", "sindi")
+             parameters (str): JSON string containing index configuration parameters
+
+         )pbdoc")
+
+        // Dense vector build
         .def("build",
              &Index::Build,
              py::arg("vectors"),
              py::arg("ids"),
              py::arg("num_elements"),
-             py::arg("dim"))
+             py::arg("dim"),
+             R"pbdoc(
+         Build index from dense float32 vectors.
+         
+         Args:
+             vectors (numpy.ndarray): 1D array of float32 values with total size num_elements * dim
+             ids (numpy.ndarray): 1D array of int64 values with shape (num_elements,)
+             num_elements (int): Number of vectors in the dataset
+             dim (int): Dimensionality of each vector
+             
+         Note:
+             - The vectors array should contain num_elements * dim consecutive float32 values
+         )pbdoc")
+
+        // Sparse vector build
         .def("build",
              &Index::SparseBuild,
              py::arg("index_pointers"),
              py::arg("indices"),
              py::arg("values"),
-             py::arg("ids"))
-        .def(
-            "knn_search", &Index::KnnSearch, py::arg("vector"), py::arg("k"), py::arg("parameters"))
+             py::arg("ids"),
+             R"pbdoc(
+         Build index from sparse vectors in CSR (Compressed Sparse Row) format.
+         
+         Args:
+             index_pointers (numpy.ndarray): 1D array of uint32 values with shape (num_elements + 1,)
+             indices (numpy.ndarray): 1D array of uint32 values containing column indices
+             values (numpy.ndarray): 1D array of float32 values containing non-zero element values
+             ids (numpy.ndarray): 1D array of int64 values with shape (num_elements,)
+             
+         CSR Format Requirements:
+             - index_pointers[0] must be 0
+             - index_pointers should be monotonically non-decreasing
+             - len(indices) == len(values) == index_pointers[-1]
+             - All arrays use 0-based indexing
+         )pbdoc")
+
+        // Dense KNN search
+        .def("knn_search",
+             &Index::KnnSearch,
+             py::arg("vector"),
+             py::arg("k"),
+             py::arg("parameters"),
+             R"pbdoc(
+         Perform k-nearest neighbors search on a single dense query vector.
+         
+         Args:
+             vector (numpy.ndarray): 1D array of float32 values representing the query vector
+             k (int): Number of nearest neighbors to retrieve
+             parameters (str): JSON-formatted string containing search-specific parameters
+             
+         Returns:
+             tuple: (distances, ids) where:
+                 - distances: numpy.ndarray of float32 with shape (k,) containing distances to neighbors
+                 - ids: numpy.ndarray of int64 with shape (k,) containing neighbor IDs
+                 
+         Note:
+             - Distance metric depends on the index configuration (typically L2 or inner product)
+             - Results are sorted by distance (closest first)
+         )pbdoc")
+
+        // Sparse KNN search
         .def("knn_search",
              &Index::SparseKnnSearch,
              py::arg("index_pointers"),
              py::arg("indices"),
              py::arg("values"),
              py::arg("k"),
-             py::arg("parameters"))
+             py::arg("parameters"),
+             R"pbdoc(
+         Perform k-nearest neighbors search on a single sparse query vector in CSR format.
+         
+         Args:
+             index_pointers (numpy.ndarray): 1D array of uint32 with shape (2,) = [0, nnz]
+             indices (numpy.ndarray): 1D array of uint32 containing column indices of non-zero elements
+             values (numpy.ndarray): 1D array of float32 containing non-zero values
+             k (int): Number of nearest neighbors to retrieve
+             parameters (str): JSON-formatted string containing search-specific parameters
+             
+         Returns:
+             tuple: (distances, ids) with the same format as dense knn_search
+             
+         )pbdoc")
+
+        // Range search
         .def("range_search",
              &Index::RangeSearch,
-             py::arg("vector"),
+             py::arg("point"),
              py::arg("threshold"),
-             py::arg("parameters"))
-        .def("save", &Index::Save, py::arg("filename"))
-        .def("load", &Index::Load, py::arg("filename"));
+             py::arg("parameters"),
+             R"pbdoc(
+         Perform range search to find all vectors within a specified distance threshold.
+         
+         Args:
+             point (numpy.ndarray): 1D array of float32 values representing the query vector
+             threshold (float): Maximum distance threshold for inclusion in results
+             parameters (str): JSON-formatted string containing search-specific parameters
+             
+         Returns:
+             tuple: (distances, ids) where:
+                 - distances: numpy.ndarray of float32 containing distances to all qualifying vectors
+                 - ids: numpy.ndarray of int64 containing corresponding IDs
+                 
+         Note:
+             - The number of returned results varies based on data distribution and threshold
+             - Results are not guaranteed to be sorted by distance
+         )pbdoc")
+
+        // Save/Load methods
+        .def("save",
+             &Index::Save,
+             py::arg("filename"),
+             R"pbdoc(
+         Save the built index to a binary file.
+         
+         Args:
+             filename (str): Path to the output file where the index will be saved
+             
+         Note:
+             The saved file can be loaded later using the load() method.
+         )pbdoc")
+
+        .def("load",
+             &Index::Load,
+             py::arg("filename"),
+             R"pbdoc(
+         Load a previously saved index from a binary file.
+         
+         Args:
+             filename (str): Path to the input file containing the saved index
+             
+         Note:
+             The Index object must be constructed with the same parameters
+             that were used when the index was originally built and saved.
+         )pbdoc");
 }
