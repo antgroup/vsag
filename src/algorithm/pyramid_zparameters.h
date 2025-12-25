@@ -55,7 +55,7 @@ public:
     float alpha{1.2F};
     uint32_t index_min_size{0};
 
-    bool support_duplicate{true};
+    bool support_duplicate{false};
 };
 
 class PyramidSearchParameters : public IndexSearchParameter {

@@ -566,7 +566,8 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
         "{BUILD_THREAD_COUNT_KEY}": 16,
         "{EF_CONSTRUCTION_KEY}": 400,
         "{NO_BUILD_LEVELS}":[],
-        "{INDEX_MIN_SIZE}": 0
+        "{INDEX_MIN_SIZE}": 0,
+        "{SUPPORT_DUPLICATE}": false
     })";
 
 ParamPtr
@@ -594,7 +595,8 @@ Pyramid::CheckAndMappingExternalParam(const JsonType& external_param,
         {ODESCENT_PARAMETER_GRAPH_ITER_TURN, {GRAPH_KEY, ODESCENT_PARAMETER_GRAPH_ITER_TURN}},
         {ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE,
          {GRAPH_KEY, ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE}},
-        {PYRAMID_INDEX_MIN_SIZE, {INDEX_MIN_SIZE}}};
+        {PYRAMID_INDEX_MIN_SIZE, {INDEX_MIN_SIZE}},
+        {PYRAMID_SUPPORT_DUPLICATE, {SUPPORT_DUPLICATE}}};
 
     std::string str = format_map(HGRAPH_PARAMS_TEMPLATE, DEFAULT_MAP);
     auto inner_json = JsonType::Parse(str);

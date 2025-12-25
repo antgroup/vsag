@@ -27,6 +27,7 @@ struct PyramidParam {
     std::string precise_quantization_type = "fp32";
     std::string graph_type = "nsw";
     bool use_reorder = false;
+    bool support_duplicate = false;
 };
 
 namespace fixtures {
@@ -81,7 +82,8 @@ PyramidTestIndex::GeneratePyramidBuildParametersString(const std::string& metric
             "base_quantization_type": "{}",
             "precise_quantization_type": "{}",
             "use_reorder": {},
-            "index_min_size": 28
+            "index_min_size": 28,
+            "support_duplicate": {}
         }}
     }}
     )";
@@ -92,7 +94,8 @@ PyramidTestIndex::GeneratePyramidBuildParametersString(const std::string& metric
                                             param.graph_type,
                                             param.base_quantization_type,
                                             param.precise_quantization_type,
-                                            param.use_reorder);
+                                            param.use_reorder,
+                                            param.support_duplicate);
     return build_parameters_str;
 }
 
@@ -351,6 +354,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
         {"prefix", 0.9}, {"suffix", 0.9}, {"middle", 1.0}};
     auto recall = 0.98F;
     PyramidParam pyramid_param;
+    pyramid_param.support_duplicate = true;
     for (auto& dim : dims) {
         vsag::Options::Instance().set_block_size_limit(size);
         auto param = GeneratePyramidBuildParametersString(metric_type, dim, pyramid_param);
