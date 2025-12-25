@@ -33,10 +33,10 @@ void add_new_file_to_single_index(std::string index_file, std::string new_file)
         stream << "Error, index file specified does not have correct metadata. " << std::endl;
         throw diskann::ANNException(stream.str(), -1);
     }
-    size_t index_ending_offset = metadata[nr - 1];
-    size_t read_blk_size = 64 * 1024 * 1024;
+    uint64_t index_ending_offset = metadata[nr - 1];
+    uint64_t read_blk_size = 64 * 1024 * 1024;
     cached_ofstream writer(index_file, read_blk_size);
-    size_t check_file_size = get_file_size(index_file);
+    uint64_t check_file_size = get_file_size(index_file);
     if (check_file_size != index_ending_offset)
     {
         std::stringstream stream;
@@ -47,7 +47,7 @@ void add_new_file_to_single_index(std::string index_file, std::string new_file)
     }
 
     cached_ifstream reader(new_file, read_blk_size);
-    size_t fsize = reader.get_file_size();
+    uint64_t fsize = reader.get_file_size();
     if (fsize == 0)
     {
         std::stringstream stream;
@@ -55,11 +55,11 @@ void add_new_file_to_single_index(std::string index_file, std::string new_file)
         throw diskann::ANNException(stream.str(), -1);
     }
 
-    size_t num_blocks = DIV_ROUND_UP(fsize, read_blk_size);
+    uint64_t num_blocks = DIV_ROUND_UP(fsize, read_blk_size);
     char *dump = new char[read_blk_size];
     for (uint64_t i = 0; i < num_blocks; i++)
     {
-        size_t cur_block_size =
+        uint64_t cur_block_size =
             read_blk_size > fsize - (i * read_blk_size) ? fsize - (i * read_blk_size) : read_blk_size;
         reader.read(dump, cur_block_size);
         writer.write(dump, cur_block_size);
@@ -93,17 +93,17 @@ double get_memory_budget(const std::string &mem_budget_str)
     return get_memory_budget(search_ram_budget);
 }
 
-size_t calculate_num_pq_chunks(double final_index_ram_limit, size_t points_num, uint32_t dim,
+uint64_t calculate_num_pq_chunks(double final_index_ram_limit, uint64_t points_num, uint32_t dim,
                                const std::vector<std::string> &param_list)
 {
-    size_t num_pq_chunks = (size_t)(std::floor)(uint64_t(final_index_ram_limit / (double)points_num));
+    uint64_t num_pq_chunks = (uint64_t)(std::floor)(uint64_t(final_index_ram_limit / (double)points_num));
     diskann::cout << "Calculated num_pq_chunks :" << num_pq_chunks << std::endl;
     if (param_list.size() >= 6)
     {
         float compress_ratio = (float)atof(param_list[5].c_str());
         if (compress_ratio > 0 && compress_ratio <= 1)
         {
-            size_t chunks_by_cr = (size_t)(std::floor)(compress_ratio * dim);
+            uint64_t chunks_by_cr = (uint64_t)(std::floor)(compress_ratio * dim);
 
             if (chunks_by_cr > 0 && chunks_by_cr < num_pq_chunks)
             {
@@ -193,10 +193,10 @@ T *load_warmup(const std::string &cache_warmup_file, uint64_t &warmup_num, uint6
 {
     T *warmup = nullptr;
     uint64_t file_dim, file_aligned_dim;
-
+    uint64_t warmup_num_size = static_cast<uint64_t>(warmup_num);
     if (file_exists(cache_warmup_file))
     {
-        diskann::load_aligned_bin<T>(cache_warmup_file, warmup, warmup_num, file_dim, file_aligned_dim);
+        diskann::load_aligned_bin<T>(cache_warmup_file, warmup, warmup_num_size, file_dim, file_aligned_dim);
         if (file_dim != warmup_dim || file_aligned_dim != warmup_aligned_dim)
         {
             std::stringstream stream;
@@ -220,21 +220,21 @@ T *load_warmup(const std::string &cache_warmup_file, uint64_t &warmup_num, uint6
 void read_idmap(const std::string &fname, std::vector<uint32_t> &ivecs)
 {
     uint32_t npts32, dim;
-    size_t actual_file_size = get_file_size(fname);
+    uint64_t actual_file_size = get_file_size(fname);
     std::ifstream reader(fname.c_str(), std::ios::binary);
     reader.read((char *)&npts32, sizeof(uint32_t));
     reader.read((char *)&dim, sizeof(uint32_t));
-    if (dim != 1 || actual_file_size != ((size_t)npts32) * sizeof(uint32_t) + 2 * sizeof(uint32_t))
+    if (dim != 1 || actual_file_size != ((uint64_t)npts32) * sizeof(uint32_t) + 2 * sizeof(uint32_t))
     {
         std::stringstream stream;
         stream << "Error reading idmap file. Check if the file is bin file with "
                   "1 dimensional data. Actual: "
-               << actual_file_size << ", expected: " << (size_t)npts32 + 2 * sizeof(uint32_t) << std::endl;
+               << actual_file_size << ", expected: " << (uint64_t)npts32 + 2 * sizeof(uint32_t) << std::endl;
 
         throw diskann::ANNException(stream.str(), -1, __FUNCSIG__, __FILE__, __LINE__);
     }
     ivecs.resize(npts32);
-    reader.read((char *)ivecs.data(), ((size_t)npts32) * sizeof(uint32_t));
+    reader.read((char *)ivecs.data(), ((uint64_t)npts32) * sizeof(uint32_t));
     reader.close();
 }
 
@@ -253,13 +253,13 @@ int merge_shards(const std::string &vamana_prefix, const std::string &vamana_suf
     }
 
     // find max node id
-    size_t nnodes = 0;
-    size_t nelems = 0;
+    uint64_t nnodes = 0;
+    uint64_t nelems = 0;
     for (auto &idmap : idmaps)
     {
         for (auto &id : idmap)
         {
-            nnodes = std::max(nnodes, (size_t)id);
+            nnodes = std::max(nnodes, (uint64_t)id);
         }
         nelems += idmap.size();
     }
@@ -269,12 +269,12 @@ int merge_shards(const std::string &vamana_prefix, const std::string &vamana_suf
     // compute inverse map: node -> shards
     std::vector<std::pair<uint32_t, uint32_t>> node_shard;
     node_shard.reserve(nelems);
-    for (size_t shard = 0; shard < nshards; shard++)
+    for (uint64_t shard = 0; shard < nshards; shard++)
     {
         diskann::cout << "Creating inverse map -- shard #" << shard << std::endl;
-        for (size_t idx = 0; idx < idmaps[shard].size(); idx++)
+        for (uint64_t idx = 0; idx < idmaps[shard].size(); idx++)
         {
-            size_t node_id = idmaps[shard][idx];
+            uint64_t node_id = idmaps[shard][idx];
             node_shard.push_back(std::make_pair((uint32_t)node_id, (uint32_t)shard));
         }
     }
@@ -289,7 +289,7 @@ int merge_shards(const std::string &vamana_prefix, const std::string &vamana_suf
     {
         std::unordered_map<uint32_t, std::vector<uint32_t>> global_label_to_medoids;
 
-        for (size_t i = 0; i < nshards; i++)
+        for (uint64_t i = 0; i < nshards; i++)
         {
             std::ifstream mapping_reader;
             std::string map_file = vamana_names[i] + "_labels_to_medoids.txt";
@@ -340,23 +340,23 @@ int merge_shards(const std::string &vamana_prefix, const std::string &vamana_suf
 
     // create cached vamana readers
     std::vector<cached_ifstream> vamana_readers(nshards);
-    for (size_t i = 0; i < nshards; i++)
+    for (uint64_t i = 0; i < nshards; i++)
     {
         vamana_readers[i].open(vamana_names[i], BUFFER_SIZE_FOR_CACHED_IO);
-        size_t expected_file_size;
+        uint64_t expected_file_size;
         vamana_readers[i].read((char *)&expected_file_size, sizeof(uint64_t));
     }
 
-    size_t vamana_metadata_size =
+    uint64_t vamana_metadata_size =
         sizeof(uint64_t) + sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint64_t); // expected file size + max degree +
                                                                                    // medoid_id + frozen_point info
 
     // create cached vamana writers
     cached_ofstream merged_vamana_writer(output_vamana, BUFFER_SIZE_FOR_CACHED_IO);
 
-    size_t merged_index_size = vamana_metadata_size; // we initialize the size of the merged index to
+    uint64_t merged_index_size = vamana_metadata_size; // we initialize the size of the merged index to
                                                      // the metadata size
-    size_t merged_index_frozen = 0;
+    uint64_t merged_index_frozen = 0;
     merged_vamana_writer.write((char *)&merged_index_size,
                                sizeof(uint64_t)); // we will overwrite the index size at the end
 
@@ -419,7 +419,7 @@ int merge_shards(const std::string &vamana_prefix, const std::string &vamana_suf
         {
             // Gopal. random_shuffle() is deprecated.
             std::shuffle(final_nhood.begin(), final_nhood.end(), urng);
-            nnbrs = (uint32_t)std::min(final_nhood.size(), (uint64_t)max_degree);
+            nnbrs = (uint32_t)std::min<uint64_t>(final_nhood.size(), (uint64_t)max_degree);
             // write into merged ofstream
             merged_vamana_writer.write((char *)&nnbrs, sizeof(uint32_t));
             merged_vamana_writer.write((char *)final_nhood.data(), nnbrs * sizeof(uint32_t));
@@ -458,7 +458,7 @@ int merge_shards(const std::string &vamana_prefix, const std::string &vamana_suf
 
     // Gopal. random_shuffle() is deprecated.
     std::shuffle(final_nhood.begin(), final_nhood.end(), urng);
-    nnbrs = (uint32_t)std::min(final_nhood.size(), (uint64_t)max_degree);
+    nnbrs = (uint32_t)std::min<uint64_t>(final_nhood.size(), (uint64_t)max_degree);
     // write into merged ofstream
     merged_vamana_writer.write((char *)&nnbrs, sizeof(uint32_t));
     if (nnbrs > 0)
@@ -613,12 +613,12 @@ void extract_shard_labels(const std::string &in_label_file, const std::string &s
 template <typename T, typename LabelT>
 int build_merged_vamana_index(std::string base_file, diskann::Metric compareMetric, uint32_t L, uint32_t R,
                               double sampling_rate, double ram_budget, std::string mem_index_path,
-                              std::string medoids_file, std::string centroids_file, size_t build_pq_bytes, bool use_opq,
+                              std::string medoids_file, std::string centroids_file, uint64_t build_pq_bytes, bool use_opq,
                               uint32_t num_threads, bool use_filters, const std::string &label_file,
                               const std::string &labels_to_medoids_file, const std::string &universal_label,
                               const uint32_t Lf)
 {
-    size_t base_num, base_dim;
+    uint64_t base_num, base_dim;
     diskann::get_bin_metadata(base_file, base_num, base_dim);
 
     double full_index_ram = estimate_ram_usage(base_num, (uint32_t)base_dim, sizeof(T), R);
@@ -825,13 +825,13 @@ void create_disk_layout(const std::string base_file, const std::string mem_index
     uint32_t npts, ndims;
 
     // amount to read or write in one shot
-    size_t read_blk_size = 64 * 1024 * 1024;
-    size_t write_blk_size = read_blk_size;
+    uint64_t read_blk_size = 64 * 1024 * 1024;
+    uint64_t write_blk_size = read_blk_size;
     cached_ifstream base_reader(base_file, read_blk_size);
     base_reader.read((char *)&npts, sizeof(uint32_t));
     base_reader.read((char *)&ndims, sizeof(uint32_t));
 
-    size_t npts_64, ndims_64;
+    uint64_t npts_64, ndims_64;
     npts_64 = npts;
     ndims_64 = ndims;
 
@@ -843,7 +843,7 @@ void create_disk_layout(const std::string base_file, const std::string mem_index
     if (reorder_data_file != std::string(""))
     {
         append_reorder_data = true;
-        size_t reorder_data_file_size = get_file_size(reorder_data_file);
+        uint64_t reorder_data_file_size = get_file_size(reorder_data_file);
         reorder_data_reader.exceptions(std::ofstream::failbit | std::ofstream::badbit);
 
         try
@@ -855,7 +855,7 @@ void create_disk_layout(const std::string base_file, const std::string mem_index
                 throw ANNException("Mismatch in num_points between reorder "
                                    "data file and base file",
                                    -1, __FUNCSIG__, __FILE__, __LINE__);
-            if (reorder_data_file_size != 8 + sizeof(float) * (size_t)npts_reorder_file * (size_t)ndims_reorder_file)
+            if (reorder_data_file_size != 8 + sizeof(float) * (uint64_t)npts_reorder_file * (uint64_t)ndims_reorder_file)
                 throw ANNException("Discrepancy in reorder data file size ", -1, __FUNCSIG__, __FILE__, __LINE__);
         }
         catch (std::system_error &e)
@@ -865,14 +865,14 @@ void create_disk_layout(const std::string base_file, const std::string mem_index
     }
 
     // create cached reader + writer
-    size_t actual_file_size = get_file_size(mem_index_file);
+    uint64_t actual_file_size = get_file_size(mem_index_file);
     // diskann::cout << "Vamana index file size=" << actual_file_size << std::endl;
     std::ifstream vamana_reader(mem_index_file, std::ios::binary);
     cached_ofstream diskann_writer(output_file, write_blk_size);
 
     // metadata: width, medoid
     uint32_t width_u32, medoid_u32;
-    size_t index_file_size;
+    uint64_t index_file_size;
 
     vamana_reader.read((char *)&index_file_size, sizeof(uint64_t));
     if (index_file_size != actual_file_size)
@@ -1023,14 +1023,14 @@ void create_disk_layout(const std::string base_file, const std::string mem_index
 }
 
 template <typename T>
-void create_disk_layout(const T *data, uint32_t npts, uint32_t ndims, const std::vector<size_t>& skip_locs, std::stringstream &vamana_reader,
-                        std::stringstream &diskann_writer, size_t sector_len, diskann::Metric metric)
+void create_disk_layout(const T *data, uint32_t npts, uint32_t ndims, const std::vector<uint64_t>& skip_locs, std::stringstream &vamana_reader,
+                        std::stringstream &diskann_writer, uint64_t sector_len, diskann::Metric metric)
     {
         // amount to read or write in one shot
-        size_t read_blk_size = 64 * 1024 * 1024;
-        size_t write_blk_size = read_blk_size;
+        uint64_t read_blk_size = 64 * 1024 * 1024;
+        uint64_t write_blk_size = read_blk_size;
 
-        size_t npts_64, ndims_64;
+        uint64_t npts_64, ndims_64;
         npts_64 = npts;
         ndims_64 = ndims;
 
@@ -1041,12 +1041,12 @@ void create_disk_layout(const T *data, uint32_t npts, uint32_t ndims, const std:
         uint32_t npts_reorder_file = 0, ndims_reorder_file = 0;
 
         // create cached reader + writer
-        size_t actual_file_size = vamana_reader.str().size();
+        uint64_t actual_file_size = vamana_reader.str().size();
         // diskann::cout << "Vamana index file size=" << actual_file_size << std::endl;
 
         // metadata: width, medoid
         uint32_t width_u32, medoid_u32;
-        size_t index_file_size;
+        uint64_t index_file_size;
 
         vamana_reader.read((char *)&index_file_size, sizeof(uint64_t));
         if (index_file_size != actual_file_size)
@@ -1110,7 +1110,7 @@ void create_disk_layout(const T *data, uint32_t npts, uint32_t ndims, const std:
 
        // diskann::cout << "# sectors: " << n_sectors << std::endl;
         uint64_t cur_node_id = 0;
-        size_t next_skip_loc = 0;
+        uint64_t next_skip_loc = 0;
         for (uint64_t sector = 0; sector < n_sectors; sector++)
         {
             if (sector % 100000 == 0)
@@ -1211,9 +1211,9 @@ int build_disk_index(const char *dataFilePath, const char *indexFilePath, const 
         throw diskann::ANNException(stream.str(), -1);
     }
 
-    size_t disk_pq_dims = 0;
+    uint64_t disk_pq_dims = 0;
     bool use_disk_pq = false;
-    size_t build_pq_bytes = 0;
+    uint64_t build_pq_bytes = 0;
 
     // if there is a 6th parameter, it means we compress the disk index
     // vectors also using PQ data (for very large dimensionality data). If the
@@ -1340,7 +1340,7 @@ int build_disk_index(const char *dataFilePath, const char *indexFilePath, const 
         }
     }
 
-    size_t points_num, dim;
+    uint64_t points_num, dim;
 
     Timer timer;
     diskann::get_bin_metadata(data_file_to_use.c_str(), points_num, dim);
@@ -1351,7 +1351,7 @@ int build_disk_index(const char *dataFilePath, const char *indexFilePath, const 
         generate_disk_quantized_data<T>(data_file_to_use, disk_pq_pivots_path, disk_pq_compressed_vectors_path,
                                         compareMetric, p_val, disk_pq_dims);
     }
-    size_t num_pq_chunks = (size_t)(std::floor)(uint64_t(final_index_ram_limit / points_num));
+    uint64_t num_pq_chunks = (uint64_t)(std::floor)(uint64_t(final_index_ram_limit / points_num));
 
     num_pq_chunks = num_pq_chunks <= 0 ? 1 : num_pq_chunks;
     num_pq_chunks = num_pq_chunks > dim ? dim : num_pq_chunks;
@@ -1443,12 +1443,12 @@ template DISKANN_DLLEXPORT void create_disk_layout<float>(const std::string base
                                                           const std::string reorder_data_file);
 
 
-template DISKANN_DLLEXPORT void create_disk_layout<int8_t>(const int8_t *data, uint32_t npts, uint32_t ndims, const std::vector<size_t>& skip_locs, std::stringstream &vamana_reader, std::stringstream &diskann_writer,
-                                                           size_t sector_len, diskann::Metric metric);
-template DISKANN_DLLEXPORT void create_disk_layout<uint8_t>(const uint8_t *data, uint32_t npts, uint32_t ndims, const std::vector<size_t>& skip_locs, std::stringstream &vamana_reader, std::stringstream &diskann_writer,
-                                                            size_t sector_len, diskann::Metric metric);
-template DISKANN_DLLEXPORT void create_disk_layout<float>(const float *data, uint32_t npts, uint32_t ndims, const std::vector<size_t>& skip_locs, std::stringstream &vamana_reader, std::stringstream &diskann_writer,
-                                                          size_t sector_len, diskann::Metric metric);
+template DISKANN_DLLEXPORT void create_disk_layout<int8_t>(const int8_t *data, uint32_t npts, uint32_t ndims, const std::vector<uint64_t>& skip_locs, std::stringstream &vamana_reader, std::stringstream &diskann_writer,
+                                                           uint64_t sector_len, diskann::Metric metric);
+template DISKANN_DLLEXPORT void create_disk_layout<uint8_t>(const uint8_t *data, uint32_t npts, uint32_t ndims, const std::vector<uint64_t>& skip_locs, std::stringstream &vamana_reader, std::stringstream &diskann_writer,
+                                                            uint64_t sector_len, diskann::Metric metric);
+template DISKANN_DLLEXPORT void create_disk_layout<float>(const float *data, uint32_t npts, uint32_t ndims, const std::vector<uint64_t>& skip_locs, std::stringstream &vamana_reader, std::stringstream &diskann_writer,
+                                                          uint64_t sector_len, diskann::Metric metric);
 template DISKANN_DLLEXPORT int8_t *load_warmup<int8_t>(const std::string &cache_warmup_file, uint64_t &warmup_num,
                                                        uint64_t warmup_dim, uint64_t warmup_aligned_dim);
 template DISKANN_DLLEXPORT uint8_t *load_warmup<uint8_t>(const std::string &cache_warmup_file, uint64_t &warmup_num,
@@ -1535,32 +1535,32 @@ template DISKANN_DLLEXPORT int build_disk_index<float, uint16_t>(const char *dat
 template DISKANN_DLLEXPORT int build_merged_vamana_index<int8_t, uint32_t>(
     std::string base_file, diskann::Metric compareMetric, uint32_t L, uint32_t R, double sampling_rate,
     double ram_budget, std::string mem_index_path, std::string medoids_path, std::string centroids_file,
-    size_t build_pq_bytes, bool use_opq, uint32_t num_threads, bool use_filters, const std::string &label_file,
+    uint64_t build_pq_bytes, bool use_opq, uint32_t num_threads, bool use_filters, const std::string &label_file,
     const std::string &labels_to_medoids_file, const std::string &universal_label, const uint32_t Lf);
 template DISKANN_DLLEXPORT int build_merged_vamana_index<float, uint32_t>(
     std::string base_file, diskann::Metric compareMetric, uint32_t L, uint32_t R, double sampling_rate,
     double ram_budget, std::string mem_index_path, std::string medoids_path, std::string centroids_file,
-    size_t build_pq_bytes, bool use_opq, uint32_t num_threads, bool use_filters, const std::string &label_file,
+    uint64_t build_pq_bytes, bool use_opq, uint32_t num_threads, bool use_filters, const std::string &label_file,
     const std::string &labels_to_medoids_file, const std::string &universal_label, const uint32_t Lf);
 template DISKANN_DLLEXPORT int build_merged_vamana_index<uint8_t, uint32_t>(
     std::string base_file, diskann::Metric compareMetric, uint32_t L, uint32_t R, double sampling_rate,
     double ram_budget, std::string mem_index_path, std::string medoids_path, std::string centroids_file,
-    size_t build_pq_bytes, bool use_opq, uint32_t num_threads, bool use_filters, const std::string &label_file,
+    uint64_t build_pq_bytes, bool use_opq, uint32_t num_threads, bool use_filters, const std::string &label_file,
     const std::string &labels_to_medoids_file, const std::string &universal_label, const uint32_t Lf);
 // Label=16_t
 template DISKANN_DLLEXPORT int build_merged_vamana_index<int8_t, uint16_t>(
     std::string base_file, diskann::Metric compareMetric, uint32_t L, uint32_t R, double sampling_rate,
     double ram_budget, std::string mem_index_path, std::string medoids_path, std::string centroids_file,
-    size_t build_pq_bytes, bool use_opq, uint32_t num_threads, bool use_filters, const std::string &label_file,
+    uint64_t build_pq_bytes, bool use_opq, uint32_t num_threads, bool use_filters, const std::string &label_file,
     const std::string &labels_to_medoids_file, const std::string &universal_label, const uint32_t Lf);
 template DISKANN_DLLEXPORT int build_merged_vamana_index<float, uint16_t>(
     std::string base_file, diskann::Metric compareMetric, uint32_t L, uint32_t R, double sampling_rate,
     double ram_budget, std::string mem_index_path, std::string medoids_path, std::string centroids_file,
-    size_t build_pq_bytes, bool use_opq, uint32_t num_threads, bool use_filters, const std::string &label_file,
+    uint64_t build_pq_bytes, bool use_opq, uint32_t num_threads, bool use_filters, const std::string &label_file,
     const std::string &labels_to_medoids_file, const std::string &universal_label, const uint32_t Lf);
 template DISKANN_DLLEXPORT int build_merged_vamana_index<uint8_t, uint16_t>(
     std::string base_file, diskann::Metric compareMetric, uint32_t L, uint32_t R, double sampling_rate,
     double ram_budget, std::string mem_index_path, std::string medoids_path, std::string centroids_file,
-    size_t build_pq_bytes, bool use_opq, uint32_t num_threads, bool use_filters, const std::string &label_file,
+    uint64_t build_pq_bytes, bool use_opq, uint32_t num_threads, bool use_filters, const std::string &label_file,
     const std::string &labels_to_medoids_file, const std::string &universal_label, const uint32_t Lf);
 }; // namespace diskann

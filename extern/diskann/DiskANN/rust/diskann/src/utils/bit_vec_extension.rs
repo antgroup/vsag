@@ -26,7 +26,7 @@ mod bit_vec_extension_test {
     use super::*;
 
     #[test]
-    fn resize_test() {
+    fn reuint64_test() {
         let mut bitset = BitVec::new();
 
         bitset.resize(10, false);

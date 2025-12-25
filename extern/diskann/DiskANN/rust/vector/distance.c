@@ -8,7 +8,7 @@ inline __m256i load_128bit_to_256bit(const __m128i *ptr)
 	return _mm256_inserti128_si256(value256, _mm_setzero_si128(), 1);
 }
 
-float distance_compare_avx512f_f16(const unsigned char *vec1, const unsigned char *vec2, size_t size)
+float distance_compare_avx512f_f16(const unsigned char *vec1, const unsigned char *vec2, uint64_t size)
 {
 	__m512 sum_squared_diff = _mm512_setzero_ps();
 
@@ -21,7 +21,7 @@ float distance_compare_avx512f_f16(const unsigned char *vec1, const unsigned cha
 		sum_squared_diff = _mm512_fmadd_ps(diff, diff, sum_squared_diff);
 	}
 
-	size_t i = (size / 16) * 16;
+	uint64_t i = (size / 16) * 16;
 
 	if (i != size)
 	{

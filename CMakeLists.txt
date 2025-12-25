@@ -73,24 +73,28 @@ option (DISABLE_NEON_FORCE "Force disable neon instructions" OFF)
 option (DISABLE_SVE_FORCE "Force disable sve instructions" OFF)
 # AIO library configuration
 option (ENABLE_LIBAIO "Whether to enable libaio support" ON)
+if (NOT APPLE)
+    if (ENABLE_CXX11_ABI)
+        add_definitions (-D_GLIBCXX_USE_CXX11_ABI=1)
+        message (STATUS "Using libstdc++ with ${Yellow}C++11 ABI${CR}")
+    else ()
+        add_definitions (-D_GLIBCXX_USE_CXX11_ABI=0)
+        message (STATUS "Using libstdc++ with ${Yellow}pre-C++11 ABI${CR}")
 
-if (ENABLE_CXX11_ABI)
-    add_definitions (-D_GLIBCXX_USE_CXX11_ABI=1)
-    message (STATUS "Using libstdc++ with ${Yellow}C++11 ABI${CR}")
-else ()
-    add_definitions (-D_GLIBCXX_USE_CXX11_ABI=0)
-    message (STATUS "Using libstdc++ with ${Yellow}pre-C++11 ABI${CR}")
-
-    # for avoiding symbol conflict: _Rep::_S_create
-    vsag_add_shared_linker_flag(-fvisibility-inlines-hidden)
+        # for avoiding symbol conflict: _Rep::_S_create
+        vsag_add_shared_linker_flag(-fvisibility-inlines-hidden)
+    endif ()
 endif ()
 
 if (ENABLE_WERROR)
     add_compile_options (-Werror)
 endif ()
 
-vsag_add_exe_linker_flag (-static-libstdc++)
-vsag_add_shared_linker_flag (-static-libstdc++)
+# Apple 平台使用系统 libc++，不要静态链接 libstdc++
+if (NOT APPLE)
+    vsag_add_exe_linker_flag (-static-libstdc++)
+    vsag_add_shared_linker_flag (-static-libstdc++)
+endif ()
 vsag_add_shared_linker_flag (-fvisibility=hidden)
 
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
@@ -107,25 +111,30 @@ else ()
     endif ()
 endif ()
 
-if (ENABLE_LIBCXX)
+if (ENABLE_LIBCXX OR APPLE)
     message (STATUS "Using libc++ with C++11 ABI")
+    if (APPLE)
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libc++")
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -stdlib=libc++")
+        set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -stdlib=libc++")
+    else()
+        set (LIBCXX_SEARCH_PATH /opt/alibaba-cloud-compiler/lib64)
+        find_library (LIBCXX_STATIC libc++.a PATHS ${LIBCXX_SEARCH_PATH})
+        find_library (LIBCXXABI_STATIC libc++abi.a PATHS ${LIBCXX_SEARCH_PATH})
+        if (LIBCXX_STATIC AND LIBCXXABI_STATIC)
+            get_filename_component (LIBCXX_DIR "${LIBCXX_STATIC}" DIRECTORY)
+            message (STATUS "Found libc++ at ${LIBCXX_STATIC}")
+            message (STATUS "Found libc++abi at ${LIBCXXABI_STATIC}")
+            set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libc++")
 
-    set (LIBCXX_SEARCH_PATH /opt/alibaba-cloud-compiler/lib64)
-    find_library (LIBCXX_STATIC libc++.a PATHS ${LIBCXX_SEARCH_PATH})
-    find_library (LIBCXXABI_STATIC libc++abi.a PATHS ${LIBCXX_SEARCH_PATH})
-    if (LIBCXX_STATIC AND LIBCXXABI_STATIC)
-        get_filename_component (LIBCXX_DIR "${LIBCXX_STATIC}" DIRECTORY)
-        message (STATUS "Found libc++ at ${LIBCXX_STATIC}")
-        message (STATUS "Found libc++abi at ${LIBCXXABI_STATIC}")
-        set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libc++")
-
-        vsag_add_shared_linker_flag ("-fuse-ld=lld")
-        vsag_add_shared_linker_flag ("-Wl,-rpath,${LIBCXX_DIR}")
-        vsag_add_exe_linker_flag ("-fuse-ld=lld")
-        vsag_add_exe_linker_flag ("-Wl,-rpath,${LIBCXX_DIR}")
-        set (CMAKE_CXX_STANDARD_LIBRARIES "${CMAKE_CXX_STANDARD_LIBRARIES} ${LIBCXX_STATIC} ${LIBCXXABI_STATIC}")
-    else ()
-        message (FATAL_ERROR "libc++ or libc++abi not found")
+            vsag_add_shared_linker_flag ("-fuse-ld=lld")
+            vsag_add_shared_linker_flag ("-Wl,-rpath,${LIBCXX_DIR}")
+            vsag_add_exe_linker_flag ("-fuse-ld=lld")
+            vsag_add_exe_linker_flag ("-Wl,-rpath,${LIBCXX_DIR}")
+            set (CMAKE_CXX_STANDARD_LIBRARIES "${CMAKE_CXX_STANDARD_LIBRARIES} ${LIBCXX_STATIC} ${LIBCXXABI_STATIC}")
+        else ()
+            message (FATAL_ERROR "libc++ or libc++abi not found")
+        endif ()
     endif ()
 else ()
     if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
@@ -203,16 +212,22 @@ set (common_cmake_args
         "-DCMAKE_LIBRARY_PATH=${CMAKE_INSTALL_PREFIX}/lib:/opt/alibaba-cloud-compiler/lib64"
 )
 
-set (common_configure_envs
-        "env"
-        "CC=${CMAKE_C_COMPILER}"
-        "CXX=${CMAKE_CXX_COMPILER}"
-        "CFLAGS=${CMAKE_C_FLAGS} -fno-omit-frame-pointer -fPIC -O2 -D_DEFAULT_SOURCE -D_GNU_SOURCE -gdwarf-4"
-        "CXXFLAGS=${CMAKE_CXX_FLAGS} -fno-omit-frame-pointer -fPIC -O2 -D_DEFAULT_SOURCE -D_GNU_SOURCE -gdwarf-4"
-        "CPPFLAGS=-isystem ${CMAKE_INSTALL_PREFIX}/include"
-        "LDFLAGS=-Wl,-rpath=\\\\$\\$ORIGIN ${ld_flags}"
-        "PATH=${BUILDING_PATH}:$ENV{PATH}"
-        "ACLOCAL_PATH=${ACLOCAL_PATH}"
+if(APPLE)
+    set(ld_flags_workaround "-Wl,-rpath,@loader_path")
+else()
+    set(ld_flags_workaround "-Wl,-rpath=\\$\\$ORIGIN")
+endif()
+
+set(common_configure_envs
+    "env"
+    "CC=${CMAKE_C_COMPILER}"
+    "CXX=${CMAKE_CXX_COMPILER}"
+    "CFLAGS=${CMAKE_C_FLAGS} -fno-omit-frame-pointer -fPIC -O2 -D_DEFAULT_SOURCE -D_GNU_SOURCE -gdwarf-4"
+    "CXXFLAGS=${CMAKE_CXX_FLAGS} -fno-omit-frame-pointer -fPIC -O2 -D_DEFAULT_SOURCE -D_GNU_SOURCE -gdwarf-4"
+    "CPPFLAGS=-isystem ${CMAKE_INSTALL_PREFIX}/include"
+    "LDFLAGS=${ld_flags_workaround} ${ld_flags}"  # Use the workaround for LDFLAGS
+    "PATH=${BUILDING_PATH}:$ENV{PATH}"
+    "ACLOCAL_PATH=${ACLOCAL_PATH}"
 )
 
 # set the default compilation parallelism of thirdparties
@@ -227,6 +242,43 @@ include (extern/json/json.cmake)
 include (extern/antlr4/antlr4.cmake)
 include (extern/boost/boost.cmake)
 include (extern/openblas/openblas.cmake)
+# Add gfortran, OpenMP, and LAPACK library paths for macOS
+if (APPLE)
+    execute_process(
+        COMMAND brew --prefix gcc
+        OUTPUT_VARIABLE GCC_PREFIX
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+    if (GCC_PREFIX)
+        link_directories(${GCC_PREFIX}/lib/gcc/current)
+        message(STATUS "Added gfortran library path: ${GCC_PREFIX}/lib/gcc/current")
+    endif()
+    
+    execute_process(
+        COMMAND brew --prefix libomp
+        OUTPUT_VARIABLE OMP_PREFIX
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+    if (OMP_PREFIX)
+        link_directories(${OMP_PREFIX}/lib)
+        include_directories(${OMP_PREFIX}/include)
+        message(STATUS "Added libomp library path: ${OMP_PREFIX}/lib")
+    endif()
+    
+    execute_process(
+        COMMAND brew --prefix lapack
+        OUTPUT_VARIABLE LAPACK_PREFIX
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+    if (LAPACK_PREFIX)
+        link_directories(${LAPACK_PREFIX}/lib)
+        include_directories(${LAPACK_PREFIX}/include)
+        message(STATUS "Added LAPACK library path: ${LAPACK_PREFIX}/lib")
+    endif()
+endif()
 include (extern/mkl/mkl.cmake)
 include (extern/diskann/diskann.cmake)
 include (extern/spdlog/spdlog.cmake)
@@ -319,7 +371,9 @@ endif ()
 
 # sources
 add_subdirectory (src)
-add_subdirectory (mockimpl)
+if (NOT APPLE)
+    add_subdirectory (mockimpl)
+endif ()
 if (ENABLE_EXAMPLES)
     add_subdirectory (examples/cpp)
 endif ()
@@ -353,7 +407,9 @@ if (ENABLE_PYBINDS)
     pybind11_add_module (_pyvsag python_bindings/binding.cpp)
     target_compile_options (_pyvsag PRIVATE -fopenmp)
     target_link_libraries (_pyvsag PRIVATE pybind11::module vsag)
-    target_link_options(_pyvsag PRIVATE -static-libstdc++ -static-libgcc)
+    if (NOT APPLE)
+        target_link_options(_pyvsag PRIVATE -static-libstdc++ -static-libgcc)
+    endif ()
 
     message(STATUS "Building _pyvsag for Python ${Python3_VERSION}")
     message(STATUS "Expected output: _pyvsag${Python3_SOABI}${CMAKE_SHARED_MODULE_SUFFIX}")

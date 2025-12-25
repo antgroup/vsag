@@ -99,7 +99,7 @@ fn lloyds_iter(
 /// Run Lloyds until max_reps or stopping criterion
 /// If you pass NULL for closest_docs and closest_center, it will NOT return
 /// the results, else it will assume appropriate allocation as closest_docs =
-/// new vec<usize> [num_centers], and closest_center = new size_t[num_points]
+/// new vec<usize> [num_centers], and closest_center = new uint64_t[num_points]
 /// Final centers are output in centers as row-major num_centers * dim.
 fn run_lloyds(
     data: &[f32],

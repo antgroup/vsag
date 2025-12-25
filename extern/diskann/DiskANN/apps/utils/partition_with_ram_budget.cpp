@@ -25,8 +25,8 @@ int main(int argc, char **argv)
     const std::string prefix_path(argv[3]);
     const float sampling_rate = (float)atof(argv[4]);
     const double ram_budget = (double)std::atof(argv[5]);
-    const size_t graph_degree = (size_t)std::atoi(argv[6]);
-    const size_t k_index = (size_t)std::atoi(argv[7]);
+    const uint64_t graph_degree = (uint64_t)std::atoi(argv[6]);
+    const uint64_t k_index = (uint64_t)std::atoi(argv[7]);
 
     if (std::string(argv[1]) == std::string("float"))
         partition_with_ram_budget<float>(data_path, sampling_rate, ram_budget, graph_degree, prefix_path, k_index);

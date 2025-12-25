@@ -80,7 +80,7 @@ Footer::Parse(StreamReader& reader) {
     }
     // no popseek, continue to parse
 
-    size_t metadata_string_length = 0;
+    uint64_t metadata_string_length = 0;
     std::vector<char> string_buffer(length);
     memcpy(&metadata_string_length, meta_buffer.data() + 8, 8);
     std::string metadata_string(meta_buffer.data() + 16, metadata_string_length);

@@ -58,7 +58,7 @@ typedef int FileHandle;
     4096 // all metadata of individual sub-component files is written in first
          // 4KB for unified files
 
-#define BUFFER_SIZE_FOR_CACHED_IO (size_t)1024 * (size_t)1048576
+#define BUFFER_SIZE_FOR_CACHED_IO (uint64_t)1024 * (uint64_t)1048576
 
 #define PBSTR "||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||"
 #define PBWIDTH 60
@@ -114,7 +114,12 @@ inline void open_file_to_write(std::ofstream &writer, const std::string &filenam
 #ifdef _WINDOWS
         auto ret = std::to_string(strerror_s(buff, 1024, errno));
 #else
+#ifdef __APPLE__
+        strerror_r(errno, buff, 1024);
+        auto ret = std::string(buff);
+#else
         auto ret = std::string(strerror_r(errno, buff, 1024));
+#endif
 #endif
         auto message = std::string("Failed to open file") + filename + " for write because " + buff + ", ret=" + ret;
         diskann::cerr << message << std::endl;
@@ -122,12 +127,12 @@ inline void open_file_to_write(std::ofstream &writer, const std::string &filenam
     }
 }
 
-inline size_t get_file_size(const std::string &fname)
+inline uint64_t get_file_size(const std::string &fname)
 {
     std::ifstream reader(fname, std::ios::binary | std::ios::ate);
     if (!reader.fail() && reader.is_open())
     {
-        size_t end_pos = reader.tellg();
+        uint64_t end_pos = reader.tellg();
         reader.close();
         return end_pos;
     }
@@ -188,7 +193,7 @@ inline void convert_labels_string_to_int(const std::string &inFileName, const st
             std::cout << "No label found";
             exit(-1);
         }
-        for (size_t j = 0; j < lbls.size(); j++)
+        for (uint64_t j = 0; j < lbls.size(); j++)
         {
             if (j != lbls.size() - 1)
                 label_writer << lbls[j] << ",";
@@ -212,7 +217,7 @@ class AlignedFileReader;
 
 namespace diskann
 {
-static const size_t MAX_SIZE_OF_STREAMBUF = 2LL * 1024 * 1024 * 1024;
+static const uint64_t MAX_SIZE_OF_STREAMBUF = 2LL * 1024 * 1024 * 1024;
 
 inline void print_error_and_terminate(std::stringstream &error_stream)
 {
@@ -227,14 +232,14 @@ inline void report_memory_allocation_failure()
     print_error_and_terminate(stream);
 }
 
-inline void report_misalignment_of_requested_size(size_t align)
+inline void report_misalignment_of_requested_size(uint64_t align)
 {
     std::stringstream stream;
     stream << "Requested memory size is not a multiple of " << align << ". Can not be allocated.";
     print_error_and_terminate(stream);
 }
 
-inline void alloc_aligned(void **ptr, size_t size, size_t align)
+inline void alloc_aligned(void **ptr, uint64_t size, uint64_t align)
 {
     *ptr = nullptr;
     if (IS_ALIGNED(size, align) == 0)
@@ -248,7 +253,7 @@ inline void alloc_aligned(void **ptr, size_t size, size_t align)
         report_memory_allocation_failure();
 }
 
-inline void realloc_aligned(void **ptr, size_t size, size_t align)
+inline void realloc_aligned(void **ptr, uint64_t size, uint64_t align)
 {
     if (IS_ALIGNED(size, align) == 0)
         report_misalignment_of_requested_size(align);
@@ -308,7 +313,7 @@ inline void GenRandom(std::mt19937 &rng, unsigned *addr, unsigned size, unsigned
 }
 
 // get_bin_metadata functions START
-inline void get_bin_metadata_impl(std::basic_istream<char> &reader, size_t &nrows, size_t &ncols, size_t offset = 0)
+inline void get_bin_metadata_impl(std::basic_istream<char> &reader, uint64_t &nrows, uint64_t &ncols, uint64_t offset = 0)
 {
     int nrows_32, ncols_32;
     reader.seekg(offset, reader.beg);
@@ -319,8 +324,8 @@ inline void get_bin_metadata_impl(std::basic_istream<char> &reader, size_t &nrow
 }
 
 #ifdef EXEC_ENV_OLS
-inline void get_bin_metadata(MemoryMappedFiles &files, const std::string &bin_file, size_t &nrows, size_t &ncols,
-                             size_t offset = 0)
+inline void get_bin_metadata(MemoryMappedFiles &files, const std::string &bin_file, uint64_t &nrows, uint64_t &ncols,
+                             uint64_t offset = 0)
 {
     diskann::cout << "Getting metadata for file: " << bin_file << std::endl;
     auto fc = files.getContent(bin_file);
@@ -337,13 +342,13 @@ inline void get_bin_metadata(MemoryMappedFiles &files, const std::string &bin_fi
 }
 #endif
 
-inline void get_bin_metadata(const std::string &bin_file, size_t &nrows, size_t &ncols, size_t offset = 0)
+inline void get_bin_metadata(const std::string &bin_file, uint64_t &nrows, uint64_t &ncols, uint64_t offset = 0)
 {
     std::ifstream reader(bin_file.c_str(), std::ios::binary);
     get_bin_metadata_impl(reader, nrows, ncols, offset);
 }
 
-inline void get_bin_metadata(std::stringstream &in, size_t &nrows, size_t &ncols, size_t offset = 0)
+inline void get_bin_metadata(std::stringstream &in, uint64_t &nrows, uint64_t &ncols, uint64_t offset = 0)
 {
     get_bin_metadata_impl(in, nrows, ncols, offset);
 }
@@ -351,30 +356,30 @@ inline void get_bin_metadata(std::stringstream &in, size_t &nrows, size_t &ncols
 // get_bin_metadata functions END
 
 #ifndef EXEC_ENV_OLS
-inline size_t get_graph_num_frozen_points(const std::string &graph_file)
+inline uint64_t get_graph_num_frozen_points(const std::string &graph_file)
 {
-    size_t expected_file_size;
+    uint64_t expected_file_size;
     uint32_t max_observed_degree, start;
-    size_t file_frozen_pts;
+    uint64_t file_frozen_pts;
 
     std::ifstream in;
     in.exceptions(std::ios::badbit | std::ios::failbit);
 
     in.open(graph_file, std::ios::binary);
-    in.read((char *)&expected_file_size, sizeof(size_t));
+    in.read((char *)&expected_file_size, sizeof(uint64_t));
     in.read((char *)&max_observed_degree, sizeof(uint32_t));
     in.read((char *)&start, sizeof(uint32_t));
-    in.read((char *)&file_frozen_pts, sizeof(size_t));
+    in.read((char *)&file_frozen_pts, sizeof(uint64_t));
 
     return file_frozen_pts;
 }
 #endif
 
-template <typename T> inline std::string getValues(T *data, size_t num)
+template <typename T> inline std::string getValues(T *data, uint64_t num)
 {
     std::stringstream stream;
     stream << "[";
-    for (size_t i = 0; i < num; i++)
+    for (uint64_t i = 0; i < num; i++)
     {
         stream << std::to_string(data[i]) << ",";
     }
@@ -385,7 +390,7 @@ template <typename T> inline std::string getValues(T *data, size_t num)
 
 // load_bin functions START
 template <typename T>
-inline void load_bin_impl(std::basic_istream<char> &reader, T *&data, size_t &npts, size_t &dim, size_t file_offset = 0)
+inline void load_bin_impl(std::basic_istream<char> &reader, T *&data, uint64_t &npts, uint64_t &dim, uint64_t file_offset = 0)
 {
     int npts_i32, dim_i32;
 
@@ -403,8 +408,8 @@ inline void load_bin_impl(std::basic_istream<char> &reader, T *&data, size_t &np
 
 #ifdef EXEC_ENV_OLS
 template <typename T>
-inline void load_bin(MemoryMappedFiles &files, const std::string &bin_file, T *&data, size_t &npts, size_t &dim,
-                     size_t offset = 0)
+inline void load_bin(MemoryMappedFiles &files, const std::string &bin_file, T *&data, uint64_t &npts, uint64_t &dim,
+                     uint64_t offset = 0)
 {
     diskann::cout << "Reading bin file " << bin_file.c_str() << " at offset: " << offset << "..." << std::endl;
     auto fc = files.getContent(bin_file);
@@ -420,26 +425,26 @@ inline void load_bin(MemoryMappedFiles &files, const std::string &bin_file, T *&
     data = (T *)((char *)fc._content + offset + 2 * sizeof(uint32_t)); // No need to copy!
 }
 
-DISKANN_DLLEXPORT void get_bin_metadata(AlignedFileReader &reader, size_t &npts, size_t &ndim, size_t offset = 0);
+DISKANN_DLLEXPORT void get_bin_metadata(AlignedFileReader &reader, uint64_t &npts, uint64_t &ndim, uint64_t offset = 0);
 template <typename T>
-DISKANN_DLLEXPORT void load_bin(AlignedFileReader &reader, T *&data, size_t &npts, size_t &ndim, size_t offset = 0);
+DISKANN_DLLEXPORT void load_bin(AlignedFileReader &reader, T *&data, uint64_t &npts, uint64_t &ndim, uint64_t offset = 0);
 template <typename T>
-DISKANN_DLLEXPORT void load_bin(AlignedFileReader &reader, std::unique_ptr<T[]> &data, size_t &npts, size_t &ndim,
-                                size_t offset = 0);
+DISKANN_DLLEXPORT void load_bin(AlignedFileReader &reader, std::unique_ptr<T[]> &data, uint64_t &npts, uint64_t &ndim,
+                                uint64_t offset = 0);
 
 template <typename T>
-DISKANN_DLLEXPORT void copy_aligned_data_from_file(AlignedFileReader &reader, T *&data, size_t &npts, size_t &dim,
-                                                   const size_t &rounded_dim, size_t offset = 0);
+DISKANN_DLLEXPORT void copy_aligned_data_from_file(AlignedFileReader &reader, T *&data, uint64_t &npts, uint64_t &dim,
+                                                   const uint64_t &rounded_dim, uint64_t offset = 0);
 
 // Unlike load_bin, assumes that data is already allocated 'size' entries
 template <typename T>
-DISKANN_DLLEXPORT void read_array(AlignedFileReader &reader, T *data, size_t size, size_t offset = 0);
+DISKANN_DLLEXPORT void read_array(AlignedFileReader &reader, T *data, uint64_t size, uint64_t offset = 0);
 
-template <typename T> DISKANN_DLLEXPORT void read_value(AlignedFileReader &reader, T &value, size_t offset = 0);
+template <typename T> DISKANN_DLLEXPORT void read_value(AlignedFileReader &reader, T &value, uint64_t offset = 0);
 #endif
 
 template <typename T>
-inline void load_bin(const std::string &bin_file, T *&data, size_t &npts, size_t &dim, size_t offset = 0)
+inline void load_bin(const std::string &bin_file, T *&data, uint64_t &npts, uint64_t &dim, uint64_t offset = 0)
 {
     // diskann::cout << "Reading bin file " << bin_file.c_str() << " ..." << std::endl;
     std::ifstream reader;
@@ -460,7 +465,7 @@ inline void load_bin(const std::string &bin_file, T *&data, size_t &npts, size_t
 }
 
 template <typename T>
-inline void load_bin(std::stringstream &reader, T *&data, size_t &npts, size_t &dim, size_t offset = 0)
+inline void load_bin(std::stringstream &reader, T *&data, uint64_t &npts, uint64_t &dim, uint64_t offset = 0)
 {
     try
     {
@@ -485,12 +490,12 @@ inline void wait_for_keystroke()
 }
 // load_bin functions END
 
-inline void load_truthset(const std::string &bin_file, uint32_t *&ids, float *&dists, size_t &npts, size_t &dim)
+inline void load_truthset(const std::string &bin_file, uint32_t *&ids, float *&dists, uint64_t &npts, uint64_t &dim)
 {
-    size_t read_blk_size = 64 * 1024 * 1024;
+    uint64_t read_blk_size = 64 * 1024 * 1024;
     cached_ifstream reader(bin_file, read_blk_size);
     diskann::cout << "Reading truthset file " << bin_file.c_str() << " ..." << std::endl;
-    size_t actual_file_size = reader.get_file_size();
+    uint64_t actual_file_size = reader.get_file_size();
 
     int npts_i32, dim_i32;
     reader.read((char *)&npts_i32, sizeof(int));
@@ -502,12 +507,12 @@ inline void load_truthset(const std::string &bin_file, uint32_t *&ids, float *&d
 
     int truthset_type = -1; // 1 means truthset has ids and distances, 2 means
                             // only ids, -1 is error
-    size_t expected_file_size_with_dists = 2 * npts * dim * sizeof(uint32_t) + 2 * sizeof(uint32_t);
+    uint64_t expected_file_size_with_dists = 2 * npts * dim * sizeof(uint32_t) + 2 * sizeof(uint32_t);
 
     if (actual_file_size == expected_file_size_with_dists)
         truthset_type = 1;
 
-    size_t expected_file_size_just_ids = npts * dim * sizeof(uint32_t) + 2 * sizeof(uint32_t);
+    uint64_t expected_file_size_just_ids = npts * dim * sizeof(uint32_t) + 2 * sizeof(uint32_t);
 
     if (actual_file_size == expected_file_size_just_ids)
         truthset_type = 2;
@@ -535,12 +540,12 @@ inline void load_truthset(const std::string &bin_file, uint32_t *&ids, float *&d
 }
 
 inline void prune_truthset_for_range(const std::string &bin_file, float range,
-                                     std::vector<std::vector<uint32_t>> &groundtruth, size_t &npts)
+                                     std::vector<std::vector<uint32_t>> &groundtruth, uint64_t &npts)
 {
-    size_t read_blk_size = 64 * 1024 * 1024;
+    uint64_t read_blk_size = 64 * 1024 * 1024;
     cached_ifstream reader(bin_file, read_blk_size);
     diskann::cout << "Reading truthset file " << bin_file.c_str() << "... " << std::endl;
-    size_t actual_file_size = reader.get_file_size();
+    uint64_t actual_file_size = reader.get_file_size();
 
     int npts_i32, dim_i32;
     reader.read((char *)&npts_i32, sizeof(int));
@@ -554,7 +559,7 @@ inline void prune_truthset_for_range(const std::string &bin_file, float range,
 
     int truthset_type = -1; // 1 means truthset has ids and distances, 2 means
                             // only ids, -1 is error
-    size_t expected_file_size_with_dists = 2 * npts * dim * sizeof(uint32_t) + 2 * sizeof(uint32_t);
+    uint64_t expected_file_size_with_dists = 2 * npts * dim * sizeof(uint32_t) + 2 * sizeof(uint32_t);
 
     if (actual_file_size == expected_file_size_with_dists)
         truthset_type = 1;
@@ -603,10 +608,10 @@ inline void prune_truthset_for_range(const std::string &bin_file, float range,
 inline void load_range_truthset(const std::string &bin_file, std::vector<std::vector<uint32_t>> &groundtruth,
                                 uint64_t &gt_num)
 {
-    size_t read_blk_size = 64 * 1024 * 1024;
+    uint64_t read_blk_size = 64 * 1024 * 1024;
     cached_ifstream reader(bin_file, read_blk_size);
     diskann::cout << "Reading truthset file " << bin_file.c_str() << "... " << std::flush;
-    size_t actual_file_size = reader.get_file_size();
+    uint64_t actual_file_size = reader.get_file_size();
 
     int nptsuint32_t, totaluint32_t;
     reader.read((char *)&nptsuint32_t, sizeof(int));
@@ -617,7 +622,7 @@ inline void load_range_truthset(const std::string &bin_file, std::vector<std::ve
 
     // diskann::cout << "Metadata: #pts = " << gt_num << ", #total_results = " << total_res << "..." << std::endl;
 
-    size_t expected_file_size = 2 * sizeof(uint32_t) + gt_num * sizeof(uint32_t) + total_res * sizeof(uint32_t);
+    uint64_t expected_file_size = 2 * sizeof(uint32_t) + gt_num * sizeof(uint32_t) + total_res * sizeof(uint32_t);
 
     if (actual_file_size != expected_file_size)
     {
@@ -638,7 +643,7 @@ inline void load_range_truthset(const std::string &bin_file, std::vector<std::ve
 
     std::cout << "GT count percentiles:" << std::endl;
     for (uint32_t p = 0; p < 100; p += 5)
-        std::cout << "percentile " << p << ": " << gt_stats[static_cast<size_t>(std::floor((p / 100.0) * gt_num))]
+        std::cout << "percentile " << p << ": " << gt_stats[static_cast<uint64_t>(std::floor((p / 100.0) * gt_num))]
                   << std::endl;
     std::cout << "percentile 100"
               << ": " << gt_stats[gt_num - 1] << std::endl;
@@ -654,8 +659,8 @@ inline void load_range_truthset(const std::string &bin_file, std::vector<std::ve
 
 #ifdef EXEC_ENV_OLS
 template <typename T>
-inline void load_bin(MemoryMappedFiles &files, const std::string &bin_file, std::unique_ptr<T[]> &data, size_t &npts,
-                     size_t &dim, size_t offset = 0)
+inline void load_bin(MemoryMappedFiles &files, const std::string &bin_file, std::unique_ptr<T[]> &data, uint64_t &npts,
+                     uint64_t &dim, uint64_t offset = 0)
 {
     T *ptr;
     load_bin<T>(files, bin_file, ptr, npts, dim, offset);
@@ -689,8 +694,8 @@ DISKANN_DLLEXPORT double calculate_range_search_recall(unsigned num_queries,
                                                        std::vector<std::vector<uint32_t>> &our_results);
 
 template <typename T>
-inline void load_bin(const std::string &bin_file, std::unique_ptr<T[]> &data, size_t &npts, size_t &dim,
-                     size_t offset = 0)
+inline void load_bin(const std::string &bin_file, std::unique_ptr<T[]> &data, uint64_t &npts, uint64_t &dim,
+                     uint64_t offset = 0)
 {
     T *ptr;
     load_bin<T>(bin_file, ptr, npts, dim, offset);
@@ -711,7 +716,12 @@ inline void open_file_to_write(std::ofstream &writer, const std::string &filenam
 #ifdef _WINDOWS
         auto ret = std::to_string(strerror_s(buff, 1024, errno));
 #else
+#ifdef __APPLE__
+        strerror_r(errno, buff, 1024);
+        auto ret = std::string(buff);
+#else
         auto ret = std::string(strerror_r(errno, buff, 1024));
+#endif
 #endif
         std::string error_message =
             std::string("Failed to open file") + filename + " for write because " + buff + ", ret=" + ret;
@@ -721,7 +731,7 @@ inline void open_file_to_write(std::ofstream &writer, const std::string &filenam
 }
 
 template <typename T>
-inline size_t save_bin(const std::string &filename, T *data, size_t npts, size_t ndims, size_t offset = 0)
+inline uint64_t save_bin(const std::string &filename, T *data, uint64_t npts, uint64_t ndims, uint64_t offset = 0)
 {
     std::ofstream writer;
     open_file_to_write(writer, filename);
@@ -729,7 +739,7 @@ inline size_t save_bin(const std::string &filename, T *data, size_t npts, size_t
     diskann::cout << "Writing bin: " << filename.c_str() << std::endl;
     writer.seekp(offset, writer.beg);
     int npts_i32 = (int)npts, ndims_i32 = (int)ndims;
-    size_t bytes_written = npts * ndims * sizeof(T) + 2 * sizeof(uint32_t);
+    uint64_t bytes_written = npts * ndims * sizeof(T) + 2 * sizeof(uint32_t);
     writer.write((char *)&npts_i32, sizeof(int));
     writer.write((char *)&ndims_i32, sizeof(int));
     diskann::cout << "bin: #pts = " << npts << ", #dims = " << ndims << ", size = " << bytes_written << "B"
@@ -742,12 +752,12 @@ inline size_t save_bin(const std::string &filename, T *data, size_t npts, size_t
 }
 
 template <typename T>
-inline size_t save_bin(std::stringstream& writer, T *data, size_t npts, size_t ndims, size_t offset = 0)
+inline uint64_t save_bin(std::stringstream& writer, T *data, uint64_t npts, uint64_t ndims, uint64_t offset = 0)
 {
 //    std::ofstream writer;
     writer.seekp(offset, writer.beg);
     int npts_i32 = (int)npts, ndims_i32 = (int)ndims;
-    size_t bytes_written = npts * ndims * sizeof(T) + 2 * sizeof(uint32_t);
+    uint64_t bytes_written = npts * ndims * sizeof(T) + 2 * sizeof(uint32_t);
     writer.write((char *)&npts_i32, sizeof(int));
     writer.write((char *)&ndims_i32, sizeof(int));
     // diskann::cout << "bin: #pts = " << npts << ", #dims = " << ndims << ", size = " << bytes_written << "B"
@@ -770,8 +780,8 @@ inline void print_progress(double percentage)
 // load_aligned_bin functions START
 
 template <typename T>
-inline void load_aligned_bin_impl(std::basic_istream<char> &reader, size_t actual_file_size, T *&data, size_t &npts,
-                                  size_t &dim, size_t &rounded_dim)
+inline void load_aligned_bin_impl(std::basic_istream<char> &reader, uint64_t actual_file_size, T *&data, uint64_t &npts,
+                                  uint64_t &dim, uint64_t &rounded_dim)
 {
     int npts_i32, dim_i32;
     reader.read((char *)&npts_i32, sizeof(int));
@@ -779,7 +789,7 @@ inline void load_aligned_bin_impl(std::basic_istream<char> &reader, size_t actua
     npts = (unsigned)npts_i32;
     dim = (unsigned)dim_i32;
 
-    size_t expected_actual_file_size = npts * dim * sizeof(T) + 2 * sizeof(uint32_t);
+    uint64_t expected_actual_file_size = npts * dim * sizeof(T) + 2 * sizeof(uint32_t);
     if (actual_file_size != expected_actual_file_size)
     {
         std::stringstream stream;
@@ -792,12 +802,12 @@ inline void load_aligned_bin_impl(std::basic_istream<char> &reader, size_t actua
     rounded_dim = ROUND_UP(dim, 8);
     // diskann::cout << "Metadata: #pts = " << npts << ", #dims = " << dim << ", aligned_dim = " << rounded_dim << "... "
     //               << std::flush;
-    size_t allocSize = npts * rounded_dim * sizeof(T);
+    uint64_t allocSize = npts * rounded_dim * sizeof(T);
     diskann::cout << "allocating aligned memory of " << allocSize << " bytes... " << std::flush;
     alloc_aligned(((void **)&data), allocSize, 8 * sizeof(T));
     diskann::cout << "done. Copying data to mem_aligned buffer..." << std::flush;
 
-    for (size_t i = 0; i < npts; i++)
+    for (uint64_t i = 0; i < npts; i++)
     {
         reader.read((char *)(data + i * rounded_dim), dim * sizeof(T));
         memset(data + i * rounded_dim + dim, 0, (rounded_dim - dim) * sizeof(T));
@@ -807,8 +817,8 @@ inline void load_aligned_bin_impl(std::basic_istream<char> &reader, size_t actua
 
 #ifdef EXEC_ENV_OLS
 template <typename T>
-inline void load_aligned_bin(MemoryMappedFiles &files, const std::string &bin_file, T *&data, size_t &npts, size_t &dim,
-                             size_t &rounded_dim)
+inline void load_aligned_bin(MemoryMappedFiles &files, const std::string &bin_file, T *&data, uint64_t &npts, uint64_t &dim,
+                             uint64_t &rounded_dim)
 {
     try
     {
@@ -817,7 +827,7 @@ inline void load_aligned_bin(MemoryMappedFiles &files, const std::string &bin_fi
         ContentBuf buf((char *)fc._content, fc._size);
         std::basic_istream<char> reader(&buf);
 
-        size_t actual_file_size = fc._size;
+        uint64_t actual_file_size = fc._size;
         load_aligned_bin_impl(reader, actual_file_size, data, npts, dim, rounded_dim);
     }
     catch (std::system_error &e)
@@ -828,7 +838,7 @@ inline void load_aligned_bin(MemoryMappedFiles &files, const std::string &bin_fi
 #endif
 
 template <typename T>
-inline void load_aligned_bin(const std::string &bin_file, T *&data, size_t &npts, size_t &dim, size_t &rounded_dim)
+inline void load_aligned_bin(const std::string &bin_file, T *&data, uint64_t &npts, uint64_t &dim, uint64_t &rounded_dim)
 {
     std::ifstream reader;
     reader.exceptions(std::ifstream::failbit | std::ifstream::badbit);
@@ -849,7 +859,7 @@ inline void load_aligned_bin(const std::string &bin_file, T *&data, size_t &npts
 }
 
 template <typename InType, typename OutType>
-void convert_types(const InType *srcmat, OutType *destmat, size_t npts, size_t dim)
+void convert_types(const InType *srcmat, OutType *destmat, uint64_t npts, uint64_t dim)
 {
     for (int64_t i = 0; i < (int64_t)npts; i++)
     {
@@ -888,8 +898,8 @@ template <typename T> float prepare_base_for_inner_products(const std::string in
     out_writer.write((char *)&npts32, sizeof(uint32_t));
     out_writer.write((char *)&outdims32, sizeof(uint32_t));
 
-    size_t BLOCK_SIZE = 100000;
-    size_t block_size = npts <= BLOCK_SIZE ? npts : BLOCK_SIZE;
+    uint64_t BLOCK_SIZE = 100000;
+    uint64_t block_size = npts <= BLOCK_SIZE ? npts : BLOCK_SIZE;
     std::unique_ptr<T[]> in_block_data = std::make_unique<T[]>(block_size * in_dims);
     std::unique_ptr<float[]> out_block_data = std::make_unique<float[]>(block_size * out_dims);
 
@@ -940,7 +950,7 @@ template <typename T> float prepare_base_for_inner_products(const std::string in
 }
 
 // plain saves data as npts X ndims array into filename
-template <typename T> void save_Tvecs(const char *filename, T *data, size_t npts, size_t ndims)
+template <typename T> void save_Tvecs(const char *filename, T *data, uint64_t npts, uint64_t ndims)
 {
     std::string fname(filename);
 
@@ -950,7 +960,7 @@ template <typename T> void save_Tvecs(const char *filename, T *data, size_t npts
     unsigned dims_u32 = (unsigned)ndims;
 
     // start writing
-    for (size_t i = 0; i < npts; i++)
+    for (uint64_t i = 0; i < npts; i++)
     {
         // write dims in u32
         writer.write((char *)&dims_u32, sizeof(unsigned));
@@ -961,17 +971,17 @@ template <typename T> void save_Tvecs(const char *filename, T *data, size_t npts
     }
 }
 template <typename T>
-inline size_t save_data_in_base_dimensions(const std::string &filename, T *data, size_t npts, size_t ndims,
-                                           size_t aligned_dim, size_t offset = 0)
+inline uint64_t save_data_in_base_dimensions(const std::string &filename, T *data, uint64_t npts, uint64_t ndims,
+                                           uint64_t aligned_dim, uint64_t offset = 0)
 {
     std::ofstream writer; //(filename, std::ios::binary | std::ios::out);
     open_file_to_write(writer, filename);
     int npts_i32 = (int)npts, ndims_i32 = (int)ndims;
-    size_t bytes_written = 2 * sizeof(uint32_t) + npts * ndims * sizeof(T);
+    uint64_t bytes_written = 2 * sizeof(uint32_t) + npts * ndims * sizeof(T);
     writer.seekp(offset, writer.beg);
     writer.write((char *)&npts_i32, sizeof(int));
     writer.write((char *)&ndims_i32, sizeof(int));
-    for (size_t i = 0; i < npts; i++)
+    for (uint64_t i = 0; i < npts; i++)
     {
         writer.write((char *)(data + i * aligned_dim), ndims * sizeof(T));
     }
@@ -981,15 +991,15 @@ inline size_t save_data_in_base_dimensions(const std::string &filename, T *data,
 
 
 template <typename T>
-inline size_t save_data_in_base_dimensions(std::stringstream &writer, T *data, size_t npts, size_t ndims,
-                                               size_t aligned_dim, size_t offset = 0)
+inline uint64_t save_data_in_base_dimensions(std::stringstream &writer, T *data, uint64_t npts, uint64_t ndims,
+                                               uint64_t aligned_dim, uint64_t offset = 0)
 {
     int npts_i32 = (int)npts, ndims_i32 = (int)ndims;
-    size_t bytes_written = 2 * sizeof(uint32_t) + npts * ndims * sizeof(T);
+    uint64_t bytes_written = 2 * sizeof(uint32_t) + npts * ndims * sizeof(T);
     writer.seekp(offset, writer.beg);
     writer.write((char *)&npts_i32, sizeof(int));
     writer.write((char *)&ndims_i32, sizeof(int));
-    for (size_t i = 0; i < npts; i++)
+    for (uint64_t i = 0; i < npts; i++)
     {
         writer.write((char *)(data + i * aligned_dim), ndims * sizeof(T));
     }
@@ -997,8 +1007,8 @@ inline size_t save_data_in_base_dimensions(std::stringstream &writer, T *data, s
 }
 
 template <typename T>
-inline void copy_aligned_data_from_file(const char *bin_file, T *&data, size_t &npts, size_t &dim,
-                                        const size_t &rounded_dim, size_t offset = 0)
+inline void copy_aligned_data_from_file(const char *bin_file, T *&data, uint64_t &npts, uint64_t &dim,
+                                        const uint64_t &rounded_dim, uint64_t offset = 0)
 {
     if (data == nullptr)
     {
@@ -1018,7 +1028,7 @@ inline void copy_aligned_data_from_file(const char *bin_file, T *&data, size_t &
     npts = (unsigned)npts_i32;
     dim = (unsigned)dim_i32;
 
-    for (size_t i = 0; i < npts; i++)
+    for (uint64_t i = 0; i < npts; i++)
     {
         reader.read((char *)(data + i * rounded_dim), dim * sizeof(T));
         memset(data + i * rounded_dim + dim, 0, (rounded_dim - dim) * sizeof(T));
@@ -1027,8 +1037,8 @@ inline void copy_aligned_data_from_file(const char *bin_file, T *&data, size_t &
 
 
 template <typename T>
-inline void copy_aligned_data_from_file(std::stringstream &reader, T *&data, size_t &npts, size_t &dim,
-                                            const size_t &rounded_dim, size_t offset = 0)
+inline void copy_aligned_data_from_file(std::stringstream &reader, T *&data, uint64_t &npts, uint64_t &dim,
+                                            const uint64_t &rounded_dim, uint64_t offset = 0)
 {
     if (data == nullptr)
     {
@@ -1045,7 +1055,7 @@ inline void copy_aligned_data_from_file(std::stringstream &reader, T *&data, siz
     npts = (unsigned)npts_i32;
     dim = (unsigned)dim_i32;
 
-    for (size_t i = 0; i < npts; i++)
+    for (uint64_t i = 0; i < npts; i++)
     {
         reader.read((char *)(data + i * rounded_dim), dim * sizeof(T));
         memset(data + i * rounded_dim + dim, 0, (rounded_dim - dim) * sizeof(T));
@@ -1053,23 +1063,23 @@ inline void copy_aligned_data_from_file(std::stringstream &reader, T *&data, siz
 }
 
 // NOTE :: good efficiency when total_vec_size is integral multiple of 64
-inline void prefetch_vector(const char *vec, size_t vecsize)
+inline void prefetch_vector(const char *vec, uint64_t vecsize)
 {
     // FIXME: alternative instruction on aarch64
 #if defined(__i386__) || defined(__x86_64__)
-    size_t max_prefetch_size = (vecsize / 64) * 64;
-    for (size_t d = 0; d < max_prefetch_size; d += 64)
+    uint64_t max_prefetch_size = (vecsize / 64) * 64;
+    for (uint64_t d = 0; d < max_prefetch_size; d += 64)
         _mm_prefetch((const char *)vec + d, _MM_HINT_T0);
 #endif
 }
 
 // NOTE :: good efficiency when total_vec_size is integral multiple of 64
-inline void prefetch_vector_l2(const char *vec, size_t vecsize)
+inline void prefetch_vector_l2(const char *vec, uint64_t vecsize)
 {
     // FIXME: alternative instruction on aarch64
 #if defined(__i386__) || defined(__x86_64__)
-    size_t max_prefetch_size = (vecsize / 64) * 64;
-    for (size_t d = 0; d < max_prefetch_size; d += 64)
+    uint64_t max_prefetch_size = (vecsize / 64) * 64;
+    for (uint64_t d = 0; d < max_prefetch_size; d += 64)
         _mm_prefetch((const char *)vec + d, _MM_HINT_T1);
 #endif
 }
@@ -1085,7 +1095,7 @@ struct PivotContainer
 {
     PivotContainer() = default;
 
-    PivotContainer(size_t pivo_id, float pivo_dist) : piv_id{pivo_id}, piv_dist{pivo_dist}
+    PivotContainer(uint64_t pivo_id, float pivo_dist) : piv_id{pivo_id}, piv_dist{pivo_dist}
     {
     }
 
@@ -1099,7 +1109,7 @@ struct PivotContainer
         return p.piv_dist > piv_dist;
     }
 
-    size_t piv_id;
+    uint64_t piv_id;
     float piv_dist;
 };
 
@@ -1109,9 +1119,9 @@ inline bool validate_index_file_size(std::ifstream &in)
         throw diskann::ANNException("Index file size check called on unopened file stream", -1, __FUNCSIG__, __FILE__,
                                     __LINE__);
     in.seekg(0, in.end);
-    size_t actual_file_size = in.tellg();
+    uint64_t actual_file_size = in.tellg();
     in.seekg(0, in.beg);
-    size_t expected_file_size;
+    uint64_t expected_file_size;
     in.read((char *)&expected_file_size, sizeof(uint64_t));
     in.seekg(0, in.beg);
     if (actual_file_size != expected_file_size)
@@ -1123,7 +1133,7 @@ inline bool validate_index_file_size(std::ifstream &in)
     return true;
 }
 
-template <typename T> inline float get_norm(T *arr, const size_t dim)
+template <typename T> inline float get_norm(T *arr, const uint64_t dim)
 {
     float sum = 0.0f;
     for (uint32_t i = 0; i < dim; i++)
@@ -1134,7 +1144,7 @@ template <typename T> inline float get_norm(T *arr, const size_t dim)
 }
 
 // This function is valid only for float data type.
-template <typename T = float> inline void normalize(T *arr, const size_t dim)
+template <typename T = float> inline void normalize(T *arr, const uint64_t dim)
 {
     float norm = get_norm(arr, dim);
     for (uint32_t i = 0; i < dim; i++)
@@ -1254,7 +1264,7 @@ template <> inline const char *diskann_type_to_name<int64_t>()
 extern bool AvxSupportedCPU;
 extern bool Avx2SupportedCPU;
 
-inline size_t getMemoryUsage()
+inline uint64_t getMemoryUsage()
 {
     PROCESS_MEMORY_COUNTERS_EX pmc;
     GetProcessMemoryInfo(GetCurrentProcess(), (PROCESS_MEMORY_COUNTERS *)&pmc, sizeof(pmc));
@@ -1302,7 +1312,7 @@ inline void printProcessMemory(const char *)
 {
 }
 
-inline size_t getMemoryUsage()
+inline uint64_t getMemoryUsage()
 { // for non-windows, we have not implemented this function
     return 0;
 }

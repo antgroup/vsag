@@ -89,7 +89,7 @@ inline tsl::robin_map<std::string, std::vector<uint32_t>> generate_label_specifi
     std::memcpy(&number_of_points, input_start, sizeof(uint32_t));
     std::memcpy(&dimension, input_start + sizeof(uint32_t), sizeof(uint32_t));
     const uint32_t VECTOR_SIZE = dimension * sizeof(T);
-    const size_t METADATA = 2 * sizeof(uint32_t);
+    const uint64_t METADATA = 2 * sizeof(uint32_t);
     if (number_of_points != point_ids_to_labels.size())
     {
         std::cerr << "Error: number of points in labels file and data file differ." << std::endl;
@@ -151,7 +151,7 @@ inline tsl::robin_map<std::string, std::vector<uint32_t>> generate_label_specifi
 
         // limits on number of iovec structs per writev means we need to perform
         // multiple writevs
-        size_t i = 0;
+        uint64_t i = 0;
         while (curr_num_pts > IOV_MAX)
         {
             return_value = writev(label_input_data_fd, (label_to_iovec_map[lbl] + (IOV_MAX * i)), IOV_MAX);
@@ -190,7 +190,7 @@ inline std::vector<uint32_t> loadTags(const std::string &tags_file, const std::s
     std::vector<uint32_t> location_to_tag;
     if (tags_enabled)
     {
-        size_t tag_file_ndims, tag_file_npts;
+        uint64_t tag_file_ndims, tag_file_npts;
         std::uint32_t *tag_data;
         diskann::load_bin<std::uint32_t>(tags_file, tag_data, tag_file_npts, tag_file_ndims);
         if (tag_file_ndims != 1)
@@ -200,7 +200,7 @@ inline std::vector<uint32_t> loadTags(const std::string &tags_file, const std::s
         }
 
         // check if the point count match
-        size_t base_file_npts, base_file_ndims;
+        uint64_t base_file_npts, base_file_ndims;
         diskann::get_bin_metadata(base_file, base_file_npts, base_file_ndims);
         if (base_file_npts != tag_file_npts)
         {

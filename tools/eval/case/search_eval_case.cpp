@@ -154,7 +154,7 @@ SearchEvalCase::do_knn_search() {
     uint64_t topk = config_.top_k;
     auto query_count = this->dataset_ptr_->GetNumberOfQuery();
     this->logger_->Debug("query count is " + std::to_string(query_count));
-    auto min_query = std::max(query_count, 100'000L);
+    auto min_query = std::max<int64_t>(query_count, 100000);
     for (auto& monitor : this->monitors_) {
         monitor->Start();
 
@@ -209,7 +209,7 @@ SearchEvalCase::do_knn_filter_search() {
         this->logger_->Error("dataset does not contain test_labels");
     }
     this->logger_->Debug("query count is " + std::to_string(query_count));
-    auto min_query = std::max(query_count, 10000L);
+    auto min_query = std::max<int64_t>(query_count, 10000);
     for (auto& monitor : this->monitors_) {
         monitor->Start();
         for (int64_t id = 0; id < min_query; ++id) {

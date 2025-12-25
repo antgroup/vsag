@@ -28,21 +28,21 @@ namespace po = boost::program_options;
 // load_aligned_bin modified to read pieces of the file, but using ifstream
 // instead of cached_ifstream.
 template <typename T>
-inline void load_aligned_bin_part(const std::string &bin_file, T *data, size_t offset_points, size_t points_to_read)
+inline void load_aligned_bin_part(const std::string &bin_file, T *data, uint64_t offset_points, uint64_t points_to_read)
 {
     std::ifstream reader;
     reader.exceptions(std::ios::failbit | std::ios::badbit);
     reader.open(bin_file, std::ios::binary | std::ios::ate);
-    size_t actual_file_size = reader.tellg();
+    uint64_t actual_file_size = reader.tellg();
     reader.seekg(0, std::ios::beg);
 
     int npts_i32, dim_i32;
     reader.read((char *)&npts_i32, sizeof(int));
     reader.read((char *)&dim_i32, sizeof(int));
-    size_t npts = (uint32_t)npts_i32;
-    size_t dim = (uint32_t)dim_i32;
+    uint64_t npts = (uint32_t)npts_i32;
+    uint64_t dim = (uint32_t)dim_i32;
 
-    size_t expected_actual_file_size = npts * dim * sizeof(T) + 2 * sizeof(uint32_t);
+    uint64_t expected_actual_file_size = npts * dim * sizeof(T) + 2 * sizeof(uint32_t);
     if (actual_file_size != expected_actual_file_size)
     {
         std::stringstream stream;
@@ -64,9 +64,9 @@ inline void load_aligned_bin_part(const std::string &bin_file, T *data, size_t o
 
     reader.seekg(2 * sizeof(uint32_t) + offset_points * dim * sizeof(T));
 
-    const size_t rounded_dim = ROUND_UP(dim, 8);
+    const uint64_t rounded_dim = ROUND_UP(dim, 8);
 
-    for (size_t i = 0; i < points_to_read; i++)
+    for (uint64_t i = 0; i < points_to_read; i++)
     {
         reader.read((char *)(data + i * rounded_dim), dim * sizeof(T));
         memset(data + i * rounded_dim + dim, 0, (rounded_dim - dim) * sizeof(T));
@@ -74,8 +74,8 @@ inline void load_aligned_bin_part(const std::string &bin_file, T *data, size_t o
     reader.close();
 }
 
-std::string get_save_filename(const std::string &save_path, size_t active_window, size_t consolidate_interval,
-                              size_t max_points_to_insert)
+std::string get_save_filename(const std::string &save_path, uint64_t active_window, uint64_t consolidate_interval,
+                              uint64_t max_points_to_insert)
 {
     std::string final_path = save_path;
     final_path += "act" + std::to_string(active_window) + "-";
@@ -85,15 +85,15 @@ std::string get_save_filename(const std::string &save_path, size_t active_window
 }
 
 template <typename T, typename TagT = uint32_t, typename LabelT = uint32_t>
-void insert_next_batch(diskann::AbstractIndex &index, size_t start, size_t end, size_t insert_threads, T *data,
-                       size_t aligned_dim)
+void insert_next_batch(diskann::AbstractIndex &index, uint64_t start, uint64_t end, uint64_t insert_threads, T *data,
+                       uint64_t aligned_dim)
 {
     try
     {
         diskann::Timer insert_timer;
         std::cout << std::endl << "Inserting from " << start << " to " << end << std::endl;
 
-        size_t num_failed = 0;
+        uint64_t num_failed = 0;
 #pragma omp parallel for num_threads((int32_t)insert_threads) schedule(dynamic) reduction(+ : num_failed)
         for (int64_t j = start; j < (int64_t)end; j++)
         {
@@ -117,13 +117,13 @@ void insert_next_batch(diskann::AbstractIndex &index, size_t start, size_t end, 
 }
 
 template <typename T, typename TagT = uint32_t, typename LabelT = uint32_t>
-void delete_and_consolidate(diskann::AbstractIndex &index, diskann::IndexWriteParameters &delete_params, size_t start,
-                            size_t end)
+void delete_and_consolidate(diskann::AbstractIndex &index, diskann::IndexWriteParameters &delete_params, uint64_t start,
+                            uint64_t end)
 {
     try
     {
         std::cout << std::endl << "Lazy deleting points " << start << " to " << end << "... ";
-        for (size_t i = start; i < end; ++i)
+        for (uint64_t i = start; i < end; ++i)
             index.lazy_delete(static_cast<TagT>(1 + i));
         std::cout << "lazy delete done." << std::endl;
 
@@ -170,7 +170,7 @@ void delete_and_consolidate(diskann::AbstractIndex &index, diskann::IndexWritePa
 template <typename T>
 void build_incremental_index(const std::string &data_path, const uint32_t L, const uint32_t R, const float alpha,
                              const uint32_t insert_threads, const uint32_t consolidate_threads,
-                             size_t max_points_to_insert, size_t active_window, size_t consolidate_interval,
+                             uint64_t max_points_to_insert, uint64_t active_window, uint64_t consolidate_interval,
                              const float start_point_norm, uint32_t num_start_pts, const std::string &save_path)
 {
     const uint32_t C = 500;
@@ -193,8 +193,8 @@ void build_incremental_index(const std::string &data_path, const uint32_t L, con
                                                       .with_num_threads(consolidate_threads)
                                                       .build();
 
-    size_t dim, aligned_dim;
-    size_t num_points;
+    uint64_t dim, aligned_dim;
+    uint64_t num_points;
 
     diskann::get_bin_metadata(data_path, num_points, dim);
     diskann::cout << "metadata: file " << data_path << " has " << num_points << " points in " << dim << " dims"
@@ -255,11 +255,11 @@ void build_incremental_index(const std::string &data_path, const uint32_t L, con
 
     auto insert_task = std::async(std::launch::async, [&]() {
         load_aligned_bin_part(data_path, data, 0, active_window);
-        insert_next_batch(*index, (size_t)0, active_window, params.num_threads, data, aligned_dim);
+        insert_next_batch(*index, (uint64_t)0, active_window, params.num_threads, data, aligned_dim);
     });
     insert_task.wait();
 
-    for (size_t start = active_window; start + consolidate_interval <= max_points_to_insert;
+    for (uint64_t start = active_window; start + consolidate_interval <= max_points_to_insert;
          start += consolidate_interval)
     {
         auto end = std::min(start + consolidate_interval, max_points_to_insert);
@@ -277,7 +277,7 @@ void build_incremental_index(const std::string &data_path, const uint32_t L, con
             auto end_del = start - active_window;
 
             delete_tasks.emplace_back(std::async(std::launch::async, [&]() {
-                delete_and_consolidate<T, TagT, LabelT>(*index, delete_params, (size_t)start_del, (size_t)end_del);
+                delete_and_consolidate<T, TagT, LabelT>(*index, delete_params, (uint64_t)start_del, (uint64_t)end_del);
             }));
         }
     }
@@ -298,7 +298,7 @@ int main(int argc, char **argv)
     uint32_t insert_threads, consolidate_threads;
     uint32_t R, L, num_start_pts;
     float alpha, start_point_norm;
-    size_t max_points_to_insert, active_window, consolidate_interval;
+    uint64_t max_points_to_insert, active_window, consolidate_interval;
 
     po::options_description desc{program_options_utils::make_program_description("test_streaming_scenario",
                                                                                  "Test insert deletes & consolidate")};
