@@ -13,19 +13,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "impl/reorder/flatten_reorder.h"
+#include "flatten_reorder.h"
+
+#include "impl/heap/standard_heap.h"
 
 namespace vsag {
 
 DistHeapPtr
-FlattenReorder::Reorder(const DistHeapPtr& input,
+FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
                         const float* query,
                         int64_t topk,
-                        Allocator* allocator) {
+                        vsag::Allocator* allocator,
+                        IteratorFilterContext* iter_ctx) {
     if (allocator == nullptr) {
         allocator = allocator_;
     }
-    auto reorder_heap = DistanceHeap::MakeInstanceBySize<true, true>(allocator, topk);
+    auto reorder_heap = std::make_shared<StandardHeap<true, false>>(allocator, topk);
     auto computer = flatten_->FactoryComputer(query);
     size_t candidate_size = input->Size();
     const auto* candidate_result = input->GetData();
@@ -39,6 +42,10 @@ FlattenReorder::Reorder(const DistHeapPtr& input,
         if (reorder_heap->Size() < topk || dists[i] < reorder_heap->Top().first) {
             reorder_heap->Push(dists[i], candidate_result[i].second);
             if (reorder_heap->Size() > topk) {
+                if (iter_ctx != nullptr) {
+                    auto curr = reorder_heap->Top();
+                    iter_ctx->AddDiscardNode(curr.first, curr.second);
+                }
                 reorder_heap->Pop();
             }
         }

@@ -23,6 +23,7 @@
 #include "storage/stream_writer.h"
 #include "typing.h"
 #include "utils/pointer_define.h"
+#include "vsag_exception.h"
 
 namespace vsag {
 
@@ -122,18 +123,21 @@ public:
     GetIdByLabel(LabelType label, bool return_even_removed = false) const {
         if (use_reverse_map_ and not return_even_removed) {
             if (this->label_remap_.count(label) == 0) {
-                throw std::runtime_error(fmt::format("label {} does not exist", label));
+                throw VsagException(ErrorType::INTERNAL_ERROR,
+                                    fmt::format("label {} does not exist", label));
             }
             auto id = this->label_remap_.at(label);
             if (id != std::numeric_limits<InnerIdType>::max()) {
                 return id;
             } else {
-                throw std::runtime_error(fmt::format("label {} is removed", label));
+                throw VsagException(ErrorType::INTERNAL_ERROR,
+                                    fmt::format("label {} is removed", label));
             }
         }
         auto result = std::find(label_table_.begin(), label_table_.end(), label);
         if (result == label_table_.end()) {
-            throw std::runtime_error(fmt::format("label {} does not exist", label));
+            throw VsagException(ErrorType::INTERNAL_ERROR,
+                                fmt::format("label {} does not exist", label));
         }
         return result - label_table_.begin();
     }
@@ -154,7 +158,8 @@ public:
     UpdateLabel(LabelType old_label, LabelType new_label) {
         // 1. check whether new_label is occupied
         if (CheckLabel(new_label)) {
-            throw std::runtime_error(fmt::format("new label {} has been in HGraph", new_label));
+            throw VsagException(ErrorType::INTERNAL_ERROR,
+                                fmt::format("new label {} has been in Index", new_label));
         }
 
         // 2. update label_table_
@@ -166,8 +171,9 @@ public:
                 found = true;
             }
         }
-        if (!found) {
-            throw std::runtime_error(fmt::format("old label {} does not exist", old_label));
+        if (not found) {
+            throw VsagException(ErrorType::INTERNAL_ERROR,
+                                fmt::format("old label {} does not exist", old_label));
         }
 
         // 3. update label_remap_
@@ -183,7 +189,8 @@ public:
     inline LabelType
     GetLabelById(InnerIdType inner_id) const {
         if (inner_id >= label_table_.size()) {
-            throw std::runtime_error(
+            throw VsagException(
+                ErrorType::INTERNAL_ERROR,
                 fmt::format("id is too large {} >= {}", inner_id, label_table_.size()));
         }
         return this->label_table_[inner_id];
