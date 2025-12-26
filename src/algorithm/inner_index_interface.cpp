@@ -74,6 +74,18 @@ InnerIndexInterface::Build(const DatasetPtr& base) {
     return this->Add(base);
 }
 
+bool
+InnerIndexInterface::UpdateId(int64_t old_id, int64_t new_id) {
+    if (old_id == new_id) {
+        return true;
+    }
+
+    std::scoped_lock label_lock(this->label_lookup_mutex_);
+    this->label_table_->UpdateLabel(old_id, new_id);
+
+    return true;
+}
+
 DatasetPtr
 InnerIndexInterface::KnnSearch(const DatasetPtr& query,
                                int64_t k,
