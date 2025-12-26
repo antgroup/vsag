@@ -20,6 +20,7 @@
 
 #include "impl/heap/standard_heap.h"
 #include "utils/linear_congruential_generator.h"
+#include "utils/spsc_queue.h"
 
 namespace vsag {
 
@@ -122,20 +123,15 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
     uint32_t hops = 0;
     uint32_t dist_cmp = 0;
     uint32_t count_no_visited = 0;
-    uint32_t vector_size =
-        graph->MaximumDegree() * inner_search_param.parallel_search_thread_count_per_query;
+    uint64_t beam = 1;
+    uint32_t vector_size = graph->MaximumDegree() * beam;
     uint32_t current_start = 0;
     Vector<InnerIdType> to_be_visited_rid(vector_size, alloc);
     Vector<InnerIdType> to_be_visited_id(vector_size, alloc);
-    std::vector<Vector<InnerIdType>> neighbors(
-        inner_search_param.parallel_search_thread_count_per_query,
-        Vector<InnerIdType>(graph->MaximumDegree(), alloc));
+    std::vector<Vector<InnerIdType>> neighbors(beam,
+                                               Vector<InnerIdType>(graph->MaximumDegree(), alloc));
     Vector<float> line_dists(vector_size, alloc);
-    Vector<std::pair<float, uint64_t>> node_pair(
-        inner_search_param.parallel_search_thread_count_per_query, alloc);
-    Vector<uint32_t> tasks_per_thread(inner_search_param.parallel_search_thread_count_per_query,
-                                      alloc);
-    Vector<uint32_t> start_index(inner_search_param.parallel_search_thread_count_per_query, alloc);
+    Vector<std::pair<float, uint64_t>> node_pair(beam, alloc);
 
     flatten->Query(&dist, computer, &ep, 1, alloc);
     if (not is_id_allowed || is_id_allowed->CheckValid(ep)) {
@@ -153,12 +149,33 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
     candidate_set->Push(-dist, ep);
     vl->Set(ep);
 
+    auto num_threads = inner_search_param.parallel_search_thread_count - 1;
+
+    std::vector<SPSCQueue<std::tuple<float*, InnerIdType*, uint64_t>, 1024>> queues(num_threads);
+
+    std::atomic<uint32_t> num_points{0};
+
+    auto task = [&](uint64_t thread_id) {
+        std::tuple<float*, InnerIdType*, uint64_t> item;
+        while (true) {
+            if (queues[thread_id].Pop(item)) {
+                auto [distances, ids, count] = item;
+                if (distances == nullptr) {
+                    break;
+                }
+                flatten->Query(distances, computer, ids, count, alloc);
+                num_points.fetch_add(count, std::memory_order_release);
+            }
+        }
+    };
+
+    for (uint64_t i = 0; i < num_threads; i++) {
+        pool->GeneralEnqueue(task, i);
+    }
+
     while (not candidate_set->Empty()) {
         hops++;
-        auto num_explore_nodes =
-            candidate_set->Size() < inner_search_param.parallel_search_thread_count_per_query
-                ? candidate_set->Size()
-                : inner_search_param.parallel_search_thread_count_per_query;
+        auto num_explore_nodes = candidate_set->Size() < beam ? candidate_set->Size() : beam;
 
         auto current_first_node_pair = candidate_set->Top();
         node_pair[0] = current_first_node_pair;
@@ -186,42 +203,40 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
                                  num_explore_nodes);
 
         dist_cmp += count_no_visited;
-        uint64_t num_threads = num_explore_nodes;
+        num_points.store(0, std::memory_order_relaxed);
+        auto point_per_thread = count_no_visited / (num_threads + 1);
+        auto hard_task_count = point_per_thread % (num_threads + 1);
 
-        uint32_t base = 0;
-        uint32_t remainder = 0;
-
-        if (num_threads) {
-            base = count_no_visited / num_threads;
-            remainder = count_no_visited % num_threads;
-        }
-
-        current_start = 0;
+        uint64_t offset = 0;
         for (uint64_t i = 0; i < num_threads; ++i) {
-            tasks_per_thread[i] = base + (i < remainder ? 1 : 0);
-            start_index[i] = current_start;
-            current_start += tasks_per_thread[i];
+            if (i < hard_task_count) {
+                queues[i].Push({line_dists.data() + offset,
+                                to_be_visited_id.data() + offset,
+                                point_per_thread + 1});
+                offset += point_per_thread + 1;
+            } else {
+                queues[i].Push({line_dists.data() + offset,
+                                to_be_visited_id.data() + offset,
+                                point_per_thread});
+                offset += point_per_thread;
+            }
         }
 
-        auto dist_compute = [&](uint64_t i) -> void {
-            flatten->Query(line_dists.data() + start_index[i],
+        while (num_points.load(std::memory_order_relaxed) < count_no_visited) {
+            if (offset >= count_no_visited) {
+                continue;
+            }
+            const auto remaining_work = count_no_visited - offset;
+            flatten->Query(line_dists.data() + offset,
                            computer,
-                           to_be_visited_id.data() + start_index[i],
-                           tasks_per_thread[i],
+                           to_be_visited_id.data() + offset,
+                           remaining_work,
                            alloc);
+            num_points.fetch_add(remaining_work, std::memory_order_release);
+            offset += remaining_work;
         };
 
-        std::vector<std::future<void>> futures;
-
-        for (uint64_t i = 0; i < num_threads; i++) {
-            futures.emplace_back(pool->GeneralEnqueue(dist_compute, i));
-        }
-
-        for (auto& f : futures) {
-            f.get();
-        }
-
-        for (uint32_t i = 0; i < count_no_visited; i++) {
+        for (uint64_t i = 0; i < count_no_visited; i++) {
             dist = line_dists[i];
             if (dist < THRESHOLD_ERROR) {
                 inner_search_param.duplicate_id = to_be_visited_id[i];
@@ -268,6 +283,11 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
             top_candidates->Pop();
         }
     }
+
+    for (uint64_t i = 0; i < num_threads; i++) {
+        queues[i].Push({nullptr, nullptr, 0});
+    }
+
     return top_candidates;
 }
 

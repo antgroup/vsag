@@ -846,6 +846,8 @@ HGraph::KnnSearch(const DatasetPtr& query,
         search_param.ef = std::max(params.ef_search, k);
         search_param.is_inner_id_allowed = ft;
         search_param.topk = static_cast<int64_t>(search_param.ef);
+        search_param.parallel_search_thread_count = params.parallel_search_thread_count;
+
         search_result = this->search_one_graph(query_data,
                                                this->bottom_graph_,
                                                this->basic_flatten_codes_,
@@ -963,7 +965,7 @@ HGraph::search_one_graph(const void* query,
         visited_list->Reset();
     }
     DistHeapPtr result = nullptr;
-    if (inner_search_param.use_muti_threads_for_one_query && inner_search_param.level_0) {
+    if (inner_search_param.parallel_search_thread_count > 1) {
         result = this->parallel_searcher_->Search(
             graph, flatten, visited_list, query, inner_search_param);
     } else {
@@ -1044,12 +1046,15 @@ HGraph::RangeSearch(const DatasetPtr& query,
     search_param.search_mode = RANGE_SEARCH;
     search_param.consider_duplicate = true;
     search_param.range_search_limit_size = static_cast<int>(limited_size);
+    search_param.parallel_search_thread_count = params.parallel_search_thread_count;
+
     auto search_result = this->search_one_graph(raw_query,
                                                 this->bottom_graph_,
                                                 this->basic_flatten_codes_,
                                                 search_param,
                                                 (VisitedListPtr) nullptr,
                                                 stats);
+
     if (use_reorder_) {
         this->reorder(raw_query, this->high_precise_codes_, search_result, limited_size);
     }
@@ -2080,6 +2085,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         search_param.time_cost->SetThreshold(params.timeout_ms);
         stats.is_timeout.store(false, std::memory_order_relaxed);
     }
+    search_param.parallel_search_thread_count = params.parallel_search_thread_count;
 
     auto search_result = this->search_one_graph(
         raw_query, this->bottom_graph_, this->basic_flatten_codes_, search_param, vt, stats);
