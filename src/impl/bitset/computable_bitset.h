@@ -133,6 +133,14 @@ public:
      */
     virtual void
     Clear() = 0;
+
+    /**
+     * @brief Retrieves the current memory usage of the ComputableBitset.
+     * 
+     * @return The current memory usage in bytes.
+     */
+    virtual int64_t
+    GetCurrentMemoryUsage() const = 0;
 };
 
 }  // namespace vsag
