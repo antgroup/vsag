@@ -66,12 +66,13 @@ TEST_CASE("SparseTermDatacell Basic Test", "[ut][SparseTermDatacell]") {
     float doc_retain_ratio = 0.5;
     float term_prune_ratio = 0.0;
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
+
     auto q_params = std::make_shared<QuantizationParams>();
     q_params->min_val = 0.0f;
     q_params->max_val = 18.0f;
     q_params->diff = q_params->max_val - q_params->min_val;
     auto data_cell = std::make_shared<SparseTermDataCell>(
-        doc_retain_ratio, DEFAULT_TERM_ID_LIMIT, allocator.get(), q_params);
+        doc_retain_ratio, DEFAULT_TERM_ID_LIMIT, allocator.get(), false, q_params);
     REQUIRE(std::abs(data_cell->doc_retain_ratio_ - doc_retain_ratio) < 1e-3);
 
     // test factory computer
@@ -97,7 +98,7 @@ TEST_CASE("SparseTermDatacell Basic Test", "[ut][SparseTermDatacell]") {
         } else {
             REQUIRE(data_cell->term_ids_[i]->size() == data_cell->term_sizes_[i]);
             REQUIRE(data_cell->term_ids_[i]->size() == exp_size[i]);
-            REQUIRE(data_cell->term_datas_[i]->size() == exp_size[i]);
+            REQUIRE(data_cell->term_datas_[i]->size() == exp_size[i] * sizeof(float));
         }
     }
 
@@ -112,17 +113,12 @@ TEST_CASE("SparseTermDatacell Basic Test", "[ut][SparseTermDatacell]") {
         // 2. Call the actual DocPrune function
         data_cell->DocPrune(sorted_base);
 
-        // 3. Simulate quantization and inner product calculation (without dequantization)
+        // 3. Simulate quantization and inner product calculation
         float total_dist = 0.0f;
         for (const auto& pair : sorted_base) {
             float val = pair.second;
-            // Quantize the value using the cell's Encode method
-            uint8_t quantized_val;
-            data_cell->Encode(val, &quantized_val);
-
-            // The computer uses -1.0 as query value for inner product
-            float query_val = -1.0f;
-            total_dist += query_val * static_cast<float>(quantized_val);
+            float query_val = -1.0f;  // The computer uses -1.0 as query value
+            total_dist += query_val * val;
         }
         exp_dists[i] = total_dist;
     }
@@ -131,8 +127,7 @@ TEST_CASE("SparseTermDatacell Basic Test", "[ut][SparseTermDatacell]") {
         std::vector<float> dists(count_base, 0);
         data_cell->Query(dists.data(), computer);
         for (auto i = 0; i < dists.size(); i++) {
-            std::cout << "test query Distance to base " << i << ": " << dists[i] << std::endl;
-            REQUIRE(std::abs(dists[i] - exp_dists[i]) < 1e-2);
+            REQUIRE(std::abs(dists[i] - exp_dists[i]) < 1e-3);
         }
     }
 
@@ -151,9 +146,7 @@ TEST_CASE("SparseTermDatacell Basic Test", "[ut][SparseTermDatacell]") {
             auto cur_top = heap.top();
             auto exp_id = pos + i;
             REQUIRE(cur_top.second == exp_id);
-            std::cout << "insert heap Distance to base " << exp_id << ": " << cur_top.first
-                      << std::endl;
-            REQUIRE(std::abs(cur_top.first - exp_dists[exp_id]) < 1e-2);
+            REQUIRE(std::abs(cur_top.first - exp_dists[exp_id]) < 1e-3);
             heap.pop();
         }
         for (auto i = 0; i < dists.size(); i++) {
@@ -176,9 +169,7 @@ TEST_CASE("SparseTermDatacell Basic Test", "[ut][SparseTermDatacell]") {
             auto cur_top = heap.top();
             auto exp_id = pos + i + 1;
             REQUIRE(cur_top.second == exp_id);
-            std::cout << "range search Distance to base " << exp_id << ": " << cur_top.first
-                      << std::endl;
-            REQUIRE(std::abs(cur_top.first - exp_dists[exp_id]) < 1e-2);
+            REQUIRE(std::abs(cur_top.first - exp_dists[exp_id]) < 1e-3);
             heap.pop();
         }
         for (auto i = 0; i < range_topk; i++) {
@@ -214,7 +205,7 @@ TEST_CASE("SparseTermDatacell Encode/Decode Test", "[ut][SparseTermDatacell]") {
     q_params->max_val = max_val;
     q_params->diff = max_val - min_val;
     auto data_cell = std::make_shared<SparseTermDataCell>(
-        1.0f, DEFAULT_TERM_ID_LIMIT, allocator.get(), q_params);
+        1.0f, DEFAULT_TERM_ID_LIMIT, allocator.get(), true, q_params);
 
     // Insert vector (tests Encode)
     uint16_t base_id = 5;
@@ -270,7 +261,7 @@ TEST_CASE("SparseTermDatacell Last Term Test", "[ut][SparseTermDatacell]") {
         q_params->max_val = 0.1f;
         q_params->diff = q_params->max_val - q_params->min_val;
         auto data_cell = std::make_shared<SparseTermDataCell>(
-            1, DEFAULT_TERM_ID_LIMIT, allocator.get(), q_params);
+            1, DEFAULT_TERM_ID_LIMIT, allocator.get(), false, q_params);
         data_cell->InsertVector(sv0, ids[0]);
         data_cell->InsertVector(sv1, ids[1]);
 
@@ -286,8 +277,7 @@ TEST_CASE("SparseTermDatacell Last Term Test", "[ut][SparseTermDatacell]") {
 
         std::vector<float> dists(2, 0);
         data_cell->Query(dists.data(), computer);
-
-        REQUIRE(std::abs(dists[0] - (-255.0f)) < 1e-2f);
-        REQUIRE(std::abs(dists[1] - (-255.0f)) < 1e-2f);
+        REQUIRE(std::abs(dists[0] - (-0.1f)) < 1e-2f);
+        REQUIRE(std::abs(dists[1] - (-0.1f)) < 1e-2f);
     }
 }

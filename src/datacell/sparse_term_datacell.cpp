@@ -34,12 +34,23 @@ SparseTermDataCell::Query(float* global_dists, const SparseTermComputerPtr& comp
             continue;
         }
 
-        computer->ScanForAccumulate(it,
-                                    term_ids_[term]->data(),
-                                    term_datas_[term]->data(),
-                                    static_cast<uint32_t>(static_cast<float>(term_sizes_[term]) *
-                                                          computer->term_retain_ratio_),
-                                    global_dists);
+        auto term_size = static_cast<uint32_t>(static_cast<float>(term_sizes_[term]) *
+                                               computer->term_retain_ratio_);
+
+        if (use_quantization_) {
+            computer->ScanForAccumulate(it,
+                                        term_ids_[term]->data(),
+                                        term_datas_[term]->data(),
+                                        term_size,
+                                        global_dists);
+        } else {
+            computer->ScanForAccumulate(
+                it,
+                term_ids_[term]->data(),
+                reinterpret_cast<const float*>(term_datas_[term]->data()),
+                term_size,
+                global_dists);
+        }
     }
     computer->ResetTerm();
 }
@@ -180,8 +191,6 @@ SparseTermDataCell::InsertVector(const SparseVector& sparse_base, uint16_t base_
     // doc prune
     DocPrune(sorted_base);
 
-    size_t buffer_length = 1;
-
     // insert vector
     for (auto& item : sorted_base) {
         auto term = item.first;
@@ -194,12 +203,16 @@ SparseTermDataCell::InsertVector(const SparseVector& sparse_base, uint16_t base_
 
         term_ids_[term]->push_back(base_id);
 
-        uint8_t buffer[buffer_length];
-        Encode(val, buffer);
         auto& data_vec = *term_datas_[term];
-        auto old_size = data_vec.size();
-        data_vec.resize(old_size + buffer_length);
-        std::memcpy(data_vec.data() + old_size, buffer, buffer_length);
+        if (use_quantization_) {
+            uint8_t buffer;
+            Encode(val, &buffer);
+            data_vec.push_back(buffer);
+        } else {
+            auto old_size = data_vec.size();
+            data_vec.resize(old_size + sizeof(float));
+            *reinterpret_cast<float*>(data_vec.data() + old_size) = val;
+        }
 
         term_sizes_[term] += 1;
     }
@@ -248,9 +261,13 @@ SparseTermDataCell::CalcDistanceByInnerId(const SparseTermComputerPtr& computer,
         // Dequantize
         const float* vals = nullptr;
         auto size = term_sizes_[term];
-        temp_data.resize(size);
-        Decode(term_datas_[term]->data(), size, temp_data.data());
-        vals = temp_data.data();
+        if (use_quantization_) {
+            temp_data.resize(size);
+            Decode(term_datas_[term]->data(), size, temp_data.data());
+            vals = temp_data.data();
+        } else {
+            vals = reinterpret_cast<const float*>(term_datas_[term]->data());
+        }
 
         computer->ScanForCalculateDist(
             it, term_ids_[term]->data(), vals, term_sizes_[term], base_id, &ip);
@@ -264,14 +281,19 @@ SparseTermDataCell::GetSparseVector(uint16_t base_id, SparseVector* data) {
     Vector<uint32_t> ids(allocator_);
     Vector<float> vals(allocator_);
 
-    size_t step = 1;
-
     for (auto term = 0; term < term_ids_.size(); term++) {
+        if (term_sizes_[term] == 0) {
+            continue;
+        }
         for (auto i = 0; i < term_sizes_[term]; i++) {
             if ((*term_ids_[term])[i] == base_id) {
                 ids.push_back(term);
                 float v;
-                Decode(term_datas_[term]->data() + i * step, 1, &v);
+                if (use_quantization_) {
+                    Decode(term_datas_[term]->data() + i, 1, &v);
+                } else {
+                    v = reinterpret_cast<float*>(term_datas_[term]->data())[i];
+                }
                 vals.push_back(v);
             }
         }

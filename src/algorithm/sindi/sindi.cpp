@@ -32,6 +32,7 @@ SINDI::CheckAndMappingExternalParam(const JsonType& external_param,
 SINDI::SINDI(const SINDIParameterPtr& param, const IndexCommonParam& common_param)
     : InnerIndexInterface(param, common_param),
       use_reorder_(param->use_reorder),
+      use_quantization_(param->use_quantization),
       term_id_limit_(param->term_id_limit),
       window_size_(param->window_size),
       doc_retain_ratio_(1.0F - param->doc_prune_ratio),
@@ -59,7 +60,7 @@ SINDI::Add(const DatasetPtr& base) {
     const auto* extra_info = base->GetExtraInfos();
     const auto extra_info_size = base->GetExtraInfoSize();
 
-    if (cur_element_count_ == 0) {
+    if (use_quantization_ && cur_element_count_ == 0) {
         float min_val = std::numeric_limits<float>::max();
         float max_val = std::numeric_limits<float>::lowest();
         for (int64_t i = 0; i < data_num; ++i) {
@@ -85,8 +86,11 @@ SINDI::Add(const DatasetPtr& base) {
     // adjust window
     int64_t final_add_window = align_up(cur_element_count_ + data_num, window_size_) / window_size_;
     while (window_term_list_.size() < final_add_window) {
-        window_term_list_.emplace_back(std::make_shared<SparseTermDataCell>(
-            doc_retain_ratio_, term_id_limit_, allocator_, quantization_params_));
+        window_term_list_.emplace_back(std::make_shared<SparseTermDataCell>(doc_retain_ratio_,
+                                                                            term_id_limit_,
+                                                                            allocator_,
+                                                                            use_quantization_,
+                                                                            quantization_params_));
     }
 
     // add process
@@ -395,8 +399,11 @@ SINDI::Deserialize(StreamReader& reader) {
     StreamReader::ReadObj(reader_ref, window_term_list_size);
     window_term_list_.resize(window_term_list_size);
     for (auto& window : window_term_list_) {
-        window = std::make_shared<SparseTermDataCell>(
-            doc_retain_ratio_, term_id_limit_, allocator_, quantization_params_);
+        window = std::make_shared<SparseTermDataCell>(doc_retain_ratio_,
+                                                      term_id_limit_,
+                                                      allocator_,
+                                                      use_quantization_,
+                                                      quantization_params_);
         window->Deserialize(reader_ref);
     }
 

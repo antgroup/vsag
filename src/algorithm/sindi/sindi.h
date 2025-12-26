@@ -135,6 +135,8 @@ private:
 
     bool use_reorder_{false};
 
+    bool use_quantization_{false};
+
     float doc_retain_ratio_{0};
 
     std::shared_ptr<SparseIndex> rerank_flat_index_{nullptr};

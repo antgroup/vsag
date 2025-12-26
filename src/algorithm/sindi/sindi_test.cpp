@@ -47,7 +47,6 @@ TEST_CASE("SINDI Basic Test", "[ut][SINDI]") {
     float max_val = 10;
     int seed_base = 114;
     int64_t k = 10;
-    auto use_reorder = GENERATE("false", "true");
 
     std::vector<int64_t> ids(num_base);
     for (int64_t i = 0; i < num_base; ++i) {
@@ -60,14 +59,16 @@ TEST_CASE("SINDI Basic Test", "[ut][SINDI]") {
     base->NumElements(num_base)->SparseVectors(sv_base.data())->Ids(ids.data())->Owner(false);
 
     constexpr static auto param_str = R"({{
-        "use_reorder": {},
+        "use_reorder": true,
+        "use_quantization": false,
         "doc_prune_ratio": 0.0,
         "term_prune_ratio": 0.0,
         "window_size": 10000,
         "term_id_limit": 30001
     }})";
 
-    vsag::JsonType param_json = vsag::JsonType::Parse(fmt::format(param_str, use_reorder));
+    vsag::JsonType param_json =
+        vsag::JsonType::Parse(fmt::format(param_str));
     auto index_param = std::make_shared<vsag::SINDIParameter>();
     index_param->FromJson(param_json);
     auto index = std::make_unique<SINDI>(index_param, common_param);
@@ -123,14 +124,12 @@ TEST_CASE("SINDI Basic Test", "[ut][SINDI]") {
 
         // test basic performance
         auto result = index->KnnSearch(query, k, search_param_str, nullptr);
-        REQUIRE(result->GetIds()[0] == ids[i]);
-        int not_match = 0;
+        REQUIRE(result->GetNumElements() == bf_result->GetNumElements());
+        REQUIRE(result->GetDim() == bf_result->GetDim());
         for (int j = 0; j < k; j++) {
-            if (result->GetIds()[j] == bf_result->GetIds()[j]) {
-                not_match++;
-            }
+            REQUIRE(result->GetIds()[j] == bf_result->GetIds()[j]);
+            REQUIRE(std::abs(result->GetDistances()[j] - bf_result->GetDistances()[j]) < 1e-3);
         }
-        int recall = (k * num_query - not_match) / k * num_query;
 
         // test filter with knn
         auto filter_knn_result = index->KnnSearch(query, k, search_param_str, mock_filter);

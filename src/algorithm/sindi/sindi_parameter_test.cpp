@@ -43,6 +43,7 @@ using namespace vsag;
 
 struct SINDIDefaultParam {
     bool use_reorder = true;
+    bool use_quantization = false;
     float doc_prune_ratio = 0.1F;
     int window_size = 55555;
     int term_id_limit = 10000;
@@ -52,6 +53,7 @@ std::string
 generate_sindi_param(const SINDIDefaultParam& param) {
     vsag::JsonType json;
     json[USE_REORDER_KEY].SetBool(param.use_reorder);
+    json[USE_QUANTIZATION].SetBool(param.use_quantization);
     json[SPARSE_DOC_PRUNE_RATIO].SetFloat(param.doc_prune_ratio);
     json[SPARSE_WINDOW_SIZE].SetInt(param.window_size);
     json[SPARSE_TERM_ID_LIMIT].SetInt(param.term_id_limit);
@@ -65,6 +67,7 @@ TEST_CASE("SINDI Index Parameters Test", "[ut][SINDIParameter]") {
     auto param = std::make_shared<vsag::SINDIParameter>();
     param->FromJson(param_json);
     REQUIRE(param->use_reorder == default_param.use_reorder);
+    REQUIRE(param->use_quantization == default_param.use_quantization);
     REQUIRE(std::abs(param->doc_prune_ratio - default_param.doc_prune_ratio) < 1e-3);
     REQUIRE(param->window_size == default_param.window_size);
     REQUIRE(param->term_id_limit == default_param.term_id_limit);
@@ -86,6 +89,8 @@ TEST_CASE("SINDI Index Parameters Test", "[ut][SINDIParameter]") {
 
 TEST_CASE("SINDI Index Parameters Compatibility Test", "[ut][SINDIParameter]") {
     TEST_COMPATIBILITY_CASE("use_reorder compatibility", use_reorder, true, false, false);
+    TEST_COMPATIBILITY_CASE(
+        "use_quantization compatibility", use_quantization, true, false, false);
     TEST_COMPATIBILITY_CASE("doc_prune_ratio compatibility", doc_prune_ratio, 0.2F, 0.3F, false);
     TEST_COMPATIBILITY_CASE("window_size compatibility", window_size, 33333, 55555, false);
     TEST_COMPATIBILITY_CASE("term_id_limit compatibility", term_id_limit, 10000, 10001, false);
