@@ -36,7 +36,7 @@ jobs:
           path: ./build
           name: test_x86-${{ github.run_id }}-tsan
           compression-level: 1
-          retention-days: 1
+          retention-days: 3
           overwrite: 'true'
 
   test_tsan:
