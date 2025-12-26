@@ -45,6 +45,71 @@ SparseTermDataCell::Query(float* global_dists, const SparseTermComputerPtr& comp
 
 template <InnerSearchMode mode, InnerSearchType type>
 void
+SparseTermDataCell::InsertCandidateIntoHeap(uint32_t id,
+                                            float* dists,
+                                            float& cur_heap_top,
+                                            MaxHeap& heap,
+                                            uint32_t offset_id,
+                                            uint32_t n_candidate,
+                                            float radius,
+                                            const FilterPtr& filter) const {
+    if constexpr (type == InnerSearchType::WITH_FILTER) {
+#if __cplusplus >= 202002L
+        if (dists[id] > cur_heap_top or not filter->CheckValid(id + offset_id)) [[likely]] {
+#else
+        if (__builtin_expect(dists[id] > cur_heap_top or not filter->CheckValid(id + offset_id),
+                             1)) {
+#endif
+            dists[id] = 0;
+            return;
+        }
+    } else {
+#if __cplusplus >= 202002L
+        if (dists[id] > cur_heap_top) [[likely]] {
+#else
+        if (__builtin_expect(dists[id] > cur_heap_top, 1)) {
+#endif
+            dists[id] = 0;
+            return;
+        }
+    }
+    heap.emplace(dists[id], id + offset_id);
+    if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
+        heap.pop();
+        cur_heap_top = heap.top().first;
+    }
+    if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
+        cur_heap_top = radius - 1;
+    }
+    dists[id] = 0;
+}
+
+template <InnerSearchType type>
+bool
+SparseTermDataCell::FillHeapInitial(uint32_t id,
+                                    float* dists,
+                                    float& cur_heap_top,
+                                    MaxHeap& heap,
+                                    uint32_t offset_id,
+                                    uint32_t n_candidate,
+                                    const FilterPtr& filter) const {
+    if (dists[id] != 0) {
+        if constexpr (type == InnerSearchType::WITH_FILTER) {
+            if (not filter->CheckValid(id + offset_id)) {
+                dists[id] = 0;
+                return false;
+            }
+        }
+        heap.emplace(dists[id], id + offset_id);
+        cur_heap_top = heap.top().first;
+        dists[id] = 0;
+        return heap.size() == n_candidate;
+    }
+    return false;
+}
+
+template <InnerSearchMode mode, InnerSearchType type>
+void
 SparseTermDataCell::InsertHeapByTermLists(float* dists,
                                           const SparseTermComputerPtr& computer,
                                           MaxHeap& heap,
@@ -76,21 +141,10 @@ SparseTermDataCell::InsertHeapByTermLists(float* dists,
         if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
             if (heap.size() < n_candidate) {
                 for (; i < term_size; i++) {
-                    id = term_ids_[term][i];
-
-                    if (dists[id] != 0) {
-                        if constexpr (type == InnerSearchType::WITH_FILTER) {
-                            if (not filter->CheckValid(id + offset_id)) {
-                                dists[id] = 0;
-                                continue;
-                            }
-                        }
-                        heap.emplace(dists[id], id + offset_id);
-                        cur_heap_top = heap.top().first;
-                        dists[id] = 0;
-                    }
-
-                    if (heap.size() == n_candidate) {
+                    id = (*term_ids_[term])[i];
+                    if (FillHeapInitial<type>(
+                            id, dists, cur_heap_top, heap, offset_id, n_candidate, filter)) {
+                        i++;
                         break;
                     }
                 }
@@ -98,37 +152,9 @@ SparseTermDataCell::InsertHeapByTermLists(float* dists,
         }
 
         for (; i < term_size; i++) {
-            id = term_ids_[term][i];
-
-            if constexpr (type == InnerSearchType::WITH_FILTER) {
-#if __cplusplus >= 202002L
-                if (dists[id] > cur_heap_top or not filter->CheckValid(id + offset_id)) [[likely]] {
-#else
-                if (__builtin_expect(
-                        dists[id] > cur_heap_top or not filter->CheckValid(id + offset_id), 1)) {
-#endif
-                    dists[id] = 0;
-                    continue;
-                }
-            } else {
-#if __cplusplus >= 202002L
-                if (dists[id] > cur_heap_top) [[likely]] {
-#else
-                if (__builtin_expect(dists[id] > cur_heap_top, 1)) {
-#endif
-                    dists[id] = 0;
-                    continue;
-                }
-            }
-            heap.emplace(dists[id], id + offset_id);
-            if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
-                heap.pop();
-                cur_heap_top = heap.top().first;
-            }
-            if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
-                cur_heap_top = radius - 1;
-            }
-            dists[id] = 0;
+            id = (*term_ids_[term])[i];
+            InsertCandidateIntoHeap<mode, type>(
+                id, dists, cur_heap_top, heap, offset_id, n_candidate, radius, filter);
         }
     }
     computer->ResetTerm();
@@ -154,56 +180,18 @@ SparseTermDataCell::InsertHeapByDists(float* dists,
     if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
         if (heap.size() < n_candidate) {
             for (; id < dists_size; id++) {
-                if (dists[id] != 0) {
-                    if constexpr (type == InnerSearchType::WITH_FILTER) {
-                        if (not filter->CheckValid(id + offset_id)) {
-                            dists[id] = 0;
-                            continue;
-                        }
-                    }
-                    heap.emplace(dists[id], id + offset_id);
-                    cur_heap_top = heap.top().first;
-                    dists[id] = 0;
-
-                    if (heap.size() == n_candidate) {
-                        id++;
-                        break;
-                    }
+                if (FillHeapInitial<type>(
+                        id, dists, cur_heap_top, heap, offset_id, n_candidate, filter)) {
+                    id++;
+                    break;
                 }
             }
         }
     }
 
     for (; id < dists_size; id++) {
-        if constexpr (type == InnerSearchType::WITH_FILTER) {
-#if __cplusplus >= 202002L
-            if (dists[id] > cur_heap_top or not filter->CheckValid(id + offset_id)) [[likely]] {
-#else
-            if (__builtin_expect(dists[id] > cur_heap_top or not filter->CheckValid(id + offset_id),
-                                 1)) {
-#endif
-                dists[id] = 0;
-                continue;
-            }
-        } else {
-#if __cplusplus >= 202002L
-            if (dists[id] > cur_heap_top) [[likely]] {
-#else
-            if (__builtin_expect(dists[id] > cur_heap_top, 1)) {
-#endif
-                dists[id] = 0;
-                continue;
-            }
-        }
-        heap.emplace(dists[id], id + offset_id);
-        if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
-            heap.pop();
-            cur_heap_top = heap.top().first;
-        }
-        if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
-            cur_heap_top = radius - 1;
-        }
-        dists[id] = 0;
+        InsertCandidateIntoHeap<mode, type>(
+            id, dists, cur_heap_top, heap, offset_id, n_candidate, radius, filter);
     }
 }
 
