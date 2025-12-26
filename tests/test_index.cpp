@@ -1396,15 +1396,21 @@ TestIndex::TestDuplicateAdd(const TestIndex::IndexPtr& index, const TestDatasetP
     auto dim = dataset->base_->GetDim();
     auto new_data = std::shared_ptr<float[]>(new float[double_count * dim]);
     auto new_ids = std::shared_ptr<int64_t[]>(new int64_t[double_count]);
+    auto new_paths = std::shared_ptr<std::string[]>(new std::string[double_count]);
     memcpy(new_data.get(), dataset->base_->GetFloat32Vectors(), base_count * dim * sizeof(float));
     memcpy(new_data.get() + base_count * dim,
            dataset->base_->GetFloat32Vectors(),
            base_count * dim * sizeof(float));
     memcpy(new_ids.get(), dataset->base_->GetIds(), base_count * sizeof(int64_t));
     memcpy(new_ids.get() + base_count, dataset->base_->GetIds(), base_count * sizeof(int64_t));
+    for (uint64_t i = 0; i < base_count; ++i) {
+        new_paths[i] = dataset->base_->GetPaths()[i];
+        new_paths[i + base_count] = dataset->base_->GetPaths()[i];
+    }
     double_dataset->Dim(dim)
         ->NumElements(double_count)
         ->Ids(new_ids.get())
+        ->Paths(new_paths.get())
         ->Float32Vectors(new_data.get())
         ->Owner(false);
 
