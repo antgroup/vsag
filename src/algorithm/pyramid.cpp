@@ -665,7 +665,7 @@ Pyramid::add_one_point(const std::shared_ptr<IndexNode>& node,
     } else {
         InnerSearchParam search_param;
         search_param.ef = ef_construction_;
-        search_param.topk = ef_construction_;
+        search_param.topk = static_cast<int64_t>(ef_construction_);
         search_param.search_mode = KNN_SEARCH;
         if (label_table_->CompressDuplicateData()) {
             search_param.find_duplicate = true;
