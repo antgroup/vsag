@@ -66,6 +66,18 @@ InnerIndexParameter::FromJson(const JsonType& json) {
         this->extra_info_param = std::make_shared<ExtraInfoDataCellParameter>();
         this->extra_info_param->FromJson(json[EXTRA_INFO_KEY]);
     }
+
+    if (json.Contains(TRAIN_SAMPLE_COUNT_KEY)) {
+        this->train_sample_count = json[TRAIN_SAMPLE_COUNT_KEY].GetInt();
+        CHECK_ARGUMENT(
+            this->train_sample_count >= 512,
+            fmt::format("train_sample_count must be greater than or equal to 512, got: {}",
+                        this->train_sample_count));
+        CHECK_ARGUMENT(
+            this->train_sample_count <= 65536L,
+            fmt::format("train_sample_count must be less than or equal to 65536, got: {}",
+                        this->train_sample_count));
+    }
 }
 
 JsonType
@@ -87,6 +99,9 @@ InnerIndexParameter::ToJson() const {
     if (this->use_attribute_filter) {
         json[ATTR_PARAMS_KEY].SetJson(this->attr_inverted_interface_param->ToJson());
     }
+
+    json[TRAIN_SAMPLE_COUNT_KEY].SetInt(this->train_sample_count);
+
     auto str = json.Dump(4);
     return json;
 }
