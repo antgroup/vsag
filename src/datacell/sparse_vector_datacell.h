@@ -53,6 +53,13 @@ public:
                             "Decode function is not implemented for SparseVectorDataCell");
     }
 
+    bool
+    Encode(const DataType* vector, uint8_t* codes) override {
+        // TODO(inabao): Implement the decode function
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Encode function is not implemented for SparseVectorDataCell");
+    }
+
     float
     ComputePairVectors(InnerIdType id1, InnerIdType id2) override;
 

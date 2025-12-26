@@ -2346,6 +2346,8 @@ TestIndex::TestBuildDuplicateIndex(const IndexPtr& index,
             new_data->NumElements(1)
                 ->Dim(dataset->base_->GetDim())
                 ->Ids(&i)
+                ->SparseVectors(dataset->base_->GetSparseVectors())
+                ->Paths(dataset->base_->GetPaths())
                 ->Float32Vectors(dataset->base_->GetFloat32Vectors())
                 ->Owner(false);
             auto add_result = index->Add(new_data);
@@ -2358,6 +2360,8 @@ TestIndex::TestBuildDuplicateIndex(const IndexPtr& index,
             new_data->NumElements(1)
                 ->Dim(dataset->base_->GetDim())
                 ->Ids(&i)
+                ->SparseVectors(dataset->base_->GetSparseVectors())
+                ->Paths(dataset->base_->GetPaths())
                 ->Float32Vectors(dataset->base_->GetFloat32Vectors())
                 ->Owner(false);
             auto add_result = index->Add(new_data);
