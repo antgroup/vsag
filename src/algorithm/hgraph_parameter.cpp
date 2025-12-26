@@ -104,6 +104,10 @@ HGraphParameter::FromJson(const JsonType& json) {
 
     if (json.Contains(ALPHA_KEY)) {
         this->alpha = json[ALPHA_KEY].GetFloat();
+        this->selectedgeparam = "alpha";
+    } else if (json.Contains(TAU_KEY)) {
+        this->tau = json[TAU_KEY].GetFloat();
+        this->selectedgeparam = "tau";
     }
 
     if (json.Contains(BUILD_THREAD_COUNT_KEY)) {
@@ -136,6 +140,7 @@ HGraphParameter::ToJson() const {
     json[GRAPH_KEY].SetJson(this->bottom_graph_param->ToJson());
     json[EF_CONSTRUCTION_KEY].SetInt(this->ef_construction);
     json[ALPHA_KEY].SetFloat(this->alpha);
+    json[TAU_KEY].SetFloat(this->tau);
     json[SUPPORT_DUPLICATE].SetBool(this->support_duplicate);
     return json;
 }
