@@ -44,6 +44,7 @@ public:
 
     // temporal parameter
     bool deserialize_without_footer{false};
+    bool deserialize_without_buffer{false};
 };
 
 using SINDIParameterPtr = std::shared_ptr<SINDIParameter>;
