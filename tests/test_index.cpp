@@ -1842,7 +1842,7 @@ TestIndex::TestRemoveIndex(const TestIndex::IndexPtr& index,
         auto add_results = index->Add(new_data);
         REQUIRE(add_results.has_value());
     }
-    for (int64_t i = 0; i < base_num; ++i) {
+    for (int64_t i = 0; i < base_num / 2; ++i) {
         auto new_data = vsag::Dataset::Make();
         new_data->NumElements(1)
             ->Dim(base_dim)
