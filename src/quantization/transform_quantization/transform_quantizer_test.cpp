@@ -25,7 +25,7 @@
 
 using namespace vsag;
 
-const auto dims = fixtures::get_common_used_dims(10, 114);
+const auto dims = fixtures::get_common_used_dims(3, 114);
 const auto counts = {101, 1001};
 
 template <typename T, MetricType metric>

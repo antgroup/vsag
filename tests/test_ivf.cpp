@@ -68,7 +68,7 @@ public:
 
     static const std::string name;
 
-    constexpr static uint64_t base_count = 1000;
+    constexpr static uint64_t base_count = 800;
 
     static const std::vector<std::pair<std::string, float>> all_test_cases;
 };

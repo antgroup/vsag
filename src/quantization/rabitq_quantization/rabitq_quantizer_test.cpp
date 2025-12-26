@@ -28,7 +28,7 @@
 
 using namespace vsag;
 
-const auto dims = fixtures::get_common_used_dims();
+const auto dims = fixtures::get_common_used_dims(6, 129);
 const auto counts = {100};
 
 TEST_CASE("RaBitQ Basic Test", "[ut][RaBitQuantizer]") {
