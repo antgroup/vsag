@@ -71,6 +71,11 @@ SINDI::Add(const DatasetPtr& base) {
         auto cur_window = cur_element_count_ / window_size_;
         auto window_start_id = cur_window * window_size_;
         const auto& sparse_vector = sparse_vectors[i];
+        if (label_table_->CheckLabel(ids[i])) {
+            failed_ids.push_back(ids[i]);
+            logger::warn("id ({}) already exists", ids[i]);
+            continue;
+        }
         if (sparse_vector.len_ <= 0) {
             failed_ids.push_back(ids[i]);
             logger::warn(

@@ -228,3 +228,12 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Serialize File", "
     }
     vsag::Options::Instance().set_block_size_limit(origin_size);
 }
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "Sindi Duplicate ID Test", "[ft][sindi]") {
+    fixtures::SINDIParam param;
+    param.use_reorder = GENERATE(true, false);
+    auto build_param = fixtures::SINDITestIndex::GenerateBuildParameter(param);
+    auto index = TestFactory("sindi", build_param, true);
+    auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
+    TestDuplicateAdd(index, dataset);
+}
