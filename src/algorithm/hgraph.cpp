@@ -103,13 +103,19 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
 }
 void
 HGraph::Train(const DatasetPtr& base) {
-    const auto* base_data = get_data(base);
-    this->basic_flatten_codes_->Train(base_data, base->GetNumElements());
+    int64_t total_elements = base->GetNumElements();
+    int64_t dim = base->GetDim();
+    DatasetPtr train_data =
+        vsag::sample_train_data(base, total_elements, dim, train_sample_count_, allocator_);
+
+    const auto* data_ptr = get_data(train_data);
+    this->basic_flatten_codes_->Train(data_ptr, train_data->GetNumElements());
     if (use_reorder_) {
-        this->high_precise_codes_->Train(base_data, base->GetNumElements());
+        this->high_precise_codes_->Train(data_ptr, train_data->GetNumElements());
     }
     if (create_new_raw_vector_) {
-        this->raw_vector_->Train(base_data, base->GetNumElements());
+        // nothing to do since raw_vector_ is fp32
+        this->raw_vector_->Train(data_ptr, train_data->GetNumElements());
     }
 }
 
@@ -541,9 +547,10 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
     param->base_codes_param = hgraph_parameter->base_codes_param;
 
     // export train data and train new_basic_code
-    auto train_count = std::min(MAX_TRAIN_COUNT, (uint32_t)this->total_count_);
+    auto train_count = std::min(this->train_sample_count_, this->GetNumElements());
     Vector<float> train_data(train_count * dim_, 0, allocator_);
     for (InnerIdType i = 0; i < train_count; i++) {
+        // TODO(zxy): process when i is deleted
         this->GetVectorByInnerId(i, (train_data.data() + i * dim_));
     }
     new_basic_code->Train(train_data.data(), train_count);

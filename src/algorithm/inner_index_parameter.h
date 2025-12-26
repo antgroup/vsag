@@ -48,6 +48,8 @@ public:
 
     uint64_t build_thread_count{1};
 
+    int64_t train_sample_count{MAX_TRAIN_COUNT};
+
     bool store_raw_vector{false};
     FlattenInterfaceParamPtr raw_vector_param{nullptr};
 

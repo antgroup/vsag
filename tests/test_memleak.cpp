@@ -161,7 +161,7 @@ generate_param(const std::string& index_name, const std::string& base_quantizati
                 "base_quantization_type": "{}",
                 "partition_strategy_type": "ivf",
                 "ivf_train_type": "kmeans",
-                "ivf_train_sample_count": 1000
+                "train_sample_count": 1000
             }}
             }})",
             dim,
