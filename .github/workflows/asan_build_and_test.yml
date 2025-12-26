@@ -106,6 +106,7 @@ jobs:
       - name: Do Asan Test In ${{ matrix.test_type }}
         run: |
           echo leak:libomp.so > omp.supp
+          echo leak:libgomp.so >> omp.supp
           export LSAN_OPTIONS=suppressions=omp.supp
           chmod +x ./build/tests/${{ matrix.test_type }}
           ./scripts/testing/test_parallel_by_name.sh ${{ matrix.test_type }}
@@ -144,6 +145,7 @@ jobs:
       - name: Do Asan Test In ${{ matrix.test_type }}
         run: |
           echo leak:libomp.so > omp.supp
+          echo leak:libgomp.so >> omp.supp
           export LSAN_OPTIONS=suppressions=omp.supp
           chmod +x ./build/tests/${{ matrix.test_type }}
           ./scripts/testing/test_parallel_by_name.sh ${{ matrix.test_type }}
