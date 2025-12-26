@@ -99,6 +99,28 @@ public:
     void
     GetSparseVector(uint32_t base_id, SparseVector* data, Allocator* specified_allocator);
 
+private:
+    template <InnerSearchMode mode, InnerSearchType type>
+    void
+    InsertCandidateIntoHeap(uint32_t id,
+                            float* dists,
+                            float& cur_heap_top,
+                            MaxHeap& heap,
+                            uint32_t offset_id,
+                            uint32_t n_candidate,
+                            float radius,
+                            const FilterPtr& filter) const;
+
+    template <InnerSearchType type>
+    bool
+    FillHeapInitial(uint32_t id,
+                    float* dists,
+                    float& cur_heap_top,
+                    MaxHeap& heap,
+                    uint32_t offset_id,
+                    uint32_t n_candidate,
+                    const FilterPtr& filter) const;
+
 public:
     uint32_t term_id_limit_{0};
 
