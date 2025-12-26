@@ -37,18 +37,7 @@ public:
           query_retain_ratio_(1.0F - search_param.query_prune_ratio),
           term_retain_ratio_(1.0F - search_param.term_prune_ratio),
           raw_query_(sparse_query) {
-        sort_sparse_vector(sparse_query, sorted_query_);
-
-        pruned_len_ = (uint32_t)(query_retain_ratio_ * sparse_query.len_);
-        if (pruned_len_ == 0) {
-            if (sorted_query_.size() != 0) {
-                pruned_len_ = 1;
-            }
-        }
-
-        for (auto i = 0; i < sorted_query_.size(); i++) {
-            sorted_query_[i].second *= -1;  // note that: dist_ip = -1 * query * base
-        }
+        SetQuery(sparse_query);
     }
 
     void

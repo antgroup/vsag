@@ -54,6 +54,9 @@ public:
     std::vector<int64_t>
     Build(const DatasetPtr& base) override;
 
+    bool
+    UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update = false) override;
+
     DatasetPtr
     KnnSearch(const DatasetPtr& query,
               int64_t k,
@@ -108,9 +111,6 @@ public:
 
     DatasetPtr
     CalDistanceById(const DatasetPtr& query, const int64_t* ids, int64_t count) const override;
-
-    bool
-    UpdateId(int64_t old_id, int64_t new_id) override;
 
     std::pair<int64_t, int64_t>
     GetMinAndMaxId() const override;
