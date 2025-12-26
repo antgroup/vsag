@@ -1,13 +1,8 @@
 #!/usr/bin/bash
 
-old_version_indexes="v0.16.2_hgraph v0.16.2_hnsw \
-                     v0.16.1_hgraph v0.16.1_hnsw \
-                     v0.16.0_hgraph v0.16.0_hnsw \
-                     v0.15.0_hgraph v0.15.0_hnsw \
+old_version_indexes="v0.17.2_hgraph v0.17.2_hnsw \
+                     v0.16.14_hgraph v0.16.14_hnsw \
                      v0.15.1_hgraph v0.15.1_hnsw \
-                     v0.14.0_hgraph v0.14.0_hnsw \
-                     v0.14.1_hgraph v0.14.1_hnsw \
-                     v0.14.2_hgraph v0.14.2_hnsw \
                      v0.14.8_hgraph v0.14.8_hnsw \
                      v0.13.4_hgraph v0.13.4_hnsw \
                      v0.13.0_hnsw \
