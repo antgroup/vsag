@@ -38,7 +38,7 @@ jobs:
           path: ./build
           name: test_x86-${{ github.run_id }}
           compression-level: 1
-          retention-days: 2
+          retention-days: 3
           overwrite: 'true'
 
   daily_build_asan_aarch64:
@@ -71,7 +71,7 @@ jobs:
           path: ./build/
           name: test_aarch64-${{ github.run_id }}
           compression-level: 1
-          retention-days: 2
+          retention-days: 3
           overwrite: 'true'
 
   daily_test_asan_x86:
@@ -113,7 +113,7 @@ jobs:
           path: ./log
           name: log-x86-${{ matrix.test_type }}-${{ github.run_id }}
           compression-level: 1
-          retention-days: 2
+          retention-days: 3
           overwrite: 'true'
 
   daily_test_asan_aarch64:
@@ -153,7 +153,7 @@ jobs:
           path: ./log
           name: log-aarch64-${{ matrix.test_type }}-${{ github.run_id }}
           compression-level: 1
-          retention-days: 2
+          retention-days: 3
           overwrite: 'true'
 
   asan_test_clean_up:
@@ -169,7 +169,7 @@ jobs:
           path: /tmp/clean_up
           name: test_x86-${{ github.run_id }}
           compression-level: 1
-          retention-days: 2
+          retention-days: 3
           overwrite: 'true'
       - name: Overwrite Test Artifact Aarch64
         uses: actions/upload-artifact@v5
@@ -177,7 +177,7 @@ jobs:
           path: /tmp/clean_up
           name: test_aarch64-${{ github.run_id }}
           compression-level: 1
-          retention-days: 2
+          retention-days: 3
           overwrite: 'true'
 
   daily_build_simd:
@@ -220,7 +220,7 @@ jobs:
           path: ./build
           name: daily_test_simd-${{ env.SIMD_KEY }}-${{ github.run_id }}
           compression-level: 1
-          retention-days: 1
+          retention-days: 3
           overwrite: 'true'
 
   daily_test_asan_simd:
@@ -284,7 +284,7 @@ jobs:
           path: /tmp/clean_up
           name: test-x86-${{ matrix.simd_key }}-${{ github.run_id }}
           compression-level: 1
-          retention-days: 2
+          retention-days: 3
           overwrite: 'true'
 
   daily_build_tsan:
@@ -316,7 +316,7 @@ jobs:
           path: ./build
           name: test_x86-${{ github.run_id }}-tsan
           compression-level: 1
-          retention-days: 2
+          retention-days: 3
           overwrite: 'true'
 
   daily_test_tsan:
