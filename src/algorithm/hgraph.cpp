@@ -1995,6 +1995,7 @@ HGraph::SetImmutable() {
     this->neighbors_mutex_.reset();
     this->neighbors_mutex_ = std::make_shared<EmptyMutex>();
     this->searcher_->SetMutexArray(this->neighbors_mutex_);
+    this->label_table_->use_reverse_map_ = false;
     STLUnorderedMap<LabelType, InnerIdType> empty_remap(allocator_);
     this->label_table_->label_remap_.swap(empty_remap);
     this->immutable_ = true;

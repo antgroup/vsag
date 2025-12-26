@@ -111,6 +111,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "[ft][pyramid]") {
     auto metric_type = GENERATE("l2", "ip", "cosine");
     auto use_reorder = GENERATE(true, false);
+    auto immutable = GENERATE(true, false);
     PyramidParam pyramid_param;
     pyramid_param.no_build_levels = {0, 1, 2};
     pyramid_param.use_reorder = use_reorder;
@@ -126,6 +127,9 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
         REQUIRE(index->GetIndexType() == vsag::IndexType::PYRAMID);
         auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type, /*with_path=*/true);
         TestContinueAdd(index, dataset, true);
+        if (immutable) {
+            index->SetImmutable();
+        }
         TestKnnSearch(index, dataset, search_param, 0.99, true);
         TestFilterSearch(index, dataset, search_param, 0.99, true);
         TestRangeSearch(index, dataset, search_param, 0.99, 10, true);

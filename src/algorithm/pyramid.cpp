@@ -38,14 +38,28 @@ split(const std::string& str, char delimiter) {
     return vec;
 }
 
+uint64_t
+get_suitable_max_degeree(int64_t data_num) {
+    if (data_num < 1'000) {
+        return 8;
+    } else if (data_num < 100'000) {
+        return 16;
+    } else if (data_num < 1000'000) {
+        return 32;
+    }
+    return 64;
+}
+
 IndexNode::IndexNode(Allocator* allocator,
                      GraphInterfaceParamPtr graph_param,
-                     uint32_t index_min_size)
+                     uint32_t index_min_size,
+                     const bool& in_build_process)
     : ids_(allocator),
       children_(allocator),
       allocator_(allocator),
       graph_param_(std::move(graph_param)),
-      index_min_size_(index_min_size) {
+      index_min_size_(index_min_size),
+      in_build_process_(in_build_process) {
 }
 
 void
@@ -69,7 +83,8 @@ IndexNode::Build(ODescent& odescent) {
 void
 IndexNode::AddChild(const std::string& key) {
     // AddChild is not thread-safe; ensure thread safety in calls to it.
-    children_[key] = std::make_shared<IndexNode>(allocator_, graph_param_, index_min_size_);
+    children_[key] =
+        std::make_shared<IndexNode>(allocator_, graph_param_, index_min_size_, in_build_process_);
     children_[key]->level_ = level_ + 1;
 }
 
@@ -139,6 +154,16 @@ void
 IndexNode::Init() {
     if (status_ == Status::NO_INDEX) {
         if (ids_.size() >= index_min_size_) {
+            if (in_build_process_ and level_ != 0) {
+                auto new_max_degree = get_suitable_max_degeree(static_cast<int64_t>(ids_.size()));
+                if (new_max_degree < graph_param_->max_degree_) {
+                    auto new_graph_param_ = std::make_shared<SparseGraphDatacellParameter>();
+                    new_graph_param_->FromJson(graph_param_->ToJson());
+                    new_graph_param_->max_degree_ =
+                        get_suitable_max_degeree(static_cast<int64_t>(ids_.size()));
+                    graph_param_ = new_graph_param_;
+                }
+            }
             graph_ = std::make_shared<SparseGraphDataCell>(
                 std::dynamic_pointer_cast<SparseGraphDatacellParameter>(graph_param_), allocator_);
             status_ = Status::GRAPH;
@@ -619,6 +644,7 @@ Pyramid::Build(const DatasetPtr& base) {
     std::vector<int64_t> ret;
     const auto* path = base->GetPaths();
     CHECK_ARGUMENT(path != nullptr, "path is required");
+    in_build_process_ = true;
     int64_t data_num = base->GetNumElements();
     for (int i = 0; i < data_num; ++i) {
         std::string current_path = path[i];
@@ -642,6 +668,7 @@ Pyramid::Build(const DatasetPtr& base) {
     } else {
         ret = this->build_by_odescent(base);
     }
+    in_build_process_ = false;
     return ret;
 }
 
@@ -769,6 +796,19 @@ Pyramid::search_node(const IndexNode* node,
     }
 
     return results;
+}
+void
+Pyramid::SetImmutable() {
+    if (this->immutable_) {
+        return;
+    }
+    label_table_->use_reverse_map_ = false;
+    this->points_mutex_.reset();
+    this->points_mutex_ = std::make_shared<EmptyMutex>();
+    this->searcher_->SetMutexArray(this->points_mutex_);
+    STLUnorderedMap<LabelType, InnerIdType> empty_remap(allocator_);
+    this->label_table_->label_remap_.swap(empty_remap);
+    immutable_ = true;
 }
 
 }  // namespace vsag

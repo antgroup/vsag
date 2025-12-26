@@ -44,7 +44,10 @@ public:
     enum class Status { NO_INDEX = 0, GRAPH = 1, FLAT = 2 };
 
 public:
-    IndexNode(Allocator* allocator_, GraphInterfaceParamPtr graph_param, uint32_t index_min_size);
+    IndexNode(Allocator* allocator_,
+              GraphInterfaceParamPtr graph_param,
+              uint32_t index_min_size,
+              const bool& in_build_process);
 
     void
     Build(ODescent& odescent);
@@ -81,9 +84,10 @@ public:
     Status status_{Status::NO_INDEX};
 
 private:
-    UnorderedMap<std::string, std::shared_ptr<IndexNode>> children_;
+    STLUnorderedMap<std::string, std::shared_ptr<IndexNode>> children_;
     Allocator* allocator_{nullptr};
     GraphInterfaceParamPtr graph_param_{nullptr};
+    const bool& in_build_process_;
 };
 
 // Pyramid index was introduced since v0.14
@@ -105,8 +109,8 @@ public:
           graph_type_(pyramid_param->graph_type) {
         label_table_->compress_duplicate_data_ = pyramid_param->support_duplicate;
         base_codes_ = FlattenInterface::MakeInstance(pyramid_param->base_codes_param, common_param);
-        root_ =
-            std::make_shared<IndexNode>(allocator_, pyramid_param->graph_param, index_min_size_);
+        root_ = std::make_shared<IndexNode>(
+            allocator_, pyramid_param->graph_param, index_min_size_, in_build_process_);
         points_mutex_ = std::make_shared<PointsMutex>(max_capacity_, allocator_);
         searcher_ = std::make_unique<BasicSearcher>(common_param, points_mutex_);
         no_build_levels_.assign(pyramid_param->no_build_levels.begin(),
@@ -168,6 +172,9 @@ public:
 
     void
     Serialize(StreamWriter& writer) const override;
+
+    void
+    SetImmutable() override;
 
     void
     Train(const vsag::DatasetPtr& base) override;
@@ -235,6 +242,8 @@ private:
 
     // static
     uint32_t index_min_size_{0};
+    bool in_build_process_{false};
+    bool immutable_{false};
 };
 
 }  // namespace vsag
