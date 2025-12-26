@@ -21,8 +21,8 @@ workflows:
 
 jobs:
   pull-request-check:
-    docker:
-      - image: vsaglib/vsag:ci-x86
+    machine:
+      image: ubuntu-2204:2025.09.1
     resource_class: large
     steps:
       - checkout
@@ -30,26 +30,56 @@ jobs:
           keys:
             - fork-cache-{{ checksum "CMakeLists.txt" }}-{{ checksum ".circleci/fresh_ci_cache.commit" }}
       - run:
-          command: export CMAKE_GENERATOR="Ninja" && make test_parallel
+          name: prepare_env_and_create_swap_file
+          command: |
+            sudo apt update
+            sudo apt install -y gfortran python3-dev libomp-15-dev gcc make cmake g++ lcov libaio-dev libcurl4-openssl-dev ninja-build 
+            sudo apt-get install -y libopenblas-dev
+            sudo dd if=/dev/zero of=.swapfile bs=2M count=2048
+            sudo chmod 600 .swapfile
+            sudo mkswap .swapfile
+            sudo swapon .swapfile
+      - run:
+          command: export CMAKE_GENERATOR="Ninja" && export VSAG_ENABLE_INTEL_MKL=OFF && export COMPILE_JOBS=4 && make test_parallel
           no_output_timeout: 50m
+      - run:
+          name: remove_swap_file
+          command: |
+            sudo swapoff .swapfile
+            sudo rm .swapfile
       - save_cache:
           key: fork-cache-{{ checksum "CMakeLists.txt" }}-{{ checksum ".circleci/fresh_ci_cache.commit" }}
           paths:
             - ./build
 
   main-branch-check:
-    docker:
-      - image: vsaglib/vsag:ci-x86
+    machine:
+      image: ubuntu-2204:2025.09.1
     resource_class: large
     steps:
       - checkout
       - restore_cache:
           keys:
-            - main-ccache-{{ checksum "CMakeLists.txt" }}-{{ checksum ".circleci/fresh_ci_cache.commit" }}
+            - main-cache-{{ checksum "CMakeLists.txt" }}-{{ checksum ".circleci/fresh_ci_cache.commit" }}
       - run:
-          command: export CMAKE_GENERATOR="Ninja" && make test_parallel
+          name: prepare_env_and_create_swap_file
+          command: |
+            sudo apt update
+            sudo apt install -y gfortran python3-dev libomp-15-dev gcc make cmake g++ lcov libaio-dev libcurl4-openssl-dev ninja-build 
+            sudo apt-get install -y libopenblas-dev
+            sudo dd if=/dev/zero of=.swapfile bs=2M count=2048
+            sudo chmod 600 .swapfile
+            sudo mkswap .swapfile
+            sudo swapon .swapfile
+      - run:
+          command: export CMAKE_GENERATOR="Ninja" && export VSAG_ENABLE_INTEL_MKL=OFF && export COMPILE_JOBS=4 && make test_parallel
           no_output_timeout: 50m
+      - run:
+          name: remove_swap_file
+          command: |
+            sudo swapoff .swapfile
+            sudo rm .swapfile
       - save_cache:
-          key: main-ccache-{{ checksum "CMakeLists.txt" }}-{{ checksum ".circleci/fresh_ci_cache.commit" }}
+          key: main-cache-{{ checksum "CMakeLists.txt" }}-{{ checksum ".circleci/fresh_ci_cache.commit" }}
           paths:
             - ./build
