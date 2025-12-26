@@ -24,6 +24,12 @@
 #include "utils/sparse_vector_transform.h"
 namespace vsag {
 
+struct QuantizationParams {
+    float min_val = 0.0f;
+    float max_val = 0.0f;
+    float diff = 1.0f;
+};
+
 static constexpr int INVALID_TERM = -1;
 DEFINE_POINTER(SparseTermComputer)
 class SparseTermComputer {
@@ -70,7 +76,7 @@ public:
     inline void
     ScanForAccumulate(uint32_t term_iterator,
                       const uint16_t* term_ids,
-                      const float* term_datas,
+                      const uint8_t* term_datas,
                       uint32_t term_count,
                       float* global_dists) {
         float query_val = sorted_query_[term_iterator].second;

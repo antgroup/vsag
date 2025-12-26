@@ -25,13 +25,6 @@
 
 namespace vsag {
 
-struct QuantizationParams {
-    std::string type = "fp32";
-    float min_val = 0.0f;
-    float max_val = 0.0f;
-    float diff = 1.0f;
-};
-
 DEFINE_POINTER(SparseTermDataCell);
 class SparseTermDataCell {
 public:
@@ -83,24 +76,11 @@ public:
     void
     GetSparseVector(uint16_t base_id, SparseVector* data);
 
-private:
     void
     Encode(float val, uint8_t* dst) const;
 
     void
-    Encodesq8(float val, uint8_t* dst) const;
-
-    static void
-    Encodefp16(float val, uint8_t* dst);
-
-    void
     Decode(const uint8_t* src, size_t size, float* dst) const;
-
-    void
-    Decodesq8(const uint8_t* src, size_t size, float* dst) const;
-
-    static void
-    Decodefp16(const uint8_t* src, size_t size, float* dst);
 
 public:
     uint32_t term_id_limit_{0};

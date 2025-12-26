@@ -19,7 +19,6 @@ namespace vsag {
 
 void
 SparseTermDataCell::Query(float* global_dists, const SparseTermComputerPtr& computer) const {
-    Vector<float> temp_data(allocator_);
     while (computer->HasNextTerm()) {
         auto it = computer->NextTermIter();
         auto term = computer->GetTerm(it);
@@ -35,20 +34,9 @@ SparseTermDataCell::Query(float* global_dists, const SparseTermComputerPtr& comp
             continue;
         }
 
-        // Dequantize for query
-        const float* vals = nullptr;
-        if (quantization_params_->type == QUANTIZATION_TYPE_VALUE_FP32) {
-            vals = reinterpret_cast<const float*>(term_datas_[term]->data());
-        } else {
-            auto size = term_sizes_[term];
-            temp_data.resize(size);
-            Decode(term_datas_[term]->data(), size, temp_data.data());
-            vals = temp_data.data();
-        }
-
         computer->ScanForAccumulate(it,
                                     term_ids_[term]->data(),
-                                    vals,
+                                    term_datas_[term]->data(),
                                     static_cast<uint32_t>(static_cast<float>(term_sizes_[term]) *
                                                           computer->term_retain_ratio_),
                                     global_dists);
@@ -192,14 +180,7 @@ SparseTermDataCell::InsertVector(const SparseVector& sparse_base, uint16_t base_
     // doc prune
     DocPrune(sorted_base);
 
-    size_t buffer_length = 0;
-    if (quantization_params_->type == QUANTIZATION_TYPE_VALUE_SQ8) {
-        buffer_length = 1;
-    } else if (quantization_params_->type == QUANTIZATION_TYPE_VALUE_FP16) {
-        buffer_length = 2;
-    } else {
-        buffer_length = 4;
-    }
+    size_t buffer_length = 1;
 
     // insert vector
     for (auto& item : sorted_base) {
@@ -266,14 +247,10 @@ SparseTermDataCell::CalcDistanceByInnerId(const SparseTermComputerPtr& computer,
 
         // Dequantize
         const float* vals = nullptr;
-        if (quantization_params_->type == QUANTIZATION_TYPE_VALUE_FP32) {
-            vals = reinterpret_cast<const float*>(term_datas_[term]->data());
-        } else {
-            auto size = term_sizes_[term];
-            temp_data.resize(size);
-            Decode(term_datas_[term]->data(), size, temp_data.data());
-            vals = temp_data.data();
-        }
+        auto size = term_sizes_[term];
+        temp_data.resize(size);
+        Decode(term_datas_[term]->data(), size, temp_data.data());
+        vals = temp_data.data();
 
         computer->ScanForCalculateDist(
             it, term_ids_[term]->data(), vals, term_sizes_[term], base_id, &ip);
@@ -287,14 +264,7 @@ SparseTermDataCell::GetSparseVector(uint16_t base_id, SparseVector* data) {
     Vector<uint32_t> ids(allocator_);
     Vector<float> vals(allocator_);
 
-    size_t step = 0;
-    if (quantization_params_->type == QUANTIZATION_TYPE_VALUE_SQ8) {
-        step = 1;
-    } else if (quantization_params_->type == QUANTIZATION_TYPE_VALUE_FP16) {
-        step = 2;
-    } else {
-        step = 4;
-    }
+    size_t step = 1;
 
     for (auto term = 0; term < term_ids_.size(); term++) {
         for (auto i = 0; i < term_sizes_[term]; i++) {
@@ -347,52 +317,15 @@ SparseTermDataCell::Deserialize(StreamReader& reader) {
 
 void
 SparseTermDataCell::Encode(float val, uint8_t* dst) const {
-    if (quantization_params_->type == QUANTIZATION_TYPE_VALUE_SQ8) {
-        Encodesq8(val, dst);
-    } else if (quantization_params_->type == QUANTIZATION_TYPE_VALUE_FP16) {
-        SparseTermDataCell::Encodefp16(val, dst);
-    } else {
-        std::memcpy(dst, &val, sizeof(float));
-    }
-}
-
-void
-SparseTermDataCell::Encodesq8(float val, uint8_t* dst) const {
     float x = (val - quantization_params_->min_val) / quantization_params_->diff * 255.0F;
     *dst = static_cast<uint8_t>(std::clamp(x, 0.0F, 255.0F));
 }
 
 void
-SparseTermDataCell::Encodefp16(float val, uint8_t* dst) {
-    uint16_t v = generic::FloatToFP16(val);
-    std::memcpy(dst, &v, sizeof(uint16_t));
-}
-
-void
 SparseTermDataCell::Decode(const uint8_t* src, size_t size, float* dst) const {
-    if (quantization_params_->type == QUANTIZATION_TYPE_VALUE_SQ8) {
-        Decodesq8(src, size, dst);
-    } else if (quantization_params_->type == QUANTIZATION_TYPE_VALUE_FP16) {
-        SparseTermDataCell::Decodefp16(src, size, dst);
-    } else {
-        std::memcpy(dst, src, size * sizeof(float));
-    }
-}
-
-void
-SparseTermDataCell::Decodesq8(const uint8_t* src, size_t size, float* dst) const {
     for (size_t i = 0; i < size; ++i) {
         dst[i] = static_cast<float>(src[i]) / 255.0F * quantization_params_->diff +
                  quantization_params_->min_val;
-    }
-}
-
-void
-SparseTermDataCell::Decodefp16(const uint8_t* src, size_t size, float* dst) {
-    for (size_t i = 0; i < size; ++i) {
-        uint16_t v;
-        std::memcpy(&v, src + i * sizeof(uint16_t), sizeof(uint16_t));
-        dst[i] = generic::FP16ToFloat(v);
     }
 }
 

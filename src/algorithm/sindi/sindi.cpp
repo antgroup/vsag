@@ -38,7 +38,6 @@ SINDI::SINDI(const SINDIParameterPtr& param, const IndexCommonParam& common_para
       window_term_list_(common_param.allocator_.get()),
       deserialize_without_footer_(param->deserialize_without_footer),
       deserialize_without_buffer_(param->deserialize_without_buffer),
-      value_quantization_type_(param->value_quantization_type),
       quantization_params_(std::make_shared<QuantizationParams>()) {
     if (use_reorder_) {
         SparseIndexParameterPtr rerank_param = std::make_shared<SparseIndexParameters>();
@@ -61,28 +60,25 @@ SINDI::Add(const DatasetPtr& base) {
     const auto extra_info_size = base->GetExtraInfoSize();
 
     if (cur_element_count_ == 0) {
-        quantization_params_->type = value_quantization_type_;
-        if (value_quantization_type_ == QUANTIZATION_TYPE_VALUE_SQ8) {
-            float min_val = std::numeric_limits<float>::max();
-            float max_val = std::numeric_limits<float>::lowest();
-            for (int64_t i = 0; i < data_num; ++i) {
-                const auto& vec = sparse_vectors[i];
-                for (int j = 0; j < vec.len_; ++j) {
-                    float val = vec.vals_[j];
-                    if (val < min_val) {
-                        min_val = val;
-                    }
-                    if (val > max_val) {
-                        max_val = val;
-                    }
+        float min_val = std::numeric_limits<float>::max();
+        float max_val = std::numeric_limits<float>::lowest();
+        for (int64_t i = 0; i < data_num; ++i) {
+            const auto& vec = sparse_vectors[i];
+            for (int j = 0; j < vec.len_; ++j) {
+                float val = vec.vals_[j];
+                if (val < min_val) {
+                    min_val = val;
+                }
+                if (val > max_val) {
+                    max_val = val;
                 }
             }
-            quantization_params_->min_val = min_val;
-            quantization_params_->max_val = max_val;
-            quantization_params_->diff = max_val - min_val;
-            if (quantization_params_->diff < 1e-6) {
-                quantization_params_->diff = 1.0F;
-            }
+        }
+        quantization_params_->min_val = min_val;
+        quantization_params_->max_val = max_val;
+        quantization_params_->diff = max_val - min_val;
+        if (quantization_params_->diff < 1e-6) {
+            quantization_params_->diff = 1.0F;
         }
     }
 
@@ -394,7 +390,6 @@ SINDI::Deserialize(StreamReader& reader) {
     StreamReader::ReadObj(reader_ref, quantization_params_->min_val);
     StreamReader::ReadObj(reader_ref, quantization_params_->max_val);
     StreamReader::ReadObj(reader_ref, quantization_params_->diff);
-    quantization_params_->type = value_quantization_type_;
 
     uint32_t window_term_list_size = 0;
     StreamReader::ReadObj(reader_ref, window_term_list_size);

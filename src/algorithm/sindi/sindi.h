@@ -142,8 +142,6 @@ private:
     bool deserialize_without_footer_{false};
     bool deserialize_without_buffer_{false};
 
-    std::string value_quantization_type_;
-
     std::shared_ptr<QuantizationParams> quantization_params_;
 };
 
