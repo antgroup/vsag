@@ -181,7 +181,7 @@ static const std::string BASE64_CHARS =
 std::string
 base64_encode(const std::string& in) {
     std::string out;
-    int32_t val = 0;
+    uint32_t val = 0;
     int32_t valb = -6;
     for (unsigned char c : in) {
         val = (val << 8) + c;
@@ -207,7 +207,7 @@ base64_decode(const std::string& in) {
     for (int i = 0; i < 64; i++) {
         t[BASE64_CHARS[i]] = i;
     }
-    int32_t val = 0;
+    uint32_t val = 0;
     int32_t valb = -8;
     for (unsigned char c : in) {
         if (t[c] == -1) {
