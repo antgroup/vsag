@@ -1474,12 +1474,15 @@ HGraph::GetMinAndMaxId() const {
 
 void
 HGraph::add_one_point(const void* data, int level, InnerIdType inner_id) {
-    this->basic_flatten_codes_->InsertVector(data, inner_id);
-    if (use_reorder_) {
-        this->high_precise_codes_->InsertVector(data, inner_id);
-    }
-    if (create_new_raw_vector_) {
-        raw_vector_->InsertVector(data, inner_id);
+    {
+        std::shared_lock add_lock(add_mutex_);
+        this->basic_flatten_codes_->InsertVector(data, inner_id);
+        if (use_reorder_) {
+            this->high_precise_codes_->InsertVector(data, inner_id);
+        }
+        if (create_new_raw_vector_) {
+            raw_vector_->InsertVector(data, inner_id);
+        }
     }
     std::unique_lock add_lock(add_mutex_);
     if (level >= static_cast<int>(this->route_graphs_.size()) || bottom_graph_->TotalCount() == 0) {
