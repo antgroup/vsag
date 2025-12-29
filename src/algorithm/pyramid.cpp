@@ -42,9 +42,11 @@ uint64_t
 get_suitable_max_degeree(int64_t data_num) {
     if (data_num < 1'000) {
         return 8;
-    } else if (data_num < 100'000) {
+    }
+    if (data_num < 100'000) {
         return 16;
-    } else if (data_num < 1000'000) {
+    }
+    if (data_num < 1000'000) {
         return 32;
     }
     return 64;
@@ -157,11 +159,11 @@ IndexNode::Init() {
             if (in_build_process_ and level_ != 0) {
                 auto new_max_degree = get_suitable_max_degeree(static_cast<int64_t>(ids_.size()));
                 if (new_max_degree < graph_param_->max_degree_) {
-                    auto new_graph_param_ = std::make_shared<SparseGraphDatacellParameter>();
-                    new_graph_param_->FromJson(graph_param_->ToJson());
-                    new_graph_param_->max_degree_ =
+                    auto new_graph_param = std::make_shared<SparseGraphDatacellParameter>();
+                    new_graph_param->FromJson(graph_param_->ToJson());
+                    new_graph_param->max_degree_ =
                         get_suitable_max_degeree(static_cast<int64_t>(ids_.size()));
-                    graph_param_ = new_graph_param_;
+                    graph_param_ = new_graph_param;
                 }
             }
             graph_ = std::make_shared<SparseGraphDataCell>(

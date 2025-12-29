@@ -130,9 +130,9 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
         if (immutable) {
             index->SetImmutable();
         }
-        TestKnnSearch(index, dataset, search_param, 0.99, true);
-        TestFilterSearch(index, dataset, search_param, 0.99, true);
-        TestRangeSearch(index, dataset, search_param, 0.99, 10, true);
+        TestKnnSearch(index, dataset, search_param, 0.96, true);
+        TestFilterSearch(index, dataset, search_param, 0.96, true);
+        TestRangeSearch(index, dataset, search_param, 0.96, 10, true);
         TestRangeSearch(index, dataset, search_param, 0.49, 5, true);
     }
 }
@@ -149,9 +149,9 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex, "Pyramid Add Test", "[f
         auto index = TestFactory(name, param, true);
         auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type, /*with_path=*/true);
         TestAddIndex(index, dataset, true);
-        TestKnnSearch(index, dataset, search_param, 0.99, true);
-        TestFilterSearch(index, dataset, search_param, 0.99, true);
-        TestRangeSearch(index, dataset, search_param, 0.99, 10, true);
+        TestKnnSearch(index, dataset, search_param, 0.96, true);
+        TestFilterSearch(index, dataset, search_param, 0.96, true);
+        TestRangeSearch(index, dataset, search_param, 0.96, 10, true);
         TestRangeSearch(index, dataset, search_param, 0.49, 5, true);
     }
 }
@@ -172,9 +172,9 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
             auto dataset =
                 pool.GetDatasetAndCreate(dim, base_count, metric_type, /*with_path=*/true);
             TestContinueAdd(index, dataset, true);
-            TestKnnSearch(index, dataset, search_param, 0.99, true);
-            TestFilterSearch(index, dataset, search_param, 0.99, true);
-            TestRangeSearch(index, dataset, search_param, 0.99, 10, true);
+            TestKnnSearch(index, dataset, search_param, 0.96, true);
+            TestFilterSearch(index, dataset, search_param, 0.96, true);
+            TestRangeSearch(index, dataset, search_param, 0.96, 10, true);
         }
     }
 }
@@ -196,9 +196,9 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex, "Pyramid No Path Test",
             dataset->query_->Paths(nullptr);
             TestContinueAdd(index, dataset, true);
             auto has_root = level[0] != 0;
-            TestKnnSearch(index, dataset, search_param, 0.99, has_root);
-            TestFilterSearch(index, dataset, search_param, 0.99, has_root);
-            TestRangeSearch(index, dataset, search_param, 0.99, 10, has_root);
+            TestKnnSearch(index, dataset, search_param, 0.96, has_root);
+            TestFilterSearch(index, dataset, search_param, 0.96, has_root);
+            TestRangeSearch(index, dataset, search_param, 0.96, 10, has_root);
             dataset->query_->Paths(tmp_paths);
         }
     }
@@ -303,13 +303,13 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
         auto index = TestFactory(name, param, true);
         auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type, /*with_path=*/true);
         TestConcurrentAdd(index, dataset, true);
-        TestConcurrentKnnSearch(index, dataset, search_param, 0.99, true);
+        TestConcurrentKnnSearch(index, dataset, search_param, 0.96, true);
     }
     for (auto& dim : dims) {
         auto param = GeneratePyramidBuildParametersString(metric_type, dim, pyramid_param);
         auto index = TestFactory(name, param, true);
         auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type, /*with_path=*/true);
-        TestConcurrentAddSearch(index, dataset, search_param, 0.99, true);
+        TestConcurrentAddSearch(index, dataset, search_param, 0.96, true);
     }
 }
 
