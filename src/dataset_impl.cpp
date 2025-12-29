@@ -134,18 +134,18 @@ DatasetImpl::DeepCopy(Allocator* allocator) const {
 
     copy_dataset->NumElements(num_elements);
     copy_dataset->Dim(dim);
-    if (this->GetIds()) {
+    if (this->GetIds() != nullptr) {
         copy_dataset->Ids(allocate_and_copy(this->GetIds(), num_elements, allocator_ref));
     }
-    if (this->GetDistances()) {
+    if (this->GetDistances() != nullptr) {
         copy_dataset->Distances(
             allocate_and_copy(this->GetDistances(), num_elements * dim, allocator_ref));
     }
-    if (this->GetInt8Vectors()) {
+    if (this->GetInt8Vectors() != nullptr) {
         copy_dataset->Int8Vectors(
             allocate_and_copy(this->GetInt8Vectors(), num_elements * dim, allocator_ref));
     }
-    if (this->GetFloat32Vectors()) {
+    if (this->GetFloat32Vectors() != nullptr) {
         copy_dataset->Float32Vectors(
             allocate_and_copy(this->GetFloat32Vectors(), num_elements * dim, allocator_ref));
     }
