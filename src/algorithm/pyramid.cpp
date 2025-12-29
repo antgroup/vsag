@@ -319,11 +319,10 @@ Pyramid::search_impl(const DatasetPtr& query,
     result->Ids(ids);
     auto* dists = (float*)allocator_->Allocate(sizeof(float) * target_size);
     result->Distances(dists);
-    for (auto j = target_size - 1; j >= 0; --j) {
-        if (j < target_size) {
-            dists[j] = search_result->Top().first;
-            ids[j] = label_table_->GetLabelById(search_result->Top().second);
-        }
+    for (int64_t j = target_size - 1; j >= 0; --j) {
+        dists[j] = search_result->Top().first;
+        ids[j] = label_table_->GetLabelById(search_result->Top().second);
+
         search_result->Pop();
     }
     return result;
