@@ -31,9 +31,13 @@ public:
         : allocator_(allocator), total_count_(total_count) {
     }
 
-    virtual JsonType GetStats() = 0;
+    virtual JsonType
+    GetStats() = 0;
 
     virtual ~AnalyzerBase() = default;
+
+    virtual bool
+    SetQuery(const DatasetPtr& query);
 
 protected:
     Allocator* allocator_;
@@ -43,8 +47,7 @@ protected:
 
 struct AnalyzerParam {
 public:
-    AnalyzerParam(Allocator* allocator)
-        : allocator(allocator){
+    AnalyzerParam(Allocator* allocator) : allocator(allocator) {
     }
 
 public:
@@ -52,9 +55,9 @@ public:
     int64_t topk{100};
     uint64_t base_sample_size{10};
     std::string search_params;
-
 };
 
-AnalyzerBasePtr CreateAnalyzer(const InnerIndexInterface* index, const AnalyzerParam& param);
+AnalyzerBasePtr
+CreateAnalyzer(const InnerIndexInterface* index, const AnalyzerParam& param);
 
 }  // namespace vsag

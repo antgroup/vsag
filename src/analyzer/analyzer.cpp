@@ -13,22 +13,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 #include "analyzer.h"
+
 #include "hgraph_analyzer.h"
 
 namespace vsag {
 
-
-AnalyzerBasePtr CreateAnalyzer(const InnerIndexInterface* index, const AnalyzerParam& param) {
+AnalyzerBasePtr
+CreateAnalyzer(const InnerIndexInterface* index, const AnalyzerParam& param) {
     auto index_no_const = const_cast<InnerIndexInterface*>(index);
     if (dynamic_cast<HGraph*>(index_no_const)) {
         auto hgraph = dynamic_cast<HGraph*>(index_no_const);
         return std::make_shared<HGraphAnalyzer>(hgraph, param);
     }
-    throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION, fmt::format("Unsupported index type ({}) for analyzer creation", index->GetName()));
+    throw VsagException(
+        ErrorType::UNSUPPORTED_INDEX_OPERATION,
+        fmt::format("Unsupported index type ({}) for analyzer creation", index->GetName()));
 }
 
-
-
-}
+}  // namespace vsag

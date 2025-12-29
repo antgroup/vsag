@@ -60,27 +60,30 @@ public:
     float
     GetQuantizationInversionRatio(const std::string& search_param);
 
-    bool SetQuery(const DatasetPtr& query);
+    bool
+    SetQuery(const DatasetPtr& query) override;
 
+    float
+    GetQueryQuantizationError(const std::string& search_param);
 
-    float GetQueryQuantizationError(const std::string& search_param);
-
-    float GetQueryQuantizationInversionRatio(const std::string& search_param);
+    float
+    GetQueryQuantizationInversionRatio(const std::string& search_param);
 
     float
     GetQueryAvgDistance();
 
-    float GetQuerySearchRecall(const std::string& search_param);
+    float
+    GetQuerySearchRecall(const std::string& search_param);
 
+    float
+    GetQuerySearchTimeCost(const std::string& search_param);
+    float
+    GetBaseSearchTimeCost(const std::string& search_param);
 
-    float GetQuerySearchTimeCost(const std::string& search_param);
-    float GetBaseSearchTimeCost(const std::string& search_param);
+    //        float GetQueryGroundTruthInDegree();
 
-//        float GetQueryGroundTruthInDegree();
-
-    JsonType GetStats() override;
-
-
+    JsonType
+    GetStats() override;
 
 private:
     void
@@ -97,28 +100,32 @@ private:
 
     std::tuple<float, float>
     calculate_quantization_result(const Vector<float>& sample_datas,
-                                 const Vector<InnerIdType>& sample_ids,
-                                 const UnorderedMap<InnerIdType, Vector<LabelType>>& search_result,
-                                 int sample_size);
+                                  const Vector<InnerIdType>& sample_ids,
+                                  const UnorderedMap<InnerIdType, Vector<LabelType>>& search_result,
+                                  int sample_size);
 
-    void calculate_groundtruth(const Vector<float>& sample_datas,
+    void
+    calculate_groundtruth(const Vector<float>& sample_datas,
                           const Vector<InnerIdType>& sample_ids,
                           UnorderedMap<InnerIdType, DistHeapPtr>& ground_truth,
                           int sample_siz);
 
-    float calculate_search_result(const Vector<float>& sample_datas,
-                                     const Vector<InnerIdType>& sample_ids,
-                                     UnorderedMap<InnerIdType, Vector<LabelType>>& search_result,
-                                     const std::string& search_param,
-                                     int sample_size);
+    float
+    calculate_search_result(const Vector<float>& sample_datas,
+                            const Vector<InnerIdType>& sample_ids,
+                            UnorderedMap<InnerIdType, Vector<LabelType>>& search_result,
+                            const std::string& search_param,
+                            int sample_size);
 
-    float get_avg_distance(const Vector<InnerIdType>& sample_ids, const UnorderedMap<InnerIdType, DistHeapPtr>& ground_truth);
+    float
+    get_avg_distance(const Vector<InnerIdType>& sample_ids,
+                     const UnorderedMap<InnerIdType, DistHeapPtr>& ground_truth);
 
-    float get_search_recall(uint32_t sample_size, const Vector<InnerIdType>& sample_ids,
-                                  const UnorderedMap<InnerIdType, DistHeapPtr>& ground_truth,
-                                  const UnorderedMap<InnerIdType, Vector<LabelType>>& search_result);
-
-
+    float
+    get_search_recall(uint32_t sample_size,
+                      const Vector<InnerIdType>& sample_ids,
+                      const UnorderedMap<InnerIdType, DistHeapPtr>& ground_truth,
+                      const UnorderedMap<InnerIdType, Vector<LabelType>>& search_result);
 
 private:
     HGraph* hgraph_;
@@ -137,11 +144,8 @@ private:
     UnorderedMap<InnerIdType, Vector<LabelType>> query_search_result_;
     float query_search_time_ms_{0.0F};
 
-
     uint32_t topk_{100};
-    float duplicate_ratio_{0.0F};
     std::string search_params_;
-
 };
 
 }  // namespace vsag
