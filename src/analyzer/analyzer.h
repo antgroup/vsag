@@ -36,8 +36,8 @@ public:
 
     virtual ~AnalyzerBase() = default;
 
-    virtual bool
-    SetQuery(const DatasetPtr& query);
+    virtual JsonType
+    AnalyzeIndexBySearch(const SearchRequest& request) = 0;
 
 protected:
     Allocator* allocator_;

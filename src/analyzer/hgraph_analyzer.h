@@ -39,6 +39,9 @@ public:
         this->search_params_ = param.search_params;
     }
 
+
+    JsonType AnalyzeIndexBySearch(const vsag::SearchRequest &request) override;
+
     Vector<int64_t>
     GetComponentCount();
 
@@ -61,7 +64,7 @@ public:
     GetQuantizationInversionRatio(const std::string& search_param);
 
     bool
-    SetQuery(const DatasetPtr& query) override;
+    SetQuery(const DatasetPtr& query);
 
     float
     GetQueryQuantizationError(const std::string& search_param);

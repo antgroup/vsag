@@ -408,5 +408,10 @@ HGraphAnalyzer::GetStats() {
     stats["total_count"].SetInt(total_count_);
     return stats;
 }
+JsonType
+HGraphAnalyzer::AnalyzeIndexBySearch(const SearchRequest& request) {
+    
+    return vsag::JsonType();
+}
 
 }  // namespace vsag
