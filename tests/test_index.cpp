@@ -901,7 +901,8 @@ TestIndex::TestSerializeFile(const IndexPtr& index_from,
         REQUIRE(res_from.has_value());
         REQUIRE(res_to.has_value());
         REQUIRE(res_from.value()->GetDim() == res_to.value()->GetDim());
-        for (auto j = 0; j < topk; ++j) {
+        int64_t result_count = res_from.value()->GetDim();
+        for (int64_t j = 0; j < result_count; ++j) {
             REQUIRE(res_to.value()->GetIds()[j] == res_from.value()->GetIds()[j]);
         }
     }
@@ -987,7 +988,8 @@ TestIndex::TestSerializeBinarySet(const IndexPtr& index_from,
         REQUIRE(res_from.has_value());
         REQUIRE(res_to.has_value());
         REQUIRE(res_from.value()->GetDim() == res_to.value()->GetDim());
-        for (auto j = 0; j < topk; ++j) {
+        int64_t result_count = res_from.value()->GetDim();
+        for (int64_t j = 0; j < result_count; ++j) {
             REQUIRE(res_to.value()->GetIds()[j] == res_from.value()->GetIds()[j]);
         }
     }
@@ -1029,7 +1031,8 @@ TestIndex::TestSerializeReaderSet(const IndexPtr& index_from,
         REQUIRE(res_from.has_value());
         REQUIRE(res_to.has_value());
         REQUIRE(res_from.value()->GetDim() == res_to.value()->GetDim());
-        for (auto j = 0; j < topk; ++j) {
+        int64_t result_count = res_from.value()->GetDim();
+        for (int64_t j = 0; j < result_count; ++j) {
             REQUIRE(res_to.value()->GetIds()[j] == res_from.value()->GetIds()[j]);
         }
     }
@@ -1075,7 +1078,8 @@ TestIndex::TestSerializeWriteFunc(const IndexPtr& index_from,
         REQUIRE(res_from.has_value());
         REQUIRE(res_to.has_value());
         REQUIRE(res_from.value()->GetDim() == res_to.value()->GetDim());
-        for (auto j = 0; j < topk; ++j) {
+        int64_t result_count = res_from.value()->GetDim();
+        for (int64_t j = 0; j < result_count; ++j) {
             REQUIRE(res_to.value()->GetIds()[j] == res_from.value()->GetIds()[j]);
         }
     }
@@ -1764,7 +1768,8 @@ TestIndex::TestClone(const TestIndex::IndexPtr& index,
         REQUIRE(res_from.has_value());
         REQUIRE(res_to.has_value());
         REQUIRE(res_from.value()->GetDim() == res_to.value()->GetDim());
-        for (auto j = 0; j < topk; ++j) {
+        int64_t result_count = res_from.value()->GetDim();
+        for (int64_t j = 0; j < result_count; ++j) {
             REQUIRE(res_to.value()->GetIds()[j] == res_from.value()->GetIds()[j]);
         }
     }
@@ -2258,6 +2263,8 @@ TestIndex::TestGetRawVectorByIds(const IndexPtr& index,
 
         if (use_specific_allocator) {
             vectors = index->GetRawVectorByIds(dataset->base_->GetIds(), count, &allocator);
+            // create a delegate task (via Dataset Owner mechanism) to check and release the memory which allocated from the external allocator.
+            vectors.value()->Owner(true, &allocator);
         }
 
         if (data_type == vsag::DATATYPE_SPARSE) {
@@ -2311,23 +2318,6 @@ TestIndex::TestGetRawVectorByIds(const IndexPtr& index,
             }
         } else {
             throw std::invalid_argument("Invalid data type: " + data_type);
-        }
-
-        if (use_specific_allocator) {
-            // free the vector memory after the dataset released
-            if (data_type == vsag::DATATYPE_SPARSE) {
-                auto* sparse_vectors = (vsag::SparseVector*)mem;
-                for (int64_t i = 0; i < count; ++i) {
-                    allocator.Deallocate(sparse_vectors[i].ids_);
-                    sparse_vectors[i].ids_ = nullptr;
-                    allocator.Deallocate(sparse_vectors[i].vals_);
-                    sparse_vectors[i].vals_ = nullptr;
-                }
-                allocator.Deallocate(sparse_vectors);
-            } else {
-                // data_type == vsag::DATATYPE_INT8 or data_type == vsag::DATATYPE_FLOAT32
-                allocator.Deallocate(mem);
-            }
         }
     }
 }
