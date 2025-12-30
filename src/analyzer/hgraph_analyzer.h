@@ -39,8 +39,8 @@ public:
         this->search_params_ = param.search_params;
     }
 
-
-    JsonType AnalyzeIndexBySearch(const vsag::SearchRequest &request) override;
+    JsonType
+    AnalyzeIndexBySearch(const vsag::SearchRequest& request) override;
 
     Vector<int64_t>
     GetComponentCount();
@@ -80,6 +80,7 @@ public:
 
     float
     GetQuerySearchTimeCost(const std::string& search_param);
+
     float
     GetBaseSearchTimeCost(const std::string& search_param);
 

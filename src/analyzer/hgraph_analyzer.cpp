@@ -399,19 +399,30 @@ HGraphAnalyzer::GetStats() {
     stats["connect_components"].SetInt(components.size());
     stats["maximal_component_size"].SetInt(*std::max_element(components.begin(), components.end()));
     stats["deleted_count"].SetInt(hgraph_->delete_count_);
+    if (hgraph_->label_table_->CompressDuplicateData()) {
+        stats["duplicate_ratio"].SetFloat(GetDuplicateRatio());
+    }
     stats["duplicate_ratio"].SetFloat(GetDuplicateRatio());
     stats["proximity_recall_neighbor"].SetFloat(GetNeighborRecall());
     stats["quantization_bias_ratio"].SetFloat(GetQuantizationError(search_params_));
     stats["quantization_inversion_count_rate"].SetFloat(
         GetQuantizationInversionRatio(search_params_));
     stats["recall_base"].SetFloat(GetBaseSearchRecall(search_params_));
+    stats["time_cost_query"].SetFloat(GetBaseSearchTimeCost(search_params_));
     stats["total_count"].SetInt(total_count_);
     return stats;
 }
 JsonType
 HGraphAnalyzer::AnalyzeIndexBySearch(const SearchRequest& request) {
-    
-    return vsag::JsonType();
+    SetQuery(request.query_);
+    JsonType stats;
+    stats["avg_distance_query"].SetFloat(GetQueryAvgDistance());
+    stats["recall_query"].SetFloat(GetQuerySearchRecall(request.params_str_));
+    stats["time_cost_query"].SetFloat(GetQuerySearchTimeCost(request.params_str_));
+    stats["quantization_bias_ratio_query"].SetFloat(GetQueryQuantizationError(request.params_str_));
+    stats["quantization_inversion_count_rate_query"].SetFloat(
+        GetQueryQuantizationInversionRatio(request.params_str_));
+    return stats;
 }
 
 }  // namespace vsag

@@ -2279,76 +2279,10 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
 
 std::string
 HGraph::AnalyzeIndexBySearch(const SearchRequest& request) {
-    JsonType stats;
-    Vector<float> distances(this->total_count_, allocator_);
-    Vector<InnerIdType> ids(this->total_count_, allocator_);
-    std::iota(ids.begin(), ids.end(), 0);
-    auto codes = (this->use_reorder_) ? this->high_precise_codes_ : this->basic_flatten_codes_;
-    auto querys = request.query_;
-    auto topk = std::min(request.topk_, GetNumElements());
-
-    int64_t num_elements = querys->GetNumElements();
-    DistHeapPtr heap = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
-    Vector<UnorderedSet<InnerIdType>> ground_truths(
-        num_elements, UnorderedSet<InnerIdType>(allocator_), allocator_);
-    float dist = 0.0F;
-    for (int64_t i = 0; i < num_elements; i++) {
-        const auto* query_data = get_data(querys, i);
-        auto computer = codes->FactoryComputer(query_data);
-        if (i % 10 == 0) {
-            logger::info("calculate groundtruth for query data {} of {}", i, i + 10);
-        }
-        codes->Query(distances.data(), computer, ids.data(), this->total_count_);
-        for (int64_t j = 0; j < this->total_count_; ++j) {
-            if (heap->Size() < topk) {
-                heap->Push({distances[j], ids[j]});
-            } else if (distances[j] < heap->Top().first) {
-                heap->Push({distances[j], ids[j]});
-                heap->Pop();
-            }
-        }
-        while (not heap->Empty()) {
-            ground_truths[i].insert(heap->Top().second);
-            dist += heap->Top().first;
-            heap->Pop();
-        }
-    }
-    dist /= static_cast<float>(num_elements * topk);
-    stats["avg_distance_query"].SetFloat(dist);
-    auto param_str = request.params_str_;
-    double time_cost = 0.0;
-    int64_t result_hit = 0;
-    for (int64_t i = 0; i < num_elements; ++i) {
-        auto query = Dataset::Make();
-        query->NumElements(1)
-            ->Dim(dim_)
-            ->Float32Vectors((const float*)get_data(querys, i))
-            ->Owner(false);
-        DatasetPtr search_result;
-        double single_query_time;
-        {
-            Timer t(single_query_time);
-            search_result = this->KnnSearch(query, topk, param_str, nullptr);
-        }
-        if (search_result->GetDim() != topk) {
-            logger::error(
-                "search result size mismatch: expected {}, got {}", topk, search_result->GetDim());
-            continue;
-        }
-        int64_t hit_count = 0;
-        for (int64_t j = 0; j < search_result->GetDim(); ++j) {
-            if (ground_truths[i].count(search_result->GetIds()[j]) > 0) {
-                hit_count++;
-            }
-        }
-        result_hit += hit_count;
-        time_cost += single_query_time;
-    }
-    stats["recall_query"].SetFloat(static_cast<float>(result_hit) /
-                                   static_cast<float>(num_elements * topk));
-    stats["time_cost_query"].SetFloat(static_cast<float>(time_cost) /
-                                      static_cast<float>(num_elements));
-    this->analyze_quantizer(stats, querys->GetFloat32Vectors(), num_elements, topk, param_str);
+    AnalyzerParam analyzer_param(allocator_);
+    analyzer_param.topk = request.topk_;
+    auto analyzer = CreateAnalyzer(this, analyzer_param);
+    JsonType stats = analyzer->AnalyzeIndexBySearch(request);
     return stats.Dump(4);
 }
 
