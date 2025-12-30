@@ -156,7 +156,7 @@ HGraphAnalyzer::GetQuantizationError(const std::string& search_param) {
     if (not hgraph_->use_reorder_) {
         return 0.0F;
     }
-    return get<0>(calculate_quantization_result(
+    return std::get<0>(calculate_quantization_result(
         base_sample_datas_, base_sample_ids_, base_search_result_, this->base_sample_size_));
 }
 
@@ -204,7 +204,7 @@ HGraphAnalyzer::GetQuantizationInversionRatio(const std::string& search_param) {
     if (not hgraph_->use_reorder_) {
         return 0.0F;
     }
-    return get<1>(calculate_quantization_result(
+    return std::get<1>(calculate_quantization_result(
         base_sample_datas_, base_sample_ids_, base_search_result_, this->base_sample_size_));
 }
 
@@ -310,7 +310,7 @@ HGraphAnalyzer::GetQueryQuantizationError(const std::string& search_param) {
     if (not hgraph_->use_reorder_) {
         return 0.0F;
     }
-    return get<0>(calculate_quantization_result(
+    return std::get<0>(calculate_quantization_result(
         query_sample_datas_, query_sample_ids_, query_search_result_, this->query_sample_size_));
 }
 
@@ -320,7 +320,7 @@ HGraphAnalyzer::GetQueryQuantizationInversionRatio(const std::string& search_par
     if (not hgraph_->use_reorder_) {
         return 0.0F;
     }
-    return get<1>(calculate_quantization_result(
+    return std::get<1>(calculate_quantization_result(
         query_sample_datas_, query_sample_ids_, query_search_result_, this->query_sample_size_));
 }
 
