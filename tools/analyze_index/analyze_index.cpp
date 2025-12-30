@@ -252,24 +252,18 @@ private:
 int
 main(int argc, char** argv) {
     argparse::ArgumentParser parser("analyze_index");
-    //    parse_args(parser, argc, argv);
-    std::string index_path = "/tbase-project/vsag/data/hgraph.index";
-    std::string build_param =
-        "{\"dim\":  768,\"dtype\":  \"float32\",\"index_param\":  {  \"base_quantization_type\":   "
-        " \"rabitq\",  \"build_thread_count\":    32,  \"ef_construction\":    500,  "
-        "\"graph_storage_type\":    \"compressed\",  \"max_degree\":    128,  "
-        "\"precise_file_path\":    \"./precise_codes_vec_v1\",  \"precise_io_type\":    "
-        "\"memory_io\",  \"precise_quantization_type\":    \"sq8\",  \"use_reorder\":    true  "
-        "},\"metric_type\":  \"l2\"}";
+    parse_args(parser, argc, argv);
+    std::string index_path = parser.get<std::string>("--index_path");
+    std::string build_param = parser.get<std::string>("--build_parameter");
     // parse index
     AnalyzedIndex index(build_param);
     index.LoadIndex(index_path);
     // get index property
     index.ShowIndexProperty();
     // analyze query
-    std::string query_path = "/tbase-project/vsag/data/query.bin";
-    std::string search_param = "{\"hgraph\":{\"ef_search\": 10000}}";
-    int64_t topk = 1000;
+    std::string query_path = parser.get<std::string>("--query_path");
+    std::string search_param = parser.get<std::string>("--search_parameter");
+    int64_t topk = parser.get<int>("--topk");
     if (query_path != EMPTY_QUERY_PATH) {
         auto querys = load_query(query_path);
         index.AnalyzeQuery(querys, topk, search_param);
