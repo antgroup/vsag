@@ -33,6 +33,34 @@ public:
     }
 };
 
+class MockValidIdFilter : public Filter {
+public:
+    [[nodiscard]] bool
+    CheckValid(int64_t id) const override {
+        return valid_ids_set_.find(id) != valid_ids_set_.end();
+    }
+
+    void
+    GetValidIds(const int64_t** valid_ids, int64_t& count) const override {
+        *valid_ids = valid_ids_.data();
+        count = static_cast<int64_t>(valid_ids_.size());
+    }
+
+    void
+    SetValidIds(std::vector<int64_t> valid_ids) {
+        valid_ids_ = std::move(valid_ids);
+        valid_ids_set_.clear();
+        valid_ids_set_.reserve(valid_ids_.size());
+        for (auto id : valid_ids_) {
+            valid_ids_set_.insert(id);
+        }
+    }
+
+private:
+    std::vector<int64_t> valid_ids_;
+    std::unordered_set<int64_t> valid_ids_set_;
+};
+
 TEST_CASE("SINDI Basic Test", "[ut][SINDI]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     IndexCommonParam common_param;
@@ -107,13 +135,22 @@ TEST_CASE("SINDI Basic Test", "[ut][SINDI]") {
         "sindi": {
             "query_prune_ratio": 0.0,
             "term_prune_ratio": 0.0,
-            "n_candidate": 20
+            "n_candidate": 20,
+            "use_term_lists_heap_insert": false
         }
     }
     )";
 
     auto query = vsag::Dataset::Make();
     auto mock_filter = std::make_shared<MockFilter>();
+    auto mock_valid_filter = std::make_shared<MockValidIdFilter>();
+    int64_t valid_count = static_cast<int64_t>(num_base * 0.5);
+    std::vector<int64_t> valid_ids(valid_count, 0);
+    valid_ids.push_back(invalid_term_id);
+    for (int64_t i = 0; i < valid_count; i++) {
+        valid_ids[i] = i;
+    }
+    mock_valid_filter->SetValidIds(valid_ids);
 
     for (int i = 0; i < num_query; ++i) {
         query->NumElements(1)->SparseVectors(sv_base.data() + i)->Owner(false);
@@ -136,6 +173,17 @@ TEST_CASE("SINDI Basic Test", "[ut][SINDI]") {
         for (int j = 0; j < k; j++) {
             if (mock_filter->CheckValid(result->GetIds()[j])) {
                 REQUIRE(result->GetIds()[j] == filter_knn_result->GetIds()[cur]);
+                cur++;
+            }
+        }
+
+        auto valid_filter_knn_result =
+            index->KnnSearch(query, k, search_param_str, mock_valid_filter);
+        REQUIRE(valid_filter_knn_result->GetDim() == k);
+        cur = 0;
+        for (int j = 0; j < k; j++) {
+            if (mock_valid_filter->CheckValid(result->GetIds()[j])) {
+                REQUIRE(result->GetIds()[j] == valid_filter_knn_result->GetIds()[cur]);
                 cur++;
             }
         }
