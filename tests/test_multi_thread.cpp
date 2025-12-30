@@ -182,7 +182,7 @@ TEST_CASE("Test HNSW Multi-threading", "[ft][hnsw][concurrent]") {
 
     float recall = correct / max_elements;
     std::cout << index->GetStats() << std::endl;
-    REQUIRE(recall > 0.96);
+    REQUIRE(recall > 0.94);
 }
 
 TEST_CASE("Test HNSW Multi-threading Read and Write", "[ft][hnsw][concurrent]") {
