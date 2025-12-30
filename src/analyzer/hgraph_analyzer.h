@@ -28,6 +28,7 @@ public:
           base_sample_ids_(hgraph->allocator_),
           base_sample_datas_(hgraph->allocator_),
           base_search_result_(hgraph->allocator_),
+          is_duplicate_ids_(hgraph->allocator_),
           query_ground_truth_(hgraph->allocator_),
           query_sample_ids_(hgraph->allocator_),
           query_sample_datas_(hgraph->allocator_),
@@ -50,6 +51,9 @@ public:
 
     float
     GetNeighborRecall();
+
+    std::tuple<std::vector<uint32_t >, std::vector<uint32_t>, float>
+    GetDegreeDistribution();
 
     float
     GetBaseSearchRecall(const std::string& search_param);
@@ -139,6 +143,7 @@ private:
     Vector<float> base_sample_datas_;
     UnorderedMap<InnerIdType, DistHeapPtr> base_ground_truth_;
     UnorderedMap<InnerIdType, Vector<LabelType>> base_search_result_;
+    Vector<bool> is_duplicate_ids_;
     float base_search_time_ms_{0.0F};
 
     uint32_t query_sample_size_{0};

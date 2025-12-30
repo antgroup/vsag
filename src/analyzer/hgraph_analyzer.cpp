@@ -64,17 +64,45 @@ HGraphAnalyzer::calculate_base_groundtruth() {
     if (not base_ground_truth_.empty()) {
         return;
     }
-    base_sample_ids_.resize(this->total_count_);
-    std::iota(base_sample_ids_.begin(), base_sample_ids_.end(), 0);
+    is_duplicate_ids_.resize(this->total_count_, false);
+    Vector<bool> visited(this->total_count_, false, allocator_);
+    if (this->hgraph_->label_table_->CompressDuplicateData()) {
+        for (int i = 0; i < this->total_count_; ++i) {
+            if (visited[i]) {
+                continue;
+            }
+            visited[i] = true;
 
-    std::random_device rd;
-    std::mt19937 rng(rd());
+            if (this->hgraph_->label_table_->duplicate_records_[i] != nullptr) {
+                for (const auto& dup_id :
+                     this->hgraph_->label_table_->duplicate_records_[i]->duplicate_ids) {
+                    visited[dup_id] = true;
+                    is_duplicate_ids_[dup_id] = true;
+                }
+            }
+        }
+    }
 
-    std::shuffle(base_sample_ids_.begin(), base_sample_ids_.end(), rng);
+    {
+        base_sample_ids_.resize(this->total_count_);
+        std::iota(base_sample_ids_.begin(), base_sample_ids_.end(), 0);
+        std::random_device rd;
+        std::mt19937 rng(rd());
+        std::shuffle(base_sample_ids_.begin(), base_sample_ids_.end(), rng);
+        Vector<InnerIdType> unique_sample_ids(allocator_);
+        for (const auto& id : base_sample_ids_) {
+            if (not is_duplicate_ids_[id]) {
+                unique_sample_ids.push_back(id);
+            }
+            if (unique_sample_ids.size() >= static_cast<size_t>(this->base_sample_size_)) {
+                break;
+            }
+        }
+        this->base_sample_size_ = unique_sample_ids.size();
+        base_sample_ids_.swap(unique_sample_ids);
+    }
 
-    base_sample_ids_.resize(base_sample_size_);
     base_sample_datas_.resize(base_sample_size_ * dim_);
-
     for (uint64_t i = 0; i < this->base_sample_size_; ++i) {
         InnerIdType sample_id = base_sample_ids_[i];
         hgraph_->GetVectorByInnerId(sample_id, base_sample_datas_.data() + i * dim_);
@@ -402,6 +430,10 @@ HGraphAnalyzer::GetStats() {
     if (hgraph_->label_table_->CompressDuplicateData()) {
         stats["duplicate_ratio"].SetFloat(GetDuplicateRatio());
     }
+    const auto& [count_in_degree, count_out_degree, avg_degree] = GetDegreeDistribution();
+    stats["in_degree_distribution"].SetVector<uint32_t>(count_in_degree);
+    stats["out_degree_distribution"].SetVector<uint32_t>(count_out_degree);
+    stats["average_degree"].SetFloat(avg_degree);
     stats["duplicate_ratio"].SetFloat(GetDuplicateRatio());
     stats["proximity_recall_neighbor"].SetFloat(GetNeighborRecall());
     stats["quantization_bias_ratio"].SetFloat(GetQuantizationError(search_params_));
@@ -423,6 +455,35 @@ HGraphAnalyzer::AnalyzeIndexBySearch(const SearchRequest& request) {
     stats["quantization_inversion_count_rate_query"].SetFloat(
         GetQueryQuantizationInversionRatio(request.params_str_));
     return stats;
+}
+
+std::tuple<std::vector<uint32_t>, std::vector<uint32_t>, float>
+HGraphAnalyzer::GetDegreeDistribution() {
+    Vector<uint32_t> in_degree(this->total_count_, allocator_);
+    Vector<uint32_t> out_degree(this->total_count_, allocator_);
+    for (InnerIdType i = 0; i < this->total_count_; ++i) {
+        Vector<InnerIdType> neighbors(allocator_);
+        hgraph_->bottom_graph_->GetNeighbors(i, neighbors);
+        out_degree[i] = neighbors.size();
+        for (const auto& nb : neighbors) {
+            in_degree[nb]++;
+        }
+    }
+    auto max_degree = hgraph_->bottom_graph_->maximum_degree_;
+    std::vector<uint32_t> count_in_degree(max_degree + 1);
+    std::vector<uint32_t> count_out_degree(max_degree + 1);
+    uint64_t total_degree = 0;
+    uint64_t valid_id_count = 0;
+    for (InnerIdType i = 0; i < this->total_count_; ++i) {
+        if (not is_duplicate_ids_[i]) {
+            count_in_degree[std::min(in_degree[i], max_degree)]++;
+            count_out_degree[std::min(out_degree[i], max_degree)]++;
+             total_degree += in_degree[i];
+            valid_id_count++;
+        }
+    }
+    auto avg_degree = static_cast<float>(total_degree) / static_cast<float>(valid_id_count);
+    return {count_in_degree, count_out_degree, avg_degree};
 }
 
 }  // namespace vsag
