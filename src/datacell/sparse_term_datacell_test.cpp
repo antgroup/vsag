@@ -115,14 +115,40 @@ TEST_CASE("SparseTermDatacell Basic Test", "[ut][SparseTermDatacell]") {
         std::vector<float> dists(count_base, 0);
         data_cell->Query(dists.data(), computer);
 
-        data_cell->InsertHeap<KNN_SEARCH, PURE>(dists.data(), computer, heap, inner_param, 0);
+        data_cell->InsertHeapByTermLists<KNN_SEARCH, PURE>(
+            dists.data(), computer, heap, inner_param, 0);
         REQUIRE(heap.size() == topk);
-        for (auto i = 0; i < topk; i++) {
-            auto cur_top = heap.top();
-            auto exp_id = pos + i;
-            REQUIRE(cur_top.second == exp_id);
-            REQUIRE(std::abs(cur_top.first + exp_dists[exp_id]) < 1e-3);
+
+        // Extract results from InsertHeapByTermLists
+        std::vector<std::pair<float, int64_t>> results_by_term_lists;
+        while (!heap.empty()) {
+            results_by_term_lists.push_back(heap.top());
             heap.pop();
+        }
+
+        for (auto i = 0; i < topk; i++) {
+            auto exp_id = pos + i;
+            REQUIRE(results_by_term_lists[i].second == exp_id);
+            REQUIRE(std::abs(results_by_term_lists[i].first + exp_dists[exp_id]) < 1e-3);
+        }
+
+        std::vector<float> dists2(count_base, 0);
+        data_cell->Query(dists2.data(), computer);
+        MaxHeap heap2(allocator.get());
+        data_cell->InsertHeapByDists<KNN_SEARCH, PURE>(
+            dists2.data(), dists2.size(), heap2, inner_param, 0);
+
+        // Extract results from InsertHeapByDists
+        std::vector<std::pair<float, int64_t>> results_by_dists;
+        while (!heap2.empty()) {
+            results_by_dists.push_back(heap2.top());
+            heap2.pop();
+        }
+        // Compare results from both methods
+        REQUIRE(results_by_term_lists.size() == results_by_dists.size());
+        for (size_t i = 0; i < results_by_term_lists.size(); i++) {
+            REQUIRE(results_by_term_lists[i].second == results_by_dists[i].second);
+            REQUIRE(std::abs(results_by_term_lists[i].first - results_by_dists[i].first) < 1e-3);
         }
         for (auto i = 0; i < dists.size(); i++) {
             REQUIRE(std::abs(dists[i] - 0) < 1e-3);
@@ -138,14 +164,40 @@ TEST_CASE("SparseTermDatacell Basic Test", "[ut][SparseTermDatacell]") {
         inner_param.radius = dists[pos];
         MaxHeap heap(allocator.get());
 
-        data_cell->InsertHeap<RANGE_SEARCH, PURE>(dists.data(), computer, heap, inner_param, 0);
+        data_cell->InsertHeapByTermLists<RANGE_SEARCH, PURE>(
+            dists.data(), computer, heap, inner_param, 0);
         REQUIRE(heap.size() == range_topk);
-        for (auto i = 0; i < range_topk; i++) {
-            auto cur_top = heap.top();
-            auto exp_id = pos + i + 1;
-            REQUIRE(cur_top.second == exp_id);
-            REQUIRE(std::abs(cur_top.first + exp_dists[exp_id]) < 1e-3);
+
+        // Extract results from InsertHeapByTermLists
+        std::vector<std::pair<float, int64_t>> results_by_term_lists;
+        while (!heap.empty()) {
+            results_by_term_lists.push_back(heap.top());
             heap.pop();
+        }
+        for (auto i = 0; i < range_topk; i++) {
+            auto exp_id = pos + i + 1;
+            REQUIRE(results_by_term_lists[i].second == exp_id);
+            REQUIRE(std::abs(results_by_term_lists[i].first + exp_dists[exp_id]) < 1e-3);
+        }
+
+        std::vector<float> dists2(count_base, 0);
+        data_cell->Query(dists2.data(), computer);
+        MaxHeap heap2(allocator.get());
+        data_cell->InsertHeapByDists<RANGE_SEARCH, PURE>(
+            dists2.data(), dists2.size(), heap2, inner_param, 0);
+
+        // Extract results from InsertHeapByDists
+        std::vector<std::pair<float, int64_t>> results_by_dists;
+        while (!heap2.empty()) {
+            results_by_dists.push_back(heap2.top());
+            heap2.pop();
+        }
+
+        // Compare results from both methods
+        REQUIRE(results_by_term_lists.size() == results_by_dists.size());
+        for (size_t i = 0; i < results_by_term_lists.size(); i++) {
+            REQUIRE(results_by_term_lists[i].second == results_by_dists[i].second);
+            REQUIRE(std::abs(results_by_term_lists[i].first - results_by_dists[i].first) < 1e-3);
         }
         for (auto i = 0; i < range_topk; i++) {
             REQUIRE(std::abs(dists[i] - 0) < 1e-3);
