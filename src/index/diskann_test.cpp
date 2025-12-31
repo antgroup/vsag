@@ -259,30 +259,6 @@ TEST_CASE("diskann knn_search", "[ut][diskann]") {
         REQUIRE_FALSE(result.has_value());
         REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
     }
-
-    SECTION("invalid parameters beam_search not found") {
-        vsag::JsonType invalid_params{{"diskann", {{"ef_search", 100}, {"io_limit", 200}}}};
-
-        auto result = index->KnnSearch(query, k, invalid_params.dump());
-        REQUIRE_FALSE(result.has_value());
-        REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
-    }
-
-    SECTION("invalid parameters io_limit not found") {
-        vsag::JsonType invalid_params{{"diskann", {{"ef_search", 100}, {"beam_search", 4}}}};
-
-        auto result = index->KnnSearch(query, k, invalid_params.dump());
-        REQUIRE_FALSE(result.has_value());
-        REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
-    }
-
-    SECTION("invalid parameters ef_search not found") {
-        vsag::JsonType invalid_params{{"diskann", {{"beam_search", 4}, {"io_limit", 200}}}};
-
-        auto result = index->KnnSearch(query, k, invalid_params.dump());
-        REQUIRE_FALSE(result.has_value());
-        REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
-    }
 }
 
 TEST_CASE("range_search", "[ut][diskann]") {
@@ -404,30 +380,6 @@ TEST_CASE("range_search", "[ut][diskann]") {
 
     SECTION("invalid parameters diskann not found") {
         vsag::JsonType invalid_params{};
-        auto result = index->RangeSearch(query, radius, invalid_params.dump());
-        REQUIRE_FALSE(result.has_value());
-        REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
-    }
-
-    SECTION("invalid parameters beam_search not found") {
-        vsag::JsonType invalid_params{{"diskann", {{"ef_search", 100}, {"io_limit", 200}}}};
-
-        auto result = index->RangeSearch(query, radius, invalid_params.dump());
-        REQUIRE_FALSE(result.has_value());
-        REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
-    }
-
-    SECTION("invalid parameters io_limit not found") {
-        vsag::JsonType invalid_params{{"diskann", {{"ef_search", 100}, {"beam_search", 4}}}};
-
-        auto result = index->RangeSearch(query, radius, invalid_params.dump());
-        REQUIRE_FALSE(result.has_value());
-        REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
-    }
-
-    SECTION("invalid parameters ef_search not found") {
-        vsag::JsonType invalid_params{{"diskann", {{"beam_search", 4}, {"io_limit", 200}}}};
-
         auto result = index->RangeSearch(query, radius, invalid_params.dump());
         REQUIRE_FALSE(result.has_value());
         REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);

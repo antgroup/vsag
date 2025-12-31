@@ -153,27 +153,24 @@ DiskannSearchParameters::FromJson(const std::string& json_string) {
     // set obj.ef_search
     CHECK_ARGUMENT(params.contains(INDEX_DISKANN),
                    fmt::format("parameters must contains {}", INDEX_DISKANN));
-    CHECK_ARGUMENT(
-        params[INDEX_DISKANN].contains(DISKANN_PARAMETER_EF_SEARCH),
-        fmt::format("parameters[{}] must contains {}", INDEX_DISKANN, DISKANN_PARAMETER_EF_SEARCH));
-    obj.ef_search = params[INDEX_DISKANN][DISKANN_PARAMETER_EF_SEARCH];
+    if (params[INDEX_DISKANN].contains(DISKANN_PARAMETER_EF_SEARCH)) {
+        obj.ef_search = params[INDEX_DISKANN][DISKANN_PARAMETER_EF_SEARCH];
+    }
     CHECK_ARGUMENT((1 <= obj.ef_search) and (obj.ef_search <= 1000),
                    fmt::format("ef_search({}) must in range[1, 1000]", obj.ef_search));
 
     // set obj.beam_search
-    CHECK_ARGUMENT(
-        params[INDEX_DISKANN].contains(DISKANN_PARAMETER_BEAM_SEARCH),
-        fmt::format(
-            "parameters[{}] must contains {}", INDEX_DISKANN, DISKANN_PARAMETER_BEAM_SEARCH));
+    if (params[INDEX_DISKANN].contains(DISKANN_PARAMETER_BEAM_SEARCH)) {
+        obj.beam_search = params[INDEX_DISKANN][DISKANN_PARAMETER_BEAM_SEARCH];
+    }
     obj.beam_search = params[INDEX_DISKANN][DISKANN_PARAMETER_BEAM_SEARCH];
     CHECK_ARGUMENT((1 <= obj.beam_search) and (obj.beam_search <= 64),
                    fmt::format("beam_search({}) must in range[1, 64]", obj.beam_search));
 
     // set obj.io_limit
-    CHECK_ARGUMENT(
-        params[INDEX_DISKANN].contains(DISKANN_PARAMETER_IO_LIMIT),
-        fmt::format("parameters[{}] must contains {}", INDEX_DISKANN, DISKANN_PARAMETER_IO_LIMIT));
-    obj.io_limit = params[INDEX_DISKANN][DISKANN_PARAMETER_IO_LIMIT];
+    if (params[INDEX_DISKANN].contains(DISKANN_PARAMETER_IO_LIMIT)) {
+        obj.io_limit = params[INDEX_DISKANN][DISKANN_PARAMETER_IO_LIMIT];
+    }
     CHECK_ARGUMENT((1 <= obj.io_limit) and (obj.io_limit <= 512),
                    fmt::format("io_limit({}) must in range[1, 512]", obj.io_limit));
 
