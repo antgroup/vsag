@@ -306,6 +306,7 @@ Pyramid::search_impl(const DatasetPtr& query,
 
     DistHeapPtr search_result = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
 
+    std::shared_lock<std::shared_mutex> lock(resize_mutex_);
     auto vl = pool_->TakeOne();
     if (query_path != nullptr) {
         const std::string& current_path = query_path[0];
@@ -827,6 +828,7 @@ Pyramid::SetImmutable() {
 
 float
 Pyramid::CalcDistanceById(const float* query, int64_t id) const {
+    std::shared_lock<std::shared_mutex> lock(resize_mutex_);
     auto flat = this->base_codes_;
     if (use_reorder_) {
         flat = this->precise_codes_;
@@ -836,6 +838,7 @@ Pyramid::CalcDistanceById(const float* query, int64_t id) const {
 
 DatasetPtr
 Pyramid::CalDistanceById(const float* query, const int64_t* ids, int64_t count) const {
+    std::shared_lock<std::shared_mutex> lock(resize_mutex_);
     auto flat = this->base_codes_;
     if (use_reorder_) {
         flat = this->precise_codes_;

@@ -234,7 +234,7 @@ private:
     int64_t cur_element_count_{0};
     float alpha_{1.0F};
 
-    std::shared_mutex resize_mutex_;
+    mutable std::shared_mutex resize_mutex_;
     std::mutex cur_element_count_mutex_;
     std::string graph_type_{GRAPH_TYPE_VALUE_NSW};
 
