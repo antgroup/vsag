@@ -582,7 +582,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Get Raw Vector", "[f
     auto metric_type = GENERATE("l2");
     const std::string name = "hnsw";
     for (auto& dim : dims) {
-        if (dtype == "int8") {
+        if (dtype == std::string("int8")) {
             metric_type = "ip";
         }
         vsag::Options::Instance().set_block_size_limit(size);
