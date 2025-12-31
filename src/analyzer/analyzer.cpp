@@ -21,9 +21,13 @@ namespace vsag {
 
 AnalyzerBasePtr
 CreateAnalyzer(const InnerIndexInterface* index, const AnalyzerParam& param) {
-    auto index_no_const = const_cast<InnerIndexInterface*>(index);
-    if (dynamic_cast<HGraph*>(index_no_const)) {
-        auto hgraph = dynamic_cast<HGraph*>(index_no_const);
+    if (index == nullptr) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "Index pointer is null when creating analyzer");
+    }
+    auto* index_no_const = const_cast<InnerIndexInterface*>(index);
+    if (dynamic_cast<HGraph*>(index_no_const) != nullptr) {
+        auto* hgraph = dynamic_cast<HGraph*>(index_no_const);
         return std::make_shared<HGraphAnalyzer>(hgraph, param);
     }
     throw VsagException(

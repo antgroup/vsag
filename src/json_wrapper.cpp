@@ -177,12 +177,10 @@ JsonWrapper::UpdateJson(const JsonWrapper& json) {
     (*json_).update(*json.json_);
 }
 
-template
-void
+template void
 JsonWrapper::SetVector<uint32_t>(std::vector<uint32_t> value);
 
-template
-void
+template void
 JsonWrapper::SetVector<int32_t>(std::vector<int32_t> value);
 
 }  // namespace vsag

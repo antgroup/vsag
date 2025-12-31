@@ -2155,7 +2155,7 @@ HGraph::GetStats() const {
     analyzer_param.topk = DEFAULT_TOPK;
     analyzer_param.base_sample_size = std::min(QUERY_SAMPLE_SIZE, this->total_count_.load());
     analyzer_param.search_params =
-        fmt::format("{{\"hgraph\": {{\"ef_search\": {}}}}}", ef_construct_);
+        fmt::format(R"({{"hgraph": {{"ef_search": {}}}}})", ef_construct_);
     auto analyzer = CreateAnalyzer(this, analyzer_param);
     JsonType stats = analyzer->GetStats();
     return stats.Dump(4);

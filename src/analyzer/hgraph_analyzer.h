@@ -52,7 +52,7 @@ public:
     float
     GetNeighborRecall();
 
-    std::tuple<std::vector<uint32_t >, std::vector<uint32_t>, float>
+    std::tuple<std::vector<uint32_t>, std::vector<uint32_t>, float>
     GetDegreeDistribution();
 
     float

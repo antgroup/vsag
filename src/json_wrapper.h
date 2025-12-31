@@ -74,7 +74,6 @@ public:
     void
     SetVector(std::vector<T> value);
 
-
     void
     UpdateJson(const JsonWrapper& json);
 

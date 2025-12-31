@@ -478,7 +478,7 @@ HGraphAnalyzer::GetDegreeDistribution() {
         if (not is_duplicate_ids_[i]) {
             count_in_degree[std::min(in_degree[i], max_degree)]++;
             count_out_degree[std::min(out_degree[i], max_degree)]++;
-             total_degree += in_degree[i];
+            total_degree += in_degree[i];
             valid_id_count++;
         }
     }
