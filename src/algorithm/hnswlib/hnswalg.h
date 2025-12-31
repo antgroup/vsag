@@ -406,7 +406,7 @@ public:
 
     static inline void
     setListCount(linklistsizeint* ptr, unsigned short int size) {
-        *((unsigned short int*)(ptr)) = *((unsigned short int*)&size);
+        *((unsigned short int*)(ptr)) = size;
     }
 
     /*
