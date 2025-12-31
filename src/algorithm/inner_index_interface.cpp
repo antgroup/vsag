@@ -705,15 +705,8 @@ float
 InnerIndexInterface::calc_distance_by_id(const float* query,
                                          int64_t id,
                                          const FlattenInterfacePtr& data) const {
-    float result = 0.0F;
-    auto computer = data->FactoryComputer(query);
-    InnerIdType new_id = 0;
-    {
-        std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
-        new_id = this->label_table_->GetIdByLabel(id);
-    }
-    data->Query(&result, computer, &new_id, 1);
-    return result;
+    auto result = cal_distance_by_id(query, &id, 1, data);
+    return result->GetDistances()[0];
 }
 
 DatasetPtr
