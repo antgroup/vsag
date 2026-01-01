@@ -57,6 +57,10 @@ SINDIParameter::FromJson(const JsonType& json) {
     if (json.contains(SPARSE_DESERIALIZE_WITHOUT_FOOTER)) {
         deserialize_without_footer = json[SPARSE_DESERIALIZE_WITHOUT_FOOTER];
     }
+
+    if (json.contains(SPARSE_DESERIALIZE_WITHOUT_BUFFER)) {
+        deserialize_without_buffer = json[SPARSE_DESERIALIZE_WITHOUT_BUFFER];
+    }
 }
 
 JsonType
