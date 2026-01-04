@@ -857,7 +857,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
     }
 
     if (use_reorder_) {
-        this->reorder(query_data, this->high_precise_codes_, search_result, k);
+        this->reorder(query_data, this->high_precise_codes_, search_result, k, iter_filter_ctx);
     }
 
     while (search_result->Size() > k) {
@@ -1440,9 +1440,9 @@ HGraph::CalDistanceById(const float* query, const int64_t* ids, int64_t count) c
         for (int64_t i = 0; i < count; ++i) {
             try {
                 inner_ids[i] = this->label_table_->GetIdByLabel(ids[i]);
-            } catch (std::runtime_error& e) {
+            } catch (VsagException& e) {
                 logger::debug(fmt::format("failed to find id: {}", ids[i]));
-                invalid_id_loc.push_back(i);
+                invalid_id_loc.emplace_back(i);
             }
         }
         flat->Query(distances, computer, inner_ids.data(), count);
@@ -1717,13 +1717,14 @@ void
 HGraph::reorder(const void* query,
                 const FlattenInterfacePtr& flatten,
                 DistHeapPtr& candidate_heap,
-                int64_t k) const {
+                int64_t k,
+                IteratorFilterContext* iter_ctx) const {
     uint64_t size = candidate_heap->Size();
     if (k <= 0) {
         k = static_cast<int64_t>(size);
     }
-    auto reorder_heap =
-        reorder_->Reorder(candidate_heap, static_cast<const float*>(query), k, allocator_);
+    auto reorder_heap = reorder_->Reorder(
+        candidate_heap, static_cast<const float*>(query), k, allocator_, iter_ctx);
     candidate_heap = reorder_heap;
 }
 
