@@ -125,7 +125,7 @@ SINDI::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) {
     // Note:
     // 1. we only check whether the old vector is a subset of the new vector
     // 2. we do not actually update the vector
-    auto check_and_cleanup = [this, id, new_base](InnerIndexInterface* index) -> bool {
+    auto check_and_cleanup = [this, id, &new_base](InnerIndexInterface* index) -> bool {
         SparseVector old_sv;
         uint32_t inner_id;
         {
