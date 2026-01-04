@@ -168,6 +168,11 @@ const char* const HGRAPH_USE_EXTRA_INFO_FILTER = "use_extra_info_filter";
 const char* const STORE_RAW_VECTOR = "store_raw_vector";
 const char* const RAW_VECTOR_IO_TYPE = "raw_vector_io_type";
 const char* const RAW_VECTOR_FILE_PATH = "raw_vector_file_path";
+// PCA parameters
+const char* const ENABLE_PCA_KEY = "enable_pca";
+const char* const PCA_DIM_KEY = "pca_dim";
+const char* const HGRAPH_USE_PCA_DISTANCE_ESTIMATION_KEY = "use_pca_distance_estimation";
+const char* const HGRAPH_PCA_SIGMA_COUNT_KEY = "pca_sigma_count";
 
 const char* const BRUTE_FORCE_BASE_QUANTIZATION_TYPE = "base_quantization_type";
 const char* const BRUTE_FORCE_BASE_IO_TYPE = "base_io_type";

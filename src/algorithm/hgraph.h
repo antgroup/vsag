@@ -375,7 +375,8 @@ private:
     std::atomic<int64_t> delete_count_{0};
 
     std::shared_ptr<Optimizer<BasicSearcher>> optimizer_;
-
+    // PCA transformer for distance estimation optimization
+    std::shared_ptr<PCATransformer> pca_transformer_{nullptr};
     bool create_new_raw_vector_{false};
     FlattenInterfacePtr raw_vector_{nullptr};
 

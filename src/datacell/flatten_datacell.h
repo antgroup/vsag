@@ -136,6 +136,9 @@ public:
     bool
     GetCodesById(InnerIdType id, uint8_t* codes) const override;
 
+    bool
+    GetRawVectorById(InnerIdType id, float* vector) override;
+
     void
     Serialize(StreamWriter& writer) override;
 
@@ -385,6 +388,18 @@ FlattenDataCell<QuantTmpl, IOTmpl>::ComputePairVectors(InnerIdType id1, InnerIdT
         this->io_->Release(codes2);
     }
 
+    return result;
+}
+
+template <typename QuantTmpl, typename IOTmpl>
+bool
+FlattenDataCell<QuantTmpl, IOTmpl>::GetRawVectorById(InnerIdType id, float* vector) {
+    bool need_release = false;
+    const auto* codes = this->GetCodesById(id, need_release);
+    bool result = this->quantizer_->DecodeOne(codes, vector);
+    if (need_release) {
+        this->io_->Release(codes);
+    }
     return result;
 }
 

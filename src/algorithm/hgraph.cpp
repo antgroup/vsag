@@ -30,6 +30,7 @@
 #include "impl/heap/standard_heap.h"
 #include "impl/odescent/odescent_graph_builder.h"
 #include "impl/pruning_strategy.h"
+#include "impl/transform/pca_transformer.h"
 #include "index/index_impl.h"
 #include "index/iterator_filter.h"
 #include "io/reader_io_parameter.h"
@@ -98,6 +99,17 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
     if (use_elp_optimizer_) {
         optimizer_ = std::make_shared<Optimizer<BasicSearcher>>(common_param);
     }
+    // Initialize PCA transformer if enabled
+    if (hgraph_param->enable_pca) {
+        int64_t pca_dim = hgraph_param->pca_dim;
+        if (pca_dim <= 0) {
+            // Auto-select PCA dimension (e.g., 50% of original dimension)
+            pca_dim = std::max(static_cast<int64_t>(1), static_cast<int64_t>(common_param.dim_ / 2));
+        }
+        this->pca_transformer_ = std::make_shared<PCATransformer>(
+            common_param.allocator_.get(), common_param.dim_, pca_dim);
+    }
+
     check_and_init_raw_vector(hgraph_param->raw_vector_param, common_param);
     resize(bottom_graph_->max_capacity_);
 }
@@ -110,6 +122,10 @@ HGraph::Train(const DatasetPtr& base) {
     }
     if (create_new_raw_vector_) {
         this->raw_vector_->Train(base_data, base->GetNumElements());
+    }
+    // Train PCA transformer if needed
+    if (this->pca_transformer_ != nullptr) {
+        this->pca_transformer_->Train(static_cast<const float*>(base_data), base->GetNumElements());
     }
 }
 
@@ -411,6 +427,18 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             HGRAPH_SUPPORT_TOMBSTONE,
             {
                 SUPPORT_TOMBSTONE,
+            },
+        },
+        {
+            ENABLE_PCA_KEY,
+            {
+                ENABLE_PCA_KEY,
+            },
+        },
+        {
+            PCA_DIM_KEY,
+            {
+                PCA_DIM_KEY,
             },
         }};
     const std::string hgraph_params_template =
@@ -2047,6 +2075,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     search_param.ef = 1;
     search_param.is_inner_id_allowed = nullptr;
     search_param.search_alloc = search_allocator;
+    search_param.use_pca_distance_estimation = params.use_pca_distance_estimation;
 
     Statistics stats;
 
@@ -2054,6 +2083,8 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
 
     const auto* raw_query = get_data(query);
     for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
+        // Ensure PCA parameters are correctly set for each route graph search
+        search_param.use_pca_distance_estimation = params.use_pca_distance_estimation;
         auto result = this->search_one_graph(
             raw_query, this->route_graphs_[i], this->basic_flatten_codes_, search_param, vt, stats);
         search_param.ep = result->Top().second;

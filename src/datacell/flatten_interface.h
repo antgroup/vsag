@@ -48,6 +48,18 @@ public:
           InnerIdType id_count,
           Allocator* allocator = nullptr) = 0;
 
+        // Incremental distance calculation with pruning support
+    virtual void
+    QueryIncremental(float* result_dists,
+                     const ComputerInterfacePtr& computer,
+                     const InnerIdType* idx,
+                     InnerIdType id_count,
+                     const float* pre_query,
+                     const float* thresholds,
+                     Allocator* allocator = nullptr) {
+        // Default implementation: call the original Query method
+        Query(result_dists, computer, idx, id_count, allocator);
+    }
     virtual ComputerInterfacePtr
     FactoryComputer(const void* query) = 0;
 
@@ -143,6 +155,20 @@ public:
 
     virtual bool
     GetCodesById(InnerIdType id, uint8_t* codes) const = 0;
+
+    virtual bool
+    GetRawVectorById(InnerIdType id, float* vector) {
+        bool need_release = false;
+        const uint8_t* codes = this->GetCodesById(id, need_release);
+        if (codes == nullptr) {
+            return false;
+        }
+        bool success = this->Decode(codes, vector);
+        if (need_release) {
+            this->Release(codes);
+        }
+        return success;
+    }
 
     [[nodiscard]] virtual InnerIdType
     TotalCount() const {

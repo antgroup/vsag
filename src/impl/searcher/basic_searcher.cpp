@@ -20,12 +20,15 @@
 
 #include "algorithm/inner_index_interface.h"
 #include "impl/heap/standard_heap.h"
+#include "impl/transform/pca_transformer.h"
 #include "utils/linear_congruential_generator.h"
 
 namespace vsag {
 
 BasicSearcher::BasicSearcher(const IndexCommonParam& common_param, MutexArrayPtr mutex_array)
-    : allocator_(common_param.allocator_.get()), mutex_array_(std::move(mutex_array)) {
+    : allocator_(common_param.allocator_.get()), 
+      mutex_array_(std::move(mutex_array)),
+      dim_(static_cast<uint64_t>(common_param.dim_)) {
 }
 
 uint32_t
@@ -95,6 +98,23 @@ BasicSearcher::Search(const GraphInterfacePtr& graph,
                       Statistics& stats) const {
     return this->search_impl<KNN_SEARCH>(
         graph, flatten, vl, query, inner_search_param, iter_ctx, stats);
+}
+
+DistHeapPtr
+BasicSearcher::Search(const GraphInterfacePtr& graph,
+                      const FlattenInterfacePtr& flatten,
+                      const VisitedListPtr& vl,
+                      const void* query,
+                      const InnerSearchParam& inner_search_param,
+                      const LabelTablePtr& label_table,
+                      Statistics& stats,
+                      bool use_pca_distance_estimation) const {
+    if (inner_search_param.search_mode == KNN_SEARCH) {
+        return this->search_impl<KNN_SEARCH>(
+            graph, flatten, vl, query, inner_search_param, label_table, stats, use_pca_distance_estimation);
+    }
+    return this->search_impl<RANGE_SEARCH>(
+        graph, flatten, vl, query, inner_search_param, label_table, stats, use_pca_distance_estimation);
 }
 
 template <InnerSearchMode mode>
@@ -398,6 +418,292 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
         }
         if (need_release) {
             flatten->Release(codes);
+        }
+    }
+
+    stats.dist_cmp.fetch_add(dist_cmp, std::memory_order_relaxed);
+    stats.hops.fetch_add(hops, std::memory_order_relaxed);
+
+    return top_candidates;
+}
+
+template <InnerSearchMode mode>
+DistHeapPtr
+BasicSearcher::search_impl(const GraphInterfacePtr& graph,
+                           const FlattenInterfacePtr& flatten,
+                           const VisitedListPtr& vl,
+                           const void* query,
+                           const InnerSearchParam& inner_search_param,
+                           const LabelTablePtr& label_table,
+                           Statistics& stats,
+                           bool use_pca_distance_estimation) const {
+    // Check if quantization type is fp32
+    std::string quantizer_name = flatten->GetQuantizerName();
+    bool is_fp32_quantization = (quantizer_name == "fp32" || quantizer_name == "FP32");
+    
+    // Only use PCA distance estimation if quantization type is fp32
+    if (!is_fp32_quantization) {
+        // Fallback to original search implementation
+        return this->search_impl<mode>(graph, flatten, vl, query, inner_search_param, label_table, stats);
+    }
+    
+    // Get PCA transformer from inner_search_param
+    PCATransformer* pca_transformer = use_pca_distance_estimation ? 
+        static_cast<PCATransformer*>(inner_search_param.pca_transformer) : nullptr;
+    std::cout << "BASIC_SEARCHER DEBUG: Received pca_transformer = " << pca_transformer 
+              << ", use_pca_distance_estimation = " << use_pca_distance_estimation << std::endl;
+    std::cout << "BASIC_SEARCHER DEBUG: inner_search_param.use_pca_distance_estimation = " 
+              << inner_search_param.use_pca_distance_estimation << std::endl;
+    
+    // Compute cumulative error upper bound for online pruning if PCA is enabled
+    vsag::Vector<float> pre_query(allocator_);
+    uint64_t pca_dim = 0;
+    if (pca_transformer != nullptr) {
+        pca_dim = pca_transformer->GetOutputDim();
+        pre_query.resize(pca_dim + 1, 0.0F);
+        pca_transformer->ComputeCumulativeErrorUpperBound(static_cast<const float*>(query), pre_query.data());
+    }
+    
+    Allocator* alloc = inner_search_param.search_alloc == nullptr ? allocator_ : inner_search_param.search_alloc;
+    auto top_candidates = std::make_shared<StandardHeap<true, false>>(alloc, -1);
+    auto candidate_set = std::make_shared<StandardHeap<true, false>>(alloc, -1);
+
+    if (not graph or not flatten) {
+        return top_candidates;
+    }
+
+    // For fp32 quantization, use PCA projected vectors for incremental distance calculation
+    auto computer = flatten->FactoryComputer(query);
+    
+    // Project query to PCA space for incremental distance calculation
+    vsag::Vector<float> pca_query(allocator_);
+    if (pca_transformer != nullptr) {
+        pca_query.resize(pca_dim, 0.0F);
+        pca_transformer->Transform(static_cast<const float*>(query), pca_query.data());
+    }
+
+    auto is_id_allowed = inner_search_param.is_inner_id_allowed;
+    auto ep = inner_search_param.ep;
+    auto ef = inner_search_param.ef;
+
+    float dist = 0.0F;
+    auto lower_bound = std::numeric_limits<float>::max();
+
+    uint32_t hops = 0;
+    uint32_t dist_cmp = 0;
+    uint32_t count_no_visited = 0;
+    Vector<InnerIdType> to_be_visited_rid(graph->MaximumDegree(), alloc);
+    Vector<InnerIdType> to_be_visited_id(graph->MaximumDegree(), alloc);
+    Vector<InnerIdType> neighbors(graph->MaximumDegree(), alloc);
+    Vector<float> line_dists(graph->MaximumDegree(), alloc);
+
+    Filter* attr_ft = nullptr;
+    if (not inner_search_param.executors.empty() and inner_search_param.executors[0] != nullptr) {
+        inner_search_param.executors[0]->Clear();
+        attr_ft = inner_search_param.executors[0]->Run();
+    }
+
+    auto check_func = [&is_id_allowed, &attr_ft](InnerIdType id) {
+        return (is_id_allowed == nullptr or is_id_allowed->CheckValid(id)) and
+               (attr_ft == nullptr or attr_ft->CheckValid(id));
+    };
+
+    // Use PCA projected vectors for initial distance calculation
+    if (pca_transformer != nullptr) {
+        // Get PCA projected vector for entry point
+        vsag::Vector<float> ep_pca_vec(allocator_);
+        ep_pca_vec.resize(pca_dim, 0.0F);
+        
+        // Get raw vector for entry point and project to PCA space
+        vsag::Vector<float> raw_ep_vec(allocator_);
+        raw_ep_vec.resize(this->dim_, 0.0F);
+        
+        // Get raw vector by id and project to PCA space
+        bool success = flatten->GetRawVectorById(ep, raw_ep_vec.data());
+        if (success) {
+            pca_transformer->Transform(raw_ep_vec.data(), ep_pca_vec.data());
+            
+            // Calculate distance between pca_query and ep_pca_vec incrementally
+            dist = 0.0F;
+            bool should_prune = false;
+            for (uint64_t tag_dim = 0; tag_dim < pca_dim; tag_dim++) {
+                // Incremental distance calculation
+                float diff = pca_query[tag_dim] - ep_pca_vec[tag_dim];
+                dist += diff * diff;
+                
+                // Check pruning condition
+                if (dist > lower_bound + pre_query[tag_dim]) {
+                    should_prune = true;
+                    break;
+                }
+            }
+            
+            if (!should_prune) {
+                if (check_func(ep)) {
+                    top_candidates->Push(dist, ep);
+                    lower_bound = top_candidates->Top().first;
+                }
+            }
+        } else {
+            // Fallback to original distance calculation if we can't get raw vector
+            flatten->Query(&dist, computer, &ep, 1, alloc);
+            ++dist_cmp;
+            if (check_func(ep)) {
+                top_candidates->Push(dist, ep);
+                lower_bound = top_candidates->Top().first;
+            }
+        }
+    } else {
+        // Fallback to original distance calculation if PCA transformer is not available
+        flatten->Query(&dist, computer, &ep, 1, alloc);
+        ++dist_cmp;
+        if (check_func(ep)) {
+            top_candidates->Push(dist, ep);
+            lower_bound = top_candidates->Top().first;
+        }
+    }
+    
+    if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
+        if (dist > inner_search_param.radius and not top_candidates->Empty()) {
+            top_candidates->Pop();
+        }
+    }
+    if (dist < THRESHOLD_ERROR) {
+        inner_search_param.duplicate_id = ep;
+    }
+    candidate_set->Push(-dist, ep);
+    vl->Set(ep);
+
+    while (not candidate_set->Empty()) {
+        ++hops;
+        auto current_node_pair = candidate_set->Top();
+
+        if (inner_search_param.time_cost != nullptr and
+            inner_search_param.time_cost->CheckOvertime()) {
+            stats.is_timeout.store(true, std::memory_order_relaxed);
+            break;
+        }
+
+        if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
+            if ((-current_node_pair.first) > lower_bound && top_candidates->Size() == ef) {
+                break;
+            }
+        }
+        candidate_set->Pop();
+
+        if (not candidate_set->Empty()) {
+            graph->Prefetch(candidate_set->Top().second, 0);
+        }
+
+        count_no_visited = visit(graph,
+                                 vl,
+                                 current_node_pair,
+                                 inner_search_param.is_inner_id_allowed,
+                                 inner_search_param.skip_ratio,
+                                 to_be_visited_rid,
+                                 to_be_visited_id,
+                                 neighbors);
+
+        // Use PCA projected vectors for incremental distance calculation
+        if (pca_transformer != nullptr) {
+            for (uint32_t i = 0; i < count_no_visited; i++) {
+                InnerIdType cur_id = to_be_visited_id[i];
+                
+                // Get PCA projected vector for current candidate
+                vsag::Vector<float> cur_pca_vec(allocator_);
+                cur_pca_vec.resize(pca_dim, 0.0F);
+                
+                // Get raw vector for current candidate and project to PCA space
+                vsag::Vector<float> raw_cur_vec(allocator_);
+                raw_cur_vec.resize(this->dim_, 0.0F);
+                
+                // Get raw vector by id and project to PCA space
+                bool success = flatten->GetRawVectorById(cur_id, raw_cur_vec.data());
+                if (success) {
+                    pca_transformer->Transform(raw_cur_vec.data(), cur_pca_vec.data());
+                    
+                    // Calculate distance incrementally with pruning
+                    float cur_dist = 0.0F;
+                    bool should_prune = false;
+                    for (uint64_t tag_dim = 0; tag_dim < pca_dim; tag_dim++) {
+                        // Incremental distance calculation
+                        float diff = pca_query[tag_dim] - cur_pca_vec[tag_dim];
+                        cur_dist += diff * diff;
+                        
+                        // Check pruning condition
+                        if (cur_dist > lower_bound + pre_query[tag_dim]) {
+                            should_prune = true;
+                            break;
+                        }
+                    }
+                    
+                    if (!should_prune) {
+                        line_dists[i] = cur_dist;
+                    } else {
+                        // Set a large distance if pruned
+                        line_dists[i] = std::numeric_limits<float>::max();
+                    }
+                } else {
+                    // Fallback to original distance calculation for this candidate
+                    flatten->Query(&line_dists[i], computer, &cur_id, 1, alloc);
+                }
+            }
+        } else {
+            // Fallback to original query implementation if PCA transformer is not available
+            flatten->Query(
+                line_dists.data(), computer, to_be_visited_id.data(), count_no_visited, alloc);
+        }
+        
+        dist_cmp += count_no_visited;
+
+        for (uint32_t i = 0; i < count_no_visited; i++) {
+            dist = line_dists[i];
+            if (dist < THRESHOLD_ERROR) {
+                inner_search_param.duplicate_id = to_be_visited_id[i];
+            }
+            if (top_candidates->Size() < ef || lower_bound > dist ||
+                (mode == RANGE_SEARCH && dist <= inner_search_param.radius)) {
+                candidate_set->Push(-dist, to_be_visited_id[i]);
+                //                flatten->Prefetch(candidate_set->Top().second);
+                if (check_func(to_be_visited_id[i])) {
+                    top_candidates->Push(dist, to_be_visited_id[i]);
+                }
+                if (inner_search_param.consider_duplicate and label_table != nullptr and
+                    label_table->CompressDuplicateData()) {
+                    const auto& duplicate_ids = label_table->GetDuplicateId(to_be_visited_id[i]);
+                    for (const auto& item : duplicate_ids) {
+                        if (check_func(item)) {
+                            top_candidates->Push(dist, item);
+                        }
+                    }
+                }
+
+                if constexpr (mode == KNN_SEARCH) {
+                    if (top_candidates->Size() > ef) {
+                        top_candidates->Pop();
+                    }
+                }
+
+                if (not top_candidates->Empty()) {
+                    lower_bound = top_candidates->Top().first;
+                }
+            }
+        }
+    }
+
+    if constexpr (mode == KNN_SEARCH) {
+        while (top_candidates->Size() > inner_search_param.topk) {
+            top_candidates->Pop();
+        }
+    } else if constexpr (mode == RANGE_SEARCH) {
+        if (inner_search_param.range_search_limit_size > 0) {
+            while (top_candidates->Size() > inner_search_param.range_search_limit_size) {
+                top_candidates->Pop();
+            }
+        }
+        while (not top_candidates->Empty() &&
+               top_candidates->Top().first > inner_search_param.radius + THRESHOLD_ERROR) {
+            top_candidates->Pop();
         }
     }
 

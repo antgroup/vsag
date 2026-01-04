@@ -183,6 +183,11 @@ extern const char* const HGRAPH_USE_EXTRA_INFO_FILTER;
 extern const char* const STORE_RAW_VECTOR;
 extern const char* const RAW_VECTOR_IO_TYPE;
 extern const char* const RAW_VECTOR_FILE_PATH;
+// PCA parameters
+extern const char* const ENABLE_PCA_KEY;
+extern const char* const PCA_DIM_KEY;
+extern const char* const HGRAPH_USE_PCA_DISTANCE_ESTIMATION_KEY;
+extern const char* const HGRAPH_PCA_SIGMA_COUNT_KEY;
 
 extern const char* const BRUTE_FORCE_BASE_QUANTIZATION_TYPE;
 extern const char* const BRUTE_FORCE_BASE_IO_TYPE;

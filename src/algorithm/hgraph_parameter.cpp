@@ -124,6 +124,13 @@ HGraphParameter::FromJson(const JsonType& json) {
     if (json.Contains(SUPPORT_TOMBSTONE)) {
         this->support_tombstone = json[SUPPORT_TOMBSTONE].GetBool();
     }
+    // Parse PCA parameters
+    if (json.Contains(ENABLE_PCA_KEY)) {
+        this->enable_pca = json[ENABLE_PCA_KEY].GetBool();
+    }
+    if (json.Contains(PCA_DIM_KEY)) {
+        this->pca_dim = json[PCA_DIM_KEY].GetInt();
+    }
 }
 
 JsonType
@@ -137,6 +144,9 @@ HGraphParameter::ToJson() const {
     json[EF_CONSTRUCTION_KEY].SetInt(this->ef_construction);
     json[ALPHA_KEY].SetFloat(this->alpha);
     json[SUPPORT_DUPLICATE].SetBool(this->support_duplicate);
+    // Add PCA parameters
+    json[ENABLE_PCA_KEY].SetBool(this->enable_pca);
+    json[PCA_DIM_KEY].SetInt(this->pca_dim);
     return json;
 }
 
@@ -178,6 +188,17 @@ HGraphParameter::CheckCompatibility(const ParamPtr& other) const {
         logger::error("HGraphParameter::CheckCompatibility: support_duplicate must be the same");
         return false;
     }
+
+    // Check PCA parameters compatibility
+    if (this->enable_pca != hgraph_param->enable_pca) {
+        logger::error("HGraphParameter::CheckCompatibility: enable_pca must be the same");
+        return false;
+    }
+    
+    if (this->enable_pca && this->pca_dim != hgraph_param->pca_dim) {
+        logger::error("HGraphParameter::CheckCompatibility: pca_dim must be the same when enable_pca is true");
+        return false;
+    }
     return true;
 }
 
@@ -206,7 +227,13 @@ HGraphSearchParameters::FromJson(const std::string& json_string) {
     if (params[INDEX_TYPE_HGRAPH].Contains(SEARCH_PARAM_FACTOR)) {
         obj.topk_factor = params[INDEX_TYPE_HGRAPH][SEARCH_PARAM_FACTOR].GetFloat();
     }
-
+    // Parse PCA distance estimation parameters
+    if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_USE_PCA_DISTANCE_ESTIMATION_KEY)) {
+        obj.use_pca_distance_estimation = params[INDEX_TYPE_HGRAPH][HGRAPH_USE_PCA_DISTANCE_ESTIMATION_KEY].GetBool();
+    } 
+    if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_PCA_SIGMA_COUNT_KEY)) {
+        obj.pca_sigma_count = params[INDEX_TYPE_HGRAPH][HGRAPH_PCA_SIGMA_COUNT_KEY].GetFloat();
+    }
     return obj;
 }
 }  // namespace vsag

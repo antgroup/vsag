@@ -48,10 +48,12 @@ main(int argc, char** argv) {
         "metric_type": "l2",
         "dim": 128,
         "index_param": {
-            "base_quantization_type": "sq8",
+            "base_quantization_type": "fp32",
             "max_degree": 26,
             "ef_construction": 100,
-            "alpha":1.2
+            "alpha":1.2,
+            "enable_pca": true,
+            "pca_dim": 64
         }
     }
     )";
@@ -80,7 +82,9 @@ main(int argc, char** argv) {
     auto hgraph_search_parameters = R"(
     {
         "hgraph": {
-            "ef_search": 100
+            "ef_search": 100,
+            "use_pca_distance_estimation": true,
+            "pca_sigma_count": 3.0
         }
     }
     )";

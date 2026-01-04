@@ -119,6 +119,24 @@ public:
 private:
     Vector<float> pca_matrix_;  // [input_dim_ * output_dim_]
     Vector<float> mean_;        // [input_dim_ * 1]
+    Vector<float> variances_;   // [output_dim_]  // Variance of each PCA dimension
+    Vector<float> eigen_values_; // [input_dim_]  // Eigenvalues from decomposition
+
+public:
+    // Method to compute cumulative error upper bound for online pruning
+    void ComputeCumulativeErrorUpperBound(const float* query_vec, float* pre_query, float sigma_count = 3.0F) const;
+    
+    // Method to get variance of a specific dimension
+    float GetVariance(uint64_t dim) const {
+        return variances_[dim];
+    }
+    
+    // Method to set variances (for offline precomputed variance loading)
+    void SetVariances(const float* variances) {
+        for (uint64_t i = 0; i < output_dim_; ++i) {
+            variances_[i] = variances[i];
+        }
+    }
 };
 
 }  // namespace vsag

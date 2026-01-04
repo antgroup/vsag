@@ -28,6 +28,11 @@
 #include "utils/timer.h"
 #include "utils/visited_list.h"
 
+// Forward declaration for PCATransformer
+namespace vsag {
+class PCATransformer;
+}
+
 namespace vsag {
 
 static constexpr uint32_t OPTIMIZE_SEARCHER_SAMPLE_SIZE = 10000;
@@ -57,6 +62,17 @@ public:
            IteratorFilterContext* iter_ctx,
            Statistics& stats) const;
 
+    // Search with PCA distance estimation optimization
+    virtual DistHeapPtr
+    Search(const GraphInterfacePtr& graph,
+           const FlattenInterfacePtr& flatten,
+           const VisitedListPtr& vl,
+           const void* query,
+           const InnerSearchParam& inner_search_param,
+           const LabelTablePtr& label_table,
+           Statistics& stats,
+           bool use_pca_distance_estimation) const;
+           
     virtual bool
     SetRuntimeParameters(const UnorderedMap<std::string, float>& new_params);
 
@@ -107,10 +123,24 @@ private:
                 IteratorFilterContext* iter_ctx,
                 Statistics& stats) const;
 
+    template <InnerSearchMode mode = KNN_SEARCH>
+    DistHeapPtr
+    search_impl(const GraphInterfacePtr& graph,
+                const FlattenInterfacePtr& flatten,
+                const VisitedListPtr& vl,
+                const void* query,
+                const InnerSearchParam& inner_search_param,
+                const LabelTablePtr& label_table,
+                Statistics& stats,
+                bool use_pca_distance_estimation) const;
+
 private:
     Allocator* allocator_{nullptr};
 
     MutexArrayPtr mutex_array_{nullptr};
+
+    // vector dimensionality
+    uint64_t dim_{0};
 
     // mock run parameters
     GraphInterfacePtr mock_graph_{nullptr};

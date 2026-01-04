@@ -65,6 +65,10 @@ public:
 
     DataTypes data_type{DataTypes::DATA_TYPE_FLOAT};
 
+    // PCA parameters for distance estimation optimization
+    bool enable_pca{false};
+    int64_t pca_dim{0};  // PCA output dimension, 0 means auto-select
+
     std::string name;
 };
 
@@ -78,7 +82,8 @@ public:
     float topk_factor{0.0F};
     bool use_reorder{false};
     bool use_extra_info_filter{false};
-
+    bool use_pca_distance_estimation{true};  // Enable PCA distance estimation optimization
+    float pca_sigma_count{3.0F};  // Safety factor for PCA error bound calculation
 private:
     HGraphSearchParameters() = default;
 };

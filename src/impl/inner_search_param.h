@@ -59,6 +59,10 @@ public:
     // use in search process with duplicate ids
     bool consider_duplicate{false};
 
+    // PCA transformer for distance estimation optimization
+    mutable void* pca_transformer{nullptr};
+    mutable bool use_pca_distance_estimation{false};
+
     // time record
     std::shared_ptr<Timer> time_cost{nullptr};
 

@@ -298,6 +298,11 @@ if (ENABLE_ASAN)
     set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${ASAN_FLAGS}")
     set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${ASAN_FLAGS}")
     set (CMAKE_LD_FLAGS "${CMAKE_LD_FLAGS} ${ASAN_FLAGS}")
+    
+    # Ensure OpenBLAS includes are available for sanitizer builds
+    if (EXISTS ${CMAKE_CURRENT_BINARY_DIR}/openblas/install/include)
+        include_directories(${CMAKE_CURRENT_BINARY_DIR}/openblas/install/include)
+    endif()
 endif ()
 
 # tsan
@@ -310,6 +315,11 @@ if (ENABLE_TSAN)
     add_compile_options (-fsanitize=thread)
     add_compile_options (-g)
     set (CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=thread")
+    
+    # Ensure OpenBLAS includes are available for sanitizer builds
+    if (EXISTS ${CMAKE_CURRENT_BINARY_DIR}/openblas/install/include)
+        include_directories(${CMAKE_CURRENT_BINARY_DIR}/openblas/install/include)
+    endif()
 endif ()
 
 # tests
