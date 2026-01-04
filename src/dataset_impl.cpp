@@ -134,27 +134,37 @@ DatasetImpl::DeepCopy(Allocator* allocator) const {
 
     copy_dataset->NumElements(num_elements);
     copy_dataset->Dim(dim);
-
-    copy_dataset->Ids(allocate_and_copy(this->GetIds(), num_elements, allocator_ref));
-    copy_dataset->Distances(
-        allocate_and_copy(this->GetDistances(), num_elements * dim, allocator_ref));
-    copy_dataset->Int8Vectors(
-        allocate_and_copy(this->GetInt8Vectors(), num_elements * dim, allocator_ref));
-    copy_dataset->Float32Vectors(
-        allocate_and_copy(this->GetFloat32Vectors(), num_elements * dim, allocator_ref));
+    if (this->GetIds() != nullptr) {
+        copy_dataset->Ids(allocate_and_copy(this->GetIds(), num_elements, allocator_ref));
+    }
+    if (this->GetDistances() != nullptr) {
+        copy_dataset->Distances(
+            allocate_and_copy(this->GetDistances(), num_elements * dim, allocator_ref));
+    }
+    if (this->GetInt8Vectors() != nullptr) {
+        copy_dataset->Int8Vectors(
+            allocate_and_copy(this->GetInt8Vectors(), num_elements * dim, allocator_ref));
+    }
+    if (this->GetFloat32Vectors() != nullptr) {
+        copy_dataset->Float32Vectors(
+            allocate_and_copy(this->GetFloat32Vectors(), num_elements * dim, allocator_ref));
+    }
 
     if (this->GetExtraInfoSize() != 0) {
         copy_dataset->ExtraInfoSize(this->GetExtraInfoSize());
         copy_dataset->ExtraInfos(allocate_and_copy(
             this->GetExtraInfos(), num_elements * this->GetExtraInfoSize(), allocator_ref));
     }
-    copy_dataset->SparseVectors(
-        allocate_and_copy_sparse_vectors(this->GetSparseVectors(), num_elements, allocator_ref));
-
-    auto* paths = new std::string[num_elements];
-    copy_dataset->Paths(paths);
-    for (int i = 0; i < num_elements; ++i) {
-        paths[i] += this->GetPaths()[i];
+    if (this->GetSparseVectors() != nullptr) {
+        copy_dataset->SparseVectors(allocate_and_copy_sparse_vectors(
+            this->GetSparseVectors(), num_elements, allocator_ref));
+    }
+    if (this->GetPaths() != nullptr) {
+        auto* paths = new std::string[num_elements];
+        copy_dataset->Paths(paths);
+        for (int i = 0; i < num_elements; ++i) {
+            paths[i] += this->GetPaths()[i];
+        }
     }
 
     if (this->GetAttributeSets() != nullptr) {
