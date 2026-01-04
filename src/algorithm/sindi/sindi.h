@@ -18,6 +18,7 @@
 #include "algorithm/inner_index_interface.h"
 #include "algorithm/sparse_index.h"
 #include "datacell/sparse_term_datacell.h"
+#include "vsag/allocator.h"
 
 namespace vsag {
 
@@ -85,7 +86,9 @@ public:
     Deserialize(StreamReader& reader) override;
 
     void
-    GetSparseVectorByInnerId(InnerIdType inner_id, SparseVector* data) const override;
+    GetSparseVectorByInnerId(InnerIdType inner_id,
+                             SparseVector* data,
+                             Allocator* specified_allocator) const override;
 
     IndexType
     GetIndexType() const override {
@@ -120,7 +123,11 @@ private:
     DatasetPtr
     search_impl(const SparseTermComputerPtr& computer,
                 const InnerSearchParam& inner_param,
-                Allocator* allocator) const;
+                Allocator* allocator,
+                bool use_term_lists_heap_insert) const;
+
+    std::pair<int64_t, int64_t>
+    get_min_max_window_id(const FilterPtr& filter) const;
 
 private:
     mutable std::shared_mutex global_mutex_;

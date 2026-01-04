@@ -28,6 +28,7 @@
 #include "storage/serialization.h"
 #include "utils/slow_task_timer.h"
 #include "utils/util_functions.h"
+#include "vsag/allocator.h"
 
 namespace vsag {
 
@@ -373,29 +374,38 @@ InnerIndexInterface::FastCreateIndex(const std::string& index_fast_str,
 }
 
 DatasetPtr
-InnerIndexInterface::GetVectorByIds(const int64_t* ids, int64_t count) const {
-    DatasetPtr vectors = Dataset::Make();
+InnerIndexInterface::GetVectorByIds(const int64_t* ids,
+                                    int64_t count,
+                                    Allocator* specified_allocator) const {
+    bool has_specified_allocator = specified_allocator != nullptr;
+    Allocator* allocator = has_specified_allocator ? specified_allocator : allocator_;
 
+    DatasetPtr vectors = Dataset::Make();
     if (GetIndexType() == IndexType::SINDI or GetIndexType() == IndexType::SPARSE) {
-        auto* sparse_vectors = (SparseVector*)allocator_->Allocate(sizeof(SparseVector) * count);
+        auto* sparse_vectors = (SparseVector*)allocator->Allocate(sizeof(SparseVector) * count);
         if (sparse_vectors == nullptr) {
             throw VsagException(ErrorType::NO_ENOUGH_MEMORY,
                                 "failed to allocate memory for vectors");
         }
         std::uninitialized_default_construct_n(sparse_vectors, count);
-        vectors->NumElements(count)->SparseVectors(sparse_vectors)->Owner(true, allocator_);
+        vectors->NumElements(count)
+            ->SparseVectors(sparse_vectors)
+            ->Owner(/*auto release=*/not has_specified_allocator, allocator);
         for (int i = 0; i < count; ++i) {
             InnerIdType inner_id = this->label_table_->GetIdByLabel(ids[i]);
-            this->GetSparseVectorByInnerId(inner_id, sparse_vectors + i);
+            this->GetSparseVectorByInnerId(inner_id, sparse_vectors + i, allocator);
         }
         return vectors;
     }
 
-    auto* float_vectors = (float*)allocator_->Allocate(sizeof(float) * count * dim_);
+    auto* float_vectors = (float*)allocator->Allocate(sizeof(float) * count * dim_);
     if (float_vectors == nullptr) {
         throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "failed to allocate memory for vectors");
     }
-    vectors->NumElements(count)->Dim(dim_)->Float32Vectors(float_vectors)->Owner(true, allocator_);
+    vectors->NumElements(count)
+        ->Dim(dim_)
+        ->Float32Vectors(float_vectors)
+        ->Owner(/*auto release=*/not has_specified_allocator, allocator);
     for (int i = 0; i < count; ++i) {
         InnerIdType inner_id = this->label_table_->GetIdByLabel(ids[i]);
         this->GetVectorByInnerId(inner_id, float_vectors + i * dim_);
@@ -549,6 +559,10 @@ InnerIndexInterface::GetIndexDetailInfos() const {
                        "Label table of current index, label table is a 2D array, "
                        "table[x][0] is label, table[x][1] is inner id",
                        IndexDetailDataType::TYPE_2DArray_INT64);
+
+    infos.emplace_back(INDEX_DETAIL_DATA_TYPE,
+                       "Data type of current index (e.g., float32, int8, sparse...)",
+                       IndexDetailDataType::TYPE_SCALAR_STRING);
     return infos;
 }
 
@@ -663,6 +677,8 @@ InnerIndexInterface::get_detail_data_by_info(const IndexDetailInfo& info) const 
             label_tables.emplace_back(std::vector<int64_t>{key, value});
         }
         data->SetData2DArrayInt64(label_tables);
+    } else if (name == INDEX_DETAIL_DATA_TYPE) {
+        data->SetDataScalarString(ToString(data_type_));
     }
     return data;
 }

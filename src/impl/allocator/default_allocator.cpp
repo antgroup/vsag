@@ -23,7 +23,9 @@ namespace vsag {
 #ifndef NDEBUG
 DefaultAllocator::~DefaultAllocator() {
     if (not allocated_ptrs_.empty()) {
-        logger::error(fmt::format("There is a memory leak in {}.", DefaultAllocator::Name()));
+        logger::error(fmt::format("There is a memory leak in {}, size: {}",
+                                  DefaultAllocator::Name(),
+                                  allocated_ptrs_.size()));
         abort();
     }
 }

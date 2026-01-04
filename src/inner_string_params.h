@@ -109,6 +109,7 @@ const char* const SPARSE_TERM_ID_LIMIT = "term_id_limit";
 const char* const SPARSE_WINDOW_SIZE = "window_size";
 const char* const SPARSE_DESERIALIZE_WITHOUT_FOOTER = "deserialize_without_footer";
 const char* const SPARSE_DESERIALIZE_WITHOUT_BUFFER = "deserialize_without_buffer";
+const char* const SPARSE_USE_TERM_LISTS_HEAP_INSERT = "use_term_lists_heap_insert";
 
 // graph param value
 const char* const GRAPH_PARAM_MAX_DEGREE_KEY = "max_degree";
@@ -155,6 +156,7 @@ const char* const REMOVE_FLAG_BIT = "remove_flag_bit";
 const char* const HOLD_MOLDS = "hold_molds";
 const char* const SUPPORT_DUPLICATE = "support_duplicate";
 const char* const SUPPORT_TOMBSTONE = "support_tombstone";
+const char* const SUPPORT_AUTOTUNE = "support_autotune";
 
 const char* const DATACELL_OFFSETS = "datacell_offsets";
 const char* const DATACELL_SIZES = "datacell_sizes";

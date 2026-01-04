@@ -23,6 +23,7 @@
 #include "storage/stream_writer.h"
 #include "typing.h"
 #include "utils/pointer_define.h"
+#include "vsag_exception.h"
 
 namespace vsag {
 
@@ -32,7 +33,7 @@ using IdMapFunction = std::function<std::tuple<bool, int64_t>(int64_t)>;
 
 struct DuplicateRecord {
     std::mutex duplicate_mutex;
-    Vector<InnerIdType> duplicate_ids;
+    UnorderedSet<InnerIdType> duplicate_ids;
     DuplicateRecord(Allocator* allocator) : duplicate_ids(allocator) {
     }
 };
@@ -122,18 +123,21 @@ public:
     GetIdByLabel(LabelType label, bool return_even_removed = false) const {
         if (use_reverse_map_ and not return_even_removed) {
             if (this->label_remap_.count(label) == 0) {
-                throw std::runtime_error(fmt::format("label {} does not exist", label));
+                throw VsagException(ErrorType::INTERNAL_ERROR,
+                                    fmt::format("label {} does not exist", label));
             }
             auto id = this->label_remap_.at(label);
             if (id != std::numeric_limits<InnerIdType>::max()) {
                 return id;
             } else {
-                throw std::runtime_error(fmt::format("label {} is removed", label));
+                throw VsagException(ErrorType::INTERNAL_ERROR,
+                                    fmt::format("label {} is removed", label));
             }
         }
         auto result = std::find(label_table_.begin(), label_table_.end(), label);
         if (result == label_table_.end()) {
-            throw std::runtime_error(fmt::format("label {} does not exist", label));
+            throw VsagException(ErrorType::INTERNAL_ERROR,
+                                fmt::format("label {} does not exist", label));
         }
         return result - label_table_.begin();
     }
@@ -154,7 +158,8 @@ public:
     UpdateLabel(LabelType old_label, LabelType new_label) {
         // 1. check whether new_label is occupied
         if (CheckLabel(new_label)) {
-            throw std::runtime_error(fmt::format("new label {} has been in HGraph", new_label));
+            throw VsagException(ErrorType::INTERNAL_ERROR,
+                                fmt::format("new label {} has been in Index", new_label));
         }
 
         // 2. update label_table_
@@ -166,8 +171,9 @@ public:
                 found = true;
             }
         }
-        if (!found) {
-            throw std::runtime_error(fmt::format("old label {} does not exist", old_label));
+        if (not found) {
+            throw VsagException(ErrorType::INTERNAL_ERROR,
+                                fmt::format("old label {} does not exist", old_label));
         }
 
         // 3. update label_remap_
@@ -183,7 +189,8 @@ public:
     inline LabelType
     GetLabelById(InnerIdType inner_id) const {
         if (inner_id >= label_table_.size()) {
-            throw std::runtime_error(
+            throw VsagException(
+                ErrorType::INTERNAL_ERROR,
                 fmt::format("id is too large {} >= {}", inner_id, label_table_.size()));
         }
         return this->label_table_[inner_id];
@@ -202,7 +209,11 @@ public:
             for (InnerIdType i = 0; i < label_table_.size(); ++i) {
                 if (duplicate_records_[i] != nullptr) {
                     StreamWriter::WriteObj(writer, i);
-                    StreamWriter::WriteVector(writer, duplicate_records_[i]->duplicate_ids);
+                    Vector<InnerIdType> id_list(allocator_);
+                    for (const auto& duplicate_id : duplicate_records_[i]->duplicate_ids) {
+                        id_list.push_back(duplicate_id);
+                    }
+                    StreamWriter::WriteVector(writer, id_list);
                 }
             }
         }
@@ -226,7 +237,11 @@ public:
                 InnerIdType id;
                 StreamReader::ReadObj<InnerIdType>(reader, id);
                 duplicate_records_[id] = allocator_->New<DuplicateRecord>(allocator_);
-                StreamReader::ReadVector(reader, duplicate_records_[id]->duplicate_ids);
+                Vector<InnerIdType> id_list(allocator_);
+                StreamReader::ReadVector(reader, id_list);
+                for (const auto& duplicate_id : id_list) {
+                    duplicate_records_[id]->duplicate_ids.insert(duplicate_id);
+                }
             }
         }
         if (support_tombstone_) {
@@ -264,13 +279,13 @@ public:
             duplicate_count_++;
         }
         std::lock_guard lock(duplicate_records_[previous_id]->duplicate_mutex);
-        duplicate_records_[previous_id]->duplicate_ids.push_back(current_id);
+        duplicate_records_[previous_id]->duplicate_ids.insert(current_id);
     }
 
-    const Vector<InnerIdType>
+    const UnorderedSet<InnerIdType>
     GetDuplicateId(InnerIdType id) const {
         if (duplicate_records_[id] == nullptr) {
-            return Vector<InnerIdType>(allocator_);
+            return UnorderedSet<InnerIdType>(allocator_);
         }
         std::lock_guard lock(duplicate_records_[id]->duplicate_mutex);
         return duplicate_records_[id]->duplicate_ids;

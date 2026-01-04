@@ -19,6 +19,7 @@
 #include "fixtures/test_logger.h"
 #include "fixtures/test_reader.h"
 #include "fixtures/thread_pool.h"
+#include "impl/allocator/default_allocator.h"
 #include "index/hnsw.h"
 #include "simd/fp32_simd.h"
 #include "vsag/engine.h"
@@ -900,7 +901,8 @@ TestIndex::TestSerializeFile(const IndexPtr& index_from,
         REQUIRE(res_from.has_value());
         REQUIRE(res_to.has_value());
         REQUIRE(res_from.value()->GetDim() == res_to.value()->GetDim());
-        for (auto j = 0; j < topk; ++j) {
+        int64_t result_count = res_from.value()->GetDim();
+        for (int64_t j = 0; j < result_count; ++j) {
             REQUIRE(res_to.value()->GetIds()[j] == res_from.value()->GetIds()[j]);
         }
     }
@@ -986,7 +988,8 @@ TestIndex::TestSerializeBinarySet(const IndexPtr& index_from,
         REQUIRE(res_from.has_value());
         REQUIRE(res_to.has_value());
         REQUIRE(res_from.value()->GetDim() == res_to.value()->GetDim());
-        for (auto j = 0; j < topk; ++j) {
+        int64_t result_count = res_from.value()->GetDim();
+        for (int64_t j = 0; j < result_count; ++j) {
             REQUIRE(res_to.value()->GetIds()[j] == res_from.value()->GetIds()[j]);
         }
     }
@@ -1028,7 +1031,8 @@ TestIndex::TestSerializeReaderSet(const IndexPtr& index_from,
         REQUIRE(res_from.has_value());
         REQUIRE(res_to.has_value());
         REQUIRE(res_from.value()->GetDim() == res_to.value()->GetDim());
-        for (auto j = 0; j < topk; ++j) {
+        int64_t result_count = res_from.value()->GetDim();
+        for (int64_t j = 0; j < result_count; ++j) {
             REQUIRE(res_to.value()->GetIds()[j] == res_from.value()->GetIds()[j]);
         }
     }
@@ -1074,7 +1078,8 @@ TestIndex::TestSerializeWriteFunc(const IndexPtr& index_from,
         REQUIRE(res_from.has_value());
         REQUIRE(res_to.has_value());
         REQUIRE(res_from.value()->GetDim() == res_to.value()->GetDim());
-        for (auto j = 0; j < topk; ++j) {
+        int64_t result_count = res_from.value()->GetDim();
+        for (int64_t j = 0; j < result_count; ++j) {
             REQUIRE(res_to.value()->GetIds()[j] == res_from.value()->GetIds()[j]);
         }
     }
@@ -1763,7 +1768,8 @@ TestIndex::TestClone(const TestIndex::IndexPtr& index,
         REQUIRE(res_from.has_value());
         REQUIRE(res_to.has_value());
         REQUIRE(res_from.value()->GetDim() == res_to.value()->GetDim());
-        for (auto j = 0; j < topk; ++j) {
+        int64_t result_count = res_from.value()->GetDim();
+        for (int64_t j = 0; j < result_count; ++j) {
             REQUIRE(res_to.value()->GetIds()[j] == res_from.value()->GetIds()[j]);
         }
     }
@@ -1850,6 +1856,7 @@ TestIndex::TestRemoveIndex(const TestIndex::IndexPtr& index,
             ->Owner(false);
         auto add_results = index->Add(new_data);
         REQUIRE(add_results.has_value());
+
         auto remove_results = index->Remove(i + base_num);
         REQUIRE(index->GetNumberRemoved() == i + 1);
         REQUIRE(remove_results.has_value());
@@ -2235,48 +2242,83 @@ TestIndex::TestGetRawVectorByIds(const IndexPtr& index,
         return;
     }
 
-    int64_t non_exist_id = -9999999;
-    auto failed_res = index->GetRawVectorByIds(&non_exist_id, 1);
-    REQUIRE(not failed_res.has_value());
+    // get with not existed id
+    {
+        int64_t non_exist_id = -9999999;
+        auto failed_res = index->GetRawVectorByIds(&non_exist_id, 1);
+        REQUIRE(not failed_res.has_value());
+    }
 
-    int64_t count = dataset->count_;
-    auto vectors = index->GetRawVectorByIds(dataset->base_->GetIds(), count);
-    REQUIRE(vectors.has_value());
-    if (index->GetIndexType() == vsag::IndexType::SINDI or
-        index->GetIndexType() == vsag::IndexType::SPARSE) {
-        for (int i = 0; i < count; i++) {
-            // get single data
-            auto single_dataset = vsag::Dataset::Make();
-            auto sparse_vectors = vectors.value()->GetSparseVectors() + i;
-            single_dataset->SparseVectors(sparse_vectors)->NumElements(1)->Owner(false);
+    auto count = static_cast<int64_t>(dataset->count_);
+    vsag::IndexDetailInfo info;
+    auto data_type = index->GetDetailDataByName("data_type", info).value()->GetDataScalarString();
+
+    for (bool use_specific_allocator : {true, false}) {
+        // specific_allocator
+        vsag::DefaultAllocator allocator;
+        void* mem = nullptr;
+
+        // common case
+        auto vectors = index->GetRawVectorByIds(dataset->base_->GetIds(), count);
+        REQUIRE(vectors.has_value());
+
+        if (use_specific_allocator) {
+            vectors = index->GetRawVectorByIds(dataset->base_->GetIds(), count, &allocator);
+            // create a delegate task (via Dataset Owner mechanism) to check and release the memory which allocated from the external allocator.
+            vectors.value()->Owner(true, &allocator);
+        }
+
+        if (data_type == vsag::DATATYPE_SPARSE) {
+            mem = (void*)vectors.value()->GetSparseVectors();
+            for (int i = 0; i < count; i++) {
+                // get single data
+                auto single_dataset = vsag::Dataset::Make();
+                auto sparse_vectors = vectors.value()->GetSparseVectors() + i;
+                single_dataset->SparseVectors(sparse_vectors)->NumElements(1)->Owner(false);
+                if (not expected_success) {
+                    return;
+                }
+
+                // self distance
+                auto dists_res =
+                    index->CalDistanceById(single_dataset, dataset->base_->GetIds() + i, 1);
+                REQUIRE(dists_res.has_value());
+                auto dist = dists_res.value()->GetDistances()[0];
+
+                // ground truth distance
+                float gt_dist = 0;
+                for (int j = 0; j < sparse_vectors->len_; j++) {
+                    gt_dist += sparse_vectors->vals_[j] * sparse_vectors->vals_[j];
+                }
+                gt_dist = 1 - gt_dist;
+                REQUIRE(std::abs(gt_dist - dist) < 1e-3);
+            }
+        } else if (data_type == vsag::DATATYPE_FLOAT32) {
+            auto float_vectors = vectors.value()->GetFloat32Vectors();
+            mem = (void*)float_vectors;
+            auto dim = dataset->base_->GetDim();
             if (not expected_success) {
                 return;
             }
-
-            // self distance
-            auto dists_res =
-                index->CalDistanceById(single_dataset, dataset->base_->GetIds() + i, 1);
-            REQUIRE(dists_res.has_value());
-            auto dist = dists_res.value()->GetDistances()[0];
-
-            // ground truth distance
-            float gt_dist = 0;
-            for (int j = 0; j < sparse_vectors->len_; j++) {
-                gt_dist += sparse_vectors->vals_[j] * sparse_vectors->vals_[j];
+            for (int i = 0; i < count; ++i) {
+                REQUIRE(std::memcmp(float_vectors + i * dim,
+                                    dataset->base_->GetFloat32Vectors() + i * dim,
+                                    dim * sizeof(float)) == 0);
             }
-            gt_dist = 1 - gt_dist;
-            REQUIRE(std::abs(gt_dist - dist) < 1e-3);
-        }
-    } else {
-        auto float_vectors = vectors.value()->GetFloat32Vectors();
-        auto dim = dataset->base_->GetDim();
-        if (not expected_success) {
-            return;
-        }
-        for (int i = 0; i < count; ++i) {
-            REQUIRE(std::memcmp(float_vectors + i * dim,
-                                dataset->base_->GetFloat32Vectors() + i * dim,
-                                dim * sizeof(float)) == 0);
+        } else if (data_type == vsag::DATATYPE_INT8) {
+            auto int8_vectors = vectors.value()->GetInt8Vectors();
+            mem = (void*)int8_vectors;
+            auto dim = dataset->base_->GetDim();
+            if (not expected_success) {
+                return;
+            }
+            for (int i = 0; i < count; ++i) {
+                REQUIRE(std::memcmp(int8_vectors + i * dim,
+                                    dataset->base_->GetInt8Vectors() + i * dim,
+                                    dim) == 0);
+            }
+        } else {
+            throw std::invalid_argument("Invalid data type: " + data_type);
         }
     }
 }
@@ -2295,6 +2337,8 @@ TestIndex::TestBuildDuplicateIndex(const IndexPtr& index,
             new_data->NumElements(1)
                 ->Dim(dataset->base_->GetDim())
                 ->Ids(&i)
+                ->SparseVectors(dataset->base_->GetSparseVectors())
+                ->Paths(dataset->base_->GetPaths())
                 ->Float32Vectors(dataset->base_->GetFloat32Vectors())
                 ->Owner(false);
             auto add_result = index->Add(new_data);
@@ -2307,6 +2351,8 @@ TestIndex::TestBuildDuplicateIndex(const IndexPtr& index,
             new_data->NumElements(1)
                 ->Dim(dataset->base_->GetDim())
                 ->Ids(&i)
+                ->SparseVectors(dataset->base_->GetSparseVectors())
+                ->Paths(dataset->base_->GetPaths())
                 ->Float32Vectors(dataset->base_->GetFloat32Vectors())
                 ->Owner(false);
             auto add_result = index->Add(new_data);

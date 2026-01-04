@@ -50,6 +50,7 @@ extern const char* const METRIC_L2;
 extern const char* const METRIC_COSINE;
 extern const char* const METRIC_IP;
 extern const char* const DATATYPE_FLOAT32;
+extern const char* const DATATYPE_FLOAT16;
 extern const char* const DATATYPE_INT8;
 extern const char* const DATATYPE_SPARSE;
 extern const char* const BLANK_INDEX;
@@ -100,6 +101,7 @@ extern const char* const HNSW_PARAMETER_SKIP_RATIO;
 
 extern const char* const INDEX_PARAM;
 
+extern const char* const PYRAMID_SUPPORT_DUPLICATE;
 extern const char* const PYRAMID_EF_CONSTRUCTION;
 extern const char* const PYRAMID_USE_REORDER;
 extern const char* const PYRAMID_BASE_QUANTIZATION_TYPE;

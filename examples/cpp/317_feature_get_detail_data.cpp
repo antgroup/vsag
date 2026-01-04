@@ -26,6 +26,8 @@ transform_type(vsag::IndexDetailDataType type) {
             return "scalar_double";
         case vsag::IndexDetailDataType::TYPE_SCALAR_BOOL:
             return "scalar_bool";
+        case vsag::IndexDetailDataType::TYPE_SCALAR_STRING:
+            return "scalar_string";
         case vsag::IndexDetailDataType::TYPE_1DArray_INT64:
             return "1d_array_int64";
         case vsag::IndexDetailDataType::TYPE_2DArray_INT64:
@@ -144,6 +146,17 @@ main(int argc, char** argv) {
         std::cout << "label_table(type): " << transform_type(info.type) << std::endl;
         std::cout << "label_table(value)[:10]: "
                   << trans_2d_array_int64(detail_datas.value()->GetData2DArrayInt64(), 10, 2)
+                  << std::endl;
+    } else {
+        std::cerr << "Failed to get index detail datas: " << detail_datas.error().message
+                  << std::endl;
+        exit(-1);
+    }
+
+    if (auto detail_datas = index->GetDetailDataByName("data_type", info);
+        detail_datas.has_value()) {
+        std::cout << "data_type(type): " << transform_type(info.type) << std::endl;
+        std::cout << "data_type(value): " << detail_datas.value()->GetDataScalarString()
                   << std::endl;
     } else {
         std::cerr << "Failed to get index detail datas: " << detail_datas.error().message

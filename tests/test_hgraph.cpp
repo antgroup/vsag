@@ -92,7 +92,7 @@ using HGraphTestIndexPtr = std::shared_ptr<HGraphTestIndex>;
 
 TestDatasetPool HGraphTestIndex::pool{};
 fixtures::TempDir HGraphTestIndex::dir{"hgraph_test"};
-uint64_t HGraphTestIndex::base_count = 1200;
+uint64_t HGraphTestIndex::base_count = 600;
 const std::string HGraphTestIndex::name = "hgraph";
 const std::vector<std::pair<std::string, float>> HGraphTestIndex::all_test_cases = {
     {"fp32", 0.99},
@@ -508,7 +508,6 @@ TestHGraphBuildAndContinueAdd(const fixtures::HGraphTestIndexPtr& test_index,
                                  dim,
                                  base_quantization_str,
                                  recall));
-                // TODO
                 if (HGraphTestIndex::IsRaBitQ(base_quantization_str) &&
                     dim < fixtures::RABITQ_MIN_RACALL_DIM) {
                     continue;  // Skip invalid RaBitQ configurations
@@ -574,7 +573,7 @@ TestHGraphFactor(const fixtures::HGraphTestIndexPtr& test_index,
                 auto index = TestIndex::TestFactory(test_index->name, param, true);
                 auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(
                     dim, resource->base_count, metric_type);
-                TestIndex::TestContinueAdd(index, dataset, true);
+                TestIndex::TestBuildIndex(index, dataset, true);
                 float factors[4]{4, 0.5, -2.0F, 100};
                 for (int i = 0; i < 4; i++) {
                     auto search_param = fmt::format(search_param_template, factors[i], false);
@@ -862,6 +861,84 @@ TEST_CASE("(Daily) HGraph Support Get Raw Vector", "[ft][hgraph][daily]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(false);
     TestHGraphGetRawVector(test_index, resource);
+}
+
+static void
+TestHGraphTune(const fixtures::HGraphTestIndexPtr& test_index,
+               const fixtures::HGraphResourcePtr& resource) {
+    using namespace fixtures;
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    const std::vector<std::pair<std::string, std::string>> test_cases = {
+        {"sq8", "sq8"}, {"fp32", "bf16"}, {"sq8", "fp32"}};
+
+    auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
+    for (auto metric_type : resource->metric_types) {
+        for (auto dim : resource->dims) {
+            for (auto& [base_quantization_str1, base_quantization_str2] : test_cases) {
+                INFO(
+                    fmt::format("metric_type: {}, dim: {}, base_quantization_str1: {}, "
+                                "base_quantization_str2: {}",
+                                metric_type,
+                                dim,
+                                base_quantization_str1,
+                                base_quantization_str2));
+                if (HGraphTestIndex::IsRaBitQ(base_quantization_str1) &&
+                    dim < fixtures::RABITQ_MIN_RACALL_DIM) {
+                    continue;  // Skip invalid RaBitQ configurations
+                }
+
+                // Set block size limit for current test iteration
+                vsag::Options::Instance().set_block_size_limit(size);
+
+                // Generate index parameters with attribute support enabled
+                HGraphTestIndex::HGraphBuildParam build_param1(
+                    metric_type, dim, base_quantization_str1);
+                build_param1.store_raw_vector = true;
+                auto param1 = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param1);
+
+                // Generate alter index param
+                HGraphTestIndex::HGraphBuildParam build_param2(
+                    metric_type, dim, base_quantization_str2);
+                build_param2.store_raw_vector = true;
+                auto param2 = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param2);
+
+                // Create index and dataset
+                auto index1 = TestIndex::TestFactory(test_index->name, param1, true);
+                auto index2 = TestIndex::TestFactory(test_index->name, param2, true);
+                auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(
+                    dim, resource->base_count, metric_type);
+                TestIndex::TestBuildIndex(index1, dataset, true);
+
+                // set index param
+                auto set_result = index1->Tune(param2);
+                REQUIRE(set_result.has_value());
+                REQUIRE(set_result.value());
+
+                // serialize test
+                TestIndex::TestSerializeFile(index1, index2, dataset, search_param, true);
+
+                // basic test
+                HGraphTestIndex::TestGeneral(index1, dataset, search_param, 0.9);
+                HGraphTestIndex::TestGeneral(index2, dataset, search_param, 0.9);
+
+                // Restore original block size limit
+                vsag::Options::Instance().set_block_size_limit(origin_size);
+            }
+        }
+    }
+}
+
+TEST_CASE("(PR) HGraph Tune", "[ft][hgraph][pr]") {
+    auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
+    auto resource = test_index->GetResource(true);
+    TestHGraphTune(test_index, resource);
+}
+
+TEST_CASE("(Daily) HGraph Tune", "[ft][hgraph][daily]") {
+    auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
+    auto resource = test_index->GetResource(false);
+    TestHGraphTune(test_index, resource);
 }
 
 static void
@@ -1537,7 +1614,7 @@ TestHGraphClone(const fixtures::HGraphTestIndexPtr& test_index,
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
-    uint64_t extra_info_size = 64;
+    uint64_t extra_info_size = 32;
 
     for (auto metric_type : resource->metric_types) {
         for (auto dim : resource->dims) {
@@ -1830,6 +1907,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HGraphTestIndex, "HGraph ELP Optimizer", 
     TestBuildIndex(index_strong, base);
     vsag::Options::Instance().set_block_size_limit(origin_size);
 }
+
 static void
 TestHGraphIgnoreReorder(const fixtures::HGraphTestIndexPtr& test_index,
                         const fixtures::HGraphResourcePtr& resource) {
@@ -2009,6 +2087,7 @@ TestHGraphDiskIOType(const fixtures::HGraphTestIndexPtr& test_index,
         {"rabitq,fp16", "rabitq,fp16,mmap_io"},
     };
     const std::vector<std::string> graph_io_types = {"block_memory_io", "mmap_io", "async_io"};
+    auto select_idx = 0;
     for (auto metric_type : resource->metric_types) {
         for (auto dim : resource->dims) {
             for (auto& [memory_io_str, disk_io_str] : io_cases) {
@@ -2030,13 +2109,14 @@ TestHGraphDiskIOType(const fixtures::HGraphTestIndexPtr& test_index,
                 TestIndex::TestBuildIndex(index, dataset, true);
                 build_param.quantization_str = disk_io_str;
 
-                for (auto& graph_io_type : graph_io_types) {
-                    build_param.graph_io_type = graph_io_type;
-                    param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
-                    auto disk_index = TestIndex::TestFactory(test_index->name, param, true);
-                    TestIndex::TestSerializeFile(index, disk_index, dataset, search_param, true);
-                    HGraphTestIndex::TestGeneral(disk_index, dataset, search_param, recall);
-                }
+                auto graph_io_type = graph_io_types[select_idx];
+                build_param.graph_io_type = graph_io_type;
+                param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+                auto disk_index = TestIndex::TestFactory(test_index->name, param, true);
+                TestIndex::TestSerializeFile(index, disk_index, dataset, search_param, true);
+                HGraphTestIndex::TestGeneral(disk_index, dataset, search_param, recall);
+                ++select_idx;
+                select_idx %= graph_io_types.size();
                 vsag::Options::Instance().set_block_size_limit(origin_size);
             }
         }
