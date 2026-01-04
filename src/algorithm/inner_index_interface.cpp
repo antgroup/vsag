@@ -726,7 +726,7 @@ InnerIndexInterface::cal_distance_by_id(const float* query,
         for (int64_t i = 0; i < count; ++i) {
             try {
                 inner_ids[i] = this->label_table_->GetIdByLabel(ids[i]);
-            } catch (std::runtime_error& e) {
+            } catch (VsagException& e) {
                 logger::debug(fmt::format("failed to find id: {}", ids[i]));
                 invalid_id_loc.push_back(i);
             }
