@@ -63,6 +63,10 @@ PyramidParameters::FromJson(const JsonType& json) {
     if (json.Contains(INDEX_MIN_SIZE)) {
         this->index_min_size = json[INDEX_MIN_SIZE].GetInt();
     }
+
+    if (json.Contains(SUPPORT_DUPLICATE)) {
+        this->support_duplicate = json[SUPPORT_DUPLICATE].GetBool();
+    }
 }
 JsonType
 PyramidParameters::ToJson() const {
@@ -81,6 +85,10 @@ PyramidParameters::ToJson() const {
     json[GRAPH_KEY].SetJson(graph_json);
     json[USE_REORDER_KEY].SetBool(this->use_reorder);
     json[INDEX_MIN_SIZE].SetInt(index_min_size);
+    json[SUPPORT_DUPLICATE].SetBool(support_duplicate);
+    if (this->use_reorder) {
+        json[PRECISE_CODES_KEY].SetJson(precise_codes_param->ToJson());
+    }
     return json;
 }
 
@@ -129,6 +137,12 @@ PyramidParameters::CheckCompatibility(const ParamPtr& other) const {
         return false;
     }
 
+    if (this->support_duplicate != pyramid_param->support_duplicate) {
+        logger::error(
+            "PyramidParameters::CheckCompatibility: support_duplicate are not compatible");
+        return false;
+    }
+
     return true;
 }
 
@@ -147,8 +161,6 @@ PyramidSearchParameters::FromJson(const std::string& json_string) {
         params[INDEX_PYRAMID].Contains(HNSW_PARAMETER_EF_RUNTIME),
         fmt::format("parameters[{}] must contains {}", INDEX_PYRAMID, HNSW_PARAMETER_EF_RUNTIME));
     obj.ef_search = params[INDEX_PYRAMID][HNSW_PARAMETER_EF_RUNTIME].GetInt();
-    CHECK_ARGUMENT((1 <= obj.ef_search) and (obj.ef_search <= 1000),
-                   fmt::format("ef_search({}) must in range[1, 1000]", obj.ef_search));
     return obj;
 }
 }  // namespace vsag
