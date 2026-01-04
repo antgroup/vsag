@@ -172,6 +172,40 @@ TestIndex::TestUpdateId(const IndexPtr& index,
 }
 
 void
+TestIndex::TestUpdateVectorSparse(const IndexPtr& index,
+                                  const TestDatasetPtr& dataset,
+                                  bool expected_success) {
+    if (not index->CheckFeature(vsag::SUPPORT_UPDATE_VECTOR_CONCURRENT)) {
+        return;
+    }
+    auto ids = dataset->base_->GetIds();
+    auto num_vectors = dataset->base_->GetNumElements();
+    auto base = dataset->base_->GetSparseVectors();
+
+    for (int i = 0; i < num_vectors; i++) {
+        auto far_base = vsag::Dataset::Make();
+        auto close_base = vsag::Dataset::Make();
+        close_base->NumElements(1)->SparseVectors(base + i)->Owner(false);
+        far_base->NumElements(1)
+            ->SparseVectors(base + ((i + num_vectors / 2) % num_vectors))
+            ->Owner(false);
+
+        // [step 1] success case with <close> vector
+        auto dist_before = index->CalcDistanceById(close_base, ids[i]).value();
+        auto update_res = index->UpdateVector(ids[i], close_base);
+        auto dist_after = index->CalcDistanceById(close_base, ids[i]).value();
+        REQUIRE(update_res.has_value());
+        REQUIRE(update_res.value());
+        REQUIRE(std::abs(dist_before - dist_after) < 1e-3);
+
+        // [step 2] update with <far> vector
+        auto far_update_res = index->UpdateVector(ids[i], far_base);
+        REQUIRE(far_update_res.has_value());
+        REQUIRE_FALSE(far_update_res.value());
+    }
+}
+
+void
 TestIndex::TestUpdateVector(const IndexPtr& index,
                             const TestDatasetPtr& dataset,
                             const std::string& search_param,
