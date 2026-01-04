@@ -12,7 +12,7 @@ jobs:
     name: Check Compatibility
     runs-on: ubuntu-latest
     concurrency:
-      group: compatibility-${{ github.event.pull_request.number }}
+      group: compatibility-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     container:
       image: vsaglib/vsag:ci-x86
