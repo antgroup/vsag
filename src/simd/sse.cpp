@@ -62,7 +62,7 @@ float
 INT8InnerProduct(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
     auto* pVect1 = (int8_t*)pVect1v;
     auto* pVect2 = (int8_t*)pVect2v;
-    auto qty = *((size_t*)qty_ptr);
+    auto qty = *((uint64_t*)qty_ptr);
     return sse::INT8ComputeIP(pVect1, pVect2, qty);
 }
 

@@ -3,6 +3,14 @@ set(name openblas)
 set(source_dir ${CMAKE_CURRENT_BINARY_DIR}/${name}/source)
 set(install_dir ${CMAKE_CURRENT_BINARY_DIR}/${name}/install)
 
+if (APPLE)
+    set(build_make_args USE_THREAD=0 NO_TESTS=1 USE_LOCKING=1 DYNAMIC_ARCH=1 -j${NUM_BUILDING_JOBS} libs)
+    set(install_make_args DYNAMIC_ARCH=1 NO_TESTS=1 PREFIX=${install_dir} install)
+else()
+    set(build_make_args USE_THREAD=0 USE_LOCKING=1 DYNAMIC_ARCH=1 -j${NUM_BUILDING_JOBS})
+    set(install_make_args DYNAMIC_ARCH=1 PREFIX=${install_dir} install) 
+endif()
+
 ExternalProject_Add(
     ${name}
     URL https://github.com/OpenMathLib/OpenBLAS/releases/download/v0.3.23/OpenBLAS-0.3.23.tar.gz
@@ -22,9 +30,9 @@ ExternalProject_Add(
         OMP_NUM_THREADS=1
         PATH=/usr/lib/ccache:$ENV{PATH}
         LD_LIBRARY_PATH=/opt/alibaba-cloud-compiler/lib64/:$ENV{LD_LIBRARY_PATH}
-        make USE_THREAD=0 USE_LOCKING=1 DYNAMIC_ARCH=1 -j${NUM_BUILDING_JOBS}
+        make ${build_make_args}
     INSTALL_COMMAND
-        make DYNAMIC_ARCH=1 PREFIX=${install_dir} install
+        make ${install_make_args}
     BUILD_IN_SOURCE 1
     LOG_CONFIGURE TRUE
     LOG_BUILD TRUE
@@ -36,7 +44,9 @@ ExternalProject_Add(
 
 include_directories(${install_dir}/include)
 link_directories (${install_dir}/lib)
-link_directories (${install_dir}/lib64)
+if (NOT APPLE)
+    link_directories (${install_dir}/lib64)
+endif()
 
 file(GLOB LIB_DIR_EXIST CHECK_DIRECTORIES LIST_DIRECTORIES true ${install_dir}/lib)
 if(LIB_DIR_EXIST)
@@ -48,12 +58,14 @@ if(LIB_DIR_EXIST)
     endforeach()
 endif()
 
-file(GLOB LIB64_DIR_EXIST CHECK_DIRECTORIES LIST_DIRECTORIES true ${install_dir}/lib64)
-if(LIB64_DIR_EXIST)
-    file(GLOB LIB64_FILES ${install_dir}/lib64/lib*.a)
-    foreach(lib64_file ${LIB64_FILES})
-        install(FILES ${lib64_file}
-                DESTINATION ${CMAKE_INSTALL_PREFIX}/lib
-    )
-    endforeach()
+if (NOT APPLE)
+    file(GLOB LIB64_DIR_EXIST CHECK_DIRECTORIES LIST_DIRECTORIES true ${install_dir}/lib64)
+    if(LIB64_DIR_EXIST)
+        file(GLOB LIB64_FILES ${install_dir}/lib64/lib*.a)
+        foreach(lib64_file ${LIB64_FILES})
+            install(FILES ${lib64_file}
+                    DESTINATION ${CMAKE_INSTALL_PREFIX}/lib
+        )
+        endforeach()
+    endif()
 endif()

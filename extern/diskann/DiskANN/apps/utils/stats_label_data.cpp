@@ -90,8 +90,8 @@ void stats_analysis(const std::string labels_file, std::string univeral_label, u
 
     for (float p = 0; p < 1; p += 0.05)
     {
-        std::cout << "Percentile " << (100 * p) << "\t" << label_count_vec[(size_t)(p * label_count_vec.size())].first
-                  << " with count=" << label_count_vec[(size_t)(p * label_count_vec.size())].second << std::endl;
+        std::cout << "Percentile " << (100 * p) << "\t" << label_count_vec[(uint64_t)(p * label_count_vec.size())].first
+                  << " with count=" << label_count_vec[(uint64_t)(p * label_count_vec.size())].second << std::endl;
     }
 
     std::cout << "Most common label "

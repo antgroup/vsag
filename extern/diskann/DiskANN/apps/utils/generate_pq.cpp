@@ -8,14 +8,14 @@
 #define KMEANS_ITERS_FOR_PQ 15
 
 template <typename T>
-bool generate_pq(const std::string &data_path, const std::string &index_prefix_path, const size_t num_pq_centers,
-                 const size_t num_pq_chunks, const float sampling_rate, const bool opq)
+bool generate_pq(const std::string &data_path, const std::string &index_prefix_path, const uint64_t num_pq_centers,
+                 const uint64_t num_pq_chunks, const float sampling_rate, const bool opq)
 {
     std::string pq_pivots_path = index_prefix_path + "_pq_pivots.bin";
     std::string pq_compressed_vectors_path = index_prefix_path + "_pq_compressed.bin";
 
     // generates random sample and sets it to train_data and updates train_size
-    size_t train_size, train_dim;
+    uint64_t train_size, train_dim;
     float *train_data;
     gen_random_slice<T>(data_path, sampling_rate, train_data, train_size, train_dim);
     std::cout << "For computing pivots, loaded sample data of size " << train_size << std::endl;
@@ -53,8 +53,8 @@ int main(int argc, char **argv)
     {
         const std::string data_path(argv[2]);
         const std::string index_prefix_path(argv[3]);
-        const size_t num_pq_centers = 256;
-        const size_t num_pq_chunks = (size_t)atoi(argv[4]);
+        const uint64_t num_pq_centers = 256;
+        const uint64_t num_pq_chunks = (uint64_t)atoi(argv[4]);
         const float sampling_rate = (float)atof(argv[5]);
         const bool opq = atoi(argv[6]) == 0 ? false : true;
 

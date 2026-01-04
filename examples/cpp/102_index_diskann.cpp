@@ -121,7 +121,7 @@ main(int argc, char** argv) {
     }
 
     /******************* Serialize and Clean Index *****************/
-    std::unordered_map<std::string, size_t> meta_info;
+    std::unordered_map<std::string, uint64_t> meta_info;
     {
         if (auto bs = index->Serialize(); bs.has_value()) {
             index = nullptr;

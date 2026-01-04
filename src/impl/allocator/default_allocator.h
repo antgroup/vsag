@@ -35,13 +35,13 @@ public:
     Name() override;
 
     void*
-    Allocate(size_t size) override;
+    Allocate(uint64_t size) override;
 
     void
     Deallocate(void* p) override;
 
     void*
-    Reallocate(void* p, size_t size) override;
+    Reallocate(void* p, uint64_t size) override;
 
 private:
 #ifndef NDEBUG

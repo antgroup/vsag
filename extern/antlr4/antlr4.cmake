@@ -42,7 +42,9 @@ ExternalProject_Add(
 
 include_directories(${install_dir}/include/antlr4-runtime)
 link_directories(${install_dir}/lib)
-link_directories(${install_dir}/lib64)
+if (NOT APPLE)
+    link_directories(${install_dir}/lib64)
+endif()
 
 include_directories(extern/antlr4/fc)
 file(GLOB ANTLR4_GEN_SRC "extern/antlr4/fc/*.cpp")

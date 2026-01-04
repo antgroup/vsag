@@ -76,7 +76,7 @@ TransformQuantizerParameter::SplitString(const std::string& input, char delimite
 std::string
 TransformQuantizerParameter::MergeStrings(const std::vector<std::string>& vec, char delimiter) {
     std::ostringstream oss;
-    for (size_t i = 0; i < vec.size(); ++i) {
+    for (uint64_t i = 0; i < vec.size(); ++i) {
         oss << vec[i];
         if (i != vec.size() - 1) {
             oss << delimiter;

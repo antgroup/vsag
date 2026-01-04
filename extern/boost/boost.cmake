@@ -5,6 +5,11 @@ cmake_policy(SET CMP0114 NEW)
 set(name boost)
 set(source_dir ${CMAKE_CURRENT_BINARY_DIR}/${name}/source)
 set(install_dir ${CMAKE_CURRENT_BINARY_DIR}/${name}/install)
+if(APPLE)
+    set(BOOST_TOOLSET "clang")
+else()
+    set(BOOST_TOOLSET "gcc")
+endif()
 get_filename_component(compiler_path ${CMAKE_CXX_COMPILER} DIRECTORY)
 ExternalProject_Add(
     ${name}
@@ -39,6 +44,7 @@ ExternalProject_Add(
             runtime-link=static
             link=static
             variant=release
+            toolset=${BOOST_TOOLSET}
     BUILD_IN_SOURCE 1
     INSTALL_COMMAND ""
     LOG_CONFIGURE TRUE
