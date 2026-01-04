@@ -338,4 +338,3 @@ TEST_CASE("SINDI Quantization Test", "[ut][SINDI]") {
         delete[] item.ids_;
     }
 }
-
