@@ -103,6 +103,7 @@ public:
           max_degree_(pyramid_param->max_degree),
           index_min_size_(pyramid_param->index_min_size),
           graph_type_(pyramid_param->graph_type) {
+        label_table_->compress_duplicate_data_ = pyramid_param->support_duplicate;
         base_codes_ = FlattenInterface::MakeInstance(pyramid_param->base_codes_param, common_param);
         root_ =
             std::make_shared<IndexNode>(allocator_, pyramid_param->graph_param, index_min_size_);

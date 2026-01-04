@@ -33,7 +33,7 @@ using IdMapFunction = std::function<std::tuple<bool, int64_t>(int64_t)>;
 
 struct DuplicateRecord {
     std::mutex duplicate_mutex;
-    Vector<InnerIdType> duplicate_ids;
+    UnorderedSet<InnerIdType> duplicate_ids;
     DuplicateRecord(Allocator* allocator) : duplicate_ids(allocator) {
     }
 };
@@ -209,7 +209,11 @@ public:
             for (InnerIdType i = 0; i < label_table_.size(); ++i) {
                 if (duplicate_records_[i] != nullptr) {
                     StreamWriter::WriteObj(writer, i);
-                    StreamWriter::WriteVector(writer, duplicate_records_[i]->duplicate_ids);
+                    Vector<InnerIdType> id_list(allocator_);
+                    for (const auto& duplicate_id : duplicate_records_[i]->duplicate_ids) {
+                        id_list.push_back(duplicate_id);
+                    }
+                    StreamWriter::WriteVector(writer, id_list);
                 }
             }
         }
@@ -233,7 +237,11 @@ public:
                 InnerIdType id;
                 StreamReader::ReadObj<InnerIdType>(reader, id);
                 duplicate_records_[id] = allocator_->New<DuplicateRecord>(allocator_);
-                StreamReader::ReadVector(reader, duplicate_records_[id]->duplicate_ids);
+                Vector<InnerIdType> id_list(allocator_);
+                StreamReader::ReadVector(reader, id_list);
+                for (const auto& duplicate_id : id_list) {
+                    duplicate_records_[id]->duplicate_ids.insert(duplicate_id);
+                }
             }
         }
         if (support_tombstone_) {
@@ -271,13 +279,13 @@ public:
             duplicate_count_++;
         }
         std::lock_guard lock(duplicate_records_[previous_id]->duplicate_mutex);
-        duplicate_records_[previous_id]->duplicate_ids.push_back(current_id);
+        duplicate_records_[previous_id]->duplicate_ids.insert(current_id);
     }
 
-    const Vector<InnerIdType>
+    const UnorderedSet<InnerIdType>
     GetDuplicateId(InnerIdType id) const {
         if (duplicate_records_[id] == nullptr) {
-            return Vector<InnerIdType>(allocator_);
+            return UnorderedSet<InnerIdType>(allocator_);
         }
         std::lock_guard lock(duplicate_records_[id]->duplicate_mutex);
         return duplicate_records_[id]->duplicate_ids;
