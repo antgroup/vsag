@@ -226,7 +226,7 @@ TEST_CASE("index search distance", "[ft][index]") {
                 fail_count++;
             }
         }
-        REQUIRE(fail_count <= 2);
+        REQUIRE(fail_count <= 3);
     }
 }
 

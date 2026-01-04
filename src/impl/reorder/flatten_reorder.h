@@ -33,7 +33,8 @@ public:
     Reorder(const DistHeapPtr& input,
             const float* query,
             int64_t topk,
-            Allocator* allocator = nullptr) override;
+            Allocator* allocator = nullptr,
+            IteratorFilterContext* iter_ctx = nullptr) override;
 
 private:
     const FlattenInterfacePtr flatten_;

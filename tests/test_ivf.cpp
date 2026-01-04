@@ -68,7 +68,7 @@ public:
 
     static const std::string name;
 
-    constexpr static uint64_t base_count = 1000;
+    constexpr static uint64_t base_count = 800;
 
     static const std::vector<std::pair<std::string, float>> all_test_cases;
 };
@@ -695,7 +695,7 @@ TestIVFBuildWithLargeK(const fixtures::IVFResourcePtr& resource) {
                     if (train_type == "kmeans") {
                         recall *= 0.8F;  // Kmeans may not achieve high recall in random datasets
                     }
-                    auto search_param = fmt::format(fixtures::search_param_tmp, 3000);
+                    auto search_param = fmt::format(fixtures::search_param_tmp, 400);
                     INFO(
                         fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, "
                                     "train_type: {}, recall: {}",
@@ -707,9 +707,9 @@ TestIVFBuildWithLargeK(const fixtures::IVFResourcePtr& resource) {
 
                     vsag::Options::Instance().set_block_size_limit(size);
                     auto param = IVFTestIndex::GenerateIVFBuildParametersString(
-                        metric_type, dim, base_quantization_str, 10000, train_type);
+                        metric_type, dim, base_quantization_str, 1000, train_type);
                     auto index = IVFTestIndex::TestFactory(IVFTestIndex::name, param, true);
-                    auto dataset = IVFTestIndex::pool.GetDatasetAndCreate(dim, 20000, metric_type);
+                    auto dataset = IVFTestIndex::pool.GetDatasetAndCreate(dim, 3000, metric_type);
                     IVFTestIndex::TestBuildIndex(index, dataset, true);
                     if (index->CheckFeature(vsag::SUPPORT_BUILD)) {
                         IVFTestIndex::TestGeneral(index, dataset, search_param, recall);

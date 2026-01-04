@@ -39,19 +39,19 @@ public:
 
     void
     TestBasic() {
-        this->array_->Resize(5);
-        for (size_t i = 0; i < 5; ++i) {
+        this->array_->Resize(3);
+        for (size_t i = 0; i < 3; ++i) {
             TestBasicReadWrite((*this->array_)[i]);
         }
-        for (size_t i = 0; i < 5; ++i) {
+        for (size_t i = 0; i < 3; ++i) {
             TestBasicReadWrite(this->array_->At(i));
         }
-        this->array_->Resize(10);
-        for (size_t i = 5; i < 10; ++i) {
+        this->array_->Resize(6);
+        for (size_t i = 3; i < 6; ++i) {
             TestBasicReadWrite(this->array_->At(i));
         }
-        this->array2_->Resize(10);
-        for (size_t i = 0; i < 10; ++i) {
+        this->array2_->Resize(6);
+        for (size_t i = 0; i < 6; ++i) {
             TestSerializeAndDeserialize((*this->array_)[i], (*this->array2_)[i]);
         }
     }

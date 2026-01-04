@@ -301,7 +301,8 @@ private:
     reorder(const void* query,
             const FlattenInterfacePtr& flatten,
             DistHeapPtr& candidate_heap,
-            int64_t k) const;
+            int64_t k,
+            IteratorFilterContext* iter_ctx = nullptr) const;
 
     void
     elp_optimize();
