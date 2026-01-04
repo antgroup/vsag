@@ -28,7 +28,7 @@ jobs:
           "generic;-DDISABLE_SSE_FORCE=1",
         ]
     concurrency:
-      group: build-${{ matrix.simd_option }}-${{ github.event.pull_request.number }}
+      group: build-${{ matrix.simd_option }}-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
       - name: Free Disk Space
@@ -73,7 +73,7 @@ jobs:
           generic
         ]
     concurrency:
-      group: test-${{ matrix.simd_key }}-${{ matrix.test_type }}-${{ github.event.pull_request.number }}
+      group: test-${{ matrix.simd_key }}-${{ matrix.test_type }}-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     container:
       image: vsaglib/vsag:ci-x86
