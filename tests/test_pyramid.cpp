@@ -27,6 +27,7 @@ struct PyramidParam {
     std::string precise_quantization_type = "fp32";
     std::string graph_type = "nsw";
     bool use_reorder = false;
+    bool support_duplicate = false;
 };
 
 namespace fixtures {
@@ -38,7 +39,9 @@ public:
                                          const PyramidParam& param);
 
     static std::string
-    GeneratePyramidSearchParametersString(int64_t ef_search, double timeout_ms = 100);
+    GeneratePyramidSearchParametersString(
+        int64_t ef_search,
+        double timeout_ms = static_cast<double>(std::numeric_limits<uint32_t>::max()));
 
     static TestDatasetPool pool;
 
@@ -79,7 +82,8 @@ PyramidTestIndex::GeneratePyramidBuildParametersString(const std::string& metric
             "base_quantization_type": "{}",
             "precise_quantization_type": "{}",
             "use_reorder": {},
-            "index_min_size": 28
+            "index_min_size": 28,
+            "support_duplicate": {}
         }}
     }}
     )";
@@ -90,7 +94,8 @@ PyramidTestIndex::GeneratePyramidBuildParametersString(const std::string& metric
                                             param.graph_type,
                                             param.base_quantization_type,
                                             param.precise_quantization_type,
-                                            param.use_reorder);
+                                            param.use_reorder,
+                                            param.support_duplicate);
     return build_parameters_str;
 }
 
@@ -332,5 +337,54 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex, "Pyramid OverTime Test"
         REQUIRE(stats.size() == 1);
         bool is_timeout = stats[0] == "true";
         REQUIRE(is_timeout);
+    }
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
+                             "Pyramid Duplicate Test",
+                             "[ft][pyramid][concurrent]") {
+    using namespace fixtures;
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto metric_type = GENERATE("l2", "cosine");
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto name = "pyramid";
+    auto duplicate_pos = GENERATE("prefix", "suffix", "middle");
+    auto search_param = GeneratePyramidSearchParametersString(100);
+    std::unordered_map<std::string, float> ratios{
+        {"prefix", 0.9}, {"suffix", 0.9}, {"middle", 1.0}};
+    auto recall = 0.98F;
+    PyramidParam pyramid_param;
+    pyramid_param.support_duplicate = true;
+    for (auto& dim : dims) {
+        vsag::Options::Instance().set_block_size_limit(size);
+        auto param = GeneratePyramidBuildParametersString(metric_type, dim, pyramid_param);
+        auto index = TestFactory(name, param, true);
+        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type, /*with_path=*/true);
+        TestIndex::TestBuildDuplicateIndex(index, dataset, duplicate_pos, true);
+        TestIndex::TestKnnSearch(index, dataset, search_param, recall, true);
+        TestIndex::TestConcurrentKnnSearch(index, dataset, search_param, recall, true);
+        TestIndex::TestRangeSearch(index, dataset, search_param, recall, 10, true);
+        TestIndex::TestRangeSearch(index, dataset, search_param, recall / 2.0, 5, true);
+        TestIndex::TestFilterSearch(index, dataset, search_param, recall, true, true);
+        auto index2 = TestIndex::TestFactory(name, param, true);
+        TestIndex::TestSerializeFile(index, index2, dataset, search_param, true);
+
+        // query duplicate data
+        if (duplicate_pos != std::string("middle")) {
+            auto duplicate_data = vsag::Dataset::Make();
+            duplicate_data->NumElements(1)
+                ->Dim(dataset->base_->GetDim())
+                ->SparseVectors(dataset->base_->GetSparseVectors())
+                ->Paths(dataset->base_->GetPaths())
+                ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+                ->Owner(false);
+            auto result = index->KnnSearch(duplicate_data, 10, search_param).value();
+            REQUIRE(result->GetDim() == 10);
+            for (size_t i = 0; i < result->GetDim(); ++i) {
+                auto distance = result->GetDistances()[i];
+                REQUIRE(std::abs(distance) <= 2e-6);
+            }
+        }
+        vsag::Options::Instance().set_block_size_limit(origin_size);
     }
 }

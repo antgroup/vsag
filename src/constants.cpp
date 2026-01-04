@@ -188,6 +188,7 @@ const char* const IVF_BASE_IO_TYPE = "base_io_type";
 const char* const IVF_BASE_PQ_DIM = "base_pq_dim";
 const char* const IVF_BASE_FILE_PATH = "base_file_path";
 
+const char* const PYRAMID_SUPPORT_DUPLICATE = SUPPORT_DUPLICATE;
 const char* const PYRAMID_EF_CONSTRUCTION = EF_CONSTRUCTION_KEY;
 const char* const PYRAMID_USE_REORDER = USE_REORDER_KEY;
 const char* const PYRAMID_BASE_QUANTIZATION_TYPE = "base_quantization_type";
