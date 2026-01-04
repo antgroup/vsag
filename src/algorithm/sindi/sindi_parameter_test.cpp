@@ -90,8 +90,7 @@ TEST_CASE("SINDI Index Parameters Test", "[ut][SINDIParameter]") {
 
 TEST_CASE("SINDI Index Parameters Compatibility Test", "[ut][SINDIParameter]") {
     TEST_COMPATIBILITY_CASE("use_reorder compatibility", use_reorder, true, false, false);
-    TEST_COMPATIBILITY_CASE(
-        "use_quantization compatibility", use_quantization, true, false, false);
+    TEST_COMPATIBILITY_CASE("use_quantization compatibility", use_quantization, true, false, false);
     TEST_COMPATIBILITY_CASE("doc_prune_ratio compatibility", doc_prune_ratio, 0.2F, 0.3F, false);
     TEST_COMPATIBILITY_CASE("window_size compatibility", window_size, 33333, 55555, false);
     TEST_COMPATIBILITY_CASE("term_id_limit compatibility", term_id_limit, 10000, 10001, false);

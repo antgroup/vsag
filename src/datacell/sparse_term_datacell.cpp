@@ -40,18 +40,14 @@ SparseTermDataCell::Query(float* global_dists, const SparseTermComputerPtr& comp
                                                computer->term_retain_ratio_);
 
         if (use_quantization_) {
+            computer->ScanForAccumulate(
+                it, term_ids_[term]->data(), term_datas_[term]->data(), term_size, global_dists);
+        } else {
             computer->ScanForAccumulate(it,
                                         term_ids_[term]->data(),
-                                        term_datas_[term]->data(),
+                                        reinterpret_cast<const float*>(term_datas_[term]->data()),
                                         term_size,
                                         global_dists);
-        } else {
-            computer->ScanForAccumulate(
-                it,
-                term_ids_[term]->data(),
-                reinterpret_cast<const float*>(term_datas_[term]->data()),
-                term_size,
-                global_dists);
         }
     }
     computer->ResetTerm();

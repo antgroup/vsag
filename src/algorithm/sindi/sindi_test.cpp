@@ -95,8 +95,7 @@ TEST_CASE("SINDI Basic Test", "[ut][SINDI]") {
         "term_id_limit": 30001
     }})";
 
-    vsag::JsonType param_json =
-        vsag::JsonType::Parse(fmt::format(param_str));
+    vsag::JsonType param_json = vsag::JsonType::Parse(fmt::format(param_str));
     auto index_param = std::make_shared<vsag::SINDIParameter>();
     index_param->FromJson(param_json);
     auto index = std::make_unique<SINDI>(index_param, common_param);
