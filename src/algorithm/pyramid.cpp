@@ -180,13 +180,9 @@ IndexNode::Search(const SearchFunc& search_func,
                   int64_t ef_search) const {
     if (status_ != IndexNode::Status::NO_INDEX) {
         auto self_search_result = search_func(this, vl);
-        while (not self_search_result->Empty()) {
-            auto result = self_search_result->Top();
-            self_search_result->Pop();
-            search_result->Push(result.first, result.second);
-            if (search_result->Size() > ef_search) {
-                search_result->Pop();
-            }
+        search_result->Merge(*self_search_result);
+        while (search_result->Size() > ef_search) {
+            search_result->Pop();
         }
         return;
     }
