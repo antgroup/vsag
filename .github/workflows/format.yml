@@ -1,6 +1,7 @@
 name: Format Check
 
 on:
+  workflow_dispatch:
   push:
     branches: [ "main", "0.*" ]
   pull_request:
