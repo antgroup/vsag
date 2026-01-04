@@ -21,12 +21,13 @@
 #include "utils/lock_strategy.h"
 namespace vsag {
 
+template <EdgeSelectionParam param>
 void
 select_edges_by_heuristic(const DistHeapPtr& edges,
                           uint64_t max_size,
                           const FlattenInterfacePtr& flatten,
                           Allocator* allocator,
-                          float alpha) {
+                          float param_value) {
     if (edges->Size() < max_size) {
         return;
     }
@@ -49,9 +50,21 @@ select_edges_by_heuristic(const DistHeapPtr& edges,
 
         for (const auto& second_pair : return_list) {
             float curdist = flatten->ComputePairVectors(second_pair.second, current_pair.second);
-            if (alpha * curdist < float_query) {
-                good = false;
-                break;
+
+            if constexpr (param == EdgeSelectionParam::ALPHA) {
+                if (param_value * curdist < float_query) {
+                    good = false;
+                    break;
+                }
+            } else {
+                if (curdist < (float_query - 3 * param_value)) {
+                    good = false;
+                    break;
+                }
+                if (float_query <= 3 * param_value) {
+                    good = true;
+                    break;
+                }
             }
         }
         if (good) {
@@ -64,6 +77,7 @@ select_edges_by_heuristic(const DistHeapPtr& edges,
     }
 }
 
+template <EdgeSelectionParam param>
 InnerIdType
 mutually_connect_new_element(InnerIdType cur_c,
                              const DistHeapPtr& top_candidates,
@@ -71,9 +85,11 @@ mutually_connect_new_element(InnerIdType cur_c,
                              const FlattenInterfacePtr& flatten,
                              const MutexArrayPtr& neighbors_mutexes,
                              Allocator* allocator,
-                             float alpha) {
+                             float param_value) {
     const size_t max_size = graph->MaximumDegree();
-    select_edges_by_heuristic(top_candidates, max_size, flatten, allocator, alpha);
+
+    select_edges_by_heuristic<param>(top_candidates, max_size, flatten, allocator, param_value);
+
     if (top_candidates->Size() > max_size) {
         throw VsagException(
             ErrorType::INTERNAL_ERROR,
@@ -123,7 +139,7 @@ mutually_connect_new_element(InnerIdType cur_c,
                                  neighbors[j]);
             }
 
-            select_edges_by_heuristic(candidates, max_size, flatten, allocator, alpha);
+            select_edges_by_heuristic<param>(candidates, max_size, flatten, allocator, param_value);
 
             Vector<InnerIdType> cand_neighbors(allocator);
             while (not candidates->Empty()) {
@@ -135,5 +151,31 @@ mutually_connect_new_element(InnerIdType cur_c,
     }
     return next_closest_entry_point;
 }
+
+template void
+select_edges_by_heuristic<EdgeSelectionParam::ALPHA>(
+    const DistHeapPtr&, uint64_t, const FlattenInterfacePtr&, Allocator*, float);
+
+template void
+select_edges_by_heuristic<EdgeSelectionParam::TAU>(
+    const DistHeapPtr&, uint64_t, const FlattenInterfacePtr&, Allocator*, float);
+
+template InnerIdType
+mutually_connect_new_element<EdgeSelectionParam::ALPHA>(InnerIdType,
+                                                        const DistHeapPtr&,
+                                                        const GraphInterfacePtr&,
+                                                        const FlattenInterfacePtr&,
+                                                        const MutexArrayPtr&,
+                                                        Allocator*,
+                                                        float);
+
+template InnerIdType
+mutually_connect_new_element<EdgeSelectionParam::TAU>(InnerIdType,
+                                                      const DistHeapPtr&,
+                                                      const GraphInterfacePtr&,
+                                                      const FlattenInterfacePtr&,
+                                                      const MutexArrayPtr&,
+                                                      Allocator*,
+                                                      float);
 
 }  // namespace vsag

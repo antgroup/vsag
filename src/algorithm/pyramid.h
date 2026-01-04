@@ -97,6 +97,8 @@ public:
     Pyramid(const PyramidParamPtr& pyramid_param, const IndexCommonParam& common_param)
         : InnerIndexInterface(pyramid_param, common_param),
           alpha_(pyramid_param->alpha),
+          tau_(pyramid_param->tau),
+          select_edge_param(pyramid_param->selectedgeparam),
           no_build_levels_(common_param.allocator_.get()),
           odescent_param_(pyramid_param->odescent_param),
           ef_construction_(pyramid_param->ef_construction),
@@ -223,6 +225,8 @@ private:
     int64_t max_capacity_{0};
     int64_t cur_element_count_{0};
     float alpha_{1.0F};
+    float tau_{0.0F};
+    std::string select_edge_param{"alpha"};
 
     std::shared_mutex resize_mutex_;
     std::mutex cur_element_count_mutex_;

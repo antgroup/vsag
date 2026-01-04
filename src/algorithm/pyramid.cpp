@@ -668,8 +668,13 @@ Pyramid::add_one_point(const std::shared_ptr<IndexNode>& node,
         auto results = searcher_->Search(
             node->graph_, codes, vl, vector, search_param, (LabelTablePtr) nullptr, discard_stats);
         pool_->ReturnOne(vl);
-        mutually_connect_new_element(
-            inner_id, results, node->graph_, codes, points_mutex_, allocator_, alpha_);
+        if (select_edge_param == "alpha") {
+            mutually_connect_new_element<EdgeSelectionParam::ALPHA>(
+                inner_id, results, node->graph_, codes, points_mutex_, allocator_, alpha_);
+        } else {
+            mutually_connect_new_element<EdgeSelectionParam::TAU>(
+                inner_id, results, node->graph_, codes, points_mutex_, allocator_, tau_);
+        }
         if (update_entry_point) {
             node->entry_point_ = inner_id;
         }
