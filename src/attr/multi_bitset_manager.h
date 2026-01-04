@@ -107,10 +107,23 @@ public:
     void
     Deserialize(lvalue_or_rvalue<StreamReader> reader);
 
+    /**
+     * @brief Retrieves the type of ComputableBitset instances managed by this object.
+     * 
+     * @return The type of ComputableBitset instances.
+     */
     ComputableBitsetType
     GetBitsetType() const {
         return this->bitset_type_;
     }
+
+    /**
+     * @brief Retrieves the current memory usage of the MultiBitsetManager.
+     * 
+     * @return The current memory usage in bytes.
+     */
+    int64_t
+    GetCurrentMemoryUsage() const;
 
 private:
     /// A vector containing pointers to ComputableBitset instances.
