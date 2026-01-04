@@ -54,14 +54,12 @@ get_suitable_max_degree(int64_t data_num) {
 
 IndexNode::IndexNode(Allocator* allocator,
                      GraphInterfaceParamPtr graph_param,
-                     uint32_t index_min_size,
-                     const bool& in_build_process)
+                     uint32_t index_min_size)
     : ids_(allocator),
       children_(allocator),
       allocator_(allocator),
       graph_param_(std::move(graph_param)),
-      index_min_size_(index_min_size),
-      in_build_process_(in_build_process) {
+      index_min_size_(index_min_size) {
 }
 
 void
@@ -85,8 +83,7 @@ IndexNode::Build(ODescent& odescent) {
 void
 IndexNode::AddChild(const std::string& key) {
     // AddChild is not thread-safe; ensure thread safety in calls to it.
-    children_[key] =
-        std::make_shared<IndexNode>(allocator_, graph_param_, index_min_size_, in_build_process_);
+    children_[key] = std::make_shared<IndexNode>(allocator_, graph_param_, index_min_size_);
     children_[key]->level_ = level_ + 1;
 }
 
@@ -156,7 +153,7 @@ void
 IndexNode::Init() {
     if (status_ == Status::NO_INDEX) {
         if (ids_.size() >= index_min_size_) {
-            if (in_build_process_ and level_ != 0) {
+            if (ids_.size() != 0 and level_ != 0) {
                 auto new_max_degree = get_suitable_max_degree(static_cast<int64_t>(ids_.size()));
                 if (new_max_degree < graph_param_->max_degree_) {
                     auto new_graph_param = std::make_shared<SparseGraphDatacellParameter>();
@@ -168,6 +165,7 @@ IndexNode::Init() {
             }
             graph_ = std::make_shared<SparseGraphDataCell>(
                 std::dynamic_pointer_cast<SparseGraphDatacellParameter>(graph_param_), allocator_);
+            Vector<InnerIdType>(allocator_).swap(ids_);
             status_ = Status::GRAPH;
         } else {
             status_ = Status::FLAT;
@@ -646,7 +644,6 @@ Pyramid::Build(const DatasetPtr& base) {
     std::vector<int64_t> ret;
     const auto* path = base->GetPaths();
     CHECK_ARGUMENT(path != nullptr, "path is required");
-    in_build_process_ = true;
     int64_t data_num = base->GetNumElements();
     for (int i = 0; i < data_num; ++i) {
         std::string current_path = path[i];
@@ -670,7 +667,6 @@ Pyramid::Build(const DatasetPtr& base) {
     } else {
         ret = this->build_by_odescent(base);
     }
-    in_build_process_ = false;
     return ret;
 }
 
