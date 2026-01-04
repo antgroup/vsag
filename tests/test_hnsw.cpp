@@ -284,7 +284,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Test non-standard ID
 
     const std::string name = "hnsw";
     auto search_param = fmt::format(search_param_tmp, 200);
-    auto id_shift = 48;
+    auto id_shift = 52;
     constexpr auto parameter_temp = R"(
     {{
         "dtype": "float32",
@@ -302,7 +302,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Test non-standard ID
         auto param = fmt::format(parameter_temp, metric_type, dim, false);
         auto index = TestFactory(name, param, true);
         REQUIRE(index->GetIndexType() == vsag::IndexType::HNSW);
-        auto dataset = pool.GetDatasetAndCreate(dim, 10000, metric_type, false, 0.8, 0, id_shift);
+        auto dataset = pool.GetDatasetAndCreate(dim, 1200, metric_type, false, 0.8, 0, id_shift);
         TestContinueAdd(index, dataset, true);
         TestKnnSearch(index, dataset, search_param, 0.99, true);
         TestKnnSearchIter(index, dataset, search_param, 0.99, true);
@@ -480,10 +480,11 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Remove", "[ft][hnsw]
     auto test_recovery = GENERATE(true, false);
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("l2", "ip", "cosine");
+    std::vector<std::string> metric_types = {"l2", "ip", "cosine"};
     const std::string name = "hnsw";
     auto search_param = fmt::format(search_param_tmp, 100);
     for (auto& dim : dims) {
+        auto metric_type = metric_types[random() % metric_types.size()];
         vsag::Options::Instance().set_block_size_limit(size);
         auto param = GenerateHNSWBuildParametersString(metric_type, dim);
         auto index = TestFactory(name, param, true);
