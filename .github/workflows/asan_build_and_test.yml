@@ -16,7 +16,7 @@ jobs:
       volumes:
         - /opt:/useless
     concurrency:
-      group: asan_build_x86-${{ github.event.pull_request.number }}
+      group: asan_build_x86-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
       - name: Free Disk Space
@@ -51,7 +51,7 @@ jobs:
     name: Asan Build Aarch64
     runs-on: ubuntu-22.04-arm
     concurrency:
-      group: asan_build_aarch-${{ github.event.pull_request.number }}
+      group: asan_build_aarch-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
       - name: Free Disk Space
@@ -83,7 +83,7 @@ jobs:
     needs: build_asan_x86
     runs-on: ubuntu-22.04
     concurrency:
-      group: test_asan_x86-${{ matrix.test_type }}-${{ github.event.pull_request.number }}
+      group: test_asan_x86-${{ matrix.test_type }}-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     strategy:
       matrix:
@@ -126,7 +126,7 @@ jobs:
       matrix:
         test_type: [ unittests, functests ]
     concurrency:
-      group: test_asan_aarch64-${{ matrix.test_type }}-${{ github.event.pull_request.number }}
+      group: test_asan_aarch64-${{ matrix.test_type }}-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
       - name: Free Disk Space
