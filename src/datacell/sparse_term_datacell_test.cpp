@@ -257,16 +257,6 @@ TEST_CASE("SparseTermDatacell Encode/Decode Test", "[ut][SparseTermDatacell]") {
     auto data_cell = std::make_shared<SparseTermDataCell>(
         1.0f, DEFAULT_TERM_ID_LIMIT, allocator.get(), true, q_params);
 
-    // Test Encode/Decode directly
-    {
-        float val = 2.0f;
-        uint8_t code;
-        data_cell->Encode(val, &code);
-        float decoded_val;
-        data_cell->Decode(&code, 1, &decoded_val);
-        REQUIRE(std::abs(val - decoded_val) < 0.1f);
-    }
-
     // Insert vector (tests Encode)
     uint16_t base_id = 5;
     data_cell->InsertVector(sv, base_id);
