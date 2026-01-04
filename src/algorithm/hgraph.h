@@ -321,7 +321,11 @@ private:
 
     void
     check_and_init_raw_vector(const FlattenInterfaceParamPtr& raw_vector_param,
-                              const IndexCommonParam& common_param);
+                              const IndexCommonParam& common_param,
+                              bool is_create_new = true);
+
+    void
+    init_resize_bit_and_reorder();
 
     void
     cal_memory_usage();

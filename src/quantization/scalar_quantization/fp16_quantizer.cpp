@@ -44,6 +44,7 @@ FP16Quantizer<metric>::FP16Quantizer(const QuantizerParamPtr& param,
 template <MetricType metric>
 bool
 FP16Quantizer<metric>::TrainImpl(const DataType* data, uint64_t count) {
+    this->is_trained_ = true;
     return data != nullptr;
 }
 

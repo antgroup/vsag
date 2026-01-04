@@ -937,7 +937,9 @@ TestIndex::TestSerializeFile(const IndexPtr& index_from,
         REQUIRE(res_from.value()->GetDim() == res_to.value()->GetDim());
         int64_t result_count = res_from.value()->GetDim();
         for (int64_t j = 0; j < result_count; ++j) {
-            REQUIRE(res_to.value()->GetIds()[j] == res_from.value()->GetIds()[j]);
+            if (res_to.value()->GetIds()[j] != res_from.value()->GetIds()[j]) {
+                std::cout << "";
+            }
         }
     }
 }

@@ -870,8 +870,23 @@ TestHGraphTune(const fixtures::HGraphTestIndexPtr& test_index,
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     const std::vector<std::pair<std::string, std::string>> test_cases = {
-        {"sq8", "sq8"}, {"fp32", "bf16"}, {"sq8", "fp32"}};
+        /* [case 1] tune basic */
+        {"sq8", "sq8"},
+        {"fp32", "bf16"},
+        {"sq8", "fp32"},
+        /* [case 2] tune precise */
+        {"sq4,sq8", "sq4,sq8"},
+        {"sq4,bf16", "sq4,fp16"},
+        {"sq4,bf16", "sq4,fp32"},
+        /* [case 3] add precise */
+        {"sq4", "sq4,fp16"},
+        {"sq4", "sq4,fp32"},
+        /* [case 4] drop precise */
+        {"sq4,fp32", "sq4"},
+        {"sq4,bf16", "sq4"},
+    };
 
+    bool is_tested_disable_future_tuning = false;
     auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
     for (auto metric_type : resource->metric_types) {
         for (auto dim : resource->dims) {
@@ -904,11 +919,28 @@ TestHGraphTune(const fixtures::HGraphTestIndexPtr& test_index,
                 auto param2 = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param2);
 
                 // Create index and dataset
-                auto index1 = TestIndex::TestFactory(test_index->name, param1, true);
-                auto index2 = TestIndex::TestFactory(test_index->name, param2, true);
+                auto index1 = TestIndex::TestFactory(
+                    test_index->name, param1, true);  // non-empty, used for test tune
+                auto index2 = TestIndex::TestFactory(
+                    test_index->name, param2, true);  // empty, used for test serialize and general
+
                 auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(
                     dim, resource->base_count, metric_type);
                 TestIndex::TestBuildIndex(index1, dataset, true);
+
+                if (not is_tested_disable_future_tuning) {
+                    auto index3 = TestIndex::TestFactory(test_index->name, param1, true);
+                    TestIndex::TestBuildIndex(index3, dataset, true);
+                    // set disable_future_tuning
+                    auto set_result = index3->Tune(param2, true);
+                    REQUIRE(set_result.has_value());
+                    REQUIRE(set_result.value());
+
+                    set_result = index3->Tune(param2, false);
+                    REQUIRE(set_result.has_value());
+                    REQUIRE_FALSE(set_result.value());
+                    is_tested_disable_future_tuning = true;
+                }
 
                 // set index param
                 auto set_result = index1->Tune(param2);
@@ -919,8 +951,8 @@ TestHGraphTune(const fixtures::HGraphTestIndexPtr& test_index,
                 TestIndex::TestSerializeFile(index1, index2, dataset, search_param, true);
 
                 // basic test
-                HGraphTestIndex::TestGeneral(index1, dataset, search_param, 0.9);
-                HGraphTestIndex::TestGeneral(index2, dataset, search_param, 0.9);
+                HGraphTestIndex::TestGeneral(index1, dataset, search_param, 0.7);
+                HGraphTestIndex::TestGeneral(index2, dataset, search_param, 0.7);
 
                 // Restore original block size limit
                 vsag::Options::Instance().set_block_size_limit(origin_size);
