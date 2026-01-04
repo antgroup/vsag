@@ -153,7 +153,7 @@ void
 IndexNode::Init() {
     if (status_ == Status::NO_INDEX) {
         if (ids_.size() >= index_min_size_) {
-            if (ids_.size() != 0 and level_ != 0) {
+            if (not ids_.empty() and level_ != 0) {
                 auto new_max_degree = get_suitable_max_degree(static_cast<int64_t>(ids_.size()));
                 if (new_max_degree < graph_param_->max_degree_) {
                     auto new_graph_param = std::make_shared<SparseGraphDatacellParameter>();
