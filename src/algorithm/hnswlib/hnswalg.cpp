@@ -558,9 +558,10 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
             metric_distance_computations_ += size;
         }
 
-        auto vector_data_ptr = data_level0_memory_->GetElementPtr((*(data + 1)), offset_data_);
         vsag::PrefetchLines((char*)(visited_array + *(data + 1)), 64);
         vsag::PrefetchLines((char*)(visited_array + *(data + 1) + 64), 64);
+        char* vector_data_ptr = nullptr;
+        vector_data_ptr = data_level0_memory_->GetElementPtr((*(data + 1)), offset_data_);
         vsag::PrefetchLines(vector_data_ptr, data_size_);
         vsag::PrefetchLines((char*)(data + 2), 64);
 
@@ -664,9 +665,10 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
             metric_distance_computations_ += size;
         }
 
-        auto vector_data_ptr = data_level0_memory_->GetElementPtr((*(data + 1)), offset_data_);
         vsag::PrefetchLines((char*)(visited_array + *(data + 1)), 64);
         vsag::PrefetchLines((char*)(visited_array + *(data + 1) + 64), 64);
+        char* vector_data_ptr = nullptr;
+        vector_data_ptr = data_level0_memory_->GetElementPtr((*(data + 1)), offset_data_);
         vsag::PrefetchLines(vector_data_ptr, 64);
         vsag::PrefetchLines((char*)(data + 2), 64);
 
