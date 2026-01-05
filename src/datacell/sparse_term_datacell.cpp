@@ -141,7 +141,7 @@ SparseTermDataCell::InsertHeapByTermLists(float* dists,
         if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
             if (heap.size() < n_candidate) {
                 for (; i < term_size; i++) {
-                    id = (*term_ids_[term])[i];
+                    id = term_ids_[term][i];
                     if (fill_heap_initial<type>(
                             id, dists, cur_heap_top, heap, offset_id, n_candidate, filter)) {
                         i++;
@@ -152,7 +152,7 @@ SparseTermDataCell::InsertHeapByTermLists(float* dists,
         }
 
         for (; i < term_size; i++) {
-            id = (*term_ids_[term])[i];
+            id = term_ids_[term][i];
             insert_candidate_into_heap<mode, type>(
                 id, dists, cur_heap_top, heap, offset_id, n_candidate, radius, filter);
         }
