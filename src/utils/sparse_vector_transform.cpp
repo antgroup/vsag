@@ -34,4 +34,31 @@ sort_sparse_vector(const SparseVector& sparse_vector,
               });
 }
 
+bool
+is_subset_of_sparse_vector(const SparseVector& sv1, const SparseVector& sv2) {
+    if (sv1.len_ > sv2.len_) {
+        // [case 1]: sv1 is larger than sv2
+        return false;
+    }
+
+    std::unordered_map<uint32_t, float> sv2_map;
+    for (auto i = 0; i < sv2.len_; i++) {
+        sv2_map[sv2.ids_[i]] = sv2.vals_[i];
+    }
+
+    for (auto i = 0; i < sv1.len_; i++) {
+        auto search = sv2_map.find(sv1.ids_[i]);
+        if (search == sv2_map.end()) {
+            // [case 2]: The term ID in the sv1 does not exist in the sv2
+            return false;
+        }
+        float new_term_value = search->second;
+        if (std::abs(sv1.vals_[i] - new_term_value) > 1e-3) {
+            // [case 3]: The term VALUE in the sv1 is not equal to that in the sv2
+            return false;
+        }
+    }
+    return true;
+}
+
 }  // namespace vsag

@@ -2346,18 +2346,6 @@ HGraph::check_and_init_raw_vector(const FlattenInterfaceParamPtr& raw_vector_par
 }
 
 bool
-HGraph::UpdateId(int64_t old_id, int64_t new_id) {
-    if (old_id == new_id) {
-        return true;
-    }
-
-    std::scoped_lock label_lock(this->label_lookup_mutex_);
-    this->label_table_->UpdateLabel(old_id, new_id);
-
-    return true;
-}
-
-bool
 HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) {
     // check if id exists and get copied base data
     uint32_t inner_id = 0;
