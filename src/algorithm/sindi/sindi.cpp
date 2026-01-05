@@ -355,9 +355,11 @@ SINDI::Serialize(StreamWriter& writer) const {
 
     StreamWriter::WriteObj(writer, cur_element_count_);
 
-    StreamWriter::WriteObj(writer, quantization_params_->min_val);
-    StreamWriter::WriteObj(writer, quantization_params_->max_val);
-    StreamWriter::WriteObj(writer, quantization_params_->diff);
+    if (use_quantization_) {
+        StreamWriter::WriteObj(writer, quantization_params_->min_val);
+        StreamWriter::WriteObj(writer, quantization_params_->max_val);
+        StreamWriter::WriteObj(writer, quantization_params_->diff);
+    }
 
     uint32_t window_term_list_size = window_term_list_.size();
     StreamWriter::WriteObj(writer, window_term_list_size);
@@ -411,9 +413,12 @@ SINDI::Deserialize(StreamReader& reader) {
     auto& reader_ref = *reader_ptr;
 
     StreamReader::ReadObj(reader_ref, cur_element_count_);
-    StreamReader::ReadObj(reader_ref, quantization_params_->min_val);
-    StreamReader::ReadObj(reader_ref, quantization_params_->max_val);
-    StreamReader::ReadObj(reader_ref, quantization_params_->diff);
+
+    if (use_quantization_) {
+        StreamReader::ReadObj(reader_ref, quantization_params_->min_val);
+        StreamReader::ReadObj(reader_ref, quantization_params_->max_val);
+        StreamReader::ReadObj(reader_ref, quantization_params_->diff);
+    }
 
     uint32_t window_term_list_size = 0;
     StreamReader::ReadObj(reader_ref, window_term_list_size);
