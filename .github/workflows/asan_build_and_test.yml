@@ -31,7 +31,13 @@ jobs:
       - name: Make Asan
         run: export CMAKE_GENERATOR="Ninja"; make asan
       - name: Clean
-        run: find ./build -type f -name "*.o" -exec rm -f {} +
+        run: |
+          find ./build -type f -name "*.o" -exec rm -f {} +
+          find ./build -type f -name "*.cpp" -exec rm -f {} +
+          find ./build -type f -name "*.a" -exec rm -f {} +
+          rm -rf ./build/hdf5
+          rm -rf ./build/boost
+          rm -rf ./build/tools
       - name: Save Test
         uses: actions/upload-artifact@v4
         with:
