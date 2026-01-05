@@ -170,6 +170,9 @@ public:
     Serialize(StreamWriter& writer) const override;
 
     void
+    SetImmutable() override;
+
+    void
     Train(const vsag::DatasetPtr& base) override;
 
 private:
@@ -235,6 +238,7 @@ private:
 
     // static
     uint32_t index_min_size_{0};
+    bool immutable_{false};
 };
 
 }  // namespace vsag

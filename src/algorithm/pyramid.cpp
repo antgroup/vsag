@@ -38,6 +38,20 @@ split(const std::string& str, char delimiter) {
     return vec;
 }
 
+uint64_t
+get_suitable_max_degree(int64_t data_num) {
+    if (data_num < 1'000) {
+        return 8;
+    }
+    if (data_num < 100'000) {
+        return 16;
+    }
+    if (data_num < 1000'000) {
+        return 32;
+    }
+    return 64;
+}
+
 IndexNode::IndexNode(Allocator* allocator,
                      GraphInterfaceParamPtr graph_param,
                      uint32_t index_min_size)
@@ -139,8 +153,19 @@ void
 IndexNode::Init() {
     if (status_ == Status::NO_INDEX) {
         if (ids_.size() >= index_min_size_) {
+            if (not ids_.empty() and level_ != 0) {
+                auto new_max_degree = get_suitable_max_degree(static_cast<int64_t>(ids_.size()));
+                if (new_max_degree < graph_param_->max_degree_) {
+                    auto new_graph_param = std::make_shared<SparseGraphDatacellParameter>();
+                    new_graph_param->FromJson(graph_param_->ToJson());
+                    new_graph_param->max_degree_ =
+                        get_suitable_max_degree(static_cast<int64_t>(ids_.size()));
+                    graph_param_ = new_graph_param;
+                }
+            }
             graph_ = std::make_shared<SparseGraphDataCell>(
                 std::dynamic_pointer_cast<SparseGraphDatacellParameter>(graph_param_), allocator_);
+            Vector<InnerIdType>(allocator_).swap(ids_);
             status_ = Status::GRAPH;
         } else {
             status_ = Status::FLAT;
@@ -155,13 +180,9 @@ IndexNode::Search(const SearchFunc& search_func,
                   int64_t ef_search) const {
     if (status_ != IndexNode::Status::NO_INDEX) {
         auto self_search_result = search_func(this, vl);
-        while (not self_search_result->Empty()) {
-            auto result = self_search_result->Top();
-            self_search_result->Pop();
-            search_result->Push(result.first, result.second);
-            if (search_result->Size() > ef_search) {
-                search_result->Pop();
-            }
+        search_result->Merge(*self_search_result);
+        while (search_result->Size() > ef_search) {
+            search_result->Pop();
         }
         return;
     }
@@ -769,6 +790,19 @@ Pyramid::search_node(const IndexNode* node,
     }
 
     return results;
+}
+void
+Pyramid::SetImmutable() {
+    if (this->immutable_) {
+        return;
+    }
+    label_table_->use_reverse_map_ = false;
+    this->points_mutex_.reset();
+    this->points_mutex_ = std::make_shared<EmptyMutex>();
+    this->searcher_->SetMutexArray(this->points_mutex_);
+    STLUnorderedMap<LabelType, InnerIdType> empty_remap(allocator_);
+    this->label_table_->label_remap_.swap(empty_remap);
+    immutable_ = true;
 }
 
 }  // namespace vsag
