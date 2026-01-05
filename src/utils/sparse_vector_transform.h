@@ -27,4 +27,12 @@ void
 sort_sparse_vector(const SparseVector& sparse_vector,
                    Vector<std::pair<uint32_t, float>>& sorted_query);
 
+/**
+ * check whether sv1 is a subset of sv2
+ * @param sv1
+ * @param sv2
+ * @return true iff sv1 is a subset of sv2
+ */
+bool
+is_subset_of_sparse_vector(const SparseVector& sv1, const SparseVector& sv2);
 }  // namespace vsag
