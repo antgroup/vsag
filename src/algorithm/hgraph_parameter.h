@@ -15,8 +15,6 @@
 
 #pragma once
 
-#include <limits>
-
 #include "data_type.h"
 #include "index_search_parameter.h"
 #include "inner_index_parameter.h"
@@ -58,7 +56,6 @@ public:
     bool use_elp_optimizer{false};
     bool ignore_reorder{false};
     bool build_by_base{false};
-    bool use_reverse_edges{false};
 
     uint64_t ef_construction{400};
     float alpha{1.0F};
@@ -78,8 +75,7 @@ public:
 
 public:
     int64_t ef_search{30};
-    uint32_t hops_limit{std::numeric_limits<uint32_t>::max()};
-    bool use_reorder{false};
+
     bool use_extra_info_filter{false};
 
 private:
