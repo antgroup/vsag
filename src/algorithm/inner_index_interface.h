@@ -405,10 +405,7 @@ public:
     UpdateExtraInfo(const DatasetPtr& new_base);
 
     virtual bool
-    UpdateId(int64_t old_id, int64_t new_id) {
-        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                            "Index doesn't support UpdateId");
-    }
+    UpdateId(int64_t old_id, int64_t new_id);
 
     virtual bool
     UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update = false) {

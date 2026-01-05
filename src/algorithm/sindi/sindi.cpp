@@ -125,6 +125,37 @@ SINDI::Build(const DatasetPtr& base) {
     return this->Add(base);
 }
 
+bool
+SINDI::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) {
+    // Note:
+    // 1. we only check whether the old vector is a subset of the new vector
+    // 2. we do not actually update the vector
+    auto check_and_cleanup = [this, id, &new_base](InnerIndexInterface* index) -> bool {
+        SparseVector old_sv;
+        uint32_t inner_id;
+        {
+            std::scoped_lock rlock(this->global_mutex_);
+            inner_id = this->label_table_->GetIdByLabel(id);
+        }
+        index->GetSparseVectorByInnerId(inner_id, &old_sv, this->allocator_);
+
+        const auto& new_sv = *new_base->GetSparseVectors();
+        bool ret = is_subset_of_sparse_vector(old_sv, new_sv);
+
+        this->allocator_->Deallocate(old_sv.vals_);
+        this->allocator_->Deallocate(old_sv.ids_);
+        return ret;
+    };
+
+    if (use_reorder_) {
+        if (not check_and_cleanup(rerank_flat_index_.get())) {
+            return false;
+        }
+    }
+
+    return check_and_cleanup(this);
+}
+
 DatasetPtr
 SINDI::KnnSearch(const DatasetPtr& query,
                  int64_t k,
@@ -396,17 +427,6 @@ SINDI::Deserialize(StreamReader& reader) {
     }
 }
 
-bool
-SINDI::UpdateId(int64_t old_id, int64_t new_id) {
-    if (old_id == new_id) {
-        return true;
-    }
-
-    std::scoped_lock wlock(this->global_mutex_);
-    label_table_->UpdateLabel(old_id, new_id);
-    return true;
-}
-
 std::pair<int64_t, int64_t>
 SINDI::GetMinAndMaxId() const {
     int64_t min_id = INT64_MAX;
@@ -569,8 +589,8 @@ SINDI::InitFeatures() {
     // concurrency
     this->index_feature_list_->SetFeatures({IndexFeature::SUPPORT_SEARCH_CONCURRENT,
                                             IndexFeature::SUPPORT_ADD_CONCURRENT,
-                                            IndexFeature::SUPPORT_ADD_CONCURRENT,
-                                            IndexFeature::SUPPORT_UPDATE_ID_CONCURRENT});
+                                            IndexFeature::SUPPORT_UPDATE_ID_CONCURRENT,
+                                            IndexFeature::SUPPORT_UPDATE_VECTOR_CONCURRENT});
 
     // metric
     this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_METRIC_TYPE_INNER_PRODUCT);
