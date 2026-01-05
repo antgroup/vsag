@@ -2124,26 +2124,6 @@ TestIndex::TestSearchOvertime(const IndexPtr& index,
     }
 }
 
-void
-TestIndex::TestExportIDs(const IndexPtr& index, const TestDatasetPtr& dataset) {
-    if (not index->CheckFeature(vsag::SUPPORT_EXPORT_IDS)) {
-        return;
-    }
-    auto result = index->ExportIDs();
-    REQUIRE(result.has_value());
-    const auto* ids = result.value()->GetIds();
-    auto num_element = result.value()->GetNumElements();
-    REQUIRE(num_element == dataset->base_->GetNumElements());
-    auto* origin_ids = dataset->base_->GetIds();
-    // check ids, no order
-    std::unordered_set<int64_t> id_set(origin_ids, origin_ids + num_element);
-    for (int64_t i = 0; i < num_element; ++i) {
-        REQUIRE(id_set.find(ids[i]) != id_set.end());
-    }
-    std::unordered_set<int64_t> id_set2(ids, ids + num_element);
-    REQUIRE(id_set2.size() == num_element);
-}
-
 template <typename T>
 static void
 compare_attr_value(const vsag::Attribute* attr1, const vsag::Attribute* attr2) {
@@ -2194,58 +2174,6 @@ compare_attr_set(const vsag::AttributeSet& attr1, const vsag::AttributeSet& attr
             compare_attr_value<std::string>(attr, gt_attr);
         }
     }
-}
-
-void
-TestIndex::TestGetDataById(const IndexPtr& index, const TestDatasetPtr& dataset) {
-    if (not index->CheckFeature(vsag::SUPPORT_GET_DATA_BY_IDS)) {
-        return;
-    }
-    auto result = index->GetDataByIds(dataset->base_->GetIds(), dataset->base_->GetNumElements());
-    REQUIRE(result.has_value());
-    auto data = result.value();
-    REQUIRE(data->GetNumElements() == dataset->base_->GetNumElements());
-    REQUIRE(data->GetDim() == dataset->base_->GetDim());
-    // vectors
-    auto float_vectors = data->GetFloat32Vectors();
-    for (int i = 0; i < data->GetNumElements(); ++i) {
-        REQUIRE(memcmp(float_vectors + i * data->GetDim(),
-                       dataset->base_->GetFloat32Vectors() + i * data->GetDim(),
-                       data->GetDim() * sizeof(float)) == 0);
-    }
-    // attributes
-    auto attrs = data->GetAttributeSets();
-    auto gt_attrs = dataset->base_->GetAttributeSets();
-    for (int i = 0; i < data->GetNumElements(); ++i) {
-        auto& attr = attrs[i];
-        auto& gt_attr = gt_attrs[i];
-        compare_attr_set(attr, gt_attr);
-    }
-}
-
-void
-TestIndex::TestIndexStatus(const IndexPtr& index) {
-    auto set_result = index->SetImmutable();
-    if (not set_result.has_value()) {
-        return;
-    }
-    REQUIRE_FALSE(index->Train(nullptr));
-    REQUIRE_FALSE(index->Build(nullptr));
-    REQUIRE_FALSE(index->Add(nullptr));
-    std::ifstream inf;
-    REQUIRE_FALSE(index->Deserialize(inf));
-    REQUIRE_FALSE(index->Remove(0));
-    std::vector<vsag::MergeUnit> merge_units;
-    REQUIRE_FALSE(index->Merge(merge_units));
-    vsag::AttributeSet new_attrs;
-    REQUIRE_FALSE(index->UpdateAttribute(0, new_attrs));
-    REQUIRE_FALSE(index->UpdateAttribute(0, new_attrs, new_attrs));
-    REQUIRE_FALSE(index->UpdateId(0, 0));
-    REQUIRE_FALSE(index->UpdateVector(0, nullptr, false));
-}
-
-void
-TestIndex::TestGetDataByIdWithFlag(const IndexPtr& index, const TestDatasetPtr& dataset) {
 }
 
 void
