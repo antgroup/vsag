@@ -681,6 +681,79 @@ TEST_CASE("(Daily) IVF Search Overtime", "[ft][ivf][daily]") {
 }
 
 static void
+TestIVFSearchDisableReorder(const fixtures::IVFResourcePtr& resource) {
+    using namespace fixtures;
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    constexpr static const char* search_param_tmp2 = R"(
+        {{
+            "ivf": {{
+                "scan_buckets_count": {},
+                "factor": 4.0,
+                "enable_reorder": {}
+            }}
+        }})";
+    for (auto metric_type : resource->metric_types) {
+        for (auto dim : resource->dims) {
+            for (auto train_type : resource->train_types) {
+                auto base_quantization_str = "sq4_uniform,fp32";
+                float recall_with_reorder = 0.89;
+                float recall_without_reorder = 0.55;
+                auto count = std::min(300, static_cast<int32_t>(dim / 4));
+                if (train_type == "kmeans") {
+                    recall_with_reorder *=
+                        0.8F;  // Kmeans may not achieve high recall in random datasets
+                    recall_without_reorder *=
+                        0.8F;  // Kmeans may not achieve high recall in random datasets
+                }
+                INFO(fmt::format(
+                    "metric_type: {}, dim: {}, base_quantization_str: {}, "
+                    "train_type: {}, recall_with_reorder: {}, recall_without_reorder: {}",
+                    metric_type,
+                    dim,
+                    base_quantization_str,
+                    train_type,
+                    recall_with_reorder,
+                    recall_without_reorder));
+                vsag::Options::Instance().set_block_size_limit(size);
+                auto param = IVFTestIndex::GenerateIVFBuildParametersString(
+                    metric_type, dim, base_quantization_str, 300, train_type, false, 1, false, 3);
+                auto index = IVFTestIndex::TestFactory(IVFTestIndex::name, param, true);
+                auto dataset =
+                    IVFTestIndex::pool.GetDatasetAndCreate(dim, resource->base_count, metric_type);
+                IVFTestIndex::TestBuildIndex(index, dataset, true);
+                auto recall_result_with_reorder = TestIndex::TestKnnSearch(
+                    index,
+                    dataset,
+                    fmt::format(search_param_tmp2, std::max(200, count), true),
+                    recall_with_reorder,
+                    true);
+                auto recall_result_without_reorder = TestIndex::TestKnnSearch(
+                    index,
+                    dataset,
+                    fmt::format(search_param_tmp2, std::max(200, count), false),
+                    recall_without_reorder,
+                    true);
+                REQUIRE(recall_result_with_reorder >= recall_result_without_reorder);
+                vsag::Options::Instance().set_block_size_limit(origin_size);
+            }
+        }
+    }
+}
+
+TEST_CASE("(PR) IVF Search Disable Reorder", "[ft][ivf][pr]") {
+    auto test_index = std::make_shared<fixtures::IVFTestIndex>();
+    auto resource = test_index->GetResource(true);
+    TestIVFSearchDisableReorder(resource);
+}
+
+TEST_CASE("(Daily) IVF Search Disable Reorder", "[ft][ivf][daily]") {
+    auto test_index = std::make_shared<fixtures::IVFTestIndex>();
+    auto resource = test_index->GetResource(false);
+    TestIVFSearchDisableReorder(resource);
+}
+
+static void
 TestIVFBuildWithLargeK(const fixtures::IVFResourcePtr& resource) {
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
