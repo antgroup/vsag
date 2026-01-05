@@ -36,18 +36,22 @@ public:
 
 public:
     int64_t topk{0};
+    float factor{2.0F};
     float radius{0.0F};
-    InnerIdType ep{0};
-    uint64_t ef{10};
-    FilterPtr is_inner_id_allowed{nullptr};
-    float skip_ratio{0.8F};
+    bool enable_reorder{true};
     InnerSearchMode search_mode{KNN_SEARCH};
     int range_search_limit_size{-1};
-    int64_t parallel_search_thread_count{1};
 
-    // for ivf
+    int64_t parallel_search_thread_count{1};
+    FilterPtr is_inner_id_allowed{nullptr};
+
+    // for HGraph
+    InnerIdType ep{0};
+    uint64_t ef{10};
+    float skip_ratio{0.8F};
+
+    // for IVF
     int scan_bucket_size{1};
-    float factor{2.0F};
     float first_order_scan_ratio{1.0F};
     std::vector<ExecutorPtr> executors;
 

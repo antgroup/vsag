@@ -2149,7 +2149,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
 
     this->pool_->ReturnOne(vt);
 
-    if (use_reorder_) {
+    if (use_reorder_ and params.enable_reorder) {
         this->reorder(raw_query, this->high_precise_codes_, search_result, k, nullptr, ctx);
     }
 
