@@ -71,6 +71,7 @@ IndexNode::Build(ODescent& odescent) {
     }
     if (status_ == Status::GRAPH) {
         entry_point_ = ids_[0];
+        odescent.SetMaxDegree(graph_param_->max_degree_);
         odescent.Build(ids_);
         odescent.SaveGraph(graph_);
         Vector<InnerIdType>(allocator_).swap(ids_);
@@ -165,7 +166,6 @@ IndexNode::Init() {
             }
             graph_ = std::make_shared<SparseGraphDataCell>(
                 std::dynamic_pointer_cast<SparseGraphDatacellParameter>(graph_param_), allocator_);
-            Vector<InnerIdType>(allocator_).swap(ids_);
             status_ = Status::GRAPH;
         } else {
             status_ = Status::FLAT;
@@ -726,6 +726,7 @@ Pyramid::add_one_point(const std::shared_ptr<IndexNode>& node,
     if (node->graph_->TotalCount() == 0) {
         node->graph_->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
         node->entry_point_ = inner_id;
+        Vector<InnerIdType>(allocator_).swap(node->ids_);
     } else {
         InnerSearchParam search_param;
         search_param.ef = ef_construction_;

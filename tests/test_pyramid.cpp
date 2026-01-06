@@ -113,6 +113,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
     auto use_reorder = GENERATE(true, false);
     auto immutable = GENERATE(true, false);
     PyramidParam pyramid_param;
+    pyramid_param.graph_type = GENERATE("nsw", "odescent");
     pyramid_param.no_build_levels = {0, 1, 2};
     pyramid_param.use_reorder = use_reorder;
     if (use_reorder) {
