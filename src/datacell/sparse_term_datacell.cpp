@@ -35,12 +35,20 @@ SparseTermDataCell::Query(float* global_dists, const SparseTermComputerPtr& comp
         if (term >= term_sizes_.size() || term_sizes_[term] == 0) {
             continue;
         }
-        computer->ScanForAccumulate(it,
-                                    term_ids_[term]->data(),
-                                    term_datas_[term]->data(),
-                                    static_cast<uint32_t>(static_cast<float>(term_sizes_[term]) *
-                                                          computer->term_retain_ratio_),
-                                    global_dists);
+
+        auto term_size = static_cast<uint32_t>(static_cast<float>(term_sizes_[term]) *
+                                               computer->term_retain_ratio_);
+
+        if (use_quantization_) {
+            computer->ScanForAccumulate(
+                it, term_ids_[term]->data(), term_datas_[term]->data(), term_size, global_dists);
+        } else {
+            computer->ScanForAccumulate(it,
+                                        term_ids_[term]->data(),
+                                        reinterpret_cast<const float*>(term_datas_[term]->data()),
+                                        term_size,
+                                        global_dists);
+        }
     }
     computer->ResetTerm();
 }
@@ -220,7 +228,7 @@ SparseTermDataCell::DocPrune(Vector<std::pair<uint32_t, float>>& sorted_base) co
 }
 
 void
-SparseTermDataCell::InsertVector(const SparseVector& sparse_base, uint32_t base_id) {
+SparseTermDataCell::InsertVector(const SparseVector& sparse_base, uint16_t base_id) {
     // resize term
     uint32_t max_term_id = 0;
     for (auto i = 0; i < sparse_base.len_; i++) {
@@ -247,12 +255,23 @@ SparseTermDataCell::InsertVector(const SparseVector& sparse_base, uint32_t base_
         auto val = item.second;
 
         if (term_sizes_[term] == 0) {  // create term until needed
-            term_ids_[term] = std::make_unique<Vector<uint32_t>>(allocator_);
-            term_datas_[term] = std::make_unique<Vector<float>>(allocator_);
+            term_ids_[term] = std::make_unique<Vector<uint16_t>>(allocator_);
+            term_datas_[term] = std::make_unique<Vector<uint8_t>>(allocator_);
         }
 
         term_ids_[term]->push_back(base_id);
-        term_datas_[term]->push_back(val);
+
+        auto& data_vec = *term_datas_[term];
+        if (use_quantization_) {
+            uint8_t buffer;
+            Encode(val, &buffer);
+            data_vec.push_back(buffer);
+        } else {
+            auto old_size = data_vec.size();
+            data_vec.resize(old_size + sizeof(float));
+            *reinterpret_cast<float*>(data_vec.data() + old_size) = val;
+        }
+
         term_sizes_[term] += 1;
     }
 }
@@ -262,8 +281,8 @@ SparseTermDataCell::ResizeTermList(InnerIdType new_term_capacity) {
     if (new_term_capacity <= term_capacity_) {
         return;
     }
-    Vector<std::unique_ptr<Vector<uint32_t>>> new_ids(new_term_capacity, allocator_);
-    Vector<std::unique_ptr<Vector<float>>> new_datas(new_term_capacity, allocator_);
+    Vector<std::unique_ptr<Vector<uint16_t>>> new_ids(new_term_capacity, allocator_);
+    Vector<std::unique_ptr<Vector<uint8_t>>> new_datas(new_term_capacity, allocator_);
     Vector<uint32_t> new_sizes(new_term_capacity, 0, allocator_);
 
     std::move(term_ids_.begin(), term_ids_.end(), new_ids.begin());
@@ -277,8 +296,9 @@ SparseTermDataCell::ResizeTermList(InnerIdType new_term_capacity) {
 }
 
 float
-SparseTermDataCell::CalcDistanceByInnerId(const SparseTermComputerPtr& computer, uint32_t base_id) {
+SparseTermDataCell::CalcDistanceByInnerId(const SparseTermComputerPtr& computer, uint16_t base_id) {
     float ip = 0;
+    Vector<float> temp_data(allocator_);
     while (computer->HasNextTerm()) {
         auto it = computer->NextTermIter();
         auto term = computer->GetTerm(it);
@@ -291,15 +311,24 @@ SparseTermDataCell::CalcDistanceByInnerId(const SparseTermComputerPtr& computer,
             __builtin_prefetch(term_ids_[next_term]->data(), 0, 3);
             __builtin_prefetch(term_datas_[next_term]->data(), 0, 3);
         }
-        if (term >= term_ids_.size()) {
+        // Fix: Check term_sizes_[term] == 0 to avoid null pointer dereference
+        if (term >= term_ids_.size() || term_sizes_[term] == 0) {
             continue;
         }
-        computer->ScanForCalculateDist(it,
-                                       term_ids_[term]->data(),
-                                       term_datas_[term]->data(),
-                                       term_sizes_[term],
-                                       base_id,
-                                       &ip);
+
+        // Dequantize
+        const float* vals = nullptr;
+        auto size = term_sizes_[term];
+        if (use_quantization_) {
+            temp_data.resize(size);
+            Decode(term_datas_[term]->data(), size, temp_data.data());
+            vals = temp_data.data();
+        } else {
+            vals = reinterpret_cast<const float*>(term_datas_[term]->data());
+        }
+
+        computer->ScanForCalculateDist(
+            it, term_ids_[term]->data(), vals, term_sizes_[term], base_id, &ip);
     }
     computer->ResetTerm();
     return 1 + ip;
@@ -315,10 +344,19 @@ SparseTermDataCell::GetSparseVector(uint32_t base_id,
     Vector<float> vals(allocator);
 
     for (auto term = 0; term < term_ids_.size(); term++) {
+        if (term_sizes_[term] == 0) {
+            continue;
+        }
         for (auto i = 0; i < term_sizes_[term]; i++) {
             if ((*term_ids_[term])[i] == base_id) {
                 ids.push_back(term);
-                vals.push_back((*term_datas_[term])[i]);
+                float v;
+                if (use_quantization_) {
+                    Decode(term_datas_[term]->data() + i, 1, &v);
+                } else {
+                    v = reinterpret_cast<float*>(term_datas_[term]->data())[i];
+                }
+                vals.push_back(v);
             }
         }
     }
@@ -353,11 +391,25 @@ SparseTermDataCell::Deserialize(StreamReader& reader) {
 
     for (auto i = 0; i < term_capacity; i++) {
         if (term_sizes_[i] != 0) {
-            term_ids_[i] = std::make_unique<Vector<uint32_t>>(allocator_);
-            term_datas_[i] = std::make_unique<Vector<float>>(allocator_);
+            term_ids_[i] = std::make_unique<Vector<uint16_t>>(allocator_);
+            term_datas_[i] = std::make_unique<Vector<uint8_t>>(allocator_);
             StreamReader::ReadVector(reader, *term_ids_[i]);
             StreamReader::ReadVector(reader, *term_datas_[i]);
         }
+    }
+}
+
+void
+SparseTermDataCell::Encode(float val, uint8_t* dst) const {
+    float x = (val - quantization_params_->min_val) / quantization_params_->diff * 255.0F;
+    *dst = static_cast<uint8_t>(std::clamp(x, 0.0F, 255.0F));
+}
+
+void
+SparseTermDataCell::Decode(const uint8_t* src, size_t size, float* dst) const {
+    for (size_t i = 0; i < size; ++i) {
+        dst[i] = static_cast<float>(src[i]) / 255.0F * quantization_params_->diff +
+                 quantization_params_->min_val;
     }
 }
 
