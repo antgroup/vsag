@@ -43,7 +43,7 @@ public:
 
     ComputerInterfacePtr
     FactoryComputer(const void* query) override {
-        return this->factory_computer((const float*)query);
+        return this->factory_computer(static_cast<const float*>(query));
     }
 
     bool
