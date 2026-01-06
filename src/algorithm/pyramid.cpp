@@ -349,9 +349,9 @@ Pyramid::search_impl(const DatasetPtr& query,
         return result;
     }
     result->Dim(target_size)->NumElements(1)->Owner(true, allocator_);
-    auto* ids = (int64_t*)allocator_->Allocate(sizeof(int64_t) * target_size);
+    auto* ids = static_cast<int64_t*>(allocator_->Allocate(sizeof(int64_t) * target_size));
     result->Ids(ids);
-    auto* dists = (float*)allocator_->Allocate(sizeof(float) * target_size);
+    auto* dists = static_cast<float*>(allocator_->Allocate(sizeof(float) * target_size));
     result->Distances(dists);
     for (int64_t j = target_size - 1; j >= 0; --j) {
         dists[j] = search_result->Top().first;

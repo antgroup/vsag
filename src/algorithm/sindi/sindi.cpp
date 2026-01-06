@@ -556,7 +556,7 @@ SINDI::CalDistanceById(const DatasetPtr& query, const int64_t* ids, int64_t coun
     // prepare result
     auto result = Dataset::Make();
     result->Owner(true, allocator_);
-    auto* distances = (float*)allocator_->Allocate(sizeof(float) * count);
+    auto* distances = static_cast<float*>(allocator_->Allocate(sizeof(float) * count));
     std::fill_n(distances, count, -1.0F);
     result->Distances(distances);
 
