@@ -44,8 +44,13 @@ public:
 
     float doc_prune_ratio{0};
 
+    bool use_reorder{false};
+
+    bool use_quantization{false};
+
     // temporal parameter
     bool deserialize_without_footer{false};
+    bool deserialize_without_buffer{false};
 };
 
 class SINDISearchParameter : public Parameter {

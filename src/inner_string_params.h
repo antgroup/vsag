@@ -105,8 +105,10 @@ const char* const SPARSE_TERM_PRUNE_RATIO = "term_prune_ratio";
 const char* const SPARSE_TERM_ID_LIMIT = "term_id_limit";
 const char* const SPARSE_WINDOW_SIZE = "window_size";
 const char* const SPARSE_USE_REORDER = "use_reorder";
+const char* const USE_QUANTIZATION = "use_quantization";
 const char* const SPARSE_N_CANDIDATE = "n_candidate";
 const char* const SPARSE_DESERIALIZE_WITHOUT_FOOTER = "deserialize_without_footer";
+const char* const SPARSE_DESERIALIZE_WITHOUT_BUFFER = "deserialize_without_buffer";
 const char* const SPARSE_USE_TERM_LISTS_HEAP_INSERT = "use_term_lists_heap_insert";
 
 // graph param value

@@ -21,21 +21,29 @@
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "utils/pointer_define.h"
+#include "vsag/allocator.h"
 #include "vsag/dataset.h"
 
 namespace vsag {
+
 DEFINE_POINTER(SparseTermDataCell);
 class SparseTermDataCell {
 public:
     SparseTermDataCell() = default;
 
-    SparseTermDataCell(float doc_prune_ratio, uint32_t term_id_limit, Allocator* allocator)
-        : doc_prune_ratio_(doc_prune_ratio),
+    SparseTermDataCell(float doc_retain_ratio,
+                       uint32_t term_id_limit,
+                       Allocator* allocator,
+                       bool use_quantization,
+                       std::shared_ptr<QuantizationParams> quantization_params)
+        : doc_retain_ratio_(doc_retain_ratio),
           term_id_limit_(term_id_limit),
           allocator_(allocator),
-          term_ids_(0, Vector<uint32_t>(allocator), allocator),
-          term_datas_(0, Vector<float>(allocator), allocator),
-          term_sizes_(allocator) {
+          term_ids_(allocator),
+          term_datas_(allocator),
+          term_sizes_(allocator),
+          use_quantization_(use_quantization),
+          quantization_params_(std::move(quantization_params)) {
     }
 
     void
@@ -81,7 +89,7 @@ public:
     DocPrune(Vector<std::pair<uint32_t, float>>& sorted_base) const;
 
     void
-    InsertVector(const SparseVector& sparse_base, uint32_t base_id);
+    InsertVector(const SparseVector& sparse_base, uint16_t base_id);
 
     void
     ResizeTermList(InnerIdType new_term_capacity);
@@ -93,7 +101,19 @@ public:
     Deserialize(StreamReader& reader);
 
     float
-    CalcDistanceByInnerId(const SparseTermComputerPtr& computer, uint32_t base_id);
+    CalcDistanceByInnerId(const SparseTermComputerPtr& computer, uint16_t base_id);
+
+    void
+    GetSparseVector(uint16_t base_id, SparseVector* data);
+
+    void
+    Encode(float val, uint8_t* dst) const;
+
+    void
+    Decode(const uint8_t* src, size_t size, float* dst) const;
+
+    void
+    GetSparseVector(uint32_t base_id, SparseVector* data, Allocator* specified_allocator);
 
 private:
     template <InnerSearchMode mode, InnerSearchType type>
@@ -120,16 +140,20 @@ private:
 public:
     uint32_t term_id_limit_{0};
 
-    float doc_prune_ratio_{0};
+    float doc_retain_ratio_{0};
 
     uint32_t term_capacity_{0};
 
-    Vector<Vector<uint32_t>> term_ids_;
+    Vector<std::unique_ptr<Vector<uint16_t>>> term_ids_;
 
-    Vector<Vector<float>> term_datas_;
+    Vector<std::unique_ptr<Vector<uint8_t>>> term_datas_;
 
     Vector<uint32_t> term_sizes_;
 
     Allocator* const allocator_{nullptr};
+
+    bool use_quantization_{false};
+
+    std::shared_ptr<QuantizationParams> quantization_params_;
 };
 }  // namespace vsag
