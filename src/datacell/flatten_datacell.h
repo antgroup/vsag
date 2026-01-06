@@ -149,6 +149,8 @@ public:
     InitIO(const IOParamPtr& io_param) override {
         this->io_->InitIO(io_param);
     }
+    int64_t
+    GetCurrentMemoryUsage() const override;
 
 public:
     std::shared_ptr<Quantizer<QuantTmpl>> quantizer_{nullptr};
@@ -421,4 +423,16 @@ FlattenDataCell<QuantTmpl, IOTmpl>::MergeOther(const FlattenInterfacePtr& other,
     }
     this->total_count_ += total_count;
 }
+
+template <typename QuantTmpl, typename IOTmpl>
+int64_t
+FlattenDataCell<QuantTmpl, IOTmpl>::GetCurrentMemoryUsage() const {
+    int64_t memory = sizeof(FlattenDataCell<QuantTmpl, IOTmpl>);
+    if (IOTmpl::InMemory) {
+        memory += this->io_->GetCurrentMemoryUsage();
+    }
+    memory += sizeof(QuantTmpl);
+    return memory;
+}
+
 }  // namespace vsag

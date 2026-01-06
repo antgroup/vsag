@@ -73,6 +73,9 @@ public:
     Vector<InnerIdType>
     GetIds() const override;
 
+    int64_t
+    GetCurrentMemoryUsage() const override;
+
 private:
     uint32_t code_line_size_{0};
     Allocator* const allocator_{nullptr};
