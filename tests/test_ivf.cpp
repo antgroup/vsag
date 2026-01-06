@@ -41,7 +41,7 @@ public:
                                      int buckets_per_data = 1,
                                      bool use_attr_filter = false,
                                      int thread_count = 1,
-                                     int64_t sample_count = 65536L);
+                                     int64_t sample_count = 10000L);
 
     static IVFResourcePtr
     GetResource(bool sample = true);
@@ -147,7 +147,7 @@ IVFTestIndex::GenerateIVFBuildParametersString(const std::string& metric_type,
             "buckets_per_data": {},
             "use_attribute_filter": {},
             "thread_count": {},
-            "ivf_train_sample_count": {}
+            "train_sample_count": {}
         }}
     }}
     )";

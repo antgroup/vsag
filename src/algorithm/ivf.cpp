@@ -215,9 +215,9 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
             },
         },
         {
-            IVF_TRAIN_SAMPLE_COUNT_KEY,
+            TRAIN_SAMPLE_COUNT_KEY,
             {
-                IVF_TRAIN_SAMPLE_COUNT_KEY,
+                TRAIN_SAMPLE_COUNT_KEY,
             },
         },
     };
@@ -240,7 +240,6 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
 IVF::IVF(const IVFParameterPtr& param, const IndexCommonParam& common_param)
     : InnerIndexInterface(param, common_param),
       buckets_per_data_(param->buckets_per_data),
-      train_sample_count_(param->train_sample_count),
       location_map_(common_param.allocator_.get()) {
     this->bucket_ = BucketInterface::MakeInstance(param->bucket_param, common_param);
     if (this->bucket_ == nullptr) {
