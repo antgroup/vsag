@@ -163,7 +163,6 @@ DiskannSearchParameters::FromJson(const std::string& json_string) {
     if (params[INDEX_DISKANN].Contains(DISKANN_PARAMETER_BEAM_SEARCH)) {
         obj.beam_search = params[INDEX_DISKANN][DISKANN_PARAMETER_BEAM_SEARCH].GetInt();
     }
-    obj.beam_search = params[INDEX_DISKANN][DISKANN_PARAMETER_BEAM_SEARCH].GetInt();
     CHECK_ARGUMENT((1 <= obj.beam_search) and (obj.beam_search <= 64),
                    fmt::format("beam_search({}) must in range[1, 64]", obj.beam_search));
 
