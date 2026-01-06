@@ -138,4 +138,16 @@ CompressedGraphDataCell::Resize(InnerIdType new_size) {
     this->max_capacity_ = new_size;
 }
 
+int64_t
+CompressedGraphDataCell::GetCurrentMemoryUsage() const {
+    auto memory = sizeof(CompressedGraphDataCell);
+    memory += neighbor_sets_.size() * sizeof(std::nullptr_t);
+    for (const auto& encoder : neighbor_sets_) {
+        if (encoder) {
+            memory += encoder->SizeInBytes();
+        }
+    }
+    return static_cast<int64_t>(memory);
+}
+
 }  // namespace vsag

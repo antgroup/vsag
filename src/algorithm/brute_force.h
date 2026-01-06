@@ -120,12 +120,18 @@ public:
                     const AttributeSet& new_attrs,
                     const AttributeSet& origin_attrs) override;
 
+    int64_t
+    GetMemoryUsage() const override;
+
 private:
     void
     resize(uint64_t new_size);
 
     void
     add_one(const float* data, InnerIdType inner_id);
+
+    void
+    cal_memory_usage();
 
 private:
     FlattenInterfacePtr inner_codes_{nullptr};

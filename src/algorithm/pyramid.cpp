@@ -404,6 +404,7 @@ Pyramid::Deserialize(StreamReader& reader) {
     cur_element_count_ = base_codes_->TotalCount();
     root_->Deserialize(buffer_reader);
     resize(max_capacity);
+    this->current_memory_usage_ = static_cast<int64_t>(this->CalSerializeSize());
 }
 
 std::vector<int64_t>
@@ -527,6 +528,7 @@ Pyramid::InitFeatures() {
     // other
     this->index_feature_list_->SetFeatures({
         IndexFeature::SUPPORT_CLONE,
+        IndexFeature::SUPPORT_GET_MEMORY_USAGE,
     });
 }
 

@@ -205,7 +205,8 @@ public:
 
     [[nodiscard]] virtual int64_t
     GetMemoryUsage() const {
-        return static_cast<int64_t>(this->CalSerializeSize());
+        std::shared_lock lock(this->memory_usage_mutex_);
+        return this->current_memory_usage_.load();
     }
 
     [[nodiscard]] virtual std::string
@@ -444,6 +445,9 @@ public:
     bool immutable_{false};
 
 protected:
+    std::atomic<int64_t> current_memory_usage_{0};
+    mutable std::shared_mutex memory_usage_mutex_{};
+
     bool has_raw_vector_{false};
     bool has_attribute_{false};
 

@@ -119,6 +119,9 @@ public:
     virtual void
     Unpack(){};
 
+    [[nodiscard]] virtual int64_t
+    GetCurrentMemoryUsage() const = 0;
+
 public:
     BucketIdType bucket_count_{0};
     uint32_t code_size_{0};

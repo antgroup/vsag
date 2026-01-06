@@ -163,4 +163,10 @@ IVFNearestPartition::GetCentroid(BucketIdType bucket_id, Vector<float>& centroid
     }
     this->route_index_ptr_->GetCodeByInnerId(bucket_id, (uint8_t*)centroid.data());
 }
+
+[[nodiscard]] int64_t
+IVFNearestPartition::GetCurrentMemoryUsage() const {
+    return static_cast<int64_t>(sizeof(IVFNearestPartition) +
+                                this->route_index_ptr_->GetMemoryUsage());
+}
 }  // namespace vsag

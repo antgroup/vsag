@@ -137,6 +137,9 @@ public:
         this->io_ = io;
     }
 
+    int64_t
+    GetCurrentMemoryUsage() const override;
+
 private:
     inline void
     query(float* result_dists,
@@ -151,6 +154,7 @@ private:
         return computer;
     }
 
+private:
     std::shared_ptr<Quantizer<QuantTmpl>> quantizer_{nullptr};
     std::shared_ptr<BasicIO<IOTmpl>> io_{nullptr};
 

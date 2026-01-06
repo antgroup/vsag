@@ -51,6 +51,11 @@ public:
     void
     Reset() override;
 
+    int64_t
+    MemoryUsage() const override {
+        return sizeof(VisitedList) + sizeof(VisitedListType) * this->max_size_;
+    }
+
 private:
     Allocator* const allocator_{nullptr};
 

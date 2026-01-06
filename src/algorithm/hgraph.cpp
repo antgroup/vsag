@@ -1331,6 +1331,7 @@ HGraph::Deserialize(StreamReader& reader) {
         if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
             this->attr_filter_index_->Deserialize(reader);
         }
+        this->cal_memory_usage();
     } else {  // create like `else if ( ver in [v0.15, v0.17] )` here if need in the future
         logger::debug("parse with new version format");
 
@@ -1596,7 +1597,6 @@ HGraph::resize(uint64_t new_size) {
         pool_ = std::make_shared<VisitedListPool>(1, allocator_, new_size_power_2, allocator_);
         this->label_table_->Resize(new_size_power_2);
         bottom_graph_->Resize(new_size_power_2);
-        this->max_capacity_.store(new_size_power_2);
         this->basic_flatten_codes_->Resize(new_size_power_2);
         if (use_reorder_) {
             this->high_precise_codes_->Resize(new_size_power_2);
@@ -1607,7 +1607,9 @@ HGraph::resize(uint64_t new_size) {
         if (this->extra_infos_ != nullptr) {
             this->extra_infos_->Resize(new_size_power_2);
         }
+        this->max_capacity_.store(new_size_power_2);
     }
+    this->cal_memory_usage();
 }
 void
 HGraph::InitFeatures() {
@@ -1646,6 +1648,7 @@ HGraph::InitFeatures() {
     });
     // other
     this->index_feature_list_->SetFeatures({IndexFeature::SUPPORT_ESTIMATE_MEMORY,
+                                            IndexFeature::SUPPORT_GET_MEMORY_USAGE,
                                             IndexFeature::SUPPORT_CHECK_ID_EXIST,
                                             IndexFeature::SUPPORT_CLONE,
                                             IndexFeature::SUPPORT_EXPORT_MODEL,
@@ -2486,6 +2489,33 @@ HGraph::AnalyzeIndexBySearch(const SearchRequest& request) {
 void
 HGraph::GetAttributeSetByInnerId(InnerIdType inner_id, AttributeSet* attr) const {
     this->attr_filter_index_->GetAttribute(0, inner_id, attr);
+}
+
+void
+HGraph::cal_memory_usage() {
+    auto memory = sizeof(HGraph);
+    memory += this->neighbors_mutex_->GetCurrentMemoryUsage();
+    memory += this->pool_->GetCurrentMemoryUsage();
+    memory += this->label_table_->GetCurrentMemoryUsage();
+    memory += this->basic_flatten_codes_->GetCurrentMemoryUsage();
+    memory += this->bottom_graph_->GetCurrentMemoryUsage();
+    for (auto& graph : this->route_graphs_) {
+        memory += graph->GetCurrentMemoryUsage();
+    }
+    if (use_reorder_) {
+        memory += this->high_precise_codes_->GetCurrentMemoryUsage();
+    }
+
+    if (this->extra_infos_ != nullptr and this->extra_info_size_ > 0) {
+        memory += this->extra_infos_->GetCurrentMemoryUsage();
+    }
+
+    if (this->create_new_raw_vector_ and this->raw_vector_ != nullptr) {
+        memory += raw_vector_->GetCurrentMemoryUsage();
+    }
+
+    std::unique_lock lock(this->memory_usage_mutex_);
+    this->current_memory_usage_.store(static_cast<int64_t>(memory));
 }
 
 }  // namespace vsag

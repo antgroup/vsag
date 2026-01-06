@@ -25,6 +25,8 @@ DEFINE_POINTER(MutexArray);
 
 class MutexArray {
 public:
+    virtual ~MutexArray() = default;
+
     virtual void
     Lock(uint32_t i) = 0;
 
@@ -39,6 +41,9 @@ public:
 
     virtual void
     Resize(uint32_t new_element_num) = 0;
+
+    virtual int64_t
+    GetCurrentMemoryUsage() = 0;
 };
 
 class PointsMutex : public MutexArray {
@@ -59,6 +64,9 @@ public:
 
     void
     Resize(uint32_t new_element_num) override;
+
+    int64_t
+    GetCurrentMemoryUsage() override;
 
 private:
     Vector<std::shared_ptr<std::shared_mutex>> neighbors_mutex_;
@@ -86,6 +94,11 @@ public:
 
     void
     Resize(uint32_t new_element_num) override {
+    }
+
+    int64_t
+    GetCurrentMemoryUsage() override {
+        return 0;
     }
 };
 

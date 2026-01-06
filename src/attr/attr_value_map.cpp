@@ -115,4 +115,30 @@ AttrValueMap::Deserialize(StreamReader& reader) {
         string_to_bitset_[key] = manager;
     }
 }
+
+template <typename T>
+int64_t
+get_memory_usage(const UnorderedMap<T, MultiBitsetManager*>& map) {
+    int64_t memory_usage = 0;
+    for (const auto& [key, value] : map) {
+        memory_usage += sizeof(T) + value->GetCurrentMemoryUsage();
+    }
+    return memory_usage;
+}
+
+int64_t
+AttrValueMap::GetCurrentMemoryUsage() const {
+    int64_t memory_usage = sizeof(AttrValueMap);
+    memory_usage += get_memory_usage(int64_to_bitset_);
+    memory_usage += get_memory_usage(int32_to_bitset_);
+    memory_usage += get_memory_usage(int16_to_bitset_);
+    memory_usage += get_memory_usage(int8_to_bitset_);
+    memory_usage += get_memory_usage(uint64_to_bitset_);
+    memory_usage += get_memory_usage(uint32_to_bitset_);
+    memory_usage += get_memory_usage(uint16_to_bitset_);
+    memory_usage += get_memory_usage(uint8_to_bitset_);
+    memory_usage += get_memory_usage(string_to_bitset_);
+    return memory_usage;
+}
+
 }  // namespace vsag

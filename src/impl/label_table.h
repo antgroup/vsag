@@ -294,6 +294,14 @@ public:
     void
     MergeOther(const LabelTablePtr& other, const IdMapFunction& id_map = nullptr);
 
+    int64_t
+    GetCurrentMemoryUsage() {
+        return sizeof(LabelTable) + label_table_.size() * sizeof(LabelType) +
+               label_remap_.size() * (sizeof(LabelType) + sizeof(InnerIdType)) +
+               deleted_ids_.size() * sizeof(InnerIdType) +
+               duplicate_records_.size() * (sizeof(DuplicateRecord*) + sizeof(DuplicateRecord));
+    }
+
 public:
     Vector<LabelType> label_table_;
     STLUnorderedMap<LabelType, InnerIdType> label_remap_;

@@ -1446,8 +1446,38 @@ TestIndex::TestDuplicateAdd(const TestIndex::IndexPtr& index, const TestDatasetP
     REQUIRE(add_index_2.has_value());
     check_func(add_index_2.value());
 }
+
 void
 TestIndex::TestEstimateMemory(const std::string& index_name,
+                              const std::string& build_param,
+                              const TestDatasetPtr& dataset) {
+    auto allocator = std::make_shared<fixtures::MemoryRecordAllocator>();
+    {
+        vsag::Resource resource(allocator.get(), nullptr);
+        vsag::Engine engine(&resource);
+        auto index1 = engine.CreateIndex(index_name, build_param).value();
+        REQUIRE(index1->GetNumElements() == 0);
+        if (index1->CheckFeature(vsag::SUPPORT_ESTIMATE_MEMORY)) {
+            auto data_size = dataset->base_->GetNumElements();
+            auto estimate_memory = index1->EstimateMemory(data_size);
+            auto build_index = index1->Build(dataset->base_);
+            auto real_memory = allocator->GetCurrentMemory();
+            if (estimate_memory <= static_cast<uint64_t>(real_memory * 0.8) or
+                estimate_memory >= static_cast<uint64_t>(real_memory * 1.2)) {
+                WARN(fmt::format("estimate_memory({}) is not in range [{}, {}]",
+                                 estimate_memory,
+                                 static_cast<uint64_t>(real_memory * 0.8),
+                                 static_cast<uint64_t>(real_memory * 1.2)));
+            }
+
+            REQUIRE(estimate_memory >= static_cast<uint64_t>(real_memory * 0.1));
+            REQUIRE(estimate_memory <= static_cast<uint64_t>(real_memory * 5.0));
+        }
+    }
+}
+
+void
+TestIndex::TestGetMemoryUsage(const std::string& index_name,
                               const std::string& build_param,
                               const TestDatasetPtr& dataset) {
     auto allocator = std::make_shared<fixtures::MemoryRecordAllocator>();
@@ -1460,9 +1490,8 @@ TestIndex::TestEstimateMemory(const std::string& index_name,
         REQUIRE(index2->GetNumElements() == 0);
         fixtures::TempDir dir("index");
         auto path = dir.GenerateRandomFile();
-        if (index1->CheckFeature(vsag::SUPPORT_ESTIMATE_MEMORY)) {
+        if (index1->CheckFeature(vsag::SUPPORT_GET_MEMORY_USAGE)) {
             auto data_size = dataset->base_->GetNumElements();
-            auto estimate_memory = index1->EstimateMemory(data_size);
             auto build_index = index2->Build(dataset->base_);
             REQUIRE(build_index.has_value());
             std::ofstream outf(path, std::ios::binary);
@@ -1483,17 +1512,6 @@ TestIndex::TestEstimateMemory(const std::string& index_name,
 
             REQUIRE(get_memory >= static_cast<uint64_t>(real_memory * 0.2));
             REQUIRE(get_memory <= static_cast<uint64_t>(real_memory * 3.2));
-
-            if (estimate_memory <= static_cast<uint64_t>(real_memory * 0.8) or
-                estimate_memory >= static_cast<uint64_t>(real_memory * 1.2)) {
-                WARN(fmt::format("estimate_memory({}) is not in range [{}, {}]",
-                                 estimate_memory,
-                                 static_cast<uint64_t>(real_memory * 0.8),
-                                 static_cast<uint64_t>(real_memory * 1.2)));
-            }
-
-            REQUIRE(estimate_memory >= static_cast<uint64_t>(real_memory * 0.1));
-            REQUIRE(estimate_memory <= static_cast<uint64_t>(real_memory * 5.0));
             inf.close();
         }
     }
