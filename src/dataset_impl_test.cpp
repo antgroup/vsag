@@ -27,7 +27,7 @@ TEST_CASE("Dataset Implement Test", "[ut][dataset]") {
     vsag::DefaultAllocator allocator;
     SECTION("allocator") {
         auto dataset = vsag::Dataset::Make();
-        auto* data = (float*)allocator.Allocate(sizeof(float) * 1);
+        auto* data = static_cast<float*>(allocator.Allocate(sizeof(float) * 1));
         dataset->Float32Vectors(data)->Owner(true, &allocator);
     }
 

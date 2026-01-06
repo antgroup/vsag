@@ -362,8 +362,8 @@ SparseTermDataCell::GetSparseVector(uint32_t base_id,
     }
 
     data->len_ = ids.size();
-    data->ids_ = (uint32_t*)allocator->Allocate(sizeof(uint32_t) * data->len_);
-    data->vals_ = (float*)allocator->Allocate(sizeof(float) * data->len_);
+    data->ids_ = static_cast<uint32_t*>(allocator->Allocate(sizeof(uint32_t) * data->len_));
+    data->vals_ = static_cast<float*>(allocator->Allocate(sizeof(float) * data->len_));
 
     memcpy(data->ids_, ids.data(), data->len_ * sizeof(uint32_t));
     memcpy(data->vals_, vals.data(), data->len_ * sizeof(float));

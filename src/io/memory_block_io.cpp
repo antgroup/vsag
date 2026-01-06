@@ -129,7 +129,7 @@ MemoryBlockIO::check_and_realloc(uint64_t size) {
     auto cur_block_size = this->blocks_.size();
     this->blocks_.reserve(new_block_count);
     while (cur_block_size < new_block_count) {
-        this->blocks_.emplace_back((uint8_t*)(this->allocator_->Allocate(block_size_)));
+        this->blocks_.emplace_back(static_cast<uint8_t*>(this->allocator_->Allocate(block_size_)));
         ++cur_block_size;
     }
 }

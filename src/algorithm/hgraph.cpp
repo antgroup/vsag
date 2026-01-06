@@ -874,7 +874,8 @@ HGraph::KnnSearch(const DatasetPtr& query,
     auto [dataset_results, dists, ids] = create_fast_dataset(count, search_allocator);
     char* extra_infos = nullptr;
     if (extra_info_size_ > 0) {
-        extra_infos = (char*)search_allocator->Allocate(extra_info_size_ * search_result->Size());
+        extra_infos = static_cast<char*>(
+            search_allocator->Allocate(extra_info_size_ * search_result->Size()));
         dataset_results->ExtraInfos(extra_infos);
     }
     for (int64_t j = count - 1; j >= 0; --j) {
@@ -1069,7 +1070,8 @@ HGraph::RangeSearch(const DatasetPtr& query,
     auto [dataset_results, dists, ids] = create_fast_dataset(count, allocator_);
     char* extra_infos = nullptr;
     if (extra_info_size_ > 0) {
-        extra_infos = (char*)allocator_->Allocate(extra_info_size_ * search_result->Size());
+        extra_infos =
+            static_cast<char*>(allocator_->Allocate(extra_info_size_ * search_result->Size()));
         dataset_results->ExtraInfos(extra_infos);
     }
     for (int64_t j = count - 1; j >= 0; --j) {
@@ -1430,7 +1432,7 @@ HGraph::CalDistanceById(const float* query, const int64_t* ids, int64_t count) c
     }
     auto result = Dataset::Make();
     result->Owner(true, allocator_);
-    auto* distances = (float*)allocator_->Allocate(sizeof(float) * count);
+    auto* distances = static_cast<float*>(allocator_->Allocate(sizeof(float) * count));
     result->Distances(distances);
     auto computer = flat->FactoryComputer(query);
     Vector<InnerIdType> inner_ids(count, 0, allocator_);
@@ -2115,7 +2117,8 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     auto [dataset_results, dists, ids] = create_fast_dataset(count, search_allocator);
     char* extra_infos = nullptr;
     if (extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
-        extra_infos = (char*)search_allocator->Allocate(extra_info_size_ * search_result->Size());
+        extra_infos = static_cast<char*>(
+            search_allocator->Allocate(extra_info_size_ * search_result->Size()));
         dataset_results->ExtraInfos(extra_infos);
     }
     for (int64_t j = count - 1; j >= 0; --j) {
@@ -2382,8 +2385,9 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
 
             float neighbor_dist = 0;
             try {
-                neighbor_dist = this->CalcDistanceById(
-                    (float*)new_base_vec, this->label_table_->GetLabelById(neighbor_inner_id));
+                neighbor_dist =
+                    this->CalcDistanceById(static_cast<float*>(new_base_vec),
+                                           this->label_table_->GetLabelById(neighbor_inner_id));
             } catch (const std::runtime_error& e) {
                 // incase that neighbor has been deleted
                 continue;
@@ -2449,7 +2453,7 @@ HGraph::AnalyzeIndexBySearch(const SearchRequest& request) {
         auto query = Dataset::Make();
         query->NumElements(1)
             ->Dim(dim_)
-            ->Float32Vectors((const float*)get_data(querys, i))
+            ->Float32Vectors(static_cast<const float*>(get_data(querys, i)))
             ->Owner(false);
         DatasetPtr search_result;
         double single_query_time;

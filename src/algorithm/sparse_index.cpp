@@ -73,7 +73,7 @@ SparseIndex::Deserialize(StreamReader& reader) {
     for (int i = 0; i < cur_element_count_; ++i) {
         uint32_t len;
         StreamReader::ReadObj(reader, len);
-        datas_[i] = (uint32_t*)allocator_->Allocate((2 * len + 1) * sizeof(uint32_t));
+        datas_[i] = static_cast<uint32_t*>(allocator_->Allocate((2 * len + 1) * sizeof(uint32_t)));
         datas_[i][0] = len;
         reader.Read((char*)(datas_[i] + 1), static_cast<uint64_t>(2 * len) * sizeof(uint32_t));
     }
@@ -136,7 +136,7 @@ SparseIndex::Add(const DatasetPtr& base) {
         const auto& vector = sparse_vectors[i];
         auto size = (vector.len_ + 1) * sizeof(uint32_t);  // vector index + array size
         size += (vector.len_) * sizeof(float);             // vector value
-        datas_[i + cur_element_count_] = (uint32_t*)allocator_->Allocate(size);
+        datas_[i + cur_element_count_] = static_cast<uint32_t*>(allocator_->Allocate(size));
         datas_[i + cur_element_count_][0] = vector.len_;
         auto* data = datas_[i + cur_element_count_] + 1;
         label_table_->Insert(i + cur_element_count_, ids[i]);
@@ -247,8 +247,8 @@ SparseIndex::GetSparseVectorByInnerId(InnerIdType inner_id,
     Allocator* allocator = specified_allocator != nullptr ? specified_allocator : allocator_;
 
     data->len_ = datas_[inner_id][0];
-    data->ids_ = (uint32_t*)allocator->Allocate(sizeof(uint32_t) * data->len_);
-    data->vals_ = (float*)allocator->Allocate(sizeof(float) * data->len_);
+    data->ids_ = static_cast<uint32_t*>(allocator->Allocate(sizeof(uint32_t) * data->len_));
+    data->vals_ = static_cast<float*>(allocator->Allocate(sizeof(float) * data->len_));
 
     memcpy(data->ids_, datas_[inner_id] + 1, data->len_ * sizeof(uint32_t));
     memcpy(data->vals_, datas_[inner_id] + 1 + datas_[inner_id][0], data->len_ * sizeof(float));
@@ -259,7 +259,7 @@ SparseIndex::CalDistanceById(const DatasetPtr& query, const int64_t* ids, int64_
     // prepare result
     auto result = Dataset::Make();
     result->Owner(true, allocator_);
-    auto* distances = (float*)allocator_->Allocate(sizeof(float) * count);
+    auto* distances = static_cast<float*>(allocator_->Allocate(sizeof(float) * count));
     result->Distances(distances);
 
     // key optimization: only sort once for one query
