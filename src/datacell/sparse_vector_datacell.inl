@@ -176,4 +176,15 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::SparseVectorDataCell(
     this->code_size_ = this->quantizer_->GetCodeSize();
 }
 
+template <typename QuantTmpl, typename IOTmpl>
+int64_t
+SparseVectorDataCell<QuantTmpl, IOTmpl>::GetCurrentMemoryUsage() const {
+    int64_t memory = sizeof(SparseVectorDataCell<QuantTmpl, IOTmpl>);
+    memory += this->offset_io_->size_;
+    if (IOTmpl::InMemory) {
+        memory += this->io_->GetCurrentMemoryUsage();
+    }
+    memory += sizeof(QuantTmpl);
+    return memory;
 }
+} // namespace vsag

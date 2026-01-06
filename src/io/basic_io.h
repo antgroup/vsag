@@ -218,6 +218,11 @@ public:
         }
     }
 
+    inline int64_t
+    GetCurrentMemoryUsage() const {
+        return this->size_;
+    }
+
 public:
     /**
      * @brief The size of the IO object.

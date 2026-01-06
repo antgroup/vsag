@@ -89,6 +89,11 @@ public:
     virtual void
     GetResidual(size_t n, const float* x, float* residuals, float* centroids, BucketIdType* assign);
 
+    virtual int64_t
+    GetCurrentMemoryUsage() const {
+        return 0;
+    }
+
 public:
     bool is_trained_{false};
 

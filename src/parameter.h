@@ -27,8 +27,7 @@ class Parameter {
 public:
     static std::string
     TryToParseType(const JsonType& json) {
-        CHECK_ARGUMENT(json.Contains(TYPE_KEY),
-                       "params must have type");  // TODO(LHT): "type" rename
+        CHECK_ARGUMENT(json.Contains(TYPE_KEY), "params must have type");
         return json[TYPE_KEY].GetString();
     }
 

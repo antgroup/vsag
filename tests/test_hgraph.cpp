@@ -1817,8 +1817,8 @@ TEST_CASE("(Daily) HGraph Duplicate Build", "[ft][hgraph][daily]") {
 }
 
 static void
-TestHGraphEstimateMemory(const fixtures::HGraphTestIndexPtr& test_index,
-                         const fixtures::HGraphResourcePtr& resource) {
+TestHGraphEstimateMemoryAndGetMemoryUsage(const fixtures::HGraphTestIndexPtr& test_index,
+                                          const fixtures::HGraphResourcePtr& resource) {
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
@@ -1851,22 +1851,23 @@ TestHGraphEstimateMemory(const fixtures::HGraphTestIndexPtr& test_index,
                                                                          0.8 /*valid_ratio*/,
                                                                          extra_info_size);
                 TestIndex::TestEstimateMemory(test_index->name, param, dataset);
+                TestIndex::TestGetMemoryUsage(test_index->name, param, dataset);
                 vsag::Options::Instance().set_block_size_limit(origin_size);
             }
         }
     }
 }
 
-TEST_CASE("(PR) HGraph Estimate Memory", "[ft][hgraph][pr]") {
+TEST_CASE("(PR) HGraph Estimate Memory And Get Memory Usage", "[ft][hgraph][pr]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(true);
-    TestHGraphEstimateMemory(test_index, resource);
+    TestHGraphEstimateMemoryAndGetMemoryUsage(test_index, resource);
 }
 
 TEST_CASE("(Daily) HGraph Estimate Memory", "[ft][hgraph][daily]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(false);
-    TestHGraphEstimateMemory(test_index, resource);
+    TestHGraphEstimateMemoryAndGetMemoryUsage(test_index, resource);
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::HGraphTestIndex, "HGraph ELP Optimizer", "[ft][hgraph]") {

@@ -44,6 +44,19 @@ public:
      * taken from, preventing pool imbalance under concurrent access.
      */
     int64_t source_pool_id_{0};
+
+    /**
+     * @brief Get the memory usage of the resource object.
+     *
+     * This pure virtual function forces derived classes to provide an
+     * implementation for returning the memory usage of their specific resources.
+     * The memory usage should include all dynamically allocated memory, whether
+     * directly or indirectly, used by the resource.
+     *
+     * @return int64_t The memory usage of the resource object in bytes.
+     */
+    virtual int64_t
+    MemoryUsage() const = 0;
 };
 
 }  // namespace vsag
