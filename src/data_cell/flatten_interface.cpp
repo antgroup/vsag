@@ -23,20 +23,32 @@
 #include "sparse_vector_datacell.h"
 
 namespace vsag {
+
 template <typename QuantTemp, typename IOTemp>
 static FlattenInterfacePtr
-make_instance(const FlattenInterfaceParamPtr& param, const IndexCommonParam& common_param) {
+make_instance_flatten(const FlattenInterfaceParamPtr& param, const IndexCommonParam& common_param) {
     auto& io_param = param->io_parameter;
     auto& quantizer_param = param->quantizer_parameter;
-    if (param->name == SPARSE_VECTOR_DATA_CELL) {
-        return std::make_shared<SparseVectorDataCell<QuantTemp, IOTemp>>(
-            quantizer_param, io_param, common_param);
-    }
     if (param->name == FLATTEN_DATA_CELL) {
         return std::make_shared<FlattenDataCell<QuantTemp, IOTemp>>(
             quantizer_param, io_param, common_param);
     }
-    return nullptr;
+    throw VsagException(ErrorType::INVALID_ARGUMENT,
+                        fmt::format("Unknown flatten interface name: {}", param->name));
+}
+
+template <typename QuantTemp, typename IOTemp>
+static FlattenInterfacePtr
+make_instance_sparse(const FlattenInterfaceParamPtr& param, const IndexCommonParam& common_param) {
+    auto& io_param = param->io_parameter;
+    auto& quantizer_param = param->quantizer_parameter;
+
+    if (param->name == SPARSE_VECTOR_DATA_CELL) {
+        return std::make_shared<SparseVectorDataCell<QuantTemp, IOTemp>>(
+            quantizer_param, io_param, common_param);
+    }
+    throw VsagException(ErrorType::INVALID_ARGUMENT,
+                        fmt::format("Unknown flatten interface name: {}", param->name));
 }
 
 template <MetricType metric, typename IOTemp>
@@ -44,37 +56,37 @@ static FlattenInterfacePtr
 make_instance(const FlattenInterfaceParamPtr& param, const IndexCommonParam& common_param) {
     std::string quantization_string = param->quantizer_parameter->GetTypeName();
     if (quantization_string == QUANTIZATION_TYPE_VALUE_SQ8) {
-        return make_instance<SQ8Quantizer<metric>, IOTemp>(param, common_param);
+        return make_instance_flatten<SQ8Quantizer<metric>, IOTemp>(param, common_param);
     }
     if (quantization_string == QUANTIZATION_TYPE_VALUE_FP32) {
-        return make_instance<FP32Quantizer<metric>, IOTemp>(param, common_param);
+        return make_instance_flatten<FP32Quantizer<metric>, IOTemp>(param, common_param);
     }
     if (quantization_string == QUANTIZATION_TYPE_VALUE_SQ4) {
-        return make_instance<SQ4Quantizer<metric>, IOTemp>(param, common_param);
+        return make_instance_flatten<SQ4Quantizer<metric>, IOTemp>(param, common_param);
     }
     if (quantization_string == QUANTIZATION_TYPE_VALUE_SQ4_UNIFORM) {
-        return make_instance<SQ4UniformQuantizer<metric>, IOTemp>(param, common_param);
+        return make_instance_flatten<SQ4UniformQuantizer<metric>, IOTemp>(param, common_param);
     }
     if (quantization_string == QUANTIZATION_TYPE_VALUE_SQ8_UNIFORM) {
-        return make_instance<SQ8UniformQuantizer<metric>, IOTemp>(param, common_param);
+        return make_instance_flatten<SQ8UniformQuantizer<metric>, IOTemp>(param, common_param);
     }
     if (quantization_string == QUANTIZATION_TYPE_VALUE_BF16) {
-        return make_instance<BF16Quantizer<metric>, IOTemp>(param, common_param);
+        return make_instance_flatten<BF16Quantizer<metric>, IOTemp>(param, common_param);
     }
     if (quantization_string == QUANTIZATION_TYPE_VALUE_FP16) {
-        return make_instance<FP16Quantizer<metric>, IOTemp>(param, common_param);
+        return make_instance_flatten<FP16Quantizer<metric>, IOTemp>(param, common_param);
     }
     if (quantization_string == QUANTIZATION_TYPE_VALUE_PQ) {
-        return make_instance<ProductQuantizer<metric>, IOTemp>(param, common_param);
+        return make_instance_flatten<ProductQuantizer<metric>, IOTemp>(param, common_param);
     }
     if (quantization_string == QUANTIZATION_TYPE_VALUE_PQFS) {
-        return make_instance<PQFastScanQuantizer<metric>, IOTemp>(param, common_param);
+        return make_instance_flatten<PQFastScanQuantizer<metric>, IOTemp>(param, common_param);
     }
     if (quantization_string == QUANTIZATION_TYPE_VALUE_RABITQ) {
-        return make_instance<RaBitQuantizer<metric>, IOTemp>(param, common_param);
+        return make_instance_flatten<RaBitQuantizer<metric>, IOTemp>(param, common_param);
     }
     if (quantization_string == QUANTIZATION_TYPE_VALUE_SPARSE) {
-        return make_instance<SparseQuantizer<metric>, IOTemp>(param, common_param);
+        return make_instance_sparse<SparseQuantizer<metric>, IOTemp>(param, common_param);
     }
     return nullptr;
 }

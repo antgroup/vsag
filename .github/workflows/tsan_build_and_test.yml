@@ -15,7 +15,13 @@ jobs:
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     container:
       image: vsaglib/vsag:ci-x86
+      volumes:
+        - /opt:/useless
     steps:
+      - name: Free Disk Space
+        run: |
+          rm -rf /useless/*
+          rm -rf /opt/hostedtoolcache
       - uses: actions/checkout@v4
         with:
           fetch-depth: '0'
