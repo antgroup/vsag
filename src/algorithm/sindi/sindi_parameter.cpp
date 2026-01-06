@@ -60,6 +60,15 @@ SINDIParameter::FromJson(const JsonType& json) {
         window_size = DEFAULT_WINDOW_SIZE;
     }
 
+    if (json.Contains(SPARSE_AVG_DOC_TERM_LENGTH)) {
+        avg_doc_term_length = json[SPARSE_AVG_DOC_TERM_LENGTH].GetInt();
+        CHECK_ARGUMENT((0 < avg_doc_term_length),
+                       fmt::format("avg_doc_term_length must be greater than 0, but now is {}",
+                                   avg_doc_term_length));
+    } else {
+        avg_doc_term_length = DEFAULT_AVG_DOC_TERM_LENGTH;
+    }
+
     if (json.Contains(SPARSE_DESERIALIZE_WITHOUT_FOOTER)) {
         deserialize_without_footer = json[SPARSE_DESERIALIZE_WITHOUT_FOOTER].GetBool();
     }
@@ -77,6 +86,7 @@ SINDIParameter::ToJson() const {
     json[USE_REORDER_KEY].SetBool(use_reorder);
     json[USE_QUANTIZATION].SetBool(use_quantization);
     json[SPARSE_WINDOW_SIZE].SetInt(window_size);
+    json[SPARSE_AVG_DOC_TERM_LENGTH].SetInt(avg_doc_term_length);
     return json;
 }
 
@@ -99,6 +109,9 @@ SINDIParameter::CheckCompatibility(const vsag::ParamPtr& other) const {
         return false;
     }
     if (this->use_quantization != sindi_param->use_quantization) {
+        return false;
+    }
+    if (this->avg_doc_term_length != sindi_param->avg_doc_term_length) {
         return false;
     }
     return true;

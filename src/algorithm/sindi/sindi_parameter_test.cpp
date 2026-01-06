@@ -47,6 +47,7 @@ struct SINDIDefaultParam {
     float doc_prune_ratio = 0.1F;
     int window_size = 55555;
     int term_id_limit = 10000;
+    int avg_doc_term_length = 100;
 };
 
 std::string
@@ -57,6 +58,7 @@ generate_sindi_param(const SINDIDefaultParam& param) {
     json[SPARSE_DOC_PRUNE_RATIO].SetFloat(param.doc_prune_ratio);
     json[SPARSE_WINDOW_SIZE].SetInt(param.window_size);
     json[SPARSE_TERM_ID_LIMIT].SetInt(param.term_id_limit);
+    json[SPARSE_AVG_DOC_TERM_LENGTH].SetInt(param.avg_doc_term_length);
     return json.Dump();
 }
 
@@ -71,6 +73,7 @@ TEST_CASE("SINDI Index Parameters Test", "[ut][SINDIParameter]") {
     REQUIRE(std::abs(param->doc_prune_ratio - default_param.doc_prune_ratio) < 1e-3);
     REQUIRE(param->window_size == default_param.window_size);
     REQUIRE(param->term_id_limit == default_param.term_id_limit);
+    REQUIRE(param->avg_doc_term_length == default_param.avg_doc_term_length);
 
     vsag::ParameterTest::TestToJson(param);
 
@@ -94,4 +97,6 @@ TEST_CASE("SINDI Index Parameters Compatibility Test", "[ut][SINDIParameter]") {
     TEST_COMPATIBILITY_CASE("doc_prune_ratio compatibility", doc_prune_ratio, 0.2F, 0.3F, false);
     TEST_COMPATIBILITY_CASE("window_size compatibility", window_size, 33333, 55555, false);
     TEST_COMPATIBILITY_CASE("term_id_limit compatibility", term_id_limit, 10000, 10001, false);
+    TEST_COMPATIBILITY_CASE(
+        "avg_doc_term_length compatibility", avg_doc_term_length, 100, 200, false);
 }

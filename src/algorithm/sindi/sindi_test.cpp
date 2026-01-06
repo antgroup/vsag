@@ -92,7 +92,8 @@ TEST_CASE("SINDI Basic Test", "[ut][SINDI]") {
         "doc_prune_ratio": 0.0,
         "term_prune_ratio": 0.0,
         "window_size": 10000,
-        "term_id_limit": 30001
+        "term_id_limit": 30001,
+        "avg_doc_term_length": 100
     }})";
 
     vsag::JsonType param_json = vsag::JsonType::Parse(fmt::format(param_str));
@@ -276,7 +277,8 @@ TEST_CASE("SINDI Quantization Test", "[ut][SINDI]") {
         "doc_prune_ratio": 0.0,
         "term_prune_ratio": 0.0,
         "window_size": 10000,
-        "term_id_limit": 30001
+        "term_id_limit": 30001,
+        "avg_doc_term_length": 100
     }})";
 
     vsag::JsonType param_json = vsag::JsonType::Parse(fmt::format(param_str));
