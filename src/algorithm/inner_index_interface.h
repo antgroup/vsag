@@ -457,6 +457,7 @@ protected:
     ExtraInfoInterfacePtr extra_infos_{nullptr};
 
     uint64_t build_thread_count_{1};
+    int64_t train_sample_count_{65536L};
 
     std::shared_ptr<SafeThreadPool> build_pool_{nullptr};
 

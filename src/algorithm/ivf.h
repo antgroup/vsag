@@ -174,7 +174,6 @@ private:
     BucketIdType buckets_per_data_;
 
     int64_t total_elements_{0};
-    int64_t train_sample_count_{65536L};
     bool is_trained_{false};
 
     FlattenInterfacePtr reorder_codes_{nullptr};

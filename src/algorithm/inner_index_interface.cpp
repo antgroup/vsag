@@ -41,6 +41,7 @@ InnerIndexInterface::InnerIndexInterface(const InnerIndexParameterPtr& index_par
       data_type_(common_param.data_type_),
       build_thread_count_(index_param->build_thread_count),
       use_attribute_filter_(index_param->use_attribute_filter),
+      train_sample_count_(index_param->train_sample_count),
       use_reorder_(index_param->use_reorder) {
     this->label_table_ = std::make_shared<LabelTable>(allocator_);
     this->tomb_label_table_ = std::make_shared<LabelTable>(allocator_);

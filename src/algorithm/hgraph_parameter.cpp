@@ -137,6 +137,7 @@ HGraphParameter::ToJson() const {
     json[EF_CONSTRUCTION_KEY].SetInt(this->ef_construction);
     json[ALPHA_KEY].SetFloat(this->alpha);
     json[SUPPORT_DUPLICATE].SetBool(this->support_duplicate);
+    json[TRAIN_SAMPLE_COUNT_KEY].SetInt(this->train_sample_count);
     return json;
 }
 
