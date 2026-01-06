@@ -57,6 +57,9 @@ public:
     void
     Deserialize(StreamReader& reader) override;
 
+    int64_t
+    GetCurrentMemoryUsage() const override;
+
 private:
     Allocator* const allocator_{nullptr};
     Vector<std::unique_ptr<EliasFanoEncoder>> neighbor_sets_;

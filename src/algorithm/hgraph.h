@@ -92,11 +92,6 @@ public:
     void
     GetCodeByInnerId(InnerIdType inner_id, uint8_t* data) const override;
 
-    int64_t
-    GetMemoryUsage() const override {
-        return static_cast<int64_t>(this->CalSerializeSize());
-    }
-
     std::string
     GetMemoryUsageDetail() const override;
 
@@ -327,6 +322,9 @@ private:
     void
     check_and_init_raw_vector(const FlattenInterfaceParamPtr& raw_vector_param,
                               const IndexCommonParam& common_param);
+
+    void
+    cal_memory_usage();
 
 private:
     FlattenInterfacePtr basic_flatten_codes_{nullptr};

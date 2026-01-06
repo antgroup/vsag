@@ -261,6 +261,11 @@ public:
                        const TestDatasetPtr& dataset);
 
     static void
+    TestGetMemoryUsage(const std::string& index_name,
+                       const std::string& build_param,
+                       const TestDatasetPtr& dataset);
+
+    static void
     TestCheckIdExist(const IndexPtr& index,
                      const TestDatasetPtr& dataset,
                      bool expected_success = true);
