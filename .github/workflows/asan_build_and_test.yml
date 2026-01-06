@@ -22,8 +22,7 @@ jobs:
         run: |
           rm -rf /useless/*
           rm -rf /opt/hostedtoolcache
-      - name: Debug with SSH
-        uses: mxschmitt/action-tmate@v3
+          rm -rf /opt/intel/oneapi/mkl
       - uses: actions/checkout@v4
       - name: Load Cache
         uses: hendrikmuhs/ccache-action@v1.2
@@ -32,7 +31,7 @@ jobs:
           save: ${{ github.event_name != 'pull_request' }}
           key: build-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
       - name: Make Asan
-        run: export CMAKE_GENERATOR="Ninja"; make asan
+        run: export CMAKE_GENERATOR="Ninja"; make asan VSAG_ENABLE_INTEL_MKL=OFF
       - name: Clean
         run: |
           find ./build -type f -name "*.o" -exec rm -f {} +
