@@ -701,4 +701,42 @@ InnerIndexInterface::get_detail_data_by_info(const IndexDetailInfo& info) const 
     return data;
 }
 
+float
+InnerIndexInterface::calc_distance_by_id(const float* query,
+                                         int64_t id,
+                                         const FlattenInterfacePtr& data) const {
+    auto result = cal_distance_by_id(query, &id, 1, data);
+    return result->GetDistances()[0];
+}
+
+DatasetPtr
+InnerIndexInterface::cal_distance_by_id(const float* query,
+                                        const int64_t* ids,
+                                        int64_t count,
+                                        const FlattenInterfacePtr& data) const {
+    auto result = Dataset::Make();
+    result->Owner(true, allocator_);
+    auto* distances = (float*)allocator_->Allocate(sizeof(float) * count);
+    result->Distances(distances);
+    auto computer = data->FactoryComputer(query);
+    Vector<InnerIdType> inner_ids(count, 0, allocator_);
+    Vector<InnerIdType> invalid_id_loc(allocator_);
+    {
+        std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
+        for (int64_t i = 0; i < count; ++i) {
+            try {
+                inner_ids[i] = this->label_table_->GetIdByLabel(ids[i]);
+            } catch (VsagException& e) {
+                logger::debug(fmt::format("failed to find id: {}", ids[i]));
+                invalid_id_loc.push_back(i);
+            }
+        }
+    }
+    data->Query(distances, computer, inner_ids.data(), count);
+    for (unsigned int i : invalid_id_loc) {
+        distances[i] = -1;
+    }
+    return result;
+}
+
 }  // namespace vsag

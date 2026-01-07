@@ -306,6 +306,7 @@ Pyramid::search_impl(const DatasetPtr& query,
 
     DistHeapPtr search_result = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
 
+    std::shared_lock<std::shared_mutex> lock(resize_mutex_);
     auto vl = pool_->TakeOne();
     if (query_path != nullptr) {
         const std::string& current_path = query_path[0];
@@ -414,6 +415,8 @@ Pyramid::Add(const DatasetPtr& base) {
     int64_t data_num = base->GetNumElements();
     const auto* data_vectors = base->GetFloat32Vectors();
     const auto* data_ids = base->GetIds();
+    std::vector<int64_t> failed_ids;
+    Vector<int64_t> data_biases(allocator_);
     int64_t local_cur_element_count = 0;
     {
         std::lock_guard lock(cur_element_count_mutex_);
@@ -427,24 +430,33 @@ Pyramid::Add(const DatasetPtr& base) {
                            max_capacity_;
             resize(new_capacity);
         }
-        cur_element_count_ += data_num;
-        base_codes_->BatchInsertVector(data_vectors, data_num);
-        if (use_reorder_) {
-            precise_codes_->BatchInsertVector(data_vectors, data_num);
+        int64_t valid_id_count = 0;
+        for (int64_t i = 0; i < data_num; ++i) {
+            if (not label_table_->CheckLabel(data_ids[i])) {
+                label_table_->Insert(valid_id_count + local_cur_element_count, data_ids[i]);
+                base_codes_->InsertVector(data_vectors + dim_ * i,
+                                          valid_id_count + local_cur_element_count);
+                if (use_reorder_) {
+                    precise_codes_->InsertVector(data_vectors + dim_ * i,
+                                                 valid_id_count + local_cur_element_count);
+                }
+                valid_id_count++;
+                data_biases.push_back(i);
+            } else {
+                logger::warn("Label {} already exists, skip adding.", data_ids[i]);
+                failed_ids.push_back(data_ids[i]);
+            }
         }
+        cur_element_count_ += valid_id_count;
     }
     std::shared_lock<std::shared_mutex> lock(resize_mutex_);
 
-    std::memcpy(label_table_->label_table_.data() + local_cur_element_count,
-                data_ids,
-                sizeof(LabelType) * data_num);
-
-    auto add_func = [&](int i) {
-        std::string current_path = path[i];
+    auto add_func = [&](int64_t i, int64_t data_bias) {
+        std::string current_path = path[data_bias];
         auto path_slices = split(current_path, PART_SLASH);
         std::shared_ptr<IndexNode> node = root_;
         auto inner_id = static_cast<InnerIdType>(i + local_cur_element_count);
-        const auto* vector = data_vectors + dim_ * i;
+        const auto* vector = data_vectors + dim_ * data_bias;
         int no_build_level_index = 0;
         for (int j = 0; j <= path_slices.size(); ++j) {
             std::shared_ptr<IndexNode> new_node = nullptr;
@@ -463,11 +475,12 @@ Pyramid::Add(const DatasetPtr& base) {
     };
 
     Vector<std::future<void>> futures(allocator_);
-    for (auto i = 0; i < data_num; ++i) {
+    for (int64_t i = 0; i < data_biases.size(); ++i) {
+        auto data_bias = data_biases[i];
         if (this->build_pool_ != nullptr) {
-            futures.push_back(this->build_pool_->GeneralEnqueue(add_func, i));
+            futures.push_back(this->build_pool_->GeneralEnqueue(add_func, i, data_bias));
         } else {
-            add_func(i);
+            add_func(i, data_bias);
         }
     }
     if (this->build_pool_ != nullptr) {
@@ -475,7 +488,7 @@ Pyramid::Add(const DatasetPtr& base) {
             future.get();
         }
     }
-    return {};
+    return failed_ids;
 }
 
 void
@@ -509,6 +522,12 @@ Pyramid::InitFeatures() {
         IndexFeature::SUPPORT_KNN_SEARCH_WITH_ID_FILTER,
         IndexFeature::SUPPORT_RANGE_SEARCH,
         IndexFeature::SUPPORT_RANGE_SEARCH_WITH_ID_FILTER,
+    });
+
+    // calculate distance by id
+
+    this->index_feature_list_->SetFeatures({
+        IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID,
     });
 
     // concurrency
@@ -807,4 +826,23 @@ Pyramid::SetImmutable() {
     immutable_ = true;
 }
 
+float
+Pyramid::CalcDistanceById(const float* query, int64_t id) const {
+    std::shared_lock<std::shared_mutex> lock(resize_mutex_);
+    auto flat = this->base_codes_;
+    if (use_reorder_) {
+        flat = this->precise_codes_;
+    }
+    return InnerIndexInterface::calc_distance_by_id(query, id, flat);
+}
+
+DatasetPtr
+Pyramid::CalDistanceById(const float* query, const int64_t* ids, int64_t count) const {
+    std::shared_lock<std::shared_mutex> lock(resize_mutex_);
+    auto flat = this->base_codes_;
+    if (use_reorder_) {
+        flat = this->precise_codes_;
+    }
+    return InnerIndexInterface::cal_distance_by_id(query, ids, count, flat);
+}
 }  // namespace vsag

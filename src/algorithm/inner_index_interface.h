@@ -22,6 +22,7 @@
 #include "data_type.h"
 #include "datacell/attribute_inverted_interface.h"
 #include "datacell/extra_info_interface.h"
+#include "datacell/flatten_interface.h"
 #include "dataset_impl.h"
 #include "inner_index_parameter.h"
 #include "metric_type.h"
@@ -424,6 +425,15 @@ protected:
 
     virtual DetailDataPtr
     get_detail_data_by_info(const IndexDetailInfo& info) const;
+
+    float
+    calc_distance_by_id(const float* query, int64_t id, const FlattenInterfacePtr& data) const;
+
+    DatasetPtr
+    cal_distance_by_id(const float* query,
+                       const int64_t* ids,
+                       int64_t count,
+                       const FlattenInterfacePtr& data) const;
 
 public:
     LabelTablePtr label_table_{nullptr};
