@@ -40,7 +40,8 @@ SINDI::SINDI(const SINDIParameterPtr& param, const IndexCommonParam& common_para
       window_term_list_(common_param.allocator_.get()),
       deserialize_without_footer_(param->deserialize_without_footer),
       deserialize_without_buffer_(param->deserialize_without_buffer),
-      quantization_params_(std::make_shared<QuantizationParams>()) {
+      quantization_params_(std::make_shared<QuantizationParams>()),
+      avg_doc_term_length_(param->avg_doc_term_length) {
     if (use_reorder_) {
         SparseIndexParameterPtr rerank_param = std::make_shared<SparseIndexParameters>();
         rerank_param->need_sort = true;
@@ -493,7 +494,11 @@ SINDI::EstimateMemory(uint64_t num_elements) const {
     mem += 2 * sizeof(int64_t) * num_elements;
 
     // size of term id + term data
-    mem += ESTIMATE_DOC_TERM * num_elements * (sizeof(float) + sizeof(uint16_t));
+    if (use_quantization_) {
+        mem += avg_doc_term_length_ * num_elements * (sizeof(uint8_t) + sizeof(uint16_t));
+    } else {
+        mem += avg_doc_term_length_ * num_elements * (sizeof(float) + sizeof(uint16_t));
+    }
 
     // size of rerank index is same as sindi
     if (use_reorder_) {
