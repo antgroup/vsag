@@ -69,23 +69,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
         GraphInterface::MakeInstance(hgraph_param->bottom_graph_param, common_param);
     mult_ = 1 / log(1.0 * static_cast<double>(this->bottom_graph_->MaximumDegree()));
 
-    auto step_block_size = Options::Instance().block_size_limit();
-    auto block_size_per_vector = this->basic_flatten_codes_->code_size_;
-    block_size_per_vector =
-        std::max(block_size_per_vector,
-                 static_cast<uint32_t>(this->bottom_graph_->maximum_degree_ * sizeof(InnerIdType)));
-    if (use_reorder_) {
-        block_size_per_vector =
-            std::max(block_size_per_vector, this->high_precise_codes_->code_size_);
-        reorder_ = std::make_shared<FlattenReorder>(this->high_precise_codes_, allocator_);
-    }
-    if (this->extra_infos_ != nullptr) {
-        block_size_per_vector =
-            std::max(block_size_per_vector, static_cast<uint32_t>(this->extra_info_size_));
-    }
-    auto increase_count = step_block_size / block_size_per_vector;
-    this->resize_increase_count_bit_ = std::max(
-        DEFAULT_RESIZE_BIT, static_cast<uint64_t>(log2(static_cast<double>(increase_count))));
+    init_resize_bit_and_reorder();
 
     this->parallel_searcher_ =
         std::make_shared<ParallelSearcher>(common_param, build_pool_, neighbors_mutex_);
@@ -512,7 +496,8 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
 
 bool
 HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
-    if (not this->index_feature_list_->CheckFeature(IndexFeature::SUPPORT_TUNE)) {
+    if (not this->index_feature_list_->CheckFeature(IndexFeature::SUPPORT_TUNE) or
+        not this->has_raw_vector_) {
         return false;
     }
 
@@ -529,68 +514,96 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
     // construct param obj
     auto hgraph_parameter = std::make_shared<HGraphParameter>();
     hgraph_parameter->FromJson(inner_json);
+    auto inner_parameter = std::make_shared<InnerIndexParameter>();
+    inner_parameter->FromJson(inner_json);
 
-    // TODO(zxy): process high_precision_code
     // init new_basic_code obj
     auto common_param = this->basic_flatten_codes_->ExportCommonParam();
     auto new_basic_code =
         FlattenInterface::MakeInstance(hgraph_parameter->base_codes_param, common_param);
+    FlattenInterfacePtr new_precise_code;
+    if (inner_parameter->use_reorder) {
+        new_precise_code =
+            FlattenInterface::MakeInstance(hgraph_parameter->precise_codes_param, common_param);
+    }
 
-    // nothing need to do
-    if (basic_flatten_codes_->GetQuantizerName() == new_basic_code->GetQuantizerName()) {
-        return true;
+    std::scoped_lock lock(this->add_mutex_);
+
+    // check which code need to tune and update create_param_ptr_
+    bool is_tune_base_code = false;
+    bool is_tune_precise_code = false;
+    auto param = std::dynamic_pointer_cast<HGraphParameter>(create_param_ptr_);
+    if (basic_flatten_codes_->GetQuantizerName() != new_basic_code->GetQuantizerName()) {
+        // [case 1] base_code is not same
+        is_tune_base_code = true;
+    }
+    if (use_reorder_ and inner_parameter->use_reorder and
+        this->high_precise_codes_->GetQuantizerName() != new_precise_code->GetQuantizerName()) {
+        // [case 2] precise code is not same
+        is_tune_precise_code = true;
+    }
+    if (not inner_parameter->use_reorder) {
+        // [case 3] drop precise_code
+        use_reorder_ = false;
+        this->high_precise_codes_.reset();
+        param->precise_codes_param.reset();
+        is_tune_precise_code = false;
+    }
+    if (not use_reorder_ and inner_parameter->use_reorder) {
+        // [case 4] assign new precise_code
+        use_reorder_ = true;
+        is_tune_precise_code = true;
     }
 
     // update create_param_ptr_
-    std::scoped_lock lock(this->add_mutex_);
-    auto param = std::dynamic_pointer_cast<HGraphParameter>(create_param_ptr_);
-    param->base_codes_param = hgraph_parameter->base_codes_param;
+    if (is_tune_base_code) {
+        param->base_codes_param = hgraph_parameter->base_codes_param;
+    }
+    if (is_tune_precise_code) {
+        param->precise_codes_param = hgraph_parameter->precise_codes_param;
+    }
+    param->use_reorder = use_reorder_;
 
     // export train data and train new_basic_code
     auto train_count = std::min(this->train_sample_count_, this->GetNumElements());
     Vector<float> train_data(train_count * dim_, 0, allocator_);
-    for (InnerIdType i = 0; i < train_count; i++) {
-        // TODO(zxy): process when i is deleted
-        this->GetVectorByInnerId(i, (train_data.data() + i * dim_));
-    }
-    new_basic_code->Train(train_data.data(), train_count);
-
-    // insert data into new_basic_code
-    Vector<float> insert_buffer(dim_, 0, allocator_);
-    for (auto i = 0; i < this->total_count_; i++) {
-        this->GetVectorByInnerId(i, insert_buffer.data());
-        new_basic_code->InsertVector((const void*)insert_buffer.data(), i);
+    if (is_tune_base_code or is_tune_precise_code) {
+        for (InnerIdType i = 0; i < train_count; i++) {
+            this->GetVectorByInnerId(i, (train_data.data() + i * dim_));
+        }
     }
 
-    /**
-     * re-locate raw_vector logic (note that any != fp32):
-     * change basic:
-     * 1. quant1, any, fp32 -> quant2, any, fp32: no process
-     * 2. quant1, any, fp32 -> fp32, any, fp32: raw = basic
-     * 3. fp32, any, fp32 -> quant2, any, fp32: basic = quant2
-     *
-     * change high-precision
-     * 1. any, quant1, fp32 -> any, quant2, fp32: no process
-     * 2. any, quant1, fp32 -> any, fp32, fp32: raw = high
-     * 3. any, fp32, fp32 -> any, quant2, fp32: high = quant2
-     */
-    auto old_is_fp32 = basic_flatten_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32;
-    auto new_is_fp32 = new_basic_code->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32;
+    auto tune_and_rebuild =
+        [&](bool need_tune, FlattenInterfacePtr old_code, FlattenInterfacePtr new_code) {
+            if (not need_tune) {
+                return old_code;
+            }
 
-    if (!old_is_fp32 && new_is_fp32) {
-        // case 2: quant -> fp32
-        this->basic_flatten_codes_ = new_basic_code;
-        this->raw_vector_ = new_basic_code;
-        create_new_raw_vector_ = false;
-        has_raw_vector_ = true;
-    } else {  // quant -> quant OR fp32 -> quant
-        // case 1 and 3
-        this->basic_flatten_codes_ = new_basic_code;
-        create_new_raw_vector_ = true;
-        has_raw_vector_ = true;
-    }
+            new_code->Train(train_data.data(), train_count);
+
+            Vector<float> insert_buffer(dim_, 0, allocator_);
+            for (int64_t i = 0; i < total_count_; ++i) {
+                GetVectorByInnerId(i, insert_buffer.data());
+                new_code->InsertVector(static_cast<const void*>(insert_buffer.data()), i);
+            }
+            return new_code;
+        };
+
+    basic_flatten_codes_ =
+        tune_and_rebuild(is_tune_base_code, basic_flatten_codes_, new_basic_code);
+    high_precise_codes_ =
+        tune_and_rebuild(is_tune_precise_code, high_precise_codes_, new_precise_code);
+
+    check_and_init_raw_vector(param->raw_vector_param, common_param, false);
+    init_resize_bit_and_reorder();
 
     // set status
+    if (disable_future_tuning) {
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_TUNE, false);
+        this->raw_vector_.reset();
+        has_raw_vector_ = false;
+        create_new_raw_vector_ = false;
+    }
     return true;
 }
 
@@ -2285,15 +2298,40 @@ HGraph::analyze_graph_connection(JsonType& stats) const {
 }
 
 void
+HGraph::init_resize_bit_and_reorder() {
+    auto step_block_size = Options::Instance().block_size_limit();
+    auto block_size_per_vector = this->basic_flatten_codes_->code_size_;
+    block_size_per_vector =
+        std::max(block_size_per_vector,
+                 static_cast<uint32_t>(this->bottom_graph_->maximum_degree_ * sizeof(InnerIdType)));
+    if (use_reorder_) {
+        block_size_per_vector =
+            std::max(block_size_per_vector, this->high_precise_codes_->code_size_);
+        reorder_ = std::make_shared<FlattenReorder>(this->high_precise_codes_, allocator_);
+    }
+    if (this->extra_infos_ != nullptr) {
+        block_size_per_vector =
+            std::max(block_size_per_vector, static_cast<uint32_t>(this->extra_info_size_));
+    }
+    auto increase_count = step_block_size / block_size_per_vector;
+    this->resize_increase_count_bit_ = std::max(
+        DEFAULT_RESIZE_BIT, static_cast<uint64_t>(log2(static_cast<double>(increase_count))));
+}
+
+void
 HGraph::check_and_init_raw_vector(const FlattenInterfaceParamPtr& raw_vector_param,
-                                  const IndexCommonParam& common_param) {
+                                  const IndexCommonParam& common_param,
+                                  bool is_create_new) {
     if (raw_vector_param == nullptr) {
         return;
     }
 
+    if (is_create_new) {
+        raw_vector_ = FlattenInterface::MakeInstance(raw_vector_param, common_param);
+    }
+
     if (basic_flatten_codes_->GetQuantizerName() != QUANTIZATION_TYPE_VALUE_FP32 and
         high_precise_codes_ == nullptr) {
-        raw_vector_ = FlattenInterface::MakeInstance(raw_vector_param, common_param);
         create_new_raw_vector_ = true;
         has_raw_vector_ = true;
         return;
@@ -2301,7 +2339,6 @@ HGraph::check_and_init_raw_vector(const FlattenInterfaceParamPtr& raw_vector_par
     if (basic_flatten_codes_->GetQuantizerName() != QUANTIZATION_TYPE_VALUE_FP32 and
         high_precise_codes_ != nullptr and
         high_precise_codes_->GetQuantizerName() != QUANTIZATION_TYPE_VALUE_FP32) {
-        raw_vector_ = FlattenInterface::MakeInstance(raw_vector_param, common_param);
         create_new_raw_vector_ = true;
         has_raw_vector_ = true;
         return;
@@ -2309,7 +2346,6 @@ HGraph::check_and_init_raw_vector(const FlattenInterfaceParamPtr& raw_vector_par
 
     auto io_type_name = raw_vector_param->io_parameter->GetTypeName();
     if (io_type_name != IO_TYPE_VALUE_BLOCK_MEMORY_IO and io_type_name != IO_TYPE_VALUE_MEMORY_IO) {
-        raw_vector_ = FlattenInterface::MakeInstance(raw_vector_param, common_param);
         create_new_raw_vector_ = true;
         has_raw_vector_ = true;
         return;
