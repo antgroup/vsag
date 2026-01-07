@@ -129,6 +129,12 @@ public:
     std::vector<int64_t>
     Build(const DatasetPtr& base) override;
 
+    float
+    CalcDistanceById(const float* query, int64_t id) const override;
+
+    DatasetPtr
+    CalDistanceById(const float* query, const int64_t* ids, int64_t count) const override;
+
     void
     Deserialize(StreamReader& reader) override;
 
@@ -228,7 +234,7 @@ private:
     int64_t cur_element_count_{0};
     float alpha_{1.0F};
 
-    std::shared_mutex resize_mutex_;
+    mutable std::shared_mutex resize_mutex_;
     std::mutex cur_element_count_mutex_;
     std::string graph_type_{GRAPH_TYPE_VALUE_NSW};
 

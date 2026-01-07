@@ -159,6 +159,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex, "Pyramid Add Test", "[f
         TestFilterSearch(index, dataset, search_param, 0.96, true);
         TestRangeSearch(index, dataset, search_param, 0.96, 10, true);
         TestRangeSearch(index, dataset, search_param, 0.49, 5, true);
+        TestCalcDistanceById(index, dataset, 1e-5, true);
     }
 }
 
@@ -185,6 +186,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
             TestKnnSearch(index, dataset, search_param, 0.96, true);
             TestFilterSearch(index, dataset, search_param, 0.96, true);
             TestRangeSearch(index, dataset, search_param, 0.96, 10, true);
+            TestCalcDistanceById(index, dataset, 1e-5, true);
         }
     }
 }
@@ -213,6 +215,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex, "Pyramid No Path Test",
             TestKnnSearch(index, dataset, search_param, 0.96, has_root);
             TestFilterSearch(index, dataset, search_param, 0.96, has_root);
             TestRangeSearch(index, dataset, search_param, 0.96, 10, has_root);
+            TestCalcDistanceById(index, dataset, 1e-5, true);
             dataset->query_->Paths(tmp_paths);
         }
     }
@@ -321,6 +324,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
         auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type, /*with_path=*/true);
         TestConcurrentAdd(index, dataset, true);
         TestConcurrentKnnSearch(index, dataset, search_param, 0.96, true);
+        TestCalcDistanceById(index, dataset, 1e-5, true);
     }
     for (auto& dim : dims) {
         auto param = GeneratePyramidBuildParametersString(metric_type, dim, pyramid_param);
@@ -408,5 +412,21 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
             }
         }
         vsag::Options::Instance().set_block_size_limit(origin_size);
+    }
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
+                             "Pyramid Duplicate ID Test",
+                             "[ft][pyramid]") {
+    auto metric_type = GENERATE("l2");
+    PyramidParam pyramid_param;
+    pyramid_param.no_build_levels = {0, 1};
+    const std::string name = "pyramid";
+    auto search_param = GeneratePyramidSearchParametersString(100, 20);
+    for (auto& dim : dims) {
+        auto param = GeneratePyramidBuildParametersString(metric_type, dim, pyramid_param);
+        auto index = TestFactory(name, param, true);
+        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type, /*with_path=*/true);
+        TestDuplicateAdd(index, dataset);
     }
 }
