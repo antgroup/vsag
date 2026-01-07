@@ -157,6 +157,7 @@ private:
     bool deserialize_without_buffer_{false};
 
     std::shared_ptr<QuantizationParams> quantization_params_;
+    uint32_t avg_doc_term_length_{100};
 };
 
 }  // namespace vsag
