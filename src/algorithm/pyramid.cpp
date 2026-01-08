@@ -52,6 +52,20 @@ get_suitable_max_degree(int64_t data_num) {
     return 64;
 }
 
+uint64_t
+get_suitable_ef_search(int64_t topk, int64_t data_num) {
+    if (data_num < 1'000) {
+        return std::max(static_cast<uint64_t>(1.5F * topk), 50UL);
+    }
+    if (data_num < 100'000) {
+        return std::max(static_cast<uint64_t>(2.0F * topk), 100UL);
+    }
+    if (data_num < 1'000'000) {
+        return std::max(static_cast<uint64_t>(3.0F * topk), 200UL);
+    }
+    return std::max(static_cast<uint64_t>(4.0F * topk), 400UL);
+}
+
 IndexNode::IndexNode(Allocator* allocator,
                      GraphInterfaceParamPtr graph_param,
                      uint32_t index_min_size)
@@ -229,7 +243,7 @@ Pyramid::KnnSearch(const DatasetPtr& query,
 
     InnerSearchParam search_param;
     search_param.ef = parsed_param.ef_search;
-    search_param.topk = parsed_param.ef_search;
+    search_param.topk = k;
     search_param.search_mode = KNN_SEARCH;
     if (this->label_table_->CompressDuplicateData()) {
         search_param.consider_duplicate = true;
@@ -825,6 +839,12 @@ Pyramid::search_node(const IndexNode* node,
     } else if (node->status_ == IndexNode::Status::GRAPH) {
         InnerSearchParam modified_param = search_param;
         modified_param.ep = node->entry_point_;
+        if (node->level_ != 0 && search_param.search_mode == KNN_SEARCH) {
+            modified_param.ef =
+                std::min(modified_param.ef,
+                         get_suitable_ef_search(search_param.topk, node->graph_->TotalCount()));
+        }
+        modified_param.topk = modified_param.ef;
         results = searcher_->Search(node->graph_,
                                     codes,
                                     vl,
