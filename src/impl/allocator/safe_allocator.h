@@ -47,7 +47,7 @@ public:
     }
 
     void*
-    Allocate(size_t size) override {
+    Allocate(uint64_t size) override {
         auto ret = raw_allocator_->Allocate(size);
         if (not ret) {
             throw std::bad_alloc();
@@ -61,7 +61,7 @@ public:
     }
 
     void*
-    Reallocate(void* p, size_t size) override {
+    Reallocate(void* p, uint64_t size) override {
         auto ret = raw_allocator_->Reallocate(p, size);
         if (not ret) {
             throw std::bad_alloc();

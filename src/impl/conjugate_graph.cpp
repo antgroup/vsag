@@ -113,7 +113,7 @@ ConjugateGraph::EnhanceResult(std::priority_queue<std::pair<float, LabelType>>& 
     return successfully_enhanced;
 }
 
-size_t
+uint64_t
 ConjugateGraph::GetMemoryUsage() const {
     return memory_usage_;
 }
@@ -141,7 +141,7 @@ ConjugateGraph::Serialize() const {
     }
 
     out_ss.seekg(0, std::ios_base::end);
-    size_t size = out_ss.tellg();
+    uint64_t size = out_ss.tellg();
     out_ss.seekg(0, std::ios_base::beg);
 
     std::shared_ptr<int8_t[]> data(new int8_t[size]);
@@ -157,7 +157,7 @@ ConjugateGraph::Serialize(std::ostream& out_stream) const {
 
     for (auto item : conjugate_graph_) {
         auto neighbor_set = *item.second;
-        size_t neighbor_set_size = neighbor_set.size();
+        uint64_t neighbor_set_size = neighbor_set.size();
 
         out_stream.write((char*)&item.first, sizeof(item.first));
         out_stream.write((char*)&neighbor_set_size, sizeof(neighbor_set_size));
@@ -193,7 +193,7 @@ ConjugateGraph::Deserialize(StreamReader& in_stream) {
     try {
         uint32_t offset = 0;
         uint32_t footer_offset = 0;
-        size_t neighbor_size = 0;
+        uint64_t neighbor_size = 0;
         int64_t from_tag_id = 0;
         int64_t to_tag_id = 0;
 

@@ -63,16 +63,16 @@ class HierarchicalNSW : public AlgorithmInterface<float> {
 private:
     static const unsigned char DELETE_MARK = 0x01;
 
-    size_t max_elements_ = 0;
-    mutable std::atomic<size_t> cur_element_count_{0};  // current number of elements
-    size_t size_data_per_element_{0};
-    size_t size_links_per_element_{0};
-    mutable std::atomic<size_t> num_deleted_{0};  // number of deleted elements
-    size_t M_{0};
-    size_t maxM_{0};
-    size_t maxM0_{0};
-    size_t ef_construction_{0};
-    size_t dim_{0};
+    uint64_t max_elements_ = 0;
+    mutable std::atomic<uint64_t> cur_element_count_{0};  // current number of elements
+    uint64_t size_data_per_element_{0};
+    uint64_t size_links_per_element_{0};
+    mutable std::atomic<uint64_t> num_deleted_{0};  // number of deleted elements
+    uint64_t M_{0};
+    uint64_t maxM_{0};
+    uint64_t maxM0_{0};
+    uint64_t ef_construction_{0};
+    uint64_t dim_{0};
 
     double mult_{0.0}, rev_size_{0.0};
     int max_level_{0};
@@ -90,10 +90,10 @@ private:
 
     InnerIdType enterpoint_node_{0};
 
-    size_t size_links_level0_{0};
-    size_t offset_data_{0};
-    size_t offsetLevel0_{0};
-    size_t label_offset_{0};
+    uint64_t size_links_level0_{0};
+    uint64_t offset_data_{0};
+    uint64_t offsetLevel0_{0};
+    uint64_t label_offset_{0};
 
     bool normalize_{false};
     float* molds_{nullptr};
@@ -106,10 +106,10 @@ private:
     reverselinklist** reversed_level0_link_list_{nullptr};
     vsag::UnorderedMap<int, reverselinklist>** reversed_link_lists_{nullptr};
 
-    size_t data_size_{0};
-    size_t prefetch_jump_code_size_{1};
+    uint64_t data_size_{0};
+    uint64_t prefetch_jump_code_size_{1};
 
-    size_t data_element_per_block_{0};
+    uint64_t data_element_per_block_{0};
 
     DISTFUNC fstdistfunc_{nullptr};
     void* dist_func_param_{nullptr};
@@ -137,14 +137,14 @@ private:
 
 public:
     HierarchicalNSW(SpaceInterface* s,
-                    size_t max_elements,
+                    uint64_t max_elements,
                     vsag::Allocator* allocator,
-                    size_t M = 16,
-                    size_t ef_construction = 200,
+                    uint64_t M = 16,
+                    uint64_t ef_construction = 200,
                     bool use_reversed_edges = false,
                     bool normalize = false,
-                    size_t block_size_limit = 128 * 1024 * 1024,
-                    size_t random_seed = 100,
+                    uint64_t block_size_limit = 128 * 1024 * 1024,
+                    uint64_t random_seed = 100,
                     bool allow_replace_deleted = true);
 
     ~HierarchicalNSW() override;
@@ -177,7 +177,7 @@ public:
     virtual void
     getNeighborsInternalId(uint32_t internal_id, vsag::Vector<InnerIdType>& neighbor_ids) override;
 
-    size_t
+    uint64_t
     getMaxDegree() {
         return maxM0_;
     };
@@ -249,17 +249,17 @@ public:
     int
     getRandomLevel(double reverse_size);
 
-    size_t
+    uint64_t
     getMaxElements() override {
         return max_elements_;
     }
 
-    size_t
+    uint64_t
     getCurrentElementCount() override {
         return cur_element_count_;
     }
 
-    size_t
+    uint64_t
     getDeletedCount() override {
         return num_deleted_;
     }
@@ -276,7 +276,7 @@ public:
     MaxHeap
     searchBaseLayerST(InnerIdType ep_id,
                       const void* data_point,
-                      size_t ef,
+                      uint64_t ef,
                       const vsag::FilterPtr is_id_allowed = nullptr,
                       const float skip_ratio = 0.9f,
                       vsag::Allocator* allocator = nullptr,
@@ -291,16 +291,16 @@ public:
                       const vsag::FilterPtr is_id_allowed = nullptr) const;
 
     void
-    getNeighborsByHeuristic2(MaxHeap& top_candidates, size_t M);
+    getNeighborsByHeuristic2(MaxHeap& top_candidates, uint64_t M);
 
     void
     setBatchNeigohbors(InnerIdType internal_id,
                        int level,
                        const InnerIdType* neighbors,
-                       size_t neigbor_count);
+                       uint64_t neigbor_count);
 
     void
-    appendNeigohbor(InnerIdType internal_id, int level, InnerIdType neighbor, size_t max_degree);
+    appendNeigohbor(InnerIdType internal_id, int level, InnerIdType neighbor, uint64_t max_degree);
 
     linklistsizeint*
     getLinklist0(InnerIdType internal_id) const {
@@ -335,14 +335,14 @@ public:
     mutuallyConnectNewElement(InnerIdType cur_c, MaxHeap& top_candidates, int level, bool isUpdate);
 
     void
-    resizeIndex(size_t new_max_elements) override;
+    resizeIndex(uint64_t new_max_elements) override;
 
     void
     setDataAndGraph(vsag::FlattenInterfacePtr& data,
                     vsag::GraphInterfacePtr& graph,
                     vsag::Vector<LabelType>& ids);
 
-    size_t
+    uint64_t
     calcSerializeSize() override;
 
     void
@@ -352,10 +352,10 @@ public:
     SerializeImpl(StreamWriter& writer);
 
     void
-    loadIndex(StreamReader& buffer_reader, SpaceInterface* s, size_t max_elements_i = 0) override;
+    loadIndex(StreamReader& buffer_reader, SpaceInterface* s, uint64_t max_elements_i = 0) override;
 
     void
-    DeserializeImpl(StreamReader& reader, SpaceInterface* s, size_t max_elements_i = 0);
+    DeserializeImpl(StreamReader& reader, SpaceInterface* s, uint64_t max_elements_i = 0);
 
     const float*
     getDataByLabel(LabelType label) const override;
@@ -441,7 +441,7 @@ public:
 
     std::priority_queue<std::pair<float, LabelType>>
     searchKnn(const void* query_data,
-              size_t k,
+              uint64_t k,
               uint64_t ef,
               const vsag::FilterPtr is_id_allowed = nullptr,
               const float skip_ratio = 0.9f,

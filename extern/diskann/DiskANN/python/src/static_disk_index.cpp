@@ -10,7 +10,7 @@ namespace diskannpy
 
 template <typename DT>
 StaticDiskIndex<DT>::StaticDiskIndex(const diskann::Metric metric, const std::string &index_path_prefix,
-                                     const uint32_t num_threads, const size_t num_nodes_to_cache,
+                                     const uint32_t num_threads, const uint64_t num_nodes_to_cache,
                                      const uint32_t cache_mechanism)
     : _reader(std::make_shared<PlatformSpecificAlignedFileReader>()), _index(_reader, metric)
 {
@@ -30,7 +30,7 @@ StaticDiskIndex<DT>::StaticDiskIndex(const diskann::Metric metric, const std::st
     }
 }
 
-template <typename DT> void StaticDiskIndex<DT>::cache_bfs_levels(const size_t num_nodes_to_cache)
+template <typename DT> void StaticDiskIndex<DT>::cache_bfs_levels(const uint64_t num_nodes_to_cache)
 {
     std::vector<uint32_t> node_list;
     _index.cache_bfs_levels(num_nodes_to_cache, node_list);
@@ -38,7 +38,7 @@ template <typename DT> void StaticDiskIndex<DT>::cache_bfs_levels(const size_t n
 }
 
 template <typename DT>
-void StaticDiskIndex<DT>::cache_sample_paths(const size_t num_nodes_to_cache, const std::string &warmup_query_file,
+void StaticDiskIndex<DT>::cache_sample_paths(const uint64_t num_nodes_to_cache, const std::string &warmup_query_file,
                                              const uint32_t num_threads)
 {
     if (!file_exists(warmup_query_file))

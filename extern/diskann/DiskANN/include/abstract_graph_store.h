@@ -14,7 +14,7 @@ namespace diskann
 class AbstractGraphStore
 {
   public:
-    AbstractGraphStore(const size_t max_pts) : _capacity(max_pts)
+    AbstractGraphStore(const uint64_t max_pts) : _capacity(max_pts)
     {
     }
 
@@ -25,7 +25,7 @@ class AbstractGraphStore
     virtual void set_adj_list(const location_t i, std::vector<location_t> &neighbors) = 0;
 
   private:
-    size_t _capacity;
+    uint64_t _capacity;
 };
 
 } // namespace diskann

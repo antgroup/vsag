@@ -54,7 +54,7 @@ public:
     tl::expected<void, Error>
     Deserialize(StreamReader& in_stream);
 
-    size_t
+    uint64_t
     GetMemoryUsage() const;
 
 private:

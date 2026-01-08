@@ -50,7 +50,7 @@ public:
     }
 
     void*
-    Allocate(size_t size) override {
+    Allocate(uint64_t size) override {
         std::scoped_lock lock(mutex_);
         auto* ptr = malloc(size);
         if (ptr != nullptr) {
@@ -68,7 +68,7 @@ public:
     }
 
     void*
-    Reallocate(void* p, size_t size) override {
+    Reallocate(void* p, uint64_t size) override {
         std::scoped_lock lock(mutex_);
         if (p == nullptr) {
             return Allocate(size);

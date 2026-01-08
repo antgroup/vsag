@@ -21,9 +21,9 @@
 
 namespace vsag {
 
-inline size_t
-floor_log2(size_t x) {  //smaller or equal
-    size_t ret = 0;
+inline uint64_t
+floor_log2(uint64_t x) {  //smaller or equal
+    uint64_t ret = 0;
     while (x > 1) {
         ret++;
         x >>= 1;
@@ -41,7 +41,7 @@ FhtKacRotator::FhtKacRotator(Allocator* allocator, int64_t dim)
     this->type_ = VectorTransformerType::FHT;
     flip_offset_ = (this->input_dim_ + 7) / BYTE_LEN;
     flip_.resize(ROUND * flip_offset_);
-    size_t bottom_log_dim = floor_log2(dim);
+    uint64_t bottom_log_dim = floor_log2(dim);
     trunc_dim_ = 1 << bottom_log_dim;
     fac_ = 1.0F / std::sqrt(static_cast<float>(trunc_dim_));
 }
@@ -75,7 +75,7 @@ FhtKacRotator::Transform(const float* data, float* rotated_vec) const {
         return meta;
     }
 
-    size_t start = dim - trunc_dim_;
+    uint64_t start = dim - trunc_dim_;
 
     for (int flip_time = 0; flip_time < ROUND; flip_time += 2) {
         FlipSign(flip_.data() + flip_time * flip_offset_, rotated_vec, dim);
@@ -107,7 +107,7 @@ FhtKacRotator::InverseTransform(float const* data, float* rotated_vec) const {
         return;
     }
 
-    size_t start = dim - trunc_dim_;
+    uint64_t start = dim - trunc_dim_;
 
     VecRescale(rotated_vec, dim, 0.25F);
     for (int flip_time = ROUND - 1; flip_time > 0; flip_time -= 2) {

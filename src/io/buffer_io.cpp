@@ -44,7 +44,11 @@ BufferIO::BufferIO(const IOParamPtr& param, const IndexCommonParam& common_param
 
 void
 BufferIO::WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset) {
+#ifdef __APPLE__
+    auto ret = pwrite(this->fd_, data, size, static_cast<off_t>(offset));
+#else
     auto ret = pwrite64(this->fd_, data, size, static_cast<int64_t>(offset));
+#endif
     if (ret != size) {
         throw VsagException(ErrorType::INTERNAL_ERROR,
                             fmt::format("write bytes {} less than {}", ret, size));
@@ -59,7 +63,11 @@ BufferIO::ReadImpl(uint64_t size, uint64_t offset, uint8_t* data) const {
     if (size == 0) {
         return true;
     }
+#ifdef __APPLE__
+    auto ret = pread(this->fd_, data, size, static_cast<off_t>(offset));
+#else
     auto ret = pread64(this->fd_, data, size, static_cast<int64_t>(offset));
+#endif
     if (ret != size) {
         throw VsagException(ErrorType::INTERNAL_ERROR,
                             fmt::format("read bytes {} less than {}", ret, size));
