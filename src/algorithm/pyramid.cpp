@@ -54,16 +54,17 @@ get_suitable_max_degree(int64_t data_num) {
 
 uint64_t
 get_suitable_ef_search(int64_t topk, int64_t data_num) {
+    float topk_float = static_cast<float>(topk);
     if (data_num < 1'000) {
-        return std::max(static_cast<uint64_t>(1.5F * topk), 50UL);
+        return std::max(static_cast<uint64_t>(1.5F * topk_float), 50UL);
     }
     if (data_num < 100'000) {
-        return std::max(static_cast<uint64_t>(2.0F * topk), 100UL);
+        return std::max(static_cast<uint64_t>(2.0F * topk_float), 100UL);
     }
     if (data_num < 1'000'000) {
-        return std::max(static_cast<uint64_t>(3.0F * topk), 200UL);
+        return std::max(static_cast<uint64_t>(3.0F * topk_float), 200UL);
     }
-    return std::max(static_cast<uint64_t>(4.0F * topk), 400UL);
+    return std::max(static_cast<uint64_t>(4.0F * topk_float), 400UL);
 }
 
 IndexNode::IndexNode(Allocator* allocator,
@@ -85,7 +86,7 @@ IndexNode::Build(ODescent& odescent) {
     }
     if (status_ == Status::GRAPH) {
         entry_point_ = ids_[0];
-        odescent.SetMaxDegree(graph_param_->max_degree_);
+        odescent.SetMaxDegree(static_cast<int32_t>(graph_param_->max_degree_));
         odescent.Build(ids_);
         odescent.SaveGraph(graph_);
         Vector<InnerIdType>(allocator_).swap(ids_);
@@ -844,7 +845,7 @@ Pyramid::search_node(const IndexNode* node,
                 std::min(modified_param.ef,
                          get_suitable_ef_search(search_param.topk, node->graph_->TotalCount()));
         }
-        modified_param.topk = modified_param.ef;
+        modified_param.topk = static_cast<uint64_t>(modified_param.ef);
         results = searcher_->Search(node->graph_,
                                     codes,
                                     vl,
