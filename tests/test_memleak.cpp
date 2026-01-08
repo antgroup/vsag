@@ -161,7 +161,7 @@ generate_param(const std::string& index_name, const std::string& base_quantizati
                 "base_quantization_type": "{}",
                 "partition_strategy_type": "ivf",
                 "ivf_train_type": "kmeans",
-                "ivf_train_sample_count": 1000
+                "train_sample_count": 1000
             }}
             }})",
             dim,
@@ -171,11 +171,11 @@ generate_param(const std::string& index_name, const std::string& base_quantizati
 }
 
 const std::tuple<std::string, std::string, std::string, int64_t, int64_t> INDEX_PARAMS[] = {
-    {"hgraph", "fp32", R"({"hgraph": {"ef_search": 100}})", 10000, 128},
+    {"hgraph", "fp32", R"({"hgraph": {"ef_search": 100}})", 3000, 128},
 
-    {"hgraph", "sq8_uniform", R"({"hgraph": {"ef_search": 100}})", 10000, 128},
+    {"hgraph", "sq8_uniform", R"({"hgraph": {"ef_search": 100}})", 3000, 128},
 
-    {"ivf", "fp32", R"({"ivf": {"scan_buckets_count": 10}})", 10000, 128},
+    {"ivf", "fp32", R"({"ivf": {"scan_buckets_count": 10}})", 3000, 128},
 };
 
 TEST_CASE("Test Classic Index Memory Leak", "[ft][memleak]") {

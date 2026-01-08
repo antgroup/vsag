@@ -12,11 +12,15 @@ jobs:
     name: Build with TSAN
     runs-on: ubuntu-22.04
     concurrency:
-      group: test_tsan_x86-${{ github.event.pull_request.number }}
+      group: test_tsan_x86-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     container:
       image: vsaglib/vsag:ci-x86
+      volumes:
+        - /opt:/useless
     steps:
+      - name: Free Disk Space
+        run: rm -rf /useless/*
       - uses: actions/checkout@v4
         with:
           fetch-depth: '0'
@@ -36,7 +40,7 @@ jobs:
           path: ./build
           name: test_x86-${{ github.run_id }}-tsan
           compression-level: 1
-          retention-days: 1
+          retention-days: 3
           overwrite: 'true'
 
   test_tsan:
@@ -44,7 +48,7 @@ jobs:
     needs: build_tsan
     runs-on: ubuntu-22.04
     concurrency:
-      group: test_tsan_x86-${{ github.event.pull_request.number }}
+      group: test_tsan_x86-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     container:
       image: vsaglib/vsag:ci-x86

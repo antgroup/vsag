@@ -15,7 +15,7 @@ jobs:
     container:
       image: vsaglib/vsag:ci-x86
     concurrency:
-      group: lint-${{ github.event.pull_request.number }}
+      group: lint-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
       - name: Checkout code

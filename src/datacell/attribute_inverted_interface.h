@@ -88,6 +88,9 @@ public:
         return this->bitset_type_;
     }
 
+    virtual int64_t
+    GetCurrentMemoryUsage() const = 0;
+
 public:
     Allocator* const allocator_{nullptr};
 

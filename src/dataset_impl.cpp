@@ -35,7 +35,7 @@ DatasetImpl::MakeEmptyDataset() {
 }
 
 template <typename T>
-inline T*
+static inline T*
 new_element(T*& old_dest, uint64_t old_count, uint64_t new_total) {
     T* dest = new T[new_total];
     if (old_dest != nullptr) {
@@ -47,7 +47,7 @@ new_element(T*& old_dest, uint64_t old_count, uint64_t new_total) {
 }
 
 template <typename T>
-inline T*
+static inline T*
 allocator_element(Allocator* allocator, T* old_dest, uint64_t new_size_in_bytes) {
     if (old_dest != nullptr) {
         return static_cast<T*>(allocator->Reallocate(old_dest, new_size_in_bytes));
@@ -56,7 +56,7 @@ allocator_element(Allocator* allocator, T* old_dest, uint64_t new_size_in_bytes)
 }
 
 template <typename T>
-T*
+static inline T*
 allocate_and_copy(
     const T* src, uint64_t count, Allocator* allocator, T* old_dest = nullptr, uint64_t old_count = 0) {
     if (src == nullptr || count == 0) {
@@ -81,7 +81,7 @@ allocate_and_copy(
     return dest;
 }
 
-void
+static void
 copy_sparse_vector(const SparseVector& src, SparseVector* dest, Allocator* allocator) {
     uint64_t len = src.len_;
     if (allocator != nullptr) {
@@ -96,7 +96,7 @@ copy_sparse_vector(const SparseVector& src, SparseVector* dest, Allocator* alloc
     std::memcpy(dest->vals_, src.vals_, len * sizeof(float));
 }
 
-SparseVector*
+static SparseVector*
 allocate_and_copy_sparse_vectors(const SparseVector* src,
                                  uint64_t count,
                                  Allocator* allocator,
@@ -123,6 +123,69 @@ allocate_and_copy_sparse_vectors(const SparseVector* src,
     return dest;
 }
 
+template <typename T>
+static inline void*
+void_ptr(const T* ptr) {
+    return static_cast<void*>(const_cast<T*>(ptr));
+}
+
+template <typename T>
+static inline void*
+void_ptr(T* ptr) {
+    return static_cast<void*>(ptr);
+}
+
+DatasetImpl::~DatasetImpl() {  // NOLINT
+    if (not this->owner_) {
+        return;
+    }
+
+    if (allocator_ != nullptr) {
+        allocator_->Deallocate(void_ptr(DatasetImpl::GetIds()));
+        allocator_->Deallocate(void_ptr(DatasetImpl::GetDistances()));
+        allocator_->Deallocate(void_ptr(DatasetImpl::GetInt8Vectors()));
+        allocator_->Deallocate(void_ptr(DatasetImpl::GetFloat32Vectors()));
+        allocator_->Deallocate(void_ptr(DatasetImpl::GetExtraInfos()));
+        const auto* sparse_vectors = DatasetImpl::GetSparseVectors();
+        if (sparse_vectors != nullptr) {
+            for (int i = 0; i < DatasetImpl::GetNumElements(); i++) {
+                if (sparse_vectors[i].ids_ != nullptr) {
+                    allocator_->Deallocate(void_ptr(sparse_vectors[i].ids_));
+                }
+                if (sparse_vectors[i].vals_ != nullptr) {
+                    allocator_->Deallocate(void_ptr(sparse_vectors[i].vals_));
+                }
+            }
+            allocator_->Deallocate(void_ptr(DatasetImpl::GetSparseVectors()));
+        }
+
+    } else {
+        delete[] DatasetImpl::GetIds();
+        delete[] DatasetImpl::GetDistances();
+        delete[] DatasetImpl::GetInt8Vectors();
+        delete[] DatasetImpl::GetFloat32Vectors();
+        delete[] DatasetImpl::GetExtraInfos();
+
+        if (DatasetImpl::GetSparseVectors() != nullptr) {
+            for (int i = 0; i < DatasetImpl::GetNumElements(); i++) {
+                delete[] DatasetImpl::GetSparseVectors()[i].ids_;
+                delete[] DatasetImpl::GetSparseVectors()[i].vals_;
+            }
+            delete[] DatasetImpl::GetSparseVectors();
+        }
+    }
+    delete[] DatasetImpl::GetPaths();
+    if (DatasetImpl::GetAttributeSets() != nullptr) {
+        const auto* attrsets = DatasetImpl::GetAttributeSets();
+        for (int i = 0; i < DatasetImpl::GetNumElements(); ++i) {
+            for (auto* attr : attrsets[i].attrs_) {
+                delete attr;
+            }
+        }
+        delete[] attrsets;
+    }
+}
+
 DatasetPtr
 DatasetImpl::DeepCopy(Allocator* allocator) const {
     auto* allocator_ref = allocator != nullptr ? allocator : this->allocator_;
@@ -134,27 +197,37 @@ DatasetImpl::DeepCopy(Allocator* allocator) const {
 
     copy_dataset->NumElements(num_elements);
     copy_dataset->Dim(dim);
-
-    copy_dataset->Ids(allocate_and_copy(this->GetIds(), num_elements, allocator_ref));
-    copy_dataset->Distances(
-        allocate_and_copy(this->GetDistances(), num_elements * dim, allocator_ref));
-    copy_dataset->Int8Vectors(
-        allocate_and_copy(this->GetInt8Vectors(), num_elements * dim, allocator_ref));
-    copy_dataset->Float32Vectors(
-        allocate_and_copy(this->GetFloat32Vectors(), num_elements * dim, allocator_ref));
+    if (this->GetIds() != nullptr) {
+        copy_dataset->Ids(allocate_and_copy(this->GetIds(), num_elements, allocator_ref));
+    }
+    if (this->GetDistances() != nullptr) {
+        copy_dataset->Distances(
+            allocate_and_copy(this->GetDistances(), num_elements * dim, allocator_ref));
+    }
+    if (this->GetInt8Vectors() != nullptr) {
+        copy_dataset->Int8Vectors(
+            allocate_and_copy(this->GetInt8Vectors(), num_elements * dim, allocator_ref));
+    }
+    if (this->GetFloat32Vectors() != nullptr) {
+        copy_dataset->Float32Vectors(
+            allocate_and_copy(this->GetFloat32Vectors(), num_elements * dim, allocator_ref));
+    }
 
     if (this->GetExtraInfoSize() != 0) {
         copy_dataset->ExtraInfoSize(this->GetExtraInfoSize());
         copy_dataset->ExtraInfos(allocate_and_copy(
             this->GetExtraInfos(), num_elements * this->GetExtraInfoSize(), allocator_ref));
     }
-    copy_dataset->SparseVectors(
-        allocate_and_copy_sparse_vectors(this->GetSparseVectors(), num_elements, allocator_ref));
-
-    auto* paths = new std::string[num_elements];
-    copy_dataset->Paths(paths);
-    for (int i = 0; i < num_elements; ++i) {
-        paths[i] += this->GetPaths()[i];
+    if (this->GetSparseVectors() != nullptr) {
+        copy_dataset->SparseVectors(allocate_and_copy_sparse_vectors(
+            this->GetSparseVectors(), num_elements, allocator_ref));
+    }
+    if (this->GetPaths() != nullptr) {
+        auto* paths = new std::string[num_elements];
+        copy_dataset->Paths(paths);
+        for (int i = 0; i < num_elements; ++i) {
+            paths[i] += this->GetPaths()[i];
+        }
     }
 
     if (this->GetAttributeSets() != nullptr) {

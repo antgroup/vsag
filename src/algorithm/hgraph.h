@@ -68,6 +68,9 @@ public:
     std::vector<int64_t>
     Build(const DatasetPtr& data) override;
 
+    bool
+    Tune(const std::string& parameters, bool disable_future_tuning) override;
+
     float
     CalcDistanceById(const float* query, int64_t id) const override;
 
@@ -88,11 +91,6 @@ public:
 
     void
     GetCodeByInnerId(InnerIdType inner_id, uint8_t* data) const override;
-
-    int64_t
-    GetMemoryUsage() const override {
-        return static_cast<int64_t>(this->CalSerializeSize());
-    }
 
     std::string
     GetMemoryUsageDetail() const override;
@@ -191,9 +189,6 @@ public:
     Train(const DatasetPtr& base) override;
 
     bool
-    UpdateId(int64_t old_id, int64_t new_id) override;
-
-    bool
     UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update = false) override;
 
     void
@@ -205,6 +200,9 @@ public:
                     const AttributeSet& origin_attrs) override;
 
 private:
+    static JsonType
+    map_hgraph_param(const JsonType& hgraph_json);
+
     const void*
     get_data(const DatasetPtr& dataset, uint32_t index = 0) const {
         if (data_type_ == DataTypes::DATA_TYPE_FLOAT) {
@@ -295,7 +293,8 @@ private:
     reorder(const void* query,
             const FlattenInterfacePtr& flatten,
             DistHeapPtr& candidate_heap,
-            int64_t k) const;
+            int64_t k,
+            IteratorFilterContext* iter_ctx = nullptr) const;
 
     void
     elp_optimize();
@@ -322,7 +321,14 @@ private:
 
     void
     check_and_init_raw_vector(const FlattenInterfaceParamPtr& raw_vector_param,
-                              const IndexCommonParam& common_param);
+                              const IndexCommonParam& common_param,
+                              bool is_create_new = true);
+
+    void
+    init_resize_bit_and_reorder();
+
+    void
+    cal_memory_usage();
 
 private:
     FlattenInterfacePtr basic_flatten_codes_{nullptr};

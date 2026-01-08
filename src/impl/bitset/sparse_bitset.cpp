@@ -115,4 +115,9 @@ SparseBitset::Clear() {
     this->r_ = std::move(roaring::Roaring());
 }
 
+int64_t
+SparseBitset::GetCurrentMemoryUsage() const {
+    return static_cast<int64_t>(sizeof(SparseBitset) + r_.getSizeInBytes());
+}
+
 }  // namespace vsag

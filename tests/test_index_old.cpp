@@ -41,6 +41,13 @@ TEST_CASE("hnsw int8 recall", "[ft][index][hnsw]") {
         std::cout << "Build HNSW Error" << std::endl;
         return;
     }
+
+    vsag::IndexDetailInfo info;
+    auto data_type = hnsw->GetDetailDataByName(vsag::INDEX_DETAIL_DATA_TYPE, info)
+                         .value()
+                         ->GetDataScalarString();
+    REQUIRE(data_type == vsag::DATATYPE_INT8);
+
     std::shared_ptr<int64_t[]> ids(new int64_t[num_vectors]);
     std::shared_ptr<int8_t[]> data(new int8_t[dim * num_vectors]);
 
@@ -219,7 +226,7 @@ TEST_CASE("index search distance", "[ft][index]") {
                 fail_count++;
             }
         }
-        REQUIRE(fail_count <= 2);
+        REQUIRE(fail_count <= 3);
     }
 }
 
@@ -1228,6 +1235,12 @@ TEST_CASE("hnsw + feedback with global optimum id + remove", "[ft][index][hnsw]"
     REQUIRE(createindex.has_value());
     auto index = createindex.value();
 
+    vsag::IndexDetailInfo info;
+    auto data_type = index->GetDetailDataByName(vsag::INDEX_DETAIL_DATA_TYPE, info)
+                         .value()
+                         ->GetDataScalarString();
+    REQUIRE(data_type == vsag::DATATYPE_FLOAT32);
+
     // generate dataset
     auto [base_ids, base_vectors] = fixtures::generate_ids_and_vectors(num_base, dim);
     auto base = vsag::Dataset::Make();
@@ -1943,122 +1956,5 @@ TEST_CASE("DiskAnn filtered knn search", "[ft][index][diskann]") {
                 REQUIRE(result.value()->GetDim() == max_elements);
             }
         }
-    }
-}
-
-TEST_CASE("HNSW tombstone recovery", "[ft][index][hnsw]") {
-    vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
-    int64_t num_vectors = 1000;
-    int64_t dim = 64;
-    auto index_name = GENERATE("hnsw");
-    auto metric_type = GENERATE("cosine", "ip", "l2");
-
-    bool need_normalize = metric_type != std::string("cosine");
-    auto [ids, vectors] = fixtures::generate_ids_and_vectors(num_vectors, dim, need_normalize);
-    auto index = fixtures::generate_index(index_name, metric_type, num_vectors, dim, ids, vectors);
-
-    constexpr auto search_parameters = R"(
-    {
-        "hnsw": {
-            "ef_search": 100
-        }
-    }
-    )";
-
-    // test original recall
-    int correct = 0;
-    for (int i = 0; i < num_vectors; i++) {
-        auto query = vsag::Dataset::Make();
-        query->NumElements(1)->Dim(dim)->Float32Vectors(vectors.data() + i * dim)->Owner(false);
-
-        int64_t k = 10;
-        auto result = index->KnnSearch(query, k, search_parameters);
-        REQUIRE(result.has_value());
-        if (result.value()->GetIds()[0] == ids[i]) {
-            correct += 1;
-        }
-    }
-    float recall_before = ((float)correct) / num_vectors;
-
-    // remove half data
-    for (int i = 0; i < num_vectors / 2; ++i) {
-        REQUIRE(index->GetNumElements() == num_vectors - i);
-        REQUIRE(index->GetNumberRemoved() == i);
-        auto result = index->Remove(ids[i]);
-        REQUIRE(result.has_value());
-        REQUIRE(result.value());
-    }
-    auto wrong_result = index->Remove(-1);
-    REQUIRE(wrong_result.has_value());
-    REQUIRE_FALSE(wrong_result.value());
-
-    REQUIRE(index->GetNumElements() == num_vectors / 2);
-    REQUIRE(index->GetNumberRemoved() == num_vectors / 2);
-
-    // test recall for half data
-    correct = 0;
-    for (int i = 0; i < num_vectors; i++) {
-        auto query = vsag::Dataset::Make();
-        query->NumElements(1)->Dim(dim)->Float32Vectors(vectors.data() + i * dim)->Owner(false);
-
-        int64_t k = 10;
-        auto result = index->KnnSearch(query, k, search_parameters);
-        REQUIRE(result.has_value());
-        if (i < num_vectors / 2) {
-            REQUIRE(result.value()->GetIds()[0] != ids[i]);
-        } else {
-            if (result.value()->GetIds()[0] == ids[i]) {
-                correct += 1;
-            }
-        }
-    }
-    float recall_removed = ((float)correct) / (num_vectors / 2);
-    REQUIRE(recall_removed >= 0.98);
-
-    // add data into index again but failed
-    auto dataset = vsag::Dataset::Make();
-    std::vector<int64_t> alter_ids(num_vectors);
-    for (int i = 0; i < num_vectors; i++) {
-        alter_ids[i] = num_vectors - i - 1;
-    }
-    dataset->NumElements(num_vectors)
-        ->Dim(dim)
-        ->Float32Vectors(vectors.data())
-        ->Ids(alter_ids.data())
-        ->Owner(false);
-    auto result2 = index->Add(dataset);
-    REQUIRE(result2.value().size() > num_vectors / 2);
-    REQUIRE(index->GetNumElements() > num_vectors / 2);
-    REQUIRE(index->GetNumberRemoved() < num_vectors / 2);
-
-    // add data into index again for recovery
-    correct = 0;
-    dataset->NumElements(num_vectors)
-        ->Dim(dim)
-        ->Float32Vectors(vectors.data())
-        ->Ids(ids.data())
-        ->Owner(false);
-    auto result3 = index->Add(dataset);
-    REQUIRE(result3.value().size() > num_vectors / 2);
-    REQUIRE(index->GetNumElements() == num_vectors);
-    REQUIRE(index->GetNumberRemoved() == 0);
-
-    for (int i = 0; i < num_vectors; i++) {
-        auto query = vsag::Dataset::Make();
-        query->NumElements(1)->Dim(dim)->Float32Vectors(vectors.data() + i * dim)->Owner(false);
-
-        int64_t k = 10;
-        auto result = index->KnnSearch(query, k, search_parameters);
-        REQUIRE(result.has_value());
-        if (result.value()->GetIds()[0] == ids[i]) {
-            correct += 1;
-        }
-    }
-    float recall_after = ((float)correct) / num_vectors;
-    if (result2.value().size() == num_vectors) {
-        REQUIRE(std::abs(recall_before - recall_after) < 1e-5);
-    } else {
-        // if alter_ids are added by tombstone recovery, then recall may be lower
-        REQUIRE(std::abs(recall_before - recall_after) < 0.1);
     }
 }

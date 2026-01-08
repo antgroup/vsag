@@ -69,6 +69,21 @@ public:
     virtual float
     ComputePairVectors(InnerIdType id1, InnerIdType id2) = 0;
 
+    bool
+    CompareVectors(InnerIdType id1, InnerIdType id2) {
+        bool release1, release2;
+        const auto* codes1 = this->GetCodesById(id1, release1);
+        const auto* codes2 = this->GetCodesById(id2, release2);
+        bool result = (std::memcmp(codes1, codes2, this->code_size_) == 0);
+        if (release1) {
+            this->Release(codes1);
+        }
+        if (release2) {
+            this->Release(codes2);
+        }
+        return result;
+    }
+
     virtual void
     Prefetch(InnerIdType id) = 0;
 
@@ -88,6 +103,15 @@ public:
     InitIO(const IOParamPtr& io_param) {
         throw VsagException(ErrorType::INTERNAL_ERROR,
                             "InitIO not implemented in FlattenInterface");
+    }
+    virtual int64_t
+    GetCurrentMemoryUsage() const {
+        return 0;
+    }
+
+    virtual IndexCommonParam
+    ExportCommonParam() {
+        throw VsagException(ErrorType::INTERNAL_ERROR, "ExportCommonParam is not implemented");
     }
 
 public:
@@ -112,8 +136,14 @@ public:
     virtual bool
     Decode(const uint8_t* codes, DataType* vector) = 0;
 
+    virtual bool
+    Encode(const DataType* vector, uint8_t* codes) = 0;
+
     [[nodiscard]] virtual const uint8_t*
     GetCodesById(InnerIdType id, bool& need_release) const = 0;
+
+    virtual void
+    Release(const uint8_t* data) const = 0;
 
     virtual bool
     GetCodesById(InnerIdType id, uint8_t* codes) const = 0;

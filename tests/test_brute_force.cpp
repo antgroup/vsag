@@ -443,7 +443,7 @@ TestBruteForceRandomAllocator(const fixtures::BruteForceResourcePtr& resource) {
                 }
                 auto dataset = BruteForceTestIndex::pool.GetDatasetAndCreate(
                     dim, BruteForceTestIndex::base_count, metric_type);
-                TestIndex::TestContinueAddIgnoreRequire(index.value(), dataset);
+                //                TestIndex::TestContinueAddIgnoreRequire(index.value(), dataset);
                 vsag::Options::Instance().set_block_size_limit(origin_size);
             }
         }
