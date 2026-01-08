@@ -215,9 +215,9 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
             },
         },
         {
-            IVF_TRAIN_SAMPLE_COUNT_KEY,
+            TRAIN_SAMPLE_COUNT_KEY,
             {
-                IVF_TRAIN_SAMPLE_COUNT_KEY,
+                TRAIN_SAMPLE_COUNT_KEY,
             },
         },
     };
@@ -240,7 +240,6 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
 IVF::IVF(const IVFParameterPtr& param, const IndexCommonParam& common_param)
     : InnerIndexInterface(param, common_param),
       buckets_per_data_(param->buckets_per_data),
-      train_sample_count_(param->train_sample_count),
       location_map_(common_param.allocator_.get()) {
     this->bucket_ = BucketInterface::MakeInstance(param->bucket_param, common_param);
     if (this->bucket_ == nullptr) {
@@ -335,6 +334,7 @@ IVF::InitFeatures() {
 
     this->index_feature_list_->SetFeatures({IndexFeature::SUPPORT_CLONE,
                                             IndexFeature::SUPPORT_EXPORT_MODEL,
+                                            IndexFeature::SUPPORT_GET_MEMORY_USAGE,
                                             IndexFeature::SUPPORT_MERGE_INDEX});
 
     if (this->bucket_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_PQFS) {
@@ -390,6 +390,7 @@ IVF::Add(const DatasetPtr& base) {
         partition_strategy_->ClassifyDatas(vectors, num_element, buckets_per_data_, discard_stats);
 
     int64_t current_num;
+    bool need_cal_memory_usage = false;
     {
         std::lock_guard lock(label_lookup_mutex_);
         if (use_reorder_) {
@@ -401,6 +402,10 @@ IVF::Add(const DatasetPtr& base) {
         }
         current_num = this->total_elements_;
         this->total_elements_ += num_element;
+        if (this->total_elements_ - last_cal_memory_element_ >= cal_memory_element_interval_) {
+            need_cal_memory_usage = true;
+            last_cal_memory_element_ = this->total_elements_;
+        }
         location_map_.resize(this->total_elements_);
     }
 
@@ -443,6 +448,9 @@ IVF::Add(const DatasetPtr& base) {
         }
     }
     this->bucket_->Package();
+    if (need_cal_memory_usage) {
+        this->cal_memory_usage();
+    }
     return {};
 }
 
@@ -667,8 +675,7 @@ IVF::Deserialize(StreamReader& reader) {
         }
     }
     this->fill_location_map();
-
-    // post serialize procedure
+    this->cal_memory_usage();
 }
 
 InnerSearchParam
@@ -907,20 +914,10 @@ IVF::check_merge_illegal(const vsag::MergeUnit& unit) const {
     IOStreamWriter writer1(ss1);
     cur_model->Serialize(writer1);
 
-    // std::ofstream of1("/tmp/vsag-f1.index", std::ios::binary | std::ios::out);
-    // IOStreamWriter os1(of1);
-    // cur_model->Serialize(os1);
-    // of1.close();
-
     cur_model.reset();
     auto other_model = other_ivf_index->ExportModel(index->GetCommonParam());
     IOStreamWriter writer2(ss2);
     other_model->Serialize(writer2);
-
-    // std::ofstream of2("/tmp/vsag-f2.index", std::ios::binary | std::ios::out);
-    // IOStreamWriter os2(of2);
-    // other_model->Serialize(os2);
-    // of2.close();
 
     other_model.reset();
 
@@ -994,7 +991,7 @@ DatasetPtr
 IVF::CalDistanceById(const float* query, const int64_t* ids, int64_t count) const {
     auto result = Dataset::Make();
     result->Owner(true, allocator_);
-    auto* distances = (float*)allocator_->Allocate(sizeof(float) * count);
+    auto* distances = static_cast<float*>(allocator_->Allocate(sizeof(float) * count));
     result->Distances(distances);
     if (this->use_reorder_) {
         auto computer = this->reorder_codes_->FactoryComputer(query);
@@ -1127,6 +1124,36 @@ IVF::AnalyzeIndexBySearch(const SearchRequest& request) {
     // quantization error
     this->analyze_quantizer(stats, querys->GetFloat32Vectors(), num_elements, topk, param_str);
     return stats.Dump(4);
+}
+
+void
+IVF::cal_memory_usage() {
+    auto memory = sizeof(IVF);
+    memory += this->bucket_->GetCurrentMemoryUsage();
+    if (use_reorder_) {
+        memory += this->reorder_codes_->GetCurrentMemoryUsage();
+    }
+    if (this->extra_info_size_ > 0 and this->extra_infos_ != nullptr) {
+        memory += this->extra_infos_->GetCurrentMemoryUsage();
+    }
+    memory += this->label_table_->GetCurrentMemoryUsage();
+    memory += location_map_.size() * sizeof(uint64_t);
+    memory += partition_strategy_->GetCurrentMemoryUsage();
+    std::unique_lock lock(this->memory_usage_mutex_);
+    this->current_memory_usage_.store(static_cast<int64_t>(memory));
+}
+
+int64_t
+IVF::GetMemoryUsage() const {
+    int64_t memory = 0;
+    {
+        std::shared_lock lock(this->memory_usage_mutex_);
+        memory = this->current_memory_usage_.load();
+    }
+    if (this->attr_filter_index_ != nullptr) {
+        memory += this->attr_filter_index_->GetCurrentMemoryUsage();
+    }
+    return memory;
 }
 
 }  // namespace vsag

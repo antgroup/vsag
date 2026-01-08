@@ -232,4 +232,13 @@ SparseGraphDataCell::GetIds() const {
     return ids;
 }
 
+int64_t
+SparseGraphDataCell::GetCurrentMemoryUsage() const {
+    auto memory = sizeof(SparseGraphDataCell);
+    memory += neighbors_.size() * (sizeof(InnerIdType) + maximum_degree_ * sizeof(InnerIdType) +
+                                   sizeof(std::nullptr_t));
+    memory += node_version_.size() * (sizeof(uint8_t) + sizeof(InnerIdType));
+    return static_cast<int64_t>(memory);
+}
+
 }  // namespace vsag

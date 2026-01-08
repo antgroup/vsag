@@ -44,8 +44,14 @@ public:
 
     float doc_prune_ratio{0};
 
+    bool use_reorder{false};
+
+    bool use_quantization{false};
+
     // temporal parameter
     bool deserialize_without_footer{false};
+    bool deserialize_without_buffer{false};
+    uint32_t avg_doc_term_length{100};
 };
 
 class SINDISearchParameter : public Parameter {
@@ -61,6 +67,9 @@ public:
 public:
     // search
     uint32_t n_candidate{0};
+
+    // choose heap insert path during search
+    bool use_term_lists_heap_insert{true};
 
     // data cell
     float query_prune_ratio{0};

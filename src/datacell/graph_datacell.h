@@ -100,6 +100,15 @@ public:
     void
     MergeOther(GraphInterfacePtr other, uint64_t bias) override;
 
+    int64_t
+    GetCurrentMemoryUsage() const override {
+        int64_t memory = sizeof(GraphDataCell) + node_versions_.size() * sizeof(uint8_t);
+        if (IOTmpl::InMemory) {
+            memory += io_->GetCurrentMemoryUsage();
+        }
+        return memory;
+    }
+
 private:
     std::shared_ptr<BasicIO<IOTmpl>> io_{nullptr};
 
@@ -108,7 +117,7 @@ private:
     bool is_support_delete_{true};
     uint32_t remove_flag_bit_{8};
     uint32_t id_bit_{24};
-    uint32_t remove_flag_mask_{0x00ffffff};
+    uint32_t remove_flag_mask_{0x00FFFFFF};
 
     uint32_t code_line_size_{0};
 };

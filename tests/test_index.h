@@ -93,6 +93,11 @@ public:
                      bool expected_success = true);
 
     static void
+    TestUpdateVectorSparse(const IndexPtr& index,
+                           const TestDatasetPtr& dataset,
+                           bool expected_success = true);
+
+    static void
     TestContinueAdd(const IndexPtr& index,
                     const TestDatasetPtr& dataset,
                     bool expected_success = true);
@@ -252,6 +257,11 @@ public:
 
     static void
     TestEstimateMemory(const std::string& index_name,
+                       const std::string& build_param,
+                       const TestDatasetPtr& dataset);
+
+    static void
+    TestGetMemoryUsage(const std::string& index_name,
                        const std::string& build_param,
                        const TestDatasetPtr& dataset);
 

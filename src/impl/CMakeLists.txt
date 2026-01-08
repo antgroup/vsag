@@ -29,7 +29,6 @@ add_subdirectory (blas)
 
 file (GLOB IMPL_SRCS "*.cpp")
 list (FILTER IMPL_SRCS EXCLUDE REGEX "_test.cpp")
-list (FILTER IMPL_SRCS EXCLUDE REGEX kmeans_cluster.cpp)
 
 add_library (impl OBJECT ${IMPL_SRCS})
 target_link_libraries (impl PUBLIC transform thread_pool allocator heap vsag_blas

@@ -16,7 +16,7 @@
 
 #include <cblas.h>
 #include <lapacke.h>
-
+#include <omp.h>
 namespace vsag {
 
 void
@@ -42,6 +42,8 @@ BlasFunction::Sgemv(int32_t order,
                     float beta,
                     float* y,
                     int32_t incy) {
+    int original_threads = omp_get_max_threads();
+    omp_set_num_threads(1);
     cblas_sgemv(static_cast<CBLAS_ORDER>(order),
                 static_cast<CBLAS_TRANSPOSE>(trans),
                 m,
@@ -54,6 +56,7 @@ BlasFunction::Sgemv(int32_t order,
                 beta,
                 y,
                 incy);
+    omp_set_num_threads(original_threads);
 }
 
 void

@@ -57,4 +57,11 @@ PointsMutex::Resize(uint32_t new_element_num) {
     element_num_ = new_element_num;
 }
 
+int64_t
+PointsMutex::GetCurrentMemoryUsage() {
+    return static_cast<int64_t>(
+        neighbors_mutex_.size() *
+        (sizeof(std::shared_ptr<std::shared_mutex>) + sizeof(std::shared_mutex)));
+}
+
 }  // namespace vsag

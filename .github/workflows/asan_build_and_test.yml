@@ -16,7 +16,7 @@ jobs:
       volumes:
         - /opt:/useless
     concurrency:
-      group: asan_build_x86-${{ github.event.pull_request.number }}
+      group: asan_build_x86-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
       - name: Free Disk Space
@@ -34,6 +34,9 @@ jobs:
         run: |
           find ./build -type f -name "*.o" -exec rm -f {} +
           find ./build -type f -name "*.cpp" -exec rm -f {} +
+          find ./build -type f -name "*.a" -exec rm -f {} +
+          rm -rf ./build/hdf5
+          rm -rf ./build/boost
           rm -rf ./build/tools
       - name: Save Test
         uses: actions/upload-artifact@v5
@@ -41,14 +44,14 @@ jobs:
           path: ./build
           name: test_x86-${{ github.run_id }}
           compression-level: 1
-          retention-days: 1
+          retention-days: 3
           overwrite: 'true'
 
   build_asan_aarch64:
     name: Asan Build Aarch64
     runs-on: ubuntu-22.04-arm
     concurrency:
-      group: asan_build_aarch-${{ github.event.pull_request.number }}
+      group: asan_build_aarch-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
       - name: Free Disk Space
@@ -72,7 +75,7 @@ jobs:
           path: ./build/
           name: test_aarch64-${{ github.run_id }}
           compression-level: 1
-          retention-days: 1
+          retention-days: 3
           overwrite: 'true'
 
   test_asan_x86:
@@ -80,7 +83,7 @@ jobs:
     needs: build_asan_x86
     runs-on: ubuntu-22.04
     concurrency:
-      group: test_asan_x86-${{ matrix.test_type }}-${{ github.event.pull_request.number }}
+      group: test_asan_x86-${{ matrix.test_type }}-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     strategy:
       matrix:
@@ -103,6 +106,7 @@ jobs:
       - name: Do Asan Test In ${{ matrix.test_type }}
         run: |
           echo leak:libomp.so > omp.supp
+          echo leak:libgomp.so >> omp.supp
           export LSAN_OPTIONS=suppressions=omp.supp
           chmod +x ./build/tests/${{ matrix.test_type }}
           ./scripts/testing/test_parallel_by_name.sh ${{ matrix.test_type }}
@@ -112,7 +116,7 @@ jobs:
           path: ./log
           name: log-x86-${{ matrix.test_type }}-${{ github.run_id }}
           compression-level: 1
-          retention-days: 1
+          retention-days: 3
           overwrite: 'true'
 
   test_asan_aarch64:
@@ -123,7 +127,7 @@ jobs:
       matrix:
         test_type: [ unittests, functests ]
     concurrency:
-      group: test_asan_aarch64-${{ matrix.test_type }}-${{ github.event.pull_request.number }}
+      group: test_asan_aarch64-${{ matrix.test_type }}-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
       - name: Free Disk Space
@@ -141,6 +145,7 @@ jobs:
       - name: Do Asan Test In ${{ matrix.test_type }}
         run: |
           echo leak:libomp.so > omp.supp
+          echo leak:libgomp.so >> omp.supp
           export LSAN_OPTIONS=suppressions=omp.supp
           chmod +x ./build/tests/${{ matrix.test_type }}
           ./scripts/testing/test_parallel_by_name.sh ${{ matrix.test_type }}
@@ -150,7 +155,7 @@ jobs:
           path: ./log
           name: log-aarch64-${{ matrix.test_type }}-${{ github.run_id }}
           compression-level: 1
-          retention-days: 1
+          retention-days: 3
           overwrite: 'true'
 
   clean_up:
@@ -166,7 +171,7 @@ jobs:
           path: /tmp/clean_up
           name: test_x86-${{ github.run_id }}
           compression-level: 1
-          retention-days: 1
+          retention-days: 3
           overwrite: 'true'
       - name: Overwrite Test Artifact Aarch64
         uses: actions/upload-artifact@v5
@@ -174,5 +179,5 @@ jobs:
           path: /tmp/clean_up
           name: test_aarch64-${{ github.run_id }}
           compression-level: 1
-          retention-days: 1
+          retention-days: 3
           overwrite: 'true'

@@ -103,6 +103,7 @@ public:
           max_degree_(pyramid_param->max_degree),
           index_min_size_(pyramid_param->index_min_size),
           graph_type_(pyramid_param->graph_type) {
+        label_table_->compress_duplicate_data_ = pyramid_param->support_duplicate;
         base_codes_ = FlattenInterface::MakeInstance(pyramid_param->base_codes_param, common_param);
         root_ =
             std::make_shared<IndexNode>(allocator_, pyramid_param->graph_param, index_min_size_);
@@ -127,6 +128,12 @@ public:
 
     std::vector<int64_t>
     Build(const DatasetPtr& base) override;
+
+    float
+    CalcDistanceById(const float* query, int64_t id) const override;
+
+    DatasetPtr
+    CalDistanceById(const float* query, const int64_t* ids, int64_t count) const override;
 
     void
     Deserialize(StreamReader& reader) override;
@@ -169,6 +176,9 @@ public:
     Serialize(StreamWriter& writer) const override;
 
     void
+    SetImmutable() override;
+
+    void
     Train(const vsag::DatasetPtr& base) override;
 
 private:
@@ -179,7 +189,8 @@ private:
     search_impl(const DatasetPtr& query,
                 int64_t limit,
                 const SearchFunc& search_func,
-                int64_t ef_search) const;
+                int64_t ef_search,
+                float radius = std::numeric_limits<float>::max()) const;
 
     bool
     is_update_entry_point(uint64_t total_count) {
@@ -223,7 +234,7 @@ private:
     int64_t cur_element_count_{0};
     float alpha_{1.0F};
 
-    std::shared_mutex resize_mutex_;
+    mutable std::shared_mutex resize_mutex_;
     std::mutex cur_element_count_mutex_;
     std::string graph_type_{GRAPH_TYPE_VALUE_NSW};
 
@@ -233,6 +244,7 @@ private:
 
     // static
     uint32_t index_min_size_{0};
+    bool immutable_{false};
 };
 
 }  // namespace vsag

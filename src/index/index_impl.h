@@ -88,6 +88,12 @@ public:
         SAFE_CALL(return this->inner_index_->Build(base));
     }
 
+    tl::expected<bool, Error>
+    Tune(const std::string& parameters, bool disable_future_tuning = false) override {
+        CHECK_IMMUTABLE_INDEX("tune");
+        SAFE_CALL(return this->inner_index_->Tune(parameters, disable_future_tuning));
+    }
+
     tl::expected<float, Error>
     CalcDistanceById(const DatasetPtr& vector, int64_t id) const override {
         SAFE_CALL(return this->inner_index_->CalcDistanceById(vector, id));
@@ -233,13 +239,15 @@ public:
         return this->inner_index_->GetNumberRemoved();
     }
 
-    virtual tl::expected<DatasetPtr, Error>
-    GetRawVectorByIds(const int64_t* ids, int64_t count) const override {
+    tl::expected<DatasetPtr, Error>
+    GetRawVectorByIds(const int64_t* ids,
+                      int64_t count,
+                      Allocator* specified_allocator) const override {
         if (not CheckFeature(IndexFeature::SUPPORT_GET_RAW_VECTOR_BY_IDS)) {
             return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                                         "index no support to get raw vector by ids"));
         }
-        SAFE_CALL(return this->inner_index_->GetVectorByIds(ids, count));
+        SAFE_CALL(return this->inner_index_->GetVectorByIds(ids, count, specified_allocator));
     };
 
     [[nodiscard]] std::string

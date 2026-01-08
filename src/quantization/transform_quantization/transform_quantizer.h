@@ -132,6 +132,11 @@ TransformQuantizer<QuantTmpl, metric>::TransformQuantizer(const TransformQuantiz
     transformer_param.input_dim_ = this->dim_;
     for (const auto& transform_str : param->tq_chain_) {
         transform_chain_.emplace_back(MakeTransformerInstance(transform_str, transformer_param));
+        if (transform_chain_.back()->GetType() == VectorTransformerType::MRLE and
+            transform_chain_.size() > 1) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                fmt::format("MRLE must be first if exists"));
+        }
         transformer_param.input_dim_ = transform_chain_.back()->GetOutputDim();
     }
 
@@ -186,6 +191,17 @@ TransformQuantizer<QuantTmpl, metric>::MakeTransformerInstance(
         return std::make_shared<RandomOrthogonalMatrix>(this->allocator_, input_dim, output_dim);
     }
 
+    if (transform_str == TRANSFORMER_TYPE_VALUE_MRLE) {
+        if (param.mrle_dim_ != 0) {
+            output_dim = param.mrle_dim_;
+            if (output_dim > input_dim) {
+                throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                    fmt::format("mrle dim must be less than input dim"));
+            }
+        }
+        return std::make_shared<MRLETransformer<metric>>(this->allocator_, input_dim, output_dim);
+    }
+
     throw VsagException(ErrorType::INVALID_ARGUMENT,
                         fmt::format("invalid transformer name {}", transform_str));
 };
@@ -193,8 +209,6 @@ TransformQuantizer<QuantTmpl, metric>::MakeTransformerInstance(
 template <typename QuantTmpl, MetricType metric>
 bool
 TransformQuantizer<QuantTmpl, metric>::TrainImpl(const DataType* data, uint64_t count) {
-    count = std::min(count, (uint64_t)TQ_MAX_TRAIN_COUNT);
-
     // 1. train transformer based on original data
     for (const auto& vector_transformer : this->transform_chain_) {
         vector_transformer->Train(data, count);

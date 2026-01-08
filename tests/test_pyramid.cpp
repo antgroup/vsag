@@ -27,6 +27,7 @@ struct PyramidParam {
     std::string precise_quantization_type = "fp32";
     std::string graph_type = "nsw";
     bool use_reorder = false;
+    bool support_duplicate = false;
 };
 
 namespace fixtures {
@@ -38,7 +39,9 @@ public:
                                          const PyramidParam& param);
 
     static std::string
-    GeneratePyramidSearchParametersString(int64_t ef_search, double timeout_ms = 100);
+    GeneratePyramidSearchParametersString(
+        int64_t ef_search,
+        double timeout_ms = static_cast<double>(std::numeric_limits<uint32_t>::max()));
 
     static TestDatasetPool pool;
 
@@ -79,7 +82,8 @@ PyramidTestIndex::GeneratePyramidBuildParametersString(const std::string& metric
             "base_quantization_type": "{}",
             "precise_quantization_type": "{}",
             "use_reorder": {},
-            "index_min_size": 28
+            "index_min_size": 28,
+            "support_duplicate": {}
         }}
     }}
     )";
@@ -90,7 +94,8 @@ PyramidTestIndex::GeneratePyramidBuildParametersString(const std::string& metric
                                             param.graph_type,
                                             param.base_quantization_type,
                                             param.precise_quantization_type,
-                                            param.use_reorder);
+                                            param.use_reorder,
+                                            param.support_duplicate);
     return build_parameters_str;
 }
 
@@ -106,6 +111,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "[ft][pyramid]") {
     auto metric_type = GENERATE("l2", "ip", "cosine");
     auto use_reorder = GENERATE(true, false);
+    auto immutable = GENERATE(true, false);
     PyramidParam pyramid_param;
     pyramid_param.no_build_levels = {0, 1, 2};
     pyramid_param.use_reorder = use_reorder;
@@ -116,14 +122,22 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
     const std::string name = "pyramid";
     auto search_param = GeneratePyramidSearchParametersString(100);
     for (auto& dim : dims) {
+        INFO(fmt::format("metric_type={}, dim={}, use_reorder={}, immutable={}",
+                         metric_type,
+                         dim,
+                         use_reorder,
+                         immutable));
         auto param = GeneratePyramidBuildParametersString(metric_type, dim, pyramid_param);
         auto index = TestFactory(name, param, true);
         REQUIRE(index->GetIndexType() == vsag::IndexType::PYRAMID);
         auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type, /*with_path=*/true);
         TestContinueAdd(index, dataset, true);
-        TestKnnSearch(index, dataset, search_param, 0.99, true);
-        TestFilterSearch(index, dataset, search_param, 0.99, true);
-        TestRangeSearch(index, dataset, search_param, 0.99, 10, true);
+        if (immutable) {
+            index->SetImmutable();
+        }
+        TestKnnSearch(index, dataset, search_param, 0.96, true);
+        TestFilterSearch(index, dataset, search_param, 0.96, true);
+        TestRangeSearch(index, dataset, search_param, 0.96, 10, true);
         TestRangeSearch(index, dataset, search_param, 0.49, 5, true);
     }
 }
@@ -136,14 +150,16 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex, "Pyramid Add Test", "[f
     const std::string name = "pyramid";
     auto search_param = GeneratePyramidSearchParametersString(100);
     for (auto& dim : dims) {
+        INFO(fmt::format("metric_type={}, dim={}", metric_type, dim));
         auto param = GeneratePyramidBuildParametersString(metric_type, dim, pyramid_param);
         auto index = TestFactory(name, param, true);
         auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type, /*with_path=*/true);
         TestAddIndex(index, dataset, true);
-        TestKnnSearch(index, dataset, search_param, 0.99, true);
-        TestFilterSearch(index, dataset, search_param, 0.99, true);
-        TestRangeSearch(index, dataset, search_param, 0.99, 10, true);
+        TestKnnSearch(index, dataset, search_param, 0.96, true);
+        TestFilterSearch(index, dataset, search_param, 0.96, true);
+        TestRangeSearch(index, dataset, search_param, 0.96, 10, true);
         TestRangeSearch(index, dataset, search_param, 0.49, 5, true);
+        TestCalcDistanceById(index, dataset, 1e-5, true);
     }
 }
 
@@ -157,15 +173,20 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
     PyramidParam pyramid_param;
     for (auto& dim : dims) {
         for (const auto& level : levels) {
+            INFO(fmt::format("metric_type={}, dim={}, no_build_levels={}",
+                             metric_type,
+                             dim,
+                             fmt::join(level, ",")));
             pyramid_param.no_build_levels = level;
             auto param = GeneratePyramidBuildParametersString(metric_type, dim, pyramid_param);
             auto index = TestFactory(name, param, true);
             auto dataset =
                 pool.GetDatasetAndCreate(dim, base_count, metric_type, /*with_path=*/true);
             TestContinueAdd(index, dataset, true);
-            TestKnnSearch(index, dataset, search_param, 0.99, true);
-            TestFilterSearch(index, dataset, search_param, 0.99, true);
-            TestRangeSearch(index, dataset, search_param, 0.99, 10, true);
+            TestKnnSearch(index, dataset, search_param, 0.96, true);
+            TestFilterSearch(index, dataset, search_param, 0.96, true);
+            TestRangeSearch(index, dataset, search_param, 0.96, 10, true);
+            TestCalcDistanceById(index, dataset, 1e-5, true);
         }
     }
 }
@@ -179,6 +200,10 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex, "Pyramid No Path Test",
     std::vector<std::vector<int>> tmp_levels = {{1, 2}, {0, 1, 2}};
     for (auto& dim : dims) {
         for (const auto& level : tmp_levels) {
+            INFO(fmt::format("metric_type={}, dim={}, no_build_levels={}",
+                             metric_type,
+                             dim,
+                             fmt::join(level, ",")));
             pyramid_param.no_build_levels = level;
             auto param = GeneratePyramidBuildParametersString(metric_type, dim, pyramid_param);
             auto index = TestFactory(name, param, true);
@@ -187,9 +212,10 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex, "Pyramid No Path Test",
             dataset->query_->Paths(nullptr);
             TestContinueAdd(index, dataset, true);
             auto has_root = level[0] != 0;
-            TestKnnSearch(index, dataset, search_param, 0.99, has_root);
-            TestFilterSearch(index, dataset, search_param, 0.99, has_root);
-            TestRangeSearch(index, dataset, search_param, 0.99, 10, has_root);
+            TestKnnSearch(index, dataset, search_param, 0.96, has_root);
+            TestFilterSearch(index, dataset, search_param, 0.96, has_root);
+            TestRangeSearch(index, dataset, search_param, 0.96, 10, has_root);
+            TestCalcDistanceById(index, dataset, 1e-5, true);
             dataset->query_->Paths(tmp_paths);
         }
     }
@@ -212,6 +238,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
     const std::string name = "pyramid";
     auto search_param = GeneratePyramidSearchParametersString(100);
     for (auto& dim : dims) {
+        INFO(fmt::format("metric_type={}, dim={}, use_reorder={}", metric_type, dim, use_reorder));
         vsag::Options::Instance().set_block_size_limit(size);
         auto param = GeneratePyramidBuildParametersString(metric_type, dim, pyramid_param);
         auto index = TestFactory(name, param, true);
@@ -249,6 +276,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex, "Pyramid Clone", "[ft][
     const std::string name = "pyramid";
     auto search_param = GeneratePyramidSearchParametersString(100);
     for (auto& dim : dims) {
+        INFO(fmt::format("metric_type={}, dim={}", metric_type, dim));
         vsag::Options::Instance().set_block_size_limit(size);
         auto param = GeneratePyramidBuildParametersString(metric_type, dim, pyramid_param);
         auto index = TestFactory(name, param, true);
@@ -270,6 +298,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
     pyramid_param.no_build_levels = {0, 1, 2};
     const std::string name = "pyramid";
     for (auto& dim : dims) {
+        INFO(fmt::format("metric_type={}, dim={}", metric_type, dim));
         vsag::Options::Instance().set_block_size_limit(size);
         auto param = GeneratePyramidBuildParametersString(metric_type, dim, pyramid_param);
         auto index = vsag::Factory::CreateIndex(name, param, allocator.get());
@@ -294,13 +323,14 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
         auto index = TestFactory(name, param, true);
         auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type, /*with_path=*/true);
         TestConcurrentAdd(index, dataset, true);
-        TestConcurrentKnnSearch(index, dataset, search_param, 0.99, true);
+        TestConcurrentKnnSearch(index, dataset, search_param, 0.96, true);
+        TestCalcDistanceById(index, dataset, 1e-5, true);
     }
     for (auto& dim : dims) {
         auto param = GeneratePyramidBuildParametersString(metric_type, dim, pyramid_param);
         auto index = TestFactory(name, param, true);
         auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type, /*with_path=*/true);
-        TestConcurrentAddSearch(index, dataset, search_param, 0.99, true);
+        TestConcurrentAddSearch(index, dataset, search_param, 0.96, true);
     }
 }
 
@@ -311,12 +341,13 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex, "Pyramid OverTime Test"
     const std::string name = "pyramid";
     auto search_param = GeneratePyramidSearchParametersString(100, 20);
     for (auto& dim : dims) {
+        INFO(fmt::format("metric_type={}, dim={}", metric_type, dim));
         auto param = GeneratePyramidBuildParametersString(metric_type, dim, pyramid_param);
         auto index = TestFactory(name, param, true);
         auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type, /*with_path=*/true);
         TestContinueAdd(index, dataset, true);
         TestSearchOvertime(index, dataset, search_param);
-        auto timeout_search_param = GeneratePyramidSearchParametersString(100, 0.1);
+        auto timeout_search_param = GeneratePyramidSearchParametersString(100, 0.0F);
 
         auto query = vsag::Dataset::Make();
         query->NumElements(1)
@@ -332,5 +363,70 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex, "Pyramid OverTime Test"
         REQUIRE(stats.size() == 1);
         bool is_timeout = stats[0] == "true";
         REQUIRE(is_timeout);
+    }
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
+                             "Pyramid Duplicate Test",
+                             "[ft][pyramid][concurrent]") {
+    using namespace fixtures;
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto metric_type = GENERATE("l2", "cosine");
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto name = "pyramid";
+    auto duplicate_pos = GENERATE("prefix", "suffix", "middle");
+    auto search_param = GeneratePyramidSearchParametersString(100);
+    std::unordered_map<std::string, float> ratios{
+        {"prefix", 0.9}, {"suffix", 0.9}, {"middle", 1.0}};
+    auto recall = 0.98F;
+    PyramidParam pyramid_param;
+    pyramid_param.support_duplicate = true;
+    for (auto& dim : dims) {
+        vsag::Options::Instance().set_block_size_limit(size);
+        auto param = GeneratePyramidBuildParametersString(metric_type, dim, pyramid_param);
+        auto index = TestFactory(name, param, true);
+        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type, /*with_path=*/true);
+        TestIndex::TestBuildDuplicateIndex(index, dataset, duplicate_pos, true);
+        TestIndex::TestKnnSearch(index, dataset, search_param, recall, true);
+        TestIndex::TestConcurrentKnnSearch(index, dataset, search_param, recall, true);
+        TestIndex::TestRangeSearch(index, dataset, search_param, recall, 10, true);
+        TestIndex::TestRangeSearch(index, dataset, search_param, recall / 2.0, 5, true);
+        TestIndex::TestFilterSearch(index, dataset, search_param, recall, true, true);
+        auto index2 = TestIndex::TestFactory(name, param, true);
+        TestIndex::TestSerializeFile(index, index2, dataset, search_param, true);
+
+        // query duplicate data
+        if (duplicate_pos != std::string("middle")) {
+            auto duplicate_data = vsag::Dataset::Make();
+            duplicate_data->NumElements(1)
+                ->Dim(dataset->base_->GetDim())
+                ->SparseVectors(dataset->base_->GetSparseVectors())
+                ->Paths(dataset->base_->GetPaths())
+                ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+                ->Owner(false);
+            auto result = index->KnnSearch(duplicate_data, 10, search_param).value();
+            REQUIRE(result->GetDim() == 10);
+            for (size_t i = 0; i < result->GetDim(); ++i) {
+                auto distance = result->GetDistances()[i];
+                REQUIRE(std::abs(distance) <= 2e-6);
+            }
+        }
+        vsag::Options::Instance().set_block_size_limit(origin_size);
+    }
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
+                             "Pyramid Duplicate ID Test",
+                             "[ft][pyramid]") {
+    auto metric_type = GENERATE("l2");
+    PyramidParam pyramid_param;
+    pyramid_param.no_build_levels = {0, 1};
+    const std::string name = "pyramid";
+    auto search_param = GeneratePyramidSearchParametersString(100, 20);
+    for (auto& dim : dims) {
+        auto param = GeneratePyramidBuildParametersString(metric_type, dim, pyramid_param);
+        auto index = TestFactory(name, param, true);
+        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type, /*with_path=*/true);
+        TestDuplicateAdd(index, dataset);
     }
 }

@@ -15,12 +15,78 @@
 
 if(APPLE)
     set(ld_flags_workaround "-Wl,-rpath,@loader_path")
-    # Find OpenMP - will locate libomp on macOS
-    find_package(OpenMP REQUIRED)
-    if (OpenMP_CXX_FOUND)
-        message(STATUS "Found OpenMP: ${OpenMP_CXX_INCLUDE_DIRS}")
-        set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+    
+    # Find OpenMP (libomp) on macOS.
+    # Try to detect Homebrew prefix automatically
+    if (NOT DEFINED OpenMP_ROOT)
+        # Try to get Homebrew prefix
+        execute_process(
+            COMMAND brew --prefix libomp
+            OUTPUT_VARIABLE BREW_LIBOMP_PREFIX
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET
+        )
+        if (BREW_LIBOMP_PREFIX AND EXISTS "${BREW_LIBOMP_PREFIX}")
+            set(OpenMP_ROOT "${BREW_LIBOMP_PREFIX}")
+            message(STATUS "Auto-detected OpenMP from Homebrew: ${OpenMP_ROOT}")
+        endif()
+    endif()
+
+    set(OpenMP_C_FOUND FALSE)
+    set(OpenMP_CXX_FOUND FALSE)
+
+    # Search for libomp - CMake will automatically search standard system paths
+    find_library(VSAG_LIBOMP_LIBRARY NAMES omp libomp
+        HINTS "${OpenMP_ROOT}"
+        PATH_SUFFIXES lib
+    )
+    find_path(VSAG_LIBOMP_INCLUDE_DIR NAMES omp.h
+        HINTS "${OpenMP_ROOT}"
+        PATH_SUFFIXES include
+    )
+
+    if (VSAG_LIBOMP_LIBRARY AND VSAG_LIBOMP_INCLUDE_DIR)
+        # For LLVM clang on macOS, we need both compile and link flags
+        set(OpenMP_C_FLAGS "-fopenmp")
+        set(OpenMP_CXX_FLAGS "-fopenmp")
+        set(OpenMP_C_FOUND TRUE)
+        set(OpenMP_CXX_FOUND TRUE)
+
+        # Add the libomp library path to linker search paths
+        get_filename_component(VSAG_LIBOMP_LIB_DIR "${VSAG_LIBOMP_LIBRARY}" DIRECTORY)
+        link_directories("${VSAG_LIBOMP_LIB_DIR}")
+
+        message(STATUS "Found OpenMP (explicit libomp): ${VSAG_LIBOMP_LIBRARY}")
+
+        if (NOT TARGET OpenMP::OpenMP_C)
+            add_library(OpenMP::OpenMP_C INTERFACE IMPORTED)
+        endif()
+        if (NOT TARGET OpenMP::OpenMP_CXX)
+            add_library(OpenMP::OpenMP_CXX INTERFACE IMPORTED)
+        endif()
+
+        # Set both compile and link options
+        set_target_properties(OpenMP::OpenMP_C PROPERTIES
+            INTERFACE_COMPILE_OPTIONS "${OpenMP_C_FLAGS}"
+            INTERFACE_INCLUDE_DIRECTORIES "${VSAG_LIBOMP_INCLUDE_DIR}"
+            INTERFACE_LINK_LIBRARIES "${VSAG_LIBOMP_LIBRARY}"
+        )
+        set_target_properties(OpenMP::OpenMP_CXX PROPERTIES
+            INTERFACE_COMPILE_OPTIONS "${OpenMP_CXX_FLAGS}"
+            INTERFACE_INCLUDE_DIRECTORIES "${VSAG_LIBOMP_INCLUDE_DIR}"
+            INTERFACE_LINK_LIBRARIES "${VSAG_LIBOMP_LIBRARY}"
+        )
+    else()
+        find_package(OpenMP QUIET) # Try default FindOpenMP if explicit fails
+        if (OpenMP_CXX_FOUND)
+            message(STATUS "Found OpenMP (FindOpenMP): ${OpenMP_CXX_INCLUDE_DIRS}")
+            # LLVM clang can use -fopenmp directly
+            if (" ${OpenMP_CXX_FLAGS} " MATCHES " -fopenmp ")
+                message(STATUS "Using LLVM clang OpenMP flags: ${OpenMP_CXX_FLAGS}")
+            endif()
+        else()
+            message(FATAL_ERROR "OpenMP not found on macOS. Set OpenMP_ROOT (e.g. /opt/homebrew/opt/libomp).")
+        endif()
     endif()
     
     # Find LAPACK - will automatically use Accelerate framework on macOS

@@ -18,6 +18,7 @@
 #include "algorithm/inner_index_interface.h"
 #include "algorithm/sparse_index.h"
 #include "datacell/sparse_term_datacell.h"
+#include "vsag/allocator.h"
 
 namespace vsag {
 
@@ -53,6 +54,9 @@ public:
     std::vector<int64_t>
     Build(const DatasetPtr& base) override;
 
+    bool
+    UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update = false) override;
+
     DatasetPtr
     KnnSearch(const DatasetPtr& query,
               int64_t k,
@@ -85,7 +89,9 @@ public:
     Deserialize(StreamReader& reader) override;
 
     void
-    GetSparseVectorByInnerId(InnerIdType inner_id, SparseVector* data) const override;
+    GetSparseVectorByInnerId(InnerIdType inner_id,
+                             SparseVector* data,
+                             Allocator* specified_allocator) const override;
 
     IndexType
     GetIndexType() const override {
@@ -106,21 +112,27 @@ public:
     DatasetPtr
     CalDistanceById(const DatasetPtr& query, const int64_t* ids, int64_t count) const override;
 
-    bool
-    UpdateId(int64_t old_id, int64_t new_id) override;
-
     std::pair<int64_t, int64_t>
     GetMinAndMaxId() const override;
 
     void
     SetImmutable() override;
 
+    int64_t
+    GetMemoryUsage() const override {
+        return this->CalSerializeSize();
+    }
+
 private:
     template <InnerSearchMode mode>
     DatasetPtr
     search_impl(const SparseTermComputerPtr& computer,
                 const InnerSearchParam& inner_param,
-                Allocator* allocator) const;
+                Allocator* allocator,
+                bool use_term_lists_heap_insert) const;
+
+    std::pair<int64_t, int64_t>
+    get_min_max_window_id(const FilterPtr& filter) const;
 
 private:
     mutable std::shared_mutex global_mutex_;
@@ -135,10 +147,17 @@ private:
 
     bool use_reorder_{false};
 
+    bool use_quantization_{false};
+
     float doc_retain_ratio_{0};
 
     std::shared_ptr<SparseIndex> rerank_flat_index_{nullptr};
+
     bool deserialize_without_footer_{false};
+    bool deserialize_without_buffer_{false};
+
+    std::shared_ptr<QuantizationParams> quantization_params_;
+    uint32_t avg_doc_term_length_{100};
 };
 
 }  // namespace vsag

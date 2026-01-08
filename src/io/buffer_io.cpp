@@ -20,6 +20,10 @@
 
 #include <filesystem>
 
+#if !HAVE_LIBAIO
+#include "async_io_parameter.h"
+#endif
+
 namespace vsag {
 
 BufferIO::BufferIO(std::string filename, Allocator* allocator)
@@ -40,7 +44,20 @@ BufferIO::BufferIO(const BufferIOParameterPtr& io_param, const IndexCommonParam&
     : BufferIO(io_param->path_, common_param.allocator_.get()){};
 
 BufferIO::BufferIO(const IOParamPtr& param, const IndexCommonParam& common_param)
-    : BufferIO(std::dynamic_pointer_cast<BufferIOParameter>(param), common_param){};
+    : BufferIO([&param]() -> std::string {
+          auto buffer_param = std::dynamic_pointer_cast<BufferIOParameter>(param);
+          if (buffer_param) {
+              return buffer_param->path_;
+          }
+          #if !HAVE_LIBAIO
+          // On macOS, AsyncIO is aliased to BufferIO
+          auto async_param = std::dynamic_pointer_cast<AsyncIOParameter>(param);
+          if (async_param) {
+              return async_param->path_;
+          }
+          #endif
+          throw std::runtime_error("BufferIO: invalid parameter type");
+      }(), common_param.allocator_.get()) {};
 
 void
 BufferIO::WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset) {

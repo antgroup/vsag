@@ -197,7 +197,7 @@ public:
 
     void*
     Allocate(uint64_t size) override {
-        auto addr = (void*)malloc(size);
+        auto addr = static_cast<void*>(malloc(size));
         return addr;
     }
 
@@ -208,7 +208,7 @@ public:
 
     void*
     Reallocate(void* p, uint64_t size) override {
-        auto addr = (void*)realloc(p, size);
+        auto addr = static_cast<void*>(realloc(p, size));
         return addr;
     }
 

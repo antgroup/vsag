@@ -27,7 +27,15 @@ public:
     static std::string
     GenerateHNSWBuildParametersString(const std::string& metric_type,
                                       int64_t dim,
-                                      bool use_static = false);
+                                      bool use_static = false,
+                                      std::string dtype = "float32");
+
+    static void
+    TestGeneral(const IndexPtr& index,
+                const TestDatasetPtr& dataset,
+                const std::string& search_param,
+                float recall,
+                bool expect_success = true);
 
     static TestDatasetPool pool;
 
@@ -53,22 +61,44 @@ std::vector<float> HNSWTestIndex::valid_ratios{0.01, 0.05, 0.99};
 std::string
 HNSWTestIndex::GenerateHNSWBuildParametersString(const std::string& metric_type,
                                                  int64_t dim,
-                                                 bool use_static) {
+                                                 bool use_static,
+                                                 std::string dtype) {
+    // should be aligned with HGraphTestIndex::GenerateHGraphBuildParametersString
     constexpr auto parameter_temp = R"(
     {{
-        "dtype": "float32",
+        "dtype": "{}",
         "metric_type": "{}",
         "dim": {},
         "hnsw": {{
-            "max_degree": 16,
-            "ef_construction": 200,
+            "max_degree": 96,
+            "ef_construction": 500,
             "use_static": {}
         }}
     }}
     )";
-    auto build_parameters_str = fmt::format(parameter_temp, metric_type, dim, use_static);
+    auto build_parameters_str = fmt::format(parameter_temp, dtype, metric_type, dim, use_static);
     return build_parameters_str;
 }
+
+void
+HNSWTestIndex::TestGeneral(const TestIndex::IndexPtr& index,
+                           const TestDatasetPtr& dataset,
+                           const std::string& search_param,
+                           float recall,
+                           bool expect_success) {
+    REQUIRE(index->GetIndexType() == vsag::IndexType::HNSW);
+    TestKnnSearch(index, dataset, search_param, recall, true);
+    TestConcurrentKnnSearch(index, dataset, search_param, recall, true);
+    TestRangeSearch(index, dataset, search_param, recall, 10, true);
+    TestRangeSearch(index, dataset, search_param, recall / 2.0, 5, true);
+    TestFilterSearch(index, dataset, search_param, recall, true, true);
+    TestCheckIdExist(index, dataset);
+    TestBatchCalcDistanceById(index, dataset, 1e-5, true, false, true);
+    TestSearchAllocator(index, dataset, search_param, recall, true);
+    TestUpdateVector(index, dataset, search_param, false);
+    TestUpdateId(index, dataset, search_param, true);
+}
+
 }  // namespace fixtures
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
@@ -254,7 +284,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Test non-standard ID
 
     const std::string name = "hnsw";
     auto search_param = fmt::format(search_param_tmp, 200);
-    auto id_shift = 48;
+    auto id_shift = 52;
     constexpr auto parameter_temp = R"(
     {{
         "dtype": "float32",
@@ -272,7 +302,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Test non-standard ID
         auto param = fmt::format(parameter_temp, metric_type, dim, false);
         auto index = TestFactory(name, param, true);
         REQUIRE(index->GetIndexType() == vsag::IndexType::HNSW);
-        auto dataset = pool.GetDatasetAndCreate(dim, 10000, metric_type, false, 0.8, 0, id_shift);
+        auto dataset = pool.GetDatasetAndCreate(dim, 1200, metric_type, false, 0.8, 0, id_shift);
         TestContinueAdd(index, dataset, true);
         TestKnnSearch(index, dataset, search_param, 0.99, true);
         TestKnnSearchIter(index, dataset, search_param, 0.99, true);
@@ -446,6 +476,32 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Concurrent Add", "[f
     }
 }
 
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Remove", "[ft][hnsw]") {
+    auto test_recovery = GENERATE(true, false);
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    std::vector<std::string> metric_types = {"l2", "ip", "cosine"};
+    const std::string name = "hnsw";
+    auto search_param = fmt::format(search_param_tmp, 100);
+    for (auto& dim : dims) {
+        auto metric_type = metric_types[random() % metric_types.size()];
+        vsag::Options::Instance().set_block_size_limit(size);
+        auto param = GenerateHNSWBuildParametersString(metric_type, dim);
+        auto index = TestFactory(name, param, true);
+        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+
+        if (test_recovery) {
+            TestIndex::TestRecoverRemoveIndex(index, dataset, search_param);
+            HNSWTestIndex::TestGeneral(index, dataset, search_param, 0.85, false);
+        } else {
+            TestIndex::TestRemoveIndex(index, dataset, true);
+            HNSWTestIndex::TestGeneral(index, dataset, search_param, 0.85);
+        }
+
+        vsag::Options::Instance().set_block_size_limit(origin_size);
+    }
+}
+
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Update Id", "[ft][hnsw]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
@@ -518,6 +574,26 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Get Min Max ID", "[f
     TestBuildIndex(index, dataset, true);
     TestGetMinAndMaxId(index, dataset);
     vsag::Options::Instance().set_block_size_limit(origin_size);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Get Raw Vector", "[ft][hnsw]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    auto dtype = GENERATE("float32", "int8");
+    auto metric_type = GENERATE("l2");
+    const std::string name = "hnsw";
+    for (auto& dim : dims) {
+        if (dtype == std::string("int8")) {
+            metric_type = "ip";
+        }
+        vsag::Options::Instance().set_block_size_limit(size);
+        auto param = GenerateHNSWBuildParametersString(metric_type, dim, false, dtype);
+        auto index = TestFactory(name, param, true);
+        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+        TestBuildIndex(index, dataset, true);
+        TestGetRawVectorByIds(index, dataset, true);
+        vsag::Options::Instance().set_block_size_limit(origin_size);
+    }
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Update Vector", "[ft][hnsw]") {

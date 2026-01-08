@@ -30,6 +30,7 @@ const char* const INDEX_TYPE_PYRAMID = "pyramid";
 
 const char* const TYPE_KEY = "type";
 const char* const USE_REORDER_KEY = "use_reorder";
+const char* const USE_QUANTIZATION = "use_quantization";
 const char* const EXTRA_INFO_KEY = "extra_info";
 const char* const USE_ATTRIBUTE_FILTER_KEY = "use_attribute_filter";
 const char* const BUILD_THREAD_COUNT_KEY = "build_thread_count";
@@ -82,12 +83,14 @@ const char* const QUANTIZATION_TYPE_VALUE_TQ = "tq";
 const char* const TRANSFORMER_TYPE_VALUE_PCA = "pca";
 const char* const TRANSFORMER_TYPE_VALUE_ROM = "rom";
 const char* const TRANSFORMER_TYPE_VALUE_FHT = "fht";
+const char* const TRANSFORMER_TYPE_VALUE_MRLE = "mrle";
 const char* const TRANSFORMER_TYPE_VALUE_RESIDUAL = "residual";
 const char* const TRANSFORMER_TYPE_VALUE_NORMALIZE = "normalize";
 
 // vector transformer param
 const char* const INPUT_DIM_KEY = "input_dim";
 const char* const PCA_DIM_KEY = "pca_dim";
+const char* const MRLE_DIM_KEY = "mrle_dim";
 const char* const USE_FHT_KEY = "use_fht";
 
 // quantization param
@@ -105,6 +108,9 @@ const char* const SPARSE_TERM_PRUNE_RATIO = "term_prune_ratio";
 const char* const SPARSE_TERM_ID_LIMIT = "term_id_limit";
 const char* const SPARSE_WINDOW_SIZE = "window_size";
 const char* const SPARSE_DESERIALIZE_WITHOUT_FOOTER = "deserialize_without_footer";
+const char* const SPARSE_DESERIALIZE_WITHOUT_BUFFER = "deserialize_without_buffer";
+const char* const SPARSE_USE_TERM_LISTS_HEAP_INSERT = "use_term_lists_heap_insert";
+const char* const SPARSE_AVG_DOC_TERM_LENGTH = "avg_doc_term_length";
 
 // graph param value
 const char* const GRAPH_PARAM_MAX_DEGREE_KEY = "max_degree";
@@ -129,7 +135,8 @@ const char* const IVF_TRAIN_TYPE_KEY = "ivf_train_type";
 const char* const IVF_TRAIN_TYPE_RANDOM = "random";
 const char* const IVF_TRAIN_TYPE_KMEANS = "kmeans";
 
-const char* const IVF_TRAIN_SAMPLE_COUNT_KEY = "ivf_train_sample_count";
+const char* const TRAIN_SAMPLE_COUNT_KEY =
+    "train_sample_count";  // used after v0.18 for both Hgraph and IVF
 const char* const IVF_PARTITION_STRATEGY_PARAMS_KEY = "partition_strategy";
 const char* const IVF_PARTITION_STRATEGY_TYPE_KEY = "partition_strategy_type";
 const char* const IVF_PARTITION_STRATEGY_TYPE_NEAREST = "ivf";
@@ -151,6 +158,7 @@ const char* const REMOVE_FLAG_BIT = "remove_flag_bit";
 const char* const HOLD_MOLDS = "hold_molds";
 const char* const SUPPORT_DUPLICATE = "support_duplicate";
 const char* const SUPPORT_TOMBSTONE = "support_tombstone";
+const char* const SUPPORT_AUTOTUNE = "support_autotune";
 
 const char* const DATACELL_OFFSETS = "datacell_offsets";
 const char* const DATACELL_SIZES = "datacell_sizes";

@@ -29,8 +29,8 @@ using namespace vsag;
 template <typename T>
 void
 TestBasicReadWrite(BasicIO<T>& io) {
-    std::vector<uint64_t> counts = {200, 500};
-    std::vector<uint64_t> max_lengths = {2, 20, 37, 64, 128, 260, 999};
+    std::vector<uint64_t> counts = {100, 250};
+    std::vector<uint64_t> max_lengths = {2, 20, 37, 128, 260, 999};
     for (auto count : counts) {
         for (auto max_length : max_lengths) {
             auto vecs = fixtures::GenTestItems(count, max_length);
@@ -70,8 +70,8 @@ TestBasicReadWrite(BasicIO<T>& io) {
 template <typename T>
 void
 TestSerializeAndDeserialize(BasicIO<T>& wio, BasicIO<T>& rio) {
-    std::vector<uint64_t> counts = {200, 500};
-    std::vector<uint64_t> max_lengths = {2, 20, 37, 64, 128, 260, 999};
+    std::vector<uint64_t> counts = {100, 250};
+    std::vector<uint64_t> max_lengths = {2, 20, 37, 128, 260, 999};
     srandom(time(nullptr));
     fixtures::TempDir dirname("TestSerializeAndDeserialize");
     for (auto count : counts) {

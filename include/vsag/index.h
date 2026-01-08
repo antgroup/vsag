@@ -79,6 +79,20 @@ public:
     }
 
     /**
+     * @brief Tunes the index using the specified parameters.
+     *
+     * @param parameters Parameters used to configure the tuning process.
+     * @param disable_future_tuning If true, further tuning will be disabled after this call.
+     * @return An expected containing:
+     *         - bool: true if tuning was applied successfully; false otherwise.
+     *         - Error: error details if the tuning operation fails.
+     */
+    virtual tl::expected<bool, Error>
+    Tune(const std::string& parameters, bool disable_future_tuning = false) {
+        throw std::runtime_error("Tune is not supported by this index");
+    }
+
+    /**
       * @brief Training index with given vectors
       *
       * @param datas should contains dim, num_elements, ids and vectors
@@ -492,6 +506,7 @@ public:
      *
      * @param ids Array of vector IDs for which raw data is requested.
      * @param count Number of IDs in the 'ids' array.
+     * @param specified_allocator Optional Allocator for memory management (default is nullptr).
      * @return tl::expected<DatasetPtr, Error>
      *         - On success: A DatasetPtr containing the raw vector data
      *           (format depends on implementation, but typically includes vector arrays).
@@ -510,7 +525,9 @@ public:
      * inserted ones, even if the IDs match.
      */
     virtual tl::expected<DatasetPtr, Error>
-    GetRawVectorByIds(const int64_t* ids, int64_t count) const {
+    GetRawVectorByIds(const int64_t* ids,
+                      int64_t count,
+                      Allocator* specified_allocator = nullptr) const {
         throw std::runtime_error("Index doesn't support GetRawVectorByIds");
     };
 

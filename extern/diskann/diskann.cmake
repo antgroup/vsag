@@ -44,9 +44,12 @@ if(CMAKE_HOST_SYSTEM_PROCESSOR STREQUAL "x86_64" AND ENABLE_INTEL_MKL)
     add_dependencies(diskann mkl)
   endif()
 endif()
-target_link_libraries(diskann
+target_link_libraries(diskann PRIVATE
   ${BLAS_LIBRARIES}
 )
+if (TARGET OpenMP::OpenMP_CXX)
+  target_link_libraries(diskann PRIVATE OpenMP::OpenMP_CXX)
+endif()
 
 install (
   TARGETS diskann

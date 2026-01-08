@@ -16,6 +16,7 @@
 #pragma once
 
 #include "fht_kac_rotate_transformer.h"
+#include "mrle_transformer.h"
 #include "pca_transformer.h"
 #include "random_orthogonal_transformer.h"
 #include "vector_transformer.h"

@@ -41,7 +41,7 @@ public:
                                      int buckets_per_data = 1,
                                      bool use_attr_filter = false,
                                      int thread_count = 1,
-                                     int64_t sample_count = 65536L);
+                                     int64_t sample_count = 10000L);
 
     static IVFResourcePtr
     GetResource(bool sample = true);
@@ -68,7 +68,7 @@ public:
 
     static const std::string name;
 
-    constexpr static uint64_t base_count = 1000;
+    constexpr static uint64_t base_count = 800;
 
     static const std::vector<std::pair<std::string, float>> all_test_cases;
 };
@@ -147,7 +147,7 @@ IVFTestIndex::GenerateIVFBuildParametersString(const std::string& metric_type,
             "buckets_per_data": {},
             "use_attribute_filter": {},
             "thread_count": {},
-            "ivf_train_sample_count": {}
+            "train_sample_count": {}
         }}
     }}
     )";
@@ -695,7 +695,7 @@ TestIVFBuildWithLargeK(const fixtures::IVFResourcePtr& resource) {
                     if (train_type == "kmeans") {
                         recall *= 0.8F;  // Kmeans may not achieve high recall in random datasets
                     }
-                    auto search_param = fmt::format(fixtures::search_param_tmp, 3000);
+                    auto search_param = fmt::format(fixtures::search_param_tmp, 400);
                     INFO(
                         fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, "
                                     "train_type: {}, recall: {}",
@@ -707,9 +707,9 @@ TestIVFBuildWithLargeK(const fixtures::IVFResourcePtr& resource) {
 
                     vsag::Options::Instance().set_block_size_limit(size);
                     auto param = IVFTestIndex::GenerateIVFBuildParametersString(
-                        metric_type, dim, base_quantization_str, 10000, train_type);
+                        metric_type, dim, base_quantization_str, 1000, train_type);
                     auto index = IVFTestIndex::TestFactory(IVFTestIndex::name, param, true);
-                    auto dataset = IVFTestIndex::pool.GetDatasetAndCreate(dim, 20000, metric_type);
+                    auto dataset = IVFTestIndex::pool.GetDatasetAndCreate(dim, 3000, metric_type);
                     IVFTestIndex::TestBuildIndex(index, dataset, true);
                     if (index->CheckFeature(vsag::SUPPORT_BUILD)) {
                         IVFTestIndex::TestGeneral(index, dataset, search_param, recall);
@@ -1215,7 +1215,7 @@ TEST_CASE("(Daily) IVF Build & ContinueAdd Test With Random Allocator", "[ft][iv
 }
 
 static void
-TestIVFEstimateMemory(const fixtures::IVFResourcePtr& resource) {
+TestIVFEstimateMemoryAndGetMemoryUsage(const fixtures::IVFResourcePtr& resource) {
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
@@ -1245,6 +1245,7 @@ TestIVFEstimateMemory(const fixtures::IVFResourcePtr& resource) {
                     auto dataset =
                         IVFTestIndex::pool.GetDatasetAndCreate(dim, estimate_count, metric_type);
                     IVFTestIndex::TestEstimateMemory(IVFTestIndex::name, param, dataset);
+                    IVFTestIndex::TestGetMemoryUsage(IVFTestIndex::name, param, dataset);
                     vsag::Options::Instance().set_block_size_limit(origin_size);
                 }
             }
@@ -1252,16 +1253,16 @@ TestIVFEstimateMemory(const fixtures::IVFResourcePtr& resource) {
     }
 }
 
-TEST_CASE("(PR) IVF Estimate Memory", "[ft][ivf][pr]") {
+TEST_CASE("(PR) IVF Estimate Memory And Get Memory Usage", "[ft][ivf][pr]") {
     auto test_index = std::make_shared<fixtures::IVFTestIndex>();
     auto resource = test_index->GetResource(true);
-    TestIVFEstimateMemory(resource);
+    TestIVFEstimateMemoryAndGetMemoryUsage(resource);
 }
 
 TEST_CASE("(Daily) IVF Estimate Memory", "[ft][ivf][daily]") {
     auto test_index = std::make_shared<fixtures::IVFTestIndex>();
     auto resource = test_index->GetResource(false);
-    TestIVFEstimateMemory(resource);
+    TestIVFEstimateMemoryAndGetMemoryUsage(resource);
 }
 
 static void

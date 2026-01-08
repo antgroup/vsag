@@ -126,6 +126,12 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::GetCodesById(InnerIdType id, bool& need
 }
 
 template <typename QuantTmpl, typename IOTmpl>
+void
+SparseVectorDataCell<QuantTmpl, IOTmpl>::Release(const uint8_t* data) const {
+    io_->Release(data);
+}
+
+template <typename QuantTmpl, typename IOTmpl>
 MetricType
 SparseVectorDataCell<QuantTmpl, IOTmpl>::GetMetricType() {
     return this->quantizer_->Metric();
@@ -170,4 +176,15 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::SparseVectorDataCell(
     this->code_size_ = this->quantizer_->GetCodeSize();
 }
 
+template <typename QuantTmpl, typename IOTmpl>
+int64_t
+SparseVectorDataCell<QuantTmpl, IOTmpl>::GetCurrentMemoryUsage() const {
+    int64_t memory = sizeof(SparseVectorDataCell<QuantTmpl, IOTmpl>);
+    memory += this->offset_io_->size_;
+    if (IOTmpl::InMemory) {
+        memory += this->io_->GetCurrentMemoryUsage();
+    }
+    memory += sizeof(QuantTmpl);
+    return memory;
 }
+} // namespace vsag

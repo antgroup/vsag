@@ -15,6 +15,8 @@
 
 #include "sparse_term_datacell.h"
 
+#include "vsag/allocator.h"
+
 namespace vsag {
 
 void
@@ -33,23 +35,96 @@ SparseTermDataCell::Query(float* global_dists, const SparseTermComputerPtr& comp
         if (term >= term_sizes_.size() || term_sizes_[term] == 0) {
             continue;
         }
-        computer->ScanForAccumulate(it,
-                                    term_ids_[term]->data(),
-                                    term_datas_[term]->data(),
-                                    static_cast<uint32_t>(static_cast<float>(term_sizes_[term]) *
-                                                          computer->term_retain_ratio_),
-                                    global_dists);
+
+        auto term_size = static_cast<uint32_t>(static_cast<float>(term_sizes_[term]) *
+                                               computer->term_retain_ratio_);
+
+        if (use_quantization_) {
+            computer->ScanForAccumulate(
+                it, term_ids_[term]->data(), term_datas_[term]->data(), term_size, global_dists);
+        } else {
+            computer->ScanForAccumulate(it,
+                                        term_ids_[term]->data(),
+                                        reinterpret_cast<const float*>(term_datas_[term]->data()),
+                                        term_size,
+                                        global_dists);
+        }
     }
     computer->ResetTerm();
 }
 
 template <InnerSearchMode mode, InnerSearchType type>
 void
-SparseTermDataCell::InsertHeap(float* dists,
-                               const SparseTermComputerPtr& computer,
-                               MaxHeap& heap,
-                               const InnerSearchParam& param,
-                               uint32_t offset_id) const {
+SparseTermDataCell::insert_candidate_into_heap(uint32_t id,
+                                               float* dists,
+                                               float& cur_heap_top,
+                                               MaxHeap& heap,
+                                               uint32_t offset_id,
+                                               uint32_t n_candidate,
+                                               float radius,
+                                               const FilterPtr& filter) const {
+    if constexpr (type == InnerSearchType::WITH_FILTER) {
+#if __cplusplus >= 202002L
+        if (dists[id] > cur_heap_top or not filter->CheckValid(id + offset_id)) [[likely]] {
+#else
+        if (__builtin_expect(dists[id] > cur_heap_top or not filter->CheckValid(id + offset_id),
+                             1)) {
+#endif
+            dists[id] = 0;
+            return;
+        }
+    } else {
+#if __cplusplus >= 202002L
+        if (dists[id] > cur_heap_top) [[likely]] {
+#else
+        if (__builtin_expect(dists[id] > cur_heap_top, 1)) {
+#endif
+            dists[id] = 0;
+            return;
+        }
+    }
+    heap.emplace(dists[id], id + offset_id);
+    if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
+        heap.pop();
+        cur_heap_top = heap.top().first;
+    }
+    if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
+        cur_heap_top = radius - 1;
+    }
+    dists[id] = 0;
+}
+
+template <InnerSearchType type>
+bool
+SparseTermDataCell::fill_heap_initial(uint32_t id,
+                                      float* dists,
+                                      float& cur_heap_top,
+                                      MaxHeap& heap,
+                                      uint32_t offset_id,
+                                      uint32_t n_candidate,
+                                      const FilterPtr& filter) const {
+    if (dists[id] != 0) {
+        if constexpr (type == InnerSearchType::WITH_FILTER) {
+            if (not filter->CheckValid(id + offset_id)) {
+                dists[id] = 0;
+                return false;
+            }
+        }
+        heap.emplace(dists[id], id + offset_id);
+        cur_heap_top = heap.top().first;
+        dists[id] = 0;
+        return heap.size() == n_candidate;
+    }
+    return false;
+}
+
+template <InnerSearchMode mode, InnerSearchType type>
+void
+SparseTermDataCell::InsertHeapByTermLists(float* dists,
+                                          const SparseTermComputerPtr& computer,
+                                          MaxHeap& heap,
+                                          const InnerSearchParam& param,
+                                          uint32_t offset_id) const {
     uint32_t id = 0;
     float cur_heap_top = std::numeric_limits<float>::max();
     auto n_candidate = param.ef;
@@ -77,21 +152,9 @@ SparseTermDataCell::InsertHeap(float* dists,
             if (heap.size() < n_candidate) {
                 for (; i < term_size; i++) {
                     id = (*term_ids_[term])[i];
-
-                    if constexpr (type == InnerSearchType::WITH_FILTER) {
-                        if (not filter->CheckValid(id + offset_id)) {
-                            dists[id] = 0;
-                            continue;
-                        }
-                    }
-
-                    if (dists[id] != 0) {
-                        heap.emplace(dists[id], id + offset_id);
-                        cur_heap_top = heap.top().first;
-                        dists[id] = 0;
-                    }
-
-                    if (heap.size() == n_candidate) {
+                    if (fill_heap_initial<type>(
+                            id, dists, cur_heap_top, heap, offset_id, n_candidate, filter)) {
+                        i++;
                         break;
                     }
                 }
@@ -100,39 +163,46 @@ SparseTermDataCell::InsertHeap(float* dists,
 
         for (; i < term_size; i++) {
             id = (*term_ids_[term])[i];
-
-            if constexpr (type == InnerSearchType::WITH_FILTER) {
-#if __cplusplus >= 202002L
-                if (dists[id] > cur_heap_top or not filter->CheckValid(id + offset_id)) [[likely]] {
-#else
-                if (__builtin_expect(
-                        dists[id] > cur_heap_top or not filter->CheckValid(id + offset_id), 1)) {
-#endif
-                    dists[id] = 0;
-                    continue;
-                }
-            } else {
-#if __cplusplus >= 202002L
-                if (dists[id] > cur_heap_top) [[likely]] {
-#else
-                if (__builtin_expect(dists[id] > cur_heap_top, 1)) {
-#endif
-                    dists[id] = 0;
-                    continue;
-                }
-            }
-            heap.emplace(dists[id], id + offset_id);
-            if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
-                heap.pop();
-                cur_heap_top = heap.top().first;
-            }
-            if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
-                cur_heap_top = radius - 1;
-            }
-            dists[id] = 0;
+            insert_candidate_into_heap<mode, type>(
+                id, dists, cur_heap_top, heap, offset_id, n_candidate, radius, filter);
         }
     }
     computer->ResetTerm();
+}
+
+template <InnerSearchMode mode, InnerSearchType type>
+void
+SparseTermDataCell::InsertHeapByDists(float* dists,
+                                      uint32_t dists_size,
+                                      MaxHeap& heap,
+                                      const InnerSearchParam& param,
+                                      uint32_t offset_id) const {
+    float cur_heap_top = std::numeric_limits<float>::max();
+    auto n_candidate = param.ef;
+    auto radius = param.radius;
+    auto filter = param.is_inner_id_allowed;
+
+    if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
+        cur_heap_top = radius - 1;
+    }
+
+    uint32_t id = 0;
+    if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
+        if (heap.size() < n_candidate) {
+            for (; id < dists_size; id++) {
+                if (fill_heap_initial<type>(
+                        id, dists, cur_heap_top, heap, offset_id, n_candidate, filter)) {
+                    id++;
+                    break;
+                }
+            }
+        }
+    }
+
+    for (; id < dists_size; id++) {
+        insert_candidate_into_heap<mode, type>(
+            id, dists, cur_heap_top, heap, offset_id, n_candidate, radius, filter);
+    }
 }
 
 void
@@ -158,7 +228,7 @@ SparseTermDataCell::DocPrune(Vector<std::pair<uint32_t, float>>& sorted_base) co
 }
 
 void
-SparseTermDataCell::InsertVector(const SparseVector& sparse_base, uint32_t base_id) {
+SparseTermDataCell::InsertVector(const SparseVector& sparse_base, uint16_t base_id) {
     // resize term
     uint32_t max_term_id = 0;
     for (auto i = 0; i < sparse_base.len_; i++) {
@@ -185,12 +255,23 @@ SparseTermDataCell::InsertVector(const SparseVector& sparse_base, uint32_t base_
         auto val = item.second;
 
         if (term_sizes_[term] == 0) {  // create term until needed
-            term_ids_[term] = std::make_unique<Vector<uint32_t>>(allocator_);
-            term_datas_[term] = std::make_unique<Vector<float>>(allocator_);
+            term_ids_[term] = std::make_unique<Vector<uint16_t>>(allocator_);
+            term_datas_[term] = std::make_unique<Vector<uint8_t>>(allocator_);
         }
 
         term_ids_[term]->push_back(base_id);
-        term_datas_[term]->push_back(val);
+
+        auto& data_vec = *term_datas_[term];
+        if (use_quantization_) {
+            uint8_t buffer;
+            Encode(val, &buffer);
+            data_vec.push_back(buffer);
+        } else {
+            auto old_size = data_vec.size();
+            data_vec.resize(old_size + sizeof(float));
+            *reinterpret_cast<float*>(data_vec.data() + old_size) = val;
+        }
+
         term_sizes_[term] += 1;
     }
 }
@@ -200,8 +281,8 @@ SparseTermDataCell::ResizeTermList(InnerIdType new_term_capacity) {
     if (new_term_capacity <= term_capacity_) {
         return;
     }
-    Vector<std::unique_ptr<Vector<uint32_t>>> new_ids(new_term_capacity, allocator_);
-    Vector<std::unique_ptr<Vector<float>>> new_datas(new_term_capacity, allocator_);
+    Vector<std::unique_ptr<Vector<uint16_t>>> new_ids(new_term_capacity, allocator_);
+    Vector<std::unique_ptr<Vector<uint8_t>>> new_datas(new_term_capacity, allocator_);
     Vector<uint32_t> new_sizes(new_term_capacity, 0, allocator_);
 
     std::move(term_ids_.begin(), term_ids_.end(), new_ids.begin());
@@ -215,8 +296,9 @@ SparseTermDataCell::ResizeTermList(InnerIdType new_term_capacity) {
 }
 
 float
-SparseTermDataCell::CalcDistanceByInnerId(const SparseTermComputerPtr& computer, uint32_t base_id) {
+SparseTermDataCell::CalcDistanceByInnerId(const SparseTermComputerPtr& computer, uint16_t base_id) {
     float ip = 0;
+    Vector<float> temp_data(allocator_);
     while (computer->HasNextTerm()) {
         auto it = computer->NextTermIter();
         auto term = computer->GetTerm(it);
@@ -229,37 +311,59 @@ SparseTermDataCell::CalcDistanceByInnerId(const SparseTermComputerPtr& computer,
             __builtin_prefetch(term_ids_[next_term]->data(), 0, 3);
             __builtin_prefetch(term_datas_[next_term]->data(), 0, 3);
         }
-        if (term >= term_ids_.size()) {
+        // Fix: Check term_sizes_[term] == 0 to avoid null pointer dereference
+        if (term >= term_ids_.size() || term_sizes_[term] == 0) {
             continue;
         }
-        computer->ScanForCalculateDist(it,
-                                       term_ids_[term]->data(),
-                                       term_datas_[term]->data(),
-                                       term_sizes_[term],
-                                       base_id,
-                                       &ip);
+
+        // Dequantize
+        const float* vals = nullptr;
+        auto size = term_sizes_[term];
+        if (use_quantization_) {
+            temp_data.resize(size);
+            Decode(term_datas_[term]->data(), size, temp_data.data());
+            vals = temp_data.data();
+        } else {
+            vals = reinterpret_cast<const float*>(term_datas_[term]->data());
+        }
+
+        computer->ScanForCalculateDist(
+            it, term_ids_[term]->data(), vals, term_sizes_[term], base_id, &ip);
     }
     computer->ResetTerm();
     return 1 + ip;
 }
 
 void
-SparseTermDataCell::GetSparseVector(uint32_t base_id, SparseVector* data) {
-    Vector<uint32_t> ids(allocator_);
-    Vector<float> vals(allocator_);
+SparseTermDataCell::GetSparseVector(uint32_t base_id,
+                                    SparseVector* data,
+                                    Allocator* specified_allocator) {
+    Allocator* allocator = specified_allocator != nullptr ? specified_allocator : allocator_;
+
+    Vector<uint32_t> ids(allocator);
+    Vector<float> vals(allocator);
 
     for (auto term = 0; term < term_ids_.size(); term++) {
+        if (term_sizes_[term] == 0) {
+            continue;
+        }
         for (auto i = 0; i < term_sizes_[term]; i++) {
             if ((*term_ids_[term])[i] == base_id) {
                 ids.push_back(term);
-                vals.push_back((*term_datas_[term])[i]);
+                float v;
+                if (use_quantization_) {
+                    Decode(term_datas_[term]->data() + i, 1, &v);
+                } else {
+                    v = reinterpret_cast<float*>(term_datas_[term]->data())[i];
+                }
+                vals.push_back(v);
             }
         }
     }
 
     data->len_ = ids.size();
-    data->ids_ = (uint32_t*)allocator_->Allocate(sizeof(uint32_t) * data->len_);
-    data->vals_ = (float*)allocator_->Allocate(sizeof(float) * data->len_);
+    data->ids_ = static_cast<uint32_t*>(allocator->Allocate(sizeof(uint32_t) * data->len_));
+    data->vals_ = static_cast<float*>(allocator->Allocate(sizeof(float) * data->len_));
 
     memcpy(data->ids_, ids.data(), data->len_ * sizeof(uint32_t));
     memcpy(data->vals_, vals.data(), data->len_ * sizeof(float));
@@ -287,16 +391,30 @@ SparseTermDataCell::Deserialize(StreamReader& reader) {
 
     for (auto i = 0; i < term_capacity; i++) {
         if (term_sizes_[i] != 0) {
-            term_ids_[i] = std::make_unique<Vector<uint32_t>>(allocator_);
-            term_datas_[i] = std::make_unique<Vector<float>>(allocator_);
+            term_ids_[i] = std::make_unique<Vector<uint16_t>>(allocator_);
+            term_datas_[i] = std::make_unique<Vector<uint8_t>>(allocator_);
             StreamReader::ReadVector(reader, *term_ids_[i]);
             StreamReader::ReadVector(reader, *term_datas_[i]);
         }
     }
 }
 
+void
+SparseTermDataCell::Encode(float val, uint8_t* dst) const {
+    float x = (val - quantization_params_->min_val) / quantization_params_->diff * 255.0F;
+    *dst = static_cast<uint8_t>(std::clamp(x, 0.0F, 255.0F));
+}
+
+void
+SparseTermDataCell::Decode(const uint8_t* src, size_t size, float* dst) const {
+    for (size_t i = 0; i < size; ++i) {
+        dst[i] = static_cast<float>(src[i]) / 255.0F * quantization_params_->diff +
+                 quantization_params_->min_val;
+    }
+}
+
 template void
-SparseTermDataCell::InsertHeap<InnerSearchMode::KNN_SEARCH, InnerSearchType::PURE>(
+SparseTermDataCell::InsertHeapByTermLists<InnerSearchMode::KNN_SEARCH, InnerSearchType::PURE>(
     float* dists,
     const SparseTermComputerPtr& computer,
     MaxHeap& heap,
@@ -304,7 +422,8 @@ SparseTermDataCell::InsertHeap<InnerSearchMode::KNN_SEARCH, InnerSearchType::PUR
     uint32_t offset_id) const;
 
 template void
-SparseTermDataCell::InsertHeap<InnerSearchMode::KNN_SEARCH, InnerSearchType::WITH_FILTER>(
+SparseTermDataCell::InsertHeapByTermLists<InnerSearchMode::KNN_SEARCH,
+                                          InnerSearchType::WITH_FILTER>(
     float* dists,
     const SparseTermComputerPtr& computer,
     MaxHeap& heap,
@@ -312,7 +431,7 @@ SparseTermDataCell::InsertHeap<InnerSearchMode::KNN_SEARCH, InnerSearchType::WIT
     uint32_t offset_id) const;
 
 template void
-SparseTermDataCell::InsertHeap<InnerSearchMode::RANGE_SEARCH, InnerSearchType::PURE>(
+SparseTermDataCell::InsertHeapByTermLists<InnerSearchMode::RANGE_SEARCH, InnerSearchType::PURE>(
     float* dists,
     const SparseTermComputerPtr& computer,
     MaxHeap& heap,
@@ -320,9 +439,42 @@ SparseTermDataCell::InsertHeap<InnerSearchMode::RANGE_SEARCH, InnerSearchType::P
     uint32_t offset_id) const;
 
 template void
-SparseTermDataCell::InsertHeap<InnerSearchMode::RANGE_SEARCH, InnerSearchType::WITH_FILTER>(
+SparseTermDataCell::InsertHeapByTermLists<InnerSearchMode::RANGE_SEARCH,
+                                          InnerSearchType::WITH_FILTER>(
     float* dists,
     const SparseTermComputerPtr& computer,
+    MaxHeap& heap,
+    const InnerSearchParam& param,
+    uint32_t offset_id) const;
+
+template void
+SparseTermDataCell::InsertHeapByDists<InnerSearchMode::KNN_SEARCH, InnerSearchType::PURE>(
+    float* dists,
+    uint32_t dists_size,
+    MaxHeap& heap,
+    const InnerSearchParam& param,
+    uint32_t offset_id) const;
+
+template void
+SparseTermDataCell::InsertHeapByDists<InnerSearchMode::KNN_SEARCH, InnerSearchType::WITH_FILTER>(
+    float* dists,
+    uint32_t dists_size,
+    MaxHeap& heap,
+    const InnerSearchParam& param,
+    uint32_t offset_id) const;
+
+template void
+SparseTermDataCell::InsertHeapByDists<InnerSearchMode::RANGE_SEARCH, InnerSearchType::PURE>(
+    float* dists,
+    uint32_t dists_size,
+    MaxHeap& heap,
+    const InnerSearchParam& param,
+    uint32_t offset_id) const;
+
+template void
+SparseTermDataCell::InsertHeapByDists<InnerSearchMode::RANGE_SEARCH, InnerSearchType::WITH_FILTER>(
+    float* dists,
+    uint32_t dists_size,
     MaxHeap& heap,
     const InnerSearchParam& param,
     uint32_t offset_id) const;

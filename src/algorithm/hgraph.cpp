@@ -69,25 +69,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
         GraphInterface::MakeInstance(hgraph_param->bottom_graph_param, common_param);
     mult_ = 1 / log(1.0 * static_cast<double>(this->bottom_graph_->MaximumDegree()));
 
-    auto step_block_size = Options::Instance().block_size_limit();
-    auto block_size_per_vector = this->basic_flatten_codes_->code_size_;
-    block_size_per_vector =
-        std::max(block_size_per_vector,
-                 static_cast<uint32_t>(this->bottom_graph_->maximum_degree_ * sizeof(InnerIdType)));
-    if (use_reorder_) {
-        block_size_per_vector =
-            std::max(block_size_per_vector, this->high_precise_codes_->code_size_);
-        reorder_ = std::make_shared<FlattenReorder>(this->high_precise_codes_, allocator_);
-    }
-    if (this->extra_infos_ != nullptr) {
-        block_size_per_vector =
-            std::max(block_size_per_vector, static_cast<uint32_t>(this->extra_info_size_));
-    }
-    auto increase_count = step_block_size / block_size_per_vector;
-    this->resize_increase_count_bit_ = std::max(
-        DEFAULT_RESIZE_BIT, static_cast<uint64_t>(log2(static_cast<double>(increase_count))));
-
-    resize(bottom_graph_->max_capacity_);
+    init_resize_bit_and_reorder();
 
     this->parallel_searcher_ =
         std::make_shared<ParallelSearcher>(common_param, build_pool_, neighbors_mutex_);
@@ -101,13 +83,23 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
         optimizer_ = std::make_shared<Optimizer<BasicSearcher>>(common_param);
     }
     check_and_init_raw_vector(hgraph_param->raw_vector_param, common_param);
+    resize(bottom_graph_->max_capacity_);
 }
 void
 HGraph::Train(const DatasetPtr& base) {
-    const auto* base_data = get_data(base);
-    this->basic_flatten_codes_->Train(base_data, base->GetNumElements());
+    int64_t total_elements = base->GetNumElements();
+    int64_t dim = base->GetDim();
+    DatasetPtr train_data =
+        vsag::sample_train_data(base, total_elements, dim, train_sample_count_, allocator_);
+
+    const auto* data_ptr = get_data(train_data);
+    this->basic_flatten_codes_->Train(data_ptr, train_data->GetNumElements());
     if (use_reorder_) {
-        this->high_precise_codes_->Train(base_data, base->GetNumElements());
+        this->high_precise_codes_->Train(data_ptr, train_data->GetNumElements());
+    }
+    if (create_new_raw_vector_) {
+        // nothing to do since raw_vector_ is fp32
+        this->raw_vector_->Train(data_ptr, train_data->GetNumElements());
     }
 }
 
@@ -125,6 +117,494 @@ HGraph::Build(const DatasetPtr& data) {
         elp_optimize();
     }
     return ret;
+}
+
+JsonType
+HGraph::map_hgraph_param(const JsonType& hgraph_json) {
+    static const ConstParamMap external_mapping = {
+        {
+            HGRAPH_USE_REORDER,
+            {
+                USE_REORDER_KEY,
+            },
+        },
+        {
+            HGRAPH_USE_ELP_OPTIMIZER,
+            {
+                HGRAPH_USE_ELP_OPTIMIZER_KEY,
+            },
+        },
+        {
+            HGRAPH_IGNORE_REORDER,
+            {
+                HGRAPH_IGNORE_REORDER_KEY,
+            },
+        },
+        {
+            HGRAPH_BUILD_BY_BASE_QUANTIZATION,
+            {
+                HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY,
+            },
+        },
+        {
+            USE_ATTRIBUTE_FILTER,
+            {
+                USE_ATTRIBUTE_FILTER_KEY,
+            },
+        },
+        {
+            HGRAPH_BASE_QUANTIZATION_TYPE,
+            {
+                BASE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                TYPE_KEY,
+            },
+        },
+        {
+            STORE_RAW_VECTOR,
+            {
+                BASE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                HOLD_MOLDS,
+            },
+        },
+        {
+            HGRAPH_BASE_IO_TYPE,
+            {
+                BASE_CODES_KEY,
+                IO_PARAMS_KEY,
+                TYPE_KEY,
+            },
+        },
+        {
+            HGRAPH_PRECISE_IO_TYPE,
+            {
+                PRECISE_CODES_KEY,
+                IO_PARAMS_KEY,
+                TYPE_KEY,
+            },
+        },
+        {
+            HGRAPH_BASE_FILE_PATH,
+            {
+                BASE_CODES_KEY,
+                IO_PARAMS_KEY,
+                IO_FILE_PATH_KEY,
+            },
+        },
+        {
+            HGRAPH_PRECISE_FILE_PATH,
+            {
+                PRECISE_CODES_KEY,
+                IO_PARAMS_KEY,
+                IO_FILE_PATH_KEY,
+            },
+        },
+        {
+            HGRAPH_PRECISE_QUANTIZATION_TYPE,
+            {
+                PRECISE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                TYPE_KEY,
+            },
+        },
+        {
+            HGRAPH_GRAPH_IO_TYPE,
+            {
+                GRAPH_KEY,
+                IO_PARAMS_KEY,
+                TYPE_KEY,
+            },
+        },
+        {
+            HGRAPH_GRAPH_FILE_PATH,
+            {
+                GRAPH_KEY,
+                IO_PARAMS_KEY,
+                IO_FILE_PATH_KEY,
+            },
+        },
+        {
+            STORE_RAW_VECTOR,
+            {
+                PRECISE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                HOLD_MOLDS,
+            },
+        },
+        {
+            STORE_RAW_VECTOR,
+            {
+                STORE_RAW_VECTOR_KEY,
+            },
+        },
+        {
+            RAW_VECTOR_IO_TYPE,
+            {
+                RAW_VECTOR_KEY,
+                IO_PARAMS_KEY,
+                TYPE_KEY,
+            },
+        },
+        {
+            RAW_VECTOR_FILE_PATH,
+            {
+                RAW_VECTOR_KEY,
+                IO_PARAMS_KEY,
+                IO_FILE_PATH_KEY,
+            },
+        },
+        {
+            HGRAPH_GRAPH_MAX_DEGREE,
+            {
+                GRAPH_KEY,
+                GRAPH_PARAM_MAX_DEGREE_KEY,
+            },
+        },
+        {
+            HGRAPH_BUILD_EF_CONSTRUCTION,
+            {
+                EF_CONSTRUCTION_KEY,
+            },
+        },
+        {
+            HGRAPH_BUILD_ALPHA,
+            {
+                ALPHA_KEY,
+            },
+        },
+        {
+            HGRAPH_INIT_CAPACITY,
+            {
+                GRAPH_KEY,
+                GRAPH_PARAM_INIT_MAX_CAPACITY_KEY,
+            },
+        },
+        {
+            HGRAPH_GRAPH_TYPE,
+            {
+                GRAPH_KEY,
+                GRAPH_TYPE_KEY,
+            },
+        },
+        {
+            HGRAPH_GRAPH_STORAGE_TYPE,
+            {
+                GRAPH_KEY,
+                GRAPH_STORAGE_TYPE_KEY,
+            },
+        },
+        {
+            ODESCENT_PARAMETER_ALPHA,
+            {
+                GRAPH_KEY,
+                ODESCENT_PARAMETER_ALPHA,
+            },
+        },
+        {
+            ODESCENT_PARAMETER_GRAPH_ITER_TURN,
+            {
+                GRAPH_KEY,
+                ODESCENT_PARAMETER_GRAPH_ITER_TURN,
+            },
+        },
+        {
+            ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE,
+            {
+                GRAPH_KEY,
+                ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE,
+            },
+        },
+        {
+            ODESCENT_PARAMETER_MIN_IN_DEGREE,
+            {
+                GRAPH_KEY,
+                ODESCENT_PARAMETER_MIN_IN_DEGREE,
+            },
+        },
+        {
+            ODESCENT_PARAMETER_BUILD_BLOCK_SIZE,
+            {
+                GRAPH_KEY,
+                ODESCENT_PARAMETER_BUILD_BLOCK_SIZE,
+            },
+        },
+        {
+            HGRAPH_BUILD_THREAD_COUNT,
+            {
+                BUILD_THREAD_COUNT_KEY,
+            },
+        },
+        {
+            SQ4_UNIFORM_TRUNC_RATE,
+            {
+                BASE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE_KEY,
+            },
+        },
+        {
+            RABITQ_PCA_DIM,
+            {
+                BASE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                PCA_DIM_KEY,
+            },
+        },
+        {
+            INDEX_TQ_CHAIN,
+            {
+                BASE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                TQ_CHAIN_KEY,
+            },
+        },
+        {
+            RABITQ_BITS_PER_DIM_QUERY,
+            {
+                BASE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY,
+            },
+        },
+        {
+            HGRAPH_BASE_PQ_DIM,
+            {
+                BASE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                PRODUCT_QUANTIZATION_DIM_KEY,
+            },
+        },
+        {
+            RABITQ_USE_FHT,
+            {
+                BASE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                USE_FHT_KEY,
+            },
+        },
+        {
+            HGRAPH_SUPPORT_REMOVE,
+            {GRAPH_KEY, GRAPH_SUPPORT_REMOVE},
+        },
+        {
+            HGRAPH_REMOVE_FLAG_BIT,
+            {GRAPH_KEY, REMOVE_FLAG_BIT},
+        },
+        {
+            HGRAPH_SUPPORT_DUPLICATE,
+            {
+                SUPPORT_DUPLICATE,
+            },
+        },
+        {
+            HGRAPH_SUPPORT_TOMBSTONE,
+            {
+                SUPPORT_TOMBSTONE,
+            },
+        }};
+    const std::string hgraph_params_template =
+        R"(
+    {
+        "{TYPE_KEY}": "{INDEX_TYPE_HGRAPH}",
+        "{USE_REORDER_KEY}": false,
+        "{HGRAPH_USE_ENV_OPTIMIZER}": false,
+        "{HGRAPH_IGNORE_REORDER_KEY}": false,
+        "{HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY}": false,
+        "{HGRAPH_USE_ATTRIBUTE_FILTER_KEY}": false,
+        "{GRAPH_KEY}": {
+            "{IO_PARAMS_KEY}": {
+                "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
+                "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
+            },
+            "{GRAPH_TYPE_KEY}": "{GRAPH_TYPE_VALUE_NSW}",
+            "{GRAPH_STORAGE_TYPE_KEY}": "{GRAPH_STORAGE_TYPE_VALUE_FLAT}",
+            "{ODESCENT_PARAMETER_BUILD_BLOCK_SIZE}": 10000,
+            "{ODESCENT_PARAMETER_MIN_IN_DEGREE}": 1,
+            "{ODESCENT_PARAMETER_ALPHA}": 1.2,
+            "{ODESCENT_PARAMETER_GRAPH_ITER_TURN}": 30,
+            "{ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE}": 0.2,
+            "{GRAPH_PARAM_MAX_DEGREE_KEY}": 64,
+            "{GRAPH_PARAM_INIT_MAX_CAPACITY_KEY}": 100,
+            "{GRAPH_SUPPORT_REMOVE}": false,
+            "{REMOVE_FLAG_BIT}": 8
+        },
+        "{BASE_CODES_KEY}": {
+            "{IO_PARAMS_KEY}": {
+                "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
+                "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
+            },
+            "{CODES_TYPE_KEY}": "flatten",
+            "{QUANTIZATION_PARAMS_KEY}": {
+                "{TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
+                "{SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE_KEY}": 0.05,
+                "{PCA_DIM_KEY}": 0,
+                "{RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY}": 32,
+                "{TQ_CHAIN_KEY}": "",
+                "nbits": 8,
+                "{PRODUCT_QUANTIZATION_DIM_KEY}": 1,
+                "{HOLD_MOLDS}": false
+            }
+        },
+        "{PRECISE_CODES_KEY}": {
+            "{IO_PARAMS_KEY}": {
+                "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
+                "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
+            },
+            "{CODES_TYPE_KEY}": "flatten",
+            "{QUANTIZATION_PARAMS_KEY}": {
+                "{TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
+                "{SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE_KEY}": 0.05,
+                "{PCA_DIM_KEY}": 0,
+                "{PRODUCT_QUANTIZATION_DIM_KEY}": 1,
+                "{HOLD_MOLDS}": false
+            }
+        },
+        "{STORE_RAW_VECTOR_KEY}": false,
+        "{RAW_VECTOR_KEY}": {
+            "{IO_PARAMS_KEY}": {
+                "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
+                "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
+            },
+            "{CODES_TYPE_KEY}": "flatten",
+            "{QUANTIZATION_PARAMS_KEY}": {
+                "{TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
+                "{HOLD_MOLDS}": true
+            }
+        },
+        "{BUILD_THREAD_COUNT_KEY}": 100,
+        "{EXTRA_INFO_KEY}": {
+            "{IO_PARAMS_KEY}": {
+                "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
+                "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
+            }
+        },
+        "{ATTR_PARAMS_KEY}": {
+            "{ATTR_HAS_BUCKETS_KEY}": false
+        },
+        "{HGRAPH_SUPPORT_DUPLICATE}": false,
+        "{HGRAPH_SUPPORT_TOMBSTONE}": false,
+        "{EF_CONSTRUCTION_KEY}": 400
+    })";
+
+    std::string str = format_map(hgraph_params_template, DEFAULT_MAP);
+    auto inner_json = JsonType::Parse(str);
+    mapping_external_param_to_inner(hgraph_json, external_mapping, inner_json);
+
+    return inner_json;
+}
+
+bool
+HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
+    if (not this->index_feature_list_->CheckFeature(IndexFeature::SUPPORT_TUNE) or
+        not this->has_raw_vector_) {
+        return false;
+    }
+
+    // parse
+    auto parsed_params = JsonType::Parse(parameters);
+    JsonType hgraph_json;
+    if (parsed_params.Contains(INDEX_PARAM)) {
+        hgraph_json = parsed_params[INDEX_PARAM];
+    }
+
+    // map
+    auto inner_json = map_hgraph_param(hgraph_json);
+
+    // construct param obj
+    auto hgraph_parameter = std::make_shared<HGraphParameter>();
+    hgraph_parameter->FromJson(inner_json);
+    auto inner_parameter = std::make_shared<InnerIndexParameter>();
+    inner_parameter->FromJson(inner_json);
+
+    // init new_basic_code obj
+    auto common_param = this->basic_flatten_codes_->ExportCommonParam();
+    auto new_basic_code =
+        FlattenInterface::MakeInstance(hgraph_parameter->base_codes_param, common_param);
+    FlattenInterfacePtr new_precise_code;
+    if (inner_parameter->use_reorder) {
+        new_precise_code =
+            FlattenInterface::MakeInstance(hgraph_parameter->precise_codes_param, common_param);
+    }
+
+    std::scoped_lock lock(this->add_mutex_);
+
+    // check which code need to tune and update create_param_ptr_
+    bool is_tune_base_code = false;
+    bool is_tune_precise_code = false;
+    auto param = std::dynamic_pointer_cast<HGraphParameter>(create_param_ptr_);
+    if (basic_flatten_codes_->GetQuantizerName() != new_basic_code->GetQuantizerName()) {
+        // [case 1] base_code is not same
+        is_tune_base_code = true;
+    }
+    if (use_reorder_ and inner_parameter->use_reorder and
+        this->high_precise_codes_->GetQuantizerName() != new_precise_code->GetQuantizerName()) {
+        // [case 2] precise code is not same
+        is_tune_precise_code = true;
+    }
+    if (not inner_parameter->use_reorder) {
+        // [case 3] drop precise_code
+        use_reorder_ = false;
+        this->high_precise_codes_.reset();
+        param->precise_codes_param.reset();
+        is_tune_precise_code = false;
+    }
+    if (not use_reorder_ and inner_parameter->use_reorder) {
+        // [case 4] assign new precise_code
+        use_reorder_ = true;
+        is_tune_precise_code = true;
+    }
+
+    // update create_param_ptr_
+    if (is_tune_base_code) {
+        param->base_codes_param = hgraph_parameter->base_codes_param;
+    }
+    if (is_tune_precise_code) {
+        param->precise_codes_param = hgraph_parameter->precise_codes_param;
+    }
+    param->use_reorder = use_reorder_;
+
+    // export train data and train new_basic_code
+    auto train_count = std::min(this->train_sample_count_, this->GetNumElements());
+    Vector<float> train_data(train_count * dim_, 0, allocator_);
+    if (is_tune_base_code or is_tune_precise_code) {
+        for (InnerIdType i = 0; i < train_count; i++) {
+            this->GetVectorByInnerId(i, (train_data.data() + i * dim_));
+        }
+    }
+
+    auto tune_and_rebuild =
+        [&](bool need_tune, FlattenInterfacePtr old_code, FlattenInterfacePtr new_code) {
+            if (not need_tune) {
+                return old_code;
+            }
+
+            new_code->Train(train_data.data(), train_count);
+
+            Vector<float> insert_buffer(dim_, 0, allocator_);
+            for (int64_t i = 0; i < total_count_; ++i) {
+                GetVectorByInnerId(i, insert_buffer.data());
+                new_code->InsertVector(static_cast<const void*>(insert_buffer.data()), i);
+            }
+            return new_code;
+        };
+
+    basic_flatten_codes_ =
+        tune_and_rebuild(is_tune_base_code, basic_flatten_codes_, new_basic_code);
+    high_precise_codes_ =
+        tune_and_rebuild(is_tune_precise_code, high_precise_codes_, new_precise_code);
+
+    check_and_init_raw_vector(param->raw_vector_param, common_param, false);
+    init_resize_bit_and_reorder();
+
+    // set status
+    if (disable_future_tuning) {
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_TUNE, false);
+        this->raw_vector_.reset();
+        has_raw_vector_ = false;
+        create_new_raw_vector_ = false;
+    }
+    return true;
 }
 
 std::vector<int64_t>
@@ -150,6 +630,9 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
         this->basic_flatten_codes_->InsertVector(vectors + dim_ * i, inner_id);
         if (use_reorder_) {
             this->high_precise_codes_->InsertVector(vectors + dim_ * i, inner_id);
+        }
+        if (create_new_raw_vector_) {
+            this->raw_vector_->InsertVector(vectors + dim_ * i, inner_id);
         }
         auto level = this->get_random_level() - 1;
         if (level >= 0) {
@@ -383,6 +866,8 @@ HGraph::KnnSearch(const DatasetPtr& query,
         search_param.ef = std::max(params.ef_search, k);
         search_param.is_inner_id_allowed = ft;
         search_param.topk = static_cast<int64_t>(search_param.ef);
+        search_param.parallel_search_thread_count = params.parallel_search_thread_count;
+
         search_result = this->search_one_graph(query_data,
                                                this->bottom_graph_,
                                                this->basic_flatten_codes_,
@@ -392,7 +877,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
     }
 
     if (use_reorder_) {
-        this->reorder(query_data, this->high_precise_codes_, search_result, k);
+        this->reorder(query_data, this->high_precise_codes_, search_result, k, iter_filter_ctx);
     }
 
     while (search_result->Size() > k) {
@@ -409,7 +894,8 @@ HGraph::KnnSearch(const DatasetPtr& query,
     auto [dataset_results, dists, ids] = create_fast_dataset(count, search_allocator);
     char* extra_infos = nullptr;
     if (extra_info_size_ > 0) {
-        extra_infos = (char*)search_allocator->Allocate(extra_info_size_ * search_result->Size());
+        extra_infos = static_cast<char*>(
+            search_allocator->Allocate(extra_info_size_ * search_result->Size()));
         dataset_results->ExtraInfos(extra_infos);
     }
     for (int64_t j = count - 1; j >= 0; --j) {
@@ -500,7 +986,7 @@ HGraph::search_one_graph(const void* query,
         visited_list->Reset();
     }
     DistHeapPtr result = nullptr;
-    if (inner_search_param.use_muti_threads_for_one_query && inner_search_param.level_0) {
+    if (inner_search_param.parallel_search_thread_count > 1) {
         result = this->parallel_searcher_->Search(
             graph, flatten, visited_list, query, inner_search_param);
     } else {
@@ -581,12 +1067,15 @@ HGraph::RangeSearch(const DatasetPtr& query,
     search_param.search_mode = RANGE_SEARCH;
     search_param.consider_duplicate = true;
     search_param.range_search_limit_size = static_cast<int>(limited_size);
+    search_param.parallel_search_thread_count = params.parallel_search_thread_count;
+
     auto search_result = this->search_one_graph(raw_query,
                                                 this->bottom_graph_,
                                                 this->basic_flatten_codes_,
                                                 search_param,
                                                 (VisitedListPtr) nullptr,
                                                 stats);
+
     if (use_reorder_) {
         this->reorder(raw_query, this->high_precise_codes_, search_result, limited_size);
     }
@@ -601,7 +1090,8 @@ HGraph::RangeSearch(const DatasetPtr& query,
     auto [dataset_results, dists, ids] = create_fast_dataset(count, allocator_);
     char* extra_infos = nullptr;
     if (extra_info_size_ > 0) {
-        extra_infos = (char*)allocator_->Allocate(extra_info_size_ * search_result->Size());
+        extra_infos =
+            static_cast<char*>(allocator_->Allocate(extra_info_size_ * search_result->Size()));
         dataset_results->ExtraInfos(extra_infos);
     }
     for (int64_t j = count - 1; j >= 0; --j) {
@@ -768,7 +1258,9 @@ HGraph::deserialize_label_info(StreamReader& reader) const {
         StreamReader::ReadObj(reader, key);
         InnerIdType value;
         StreamReader::ReadObj(reader, value);
-        this->label_table_->label_remap_.emplace(key, value);
+        if (not this->immutable_) {
+            this->label_table_->label_remap_.emplace(key, value);
+        }
     }
 }
 
@@ -859,6 +1351,7 @@ HGraph::Deserialize(StreamReader& reader) {
         if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
             this->attr_filter_index_->Deserialize(reader);
         }
+        this->cal_memory_usage();
     } else {  // create like `else if ( ver in [v0.15, v0.17] )` here if need in the future
         logger::debug("parse with new version format");
 
@@ -936,14 +1429,10 @@ HGraph::CalcDistanceById(const float* query, int64_t id) const {
     if (use_reorder_) {
         flat = this->high_precise_codes_;
     }
-    float result = 0.0F;
-    auto computer = flat->FactoryComputer(query);
-    {
-        std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
-        auto new_id = this->label_table_->GetIdByLabel(id);
-        flat->Query(&result, computer, &new_id, 1);
-        return result;
+    if (create_new_raw_vector_) {
+        flat = this->raw_vector_;
     }
+    return InnerIndexInterface::calc_distance_by_id(query, id, flat);
 }
 
 DatasetPtr
@@ -952,29 +1441,10 @@ HGraph::CalDistanceById(const float* query, const int64_t* ids, int64_t count) c
     if (use_reorder_) {
         flat = this->high_precise_codes_;
     }
-    auto result = Dataset::Make();
-    result->Owner(true, allocator_);
-    auto* distances = (float*)allocator_->Allocate(sizeof(float) * count);
-    result->Distances(distances);
-    auto computer = flat->FactoryComputer(query);
-    Vector<InnerIdType> inner_ids(count, 0, allocator_);
-    Vector<InnerIdType> invalid_id_loc(allocator_);
-    {
-        std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
-        for (int64_t i = 0; i < count; ++i) {
-            try {
-                inner_ids[i] = this->label_table_->GetIdByLabel(ids[i]);
-            } catch (std::runtime_error& e) {
-                logger::debug(fmt::format("failed to find id: {}", ids[i]));
-                invalid_id_loc.push_back(i);
-            }
-        }
-        flat->Query(distances, computer, inner_ids.data(), count);
-        for (unsigned int i : invalid_id_loc) {
-            distances[i] = -1;
-        }
+    if (create_new_raw_vector_) {
+        flat = this->raw_vector_;
     }
-    return result;
+    return InnerIndexInterface::cal_distance_by_id(query, ids, count, flat);
 }
 
 std::pair<int64_t, int64_t>
@@ -998,12 +1468,15 @@ HGraph::GetMinAndMaxId() const {
 
 void
 HGraph::add_one_point(const void* data, int level, InnerIdType inner_id) {
-    this->basic_flatten_codes_->InsertVector(data, inner_id);
-    if (use_reorder_) {
-        this->high_precise_codes_->InsertVector(data, inner_id);
-    }
-    if (create_new_raw_vector_) {
-        raw_vector_->InsertVector(data, inner_id);
+    {
+        std::shared_lock add_lock(add_mutex_);
+        this->basic_flatten_codes_->InsertVector(data, inner_id);
+        if (use_reorder_) {
+            this->high_precise_codes_->InsertVector(data, inner_id);
+        }
+        if (create_new_raw_vector_) {
+            raw_vector_->InsertVector(data, inner_id);
+        }
     }
     std::unique_lock add_lock(add_mutex_);
     if (level >= static_cast<int>(this->route_graphs_.size()) || bottom_graph_->TotalCount() == 0) {
@@ -1049,6 +1522,9 @@ HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
 
     param.ef = this->ef_construct_;
     param.topk = static_cast<int64_t>(ef_construct_);
+    if (this->label_table_->CompressDuplicateData()) {
+        param.find_duplicate = true;
+    }
 
     if (bottom_graph_->TotalCount() != 0) {
         result = search_one_graph(data,
@@ -1112,15 +1588,19 @@ HGraph::resize(uint64_t new_size) {
         pool_ = std::make_shared<VisitedListPool>(1, allocator_, new_size_power_2, allocator_);
         this->label_table_->Resize(new_size_power_2);
         bottom_graph_->Resize(new_size_power_2);
-        this->max_capacity_.store(new_size_power_2);
         this->basic_flatten_codes_->Resize(new_size_power_2);
         if (use_reorder_) {
             this->high_precise_codes_->Resize(new_size_power_2);
         }
+        if (create_new_raw_vector_) {
+            this->raw_vector_->Resize(new_size_power_2);
+        }
         if (this->extra_infos_ != nullptr) {
             this->extra_infos_->Resize(new_size_power_2);
         }
+        this->max_capacity_.store(new_size_power_2);
     }
+    this->cal_memory_usage();
 }
 void
 HGraph::InitFeatures() {
@@ -1158,12 +1638,12 @@ HGraph::InitFeatures() {
         IndexFeature::SUPPORT_SERIALIZE_WRITE_FUNC,
     });
     // other
-    this->index_feature_list_->SetFeatures({
-        IndexFeature::SUPPORT_ESTIMATE_MEMORY,
-        IndexFeature::SUPPORT_CHECK_ID_EXIST,
-        IndexFeature::SUPPORT_CLONE,
-        IndexFeature::SUPPORT_EXPORT_MODEL,
-    });
+    this->index_feature_list_->SetFeatures({IndexFeature::SUPPORT_ESTIMATE_MEMORY,
+                                            IndexFeature::SUPPORT_GET_MEMORY_USAGE,
+                                            IndexFeature::SUPPORT_CHECK_ID_EXIST,
+                                            IndexFeature::SUPPORT_CLONE,
+                                            IndexFeature::SUPPORT_EXPORT_MODEL,
+                                            IndexFeature::SUPPORT_TUNE});
 
     // About Train
     auto name = this->basic_flatten_codes_->GetQuantizerName();
@@ -1196,7 +1676,6 @@ HGraph::InitFeatures() {
     }
 
     if (raw_vector_ != nullptr) {
-        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID);
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_RAW_VECTOR_BY_IDS);
     }
 
@@ -1234,388 +1713,21 @@ void
 HGraph::reorder(const void* query,
                 const FlattenInterfacePtr& flatten,
                 DistHeapPtr& candidate_heap,
-                int64_t k) const {
+                int64_t k,
+                IteratorFilterContext* iter_ctx) const {
     uint64_t size = candidate_heap->Size();
     if (k <= 0) {
         k = static_cast<int64_t>(size);
     }
-    auto reorder_heap =
-        reorder_->Reorder(candidate_heap, static_cast<const float*>(query), k, allocator_);
+    auto reorder_heap = reorder_->Reorder(
+        candidate_heap, static_cast<const float*>(query), k, allocator_, iter_ctx);
     candidate_heap = reorder_heap;
 }
-
-static const std::string HGRAPH_PARAMS_TEMPLATE =
-    R"(
-    {
-        "{TYPE_KEY}": "{INDEX_TYPE_HGRAPH}",
-        "{USE_REORDER_KEY}": false,
-        "{HGRAPH_USE_ENV_OPTIMIZER}": false,
-        "{HGRAPH_IGNORE_REORDER_KEY}": false,
-        "{HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY}": false,
-        "{HGRAPH_USE_ATTRIBUTE_FILTER_KEY}": false,
-        "{GRAPH_KEY}": {
-            "{IO_PARAMS_KEY}": {
-                "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
-                "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
-            },
-            "{GRAPH_TYPE_KEY}": "{GRAPH_TYPE_VALUE_NSW}",
-            "{GRAPH_STORAGE_TYPE_KEY}": "{GRAPH_STORAGE_TYPE_VALUE_FLAT}",
-            "{ODESCENT_PARAMETER_BUILD_BLOCK_SIZE}": 10000,
-            "{ODESCENT_PARAMETER_MIN_IN_DEGREE}": 1,
-            "{ODESCENT_PARAMETER_ALPHA}": 1.2,
-            "{ODESCENT_PARAMETER_GRAPH_ITER_TURN}": 30,
-            "{ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE}": 0.2,
-            "{GRAPH_PARAM_MAX_DEGREE_KEY}": 64,
-            "{GRAPH_PARAM_INIT_MAX_CAPACITY_KEY}": 100,
-            "{GRAPH_SUPPORT_REMOVE}": false,
-            "{REMOVE_FLAG_BIT}": 8
-        },
-        "{BASE_CODES_KEY}": {
-            "{IO_PARAMS_KEY}": {
-                "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
-                "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
-            },
-            "{CODES_TYPE_KEY}": "flatten",
-            "{QUANTIZATION_PARAMS_KEY}": {
-                "{TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
-                "{SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE_KEY}": 0.05,
-                "{PCA_DIM_KEY}": 0,
-                "{RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY}": 32,
-                "{TQ_CHAIN_KEY}": "",
-                "nbits": 8,
-                "{PRODUCT_QUANTIZATION_DIM_KEY}": 1,
-                "{HOLD_MOLDS}": false
-            }
-        },
-        "{PRECISE_CODES_KEY}": {
-            "{IO_PARAMS_KEY}": {
-                "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
-                "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
-            },
-            "{CODES_TYPE_KEY}": "flatten",
-            "{QUANTIZATION_PARAMS_KEY}": {
-                "{TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
-                "{SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE_KEY}": 0.05,
-                "{PCA_DIM_KEY}": 0,
-                "{PRODUCT_QUANTIZATION_DIM_KEY}": 1,
-                "{HOLD_MOLDS}": false
-            }
-        },
-        "{STORE_RAW_VECTOR_KEY}": false,
-        "{RAW_VECTOR_KEY}": {
-            "{IO_PARAMS_KEY}": {
-                "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
-                "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
-            },
-            "{CODES_TYPE_KEY}": "flatten",
-            "{QUANTIZATION_PARAMS_KEY}": {
-                "{TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
-                "{HOLD_MOLDS}": true
-            }
-        },
-        "{BUILD_THREAD_COUNT_KEY}": 100,
-        "{EXTRA_INFO_KEY}": {
-            "{IO_PARAMS_KEY}": {
-                "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
-                "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
-            }
-        },
-        "{ATTR_PARAMS_KEY}": {
-            "{ATTR_HAS_BUCKETS_KEY}": false
-        },
-        "{HGRAPH_SUPPORT_DUPLICATE}": false,
-        "{HGRAPH_SUPPORT_TOMBSTONE}": false,
-        "{EF_CONSTRUCTION_KEY}": 400
-    })";
 
 ParamPtr
 HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                      const IndexCommonParam& common_param) {
-    const ConstParamMap external_mapping = {{
-                                                HGRAPH_USE_REORDER,
-                                                {
-                                                    USE_REORDER_KEY,
-                                                },
-                                            },
-                                            {
-                                                HGRAPH_USE_ELP_OPTIMIZER,
-                                                {
-                                                    HGRAPH_USE_ELP_OPTIMIZER_KEY,
-                                                },
-                                            },
-                                            {
-                                                HGRAPH_IGNORE_REORDER,
-                                                {
-                                                    HGRAPH_IGNORE_REORDER_KEY,
-                                                },
-                                            },
-                                            {
-                                                HGRAPH_BUILD_BY_BASE_QUANTIZATION,
-                                                {
-                                                    HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY,
-                                                },
-                                            },
-                                            {
-                                                USE_ATTRIBUTE_FILTER,
-                                                {
-                                                    USE_ATTRIBUTE_FILTER_KEY,
-                                                },
-                                            },
-                                            {
-                                                HGRAPH_BASE_QUANTIZATION_TYPE,
-                                                {
-                                                    BASE_CODES_KEY,
-                                                    QUANTIZATION_PARAMS_KEY,
-                                                    TYPE_KEY,
-                                                },
-                                            },
-                                            {
-                                                STORE_RAW_VECTOR,
-                                                {
-                                                    BASE_CODES_KEY,
-                                                    QUANTIZATION_PARAMS_KEY,
-                                                    HOLD_MOLDS,
-                                                },
-                                            },
-                                            {
-                                                HGRAPH_BASE_IO_TYPE,
-                                                {
-                                                    BASE_CODES_KEY,
-                                                    IO_PARAMS_KEY,
-                                                    TYPE_KEY,
-                                                },
-                                            },
-                                            {
-                                                HGRAPH_PRECISE_IO_TYPE,
-                                                {
-                                                    PRECISE_CODES_KEY,
-                                                    IO_PARAMS_KEY,
-                                                    TYPE_KEY,
-                                                },
-                                            },
-                                            {
-                                                HGRAPH_BASE_FILE_PATH,
-                                                {
-                                                    BASE_CODES_KEY,
-                                                    IO_PARAMS_KEY,
-                                                    IO_FILE_PATH_KEY,
-                                                },
-                                            },
-                                            {
-                                                HGRAPH_PRECISE_FILE_PATH,
-                                                {
-                                                    PRECISE_CODES_KEY,
-                                                    IO_PARAMS_KEY,
-                                                    IO_FILE_PATH_KEY,
-                                                },
-                                            },
-                                            {
-                                                HGRAPH_PRECISE_QUANTIZATION_TYPE,
-                                                {
-                                                    PRECISE_CODES_KEY,
-                                                    QUANTIZATION_PARAMS_KEY,
-                                                    TYPE_KEY,
-                                                },
-                                            },
-                                            {
-                                                HGRAPH_GRAPH_IO_TYPE,
-                                                {
-                                                    GRAPH_KEY,
-                                                    IO_PARAMS_KEY,
-                                                    TYPE_KEY,
-                                                },
-                                            },
-                                            {
-                                                HGRAPH_GRAPH_FILE_PATH,
-                                                {
-                                                    GRAPH_KEY,
-                                                    IO_PARAMS_KEY,
-                                                    IO_FILE_PATH_KEY,
-                                                },
-                                            },
-                                            {
-                                                STORE_RAW_VECTOR,
-                                                {
-                                                    PRECISE_CODES_KEY,
-                                                    QUANTIZATION_PARAMS_KEY,
-                                                    HOLD_MOLDS,
-                                                },
-                                            },
-                                            {
-                                                STORE_RAW_VECTOR,
-                                                {
-                                                    STORE_RAW_VECTOR_KEY,
-                                                },
-                                            },
-                                            {
-                                                RAW_VECTOR_IO_TYPE,
-                                                {
-                                                    RAW_VECTOR_KEY,
-                                                    IO_PARAMS_KEY,
-                                                    TYPE_KEY,
-                                                },
-                                            },
-                                            {
-                                                RAW_VECTOR_FILE_PATH,
-                                                {
-                                                    RAW_VECTOR_KEY,
-                                                    IO_PARAMS_KEY,
-                                                    IO_FILE_PATH_KEY,
-                                                },
-                                            },
-                                            {
-                                                HGRAPH_GRAPH_MAX_DEGREE,
-                                                {
-                                                    GRAPH_KEY,
-                                                    GRAPH_PARAM_MAX_DEGREE_KEY,
-                                                },
-                                            },
-                                            {
-                                                HGRAPH_BUILD_EF_CONSTRUCTION,
-                                                {
-                                                    EF_CONSTRUCTION_KEY,
-                                                },
-                                            },
-                                            {
-                                                HGRAPH_BUILD_ALPHA,
-                                                {
-                                                    ALPHA_KEY,
-                                                },
-                                            },
-                                            {
-                                                HGRAPH_INIT_CAPACITY,
-                                                {
-                                                    GRAPH_KEY,
-                                                    GRAPH_PARAM_INIT_MAX_CAPACITY_KEY,
-                                                },
-                                            },
-                                            {
-                                                HGRAPH_GRAPH_TYPE,
-                                                {
-                                                    GRAPH_KEY,
-                                                    GRAPH_TYPE_KEY,
-                                                },
-                                            },
-                                            {
-                                                HGRAPH_GRAPH_STORAGE_TYPE,
-                                                {
-                                                    GRAPH_KEY,
-                                                    GRAPH_STORAGE_TYPE_KEY,
-                                                },
-                                            },
-                                            {
-                                                ODESCENT_PARAMETER_ALPHA,
-                                                {
-                                                    GRAPH_KEY,
-                                                    ODESCENT_PARAMETER_ALPHA,
-                                                },
-                                            },
-                                            {
-                                                ODESCENT_PARAMETER_GRAPH_ITER_TURN,
-                                                {
-                                                    GRAPH_KEY,
-                                                    ODESCENT_PARAMETER_GRAPH_ITER_TURN,
-                                                },
-                                            },
-                                            {
-                                                ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE,
-                                                {
-                                                    GRAPH_KEY,
-                                                    ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE,
-                                                },
-                                            },
-                                            {
-                                                ODESCENT_PARAMETER_MIN_IN_DEGREE,
-                                                {
-                                                    GRAPH_KEY,
-                                                    ODESCENT_PARAMETER_MIN_IN_DEGREE,
-                                                },
-                                            },
-                                            {
-                                                ODESCENT_PARAMETER_BUILD_BLOCK_SIZE,
-                                                {
-                                                    GRAPH_KEY,
-                                                    ODESCENT_PARAMETER_BUILD_BLOCK_SIZE,
-                                                },
-                                            },
-                                            {
-                                                HGRAPH_BUILD_THREAD_COUNT,
-                                                {
-                                                    BUILD_THREAD_COUNT_KEY,
-                                                },
-                                            },
-                                            {
-                                                SQ4_UNIFORM_TRUNC_RATE,
-                                                {
-                                                    BASE_CODES_KEY,
-                                                    QUANTIZATION_PARAMS_KEY,
-                                                    SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE_KEY,
-                                                },
-                                            },
-                                            {
-                                                RABITQ_PCA_DIM,
-                                                {
-                                                    BASE_CODES_KEY,
-                                                    QUANTIZATION_PARAMS_KEY,
-                                                    PCA_DIM_KEY,
-                                                },
-                                            },
-                                            {
-                                                INDEX_TQ_CHAIN,
-                                                {
-                                                    BASE_CODES_KEY,
-                                                    QUANTIZATION_PARAMS_KEY,
-                                                    TQ_CHAIN_KEY,
-                                                },
-                                            },
-                                            {
-                                                RABITQ_BITS_PER_DIM_QUERY,
-                                                {
-                                                    BASE_CODES_KEY,
-                                                    QUANTIZATION_PARAMS_KEY,
-                                                    RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY,
-                                                },
-                                            },
-                                            {
-                                                HGRAPH_BASE_PQ_DIM,
-                                                {
-                                                    BASE_CODES_KEY,
-                                                    QUANTIZATION_PARAMS_KEY,
-                                                    PRODUCT_QUANTIZATION_DIM_KEY,
-                                                },
-                                            },
-                                            {
-                                                RABITQ_USE_FHT,
-                                                {
-                                                    BASE_CODES_KEY,
-                                                    QUANTIZATION_PARAMS_KEY,
-                                                    USE_FHT_KEY,
-                                                },
-                                            },
-                                            {
-                                                HGRAPH_SUPPORT_REMOVE,
-                                                {GRAPH_KEY, GRAPH_SUPPORT_REMOVE},
-                                            },
-                                            {
-                                                HGRAPH_REMOVE_FLAG_BIT,
-                                                {GRAPH_KEY, REMOVE_FLAG_BIT},
-                                            },
-                                            {
-                                                HGRAPH_SUPPORT_DUPLICATE,
-                                                {
-                                                    SUPPORT_DUPLICATE,
-                                                },
-                                            },
-                                            {
-                                                HGRAPH_SUPPORT_TOMBSTONE,
-                                                {
-                                                    SUPPORT_TOMBSTONE,
-                                                },
-                                            }};
-
-    std::string str = format_map(HGRAPH_PARAMS_TEMPLATE, DEFAULT_MAP);
-    auto inner_json = JsonType::Parse(str);
-    mapping_external_param_to_inner(external_param, external_mapping, inner_json);
+    auto inner_json = map_hgraph_param(external_param);
     if (common_param.data_type_ == DataTypes::DATA_TYPE_SPARSE) {
         inner_json[BASE_CODES_KEY][CODES_TYPE_KEY].SetString(SPARSE_CODES);
         inner_json[PRECISE_CODES_KEY][CODES_TYPE_KEY].SetString(SPARSE_CODES);
@@ -1743,16 +1855,18 @@ HGraph::try_recover_tombstone(const DatasetPtr& data, std::vector<int64_t>& fail
      *
      *
      * [case 1] fail to insert -> continue + record failed id
-     * 1. exist + not delete : is_label_valid = true, is_tombstone = false
-     * 2. exist + delete + not recovery: is_label_valid = false, is_tombstone = ture, is_recover = false
+     * exist + not delete : is_label_valid = true, is_tombstone = false
      *
-     * [case 2] tombstone recovery -> continue
-     * exist + delete + recovery: is_label_valid = false, is_tombstone = ture, is_recover = true
+     * [case 2] fail to recovery -> add process
+     * exist + delete + not recovery: is_label_valid = false, is_tombstone = ture, is_recovered = false
      *
-     * [case 3] add -> no continue
+     * [case 3] tombstone recovery -> continue
+     * exist + delete + recovery: is_label_valid = false, is_tombstone = ture, is_recovered = true
+     *
+     * [case 4] no old point -> add process
      * not exists + not delete: is_label_valid = false, is_tombstone = false
      *
-     * [case 4] error
+     * [case 5] error
      * exists + deleted: is_label_valid = true, is_tombstone = true
      */
 
@@ -1760,7 +1874,7 @@ HGraph::try_recover_tombstone(const DatasetPtr& data, std::vector<int64_t>& fail
 
     bool is_label_valid = false;
     bool is_tombstone = false;
-    bool is_recover = false;
+    bool is_recovered = false;
     {
         std::scoped_lock label_lock(this->label_lookup_mutex_);
         is_label_valid = this->label_table_->CheckLabel(label);
@@ -1771,26 +1885,30 @@ HGraph::try_recover_tombstone(const DatasetPtr& data, std::vector<int64_t>& fail
 
     if (is_tombstone) {
         try {
-            // try update
+            // try recover and update
             recover_remove(label);
             auto update_res = UpdateVector(label, data, false);
             if (update_res) {
-                is_recover = true;
-                return true;
+                // [case 3]
+                is_recovered = true;
+                return is_recovered;
             }
+            // recover failed: roll back
+            Remove(label);
         } catch (std::runtime_error& e) {
-            // recover failed: delete again
+            // recover failed: roll back
             Remove(label);
         }
     }
 
-    if (is_label_valid or is_tombstone) {
-        if (not is_recover) {
-            failed_ids.emplace_back(label);
-        }
+    // is_recovered = false
+    if (is_label_valid) {
+        // [case 1]
+        failed_ids.emplace_back(label);
         return true;
     }
 
+    // [case 2, 4]
     return false;
 }
 
@@ -1855,9 +1973,13 @@ HGraph::Merge(const std::vector<MergeUnit>& merge_units) {
 void
 HGraph::GetVectorByInnerId(InnerIdType inner_id, float* data) const {
     auto codes = (use_reorder_) ? high_precise_codes_ : basic_flatten_codes_;
-    Vector<uint8_t> buffer(codes->code_size_, allocator_);
-    codes->GetCodesById(inner_id, buffer.data());
-    codes->Decode(buffer.data(), data);
+    codes = (create_new_raw_vector_) ? raw_vector_ : codes;
+    bool release;
+    const auto* buffer = codes->GetCodesById(inner_id, release);
+    codes->Decode(buffer, data);
+    if (release) {
+        codes->Release(buffer);
+    }
 }
 
 void
@@ -1869,6 +1991,9 @@ HGraph::SetImmutable() {
     this->neighbors_mutex_.reset();
     this->neighbors_mutex_ = std::make_shared<EmptyMutex>();
     this->searcher_->SetMutexArray(this->neighbors_mutex_);
+    this->label_table_->use_reverse_map_ = false;
+    STLUnorderedMap<LabelType, InnerIdType> empty_remap(allocator_);
+    this->label_table_->label_remap_.swap(empty_remap);
     this->immutable_ = true;
 }
 
@@ -1961,6 +2086,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         search_param.time_cost->SetThreshold(params.timeout_ms);
         stats.is_timeout.store(false, std::memory_order_relaxed);
     }
+    search_param.parallel_search_thread_count = params.parallel_search_thread_count;
 
     auto search_result = this->search_one_graph(
         raw_query, this->bottom_graph_, this->basic_flatten_codes_, search_param, vt, stats);
@@ -1984,8 +2110,9 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     auto count = static_cast<const int64_t>(search_result->Size());
     auto [dataset_results, dists, ids] = create_fast_dataset(count, search_allocator);
     char* extra_infos = nullptr;
-    if (extra_info_size_ > 0) {
-        extra_infos = (char*)search_allocator->Allocate(extra_info_size_ * search_result->Size());
+    if (extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
+        extra_infos = static_cast<char*>(
+            search_allocator->Allocate(extra_info_size_ * search_result->Size()));
         dataset_results->ExtraInfos(extra_infos);
     }
     for (int64_t j = count - 1; j >= 0; --j) {
@@ -2171,15 +2298,40 @@ HGraph::analyze_graph_connection(JsonType& stats) const {
 }
 
 void
+HGraph::init_resize_bit_and_reorder() {
+    auto step_block_size = Options::Instance().block_size_limit();
+    auto block_size_per_vector = this->basic_flatten_codes_->code_size_;
+    block_size_per_vector =
+        std::max(block_size_per_vector,
+                 static_cast<uint32_t>(this->bottom_graph_->maximum_degree_ * sizeof(InnerIdType)));
+    if (use_reorder_) {
+        block_size_per_vector =
+            std::max(block_size_per_vector, this->high_precise_codes_->code_size_);
+        reorder_ = std::make_shared<FlattenReorder>(this->high_precise_codes_, allocator_);
+    }
+    if (this->extra_infos_ != nullptr) {
+        block_size_per_vector =
+            std::max(block_size_per_vector, static_cast<uint32_t>(this->extra_info_size_));
+    }
+    auto increase_count = step_block_size / block_size_per_vector;
+    this->resize_increase_count_bit_ = std::max(
+        DEFAULT_RESIZE_BIT, static_cast<uint64_t>(log2(static_cast<double>(increase_count))));
+}
+
+void
 HGraph::check_and_init_raw_vector(const FlattenInterfaceParamPtr& raw_vector_param,
-                                  const IndexCommonParam& common_param) {
+                                  const IndexCommonParam& common_param,
+                                  bool is_create_new) {
     if (raw_vector_param == nullptr) {
         return;
     }
 
+    if (is_create_new) {
+        raw_vector_ = FlattenInterface::MakeInstance(raw_vector_param, common_param);
+    }
+
     if (basic_flatten_codes_->GetQuantizerName() != QUANTIZATION_TYPE_VALUE_FP32 and
         high_precise_codes_ == nullptr) {
-        raw_vector_ = FlattenInterface::MakeInstance(raw_vector_param, common_param);
         create_new_raw_vector_ = true;
         has_raw_vector_ = true;
         return;
@@ -2187,7 +2339,6 @@ HGraph::check_and_init_raw_vector(const FlattenInterfaceParamPtr& raw_vector_par
     if (basic_flatten_codes_->GetQuantizerName() != QUANTIZATION_TYPE_VALUE_FP32 and
         high_precise_codes_ != nullptr and
         high_precise_codes_->GetQuantizerName() != QUANTIZATION_TYPE_VALUE_FP32) {
-        raw_vector_ = FlattenInterface::MakeInstance(raw_vector_param, common_param);
         create_new_raw_vector_ = true;
         has_raw_vector_ = true;
         return;
@@ -2195,7 +2346,6 @@ HGraph::check_and_init_raw_vector(const FlattenInterfaceParamPtr& raw_vector_par
 
     auto io_type_name = raw_vector_param->io_parameter->GetTypeName();
     if (io_type_name != IO_TYPE_VALUE_BLOCK_MEMORY_IO and io_type_name != IO_TYPE_VALUE_MEMORY_IO) {
-        raw_vector_ = FlattenInterface::MakeInstance(raw_vector_param, common_param);
         create_new_raw_vector_ = true;
         has_raw_vector_ = true;
         return;
@@ -2213,18 +2363,6 @@ HGraph::check_and_init_raw_vector(const FlattenInterfaceParamPtr& raw_vector_par
         has_raw_vector_ = true;
         return;
     }
-}
-
-bool
-HGraph::UpdateId(int64_t old_id, int64_t new_id) {
-    if (old_id == new_id) {
-        return true;
-    }
-
-    std::scoped_lock label_lock(this->label_lookup_mutex_);
-    this->label_table_->UpdateLabel(old_id, new_id);
-
-    return true;
 }
 
 bool
@@ -2264,8 +2402,9 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
 
             float neighbor_dist = 0;
             try {
-                neighbor_dist = this->CalcDistanceById(
-                    (float*)new_base_vec, this->label_table_->GetLabelById(neighbor_inner_id));
+                neighbor_dist =
+                    this->CalcDistanceById(static_cast<float*>(new_base_vec),
+                                           this->label_table_->GetLabelById(neighbor_inner_id));
             } catch (const std::runtime_error& e) {
                 // incase that neighbor has been deleted
                 continue;
@@ -2331,7 +2470,7 @@ HGraph::AnalyzeIndexBySearch(const SearchRequest& request) {
         auto query = Dataset::Make();
         query->NumElements(1)
             ->Dim(dim_)
-            ->Float32Vectors((const float*)get_data(querys, i))
+            ->Float32Vectors(static_cast<const float*>(get_data(querys, i)))
             ->Owner(false);
         DatasetPtr search_result;
         double single_query_time;
@@ -2364,6 +2503,33 @@ HGraph::AnalyzeIndexBySearch(const SearchRequest& request) {
 void
 HGraph::GetAttributeSetByInnerId(InnerIdType inner_id, AttributeSet* attr) const {
     this->attr_filter_index_->GetAttribute(0, inner_id, attr);
+}
+
+void
+HGraph::cal_memory_usage() {
+    auto memory = sizeof(HGraph);
+    memory += this->neighbors_mutex_->GetCurrentMemoryUsage();
+    memory += this->pool_->GetCurrentMemoryUsage();
+    memory += this->label_table_->GetCurrentMemoryUsage();
+    memory += this->basic_flatten_codes_->GetCurrentMemoryUsage();
+    memory += this->bottom_graph_->GetCurrentMemoryUsage();
+    for (auto& graph : this->route_graphs_) {
+        memory += graph->GetCurrentMemoryUsage();
+    }
+    if (use_reorder_) {
+        memory += this->high_precise_codes_->GetCurrentMemoryUsage();
+    }
+
+    if (this->extra_infos_ != nullptr and this->extra_info_size_ > 0) {
+        memory += this->extra_infos_->GetCurrentMemoryUsage();
+    }
+
+    if (this->create_new_raw_vector_ and this->raw_vector_ != nullptr) {
+        memory += raw_vector_->GetCurrentMemoryUsage();
+    }
+
+    std::unique_lock lock(this->memory_usage_mutex_);
+    this->current_memory_usage_.store(static_cast<int64_t>(memory));
 }
 
 }  // namespace vsag

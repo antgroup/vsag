@@ -43,7 +43,7 @@ public:
 
     ComputerInterfacePtr
     FactoryComputer(const void* query) override {
-        return this->factory_computer((const float*)query);
+        return this->factory_computer(static_cast<const float*>(query));
     }
 
     bool
@@ -51,6 +51,13 @@ public:
         // TODO(inabao): Implement the decode function
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                             "Decode function is not implemented for SparseVectorDataCell");
+    }
+
+    bool
+    Encode(const DataType* vector, uint8_t* codes) override {
+        // TODO(inabao): Implement the decode function
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Encode function is not implemented for SparseVectorDataCell");
     }
 
     float
@@ -105,6 +112,9 @@ public:
     [[nodiscard]] const uint8_t*
     GetCodesById(InnerIdType id, bool& need_release) const override;
 
+    void
+    Release(const uint8_t* data) const override;
+
     [[nodiscard]] bool
     InMemory() const override;
 
@@ -127,6 +137,9 @@ public:
         this->io_ = io;
     }
 
+    int64_t
+    GetCurrentMemoryUsage() const override;
+
 private:
     inline void
     query(float* result_dists,
@@ -141,6 +154,7 @@ private:
         return computer;
     }
 
+private:
     std::shared_ptr<Quantizer<QuantTmpl>> quantizer_{nullptr};
     std::shared_ptr<BasicIO<IOTmpl>> io_{nullptr};
 

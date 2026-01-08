@@ -26,6 +26,7 @@ struct SINDIParam {
     float doc_prune_ratio = 0.0;
     int window_size = 10000;
     bool deserialize_without_footer = false;
+    bool deserialize_without_buffer = false;
     int term_id_limit = 2000;
 };
 
@@ -55,7 +56,8 @@ public:
                 "doc_prune_ratio": {},
                 "window_size": {},
                 "term_id_limit": {},
-                "deserialize_without_footer": {}
+                "deserialize_without_footer": {},
+                "deserialize_without_buffer": {}
             }}
         }})";
         return fmt::format(build_param_template,
@@ -63,7 +65,8 @@ public:
                            param.doc_prune_ratio,
                            param.window_size,
                            param.term_id_limit,
-                           param.deserialize_without_footer);
+                           param.deserialize_without_footer,
+                           param.deserialize_without_buffer);
     }
 };
 TestDatasetPool SINDITestIndex::pool{};
@@ -175,6 +178,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Build and Search",
     TestGetMinAndMaxId(index, dataset, true);
     TestCalcDistanceById(index, dataset, 1e-4, true, true);
     TestBatchCalcDistanceById(index, dataset, 1e-4, true, true);
+    TestUpdateVectorSparse(index, dataset, true);
     TestUpdateId(index, dataset, search_param, true);
     TestEstimateMemory("sindi", build_param, dataset);
     TestIndexStatus(index);
@@ -193,6 +197,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Concurrent", "[ft]
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Serialize File", "[ft][sindi]") {
     fixtures::SINDIParam param;
     param.deserialize_without_footer = GENERATE(true, false);
+    param.deserialize_without_buffer = true;
     param.use_reorder = GENERATE(true, false);
     auto build_param = fixtures::SINDITestIndex::GenerateBuildParameter(param);
     auto origin_size = vsag::Options::Instance().block_size_limit();
@@ -223,4 +228,13 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Serialize File", "
         TestSerializeFile(index, index2, dataset, search_param, true);
     }
     vsag::Options::Instance().set_block_size_limit(origin_size);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "Sindi Duplicate ID Test", "[ft][sindi]") {
+    fixtures::SINDIParam param;
+    param.use_reorder = GENERATE(true, false);
+    auto build_param = fixtures::SINDITestIndex::GenerateBuildParameter(param);
+    auto index = TestFactory("sindi", build_param, true);
+    auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
+    TestDuplicateAdd(index, dataset);
 }
