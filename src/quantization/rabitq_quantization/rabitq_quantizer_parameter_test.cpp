@@ -18,6 +18,7 @@
 #include <fmt/format.h>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include "parameter_test.h"
 
@@ -26,6 +27,7 @@ using namespace vsag;
 struct RaBitQDefaultParam {
     int pca_dim = 256;
     int rabitq_bits_per_dim_query = 4;
+    int rabitq_bits_per_dim_base = 1;
     bool use_fht = false;
 };
 
@@ -35,10 +37,15 @@ generate_rabitq_param(const RaBitQDefaultParam& param) {
         {{
             "pca_dim": {},
             "rabitq_bits_per_dim_query": {},
+            "rabitq_bits_per_dim_base": {},
             "use_fht": {}
         }}
     )";
-    return fmt::format(param_str, param.pca_dim, param.rabitq_bits_per_dim_query, param.use_fht);
+    return fmt::format(param_str,
+                       param.pca_dim,
+                       param.rabitq_bits_per_dim_query,
+                       param.rabitq_bits_per_dim_base,
+                       param.use_fht);
 }
 
 #define TEST_COMPATIBILITY_CASE(section_name, param_member, val1, val2, expect_compatible) \
@@ -60,17 +67,35 @@ generate_rabitq_param(const RaBitQDefaultParam& param) {
         }                                                                                  \
     }
 
-TEST_CASE("RaBitQ Quantizer Parameter CheckCompatibility", "[ut][RaBitQuantizerParameter]") {
-    SECTION("wrong parameter type") {
-        RaBitQDefaultParam default_param;
-        auto param_str = generate_rabitq_param(default_param);
-        auto param = std::make_shared<vsag::RaBitQuantizerParameter>();
-        param->FromString(param_str);
-        REQUIRE(param->CheckCompatibility(param));
-        REQUIRE_FALSE(param->CheckCompatibility(std::make_shared<vsag::EmptyParameter>()));
-    }
-    TEST_COMPATIBILITY_CASE("different pac_dim", pca_dim, 256, 512, false)
-    TEST_COMPATIBILITY_CASE(
-        "different rabitq_bits_per_dim_query", rabitq_bits_per_dim_query, 4, 8, false)
-    TEST_COMPATIBILITY_CASE("different use_fht", use_fht, true, false, false)
+TEST_CASE("RaBitQ Quantizer Parameter CheckCompatibility", "[ut][RaBitQuantizerParameter]"){
+    SECTION("wrong parameter type"){RaBitQDefaultParam default_param;
+auto param_str = generate_rabitq_param(default_param);
+auto param = std::make_shared<vsag::RaBitQuantizerParameter>();
+param->FromString(param_str);
+REQUIRE(param->CheckCompatibility(param));
+REQUIRE_FALSE(param->CheckCompatibility(std::make_shared<vsag::EmptyParameter>()));
+}
+TEST_COMPATIBILITY_CASE("different pac_dim", pca_dim, 256, 512, false)
+TEST_COMPATIBILITY_CASE(
+    "different rabitq_bits_per_dim_query", rabitq_bits_per_dim_query, 4, 32, false)
+TEST_COMPATIBILITY_CASE("different rabitq_bits_per_dim_base", rabitq_bits_per_dim_base, 1, 4, false)
+TEST_COMPATIBILITY_CASE("different use_fht", use_fht, true, false, false)
+}
+
+TEST_CASE("Wrong rabitq_bits_per_dim_base parameter", "[ut][RaBitQuantizerParameter]") {
+    auto wrong_rabitq_bits_per_dim_base = GENERATE(0, 9);
+    RaBitQDefaultParam default_param;
+    default_param.rabitq_bits_per_dim_base = wrong_rabitq_bits_per_dim_base;
+    auto param_str = generate_rabitq_param(default_param);
+    auto param = std::make_shared<vsag::RaBitQuantizerParameter>();
+    REQUIRE_THROWS(param->FromString(param_str));
+}
+
+TEST_CASE("Wrong rabitq_bits_per_dim_query parameter", "[ut][RaBitQuantizerParameter]") {
+    auto wrong_rabitq_bits_per_dim_query = GENERATE(2, 3, 6, 31);
+    RaBitQDefaultParam default_param;
+    default_param.rabitq_bits_per_dim_query = wrong_rabitq_bits_per_dim_query;
+    auto param_str = generate_rabitq_param(default_param);
+    auto param = std::make_shared<vsag::RaBitQuantizerParameter>();
+    REQUIRE_THROWS(param->FromString(param_str));
 }

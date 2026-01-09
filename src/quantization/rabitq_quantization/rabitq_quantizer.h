@@ -23,14 +23,16 @@
 
 namespace vsag {
 
-/** Implement of RaBitQ Quantization, Integrate MRQ (Minimized Residual Quantization)
+/** Implement of RaBitQ Quantization, Integrate MRQ (Minimized Residual Quantization) and Extend-RaBitQ
  *
  *  RaBitQ: Supports bit-level quantization
  *  MRQ: Support use residual part of PCA to increase precision
+ *  Extend-RaBitQ: Supports multi-bit quantization
  *
  *  Reference:
  *  [1] Jianyang Gao and Cheng Long. 2024. RaBitQ: Quantizing High-Dimensional Vectors with a Theoretical Error Bound for Approximate Nearest Neighbor Search. Proc. ACM Manag. Data 2, 3, Article 167 (June 2024), 27 pages. https://doi.org/10.1145/3654970
  *  [2] Mingyu Yang, Wentao Li, Wei Wang. Fast High-dimensional Approximate Nearest Neighbor Search with Efficient Index Time and Space
+ *  [3] Jianyang Gao, Yutong Gou, Yuexuan Xu, Yongyi Yang, Cheng Long, and Raymond Chi-Wing Wong. 2025. Practical and Asymptotically Optimal Quantization of High-Dimensional Vectors in Euclidean Space for Approximate Nearest Neighbor Search. Proc. ACM Manag. Data 3, 3, Article 202 (June 2025), 26 pages. https://doi.org/10.1145/3725413
  */
 template <MetricType metric = MetricType::METRIC_TYPE_L2SQR>
 class RaBitQuantizer : public Quantizer<RaBitQuantizer<metric>> {
@@ -42,6 +44,7 @@ public:
     explicit RaBitQuantizer(int dim,
                             uint64_t pca_dim,
                             uint64_t num_bits_per_dim_query,
+                            uint64_t num_bits_per_dim_base,
                             bool use_fht,
                             bool use_mrq,
                             Allocator* allocator);
@@ -99,6 +102,7 @@ public:
     }
 
 public:
+    // query sq4 related
     void
     ReOrderSQ4(const uint8_t* input, uint8_t* output) const;
 
@@ -124,7 +128,16 @@ public:
     void
     RecoverOrderSQ(const uint8_t* output, uint8_t* input) const;
 
+public:
+    // base multi-bit related
+    void
+    EncodeExtendRaBitQ(const float* o_prime, uint8_t* code, float& y_norm) const;
+
 private:
+    // bit related
+    uint64_t num_bits_per_dim_query_{32};
+    uint32_t num_bits_per_dim_base_{1};
+
     // compute related
     float inv_sqrt_d_{0.0F};
 
@@ -140,10 +153,9 @@ private:
     bool use_mrq_{false};
 
     /***
-     * query layout: sq-code(required) + lower_bound(sq4) + delta(sq4) + sum(sq4) + norm(required) + mrq_norm(required)
+     * query layout: sq-code(required) + lower_bound(sq4) + delta(sq4) + sum(sq4 or extend_rabitq) + norm(required) + mrq_norm(required)
      */
     uint64_t aligned_dim_{0};
-    uint64_t num_bits_per_dim_query_{32};
     uint64_t query_offset_lb_{0};
     uint64_t query_offset_delta_{0};
     uint64_t query_offset_sum_{0};
@@ -152,11 +164,12 @@ private:
     uint64_t query_offset_raw_norm_{0};
 
     /***
-     * code layout: bq-code(required) + norm(required) + error(required) + sum(sq4) + mrq_norm(required)
+     * code layout: bq-code(required) + norm(required) + error(required) + offset_norm_code(extend_rabitq) + sum(sq4) + mrq_norm(required)
      */
     uint64_t offset_code_{0};
     uint64_t offset_norm_{0};
     uint64_t offset_error_{0};
+    uint64_t offset_norm_code_{0};
     uint64_t offset_sum_{0};
     uint64_t offset_mrq_norm_{0};
     uint64_t offset_raw_norm_{0};

@@ -372,6 +372,9 @@ TestComputer(Quantizer<T>& quant,
             REQUIRE(fixtures::dist_t(dists1[j]) == fixtures::dist_t(dists2[j]));
         }
     }
+    if (not count_unbounded_numeric_error / (query_count * count) <= unbounded_numeric_error_rate) {
+        std::cout << "";
+    }
     REQUIRE(count_unbounded_numeric_error / (query_count * count) <= unbounded_numeric_error_rate);
     REQUIRE(count_unbounded_related_error / (query_count * count) <= unbounded_related_error_rate);
 }
