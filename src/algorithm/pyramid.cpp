@@ -54,7 +54,7 @@ get_suitable_max_degree(int64_t data_num) {
 
 uint64_t
 get_suitable_ef_search(int64_t topk, int64_t data_num) {
-    float topk_float = static_cast<float>(topk);
+    auto topk_float = static_cast<float>(topk);
     if (data_num < 1'000) {
         return std::max(static_cast<uint64_t>(1.5F * topk_float), 50UL);
     }
@@ -845,7 +845,7 @@ Pyramid::search_node(const IndexNode* node,
                 std::min(modified_param.ef,
                          get_suitable_ef_search(search_param.topk, node->graph_->TotalCount()));
         }
-        modified_param.topk = static_cast<uint64_t>(modified_param.ef);
+        modified_param.topk = static_cast<int64_t>(modified_param.ef);
         results = searcher_->Search(node->graph_,
                                     codes,
                                     vl,
