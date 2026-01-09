@@ -15,6 +15,8 @@
 
 #pragma once
 
+#include <cstdint>
+
 namespace vsag {
 
 class ResourceObject {
@@ -34,6 +36,19 @@ public:
      */
     virtual void
     Reset() = 0;
+
+    /**
+     * @brief Get the memory usage of the resource object.
+     *
+     * This pure virtual function forces derived classes to provide an
+     * implementation for returning the memory usage of their specific resources.
+     * The memory usage should include all dynamically allocated memory, whether
+     * directly or indirectly, used by the resource.
+     *
+     * @return int64_t The memory usage of the resource object in bytes.
+     */
+    virtual int64_t
+    MemoryUsage() const = 0;
 };
 
 }  // namespace vsag

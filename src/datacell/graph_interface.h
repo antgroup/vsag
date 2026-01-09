@@ -79,6 +79,11 @@ public:
                             "GetIds in GraphInterface is not implemented");
     }
 
+    virtual int64_t
+    GetCurrentMemoryUsage() const {
+        return 0;
+    }
+
 public:
     virtual void
     Serialize(StreamWriter& writer) {

@@ -66,6 +66,11 @@ public:
     virtual bool
     GetExtraInfoById(InnerIdType id, char* extra_info) const = 0;
 
+    virtual int64_t
+    GetCurrentMemoryUsage() const {
+        return 0;
+    }
+
     [[nodiscard]] virtual InnerIdType
     TotalCount() const {
         return this->total_count_;

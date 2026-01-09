@@ -112,6 +112,11 @@ public:
     void
     SetImmutable() override;
 
+    int64_t
+    GetMemoryUsage() const override {
+        return this->CalSerializeSize();
+    }
+
 private:
     template <InnerSearchMode mode>
     DatasetPtr

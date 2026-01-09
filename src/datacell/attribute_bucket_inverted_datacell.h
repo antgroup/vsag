@@ -58,6 +58,9 @@ public:
     void
     GetAttribute(BucketIdType bucket_id, InnerIdType inner_id, AttributeSet* attr) override;
 
+    int64_t
+    GetCurrentMemoryUsage() const override;
+
 private:
     UnorderedMap<std::string, ValueMapPtr> field_2_value_map_;
 

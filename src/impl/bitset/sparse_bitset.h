@@ -76,6 +76,9 @@ public:
     void
     Clear() override;
 
+    int64_t
+    GetCurrentMemoryUsage() const override;
+
 private:
     mutable std::mutex mutex_;
     roaring::Roaring r_;

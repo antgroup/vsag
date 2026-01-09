@@ -133,6 +133,9 @@ public:
                     const AttributeSet& new_attrs,
                     const AttributeSet& origin_attrs) override;
 
+    [[nodiscard]] int64_t
+    GetMemoryUsage() const override;
+
 private:
     InnerSearchParam
     create_search_param(const std::string& parameters, const FilterPtr& filter) const;
@@ -159,6 +162,9 @@ private:
     std::pair<BucketIdType, InnerIdType>
     get_location(InnerIdType inner_id) const;
 
+    void
+    cal_memory_usage();
+
 private:
     BucketInterfacePtr bucket_{nullptr};
 
@@ -177,5 +183,9 @@ private:
     Vector<uint64_t> location_map_;
 
     static const uint64_t LOCATION_SPLIT_BIT = 32;
+
+    // last_cal_memory_element_ is used to avoid cal memory usage too frequently
+    int64_t last_cal_memory_element_{0};
+    int64_t cal_memory_element_interval_{1024L};
 };
 }  // namespace vsag

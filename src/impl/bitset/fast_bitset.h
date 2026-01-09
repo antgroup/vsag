@@ -77,6 +77,9 @@ public:
     std::string
     Dump() override;
 
+    int64_t
+    GetCurrentMemoryUsage() const override;
+
 private:
     void
     resize(uint32_t new_size, uint64_t fill = 0);

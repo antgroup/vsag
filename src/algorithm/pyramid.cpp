@@ -344,6 +344,9 @@ Pyramid::Deserialize(StreamReader& reader) {
         pool_ = std::make_unique<VisitedListPool>(
             1, allocator_, flatten_interface_ptr_->TotalCount(), allocator_);
     }
+    cur_element_count_ = flatten_interface_ptr_->TotalCount();
+    resize(max_capacity_);
+    this->current_memory_usage_ = static_cast<int64_t>(this->CalSerializeSize());
 }
 
 std::vector<int64_t>
@@ -470,6 +473,7 @@ Pyramid::InitFeatures() {
     // other
     this->index_feature_list_->SetFeatures({
         IndexFeature::SUPPORT_CLONE,
+        IndexFeature::SUPPORT_GET_MEMORY_USAGE,
     });
 }
 
