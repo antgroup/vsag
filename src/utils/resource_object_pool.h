@@ -40,10 +40,10 @@ public:
     template <typename... Args>
     explicit ResourceObjectPool(uint64_t init_size, Allocator* allocator, Args... args)
         : allocator_(allocator), init_size_(init_size), memory_usage_(0) {
-        this->constructor_ = [=]() -> std::shared_ptr<T> {
+        this->constructor_ = [=, pool = this]() -> std::shared_ptr<T> {
             auto ptr = std::make_shared<T>(args...);
             auto value = ptr->MemoryUsage();
-            memory_usage_.fetch_add(value, std::memory_order_relaxed);
+            pool->memory_usage_.fetch_add(value, std::memory_order_relaxed);
             return ptr;
         };
         if (allocator_ == nullptr) {
