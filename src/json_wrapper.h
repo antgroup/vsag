@@ -70,8 +70,9 @@ public:
     void
     SetBool(bool value);
 
+    template <class T>
     void
-    SetVector(const std::vector<int32_t>& value);
+    SetVector(std::vector<T> value);
 
     void
     UpdateJson(const JsonWrapper& json);
