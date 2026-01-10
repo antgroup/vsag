@@ -469,7 +469,7 @@ protected:
     uint64_t build_thread_count_{1};
     int64_t train_sample_count_{65536L};
 
-    std::shared_ptr<SafeThreadPool> build_pool_{nullptr};
+    std::shared_ptr<SafeThreadPool> thread_pool_{nullptr};
 
     AttrInvertedInterfacePtr attr_filter_index_{nullptr};
 };

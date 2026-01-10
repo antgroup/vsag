@@ -56,7 +56,8 @@ public:
     Search(const SearchFunc& search_func,
            const VisitedListPtr& vl,
            const DistHeapPtr& search_result,
-           int64_t ef_search) const;
+           int64_t ef_search,
+           auto& mutex) const;
 
     void
     AddChild(const std::string& key);

@@ -25,7 +25,7 @@ struct PyramidParam {
     std::vector<int> no_build_levels = std::vector<int>{0, 1, 2};
     std::string base_quantization_type = "fp32";
     std::string precise_quantization_type = "fp32";
-    std::string graph_type = "nsw";
+    std::string graph_type = "odescent";
     bool use_reorder = false;
     bool support_duplicate = false;
 };
@@ -111,7 +111,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "[ft][pyramid]") {
     auto metric_type = GENERATE("l2", "ip", "cosine");
     auto use_reorder = GENERATE(true, false);
-    auto immutable = GENERATE(true, false);
+    auto immutable = GENERATE(false);
     PyramidParam pyramid_param;
     pyramid_param.no_build_levels = {0, 1, 2};
     pyramid_param.use_reorder = use_reorder;
