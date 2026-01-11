@@ -15,8 +15,6 @@
 
 #include "pyramid.h"
 
-#include <iostream>
-
 #include "algorithm/inner_index_interface.h"
 #include "datacell/flatten_interface.h"
 #include "impl/heap/standard_heap.h"
