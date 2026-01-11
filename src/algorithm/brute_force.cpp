@@ -120,10 +120,10 @@ BruteForce::Add(const DatasetPtr& data) {
         }
         if (this->thread_pool_ != nullptr) {
             auto future = this->thread_pool_->GeneralEnqueue(add_func,
-                                                            vectors + j * dim_,
-                                                            label,
-                                                            attrs == nullptr ? nullptr : attrs + j,
-                                                            extra_info + j * extra_info_size);
+                                                             vectors + j * dim_,
+                                                             label,
+                                                             attrs == nullptr ? nullptr : attrs + j,
+                                                             extra_info + j * extra_info_size);
             futures.emplace_back(std::move(future));
         } else {
             if (auto add_res = add_func(vectors + j * dim_,

@@ -15,6 +15,8 @@
 
 #include "pyramid.h"
 
+#include <iostream>
+
 #include "algorithm/inner_index_interface.h"
 #include "datacell/flatten_interface.h"
 #include "impl/heap/standard_heap.h"
@@ -328,7 +330,7 @@ Pyramid::search_impl(const DatasetPtr& query,
             }
             if (valid) {
                 if (thread_pool_ != nullptr) {
-                    futures.push_back(thread_pool_->GeneralEnqueue([&]()->void {
+                    futures.push_back(thread_pool_->GeneralEnqueue([&, node]() -> void {
                         node->Search(search_func, vl, search_result, ef_search, query_mutex);
                     }));
                 } else {

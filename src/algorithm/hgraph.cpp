@@ -655,7 +655,8 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
                                                             : this->basic_flatten_codes_;
     {
         odescent_param_->max_degree = bottom_graph_->MaximumDegree();
-        ODescent odescent_builder(odescent_param_, build_data, allocator_, this->thread_pool_.get());
+        ODescent odescent_builder(
+            odescent_param_, build_data, allocator_, this->thread_pool_.get());
         odescent_builder.Build();
         odescent_builder.SaveGraph(bottom_graph_);
     }
@@ -1958,7 +1959,8 @@ HGraph::Merge(const std::vector<MergeUnit>& merge_units) {
     }
     {
         odescent_param_->max_degree = bottom_graph_->MaximumDegree();
-        ODescent odescent_builder(odescent_param_, build_data, allocator_, this->thread_pool_.get());
+        ODescent odescent_builder(
+            odescent_param_, build_data, allocator_, this->thread_pool_.get());
         odescent_builder.Build(bottom_graph_);
         odescent_builder.SaveGraph(bottom_graph_);
     }

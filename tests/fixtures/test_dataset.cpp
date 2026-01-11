@@ -19,7 +19,6 @@
 #include <cstring>
 #include <functional>
 
-#include "algorithm/pyramid.h"
 #include "fixtures.h"
 #include "simd/fp32_simd.h"
 
@@ -36,17 +35,6 @@ struct CompareByFirst {
 using MaxHeap = std::priority_queue<std::pair<float, int64_t>,
                                     std::vector<std::pair<float, int64_t>>,
                                     CompareByFirst>;
-
-bool
-is_path_belong_to(const std::string& a, const std::string& b) {
-    auto paths = vsag::split(a, '|');
-    for (const auto& path : paths) {
-        if (b.compare(0, path.size(), path) == 0) {
-            return true;
-        }
-    }
-    return false;
-}
 
 static TestDataset::DatasetPtr
 GenerateRandomDataset(uint64_t dim,

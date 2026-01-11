@@ -38,6 +38,9 @@ get_common_used_dims(uint64_t count = -1, int seed = 369, int limited_dim = -1);
 std::vector<int>
 get_index_test_dims(uint64_t count = -1, int seed = 369, int limited_dim = -1);
 
+bool
+is_path_belong_to(const std::string& a, const std::string& b);
+
 template <typename T>
 T*
 CopyVector(const std::vector<T>& vec) {

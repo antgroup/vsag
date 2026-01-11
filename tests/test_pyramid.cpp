@@ -25,7 +25,7 @@ struct PyramidParam {
     std::vector<int> no_build_levels = std::vector<int>{0, 1, 2};
     std::string base_quantization_type = "fp32";
     std::string precise_quantization_type = "fp32";
-    std::string graph_type = "odescent";
+    std::string graph_type = "nsw";
     bool use_reorder = false;
     bool support_duplicate = false;
 };
