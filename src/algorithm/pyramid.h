@@ -36,7 +36,7 @@ namespace vsag {
 class IndexNode;
 using SearchFunc = std::function<DistHeapPtr(const IndexNode* node, const VisitedListPtr& vl)>;
 
-std::vector<std::string>
+static std::vector<std::string>
 split(const std::string& str, char delimiter);
 
 class IndexNode {

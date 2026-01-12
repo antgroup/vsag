@@ -93,8 +93,8 @@ main(int argc, char** argv) {
     // - "max_degree": The maximum number of connections for each node in the graph.
     // - "alpha": The parameter for the graph construction, which influences the pruning process.
     // - "no_build_levels": The levels that do not need to be built.
-    // - "base_quantization_type": the base quantization codes
-    // - "precise_quantization_type": the precise quantization codes
+    // - "base_quantization_type": The base quantization codes
+    // - "precise_quantization_type": The precise quantization codes
     // - "index_min_size": The minimum size required to build the index
     // - "support_duplicate": support for duplicate data in the index
     auto pyramid_build_paramesters = R"(

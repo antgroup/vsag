@@ -165,7 +165,7 @@ private:
     bool pruning_{true};
     Allocator* const allocator_;
 
-    ODescentParameterPtr odescent_param_;
+    const ODescentParameterPtr odescent_param_;
 
     const FlattenInterfacePtr& flatten_interface_;
 };

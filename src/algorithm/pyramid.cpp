@@ -29,7 +29,7 @@ namespace vsag {
 
 const static float RADIUS_EPSILON = 1.1F;
 
-std::vector<std::string>
+static std::vector<std::string>
 split(const std::string& str, char delimiter) {
     auto vec = split_string(str, delimiter);
     vec.erase(
@@ -38,7 +38,7 @@ split(const std::string& str, char delimiter) {
     return vec;
 }
 
-uint64_t
+static uint64_t
 get_suitable_max_degree(int64_t data_num) {
     if (data_num < 1'000) {
         return 8;
@@ -52,19 +52,19 @@ get_suitable_max_degree(int64_t data_num) {
     return 64;
 }
 
-uint64_t
+static uint64_t
 get_suitable_ef_search(int64_t topk, int64_t data_num) {
     auto topk_float = static_cast<float>(topk);
     if (data_num < 1'000) {
-        return std::max(static_cast<uint64_t>(1.5F * topk_float), 50UL);
+        return std::max(static_cast<uint64_t>(1.5F * topk_float), 50ULL);
     }
     if (data_num < 100'000) {
-        return std::max(static_cast<uint64_t>(2.0F * topk_float), 100UL);
+        return std::max(static_cast<uint64_t>(2.0F * topk_float), 100ULL);
     }
     if (data_num < 1'000'000) {
-        return std::max(static_cast<uint64_t>(3.0F * topk_float), 200UL);
+        return std::max(static_cast<uint64_t>(3.0F * topk_float), 200ULL);
     }
-    return std::max(static_cast<uint64_t>(4.0F * topk_float), 400UL);
+    return std::max(static_cast<uint64_t>(4.0F * topk_float), 400ULL);
 }
 
 IndexNode::IndexNode(Allocator* allocator,
