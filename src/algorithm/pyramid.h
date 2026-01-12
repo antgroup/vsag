@@ -57,7 +57,7 @@ public:
            const VisitedListPtr& vl,
            const DistHeapPtr& search_result,
            int64_t ef_search,
-           auto& mutex) const;
+           std::mutex& query_mutex) const;
 
     void
     AddChild(const std::string& key);

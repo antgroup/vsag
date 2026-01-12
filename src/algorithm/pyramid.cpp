@@ -178,10 +178,10 @@ IndexNode::Search(const SearchFunc& search_func,
                   const VisitedListPtr& vl,
                   const DistHeapPtr& search_result,
                   int64_t ef_search,
-                  auto& mutex) const {
+                  std::mutex& query_mutex) const {
     if (status_ != IndexNode::Status::NO_INDEX) {
         auto self_search_result = search_func(this, vl);
-        std::scoped_lock lock(mutex);
+        std::scoped_lock lock(query_mutex);
         search_result->Merge(*self_search_result);
         while (search_result->Size() > ef_search) {
             search_result->Pop();
@@ -190,7 +190,7 @@ IndexNode::Search(const SearchFunc& search_func,
     }
 
     for (const auto& [key, node] : children_) {
-        node->Search(search_func, vl, search_result, ef_search, mutex);
+        node->Search(search_func, vl, search_result, ef_search, query_mutex);
     }
 }
 
