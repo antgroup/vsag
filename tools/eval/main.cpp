@@ -83,6 +83,10 @@ parse_args(argparse::ArgumentParser& parser, int argc, char** argv) {
         .default_value(0.5f)
         .help("The range value for range search or range_filter search")
         .scan<'f', float>();
+    parser.add_argument("--search-query-count")
+        .default_value(100000)
+        .help("The number of queries to run for search performance evaluation")
+        .scan<'i', uint64_t>();
 
     // metrics
     parser.add_argument("--disable_recall")
