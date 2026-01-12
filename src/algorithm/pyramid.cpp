@@ -339,11 +339,11 @@ Pyramid::search_impl(const DatasetPtr& query,
     } else {
         root_->Search(search_func, vl, search_result, ef_search, query_mutex);
     }
-    pool_->ReturnOne(vl);
 
     for (auto& future : futures) {
         future.get();
     }
+    pool_->ReturnOne(vl);
 
     if (use_reorder_) {
         search_result = this->reorder_->Reorder(search_result, query->GetFloat32Vectors(), limit);
