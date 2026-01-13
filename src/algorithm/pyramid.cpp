@@ -29,7 +29,7 @@ namespace vsag {
 
 const static float RADIUS_EPSILON = 1.1F;
 
-static std::vector<std::string>
+std::vector<std::string>
 split(const std::string& str, char delimiter) {
     auto vec = split_string(str, delimiter);
     vec.erase(
