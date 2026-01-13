@@ -56,15 +56,15 @@ static uint64_t
 get_suitable_ef_search(int64_t topk, int64_t data_num) {
     auto topk_float = static_cast<float>(topk);
     if (data_num < 1'000) {
-        return std::max(static_cast<uint64_t>(1.5F * topk_float), 50ULL);
+        return std::max(static_cast<uint64_t>(1.5F * topk_float), 50UL);
     }
     if (data_num < 100'000) {
-        return std::max(static_cast<uint64_t>(2.0F * topk_float), 100ULL);
+        return std::max(static_cast<uint64_t>(2.0F * topk_float), 100UL);
     }
     if (data_num < 1'000'000) {
-        return std::max(static_cast<uint64_t>(3.0F * topk_float), 200ULL);
+        return std::max(static_cast<uint64_t>(3.0F * topk_float), 200UL);
     }
-    return std::max(static_cast<uint64_t>(4.0F * topk_float), 400ULL);
+    return std::max(static_cast<uint64_t>(4.0F * topk_float), 400UL);
 }
 
 IndexNode::IndexNode(Allocator* allocator,
