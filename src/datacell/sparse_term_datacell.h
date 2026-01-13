@@ -104,9 +104,6 @@ public:
     CalcDistanceByInnerId(const SparseTermComputerPtr& computer, uint16_t base_id);
 
     void
-    GetSparseVector(uint16_t base_id, SparseVector* data);
-
-    void
     Encode(float val, uint8_t* dst) const;
 
     void
@@ -123,7 +120,6 @@ private:
                                float& cur_heap_top,
                                MaxHeap& heap,
                                uint32_t offset_id,
-                               uint32_t n_candidate,
                                float radius,
                                const FilterPtr& filter) const;
 

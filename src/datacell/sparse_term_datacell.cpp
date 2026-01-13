@@ -60,30 +60,30 @@ SparseTermDataCell::insert_candidate_into_heap(uint32_t id,
                                                float& cur_heap_top,
                                                MaxHeap& heap,
                                                uint32_t offset_id,
-                                               uint32_t n_candidate,
                                                float radius,
                                                const FilterPtr& filter) const {
+    auto& dist = dists[id];
     if constexpr (type == InnerSearchType::WITH_FILTER) {
 #if __cplusplus >= 202002L
-        if (dists[id] > cur_heap_top or not filter->CheckValid(id + offset_id)) [[likely]] {
+        if (dist > cur_heap_top or not filter->CheckValid(id + offset_id)) [[likely]] {
 #else
-        if (__builtin_expect(dists[id] > cur_heap_top or not filter->CheckValid(id + offset_id),
+        if (__builtin_expect(dist > cur_heap_top or not filter->CheckValid(id + offset_id),
                              1)) {
 #endif
-            dists[id] = 0;
+            dist = 0;
             return;
         }
     } else {
 #if __cplusplus >= 202002L
-        if (dists[id] > cur_heap_top) [[likely]] {
+        if (dist > cur_heap_top) [[likely]] {
 #else
-        if (__builtin_expect(dists[id] > cur_heap_top, 1)) {
+        if (__builtin_expect(dist > cur_heap_top, 1)) {
 #endif
-            dists[id] = 0;
+            dist = 0;
             return;
         }
     }
-    heap.emplace(dists[id], id + offset_id);
+    heap.emplace(dist, id + offset_id);
     if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
         heap.pop();
         cur_heap_top = heap.top().first;
@@ -91,7 +91,7 @@ SparseTermDataCell::insert_candidate_into_heap(uint32_t id,
     if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
         cur_heap_top = radius - 1;
     }
-    dists[id] = 0;
+    dist = 0;
 }
 
 template <InnerSearchType type>
@@ -103,16 +103,17 @@ SparseTermDataCell::fill_heap_initial(uint32_t id,
                                       uint32_t offset_id,
                                       uint32_t n_candidate,
                                       const FilterPtr& filter) const {
-    if (dists[id] != 0) {
+    auto& dist = dists[id];
+    if (dist != 0) {
         if constexpr (type == InnerSearchType::WITH_FILTER) {
             if (not filter->CheckValid(id + offset_id)) {
-                dists[id] = 0;
+                dist = 0;
                 return false;
             }
         }
-        heap.emplace(dists[id], id + offset_id);
+        heap.emplace(dist, id + offset_id);
         cur_heap_top = heap.top().first;
-        dists[id] = 0;
+        dist = 0;
         return heap.size() == n_candidate;
     }
     return false;
@@ -148,10 +149,11 @@ SparseTermDataCell::InsertHeapByTermLists(float* dists,
         uint32_t i = 0;
         auto term_size = static_cast<uint32_t>(static_cast<float>(term_sizes_[term]) *
                                                computer->term_retain_ratio_);
+        auto& one_term_ids = *term_ids_[term];
         if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
             if (heap.size() < n_candidate) {
                 for (; i < term_size; i++) {
-                    id = (*term_ids_[term])[i];
+                    id = one_term_ids[i];
                     if (fill_heap_initial<type>(
                             id, dists, cur_heap_top, heap, offset_id, n_candidate, filter)) {
                         i++;
@@ -162,9 +164,9 @@ SparseTermDataCell::InsertHeapByTermLists(float* dists,
         }
 
         for (; i < term_size; i++) {
-            id = (*term_ids_[term])[i];
+            id = one_term_ids[i];
             insert_candidate_into_heap<mode, type>(
-                id, dists, cur_heap_top, heap, offset_id, n_candidate, radius, filter);
+                id, dists, cur_heap_top, heap, offset_id, radius, filter);
         }
     }
     computer->ResetTerm();
@@ -201,7 +203,7 @@ SparseTermDataCell::InsertHeapByDists(float* dists,
 
     for (; id < dists_size; id++) {
         insert_candidate_into_heap<mode, type>(
-            id, dists, cur_heap_top, heap, offset_id, n_candidate, radius, filter);
+            id, dists, cur_heap_top, heap, offset_id, radius, filter);
     }
 }
 
@@ -347,8 +349,9 @@ SparseTermDataCell::GetSparseVector(uint32_t base_id,
         if (term_sizes_[term] == 0) {
             continue;
         }
+        auto& one_term_ids = *term_ids_[term];
         for (auto i = 0; i < term_sizes_[term]; i++) {
-            if ((*term_ids_[term])[i] == base_id) {
+            if (one_term_ids[i] == base_id) {
                 ids.push_back(term);
                 float v;
                 if (use_quantization_) {
