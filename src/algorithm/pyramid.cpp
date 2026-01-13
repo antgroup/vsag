@@ -177,11 +177,9 @@ void
 IndexNode::Search(const SearchFunc& search_func,
                   const VisitedListPtr& vl,
                   const DistHeapPtr& search_result,
-                  int64_t ef_search,
-                  std::mutex& query_mutex) const {
+                  int64_t ef_search) const {
     if (status_ != IndexNode::Status::NO_INDEX) {
         auto self_search_result = search_func(this, vl);
-        std::scoped_lock lock(query_mutex);
         search_result->Merge(*self_search_result);
         while (search_result->Size() > ef_search) {
             search_result->Pop();
@@ -190,7 +188,7 @@ IndexNode::Search(const SearchFunc& search_func,
     }
 
     for (const auto& [key, node] : children_) {
-        node->Search(search_func, vl, search_result, ef_search, query_mutex);
+        node->Search(search_func, vl, search_result, ef_search);
     }
 }
 
@@ -309,14 +307,15 @@ Pyramid::search_impl(const DatasetPtr& query,
     DistHeapPtr search_result = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
 
     std::shared_lock<std::shared_mutex> lock(resize_mutex_);
-
-    std::mutex query_mutex;
-    std::vector<std::future<void>> futures;
     auto vl = pool_->TakeOne();
     if (query_path != nullptr) {
+        std::vector<std::future<void>> futures;
         const std::string& current_path = query_path[0];
         auto parsed_path = parse_path(current_path);
-        for (const auto& one_path : parsed_path) {
+        Vector<DistHeapPtr> search_result_lists(parsed_path.size(), allocator_);
+        for (uint32_t i = 0; i < parsed_path.size(); ++i) {
+            const auto& one_path = parsed_path[i];
+            search_result_lists[i] = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
             std::shared_ptr<IndexNode> node = root_;
             bool valid = true;
             for (const auto& item : one_path) {
@@ -328,20 +327,27 @@ Pyramid::search_impl(const DatasetPtr& query,
             }
             if (valid) {
                 if (thread_pool_ != nullptr) {
-                    futures.push_back(thread_pool_->GeneralEnqueue([&, node]() -> void {
-                        node->Search(search_func, vl, search_result, ef_search, query_mutex);
+                    futures.push_back(thread_pool_->GeneralEnqueue([&, node, i]() -> void {
+                        node->Search(search_func, vl, search_result_lists[i], ef_search);
                     }));
                 } else {
-                    node->Search(search_func, vl, search_result, ef_search, query_mutex);
+                    node->Search(search_func, vl, search_result_lists[i], ef_search);
                 }
             }
         }
-    } else {
-        root_->Search(search_func, vl, search_result, ef_search, query_mutex);
-    }
 
-    for (auto& future : futures) {
-        future.get();
+        for (uint32_t i = 0; i < futures.size(); ++i) {
+            auto& future = futures[i];
+            future.get();
+            if (i != 0) {
+                search_result->Merge(*search_result_lists[i]);
+            } else {
+                search_result = search_result_lists[i];
+            }
+        }
+
+    } else {
+        root_->Search(search_func, vl, search_result, ef_search);
     }
     pool_->ReturnOne(vl);
 
