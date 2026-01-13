@@ -336,9 +336,11 @@ Pyramid::search_impl(const DatasetPtr& query,
             }
         }
 
-        for (uint32_t i = 0; i < futures.size(); ++i) {
-            auto& future = futures[i];
+        for (auto& future : futures) {
             future.get();
+        }
+
+        for (uint32_t i = 0; i < search_result_lists.size(); ++i) {
             if (i != 0) {
                 search_result->Merge(*search_result_lists[i]);
             } else {
