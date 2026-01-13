@@ -3,4 +3,4 @@
 FROM dockcross/manylinux_2_28-x64
 
 # install deps
-RUN yum install -y gcc-gfortran python3-devel libaio-devel
+RUN yum install -y gcc-gfortran python3-devel libaio-devel liburing-devel
