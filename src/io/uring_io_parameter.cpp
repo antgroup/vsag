@@ -13,31 +13,34 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "async_io_parameter.h"
+#if HAVE_LIBURING
+
+#include "uring_io_parameter.h"
 
 #include "inner_string_params.h"
 
 namespace vsag {
 
-AsyncIOParameter::AsyncIOParameter() : IOParameter(IO_TYPE_VALUE_ASYNC_IO) {
+UringIOParameter::UringIOParameter() : IOParameter(IO_TYPE_VALUE_URING_IO) {
 }
 
-AsyncIOParameter::AsyncIOParameter(const vsag::JsonType& json)
-    : IOParameter(IO_TYPE_VALUE_ASYNC_IO) {
+UringIOParameter::UringIOParameter(const vsag::JsonType& json)
+    : IOParameter(IO_TYPE_VALUE_URING_IO) {
     this->FromJson(json);  // NOLINT(clang-analyzer-optin.cplusplus.VirtualCall)
 }
 
 void
-AsyncIOParameter::FromJson(const JsonType& json) {
+UringIOParameter::FromJson(const JsonType& json) {
     CHECK_ARGUMENT(json.Contains(IO_FILE_PATH_KEY), "miss file_path param in async io type");
     this->path_ = json[IO_FILE_PATH_KEY].GetString();
 }
 
 JsonType
-AsyncIOParameter::ToJson() const {
+UringIOParameter::ToJson() const {
     JsonType json;
-    json[TYPE_KEY].SetString(IO_TYPE_VALUE_ASYNC_IO);
+    json[TYPE_KEY].SetString(IO_TYPE_VALUE_URING_IO);
     json[IO_FILE_PATH_KEY].SetString(this->path_);
     return json;
 }
 }  // namespace vsag
+#endif  // HAVE_LIBURING

@@ -26,6 +26,7 @@
 #include "memory_io.h"
 #include "mmap_io.h"
 #include "noncontinuous_io.h"
+#include "uring_io.h"
 
 namespace vsag {
 template <typename IOType>
@@ -88,5 +89,13 @@ TEST_CASE("IOArrayTest AsyncIO Basic Test", "[IOArray][ut]") {
     auto dir = fixtures::TempDir("test_async_io");
     auto path = dir.GenerateRandomFile();
     IOArrayTest<NonContinuousIO<AsyncIO>> test(allocator.get(), path, allocator.get());
+    test.TestBasic();
+}
+
+TEST_CASE("IOArrayTest UringIO Basic Test", "[IOArray][ut]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto dir = fixtures::TempDir("test_uring_io");
+    auto path = dir.GenerateRandomFile();
+    IOArrayTest<NonContinuousIO<UringIO>> test(allocator.get(), path, allocator.get());
     test.TestBasic();
 }
