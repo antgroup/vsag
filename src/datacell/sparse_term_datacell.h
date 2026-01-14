@@ -114,7 +114,7 @@ public:
 
 private:
     template <InnerSearchMode mode, InnerSearchType type>
-    void
+    __attribute__((always_inline)) void
     insert_candidate_into_heap(uint32_t id,
                                float* dists,
                                float& cur_heap_top,
@@ -124,7 +124,7 @@ private:
                                const FilterPtr& filter) const;
 
     template <InnerSearchType type>
-    bool
+    __attribute__((always_inline)) bool
     fill_heap_initial(uint32_t id,
                       float* dists,
                       float& cur_heap_top,
