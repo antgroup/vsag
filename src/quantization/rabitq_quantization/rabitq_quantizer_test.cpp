@@ -69,7 +69,7 @@ TEST_CASE("Extend RaBitQ Basic Test", "[ut][RaBitQuantizer]") {
     auto count = 1000;
     auto dim = 32;
     auto num_bits_per_dim_query = 32;
-    auto num_bits_per_dim_base = 2;
+    auto num_bits_per_dim_base = GENERATE(2, 4, 8);
     auto use_fht = false;
     auto pca_dim = dim;
 
@@ -94,9 +94,7 @@ TEST_CASE("Extend RaBitQ Basic Test", "[ut][RaBitQuantizer]") {
         quantizer.EncodeOne(base, base_code.data());
 
         auto dist = quantizer.ComputeDist(*computer, base_code.data());
-        if (std::abs(dist) > 1e-3) {
-            std::cout << "error" << std::endl;
-        }
+        REQUIRE(std::abs(dist) <= 1e-3);
     }
 }
 

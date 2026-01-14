@@ -215,11 +215,11 @@ RaBitQuantizer<metric>::TrainImpl(const DataType* data, uint64_t count) {
 }
 
 inline float
-IP_obar_q(float ip_yu_q, float q_prime_sum, float y_norm, int B) {
-    const float c = 0.5f * float((1u << B) - 1u);
+ip_obar_q(float ip_yu_q, float q_prime_sum, float y_norm, int B) {
+    const float c = 0.5F * float((1U << B) - 1U);
 
-    if (y_norm <= 0.0f) {
-        return 0.0f;
+    if (y_norm <= 0.0F) {
+        return 0.0F;
     }
     auto ret = (ip_yu_q - c * q_prime_sum);
     ret /= y_norm;
@@ -234,13 +234,14 @@ RaBitQuantizer<metric>::EncodeExtendRaBitQ(const float* o_prime,
     constexpr double eps = 1e-12;                                     // for stability at boundaries
     const int UMAX = int((1u << this->num_bits_per_dim_base_) - 1u);  // e.g. 15
     const double c = 0.5 * double(UMAX);                              // e.g. 7.5
-    const int STEP = 2;                                               // y2 grid step
+    const int step = 2;                                               // y2 grid step
 
     auto clamp_int = [](int x, int lo, int hi) -> int { return x < lo ? lo : (x > hi ? hi : x); };
 
     auto round_clamp_parity = [&](double val) -> int {
-        int lo = -UMAX, hi = +UMAX;
-        long long r = llround(val);
+        int lo = -UMAX;
+        int hi = +UMAX;
+        auto r = llround(val);
         int ri = clamp_int(r, lo, hi);
 
         if ((ri & 1) == (UMAX & 1)) {
@@ -265,7 +266,7 @@ RaBitQuantizer<metric>::EncodeExtendRaBitQ(const float* o_prime,
         for (size_t i = 0; i < this->dim_; ++i) {
             code[i] = uint8_t(UMAX / 2);
         }
-        y_norm = 1.f;
+        y_norm = 1.F;
         return;
     }
 
@@ -282,17 +283,18 @@ RaBitQuantizer<metric>::EncodeExtendRaBitQ(const float* o_prime,
         pq;
 
     auto compute_next_t_for_dim = [&](size_t i) -> double {
-        const double oi = double(o_prime[i]);
-        if (oi == 0.0)
+        auto oi = double(o_prime[i]);
+        if (oi < 1e-3) {
             return std::numeric_limits<double>::infinity();
+        }
 
-        const int sign = (oi > 0.0) ? +1 : -1;
-        const int y2_next = y2_cur[i] + sign * STEP;
+        auto sign = (oi > 0.0) ? +1 : -1;
+        auto y2_next = y2_cur[i] + sign * step;
         if (y2_next < -UMAX or y2_next > +UMAX) {
             return std::numeric_limits<double>::infinity();
         }
 
-        double t = double(y2_cur[i] + sign) / (2.0 * oi);
+        auto t = double(y2_cur[i] + sign) / (2.0 * oi);
 
         if (t < 0.0) {
             t = 0.0;
@@ -310,7 +312,8 @@ RaBitQuantizer<metric>::EncodeExtendRaBitQ(const float* o_prime,
         }
     }
 
-    double best_ip = eps, best_t = t_start;
+    double best_ip = eps;
+    double best_t = t_start;
 
     while (not pq.empty()) {
         auto cur_t = pq.top().first;
@@ -324,7 +327,7 @@ RaBitQuantizer<metric>::EncodeExtendRaBitQ(const float* o_prime,
         const int sign = (o_prime[k] > 0.0) ? +1 : -1;
 
         const int y2_old = y2_cur[k];
-        const int y2_new = y2_old + sign * STEP;
+        const int y2_new = y2_old + sign * step;
         if (y2_new < -UMAX or y2_new > +UMAX) {
             // shouldn't happen because compute_next_t_for_dim filtered it
             continue;
@@ -367,8 +370,8 @@ RaBitQuantizer<metric>::EncodeExtendRaBitQ(const float* o_prime,
         sum_y2 += y * y;
     }
     y_norm = float(std::sqrt(sum_y2));
-    if (not std::isfinite(y_norm) or y_norm <= 0.f) {
-        y_norm = 1.f;
+    if (not std::isfinite(y_norm) or y_norm <= 0.F) {
+        y_norm = 1.F;
     }
 }
 
@@ -422,7 +425,7 @@ RaBitQuantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) cons
             o_sum += normed_data[i];
         }
         float ip_yu_q = RaBitQFloatSQIP(normed_data.data(), codes + offset_code_, this->dim_);
-        error_type error = IP_obar_q(ip_yu_q, o_sum, norm_code, num_bits_per_dim_base_);
+        error_type error = ip_obar_q(ip_yu_q, o_sum, norm_code, num_bits_per_dim_base_);
 
         // 6. store norm, error, sum
         *(norm_type*)(codes + offset_norm_) = norm;
@@ -563,7 +566,7 @@ RaBitQuantizer<metric>::ComputeQueryBaseImpl(const uint8_t* query_codes,
         sum_type query_raw_sum = *((sum_type*)(query_codes + query_offset_sum_));
         float ip_yu_q =
             RaBitQFloatSQIP((DataType*)query_codes, base_codes + offset_code_, this->dim_);
-        ip_bq_estimate = IP_obar_q(ip_yu_q,
+        ip_bq_estimate = ip_obar_q(ip_yu_q,
                                    query_raw_sum,
                                    *(norm_type*)(base_codes + offset_norm_code_),
                                    num_bits_per_dim_base_);
