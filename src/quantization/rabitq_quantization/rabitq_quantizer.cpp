@@ -216,6 +216,7 @@ RaBitQuantizer<metric>::TrainImpl(const DataType* data, uint64_t count) {
 
 inline float
 ip_obar_q(float ip_yu_q, float q_prime_sum, float y_norm, int B) {
+    // used for recover distance from ip_yu_q
     const float c = 0.5F * float((1U << B) - 1U);
 
     if (y_norm <= 0.0F) {
@@ -231,20 +232,22 @@ void
 RaBitQuantizer<metric>::EncodeExtendRaBitQ(const float* o_prime,
                                            uint8_t* code,
                                            float& y_norm) const {
-    constexpr double eps = 1e-12;                                     // for stability at boundaries
-    const int UMAX = int((1u << this->num_bits_per_dim_base_) - 1u);  // e.g. 15
-    const double c = 0.5 * double(UMAX);                              // e.g. 7.5
-    const int step = 2;                                               // y2 grid step
+    // used for encode float into multi-bit rabitq
+    // we use y2 means 2 * y to avoid operations on 0.5
+    constexpr double eps = 1e-12;  // for stability at boundaries
+    const int y2_max = int((1U << this->num_bits_per_dim_base_) - 1U);  // e.g. 15
+    const double c = 0.5 * double(y2_max);                              // e.g. 7.5
+    const int step = 2;                                                 // y2 grid step
 
     auto clamp_int = [](int x, int lo, int hi) -> int { return x < lo ? lo : (x > hi ? hi : x); };
 
     auto round_clamp_parity = [&](double val) -> int {
-        int lo = -UMAX;
-        int hi = +UMAX;
+        int lo = -y2_max;
+        int hi = +y2_max;
         auto r = llround(val);
         int ri = clamp_int(r, lo, hi);
 
-        if ((ri & 1) == (UMAX & 1)) {
+        if ((ri & 1) == (y2_max & 1)) {
             return ri;
         }
 
@@ -264,22 +267,22 @@ RaBitQuantizer<metric>::EncodeExtendRaBitQ(const float* o_prime,
 
     if (max_o <= 0.0) {
         for (size_t i = 0; i < this->dim_; ++i) {
-            code[i] = uint8_t(UMAX / 2);
+            code[i] = uint8_t(y2_max / 2);
         }
         y_norm = 1.F;
         return;
     }
 
+    // [step 1]: enumerate t
     std::vector<int> y2_cur(this->dim_, 0);
-
     const double t_start = 0.0;
-    const double t_end = (double(UMAX) + 2.0) / (2.0 * max_o);
+    const double t_end = (double(y2_max) + 2.0) / (2.0 * max_o);
     double ip_y2_o = 0.0;
     double norm_y2 = 0.0;
 
-    std::priority_queue<std::pair<double, size_t>,
-                        std::vector<std::pair<double, size_t>>,
-                        std::greater<std::pair<double, size_t>>>
+    std::priority_queue<std::pair<double, std::size_t>,
+                        std::vector<std::pair<double, std::size_t>>,
+                        std::greater<>>
         pq;
 
     auto compute_next_t_for_dim = [&](size_t i) -> double {
@@ -290,7 +293,7 @@ RaBitQuantizer<metric>::EncodeExtendRaBitQ(const float* o_prime,
 
         auto sign = (oi > 0.0) ? +1 : -1;
         auto y2_next = y2_cur[i] + sign * step;
-        if (y2_next < -UMAX or y2_next > +UMAX) {
+        if (y2_next < -y2_max or y2_next > +y2_max) {
             return std::numeric_limits<double>::infinity();
         }
 
@@ -303,15 +306,17 @@ RaBitQuantizer<metric>::EncodeExtendRaBitQ(const float* o_prime,
     };
 
     for (size_t i = 0; i < this->dim_; ++i) {
-        const double oi = double(o_prime[i]);
-        if (oi == 0.0)
+        auto oi = double(o_prime[i]);
+        if (oi == 0.0) {
             continue;
+        }
         double t0 = compute_next_t_for_dim(i);
         if (std::isfinite(t0) and t0 <= t_end) {
             pq.emplace(t0, i);
         }
     }
 
+    // [step 2]: choose a best t
     double best_ip = eps;
     double best_t = t_start;
 
@@ -328,7 +333,7 @@ RaBitQuantizer<metric>::EncodeExtendRaBitQ(const float* o_prime,
 
         const int y2_old = y2_cur[k];
         const int y2_new = y2_old + sign * step;
-        if (y2_new < -UMAX or y2_new > +UMAX) {
+        if (y2_new < -y2_max or y2_new > +y2_max) {
             // shouldn't happen because compute_next_t_for_dim filtered it
             continue;
         }
@@ -353,14 +358,15 @@ RaBitQuantizer<metric>::EncodeExtendRaBitQ(const float* o_prime,
         }
     }
 
+    // [step 3]: encode the data according to best t
     std::vector<int> y2_bar(this->dim_, 0);
     for (size_t i = 0; i < this->dim_; ++i) {
         const double val = 2.0 * best_t * double(o_prime[i]);
         int y2 = round_clamp_parity(val + ((val >= 0) ? eps : -eps));
         y2_bar[i] = y2;
 
-        int u = (y2 + UMAX) / 2;
-        u = clamp_int(u, 0, UMAX);
+        int u = (y2 + y2_max) / 2;
+        u = clamp_int(u, 0, y2_max);
         code[i] = uint8_t(u);
     }
 
