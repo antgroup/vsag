@@ -67,8 +67,7 @@ SparseTermDataCell::insert_candidate_into_heap(uint32_t id,
 #if __cplusplus >= 202002L
         if (dist > cur_heap_top or not filter->CheckValid(id + offset_id)) [[likely]] {
 #else
-        if (__builtin_expect(dist > cur_heap_top or not filter->CheckValid(id + offset_id),
-                             1)) {
+        if (__builtin_expect(dist > cur_heap_top or not filter->CheckValid(id + offset_id), 1)) {
 #endif
             dist = 0;
             return;
