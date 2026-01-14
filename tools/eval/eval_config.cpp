@@ -41,6 +41,7 @@ EvalConfig::Load(argparse::ArgumentParser& parser) {
 
     config.top_k = parser.get<int>("--topk");
     config.radius = parser.get<float>("--range");
+    config.search_query_count = parser.get<uint64_t>("--search-query-count");
 
     config.delete_index_after_search = parser.get<bool>("--delete-index-after-search");
 
@@ -92,6 +93,7 @@ EvalConfig::Load(YAML::Node& yaml_node, const eval_job& global_options) {
     check_and_get_value<>(yaml_node, "index_path", config.index_path);
     check_and_get_value<int>(yaml_node, "topk", config.top_k);
     check_and_get_value<float>(yaml_node, "range", config.radius);
+    check_and_get_value<uint64_t>(yaml_node, "search_query_count", config.search_query_count);
 
     check_and_get_value<bool>(
         yaml_node, "delete_index_after_search", config.delete_index_after_search);
