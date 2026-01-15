@@ -495,7 +495,7 @@ RaBitQuantizer<metric>::DecodeOneImpl(const uint8_t* codes, DataType* data) {
         }
     } else {
         const int y2_max = int((1U << this->num_bits_per_dim_base_) - 1U);
-        const float c = 0.5f * static_cast<float>(y2_max);
+        const float c = 0.5F * static_cast<float>(y2_max);
         for (uint64_t d = 0; d < this->dim_; ++d) {
             normed_data[d] = static_cast<float>(codes[d]) - c;
         }
