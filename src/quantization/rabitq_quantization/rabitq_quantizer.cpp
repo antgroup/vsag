@@ -15,6 +15,8 @@
 
 #include "rabitq_quantizer.h"
 
+#include <queue>
+
 #include "impl/transform/transformer_headers.h"
 #include "simd/fp32_simd.h"
 #include "simd/normalize.h"
@@ -28,6 +30,7 @@ template <MetricType metric>
 RaBitQuantizer<metric>::RaBitQuantizer(int dim,
                                        uint64_t pca_dim,
                                        uint64_t num_bits_per_dim_query,
+                                       uint64_t num_bits_per_dim_base,
                                        bool use_fht,
                                        bool use_mrq,
                                        Allocator* allocator)
@@ -49,6 +52,12 @@ RaBitQuantizer<metric>::RaBitQuantizer(int dim,
 
     // bits query
     num_bits_per_dim_query_ = num_bits_per_dim_query;
+    num_bits_per_dim_base_ = num_bits_per_dim_base;
+    if (num_bits_per_dim_query_ == 4 and num_bits_per_dim_base_ != 1) {
+        throw VsagException(
+            ErrorType::INVALID_ARGUMENT,
+            "not support num_bits_per_dim_query_ == 4 with num_bits_per_dim_base_ != 1");
+    }
 
     // centroid
     centroid_.resize(this->dim_, 0);
@@ -65,12 +74,21 @@ RaBitQuantizer<metric>::RaBitQuantizer(int dim,
 
     // base code layout
     size_t align_size = std::max(std::max(sizeof(error_type), sizeof(norm_type)), sizeof(DataType));
+
     size_t code_original_size = (this->dim_ + 7) / 8;
+    if (num_bits_per_dim_base_ != 1) {
+        code_original_size = this->dim_;
+    }
 
     this->code_size_ = 0;
 
     offset_code_ = this->code_size_;
     this->code_size_ += ((code_original_size + align_size - 1) / align_size) * align_size;
+
+    if (num_bits_per_dim_base_ != 1) {
+        offset_norm_code_ = this->code_size_;
+        this->code_size_ += ((sizeof(norm_type) + align_size - 1) / align_size) * align_size;
+    }
 
     offset_norm_ = this->code_size_;
     this->code_size_ += ((sizeof(norm_type) + align_size - 1) / align_size) * align_size;
@@ -104,11 +122,13 @@ RaBitQuantizer<metric>::RaBitQuantizer(int dim,
 
         query_offset_delta_ = this->query_code_size_;
         this->query_code_size_ += ((sizeof(DataType) + align_size - 1) / align_size) * align_size;
-
-        query_offset_sum_ = this->query_code_size_;
-        this->query_code_size_ += ((sizeof(sum_type) + align_size - 1) / align_size) * align_size;
     } else {
         this->query_code_size_ = ((sizeof(DataType) * this->dim_) / align_size) * align_size;
+    }
+
+    if (num_bits_per_dim_query_ == 4 or num_bits_per_dim_base_ != 1) {
+        query_offset_sum_ = this->query_code_size_;
+        this->query_code_size_ += ((sizeof(sum_type) + align_size - 1) / align_size) * align_size;
     }
 
     query_offset_norm_ = this->query_code_size_;
@@ -136,6 +156,7 @@ RaBitQuantizer<metric>::RaBitQuantizer(const RaBitQuantizerParamPtr& param,
     : RaBitQuantizer<metric>(common_param.dim_,
                              param->pca_dim_,
                              param->num_bits_per_dim_query_,
+                             param->num_bits_per_dim_base_,
                              param->use_fht_,
                              false,
                              common_param.allocator_.get()){};
@@ -193,6 +214,173 @@ RaBitQuantizer<metric>::TrainImpl(const DataType* data, uint64_t count) {
     return true;
 }
 
+inline float
+ip_obar_q(float ip_yu_q, float q_prime_sum, float y_norm, int B) {
+    // used for recover distance from ip_yu_q
+    const float c = 0.5F * float((1U << B) - 1U);
+
+    if (y_norm <= 0.0F) {
+        return 0.0F;
+    }
+    auto ret = (ip_yu_q - c * q_prime_sum);
+    ret /= y_norm;
+    return ret;
+}
+
+template <MetricType metric>
+void
+RaBitQuantizer<metric>::EncodeExtendRaBitQ(const float* o_prime,
+                                           uint8_t* code,
+                                           float& y_norm) const {
+    // used for encode float into multi-bit rabitq
+    // we use y2 means 2 * y to avoid operations on 0.5
+    constexpr double eps = 1e-12;  // for stability at boundaries
+    const int y2_max = int((1U << this->num_bits_per_dim_base_) - 1U);  // e.g. 15
+    const double c = 0.5 * double(y2_max);                              // e.g. 7.5
+    const int step = 2;                                                 // y2 grid step
+
+    auto clamp_int = [](int x, int lo, int hi) -> int { return x < lo ? lo : (x > hi ? hi : x); };
+
+    auto round_clamp_parity = [&](double val) -> int {
+        int lo = -y2_max;
+        int hi = +y2_max;
+        auto r = llround(val);
+        int ri = clamp_int(r, lo, hi);
+
+        if ((ri & 1) == (y2_max & 1)) {
+            return ri;
+        }
+
+        int step = (val >= 0.0) ? +1 : -1;
+        int cand = ri + step;
+
+        if (cand < lo or cand > hi) {
+            cand = ri - step;
+        }
+        return clamp_int(cand, lo, hi);
+    };
+
+    double max_o = 0.0;
+    for (size_t i = 0; i < this->dim_; ++i) {
+        max_o = std::max(max_o, std::fabs(double(o_prime[i])));
+    }
+
+    if (max_o <= 0.0) {
+        for (size_t i = 0; i < this->dim_; ++i) {
+            code[i] = uint8_t(y2_max / 2);
+        }
+        y_norm = 1.F;
+        return;
+    }
+
+    // [step 1]: enumerate t
+    std::vector<int> y2_cur(this->dim_, 0);
+    const double t_start = 0.0;
+    const double t_end = (double(y2_max) + 2.0) / (2.0 * max_o);
+    double ip_y2_o = 0.0;
+    double norm_y2 = 0.0;
+
+    std::priority_queue<std::pair<double, std::size_t>,
+                        std::vector<std::pair<double, std::size_t>>,
+                        std::greater<>>
+        pq;
+
+    auto compute_next_t_for_dim = [&](size_t i) -> double {
+        auto oi = double(o_prime[i]);
+        if (oi < 1e-3) {
+            return std::numeric_limits<double>::infinity();
+        }
+
+        auto sign = (oi > 0.0) ? +1 : -1;
+        auto y2_next = y2_cur[i] + sign * step;
+        if (y2_next < -y2_max or y2_next > +y2_max) {
+            return std::numeric_limits<double>::infinity();
+        }
+
+        auto t = double(y2_cur[i] + sign) / (2.0 * oi);
+
+        if (t < 0.0) {
+            t = 0.0;
+        }
+        return t;
+    };
+
+    for (size_t i = 0; i < this->dim_; ++i) {
+        auto oi = double(o_prime[i]);
+        if (oi == 0.0) {
+            continue;
+        }
+        double t0 = compute_next_t_for_dim(i);
+        if (std::isfinite(t0) and t0 <= t_end) {
+            pq.emplace(t0, i);
+        }
+    }
+
+    // [step 2]: choose a best t
+    double best_ip = eps;
+    double best_t = t_start;
+
+    while (not pq.empty()) {
+        auto cur_t = pq.top().first;
+        auto k = pq.top().second;
+        pq.pop();
+
+        if (cur_t >= t_end) {
+            break;
+        }
+
+        const int sign = (o_prime[k] > 0.0) ? +1 : -1;
+
+        const int y2_old = y2_cur[k];
+        const int y2_new = y2_old + sign * step;
+        if (y2_new < -y2_max or y2_new > +y2_max) {
+            // shouldn't happen because compute_next_t_for_dim filtered it
+            continue;
+        }
+        y2_cur[k] = y2_new;
+
+        ip_y2_o += (double(y2_new) - double(y2_old)) * o_prime[k];
+        norm_y2 += double(y2_new) * double(y2_new) - double(y2_old) * double(y2_old);
+
+        auto cur_ip = (norm_y2 > 0.0) ? (ip_y2_o / std::sqrt(norm_y2)) : 0.0;
+
+        if (cur_ip > best_ip) {
+            best_ip = cur_ip;
+            best_t = cur_t;
+        }
+
+        double t_next = compute_next_t_for_dim(k);
+        if (t_next <= cur_t) {
+            t_next = std::nextafter(cur_t, std::numeric_limits<double>::infinity());
+        }
+        if (std::isfinite(t_next) and t_next < t_end) {
+            pq.emplace(t_next, k);
+        }
+    }
+
+    // [step 3]: encode the data according to best t
+    std::vector<int> y2_bar(this->dim_, 0);
+    for (size_t i = 0; i < this->dim_; ++i) {
+        const double val = 2.0 * best_t * double(o_prime[i]);
+        int y2 = round_clamp_parity(val + ((val >= 0) ? eps : -eps));
+        y2_bar[i] = y2;
+
+        int u = (y2 + y2_max) / 2;
+        u = clamp_int(u, 0, y2_max);
+        code[i] = uint8_t(u);
+    }
+
+    double sum_y2 = 0.0;
+    for (size_t i = 0; i < this->dim_; ++i) {
+        const double y = double(code[i]) - c;
+        sum_y2 += y * y;
+    }
+    y_norm = float(std::sqrt(sum_y2));
+    if (not std::isfinite(y_norm) or y_norm <= 0.F) {
+        y_norm = 1.F;
+    }
+}
+
 template <MetricType metric>
 bool
 RaBitQuantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) const {
@@ -230,26 +418,47 @@ RaBitQuantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) cons
     norm_type norm = NormalizeWithCentroid(
         transformed_data.data(), centroid_.data(), normed_data.data(), this->dim_);
 
-    // 4. encode with BQ
-    sum_type sum = 0;
-    for (uint64_t d = 0; d < this->dim_; ++d) {
-        if (normed_data[d] >= 0.0F) {
-            sum += 1;
-            codes[offset_code_ + d / 8] |= (1 << (d % 8));
+    if (num_bits_per_dim_base_ != 1) {
+        float norm_code = 0;
+
+        EncodeExtendRaBitQ(normed_data.data(), codes + offset_code_, norm_code);
+
+        *(norm_type*)(codes + offset_norm_code_) = norm_code;
+
+        // 5. compute encode error
+        float o_sum = 0;
+        for (auto i = 0; i < this->dim_; i++) {
+            o_sum += normed_data[i];
+        }
+        float ip_yu_q = RaBitQFloatSQIP(normed_data.data(), codes + offset_code_, this->dim_);
+        error_type error = ip_obar_q(ip_yu_q, o_sum, norm_code, num_bits_per_dim_base_);
+
+        // 6. store norm, error, sum
+        *(norm_type*)(codes + offset_norm_) = norm;
+        *(error_type*)(codes + offset_error_) = error;
+    } else {
+        // 4. encode with BQ
+        sum_type sum = 0;
+        for (uint64_t d = 0; d < this->dim_; ++d) {
+            if (normed_data[d] >= 0.0F) {
+                sum += 1;
+                codes[offset_code_ + d / 8] |= (1 << (d % 8));
+            }
+        }
+
+        // 5. compute encode error
+        error_type error =
+            RaBitQFloatBinaryIP(normed_data.data(), codes + offset_code_, this->dim_, inv_sqrt_d_);
+
+        // 6. store norm, error, sum
+        *(norm_type*)(codes + offset_norm_) = norm;
+        *(error_type*)(codes + offset_error_) = error;
+
+        if (num_bits_per_dim_query_ != 32) {
+            *(sum_type*)(codes + offset_sum_) = sum;
         }
     }
 
-    // 5. compute encode error
-    error_type error =
-        RaBitQFloatBinaryIP(normed_data.data(), codes + offset_code_, this->dim_, inv_sqrt_d_);
-
-    // 6. store norm, error, sum
-    *(norm_type*)(codes + offset_norm_) = norm;
-    *(error_type*)(codes + offset_error_) = error;
-
-    if (num_bits_per_dim_query_ != 32) {
-        *(sum_type*)(codes + offset_sum_) = sum;
-    }
     if constexpr (metric == MetricType::METRIC_TYPE_IP or
                   metric == MetricType::METRIC_TYPE_COSINE) {
         *(norm_type*)(codes + offset_raw_norm_) = raw_norm;
@@ -279,9 +488,17 @@ RaBitQuantizer<metric>::DecodeOneImpl(const uint8_t* codes, DataType* data) {
     Vector<DataType> transformed_data(this->dim_, 0, this->allocator_);
 
     // 2. decode with BQ
-    for (uint64_t d = 0; d < this->dim_; ++d) {
-        bool bit = ((codes[d / 8] >> (d % 8)) & 1) != 0;
-        normed_data[d] = bit ? inv_sqrt_d_ : -inv_sqrt_d_;
+    if (num_bits_per_dim_base_ == 1) {
+        for (uint64_t d = 0; d < this->dim_; ++d) {
+            bool bit = ((codes[d / 8] >> (d % 8)) & 1) != 0;
+            normed_data[d] = bit ? inv_sqrt_d_ : -inv_sqrt_d_;
+        }
+    } else {
+        const int y2_max = int((1U << this->num_bits_per_dim_base_) - 1U);
+        const float c = 0.5F * static_cast<float>(y2_max);
+        for (uint64_t d = 0; d < this->dim_; ++d) {
+            normed_data[d] = static_cast<float>(codes[d]) - c;
+        }
     }
     // 3. inverse normalize
     InverseNormalizeWithCentroid(normed_data.data(),
@@ -341,8 +558,9 @@ RaBitQuantizer<metric>::ComputeQueryBaseImpl(const uint8_t* query_codes,
                                              const uint8_t* base_codes) const {
     // codes1 -> query (fp32, sq8, sq4...) + norm
     // codes2 -> base  (binary) + norm + error
-    float ip_bq_estimate;
-    if (num_bits_per_dim_query_ == 4) {
+    float ip_bq_estimate = 0;
+    if (num_bits_per_dim_query_ == 4 and num_bits_per_dim_base_ == 1) {
+        //
         std::vector<uint8_t> tmp(aligned_dim_ / 8, 0);
         memcpy(tmp.data(), base_codes, offset_norm_);
 
@@ -355,9 +573,19 @@ RaBitQuantizer<metric>::ComputeQueryBaseImpl(const uint8_t* query_codes,
 
         ip_bq_estimate = recover_dist_between_sq4u_and_fp32(
             ip_bq_estimate, base_sum, query_sum, lower_bound, delta, this->inv_sqrt_d_, this->dim_);
-    } else {
+    } else if (num_bits_per_dim_query_ == 32 and num_bits_per_dim_base_ == 1) {
         ip_bq_estimate =
             RaBitQFloatBinaryIP((DataType*)query_codes, base_codes, this->dim_, inv_sqrt_d_);
+    } else if (num_bits_per_dim_query_ == 32 and num_bits_per_dim_base_ != 1) {
+        sum_type query_raw_sum = *((sum_type*)(query_codes + query_offset_sum_));
+        float ip_yu_q =
+            RaBitQFloatSQIP((DataType*)query_codes, base_codes + offset_code_, this->dim_);
+        ip_bq_estimate = ip_obar_q(ip_yu_q,
+                                   query_raw_sum,
+                                   *(norm_type*)(base_codes + offset_norm_code_),
+                                   num_bits_per_dim_base_);
+    } else {
+        // num_bits_per_dim_query_ == 4 and num_bits_per_dim_base_ != 1: not support for now
     }
 
     norm_type query_norm = *((norm_type*)(query_codes + query_offset_norm_));
@@ -610,6 +838,14 @@ RaBitQuantizer<metric>::ProcessQueryImpl(const DataType* query,
         } else {
             // store codes
             memcpy(computer.buf_, normed_data.data(), normed_data.size() * sizeof(DataType));
+        }
+
+        if (num_bits_per_dim_base_ != 1) {
+            float query_raw_sum = 0;
+            for (uint32_t d = 0; d < this->dim_; d++) {
+                query_raw_sum += normed_data[d];
+            }
+            *(sum_type*)(computer.buf_ + query_offset_sum_) = query_raw_sum;
         }
 
         // 5. store norm

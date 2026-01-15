@@ -371,6 +371,14 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             },
         },
         {
+            RABITQ_BITS_PER_DIM_BASE,
+            {
+                BASE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY,
+            },
+        },
+        {
             HGRAPH_BASE_PQ_DIM,
             {
                 BASE_CODES_KEY,
