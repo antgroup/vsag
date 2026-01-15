@@ -32,7 +32,7 @@ jobs:
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
       - name: Free Disk Space
-        run: rm -rf /useless/hostedtoolcache
+        run: rm -rf /useless/*
       - uses: actions/checkout@v4
       - name: Load Cache
         uses: hendrikmuhs/ccache-action@v1.2
@@ -81,7 +81,7 @@ jobs:
         - /opt:/useless
     steps:
       - name: Free Disk Space
-        run: rm -rf /useless/hostedtoolcache
+        run: rm -rf /useless/*
       - uses: actions/checkout@v4
       - name: Clean Env
         run: rm -rf ./build
