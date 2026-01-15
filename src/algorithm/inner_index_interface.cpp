@@ -53,12 +53,12 @@ InnerIndexInterface::InnerIndexInterface(const InnerIndexParameterPtr& index_par
             ExtraInfoInterface::MakeInstance(index_param->extra_info_param, common_param);
     }
 
-    this->build_pool_ = common_param.thread_pool_;
-    if (this->build_pool_ == nullptr) {
-        this->build_pool_ = SafeThreadPool::FactoryDefaultThreadPool();
+    this->thread_pool_ = common_param.thread_pool_;
+    if (this->thread_pool_ == nullptr) {
+        this->thread_pool_ = SafeThreadPool::FactoryDefaultThreadPool();
     }
     if (this->build_thread_count_ > 1) {
-        this->build_pool_->SetPoolSize(build_thread_count_);
+        this->thread_pool_->SetPoolSize(build_thread_count_);
     }
 
     if (this->use_attribute_filter_) {
@@ -487,12 +487,12 @@ InnerIndexInterface::GetDataByIdsWithFlag(const int64_t* ids,
                 this->GetVectorByInnerId(inner_id, fp32_data + i * this->dim_);
             }
         };
-        if (this->build_pool_ != nullptr) {
+        if (this->thread_pool_ != nullptr) {
             std::vector<std::future<void>> futures;
             for (int64_t i = 0; i < thread_count; ++i) {
                 int64_t begin = i * item_per_thread;
                 int64_t end = std::min(begin + item_per_thread, count);
-                futures.emplace_back(this->build_pool_->GeneralEnqueue(get_vec_func, begin, end));
+                futures.emplace_back(this->thread_pool_->GeneralEnqueue(get_vec_func, begin, end));
             }
             for (auto& future : futures) {
                 future.get();
@@ -514,12 +514,12 @@ InnerIndexInterface::GetDataByIdsWithFlag(const int64_t* ids,
                 this->GetAttributeSetByInnerId(inner_id, attribute_data + i);
             }
         };
-        if (this->build_pool_ != nullptr) {
+        if (this->thread_pool_ != nullptr) {
             std::vector<std::future<void>> futures;
             for (int64_t i = 0; i < thread_count; ++i) {
                 int64_t begin = i * item_per_thread;
                 int64_t end = std::min(begin + item_per_thread, count);
-                futures.emplace_back(this->build_pool_->GeneralEnqueue(get_attr_func, begin, end));
+                futures.emplace_back(this->thread_pool_->GeneralEnqueue(get_attr_func, begin, end));
             }
             for (auto& future : futures) {
                 future.get();
@@ -542,13 +542,13 @@ InnerIndexInterface::GetDataByIdsWithFlag(const int64_t* ids,
                 this->extra_infos_->GetExtraInfoById(inner_id, extra_info + i * extra_info_size_);
             }
         };
-        if (this->build_pool_ != nullptr) {
+        if (this->thread_pool_ != nullptr) {
             std::vector<std::future<void>> futures;
             for (int64_t i = 0; i < thread_count; ++i) {
                 int64_t begin = i * item_per_thread;
                 int64_t end = std::min(begin + item_per_thread, count);
                 futures.emplace_back(
-                    this->build_pool_->GeneralEnqueue(get_extra_info_func, begin, end));
+                    this->thread_pool_->GeneralEnqueue(get_extra_info_func, begin, end));
             }
             for (auto& future : futures) {
                 future.get();

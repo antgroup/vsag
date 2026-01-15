@@ -75,7 +75,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
     init_resize_bit_and_reorder();
 
     this->parallel_searcher_ =
-        std::make_shared<ParallelSearcher>(common_param, build_pool_, neighbors_mutex_);
+        std::make_shared<ParallelSearcher>(common_param, thread_pool_, neighbors_mutex_);
 
     UnorderedMap<std::string, float> default_param(common_param.allocator_.get());
     default_param.insert(
@@ -655,14 +655,15 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
                                                             : this->basic_flatten_codes_;
     {
         odescent_param_->max_degree = bottom_graph_->MaximumDegree();
-        ODescent odescent_builder(odescent_param_, build_data, allocator_, this->build_pool_.get());
+        ODescent odescent_builder(
+            odescent_param_, build_data, allocator_, this->thread_pool_.get());
         odescent_builder.Build();
         odescent_builder.SaveGraph(bottom_graph_);
     }
     for (auto& route_graph_id : route_graph_ids) {
         odescent_param_->max_degree = bottom_graph_->MaximumDegree() / 2;
         ODescent sparse_odescent_builder(
-            odescent_param_, build_data, allocator_, this->build_pool_.get());
+            odescent_param_, build_data, allocator_, this->thread_pool_.get());
         auto graph = this->generate_one_route_graph();
         sparse_odescent_builder.Build(route_graph_id);
         sparse_odescent_builder.SaveGraph(graph);
@@ -744,15 +745,15 @@ HGraph::Add(const DatasetPtr& data) {
         if (attr_sets != nullptr) {
             cur_attr_set = attr_sets + local_idx;
         }
-        if (this->build_pool_ != nullptr) {
-            auto future = this->build_pool_->GeneralEnqueue(
+        if (this->thread_pool_ != nullptr) {
+            auto future = this->thread_pool_->GeneralEnqueue(
                 add_func, get_data(data, local_idx), level, inner_id, extra_info, cur_attr_set);
             futures.emplace_back(std::move(future));
         } else {
             add_func(get_data(data, local_idx), level, inner_id, extra_info, cur_attr_set);
         }
     }
-    if (this->build_pool_ != nullptr) {
+    if (this->thread_pool_ != nullptr) {
         for (auto& future : futures) {
             future.get();
         }
@@ -1958,14 +1959,15 @@ HGraph::Merge(const std::vector<MergeUnit>& merge_units) {
     }
     {
         odescent_param_->max_degree = bottom_graph_->MaximumDegree();
-        ODescent odescent_builder(odescent_param_, build_data, allocator_, this->build_pool_.get());
+        ODescent odescent_builder(
+            odescent_param_, build_data, allocator_, this->thread_pool_.get());
         odescent_builder.Build(bottom_graph_);
         odescent_builder.SaveGraph(bottom_graph_);
     }
     for (auto& graph : route_graphs_) {
         odescent_param_->max_degree = bottom_graph_->MaximumDegree() / 2;
         ODescent sparse_odescent_builder(
-            odescent_param_, build_data, allocator_, this->build_pool_.get());
+            odescent_param_, build_data, allocator_, this->thread_pool_.get());
         auto ids = graph->GetIds();
         sparse_odescent_builder.Build(ids, graph);
         sparse_odescent_builder.SaveGraph(graph);
