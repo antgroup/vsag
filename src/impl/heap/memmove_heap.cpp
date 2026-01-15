@@ -28,7 +28,7 @@ MemmoveHeap<max_heap, fixed_size>::MemmoveHeap(Allocator* allocator, int64_t max
 template <bool max_heap, bool fixed_size>
 void
 MemmoveHeap<max_heap, fixed_size>::Push(float dist, InnerIdType id) {
-    using CompareType = typename std::conditional<max_heap, CompareMax, CompareMin>::type;
+    using CompareType = std::conditional_t<max_heap, CompareMax, CompareMin>;
     if constexpr (fixed_size) {
         if (this->Size() < max_size_ or (dist < this->Top().first) == max_heap) {
             DistanceRecord record = {dist, id};

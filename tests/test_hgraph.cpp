@@ -2167,3 +2167,134 @@ TEST_CASE("(Daily) HGraph Disk IO Type Index", "[ft][hgraph][serialization][dail
     auto resource = test_index->GetResource(false);
     TestHGraphDiskIOType(test_index, resource);
 }
+
+TEST_CASE("HGraph Concurrent Read Write", "[ft][hgraph][concurrent]") {
+    uint32_t op_num = 10000;
+    uint32_t dim = 128;
+    uint32_t top_k = 5;
+    float read_ratio = 0.8;
+    float thread_num = 5;
+
+    std::vector<std::vector<float>> dataset;
+    dataset.reserve(op_num);
+    auto seed = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+    std::mt19937 rng(seed);
+    std::uniform_real_distribution<float> dist(-10.0, 10.0);
+    for (uint32_t i = 0; i < op_num; ++i) {
+        std::vector<float> vector_data;
+        vector_data.reserve(dim);
+        for (uint32_t j = 0; j < dim; ++j) {
+            vector_data.emplace_back(dist(rng));
+        }
+        dataset.emplace_back(std::move(vector_data));
+    }
+
+    std::string search_params = R"({
+        "hgraph": {
+          "ef_search": 100
+        }
+    })";
+
+    std::string hgraph_params = R"({
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": 128,
+        "index_param": {
+            "base_quantization_type": "fp32",
+            "base_io_type": "block_memory_io",
+            "max_degree": 32,
+            "ef_construction": 100,
+            "alpha":1.2,
+            "use_reorder": false
+        }
+    })";
+    auto build_res = vsag::Factory::CreateIndex("hgraph", hgraph_params);
+    auto vsag_index = std::move(build_res.value());
+
+    std::atomic<uint32_t> actual_read_num{0};
+    std::atomic<uint32_t> actual_write_num{0};
+    uint32_t expect_read_num = op_num * read_ratio;
+    uint32_t expect_write_num = op_num - expect_read_num;
+
+    auto test_func = [&]() {
+        // Decide whether each operation is a write or a read.
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::uniform_real_distribution<float> dist(0.0, 1.0);
+
+        uint32_t local_read_num{0};
+        uint32_t local_write_num{0};
+
+        auto write_func = [&]() {
+            uint32_t old_value = actual_write_num.fetch_add(1);
+            if (old_value >= expect_write_num) {
+                return;
+            }
+
+            int64_t vec_id = static_cast<int64_t>(old_value);
+            auto base = vsag::Dataset::Make();
+            base->NumElements(1)
+                ->Dim(dim)
+                ->Ids(&vec_id)
+                ->Float32Vectors(dataset[old_value].data())
+                ->Owner(false);
+
+            // Do hnsw add.
+            auto res = vsag_index->Add(base);
+            if (!res.has_value()) {
+                std::cout << "put error: " << res.error().message << std::endl;
+            }
+
+            ++local_write_num;
+        };
+
+        auto read_func = [&]() {
+            uint32_t old_value = actual_read_num.fetch_add(1);
+            if (old_value >= expect_read_num) {
+                return;
+            }
+
+            auto query = vsag::Dataset::Make();
+            query->NumElements(1)
+                ->Dim(dim)
+                ->Float32Vectors(dataset[old_value].data())
+                ->Owner(false);
+
+            // Do knn search.
+            auto res = vsag_index->KnnSearch(query, top_k, search_params);
+            if (!res.has_value()) {
+                std::cout << "query error: " << res.error().message << std::endl;
+            }
+
+            ++local_read_num;
+        };
+
+        while (true) {
+            if (actual_read_num >= expect_read_num && actual_write_num >= expect_write_num) {
+                break;
+            }
+
+            if (actual_read_num >= expect_read_num) {
+                write_func();
+            } else if (actual_write_num >= expect_write_num) {
+                read_func();
+            } else if (dist(gen) > read_ratio) {
+                write_func();
+            } else {
+                read_func();
+            }
+        }
+
+    };
+
+    auto threads = std::make_unique<std::vector<std::thread>>();
+    threads->reserve(thread_num);
+    for (uint32_t i = 0; i < thread_num; ++i) {
+        threads->emplace_back(test_func);
+    }
+
+    // Wait write completed.
+    for (auto& thread : *threads) {
+        thread.join();
+    }
+}
