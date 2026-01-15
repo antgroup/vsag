@@ -1115,8 +1115,14 @@ RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, floa
     float result = 0.0F;
     alignas(32) float temp[8];
     __m256 sum = _mm256_setzero_ps();
-    const __m256 inv_sqrt_d_vec = _mm256_set1_ps(inv_sqrt_d);
-    const __m256 neg_inv_sqrt_d_vec = _mm256_set1_ps(-inv_sqrt_d);
+    __m256 pos, neg;
+    if (inv_sqrt_d > 1e-3) {
+        pos = _mm256_set1_ps(inv_sqrt_d);
+        neg = _mm256_set1_ps(-inv_sqrt_d);
+    } else {
+        pos = _mm256_set1_ps(1.0f);
+        neg = _mm256_setzero_ps();
+    }
 
     for (; d + 8 <= dim; d += 8) {
         __m256 vec = _mm256_loadu_ps(vector + d);
@@ -1127,8 +1133,7 @@ RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, floa
         mask = _mm256_cmpeq_epi32(mask, _mm256_setzero_si256());
         mask = _mm256_andnot_si256(mask, _mm256_set1_epi32(0xFFFFFFFF));
 
-        __m256 b_vec =
-            _mm256_blendv_ps(neg_inv_sqrt_d_vec, inv_sqrt_d_vec, _mm256_castsi256_ps(mask));
+        __m256 b_vec = _mm256_blendv_ps(neg, pos, _mm256_castsi256_ps(mask));
 
         sum = _mm256_fmadd_ps(b_vec, vec, sum);
     }
