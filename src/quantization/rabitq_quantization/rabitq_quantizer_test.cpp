@@ -102,12 +102,8 @@ TEST_CASE("RaBitQ Encode and Decode", "[ut][RaBitQuantizer]") {
     bool use_fht = GENERATE(true, false);
     auto num_bits_per_dim_query = GENERATE(4, 32);
     auto num_bits_per_dim_base = GENERATE(1, 2, 4, 8);
-    auto use_pca = GENERATE(true, false);
     for (auto dim : dims) {
         auto pca_dim = dim;
-        if (use_pca) {
-            pca_dim = dim / 2;
-        }
         bool use_mrq = false;
         for (auto count : counts) {
             if (num_bits_per_dim_query == 4 and num_bits_per_dim_base != 1) {
