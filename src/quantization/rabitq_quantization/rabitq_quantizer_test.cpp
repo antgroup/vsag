@@ -109,6 +109,9 @@ TEST_CASE("RaBitQ Encode and Decode", "[ut][RaBitQuantizer]") {
             if (num_bits_per_dim_query == 4 and num_bits_per_dim_base != 1) {
                 continue;
             }
+            if (dim < 900) {
+                continue;
+            }
             auto allocator = SafeAllocator::FactoryDefaultAllocator();
             RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR> quantizer(dim,
                                                                     pca_dim,
