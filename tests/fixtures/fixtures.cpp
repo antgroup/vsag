@@ -22,6 +22,7 @@
 #include <string>
 #include <unordered_set>
 
+#include "algorithm/pyramid.h"
 #include "fmt/format.h"
 #include "simd/simd.h"
 #include "vsag/dataset.h"
@@ -75,6 +76,17 @@ std::vector<int>
 get_index_test_dims(uint64_t count, int seed, int limited_dim) {
     const std::vector<int> dims = {32, 57, 128, 256, 768, 1536};
     return select_dims(dims, count, seed, limited_dim);
+}
+
+bool
+is_path_belong_to(const std::string& a, const std::string& b) {
+    auto paths = vsag::split(a, '|');
+    for (const auto& path : paths) {
+        if (b.compare(0, path.size(), path) == 0) {
+            return true;
+        }
+    }
+    return false;
 }
 
 std::vector<vsag::SparseVector>
@@ -197,7 +209,18 @@ create_random_string(bool is_full) {
             if (num_levels == 3) {
                 selected_levels.push_back(level3[distr(mt) % level3.size()]);
             }
-            paths.push_back(fmt::to_string(fmt::join(selected_levels, "/")));
+            bool is_same = false;
+            auto new_path = fmt::to_string(fmt::join(selected_levels, "/"));
+            for (const auto& path : paths) {
+                if (path == new_path || is_path_belong_to(new_path, path) ||
+                    is_path_belong_to(path, new_path)) {
+                    is_same = true;
+                    break;
+                }
+            }
+            if (not is_same) {
+                paths.push_back(fmt::to_string(fmt::join(selected_levels, "/")));
+            }
         }
         return fmt::to_string(fmt::join(paths, "|"));
     }
