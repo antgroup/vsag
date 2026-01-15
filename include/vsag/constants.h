@@ -148,6 +148,7 @@ extern const char* const SERIALIZE_VERSION;
 extern const char* const SQ4_UNIFORM_TRUNC_RATE;
 extern const char* const RABITQ_PCA_DIM;
 extern const char* const RABITQ_BITS_PER_DIM_QUERY;
+extern const char* const RABITQ_BITS_PER_DIM_BASE;
 extern const char* const RABITQ_USE_FHT;
 extern const char* const INDEX_TQ_CHAIN;
 
