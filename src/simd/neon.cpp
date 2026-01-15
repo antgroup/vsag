@@ -1979,8 +1979,10 @@ RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, floa
 
     uint64_t d = 0;
     float32x4_t sum = vdupq_n_f32(0.0f);
-    const float32x4_t inv_sqrt_d_vec = vdupq_n_f32(inv_sqrt_d);
-    const float32x4_t neg_inv_sqrt_d_vec = vdupq_n_f32(-inv_sqrt_d);
+    const float32x4_t inv_sqrt_d_vec =
+        inv_sqrt_d < 1e-3 ? vdupq_n_f32(1.0f) : vdupq_n_f32(inv_sqrt_d);
+    const float32x4_t neg_inv_sqrt_d_vec =
+        inv_sqrt_d < 1e-3 ? vdupq_n_f32(0.0f) : vdupq_n_f32(-inv_sqrt_d);
 
     for (; d + 11 < dim; d += 12) {
         __builtin_prefetch(vector + d + 24, 0, 1);
