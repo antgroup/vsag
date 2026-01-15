@@ -488,9 +488,17 @@ RaBitQuantizer<metric>::DecodeOneImpl(const uint8_t* codes, DataType* data) {
     Vector<DataType> transformed_data(this->dim_, 0, this->allocator_);
 
     // 2. decode with BQ
-    for (uint64_t d = 0; d < this->dim_; ++d) {
-        bool bit = ((codes[d / 8] >> (d % 8)) & 1) != 0;
-        normed_data[d] = bit ? inv_sqrt_d_ : -inv_sqrt_d_;
+    if (num_bits_per_dim_base_ == 1) {
+        for (uint64_t d = 0; d < this->dim_; ++d) {
+            bool bit = ((codes[d / 8] >> (d % 8)) & 1) != 0;
+            normed_data[d] = bit ? inv_sqrt_d_ : -inv_sqrt_d_;
+        }
+    } else {
+        const int y2_max = int((1U << this->num_bits_per_dim_base_) - 1U);  // e.g. 15
+        const double c = 0.5 * double(y2_max);                              // e.g. 7.5
+        for (uint64_t d = 0; d < this->dim_; ++d) {
+            normed_data[d] = double(codes[d]) - c;
+        }
     }
     // 3. inverse normalize
     InverseNormalizeWithCentroid(normed_data.data(),
