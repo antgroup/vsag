@@ -116,7 +116,7 @@ private:
     template <InnerSearchMode mode, InnerSearchType type>
     void
     insert_candidate_into_heap(uint32_t id,
-                               float* dists,
+                               float& dist,
                                float& cur_heap_top,
                                MaxHeap& heap,
                                uint32_t offset_id,
@@ -126,7 +126,7 @@ private:
     template <InnerSearchType type>
     bool
     fill_heap_initial(uint32_t id,
-                      float* dists,
+                      float& dist,
                       float& cur_heap_top,
                       MaxHeap& heap,
                       uint32_t offset_id,
