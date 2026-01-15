@@ -2284,7 +2284,6 @@ TEST_CASE("HGraph Concurrent Read Write", "[ft][hgraph][concurrent]") {
                 read_func();
             }
         }
-
     };
 
     auto threads = std::make_unique<std::vector<std::thread>>();
