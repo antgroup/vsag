@@ -107,6 +107,9 @@ namespace generic {
 float
 RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, float inv_sqrt_d);
 
+float
+RaBitQFloatSQIP(const float* vector, const uint8_t* codes, uint64_t dim);
+
 uint32_t
 RaBitQSQ4UBinaryIP(const uint8_t* codes, const uint8_t* bits, uint64_t dim);
 
@@ -179,6 +182,8 @@ using RaBitQFloatBinaryType = float (*)(const float* vector,
 
 using RaBitQSQ4UBinaryType = uint32_t (*)(const uint8_t* codes, const uint8_t* bits, uint64_t dim);
 
+using RaBitQFloatSQType = float (*)(const float* vector, const uint8_t* codes, uint64_t dim);
+
 using FHTRotateType = void (*)(float* data, uint64_t dim_);
 
 using KacsWalkType = void (*)(float* data, uint64_t len);
@@ -189,6 +194,7 @@ using FlipSignType = void (*)(const uint8_t* flip, float* data, uint64_t dim);
 
 using RotateOpType = void (*)(float* data, int idx, int dim_, int step);
 extern RaBitQFloatBinaryType RaBitQFloatBinaryIP;
+extern RaBitQFloatSQType RaBitQFloatSQIP;
 extern RaBitQSQ4UBinaryType RaBitQSQ4UBinaryIP;
 extern FHTRotateType FHTRotate;
 extern KacsWalkType KacsWalk;

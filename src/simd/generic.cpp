@@ -511,6 +511,20 @@ RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, floa
     return result;
 }
 
+float
+RaBitQFloatSQIP(const float* vector, const uint8_t* codes, uint64_t dim) {
+    if (dim == 0) {
+        return 0.0f;
+    }
+
+    float result = 0.0f;
+    for (uint64_t d = 0; d < dim; ++d) {
+        result += float(codes[d]) * vector[d];
+    }
+
+    return result;
+}
+
 uint32_t
 RaBitQSQ4UBinaryIP(const uint8_t* codes, const uint8_t* bits, uint64_t dim) {
     // note that this func requiere the redident part in codes and bits is 0

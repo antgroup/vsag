@@ -70,6 +70,11 @@ GetRaBitQSQ4UBinaryIP() {
     return generic::RaBitQSQ4UBinaryIP;
 }
 
+static RaBitQFloatSQType
+GetRaBitQFloatSQIP() {
+    return generic::RaBitQFloatSQIP;
+}
+
 static FHTRotateType
 GetFHTRotate() {
     if (SimdStatus::SupportAVX512()) {
@@ -209,6 +214,7 @@ GetRotateOp() {
 }
 RaBitQFloatBinaryType RaBitQFloatBinaryIP = GetRaBitQFloatBinaryIP();
 RaBitQSQ4UBinaryType RaBitQSQ4UBinaryIP = GetRaBitQSQ4UBinaryIP();
+RaBitQFloatSQType RaBitQFloatSQIP = GetRaBitQFloatSQIP();
 FHTRotateType FHTRotate = GetFHTRotate();
 KacsWalkType KacsWalk = GetKacsWalk();
 VecRescaleType VecRescale = GetVecRescale();

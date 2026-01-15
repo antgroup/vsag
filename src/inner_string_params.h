@@ -96,6 +96,7 @@ const char* const USE_FHT_KEY = "use_fht";
 // quantization param
 const char* const TQ_CHAIN_KEY = "tq_chain";
 const char* const RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY = "rabitq_bits_per_dim_query";
+const char* const RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY = "rabitq_bits_per_dim_base";
 const char* const SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE_KEY = "sq4_uniform_trunc_rate";
 const char* const PRODUCT_QUANTIZATION_DIM_KEY = "pq_dim";
 const char* const PRODUCT_QUANTIZATION_BITS_KEY = "pq_bits";

@@ -37,6 +37,7 @@ public:
 public:
     uint64_t pca_dim_{0};
     uint64_t num_bits_per_dim_query_{32};
+    uint64_t num_bits_per_dim_base_{1};
     bool use_fht_{false};
 };
 }  // namespace vsag

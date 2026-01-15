@@ -32,6 +32,24 @@ RaBitQuantizerParameter::FromJson(const JsonType& json) {
     if (json.Contains(RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY)) {
         this->num_bits_per_dim_query_ = json[RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY].GetInt();
     }
+
+    if (num_bits_per_dim_query_ != 4 and num_bits_per_dim_query_ != 32) {
+        throw VsagException(
+            ErrorType::INVALID_ARGUMENT,
+            fmt::format("currently, only support rabitq_bits_per_dim_query = 4 or 32, but got {}",
+                        num_bits_per_dim_query_));
+    }
+
+    if (json.Contains(RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY)) {
+        this->num_bits_per_dim_base_ = json[RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY].GetInt();
+    }
+
+    if (num_bits_per_dim_base_ > 8 or num_bits_per_dim_base_ < 1) {
+        throw VsagException(
+            ErrorType::INVALID_ARGUMENT,
+            fmt::format("currently, only support rabitq_bits_per_dim_base in [1, 8], but got {}",
+                        num_bits_per_dim_base_));
+    }
     if (json.Contains(USE_FHT_KEY)) {
         this->use_fht_ = json[USE_FHT_KEY].GetBool();
     }
@@ -43,6 +61,7 @@ RaBitQuantizerParameter::ToJson() const {
     json[TYPE_KEY].SetString(QUANTIZATION_TYPE_VALUE_RABITQ);
     json[PCA_DIM_KEY].SetInt(this->pca_dim_);
     json[RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY].SetInt(this->num_bits_per_dim_query_);
+    json[RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY].SetInt(this->num_bits_per_dim_base_);
     json[USE_FHT_KEY].SetBool(this->use_fht_);
     return json;
 }
@@ -69,6 +88,14 @@ RaBitQuantizerParameter::CheckCompatibility(const ParamPtr& other) const {
             "not match: {} vs {}",
             this->num_bits_per_dim_query_,
             rabitq_param->num_bits_per_dim_query_);
+        return false;
+    }
+    if (this->num_bits_per_dim_base_ != rabitq_param->num_bits_per_dim_base_) {
+        logger::error(
+            "RaBitQuantizerParameter::CheckCompatibility: Number of bits per dimension base do "
+            "not match: {} vs {}",
+            this->num_bits_per_dim_base_,
+            rabitq_param->num_bits_per_dim_base_);
         return false;
     }
     if (this->use_fht_ != rabitq_param->use_fht_) {
