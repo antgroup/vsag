@@ -178,7 +178,7 @@ public:
     void
     SetBuildThreadsCount(uint64_t count) {
         this->build_thread_count_ = count;
-        this->build_pool_->SetPoolSize(count);
+        this->thread_pool_->SetPoolSize(count);
     }
 
     void

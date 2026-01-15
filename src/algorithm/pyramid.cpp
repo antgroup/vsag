@@ -209,7 +209,7 @@ Pyramid::build_by_odescent(const DatasetPtr& base) {
     }
     auto codes = use_reorder_ ? precise_codes_ : base_codes_;
 
-    ODescent graph_builder(odescent_param_, codes, allocator_, this->build_pool_.get());
+    ODescent graph_builder(odescent_param_, codes, allocator_, this->thread_pool_.get());
     root_->Build(graph_builder);
     cur_element_count_ = data_num;
     return {};
@@ -309,9 +309,13 @@ Pyramid::search_impl(const DatasetPtr& query,
     std::shared_lock<std::shared_mutex> lock(resize_mutex_);
     auto vl = pool_->TakeOne();
     if (query_path != nullptr) {
+        std::vector<std::future<void>> futures;
         const std::string& current_path = query_path[0];
         auto parsed_path = parse_path(current_path);
-        for (const auto& one_path : parsed_path) {
+        Vector<DistHeapPtr> search_result_lists(parsed_path.size(), allocator_);
+        for (uint32_t i = 0; i < parsed_path.size(); ++i) {
+            const auto& one_path = parsed_path[i];
+            search_result_lists[i] = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
             std::shared_ptr<IndexNode> node = root_;
             bool valid = true;
             for (const auto& item : one_path) {
@@ -322,9 +326,28 @@ Pyramid::search_impl(const DatasetPtr& query,
                 }
             }
             if (valid) {
-                node->Search(search_func, vl, search_result, ef_search);
+                if (thread_pool_ != nullptr) {
+                    futures.push_back(thread_pool_->GeneralEnqueue([&, node, i]() -> void {
+                        node->Search(search_func, vl, search_result_lists[i], ef_search);
+                    }));
+                } else {
+                    node->Search(search_func, vl, search_result_lists[i], ef_search);
+                }
             }
         }
+
+        for (auto& future : futures) {
+            future.get();
+        }
+
+        for (uint32_t i = 0; i < search_result_lists.size(); ++i) {
+            if (i != 0) {
+                search_result->Merge(*search_result_lists[i]);
+            } else {
+                search_result = search_result_lists[i];
+            }
+        }
+
     } else {
         root_->Search(search_func, vl, search_result, ef_search);
     }
@@ -477,13 +500,13 @@ Pyramid::Add(const DatasetPtr& base) {
     Vector<std::future<void>> futures(allocator_);
     for (int64_t i = 0; i < data_biases.size(); ++i) {
         auto data_bias = data_biases[i];
-        if (this->build_pool_ != nullptr) {
-            futures.push_back(this->build_pool_->GeneralEnqueue(add_func, i, data_bias));
+        if (this->thread_pool_ != nullptr) {
+            futures.push_back(this->thread_pool_->GeneralEnqueue(add_func, i, data_bias));
         } else {
             add_func(i, data_bias);
         }
     }
-    if (this->build_pool_ != nullptr) {
+    if (this->thread_pool_ != nullptr) {
         for (auto& future : futures) {
             future.get();
         }

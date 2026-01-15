@@ -656,7 +656,8 @@ TestIndex::TestFilterSearch(const TestIndex::IndexPtr& index,
             auto obj_res = index->KnnSearch(query, topk, search_param, filter);
             if (expected_success) {
                 for (int j = 0; j < topk; ++j) {
-                    REQUIRE(obj_res.value()->GetIds()[j] == res.value()->GetIds()[j]);
+                    REQUIRE(std::abs(obj_res.value()->GetDistances()[j] -
+                                     res.value()->GetDistances()[j]) <= 2e-6);
                 }
             }
         }
@@ -943,7 +944,8 @@ TestIndex::TestSerializeFile(const IndexPtr& index_from,
         REQUIRE(res_from.value()->GetDim() == res_to.value()->GetDim());
         int64_t result_count = res_from.value()->GetDim();
         for (int64_t j = 0; j < result_count; ++j) {
-            REQUIRE(res_to.value()->GetIds()[j] == res_from.value()->GetIds()[j]);
+            REQUIRE(std::abs(res_from.value()->GetDistances()[j] -
+                             res_to.value()->GetDistances()[j]) <= 2e-6);
         }
     }
 }

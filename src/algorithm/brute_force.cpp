@@ -118,12 +118,12 @@ BruteForce::Add(const DatasetPtr& data) {
                 continue;
             }
         }
-        if (this->build_pool_ != nullptr) {
-            auto future = this->build_pool_->GeneralEnqueue(add_func,
-                                                            vectors + j * dim_,
-                                                            label,
-                                                            attrs == nullptr ? nullptr : attrs + j,
-                                                            extra_info + j * extra_info_size);
+        if (this->thread_pool_ != nullptr) {
+            auto future = this->thread_pool_->GeneralEnqueue(add_func,
+                                                             vectors + j * dim_,
+                                                             label,
+                                                             attrs == nullptr ? nullptr : attrs + j,
+                                                             extra_info + j * extra_info_size);
             futures.emplace_back(std::move(future));
         } else {
             if (auto add_res = add_func(vectors + j * dim_,
@@ -136,7 +136,7 @@ BruteForce::Add(const DatasetPtr& data) {
         }
     }
 
-    if (this->build_pool_ != nullptr) {
+    if (this->thread_pool_ != nullptr) {
         for (auto& future : futures) {
             if (auto reply = future.get(); reply.has_value()) {
                 failed_ids.emplace_back(reply.value());
@@ -247,7 +247,7 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
         for (auto i = 0; i < parallel_count; ++i) {
             auto start = i * chunk_size;
             auto end = std::min(start + chunk_size, total_count_);
-            auto future = this->build_pool_->GeneralEnqueue(search_func, start, end, heaps[i]);
+            auto future = this->thread_pool_->GeneralEnqueue(search_func, start, end, heaps[i]);
             futures.emplace_back(std::move(future));
         }
         for (auto& future : futures) {
