@@ -56,6 +56,7 @@ main(int argc, char** argv) {
     )";
     vsag::Resource resource(vsag::Engine::CreateDefaultAllocator(), nullptr);
     vsag::Engine engine(&resource);
+    vsag::Options::Instance().set_block_size_limit(2 * 1024 * 1024);
     auto index = engine.CreateIndex("hgraph", hgraph_build_parameters).value();
 
     /******************* Build HGraph Index *****************/

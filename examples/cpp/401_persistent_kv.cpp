@@ -150,7 +150,7 @@ main(int32_t argc, char** argv) {
     }
 
     auto base = vsag::Dataset::Make();
-    base->NumElements(num_vectors)->Dim(dim)->Ids(ids)->Float32Vectors(vectors)->Owner(false);
+    base->NumElements(num_vectors)->Dim(dim)->Ids(ids)->Float32Vectors(vectors)->Owner(true);
     if (auto build_index = index->Build(base); not build_index.has_value()) {
         std::cerr << "build index failed: " << build_index.error().message << std::endl;
         abort();
@@ -208,7 +208,7 @@ main(int32_t argc, char** argv) {
         query_vector[i] = distrib_real(rng);
     }
     auto query = vsag::Dataset::Make();
-    query->NumElements(1)->Dim(dim)->Float32Vectors(query_vector)->Owner(false);
+    query->NumElements(1)->Dim(dim)->Float32Vectors(query_vector)->Owner(true);
     auto search_parameters = R"(
     {
         "hnsw": {
