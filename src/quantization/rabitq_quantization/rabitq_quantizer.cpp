@@ -228,31 +228,31 @@ ip_obar_q(float ip_yu_q, float q_prime_sum, float y_norm, int B) {
 template <MetricType metric>
 float
 RaBitQuantizer<metric>::RaBitQFloatSQIPByPlanes(const float* query, const uint8_t* planes) const {
-    float ip_yu_q = 0.0f;
+    float ip_yu_q = 0.0F;
     uint64_t plane_bytes = (this->dim_ + 7) / 8;
     for (int b = 0; b < num_bits_per_dim_base_; ++b) {
         float sb = RaBitQFloatBinaryIP(query, planes + b * plane_bytes, this->dim_, 0);
-        ip_yu_q += sb * float(1u << b);
+        ip_yu_q += sb * float(1U << b);
     }
     return ip_yu_q;
 }
 
 template <MetricType metric>
 void
-RaBitQuantizer<metric>::PackIntoPlanes(uint8_t* src, uint8_t* dst) const {
+RaBitQuantizer<metric>::PackIntoPlanes(const uint8_t* src, uint8_t* dst) const {
     size_t plane_size = (this->dim_ + 7) / 8;
 
-    const uint8_t maskN =
-        (num_bits_per_dim_base_ == 8) ? 0xFFu : uint8_t((1u << num_bits_per_dim_base_) - 1u);
+    const uint8_t mask_n =
+        (num_bits_per_dim_base_ == 8) ? 0xFFU : uint8_t((1U << num_bits_per_dim_base_) - 1U);
 
     for (uint64_t i = 0; i < this->dim_; ++i) {
-        uint8_t v = src[i] & maskN;
-        const uint64_t byte_idx = (i >> 3);
-        const uint8_t bit_in_byte = uint8_t(i & 7);
-        const uint8_t bitmask = uint8_t(1u << bit_in_byte);
+        uint8_t v = src[i] & mask_n;
+        const auto byte_idx = (i >> 3);
+        const auto bit_in_byte = uint8_t(i & 7);
+        const auto bitmask = uint8_t(1U << bit_in_byte);
 
         for (int b = 0; b < num_bits_per_dim_base_; ++b) {
-            if (v & (1u << b)) {
+            if ((v & (1U << b)) != 0u) {
                 dst[uint64_t(b) * plane_size + byte_idx] |= bitmask;
             }
         }
@@ -530,11 +530,7 @@ RaBitQuantizer<metric>::DecodeOneImpl(const uint8_t* codes, DataType* data) {
             normed_data[d] = bit ? inv_sqrt_d_ : -inv_sqrt_d_;
         }
     } else {
-        const int y2_max = int((1U << this->num_bits_per_dim_base_) - 1U);
-        const float c = 0.5F * static_cast<float>(y2_max);
-        for (uint64_t d = 0; d < this->dim_; ++d) {
-            normed_data[d] = static_cast<float>(codes[d]) - c;
-        }
+        return false;
     }
     // 3. inverse normalize
     InverseNormalizeWithCentroid(normed_data.data(),

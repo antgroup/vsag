@@ -134,7 +134,7 @@ public:
     EncodeExtendRaBitQ(const float* o_prime, uint8_t* code, float& y_norm) const;
 
     void
-    PackIntoPlanes(uint8_t* src, uint8_t* dst) const;
+    PackIntoPlanes(const uint8_t* src, uint8_t* dst) const;
 
     float
     RaBitQFloatSQIPByPlanes(const float* query, const uint8_t* planes) const;
