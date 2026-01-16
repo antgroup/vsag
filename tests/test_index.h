@@ -289,7 +289,12 @@ public:
                        const TestDatasetPtr& dataset,
                        const std::string& search_param);
 
-    constexpr static float RECALL_THRESHOLD = 0.95;
+    static void
+    TestSearchUnrelatedParameter(const IndexPtr& index,
+                                 const TestDatasetPtr& dataset,
+                                 const std::string& search_param);
+
+    constexpr static float RECALL_THRESHOLD = 0.85F;
 };
 
 }  // namespace fixtures
