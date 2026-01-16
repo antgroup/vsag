@@ -733,6 +733,7 @@ Pyramid::add_one_point(const std::shared_ptr<IndexNode>& node,
     // add one point
     if (node->status_ == IndexNode::Status::NO_INDEX) {
         node->Init();
+        Vector<InnerIdType>(allocator_).swap(node->ids_);
     }
     if (node->status_ == IndexNode::Status::FLAT) {
         node->ids_.push_back(inner_id);
@@ -741,7 +742,6 @@ Pyramid::add_one_point(const std::shared_ptr<IndexNode>& node,
     if (node->graph_->TotalCount() == 0) {
         node->graph_->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
         node->entry_point_ = inner_id;
-        Vector<InnerIdType>(allocator_).swap(node->ids_);
     } else {
         InnerSearchParam search_param;
         search_param.ef = ef_construction_;
