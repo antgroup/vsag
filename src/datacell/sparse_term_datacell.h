@@ -104,9 +104,6 @@ public:
     CalcDistanceByInnerId(const SparseTermComputerPtr& computer, uint16_t base_id);
 
     void
-    GetSparseVector(uint16_t base_id, SparseVector* data);
-
-    void
     Encode(float val, uint8_t* dst) const;
 
     void
@@ -119,18 +116,17 @@ private:
     template <InnerSearchMode mode, InnerSearchType type>
     void
     insert_candidate_into_heap(uint32_t id,
-                               float* dists,
+                               float& dist,
                                float& cur_heap_top,
                                MaxHeap& heap,
                                uint32_t offset_id,
-                               uint32_t n_candidate,
                                float radius,
                                const FilterPtr& filter) const;
 
     template <InnerSearchType type>
     bool
     fill_heap_initial(uint32_t id,
-                      float* dists,
+                      float& dist,
                       float& cur_heap_top,
                       MaxHeap& heap,
                       uint32_t offset_id,
