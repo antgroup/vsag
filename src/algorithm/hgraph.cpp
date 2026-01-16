@@ -2049,7 +2049,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     search_param.search_alloc = search_allocator;
 
     Statistics stats;
-    if (search_param.ep >= this->total_count_) {
+    if (search_param.ep == INVALID_ENTRY_POINT) {
         auto dataset_result = DatasetImpl::MakeEmptyDataset();
         dataset_result->Statistics(stats.Dump());
         return dataset_result;
