@@ -252,7 +252,7 @@ RaBitQuantizer<metric>::PackIntoPlanes(const uint8_t* src, uint8_t* dst) const {
         const auto bitmask = uint8_t(1U << bit_in_byte);
 
         for (int b = 0; b < num_bits_per_dim_base_; ++b) {
-            if ((v & (1U << b)) != 0u) {
+            if ((v & (1U << b)) != 0U) {
                 dst[uint64_t(b) * plane_size + byte_idx] |= bitmask;
             }
         }
