@@ -32,6 +32,8 @@ ifdef SHARD
 endif
 
 
+##
+## =================== help ====================
 .PHONY: help
 help:                    ## Show the help.
 	@echo "Usage: make <target>"
