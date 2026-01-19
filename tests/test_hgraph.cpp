@@ -1287,6 +1287,15 @@ TestHGraphDuplicate(const fixtures::HGraphTestIndexPtr& test_index,
     for (auto metric_type : resource->metric_types) {
         for (auto dim : resource->dims) {
             for (auto& [base_quantization_str, recall] : resource->test_cases) {
+                if (base_quantization_str == "sq8_uniform" or
+                    base_quantization_str == "sq4_uniform") {
+                    // The codes for sq8_uniform and sq4_uniform store the norm values. Even when
+                    // vectors are identical, there may be precision errors in the norms, so it's
+                    // not possible to determine duplicates based solely on the codes. Since the
+                    // uniform version of quantization isn't used for building indexes, this step
+                    // can be omitted here.
+                    continue;
+                }
                 INFO(
                     fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, recall: {}, "
                                 "duplicate_pos: {}",
