@@ -216,7 +216,8 @@ private:
                 const InnerSearchParam& search_param,
                 const DatasetPtr& query,
                 const FlattenInterfacePtr& codes,
-                Statistics& stats) const;
+                Statistics& stats,
+                uint64_t subindex_ef_search) const;
 
 private:
     ODescentParameterPtr odescent_param_{nullptr};

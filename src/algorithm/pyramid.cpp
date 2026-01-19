@@ -53,18 +53,18 @@ get_suitable_max_degree(int64_t data_num) {
 }
 
 static uint64_t
-get_suitable_ef_search(int64_t topk, int64_t data_num) {
+get_suitable_ef_search(int64_t topk, int64_t data_num, uint64_t subindex_ef_search = 50) {
     auto topk_float = static_cast<float>(topk);
     if (data_num < 1'000) {
-        return std::max(static_cast<uint64_t>(1.5F * topk_float), 50UL);
+        return std::max(static_cast<uint64_t>(1.5F * topk_float), subindex_ef_search);
     }
     if (data_num < 100'000) {
-        return std::max(static_cast<uint64_t>(2.0F * topk_float), 100UL);
+        return std::max(static_cast<uint64_t>(2.0F * topk_float), subindex_ef_search * 2);
     }
     if (data_num < 1'000'000) {
-        return std::max(static_cast<uint64_t>(3.0F * topk_float), 200UL);
+        return std::max(static_cast<uint64_t>(3.0F * topk_float), subindex_ef_search * 4);
     }
-    return std::max(static_cast<uint64_t>(4.0F * topk_float), 400UL);
+    return std::max(static_cast<uint64_t>(4.0F * topk_float), subindex_ef_search * 8);
 }
 
 IndexNode::IndexNode(Allocator* allocator,
@@ -261,7 +261,8 @@ Pyramid::KnnSearch(const DatasetPtr& query,
     }
     Statistics stats;
     SearchFunc search_func = [&](const IndexNode* node, const VisitedListPtr& vl) {
-        return this->search_node(node, vl, search_param, query, base_codes_, stats);
+        return this->search_node(
+            node, vl, search_param, query, base_codes_, stats, parsed_param.subindex_ef_search);
     };
 
     auto result = this->search_impl(query, k, search_func, parsed_param.ef_search);
@@ -298,7 +299,8 @@ Pyramid::RangeSearch(const DatasetPtr& query,
     }
     Statistics stats;
     SearchFunc search_func = [&](const IndexNode* node, const VisitedListPtr& vl) {
-        return this->search_node(node, vl, search_param, query, base_codes_, stats);
+        return this->search_node(
+            node, vl, search_param, query, base_codes_, stats, parsed_param.subindex_ef_search);
     };
     int64_t final_limit = limited_size == -1 ? std::numeric_limits<int64_t>::max() : limited_size;
 
@@ -797,7 +799,8 @@ Pyramid::search_node(const IndexNode* node,
                      const InnerSearchParam& search_param,
                      const DatasetPtr& query,
                      const FlattenInterfacePtr& codes,
-                     Statistics& stats) const {
+                     Statistics& stats,
+                     uint64_t subindex_ef_search) const {
     std::shared_lock lock(node->mutex_);
     DistHeapPtr results = nullptr;
 
@@ -843,7 +846,8 @@ Pyramid::search_node(const IndexNode* node,
         if (node->level_ != 0 && search_param.search_mode == KNN_SEARCH) {
             modified_param.ef =
                 std::min(modified_param.ef,
-                         get_suitable_ef_search(search_param.topk, node->graph_->TotalCount()));
+                         get_suitable_ef_search(
+                             search_param.topk, node->graph_->TotalCount(), subindex_ef_search));
         }
         modified_param.topk = static_cast<int64_t>(modified_param.ef);
         results = searcher_->Search(node->graph_,

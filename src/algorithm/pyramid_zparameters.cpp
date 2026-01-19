@@ -158,9 +158,13 @@ PyramidSearchParameters::FromJson(const std::string& json_string) {
     obj.IndexSearchParameter::FromJson(params[INDEX_PYRAMID]);
 
     CHECK_ARGUMENT(
-        params[INDEX_PYRAMID].Contains(HNSW_PARAMETER_EF_RUNTIME),
-        fmt::format("parameters[{}] must contains {}", INDEX_PYRAMID, HNSW_PARAMETER_EF_RUNTIME));
-    obj.ef_search = params[INDEX_PYRAMID][HNSW_PARAMETER_EF_RUNTIME].GetInt();
+        params[INDEX_PYRAMID].Contains(PYRAMID_PARAMETER_EF_SEARCH),
+        fmt::format("parameters[{}] must contains {}", INDEX_PYRAMID, PYRAMID_PARAMETER_EF_SEARCH));
+    obj.ef_search = params[INDEX_PYRAMID][PYRAMID_PARAMETER_EF_SEARCH].GetInt();
+    if (params[INDEX_PYRAMID].Contains(PYRAMID_PARAMETER_SUBINDEX_EF_SEARCH)) {
+        obj.subindex_ef_search =
+            params[INDEX_PYRAMID][PYRAMID_PARAMETER_SUBINDEX_EF_SEARCH].GetInt();
+    }
     return obj;
 }
 }  // namespace vsag

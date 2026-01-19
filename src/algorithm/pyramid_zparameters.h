@@ -64,7 +64,8 @@ public:
     FromJson(const std::string& json_string);
 
 public:
-    int64_t ef_search{100};
+    uint64_t ef_search{100};
+    uint64_t subindex_ef_search{50};
 
 private:
     PyramidSearchParameters() = default;
