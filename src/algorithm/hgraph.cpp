@@ -1363,7 +1363,6 @@ HGraph::Deserialize(StreamReader& reader) {
         if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
             this->attr_filter_index_->Deserialize(reader);
         }
-        this->cal_memory_usage();
     } else {  // create like `else if ( ver in [v0.15, v0.17] )` here if need in the future
         logger::debug("parse with new version format");
 
@@ -1405,6 +1404,7 @@ HGraph::Deserialize(StreamReader& reader) {
             this->has_raw_vector_ = true;
         }
     }
+    this->cal_memory_usage();
 
     // post serialize procedure
     if (use_elp_optimizer_) {
