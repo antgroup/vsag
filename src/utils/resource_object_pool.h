@@ -42,7 +42,7 @@ public:
         : allocator_(allocator), init_size_(init_size), memory_usage_(0) {
         this->constructor_ = [=, pool = this]() -> std::shared_ptr<T> {
             auto ptr = std::make_shared<T>(args...);
-            auto value = ptr->MemoryUsage();
+            auto value = ptr->GetMemoryUsage();
             pool->memory_usage_.fetch_add(value, std::memory_order_relaxed);
             return ptr;
         };
@@ -100,7 +100,7 @@ public:
     }
 
     inline int64_t
-    GetCurrentMemoryUsage() {
+    GetMemoryUsage() {
         return memory_usage_.load(std::memory_order_relaxed);
     }
 

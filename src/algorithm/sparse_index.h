@@ -96,6 +96,9 @@ public:
                           Vector<float>& sorted_vals,
                           uint32_t inner_id) const;
 
+    int64_t
+    GetMemoryUsage() const override;
+
     DatasetPtr
     collect_results(const DistHeapPtr& results) const;
 

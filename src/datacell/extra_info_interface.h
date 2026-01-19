@@ -67,7 +67,7 @@ public:
     GetExtraInfoById(InnerIdType id, char* extra_info) const = 0;
 
     virtual int64_t
-    GetCurrentMemoryUsage() const {
+    GetMemoryUsage() const {
         return 0;
     }
 

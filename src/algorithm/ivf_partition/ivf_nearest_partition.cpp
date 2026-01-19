@@ -165,7 +165,7 @@ IVFNearestPartition::GetCentroid(BucketIdType bucket_id, Vector<float>& centroid
 }
 
 [[nodiscard]] int64_t
-IVFNearestPartition::GetCurrentMemoryUsage() const {
+IVFNearestPartition::GetMemoryUsage() const {
     return static_cast<int64_t>(sizeof(IVFNearestPartition) +
                                 this->route_index_ptr_->GetMemoryUsage());
 }

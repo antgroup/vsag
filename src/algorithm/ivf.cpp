@@ -1129,16 +1129,16 @@ IVF::AnalyzeIndexBySearch(const SearchRequest& request) {
 void
 IVF::cal_memory_usage() {
     auto memory = sizeof(IVF);
-    memory += this->bucket_->GetCurrentMemoryUsage();
+    memory += this->bucket_->GetMemoryUsage();
     if (use_reorder_) {
-        memory += this->reorder_codes_->GetCurrentMemoryUsage();
+        memory += this->reorder_codes_->GetMemoryUsage();
     }
     if (this->extra_info_size_ > 0 and this->extra_infos_ != nullptr) {
-        memory += this->extra_infos_->GetCurrentMemoryUsage();
+        memory += this->extra_infos_->GetMemoryUsage();
     }
-    memory += this->label_table_->GetCurrentMemoryUsage();
+    memory += this->label_table_->GetMemoryUsage();
     memory += location_map_.size() * sizeof(uint64_t);
-    memory += partition_strategy_->GetCurrentMemoryUsage();
+    memory += partition_strategy_->GetMemoryUsage();
     std::unique_lock lock(this->memory_usage_mutex_);
     this->current_memory_usage_.store(static_cast<int64_t>(memory));
 }
@@ -1151,7 +1151,7 @@ IVF::GetMemoryUsage() const {
         memory = this->current_memory_usage_.load();
     }
     if (this->attr_filter_index_ != nullptr) {
-        memory += this->attr_filter_index_->GetCurrentMemoryUsage();
+        memory += this->attr_filter_index_->GetMemoryUsage();
     }
     return memory;
 }

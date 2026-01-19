@@ -278,6 +278,20 @@ SparseIndex::CalDistanceById(const DatasetPtr& query, const int64_t* ids, int64_
     return result;
 }
 
+int64_t
+SparseIndex::GetMemoryUsage() const {
+    auto memory = sizeof(SparseIndex);
+    memory += datas_.size() * sizeof(uint8_t*);
+    for (const auto& data : datas_) {
+        if (data == nullptr) {
+            continue;
+        }
+        memory += data[0] * sizeof(uint32_t) + data[0] * sizeof(float) + sizeof(uint32_t);
+    }
+    memory += static_cast<uint64_t>(this->label_table_->GetMemoryUsage());
+    return static_cast<int64_t>(memory);
+}
+
 void
 SparseIndex::InitFeatures() {
     // build & add

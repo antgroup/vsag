@@ -139,7 +139,7 @@ CompressedGraphDataCell::Resize(InnerIdType new_size) {
 }
 
 int64_t
-CompressedGraphDataCell::GetCurrentMemoryUsage() const {
+CompressedGraphDataCell::GetMemoryUsage() const {
     auto memory = sizeof(CompressedGraphDataCell);
     memory += neighbor_sets_.size() * sizeof(std::nullptr_t);
     for (const auto& encoder : neighbor_sets_) {

@@ -178,11 +178,11 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::SparseVectorDataCell(
 
 template <typename QuantTmpl, typename IOTmpl>
 int64_t
-SparseVectorDataCell<QuantTmpl, IOTmpl>::GetCurrentMemoryUsage() const {
+SparseVectorDataCell<QuantTmpl, IOTmpl>::GetMemoryUsage() const {
     int64_t memory = sizeof(SparseVectorDataCell<QuantTmpl, IOTmpl>);
     memory += this->offset_io_->size_;
     if (IOTmpl::InMemory) {
-        memory += this->io_->GetCurrentMemoryUsage();
+        memory += this->io_->GetMemoryUsage();
     }
     memory += sizeof(QuantTmpl);
     return memory;

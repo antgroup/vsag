@@ -638,9 +638,9 @@ BruteForce::GetAttributeSetByInnerId(InnerIdType inner_id, AttributeSet* attr) c
 
 void
 BruteForce::cal_memory_usage() {
-    auto memory_usage = this->inner_codes_->GetCurrentMemoryUsage();
+    auto memory_usage = this->inner_codes_->GetMemoryUsage();
     memory_usage += sizeof(BruteForce);
-    memory_usage += this->label_table_->GetCurrentMemoryUsage();
+    memory_usage += this->label_table_->GetMemoryUsage();
     std::unique_lock lock(this->memory_usage_mutex_);
     this->current_memory_usage_.store(memory_usage);
 }
@@ -653,7 +653,7 @@ BruteForce::GetMemoryUsage() const {
         memory = this->current_memory_usage_.load();
     }
     if (this->attr_filter_index_ != nullptr) {
-        memory += this->attr_filter_index_->GetCurrentMemoryUsage();
+        memory += this->attr_filter_index_->GetMemoryUsage();
     }
     return memory;
 }

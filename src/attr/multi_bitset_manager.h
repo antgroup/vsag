@@ -123,7 +123,7 @@ public:
      * @return The current memory usage in bytes.
      */
     int64_t
-    GetCurrentMemoryUsage() const;
+    GetMemoryUsage() const;
 
 private:
     /// A vector containing pointers to ComputableBitset instances.
