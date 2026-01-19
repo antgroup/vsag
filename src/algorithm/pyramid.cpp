@@ -40,9 +40,6 @@ split(const std::string& str, char delimiter) {
 
 static uint64_t
 get_suitable_max_degree(int64_t data_num) {
-    if (data_num < 1'000) {
-        return 8;
-    }
     if (data_num < 100'000) {
         return 16;
     }
