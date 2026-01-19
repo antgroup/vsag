@@ -310,7 +310,7 @@ DatasetPtr
 Pyramid::search_impl(const DatasetPtr& query,
                      int64_t limit,
                      const SearchFunc& search_func,
-                     int64_t ef_search,
+                     uint64_t ef_search,
                      float radius) const {
     const auto* query_path = query->GetPaths();
     CHECK_ARGUMENT(  // NOLINT
