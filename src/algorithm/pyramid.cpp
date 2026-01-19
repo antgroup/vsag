@@ -189,7 +189,7 @@ void
 IndexNode::Search(const SearchFunc& search_func,
                   const VisitedListPtr& vl,
                   const DistHeapPtr& search_result,
-                  int64_t ef_search) const {
+                  uint64_t ef_search) const {
     if (status_ != IndexNode::Status::NO_INDEX) {
         auto self_search_result = search_func(this, vl);
         search_result->Merge(*self_search_result);
