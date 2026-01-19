@@ -24,12 +24,12 @@
 
 # Detail source codes
 /src/index               @inabao @wxyucs @LHT129 @ShawnShawnYou
-/src/data_cell/          @LHT129 @ShawnShawnYou
-/src/io/                 @LHT129
-/src/quantization/       @LHT129 @ShawnShawnYou
-/src/impl/               @ShawnShawnYou
+/src/data_cell/          @LHT129 @ShawnShawnYou @inabao
+/src/io/                 @LHT129 @inabao
+/src/quantization/       @LHT129 @ShawnShawnYou @inabao
+/src/impl/               @ShawnShawnYou @inabao @LHT129 
 /src/algorithm/          @inabao @wxyucs
-/src/simd/               @LHT129 @ShawnShawnYou
+/src/simd/               @LHT129 @ShawnShawnYou @inabao
 
 # pybinds
 /python/                 @wxyucs @LHT129 @jac0626
