@@ -838,6 +838,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
         auto* new_ctx = new IteratorFilterContext();
         if (auto ret = new_ctx->init(cur_count, params.ef_search, search_allocator);
             not ret.has_value()) {
+            delete new_ctx;
             throw vsag::VsagException(ErrorType::INTERNAL_ERROR,
                                       "failed to init IteratorFilterContext");
         }
