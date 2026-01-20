@@ -152,12 +152,13 @@ main() {
 
     /******************* Hgraph sq8 Iterator Filter *****************/
     {
-        vsag::IteratorContext* iter_ctx = nullptr;
         nlohmann::json search_parameters = {
             {"hgraph", {{"ef_search", 100}, {"skip_ratio", 0.7f}}},
         };
         std::string param_str = search_parameters.dump();
-        vsag::SearchParam search_param(true, param_str, nullptr, &allocator, iter_ctx, false);
+        vsag::SearchParam search_param(true, param_str, nullptr, &allocator);
+        search_param.iter_ctx = nullptr;
+        search_param.is_last_search = false;
 
         /* first search */
         {
@@ -187,6 +188,8 @@ main() {
             allocator.Deallocate((void*)result->GetIds());
             allocator.Deallocate((void*)result->GetDistances());
         }
+
+        delete search_param.iter_ctx;
     }
 
     engine.Shutdown();

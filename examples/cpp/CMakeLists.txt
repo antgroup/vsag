@@ -32,14 +32,14 @@ target_link_libraries (105_index_brute_force vsag)
 add_executable (106_index_ivf 106_index_ivf.cpp)
 target_link_libraries (106_index_ivf vsag)
 
-add_executable (107_index_pyramid 107_index_pyramid.cpp)
-target_link_libraries (107_index_pyramid vsag)
+# add_executable (107_index_pyramid 107_index_pyramid.cpp)
+# target_link_libraries (107_index_pyramid vsag)
 
 add_executable (108_index_gno_imi 108_index_gno_imi.cpp)
 target_link_libraries (108_index_gno_imi vsag)
 
-add_executable (109_index_sindi 109_index_sindi.cpp)
-target_link_libraries (109_index_sindi vsag)
+# add_executable (109_index_sindi 109_index_sindi.cpp)
+# target_link_libraries (109_index_sindi vsag)
 
 add_executable (201_custom_allocator 201_custom_allocator.cpp)
 target_link_libraries (201_custom_allocator vsag)
@@ -62,8 +62,8 @@ target_link_libraries (303_feature_remove vsag)
 add_executable(304_feature_enhance_graph 304_feature_enhance_graph.cpp)
 target_link_libraries(304_feature_enhance_graph vsag)
 
-add_executable(305_feature_update 305_feature_update.cpp)
-target_link_libraries(305_feature_update vsag)
+# add_executable(305_feature_update 305_feature_update.cpp)
+# target_link_libraries(305_feature_update vsag)
 
 add_executable(306_feature_calculate_distance_by_id 306_feature_calculate_distance_by_id.cpp)
 target_link_libraries(306_feature_calculate_distance_by_id vsag)
@@ -83,8 +83,11 @@ target_link_libraries(310_feature_export_model vsag)
 add_executable(311_feature_train 311_feature_train.cpp)
 target_link_libraries(311_feature_train vsag)
 
-add_executable(313_feature_search_allocator 313_feature_search_allocator.cpp)
-target_link_libraries(313_feature_search_allocator vsag)
+add_executable(312_feature_odescent 312_feature_odescent.cpp)
+target_link_libraries(312_feature_odescent vsag)
+
+# add_executable(313_feature_search_allocator 313_feature_search_allocator.cpp)
+# target_link_libraries(313_feature_search_allocator vsag)
 
 add_executable(314_feature_hgraph_search_allocator 314_feature_hgraph_search_allocator.cpp)
 target_link_libraries(314_feature_hgraph_search_allocator vsag)
@@ -107,5 +110,5 @@ target_link_libraries (401_persistent_kv vsag)
 add_executable (402_persistent_streaming 402_persistent_streaming.cpp)
 target_link_libraries (402_persistent_streaming vsag)
 
-add_executable (501_quantization_transform 501_quantization_transform.cpp)
-target_link_libraries (501_quantization_transform vsag)
+# add_executable (501_quantization_transform 501_quantization_transform.cpp)
+# target_link_libraries (501_quantization_transform vsag)
