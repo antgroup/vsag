@@ -56,7 +56,7 @@ public:
     Search(const SearchFunc& search_func,
            const VisitedListPtr& vl,
            const DistHeapPtr& search_result,
-           int64_t ef_search) const;
+           uint64_t ef_search) const;
 
     void
     AddChild(const std::string& key);
@@ -189,7 +189,7 @@ private:
     search_impl(const DatasetPtr& query,
                 int64_t limit,
                 const SearchFunc& search_func,
-                int64_t ef_search,
+                uint64_t ef_search,
                 float radius = std::numeric_limits<float>::max()) const;
 
     bool
@@ -216,7 +216,8 @@ private:
                 const InnerSearchParam& search_param,
                 const DatasetPtr& query,
                 const FlattenInterfacePtr& codes,
-                Statistics& stats) const;
+                Statistics& stats,
+                uint64_t subindex_ef_search) const;
 
 private:
     ODescentParameterPtr odescent_param_{nullptr};

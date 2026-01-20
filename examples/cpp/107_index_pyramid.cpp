@@ -90,12 +90,13 @@ main(int argc, char** argv) {
     // The "dim" represents the dimensionality of the vectors, indicating the number of features for each data point.
     // The "pyramid" section contains parameters specific to Pyramid:
     // - "odescent": graph type
-    //    - "io_params": The parameters for the I/O operation, which can be "memory" or "block_memory_io".
-    //    - "max_degree": The maximum number of connections for each node in the graph.
-    //    - "alpha": The parameter for the graph construction, which influences the pruning process.
-    //    - "graph_iter_turn": The number of iterations for graph construction.
-    //    - "neighbor_sample_rate": The ratio of the number of neighbors to be selected for iteration of graph update.
+    // - "max_degree": The maximum number of connections for each node in the graph.
+    // - "alpha": The parameter for the graph construction, which influences the pruning process.
     // - "no_build_levels": The levels that do not need to be built.
+    // - "base_quantization_type": The base quantization codes
+    // - "precise_quantization_type": The precise quantization codes
+    // - "index_min_size": The minimum size required to build the index
+    // - "support_duplicate": support for duplicate data in the index
     auto pyramid_build_paramesters = R"(
     {
         "dtype": "float32",
