@@ -16,6 +16,7 @@
 #pragma once
 
 #include <cstdint>
+#include <limits>
 
 #include "vsag_exception.h"
 
@@ -67,3 +68,4 @@ constexpr static const float DEFAULT_DOC_PRUNE_RATIO = 0.0F;
 constexpr static const float DEFAULT_TERM_PRUNE_RATIO = 0.0F;
 constexpr static const uint32_t DEFAULT_N_CANDIDATE = 0;
 constexpr static const uint32_t DEFAULT_AVG_DOC_TERM_LENGTH = 100;
+constexpr static const uint32_t INVALID_ENTRY_POINT = std::numeric_limits<uint32_t>::max();
