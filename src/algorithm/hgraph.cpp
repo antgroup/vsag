@@ -165,7 +165,7 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
         if (level >= 0) {
             if (level >= static_cast<int>(route_graph_ids.size()) || route_graph_ids.empty()) {
                 for (auto k = static_cast<int>(route_graph_ids.size()); k <= level; ++k) {
-                    route_graph_ids.emplace_back(Vector<InnerIdType>(allocator_));
+                    route_graph_ids.emplace_back(allocator_);
                 }
                 entry_point_id_ = inner_id;
             }
@@ -1696,6 +1696,14 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     search_param.ef = 1;
     search_param.is_inner_id_allowed = nullptr;
     search_param.search_alloc = search_allocator;
+
+    if (search_param.ep == INVALID_ENTRY_POINT) {
+        auto dataset_result = DatasetImpl::MakeEmptyDataset();
+        return dataset_result;
+    }
+
+    auto vt = this->pool_->TakeOne();
+
     const auto* raw_query = get_data(query);
     for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
         auto result = this->search_one_graph(

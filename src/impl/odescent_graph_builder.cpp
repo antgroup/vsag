@@ -37,7 +37,7 @@ ODescent::Build(const Vector<InnerIdType>& ids_sequence, const GraphInterfacePtr
                             "ODescent cannot build a graph with data_num less than 0");
     }
     if (data_num_ == 1) {
-        graph_.push_back(Linklist(allocator_));
+        graph_.emplace_back(allocator_);
         return true;
     }
     Vector<std::mutex>(data_num_, allocator_).swap(points_lock_);
