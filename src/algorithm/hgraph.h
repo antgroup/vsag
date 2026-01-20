@@ -340,7 +340,7 @@ private:
     std::default_random_engine level_generator_{2021};
     double mult_{1.0};
 
-    InnerIdType entry_point_id_{std::numeric_limits<InnerIdType>::max()};
+    InnerIdType entry_point_id_{INVALID_ENTRY_POINT};
 
     ODescentParameterPtr odescent_param_{nullptr};
     std::string graph_type_{GRAPH_TYPE_VALUE_NSW};
