@@ -108,6 +108,11 @@ public:
     void
     SaveGraph(GraphInterfacePtr& graph_storage);
 
+    void
+    SetMaxDegree(int32_t max_degree) {
+        odescent_param_->max_degree = max_degree;
+    }
+
 private:
     inline float
     get_distance(uint32_t loc1, uint32_t loc2) {

@@ -205,6 +205,7 @@ const char* const PYRAMID_BASE_FILE_PATH = "base_file_path";
 const char* const PYRAMID_PRECISE_IO_TYPE = "precise_io_type";
 const char* const PYRAMID_PRECISE_FILE_PATH = "precise_file_path";
 const char* const PYRAMID_PARAMETER_EF_SEARCH = "ef_search";
+const char* const PYRAMID_PARAMETER_SUBINDEX_EF_SEARCH = "subindex_ef_search";
 const char* const PYRAMID_NO_BUILD_LEVELS = "no_build_levels";
 const char* const PYRAMID_INDEX_MIN_SIZE = "index_min_size";
 

@@ -38,11 +38,8 @@ split(const std::string& str, char delimiter) {
     return vec;
 }
 
-uint64_t
+static uint64_t
 get_suitable_max_degree(int64_t data_num) {
-    if (data_num < 1'000) {
-        return 8;
-    }
     if (data_num < 100'000) {
         return 16;
     }
@@ -50,6 +47,21 @@ get_suitable_max_degree(int64_t data_num) {
         return 32;
     }
     return 64;
+}
+
+static uint64_t
+get_suitable_ef_search(int64_t topk, int64_t data_num, uint64_t subindex_ef_search = 50) {
+    auto topk_float = static_cast<float>(topk);
+    if (data_num < 1'000) {
+        return std::max(static_cast<uint64_t>(1.5F * topk_float), subindex_ef_search);
+    }
+    if (data_num < 100'000) {
+        return std::max(static_cast<uint64_t>(2.0F * topk_float), subindex_ef_search * 2);
+    }
+    if (data_num < 1'000'000) {
+        return std::max(static_cast<uint64_t>(3.0F * topk_float), subindex_ef_search * 4);
+    }
+    return std::max(static_cast<uint64_t>(4.0F * topk_float), subindex_ef_search * 8);
 }
 
 IndexNode::IndexNode(Allocator* allocator,
@@ -71,6 +83,7 @@ IndexNode::Build(ODescent& odescent) {
     }
     if (status_ == Status::GRAPH) {
         entry_point_ = ids_[0];
+        odescent.SetMaxDegree(static_cast<int32_t>(graph_param_->max_degree_));
         odescent.Build(ids_);
         odescent.SaveGraph(graph_);
         Vector<InnerIdType>(allocator_).swap(ids_);
@@ -165,7 +178,6 @@ IndexNode::Init() {
             }
             graph_ = std::make_shared<SparseGraphDataCell>(
                 std::dynamic_pointer_cast<SparseGraphDatacellParameter>(graph_param_), allocator_);
-            Vector<InnerIdType>(allocator_).swap(ids_);
             status_ = Status::GRAPH;
         } else {
             status_ = Status::FLAT;
@@ -177,7 +189,7 @@ void
 IndexNode::Search(const SearchFunc& search_func,
                   const VisitedListPtr& vl,
                   const DistHeapPtr& search_result,
-                  int64_t ef_search) const {
+                  uint64_t ef_search) const {
     if (status_ != IndexNode::Status::NO_INDEX) {
         auto self_search_result = search_func(this, vl);
         search_result->Merge(*self_search_result);
@@ -229,7 +241,7 @@ Pyramid::KnnSearch(const DatasetPtr& query,
 
     InnerSearchParam search_param;
     search_param.ef = parsed_param.ef_search;
-    search_param.topk = parsed_param.ef_search;
+    search_param.topk = k;
     search_param.search_mode = KNN_SEARCH;
     if (this->label_table_->CompressDuplicateData()) {
         search_param.consider_duplicate = true;
@@ -246,7 +258,8 @@ Pyramid::KnnSearch(const DatasetPtr& query,
     }
     Statistics stats;
     SearchFunc search_func = [&](const IndexNode* node, const VisitedListPtr& vl) {
-        return this->search_node(node, vl, search_param, query, base_codes_, stats);
+        return this->search_node(
+            node, vl, search_param, query, base_codes_, stats, parsed_param.subindex_ef_search);
     };
 
     auto result = this->search_impl(query, k, search_func, parsed_param.ef_search);
@@ -283,7 +296,8 @@ Pyramid::RangeSearch(const DatasetPtr& query,
     }
     Statistics stats;
     SearchFunc search_func = [&](const IndexNode* node, const VisitedListPtr& vl) {
-        return this->search_node(node, vl, search_param, query, base_codes_, stats);
+        return this->search_node(
+            node, vl, search_param, query, base_codes_, stats, parsed_param.subindex_ef_search);
     };
     int64_t final_limit = limited_size == -1 ? std::numeric_limits<int64_t>::max() : limited_size;
 
@@ -296,7 +310,7 @@ DatasetPtr
 Pyramid::search_impl(const DatasetPtr& query,
                      int64_t limit,
                      const SearchFunc& search_func,
-                     int64_t ef_search,
+                     uint64_t ef_search,
                      float radius) const {
     const auto* query_path = query->GetPaths();
     CHECK_ARGUMENT(  // NOLINT
@@ -718,6 +732,7 @@ Pyramid::add_one_point(const std::shared_ptr<IndexNode>& node,
     // add one point
     if (node->status_ == IndexNode::Status::NO_INDEX) {
         node->Init();
+        Vector<InnerIdType>(allocator_).swap(node->ids_);
     }
     if (node->status_ == IndexNode::Status::FLAT) {
         node->ids_.push_back(inner_id);
@@ -781,7 +796,8 @@ Pyramid::search_node(const IndexNode* node,
                      const InnerSearchParam& search_param,
                      const DatasetPtr& query,
                      const FlattenInterfacePtr& codes,
-                     Statistics& stats) const {
+                     Statistics& stats,
+                     uint64_t subindex_ef_search) const {
     std::shared_lock lock(node->mutex_);
     DistHeapPtr results = nullptr;
 
@@ -824,6 +840,13 @@ Pyramid::search_node(const IndexNode* node,
     } else if (node->status_ == IndexNode::Status::GRAPH) {
         InnerSearchParam modified_param = search_param;
         modified_param.ep = node->entry_point_;
+        if (node->level_ != 0 && search_param.search_mode == KNN_SEARCH) {
+            modified_param.ef =
+                std::min(modified_param.ef,
+                         get_suitable_ef_search(
+                             search_param.topk, node->graph_->TotalCount(), subindex_ef_search));
+        }
+        modified_param.topk = static_cast<int64_t>(modified_param.ef);
         results = searcher_->Search(node->graph_,
                                     codes,
                                     vl,
