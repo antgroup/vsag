@@ -76,9 +76,7 @@ RaBitQuantizer<metric>::RaBitQuantizer(int dim,
     size_t align_size = std::max(std::max(sizeof(error_type), sizeof(norm_type)), sizeof(DataType));
 
     size_t code_original_size = (this->dim_ + 7) / 8;
-    if (num_bits_per_dim_base_ != 1) {
-        code_original_size = this->dim_;
-    }
+    code_original_size *= num_bits_per_dim_base_;
 
     this->code_size_ = 0;
 
@@ -225,6 +223,40 @@ ip_obar_q(float ip_yu_q, float q_prime_sum, float y_norm, int B) {
     auto ret = (ip_yu_q - c * q_prime_sum);
     ret /= y_norm;
     return ret;
+}
+
+template <MetricType metric>
+float
+RaBitQuantizer<metric>::RaBitQFloatSQIPByPlanes(const float* query, const uint8_t* planes) const {
+    float ip_yu_q = 0.0F;
+    uint64_t plane_bytes = (this->dim_ + 7) / 8;
+    for (int b = 0; b < num_bits_per_dim_base_; ++b) {
+        float sb = RaBitQFloatBinaryIP(query, planes + b * plane_bytes, this->dim_, 0);
+        ip_yu_q += sb * float(1U << b);
+    }
+    return ip_yu_q;
+}
+
+template <MetricType metric>
+void
+RaBitQuantizer<metric>::PackIntoPlanes(const uint8_t* src, uint8_t* dst) const {
+    size_t plane_size = (this->dim_ + 7) / 8;
+
+    const uint8_t mask_n =
+        (num_bits_per_dim_base_ == 8) ? 0xFFU : uint8_t((1U << num_bits_per_dim_base_) - 1U);
+
+    for (uint64_t i = 0; i < this->dim_; ++i) {
+        uint8_t v = src[i] & mask_n;
+        const auto byte_idx = (i >> 3);
+        const auto bit_in_byte = uint8_t(i & 7);
+        const auto bitmask = uint8_t(1U << bit_in_byte);
+
+        for (int b = 0; b < num_bits_per_dim_base_; ++b) {
+            if ((v & (1U << b)) != 0U) {
+                dst[uint64_t(b) * plane_size + byte_idx] |= bitmask;
+            }
+        }
+    }
 }
 
 template <MetricType metric>
@@ -421,7 +453,9 @@ RaBitQuantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) cons
     if (num_bits_per_dim_base_ != 1) {
         float norm_code = 0;
 
-        EncodeExtendRaBitQ(normed_data.data(), codes + offset_code_, norm_code);
+        Vector<uint8_t> scalar_codes(this->dim_, 0, this->allocator_);
+        EncodeExtendRaBitQ(normed_data.data(), scalar_codes.data(), norm_code);
+        PackIntoPlanes(scalar_codes.data(), codes + offset_code_);
 
         *(norm_type*)(codes + offset_norm_code_) = norm_code;
 
@@ -430,7 +464,9 @@ RaBitQuantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) cons
         for (auto i = 0; i < this->dim_; i++) {
             o_sum += normed_data[i];
         }
-        float ip_yu_q = RaBitQFloatSQIP(normed_data.data(), codes + offset_code_, this->dim_);
+
+        float ip_yu_q = RaBitQFloatSQIPByPlanes(normed_data.data(), codes + offset_code_);
+
         error_type error = ip_obar_q(ip_yu_q, o_sum, norm_code, num_bits_per_dim_base_);
 
         // 6. store norm, error, sum
@@ -494,11 +530,7 @@ RaBitQuantizer<metric>::DecodeOneImpl(const uint8_t* codes, DataType* data) {
             normed_data[d] = bit ? inv_sqrt_d_ : -inv_sqrt_d_;
         }
     } else {
-        const int y2_max = int((1U << this->num_bits_per_dim_base_) - 1U);
-        const float c = 0.5F * static_cast<float>(y2_max);
-        for (uint64_t d = 0; d < this->dim_; ++d) {
-            normed_data[d] = static_cast<float>(codes[d]) - c;
-        }
+        return false;
     }
     // 3. inverse normalize
     InverseNormalizeWithCentroid(normed_data.data(),
@@ -578,8 +610,9 @@ RaBitQuantizer<metric>::ComputeQueryBaseImpl(const uint8_t* query_codes,
             RaBitQFloatBinaryIP((DataType*)query_codes, base_codes, this->dim_, inv_sqrt_d_);
     } else if (num_bits_per_dim_query_ == 32 and num_bits_per_dim_base_ != 1) {
         sum_type query_raw_sum = *((sum_type*)(query_codes + query_offset_sum_));
-        float ip_yu_q =
-            RaBitQFloatSQIP((DataType*)query_codes, base_codes + offset_code_, this->dim_);
+
+        float ip_yu_q = RaBitQFloatSQIPByPlanes((DataType*)query_codes, base_codes + offset_code_);
+
         ip_bq_estimate = ip_obar_q(ip_yu_q,
                                    query_raw_sum,
                                    *(norm_type*)(base_codes + offset_norm_code_),

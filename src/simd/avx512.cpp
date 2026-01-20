@@ -1033,15 +1033,21 @@ RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, floa
 
     uint64_t d = 0;
     __m512 sum = _mm512_setzero_ps();
-    const __m512 inv_sqrt_d_vec = _mm512_set1_ps(inv_sqrt_d);
-    const __m512 neg_inv_sqrt_d_vec = _mm512_set1_ps(-inv_sqrt_d);
+    __m512 pos, neg;
+    if (inv_sqrt_d > 1e-3) {
+        pos = _mm512_set1_ps(inv_sqrt_d);
+        neg = _mm512_set1_ps(-inv_sqrt_d);
+    } else {
+        pos = _mm512_set1_ps(1.0f);
+        neg = _mm512_setzero_ps();
+    }
 
     for (; d + 16 <= dim; d += 16) {
         __m512 vec = _mm512_loadu_ps(vector + d);
 
         __mmask16 mask = static_cast<__mmask16>(bits[d / 8 + 1] << 8 | bits[d / 8]);
 
-        __m512 b_vec = _mm512_mask_blend_ps(mask, neg_inv_sqrt_d_vec, inv_sqrt_d_vec);
+        __m512 b_vec = _mm512_mask_blend_ps(mask, neg, pos);
 
         sum = _mm512_fmadd_ps(b_vec, vec, sum);
     }
