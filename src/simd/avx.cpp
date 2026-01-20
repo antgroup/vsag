@@ -1017,7 +1017,7 @@ RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, floa
         return 0.0F;
     }
 
-    if (dim < 8) {
+    if (dim < 8 or inv_sqrt_d < 1e-3) {
         return sse::RaBitQFloatBinaryIP(vector, bits, dim, inv_sqrt_d);
     }
 
