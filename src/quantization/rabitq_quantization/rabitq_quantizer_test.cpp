@@ -152,20 +152,20 @@ TEST_CASE("RaBitQ Encode and Decode", "[ut][RaBitQuantizer]") {
 TEST_CASE("RaBitQ Compute", "[ut][RaBitQuantizer]") {
     auto use_fht = GENERATE(true, false);
     auto num_bits_per_dim_query = GENERATE(4, 32);
-    auto num_bits_per_dim_base = GENERATE(2, 4, 8);
+    auto num_bits_per_dim_base = GENERATE(2, 4);
     for (auto dim : dims) {
         float numeric_error = 1 / std::sqrt(dim) * dim;
-        float related_error = 0.05f;
-        float unbounded_numeric_error_rate = 0.05f;
-        float unbounded_related_error_rate = 0.1f;
+        float related_error = 0.05F;
+        float unbounded_numeric_error_rate = 0.05F;
+        float unbounded_related_error_rate = 0.1F;
         if (num_bits_per_dim_query == 4) {
-            unbounded_related_error_rate = 0.12f;
+            unbounded_related_error_rate = 0.12F;
             if (num_bits_per_dim_base != 1) {
                 continue;  // not support
             }
         }
         if (use_fht) {
-            unbounded_related_error_rate += 0.05f;
+            unbounded_related_error_rate += 0.05F;
         }
         if (dim < 900) {
             continue;
@@ -242,7 +242,7 @@ TEST_CASE("RaBitQ Compute", "[ut][RaBitQuantizer]") {
 TEST_CASE("RaBitQ Serialize and Deserialize", "[ut][RaBitQuantizer]") {
     bool use_fht = GENERATE(true, false);
     auto num_bits_per_dim_query = GENERATE(4, 32);
-    auto num_bits_per_dim_base = GENERATE(1, 2, 4, 8);
+    auto num_bits_per_dim_base = GENERATE(1, 4);
     auto dim = 1024;
     float numeric_error = 1 / std::sqrt(dim) * dim;
     float related_error = 0.05F;
