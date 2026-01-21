@@ -64,7 +64,7 @@ BruteForce::Train(const DatasetPtr& data) {
 }
 
 std::vector<int64_t>
-BruteForce::Add(const DatasetPtr& data) {
+BruteForce::Add(const DatasetPtr& data, AddMode mode) {
     std::vector<int64_t> failed_ids;
     auto base_dim = data->GetDim();
     CHECK_ARGUMENT(base_dim == dim_,
@@ -146,34 +146,44 @@ BruteForce::Add(const DatasetPtr& data) {
     return failed_ids;
 }
 
-bool
-BruteForce::Remove(int64_t label) {
+uint32_t
+BruteForce::Remove(const std::vector<int64_t>& ids, RemoveMode mode) {
     CHECK_ARGUMENT(not use_attribute_filter_,
                    "remove is not supported when use_attribute_filter is true");
 
-    std::scoped_lock lock(this->add_mutex_, this->label_lookup_mutex_);
-    const auto last_inner_id = static_cast<InnerIdType>(this->total_count_ - 1);
-    const auto inner_id = this->label_table_->GetIdByLabel(label);
-
-    CHECK_ARGUMENT(inner_id <= last_inner_id, "the element to be remove is invalid");
-
-    const auto last_label = this->label_table_->GetLabelById(last_inner_id);
-    this->label_table_->Remove(label);
-    --this->label_table_->total_count_;
-
-    if (inner_id < last_inner_id) {
-        Vector<float> data(dim_, allocator_);
-        GetVectorByInnerId(last_inner_id, data.data());
-
-        this->label_table_->Remove(last_label);
-        --this->label_table_->total_count_;
-
-        this->inner_codes_->InsertVector(data.data(), inner_id);
-        this->label_table_->Insert(inner_id, last_label);
+    uint32_t delete_count = 0;
+    if (mode == RemoveMode::MARK_REMOVE) {
+        std::scoped_lock label_lock(this->label_lookup_mutex_);
+        delete_count = this->label_table_->MarkRemove(ids);
+        delete_count_ += delete_count;
+        return delete_count;
     }
 
-    this->total_count_--;
-    return true;
+    std::scoped_lock lock(this->add_mutex_, this->label_lookup_mutex_);
+    for (auto label : ids) {
+        const auto last_inner_id = static_cast<InnerIdType>(this->total_count_ - 1);
+        const auto inner_id = this->label_table_->GetIdByLabel(label);
+
+        CHECK_ARGUMENT(inner_id <= last_inner_id, "the element to be remove is invalid");
+
+        const auto last_label = this->label_table_->GetLabelById(last_inner_id);
+        this->label_table_->MarkRemove(label);
+        --this->label_table_->total_count_;
+
+        if (inner_id < last_inner_id) {
+            Vector<float> data(dim_, allocator_);
+            GetVectorByInnerId(last_inner_id, data.data());
+
+            this->label_table_->MarkRemove(last_label);
+            --this->label_table_->total_count_;
+
+            this->inner_codes_->InsertVector(data.data(), inner_id);
+            this->label_table_->Insert(inner_id, last_label);
+        }
+
+        this->total_count_--;
+    }
+    return 1;
 }
 
 DatasetPtr
@@ -199,10 +209,18 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
     DistHeapPtr heap = nullptr;
     ExecutorPtr executor = nullptr;
     Filter* attr_filter = nullptr;
-    Filter* filter = nullptr;
+
+    auto combined_filter = std::make_shared<CombinedFilter>();
+    combined_filter->AppendFilter(this->label_table_->GetDeletedIdsFilter());
     if (request.filter_ != nullptr) {
-        filter = request.filter_.get();
+        combined_filter->AppendFilter(
+            std::make_shared<InnerIdWrapperFilter>(request.filter_, *this->label_table_));
     }
+    FilterPtr ft = nullptr;
+    if (not combined_filter->IsEmpty()) {
+        ft = combined_filter;
+    }
+
     if (request.enable_attribute_filter_) {
         auto& schema = this->attr_filter_index_->field_type_map_;
         auto expr = AstParse(request.attribute_filter_str_, &schema);
@@ -228,7 +246,7 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
             if (attr_filter != nullptr and not attr_filter->CheckValid(i)) {
                 continue;
             }
-            if (filter == nullptr or filter->CheckValid(this->label_table_->GetLabelById(i))) {
+            if (ft == nullptr or ft->CheckValid(i)) {
                 inner_codes_->Query(&dist, computer, &i, 1);
                 ++dist_cmp_local;
                 cur_heap->Push(dist, i);
