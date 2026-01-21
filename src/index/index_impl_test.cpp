@@ -67,7 +67,7 @@ TEST_CASE("immutable index test", "[ut][index_impl]") {
     REQUIRE_FALSE(result_add.has_value());
     REQUIRE(result_add.error().type == vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION);
 
-    auto result_remove = index->Remove(0);
+    auto result_remove = index->Remove({0});
     REQUIRE_FALSE(result_remove.has_value());
     REQUIRE(result_remove.error().type == vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION);
 
