@@ -29,6 +29,7 @@
 #include "datacell/flatten_interface.h"
 #include "datacell/sparse_graph_datacell.h"
 #include "dataset_impl.h"
+#include "impl/filter/filter_headers.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/odescent/odescent_graph_builder.h"
 #include "impl/pruning_strategy.h"
@@ -682,7 +683,7 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
 }
 
 std::vector<int64_t>
-HGraph::Add(const DatasetPtr& data) {
+HGraph::Add(const DatasetPtr& data, AddMode mode) {
     std::vector<int64_t> failed_ids;
     auto base_dim = data->GetDim();
     if (data_type_ != DataTypes::DATA_TYPE_SPARSE) {
@@ -831,13 +832,20 @@ HGraph::KnnSearch(const DatasetPtr& query,
     // check query vector
     CHECK_ARGUMENT(query->GetNumElements() == 1, "query dataset should contain 1 vector only");
 
-    FilterPtr ft = nullptr;
+    auto combined_filter = std::make_shared<CombinedFilter>();
+    combined_filter->AppendFilter(this->label_table_->GetDeletedIdsFilter());
     if (filter != nullptr) {
         if (params.use_extra_info_filter) {
-            ft = std::make_shared<ExtraInfoWrapperFilter>(filter, this->extra_infos_);
+            combined_filter->AppendFilter(
+                std::make_shared<ExtraInfoWrapperFilter>(filter, this->extra_infos_));
         } else {
-            ft = std::make_shared<InnerIdWrapperFilter>(filter, *this->label_table_);
+            combined_filter->AppendFilter(
+                std::make_shared<InnerIdWrapperFilter>(filter, *this->label_table_));
         }
+    }
+    FilterPtr ft = nullptr;
+    if (not combined_filter->IsEmpty()) {
+        ft = combined_filter;
     }
 
     if (iter_ctx == nullptr) {
@@ -1040,10 +1048,17 @@ HGraph::RangeSearch(const DatasetPtr& query,
     SearchStatistics stats;
     QueryContext ctx{.stats = &stats};
 
-    std::shared_ptr<InnerIdWrapperFilter> ft = nullptr;
+    auto combined_filter = std::make_shared<CombinedFilter>();
+    combined_filter->AppendFilter(this->label_table_->GetDeletedIdsFilter());
     if (filter != nullptr) {
-        ft = std::make_shared<InnerIdWrapperFilter>(filter, *this->label_table_);
+        combined_filter->AppendFilter(
+            std::make_shared<InnerIdWrapperFilter>(filter, *this->label_table_));
     }
+    FilterPtr ft = nullptr;
+    if (not combined_filter->IsEmpty()) {
+        ft = combined_filter;
+    }
+
     int64_t query_dim = query->GetDim();
     if (data_type_ != DataTypes::DATA_TYPE_SPARSE) {
         CHECK_ARGUMENT(
@@ -1479,7 +1494,7 @@ HGraph::GetMinAndMaxId() const {
         if (this->label_table_->IsRemoved(i)) {
             continue;
         }
-        auto label = this->label_table_->label_table_[i];
+        auto label = this->label_table_->GetLabelById(i);
         max_id = std::max(label, max_id);
         min_id = std::min(label, min_id);
     }
@@ -1514,7 +1529,7 @@ HGraph::add_one_point(const void* data, int level, InnerIdType inner_id) {
         add_lock.unlock();
     } else {
         add_lock.unlock();
-        std::shared_lock<std::shared_mutex> rlock(this->global_mutex_);
+        std::shared_lock rlock(this->global_mutex_);
         this->graph_add_one(data, level, inner_id);
     }
 }
@@ -1797,46 +1812,55 @@ HGraph::GetCodeByInnerId(InnerIdType inner_id, uint8_t* data) const {
     }
 }
 
-bool
-HGraph::Remove(int64_t id) {
-    InnerIdType inner_id;
-    {
-        std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
-        inner_id = this->label_table_->GetIdByLabel(id);
-    }
-    if (inner_id == this->entry_point_id_) {
-        bool find_new_ep = false;
-        while (not route_graphs_.empty()) {
-            auto& upper_graph = route_graphs_.back();
-            Vector<InnerIdType> neighbors(allocator_);
-            upper_graph->GetNeighbors(this->entry_point_id_, neighbors);
-            for (const auto& nb_id : neighbors) {
-                if (inner_id == nb_id) {
-                    continue;
-                }
-                this->entry_point_id_ = nb_id;
-                find_new_ep = true;
-                break;
-            }
-            if (find_new_ep) {
-                break;
-            }
-            route_graphs_.pop_back();
-        }
-    }
-    {
-        {
-            std::scoped_lock<std::shared_mutex> wlock(this->global_mutex_);
-            for (int level = static_cast<int>(route_graphs_.size()) - 1; level >= 0; --level) {
-                this->route_graphs_[level]->DeleteNeighborsById(inner_id);
-            }
-            this->bottom_graph_->DeleteNeighborsById(inner_id);
-        }
+uint32_t
+HGraph::Remove(const std::vector<int64_t>& ids, RemoveMode mode) {
+    uint32_t delete_count = 0;
+    if (mode == RemoveMode::MARK_REMOVE) {
         std::scoped_lock label_lock(this->label_lookup_mutex_);
-        this->label_table_->Remove(id);
-        delete_count_++;
+        delete_count = this->label_table_->MarkRemove(ids);
+        delete_count_ += delete_count;
+        return delete_count;
     }
-    return true;
+    for (const auto& id : ids) {
+        InnerIdType inner_id;
+        {
+            std::shared_lock lock(this->label_lookup_mutex_);
+            inner_id = this->label_table_->GetIdByLabel(id);
+        }
+        if (inner_id == this->entry_point_id_) {
+            bool find_new_ep = false;
+            while (not route_graphs_.empty()) {
+                auto& upper_graph = route_graphs_.back();
+                Vector<InnerIdType> neighbors(allocator_);
+                upper_graph->GetNeighbors(this->entry_point_id_, neighbors);
+                for (const auto& nb_id : neighbors) {
+                    if (inner_id == nb_id) {
+                        continue;
+                    }
+                    this->entry_point_id_ = nb_id;
+                    find_new_ep = true;
+                    break;
+                }
+                if (find_new_ep) {
+                    break;
+                }
+                route_graphs_.pop_back();
+            }
+        }
+        {
+            {
+                std::scoped_lock<std::shared_mutex> wlock(this->global_mutex_);
+                for (int level = static_cast<int>(route_graphs_.size()) - 1; level >= 0; --level) {
+                    this->route_graphs_[level]->DeleteNeighborsById(inner_id);
+                }
+                this->bottom_graph_->DeleteNeighborsById(inner_id);
+            }
+            std::scoped_lock label_lock(this->label_lookup_mutex_);
+            this->label_table_->MarkRemove(id);
+            delete_count++;
+        }
+    }
+    return delete_count;
 }
 
 void
@@ -1915,10 +1939,10 @@ HGraph::try_recover_tombstone(const DatasetPtr& data, std::vector<int64_t>& fail
                 return is_recovered;
             }
             // recover failed: roll back
-            Remove(label);
+            Remove({label});
         } catch (std::runtime_error& e) {
             // recover failed: roll back
-            Remove(label);
+            Remove({label});
         }
     }
 
@@ -2081,13 +2105,20 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         search_param.ep = result->Top().second;
     }
 
-    FilterPtr ft = nullptr;
+    auto combined_filter = std::make_shared<CombinedFilter>();
+    combined_filter->AppendFilter(this->label_table_->GetDeletedIdsFilter());
     if (request.filter_ != nullptr) {
         if (params.use_extra_info_filter) {
-            ft = std::make_shared<ExtraInfoWrapperFilter>(request.filter_, this->extra_infos_);
+            combined_filter->AppendFilter(
+                std::make_shared<ExtraInfoWrapperFilter>(request.filter_, this->extra_infos_));
         } else {
-            ft = std::make_shared<InnerIdWrapperFilter>(request.filter_, *this->label_table_);
+            combined_filter->AppendFilter(
+                std::make_shared<InnerIdWrapperFilter>(request.filter_, *this->label_table_));
         }
+    }
+    FilterPtr ft = nullptr;
+    if (not combined_filter->IsEmpty()) {
+        ft = combined_filter;
     }
 
     if (request.enable_attribute_filter_ and this->attr_filter_index_ != nullptr) {

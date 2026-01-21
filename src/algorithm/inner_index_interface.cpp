@@ -44,7 +44,6 @@ InnerIndexInterface::InnerIndexInterface(const InnerIndexParameterPtr& index_par
       train_sample_count_(index_param->train_sample_count),
       use_reorder_(index_param->use_reorder) {
     this->label_table_ = std::make_shared<LabelTable>(allocator_);
-    this->tomb_label_table_ = std::make_shared<LabelTable>(allocator_);
     this->index_feature_list_ = std::make_unique<IndexFeatureList>();
     this->index_feature_list_->SetFeature(SUPPORT_EXPORT_IDS);
     this->extra_info_size_ = common_param.extra_info_size_;

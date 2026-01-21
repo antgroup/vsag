@@ -22,6 +22,7 @@ set (FILTER_SRC
         inner_id_wrapper_filter.h
         white_list_filter.h
         white_list_filter.cpp
+        combined_filter.h
 )
 add_library (filter OBJECT ${FILTER_SRC})
 target_link_libraries (filter PRIVATE fmt::fmt coverage_config)

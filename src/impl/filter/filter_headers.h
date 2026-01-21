@@ -16,6 +16,7 @@
 #pragma once
 
 #include "black_list_filter.h"
+#include "combined_filter.h"
 #include "extrainfo_wrapper_filter.h"
 #include "inner_id_wrapper_filter.h"
 #include "white_list_filter.h"

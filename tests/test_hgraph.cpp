@@ -701,6 +701,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HGraphTestIndex,
     TestIndex::TestSerializeWriteFunc(index, index2, dataset, search_param, true);
     vsag::Options::Instance().set_block_size_limit(origin_size);
 }
+
 static void
 TestHGraphBuild(const fixtures::HGraphTestIndexPtr& test_index,
                 const fixtures::HGraphResourcePtr& resource) {
@@ -1051,14 +1052,12 @@ TEST_CASE("(Daily) HGraph ODescent Build", "[ft][hgraph][daily]") {
 }
 
 static void
-TestHGraphRemove(const fixtures::HGraphTestIndexPtr& test_index,
-                 const fixtures::HGraphResourcePtr& resource) {
+TestHGraphMarkRemove(const fixtures::HGraphTestIndexPtr& test_index,
+                     const fixtures::HGraphResourcePtr& resource) {
     using namespace fixtures;
-    auto test_recovery = GENERATE(true, false);
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
-
     for (auto metric_type : resource->metric_types) {
         for (auto dim : resource->dims) {
             for (auto& [base_quantization_str, recall] : resource->test_cases) {
@@ -1079,29 +1078,24 @@ TestHGraphRemove(const fixtures::HGraphTestIndexPtr& test_index,
                 auto index = TestIndex::TestFactory(test_index->name, param, true);
                 auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(
                     dim, resource->base_count, metric_type);
-                if (test_recovery) {
-                    TestIndex::TestRecoverRemoveIndex(index, dataset, search_param);
-                    HGraphTestIndex::TestGeneral(index, dataset, search_param, recall * 0.8, false);
-                } else {
-                    TestIndex::TestRemoveIndex(index, dataset, true);
-                    HGraphTestIndex::TestGeneral(index, dataset, search_param, recall);
-                }
+                TestIndex::TestMarkRemoveIndex(index, dataset, search_param, true);
+                HGraphTestIndex::TestGeneral(index, dataset, search_param, recall);
                 vsag::Options::Instance().set_block_size_limit(origin_size);
             }
         }
     }
 }
 
-TEST_CASE("(PR) HGraph Remove", "[ft][hgraph][pr]") {
+TEST_CASE("(PR) HGraph Mark Remove", "[ft][hgraph][pr]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(true);
-    TestHGraphRemove(test_index, resource);
+    TestHGraphMarkRemove(test_index, resource);
 }
 
-TEST_CASE("(Daily) HGraph Remove", "[ft][hgraph][daily]") {
+TEST_CASE("(Daily) HGraph Mark Remove", "[ft][hgraph][daily]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(false);
-    TestHGraphRemove(test_index, resource);
+    TestHGraphMarkRemove(test_index, resource);
 }
 
 static void

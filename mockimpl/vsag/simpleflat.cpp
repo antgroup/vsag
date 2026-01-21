@@ -69,7 +69,7 @@ SimpleFlat::Build(const DatasetPtr& base) {
 }
 
 tl::expected<std::vector<int64_t>, Error>
-SimpleFlat::Add(const DatasetPtr& base) {
+SimpleFlat::Add(const DatasetPtr& base, AddMode mode) {
     std::vector<int64_t> failed_ids;
     if (not this->data_.empty()) {
         if (this->dim_ != base->GetDim()) {
@@ -429,22 +429,25 @@ SimpleFlat::GetStats() const {
     return j.dump();
 }
 
-tl::expected<bool, Error>
-SimpleFlat::Remove(int64_t id) {
-    auto iter = std::find(ids_.begin(), ids_.end(), id);
-    if (iter != ids_.end()) {
-        int index = iter - ids_.begin();
-        num_elements_--;
-        ids_[index] = ids_[num_elements_];
-        std::memcpy(
-            data_.data() + index * dim_, data_.data() + num_elements_ * dim_, dim_ * sizeof(float));
-        ids_.resize(num_elements_);
-        data_.resize(num_elements_ * dim_);
-    } else {
-        return false;
+tl::expected<uint32_t, Error>
+SimpleFlat::Remove(const std::vector<int64_t>& ids, RemoveMode mode) {
+    uint32_t removed = 0;
+    for (auto id : ids) {
+        auto iter = std::find(ids_.begin(), ids_.end(), id);
+        if (iter != ids_.end()) {
+            int index = iter - ids_.begin();
+            num_elements_--;
+            ids_[index] = ids_[num_elements_];
+            std::memcpy(data_.data() + index * dim_,
+                        data_.data() + num_elements_ * dim_,
+                        dim_ * sizeof(float));
+            ids_.resize(num_elements_);
+            data_.resize(num_elements_ * dim_);
+            removed++;
+        }
     }
 
-    return true;
+    return removed;
 }
 
 }  // namespace vsag

@@ -29,10 +29,10 @@ public:
     Build(const DatasetPtr& base) override;
 
     virtual tl::expected<std::vector<int64_t>, Error>
-    Add(const DatasetPtr& base) override;
+    Add(const DatasetPtr& base, AddMode mode) override;
 
-    tl::expected<bool, Error>
-    Remove(int64_t id) override;
+    tl::expected<uint32_t, Error>
+    Remove(const std::vector<int64_t>& ids, RemoveMode mode) override;
 
     tl::expected<DatasetPtr, Error>
     KnnSearch(const DatasetPtr& query,

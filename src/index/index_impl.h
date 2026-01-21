@@ -70,10 +70,10 @@ public:
 
 public:
     tl::expected<std::vector<int64_t>, Error>
-    Add(const DatasetPtr& base) override {
+    Add(const DatasetPtr& base, AddMode mode = AddMode::DEFAULT) override {
         CHECK_IMMUTABLE_INDEX("add");
         CHECK_NONEMPTY_DATASET(base);
-        SAFE_CALL(return this->inner_index_->Add(base));
+        SAFE_CALL(return this->inner_index_->Add(base, mode));
     }
 
     std::string
@@ -402,10 +402,10 @@ public:
             query, radius, parameters, filter, limited_size));
     }
 
-    tl::expected<bool, Error>
-    Remove(int64_t id) override {
+    tl::expected<uint32_t, Error>
+    Remove(const std::vector<int64_t>& ids, RemoveMode mode = RemoveMode::MARK_REMOVE) override {
         CHECK_IMMUTABLE_INDEX("remove");
-        SAFE_CALL(return this->inner_index_->Remove(id));
+        SAFE_CALL(return this->inner_index_->Remove(ids, mode));
     }
 
     [[nodiscard]] tl::expected<BinarySet, Error>

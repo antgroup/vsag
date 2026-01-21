@@ -447,7 +447,7 @@ TEST_CASE("static hnsw", "[ut][hnsw]") {
         REQUIRE_THROWS(std::make_shared<HNSW>(incorrect_hnsw_obj, incorrect_common_param));
     }
 
-    auto remove_result = index->Remove(ids[0]);
+    auto remove_result = index->Index::Remove(ids[0]);
     REQUIRE_FALSE(remove_result.has_value());
     REQUIRE(remove_result.error().type == ErrorType::UNSUPPORTED_INDEX_OPERATION);
 }
@@ -1038,7 +1038,7 @@ TEST_CASE("extract/set data and graph", "[ut][hnsw]") {
         ->Ids(ids.data() + num_elements / 2)
         ->Float32Vectors(vectors.data() + num_elements / 2 * dim)
         ->Owner(false);
-    another_index->Add(dataset);
+    another_index->Add(dataset, AddMode::DEFAULT);
 
     JsonType search_parameters;
 

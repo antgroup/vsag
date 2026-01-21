@@ -90,7 +90,7 @@ public:
     }
 
     std::vector<int64_t>
-    Add(const DatasetPtr& base) override {
+    Add(const DatasetPtr& base, AddMode mode) override {
         return {};
     }
 
@@ -139,7 +139,7 @@ TEST_CASE("InnerIndexInterface NOT Implemented", "[ut][InnerIndexInterface]") {
     std::vector<int64_t> pretrain_ids;
     std::vector<MergeUnit> merge_units;
 
-    REQUIRE_THROWS(empty_index->Remove(0));
+    REQUIRE_THROWS(empty_index->Remove({0}));
     REQUIRE_THROWS(empty_index->GetNumberRemoved());
     REQUIRE_THROWS(empty_index->EstimateMemory(1000));
     REQUIRE_THROWS(empty_index->GetEstimateBuildMemory(1000));

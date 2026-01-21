@@ -50,7 +50,7 @@ SINDI::SINDI(const SINDIParameterPtr& param, const IndexCommonParam& common_para
 }
 
 std::vector<int64_t>
-SINDI::Add(const DatasetPtr& base) {
+SINDI::Add(const DatasetPtr& base, AddMode mode) {
     std::scoped_lock wlock(this->global_mutex_);
     std::vector<int64_t> failed_ids;
 
@@ -497,7 +497,7 @@ SINDI::GetMinAndMaxId() const {
         if (this->label_table_->IsRemoved(i)) {
             continue;
         }
-        auto label = this->label_table_->label_table_[i];
+        auto label = this->label_table_->GetLabelById(i);
         max_id = std::max(label, max_id);
         min_id = std::min(label, min_id);
     }

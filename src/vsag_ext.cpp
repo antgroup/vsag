@@ -115,9 +115,9 @@ IndexHandler::Add(DatasetHandler* base) {
     return index_->Add(base->dataset_);
 }
 
-tl::expected<bool, Error>
+tl::expected<uint32_t, Error>
 IndexHandler::Remove(int64_t id) {
-    return index_->Remove(id);
+    return index_->Remove({id});
 }
 
 tl::expected<DatasetHandler*, Error>
