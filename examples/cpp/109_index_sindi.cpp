@@ -127,7 +127,7 @@ main(int argc, char** argv) {
             "use_reorder": true,
             "term_id_limit": 1000000,
             "doc_prune_ratio": 0.0,
-            "window_size": 100000
+            "window_size": 60000
         }
     }
     )";
