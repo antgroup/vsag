@@ -212,11 +212,11 @@ jobs:
           path: ./build
       - name: Do Test In example
         run: |
+          cd ./build/examples/cpp
           echo race:libomp.so > omp.supp
           echo race:libomp.so.5 >> omp.supp
           echo race:fmt::v10::detail::format_decimal >> omp.supp
           export ASAN_OPTIONS=suppressions=omp.supp
-          cd ./build/examples/cpp
           for example in ./*; do
             filename=$(basename "$example")
             if [[ $filename =~ ^[0-9]{3} ]]; then
