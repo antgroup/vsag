@@ -56,7 +56,7 @@ public:
      * @return int64_t The memory usage of the resource object in bytes.
      */
     virtual int64_t
-    MemoryUsage() const = 0;
+    GetMemoryUsage() const = 0;
 };
 
 }  // namespace vsag

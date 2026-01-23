@@ -43,7 +43,7 @@ public:
     Resize(uint32_t new_element_num) = 0;
 
     virtual int64_t
-    GetCurrentMemoryUsage() = 0;
+    GetMemoryUsage() = 0;
 };
 
 class PointsMutex : public MutexArray {
@@ -66,7 +66,7 @@ public:
     Resize(uint32_t new_element_num) override;
 
     int64_t
-    GetCurrentMemoryUsage() override;
+    GetMemoryUsage() override;
 
 private:
     Vector<std::shared_ptr<std::shared_mutex>> neighbors_mutex_;
@@ -97,7 +97,7 @@ public:
     }
 
     int64_t
-    GetCurrentMemoryUsage() override {
+    GetMemoryUsage() override {
         return 0;
     }
 };

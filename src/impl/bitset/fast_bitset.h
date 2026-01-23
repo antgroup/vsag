@@ -78,7 +78,7 @@ public:
     Dump() override;
 
     int64_t
-    GetCurrentMemoryUsage() const override;
+    GetMemoryUsage() const override;
 
 private:
     void

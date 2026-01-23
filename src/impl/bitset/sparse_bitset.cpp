@@ -116,7 +116,7 @@ SparseBitset::Clear() {
 }
 
 int64_t
-SparseBitset::GetCurrentMemoryUsage() const {
+SparseBitset::GetMemoryUsage() const {
     return static_cast<int64_t>(sizeof(SparseBitset) + r_.getSizeInBytes());
 }
 

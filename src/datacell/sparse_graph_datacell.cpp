@@ -233,7 +233,7 @@ SparseGraphDataCell::GetIds() const {
 }
 
 int64_t
-SparseGraphDataCell::GetCurrentMemoryUsage() const {
+SparseGraphDataCell::GetMemoryUsage() const {
     auto memory = sizeof(SparseGraphDataCell);
     memory += neighbors_.size() * (sizeof(InnerIdType) + maximum_degree_ * sizeof(InnerIdType) +
                                    sizeof(std::nullptr_t));

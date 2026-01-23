@@ -119,10 +119,10 @@ public:
     GetCodesById(BucketIdType bucket_id, InnerIdType offset_id, uint8_t* data) const override;
 
     [[nodiscard]] int64_t
-    GetCurrentMemoryUsage() const override {
+    GetMemoryUsage() const override {
         int64_t memory = sizeof(BucketDataCell);
         for (BucketIdType bucket_id = 0; bucket_id < this->bucket_count_; bucket_id++) {
-            memory += this->datas_[bucket_id].GetCurrentMemoryUsage();
+            memory += this->datas_[bucket_id].GetMemoryUsage();
             memory += this->inner_ids_[bucket_id].size() * sizeof(InnerIdType);
             memory += this->residual_bias_[bucket_id].size() * sizeof(float);
             memory += sizeof(std::shared_mutex) + sizeof(InnerIdType);

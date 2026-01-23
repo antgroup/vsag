@@ -120,7 +120,7 @@ public:
     Unpack(){};
 
     [[nodiscard]] virtual int64_t
-    GetCurrentMemoryUsage() const = 0;
+    GetMemoryUsage() const = 0;
 
 public:
     BucketIdType bucket_count_{0};

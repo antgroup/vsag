@@ -309,11 +309,11 @@ AttributeBucketInvertedDataCell::GetAttribute(BucketIdType bucket_id,
 }
 
 int64_t
-AttributeBucketInvertedDataCell::GetCurrentMemoryUsage() const {
+AttributeBucketInvertedDataCell::GetMemoryUsage() const {
     auto memory_usage = sizeof(AttributeBucketInvertedDataCell);
 
     for (const auto& [name, value_map] : this->field_2_value_map_) {
-        memory_usage += value_map->GetCurrentMemoryUsage();
+        memory_usage += value_map->GetMemoryUsage();
         memory_usage += name.size() + sizeof(ValueMapPtr);
     }
     return static_cast<int64_t>(memory_usage);

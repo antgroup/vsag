@@ -104,6 +104,9 @@ target_link_libraries(317_feature_get_detail_data vsag)
 add_executable(318_feature_tune 318_feature_tune.cpp)
 target_link_libraries(318_feature_tune vsag)
 
+add_executable(319_feature_get_memory_usage 319_feature_get_memory_usage.cpp)
+target_link_libraries(319_feature_get_memory_usage vsag)
+
 add_executable (401_persistent_kv 401_persistent_kv.cpp)
 target_link_libraries (401_persistent_kv vsag)
 

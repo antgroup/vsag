@@ -246,7 +246,7 @@ FastBitset::resize(uint32_t new_size, uint64_t fill) {
 }
 
 int64_t
-FastBitset::GetCurrentMemoryUsage() const {
+FastBitset::GetMemoryUsage() const {
     return static_cast<int64_t>(sizeof(FastBitset) + this->size_ * sizeof(uint64_t));
 }
 

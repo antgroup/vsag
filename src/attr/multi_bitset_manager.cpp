@@ -106,12 +106,12 @@ MultiBitsetManager::Deserialize(lvalue_or_rvalue<StreamReader> reader) {
 }
 
 int64_t
-MultiBitsetManager::GetCurrentMemoryUsage() const {
+MultiBitsetManager::GetMemoryUsage() const {
     auto memory_usage = sizeof(MultiBitsetManager);
     memory_usage += bitsets_.size() * sizeof(std::nullptr_t);
     memory_usage += bitset_map_.size() * sizeof(int16_t);
     for (auto* bitset : bitsets_) {
-        memory_usage += bitset->GetCurrentMemoryUsage();
+        memory_usage += bitset->GetMemoryUsage();
     }
     return static_cast<int64_t>(memory_usage);
 }

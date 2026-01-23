@@ -83,7 +83,7 @@ public:
     Deserialize(StreamReader& reader) override;
 
     int64_t
-    GetCurrentMemoryUsage() const override;
+    GetMemoryUsage() const override;
 
     inline void
     SetIO(std::shared_ptr<BasicIO<IOTmpl>> io) {
@@ -176,10 +176,10 @@ ExtraInfoDataCell<IOTmpl>::Deserialize(StreamReader& reader) {
 
 template <typename IOTmpl>
 int64_t
-ExtraInfoDataCell<IOTmpl>::GetCurrentMemoryUsage() const {
+ExtraInfoDataCell<IOTmpl>::GetMemoryUsage() const {
     int64_t memory = sizeof(ExtraInfoDataCell<IOTmpl>);
     if (IOTmpl::InMemory) {
-        memory += this->io_->GetCurrentMemoryUsage();
+        memory += this->io_->GetMemoryUsage();
     }
     return memory;
 }

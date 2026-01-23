@@ -112,6 +112,9 @@ public:
     void
     GetSparseVector(uint32_t base_id, SparseVector* data, Allocator* specified_allocator);
 
+    [[nodiscard]] int64_t
+    GetMemoryUsage() const;
+
 private:
     template <InnerSearchMode mode, InnerSearchType type>
     void

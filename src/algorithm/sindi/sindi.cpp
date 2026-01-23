@@ -144,7 +144,7 @@ SINDI::Add(const DatasetPtr& base) {
             rerank_flat_index_->Add(single_base);
         }
     }
-
+    this->cal_memory_usage();
     return failed_ids;
 }
 
@@ -382,6 +382,22 @@ SINDI::RangeSearch(const DatasetPtr& query,
 }
 
 void
+SINDI::cal_memory_usage() {
+    auto memory = sizeof(SINDI);
+    memory += window_term_list_.size() * sizeof(SparseTermDataCellPtr);
+    for (auto& window : window_term_list_) {
+        memory += window->GetMemoryUsage();
+    }
+    if (this->rerank_flat_index_ != nullptr) {
+        memory += this->rerank_flat_index_->GetMemoryUsage();
+    }
+    memory += sizeof(QuantizationParams);
+
+    std::unique_lock lock(this->memory_usage_mutex_);
+    this->current_memory_usage_.store(static_cast<int64_t>(memory));
+}
+
+void
 SINDI::Serialize(StreamWriter& writer) const {
     std::shared_lock rlock(this->global_mutex_);
 
@@ -466,6 +482,7 @@ SINDI::Deserialize(StreamReader& reader) {
     if (use_reorder_) {
         rerank_flat_index_->Deserialize(reader_ref);
     }
+    this->cal_memory_usage();
 }
 
 std::pair<int64_t, int64_t>
