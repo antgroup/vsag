@@ -333,6 +333,26 @@ SparseTermDataCell::CalcDistanceByInnerId(const SparseTermComputerPtr& computer,
     return 1 + ip;
 }
 
+int64_t
+SparseTermDataCell::GetMemoryUsage() const {
+    auto memory = sizeof(SparseTermDataCell);
+    memory += term_ids_.size() * sizeof(std::unique_ptr<Vector<uint16_t>>);
+    memory += term_datas_.size() * sizeof(std::unique_ptr<Vector<uint8_t>>);
+    for (const auto& ptr : term_ids_) {
+        if (ptr != nullptr) {
+            memory += ptr->size() * sizeof(uint16_t);
+        }
+    }
+    for (const auto& ptr : term_datas_) {
+        if (ptr != nullptr) {
+            memory += ptr->size() * sizeof(uint8_t);
+        }
+    }
+    memory += sizeof(QuantizationParams);
+    memory += term_sizes_.size() * sizeof(uint32_t);
+    return static_cast<int64_t>(memory);
+}
+
 void
 SparseTermDataCell::GetSparseVector(uint32_t base_id,
                                     SparseVector* data,

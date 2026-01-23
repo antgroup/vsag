@@ -105,7 +105,7 @@ public:
                             "InitIO not implemented in FlattenInterface");
     }
     virtual int64_t
-    GetCurrentMemoryUsage() const {
+    GetMemoryUsage() const {
         return 0;
     }
 

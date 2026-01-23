@@ -2321,24 +2321,24 @@ HGraph::GetAttributeSetByInnerId(InnerIdType inner_id, AttributeSet* attr) const
 void
 HGraph::cal_memory_usage() {
     auto memory = sizeof(HGraph);
-    memory += this->neighbors_mutex_->GetCurrentMemoryUsage();
-    memory += this->pool_->GetCurrentMemoryUsage();
-    memory += this->label_table_->GetCurrentMemoryUsage();
-    memory += this->basic_flatten_codes_->GetCurrentMemoryUsage();
-    memory += this->bottom_graph_->GetCurrentMemoryUsage();
+    memory += this->neighbors_mutex_->GetMemoryUsage();
+    memory += this->pool_->GetMemoryUsage();
+    memory += this->label_table_->GetMemoryUsage();
+    memory += this->basic_flatten_codes_->GetMemoryUsage();
+    memory += this->bottom_graph_->GetMemoryUsage();
     for (auto& graph : this->route_graphs_) {
-        memory += graph->GetCurrentMemoryUsage();
+        memory += graph->GetMemoryUsage();
     }
     if (use_reorder_) {
-        memory += this->high_precise_codes_->GetCurrentMemoryUsage();
+        memory += this->high_precise_codes_->GetMemoryUsage();
     }
 
     if (this->extra_infos_ != nullptr and this->extra_info_size_ > 0) {
-        memory += this->extra_infos_->GetCurrentMemoryUsage();
+        memory += this->extra_infos_->GetMemoryUsage();
     }
 
     if (this->create_new_raw_vector_ and this->raw_vector_ != nullptr) {
-        memory += raw_vector_->GetCurrentMemoryUsage();
+        memory += raw_vector_->GetMemoryUsage();
     }
 
     std::unique_lock lock(this->memory_usage_mutex_);

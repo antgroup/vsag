@@ -47,7 +47,7 @@ public:
     Deserialize(lvalue_or_rvalue<StreamReader> reader) override;
 
     [[nodiscard]] int64_t
-    GetCurrentMemoryUsage() const override;
+    GetMemoryUsage() const override;
 
 public:
     IVFPartitionStrategyParametersPtr ivf_partition_strategy_param_{nullptr};

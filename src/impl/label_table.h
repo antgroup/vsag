@@ -295,7 +295,7 @@ public:
     MergeOther(const LabelTablePtr& other, const IdMapFunction& id_map = nullptr);
 
     int64_t
-    GetCurrentMemoryUsage() {
+    GetMemoryUsage() {
         return sizeof(LabelTable) + label_table_.size() * sizeof(LabelType) +
                label_remap_.size() * (sizeof(LabelType) + sizeof(InnerIdType)) +
                deleted_ids_.size() * sizeof(InnerIdType) +

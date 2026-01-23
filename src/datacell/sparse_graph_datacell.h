@@ -74,7 +74,7 @@ public:
     GetIds() const override;
 
     int64_t
-    GetCurrentMemoryUsage() const override;
+    GetMemoryUsage() const override;
 
 private:
     uint32_t code_line_size_{0};

@@ -219,7 +219,7 @@ public:
     }
 
     inline int64_t
-    GetCurrentMemoryUsage() const {
+    GetMemoryUsage() const {
         return this->size_;
     }
 

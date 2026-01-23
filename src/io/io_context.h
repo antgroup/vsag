@@ -43,7 +43,7 @@ public:
     Reset() override{};
 
     int64_t
-    MemoryUsage() const override {
+    GetMemoryUsage() const override {
         return sizeof(IOContext) +
                DEFAULT_REQUEST_COUNT * (sizeof(struct iocb) + sizeof(struct io_event));
     }

@@ -121,13 +121,13 @@ int64_t
 get_memory_usage(const UnorderedMap<T, MultiBitsetManager*>& map) {
     int64_t memory_usage = 0;
     for (const auto& [key, value] : map) {
-        memory_usage += sizeof(T) + value->GetCurrentMemoryUsage();
+        memory_usage += sizeof(T) + value->GetMemoryUsage();
     }
     return memory_usage;
 }
 
 int64_t
-AttrValueMap::GetCurrentMemoryUsage() const {
+AttrValueMap::GetMemoryUsage() const {
     int64_t memory_usage = sizeof(AttrValueMap);
     memory_usage += get_memory_usage(int64_to_bitset_);
     memory_usage += get_memory_usage(int32_to_bitset_);

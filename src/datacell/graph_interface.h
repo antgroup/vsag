@@ -81,7 +81,7 @@ public:
     }
 
     virtual int64_t
-    GetCurrentMemoryUsage() const {
+    GetMemoryUsage() const {
         return 0;
     }
 
