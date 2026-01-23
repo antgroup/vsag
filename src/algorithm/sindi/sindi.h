@@ -118,11 +118,6 @@ public:
     void
     SetImmutable() override;
 
-    int64_t
-    GetMemoryUsage() const override {
-        return this->CalSerializeSize();
-    }
-
 private:
     template <InnerSearchMode mode>
     DatasetPtr
@@ -133,6 +128,9 @@ private:
 
     std::pair<int64_t, int64_t>
     get_min_max_window_id(const FilterPtr& filter) const;
+
+    void
+    cal_memory_usage();
 
 private:
     mutable std::shared_mutex global_mutex_;

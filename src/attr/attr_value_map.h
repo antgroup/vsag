@@ -119,7 +119,7 @@ public:
     Deserialize(StreamReader& reader);
 
     int64_t
-    GetCurrentMemoryUsage() const;
+    GetMemoryUsage() const;
 
 private:
     template <class T>

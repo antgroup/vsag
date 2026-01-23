@@ -90,7 +90,7 @@ public:
     GetResidual(size_t n, const float* x, float* residuals, float* centroids, BucketIdType* assign);
 
     virtual int64_t
-    GetCurrentMemoryUsage() const {
+    GetMemoryUsage() const {
         return 0;
     }
 
