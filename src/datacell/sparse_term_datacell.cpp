@@ -390,7 +390,8 @@ SparseTermDataCell::Serialize(StreamWriter& writer) const {
         if (term_sizes_[i] != 0) {
             convert(*term_ids_[i], buffer_ids);
             StreamWriter::WriteVector(writer, buffer_ids);
-            buffer_data.resize(align_up(term_datas_[i]->size(), sizeof(float)) / sizeof(float));
+            auto buffer_size = align_up(term_datas_[i]->size(), sizeof(float)) / sizeof(float);
+            buffer_data.resize(buffer_size);
             std::memcpy(buffer_data.data(),
                         term_datas_[i]->data(),
                         sizeof(uint8_t) * term_datas_[i]->size());
@@ -413,7 +414,7 @@ SparseTermDataCell::Deserialize(StreamReader& reader) {
     for (auto i = 0; i < term_capacity; i++) {
         StreamReader::ReadVector(reader, ids_buffer);
         StreamReader::ReadVector(reader, data_buffer);
-        if (ids_buffer.size() != 0) {
+        if (not ids_buffer.empty()) {
             term_ids_[i] = std::make_unique<Vector<uint16_t>>(allocator_);
             term_datas_[i] =
                 std::make_unique<Vector<uint8_t>>(sizeof(float) * data_buffer.size(), allocator_);
