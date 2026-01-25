@@ -28,7 +28,7 @@ struct SINDIParam {
     bool deserialize_without_footer = false;
     bool deserialize_without_buffer = false;
     int term_id_limit = 2000;
-    bool use_quantization = true;
+    bool use_quantization = false;
 };
 
 class SINDITestIndex : public fixtures::TestIndex {
