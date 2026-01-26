@@ -390,7 +390,9 @@ SparseTermDataCell::Serialize(StreamWriter& writer) const {
         if (term_sizes_[i] != 0) {
             convert(*term_ids_[i], buffer_ids);
             StreamWriter::WriteVector(writer, buffer_ids);
-            auto buffer_size = align_up(term_datas_[i]->size(), sizeof(float)) / sizeof(float);
+            auto buffer_size =
+                align_up(static_cast<int64_t>(term_datas_[i]->size()), sizeof(float)) /
+                sizeof(float);
             buffer_data.resize(buffer_size);
             std::memcpy(buffer_data.data(),
                         term_datas_[i]->data(),
