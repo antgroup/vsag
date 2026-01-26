@@ -29,6 +29,7 @@
 #include "io/memory_io_parameter.h"
 #include "pyramid_zparameters.h"
 #include "quantization/fp32_quantizer_parameter.h"
+#include "query_context.h"
 #include "utils/lock_strategy.h"
 
 namespace vsag {
@@ -216,7 +217,7 @@ private:
                 const InnerSearchParam& search_param,
                 const DatasetPtr& query,
                 const FlattenInterfacePtr& codes,
-                Statistics& stats,
+                QueryContext& ctx,
                 uint64_t subindex_ef_search) const;
 
 private:

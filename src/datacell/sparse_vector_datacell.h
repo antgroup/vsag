@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include "algorithm/inner_index_interface.h"
 #include "flatten_interface.h"
 #include "io/basic_io.h"
 #include "io/memory_block_io.h"
@@ -36,7 +37,7 @@ public:
           const ComputerInterfacePtr& computer,
           const InnerIdType* idx,
           InnerIdType id_count,
-          Allocator* allocator = nullptr) override {
+          QueryContext* ctx = nullptr) override {
         auto comp = std::static_pointer_cast<Computer<QuantTmpl>>(computer);
         this->query(result_dists, comp, idx, id_count);
     }

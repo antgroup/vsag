@@ -24,6 +24,7 @@
 #include "index_common_param.h"
 #include "io/reader_io.h"
 #include "quantization/computer.h"
+#include "query_context.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "typing.h"
@@ -31,6 +32,7 @@
 #include "vsag/constants.h"
 
 namespace vsag {
+
 DEFINE_POINTER(FlattenInterface);
 
 class FlattenInterface {
@@ -46,7 +48,7 @@ public:
           const ComputerInterfacePtr& computer,
           const InnerIdType* idx,
           InnerIdType id_count,
-          Allocator* allocator = nullptr) = 0;
+          QueryContext* ctx = nullptr) = 0;
 
     virtual ComputerInterfacePtr
     FactoryComputer(const void* query) = 0;

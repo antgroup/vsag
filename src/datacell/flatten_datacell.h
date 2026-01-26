@@ -16,15 +16,20 @@
 #pragma once
 
 #include <algorithm>
+#include <atomic>
+#include <cstdint>
 #include <limits>
 #include <memory>
 
+#include "algorithm/inner_index_interface.h"
 #include "common.h"
 #include "flatten_interface.h"
 #include "io/basic_io.h"
 #include "io/memory_block_io.h"
 #include "quantization/quantizer.h"
+#include "query_context.h"
 #include "utils/byte_buffer.h"
+#include "utils/timer.h"
 
 namespace vsag {
 /*
@@ -44,9 +49,9 @@ public:
           const ComputerInterfacePtr& computer,
           const InnerIdType* idx,
           InnerIdType id_count,
-          Allocator* allocator = nullptr) override {
+          QueryContext* ctx = nullptr) override {
         auto comp = static_cast<Computer<QuantTmpl>*>(computer.get());
-        this->query(result_dists, comp, idx, id_count, allocator);
+        this->query(result_dists, comp, idx, id_count, ctx);
     }
 
     ComputerInterfacePtr
@@ -180,7 +185,7 @@ private:
           Computer<QuantTmpl>* computer,
           const InnerIdType* idx,
           InnerIdType id_count,
-          Allocator* allocator);
+          QueryContext* ctx);
 
     ComputerInterfacePtr
     factory_computer(const float* query) {
@@ -303,8 +308,9 @@ FlattenDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
                                           Computer<QuantTmpl>* computer,
                                           const InnerIdType* idx,
                                           InnerIdType id_count,
-                                          Allocator* allocator) {
-    Allocator* search_alloc = allocator == nullptr ? allocator_ : allocator;
+                                          QueryContext* ctx) {
+    Allocator* search_alloc = select_query_allocator(ctx, allocator_);
+
     for (uint32_t i = 0; i < this->prefetch_stride_code_ and i < id_count; i++) {
         this->io_->Prefetch(static_cast<uint64_t>(idx[i]) * static_cast<uint64_t>(code_size_),
                             this->prefetch_depth_code_ * 64);
@@ -317,7 +323,19 @@ FlattenDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
             for (int64_t i = 0; i < id_count; ++i) {
                 offsets[i] = static_cast<uint64_t>(idx[i]) * this->code_size_;
             }
-            this->io_->MultiRead(codes.data, sizes.data(), offsets.data(), id_count);
+
+            double io_cost_ms = 0.0F;
+            {
+                Timer timer(io_cost_ms);
+                this->io_->MultiRead(codes.data, sizes.data(), offsets.data(), id_count);
+            }
+
+            if (ctx != nullptr and ctx->stats != nullptr) {
+                ctx->stats->io_cnt.fetch_add(id_count, std::memory_order_relaxed);
+                ctx->stats->io_time_ms.fetch_add(static_cast<uint32_t>(io_cost_ms),
+                                                 std::memory_order_relaxed);
+            }
+
             computer->ScanBatchDists(id_count, codes.data, result_dists);
             return;
         }

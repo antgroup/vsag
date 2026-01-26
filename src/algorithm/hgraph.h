@@ -258,7 +258,8 @@ private:
                      const FlattenInterfacePtr& flatten,
                      InnerSearchParam& inner_search_param,
                      const VisitedListPtr& vt,
-                     Statistics& stats) const;
+                     // ctx can be nullptr in adding scenario
+                     QueryContext* ctx) const;
 
     template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH>
     DistHeapPtr
@@ -267,7 +268,8 @@ private:
                      const FlattenInterfacePtr& flatten,
                      InnerSearchParam& inner_search_param,
                      IteratorFilterContext* iter_ctx,
-                     Statistics& stats) const;
+                     // ctx can be nullptr in adding scenario
+                     QueryContext* ctx) const;
 
 private:
     // since v0.15
@@ -296,7 +298,8 @@ private:
             const FlattenInterfacePtr& flatten,
             DistHeapPtr& candidate_heap,
             int64_t k,
-            IteratorFilterContext* iter_ctx = nullptr) const;
+            IteratorFilterContext* iter_ctx,
+            QueryContext& ctx) const;
 
     void
     elp_optimize();

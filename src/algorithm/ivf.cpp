@@ -22,6 +22,7 @@
 #include "algorithm/inner_index_interface.h"
 #include "attr/argparse.h"
 #include "attr/executor/executor.h"
+#include "datacell/flatten_interface.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/inner_search_param.h"
 #include "impl/reorder/flatten_reorder.h"
@@ -31,6 +32,7 @@
 #include "inner_string_params.h"
 #include "ivf_partition/gno_imi_partition.h"
 #include "ivf_partition/ivf_nearest_partition.h"
+#include "query_context.h"
 #include "storage/serialization.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
@@ -385,9 +387,8 @@ IVF::Add(const DatasetPtr& base) {
     const auto* attr_sets = base->GetAttributeSets();
     const auto* extra_info = base->GetExtraInfos();
     const auto extra_info_size = base->GetExtraInfoSize();
-    Statistics discard_stats;
     auto buckets =
-        partition_strategy_->ClassifyDatas(vectors, num_element, buckets_per_data_, discard_stats);
+        partition_strategy_->ClassifyDatas(vectors, num_element, buckets_per_data_, nullptr);
 
     int64_t current_num;
     bool need_cal_memory_usage = false;
@@ -459,16 +460,18 @@ IVF::KnnSearch(const DatasetPtr& query,
                int64_t k,
                const std::string& parameters,
                const FilterPtr& filter) const {
+    SearchStatistics stats;
+    QueryContext ctx{.stats = &stats};
+
     auto param = this->create_search_param(parameters, filter);
     param.search_mode = KNN_SEARCH;
     param.topk = k;
     if (use_reorder_) {
         param.topk = static_cast<int64_t>(param.factor * static_cast<float>(k));
     }
-    Statistics stats;
-    auto search_result = this->search<KNN_SEARCH>(query, param, stats);
+    auto search_result = this->search<KNN_SEARCH>(query, param, ctx);
     if (use_reorder_) {
-        auto dataset_results = reorder(k, search_result, query->GetFloat32Vectors(), param, stats);
+        auto dataset_results = reorder(k, search_result, query->GetFloat32Vectors(), param, ctx);
         dataset_results->Statistics(stats.Dump());
         return std::move(dataset_results);
     }
@@ -489,6 +492,9 @@ IVF::RangeSearch(const DatasetPtr& query,
                  const std::string& parameters,
                  const FilterPtr& filter,
                  int64_t limited_size) const {
+    SearchStatistics stats;
+    QueryContext ctx{.stats = &stats};
+
     auto param = this->create_search_param(parameters, filter);
     param.search_mode = RANGE_SEARCH;
     param.radius = radius;
@@ -497,11 +503,10 @@ IVF::RangeSearch(const DatasetPtr& query,
         param.range_search_limit_size =
             static_cast<int>(param.factor * static_cast<float>(limited_size));
     }
-    Statistics stats;
-    auto search_result = this->search<RANGE_SEARCH>(query, param, stats);
+    auto search_result = this->search<RANGE_SEARCH>(query, param, ctx);
     if (use_reorder_) {
         int64_t k = (limited_size > 0) ? limited_size : static_cast<int64_t>(search_result->Size());
-        return reorder(k, search_result, query->GetFloat32Vectors(), param, stats);
+        return reorder(k, search_result, query->GetFloat32Vectors(), param, ctx);
     }
     auto count = static_cast<const int64_t>(search_result->Size());
     auto [dataset_results, dists, labels] = create_fast_dataset(count, allocator_);
@@ -704,9 +709,9 @@ IVF::reorder(int64_t topk,
              DistHeapPtr& input,
              const float* query,
              const InnerSearchParam& param,
-             Statistics& stats) const {
+             QueryContext& ctx) const {
     auto [dataset_results, dists, labels] = create_fast_dataset(topk, allocator_);
-    auto reorder_heap = reorder_->Reorder(input, query, topk, allocator_);
+    auto reorder_heap = reorder_->Reorder(input, query, topk, ctx);
     auto size = static_cast<int64_t>(reorder_heap->Size());
     for (int64_t j = size - 1; j >= 0; --j) {
         dists[j] = reorder_heap->Top().first;
@@ -730,11 +735,11 @@ IVF::ExportModel(const IndexCommonParam& param) const {
 
 template <InnerSearchMode mode>
 DistHeapPtr
-IVF::search(const DatasetPtr& query, const InnerSearchParam& param, Statistics& stats) const {
+IVF::search(const DatasetPtr& query, const InnerSearchParam& param, QueryContext& ctx) const {
     const auto* query_data = query->GetFloat32Vectors();
     Vector<float> normalize_data(dim_, allocator_);
     auto candidate_buckets =
-        partition_strategy_->ClassifyDatasForSearch(query_data, 1, param, stats);
+        partition_strategy_->ClassifyDatasForSearch(query_data, 1, param, &ctx);
     auto computer = bucket_->FactoryComputer(query_data);
 
     auto cur_heap_top = std::numeric_limits<float>::max();
@@ -772,8 +777,9 @@ IVF::search(const DatasetPtr& query, const InnerSearchParam& param, Statistics& 
         Vector<float> dist(allocator_);
         uint64_t i = cur_bucket_num.fetch_add(1);
         for (; i < bucket_count; i = cur_bucket_num.fetch_add(1)) {
-            if (param.time_cost != nullptr and param.time_cost->CheckOvertime()) {
-                stats.is_timeout.store(true, std::memory_order_relaxed);
+            if (param.time_cost != nullptr and param.time_cost->CheckOvertime() and
+                ctx.stats != nullptr) {
+                ctx.stats->is_timeout.store(true, std::memory_order_relaxed);
                 break;
             }
             auto bucket_id = candidate_buckets[i];
@@ -930,6 +936,9 @@ IVF::check_merge_illegal(const vsag::MergeUnit& unit) const {
 
 DatasetPtr
 IVF::SearchWithRequest(const SearchRequest& request) const {
+    SearchStatistics stats;
+    QueryContext ctx{.alloc = request.search_allocator_, .stats = &stats};
+
     auto param = this->create_search_param(request.params_str_, request.filter_);
     param.search_mode = KNN_SEARCH;
     param.topk = request.topk_;
@@ -947,10 +956,9 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
             param.executors.emplace_back(executor);
         }
     }
-    Statistics stats;
-    auto search_result = this->search<KNN_SEARCH>(query, param, stats);
+    auto search_result = this->search<KNN_SEARCH>(query, param, ctx);
     if (use_reorder_) {
-        return reorder(request.topk_, search_result, query->GetFloat32Vectors(), param, stats);
+        return reorder(request.topk_, search_result, query->GetFloat32Vectors(), param, ctx);
     }
     auto count = static_cast<const int64_t>(search_result->Size());
     auto [dataset_results, dists, labels] = create_fast_dataset(count, allocator_);

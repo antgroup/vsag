@@ -18,6 +18,7 @@
 #include <limits>
 #include <utility>
 
+#include "datacell/flatten_interface.h"
 #include "impl/heap/standard_heap.h"
 #include "utils/linear_congruential_generator.h"
 #include "utils/spsc_queue.h"
@@ -85,13 +86,14 @@ ParallelSearcher::Search(const GraphInterfacePtr& graph,
                          const VisitedListPtr& vl,
                          const void* query,
                          const InnerSearchParam& inner_search_param,
-                         const LabelTablePtr& label_table) const {
+                         const LabelTablePtr& label_table,
+                         QueryContext* ctx) const {
     if (inner_search_param.search_mode == KNN_SEARCH) {
         return this->search_impl<KNN_SEARCH>(
-            graph, flatten, vl, query, inner_search_param, label_table);
+            graph, flatten, vl, query, inner_search_param, label_table, ctx);
     }
     return this->search_impl<RANGE_SEARCH>(
-        graph, flatten, vl, query, inner_search_param, label_table);
+        graph, flatten, vl, query, inner_search_param, label_table, ctx);
 }
 
 template <InnerSearchMode mode>
@@ -101,9 +103,11 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
                               const VisitedListPtr& vl,
                               const void* query,
                               const InnerSearchParam& inner_search_param,
-                              const LabelTablePtr& label_table) const {
-    Allocator* alloc =
-        inner_search_param.search_alloc == nullptr ? allocator_ : inner_search_param.search_alloc;
+                              const LabelTablePtr& label_table,
+                              QueryContext* ctx) const {
+    // set customize query alloctor
+    Allocator* alloc = select_query_allocator(ctx, allocator_);
+
     auto top_candidates = std::make_shared<StandardHeap<true, false>>(alloc, -1);
     auto candidate_set = std::make_shared<StandardHeap<true, false>>(alloc, -1);
 
@@ -133,7 +137,7 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
     Vector<float> line_dists(vector_size, alloc);
     Vector<std::pair<float, uint64_t>> node_pair(beam, alloc);
 
-    flatten->Query(&dist, computer, &ep, 1, alloc);
+    flatten->Query(&dist, computer, &ep, 1, ctx);
     if (not is_id_allowed || is_id_allowed->CheckValid(ep)) {
         top_candidates->Push(dist, ep);
         lower_bound = top_candidates->Top().first;
@@ -163,7 +167,7 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
                 if (distances == nullptr) {
                     break;
                 }
-                flatten->Query(distances, computer, ids, count, alloc);
+                flatten->Query(distances, computer, ids, count, ctx);
                 num_points.fetch_add(count, std::memory_order_release);
             }
         }
@@ -231,7 +235,7 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
                            computer,
                            to_be_visited_id.data() + offset,
                            remaining_work,
-                           alloc);
+                           ctx);
             num_points.fetch_add(remaining_work, std::memory_order_release);
             offset += remaining_work;
         };

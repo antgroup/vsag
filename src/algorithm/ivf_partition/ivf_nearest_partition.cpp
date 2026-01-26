@@ -25,6 +25,7 @@
 #include "impl/allocator/safe_allocator.h"
 #include "impl/cluster/kmeans_cluster.h"
 #include "inner_string_params.h"
+#include "query_context.h"
 #include "utils/util_functions.h"
 
 namespace vsag {
@@ -90,7 +91,7 @@ Vector<BucketIdType>
 IVFNearestPartition::ClassifyDatas(const void* datas,
                                    int64_t count,
                                    BucketIdType buckets_per_data,
-                                   Statistics& stats) const {
+                                   QueryContext* ctx) const {
     std::mutex dist_cmp_reduce_mutex;
     uint32_t dist_cmp = 0;
     Vector<BucketIdType> result(buckets_per_data * count, -1, this->allocator_);
@@ -130,7 +131,9 @@ IVFNearestPartition::ClassifyDatas(const void* datas,
         }
     }
 
-    stats.dist_cmp.fetch_add(dist_cmp, std::memory_order_relaxed);
+    if (ctx != nullptr and ctx->stats != nullptr) {
+        ctx->stats->dist_cmp.fetch_add(dist_cmp, std::memory_order_relaxed);
+    }
 
     return std::move(result);
 }
