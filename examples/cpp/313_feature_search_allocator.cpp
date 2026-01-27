@@ -134,6 +134,7 @@ main() {
         auto result = index->KnnSearch(query, topk, search_param).value();
 
         // print the results
+
         std::cout << "results: " << std::endl;
         for (int64_t i = 0; i < result->GetDim(); ++i) {
             std::cout << result->GetIds()[i] << ": " << result->GetDistances()[i] << std::endl;
@@ -142,12 +143,11 @@ main() {
 
     /******************* HNSW Iterator Filter *****************/
     {
-        vsag::IteratorContext* iter_ctx;
         nlohmann::json search_parameters = {
             {"hnsw", {{"ef_search", 100}, {"skip_ratio", 0.7f}}},
         };
         std::string param_str = search_parameters.dump();
-        vsag::SearchParam search_param(true, param_str, nullptr, &allocator, iter_ctx, false);
+        vsag::SearchParam search_param(true, param_str, nullptr, &allocator, nullptr, false);
 
         /* first search */
         {
@@ -172,7 +172,7 @@ main() {
             }
         }
 
-        delete iter_ctx;
+        delete search_param.iter_ctx;
     }
 
     std::cout << "delete index" << std::endl;

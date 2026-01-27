@@ -213,6 +213,9 @@ jobs:
       - name: Do Test In example
         run: |
           cd ./build/examples/cpp
+          echo "leak:libgomp.so" > lsan.supp
+          echo "leak:libgomp.so.1" >> lsan.supp
+          export LSAN_OPTIONS=suppressions=$(pwd)/lsan.supp
           for example in ./*; do
             filename=$(basename "$example")
             if [[ $filename =~ ^[0-9]{3} ]]; then
