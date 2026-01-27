@@ -375,7 +375,7 @@ convert(const Vector<T>& input, Vector<U>& output) {
     output.clear();
     output.reserve(input.size());
     for (const auto& value : input) {
-        output.push_back(static_cast<uint16_t>(value));
+        output.push_back(static_cast<U>(value));
     }
 }
 
