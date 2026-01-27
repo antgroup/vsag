@@ -34,7 +34,8 @@ public:
     static std::string
     GenerateDiskANNBuildParametersString(const std::string& metric_type,
                                          int64_t dim,
-                                         bool use_bsa = false);
+                                         bool use_bsa = false,
+                                         bool support_cal_distance_by_id = false);
     static constexpr auto search_param_template = R"(
         {{
             "diskann": {{
@@ -54,7 +55,8 @@ TestDatasetPool DiskANNTestIndex::pool{};
 std::string
 DiskANNTestIndex::GenerateDiskANNBuildParametersString(const std::string& metric_type,
                                                        int64_t dim,
-                                                       bool use_bsa) {
+                                                       bool use_bsa,
+                                                       bool support_cal_distance_by_id) {
     constexpr auto build_parameter_json = R"(
         {{
             "dtype": "float32",
@@ -66,11 +68,13 @@ DiskANNTestIndex::GenerateDiskANNBuildParametersString(const std::string& metric
                 "pq_dims": 64,
                 "pq_sample_rate": 0.5,
                 "use_pq_search": true,
-                "use_bsa": {}
+                "use_bsa": {},
+                "support_cal_distance_by_id": {}
             }}
         }}
     )";
-    auto build_parameters_str = fmt::format(build_parameter_json, metric_type, dim, use_bsa);
+    auto build_parameters_str =
+        fmt::format(build_parameter_json, metric_type, dim, use_bsa, support_cal_distance_by_id);
     return build_parameters_str;
 }
 }  // namespace fixtures
@@ -83,6 +87,20 @@ TEST_CASE_METHOD(fixtures::DiskANNTestIndex, "diskann build test", "[ft][index][
         auto index = TestFactory(name, param, true);
         auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
         TestBuildIndex(index, dataset, true);
+        REQUIRE(index->GetIndexType() == vsag::IndexType::DISKANN);
+    }
+}
+
+TEST_CASE_METHOD(fixtures::DiskANNTestIndex, "diskann cal distance by id", "[ft][index][diskann]") {
+    auto dims = fixtures::get_common_used_dims(3);
+    auto metric_type = GENERATE("l2", "ip");
+    const std::string name = "diskann";
+    for (auto dim : dims) {
+        auto param = GenerateDiskANNBuildParametersString(metric_type, dim, false, true);
+        auto index = TestFactory(name, param, true);
+        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+        TestBuildIndex(index, dataset, true);
+        TestCalcDistanceById(index, dataset, true);
         REQUIRE(index->GetIndexType() == vsag::IndexType::DISKANN);
     }
 }
