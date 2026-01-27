@@ -817,6 +817,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
         (1 <= params.ef_search) and (params.ef_search <= ef_search_threshold),
         fmt::format("ef_search({}) must in range[1, {}]", params.ef_search, ef_search_threshold));
 
+    std::shared_lock shared_lock(this->global_mutex_);
     // check k
     CHECK_ARGUMENT(k > 0, fmt::format("k({}) must be greater than 0", k));
     k = std::min(k, GetNumElements());
