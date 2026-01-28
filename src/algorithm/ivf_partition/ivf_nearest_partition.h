@@ -19,6 +19,7 @@
 #include "index_common_param.h"
 #include "ivf_partition_strategy.h"
 #include "ivf_partition_strategy_parameter.h"
+#include "query_context.h"
 #include "vsag/index.h"
 namespace vsag {
 
@@ -35,7 +36,7 @@ public:
     ClassifyDatas(const void* datas,
                   int64_t count,
                   BucketIdType buckets_per_data,
-                  Statistics& stats) const override;
+                  QueryContext* ctx) const override;
 
     void
     GetCentroid(BucketIdType bucket_id, Vector<float>& centroid) override;

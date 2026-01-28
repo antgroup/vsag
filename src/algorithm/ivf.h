@@ -25,6 +25,7 @@
 #include "inner_index_interface.h"
 #include "ivf_parameter.h"
 #include "ivf_partition/ivf_partition_strategy.h"
+#include "query_context.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "typing.h"
@@ -143,14 +144,14 @@ private:
 
     template <InnerSearchMode mode = KNN_SEARCH>
     DistHeapPtr
-    search(const DatasetPtr& query, const InnerSearchParam& param, Statistics& stats) const;
+    search(const DatasetPtr& query, const InnerSearchParam& param, QueryContext& ctx) const;
 
     DatasetPtr
     reorder(int64_t topk,
             DistHeapPtr& input,
             const float* query,
             const InnerSearchParam& param,
-            Statistics& stats) const;
+            QueryContext& ctx) const;
 
     void
     merge_one_unit(const MergeUnit& unit);

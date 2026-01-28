@@ -21,6 +21,7 @@
 #include "ivf_nearest_partition.h"
 #include "ivf_partition_strategy.h"
 #include "ivf_partition_strategy_parameter.h"
+#include "query_context.h"
 #include "vsag/index.h"
 namespace vsag {
 
@@ -36,13 +37,13 @@ public:
     ClassifyDatas(const void* datas,
                   int64_t count,
                   BucketIdType buckets_per_data,
-                  Statistics& stats) const override;
+                  QueryContext* ctx) const override;
 
     Vector<BucketIdType>
     ClassifyDatasForSearch(const void* datas,
                            int64_t count,
                            const InnerSearchParam& param,
-                           Statistics& stats) override;
+                           QueryContext* ctx) override;
 
     void
     GetCentroid(BucketIdType bucket_id, Vector<float>& centroid) override;
@@ -75,7 +76,7 @@ private:
                                int64_t count,
                                BucketIdType buckets_per_data,
                                BucketIdType* result,
-                               Statistics& stats) const;
+                               QueryContext* ctx) const;
 };
 
 }  // namespace vsag

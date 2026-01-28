@@ -25,7 +25,7 @@ double
 Optimizer<OptimizableOBJ>::Optimize(std::shared_ptr<OptimizableOBJ> obj) {
     vsag::logger::info(fmt::format("============Start Optimize==========="));
     bool have_improvement = false;
-    Statistics stats;
+    SearchStatistics stats;
     double original_loss = obj->MockRun(stats);
 
     // generate a group of runtime params

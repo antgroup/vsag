@@ -38,7 +38,8 @@ public:
            const VisitedListPtr& vl,
            const void* query,
            const InnerSearchParam& inner_search_param,
-           const LabelTablePtr& label_table = nullptr) const;
+           const LabelTablePtr& label_table = nullptr,
+           QueryContext* ctx = nullptr) const;
 
     void
     SetMutexArray(MutexArrayPtr new_mutex_array);
@@ -64,7 +65,8 @@ private:
                 const VisitedListPtr& vl,
                 const void* query,
                 const InnerSearchParam& inner_search_param,
-                const LabelTablePtr& label_table = nullptr) const;
+                const LabelTablePtr& label_table = nullptr,
+                QueryContext* ctx = nullptr) const;
 
 private:
     Allocator* allocator_{nullptr};

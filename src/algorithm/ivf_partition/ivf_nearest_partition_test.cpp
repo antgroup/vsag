@@ -49,8 +49,7 @@ TEST_CASE("IVF Nearest Partition Basic Test", "[ut][IVFNearestPartition]") {
         dataset->Float32Vectors(vec.data())->Dim(dim)->NumElements(data_count)->Owner(false);
 
         partition->Train(dataset);
-        Statistics stats;
-        auto class_result = partition->ClassifyDatas(vec.data(), data_count, 1, stats);
+        auto class_result = partition->ClassifyDatas(vec.data(), data_count, 1, nullptr);
         REQUIRE(class_result.size() == data_count);
 
         auto index = partition->route_index_ptr_;
@@ -90,8 +89,7 @@ TEST_CASE("IVF Nearest Partition Serialize Test", "[ut][IVFNearestPartition]") {
     dataset->Float32Vectors(vec.data())->Dim(dim)->NumElements(data_count)->Owner(false);
 
     partition->Train(dataset);
-    Statistics stats;
-    auto class_result = partition->ClassifyDatas(vec.data(), data_count, 1, stats);
+    auto class_result = partition->ClassifyDatas(vec.data(), data_count, 1, nullptr);
     REQUIRE(class_result.size() == data_count);
 
     auto partition2 = std::make_unique<IVFNearestPartition>(bucket_count, param, strategy_param);
