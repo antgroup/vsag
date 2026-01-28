@@ -2255,7 +2255,7 @@ void PQFlashIndex<T, LabelT>::cal_distance_by_ids(const float *query, const int6
             throw diskann::ANNException("Tag " + std::to_string(ids[i]) + " not found in the index.", -1);
         }
     }
-    if (use_reorder) {
+    if (not use_reorder) {
         diskann::aggregate_coords(inner_ids, this->data, this->n_chunks, pq_coord_scratch.get());
         diskann::pq_dist_lookup(pq_coord_scratch.get(), count, this->n_chunks, pq_dists.get(), distances);
     } else {
@@ -2273,6 +2273,11 @@ void PQFlashIndex<T, LabelT>::cal_distance_by_ids(const float *query, const int6
             T *node_fp_coords = OFFSET_TO_NODE_COORDS(node_disk_buf);
             float exact_dist = dist_cmp_float->compare((float *)aligned_query_T.get(), (float *)node_fp_coords, (uint32_t)data_dim);
             distances[i] = exact_dist;
+        }
+    }
+    for (int64_t i = 0; i < count; ++i) {
+        if (metric == diskann::Metric::INNER_PRODUCT || metric == diskann::Metric::COSINE) {
+            distances[i] = distances[i] / 2;
         }
     }
 }

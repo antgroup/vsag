@@ -107,10 +107,15 @@ public:
     EstimateMemory(uint64_t num_elements) const override;
 
     float
-    CalcDistanceById(const DatasetPtr& vector, int64_t id) const override;
+    CalcDistanceById(const DatasetPtr& vector,
+                     int64_t id,
+                     bool calculate_precise_distance = true) const override;
 
     DatasetPtr
-    CalDistanceById(const DatasetPtr& query, const int64_t* ids, int64_t count) const override;
+    CalDistanceById(const DatasetPtr& query,
+                    const int64_t* ids,
+                    int64_t count,
+                    bool calculate_precise_distance = true) const override;
 
     std::pair<int64_t, int64_t>
     GetMinAndMaxId() const override;

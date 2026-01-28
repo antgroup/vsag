@@ -95,12 +95,52 @@ TEST_CASE_METHOD(fixtures::DiskANNTestIndex, "diskann cal distance by id", "[ft]
     auto dims = fixtures::get_common_used_dims(3);
     auto metric_type = GENERATE("l2", "ip");
     const std::string name = "diskann";
+    constexpr auto search_param_template = R"(
+        {{
+            "diskann": {{
+                "ef_search": {},
+                "io_limit": 400,
+                "beam_search": 4,
+                "use_reorder": {}
+            }}
+        }}
+    )";
     for (auto dim : dims) {
         auto param = GenerateDiskANNBuildParametersString(metric_type, dim, false, true);
         auto index = TestFactory(name, param, true);
         auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
         TestBuildIndex(index, dataset, true);
-        TestCalcDistanceById(index, dataset, true);
+        TestCalcDistanceById(index, dataset, 1e-5);
+        auto search_param = fmt::format(search_param_template, dim / 4, false);
+        auto queries = dataset->query_;
+        auto query_count = queries->GetNumElements();
+        auto topk = dataset->top_k;
+        for (auto i = 0; i < query_count; ++i) {
+            auto query = vsag::Dataset::Make();
+            query->NumElements(1)
+                ->Dim(queries->GetDim())
+                ->Float32Vectors(queries->GetFloat32Vectors() + i * queries->GetDim())
+                ->SparseVectors(queries->GetSparseVectors() + i)
+                ->Owner(false);
+            if (queries->GetPaths() != nullptr) {
+                query->Paths(queries->GetPaths() + i);
+            }
+            auto res = index->KnnSearch(query, topk, search_param).value();
+            auto ids = res->GetIds();
+            auto distances = res->GetDistances();
+            auto cal_res =
+                index
+                    ->CalDistanceById(queries->GetFloat32Vectors() + i * queries->GetDim(),
+                                      ids,
+                                      res->GetDim(),
+                                      false)
+                    .value();
+            auto cal_distance = cal_res->GetDistances();
+            for (auto j = 0; j < topk; ++j) {
+                fixtures::dist_t d = distances[j];
+                REQUIRE(d == cal_distance[j]);
+            }
+        }
         REQUIRE(index->GetIndexType() == vsag::IndexType::DISKANN);
     }
 }

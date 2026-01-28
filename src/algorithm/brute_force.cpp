@@ -308,7 +308,9 @@ BruteForce::RangeSearch(const vsag::DatasetPtr& query,
 }
 
 float
-BruteForce::CalcDistanceById(const float* vector, int64_t id) const {
+BruteForce::CalcDistanceById(const float* vector,
+                             int64_t id,
+                             bool calculate_precise_distance) const {
     auto computer = this->inner_codes_->FactoryComputer(vector);
     float result = 0.0F;
     InnerIdType inner_id = this->label_table_->GetIdByLabel(id);

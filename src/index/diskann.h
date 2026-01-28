@@ -72,13 +72,18 @@ public:
     }
 
     tl::expected<DatasetPtr, Error>
-    CalDistanceById(const float* query, const int64_t* ids, int64_t count) const override {
-        SAFE_CALL(return this->cal_distance_by_id(query, ids, count));
+    CalDistanceById(const float* query,
+                    const int64_t* ids,
+                    int64_t count,
+                    bool calculate_precise_distance = true) const override {
+        SAFE_CALL(return this->cal_distance_by_id(query, ids, count, calculate_precise_distance));
     }
 
     tl::expected<float, Error>
-    CalcDistanceById(const float* vector, int64_t id) const override {
-        SAFE_CALL(return this->calc_distance_by_id(vector, id));
+    CalcDistanceById(const float* vector,
+                     int64_t id,
+                     bool calculate_precise_distance = true) const override {
+        SAFE_CALL(return this->calc_distance_by_id(vector, id, calculate_precise_distance));
     }
 
     IndexType
@@ -198,10 +203,15 @@ private:
     continue_build(const DatasetPtr& base, const BinarySet& binary_set);
 
     DatasetPtr
-    cal_distance_by_id(const float* query, const int64_t* ids, int64_t count) const;
+    cal_distance_by_id(const float* query,
+                       const int64_t* ids,
+                       int64_t count,
+                       bool calculate_precise_distance = true) const;
 
     float
-    calc_distance_by_id(const float* vector, int64_t id) const;
+    calc_distance_by_id(const float* vector,
+                        int64_t id,
+                        bool calculate_precise_distance = true) const;
 
     tl::expected<DatasetPtr, Error>
     knn_search(const DatasetPtr& query,

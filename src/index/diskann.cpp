@@ -1398,17 +1398,22 @@ DiskANN::init_feature_list() {
 }
 
 DatasetPtr
-DiskANN::cal_distance_by_id(const float* query, const int64_t* ids, int64_t count) const {
+DiskANN::cal_distance_by_id(const float* query,
+                            const int64_t* ids,
+                            int64_t count,
+                            bool calculate_precise_distance) const {
     auto dataset = Dataset::Make();
     auto dists = new float[count];
     dataset->NumElements(count)->Distances(dists)->Owner(true);
-    this->index_->cal_distance_by_ids(query, ids, count, dists);
+    this->index_->cal_distance_by_ids(query, ids, count, dists, calculate_precise_distance);
     return dataset;
 }
 float
-DiskANN::calc_distance_by_id(const float* vector, int64_t id) const {
+DiskANN::calc_distance_by_id(const float* vector,
+                             int64_t id,
+                             bool calculate_precise_distance) const {
     float dist;
-    this->index_->cal_distance_by_ids(vector, &id, 1, &dist);
+    this->index_->cal_distance_by_ids(vector, &id, 1, &dist, calculate_precise_distance);
     return dist;
 }
 
