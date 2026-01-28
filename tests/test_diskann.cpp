@@ -35,7 +35,7 @@ public:
     GenerateDiskANNBuildParametersString(const std::string& metric_type,
                                          int64_t dim,
                                          bool use_bsa = false,
-                                         bool support_cal_distance_by_id = false);
+                                         bool support_calc_distance_by_id = false);
     static constexpr auto search_param_template = R"(
         {{
             "diskann": {{
@@ -56,7 +56,7 @@ std::string
 DiskANNTestIndex::GenerateDiskANNBuildParametersString(const std::string& metric_type,
                                                        int64_t dim,
                                                        bool use_bsa,
-                                                       bool support_cal_distance_by_id) {
+                                                       bool support_calc_distance_by_id) {
     constexpr auto build_parameter_json = R"(
         {{
             "dtype": "float32",
@@ -69,12 +69,12 @@ DiskANNTestIndex::GenerateDiskANNBuildParametersString(const std::string& metric
                 "pq_sample_rate": 0.5,
                 "use_pq_search": true,
                 "use_bsa": {},
-                "support_cal_distance_by_id": {}
+                "support_calc_distance_by_id": {}
             }}
         }}
     )";
     auto build_parameters_str =
-        fmt::format(build_parameter_json, metric_type, dim, use_bsa, support_cal_distance_by_id);
+        fmt::format(build_parameter_json, metric_type, dim, use_bsa, support_calc_distance_by_id);
     return build_parameters_str;
 }
 }  // namespace fixtures

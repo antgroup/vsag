@@ -200,7 +200,7 @@ template <typename T, typename LabelT = uint32_t> class PQFlashIndex
     bool reorder_data_exists = false;
     uint64_t reoreder_data_offset = 0;
 
-    bool support_call_distance_by_ids = false;
+    bool support_calc_distance_by_ids = false;
     std::unordered_map<uint32_t, int64_t > tag_to_id_map;
 
     // Graph related data structures

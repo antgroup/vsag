@@ -142,9 +142,9 @@ DiskannParameters::FromJson(
                                                 obj.graph_type));
     }
 
-    if (diskann_param_obj.Contains(DISKANN_SUPPORT_CAL_DISTANCE_BY_ID)) {
-        obj.support_cal_distance_by_id =
-            diskann_param_obj[DISKANN_SUPPORT_CAL_DISTANCE_BY_ID].GetBool();
+    if (diskann_param_obj.Contains(DISKANN_SUPPORT_CALC_DISTANCE_BY_ID)) {
+        obj.support_calc_distance_by_id =
+            diskann_param_obj[DISKANN_SUPPORT_CALC_DISTANCE_BY_ID].GetBool();
     }
     return obj;
 }

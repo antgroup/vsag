@@ -230,7 +230,7 @@ DiskANN::DiskANN(DiskannParameters& diskann_params, const IndexCommonParam& inde
       use_reference_(diskann_params.use_reference),
       use_opq_(diskann_params.use_opq),
       use_bsa_(diskann_params.use_bsa),
-      support_cal_distance_by_id_(diskann_params.support_cal_distance_by_id),
+      support_calc_distance_by_id_(diskann_params.support_calc_distance_by_id),
       diskann_params_(diskann_params),
       common_param_(index_common_param) {
     status_ = IndexStatus::EMPTY;
@@ -382,7 +382,7 @@ DiskANN::build(const DatasetPtr& base) {
         disk_layout_reader_ = std::make_shared<LocalMemoryReader>(disk_layout_stream_);
         reader_.reset(new LocalFileReader(batch_read_));
         index_.reset(new diskann::PQFlashIndex<float, int64_t>(
-            reader_, metric_, sector_len_, dim_, use_bsa_, support_cal_distance_by_id_));
+            reader_, metric_, sector_len_, dim_, use_bsa_, support_calc_distance_by_id_));
         index_->load_from_separate_paths(
             pq_pivots_stream_, disk_pq_compressed_vectors_, tag_stream_);
         if (preload_) {
@@ -872,7 +872,7 @@ DiskANN::deserialize(const ReaderSet& reader_set) {
         disk_layout_reader_ = reader_set.Get(DISKANN_LAYOUT_FILE);
         reader_.reset(new LocalFileReader(batch_read_));
         index_.reset(new diskann::PQFlashIndex<float, int64_t>(
-            reader_, metric_, sector_len_, dim_, use_bsa_, support_cal_distance_by_id_));
+            reader_, metric_, sector_len_, dim_, use_bsa_, support_calc_distance_by_id_));
         index_->load_from_separate_paths(pq_pivots_stream, disk_pq_compressed_vectors, tag_stream);
 
         auto graph_reader = reader_set.Get(DISKANN_GRAPH);
@@ -938,7 +938,7 @@ DiskANN::deserialize(const ReaderSet& reader_set) {
     disk_layout_reader_ = reader_set.Get(DISKANN_LAYOUT_FILE);
     reader_.reset(new LocalFileReader(batch_read_));
     index_.reset(new diskann::PQFlashIndex<float, int64_t>(
-        reader_, metric_, sector_len_, dim_, use_bsa_, support_cal_distance_by_id_));
+        reader_, metric_, sector_len_, dim_, use_bsa_, support_calc_distance_by_id_));
     index_->load_from_separate_paths(pq_pivots_stream, disk_pq_compressed_vectors, tag_stream);
 
     auto graph_reader = reader_set.Get(DISKANN_GRAPH);
@@ -1053,7 +1053,7 @@ DiskANN::deserialize(std::istream& in_stream) {
 
         reader_.reset(new LocalFileReader(batch_read_));
         index_.reset(new diskann::PQFlashIndex<float, int64_t>(
-            reader_, metric_, sector_len_, dim_, use_bsa_, support_cal_distance_by_id_));
+            reader_, metric_, sector_len_, dim_, use_bsa_, support_calc_distance_by_id_));
         index_->load_from_separate_paths(pq_pivots_stream, disk_pq_compressed_vectors, tag_stream);
 
         if (preload_) {
@@ -1346,7 +1346,7 @@ DiskANN::load_disk_index(const BinarySet& binary_set) {
     disk_layout_reader_ = std::make_shared<LocalMemoryReader>(disk_layout_stream_);
     reader_.reset(new LocalFileReader(batch_read_));
     index_.reset(new diskann::PQFlashIndex<float, int64_t>(
-        reader_, metric_, sector_len_, dim_, use_bsa_, support_cal_distance_by_id_));
+        reader_, metric_, sector_len_, dim_, use_bsa_, support_calc_distance_by_id_));
 
     convert_binary_to_stream(binary_set.Get(DISKANN_COMPRESSED_VECTOR),
                              disk_pq_compressed_vectors_);

@@ -50,7 +50,7 @@ public:
     int64_t turn = 40;
     float sample_rate = 0.3;
 
-    bool support_cal_distance_by_id = false;
+    bool support_calc_distance_by_id = false;
 
 private:
     DiskannParameters() = default;

@@ -292,7 +292,7 @@ private:
 
     int64_t build_batch_num_ = 10;
 
-    bool support_cal_distance_by_id_ = false;
+    bool support_calc_distance_by_id_ = false;
 
     int64_t dim_;
     bool use_reference_ = true;
