@@ -15,8 +15,8 @@
 
 #include "sparse_term_datacell.h"
 
+#include "utils/util_functions.h"
 #include "vsag/allocator.h"
-
 namespace vsag {
 
 void
@@ -389,16 +389,41 @@ SparseTermDataCell::GetSparseVector(uint32_t base_id,
     memcpy(data->vals_, vals.data(), data->len_ * sizeof(float));
 }
 
+template <typename T, typename U>
+void
+convert(const Vector<T>& input, Vector<U>& output) {
+    output.clear();
+    output.reserve(input.size());
+    for (const auto& value : input) {
+        output.push_back(static_cast<U>(value));
+    }
+}
+
 void
 SparseTermDataCell::Serialize(StreamWriter& writer) const {
     StreamWriter::WriteObj(writer, term_capacity_);
-    StreamWriter::WriteVector(writer, term_sizes_);
+    Vector<float> empty_data(allocator_);
+    Vector<uint32_t> empty_ids(allocator_);
+    Vector<float> buffer_data(allocator_);
+    Vector<uint32_t> buffer_ids(allocator_);
     for (auto i = 0; i < term_capacity_; i++) {
         if (term_sizes_[i] != 0) {
-            StreamWriter::WriteVector(writer, *term_ids_[i]);
-            StreamWriter::WriteVector(writer, *term_datas_[i]);
+            convert(*term_ids_[i], buffer_ids);
+            StreamWriter::WriteVector(writer, buffer_ids);
+            auto buffer_size =
+                align_up(static_cast<int64_t>(term_datas_[i]->size()), sizeof(float)) /
+                sizeof(float);
+            buffer_data.resize(buffer_size);
+            std::memcpy(buffer_data.data(),
+                        term_datas_[i]->data(),
+                        sizeof(uint8_t) * term_datas_[i]->size());
+            StreamWriter::WriteVector(writer, buffer_data);
+        } else {
+            StreamWriter::WriteVector(writer, empty_ids);
+            StreamWriter::WriteVector(writer, empty_data);
         }
     }
+    StreamWriter::WriteVector(writer, term_sizes_);
 }
 
 void
@@ -406,17 +431,24 @@ SparseTermDataCell::Deserialize(StreamReader& reader) {
     uint32_t term_capacity;
     StreamReader::ReadObj(reader, term_capacity);
     ResizeTermList(term_capacity);
-
-    StreamReader::ReadVector(reader, term_sizes_);
-
+    Vector<uint32_t> ids_buffer(allocator_);
+    Vector<float> data_buffer(allocator_);
     for (auto i = 0; i < term_capacity; i++) {
-        if (term_sizes_[i] != 0) {
+        StreamReader::ReadVector(reader, ids_buffer);
+        StreamReader::ReadVector(reader, data_buffer);
+        if (not ids_buffer.empty()) {
             term_ids_[i] = std::make_unique<Vector<uint16_t>>(allocator_);
-            term_datas_[i] = std::make_unique<Vector<uint8_t>>(allocator_);
-            StreamReader::ReadVector(reader, *term_ids_[i]);
-            StreamReader::ReadVector(reader, *term_datas_[i]);
+            term_datas_[i] =
+                std::make_unique<Vector<uint8_t>>(sizeof(float) * data_buffer.size(), allocator_);
+            std::memcpy(
+                term_datas_[i]->data(), data_buffer.data(), sizeof(float) * data_buffer.size());
+            convert(ids_buffer, *term_ids_[i]);
+            if (use_quantization_) {
+                term_datas_[i]->resize(term_ids_[i]->size());
+            }
         }
     }
+    StreamReader::ReadVector(reader, term_sizes_);
 }
 
 void
