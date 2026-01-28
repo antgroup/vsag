@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -33,6 +32,9 @@ enum AttrValueType {
     STRING = 9,
 };
 
+class Attribute;
+using AttributePtr = std::shared_ptr<Attribute>;
+
 class Attribute {
 public:
     std::string name_{};
@@ -51,7 +53,6 @@ public:
     [[nodiscard]] virtual bool
     Equal(const Attribute* other) const = 0;
 };
-using AttributePtr = std::shared_ptr<Attribute>;
 
 template <class T>
 class AttributeValue : public Attribute {
@@ -68,7 +69,7 @@ public:
     const std::vector<T>&
     GetValue() const;
 
-    Attribute*
+    [[nodiscard]] Attribute*
     DeepCopy() const override;
 
     bool
