@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include "algorithm/inner_index_interface.h"
 #include "impl/heap/distance_heap.h"
 #include "index/iterator_filter.h"
 #include "utils/pointer_define.h"
@@ -29,7 +30,7 @@ public:
     Reorder(const DistHeapPtr& input,
             const float* query,
             int64_t topk,
-            Allocator* allocator = nullptr,
+            QueryContext& ctx,
             IteratorFilterContext* iter_ctx = nullptr) = 0;
 };
 

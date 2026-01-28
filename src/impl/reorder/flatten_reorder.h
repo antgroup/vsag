@@ -17,6 +17,7 @@
 
 #include <memory>
 
+#include "algorithm/inner_index_interface.h"
 #include "datacell/flatten_interface.h"
 #include "impl/heap/distance_heap.h"
 #include "impl/reorder/reorder.h"
@@ -33,7 +34,7 @@ public:
     Reorder(const DistHeapPtr& input,
             const float* query,
             int64_t topk,
-            Allocator* allocator = nullptr,
+            QueryContext& ctx,
             IteratorFilterContext* iter_ctx = nullptr) override;
 
 private:

@@ -27,6 +27,7 @@
 #include "impl/blas/blas_function.h"
 #include "impl/cluster/kmeans_cluster.h"
 #include "inner_string_params.h"
+#include "query_context.h"
 #include "utils/util_functions.h"
 
 namespace vsag {
@@ -205,10 +206,10 @@ Vector<BucketIdType>
 GNOIMIPartition::ClassifyDatas(const void* datas,
                                int64_t count,
                                BucketIdType buckets_per_data,
-                               Statistics& stats) const {
+                               QueryContext* ctx) const {
     Vector<BucketIdType> result(buckets_per_data * count, this->allocator_);
     inner_joint_classify_datas(
-        reinterpret_cast<const float*>(datas), count, buckets_per_data, result.data(), stats);
+        reinterpret_cast<const float*>(datas), count, buckets_per_data, result.data(), ctx);
     return result;
 }
 
@@ -216,7 +217,7 @@ Vector<BucketIdType>
 GNOIMIPartition::ClassifyDatasForSearch(const void* datas,
                                         int64_t count,
                                         const InnerSearchParam& param,
-                                        Statistics& stats) {
+                                        QueryContext* ctx) {
     Vector<float> norm_vectors(allocator_);
     if (metric_type_ == MetricType::METRIC_TYPE_COSINE) {
         norm_vectors.resize(count * dim_);
@@ -356,7 +357,7 @@ GNOIMIPartition::inner_joint_classify_datas(const float* datas,
                                             int64_t count,
                                             BucketIdType buckets_per_data,
                                             BucketIdType* result,
-                                            Statistics& stats) const {
+                                            QueryContext* ctx) const {
     Vector<float> dist_to_s(bucket_count_s_ * count, this->allocator_);
     Vector<float> dist_to_t(bucket_count_t_ * count, this->allocator_);
     Vector<std::pair<float, BucketIdType>> precomputed_terms_s(bucket_count_s_, this->allocator_);
@@ -413,7 +414,9 @@ GNOIMIPartition::inner_joint_classify_datas(const float* datas,
         }
     }
 
-    stats.dist_cmp.fetch_add(dist_cmp, std::memory_order_relaxed);
+    if (ctx != nullptr and ctx->stats != nullptr) {
+        ctx->stats->dist_cmp.fetch_add(dist_cmp, std::memory_order_relaxed);
+    }
 }
 
 void

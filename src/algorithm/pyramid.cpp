@@ -21,6 +21,7 @@
 #include "impl/odescent/odescent_graph_builder.h"
 #include "impl/pruning_strategy.h"
 #include "io/memory_io_parameter.h"
+#include "query_context.h"
 #include "storage/empty_index_binary_set.h"
 #include "storage/serialization.h"
 #include "utils/slow_task_timer.h"
@@ -232,6 +233,9 @@ Pyramid::KnnSearch(const DatasetPtr& query,
                    int64_t k,
                    const std::string& parameters,
                    const FilterPtr& filter) const {
+    SearchStatistics stats;
+    QueryContext ctx{.stats = &stats};
+
     auto parsed_param = PyramidSearchParameters::FromJson(parameters);
     auto ef_search_threshold = std::max(AMPLIFICATION_FACTOR * k, 1000L);
     CHECK_ARGUMENT(  // NOLINT
@@ -256,10 +260,9 @@ Pyramid::KnnSearch(const DatasetPtr& query,
         search_param.is_inner_id_allowed =
             std::make_shared<InnerIdWrapperFilter>(filter, *label_table_);
     }
-    Statistics stats;
     SearchFunc search_func = [&](const IndexNode* node, const VisitedListPtr& vl) {
         return this->search_node(
-            node, vl, search_param, query, base_codes_, stats, parsed_param.subindex_ef_search);
+            node, vl, search_param, query, base_codes_, ctx, parsed_param.subindex_ef_search);
     };
 
     auto result = this->search_impl(query, k, search_func, parsed_param.ef_search);
@@ -274,6 +277,9 @@ Pyramid::RangeSearch(const DatasetPtr& query,
                      const FilterPtr& filter,
                      int64_t limited_size) const {
     CHECK_ARGUMENT(radius >= 0.0F, "radius must be non-negative");
+
+    SearchStatistics stats;
+    QueryContext ctx{.stats = &stats};
 
     auto parsed_param = PyramidSearchParameters::FromJson(parameters);
     InnerSearchParam search_param;
@@ -294,10 +300,9 @@ Pyramid::RangeSearch(const DatasetPtr& query,
         search_param.is_inner_id_allowed =
             std::make_shared<InnerIdWrapperFilter>(filter, *label_table_);
     }
-    Statistics stats;
     SearchFunc search_func = [&](const IndexNode* node, const VisitedListPtr& vl) {
         return this->search_node(
-            node, vl, search_param, query, base_codes_, stats, parsed_param.subindex_ef_search);
+            node, vl, search_param, query, base_codes_, ctx, parsed_param.subindex_ef_search);
     };
     int64_t final_limit = limited_size == -1 ? std::numeric_limits<int64_t>::max() : limited_size;
 
@@ -312,6 +317,9 @@ Pyramid::search_impl(const DatasetPtr& query,
                      const SearchFunc& search_func,
                      uint64_t ef_search,
                      float radius) const {
+    SearchStatistics stats;
+    QueryContext ctx{.stats = &stats};
+
     const auto* query_path = query->GetPaths();
     CHECK_ARGUMENT(  // NOLINT
         query_path != nullptr || root_->status_ != IndexNode::Status::NO_INDEX,
@@ -368,7 +376,8 @@ Pyramid::search_impl(const DatasetPtr& query,
     pool_->ReturnOne(vl);
 
     if (use_reorder_) {
-        search_result = this->reorder_->Reorder(search_result, query->GetFloat32Vectors(), limit);
+        search_result =
+            this->reorder_->Reorder(search_result, query->GetFloat32Vectors(), limit, ctx);
     }
 
     if (search_result->Empty()) {
@@ -761,9 +770,8 @@ Pyramid::add_one_point(const std::shared_ptr<IndexNode>& node,
         }
 
         auto vl = pool_->TakeOne();
-        Statistics discard_stats;
         auto results = searcher_->Search(
-            node->graph_, codes, vl, vector, search_param, (LabelTablePtr) nullptr, discard_stats);
+            node->graph_, codes, vl, vector, search_param, (LabelTablePtr) nullptr, nullptr);
         pool_->ReturnOne(vl);
         if (this->label_table_->CompressDuplicateData() && search_param.duplicate_id >= 0) {
             std::unique_lock lock(this->label_lookup_mutex_);
@@ -796,15 +804,16 @@ Pyramid::search_node(const IndexNode* node,
                      const InnerSearchParam& search_param,
                      const DatasetPtr& query,
                      const FlattenInterfacePtr& codes,
-                     Statistics& stats,
+                     QueryContext& ctx,
                      uint64_t subindex_ef_search) const {
     std::shared_lock lock(node->mutex_);
     DistHeapPtr results = nullptr;
 
     if (node->status_ == IndexNode::Status::FLAT) {
         results = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
-        if (search_param.time_cost != nullptr and search_param.time_cost->CheckOvertime()) {
-            stats.is_timeout.store(true, std::memory_order_relaxed);
+        if (search_param.time_cost != nullptr and search_param.time_cost->CheckOvertime() and
+            ctx.stats != nullptr) {
+            ctx.stats->is_timeout.store(true, std::memory_order_relaxed);
             return results;
         }
         const auto* ids_ptr = node->ids_.data();
@@ -853,7 +862,7 @@ Pyramid::search_node(const IndexNode* node,
                                     query->GetFloat32Vectors(),
                                     modified_param,
                                     label_table_,
-                                    stats);
+                                    &ctx);
     }
 
     return results;
