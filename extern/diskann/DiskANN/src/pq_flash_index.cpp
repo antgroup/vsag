@@ -2241,9 +2241,7 @@ void PQFlashIndex<T, LabelT>::cal_distance_by_ids(const float *query, const int6
     pq_table.preprocess_query(aligned_query_T.get());
     auto pq_dists = std::shared_ptr<float[]>(new float[NUM_CENTROID * this->n_chunks]);
     pq_table.populate_chunk_distances(aligned_query_T.get(), pq_dists.get());
-
-    auto dist_scratch = std::shared_ptr<float[]>(new float[this->max_degree]);
-    auto pq_coord_scratch = std::shared_ptr<uint8_t[]>(new uint8_t[this->max_degree * this->n_chunks]);
+    auto pq_coord_scratch = std::shared_ptr<uint8_t[]>(new uint8_t[count * this->n_chunks]);
 
     std::vector<uint32_t> inner_ids;
     inner_ids.resize(count);
