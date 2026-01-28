@@ -28,6 +28,7 @@ struct SINDIParam {
     bool deserialize_without_footer = false;
     bool deserialize_without_buffer = false;
     int term_id_limit = 2000;
+    bool use_quantization = false;
 };
 
 class SINDITestIndex : public fixtures::TestIndex {
@@ -57,7 +58,8 @@ public:
                 "window_size": {},
                 "term_id_limit": {},
                 "deserialize_without_footer": {},
-                "deserialize_without_buffer": {}
+                "deserialize_without_buffer": {},
+                "use_quantization": {}
             }}
         }})";
         return fmt::format(build_param_template,
@@ -66,7 +68,8 @@ public:
                            param.window_size,
                            param.term_id_limit,
                            param.deserialize_without_footer,
-                           param.deserialize_without_buffer);
+                           param.deserialize_without_buffer,
+                           param.use_quantization);
     }
 };
 TestDatasetPool SINDITestIndex::pool{};
@@ -199,6 +202,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Serialize File", "
     param.deserialize_without_footer = GENERATE(true, false);
     param.deserialize_without_buffer = true;
     param.use_reorder = GENERATE(true, false);
+    param.use_quantization = GENERATE(true, false);
     auto build_param = fixtures::SINDITestIndex::GenerateBuildParameter(param);
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
