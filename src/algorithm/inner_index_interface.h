@@ -43,23 +43,6 @@ DEFINE_POINTER(IndexFeatureList);
 
 class IndexCommonParam;
 
-class Statistics {
-public:
-    [[nodiscard]] std::string
-    Dump() const {
-        JsonType j;
-        j["is_timeout"].SetBool(is_timeout.load(std::memory_order_relaxed));
-        j["dist_cmp"].SetInt(dist_cmp.load(std::memory_order_relaxed));
-        j["hops"].SetInt(hops.load(std::memory_order_relaxed));
-        return j.Dump();
-    }
-
-public:
-    std::atomic<bool> is_timeout{false};
-    std::atomic<uint32_t> dist_cmp{0};
-    std::atomic<uint32_t> hops{0};
-};
-
 class InnerIndexInterface {
 public:
     InnerIndexInterface() = default;

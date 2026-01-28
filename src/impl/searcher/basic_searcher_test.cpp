@@ -16,6 +16,7 @@
 #include "basic_searcher.h"
 
 #include "algorithm/inner_index_interface.h"
+#include "datacell/flatten_interface.h"
 #include "searcher_test.h"
 #include "utils/visited_list.h"
 
@@ -135,18 +136,18 @@ TEST_CASE("Search with HNSW", "[ut][BasicSearcher]") {
         {
             // search with empty graph_data_cell
             auto vl = pool->TakeOne();
-            Statistics stats;
+            QueryContext* qctx = nullptr;
             auto failed_without_vector = searcher->Search(
-                graph_data_cell, nullptr, vl, base_vectors.data(), search_param, nullptr, stats);
+                graph_data_cell, nullptr, vl, base_vectors.data(), search_param, nullptr, qctx);
             pool->ReturnOne(vl);
             REQUIRE(failed_without_vector->Size() == 0);
         }
         {
             // search with empty vector_data_cell
             auto vl = pool->TakeOne();
-            Statistics stats;
+            QueryContext* qctx = nullptr;
             auto failed_without_graph = searcher->Search(
-                nullptr, vector_data_cell, vl, base_vectors.data(), search_param, nullptr, stats);
+                nullptr, vector_data_cell, vl, base_vectors.data(), search_param, nullptr, qctx);
             pool->ReturnOne(vl);
             REQUIRE(failed_without_graph->Size() == 0);
         }
@@ -179,14 +180,14 @@ TEST_CASE("Search with HNSW", "[ut][BasicSearcher]") {
         for (int i = 0; i < query_size; i++) {
             std::unordered_set<InnerIdType> valid_set, set;
             auto vl = pool->TakeOne();
-            Statistics stats;
+            QueryContext* ctx = nullptr;
             auto result = searcher->Search(graph_data_cell,
                                            vector_data_cell,
                                            vl,
                                            base_vectors.data() + i * dim,
                                            search_param,
                                            (LabelTablePtr) nullptr,
-                                           stats);
+                                           ctx);
             pool->ReturnOne(vl);
             auto result_size = result->Size();
             for (int j = 0; j < result_size; j++) {
@@ -312,7 +313,7 @@ TEST_CASE("Optimize SQ4", "[ut][BasicOptimizer]") {
 
     // searcher-optimizer
     searcher->SetMockParameters(graph_data_cell, vector_data_cell, pool, search_param, dim, 1000);
-    Statistics stats;
+    SearchStatistics stats;
     auto loss_before = searcher->MockRun(stats);
     auto optimizer_searcher = std::make_shared<Optimizer<BasicSearcher>>(common);
     optimizer_searcher->RegisterParameter(RuntimeParameter(PREFETCH_DEPTH_CODE, 1, 3, 1));

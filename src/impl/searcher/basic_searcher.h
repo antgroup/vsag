@@ -34,6 +34,7 @@ static constexpr uint32_t OPTIMIZE_SEARCHER_SAMPLE_SIZE = 10000;
 
 constexpr float THRESHOLD_ERROR = 2e-6;
 DEFINE_POINTER(BasicSearcher);
+
 class BasicSearcher {
 public:
     explicit BasicSearcher(const IndexCommonParam& common_param,
@@ -46,7 +47,7 @@ public:
            const void* query,
            const InnerSearchParam& inner_search_param,
            const LabelTablePtr& label_table,
-           Statistics& stats) const;
+           QueryContext* ctx) const;
 
     virtual DistHeapPtr
     Search(const GraphInterfacePtr& graph,
@@ -55,7 +56,7 @@ public:
            const void* query,
            const InnerSearchParam& inner_search_param,
            IteratorFilterContext* iter_ctx,
-           Statistics& stats) const;
+           QueryContext* ctx) const;
 
     virtual bool
     SetRuntimeParameters(const UnorderedMap<std::string, float>& new_params);
@@ -69,7 +70,7 @@ public:
                       const uint32_t n_trials = OPTIMIZE_SEARCHER_SAMPLE_SIZE);
 
     virtual double
-    MockRun(Statistics& stats) const;
+    MockRun(SearchStatistics& stats) const;
 
     void
     SetMutexArray(MutexArrayPtr new_mutex_array);
@@ -95,7 +96,7 @@ private:
                 const void* query,
                 const InnerSearchParam& inner_search_param,
                 const LabelTablePtr& label_table,
-                Statistics& stats) const;
+                QueryContext* ctx) const;
 
     template <InnerSearchMode mode = KNN_SEARCH>
     DistHeapPtr
@@ -105,7 +106,7 @@ private:
                 const void* query,
                 const InnerSearchParam& inner_search_param,
                 IteratorFilterContext* iter_ctx,
-                Statistics& stats) const;
+                QueryContext* ctx) const;
 
 private:
     Allocator* allocator_{nullptr};

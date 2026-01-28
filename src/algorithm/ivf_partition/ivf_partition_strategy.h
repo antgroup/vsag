@@ -59,14 +59,14 @@ public:
     ClassifyDatas(const void* datas,
                   int64_t count,
                   BucketIdType buckets_per_data,
-                  Statistics& stats) const = 0;
+                  QueryContext* ctx) const = 0;
 
     virtual Vector<BucketIdType>
     ClassifyDatasForSearch(const void* datas,
                            int64_t count,
                            const InnerSearchParam& param,
-                           Statistics& stats) {
-        return std::move(ClassifyDatas(datas, count, param.scan_bucket_size, stats));
+                           QueryContext* ctx) {
+        return std::move(ClassifyDatas(datas, count, param.scan_bucket_size, ctx));
     }
 
     virtual void
