@@ -22,6 +22,7 @@
 #include <iostream>
 #include <stdexcept>
 
+#include "../eval_progress.h"
 #include "../monitor/latency_monitor.h"
 #include "../monitor/memory_peak_monitor.h"
 #include "../monitor/recall_monitor.h"
@@ -157,6 +158,8 @@ SearchEvalCase::do_knn_search() {
     auto min_query = std::max(static_cast<uint64_t>(query_count), config_.search_query_count);
     for (auto& monitor : this->monitors_) {
         monitor->Start();
+        ProgressBar progress_bar(monitor->GetName(), min_query);
+        progress_bar.Start();
 
         omp_set_num_threads(config_.num_threads_searching);
 #pragma omp parallel for schedule(dynamic)
@@ -177,7 +180,7 @@ SearchEvalCase::do_knn_search() {
             auto result = this->index_->KnnSearch(query, topk, config_.search_param);
             if (not result.has_value()) {
                 std::cerr << "query error: " << result.error().message << std::endl;
-                exit(-1);
+                throw std::runtime_error(result.error().message);
             }
             const int64_t* neighbors = result.value()->GetIds();
             int64_t* ground_truth_neighbors = dataset_ptr_->GetNeighbors(i);
@@ -187,7 +190,9 @@ SearchEvalCase::do_knn_search() {
                                           query_vector,
                                           result.value()->GetDim());
             monitor->Record(&record);
+            progress_bar.Update();
         }
+        progress_bar.Finish();
         monitor->Stop();
     }
 }
@@ -212,6 +217,8 @@ SearchEvalCase::do_knn_filter_search() {
     auto min_query = std::max(query_count, 10000L);
     for (auto& monitor : this->monitors_) {
         monitor->Start();
+        ProgressBar progress_bar(monitor->GetName(), min_query);
+        progress_bar.Start();
         for (int64_t id = 0; id < min_query; ++id) {
             auto i = id % query_count;
             auto query = vsag::Dataset::Make();
@@ -228,14 +235,16 @@ SearchEvalCase::do_knn_filter_search() {
             auto result = this->index_->KnnSearch(query, topk, config_.search_param, filter);
             if (not result.has_value()) {
                 std::cerr << "query error: " << result.error().message << std::endl;
-                exit(-1);
+                throw std::runtime_error(result.error().message);
             }
             const int64_t* neighbors = result.value()->GetIds();
             int64_t* ground_truth_neighbors = dataset_ptr_->GetNeighbors(i);
             auto record = std::make_tuple(
                 neighbors, ground_truth_neighbors, dataset_ptr_.get(), query_vector, topk);
             monitor->Record(&record);
+            progress_bar.Update();
         }
+        progress_bar.Finish();
         monitor->Stop();
     }
 }

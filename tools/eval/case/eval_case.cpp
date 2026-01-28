@@ -42,6 +42,10 @@ EvalCase::MakeInstance(const EvalConfig& config, std::string type) {
 
     auto index = vsag::Factory::CreateIndex(index_name, create_params);
 
+    if (!index.has_value()) {
+        throw std::runtime_error("CreateIndex failed: " + index.error().message);
+    }
+
     // to support BuildSearch
     if (type == "none") {
         type = config.action_type;

@@ -152,13 +152,29 @@ EvalConfig::CheckKeyAndType(YAML::Node& yaml_node) {
     check_exist_and_get_value<>(yaml_node, "index_name");
     check_exist_and_get_value<>(yaml_node, "create_params");
     auto action = check_exist_and_get_value<>(yaml_node, "type");
+    if (action != "build" && action != "search" && action != "build,search") {
+        throw std::invalid_argument("action type error, must be build, search or build,search");
+    }
     if (action == "search") {
         check_exist_and_get_value<>(yaml_node, "search_params");
     }
     check_and_get_value<>(yaml_node, "search_mode");
+    if (yaml_node["search_mode"].IsDefined()) {
+        auto mode = yaml_node["search_mode"].as<std::string>();
+        if (mode != "knn" && mode != "range" && mode != "knn_filter" && mode != "range_filter") {
+            throw std::invalid_argument(
+                "search_mode error, must be knn, range, knn_filter or range_filter");
+        }
+    }
     check_and_get_value<>(yaml_node, "index_path");
     check_and_get_value<int>(yaml_node, "topk");
+    if (yaml_node["topk"].IsDefined() && yaml_node["topk"].as<int>() <= 0) {
+        throw std::invalid_argument("topk must be greater than 0");
+    }
     check_and_get_value<float>(yaml_node, "range");
+    if (yaml_node["range"].IsDefined() && yaml_node["range"].as<float>() < 0) {
+        throw std::invalid_argument("range must be greater or equal to 0");
+    }
     check_and_get_value<bool>(yaml_node, "disable_recall");
     check_and_get_value<bool>(yaml_node, "disable_percent_recall");
     check_and_get_value<bool>(yaml_node, "disable_qps");
