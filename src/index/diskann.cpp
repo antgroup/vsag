@@ -1403,7 +1403,7 @@ DiskANN::cal_distance_by_id(const float* query,
                             int64_t count,
                             bool calculate_precise_distance) const {
     auto dataset = Dataset::Make();
-    auto dists = new float[count];
+    auto* dists = new float[count];
     dataset->NumElements(count)->Distances(dists)->Owner(true);
     this->index_->cal_distance_by_ids(query, ids, count, dists, calculate_precise_distance);
     return dataset;
