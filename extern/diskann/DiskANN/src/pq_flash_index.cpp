@@ -43,9 +43,9 @@ namespace diskann
 {
 
 template <typename T, typename LabelT>
-PQFlashIndex<T, LabelT>::PQFlashIndex(std::shared_ptr<LocalFileReader> &fileReader, diskann::Metric m, size_t sector_len, size_t dim, bool use_bsa, bool support_call_distance_by_ids)
+PQFlashIndex<T, LabelT>::PQFlashIndex(std::shared_ptr<LocalFileReader> &fileReader, diskann::Metric m, size_t sector_len, size_t dim, bool use_bsa, bool support_calc_distance_by_ids)
     : reader(fileReader), metric(m), thread_data(nullptr), sector_len(sector_len), use_bsa(use_bsa), data_dim(dim),
-      support_calc_distance_by_ids(support_call_distance_by_ids)
+      support_calc_distance_by_ids(support_calc_distance_by_ids)
 {
     this->dist_cmp_float.reset(new VsagDistanceL2Float(data_dim));
 }

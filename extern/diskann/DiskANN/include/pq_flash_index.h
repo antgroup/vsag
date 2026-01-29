@@ -24,7 +24,7 @@ namespace diskann
 template <typename T, typename LabelT = uint32_t> class PQFlashIndex
 {
   public:
-    DISKANN_DLLEXPORT PQFlashIndex(std::shared_ptr<LocalFileReader> &fileReader, diskann::Metric m, size_t len, size_t dim, bool use_bsa = false, bool support_call_distance_by_ids = false);
+    DISKANN_DLLEXPORT PQFlashIndex(std::shared_ptr<LocalFileReader> &fileReader, diskann::Metric m, size_t len, size_t dim, bool use_bsa = false, bool support_calc_distance_by_ids = false);
     DISKANN_DLLEXPORT ~PQFlashIndex();
 
 #ifdef EXEC_ENV_OLS
