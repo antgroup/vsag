@@ -996,12 +996,15 @@ IVF::GetAttributeSetByInnerId(InnerIdType inner_id, AttributeSet* attr) const {
 }
 
 DatasetPtr
-IVF::CalDistanceById(const float* query, const int64_t* ids, int64_t count) const {
+IVF::CalDistanceById(const float* query,
+                     const int64_t* ids,
+                     int64_t count,
+                     bool calculate_precise_distance) const {
     auto result = Dataset::Make();
     result->Owner(true, allocator_);
     auto* distances = static_cast<float*>(allocator_->Allocate(sizeof(float) * count));
     result->Distances(distances);
-    if (this->use_reorder_) {
+    if (this->use_reorder_ && calculate_precise_distance) {
         auto computer = this->reorder_codes_->FactoryComputer(query);
         Vector<InnerIdType> inner_ids(count, allocator_);
         for (int64_t i = 0; i < count; ++i) {
@@ -1019,8 +1022,8 @@ IVF::CalDistanceById(const float* query, const int64_t* ids, int64_t count) cons
     return result;
 }
 float
-IVF::CalcDistanceById(const float* query, int64_t id) const {
-    if (this->use_reorder_) {
+IVF::CalcDistanceById(const float* query, int64_t id, bool calculate_precise_distance) const {
+    if (this->use_reorder_ && calculate_precise_distance) {
         float dist = 0.0F;
         auto computer = this->reorder_codes_->FactoryComputer(query);
         auto inner_id = this->label_table_->GetIdByLabel(id);

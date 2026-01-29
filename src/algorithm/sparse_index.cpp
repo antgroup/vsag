@@ -233,7 +233,9 @@ SparseIndex::CalDistanceByIdUnsafe(Vector<uint32_t>& sorted_ids,
 }
 
 float
-SparseIndex::CalcDistanceById(const DatasetPtr& vector, int64_t id) const {
+SparseIndex::CalcDistanceById(const DatasetPtr& vector,
+                              int64_t id,
+                              bool calculate_precise_distance) const {
     const auto* sparse_vectors = vector->GetSparseVectors();
     uint32_t inner_id = this->label_table_->GetIdByLabel(id);
     auto [sorted_ids, sorted_vals] = sort_sparse_vector(sparse_vectors[0]);
@@ -255,7 +257,10 @@ SparseIndex::GetSparseVectorByInnerId(InnerIdType inner_id,
 }
 
 DatasetPtr
-SparseIndex::CalDistanceById(const DatasetPtr& query, const int64_t* ids, int64_t count) const {
+SparseIndex::CalDistanceById(const DatasetPtr& query,
+                             const int64_t* ids,
+                             int64_t count,
+                             bool calculate_precise_distance) const {
     // prepare result
     auto result = Dataset::Make();
     result->Owner(true, allocator_);
