@@ -131,10 +131,15 @@ public:
     Build(const DatasetPtr& base) override;
 
     float
-    CalcDistanceById(const float* query, int64_t id) const override;
+    CalcDistanceById(const float* query,
+                     int64_t id,
+                     bool calculate_precise_distance = true) const override;
 
     DatasetPtr
-    CalDistanceById(const float* query, const int64_t* ids, int64_t count) const override;
+    CalDistanceById(const float* query,
+                    const int64_t* ids,
+                    int64_t count,
+                    bool calculate_precise_distance = true) const override;
 
     void
     Deserialize(StreamReader& reader) override;

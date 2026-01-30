@@ -43,8 +43,9 @@ namespace diskann
 {
 
 template <typename T, typename LabelT>
-PQFlashIndex<T, LabelT>::PQFlashIndex(std::shared_ptr<LocalFileReader> &fileReader, diskann::Metric m, size_t sector_len, size_t dim, bool use_bsa)
-    : reader(fileReader), metric(m), thread_data(nullptr), sector_len(sector_len), use_bsa(use_bsa), data_dim(dim)
+PQFlashIndex<T, LabelT>::PQFlashIndex(std::shared_ptr<LocalFileReader> &fileReader, diskann::Metric m, size_t sector_len, size_t dim, bool use_bsa, bool support_calc_distance_by_ids)
+    : reader(fileReader), metric(m), thread_data(nullptr), sector_len(sector_len), use_bsa(use_bsa), data_dim(dim),
+      support_calc_distance_by_ids(support_calc_distance_by_ids)
 {
     this->dist_cmp_float.reset(new VsagDistanceL2Float(data_dim));
 }
@@ -1349,6 +1350,12 @@ int PQFlashIndex<T, LabelT>::load_from_separate_paths(std::stringstream &pivots_
     size_t tag_len = 1;
     diskann::load_bin<LabelT>(tag_stream, this->tags, npts_u64, tag_len);
 
+    if (support_calc_distance_by_ids) {
+        for (uint64_t i = 0; i < npts_u64; ++i) {
+            tag_to_id_map[tags[i]] = i;
+        }
+    }
+
     pq_table.load_pq_centroid_bin(pivots_stream, nchunks_u64);
     // diskann::cout << "Loaded PQ centroids and in-memory compressed vectors. #points: " << num_points
     //               << " #dim: " << data_dim << " #aligned_dim: " << aligned_dim << " #chunks: " << n_chunks << std::endl;
@@ -2218,6 +2225,60 @@ int64_t PQFlashIndex<T, LabelT>::range_search(const T *query, const double range
     indices.resize(res_count);
     distances.resize(res_count);
     return res_count;
+}
+
+
+template <typename T, typename LabelT>
+void PQFlashIndex<T, LabelT>::cal_distance_by_ids(const float *query, const int64_t *ids, int64_t count,
+                                                  float *distances, bool use_reorder)
+{
+    std::shared_ptr<float[]> aligned_query_T = std::shared_ptr<float[]>(new float[this->data_dim]); // TODO: add support for other data type
+
+    for (size_t i = 0; i < this->data_dim; i++)
+    {
+        aligned_query_T[i] = (float) query[i];
+    }
+
+    pq_table.preprocess_query(aligned_query_T.get());
+    auto pq_dists = std::shared_ptr<float[]>(new float[NUM_CENTROID * this->n_chunks]);
+    pq_table.populate_chunk_distances(aligned_query_T.get(), pq_dists.get());
+    auto pq_coord_scratch = std::shared_ptr<uint8_t[]>(new uint8_t[count * this->n_chunks]);
+
+    std::vector<uint32_t> inner_ids;
+    inner_ids.resize(count);
+    for (int64_t i = 0; i < count; ++i) {
+        auto it = this->tag_to_id_map.find((LabelT)ids[i]);
+        if (it != this->tag_to_id_map.end()) {
+            inner_ids[i] = it->second;
+        } else {
+            throw diskann::ANNException("Tag " + std::to_string(ids[i]) + " not found in the index.", -1);
+        }
+    }
+    if (not use_reorder) {
+        diskann::aggregate_coords(inner_ids, this->data, this->n_chunks, pq_coord_scratch.get());
+        diskann::pq_dist_lookup(pq_coord_scratch.get(), count, this->n_chunks, pq_dists.get(), distances);
+    } else {
+        auto sector_scratch = std::shared_ptr<char[]>(new char[count * sector_len]);
+        std::vector<AlignedRead> sorted_read_reqs;
+        for (int64_t i = 0; i < count; ++i) {
+            uint32_t id = inner_ids[i];
+            sorted_read_reqs.emplace_back(NODE_SECTOR_NO(((size_t)id)) * sector_len, sector_len,
+                                          sector_scratch.get() + i * sector_len);
+        }
+        reader->read(sorted_read_reqs);
+        for (int64_t i = 0; i < count; ++i) {
+            uint32_t id = inner_ids[i];
+            char *node_disk_buf = OFFSET_TO_NODE(sector_scratch.get() + i * sector_len, id);
+            T *node_fp_coords = OFFSET_TO_NODE_COORDS(node_disk_buf);
+            float exact_dist = dist_cmp_float->compare((float *)aligned_query_T.get(), (float *)node_fp_coords, (uint32_t)data_dim);
+            distances[i] = exact_dist;
+        }
+    }
+    for (int64_t i = 0; i < count; ++i) {
+        if (metric == diskann::Metric::INNER_PRODUCT || metric == diskann::Metric::COSINE) {
+            distances[i] = distances[i] / 2;
+        }
+    }
 }
 
 template <typename T, typename LabelT> uint64_t PQFlashIndex<T, LabelT>::get_data_dim()
