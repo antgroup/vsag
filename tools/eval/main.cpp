@@ -161,7 +161,7 @@ parse_yaml_file(const std::string& yaml_file) {
                 std::cerr << "The root node is not a map!" << std::endl;
                 exit(-1);
             }
-        } catch (YAML::Exception& e) {
+        } catch (const std::exception& e) {
             std::cerr << "Error parsing YAML: " << e.what() << std::endl;
             exit(-1);
         }
@@ -186,31 +186,36 @@ main(int argc, char** argv) {
 
         vsag::eval::JsonType results;
         for (auto& [name, case_yaml_node] : job.cases) {
-            config = EvalConfig::Load(case_yaml_node, job);
-            vsag::Options::Instance().set_num_threads_building(config.num_threads_building);
+            try {
+                config = EvalConfig::Load(case_yaml_node, job);
+                vsag::Options::Instance().set_num_threads_building(config.num_threads_building);
 
-            auto eval_case = EvalCase::MakeInstance(config);
-            if (eval_case != nullptr) {
-                results[name] = eval_case->Run();
+                auto eval_case = EvalCase::MakeInstance(config);
+                if (eval_case != nullptr) {
+                    // Run one case
+                    auto single_result = eval_case->Run();
+                    // Save to global results
+                    results[name] = single_result;
+
+                    // Export immediately to prevent data loss if process crashes
+                    std::unordered_map<std::string, std::string> cached_strings;
+                    for (const auto& exporter : job.exporters) {
+                        if (cached_strings.find(exporter.format) == cached_strings.end()) {
+                            cached_strings[exporter.format] =
+                                Formatter::Create(exporter.format)->Format(results);
+                        }
+                        std::string formatted_string = cached_strings[exporter.format];
+
+                        Exporter::Create(exporter.to, exporter.vars)->Export(formatted_string);
+                    }
+                }
+            } catch (const std::exception& e) {
+                std::cerr << "case(" << name << ") error: " << e.what() << std::endl;
+                results[name]["error"] = e.what();
             }
         }
 
-        // <format, formatted_results>
-        std::unordered_map<std::string, std::string> cached_strings;
-        for (const auto& exporter : job.exporters) {
-            // std::cout << "export to " << exporter.to << " in " << exporter.format << std::endl;
-
-            // convert at first time
-            if (cached_strings.find(exporter.format) == cached_strings.end()) {
-                cached_strings[exporter.format] =
-                    Formatter::Create(exporter.format)->Format(results);
-            }
-            std::string formatted_string = cached_strings[exporter.format];
-
-            Exporter::Create(exporter.to, exporter.vars)->Export(formatted_string);
-        }
-
-        // by default, eval output as table/text format
+        // Final export (optional, mostly for non-accumulating exporters or ensuring final state)
         if (job.exporters.empty()) {
             std::cout << Formatter::Create("table")->Format(results) << std::endl;
         }
