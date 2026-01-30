@@ -19,8 +19,8 @@
 
 #include "common.h"
 #include "index_common_param.h"
+#include "inner_string_params.h"
 #include "vsag/constants.h"
-
 // NOLINTBEGIN(readability-simplify-boolean-expr)
 
 namespace vsag {
@@ -140,6 +140,11 @@ DiskannParameters::FromJson(
                                                 DISKANN_GRAPH_TYPE_VAMANA,
                                                 GRAPH_TYPE_ODESCENT,
                                                 obj.graph_type));
+    }
+
+    if (diskann_param_obj.Contains(DISKANN_SUPPORT_CALC_DISTANCE_BY_ID)) {
+        obj.support_calc_distance_by_id =
+            diskann_param_obj[DISKANN_SUPPORT_CALC_DISTANCE_BY_ID].GetBool();
     }
     return obj;
 }

@@ -228,8 +228,17 @@ public:
                             "Index doesn't support calculate distance by id");
     }
 
+    virtual float
+    CalcDistanceById(const float* query, int64_t id, bool calculate_precise_distance = true) const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index doesn't support calculate distance by id");
+    }
+
     virtual DatasetPtr
-    CalDistanceById(const float* query, const int64_t* ids, int64_t count) const;
+    CalDistanceById(const float* query,
+                    const int64_t* ids,
+                    int64_t count,
+                    bool calculate_precise_distance = true) const;
 
     virtual std::pair<int64_t, int64_t>
     GetMinAndMaxId() const {

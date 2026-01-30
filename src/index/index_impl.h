@@ -337,15 +337,21 @@ public:
             query, radius, parameters, filter, limited_size));
     }
 
-    tl::expected<float, Error>
-    CalcDistanceById(const float* vector, int64_t id) const override {
-        SAFE_CALL(return this->inner_index_->CalcDistanceById(vector, id));
-    }
+        tl::expected<float, Error>
+        CalcDistanceById(const DatasetPtr& vector,
+                         int64_t id,
+                         bool calculate_precise_distance = true) const override {
+            SAFE_CALL(
+                return this->inner_index_->CalcDistanceById(vector, id, calculate_precise_distance));
+        }
 
-    tl::expected<DatasetPtr, Error>
-    CalDistanceById(const float* query, const int64_t* ids, int64_t count) const override {
-        SAFE_CALL(return this->inner_index_->CalDistanceById(query, ids, count));
-    }
+        tl::expected<float, Error>
+        CalcDistanceById(const float* vector,
+                         int64_t id,
+                         bool calculate_precise_distance = true) const override {
+            SAFE_CALL(
+                return this->inner_index_->CalcDistanceById(vector, id, calculate_precise_distance));
+        }
 
     virtual tl::expected<void, Error>
     GetExtraInfoByIds(const int64_t* ids, int64_t count, char* extra_infos) const override {

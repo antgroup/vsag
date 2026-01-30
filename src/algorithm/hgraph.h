@@ -141,11 +141,17 @@ public:
     std::string
     GetMemoryUsageDetail() const override;
 
-    float
-    CalcDistanceById(const float* query, int64_t id) const override;
 
-    DatasetPtr
-    CalDistanceById(const float* query, const int64_t* ids, int64_t count) const override;
+        float
+        CalcDistanceById(const float* query,
+                         int64_t id,
+                         bool calculate_precise_distance = true) const override;
+
+        DatasetPtr
+        CalDistanceById(const float* query,
+                        const int64_t* ids,
+                        int64_t count,
+                        bool calculate_precise_distance = true) const override;
 
     std::pair<int64_t, int64_t>
     GetMinAndMaxId() const override;

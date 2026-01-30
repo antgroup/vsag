@@ -84,7 +84,9 @@ public:
                 int64_t limited_size = -1) const override;
 
     float
-    CalcDistanceById(const float* vector, int64_t id) const override;
+    CalcDistanceById(const float* vector,
+                     int64_t id,
+                     bool calculate_precise_distance = true) const override;
 
     void
     Serialize(StreamWriter& writer) const override;
