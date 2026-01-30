@@ -1441,24 +1441,27 @@ HGraph::GetMemoryUsageDetail() const {
 }
 
 float
-HGraph::CalcDistanceById(const float* query, int64_t id) const {
+HGraph::CalcDistanceById(const float* query, int64_t id, bool calculate_precise_distance) const {
     auto flat = this->basic_flatten_codes_;
-    if (use_reorder_) {
+    if (use_reorder_ && calculate_precise_distance) {
         flat = this->high_precise_codes_;
     }
-    if (create_new_raw_vector_) {
+    if (create_new_raw_vector_ && calculate_precise_distance) {
         flat = this->raw_vector_;
     }
     return InnerIndexInterface::calc_distance_by_id(query, id, flat);
 }
 
 DatasetPtr
-HGraph::CalDistanceById(const float* query, const int64_t* ids, int64_t count) const {
+HGraph::CalDistanceById(const float* query,
+                        const int64_t* ids,
+                        int64_t count,
+                        bool calculate_precise_distance) const {
     auto flat = this->basic_flatten_codes_;
-    if (use_reorder_) {
+    if (use_reorder_ && calculate_precise_distance) {
         flat = this->high_precise_codes_;
     }
-    if (create_new_raw_vector_) {
+    if (create_new_raw_vector_ && calculate_precise_distance) {
         flat = this->raw_vector_;
     }
     return InnerIndexInterface::cal_distance_by_id(query, ids, count, flat);
