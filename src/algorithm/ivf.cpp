@@ -375,7 +375,7 @@ IVF::Train(const DatasetPtr& data) {
 }
 
 std::vector<int64_t>
-IVF::Add(const DatasetPtr& base) {
+IVF::Add(const DatasetPtr& base, AddMode mode) {
     // TODO(LHT): duplicate
     if (not partition_strategy_->is_trained_) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "ivf index add without train error");
@@ -522,7 +522,7 @@ IVF::RangeSearch(const DatasetPtr& query,
 
 int64_t
 IVF::GetNumElements() const {
-    return this->total_elements_;
+    return this->total_elements_ - this->delete_count_;
 }
 
 void
@@ -542,6 +542,17 @@ IVF::get_location(InnerIdType inner_id) const {
     auto bucket_id = static_cast<BucketIdType>(loc >> LOCATION_SPLIT_BIT);
     auto offset_id = static_cast<InnerIdType>(loc & mask);
     return {bucket_id, offset_id};
+}
+
+uint32_t
+IVF::Remove(const std::vector<int64_t>& ids, RemoveMode mode) {
+    uint32_t delete_count = 0;
+    if (mode == RemoveMode::MARK_REMOVE) {
+        std::scoped_lock label_lock(this->label_lookup_mutex_);
+        delete_count = this->label_table_->MarkRemove(ids);
+        delete_count_ += delete_count;
+    }
+    return delete_count;
 }
 
 void
@@ -686,9 +697,15 @@ IVF::Deserialize(StreamReader& reader) {
 InnerSearchParam
 IVF::create_search_param(const std::string& parameters, const FilterPtr& filter) const {
     InnerSearchParam param;
-    std::shared_ptr<InnerIdWrapperFilter> ft = nullptr;
+    auto combined_filter = std::make_shared<CombinedFilter>();
+    combined_filter->AppendFilter(this->label_table_->GetDeletedIdsFilter());
     if (filter != nullptr) {
-        ft = std::make_shared<InnerIdWrapperFilter>(filter, *this->label_table_);
+        combined_filter->AppendFilter(
+            std::make_shared<InnerIdWrapperFilter>(filter, *this->label_table_));
+    }
+    FilterPtr ft = nullptr;
+    if (not combined_filter->IsEmpty()) {
+        ft = combined_filter;
     }
     param.is_inner_id_allowed = ft;
     auto search_param = IVFSearchParameters::FromJson(parameters);

@@ -58,7 +58,7 @@ public:
     FastCreateIndex(const std::string& index_fast_str, const IndexCommonParam& common_param);
 
     virtual std::vector<int64_t>
-    Add(const DatasetPtr& base) = 0;
+    Add(const DatasetPtr& base, AddMode mode = AddMode::DEFAULT) = 0;
 
     virtual std::string
     AnalyzeIndexBySearch(const SearchRequest& request) {
@@ -346,9 +346,14 @@ public:
         return this->RangeSearch(query, radius, parameters, filter, limited_size);
     }
 
-    virtual bool
-    Remove(int64_t id) {
+    virtual uint32_t
+    Remove(const std::vector<int64_t>& ids, RemoveMode mode = RemoveMode::MARK_REMOVE) {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION, "Index doesn't support Remove");
+    }
+
+    virtual uint32_t
+    Remove(int64_t id, RemoveMode mode = RemoveMode::MARK_REMOVE) {
+        return this->Remove(std::vector<int64_t>({id}), mode);
     }
 
     [[nodiscard]] virtual DatasetPtr
@@ -429,8 +434,6 @@ protected:
 public:
     LabelTablePtr label_table_{nullptr};
     mutable std::shared_mutex label_lookup_mutex_{};  // lock for label_lookup_ & labels_
-
-    LabelTablePtr tomb_label_table_{nullptr};
 
     Allocator* const allocator_{nullptr};
     int64_t dim_{0};
