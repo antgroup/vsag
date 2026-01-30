@@ -295,7 +295,10 @@ InnerIndexInterface::CalSerializeSize() const {
 }
 
 DatasetPtr
-InnerIndexInterface::CalDistanceById(const float* query, const int64_t* ids, int64_t count) const {
+InnerIndexInterface::CalDistanceById(const float* query,
+                                     const int64_t* ids,
+                                     int64_t count,
+                                     bool calculate_precise_distance) const {
     auto result = Dataset::Make();
     result->Owner(true, allocator_);
     auto* distances = static_cast<float*>(allocator_->Allocate(sizeof(float) * count));
@@ -309,7 +312,8 @@ InnerIndexInterface::CalDistanceById(const float* query, const int64_t* ids, int
 DatasetPtr
 InnerIndexInterface::CalDistanceById(const DatasetPtr& query,
                                      const int64_t* ids,
-                                     int64_t count) const {
+                                     int64_t count,
+                                     bool calculate_precise_distance) const {
     auto result = Dataset::Make();
     result->Owner(true, allocator_);
     auto* distances = static_cast<float*>(allocator_->Allocate(sizeof(float) * count));
