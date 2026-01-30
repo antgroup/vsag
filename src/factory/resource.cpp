@@ -21,26 +21,26 @@
 namespace vsag {
 
 Resource::Resource() {
-    this->allocator = SafeAllocator::FactoryDefaultAllocator();
-    this->thread_pool = SafeThreadPool::FactoryDefaultThreadPool();
+    this->allocator_ = SafeAllocator::FactoryDefaultAllocator();
+    this->thread_pool_ = SafeThreadPool::FactoryDefaultThreadPool();
 }
 
 Resource::Resource(Allocator* allocator, ThreadPool* thread_pool) {
     if (allocator != nullptr) {
-        this->allocator = std::make_shared<SafeAllocator>(allocator, false);
+        this->allocator_ = std::make_shared<SafeAllocator>(allocator, false);
     }
     if (thread_pool != nullptr) {
-        this->thread_pool = std::make_shared<SafeThreadPool>(thread_pool, false);
+        this->thread_pool_ = std::make_shared<SafeThreadPool>(thread_pool, false);
     }
 }
 
 Resource::Resource(const std::shared_ptr<Allocator>& allocator,
                    const std::shared_ptr<ThreadPool>& thread_pool) {
     if (allocator != nullptr) {
-        this->allocator = std::make_shared<SafeAllocator>(allocator);
+        this->allocator_ = std::make_shared<SafeAllocator>(allocator);
     }
     if (thread_pool != nullptr) {
-        this->thread_pool = std::make_shared<SafeThreadPool>(thread_pool);
+        this->thread_pool_ = std::make_shared<SafeThreadPool>(thread_pool);
     }
 }
 
