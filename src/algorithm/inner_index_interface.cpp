@@ -54,10 +54,10 @@ InnerIndexInterface::InnerIndexInterface(const InnerIndexParameterPtr& index_par
     }
 
     this->thread_pool_ = common_param.thread_pool_;
-    if (this->thread_pool_ == nullptr) {
-        this->thread_pool_ = SafeThreadPool::FactoryDefaultThreadPool();
-    }
     if (this->build_thread_count_ > 1) {
+        if (this->thread_pool_ == nullptr) {
+            this->thread_pool_ = SafeThreadPool::FactoryDefaultThreadPool();
+        }
         this->thread_pool_->SetPoolSize(build_thread_count_);
     }
 
