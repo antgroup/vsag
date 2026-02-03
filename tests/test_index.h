@@ -71,6 +71,12 @@ public:
                  bool expected_success = true);
 
     static void
+    TestMarkRemoveIndex(const IndexPtr& index,
+                        const TestDatasetPtr& dataset,
+                        const std::string& search_param,
+                        bool expected_success = true);
+
+    static void
     TestRemoveIndex(const IndexPtr& index,
                     const TestDatasetPtr& dataset,
                     bool expected_success = true);

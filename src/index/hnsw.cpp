@@ -124,7 +124,7 @@ HNSW::build(const DatasetPtr& base) {
 
         int64_t num_elements = base->GetNumElements();
 
-        std::unique_lock lock(rw_mutex_);
+        std::scoped_lock lock(rw_mutex_);
 
         const auto* ids = base->GetIds();
         void* vectors = nullptr;
@@ -587,7 +587,7 @@ HNSW::deserialize(const BinarySet& binary_set) {
     };
 
     try {
-        std::unique_lock lock(rw_mutex_);
+        std::scoped_lock lock(rw_mutex_);
         int64_t cursor = 0;
         ReadFuncStreamReader reader(func, cursor, b.size);
         BufferStreamReader buffer_reader(&reader, b.size, allocator_.get());
@@ -649,7 +649,7 @@ HNSW::deserialize(const ReaderSet& reader_set) {
     };
 
     try {
-        std::unique_lock lock(rw_mutex_);
+        std::scoped_lock lock(rw_mutex_);
 
         int64_t cursor = 0;
         ReadFuncStreamReader reader(func, cursor, hnsw_data->Size());
@@ -710,7 +710,7 @@ HNSW::deserialize(std::istream& in_stream) {
 
     SlowTaskTimer t("hnsw deserialize");
     try {
-        std::unique_lock lock(rw_mutex_);
+        std::scoped_lock lock(rw_mutex_);
 
         IOStreamReader reader(in_stream);
         auto footer = Footer::Parse(reader);
@@ -837,8 +837,10 @@ HNSW::update_vector(int64_t id, const DatasetPtr& new_base, bool force_update) {
     return true;
 }
 
-tl::expected<bool, Error>
-HNSW::remove(int64_t id) {
+tl::expected<uint32_t, Error>
+HNSW::remove(const std::vector<int64_t>& ids) {
+    uint32_t remove_count = 0;
+
     std::shared_lock status_lock(index_status_mutex_);
     if (not this->IsValidStatus()) {
         LOG_ERROR_AND_RETURNS(
@@ -849,21 +851,22 @@ HNSW::remove(int64_t id) {
         LOG_ERROR_AND_RETURNS(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                               "static hnsw does not support remove");
     }
+    for (auto id : ids) {
+        try {
+            std::scoped_lock lock(rw_mutex_);
 
-    try {
-        std::unique_lock lock(rw_mutex_);
-
-        if (use_reversed_edges_) {
-            std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)->removePoint(id);
-        } else {
-            std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)->markDelete(id);
+            if (use_reversed_edges_) {
+                std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)->removePoint(id);
+            } else {
+                std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)->markDelete(id);
+            }
+            ++remove_count;
+        } catch (const std::runtime_error& e) {
+            logger::warn("mark delete error for id {}: {}", id, e.what());
         }
-    } catch (const std::runtime_error& e) {
-        logger::warn("mark delete error for id {}: {}", id, e.what());
-        return false;
     }
 
-    return true;
+    return remove_count;
 }
 
 tl::expected<uint32_t, Error>
@@ -903,7 +906,7 @@ HNSW::feedback(const DatasetPtr& query,
                               result.error().message);
     }
 
-    std::unique_lock lock(rw_mutex_);
+    std::scoped_lock lock(rw_mutex_);
 
     return this->feedback(*result, global_optimum_tag_id, k);
 }
@@ -1401,7 +1404,7 @@ HNSW::knn_search_internal<std::function<bool(int64_t)>>(
 
 void
 HNSW::set_immutable() {
-    std::unique_lock lock(rw_mutex_);
+    std::scoped_lock lock(rw_mutex_);
     alg_hnsw_->setImmutable();
 }
 

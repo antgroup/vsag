@@ -125,7 +125,7 @@ public:
     ~Pyramid() = default;
 
     std::vector<int64_t>
-    Add(const DatasetPtr& base) override;
+    Add(const DatasetPtr& base, AddMode mode = AddMode::DEFAULT) override;
 
     std::vector<int64_t>
     Build(const DatasetPtr& base) override;

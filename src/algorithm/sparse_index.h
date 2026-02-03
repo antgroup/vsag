@@ -36,7 +36,7 @@ public:
     ~SparseIndex() override;
 
     std::vector<int64_t>
-    Add(const DatasetPtr& base) override;
+    Add(const DatasetPtr& base, AddMode mode = AddMode::DEFAULT) override;
 
     DatasetPtr
     CalDistanceById(const DatasetPtr& query,

@@ -455,7 +455,7 @@ Pyramid::Deserialize(StreamReader& reader) {
 }
 
 std::vector<int64_t>
-Pyramid::Add(const DatasetPtr& base) {
+Pyramid::Add(const DatasetPtr& base, AddMode mode) {
     const auto* path = base->GetPaths();
     CHECK_ARGUMENT(path != nullptr, "path is required");
     int64_t data_num = base->GetNumElements();
@@ -872,12 +872,10 @@ Pyramid::SetImmutable() {
     if (this->immutable_) {
         return;
     }
-    label_table_->use_reverse_map_ = false;
+    label_table_->SetImmutable();
     this->points_mutex_.reset();
     this->points_mutex_ = std::make_shared<EmptyMutex>();
     this->searcher_->SetMutexArray(this->points_mutex_);
-    STLUnorderedMap<LabelType, InnerIdType> empty_remap(allocator_);
-    this->label_table_->label_remap_.swap(empty_remap);
     immutable_ = true;
 }
 
