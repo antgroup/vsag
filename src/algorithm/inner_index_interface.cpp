@@ -54,10 +54,10 @@ InnerIndexInterface::InnerIndexInterface(const InnerIndexParameterPtr& index_par
     }
 
     this->thread_pool_ = common_param.thread_pool_;
-    if (this->thread_pool_ == nullptr) {
-        this->thread_pool_ = SafeThreadPool::FactoryDefaultThreadPool();
-    }
     if (this->build_thread_count_ > 1) {
+        if (this->thread_pool_ == nullptr) {
+            this->thread_pool_ = SafeThreadPool::FactoryDefaultThreadPool();
+        }
         this->thread_pool_->SetPoolSize(build_thread_count_);
     }
 
@@ -243,7 +243,7 @@ InnerIndexInterface::Deserialize(const ReaderSet& reader_set) {
         this->SetIO(index_reader);
         return;
     } catch (const std::bad_alloc& e) {
-        throw VsagException(ErrorType::READ_ERROR, "failed to Deserialize: ", e.what());
+        throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "failed to Deserialize: ", e.what());
     }
 }
 
@@ -282,7 +282,7 @@ InnerIndexInterface::Deserialize(std::istream& in_stream) {
         this->Deserialize(reader);
         return;
     } catch (const std::bad_alloc& e) {
-        throw VsagException(ErrorType::READ_ERROR, "failed to Deserialize: ", e.what());
+        throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "failed to Deserialize: ", e.what());
     }
 }
 
