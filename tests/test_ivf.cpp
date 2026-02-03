@@ -289,7 +289,6 @@ IVFTestIndex::TestGeneral(const TestIndex::IndexPtr& index,
     TestFilterSearch(index, dataset, search_param, recall, true);
     TestCalcDistanceById(index, dataset, 2e-6, true);
     TestCheckIdExist(index, dataset);
-    TestExportIDs(index, dataset);
 }
 }  // namespace fixtures
 
@@ -452,6 +451,7 @@ TestIVFBuildAndContinueAdd(const fixtures::IVFResourcePtr& resource) {
                     TestIndex::TestContinueAdd(index, dataset, true);
                     if (index->CheckFeature(vsag::SUPPORT_ADD_AFTER_BUILD)) {
                         IVFTestIndex::TestGeneral(index, dataset, search_param, recall);
+                        TestIndex::TestExportIDs(index, dataset);
                     }
                     vsag::Options::Instance().set_block_size_limit(origin_size);
                 }
@@ -731,6 +731,59 @@ TEST_CASE("(Daily) IVF Build With Large K", "[ft][ivf][daily]") {
     auto test_index = std::make_shared<fixtures::IVFTestIndex>();
     auto resource = test_index->GetResource(false);
     TestIVFBuildWithLargeK(resource);
+}
+
+static void
+TestIVFMarkRemove(const fixtures::IVFResourcePtr& resource) {
+    using namespace fixtures;
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    for (auto metric_type : resource->metric_types) {
+        for (auto dim : resource->dims) {
+            for (auto train_type : resource->train_types) {
+                for (auto [base_quantization_str, recall] : resource->test_cases) {
+                    if (train_type == "kmeans") {
+                        recall *= 0.8F;  // Kmeans may not achieve high recall in random datasets
+                    }
+                    if (base_quantization_str == "fp16") {
+                        recall *= (1 - dim / 8192.0F);
+                    }
+                    auto count = std::min(300, static_cast<int32_t>(dim / 4));
+                    auto search_param =
+                        fmt::format(fixtures::search_param_tmp, std::max(250, count));
+                    INFO(
+                        fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, "
+                                    "train_type: {}, recall: {}",
+                                    metric_type,
+                                    dim,
+                                    base_quantization_str,
+                                    train_type,
+                                    recall));
+                    vsag::Options::Instance().set_block_size_limit(size);
+                    auto param = IVFTestIndex::GenerateIVFBuildParametersString(
+                        metric_type, dim, base_quantization_str, 300, train_type);
+                    auto index = TestIndex::TestFactory(IVFTestIndex::name, param, true);
+                    auto dataset = IVFTestIndex::pool.GetDatasetAndCreate(
+                        dim, resource->base_count, metric_type);
+                    TestIndex::TestMarkRemoveIndex(index, dataset, search_param, true);
+                    IVFTestIndex::TestGeneral(index, dataset, search_param, recall);
+                    vsag::Options::Instance().set_block_size_limit(origin_size);
+                }
+            }
+        }
+    }
+}
+
+TEST_CASE("(PR) IVF Mark Remove", "[ft][ivf][pr]") {
+    auto test_index = std::make_shared<fixtures::IVFTestIndex>();
+    auto resource = test_index->GetResource(true);
+    TestIVFMarkRemove(resource);
+}
+
+TEST_CASE("(Daily) IVF Mark Remove", "[ft][ivf][daily]") {
+    auto test_index = std::make_shared<fixtures::IVFTestIndex>();
+    auto resource = test_index->GetResource(false);
+    TestIVFMarkRemove(resource);
 }
 
 static void

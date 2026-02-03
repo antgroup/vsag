@@ -62,7 +62,7 @@ public:
     ~HGraph() override = default;
 
     std::vector<int64_t>
-    Add(const DatasetPtr& data) override;
+    Add(const DatasetPtr& data, AddMode mode = AddMode::DEFAULT) override;
 
     std::string
     AnalyzeIndexBySearch(const SearchRequest& request) override;
@@ -174,8 +174,8 @@ public:
     [[nodiscard]] DatasetPtr
     SearchWithRequest(const SearchRequest& request) const override;
 
-    bool
-    Remove(int64_t id) override;
+    uint32_t
+    Remove(const std::vector<int64_t>& ids, RemoveMode mode = RemoveMode::MARK_REMOVE) override;
 
     void
     Serialize(StreamWriter& writer) const override;

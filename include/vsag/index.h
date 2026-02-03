@@ -56,6 +56,23 @@ using OffsetType = uint64_t;
 using SizeType = uint64_t;
 using WriteFuncType = std::function<void(OffsetType, SizeType, const void*)>;
 
+enum class AddMode {
+    /** try to reuse the memory of the deleted vector, no recovery check */
+    DEFAULT = 0,
+
+    /** always allocate new memory for the vector, but also check whether recovery from the same id */
+    KEEP_TOMBSTONE = 1,
+};
+
+enum class RemoveMode {
+    /** mark the vector as deleted, but not remove it from index, no shrink and repair,
+        * this mode is fast */
+    MARK_REMOVE = 0,
+
+    /** remove the vector from index and repair the index, but not shrink the index, 
+        * this mode is heavy */
+    REMOVE_AND_REPAIR = 1,
+};
 class Index {
 public:
     /**
@@ -128,19 +145,40 @@ public:
       * @return IDs that failed to insert into the index
       */
     [[nodiscard]] virtual tl::expected<std::vector<int64_t>, Error>
-    Add(const DatasetPtr& base) {
+    Add(const DatasetPtr& base, AddMode mode = AddMode::DEFAULT) {
         throw std::runtime_error("Index not support adding vectors");
     }
 
     /**
-      * @brief Remove the vector corresponding to the given ID from the index
-      *
-      * @param id of the vector that need to be removed from the index
-      * @return result indicates whether the remove operation is successful.
-      */
-    virtual tl::expected<bool, Error>
-    Remove(int64_t id) {
-        throw std::runtime_error("Index not support delete vector");
+     * @brief Remove the vectors corresponding to the given IDs from the index
+     *
+     * @param ids of the vectors that need to be removed from the index
+     * @return number of vectors that successfully removed from the index
+     */
+    virtual tl::expected<uint32_t, Error>
+    Remove(const std::vector<int64_t>& ids, RemoveMode mode = RemoveMode::MARK_REMOVE) {
+        throw std::runtime_error("Index not support Remove");
+    }
+
+    /**
+     * @brief Remove the vector corresponding to the given ID from the index
+     *
+     * @param id of the vector that need to be removed from the index
+     * @return number of vectors that successfully removed from the index
+     */
+    virtual tl::expected<uint32_t, Error>
+    Remove(int64_t id, RemoveMode mode = RemoveMode::MARK_REMOVE) {
+        return this->Remove(std::vector<int64_t>({id}), mode);
+    }
+
+    /**
+     * @brief 
+     *  1. Shrink the index to release memory occupied by soft deleted vectors.
+     *  2. Repair the index which is corrupted by soft delete.
+     */
+    virtual void
+    ShrinkAndRepair() {
+        throw std::runtime_error("Index not support ShrinkAndRepair");
     }
 
     /**
