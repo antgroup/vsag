@@ -238,7 +238,7 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
         dist_cmp.fetch_add(dist_cmp_local, std::memory_order_relaxed);
     };
 
-    if (parallel_count == 1) {
+    if (parallel_count == 1 || this->thread_pool_ == nullptr) {
         search_func(0, total_count_, heaps[0]);
         heap = heaps[0];
     } else {

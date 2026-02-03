@@ -120,7 +120,7 @@ FP16Quantizer<metric>::ProcessQueryImpl(const DataType* query,
         this->EncodeOneImpl(query, computer.buf_);
     } catch (std::bad_alloc& e) {
         throw VsagException(
-            ErrorType::INTERNAL_ERROR, "bad alloc when init computer buf", e.what());
+            ErrorType::NO_ENOUGH_MEMORY, "bad alloc when init computer buf", e.what());
     }
 }
 
