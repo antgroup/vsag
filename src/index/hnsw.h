@@ -87,13 +87,15 @@ public:
     }
 
     tl::expected<std::vector<int64_t>, Error>
-    Add(const DatasetPtr& base) override {
+    Add(const DatasetPtr& base, AddMode mode = AddMode::DEFAULT) override {
+        // TODO(LHT): HNSW only support KEEP_TOMBSTONE mode
         SAFE_CALL(return this->add(base));
     }
 
-    tl::expected<bool, Error>
-    Remove(int64_t id) override {
-        SAFE_CALL(return this->remove(id));
+    tl::expected<uint32_t, Error>
+    Remove(const std::vector<int64_t>& ids, RemoveMode mode = RemoveMode::MARK_REMOVE) override {
+        // TODO(LHT): HNSW only support MARK_DELETE mode
+        SAFE_CALL(return this->remove(ids));
     }
 
     tl::expected<bool, Error>
@@ -349,8 +351,8 @@ private:
     tl::expected<std::vector<int64_t>, Error>
     add(const DatasetPtr& base);
 
-    tl::expected<bool, Error>
-    remove(int64_t id);
+    tl::expected<uint32_t, Error>
+    remove(const std::vector<int64_t>& ids);
 
     tl::expected<bool, Error>
     update_id(int64_t old_id, int64_t new_id);

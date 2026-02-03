@@ -115,7 +115,7 @@ SparseIndex::sort_sparse_vector(const SparseVector& vector) const {
 }
 
 std::vector<int64_t>
-SparseIndex::Add(const DatasetPtr& base) {
+SparseIndex::Add(const DatasetPtr& base, AddMode mode) {
     const auto* sparse_vectors = base->GetSparseVectors();
     auto data_num = base->GetNumElements();
     CHECK_ARGUMENT(data_num > 0, "data_num is zero when add vectors");

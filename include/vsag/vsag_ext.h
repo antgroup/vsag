@@ -133,7 +133,7 @@ public:
     tl::expected<std::vector<int64_t>, Error>
     Add(DatasetHandler* base);
 
-    tl::expected<bool, Error>
+    tl::expected<uint32_t, Error>
     Remove(int64_t id);
 
     tl::expected<DatasetHandler*, Error>

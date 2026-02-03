@@ -1873,6 +1873,89 @@ TestIndex::TestExportModel(const TestIndex::IndexPtr& index,
 }
 
 void
+TestIndex::TestMarkRemoveIndex(const TestIndex::IndexPtr& index,
+                               const TestDatasetPtr& dataset,
+                               const std::string& search_param,
+                               bool expected_success) {
+    if (index->GetIndexType() != vsag::IndexType::HNSW) {
+        auto train_result = index->Train(dataset->base_);
+        REQUIRE(train_result.has_value());
+    }
+
+    auto base_num = dataset->base_->GetNumElements();
+    auto base_dim = dataset->base_->GetDim();
+    auto vectors = dataset->base_->GetFloat32Vectors();
+    auto ids = dataset->base_->GetIds();
+
+    // step 1: add base data to index
+    auto add_results = index->Add(dataset->base_);
+    REQUIRE(add_results.has_value());
+    REQUIRE(add_results.value().empty());
+
+    // step 2: verify initial state
+    REQUIRE(index->GetNumElements() == base_num);
+    REQUIRE(index->GetNumberRemoved() == 0);
+
+    // step 3: test mark remove operation
+    {
+        // test mark remove operation with invalid id
+        auto wrong_result = index->Remove(-1, vsag::RemoveMode::MARK_REMOVE);
+        if (index->GetIndexType() == vsag::IndexType::HNSW) {
+            REQUIRE(wrong_result.has_value());
+            REQUIRE_FALSE(wrong_result.value());
+        } else {
+            REQUIRE(wrong_result.has_value());
+            REQUIRE(wrong_result.value() == 0);
+        }
+
+        // delete half of the base data
+        int64_t remove_count = base_num / 2;
+        std::vector<int64_t> remove_ids;
+        remove_ids.assign(ids, ids + remove_count);
+        auto remove_result = index->Remove(remove_ids, vsag::RemoveMode::MARK_REMOVE);
+
+        // verify number of removed elements and num elements after mark remove
+        REQUIRE(remove_result.has_value());
+        REQUIRE(remove_result.value());
+        REQUIRE(index->GetNumElements() == base_num - remove_count);
+        REQUIRE(index->GetNumberRemoved() == remove_count);
+
+        // test mark remove operation with duplicate id
+        auto duplicate_remove = index->Remove(remove_ids, vsag::RemoveMode::MARK_REMOVE);
+        REQUIRE(duplicate_remove.has_value());
+        REQUIRE(duplicate_remove.value() == 0);
+
+        // test search operation after mark remove
+        for (int64_t i = 0; i < base_num; ++i) {
+            auto query = vsag::Dataset::Make();
+            query->NumElements(1)
+                ->Dim(base_dim)
+                ->Float32Vectors(vectors + i * base_dim)
+                ->Owner(false);
+
+            int64_t k = 10;
+            auto search_result = index->KnnSearch(query, k, search_param);
+            REQUIRE(search_result.has_value());
+
+            // verify removed ids are not in search results
+            if (i < remove_count) {
+                bool found_removed_id = false;
+                for (int64_t j = 0; j < search_result.value()->GetDim(); ++j) {
+                    if (search_result.value()->GetIds()[j] == ids[i]) {
+                        found_removed_id = true;
+                        break;
+                    }
+                }
+                REQUIRE_FALSE(found_removed_id);
+                query->Ids(ids + i);
+                auto add_result = index->Add(query);
+                REQUIRE(add_result.has_value());
+            }
+        }
+    }
+}
+
+void
 TestIndex::TestRemoveIndex(const TestIndex::IndexPtr& index,
                            const TestDatasetPtr& dataset,
                            bool expected_success) {
@@ -2646,5 +2729,4 @@ TestIndex::TestIndexDetailData(const IndexPtr& index) {
         }
     }
 }
-
 }  // namespace fixtures

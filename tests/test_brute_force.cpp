@@ -565,6 +565,40 @@ TEST_CASE("(Daily) BruteForce With Attribute Filter Test", "[ft][BruteForce][dai
 }
 
 static void
+TestBruteForceMarkRemove(const fixtures::BruteForceResourcePtr& resource) {
+    using namespace fixtures;
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = 1024 * 1024 * 2;
+    for (const auto& metric_type : resource->metric_types) {
+        for (auto& dim : resource->dims) {
+            for (auto& [base_quantization_str, recall] : resource->test_cases) {
+                vsag::Options::Instance().set_block_size_limit(size);
+                auto param = BruteForceTestIndex::GenerateBruteForceBuildParametersString(
+                    metric_type, dim, base_quantization_str);
+                auto index = TestIndex::TestFactory(BruteForceTestIndex::name, param, true);
+                auto dataset = BruteForceTestIndex::pool.GetDatasetAndCreate(
+                    dim, BruteForceTestIndex::base_count, metric_type);
+                TestIndex::TestMarkRemoveIndex(index, dataset, search_param_tmp, true);
+                BruteForceTestIndex::TestGeneral(index, dataset, search_param_tmp, recall);
+                vsag::Options::Instance().set_block_size_limit(origin_size);
+            }
+        }
+    }
+}
+
+TEST_CASE("(PR) BruteForce Mark Remove", "[ft][BruteForce][pr]") {
+    auto test_index = std::make_shared<fixtures::BruteForceTestIndex>();
+    auto resource = test_index->GetResource(true);
+    TestBruteForceMarkRemove(resource);
+}
+
+TEST_CASE("(Daily) BruteForce Mark Remove", "[ft][BruteForce][daily]") {
+    auto test_index = std::make_shared<fixtures::BruteForceTestIndex>();
+    auto resource = test_index->GetResource(false);
+    TestBruteForceMarkRemove(resource);
+}
+
+static void
 TestBruteForceRemoveById(const fixtures::BruteForceResourcePtr& resource) {
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();

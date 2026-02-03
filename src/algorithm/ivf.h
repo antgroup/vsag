@@ -49,7 +49,7 @@ public:
     ~IVF() override = default;
 
     std::vector<int64_t>
-    Add(const DatasetPtr& base) override;
+    Add(const DatasetPtr& base, AddMode mode = AddMode::DEFAULT) override;
 
     std::string
     AnalyzeIndexBySearch(const vsag::SearchRequest& request) override;
@@ -98,6 +98,11 @@ public:
     [[nodiscard]] int64_t
     GetNumElements() const override;
 
+    [[nodiscard]] int64_t
+    GetNumberRemoved() const override {
+        return this->delete_count_;
+    }
+
     void
     GetVectorByInnerId(InnerIdType inner_id, float* data) const override;
 
@@ -122,6 +127,9 @@ public:
                 const std::string& parameters,
                 const FilterPtr& filter,
                 int64_t limited_size = -1) const override;
+
+    uint32_t
+    Remove(const std::vector<int64_t>& ids, RemoveMode mode = RemoveMode::MARK_REMOVE) override;
 
     [[nodiscard]] DatasetPtr
     SearchWithRequest(const SearchRequest& request) const override;
@@ -190,6 +198,8 @@ private:
     Vector<uint64_t> location_map_;
 
     static const uint64_t LOCATION_SPLIT_BIT = 32;
+
+    std::atomic<int64_t> delete_count_{0};
 
     // last_cal_memory_element_ is used to avoid cal memory usage too frequently
     int64_t last_cal_memory_element_{0};
