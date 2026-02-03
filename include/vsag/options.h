@@ -215,4 +215,5 @@ private:
  * @brief Type alias for the Options class, for compatibility.
  */
 using Option = Options;
+
 }  // namespace vsag
