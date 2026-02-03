@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -18,6 +17,9 @@
 #include <memory>
 
 namespace vsag {
+
+class Filter;
+using FilterPtr = std::shared_ptr<Filter>;
 
 class Filter {
 public:
@@ -61,7 +63,7 @@ public:
       */
     [[nodiscard]] virtual float
     ValidRatio() const {
-        return 1.0f;  // (default) all vectors is valid
+        return 1.0F;  // (default) all vectors is valid
     }
 
     /**
@@ -83,7 +85,5 @@ public:
     GetValidIds(const int64_t** valid_ids, int64_t& count) const {
     }
 };
-
-using FilterPtr = std::shared_ptr<Filter>;
 
 };  // namespace vsag

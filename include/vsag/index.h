@@ -58,6 +58,16 @@ using WriteFuncType = std::function<void(OffsetType, SizeType, const void*)>;
 
 class Index {
 public:
+    /**
+     * @brief Get Index Type
+     * @return IndexType
+     */
+    [[nodiscard]] virtual IndexType
+    GetIndexType() const {
+        throw std::runtime_error("Index not support GetIndexType");
+    }
+
+public:
     // [basic methods]
 
     /**
@@ -68,15 +78,6 @@ public:
       */
     virtual tl::expected<std::vector<int64_t>, Error>
     Build(const DatasetPtr& base) = 0;
-
-    /**
-     * @brief Get Index Type
-     * @return IndexType
-     */
-    virtual IndexType
-    GetIndexType() const {
-        throw std::runtime_error("Index not support GetIndexType");
-    }
 
     /**
      * @brief Tunes the index using the specified parameters.
@@ -121,12 +122,12 @@ public:
     }
 
     /**
-      * @brief Adding vectors into a built index, only HNSW supported now, called on other index will cause exception
-      * 
+      * @brief Add new vectors into the index
+      *
       * @param base should contains dim, num_elements, ids and vectors
       * @return IDs that failed to insert into the index
       */
-    virtual tl::expected<std::vector<int64_t>, Error>
+    [[nodiscard]] virtual tl::expected<std::vector<int64_t>, Error>
     Add(const DatasetPtr& base) {
         throw std::runtime_error("Index not support adding vectors");
     }
@@ -198,6 +199,9 @@ public:
         throw std::runtime_error("Index not support update attribute with origin attributes");
     }
 
+public:
+    // [search methods]
+
     /**
       * @brief Performing single KNN search on index
       * 
@@ -224,7 +228,7 @@ public:
       *                - num_elements: 1
       *                - ids, distances: length is (num_elements * k)
       */
-    virtual tl::expected<DatasetPtr, Error>
+    [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     KnnSearch(const DatasetPtr& query,
               int64_t k,
               const std::string& parameters,
@@ -240,7 +244,7 @@ public:
       *                - num_elements: 1
       *                - ids, distances: length is (num_elements * k)
       */
-    virtual tl::expected<DatasetPtr, Error>
+    [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     KnnSearch(const DatasetPtr& query,
               int64_t k,
               const std::string& parameters,
@@ -256,7 +260,7 @@ public:
       *                - num_elements: 1
       *                - ids, distances: length is (num_elements * k)               
       */
-    virtual tl::expected<DatasetPtr, Error>
+    [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     SearchWithRequest(const SearchRequest& request) const {
         throw std::runtime_error("Index doesn't support Search With Request");
     }
@@ -273,7 +277,7 @@ public:
       *                - num_elements: 1
       *                - ids, distances: length is (num_elements * k)
       */
-    virtual tl::expected<DatasetPtr, Error>
+    [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     KnnSearch(const DatasetPtr& query,
               int64_t k,
               const std::string& parameters,
@@ -284,6 +288,8 @@ public:
     }
 
     /**
+      * [[deprecated("use SearchWithrequest instead")]]
+      *
       * @brief Performing single KNN search on index
       *
       * @param query should contains dim, num_elements and vectors
@@ -293,7 +299,7 @@ public:
       *                - num_elements: 1
       *                - ids, distances: length is (num_elements * k)
       */
-    virtual tl::expected<DatasetPtr, Error>
+    [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     KnnSearch(const DatasetPtr& query, int64_t k, SearchParam& search_param) const {
         throw std::runtime_error("Index doesn't support new filter");
     }
@@ -355,7 +361,7 @@ public:
       *                - dim: the size of results
       *                - ids, distances: length is dim
       */
-    virtual tl::expected<DatasetPtr, Error>
+    [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     RangeSearch(const DatasetPtr& query,
                 float radius,
                 const std::string& parameters,
@@ -377,7 +383,7 @@ public:
       *                - dim: the size of results
       *                - ids, distances: length is dim
       */
-    virtual tl::expected<DatasetPtr, Error>
+    [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     RangeSearch(const DatasetPtr& query,
                 float radius,
                 const std::string& parameters,
@@ -425,7 +431,7 @@ public:
      *        use quantized or approximate representations for faster computation.
      * @return result is the distance between the query and the vector of the given ID.
      */
-    virtual tl::expected<float, Error>
+    [[nodiscard]] virtual tl::expected<float, Error>
     CalcDistanceById(const float* vector,
                      int64_t id,
                      bool calculate_precise_distance = true) const {
@@ -443,7 +449,7 @@ public:
      *        use quantized or approximate representations for faster computation.
      * @return result is the distance between the query and the vector of the given ID.
      */
-    virtual tl::expected<float, Error>
+    [[nodiscard]] virtual tl::expected<float, Error>
     CalcDistanceById(const DatasetPtr& vector,
                      int64_t id,
                      bool calculate_precise_distance = true) const {
@@ -462,7 +468,7 @@ public:
      *        use quantized or approximate representations for faster computation.
      * @return result is valid distance of input ids. '-1' indicates an invalid distance.
      */
-    virtual tl::expected<DatasetPtr, Error>
+    [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     CalDistanceById(const float* query,
                     const int64_t* ids,
                     int64_t count,
@@ -482,7 +488,7 @@ public:
      *        use quantized or approximate representations for faster computation.
      * @return result is valid distance of input ids. '-1' indicates an invalid distance.
      */
-    virtual tl::expected<DatasetPtr, Error>
+    [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     CalDistanceById(const DatasetPtr& query,
                     const int64_t* ids,
                     int64_t count,
@@ -496,7 +502,7 @@ public:
      * @param min_id The minimum id returned
      * @param max_id The maximum id returned
      */
-    virtual tl::expected<std::pair<int64_t, int64_t>, Error>
+    [[nodiscard]] virtual tl::expected<std::pair<int64_t, int64_t>, Error>
     GetMinAndMaxId() const {
         throw std::runtime_error("Index doesn't support get Min and Max id");
     }
@@ -550,7 +556,7 @@ public:
      * Users should not assume bitwise identicality between the returned vectors and the originally
      * inserted ones, even if the IDs match.
      */
-    virtual tl::expected<DatasetPtr, Error>
+    [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     GetRawVectorByIds(const int64_t* ids,
                       int64_t count,
                       Allocator* specified_allocator = nullptr) const {
@@ -572,7 +578,7 @@ public:
      * @throws std::runtime_error If the index implementation does not support this operation
      *            (default behavior for base class).
      */
-    virtual tl::expected<DatasetPtr, Error>
+    [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     GetDataByIdsWithFlag(const int64_t* ids, int64_t count, uint64_t selected_data_flag) const {
         throw std::runtime_error("Index doesn't support GetDataByIdsWithFlag");
     };
@@ -589,7 +595,7 @@ public:
      * @throws std::runtime_error If the index implementation does not support this operation
      *            (default behavior for base class).
      */
-    virtual tl::expected<std::vector<IndexDetailInfo>, Error>
+    [[nodiscard]] virtual tl::expected<std::vector<IndexDetailInfo>, Error>
     GetIndexDetailInfos() const {
         throw std::runtime_error("Index doesn't support GetIndexDetailInfos");
     };
@@ -625,7 +631,7 @@ public:
      *            (default behavior for base class).
      * @note The default implementation returns all data which in current index
      */
-    virtual tl::expected<DatasetPtr, Error>
+    [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     GetDataByIds(const int64_t* ids, int64_t count) const {
         throw std::runtime_error("Index doesn't support GetDataByIds");
     };
@@ -669,7 +675,7 @@ public:
      *
      * @return IndexPtr A pointer to the cloned index.
      */
-    virtual tl::expected<IndexPtr, Error>
+    [[nodiscard]] virtual tl::expected<IndexPtr, Error>
     Clone(const std::shared_ptr<Allocator>& allocator = nullptr) const {
         throw std::runtime_error("Index doesn't support Clone");
     }
@@ -680,7 +686,7 @@ public:
      * @return IndexPtr A pointer to the exported model index.
      * @throws std::runtime_error If the index does not support exporting the model.
      */
-    virtual tl::expected<IndexPtr, Error>
+    [[nodiscard]] virtual tl::expected<IndexPtr, Error>
     ExportModel() const {
         throw std::runtime_error("Index doesn't support ExportModel");
     }
@@ -691,7 +697,7 @@ public:
      * @return DatasetPtr A pointer to the exported IDs dataset.
      * @throws std::runtime_error If the index does not support exporting the IDs.
      */
-    virtual tl::expected<DatasetPtr, Error>
+    [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     ExportIDs() const {
         throw std::runtime_error("Index doesn't support ExportIDs");
     }
@@ -799,10 +805,10 @@ public:
     GetMemoryUsage() const = 0;
 
     /**
-  * @brief Return the memory usage of every component in the index
-  *
-  * @return a json object that contains the memory usage of every component in the index
-  */
+      * @brief Return the memory usage of every component in the index
+      *
+      * @return a json object that contains the memory usage of every component in the index
+      */
     // TODO(deming): implement func for every types of index
     // [[nodiscard]] virtual JsonType
     // GetMemoryUsageDetail() const = 0;
