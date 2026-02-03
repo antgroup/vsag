@@ -39,7 +39,7 @@ public:
       *              depending on the specific implementation.
       */
     virtual void
-    SetQueueSizeLimit(std::size_t limit) = 0;
+    SetQueueSizeLimit(std::uint64_t limit) = 0;
 
     /**
       * Sets the limit on the size of the thread pool.
@@ -48,7 +48,7 @@ public:
       *              No additional threads will be created beyond this limit.
       */
     virtual void
-    SetPoolSize(std::size_t limit) = 0;
+    SetPoolSize(std::uint64_t limit) = 0;
 
     /**
       * Destructor.

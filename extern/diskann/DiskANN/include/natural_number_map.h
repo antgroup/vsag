@@ -34,11 +34,11 @@ template <typename Key, typename Value> class natural_number_map
     // over map entries.
     struct position
     {
-        size_t _key;
+        uint64_t _key;
         // The number of keys that were enumerated when iterating through the
         // map so far. Used to early-terminate enumeration when ithere are no
         // more entries in the map.
-        size_t _keys_already_enumerated;
+        uint64_t _keys_already_enumerated;
 
         // Returns whether it's valid to access the element at this position in
         // the map.
@@ -47,8 +47,8 @@ template <typename Key, typename Value> class natural_number_map
 
     natural_number_map();
 
-    void reserve(size_t count);
-    size_t size() const;
+    void reserve(uint64_t count);
+    uint64_t size() const;
 
     void set(Key key, Value value);
     void erase(Key key);
@@ -73,7 +73,7 @@ template <typename Key, typename Value> class natural_number_map
   private:
     // Number of entries in the map. Not the same as size() of the
     // _values_vector below.
-    size_t _size;
+    uint64_t _size;
 
     // Array of values. The key is the index of the value.
     std::vector<Value> _values_vector;

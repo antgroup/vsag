@@ -12,7 +12,7 @@ inline float aggregate_recall(const uint32_t k_aggr, const uint32_t k, const uin
     float found = 0;
     for (uint32_t i = 0; i < npart; ++i)
     {
-        size_t max_found = std::min(count[i], k);
+        uint64_t max_found = std::min(count[i], k);
         found += recalls[max_found - 1] * max_found;
     }
     return found / (float)k_aggr;

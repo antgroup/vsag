@@ -9,8 +9,8 @@ namespace diskannpy
 {
 
 template <class DT>
-diskann::Index<DT, StaticIdType, filterT> static_index_builder(const diskann::Metric m, const size_t num_points,
-                                                               const size_t dimensions,
+diskann::Index<DT, StaticIdType, filterT> static_index_builder(const diskann::Metric m, const uint64_t num_points,
+                                                               const uint64_t dimensions,
                                                                const uint32_t initial_search_complexity)
 {
     if (initial_search_complexity == 0)
@@ -30,7 +30,7 @@ diskann::Index<DT, StaticIdType, filterT> static_index_builder(const diskann::Me
 
 template <class DT>
 StaticMemoryIndex<DT>::StaticMemoryIndex(const diskann::Metric m, const std::string &index_prefix,
-                                         const size_t num_points, const size_t dimensions, const uint32_t num_threads,
+                                         const uint64_t num_points, const uint64_t dimensions, const uint32_t num_threads,
                                          const uint32_t initial_search_complexity)
     : _index(static_index_builder<DT>(m, num_points, dimensions, initial_search_complexity))
 {

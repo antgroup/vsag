@@ -106,8 +106,8 @@ build_int_list_ptr(const int signed_cnt, const std::vector<NumericValue>& values
 static std::vector<std::string_view>
 string_view_split(std::string_view str, char delim) {
     std::vector<std::string_view> result;
-    size_t start = 0;
-    size_t end = str.find(delim);
+    uint64_t start = 0;
+    uint64_t end = str.find(delim);
 
     while (end != std::string_view::npos) {
         result.emplace_back(str.substr(start, end - start));

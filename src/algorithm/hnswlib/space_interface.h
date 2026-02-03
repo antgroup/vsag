@@ -24,7 +24,7 @@ using DISTFUNC = float (*)(const void*, const void*, const void*);
 class SpaceInterface {
 public:
     // virtual void search(void *);
-    virtual size_t
+    virtual uint64_t
     get_data_size() = 0;
 
     virtual DISTFUNC

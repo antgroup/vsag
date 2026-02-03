@@ -73,7 +73,7 @@ bool AvxSupportedCPU = false;
 namespace diskann
 {
 
-void block_convert(std::ofstream &writr, std::ifstream &readr, float *read_buf, size_t npts, size_t ndims)
+void block_convert(std::ofstream &writr, std::ifstream &readr, float *read_buf, uint64_t npts, uint64_t ndims)
 {
     readr.read((char *)read_buf, npts * ndims * sizeof(float));
     uint32_t ndims_u32 = (uint32_t)ndims;
@@ -106,19 +106,19 @@ void normalize_data_file(const std::string &inFileName, const std::string &outFi
     writr.write((char *)&npts_s32, sizeof(int32_t));
     writr.write((char *)&ndims_s32, sizeof(int32_t));
 
-    size_t npts = (size_t)npts_s32;
-    size_t ndims = (size_t)ndims_s32;
+    uint64_t npts = (uint64_t)npts_s32;
+    uint64_t ndims = (uint64_t)ndims_s32;
     diskann::cout << "Normalizing FLOAT vectors in file: " << inFileName << std::endl;
     diskann::cout << "Dataset: #pts = " << npts << ", # dims = " << ndims << std::endl;
 
-    size_t blk_size = 131072;
-    size_t nblks = ROUND_UP(npts, blk_size) / blk_size;
+    uint64_t blk_size = 131072;
+    uint64_t nblks = ROUND_UP(npts, blk_size) / blk_size;
     diskann::cout << "# blks: " << nblks << std::endl;
 
     float *read_buf = new float[npts * ndims];
-    for (size_t i = 0; i < nblks; i++)
+    for (uint64_t i = 0; i < nblks; i++)
     {
-        size_t cblk_size = std::min(npts - i * blk_size, blk_size);
+        uint64_t cblk_size = std::min(npts - i * blk_size, blk_size);
         block_convert(writr, readr, read_buf, cblk_size, ndims);
     }
     delete[] read_buf;
@@ -132,13 +132,13 @@ double calculate_recall(uint32_t num_queries, uint32_t *gold_std, float *gs_dist
     double total_recall = 0;
     std::set<uint32_t> gt, res;
 
-    for (size_t i = 0; i < num_queries; i++)
+    for (uint64_t i = 0; i < num_queries; i++)
     {
         gt.clear();
         res.clear();
         uint32_t *gt_vec = gold_std + dim_gs * i;
         uint32_t *res_vec = our_results + dim_or * i;
-        size_t tie_breaker = recall_at;
+        uint64_t tie_breaker = recall_at;
         if (gs_dist != nullptr)
         {
             tie_breaker = recall_at - 1;
@@ -171,13 +171,13 @@ double calculate_recall(uint32_t num_queries, uint32_t *gold_std, float *gs_dist
     double total_recall = 0;
     std::set<uint32_t> gt, res;
     bool printed = false;
-    for (size_t i = 0; i < num_queries; i++)
+    for (uint64_t i = 0; i < num_queries; i++)
     {
         gt.clear();
         res.clear();
         uint32_t *gt_vec = gold_std + dim_gs * i;
         uint32_t *res_vec = our_results + dim_or * i;
-        size_t tie_breaker = recall_at;
+        uint64_t tie_breaker = recall_at;
         uint32_t active_points_count = 0;
         uint32_t cur_counter = 0;
         while (active_points_count < recall_at && cur_counter < dim_gs)
@@ -229,7 +229,7 @@ double calculate_range_search_recall(uint32_t num_queries, std::vector<std::vect
     double total_recall = 0;
     std::set<uint32_t> gt, res;
 
-    for (size_t i = 0; i < num_queries; i++)
+    for (uint64_t i = 0; i < num_queries; i++)
     {
         gt.clear();
         res.clear();
@@ -253,7 +253,7 @@ double calculate_range_search_recall(uint32_t num_queries, std::vector<std::vect
 }
 
 #ifdef EXEC_ENV_OLS
-void get_bin_metadata(AlignedFileReader &reader, size_t &npts, size_t &ndim, size_t offset)
+void get_bin_metadata(AlignedFileReader &reader, uint64_t &npts, uint64_t &ndim, uint64_t offset)
 {
     std::vector<AlignedRead> readReqs;
     AlignedRead readReq;
@@ -281,15 +281,15 @@ void get_bin_metadata(AlignedFileReader &reader, size_t &npts, size_t &ndim, siz
     }
 }
 
-template <typename T> void load_bin(AlignedFileReader &reader, T *&data, size_t &npts, size_t &ndim, size_t offset)
+template <typename T> void load_bin(AlignedFileReader &reader, T *&data, uint64_t &npts, uint64_t &ndim, uint64_t offset)
 {
     // Code assumes that the reader is already setup correctly.
     get_bin_metadata(reader, npts, ndim, offset);
     data = new T[npts * ndim];
 
-    size_t data_size = npts * ndim * sizeof(T);
-    size_t write_offset = 0;
-    size_t read_start = offset + 2 * sizeof(uint32_t);
+    uint64_t data_size = npts * ndim * sizeof(T);
+    uint64_t write_offset = 0;
+    uint64_t read_start = offset + 2 * sizeof(uint32_t);
 
     // BingAlignedFileReader can only read uint32_t bytes of data. So,
     // we limit ourselves even more to reading 1GB at a time.
@@ -320,7 +320,7 @@ template <typename T> void load_bin(AlignedFileReader &reader, T *&data, size_t 
     }
 }
 template <typename T>
-void load_bin(AlignedFileReader &reader, std::unique_ptr<T[]> &data, size_t &npts, size_t &ndim, size_t offset)
+void load_bin(AlignedFileReader &reader, std::unique_ptr<T[]> &data, uint64_t &npts, uint64_t &ndim, uint64_t offset)
 {
     T *ptr = nullptr;
     load_bin(reader, ptr, npts, ndim, offset);
@@ -328,8 +328,8 @@ void load_bin(AlignedFileReader &reader, std::unique_ptr<T[]> &data, size_t &npt
 }
 
 template <typename T>
-void copy_aligned_data_from_file(AlignedFileReader &reader, T *&data, size_t &npts, size_t &ndim,
-                                 const size_t &rounded_dim, size_t offset)
+void copy_aligned_data_from_file(AlignedFileReader &reader, T *&data, uint64_t &npts, uint64_t &ndim,
+                                 const uint64_t &rounded_dim, uint64_t offset)
 {
     if (data == nullptr)
     {
@@ -339,7 +339,7 @@ void copy_aligned_data_from_file(AlignedFileReader &reader, T *&data, size_t &np
                                     __LINE__);
     }
 
-    size_t pts, dim;
+    uint64_t pts, dim;
     get_bin_metadata(reader, pts, dim, offset);
 
     if (ndim != dim || npts != pts)
@@ -353,7 +353,7 @@ void copy_aligned_data_from_file(AlignedFileReader &reader, T *&data, size_t &np
     // Instead of reading one point of ndim size and setting (rounded_dim - dim)
     // values to zero We'll set everything to zero and read in chunks of data at
     // the appropriate locations.
-    size_t read_offset = offset + 2 * sizeof(uint32_t);
+    uint64_t read_offset = offset + 2 * sizeof(uint32_t);
     memset(data, 0, npts * rounded_dim * sizeof(T));
     int i = 0;
     std::vector<AlignedRead> read_requests;
@@ -386,7 +386,7 @@ void copy_aligned_data_from_file(AlignedFileReader &reader, T *&data, size_t &np
 }
 
 // Unlike load_bin, assumes that data is already allocated 'size' entries
-template <typename T> void read_array(AlignedFileReader &reader, T *data, size_t size, size_t offset)
+template <typename T> void read_array(AlignedFileReader &reader, T *data, uint64_t size, uint64_t offset)
 {
     if (data == nullptr)
     {
@@ -417,59 +417,59 @@ template <typename T> void read_array(AlignedFileReader &reader, T *data, size_t
     }
 }
 
-template <typename T> void read_value(AlignedFileReader &reader, T &value, size_t offset)
+template <typename T> void read_value(AlignedFileReader &reader, T &value, uint64_t offset)
 {
     read_array(reader, &value, 1, offset);
 }
 
 template DISKANN_DLLEXPORT void load_bin<uint8_t>(AlignedFileReader &reader, std::unique_ptr<uint8_t[]> &data,
-                                                  size_t &npts, size_t &ndim, size_t offset);
+                                                  uint64_t &npts, uint64_t &ndim, uint64_t offset);
 template DISKANN_DLLEXPORT void load_bin<int8_t>(AlignedFileReader &reader, std::unique_ptr<int8_t[]> &data,
-                                                 size_t &npts, size_t &ndim, size_t offset);
+                                                 uint64_t &npts, uint64_t &ndim, uint64_t offset);
 template DISKANN_DLLEXPORT void load_bin<uint32_t>(AlignedFileReader &reader, std::unique_ptr<uint32_t[]> &data,
-                                                   size_t &npts, size_t &ndim, size_t offset);
+                                                   uint64_t &npts, uint64_t &ndim, uint64_t offset);
 template DISKANN_DLLEXPORT void load_bin<uint64_t>(AlignedFileReader &reader, std::unique_ptr<uint64_t[]> &data,
-                                                   size_t &npts, size_t &ndim, size_t offset);
+                                                   uint64_t &npts, uint64_t &ndim, uint64_t offset);
 template DISKANN_DLLEXPORT void load_bin<int64_t>(AlignedFileReader &reader, std::unique_ptr<int64_t[]> &data,
-                                                  size_t &npts, size_t &ndim, size_t offset);
-template DISKANN_DLLEXPORT void load_bin<float>(AlignedFileReader &reader, std::unique_ptr<float[]> &data, size_t &npts,
-                                                size_t &ndim, size_t offset);
+                                                  uint64_t &npts, uint64_t &ndim, uint64_t offset);
+template DISKANN_DLLEXPORT void load_bin<float>(AlignedFileReader &reader, std::unique_ptr<float[]> &data, uint64_t &npts,
+                                                uint64_t &ndim, uint64_t offset);
 
-template DISKANN_DLLEXPORT void load_bin<uint8_t>(AlignedFileReader &reader, uint8_t *&data, size_t &npts, size_t &ndim,
-                                                  size_t offset);
-template DISKANN_DLLEXPORT void load_bin<int64_t>(AlignedFileReader &reader, int64_t *&data, size_t &npts, size_t &ndim,
-                                                  size_t offset);
-template DISKANN_DLLEXPORT void load_bin<uint64_t>(AlignedFileReader &reader, uint64_t *&data, size_t &npts,
-                                                   size_t &ndim, size_t offset);
-template DISKANN_DLLEXPORT void load_bin<uint32_t>(AlignedFileReader &reader, uint32_t *&data, size_t &npts,
-                                                   size_t &ndim, size_t offset);
-template DISKANN_DLLEXPORT void load_bin<int32_t>(AlignedFileReader &reader, int32_t *&data, size_t &npts, size_t &ndim,
-                                                  size_t offset);
+template DISKANN_DLLEXPORT void load_bin<uint8_t>(AlignedFileReader &reader, uint8_t *&data, uint64_t &npts, uint64_t &ndim,
+                                                  uint64_t offset);
+template DISKANN_DLLEXPORT void load_bin<int64_t>(AlignedFileReader &reader, int64_t *&data, uint64_t &npts, uint64_t &ndim,
+                                                  uint64_t offset);
+template DISKANN_DLLEXPORT void load_bin<uint64_t>(AlignedFileReader &reader, uint64_t *&data, uint64_t &npts,
+                                                   uint64_t &ndim, uint64_t offset);
+template DISKANN_DLLEXPORT void load_bin<uint32_t>(AlignedFileReader &reader, uint32_t *&data, uint64_t &npts,
+                                                   uint64_t &ndim, uint64_t offset);
+template DISKANN_DLLEXPORT void load_bin<int32_t>(AlignedFileReader &reader, int32_t *&data, uint64_t &npts, uint64_t &ndim,
+                                                  uint64_t offset);
 
 template DISKANN_DLLEXPORT void copy_aligned_data_from_file<uint8_t>(AlignedFileReader &reader, uint8_t *&data,
-                                                                     size_t &npts, size_t &dim,
-                                                                     const size_t &rounded_dim, size_t offset);
+                                                                     uint64_t &npts, uint64_t &dim,
+                                                                     const uint64_t &rounded_dim, uint64_t offset);
 template DISKANN_DLLEXPORT void copy_aligned_data_from_file<int8_t>(AlignedFileReader &reader, int8_t *&data,
-                                                                    size_t &npts, size_t &dim,
-                                                                    const size_t &rounded_dim, size_t offset);
+                                                                    uint64_t &npts, uint64_t &dim,
+                                                                    const uint64_t &rounded_dim, uint64_t offset);
 template DISKANN_DLLEXPORT void copy_aligned_data_from_file<float>(AlignedFileReader &reader, float *&data,
-                                                                   size_t &npts, size_t &dim, const size_t &rounded_dim,
-                                                                   size_t offset);
+                                                                   uint64_t &npts, uint64_t &dim, const uint64_t &rounded_dim,
+                                                                   uint64_t offset);
 
-template DISKANN_DLLEXPORT void read_array<char>(AlignedFileReader &reader, char *data, size_t size, size_t offset);
+template DISKANN_DLLEXPORT void read_array<char>(AlignedFileReader &reader, char *data, uint64_t size, uint64_t offset);
 
-template DISKANN_DLLEXPORT void read_array<uint8_t>(AlignedFileReader &reader, uint8_t *data, size_t size,
-                                                    size_t offset);
-template DISKANN_DLLEXPORT void read_array<int8_t>(AlignedFileReader &reader, int8_t *data, size_t size, size_t offset);
-template DISKANN_DLLEXPORT void read_array<uint32_t>(AlignedFileReader &reader, uint32_t *data, size_t size,
-                                                     size_t offset);
-template DISKANN_DLLEXPORT void read_array<float>(AlignedFileReader &reader, float *data, size_t size, size_t offset);
+template DISKANN_DLLEXPORT void read_array<uint8_t>(AlignedFileReader &reader, uint8_t *data, uint64_t size,
+                                                    uint64_t offset);
+template DISKANN_DLLEXPORT void read_array<int8_t>(AlignedFileReader &reader, int8_t *data, uint64_t size, uint64_t offset);
+template DISKANN_DLLEXPORT void read_array<uint32_t>(AlignedFileReader &reader, uint32_t *data, uint64_t size,
+                                                     uint64_t offset);
+template DISKANN_DLLEXPORT void read_array<float>(AlignedFileReader &reader, float *data, uint64_t size, uint64_t offset);
 
-template DISKANN_DLLEXPORT void read_value<uint8_t>(AlignedFileReader &reader, uint8_t &value, size_t offset);
-template DISKANN_DLLEXPORT void read_value<int8_t>(AlignedFileReader &reader, int8_t &value, size_t offset);
-template DISKANN_DLLEXPORT void read_value<float>(AlignedFileReader &reader, float &value, size_t offset);
-template DISKANN_DLLEXPORT void read_value<uint32_t>(AlignedFileReader &reader, uint32_t &value, size_t offset);
-template DISKANN_DLLEXPORT void read_value<uint64_t>(AlignedFileReader &reader, uint64_t &value, size_t offset);
+template DISKANN_DLLEXPORT void read_value<uint8_t>(AlignedFileReader &reader, uint8_t &value, uint64_t offset);
+template DISKANN_DLLEXPORT void read_value<int8_t>(AlignedFileReader &reader, int8_t &value, uint64_t offset);
+template DISKANN_DLLEXPORT void read_value<float>(AlignedFileReader &reader, float &value, uint64_t offset);
+template DISKANN_DLLEXPORT void read_value<uint32_t>(AlignedFileReader &reader, uint32_t &value, uint64_t offset);
+template DISKANN_DLLEXPORT void read_value<uint64_t>(AlignedFileReader &reader, uint64_t &value, uint64_t offset);
 
 #endif
 

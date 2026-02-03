@@ -43,7 +43,7 @@ void generate_label_indices(path input_data_path, path final_index_path_prefix, 
         path curr_label_input_data_path(input_data_path + "_" + lbl);
         path curr_label_index_path(final_index_path_prefix + "_" + lbl);
 
-        size_t number_of_label_points, dimension;
+        uint64_t number_of_label_points, dimension;
         diskann::get_bin_metadata(curr_label_input_data_path, number_of_label_points, dimension);
         diskann::Index<T> index(diskann::Metric::L2, dimension, number_of_label_points, false, false);
 
@@ -152,12 +152,12 @@ load_label_index_return_values load_label_index(path label_index_path, uint32_t 
 
     uint64_t index_file_size, index_num_frozen_points;
     uint32_t index_max_observed_degree, index_entry_point;
-    const size_t INDEX_METADATA = 2 * sizeof(uint64_t) + 2 * sizeof(uint32_t);
+    const uint64_t INDEX_METADATA = 2 * sizeof(uint64_t) + 2 * sizeof(uint32_t);
     label_index_stream.read((char *)&index_file_size, sizeof(uint64_t));
     label_index_stream.read((char *)&index_max_observed_degree, sizeof(uint32_t));
     label_index_stream.read((char *)&index_entry_point, sizeof(uint32_t));
     label_index_stream.read((char *)&index_num_frozen_points, sizeof(uint64_t));
-    size_t bytes_read = INDEX_METADATA;
+    uint64_t bytes_read = INDEX_METADATA;
 
     std::vector<std::vector<uint32_t>> label_index(label_number_of_points);
     uint32_t nodes_read = 0;

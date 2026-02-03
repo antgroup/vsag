@@ -17,8 +17,8 @@ struct IndexConfig
     GraphStoreStrategy graph_strategy;
 
     Metric metric;
-    size_t dimension;
-    size_t max_points;
+    uint64_t dimension;
+    uint64_t max_points;
 
     bool dynamic_index;
     bool enable_tags;
@@ -26,8 +26,8 @@ struct IndexConfig
     bool concurrent_consolidate;
     bool use_opq;
 
-    size_t num_pq_chunks;
-    size_t num_frozen_pts;
+    uint64_t num_pq_chunks;
+    uint64_t num_frozen_pts;
 
     std::string label_type;
     std::string tag_type;
@@ -39,8 +39,8 @@ struct IndexConfig
     uint32_t initial_search_list_size;
 
   private:
-    IndexConfig(DataStoreStrategy data_strategy, GraphStoreStrategy graph_strategy, Metric metric, size_t dimension,
-                size_t max_points, size_t num_pq_chunks, size_t num_frozen_points, bool dynamic_index, bool enable_tags,
+    IndexConfig(DataStoreStrategy data_strategy, GraphStoreStrategy graph_strategy, Metric metric, uint64_t dimension,
+                uint64_t max_points, uint64_t num_pq_chunks, uint64_t num_frozen_points, bool dynamic_index, bool enable_tags,
                 bool pq_dist_build, bool concurrent_consolidate, bool use_opq, const std::string &data_type,
                 const std::string &tag_type, const std::string &label_type,
                 std::shared_ptr<IndexWriteParameters> index_write_params, uint32_t search_threads,
@@ -82,13 +82,13 @@ class IndexConfigBuilder
         return *this;
     }
 
-    IndexConfigBuilder &with_dimension(size_t dimension)
+    IndexConfigBuilder &with_dimension(uint64_t dimension)
     {
         this->_dimension = dimension;
         return *this;
     }
 
-    IndexConfigBuilder &with_max_points(size_t max_points)
+    IndexConfigBuilder &with_max_points(uint64_t max_points)
     {
         this->_max_points = max_points;
         return *this;
@@ -124,13 +124,13 @@ class IndexConfigBuilder
         return *this;
     }
 
-    IndexConfigBuilder &with_num_pq_chunks(size_t num_pq_chunks)
+    IndexConfigBuilder &with_num_pq_chunks(uint64_t num_pq_chunks)
     {
         this->_num_pq_chunks = num_pq_chunks;
         return *this;
     }
 
-    IndexConfigBuilder &with_num_frozen_pts(size_t num_frozen_pts)
+    IndexConfigBuilder &with_num_frozen_pts(uint64_t num_frozen_pts)
     {
         this->_num_frozen_pts = num_frozen_pts;
         return *this;
@@ -200,8 +200,8 @@ class IndexConfigBuilder
     GraphStoreStrategy _graph_strategy;
 
     Metric _metric;
-    size_t _dimension;
-    size_t _max_points;
+    uint64_t _dimension;
+    uint64_t _max_points;
 
     bool _dynamic_index = false;
     bool _enable_tags = false;
@@ -209,8 +209,8 @@ class IndexConfigBuilder
     bool _concurrent_consolidate = false;
     bool _use_opq = false;
 
-    size_t _num_pq_chunks = 0;
-    size_t _num_frozen_pts = 0;
+    uint64_t _num_pq_chunks = 0;
+    uint64_t _num_frozen_pts = 0;
 
     std::string _label_type = "uint32";
     std::string _tag_type = "uint32";

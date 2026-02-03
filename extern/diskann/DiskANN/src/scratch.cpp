@@ -12,9 +12,9 @@ namespace diskann
 // Functions to manage scratch space for in-memory index based search
 //
 template <typename T>
-InMemQueryScratch<T>::InMemQueryScratch(uint32_t search_l, uint32_t indexing_l, uint32_t r, uint32_t maxc, size_t dim,
-                                        size_t aligned_dim, size_t alignment_factor, bool init_pq_scratch, size_t max_degree,
-                                        size_t pq_chunk)
+InMemQueryScratch<T>::InMemQueryScratch(uint32_t search_l, uint32_t indexing_l, uint32_t r, uint32_t maxc, uint64_t dim,
+                                        uint64_t aligned_dim, uint64_t alignment_factor, bool init_pq_scratch, uint64_t max_degree,
+                                        uint64_t pq_chunk)
     : _L(0), _R(r), _maxc(maxc)
 {
     if (search_l == 0 || indexing_l == 0 || r == 0 || dim == 0)
@@ -35,8 +35,8 @@ InMemQueryScratch<T>::InMemQueryScratch(uint32_t search_l, uint32_t indexing_l, 
 
     _occlude_factor.reserve(maxc);
     _inserted_into_pool_bs = new boost::dynamic_bitset<>();
-    _id_scratch.reserve((size_t)std::ceil(1.5 * GRAPH_SLACK_FACTOR * _R));
-    _dist_scratch.reserve((size_t)std::ceil(1.5 * GRAPH_SLACK_FACTOR * _R));
+    _id_scratch.reserve((uint64_t)std::ceil(1.5 * GRAPH_SLACK_FACTOR * _R));
+    _dist_scratch.reserve((uint64_t)std::ceil(1.5 * GRAPH_SLACK_FACTOR * _R));
 
     resize_for_new_L(std::max(search_l, indexing_l));
 }
@@ -89,9 +89,9 @@ template <typename T> void SSDQueryScratch<T>::reset()
     sector_idx = 0;
 }
 
-template <typename T> SSDQueryScratch<T>::SSDQueryScratch(size_t max_degree, size_t aligned_dim, size_t pq_chunk)
+template <typename T> SSDQueryScratch<T>::SSDQueryScratch(uint64_t max_degree, uint64_t aligned_dim, uint64_t pq_chunk)
 {
-    size_t coord_alloc_size = ROUND_UP(sizeof(T) * aligned_dim, 256);
+    uint64_t coord_alloc_size = ROUND_UP(sizeof(T) * aligned_dim, 256);
 
     diskann::alloc_aligned((void **)&coord_scratch, coord_alloc_size, 256);
     diskann::alloc_aligned((void **)&aligned_query_T, aligned_dim * sizeof(T), 8 * sizeof(T));
@@ -112,7 +112,7 @@ template <typename T> SSDQueryScratch<T>::~SSDQueryScratch()
 
 
 template <typename T>
-SSDThreadData<T>::SSDThreadData(size_t max_degree, size_t aligned_dim, size_t pq_chunk):
+SSDThreadData<T>::SSDThreadData(uint64_t max_degree, uint64_t aligned_dim, uint64_t pq_chunk):
       scratch(max_degree, aligned_dim, pq_chunk)
 {
 }

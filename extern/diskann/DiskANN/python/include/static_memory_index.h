@@ -20,8 +20,8 @@ template <typename DT>
 class StaticMemoryIndex
 {
   public:
-    StaticMemoryIndex(diskann::Metric m, const std::string &index_prefix, size_t num_points,
-                     size_t dimensions, uint32_t num_threads, uint32_t initial_search_complexity);
+    StaticMemoryIndex(diskann::Metric m, const std::string &index_prefix, uint64_t num_points,
+                     uint64_t dimensions, uint32_t num_threads, uint32_t initial_search_complexity);
 
     NeighborsAndDistances<StaticIdType> search(py::array_t<DT, py::array::c_style | py::array::forcecast> &query, uint64_t knn,
                 uint64_t complexity);

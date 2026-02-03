@@ -98,7 +98,7 @@ InMemorySearch<T>::InMemorySearch(const std::string &baseFile, const std::string
                                   const std::string &tagsFile, Metric m, uint32_t num_threads, uint32_t search_l)
     : BaseSearch(tagsFile)
 {
-    size_t dimensions, total_points = 0;
+    uint64_t dimensions, total_points = 0;
     diskann::get_bin_metadata(baseFile, total_points, dimensions);
     _index = std::unique_ptr<diskann::Index<T>>(new diskann::Index<T>(m, dimensions, total_points, false));
 

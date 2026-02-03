@@ -154,7 +154,7 @@ private:
     void
     parallelize_task(const std::function<void(int64_t i, int64_t end)>& task);
 
-    size_t dim_;
+    uint64_t dim_;
     int64_t data_num_;
     Vector<Linklist> graph_;
     Vector<std::mutex> points_lock_;

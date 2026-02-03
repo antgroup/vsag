@@ -19,11 +19,11 @@ struct consolidation_report
         INCONSISTENT_COUNT_ERROR = 3
     };
     status_code _status;
-    size_t _active_points, _max_points, _empty_slots, _slots_released, _delete_set_size, _num_calls_to_process_delete;
+    uint64_t _active_points, _max_points, _empty_slots, _slots_released, _delete_set_size, _num_calls_to_process_delete;
     double _time;
 
-    consolidation_report(status_code status, size_t active_points, size_t max_points, size_t empty_slots,
-                         size_t slots_released, size_t delete_set_size, size_t num_calls_to_process_delete,
+    consolidation_report(status_code status, uint64_t active_points, uint64_t max_points, uint64_t empty_slots,
+                         uint64_t slots_released, uint64_t delete_set_size, uint64_t num_calls_to_process_delete,
                          double time_secs)
         : _status(status), _active_points(active_points), _max_points(max_points), _empty_slots(empty_slots),
           _slots_released(slots_released), _delete_set_size(delete_set_size),
@@ -41,11 +41,11 @@ class AbstractIndex
     AbstractIndex() = default;
     virtual ~AbstractIndex() = default;
 
-    virtual void build(const std::string &data_file, const size_t num_points_to_load,
+    virtual void build(const std::string &data_file, const uint64_t num_points_to_load,
                        IndexBuildParams &build_params) = 0;
 
     template <typename data_type, typename tag_type>
-    void build(const data_type *data, const size_t num_points_to_load, const IndexWriteParameters &parameters,
+    void build(const data_type *data, const uint64_t num_points_to_load, const IndexWriteParameters &parameters,
                const std::vector<tag_type> &tags);
 
     virtual void save(const char *filename, bool compact_before_save = false) = 0;
@@ -58,25 +58,25 @@ class AbstractIndex
 
     // For FastL2 search on optimized layout
     template <typename data_type>
-    void search_with_optimized_layout(const data_type *query, size_t K, size_t L, uint32_t *indices);
+    void search_with_optimized_layout(const data_type *query, uint64_t K, uint64_t L, uint32_t *indices);
 
     // Initialize space for res_vectors before calling.
     template <typename data_type, typename tag_type>
-    size_t search_with_tags(const data_type *query, const uint64_t K, const uint32_t L, tag_type *tags,
+    uint64_t search_with_tags(const data_type *query, const uint64_t K, const uint32_t L, tag_type *tags,
                             float *distances, std::vector<data_type *> &res_vectors);
 
     // Added search overload that takes L as parameter, so that we
     // can customize L on a per-query basis without tampering with "Parameters"
     // IDtype is either uint32_t or uint64_t
     template <typename data_type, typename IDType>
-    std::pair<uint32_t, uint32_t> search(const data_type *query, const size_t K, const uint32_t L, IDType *indices,
+    std::pair<uint32_t, uint32_t> search(const data_type *query, const uint64_t K, const uint32_t L, IDType *indices,
                                          float *distances = nullptr);
 
     // Filter support search
     // IndexType is either uint32_t or uint64_t
     template <typename IndexType>
     std::pair<uint32_t, uint32_t> search_with_filters(const DataType &query, const std::string &raw_label,
-                                                      const size_t K, const uint32_t L, IndexType *indices,
+                                                      const uint64_t K, const uint32_t L, IndexType *indices,
                                                       float *distances);
 
     template <typename data_type, typename tag_type> int insert_point(const data_type *point, const tag_type tag);
@@ -98,12 +98,12 @@ class AbstractIndex
     template <typename tag_type, typename data_type> int get_vector_by_tag(tag_type &tag, data_type *vec);
 
   private:
-    virtual void _build(const DataType &data, const size_t num_points_to_load, const IndexWriteParameters &parameters,
+    virtual void _build(const DataType &data, const uint64_t num_points_to_load, const IndexWriteParameters &parameters,
                         TagVector &tags) = 0;
-    virtual std::pair<uint32_t, uint32_t> _search(const DataType &query, const size_t K, const uint32_t L,
+    virtual std::pair<uint32_t, uint32_t> _search(const DataType &query, const uint64_t K, const uint32_t L,
                                                   std::any &indices, float *distances = nullptr) = 0;
     virtual std::pair<uint32_t, uint32_t> _search_with_filters(const DataType &query, const std::string &filter_label,
-                                                               const size_t K, const uint32_t L, std::any &indices,
+                                                               const uint64_t K, const uint32_t L, std::any &indices,
                                                                float *distances) = 0;
     virtual int _insert_point(const DataType &data_point, const TagType tag) = 0;
     virtual int _lazy_delete(const TagType &tag) = 0;
@@ -111,8 +111,8 @@ class AbstractIndex
     virtual void _get_active_tags(TagRobinSet &active_tags) = 0;
     virtual void _set_start_points_at_random(DataType radius, uint32_t random_seed = 0) = 0;
     virtual int _get_vector_by_tag(TagType &tag, DataType &vec) = 0;
-    virtual size_t _search_with_tags(const DataType &query, const uint64_t K, const uint32_t L, const TagType &tags,
+    virtual uint64_t _search_with_tags(const DataType &query, const uint64_t K, const uint32_t L, const TagType &tags,
                                      float *distances, DataVector &res_vectors) = 0;
-    virtual void _search_with_optimized_layout(const DataType &query, size_t K, size_t L, uint32_t *indices) = 0;
+    virtual void _search_with_optimized_layout(const DataType &query, uint64_t K, uint64_t L, uint32_t *indices) = 0;
 };
 } // namespace diskann

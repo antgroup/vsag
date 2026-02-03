@@ -29,7 +29,7 @@ void query_loop(const std::string &ip_addr_port, const std::string &query_file, 
     web::http::client::http_client client(U(ip_addr_port));
 
     T *data;
-    size_t npts = 1, ndims = 128, rounded_dim = 128;
+    uint64_t npts = 1, ndims = 128, rounded_dim = 128;
     diskann::load_aligned_bin<T>(query_file, data, npts, ndims, rounded_dim);
 
     for (unsigned i = 0; i < nq; ++i)
@@ -40,7 +40,7 @@ void query_loop(const std::string &ip_addr_port, const std::string &query_file, 
         queryJson[QUERY_ID_KEY] = i;
         queryJson[K_KEY] = k_value;
         queryJson[L_KEY] = Ls;
-        for (size_t i = 0; i < ndims; ++i)
+        for (uint64_t i = 0; i < ndims; ++i)
         {
             queryJson[VECTOR_KEY][i] = web::json::value::number(vec[i]);
         }

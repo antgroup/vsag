@@ -36,7 +36,7 @@ QuantizerAdapter<QuantT, DataT>::QuantizerAdapter(const QuantizerParamPtr& param
 
 template <typename QuantT, typename DataT>
 bool
-QuantizerAdapter<QuantT, DataT>::TrainImpl(const DataType* data, size_t count) {
+QuantizerAdapter<QuantT, DataT>::TrainImpl(const DataType* data, uint64_t count) {
     if constexpr (std::is_same_v<DataT, int8_t>) {
         const auto* data_int8 = reinterpret_cast<const int8_t*>(data);
         Vector<DataType> vec(this->dim_ * count, this->allocator_);

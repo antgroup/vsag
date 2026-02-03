@@ -70,22 +70,30 @@ public:
     Build(const DatasetPtr& base);
 
     virtual float
-    CalcDistanceById(const DatasetPtr& vector, int64_t id) const {
+    CalcDistanceById(const DatasetPtr& vector,
+                     int64_t id,
+                     bool calculate_precise_distance = true) const {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                             "Index doesn't support calculate distance by id");
     };
 
     virtual float
-    CalcDistanceById(const float* query, int64_t id) const {
+    CalcDistanceById(const float* query, int64_t id, bool calculate_precise_distance = true) const {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                             "Index doesn't support calculate distance by id");
     }
 
     virtual DatasetPtr
-    CalDistanceById(const float* query, const int64_t* ids, int64_t count) const;
+    CalDistanceById(const float* query,
+                    const int64_t* ids,
+                    int64_t count,
+                    bool calculate_precise_distance = true) const;
 
     virtual DatasetPtr
-    CalDistanceById(const DatasetPtr& query, const int64_t* ids, int64_t count) const;
+    CalDistanceById(const DatasetPtr& query,
+                    const int64_t* ids,
+                    int64_t count,
+                    bool calculate_precise_distance = true) const;
 
     virtual uint64_t
     CalSerializeSize() const;

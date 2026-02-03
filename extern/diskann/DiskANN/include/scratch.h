@@ -20,7 +20,7 @@
 
 // SSD Index related limits
 #define MAX_GRAPH_DEGREE 512
-#define SECTOR_LEN (size_t)4096
+#define SECTOR_LEN (uint64_t)4096
 #define MAX_N_SECTOR_READS 512
 
 namespace diskann
@@ -34,8 +34,8 @@ template <typename T> class InMemQueryScratch
   public:
     ~InMemQueryScratch();
     // REFACTOR TODO: move all parameters to a new class.
-    InMemQueryScratch(uint32_t search_l, uint32_t indexing_l, uint32_t r, uint32_t maxc, size_t dim, size_t aligned_dim,
-                      size_t alignment_factor, bool init_pq_scratch = false, size_t max_degree = MAX_GRAPH_DEGREE, size_t pq_chunk = MAX_PQ_CHUNKS);
+    InMemQueryScratch(uint32_t search_l, uint32_t indexing_l, uint32_t r, uint32_t maxc, uint64_t dim, uint64_t aligned_dim,
+                      uint64_t alignment_factor, bool init_pq_scratch = false, uint64_t max_degree = MAX_GRAPH_DEGREE, uint64_t pq_chunk = MAX_PQ_CHUNKS);
     void resize_for_new_L(uint32_t new_search_l);
     void clear();
 
@@ -153,14 +153,14 @@ template <typename T> class SSDQueryScratch
   public:
     T *coord_scratch = nullptr; // MUST BE AT LEAST [sizeof(T) * data_dim]
 
-    size_t sector_idx = 0;          // index of next [SECTOR_LEN] scratch to use
+    uint64_t sector_idx = 0;          // index of next [SECTOR_LEN] scratch to use
 
     T *aligned_query_T = nullptr;
 
     PQScratch<T> *_pq_scratch;
 
 
-    SSDQueryScratch(size_t max_degree, size_t aligned_dim, size_t pq_chunk);
+    SSDQueryScratch(uint64_t max_degree, uint64_t aligned_dim, uint64_t pq_chunk);
     ~SSDQueryScratch();
 
     void reset();
@@ -170,7 +170,7 @@ template <typename T> class SSDThreadData
 {
   public:
     SSDQueryScratch<T> scratch;
-    SSDThreadData(size_t max_degree, size_t aligned_dim, size_t pq_chunk);
+    SSDThreadData(uint64_t max_degree, uint64_t aligned_dim, uint64_t pq_chunk);
     void clear();
 };
 

@@ -96,7 +96,7 @@ CompressedGraphDataCell::Serialize(StreamWriter& writer) {
             StreamWriter::WriteObj(writer, encoder.low_bits_width);
             StreamWriter::WriteObj(writer, encoder.low_bits_size);
             StreamWriter::WriteObj(writer, encoder.high_bits_size);
-            for (size_t j = 0; j < encoder.low_bits_size + encoder.high_bits_size; j++) {
+            for (uint64_t j = 0; j < encoder.low_bits_size + encoder.high_bits_size; j++) {
                 StreamWriter::WriteObj(writer, encoder.bits[j]);
             }
         }
@@ -122,7 +122,7 @@ CompressedGraphDataCell::Deserialize(StreamReader& reader) {
 
             encoder.bits = static_cast<uint64_t*>(allocator_->Allocate(
                 (encoder.low_bits_size + encoder.high_bits_size) * sizeof(uint64_t)));
-            for (size_t j = 0; j < encoder.low_bits_size + encoder.high_bits_size; j++) {
+            for (uint64_t j = 0; j < encoder.low_bits_size + encoder.high_bits_size; j++) {
                 StreamReader::ReadObj(reader, encoder.bits[j]);
             }
         }

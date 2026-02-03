@@ -24,7 +24,7 @@ namespace diskann
 template <typename T, typename LabelT = uint32_t> class PQFlashIndex
 {
   public:
-    DISKANN_DLLEXPORT PQFlashIndex(std::shared_ptr<LocalFileReader> &fileReader, diskann::Metric m, size_t len, size_t dim, bool use_bsa = false);
+    DISKANN_DLLEXPORT PQFlashIndex(std::shared_ptr<LocalFileReader> &fileReader, diskann::Metric m, uint64_t len, uint64_t dim, bool use_bsa = false, bool support_calc_distance_by_ids = false);
     DISKANN_DLLEXPORT ~PQFlashIndex();
 
 #ifdef EXEC_ENV_OLS
@@ -48,7 +48,7 @@ template <typename T, typename LabelT = uint32_t> class PQFlashIndex
     DISKANN_DLLEXPORT int load_from_separate_paths(std::stringstream &pivots_stream, std::stringstream &compressed_stream,
                                                    std::stringstream &tag_stream);
 
-    DISKANN_DLLEXPORT size_t load_graph(std::stringstream &in);
+    DISKANN_DLLEXPORT uint64_t load_graph(std::stringstream &in);
 
 
     DISKANN_DLLEXPORT void load_cache_list(std::vector<uint32_t> &node_list);
@@ -103,6 +103,8 @@ template <typename T, typename LabelT = uint32_t> class PQFlashIndex
 
     DISKANN_DLLEXPORT int64_t get_memory_usage();
 
+    DISKANN_DLLEXPORT void cal_distance_by_ids(const float *query, const int64_t *ids, int64_t count, float *distances, bool use_reorder = true);
+
   protected:
     DISKANN_DLLEXPORT void use_medoids_data_as_centroids();
     DISKANN_DLLEXPORT void setup_thread_data(uint64_t nthreads, uint64_t visited_reserve = 4096);
@@ -112,7 +114,7 @@ template <typename T, typename LabelT = uint32_t> class PQFlashIndex
   private:
     DISKANN_DLLEXPORT inline bool point_has_label(uint32_t point_id, uint32_t label_id);
     std::unordered_map<std::string, LabelT> load_label_map(const std::string &map_file);
-    DISKANN_DLLEXPORT void parse_label_file(const std::string &map_file, size_t &num_pts_labels);
+    DISKANN_DLLEXPORT void parse_label_file(const std::string &map_file, uint64_t &num_pts_labels);
     DISKANN_DLLEXPORT void get_label_file_metadata(std::string map_file, uint32_t &num_pts, uint32_t &num_total_labels);
     DISKANN_DLLEXPORT inline int32_t get_filter_number(const LabelT &filter_label);
     DISKANN_DLLEXPORT void generate_random_labels(std::vector<LabelT> &labels, const uint32_t num_labels,
@@ -123,7 +125,7 @@ template <typename T, typename LabelT = uint32_t> class PQFlashIndex
     // offset in sector: [(i % nnodes_per_sector) * max_node_len]
     // nnbrs of node `i`: *(unsigned*) (buf)
     // nbrs of node `i`: ((unsigned*)buf) + 1
-    size_t sector_len = 4096 * 8;
+    uint64_t sector_len = 4096 * 8;
 
 
     uint64_t max_node_len = 0, nnodes_per_sector = 0, max_degree = 0;
@@ -176,7 +178,7 @@ template <typename T, typename LabelT = uint32_t> class PQFlashIndex
     // we can optionally have multiple starting points
     uint32_t *medoids = nullptr;
     // defaults to 1
-    size_t num_medoids;
+    uint64_t num_medoids;
     // by default, it is empty. If there are multiple
     // centroids, we pick the medoid corresponding to the
     // closest centroid as the starting point of search
@@ -198,7 +200,8 @@ template <typename T, typename LabelT = uint32_t> class PQFlashIndex
     bool reorder_data_exists = false;
     uint64_t reoreder_data_offset = 0;
 
-
+    bool support_calc_distance_by_ids = false;
+    std::unordered_map<uint32_t, int64_t > tag_to_id_map;
 
     // Graph related data structures
     int64_t graph_size = 0;

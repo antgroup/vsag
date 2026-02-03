@@ -61,7 +61,7 @@ float
 INT8InnerProduct(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
     auto* pVect1 = (int8_t*)pVect1v;
     auto* pVect2 = (int8_t*)pVect2v;
-    auto qty = *((size_t*)qty_ptr);
+    auto qty = *((uint64_t*)qty_ptr);
     return neon::INT8ComputeIP(pVect1, pVect2, qty);
 }
 
@@ -1847,12 +1847,12 @@ SQ8UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t 
 
 #if defined(ENABLE_NEON)
 __inline void __attribute__((__always_inline__)) extract_12_bits_to_mask(const uint8_t* bits,
-                                                                         size_t bit_offset,
+                                                                         uint64_t bit_offset,
                                                                          uint32x4_t& mask0,
                                                                          uint32x4_t& mask1,
                                                                          uint32x4_t& mask2) {
-    size_t byte_idx = bit_offset / 8;
-    size_t bit_start = bit_offset % 8;
+    uint64_t byte_idx = bit_offset / 8;
+    uint64_t bit_start = bit_offset % 8;
 
     uint32_t mask_bits;
     if (bit_start <= 4) {
@@ -1883,11 +1883,11 @@ __inline void __attribute__((__always_inline__)) extract_12_bits_to_mask(const u
 }
 
 __inline void __attribute__((__always_inline__)) extract_8_bits_to_mask(const uint8_t* bits,
-                                                                        size_t bit_offset,
+                                                                        uint64_t bit_offset,
                                                                         uint32x4_t& mask0,
                                                                         uint32x4_t& mask1) {
-    size_t byte_idx = bit_offset / 8;
-    size_t bit_start = bit_offset % 8;
+    uint64_t byte_idx = bit_offset / 8;
+    uint64_t bit_start = bit_offset % 8;
 
     uint16_t mask_bits;
     if (bit_start == 0) {
@@ -1934,13 +1934,13 @@ RaBitQSQ4UBinaryIP(const uint8_t* codes, const uint8_t* bits, uint64_t dim) {
         return 0;
 
     uint32_t result = 0;
-    size_t num_bytes = (dim + 7) / 8;
+    uint64_t num_bytes = (dim + 7) / 8;
 
     for (uint64_t bit_pos = 0; bit_pos < 4; ++bit_pos) {
         const uint8_t* codes_ptr = codes + bit_pos * num_bytes;
         uint32x4_t popcnt_sum = vdupq_n_u32(0);
 
-        size_t i = 0;
+        uint64_t i = 0;
         for (; i + 15 < num_bytes; i += 16) {
             uint8x16_t code_vec = vld1q_u8(codes_ptr + i);
             uint8x16_t bits_vec = vld1q_u8(bits + i);
@@ -2255,10 +2255,10 @@ BitNot(const uint8_t* x, const uint64_t num_byte, uint8_t* result) {
 void
 KacsWalk(float* data, uint64_t len) {
 #if defined(ENABLE_NEON)
-    size_t base = len % 2;
-    size_t offset = base + (len / 2);
+    uint64_t base = len % 2;
+    uint64_t offset = base + (len / 2);
 
-    size_t i = 0;
+    uint64_t i = 0;
     for (; i + 3 < len / 2; i += 4) {
         float32x4_t first = vld1q_f32(data + i);
         float32x4_t second = vld1q_f32(data + i + offset);
@@ -2288,7 +2288,7 @@ KacsWalk(float* data, uint64_t len) {
 void
 FlipSign(const uint8_t* flip, float* data, uint64_t dim) {
 #if defined(ENABLE_NEON)
-    size_t i = 0;
+    uint64_t i = 0;
 
     for (; i + 3 < dim; i += 4) {
         uint8_t byte_val = flip[i / 8];
@@ -2325,7 +2325,7 @@ void
 VecRescale(float* data, uint64_t dim, float val) {
 #if defined(ENABLE_NEON)
     float32x4_t scale = vdupq_n_f32(val);
-    size_t i = 0;
+    uint64_t i = 0;
 
     for (; i + 3 < dim; i += 4) {
         float32x4_t vec = vld1q_f32(data + i);
@@ -2373,8 +2373,8 @@ RotateOp(float* data, int idx, int dim_, int step) {
 void
 FHTRotate(float* data, uint64_t dim_) {
 #if defined(ENABLE_NEON)
-    size_t n = dim_;
-    size_t step = 1;
+    uint64_t n = dim_;
+    uint64_t step = 1;
     while (step < n) {
         neon::RotateOp(data, 0, dim_, step);
         step *= 2;

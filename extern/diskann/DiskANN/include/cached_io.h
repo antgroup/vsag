@@ -52,7 +52,7 @@ class cached_ifstream
         }
     }
 
-    size_t get_file_size()
+    uint64_t get_file_size()
     {
         return fsize;
     }
@@ -158,7 +158,7 @@ class cached_ofstream
         diskann::cout << "Finished writing " << fsize << "B" << std::endl;
     }
 
-    size_t get_file_size()
+    uint64_t get_file_size()
     {
         return fsize;
     }

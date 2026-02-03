@@ -47,20 +47,20 @@ template <typename T> class Distance
     //
     //  TODO: This does not take into account the case for SSD inner product
     //  where the dimensions change after normalization.
-    DISKANN_DLLEXPORT virtual void preprocess_base_points(T *original_data, const size_t orig_dim,
-                                                          const size_t num_points);
+    DISKANN_DLLEXPORT virtual void preprocess_base_points(T *original_data, const uint64_t orig_dim,
+                                                          const uint64_t num_points);
 
     // Invokes normalization for a single vector during search. The scratch space
     // has to be created by the caller keeping track of the fact that
     // normalization might change the dimension of the query vector.
-    DISKANN_DLLEXPORT virtual void preprocess_query(const T *query_vec, const size_t query_dim, T *scratch_query);
+    DISKANN_DLLEXPORT virtual void preprocess_query(const T *query_vec, const uint64_t query_dim, T *scratch_query);
 
     // If an algorithm has a requirement that some data be aligned to a certain
     // boundary it can use this function to indicate that requirement. Currently,
     // we are setting it to 8 because that works well for AVX2. If we have AVX512
     // implementations of distance algos, they might have to set this to 16
     // (depending on how they are implemented)
-    DISKANN_DLLEXPORT virtual size_t get_required_alignment() const;
+    DISKANN_DLLEXPORT virtual uint64_t get_required_alignment() const;
 
     // Providing a default implementation for the virtual destructor because we
     // don't expect most metric implementations to need it.
@@ -68,7 +68,7 @@ template <typename T> class Distance
 
   protected:
     diskann::Metric _distance_metric;
-    size_t _alignment_factor = 8;
+    uint64_t _alignment_factor = 8;
 };
 
 class DistanceCosineInt8 : public Distance<int8_t>
@@ -223,17 +223,17 @@ class AVXNormalizedCosineDistanceFloat : public Distance<float>
 
     DISKANN_DLLEXPORT virtual bool preprocessing_required() const override;
 
-    DISKANN_DLLEXPORT virtual void preprocess_base_points(float *original_data, const size_t orig_dim,
-                                                          const size_t num_points) override;
+    DISKANN_DLLEXPORT virtual void preprocess_base_points(float *original_data, const uint64_t orig_dim,
+                                                          const uint64_t num_points) override;
 
-    DISKANN_DLLEXPORT virtual void preprocess_query(const float *query_vec, const size_t query_dim,
+    DISKANN_DLLEXPORT virtual void preprocess_query(const float *query_vec, const uint64_t query_dim,
                                                     float *scratch_query_vector) override;
 };
 
 class VsagDistanceL2Float : public Distance<float>
 {
   public:
-    VsagDistanceL2Float(size_t dimension);
+    VsagDistanceL2Float(uint64_t dimension);
 
     DISKANN_DLLEXPORT virtual float compare(const float *a, const float *b, uint32_t size) const override;
   private:
@@ -243,7 +243,7 @@ class VsagDistanceL2Float : public Distance<float>
 class VsagDistanceInnerProductFloat : public Distance<float>
 {
   public:
-    VsagDistanceInnerProductFloat(size_t dimension);
+    VsagDistanceInnerProductFloat(uint64_t dimension);
 
     DISKANN_DLLEXPORT virtual float compare(const float *a, const float *b, uint32_t size) const override;
   private:

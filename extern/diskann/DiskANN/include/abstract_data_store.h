@@ -18,7 +18,7 @@ namespace diskann
 template <typename data_t> class AbstractDataStore
 {
   public:
-    AbstractDataStore(const location_t capacity, const size_t dim);
+    AbstractDataStore(const location_t capacity, const uint64_t dim);
 
     virtual ~AbstractDataStore() = default;
 
@@ -32,27 +32,27 @@ template <typename data_t> class AbstractDataStore
     // resizing we can end up in a situation where the store has spare capacity.
     // To optimize disk utilization, we pass the number of points that are "true"
     // points, so that the store can discard the empty locations before saving.
-    virtual size_t save(const std::string &filename, const location_t num_pts) = 0;
+    virtual uint64_t save(const std::string &filename, const location_t num_pts) = 0;
 
 
-    virtual size_t save(std::stringstream &out, const location_t num_pts) = 0;
+    virtual uint64_t save(std::stringstream &out, const location_t num_pts) = 0;
 
     DISKANN_DLLEXPORT virtual location_t capacity() const;
 
-    DISKANN_DLLEXPORT virtual size_t get_dims() const;
+    DISKANN_DLLEXPORT virtual uint64_t get_dims() const;
 
     // Implementers can choose to return _dim if they are not
     // concerned about memory alignment.
     // Some distance metrics (like l2) need data vectors to be aligned, so we
     // align the dimension by padding zeros.
-    virtual size_t get_aligned_dim() const = 0;
+    virtual uint64_t get_aligned_dim() const = 0;
 
     // populate the store with vectors (either from a pointer or bin file),
     // potentially after pre-processing the vectors if the metric deems so
     // e.g., normalizing vectors for cosine distance over floating-point vectors
     // useful for bulk or static index building.
     virtual void populate_data(const data_t *vectors, const location_t num_pts) = 0;
-    virtual void populate_data(const std::string &filename, const size_t offset) = 0;
+    virtual void populate_data(const std::string &filename, const uint64_t offset) = 0;
     virtual void populate_data(const data_t *vectors, const location_t num_pts, const boost::dynamic_bitset<>& mask) = 0;
     virtual void link_data(const data_t *vectors, const location_t num_pts,  const boost::dynamic_bitset<>& mask) = 0;
 
@@ -103,7 +103,7 @@ template <typename data_t> class AbstractDataStore
     // search helpers
     // if the base data is aligned per the request of the metric, this will tell
     // how to align the query vector in a consistent manner
-    virtual size_t get_alignment_factor() const = 0;
+    virtual uint64_t get_alignment_factor() const = 0;
 
   protected:
     // Expand the datastore to new_num_points. Returns the new capacity created,
@@ -117,7 +117,7 @@ template <typename data_t> class AbstractDataStore
     virtual location_t shrink(const location_t new_num_points) = 0;
 
     location_t _capacity;
-    size_t _dim;
+    uint64_t _dim;
 };
 
 } // namespace diskann

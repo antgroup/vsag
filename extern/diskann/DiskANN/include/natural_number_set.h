@@ -28,11 +28,11 @@ template <typename T> class natural_number_set
     natural_number_set();
 
     bool is_empty() const;
-    void reserve(size_t count);
+    void reserve(uint64_t count);
     void insert(T id);
     T pop_any();
     void clear();
-    size_t size() const;
+    uint64_t size() const;
     bool is_in_set(T id) const;
 
   private:

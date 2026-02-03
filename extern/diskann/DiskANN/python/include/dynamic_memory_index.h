@@ -22,7 +22,7 @@ template <typename DT>
 class DynamicMemoryIndex
 {
   public:
-    DynamicMemoryIndex(diskann::Metric m, size_t dimensions, size_t max_vectors, uint32_t complexity,
+    DynamicMemoryIndex(diskann::Metric m, uint64_t dimensions, uint64_t max_vectors, uint32_t complexity,
                        uint32_t graph_degree, bool saturate_graph, uint32_t max_occlusion_size, float alpha,
                        uint32_t num_threads, uint32_t filter_complexity, uint32_t num_frozen_points,
                        uint32_t initial_search_complexity, uint32_t initial_search_threads,
@@ -41,7 +41,7 @@ class DynamicMemoryIndex
                                             uint64_t num_queries, uint64_t knn, uint64_t complexity,
                                             uint32_t num_threads);
     void consolidate_delete();
-    size_t num_points();
+    uint64_t num_points();
 
 
   private:

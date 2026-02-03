@@ -25,14 +25,14 @@ WindowResultQueue::WindowResultQueue() {
 
 void
 WindowResultQueue::Push(float value) {
-    size_t window_size = queue_.size();
+    uint64_t window_size = queue_.size();
     queue_[count_ % window_size] = value;
     count_++;
 }
 
 float
 WindowResultQueue::GetAvgResult() const {
-    size_t statistic_num = std::min(count_, queue_.size());
+    uint64_t statistic_num = std::min<uint64_t>(count_, queue_.size());
     float result = 0;
     for (int i = 0; i < statistic_num; i++) {
         result += queue_[i];

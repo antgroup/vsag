@@ -137,7 +137,14 @@ else()
         message(WARNING "Intel MKL is not supported on this architecture (${CMAKE_HOST_SYSTEM_PROCESSOR}). Falling back to OpenBLAS.")
     endif()
 
-    set(BLAS_LIBRARIES libopenblas.a gfortran)
+    # OpenBLAS on macOS typically requires libgfortran at link time, but `-lgfortran` often fails
+    # because libgfortran is not in the default linker search paths. If DarwinDep.cmake already
+    # detected the full path to libgfortran.dylib, prefer that; otherwise fall back to `gfortran`.
+    if (APPLE AND DEFINED GFORTRAN_LIB AND EXISTS "${GFORTRAN_LIB}")
+        set(BLAS_LIBRARIES libopenblas.a "${GFORTRAN_LIB}")
+    else()
+        set(BLAS_LIBRARIES libopenblas.a gfortran)
+    endif()
     if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
         list(PREPEND BLAS_LIBRARIES omp)
     else()

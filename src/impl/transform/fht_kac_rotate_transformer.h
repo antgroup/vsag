@@ -49,15 +49,15 @@ public:
     void
     CopyFlip(uint8_t* out_flip) const;
 
-    constexpr static size_t BYTE_LEN = 8;
+    constexpr static uint64_t BYTE_LEN = 8;
     constexpr static int ROUND = 4;
 
 private:
-    size_t flip_offset_{0};
+    uint64_t flip_offset_{0};
 
     std::vector<uint8_t> flip_;
 
-    size_t trunc_dim_{0};
+    uint64_t trunc_dim_{0};
 
     float fac_{0};
 };

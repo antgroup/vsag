@@ -25,7 +25,7 @@ namespace po = boost::program_options;
 template <typename T, typename TagT = uint32_t, typename LabelT = uint32_t>
 int build_in_memory_index(const diskann::Metric &metric, const std::string &data_path, const uint32_t R,
                           const uint32_t L, const float alpha, const std::string &save_path, const uint32_t num_threads,
-                          const bool use_pq_build, const size_t num_pq_bytes, const bool use_opq,
+                          const bool use_pq_build, const uint64_t num_pq_bytes, const bool use_opq,
                           const std::string &label_file, const std::string &universal_label, const uint32_t Lf)
 {
     diskann::IndexWriteParameters paras = diskann::IndexWriteParametersBuilder(L, R)
@@ -37,7 +37,7 @@ int build_in_memory_index(const diskann::Metric &metric, const std::string &data
     std::string labels_file_to_use = save_path + "_label_formatted.txt";
     std::string mem_labels_int_map_file = save_path + "_labels_map.txt";
 
-    size_t data_num, data_dim;
+    uint64_t data_num, data_dim;
     diskann::get_bin_metadata(data_path, data_num, data_dim);
 
     diskann::Index<T, TagT, LabelT> index(metric, data_dim, data_num, false, false, false, use_pq_build, num_pq_bytes,
@@ -161,7 +161,7 @@ int main(int argc, char **argv)
         diskann::cout << "Starting index build with R: " << R << "  Lbuild: " << L << "  alpha: " << alpha
                       << "  #threads: " << num_threads << std::endl;
 
-        size_t data_num, data_dim;
+        uint64_t data_num, data_dim;
         diskann::get_bin_metadata(data_path, data_num, data_dim);
 
         auto config = diskann::IndexConfigBuilder()

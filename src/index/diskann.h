@@ -57,7 +57,7 @@ enum BuildStatus { BEGIN = 0, GRAPH = 1, EDGE_PRUNE = 2, PQ = 3, DISK_LAYOUT = 4
 
 class DiskANN : public Index {
 public:
-    using rs = std::pair<float, size_t>;
+    using rs = std::pair<float, uint64_t>;
 
     // offset: uint64, len: uint64, dest: void*
     using read_request = std::tuple<uint64_t, uint64_t, void*>;
@@ -69,6 +69,21 @@ public:
     tl::expected<std::vector<int64_t>, Error>
     Build(const DatasetPtr& base) override {
         SAFE_CALL(return this->build(base));
+    }
+
+    tl::expected<DatasetPtr, Error>
+    CalDistanceById(const float* query,
+                    const int64_t* ids,
+                    int64_t count,
+                    bool calculate_precise_distance = true) const override {
+        SAFE_CALL(return this->cal_distance_by_id(query, ids, count, calculate_precise_distance));
+    }
+
+    tl::expected<float, Error>
+    CalcDistanceById(const float* vector,
+                     int64_t id,
+                     bool calculate_precise_distance = true) const override {
+        SAFE_CALL(return this->calc_distance_by_id(vector, id, calculate_precise_distance));
     }
 
     IndexType
@@ -187,6 +202,17 @@ private:
     tl::expected<Checkpoint, Error>
     continue_build(const DatasetPtr& base, const BinarySet& binary_set);
 
+    DatasetPtr
+    cal_distance_by_id(const float* query,
+                       const int64_t* ids,
+                       int64_t count,
+                       bool calculate_precise_distance = true) const;
+
+    float
+    calc_distance_by_id(const float* vector,
+                        int64_t id,
+                        bool calculate_precise_distance = true) const;
+
     tl::expected<DatasetPtr, Error>
     knn_search(const DatasetPtr& query,
                int64_t k,
@@ -261,10 +287,12 @@ private:
     int L_ = 200;
     int R_ = 64;
     float p_val_ = 0.5;
-    size_t disk_pq_dims_ = 8;
-    size_t sector_len_;
+    uint64_t disk_pq_dims_ = 8;
+    uint64_t sector_len_;
 
     int64_t build_batch_num_ = 10;
+
+    bool support_calc_distance_by_id_ = false;
 
     int64_t dim_;
     bool use_reference_ = true;

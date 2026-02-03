@@ -21,21 +21,21 @@ namespace diskann
 template <typename data_t> class InMemDataStore : public AbstractDataStore<data_t>
 {
   public:
-    InMemDataStore(const location_t capacity, const size_t dim, std::shared_ptr<Distance<data_t>> distance_fn, bool compute_norm = false);
+    InMemDataStore(const location_t capacity, const uint64_t dim, std::shared_ptr<Distance<data_t>> distance_fn, bool compute_norm = false);
     virtual ~InMemDataStore();
 
     virtual location_t load(const std::string &filename) override;
     virtual location_t load(std::stringstream &in) override;
-    virtual size_t save(const std::string &filename, const location_t num_points) override;
-    virtual size_t save(std::stringstream &out, const location_t num_points) override;
+    virtual uint64_t save(const std::string &filename, const location_t num_points) override;
+    virtual uint64_t save(std::stringstream &out, const location_t num_points) override;
 
-    virtual size_t get_aligned_dim() const override;
+    virtual uint64_t get_aligned_dim() const override;
 
     // Populate internal data from unaligned data while doing alignment and any
     // normalization that is required.
     virtual void populate_data(const data_t *vectors, const location_t num_pts) override;
     virtual void populate_data(const data_t *vectors, const location_t num_pts, const boost::dynamic_bitset<>& mask) override;
-    virtual void populate_data(const std::string &filename, const size_t offset) override;
+    virtual void populate_data(const std::string &filename, const uint64_t offset) override;
     virtual void link_data(const data_t *vectors, const location_t num_pts, const boost::dynamic_bitset<>& mask) override;
 
     virtual void extract_data_to_bin(const std::string &filename, const location_t num_pts) override;
@@ -55,7 +55,7 @@ template <typename data_t> class InMemDataStore : public AbstractDataStore<data_
 
     virtual Distance<data_t> *get_dist_fn() override;
 
-    virtual size_t get_alignment_factor() const override;
+    virtual uint64_t get_alignment_factor() const override;
 
   protected:
     virtual location_t expand(const location_t new_size) override;
@@ -70,7 +70,7 @@ template <typename data_t> class InMemDataStore : public AbstractDataStore<data_
   private:
     data_t *_data = nullptr;
 
-    size_t _aligned_dim;
+    uint64_t _aligned_dim;
 
     // It may seem weird to put distance metric along with the data store class,
     // but this gives us perf benefits as the datastore can do distance
@@ -83,7 +83,7 @@ template <typename data_t> class InMemDataStore : public AbstractDataStore<data_
     std::shared_ptr<float[]> _pre_computed_norms;
 
     bool _use_data_reference = false;
-    std::vector<size_t> _loc_to_memory_index;
+    std::vector<uint64_t> _loc_to_memory_index;
 };
 
 } // namespace diskann

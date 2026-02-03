@@ -28,7 +28,7 @@
 namespace diskann
 {
 
-inline double estimate_ram_usage(size_t size, uint32_t dim, uint32_t datasize, uint32_t degree)
+inline double estimate_ram_usage(uint64_t size, uint32_t dim, uint32_t datasize, uint32_t degree)
 {
     double size_of_data = ((double)size) * ROUND_UP(dim, 8) * datasize;
     double size_of_graph = ((double)size) * degree * sizeof(uint32_t) * GRAPH_SLACK_FACTOR;
@@ -51,18 +51,18 @@ template <typename T, typename TagT = uint32_t, typename LabelT = uint32_t> clas
   public:
     // Constructor for Bulk operations and for creating the index object solely
     // for loading a prexisting index.
-    DISKANN_DLLEXPORT Index(Metric m, const size_t dim, const size_t max_points = 1, const bool dynamic_index = false,
+    DISKANN_DLLEXPORT Index(Metric m, const uint64_t dim, const uint64_t max_points = 1, const bool dynamic_index = false,
                             const bool enable_tags = false, const bool concurrent_consolidate = false,
-                            const bool pq_dist_build = false, const size_t num_pq_chunks = 0,
-                            const bool use_opq = false, const size_t num_frozen_pts = 0,
+                            const bool pq_dist_build = false, const uint64_t num_pq_chunks = 0,
+                            const bool use_opq = false, const uint64_t num_frozen_pts = 0,
                             const bool init_data_store = true);
 
     // Constructor for incremental index
-    DISKANN_DLLEXPORT Index(Metric m, const size_t dim, const size_t max_points, const bool dynamic_index,
+    DISKANN_DLLEXPORT Index(Metric m, const uint64_t dim, const uint64_t max_points, const bool dynamic_index,
                             const IndexWriteParameters &indexParameters, const uint32_t initial_search_list_size,
                             const uint32_t search_threads, const bool enable_tags = false,
                             const bool concurrent_consolidate = false, const bool pq_dist_build = false,
-                            const size_t num_pq_chunks = 0, const bool use_opq = false);
+                            const uint64_t num_pq_chunks = 0, const bool use_opq = false);
 
     DISKANN_DLLEXPORT Index(const IndexConfig &index_config, std::unique_ptr<AbstractDataStore<T>> data_store
                             /* std::unique_ptr<AbstractGraphStore> graph_store*/);
@@ -80,7 +80,7 @@ template <typename T, typename TagT = uint32_t, typename LabelT = uint32_t> clas
     DISKANN_DLLEXPORT void load(AlignedFileReader &reader, uint32_t num_threads, uint32_t search_l);
 #else
     // Reads the number of frozen points from graph's metadata file section.
-    DISKANN_DLLEXPORT static size_t get_graph_num_frozen_points(const std::string &graph_file);
+    DISKANN_DLLEXPORT static uint64_t get_graph_num_frozen_points(const std::string &graph_file);
 
     DISKANN_DLLEXPORT void load(const char *index_file, uint32_t num_threads, uint32_t search_l) override;
 
@@ -89,36 +89,36 @@ template <typename T, typename TagT = uint32_t, typename LabelT = uint32_t> clas
 #endif
 
     // get some private variables
-    DISKANN_DLLEXPORT size_t get_num_points();
-    DISKANN_DLLEXPORT size_t get_max_points();
+    DISKANN_DLLEXPORT uint64_t get_num_points();
+    DISKANN_DLLEXPORT uint64_t get_max_points();
 
     DISKANN_DLLEXPORT bool detect_common_filters(uint32_t point_id, bool search_invocation,
                                                  const std::vector<LabelT> &incoming_labels);
 
     // Batch build from a file. Optionally pass tags vector.
-    DISKANN_DLLEXPORT void build(const char *filename, const size_t num_points_to_load,
+    DISKANN_DLLEXPORT void build(const char *filename, const uint64_t num_points_to_load,
                                  const IndexWriteParameters &parameters,
                                  const std::vector<TagT> &tags = std::vector<TagT>());
 
     // Batch build from a file. Optionally pass tags file.
-    DISKANN_DLLEXPORT void build(const char *filename, const size_t num_points_to_load,
+    DISKANN_DLLEXPORT void build(const char *filename, const uint64_t num_points_to_load,
                                  const IndexWriteParameters &parameters, const char *tag_filename);
 
     // Batch build from a data array, which must pad vectors to aligned_dim
-    DISKANN_DLLEXPORT std::vector<size_t> build(const T *data, const size_t num_points_to_load, const IndexWriteParameters &parameters,
+    DISKANN_DLLEXPORT std::vector<uint64_t> build(const T *data, const uint64_t num_points_to_load, const IndexWriteParameters &parameters,
                                  const std::vector<TagT> &tags, bool use_reference);
 
 
-    DISKANN_DLLEXPORT std::vector<size_t> build(const T *data, const size_t num_points_to_load, const IndexWriteParameters &parameters,
+    DISKANN_DLLEXPORT std::vector<uint64_t> build(const T *data, const uint64_t num_points_to_load, const IndexWriteParameters &parameters,
                                                 const std::vector<TagT> &tags, bool use_reference, int round,
                                                 int batch_num, std::unordered_set<uint32_t>* builded_nodes);
 
-    DISKANN_DLLEXPORT void build(const std::string &data_file, const size_t num_points_to_load,
+    DISKANN_DLLEXPORT void build(const std::string &data_file, const uint64_t num_points_to_load,
                                  IndexBuildParams &build_params) override;
 
     // Filtered Support
     DISKANN_DLLEXPORT void build_filtered_index(const char *filename, const std::string &label_file,
-                                                const size_t num_points_to_load, IndexWriteParameters &parameters,
+                                                const uint64_t num_points_to_load, IndexWriteParameters &parameters,
                                                 const std::vector<TagT> &tags = std::vector<TagT>());
 
     DISKANN_DLLEXPORT void set_universal_label(const LabelT &label);
@@ -128,7 +128,7 @@ template <typename T, typename TagT = uint32_t, typename LabelT = uint32_t> clas
 
     // Set starting point of an index before inserting any points incrementally.
     // The data count should be equal to _num_frozen_pts * _aligned_dim.
-    DISKANN_DLLEXPORT void set_start_points(const T *data, size_t data_count);
+    DISKANN_DLLEXPORT void set_start_points(const T *data, uint64_t data_count);
     // Set starting points to random points on a sphere of certain radius.
     // A fixed random seed can be specified for scenarios where it's important
     // to have higher consistency between index builds.
@@ -138,22 +138,22 @@ template <typename T, typename TagT = uint32_t, typename LabelT = uint32_t> clas
     DISKANN_DLLEXPORT void optimize_index_layout() override;
 
     // For FastL2 search on optimized layout
-    DISKANN_DLLEXPORT void search_with_optimized_layout(const T *query, size_t K, size_t L, uint32_t *indices);
+    DISKANN_DLLEXPORT void search_with_optimized_layout(const T *query, uint64_t K, uint64_t L, uint32_t *indices);
 
     // Added search overload that takes L as parameter, so that we
     // can customize L on a per-query basis without tampering with "Parameters"
     template <typename IDType>
-    DISKANN_DLLEXPORT std::pair<uint32_t, uint32_t> search(const T *query, const size_t K, const uint32_t L,
+    DISKANN_DLLEXPORT std::pair<uint32_t, uint32_t> search(const T *query, const uint64_t K, const uint32_t L,
                                                            IDType *indices, float *distances = nullptr);
 
     // Initialize space for res_vectors before calling.
-    DISKANN_DLLEXPORT size_t search_with_tags(const T *query, const uint64_t K, const uint32_t L, TagT *tags,
+    DISKANN_DLLEXPORT uint64_t search_with_tags(const T *query, const uint64_t K, const uint32_t L, TagT *tags,
                                               float *distances, std::vector<T *> &res_vectors);
 
     // Filter support search
     template <typename IndexType>
     DISKANN_DLLEXPORT std::pair<uint32_t, uint32_t> search_with_filters(const T *query, const LabelT &filter_label,
-                                                                        const size_t K, const uint32_t L,
+                                                                        const uint64_t K, const uint32_t L,
                                                                         IndexType *indices, float *distances);
 
     // Will fail if tag already in the index or if tag=0.
@@ -210,13 +210,13 @@ template <typename T, typename TagT = uint32_t, typename LabelT = uint32_t> clas
 
   protected:
     // overload of abstract index virtual methods
-    virtual void _build(const DataType &data, const size_t num_points_to_load, const IndexWriteParameters &parameters,
+    virtual void _build(const DataType &data, const uint64_t num_points_to_load, const IndexWriteParameters &parameters,
                         TagVector &tags) override;
 
-    virtual std::pair<uint32_t, uint32_t> _search(const DataType &query, const size_t K, const uint32_t L,
+    virtual std::pair<uint32_t, uint32_t> _search(const DataType &query, const uint64_t K, const uint32_t L,
                                                   std::any &indices, float *distances = nullptr) override;
     virtual std::pair<uint32_t, uint32_t> _search_with_filters(const DataType &query,
-                                                               const std::string &filter_label_raw, const size_t K,
+                                                               const std::string &filter_label_raw, const uint64_t K,
                                                                const uint32_t L, std::any &indices,
                                                                float *distances) override;
 
@@ -232,9 +232,9 @@ template <typename T, typename TagT = uint32_t, typename LabelT = uint32_t> clas
 
     virtual int _get_vector_by_tag(TagType &tag, DataType &vec) override;
 
-    virtual void _search_with_optimized_layout(const DataType &query, size_t K, size_t L, uint32_t *indices) override;
+    virtual void _search_with_optimized_layout(const DataType &query, uint64_t K, uint64_t L, uint32_t *indices) override;
 
-    virtual size_t _search_with_tags(const DataType &query, const uint64_t K, const uint32_t L, const TagType &tags,
+    virtual uint64_t _search_with_tags(const DataType &query, const uint64_t K, const uint32_t L, const TagType &tags,
                                      float *distances, DataVector &res_vectors) override;
 
     // No copy/assign.
@@ -252,7 +252,7 @@ template <typename T, typename TagT = uint32_t, typename LabelT = uint32_t> clas
     // determines navigating node of the graph by calculating medoid of datafopt
     uint32_t calculate_entry_point();
 
-    void parse_label_file(const std::string &label_file, size_t &num_pts_labels);
+    void parse_label_file(const std::string &label_file, uint64_t &num_pts_labels);
 
     std::unordered_map<std::string, LabelT> load_label_map(const std::string &map_file);
 
@@ -295,12 +295,12 @@ template <typename T, typename TagT = uint32_t, typename LabelT = uint32_t> clas
     int reserve_location();
 
     // Acquire exclusive _tag_lock before calling
-    size_t release_location(int location);
-    size_t release_locations(const tsl::robin_set<uint32_t> &locations);
+    uint64_t release_location(int location);
+    uint64_t release_locations(const tsl::robin_set<uint32_t> &locations);
 
     // Resize the index when no slots are left for insertion.
     // Acquire exclusive _update_lock and _tag_lock before calling.
-    void resize(size_t new_max_points);
+    void resize(uint64_t new_max_points);
 
     // Acquire unique lock on _update_lock, _consolidate_lock, _tag_lock
     // and _delete_lock before calling these functions.
@@ -313,42 +313,42 @@ template <typename T, typename TagT = uint32_t, typename LabelT = uint32_t> clas
     // Remove deleted nodes from adjacency list of node loc
     // Replace removed neighbors with second order neighbors.
     // Also acquires _locks[i] for i = loc and out-neighbors of loc.
-    void process_delete(const tsl::robin_set<uint32_t> &old_delete_set, size_t loc, const uint32_t range,
+    void process_delete(const tsl::robin_set<uint32_t> &old_delete_set, uint64_t loc, const uint32_t range,
                         const uint32_t maxc, const float alpha, InMemQueryScratch<T> *scratch);
 
     void initialize_query_scratch(uint32_t num_threads, uint32_t search_l, uint32_t indexing_l, uint32_t r,
-                                  uint32_t maxc, size_t dim);
+                                  uint32_t maxc, uint64_t dim);
 
     // Do not call without acquiring appropriate locks
     // call public member functions save and load to invoke these.
-    DISKANN_DLLEXPORT size_t save_graph(std::string filename);
-    DISKANN_DLLEXPORT size_t save_data(std::string filename);
-    DISKANN_DLLEXPORT size_t save_tags(std::string filename);
+    DISKANN_DLLEXPORT uint64_t save_graph(std::string filename);
+    DISKANN_DLLEXPORT uint64_t save_data(std::string filename);
+    DISKANN_DLLEXPORT uint64_t save_tags(std::string filename);
 
 
-    DISKANN_DLLEXPORT size_t save_graph(std::stringstream& out);
-    DISKANN_DLLEXPORT size_t save_data(std::stringstream& out);
-    DISKANN_DLLEXPORT size_t save_tags(std::stringstream& out);
+    DISKANN_DLLEXPORT uint64_t save_graph(std::stringstream& out);
+    DISKANN_DLLEXPORT uint64_t save_data(std::stringstream& out);
+    DISKANN_DLLEXPORT uint64_t save_tags(std::stringstream& out);
 
 
-    DISKANN_DLLEXPORT size_t save_delete_list(const std::string &filename);
+    DISKANN_DLLEXPORT uint64_t save_delete_list(const std::string &filename);
 #ifdef EXEC_ENV_OLS
-    DISKANN_DLLEXPORT size_t load_graph(AlignedFileReader &reader, size_t expected_num_points);
-    DISKANN_DLLEXPORT size_t load_data(AlignedFileReader &reader);
-    DISKANN_DLLEXPORT size_t load_tags(AlignedFileReader &reader);
-    DISKANN_DLLEXPORT size_t load_delete_set(AlignedFileReader &reader);
+    DISKANN_DLLEXPORT uint64_t load_graph(AlignedFileReader &reader, uint64_t expected_num_points);
+    DISKANN_DLLEXPORT uint64_t load_data(AlignedFileReader &reader);
+    DISKANN_DLLEXPORT uint64_t load_tags(AlignedFileReader &reader);
+    DISKANN_DLLEXPORT uint64_t load_delete_set(AlignedFileReader &reader);
 #else
-    DISKANN_DLLEXPORT size_t load_graph(const std::string filename, size_t expected_num_points);
-    DISKANN_DLLEXPORT size_t load_data(std::string filename0);
-    DISKANN_DLLEXPORT size_t load_tags(const std::string tag_file_name);
+    DISKANN_DLLEXPORT uint64_t load_graph(const std::string filename, uint64_t expected_num_points);
+    DISKANN_DLLEXPORT uint64_t load_data(std::string filename0);
+    DISKANN_DLLEXPORT uint64_t load_tags(const std::string tag_file_name);
 
 
-    DISKANN_DLLEXPORT size_t load_graph(std::stringstream &in, size_t expected_num_points);
-    DISKANN_DLLEXPORT size_t load_data(std::stringstream &in);
-    DISKANN_DLLEXPORT size_t load_tags(std::stringstream &in);
+    DISKANN_DLLEXPORT uint64_t load_graph(std::stringstream &in, uint64_t expected_num_points);
+    DISKANN_DLLEXPORT uint64_t load_data(std::stringstream &in);
+    DISKANN_DLLEXPORT uint64_t load_tags(std::stringstream &in);
 
 
-    DISKANN_DLLEXPORT size_t load_delete_set(const std::string &filename);
+    DISKANN_DLLEXPORT uint64_t load_delete_set(const std::string &filename);
 #endif
 
   private:
@@ -365,20 +365,20 @@ template <typename T, typename TagT = uint32_t, typename LabelT = uint32_t> clas
 
     T *_data = nullptr; // coordinates of all base points
     // Dimensions
-    size_t _dim = 0;
-    size_t _nd = 0;         // number of active points i.e. existing in the graph
-    size_t _max_points = 0; // total number of points in given data set
+    uint64_t _dim = 0;
+    uint64_t _nd = 0;         // number of active points i.e. existing in the graph
+    uint64_t _max_points = 0; // total number of points in given data set
 
     // _num_frozen_pts is the number of points which are used as initial
     // candidates when iterating to closest point(s). These are not visible
     // externally and won't be returned by search. At least 1 frozen point is
     // needed for a dynamic index. The frozen points have consecutive locations.
     // See also _start below.
-    size_t _num_frozen_pts = 0;
-    size_t _max_range_of_loaded_graph = 0;
-    size_t _node_size;
-    size_t _data_len;
-    size_t _neighbor_len;
+    uint64_t _num_frozen_pts = 0;
+    uint64_t _max_range_of_loaded_graph = 0;
+    uint64_t _node_size;
+    uint64_t _data_len;
+    uint64_t _neighbor_len;
 
     uint32_t _max_observed_degree = 0;
     // Start point of the search. When _num_frozen_pts is greater than zero,
@@ -419,7 +419,7 @@ template <typename T, typename TagT = uint32_t, typename LabelT = uint32_t> clas
     // Flags for PQ based distance calculation
     bool _pq_dist = false;
     bool _use_opq = false;
-    size_t _num_pq_chunks = 0;
+    uint64_t _num_pq_chunks = 0;
     uint8_t *_pq_data = nullptr;
     bool _pq_generated = false;
     FixedChunkPQTable _pq_table;

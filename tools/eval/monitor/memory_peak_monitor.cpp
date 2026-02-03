@@ -16,6 +16,7 @@
 #include "memory_peak_monitor.h"
 
 #include <mutex>
+#include <sstream>
 
 namespace vsag::eval {
 

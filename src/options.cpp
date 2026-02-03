@@ -36,7 +36,7 @@ Options::logger() {
 }
 
 void
-Options::set_direct_IO_object_align_bit(size_t align_bit) {
+Options::set_direct_IO_object_align_bit(uint64_t align_bit) {
     if (align_bit > 21) {
         throw std::runtime_error(
             fmt::format("size ({}) should be smaller than 2^21(2M).", align_bit));
@@ -47,7 +47,7 @@ Options::set_direct_IO_object_align_bit(size_t align_bit) {
 }
 
 void
-Options::set_block_size_limit(size_t size) {
+Options::set_block_size_limit(uint64_t size) {
     if (size < 256UL * 1024) {
         throw std::runtime_error(fmt::format("size ({}) should be greater than 256K.", size));
     }
@@ -55,7 +55,7 @@ Options::set_block_size_limit(size_t size) {
 }
 
 void
-Options::set_num_threads_io(size_t num_threads) {
+Options::set_num_threads_io(uint64_t num_threads) {
     if (num_threads < 1 || num_threads > 200) {
         throw std::runtime_error(
             fmt::format("num_threads must be set between 1 and 200, but found {}.", num_threads));
@@ -64,7 +64,7 @@ Options::set_num_threads_io(size_t num_threads) {
 }
 
 void
-Options::set_num_threads_building(size_t num_threads) {
+Options::set_num_threads_building(uint64_t num_threads) {
     if (num_threads < 1 || num_threads > 200) {
         throw std::runtime_error(
             fmt::format("num_threads must be set between 1 and 200, but found {}.", num_threads));

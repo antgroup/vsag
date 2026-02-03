@@ -29,7 +29,7 @@ diskann::IndexWriteParameters dynamic_index_write_parameters(const uint32_t comp
 template <class DT>
 diskann::Index<DT, DynamicIdType, filterT> dynamic_index_builder(const diskann::Metric m,
                                                                  const diskann::IndexWriteParameters &write_params,
-                                                                 const size_t dimensions, const size_t max_vectors,
+                                                                 const uint64_t dimensions, const uint64_t max_vectors,
                                                                  const uint32_t initial_search_complexity,
                                                                  const uint32_t initial_search_threads,
                                                                  const bool concurrent_consolidation)
@@ -51,7 +51,7 @@ diskann::Index<DT, DynamicIdType, filterT> dynamic_index_builder(const diskann::
 }
 
 template <class DT>
-DynamicMemoryIndex<DT>::DynamicMemoryIndex(const diskann::Metric m, const size_t dimensions, const size_t max_vectors,
+DynamicMemoryIndex<DT>::DynamicMemoryIndex(const diskann::Metric m, const uint64_t dimensions, const uint64_t max_vectors,
                                            const uint32_t complexity, const uint32_t graph_degree,
                                            const bool saturate_graph, const uint32_t max_occlusion_size,
                                            const float alpha, const uint32_t num_threads,
@@ -159,7 +159,7 @@ template <class DT> void DynamicMemoryIndex<DT>::consolidate_delete()
     _index.consolidate_deletes(_write_parameters);
 }
 
-template <class DT> size_t DynamicMemoryIndex<DT>::num_points()
+template <class DT> uint64_t DynamicMemoryIndex<DT>::num_points()
 {
     return _index.get_num_points();
 }

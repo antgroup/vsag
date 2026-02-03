@@ -242,10 +242,10 @@ template <class T> static float CosineSimilarity2(const T *p1, const T *p2, uint
 }
 
 // static template float CosineSimilarity2<__int8>(const __int8* pVect1,
-//                                         const __int8* pVect2, size_t qty);
+//                                         const __int8* pVect2, uint64_t qty);
 
 // static template float CosineSimilarity2<float>(const float* pVect1,
-//                                        const float* pVect2, size_t qty);
+//                                        const float* pVect2, uint64_t qty);
 
 template <class T> static void CosineSimilarityNormalize(T *pVector, uint32_t qty)
 {
@@ -266,9 +266,9 @@ template <class T> static void CosineSimilarityNormalize(T *pVector, uint32_t qt
 }
 
 // template static void CosineSimilarityNormalize<float>(float* pVector,
-//                                                      size_t qty);
+//                                                      uint64_t qty);
 // template static void CosineSimilarityNormalize<double>(double* pVector,
-//                                                       size_t  qty);
+//                                                       uint64_t  qty);
 
 template <> void CosineSimilarityNormalize(__int8 * /*pVector*/, uint32_t /*qty*/)
 {

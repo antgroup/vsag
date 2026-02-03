@@ -64,16 +64,16 @@ template <typename T> bool Distance<T>::preprocessing_required() const
 }
 
 template <typename T>
-void Distance<T>::preprocess_base_points(T *original_data, const size_t orig_dim, const size_t num_points)
+void Distance<T>::preprocess_base_points(T *original_data, const uint64_t orig_dim, const uint64_t num_points)
 {
 }
 
-template <typename T> void Distance<T>::preprocess_query(const T *query_vec, const size_t query_dim, T *scratch_query)
+template <typename T> void Distance<T>::preprocess_query(const T *query_vec, const uint64_t query_dim, T *scratch_query)
 {
     std::memcpy(scratch_query, query_vec, query_dim * sizeof(T));
 }
 
-template <typename T> size_t Distance<T>::get_required_alignment() const
+template <typename T> uint64_t Distance<T>::get_required_alignment() const
 {
     return _alignment_factor;
 }
@@ -595,8 +595,8 @@ bool AVXNormalizedCosineDistanceFloat::preprocessing_required() const
 {
     return true;
 }
-void AVXNormalizedCosineDistanceFloat::preprocess_base_points(float *original_data, const size_t orig_dim,
-                                                              const size_t num_points)
+void AVXNormalizedCosineDistanceFloat::preprocess_base_points(float *original_data, const uint64_t orig_dim,
+                                                              const uint64_t num_points)
 {
     for (uint32_t i = 0; i < num_points; i++)
     {
@@ -604,7 +604,7 @@ void AVXNormalizedCosineDistanceFloat::preprocess_base_points(float *original_da
     }
 }
 
-void AVXNormalizedCosineDistanceFloat::preprocess_query(const float *query_vec, const size_t query_dim,
+void AVXNormalizedCosineDistanceFloat::preprocess_query(const float *query_vec, const uint64_t query_dim,
                                                         float *query_scratch)
 {
     normalize_and_copy(query_vec, (uint32_t)query_dim, query_scratch);
@@ -621,18 +621,18 @@ void AVXNormalizedCosineDistanceFloat::normalize_and_copy(const float *query_vec
     }
 }
 
-VsagDistanceL2Float::VsagDistanceL2Float(size_t dim) : Distance<float>(diskann::Metric::L2)
+VsagDistanceL2Float::VsagDistanceL2Float(uint64_t dim) : Distance<float>(diskann::Metric::L2)
 {
     dist_func_ = vsag::L2Sqr;
 }
 
 float VsagDistanceL2Float::compare(const float *a, const float *b, uint32_t size) const
 {
-    size_t dim = size;
+    uint64_t dim = size;
     return dist_func_(a, b, &dim);
 }
 
-VsagDistanceInnerProductFloat::VsagDistanceInnerProductFloat(size_t dim)
+VsagDistanceInnerProductFloat::VsagDistanceInnerProductFloat(uint64_t dim)
     : Distance<float>(diskann::Metric::INNER_PRODUCT)
 {
     dist_func_ = vsag::InnerProductDistance;
@@ -640,7 +640,7 @@ VsagDistanceInnerProductFloat::VsagDistanceInnerProductFloat(size_t dim)
 
 float VsagDistanceInnerProductFloat::compare(const float *a, const float *b, uint32_t size) const
 {
-    size_t dim = size;
+    uint64_t dim = size;
     return dist_func_(a, b, &dim);
 }
 

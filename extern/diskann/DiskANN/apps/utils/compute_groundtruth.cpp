@@ -45,7 +45,7 @@ template <class T> T div_round_up(const T numerator, const T denominator)
     return (numerator % denominator == 0) ? (numerator / denominator) : 1 + (numerator / denominator);
 }
 
-using pairIF = std::pair<size_t, float>;
+using pairIF = std::pair<uint64_t, float>;
 struct cmpmaxstruct
 {
     bool operator()(const pairIF &l, const pairIF &r)
@@ -56,7 +56,7 @@ struct cmpmaxstruct
 
 using maxPQIFCS = std::priority_queue<pairIF, std::vector<pairIF>, cmpmaxstruct>;
 
-template <class T> T *aligned_malloc(const size_t n, const size_t alignment)
+template <class T> T *aligned_malloc(const uint64_t n, const uint64_t alignment)
 {
 #ifdef _WINDOWS
     return (T *)_aligned_malloc(sizeof(T) * n, alignment);
@@ -79,11 +79,11 @@ void compute_l2sq(float *const points_l2sq, const float *const matrix, const int
                                     matrix + (ptrdiff_t)d * (ptrdiff_t)dim, 1);
 }
 
-void distsq_to_points(const size_t dim,
+void distsq_to_points(const uint64_t dim,
                       float *dist_matrix, // Col Major, cols are queries, rows are points
-                      size_t npoints, const float *const points,
+                      uint64_t npoints, const float *const points,
                       const float *const points_l2sq, // points in Col major
-                      size_t nqueries, const float *const queries,
+                      uint64_t nqueries, const float *const queries,
                       const float *const queries_l2sq, // queries in Col major
                       float *ones_vec = NULL)          // Scratchspace of num_data size and init to 1.0
 {
@@ -104,9 +104,9 @@ void distsq_to_points(const size_t dim,
         delete[] ones_vec;
 }
 
-void inner_prod_to_points(const size_t dim,
+void inner_prod_to_points(const uint64_t dim,
                           float *dist_matrix, // Col Major, cols are queries, rows are points
-                          size_t npoints, const float *const points, size_t nqueries, const float *const queries,
+                          uint64_t npoints, const float *const points, uint64_t nqueries, const float *const queries,
                           float *ones_vec = NULL) // Scratchspace of num_data size and init to 1.0
 {
     bool ones_vec_alloc = false;
@@ -123,15 +123,15 @@ void inner_prod_to_points(const size_t dim,
         delete[] ones_vec;
 }
 
-void exact_knn(const size_t dim, const size_t k,
-               size_t *const closest_points,     // k * num_queries preallocated, col
+void exact_knn(const uint64_t dim, const uint64_t k,
+               uint64_t *const closest_points,     // k * num_queries preallocated, col
                                                  // major, queries columns
                float *const dist_closest_points, // k * num_queries
                                                  // preallocated, Dist to
                                                  // corresponding closes_points
-               size_t npoints,
+               uint64_t npoints,
                float *points_in, // points in Col major
-               size_t nqueries, float *queries_in,
+               uint64_t nqueries, float *queries_in,
                diskann::Metric metric = diskann::Metric::L2) // queries in Col major
 {
     float *points_l2sq = new float[npoints];
@@ -189,10 +189,10 @@ void exact_knn(const size_t dim, const size_t k,
         std::cout << " L2 ";
     std::cout << "distance fn. " << std::endl;
 
-    size_t q_batch_size = (1 << 9);
-    float *dist_matrix = new float[(size_t)q_batch_size * (size_t)npoints];
+    uint64_t q_batch_size = (1 << 9);
+    float *dist_matrix = new float[(uint64_t)q_batch_size * (uint64_t)npoints];
 
-    for (size_t b = 0; b < div_round_up(nqueries, q_batch_size); ++b)
+    for (uint64_t b = 0; b < div_round_up(nqueries, q_batch_size); ++b)
     {
         int64_t q_b = b * q_batch_size;
         int64_t q_e = ((b + 1) * q_batch_size > nqueries) ? nqueries : (b + 1) * q_batch_size;
@@ -213,9 +213,9 @@ void exact_knn(const size_t dim, const size_t k,
         for (long long q = q_b; q < q_e; q++)
         {
             maxPQIFCS point_dist;
-            for (size_t p = 0; p < k; p++)
+            for (uint64_t p = 0; p < k; p++)
                 point_dist.emplace(p, dist_matrix[(ptrdiff_t)p + (ptrdiff_t)(q - q_b) * (ptrdiff_t)npoints]);
-            for (size_t p = k; p < npoints; p++)
+            for (uint64_t p = k; p < npoints; p++)
             {
                 if (point_dist.top().second > dist_matrix[(ptrdiff_t)p + (ptrdiff_t)(q - q_b) * (ptrdiff_t)npoints])
                     point_dist.emplace(p, dist_matrix[(ptrdiff_t)p + (ptrdiff_t)(q - q_b) * (ptrdiff_t)npoints]);
@@ -264,7 +264,7 @@ template <typename T> inline int get_num_parts(const char *filename)
 }
 
 template <typename T>
-inline void load_bin_as_float(const char *filename, float *&data, size_t &npts, size_t &ndims, int part_num)
+inline void load_bin_as_float(const char *filename, float *&data, uint64_t &npts, uint64_t &ndims, int part_num)
 {
     std::ifstream reader;
     reader.exceptions(std::ios::failbit | std::ios::badbit);
@@ -299,7 +299,7 @@ inline void load_bin_as_float(const char *filename, float *&data, size_t &npts, 
     std::cout << "Finished converting part data to float." << std::endl;
 }
 
-template <typename T> inline void save_bin(const std::string filename, T *data, size_t npts, size_t ndims)
+template <typename T> inline void save_bin(const std::string filename, T *data, uint64_t npts, uint64_t ndims)
 {
     std::ofstream writer;
     writer.exceptions(std::ios::failbit | std::ios::badbit);
@@ -316,8 +316,8 @@ template <typename T> inline void save_bin(const std::string filename, T *data, 
     std::cout << "Finished writing bin" << std::endl;
 }
 
-inline void save_groundtruth_as_one_file(const std::string filename, int32_t *data, float *distances, size_t npts,
-                                         size_t ndims)
+inline void save_groundtruth_as_one_file(const std::string filename, int32_t *data, float *distances, uint64_t npts,
+                                         uint64_t ndims)
 {
     std::ofstream writer(filename, std::ios::binary | std::ios::out);
     int npts_i32 = (int)npts, ndims_i32 = (int)ndims;
@@ -336,8 +336,8 @@ inline void save_groundtruth_as_one_file(const std::string filename, int32_t *da
 
 template <typename T>
 std::vector<std::vector<std::pair<uint32_t, float>>> processUnfilteredParts(const std::string &base_file,
-                                                                            size_t &nqueries, size_t &npoints,
-                                                                            size_t &dim, size_t &k, float *query_data,
+                                                                            uint64_t &nqueries, uint64_t &npoints,
+                                                                            uint64_t &dim, uint64_t &k, float *query_data,
                                                                             const diskann::Metric &metric,
                                                                             std::vector<uint32_t> &location_to_tag)
 {
@@ -346,19 +346,19 @@ std::vector<std::vector<std::pair<uint32_t, float>>> processUnfilteredParts(cons
     std::vector<std::vector<std::pair<uint32_t, float>>> res(nqueries);
     for (int p = 0; p < num_parts; p++)
     {
-        size_t start_id = p * PARTSIZE;
+        uint64_t start_id = p * PARTSIZE;
         load_bin_as_float<T>(base_file.c_str(), base_data, npoints, dim, p);
 
-        size_t *closest_points_part = new size_t[nqueries * k];
+        uint64_t *closest_points_part = new uint64_t[nqueries * k];
         float *dist_closest_points_part = new float[nqueries * k];
 
         auto part_k = k < npoints ? k : npoints;
         exact_knn(dim, part_k, closest_points_part, dist_closest_points_part, npoints, base_data, nqueries, query_data,
                   metric);
 
-        for (size_t i = 0; i < nqueries; i++)
+        for (uint64_t i = 0; i < nqueries; i++)
         {
-            for (size_t j = 0; j < part_k; j++)
+            for (uint64_t j = 0; j < part_k; j++)
             {
                 if (!location_to_tag.empty())
                     if (location_to_tag[closest_points_part[i * k + j] + start_id] == 0)
@@ -378,10 +378,10 @@ std::vector<std::vector<std::pair<uint32_t, float>>> processUnfilteredParts(cons
 };
 
 template <typename T>
-int aux_main(const std::string &base_file, const std::string &query_file, const std::string &gt_file, size_t k,
+int aux_main(const std::string &base_file, const std::string &query_file, const std::string &gt_file, uint64_t k,
              const diskann::Metric &metric, const std::string &tags_file = std::string(""))
 {
-    size_t npoints, nqueries, dim;
+    uint64_t npoints, nqueries, dim;
 
     float *query_data;
 
@@ -400,11 +400,11 @@ int aux_main(const std::string &base_file, const std::string &query_file, const 
     std::vector<std::vector<std::pair<uint32_t, float>>> results =
         processUnfilteredParts<T>(base_file, nqueries, npoints, dim, k, query_data, metric, location_to_tag);
 
-    for (size_t i = 0; i < nqueries; i++)
+    for (uint64_t i = 0; i < nqueries; i++)
     {
         std::vector<std::pair<uint32_t, float>> &cur_res = results[i];
         std::sort(cur_res.begin(), cur_res.end(), custom_dist);
-        size_t j = 0;
+        uint64_t j = 0;
         for (auto iter : cur_res)
         {
             if (j == k)
@@ -438,12 +438,12 @@ int aux_main(const std::string &base_file, const std::string &query_file, const 
     return 0;
 }
 
-void load_truthset(const std::string &bin_file, uint32_t *&ids, float *&dists, size_t &npts, size_t &dim)
+void load_truthset(const std::string &bin_file, uint32_t *&ids, float *&dists, uint64_t &npts, uint64_t &dim)
 {
-    size_t read_blk_size = 64 * 1024 * 1024;
+    uint64_t read_blk_size = 64 * 1024 * 1024;
     cached_ifstream reader(bin_file, read_blk_size);
     diskann::cout << "Reading truthset file " << bin_file.c_str() << " ..." << std::endl;
-    size_t actual_file_size = reader.get_file_size();
+    uint64_t actual_file_size = reader.get_file_size();
 
     int npts_i32, dim_i32;
     reader.read((char *)&npts_i32, sizeof(int));
@@ -455,12 +455,12 @@ void load_truthset(const std::string &bin_file, uint32_t *&ids, float *&dists, s
 
     int truthset_type = -1; // 1 means truthset has ids and distances, 2 means
                             // only ids, -1 is error
-    size_t expected_file_size_with_dists = 2 * npts * dim * sizeof(uint32_t) + 2 * sizeof(uint32_t);
+    uint64_t expected_file_size_with_dists = 2 * npts * dim * sizeof(uint32_t) + 2 * sizeof(uint32_t);
 
     if (actual_file_size == expected_file_size_with_dists)
         truthset_type = 1;
 
-    size_t expected_file_size_just_ids = npts * dim * sizeof(uint32_t) + 2 * sizeof(uint32_t);
+    uint64_t expected_file_size_just_ids = npts * dim * sizeof(uint32_t) + 2 * sizeof(uint32_t);
 
     if (actual_file_size == expected_file_size_just_ids)
         truthset_type = 2;

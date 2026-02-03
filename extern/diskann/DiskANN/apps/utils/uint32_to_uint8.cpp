@@ -13,7 +13,7 @@ int main(int argc, char **argv)
     }
 
     uint32_t *input;
-    size_t npts, nd;
+    uint64_t npts, nd;
     diskann::load_bin<uint32_t>(argv[1], input, npts, nd);
     uint8_t *output = new uint8_t[npts * nd];
     diskann::convert_types<uint32_t, uint8_t>(input, output, npts, nd);

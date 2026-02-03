@@ -68,7 +68,7 @@ int search_disk_index(diskann::Metric &metric, const std::string &index_path_pre
     // load query bin
     T *query = nullptr;
     std::vector<std::vector<uint32_t>> groundtruth_ids;
-    size_t query_num, query_dim, query_aligned_dim, gt_num;
+    uint64_t query_num, query_dim, query_aligned_dim, gt_num;
     diskann::load_aligned_bin<T>(query_file, query, query_num, query_dim, query_aligned_dim);
 
     bool calc_recall_flag = false;
