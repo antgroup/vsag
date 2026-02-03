@@ -929,22 +929,4 @@ IVF::fill_location_map() {
     }
 }
 
-
-
-float
-IVF::CalcDistanceById(const float* query, int64_t id, bool calculate_precise_distance) const {
-    if (this->use_reorder_ && calculate_precise_distance) {
-        float dist = 0.0F;
-        auto computer = this->reorder_codes_->FactoryComputer(query);
-        auto inner_id = this->label_table_->GetIdByLabel(id);
-        this->reorder_codes_->Query(&dist, computer, &inner_id, 1);
-        return dist;
-    }
-    auto computer = this->bucket_->FactoryComputer(query);
-    auto inner_id = this->label_table_->GetIdByLabel(id);
-    auto location = this->get_location(inner_id);
-    return this->bucket_->QueryOneById(computer, location.first, location.second);
-}
-
-
 }  // namespace vsag

@@ -223,12 +223,6 @@ public:
     }
 
     virtual float
-    CalcDistanceById(const float* query, int64_t id) const {
-        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                            "Index doesn't support calculate distance by id");
-    }
-
-    virtual float
     CalcDistanceById(const float* query, int64_t id, bool calculate_precise_distance = true) const {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                             "Index doesn't support calculate distance by id");

@@ -46,7 +46,6 @@ public:
                                          int64_t dim,
                                          bool use_bsa = false,
                                          bool support_calc_distance_by_id = false);
-                                         bool use_bsa = false);
 
     static DiskANNResourcePtr
     GetResource(bool sample = true);

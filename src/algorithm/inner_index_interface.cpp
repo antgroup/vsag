@@ -276,27 +276,7 @@ InnerIndexInterface::CalDistanceById(const float* query,
     auto* distances = (float*)allocator_->Allocate(sizeof(float) * count);
     result->Distances(distances);
     for (int64_t i = 0; i < count; ++i) {
-        distances[i] = this->CalcDistanceById(query, ids[i]);
-    }
-    return result;
-}
-
-DatasetPtr
-InnerIndexInterface::CalDistanceById(const DatasetPtr& query,
-                                     const int64_t* ids,
-                                     int64_t count,
-                                     bool calculate_precise_distance) const {
-    auto result = Dataset::Make();
-    result->Owner(true, allocator_);
-    auto* distances = static_cast<float*>(allocator_->Allocate(sizeof(float) * count));
-    result->Distances(distances);
-    for (int64_t i = 0; i < count; ++i) {
-        try {
-            distances[i] = this->CalcDistanceById(query, ids[i]);
-        } catch (std::runtime_error& e) {
-            logger::debug(fmt::format("failed to find id: {}", ids[i]));
-            distances[i] = -1;
-        }
+        distances[i] = this->CalcDistanceById(query, ids[i], calculate_precise_distance);
     }
     return result;
 }

@@ -885,7 +885,14 @@ HGraph::CalcDistanceById(const float* query, int64_t id, bool calculate_precise_
     if (use_reorder_ && calculate_precise_distance) {
         flat = this->high_precise_codes_;
     }
-    return InnerIndexInterface::calc_distance_by_id(query, id, flat);
+    float result = 0.0F;
+    auto computer = flat->FactoryComputer(query);
+    {
+        std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
+        auto new_id = this->label_table_->GetIdByLabel(id);
+        flat->Query(&result, computer, &new_id, 1);
+        return result;
+    }
 }
 
 DatasetPtr
@@ -897,9 +904,30 @@ HGraph::CalDistanceById(const float* query,
     if (use_reorder_ && calculate_precise_distance) {
         flat = this->high_precise_codes_;
     }
-    return InnerIndexInterface::cal_distance_by_id(query, ids, count, flat);
+    auto result = Dataset::Make();
+    result->Owner(true, allocator_);
+    auto* distances = (float*)allocator_->Allocate(sizeof(float) * count);
+    result->Distances(distances);
+    auto computer = flat->FactoryComputer(query);
+    Vector<InnerIdType> inner_ids(count, 0, allocator_);
+    Vector<InnerIdType> invalid_id_loc(allocator_);
+    {
+        std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
+        for (int64_t i = 0; i < count; ++i) {
+            try {
+                inner_ids[i] = this->label_table_->GetIdByLabel(ids[i]);
+            } catch (std::runtime_error& e) {
+                logger::debug(fmt::format("failed to find id: {}", ids[i]));
+                invalid_id_loc.push_back(i);
+            }
+        }
+        flat->Query(distances, computer, inner_ids.data(), count);
+        for (unsigned int i : invalid_id_loc) {
+            distances[i] = -1;
+        }
+    }
+    return result;
 }
-
 std::pair<int64_t, int64_t>
 HGraph::GetMinAndMaxId() const {
     int64_t min_id = INT64_MAX;
