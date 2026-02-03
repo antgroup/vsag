@@ -978,7 +978,9 @@ HierarchicalNSW::SerializeImpl(StreamWriter& writer) {
 
 // load index from a file stream
 void
-HierarchicalNSW::loadIndex(StreamReader& buffer_reader, SpaceInterface* s, uint64_t max_elements_i) {
+HierarchicalNSW::loadIndex(StreamReader& buffer_reader,
+                           SpaceInterface* s,
+                           uint64_t max_elements_i) {
     this->DeserializeImpl(buffer_reader, s, max_elements_i);
 }
 

@@ -42,8 +42,8 @@ AlgorithmInterface<dist_t>::searchKnnCloserFirst(const void* query_data,
 // Explicit template instantiation
 template std::vector<std::pair<float, LabelType>>
 AlgorithmInterface<float>::searchKnnCloserFirst(const void* query_data,
-                                                 uint64_t k,
-                                                 uint64_t ef,
-                                                 const vsag::FilterPtr& is_id_allowed) const;
+                                                uint64_t k,
+                                                uint64_t ef,
+                                                const vsag::FilterPtr& is_id_allowed) const;
 
 }  // namespace hnswlib

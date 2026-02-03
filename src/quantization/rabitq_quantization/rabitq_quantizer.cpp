@@ -73,7 +73,8 @@ RaBitQuantizer<metric>::RaBitQuantizer(int dim,
     inv_sqrt_d_ = 1.0F / sqrt(this->dim_);
 
     // base code layout
-    uint64_t align_size = std::max(std::max(sizeof(error_type), sizeof(norm_type)), sizeof(DataType));
+    uint64_t align_size =
+        std::max(std::max(sizeof(error_type), sizeof(norm_type)), sizeof(DataType));
 
     uint64_t code_original_size = (this->dim_ + 7) / 8;
     code_original_size *= num_bits_per_dim_base_;

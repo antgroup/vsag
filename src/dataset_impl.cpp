@@ -57,8 +57,11 @@ allocator_element(Allocator* allocator, T* old_dest, uint64_t new_size_in_bytes)
 
 template <typename T>
 static inline T*
-allocate_and_copy(
-    const T* src, uint64_t count, Allocator* allocator, T* old_dest = nullptr, uint64_t old_count = 0) {
+allocate_and_copy(const T* src,
+                  uint64_t count,
+                  Allocator* allocator,
+                  T* old_dest = nullptr,
+                  uint64_t old_count = 0) {
     if (src == nullptr || count == 0) {
         return nullptr;
     }

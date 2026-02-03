@@ -167,7 +167,9 @@ public:
     GetCursor() const override;
 
 public:
-    explicit BufferStreamReader(StreamReader* reader, uint64_t max_size, vsag::Allocator* allocator);
+    explicit BufferStreamReader(StreamReader* reader,
+                                uint64_t max_size,
+                                vsag::Allocator* allocator);
 
     ~BufferStreamReader();
 

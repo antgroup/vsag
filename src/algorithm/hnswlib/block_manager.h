@@ -28,7 +28,9 @@ namespace hnswlib {
 
 class BlockManager {
 public:
-    BlockManager(uint64_t size_data_per_element, uint64_t block_size_limit, vsag::Allocator* allocator);
+    BlockManager(uint64_t size_data_per_element,
+                 uint64_t block_size_limit,
+                 vsag::Allocator* allocator);
 
     ~BlockManager();
 

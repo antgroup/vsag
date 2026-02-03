@@ -275,9 +275,9 @@ DiskANN::DiskANN(DiskannParameters& diskann_params, const IndexCommonParam& inde
 
     // When the length of the vector is too long, set sector_len_ to the size of storing a vector along with its linkage list.
     sector_len_ = std::max(
-        MINIMAL_SECTOR_LEN,                                                           // NOLINT
+        MINIMAL_SECTOR_LEN,                                                             // NOLINT
         (uint64_t)(dim_ * sizeof(float) + (R_ * GRAPH_SLACK + 1) * sizeof(uint32_t)) *  // NOLINT
-            VECTOR_PER_BLOCK);                                                        // NOLINT
+            VECTOR_PER_BLOCK);                                                          // NOLINT
 
     this->feature_list_ = std::make_shared<IndexFeatureList>();
     this->init_feature_list();
@@ -1106,11 +1106,11 @@ DiskANN::GetEstimateBuildMemory(const int64_t num_elements) const {
         estimate_memory_usage +=
             static_cast<int64_t>((num_elements + 1) * sector_len_ * sizeof(uint8_t));
     } else {
-        uint64_t single_node =
-            (uint64_t)(dim_ * sizeof(float) + (R_ * GRAPH_SLACK + 1) * sizeof(uint32_t)) *  // NOLINT
+        size_t single_node =
+            (size_t)(dim_ * sizeof(float) + (R_ * GRAPH_SLACK + 1) * sizeof(uint32_t)) *  // NOLINT
             VECTOR_PER_BLOCK;
-        uint64_t node_per_sector = MINIMAL_SECTOR_LEN / single_node;
-        uint64_t sector_size = num_elements / node_per_sector + 1;
+        size_t node_per_sector = MINIMAL_SECTOR_LEN / single_node;
+        size_t sector_size = num_elements / node_per_sector + 1;
         estimate_memory_usage +=
             static_cast<int64_t>((sector_size + 1) * sector_len_ * sizeof(uint8_t));
     }
@@ -1242,8 +1242,8 @@ DiskANN::continue_build(const DatasetPtr& base, const BinarySet& binary_set) {
             }
             case PQ: {
                 SlowTaskTimer t(fmt::format("diskann build (pq)"));
-                auto failed_locs =
-                    deserialize_vector_from_binary<uint64_t>(after_binary_set.Get(BUILD_FAILED_LOC));
+                auto failed_locs = deserialize_vector_from_binary<uint64_t>(
+                    after_binary_set.Get(BUILD_FAILED_LOC));
                 diskann::generate_disk_quantized_data<float>(base->GetFloat32Vectors(),
                                                              base->GetNumElements(),
                                                              dim_,
@@ -1263,8 +1263,8 @@ DiskANN::continue_build(const DatasetPtr& base, const BinarySet& binary_set) {
             }
             case DISK_LAYOUT: {
                 SlowTaskTimer t(fmt::format("diskann build (disk layout)"));
-                auto failed_locs =
-                    deserialize_vector_from_binary<uint64_t>(after_binary_set.Get(BUILD_FAILED_LOC));
+                auto failed_locs = deserialize_vector_from_binary<uint64_t>(
+                    after_binary_set.Get(BUILD_FAILED_LOC));
                 convert_binary_to_stream(binary_set.Get(DISKANN_GRAPH), graph_stream_);
                 diskann::create_disk_layout<float>(base->GetFloat32Vectors(),
                                                    base->GetNumElements(),

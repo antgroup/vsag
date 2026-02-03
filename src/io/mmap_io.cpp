@@ -78,7 +78,7 @@ MMapIO::WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset) {
         old_size = DEFAULT_INIT_MMAP_SIZE;
     }
     if (new_size > old_size) {
-        auto ret = 
+        auto ret =
 #ifdef __APPLE__
             ftruncate(this->fd_, static_cast<off_t>(new_size));
 #else
@@ -91,8 +91,7 @@ MMapIO::WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset) {
 #ifdef __APPLE__
         // macOS doesn't have mremap; unmap the old region first, then re-mmap.
         munmap(this->start_, old_size);
-        void* addr =
-            mmap(nullptr, new_size, PROT_READ | PROT_WRITE, MAP_SHARED, this->fd_, 0);
+        void* addr = mmap(nullptr, new_size, PROT_READ | PROT_WRITE, MAP_SHARED, this->fd_, 0);
         if (addr == MAP_FAILED) {
             throw VsagException(ErrorType::INTERNAL_ERROR, "mmap remap failed");
         }

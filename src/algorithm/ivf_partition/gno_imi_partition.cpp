@@ -339,8 +339,9 @@ GNOIMIPartition::inner_classify_datas(BruteForce& route_index, const float* data
             ->Float32Vectors(datas + i * this->dim_)
             ->NumElements(1)
             ->Owner(false);
-        auto search_param = fmt::format(
-            SEARCH_PARAM_TEMPLATE_STR, std::max<int64_t>(10, static_cast<int64_t>(buckets_per_data * 1.2)));
+        auto search_param =
+            fmt::format(SEARCH_PARAM_TEMPLATE_STR,
+                        std::max<int64_t>(10, static_cast<int64_t>(buckets_per_data * 1.2)));
         FilterPtr filter = nullptr;
         auto search_result = route_index.KnnSearch(query, buckets_per_data, search_param, filter);
         const auto* result_ids = search_result->GetIds();

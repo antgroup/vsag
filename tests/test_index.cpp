@@ -363,7 +363,8 @@ TestIndex::TestTrainAndAdd(const TestIndex::IndexPtr& index,
                            const TestDatasetPtr& dataset,
                            bool expected_success) {
     auto base_count = dataset->base_->GetNumElements();
-    int64_t temp_count = std::max<int64_t>(1, static_cast<int64_t>(dataset->base_->GetNumElements() * 0.8));
+    int64_t temp_count =
+        std::max<int64_t>(1, static_cast<int64_t>(dataset->base_->GetNumElements() * 0.8));
     auto dim = dataset->base_->GetDim();
     auto temp_dataset = vsag::Dataset::Make();
     temp_dataset->Dim(dim)

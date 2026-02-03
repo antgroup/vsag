@@ -2174,7 +2174,7 @@ std::string
 HGraph::GetStats() const {
     AnalyzerParam analyzer_param(allocator_);
     analyzer_param.topk = DEFAULT_TOPK;
-    analyzer_param.base_sample_size = std::min<int64_t>(QUERY_SAMPLE_SIZE, this->total_count_.load());
+    analyzer_param.base_sample_size = std::min(QUERY_SAMPLE_SIZE, this->total_count_.load());
     analyzer_param.search_params =
         fmt::format(R"({{"hgraph": {{"ef_search": {}}}}})", ef_construct_);
     auto analyzer = CreateAnalyzer(this, analyzer_param);

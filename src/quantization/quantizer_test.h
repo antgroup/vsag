@@ -176,8 +176,11 @@ TestQuantizerEncodeDecodeSame(Quantizer<T>& quant,
 
 template <typename T, MetricType metric>
 void
-TestComputeCodes(
-    Quantizer<T>& quantizer, uint64_t dim, uint32_t count, float error = 1e-4f, bool retrain = true) {
+TestComputeCodes(Quantizer<T>& quantizer,
+                 uint64_t dim,
+                 uint32_t count,
+                 float error = 1e-4f,
+                 bool retrain = true) {
     auto vecs = fixtures::generate_vectors(count, dim, true);
     if (retrain) {
         quantizer.ReTrain(vecs.data(), count);
