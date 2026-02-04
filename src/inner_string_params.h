@@ -140,6 +140,8 @@ const char* const SUPPORT_DUPLICATE = "support_duplicate";
 const char* const DATACELL_OFFSETS = "datacell_offsets";
 const char* const DATACELL_SIZES = "datacell_sizes";
 
+const char* const DISKANN_SUPPORT_CALC_DISTANCE_BY_ID = "support_calc_distance_by_id";
+
 const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"INDEX_TYPE_HGRAPH", INDEX_TYPE_HGRAPH},
     {"INDEX_TYPE_IVF", INDEX_TYPE_IVF},

@@ -880,9 +880,9 @@ HGraph::GetMemoryUsageDetail() const {
 }
 
 float
-HGraph::CalcDistanceById(const float* query, int64_t id) const {
+HGraph::CalcDistanceById(const float* query, int64_t id, bool calculate_precise_distance) const {
     auto flat = this->basic_flatten_codes_;
-    if (use_reorder_) {
+    if (use_reorder_ && calculate_precise_distance) {
         flat = this->high_precise_codes_;
     }
     float result = 0.0F;
@@ -896,9 +896,12 @@ HGraph::CalcDistanceById(const float* query, int64_t id) const {
 }
 
 DatasetPtr
-HGraph::CalDistanceById(const float* query, const int64_t* ids, int64_t count) const {
+HGraph::CalDistanceById(const float* query,
+                        const int64_t* ids,
+                        int64_t count,
+                        bool calculate_precise_distance) const {
     auto flat = this->basic_flatten_codes_;
-    if (use_reorder_) {
+    if (use_reorder_ && calculate_precise_distance) {
         flat = this->high_precise_codes_;
     }
     auto result = Dataset::Make();
@@ -925,7 +928,6 @@ HGraph::CalDistanceById(const float* query, const int64_t* ids, int64_t count) c
     }
     return result;
 }
-
 std::pair<int64_t, int64_t>
 HGraph::GetMinAndMaxId() const {
     int64_t min_id = INT64_MAX;

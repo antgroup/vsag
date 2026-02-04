@@ -267,13 +267,16 @@ InnerIndexInterface::CalSerializeSize() const {
 }
 
 DatasetPtr
-InnerIndexInterface::CalDistanceById(const float* query, const int64_t* ids, int64_t count) const {
+InnerIndexInterface::CalDistanceById(const float* query,
+                                     const int64_t* ids,
+                                     int64_t count,
+                                     bool calculate_precise_distance) const {
     auto result = Dataset::Make();
     result->Owner(true, allocator_);
     auto* distances = (float*)allocator_->Allocate(sizeof(float) * count);
     result->Distances(distances);
     for (int64_t i = 0; i < count; ++i) {
-        distances[i] = this->CalcDistanceById(query, ids[i]);
+        distances[i] = this->CalcDistanceById(query, ids[i], calculate_precise_distance);
     }
     return result;
 }

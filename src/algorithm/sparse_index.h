@@ -104,12 +104,6 @@ public:
         return cur_element_count_;
     }
 
-    DatasetPtr
-    CalDistanceById(const float* query, const int64_t* ids, int64_t count) const override {
-        throw VsagException(vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                            "no support CalDistanceById in " + GetName());
-    }
-
     void
     InitFeatures() override {
     }
