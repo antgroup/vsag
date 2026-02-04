@@ -36,11 +36,7 @@ public:
     operator=(ProgressBar&&) = delete;
 
     ProgressBar(std::string name, uint64_t total, uint64_t report_interval_ms = 1000)
-        : name_(std::move(name)),
-          total_(total),
-          report_interval_ms_(report_interval_ms),
-          running_(false),
-          current_(0) {
+        : name_(std::move(name)), total_(total), report_interval_ms_(report_interval_ms) {
     }
 
     ~ProgressBar() {
@@ -86,7 +82,7 @@ public:
 private:
     void
     Print(bool force_end = false) {
-        std::lock_guard<std::mutex> lock(cout_mutex_);
+        std::scoped_lock lock(cout_mutex_);
         auto now = std::chrono::steady_clock::now();
         auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start_time_).count();
         uint64_t cur = current_.load(std::memory_order_relaxed);
@@ -110,10 +106,10 @@ private:
     }
 
     std::string name_;
-    uint64_t total_;
-    uint64_t report_interval_ms_;
-    std::atomic<uint64_t> current_;
-    std::atomic<bool> running_;
+    uint64_t total_{0};
+    uint64_t report_interval_ms_{1000};
+    std::atomic<uint64_t> current_{0};
+    std::atomic<bool> running_{false};
     std::thread reporter_thread_;
     std::chrono::time_point<std::chrono::steady_clock> start_time_;
     inline static std::mutex cout_mutex_;
