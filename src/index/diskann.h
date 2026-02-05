@@ -192,9 +192,6 @@ public:
     std::string
     GetStats() const override;
 
-    std::vector<std::string>
-    GetSupportedMetricKeys() const override;
-
     bool
     CheckFeature(IndexFeature feature) const override;
 
