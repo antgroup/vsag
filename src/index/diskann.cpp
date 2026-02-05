@@ -1120,6 +1120,8 @@ DiskANN::GetStats() const {
             j[item.first].SetFloat(item.second.GetAvgResult());
             
             // Add max metrics for IO time
+            // Note: These track the maximum of the average IO times across queries,
+            // providing insight into the worst-case query performance
             if (item.first == STATSTIC_KNN_IO_TIME) {
                 j[STATSTIC_KNN_IO_MAX_TIME].SetFloat(item.second.GetMaxResult());
             } else if (item.first == STATSTIC_RANGE_IO_TIME) {

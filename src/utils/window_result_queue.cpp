@@ -26,17 +26,25 @@ WindowResultQueue::WindowResultQueue() {
 void
 WindowResultQueue::Push(float value) {
     uint64_t window_size = queue_.size();
-    queue_[count_ % window_size] = value;
+    uint64_t index = count_ % window_size;
+    
+    // Check if we're about to evict the current max value
+    bool need_recalculate = false;
+    if (count_ >= window_size && queue_[index] == max_value_) {
+        need_recalculate = true;
+    }
+    
+    queue_[index] = value;
     count_++;
     
     // Update max value
     if (count_ == 1 || value > max_value_) {
         max_value_ = value;
-    } else if (count_ > window_size) {
-        // If we've wrapped around, recalculate max from current window
-        max_value_ = 0.0f;
+    } else if (need_recalculate) {
+        // Only recalculate when we evicted the max value
+        max_value_ = queue_[0];
         uint64_t statistic_num = std::min<uint64_t>(count_, queue_.size());
-        for (uint64_t i = 0; i < statistic_num; i++) {
+        for (uint64_t i = 1; i < statistic_num; i++) {
             if (queue_[i] > max_value_) {
                 max_value_ = queue_[i];
             }
