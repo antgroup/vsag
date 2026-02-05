@@ -21,6 +21,7 @@
 #include <cstdint>
 #include <deque>
 #include <queue>
+#include <unordered_map>
 
 #include "impl/allocator/allocator_wrapper.h"
 #include "json_wrapper.h"

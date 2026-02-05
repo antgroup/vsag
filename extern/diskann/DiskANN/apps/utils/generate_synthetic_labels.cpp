@@ -148,10 +148,10 @@ int main(int argc, char **argv)
         }
         else if (distribution_type == "random")
         {
-            for (size_t i = 0; i < num_points; i++)
+            for (uint64_t i = 0; i < num_points; i++)
             {
                 bool label_written = false;
-                for (size_t j = 1; j <= num_labels; j++)
+                for (uint64_t j = 1; j <= num_labels; j++)
                 {
                     // 50% chance to assign each label
                     if (rand() > (RAND_MAX / 2))
@@ -180,7 +180,7 @@ int main(int argc, char **argv)
             std::mt19937 gen(rd());                               // seed the generator
             std::uniform_int_distribution<> distr(0, num_labels); // define the range
 
-            for (size_t i = 0; i < num_points; i++)
+            for (uint64_t i = 0; i < num_points; i++)
             {
                 outfile << distr(gen);
                 if (i != num_points - 1)

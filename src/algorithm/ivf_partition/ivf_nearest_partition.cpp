@@ -101,8 +101,9 @@ IVFNearestPartition::ClassifyDatas(const void* datas,
             ->Float32Vectors(reinterpret_cast<const float*>(datas) + i * this->dim_)
             ->NumElements(1)
             ->Owner(false);
-        auto search_param = fmt::format(
-            SEARCH_PARAM_TEMPLATE_STR, std::max(10L, static_cast<int64_t>(buckets_per_data * 1.2)));
+        auto search_param =
+            fmt::format(SEARCH_PARAM_TEMPLATE_STR,
+                        std::max<int64_t>(10, static_cast<int64_t>(buckets_per_data * 1.2)));
         FilterPtr filter = nullptr;
         auto search_result =
             this->route_index_ptr_->KnnSearch(query, buckets_per_data, search_param, filter);

@@ -71,7 +71,7 @@ int search_disk_index(diskann::Metric &metric, const std::string &index_path_pre
     T *query = nullptr;
     uint32_t *gt_ids = nullptr;
     float *gt_dists = nullptr;
-    size_t query_num, query_dim, query_aligned_dim, gt_num, gt_dim;
+    uint64_t query_num, query_dim, query_aligned_dim, gt_num, gt_dim;
     diskann::load_aligned_bin<T>(query_file, query, query_num, query_dim, query_aligned_dim);
 
     bool filtered_search = false;

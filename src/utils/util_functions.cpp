@@ -30,7 +30,7 @@ format_map(const std::string& str, const std::unordered_map<std::string, std::st
     std::string result = str;
 
     for (const auto& [key, value] : mappings) {
-        size_t pos = result.find("{" + key + "}");
+        uint64_t pos = result.find("{" + key + "}");
         while (pos != std::string::npos) {
             result.replace(pos, key.length() + 2, value);
             pos = result.find("{" + key + "}");
@@ -228,7 +228,7 @@ get_vectors(DataTypes type,
             int64_t dim,
             const vsag::DatasetPtr& base,
             void** vectors_ptr,
-            size_t* data_size_ptr) {
+            uint64_t* data_size_ptr) {
     if (type == DataTypes::DATA_TYPE_FLOAT) {
         *vectors_ptr = (void*)base->GetFloat32Vectors();
         *data_size_ptr = dim * sizeof(float);

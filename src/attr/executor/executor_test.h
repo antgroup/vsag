@@ -137,7 +137,7 @@ template <class T>
 std::string
 CreateMultiInString(const std::string& name, const std::vector<T>& values) {
     std::ostringstream oss;
-    for (size_t i = 0; i < values.size(); ++i) {
+    for (uint64_t i = 0; i < values.size(); ++i) {
         if (i != 0) {
             oss << "|";
         }
@@ -154,7 +154,7 @@ template <class T>
 std::string
 CreateMultiNotInString(const std::string& name, const std::vector<T>& values) {
     std::ostringstream oss;
-    for (size_t i = 0; i < values.size(); ++i) {
+    for (uint64_t i = 0; i < values.size(); ++i) {
         if (i != 0) {
             oss << "|";
         }

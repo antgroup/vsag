@@ -35,14 +35,14 @@ SQ4UniformQuantizer<metric>::SQ4UniformQuantizer(int dim, Allocator* allocator, 
     lower_bound_ = std::numeric_limits<DataType>::max();
     diff_ = std::numeric_limits<DataType>::lowest();
 
-    size_t align_size = 1;
+    uint64_t align_size = 1;
     if constexpr (metric == MetricType::METRIC_TYPE_L2SQR or
                   metric == MetricType::METRIC_TYPE_COSINE) {
-        align_size = std::max(align_size, sizeof(norm_type));
+        align_size = std::max<uint64_t>(align_size, sizeof(norm_type));
     }
     if constexpr (metric == MetricType::METRIC_TYPE_IP or
                   metric == MetricType::METRIC_TYPE_COSINE) {
-        align_size = std::max(align_size, sizeof(sum_type));
+        align_size = std::max<uint64_t>(align_size, sizeof(sum_type));
     }
     this->code_size_ = 0;
 

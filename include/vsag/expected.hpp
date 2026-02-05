@@ -329,7 +329,7 @@ namespace swap_adl_tests {
 struct tag {};
 
 template <class T> tag swap(T &, T &);
-template <class T, std::size_t N> tag swap(T (&a)[N], T (&b)[N]);
+template <class T, std::uint64_t N> tag swap(T (&a)[N], T (&b)[N]);
 
 // helper functions to test if an unqualified swap is possible, and if it
 // becomes std::swap
@@ -350,7 +350,7 @@ struct is_std_swap_noexcept
                              std::is_nothrow_move_constructible<T>::value &&
                                  std::is_nothrow_move_assignable<T>::value> {};
 
-template <class T, std::size_t N>
+template <class T, std::uint64_t N>
 struct is_std_swap_noexcept<T[N]> : is_std_swap_noexcept<T> {};
 
 template <class T, class U>
@@ -367,7 +367,7 @@ struct is_swappable
                (std::is_move_assignable<T>::value &&
                 std::is_move_constructible<T>::value))> {};
 
-template <class T, std::size_t N>
+template <class T, std::uint64_t N>
 struct is_swappable<T[N], T[N]>
     : std::integral_constant<
           bool,

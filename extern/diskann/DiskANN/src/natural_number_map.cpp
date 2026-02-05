@@ -16,13 +16,13 @@ natural_number_map<Key, Value>::natural_number_map()
 {
 }
 
-template <typename Key, typename Value> void natural_number_map<Key, Value>::reserve(size_t count)
+template <typename Key, typename Value> void natural_number_map<Key, Value>::reserve(uint64_t count)
 {
     _values_vector.reserve(count);
     _values_bitset->reserve(count);
 }
 
-template <typename Key, typename Value> size_t natural_number_map<Key, Value>::size() const
+template <typename Key, typename Value> uint64_t natural_number_map<Key, Value>::size() const
 {
     return _size;
 }
@@ -31,7 +31,7 @@ template <typename Key, typename Value> void natural_number_map<Key, Value>::set
 {
     if (key >= _values_bitset->size())
     {
-        _values_bitset->resize(static_cast<size_t>(key) + 1);
+        _values_bitset->resize(static_cast<uint64_t>(key) + 1);
         _values_vector.resize(_values_bitset->size());
     }
 

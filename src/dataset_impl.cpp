@@ -36,7 +36,7 @@ DatasetImpl::MakeEmptyDataset() {
 
 template <typename T>
 static inline T*
-new_element(T*& old_dest, size_t old_count, size_t new_total) {
+new_element(T*& old_dest, uint64_t old_count, uint64_t new_total) {
     T* dest = new T[new_total];
     if (old_dest != nullptr) {
         memcpy(dest, old_dest, old_count * sizeof(T));
@@ -48,7 +48,7 @@ new_element(T*& old_dest, size_t old_count, size_t new_total) {
 
 template <typename T>
 static inline T*
-allocator_element(Allocator* allocator, T* old_dest, size_t new_size_in_bytes) {
+allocator_element(Allocator* allocator, T* old_dest, uint64_t new_size_in_bytes) {
     if (old_dest != nullptr) {
         return static_cast<T*>(allocator->Reallocate(old_dest, new_size_in_bytes));
     }
@@ -57,8 +57,11 @@ allocator_element(Allocator* allocator, T* old_dest, size_t new_size_in_bytes) {
 
 template <typename T>
 static inline T*
-allocate_and_copy(
-    const T* src, size_t count, Allocator* allocator, T* old_dest = nullptr, size_t old_count = 0) {
+allocate_and_copy(const T* src,
+                  uint64_t count,
+                  Allocator* allocator,
+                  T* old_dest = nullptr,
+                  uint64_t old_count = 0) {
     if (src == nullptr || count == 0) {
         return nullptr;
     }
@@ -83,7 +86,7 @@ allocate_and_copy(
 
 static void
 copy_sparse_vector(const SparseVector& src, SparseVector* dest, Allocator* allocator) {
-    size_t len = src.len_;
+    uint64_t len = src.len_;
     if (allocator != nullptr) {
         dest->ids_ = static_cast<uint32_t*>(allocator->Allocate(len * sizeof(uint32_t)));
         dest->vals_ = static_cast<float*>(allocator->Allocate(len * sizeof(float)));
@@ -98,15 +101,15 @@ copy_sparse_vector(const SparseVector& src, SparseVector* dest, Allocator* alloc
 
 static SparseVector*
 allocate_and_copy_sparse_vectors(const SparseVector* src,
-                                 size_t count,
+                                 uint64_t count,
                                  Allocator* allocator,
                                  SparseVector* old_dest = nullptr,
-                                 size_t old_count = 0) {
+                                 uint64_t old_count = 0) {
     if (src == nullptr || count == 0) {
         return old_dest;
     }
 
-    size_t new_total = old_count + count;
+    uint64_t new_total = old_count + count;
     SparseVector* dest = nullptr;
 
     if (allocator != nullptr) {
@@ -116,7 +119,7 @@ allocate_and_copy_sparse_vectors(const SparseVector* src,
         dest = new_element<SparseVector>(old_dest, old_count, new_total);
     }
 
-    for (size_t i = old_count; i < new_total; ++i) {
+    for (uint64_t i = old_count; i < new_total; ++i) {
         const SparseVector& src_vec = src[i - old_count];
         copy_sparse_vector(src_vec, &dest[i], allocator);
     }

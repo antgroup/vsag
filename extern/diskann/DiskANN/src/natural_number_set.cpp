@@ -18,7 +18,7 @@ template <typename T> bool natural_number_set<T>::is_empty() const
     return _values_vector.empty();
 }
 
-template <typename T> void natural_number_set<T>::reserve(size_t count)
+template <typename T> void natural_number_set<T>::reserve(uint64_t count)
 {
     _values_vector.reserve(count);
     _values_bitset->reserve(count);
@@ -29,7 +29,7 @@ template <typename T> void natural_number_set<T>::insert(T id)
     _values_vector.emplace_back(id);
 
     if (id >= _values_bitset->size())
-        _values_bitset->resize(static_cast<size_t>(id) + 1);
+        _values_bitset->resize(static_cast<uint64_t>(id) + 1);
 
     _values_bitset->set(id, true);
 }
@@ -55,7 +55,7 @@ template <typename T> void natural_number_set<T>::clear()
     _values_bitset->clear();
 }
 
-template <typename T> size_t natural_number_set<T>::size() const
+template <typename T> uint64_t natural_number_set<T>::size() const
 {
     return _values_vector.size();
 }

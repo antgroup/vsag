@@ -10,7 +10,7 @@ namespace diskann
 {
 
 template <typename data_t>
-InMemDataStore<data_t>::InMemDataStore(const location_t num_points, const size_t dim,
+InMemDataStore<data_t>::InMemDataStore(const location_t num_points, const uint64_t dim,
                                        std::shared_ptr<Distance<data_t>> distance_fn, bool compute_norms)
     : AbstractDataStore<data_t>(num_points, dim), _distance_fn(distance_fn), _compute_norms(compute_norms)
 {
@@ -25,12 +25,12 @@ template <typename data_t> InMemDataStore<data_t>::~InMemDataStore()
     }
 }
 
-template <typename data_t> size_t InMemDataStore<data_t>::get_aligned_dim() const
+template <typename data_t> uint64_t InMemDataStore<data_t>::get_aligned_dim() const
 {
     return _aligned_dim;
 }
 
-template <typename data_t> size_t InMemDataStore<data_t>::get_alignment_factor() const
+template <typename data_t> uint64_t InMemDataStore<data_t>::get_alignment_factor() const
 {
     return _distance_fn->get_required_alignment();
 }
@@ -48,7 +48,7 @@ template <typename data_t> location_t InMemDataStore<data_t>::load(std::stringst
 #ifdef EXEC_ENV_OLS
 template <typename data_t> location_t InMemDataStore<data_t>::load_impl(AlignedFileReader &reader)
 {
-    size_t file_dim, file_num_points;
+    uint64_t file_dim, file_num_points;
 
     diskann::get_bin_metadata(reader, file_num_points, file_dim);
 
@@ -74,7 +74,7 @@ template <typename data_t> location_t InMemDataStore<data_t>::load_impl(AlignedF
 
 template <typename data_t> location_t InMemDataStore<data_t>::load_impl(const std::string &filename)
 {
-    size_t file_dim, file_num_points;
+    uint64_t file_dim, file_num_points;
     if (!file_exists(filename))
     {
         std::stringstream stream;
@@ -107,7 +107,7 @@ template <typename data_t> location_t InMemDataStore<data_t>::load_impl(const st
 
 template <typename data_t> location_t InMemDataStore<data_t>::load_impl(std::stringstream &in)
 {
-    size_t file_dim, file_num_points;
+    uint64_t file_dim, file_num_points;
     diskann::get_bin_metadata(in, file_num_points, file_dim);
 
     if (file_dim != this->_dim)
@@ -132,20 +132,20 @@ template <typename data_t> location_t InMemDataStore<data_t>::load_impl(std::str
 }
 
 
-template <typename data_t> size_t InMemDataStore<data_t>::save(const std::string &filename, const location_t num_points)
+template <typename data_t> uint64_t InMemDataStore<data_t>::save(const std::string &filename, const location_t num_points)
 {
     return save_data_in_base_dimensions(filename, _data, num_points, this->get_dims(), this->get_aligned_dim(), 0U);
 }
 
-template <typename data_t> size_t InMemDataStore<data_t>::save(std::stringstream &out, const location_t num_points)
+template <typename data_t> uint64_t InMemDataStore<data_t>::save(std::stringstream &out, const location_t num_points)
 {
     if (_use_data_reference) {
         int npts_i32 = (int)num_points, ndims_i32 = (int)this->_dim;
-        size_t bytes_written = 2 * sizeof(uint32_t) + num_points * this->_dim * sizeof(data_t);
+        uint64_t bytes_written = 2 * sizeof(uint32_t) + num_points * this->_dim * sizeof(data_t);
         out.seekp(0, out.beg);
         out.write((char *)&npts_i32, sizeof(int));
         out.write((char *)&ndims_i32, sizeof(int));
-        for (size_t i = 0; i < num_points; i++)
+        for (uint64_t i = 0; i < num_points; i++)
         {
             out.write((char *)(_data + _loc_to_memory_index[i] * this->_dim), this->_dim * sizeof(data_t));
         }
@@ -224,9 +224,9 @@ template <typename data_t> void InMemDataStore<data_t>::link_data(const data_t *
 }
 
 
-template <typename data_t> void InMemDataStore<data_t>::populate_data(const std::string &filename, const size_t offset)
+template <typename data_t> void InMemDataStore<data_t>::populate_data(const std::string &filename, const uint64_t offset)
 {
-    size_t npts, ndim;
+    uint64_t npts, ndim;
     copy_aligned_data_from_file(filename.c_str(), _data, npts, ndim, _aligned_dim, offset);
 
     if ((location_t)npts > this->capacity())
@@ -277,7 +277,7 @@ template <typename data_t> void InMemDataStore<data_t>::get_vector(location_t lo
 
 template <typename data_t> void InMemDataStore<data_t>::set_vector(const location_t loc, const data_t *const vector)
 {
-    size_t offset_in_data = loc * _aligned_dim;
+    uint64_t offset_in_data = loc * _aligned_dim;
     memset(_data + offset_in_data, 0, _aligned_dim * sizeof(data_t));
     memcpy(_data + offset_in_data, vector, this->_dim * sizeof(data_t));
     if (_distance_fn->preprocessing_required())
@@ -291,10 +291,10 @@ template <typename data_t> void InMemDataStore<data_t>::prefetch_vector(location
     if (_use_data_reference)
     {
         loc = _loc_to_memory_index[loc];
-        diskann::prefetch_vector((const char *)_data + this->_dim * (size_t)loc, sizeof(data_t) * this->_dim);
+        diskann::prefetch_vector((const char *)_data + this->_dim * (uint64_t)loc, sizeof(data_t) * this->_dim);
         return;
     }
-    diskann::prefetch_vector((const char *)_data + _aligned_dim * (size_t)loc, sizeof(data_t) * _aligned_dim);
+    diskann::prefetch_vector((const char *)_data + _aligned_dim * (uint64_t)loc, sizeof(data_t) * _aligned_dim);
 }
 
 template <typename data_t> float InMemDataStore<data_t>::get_distance(const data_t *query, location_t loc) const
@@ -443,24 +443,24 @@ template <typename data_t> location_t InMemDataStore<data_t>::calculate_medoid()
 {
     // allocate and init centroid
     float *center = new float[this->_dim];
-    for (size_t j = 0; j < this->_dim; j++)
+    for (uint64_t j = 0; j < this->_dim; j++)
         center[j] = 0;
 
-    for (size_t i = 0; i < this->capacity(); i++) {
+    for (uint64_t i = 0; i < this->capacity(); i++) {
         location_t loc = i;
         if (_use_data_reference) {
             loc = _loc_to_memory_index[loc];
-            for (size_t j = 0; j < this->_dim; j++) {
+            for (uint64_t j = 0; j < this->_dim; j++) {
                 center[j] += (float)_data[loc * this->_dim + j];
             }
         } else {
-            for (size_t j = 0; j < this->_dim; j++) {
+            for (uint64_t j = 0; j < this->_dim; j++) {
                 center[j] += (float)_data[loc * _aligned_dim + j];
             }
         }
     }
 
-    for (size_t j = 0; j < this->_dim; j++)
+    for (uint64_t j = 0; j < this->_dim; j++)
         center[j] /= (float)this->capacity();
 
     // compute all to one distance
@@ -478,13 +478,13 @@ template <typename data_t> location_t InMemDataStore<data_t>::calculate_medoid()
         data_t *cur_vec;
         if (_use_data_reference) {
             loc = _loc_to_memory_index[loc];
-            cur_vec = _data + (loc * (size_t)this->_dim);
+            cur_vec = _data + (loc * (uint64_t)this->_dim);
         } else {
-            cur_vec = _data + (loc * (size_t)_aligned_dim);
+            cur_vec = _data + (loc * (uint64_t)_aligned_dim);
         }
         dist = 0;
         float diff = 0;
-        for (size_t j = 0; j < this->_dim; j++)
+        for (uint64_t j = 0; j < this->_dim; j++)
         {
             diff = (center[j] - (float)cur_vec[j]) * (center[j] - (float)cur_vec[j]);
             dist += diff;

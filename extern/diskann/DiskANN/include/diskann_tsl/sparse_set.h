@@ -108,7 +108,7 @@ class sparse_set {
  public:
   using key_type = typename ht::key_type;
   using value_type = typename ht::value_type;
-  using size_type = typename ht::size_type;
+  using uint64_type = typename ht::uint64_type;
   using difference_type = typename ht::difference_type;
   using hasher = typename ht::hasher;
   using key_equal = typename ht::key_equal;
@@ -125,15 +125,15 @@ class sparse_set {
    */
   sparse_set() : sparse_set(ht::DEFAULT_INIT_BUCKET_COUNT) {}
 
-  explicit sparse_set(size_type bucket_count, const Hash &hash = Hash(),
+  explicit sparse_set(uint64_type bucket_count, const Hash &hash = Hash(),
                       const KeyEqual &equal = KeyEqual(),
                       const Allocator &alloc = Allocator())
       : m_ht(bucket_count, hash, equal, alloc, ht::DEFAULT_MAX_LOAD_FACTOR) {}
 
-  sparse_set(size_type bucket_count, const Allocator &alloc)
+  sparse_set(uint64_type bucket_count, const Allocator &alloc)
       : sparse_set(bucket_count, Hash(), KeyEqual(), alloc) {}
 
-  sparse_set(size_type bucket_count, const Hash &hash, const Allocator &alloc)
+  sparse_set(uint64_type bucket_count, const Hash &hash, const Allocator &alloc)
       : sparse_set(bucket_count, hash, KeyEqual(), alloc) {}
 
   explicit sparse_set(const Allocator &alloc)
@@ -141,7 +141,7 @@ class sparse_set {
 
   template <class InputIt>
   sparse_set(InputIt first, InputIt last,
-             size_type bucket_count = ht::DEFAULT_INIT_BUCKET_COUNT,
+             uint64_type bucket_count = ht::DEFAULT_INIT_BUCKET_COUNT,
              const Hash &hash = Hash(), const KeyEqual &equal = KeyEqual(),
              const Allocator &alloc = Allocator())
       : sparse_set(bucket_count, hash, equal, alloc) {
@@ -149,28 +149,28 @@ class sparse_set {
   }
 
   template <class InputIt>
-  sparse_set(InputIt first, InputIt last, size_type bucket_count,
+  sparse_set(InputIt first, InputIt last, uint64_type bucket_count,
              const Allocator &alloc)
       : sparse_set(first, last, bucket_count, Hash(), KeyEqual(), alloc) {}
 
   template <class InputIt>
-  sparse_set(InputIt first, InputIt last, size_type bucket_count,
+  sparse_set(InputIt first, InputIt last, uint64_type bucket_count,
              const Hash &hash, const Allocator &alloc)
       : sparse_set(first, last, bucket_count, hash, KeyEqual(), alloc) {}
 
   sparse_set(std::initializer_list<value_type> init,
-             size_type bucket_count = ht::DEFAULT_INIT_BUCKET_COUNT,
+             uint64_type bucket_count = ht::DEFAULT_INIT_BUCKET_COUNT,
              const Hash &hash = Hash(), const KeyEqual &equal = KeyEqual(),
              const Allocator &alloc = Allocator())
       : sparse_set(init.begin(), init.end(), bucket_count, hash, equal, alloc) {
   }
 
-  sparse_set(std::initializer_list<value_type> init, size_type bucket_count,
+  sparse_set(std::initializer_list<value_type> init, uint64_type bucket_count,
              const Allocator &alloc)
       : sparse_set(init.begin(), init.end(), bucket_count, Hash(), KeyEqual(),
                    alloc) {}
 
-  sparse_set(std::initializer_list<value_type> init, size_type bucket_count,
+  sparse_set(std::initializer_list<value_type> init, uint64_type bucket_count,
              const Hash &hash, const Allocator &alloc)
       : sparse_set(init.begin(), init.end(), bucket_count, hash, KeyEqual(),
                    alloc) {}
@@ -201,8 +201,8 @@ class sparse_set {
    * Capacity
    */
   bool empty() const noexcept { return m_ht.empty(); }
-  size_type size() const noexcept { return m_ht.size(); }
-  size_type max_size() const noexcept { return m_ht.max_size(); }
+  uint64_type size() const noexcept { return m_ht.size(); }
+  uint64_type max_size() const noexcept { return m_ht.max_size(); }
 
   /*
    * Modifiers
@@ -263,7 +263,7 @@ class sparse_set {
   iterator erase(const_iterator first, const_iterator last) {
     return m_ht.erase(first, last);
   }
-  size_type erase(const key_type &key) { return m_ht.erase(key); }
+  uint64_type erase(const key_type &key) { return m_ht.erase(key); }
 
   /**
    * Use the hash value `precalculated_hash` instead of hashing the key. The
@@ -271,7 +271,7 @@ class sparse_set {
    * behaviour is undefined. Useful to speed-up the lookup if you already have
    * the hash.
    */
-  size_type erase(const key_type &key, std::size_t precalculated_hash) {
+  uint64_type erase(const key_type &key, std::uint64_t precalculated_hash) {
     return m_ht.erase(key, precalculated_hash);
   }
 
@@ -283,7 +283,7 @@ class sparse_set {
   template <
       class K, class KE = KeyEqual,
       typename std::enable_if<has_is_transparent<KE>::value>::type * = nullptr>
-  size_type erase(const K &key) {
+  uint64_type erase(const K &key) {
     return m_ht.erase(key);
   }
 
@@ -298,7 +298,7 @@ class sparse_set {
   template <
       class K, class KE = KeyEqual,
       typename std::enable_if<has_is_transparent<KE>::value>::type * = nullptr>
-  size_type erase(const K &key, std::size_t precalculated_hash) {
+  uint64_type erase(const K &key, std::uint64_t precalculated_hash) {
     return m_ht.erase(key, precalculated_hash);
   }
 
@@ -307,7 +307,7 @@ class sparse_set {
   /*
    * Lookup
    */
-  size_type count(const Key &key) const { return m_ht.count(key); }
+  uint64_type count(const Key &key) const { return m_ht.count(key); }
 
   /**
    * Use the hash value `precalculated_hash` instead of hashing the key. The
@@ -315,7 +315,7 @@ class sparse_set {
    * behaviour is undefined. Useful to speed-up the lookup if you already have
    * the hash.
    */
-  size_type count(const Key &key, std::size_t precalculated_hash) const {
+  uint64_type count(const Key &key, std::uint64_t precalculated_hash) const {
     return m_ht.count(key, precalculated_hash);
   }
 
@@ -327,7 +327,7 @@ class sparse_set {
   template <
       class K, class KE = KeyEqual,
       typename std::enable_if<has_is_transparent<KE>::value>::type * = nullptr>
-  size_type count(const K &key) const {
+  uint64_type count(const K &key) const {
     return m_ht.count(key);
   }
 
@@ -342,7 +342,7 @@ class sparse_set {
   template <
       class K, class KE = KeyEqual,
       typename std::enable_if<has_is_transparent<KE>::value>::type * = nullptr>
-  size_type count(const K &key, std::size_t precalculated_hash) const {
+  uint64_type count(const K &key, std::uint64_t precalculated_hash) const {
     return m_ht.count(key, precalculated_hash);
   }
 
@@ -354,16 +354,16 @@ class sparse_set {
    * behaviour is undefined. Useful to speed-up the lookup if you already have
    * the hash.
    */
-  iterator find(const Key &key, std::size_t precalculated_hash) {
+  iterator find(const Key &key, std::uint64_t precalculated_hash) {
     return m_ht.find(key, precalculated_hash);
   }
 
   const_iterator find(const Key &key) const { return m_ht.find(key); }
 
   /**
-   * @copydoc find(const Key& key, std::size_t precalculated_hash)
+   * @copydoc find(const Key& key, std::uint64_t precalculated_hash)
    */
-  const_iterator find(const Key &key, std::size_t precalculated_hash) const {
+  const_iterator find(const Key &key, std::uint64_t precalculated_hash) const {
     return m_ht.find(key, precalculated_hash);
   }
 
@@ -390,7 +390,7 @@ class sparse_set {
   template <
       class K, class KE = KeyEqual,
       typename std::enable_if<has_is_transparent<KE>::value>::type * = nullptr>
-  iterator find(const K &key, std::size_t precalculated_hash) {
+  iterator find(const K &key, std::uint64_t precalculated_hash) {
     return m_ht.find(key, precalculated_hash);
   }
 
@@ -415,7 +415,7 @@ class sparse_set {
   template <
       class K, class KE = KeyEqual,
       typename std::enable_if<has_is_transparent<KE>::value>::type * = nullptr>
-  const_iterator find(const K &key, std::size_t precalculated_hash) const {
+  const_iterator find(const K &key, std::uint64_t precalculated_hash) const {
     return m_ht.find(key, precalculated_hash);
   }
 
@@ -426,7 +426,7 @@ class sparse_set {
    * hash value should be the same as hash_function()(key). Useful to speed-up
    * the lookup if you already have the hash.
    */
-  bool contains(const Key &key, std::size_t precalculated_hash) const {
+  bool contains(const Key &key, std::uint64_t precalculated_hash) const {
     return m_ht.contains(key, precalculated_hash);
   }
 
@@ -452,7 +452,7 @@ class sparse_set {
   template <
       class K, class KE = KeyEqual,
       typename std::enable_if<has_is_transparent<KE>::value>::type * = nullptr>
-  bool contains(const K &key, std::size_t precalculated_hash) const {
+  bool contains(const K &key, std::uint64_t precalculated_hash) const {
     return m_ht.contains(key, precalculated_hash);
   }
 
@@ -467,7 +467,7 @@ class sparse_set {
    * the hash.
    */
   std::pair<iterator, iterator> equal_range(const Key &key,
-                                            std::size_t precalculated_hash) {
+                                            std::uint64_t precalculated_hash) {
     return m_ht.equal_range(key, precalculated_hash);
   }
 
@@ -476,10 +476,10 @@ class sparse_set {
   }
 
   /**
-   * @copydoc equal_range(const Key& key, std::size_t precalculated_hash)
+   * @copydoc equal_range(const Key& key, std::uint64_t precalculated_hash)
    */
   std::pair<const_iterator, const_iterator> equal_range(
-      const Key &key, std::size_t precalculated_hash) const {
+      const Key &key, std::uint64_t precalculated_hash) const {
     return m_ht.equal_range(key, precalculated_hash);
   }
 
@@ -507,7 +507,7 @@ class sparse_set {
       class K, class KE = KeyEqual,
       typename std::enable_if<has_is_transparent<KE>::value>::type * = nullptr>
   std::pair<iterator, iterator> equal_range(const K &key,
-                                            std::size_t precalculated_hash) {
+                                            std::uint64_t precalculated_hash) {
     return m_ht.equal_range(key, precalculated_hash);
   }
 
@@ -522,21 +522,21 @@ class sparse_set {
   }
 
   /**
-   * @copydoc equal_range(const K& key, std::size_t precalculated_hash)
+   * @copydoc equal_range(const K& key, std::uint64_t precalculated_hash)
    */
   template <
       class K, class KE = KeyEqual,
       typename std::enable_if<has_is_transparent<KE>::value>::type * = nullptr>
   std::pair<const_iterator, const_iterator> equal_range(
-      const K &key, std::size_t precalculated_hash) const {
+      const K &key, std::uint64_t precalculated_hash) const {
     return m_ht.equal_range(key, precalculated_hash);
   }
 
   /*
    * Bucket interface
    */
-  size_type bucket_count() const { return m_ht.bucket_count(); }
-  size_type max_bucket_count() const { return m_ht.max_bucket_count(); }
+  uint64_type bucket_count() const { return m_ht.bucket_count(); }
+  uint64_type max_bucket_count() const { return m_ht.max_bucket_count(); }
 
   /*
    *  Hash policy
@@ -545,8 +545,8 @@ class sparse_set {
   float max_load_factor() const { return m_ht.max_load_factor(); }
   void max_load_factor(float ml) { m_ht.max_load_factor(ml); }
 
-  void rehash(size_type count) { m_ht.rehash(count); }
-  void reserve(size_type count) { m_ht.reserve(count); }
+  void rehash(uint64_type count) { m_ht.rehash(count); }
+  void reserve(uint64_type count) { m_ht.reserve(count); }
 
   /*
    * Observers
@@ -595,7 +595,7 @@ class sparse_set {
    * set, the deserialization process can be sped up by setting
    * `hash_compatible` to true. To be hash compatible, the Hash, KeyEqual and
    * GrowthPolicy must behave the same way than the ones used on the serialized
-   * set. The `std::size_t` must also be of the same size as the one on the
+   * set. The `std::uint64_t` must also be of the same size as the one on the
    * platform used to serialize the set. If these criteria are not met, the
    * behaviour is undefined with `hash_compatible` sets to true.
    *

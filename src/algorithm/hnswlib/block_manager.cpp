@@ -17,8 +17,8 @@
 
 namespace hnswlib {
 
-BlockManager::BlockManager(size_t size_data_per_element,
-                           size_t block_size_limit,
+BlockManager::BlockManager(uint64_t size_data_per_element,
+                           uint64_t block_size_limit,
                            vsag::Allocator* allocator)
     : max_elements_(0), size_data_per_element_(size_data_per_element), allocator_(allocator) {
     data_num_per_block_ = block_size_limit / size_data_per_element_;
@@ -32,24 +32,24 @@ BlockManager::~BlockManager() {
 }
 
 char*
-BlockManager::GetElementPtr(size_t index, size_t offset) {
+BlockManager::GetElementPtr(uint64_t index, uint64_t offset) {
     if (index >= max_elements_) {
         throw std::out_of_range("Index is out of range:" + std::to_string(index));
     }
 
-    size_t block_index = (index * size_data_per_element_) / block_size_;
-    size_t offset_in_block = (index * size_data_per_element_) % block_size_;
+    uint64_t block_index = (index * size_data_per_element_) / block_size_;
+    uint64_t offset_in_block = (index * size_data_per_element_) % block_size_;
     return blocks_[block_index] + offset_in_block + offset;
 }
 
 bool
-BlockManager::Resize(size_t new_max_elements) {
+BlockManager::Resize(uint64_t new_max_elements) {
     if (new_max_elements < max_elements_) {
         throw std::runtime_error("new_max_elements is less than max_elements_");
     }
 
-    size_t new_full_blocks = (new_max_elements * size_data_per_element_) / block_size_;
-    size_t new_remaining_size = (new_max_elements * size_data_per_element_) % block_size_;
+    uint64_t new_full_blocks = (new_max_elements * size_data_per_element_) / block_size_;
+    uint64_t new_remaining_size = (new_max_elements * size_data_per_element_) % block_size_;
 
     try {
         bool append_more_block = blocks_.size() <= new_full_blocks;
@@ -60,7 +60,7 @@ BlockManager::Resize(size_t new_max_elements) {
         if (!blocks_.empty() && blocks_.back() != nullptr && block_lens_.back() != block_size_) {
             char* last_block = blocks_.back();
 
-            size_t new_last_block_size = append_more_block ? block_size_ : new_remaining_size;
+            uint64_t new_last_block_size = append_more_block ? block_size_ : new_remaining_size;
             auto new_last_block = allocator_->Reallocate(last_block, new_last_block_size);
             if (new_last_block == nullptr) {
                 return false;
@@ -88,24 +88,24 @@ BlockManager::Resize(size_t new_max_elements) {
 }
 
 bool
-BlockManager::Serialize(StreamWriter& writer, size_t cur_element_count) {
+BlockManager::Serialize(StreamWriter& writer, uint64_t cur_element_count) {
     return this->SerializeImpl(writer, cur_element_count);
 }
 
 bool
-BlockManager::Deserialize(std::istream& ifs, size_t cur_element_count) {
+BlockManager::Deserialize(std::istream& ifs, uint64_t cur_element_count) {
     IOStreamReader reader(ifs);
     return this->DeserializeImpl(reader, cur_element_count);
 }
 
 bool
 BlockManager::SerializeImpl(StreamWriter& writer, uint64_t cur_element_count) {
-    size_t store_size = cur_element_count * size_data_per_element_;
+    uint64_t store_size = cur_element_count * size_data_per_element_;
     try {
-        size_t offset = 0;
+        uint64_t offset = 0;
         for (int i = 0; i < blocks_.size(); ++i) {
-            size_t new_offset = offset + block_lens_[i];
-            size_t current_block_size = std::min(new_offset, store_size) - offset;
+            uint64_t new_offset = offset + block_lens_[i];
+            uint64_t current_block_size = std::min(new_offset, store_size) - offset;
             writer.Write(blocks_[i], current_block_size);
             offset = new_offset;
             if (new_offset >= store_size) {
@@ -121,10 +121,10 @@ BlockManager::SerializeImpl(StreamWriter& writer, uint64_t cur_element_count) {
 bool
 BlockManager::DeserializeImpl(StreamReader& reader, uint64_t cur_element_count) {
     try {
-        size_t offset = 0;
-        size_t need_read_size = cur_element_count * size_data_per_element_;
-        for (size_t i = 0; i < blocks_.size(); ++i) {
-            size_t current_read_size = std::min(need_read_size, offset + block_lens_[i]) - offset;
+        uint64_t offset = 0;
+        uint64_t need_read_size = cur_element_count * size_data_per_element_;
+        for (uint64_t i = 0; i < blocks_.size(); ++i) {
+            uint64_t current_read_size = std::min(need_read_size, offset + block_lens_[i]) - offset;
             reader.Read(blocks_[i], current_read_size);
             offset += block_lens_[i];
             if (offset >= need_read_size) {

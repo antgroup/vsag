@@ -51,7 +51,7 @@ template <typename T> inline void add_variant(py::module_ &m, const Variant &var
           "use_pq_build"_a, "num_pq_bytes"_a, "use_opq"_a, "filter_complexity"_a = 0, "use_tags"_a = false);
 
     py::class_<diskannpy::StaticMemoryIndex<T>>(m, variant.static_memory_index_name.c_str())
-        .def(py::init<const diskann::Metric, const std::string &, const size_t, const size_t, const uint32_t,
+        .def(py::init<const diskann::Metric, const std::string &, const uint64_t, const uint64_t, const uint32_t,
                       const uint32_t>(),
              "distance_metric"_a, "index_path"_a, "num_points"_a, "dimensions"_a, "num_threads"_a,
              "initial_search_complexity"_a)
@@ -60,7 +60,7 @@ template <typename T> inline void add_variant(py::module_ &m, const Variant &var
              "complexity"_a, "num_threads"_a);
 
     py::class_<diskannpy::DynamicMemoryIndex<T>>(m, variant.dynamic_memory_index_name.c_str())
-        .def(py::init<const diskann::Metric, const size_t, const size_t, const uint32_t, const uint32_t, const bool,
+        .def(py::init<const diskann::Metric, const uint64_t, const uint64_t, const uint32_t, const uint32_t, const bool,
                       const uint32_t, const float, const uint32_t, const uint32_t, const uint32_t, const uint32_t,
                       const uint32_t, const bool>(),
              "distance_metric"_a, "dimensions"_a, "max_vectors"_a, "complexity"_a, "graph_degree"_a,
@@ -83,7 +83,7 @@ template <typename T> inline void add_variant(py::module_ &m, const Variant &var
         .def("num_points", &diskannpy::DynamicMemoryIndex<T>::num_points);
 
     py::class_<diskannpy::StaticDiskIndex<T>>(m, variant.static_disk_index_name.c_str())
-        .def(py::init<const diskann::Metric, const std::string &, const uint32_t, const size_t, const uint32_t>(),
+        .def(py::init<const diskann::Metric, const std::string &, const uint32_t, const uint64_t, const uint32_t>(),
              "distance_metric"_a, "index_path_prefix"_a, "num_threads"_a, "num_nodes_to_cache"_a,
              "cache_mechanism"_a = 1)
         .def("cache_bfs_levels", &diskannpy::StaticDiskIndex<T>::cache_bfs_levels, "num_nodes_to_cache"_a)

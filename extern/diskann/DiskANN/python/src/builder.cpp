@@ -35,7 +35,7 @@ template <typename T, typename TagT, typename LabelT>
 void build_memory_index(const diskann::Metric metric, const std::string &vector_bin_path,
                         const std::string &index_output_path, const uint32_t graph_degree, const uint32_t complexity,
                         const float alpha, const uint32_t num_threads, const bool use_pq_build,
-                        const size_t num_pq_bytes, const bool use_opq, const uint32_t filter_complexity,
+                        const uint64_t num_pq_bytes, const bool use_opq, const uint32_t filter_complexity,
                         const bool use_tags)
 {
     diskann::IndexWriteParameters index_build_params = diskann::IndexWriteParametersBuilder(complexity, graph_degree)
@@ -44,7 +44,7 @@ void build_memory_index(const diskann::Metric metric, const std::string &vector_
                                                            .with_saturate_graph(false)
                                                            .with_num_threads(num_threads)
                                                            .build();
-    size_t data_num, data_dim;
+    uint64_t data_num, data_dim;
     diskann::get_bin_metadata(vector_bin_path, data_num, data_dim);
     diskann::Index<T, TagT, LabelT> index(metric, data_dim, data_num, use_tags, use_tags, false, use_pq_build,
                                           num_pq_bytes, use_opq);
@@ -57,7 +57,7 @@ void build_memory_index(const diskann::Metric metric, const std::string &vector_
             throw std::runtime_error("tags file not found at expected path: " + tags_file);
         }
         TagT *tags_data;
-        size_t tag_dims = 1;
+        uint64_t tag_dims = 1;
         diskann::load_bin(tags_file, tags_data, data_num, tag_dims);
         std::vector<TagT> tags(tags_data, tags_data + data_num);
         index.build(vector_bin_path.c_str(), data_num, index_build_params, tags);
@@ -71,12 +71,12 @@ void build_memory_index(const diskann::Metric metric, const std::string &vector_
 }
 
 template void build_memory_index<float>(diskann::Metric, const std::string &, const std::string &, uint32_t, uint32_t,
-                                        float, uint32_t, bool, size_t, bool, uint32_t, bool);
+                                        float, uint32_t, bool, uint64_t, bool, uint32_t, bool);
 
 template void build_memory_index<int8_t>(diskann::Metric, const std::string &, const std::string &, uint32_t, uint32_t,
-                                         float, uint32_t, bool, size_t, bool, uint32_t, bool);
+                                         float, uint32_t, bool, uint64_t, bool, uint32_t, bool);
 
 template void build_memory_index<uint8_t>(diskann::Metric, const std::string &, const std::string &, uint32_t, uint32_t,
-                                          float, uint32_t, bool, size_t, bool, uint32_t, bool);
+                                          float, uint32_t, bool, uint64_t, bool, uint32_t, bool);
 
 } // namespace diskannpy
