@@ -38,7 +38,7 @@ WindowResultQueue::Push(float value) {
     count_++;
     
     // Update max value
-    if (count_ == 1 || value > max_value_) {
+    if (count_ == 1 || value >= max_value_) {
         max_value_ = value;
     } else if (need_recalculate) {
         // Only recalculate when we evicted the max value
