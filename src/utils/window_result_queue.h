@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -29,8 +30,12 @@ public:
     [[nodiscard]] float
     GetAvgResult() const;
 
+    [[nodiscard]] float
+    GetMaxResult() const;
+
 private:
     uint64_t count_ = 0;
+    float max_value_ = 0.0f;
     std::vector<float> queue_;
 };
 }  // namespace vsag

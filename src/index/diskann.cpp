@@ -519,9 +519,24 @@ DiskANN::knn_search(const DatasetPtr& query,
                     std::lock_guard<std::mutex> lock(stats_mutex_);
                     result_queues_[STATSTIC_KNN_IO].Push(static_cast<float>(query_stats[i].n_ios));
                     result_queues_[STATSTIC_KNN_TIME].Push(static_cast<float>(time_cost));
-                    result_queues_[STATSTIC_KNN_IO_TIME].Push(
-                        (query_stats[i].io_us / static_cast<float>(query_stats[i].n_ios)) /
-                        MACRO_TO_MILLI);
+                    
+                    // Track average and max IO time
+                    if (query_stats[i].n_ios > 0) {
+                        result_queues_[STATSTIC_KNN_IO_TIME].Push(
+                            (query_stats[i].io_us / static_cast<float>(query_stats[i].n_ios)) /
+                            MACRO_TO_MILLI);
+                    }
+                    
+                    // Track pre-reorder and reorder stage timings
+                    // Pre-reorder is the CPU time (graph traversal)
+                    result_queues_[STATSTIC_KNN_PREREORDER_TIME].Push(
+                        query_stats[i].cpu_us / MACRO_TO_MILLI);
+                    
+                    // Reorder time is the IO time when reorder is enabled
+                    if (reorder) {
+                        result_queues_[STATSTIC_KNN_REORDER_TIME].Push(
+                            query_stats[i].io_us / MACRO_TO_MILLI);
+                    }
                 }
 
             } catch (const std::runtime_error& e) {
@@ -657,8 +672,23 @@ DiskANN::range_search(const DatasetPtr& query,
                 result_queues_[STATSTIC_RANGE_TIME].Push(static_cast<float>(time_cost));
                 result_queues_[STATSTIC_RANGE_CACHE_HIT].Push(
                     static_cast<float>(query_stats.n_cache_hits));
-                result_queues_[STATSTIC_RANGE_IO_TIME].Push(
-                    (query_stats.io_us / static_cast<float>(query_stats.n_ios)) / MACRO_TO_MILLI);
+                
+                // Track average and max IO time
+                if (query_stats.n_ios > 0) {
+                    result_queues_[STATSTIC_RANGE_IO_TIME].Push(
+                        (query_stats.io_us / static_cast<float>(query_stats.n_ios)) / MACRO_TO_MILLI);
+                }
+                
+                // Track pre-reorder and reorder stage timings
+                // Pre-reorder is the CPU time (graph traversal)
+                result_queues_[STATSTIC_RANGE_PREREORDER_TIME].Push(
+                    query_stats.cpu_us / MACRO_TO_MILLI);
+                
+                // Reorder time is the IO time when reorder is enabled
+                if (reorder) {
+                    result_queues_[STATSTIC_RANGE_REORDER_TIME].Push(
+                        query_stats.io_us / MACRO_TO_MILLI);
+                }
             }
         } catch (const std::runtime_error& e) {
             LOG_ERROR_AND_RETURNS(
@@ -1088,10 +1118,42 @@ DiskANN::GetStats() const {
         std::lock_guard<std::mutex> lock(stats_mutex_);
         for (auto& item : result_queues_) {
             j[item.first].SetFloat(item.second.GetAvgResult());
+            
+            // Add max metrics for IO time
+            if (item.first == STATSTIC_KNN_IO_TIME) {
+                j[STATSTIC_KNN_IO_MAX_TIME].SetFloat(item.second.GetMaxResult());
+            } else if (item.first == STATSTIC_RANGE_IO_TIME) {
+                j[STATSTIC_RANGE_IO_MAX_TIME].SetFloat(item.second.GetMaxResult());
+            }
         }
     }
 
     return j.Dump(4);
+}
+
+std::vector<std::string>
+DiskANN::GetSupportedMetricKeys() const {
+    return {
+        STATSTIC_MEMORY,
+        STATSTIC_INDEX_NAME,
+        STATSTIC_DATA_NUM,
+        STATSTIC_KNN_TIME,
+        STATSTIC_KNN_IO,
+        STATSTIC_KNN_HOP,
+        STATSTIC_KNN_IO_TIME,
+        STATSTIC_KNN_IO_MAX_TIME,
+        STATSTIC_KNN_CACHE_HIT,
+        STATSTIC_KNN_PREREORDER_TIME,
+        STATSTIC_KNN_REORDER_TIME,
+        STATSTIC_RANGE_TIME,
+        STATSTIC_RANGE_IO,
+        STATSTIC_RANGE_HOP,
+        STATSTIC_RANGE_IO_TIME,
+        STATSTIC_RANGE_IO_MAX_TIME,
+        STATSTIC_RANGE_CACHE_HIT,
+        STATSTIC_RANGE_PREREORDER_TIME,
+        STATSTIC_RANGE_REORDER_TIME
+    };
 }
 
 int64_t

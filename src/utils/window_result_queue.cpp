@@ -28,6 +28,20 @@ WindowResultQueue::Push(float value) {
     uint64_t window_size = queue_.size();
     queue_[count_ % window_size] = value;
     count_++;
+    
+    // Update max value
+    if (count_ == 1 || value > max_value_) {
+        max_value_ = value;
+    } else if (count_ > window_size) {
+        // If we've wrapped around, recalculate max from current window
+        max_value_ = 0.0f;
+        uint64_t statistic_num = std::min<uint64_t>(count_, queue_.size());
+        for (uint64_t i = 0; i < statistic_num; i++) {
+            if (queue_[i] > max_value_) {
+                max_value_ = queue_[i];
+            }
+        }
+    }
 }
 
 float
@@ -38,6 +52,11 @@ WindowResultQueue::GetAvgResult() const {
         result += queue_[i];
     }
     return result / static_cast<float>(statistic_num);
+}
+
+float
+WindowResultQueue::GetMaxResult() const {
+    return max_value_;
 }
 
 }  // namespace vsag
