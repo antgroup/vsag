@@ -69,7 +69,7 @@ TEST_CASE("GNO-IMI Partition Basic Test", "[ut][GNOIMIPartition]") {
     inner_search_param.first_order_scan_ratio = search_param.first_order_scan_ratio;
     REQUIRE(inner_search_param.scan_bucket_size == 1);
     REQUIRE(inner_search_param.first_order_scan_ratio == 0.1f);
-    size_t match_count = 0;
+    uint64_t match_count = 0;
     for (int64_t i = 0; i < data_count; ++i) {
         auto query = Dataset::Make();
         query->Dim(dim)->Float32Vectors(vec.data() + i * dim)->NumElements(1)->Owner(false);
@@ -158,7 +158,7 @@ TEST_CASE("GNO-IMI Partition Serialize Test", "[ut][GNOIMIPartition]") {
     inner_search_param.scan_bucket_size = search_param.scan_buckets_count;
     inner_search_param.first_order_scan_ratio = search_param.first_order_scan_ratio;
 
-    size_t match_count = 0;
+    uint64_t match_count = 0;
     FilterPtr filter = nullptr;
     for (int64_t i = 0; i < data_count; ++i) {
         auto query = Dataset::Make();

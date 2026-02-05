@@ -24,13 +24,13 @@ template <typename T> int analyze_norm(std::string base_file)
 {
     std::cout << "Analyzing data norms" << std::endl;
     T *data;
-    size_t npts, ndims;
+    uint64_t npts, ndims;
     diskann::load_bin<T>(base_file, data, npts, ndims);
     std::vector<float> norms(npts, 0);
 #pragma omp parallel for schedule(dynamic)
     for (int64_t i = 0; i < (int64_t)npts; i++)
     {
-        for (size_t d = 0; d < ndims; d++)
+        for (uint64_t d = 0; d < ndims; d++)
             norms[i] += data[i * ndims + d] * data[i * ndims + d];
         norms[i] = std::sqrt(norms[i]);
     }
@@ -47,17 +47,17 @@ template <typename T> int normalize_base(std::string base_file, std::string out_
 {
     std::cout << "Normalizing base" << std::endl;
     T *data;
-    size_t npts, ndims;
+    uint64_t npts, ndims;
     diskann::load_bin<T>(base_file, data, npts, ndims);
     //  std::vector<float> norms(npts, 0);
 #pragma omp parallel for schedule(dynamic)
     for (int64_t i = 0; i < (int64_t)npts; i++)
     {
         float pt_norm = 0;
-        for (size_t d = 0; d < ndims; d++)
+        for (uint64_t d = 0; d < ndims; d++)
             pt_norm += data[i * ndims + d] * data[i * ndims + d];
         pt_norm = std::sqrt(pt_norm);
-        for (size_t d = 0; d < ndims; d++)
+        for (uint64_t d = 0; d < ndims; d++)
             data[i * ndims + d] = static_cast<T>(data[i * ndims + d] / pt_norm);
     }
     diskann::save_bin<T>(out_file, data, npts, ndims);
@@ -69,14 +69,14 @@ template <typename T> int augment_base(std::string base_file, std::string out_fi
 {
     std::cout << "Analyzing data norms" << std::endl;
     T *data;
-    size_t npts, ndims;
+    uint64_t npts, ndims;
     diskann::load_bin<T>(base_file, data, npts, ndims);
     std::vector<float> norms(npts, 0);
     float max_norm = 0;
 #pragma omp parallel for schedule(dynamic)
     for (int64_t i = 0; i < (int64_t)npts; i++)
     {
-        for (size_t d = 0; d < ndims; d++)
+        for (uint64_t d = 0; d < ndims; d++)
             norms[i] += data[i * ndims + d] * data[i * ndims + d];
         max_norm = norms[i] > max_norm ? norms[i] : max_norm;
     }
@@ -84,13 +84,13 @@ template <typename T> int augment_base(std::string base_file, std::string out_fi
     max_norm = std::sqrt(max_norm);
     std::cout << "Max norm: " << max_norm << std::endl;
     T *new_data;
-    size_t newdims = ndims + 1;
+    uint64_t newdims = ndims + 1;
     new_data = new T[npts * newdims];
-    for (size_t i = 0; i < npts; i++)
+    for (uint64_t i = 0; i < npts; i++)
     {
         if (prep_base)
         {
-            for (size_t j = 0; j < ndims; j++)
+            for (uint64_t j = 0; j < ndims; j++)
             {
                 new_data[i * newdims + j] = static_cast<T>(data[i * ndims + j] / max_norm);
             }
@@ -104,7 +104,7 @@ template <typename T> int augment_base(std::string base_file, std::string out_fi
         }
         else
         {
-            for (size_t j = 0; j < ndims; j++)
+            for (uint64_t j = 0; j < ndims; j++)
             {
                 new_data[i * newdims + j] = static_cast<T>(data[i * ndims + j] / std::sqrt(norms[i]));
             }

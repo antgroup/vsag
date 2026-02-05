@@ -66,7 +66,7 @@ PQFastScanQuantizer<metric>::TrainImpl(const vsag::DataType* data, uint64_t coun
     if (this->is_trained_) {
         return true;
     }
-    count = std::min(count, 65536UL);
+    count = std::min<uint64_t>(count, 65536UL);
     Vector<float> slice(this->allocator_);
     slice.resize(count * subspace_dim_);
     Vector<float> norm_data(this->allocator_);

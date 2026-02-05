@@ -32,7 +32,7 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
 
     auto reorder_heap = std::make_shared<StandardHeap<true, false>>(query_allocator, topk);
     auto computer = flatten_->FactoryComputer(query);
-    size_t candidate_size = input->Size();
+    uint64_t candidate_size = input->Size();
     const auto* candidate_result = input->GetData();
     Vector<InnerIdType> ids(candidate_size, query_allocator);
     Vector<float> dists(candidate_size, query_allocator);

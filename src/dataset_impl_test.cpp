@@ -245,8 +245,8 @@ EqualDataset(const vsag::DatasetPtr& data1, const vsag::DatasetPtr& data2) {
 
 template <typename T>
 bool
-AreAllPointersDifferent(T* original, T* copy, size_t num_elements) {
-    for (size_t i = 0; i < num_elements; ++i) {
+AreAllPointersDifferent(T* original, T* copy, uint64_t num_elements) {
+    for (uint64_t i = 0; i < num_elements; ++i) {
         if (std::memcmp(original + i, copy + i, sizeof(T)) == 0) {
             return false;
         }

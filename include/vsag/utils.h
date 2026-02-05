@@ -41,8 +41,12 @@ namespace vsag {
  * @return float The final quantization error (sum of squared distances to the nearest centroid).
  */
 float
-kmeans_clustering(
-    size_t d, size_t n, size_t k, const float* x, float* centroids, const std::string& dis_type);
+kmeans_clustering(uint64_t d,
+                  uint64_t n,
+                  uint64_t k,
+                  const float* x,
+                  float* centroids,
+                  const std::string& dis_type);
 
 /**
  * @brief Filters a set of vectors based on a distance threshold.

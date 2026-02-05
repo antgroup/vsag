@@ -129,7 +129,7 @@ HGraphAnalyzer::GetNeighborRecall() {
         DistHeapPtr groundtruth = base_ground_truth_[id];
         std::unordered_set<InnerIdType> gt_set;
         const auto* gt_data = groundtruth->GetData();
-        auto neighbor_count = std::min(neighbors.size(), groundtruth->Size());
+        auto neighbor_count = std::min<uint64_t>(neighbors.size(), groundtruth->Size());
         for (uint32_t i = 0; i < neighbor_count; ++i) {
             gt_set.insert(gt_data[i].second);
         }

@@ -73,9 +73,10 @@ RaBitQuantizer<metric>::RaBitQuantizer(int dim,
     inv_sqrt_d_ = 1.0F / sqrt(this->dim_);
 
     // base code layout
-    size_t align_size = std::max(std::max(sizeof(error_type), sizeof(norm_type)), sizeof(DataType));
+    uint64_t align_size =
+        std::max(std::max(sizeof(error_type), sizeof(norm_type)), sizeof(DataType));
 
-    size_t code_original_size = (this->dim_ + 7) / 8;
+    uint64_t code_original_size = (this->dim_ + 7) / 8;
     code_original_size *= num_bits_per_dim_base_;
 
     this->code_size_ = 0;
@@ -733,7 +734,7 @@ RaBitQuantizer<metric>::EncodeSQ(const DataType* normed_data,
                                  sum_type& query_sum) const {
     lower_bound = std::numeric_limits<float>::max();
     upper_bound = std::numeric_limits<float>::lowest();
-    for (size_t i = 0; i < this->dim_; i++) {
+    for (uint64_t i = 0; i < this->dim_; i++) {
         const float val = normed_data[i];
         if (val < lower_bound) {
             lower_bound = val;
@@ -755,9 +756,9 @@ RaBitQuantizer<metric>::EncodeSQ(const DataType* normed_data,
 template <MetricType metric>
 void
 RaBitQuantizer<metric>::ReOrderSQ(const uint8_t* quantized_data, uint8_t* reorder_data) const {
-    size_t offset = aligned_dim_ / 8;
-    for (size_t d = 0; d < this->dim_; d++) {
-        for (size_t bit_pos = 0; bit_pos < num_bits_per_dim_query_; bit_pos++) {
+    uint64_t offset = aligned_dim_ / 8;
+    for (uint64_t d = 0; d < this->dim_; d++) {
+        for (uint64_t bit_pos = 0; bit_pos < num_bits_per_dim_query_; bit_pos++) {
             const bool bit = ((quantized_data[d] & (1 << bit_pos)) != 0);
             reorder_data[bit_pos * offset + d / 8] |= (static_cast<int32_t>(bit) * (1 << (d % 8)));
         }
@@ -783,7 +784,7 @@ void
 RaBitQuantizer<metric>::RecoverOrderSQ(const uint8_t* output, uint8_t* input) const {
     // note that the codesize of input is different from output
     // output: align dim bits with 8 bits (1 byte)
-    size_t offset = aligned_dim_ / 8;
+    uint64_t offset = aligned_dim_ / 8;
     for (uint64_t d = 0; d < this->dim_; ++d) {
         for (uint64_t bit_pos = 0; bit_pos < num_bits_per_dim_query_; ++bit_pos) {
             // calculate the position in the reordered output

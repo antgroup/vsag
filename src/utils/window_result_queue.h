@@ -30,7 +30,7 @@ public:
     GetAvgResult() const;
 
 private:
-    size_t count_ = 0;
+    uint64_t count_ = 0;
     std::vector<float> queue_;
 };
 }  // namespace vsag

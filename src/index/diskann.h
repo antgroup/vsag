@@ -57,7 +57,7 @@ enum BuildStatus { BEGIN = 0, GRAPH = 1, EDGE_PRUNE = 2, PQ = 3, DISK_LAYOUT = 4
 
 class DiskANN : public Index {
 public:
-    using rs = std::pair<float, size_t>;
+    using rs = std::pair<float, uint64_t>;
 
     // offset: uint64, len: uint64, dest: void*
     using read_request = std::tuple<uint64_t, uint64_t, void*>;
@@ -287,8 +287,8 @@ private:
     int L_ = 200;
     int R_ = 64;
     float p_val_ = 0.5;
-    size_t disk_pq_dims_ = 8;
-    size_t sector_len_;
+    uint64_t disk_pq_dims_ = 8;
+    uint64_t sector_len_;
 
     int64_t build_batch_num_ = 10;
 

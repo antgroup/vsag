@@ -327,7 +327,7 @@ TestIndex::TestContinueAdd(const IndexPtr& index,
         return;
     }
     auto base_count = dataset->base_->GetNumElements();
-    int64_t temp_count = std::max(1L, dataset->base_->GetNumElements() / 2);
+    int64_t temp_count = std::max<int64_t>(1, dataset->base_->GetNumElements() / 2);
     auto dim = dataset->base_->GetDim();
     auto temp_dataset = vsag::Dataset::Make();
     temp_dataset->Dim(dim)
@@ -363,7 +363,8 @@ TestIndex::TestTrainAndAdd(const TestIndex::IndexPtr& index,
                            const TestDatasetPtr& dataset,
                            bool expected_success) {
     auto base_count = dataset->base_->GetNumElements();
-    int64_t temp_count = std::max(1L, static_cast<int64_t>(dataset->base_->GetNumElements() * 0.8));
+    int64_t temp_count =
+        std::max<int64_t>(1, static_cast<int64_t>(dataset->base_->GetNumElements() * 0.8));
     auto dim = dataset->base_->GetDim();
     auto temp_dataset = vsag::Dataset::Make();
     temp_dataset->Dim(dim)
@@ -721,7 +722,7 @@ TestIndex::TestSearchAllocator(const TestIndex::IndexPtr& index,
         }
 
         void*
-        Allocate(size_t size) override {
+        Allocate(uint64_t size) override {
             auto addr = (void*)malloc(size);
             sizes_[addr] = size;
             return addr;
@@ -736,7 +737,7 @@ TestIndex::TestSearchAllocator(const TestIndex::IndexPtr& index,
         }
 
         void*
-        Reallocate(void* p, size_t size) override {
+        Reallocate(void* p, uint64_t size) override {
             auto addr = (void*)realloc(p, size);
             sizes_.erase(p);
             sizes_[addr] = size;
@@ -744,7 +745,7 @@ TestIndex::TestSearchAllocator(const TestIndex::IndexPtr& index,
         }
 
     private:
-        std::unordered_map<void*, size_t> sizes_;
+        std::unordered_map<void*, uint64_t> sizes_;
     };
 
     for (auto i = 0; i < query_count; ++i) {
@@ -2172,7 +2173,7 @@ create_attr_string(const std::string& name, const std::vector<T>& values) {
         return ss.str();
     }
     std::ostringstream oss;
-    for (size_t i = 0; i < values.size(); ++i) {
+    for (uint64_t i = 0; i < values.size(); ++i) {
         if (i != 0) {
             oss << "|";
         }
@@ -2300,7 +2301,7 @@ TestIndex::TestWithAttr(const IndexPtr& index,
     using namespace vsag;
     auto attrsets = dataset->base_->GetAttributeSets();
     auto* query_vec = dataset->base_->GetFloat32Vectors();
-    auto count = std::min(dataset->base_->GetNumElements(), 200L);
+    auto count = std::min<int64_t>(dataset->base_->GetNumElements(), 200);
     auto dim = dataset->base_->GetDim();
     const auto* labels = dataset->base_->GetIds();
 

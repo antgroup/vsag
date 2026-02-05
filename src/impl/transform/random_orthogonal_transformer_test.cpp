@@ -93,7 +93,7 @@ TestOrthogonality(RandomOrthogonalMatrix& rom, uint64_t dim) {
 
     // verify that Q ^ T * Q is close to the unit matrix
     REQUIRE(result.size() == identity.size());
-    for (size_t i = 0; i < result.size(); ++i) {
+    for (uint64_t i = 0; i < result.size(); ++i) {
         REQUIRE(std::fabs(result[i] - identity[i]) < 1e-4);
     }
 }

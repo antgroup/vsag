@@ -68,14 +68,14 @@ void
 ODescent::SaveGraph(std::stringstream& out) {
     std::streamoff file_offset = 0;  // we will use this if we want
     out.seekp(file_offset, std::stringstream::beg);
-    size_t index_size = 24;
+    uint64_t index_size = 24;
     uint32_t max_degree = 0;
     out.write((char*)&index_size, sizeof(uint64_t));
     out.write((char*)&max_degree, sizeof(uint32_t));
     uint32_t ep_u32 = 0;
-    size_t num_frozen = 0;
+    uint64_t num_frozen = 0;
     out.write((char*)&ep_u32, sizeof(uint32_t));
-    out.write((char*)&num_frozen, sizeof(size_t));
+    out.write((char*)&num_frozen, sizeof(uint64_t));
     // Note: at this point, either _nd == _max_points or any frozen points have
     // been temporarily moved to _nd, so _nd + _num_frozen_points is the valid
     // location limit.
@@ -89,7 +89,7 @@ ODescent::SaveGraph(std::stringstream& out) {
         out.write((char*)&gk, sizeof(uint32_t));
         out.write((char*)edges.data(), static_cast<std::streamsize>(gk * sizeof(uint32_t)));
         max_degree = edges.size() > max_degree ? (uint32_t)edges.size() : max_degree;
-        index_size += (size_t)(sizeof(uint32_t) * (gk + 1));
+        index_size += (uint64_t)(sizeof(uint32_t) * (gk + 1));
     }
     out.seekp(file_offset, std::stringstream::beg);
     out.write((char*)&index_size, sizeof(uint64_t));
@@ -160,7 +160,7 @@ ODescent::update_neighbors(Vector<UnorderedSet<uint32_t>>& old_neighbors,
     };
     parallelize_task(task);
 
-    auto resize_task = [&, this](int64_t start, int64_t end) {
+    auto reuint64_task = [&, this](int64_t start, int64_t end) {
         for (uint32_t i = start; i < end; ++i) {
             auto& neighbors = graph_[i].neighbors;
             std::sort(neighbors.begin(), neighbors.end());
@@ -171,7 +171,7 @@ ODescent::update_neighbors(Vector<UnorderedSet<uint32_t>>& old_neighbors,
             graph_[i].greast_neighbor_distance = neighbors.back().distance;
         }
     };
-    parallelize_task(resize_task);
+    parallelize_task(reuint64_task);
 }
 
 void
@@ -362,7 +362,7 @@ ODescent::SaveGraph(GraphInterfacePtr& graph_storage) {
             id = valid_ids_[i];
         }
         Vector<uint32_t> edges(allocator_);
-        size_t size = graph_[i].neighbors.size();
+        uint64_t size = graph_[i].neighbors.size();
         if (size > 0) {
             edges.resize(size);
             for (int j = 0; j < size; ++j) {
@@ -386,7 +386,7 @@ ODescent::init_one_edge(int64_t i,
     ids_set.insert(i);
     graph_[i].neighbors.reserve(odescent_param_->max_degree);
     // extract graph from graph_storage
-    size_t valid_id_count = 0;
+    uint64_t valid_id_count = 0;
     if (graph_storage != nullptr) {
         Vector<InnerIdType> edges(allocator_);
         InnerIdType id = i;
