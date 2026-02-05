@@ -107,7 +107,7 @@ SparseIndex::sort_sparse_vector(const SparseVector& vector) const {
     });
     Vector<uint32_t> sorted_ids(vector.len_, allocator_);
     Vector<float> sorted_vals(vector.len_, allocator_);
-    for (size_t j = 0; j < vector.len_; ++j) {
+    for (uint64_t j = 0; j < vector.len_; ++j) {
         sorted_ids[j] = vector.ids_[indices[j]];
         sorted_vals[j] = vector.vals_[indices[j]];
     }

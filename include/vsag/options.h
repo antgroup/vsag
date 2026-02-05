@@ -66,9 +66,9 @@ public:
      * This function retrieves the number of threads to use for disk index IO during the search process.
      * It is thread-safe, using memory order acquire operations.
      *
-     * @return size_t The number of threads for IO operations.
+     * @return uint64_t The number of threads for IO operations.
      */
-    [[nodiscard]] inline size_t
+    [[nodiscard]] inline uint64_t
     num_threads_io() const {
         return num_threads_io_.load(std::memory_order_acquire);
     }
@@ -79,9 +79,9 @@ public:
      * This function retrieves the number of threads used for constructing indices.
      * It is thread-safe, using memory order acquire operations.
      *
-     * @return size_t The number of threads for building operations.
+     * @return uint64_t The number of threads for building operations.
      */
-    [[nodiscard]] inline size_t
+    [[nodiscard]] inline uint64_t
     num_threads_building() const {
         return num_threads_building_.load(std::memory_order_acquire);
     }
@@ -95,7 +95,7 @@ public:
      * @param num_threads Number of threads for IO operations.
      */
     void
-    set_num_threads_io(size_t num_threads);
+    set_num_threads_io(uint64_t num_threads);
 
     /**
      * @brief Sets the number of threads for building operations in diskann.
@@ -105,7 +105,7 @@ public:
      * @param num_threads Number of threads for building operations.
      */
     void
-    set_num_threads_building(size_t num_threads);
+    set_num_threads_building(uint64_t num_threads);
 
     /**
      * @brief Gets the limit of block size for memory allocations.
@@ -114,9 +114,9 @@ public:
      * It is thread-safe, using memory order acquire operations.
      * The block size should be greater than 2M.
      *
-     * @return size_t The block size limit for memory allocations.
+     * @return uint64_t The block size limit for memory allocations.
      */
-    [[nodiscard]] inline size_t
+    [[nodiscard]] inline uint64_t
     block_size_limit() const {
         return block_size_limit_.load(std::memory_order_acquire);
     }
@@ -129,7 +129,7 @@ public:
      * @param size The size of the block limit, must be greater than 2M.
      */
     void
-    set_block_size_limit(size_t size);
+    set_block_size_limit(uint64_t size);
 
     /**
      * @brief Gets the size of direct IO object align bits.
@@ -138,9 +138,9 @@ public:
      * It is thread-safe, using memory order acquire operations.
      * The size of direct IO object align bits should be smaller than 21(direct IO object smaller than 2M).
      *
-     * @return size_t The size of direct IO object align bits.
+     * @return uint64_t The size of direct IO object align bits.
      */
-    [[nodiscard]] inline size_t
+    [[nodiscard]] inline uint64_t
     direct_IO_object_align_bit() const {
         return direct_IO_object_align_bit_.load(std::memory_order_acquire);
     }
@@ -153,7 +153,7 @@ public:
      * @param align_bit The size of direct IO object align bits.
      */
     void
-    set_direct_IO_object_align_bit(size_t align_bit);
+    set_direct_IO_object_align_bit(uint64_t align_bit);
 
     /**
      * @brief Gets the current logger instance.
@@ -192,16 +192,16 @@ private:
 
 private:
     ///< The size of the thread pool for single index I/O during searches.
-    std::atomic<size_t> num_threads_io_{8};
+    std::atomic<uint64_t> num_threads_io_{8};
 
     ///< The number of threads used for building a single index.
-    std::atomic<size_t> num_threads_building_{4};
+    std::atomic<uint64_t> num_threads_building_{4};
 
     ///< The size of the maximum memory allocated each time (default is 128MB).
-    std::atomic<size_t> block_size_limit_{128 * 1024 * 1024};
+    std::atomic<uint64_t> block_size_limit_{128 * 1024 * 1024};
 
     ///< The size of the bits used for DirectIOObject align (default is 9).
-    std::atomic<size_t> direct_IO_object_align_bit_{9};
+    std::atomic<uint64_t> direct_IO_object_align_bit_{9};
 
     ///< A flag to ensure that the set_direct_IO_object_align_bit() is called only once.
     std::atomic<bool> direct_IO_object_align_bit_flag{false};

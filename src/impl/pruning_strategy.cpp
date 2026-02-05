@@ -72,7 +72,7 @@ mutually_connect_new_element(InnerIdType cur_c,
                              const MutexArrayPtr& neighbors_mutexes,
                              Allocator* allocator,
                              float alpha) {
-    const size_t max_size = graph->MaximumDegree();
+    const uint64_t max_size = graph->MaximumDegree();
     select_edges_by_heuristic(top_candidates, max_size, flatten, allocator, alpha);
     if (top_candidates->Size() > max_size) {
         throw VsagException(
@@ -102,7 +102,7 @@ mutually_connect_new_element(InnerIdType cur_c,
         Vector<InnerIdType> neighbors(allocator);
         graph->GetNeighbors(selected_neighbor, neighbors);
 
-        size_t sz_link_list_other = neighbors.size();
+        uint64_t sz_link_list_other = neighbors.size();
 
         if (sz_link_list_other > max_size) {
             throw VsagException(ErrorType::INTERNAL_ERROR, "Bad value of sz_link_list_other");
@@ -118,7 +118,7 @@ mutually_connect_new_element(InnerIdType cur_c,
             auto candidates = std::make_shared<StandardHeap<true, false>>(allocator, -1);
             candidates->Push(d_max, cur_c);
 
-            for (size_t j = 0; j < sz_link_list_other; j++) {
+            for (uint64_t j = 0; j < sz_link_list_other; j++) {
                 candidates->Push(flatten->ComputePairVectors(neighbors[j], selected_neighbor),
                                  neighbors[j]);
             }

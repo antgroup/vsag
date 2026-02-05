@@ -92,8 +92,11 @@ TestQuantizerAdapterEncodeDecode(
 
 template <typename T, MetricType metric, typename DataT = float>
 void
-TestQuantizerAdapterComputeCodes(
-    Quantizer<T>& quantizer, size_t dim, uint32_t count, float error = 1e-4f, bool retrain = true) {
+TestQuantizerAdapterComputeCodes(Quantizer<T>& quantizer,
+                                 uint64_t dim,
+                                 uint32_t count,
+                                 float error = 1e-4f,
+                                 bool retrain = true) {
     std::vector<DataT> vecs;
     if constexpr (std::is_same<DataT, float>::value == true) {
         vecs = fixtures::generate_vectors(count, dim, false);
@@ -133,7 +136,7 @@ TestQuantizerAdapterComputeCodes(
 template <typename T, MetricType metric, typename DataT = float>
 void
 TestQuantizerAdapterComputer(Quantizer<T>& quant,
-                             size_t dim,
+                             uint64_t dim,
                              uint32_t count,
                              float error = 1e-5f,
                              float related_error = 1.0f,

@@ -139,7 +139,7 @@ GNOIMIPartition::Train(const DatasetPtr dataset) {
 
     // train loop
     double min_err = std::numeric_limits<double>::max();
-    for (size_t i = 0; i < 2; ++i) {
+    for (uint64_t i = 0; i < 2; ++i) {
         double err_to_s = 0.0;
         double err_to_t = 0.0;
         train_and_get_residual(centroids_s, data_centroids_s_tmp.data(), &err_to_s);
@@ -178,8 +178,8 @@ GNOIMIPartition::Train(const DatasetPtr dataset) {
     std::vector<float> temp_data(bucket_count_t_ * dim_, 0.0);
     for (BucketIdType i = 0; i < bucket_count_t_; ++i) {
         BucketIdType src_idx = norms_t[i].second;
-        size_t src_offset = src_idx * dim_;
-        size_t dst_offset = i * dim_;
+        uint64_t src_offset = src_idx * dim_;
+        uint64_t dst_offset = i * dim_;
         std::copy(data_centroids_t_.data() + src_offset,
                   data_centroids_t_.data() + src_offset + dim_,
                   temp_data.data() + dst_offset);
@@ -252,13 +252,13 @@ GNOIMIPartition::ClassifyDatasForSearch(const void* datas,
            bucket_count_t_,
            dim_);
 
-    for (size_t i = 0; i < count; i++) {
+    for (uint64_t i = 0; i < count; i++) {
         auto qnorm = FP32ComputeIP(reinterpret_cast<const float*>(datas) + i * dim_,
                                    reinterpret_cast<const float*>(datas) + i * dim_,
                                    dim_) /
                      2;
         MaxHeap heap(this->allocator_);
-        for (size_t j = 0; j < bucket_count_s_; ++j) {
+        for (uint64_t j = 0; j < bucket_count_s_; ++j) {
             auto dist_term_s = norms_s_[j] - dist_to_s_data[i * bucket_count_s_ + j];
             if (heap.size() < candidate_count_s || dist_term_s < heap.top().first) {
                 heap.emplace(dist_term_s, j);
@@ -277,8 +277,8 @@ GNOIMIPartition::ClassifyDatasForSearch(const void* datas,
         auto scan_bucket_count_s = static_cast<BucketIdType>(
             std::floor(static_cast<float>(bucket_count_s_) * param.first_order_scan_ratio));
         scan_bucket_count_s = std::max(scan_bucket_count_s, 1);
-        for (size_t j = 0; j < scan_bucket_count_s; ++j) {
-            for (size_t k = 0; k < bucket_count_t_; ++k) {
+        for (uint64_t j = 0; j < scan_bucket_count_s; ++j) {
+            for (uint64_t k = 0; k < bucket_count_t_; ++k) {
                 auto cur_bucket_id_s = candidate_s_id_data[j];
                 auto cur_bucket_id_t = k;
                 float dist_term_st = candidate_s_dist_data[j] +
@@ -339,8 +339,9 @@ GNOIMIPartition::inner_classify_datas(BruteForce& route_index, const float* data
             ->Float32Vectors(datas + i * this->dim_)
             ->NumElements(1)
             ->Owner(false);
-        auto search_param = fmt::format(
-            SEARCH_PARAM_TEMPLATE_STR, std::max(10L, static_cast<int64_t>(buckets_per_data * 1.2)));
+        auto search_param =
+            fmt::format(SEARCH_PARAM_TEMPLATE_STR,
+                        std::max<int64_t>(10, static_cast<int64_t>(buckets_per_data * 1.2)));
         FilterPtr filter = nullptr;
         auto search_result = route_index.KnnSearch(query, buckets_per_data, search_param, filter);
         const auto* result_ids = search_result->GetIds();
@@ -369,7 +370,7 @@ GNOIMIPartition::inner_joint_classify_datas(const float* datas,
     // precomputed_terms_st: |t|^2 + 2st
     float total_err = 0.0;
     uint32_t dist_cmp = 0;
-    for (size_t i = 0; i < count; ++i) {
+    for (uint64_t i = 0; i < count; ++i) {
         auto data_norm = FP32ComputeIP(datas + i * dim_, datas + i * dim_, dim_);
         for (BucketIdType j = 0; j < bucket_count_s_; ++j) {
             precomputed_terms_s[j].first =
@@ -379,7 +380,7 @@ GNOIMIPartition::inner_joint_classify_datas(const float* datas,
         std::sort(precomputed_terms_s.begin(), precomputed_terms_s.end());
 
         MaxHeap heap(this->allocator_);
-        for (size_t j = 0; j < bucket_count_s_; ++j) {
+        for (uint64_t j = 0; j < bucket_count_s_; ++j) {
             float cur_precomputed_term_s = precomputed_terms_s[j].first;
             BucketIdType cur_bucket_id_s = precomputed_terms_s[j].second;
 

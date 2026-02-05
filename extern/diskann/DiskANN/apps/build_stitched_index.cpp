@@ -38,11 +38,11 @@ inline void print_progress(double percentage)
 /*
  * Inline function to generate a random integer in a range.
  */
-inline size_t random(size_t range_from, size_t range_to)
+inline uint64_t random(uint64_t range_from, uint64_t range_to)
 {
     std::random_device rand_dev;
     std::mt19937 generator(rand_dev());
-    std::uniform_int_distribution<size_t> distr(range_from, range_to);
+    std::uniform_int_distribution<uint64_t> distr(range_from, range_to);
     return distr(generator);
 }
 
@@ -165,7 +165,7 @@ void save_full_index(path final_index_path_prefix, path input_data_path, uint64_
     // main index
     uint64_t index_num_frozen_points = 0, index_num_edges = 0;
     uint32_t index_max_observed_degree = 0, index_entry_point = 0;
-    const size_t METADATA = 2 * sizeof(uint64_t) + 2 * sizeof(uint32_t);
+    const uint64_t METADATA = 2 * sizeof(uint64_t) + 2 * sizeof(uint32_t);
     for (auto &point_neighbors : stitched_graph)
     {
         index_max_observed_degree = std::max(index_max_observed_degree, (uint32_t)point_neighbors.size());
@@ -180,7 +180,7 @@ void save_full_index(path final_index_path_prefix, path input_data_path, uint64_
     stitched_graph_writer.write((char *)&index_entry_point, sizeof(uint32_t));
     stitched_graph_writer.write((char *)&index_num_frozen_points, sizeof(uint64_t));
 
-    size_t bytes_written = METADATA;
+    uint64_t bytes_written = METADATA;
     for (uint32_t node_point = 0; node_point < stitched_graph.size(); node_point++)
     {
         uint32_t current_node_num_neighbors = (uint32_t)stitched_graph[node_point].size();
@@ -223,7 +223,7 @@ stitch_indices_return_values stitch_label_indices(
     tsl::robin_map<std::string, uint32_t> &label_entry_points,
     tsl::robin_map<std::string, std::vector<uint32_t>> label_id_to_orig_id_map)
 {
-    size_t final_index_size = 0;
+    uint64_t final_index_size = 0;
     std::vector<std::vector<uint32_t>> stitched_graph(total_number_of_points);
 
     auto stitching_index_timer = std::chrono::high_resolution_clock::now();
@@ -256,7 +256,7 @@ stitch_indices_return_values stitch_label_indices(
         }
     }
 
-    const size_t METADATA = 2 * sizeof(uint64_t) + 2 * sizeof(uint32_t);
+    const uint64_t METADATA = 2 * sizeof(uint64_t) + 2 * sizeof(uint32_t);
     final_index_size += (total_number_of_points * sizeof(uint32_t) + METADATA);
 
     std::chrono::duration<double> stitching_index_time =
@@ -279,7 +279,7 @@ void prune_and_save(path final_index_path_prefix, path full_index_path_prefix, p
                     tsl::robin_map<std::string, uint32_t> label_entry_points, std::string universal_label,
                     path label_data_path, uint32_t num_threads)
 {
-    size_t dimension, number_of_label_points;
+    uint64_t dimension, number_of_label_points;
     auto diskann_cout_buffer = diskann::cout.rdbuf(nullptr);
     auto std_cout_buffer = std::cout.rdbuf(nullptr);
     auto pruning_index_timer = std::chrono::high_resolution_clock::now();

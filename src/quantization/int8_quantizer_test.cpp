@@ -100,7 +100,7 @@ TEST_CASE("INT8 Quantizer Encode and Decode", "[ut][INT8Quantizer]") {
 template <MetricType metric>
 void
 TestComputeCodesINT8(Quantizer<INT8Quantizer<metric>>& quantizer,
-                     size_t dim,
+                     uint64_t dim,
                      uint32_t count,
                      float error = 1e-4f,
                      bool retrain = true) {
@@ -143,7 +143,7 @@ TestComputeCodesINT8(Quantizer<INT8Quantizer<metric>>& quantizer,
 template <MetricType metric>
 void
 TestComputerINT8(Quantizer<INT8Quantizer<metric>>& quant,
-                 size_t dim,
+                 uint64_t dim,
                  uint32_t count,
                  float error = 1e-5f,
                  float related_error = 1.0f,
@@ -245,7 +245,7 @@ template <MetricType metric>
 void
 TestSerializeAndDeserializeINT8(Quantizer<INT8Quantizer<metric>>& quant1,
                                 Quantizer<INT8Quantizer<metric>>& quant2,
-                                size_t dim,
+                                uint64_t dim,
                                 uint32_t count,
                                 float error = 1e-5f,
                                 float related_error = 1.0f,

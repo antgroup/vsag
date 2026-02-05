@@ -26,7 +26,7 @@ public:
     using pointer = T*;
     using void_pointer = void*;
     using const_void_pointer = const void*;
-    using size_type = size_t;
+    using uint64_type = uint64_t;
     using difference_type = std::ptrdiff_t;
 
     AllocatorWrapper(Allocator* allocator) {
@@ -48,12 +48,12 @@ public:
     }
 
     inline pointer
-    allocate(size_type n, const_void_pointer hint = 0) {
+    allocate(uint64_type n, const_void_pointer hint = 0) {
         return static_cast<pointer>(allocator_->Allocate(n * sizeof(value_type)));
     }
 
     inline void
-    deallocate(pointer p, size_type n) {
+    deallocate(pointer p, uint64_type n) {
         allocator_->Deallocate(static_cast<void_pointer>(p));
     }
 

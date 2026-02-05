@@ -1061,10 +1061,10 @@ IVF::GetVectorByInnerId(InnerIdType inner_id, float* data) const {
 
 float
 calculate_percentile(const std::vector<float>& sorted_data, float percentile) {
-    size_t n = sorted_data.size();
+    uint64_t n = sorted_data.size();
     float index = percentile * static_cast<float>(n - 1);
-    auto floor_index = static_cast<size_t>(std::floor(index));
-    size_t ceil_index = floor_index + 1;
+    auto floor_index = static_cast<uint64_t>(std::floor(index));
+    uint64_t ceil_index = floor_index + 1;
 
     if (ceil_index >= n) {
         return sorted_data[floor_index];

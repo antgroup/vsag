@@ -42,9 +42,13 @@ MMapIO::MMapIO(std::string filename, Allocator* allocator)
     auto mmap_size = this->size_;
     if (this->size_ == 0) {
         mmap_size = DEFAULT_INIT_MMAP_SIZE;
+#ifdef __APPLE__
+        auto ret = ftruncate(this->fd_, static_cast<off_t>(mmap_size));
+#else
         auto ret = ftruncate64(this->fd_, static_cast<int64_t>(mmap_size));
+#endif
         if (ret == -1) {
-            throw VsagException(ErrorType::INTERNAL_ERROR, "ftruncate64 failed");
+            throw VsagException(ErrorType::INTERNAL_ERROR, "ftruncate failed");
         }
     }
     void* addr = mmap(nullptr, mmap_size, PROT_READ | PROT_WRITE, MAP_SHARED, this->fd_, 0);
@@ -74,12 +78,28 @@ MMapIO::WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset) {
         old_size = DEFAULT_INIT_MMAP_SIZE;
     }
     if (new_size > old_size) {
-        auto ret = ftruncate64(this->fd_, static_cast<int64_t>(new_size));
+        auto ret =
+#ifdef __APPLE__
+            ftruncate(this->fd_, static_cast<off_t>(new_size));
+#else
+            ftruncate64(this->fd_, static_cast<int64_t>(new_size));
+#endif
         if (ret == -1) {
-            throw VsagException(ErrorType::INTERNAL_ERROR, "ftruncate64 failed");
+            throw VsagException(ErrorType::INTERNAL_ERROR, "ftruncate failed");
         }
+
+#ifdef __APPLE__
+        // macOS doesn't have mremap; unmap the old region first, then re-mmap.
+        munmap(this->start_, old_size);
+        void* addr = mmap(nullptr, new_size, PROT_READ | PROT_WRITE, MAP_SHARED, this->fd_, 0);
+        if (addr == MAP_FAILED) {
+            throw VsagException(ErrorType::INTERNAL_ERROR, "mmap remap failed");
+        }
+        this->start_ = static_cast<uint8_t*>(addr);
+#else
         this->start_ =
             static_cast<uint8_t*>(mremap(this->start_, old_size, new_size, MREMAP_MAYMOVE));
+#endif
     }
     this->size_ = std::max(this->size_, new_size);
     memcpy(this->start_ + offset, data, size);

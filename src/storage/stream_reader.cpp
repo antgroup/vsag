@@ -109,7 +109,7 @@ BufferStreamReader::Length() {
 void
 BufferStreamReader::Read(char* data, uint64_t size) {
     // Total bytes copied to dest
-    size_t total_copied = 0;
+    uint64_t total_copied = 0;
 
     if (buffer_ == nullptr) {
         buffer_ = (char*)allocator_->Allocate(buffer_size_);
@@ -121,11 +121,11 @@ BufferStreamReader::Read(char* data, uint64_t size) {
     // Loop to read until read_size is satisfied
     while (total_copied < size) {
         // Calculate the available data in buffer_
-        size_t available_in_src = valid_size_ - buffer_cursor_;
+        uint64_t available_in_src = valid_size_ - buffer_cursor_;
 
         // If there is available data in buffer_, copy it to dest
         if (available_in_src > 0) {
-            size_t bytes_to_copy = std::min(size - total_copied, available_in_src);
+            uint64_t bytes_to_copy = std::min<uint64_t>(size - total_copied, available_in_src);
             memcpy(data + total_copied, buffer_ + buffer_cursor_, bytes_to_copy);
             total_copied += bytes_to_copy;
             buffer_cursor_ += bytes_to_copy;
@@ -137,7 +137,7 @@ BufferStreamReader::Read(char* data, uint64_t size) {
 
         // If buffer_ is full, reset cursor and read new data from reader
         buffer_cursor_ = 0;  // Reset cursor to overwrite buffer_'s content
-        valid_size_ = std::min(max_size_ - cursor_, buffer_size_);
+        valid_size_ = std::min<uint64_t>(max_size_ - cursor_, buffer_size_);
         if (valid_size_ == 0) {
             throw vsag::VsagException(
                 vsag::ErrorType::READ_ERROR,
@@ -162,7 +162,7 @@ BufferStreamReader::GetCursor() const {
 }
 
 BufferStreamReader::BufferStreamReader(StreamReader* reader,
-                                       size_t max_size,
+                                       uint64_t max_size,
                                        vsag::Allocator* allocator)
     : reader_impl_(reader), max_size_(max_size), allocator_(allocator) {
     if (max_size == std::numeric_limits<uint64_t>::max()) {

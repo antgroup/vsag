@@ -28,7 +28,7 @@ class MemoryMapper
 
 #endif
     char *_buf;
-    size_t _fileSize;
+    uint64_t _fileSize;
     const char *_fileName;
 
   public:
@@ -36,7 +36,7 @@ class MemoryMapper
     MemoryMapper(const std::string &filename);
 
     char *getBuf();
-    size_t getFileSize();
+    uint64_t getFileSize();
 
     ~MemoryMapper();
 };

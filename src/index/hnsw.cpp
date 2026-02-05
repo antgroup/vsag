@@ -128,7 +128,7 @@ HNSW::build(const DatasetPtr& base) {
 
         const auto* ids = base->GetIds();
         void* vectors = nullptr;
-        size_t data_size = 0;
+        uint64_t data_size = 0;
         get_vectors(type_, dim_, base, &vectors, &data_size);
         std::vector<int64_t> failed_ids;
         {
@@ -178,7 +178,7 @@ HNSW::add(const DatasetPtr& base) {
         int64_t num_elements = base->GetNumElements();
         const auto* ids = base->GetIds();
         void* vectors = nullptr;
-        size_t data_size = 0;
+        uint64_t data_size = 0;
         get_vectors(type_, dim_, base, &vectors, &data_size);
         std::vector<int64_t> failed_ids;
         bool is_tombstone = false;
@@ -273,7 +273,7 @@ HNSW::knn_search(const DatasetPtr& query,
         // check query vector
         CHECK_ARGUMENT(query->GetNumElements() == 1, "query dataset should contain 1 vector only");
         void* vector = nullptr;
-        size_t data_size = 0;
+        uint64_t data_size = 0;
         get_vectors(type_, dim_, query, &vector, &data_size);
         int64_t query_dim = query->GetDim();
         CHECK_ARGUMENT(
@@ -282,7 +282,7 @@ HNSW::knn_search(const DatasetPtr& query,
 
         // check search parameters
         auto params = HnswSearchParameters::FromJson(parameters);
-        auto ef_search_threshold = std::max(AMPLIFICATION_FACTOR * k, 1000L);
+        auto ef_search_threshold = std::max<int64_t>(AMPLIFICATION_FACTOR * k, 1000);
         CHECK_ARGUMENT(  // NOLINT
             (1 <= params.ef_search) and (params.ef_search <= ef_search_threshold),
             fmt::format(
@@ -425,7 +425,7 @@ HNSW::range_search(const DatasetPtr& query,
         // check query vector
         CHECK_ARGUMENT(query->GetNumElements() == 1, "query dataset should contain 1 vector only");
         void* vector = nullptr;
-        size_t data_size = 0;
+        uint64_t data_size = 0;
         get_vectors(type_, dim_, query, &vector, &data_size);
         int64_t query_dim = query->GetDim();
         CHECK_ARGUMENT(
@@ -523,7 +523,7 @@ HNSW::serialize() const {
     }
 
     SlowTaskTimer t("hnsw serialize");
-    size_t num_bytes = alg_hnsw_->calcSerializeSize();
+    uint64_t num_bytes = alg_hnsw_->calcSerializeSize();
     try {
         std::shared_ptr<int8_t[]> bin(new int8_t[num_bytes]);
         std::shared_lock lock(rw_mutex_);
@@ -792,7 +792,7 @@ HNSW::update_vector(int64_t id, const DatasetPtr& new_base, bool force_update) {
 
     // the validation of the new vector
     void* new_base_vec = nullptr;
-    size_t data_size = 0;
+    uint64_t data_size = 0;
     get_vectors(type_, dim_, new_base, &new_base_vec, &data_size);
     auto index = std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_);
 
@@ -962,7 +962,7 @@ HNSW::brute_force(const DatasetPtr& query, int64_t k) {
         result->Distances(dists);
 
         void* vector = nullptr;
-        size_t data_size = 0;
+        uint64_t data_size = 0;
         get_vectors(type_, dim_, query, &vector, &data_size);
 
         std::shared_lock lock(rw_mutex_);
@@ -1167,7 +1167,7 @@ HNSW::ExtractDataAndGraph(FlattenInterfacePtr& data,
         char* vector_data = hnsw->getDataByInternalId(i);
         data->InsertVector(reinterpret_cast<float*>(vector_data));
         int* link_data = (int*)hnsw->getLinklistAtLevel(i, 0);
-        size_t size = hnsw->getListCount((unsigned int*)link_data);
+        uint64_t size = hnsw->getListCount((unsigned int*)link_data);
         Vector<InnerIdType> edge(allocator);
         for (int j = 0; j < size; ++j) {
             if (not bitset->Test(*(link_data + 1 + j))) {

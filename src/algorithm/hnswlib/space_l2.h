@@ -21,17 +21,17 @@ namespace hnswlib {
 
 class L2Space : public SpaceInterface {
     DISTFUNC fstdistfunc_;
-    size_t data_size_;
-    size_t dim_;
+    uint64_t data_size_;
+    uint64_t dim_;
 
 public:
-    explicit L2Space(size_t dim) {
+    explicit L2Space(uint64_t dim) {
         fstdistfunc_ = vsag::L2Sqr;
         dim_ = dim;
         data_size_ = dim * sizeof(float);
     }
 
-    size_t
+    uint64_t
     get_data_size() override {
         return data_size_;
     }

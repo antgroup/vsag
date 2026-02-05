@@ -21,7 +21,7 @@ float distance_compare_avx512f_f16(const unsigned char *vec1, const unsigned cha
 		sum_squared_diff = _mm512_fmadd_ps(diff, diff, sum_squared_diff);
 	}
 
-	size_t i = (size / 16) * 16;
+	uint64_t i = (size / 16) * 16;
 
 	if (i != size)
 	{

@@ -51,7 +51,7 @@ HnswParameters::FromJson(const JsonType& hnsw_param_obj,
     CHECK_ARGUMENT(hnsw_param_obj[HNSW_PARAMETER_M].IsNumberInteger(),
                    fmt::format("parameters[{}] must be integer type", HNSW_PARAMETER_M));
     obj.max_degree = hnsw_param_obj[HNSW_PARAMETER_M].GetInt();
-    auto max_degree_threshold = std::max(index_common_param.dim_, 128L);
+    auto max_degree_threshold = std::max<int64_t>(index_common_param.dim_, 128);
     CHECK_ARGUMENT(  // NOLINT
         (4 <= obj.max_degree) and (obj.max_degree <= max_degree_threshold),
         fmt::format("max_degree({}) must in range[4, {}]", obj.max_degree, max_degree_threshold));
@@ -63,7 +63,7 @@ HnswParameters::FromJson(const JsonType& hnsw_param_obj,
     CHECK_ARGUMENT(hnsw_param_obj[HNSW_PARAMETER_CONSTRUCTION].IsNumberInteger(),
                    fmt::format("parameters[{}] must be integer type", HNSW_PARAMETER_CONSTRUCTION));
     obj.ef_construction = hnsw_param_obj[HNSW_PARAMETER_CONSTRUCTION].GetInt();
-    auto construction_threshold = std::max(1000L, AMPLIFICATION_FACTOR * obj.max_degree);
+    auto construction_threshold = std::max<int64_t>(1000, AMPLIFICATION_FACTOR * obj.max_degree);
     CHECK_ARGUMENT((obj.max_degree <= obj.ef_construction) and  // NOLINT
                        (obj.ef_construction <= construction_threshold),
                    fmt::format("ef_construction({}) must in range[$max_degree({}), {}]",

@@ -26,13 +26,13 @@
 namespace vsag {
 
 extern void*
-allocate(size_t size);
+allocate(uint64_t size);
 
 extern void
 deallocate(void* p);
 
 extern void*
-reallocate(void* p, size_t size);
+reallocate(void* p, uint64_t size);
 
 }  // namespace vsag
 

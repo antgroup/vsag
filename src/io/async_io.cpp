@@ -66,7 +66,11 @@ AsyncIO::~AsyncIO() {
 
 void
 AsyncIO::WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset) {
+#ifdef __APPLE__
+    auto ret = pwrite(this->wfd_, data, size, static_cast<off_t>(offset));
+#else
     auto ret = pwrite64(this->wfd_, data, size, static_cast<int64_t>(offset));
+#endif
     if (ret != size) {
         throw VsagException(ErrorType::INTERNAL_ERROR,
                             fmt::format("write bytes {} less than {}", ret, size));
@@ -96,7 +100,11 @@ AsyncIO::DirectReadImpl(uint64_t size, uint64_t offset, bool& need_release) cons
         return nullptr;
     }
     DirectIOObject obj(size, offset);
+#ifdef __APPLE__
+    auto ret = pread(this->rfd_, obj.align_data, obj.size, static_cast<off_t>(obj.offset));
+#else
     auto ret = pread64(this->rfd_, obj.align_data, obj.size, static_cast<int64_t>(obj.offset));
+#endif
     if (ret < 0) {
         throw VsagException(ErrorType::INTERNAL_ERROR, fmt::format("pread64 error {}", ret));
     }

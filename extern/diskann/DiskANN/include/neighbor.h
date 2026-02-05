@@ -43,7 +43,7 @@ class NeighborPriorityQueue
     {
     }
 
-    explicit NeighborPriorityQueue(size_t capacity) : _size(0), _capacity(capacity), _cur(0), _data(capacity + 1)
+    explicit NeighborPriorityQueue(uint64_t capacity) : _size(0), _capacity(capacity), _cur(0), _data(capacity + 1)
     {
     }
 
@@ -59,10 +59,10 @@ class NeighborPriorityQueue
             return;
         }
 
-        size_t lo = 0, hi = _size;
+        uint64_t lo = 0, hi = _size;
         while (lo < hi)
         {
-            size_t mid = (lo + hi) >> 1;
+            uint64_t mid = (lo + hi) >> 1;
             if (nbr < _data[mid])
             {
                 hi = mid;
@@ -96,7 +96,7 @@ class NeighborPriorityQueue
     Neighbor closest_unexpanded()
     {
         _data[_cur].expanded = true;
-        size_t pre = _cur;
+        uint64_t pre = _cur;
         while (_cur < _size && _data[_cur].expanded)
         {
             _cur++;
@@ -109,17 +109,17 @@ class NeighborPriorityQueue
         return _cur < _size;
     }
 
-    size_t size() const
+    uint64_t size() const
     {
         return _size;
     }
 
-    size_t capacity() const
+    uint64_t capacity() const
     {
         return _capacity;
     }
 
-    void reserve(size_t capacity)
+    void reserve(uint64_t capacity)
     {
         if (capacity + 1 > _data.size())
         {
@@ -128,12 +128,12 @@ class NeighborPriorityQueue
         _capacity = capacity;
     }
 
-    Neighbor &operator[](size_t i)
+    Neighbor &operator[](uint64_t i)
     {
         return _data[i];
     }
 
-    Neighbor operator[](size_t i) const
+    Neighbor operator[](uint64_t i) const
     {
         return _data[i];
     }
@@ -145,7 +145,7 @@ class NeighborPriorityQueue
     }
 
   private:
-    size_t _size, _capacity, _cur;
+    uint64_t _size, _capacity, _cur;
     std::vector<Neighbor> _data;
 };
 

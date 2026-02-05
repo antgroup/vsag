@@ -6,7 +6,7 @@ namespace diskann
 {
 
 template <typename data_type, typename tag_type>
-void AbstractIndex::build(const data_type *data, const size_t num_points_to_load,
+void AbstractIndex::build(const data_type *data, const uint64_t num_points_to_load,
                           const IndexWriteParameters &parameters, const std::vector<tag_type> &tags)
 {
     auto any_data = std::any(data);
@@ -15,7 +15,7 @@ void AbstractIndex::build(const data_type *data, const size_t num_points_to_load
 }
 
 template <typename data_type, typename IDType>
-std::pair<uint32_t, uint32_t> AbstractIndex::search(const data_type *query, const size_t K, const uint32_t L,
+std::pair<uint32_t, uint32_t> AbstractIndex::search(const data_type *query, const uint64_t K, const uint32_t L,
                                                     IDType *indices, float *distances)
 {
     auto any_indices = std::any(indices);
@@ -24,7 +24,7 @@ std::pair<uint32_t, uint32_t> AbstractIndex::search(const data_type *query, cons
 }
 
 template <typename data_type, typename tag_type>
-size_t AbstractIndex::search_with_tags(const data_type *query, const uint64_t K, const uint32_t L, tag_type *tags,
+uint64_t AbstractIndex::search_with_tags(const data_type *query, const uint64_t K, const uint32_t L, tag_type *tags,
                                        float *distances, std::vector<data_type *> &res_vectors)
 {
     auto any_query = std::any(query);
@@ -35,7 +35,7 @@ size_t AbstractIndex::search_with_tags(const data_type *query, const uint64_t K,
 
 template <typename IndexType>
 std::pair<uint32_t, uint32_t> AbstractIndex::search_with_filters(const DataType &query, const std::string &raw_label,
-                                                                 const size_t K, const uint32_t L, IndexType *indices,
+                                                                 const uint64_t K, const uint32_t L, IndexType *indices,
                                                                  float *distances)
 {
     auto any_indices = std::any(indices);
@@ -43,7 +43,7 @@ std::pair<uint32_t, uint32_t> AbstractIndex::search_with_filters(const DataType 
 }
 
 template <typename data_type>
-void AbstractIndex::search_with_optimized_layout(const data_type *query, size_t K, size_t L, uint32_t *indices)
+void AbstractIndex::search_with_optimized_layout(const data_type *query, uint64_t K, uint64_t L, uint32_t *indices)
 {
     auto any_query = std::any(query);
     this->_search_with_optimized_layout(any_query, K, L, indices);
@@ -91,137 +91,137 @@ template <typename tag_type, typename data_type> int AbstractIndex::get_vector_b
 }
 
 // exports
-template DISKANN_DLLEXPORT void AbstractIndex::build<float, int32_t>(const float *data, const size_t num_points_to_load,
+template DISKANN_DLLEXPORT void AbstractIndex::build<float, int32_t>(const float *data, const uint64_t num_points_to_load,
                                                                      const IndexWriteParameters &parameters,
                                                                      const std::vector<int32_t> &tags);
 template DISKANN_DLLEXPORT void AbstractIndex::build<int8_t, int32_t>(const int8_t *data,
-                                                                      const size_t num_points_to_load,
+                                                                      const uint64_t num_points_to_load,
                                                                       const IndexWriteParameters &parameters,
                                                                       const std::vector<int32_t> &tags);
 template DISKANN_DLLEXPORT void AbstractIndex::build<uint8_t, int32_t>(const uint8_t *data,
-                                                                       const size_t num_points_to_load,
+                                                                       const uint64_t num_points_to_load,
                                                                        const IndexWriteParameters &parameters,
                                                                        const std::vector<int32_t> &tags);
 template DISKANN_DLLEXPORT void AbstractIndex::build<float, uint32_t>(const float *data,
-                                                                      const size_t num_points_to_load,
+                                                                      const uint64_t num_points_to_load,
                                                                       const IndexWriteParameters &parameters,
                                                                       const std::vector<uint32_t> &tags);
 template DISKANN_DLLEXPORT void AbstractIndex::build<int8_t, uint32_t>(const int8_t *data,
-                                                                       const size_t num_points_to_load,
+                                                                       const uint64_t num_points_to_load,
                                                                        const IndexWriteParameters &parameters,
                                                                        const std::vector<uint32_t> &tags);
 template DISKANN_DLLEXPORT void AbstractIndex::build<uint8_t, uint32_t>(const uint8_t *data,
-                                                                        const size_t num_points_to_load,
+                                                                        const uint64_t num_points_to_load,
                                                                         const IndexWriteParameters &parameters,
                                                                         const std::vector<uint32_t> &tags);
-template DISKANN_DLLEXPORT void AbstractIndex::build<float, int64_t>(const float *data, const size_t num_points_to_load,
+template DISKANN_DLLEXPORT void AbstractIndex::build<float, int64_t>(const float *data, const uint64_t num_points_to_load,
                                                                      const IndexWriteParameters &parameters,
                                                                      const std::vector<int64_t> &tags);
 template DISKANN_DLLEXPORT void AbstractIndex::build<int8_t, int64_t>(const int8_t *data,
-                                                                      const size_t num_points_to_load,
+                                                                      const uint64_t num_points_to_load,
                                                                       const IndexWriteParameters &parameters,
                                                                       const std::vector<int64_t> &tags);
 template DISKANN_DLLEXPORT void AbstractIndex::build<uint8_t, int64_t>(const uint8_t *data,
-                                                                       const size_t num_points_to_load,
+                                                                       const uint64_t num_points_to_load,
                                                                        const IndexWriteParameters &parameters,
                                                                        const std::vector<int64_t> &tags);
 template DISKANN_DLLEXPORT void AbstractIndex::build<float, uint64_t>(const float *data,
-                                                                      const size_t num_points_to_load,
+                                                                      const uint64_t num_points_to_load,
                                                                       const IndexWriteParameters &parameters,
                                                                       const std::vector<uint64_t> &tags);
 template DISKANN_DLLEXPORT void AbstractIndex::build<int8_t, uint64_t>(const int8_t *data,
-                                                                       const size_t num_points_to_load,
+                                                                       const uint64_t num_points_to_load,
                                                                        const IndexWriteParameters &parameters,
                                                                        const std::vector<uint64_t> &tags);
 template DISKANN_DLLEXPORT void AbstractIndex::build<uint8_t, uint64_t>(const uint8_t *data,
-                                                                        const size_t num_points_to_load,
+                                                                        const uint64_t num_points_to_load,
                                                                         const IndexWriteParameters &parameters,
                                                                         const std::vector<uint64_t> &tags);
 
 template DISKANN_DLLEXPORT std::pair<uint32_t, uint32_t> AbstractIndex::search<float, uint32_t>(
-    const float *query, const size_t K, const uint32_t L, uint32_t *indices, float *distances);
+    const float *query, const uint64_t K, const uint32_t L, uint32_t *indices, float *distances);
 template DISKANN_DLLEXPORT std::pair<uint32_t, uint32_t> AbstractIndex::search<uint8_t, uint32_t>(
-    const uint8_t *query, const size_t K, const uint32_t L, uint32_t *indices, float *distances);
+    const uint8_t *query, const uint64_t K, const uint32_t L, uint32_t *indices, float *distances);
 template DISKANN_DLLEXPORT std::pair<uint32_t, uint32_t> AbstractIndex::search<int8_t, uint32_t>(
-    const int8_t *query, const size_t K, const uint32_t L, uint32_t *indices, float *distances);
+    const int8_t *query, const uint64_t K, const uint32_t L, uint32_t *indices, float *distances);
 
 template DISKANN_DLLEXPORT std::pair<uint32_t, uint32_t> AbstractIndex::search<float, uint64_t>(
-    const float *query, const size_t K, const uint32_t L, uint64_t *indices, float *distances);
+    const float *query, const uint64_t K, const uint32_t L, uint64_t *indices, float *distances);
 template DISKANN_DLLEXPORT std::pair<uint32_t, uint32_t> AbstractIndex::search<uint8_t, uint64_t>(
-    const uint8_t *query, const size_t K, const uint32_t L, uint64_t *indices, float *distances);
+    const uint8_t *query, const uint64_t K, const uint32_t L, uint64_t *indices, float *distances);
 template DISKANN_DLLEXPORT std::pair<uint32_t, uint32_t> AbstractIndex::search<int8_t, uint64_t>(
-    const int8_t *query, const size_t K, const uint32_t L, uint64_t *indices, float *distances);
+    const int8_t *query, const uint64_t K, const uint32_t L, uint64_t *indices, float *distances);
 
 template DISKANN_DLLEXPORT std::pair<uint32_t, uint32_t> AbstractIndex::search_with_filters<uint32_t>(
-    const DataType &query, const std::string &raw_label, const size_t K, const uint32_t L, uint32_t *indices,
+    const DataType &query, const std::string &raw_label, const uint64_t K, const uint32_t L, uint32_t *indices,
     float *distances);
 
 template DISKANN_DLLEXPORT std::pair<uint32_t, uint32_t> AbstractIndex::search_with_filters<uint64_t>(
-    const DataType &query, const std::string &raw_label, const size_t K, const uint32_t L, uint64_t *indices,
+    const DataType &query, const std::string &raw_label, const uint64_t K, const uint32_t L, uint64_t *indices,
     float *distances);
 
-template DISKANN_DLLEXPORT size_t AbstractIndex::search_with_tags<float, int32_t>(const float *query, const uint64_t K,
+template DISKANN_DLLEXPORT uint64_t AbstractIndex::search_with_tags<float, int32_t>(const float *query, const uint64_t K,
                                                                                   const uint32_t L, int32_t *tags,
                                                                                   float *distances,
                                                                                   std::vector<float *> &res_vectors);
 
-template DISKANN_DLLEXPORT size_t
+template DISKANN_DLLEXPORT uint64_t
 AbstractIndex::search_with_tags<uint8_t, int32_t>(const uint8_t *query, const uint64_t K, const uint32_t L,
                                                   int32_t *tags, float *distances, std::vector<uint8_t *> &res_vectors);
 
-template DISKANN_DLLEXPORT size_t AbstractIndex::search_with_tags<int8_t, int32_t>(const int8_t *query,
+template DISKANN_DLLEXPORT uint64_t AbstractIndex::search_with_tags<int8_t, int32_t>(const int8_t *query,
                                                                                    const uint64_t K, const uint32_t L,
                                                                                    int32_t *tags, float *distances,
                                                                                    std::vector<int8_t *> &res_vectors);
 
-template DISKANN_DLLEXPORT size_t AbstractIndex::search_with_tags<float, uint32_t>(const float *query, const uint64_t K,
+template DISKANN_DLLEXPORT uint64_t AbstractIndex::search_with_tags<float, uint32_t>(const float *query, const uint64_t K,
                                                                                    const uint32_t L, uint32_t *tags,
                                                                                    float *distances,
                                                                                    std::vector<float *> &res_vectors);
 
-template DISKANN_DLLEXPORT size_t AbstractIndex::search_with_tags<uint8_t, uint32_t>(
+template DISKANN_DLLEXPORT uint64_t AbstractIndex::search_with_tags<uint8_t, uint32_t>(
     const uint8_t *query, const uint64_t K, const uint32_t L, uint32_t *tags, float *distances,
     std::vector<uint8_t *> &res_vectors);
 
-template DISKANN_DLLEXPORT size_t AbstractIndex::search_with_tags<int8_t, uint32_t>(const int8_t *query,
+template DISKANN_DLLEXPORT uint64_t AbstractIndex::search_with_tags<int8_t, uint32_t>(const int8_t *query,
                                                                                     const uint64_t K, const uint32_t L,
                                                                                     uint32_t *tags, float *distances,
                                                                                     std::vector<int8_t *> &res_vectors);
 
-template DISKANN_DLLEXPORT size_t AbstractIndex::search_with_tags<float, int64_t>(const float *query, const uint64_t K,
+template DISKANN_DLLEXPORT uint64_t AbstractIndex::search_with_tags<float, int64_t>(const float *query, const uint64_t K,
                                                                                   const uint32_t L, int64_t *tags,
                                                                                   float *distances,
                                                                                   std::vector<float *> &res_vectors);
 
-template DISKANN_DLLEXPORT size_t
+template DISKANN_DLLEXPORT uint64_t
 AbstractIndex::search_with_tags<uint8_t, int64_t>(const uint8_t *query, const uint64_t K, const uint32_t L,
                                                   int64_t *tags, float *distances, std::vector<uint8_t *> &res_vectors);
 
-template DISKANN_DLLEXPORT size_t AbstractIndex::search_with_tags<int8_t, int64_t>(const int8_t *query,
+template DISKANN_DLLEXPORT uint64_t AbstractIndex::search_with_tags<int8_t, int64_t>(const int8_t *query,
                                                                                    const uint64_t K, const uint32_t L,
                                                                                    int64_t *tags, float *distances,
                                                                                    std::vector<int8_t *> &res_vectors);
 
-template DISKANN_DLLEXPORT size_t AbstractIndex::search_with_tags<float, uint64_t>(const float *query, const uint64_t K,
+template DISKANN_DLLEXPORT uint64_t AbstractIndex::search_with_tags<float, uint64_t>(const float *query, const uint64_t K,
                                                                                    const uint32_t L, uint64_t *tags,
                                                                                    float *distances,
                                                                                    std::vector<float *> &res_vectors);
 
-template DISKANN_DLLEXPORT size_t AbstractIndex::search_with_tags<uint8_t, uint64_t>(
+template DISKANN_DLLEXPORT uint64_t AbstractIndex::search_with_tags<uint8_t, uint64_t>(
     const uint8_t *query, const uint64_t K, const uint32_t L, uint64_t *tags, float *distances,
     std::vector<uint8_t *> &res_vectors);
 
-template DISKANN_DLLEXPORT size_t AbstractIndex::search_with_tags<int8_t, uint64_t>(const int8_t *query,
+template DISKANN_DLLEXPORT uint64_t AbstractIndex::search_with_tags<int8_t, uint64_t>(const int8_t *query,
                                                                                     const uint64_t K, const uint32_t L,
                                                                                     uint64_t *tags, float *distances,
                                                                                     std::vector<int8_t *> &res_vectors);
 
-template DISKANN_DLLEXPORT void AbstractIndex::search_with_optimized_layout<float>(const float *query, size_t K,
-                                                                                   size_t L, uint32_t *indices);
-template DISKANN_DLLEXPORT void AbstractIndex::search_with_optimized_layout<uint8_t>(const uint8_t *query, size_t K,
-                                                                                     size_t L, uint32_t *indices);
-template DISKANN_DLLEXPORT void AbstractIndex::search_with_optimized_layout<int8_t>(const int8_t *query, size_t K,
-                                                                                    size_t L, uint32_t *indices);
+template DISKANN_DLLEXPORT void AbstractIndex::search_with_optimized_layout<float>(const float *query, uint64_t K,
+                                                                                   uint64_t L, uint32_t *indices);
+template DISKANN_DLLEXPORT void AbstractIndex::search_with_optimized_layout<uint8_t>(const uint8_t *query, uint64_t K,
+                                                                                     uint64_t L, uint32_t *indices);
+template DISKANN_DLLEXPORT void AbstractIndex::search_with_optimized_layout<int8_t>(const int8_t *query, uint64_t K,
+                                                                                    uint64_t L, uint32_t *indices);
 
 template DISKANN_DLLEXPORT int AbstractIndex::insert_point<float, int32_t>(const float *point, const int32_t tag);
 template DISKANN_DLLEXPORT int AbstractIndex::insert_point<uint8_t, int32_t>(const uint8_t *point, const int32_t tag);

@@ -74,11 +74,11 @@ public:
         pool_->WaitUntilEmpty();
     }
     void
-    SetQueueSizeLimit(std::size_t limit) override {
+    SetQueueSizeLimit(std::uint64_t limit) override {
         pool_->SetQueueSizeLimit(limit);
     }
     void
-    SetPoolSize(std::size_t limit) override {
+    SetPoolSize(std::uint64_t limit) override {
         pool_->SetPoolSize(limit);
     }
 

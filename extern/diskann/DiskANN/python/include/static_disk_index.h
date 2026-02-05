@@ -34,11 +34,11 @@ class StaticDiskIndex
 {
   public:
     StaticDiskIndex(diskann::Metric metric, const std::string &index_path_prefix, uint32_t num_threads,
-                    size_t num_nodes_to_cache, uint32_t cache_mechanism);
+                    uint64_t num_nodes_to_cache, uint32_t cache_mechanism);
 
-    void cache_bfs_levels(size_t num_nodes_to_cache);
+    void cache_bfs_levels(uint64_t num_nodes_to_cache);
 
-    void cache_sample_paths(size_t num_nodes_to_cache, const std::string &warmup_query_file, uint32_t num_threads);
+    void cache_sample_paths(uint64_t num_nodes_to_cache, const std::string &warmup_query_file, uint32_t num_threads);
 
     NeighborsAndDistances<StaticIdType> search(py::array_t<DT, py::array::c_style | py::array::forcecast> &query, uint64_t knn,
                 uint64_t complexity, uint64_t beam_width);

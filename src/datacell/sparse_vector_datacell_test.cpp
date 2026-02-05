@@ -52,7 +52,7 @@ TEST_CASE("SparseDataCell Basic Test", "[ut][SparseDataCell] ") {
     REQUIRE(data_cell->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_SPARSE);
     REQUIRE(data_cell->GetMetricType() == MetricType::METRIC_TYPE_IP);
 
-    size_t base_count = 1000;
+    uint64_t base_count = 1000;
     auto sparse_vectors = fixtures::GenerateSparseVectors(base_count, max_dim);
     std::vector<InnerIdType> idx(base_count);
     std::iota(idx.begin(), idx.end(), 0);
@@ -133,7 +133,7 @@ TEST_CASE("SparseDataCell Concurrent Test", "[ut][SparseDataCell][concurrent] ")
     REQUIRE(data_cell->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_SPARSE);
     REQUIRE(data_cell->GetMetricType() == MetricType::METRIC_TYPE_IP);
 
-    size_t base_count = 1000;
+    uint64_t base_count = 1000;
     auto sparse_vectors = fixtures::GenerateSparseVectors(base_count, max_dim);
     std::vector<InnerIdType> idx(base_count);
     std::iota(idx.begin(), idx.end(), 0);

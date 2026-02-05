@@ -819,7 +819,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
     }
 
     auto params = HGraphSearchParameters::FromJson(parameters);
-    auto ef_search_threshold = std::max(AMPLIFICATION_FACTOR * k, 1000L);
+    auto ef_search_threshold = std::max<int64_t>(AMPLIFICATION_FACTOR * k, 1000);
     CHECK_ARGUMENT(  // NOLINT
         (1 <= params.ef_search) and (params.ef_search <= ef_search_threshold),
         fmt::format("ef_search({}) must in range[1, {}]", params.ef_search, ef_search_threshold));
@@ -1443,7 +1443,7 @@ HGraph::GetMemoryUsageDetail() const {
     if (this->use_reorder_) {
         memory_usage["high_precise_codes"].SetInt(this->high_precise_codes_->CalcSerializeSize());
     }
-    size_t route_graph_size = 0;
+    uint64_t route_graph_size = 0;
     for (const auto& route_graph : this->route_graphs_) {
         route_graph_size += route_graph->CalcSerializeSize();
     }
@@ -1775,12 +1775,12 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
     hgraph_parameter->FromJson(inner_json);
     uint64_t max_degree = hgraph_parameter->bottom_graph_param->max_degree_;
 
-    auto max_degree_threshold = std::max(common_param.dim_, 128L);
+    auto max_degree_threshold = std::max<int64_t>(common_param.dim_, 128);
     CHECK_ARGUMENT(  // NOLINT
         (4 <= max_degree) and (max_degree <= max_degree_threshold),
         fmt::format("max_degree({}) must in range[4, {}]", max_degree, max_degree_threshold));
 
-    auto construction_threshold = std::max(1000UL, AMPLIFICATION_FACTOR * max_degree);
+    auto construction_threshold = std::max<uint64_t>(1000UL, AMPLIFICATION_FACTOR * max_degree);
     CHECK_ARGUMENT((max_degree <= hgraph_parameter->ef_construction) and  // NOLINT
                        (hgraph_parameter->ef_construction <= construction_threshold),
                    fmt::format("ef_construction({}) must in range[$max_degree({}), {}]",
@@ -1879,7 +1879,7 @@ HGraph::recover_remove(int64_t id) {
 DatasetPtr
 HGraph::get_single_dataset(const DatasetPtr& data, uint32_t j) {
     void* vectors = nullptr;
-    size_t data_size = 0;
+    uint64_t data_size = 0;
     get_vectors(data_type_, dim_, data, &vectors, &data_size);
     const auto* labels = data->GetIds();
     auto one_data = Dataset::Make();
@@ -2070,7 +2070,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
 
     auto params = HGraphSearchParameters::FromJson(request.params_str_);
 
-    auto ef_search_threshold = std::max(AMPLIFICATION_FACTOR * k, 1000L);
+    auto ef_search_threshold = std::max<int64_t>(AMPLIFICATION_FACTOR * k, 1000);
     CHECK_ARGUMENT(  // NOLINT
         (1 <= params.ef_search) and (params.ef_search <= ef_search_threshold),
         fmt::format("ef_search({}) must in range[1, {}]", params.ef_search, ef_search_threshold));
@@ -2227,7 +2227,7 @@ HGraph::init_resize_bit_and_reorder() {
     }
     if (this->extra_infos_ != nullptr) {
         block_size_per_vector =
-            std::max(block_size_per_vector, static_cast<uint32_t>(this->extra_info_size_));
+            std::max<int64_t>(block_size_per_vector, static_cast<uint32_t>(this->extra_info_size_));
     }
     auto increase_count = step_block_size / block_size_per_vector;
     this->resize_increase_count_bit_ = std::max(
@@ -2292,7 +2292,7 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
 
     // the validation of the new vector
     void* new_base_vec = nullptr;
-    size_t data_size = 0;
+    uint64_t data_size = 0;
     get_vectors(data_type_, dim_, new_base, &new_base_vec, &data_size);
 
     if (not force_update) {

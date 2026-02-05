@@ -11,7 +11,7 @@ namespace diskann
 class InMemGraphStore : public AbstractGraphStore
 {
   public:
-    InMemGraphStore(const size_t max_pts);
+    InMemGraphStore(const uint64_t max_pts);
 
     int load(const std::string &index_path_prefix) override;
     int store(const std::string &index_path_prefix) override;
