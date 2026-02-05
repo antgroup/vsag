@@ -216,6 +216,12 @@ protected:
     TestConcurrentAdd(const IndexPtr& index,
                       const TestDatasetPtr& dataset,
                       bool expected_success = true);
+
+    static void
+    TestConcurrentAddSearchRemove(const IndexPtr& index,
+                                  const TestDatasetPtr& dataset,
+                                  const std::string& search_param,
+                                  bool expected_success = true);
     static void
     TestDuplicateAdd(const IndexPtr& index, const TestDatasetPtr& dataset);
 
