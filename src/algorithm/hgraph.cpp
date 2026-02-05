@@ -306,6 +306,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
             query_dim == dim_,
             fmt::format("query.dim({}) must be equal to index.dim({})", query_dim, dim_));
     }
+    std::shared_lock shared_lock(this->global_mutex_);
     // check k
     CHECK_ARGUMENT(k > 0, fmt::format("k({}) must be greater than 0", k));
     k = std::min(k, GetNumElements());
@@ -397,6 +398,8 @@ HGraph::KnnSearch(const DatasetPtr& query,
             query_dim == dim_,
             fmt::format("query.dim({}) must be equal to index.dim({})", query_dim, dim_));
     }
+
+    std::shared_lock shared_lock(this->global_mutex_);
     // check k
     CHECK_ARGUMENT(k > 0, fmt::format("k({}) must be greater than 0", k));
     k = std::min(k, GetNumElements());
@@ -1113,6 +1116,8 @@ HGraph::InitFeatures() {
     // concurrency
     this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_SEARCH_CONCURRENT);
     this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ADD_CONCURRENT);
+    this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ADD_SEARCH_CONCURRENT);
+    this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ADD_SEARCH_DELETE_CONCURRENT);
     // serialize
     this->index_feature_list_->SetFeatures({
         IndexFeature::SUPPORT_DESERIALIZE_BINARY_SET,
@@ -1533,8 +1538,11 @@ HGraph::GetRawData(vsag::InnerIdType inner_id, uint8_t* data) const {
 
 bool
 HGraph::Remove(int64_t id) {
-    // TODO(inbao): support thread safe remove
-    auto inner_id = this->label_table_->GetIdByLabel(id);
+    InnerIdType inner_id;
+    {
+        std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
+        inner_id = this->label_table_->GetIdByLabel(id);
+    }
     if (inner_id == this->entry_point_id_) {
         bool find_new_ep = false;
         while (not route_graphs_.empty()) {
@@ -1555,13 +1563,19 @@ HGraph::Remove(int64_t id) {
             route_graphs_.pop_back();
         }
     }
-    for (int level = static_cast<int>(route_graphs_.size()) - 1; level >= 0; --level) {
-        this->route_graphs_[level]->DeleteNeighborsById(inner_id);
+    {
+        {
+            std::scoped_lock<std::shared_mutex> wlock(this->global_mutex_);
+            for (int level = static_cast<int>(route_graphs_.size()) - 1; level >= 0; --level) {
+                this->route_graphs_[level]->DeleteNeighborsById(inner_id);
+            }
+            this->bottom_graph_->DeleteNeighborsById(inner_id);
+        }
+        std::scoped_lock label_lock(this->label_lookup_mutex_);
+        this->label_table_->Remove(id);
+        this->deleted_ids_.insert(inner_id);
+        delete_count_++;
     }
-    this->bottom_graph_->DeleteNeighborsById(inner_id);
-    this->label_table_->Remove(id);
-    this->deleted_ids_.insert(inner_id);
-    delete_count_++;
     return true;
 }
 
