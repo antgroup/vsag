@@ -221,6 +221,9 @@ public:
         if (compress_duplicate_data_) {
             StreamReader::ReadObj(reader, duplicate_count_);
             duplicate_ids_.resize(label_table_.size());
+            for (int i = total_count_; i < label_table_.size(); ++i) {
+                duplicate_ids_[i] = i;
+            }
             for (InnerIdType i = 0; i < duplicate_count_; ++i) {
                 InnerIdType id;
                 StreamReader::ReadObj<InnerIdType>(reader, id);
