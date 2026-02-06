@@ -37,6 +37,14 @@ public:
             timeout_ms = json[SEARCH_MAX_TIME_COST_MS].GetInt();
             enable_time_record = true;
         }
+
+        if (json.Contains(SEARCH_PARAM_FACTOR)) {
+            topk_factor = json[SEARCH_PARAM_FACTOR].GetFloat();
+        }
+
+        if (json.Contains(SEARCH_PARAM_ENABLE_REORDER)) {
+            enable_reorder = json[SEARCH_PARAM_ENABLE_REORDER].GetBool();
+        }
     }
 
 public:
@@ -45,5 +53,9 @@ public:
     // for timeout
     double timeout_ms{std::numeric_limits<double>::max()};
     bool enable_time_record{false};
+
+    // for reorder
+    bool enable_reorder{true};
+    float topk_factor{0.0F};
 };
 }  // namespace vsag

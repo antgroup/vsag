@@ -2129,6 +2129,61 @@ TEST_CASE("(Daily) HGraph Search Over Time", "[ft][hgraph][daily]") {
 }
 
 static void
+TestHGraphSearchDisableReorder(const fixtures::HGraphTestIndexPtr& test_index,
+                               const fixtures::HGraphResourcePtr& resource) {
+    using namespace fixtures;
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    constexpr const char* search_param_tmp = R"({{
+            "hgraph": {{
+                "ef_search": 200,
+                "enable_reorder": {}
+            }}
+        }})";
+
+    for (auto metric_type : resource->metric_types) {
+        for (auto dim : resource->dims) {
+            auto base_quantization_str = "sq4_uniform,fp32";
+            float recall_with_reorder = 0.95;
+            float recall_without_reorder = 0.75;
+            INFO(
+                fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, "
+                            "recall_with_reorder: {}, recall_without_reorder: {}",
+                            metric_type,
+                            dim,
+                            base_quantization_str,
+                            recall_with_reorder,
+                            recall_without_reorder));
+            vsag::Options::Instance().set_block_size_limit(size);
+            HGraphTestIndex::HGraphBuildParam build_param(metric_type, dim, base_quantization_str);
+            auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+            auto index = TestIndex::TestFactory(test_index->name, param, true);
+            auto dataset =
+                HGraphTestIndex::pool.GetDatasetAndCreate(dim, resource->base_count, metric_type);
+            TestIndex::TestBuildIndex(index, dataset, true);
+            auto recall_result_with_reorder = TestIndex::TestKnnSearch(
+                index, dataset, fmt::format(search_param_tmp, true), recall_with_reorder, true);
+            auto recall_result_without_reorder = TestIndex::TestKnnSearch(
+                index, dataset, fmt::format(search_param_tmp, false), recall_without_reorder, true);
+            REQUIRE(recall_result_with_reorder > recall_result_without_reorder);
+            vsag::Options::Instance().set_block_size_limit(origin_size);
+        }
+    }
+}
+
+TEST_CASE("(PR) HGraph Search Disable Reorder", "[ft][hgraph][pr]") {
+    auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
+    auto resource = test_index->GetResource(true);
+    TestHGraphSearchDisableReorder(test_index, resource);
+}
+
+TEST_CASE("(Daily) HGraph Search Disable Reorder", "[ft][hgraph][daily]") {
+    auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
+    auto resource = test_index->GetResource(false);
+    TestHGraphSearchDisableReorder(test_index, resource);
+}
+
+static void
 TestHGraphDiskIOType(const fixtures::HGraphTestIndexPtr& test_index,
                      const fixtures::HGraphResourcePtr& resource) {
     using namespace fixtures;
