@@ -375,7 +375,8 @@ TestIndex::TestTrainAndAdd(const TestIndex::IndexPtr& index,
         ->SparseVectors(dataset->base_->GetSparseVectors())
         ->Owner(false);
     index->Train(dataset->base_);
-    index->Add(temp_dataset);
+    auto result_add = index->Add(temp_dataset);
+    REQUIRE(result_add.has_value());
     for (uint64_t j = temp_count; j < base_count; ++j) {
         auto data_one = vsag::Dataset::Make();
         data_one->Dim(dim)
@@ -1643,7 +1644,8 @@ TestIndex::TestMergeIndexWithSameModel(const TestIndex::IndexPtr& model,
         auto new_index_result = model->Clone();
         REQUIRE(new_index_result.has_value() == expect_success);
         auto new_index = new_index_result.value();
-        new_index->Add(sub_dataset);
+        auto result_new = new_index->Add(sub_dataset);
+        REQUIRE(result_new.has_value());
         vsag::IdMapFunction id_map = [](int64_t id) -> std::tuple<bool, int64_t> {
             return std::make_tuple(true, id);
         };
