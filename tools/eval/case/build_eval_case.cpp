@@ -19,6 +19,7 @@
 #include <filesystem>
 #include <utility>
 
+#include "../eval_progress.h"
 #include "../monitor/duration_monitor.h"
 #include "../monitor/memory_peak_monitor.h"
 #include "vsag_exception.h"
@@ -71,7 +72,11 @@ BuildEvalCase::do_build() {
     for (auto& monitor : monitors_) {
         monitor->Start();
     }
+    ProgressBar progress_bar("Building " + config_.index_name, 0);
+    progress_bar.Start();
     auto build_index = index_->Build(base);
+    progress_bar.Finish();
+
     if (not build_index.has_value()) {
         throw std::runtime_error(build_index.error().message);
     }
