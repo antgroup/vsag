@@ -15,6 +15,9 @@
 
 #pragma once
 
+#include <cstdint>
+#include <limits>
+
 #include "vsag_exception.h"
 
 #define SAFE_CALL(stmt)                                                                      \
@@ -43,3 +46,4 @@
 constexpr static const int64_t INIT_CAPACITY = 10;
 constexpr static const int64_t MAX_CAPACITY_EXTEND = 10000;
 constexpr static const int64_t AMPLIFICATION_FACTOR = 10;
+constexpr static const uint32_t INVALID_ENTRY_POINT = std::numeric_limits<uint32_t>::max();
