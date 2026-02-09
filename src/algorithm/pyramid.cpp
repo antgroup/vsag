@@ -97,22 +97,22 @@ IndexNode::Build(ODescent& odescent) {
 void
 IndexNode::AddChild(const std::string& key) {
     // AddChild is not thread-safe; ensure thread safety in calls to it.
-    children_[key] = std::make_shared<IndexNode>(allocator_, graph_param_, index_min_size_);
+    children_[key] = std::make_unique<IndexNode>(allocator_, graph_param_, index_min_size_);
     children_[key]->level_ = level_ + 1;
 }
 
-std::shared_ptr<IndexNode>
+IndexNode*
 IndexNode::GetChild(const std::string& key, bool need_init) {
     std::unique_lock lock(mutex_);
     auto result = children_.find(key);
     if (result != children_.end()) {
-        return result->second;
+        return result->second.get();
     }
     if (not need_init) {
         return nullptr;
     }
     AddChild(key);
-    return children_[key];
+    return children_[key].get();
 }
 
 void
@@ -338,7 +338,7 @@ Pyramid::search_impl(const DatasetPtr& query,
         for (uint32_t i = 0; i < parsed_path.size(); ++i) {
             const auto& one_path = parsed_path[i];
             search_result_lists[i] = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
-            std::shared_ptr<IndexNode> node = root_;
+            IndexNode* node = root_.get();
             bool valid = true;
             for (const auto& item : one_path) {
                 node = node->GetChild(item, false);
@@ -500,12 +500,12 @@ Pyramid::Add(const DatasetPtr& base, AddMode mode) {
     auto add_func = [&](int64_t i, int64_t data_bias) {
         std::string current_path = path[data_bias];
         auto path_slices = split(current_path, PART_SLASH);
-        std::shared_ptr<IndexNode> node = root_;
+        IndexNode* node = root_.get();
         auto inner_id = static_cast<InnerIdType>(i + local_cur_element_count);
         const auto* vector = data_vectors + dim_ * data_bias;
         int no_build_level_index = 0;
         for (int j = 0; j <= path_slices.size(); ++j) {
-            std::shared_ptr<IndexNode> new_node = nullptr;
+            IndexNode* new_node = nullptr;
             if (j != path_slices.size()) {
                 new_node = node->GetChild(path_slices[j], true);
             }
@@ -711,7 +711,7 @@ Pyramid::Build(const DatasetPtr& base) {
     for (int i = 0; i < data_num; ++i) {
         std::string current_path = path[i];
         auto path_slices = split(current_path, PART_SLASH);
-        std::shared_ptr<IndexNode> node = root_;
+        IndexNode* node = root_.get();
         if (std::find(no_build_levels_.begin(), no_build_levels_.end(), node->level_) ==
             no_build_levels_.end()) {
             node->ids_.push_back(i);
@@ -734,9 +734,7 @@ Pyramid::Build(const DatasetPtr& base) {
 }
 
 void
-Pyramid::add_one_point(const std::shared_ptr<IndexNode>& node,
-                       InnerIdType inner_id,
-                       const float* vector) {
+Pyramid::add_one_point(IndexNode* node, InnerIdType inner_id, const float* vector) {
     std::unique_lock graph_lock(node->mutex_);
     // add one point
     if (node->status_ == IndexNode::Status::NO_INDEX) {

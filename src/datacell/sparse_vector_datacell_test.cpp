@@ -75,9 +75,9 @@ TEST_CASE("SparseDataCell Basic Test", "[ut][SparseDataCell] ") {
     auto query_sparse_vectors = fixtures::GenerateSparseVectors(1, 100);
     SECTION("accuracy") {
         auto computer = data_cell->FactoryComputer(query_sparse_vectors.data());
-        std::shared_ptr<float[]> dist = std::shared_ptr<float[]>(new float[base_count]);
-        data_cell->Query(dist.get(), computer, idx.data(), 1);
-        data_cell->Query(dist.get() + 1, computer, idx.data() + 1, base_count - 1);
+        std::vector<float> dist(base_count);
+        data_cell->Query(dist.data(), computer, idx.data(), 1);
+        data_cell->Query(dist.data() + 1, computer, idx.data() + 1, base_count - 1);
         for (int i = 0; i < base_count; ++i) {
             fixtures::dist_t distance =
                 fixtures::GetSparseDistance(query_sparse_vectors[0], sparse_vectors[i]);
@@ -88,9 +88,9 @@ TEST_CASE("SparseDataCell Basic Test", "[ut][SparseDataCell] ") {
         auto new_data_cell = FlattenInterface::MakeInstance(param, index_common_param);
         test_serializion(*data_cell, *new_data_cell);
         auto computer = new_data_cell->FactoryComputer(query_sparse_vectors.data());
-        std::shared_ptr<float[]> dist = std::shared_ptr<float[]>(new float[base_count]);
-        new_data_cell->Query(dist.get(), computer, idx.data(), 1);
-        new_data_cell->Query(dist.get() + 1, computer, idx.data() + 1, base_count - 1);
+        std::vector<float> dist(base_count);
+        new_data_cell->Query(dist.data(), computer, idx.data(), 1);
+        new_data_cell->Query(dist.data() + 1, computer, idx.data() + 1, base_count - 1);
         for (int i = 0; i < base_count; ++i) {
             fixtures::dist_t distance =
                 fixtures::GetSparseDistance(query_sparse_vectors[0], sparse_vectors[i]);
@@ -160,9 +160,9 @@ TEST_CASE("SparseDataCell Concurrent Test", "[ut][SparseDataCell][concurrent] ")
     auto query_sparse_vectors = fixtures::GenerateSparseVectors(1, 100);
     SECTION("accuracy") {
         auto computer = data_cell->FactoryComputer(query_sparse_vectors.data());
-        std::shared_ptr<float[]> dist = std::shared_ptr<float[]>(new float[base_count]);
-        data_cell->Query(dist.get(), computer, idx.data(), 1);
-        data_cell->Query(dist.get() + 1, computer, idx.data() + 1, base_count - 1);
+        std::vector<float> dist(base_count);
+        data_cell->Query(dist.data(), computer, idx.data(), 1);
+        data_cell->Query(dist.data() + 1, computer, idx.data() + 1, base_count - 1);
         for (int i = 0; i < base_count; ++i) {
             fixtures::dist_t distance =
                 fixtures::GetSparseDistance(query_sparse_vectors[0], sparse_vectors[i]);
