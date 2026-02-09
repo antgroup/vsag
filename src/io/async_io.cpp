@@ -81,6 +81,19 @@ AsyncIO::WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset) {
     fsync(wfd_);
 }
 
+void
+AsyncIO::ResizeImpl(uint64_t size) {
+#ifdef __APPLE__
+    auto ret = ftruncate(this->wfd_, static_cast<off_t>(size));
+#else
+    auto ret = ftruncate64(this->wfd_, static_cast<int64_t>(size));
+#endif
+    if (ret == -1) {
+        throw VsagException(ErrorType::INTERNAL_ERROR, "ftruncate failed");
+    }
+    this->size_ = size;
+}
+
 bool
 AsyncIO::ReadImpl(uint64_t size, uint64_t offset, uint8_t* data) const {
     bool need_release = true;

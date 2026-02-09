@@ -58,6 +58,19 @@ BufferIO::WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset) {
     }
 }
 
+void
+BufferIO::ResizeImpl(uint64_t size) {
+#ifdef __APPLE__
+    auto ret = ftruncate(this->fd_, static_cast<off_t>(size));
+#else
+    auto ret = ftruncate64(this->fd_, static_cast<int64_t>(size));
+#endif
+    if (ret == -1) {
+        throw VsagException(ErrorType::INTERNAL_ERROR, "ftruncate failed");
+    }
+    this->size_ = size;
+}
+
 bool
 BufferIO::ReadImpl(uint64_t size, uint64_t offset, uint8_t* data) const {
     if (size == 0) {

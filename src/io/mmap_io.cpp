@@ -105,6 +105,60 @@ MMapIO::WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset) {
     memcpy(this->start_ + offset, data, size);
 }
 
+void
+MMapIO::ResizeImpl(uint64_t size) {
+    auto new_size = size;
+    auto old_size = this->size_;
+    if (old_size == 0) {
+        old_size = DEFAULT_INIT_MMAP_SIZE;
+    }
+    if (new_size > old_size) {
+        auto ret =
+#ifdef __APPLE__
+            ftruncate(this->fd_, static_cast<off_t>(new_size));
+#else
+            ftruncate64(this->fd_, static_cast<int64_t>(new_size));
+#endif
+        if (ret == -1) {
+            throw VsagException(ErrorType::INTERNAL_ERROR, "ftruncate failed");
+        }
+
+#ifdef __APPLE__
+        munmap(this->start_, old_size);
+        void* addr = mmap(nullptr, new_size, PROT_READ | PROT_WRITE, MAP_SHARED, this->fd_, 0);
+        if (addr == MAP_FAILED) {
+            throw VsagException(ErrorType::INTERNAL_ERROR, "mmap remap failed");
+        }
+        this->start_ = static_cast<uint8_t*>(addr);
+#else
+        this->start_ =
+            static_cast<uint8_t*>(mremap(this->start_, old_size, new_size, MREMAP_MAYMOVE));
+#endif
+    } else if (new_size < old_size) {
+#ifdef __APPLE__
+        munmap(this->start_, old_size);
+        void* addr = mmap(nullptr, new_size, PROT_READ | PROT_WRITE, MAP_SHARED, this->fd_, 0);
+        if (addr == MAP_FAILED) {
+            throw VsagException(ErrorType::INTERNAL_ERROR, "mmap remap failed");
+        }
+        this->start_ = static_cast<uint8_t*>(addr);
+#else
+        this->start_ =
+            static_cast<uint8_t*>(mremap(this->start_, old_size, new_size, MREMAP_MAYMOVE));
+#endif
+        auto ret =
+#ifdef __APPLE__
+            ftruncate(this->fd_, static_cast<off_t>(new_size));
+#else
+            ftruncate64(this->fd_, static_cast<int64_t>(new_size));
+#endif
+        if (ret == -1) {
+            throw VsagException(ErrorType::INTERNAL_ERROR, "ftruncate failed");
+        }
+    }
+    this->size_ = new_size;
+}
+
 bool
 MMapIO::ReadImpl(uint64_t size, uint64_t offset, uint8_t* data) const {
     if (offset + size > this->size_) {
