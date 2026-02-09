@@ -2012,7 +2012,6 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HGraphTestIndex,
     TestHGraphSearchUnrelatedParameter(test_index, resource);
 }
 
-
 TEST_CASE("HGraph Concurrent Read Write", "[ft][hgraph][concurrent]") {
     uint32_t op_num = 10000;
     uint32_t dim = 128;
@@ -2142,4 +2141,3 @@ TEST_CASE("HGraph Concurrent Read Write", "[ft][hgraph][concurrent]") {
         thread.join();
     }
 }
-
