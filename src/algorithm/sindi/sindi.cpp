@@ -423,6 +423,7 @@ SINDI::Serialize(StreamWriter& writer) const {
 
     JsonType jsonify_basic_info;
     auto metadata = std::make_shared<Metadata>();
+    metadata->SetVersion("v0.15");
     jsonify_basic_info[INDEX_PARAM].SetString(this->create_param_ptr_->ToString());
     metadata->Set("basic_info", jsonify_basic_info);
     auto footer = std::make_shared<Footer>(metadata);

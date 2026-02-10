@@ -20,6 +20,7 @@
 #include "impl/heap/standard_heap.h"
 #include "impl/label_table.h"
 #include "index_feature_list.h"
+#include "storage/serialization.h"
 #include "utils/util_functions.h"
 #include "vsag/allocator.h"
 namespace vsag {
@@ -67,17 +68,40 @@ SparseIndex::~SparseIndex() {
 
 void
 SparseIndex::Deserialize(StreamReader& reader) {
-    StreamReader::ReadObj(reader, cur_element_count_);
-    datas_.resize(cur_element_count_);
-    max_capacity_ = cur_element_count_;
-    for (int i = 0; i < cur_element_count_; ++i) {
-        uint32_t len;
-        StreamReader::ReadObj(reader, len);
-        datas_[i] = static_cast<uint32_t*>(allocator_->Allocate((2 * len + 1) * sizeof(uint32_t)));
-        datas_[i][0] = len;
-        reader.Read((char*)(datas_[i] + 1), static_cast<uint64_t>(2 * len) * sizeof(uint32_t));
+    // try to deserialize footer (only in new version)
+    auto footer = Footer::Parse(reader);
+
+    if (footer == nullptr) {  // old format, DON'T EDIT, remove in the future
+        logger::debug("parse with old version format");
+
+        StreamReader::ReadObj(reader, cur_element_count_);
+        datas_.resize(cur_element_count_);
+        max_capacity_ = cur_element_count_;
+        for (int i = 0; i < cur_element_count_; ++i) {
+            uint32_t len;
+            StreamReader::ReadObj(reader, len);
+            datas_[i] =
+                static_cast<uint32_t*>(allocator_->Allocate((2 * len + 1) * sizeof(uint32_t)));
+            datas_[i][0] = len;
+            reader.Read((char*)(datas_[i] + 1), static_cast<uint64_t>(2 * len) * sizeof(uint32_t));
+        }
+        label_table_->Deserialize(reader);
+    } else {  // new format with footer (v0.15+)
+        logger::debug("parse with new version format");
+
+        StreamReader::ReadObj(reader, cur_element_count_);
+        datas_.resize(cur_element_count_);
+        max_capacity_ = cur_element_count_;
+        for (int i = 0; i < cur_element_count_; ++i) {
+            uint32_t len;
+            StreamReader::ReadObj(reader, len);
+            datas_[i] =
+                static_cast<uint32_t*>(allocator_->Allocate((2 * len + 1) * sizeof(uint32_t)));
+            datas_[i][0] = len;
+            reader.Read((char*)(datas_[i] + 1), static_cast<uint64_t>(2 * len) * sizeof(uint32_t));
+        }
+        label_table_->Deserialize(reader);
     }
-    label_table_->Deserialize(reader);
 }
 
 void
@@ -88,6 +112,15 @@ SparseIndex::Serialize(StreamWriter& writer) const {
         writer.Write((char*)datas_[i], (2 * len + 1) * sizeof(uint32_t));
     }
     label_table_->Serialize(writer);
+
+    // serialize footer (introduced since v0.15)
+    auto metadata = std::make_shared<Metadata>();
+    metadata->SetVersion("v0.15");
+    JsonType basic_info;
+    basic_info["cur_element_count"].SetInt(cur_element_count_);
+    metadata->Set("basic_info", basic_info);
+    auto footer = std::make_shared<Footer>(metadata);
+    footer->Write(writer);
 }
 
 ParamPtr
