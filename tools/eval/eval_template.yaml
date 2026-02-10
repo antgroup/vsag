@@ -8,9 +8,10 @@ global:
         to: "file://tmp/eval_example_output.json"
       send-to-influxdb:
         format: "line_protocol"
-        to: "influxdb://127.0.0.1:8086/api/v2/write?org=7d71a0eb85deafbe&bucket=583a2fd8dd85e66c&precision=ns"
+        to: "influxdb://127.0.0.1:8086/api/v2/write?org=YOUR_ORG_ID&bucket=YOUR_BUCKET_ID&precision=ns"
         vars:
-          token: "Token mlIiP-zVfcooHhMbGG9Yk-KfrkHyDc2h-rphnIBda8UMe_6Qocy8tNmV323yxOPEAsC8uIs6_nb-XUSMEAO76A=="
+          # Replace with your actual InfluxDB token
+          token: "Token YOUR_INFLUXDB_TOKEN_HERE"
 
 eval_case1:
     datapath: "/tmp/sift-128-euclidean.hdf5"
