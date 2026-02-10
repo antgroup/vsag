@@ -850,6 +850,13 @@ HGraph::KnnSearch(const DatasetPtr& query,
 
     if (iter_ctx == nullptr) {
         auto cur_count = this->bottom_graph_->TotalCount();
+
+        if (cur_count == 0) {
+            SearchStatistics stats;
+            auto dataset_result = DatasetImpl::MakeEmptyDataset();
+            dataset_result->Statistics(stats.Dump());
+            return dataset_result;
+        }
         auto* new_ctx = new IteratorFilterContext();
         if (auto ret = new_ctx->init(cur_count, params.ef_search, ctx.alloc); not ret.has_value()) {
             delete new_ctx;

@@ -143,8 +143,8 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
         while (!iter_ctx->Empty()) {
             uint32_t cur_inner_id = iter_ctx->GetTopID();
             float cur_dist = iter_ctx->GetTopDist();
-            if (!vl->Get(cur_inner_id) && iter_ctx->CheckPoint(cur_inner_id)) {
-                vl->Set(cur_inner_id);
+            vl->Set(cur_inner_id);
+            if (iter_ctx->CheckPoint(cur_inner_id)) {
                 lower_bound = std::max(lower_bound, cur_dist);
                 flatten->Query(&cur_dist, computer, &cur_inner_id, 1, ctx);
                 top_candidates->Push(cur_dist, cur_inner_id);
