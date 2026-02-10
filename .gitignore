@@ -163,6 +163,7 @@ flycheck_*.el
 # vsag
 _deps
 /build/
+/build-*/
 .idea/
 .vscode/
 venv/
