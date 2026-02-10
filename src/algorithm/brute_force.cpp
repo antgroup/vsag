@@ -621,8 +621,8 @@ BruteForce::resize(uint64_t new_size) {
     if (cur_size < new_size_power_2) {
         this->inner_codes_->Resize(new_size_power_2);
         this->max_capacity_.store(new_size_power_2);
+        this->cal_memory_usage();
     }
-    this->cal_memory_usage();
 }
 
 void
