@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <memory>
 #include <utility>
 
 #include "datacell/graph_interface.h"
@@ -62,7 +63,7 @@ public:
     void
     AddChild(const std::string& key);
 
-    std::shared_ptr<IndexNode>
+    IndexNode*
     GetChild(const std::string& key, bool need_init = false);
 
     void
@@ -82,7 +83,7 @@ public:
     Status status_{Status::NO_INDEX};
 
 private:
-    UnorderedMap<std::string, std::shared_ptr<IndexNode>> children_;
+    UnorderedMap<std::string, std::unique_ptr<IndexNode>> children_;
     Allocator* allocator_{nullptr};
     GraphInterfaceParamPtr graph_param_{nullptr};
 };
@@ -107,7 +108,7 @@ public:
         label_table_->compress_duplicate_data_ = pyramid_param->support_duplicate;
         base_codes_ = FlattenInterface::MakeInstance(pyramid_param->base_codes_param, common_param);
         root_ =
-            std::make_shared<IndexNode>(allocator_, pyramid_param->graph_param, index_min_size_);
+            std::make_unique<IndexNode>(allocator_, pyramid_param->graph_param, index_min_size_);
         points_mutex_ = std::make_shared<PointsMutex>(max_capacity_, allocator_);
         searcher_ = std::make_unique<BasicSearcher>(common_param, points_mutex_);
         no_build_levels_.assign(pyramid_param->no_build_levels.begin(),
@@ -209,9 +210,7 @@ private:
     build_by_odescent(const DatasetPtr& base);
 
     void
-    add_one_point(const std::shared_ptr<IndexNode>& node,
-                  InnerIdType inner_id,
-                  const float* vector);
+    add_one_point(IndexNode* node, InnerIdType inner_id, const float* vector);
 
     static std::vector<std::vector<std::string>>
     parse_path(const std::string& path);
@@ -230,7 +229,7 @@ private:
     Vector<int32_t> no_build_levels_;
     uint64_t ef_construction_{400};
     int64_t max_degree_{64};
-    std::shared_ptr<IndexNode> root_{nullptr};
+    std::unique_ptr<IndexNode> root_{nullptr};
     FlattenInterfacePtr base_codes_{nullptr};
     FlattenInterfacePtr precise_codes_{nullptr};
     std::unique_ptr<VisitedListPool> pool_ = nullptr;
