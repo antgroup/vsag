@@ -1658,9 +1658,11 @@ HierarchicalNSW::searchKnn(const void* query_data,
                                                         iter_ctx);
     } else {
         int64_t currObj;
+        int max_level_copy;
         {
             std::shared_lock data_loc(max_level_mutex_);
             currObj = enterpoint_node_;
+            max_level_copy = max_level_;
         }
         if (currObj > cur_element_count_) {
             return result;
@@ -1668,7 +1670,7 @@ HierarchicalNSW::searchKnn(const void* query_data,
 
         float curdist = fstdistfunc_(query_data, getDataByInternalId(currObj), dist_func_param_);
         std::shared_ptr<char[]> link_data = std::shared_ptr<char[]>(new char[size_links_level0_]);
-        for (int level = max_level_; level > 0; level--) {
+        for (int level = max_level_copy; level > 0; level--) {
             bool changed = true;
             while (changed) {
                 changed = false;
@@ -1747,14 +1749,16 @@ HierarchicalNSW::searchRange(const void* query_data,
     std::shared_ptr<float[]> normalize_query;
     normalizeVector(query_data, normalize_query);
     int64_t currObj;
+    int max_level_copy;
     {
         std::shared_lock data_loc(max_level_mutex_);
         currObj = enterpoint_node_;
+        max_level_copy = max_level_;
     }
     float curdist = fstdistfunc_(query_data, getDataByInternalId(currObj), dist_func_param_);
 
     std::shared_ptr<char[]> link_data = std::shared_ptr<char[]>(new char[size_links_level0_]);
-    for (int level = max_level_; level > 0; level--) {
+    for (int level = max_level_copy; level > 0; level--) {
         bool changed = true;
         while (changed) {
             changed = false;
