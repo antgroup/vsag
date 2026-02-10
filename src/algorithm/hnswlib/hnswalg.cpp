@@ -515,9 +515,8 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
         while (!iter_ctx->Empty()) {
             uint32_t cur_inner_id = iter_ctx->GetTopID();
             float cur_dist = iter_ctx->GetTopDist();
-            if (visited_array[cur_inner_id] != visited_array_tag &&
-                iter_ctx->CheckPoint(cur_inner_id)) {
-                visited_array[cur_inner_id] = visited_array_tag;
+            visited_array[cur_inner_id] = visited_array_tag;
+            if (iter_ctx->CheckPoint(cur_inner_id)) {
                 top_candidates.emplace(cur_dist, cur_inner_id);
                 candidate_set.emplace(-cur_dist, cur_inner_id);
                 lower_bound = std::max(lower_bound, cur_dist);

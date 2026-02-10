@@ -94,12 +94,15 @@ IteratorFilterContext::SetOFFFirstUsed() {
 
 void
 IteratorFilterContext::SetPoint(InnerIdType inner_id) {
+    if (inner_id >= max_size_) {
+        return;
+    }
     list_[byte_pos(inner_id)] |= (1 << bit_pos(inner_id));
 }
 
 bool
 IteratorFilterContext::CheckPoint(InnerIdType inner_id) {
-    return (list_[byte_pos(inner_id)] & (1 << bit_pos(inner_id))) == 0;
+    return inner_id < max_size_ && (list_[byte_pos(inner_id)] & (1 << bit_pos(inner_id))) == 0;
 }
 
 int64_t
