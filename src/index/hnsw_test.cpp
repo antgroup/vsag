@@ -949,13 +949,13 @@ TEST_CASE("get data by label", "[ut][hnsw]") {
     SECTION("hnsw test") {
         DefaultAllocator allocator;
         auto* alg_hnsw = new hnswlib::HierarchicalNSW(&space, 100, &allocator);
-        std::shared_ptr<int8_t[]> base_data(new int8_t[dim * sizeof(float)]);
+        std::vector<int8_t> base_data(dim * sizeof(float));
         alg_hnsw->init_memory_space();
         alg_hnsw->addPoint(base_vectors.data(), 0);
         fixtures::dist_t distance = alg_hnsw->getDistanceByLabel(0, alg_hnsw->getDataByLabel(0));
 
-        alg_hnsw->copyDataByLabel(0, base_data.get());
-        fixtures::dist_t distance_validate = alg_hnsw->getDistanceByLabel(0, base_data.get());
+        alg_hnsw->copyDataByLabel(0, base_data.data());
+        fixtures::dist_t distance_validate = alg_hnsw->getDistanceByLabel(0, base_data.data());
 
         REQUIRE(distance == 0);
         REQUIRE(distance == distance_validate);
@@ -966,15 +966,15 @@ TEST_CASE("get data by label", "[ut][hnsw]") {
     SECTION("static hnsw test") {
         DefaultAllocator allocator;
         auto* alg_hnsw_static = new hnswlib::StaticHierarchicalNSW(&space, 100, &allocator);
-        std::shared_ptr<int8_t[]> base_data(new int8_t[dim * sizeof(float)]);
+        std::vector<int8_t> base_data(dim * sizeof(float));
         alg_hnsw_static->init_memory_space();
         alg_hnsw_static->addPoint(base_vectors.data(), 0);
         fixtures::dist_t distance =
             alg_hnsw_static->getDistanceByLabel(0, alg_hnsw_static->getDataByLabel(0));
 
-        alg_hnsw_static->copyDataByLabel(0, base_data.get());
+        alg_hnsw_static->copyDataByLabel(0, base_data.data());
         fixtures::dist_t distance_validate =
-            alg_hnsw_static->getDistanceByLabel(0, base_data.get());
+            alg_hnsw_static->getDistanceByLabel(0, base_data.data());
 
         REQUIRE(distance == 0);
         REQUIRE(distance == distance_validate);

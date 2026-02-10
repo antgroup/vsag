@@ -1019,10 +1019,10 @@ HNSW::pretrain(const std::vector<int64_t>& base_tag_ids,
     } else {
         data_size = dim_ * 4;
     }
-    std::shared_ptr<int8_t[]> base_data(new int8_t[data_size]);
-    std::shared_ptr<int8_t[]> topk_data(new int8_t[data_size]);
+    std::unique_ptr<int8_t[]> base_data(new int8_t[data_size]);
+    std::unique_ptr<int8_t[]> topk_data(new int8_t[data_size]);
 
-    std::shared_ptr<int8_t[]> generated_data(new int8_t[data_size]);
+    std::unique_ptr<int8_t[]> generated_data(new int8_t[data_size]);
     set_dataset(type_, dim_, generated_query, generated_data.get(), 1);
 
     for (const int64_t& base_tag_id : base_tag_ids) {
