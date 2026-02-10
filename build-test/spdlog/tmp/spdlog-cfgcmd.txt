@@ -1,0 +1,1 @@
+cmd='cmake;-DCMAKE_INSTALL_PREFIX=/home/runner/work/vsag/vsag/build-test/spdlog/install;-S.;-Bbuild'
