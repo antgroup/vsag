@@ -12,7 +12,7 @@ FetchContent_Declare (
         TIMEOUT 30
 )
 
-set(YAML_CPP_BUILD_TESTS OFF CACHE BOOL "Enable testing" FORCE)
+set(YAML_CPP_BUILD_TESTS OFF CACHE BOOL "Build yaml-cpp tests" FORCE)
 set(YAML_BUILD_SHARED_LIBS OFF CACHE BOOL "Build yaml-cpp shared library" FORCE)
 
 FetchContent_MakeAvailable (yaml-cpp)
