@@ -264,9 +264,7 @@ GraphDataCell<IOTmpl>::Resize(InnerIdType new_size) {
     }
     this->max_capacity_ = new_size;
     uint64_t io_size = static_cast<uint64_t>(new_size) * static_cast<uint64_t>(code_line_size_);
-    uint8_t end_flag =
-        127;  // the value is meaningless, only to occupy the position for io allocate
-    this->io_->Write(&end_flag, 1, io_size);
+    this->io_->Resize(io_size);
 }
 
 template <typename IOTmpl>

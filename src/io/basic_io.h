@@ -218,6 +218,24 @@ public:
         }
     }
 
+    inline void
+    Resize(uint64_t size) {
+        if constexpr (has_ResizeImpl<IOTmpl>::value) {
+            return cast().ResizeImpl(size);
+        } else {
+            if (size <= this->size_) {
+                return;
+            }
+            ByteBuffer buffer(SERIALIZE_BUFFER_SIZE, this->allocator_);
+            uint64_t offset = this->size_;
+            while (offset < size) {
+                auto cur_size = std::min(SERIALIZE_BUFFER_SIZE, size - offset);
+                this->Write(buffer.data, cur_size, offset);
+                offset += cur_size;
+            }
+        }
+    }
+
     inline int64_t
     GetMemoryUsage() const {
         return this->size_;
@@ -314,5 +332,6 @@ private:
                                  std::declval<uint64_t>())
     GENERATE_HAS_MEMBER_FUNCTION(ReleaseImpl, void, std::declval<const uint8_t*>())
     GENERATE_HAS_MEMBER_FUNCTION(InitIOImpl, void, std::declval<const IOParamPtr&>())
+    GENERATE_HAS_MEMBER_FUNCTION(ResizeImpl, void, std::declval<uint64_t>())
 };
 }  // namespace vsag
