@@ -107,11 +107,14 @@ target_link_libraries(318_feature_tune vsag)
 add_executable(319_feature_get_memory_usage 319_feature_get_memory_usage.cpp)
 target_link_libraries(319_feature_get_memory_usage vsag)
 
+add_executable(320_feature_extra_info 320_feature_extra_info.cpp)
+target_link_libraries(320_feature_extra_info vsag)
+
 add_executable (401_persistent_kv 401_persistent_kv.cpp)
 target_link_libraries (401_persistent_kv vsag)
 
 add_executable (402_persistent_streaming 402_persistent_streaming.cpp)
 target_link_libraries (402_persistent_streaming vsag)
 
- add_executable (501_quantization_transform 501_quantization_transform.cpp)
- target_link_libraries (501_quantization_transform vsag)
+add_executable (501_quantization_transform 501_quantization_transform.cpp)
+target_link_libraries (501_quantization_transform vsag)
