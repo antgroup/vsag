@@ -428,9 +428,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
         auto cur_count = this->bottom_graph_->TotalCount();
 
         if (cur_count == 0) {
-            SearchStatistics stats;
             auto dataset_result = DatasetImpl::MakeEmptyDataset();
-            dataset_result->Statistics(stats.Dump());
             return dataset_result;
         }
         auto* new_ctx = new IteratorFilterContext();
