@@ -87,12 +87,14 @@ SINDI::Add(const DatasetPtr& base, AddMode mode) {
 
     // adjust window
     int64_t final_add_window = align_up(cur_element_count_ + data_num, window_size_) / window_size_;
+    bool window_changed = false;
     while (window_term_list_.size() < final_add_window) {
         window_term_list_.emplace_back(std::make_shared<SparseTermDataCell>(doc_retain_ratio_,
                                                                             term_id_limit_,
                                                                             allocator_,
                                                                             use_quantization_,
                                                                             quantization_params_));
+        window_changed = true;
     }
 
     // add process
@@ -144,7 +146,9 @@ SINDI::Add(const DatasetPtr& base, AddMode mode) {
             rerank_flat_index_->Add(single_base);
         }
     }
-    this->cal_memory_usage();
+    if (window_changed) {
+        this->cal_memory_usage();
+    }
     return failed_ids;
 }
 
