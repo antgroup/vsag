@@ -101,7 +101,7 @@ SparseTermDataCell::fill_heap_initial(uint32_t id,
                                       uint32_t offset_id,
                                       uint32_t n_candidate,
                                       const FilterPtr& filter) const {
-    if (dist > 0) {
+    if (dist < 0) {
         if constexpr (type == InnerSearchType::WITH_FILTER) {
             if (not filter->CheckValid(id + offset_id)) {
                 dist = 0;
@@ -273,7 +273,7 @@ SparseTermDataCell::InsertVector(const SparseVector& sparse_base, uint16_t base_
 
         term_sizes_[term] += 1;
     }
-    total_count_ ++;
+    total_count_++;
 }
 
 void
