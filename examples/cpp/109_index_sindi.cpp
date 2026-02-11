@@ -59,6 +59,19 @@ main(int argc, char** argv) {
         ->Owner(false);
 
     /******************* Create SINDI Index *****************/
+    /*
+     * build_params is the configuration for building a sparse index.
+     *
+     * - dtype: Must be set to "sparse", indicating the data type of the vectors.
+     * - dim: Dimensionality of the sparse vectors (must be >0, but does not affect the result).
+     * - metric_type: Distance metric type, currently only "ip" (inner product) is supported.
+     * - index_param: Parameters specific to sparse indexing:
+     *   - use_reorder: If true, enables full-precision re-ranking of results. This requires storing additional data.
+     *     When doc_prune_ratio is 0, use_reorder can be false while still maintaining full-precision results.
+     *   - term_id_limit: Maximum term id (e.g., when term_id_limit = 10, then, term [15: 0.1] in sparse vector is not allowed)
+     *   - doc_prune_ratio: Ratio of term pruning in documents (0 = no pruning).
+     *   - window_size: Window size for table scanning. Related to L3 cache size; 100000 is an empirically optimal value.
+     */
     auto sindi_build_parameters = R"({
         "dtype": "sparse",
         "dim": 128,
@@ -103,6 +116,14 @@ main(int argc, char** argv) {
     query->NumElements(1)->SparseVectors(&query_vector)->Owner(false);
 
     /******************* KnnSearch For SINDI Index *****************/
+    /*
+     * search_params is the configuration for sparse index search.
+     *
+     * - sindi: Parameters specific to sparse indexing search:
+     *   - query_prune_ratio: Ratio of term pruning for the query (0 = no pruning).
+     *   - n_candidate: Number of candidates for re-ranking. Must be greater than topK.
+     *     This parameter is ignored if use_reorder is false in the build parameters.
+     */
     auto sindi_search_parameters = R"({
         "sindi": {
             "query_prune_ratio": 0,
