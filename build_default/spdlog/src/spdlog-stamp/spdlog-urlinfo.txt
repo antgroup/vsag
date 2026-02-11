@@ -1,0 +1,12 @@
+# This is a generated file and its contents are an internal implementation detail.
+# The download step will be re-executed if anything in this file changes.
+# No other meaning or use of this file is supported.
+
+method=url
+command=/usr/local/bin/cmake;-DCMAKE_MESSAGE_LOG_LEVEL=VERBOSE;-P;/home/runner/work/vsag/vsag/build_default/spdlog/src/spdlog-stamp/download-spdlog.cmake;COMMAND;/usr/local/bin/cmake;-DCMAKE_MESSAGE_LOG_LEVEL=VERBOSE;-P;/home/runner/work/vsag/vsag/build_default/spdlog/src/spdlog-stamp/verify-spdlog.cmake;COMMAND;/usr/local/bin/cmake;-DCMAKE_MESSAGE_LOG_LEVEL=VERBOSE;-P;/home/runner/work/vsag/vsag/build_default/spdlog/src/spdlog-stamp/extract-spdlog.cmake
+source_dir=/home/runner/work/vsag/vsag/build_default/spdlog/source
+work_dir=/home/runner/work/vsag/vsag/build_default/spdlog
+url(s)=https://github.com/gabime/spdlog/archive/refs/tags/v1.12.0.tar.gz;http://vsagcache.oss-rg-china-mainland.aliyuncs.com/spdlog/v1.12.0.tar.gz
+hash=MD5=6b4446526264c1d1276105482adc18d1
+      no_extract=
+
