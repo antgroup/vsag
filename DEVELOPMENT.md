@@ -76,6 +76,34 @@ clean-release:           ## Clear build-release/ directory.
 install:                 ## Build and install the release version of vsag.
 ```
 
+## CMake Build Options
+
+VSAG provides several CMake options to customize the build:
+
+### BLAS Library Options
+
+- **`ENABLE_INTEL_MKL`** (default: `ON` on x86_64, `OFF` otherwise)
+  - Enable Intel MKL as the BLAS backend (x86_64 platforms only)
+  - When disabled, OpenBLAS is used instead
+
+- **`USE_SYSTEM_OPENBLAS`** (default: `OFF`)
+  - Use system-installed OpenBLAS instead of building from source
+  - Requires `libopenblas-dev` and `liblapacke-dev` to be installed
+  - Falls back to building from source if system OpenBLAS is not found
+  - Example:
+    ```bash
+    # Install OpenBLAS on Ubuntu/Debian
+    sudo apt-get install libopenblas-dev liblapacke-dev
+    
+    # Build with system OpenBLAS
+    cmake -DUSE_SYSTEM_OPENBLAS=ON -DENABLE_INTEL_MKL=OFF -B build
+    cmake --build build
+    ```
+
+### Other Build Options
+
+For a complete list of build options, see the `option()` directives in `CMakeLists.txt`.
+
 ## Project Structure
 - `cmake/`: cmake util functions
 - `docker/`: the dockerfile to build develop and ci image

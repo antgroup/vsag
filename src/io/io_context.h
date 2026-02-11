@@ -40,7 +40,7 @@ public:
     };
 
     void
-    Reset() override{};
+    Reset() override {};
 
     int64_t
     GetMemoryUsage() const override {

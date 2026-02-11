@@ -49,13 +49,13 @@ public:
     }
 
     void
-    Serialize(StreamWriter& writer) const override{};
+    Serialize(StreamWriter& writer) const override {};
 
     void
-    Deserialize(StreamReader& reader) override{};
+    Deserialize(StreamReader& reader) override {};
 
     void
-    Train(const float* data, uint64_t count) override{};
+    Train(const float* data, uint64_t count) override {};
 };
 
 }  // namespace vsag

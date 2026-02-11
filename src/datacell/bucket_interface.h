@@ -114,10 +114,10 @@ public:
     }
 
     virtual void
-    Package(){};
+    Package() {};
 
     virtual void
-    Unpack(){};
+    Unpack() {};
 
     [[nodiscard]] virtual int64_t
     GetMemoryUsage() const = 0;
