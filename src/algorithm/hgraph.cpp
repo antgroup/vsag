@@ -1641,8 +1641,8 @@ HGraph::resize(uint64_t new_size) {
             this->extra_infos_->Resize(new_size_power_2);
         }
         this->max_capacity_.store(new_size_power_2);
+        this->cal_memory_usage();
     }
-    this->cal_memory_usage();
 }
 void
 HGraph::InitFeatures() {
