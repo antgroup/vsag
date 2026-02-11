@@ -23,6 +23,16 @@ MemoryIO::WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset) {
     memcpy(start_ + offset, data, size);
 }
 
+void
+MemoryIO::ResizeImpl(uint64_t size) {
+    if (size <= this->size_) {
+        this->size_ = size;
+        return;
+    }
+    check_and_realloc(size);
+    this->size_ = size;
+}
+
 bool
 MemoryIO::ReadImpl(uint64_t size, uint64_t offset, uint8_t* data) const {
     bool ret = check_valid_offset(size + offset);
