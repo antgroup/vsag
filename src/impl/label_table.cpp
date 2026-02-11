@@ -41,7 +41,7 @@ LabelTable::LabelTable(Allocator* allocator, bool use_reverse_map, bool compress
       use_reverse_map_(use_reverse_map),
       deleted_ids_(allocator),
       compress_duplicate_data_(compress_redundant_data),
-      duplicate_records_(0, allocator) {
+      duplicate_ids_(0, allocator) {
     deleted_ids_filter_ = std::make_shared<RemoveListFilter>(deleted_ids_, delete_ids_mutex_);
 }
 

@@ -179,3 +179,208 @@ TEST_CASE("LabelTable Edge Cases", "[ut][LabelTable]") {
         REQUIRE(label_table.GetIdByLabel(5000) == 1000);
     }
 }
+
+TEST_CASE("LabelTable Duplicate ID Operations", "[ut][LabelTable]") {
+    auto allocator = std::make_shared<DefaultAllocator>();
+
+    SECTION("SetDuplicateId and GetDuplicateId with single duplicate") {
+        // Setup: Insert two labels with same label value (simulating duplicate)
+        LabelTable label_table(allocator.get(), true, true);  // enable compress_duplicate_data
+        label_table.Resize(2);
+        label_table.Insert(0, 100);
+        label_table.Insert(1, 100);
+        label_table.SetDuplicateId(0, 1);
+
+        auto duplicates = label_table.GetDuplicateId(0);
+        REQUIRE(duplicates.size() == 1);
+        REQUIRE(duplicates.count(1) == 1);
+    }
+
+    SECTION("SetDuplicateId and GetDuplicateId with multiple duplicates") {
+        // Setup: Insert multiple labels with same label value
+        LabelTable label_table(allocator.get(), true, true);  // enable compress_duplicate_data
+        label_table.Resize(4);
+        label_table.Insert(0, 100);
+        label_table.Insert(1, 100);
+        label_table.Insert(2, 100);
+        label_table.Insert(3, 100);
+
+        label_table.SetDuplicateId(0, 1);
+        label_table.SetDuplicateId(0, 2);
+        label_table.SetDuplicateId(0, 3);
+
+        auto duplicates = label_table.GetDuplicateId(0);
+        REQUIRE(duplicates.size() == 3);
+        REQUIRE(duplicates.count(1) == 1);
+        REQUIRE(duplicates.count(2) == 1);
+        REQUIRE(duplicates.count(3) == 1);
+    }
+
+    SECTION("GetDuplicateId returns empty set for ID without duplicates") {
+        LabelTable label_table(allocator.get(), true, true);  // enable compress_duplicate_data
+        label_table.Resize(1);
+        label_table.Insert(0, 100);
+
+        auto duplicates = label_table.GetDuplicateId(0);
+        REQUIRE(duplicates.empty());
+    }
+
+    SECTION("Multiple independent duplicate groups") {
+        LabelTable label_table(allocator.get(), true, true);  // enable compress_duplicate_data
+        label_table.Resize(5);
+        // Group 1: IDs 0, 1, 2 share label 100
+        label_table.Insert(0, 100);
+        label_table.Insert(1, 100);
+        label_table.Insert(2, 100);
+
+        // Group 2: IDs 3, 4 share label 200
+        label_table.Insert(3, 200);
+        label_table.Insert(4, 200);
+
+        label_table.SetDuplicateId(0, 1);
+        label_table.SetDuplicateId(0, 2);
+        label_table.SetDuplicateId(3, 4);
+
+        auto group1 = label_table.GetDuplicateId(0);
+        REQUIRE(group1.size() == 2);
+        REQUIRE(group1.count(1) == 1);
+        REQUIRE(group1.count(2) == 1);
+
+        auto group2 = label_table.GetDuplicateId(3);
+        REQUIRE(group2.size() == 1);
+        REQUIRE(group2.count(4) == 1);
+    }
+}
+
+TEST_CASE("LabelTable Serialize and Deserialize with Duplicates", "[ut][LabelTable]") {
+    auto allocator = std::make_shared<DefaultAllocator>();
+
+    SECTION("Serialize and Deserialize with duplicate IDs") {
+        // Create and populate label table with duplicates
+        auto label_table = std::make_shared<LabelTable>(allocator.get(), true, true);
+        label_table->Resize(5);
+        label_table->Insert(0, 100);
+        label_table->Insert(1, 100);
+        label_table->Insert(2, 100);
+        label_table->Insert(3, 200);
+        label_table->Insert(4, 200);
+
+        label_table->SetDuplicateId(0, 1);
+        label_table->SetDuplicateId(0, 2);
+        label_table->SetDuplicateId(3, 4);
+
+        // Serialize
+        std::stringstream ss;
+        IOStreamWriter writer(ss);
+        label_table->Serialize(writer);
+
+        // Deserialize into new label table
+        auto new_label_table = std::make_shared<LabelTable>(allocator.get(), true, true);
+        IOStreamReader reader(ss);
+        new_label_table->Deserialize(reader);
+
+        // Verify labels are preserved
+        REQUIRE(new_label_table->GetLabelById(0) == 100);
+        REQUIRE(new_label_table->GetLabelById(1) == 100);
+        REQUIRE(new_label_table->GetLabelById(2) == 100);
+        REQUIRE(new_label_table->GetLabelById(3) == 200);
+        REQUIRE(new_label_table->GetLabelById(4) == 200);
+
+        // Verify duplicates are preserved
+        auto group1 = new_label_table->GetDuplicateId(0);
+        REQUIRE(group1.size() == 2);
+        REQUIRE(group1.count(1) == 1);
+        REQUIRE(group1.count(2) == 1);
+
+        auto group2 = new_label_table->GetDuplicateId(3);
+        REQUIRE(group2.size() == 1);
+        REQUIRE(group2.count(4) == 1);
+    }
+
+    SECTION("Serialize and Deserialize without duplicates") {
+        auto label_table = std::make_shared<LabelTable>(allocator.get(), true, true);
+        label_table->Resize(3);
+        label_table->Insert(0, 100);
+        label_table->Insert(1, 200);
+        label_table->Insert(2, 300);
+
+        std::stringstream ss;
+        IOStreamWriter writer(ss);
+        label_table->Serialize(writer);
+
+        auto new_label_table = std::make_shared<LabelTable>(allocator.get(), true, true);
+        IOStreamReader reader(ss);
+        new_label_table->Deserialize(reader);
+
+        REQUIRE(new_label_table->GetLabelById(0) == 100);
+        REQUIRE(new_label_table->GetLabelById(1) == 200);
+        REQUIRE(new_label_table->GetLabelById(2) == 300);
+
+        REQUIRE(new_label_table->GetDuplicateId(0).empty());
+        REQUIRE(new_label_table->GetDuplicateId(1).empty());
+        REQUIRE(new_label_table->GetDuplicateId(2).empty());
+    }
+
+    SECTION("Serialize and Deserialize preserves total count") {
+        auto label_table = std::make_shared<LabelTable>(allocator.get(), true, true);
+        label_table->Resize(3);
+        label_table->Insert(0, 100);
+        label_table->Insert(1, 200);
+        label_table->Insert(2, 300);
+
+        auto count_before = label_table->GetTotalCount();
+
+        std::stringstream ss;
+        IOStreamWriter writer(ss);
+        label_table->Serialize(writer);
+
+        auto new_label_table = std::make_shared<LabelTable>(allocator.get(), true, true);
+        IOStreamReader reader(ss);
+        new_label_table->Deserialize(reader);
+
+        REQUIRE(new_label_table->GetTotalCount() == count_before);
+    }
+}
+
+TEST_CASE("LabelTable Duplicate ID with Resize", "[ut][LabelTable]") {
+    auto allocator = std::make_shared<DefaultAllocator>();
+    LabelTable label_table(allocator.get(), true, true);
+    label_table.Resize(2);
+
+    SECTION("Resize preserves duplicate information") {
+        label_table.Insert(0, 100);
+        label_table.Insert(1, 100);
+        label_table.SetDuplicateId(0, 1);
+
+        label_table.Resize(100);
+
+        auto duplicates = label_table.GetDuplicateId(0);
+        REQUIRE(duplicates.size() == 1);
+        REQUIRE(duplicates.count(1) == 1);
+
+        // Verify we can still insert at new positions
+        label_table.Insert(50, 500);
+        REQUIRE(label_table.GetLabelById(50) == 500);
+    }
+
+    SECTION("Resize and add new duplicates") {
+        label_table.Insert(0, 100);
+        label_table.Insert(1, 100);
+        label_table.SetDuplicateId(0, 1);
+
+        label_table.Resize(10);
+
+        // Add new entries and create another duplicate group
+        label_table.Insert(5, 500);
+        label_table.Insert(6, 500);
+        label_table.SetDuplicateId(5, 6);
+
+        auto group1 = label_table.GetDuplicateId(0);
+        REQUIRE(group1.size() == 1);
+        REQUIRE(group1.count(1) == 1);
+
+        auto group2 = label_table.GetDuplicateId(5);
+        REQUIRE(group2.size() == 1);
+        REQUIRE(group2.count(6) == 1);
+    }
+}

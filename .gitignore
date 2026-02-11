@@ -189,3 +189,4 @@ data/
 /coverage/
 *.gcov
 /dist/
+opencode.json

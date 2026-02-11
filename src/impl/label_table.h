@@ -33,24 +33,11 @@ DEFINE_POINTER(LabelTable);
 
 using IdMapFunction = std::function<std::tuple<bool, int64_t>(int64_t)>;
 
-struct DuplicateRecord {
-    std::mutex duplicate_mutex;
-    UnorderedSet<InnerIdType> duplicate_ids;
-    DuplicateRecord(Allocator* allocator) : duplicate_ids(allocator) {
-    }
-};
-
 class LabelTable {
 public:
     explicit LabelTable(Allocator* allocator,
                         bool use_reverse_map = true,
                         bool compress_redundant_data = false);
-
-    ~LabelTable() {
-        for (auto& record : duplicate_records_) {
-            allocator_->Delete(record);
-        }
-    }
 
     static constexpr InnerIdType INVALID_ID = std::numeric_limits<InnerIdType>::max();
 
@@ -202,12 +189,17 @@ public:
         StreamWriter::WriteVector(writer, label_table_);
         if (compress_duplicate_data_) {
             StreamWriter::WriteObj(writer, duplicate_count_);
+            Vector<bool> visited(label_table_.size(), false, allocator_);
             for (InnerIdType i = 0; i < label_table_.size(); ++i) {
-                if (duplicate_records_[i] != nullptr) {
+                if (duplicate_ids_[i] != i and not visited[i]) {
                     StreamWriter::WriteObj(writer, i);
                     Vector<InnerIdType> id_list(allocator_);
-                    for (const auto& duplicate_id : duplicate_records_[i]->duplicate_ids) {
-                        id_list.emplace_back(duplicate_id);
+                    auto current_id = i;
+                    visited[current_id] = true;
+                    while (duplicate_ids_[current_id] != i) {
+                        id_list.emplace_back(duplicate_ids_[current_id]);
+                        current_id = duplicate_ids_[current_id];
+                        visited[current_id] = true;
                     }
                     StreamWriter::WriteVector(writer, id_list);
                 }
@@ -228,16 +220,21 @@ public:
         }
         if (compress_duplicate_data_) {
             StreamReader::ReadObj(reader, duplicate_count_);
-            duplicate_records_.resize(label_table_.size(), nullptr);
+            duplicate_ids_.resize(label_table_.size());
+            for (int i = total_count_; i < label_table_.size(); ++i) {
+                duplicate_ids_[i] = i;
+            }
             for (InnerIdType i = 0; i < duplicate_count_; ++i) {
                 InnerIdType id;
                 StreamReader::ReadObj<InnerIdType>(reader, id);
-                duplicate_records_[id] = allocator_->New<DuplicateRecord>(allocator_);
                 Vector<InnerIdType> id_list(allocator_);
                 StreamReader::ReadVector(reader, id_list);
+                auto current_id = id;
                 for (const auto& duplicate_id : id_list) {
-                    duplicate_records_[id]->duplicate_ids.insert(duplicate_id);
+                    duplicate_ids_[current_id] = duplicate_id;
+                    current_id = duplicate_id;
                 }
+                duplicate_ids_[current_id] = id;
             }
         }
         if (support_tombstone_) {
@@ -253,7 +250,10 @@ public:
         }
         label_table_.resize(new_size);
         if (compress_duplicate_data_) {
-            duplicate_records_.resize(new_size, nullptr);
+            duplicate_ids_.resize(new_size);
+            for (int i = total_count_; i < new_size; ++i) {
+                duplicate_ids_[i] = i;
+            }
         }
     }
 
@@ -269,22 +269,28 @@ public:
 
     inline void
     SetDuplicateId(InnerIdType previous_id, InnerIdType current_id) {
-        std::lock_guard duplicate_lock(duplicate_mutex_);
-        if (duplicate_records_[previous_id] == nullptr) {
-            duplicate_records_[previous_id] = allocator_->New<DuplicateRecord>(allocator_);
+        std::scoped_lock duplicate_lock(duplicate_mutex_);
+        auto id = previous_id;
+        while (duplicate_ids_[id] != previous_id) {
+            id = duplicate_ids_[id];
+        }
+        if (duplicate_ids_[id] == id) {
             duplicate_count_++;
         }
-        std::lock_guard lock(duplicate_records_[previous_id]->duplicate_mutex);
-        duplicate_records_[previous_id]->duplicate_ids.insert(current_id);
+        duplicate_ids_[current_id] = duplicate_ids_[id];
+        duplicate_ids_[id] = current_id;
     }
 
     const UnorderedSet<InnerIdType>
     GetDuplicateId(InnerIdType id) const {
-        if (duplicate_records_[id] == nullptr) {
-            return UnorderedSet<InnerIdType>(allocator_);
+        std::shared_lock duplicate_lock(duplicate_mutex_);
+        UnorderedSet<InnerIdType> ids(allocator_);
+        auto current_id = id;
+        while (duplicate_ids_[current_id] != id) {
+            ids.insert(duplicate_ids_[current_id]);
+            current_id = duplicate_ids_[current_id];
         }
-        std::lock_guard lock(duplicate_records_[id]->duplicate_mutex);
-        return duplicate_records_[id]->duplicate_ids;
+        return ids;
     }
 
     void
@@ -299,7 +305,7 @@ public:
         return sizeof(LabelTable) + label_table_.size() * sizeof(LabelType) +
                label_remap_.size() * (sizeof(LabelType) + sizeof(InnerIdType)) +
                deleted_ids_.size() * sizeof(InnerIdType) +
-               duplicate_records_.size() * (sizeof(DuplicateRecord*) + sizeof(DuplicateRecord));
+               duplicate_ids_.size() * sizeof(InnerIdType);
     }
 
     /**
@@ -334,9 +340,9 @@ public:
     bool compress_duplicate_data_{true};
     bool support_tombstone_{false};
 
-    std::mutex duplicate_mutex_;
+    mutable std::shared_mutex duplicate_mutex_;
     uint64_t duplicate_count_{0L};
-    Vector<DuplicateRecord*> duplicate_records_;
+    Vector<InnerIdType> duplicate_ids_;
 
     Allocator* allocator_{nullptr};
     std::atomic<int64_t> total_count_{0L};
