@@ -2,7 +2,7 @@
 # Personal Configurations, Disable Some Options via Env Vars to Accelerate Building
 CMAKE_GENERATOR ?= "Unix Makefiles"
 CMAKE_INSTALL_PREFIX ?= "/usr/local/"
-COMPILE_JOBS ?= 6
+COMPILE_JOBS ?= 4
 DEBUG_BUILD_DIR ?= "./build/"
 RELEASE_BUILD_DIR ?= "./build-release/"
 VSAG_ENABLE_TESTS ?= ON
