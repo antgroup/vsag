@@ -129,9 +129,23 @@ MemoryBlockIO::check_and_realloc(uint64_t size) {
     auto cur_block_size = this->blocks_.size();
     this->blocks_.reserve(new_block_count);
     while (cur_block_size < new_block_count) {
-        this->blocks_.emplace_back(static_cast<uint8_t*>(this->allocator_->Allocate(block_size_)));
+        auto* ptr = static_cast<uint8_t*>(this->allocator_->Allocate(block_size_));
+        if (ptr == nullptr) {
+            throw VsagException(ErrorType::INTERNAL_ERROR, "MemoryBlockIO allocation failed");
+        }
+        this->blocks_.emplace_back(ptr);
         ++cur_block_size;
     }
+}
+
+void
+MemoryBlockIO::ResizeImpl(uint64_t size) {
+    if (size <= this->size_) {
+        this->size_ = size;
+        return;
+    }
+    check_and_realloc(size);
+    this->size_ = size;
 }
 
 static int

@@ -54,9 +54,7 @@ public:
         this->max_capacity_ = new_capacity;
         uint64_t io_size =
             static_cast<uint64_t>(new_capacity) * static_cast<uint64_t>(extra_info_size_);
-        uint8_t end_flag =
-            127;  // the value is meaningless, only to occupy the position for io allocate
-        this->io_->Write(&end_flag, 1, io_size);
+        this->io_->Resize(io_size);
     }
 
     void

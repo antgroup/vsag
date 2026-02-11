@@ -39,6 +39,9 @@ public:
     void
     WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset);
 
+    void
+    ResizeImpl(uint64_t size);
+
     bool
     ReadImpl(uint64_t size, uint64_t offset, uint8_t* data) const;
 
