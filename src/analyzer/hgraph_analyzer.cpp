@@ -25,12 +25,15 @@ HGraphAnalyzer::GetComponentCount() {
     Vector<bool> visited(total_count_, false, allocator_);
     Vector<int64_t> component_sizes(allocator_);
     if (hgraph_->label_table_->CompressDuplicateData()) {
-        for (int i = 0; i < hgraph_->total_count_; ++i) {
-            if (hgraph_->label_table_->duplicate_records_[i] != nullptr) {
-                for (const auto& dup_id :
-                     hgraph_->label_table_->duplicate_records_[i]->duplicate_ids) {
-                    visited[dup_id] = true;
-                }
+        for (InnerIdType i = 0; i < hgraph_->total_count_; ++i) {
+            if (visited[i]) {
+                continue;
+            }
+            const auto& dup_ids = hgraph_->label_table_->duplicate_ids_;
+            auto current_id = i;
+            while (dup_ids[current_id] != i) {
+                visited[dup_ids[current_id]] = true;
+                current_id = dup_ids[current_id];
             }
         }
     }
@@ -67,18 +70,16 @@ HGraphAnalyzer::calculate_base_groundtruth() {
     is_duplicate_ids_.resize(this->total_count_, false);
     Vector<bool> visited(this->total_count_, false, allocator_);
     if (this->hgraph_->label_table_->CompressDuplicateData()) {
-        for (int i = 0; i < this->total_count_; ++i) {
+        for (InnerIdType i = 0; i < this->total_count_; ++i) {
             if (visited[i]) {
                 continue;
             }
             visited[i] = true;
-
-            if (this->hgraph_->label_table_->duplicate_records_[i] != nullptr) {
-                for (const auto& dup_id :
-                     this->hgraph_->label_table_->duplicate_records_[i]->duplicate_ids) {
-                    visited[dup_id] = true;
-                    is_duplicate_ids_[dup_id] = true;
-                }
+            const auto& dup_ids = hgraph_->label_table_->duplicate_ids_;
+            auto current_id = i;
+            while (dup_ids[current_id] != i) {
+                visited[dup_ids[current_id]] = true;
+                current_id = dup_ids[current_id];
             }
         }
     }
@@ -148,13 +149,14 @@ HGraphAnalyzer::GetNeighborRecall() {
 float
 HGraphAnalyzer::GetDuplicateRatio() {
     if (hgraph_->label_table_->CompressDuplicateData()) {
-        size_t duplicate_num = 0;
-        for (int i = 0; i < this->total_count_; ++i) {
-            if (hgraph_->label_table_->duplicate_records_[i] != nullptr) {
-                duplicate_num += hgraph_->label_table_->duplicate_records_[i]->duplicate_ids.size();
+        auto duplicate_count = 0;
+        for (int i = 0; i < hgraph_->label_table_->duplicate_ids_.size(); ++i) {
+            if (hgraph_->label_table_->duplicate_ids_[i] != i) {
+                is_duplicate_ids_[i] = true;
+                duplicate_count++;
             }
         }
-        return static_cast<float>(duplicate_num) / static_cast<float>(this->total_count_);
+        return static_cast<float>(duplicate_count) / static_cast<float>(this->total_count_);
     }
     return 0.0F;
 }
