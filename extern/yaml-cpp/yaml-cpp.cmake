@@ -2,11 +2,11 @@ include (FetchContent)
 
 FetchContent_Declare (
         yaml-cpp
-        URL https://github.com/jbeder/yaml-cpp/archive/refs/tags/0.8.0.tar.gz
+        URL https://github.com/jbeder/yaml-cpp/archive/refs/tags/yaml-cpp-0.9.0.tar.gz
         # this url is maintained by the vsag project, if it's broken, please try
         #  the latest commit or contact the vsag project
-        http://vsagcache.oss-rg-china-mainland.aliyuncs.com/yaml-cpp/0.8.0.tar.gz
-        URL_HASH MD5=1d2c7975edba60e995abe3c4af6480e5
+        http://vsagcache.oss-rg-china-mainland.aliyuncs.com/yaml-cpp/yaml-cpp-0.9.0.tar.gz
+        URL_HASH MD5=7d17de1b2a4b1d2776181f67c940bcdf
         DOWNLOAD_NO_PROGRESS 1
         INACTIVITY_TIMEOUT 5
         TIMEOUT 30
