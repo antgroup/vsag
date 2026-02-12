@@ -714,6 +714,7 @@ IVF::create_search_param(const std::string& parameters, const FilterPtr& filter)
     param.factor = search_param.topk_factor;
     param.first_order_scan_ratio = search_param.first_order_scan_ratio;
     param.parallel_search_thread_count = search_param.parallel_search_thread_count;
+    param.enable_reorder = search_param.enable_reorder;
     if (search_param.enable_time_record) {
         param.time_cost = std::make_shared<Timer>();
         param.time_cost->SetThreshold(search_param.timeout_ms);
@@ -959,7 +960,7 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
     auto param = this->create_search_param(request.params_str_, request.filter_);
     param.search_mode = KNN_SEARCH;
     param.topk = request.topk_;
-    if (use_reorder_) {
+    if (use_reorder_ and param.enable_reorder) {
         param.topk = static_cast<int64_t>(param.factor * static_cast<float>(request.topk_));
     }
     auto query = request.query_;
@@ -973,10 +974,12 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
             param.executors.emplace_back(executor);
         }
     }
+
     auto search_result = this->search<KNN_SEARCH>(query, param, ctx);
-    if (use_reorder_) {
+    if (use_reorder_ and param.enable_reorder) {
         return reorder(request.topk_, search_result, query->GetFloat32Vectors(), param, ctx);
     }
+
     auto count = static_cast<const int64_t>(search_result->Size());
     auto [dataset_results, dists, labels] = create_fast_dataset(count, allocator_);
     for (int64_t j = count - 1; j >= 0; --j) {

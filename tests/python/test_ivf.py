@@ -88,8 +88,8 @@ class TestIVF(TestBase):
 
 
 def run_ivf_test():
-    """Run HNSW index tests"""
-    metric_types = ["ip"]
+    """Run IVF Index Tests"""
+    metric_types = ["ip", "l2"]
     dims = [128, 256, 1024]
     quantizer_recalls = [
         ("sq8", 0.9),
