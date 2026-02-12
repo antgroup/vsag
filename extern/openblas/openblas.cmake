@@ -54,6 +54,28 @@ if(USE_SYSTEM_OPENBLAS)
         message(STATUS "Found OpenBLAS include directory: ${OPENBLAS_INCLUDE}")
         message(STATUS "Found LAPACKE include directory: ${LAPACKE_INCLUDE}")
         
+        # Try to find LAPACKE library (separate from OpenBLAS on some systems)
+        find_library(LAPACKE_LIB
+            NAMES lapacke
+            PATHS
+                /usr/lib
+                /usr/lib64
+                /usr/lib/x86_64-linux-gnu
+                /usr/lib/aarch64-linux-gnu
+                /usr/local/lib
+                /usr/local/lib64
+                /opt/homebrew/lib
+            NO_DEFAULT_PATH
+        )
+        
+        if(LAPACKE_LIB)
+            message(STATUS "Found LAPACKE library: ${LAPACKE_LIB}")
+            set(OPENBLAS_LAPACKE_LIB ${LAPACKE_LIB})
+        else()
+            message(STATUS "LAPACKE library not found as separate library, assuming it's included in OpenBLAS")
+            set(OPENBLAS_LAPACKE_LIB "")
+        endif()
+        
         # Set install_dir to a dummy value for compatibility
         set(install_dir ${CMAKE_CURRENT_BINARY_DIR}/${name}/system)
         

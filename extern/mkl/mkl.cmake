@@ -142,6 +142,11 @@ else()
         # Use the system OpenBLAS library
         set(BLAS_LIBRARIES ${OPENBLAS_LIB})
         
+        # Add LAPACKE library if found separately
+        if(DEFINED OPENBLAS_LAPACKE_LIB AND OPENBLAS_LAPACKE_LIB)
+            list(APPEND BLAS_LIBRARIES ${OPENBLAS_LAPACKE_LIB})
+        endif()
+        
         # Add gfortran dependency
         if (APPLE AND DEFINED GFORTRAN_LIB AND EXISTS "${GFORTRAN_LIB}")
             list(APPEND BLAS_LIBRARIES "${GFORTRAN_LIB}")
