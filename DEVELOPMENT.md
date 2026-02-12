@@ -76,6 +76,35 @@ clean-release:           ## Clear build-release/ directory.
 install:                 ## Build and install the release version of vsag.
 ```
 
+### Build Performance Tuning
+
+The VSAG project can be resource-intensive during compilation. You can control the number of parallel build jobs using the `COMPILE_JOBS` environment variable:
+
+```bash
+# Default: uses 4 parallel jobs
+make debug
+
+# Customize based on your system resources
+# For systems with more CPU cores
+make COMPILE_JOBS=8 debug
+
+# For systems with limited memory, reduce parallelism
+make COMPILE_JOBS=2 debug
+
+# Disable specific features to speed up development builds
+make VSAG_ENABLE_TESTS=OFF VSAG_ENABLE_EXAMPLES=OFF debug
+```
+
+**Resource Requirements:**
+- Minimum: 4 CPU cores, 8GB RAM
+- Recommended: 8+ CPU cores, 16GB RAM
+- For full parallel build with all features: 16GB+ RAM recommended
+
+**Tips for Resource-Constrained Environments:**
+- Reduce `COMPILE_JOBS` to 1-2 if experiencing out-of-memory errors
+- Disable unnecessary components during development (tests, examples, tools)
+- Use `make clean` before rebuilding to free up disk space
+
 ## Project Structure
 - `cmake/`: cmake util functions
 - `docker/`: the dockerfile to build develop and ci image
