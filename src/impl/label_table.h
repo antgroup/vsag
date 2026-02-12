@@ -56,7 +56,7 @@ public:
     void
     SetImmutable() {
         this->use_reverse_map_ = false;
-        STLUnorderedMap<LabelType, InnerIdType> empty_remap(allocator_);
+        PGUnorderedMap<LabelType, InnerIdType> empty_remap(allocator_);
         this->label_remap_.swap(empty_remap);
     }
 
@@ -335,7 +335,7 @@ public:
     // Whether to use reverse map to speed up GetIdByLabel.
     bool use_reverse_map_{true};
     // Reverse map from label to id.
-    STLUnorderedMap<LabelType, InnerIdType> label_remap_;
+    PGUnorderedMap<LabelType, InnerIdType> label_remap_;
 
     bool compress_duplicate_data_{true};
     bool support_tombstone_{false};
