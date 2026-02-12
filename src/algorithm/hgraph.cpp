@@ -503,7 +503,6 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
     std::string str = format_map(hgraph_params_template, DEFAULT_MAP);
     auto inner_json = JsonType::Parse(str);
     mapping_external_param_to_inner(hgraph_json, external_mapping, inner_json);
-
     return inner_json;
 }
 

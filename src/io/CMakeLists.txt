@@ -28,6 +28,8 @@ set (IO_SRC
         memory_block_io.cpp
         reader_io.cpp
         reader_io_parameter.cpp
+        uring_io.cpp
+        uring_io_parameter.cpp
 )
 
 add_library (io OBJECT ${IO_SRC})
@@ -39,6 +41,16 @@ else ()
     target_compile_definitions (io PUBLIC -DHAVE_LIBAIO=0)
     target_link_libraries (io PUBLIC fmt::fmt coverage_config)
     message (STATUS "io module: libaio not available, async I/O disabled")
+endif ()
+
+if (HAVE_LIBURING)
+    target_compile_definitions (io PUBLIC -DHAVE_LIBURING=1)
+    target_link_libraries (io PUBLIC fmt::fmt uring coverage_config)
+    message (STATUS "io module: linking with liburing")
+else ()
+    target_compile_definitions (io PUBLIC -DHAVE_LIBURING=0)
+    target_link_libraries (io PUBLIC fmt::fmt coverage_config)
+    message (STATUS "io module: liburing not available, io_uring disabled")
 endif ()
 
 maybe_add_dependencies (io spdlog)
