@@ -101,7 +101,7 @@ SparseTermDataCell::fill_heap_initial(uint32_t id,
                                       uint32_t offset_id,
                                       uint32_t n_candidate,
                                       const FilterPtr& filter) const {
-    if (dist != 0) {
+    if (dist < 0) {
         if constexpr (type == InnerSearchType::WITH_FILTER) {
             if (not filter->CheckValid(id + offset_id)) {
                 dist = 0;
@@ -188,7 +188,7 @@ SparseTermDataCell::InsertHeapByDists(float* dists,
     uint32_t id = 0;
     if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
         if (heap.size() < n_candidate) {
-            for (; id < dists_size; id++) {
+            for (; id < total_count_; id++) {
                 if (fill_heap_initial<type>(
                         id, dists[id], cur_heap_top, heap, offset_id, n_candidate, filter)) {
                     id++;
@@ -198,7 +198,7 @@ SparseTermDataCell::InsertHeapByDists(float* dists,
         }
     }
 
-    for (; id < dists_size; id++) {
+    for (; id < total_count_; id++) {
         insert_candidate_into_heap<mode, type>(
             id, dists[id], cur_heap_top, heap, offset_id, radius, filter);
     }
@@ -273,6 +273,7 @@ SparseTermDataCell::InsertVector(const SparseVector& sparse_base, uint16_t base_
 
         term_sizes_[term] += 1;
     }
+    total_count_++;
 }
 
 void

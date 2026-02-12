@@ -192,7 +192,7 @@ TEST_CASE("SINDI Basic Test", "[ut][SINDI]") {
 
         // test serialize
         auto another_result = another_index->KnnSearch(query, k, search_param_str, nullptr);
-        for (int j = 0; j < k; j++) {
+        for (int j = 0; j < another_result->GetDim(); j++) {
             REQUIRE(result->GetIds()[j] == another_result->GetIds()[j]);
             REQUIRE(std::abs(result->GetDistances()[j] - another_result->GetDistances()[j]) < 1e-3);
         }

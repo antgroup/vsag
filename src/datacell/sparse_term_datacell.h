@@ -153,6 +153,8 @@ public:
 
     bool use_quantization_{false};
 
+    int64_t total_count_{0};
+
     std::shared_ptr<QuantizationParams> quantization_params_;
 };
 }  // namespace vsag
