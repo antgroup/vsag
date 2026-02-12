@@ -152,8 +152,8 @@ SparseTermDataCell::InsertHeapByDists(float* dists,
     uint32_t id = 0;
     if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
         if (heap.size() < n_candidate) {
-            for (; id < dists_size; id++) {
-                if (dists[id] != 0) {
+            for (; id < total_count_; id++) {
+                if (dists[id] < 0) {
                     if constexpr (type == InnerSearchType::WITH_FILTER) {
                         if (not filter->CheckValid(id + offset_id)) {
                             dists[id] = 0;
@@ -173,7 +173,7 @@ SparseTermDataCell::InsertHeapByDists(float* dists,
         }
     }
 
-    for (; id < dists_size; id++) {
+    for (; id < total_count_; id++) {
         if constexpr (type == InnerSearchType::WITH_FILTER) {
 #if __cplusplus >= 202002L
             if (dists[id] > cur_heap_top or not filter->CheckValid(id + offset_id)) [[likely]] {
@@ -247,6 +247,7 @@ SparseTermDataCell::InsertVector(const SparseVector& sparse_base, uint32_t base_
         term_datas_[term].push_back(val);
         term_sizes_[term] += 1;
     }
+    total_count_++;
 }
 
 void

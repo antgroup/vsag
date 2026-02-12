@@ -104,6 +104,8 @@ public:
     Vector<uint32_t> term_sizes_;
 
     Allocator* const allocator_{nullptr};
+
+    int64_t total_count_{0};
 };
 
 using SparseTermDataCellPtr = std::shared_ptr<SparseTermDataCell>;
