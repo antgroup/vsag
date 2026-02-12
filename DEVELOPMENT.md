@@ -27,7 +27,9 @@ docker pull vsaglib/vsag:ubuntu
 - Compiler:
   - GCC version 9.4.0 or later
   - or Clang version 13.0.0 or later
-- Build Tools: CMake version 3.18.0 or later
+- Build Tools: 
+  - CMake version 3.18.0 or later
+  - clang-format version 13 or later (version 15 recommended for CI consistency)
 - Additional Dependencies:
   - gfortran
   - python 3.6+

@@ -15,6 +15,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       - name: Install Clang format
-        run: sudo apt-get install clang-format
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-format-15
+          sudo ln -sf /usr/bin/clang-format-15 /usr/bin/clang-format
+          clang-format --version
       - name: Run Clang format check
         run: ./scripts/format/check_format.sh

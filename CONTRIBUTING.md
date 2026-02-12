@@ -84,14 +84,21 @@ And we made the following changes based on the guide:
 
 ### Format code
 
-Install clang-format-13, or later
+Install clang-format (version 13 or later recommended, version 15 used in CI)
 ```shell
+# Ubuntu/Debian
 $ sudo apt-get install clang-format
+
+# Or install a specific version (e.g., clang-format-15)
+$ sudo apt-get install clang-format-15
+$ sudo ln -s /usr/bin/clang-format-15 /usr/bin/clang-format
 ```
 To format the code
 ```shell
 $ make fmt
 ```
+
+**Note**: While any version >= 13 should work, we recommend using clang-format-15 for consistency with the CI environment.
 
 ## Run tests with code coverage
 

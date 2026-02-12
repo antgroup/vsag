@@ -1,4 +1,7 @@
 ---
+# VSAG C++ Code Formatting Configuration
+# Requires: clang-format version 13 or later
+# Recommended: clang-format version 15 (used in CI/CD)
 Language: Cpp
 BasedOnStyle: Google
 AccessModifierOffset: -4
