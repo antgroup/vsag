@@ -95,18 +95,30 @@ Thrive together in VSAG community with users and developers from all around the 
 - Discuss at [discord](https://discord.com/invite/JyDmUzuhrp).
 - Follow us on [Weixin Official Accounts](./docs/weixin-qr.jpg)（微信公众平台）to get the latest news.
 
-## Roadmap
-- v0.15 (ETA: Apr. 2025)
-  - support sparse vector searching
-  - introduce pluggable product quantization(known as PQ) in datacell
-- v0.16 (ETA: May 2025)
-  - support neon instruction acceleration on ARM platform
-  - support using GPU to accelerate index building
-  - provide an optimizer that supports optimizing search parameters by recall or latency
-- v0.17 (ETA: Jun. 2025)
-  - support amx instruction acceleration on Intel CPU
-  - support attributes stored in vector index
-  - support graph structure compression
+## Roadmap v1.0 (ETA Mar. 2026)
+- **Versatile Data Type Support**
+  - **FP32 Vectors**: For standard, high-precision retrieval scenarios.
+  - **INT8, BF16, FP16 Vectors**: Natively support quantized embedding models to reduce memory footprint.
+  - **Sparse Vectors**: To enhance text retrieval capabilities.
+
+- **Optimized Index Types**
+  - **HGraph (Graph Index)**: For scenarios demanding high recall and low latency.
+  - **IVF (Inverted File Index)**: Optimized for large-scale search (high `k`) and batch queries.
+  - **SINDI (Sparse Inverted Non-redundant Distance Index)**: Optimized sparse vector index.
+
+- **Advanced Quantization Methods**
+  - **RaBitQ (BQ)**: Extreme compression for minimal memory usage.
+  - **PQ (Product Quantization)**: Flexible compression for tuning the memory-recall trade-off.
+  - **SQ4 & SQ8 (Scalar Quantization)**: Balanced performance with minimal recall loss for memory and speed gains.
+
+- **Cross-Platform CPU Optimizations**
+  - **x86_64**: `SSE`, `AVX`, `AVX2`, `AVX512`, `AMX`.
+  - **ARM**: `Neon`, `SVE`.
+  - **Optional Libraries**: Supports `Intel-MKL` and `OpenBLAS` for accelerated matrix multiplication.
+
+- **Granular Resource Management**
+  - **Memory Isolation**: Per-index memory allocators for tenant-level memory management.
+  - **CPU Control**: Supports custom thread pools to scale ingestion and search throughput.
 
 ## Our Publications
 
