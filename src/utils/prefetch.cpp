@@ -23,7 +23,7 @@ namespace vsag {
 
 template <>
 void
-PrefetchImpl<0>(const void* data) {};
+PrefetchImpl<0>(const void* data){};
 
 void
 PrefetchLines(const void* data, uint64_t size) {

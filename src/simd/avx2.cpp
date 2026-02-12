@@ -96,8 +96,7 @@ Prefetch(const void* data) {
 }
 
 #if defined(ENABLE_AVX2)
-__inline __m128i __attribute__((__always_inline__))
-load_8_char(const uint8_t* data) {
+__inline __m128i __attribute__((__always_inline__)) load_8_char(const uint8_t* data) {
     return _mm_loadl_epi64(reinterpret_cast<const __m128i*>(data));
 }
 #endif
@@ -373,8 +372,7 @@ FP32ReduceAdd(const float* x, uint64_t dim) {
 }
 
 #if defined(ENABLE_AVX2)
-__inline __m256i __attribute__((__always_inline__))
-load_8_short(const uint16_t* data) {
+__inline __m256i __attribute__((__always_inline__)) load_8_short(const uint16_t* data) {
     __m128i bf16 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(data));
     __m256i bf32 = _mm256_cvtepu16_epi32(bf16);
     return _mm256_slli_epi32(bf32, 16);
@@ -774,18 +772,16 @@ SQ8ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
 
 #if defined(ENABLE_AVX2)
 
-__inline __m128i __attribute__((__always_inline__))
-load_4_char(const uint8_t* data) {
+__inline __m128i __attribute__((__always_inline__)) load_4_char(const uint8_t* data) {
     return _mm_set_epi8(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, data[3], data[2], data[1], data[0]);
 }
 
-__inline void __attribute__((__always_inline__))
-SQ4Decode16Values(const uint8_t* codes,
-                  uint64_t offset,
-                  __m256& values01,
-                  __m256& values23,
-                  const float* lower_bound,
-                  const float* diff) {
+__inline void __attribute__((__always_inline__)) SQ4Decode16Values(const uint8_t* codes,
+                                                                   uint64_t offset,
+                                                                   __m256& values01,
+                                                                   __m256& values23,
+                                                                   const float* lower_bound,
+                                                                   const float* diff) {
     // Load 8 bytes (16 4-bit values)
     __m128i code_vec = load_4_char(codes + (offset >> 1));
     __m128i code_vec2 = load_4_char(codes + (offset >> 1) + 4);

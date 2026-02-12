@@ -385,7 +385,7 @@ public:
     }
 
     virtual void
-    Train(const DatasetPtr& base) {};
+    Train(const DatasetPtr& base){};
 
     virtual void
     UpdateAttribute(int64_t id, const AttributeSet& new_attrs) {

@@ -29,7 +29,7 @@ docker pull vsaglib/vsag:ubuntu
   - or Clang version 13.0.0 or later
 - Build Tools: 
   - CMake version 3.18.0 or later
-  - clang-format version 13 or later (version 15 recommended for CI consistency)
+  - clang-format version 15 EXACTLY (not higher, not lower - required for consistent formatting)
 - Additional Dependencies:
   - gfortran
   - python 3.6+

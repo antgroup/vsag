@@ -40,7 +40,8 @@ struct LogListener : Catch::EventListenerBase {
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start_).count();
         std::cout << std::fixed << std::setprecision(3) << testCaseStats.testInfo->name
                   << ": Executed in " << (duration > 10000 ? "\033[31m" : "") << duration / 1000.0F
-                  << "\033[0m" << " seconds" << std::endl;
+                  << "\033[0m"
+                  << " seconds" << std::endl;
     }
 
 private:
