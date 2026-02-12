@@ -125,6 +125,14 @@ const char* const STATSTIC_RANGE_HOP = "range_hop";
 const char* const STATSTIC_RANGE_CACHE_HIT = "range_cache_hit";
 const char* const STATSTIC_RANGE_IO_TIME = "range_io_time";
 
+// Additional statistics
+const char* const STATSTIC_KNN_PREREORDER_TIME = "knn_prereorder_time";
+const char* const STATSTIC_KNN_REORDER_TIME = "knn_reorder_time";
+const char* const STATSTIC_KNN_IO_MAX_TIME = "knn_io_max_time";
+const char* const STATSTIC_RANGE_PREREORDER_TIME = "range_prereorder_time";
+const char* const STATSTIC_RANGE_REORDER_TIME = "range_reorder_time";
+const char* const STATSTIC_RANGE_IO_MAX_TIME = "range_io_max_time";
+
 //Error message
 const char* const MESSAGE_PARAMETER = "invalid parameter";
 
