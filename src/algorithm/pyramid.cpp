@@ -427,6 +427,7 @@ Pyramid::Serialize(StreamWriter& writer) const {
     JsonType basic_info;
     basic_info["max_capacity"].SetInt(max_capacity_);
     auto metadata = std::make_shared<Metadata>();
+    metadata->SetVersion("v0.15");
     metadata->Set(BASIC_INFO, basic_info);
     auto footer = std::make_shared<Footer>(metadata);
     footer->Write(writer);
