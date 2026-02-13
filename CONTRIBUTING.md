@@ -84,14 +84,20 @@ And we made the following changes based on the guide:
 
 ### Format code
 
-Install clang-format-13, or later
+**Important**: VSAG requires **clang-format version 15 EXACTLY**. Do not use higher or lower versions as they may produce different formatting.
+
+Install clang-format-15:
 ```shell
-$ sudo apt-get install clang-format
+# Ubuntu/Debian
+$ sudo apt-get install clang-format-15
 ```
-To format the code
+
+To format the code:
 ```shell
 $ make fmt
 ```
+
+The format script will automatically verify you're using clang-format-15 and will fail if a different version is detected.
 
 ## Run tests with code coverage
 
