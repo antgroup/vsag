@@ -27,6 +27,7 @@ namespace vsag {
 
 void
 PyramidParameters::FromJson(const JsonType& json) {
+    InnerIndexParameter::FromJson(json);
     // init graph param
     const auto& graph_json = json[GRAPH_KEY];
 

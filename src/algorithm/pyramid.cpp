@@ -650,7 +650,7 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
                 "{HOLD_MOLDS}": false
             }
         },
-        "{BUILD_THREAD_COUNT_KEY}": 16,
+        "{BUILD_THREAD_COUNT_KEY}": 1,
         "{EF_CONSTRUCTION_KEY}": 400,
         "{NO_BUILD_LEVELS}":[],
         "{INDEX_MIN_SIZE}": 0,
