@@ -150,6 +150,8 @@ The final commit will look like:
 feat(hgraph): description here
 
 Signed-off-by: Your Actual Name <your.actual@email.com>
+
+Co-Authored-By: Claude <noreply@anthropic.com>
 ```
 
 ### [skip ci] Prefix

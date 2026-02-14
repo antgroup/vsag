@@ -41,6 +41,11 @@ Commit code changes to a git remote repository (non-interactive mode):
 
 5. **Execute Commit**
    - Use `git commit -s` to add DCO sign-off with the user's configured git identity
+   - Add Co-Authored-By trailer for Claude Code: `Co-Authored-By: Claude <noreply@anthropic.com>`
+   - Commit command format:
+     ```
+     git commit -s -m "<commit-message>" -m "Co-Authored-By: Claude <noreply@anthropic.com>"
+     ```
 
 ## Push to Remote
 
