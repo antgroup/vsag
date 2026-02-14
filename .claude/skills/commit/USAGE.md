@@ -4,6 +4,8 @@
 
 The `commit` skill helps you commit VSAG project code changes to a git remote repository following best practices: code formatting, branch management, and signed commits with DCO (Developer Certificate of Origin).
 
+**Note:** This skill operates in **non-interactive mode** - all decisions are made automatically based on conventions.
+
 ## Installation
 
 The skill is already placed in the project directory at `.claude/skills/commit/`. Claude Code will auto-load it when available.
@@ -26,24 +28,32 @@ Stages and commits all current changes (equivalent to `git add -A`).
 
 Only stages and commits the specified file(s).
 
-## Interactive Workflow
+## Automatic Workflow (Non-Interactive)
 
 ### 1. Code Formatting Check
 
-Claude automatically runs `make fmt` to ensure code follows the project's formatting standards. If formatting produces changes, Claude will ask whether to include these changes in the commit.
+Claude automatically runs `make fmt` to ensure code follows the project's formatting standards. Any formatting changes are staged automatically.
 
 ### 2. Branch Check and Creation
 
-- If you have changes on the `main` or `master` branch, Claude will suggest creating a new branch
-- Branch names are auto-generated based on commit type (e.g., `feat-hgraph-optimize`, `fix-memory-leak`)
-- You can confirm the suggested name or provide your own
+- If you have changes on the `main` or `master` branch, Claude automatically creates a new branch
+- Branch names are auto-generated based on the commit type (e.g., `feat-hgraph-optimize`, `fix-memory-leak`)
+- No confirmation needed - branch is created immediately
 
 ### 3. Commit Message Generation
 
-Claude analyzes your changes and generates a commit message following the Conventional Commits specification:
+Claude analyzes your changes and generates a commit message following the VSAG project format:
 
 ```
-feat(hgraph): add new optimization for vector search
+type(scope): description
+
+Signed-off-by: Your Name <your.email@example.com>
+```
+
+For documentation-only changes, `[skip ci]` is prepended:
+
+```
+[skip ci] docs(claude): update commit skill documentation
 
 Signed-off-by: Your Name <your.email@example.com>
 ```
@@ -57,23 +67,36 @@ Available commit types:
 - `test` - Test-related changes
 - `chore` - Build process or tooling changes
 
+Available scopes (based on changed files):
+- `hgraph` - HGraph algorithm
+- `hnsw` - HNSW algorithm
+- `sindi` - SINDI sparse index
+- `pyramid` - Pyramid index
+- `ivf` - IVF index
+- `quantization` - Quantization methods
+- `simd` - SIMD optimizations
+- `storage` - Storage layer
+- `io` - I/O abstractions
+- `datacell` - DataCell components
+- `factory` - Factory/creation
+- `tests` - Test infrastructure
+- `examples` - Example code
+- `tools` - Tools and scripts
+- `build` - Build system
+- `claude` - Claude Code configuration
+- `docs` - Documentation
+
 ### 4. Remote Repository Selection
 
-Claude does **not** assume the remote is always named "origin". Instead:
+Claude automatically selects the remote to push to:
+- **Prefers GitHub remotes** (URLs containing github.com)
+- If multiple GitHub remotes exist, prefers `antgroup/vsag`
+- If no GitHub remote, uses the first configured remote
+- No confirmation needed - push happens automatically
 
-- Lists all configured remotes using `git remote -v`
-- If multiple remotes exist, asks you to select which one to push to
-- If only one remote exists, confirms with you before using it
-- If no remotes are configured, prompts you to add one
+### 5. Push
 
-### 5. Confirmation and Push
-
-Before pushing, Claude displays:
-- Complete diff summary
-- The generated commit message
-- Selected remote and branch
-
-You must confirm before the push is executed.
+The branch is pushed to the selected remote immediately without confirmation.
 
 ## Usage Scenarios
 
@@ -81,32 +104,33 @@ You must confirm before the push is executed.
 
 ```
 User: /commit
-Claude: You are currently on the main branch. Suggested new branch: feat-new-index. Confirm?
-User: Yes
+Claude: Automatically created branch: feat-optimize-search
 Claude: [make fmt output]
-Claude: Generated commit message: feat(index): add new index implementation
-Claude: Found remotes: origin (github.com), upstream (github.com)
-Claude: Which remote to push to?
-User: origin
-Claude: Confirm commit and push to origin/feat-new-index?
-User: Yes
-Claude: Successfully pushed to origin/feat-new-index
+Claude: Commit message: feat(hgraph): optimize vector search performance
+Claude: Pushing to github-vsag/feat-optimize-search
+Claude: Successfully pushed. Create PR at: https://github.com/antgroup/vsag/pull/new/feat-optimize-search
 ```
 
-### Scenario 2: Committing Specific Files
+### Scenario 2: Committing Documentation
 
 ```
-User: /commit src/algorithm/hnswlib/hnswalg.cpp
-Claude: Staging changes to src/algorithm/hnswlib/hnswalg.cpp...
-Claude: [proceeds with commit workflow]
+User: /commit
+Claude: Automatically created branch: docs-update-guide
+Claude: [make fmt output]
+Claude: Commit message: [skip ci] docs(claude): update commit skill guide
+Claude: Pushing to github-vsag/docs-update-guide
+Claude: Successfully pushed. Create PR at: https://github.com/antgroup/vsag/pull/new/docs-update-guide
 ```
 
 ### Scenario 3: Committing on a Feature Branch
 
 ```
 User: /commit
-Claude: Currently on branch feat-optimize (not main/master), committing directly to this branch.
-Claude: [proceeds with commit workflow]
+Claude: Already on branch feat-optimize, committing directly.
+Claude: [make fmt output]
+Claude: Commit message: refactor(hgraph): extract common search logic
+Claude: Pushing to github-vsag/feat-optimize
+Claude: Successfully pushed.
 ```
 
 ## Important Notes
@@ -123,10 +147,14 @@ git config user.email  # Used for Signed-off-by email
 The final commit will look like:
 
 ```
-feat: description here
+feat(hgraph): description here
 
 Signed-off-by: Your Actual Name <your.actual@email.com>
 ```
+
+### [skip ci] Prefix
+
+Documentation-only commits (only `.md` files or files in `docs/` directory) automatically get `[skip ci]` prepended to skip CI builds.
 
 ### Code Formatting
 
@@ -136,29 +164,27 @@ Signed-off-by: Your Actual Name <your.actual@email.com>
 
 ### Main Branch Protection
 
-If changes are detected on `main` or `master`, creating a new branch is **mandatory**.
+If changes are detected on `main` or `master`, a new branch is automatically created.
 
-### Remote Repository Flexibility
+### Remote Repository Selection
 
-The skill handles various remote configurations:
+The skill automatically handles various remote configurations:
 
 ```bash
-# Single remote - confirms before use
+# Single GitHub remote - used automatically
 git remote -v
-origin  https://github.com/user/vsag.git (fetch)
-origin  https://github.com/user/vsag.git (push)
+origin  https://github.com/antgroup/vsag.git (fetch)
+origin  https://github.com/antgroup/vsag.git (push)
 
-# Multiple remotes - asks you to select
+# Multiple remotes - GitHub is preferred
 git remote -v
-origin   https://github.com/user/vsag.git (fetch)
-origin   https://github.com/user/vsag.git (push)
-upstream https://github.com/antgroup/vsag.git (fetch)
-upstream https://github.com/antgroup/vsag.git (push)
+origin   https://code.alipay.com/octopus/vsag.git (fetch)
+github   https://github.com/antgroup/vsag.git (fetch)  <- This one is chosen
 
-# Named differently - adapts accordingly
+# Different GitHub organization - antgroup/vsag is preferred
 git remote -v
-github  https://github.com/user/vsag.git (fetch)
-github  https://github.com/user/vsag.git (push)
+fork     https://github.com/yourname/vsag.git (fetch)
+upstream https://github.com/antgroup/vsag.git (fetch)  <- This one is chosen
 ```
 
 ## Troubleshooting
@@ -210,7 +236,7 @@ git config user.email "your.email@example.com"
 ### Git Command Sequence
 
 1. `make fmt` - Format code
-2. `git branch --show-current` - Get current branch
+2. `git rev-parse --abbrev-ref HEAD` - Get current branch (compatible with older git versions)
 3. `git status` - Check change status
 4. `git add -A` or `git add <files>` - Stage changes
 5. `git diff --staged` - Review staged changes
@@ -236,10 +262,19 @@ Examples:
 
 1. Run `git remote -v` to get all remotes
 2. Parse remote names and URLs
-3. Handle cases:
-   - 0 remotes: Prompt user to add a remote
-   - 1 remote: Confirm with user, then use it
-   - 2+ remotes: Present options via `AskUserQuestion`
+3. Priority:
+   - GitHub remote with `antgroup/vsag` (highest)
+   - Any GitHub remote (medium)
+   - First available remote (lowest)
+4. Push automatically
+
+### Commit Message Format
+
+```
+[skip ci] <type>(<scope>): <description>
+```
+
+The `[skip ci]` prefix is added for documentation-only changes.
 
 ## Related VSAG Documentation
 
