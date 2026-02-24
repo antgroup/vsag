@@ -110,7 +110,8 @@ main(int argc, char** argv) {
             "neighbor_sample_rate": 0.2,
             "no_build_levels": [0, 1],
             "use_reorder": true,
-            "graph_type": "odescent"
+            "graph_type": "odescent",
+            "build_thread_count": 16
         }
     }
     )";
