@@ -24,11 +24,6 @@
 
 namespace fixtures {
 
-union FilterUnion {
-    const char* c;
-    uint64_t u;
-};
-
 struct CompareByFirst {
     constexpr bool
     operator()(std::pair<float, int64_t> const& a,
