@@ -36,7 +36,11 @@ public:
                       std::string vector_type = "dense",
                       uint64_t extra_info_size = 0,
                       bool has_duplicate = false,
-                      int64_t id_shift = 16);
+                      int64_t id_shift = 16,
+                      bool is_multi_vector = false);
+
+    static std::shared_ptr<TestDataset>
+    CreateMultiVectorDataset(uint64_t dim, uint64_t count);
 
     static std::shared_ptr<TestDataset>
     CreateNanDataset(const std::string& metric_str);
