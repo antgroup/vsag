@@ -141,7 +141,8 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::WarpTestIndex,
             auto deserialize_index = index2->Deserialize(serialize_binary.value());
             REQUIRE(deserialize_index.has_value());
         }
-        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+        auto dataset =
+            pool.GetDatasetAndCreate(dim, base_count, metric_type, false, 0.8, 0, 16, true);
         TestBuildIndex(index, dataset, true);
         SECTION("serialize/deserialize by binary") {
             auto index2 = TestFactory(name, param, true);
