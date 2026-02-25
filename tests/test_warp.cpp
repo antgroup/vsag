@@ -110,7 +110,8 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::WarpTestIndex, "Warp Add Test", "[ft][war
         auto param = GenerateWarpBuildParametersString(metric_type, dim, warp_param);
         auto index = TestFactory(name, param, true);
         REQUIRE(index->GetIndexType() == vsag::IndexType::WARP);
-        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+        auto dataset =
+            pool.GetDatasetAndCreate(dim, base_count, metric_type, false, 0.8, 0, 16, true);
         TestAddIndex(index, dataset, true);
         TestKnnSearch(index, dataset, search_param, 0.99, true);
         TestRangeSearch(index, dataset, search_param, 0.99, 10, true);

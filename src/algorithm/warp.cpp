@@ -77,8 +77,10 @@ WARP::Add(const DatasetPtr& data, AddMode mode) {
                    fmt::format("base.dim({}) must be equal to index.dim({})", base_dim, dim_));
     CHECK_ARGUMENT(data->GetFloat32Vectors() != nullptr, "base.float_vector is nullptr");
 
-    // For multi-vector support, we need vector counts per document
+    // For multi-vector support, vector counts per document is required
     const uint32_t* vector_counts = data->GetVectorCounts();
+    CHECK_ARGUMENT(vector_counts != nullptr, "base.vector_counts is nullptr");
+
     int64_t num_elements = data->GetNumElements();
 
     {
@@ -88,158 +90,81 @@ WARP::Add(const DatasetPtr& data, AddMode mode) {
         }
     }
 
-    // If no vector counts provided, assume 1 vector per document (backward compatible)
-    if (vector_counts == nullptr) {
-        auto add_func = [&](const float* data,
-                            const int64_t label,
-                            const AttributeSet* attr,
-                            const char* extra_info) -> std::optional<int64_t> {
-            InnerIdType inner_id;
-            {
-                std::scoped_lock add_lock(this->label_lookup_mutex_, this->add_mutex_);
-                if (this->label_table_->CheckLabel(label)) {
-                    return label;
-                }
-                inner_id = this->total_count_;
-                this->total_count_++;
-                this->resize(total_count_);
-                this->label_table_->Insert(inner_id, label);
-            }
-            std::shared_lock global_lock(this->global_mutex_);
-            if (use_attribute_filter_ && attr != nullptr) {
-                this->attr_filter_index_->Insert(*attr, inner_id);
-            }
+    // Multi-vector document handling
+    const auto total = data->GetNumElements();
+    const auto* labels = data->GetIds();
+    const auto* vectors = data->GetFloat32Vectors();
+    const auto* attrs = data->GetAttributeSets();
+    const auto* extra_info = data->GetExtraInfos();
+    const auto extra_info_size = data->GetExtraInfoSize();
 
-            this->add_one_doc(data, 1, inner_id);
-            return std::nullopt;
-        };
-
-        std::vector<std::future<std::optional<int64_t>>> futures;
-        const auto total = data->GetNumElements();
-        const auto* labels = data->GetIds();
-        const auto* vectors = data->GetFloat32Vectors();
-        const auto* attrs = data->GetAttributeSets();
-        const auto* extra_info = data->GetExtraInfos();
-        const auto extra_info_size = data->GetExtraInfoSize();
-        for (int64_t j = 0; j < total; ++j) {
-            const auto label = labels[j];
-            {
-                std::lock_guard label_lock(this->label_lookup_mutex_);
-                if (this->label_table_->CheckLabel(label)) {
-                    failed_ids.emplace_back(label);
-                    continue;
-                }
+    auto add_func = [&](const float* doc_vectors,
+                        uint32_t doc_vec_count,
+                        const int64_t label,
+                        const AttributeSet* attr,
+                        const char* extra_info) -> std::optional<int64_t> {
+        InnerIdType inner_id;
+        {
+            std::scoped_lock add_lock(this->label_lookup_mutex_, this->add_mutex_);
+            if (this->label_table_->CheckLabel(label)) {
+                return label;
             }
-            if (this->thread_pool_ != nullptr) {
-                auto future =
-                    this->thread_pool_->GeneralEnqueue(add_func,
-                                                       vectors + j * dim_,
-                                                       label,
-                                                       attrs == nullptr ? nullptr : attrs + j,
-                                                       extra_info + j * extra_info_size);
-                futures.emplace_back(std::move(future));
-            } else {
-                if (auto add_res = add_func(vectors + j * dim_,
-                                            label,
-                                            attrs == nullptr ? nullptr : attrs + j,
-                                            extra_info + j * extra_info_size);
-                    add_res.has_value()) {
-                    failed_ids.emplace_back(add_res.value());
-                }
+            inner_id = this->total_count_;
+            this->total_count_++;
+            this->resize(total_count_);
+            this->label_table_->Insert(inner_id, label);
+        }
+        std::shared_lock global_lock(this->global_mutex_);
+        if (use_attribute_filter_ && attr != nullptr) {
+            this->attr_filter_index_->Insert(*attr, inner_id);
+        }
+
+        this->add_one_doc(doc_vectors, doc_vec_count, inner_id);
+        return std::nullopt;
+    };
+
+    std::vector<std::future<std::optional<int64_t>>> futures;
+    uint64_t vec_offset = 0;
+
+    for (int64_t j = 0; j < total; ++j) {
+        const auto label = labels[j];
+        uint32_t doc_vec_count = vector_counts[j];
+
+        {
+            std::lock_guard label_lock(this->label_lookup_mutex_);
+            if (this->label_table_->CheckLabel(label)) {
+                failed_ids.emplace_back(label);
+                vec_offset += doc_vec_count;
+                continue;
             }
         }
 
         if (this->thread_pool_ != nullptr) {
-            for (auto& future : futures) {
-                if (auto reply = future.get(); reply.has_value()) {
-                    failed_ids.emplace_back(reply.value());
-                }
+            auto future = this->thread_pool_->GeneralEnqueue(add_func,
+                                                             vectors + vec_offset * dim_,
+                                                             doc_vec_count,
+                                                             label,
+                                                             attrs == nullptr ? nullptr : attrs + j,
+                                                             extra_info + j * extra_info_size);
+            futures.emplace_back(std::move(future));
+        } else {
+            if (auto add_res = add_func(vectors + vec_offset * dim_,
+                                        doc_vec_count,
+                                        label,
+                                        attrs == nullptr ? nullptr : attrs + j,
+                                        extra_info + j * extra_info_size);
+                add_res.has_value()) {
+                failed_ids.emplace_back(add_res.value());
             }
         }
-    } else {
-        // Multi-vector document handling
-        const auto total = data->GetNumElements();
-        const auto* labels = data->GetIds();
-        const auto* vectors = data->GetFloat32Vectors();
-        const auto* attrs = data->GetAttributeSets();
-        const auto* extra_info = data->GetExtraInfos();
-        const auto extra_info_size = data->GetExtraInfoSize();
 
-        // Calculate total vectors
-        uint64_t total_vectors = 0;
-        for (int64_t i = 0; i < total; ++i) {
-            total_vectors += vector_counts[i];
-        }
+        vec_offset += doc_vec_count;
+    }
 
-        auto add_func = [&](const float* doc_vectors,
-                            uint32_t doc_vec_count,
-                            const int64_t label,
-                            const AttributeSet* attr,
-                            const char* extra_info) -> std::optional<int64_t> {
-            InnerIdType inner_id;
-            {
-                std::scoped_lock add_lock(this->label_lookup_mutex_, this->add_mutex_);
-                if (this->label_table_->CheckLabel(label)) {
-                    return label;
-                }
-                inner_id = this->total_count_;
-                this->total_count_++;
-                this->resize(total_count_);
-                this->label_table_->Insert(inner_id, label);
-            }
-            std::shared_lock global_lock(this->global_mutex_);
-            if (use_attribute_filter_ && attr != nullptr) {
-                this->attr_filter_index_->Insert(*attr, inner_id);
-            }
-
-            this->add_one_doc(doc_vectors, doc_vec_count, inner_id);
-            return std::nullopt;
-        };
-
-        std::vector<std::future<std::optional<int64_t>>> futures;
-        uint64_t vec_offset = 0;
-
-        for (int64_t j = 0; j < total; ++j) {
-            const auto label = labels[j];
-            uint32_t doc_vec_count = vector_counts[j];
-
-            {
-                std::lock_guard label_lock(this->label_lookup_mutex_);
-                if (this->label_table_->CheckLabel(label)) {
-                    failed_ids.emplace_back(label);
-                    vec_offset += doc_vec_count;
-                    continue;
-                }
-            }
-
-            if (this->thread_pool_ != nullptr) {
-                auto future =
-                    this->thread_pool_->GeneralEnqueue(add_func,
-                                                       vectors + vec_offset * dim_,
-                                                       doc_vec_count,
-                                                       label,
-                                                       attrs == nullptr ? nullptr : attrs + j,
-                                                       extra_info + j * extra_info_size);
-                futures.emplace_back(std::move(future));
-            } else {
-                if (auto add_res = add_func(vectors + vec_offset * dim_,
-                                            doc_vec_count,
-                                            label,
-                                            attrs == nullptr ? nullptr : attrs + j,
-                                            extra_info + j * extra_info_size);
-                    add_res.has_value()) {
-                    failed_ids.emplace_back(add_res.value());
-                }
-            }
-
-            vec_offset += doc_vec_count;
-        }
-
-        if (this->thread_pool_ != nullptr) {
-            for (auto& future : futures) {
-                if (auto reply = future.get(); reply.has_value()) {
-                    failed_ids.emplace_back(reply.value());
-                }
+    if (this->thread_pool_ != nullptr) {
+        for (auto& future : futures) {
+            if (auto reply = future.get(); reply.has_value()) {
+                failed_ids.emplace_back(reply.value());
             }
         }
     }
@@ -298,12 +223,10 @@ WARP::SearchWithRequest(const SearchRequest& request) const {
     // Get query information
     const float* query_vectors = request.query_->GetFloat32Vectors();
     const uint32_t* query_vec_counts = request.query_->GetVectorCounts();
-    int64_t query_num = request.query_->GetNumElements();
+    CHECK_ARGUMENT(query_vec_counts != nullptr, "query.vector_counts is nullptr");
 
-    uint32_t query_vec_count = 1;  // Default: single vector query
-    if (query_vec_counts != nullptr) {
-        query_vec_count = query_vec_counts[0];
-    }
+    int64_t query_num = request.query_->GetNumElements();
+    uint32_t query_vec_count = query_vec_counts[0];
 
     FilterPtr ft = nullptr;
     auto combined_filter = std::make_shared<CombinedFilter>();
@@ -398,10 +321,9 @@ WARP::RangeSearch(const vsag::DatasetPtr& query,
     // Get query information
     const float* query_vectors = query->GetFloat32Vectors();
     const uint32_t* query_vec_counts = query->GetVectorCounts();
-    uint32_t query_vec_count = 1;  // Default: single vector query
-    if (query_vec_counts != nullptr) {
-        query_vec_count = query_vec_counts[0];
-    }
+    CHECK_ARGUMENT(query_vec_counts != nullptr, "query.vector_counts is nullptr");
+
+    uint32_t query_vec_count = query_vec_counts[0];
 
     if (limited_size < 0) {
         limited_size = std::numeric_limits<int64_t>::max();

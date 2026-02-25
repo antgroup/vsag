@@ -72,7 +72,8 @@ GenerateVectorCounts(uint64_t count, uint32_t min_count = 1, uint32_t max_count 
     return {vector_counts, total_vectors};
 }
 
-// Calculate distance between two multi-vector documents using max similarity (min distance)
+// Calculate distance between two multi-vector documents using MaxSim similarity
+// MaxSim: for each query vector, find the max similarity (min distance) with any base vector, then sum
 static float
 CalMultiVectorDistance(const vsag::DatasetPtr query,
                        uint64_t query_idx,
@@ -95,9 +96,10 @@ CalMultiVectorDistance(const vsag::DatasetPtr query,
         b_vec_start += base_counts[i];
     }
 
-    // Calculate max similarity (min distance) across all pairs of vectors
-    float min_dist = std::numeric_limits<float>::max();
+    // MaxSim: for each query vector, find min distance (max similarity), then sum
+    float total_score = 0.0F;
     for (uint32_t qv = 0; qv < query_counts[query_idx]; ++qv) {
+        float min_dist = std::numeric_limits<float>::max();
         for (uint32_t bv = 0; bv < base_counts[base_idx]; ++bv) {
             float dist = dist_func(
                 query_vecs + (q_vec_start + qv) * dim, base_vecs + (b_vec_start + bv) * dim, dim);
@@ -105,8 +107,9 @@ CalMultiVectorDistance(const vsag::DatasetPtr query,
                 min_dist = dist;
             }
         }
+        total_score += min_dist;
     }
-    return min_dist;
+    return total_score;
 }
 
 static std::pair<float*, int64_t*>
