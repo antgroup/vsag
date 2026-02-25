@@ -163,6 +163,7 @@ flycheck_*.el
 # vsag
 _deps
 /build/
+/build_*/
 .idea/
 .vscode/
 venv/
@@ -190,3 +191,4 @@ data/
 *.gcov
 /dist/
 opencode.json
+_codeql_detected_source_root

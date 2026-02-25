@@ -1,4 +1,8 @@
 ---
+# VSAG C++ Code Formatting Configuration
+# CRITICAL: Requires clang-format version 15 EXACTLY
+# Do NOT use version 16, 17, 18 or any other version - formatting will differ!
+# Install with: sudo apt-get install clang-format-15
 Language: Cpp
 BasedOnStyle: Google
 AccessModifierOffset: -4
