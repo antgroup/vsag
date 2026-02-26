@@ -178,10 +178,10 @@ WARP::compute_maxsin_similarity(const float* query_vectors,
                                 uint32_t doc_start_vec_idx,
                                 uint32_t doc_vec_count) const {
     if (doc_vec_count == 0 || query_vec_count == 0) {
-        return 0.0f;
+        return 0.0F;
     }
 
-    float total_score = 0.0f;
+    float total_score = 0.0F;
 
     // For each query vector, find max similarity with any document vector
     for (uint32_t q = 0; q < query_vec_count; ++q) {
@@ -477,7 +477,7 @@ WARP::cal_memory_usage() {
     auto memory_usage = this->inner_codes_->GetMemoryUsage();
     memory_usage += sizeof(WARP);
     memory_usage += this->label_table_->GetMemoryUsage();
-    memory_usage += doc_offsets_.size() * sizeof(uint32_t);
+    memory_usage += static_cast<int64_t>(doc_offsets_.size() * sizeof(uint32_t));
     std::unique_lock lock(this->memory_usage_mutex_);
     this->current_memory_usage_.store(memory_usage);
 }
