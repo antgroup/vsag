@@ -149,6 +149,7 @@ DatasetImpl::~DatasetImpl() {  // NOLINT
         allocator_->Deallocate(void_ptr(DatasetImpl::GetInt8Vectors()));
         allocator_->Deallocate(void_ptr(DatasetImpl::GetFloat32Vectors()));
         allocator_->Deallocate(void_ptr(DatasetImpl::GetExtraInfos()));
+        allocator_->Deallocate(void_ptr(DatasetImpl::GetVectorCounts()));
         const auto* sparse_vectors = DatasetImpl::GetSparseVectors();
         if (sparse_vectors != nullptr) {
             for (int i = 0; i < DatasetImpl::GetNumElements(); i++) {
@@ -168,6 +169,7 @@ DatasetImpl::~DatasetImpl() {  // NOLINT
         delete[] DatasetImpl::GetInt8Vectors();
         delete[] DatasetImpl::GetFloat32Vectors();
         delete[] DatasetImpl::GetExtraInfos();
+        delete[] DatasetImpl::GetVectorCounts();
 
         if (DatasetImpl::GetSparseVectors() != nullptr) {
             for (int i = 0; i < DatasetImpl::GetNumElements(); i++) {
