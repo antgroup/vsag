@@ -40,9 +40,6 @@ public:
                       bool is_multi_vector = false);
 
     static std::shared_ptr<TestDataset>
-    CreateMultiVectorDataset(uint64_t dim, uint64_t count);
-
-    static std::shared_ptr<TestDataset>
     CreateNanDataset(const std::string& metric_str);
 
     DatasetPtr base_{nullptr};

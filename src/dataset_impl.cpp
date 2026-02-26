@@ -216,6 +216,11 @@ DatasetImpl::DeepCopy(Allocator* allocator) const {
             allocate_and_copy(this->GetFloat32Vectors(), num_elements * dim, allocator_ref));
     }
 
+    if (this->GetVectorCounts() != nullptr) {
+        copy_dataset->VectorCounts(
+            allocate_and_copy(this->GetVectorCounts(), num_elements, allocator_ref));
+    }
+
     if (this->GetExtraInfoSize() != 0) {
         copy_dataset->ExtraInfoSize(this->GetExtraInfoSize());
         copy_dataset->ExtraInfos(allocate_and_copy(
@@ -287,6 +292,7 @@ DatasetImpl::Append(const DatasetPtr& other) {
     APPEND_DATA(DISTS, float*, Distances, dim);
     APPEND_DATA(INT8_VECTORS, int8_t*, Int8Vectors, dim);
     APPEND_DATA(FLOAT32_VECTORS, float*, Float32Vectors, dim);
+    APPEND_DATA(VECTOR_COUNTS, uint32_t*, VectorCounts, 1);
     if (this->GetExtraInfoSize() != 0) {
         APPEND_DATA(EXTRA_INFOS, char*, ExtraInfos, this->GetExtraInfoSize());
     }
