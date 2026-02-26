@@ -57,6 +57,7 @@ class TestIVF(TestBase):
                     "base_quantization_type": self.base_quantization_type,
                     "precise_quantization_type": self.precise_quantization_type,
                     "use_reorder": self.use_reorder,
+                    "factor": 2
                 },
             }
         )
