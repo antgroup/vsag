@@ -29,7 +29,7 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
                         IteratorFilterContext* iter_ctx) {
     // set query allocator
     Allocator* query_allocator = select_query_allocator(ctx.alloc, allocator_);
-
+    topk = std::min(topk, static_cast<int64_t>(input->Size()));
     auto reorder_heap = std::make_shared<StandardHeap<true, false>>(query_allocator, topk);
     auto computer = flatten_->FactoryComputer(query);
     uint64_t candidate_size = input->Size();

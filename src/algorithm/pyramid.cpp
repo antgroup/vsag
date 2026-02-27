@@ -245,8 +245,10 @@ Pyramid::KnnSearch(const DatasetPtr& query,
 
     InnerSearchParam search_param;
     search_param.ef = parsed_param.ef_search;
+    search_param.radius = std::numeric_limits<float>::max();
     search_param.topk = k;
     search_param.search_mode = KNN_SEARCH;
+    search_param.parallel_search_thread_count = parsed_param.parallel_search_thread_count;
     if (this->label_table_->CompressDuplicateData()) {
         search_param.consider_duplicate = true;
     }
@@ -265,7 +267,7 @@ Pyramid::KnnSearch(const DatasetPtr& query,
             node, vl, search_param, query, base_codes_, ctx, parsed_param.subindex_ef_search);
     };
 
-    auto result = this->search_impl(query, k, search_func, parsed_param.ef_search);
+    auto result = this->search_impl(query, search_func, search_param);
     result->Statistics(stats.Dump());
     return result;
 }
@@ -286,6 +288,8 @@ Pyramid::RangeSearch(const DatasetPtr& query,
     search_param.ef = parsed_param.ef_search;
     search_param.radius = radius * RADIUS_EPSILON;
     search_param.search_mode = RANGE_SEARCH;
+    search_param.parallel_search_thread_count = parsed_param.parallel_search_thread_count;
+    search_param.topk = limited_size == -1 ? std::numeric_limits<int64_t>::max() : limited_size;
 
     if (parsed_param.enable_time_record) {
         search_param.time_cost = std::make_shared<Timer>();
@@ -304,19 +308,16 @@ Pyramid::RangeSearch(const DatasetPtr& query,
         return this->search_node(
             node, vl, search_param, query, base_codes_, ctx, parsed_param.subindex_ef_search);
     };
-    int64_t final_limit = limited_size == -1 ? std::numeric_limits<int64_t>::max() : limited_size;
 
-    auto result = this->search_impl(query, final_limit, search_func, parsed_param.ef_search);
+    auto result = this->search_impl(query, search_func, search_param);
     result->Statistics(stats.Dump());
     return result;
 }
 
 DatasetPtr
 Pyramid::search_impl(const DatasetPtr& query,
-                     int64_t limit,
                      const SearchFunc& search_func,
-                     uint64_t ef_search,
-                     float radius) const {
+                     InnerSearchParam& search_param) const {
     SearchStatistics stats;
     QueryContext ctx{.stats = &stats};
 
@@ -348,12 +349,12 @@ Pyramid::search_impl(const DatasetPtr& query,
                 }
             }
             if (valid) {
-                if (thread_pool_ != nullptr) {
+                if (thread_pool_ != nullptr && search_param.parallel_search_thread_count > 1) {
                     futures.push_back(thread_pool_->GeneralEnqueue([&, node, i]() -> void {
-                        node->Search(search_func, vl, search_result_lists[i], ef_search);
+                        node->Search(search_func, vl, search_result_lists[i], search_param.ef);
                     }));
                 } else {
-                    node->Search(search_func, vl, search_result_lists[i], ef_search);
+                    node->Search(search_func, vl, search_result_lists[i], search_param.ef);
                 }
             }
         }
@@ -371,20 +372,21 @@ Pyramid::search_impl(const DatasetPtr& query,
         }
 
     } else {
-        root_->Search(search_func, vl, search_result, ef_search);
+        root_->Search(search_func, vl, search_result, search_param.ef);
     }
     pool_->ReturnOne(vl);
 
     if (use_reorder_) {
-        search_result =
-            this->reorder_->Reorder(search_result, query->GetFloat32Vectors(), limit, ctx);
+        search_result = this->reorder_->Reorder(
+            search_result, query->GetFloat32Vectors(), search_param.topk, ctx);
     }
 
     if (search_result->Empty()) {
         return DatasetImpl::MakeEmptyDataset();
     }
 
-    while (search_result->Size() > limit || search_result->Top().first > radius) {
+    while (search_result->Size() > search_param.topk ||
+           search_result->Top().first > search_param.radius) {
         search_result->Pop();
     }
 
@@ -650,7 +652,7 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
                 "{HOLD_MOLDS}": false
             }
         },
-        "{BUILD_THREAD_COUNT_KEY}": 16,
+        "{BUILD_THREAD_COUNT_KEY}": 1,
         "{EF_CONSTRUCTION_KEY}": 400,
         "{NO_BUILD_LEVELS}":[],
         "{INDEX_MIN_SIZE}": 0,
