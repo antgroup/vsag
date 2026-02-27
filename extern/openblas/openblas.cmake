@@ -98,13 +98,20 @@ endif()
 if(NOT OPENBLAS_FOUND)
     # Build OpenBLAS from source
     message(STATUS "Building OpenBLAS from source")
-    
-    ExternalProject_Add(
-        ${name}
-        URL https://github.com/OpenMathLib/OpenBLAS/releases/download/v0.3.23/OpenBLAS-0.3.23.tar.gz
+
+    # Support custom URL from environment variable via VSAG_OPENBLAS_URL
+    if(NOT VSAG_OPENBLAS_URL)
+        set(VSAG_OPENBLAS_URL
+            https://github.com/OpenMathLib/OpenBLAS/releases/download/v0.3.23/OpenBLAS-0.3.23.tar.gz
             # this url is maintained by the vsag project, if it's broken, please try
             #  the latest commit or contact the vsag project
             http://vsagcache.oss-rg-china-mainland.aliyuncs.com/openblas/OpenBLAS-0.3.23.tar.gz
+        )
+    endif()
+
+    ExternalProject_Add(
+        ${name}
+        URL ${VSAG_OPENBLAS_URL}
         URL_HASH MD5=115634b39007de71eb7e75cf7591dfb2
         DOWNLOAD_NAME OpenBLAS-v0.3.23.tar.gz
         PREFIX ${CMAKE_CURRENT_BINARY_DIR}/${name}

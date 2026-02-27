@@ -11,12 +11,20 @@ else()
     set(BOOST_TOOLSET "gcc")
 endif()
 get_filename_component(compiler_path ${CMAKE_CXX_COMPILER} DIRECTORY)
-ExternalProject_Add(
-    ${name}
-    URL https://archives.boost.io/release/1.67.0/source/boost_1_67_0.tar.gz
+
+# Support custom URL from environment variable via VSAG_BOOST_URL
+if(NOT VSAG_BOOST_URL)
+    set(VSAG_BOOST_URL
+        https://archives.boost.io/release/1.67.0/source/boost_1_67_0.tar.gz
         # this url is maintained by the vsag project, if it's broken, please try
         #  the latest commit or contact the vsag project
         http://vsagcache.oss-rg-china-mainland.aliyuncs.com/boost/boost_1_67_0.tar.gz
+    )
+endif()
+
+ExternalProject_Add(
+    ${name}
+    URL ${VSAG_BOOST_URL}
     URL_HASH SHA256=8aa4e330c870ef50a896634c931adf468b21f8a69b77007e45c444151229f665
     DOWNLOAD_NAME boost_1_67_0.tar.gz
     PREFIX ${CMAKE_CURRENT_BINARY_DIR}/${name}

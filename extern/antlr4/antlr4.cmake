@@ -12,12 +12,19 @@ endif ()
 
 set (FULL_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${VSAG_ANTLR4_CXX11_ABI}")
 
-ExternalProject_Add(
-        ${name}
-        URL https://github.com/antlr/antlr4/archive/refs/tags/4.13.2.tar.gz
+# Support custom URL from environment variable via VSAG_ANTLR4_URL
+if(NOT VSAG_ANTLR4_URL)
+    set(VSAG_ANTLR4_URL
+        https://github.com/antlr/antlr4/archive/refs/tags/4.13.2.tar.gz
         # this url is maintained by the vsag project, if it's broken, please try
         #  the latest commit or contact the vsag project
         https://vsagcache.oss-rg-china-mainland.aliyuncs.com/antlr4/v4.13.2.tar.gz
+    )
+endif()
+
+ExternalProject_Add(
+        ${name}
+        URL ${VSAG_ANTLR4_URL}
         URL_HASH MD5=3b75610fc8a827119258cba09a068be5
         DOWNLOAD_NAME antlr4_4.13.2.tar.gz
         PREFIX ${CMAKE_CURRENT_BINARY_DIR}/${name}

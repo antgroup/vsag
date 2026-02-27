@@ -5,12 +5,19 @@ include(FetchContent)
 # ref: https://github.com/fmtlib/fmt/issues/2708
 set (FMT_SYSTEM_HEADERS ON)
 
-FetchContent_Declare(
-    fmt
-    URL https://github.com/fmtlib/fmt/archive/refs/tags/10.2.1.tar.gz
+# Support custom URL from environment variable via VSAG_FMT_URL
+if(NOT VSAG_FMT_URL)
+    set(VSAG_FMT_URL
+        https://github.com/fmtlib/fmt/archive/refs/tags/10.2.1.tar.gz
         # this url is maintained by the vsag project, if it's broken, please try
         #  the latest commit or contact the vsag project
         http://vsagcache.oss-rg-china-mainland.aliyuncs.com/fmt/10.2.1.tar.gz
+    )
+endif()
+
+FetchContent_Declare(
+    fmt
+    URL ${VSAG_FMT_URL}
     URL_HASH MD5=dc09168c94f90ea890257995f2c497a5
     DOWNLOAD_NO_PROGRESS 1
     INACTIVITY_TIMEOUT 5

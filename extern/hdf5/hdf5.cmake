@@ -4,12 +4,20 @@ include(ExternalProject)
 set(name hdf5)
 set(source_dir ${CMAKE_CURRENT_BINARY_DIR}/${name}/source)
 set(install_dir ${CMAKE_CURRENT_BINARY_DIR}/${name}/install)
-ExternalProject_Add(
-    ${name}
-    URL https://github.com/HDFGroup/hdf5/archive/refs/tags/hdf5_1.14.4.tar.gz
+
+# Support custom URL from environment variable via VSAG_HDF5_URL
+if(NOT VSAG_HDF5_URL)
+    set(VSAG_HDF5_URL
+        https://github.com/HDFGroup/hdf5/archive/refs/tags/hdf5_1.14.4.tar.gz
         # this url is maintained by the vsag project, if it's broken, please try
         #  the latest commit or contact the vsag project
         http://vsagcache.oss-rg-china-mainland.aliyuncs.com/hdf5/hdf5_1.14.4.tar.gz
+    )
+endif()
+
+ExternalProject_Add(
+    ${name}
+    URL ${VSAG_HDF5_URL}
     URL_HASH MD5=fdea52afcce07ed6c3e2a36e7fa11f21
     DOWNLOAD_NAME hdf5_1.14.4.tar.gz
     PREFIX ${CMAKE_CURRENT_BINARY_DIR}/${name}

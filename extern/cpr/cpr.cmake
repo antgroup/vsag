@@ -1,8 +1,16 @@
 include(FetchContent)
+
+# Support custom URL from environment variable via VSAG_CPR_URL
+if(NOT VSAG_CPR_URL)
+    set(VSAG_CPR_URL
+        https://github.com/libcpr/cpr/archive/refs/tags/1.11.2.tar.gz
+        https://vsagcache.oss-rg-china-mainland.aliyuncs.com/cpr/1.11.2.tar.gz
+    )
+endif()
+
 FetchContent_Declare(
         cpr
-        URL https://github.com/libcpr/cpr/archive/refs/tags/1.11.2.tar.gz
-        https://vsagcache.oss-rg-china-mainland.aliyuncs.com/cpr/1.11.2.tar.gz
+        URL ${VSAG_CPR_URL}
         URL_HASH MD5=639cff98d5124cf06923a0975fb427d8
         DOWNLOAD_NO_PROGRESS 1
         INACTIVITY_TIMEOUT 5
