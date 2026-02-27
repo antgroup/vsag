@@ -59,7 +59,9 @@ public:
     float first_order_scan_ratio{1.0F};
 
 private:
-    IVFSearchParameters() = default;
+    IVFSearchParameters() {
+        topk_factor = 2.0F;  // IVF default factor is 2.0
+    }
 };
 
 }  // namespace vsag

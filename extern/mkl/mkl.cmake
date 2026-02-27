@@ -111,9 +111,7 @@ if (CMAKE_HOST_SYSTEM_PROCESSOR STREQUAL "x86_64" AND ENABLE_INTEL_MKL)
 
        
         set(BLAS_LIBRARIES
-            "${MKL_PATH}/libmkl_intel_lp64.so"
-            "${MKL_PATH}/libmkl_intel_thread.so"
-            "${MKL_PATH}/libmkl_core.so"
+            "${MKL_PATH}/libmkl_rt.so"
             "${OMP_PATH}/libiomp5.so"
         )
 
