@@ -32,7 +32,9 @@ public:
 
     JsonType
     ToJson() const override {
-        return JsonType();
+        JsonType json;
+        json[TYPE_KEY].SetString(IO_TYPE_VALUE_READER_IO);
+        return json;
     }
 
     void
