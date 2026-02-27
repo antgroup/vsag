@@ -114,7 +114,7 @@ private:
     DISTFUNC fstdistfunc_{nullptr};
     void* dist_func_param_{nullptr};
 
-    vsag::STLUnorderedMap<LabelType, InnerIdType> label_lookup_;
+    vsag::PGUnorderedMap<LabelType, InnerIdType> label_lookup_;
 
     std::default_random_engine level_generator_{2021};
     mutable std::default_random_engine update_probability_generator_;
@@ -130,7 +130,7 @@ private:
     bool allow_replace_deleted_{false};
 
     std::mutex deleted_elements_lock_{};  // lock for deleted_elements_
-    vsag::STLUnorderedMap<LabelType, InnerIdType>
+    vsag::PGUnorderedMap<LabelType, InnerIdType>
         deleted_elements_;  // contains labels and internal ids of deleted elements
 
     bool immutable_{false};
@@ -264,7 +264,7 @@ public:
         return num_deleted_;
     }
 
-    vsag::STLUnorderedMap<LabelType, InnerIdType>
+    vsag::PGUnorderedMap<LabelType, InnerIdType>
     getDeletedElements() override {
         return deleted_elements_;
     }
