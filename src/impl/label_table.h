@@ -79,7 +79,6 @@ public:
             return false;
         }
         deleted_ids_.insert(iter->second);
-
         label_remap_[label] = std::numeric_limits<InnerIdType>::max();
         return true;
     }
@@ -304,7 +303,10 @@ public:
 
 public:
     Vector<LabelType> label_table_;
-    STLUnorderedMap<LabelType, InnerIdType> label_remap_;
+    // Whether to use reverse map to speed up GetIdByLabel.
+    bool use_reverse_map_{true};
+    // Reverse map from label to id.
+    PGUnorderedMap<LabelType, InnerIdType> label_remap_;
     UnorderedSet<InnerIdType> deleted_ids_;
 
     bool compress_duplicate_data_{true};
@@ -316,7 +318,6 @@ public:
 
     Allocator* allocator_{nullptr};
     std::atomic<int64_t> total_count_{0L};
-    bool use_reverse_map_{true};
 };
 
 }  // namespace vsag
