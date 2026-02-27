@@ -71,3 +71,72 @@ target_include_directories (functests PRIVATE
         ${HDF5_INCLUDE_DIRS})
 target_link_libraries (functests PRIVATE Catch2::Catch2 vsag simd)
 add_dependencies (functests spdlog Catch2)
+
+# --- Module-level unit test executables (directory-level split) ---
+if (ENABLE_TESTS)
+    set(UNIT_TEST_MODULES
+        simd
+        vsag
+        algorithm
+        factory
+        attr
+        datacell
+        quantizer
+        storage
+        io
+        utils
+        impl
+    )
+
+    foreach(mod ${UNIT_TEST_MODULES})
+        # Gather test sources from the module's src directory
+        file(GLOB_RECURSE MODULE_TEST_SOURCES RELATIVE ${CMAKE_SOURCE_DIR}
+            "src/${mod}/*_test.cpp"
+            "src/${mod}/*/*_test.cpp")
+
+        if (MODULE_TEST_SOURCES)
+            set(target "${mod}_unittests")
+            # create per-module executable compiling only that module's tests
+            add_executable(${target}
+                ${MODULE_TEST_SOURCES}
+                test_main.cpp
+                fixtures/fixtures.cpp
+                fixtures/test_logger.cpp
+            )
+
+            target_include_directories(${target} PRIVATE ${CMAKE_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/src)
+            target_link_libraries(${target} PRIVATE Catch2::Catch2 vsag)
+            if (TARGET ${mod})
+                target_link_libraries(${target} PRIVATE ${mod})
+            endif()
+
+            # If a static test library for the module exists (e.g. simd_test),
+            # link it into the per-module executable and ensure its objects
+            # are not dead-stripped. On macOS use -force_load, on other platforms
+            # use --whole-archive/--no-whole-archive around the test archive.
+            if (TARGET ${mod}_test)
+                if (APPLE)
+                    # Ensure static test libraries are not dead-stripped on macOS
+                    target_link_options(${target} PRIVATE
+                        "-Wl,-force_load,$<TARGET_FILE:${mod}_test>"
+                    )
+                    # Also add the test target as a normal library so CMake knows
+                    # the dependency and the linker sees the file.
+                    target_link_libraries(${target} PRIVATE ${mod}_test)
+                else()
+                    target_link_libraries(${target} PRIVATE
+                        "-Wl,--whole-archive" ${mod}_test "-Wl,--no-whole-archive"
+                    )
+                endif()
+                add_dependencies(${target} ${mod}_test)
+            endif()
+
+            add_dependencies(${target} spdlog Catch2 vsag)
+
+            # Register with CTest so ctest can drive per-module runs
+            include(CTest)
+            add_test(NAME ${target} COMMAND ${target} -d yes)
+            set_tests_properties(${target} PROPERTIES TIMEOUT 600)
+        endif()
+    endforeach()
+endif()
