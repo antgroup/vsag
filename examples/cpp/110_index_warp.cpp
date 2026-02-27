@@ -113,26 +113,5 @@ main(int argc, char** argv) {
                   << ": score = " << result->GetDistances()[i] << std::endl;
     }
 
-    /******************* Test with Single-Vector Query (backward compatible) *****************/
-    // WARP also supports single-vector queries
-    std::vector<float> single_query_vector(dim);
-    for (int64_t i = 0; i < dim; ++i) {
-        single_query_vector[i] = distrib_real(rng);
-    }
-
-    auto single_query = vsag::Dataset::Make();
-    single_query->NumElements(1)
-        ->Dim(dim)
-        ->Float32Vectors(single_query_vector.data())
-        ->Owner(false);
-
-    auto single_result = index->KnnSearch(single_query, topk, warp_search_parameters).value();
-
-    std::cout << "\nTop-" << topk << " results (single-vector query): " << std::endl;
-    for (int64_t i = 0; i < single_result->GetDim(); ++i) {
-        std::cout << "  Document " << single_result->GetIds()[i]
-                  << ": score = " << single_result->GetDistances()[i] << std::endl;
-    }
-
     return 0;
 }
