@@ -437,14 +437,14 @@ TestIndex::TestKnnSearchCompare(const IndexPtr& index_weak,
     }
 }
 
-void
+float
 TestIndex::TestKnnSearch(const IndexPtr& index,
                          const TestDatasetPtr& dataset,
                          const std::string& search_param,
                          float expected_recall,
                          bool expected_success) {
     if (not index->CheckFeature(vsag::SUPPORT_KNN_SEARCH)) {
-        return;
+        return 0.0F;
     }
     auto queries = dataset->query_;
     auto query_count = queries->GetNumElements();
@@ -460,7 +460,7 @@ TestIndex::TestKnnSearch(const IndexPtr& index,
             if (res.has_value()) {
                 REQUIRE(res.value()->GetDim() == 0);
             }
-            return;
+            return 0.0F;
         } else {
             REQUIRE(res.has_value() == true);
         }
@@ -476,6 +476,7 @@ TestIndex::TestKnnSearch(const IndexPtr& index,
                          expected_recall * query_count));
     }
     REQUIRE(cur_recall > expected_recall * query_count * RECALL_THRESHOLD);
+    return cur_recall / static_cast<float>(query_count);
 }
 
 void

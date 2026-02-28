@@ -118,7 +118,7 @@ public:
                                  const TestDatasetPtr& dataset,
                                  float build_ratio = 0.5);
 
-    static void
+    static float
     TestKnnSearch(const IndexPtr& index,
                   const TestDatasetPtr& dataset,
                   const std::string& search_param,

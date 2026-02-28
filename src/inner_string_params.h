@@ -171,6 +171,7 @@ const char* const SPARSE_CODES = "sparse";
 
 const char* const IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT = "scan_buckets_count";
 const char* const SEARCH_PARAM_FACTOR = "factor";
+const char* const SEARCH_PARAM_ENABLE_REORDER = "enable_reorder";
 const char* const SEARCH_PARALLELISM = "parallelism";
 const char* const SEARCH_MAX_TIME_COST_MS = "timeout_ms";
 const char* const SPARSE_N_CANDIDATE = "n_candidate";
