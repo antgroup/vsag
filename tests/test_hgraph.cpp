@@ -2140,8 +2140,10 @@ TestHGraphDiskIOType(const fixtures::HGraphTestIndexPtr& test_index,
         {"sq8_uniform,bf16", "sq8_uniform,bf16,buffer_io"},
         {"rabitq,fp16", "rabitq,fp16,async_io"},
         {"rabitq,fp16", "rabitq,fp16,mmap_io"},
+        {"sq4,fp16", "sq4,fp16,uring_io"},
     };
-    const std::vector<std::string> graph_io_types = {"block_memory_io", "mmap_io", "async_io"};
+    const std::vector<std::string> graph_io_types = {
+        "block_memory_io", "mmap_io", "async_io", "uring_io"};
     auto select_idx = 0;
     for (auto metric_type : resource->metric_types) {
         for (auto dim : resource->dims) {
