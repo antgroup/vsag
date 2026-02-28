@@ -1,15 +1,22 @@
 include(FetchContent)
+set(roaringbitmap_urls
+    https://github.com/RoaringBitmap/CRoaring/archive/refs/tags/v3.0.1.tar.gz
+    # this url is maintained by the vsag project, if it's broken, please try
+    #  the latest commit or contact the vsag project
+    https://vsagcache.oss-rg-china-mainland.aliyuncs.com/roaringbitmap/v3.0.1.tar.gz
+)
+if(DEFINED ENV{VSAG_THIRDPARTY_ROARINGBITMAP})
+  message(STATUS "Using local path for roaringbitmap: $ENV{VSAG_THIRDPARTY_ROARINGBITMAP}")
+  list(PREPEND roaringbitmap_urls "$ENV{VSAG_THIRDPARTY_ROARINGBITMAP}")
+endif()
 FetchContent_Declare(
-		roaringbitmap
-		URL https://github.com/RoaringBitmap/CRoaring/archive/refs/tags/v3.0.1.tar.gz
-                    # this url is maintained by the vsag project, if it's broken, please try
-                    #  the latest commit or contact the vsag project
-		    http://vsagcache.oss-rg-china-mainland.aliyuncs.com/roaringbitmap/v3.0.1.tar.gz
-		URL_HASH MD5=463db911f97d5da69393d4a3190f9201
-                DOWNLOAD_NO_PROGRESS 0
-                INACTIVITY_TIMEOUT 5
-                # filesize ~= 90MiB
-                TIMEOUT 90
+        roaringbitmap
+        URL ${roaringbitmap_urls}
+        URL_HASH MD5=463db911f97d5da69393d4a3190f9201
+        DOWNLOAD_NO_PROGRESS 0
+        INACTIVITY_TIMEOUT 5
+        # filesize ~= 90MiB
+        TIMEOUT 90
 )
 
 set(ROARING_USE_CPM OFF)
