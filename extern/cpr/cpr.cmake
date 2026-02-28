@@ -1,8 +1,15 @@
 include(FetchContent)
+set(cpr_urls
+    https://github.com/libcpr/cpr/archive/refs/tags/1.11.2.tar.gz
+    https://vsagcache.oss-rg-china-mainland.aliyuncs.com/cpr/1.11.2.tar.gz
+)
+if(DEFINED ENV{VSAG_THIRDPARTY_CPR})
+  message(STATUS "Using local path for cpr: $ENV{VSAG_THIRDPARTY_CPR}")
+  list(PREPEND cpr_urls "$ENV{VSAG_THIRDPARTY_CPR}")
+endif()
 FetchContent_Declare(
         cpr
-        URL https://github.com/libcpr/cpr/archive/refs/tags/1.11.2.tar.gz
-        https://vsagcache.oss-rg-china-mainland.aliyuncs.com/cpr/1.11.2.tar.gz
+        URL ${cpr_urls}
         URL_HASH MD5=639cff98d5124cf06923a0975fb427d8
         DOWNLOAD_NO_PROGRESS 1
         INACTIVITY_TIMEOUT 5

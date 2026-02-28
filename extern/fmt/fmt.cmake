@@ -5,12 +5,19 @@ include(FetchContent)
 # ref: https://github.com/fmtlib/fmt/issues/2708
 set (FMT_SYSTEM_HEADERS ON)
 
+set(fmt_urls
+    https://github.com/fmtlib/fmt/archive/refs/tags/10.2.1.tar.gz
+    # this url is maintained by the vsag project, if it's broken, please try
+    #  the latest commit or contact the vsag project
+    https://vsagcache.oss-rg-china-mainland.aliyuncs.com/fmt/10.2.1.tar.gz
+)
+if(DEFINED ENV{VSAG_THIRDPARTY_FMT})
+  message(STATUS "Using local path for fmt: $ENV{VSAG_THIRDPARTY_FMT}")
+  list(PREPEND fmt_urls "$ENV{VSAG_THIRDPARTY_FMT}")
+endif()
 FetchContent_Declare(
     fmt
-    URL https://github.com/fmtlib/fmt/archive/refs/tags/10.2.1.tar.gz
-        # this url is maintained by the vsag project, if it's broken, please try
-        #  the latest commit or contact the vsag project
-        http://vsagcache.oss-rg-china-mainland.aliyuncs.com/fmt/10.2.1.tar.gz
+    URL ${fmt_urls}
     URL_HASH MD5=dc09168c94f90ea890257995f2c497a5
     DOWNLOAD_NO_PROGRESS 1
     INACTIVITY_TIMEOUT 5

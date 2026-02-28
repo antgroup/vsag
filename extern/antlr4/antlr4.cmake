@@ -12,12 +12,20 @@ endif ()
 
 set (FULL_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${VSAG_ANTLR4_CXX11_ABI}")
 
+set(antlr4_urls
+    https://github.com/antlr/antlr4/archive/refs/tags/4.13.2.tar.gz
+    # this url is maintained by the vsag project, if it's broken, please try
+    #  the latest commit or contact the vsag project
+    https://vsagcache.oss-rg-china-mainland.aliyuncs.com/antlr4/v4.13.2.tar.gz
+)
+if(DEFINED ENV{VSAG_THIRDPARTY_ANTLR4})
+    message(STATUS "Using local path for antlr4: $ENV{VSAG_THIRDPARTY_ANTLR4}")
+    list(PREPEND antlr4_urls "$ENV{VSAG_THIRDPARTY_ANTLR4}")
+endif()
+
 ExternalProject_Add(
         ${name}
-        URL https://github.com/antlr/antlr4/archive/refs/tags/4.13.2.tar.gz
-        # this url is maintained by the vsag project, if it's broken, please try
-        #  the latest commit or contact the vsag project
-        https://vsagcache.oss-rg-china-mainland.aliyuncs.com/antlr4/v4.13.2.tar.gz
+        URL ${antlr4_urls}
         URL_HASH MD5=3b75610fc8a827119258cba09a068be5
         DOWNLOAD_NAME antlr4_4.13.2.tar.gz
         PREFIX ${CMAKE_CURRENT_BINARY_DIR}/${name}
