@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <cstdint>
+
 #ifndef _WINDOWS
 #include <fcntl.h>
 #include <sys/mman.h>

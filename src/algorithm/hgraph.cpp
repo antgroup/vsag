@@ -1351,6 +1351,7 @@ HGraph::Serialize(StreamWriter& writer) const {
     // serialize footer (introduced since v0.15)
     auto jsonify_basic_info = this->serialize_basic_info();
     auto metadata = std::make_shared<Metadata>();
+    metadata->SetVersion("v0.15");
     metadata->Set(BASIC_INFO, jsonify_basic_info);
     logger::debug(jsonify_basic_info.Dump());
 

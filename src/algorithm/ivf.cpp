@@ -607,6 +607,7 @@ IVF::Serialize(StreamWriter& writer) const {
     basic_info["metric"].SetInt(static_cast<int64_t>(this->metric_));
 
     auto metadata = std::make_shared<Metadata>();
+    metadata->SetVersion("v0.15");
     metadata->Set(BASIC_INFO, basic_info);
     metadata->Set("datacell_offsets", datacell_offsets);
     metadata->Set("datacell_sizes", datacell_sizes);
