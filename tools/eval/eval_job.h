@@ -32,6 +32,12 @@ struct exporter {
     std::unordered_map<std::string, std::string> vars;  // environment variables, like cookies
 };
 
+// http_server config for monitoring
+struct HttpServer {
+    bool enabled = false;
+    int port = 8080;  // default port
+};
+
 // a eval_job contains multiple eval cases
 struct eval_job {
     using eval_case = YAML::Node;
@@ -43,6 +49,7 @@ struct eval_job {
     std::vector<exporter> exporters;
     std::optional<int32_t> num_threads_building;
     std::optional<int32_t> num_threads_searching;
+    std::optional<HttpServer> http_server;
 };
 
 }  // namespace vsag::eval
