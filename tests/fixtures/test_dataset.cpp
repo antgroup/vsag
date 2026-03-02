@@ -410,18 +410,12 @@ TestDataset::CreateTestDataset(uint64_t dim,
                                                     (id >> dataset->id_shift));
         };
 
-        std::pair<float*, int64_t*> result, ex_result;
+        std::pair<float*, int64_t*> result;
         if (is_multi_vector) {
             result = CalMultiVectorDistanceMatrix(dataset->query_, dataset->base_);
-            ex_result = CalMultiVectorDistanceMatrix(dataset->query_, dataset->base_);
         } else {
             result =
                 CalDistanceFloatMetrix(dataset->query_, dataset->base_, metric_str, vector_type);
-            ex_result = CalDistanceFloatMetrixWithExFilter(dataset->query_,
-                                                           dataset->base_,
-                                                           metric_str,
-                                                           dataset->ex_filter_function_,
-                                                           vector_type);
         }
 
         if (with_path) {
