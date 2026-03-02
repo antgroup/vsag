@@ -467,6 +467,9 @@ IVF::KnnSearch(const DatasetPtr& query,
     param.search_mode = KNN_SEARCH;
     param.topk = k;
     if (use_reorder_) {
+        CHECK_ARGUMENT(
+            param.factor > 0.0F,
+            fmt::format("factor must be positive when use_reorder is true, got {}", param.factor));
         param.topk = static_cast<int64_t>(param.factor * static_cast<float>(k));
     }
     auto search_result = this->search<KNN_SEARCH>(query, param, ctx);
@@ -500,6 +503,9 @@ IVF::RangeSearch(const DatasetPtr& query,
     param.radius = radius;
     param.range_search_limit_size = static_cast<int>(limited_size);
     if (use_reorder_ and limited_size > 0) {
+        CHECK_ARGUMENT(
+            param.factor > 0.0F,
+            fmt::format("factor must be positive when use_reorder is true, got {}", param.factor));
         param.range_search_limit_size =
             static_cast<int>(param.factor * static_cast<float>(limited_size));
     }
@@ -960,6 +966,9 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
     param.search_mode = KNN_SEARCH;
     param.topk = request.topk_;
     if (use_reorder_) {
+        CHECK_ARGUMENT(
+            param.factor > 0.0F,
+            fmt::format("factor must be positive when use_reorder is true, got {}", param.factor));
         param.topk = static_cast<int64_t>(param.factor * static_cast<float>(request.topk_));
     }
     auto query = request.query_;

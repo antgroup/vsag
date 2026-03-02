@@ -53,7 +53,7 @@ echo "✅ Detected local architecture: $ARCH"
 cleanup() {
   echo "🧹 Cleaning up and restoring files..."
   # Use git to restore the patched files, which is safer than using .bak files
-  git restore python/pyproject.toml python/setup.py
+  git checkout -- python/pyproject.toml python/setup.py
   rm -f python/pyvsag/_version.py
   echo "✅ Cleanup complete."
 }
