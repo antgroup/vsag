@@ -56,7 +56,7 @@ class TestIVF(TestBase):
                     "ivf_train_type": "kmeans",
                     "base_quantization_type": self.base_quantization_type,
                     "precise_quantization_type": self.precise_quantization_type,
-                    "use_reorder": self.use_reorder,
+                    "use_reorder": self.use_reorder
                 },
             }
         )
@@ -68,7 +68,7 @@ class TestIVF(TestBase):
 
     def general_test_search(self):
         """Test search index"""
-        search_params = json.dumps({"ivf": {"scan_buckets_count": 50}})
+        search_params = json.dumps({"ivf": {"scan_buckets_count": 50, "factor": 4.0}})
         TestBase.TestKnnSearch(self.index, self.dataset, search_params)
 
     def test_build(self):

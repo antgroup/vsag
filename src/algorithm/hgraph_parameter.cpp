@@ -204,10 +204,6 @@ HGraphSearchParameters::FromJson(const std::string& json_string) {
             params[INDEX_TYPE_HGRAPH][HGRAPH_USE_EXTRA_INFO_FILTER].GetBool();
     }
 
-    if (params[INDEX_TYPE_HGRAPH].Contains(SEARCH_PARAM_FACTOR)) {
-        obj.topk_factor = params[INDEX_TYPE_HGRAPH][SEARCH_PARAM_FACTOR].GetFloat();
-    }
-
     return obj;
 }
 }  // namespace vsag

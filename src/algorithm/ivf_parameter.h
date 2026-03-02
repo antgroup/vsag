@@ -56,11 +56,12 @@ public:
 
 public:
     int64_t scan_buckets_count{30};
-    float topk_factor{2.0F};
     float first_order_scan_ratio{1.0F};
 
 private:
-    IVFSearchParameters() = default;
+    IVFSearchParameters() {
+        topk_factor = 2.0F;  // IVF default factor is 2.0
+    }
 };
 
 }  // namespace vsag

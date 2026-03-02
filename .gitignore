@@ -192,3 +192,4 @@ data/
 /dist/
 opencode.json
 _codeql_detected_source_root
+wheelhouse/

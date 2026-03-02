@@ -31,7 +31,7 @@ rm -rf python/pyvsag/*.so python/pyvsag/*.so.*
 echo "=== Configuring CMake ==="
 cmake -S. -B$CMAKE_BUILD_DIR \
     -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_CXX_FLAGS_RELEASE="-O3 -DNDEBUG -s" \
+    -DCMAKE_CXX_FLAGS_RELEASE="-O3 -DNDEBUG" \
     -DENABLE_PYBINDS=ON \
     -DENABLE_TESTS=OFF \
     -DPython3_EXECUTABLE="$PYTHON_EXECUTABLE" \
