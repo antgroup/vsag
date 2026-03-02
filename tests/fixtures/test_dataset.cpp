@@ -169,64 +169,6 @@ CalDistanceFloatMetrix(const vsag::DatasetPtr query,
     return {result, ids};
 }
 
-static std::pair<float*, int64_t*>
-CalDistanceFloatMetrixWithExFilter(const vsag::DatasetPtr query,
-                                   const vsag::DatasetPtr base,
-                                   const std::string& metric_str,
-                                   std::function<bool(const char*)> filter,
-                                   const std::string& vector_type = "dense") {
-    uint64_t query_count = query->GetNumElements();
-    uint64_t base_count = base->GetNumElements();
-    auto extra_info_size = base->GetExtraInfoSize();
-
-    auto* result = new float[query_count * base_count];
-    auto* ids = new int64_t[query_count * base_count];
-    auto dist_func = vsag::FP32ComputeL2Sqr;
-    if (metric_str == "ip") {
-        dist_func = [](const float* query, const float* codes, uint64_t dim) -> float {
-            return 1 - vsag::FP32ComputeIP(query, codes, dim);
-        };
-    } else if (metric_str == "cosine") {
-        dist_func = [](const float* query, const float* codes, uint64_t dim) -> float {
-            auto norm_query = std::unique_ptr<float[]>(new float[dim]);
-            auto norm_codes = std::unique_ptr<float[]>(new float[dim]);
-            vsag::Normalize(query, norm_query.get(), dim);
-            vsag::Normalize(codes, norm_codes.get(), dim);
-            return 1 - vsag::FP32ComputeIP(norm_query.get(), norm_codes.get(), dim);
-        };
-    }
-    auto dim = base->GetDim();
-#pragma omp parallel for schedule(dynamic)
-    for (uint64_t i = 0; i < query_count; ++i) {
-        MaxHeap heap;
-        for (uint64_t j = 0; j < base_count; ++j) {
-            float dist;
-            const char* extra_info =
-                extra_info_size > 0 ? (base->GetExtraInfos() + extra_info_size * j) : nullptr;
-            if (vector_type == "dense") {
-                dist = dist_func(
-                    query->GetFloat32Vectors() + dim * i, base->GetFloat32Vectors() + dim * j, dim);
-            } else if (vector_type == "sparse") {
-                dist = GetSparseDistance(query->GetSparseVectors()[i], base->GetSparseVectors()[j]);
-            } else {
-                throw std::runtime_error("no such vector type");
-            }
-            if (extra_info_size == 0 || not filter(extra_info)) {
-                heap.emplace(dist, base->GetIds()[j]);
-            }
-        }
-        auto idx = 0;
-        while (not heap.empty()) {
-            auto [dist, id] = heap.top();
-            result[i * base_count + idx] = dist;
-            ids[i * base_count + idx] = id;
-            ++idx;
-            heap.pop();
-        }
-    }
-    return {result, ids};
-}
-
 static vsag::DatasetPtr
 CalTopKGroundTruth(const std::pair<float*, int64_t*>& result,
                    uint64_t top_k,
@@ -344,12 +286,16 @@ TestDataset::CreateTestDataset(uint64_t dim,
             return (id >> shift) > valid_ratio * count;
         };
 
-        dataset->ex_filter_function_ = [valid_ratio, count](const char* data) -> bool {
+        dataset->ex_filter_function_ = [valid_ratio](const char* data) -> bool {
             uint8_t abs = *data - INT8_MIN;
             return abs > UINT8_MAX * valid_ratio;
         };
-        auto ex_result = CalDistanceFloatMetrixWithExFilter(
-            dataset->query_, dataset->base_, metric_str, dataset->ex_filter_function_, vector_type);
+        auto help_filter_function = [&](int64_t id) -> bool {
+            return extra_info_size != 0 &&
+                   dataset->ex_filter_function_(dataset->base_->GetExtraInfos() +
+                                                dataset->base_->GetExtraInfoSize() *
+                                                    (id >> dataset->id_shift));
+        };
 
         if (with_path) {
             dataset->ground_truth_ = CalGroundTruthWithPath(result,
@@ -364,18 +310,18 @@ TestDataset::CreateTestDataset(uint64_t dim,
                                                                    dataset->query_,
                                                                    dataset->filter_function_,
                                                                    dataset->id_shift);
-            dataset->ex_filter_ground_truth_ = CalGroundTruthWithPath(ex_result,
+            dataset->ex_filter_ground_truth_ = CalGroundTruthWithPath(result,
                                                                       dataset->top_k,
                                                                       dataset->base_,
                                                                       dataset->query_,
-                                                                      nullptr,
+                                                                      help_filter_function,
                                                                       dataset->id_shift);
         } else {
             dataset->ground_truth_ = CalTopKGroundTruth(result, dataset->top_k, count, query_count);
             dataset->filter_ground_truth_ = CalFilterGroundTruth(
                 result, dataset->top_k, dataset->filter_function_, count, query_count);
-            dataset->ex_filter_ground_truth_ =
-                CalTopKGroundTruth(ex_result, dataset->top_k, count, query_count);
+            dataset->ex_filter_ground_truth_ = CalFilterGroundTruth(
+                result, dataset->top_k, help_filter_function, count, query_count);
         }
         dataset->range_ground_truth_ = dataset->ground_truth_;
         dataset->range_radius_.resize(query_count);
@@ -388,8 +334,6 @@ TestDataset::CreateTestDataset(uint64_t dim,
         }
         delete[] result.first;
         delete[] result.second;
-        delete[] ex_result.first;
-        delete[] ex_result.second;
     }
     return dataset;
 }
