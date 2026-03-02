@@ -12,102 +12,87 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from test_base import TestBase
-from test_dataset import TestDataset
+"""Pytest tests for HGraph index"""
+
 import json
-import os
 import pyvsag
+import pytest
+from conftest import create_index, build_index, save_index, load_index, verify_knn_search
 
 
-class TestHGraph(TestBase):
-    """Test HGraph index"""
-
-    type_name: str = "hgraph"
-
-    def __init__(
-        self,
-        dim: int = 128,
-        num_vectors: int = 1000,
-        metric: str = "l2",
-        expect_recall: float = 0.9,
-        quantization_type: str = "sq8",
-    ):
-        self.dim = dim
-        self.num_vectors = num_vectors
-        self.metric = metric
-        self.dataset = TestDataset(dim=dim, num_vectors=num_vectors, metric=metric)
-        self.max_degree = int(dim / 4)
-        self.ef_construction = max(200, self.max_degree)
-        qs = quantization_type.split(",")
-        self.base_quantization_type = qs[0]
-        self.precise_quantization_type = "fp32"
-        if len(qs) > 1:
-            self.precise_quantization_type = qs[1]
-            self.use_reorder = True
-        else:
-            self.use_reorder = False
-
-        self.index_params = json.dumps(
-            {
-                "dtype": "float32",
-                "metric_type": self.metric,
-                "dim": self.dim,
-                "index_param": {
-                    "max_degree": self.max_degree,
-                    "ef_construction": self.ef_construction,
-                    "base_quantization_type": self.base_quantization_type,
-                    "precise_quantization_type": self.precise_quantization_type,
-                    "use_reorder": self.use_reorder,
-                },
-            }
-        )
-
-    def init_index(self) -> pyvsag.Index:
-        """Initialize HGraph index"""
-
-        return TestBase.FactoryIndex(self.type_name, self.index_params)
-
-    def general_test_search(self):
-        """Test search index"""
-        search_params = json.dumps({"hgraph": {"ef_search": 100}})
-        TestBase.TestKnnSearch(self.index, self.dataset, search_params)
-
-    def test_build(self):
-        """Test build index"""
-        self.index = self.init_index()
-        TestBase.BuildIndex(self.index, self.dataset)
-        self.general_test_search()
-
-    def test_load_save(self):
-        """Test load and save index"""
-        filename = TestBase.GenerateRandomFilePath()
-        TestBase.SaveIndex(self.index, filename)
-        self.index = self.init_index()
-        TestBase.LoadIndex(self.index, filename)
-        os.remove(filename)
-        self.general_test_search()
+TYPE_NAME = "hgraph"
 
 
-def run_hgraph_test():
-    """Run HNSW index tests"""
-    metric_types = ["ip"]
-    dims = [128, 256, 1024]
-    quantizer_recalls = [
-        ("sq8", 0.9),
-        ("fp16", 0.92),
-        ("fp32", 0.93),
-        ("sq8,fp16", 0.92),
-        ("sq8_uniform,fp32", 0.9),
-    ]
-    for metric in metric_types:
-        for dim in dims:
-            for qt, recall in quantizer_recalls:
-                test_hgraph = TestHGraph(
-                    dim=dim, metric=metric, expect_recall=recall, quantization_type=qt
-                )
-                test_hgraph.test_build()
-                test_hgraph.test_load_save()
+def _create_index_params(dim: int, metric: str, quantization_type: str) -> str:
+    """Create index parameters for HGraph"""
+    max_degree = int(dim / 4)
+    ef_construction = max(200, max_degree)
+    qs = quantization_type.split(",")
+    base_quantization_type = qs[0]
+    precise_quantization_type = "fp32"
+    use_reorder = False
+    if len(qs) > 1:
+        precise_quantization_type = qs[1]
+        use_reorder = True
+    
+    return json.dumps(
+        {
+            "dtype": "float32",
+            "metric_type": metric,
+            "dim": dim,
+            "index_param": {
+                "max_degree": max_degree,
+                "ef_construction": ef_construction,
+                "base_quantization_type": base_quantization_type,
+                "precise_quantization_type": precise_quantization_type,
+                "use_reorder": use_reorder,
+            },
+        }
+    )
 
 
-if __name__ == "__main__":
-    run_hgraph_test()
+@pytest.mark.parametrize("metric", ["ip"])
+@pytest.mark.parametrize("dim", [128, 256, 1024])
+@pytest.mark.parametrize("quantization_type,expect_recall", [
+    ("sq8", 0.9),
+    ("fp16", 0.92),
+    ("fp32", 0.93),
+    ("sq8,fp16", 0.92),
+    ("sq8_uniform,fp32", 0.9),
+])
+def test_hgraph_build(dim, metric, quantization_type, expect_recall, dataset_factory):
+    """Test building HGraph index"""
+    dataset = dataset_factory(dim=dim, num_vectors=1000, metric=metric)
+    index_params = _create_index_params(dim, metric, quantization_type)
+    index = create_index(TYPE_NAME, index_params)
+    build_index(index, dataset)
+    
+    search_params = json.dumps({"hgraph": {"ef_search": 100}})
+    verify_knn_search(index, dataset, search_params, expect_recall=expect_recall)
+
+
+@pytest.mark.parametrize("metric", ["ip"])
+@pytest.mark.parametrize("dim", [128, 256, 1024])
+@pytest.mark.parametrize("quantization_type,expect_recall", [
+    ("sq8", 0.9),
+    ("fp16", 0.92),
+    ("fp32", 0.93),
+    ("sq8,fp16", 0.92),
+    ("sq8_uniform,fp32", 0.9),
+])
+def test_hgraph_load_save(dim, metric, quantization_type, expect_recall, dataset_factory, tmp_path):
+    """Test loading and saving HGraph index"""
+    dataset = dataset_factory(dim=dim, num_vectors=1000, metric=metric)
+    index_params = _create_index_params(dim, metric, quantization_type)
+    
+    # Build and save
+    index = create_index(TYPE_NAME, index_params)
+    build_index(index, dataset)
+    filename = tmp_path / f"test_hgraph_{dim}_{metric}_{quantization_type.replace(',', '_')}.vsag"
+    save_index(index, str(filename))
+    
+    # Load and test
+    index = create_index(TYPE_NAME, index_params)
+    load_index(index, str(filename))
+    search_params = json.dumps({"hgraph": {"ef_search": 100}})
+    verify_knn_search(index, dataset, search_params, expect_recall=expect_recall)

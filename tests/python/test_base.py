@@ -12,44 +12,50 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from test_dataset import TestDataset
+"""Test base module - re-exported from conftest for backward compatibility"""
+
 import pyvsag
-import json
 import numpy as np
 import os
+from conftest import (
+    TestDataset,
+    create_index,
+    build_index,
+    save_index,
+    load_index,
+    calculate_recall,
+)
+
+__all__ = ["TestBase", "TestDataset"]
 
 
 class TestBase:
-    """Test base class for VSAG index tests"""
+    """Test base class for VSAG index tests - backward compatibility wrapper"""
 
     @staticmethod
     def FactoryIndex(index_type: str, index_param: str) -> pyvsag.Index:
         """Factory method to create index for testing"""
-        return pyvsag.Index(index_type, index_param)
+        return create_index(index_type, index_param)
 
     @staticmethod
     def BuildIndex(index: pyvsag.Index, dataset: TestDataset):
         """Build index for testing"""
-        index.build(
-            dataset.base_vectors, dataset.ids, dataset.num_elements, dataset.dim
-        )
+        build_index(index, dataset)
 
     @staticmethod
     def SaveIndex(index: pyvsag.Index, file_path: str):
         """Serialize index for testing"""
-        index.save(file_path)
+        save_index(index, file_path)
 
     @staticmethod
     def LoadIndex(index: pyvsag.Index, file_path: str):
         """Load index for testing"""
-        index.load(file_path)
+        load_index(index, file_path)
 
     @staticmethod
     def CalRecall(results: np.ndarray, gt_ids: np.ndarray, topk: int = 10) -> float:
         """Calculate recall for testing"""
-        # too many indices for array: array is 1-dimensional, but 2 were indexed
-        recall = np.isin(results[:topk], gt_ids[:topk]).sum(axis=0)
-        return recall / topk
+        return calculate_recall(results, gt_ids, topk)
 
     @staticmethod
     def GenerateRandomFilePath() -> str:
@@ -70,28 +76,5 @@ class TestBase:
         expect_recall: float = 0.9,
     ):
         """Test knn_search method for testing"""
-        query_count = dataset.query_vectors_count
-        query_vectors = dataset.query_vectors.reshape(query_count, dataset.dim)
-        recall = 0
-        for i in range(query_count):
-            query = query_vectors[i]
-            ids, _ = index.knn_search(vector=query, k=topk, parameters=search_param)
-            assert len(ids) == topk
-            recall += TestBase.CalRecall(ids, dataset.gt_ids, topk)
-        print(f"recall: {recall / query_count}")
-        assert recall >= expect_recall * query_count
-
-
-if __name__ == "__main__":
-    dataset = TestDataset()
-    index_params = json.dumps(
-        {
-            "dtype": "float32",
-            "metric_type": "l2",
-            "dim": 128,
-            "hnsw": {"max_degree": 16, "ef_construction": 100},
-        }
-    )
-    index = TestBase.FactoryIndex("hnsw", index_params)
-    TestBase.BuildIndex(index, dataset)
-    TestBase.TestKnnSearch(index, dataset, json.dumps({"hnsw": {"ef_search": 100}}))
+        from conftest import verify_knn_search
+        verify_knn_search(index, dataset, search_param, topk, expect_recall)
