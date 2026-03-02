@@ -178,6 +178,9 @@ public:
     Remove(const std::vector<int64_t>& ids, RemoveMode mode = RemoveMode::MARK_REMOVE) override;
 
     void
+    ShrinkAndRepair(double timeout_ms = std::numeric_limits<double>::max()) override{};
+
+    void
     Serialize(StreamWriter& writer) const override;
 
     void
