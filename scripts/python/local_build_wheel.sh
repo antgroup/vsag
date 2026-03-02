@@ -5,7 +5,7 @@ set -e
 
 # --- Configuration ---
 VENV_DIR=".venv"
-SUPPORTED_VERSIONS=("3.6" "3.7" "3.8" "3.9" "3.10" "3.11" "3.12")
+SUPPORTED_VERSIONS=("3.6" "3.7" "3.8" "3.9" "3.10" "3.11" "3.12" "3.13" "3.14")
 HAVE_DOCKER=true
 
 # --- Prerequisite Checks ---
@@ -51,10 +51,9 @@ echo "✅ Detected local architecture: $ARCH"
 
 # --- Cleanup Function ---
 cleanup() {
-  echo "🧹 Cleaning up and restoring files..."
-  # Use git to restore the patched files, which is safer than using .bak files
-  git restore python/pyproject.toml python/setup.py
+  echo "🧹 Cleaning up..."
   rm -f python/pyvsag/_version.py
+  rm -rf python/build python/*.so python/pyvsag/*.so
   echo "✅ Cleanup complete."
 }
 
@@ -62,10 +61,18 @@ cleanup() {
 run_build() {
   local py_version=$1
   local cibw_build_pattern="cp$(echo "$py_version" | tr -d '.')-*"
-  local cibw_version="2.19.1" # Default for modern python
+  local cibw_version="3.3.1" # Default for modern python 3.8+ (supports 3.13/3.14)
+  local use_uvx=true          # cibuildwheel 3.x requires Python >= 3.11 on the host
 
   if [[ "$py_version" == "3.6" ]]; then
     cibw_version="2.11.4"
+    use_uvx=false
+  elif [[ "$py_version" == "3.7" ]]; then
+    cibw_version="2.23.3"     # cibuildwheel 3.x dropped Python < 3.8
+    use_uvx=false
+  elif python3 -c "import sys; sys.exit(0 if sys.version_info >= (3,11) else 1)" 2>/dev/null; then
+    # Host Python >= 3.11, can pip-install cibuildwheel 3.x directly
+    use_uvx=false
   fi
 
   echo "========================================================================"
@@ -73,7 +80,11 @@ run_build() {
   echo "========================================================================"
 
   if $HAVE_DOCKER; then
-    pip install -q "cibuildwheel==${cibw_version}"
+    if $use_uvx; then
+      pip install -q uv 2>/dev/null || true
+    else
+      pip install -q "cibuildwheel==${cibw_version}"
+    fi
   else
     pip install build
   fi
@@ -82,20 +93,26 @@ run_build() {
   trap cleanup EXIT INT TERM
 
   # Call the reusable script
+  rm -rf python/build python/*.so python/pyvsag/*.so
   bash ./scripts/python/prepare_python_build.sh "$py_version"
 
   PIP_DEFAULT_TIMEOUT="100" \
   PIP_INDEX_URL="https://pypi.tuna.tsinghua.edu.cn/simple"
   if $HAVE_DOCKER; then
     echo "🛠️  Starting cibuildwheel... "
-    CIBW_BUILD="${cibw_build_pattern}" \
-    CIBW_ARCHS="${ARCH}" \
-    CIBW_TEST_COMMAND="pip install numpy && ls -alF /project/ && python /project/tests/python/run_test.py" \
-    cibuildwheel --platform linux --output-dir wheelhouse python
+    if $use_uvx; then
+      CIBW_BUILD="${cibw_build_pattern}" \
+      CIBW_ARCHS="${ARCH}" \
+      CIBW_TEST_COMMAND="pip install numpy && ls -alF /project/ && python /project/tests/python/run_test.py" \
+      uvx --python 3.12 --from "cibuildwheel==${cibw_version}" cibuildwheel --platform linux --output-dir wheelhouse python
+    else
+      CIBW_BUILD="${cibw_build_pattern}" \
+      CIBW_ARCHS="${ARCH}" \
+      CIBW_TEST_COMMAND="pip install numpy && ls -alF /project/ && python /project/tests/python/run_test.py" \
+      cibuildwheel --platform linux --output-dir wheelhouse python
+    fi
   else 
     echo "🛠️  Starting build..."
-    ENABLE_MKL_STATIC_LINK=$HAVE_DOCKER
-    bash scripts/python/build_cpp_for_cibw.sh $ENABLE_MKL_STATIC_LINK
     python -m build --wheel --outdir wheelhouse python
     echo "✅ Build complete. Starting test..."
     # Find the most recently created wheel
