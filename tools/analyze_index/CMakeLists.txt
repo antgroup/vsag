@@ -14,11 +14,11 @@
 # limitations under the License.
 
 
-add_executable (analyze_index analyze_index.cpp)
-target_link_libraries (analyze_index
-        PRIVATE
-        argparse::argparse
-        vsag
+add_executable(analyze_index analyze_index.cpp)
+target_link_libraries(
+    analyze_index
+    PRIVATE
+    argparse::argparse
+    vsag
 )
-
 
