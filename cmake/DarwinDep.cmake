@@ -16,11 +16,65 @@
 if(APPLE)
     set(ld_flags_workaround "-Wl,-rpath,@loader_path")
     # Find OpenMP - will locate libomp on macOS
-    find_package(OpenMP REQUIRED)
+    # First try to find OpenMP normally
+    find_package(OpenMP)
+    # If not found, try to find it in common locations where libomp gets installed on macOS
+    if(NOT OpenMP_C_FOUND OR NOT OpenMP_CXX_FOUND)
+        # Common locations for libomp on macOS
+        find_path(OpenMP_C_INCLUDE_DIR
+            NAMES omp.h
+            HINTS ENV OpenMP_ROOT
+                  /opt/homebrew/opt/libomp
+                  /usr/local/opt/libomp
+            PATH_SUFFIXES include
+        )
+        
+        find_path(OpenMP_CXX_INCLUDE_DIR
+            NAMES omp.h
+            HINTS ENV OpenMP_ROOT
+                  /opt/homebrew/opt/libomp
+                  /usr/local/opt/libomp
+            PATH_SUFFIXES include
+        )
+        
+        find_library(OpenMP_C_LIBRARY
+            NAMES omp
+            HINTS ENV OpenMP_ROOT
+                  /opt/homebrew/opt/libomp
+                  /usr/local/opt/libomp
+            PATH_SUFFIXES lib
+        )
+        
+        find_library(OpenMP_CXX_LIBRARY
+            NAMES omp
+            HINTS ENV OpenMP_ROOT
+                  /opt/homebrew/opt/libomp
+                  /usr/local/opt/libomp
+            PATH_SUFFIXES lib
+        )
+        
+        if(OpenMP_C_INCLUDE_DIR AND OpenMP_CXX_INCLUDE_DIR AND OpenMP_C_LIBRARY AND OpenMP_CXX_LIBRARY)
+            set(OpenMP_C_FOUND TRUE)
+            set(OpenMP_CXX_FOUND TRUE)
+            set(OpenMP_FOUND TRUE)
+            set(OpenMP_C_FLAGS "-Xpreprocessor -fopenmp -I${OpenMP_C_INCLUDE_DIR}")
+            set(OpenMP_CXX_FLAGS "-Xpreprocessor -fopenmp -I${OpenMP_CXX_INCLUDE_DIR}")
+            set(OpenMP_C_LIB_NAMES ${OpenMP_C_LIBRARY})
+            set(OpenMP_CXX_LIB_NAMES ${OpenMP_CXX_LIBRARY})
+            set(OpenMP_LIBRARIES ${OpenMP_C_LIBRARY} ${OpenMP_CXX_LIBRARY})
+            
+            # Set the variables that CMake expects
+            set(OpenMP_C_INCLUDE_DIRS ${OpenMP_C_INCLUDE_DIR})
+            set(OpenMP_CXX_INCLUDE_DIRS ${OpenMP_CXX_INCLUDE_DIR})
+        endif()
+    endif()
+    
     if (OpenMP_CXX_FOUND)
         message(STATUS "Found OpenMP: ${OpenMP_CXX_INCLUDE_DIRS}")
         set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+    else()
+        message(WARNING "OpenMP not found on macOS. Install with 'brew install libomp' for OpenMP support.")
     endif()
     
     # Find LAPACK - will automatically use Accelerate framework on macOS
