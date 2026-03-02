@@ -1,0 +1,57 @@
+
+// Copyright 2024-present the vsag project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#pragma once
+
+#include "datacell/flatten_interface_parameter.h"
+#include "index_search_parameter.h"
+#include "inner_index_parameter.h"
+#include "typing.h"
+#include "utils/pointer_define.h"
+
+namespace vsag {
+
+class WarpParameter : public InnerIndexParameter {
+public:
+    void
+    FromJson(const JsonType& json) override;
+
+    JsonType
+    ToJson() const override;
+
+    bool
+    CheckCompatibility(const vsag::ParamPtr& other) const override;
+
+public:
+    FlattenInterfaceParamPtr base_codes_param{nullptr};
+};
+
+DEFINE_POINTER(WarpParameter);
+
+class WarpSearchParameters : public IndexSearchParameter {
+public:
+    static WarpSearchParameters
+    FromJson(const std::string& json_string) {
+        if (json_string.empty()) {
+            return WarpSearchParameters();
+        }
+        auto params = JsonType::Parse(json_string);
+        WarpSearchParameters obj;
+        obj.IndexSearchParameter::FromJson(params);
+        return obj;
+    }
+};
+
+}  // namespace vsag

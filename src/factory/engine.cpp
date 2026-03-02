@@ -26,6 +26,7 @@
 #include "algorithm/pyramid_zparameters.h"
 #include "algorithm/sindi/sindi.h"
 #include "algorithm/sparse_index.h"
+#include "algorithm/warp.h"
 #include "common.h"
 #include "impl/thread_pool/safe_thread_pool.h"
 #include "index/diskann.h"
@@ -148,6 +149,14 @@ Engine::CreateIndex(const std::string& origin_name, const std::string& parameter
             auto sparse_index =
                 std::make_shared<IndexImpl<SINDI>>(sparse_json, index_common_params);
             return sparse_index;
+        } else if (name == INDEX_WARP) {
+            logger::debug("created a warp index");
+            JsonType warp_json;
+            if (parsed_params.Contains(INDEX_PARAM)) {
+                warp_json = parsed_params[INDEX_PARAM];
+            }
+            auto warp_index = std::make_shared<IndexImpl<WARP>>(warp_json, index_common_params);
+            return warp_index;
         } else {
             LOG_ERROR_AND_RETURNS(
                 ErrorType::UNSUPPORTED_INDEX, "failed to create index(unsupported): ", name);

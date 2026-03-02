@@ -354,6 +354,23 @@ public:
      */
     virtual std::vector<std::string>
     GetStatistics(const std::vector<std::string>& stat_keys) const = 0;
+
+    /**
+     * @brief Sets the vector counts array for the dataset (for multi-vector documents).
+     *
+     * @param counts Pointer to the array of vector counts per document.
+     * @return DatasetPtr A shared pointer to the dataset with updated vector counts.
+     */
+    virtual DatasetPtr
+    VectorCounts(const uint32_t* counts) = 0;
+
+    /**
+     * @brief Retrieves the vector counts array of the dataset.
+     *
+     * @return const uint32_t* Pointer to the array of vector counts per document.
+     */
+    virtual const uint32_t*
+    GetVectorCounts() const = 0;
 };
 
 };  // namespace vsag

@@ -32,9 +32,113 @@ struct CompareByFirst {
     }
 };
 
+vsag::FP32ComputeType
+get_distance_func(const std::string& metric_str) {
+    if (metric_str == "l2") {
+        return vsag::FP32ComputeL2Sqr;
+    } else if (metric_str == "ip") {
+        return [](const float* query, const float* codes, uint64_t dim) -> float {
+            return 1 - vsag::FP32ComputeIP(query, codes, dim);
+        };
+    } else if (metric_str == "cosine") {
+        return [](const float* query, const float* codes, uint64_t dim) -> float {
+            auto norm_query = std::unique_ptr<float[]>(new float[dim]);
+            auto norm_codes = std::unique_ptr<float[]>(new float[dim]);
+            vsag::Normalize(query, norm_query.get(), dim);
+            vsag::Normalize(codes, norm_codes.get(), dim);
+            return 1 - vsag::FP32ComputeIP(norm_query.get(), norm_codes.get(), dim);
+        };
+    } else {
+        throw std::runtime_error("no such metric");
+    }
+}
+
 using MaxHeap = std::priority_queue<std::pair<float, int64_t>,
                                     std::vector<std::pair<float, int64_t>>,
                                     CompareByFirst>;
+
+static std::pair<std::vector<uint32_t>, uint64_t>
+GenerateVectorCounts(uint64_t count, uint32_t min_count = 1, uint32_t max_count = 5) {
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<uint32_t> dist(min_count, max_count);
+
+    std::vector<uint32_t> vector_counts(count);
+    uint64_t total_vectors = 0;
+    for (uint64_t i = 0; i < count; ++i) {
+        vector_counts[i] = dist(gen);
+        total_vectors += vector_counts[i];
+    }
+    return {vector_counts, total_vectors};
+}
+
+// Calculate distance between two multi-vector documents using MaxSim similarity
+// MaxSim: for each query vector, find the max similarity (min distance) with any base vector, then sum
+static float
+CalMultiVectorDistance(const vsag::DatasetPtr query,
+                       uint64_t query_idx,
+                       const vsag::DatasetPtr base,
+                       uint64_t base_idx) {
+    auto dim = base->GetDim();
+    auto* query_counts = query->GetVectorCounts();
+    auto* base_counts = base->GetVectorCounts();
+    auto* query_vecs = query->GetFloat32Vectors();
+    auto* base_vecs = base->GetFloat32Vectors();
+    auto dist_func = get_distance_func("ip");
+
+    // Calculate vector start offsets
+    uint32_t q_vec_start = 0;
+    for (uint64_t i = 0; i < query_idx; ++i) {
+        q_vec_start += query_counts[i];
+    }
+    uint32_t b_vec_start = 0;
+    for (uint64_t i = 0; i < base_idx; ++i) {
+        b_vec_start += base_counts[i];
+    }
+
+    // MaxSim: for each query vector, find min distance (max similarity), then sum
+    float total_score = 0.0F;
+    for (uint32_t qv = 0; qv < query_counts[query_idx]; ++qv) {
+        float min_dist = std::numeric_limits<float>::max();
+        for (uint32_t bv = 0; bv < base_counts[base_idx]; ++bv) {
+            float dist = dist_func(
+                query_vecs + (q_vec_start + qv) * dim, base_vecs + (b_vec_start + bv) * dim, dim);
+            if (dist < min_dist) {
+                min_dist = dist;
+            }
+        }
+        total_score += min_dist;
+    }
+    return total_score;
+}
+
+static std::pair<float*, int64_t*>
+CalMultiVectorDistanceMatrix(const vsag::DatasetPtr query, const vsag::DatasetPtr base) {
+    uint64_t query_count = query->GetNumElements();
+    uint64_t base_count = base->GetNumElements();
+
+    auto* result = new float[query_count * base_count];
+    auto* ids = new int64_t[query_count * base_count];
+    auto* base_ids = base->GetIds();
+
+#pragma omp parallel for schedule(dynamic)
+    for (uint64_t i = 0; i < query_count; ++i) {
+        MaxHeap heap;
+        for (uint64_t j = 0; j < base_count; ++j) {
+            float dist = CalMultiVectorDistance(query, i, base, j);
+            heap.emplace(dist, base_ids[j]);
+        }
+        auto idx = 0;
+        while (not heap.empty()) {
+            auto [dist, id] = heap.top();
+            result[i * base_count + idx] = dist;
+            ids[i * base_count + idx] = id;
+            ++idx;
+            heap.pop();
+        }
+    }
+    return {result, ids};
+}
 
 static TestDataset::DatasetPtr
 GenerateRandomDataset(uint64_t dim,
@@ -44,12 +148,23 @@ GenerateRandomDataset(uint64_t dim,
                       uint64_t extra_info_size = 0,
                       std::string vector_type = "dense",
                       bool has_duplicate = false,
-                      int64_t id_shift = 16) {
+                      int64_t id_shift = 16,
+                      bool is_multi_vector = false) {
     auto base = vsag::Dataset::Make();
     bool need_normalize = (metric_str != "cosine");
+
+    // Generate vector counts for multi-vector mode
+    std::vector<uint32_t> vector_counts;
+    uint64_t num_vectors = count;
+    if (is_multi_vector) {
+        uint64_t total_vectors;
+        std::tie(vector_counts, total_vectors) = GenerateVectorCounts(count);
+        num_vectors = total_vectors;
+    }
+
     auto vecs =
-        fixtures::generate_vectors(count, dim, need_normalize, fixtures::RandomValue(0, 564));
-    auto vecs_int8 = fixtures::generate_int8_codes(count, dim, fixtures::RandomValue(0, 564));
+        fixtures::generate_vectors(num_vectors, dim, need_normalize, fixtures::RandomValue(0, 564));
+    auto vecs_int8 = fixtures::generate_int8_codes(num_vectors, dim, fixtures::RandomValue(0, 564));
     auto attr_sets = fixtures::generate_attributes(count);
     auto paths = new std::string[count];
     for (int i = 0; i < count; ++i) {
@@ -82,6 +197,9 @@ GenerateRandomDataset(uint64_t dim,
         auto extra_infos = fixtures::generate_extra_infos(count, extra_info_size);
         base->ExtraInfos(CopyVector(extra_infos));
         base->ExtraInfoSize(extra_info_size);
+    }
+    if (is_multi_vector) {
+        base->VectorCounts(CopyVector(vector_counts));
     }
     return base;
 }
@@ -127,20 +245,7 @@ CalDistanceFloatMetrix(const vsag::DatasetPtr query,
 
     auto* result = new float[query_count * base_count];
     auto* ids = new int64_t[query_count * base_count];
-    auto dist_func = vsag::FP32ComputeL2Sqr;
-    if (metric_str == "ip") {
-        dist_func = [](const float* query, const float* codes, uint64_t dim) -> float {
-            return 1 - vsag::FP32ComputeIP(query, codes, dim);
-        };
-    } else if (metric_str == "cosine") {
-        dist_func = [](const float* query, const float* codes, uint64_t dim) -> float {
-            auto norm_query = std::unique_ptr<float[]>(new float[dim]);
-            auto norm_codes = std::unique_ptr<float[]>(new float[dim]);
-            vsag::Normalize(query, norm_query.get(), dim);
-            vsag::Normalize(codes, norm_codes.get(), dim);
-            return 1 - vsag::FP32ComputeIP(norm_query.get(), norm_codes.get(), dim);
-        };
-    }
+    auto dist_func = get_distance_func(metric_str);
     auto dim = base->GetDim();
 #pragma omp parallel for schedule(dynamic)
     for (uint64_t i = 0; i < query_count; ++i) {
@@ -257,7 +362,8 @@ TestDataset::CreateTestDataset(uint64_t dim,
                                std::string vector_type,
                                uint64_t extra_info_size,
                                bool has_duplicate,
-                               int64_t id_shift) {
+                               int64_t id_shift,
+                               bool is_multi_vector) {
     TestDatasetPtr dataset = std::shared_ptr<TestDataset>(new TestDataset);
     dataset->dim_ = dim;
     dataset->id_shift = id_shift;
@@ -269,16 +375,22 @@ TestDataset::CreateTestDataset(uint64_t dim,
                                            extra_info_size,
                                            vector_type,
                                            has_duplicate,
-                                           dataset->id_shift);
+                                           dataset->id_shift,
+                                           is_multi_vector);
     constexpr uint64_t query_count = 100;
-    dataset->query_ =
-        GenerateRandomDataset(dim, query_count, metric_str, true, extra_info_size, vector_type);
+    dataset->query_ = GenerateRandomDataset(dim,
+                                            query_count,
+                                            metric_str,
+                                            true,
+                                            extra_info_size,
+                                            vector_type,
+                                            has_duplicate,
+                                            id_shift,
+                                            is_multi_vector);
     dataset->filter_query_ = dataset->query_;
     dataset->range_query_ = dataset->query_;
     dataset->valid_ratio_ = valid_ratio;
     {
-        auto result =
-            CalDistanceFloatMetrix(dataset->query_, dataset->base_, metric_str, vector_type);
         dataset->top_k = 10;
 
         dataset->filter_function_ =
@@ -290,12 +402,21 @@ TestDataset::CreateTestDataset(uint64_t dim,
             uint8_t abs = *data - INT8_MIN;
             return abs > UINT8_MAX * valid_ratio;
         };
+
         auto help_filter_function = [&](int64_t id) -> bool {
             return extra_info_size != 0 &&
                    dataset->ex_filter_function_(dataset->base_->GetExtraInfos() +
                                                 dataset->base_->GetExtraInfoSize() *
                                                     (id >> dataset->id_shift));
         };
+
+        std::pair<float*, int64_t*> result;
+        if (is_multi_vector) {
+            result = CalMultiVectorDistanceMatrix(dataset->query_, dataset->base_);
+        } else {
+            result =
+                CalDistanceFloatMetrix(dataset->query_, dataset->base_, metric_str, vector_type);
+        }
 
         if (with_path) {
             dataset->ground_truth_ = CalGroundTruthWithPath(result,

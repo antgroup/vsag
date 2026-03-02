@@ -131,6 +131,18 @@ CreateTestDataset(int num_elements = 777,
         paths[i] = fixtures::create_random_string(false);
     }
     std::vector<int64_t> ids(num_elements);
+
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<uint32_t> dist(1, 5);
+
+    std::vector<uint32_t> vector_counts(num_elements);
+    uint64_t total_vectors = 0;
+    for (uint64_t i = 0; i < num_elements; ++i) {
+        vector_counts[i] = dist(gen);
+        total_vectors += vector_counts[i];
+    }
+
     std::iota(ids.begin(), ids.end(), 0);
     base->Dim(dim)
         ->Ids(fixtures::CopyVector(ids, allocator))
@@ -138,6 +150,7 @@ CreateTestDataset(int num_elements = 777,
         ->AttributeSets(attr_sets)
         ->NumElements(num_elements)
         ->Distances(fixtures::CopyVector(distances, allocator))
+        ->VectorCounts(fixtures::CopyVector(vector_counts, allocator))
         ->Owner(true, allocator);
     base->Float32Vectors(fixtures::CopyVector(vecs, allocator))
         ->Int8Vectors(fixtures::CopyVector(vecs_int8, allocator));
@@ -178,6 +191,12 @@ EqualDataset(const vsag::DatasetPtr& data1, const vsag::DatasetPtr& data2) {
     }
     if (memcmp(data1->GetDistances(), data2->GetDistances(), sizeof(float) * num_element * dim) !=
         0) {
+        return false;
+    }
+
+    if (memcmp(data1->GetVectorCounts(),
+               data2->GetVectorCounts(),
+               sizeof(uint32_t) * num_element) != 0) {
         return false;
     }
 
@@ -272,7 +291,7 @@ TEST_CASE("Dataset Copy and Append Test", "[ut][Dataset]") {
     SECTION("Deep Copy") {
         auto use_copy_allocator = GENERATE(true, false);
         std::shared_ptr<vsag::Allocator> copy_allocator =
-            use_allocator ? vsag::Engine::CreateDefaultAllocator() : nullptr;
+            use_copy_allocator ? vsag::Engine::CreateDefaultAllocator() : nullptr;
         auto copy = original->DeepCopy(copy_allocator.get());
         REQUIRE(EqualDataset(original, copy));
         REQUIRE(AreAllPointersDifferent(
@@ -300,6 +319,7 @@ TEST_CASE("Dataset Copy and Append Test", "[ut][Dataset]") {
             ->Distances(original->GetDistances() + num_elements * dim)
             ->Paths(original->GetPaths() + num_elements)
             ->AttributeSets(original->GetAttributeSets() + num_elements)
+            ->VectorCounts(original->GetVectorCounts() + num_elements)
             ->NumElements(append_num_elements)
             ->ExtraInfoSize(extra_info_size)
             ->ExtraInfos(original->GetExtraInfos() + num_elements * extra_info_size)

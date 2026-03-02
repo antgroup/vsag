@@ -45,9 +45,22 @@ get_one_query(const vsag::DatasetPtr& queries, int i) {
     auto query = vsag::Dataset::Make();
     query->NumElements(1)
         ->Dim(queries->GetDim())
-        ->Float32Vectors(queries->GetFloat32Vectors() + i * queries->GetDim())
         ->SparseVectors(queries->GetSparseVectors() + i)
         ->Owner(false);
+
+    // Support multi-vector query - calculate correct vector offset
+    const auto* vector_counts = queries->GetVectorCounts();
+    if (vector_counts != nullptr) {
+        uint32_t vec_offset = 0;
+        for (int j = 0; j < i; ++j) {
+            vec_offset += vector_counts[j];
+        }
+        query->Float32Vectors(queries->GetFloat32Vectors() + vec_offset * queries->GetDim());
+        query->VectorCounts(vector_counts + i);
+    } else {
+        query->Float32Vectors(queries->GetFloat32Vectors() + i * queries->GetDim());
+    }
+
     if (queries->GetPaths() != nullptr) {
         query->Paths(queries->GetPaths() + i);
     }

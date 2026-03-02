@@ -28,6 +28,7 @@ const char* const INDEX_SINDI = "sindi";
 const char* const INDEX_BRUTE_FORCE = "brute_force";
 const char* const INDEX_IVF = "ivf";
 const char* const INDEX_GNO_IMI = "gno_imi";
+const char* const INDEX_WARP = "warp";
 
 const char* const DIM = "dim";
 const char* const NUM_ELEMENTS = "num_elements";
@@ -40,6 +41,7 @@ const char* const ATTRIBUTE_SETS = "attribute_sets";
 const char* const DATASET_PATHS = "paths";
 const char* const EXTRA_INFOS = "extra_infos";
 const char* const EXTRA_INFO_SIZE = "extra_info_size";
+const char* const VECTOR_COUNTS = "vector_counts";
 
 const char* const HNSW_DATA = "hnsw_data";
 const char* const CONJUGATE_GRAPH_DATA = "conjugate_graph_data";
