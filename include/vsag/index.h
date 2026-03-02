@@ -175,9 +175,10 @@ public:
      * @brief 
      *  1. Shrink the index to release memory occupied by soft deleted vectors.
      *  2. Repair the index which is corrupted by soft delete.
+     * @param timeout_ms is the timeout in milliseconds for the shrink and repair operation
      */
-    virtual void
-    ShrinkAndRepair() {
+    virtual tl::expected<void, Error>
+    ShrinkAndRepair(double timeout_ms = std::numeric_limits<double>::max()) {
         throw std::runtime_error("Index not support ShrinkAndRepair");
     }
 

@@ -408,6 +408,12 @@ public:
         SAFE_CALL(return this->inner_index_->Remove(ids, mode));
     }
 
+    tl::expected<void, Error>
+    ShrinkAndRepair(double timeout_ms = std::numeric_limits<double>::max()) override {
+        CHECK_IMMUTABLE_INDEX("shrink and repair");
+        SAFE_CALL(this->inner_index_->ShrinkAndRepair(timeout_ms));
+    }
+
     [[nodiscard]] tl::expected<BinarySet, Error>
     Serialize() const override {
         SAFE_CALL(return this->inner_index_->Serialize());
