@@ -2151,13 +2151,28 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     }
     search_param.parallel_search_thread_count = params.parallel_search_thread_count;
 
-    auto search_result = this->search_one_graph(
-        raw_query, this->bottom_graph_, this->basic_flatten_codes_, search_param, vt, &ctx);
+    // Track pre-reorder time (graph traversal)
+    double prereorder_time = 0;
+    DistHeapPtr search_result;
+    {
+        Timer timer(prereorder_time);
+        search_result = this->search_one_graph(
+            raw_query, this->bottom_graph_, this->basic_flatten_codes_, search_param, vt, &ctx);
+    }
+    stats.prereorder_time_ms.store(static_cast<uint32_t>(prereorder_time),
+                                    std::memory_order_relaxed);
 
     this->pool_->ReturnOne(vt);
 
+    // Track reorder time
     if (use_reorder_) {
-        this->reorder(raw_query, this->high_precise_codes_, search_result, k, nullptr, ctx);
+        double reorder_time = 0;
+        {
+            Timer timer(reorder_time);
+            this->reorder(raw_query, this->high_precise_codes_, search_result, k, nullptr, ctx);
+        }
+        stats.reorder_time_ms.store(static_cast<uint32_t>(reorder_time),
+                                     std::memory_order_relaxed);
     }
 
     while (search_result->Size() > k) {
@@ -2218,6 +2233,26 @@ HGraph::GetStats() const {
     auto analyzer = CreateAnalyzer(this, analyzer_param);
     JsonType stats = analyzer->GetStats();
     return stats.Dump(4);
+}
+
+std::vector<std::string>
+HGraph::GetSupportedMetricKeys() const {
+    // Return both analyzer metrics and search statistics metrics
+    return {
+        // Per-query statistics (from SearchStatistics)
+        "is_timeout",
+        "dist_cmp",
+        "hops",
+        "io_cnt",
+        "io_time_ms",
+        "prereorder_time_ms",
+        "reorder_time_ms",
+        "io_max_time_ms",
+        // Global constants
+        STATSTIC_MEMORY,
+        STATSTIC_INDEX_NAME,
+        STATSTIC_DATA_NUM
+    };
 }
 
 void

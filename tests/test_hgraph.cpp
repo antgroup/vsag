@@ -2319,3 +2319,90 @@ TEST_CASE("HGraph Concurrent Read Write", "[ft][hgraph][concurrent]") {
         thread.join();
     }
 }
+
+TEST_CASE("HGraph Statistics Metrics", "[ft][hgraph][statistics]") {
+    int dim = 128;
+    int max_elements = 100;
+    
+    // Build parameters
+    nlohmann::json hgraph_parameters{
+        {"max_degree", 16},
+        {"ef_construction", 100},
+        {"use_reorder", true}
+    };
+    nlohmann::json index_parameters{
+        {"dtype", "float32"},
+        {"metric_type", "l2"},
+        {"dim", dim},
+        {"hgraph", hgraph_parameters}
+    };
+    
+    std::shared_ptr<vsag::Index> hgraph;
+    auto index = vsag::Factory::CreateIndex("hgraph", index_parameters.dump());
+    REQUIRE(index.has_value());
+    hgraph = index.value();
+    
+    // Generate random data
+    std::mt19937 rng;
+    rng.seed(47);
+    std::uniform_real_distribution<> distrib_real;
+    int64_t* ids = new int64_t[max_elements];
+    float* data = new float[dim * max_elements];
+    for (int i = 0; i < max_elements; i++) {
+        ids[i] = i;
+    }
+    for (int i = 0; i < dim * max_elements; i++) {
+        data[i] = distrib_real(rng);
+    }
+    
+    // Build index
+    auto dataset = vsag::Dataset::Make();
+    dataset->Dim(dim)->NumElements(max_elements)->Ids(ids)->Float32Vectors(data);
+    hgraph->Build(dataset);
+    
+    // Test GetSupportedMetricKeys
+    auto supported_keys = hgraph->GetSupportedMetricKeys();
+    REQUIRE(!supported_keys.empty());
+    
+    // Check that expected keys are present
+    std::set<std::string> key_set(supported_keys.begin(), supported_keys.end());
+    REQUIRE(key_set.count("prereorder_time_ms") > 0);
+    REQUIRE(key_set.count("reorder_time_ms") > 0);
+    REQUIRE(key_set.count("io_cnt") > 0);
+    REQUIRE(key_set.count("io_time_ms") > 0);
+    REQUIRE(key_set.count("io_max_time_ms") > 0);
+    
+    // Perform some searches to generate statistics
+    nlohmann::json search_parameters{
+        {"hgraph", {{"ef_search", 100}}}
+    };
+    int64_t k = 10;
+    for (int i = 0; i < 10; i++) {
+        auto query = vsag::Dataset::Make();
+        query->NumElements(1)->Dim(dim)->Float32Vectors(data + i * dim)->Owner(false);
+        auto result = hgraph->KnnSearch(query, k, search_parameters.dump());
+        REQUIRE(result.has_value());
+        
+        // Verify statistics are present in the result
+        if (result.has_value() && result.value()->GetNumElements() > 0) {
+            auto stats_json = result.value()->GetStatistics();
+            if (!stats_json.empty()) {
+                auto stats = nlohmann::json::parse(stats_json);
+                
+                // Verify new metrics are present and have reasonable values
+                if (stats.contains("prereorder_time_ms")) {
+                    REQUIRE(stats["prereorder_time_ms"].get<int>() >= 0);
+                }
+                if (stats.contains("reorder_time_ms")) {
+                    REQUIRE(stats["reorder_time_ms"].get<int>() >= 0);
+                }
+                if (stats.contains("io_max_time_ms")) {
+                    REQUIRE(stats["io_max_time_ms"].get<int>() >= 0);
+                }
+            }
+        }
+    }
+    
+    delete[] ids;
+    delete[] data;
+}

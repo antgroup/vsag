@@ -888,6 +888,16 @@ public:
     }
 
     /**
+      * @brief Get all supported metric keys for this index
+      *
+      * @return a vector of strings containing all supported metric keys.
+      */
+    [[nodiscard]] virtual std::vector<std::string>
+    GetSupportedMetricKeys() const {
+        return {};
+    }
+
+    /**
       * @brief Perform analysis on the index using a search request.
       *
       *
