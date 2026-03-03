@@ -71,6 +71,21 @@ public:
                            param.deserialize_without_buffer,
                            param.use_quantization);
     }
+
+    static std::string
+    GenerateSearchParameter(bool use_term_lists_heap_insert) {
+        constexpr static const char* search_param_template = R"(
+        {{
+            "sindi":
+            {{
+                "n_candidate": 20,
+                "query_prune_ratio": 0.0,
+                "term_prune_ratio": 0.0,
+                "use_term_lists_heap_insert": {}
+            }}
+        }})";
+        return fmt::format(search_param_template, use_term_lists_heap_insert);
+    }
 };
 TestDatasetPool SINDITestIndex::pool{};
 
@@ -204,6 +219,8 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Serialize File", "
     param.use_reorder = GENERATE(true, false);
     param.use_quantization = GENERATE(true, false);
     auto build_param = fixtures::SINDITestIndex::GenerateBuildParameter(param);
+    auto search_param_with_heap_insert =
+        fixtures::SINDITestIndex::GenerateSearchParameter(GENERATE(true, false));
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("ip");
@@ -221,15 +238,15 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Serialize File", "
     TestBuildIndex(index, dataset, true);
     SECTION("serialize/deserialize by binary") {
         auto index2 = TestFactory(name, build_param, true);
-        TestSerializeBinarySet(index, index2, dataset, search_param, true);
+        TestSerializeBinarySet(index, index2, dataset, search_param_with_heap_insert, true);
     }
     SECTION("serialize/deserialize by readerset") {
         auto index2 = TestFactory(name, build_param, true);
-        TestSerializeReaderSet(index, index2, dataset, search_param, name, true);
+        TestSerializeReaderSet(index, index2, dataset, search_param_with_heap_insert, name, true);
     }
     SECTION("serialize/deserialize by file") {
         auto index2 = TestFactory(name, build_param, true);
-        TestSerializeFile(index, index2, dataset, search_param, true);
+        TestSerializeFile(index, index2, dataset, search_param_with_heap_insert, true);
     }
     vsag::Options::Instance().set_block_size_limit(origin_size);
 }
@@ -241,4 +258,55 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "Sindi Duplicate ID Test"
     auto index = TestFactory("sindi", build_param, true);
     auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
     TestDuplicateAdd(index, dataset);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "Test Deserialize", "[ft][sindi][search]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = 1024 * 1024 * 2;
+    auto dim = 768;
+    vsag::Options::Instance().set_block_size_limit(size);
+    std::string build_param =
+        "{\"dtype\":\"sparse\",\"metric_type\":\"ip\",\"dim\": "
+        "1024,\"index_param\":{\"use_reorder\":false,\"doc_prune_ratio\":0.00000,\"window_size\":"
+        "60000,\"deserialize_without_footer\":true,\"deserialize_without_buffer\":true,\"use_"
+        "quantization\":false,\"term_id_limit\":500000,\"avg_doc_term_length\":120}}";
+    auto index_result = vsag::Factory::CreateIndex("sindi", build_param);
+    REQUIRE(index_result.has_value());
+    auto index = index_result.value();
+
+    std::ifstream infile("/tbase-project/vsag/data/sindi.index", std::ios::binary);
+    auto des_res = index->Deserialize(infile);
+    if (!des_res.has_value()) {
+        std::cerr << "Deserialize fail, error=" << (int)des_res.error().type << std::endl;
+        throw std::runtime_error("Index Deserialize fail");
+    }
+
+    std::string search_param =
+        "{\"sindi\":{\"query_prune_ratio\":0.000000,\"use_term_lists_heap_insert\":false,\"n_"
+        "candidate\":0}}";
+    uint32_t len = 3;
+    uint32_t* dims = new uint32_t[len];
+    float* vals = new float[len];
+    dims[0] = 1;
+    dims[1] = 2;
+    dims[2] = 3;
+    vals[0] = 0.1;
+    vals[1] = 0.2;
+    vals[2] = 0.3;
+    vsag::SparseVector sparse;
+    sparse.len_ = len;
+    sparse.ids_ = dims;
+    sparse.vals_ = vals;
+    auto data = vsag::Dataset::Make();
+    data->NumElements(1)->SparseVectors(&sparse)->Owner(false);
+    auto result = index->KnnSearch(data, 2, search_param);
+    REQUIRE(result.has_value());
+    const int64_t* neighbors = result.value()->GetIds();
+    auto result_size = result.value()->GetDim();
+    auto dist = result.value()->GetDistances();
+    std::cout << "result_size = " << result_size << std::endl;
+    for (int i = 0; i < result_size; ++i) {
+        std::cout << ", neighbors[" << i << "]=" << neighbors[i] << ", dist=" << dist[i]
+                  << std::endl;
+    }
 }
