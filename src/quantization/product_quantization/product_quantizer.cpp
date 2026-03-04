@@ -122,24 +122,6 @@ ProductQuantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) {
 
 template <MetricType metric>
 bool
-ProductQuantizer<metric>::EncodeBatchImpl(const DataType* data, uint8_t* codes, uint64_t count) {
-    for (uint64_t i = 0; i < count; ++i) {
-        this->EncodeOneImpl(data + i * this->dim_, codes + i * this->code_size_);
-    }
-    return true;
-}
-
-template <MetricType metric>
-bool
-ProductQuantizer<metric>::DecodeBatchImpl(const uint8_t* codes, DataType* data, uint64_t count) {
-    for (uint64_t i = 0; i < count; ++i) {
-        this->DecodeOneImpl(codes + i * this->code_size_, data + i * this->dim_);
-    }
-    return true;
-}
-
-template <MetricType metric>
-bool
 ProductQuantizer<metric>::DecodeOneImpl(const uint8_t* codes, DataType* data) {
     for (int i = 0; i < pq_dim_; ++i) {
         auto idx = codes[i];
@@ -274,18 +256,6 @@ ProductQuantizer<metric>::ComputeDistsBatch4Impl(Computer<ProductQuantizer<metri
 
 template <MetricType metric>
 void
-ProductQuantizer<metric>::ScanBatchDistImpl(Computer<ProductQuantizer<metric>>& computer,
-                                            uint64_t count,
-                                            const uint8_t* codes,
-                                            float* dists) const {
-    // TODO(LHT): Optimize batch for simd
-    for (uint64_t i = 0; i < count; ++i) {
-        this->ComputeDistImpl(computer, codes + i * this->code_size_, dists + i);
-    }
-}
-
-template <MetricType metric>
-void
 ProductQuantizer<metric>::SerializeImpl(StreamWriter& writer) {
     StreamWriter::WriteObj(writer, this->pq_dim_);
     StreamWriter::WriteObj(writer, this->subspace_dim_);
@@ -299,12 +269,6 @@ ProductQuantizer<metric>::DeserializeImpl(StreamReader& reader) {
     StreamReader::ReadObj(reader, this->subspace_dim_);
     StreamReader::ReadVector(reader, this->codebooks_);
     this->transpose_codebooks();
-}
-
-template <MetricType metric>
-void
-ProductQuantizer<metric>::ReleaseComputerImpl(Computer<ProductQuantizer<metric>>& computer) const {
-    this->allocator_->Deallocate(computer.buf_);
 }
 
 template <MetricType metric>
