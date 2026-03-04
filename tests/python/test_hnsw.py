@@ -12,79 +12,62 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from test_base import TestBase
-from test_dataset import TestDataset
+"""Pytest tests for HNSW index"""
+
 import json
-import os
 import pyvsag
+import pytest
+from conftest import create_index, build_index, save_index, load_index, verify_knn_search
 
 
-class TestHNSW(TestBase):
-    """Test HNSW index"""
-
-    type_name: str = "hnsw"
-
-    def __init__(
-        self,
-        dim: int = 128,
-        num_vectors: int = 1000,
-        metric: str = "l2",
-        expect_recall: float = 0.9,
-    ):
-        self.dim = dim
-        self.num_vectors = num_vectors
-        self.metric = metric
-        self.dataset = TestDataset(dim=dim, num_vectors=num_vectors, metric=metric)
-        self.max_degree = int(dim / 4)
-        self.ef_construction = max(200, self.max_degree)
-        self.index_params = json.dumps(
-            {
-                "dtype": "float32",
-                "metric_type": self.metric,
-                "dim": self.dim,
-                "hnsw": {
-                    "max_degree": self.max_degree,
-                    "ef_construction": self.ef_construction,
-                },
-            }
-        )
-
-    def init_index(self) -> pyvsag.Index:
-        """Initialize HNSW index"""
-
-        return TestBase.FactoryIndex(self.type_name, self.index_params)
-
-    def general_test_search(self):
-        """Test search index"""
-        search_params = json.dumps({"hnsw": {"ef_search": 40}})
-        TestBase.TestKnnSearch(self.index, self.dataset, search_params)
-
-    def test_build(self):
-        """Test build index"""
-        self.index = self.init_index()
-        TestBase.BuildIndex(self.index, self.dataset)
-        self.general_test_search()
-
-    def test_load_save(self):
-        """Test load and save index"""
-        filename = TestBase.GenerateRandomFilePath()
-        TestBase.SaveIndex(self.index, filename)
-        self.index = self.init_index()
-        TestBase.LoadIndex(self.index, filename)
-        os.remove(filename)
-        self.general_test_search()
+TYPE_NAME = "hnsw"
 
 
-def run_hnsw_test():
-    """Run HNSW index tests"""
-    metric_types = ["ip"]
-    dims = [128, 256, 1024]
-    for metric in metric_types:
-        for dim in dims:
-            test_hnsw = TestHNSW(dim=dim, metric=metric)
-            test_hnsw.test_build()
-            test_hnsw.test_load_save()
+def _create_index_params(dim: int, metric: str) -> str:
+    """Create index parameters for HNSW"""
+    max_degree = int(dim / 4)
+    ef_construction = max(200, max_degree)
+    return json.dumps(
+        {
+            "dtype": "float32",
+            "metric_type": metric,
+            "dim": dim,
+            "hnsw": {
+                "max_degree": max_degree,
+                "ef_construction": ef_construction,
+            },
+        }
+    )
 
 
-if __name__ == "__main__":
-    run_hnsw_test()
+@pytest.mark.parametrize("metric", ["ip"])
+@pytest.mark.parametrize("dim", [128, 256, 1024])
+def test_hnsw_build(dim, metric, dataset_factory):
+    """Test building HNSW index"""
+    dataset = dataset_factory(dim=dim, num_vectors=1000, metric=metric)
+    index_params = _create_index_params(dim, metric)
+    index = create_index(TYPE_NAME, index_params)
+    build_index(index, dataset)
+    
+    search_params = json.dumps({"hnsw": {"ef_search": 40}})
+    verify_knn_search(index, dataset, search_params)
+
+
+@pytest.mark.parametrize("metric", ["ip"])
+@pytest.mark.parametrize("dim", [128, 256, 1024])
+def test_hnsw_load_save(dim, metric, dataset_factory, tmp_path):
+    """Test loading and saving HNSW index"""
+    dataset = dataset_factory(dim=dim, num_vectors=1000, metric=metric)
+    index_params = _create_index_params(dim, metric)
+    
+    # Build and save
+    index = create_index(TYPE_NAME, index_params)
+    build_index(index, dataset)
+    filename = tmp_path / f"test_hnsw_{dim}_{metric}.vsag"
+    save_index(index, str(filename))
+    
+    # Load and test
+    index = create_index(TYPE_NAME, index_params)
+    load_index(index, str(filename))
+    search_params = json.dumps({"hnsw": {"ef_search": 40}})
+    verify_knn_search(index, dataset, search_params)

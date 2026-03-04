@@ -90,7 +90,7 @@ run_build() {
     echo "🛠️  Starting cibuildwheel... "
     CIBW_BUILD="${cibw_build_pattern}" \
     CIBW_ARCHS="${ARCH}" \
-    CIBW_TEST_COMMAND="pip install numpy && ls -alF /project/ && python /project/tests/python/run_test.py" \
+    CIBW_TEST_COMMAND="pip install numpy pytest && bash /project/tests/python/test_runner.sh" \
     cibuildwheel --platform linux --output-dir wheelhouse python
   else 
     echo "🛠️  Starting build..."
@@ -107,8 +107,9 @@ run_build() {
     echo "   - Installing wheel: ${LATEST_WHEEL}"
     pip install "${LATEST_WHEEL}" --force-reinstall
     echo "   - Running tests..."
-    pip install numpy
-    python examples/python/example_hnsw.py
+    pip install numpy pytest
+    cd tests/python && python -m pytest . -v --tb=short 2>&1 | tee test-output.log || (cat test-output.log && exit 1)
+    cd ../..
   fi
 
   cleanup
