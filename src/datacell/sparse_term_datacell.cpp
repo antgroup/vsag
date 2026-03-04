@@ -447,6 +447,9 @@ SparseTermDataCell::Deserialize(StreamReader& reader) {
             if (use_quantization_) {
                 term_datas_[i]->resize(term_ids_[i]->size());
             }
+            for (auto id : *term_ids_[i]) {
+                total_count_ = std::max(total_count_, static_cast<int64_t>(id) + 1);
+            }
         }
     }
     StreamReader::ReadVector(reader, term_sizes_);
