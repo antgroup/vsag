@@ -12,94 +12,76 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from test_base import TestBase
-from test_dataset import TestDataset
+"""Pytest tests for Bruteforce index"""
+
 import json
-import os
 import pyvsag
+import pytest
+from conftest import create_index, build_index, save_index, load_index, verify_knn_search
 
 
-class TestBruteforce(TestBase):
-    """Test Bruteforce index"""
-
-    type_name: str = "brute_force"
-
-    def __init__(
-        self,
-        dim: int = 128,
-        num_vectors: int = 1000,
-        metric: str = "l2",
-        expect_recall: float = 0.9,
-        quantization_type: str = "sq8",
-    ):
-        self.dim = dim
-        self.num_vectors = num_vectors
-        self.metric = metric
-        self.dataset = TestDataset(dim=dim, num_vectors=num_vectors, metric=metric)
-        qs = quantization_type.split(",")
-        self.base_quantization_type = qs[0]
-        self.precise_quantization_type = "fp32"
-        if len(qs) > 1:
-            self.precise_quantization_type = qs[1]
-            self.use_reorder = True
-        else:
-            self.use_reorder = False
-
-        self.index_params = json.dumps(
-            {
-                "dtype": "float32",
-                "metric_type": self.metric,
-                "dim": self.dim,
-                "index_param": {
-                    "base_quantization_type": self.base_quantization_type,
-                    "precise_quantization_type": self.precise_quantization_type,
-                },
-            }
-        )
-
-    def init_index(self) -> pyvsag.Index:
-        """Initialize Bruteforce index"""
-        return TestBase.FactoryIndex(self.type_name, self.index_params)
-
-    def general_test_search(self):
-        """Test search index"""
-        search_params = json.dumps({})
-        TestBase.TestKnnSearch(self.index, self.dataset, search_params)
-
-    def test_build(self):
-        """Test build index"""
-        self.index = self.init_index()
-        TestBase.BuildIndex(self.index, self.dataset)
-        self.general_test_search()
-
-    def test_load_save(self):
-        """Test load and save index"""
-        filename = TestBase.GenerateRandomFilePath()
-        TestBase.SaveIndex(self.index, filename)
-        self.index = self.init_index()
-        TestBase.LoadIndex(self.index, filename)
-        os.remove(filename)
-        self.general_test_search()
+TYPE_NAME = "brute_force"
 
 
-def run_bruteforce_test():
-    """Run Bruteforce index tests"""
-    metric_types = ["ip"]
-    dims = [128, 256, 1024]
-    quantizer_recalls = [
-        ("sq8", 0.9),
-        ("fp16", 0.98),
-        ("fp32", 0.9999),
-    ]
-    for metric in metric_types:
-        for dim in dims:
-            for qt, recall in quantizer_recalls:
-                test_brute_force = TestBruteforce(
-                    dim=dim, metric=metric, expect_recall=recall, quantization_type=qt
-                )
-                test_brute_force.test_build()
-                test_brute_force.test_load_save()
+def _create_index_params(dim: int, metric: str, quantization_type: str) -> str:
+    """Create index parameters for Bruteforce"""
+    qs = quantization_type.split(",")
+    base_quantization_type = qs[0]
+    precise_quantization_type = "fp32"
+    if len(qs) > 1:
+        precise_quantization_type = qs[1]
+    
+    return json.dumps(
+        {
+            "dtype": "float32",
+            "metric_type": metric,
+            "dim": dim,
+            "index_param": {
+                "base_quantization_type": base_quantization_type,
+                "precise_quantization_type": precise_quantization_type,
+            },
+        }
+    )
 
 
-if __name__ == "__main__":
-    run_bruteforce_test()
+@pytest.mark.parametrize("metric", ["ip"])
+@pytest.mark.parametrize("dim", [128, 256, 1024])
+@pytest.mark.parametrize("quantization_type,expect_recall", [
+    ("sq8", 0.9),
+    ("fp16", 0.98),
+    ("fp32", 0.9999),
+])
+def test_bruteforce_build(dim, metric, quantization_type, expect_recall, dataset_factory):
+    """Test building Bruteforce index"""
+    dataset = dataset_factory(dim=dim, num_vectors=1000, metric=metric)
+    index_params = _create_index_params(dim, metric, quantization_type)
+    index = create_index(TYPE_NAME, index_params)
+    build_index(index, dataset)
+    
+    search_params = json.dumps({})
+    verify_knn_search(index, dataset, search_params, expect_recall=expect_recall)
+
+
+@pytest.mark.parametrize("metric", ["ip"])
+@pytest.mark.parametrize("dim", [128, 256, 1024])
+@pytest.mark.parametrize("quantization_type,expect_recall", [
+    ("sq8", 0.9),
+    ("fp16", 0.98),
+    ("fp32", 0.9999),
+])
+def test_bruteforce_load_save(dim, metric, quantization_type, expect_recall, dataset_factory, tmp_path):
+    """Test loading and saving Bruteforce index"""
+    dataset = dataset_factory(dim=dim, num_vectors=1000, metric=metric)
+    index_params = _create_index_params(dim, metric, quantization_type)
+    
+    # Build and save
+    index = create_index(TYPE_NAME, index_params)
+    build_index(index, dataset)
+    filename = tmp_path / f"test_bruteforce_{dim}_{metric}_{quantization_type.replace(',', '_')}.vsag"
+    save_index(index, str(filename))
+    
+    # Load and test
+    index = create_index(TYPE_NAME, index_params)
+    load_index(index, str(filename))
+    search_params = json.dumps({})
+    verify_knn_search(index, dataset, search_params, expect_recall=expect_recall)

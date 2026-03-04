@@ -96,11 +96,42 @@ jobs:
         run: |
             pip3 uninstall pyvsag -y
             pip3 install ./wheelhouse/*.whl
-            pip3 install numpy pyjson
+            pip3 install numpy pyjson pytest
+      
       - name: Run Python Test
         run: |
             cd ./tests/python/
-            python3 run_test.py
+            echo "=== Running pytest with detailed output ==="
+            python3 -m pytest . -v --tb=short 2>&1 | tee test-output.log
+            echo "=== Test execution completed ==="
+        continue-on-error: true
+      
+      - name: Analyze Test Results
+        run: |
+            cd ./tests/python/
+            echo "=== Analyzing test results ==="
+            if grep -q "FAILED\|ERROR" test-output.log; then
+              echo "❌ Some tests failed!"
+              echo "=== Failed tests summary ==="
+              grep -A 5 "FAILED\|ERROR" test-output.log || true
+              exit 1
+            elif grep -q "passed" test-output.log && ! grep -q "FAILED" test-output.log; then
+              PASSED=$(grep -oP '\d+(?= passed)' test-output.log || echo "0")
+              echo "✅ All tests passed! ($PASSED tests)"
+            else
+              echo "⚠️ Could not determine test results"
+              cat test-output.log
+              exit 1
+            fi
+      
+      - name: Upload Test Logs
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: pytest-logs-x86-${{ github.run_id }}
+          path: ./tests/python/test-output.log
+          retention-days: 30
+          if-no-files-found: ignore
 
   test_python_aarch64:
     name: Test Python Aarch64
@@ -124,11 +155,42 @@ jobs:
         run: |
           pip3 uninstall pyvsag -y
           pip3 install ./wheelhouse/*.whl
-          pip3 install numpy pyjson
+          pip3 install numpy pyjson pytest
+      
       - name: Run Python Test
         run: |
             cd ./tests/python/
-            python3 run_test.py
+            echo "=== Running pytest with detailed output ==="
+            python3 -m pytest . -v --tb=short 2>&1 | tee test-output.log
+            echo "=== Test execution completed ==="
+        continue-on-error: true
+      
+      - name: Analyze Test Results
+        run: |
+            cd ./tests/python/
+            echo "=== Analyzing test results ==="
+            if grep -q "FAILED\|ERROR" test-output.log; then
+              echo "❌ Some tests failed!"
+              echo "=== Failed tests summary ==="
+              grep -A 5 "FAILED\|ERROR" test-output.log || true
+              exit 1
+            elif grep -q "passed" test-output.log && ! grep -q "FAILED" test-output.log; then
+              PASSED=$(grep -oP '\d+(?= passed)' test-output.log || echo "0")
+              echo "✅ All tests passed! ($PASSED tests)"
+            else
+              echo "⚠️ Could not determine test results"
+              cat test-output.log
+              exit 1
+            fi
+      
+      - name: Upload Test Logs
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: pytest-logs-aarch64-${{ github.run_id }}
+          path: ./tests/python/test-output.log
+          retention-days: 30
+          if-no-files-found: ignore
         
   clean_up:
     name: Clean Up
