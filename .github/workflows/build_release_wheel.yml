@@ -106,7 +106,21 @@ jobs:
         env:
           CIBW_ARCHS: ${{ matrix.arch }}
           CIBW_BUILD: ${{ matrix.cibw-build-id }}
-          CIBW_TEST_COMMAND: "pip install numpy && ls -alF /project/ && python /project/tests/python/run_test.py"
+          CIBW_TEST_COMMAND: |
+            pip install numpy pytest && \
+            echo "=== Running VSAG Python Tests ===" && \
+            python -m pytest /project/tests/python -v --tb=short 2>&1 | tee /tmp/test-output.log && \
+            if grep -q "FAILED\|ERROR" /tmp/test-output.log; then \
+              echo "❌ Tests failed!" && \
+              grep -A 5 "FAILED\|ERROR" /tmp/test-output.log && \
+              exit 1; \
+            elif grep -q "passed" /tmp/test-output.log; then \
+              echo "✅ All tests passed!" && \
+              exit 0; \
+            else \
+              echo "⚠️ Test results unclear" && \
+              exit 1; \
+            fi
 
       - uses: actions/upload-artifact@v5
         with:
@@ -141,7 +155,21 @@ jobs:
         env:
           CIBW_ARCHS: ${{ matrix.arch }}
           CIBW_BUILD: "cp36-*"
-          CIBW_TEST_COMMAND: "pip install numpy && ls -alF /project/ && python /project/tests/python/run_test.py"
+          CIBW_TEST_COMMAND: |
+            pip install numpy pytest && \
+            echo "=== Running VSAG Python Tests ===" && \
+            python -m pytest /project/tests/python -v --tb=short 2>&1 | tee /tmp/test-output.log && \
+            if grep -q "FAILED\|ERROR" /tmp/test-output.log; then \
+              echo "❌ Tests failed!" && \
+              grep -A 5 "FAILED\|ERROR" /tmp/test-output.log && \
+              exit 1; \
+            elif grep -q "passed" /tmp/test-output.log; then \
+              echo "✅ All tests passed!" && \
+              exit 0; \
+            else \
+              echo "⚠️ Test results unclear" && \
+              exit 1; \
+            fi
 
       - uses: actions/upload-artifact@v5
         with:

@@ -12,18 +12,26 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from test_ivf import run_ivf_test
-from test_hnsw import run_hnsw_test
-from test_hgraph import run_hgraph_test
-from test_bruteforce import run_bruteforce_test
+"""Test runner - now uses pytest under the hood"""
+
+import os
+import pytest
+import sys
 
 
 def run():
-    run_ivf_test()
-    run_hnsw_test()
-    run_hgraph_test()
-    run_bruteforce_test()
+    """Run all tests using pytest"""
+    # Get the directory where this script is located
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    args = [
+        "-v",
+        os.path.join(script_dir, "test_ivf.py"),
+        os.path.join(script_dir, "test_hnsw.py"),
+        os.path.join(script_dir, "test_hgraph.py"),
+        os.path.join(script_dir, "test_bruteforce.py"),
+    ]
+    return pytest.main(args)
 
 
 if __name__ == "__main__":
-    run()
+    sys.exit(run())
