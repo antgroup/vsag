@@ -21,9 +21,6 @@
 
 #include "simd.h"
 
-#define PORTABLE_ALIGN32 __attribute__((aligned(32)))
-#define PORTABLE_ALIGN64 __attribute__((aligned(64)))
-
 namespace vsag::avx512 {
 float
 L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
@@ -385,7 +382,24 @@ FP32Div(const float* x, const float* y, float* z, uint64_t dim) {
 
 float
 FP32ReduceAdd(const float* x, uint64_t dim) {
+#if defined(ENABLE_AVX512)
+    if (dim < 16) {
+        return avx2::FP32ReduceAdd(x, dim);
+    }
+    __m512 sum = _mm512_setzero_ps();
+    uint64_t i = 0;
+    for (; i + 15 < dim; i += 16) {
+        __m512 a = _mm512_loadu_ps(x + i);
+        sum = _mm512_add_ps(sum, a);
+    }
+    float result = _mm512_reduce_add_ps(sum);
+    if (i < dim) {
+        result += avx2::FP32ReduceAdd(x + i, dim - i);
+    }
+    return result;
+#else
     return sse::FP32ReduceAdd(x, dim);
+#endif
 }
 
 #if defined(ENABLE_AVX512)

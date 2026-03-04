@@ -22,9 +22,6 @@
 
 #include "simd.h"
 
-#define PORTABLE_ALIGN32 __attribute__((aligned(32)))
-#define PORTABLE_ALIGN64 __attribute__((aligned(64)))
-
 namespace vsag::neon {
 
 float
