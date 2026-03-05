@@ -15,6 +15,8 @@
 
 #pragma once
 
+#include <filesystem>
+
 #include "basic_io.h"
 #include "mmap_io_parameter.h"
 
@@ -29,7 +31,7 @@ public:
     static constexpr bool SkipDeserialize = false;
 
 public:
-    MMapIO(std::string filename, Allocator* allocator);
+    explicit MMapIO(std::filesystem::path filepath, Allocator* allocator);
 
     explicit MMapIO(const MMapIOParamPtr& io_param, const IndexCommonParam& common_param);
 
@@ -55,7 +57,7 @@ public:
     static constexpr int64_t DEFAULT_INIT_MMAP_SIZE = 4096;
 
 private:
-    std::string filepath_{};
+    std::filesystem::path filepath_;
 
     int fd_{-1};
 
@@ -63,4 +65,5 @@ private:
 
     bool exist_file_{false};
 };
+
 }  // namespace vsag

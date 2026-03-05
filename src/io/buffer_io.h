@@ -15,15 +15,15 @@
 
 #pragma once
 
-#include <unistd.h>
-
 #include <filesystem>
 
 #include "basic_io.h"
 #include "buffer_io_parameter.h"
-#include "index_common_param.h"
 
 namespace vsag {
+
+class IndexCommonParam;
+class Allocator;
 
 class BufferIO : public BasicIO<BufferIO> {
 public:
@@ -31,19 +31,13 @@ public:
     static constexpr bool SkipDeserialize = false;
 
 public:
-    BufferIO(std::string filename, Allocator* allocator);
+    explicit BufferIO(std::filesystem::path filepath, Allocator* allocator);
 
     explicit BufferIO(const BufferIOParameterPtr& io_param, const IndexCommonParam& common_param);
 
     explicit BufferIO(const IOParamPtr& param, const IndexCommonParam& common_param);
 
-    ~BufferIO() override {
-        close(this->fd_);
-        // remove file
-        if (not this->exist_file_) {
-            std::filesystem::remove(this->filepath_);
-        }
-    }
+    ~BufferIO() override;
 
     void
     WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset);
@@ -64,10 +58,11 @@ public:
     MultiReadImpl(uint8_t* datas, uint64_t* sizes, uint64_t* offsets, uint64_t count) const;
 
 private:
-    std::string filepath_{};
+    std::filesystem::path filepath_;
 
     int fd_{-1};
 
     bool exist_file_{false};
 };
+
 }  // namespace vsag

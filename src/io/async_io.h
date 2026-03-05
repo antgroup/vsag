@@ -15,20 +15,27 @@
 
 #pragma once
 
-#if HAVE_LIBAIO
-#include "async_io_parameter.h"
+#include <filesystem>
+
 #include "basic_io.h"
-#include "index_common_param.h"
 #include "io_context.h"
+
 namespace vsag {
 
+class AsyncIOParameter;
+class IndexCommonParam;
+class Allocator;
+
+using AsyncIOParameterPtr = std::shared_ptr<AsyncIOParameter>;
+
+#if HAVE_LIBAIO
 class AsyncIO : public BasicIO<AsyncIO> {
 public:
     static constexpr bool InMemory = false;
     static constexpr bool SkipDeserialize = false;
 
 public:
-    explicit AsyncIO(std::string filename, Allocator* allocator);
+    explicit AsyncIO(std::filesystem::path filepath, Allocator* allocator);
 
     explicit AsyncIO(const AsyncIOParameterPtr& io_param, const IndexCommonParam& common_param);
 
@@ -36,7 +43,6 @@ public:
 
     ~AsyncIO() override;
 
-public:
     void
     WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset);
 
@@ -49,28 +55,26 @@ public:
     [[nodiscard]] const uint8_t*
     DirectReadImpl(uint64_t size, uint64_t offset, bool& need_release) const;
 
-    static void
-    ReleaseImpl(const uint8_t* data);
+    void
+    ReleaseImpl(const uint8_t* data) const;
 
     bool
     MultiReadImpl(uint8_t* datas, uint64_t* sizes, uint64_t* offsets, uint64_t count) const;
 
-public:
-    static std::unique_ptr<IOContextPool> io_context_pool;
-
 private:
-    std::string filepath_{};
+    std::filesystem::path filepath_;
 
     int rfd_{-1};
 
     int wfd_{-1};
 
     bool exist_file_{false};
+
+    static std::unique_ptr<IOContextPool> io_context_pool;
 };
 
-}  // namespace vsag
-
 #else
-#include "buffer_io.h"
 #define AsyncIO BufferIO
-#endif  // HAVE_LIBAIO
+#endif
+
+}  // namespace vsag
