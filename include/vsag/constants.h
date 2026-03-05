@@ -204,6 +204,8 @@ extern const char* const IVF_BASE_QUANTIZATION_TYPE;
 extern const char* const IVF_BASE_IO_TYPE;
 extern const char* const IVF_BASE_PQ_DIM;
 extern const char* const IVF_BASE_FILE_PATH;
+extern const char* const IVF_RABITQ_BITS_PER_DIM_QUERY;
+extern const char* const IVF_RABITQ_BITS_PER_DIM_BASE;
 extern const char* const IVF_PRECISE_QUANTIZATION_TYPE;
 extern const char* const IVF_PRECISE_IO_TYPE;
 extern const char* const IVF_PRECISE_FILE_PATH;
