@@ -2319,3 +2319,87 @@ TEST_CASE("HGraph Concurrent Read Write", "[ft][hgraph][concurrent]") {
         thread.join();
     }
 }
+
+// Tests for hops_limit search parameter
+static void
+TestHGraphHopsLimit(const fixtures::HGraphTestIndexPtr& test_index,
+                    const fixtures::HGraphResourcePtr& resource) {
+    using namespace fixtures;
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+
+    // Test with valid hops_limit (> ef_search)
+    constexpr static const char* search_param_with_hops_limit = R"({
+        "hgraph": {
+            "ef_search": 30,
+            "hops_limit": 100
+        }
+    })";
+
+    // Test with invalid hops_limit (<= ef_search) - should warn and ignore
+    constexpr static const char* search_param_invalid_hops_limit = R"({
+        "hgraph": {
+            "ef_search": 100,
+            "hops_limit": 50
+        }
+    })";
+
+    // Test without hops_limit (default behavior)
+    constexpr static const char* search_param_without_hops_limit = R"({
+        "hgraph": {
+            "ef_search": 30
+        }
+    })";
+
+    for (auto metric_type : resource->metric_types) {
+        for (auto dim : resource->dims) {
+            for (auto& [base_quantization_str, recall] : resource->test_cases) {
+                INFO(fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, recall: {}",
+                                 metric_type,
+                                 dim,
+                                 base_quantization_str,
+                                 recall));
+                if (HGraphTestIndex::IsRaBitQ(base_quantization_str) &&
+                    dim < fixtures::RABITQ_MIN_RACALL_DIM) {
+                    dim = fixtures::RABITQ_MIN_RACALL_DIM;
+                }
+
+                vsag::Options::Instance().set_block_size_limit(size);
+                HGraphTestIndex::HGraphBuildParam build_param(
+                    metric_type, dim, base_quantization_str);
+                auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+                auto index = TestIndex::TestFactory(test_index->name, param, true);
+                auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(
+                    dim, resource->base_count, metric_type);
+
+                TestIndex::TestBuildIndex(index, dataset, true);
+
+                // Test with valid hops_limit - should work normally
+                TestIndex::TestKnnSearch(
+                    index, dataset, search_param_with_hops_limit, recall * 0.9, true);
+
+                // Test without hops_limit - should work normally
+                TestIndex::TestKnnSearch(
+                    index, dataset, search_param_without_hops_limit, recall, true);
+
+                // Test with invalid hops_limit - should warn but still work
+                TestIndex::TestKnnSearch(
+                    index, dataset, search_param_invalid_hops_limit, recall, true);
+
+                vsag::Options::Instance().set_block_size_limit(origin_size);
+            }
+        }
+    }
+}
+
+TEST_CASE("(PR) HGraph Hops Limit", "[ft][hgraph][pr]") {
+    auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
+    auto resource = test_index->GetResource(true);
+    TestHGraphHopsLimit(test_index, resource);
+}
+
+TEST_CASE("(Daily) HGraph Hops Limit", "[ft][hgraph][daily]") {
+    auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
+    auto resource = test_index->GetResource(false);
+    TestHGraphHopsLimit(test_index, resource);
+}

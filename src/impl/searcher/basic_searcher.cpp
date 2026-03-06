@@ -169,6 +169,9 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
 
     while (not candidate_set->Empty()) {
         hops++;
+        if (hops >= inner_search_param.hops_limit) {
+            break;
+        }
         auto current_node_pair = candidate_set->Top();
 
         if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
@@ -301,6 +304,9 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
 
     while (not candidate_set->Empty()) {
         ++hops;
+        if (hops >= inner_search_param.hops_limit) {
+            break;
+        }
         auto current_node_pair = candidate_set->Top();
 
         if (inner_search_param.time_cost != nullptr and
