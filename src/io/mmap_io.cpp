@@ -23,21 +23,23 @@
 #include <utility>
 
 #include "index_common_param.h"
+#include "mmap_io_parameter.h"
 
 namespace vsag {
 
-MMapIO::MMapIO(std::string filename, Allocator* allocator)
-    : BasicIO<MMapIO>(allocator), filepath_(std::move(filename)) {
+MMapIO::MMapIO(std::filesystem::path filepath, Allocator* allocator)
+    : BasicIO<MMapIO>(allocator), filepath_(std::move(filepath)) {
     this->exist_file_ = std::filesystem::exists(this->filepath_);
     if (std::filesystem::is_directory(this->filepath_)) {
         throw VsagException(ErrorType::INTERNAL_ERROR,
-                            fmt::format("{} is a directory", this->filepath_));
+                            fmt::format("{} is a directory", this->filepath_.string()));
     }
 
-    this->fd_ = open(filepath_.c_str(), O_CREAT | O_RDWR, 0644);
+    this->fd_ = open(this->filepath_.c_str(), O_CREAT | O_RDWR, 0644);
     if (this->fd_ < 0) {
-        throw VsagException(ErrorType::INTERNAL_ERROR,
-                            fmt::format("open file {} error {}", this->filepath_, strerror(errno)));
+        throw VsagException(
+            ErrorType::INTERNAL_ERROR,
+            fmt::format("open file {} error {}", this->filepath_.string(), strerror(errno)));
     }
     auto mmap_size = this->size_;
     if (this->size_ == 0) {

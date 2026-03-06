@@ -22,7 +22,9 @@
 
 #include <filesystem>
 
+#include "async_io_parameter.h"
 #include "direct_io_object.h"
+#include "index_common_param.h"
 #include "io_context.h"
 
 namespace vsag {
@@ -30,22 +32,24 @@ namespace vsag {
 std::unique_ptr<IOContextPool> AsyncIO::io_context_pool =
     std::make_unique<IOContextPool>(10, nullptr);
 
-AsyncIO::AsyncIO(std::string filename, Allocator* allocator)
-    : BasicIO<AsyncIO>(allocator), filepath_(std::move(filename)) {
+AsyncIO::AsyncIO(std::filesystem::path filepath, Allocator* allocator)
+    : BasicIO<AsyncIO>(allocator), filepath_(std::move(filepath)) {
     this->exist_file_ = std::filesystem::exists(this->filepath_);
     if (std::filesystem::is_directory(this->filepath_)) {
         throw VsagException(ErrorType::INTERNAL_ERROR,
-                            fmt::format("{} is a directory", this->filepath_));
+                            fmt::format("{} is a directory", this->filepath_.string()));
     }
-    this->rfd_ = open(filepath_.c_str(), O_CREAT | O_RDWR | O_DIRECT, 0644);
+    this->rfd_ = open(this->filepath_.c_str(), O_CREAT | O_RDWR | O_DIRECT, 0644);
     if (this->rfd_ < 0) {
-        throw VsagException(ErrorType::INTERNAL_ERROR,
-                            fmt::format("open file {} error {}", this->filepath_, strerror(errno)));
+        throw VsagException(
+            ErrorType::INTERNAL_ERROR,
+            fmt::format("open file {} error {}", this->filepath_.string(), strerror(errno)));
     }
-    this->wfd_ = open(filepath_.c_str(), O_CREAT | O_RDWR, 0644);
+    this->wfd_ = open(this->filepath_.c_str(), O_CREAT | O_RDWR, 0644);
     if (this->wfd_ < 0) {
-        throw VsagException(ErrorType::INTERNAL_ERROR,
-                            fmt::format("open file {} error {}", this->filepath_, strerror(errno)));
+        throw VsagException(
+            ErrorType::INTERNAL_ERROR,
+            fmt::format("open file {} error {}", this->filepath_.string(), strerror(errno)));
     }
 }
 
@@ -125,7 +129,7 @@ AsyncIO::DirectReadImpl(uint64_t size, uint64_t offset, bool& need_release) cons
 }
 
 void
-AsyncIO::ReleaseImpl(const uint8_t* data) {
+AsyncIO::ReleaseImpl(const uint8_t* data) const {
     auto* ptr = const_cast<uint8_t*>(data);
     uint64_t align_bit = Options::Instance().direct_IO_object_align_bit();
     auto raw = reinterpret_cast<uintptr_t>(ptr);
