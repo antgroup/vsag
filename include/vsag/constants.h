@@ -25,6 +25,7 @@ extern const char* const INDEX_SPARSE;
 extern const char* const INDEX_SINDI;
 extern const char* const INDEX_BRUTE_FORCE;
 extern const char* const INDEX_IVF;
+extern const char* const INDEX_WARP;
 extern const char* const DIM;
 extern const char* const NUM_ELEMENTS;
 extern const char* const IDS;
@@ -36,6 +37,7 @@ extern const char* const ATTRIBUTE_SETS;
 extern const char* const DATASET_PATHS;
 extern const char* const EXTRA_INFOS;
 extern const char* const EXTRA_INFO_SIZE;
+extern const char* const VECTOR_COUNTS;
 
 extern const char* const HNSW_DATA;
 extern const char* const CONJUGATE_GRAPH_DATA;
