@@ -40,6 +40,9 @@ public:
         j["hops"].SetInt(hops.load(std::memory_order_relaxed));
         j["io_cnt"].SetInt(io_cnt.load(std::memory_order_relaxed));
         j["io_time_ms"].SetInt(io_time_ms.load(std::memory_order_relaxed));
+        j["prereorder_time_ms"].SetInt(prereorder_time_ms.load(std::memory_order_relaxed));
+        j["reorder_time_ms"].SetInt(reorder_time_ms.load(std::memory_order_relaxed));
+        j["io_max_time_ms"].SetInt(io_max_time_ms.load(std::memory_order_relaxed));
         return j.Dump();
     }
 
@@ -49,6 +52,9 @@ public:
     std::atomic<uint32_t> hops{0};
     std::atomic<uint32_t> io_cnt{0};
     std::atomic<uint32_t> io_time_ms{0};
+    std::atomic<uint32_t> prereorder_time_ms{0};
+    std::atomic<uint32_t> reorder_time_ms{0};
+    std::atomic<uint32_t> io_max_time_ms{0};
 };
 
 inline Allocator*

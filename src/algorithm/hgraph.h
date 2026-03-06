@@ -123,6 +123,9 @@ public:
     std::string
     GetStats() const override;
 
+    std::vector<std::string>
+    GetSupportedMetricKeys() const override;
+
     void
     GetVectorByInnerId(InnerIdType inner_id, float* data) const override;
 

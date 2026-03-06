@@ -139,6 +139,14 @@ extern const char* const STATSTIC_RANGE_HOP;
 extern const char* const STATSTIC_RANGE_CACHE_HIT;
 extern const char* const STATSTIC_RANGE_IO_TIME;
 
+// Additional statistics
+extern const char* const STATSTIC_KNN_PREREORDER_TIME;
+extern const char* const STATSTIC_KNN_REORDER_TIME;
+extern const char* const STATSTIC_KNN_IO_MAX_TIME;
+extern const char* const STATSTIC_RANGE_PREREORDER_TIME;
+extern const char* const STATSTIC_RANGE_REORDER_TIME;
+extern const char* const STATSTIC_RANGE_IO_MAX_TIME;
+
 //Error message
 extern const char* const MESSAGE_PARAMETER;
 
