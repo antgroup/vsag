@@ -77,6 +77,7 @@ public:
     int64_t ef_search{30};
     bool use_reorder{false};
     bool use_extra_info_filter{false};
+    float brute_force_search_filter_ratio{-1.0F};  // disabled by default (< 0)
 
 private:
     HGraphSearchParameters() = default;

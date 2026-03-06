@@ -2078,6 +2078,66 @@ TEST_CASE("(Daily) HGraph With Extra Info", "[ft][hgraph][daily]") {
 }
 
 static void
+TestHGraphBruteForceFilterSearch(const fixtures::HGraphTestIndexPtr& test_index,
+                                  const fixtures::HGraphResourcePtr& resource) {
+    using namespace fixtures;
+    // valid_ratio = 0.05: only 5% of vectors pass the filter (high filtering)
+    constexpr float valid_ratio = 0.05F;
+    // brute_force threshold > valid_ratio: brute-force should be triggered
+    constexpr const char* bf_search_param = R"({
+            "hgraph": {
+                "ef_search": 200,
+                "brute_force_search_filter_ratio": 0.1
+            }
+        })";
+    // reference param without brute-force (normal graph search)
+    constexpr const char* normal_search_param = R"({
+            "hgraph": {
+                "ef_search": 200
+            }
+        })";
+    for (auto metric_type : resource->metric_types) {
+        for (auto dim : resource->dims) {
+            for (auto& [base_quantization_str, recall] : resource->test_cases) {
+                INFO(fmt::format("metric_type: {}, dim: {}, quant: {}",
+                                 metric_type,
+                                 dim,
+                                 base_quantization_str));
+                if (HGraphTestIndex::IsRaBitQ(base_quantization_str) &&
+                    dim < fixtures::RABITQ_MIN_RACALL_DIM) {
+                    continue;
+                }
+                HGraphTestIndex::HGraphBuildParam build_param(
+                    metric_type, dim, base_quantization_str);
+                auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+                auto index = TestIndex::TestFactory(test_index->name, param, true);
+                auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(
+                    dim, resource->base_count, metric_type, false, valid_ratio);
+                TestIndex::TestBuildIndex(index, dataset, true);
+
+                // brute-force search should return perfect recall since it is exact
+                TestIndex::TestFilterSearch(index, dataset, bf_search_param, 1.0F, true, true);
+
+                // verify normal graph search still works (no brute-force triggered)
+                TestIndex::TestFilterSearch(index, dataset, normal_search_param, recall, true, true);
+            }
+        }
+    }
+}
+
+TEST_CASE("(PR) HGraph Brute Force Filter Search", "[ft][hgraph][pr]") {
+    auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
+    auto resource = test_index->GetResource(true);
+    TestHGraphBruteForceFilterSearch(test_index, resource);
+}
+
+TEST_CASE("(Daily) HGraph Brute Force Filter Search", "[ft][hgraph][daily]") {
+    auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
+    auto resource = test_index->GetResource(false);
+    TestHGraphBruteForceFilterSearch(test_index, resource);
+}
+
+static void
 TestHGraphSearchOverTime(const fixtures::HGraphTestIndexPtr& test_index,
                          const fixtures::HGraphResourcePtr& resource) {
     using namespace fixtures;
