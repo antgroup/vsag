@@ -211,6 +211,22 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
             },
         },
         {
+            IVF_RABITQ_BITS_PER_DIM_QUERY,
+            {
+                BUCKET_PARAMS_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY,
+            },
+        },
+        {
+            IVF_RABITQ_BITS_PER_DIM_BASE,
+            {
+                BUCKET_PARAMS_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY,
+            },
+        },
+        {
             IVF_THREAD_COUNT,
             {
                 BUILD_THREAD_COUNT_KEY,

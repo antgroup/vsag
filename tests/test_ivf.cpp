@@ -89,6 +89,11 @@ const std::vector<std::pair<std::string, float>> IVFTestIndex::all_test_cases = 
     {"sq8_uniform,fp32", 0.89},
     {"pq,fp32", 0.82},
     {"pqfs,fp16", 0.82},
+    {"rabitq", 0.30},
+    {"rabitq,fp32,1", 0.30},
+    {"rabitq,fp32,2", 0.35},
+    {"rabitq,fp32,4", 0.40},
+    {"rabitq,fp32,8", 0.45},
 };
 
 IVFResourcePtr
@@ -147,7 +152,9 @@ IVFTestIndex::GenerateIVFBuildParametersString(const std::string& metric_type,
             "buckets_per_data": {},
             "use_attribute_filter": {},
             "thread_count": {},
-            "train_sample_count": {}
+            "train_sample_count": {},
+            "rabitq_bits_per_dim_query": 32,
+            "rabitq_bits_per_dim_base": {}
         }}
     }}
     )";
@@ -157,12 +164,18 @@ IVFTestIndex::GenerateIVFBuildParametersString(const std::string& metric_type,
     bool use_reorder = false;
     std::string precise_quantizer_str = "fp32";
     auto pq_dim = dim;
+    uint32_t rabitq_num_bit_base = 1;
     if (dim % 2 == 0 && basic_quantizer_str == "pq") {
         pq_dim = dim / 2;
     }
     if (strs.size() == 2) {
         use_reorder = true;
         precise_quantizer_str = strs[1];
+    }
+    if (strs.size() >= 3 && basic_quantizer_str == "rabitq") {
+        use_reorder = true;
+        precise_quantizer_str = strs[1];
+        rabitq_num_bit_base = std::stoi(strs[2]);
     }
     build_parameters_str = fmt::format(parameter_temp,
                                        metric_type,
@@ -177,7 +190,8 @@ IVFTestIndex::GenerateIVFBuildParametersString(const std::string& metric_type,
                                        buckets_per_data,
                                        use_attr_filter,
                                        thread_count,
-                                       sample_count);
+                                       sample_count,
+                                       rabitq_num_bit_base);
     INFO(build_parameters_str);
     return build_parameters_str;
 }
