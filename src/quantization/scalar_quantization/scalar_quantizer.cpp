@@ -110,17 +110,6 @@ ScalarQuantizer<metric, bit>::EncodeOneImpl(const DataType* data, uint8_t* codes
 
 template <MetricType metric, int bit>
 bool
-ScalarQuantizer<metric, bit>::EncodeBatchImpl(const DataType* data,
-                                              uint8_t* codes,
-                                              uint64_t count) {
-    for (uint64_t i = 0; i < count; ++i) {
-        this->EncodeOneImpl(data + i * this->dim_, codes + i * this->code_size_);
-    }
-    return true;
-}
-
-template <MetricType metric, int bit>
-bool
 ScalarQuantizer<metric, bit>::DecodeOneImpl(const uint8_t* codes, DataType* data) {
     for (uint64_t d = 0; d < this->dim_; d++) {
         auto idx = (d * BIT_PER_DIM) / 8;
@@ -130,17 +119,6 @@ ScalarQuantizer<metric, bit>::DecodeOneImpl(const uint8_t* codes, DataType* data
                   lower_bound_[d];
     }
 
-    return true;
-}
-
-template <MetricType metric, int bit>
-bool
-ScalarQuantizer<metric, bit>::DecodeBatchImpl(const uint8_t* codes,
-                                              DataType* data,
-                                              uint64_t count) {
-    for (uint64_t i = 0; i < count; ++i) {
-        this->DecodeOneImpl(codes + i * this->code_size_, data + i * this->dim_);
-    }
     return true;
 }
 
@@ -215,25 +193,6 @@ ScalarQuantizer<metric, bit>::ComputeDistImpl(Computer<ScalarQuantizer>& compute
         logger::error("unsupported metric type");
         dists[0] = 0;
     }
-}
-
-template <MetricType metric, int bit>
-void
-ScalarQuantizer<metric, bit>::ScanBatchDistImpl(Computer<ScalarQuantizer<metric, bit>>& computer,
-                                                uint64_t count,
-                                                const uint8_t* codes,
-                                                float* dists) const {
-    // TODO(LHT): Optimize batch for simd
-    for (uint64_t i = 0; i < count; ++i) {
-        this->ComputeDistImpl(computer, codes + i * this->code_size_, dists + i);
-    }
-}
-
-template <MetricType metric, int bit>
-void
-ScalarQuantizer<metric, bit>::ReleaseComputerImpl(
-    Computer<ScalarQuantizer<metric, bit>>& computer) const {
-    this->allocator_->Deallocate(computer.buf_);
 }
 
 template <MetricType metric, int bit>

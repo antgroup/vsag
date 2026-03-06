@@ -94,6 +94,20 @@ public:
     }
 
     /**
+     * @brief Default implementation of EncodeBatchImpl using loop.
+     * Subclasses can override for optimized batch encoding.
+     */
+    bool
+    EncodeBatchImpl(const DataType* data, uint8_t* codes, uint64_t count) {
+        for (uint64_t i = 0; i < count; ++i) {
+            if (!cast().EncodeOneImpl(data + i * dim_, codes + i * code_size_)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
      * @brief Decodes an encoded code back into its original data representation.
      *
      * @param codes Pointer to the encoded code.
@@ -116,6 +130,20 @@ public:
     bool
     DecodeBatch(const uint8_t* codes, DataType* data, uint64_t count) {
         return cast().DecodeBatchImpl(codes, data, count);
+    }
+
+    /**
+     * @brief Default implementation of DecodeBatchImpl using loop.
+     * Subclasses can override for optimized batch decoding.
+     */
+    bool
+    DecodeBatchImpl(const uint8_t* codes, DataType* data, uint64_t count) {
+        for (uint64_t i = 0; i < count; ++i) {
+            if (!cast().DecodeOneImpl(codes + i * code_size_, data + i * dim_)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**
@@ -203,6 +231,29 @@ public:
     inline void
     ReleaseComputer(Computer<QuantT>& computer) const {
         cast().ReleaseComputerImpl(computer);
+    }
+
+    /**
+     * @brief Default implementation of ReleaseComputerImpl.
+     * Subclasses can override for custom release logic.
+     */
+    void
+    ReleaseComputerImpl(Computer<QuantT>& computer) const {
+        allocator_->Deallocate(computer.buf_);
+    }
+
+    /**
+     * @brief Default implementation of ScanBatchDistImpl using loop.
+     * Subclasses can override for optimized batch distance computation.
+     */
+    void
+    ScanBatchDistImpl(Computer<QuantT>& computer,
+                      uint64_t count,
+                      const uint8_t* codes,
+                      float* dists) const {
+        for (uint64_t i = 0; i < count; ++i) {
+            cast().ComputeDistImpl(computer, codes + i * code_size_, dists + i);
+        }
     }
 
     [[nodiscard]] virtual std::string
