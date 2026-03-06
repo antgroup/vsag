@@ -14,40 +14,40 @@
 # limitations under the License.
 
 
-set (QUANTIZER_SRC
-        quantizer_adapter.cpp
-        fp32_quantizer.cpp
-        int8_quantizer.cpp
-        scalar_quantization/scalar_quantizer.cpp
-        scalar_quantization/bf16_quantizer.cpp
-        scalar_quantization/fp16_quantizer.cpp
-        scalar_quantization/sq4_uniform_quantizer.cpp
-        scalar_quantization/sq8_uniform_quantizer.cpp
-        product_quantization/pq_fastscan_quantizer.cpp
-        product_quantization/product_quantizer.cpp
-        rabitq_quantization/rabitq_quantizer.cpp
-        quantizer_parameter.cpp
-        fp32_quantizer_parameter.cpp
-        int8_quantizer_parameter.cpp
-        scalar_quantization/sq8_uniform_quantizer_parameter.cpp
-        scalar_quantization/sq4_uniform_quantizer_parameter.cpp
-        scalar_quantization/bf16_quantizer_parameter.cpp
-        scalar_quantization/scalar_quantization_trainer.cpp
-        scalar_quantization/fp16_quantizer_parameter.cpp
-        rabitq_quantization/rabitq_quantizer_parameter.cpp
-        product_quantization/product_quantizer_parameter.cpp
-        product_quantization/pq_fastscan_quantizer_parameter.cpp
-        transform_quantization/transform_quantizer_parameter.cpp
+set(QUANTIZER_SRC
+    quantizer_adapter.cpp
+    fp32_quantizer.cpp
+    int8_quantizer.cpp
+    scalar_quantization/scalar_quantizer.cpp
+    scalar_quantization/bf16_quantizer.cpp
+    scalar_quantization/fp16_quantizer.cpp
+    scalar_quantization/sq4_uniform_quantizer.cpp
+    scalar_quantization/sq8_uniform_quantizer.cpp
+    product_quantization/pq_fastscan_quantizer.cpp
+    product_quantization/product_quantizer.cpp
+    rabitq_quantization/rabitq_quantizer.cpp
+    quantizer_parameter.cpp
+    fp32_quantizer_parameter.cpp
+    int8_quantizer_parameter.cpp
+    scalar_quantization/sq8_uniform_quantizer_parameter.cpp
+    scalar_quantization/sq4_uniform_quantizer_parameter.cpp
+    scalar_quantization/bf16_quantizer_parameter.cpp
+    scalar_quantization/scalar_quantization_trainer.cpp
+    scalar_quantization/fp16_quantizer_parameter.cpp
+    rabitq_quantization/rabitq_quantizer_parameter.cpp
+    product_quantization/product_quantizer_parameter.cpp
+    product_quantization/pq_fastscan_quantizer_parameter.cpp
+    transform_quantization/transform_quantizer_parameter.cpp
 )
 
-add_library (quantizer OBJECT ${QUANTIZER_SRC})
+add_library(quantizer OBJECT ${QUANTIZER_SRC})
 target_link_libraries(quantizer PUBLIC fmt::fmt coverage_config)
 
-maybe_add_dependencies (quantizer spdlog)
+maybe_add_dependencies(quantizer spdlog)
 
 if (ENABLE_TESTS)
-    file (GLOB_RECURSE QUANTIZER_TESTS "*_test.cpp")
-    add_library (quantizer_test STATIC ${QUANTIZER_TESTS})
-    target_link_libraries (quantizer_test PRIVATE Catch2::Catch2 vsag)
-    add_dependencies (quantizer_test spdlog Catch2)
-endif ()
+    file(GLOB_RECURSE QUANTIZER_TESTS "*_test.cpp")
+    add_library(quantizer_test STATIC ${QUANTIZER_TESTS})
+    target_link_libraries(quantizer_test PRIVATE Catch2::Catch2 vsag)
+    add_dependencies(quantizer_test spdlog Catch2)
+endif()

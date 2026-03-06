@@ -15,22 +15,36 @@
 
 
 #  unittests
-add_executable (unittests
-        test_main.cpp
-        fixtures/fixtures.cpp
-        fixtures/test_logger.cpp
+add_executable(
+    unittests
+    test_main.cpp
+    fixtures/fixtures.cpp
+    fixtures/test_logger.cpp
 )
 
 if (APPLE)
-        target_link_libraries (unittests
-                        PRIVATE
-                        Catch2::Catch2 
-                        simd_test vsag_test algorithm_test factory_test attr_test
-                        datacell_test quantizer_test storage_test io_test utils_test impl_test
-                        vsag
-        )
-        # Ensure static test libraries are not dead-stripped on macOS.
-        target_link_options (unittests PRIVATE
+    target_link_libraries(
+        unittests
+        PRIVATE
+        Catch2::Catch2
+        simd_test
+        vsag_test
+        algorithm_test
+        factory_test
+        attr_test
+        datacell_test
+        quantizer_test
+        storage_test
+        io_test
+        utils_test
+        impl_test
+        vsag
+    )
+
+    # Ensure static test libraries are not dead-stripped on macOS.
+    target_link_options(
+        unittests
+        PRIVATE
         "-Wl,-force_load,$<TARGET_FILE:simd_test>"
         "-Wl,-force_load,$<TARGET_FILE:vsag_test>"
         "-Wl,-force_load,$<TARGET_FILE:algorithm_test>"
@@ -42,20 +56,30 @@ if (APPLE)
         "-Wl,-force_load,$<TARGET_FILE:io_test>"
         "-Wl,-force_load,$<TARGET_FILE:utils_test>"
         "-Wl,-force_load,$<TARGET_FILE:impl_test>"
-        )
+    )
 else()
-        target_link_libraries (unittests
-                        PRIVATE
-                        Catch2::Catch2 
-                        "-Wl,--whole-archive"
-                        simd_test vsag_test algorithm_test factory_test attr_test
-                        datacell_test quantizer_test storage_test io_test utils_test impl_test
-                        "-Wl,--no-whole-archive"
-                        vsag
-        )
+    target_link_libraries(
+        unittests
+        PRIVATE
+        Catch2::Catch2
+        "-Wl,--whole-archive"
+        simd_test
+        vsag_test
+        algorithm_test
+        factory_test
+        attr_test
+        datacell_test
+        quantizer_test
+        storage_test
+        io_test
+        utils_test
+        impl_test
+        "-Wl,--no-whole-archive"
+        vsag
+    )
 endif()
 
-add_dependencies (unittests spdlog Catch2 vsag)
+add_dependencies(unittests spdlog Catch2 vsag)
 
 # function tests
 file (GLOB FUNCTION_TESTS "test_*.cpp")
