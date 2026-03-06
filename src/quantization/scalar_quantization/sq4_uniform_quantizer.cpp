@@ -157,15 +157,6 @@ SQ4UniformQuantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes)
 
 template <MetricType metric>
 bool
-SQ4UniformQuantizer<metric>::EncodeBatchImpl(const DataType* data, uint8_t* codes, uint64_t count) {
-    for (uint64_t i = 0; i < count; ++i) {
-        this->EncodeOneImpl(data + i * this->dim_, codes + i * this->code_size_);
-    }
-    return true;
-}
-
-template <MetricType metric>
-bool
 SQ4UniformQuantizer<metric>::DecodeOneImpl(const uint8_t* codes, DataType* data) {
     for (uint64_t d = 0; d < this->dim_; d++) {
         if ((d & 1) != 0U) {
@@ -175,15 +166,6 @@ SQ4UniformQuantizer<metric>::DecodeOneImpl(const uint8_t* codes, DataType* data)
         }
     }
 
-    return true;
-}
-
-template <MetricType metric>
-bool
-SQ4UniformQuantizer<metric>::DecodeBatchImpl(const uint8_t* codes, DataType* data, uint64_t count) {
-    for (uint64_t i = 0; i < count; ++i) {
-        this->DecodeOneImpl(codes + i * this->code_size_, data + i * this->dim_);
-    }
     return true;
 }
 
@@ -235,25 +217,6 @@ SQ4UniformQuantizer<metric>::ComputeDistImpl(Computer<SQ4UniformQuantizer>& comp
                                              const uint8_t* codes,
                                              float* dists) const {
     dists[0] = this->ComputeImpl(computer.buf_, codes);
-}
-
-template <MetricType metric>
-void
-SQ4UniformQuantizer<metric>::ScanBatchDistImpl(Computer<SQ4UniformQuantizer<metric>>& computer,
-                                               uint64_t count,
-                                               const uint8_t* codes,
-                                               float* dists) const {
-    // TODO(LHT): Optimize batch for simd
-    for (uint64_t i = 0; i < count; ++i) {
-        this->ComputeDistImpl(computer, codes + i * this->code_size_, dists + i);
-    }
-}
-
-template <MetricType metric>
-void
-SQ4UniformQuantizer<metric>::ReleaseComputerImpl(
-    Computer<SQ4UniformQuantizer<metric>>& computer) const {
-    this->allocator_->Deallocate(computer.buf_);
 }
 
 template <MetricType metric>

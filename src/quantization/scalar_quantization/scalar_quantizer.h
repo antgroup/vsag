@@ -39,13 +39,7 @@ public:
     EncodeOneImpl(const float* data, uint8_t* codes) const;
 
     bool
-    EncodeBatchImpl(const float* data, uint8_t* codes, uint64_t count);
-
-    bool
     DecodeOneImpl(const uint8_t* codes, float* data);
-
-    bool
-    DecodeBatchImpl(const uint8_t* codes, float* data, uint64_t count);
 
     float
     ComputeImpl(const uint8_t* codes1, const uint8_t* codes2);
@@ -55,15 +49,6 @@ public:
 
     void
     ComputeDistImpl(Computer<ScalarQuantizer>& computer, const uint8_t* codes, float* dists) const;
-
-    void
-    ScanBatchDistImpl(Computer<ScalarQuantizer<metric, bit>>& computer,
-                      uint64_t count,
-                      const uint8_t* codes,
-                      float* dists) const;
-
-    void
-    ReleaseComputerImpl(Computer<ScalarQuantizer<metric, bit>>& computer) const;
 
     void
     SerializeImpl(StreamWriter& writer);
