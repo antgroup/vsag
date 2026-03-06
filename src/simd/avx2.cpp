@@ -13,19 +13,59 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "simd/int8_simd.h"
-#include "vsag/attribute.h"
-#if defined(ENABLE_AVX2)
-#include <immintrin.h>
-#endif
-
 #include <cmath>
 #include <cstdint>
 
 #include "simd.h"
+#include "simd/int8_simd.h"
+#include "vsag/attribute.h"
 
-#define PORTABLE_ALIGN32 __attribute__((aligned(32)))
-#define PORTABLE_ALIGN64 __attribute__((aligned(64)))
+#if defined(ENABLE_AVX2)
+#include <immintrin.h>
+
+inline float
+avx2_reduce_add_ps(__m256 a) {
+    alignas(32) float tmp[8];
+    _mm256_store_ps(tmp, a);
+    return tmp[0] + tmp[1] + tmp[2] + tmp[3] + tmp[4] + tmp[5] + tmp[6] + tmp[7];
+}
+#define AVX2_REDUCE_ADD_PS(a) avx2_reduce_add_ps(a)
+
+template <typename OP>
+inline float
+avx2_compute_fp32(const float* RESTRICT query, const float* RESTRICT codes, uint64_t dim, OP&& op) {
+    const int n = dim / 8;
+    if (dim < 8) {
+        return op.fallback(query, codes, dim);
+    }
+    __m256 sum = _mm256_setzero_ps();
+    for (int i = 0; i < n; ++i) {
+        __m256 a = _mm256_loadu_ps(query + i * 8);
+        __m256 b = _mm256_loadu_ps(codes + i * 8);
+        sum = op.compute(sum, a, b);
+    }
+    float result = AVX2_REDUCE_ADD_PS(sum);
+    result += op.fallback(query + n * 8, codes + n * 8, dim - n * 8);
+    return result;
+}
+
+struct Fp32IPOp {
+    __m256
+    compute(__m256 sum, __m256 a, __m256 b) {
+        return _mm256_add_ps(sum, _mm256_mul_ps(a, b));
+    }
+    float (*fallback)(const float*, const float*, uint64_t);
+};
+
+struct Fp32L2Op {
+    __m256
+    compute(__m256 sum, __m256 a, __m256 b) {
+        __m256 diff = _mm256_sub_ps(a, b);
+        return _mm256_fmadd_ps(diff, diff, sum);
+    }
+    float (*fallback)(const float*, const float*, uint64_t);
+};
+#endif
 
 namespace vsag::avx2 {
 
@@ -104,23 +144,8 @@ __inline __m128i __attribute__((__always_inline__)) load_8_char(const uint8_t* d
 float
 FP32ComputeIP(const float* RESTRICT query, const float* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_AVX2)
-    const int n = dim / 8;
-    if (n == 0) {
-        return avx::FP32ComputeIP(query, codes, dim);
-    }
-    // process 8 floats at a time
-    __m256 sum = _mm256_setzero_ps();  // initialize to 0
-    for (int i = 0; i < n; ++i) {
-        __m256 a = _mm256_loadu_ps(query + i * 8);      // load 8 floats from memory
-        __m256 b = _mm256_loadu_ps(codes + i * 8);      // load 8 floats from memory
-        sum = _mm256_add_ps(sum, _mm256_mul_ps(a, b));  // accumulate the product
-    }
-    alignas(32) float result[8];
-    _mm256_store_ps(result, sum);  // store the accumulated result into an array
-    float ip = result[0] + result[1] + result[2] + result[3] + result[4] + result[5] + result[6] +
-               result[7];  // calculate the sum of the accumulated results
-    ip += avx::FP32ComputeIP(query + n * 8, codes + n * 8, dim - n * 8);
-    return ip;
+    Fp32IPOp op{sse::FP32ComputeIP};
+    return avx2_compute_fp32(query, codes, dim, op);
 #else
     return avx::FP32ComputeIP(query, codes, dim);
 #endif
@@ -129,24 +154,8 @@ FP32ComputeIP(const float* RESTRICT query, const float* RESTRICT codes, uint64_t
 float
 FP32ComputeL2Sqr(const float* RESTRICT query, const float* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_AVX2)
-    const int n = dim / 8;
-    if (n == 0) {
-        return avx::FP32ComputeL2Sqr(query, codes, dim);
-    }
-    // process 8 floats at a time
-    __m256 sum = _mm256_setzero_ps();  // initialize to 0
-    for (int i = 0; i < n; ++i) {
-        __m256 a = _mm256_loadu_ps(query + i * 8);  // load 8 floats from memory
-        __m256 b = _mm256_loadu_ps(codes + i * 8);  // load 8 floats from memory
-        __m256 diff = _mm256_sub_ps(a, b);          // calculate the difference
-        sum = _mm256_fmadd_ps(diff, diff, sum);     // accumulate the squared difference
-    }
-    alignas(32) float result[8];
-    _mm256_store_ps(result, sum);  // store the accumulated result into an array
-    float l2 = result[0] + result[1] + result[2] + result[3] + result[4] + result[5] + result[6] +
-               result[7];  // calculate the sum of the accumulated results
-    l2 += avx::FP32ComputeL2Sqr(query + n * 8, codes + n * 8, dim - n * 8);
-    return l2;
+    Fp32L2Op op{sse::FP32ComputeL2Sqr};
+    return avx2_compute_fp32(query, codes, dim, op);
 #else
     return avx::FP32ComputeL2Sqr(query, codes, dim);
 #endif
@@ -368,7 +377,24 @@ FP32Div(const float* x, const float* y, float* z, uint64_t dim) {
 }
 float
 FP32ReduceAdd(const float* x, uint64_t dim) {
+#if defined(ENABLE_AVX2)
+    if (dim < 8) {
+        return sse::FP32ReduceAdd(x, dim);
+    }
+    __m256 sum = _mm256_setzero_ps();
+    uint64_t i = 0;
+    for (; i + 7 < dim; i += 8) {
+        __m256 a = _mm256_loadu_ps(x + i);
+        sum = _mm256_add_ps(sum, a);
+    }
+    float result = AVX2_REDUCE_ADD_PS(sum);
+    if (i < dim) {
+        result += sse::FP32ReduceAdd(x + i, dim - i);
+    }
+    return result;
+#else
     return sse::FP32ReduceAdd(x, dim);
+#endif
 }
 
 #if defined(ENABLE_AVX2)

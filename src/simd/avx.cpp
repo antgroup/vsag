@@ -15,15 +15,19 @@
 
 #if defined(ENABLE_AVX)
 #include <immintrin.h>
+
+inline float
+avx_reduce_add_ps(__m256 a) {
+    alignas(32) float tmp[8];
+    _mm256_store_ps(tmp, a);
+    return tmp[0] + tmp[1] + tmp[2] + tmp[3] + tmp[4] + tmp[5] + tmp[6] + tmp[7];
+}
 #endif
 
 #include <cmath>
 #include <cstdint>
 
 #include "simd.h"
-
-#define PORTABLE_ALIGN32 __attribute__((aligned(32)))
-#define PORTABLE_ALIGN64 __attribute__((aligned(64)))
 
 namespace vsag::avx {
 
@@ -112,17 +116,13 @@ FP32ComputeIP(const float* RESTRICT query, const float* RESTRICT codes, uint64_t
     if (n == 0) {
         return sse::FP32ComputeIP(query, codes, dim);
     }
-    // process 8 floats at a time
-    __m256 sum = _mm256_setzero_ps();  // initialize to 0
+    __m256 sum = _mm256_setzero_ps();
     for (int i = 0; i < n; ++i) {
-        __m256 a = _mm256_loadu_ps(query + i * 8);      // load 8 floats from memory
-        __m256 b = _mm256_loadu_ps(codes + i * 8);      // load 8 floats from memory
-        sum = _mm256_add_ps(sum, _mm256_mul_ps(a, b));  // accumulate the product
+        __m256 a = _mm256_loadu_ps(query + i * 8);
+        __m256 b = _mm256_loadu_ps(codes + i * 8);
+        sum = _mm256_add_ps(sum, _mm256_mul_ps(a, b));
     }
-    alignas(32) float result[8];
-    _mm256_store_ps(result, sum);  // store the accumulated result into an array
-    float ip = result[0] + result[1] + result[2] + result[3] + result[4] + result[5] + result[6] +
-               result[7];  // calculate the sum of the accumulated results
+    float ip = avx_reduce_add_ps(sum);
     ip += sse::FP32ComputeIP(query + n * 8, codes + n * 8, dim - n * 8);
     return ip;
 #else
@@ -137,18 +137,14 @@ FP32ComputeL2Sqr(const float* RESTRICT query, const float* RESTRICT codes, uint6
     if (n == 0) {
         return sse::FP32ComputeL2Sqr(query, codes, dim);
     }
-    // process 8 floats at a time
-    __m256 sum = _mm256_setzero_ps();  // initialize to 0
+    __m256 sum = _mm256_setzero_ps();
     for (int i = 0; i < n; ++i) {
-        __m256 a = _mm256_loadu_ps(query + i * 8);            // load 8 floats from memory
-        __m256 b = _mm256_loadu_ps(codes + i * 8);            // load 8 floats from memory
-        __m256 diff = _mm256_sub_ps(a, b);                    // calculate the difference
-        sum = _mm256_add_ps(sum, _mm256_mul_ps(diff, diff));  // accumulate the squared difference
+        __m256 a = _mm256_loadu_ps(query + i * 8);
+        __m256 b = _mm256_loadu_ps(codes + i * 8);
+        __m256 diff = _mm256_sub_ps(a, b);
+        sum = _mm256_add_ps(sum, _mm256_mul_ps(diff, diff));
     }
-    alignas(32) float result[8];
-    _mm256_store_ps(result, sum);  // store the accumulated result into an array
-    float l2 = result[0] + result[1] + result[2] + result[3] + result[4] + result[5] + result[6] +
-               result[7];  // calculate the sum of the accumulated results
+    float l2 = avx_reduce_add_ps(sum);
     l2 += sse::FP32ComputeL2Sqr(query + n * 8, codes + n * 8, dim - n * 8);
     return l2;
 #else
