@@ -43,13 +43,7 @@ public:
     EncodeOneImpl(const DataType* data, uint8_t* codes) const;
 
     bool
-    EncodeBatchImpl(const DataType* data, uint8_t* codes, uint64_t count);
-
-    bool
     DecodeOneImpl(const uint8_t* codes, DataType* data);
-
-    bool
-    DecodeBatchImpl(const uint8_t* codes, DataType* data, uint64_t count);
 
     float
     ComputeImpl(const uint8_t* codes1, const uint8_t* codes2) const;
@@ -63,19 +57,10 @@ public:
                     float* dists) const;
 
     void
-    ScanBatchDistImpl(Computer<SQ8UniformQuantizer<metric>>& computer,
-                      uint64_t count,
-                      const uint8_t* codes,
-                      float* dists) const;
-
-    void
     SerializeImpl(StreamWriter& writer);
 
     void
     DeserializeImpl(StreamReader& reader);
-
-    void
-    ReleaseComputerImpl(Computer<SQ8UniformQuantizer<metric>>& computer) const;
 
     [[nodiscard]] std::string
     NameImpl() const {
