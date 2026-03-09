@@ -67,7 +67,7 @@ ReaderIO::DirectReadImpl(uint64_t size, uint64_t offset, bool& need_release) con
 
 void
 ReaderIO::ReleaseImpl(const uint8_t* data) const {
-    allocator_->Deallocate((void*)data);
+    allocator_->Deallocate(const_cast<void*>(static_cast<const void*>(data)));
 }
 
 bool
