@@ -14,39 +14,43 @@
 # limitations under the License.
 
 
-cmake_minimum_required (VERSION 3.18)
+cmake_minimum_required(VERSION 3.18)
+
+# Newer CMake policies for optional behavior
 if (CMAKE_VERSION VERSION_GREATER_EQUAL "3.24.0")
-    cmake_policy (SET CMP0135 NEW)
-endif ()
+    cmake_policy(SET CMP0135 NEW)
+endif()
+
 if (CMAKE_VERSION VERSION_GREATER_EQUAL "3.30.0")
-    cmake_policy (SET CMP0169 OLD)
-endif ()
+    cmake_policy(SET CMP0169 OLD)
+endif()
 
-project (VSAG
-        LANGUAGES C CXX
-)
+# Project declaration
+project(VSAG LANGUAGES C CXX)
 
-include (cmake/ColorizeMessage.cmake)
+# Utilities
+include(cmake/ColorizeMessage.cmake)
 
-message (STATUS "CPU ARCH: ${Yellow}${CMAKE_HOST_SYSTEM_PROCESSOR}${CR}")
+message(STATUS "CPU ARCH: ${Yellow}${CMAKE_HOST_SYSTEM_PROCESSOR}${CR}")
 
-macro (vsag_add_exe_linker_flag flag)
-    set (CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${flag}")
-endmacro ()
+# Helper macros to accumulate linker flags
+macro(vsag_add_exe_linker_flag flag)
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${flag}")
+endmacro()
 
-macro (vsag_add_shared_linker_flag flag)
-    set (CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${flag}")
-endmacro ()
+macro(vsag_add_shared_linker_flag flag)
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${flag}")
+endmacro()
 
-macro (maybe_add_dependencies depender)
+macro(maybe_add_dependencies depender)
     if (TARGET ${depender})
         foreach (dependee ${ARGN})
             if (TARGET ${dependee})
-                add_dependencies (${depender} ${dependee})
-            endif ()
-        endforeach ()
-    endif ()
-endmacro ()
+                add_dependencies(${depender} ${dependee})
+            endif()
+        endforeach()
+    endif()
+endmacro()
 
 # options
 option (ENABLE_JEMALLOC "Whether to link jemalloc to all executables" OFF)

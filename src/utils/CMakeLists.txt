@@ -14,25 +14,25 @@
 # limitations under the License.
 
 
-set (UTILS_SRC
-        util_functions.cpp
-        linear_congruential_generator.cpp
-        visited_list.cpp
-        slow_task_timer.cpp
-        timer.cpp
-        window_result_queue.cpp
-        sparse_vector_transform.cpp
-        prefetch.cpp
-        lock_strategy.cpp
+set(UTILS_SRC
+    util_functions.cpp
+    linear_congruential_generator.cpp
+    visited_list.cpp
+    slow_task_timer.cpp
+    timer.cpp
+    window_result_queue.cpp
+    sparse_vector_transform.cpp
+    prefetch.cpp
+    lock_strategy.cpp
 )
 
-add_library (utils OBJECT ${UTILS_SRC})
-target_link_libraries (utils PUBLIC coverage_config)
-add_dependencies (utils spdlog fmt::fmt)
+add_library(utils OBJECT ${UTILS_SRC})
+target_link_libraries(utils PUBLIC coverage_config)
+add_dependencies(utils spdlog fmt::fmt)
 
 if (ENABLE_TESTS)
-    file (GLOB_RECURSE UTILS_TESTS "*_test.cpp")
-    add_library (utils_test STATIC ${UTILS_TESTS})
-    target_link_libraries (utils_test PRIVATE Catch2::Catch2 vsag)
-    add_dependencies (utils_test spdlog Catch2)
-endif ()
+    file(GLOB_RECURSE UTILS_TESTS "*_test.cpp")
+    add_library(utils_test STATIC ${UTILS_TESTS})
+    target_link_libraries(utils_test PRIVATE Catch2::Catch2 vsag)
+    add_dependencies(utils_test spdlog Catch2)
+endif()
