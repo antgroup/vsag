@@ -849,7 +849,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
     }
 
     if (iter_ctx == nullptr) {
-        auto cur_count = this->bottom_graph_->TotalCount();
+        auto cur_count = this->total_count_.load();
 
         if (cur_count == 0) {
             SearchStatistics stats;
