@@ -1200,7 +1200,7 @@ HGraph::deserialize_basic_info_v0_14(StreamReader& reader) {
         this->label_table_->label_remap_.emplace(key, value);
     }
     // Restore total_count from label_remap size
-    this->label_table_->total_count_.store(this->label_table_->label_remap_.size());
+    this->label_table_->total_count_.store(size);
 }
 
 #define TO_JSON_BASE64(json_obj, var) json_obj[#var].SetString(base64_encode_obj(this->var##_));
@@ -1304,7 +1304,7 @@ HGraph::deserialize_label_info(StreamReader& reader) const {
         this->label_table_->label_remap_.emplace(key, value);
     }
     // Restore total_count from label_remap size (same as number of valid elements)
-    this->label_table_->total_count_.store(this->label_table_->label_remap_.size());
+    this->label_table_->total_count_.store(size);
 }
 
 void
