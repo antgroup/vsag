@@ -23,6 +23,9 @@
 #include "utils/prefetch.h"
 #include "vsag_exception.h"
 
+using vsag::ErrorType;
+using vsag::VsagException;
+
 namespace hnswlib {
 
 const static InnerIdType UNUSED_ENTRY_POINT_NODE = 0;
