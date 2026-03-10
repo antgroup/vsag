@@ -30,6 +30,7 @@
 #include "exporter/exporter.h"
 #include "exporter/formatter.h"
 #include "impl/logger/logger.h"
+#include "monitor/http_server_monitor.h"
 #include "typing.h"
 #include "vsag/options.h"
 
@@ -141,6 +142,19 @@ parse_yaml_file(const std::string& yaml_file) {
                 cac.num_threads_searching = vsag::eval::check_and_get_value<int32_t>(
                     config_all["global"], "num_threads_searching");
             }
+
+            // Parse HTTP server config
+            if (config_all["global"]["http_server"]) {
+                vsag::eval::HttpServer http_cfg;
+                auto http_node = config_all["global"]["http_server"];
+                if (http_node["enabled"]) {
+                    http_cfg.enabled = http_node["enabled"].as<bool>();
+                }
+                if (http_node["port"]) {
+                    http_cfg.port = http_node["port"].as<int>();
+                }
+                cac.http_server = http_cfg;
+            }
         }
     } catch (YAML::Exception& e) {
         std::cerr << "Error parsing YAML(global): " << e.what() << std::endl;
@@ -177,6 +191,7 @@ main(int argc, char** argv) {
     using vsag::eval::EvalConfig;
     using vsag::eval::Exporter;
     using vsag::eval::Formatter;
+    using vsag::eval::HttpServerMonitor;
 
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::kOFF);
     vsag::eval::EvalConfig config;
@@ -184,15 +199,34 @@ main(int argc, char** argv) {
         std::string yaml_file = argv[1];
         auto job = parse_yaml_file(yaml_file);
 
+        // Start HTTP monitor if configured
+        std::unique_ptr<HttpServerMonitor> http_monitor;
+        if (job.http_server.has_value() && job.http_server->enabled) {
+            http_monitor = std::make_unique<HttpServerMonitor>(job.http_server->port);
+            http_monitor->Start();
+            http_monitor->SetTotalCases(static_cast<int>(job.cases.size()));
+            EvalCase::SetHttpMonitor(http_monitor.get());
+            std::cout << "[Eval] HTTP Monitor started on http://0.0.0.0:" << job.http_server->port
+                      << std::endl;
+        }
+
         vsag::eval::JsonType results;
         for (auto& [name, case_yaml_node] : job.cases) {
+            EvalCase::SetCurrentCaseName(name);
+
             config = EvalConfig::Load(case_yaml_node, job);
             vsag::Options::Instance().set_num_threads_building(config.num_threads_building);
 
             auto eval_case = EvalCase::MakeInstance(config);
             if (eval_case != nullptr) {
                 results[name] = eval_case->Run();
+                EvalCase::MarkCaseCompleted();
             }
+        }
+
+        // Stop HTTP monitor
+        if (http_monitor) {
+            http_monitor->Stop();
         }
 
         // <format, formatted_results>
