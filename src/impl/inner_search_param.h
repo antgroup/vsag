@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <limits>
 #include <mutex>
 
 #include "typing.h"
@@ -39,6 +40,7 @@ public:
     float radius{0.0F};
     InnerIdType ep{0};
     uint64_t ef{10};
+    uint32_t hops_limit{std::numeric_limits<uint32_t>::max()};
     FilterPtr is_inner_id_allowed{nullptr};
     float skip_ratio{0.8F};
     InnerSearchMode search_mode{KNN_SEARCH};
