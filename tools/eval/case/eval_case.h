@@ -17,6 +17,7 @@
 
 #include "../eval_config.h"
 #include "../eval_dataset.h"
+#include "../monitor/http_server_monitor.h"
 #include "nlohmann/json.hpp"
 #include "vsag/index.h"
 #include "vsag/logger.h"
@@ -44,6 +45,46 @@ public:
         std::cout << result.dump(4) << std::endl;
     }
 
+    // HTTP Monitor integration
+    static void
+    SetHttpMonitor(HttpServerMonitor* monitor) {
+        http_monitor_ = monitor;
+    }
+
+    static void
+    SetCurrentCaseName(const std::string& name) {
+        current_case_name_ = name;
+        if (http_monitor_) {
+            http_monitor_->SetCurrentCase(name);
+        }
+    }
+
+    static void
+    UpdateMonitorProgress(float percent) {
+        if (http_monitor_) {
+            http_monitor_->UpdateProgress(percent);
+        }
+    }
+
+    static void
+    UpdateMonitorMetrics(const JsonType& metrics) {
+        if (http_monitor_) {
+            http_monitor_->UpdateMetrics(metrics);
+        }
+    }
+
+    static void
+    MarkCaseCompleted() {
+        if (http_monitor_) {
+            http_monitor_->MarkCaseCompleted();
+        }
+    }
+
+    static HttpServerMonitor*
+    GetMonitor() {
+        return http_monitor_;
+    }
+
 public:
     explicit EvalCase(std::string dataset_path, std::string index_path, vsag::IndexPtr index);
 
@@ -65,6 +106,10 @@ protected:
     Logger logger_{nullptr};
 
     JsonType basic_info_{};
+
+    // Static members for HTTP monitor
+    inline static HttpServerMonitor* http_monitor_ = nullptr;
+    inline static std::string current_case_name_{};
 };
 
 }  // namespace vsag::eval
