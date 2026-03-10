@@ -1103,7 +1103,6 @@ HGraph::resize(uint64_t new_size) {
         pool_ = std::make_shared<VisitedListPool>(1, allocator_, new_size_power_2, allocator_);
         this->label_table_->Resize(new_size_power_2);
         bottom_graph_->Resize(new_size_power_2);
-        this->max_capacity_.store(new_size_power_2);
         this->basic_flatten_codes_->Resize(new_size_power_2);
         if (use_reorder_) {
             this->high_precise_codes_->Resize(new_size_power_2);
@@ -1111,6 +1110,7 @@ HGraph::resize(uint64_t new_size) {
         if (this->extra_infos_ != nullptr) {
             this->extra_infos_->Resize(new_size_power_2);
         }
+        this->max_capacity_.store(new_size_power_2);
     }
 }
 void
