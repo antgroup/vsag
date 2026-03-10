@@ -2151,6 +2151,19 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     }
     search_param.parallel_search_thread_count = params.parallel_search_thread_count;
 
+    // hops_limit only takes effect when it's greater than ef_search
+    if (params.hops_limit <= static_cast<uint32_t>(params.ef_search)) {
+        search_param.hops_limit = std::numeric_limits<uint32_t>::max();
+        if (params.hops_limit != std::numeric_limits<uint32_t>::max()) {
+            logger::warn(
+                fmt::format("hops_limit({}) is not greater than ef_search({}), ignoring hops_limit",
+                            params.hops_limit,
+                            params.ef_search));
+        }
+    } else {
+        search_param.hops_limit = params.hops_limit;
+    }
+
     auto search_result = this->search_one_graph(
         raw_query, this->bottom_graph_, this->basic_flatten_codes_, search_param, vt, &ctx);
 
