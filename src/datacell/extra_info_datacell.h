@@ -51,10 +51,10 @@ public:
         if (new_capacity <= this->max_capacity_) {
             return;
         }
-        this->max_capacity_ = new_capacity;
         uint64_t io_size =
             static_cast<uint64_t>(new_capacity) * static_cast<uint64_t>(extra_info_size_);
         this->io_->Resize(io_size);
+        this->max_capacity_ = new_capacity;
     }
 
     void
