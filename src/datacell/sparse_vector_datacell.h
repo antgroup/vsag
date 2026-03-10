@@ -79,9 +79,9 @@ public:
             return;
         }
         uint64_t io_size = (new_capacity - total_count_) * max_code_size_ + current_offset_;
-        this->max_capacity_ = new_capacity;
         this->io_->Resize(io_size);
         this->offset_io_->Resize(static_cast<uint64_t>(new_capacity) * sizeof(uint32_t));
+        this->max_capacity_ = new_capacity;
     }
 
     void
