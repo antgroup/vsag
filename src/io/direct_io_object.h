@@ -16,23 +16,26 @@
 #pragma once
 
 #include <cstdint>
-#include <string>
+#include <cstdlib>
+
+#include "vsag/options.h"
 
 namespace vsag {
 
 class DirectIOObject {
 public:
-    DirectIOObject() = default;
+    DirectIOObject() {
+        this->align_bit = Options::Instance().direct_IO_object_align_bit();
+        this->align_size = 1 << align_bit;
+        this->align_mask = (1 << align_bit) - 1;
+    }
 
-    DirectIOObject(uint64_t size, uint64_t offset) {
+    DirectIOObject(uint64_t size, uint64_t offset) : DirectIOObject() {
         this->Set(size, offset);
     }
 
     void
     Set(uint64_t size1, uint64_t offset1) {
-        this->align_bit = Options::Instance().direct_IO_object_align_bit();
-        this->align_size = 1 << align_bit;
-        this->align_mask = (1 << align_bit) - 1;
         this->size = size1;
         this->offset = offset1;
         if (align_data) {
