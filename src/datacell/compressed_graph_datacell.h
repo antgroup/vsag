@@ -43,6 +43,9 @@ public:
     void
     GetNeighbors(InnerIdType id, Vector<InnerIdType>& neighbor_ids) const override;
 
+    [[nodiscard]] bool
+    CheckIdExists(InnerIdType id) const override;
+
     void
     Resize(InnerIdType new_size) override;
 

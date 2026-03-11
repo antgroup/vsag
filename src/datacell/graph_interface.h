@@ -62,6 +62,9 @@ public:
     virtual void
     GetNeighbors(InnerIdType id, Vector<InnerIdType>& neighbor_ids) const = 0;
 
+    [[nodiscard]] virtual bool
+    CheckIdExists(InnerIdType id) const = 0;
+
     virtual void
     Resize(InnerIdType new_size) = 0;
 
