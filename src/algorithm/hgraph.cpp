@@ -849,7 +849,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
     }
 
     if (iter_ctx == nullptr) {
-        auto cur_count = this->bottom_graph_->TotalCount();
+        auto cur_count = this->total_count_.load();
 
         if (cur_count == 0) {
             SearchStatistics stats;
@@ -1199,6 +1199,8 @@ HGraph::deserialize_basic_info_v0_14(StreamReader& reader) {
         StreamReader::ReadObj(reader, value);
         this->label_table_->label_remap_.emplace(key, value);
     }
+    // Restore total_count from label_remap size
+    this->label_table_->total_count_.store(static_cast<int64_t>(size));
 }
 
 #define TO_JSON_BASE64(json_obj, var) json_obj[#var].SetString(base64_encode_obj(this->var##_));
@@ -1301,6 +1303,8 @@ HGraph::deserialize_label_info(StreamReader& reader) const {
         StreamReader::ReadObj(reader, value);
         this->label_table_->label_remap_.emplace(key, value);
     }
+    // Restore total_count from label_remap size (same as number of valid elements)
+    this->label_table_->total_count_.store(static_cast<int64_t>(size));
 }
 
 void
