@@ -57,6 +57,11 @@ public:
         return alg_hnsw_->getListCount((hnswlib::linklistsizeint*)data);
     }
 
+    [[nodiscard]] bool
+    CheckIdExists(InnerIdType id) const override {
+        return id < alg_hnsw_->getCurrentElementCount();
+    }
+
     void
     Prefetch(InnerIdType id, InnerIdType neighbor_i) override {
         int* data = (int*)alg_hnsw_->get_linklist0(id);

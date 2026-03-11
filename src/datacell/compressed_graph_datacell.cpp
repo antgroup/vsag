@@ -138,6 +138,11 @@ CompressedGraphDataCell::Resize(InnerIdType new_size) {
     this->max_capacity_ = new_size;
 }
 
+bool
+CompressedGraphDataCell::CheckIdExists(InnerIdType id) const {
+    return id < neighbor_sets_.size() && neighbor_sets_[id] != nullptr;
+}
+
 int64_t
 CompressedGraphDataCell::GetMemoryUsage() const {
     auto memory = sizeof(CompressedGraphDataCell);
