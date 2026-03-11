@@ -92,7 +92,9 @@ public:
     }
 
     ~Computer() override {
-        quantizer_->ReleaseComputer(*this);
+        if (quantizer_) {
+            quantizer_->ReleaseComputer(*this);
+        }
         delete inner_computer_;
     }
 
