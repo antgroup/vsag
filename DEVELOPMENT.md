@@ -29,6 +29,7 @@ docker pull vsaglib/vsag:ubuntu
   - or Clang version 13.0.0 or later
 - Build Tools: 
   - CMake version 3.18.0 or later
+  - clang-tidy version 15 EXACTLY (not higher, not lower - required for consistent lint diagnostics)
   - clang-format version 15 EXACTLY (not higher, not lower - required for consistent formatting)
 - Additional Dependencies:
   - gfortran

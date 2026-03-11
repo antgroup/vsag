@@ -26,6 +26,8 @@
 #include "vsag/options.h"
 #include "vsag_exception.h"
 
+namespace vsag {
+
 SliceStreamReader
 StreamReader::Slice(uint64_t begin, uint64_t length) {
     return {this, begin, length};
@@ -218,3 +220,5 @@ SliceStreamReader::SliceStreamReader(StreamReader* reader, uint64_t length)
     begin_ = reader->GetCursor();
     // vsag::logger::trace("SliceReader [{}, {})", begin_, begin_ + length_);
 }
+
+}  // namespace vsag

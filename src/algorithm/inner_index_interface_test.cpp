@@ -71,8 +71,7 @@ TEST_CASE("Fast Create Index", "[ut][InnerIndexInterface]") {
 
 class EmptyInnerIndex : public InnerIndexInterface {
 public:
-    EmptyInnerIndex() : InnerIndexInterface() {
-    }
+    EmptyInnerIndex() = default;
 
     std::string
     GetName() const override {
@@ -86,7 +85,6 @@ public:
 
     void
     InitFeatures() override {
-        return;
     }
 
     std::vector<int64_t>
@@ -113,12 +111,10 @@ public:
 
     void
     Serialize(StreamWriter& writer) const override {
-        return;
     }
 
     void
     Deserialize(StreamReader& reader) override {
-        return;
     }
 
     int64_t

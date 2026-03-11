@@ -26,6 +26,10 @@
 
 namespace hnswlib {
 
+using vsag::IOStreamReader;
+using vsag::StreamReader;
+using vsag::StreamWriter;
+
 class BlockManager {
 public:
     BlockManager(uint64_t size_data_per_element,

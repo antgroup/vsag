@@ -23,6 +23,8 @@
 #include "../typing.h"
 #include "impl/logger/logger.h"
 
+namespace vsag {
+
 class SliceStreamReader;
 
 class StreamReader {
@@ -167,9 +169,7 @@ public:
     GetCursor() const override;
 
 public:
-    explicit BufferStreamReader(StreamReader* reader,
-                                uint64_t max_size,
-                                vsag::Allocator* allocator);
+    explicit BufferStreamReader(StreamReader* reader, uint64_t max_size, Allocator* allocator);
 
     ~BufferStreamReader();
 
@@ -209,3 +209,5 @@ private:
     uint64_t begin_{0};
     uint64_t cursor_{0};
 };
+
+}  // namespace vsag

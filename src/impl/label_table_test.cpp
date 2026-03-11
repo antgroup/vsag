@@ -271,12 +271,12 @@ TEST_CASE("LabelTable Serialize and Deserialize with Duplicates", "[ut][LabelTab
 
         // Serialize
         std::stringstream ss;
-        IOStreamWriter writer(ss);
+        vsag::IOStreamWriter writer(ss);
         label_table->Serialize(writer);
 
         // Deserialize into new label table
         auto new_label_table = std::make_shared<LabelTable>(allocator.get(), true, true);
-        IOStreamReader reader(ss);
+        vsag::IOStreamReader reader(ss);
         new_label_table->Deserialize(reader);
 
         // Verify labels are preserved
@@ -305,11 +305,11 @@ TEST_CASE("LabelTable Serialize and Deserialize with Duplicates", "[ut][LabelTab
         label_table->Insert(2, 300);
 
         std::stringstream ss;
-        IOStreamWriter writer(ss);
+        vsag::IOStreamWriter writer(ss);
         label_table->Serialize(writer);
 
         auto new_label_table = std::make_shared<LabelTable>(allocator.get(), true, true);
-        IOStreamReader reader(ss);
+        vsag::IOStreamReader reader(ss);
         new_label_table->Deserialize(reader);
 
         REQUIRE(new_label_table->GetLabelById(0) == 100);
@@ -331,11 +331,11 @@ TEST_CASE("LabelTable Serialize and Deserialize with Duplicates", "[ut][LabelTab
         auto count_before = label_table->GetTotalCount();
 
         std::stringstream ss;
-        IOStreamWriter writer(ss);
+        vsag::IOStreamWriter writer(ss);
         label_table->Serialize(writer);
 
         auto new_label_table = std::make_shared<LabelTable>(allocator.get(), true, true);
-        IOStreamReader reader(ss);
+        vsag::IOStreamReader reader(ss);
         new_label_table->Deserialize(reader);
 
         REQUIRE(new_label_table->GetTotalCount() == count_before);

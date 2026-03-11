@@ -34,6 +34,9 @@ namespace hnswlib {
 
 using LabelType = vsag::LabelType;
 using InnerIdType = vsag::InnerIdType;
+using vsag::StreamReader;
+using vsag::StreamWriter;
+using vsag::WriteFuncStreamWriter;
 
 template <typename dist_t>
 class AlgorithmInterface {

@@ -23,8 +23,8 @@ template <typename T>
 void
 test_serializion(T& old_instance, T& new_instance) {
     std::stringstream ss;
-    IOStreamWriter writer(ss);
+    vsag::IOStreamWriter writer(ss);
     old_instance.Serialize(writer);
-    IOStreamReader reader(ss);
+    vsag::IOStreamReader reader(ss);
     new_instance.Deserialize(reader);
 }

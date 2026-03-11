@@ -18,6 +18,8 @@
 #include <cstring>
 #include <utility>
 
+namespace vsag {
+
 BufferStreamWriter::BufferStreamWriter(char* buffer) : buffer_(buffer) {
 }
 
@@ -48,3 +50,5 @@ WriteFuncStreamWriter::Write(const char* data, uint64_t size) {
     cursor_ += size;
     bytes_written_ += size;
 }
+
+}  // namespace vsag
