@@ -52,6 +52,10 @@ MMapIO::MMapIO(std::string filename, Allocator* allocator)
         }
     }
     void* addr = mmap(nullptr, mmap_size, PROT_READ | PROT_WRITE, MAP_SHARED, this->fd_, 0);
+    if (addr == MAP_FAILED) {
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            fmt::format("mmap failed: {}", strerror(errno)));
+    }
     this->start_ = static_cast<uint8_t*>(addr);
 }
 
