@@ -236,6 +236,11 @@ generate_int8_codes(uint64_t count, uint32_t dim, int seed) {
     return GenerateVectors<int8_t>(count, dim, seed);
 }
 
+std::vector<int16_t>
+generate_int16_codes(uint64_t count, uint32_t dim, int seed) {
+    return GenerateVectors<int16_t>(count, dim, seed);
+}
+
 std::vector<uint8_t>
 generate_int4_codes(uint64_t count, uint32_t dim, int seed) {
     return generate_uint8_codes(count, dim, seed);
@@ -507,17 +512,43 @@ brute_force(const vsag::DatasetPtr& query,
         } else if (data_type == "int8") {
             query_vec = query->GetInt8Vectors();
             base_vec = base->GetInt8Vectors() + i * base->GetDim();
+        } else if (data_type == "float16") {
+            query_vec = query->GetFloat16Vectors();
+            base_vec = base->GetFloat16Vectors() + i * base->GetDim();
+        } else if (data_type == "bfloat16") {
+            query_vec = query->GetBFloat16Vectors();
+            base_vec = base->GetBFloat16Vectors() + i * base->GetDim();
         } else {
             throw std::runtime_error("un-support data type");
         }
 
         if (metric_type == "l2") {
-            dist = vsag::L2Sqr(query_vec, base_vec, &dim);
+            if (data_type == "float32") {
+                dist = vsag::L2Sqr(query_vec, base_vec, &dim);
+            } else if (data_type == "int8") {
+                dist = vsag::L2Sqr(query_vec, base_vec, &dim);
+            } else if (data_type == "float16") {
+                dist = vsag::FP16ComputeL2Sqr(reinterpret_cast<const uint8_t*>(query_vec),
+                                               reinterpret_cast<const uint8_t*>(base_vec),
+                                               dim);
+            } else if (data_type == "bfloat16") {
+                dist = vsag::BF16ComputeL2Sqr(reinterpret_cast<const uint8_t*>(query_vec),
+                                               reinterpret_cast<const uint8_t*>(base_vec),
+                                               dim);
+            }
         } else if (metric_type == "ip") {
             if (data_type == "float32") {
                 dist = vsag::InnerProductDistance(query_vec, base_vec, &dim);
-            } else {
+            } else if (data_type == "int8") {
                 dist = vsag::INT8InnerProductDistance(query_vec, base_vec, &dim);
+            } else if (data_type == "float16") {
+                dist = vsag::FP16ComputeIP(reinterpret_cast<const uint8_t*>(query_vec),
+                                            reinterpret_cast<const uint8_t*>(base_vec),
+                                            dim);
+            } else if (data_type == "bfloat16") {
+                dist = vsag::BF16ComputeIP(reinterpret_cast<const uint8_t*>(query_vec),
+                                            reinterpret_cast<const uint8_t*>(base_vec),
+                                            dim);
             }
         }
 

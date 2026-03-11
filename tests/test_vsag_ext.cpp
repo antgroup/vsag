@@ -38,6 +38,8 @@ TEST_CASE("Test DatasetHandler", "[ft][ext]") {
     auto dists = new float[10];
     auto f32vectors = new float[10 * 128];
     auto i8vectors = new int8_t[10 * 128];
+    auto f16vectors = new int16_t[10 * 128];
+    auto bf16vectors = new int16_t[10 * 128];
 
     dh->Owner(true);
     dh->NumElements(100);
@@ -54,6 +56,10 @@ TEST_CASE("Test DatasetHandler", "[ft][ext]") {
     CHECK(dh->GetFloat32Vectors() == f32vectors);
     dh->Int8Vectors(i8vectors);
     CHECK(dh->GetInt8Vectors() == i8vectors);
+    dh->Float16Vectors(f16vectors);
+    CHECK(dh->GetFloat16Vectors() == f16vectors);
+    dh->BFloat16Vectors(bf16vectors);
+    CHECK(dh->GetBFloat16Vectors() == bf16vectors);
 
     delete dh;
 }

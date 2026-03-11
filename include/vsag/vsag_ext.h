@@ -78,6 +78,18 @@ public:
     const float*
     GetFloat32Vectors() const;
 
+    DatasetHandler*
+    Float16Vectors(const int16_t* vectors);
+
+    const int16_t*
+    GetFloat16Vectors() const;
+
+    DatasetHandler*
+    BFloat16Vectors(const int16_t* vectors);
+
+    const int16_t*
+    GetBFloat16Vectors() const;
+
 private:
     DatasetHandler() = default;
 

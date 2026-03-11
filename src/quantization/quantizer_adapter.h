@@ -29,8 +29,8 @@ namespace vsag {
 
 template <typename QuantT, typename DataT>
 class QuantizerAdapter : public Quantizer<QuantizerAdapter<QuantT, DataT>> {
-    static_assert(std::is_same_v<DataT, int8_t>,
-                  "QuantizerAdapter currently only supports int8_t data type");
+    static_assert(std::is_same_v<DataT, int8_t> || std::is_same_v<DataT, int16_t>,
+                  "QuantizerAdapter currently only supports int8_t and int16_t data types");
 
 public:
     explicit QuantizerAdapter(const QuantizerParamPtr& param, const IndexCommonParam& common_param);

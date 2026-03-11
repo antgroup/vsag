@@ -59,6 +59,15 @@ public:
                          const std::string& quantization_str)
             : metric_type(metric_type), dim(dim), quantization_str(quantization_str) {
         }
+        HGraphBuildParam(const std::string& metric_type,
+                         int64_t dim,
+                         const std::string& quantization_str,
+                         const std::string& data_type)
+            : metric_type(metric_type),
+              dim(dim),
+              quantization_str(quantization_str),
+              data_type(data_type) {
+        }
     };
 
     static std::string
@@ -112,6 +121,8 @@ const std::vector<std::pair<std::string, float>> HGraphTestIndex::all_test_cases
     {"sq8_uniform,fp32", 0.98},
     {"sq8_uniform,fp16", 0.98},
     {"sq8_uniform,bf16", 0.98},
+    {"fp16,float16", 0.98},
+    {"bf16,bfloat16", 0.98},
 };
 
 constexpr static const char* search_param_tmp = R"(
@@ -214,40 +225,67 @@ HGraphTestIndex::GenerateHGraphBuildParametersString(const HGraphBuildParam& par
     std::string high_quantizer_str, precise_io_type = "block_memory_io";
     auto& base_quantizer_str = strs[0];
     uint32_t rabitq_num_bit_query = 32, rabitq_num_bit_base = 1;
+
+    std::string data_type = param.data_type;
+    bool use_reorder = false;
+
     if (strs.size() > 1) {
-        high_quantizer_str = strs[1];
-        if (strs.size() > 2) {
-            precise_io_type = strs[2];
+        if (strs[1] == "float16" || strs[1] == "bfloat16") {
+            data_type = strs[1];
+            build_parameters_str = fmt::format(parameter_temp_origin,
+                                               data_type,
+                                               param.metric_type,
+                                               param.dim,
+                                               param.extra_info_size,
+                                               base_quantizer_str,
+                                               pq_dim,
+                                               param.thread_count,
+                                               param.graph_type,
+                                               param.graph_storage,
+                                               param.support_remove,
+                                               param.use_attr_filter,
+                                               param.store_raw_vector,
+                                               param.support_duplicate,
+                                               param.graph_io_type,
+                                               param.graph_file_path,
+                                               param.rabitq_num_bit_base,
+                                               param.rabitq_num_bit_query);
+        } else {
+            high_quantizer_str = strs[1];
+            use_reorder = true;
+            if (strs.size() > 2) {
+                precise_io_type = strs[2];
+            }
+            if (strs.size() > 4 and base_quantizer_str == vsag::QUANTIZATION_TYPE_VALUE_RABITQ) {
+                rabitq_num_bit_query = std::stoi(strs[3]);
+                rabitq_num_bit_base = std::stoi(strs[4]);
+            }
+            build_parameters_str = fmt::format(parameter_temp_reorder,
+                                               data_type,
+                                               param.metric_type,
+                                               param.dim,
+                                               param.extra_info_size,
+                                               use_reorder,
+                                               base_quantizer_str,
+                                               param.thread_count,
+                                               pq_dim,
+                                               high_quantizer_str,
+                                               precise_io_type,
+                                               dir.GenerateRandomFile(),
+                                               param.graph_type,
+                                               param.graph_storage,
+                                               param.support_remove,
+                                               param.use_attr_filter,
+                                               param.store_raw_vector,
+                                               param.support_duplicate,
+                                               param.graph_io_type,
+                                               param.graph_file_path,
+                                               rabitq_num_bit_base,
+                                               rabitq_num_bit_query);
         }
-        if (strs.size() > 4 and base_quantizer_str == vsag::QUANTIZATION_TYPE_VALUE_RABITQ) {
-            rabitq_num_bit_query = std::stoi(strs[3]);
-            rabitq_num_bit_base = std::stoi(strs[4]);
-        }
-        build_parameters_str = fmt::format(parameter_temp_reorder,
-                                           param.data_type,
-                                           param.metric_type,
-                                           param.dim,
-                                           param.extra_info_size,
-                                           true, /* reorder */
-                                           base_quantizer_str,
-                                           param.thread_count,
-                                           pq_dim,
-                                           high_quantizer_str,
-                                           precise_io_type,
-                                           dir.GenerateRandomFile(),
-                                           param.graph_type,
-                                           param.graph_storage,
-                                           param.support_remove,
-                                           param.use_attr_filter,
-                                           param.store_raw_vector,
-                                           param.support_duplicate,
-                                           param.graph_io_type,
-                                           param.graph_file_path,
-                                           rabitq_num_bit_base,
-                                           rabitq_num_bit_query);
     } else {
         build_parameters_str = fmt::format(parameter_temp_origin,
-                                           param.data_type,
+                                           data_type,
                                            param.metric_type,
                                            param.dim,
                                            param.extra_info_size,

@@ -32,6 +32,7 @@ class DatasetImpl : public Dataset {
                              const float*,
                              const char*,
                              const int8_t*,
+                             const int16_t*,
                              const int64_t*,
                              const std::string*,
                              const SparseVector*,
@@ -137,6 +138,36 @@ public:
     GetInt8Vectors() const override {
         if (auto iter = this->data_.find(INT8_VECTORS); iter != this->data_.end()) {
             return std::get<const int8_t*>(iter->second);
+        }
+
+        return nullptr;
+    }
+
+    DatasetPtr
+    Float16Vectors(const int16_t* vectors) override {
+        this->data_[FLOAT16_VECTORS] = vectors;
+        return shared_from_this();
+    }
+
+    const int16_t*
+    GetFloat16Vectors() const override {
+        if (auto iter = this->data_.find(FLOAT16_VECTORS); iter != this->data_.end()) {
+            return std::get<const int16_t*>(iter->second);
+        }
+
+        return nullptr;
+    }
+
+    DatasetPtr
+    BFloat16Vectors(const int16_t* vectors) override {
+        this->data_[BFLOAT16_VECTORS] = vectors;
+        return shared_from_this();
+    }
+
+    const int16_t*
+    GetBFloat16Vectors() const override {
+        if (auto iter = this->data_.find(BFLOAT16_VECTORS); iter != this->data_.end()) {
+            return std::get<const int16_t*>(iter->second);
         }
 
         return nullptr;

@@ -227,6 +227,18 @@ public:
     virtual const int8_t*
     GetInt8Vectors() const = 0;
 
+    virtual DatasetPtr
+    Float16Vectors(const int16_t* vectors) = 0;
+
+    virtual const int16_t*
+    GetFloat16Vectors() const = 0;
+
+    virtual DatasetPtr
+    BFloat16Vectors(const int16_t* vectors) = 0;
+
+    virtual const int16_t*
+    GetBFloat16Vectors() const = 0;
+
     /**
      * @brief Sets the float32 vector array for the dataset.
      *
