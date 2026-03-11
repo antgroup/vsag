@@ -154,6 +154,12 @@ SparseGraphDataCell::Deserialize(StreamReader& reader) {
 void
 SparseGraphDataCell::Resize(InnerIdType new_size){};
 
+bool
+SparseGraphDataCell::CheckIdExists(InnerIdType id) const {
+    std::shared_lock<std::shared_mutex> rlock(this->neighbors_map_mutex_);
+    return this->neighbors_.find(id) != this->neighbors_.end();
+}
+
 void
 SparseGraphDataCell::DeleteNeighborsById(vsag::InnerIdType id) {
     if (is_support_delete_) {
