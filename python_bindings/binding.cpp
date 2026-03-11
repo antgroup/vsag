@@ -279,6 +279,90 @@ public:
         return py::make_tuple(labels, dists);
     }
 
+    int64_t
+    GetNumElements() const {
+        return index_->GetNumElements();
+    }
+
+    int64_t
+    GetMemoryUsage() const {
+        return index_->GetMemoryUsage();
+    }
+
+    bool
+    CheckIdExist(int64_t id) const {
+        return index_->CheckIdExist(id);
+    }
+
+    py::tuple
+    GetMinAndMaxId() const {
+        auto result = index_->GetMinAndMaxId();
+        if (result.has_value()) {
+            auto [min_id, max_id] = result.value();
+            return py::make_tuple(min_id, max_id);
+        }
+        return py::make_tuple(-1, -1);
+    }
+
+    void
+    Add(py::array_t<float> vectors, py::array_t<int64_t> ids, size_t num_elements, size_t dim) {
+        auto dataset = vsag::Dataset::Make();
+        dataset->Owner(false)
+            ->Dim(dim)
+            ->NumElements(num_elements)
+            ->Ids(ids.mutable_data())
+            ->Float32Vectors(vectors.mutable_data());
+
+        auto result = index_->Add(dataset);
+        if (!result.has_value()) {
+            throw std::runtime_error("Failed to add vectors to index");
+        }
+    }
+
+    uint32_t
+    Remove(py::array_t<int64_t> ids) {
+        auto buf = ids.request();
+        if (buf.ndim != 1) {
+            throw std::invalid_argument("ids must be 1-dimensional");
+        }
+
+        std::vector<int64_t> ids_vec(ids.data(), ids.data() + buf.shape[0]);
+        auto result = index_->Remove(ids_vec);
+        if (result.has_value()) {
+            return result.value();
+        }
+        return 0;
+    }
+
+    py::array_t<float>
+    CalDistanceById(py::array_t<float> query, py::array_t<int64_t> ids) {
+        auto buf_query = query.request();
+        auto buf_ids = ids.request();
+
+        if (buf_query.ndim != 1 || buf_ids.ndim != 1) {
+            throw std::invalid_argument("query and ids must be 1-dimensional");
+        }
+
+        int64_t count = buf_ids.shape[0];
+        auto distances = py::array_t<float>(count);
+        auto dist_view = distances.mutable_unchecked<1>();
+
+        for (int64_t i = 0; i < count; ++i) {
+            dist_view(i) = -1.0f;
+        }
+
+        auto result = index_->CalDistanceById(query.data(), ids.data(), count);
+
+        if (result.has_value()) {
+            auto dist_data = result.value()->GetDistances();
+            for (int64_t i = 0; i < count; ++i) {
+                dist_view(i) = dist_data[i];
+            }
+        }
+
+        return distances;
+    }
+
     void
     Save(const std::string& filename) {
         std::ofstream file(filename, std::ios::binary);
@@ -470,5 +554,101 @@ PYBIND11_MODULE(_pyvsag, m) {
          Note:
              The Index object must be constructed with the same parameters
              that were used when the index was originally built and saved.
+         )pbdoc")
+
+        // Statistics methods
+        .def("get_num_elements",
+             &Index::GetNumElements,
+             R"pbdoc(
+         Get the number of elements in the index.
+         
+         Returns:
+             int: Number of vectors currently stored in the index.
+         )pbdoc")
+
+        .def("get_memory_usage",
+             &Index::GetMemoryUsage,
+             R"pbdoc(
+         Get the memory usage of the index in bytes.
+         
+         Returns:
+             int: Memory occupied by the index in bytes.
+         )pbdoc")
+
+        // ID operations
+        .def("check_id_exist",
+             &Index::CheckIdExist,
+             py::arg("id"),
+             R"pbdoc(
+         Check if a specific ID exists in the index.
+         
+         Args:
+             id (int): The ID to check for existence.
+             
+         Returns:
+             bool: True if the ID exists, False otherwise.
+         )pbdoc")
+
+        .def("get_min_max_id",
+             &Index::GetMinAndMaxId,
+             R"pbdoc(
+         Get the minimum and maximum IDs in the index.
+         
+         Returns:
+             tuple: (min_id, max_id) where:
+                 - min_id (int): Minimum ID in the index
+                 - max_id (int): Maximum ID in the index
+                 
+         Note:
+             Returns (-1, -1) if the operation fails.
+         )pbdoc")
+
+        // Dynamic operations
+        .def("add",
+             &Index::Add,
+             py::arg("vectors"),
+             py::arg("ids"),
+             py::arg("num_elements"),
+             py::arg("dim"),
+             R"pbdoc(
+         Add new vectors to the index dynamically.
+         
+         Args:
+             vectors (numpy.ndarray): 1D array of float32 values with total size num_elements * dim
+             ids (numpy.ndarray): 1D array of int64 values with shape (num_elements,)
+             num_elements (int): Number of vectors to add
+             dim (int): Dimensionality of each vector
+             
+         Raises:
+             RuntimeError: If the add operation fails.
+         )pbdoc")
+
+        .def("remove",
+             &Index::Remove,
+             py::arg("ids"),
+             R"pbdoc(
+         Remove vectors from the index by their IDs.
+         
+         Args:
+             ids (numpy.ndarray): 1D array of int64 IDs to remove
+             
+         Returns:
+             int: Number of vectors successfully removed from the index.
+         )pbdoc")
+
+        // Distance calculation
+        .def("cal_distance_by_id",
+             &Index::CalDistanceById,
+             py::arg("query"),
+             py::arg("ids"),
+             R"pbdoc(
+         Calculate distances between a query vector and vectors specified by IDs.
+         
+         Args:
+             query (numpy.ndarray): 1D array of float32 values representing the query vector
+             ids (numpy.ndarray): 1D array of int64 IDs to calculate distances for
+             
+         Returns:
+             numpy.ndarray: Array of float32 distances corresponding to each ID.
          )pbdoc");
 }
