@@ -90,6 +90,15 @@ GraphInterfaceTest::BasicTest(uint64_t max_id,
         }
     }
 
+    // Test CheckIdExists
+    SECTION("Test CheckIdExists") {
+        for (auto& [key, value] : maps) {
+            REQUIRE(this->graph_->CheckIdExists(key) == true);
+        }
+        InnerIdType non_exist_id = max_id + 1000;
+        REQUIRE(this->graph_->CheckIdExists(non_exist_id) == false);
+    }
+
     // Test Others
     SECTION("Test Others") {
         REQUIRE(this->graph_->MaxCapacity() >= this->graph_->TotalCount());
