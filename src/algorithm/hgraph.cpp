@@ -1705,8 +1705,6 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         return dataset_result;
     }
 
-    auto vt = this->pool_->TakeOne();
-
     const auto* raw_query = get_data(query);
     for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
         auto result = this->search_one_graph(
