@@ -21,6 +21,8 @@
 
 #include "typing.h"
 
+namespace vsag {
+
 class StreamWriter {
 public:
     template <typename T>
@@ -107,7 +109,8 @@ public:
 
     std::function<void(uint64_t, uint64_t, void*)> writeFunc_;
 
-public:
     uint64_t cursor_{0};
     uint64_t written_bytes_{0};
 };
+
+}  // namespace vsag

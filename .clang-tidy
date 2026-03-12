@@ -33,7 +33,7 @@ Checks: >
     -readability-identifier-length,
     -readability-magic-numbers,
     -readability-function-cognitive-complexity, # enable after fix all
-    -readability-redundant-access-specifiers
+    -readability-redundant-access-specifiers, # keep repeated public:/protected:/private: as visual separators between method groups
 
 
 HeaderFilterRegex: ''
