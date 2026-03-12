@@ -412,7 +412,7 @@ FlattenDataCell<QuantTmpl, IOTmpl>::ComputePairVectors(InnerIdType id1, InnerIdT
     bool release1 = false, release2 = false;
     const uint8_t* codes1 = nullptr;
     const uint8_t* codes2 = nullptr;
-    auto release_all = [&]() {
+    auto release_pair = [&]() {
         if (release1 && codes1) {
             this->io_->Release(codes1);
         }
@@ -424,10 +424,10 @@ FlattenDataCell<QuantTmpl, IOTmpl>::ComputePairVectors(InnerIdType id1, InnerIdT
         codes1 = this->GetCodesById(id1, release1);
         codes2 = this->GetCodesById(id2, release2);
         auto result = this->quantizer_->Compute(codes1, codes2);
-        release_all();
+        release_pair();
         return result;
     } catch (...) {
-        release_all();
+        release_pair();
         throw;
     }
 }
