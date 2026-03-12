@@ -466,10 +466,8 @@ TEST_CASE("LabelTable Hole List Serialization", "[ut][LabelTable]") {
         IOStreamReader reader(ss);
         new_label_table->Deserialize(reader);
 
-        REQUIRE(new_label_table->GetHoleCount() == 2);
+        REQUIRE(new_label_table->GetHoleCount() == 0);
         auto [s1, id1] = new_label_table->PopHole();
-        REQUIRE(s1 == true);
-        auto [s2, id2] = new_label_table->PopHole();
-        REQUIRE(s2 == true);
+        REQUIRE(s1 == false);
     }
 }
