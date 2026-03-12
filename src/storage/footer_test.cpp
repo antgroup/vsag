@@ -33,7 +33,7 @@ TEST_CASE("Footer Basic Usage Test", "[ut][footer]") {
 
         std::stringstream in_ss(std::ios::in | std::ios::binary);
         in_ss.str(str);
-        IOStreamReader reader(in_ss);
+        vsag::IOStreamReader reader(in_ss);
         footer.Deserialize(reader);
         for (int i = 0; i < 10; i++) {
             REQUIRE(std::stoi(footer.GetMetadata(std::to_string(i))) == i);
@@ -56,7 +56,7 @@ TEST_CASE("Footer Basic Usage Test", "[ut][footer]") {
         std::string str = ss.str();
         str.resize(vsag::FOOTER_SIZE - 1);
         ss.str(str);
-        IOStreamReader reader(ss);
+        vsag::IOStreamReader reader(ss);
         REQUIRE_THROWS(footer.Deserialize(reader));
     }
 
@@ -71,7 +71,7 @@ TEST_CASE("Footer Basic Usage Test", "[ut][footer]") {
         std::stringstream in_ss(std::ios::in | std::ios::binary);
         str.resize(10);
         in_ss.str(str);
-        IOStreamReader reader(in_ss);
+        vsag::IOStreamReader reader(in_ss);
         REQUIRE_THROWS(footer.Deserialize(reader));
     }
 
@@ -91,7 +91,7 @@ TEST_CASE("Footer Basic Usage Test", "[ut][footer]") {
 
         std::stringstream in_ss(std::ios::in | std::ios::binary);
         in_ss.str(str);
-        IOStreamReader reader(in_ss);
+        vsag::IOStreamReader reader(in_ss);
         REQUIRE_THROWS(footer.Deserialize(reader));
     }
 
@@ -99,7 +99,7 @@ TEST_CASE("Footer Basic Usage Test", "[ut][footer]") {
         std::stringstream ss(std::ios::in | std::ios::out | std::ios::binary);
         uint32_t serialized_data_size = vsag::FOOTER_SIZE + 1;
         ss << serialized_data_size;
-        IOStreamReader reader(ss);
+        vsag::IOStreamReader reader(ss);
         REQUIRE_THROWS(footer.Deserialize(reader));
     }
 
@@ -108,7 +108,7 @@ TEST_CASE("Footer Basic Usage Test", "[ut][footer]") {
         std::string invalid_value = "abcd";
         footer.SetMetadata(vsag::SERIALIZE_MAGIC_NUM, invalid_value);
         footer.Serialize(ss);
-        IOStreamReader reader(ss);
+        vsag::IOStreamReader reader(ss);
         REQUIRE_THROWS(footer.Deserialize(reader));
     }
 
@@ -117,7 +117,7 @@ TEST_CASE("Footer Basic Usage Test", "[ut][footer]") {
         std::string invalid_value = "1.0";
         footer.SetMetadata(vsag::SERIALIZE_VERSION, invalid_value);
         footer.Serialize(ss);
-        IOStreamReader reader(ss);
+        vsag::IOStreamReader reader(ss);
         REQUIRE_THROWS(footer.Deserialize(reader));
     }
 }

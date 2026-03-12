@@ -99,6 +99,28 @@ $ make fmt
 
 The format script will automatically verify you're using clang-format-15 and will fail if a different version is detected.
 
+### Run clang-tidy
+
+**Important**: VSAG requires **clang-tidy version 15 EXACTLY**. Do not use higher or lower versions as they may produce different diagnostics.
+
+Install clang-tidy-15:
+```shell
+# Ubuntu/Debian
+$ sudo apt-get install clang-tidy-15
+```
+
+To run lint checks:
+```shell
+$ make lint
+```
+
+To apply clang-tidy fixes in place:
+```shell
+$ make fix-lint
+```
+
+The lint wrapper will automatically verify you're using clang-tidy-15 and will fail if a different version is detected.
+
 ## Run tests with code coverage
 
 Before submitting your PR, make sure you have run unit test, and your code coverage rate is >= 90%.
