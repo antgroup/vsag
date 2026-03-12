@@ -88,9 +88,8 @@ BruteForce::Add(const DatasetPtr& data, AddMode mode) {
             if (this->label_table_->CheckLabel(label)) {
                 return label;
             }
-            inner_id = this->total_count_;
-            this->total_count_++;
-            this->resize(total_count_);
+            inner_id = static_cast<InnerIdType>(this->total_count_.load());
+            this->resize(static_cast<uint64_t>(inner_id) + 1);
             this->label_table_->Insert(inner_id, label);
         }
         std::shared_lock global_lock(this->global_mutex_);
@@ -99,6 +98,7 @@ BruteForce::Add(const DatasetPtr& data, AddMode mode) {
         }
 
         this->add_one(data, inner_id);
+        ++this->total_count_;
         return std::nullopt;
     };
 
@@ -256,16 +256,16 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
         dist_cmp.fetch_add(dist_cmp_local, std::memory_order_relaxed);
     };
 
-    uint64_t count = total_count_.load();
+    InnerIdType count = static_cast<InnerIdType>(total_count_.load());
     if (parallel_count == 1 || this->thread_pool_ == nullptr) {
         search_func(0, count, heaps[0]);
         heap = heaps[0];
     } else {
         std::vector<std::future<void>> futures;
-        auto chunk_size = (count + parallel_count - 1) / parallel_count;
+        auto chunk_size = (static_cast<uint64_t>(count) + parallel_count - 1) / parallel_count;
         for (auto i = 0; i < parallel_count; ++i) {
-            auto start = i * chunk_size;
-            auto end = std::min(start + chunk_size, count);
+            auto start = static_cast<InnerIdType>(i * chunk_size);
+            auto end = std::min(static_cast<InnerIdType>(start + chunk_size), count);
             auto future = this->thread_pool_->GeneralEnqueue(search_func, start, end, heaps[i]);
             futures.emplace_back(std::move(future));
         }
@@ -305,7 +305,7 @@ BruteForce::RangeSearch(const vsag::DatasetPtr& query,
         limited_size = std::numeric_limits<int64_t>::max();
     }
     auto heap = std::make_shared<StandardHeap<true, true>>(this->allocator_, limited_size);
-    uint64_t count = total_count_.load();
+    InnerIdType count = static_cast<InnerIdType>(total_count_.load());
     for (InnerIdType i = 0; i < count; ++i) {
         float dist;
         if (filter == nullptr or filter->CheckValid(this->label_table_->GetLabelById(i))) {
