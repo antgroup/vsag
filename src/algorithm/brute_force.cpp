@@ -256,15 +256,16 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
         dist_cmp.fetch_add(dist_cmp_local, std::memory_order_relaxed);
     };
 
+    uint64_t count = total_count_.load();
     if (parallel_count == 1 || this->thread_pool_ == nullptr) {
-        search_func(0, total_count_, heaps[0]);
+        search_func(0, count, heaps[0]);
         heap = heaps[0];
     } else {
         std::vector<std::future<void>> futures;
-        auto chunk_size = (total_count_ + parallel_count - 1) / parallel_count;
+        auto chunk_size = (count + parallel_count - 1) / parallel_count;
         for (auto i = 0; i < parallel_count; ++i) {
             auto start = i * chunk_size;
-            auto end = std::min(start + chunk_size, total_count_);
+            auto end = std::min(start + chunk_size, count);
             auto future = this->thread_pool_->GeneralEnqueue(search_func, start, end, heaps[i]);
             futures.emplace_back(std::move(future));
         }
@@ -304,7 +305,8 @@ BruteForce::RangeSearch(const vsag::DatasetPtr& query,
         limited_size = std::numeric_limits<int64_t>::max();
     }
     auto heap = std::make_shared<StandardHeap<true, true>>(this->allocator_, limited_size);
-    for (InnerIdType i = 0; i < total_count_; ++i) {
+    uint64_t count = total_count_.load();
+    for (InnerIdType i = 0; i < count; ++i) {
         float dist;
         if (filter == nullptr or filter->CheckValid(this->label_table_->GetLabelById(i))) {
             inner_codes_->Query(&dist, computer, &i, 1);
@@ -375,7 +377,9 @@ BruteForce::Deserialize(StreamReader& reader) {
         logger::debug("parse with v0.13 version format");
 
         StreamReader::ReadObj(buffer_reader, dim_);
-        StreamReader::ReadObj(buffer_reader, total_count_);
+        uint64_t temp_total_count = 0;
+        StreamReader::ReadObj(buffer_reader, temp_total_count);
+        this->total_count_.store(temp_total_count);
     } else {  // create like `else if ( ver in [v0.15, v0.17] )` here if need in the future
         logger::debug("parse with new version format");
 
