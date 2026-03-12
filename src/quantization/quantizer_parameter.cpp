@@ -94,7 +94,9 @@ QuantizerParameter::IsValidQuantizationType(const std::string& type_name) {
                                                                 QUANTIZATION_TYPE_VALUE_FP16,
                                                                 QUANTIZATION_TYPE_VALUE_RABITQ,
                                                                 QUANTIZATION_TYPE_VALUE_SPARSE,
-                                                                QUANTIZATION_TYPE_VALUE_PQFS};
+                                                                QUANTIZATION_TYPE_VALUE_PQFS,
+                                                                QUANTIZATION_TYPE_VALUE_TQ,
+                                                                QUANTIZATION_TYPE_VALUE_INT8};
 
     return valid_types.find(type_name) != valid_types.end();
 }
