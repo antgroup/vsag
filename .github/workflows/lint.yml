@@ -20,8 +20,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      - name: Install clang-tidy
-        run: sudo apt install clang-tidy-15 -y && sudo ln -s /usr/bin/clang-tidy-15 /usr/bin/clang-tidy
+      - name: Install clang-tidy 15
+        run: sudo apt install clang-tidy-15 -y
       - name: Load Cache
         uses: hendrikmuhs/ccache-action@v1.2
         with:

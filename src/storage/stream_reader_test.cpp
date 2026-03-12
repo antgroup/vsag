@@ -24,14 +24,14 @@
 // ['2' '2' ... repeats 1024 times]
 // ['3' '3' ... repeats 1024 times]
 // ['4' '4' ... repeats 1024 times]
-ReadFuncStreamReader
+vsag::ReadFuncStreamReader
 gen_4k_data_and_return_stream_reader(char* buffer) {
     memset(buffer, '1', 1024);
     memset(buffer + 1024, '2', 1024);
     memset(buffer + 2048, '3', 1024);
     memset(buffer + 3072, '4', 1024);
 
-    auto reader = ReadFuncStreamReader(
+    auto reader = vsag::ReadFuncStreamReader(
         /*read_func=*/[=](uint64_t offset,
                           uint64_t size,
                           void* dest) { memcpy(dest, buffer + offset, size); },

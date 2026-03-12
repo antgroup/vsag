@@ -323,7 +323,7 @@ TEST_CASE("serialize empty index", "[ut][hnsw]") {
         REQUIRE(result.has_value());
         out_stream.close();
         std::fstream in_stream(dir.path + "empty_index.bin", std::ios::in | std::ios::binary);
-        IOStreamReader reader(in_stream);
+        vsag::IOStreamReader reader(in_stream);
         auto footer = Footer::Parse(reader);
         REQUIRE(footer->GetMetadata()->EmptyIndex());
     }
