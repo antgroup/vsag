@@ -2580,6 +2580,70 @@ TestHGraphReverseEdges(const fixtures::HGraphTestIndexPtr& test_index,
     }
 }
 
+static void
+TestHGraphMultiQuerySearch(const fixtures::HGraphTestIndexPtr& test_index,
+                           const fixtures::HGraphResourcePtr& resource) {
+    for (const auto& dim : resource->dims) {
+        for (const auto& [quantization_str, expected_recall] : resource->test_cases) {
+            for (const auto& metric_type : resource->metric_types) {
+                fixtures::HGraphTestIndex::HGraphBuildParam param(
+                    metric_type, dim, quantization_str);
+                auto build_param_str =
+                    fixtures::HGraphTestIndex::GenerateHGraphBuildParametersString(param);
+                auto index = fixtures::TestIndex::TestFactory("hgraph", build_param_str, true);
+                auto dataset = fixtures::HGraphTestIndex::pool.GetDatasetAndCreate(
+                    dim, resource->base_count, metric_type);
+                auto search_param_str = fmt::format(fixtures::search_param_tmp, 200, false);
+
+                auto build_result = index->Build(dataset->base_);
+                REQUIRE(build_result.has_value());
+
+                int64_t num_queries = 5;
+                int64_t k = 10;
+                int64_t dim_val = dataset->query_->GetDim();
+
+                std::vector<float> multi_query_data(num_queries * dim_val);
+                const float* original_queries = dataset->query_->GetFloat32Vectors();
+                for (int64_t i = 0; i < num_queries; ++i) {
+                    std::copy(original_queries,
+                              original_queries + dim_val,
+                              multi_query_data.data() + i * dim_val);
+                }
+
+                auto multi_query = vsag::Dataset::Make();
+                multi_query->NumElements(num_queries)
+                    ->Dim(dim_val)
+                    ->Float32Vectors(multi_query_data.data())
+                    ->Owner(false);
+
+                auto result = index->KnnSearch(multi_query, k, search_param_str);
+                REQUIRE(result.has_value());
+                REQUIRE(result.value()->GetNumElements() == num_queries * k);
+
+                for (int64_t q_idx = 0; q_idx < num_queries; ++q_idx) {
+                    auto single_query = vsag::Dataset::Make();
+                    single_query->NumElements(1)
+                        ->Dim(dim_val)
+                        ->Float32Vectors(multi_query_data.data() + q_idx * dim_val)
+                        ->Owner(false);
+
+                    auto single_result = index->KnnSearch(single_query, k, search_param_str);
+                    REQUIRE(single_result.has_value());
+                    REQUIRE(single_result.value()->GetNumElements() == k);
+
+                    const auto* multi_ids = result.value()->GetIds();
+                    const auto* single_ids = single_result.value()->GetIds();
+
+                    int64_t offset = q_idx * k;
+                    for (int64_t i = 0; i < k; ++i) {
+                        REQUIRE(multi_ids[offset + i] == single_ids[i]);
+                    }
+                }
+            }
+        }
+    }
+}
+
 TEST_CASE("(PR) HGraph Reverse Edges", "[ft][build][hgraph][pr]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(true);
@@ -2590,4 +2654,82 @@ TEST_CASE("(Daily) HGraph Reverse Edges", "[ft][build][hgraph][daily]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(false);
     TestHGraphReverseEdges(test_index, resource);
+}
+
+TEST_CASE("(PR) HGraph Multi-Query Search", "[ft][hgraph][pr]") {
+    auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
+    auto resource = test_index->GetResource(true);
+    TestHGraphMultiQuerySearch(test_index, resource);
+}
+
+TEST_CASE("(Daily) HGraph Multi-Query Search", "[ft][hgraph][daily]") {
+    auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
+    auto resource = test_index->GetResource(false);
+    TestHGraphMultiQuerySearch(test_index, resource);
+}
+
+static void
+TestHGraphMultiQueryRangeSearch(const fixtures::HGraphTestIndexPtr& test_index,
+                                const fixtures::HGraphResourcePtr& resource) {
+    for (const auto& dim : resource->dims) {
+        for (const auto& [quantization_str, expected_recall] : resource->test_cases) {
+            for (const auto& metric_type : resource->metric_types) {
+                fixtures::HGraphTestIndex::HGraphBuildParam param(
+                    metric_type, dim, quantization_str);
+                auto build_param_str =
+                    fixtures::HGraphTestIndex::GenerateHGraphBuildParametersString(param);
+                auto index = fixtures::TestIndex::TestFactory("hgraph", build_param_str, true);
+                auto dataset = fixtures::HGraphTestIndex::pool.GetDatasetAndCreate(
+                    dim, resource->base_count, metric_type);
+                auto search_param_str = fmt::format(fixtures::search_param_tmp, 200, false);
+
+                auto build_result = index->Build(dataset->base_);
+                REQUIRE(build_result.has_value());
+
+                int64_t num_queries = 3;
+                int64_t dim_val = dataset->query_->GetDim();
+                float radius = 0.5F;
+
+                std::vector<float> multi_query_data(num_queries * dim_val);
+                const float* original_queries = dataset->query_->GetFloat32Vectors();
+                for (int64_t i = 0; i < num_queries; ++i) {
+                    std::copy(original_queries,
+                              original_queries + dim_val,
+                              multi_query_data.data() + i * dim_val);
+                }
+
+                auto multi_query = vsag::Dataset::Make();
+                multi_query->NumElements(num_queries)
+                    ->Dim(dim_val)
+                    ->Float32Vectors(multi_query_data.data())
+                    ->Owner(false);
+
+                auto result = index->RangeSearch(multi_query, radius, search_param_str);
+                REQUIRE(result.has_value());
+
+                for (int64_t q_idx = 0; q_idx < num_queries; ++q_idx) {
+                    auto single_query = vsag::Dataset::Make();
+                    single_query->NumElements(1)
+                        ->Dim(dim_val)
+                        ->Float32Vectors(multi_query_data.data() + q_idx * dim_val)
+                        ->Owner(false);
+
+                    auto single_result = index->RangeSearch(single_query, radius, search_param_str);
+                    REQUIRE(single_result.has_value());
+                }
+            }
+        }
+    }
+}
+
+TEST_CASE("(PR) HGraph Multi-Query Range Search", "[ft][hgraph][pr]") {
+    auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
+    auto resource = test_index->GetResource(true);
+    TestHGraphMultiQueryRangeSearch(test_index, resource);
+}
+
+TEST_CASE("(Daily) HGraph Multi-Query Range Search", "[ft][hgraph][daily]") {
+    auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
+    auto resource = test_index->GetResource(false);
+    TestHGraphMultiQueryRangeSearch(test_index, resource);
 }

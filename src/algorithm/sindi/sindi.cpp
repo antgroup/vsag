@@ -210,16 +210,10 @@ SINDI::KnnSearch(const DatasetPtr& query,
                  vsag::Allocator* allocator) const {
     std::shared_lock rlock(this->global_mutex_);
 
-    // Due to concerns about the performance of this index
-    // We have not yet implemented search with filtering capabilities
     const auto* sparse_vectors = query->GetSparseVectors();
-    CHECK_ARGUMENT(query->GetNumElements() == 1, "num of query should be 1");
-    auto sparse_query = sparse_vectors[0];
-    CHECK_ARGUMENT(
-        sparse_query.len_ > 0,
-        fmt::format("query->GetSparseVectors()->len_ ({}) is invalid", sparse_query.len_));
+    int64_t query_count = query->GetNumElements();
+    CHECK_ARGUMENT(query_count >= 1, "query count must be at least 1");
 
-    // search parameter
     SINDISearchParameter search_param;
     search_param.FromJson(JsonType::Parse(parameters));
     CHECK_ARGUMENT(search_param.n_candidate <= SPARSE_AMPLIFICATION_FACTOR * k,
@@ -227,19 +221,48 @@ SINDI::KnnSearch(const DatasetPtr& query,
                                search_param.n_candidate,
                                AMPLIFICATION_FACTOR,
                                k));
-    InnerSearchParam inner_param;
-    inner_param.ef = std::max(static_cast<int64_t>(search_param.n_candidate), k);
-    inner_param.topk = k;
 
-    FilterPtr ft = nullptr;
-    if (filter != nullptr) {
-        ft = std::make_shared<InnerIdWrapperFilter>(filter, *this->label_table_);
+    Vector<float> all_dists(allocator_);
+    Vector<int64_t> all_ids(allocator_);
+
+    for (int64_t q_idx = 0; q_idx < query_count; ++q_idx) {
+        auto sparse_query = sparse_vectors[q_idx];
+        CHECK_ARGUMENT(
+            sparse_query.len_ > 0,
+            fmt::format("query->GetSparseVectors()->len_ ({}) is invalid", sparse_query.len_));
+
+        InnerSearchParam inner_param;
+        inner_param.ef = std::max(static_cast<int64_t>(search_param.n_candidate), k);
+        inner_param.topk = k;
+
+        FilterPtr ft = nullptr;
+        if (filter != nullptr) {
+            ft = std::make_shared<InnerIdWrapperFilter>(filter, *this->label_table_);
+        }
+        inner_param.is_inner_id_allowed = ft;
+
+        auto computer =
+            std::make_shared<SparseTermComputer>(sparse_query, search_param, allocator_);
+        auto result = search_impl<KNN_SEARCH>(
+            computer, inner_param, allocator, search_param.use_term_lists_heap_insert);
+
+        auto count = result->GetNumElements();
+        const auto* result_dists = result->GetDistances();
+        const auto* result_ids = result->GetIds();
+        for (int64_t j = 0; j < count; ++j) {
+            all_dists.push_back(result_dists[j]);
+            all_ids.push_back(result_ids[j]);
+        }
     }
-    inner_param.is_inner_id_allowed = ft;
 
-    auto computer = std::make_shared<SparseTermComputer>(sparse_query, search_param, allocator_);
-    return search_impl<KNN_SEARCH>(
-        computer, inner_param, allocator, search_param.use_term_lists_heap_insert);
+    int64_t total_count = static_cast<int64_t>(all_dists.size());
+    auto [dataset_results, dists, ids] = create_fast_dataset(total_count, allocator_);
+    for (int64_t j = 0; j < total_count; ++j) {
+        dists[j] = all_dists[j];
+        ids[j] = all_ids[j];
+    }
+    dataset_results->NumElements(total_count);
+    return dataset_results;
 }
 
 template <InnerSearchMode mode>
@@ -362,32 +385,54 @@ SINDI::RangeSearch(const DatasetPtr& query,
                    int64_t limited_size) const {
     std::shared_lock rlock(this->global_mutex_);
 
-    // Due to concerns about the performance of this index
-    // We have not yet implemented search with filtering capabilities
     const auto* sparse_vectors = query->GetSparseVectors();
-    CHECK_ARGUMENT(query->GetNumElements() == 1, "num of query should be 1");
-    auto sparse_query = sparse_vectors[0];
-    CHECK_ARGUMENT(
-        sparse_query.len_ > 0,
-        fmt::format("query->GetSparseVectors()->len_ ({}) is invalid", sparse_query.len_));
+    int64_t query_count = query->GetNumElements();
+    CHECK_ARGUMENT(query_count >= 1, "query count must be at least 1");
 
-    // search parameter
     SINDISearchParameter search_param;
     search_param.FromJson(JsonType::Parse(parameters));
-    InnerSearchParam inner_param;
 
-    inner_param.range_search_limit_size = static_cast<int>(limited_size);
-    inner_param.radius = radius;
+    Vector<float> all_dists(allocator_);
+    Vector<int64_t> all_ids(allocator_);
 
-    FilterPtr ft = nullptr;
-    if (filter != nullptr) {
-        ft = std::make_shared<InnerIdWrapperFilter>(filter, *this->label_table_);
+    for (int64_t q_idx = 0; q_idx < query_count; ++q_idx) {
+        auto sparse_query = sparse_vectors[q_idx];
+        CHECK_ARGUMENT(
+            sparse_query.len_ > 0,
+            fmt::format("query->GetSparseVectors()->len_ ({}) is invalid", sparse_query.len_));
+
+        InnerSearchParam inner_param;
+        inner_param.range_search_limit_size = static_cast<int>(limited_size);
+        inner_param.radius = radius;
+
+        FilterPtr ft = nullptr;
+        if (filter != nullptr) {
+            ft = std::make_shared<InnerIdWrapperFilter>(filter, *this->label_table_);
+        }
+        inner_param.is_inner_id_allowed = ft;
+
+        auto computer =
+            std::make_shared<SparseTermComputer>(sparse_query, search_param, allocator_);
+        auto result = search_impl<RANGE_SEARCH>(
+            computer, inner_param, allocator_, search_param.use_term_lists_heap_insert);
+
+        auto count = result->GetNumElements();
+        const auto* result_dists = result->GetDistances();
+        const auto* result_ids = result->GetIds();
+        for (int64_t j = 0; j < count; ++j) {
+            all_dists.push_back(result_dists[j]);
+            all_ids.push_back(result_ids[j]);
+        }
     }
-    inner_param.is_inner_id_allowed = ft;
 
-    auto computer = std::make_shared<SparseTermComputer>(sparse_query, search_param, allocator_);
-    return search_impl<RANGE_SEARCH>(
-        computer, inner_param, allocator_, search_param.use_term_lists_heap_insert);
+    int64_t total_count = static_cast<int64_t>(all_dists.size());
+    auto [dataset_results, dists, ids] = create_fast_dataset(total_count, allocator_);
+    for (int64_t j = 0; j < total_count; ++j) {
+        dists[j] = all_dists[j];
+        ids[j] = all_ids[j];
+    }
+    dataset_results->NumElements(total_count);
+    return dataset_results;
 }
 
 void
