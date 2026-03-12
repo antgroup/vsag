@@ -384,3 +384,90 @@ TEST_CASE("LabelTable Duplicate ID with Resize", "[ut][LabelTable]") {
         REQUIRE(group2.count(6) == 1);
     }
 }
+
+TEST_CASE("LabelTable Hole List Operations", "[ut][LabelTable]") {
+    auto allocator = std::make_shared<DefaultAllocator>();
+    LabelTable label_table(allocator.get());
+
+    SECTION("PushHole and PopHole basic operations") {
+        REQUIRE(label_table.HasHole() == false);
+        REQUIRE(label_table.GetHoleCount() == 0);
+
+        label_table.PushHole(5);
+        REQUIRE(label_table.HasHole() == true);
+        REQUIRE(label_table.GetHoleCount() == 1);
+
+        auto [success, id] = label_table.PopHole();
+        REQUIRE(success == true);
+        REQUIRE(id == 5);
+        REQUIRE(label_table.HasHole() == false);
+    }
+
+    SECTION("PopHole returns false when empty") {
+        auto [success, id] = label_table.PopHole();
+        REQUIRE(success == false);
+        REQUIRE(id == 0);
+    }
+
+    SECTION("Multiple Push and Pop (LIFO order)") {
+        label_table.PushHole(1);
+        label_table.PushHole(2);
+        label_table.PushHole(3);
+        REQUIRE(label_table.GetHoleCount() == 3);
+
+        auto [s1, id1] = label_table.PopHole();
+        REQUIRE(s1 == true);
+        REQUIRE(id1 == 3);
+
+        auto [s2, id2] = label_table.PopHole();
+        REQUIRE(s2 == true);
+        REQUIRE(id2 == 2);
+
+        auto [s3, id3] = label_table.PopHole();
+        REQUIRE(s3 == true);
+        REQUIRE(id3 == 1);
+    }
+
+    SECTION("RemoveHole removes specific id") {
+        label_table.PushHole(1);
+        label_table.PushHole(2);
+        label_table.PushHole(3);
+        REQUIRE(label_table.GetHoleCount() == 3);
+
+        bool removed = label_table.RemoveHole(2);
+        REQUIRE(removed == true);
+        REQUIRE(label_table.GetHoleCount() == 2);
+
+        // RemoveHole for non-existent id returns false
+        removed = label_table.RemoveHole(99);
+        REQUIRE(removed == false);
+        REQUIRE(label_table.GetHoleCount() == 2);
+    }
+}
+
+TEST_CASE("LabelTable Hole List Serialization", "[ut][LabelTable]") {
+    auto allocator = std::make_shared<DefaultAllocator>();
+
+    SECTION("Serialize and Deserialize with holes") {
+        auto label_table = std::make_shared<LabelTable>(allocator.get());
+        label_table->Insert(0, 100);
+        label_table->Insert(1, 200);
+        label_table->Insert(2, 300);
+
+        label_table->PushHole(0);
+        label_table->PushHole(1);
+        REQUIRE(label_table->GetHoleCount() == 2);
+
+        std::stringstream ss;
+        IOStreamWriter writer(ss);
+        label_table->Serialize(writer);
+
+        auto new_label_table = std::make_shared<LabelTable>(allocator.get());
+        IOStreamReader reader(ss);
+        new_label_table->Deserialize(reader);
+
+        REQUIRE(new_label_table->GetHoleCount() == 0);
+        auto [s1, id1] = new_label_table->PopHole();
+        REQUIRE(s1 == false);
+    }
+}
