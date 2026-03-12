@@ -22,6 +22,18 @@
 
 namespace vsag {
 
+/***
+ * @brief FP16 Quantizer stores vectors in 16-bit half-precision floating-point format.
+ *
+ * code layout:
+ * +------------------------+
+ * | fp16-code              |
+ * | [dim * 2B]             |
+ * +------------------------+
+ *
+ * - fp16-code: IEEE 754 half-precision floats (required)
+ * - 1 sign bit, 5 exponent bits, 10 mantissa bits
+ */
 template <MetricType metric = MetricType::METRIC_TYPE_L2SQR>
 class FP16Quantizer : public Quantizer<FP16Quantizer<metric>> {
 public:
