@@ -37,9 +37,6 @@ generate_bit_lookup_table() {
 
 static constexpr auto g_bit_lookup_table = generate_bit_lookup_table();
 
-#define PORTABLE_ALIGN32 __attribute__((aligned(32)))
-#define PORTABLE_ALIGN64 __attribute__((aligned(64)))
-
 namespace vsag::sve {
 
 float

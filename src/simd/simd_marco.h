@@ -24,3 +24,11 @@
 #else
 #define RESTRICT restrict
 #endif
+
+#if defined(__GNUC__) || defined(__clang__)
+#define PORTABLE_ALIGN32 __attribute__((aligned(32)))
+#define PORTABLE_ALIGN64 __attribute__((aligned(64)))
+#else
+#define PORTABLE_ALIGN32
+#define PORTABLE_ALIGN64
+#endif

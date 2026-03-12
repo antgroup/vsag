@@ -24,9 +24,6 @@
 
 #include "simd.h"
 
-#define PORTABLE_ALIGN32 __attribute__((aligned(32)))
-#define PORTABLE_ALIGN64 __attribute__((aligned(64)))
-
 namespace vsag::sse {
 
 float
@@ -109,17 +106,15 @@ FP32ComputeIP(const float* RESTRICT query, const float* RESTRICT codes, uint64_t
     if (n == 0) {
         return generic::FP32ComputeIP(query, codes, dim);
     }
-    // process 4 floats at a time
-    __m128 sum = _mm_setzero_ps();  // initialize to 0
+    __m128 sum = _mm_setzero_ps();
     for (int i = 0; i < n; ++i) {
-        __m128 a = _mm_loadu_ps(query + i * 4);   // load 4 floats from memory
-        __m128 b = _mm_loadu_ps(codes + i * 4);   // load 4 floats from memory
-        sum = _mm_add_ps(sum, _mm_mul_ps(a, b));  // accumulate the product
+        __m128 a = _mm_loadu_ps(query + i * 4);
+        __m128 b = _mm_loadu_ps(codes + i * 4);
+        sum = _mm_add_ps(sum, _mm_mul_ps(a, b));
     }
     alignas(16) float result[4];
-    _mm_store_ps(result, sum);  // store the accumulated result into an array
-    float ip = result[0] + result[1] + result[2] +
-               result[3];  // calculate the sum of the accumulated results
+    _mm_store_ps(result, sum);
+    float ip = result[0] + result[1] + result[2] + result[3];
     ip += generic::FP32ComputeIP(query + n * 4, codes + n * 4, dim - n * 4);
     return ip;
 #else

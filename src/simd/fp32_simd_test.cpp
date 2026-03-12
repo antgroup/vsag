@@ -316,7 +316,7 @@ TEST_CASE("FP32 Benchmark", "[ut][simd][!benchmark]") {
 
 TEST_CASE("FP32 Benchmark Batch4", "[ut][simd][!benchmark]") {
     int64_t count = 500;
-    int64_t dim = 128;
+    int64_t dim = 256;
     auto vec1 = fixtures::generate_vectors(count * 2, dim);
     std::vector<float> vec2(vec1.begin() + count, vec1.end());
     BENCHMARK_SIMD_COMPUTE_BATCH4(generic, FP32ComputeIPBatch4);
