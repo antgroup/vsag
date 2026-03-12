@@ -256,7 +256,7 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
         dist_cmp.fetch_add(dist_cmp_local, std::memory_order_relaxed);
     };
 
-    InnerIdType count = static_cast<InnerIdType>(total_count_.load());
+    auto count = static_cast<InnerIdType>(total_count_.load());
     if (parallel_count == 1 || this->thread_pool_ == nullptr) {
         search_func(0, count, heaps[0]);
         heap = heaps[0];
@@ -305,7 +305,7 @@ BruteForce::RangeSearch(const vsag::DatasetPtr& query,
         limited_size = std::numeric_limits<int64_t>::max();
     }
     auto heap = std::make_shared<StandardHeap<true, true>>(this->allocator_, limited_size);
-    InnerIdType count = static_cast<InnerIdType>(total_count_.load());
+    auto count = static_cast<InnerIdType>(total_count_.load());
     for (InnerIdType i = 0; i < count; ++i) {
         float dist;
         if (filter == nullptr or filter->CheckValid(this->label_table_->GetLabelById(i))) {
