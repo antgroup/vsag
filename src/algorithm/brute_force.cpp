@@ -88,7 +88,7 @@ BruteForce::Add(const DatasetPtr& data, AddMode mode) {
             if (this->label_table_->CheckLabel(label)) {
                 return label;
             }
-            inner_id = static_cast<InnerIdType>(this->total_count_.load());
+            inner_id = static_cast<InnerIdType>(this->total_count_.fetch_add(1));
             this->resize(static_cast<uint64_t>(inner_id) + 1);
             this->label_table_->Insert(inner_id, label);
         }
@@ -98,7 +98,6 @@ BruteForce::Add(const DatasetPtr& data, AddMode mode) {
         }
 
         this->add_one(data, inner_id);
-        ++this->total_count_;
         return std::nullopt;
     };
 
