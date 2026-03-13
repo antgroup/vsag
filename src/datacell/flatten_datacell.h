@@ -350,41 +350,57 @@ FlattenDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
                     this->prefetch_depth_code_ * 64);
             }
         }
-        bool release1 = false;
-        const auto* codes1 = this->GetCodesById(idx[i], release1);
-        bool release2 = false;
-        const auto* codes2 = this->GetCodesById(idx[i + 1], release2);
-        bool release3 = false;
-        const auto* codes3 = this->GetCodesById(idx[i + 2], release3);
-        bool release4 = false;
-        const auto* codes4 = this->GetCodesById(idx[i + 3], release4);
-        computer->ComputeDistsBatch4(codes1,
-                                     codes2,
-                                     codes3,
-                                     codes4,
-                                     result_dists[i],
-                                     result_dists[i + 1],
-                                     result_dists[i + 2],
-                                     result_dists[i + 3]);
-
-        if (release1) {
-            this->io_->Release(codes1);
+        bool release1 = false, release2 = false, release3 = false, release4 = false;
+        const uint8_t* codes1 = nullptr;
+        const uint8_t* codes2 = nullptr;
+        const uint8_t* codes3 = nullptr;
+        const uint8_t* codes4 = nullptr;
+        auto release_batch = [&]() {
+            if (release1 && codes1) {
+                this->io_->Release(codes1);
+            }
+            if (release2 && codes2) {
+                this->io_->Release(codes2);
+            }
+            if (release3 && codes3) {
+                this->io_->Release(codes3);
+            }
+            if (release4 && codes4) {
+                this->io_->Release(codes4);
+            }
+        };
+        try {
+            codes1 = this->GetCodesById(idx[i], release1);
+            codes2 = this->GetCodesById(idx[i + 1], release2);
+            codes3 = this->GetCodesById(idx[i + 2], release3);
+            codes4 = this->GetCodesById(idx[i + 3], release4);
+            computer->ComputeDistsBatch4(codes1,
+                                         codes2,
+                                         codes3,
+                                         codes4,
+                                         result_dists[i],
+                                         result_dists[i + 1],
+                                         result_dists[i + 2],
+                                         result_dists[i + 3]);
+        } catch (...) {
+            release_batch();
+            throw;
         }
-        if (release2) {
-            this->io_->Release(codes2);
-        }
-        if (release3) {
-            this->io_->Release(codes3);
-        }
-        if (release4) {
-            this->io_->Release(codes4);
-        }
+        release_batch();
     }
     for (; i < id_count; ++i) {
         bool release = false;
-        const auto* codes = this->GetCodesById(idx[i], release);
-        computer->ComputeDist(codes, result_dists + i);
-        if (release) {
+        const uint8_t* codes = nullptr;
+        try {
+            codes = this->GetCodesById(idx[i], release);
+            computer->ComputeDist(codes, result_dists + i);
+        } catch (...) {
+            if (release && codes) {
+                this->io_->Release(codes);
+            }
+            throw;
+        }
+        if (release && codes) {
             this->io_->Release(codes);
         }
     }
@@ -393,18 +409,27 @@ FlattenDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
 template <typename QuantTmpl, typename IOTmpl>
 float
 FlattenDataCell<QuantTmpl, IOTmpl>::ComputePairVectors(InnerIdType id1, InnerIdType id2) {
-    bool release1, release2;
-    const auto* codes1 = this->GetCodesById(id1, release1);
-    const auto* codes2 = this->GetCodesById(id2, release2);
-    auto result = this->quantizer_->Compute(codes1, codes2);
-    if (release1) {
-        this->io_->Release(codes1);
+    bool release1 = false, release2 = false;
+    const uint8_t* codes1 = nullptr;
+    const uint8_t* codes2 = nullptr;
+    auto release_pair = [&]() {
+        if (release1 && codes1) {
+            this->io_->Release(codes1);
+        }
+        if (release2 && codes2) {
+            this->io_->Release(codes2);
+        }
+    };
+    try {
+        codes1 = this->GetCodesById(id1, release1);
+        codes2 = this->GetCodesById(id2, release2);
+        auto result = this->quantizer_->Compute(codes1, codes2);
+        release_pair();
+        return result;
+    } catch (...) {
+        release_pair();
+        throw;
     }
-    if (release2) {
-        this->io_->Release(codes2);
-    }
-
-    return result;
 }
 
 template <typename QuantTmpl, typename IOTmpl>
