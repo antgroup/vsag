@@ -116,12 +116,12 @@ HGraphDiskANNLoader::BuildHGraphParamFromDiskANNParam(const JsonType& external_p
     auto construction_threshold =
         std::max<uint64_t>(1000UL, 100 * static_cast<uint64_t>(max_degree));
     // NOLINTNEXTLINE(readability-simplify-boolean-expr)
-    CHECK_ARGUMENT(
-        max_degree <= ef_construction && ef_construction <= static_cast<int64_t>(construction_threshold),
-        fmt::format("ef_construction({}) must be in range [{}, {}]",
-                    ef_construction,
-                    max_degree,
-                    construction_threshold));
+    CHECK_ARGUMENT(max_degree <= ef_construction &&
+                       ef_construction <= static_cast<int64_t>(construction_threshold),
+                   fmt::format("ef_construction({}) must be in range [{}, {}]",
+                               ef_construction,
+                               max_degree,
+                               construction_threshold));
 
     // Validate pq_dims divides dim
     if (common_param.dim_ > 0 && common_param.dim_ % pq_dims != 0) {
@@ -491,7 +491,8 @@ HGraphDiskANNLoader::LoadDiskANNPQData(std::istream& pq_stream,
     uint64_t chunk_offset = cumul_bytes.size() > 2
                                 ? cumul_bytes[2]
                                 : (codebook_offset + 8 +
-                                   static_cast<uint64_t>(pivot_npts) * static_cast<uint64_t>(pivot_dim) * sizeof(float));
+                                   static_cast<uint64_t>(pivot_npts) *
+                                       static_cast<uint64_t>(pivot_dim) * sizeof(float));
     pq_stream.seekg(static_cast<std::streamoff>(chunk_offset), std::ios::beg);
     int32_t chunk_npts = 0;
     int32_t chunk_dim = 0;
@@ -570,9 +571,8 @@ HGraphDiskANNLoader::SetupProductQuantizer(std::istream& pq_stream,
         for (uint32_t c = 0; c < num_centroids_per_subspace; ++c) {
             for (uint32_t d = 0; d < subspace_dim; ++d) {
                 // DiskANN: codebook[c * dim + s * subspace_dim + d]
-                uint64_t src_idx =
-                    static_cast<uint64_t>(c) * static_cast<uint64_t>(dim) +
-                    static_cast<uint64_t>(s) * subspace_dim + d;
+                uint64_t src_idx = static_cast<uint64_t>(c) * static_cast<uint64_t>(dim) +
+                                   static_cast<uint64_t>(s) * subspace_dim + d;
                 // VSAG: codebooks_[s * 256 * subspace_dim + c * subspace_dim + d]
                 uint64_t dst_idx =
                     (static_cast<uint64_t>(s) * num_centroids_per_subspace + c) * subspace_dim + d;
@@ -703,8 +703,7 @@ HGraphDiskANNLoader::LoadDiskANNTags(std::istream& tag_stream) {
     for (int32_t i = 0; i < num_points; ++i) {
         // The tag at position i corresponds to inner_id i
         // In standard DiskANN, tags[i] is typically the original dataset ID
-        int64_t tag = (dim > 0) ? tags[static_cast<int64_t>(i) * dim]
-                                : static_cast<int64_t>(i);
+        int64_t tag = (dim > 0) ? tags[static_cast<int64_t>(i) * dim] : static_cast<int64_t>(i);
         this->label_table_->Insert(static_cast<InnerIdType>(i), tag);
     }
 }
