@@ -21,6 +21,10 @@
 #include "impl/searcher/basic_searcher.h"
 #include "utils/linear_congruential_generator.h"
 #include "utils/prefetch.h"
+#include "vsag_exception.h"
+
+using vsag::ErrorType;
+using vsag::VsagException;
 
 namespace hnswlib {
 
@@ -103,19 +107,21 @@ HierarchicalNSW::init_memory_space() {
     visited_list_pool_ = allocator_->New<VisitedListPool>(max_elements_, allocator_);
     element_levels_ = (int*)allocator_->Allocate(max_elements_ * sizeof(int));
     if (not data_level0_memory_->Resize(max_elements_)) {
-        throw std::runtime_error("allocate data_level0_memory_ error");
+        throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "failed to allocate data_level0_memory_");
     }
     if (use_reversed_edges_) {
         reversed_level0_link_list_ =
             (reverselinklist**)allocator_->Allocate(max_elements_ * sizeof(reverselinklist*));
         if (reversed_level0_link_list_ == nullptr) {
-            throw std::runtime_error("allocate reversed_level0_link_list_ fail");
+            throw VsagException(ErrorType::NO_ENOUGH_MEMORY,
+                                "failed to allocate reversed_level0_link_list_");
         }
         memset(reversed_level0_link_list_, 0, max_elements_ * sizeof(reverselinklist*));
         reversed_link_lists_ = (vsag::UnorderedMap<int, reverselinklist>**)allocator_->Allocate(
             max_elements_ * sizeof(vsag::UnorderedMap<int, reverselinklist>*));
         if (reversed_link_lists_ == nullptr) {
-            throw std::runtime_error("allocate reversed_link_lists_ fail");
+            throw VsagException(ErrorType::NO_ENOUGH_MEMORY,
+                                "failed to allocate reversed_link_lists_");
         }
         memset(reversed_link_lists_,
                0,
@@ -129,7 +135,7 @@ HierarchicalNSW::init_memory_space() {
 
     link_lists_ = (char**)allocator_->Allocate(sizeof(void*) * max_elements_);
     if (link_lists_ == nullptr)
-        throw std::runtime_error("Not enough memory: HierarchicalNSW failed to allocate linklists");
+        throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "failed to allocate linklists");
     memset(link_lists_, 0, sizeof(void*) * max_elements_);
     return true;
 }
@@ -868,8 +874,8 @@ HierarchicalNSW::resizeIndex(uint64_t new_max_elements) {
     auto element_levels_new =
         (int*)allocator_->Reallocate(element_levels_, new_max_elements * sizeof(int));
     if (element_levels_new == nullptr) {
-        throw std::runtime_error(
-            "Not enough memory: resizeIndex failed to allocate element_levels_");
+        throw VsagException(ErrorType::NO_ENOUGH_MEMORY,
+                            "resizeIndex failed to allocate element_levels_");
     }
     element_levels_ = element_levels_new;
     this->points_locks_->Resize(new_max_elements);
@@ -877,21 +883,23 @@ HierarchicalNSW::resizeIndex(uint64_t new_max_elements) {
     if (normalize_) {
         auto new_molds = (float*)allocator_->Reallocate(molds_, new_max_elements * sizeof(float));
         if (new_molds == nullptr) {
-            throw std::runtime_error("Not enough memory: resizeIndex failed to allocate molds_");
+            throw VsagException(ErrorType::NO_ENOUGH_MEMORY,
+                                "resizeIndex failed to allocate molds_");
         }
         molds_ = new_molds;
     }
 
     // Reallocate base layer
     if (not data_level0_memory_->Resize(new_max_elements))
-        throw std::runtime_error("Not enough memory: resizeIndex failed to allocate base layer");
+        throw VsagException(ErrorType::NO_ENOUGH_MEMORY,
+                            "resizeIndex failed to allocate base layer");
 
     if (use_reversed_edges_) {
         auto reversed_level0_link_list_new = (reverselinklist**)allocator_->Reallocate(
             reversed_level0_link_list_, new_max_elements * sizeof(reverselinklist*));
         if (reversed_level0_link_list_new == nullptr) {
-            throw std::runtime_error(
-                "Not enough memory: resizeIndex failed to allocate reversed_level0_link_list_");
+            throw VsagException(ErrorType::NO_ENOUGH_MEMORY,
+                                "resizeIndex failed to allocate reversed_level0_link_list_");
         }
         reversed_level0_link_list_ = reversed_level0_link_list_new;
 
@@ -904,8 +912,8 @@ HierarchicalNSW::resizeIndex(uint64_t new_max_elements) {
                 reversed_link_lists_,
                 new_max_elements * sizeof(vsag::UnorderedMap<int, reverselinklist>*));
         if (reversed_link_lists_new == nullptr) {
-            throw std::runtime_error(
-                "Not enough memory: resizeIndex failed to allocate reversed_link_lists_");
+            throw VsagException(ErrorType::NO_ENOUGH_MEMORY,
+                                "resizeIndex failed to allocate reversed_link_lists_");
         }
         reversed_link_lists_ = reversed_link_lists_new;
         memset(
@@ -918,7 +926,8 @@ HierarchicalNSW::resizeIndex(uint64_t new_max_elements) {
     char** link_lists_new =
         (char**)allocator_->Reallocate(link_lists_, sizeof(void*) * new_max_elements);
     if (link_lists_new == nullptr)
-        throw std::runtime_error("Not enough memory: resizeIndex failed to allocate other layers");
+        throw VsagException(ErrorType::NO_ENOUGH_MEMORY,
+                            "resizeIndex failed to allocate other layers");
     link_lists_ = link_lists_new;
     memset(link_lists_ + max_elements_, 0, (new_max_elements - max_elements_) * sizeof(void*));
     max_elements_ = new_max_elements;
@@ -1089,8 +1098,8 @@ HierarchicalNSW::DeserializeImpl(StreamReader& reader, SpaceInterface* s, uint64
             element_levels_[i] = link_list_size / size_links_per_element_;
             link_lists_[i] = (char*)allocator_->Allocate(link_list_size);
             if (link_lists_[i] == nullptr)
-                throw std::runtime_error(
-                    "Not enough memory: loadIndex failed to allocate linklist");
+                throw VsagException(ErrorType::NO_ENOUGH_MEMORY,
+                                    "loadIndex failed to allocate linklist");
             reader.Read(link_lists_[i], link_list_size);
         }
     }
@@ -1552,7 +1561,8 @@ HierarchicalNSW::addPoint(const void* data_point, LabelType label, int level) {
         auto new_link_lists = (char*)allocator_->Reallocate(link_lists_[cur_c],
                                                             size_links_per_element_ * curlevel + 1);
         if (new_link_lists == nullptr)
-            throw std::runtime_error("Not enough memory: addPoint failed to allocate linklist");
+            throw VsagException(ErrorType::NO_ENOUGH_MEMORY,
+                                "addPoint failed to allocate linklist");
         link_lists_[cur_c] = new_link_lists;
         memset(link_lists_[cur_c], 0, size_links_per_element_ * curlevel + 1);
     }
