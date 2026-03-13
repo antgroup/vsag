@@ -105,6 +105,12 @@ public:
     void
     MergeOther(GraphInterfacePtr other, uint64_t bias) override;
 
+    void
+    SetMaximumDegree(uint32_t maximum_degree) override {
+        this->maximum_degree_ = maximum_degree;
+        this->code_line_size_ = maximum_degree * sizeof(InnerIdType) + sizeof(uint32_t);
+    }
+
     int64_t
     GetMemoryUsage() const override {
         int64_t memory = sizeof(GraphDataCell) + node_versions_.size() * sizeof(uint8_t);

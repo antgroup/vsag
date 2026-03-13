@@ -52,6 +52,7 @@ public:
                                  const IndexCommonParam& common_param);
 
     friend class HGraphAnalyzer;
+    friend class HGraphDiskANNLoader;
 
 public:
     HGraph(const HGraphParameterPtr& param, const IndexCommonParam& common_param);
