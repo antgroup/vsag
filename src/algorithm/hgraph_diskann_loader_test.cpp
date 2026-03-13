@@ -497,7 +497,7 @@ TEST_CASE("HGraphDiskANNLoader PQ Distance Consistency", "[ut][hgraph_diskann_lo
     VerifyCodesMatch(flatten_codes, diskann_codes, num_vectors, pq_dim);
 
     // Verify distances
-    void* quantizer_ptr = flatten_codes->GetQuantizerPtr();
+    void* quantizer_ptr = flatten_codes->GetQuantizer();
     REQUIRE(quantizer_ptr != nullptr);
 
     for (uint32_t q = 0; q < num_queries; ++q) {
@@ -578,7 +578,7 @@ TEST_CASE("HGraphDiskANNLoader PQ Codebook and Dimensions", "[ut][hgraph_diskann
     auto flatten_codes = loader->TestGetFlattenCodes();
     REQUIRE(flatten_codes != nullptr);
 
-    void* quantizer_ptr = flatten_codes->GetQuantizerPtr();
+    void* quantizer_ptr = flatten_codes->GetQuantizer();
     REQUIRE(quantizer_ptr != nullptr);
 
     auto* vsag_pq = static_cast<ProductQuantizer<MetricType::METRIC_TYPE_L2SQR>*>(quantizer_ptr);

@@ -106,7 +106,7 @@ public:
     // Get raw pointer to quantizer for advanced operations (e.g., loading external codebook)
     // Returns nullptr if the operation is not supported
     [[nodiscard]] virtual void*
-    GetQuantizerPtr() {
+    GetQuantizer() {
         return nullptr;
     }
 

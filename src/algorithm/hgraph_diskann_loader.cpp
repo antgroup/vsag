@@ -43,6 +43,49 @@ constexpr uint32_t DISKANN_GRAPH_SLACK = 1;
 // Default sector size used by DiskANN
 constexpr uint64_t DISKANN_SECTOR_LEN = 4096;
 
+namespace {
+
+// Helper: convert Binary to stringstream
+std::stringstream
+BinaryToStream(const Binary& binary) {
+    std::stringstream stream;
+    stream.write(reinterpret_cast<const char*>(binary.data.get()),
+                 static_cast<std::streamsize>(binary.size));
+    stream.seekg(0);
+    return stream;
+}
+
+// Helper: convert Reader to stringstream
+std::stringstream
+ReaderToStream(const ReaderPtr& reader) {
+    auto data = std::make_unique<char[]>(reader->Size());
+    reader->Read(0, reader->Size(), data.get());
+    std::stringstream stream;
+    stream.write(data.get(), static_cast<std::streamsize>(reader->Size()));
+    stream.seekg(0);
+    return stream;
+}
+
+// Helper: read num_points from tag stream
+int32_t
+ReadNumPointsFromTagStream(std::istream& tag_stream) {
+    int32_t num_points = 0;
+    int32_t dim = 0;
+    tag_stream.read(reinterpret_cast<char*>(&num_points), sizeof(num_points));
+    tag_stream.read(reinterpret_cast<char*>(&dim), sizeof(dim));
+    tag_stream.seekg(0);
+    return num_points;
+}
+
+// Helper template for PQ quantizer operations
+template <MetricType metric>
+ProductQuantizer<metric>*
+GetPQQuantizer(void* quantizer_ptr) {
+    return static_cast<ProductQuantizer<metric>*>(quantizer_ptr);
+}
+
+}  // namespace
+
 ParamPtr
 HGraphDiskANNLoader::CheckAndMappingExternalParam(const JsonType& external_param,
                                                   const IndexCommonParam& common_param) {
@@ -67,7 +110,7 @@ HGraphDiskANNLoader::CheckAndMappingExternalParam(const JsonType& external_param
         }
 
         // Build HGraph parameters from DiskANN parameters
-        return BuildHGraphParamFromDiskANNParam(external_param, common_param);
+        return build_hgraph_param_from_diskann_param(external_param, common_param);
     }
 
     // For HGraph format parameters (with "index_param" key or without "diskann" key),
@@ -81,8 +124,8 @@ HGraphDiskANNLoader::CheckAndMappingExternalParam(const JsonType& external_param
 }
 
 ParamPtr
-HGraphDiskANNLoader::BuildHGraphParamFromDiskANNParam(const JsonType& external_param,
-                                                      const IndexCommonParam& common_param) {
+HGraphDiskANNLoader::build_hgraph_param_from_diskann_param(const JsonType& external_param,
+                                                           const IndexCommonParam& common_param) {
     const auto& diskann_json = external_param[INDEX_DISKANN];
 
     // Get DiskANN parameters with defaults
@@ -177,7 +220,7 @@ void
 HGraphDiskANNLoader::Deserialize(const BinarySet& binary_set) {
     // Check if this is a DiskANN format
     if (binary_set.Contains(DISKANN_PQ) || binary_set.Contains(DISKANN_LAYOUT_FILE)) {
-        LoadFromDiskANN(binary_set);
+        load_from_diskann(binary_set);
         loaded_from_diskann_ = true;
         return;
     }
@@ -192,7 +235,7 @@ void
 HGraphDiskANNLoader::Deserialize(const ReaderSet& reader_set) {
     // Check if this is a DiskANN format
     if (reader_set.Contains(DISKANN_PQ) || reader_set.Contains(DISKANN_LAYOUT_FILE)) {
-        LoadFromDiskANN(reader_set);
+        load_from_diskann(reader_set);
         loaded_from_diskann_ = true;
         return;
     }
@@ -204,8 +247,8 @@ HGraphDiskANNLoader::Deserialize(const ReaderSet& reader_set) {
 }
 
 void
-HGraphDiskANNLoader::LoadFromDiskANN(const BinarySet& binary_set) {
-    // Extract all DiskANN components
+HGraphDiskANNLoader::load_from_diskann(const BinarySet& binary_set) {
+    // Validate required components
     if (!binary_set.Contains(DISKANN_PQ) || !binary_set.Contains(DISKANN_COMPRESSED_VECTOR) ||
         !binary_set.Contains(DISKANN_LAYOUT_FILE) || !binary_set.Contains(DISKANN_TAG_FILE)) {
         throw VsagException(
@@ -213,103 +256,35 @@ HGraphDiskANNLoader::LoadFromDiskANN(const BinarySet& binary_set) {
             "DiskANN format requires PQ, compressed vectors, layout file, and tags");
     }
 
-    // Get the binary data
-    auto pq_binary = binary_set.Get(DISKANN_PQ);
-    auto compressed_binary = binary_set.Get(DISKANN_COMPRESSED_VECTOR);
-    auto layout_binary = binary_set.Get(DISKANN_LAYOUT_FILE);
-    auto tag_binary = binary_set.Get(DISKANN_TAG_FILE);
+    // Get the binary data and convert to streams
+    auto pq_stream = BinaryToStream(binary_set.Get(DISKANN_PQ));
+    auto compressed_stream = BinaryToStream(binary_set.Get(DISKANN_COMPRESSED_VECTOR));
+    auto layout_stream = BinaryToStream(binary_set.Get(DISKANN_LAYOUT_FILE));
+    auto tag_stream = BinaryToStream(binary_set.Get(DISKANN_TAG_FILE));
 
-    // Convert to stringstreams
-    std::stringstream pq_stream;
-    std::stringstream compressed_stream;
-    std::stringstream layout_stream;
-    std::stringstream tag_stream;
-
-    pq_stream.write(reinterpret_cast<const char*>(pq_binary.data.get()),
-                    static_cast<std::streamsize>(pq_binary.size));
-    pq_stream.seekg(0);
-
-    compressed_stream.write(reinterpret_cast<const char*>(compressed_binary.data.get()),
-                            static_cast<std::streamsize>(compressed_binary.size));
-    compressed_stream.seekg(0);
-
-    layout_stream.write(reinterpret_cast<const char*>(layout_binary.data.get()),
-                        static_cast<std::streamsize>(layout_binary.size));
-    layout_stream.seekg(0);
-
-    tag_stream.write(reinterpret_cast<const char*>(tag_binary.data.get()),
-                     static_cast<std::streamsize>(tag_binary.size));
-    tag_stream.seekg(0);
-
-    // First, read the number of points from tags file (this is the authoritative count)
-    int32_t num_points_from_tags = 0;
-    int32_t dim_from_tags = 0;
-    tag_stream.read(reinterpret_cast<char*>(&num_points_from_tags), sizeof(num_points_from_tags));
-    tag_stream.read(reinterpret_cast<char*>(&dim_from_tags), sizeof(dim_from_tags));
-    tag_stream.seekg(0);  // Reset to beginning for LoadDiskANNTags
-
-    diskann_num_points_ = static_cast<uint64_t>(num_points_from_tags);
-
-    // Note: dim_from_tags is always 1 because tag file format is [npts, dim=1, tags]
-    // where each tag is a single value. We should not use it for vector dimension validation.
-    // The actual vector dimension should come from common_param_ or PQ data.
-
-    // DiskANN format always uses reorder with precise vectors
+    // Read num_points from tags file
+    diskann_num_points_ = static_cast<uint64_t>(ReadNumPointsFromTagStream(tag_stream));
     this->use_reorder_ = true;
 
-    // Load components with correct num_points
-    LoadDiskANNPQData(pq_stream, compressed_stream, diskann_num_points_);
-
-    LoadDiskANNTags(tag_stream);
+    // Load components
+    load_diskann_pq_data(pq_stream, compressed_stream, diskann_num_points_);
+    load_diskann_tags(tag_stream);
 
     // Load graph FIRST to get diskann_max_degree_ before loading precise vectors
-    // because precise vectors layout depends on max_degree for calculating node offsets
     if (binary_set.Contains(DISKANN_GRAPH)) {
-        auto graph_binary = binary_set.Get(DISKANN_GRAPH);
-        std::stringstream graph_stream;
-        graph_stream.write(reinterpret_cast<const char*>(graph_binary.data.get()),
-                           static_cast<std::streamsize>(graph_binary.size));
-        graph_stream.seekg(0);
-        LoadDiskANNGraph(graph_stream, diskann_num_points_);
+        auto graph_stream = BinaryToStream(binary_set.Get(DISKANN_GRAPH));
+        load_diskann_graph(graph_stream, diskann_num_points_);
     }
 
-    // Now load precise vectors - diskann_max_degree_ is set correctly
-    LoadDiskANNPreciseVectors(
+    load_diskann_precise_vectors(
         layout_stream, diskann_num_points_, diskann_dim_, diskann_max_degree_);
 
-    // Update total count
-    this->total_count_ = diskann_num_points_;
-
-    // Validate max_degree consistency
-    if (diskann_max_degree_ > 0 && this->bottom_graph_ != nullptr) {
-        uint64_t configured_max_degree = this->bottom_graph_->MaximumDegree();
-        if (diskann_max_degree_ > configured_max_degree) {
-            logger::warn(
-                "DiskANN index max_degree ({}) exceeds configured max_degree ({}). "
-                "Some neighbors may be truncated.",
-                diskann_max_degree_,
-                configured_max_degree);
-        }
-    }
-
-    // Initialize bitset and reorder structures (same as HGraph constructor)
-    this->init_resize_bit_and_reorder();
-
-    this->resize(this->bottom_graph_->max_capacity_);
-    this->neighbors_mutex_->Resize(this->bottom_graph_->max_capacity_);
-
-    // Create visited list pool
-    pool_ = std::make_shared<VisitedListPool>(1, allocator_, diskann_num_points_, allocator_);
-
-    // Set mult_ (same as HGraph constructor)
-    this->mult_ = 1.0 / log(1.0 * static_cast<double>(this->bottom_graph_->MaximumDegree()));
-
-    // Mark as loaded from DiskANN
-    loaded_from_diskann_ = true;
+    finalize_loading();
 }
 
 void
-HGraphDiskANNLoader::LoadFromDiskANN(const ReaderSet& reader_set) {
+HGraphDiskANNLoader::load_from_diskann(const ReaderSet& reader_set) {
+    // Validate required components
     if (!reader_set.Contains(DISKANN_PQ) || !reader_set.Contains(DISKANN_COMPRESSED_VECTOR) ||
         !reader_set.Contains(DISKANN_LAYOUT_FILE) || !reader_set.Contains(DISKANN_TAG_FILE)) {
         throw VsagException(
@@ -317,85 +292,44 @@ HGraphDiskANNLoader::LoadFromDiskANN(const ReaderSet& reader_set) {
             "DiskANN format requires PQ, compressed vectors, layout file, and tags");
     }
 
-    // First read the tags to get the correct num_points
-    int32_t num_points_from_tags = 0;
-    int32_t dim_from_tags = 0;
+    // Read num_points from tags file
     {
-        auto tag_reader = reader_set.Get(DISKANN_TAG_FILE);
-        auto tag_data = std::make_unique<char[]>(tag_reader->Size());
-        tag_reader->Read(0, tag_reader->Size(), tag_data.get());
-        // Read num_points and dim from the beginning of tag file
-        std::memcpy(&num_points_from_tags, tag_data.get(), sizeof(num_points_from_tags));
-        std::memcpy(
-            &dim_from_tags, tag_data.get() + sizeof(num_points_from_tags), sizeof(dim_from_tags));
+        auto tag_stream = ReaderToStream(reader_set.Get(DISKANN_TAG_FILE));
+        diskann_num_points_ = static_cast<uint64_t>(ReadNumPointsFromTagStream(tag_stream));
     }
-    diskann_num_points_ = static_cast<uint64_t>(num_points_from_tags);
-
-    // Note: dim_from_tags is always 1 because tag file format is [npts, dim=1, tags]
-    // where each tag is a single value. We should not use it for vector dimension validation.
-
-    // DiskANN format always uses reorder with precise vectors
     this->use_reorder_ = true;
 
-    // Read PQ data
+    // Load PQ data
     {
-        auto pq_reader = reader_set.Get(DISKANN_PQ);
-        auto pq_data = std::make_unique<char[]>(pq_reader->Size());
-        pq_reader->Read(0, pq_reader->Size(), pq_data.get());
-        std::stringstream pq_stream;
-        pq_stream.write(pq_data.get(), static_cast<std::streamsize>(pq_reader->Size()));
-        pq_stream.seekg(0);
-
-        auto compressed_reader = reader_set.Get(DISKANN_COMPRESSED_VECTOR);
-        auto compressed_data = std::make_unique<char[]>(compressed_reader->Size());
-        compressed_reader->Read(0, compressed_reader->Size(), compressed_data.get());
-        std::stringstream compressed_stream;
-        compressed_stream.write(compressed_data.get(),
-                                static_cast<std::streamsize>(compressed_reader->Size()));
-        compressed_stream.seekg(0);
-
-        LoadDiskANNPQData(pq_stream, compressed_stream, diskann_num_points_);
+        auto pq_stream = ReaderToStream(reader_set.Get(DISKANN_PQ));
+        auto compressed_stream = ReaderToStream(reader_set.Get(DISKANN_COMPRESSED_VECTOR));
+        load_diskann_pq_data(pq_stream, compressed_stream, diskann_num_points_);
     }
 
-    // Read tags (now properly load all tags with correct num_points)
+    // Load tags
     {
-        auto tag_reader = reader_set.Get(DISKANN_TAG_FILE);
-        auto tag_data = std::make_unique<char[]>(tag_reader->Size());
-        tag_reader->Read(0, tag_reader->Size(), tag_data.get());
-        std::stringstream tag_stream;
-        tag_stream.write(tag_data.get(), static_cast<std::streamsize>(tag_reader->Size()));
-        tag_stream.seekg(0);
-
-        LoadDiskANNTags(tag_stream);
+        auto tag_stream = ReaderToStream(reader_set.Get(DISKANN_TAG_FILE));
+        load_diskann_tags(tag_stream);
     }
 
-    // Read graph FIRST to get diskann_max_degree_ before loading precise vectors
-    // because precise vectors layout depends on max_degree for calculating node offsets
+    // Load graph FIRST to get diskann_max_degree_
     if (reader_set.Contains(DISKANN_GRAPH)) {
-        auto graph_reader = reader_set.Get(DISKANN_GRAPH);
-        auto graph_data = std::make_unique<char[]>(graph_reader->Size());
-        graph_reader->Read(0, graph_reader->Size(), graph_data.get());
-        std::stringstream graph_stream;
-        graph_stream.write(graph_data.get(), static_cast<std::streamsize>(graph_reader->Size()));
-        graph_stream.seekg(0);
-
-        LoadDiskANNGraph(graph_stream, diskann_num_points_);
+        auto graph_stream = ReaderToStream(reader_set.Get(DISKANN_GRAPH));
+        load_diskann_graph(graph_stream, diskann_num_points_);
     }
 
-    // Read layout - now diskann_max_degree_ is set correctly
+    // Load precise vectors
     {
-        auto layout_reader = reader_set.Get(DISKANN_LAYOUT_FILE);
-        auto layout_data = std::make_unique<char[]>(layout_reader->Size());
-        layout_reader->Read(0, layout_reader->Size(), layout_data.get());
-        std::stringstream layout_stream;
-        layout_stream.write(layout_data.get(), static_cast<std::streamsize>(layout_reader->Size()));
-        layout_stream.seekg(0);
-
-        LoadDiskANNPreciseVectors(
+        auto layout_stream = ReaderToStream(reader_set.Get(DISKANN_LAYOUT_FILE));
+        load_diskann_precise_vectors(
             layout_stream, diskann_num_points_, diskann_dim_, diskann_max_degree_);
     }
 
-    // Update total count
+    finalize_loading();
+}
+
+void
+HGraphDiskANNLoader::finalize_loading() {
     this->total_count_ = diskann_num_points_;
 
     // Validate max_degree consistency
@@ -403,24 +337,41 @@ HGraphDiskANNLoader::LoadFromDiskANN(const ReaderSet& reader_set) {
         uint64_t configured_max_degree = this->bottom_graph_->MaximumDegree();
         if (diskann_max_degree_ > configured_max_degree) {
             logger::warn(
-                "DiskANN index max_degree ({}) exceeds configured max_degree ({}). "
-                "Some neighbors may be truncated.",
+                "max_degree mismatch: DiskANN index has max_degree={}, but config "
+                "expects max_degree={}. Neighbors will be truncated to fit the configuration.",
+                diskann_max_degree_,
+                configured_max_degree);
+        }
+        if (diskann_max_degree_ < configured_max_degree) {
+            logger::info(
+                "DiskANN index max_degree ({}) is less than configured max_degree ({}). "
+                "The index will work but with potentially lower recall.",
                 diskann_max_degree_,
                 configured_max_degree);
         }
     }
 
-    // Create visited list pool
-    pool_ = std::make_shared<VisitedListPool>(1, allocator_, diskann_num_points_, allocator_);
+    // Validate entry point
+    if (this->entry_point_id_ >= static_cast<InnerIdType>(diskann_num_points_)) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            fmt::format("Invalid entry point {}: exceeds num_points {}",
+                                        this->entry_point_id_,
+                                        diskann_num_points_));
+    }
 
-    // Mark as loaded from DiskANN
+    // Initialize structures
+    this->init_resize_bit_and_reorder();
+    this->resize(this->bottom_graph_->max_capacity_);
+    this->neighbors_mutex_->Resize(this->bottom_graph_->max_capacity_);
+    pool_ = std::make_shared<VisitedListPool>(1, allocator_, diskann_num_points_, allocator_);
+    this->mult_ = 1.0 / log(1.0 * static_cast<double>(this->bottom_graph_->MaximumDegree()));
     loaded_from_diskann_ = true;
 }
 
 void
-HGraphDiskANNLoader::LoadDiskANNPQData(std::istream& pq_stream,
-                                       std::istream& compressed_stream,
-                                       uint64_t num_points) {
+HGraphDiskANNLoader::load_diskann_pq_data(std::istream& pq_stream,
+                                          std::istream& compressed_stream,
+                                          uint64_t num_points) {
     // DiskANN PQ pivot file format (from generate_pq.cpp):
     // The file is organized in bin format sections using save_bin():
     //
@@ -486,6 +437,15 @@ HGraphDiskANNLoader::LoadDiskANNPQData(std::istream& pq_stream,
 
     diskann_dim_ = static_cast<uint32_t>(pivot_dim);
 
+    // Validate dimension consistency with configuration
+    if (common_param_.dim_ > 0 && diskann_dim_ != static_cast<uint64_t>(common_param_.dim_)) {
+        throw VsagException(
+            ErrorType::INVALID_ARGUMENT,
+            fmt::format("Dimension mismatch: DiskANN index has dim={}, but config expects dim={}",
+                        diskann_dim_,
+                        common_param_.dim_));
+    }
+
     // Calculate PQ parameters by reading chunk_offsets
     // chunk_offsets is at cumul_bytes[2] (or we can calculate from dimension)
     uint64_t chunk_offset = cumul_bytes.size() > 2
@@ -511,17 +471,47 @@ HGraphDiskANNLoader::LoadDiskANNPQData(std::istream& pq_stream,
         subspace_dim = 1;  // Minimum subspace dimension
     }
     uint32_t num_centroids_per_subspace = 256;
-    SetupProductQuantizer(pq_stream, num_pq_chunks, num_centroids_per_subspace, subspace_dim);
+    setup_product_quantizer(pq_stream, num_pq_chunks, num_centroids_per_subspace, subspace_dim);
+
+    // Validate PQ dimension consistency with configuration
+    void* quantizer_ptr = this->basic_flatten_codes_->GetQuantizer();
+    if (quantizer_ptr != nullptr) {
+        int64_t configured_pq_dim = -1;
+#define GET_PQ_DIM(METRIC) GetPQQuantizer<METRIC>(quantizer_ptr)->pq_dim_
+        switch (common_param_.metric_) {
+            case MetricType::METRIC_TYPE_L2SQR:
+                configured_pq_dim = GET_PQ_DIM(MetricType::METRIC_TYPE_L2SQR);
+                break;
+            case MetricType::METRIC_TYPE_IP:
+                configured_pq_dim = GET_PQ_DIM(MetricType::METRIC_TYPE_IP);
+                break;
+            case MetricType::METRIC_TYPE_COSINE:
+                configured_pq_dim = GET_PQ_DIM(MetricType::METRIC_TYPE_COSINE);
+                break;
+            default:
+                break;
+        }
+#undef GET_PQ_DIM
+        if (configured_pq_dim > 0 && num_pq_chunks != static_cast<uint32_t>(configured_pq_dim)) {
+            throw VsagException(
+                ErrorType::INVALID_ARGUMENT,
+                fmt::format(
+                    "PQ dimension mismatch: DiskANN index has pq_dim={}, but config expects "
+                    "pq_dim={}",
+                    num_pq_chunks,
+                    configured_pq_dim));
+        }
+    }
 
     // Read compressed vectors into basic_flatten_codes_
-    ReadCompressedVectors(compressed_stream, diskann_num_points_, num_pq_chunks);
+    read_compressed_vectors(compressed_stream, diskann_num_points_, num_pq_chunks);
 }
 
 void
-HGraphDiskANNLoader::SetupProductQuantizer(std::istream& pq_stream,
-                                           uint32_t& num_subspaces,
-                                           uint32_t& num_centroids_per_subspace,
-                                           uint32_t& subspace_dim) {
+HGraphDiskANNLoader::setup_product_quantizer(std::istream& pq_stream,
+                                             uint32_t& num_subspaces,
+                                             uint32_t& num_centroids_per_subspace,
+                                             uint32_t& subspace_dim) {
     // The codebook is essential for computing distances with PQ compressed vectors.
 
     // Rewind to start of PQ file
@@ -593,40 +583,38 @@ HGraphDiskANNLoader::SetupProductQuantizer(std::istream& pq_stream,
     auto flatten = FlattenInterface::MakeInstance(flatten_param, common_param_);
     this->basic_flatten_codes_ = flatten;
 
-    // Load the codebook into ProductQuantizer
-    // Get the quantizer pointer and cast to ProductQuantizer based on metric type
-    void* quantizer_ptr = flatten->GetQuantizerPtr();
+    // Load the codebook into ProductQuantizer based on metric type
+    void* quantizer_ptr = flatten->GetQuantizer();
     if (quantizer_ptr == nullptr) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "Failed to get quantizer pointer");
     }
 
-    // Try different metric types to find the correct ProductQuantizer
-    bool loaded = false;
-    if (common_param_.metric_ == MetricType::METRIC_TYPE_L2SQR) {
-        auto* pq = static_cast<ProductQuantizer<MetricType::METRIC_TYPE_L2SQR>*>(quantizer_ptr);
-        pq->LoadCodebook(vsag_codebook.data());
-        loaded = true;
-    } else if (common_param_.metric_ == MetricType::METRIC_TYPE_IP) {
-        auto* pq = static_cast<ProductQuantizer<MetricType::METRIC_TYPE_IP>*>(quantizer_ptr);
-        pq->LoadCodebook(vsag_codebook.data());
-        loaded = true;
-    } else if (common_param_.metric_ == MetricType::METRIC_TYPE_COSINE) {
-        auto* pq = static_cast<ProductQuantizer<MetricType::METRIC_TYPE_COSINE>*>(quantizer_ptr);
-        pq->LoadCodebook(vsag_codebook.data());
-        loaded = true;
-    }
+    // Use macro to simplify switch cases
+#define LOAD_CODEBOOK(METRIC) \
+    GetPQQuantizer<METRIC>(quantizer_ptr)->LoadCodebook(vsag_codebook.data())
 
-    if (!loaded) {
-        throw VsagException(ErrorType::INTERNAL_ERROR,
-                            fmt::format("Unsupported metric type for PQ: {}",
-                                        static_cast<int>(common_param_.metric_)));
+    switch (common_param_.metric_) {
+        case MetricType::METRIC_TYPE_L2SQR:
+            LOAD_CODEBOOK(MetricType::METRIC_TYPE_L2SQR);
+            break;
+        case MetricType::METRIC_TYPE_IP:
+            LOAD_CODEBOOK(MetricType::METRIC_TYPE_IP);
+            break;
+        case MetricType::METRIC_TYPE_COSINE:
+            LOAD_CODEBOOK(MetricType::METRIC_TYPE_COSINE);
+            break;
+        default:
+            throw VsagException(ErrorType::INTERNAL_ERROR,
+                                fmt::format("Unsupported metric type for PQ: {}",
+                                            static_cast<int>(common_param_.metric_)));
     }
+#undef LOAD_CODEBOOK
 }
 
 void
-HGraphDiskANNLoader::ReadCompressedVectors(std::istream& compressed_stream,
-                                           uint64_t num_points,
-                                           uint32_t num_subspaces) {
+HGraphDiskANNLoader::read_compressed_vectors(std::istream& compressed_stream,
+                                             uint64_t num_points,
+                                             uint32_t num_subspaces) {
     // DiskANN compressed vectors file format (standard bin format):
     // [npts (int32), nchunks (int32), data (uint8[npts * nchunks])]
 
@@ -673,7 +661,7 @@ HGraphDiskANNLoader::ReadCompressedVectors(std::istream& compressed_stream,
 }
 
 void
-HGraphDiskANNLoader::LoadDiskANNTags(std::istream& tag_stream) {
+HGraphDiskANNLoader::load_diskann_tags(std::istream& tag_stream) {
     // DiskANN tag file format (from save_bin, standard bin format):
     // [npts (int32), dim (int32), tags (int64[npts * dim])]
     // Note: TagT is int64_t in VSAG's DiskANN wrapper
@@ -709,7 +697,7 @@ HGraphDiskANNLoader::LoadDiskANNTags(std::istream& tag_stream) {
 }
 
 void
-HGraphDiskANNLoader::LoadDiskANNGraph(std::istream& graph_stream, uint64_t num_points) {
+HGraphDiskANNLoader::load_diskann_graph(std::istream& graph_stream, uint64_t num_points) {
     // Parse DiskANN graph format (from Index::save_graph)
     // Format:
     //   offset 0: index_size (uint64_t) - total file size (written as 24 initially, updated at end)
@@ -775,10 +763,10 @@ HGraphDiskANNLoader::LoadDiskANNGraph(std::istream& graph_stream, uint64_t num_p
 }
 
 void
-HGraphDiskANNLoader::LoadDiskANNPreciseVectors(std::istream& layout_stream,
-                                               uint64_t num_points,
-                                               uint64_t dim,
-                                               uint64_t max_degree) {
+HGraphDiskANNLoader::load_diskann_precise_vectors(std::istream& layout_stream,
+                                                  uint64_t num_points,
+                                                  uint64_t dim,
+                                                  uint64_t max_degree) {
     // The disk layout contains the full-precision vectors interleaved with graph structure
     // We need to extract them for high_precise_codes_
 

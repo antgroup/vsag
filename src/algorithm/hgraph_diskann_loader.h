@@ -87,7 +87,7 @@ public:
     TestLoadDiskANNPQData(std::istream& pq_stream,
                           std::istream& compressed_stream,
                           uint64_t num_points) {
-        LoadDiskANNPQData(pq_stream, compressed_stream, num_points);
+        load_diskann_pq_data(pq_stream, compressed_stream, num_points);
     }
 
     // Test-only accessor to get the flatten codes interface
@@ -96,10 +96,10 @@ public:
         return this->basic_flatten_codes_;
     }
 
-    // Test-only accessor for LoadDiskANNGraph
+    // Test-only accessor for load_diskann_graph
     void
     TestLoadDiskANNGraph(std::istream& graph_stream, uint64_t num_points) {
-        LoadDiskANNGraph(graph_stream, num_points);
+        load_diskann_graph(graph_stream, num_points);
     }
 
     // Test-only accessor to get the bottom graph
@@ -120,13 +120,13 @@ public:
         return this->diskann_max_degree_;
     }
 
-    // Test-only accessor for LoadDiskANNPreciseVectors
+    // Test-only accessor for load_diskann_precise_vectors
     void
     TestLoadDiskANNPreciseVectors(std::istream& layout_stream,
                                   uint64_t num_points,
                                   uint64_t dim,
                                   uint64_t max_degree) {
-        LoadDiskANNPreciseVectors(layout_stream, num_points, dim, max_degree);
+        load_diskann_precise_vectors(layout_stream, num_points, dim, max_degree);
     }
 
     // Test-only accessor to get precise codes
@@ -146,66 +146,72 @@ private:
      * Build HGraph parameters from DiskANN format parameters
      */
     static ParamPtr
-    BuildHGraphParamFromDiskANNParam(const JsonType& external_param,
-                                     const IndexCommonParam& common_param);
+    build_hgraph_param_from_diskann_param(const JsonType& external_param,
+                                          const IndexCommonParam& common_param);
 
     /**
      * Main entry point for loading DiskANN format from BinarySet
      */
     void
-    LoadFromDiskANN(const BinarySet& binary_set);
+    load_from_diskann(const BinarySet& binary_set);
 
     /**
      * Main entry point for loading DiskANN format from ReaderSet
      */
     void
-    LoadFromDiskANN(const ReaderSet& reader_set);
+    load_from_diskann(const ReaderSet& reader_set);
 
     /**
      * Load PQ data (pivots and compressed vectors) from DiskANN format
      */
     void
-    LoadDiskANNPQData(std::istream& pq_stream,
-                      std::istream& compressed_stream,
-                      uint64_t num_points);
+    load_diskann_pq_data(std::istream& pq_stream,
+                         std::istream& compressed_stream,
+                         uint64_t num_points);
 
     /**
      * Load graph structure from DiskANN format
      */
     void
-    LoadDiskANNGraph(std::istream& graph_stream, uint64_t num_points);
+    load_diskann_graph(std::istream& graph_stream, uint64_t num_points);
 
     /**
      * Load tags (ID mapping) from DiskANN format
      */
     void
-    LoadDiskANNTags(std::istream& tag_stream);
+    load_diskann_tags(std::istream& tag_stream);
 
     /**
      * Extract precise vectors from DiskANN disk layout
      */
     void
-    LoadDiskANNPreciseVectors(std::istream& layout_stream,
-                              uint64_t num_points,
-                              uint64_t dim,
-                              uint64_t max_degree);
+    load_diskann_precise_vectors(std::istream& layout_stream,
+                                 uint64_t num_points,
+                                 uint64_t dim,
+                                 uint64_t max_degree);
 
     /**
      * Parse PQ pivot file header and setup ProductQuantizer
      */
     void
-    SetupProductQuantizer(std::istream& pq_stream,
-                          uint32_t& num_subspaces,
-                          uint32_t& num_centroids_per_subspace,
-                          uint32_t& subspace_dim);
+    setup_product_quantizer(std::istream& pq_stream,
+                            uint32_t& num_subspaces,
+                            uint32_t& num_centroids_per_subspace,
+                            uint32_t& subspace_dim);
 
     /**
      * Read compressed vectors from DiskANN format
      */
     void
-    ReadCompressedVectors(std::istream& compressed_stream,
-                          uint64_t num_points,
-                          uint32_t num_subspaces);
+    read_compressed_vectors(std::istream& compressed_stream,
+                            uint64_t num_points,
+                            uint32_t num_subspaces);
+
+    /**
+     * Finalize loading: validate and initialize structures
+     */
+    void
+    finalize_loading();
 
 private:
     // DiskANN-specific parameters extracted during loading

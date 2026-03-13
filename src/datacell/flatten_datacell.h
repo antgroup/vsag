@@ -128,7 +128,7 @@ public:
     GetMetricType() override;
 
     [[nodiscard]] void*
-    GetQuantizerPtr() override {
+    GetQuantizer() override {
         return quantizer_.get();
     }
 
