@@ -240,6 +240,7 @@ public:
         if (support_tombstone_) {
             StreamReader::ReadObj(reader, deleted_ids_);
         }
+
         this->total_count_.store(label_table_.size());
     }
 
@@ -305,7 +306,8 @@ public:
         return sizeof(LabelTable) + label_table_.size() * sizeof(LabelType) +
                label_remap_.size() * (sizeof(LabelType) + sizeof(InnerIdType)) +
                deleted_ids_.size() * sizeof(InnerIdType) +
-               duplicate_ids_.size() * sizeof(InnerIdType);
+               duplicate_ids_.size() * sizeof(InnerIdType) +
+               hole_list_.size() * sizeof(InnerIdType);
     }
 
     /**
@@ -347,10 +349,53 @@ public:
     Allocator* allocator_{nullptr};
     std::atomic<int64_t> total_count_{0L};
 
+    void
+    PushHole(InnerIdType id) {
+        std::scoped_lock wlock(hole_mutex_);
+        hole_list_.push_back(id);
+    }
+
+    std::pair<bool, InnerIdType>
+    PopHole() {
+        std::scoped_lock wlock(hole_mutex_);
+        if (hole_list_.empty()) {
+            return {false, 0};
+        }
+        InnerIdType id = hole_list_.back();
+        hole_list_.pop_back();
+        return {true, id};
+    }
+
+    bool
+    HasHole() const {
+        std::shared_lock rlock(hole_mutex_);
+        return not hole_list_.empty();
+    }
+
+    size_t
+    GetHoleCount() const {
+        std::shared_lock rlock(hole_mutex_);
+        return hole_list_.size();
+    }
+
+    bool
+    RemoveHole(InnerIdType id) {
+        std::scoped_lock wlock(hole_mutex_);
+        auto it = std::find(hole_list_.begin(), hole_list_.end(), id);
+        if (it != hole_list_.end()) {
+            hole_list_.erase(it);
+            return true;
+        }
+        return false;
+    }
+
 private:
     UnorderedSet<InnerIdType> deleted_ids_;       // Record deleted ids.
     FilterPtr deleted_ids_filter_{nullptr};       // Filter to filter out deleted ids.
     mutable std::shared_mutex delete_ids_mutex_;  // Mutex to protect deleted_ids_.
+
+    Vector<InnerIdType> hole_list_;         // Reusable id list (stack structure).
+    mutable std::shared_mutex hole_mutex_;  // Mutex to protect hole_list_.
 };
 
 }  // namespace vsag
