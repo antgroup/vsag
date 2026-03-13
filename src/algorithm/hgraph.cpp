@@ -1992,7 +1992,8 @@ HGraph::Merge(const std::vector<MergeUnit>& merge_units) {
         if (route_graphs_.size() < other_index->route_graphs_.size()) {
             route_graphs_.push_back(this->generate_one_route_graph());
         }
-        for (int j = 0; j < other_index->route_graphs_.size(); ++j) {
+        for (int j = 0; j < std::min(other_index->route_graphs_.size(), route_graphs_.size());
+             ++j) {
             route_graphs_[j]->MergeOther(other_index->route_graphs_[j], this->total_count_);
         }
         this->total_count_ += other_index->GetNumElements();
