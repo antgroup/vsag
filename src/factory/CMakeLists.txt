@@ -17,6 +17,8 @@
 set (FACTORY_SRC
         engine.cpp
         factory.cpp
+        index_creators.cpp
+        index_registry.cpp
         resource.cpp
         resource_owner_wrapper.h
 )
