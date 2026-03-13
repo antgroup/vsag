@@ -30,7 +30,7 @@ If you have improvements to vsag, send us your pull requests! For those just get
 
 ### GitHub workflow
 
-Please create a new branch from an up-to-date master on your fork.
+Please create a new branch from an up-to-date main on your fork.
 
 1.  Fork the repository on GitHub.
 2.  Clone your fork to your local machine with `git clone git@github.com:<yourname>/vsag.git`.
@@ -42,8 +42,8 @@ If you have an existing local repository, please update it before you start, to 
 
 ```shell
 git remote add upstream git@github.com:antgroup/vsag.git
-git checkout master
-git pull upstream master
+git checkout main
+git pull upstream main
 git checkout -b my-topic-branch
 ```
 
@@ -110,7 +110,11 @@ $ sudo apt-get install clang-tidy-15
 ```
 
 To run lint checks:
+
+`make lint` reads compile commands from `build-release/`, so run `make release` first.
+
 ```shell
+$ make release
 $ make lint
 ```
 
@@ -129,7 +133,20 @@ Install lcov
 ```shell
 $ sudo apt-get install lcov
 ```
-Run tests and generate code coverage report
+Compile with coverage flags, run tests, and collect the coverage report:
 ```shell
-$ make test_cov
+$ make cov
+$ bash scripts/testing/test_parallel_bg.sh
+$ bash scripts/coverage/collect_cpp_coverage.sh
+```
+
+## Commit message and skip CI
+
+-   Follow Conventional Commits in the subject line, such as `feat:`, `fix:`, `docs:`, or `chore:`.
+-   If you need to skip CI, put `[skip ci]` at the beginning of the commit subject.
+
+Example:
+
+```text
+[skip ci] docs: update contribution examples
 ```

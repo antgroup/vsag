@@ -97,6 +97,7 @@ Update relevant docs when behavior changes:
 
 ## Contribution Notes
 
+- Before modifying code, create and switch to a working branch from an up-to-date `main`.
 - Keep changes scoped and reviewable.
 - Be careful with performance-sensitive code and cross-platform behavior.
 - Avoid changing files under `extern/` unless the task explicitly requires third-party dependency changes.
@@ -104,6 +105,11 @@ Update relevant docs when behavior changes:
 - Commit messages should follow Conventional Commits, such as `feat:`, `fix:`, `docs:`, or
   `chore:`.
 - Commits in this project are expected to use DCO sign-off (`git commit -s`).
+- For co-developed changes, include a `Signed-off-by:` trailer for each contributor.
+- If dual sign-off is requested, include both the requester's identity and the current agent
+  identity in the `Signed-off-by:` trailers.
+- Determine the agent sign-off at execution time from the active agent name and model name, and use
+  the format `AgentName (ModelName)`.
 - When using skip-CI commit messages, follow the repository convention and place `[skip ci]` at the
   beginning of the subject line.
 
