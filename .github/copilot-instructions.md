@@ -56,7 +56,7 @@ All source files must include this copyright header:
 make debug           # Build with debug options
 make test            # Build and run unit tests
 make fmt             # Format code with clang-format
-make cov             # Build with coverage flags
+make cov             # Build with coverage flags (run tests and collect coverage separately)
 make asan            # Build with AddressSanitizer
 make tsan            # Build with ThreadSanitizer
 ```

@@ -19,7 +19,7 @@
 - [ ] `make fmt`
 - [ ] `make lint`
 - [ ] `make test`
-- [ ] `make cov` + coverage collection
+- [ ] `make cov`, run tests, and collect coverage
 - [ ] Other (describe below)
 
 Test details:

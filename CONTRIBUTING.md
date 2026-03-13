@@ -136,7 +136,7 @@ $ sudo apt-get install lcov
 Compile with coverage flags, run tests, and collect the coverage report:
 ```shell
 $ make cov
-$ ./scripts/testing/test_parallel_bg.sh
+$ bash scripts/testing/test_parallel_bg.sh
 $ bash scripts/coverage/collect_cpp_coverage.sh
 ```
 
