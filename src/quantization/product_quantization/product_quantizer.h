@@ -22,6 +22,26 @@
 
 namespace vsag {
 
+/***
+ * @brief Product Quantizer divides vectors into subspaces and quantizes each subspace.
+ *
+ * code layout:
+ * +------+------+------+------+
+ * | sub0 | sub1 | ...  | subN |
+ * | [1B] | [1B] |      | [1B] |
+ * +------+------+------+------+
+ *
+ * query layout (lookup table):
+ * +------------------+------------------+          +------------------+
+ * | lut[0][0..255]   | lut[1][0..255]   |   ...    | lut[N][0..255]   |
+ * | [256 floats]     | [256 floats]     |          | [256 floats]     |
+ * +------------------+------------------+          +------------------+
+ *
+ * - pq-code: 1 byte per subspace, index into codebook (required)
+ * - pq_dim: number of subspaces
+ * - Each subspace has 256 centroids (2^8 = 256 possible indices)
+ * - Lookup table: precomputed distances for query to all centroids
+ */
 template <MetricType metric = MetricType::METRIC_TYPE_L2SQR>
 class ProductQuantizer : public Quantizer<ProductQuantizer<metric>> {
 public:
