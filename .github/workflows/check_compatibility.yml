@@ -17,10 +17,16 @@ jobs:
     container:
       image: vsaglib/vsag:ci-x86
     steps:
-      - name: Prepare Data
+      - name: Download Compatibility Indexes from Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git clone -b old_version_index https://github.com/antgroup/vsag.git
-          cp -r ./vsag/* /tmp/
+          gh release download compatibility-indexes \
+            --dir /tmp \
+            --pattern "*.index" \
+            --pattern "*.bin" \
+            --pattern "*.json" \
+            || echo "Warning: Failed to download compatibility indexes"
       - uses: actions/checkout@v4
       - name: Compile Check Compatibility Tools
         run: export CMAKE_GENERATOR="Ninja"; make release
