@@ -101,7 +101,7 @@ TEST_CASE("Test Simple Index", "[ft][simple_index]") {
     auto pool = std::make_shared<fixtures::TestDatasetPool>();
     auto dim = 12;
     auto base_count = 100;
-    auto dataset = pool->GetDatasetAndCreate(dim, base_count, "fp32");
+    auto dataset = pool->GetDatasetAndCreate(dim, base_count, "l2");
     BinarySet binary;
     std::vector<int64_t> pretrain_ids;
     FilterPtr filter = nullptr;

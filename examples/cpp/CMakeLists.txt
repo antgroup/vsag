@@ -41,6 +41,9 @@ target_link_libraries (108_index_gno_imi vsag)
 add_executable (109_index_sindi 109_index_sindi.cpp)
 target_link_libraries (109_index_sindi vsag)
 
+add_executable (110_index_warp 110_index_warp.cpp)
+target_link_libraries (110_index_warp vsag)
+
 add_executable (201_custom_allocator 201_custom_allocator.cpp)
 target_link_libraries (201_custom_allocator vsag)
 
