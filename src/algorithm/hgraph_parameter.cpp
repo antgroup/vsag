@@ -207,6 +207,11 @@ HGraphSearchParameters::FromJson(const std::string& json_string) {
             params[INDEX_TYPE_HGRAPH][HGRAPH_USE_EXTRA_INFO_FILTER].GetBool();
     }
 
+    if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_SEARCH_BRUTE_FORCE_FILTER_RATIO)) {
+        obj.brute_force_search_filter_ratio =
+            params[INDEX_TYPE_HGRAPH][HGRAPH_SEARCH_BRUTE_FORCE_FILTER_RATIO].GetFloat();
+    }
+
     return obj;
 }
 }  // namespace vsag
