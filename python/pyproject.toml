@@ -1,51 +1,20 @@
 [build-system]
-requires = ["setuptools>=61.0", "setuptools_scm[toml]>=6.2", "pep440"]
+requires = [
+    "setuptools<60; python_version == '3.6'",
+    "setuptools>=61,<68; python_version == '3.7'",
+    "setuptools>=68; python_version >= '3.8'",
+    "setuptools_scm",
+    "wheel",
+    "pep440",
+]
 build-backend = "setuptools.build_meta"
 
-[project]
-name = "pyvsag"
-description = "vsag is a vector indexing library used for similarity search"
-authors = [
-    {name = "the vsag project", email = "the.vsag.project@gmail.com"},
-]
-license = {text = "Apache-2.0"}
-keywords = ["search", "nearest", "neighbors"]
-requires-python = ">=3.6"
-classifiers = [
-    "License :: OSI Approved :: Apache Software License",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.6",
-    "Programming Language :: Python :: 3.7",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-]
-dependencies = [
-    "packaging",
-]
-dynamic = ["version"]
 
-[project.urls]
-Homepage = "https://github.com/antgroup/vsag"
-
-[tool.setuptools]
-packages = ["pyvsag"]
-package-data = { "pyvsag" = ["_pyvsag*.so"] }
-zip-safe = false
-
-[tool.setuptools_scm]
-version_scheme = "release-branch-semver"
-local_scheme = "no-local-version"
-write_to = "python/pyvsag/_version.py"
-root = ".."
 
 [tool.cibuildwheel]
 skip = ["*-musllinux*", "*i686*", "pp*"]
 before-build = '''
                 bash scripts/deps/install_deps_centos.sh 
-                bash scripts/python/build_cpp_for_cibw.sh
               '''
 before-all = '''
     sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-*.repo
