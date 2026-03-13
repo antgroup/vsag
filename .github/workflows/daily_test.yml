@@ -105,16 +105,25 @@ jobs:
         run: |
           echo leak:libomp.so > omp.supp
           export LSAN_OPTIONS=suppressions=omp.supp
-          chmod +x ./build/tests/${{ matrix.test_type }}
-          ./scripts/testing/test_parallel_by_name.sh ${{ matrix.test_type }} ~[pr]
-      - name: Upload Log
+          # If running unit tests, use ctest in build/tests to run module-level tests
+          if [ "${{ matrix.test_type }}" = "unittests" ]; then
+            mkdir -p ./refactor_test/baseline_results/split_run
+            cd ./build/tests
+            ctest -j$(nproc) --output-on-failure --output-junit ../../refactor_test/baseline_results/split_run/ctest-results.xml 2>&1 | tee ../../refactor_test/baseline_results/split_run/ctest.log
+          else
+            chmod +x ./build/tests/${{ matrix.test_type }}
+            ./scripts/testing/test_parallel_by_name.sh ${{ matrix.test_type }} ~[pr]
+          fi
+      - name: Upload test artifacts
         uses: actions/upload-artifact@v5
         with:
-          path: ./log
-          name: log-x86-${{ matrix.test_type }}-${{ github.run_id }}
+          name: module-tests-${{ matrix.test_type }}-${{ github.run_id }}
+          path: |
+            refactor_test/baseline_results/split_run/ctest-results.xml
+            refactor_test/baseline_results/split_run/ctest.log
+            ./log
+          retention-days: 7
           compression-level: 1
-          retention-days: 3
-          overwrite: 'true'
 
   daily_test_asan_aarch64:
     name: Test Aarch64
@@ -145,16 +154,25 @@ jobs:
         run: |
           echo leak:libomp.so > omp.supp
           export LSAN_OPTIONS=suppressions=omp.supp
-          chmod +x ./build/tests/${{ matrix.test_type }}
-          ./scripts/testing/test_parallel_by_name.sh ${{ matrix.test_type }} ~[pr]
-      - name: Upload Log
+          # If running unit tests, use ctest in build/tests to run module-level tests
+          if [ "${{ matrix.test_type }}" = "unittests" ]; then
+            mkdir -p ./refactor_test/baseline_results/split_run
+            cd ./build/tests
+            ctest -j$(nproc) --output-on-failure --output-junit ../../refactor_test/baseline_results/split_run/ctest-results.xml 2>&1 | tee ../../refactor_test/baseline_results/split_run/ctest.log
+          else
+            chmod +x ./build/tests/${{ matrix.test_type }}
+            ./scripts/testing/test_parallel_by_name.sh ${{ matrix.test_type }} ~[pr]
+          fi
+      - name: Upload test artifacts
         uses: actions/upload-artifact@v5
         with:
-          path: ./log
-          name: log-aarch64-${{ matrix.test_type }}-${{ github.run_id }}
+          name: module-tests-${{ matrix.test_type }}-${{ github.run_id }}
+          path: |
+            refactor_test/baseline_results/split_run/ctest-results.xml
+            refactor_test/baseline_results/split_run/ctest.log
+            ./log
+          retention-days: 7
           compression-level: 1
-          retention-days: 3
-          overwrite: 'true'
 
   asan_test_clean_up:
     name: Clean Up
@@ -343,5 +361,4 @@ jobs:
           export LSAN_OPTIONS=suppressions=omp.supp
           chmod +x ./build/tests/functests
           ./build/tests/functests "[concurrent]~[pr]"
-
 
