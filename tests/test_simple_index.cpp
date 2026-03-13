@@ -116,7 +116,12 @@ TEST_CASE("Test Simple Index", "[ft][simple_index]") {
     REQUIRE_THROWS(index->EstimateMemory(1000));
     REQUIRE_THROWS(index->GetEstimateBuildMemory(1000));
     REQUIRE_THROWS(index->Feedback(dataset->query_, 10, ""));
-    REQUIRE_THROWS(index->GetStats());
+    try {
+        index->GetStats();
+        FAIL("Expected GetStats to throw");
+    } catch (const std::runtime_error& e) {
+        REQUIRE(std::string(e.what()) == "Index not support GetStats");
+    }
     REQUIRE_THROWS(index->UpdateId(0, 1));
     REQUIRE_THROWS(index->UpdateVector(0, dataset->query_));
     REQUIRE_THROWS(index->ContinueBuild(dataset->base_, binary));
