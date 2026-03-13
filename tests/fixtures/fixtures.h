@@ -152,6 +152,9 @@ generate_int4_codes(uint64_t count, uint32_t dim, int seed = 47);
 std::vector<int8_t>
 generate_int8_codes(uint64_t count, uint32_t dim, int seed = 47);
 
+std::vector<int16_t>
+generate_int16_codes(uint64_t count, uint32_t dim, int seed = 47);
+
 std::vector<uint8_t>
 generate_uint8_codes(uint64_t count, uint32_t dim, int seed = 47);
 

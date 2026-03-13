@@ -50,6 +50,8 @@ GenerateRandomDataset(uint64_t dim,
     auto vecs =
         fixtures::generate_vectors(count, dim, need_normalize, fixtures::RandomValue(0, 564));
     auto vecs_int8 = fixtures::generate_int8_codes(count, dim, fixtures::RandomValue(0, 564));
+    auto vecs_fp16 = fixtures::generate_int16_codes(count, dim, fixtures::RandomValue(0, 564));
+    auto vecs_bf16 = fixtures::generate_int16_codes(count, dim, fixtures::RandomValue(0, 564));
     auto attr_sets = fixtures::generate_attributes(count);
     auto paths = new std::string[count];
     for (int i = 0; i < count; ++i) {
@@ -66,10 +68,15 @@ GenerateRandomDataset(uint64_t dim,
         ->NumElements(count)
         ->Owner(true);
     if (not has_duplicate) {
-        base->Float32Vectors(CopyVector(vecs))->Int8Vectors(CopyVector(vecs_int8));
+        base->Float32Vectors(CopyVector(vecs))
+            ->Int8Vectors(CopyVector(vecs_int8))
+            ->Float16Vectors(CopyVector(vecs_fp16))
+            ->BFloat16Vectors(CopyVector(vecs_bf16));
     } else {
         base->Float32Vectors(DuplicateCopyVector(vecs))
-            ->Int8Vectors(DuplicateCopyVector(vecs_int8));
+            ->Int8Vectors(DuplicateCopyVector(vecs_int8))
+            ->Float16Vectors(DuplicateCopyVector(vecs_fp16))
+            ->BFloat16Vectors(DuplicateCopyVector(vecs_bf16));
     }
     if (vector_type == "sparse") {
         if (not has_duplicate) {

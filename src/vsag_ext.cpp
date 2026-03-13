@@ -90,6 +90,28 @@ DatasetHandler::GetFloat32Vectors() const {
     return dataset_->GetFloat32Vectors();
 }
 
+DatasetHandler*
+DatasetHandler::Float16Vectors(const int16_t* vectors) {
+    dataset_->Float16Vectors(vectors);
+    return this;
+}
+
+const int16_t*
+DatasetHandler::GetFloat16Vectors() const {
+    return dataset_->GetFloat16Vectors();
+}
+
+DatasetHandler*
+DatasetHandler::BFloat16Vectors(const int16_t* vectors) {
+    dataset_->BFloat16Vectors(vectors);
+    return this;
+}
+
+const int16_t*
+DatasetHandler::GetBFloat16Vectors() const {
+    return dataset_->GetBFloat16Vectors();
+}
+
 void
 BitsetHandler::Set(int64_t pos, bool value) {
     bitset_->Set(pos, value);
