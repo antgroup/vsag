@@ -24,7 +24,7 @@
 
 # Detail source codes
 /src/index               @inabao @wxyucs @LHT129 @ShawnShawnYou
-/src/data_cell/          @LHT129 @ShawnShawnYou @inabao
+/src/datacell/           @LHT129 @ShawnShawnYou @inabao
 /src/io/                 @LHT129 @inabao
 /src/quantization/       @LHT129 @ShawnShawnYou @inabao
 /src/impl/               @ShawnShawnYou @inabao @LHT129 
