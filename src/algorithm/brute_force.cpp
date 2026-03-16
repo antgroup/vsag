@@ -354,6 +354,7 @@ BruteForce::Serialize(StreamWriter& writer) const {
 
     // serialize footer (introduced since v0.15)
     auto metadata = std::make_shared<Metadata>();
+    metadata->SetVersion("v0.15");
     JsonType basic_info;
     basic_info["dim"].SetInt(dim_);
     basic_info["total_count"].SetInt(total_count_);
