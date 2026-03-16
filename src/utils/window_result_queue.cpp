@@ -37,7 +37,7 @@ WindowResultQueue::GetAvgResult() const {
         return 0.0F;
     }
     float result = 0;
-    for (int i = 0; i < statistic_num; i++) {
+    for (uint64_t i = 0; i < statistic_num; i++) {
         result += queue_[i];
     }
     return result / static_cast<float>(statistic_num);

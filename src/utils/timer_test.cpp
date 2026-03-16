@@ -22,17 +22,19 @@
 using namespace vsag;
 
 TEST_CASE("Timer Basic", "[ut][Timer]") {
+    constexpr auto sleep_duration = std::chrono::milliseconds(20);
+
     SECTION("record elapsed time") {
         Timer timer;
-        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        std::this_thread::sleep_for(sleep_duration);
         auto elapsed_ms = timer.Record();
-        REQUIRE(elapsed_ms >= 1.0);
+        REQUIRE(elapsed_ms >= 5.0);
     }
 
     SECTION("threshold and overtime") {
         Timer timer;
-        timer.SetThreshold(1.0);
-        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        timer.SetThreshold(5.0);
+        std::this_thread::sleep_for(sleep_duration);
         REQUIRE(timer.CheckOvertime());
     }
 
@@ -40,8 +42,8 @@ TEST_CASE("Timer Basic", "[ut][Timer]") {
         double cost = 0.0;
         {
             Timer timer(cost);
-            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            std::this_thread::sleep_for(sleep_duration);
         }
-        REQUIRE(cost >= 1.0);
+        REQUIRE(cost >= 5.0);
     }
 }

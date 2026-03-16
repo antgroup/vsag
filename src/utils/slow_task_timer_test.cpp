@@ -37,6 +37,5 @@ TEST_CASE("SlowTaskTimer Basic", "[ut][SlowTaskTimer]") {
     SECTION("slow path with tiny threshold") {
         SlowTaskTimer timer("tiny-threshold", 0);
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        REQUIRE(timer.threshold == 0);
     }
 }

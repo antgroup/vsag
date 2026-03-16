@@ -19,6 +19,7 @@
 
 #include <cmath>
 #include <sstream>
+#include <unordered_map>
 #include <unordered_set>
 
 #include "impl/allocator/default_allocator.h"

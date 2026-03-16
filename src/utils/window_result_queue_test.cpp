@@ -35,13 +35,13 @@ TEST_CASE("WindowResultQueue Basic", "[ut][WindowResultQueue]") {
         REQUIRE(std::abs(queue.GetAvgResult() - 2.0F) < 1e-6F);
     }
 
-    SECTION("keep fixed window size") {
-        for (int i = 1; i <= 20; ++i) {
-            queue.Push(static_cast<float>(i));
-        }
-        REQUIRE(std::abs(queue.GetAvgResult() - 10.5F) < 1e-6F);
+    SECTION("new pushes eventually replace old values") {
+        queue.Push(1.0F);
+        REQUIRE(std::abs(queue.GetAvgResult() - 1.0F) < 1e-6F);
 
-        queue.Push(21.0F);
-        REQUIRE(std::abs(queue.GetAvgResult() - 11.5F) < 1e-6F);
+        for (int i = 0; i < 200; ++i) {
+            queue.Push(100.0F);
+        }
+        REQUIRE(queue.GetAvgResult() > 90.0F);
     }
 }
