@@ -42,7 +42,9 @@ public:
         : quantizer_(quantizer), allocator_(allocator), raw_query_(allocator){};
 
     ~Computer() override {
-        quantizer_->ReleaseComputer(*this);
+        if (quantizer_) {
+            quantizer_->ReleaseComputer(*this);
+        }
     }
 
     void
