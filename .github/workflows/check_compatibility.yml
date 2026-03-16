@@ -17,10 +17,26 @@ jobs:
     container:
       image: vsaglib/vsag:ci-x86
     steps:
-      - name: Prepare Data
+      - name: Install GitHub CLI
         run: |
-          git clone -b old_version_index https://github.com/antgroup/vsag.git
-          cp -r ./vsag/* /tmp/
+          (type -p wget >/dev/null || (apt update && apt-get install wget -y)) \
+          && mkdir -p -m 755 /etc/apt/keyrings \
+          && wget -qO- https://cli.github.com/packages/githubcli-archive-keyring.gpg | tee /etc/apt/keyrings/githubcli.gpg >/dev/null \
+          && chmod go+r /etc/apt/keyrings/githubcli.gpg \
+          && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list >/dev/null \
+          && apt update \
+          && apt install gh -y
+      - name: Download Compatibility Indexes from Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download compatibility-indexes \
+            --repo antgroup/vsag \
+            --dir /tmp \
+            --pattern "*.index" \
+            --pattern "*.bin" \
+            --pattern "*.json" \
+            || echo "Warning: Failed to download compatibility indexes"
       - uses: actions/checkout@v4
       - name: Compile Check Compatibility Tools
         run: export CMAKE_GENERATOR="Ninja"; make release

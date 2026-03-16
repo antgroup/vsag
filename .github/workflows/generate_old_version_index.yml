@@ -17,7 +17,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      pull-requests: write
     container:
       image: vsaglib/vsag:ci-x86
     steps:
@@ -36,13 +35,23 @@ jobs:
           fi
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           cd ${GITHUB_WORKSPACE}
-      - name: Fetch Index Branch
-        uses: actions/checkout@v4
-        with:
-          ref: old_version_index
-          path: vsag_index
-          fetch-tags: 'true'
-          fetch-depth: '0'
+      - name: Install GitHub CLI
+        run: |
+          (type -p wget >/dev/null || (apt update && apt-get install wget -y)) \
+          && mkdir -p -m 755 /etc/apt/keyrings \
+          && wget -qO- https://cli.github.com/packages/githubcli-archive-keyring.gpg | tee /etc/apt/keyrings/githubcli.gpg >/dev/null \
+          && chmod go+r /etc/apt/keyrings/githubcli.gpg \
+          && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list >/dev/null \
+          && apt update \
+          && apt install gh -y
+      - name: Download Test Dataset from Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download compatibility-indexes \
+            --repo antgroup/vsag \
+            --pattern "random_512d_10K.bin" \
+            || echo "Test dataset not found in release, will be generated"
       - name: Fetch Tag Branch
         uses: actions/checkout@v4
         with:
@@ -54,18 +63,31 @@ jobs:
         run: |
           echo ${{ steps.set-version.outputs.version }}
           cd vsag_tag
-          cp ../vsag_index/create_old_version_index.cpp tools/
-          cat ../vsag_index/CMakeLists.txt >> tools/CMakeLists.txt
+          cp ../random_512d_10K.bin . || true
           make release
-      - name: Generate Index And Move
+      - name: Generate Index
         run: |
           cd ${GITHUB_WORKSPACE}/vsag_tag
           ./build-release/tools/create_old_version_index ${{ steps.set-version.outputs.version }}
-          cd ../vsag_index
-      - name: Config Git And Push
-        uses: peter-evans/create-pull-request@v7
-        with:
-          path: vsag_index
-          base: old_version_index
-          signoff: 'true'
-          title: 'Update tag index ${{ steps.set-version.outputs.version }}'
+      - name: Upload to Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.set-version.outputs.version }}
+        run: |
+          cd ${GITHUB_WORKSPACE}/vsag_tag
+          files=""
+          for algo in hgraph hnsw; do
+            for ext in index build.json search.json; do
+              file="${VERSION}_${algo}_${ext}"
+              if [ -f "$file" ]; then
+                files="$files $file"
+              fi
+            done
+          done
+          if [ -n "$files" ]; then
+            gh release upload compatibility-indexes $files --repo antgroup/vsag --clobber || \
+            gh release create compatibility-indexes $files \
+              --repo antgroup/vsag \
+              --title "VSAG Compatibility Test Indexes" \
+              --notes "Index files for backward compatibility testing"
+          fi
