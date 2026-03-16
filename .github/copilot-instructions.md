@@ -56,7 +56,7 @@ All source files must include this copyright header:
 make debug           # Build with debug options
 make test            # Build and run unit tests
 make fmt             # Format code with clang-format
-make test_cov        # Run tests with coverage (must be >= 90%)
+make cov             # Build with coverage flags (run tests and collect coverage separately)
 make asan            # Build with AddressSanitizer
 make tsan            # Build with ThreadSanitizer
 ```
@@ -131,10 +131,10 @@ Familiarize yourself with these core algorithms when contributing:
 ## Contributing Workflow
 
 1. Fork the repository
-2. Create a feature branch from up-to-date master
+2. Create a feature branch from up-to-date main
 3. Make changes following coding standards
 4. Run `make fmt` to format code
-5. Run `make test_cov` to verify >= 90% coverage
+5. Run `make cov`, execute tests, and collect coverage to verify >= 90% coverage
 6. Commit with DCO sign-off: `git commit -s -m "message"`
 7. Submit pull request
 

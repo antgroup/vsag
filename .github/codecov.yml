@@ -52,7 +52,7 @@ component_management:
     - component_id: module_datacell
       name: datacell
       paths:
-        - src/data_cell/**
+        - src/datacell/**
         - src/io/**
         - src/quantization/**
     - component_id: module_index
