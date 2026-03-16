@@ -97,6 +97,9 @@ public:
     constexpr static int64_t PQ_BITS = 4L;
     constexpr static int64_t CENTROIDS_PER_SUBSPACE = 16L;
     constexpr static int64_t BLOCK_SIZE_PACKAGE = 32L;
+    constexpr static int32_t MAPPER[32] = {0,  16, 8,  24, 1,  17, 9,  25, 2,  18, 10,
+                                           26, 3,  19, 11, 27, 4,  20, 12, 28, 5,  21,
+                                           13, 29, 6,  22, 14, 30, 7,  23, 15, 31};
 
 public:
     int64_t pq_dim_{1};
