@@ -74,6 +74,39 @@ jobs:
           retention-days: 3
           overwrite: 'true'
 
+  daily_build_asan_macos:
+    name: Asan Build macOS
+    runs-on: macos-latest
+    concurrency:
+      group: daily_build_macos
+      cancel-in-progress: true
+    steps:
+      - name: Free Disk Space
+        run: rm -rf /Users/runner/hostedtoolcache || true
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Prepare Env
+        run: bash ./scripts/deps/install_deps_macos.sh
+      - name: Load Cache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          max-size: "2G"
+          save: false
+          key: build-macos-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
+      - name: Make Asan
+        run: export CMAKE_GENERATOR="Ninja"; make asan
+      - name: Clean
+        run: find ./build -type f -name "*.o" -exec rm -f {} +
+      - name: Save Test
+        uses: actions/upload-artifact@v5
+        with:
+          path: ./build/
+          name: test_macos-${{ github.run_id }}
+          compression-level: 1
+          retention-days: 3
+          overwrite: 'true'
+
   daily_test_asan_x86:
     name: Test X86
     needs: daily_build_asan_x86
@@ -112,6 +145,44 @@ jobs:
         with:
           path: ./log
           name: log-x86-${{ matrix.test_type }}-${{ github.run_id }}
+          compression-level: 1
+          retention-days: 3
+          overwrite: 'true'
+
+  daily_test_asan_macos:
+    name: Test macOS
+    needs: daily_build_asan_macos
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        test_type: [ unittests, functests ]
+    concurrency:
+      group: daily_test_macos-${{ matrix.test_type }}
+      cancel-in-progress: true
+    steps:
+      - name: Free Disk Space
+        run: rm -rf /Users/runner/hostedtoolcache || true
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Clean Env
+        run: rm -rf ./build
+      - name: Download Test
+        uses: actions/download-artifact@v5
+        with:
+          name: test_macos-${{ github.run_id }}
+          path: ./build
+      - name: Do Asan Test In ${{ matrix.test_type }}
+        run: |
+          echo leak:libomp.dylib > omp.supp
+          export LSAN_OPTIONS=suppressions=omp.supp || true
+          chmod +x ./build/tests/${{ matrix.test_type }}
+          ./scripts/testing/test_parallel_by_name.sh ${{ matrix.test_type }} ~[pr]
+      - name: Upload Log
+        uses: actions/upload-artifact@v5
+        with:
+          path: ./log
+          name: log-macos-${{ matrix.test_type }}-${{ github.run_id }}
           compression-level: 1
           retention-days: 3
           overwrite: 'true'
@@ -158,7 +229,7 @@ jobs:
 
   asan_test_clean_up:
     name: Clean Up
-    needs: [ daily_test_asan_x86, daily_test_asan_aarch64 ]
+    needs: [ daily_test_asan_x86, daily_test_asan_aarch64, daily_test_asan_macos ]
     runs-on: ubuntu-22.04
     steps:
       - name: Create Empty File
@@ -176,6 +247,14 @@ jobs:
         with:
           path: /tmp/clean_up
           name: test_aarch64-${{ github.run_id }}
+          compression-level: 1
+          retention-days: 3
+          overwrite: 'true'
+      - name: Overwrite Test Artifact macOS
+        uses: actions/upload-artifact@v5
+        with:
+          path: /tmp/clean_up
+          name: test_macos-${{ github.run_id }}
           compression-level: 1
           retention-days: 3
           overwrite: 'true'

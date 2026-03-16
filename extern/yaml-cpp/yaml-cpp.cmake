@@ -17,6 +17,7 @@ FetchContent_Declare (
         DOWNLOAD_NO_PROGRESS 1
         INACTIVITY_TIMEOUT 5
         TIMEOUT 30
+        CMAKE_ARGS -DCMAKE_POLICY_DEFAULT_CMP0048=NEW
 )
 
 FetchContent_MakeAvailable (yaml-cpp)
