@@ -16,7 +16,6 @@
 #include "util_functions.h"
 
 #include <catch2/catch_test_macros.hpp>
-
 #include <cmath>
 #include <sstream>
 #include <unordered_map>

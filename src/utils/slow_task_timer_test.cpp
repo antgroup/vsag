@@ -16,7 +16,6 @@
 #include "slow_task_timer.h"
 
 #include <catch2/catch_test_macros.hpp>
-
 #include <thread>
 
 using namespace vsag;

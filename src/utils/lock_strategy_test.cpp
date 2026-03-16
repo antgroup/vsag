@@ -16,7 +16,6 @@
 #include "lock_strategy.h"
 
 #include <catch2/catch_test_macros.hpp>
-
 #include <thread>
 
 #include "impl/allocator/default_allocator.h"

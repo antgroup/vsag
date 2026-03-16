@@ -16,7 +16,6 @@
 #include "window_result_queue.h"
 
 #include <catch2/catch_test_macros.hpp>
-
 #include <cmath>
 
 using namespace vsag;
