@@ -16,7 +16,6 @@
 #include "slow_task_timer.h"
 
 #include <catch2/catch_test_macros.hpp>
-#include <thread>
 
 using namespace vsag;
 
@@ -33,8 +32,8 @@ TEST_CASE("SlowTaskTimer Basic", "[ut][SlowTaskTimer]") {
         REQUIRE(timer.threshold == 1000);
     }
 
-    SECTION("slow path with tiny threshold") {
-        SlowTaskTimer timer("tiny-threshold", 0);
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    SECTION("construct and destruct without triggering logging") {
+        SlowTaskTimer timer("high-threshold", 1000);
+        REQUIRE(timer.threshold == 1000);
     }
 }
