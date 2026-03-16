@@ -242,8 +242,6 @@ void
 PQFastScanQuantizer<metric>::Package32(const uint8_t* codes,
                                        uint8_t* packaged_codes,
                                        int64_t valid_size) const {
-    constexpr int32_t mapper[32] = {0, 16, 8,  24, 1, 17, 9,  25, 2, 18, 10, 26, 3, 19, 11, 27,
-                                    4, 20, 12, 28, 5, 21, 13, 29, 6, 22, 14, 30, 7, 23, 15, 31};
     if (valid_size == -1) {
         valid_size = BLOCK_SIZE_PACKAGE;
     }
@@ -261,7 +259,7 @@ PQFastScanQuantizer<metric>::Package32(const uint8_t* codes,
     memset(packaged_codes, 0, this->code_size_ * BLOCK_SIZE_PACKAGE);
     for (int i = 0; i < this->pq_dim_; ++i) {
         for (int j = 0; j < BLOCK_SIZE_PACKAGE; ++j) {
-            auto code = get_code(mapper[j], i);
+            auto code = get_code(MAPPER[j], i);
             if (j % 2 == 1) {
                 code <<= 4L;
             }
@@ -273,9 +271,6 @@ PQFastScanQuantizer<metric>::Package32(const uint8_t* codes,
 template <MetricType metric>
 void
 PQFastScanQuantizer<metric>::Unpack32(const uint8_t* packaged_codes, uint8_t* codes) const {
-    constexpr int32_t mapper[32] = {0, 16, 8,  24, 1, 17, 9,  25, 2, 18, 10, 26, 3, 19, 11, 27,
-                                    4, 20, 12, 28, 5, 21, 13, 29, 6, 22, 14, 30, 7, 23, 15, 31};
-
     for (int64_t i = 0; i < this->pq_dim_; ++i) {
         for (int64_t j = 0; j < BLOCK_SIZE_PACKAGE; ++j) {
             int64_t block_base = i * (BLOCK_SIZE_PACKAGE / 2) + (j / 2);
@@ -287,7 +282,7 @@ PQFastScanQuantizer<metric>::Unpack32(const uint8_t* packaged_codes, uint8_t* co
             } else {
                 code = byte >> 4;
             }
-            int64_t vector_index = mapper[j];
+            int64_t vector_index = MAPPER[j];
 
             int64_t code_offset = vector_index * this->code_size_ + (i / 2);
 
