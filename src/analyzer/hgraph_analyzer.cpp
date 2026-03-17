@@ -158,7 +158,59 @@ HGraphAnalyzer::GetDuplicateRatio() {
         }
         return static_cast<float>(duplicate_count) / static_cast<float>(this->total_count_);
     }
-    return 0.0F;
+
+    // Sieve method: progressively filter candidate duplicate groups
+    calculate_base_groundtruth();
+    auto codes = hgraph_->reorder_ ? hgraph_->high_precise_codes_ : hgraph_->basic_flatten_codes_;
+    constexpr float EPSILON = 2e-6f;
+
+    // Initialize with all vectors as a single group
+    Vector<Vector<InnerIdType>> groups(allocator_);
+    groups.emplace_back(total_count_, allocator_);
+    std::iota(groups[0].begin(), groups[0].end(), 0);
+
+    // Process each query to sieve groups
+    for (uint64_t q = 0; q < base_sample_size_ && !groups.empty(); ++q) {
+        Vector<Vector<InnerIdType>> new_groups(allocator_);
+        auto comp = codes->FactoryComputer(base_sample_datas_.data() + q * dim_);
+
+        for (auto& group : groups) {
+            Vector<float> dists(group.size(), allocator_);
+            codes->Query(dists.data(), comp, group.data(), group.size());
+
+            Vector<std::pair<float, InnerIdType>> sorted(group.size(), allocator_);
+            for (size_t i = 0; i < group.size(); ++i) {
+                sorted[i] = {dists[i], group[i]};
+            }
+            std::sort(sorted.begin(), sorted.end());
+
+            Vector<InnerIdType> sub(allocator_);
+            sub.push_back(sorted[0].second);
+            for (size_t i = 1; i < sorted.size(); ++i) {
+                if (sorted[i].first - sorted[i - 1].first <= EPSILON) {
+                    sub.push_back(sorted[i].second);
+                } else {
+                    if (sub.size() > 1)
+                        new_groups.push_back(std::move(sub));
+                    sub.clear();
+                    sub.push_back(sorted[i].second);
+                }
+            }
+            if (sub.size() > 1)
+                new_groups.push_back(std::move(sub));
+        }
+        groups = std::move(new_groups);
+    }
+
+    // Count duplicates
+    uint64_t duplicate_count = 0;
+    for (const auto& group : groups) {
+        duplicate_count += group.size() - 1;
+        for (size_t i = 1; i < group.size(); ++i) {
+            is_duplicate_ids_[group[i]] = true;
+        }
+    }
+    return static_cast<float>(duplicate_count) / static_cast<float>(total_count_);
 }
 
 float
