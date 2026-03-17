@@ -148,6 +148,7 @@ HGraphAnalyzer::GetNeighborRecall() {
 
 float
 HGraphAnalyzer::GetDuplicateRatio() {
+    // Original logic: when support_duplicate is enabled, use duplicate_ids_ linked list
     if (hgraph_->label_table_->CompressDuplicateData()) {
         auto duplicate_count = 0;
         for (int i = 0; i < hgraph_->label_table_->duplicate_ids_.size(); ++i) {
@@ -158,7 +159,55 @@ HGraphAnalyzer::GetDuplicateRatio() {
         }
         return static_cast<float>(duplicate_count) / static_cast<float>(this->total_count_);
     }
-    return 0.0F;
+
+    // New logic: when support_duplicate is not enabled, use rank-based method
+    calculate_base_groundtruth();
+
+    if (vector_duplicate_calculated_) {
+        return vector_duplicate_ratio_;
+    }
+
+    auto make_pair_key = [](InnerIdType a, InnerIdType b) -> uint64_t {
+        if (a > b)
+            std::swap(a, b);
+        return (static_cast<uint64_t>(a) << 32) | static_cast<uint64_t>(b);
+    };
+
+    UnorderedMap<uint64_t, uint32_t> candidate_count(allocator_);
+
+    for (uint32_t i = 0; i < base_sample_size_; ++i) {
+        Vector<std::pair<float, InnerIdType>> ranked(allocator_);
+        ranked.reserve(this->total_count_);
+        for (InnerIdType j = 0; j < this->total_count_; ++j) {
+            ranked.emplace_back(all_distances_[i][j], j);
+        }
+        std::sort(ranked.begin(), ranked.end());
+
+        for (InnerIdType j = 0; j < this->total_count_ - 1; ++j) {
+            if (std::abs(ranked[j].first - ranked[j + 1].first) <= 1e-5f) {
+                uint64_t key = make_pair_key(ranked[j].second, ranked[j + 1].second);
+                candidate_count[key]++;
+            }
+        }
+    }
+
+    uint32_t duplicate_count = 0;
+    UnorderedSet<InnerIdType> counted(allocator_);
+    for (const auto& [key, count] : candidate_count) {
+        if (count >= base_sample_size_) {
+            InnerIdType id1 = static_cast<InnerIdType>(key >> 32);
+            InnerIdType id2 = static_cast<InnerIdType>(key & 0xFFFFFFFFLL);
+            if (counted.insert(id1).second)
+                duplicate_count++;
+            if (counted.insert(id2).second)
+                duplicate_count++;
+        }
+    }
+
+    vector_duplicate_ratio_ =
+        static_cast<float>(duplicate_count) / static_cast<float>(this->total_count_);
+    vector_duplicate_calculated_ = true;
+    return vector_duplicate_ratio_;
 }
 
 float
@@ -271,6 +320,11 @@ HGraphAnalyzer::calculate_groundtruth(const Vector<float>& sample_datas,
     if (not ground_truth.empty()) {
         return;
     }
+    // Initialize distance storage for duplicate detection
+    all_distances_.resize(sample_size);
+    for (uint32_t i = 0; i < sample_size; ++i) {
+        all_distances_[i].resize(this->total_count_, 0.0F, allocator_);
+    }
     // calculate duplicate ratio while calculating groundtruth
     uint32_t duplicate_count = 0;
     Vector<float> distances_array(this->total_count_, allocator_);
@@ -283,6 +337,8 @@ HGraphAnalyzer::calculate_groundtruth(const Vector<float>& sample_datas,
         }
         auto comp = codes->FactoryComputer(sample_datas.data() + i * dim_);
         codes->Query(distances_array.data(), comp, ids_array.data(), this->total_count_);
+        // Save distances for duplicate detection
+        std::copy(distances_array.begin(), distances_array.end(), all_distances_[i].begin());
         DistHeapPtr groundtruth = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
         for (uint64_t j = 0; j < this->total_count_; ++j) {
             float dist = distances_array[j];
@@ -424,9 +480,6 @@ HGraphAnalyzer::GetStats() {
     stats["connect_components"].SetInt(components.size());
     stats["maximal_component_size"].SetInt(*std::max_element(components.begin(), components.end()));
     stats["deleted_count"].SetInt(hgraph_->delete_count_);
-    if (hgraph_->label_table_->CompressDuplicateData()) {
-        stats["duplicate_ratio"].SetFloat(GetDuplicateRatio());
-    }
     const auto& [count_in_degree, count_out_degree, avg_degree] = GetDegreeDistribution();
     stats["in_degree_distribution"].SetVector<uint32_t>(count_in_degree);
     stats["out_degree_distribution"].SetVector<uint32_t>(count_out_degree);

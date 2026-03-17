@@ -158,6 +158,11 @@ private:
     Vector<bool> is_duplicate_ids_;
     float base_search_time_ms_{0.0F};
 
+    // Store distances from each sample to all vectors for duplicate detection
+    Vector<Vector<float>> all_distances_;
+    float vector_duplicate_ratio_{0.0F};
+    bool vector_duplicate_calculated_{false};
+
     uint32_t query_sample_size_{0};
     Vector<InnerIdType> query_sample_ids_;
     Vector<float> query_sample_datas_;
