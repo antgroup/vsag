@@ -121,7 +121,7 @@ For examples, refer to [103_index_hgraph.cpp](https://github.com/antgroup/vsag/b
 ### base_io_type
 - **Parameter Type**: string
 - **Parameter Description**: Storage type for base quantization codes
-- **Optional Values**: "memory_io", "block_memory_io", "buffer_io", "async_io", "mmap_io"
+- **Optional Values**: "memory_io", "block_memory_io", "buffer_io", "async_io", "mmap_io", "uring_io"
 - **Default Value**: "block_memory_io"
 
 ### base_file_path
@@ -133,7 +133,7 @@ For examples, refer to [103_index_hgraph.cpp](https://github.com/antgroup/vsag/b
 ### precise_io_type
 - **Parameter Type**: string
 - **Parameter Description**: Storage type for precise quantization codes, same as base_io_type but for reordering codes
-- **Optional Values**: "memory_io", "block_memory_io", "buffer_io", "async_io", "mmap_io"
+- **Optional Values**: "memory_io", "block_memory_io", "buffer_io", "async_io", "mmap_io", "uring_io"
 - **Default Value**: "block_memory_io"
 
 ### precise_file_path
