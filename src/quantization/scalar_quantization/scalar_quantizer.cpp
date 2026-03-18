@@ -95,7 +95,11 @@ ScalarQuantizer<metric, bit>::EncodeOneImpl(const DataType* data, uint8_t* codes
     }
     memset(codes, 0, this->code_size_);
     for (uint64_t d = 0; d < this->dim_; d++) {
-        delta = 1.0F * (cur[d] - lower_bound_[d]) / diff_[d];
+        if (diff_[d] < std::numeric_limits<float>::epsilon()) {
+            delta = 1.0F;
+        } else {
+            delta = 1.0F * (cur[d] - lower_bound_[d]) / diff_[d];
+        }
         if (delta < 0.0F) {
             delta = 0;
         } else if (delta > 0.999F) {
