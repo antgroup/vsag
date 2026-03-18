@@ -28,7 +28,7 @@ namespace vsag {
 using IndexCreator = tl::expected<std::shared_ptr<Index>, Error> (*)(
     JsonType& parsed_params, const IndexCommonParam& index_common_params);
 
-bool
+void
 register_index_creator(const std::string& index_name, IndexCreator creator);
 
 tl::expected<std::shared_ptr<Index>, Error>
