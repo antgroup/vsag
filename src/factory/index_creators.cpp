@@ -12,7 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "index_creators.h"
+
 #include <fmt/format.h>
+
+#include <mutex>
 
 #include "algorithm/brute_force.h"
 #include "algorithm/hgraph.h"
@@ -44,7 +48,7 @@ get_index_param_or_empty(const JsonType& parsed_params) {
 tl::expected<std::shared_ptr<Index>, Error>
 create_hnsw_index(JsonType& parsed_params, const IndexCommonParam& index_common_params) {
     CHECK_ARGUMENT(parsed_params.Contains(INDEX_HNSW),
-                   fmt::format("parameters must contains {}", INDEX_HNSW));
+                   fmt::format("parameters must contain {}", INDEX_HNSW));
     auto hnsw_param_obj = parsed_params[INDEX_HNSW];
     auto hnsw_params = HnswParameters::FromJson(hnsw_param_obj, index_common_params);
     logger::debug("created a hnsw index");
@@ -58,7 +62,7 @@ create_hnsw_index(JsonType& parsed_params, const IndexCommonParam& index_common_
 tl::expected<std::shared_ptr<Index>, Error>
 create_fresh_hnsw_index(JsonType& parsed_params, const IndexCommonParam& index_common_params) {
     CHECK_ARGUMENT(parsed_params.Contains(INDEX_FRESH_HNSW),
-                   fmt::format("parameters must contains {}", INDEX_FRESH_HNSW));
+                   fmt::format("parameters must contain {}", INDEX_FRESH_HNSW));
     auto hnsw_param_obj = parsed_params[INDEX_FRESH_HNSW];
     auto hnsw_params = FreshHnswParameters::FromJson(hnsw_param_obj, index_common_params);
     logger::debug("created a fresh-hnsw index");
@@ -72,15 +76,14 @@ create_fresh_hnsw_index(JsonType& parsed_params, const IndexCommonParam& index_c
 tl::expected<std::shared_ptr<Index>, Error>
 create_brute_force_index(JsonType& parsed_params, const IndexCommonParam& index_common_params) {
     logger::debug("created a brute_force index");
-    return tl::expected<std::shared_ptr<Index>, Error>(
-        std::static_pointer_cast<Index>(std::make_shared<IndexImpl<BruteForce>>(
-            get_index_param_or_empty(parsed_params), index_common_params)));
+    return {std::make_shared<IndexImpl<BruteForce>>(get_index_param_or_empty(parsed_params),
+                                                    index_common_params)};
 }
 
 tl::expected<std::shared_ptr<Index>, Error>
 create_diskann_index(JsonType& parsed_params, const IndexCommonParam& index_common_params) {
     CHECK_ARGUMENT(parsed_params.Contains(INDEX_DISKANN),
-                   fmt::format("parameters must contains {}", INDEX_DISKANN));
+                   fmt::format("parameters must contain {}", INDEX_DISKANN));
     auto diskann_param_obj = parsed_params[INDEX_DISKANN];
     auto diskann_params = DiskannParameters::FromJson(diskann_param_obj, index_common_params);
     logger::debug("created a diskann index");
@@ -93,18 +96,16 @@ create_index_impl_with_param_log(const char* log_message,
                                  JsonType& parsed_params,
                                  const IndexCommonParam& index_common_params) {
     logger::debug(log_message);
-    return tl::expected<std::shared_ptr<Index>, Error>(
-        std::static_pointer_cast<Index>(std::make_shared<IndexImpl<T>>(
-            get_index_param_or_empty(parsed_params), index_common_params)));
+    return {std::make_shared<IndexImpl<T>>(get_index_param_or_empty(parsed_params),
+                                           index_common_params)};
 }
 
 tl::expected<std::shared_ptr<Index>, Error>
 create_pyramid_index(JsonType& parsed_params, const IndexCommonParam& index_common_params) {
     CHECK_ARGUMENT(parsed_params.Contains(INDEX_PARAM),
-                   fmt::format("parameters must contains {}", INDEX_PARAM));
+                   fmt::format("parameters must contain {}", INDEX_PARAM));
     logger::debug("created a pyramid index");
-    return tl::expected<std::shared_ptr<Index>, Error>(std::static_pointer_cast<Index>(
-        std::make_shared<IndexImpl<Pyramid>>(parsed_params[INDEX_PARAM], index_common_params)));
+    return {std::make_shared<IndexImpl<Pyramid>>(parsed_params[INDEX_PARAM], index_common_params)};
 }
 
 tl::expected<std::shared_ptr<Index>, Error>
@@ -131,17 +132,22 @@ create_sindi_index(JsonType& parsed_params, const IndexCommonParam& index_common
         "created a sindi index", parsed_params, index_common_params);
 }
 
-const bool HNSW_REGISTERED = register_index_creator(INDEX_HNSW, &create_hnsw_index);
-const bool FRESH_HNSW_REGISTERED =
-    register_index_creator(INDEX_FRESH_HNSW, &create_fresh_hnsw_index);
-const bool BRUTE_FORCE_REGISTERED =
-    register_index_creator(INDEX_BRUTE_FORCE, &create_brute_force_index);
-const bool DISKANN_REGISTERED = register_index_creator(INDEX_DISKANN, &create_diskann_index);
-const bool HGRAPH_REGISTERED = register_index_creator(INDEX_HGRAPH, &create_hgraph_index);
-const bool IVF_REGISTERED = register_index_creator(INDEX_IVF, &create_ivf_index);
-const bool PYRAMID_REGISTERED = register_index_creator(INDEX_PYRAMID, &create_pyramid_index);
-const bool SPARSE_REGISTERED = register_index_creator(INDEX_SPARSE, &create_sparse_index);
-const bool SINDI_REGISTERED = register_index_creator(INDEX_SINDI, &create_sindi_index);
-
 }  // namespace
+
+void
+register_all_index_creators() {
+    static std::once_flag registration_once;
+    std::call_once(registration_once, []() {
+        register_index_creator(INDEX_HNSW, &create_hnsw_index);
+        register_index_creator(INDEX_FRESH_HNSW, &create_fresh_hnsw_index);
+        register_index_creator(INDEX_BRUTE_FORCE, &create_brute_force_index);
+        register_index_creator(INDEX_DISKANN, &create_diskann_index);
+        register_index_creator(INDEX_HGRAPH, &create_hgraph_index);
+        register_index_creator(INDEX_IVF, &create_ivf_index);
+        register_index_creator(INDEX_PYRAMID, &create_pyramid_index);
+        register_index_creator(INDEX_SPARSE, &create_sparse_index);
+        register_index_creator(INDEX_SINDI, &create_sindi_index);
+    });
+}
+
 }  // namespace vsag

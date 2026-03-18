@@ -21,6 +21,7 @@
 #include "impl/allocator/default_allocator.h"
 #include "impl/thread_pool/safe_thread_pool.h"
 #include "index_common_param.h"
+#include "index_creators.h"
 #include "index_registry.h"
 #include "resource_owner_wrapper.h"
 #include "typing.h"
@@ -48,11 +49,10 @@ Engine::Shutdown() {
 tl::expected<std::shared_ptr<Index>, Error>
 Engine::CreateIndex(const std::string& origin_name, const std::string& parameters) {
     try {
-        std::string name = origin_name;
-        transform(name.begin(), name.end(), name.begin(), ::tolower);
+        register_all_index_creators();
         auto parsed_params = JsonType::Parse(parameters);
         auto index_common_params = IndexCommonParam::CheckAndCreate(parsed_params, this->resource_);
-        return create_registered_index(name, parsed_params, index_common_params);
+        return create_registered_index(origin_name, parsed_params, index_common_params);
     } catch (const std::invalid_argument& e) {
         LOG_ERROR_AND_RETURNS(
             ErrorType::INVALID_ARGUMENT, "failed to create index(invalid argument): ", e.what());

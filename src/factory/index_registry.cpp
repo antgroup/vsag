@@ -15,7 +15,9 @@
 #include "index_registry.h"
 
 #include <algorithm>
+#include <cctype>
 #include <map>
+#include <mutex>
 #include <string>
 
 #include "common.h"
@@ -29,9 +31,17 @@ index_registry() {
     return registry;
 }
 
+std::mutex&
+index_registry_mutex() {
+    static std::mutex registry_mutex;
+    return registry_mutex;
+}
+
 std::string
 normalize_index_name(std::string index_name) {
-    std::transform(index_name.begin(), index_name.end(), index_name.begin(), ::tolower);
+    std::transform(index_name.begin(), index_name.end(), index_name.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
     return index_name;
 }
 
@@ -40,7 +50,9 @@ normalize_index_name(std::string index_name) {
 bool
 register_index_creator(const std::string& index_name, IndexCreator creator) {
     auto normalized_name = normalize_index_name(index_name);
-    return index_registry().insert_or_assign(normalized_name, creator).second;
+    std::lock_guard<std::mutex> lock(index_registry_mutex());
+    index_registry().insert_or_assign(normalized_name, creator);
+    return true;
 }
 
 tl::expected<std::shared_ptr<Index>, Error>
@@ -48,6 +60,7 @@ create_registered_index(const std::string& index_name,
                         JsonType& parsed_params,
                         const IndexCommonParam& index_common_params) {
     auto normalized_name = normalize_index_name(index_name);
+    std::lock_guard<std::mutex> lock(index_registry_mutex());
     auto& registry = index_registry();
     auto iterator = registry.find(normalized_name);
     if (iterator == registry.end()) {

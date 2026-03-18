@@ -112,13 +112,14 @@ public:
             index_ = index.value();
         } else {
             const vsag::Error error_code = index.error();
-            if (error_code.type == vsag::ErrorType::UNSUPPORTED_INDEX) {
-                throw std::runtime_error("error type: UNSUPPORTED_INDEX");
+            switch (error_code.type) {
+                case vsag::ErrorType::UNSUPPORTED_INDEX:
+                    throw std::runtime_error("error type: UNSUPPORTED_INDEX");
+                case vsag::ErrorType::INVALID_ARGUMENT:
+                    throw std::runtime_error("error type: invalid_parameter");
+                default:
+                    throw std::runtime_error("error type: unexpectedError");
             }
-            if (error_code.type == vsag::ErrorType::INVALID_ARGUMENT) {
-                throw std::runtime_error("error type: invalid_parameter");
-            }
-            throw std::runtime_error("error type: unexpectedError");
         }
     }
 
