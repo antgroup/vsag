@@ -885,7 +885,7 @@ public:
       */
     [[nodiscard]] virtual std::string
     GetStats() const {
-        throw std::runtime_error("Index not support range search");
+        throw std::runtime_error("Index not support GetStats");
     }
 
     /**
