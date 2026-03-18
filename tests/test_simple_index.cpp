@@ -14,6 +14,7 @@
 // limitations under the License.
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_exception.hpp>
 #include <fstream>
 
 #include "fixtures/fixtures.h"
@@ -116,7 +117,9 @@ TEST_CASE("Test Simple Index", "[ft][simple_index]") {
     REQUIRE_THROWS(index->EstimateMemory(1000));
     REQUIRE_THROWS(index->GetEstimateBuildMemory(1000));
     REQUIRE_THROWS(index->Feedback(dataset->query_, 10, ""));
-    REQUIRE_THROWS(index->GetStats());
+    REQUIRE_THROWS_MATCHES(index->GetStats(),
+                           std::runtime_error,
+                           Catch::Matchers::Message("Index not support GetStats"));
     REQUIRE_THROWS(index->UpdateId(0, 1));
     REQUIRE_THROWS(index->UpdateVector(0, dataset->query_));
     REQUIRE_THROWS(index->ContinueBuild(dataset->base_, binary));
