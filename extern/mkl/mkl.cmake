@@ -1,7 +1,10 @@
 
 option(MKL_STATIC_LINK "Set to ON to link Intel MKL statically." OFF)
 
+set(VSAG_BLAS_BACKEND "openblas" CACHE STRING "Selected BLAS backend")
+
 if (CMAKE_HOST_SYSTEM_PROCESSOR STREQUAL "x86_64" AND ENABLE_INTEL_MKL)
+    set(VSAG_BLAS_BACKEND "mkl" CACHE STRING "Selected BLAS backend" FORCE)
 
  
     if(MKL_STATIC_LINK)
@@ -130,53 +133,6 @@ if (CMAKE_HOST_SYSTEM_PROCESSOR STREQUAL "x86_64" AND ENABLE_INTEL_MKL)
     endforeach()
     message (STATUS "enable ${Yellow}intel-mkl${CR} as blas backend")
 
-else()
-    if(ENABLE_INTEL_MKL)
-        message(WARNING "Intel MKL is not supported on this architecture (${CMAKE_HOST_SYSTEM_PROCESSOR}). Falling back to OpenBLAS.")
-    endif()
-
-    # Check if we're using system-installed OpenBLAS
-    if(USE_SYSTEM_OPENBLAS AND OPENBLAS_FOUND)
-        # Use the system OpenBLAS library
-        set(BLAS_LIBRARIES ${OPENBLAS_LIB})
-        
-        # Add LAPACKE library if found separately
-        if(DEFINED OPENBLAS_LAPACKE_LIB AND OPENBLAS_LAPACKE_LIB)
-            list(APPEND BLAS_LIBRARIES ${OPENBLAS_LAPACKE_LIB})
-        endif()
-        
-        # Add gfortran dependency
-        if (APPLE AND DEFINED GFORTRAN_LIB AND EXISTS "${GFORTRAN_LIB}")
-            list(APPEND BLAS_LIBRARIES "${GFORTRAN_LIB}")
-        else()
-            list(APPEND BLAS_LIBRARIES gfortran)
-        endif()
-        
-        # Add OpenMP library
-        if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-            list(PREPEND BLAS_LIBRARIES omp)
-        else()
-            list(PREPEND BLAS_LIBRARIES gomp)
-        endif()
-        
-        message(STATUS "Using system OpenBLAS as BLAS backend: ${OPENBLAS_LIB}")
-    else()
-        # Use bundled/built OpenBLAS
-        # OpenBLAS on macOS typically requires libgfortran at link time, but `-lgfortran` often fails
-        # because libgfortran is not in the default linker search paths. If DarwinDep.cmake already
-        # detected the full path to libgfortran.dylib, prefer that; otherwise fall back to `gfortran`.
-        if (APPLE AND DEFINED GFORTRAN_LIB AND EXISTS "${GFORTRAN_LIB}")
-            set(BLAS_LIBRARIES libopenblas.a "${GFORTRAN_LIB}")
-        else()
-            set(BLAS_LIBRARIES libopenblas.a gfortran)
-        endif()
-        if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-            list(PREPEND BLAS_LIBRARIES omp)
-        else()
-            list(PREPEND BLAS_LIBRARIES gomp)
-        endif()
-        message ("enable openblas as blas backend")
-    endif()
 endif()
 
-set(BLAS_LIBRARIES "${BLAS_LIBRARIES}" CACHE STRING "Final list of BLAS libraries to link against.")
+set(BLAS_LIBRARIES "${BLAS_LIBRARIES}" CACHE STRING "Final list of BLAS libraries to link against." FORCE)

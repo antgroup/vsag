@@ -8,8 +8,7 @@
 #include <malloc.h>
 #endif
 #include <math_utils.h>
-// #include <mkl.h>
-#include <cblas.h>
+#include "../../blas_compat.h"
 #include "diskann_logger.h"
 #include "utils.h"
 

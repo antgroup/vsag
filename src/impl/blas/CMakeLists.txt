@@ -15,5 +15,6 @@
 
 
 add_library (vsag_blas OBJECT blas_function.cpp)
-maybe_add_dependencies (vsag_blas openblas mkl)
-
+if (VSAG_BLAS_BACKEND STREQUAL "openblas")
+    maybe_add_dependencies (vsag_blas openblas)
+endif ()

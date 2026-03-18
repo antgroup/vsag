@@ -1,9 +1,7 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT license.
 
-// #include "mkl.h"
-#include <cblas.h>
-#include <lapacke.h>
+#include "../../blas_compat.h"
 
 #include "pq.h"
 #include "partition.h"
