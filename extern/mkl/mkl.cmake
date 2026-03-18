@@ -1,8 +1,6 @@
 
 option(MKL_STATIC_LINK "Set to ON to link Intel MKL statically." OFF)
 
-set(VSAG_BLAS_BACKEND "openblas" CACHE STRING "Selected BLAS backend")
-
 if (CMAKE_HOST_SYSTEM_PROCESSOR STREQUAL "x86_64" AND ENABLE_INTEL_MKL)
     set(VSAG_BLAS_BACKEND "mkl" CACHE STRING "Selected BLAS backend" FORCE)
 

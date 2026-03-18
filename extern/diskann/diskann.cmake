@@ -4,6 +4,7 @@ include_directories(${CMAKE_CURRENT_BINARY_DIR}/boost/install/include
 if(DEFINED OPENBLAS_INCLUDE_DIRS)
   include_directories(${OPENBLAS_INCLUDE_DIRS})
 endif()
+include_directories(extern/diskann)
 
 if(VSAG_BLAS_BACKEND STREQUAL "openblas" AND NOT USE_SYSTEM_OPENBLAS)
   link_directories(${CMAKE_CURRENT_BINARY_DIR}/openblas/install/lib)
@@ -50,6 +51,11 @@ set_property(TARGET diskann PROPERTY CXX_STANDARD 17)
 add_dependencies(diskann boost)
 if(VSAG_BLAS_BACKEND STREQUAL "openblas")
   add_dependencies(diskann openblas)
+else()
+  if(NOT TARGET mkl)
+    add_custom_target(mkl)
+  endif()
+  add_dependencies(diskann mkl)
 endif()
 target_link_libraries(diskann
   ${BLAS_LIBRARIES}

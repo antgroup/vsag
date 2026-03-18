@@ -80,16 +80,11 @@ if(USE_SYSTEM_OPENBLAS)
         # Set install_dir to a dummy value for compatibility
         set(install_dir ${CMAKE_CURRENT_BINARY_DIR}/${name}/system)
         
-        # Add include directories
-        include_directories(${OPENBLAS_INCLUDE})
-        if(NOT "${OPENBLAS_INCLUDE}" STREQUAL "${LAPACKE_INCLUDE}")
-            include_directories(${LAPACKE_INCLUDE})
-        endif()
-
         set(OPENBLAS_INCLUDE_DIRS ${OPENBLAS_INCLUDE})
         if(NOT "${OPENBLAS_INCLUDE}" STREQUAL "${LAPACKE_INCLUDE}")
             list(APPEND OPENBLAS_INCLUDE_DIRS ${LAPACKE_INCLUDE})
         endif()
+        include_directories(${OPENBLAS_INCLUDE_DIRS})
         
         # Create a dummy target for consistency with dependencies
         add_custom_target(${name})
@@ -133,7 +128,7 @@ else()
         list(PREPEND BLAS_LIBRARIES gomp)
     endif()
     set(OPENBLAS_INCLUDE_DIRS ${install_dir}/include)
-    message ("enable openblas as blas backend")
+    message(STATUS "Enable OpenBLAS as BLAS backend")
 endif()
 
 set(BLAS_LIBRARIES "${BLAS_LIBRARIES}" CACHE STRING "Final list of BLAS libraries to link against." FORCE)
