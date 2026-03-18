@@ -26,6 +26,26 @@
 
 namespace vsag {
 
+/***
+ * @brief Transform Quantizer applies transformation chain before base quantization.
+ *
+ * code layout:
+ * +----------------+----------+----------+-----+----------+
+ * | base-code      | meta[0]  | meta[1]  | ... | meta[N]  |
+ * | [aligned size] | [var]    | [var]    |     | [var]    |
+ * +----------------+----------+----------+-----+----------+
+ *
+ * query layout:
+ * +----------------+----------+----------+-----+----------+
+ * | base-code      | meta[0]  | meta[1]  | ... | meta[N]  |
+ * | [aligned size] | [var]    | [var]    |     | [var]    |
+ * +----------------+----------+----------+-----+----------+
+ *
+ * - base-code: quantized code from inner quantizer (aligned)
+ * - meta[i]: metadata from i-th transformer in chain
+ * - Transformers: PCA, FHT, ROM, MRLE
+ * - Distance is recovered through chain of transformers
+ */
 template <typename QuantTmpl, MetricType metric = MetricType::METRIC_TYPE_L2SQR>
 class TransformQuantizer : public Quantizer<TransformQuantizer<QuantTmpl, metric>> {
 public:

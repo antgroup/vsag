@@ -22,6 +22,18 @@
 
 namespace vsag {
 
+/***
+ * @brief FP32 Quantizer stores vectors in 32-bit floating-point format.
+ *
+ * code layout:
+ * +----------------+----------------+
+ * | float32-code   | mold (opt)     |
+ * | [dim * 4B]     | [4B]           |
+ * +----------------+----------------+
+ *
+ * - float32-code: original vector data (required)
+ * - mold: sqrt(sum(vec^2)) for cosine similarity (optional, cosine with hold_molds)
+ */
 template <MetricType metric = MetricType::METRIC_TYPE_L2SQR>
 class FP32Quantizer : public Quantizer<FP32Quantizer<metric>> {
 public:
