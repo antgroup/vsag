@@ -79,6 +79,7 @@ HGraphAnalyzer::calculate_base_groundtruth() {
             auto current_id = i;
             while (dup_ids[current_id] != i) {
                 visited[dup_ids[current_id]] = true;
+                is_duplicate_ids_[dup_ids[current_id]] = true;
                 current_id = dup_ids[current_id];
             }
         }
@@ -254,12 +255,11 @@ HGraphAnalyzer::calculate_quantization_result(
         auto id = sample_ids[i];
         const auto& result = search_result.at(id);
         float sample_error = 0.0F;
-        hgraph_->use_reorder_ = false;
-        auto base_result = hgraph_->CalDistanceById(sample_datas.data() + i, result.data(), topk_);
+        auto base_result =
+            hgraph_->CalDistanceById(sample_datas.data() + i, result.data(), topk_, false);
         const auto* base_distance = base_result->GetDistances();
-        hgraph_->use_reorder_ = true;
         auto precise_result =
-            hgraph_->CalDistanceById(sample_datas.data() + i, result.data(), topk_);
+            hgraph_->CalDistanceById(sample_datas.data() + i, result.data(), topk_, true);
         const auto* precise_distance = precise_result->GetDistances();
         uint32_t inversion_count = 0;
         for (uint32_t j = 0; j < topk_; ++j) {
@@ -323,8 +323,6 @@ HGraphAnalyzer::calculate_groundtruth(const Vector<float>& sample_datas,
     if (not ground_truth.empty()) {
         return;
     }
-    // calculate duplicate ratio while calculating groundtruth
-    uint32_t duplicate_count = 0;
     Vector<float> distances_array(this->total_count_, allocator_);
     Vector<InnerIdType> ids_array(this->total_count_, allocator_);
     std::iota(ids_array.begin(), ids_array.end(), 0);
@@ -476,9 +474,6 @@ HGraphAnalyzer::GetStats() {
     stats["connect_components"].SetInt(components.size());
     stats["maximal_component_size"].SetInt(*std::max_element(components.begin(), components.end()));
     stats["deleted_count"].SetInt(hgraph_->delete_count_);
-    if (hgraph_->label_table_->CompressDuplicateData()) {
-        stats["duplicate_ratio"].SetFloat(GetDuplicateRatio());
-    }
     const auto& [count_in_degree, count_out_degree, avg_degree] = GetDegreeDistribution();
     stats["in_degree_distribution"].SetVector<uint32_t>(count_in_degree);
     stats["out_degree_distribution"].SetVector<uint32_t>(count_out_degree);
