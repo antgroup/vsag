@@ -71,6 +71,11 @@ create_registered_index(const std::string& index_name,
         }
         creator = iterator->second;
     }
+    if (creator == nullptr) {
+        LOG_ERROR_AND_RETURNS(ErrorType::INTERNAL_ERROR,
+                              "failed to create index(internal): null creator for ",
+                              normalized_name);
+    }
     return creator(parsed_params, index_common_params);
 }
 
