@@ -22,6 +22,19 @@
 
 namespace vsag {
 
+/***
+ * @brief BF16 Quantizer stores vectors in 16-bit bfloat16 floating-point format.
+ *
+ * code layout:
+ * +------------------------+
+ * | bf16-code              |
+ * | [dim * 2B]             |
+ * +------------------------+
+ *
+ * - bf16-code: bfloat16 (Brain Float) values (required)
+ * - 1 sign bit, 8 exponent bits, 7 mantissa bits
+ * - Same exponent range as FP32, less precision
+ */
 template <MetricType metric = MetricType::METRIC_TYPE_L2SQR>
 class BF16Quantizer : public Quantizer<BF16Quantizer<metric>> {
 public:

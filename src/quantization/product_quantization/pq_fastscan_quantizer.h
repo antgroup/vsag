@@ -22,6 +22,25 @@
 
 namespace vsag {
 
+/***
+ * @brief PQ FastScan Quantizer uses 4-bit packed storage for optimized distance computation.
+ *
+ * code layout (32 vectors packed):
+ * +--------+--------+-----+--------+
+ * | sub0   | sub1   | ... | subN   |
+ * | [32*4b]| [32*4b]|     | [32*4b]|
+ * +--------+--------+-----+--------+
+ *
+ * query layout:
+ * +------------------+--------+--------+
+ * | lookup-table     | diff   | lower  |
+ * | [pq_dim*16*4B]   | [4B]   | [4B]   |
+ * +------------------+--------+--------+
+ *
+ * - pqfs-code: 4 bits per subspace, packed for 32 vectors at once
+ * - Each subspace has 16 centroids (2^4 = 16 possible indices)
+ * - Optimized for SIMD batch distance computation
+ */
 template <MetricType metric = MetricType::METRIC_TYPE_L2SQR>
 class PQFastScanQuantizer : public Quantizer<PQFastScanQuantizer<metric>> {
 public:

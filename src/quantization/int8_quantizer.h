@@ -25,6 +25,19 @@
 #include "quantizer.h"
 
 namespace vsag {
+
+/***
+ * @brief INT8 Quantizer stores vectors in 8-bit integer format.
+ *
+ * code layout:
+ * +----------------+----------------+
+ * | int8-code      | mold (opt)     |
+ * | [dim * 1B]     | [4B]           |
+ * +----------------+----------------+
+ *
+ * - int8-code: quantized 8-bit integer values (required)
+ * - mold: sqrt(sum(vec^2)) for normalization (optional, cosine only)
+ */
 template <MetricType metric = MetricType::METRIC_TYPE_L2SQR>
 class INT8Quantizer : public Quantizer<INT8Quantizer<metric>> {
 public:

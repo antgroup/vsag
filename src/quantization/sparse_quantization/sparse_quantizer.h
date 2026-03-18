@@ -29,6 +29,21 @@ struct BufferEntry {
     float val;
 };
 
+/***
+ * @brief Sparse Quantizer stores sparse vectors with only non-zero elements.
+ *
+ * code layout:
+ * +----------+------------------+------------------+-----+------------------+
+ * | len      | entry[0]         | entry[1]         | ... | entry[len-1]     |
+ * | [4B]     | id[4B] + val[4B] | id[4B] + val[4B] |     | id[4B] + val[4B] |
+ * +----------+------------------+------------------+-----+------------------+
+ *
+ * - len: number of non-zero elements (uint32)
+ * - entry[i]: sorted by id in ascending order
+ *   - id: dimension index (uint32)
+ *   - val: value at this dimension (float)
+ * - Only supports METRIC_TYPE_IP (inner product)
+ */
 template <MetricType metric = MetricType::METRIC_TYPE_IP>
 class SparseQuantizer : public Quantizer<SparseQuantizer<metric>> {
 public:
