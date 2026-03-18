@@ -3,37 +3,9 @@
 # in this will automatically be invited to review a pull
 # request in which modified files match the pattern.
 
-# Fallback rule
-*                        @wxyucs @jiaweizone
+# NOTE: Due to the increasing volume of code submissions driven by AI-assisted
+# coding, human review now serves primarily as a gating step for merge approval.
+# The substantive code review is performed by review agents (Copilot / Gemini).
 
-# All the markdown files
-*.md                     @wxyucs @jiaweizone
-
-# GitHub routines
-/.circleci/              @wxyucs @LHT129
-/.github/                @wxyucs @LHT129
-/docker/                 @wxyucs
-/.*                      @wxyucs
-/LICENSE                 @wxyucs
-
-# Released Indexes
-/extern/diskann/         @inabao
-
-# Core codes
-/src/                    @jiaweizone @inabao @wxyucs @LHT129 @ShawnShawnYou
-
-# Detail source codes
-/src/index               @inabao @wxyucs @LHT129 @ShawnShawnYou
-/src/datacell/           @LHT129 @ShawnShawnYou @inabao
-/src/io/                 @LHT129 @inabao
-/src/quantization/       @LHT129 @ShawnShawnYou @inabao
-/src/impl/               @ShawnShawnYou @inabao @LHT129 
-/src/algorithm/          @inabao @wxyucs
-/src/simd/               @LHT129 @ShawnShawnYou @inabao
-
-# pybinds
-/python/                 @wxyucs @LHT129 @jac0626
-/python_bindings/        @wxyucs @LHT129 @jac0626
-
-# scripts
-/scripts/                @LHT129 @wxyucs @inabao
+# All files require review from all four maintainers
+*                        @wxyucs @LHT129 @inabao @jiaweizone
