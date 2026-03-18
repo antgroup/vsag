@@ -836,6 +836,10 @@ Pyramid::search_node(const IndexNode* node,
         auto computer = codes->FactoryComputer(query->GetFloat32Vectors());
         codes->Query(dists.data(), computer, ids_ptr, id_count);
 
+        for (const auto& id : node->ids_) {
+            vl->Set(id);
+        }
+
         for (int i = 0; i < id_count; ++i) {
             results->Push(dists[i], ids_ptr[i]);
             if (results->Size() > search_param.ef) {
