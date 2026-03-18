@@ -22,6 +22,25 @@
 
 namespace vsag {
 
+/***
+ * @brief Scalar Quantizer stores vectors in 4-bit or 8-bit quantized format.
+ *
+ * code layout (SQ8):
+ * +------------------------+
+ * | sq8-code               |
+ * | [dim * 1B]             |
+ * +------------------------+
+ *
+ * code layout (SQ4):
+ * +------------------------+
+ * | sq4-code               |
+ * | [dim * 0.5B, packed]   |
+ * +------------------------+
+ *
+ * - sq-code: quantized values per dimension (required)
+ * - SQ8: 8 bits per dimension, range [0, 255]
+ * - SQ4: 4 bits per dimension, packed 2 values per byte, range [0, 15]
+ */
 template <MetricType metric = MetricType::METRIC_TYPE_L2SQR, int bit = 8>
 class ScalarQuantizer : public Quantizer<ScalarQuantizer<metric, bit>> {
 public:
