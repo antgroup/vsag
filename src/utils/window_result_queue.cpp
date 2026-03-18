@@ -33,8 +33,11 @@ WindowResultQueue::Push(float value) {
 float
 WindowResultQueue::GetAvgResult() const {
     uint64_t statistic_num = std::min<uint64_t>(count_, queue_.size());
+    if (statistic_num == 0) {
+        return 0.0F;
+    }
     float result = 0;
-    for (int i = 0; i < statistic_num; i++) {
+    for (uint64_t i = 0; i < statistic_num; i++) {
         result += queue_[i];
     }
     return result / static_cast<float>(statistic_num);
