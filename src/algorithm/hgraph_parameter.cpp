@@ -132,6 +132,7 @@ HGraphParameter::ToJson() const {
     json[TYPE_KEY].SetString(INDEX_TYPE_HGRAPH);
 
     json[HGRAPH_USE_ELP_OPTIMIZER_KEY].SetBool(this->use_elp_optimizer);
+    json[HGRAPH_IGNORE_REORDER_KEY].SetBool(this->ignore_reorder);
     json[BASE_CODES_KEY].SetJson(this->base_codes_param->ToJson());
     json[GRAPH_KEY].SetJson(this->bottom_graph_param->ToJson());
     json[EF_CONSTRUCTION_KEY].SetInt(this->ef_construction);
