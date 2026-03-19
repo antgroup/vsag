@@ -32,6 +32,8 @@ class ExtraInfoInterface {
 public:
     ExtraInfoInterface() = default;
 
+    virtual ~ExtraInfoInterface() = default;
+
     static ExtraInfoInterfacePtr
     MakeInstance(const ExtraInfoDataCellParamPtr& param, const IndexCommonParam& common_param);
 
