@@ -23,6 +23,7 @@
 #include <utility>
 
 #include "index_common_param.h"
+#include "io_syscall.h"
 
 namespace vsag {
 
@@ -42,11 +43,7 @@ MMapIO::MMapIO(std::string filename, Allocator* allocator)
     auto mmap_size = this->size_;
     if (this->size_ == 0) {
         mmap_size = DEFAULT_INIT_MMAP_SIZE;
-#ifdef __APPLE__
-        auto ret = ftruncate(this->fd_, static_cast<off_t>(mmap_size));
-#else
-        auto ret = ftruncate64(this->fd_, static_cast<int64_t>(mmap_size));
-#endif
+        auto ret = IOSyscall::FTruncate(this->fd_, mmap_size);
         if (ret == -1) {
             throw VsagException(ErrorType::INTERNAL_ERROR, "ftruncate failed");
         }
@@ -82,18 +79,12 @@ MMapIO::WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset) {
         old_size = DEFAULT_INIT_MMAP_SIZE;
     }
     if (new_size > old_size) {
-        auto ret =
-#ifdef __APPLE__
-            ftruncate(this->fd_, static_cast<off_t>(new_size));
-#else
-            ftruncate64(this->fd_, static_cast<int64_t>(new_size));
-#endif
+        auto ret = IOSyscall::FTruncate(this->fd_, new_size);
         if (ret == -1) {
             throw VsagException(ErrorType::INTERNAL_ERROR, "ftruncate failed");
         }
 
 #ifdef __APPLE__
-        // macOS doesn't have mremap; unmap the old region first, then re-mmap.
         munmap(this->start_, old_size);
         void* addr = mmap(nullptr, new_size, PROT_READ | PROT_WRITE, MAP_SHARED, this->fd_, 0);
         if (addr == MAP_FAILED) {
@@ -117,12 +108,7 @@ MMapIO::ResizeImpl(uint64_t size) {
         old_size = DEFAULT_INIT_MMAP_SIZE;
     }
     if (new_size > old_size) {
-        auto ret =
-#ifdef __APPLE__
-            ftruncate(this->fd_, static_cast<off_t>(new_size));
-#else
-            ftruncate64(this->fd_, static_cast<int64_t>(new_size));
-#endif
+        auto ret = IOSyscall::FTruncate(this->fd_, new_size);
         if (ret == -1) {
             throw VsagException(ErrorType::INTERNAL_ERROR, "ftruncate failed");
         }
@@ -150,12 +136,7 @@ MMapIO::ResizeImpl(uint64_t size) {
         this->start_ =
             static_cast<uint8_t*>(mremap(this->start_, old_size, new_size, MREMAP_MAYMOVE));
 #endif
-        auto ret =
-#ifdef __APPLE__
-            ftruncate(this->fd_, static_cast<off_t>(new_size));
-#else
-            ftruncate64(this->fd_, static_cast<int64_t>(new_size));
-#endif
+        auto ret = IOSyscall::FTruncate(this->fd_, new_size);
         if (ret == -1) {
             throw VsagException(ErrorType::INTERNAL_ERROR, "ftruncate failed");
         }
