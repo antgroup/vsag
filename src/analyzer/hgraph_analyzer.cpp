@@ -163,7 +163,7 @@ HGraphAnalyzer::GetDuplicateRatio() {
     // Sieve method: progressively filter candidate duplicate groups
     calculate_base_groundtruth();
     auto codes = hgraph_->reorder_ ? hgraph_->high_precise_codes_ : hgraph_->basic_flatten_codes_;
-    constexpr float kEpsilon = 2e-6F;
+    constexpr float epsilon = 2e-6F;
 
     // Initialize with all vectors as a single group
     Vector<Vector<InnerIdType>> groups(allocator_);
@@ -188,7 +188,7 @@ HGraphAnalyzer::GetDuplicateRatio() {
             Vector<InnerIdType> sub(allocator_);
             sub.push_back(sorted[0].second);
             for (size_t i = 1; i < sorted.size(); ++i) {
-                if (sorted[i].first - sorted[i - 1].first <= kEpsilon) {
+                if (sorted[i].first - sorted[i - 1].first <= epsilon) {
                     sub.push_back(sorted[i].second);
                 } else {
                     if (sub.size() > 1) {
