@@ -1959,6 +1959,46 @@ TestIndex::TestMarkRemoveIndex(const TestIndex::IndexPtr& index,
 }
 
 void
+TestIndex::TestShrinkIndex(const TestIndex::IndexPtr& index,
+                           const TestDatasetPtr& dataset,
+                           const std::string& search_param,
+                           float recall,
+                           bool expected_success) {
+    auto base_num = dataset->base_->GetNumElements();
+    auto base_dim = dataset->base_->GetDim();
+    auto vectors = dataset->base_->GetFloat32Vectors();
+    auto ids = dataset->base_->GetIds();
+
+    auto add_results = index->Add(dataset->base_);
+    REQUIRE(add_results.has_value());
+    REQUIRE(index->GetNumElements() == base_num);
+
+    int64_t bias = 125;
+    int64_t remove_count = 100;
+    std::vector<int64_t> remove_ids(ids + bias, ids + bias + remove_count);
+    auto remove_result = index->Remove(remove_ids, vsag::RemoveMode::MARK_REMOVE);
+    REQUIRE(remove_result.has_value());
+    REQUIRE(index->GetNumberRemoved() == remove_count);
+
+    index->ShrinkAndRepair();
+
+    for (int64_t i = 0; i < remove_count; ++i) {
+        auto new_data = vsag::Dataset::Make();
+        int64_t new_id = base_num + i;
+        new_data->NumElements(1)
+            ->Dim(base_dim)
+            ->Ids(&new_id)
+            ->Float32Vectors(vectors + (bias + i) * base_dim)
+            ->Owner(false);
+        auto add_result = index->Add(new_data);
+        REQUIRE(add_result.has_value());
+        REQUIRE(add_result.value().empty());
+    }
+    REQUIRE(index->GetNumElements() == base_num);
+    TestKnnSearch(index, dataset, search_param, recall, expected_success);
+}
+
+void
 TestIndex::TestRemoveIndex(const TestIndex::IndexPtr& index,
                            const TestDatasetPtr& dataset,
                            bool expected_success) {

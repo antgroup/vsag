@@ -44,6 +44,8 @@
 
 namespace vsag {
 
+class HGraphShrinkContext;
+
 // HGraph index was introduced since v0.12
 class HGraph : public InnerIndexInterface {
 public:
@@ -52,6 +54,7 @@ public:
                                  const IndexCommonParam& common_param);
 
     friend class HGraphAnalyzer;
+    friend class HGraphShrinkContext;
 
 public:
     HGraph(const HGraphParameterPtr& param, const IndexCommonParam& common_param);
@@ -178,7 +181,7 @@ public:
     Remove(const std::vector<int64_t>& ids, RemoveMode mode = RemoveMode::MARK_REMOVE) override;
 
     void
-    ShrinkAndRepair(double timeout_ms = std::numeric_limits<double>::max()) override{};
+    ShrinkAndRepair(double timeout_ms = std::numeric_limits<double>::max()) override;
 
     void
     Serialize(StreamWriter& writer) const override;
@@ -209,6 +212,19 @@ public:
                     const AttributeSet& new_attrs,
                     const AttributeSet& origin_attrs) override;
 
+    bool
+    CheckIdLevel0(InnerIdType id) const {
+        if (id == entry_point_id_) {
+            return false;
+        }
+        for (auto& graph : route_graphs_) {
+            if (graph->CheckIdExists(id)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
 private:
     static JsonType
     map_hgraph_param(const JsonType& hgraph_json);
@@ -234,13 +250,18 @@ private:
 
     Vector<InnerIdType>
     get_unique_inner_ids(InnerIdType count) {
-        auto start = static_cast<InnerIdType>(this->total_count_);
         Vector<InnerIdType> ret(count, this->allocator_);
         if (ret.size() != count) {
             throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "allocate memory failed");
         }
-        std::iota(ret.begin(), ret.end(), start);
-        this->total_count_ += count;
+        for (InnerIdType i = 0; i < count; ++i) {
+            auto [success, id] = this->label_table_->PopHole();
+            if (success) {
+                ret[i] = id;
+            } else {
+                ret[i] = static_cast<InnerIdType>(this->total_count_++);
+            }
+        }
         return ret;
     }
 
