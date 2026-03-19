@@ -1,4 +1,3 @@
-
 # Copyright 2024-present the vsag project
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -26,7 +25,7 @@ if (APPLE)
                         PRIVATE
                         Catch2::Catch2 
                         simd_test vsag_test algorithm_test factory_test attr_test
-                        datacell_test quantizer_test storage_test io_test utils_test impl_test
+                        datacell_test quantizer_test storage_test io_test utils_test impl_test analyzer_test
                         vsag
         )
         # Ensure static test libraries are not dead-stripped on macOS.
@@ -42,17 +41,18 @@ if (APPLE)
         "-Wl,-force_load,$<TARGET_FILE:io_test>"
         "-Wl,-force_load,$<TARGET_FILE:utils_test>"
         "-Wl,-force_load,$<TARGET_FILE:impl_test>"
+        "-Wl,-force_load,$<TARGET_FILE:analyzer_test>"
         )
 else()
-	target_link_libraries (unittests
-					PRIVATE
-					Catch2::Catch2
-					"-Wl,--whole-archive"
-					simd_test vsag_test algorithm_test factory_test attr_test
-					datacell_test quantizer_test storage_test io_test utils_test impl_test
-					"-Wl,--no-whole-archive"
-					vsag roaring
-	)
+        target_link_libraries (unittests
+                        PRIVATE
+                        Catch2::Catch2 
+                        "-Wl,--whole-archive"
+                        simd_test vsag_test algorithm_test factory_test attr_test
+                        datacell_test quantizer_test storage_test io_test utils_test impl_test analyzer_test
+                        "-Wl,--no-whole-archive"
+                        vsag roaring
+        )
 endif()
 
 add_dependencies (unittests Catch2 vsag)
