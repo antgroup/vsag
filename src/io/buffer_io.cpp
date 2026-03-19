@@ -20,6 +20,8 @@
 
 #include <filesystem>
 
+#include "io_syscall.h"
+
 namespace vsag {
 
 BufferIO::BufferIO(std::string filename, Allocator* allocator)
@@ -44,12 +46,8 @@ BufferIO::BufferIO(const IOParamPtr& param, const IndexCommonParam& common_param
 
 void
 BufferIO::WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset) {
-#ifdef __APPLE__
-    auto ret = pwrite(this->fd_, data, size, static_cast<off_t>(offset));
-#else
-    auto ret = pwrite64(this->fd_, data, size, static_cast<int64_t>(offset));
-#endif
-    if (ret != size) {
+    auto ret = IOSyscall::PWrite(this->fd_, data, size, offset);
+    if (ret != static_cast<ssize_t>(size)) {
         throw VsagException(ErrorType::INTERNAL_ERROR,
                             fmt::format("write bytes {} less than {}", ret, size));
     }
@@ -60,11 +58,7 @@ BufferIO::WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset) {
 
 void
 BufferIO::ResizeImpl(uint64_t size) {
-#ifdef __APPLE__
-    auto ret = ftruncate(this->fd_, static_cast<off_t>(size));
-#else
-    auto ret = ftruncate64(this->fd_, static_cast<int64_t>(size));
-#endif
+    auto ret = IOSyscall::FTruncate(this->fd_, size);
     if (ret == -1) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "ftruncate failed");
     }
@@ -76,12 +70,8 @@ BufferIO::ReadImpl(uint64_t size, uint64_t offset, uint8_t* data) const {
     if (size == 0) {
         return true;
     }
-#ifdef __APPLE__
-    auto ret = pread(this->fd_, data, size, static_cast<off_t>(offset));
-#else
-    auto ret = pread64(this->fd_, data, size, static_cast<int64_t>(offset));
-#endif
-    if (ret != size) {
+    auto ret = IOSyscall::PRead(this->fd_, data, size, offset);
+    if (ret != static_cast<ssize_t>(size)) {
         throw VsagException(ErrorType::INTERNAL_ERROR,
                             fmt::format("read bytes {} less than {}", ret, size));
     }
