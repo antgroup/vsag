@@ -14,6 +14,8 @@
 
 #include "analyzer.h"
 
+#include <fmt/format.h>
+
 #include <catch2/catch_test_macros.hpp>
 
 #include "algorithm/hgraph.h"
@@ -32,25 +34,26 @@ TEST_CASE("CreateAnalyzer with HGraph index", "[ut][analyzer]") {
     int64_t dim = 64;
     int64_t num_vectors = 100;
 
-    auto params = vsag::JsonType::Parse(R"(
-    {
+    auto params = vsag::JsonType::Parse(fmt::format(R"(
+    {{
         "dtype": "float32",
         "metric_type": "l2",
-        "dim": 64,
-        "hgraph": {
+        "dim": {},
+        "hgraph": {{
             "max_degree": 16,
             "ef_construction": 100,
-            "base_codes": {
+            "base_codes": {{
                 "codes_type": "flatten_codes",
-                "io_params": { "type": "block_memory_io" },
-                "quantization_params": { "type": "fp32" }
-            },
-            "graph": {
-                "io_params": { "type": "block_memory_io" }
-            }
-        }
-    }
-    )");
+                "io_params": {{ "type": "block_memory_io" }},
+                "quantization_params": {{ "type": "fp32" }}
+            }},
+            "graph": {{
+                "io_params": {{ "type": "block_memory_io" }}
+            }}
+        }}
+    }}
+    )",
+                                                    dim));
 
     auto index_result = vsag::Factory::CreateIndex("hgraph", params.Dump());
     REQUIRE(index_result.has_value());
@@ -70,13 +73,13 @@ TEST_CASE("CreateAnalyzer with HGraph index", "[ut][analyzer]") {
     auto inner_index = std::dynamic_pointer_cast<vsag::IndexImpl<vsag::HGraph>>(index);
     REQUIRE(inner_index != nullptr);
 
-    auto allocator = vsag::Engine::CreateDefaultAllocator();
-    vsag::AnalyzerParam param(allocator.get());
-    param.topk = 10;
-    param.base_sample_size = 5;
+    auto analyzer_allocator = vsag::Engine::CreateDefaultAllocator();
+    vsag::AnalyzerParam analyzer_param(analyzer_allocator.get());
+    analyzer_param.topk = 10;
+    analyzer_param.base_sample_size = 5;
 
     {
-        auto analyzer = vsag::CreateAnalyzer(inner_index->GetInnerIndex().get(), param);
+        auto analyzer = vsag::CreateAnalyzer(inner_index->GetInnerIndex().get(), analyzer_param);
         REQUIRE(analyzer != nullptr);
     }
 }

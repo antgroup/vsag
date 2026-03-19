@@ -14,6 +14,9 @@
 
 #include "hgraph_analyzer.h"
 
+#include <fmt/format.h>
+
+#include <algorithm>
 #include <catch2/catch_test_macros.hpp>
 
 #include "algorithm/hgraph.h"
@@ -63,25 +66,7 @@ create_test_hgraph_index(int64_t dim, int64_t num_vectors, int64_t max_degree = 
     return index;
 }
 
-TEST_CASE("HGraphAnalyzer creation", "[ut][hgraph_analyzer]") {
-    int64_t dim = 32;
-    int64_t num_vectors = 50;
-
-    auto index = create_test_hgraph_index(dim, num_vectors);
-    auto inner_index = std::dynamic_pointer_cast<vsag::IndexImpl<vsag::HGraph>>(index);
-    REQUIRE(inner_index != nullptr);
-
-    auto allocator = vsag::Engine::CreateDefaultAllocator();
-    vsag::AnalyzerParam param(allocator.get());
-    param.topk = 10;
-    param.base_sample_size = 5;
-
-    auto hgraph_analyzer = std::dynamic_pointer_cast<vsag::HGraphAnalyzer>(
-        vsag::CreateAnalyzer(inner_index->GetInnerIndex().get(), param));
-    REQUIRE(hgraph_analyzer != nullptr);
-}
-
-TEST_CASE("HGraphAnalyzer GetComponentCount", "[ut][hgraph_analyzer]") {
+TEST_CASE("HGraphAnalyzer functionality", "[ut][hgraph_analyzer]") {
     int64_t dim = 32;
     int64_t num_vectors = 50;
 
@@ -98,73 +83,27 @@ TEST_CASE("HGraphAnalyzer GetComponentCount", "[ut][hgraph_analyzer]") {
         vsag::CreateAnalyzer(inner_index->GetInnerIndex().get(), param));
     REQUIRE(hgraph_analyzer != nullptr);
 
-    auto components = hgraph_analyzer->GetComponentCount();
+    SECTION("GetComponentCount") {
+        auto components = hgraph_analyzer->GetComponentCount();
 
-    REQUIRE_FALSE(components.empty());
-    REQUIRE(*std::max_element(components.begin(), components.end()) > 0);
-}
+        REQUIRE_FALSE(components.empty());
+        REQUIRE(*std::max_element(components.begin(), components.end()) > 0);
+    }
 
-TEST_CASE("HGraphAnalyzer GetDuplicateRatio", "[ut][hgraph_analyzer]") {
-    int64_t dim = 32;
-    int64_t num_vectors = 50;
+    SECTION("GetDuplicateRatio") {
+        auto ratio = hgraph_analyzer->GetDuplicateRatio();
+        REQUIRE(ratio >= 0.0F);
+        REQUIRE(ratio <= 1.0F);
+    }
 
-    auto index = create_test_hgraph_index(dim, num_vectors);
-    auto inner_index = std::dynamic_pointer_cast<vsag::IndexImpl<vsag::HGraph>>(index);
-    REQUIRE(inner_index != nullptr);
+    SECTION("GetBaseAvgDistance") {
+        auto avg_distance = hgraph_analyzer->GetBaseAvgDistance();
+        REQUIRE(avg_distance >= 0.0F);
+    }
 
-    auto allocator = vsag::Engine::CreateDefaultAllocator();
-    vsag::AnalyzerParam param(allocator.get());
-    param.topk = 10;
-    param.base_sample_size = 5;
-
-    auto hgraph_analyzer = std::dynamic_pointer_cast<vsag::HGraphAnalyzer>(
-        vsag::CreateAnalyzer(inner_index->GetInnerIndex().get(), param));
-    REQUIRE(hgraph_analyzer != nullptr);
-
-    auto ratio = hgraph_analyzer->GetDuplicateRatio();
-    REQUIRE(ratio >= 0.0F);
-    REQUIRE(ratio <= 1.0F);
-}
-
-TEST_CASE("HGraphAnalyzer GetBaseAvgDistance", "[ut][hgraph_analyzer]") {
-    int64_t dim = 32;
-    int64_t num_vectors = 50;
-
-    auto index = create_test_hgraph_index(dim, num_vectors);
-    auto inner_index = std::dynamic_pointer_cast<vsag::IndexImpl<vsag::HGraph>>(index);
-    REQUIRE(inner_index != nullptr);
-
-    auto allocator = vsag::Engine::CreateDefaultAllocator();
-    vsag::AnalyzerParam param(allocator.get());
-    param.topk = 10;
-    param.base_sample_size = 5;
-
-    auto hgraph_analyzer = std::dynamic_pointer_cast<vsag::HGraphAnalyzer>(
-        vsag::CreateAnalyzer(inner_index->GetInnerIndex().get(), param));
-    REQUIRE(hgraph_analyzer != nullptr);
-
-    auto avg_distance = hgraph_analyzer->GetBaseAvgDistance();
-    REQUIRE(avg_distance >= 0.0F);
-}
-
-TEST_CASE("HGraphAnalyzer GetNeighborRecall", "[ut][hgraph_analyzer]") {
-    int64_t dim = 32;
-    int64_t num_vectors = 50;
-
-    auto index = create_test_hgraph_index(dim, num_vectors);
-    auto inner_index = std::dynamic_pointer_cast<vsag::IndexImpl<vsag::HGraph>>(index);
-    REQUIRE(inner_index != nullptr);
-
-    auto allocator = vsag::Engine::CreateDefaultAllocator();
-    vsag::AnalyzerParam param(allocator.get());
-    param.topk = 10;
-    param.base_sample_size = 5;
-
-    auto hgraph_analyzer = std::dynamic_pointer_cast<vsag::HGraphAnalyzer>(
-        vsag::CreateAnalyzer(inner_index->GetInnerIndex().get(), param));
-    REQUIRE(hgraph_analyzer != nullptr);
-
-    auto recall = hgraph_analyzer->GetNeighborRecall();
-    REQUIRE(recall >= 0.0F);
-    REQUIRE(recall <= 1.0F);
+    SECTION("GetNeighborRecall") {
+        auto recall = hgraph_analyzer->GetNeighborRecall();
+        REQUIRE(recall >= 0.0F);
+        REQUIRE(recall <= 1.0F);
+    }
 }
