@@ -217,6 +217,12 @@ means that the index uses PQ quantization with 64 subspaces, enables reordering 
 - **Optional Values**: 1 to INT_MAX
 - **Default Value**: Must be provided (no default value)
 
+### brute_force_search_filter_ratio
+- **Parameter Type**: float
+- **Parameter Description**: When a pre-filter's valid ratio (fraction of vectors that pass the filter) is at or below this threshold, the search automatically switches to brute-force mode. Brute-force iterates over all elements and computes exact distances for those that pass the filter, which is faster than graph-based search when very few vectors are valid. A value less than 0 (the default) disables this feature.
+- **Optional Values**: any float (negative values disable the feature)
+- **Default Value**: -1.0 (disabled)
+
 ## Examples for Search Parameter String
 ```json
 "hgraph": {
@@ -224,3 +230,11 @@ means that the index uses PQ quantization with 64 subspaces, enables reordering 
 }
 ```
 means that the search will use an ef_search value of 200 to control the search quality and performance trade-off.
+
+```json
+"hgraph": {
+    "ef_search": 200,
+    "brute_force_search_filter_ratio": 0.05
+}
+```
+means that when the pre-filter passes 5% or fewer vectors (valid ratio ≤ 0.05), the search automatically switches from graph-based to brute-force to improve performance under high-filtering conditions.

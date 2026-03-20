@@ -2159,6 +2159,57 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         ft = combined_filter;
     }
 
+    // Check if brute-force search should be used based on filter valid ratio
+    if (not request.enable_attribute_filter_ && ft != nullptr &&
+        params.brute_force_search_filter_ratio >= 0.0F &&
+        ft->ValidRatio() <= params.brute_force_search_filter_ratio) {
+        this->pool_->ReturnOne(vt);
+
+        auto flat = this->basic_flatten_codes_;
+        if (use_reorder_) {
+            flat = this->high_precise_codes_;
+        }
+        if (create_new_raw_vector_) {
+            flat = this->raw_vector_;
+        }
+
+        auto computer = flat->FactoryComputer(raw_query);
+        auto brute_force_result = DistanceHeap::MakeInstanceBySize<true, false>(ctx.alloc, k);
+        auto total = static_cast<InnerIdType>(total_count_);
+        for (InnerIdType i = 0; i < total; ++i) {
+            if (ft->CheckValid(i)) {
+                float dist = 0.0F;
+                flat->Query(&dist, computer, &i, 1);
+                brute_force_result->Push(dist, i);
+            }
+        }
+
+        if (brute_force_result->Empty()) {
+            auto dataset_result = DatasetImpl::MakeEmptyDataset();
+            dataset_result->Statistics(stats.Dump());
+            return dataset_result;
+        }
+        auto count = static_cast<const int64_t>(brute_force_result->Size());
+        auto [dataset_results, dists, ids] = create_fast_dataset(count, ctx.alloc);
+        char* extra_infos = nullptr;
+        if (extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
+            extra_infos = static_cast<char*>(
+                ctx.alloc->Allocate(extra_info_size_ * brute_force_result->Size()));
+            dataset_results->ExtraInfos(extra_infos);
+        }
+        for (int64_t j = count - 1; j >= 0; --j) {
+            dists[j] = brute_force_result->Top().first;
+            ids[j] = this->label_table_->GetLabelById(brute_force_result->Top().second);
+            if (extra_infos != nullptr) {
+                this->extra_infos_->GetExtraInfoById(brute_force_result->Top().second,
+                                                     extra_infos + extra_info_size_ * j);
+            }
+            brute_force_result->Pop();
+        }
+        dataset_results->Statistics(stats.Dump());
+        return std::move(dataset_results);
+    }
+
     if (request.enable_attribute_filter_ and this->attr_filter_index_ != nullptr) {
         auto& schema = this->attr_filter_index_->field_type_map_;
         auto expr = AstParse(request.attribute_filter_str_, &schema);
