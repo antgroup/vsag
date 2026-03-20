@@ -93,6 +93,11 @@ public:
         return QUANTIZATION_TYPE_VALUE_PQ;
     }
 
+    // Load codebook from external data (e.g., DiskANN format)
+    // codebook_data: float[pq_dim][256][subspace_dim] format
+    void
+    LoadCodebook(const float* codebook_data);
+
 private:
     [[nodiscard]] const float*
     get_codebook_data(int64_t subspace_idx, int64_t centroid_num) const {

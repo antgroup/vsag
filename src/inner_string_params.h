@@ -23,6 +23,7 @@
 namespace vsag {
 // Index Type
 const char* const INDEX_TYPE_HGRAPH = "hgraph";
+const char* const INDEX_TYPE_HGRAPH_DISKANN_LOADER = "hgraph_diskann_loader";
 const char* const INDEX_TYPE_IVF = "ivf";
 const char* const INDEX_TYPE_BRUTE_FORCE = "brute_force";
 const char* const INDEX_TYPE_GNO_IMI = "gno_imi";
@@ -180,6 +181,7 @@ const char* const DISKANN_SUPPORT_CALC_DISTANCE_BY_ID = "support_calc_distance_b
 
 const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"INDEX_TYPE_HGRAPH", INDEX_TYPE_HGRAPH},
+    {"INDEX_TYPE_HGRAPH_DISKANN_LOADER", INDEX_TYPE_HGRAPH_DISKANN_LOADER},
     {"INDEX_TYPE_IVF", INDEX_TYPE_IVF},
     {"INDEX_TYPE_GNO_IMI", INDEX_TYPE_GNO_IMI},
     {"INDEX_TYPE_PYRAMID", INDEX_TYPE_PYRAMID},
