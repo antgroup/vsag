@@ -235,6 +235,9 @@ get_vectors(DataTypes type,
     } else if (type == DataTypes::DATA_TYPE_INT8) {
         *vectors_ptr = (void*)base->GetInt8Vectors();
         *data_size_ptr = dim * sizeof(int8_t);
+    } else if (type == DataTypes::DATA_TYPE_FP16 || type == DataTypes::DATA_TYPE_BF16) {
+        *vectors_ptr = (void*)base->GetFloat16Vectors();
+        *data_size_ptr = dim * sizeof(uint16_t);
     } else {
         throw std::invalid_argument(fmt::format("no support for this metric: {}", (int)type));
     }
@@ -250,6 +253,11 @@ set_dataset(DataTypes type,
         base->Float32Vectors((float*)vectors_ptr)->Dim(dim)->Owner(false)->NumElements(num_element);
     } else if (type == DataTypes::DATA_TYPE_INT8) {
         base->Int8Vectors((int8_t*)vectors_ptr)->Dim(dim)->Owner(false)->NumElements(num_element);
+    } else if (type == DataTypes::DATA_TYPE_FP16 || type == DataTypes::DATA_TYPE_BF16) {
+        base->Float16Vectors((uint16_t*)vectors_ptr)
+            ->Dim(dim)
+            ->Owner(false)
+            ->NumElements(num_element);
     } else {
         throw std::invalid_argument(fmt::format("no support for this type: {}", (int)type));
     }
@@ -299,22 +307,43 @@ sample_train_data(const vsag::DatasetPtr& data,
             sampled_indices[j] = i;
         }
     }
-    sampled_data_buffer.resize(sample_count * dim);
-    const auto* original_data = data->GetFloat32Vectors();
-    for (int64_t i = 0; i < sample_count; ++i) {
-        std::copy(original_data + sampled_indices[i] * dim,
-                  original_data + (sampled_indices[i] + 1) * dim,
-                  sampled_data_buffer.data() + i * dim);
-    }
-    auto* new_data_buffer =
-        static_cast<float*>(safe_allocator->Allocate(sample_count * dim * sizeof(float)));
-    std::copy(sampled_data_buffer.begin(), sampled_data_buffer.end(), new_data_buffer);
+    const auto* original_fp32_data = data->GetFloat32Vectors();
+    const auto* original_fp16_data = data->GetFloat16Vectors();
 
     auto sampled_dataset = std::make_shared<DatasetImpl>();
-    sampled_dataset->NumElements(sample_count)
-        ->Dim(dim)
-        ->Float32Vectors(new_data_buffer)
-        ->Owner(true, safe_allocator);
+
+    if (original_fp16_data != nullptr) {
+        vsag::Vector<uint16_t> sampled_fp16_buffer(sample_count * dim, safe_allocator);
+        for (int64_t i = 0; i < sample_count; ++i) {
+            std::copy(original_fp16_data + sampled_indices[i] * dim,
+                      original_fp16_data + (sampled_indices[i] + 1) * dim,
+                      sampled_fp16_buffer.data() + i * dim);
+        }
+        auto* new_data_buffer =
+            static_cast<uint16_t*>(safe_allocator->Allocate(sample_count * dim * sizeof(uint16_t)));
+        std::copy(sampled_fp16_buffer.begin(), sampled_fp16_buffer.end(), new_data_buffer);
+
+        sampled_dataset->NumElements(sample_count)
+            ->Dim(dim)
+            ->Float16Vectors(new_data_buffer)
+            ->Owner(true, safe_allocator);
+    } else {
+        vsag::Vector<float> sampled_data_buffer(sample_count * dim, safe_allocator);
+        for (int64_t i = 0; i < sample_count; ++i) {
+            std::copy(original_fp32_data + sampled_indices[i] * dim,
+                      original_fp32_data + (sampled_indices[i] + 1) * dim,
+                      sampled_data_buffer.data() + i * dim);
+        }
+        auto* new_data_buffer =
+            static_cast<float*>(safe_allocator->Allocate(sample_count * dim * sizeof(float)));
+        std::copy(sampled_data_buffer.begin(), sampled_data_buffer.end(), new_data_buffer);
+
+        sampled_dataset->NumElements(sample_count)
+            ->Dim(dim)
+            ->Float32Vectors(new_data_buffer)
+            ->Owner(true, safe_allocator);
+    }
+
     if (data->GetIds() != nullptr) {
         sampled_ids.reserve(sample_count);
         const auto* original_ids = data->GetIds();

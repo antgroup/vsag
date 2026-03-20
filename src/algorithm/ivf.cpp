@@ -33,12 +33,16 @@
 #include "ivf_partition/gno_imi_partition.h"
 #include "ivf_partition/ivf_nearest_partition.h"
 #include "query_context.h"
+#include "simd/bf16_simd.h"
+#include "simd/fp16_simd.h"
 #include "storage/serialization.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "utils/util_functions.h"
 
 namespace vsag {
+using generic::BF16ToFloat;
+using generic::FP16ToFloat;
 static constexpr const char* IVF_PARAMS_TEMPLATE =
     R"(
     {
@@ -281,6 +285,37 @@ IVF::GetCodeByInnerId(InnerIdType inner_id, uint8_t* data) const {
     this->bucket_->GetCodesById(bucket_id, offset_id, data);
 }
 
+inline const void*
+IVF::get_data(const DatasetPtr& data, int64_t index) const {
+    if (this->data_type_ == DataTypes::DATA_TYPE_FP16 ||
+        this->data_type_ == DataTypes::DATA_TYPE_BF16) {
+        return data->GetFloat16Vectors() + index * this->dim_;
+    }
+    return data->GetFloat32Vectors() + index * this->dim_;
+}
+
+static Vector<float>
+convert_to_fp32(const DatasetPtr& data, int64_t dim, DataTypes data_type, Allocator* allocator) {
+    int64_t num_elements = data->GetNumElements();
+    Vector<float> result(num_elements * dim, allocator);
+
+    if (data_type == DataTypes::DATA_TYPE_FP16) {
+        const auto* fp16_data = data->GetFloat16Vectors();
+        for (int64_t i = 0; i < num_elements * dim; ++i) {
+            result[i] = generic::FP16ToFloat(fp16_data[i]);
+        }
+    } else if (data_type == DataTypes::DATA_TYPE_BF16) {
+        const auto* bf16_data = data->GetFloat16Vectors();
+        for (int64_t i = 0; i < num_elements * dim; ++i) {
+            result[i] = generic::BF16ToFloat(bf16_data[i]);
+        }
+    } else {
+        const auto* fp32_data = data->GetFloat32Vectors();
+        memcpy(result.data(), fp32_data, num_elements * dim * sizeof(float));
+    }
+    return result;
+}
+
 void
 IVF::InitFeatures() {
     // Common Init
@@ -364,12 +399,24 @@ IVF::Train(const DatasetPtr& data) {
         vsag::sample_train_data(data, total_elements, dim, train_sample_count_, allocator_);
     int64_t sample_count = train_data->GetNumElements();
 
-    partition_strategy_->Train(train_data);
+    // Convert train data to FP32 for partition strategy (which expects FP32)
+    Vector<float> fp32_train_data = convert_to_fp32(train_data, dim, this->data_type_, allocator_);
+    DatasetPtr fp32_train_dataset = Dataset::Make();
+    fp32_train_dataset->Float32Vectors(fp32_train_data.data())
+        ->Dim(dim)
+        ->NumElements(sample_count)
+        ->Owner(false);
 
-    const auto* data_ptr = train_data->GetFloat32Vectors();
-    this->bucket_->Train(data_ptr, sample_count);
+    partition_strategy_->Train(fp32_train_dataset);
+
+    // Use original data format for bucket quantizer
+    void* data_ptr = nullptr;
+    uint64_t data_size = 0;
+    get_vectors(this->data_type_, dim, train_data, &data_ptr, &data_size);
+    this->bucket_->Train(reinterpret_cast<const float*>(data_ptr), sample_count);
     if (use_reorder_) {
-        this->reorder_codes_->Train(data->GetFloat32Vectors(), data->GetNumElements());
+        Vector<float> fp32_data = convert_to_fp32(data, dim, this->data_type_, allocator_);
+        this->reorder_codes_->Train(fp32_data.data(), data->GetNumElements());
     }
     this->is_trained_ = true;
 }
@@ -383,20 +430,21 @@ IVF::Add(const DatasetPtr& base, AddMode mode) {
     this->bucket_->Unpack();
     auto num_element = base->GetNumElements();
     const auto* ids = base->GetIds();
-    const auto* vectors = base->GetFloat32Vectors();
     const auto* attr_sets = base->GetAttributeSets();
     const auto* extra_info = base->GetExtraInfos();
     const auto extra_info_size = base->GetExtraInfoSize();
-    auto buckets =
-        partition_strategy_->ClassifyDatas(vectors, num_element, buckets_per_data_, nullptr);
+
+    // Convert to FP32 for partition strategy classification
+    Vector<float> fp32_vectors = convert_to_fp32(base, dim_, this->data_type_, allocator_);
+    auto buckets = partition_strategy_->ClassifyDatas(
+        fp32_vectors.data(), num_element, buckets_per_data_, nullptr);
 
     int64_t current_num;
     bool need_cal_memory_usage = false;
     {
         std::lock_guard lock(label_lookup_mutex_);
         if (use_reorder_) {
-            this->reorder_codes_->BatchInsertVector(base->GetFloat32Vectors(),
-                                                    base->GetNumElements());
+            this->reorder_codes_->BatchInsertVector(fp32_vectors.data(), base->GetNumElements());
         }
         for (int64_t i = 0; i < num_element; ++i) {
             this->label_table_->Insert(i + total_elements_, ids[i]);
@@ -410,12 +458,23 @@ IVF::Add(const DatasetPtr& base, AddMode mode) {
         location_map_.resize(this->total_elements_);
     }
 
+    // Get original data pointer for bucket insertion
+    void* base_vectors = nullptr;
+    uint64_t base_data_size = 0;
+    get_vectors(this->data_type_, dim_, base, &base_vectors, &base_data_size);
+    const auto* raw_vectors = reinterpret_cast<const char*>(base_vectors);
+
     auto add_func = [&](int64_t i) -> void {
         for (int64_t j = 0; j < buckets_per_data_; ++j) {
-            const auto* data_ptr = vectors + i * dim_;
+            const auto* data_ptr =
+                raw_vectors + i * dim_ *
+                                  ((this->data_type_ == DataTypes::DATA_TYPE_FLOAT)
+                                       ? sizeof(float)
+                                       : sizeof(uint16_t));
             auto idx = i * buckets_per_data_ + j;
-            InnerIdType offset_id = bucket_->InsertVector(
-                data_ptr, buckets[idx], idx + current_num * buckets_per_data_);
+            InnerIdType offset_id = bucket_->InsertVector(reinterpret_cast<const float*>(data_ptr),
+                                                          buckets[idx],
+                                                          idx + current_num * buckets_per_data_);
             if (j == 0) {
                 std::lock_guard lock(label_lookup_mutex_);
                 location_map_[i + current_num] =
