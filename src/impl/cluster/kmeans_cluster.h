@@ -20,6 +20,12 @@
 
 namespace vsag {
 class Allocator;
+
+enum class KMeansInitMethod {
+    RANDOM,
+    KMEANS_PLUS_PLUS,
+};
+
 class KMeansCluster {
 public:
     explicit KMeansCluster(int32_t dim,
@@ -35,7 +41,8 @@ public:
         int iter = 25,
         double* err = nullptr,
         bool use_mse_for_convergence = false,
-        float threshold = 1e-6F);
+        float threshold = 1e-6F,
+        KMeansInitMethod init_method = KMeansInitMethod::KMEANS_PLUS_PLUS);
 
 public:
     float* k_centroids_{nullptr};
@@ -54,6 +61,12 @@ private:
                                  const uint64_t query_count,
                                  const uint64_t k,
                                  Vector<int32_t>& labels);
+
+    void
+    select_initial_centroids_random(const float* datas, uint64_t count, uint32_t k);
+
+    void
+    select_initial_centroids_kmeans_plus_plus(const float* datas, uint64_t count, uint32_t k);
 
 private:
     Allocator* const allocator_{nullptr};
