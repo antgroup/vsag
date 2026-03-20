@@ -21,6 +21,7 @@
 
 #include "algorithm/brute_force.h"
 #include "algorithm/hgraph.h"
+#include "algorithm/hgraph_diskann_loader.h"
 #include "algorithm/ivf.h"
 #include "algorithm/pyramid.h"
 #include "algorithm/pyramid_zparameters.h"
@@ -114,6 +115,13 @@ Engine::CreateIndex(const std::string& origin_name, const std::string& parameter
             auto hgraph_index =
                 std::make_shared<IndexImpl<HGraph>>(hgraph_json, index_common_params);
             return hgraph_index;
+        } else if (name == INDEX_HGRAPH_DISKANN_LOADER) {
+            logger::debug("created a hgraph_diskann_loader index");
+            // Pass full parameters to support both HGraph format (INDEX_PARAM) and DiskANN format
+            // CheckAndMappingExternalParam will handle both formats
+            auto loader_index = std::make_shared<IndexImpl<HGraphDiskANNLoader>>(
+                parsed_params, index_common_params);
+            return loader_index;
         } else if (name == INDEX_IVF) {
             logger::debug("created an ivf index");
             JsonType ivf_json;
