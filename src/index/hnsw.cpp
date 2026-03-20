@@ -84,6 +84,7 @@ HNSW::HNSW(HnswParameters hnsw_params, const IndexCommonParam& index_common_para
                                                            true);
 
     this->init_feature_list();
+    result_queues_.try_emplace(STATSTIC_KNN_TIME);
 }
 
 tl::expected<std::vector<int64_t>, Error>
@@ -300,11 +301,7 @@ HNSW::knn_search(const DatasetPtr& query,
                                   e.what());
         }
 
-        // update stats
-        {
-            std::lock_guard<std::mutex> lock(stats_mutex_);
-            result_queues_[STATSTIC_KNN_TIME].Push(static_cast<float>(time_cost));
-        }
+        result_queues_.at(STATSTIC_KNN_TIME).Push(static_cast<float>(time_cost));
 
         // return result
         if (results.empty()) {
@@ -427,11 +424,7 @@ HNSW::range_search(const DatasetPtr& query,
                                   e.what());
         }
 
-        // update stats
-        {
-            std::lock_guard<std::mutex> lock(stats_mutex_);
-            result_queues_[STATSTIC_KNN_TIME].Push(static_cast<float>(time_cost));
-        }
+        result_queues_.at(STATSTIC_KNN_TIME).Push(static_cast<float>(time_cost));
 
         // return result
         auto target_size = static_cast<int64_t>(results.size());
@@ -716,7 +709,6 @@ HNSW::GetStats() const {
     j[STATSTIC_MEMORY].SetInt(GetMemoryUsage());
 
     {
-        std::lock_guard<std::mutex> lock(stats_mutex_);
         for (auto& item : result_queues_) {
             j[item.first].SetFloat(item.second.GetAvgResult());
         }

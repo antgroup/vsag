@@ -26,16 +26,19 @@ WindowResultQueue::WindowResultQueue() {
 void
 WindowResultQueue::Push(float value) {
     uint64_t window_size = queue_.size();
-    queue_[count_ % window_size] = value;
-    count_++;
+    uint64_t pos = count_.fetch_add(1, std::memory_order_relaxed);
+    std::lock_guard<std::mutex> lock(queue_mutex_);
+    queue_[pos % window_size] = value;
 }
 
 float
 WindowResultQueue::GetAvgResult() const {
-    uint64_t statistic_num = std::min<uint64_t>(count_, queue_.size());
+    uint64_t statistic_num =
+        std::min<uint64_t>(count_.load(std::memory_order_relaxed), queue_.size());
     if (statistic_num == 0) {
         return 0.0F;
     }
+    std::lock_guard<std::mutex> lock(queue_mutex_);
     float result = 0;
     for (uint64_t i = 0; i < statistic_num; i++) {
         result += queue_[i];
