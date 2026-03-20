@@ -119,6 +119,12 @@ public:
         return deleted_ids_.count(id) != 0;
     }
 
+    void
+    EraseFromDeletedIds(InnerIdType id) {
+        std::scoped_lock wlock(delete_ids_mutex_);
+        deleted_ids_.erase(id);
+    }
+
     /**
      * Get id by label.
      * @param label The label to query.
@@ -321,6 +327,17 @@ public:
             return nullptr;
         }
         return deleted_ids_filter_;
+    }
+
+    std::vector<InnerIdType>
+    GetDeletedIds(InnerIdType max_count) {
+        std::shared_lock rlock(delete_ids_mutex_);
+        if (deleted_ids_.empty()) {
+            return {};
+        }
+        auto size = std::min(static_cast<uint64_t>(max_count), deleted_ids_.size());
+        return std::vector<InnerIdType>(deleted_ids_.begin(),
+                                        std::next(deleted_ids_.begin(), size));
     }
 
 private:
