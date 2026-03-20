@@ -39,7 +39,7 @@ split(const std::string& str, char delimiter) {
     return vec;
 }
 
-static uint64_t
+static inline uint64_t
 get_suitable_max_degree(int64_t data_num) {
     if (data_num < 100'000) {
         return 16;
@@ -50,7 +50,7 @@ get_suitable_max_degree(int64_t data_num) {
     return 64;
 }
 
-static uint64_t
+static inline uint64_t
 get_suitable_ef_search(int64_t topk, int64_t data_num, uint64_t subindex_ef_search = 50) {
     auto topk_float = static_cast<float>(topk);
     if (data_num < 1'000) {
