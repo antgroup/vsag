@@ -24,12 +24,12 @@ namespace vsag {
 
 static DatasetPtr
 CreateFP16Dataset(int64_t dim, int64_t count, const std::vector<float>& fp32_data) {
-    std::vector<uint16_t> fp16_data(dim * count);
+    auto* fp16_data = new uint16_t[dim * count];
     for (int64_t i = 0; i < dim * count; ++i) {
         fp16_data[i] = generic::FloatToFP16(fp32_data[i]);
     }
 
-    std::vector<int64_t> ids(count);
+    auto* ids = new int64_t[count];
     for (int64_t i = 0; i < count; ++i) {
         ids[i] = i;
     }
@@ -37,20 +37,20 @@ CreateFP16Dataset(int64_t dim, int64_t count, const std::vector<float>& fp32_dat
     auto dataset = Dataset::Make();
     dataset->NumElements(count)
         ->Dim(dim)
-        ->Ids(ids.data())
-        ->Float16Vectors(fp16_data.data())
-        ->Owner(false);
+        ->Ids(ids)
+        ->Float16Vectors(fp16_data)
+        ->Owner(true);
     return dataset;
 }
 
 static DatasetPtr
 CreateBF16Dataset(int64_t dim, int64_t count, const std::vector<float>& fp32_data) {
-    std::vector<uint16_t> bf16_data(dim * count);
+    auto* bf16_data = new uint16_t[dim * count];
     for (int64_t i = 0; i < dim * count; ++i) {
         bf16_data[i] = generic::FloatToBF16(fp32_data[i]);
     }
 
-    std::vector<int64_t> ids(count);
+    auto* ids = new int64_t[count];
     for (int64_t i = 0; i < count; ++i) {
         ids[i] = i;
     }
@@ -58,9 +58,9 @@ CreateBF16Dataset(int64_t dim, int64_t count, const std::vector<float>& fp32_dat
     auto dataset = Dataset::Make();
     dataset->NumElements(count)
         ->Dim(dim)
-        ->Ids(ids.data())
-        ->Float16Vectors(bf16_data.data())
-        ->Owner(false);
+        ->Ids(ids)
+        ->Float16Vectors(bf16_data)
+        ->Owner(true);
     return dataset;
 }
 
