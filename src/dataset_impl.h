@@ -35,7 +35,8 @@ class DatasetImpl : public Dataset {
                              const int64_t*,
                              const std::string*,
                              const SparseVector*,
-                             const AttributeSet*>;
+                             const AttributeSet*,
+                             const uint32_t*>;
 
 public:
     DatasetImpl() = default;
@@ -240,6 +241,20 @@ public:
     std::string
     GetStatistics() const override {
         return this->Statistics_;
+    }
+
+    DatasetPtr
+    VectorCounts(const uint32_t* counts) override {
+        this->data_[VECTOR_COUNTS] = counts;
+        return shared_from_this();
+    }
+
+    const uint32_t*
+    GetVectorCounts() const override {
+        if (auto iter = this->data_.find(VECTOR_COUNTS); iter != this->data_.end()) {
+            return std::get<const uint32_t*>(iter->second);
+        }
+        return nullptr;
     }
 
     static DatasetPtr
