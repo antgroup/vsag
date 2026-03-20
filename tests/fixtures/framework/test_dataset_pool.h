@@ -45,6 +45,7 @@ public:
      * @param valid_ratio Ratio of valid vectors.
      * @param extra_info_size Size of extra info per vector.
      * @param id_shift Offset for generated IDs.
+     * @param is_multi_vector Whether to generate multi-vector documents.
      * @return Shared pointer to the TestDataset.
      */
     TestDatasetPtr
@@ -54,7 +55,8 @@ public:
                         bool with_path = false,
                         float valid_ratio = 0.8,
                         uint64_t extra_info_size = 0,
-                        int64_t id_shift = 16);
+                        int64_t id_shift = 16,
+                        bool is_multi_vector = false);
 
     /**
      * @brief Gets a test dataset with duplicate vectors.
@@ -102,6 +104,7 @@ private:
      * @param filter_ratio Ratio of valid vectors.
      * @param extra_info_size Size of extra info per vector.
      * @param id_shift Offset for generated IDs.
+     * @param is_multi_vector Whether to include multi-vector mode in the key.
      * @return Unique string key for the dataset.
      */
     static std::string
@@ -111,7 +114,8 @@ private:
             bool with_path = false,
             float filter_ratio = 0.8,
             uint64_t extra_info_size = 0,
-            int64_t id_shift = 16);
+            int64_t id_shift = 16,
+            bool is_multi_vector = false);
 
 private:
     std::unordered_map<std::string, TestDatasetPtr> pool_;   // Cache of TestDataset objects.

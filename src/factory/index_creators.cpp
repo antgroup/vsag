@@ -25,6 +25,7 @@
 #include "algorithm/pyramid_zparameters.h"
 #include "algorithm/sindi/sindi.h"
 #include "algorithm/sparse_index.h"
+#include "algorithm/warp.h"
 #include "common.h"
 #include "index/diskann.h"
 #include "index/diskann_zparameters.h"
@@ -132,6 +133,12 @@ create_sindi_index(JsonType& parsed_params, const IndexCommonParam& index_common
         "created a sindi index", parsed_params, index_common_params);
 }
 
+tl::expected<std::shared_ptr<Index>, Error>
+create_warp_index(JsonType& parsed_params, const IndexCommonParam& index_common_params) {
+    return create_index_impl_with_param_log<WARP>(
+        "created a warp index", parsed_params, index_common_params);
+}
+
 }  // namespace
 
 void
@@ -147,6 +154,7 @@ register_all_index_creators() {
         register_index_creator(INDEX_PYRAMID, &create_pyramid_index);
         register_index_creator(INDEX_SPARSE, &create_sparse_index);
         register_index_creator(INDEX_SINDI, &create_sindi_index);
+        register_index_creator(INDEX_WARP, &create_warp_index);
     });
 }
 
