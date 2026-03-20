@@ -77,6 +77,13 @@ public:
                         bool expected_success = true);
 
     static void
+    TestShrinkIndex(const IndexPtr& index,
+                    const TestDatasetPtr& dataset,
+                    const std::string& search_param,
+                    float recall,
+                    bool expected_success = true);
+
+    static void
     TestRemoveIndex(const IndexPtr& index,
                     const TestDatasetPtr& dataset,
                     bool expected_success = true);

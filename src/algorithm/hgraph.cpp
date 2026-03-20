@@ -29,6 +29,7 @@
 #include "datacell/flatten_interface.h"
 #include "datacell/sparse_graph_datacell.h"
 #include "dataset_impl.h"
+#include "hgraph_shrink_context.h"
 #include "impl/filter/filter_headers.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/odescent/odescent_graph_builder.h"
@@ -1554,7 +1555,6 @@ HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
     param.ef = 1;
     param.is_inner_id_allowed = nullptr;
 
-    LockGuard cur_lock(neighbors_mutex_, inner_id);
     auto flatten_codes = basic_flatten_codes_;
     if (use_reorder_ and not build_by_base_) {
         flatten_codes = high_precise_codes_;
@@ -1585,14 +1585,24 @@ HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
             label_table_->SetDuplicateId(static_cast<InnerIdType>(param.duplicate_id), inner_id);
             return false;
         }
+        auto filtered_result = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
+        while (not result->Empty()) {
+            auto [dist, id] = result->Top();
+            result->Pop();
+            if (id != inner_id) {
+                filtered_result->Push(dist, id);
+            }
+        }
+        LockGuard cur_lock(neighbors_mutex_, inner_id);
         mutually_connect_new_element(inner_id,
-                                     result,
+                                     filtered_result,
                                      this->bottom_graph_,
                                      flatten_codes,
                                      neighbors_mutex_,
                                      allocator_,
                                      alpha_);
     } else {
+        LockGuard cur_lock(neighbors_mutex_, inner_id);
         bottom_graph_->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
     }
 
@@ -1605,14 +1615,24 @@ HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
                                       // to specify which overloaded function to call
                                       (VisitedListPtr) nullptr,
                                       nullptr);
+            auto filtered_result = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
+            while (not result->Empty()) {
+                auto [dist, id] = result->Top();
+                result->Pop();
+                if (id != inner_id) {
+                    filtered_result->Push(dist, id);
+                }
+            }
+            LockGuard cur_lock(neighbors_mutex_, inner_id);
             mutually_connect_new_element(inner_id,
-                                         result,
+                                         filtered_result,
                                          route_graphs_[j],
                                          flatten_codes,
                                          neighbors_mutex_,
                                          allocator_,
                                          alpha_);
         } else {
+            LockGuard cur_lock(neighbors_mutex_, inner_id);
             route_graphs_[j]->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
         }
     }
@@ -1872,6 +1892,12 @@ HGraph::Remove(const std::vector<int64_t>& ids, RemoveMode mode) {
         }
     }
     return delete_count;
+}
+
+void
+HGraph::ShrinkAndRepair(double timeout_ms) {
+    HGraphShrinkContext ctx(this);
+    ctx.Run(timeout_ms);
 }
 
 void
