@@ -40,24 +40,5 @@ with open('python/pyvsag/_version.py', 'w') as f:
 print(f'   - Version generated: {version}')
 "
 
-# 2. Patch pyproject.toml to remove dynamic versioning and set constraints
-echo "   - Patching python/pyproject.toml..."
-# Remove the entire [tool.setuptools_scm] section
-sed -i '/\[tool.setuptools_scm\]/,/^$/d' python/pyproject.toml
-
-# Apply version-specific constraints
-case $PY_VERSION in
-  "3.6")
-    sed -i 's/setuptools>=61.0/setuptools<60/g' python/pyproject.toml
-    sed -i 's/setuptools_scm\[toml\]>=6.2/setuptools_scm[toml]<7/g' python/pyproject.toml
-    ;;
-  "3.7")
-    sed -i "s/setuptools>=61.0/setuptools>=61.0,<67/g" python/pyproject.toml
-    ;;
-  *)
-    # No additional patch needed for Python 3.8+
-    ;;
-esac
-echo "   - pyproject.toml patched."
-
+# 2. Done
 echo "✅ Build preparation complete for Python ${PY_VERSION}."
