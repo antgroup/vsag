@@ -31,7 +31,7 @@ public:
 public:
     // require vars
     int64_t dim{-1};
-    diskann::Metric metric{diskann::Metric::L2};
+    ::diskann::Metric metric{::diskann::Metric::L2};
     int64_t max_degree{-1};
     int64_t ef_construction{-1};
     int64_t pq_dims{-1};

@@ -273,6 +273,17 @@ ProductQuantizer<metric>::DeserializeImpl(StreamReader& reader) {
 
 template <MetricType metric>
 void
+ProductQuantizer<metric>::LoadCodebook(const float* codebook_data) {
+    // codebook_data is in VSAG format: [pq_dim][256][subspace_dim]
+    // Copy to codebooks_ and then compute reverse_codebooks_
+    size_t codebook_size = this->pq_dim_ * CENTROIDS_PER_SUBSPACE * this->subspace_dim_;
+    this->codebooks_.resize(codebook_size);
+    std::memcpy(this->codebooks_.data(), codebook_data, codebook_size * sizeof(float));
+    this->transpose_codebooks();
+}
+
+template <MetricType metric>
+void
 ProductQuantizer<metric>::transpose_codebooks() {
     for (int64_t i = 0; i < this->pq_dim_; ++i) {
         for (int64_t j = 0; j < CENTROIDS_PER_SUBSPACE; ++j) {
