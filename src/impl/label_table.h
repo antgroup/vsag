@@ -136,6 +136,15 @@ public:
     GetIdByLabel(LabelType label, bool return_even_removed = false) const;
 
     /**
+     * Try to get id by label without throwing exception.
+     * @param label The label to query.
+     * @param return_even_removed Whether to return even if the id is removed.
+     * @return A pair where first indicates success and second is the inner_id.
+     */
+    std::pair<bool, InnerIdType>
+    TryGetIdByLabel(LabelType label, bool return_even_removed = false) const noexcept;
+
+    /**
      * Check whether a label exists and not been removed.
      * @param label The label to check.
      * @return True if the label exists and not been removed, false otherwise.
