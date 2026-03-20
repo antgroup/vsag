@@ -92,8 +92,8 @@ LabelTable::get_id_by_label_with_label_table(LabelType label) const noexcept {
     return result - label_table_.begin();
 }
 
-InnerIdType
-LabelTable::GetIdByLabel(LabelType label, bool return_even_removed) const {
+std::pair<bool, InnerIdType>
+LabelTable::TryGetIdByLabel(LabelType label, bool return_even_removed) const noexcept {
     InnerIdType id;
     if (use_reverse_map_) {
         id = this->get_id_by_label_with_reverse_map(label);
@@ -101,17 +101,25 @@ LabelTable::GetIdByLabel(LabelType label, bool return_even_removed) const {
         id = this->get_id_by_label_with_label_table(label);
     }
     if (id == INVALID_ID) {
-        throw VsagException(ErrorType::INTERNAL_ERROR,
-                            fmt::format("label {} does not exist", label));
+        return {false, 0};
     }
     if (not return_even_removed) {
         std::shared_lock rlock(delete_ids_mutex_);
         if (this->deleted_ids_.count(id) > 0) {
-            throw VsagException(ErrorType::INTERNAL_ERROR,
-                                fmt::format("label {} is removed", label));
+            return {false, 0};
         }
     }
-    return id;
+    return {true, id};
+}
+
+InnerIdType
+LabelTable::GetIdByLabel(LabelType label, bool return_even_removed) const {
+    auto [success, inner_id] = TryGetIdByLabel(label, return_even_removed);
+    if (not success) {
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            fmt::format("label {} does not exist or is removed", label));
+    }
+    return inner_id;
 }
 
 uint32_t
