@@ -27,6 +27,8 @@
 namespace vsag {
 
 using generic::BF16ToFloat;
+using generic::FloatToBF16;
+using generic::FloatToFP16;
 using generic::FP16ToFloat;
 
 template <typename QuantT, typename DataT>
@@ -145,8 +147,13 @@ QuantizerAdapter<QuantT, DataT>::DecodeOneImpl(const uint8_t* codes, DataType* d
         if (!this->inner_quantizer_->DecodeOneImpl(codes, vec.data())) {
             return false;
         }
+        auto* data_fp16 = reinterpret_cast<uint16_t*>(data);
         for (int64_t i = 0; i < this->dim_; i++) {
-            reinterpret_cast<DataT*>(data)[i] = static_cast<DataT>(std::round(vec[i]));
+            if (data_type_ == DataTypes::DATA_TYPE_FP16) {
+                data_fp16[i] = FloatToFP16(vec[i]);
+            } else {
+                data_fp16[i] = FloatToBF16(vec[i]);
+            }
         }
         return true;
     } else {
@@ -176,8 +183,13 @@ QuantizerAdapter<QuantT, DataT>::DecodeBatchImpl(const uint8_t* codes,
         if (!this->inner_quantizer_->DecodeBatchImpl(codes, vec.data(), count)) {
             return false;
         }
+        auto* data_fp16 = reinterpret_cast<uint16_t*>(data);
         for (int64_t i = 0; i < this->dim_ * count; i++) {
-            reinterpret_cast<DataT*>(data)[i] = static_cast<DataT>(std::round(vec[i]));
+            if (data_type_ == DataTypes::DATA_TYPE_FP16) {
+                data_fp16[i] = FloatToFP16(vec[i]);
+            } else {
+                data_fp16[i] = FloatToBF16(vec[i]);
+            }
         }
         return true;
     } else {
