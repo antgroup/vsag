@@ -75,6 +75,34 @@ TEST_CASE("LabelTable Basic Operations", "[ut][LabelTable]") {
         REQUIRE(label_table.GetIdByLabel(100, true) == 0);  // return even removed
     }
 
+    SECTION("TryGetIdByLabel") {
+        label_table.Insert(0, 100);
+        label_table.Insert(1, 200);
+
+        // Test successful lookup
+        auto [success1, id1] = label_table.TryGetIdByLabel(100);
+        REQUIRE(success1 == true);
+        REQUIRE(id1 == 0);
+
+        auto [success2, id2] = label_table.TryGetIdByLabel(200);
+        REQUIRE(success2 == true);
+        REQUIRE(id2 == 1);
+
+        // Test non-existent label
+        auto [success3, id3] = label_table.TryGetIdByLabel(999);
+        REQUIRE(success3 == false);
+
+        // Test removed label
+        label_table.MarkRemove(100);
+        auto [success4, id4] = label_table.TryGetIdByLabel(100);
+        REQUIRE(success4 == false);
+
+        // Test removed label with return_even_removed=true
+        auto [success5, id5] = label_table.TryGetIdByLabel(100, true);
+        REQUIRE(success5 == true);
+        REQUIRE(id5 == 0);
+    }
+
     SECTION("SetImmutable disables reverse map") {
         label_table.Insert(0, 100);
         label_table.Insert(1, 200);
@@ -101,6 +129,20 @@ TEST_CASE("LabelTable Without Reverse Map", "[ut][LabelTable]") {
         REQUIRE(label_table.GetIdByLabel(100) == 0);
         REQUIRE(label_table.GetIdByLabel(200) == 1);
         REQUIRE(label_table.GetIdByLabel(300) == 2);
+    }
+
+    SECTION("TryGetIdByLabel without reverse map") {
+        label_table.Insert(0, 100);
+        label_table.Insert(1, 200);
+
+        // Test successful lookup
+        auto [success1, id1] = label_table.TryGetIdByLabel(100);
+        REQUIRE(success1 == true);
+        REQUIRE(id1 == 0);
+
+        // Test non-existent label
+        auto [success2, id2] = label_table.TryGetIdByLabel(999);
+        REQUIRE(success2 == false);
     }
 }
 

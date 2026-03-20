@@ -273,10 +273,10 @@ SparseIndex::CalDistanceById(const DatasetPtr& query,
 
     // cal distances one by one
     for (int64_t i = 0; i < count; i++) {
-        try {
-            uint32_t inner_id = this->label_table_->GetIdByLabel(ids[i]);
+        auto [success, inner_id] = this->label_table_->TryGetIdByLabel(ids[i]);
+        if (success) {
             distances[i] = CalDistanceByIdUnsafe(sorted_ids, sorted_vals, inner_id);
-        } catch (VsagException& e) {
+        } else {
             distances[i] = -1;
         }
     }
