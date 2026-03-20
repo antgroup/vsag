@@ -15,6 +15,7 @@
 
 #include "mmap_io.h"
 
+#include <cerrno>
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <unistd.h>
@@ -27,6 +28,22 @@
 #include "io_syscall.h"
 
 namespace vsag {
+
+namespace {
+
+void
+ThrowMremapError(uint64_t old_size, uint64_t new_size) {
+    const int saved_errno = errno;
+    throw VsagException(
+        ErrorType::INTERNAL_ERROR,
+        fmt::format("mremap(old_size={}, new_size={}) failed (errno={}): {}",
+                    old_size,
+                    new_size,
+                    saved_errno,
+                    std::error_code(saved_errno, std::system_category()).message()));
+}
+
+}  // namespace
 
 MMapIO::MMapIO(std::string filename, Allocator* allocator)
     : BasicIO<MMapIO>(allocator), filepath_(std::move(filename)) {
@@ -51,12 +68,14 @@ MMapIO::MMapIO(std::string filename, Allocator* allocator)
         mmap_size = DEFAULT_INIT_MMAP_SIZE;
         auto ret = IOSyscall::FTruncate(this->fd_, mmap_size);
         if (ret == -1) {
+            close(this->fd_);
             throw VsagException(ErrorType::INTERNAL_ERROR, "ftruncate failed");
         }
     }
     void* addr = mmap(nullptr, mmap_size, PROT_READ | PROT_WRITE, MAP_SHARED, this->fd_, 0);
     if (addr == MAP_FAILED) {
         auto saved_errno = errno;
+        close(this->fd_);
         throw VsagException(
             ErrorType::INTERNAL_ERROR,
             fmt::format("mmap(size={}) failed (errno={}): {}",
@@ -105,14 +124,7 @@ MMapIO::WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset) {
 #else
         void* new_addr = mremap(this->start_, old_size, new_size, MREMAP_MAYMOVE);
         if (new_addr == MAP_FAILED) {
-            auto saved_errno = errno;
-            throw VsagException(
-                ErrorType::INTERNAL_ERROR,
-                fmt::format("mremap(old_size={}, new_size={}) failed (errno={}): {}",
-                            old_size,
-                            new_size,
-                            saved_errno,
-                            std::error_code(saved_errno, std::system_category()).message()));
+            ThrowMremapError(old_size, new_size);
         }
         this->start_ = static_cast<uint8_t*>(new_addr);
 #endif
@@ -144,14 +156,7 @@ MMapIO::ResizeImpl(uint64_t size) {
 #else
         void* new_addr = mremap(this->start_, old_size, new_size, MREMAP_MAYMOVE);
         if (new_addr == MAP_FAILED) {
-            auto saved_errno = errno;
-            throw VsagException(
-                ErrorType::INTERNAL_ERROR,
-                fmt::format("mremap(old_size={}, new_size={}) failed (errno={}): {}",
-                            old_size,
-                            new_size,
-                            saved_errno,
-                            std::error_code(saved_errno, std::system_category()).message()));
+            ThrowMremapError(old_size, new_size);
         }
         this->start_ = static_cast<uint8_t*>(new_addr);
 #endif
@@ -166,14 +171,7 @@ MMapIO::ResizeImpl(uint64_t size) {
 #else
         void* new_addr = mremap(this->start_, old_size, new_size, MREMAP_MAYMOVE);
         if (new_addr == MAP_FAILED) {
-            auto saved_errno = errno;
-            throw VsagException(
-                ErrorType::INTERNAL_ERROR,
-                fmt::format("mremap(old_size={}, new_size={}) failed (errno={}): {}",
-                            old_size,
-                            new_size,
-                            saved_errno,
-                            std::error_code(saved_errno, std::system_category()).message()));
+            ThrowMremapError(old_size, new_size);
         }
         this->start_ = static_cast<uint8_t*>(new_addr);
 #endif
