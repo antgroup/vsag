@@ -15,6 +15,8 @@
 
 #include "fp16_quantizer.h"
 
+#include <cstring>
+
 #include "simd/fp16_simd.h"
 #include "simd/normalize.h"
 #include "typing.h"
@@ -33,7 +35,9 @@ FP16Quantizer<metric>::FP16Quantizer(int dim, Allocator* allocator)
 template <MetricType metric>
 FP16Quantizer<metric>::FP16Quantizer(const FP16QuantizerParamPtr& param,
                                      const IndexCommonParam& common_param)
-    : FP16Quantizer<metric>(common_param.dim_, common_param.allocator_.get()){};
+    : FP16Quantizer<metric>(common_param.dim_, common_param.allocator_.get()) {
+    this->input_data_type_ = common_param.data_type_;
+};
 
 template <MetricType metric>
 FP16Quantizer<metric>::FP16Quantizer(const QuantizerParamPtr& param,
@@ -51,6 +55,14 @@ FP16Quantizer<metric>::TrainImpl(const DataType* data, uint64_t count) {
 template <MetricType metric>
 bool
 FP16Quantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) const {
+    auto* codes_fp16 = reinterpret_cast<uint16_t*>(codes);
+
+    if (input_data_type_ == DataTypes::DATA_TYPE_FP16) {
+        const auto* input_fp16 = reinterpret_cast<const uint16_t*>(data);
+        std::memcpy(codes_fp16, input_fp16, this->dim_ * sizeof(uint16_t));
+        return true;
+    }
+
     const DataType* cur = data;
     Vector<float> tmp(this->allocator_);
     if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
@@ -58,7 +70,6 @@ FP16Quantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) const
         Normalize(data, tmp.data(), this->dim_);
         cur = tmp.data();
     }
-    auto* codes_fp16 = reinterpret_cast<uint16_t*>(codes);
     for (int i = 0; i < this->dim_; ++i) {
         codes_fp16[i] = generic::FloatToFP16(cur[i]);
     }
@@ -99,7 +110,17 @@ FP16Quantizer<metric>::ProcessQueryImpl(const DataType* query,
             computer.buf_ =
                 reinterpret_cast<uint8_t*>(this->allocator_->Allocate(this->query_code_size_));
         }
-        this->EncodeOneImpl(query, computer.buf_);
+        auto* codes_fp16 = reinterpret_cast<uint16_t*>(computer.buf_);
+        Vector<float> tmp(this->allocator_);
+        const DataType* cur = query;
+        if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
+            tmp.resize(this->dim_);
+            Normalize(query, tmp.data(), this->dim_);
+            cur = tmp.data();
+        }
+        for (int i = 0; i < this->dim_; ++i) {
+            codes_fp16[i] = generic::FloatToFP16(cur[i]);
+        }
     } catch (std::bad_alloc& e) {
         throw VsagException(
             ErrorType::NO_ENOUGH_MEMORY, "bad alloc when init computer buf", e.what());

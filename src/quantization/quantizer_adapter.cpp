@@ -21,13 +21,21 @@
 
 #include "quantization/computer.h"
 #include "quantization/quantizer.h"
+#include "simd/bf16_simd.h"
+#include "simd/fp16_simd.h"
 
 namespace vsag {
+
+using generic::BF16ToFloat;
+using generic::FloatToBF16;
+using generic::FloatToFP16;
+using generic::FP16ToFloat;
 
 template <typename QuantT, typename DataT>
 QuantizerAdapter<QuantT, DataT>::QuantizerAdapter(const QuantizerParamPtr& param,
                                                   const IndexCommonParam& common_param)
-    : Quantizer<QuantizerAdapter<QuantT, DataT>>(common_param.dim_, common_param.allocator_.get()) {
+    : Quantizer<QuantizerAdapter<QuantT, DataT>>(common_param.dim_, common_param.allocator_.get()),
+      data_type_(common_param.data_type_) {
     this->inner_quantizer_ = std::make_shared<QuantT>(param, common_param);
     this->code_size_ = this->inner_quantizer_->GetCodeSize();
     this->query_code_size_ = this->inner_quantizer_->GetQueryCodeSize();
@@ -44,9 +52,20 @@ QuantizerAdapter<QuantT, DataT>::TrainImpl(const DataType* data, uint64_t count)
             vec[i] = static_cast<DataType>(data_int8[i]);
         }
         return this->inner_quantizer_->TrainImpl(vec.data(), count);
+    } else if constexpr (std::is_same_v<DataT, uint16_t>) {
+        const auto* data_fp16 = reinterpret_cast<const uint16_t*>(data);
+        Vector<DataType> vec(this->dim_ * count, this->allocator_);
+        for (int64_t i = 0; i < this->dim_ * count; ++i) {
+            if (data_type_ == DataTypes::DATA_TYPE_FP16) {
+                vec[i] = FP16ToFloat(data_fp16[i]);
+            } else {
+                vec[i] = BF16ToFloat(data_fp16[i]);
+            }
+        }
+        return this->inner_quantizer_->TrainImpl(vec.data(), count);
     } else {
-        static_assert(std::is_same_v<DataT, int8_t>,
-                      "QuantizerAdapter::TrainImpl only supports int8_t data type");
+        static_assert(std::is_same_v<DataT, int8_t> || std::is_same_v<DataT, uint16_t>,
+                      "QuantizerAdapter::TrainImpl only supports int8_t and uint16_t data types");
         return false;
     }
 }
@@ -61,9 +80,21 @@ QuantizerAdapter<QuantT, DataT>::EncodeOneImpl(const DataType* data, uint8_t* co
             vec[i] = static_cast<DataType>(data_int8[i]);
         }
         return this->inner_quantizer_->EncodeOneImpl(vec.data(), codes);
+    } else if constexpr (std::is_same_v<DataT, uint16_t>) {
+        const auto* data_fp16 = reinterpret_cast<const uint16_t*>(data);
+        Vector<DataType> vec(this->dim_, this->allocator_);
+        for (int64_t i = 0; i < this->dim_; i++) {
+            if (data_type_ == DataTypes::DATA_TYPE_FP16) {
+                vec[i] = FP16ToFloat(data_fp16[i]);
+            } else {
+                vec[i] = BF16ToFloat(data_fp16[i]);
+            }
+        }
+        return this->inner_quantizer_->EncodeOneImpl(vec.data(), codes);
     } else {
-        static_assert(std::is_same_v<DataT, int8_t>,
-                      "QuantizerAdapter::EncodeOneImpl only supports int8_t data type");
+        static_assert(
+            std::is_same_v<DataT, int8_t> || std::is_same_v<DataT, uint16_t>,
+            "QuantizerAdapter::EncodeOneImpl only supports int8_t and uint16_t data types");
         return false;
     }
 }
@@ -80,9 +111,21 @@ QuantizerAdapter<QuantT, DataT>::EncodeBatchImpl(const DataType* data,
             vec[i] = static_cast<DataType>(data_int8[i]);
         }
         return this->inner_quantizer_->EncodeBatchImpl(vec.data(), codes, count);
+    } else if constexpr (std::is_same_v<DataT, uint16_t>) {
+        const auto* data_fp16 = reinterpret_cast<const uint16_t*>(data);
+        Vector<DataType> vec(this->dim_ * count, this->allocator_);
+        for (int64_t i = 0; i < this->dim_ * count; ++i) {
+            if (data_type_ == DataTypes::DATA_TYPE_FP16) {
+                vec[i] = FP16ToFloat(data_fp16[i]);
+            } else {
+                vec[i] = BF16ToFloat(data_fp16[i]);
+            }
+        }
+        return this->inner_quantizer_->EncodeBatchImpl(vec.data(), codes, count);
     } else {
-        static_assert(std::is_same_v<DataT, int8_t>,
-                      "QuantizerAdapter::EncodeBatchImpl only supports int8_t data type");
+        static_assert(
+            std::is_same_v<DataT, int8_t> || std::is_same_v<DataT, uint16_t>,
+            "QuantizerAdapter::EncodeBatchImpl only supports int8_t and uint16_t data types");
         return false;
     }
 }
@@ -99,9 +142,24 @@ QuantizerAdapter<QuantT, DataT>::DecodeOneImpl(const uint8_t* codes, DataType* d
             reinterpret_cast<DataT*>(data)[i] = static_cast<DataT>(std::round(vec[i]));
         }
         return true;
+    } else if constexpr (std::is_same_v<DataT, uint16_t>) {
+        Vector<DataType> vec(this->dim_, this->allocator_);
+        if (!this->inner_quantizer_->DecodeOneImpl(codes, vec.data())) {
+            return false;
+        }
+        auto* data_fp16 = reinterpret_cast<uint16_t*>(data);
+        for (int64_t i = 0; i < this->dim_; i++) {
+            if (data_type_ == DataTypes::DATA_TYPE_FP16) {
+                data_fp16[i] = FloatToFP16(vec[i]);
+            } else {
+                data_fp16[i] = FloatToBF16(vec[i]);
+            }
+        }
+        return true;
     } else {
-        static_assert(std::is_same_v<DataT, int8_t>,
-                      "QuantizerAdapter::DecodeOneImpl only supports int8_t data type");
+        static_assert(
+            std::is_same_v<DataT, int8_t> || std::is_same_v<DataT, uint16_t>,
+            "QuantizerAdapter::DecodeOneImpl only supports int8_t and uint16_t data types");
         return false;
     }
 }
@@ -120,9 +178,24 @@ QuantizerAdapter<QuantT, DataT>::DecodeBatchImpl(const uint8_t* codes,
             reinterpret_cast<DataT*>(data)[i] = static_cast<DataT>(std::round(vec[i]));
         }
         return true;
+    } else if constexpr (std::is_same_v<DataT, uint16_t>) {
+        Vector<DataType> vec(this->dim_ * count, this->allocator_);
+        if (!this->inner_quantizer_->DecodeBatchImpl(codes, vec.data(), count)) {
+            return false;
+        }
+        auto* data_fp16 = reinterpret_cast<uint16_t*>(data);
+        for (int64_t i = 0; i < this->dim_ * count; i++) {
+            if (data_type_ == DataTypes::DATA_TYPE_FP16) {
+                data_fp16[i] = FloatToFP16(vec[i]);
+            } else {
+                data_fp16[i] = FloatToBF16(vec[i]);
+            }
+        }
+        return true;
     } else {
-        static_assert(std::is_same_v<DataT, int8_t>,
-                      "QuantizerAdapter::DecodeBatchImpl only supports int8_t data type");
+        static_assert(
+            std::is_same_v<DataT, int8_t> || std::is_same_v<DataT, uint16_t>,
+            "QuantizerAdapter::DecodeBatchImpl only supports int8_t and uint16_t data types");
         return false;
     }
 }
@@ -156,9 +229,22 @@ QuantizerAdapter<QuantT, DataT>::ProcessQueryImpl(
         }
         auto& inner_computer = reinterpret_cast<Computer<QuantT>&>(computer);
         this->inner_quantizer_->ProcessQueryImpl(vec.data(), inner_computer);
+    } else if constexpr (std::is_same_v<DataT, uint16_t>) {
+        const auto* query_fp16 = reinterpret_cast<const uint16_t*>(query);
+        Vector<DataType> vec(this->dim_, this->allocator_);
+        for (int64_t i = 0; i < this->dim_; i++) {
+            if (data_type_ == DataTypes::DATA_TYPE_FP16) {
+                vec[i] = FP16ToFloat(query_fp16[i]);
+            } else {
+                vec[i] = BF16ToFloat(query_fp16[i]);
+            }
+        }
+        auto& inner_computer = reinterpret_cast<Computer<QuantT>&>(computer);
+        this->inner_quantizer_->ProcessQueryImpl(vec.data(), inner_computer);
     } else {
-        static_assert(std::is_same_v<DataT, int8_t>,
-                      "QuantizerAdapter::ProcessQueryImpl only supports int8_t data type");
+        static_assert(
+            std::is_same_v<DataT, int8_t> || std::is_same_v<DataT, uint16_t>,
+            "QuantizerAdapter::ProcessQueryImpl only supports int8_t and uint16_t data types");
     }
 }
 
@@ -192,4 +278,5 @@ QuantizerAdapter<QuantT, DataT>::ReleaseComputerImpl(
 }
 
 TEMPLATE_QUANTIZER_ADAPTER(ProductQuantizer, int8_t);
+TEMPLATE_QUANTIZER_ADAPTER(ProductQuantizer, uint16_t);
 }  // namespace vsag

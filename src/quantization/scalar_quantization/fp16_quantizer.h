@@ -72,6 +72,9 @@ public:
     NameImpl() const {
         return QUANTIZATION_TYPE_VALUE_FP16;
     }
+
+private:
+    DataTypes input_data_type_{DataTypes::DATA_TYPE_FLOAT};
 };
 
 }  // namespace vsag
