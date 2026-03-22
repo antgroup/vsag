@@ -187,8 +187,9 @@ HGraphAnalyzer::GetDuplicateRatio() {
 
             Vector<InnerIdType> sub(allocator_);
             sub.push_back(sorted[0].second);
+            float first_dist = sorted[0].first;
             for (size_t i = 1; i < sorted.size(); ++i) {
-                if (sorted[i].first - sorted[i - 1].first <= epsilon) {
+                if (sorted[i].first - first_dist <= epsilon) {
                     sub.push_back(sorted[i].second);
                 } else {
                     if (sub.size() > 1) {
@@ -196,6 +197,7 @@ HGraphAnalyzer::GetDuplicateRatio() {
                     }
                     sub.clear();
                     sub.push_back(sorted[i].second);
+                    first_dist = sorted[i].first;
                 }
             }
             if (sub.size() > 1) {
