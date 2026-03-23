@@ -21,10 +21,12 @@
 #include <functional>
 #include <future>
 #include <iterator>
+#include <memory>
 #include <new>
 #include <nlohmann/json.hpp>
 #include <stdexcept>
 #include <utility>
+#include <vector>
 
 #include "datacell/flatten_datacell.h"
 #include "dataset_impl.h"
@@ -466,10 +468,10 @@ DiskANN::knn_search(const DatasetPtr& query,
         beam_search = std::min(beam_search, MAXIMAL_BEAM_SEARCH);
         beam_search = std::max(beam_search, MINIMAL_BEAM_SEARCH);
 
-        uint64_t labels[query_num * k];
-        auto* distances = new float[query_num * k];
-        auto* ids = new int64_t[query_num * k];
-        diskann::QueryStats query_stats[query_num];
+        std::vector<uint64_t> labels(query_num * k);
+        auto distances = std::unique_ptr<float[]>(new float[query_num * k]);
+        auto ids = std::unique_ptr<int64_t[]>(new int64_t[query_num * k]);
+        std::vector<diskann::QueryStats> query_stats(query_num);
         for (int i = 0; i < query_num; i++) {
             try {
                 double time_cost = 0;
@@ -482,37 +484,37 @@ DiskANN::knn_search(const DatasetPtr& query,
                                 query->GetFloat32Vectors() + i * dim_,
                                 k,
                                 ef_search,
-                                labels + i * k,
-                                distances + i * k,
+                                labels.data() + i * k,
+                                distances.get() + i * k,
                                 beam_search,
                                 filter,
                                 io_limit,
                                 reorder,
-                                query_stats + i);
+                                query_stats.data() + i);
                         } else {
                             k = index_->cached_beam_search_memory(
                                 query->GetFloat32Vectors() + i * dim_,
                                 k,
                                 ef_search,
-                                labels + i * k,
-                                distances + i * k,
+                                labels.data() + i * k,
+                                distances.get() + i * k,
                                 beam_search,
                                 filter,
                                 io_limit,
                                 reorder,
-                                query_stats + i);
+                                query_stats.data() + i);
                         }
                     } else {
                         k = index_->cached_beam_search(query->GetFloat32Vectors() + i * dim_,
                                                        k,
                                                        ef_search,
-                                                       labels + i * k,
-                                                       distances + i * k,
+                                                       labels.data() + i * k,
+                                                       distances.get() + i * k,
                                                        beam_search,
                                                        filter,
                                                        io_limit,
                                                        false,
-                                                       query_stats + i);
+                                                       query_stats.data() + i);
                     }
                 }
                 {
@@ -525,8 +527,6 @@ DiskANN::knn_search(const DatasetPtr& query,
                 }
 
             } catch (const std::runtime_error& e) {
-                delete[] distances;
-                delete[] ids;
                 LOG_ERROR_AND_RETURNS(ErrorType::INTERNAL_ERROR,
                                       "failed to perform knn search on diskann: ",
                                       e.what());
@@ -537,15 +537,13 @@ DiskANN::knn_search(const DatasetPtr& query,
         result->NumElements(query->GetNumElements())->Dim(0);
 
         if (k == 0) {
-            delete[] distances;
-            delete[] ids;
             return std::move(result);
         }
         for (int i = 0; i < query_num * k; ++i) {
             ids[i] = static_cast<int64_t>(labels[i]);
         }
 
-        result->NumElements(query_num)->Dim(k)->Distances(distances)->Ids(ids);
+        result->NumElements(query_num)->Dim(k)->Distances(distances.release())->Ids(ids.release());
         return std::move(result);
     } catch (const std::invalid_argument& e) {
         LOG_ERROR_AND_RETURNS(ErrorType::INVALID_ARGUMENT,
@@ -676,17 +674,17 @@ DiskANN::range_search(const DatasetPtr& query,
             target_size = std::min((uint64_t)limited_size, target_size);
         }
 
-        auto* dis = new float[target_size];
-        auto* ids = new int64_t[target_size];
-        for (int i = 0; i < target_size; ++i) {
+        auto dis = std::unique_ptr<float[]>(new float[target_size]);
+        auto ids = std::unique_ptr<int64_t[]>(new int64_t[target_size]);
+        for (uint64_t i = 0; i < target_size; ++i) {
             ids[i] = static_cast<int64_t>(labels[i]);
             dis[i] = range_distances[i];
         }
 
         result->NumElements(query_num)
             ->Dim(static_cast<int64_t>(target_size))
-            ->Distances(dis)
-            ->Ids(ids);
+            ->Distances(dis.release())
+            ->Ids(ids.release());
         return std::move(result);
     } catch (const std::invalid_argument& e) {
         LOG_ERROR_AND_RETURNS(ErrorType::INVALID_ARGUMENT,
