@@ -79,6 +79,7 @@ HGraphAnalyzer::calculate_base_groundtruth() {
             auto current_id = i;
             while (dup_ids[current_id] != i) {
                 visited[dup_ids[current_id]] = true;
+                is_duplicate_ids_[dup_ids[current_id]] = true;
                 current_id = dup_ids[current_id];
             }
         }
@@ -158,7 +159,63 @@ HGraphAnalyzer::GetDuplicateRatio() {
         }
         return static_cast<float>(duplicate_count) / static_cast<float>(this->total_count_);
     }
-    return 0.0F;
+
+    // Sieve method: progressively filter candidate duplicate groups
+    calculate_base_groundtruth();
+    auto codes = hgraph_->reorder_ ? hgraph_->high_precise_codes_ : hgraph_->basic_flatten_codes_;
+    constexpr float epsilon = 2e-6F;
+
+    // Initialize with all vectors as a single group
+    Vector<Vector<InnerIdType>> groups(allocator_);
+    groups.emplace_back(total_count_, allocator_);
+    std::iota(groups[0].begin(), groups[0].end(), 0);
+
+    // Process each query to sieve groups
+    for (uint64_t q = 0; q < base_sample_size_ && !groups.empty(); ++q) {
+        Vector<Vector<InnerIdType>> new_groups(allocator_);
+        auto comp = codes->FactoryComputer(base_sample_datas_.data() + q * dim_);
+
+        for (auto& group : groups) {
+            Vector<float> dists(group.size(), allocator_);
+            codes->Query(dists.data(), comp, group.data(), group.size());
+
+            Vector<std::pair<float, InnerIdType>> sorted(group.size(), allocator_);
+            for (size_t i = 0; i < group.size(); ++i) {
+                sorted[i] = {dists[i], group[i]};
+            }
+            std::sort(sorted.begin(), sorted.end());
+
+            Vector<InnerIdType> sub(allocator_);
+            sub.push_back(sorted[0].second);
+            float first_dist = sorted[0].first;
+            for (size_t i = 1; i < sorted.size(); ++i) {
+                if (sorted[i].first - first_dist <= epsilon) {
+                    sub.push_back(sorted[i].second);
+                } else {
+                    if (sub.size() > 1) {
+                        new_groups.push_back(std::move(sub));
+                    }
+                    sub.clear();
+                    sub.push_back(sorted[i].second);
+                    first_dist = sorted[i].first;
+                }
+            }
+            if (sub.size() > 1) {
+                new_groups.push_back(std::move(sub));
+            }
+        }
+        groups = std::move(new_groups);
+    }
+
+    // Count duplicates
+    uint64_t duplicate_count = 0;
+    for (const auto& group : groups) {
+        duplicate_count += group.size() - 1;
+        for (size_t i = 1; i < group.size(); ++i) {
+            is_duplicate_ids_[group[i]] = true;
+        }
+    }
+    return static_cast<float>(duplicate_count) / static_cast<float>(total_count_);
 }
 
 float
@@ -202,12 +259,11 @@ HGraphAnalyzer::calculate_quantization_result(
         auto id = sample_ids[i];
         const auto& result = search_result.at(id);
         float sample_error = 0.0F;
-        hgraph_->use_reorder_ = false;
-        auto base_result = hgraph_->CalDistanceById(sample_datas.data() + i, result.data(), topk_);
+        auto base_result =
+            hgraph_->CalDistanceById(sample_datas.data() + i, result.data(), topk_, false);
         const auto* base_distance = base_result->GetDistances();
-        hgraph_->use_reorder_ = true;
         auto precise_result =
-            hgraph_->CalDistanceById(sample_datas.data() + i, result.data(), topk_);
+            hgraph_->CalDistanceById(sample_datas.data() + i, result.data(), topk_, true);
         const auto* precise_distance = precise_result->GetDistances();
         uint32_t inversion_count = 0;
         for (uint32_t j = 0; j < topk_; ++j) {
@@ -271,8 +327,6 @@ HGraphAnalyzer::calculate_groundtruth(const Vector<float>& sample_datas,
     if (not ground_truth.empty()) {
         return;
     }
-    // calculate duplicate ratio while calculating groundtruth
-    uint32_t duplicate_count = 0;
     Vector<float> distances_array(this->total_count_, allocator_);
     Vector<InnerIdType> ids_array(this->total_count_, allocator_);
     std::iota(ids_array.begin(), ids_array.end(), 0);
@@ -424,9 +478,6 @@ HGraphAnalyzer::GetStats() {
     stats["connect_components"].SetInt(components.size());
     stats["maximal_component_size"].SetInt(*std::max_element(components.begin(), components.end()));
     stats["deleted_count"].SetInt(hgraph_->delete_count_);
-    if (hgraph_->label_table_->CompressDuplicateData()) {
-        stats["duplicate_ratio"].SetFloat(GetDuplicateRatio());
-    }
     const auto& [count_in_degree, count_out_degree, avg_degree] = GetDegreeDistribution();
     stats["in_degree_distribution"].SetVector<uint32_t>(count_in_degree);
     stats["out_degree_distribution"].SetVector<uint32_t>(count_out_degree);
