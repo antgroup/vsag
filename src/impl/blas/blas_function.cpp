@@ -14,9 +14,9 @@
 
 #include "blas_function.h"
 
-#include <cblas.h>
-#include <lapacke.h>
 #include <omp.h>
+
+#include "blas_compat.h"
 namespace vsag {
 
 void
