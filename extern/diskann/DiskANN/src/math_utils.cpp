@@ -8,8 +8,7 @@
 #include <malloc.h>
 #endif
 #include <math_utils.h>
-// #include <mkl.h>
-#include <cblas.h>
+#include "blas_compat.h"
 #include "diskann_logger.h"
 #include "utils.h"
 
@@ -34,7 +33,7 @@ void compute_vecs_l2sq(float *vecs_l2sq, float *data, const uint64_t num_points,
 //#pragma omp parallel for schedule(static, 8192)
     for (int64_t n_iter = 0; n_iter < (int64_t)num_points; n_iter++)
     {
-        vecs_l2sq[n_iter] = cblas_snrm2((blasint)dim, (data + (n_iter * dim)), 1);
+        vecs_l2sq[n_iter] = cblas_snrm2((vsag_blasint)dim, (data + (n_iter * dim)), 1);
         vecs_l2sq[n_iter] *= vecs_l2sq[n_iter];
     }
 }
@@ -50,8 +49,8 @@ void rotate_data_randomly(float *data, uint64_t num_points, uint64_t dim, float 
     }
     // diskann::cout << "done Rotating data with random matrix.." << std::flush;
 
-    cblas_sgemm(CblasRowMajor, CblasNoTrans, transpose, (blasint)num_points, (blasint)dim, (blasint)dim, 1.0, data,
-                (blasint)dim, rot_mat, (blasint)dim, 0, new_mat, (blasint)dim);
+    cblas_sgemm(CblasRowMajor, CblasNoTrans, transpose, (vsag_blasint)num_points, (vsag_blasint)dim, (vsag_blasint)dim, 1.0, data,
+                (vsag_blasint)dim, rot_mat, (vsag_blasint)dim, 0, new_mat, (vsag_blasint)dim);
 
     // diskann::cout << "done." << std::endl;
 }
@@ -89,14 +88,14 @@ void compute_closest_centers_in_block(const float *const data, const uint64_t nu
         ones_b[i] = 1.0;
     }
 
-    cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans, (blasint)num_points, (blasint)num_centers, (blasint)1, 1.0f,
-                docs_l2sq, (blasint)1, ones_a, (blasint)1, 0.0f, dist_matrix, (blasint)num_centers);
+    cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans, (vsag_blasint)num_points, (vsag_blasint)num_centers, (vsag_blasint)1, 1.0f,
+                docs_l2sq, (vsag_blasint)1, ones_a, (vsag_blasint)1, 0.0f, dist_matrix, (vsag_blasint)num_centers);
 
-    cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans, (blasint)num_points, (blasint)num_centers, (blasint)1, 1.0f,
-                ones_b, (blasint)1, centers_l2sq, (blasint)1, 1.0f, dist_matrix, (blasint)num_centers);
+    cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans, (vsag_blasint)num_points, (vsag_blasint)num_centers, (vsag_blasint)1, 1.0f,
+                ones_b, (vsag_blasint)1, centers_l2sq, (vsag_blasint)1, 1.0f, dist_matrix, (vsag_blasint)num_centers);
 
-    cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans, (blasint)num_points, (blasint)num_centers, (blasint)dim, -2.0f,
-                data, (blasint)dim, centers, (blasint)dim, 1.0f, dist_matrix, (blasint)num_centers);
+    cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans, (vsag_blasint)num_points, (vsag_blasint)num_centers, (vsag_blasint)dim, -2.0f,
+                data, (vsag_blasint)dim, centers, (vsag_blasint)dim, 1.0f, dist_matrix, (vsag_blasint)num_centers);
 
     if (k == 1)
     {

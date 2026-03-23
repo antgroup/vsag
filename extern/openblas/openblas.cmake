@@ -79,11 +79,11 @@ if(USE_SYSTEM_OPENBLAS)
         # Set install_dir to a dummy value for compatibility
         set(install_dir ${CMAKE_CURRENT_BINARY_DIR}/${name}/system)
         
-        # Add include directories
-        include_directories(${OPENBLAS_INCLUDE})
+        set(OPENBLAS_INCLUDE_DIRS ${OPENBLAS_INCLUDE})
         if(NOT "${OPENBLAS_INCLUDE}" STREQUAL "${LAPACKE_INCLUDE}")
-            include_directories(${LAPACKE_INCLUDE})
+            list(APPEND OPENBLAS_INCLUDE_DIRS ${LAPACKE_INCLUDE})
         endif()
+        include_directories(${OPENBLAS_INCLUDE_DIRS})
         
         # Create a dummy target for consistency with dependencies
         add_custom_target(${name})
@@ -94,6 +94,43 @@ if(USE_SYSTEM_OPENBLAS)
         message(STATUS "  LAPACKE_INCLUDE: ${LAPACKE_INCLUDE}")
     endif()
 endif()
+
+if(USE_SYSTEM_OPENBLAS AND OPENBLAS_FOUND)
+    set(BLAS_LIBRARIES ${OPENBLAS_LIB})
+
+    if(DEFINED OPENBLAS_LAPACKE_LIB AND OPENBLAS_LAPACKE_LIB)
+        list(APPEND BLAS_LIBRARIES ${OPENBLAS_LAPACKE_LIB})
+    endif()
+
+    if (APPLE AND DEFINED GFORTRAN_LIB AND EXISTS "${GFORTRAN_LIB}")
+        list(APPEND BLAS_LIBRARIES "${GFORTRAN_LIB}")
+    else()
+        list(APPEND BLAS_LIBRARIES gfortran)
+    endif()
+
+    if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        list(PREPEND BLAS_LIBRARIES omp)
+    else()
+        list(PREPEND BLAS_LIBRARIES gomp)
+    endif()
+
+    message(STATUS "Using system OpenBLAS as BLAS backend: ${OPENBLAS_LIB}")
+else()
+    if (APPLE AND DEFINED GFORTRAN_LIB AND EXISTS "${GFORTRAN_LIB}")
+        set(BLAS_LIBRARIES libopenblas.a "${GFORTRAN_LIB}")
+    else()
+        set(BLAS_LIBRARIES libopenblas.a gfortran)
+    endif()
+    if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        list(PREPEND BLAS_LIBRARIES omp)
+    else()
+        list(PREPEND BLAS_LIBRARIES gomp)
+    endif()
+    set(OPENBLAS_INCLUDE_DIRS ${install_dir}/include)
+    message(STATUS "Enable OpenBLAS as BLAS backend")
+endif()
+
+set(BLAS_LIBRARIES "${BLAS_LIBRARIES}" CACHE STRING "Final list of BLAS libraries to link against." FORCE)
 
 if(NOT OPENBLAS_FOUND)
     # Build OpenBLAS from source

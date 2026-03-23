@@ -15,5 +15,12 @@
 
 
 add_library (vsag_blas OBJECT blas_function.cpp)
-maybe_add_dependencies (vsag_blas openblas mkl)
-
+if (VSAG_BLAS_BACKEND STREQUAL "openblas")
+    maybe_add_dependencies (vsag_blas openblas)
+elseif (VSAG_BLAS_BACKEND STREQUAL "mkl")
+    maybe_add_dependencies (vsag_blas mkl)
+    target_include_directories (vsag_blas SYSTEM BEFORE PRIVATE ${MKL_INCLUDE_PATH})
+    target_compile_definitions (vsag_blas PRIVATE VSAG_USE_MKL_HEADERS)
+else ()
+    message (FATAL_ERROR "Unsupported VSAG_BLAS_BACKEND='${VSAG_BLAS_BACKEND}'. Expected 'openblas' or 'mkl'.")
+endif ()
