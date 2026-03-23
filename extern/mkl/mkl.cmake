@@ -1,7 +1,6 @@
 
 option(MKL_STATIC_LINK "Set to ON to link Intel MKL statically." OFF)
 
-set(VSAG_BLAS_BACKEND "mkl" CACHE STRING "Selected BLAS backend" FORCE)
 if(NOT TARGET mkl)
     add_custom_target(mkl)
 endif()
@@ -58,6 +57,12 @@ if(MKL_STATIC_LINK)
         "m"
         "dl"
     )
+    set(MKL_INSTALL_LIBS
+        "${MKL_PATH}/libmkl_intel_lp64.a"
+        "${MKL_PATH}/libmkl_intel_thread.a"
+        "${MKL_PATH}/libmkl_core.a"
+        "${OMP_PATH}/libiomp5.a"
+    )
     message(STATUS "Enabled Intel MKL as BLAS backend (STATIC linking).")
 
 else()
@@ -105,8 +110,9 @@ else()
         "${MKL_PATH}/libmkl_rt.so"
         "${OMP_PATH}/libiomp5.so"
     )
+    set(MKL_INSTALL_LIBS ${BLAS_LIBRARIES})
 
-    foreach(mkllib ${BLAS_LIBRARIES})
+    foreach(mkllib ${MKL_INSTALL_LIBS})
         if(EXISTS ${mkllib})
             install(FILES ${mkllib} DESTINATION ${CMAKE_INSTALL_LIBDIR})
         endif()
@@ -114,7 +120,7 @@ else()
     message(STATUS "Enabled Intel MKL as BLAS backend (DYNAMIC linking).")
 endif()
 
-foreach(mkllib ${BLAS_LIBRARIES})
+foreach(mkllib ${MKL_INSTALL_LIBS})
     install(FILES ${mkllib} DESTINATION ${CMAKE_INSTALL_LIBDIR})
 endforeach()
 message(STATUS "enable ${Yellow}intel-mkl${CR} as blas backend")

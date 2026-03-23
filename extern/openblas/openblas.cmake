@@ -2,7 +2,6 @@
 set(name openblas)
 set(source_dir ${CMAKE_CURRENT_BINARY_DIR}/${name}/source)
 set(install_dir ${CMAKE_CURRENT_BINARY_DIR}/${name}/install)
-set(VSAG_BLAS_BACKEND "openblas" CACHE STRING "Selected BLAS backend" FORCE)
 
 option(USE_SYSTEM_OPENBLAS "Use system-installed OpenBLAS instead of building from source" OFF)
 

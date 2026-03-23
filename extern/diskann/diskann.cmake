@@ -51,8 +51,10 @@ set_property(TARGET diskann PROPERTY CXX_STANDARD 17)
 add_dependencies(diskann boost)
 if(VSAG_BLAS_BACKEND STREQUAL "openblas")
   add_dependencies(diskann openblas)
-else()
+elseif(VSAG_BLAS_BACKEND STREQUAL "mkl")
   add_dependencies(diskann mkl)
+else()
+  message(FATAL_ERROR "Unsupported VSAG_BLAS_BACKEND='${VSAG_BLAS_BACKEND}'. Expected 'openblas' or 'mkl'.")
 endif()
 target_link_libraries(diskann
   ${BLAS_LIBRARIES}
