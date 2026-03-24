@@ -26,7 +26,7 @@
 namespace {
 
 int64_t
-to_int64(size_t value) {
+to_int64(uint64_t value) {
     return static_cast<int64_t>(value);
 }
 
@@ -62,13 +62,13 @@ build_sparse_vectors_from_csr(const py::array_t<uint32_t>& index_pointers,
 
     const uint32_t num_non_zeros = ptr_data[num_elements];
 
-    if (static_cast<size_t>(num_non_zeros) != static_cast<size_t>(buf_idx.shape[0])) {
+    if (static_cast<uint64_t>(num_non_zeros) != static_cast<uint64_t>(buf_idx.shape[0])) {
         throw std::invalid_argument(
             fmt::format("Size of 'indices'({}) must equal index_pointers[last]",
                         buf_idx.shape[0],
                         num_non_zeros));
     }
-    if (static_cast<size_t>(num_non_zeros) != static_cast<size_t>(buf_val.shape[0])) {
+    if (static_cast<uint64_t>(num_non_zeros) != static_cast<uint64_t>(buf_val.shape[0])) {
         throw std::invalid_argument(
             fmt::format("Size of 'values'({}) must equal index_pointers[last]({})",
                         buf_val.shape[0],
@@ -124,7 +124,10 @@ public:
     }
 
     void
-    Build(py::array_t<float> vectors, py::array_t<int64_t> ids, size_t num_elements, size_t dim) {
+    Build(py::array_t<float> vectors,
+          py::array_t<int64_t> ids,
+          uint64_t num_elements,
+          uint64_t dim) {
         auto dataset = vsag::Dataset::Make();
         dataset->Owner(false)
             ->Dim(to_int64(dim))
@@ -162,17 +165,17 @@ public:
     }
 
     py::object
-    KnnSearch(py::array_t<float> vector, size_t k, std::string& parameters) {
+    KnnSearch(py::array_t<float> vector, uint64_t k, std::string& parameters) {
         auto query = vsag::Dataset::Make();
         query->NumElements(1)
             ->Dim(to_int64(vector.size()))
             ->Float32Vectors(vector.mutable_data())
             ->Owner(false);
 
-        size_t ids_shape[1]{k};
-        size_t ids_strides[1]{sizeof(int64_t)};
-        size_t dists_shape[1]{k};
-        size_t dists_strides[1]{sizeof(float)};
+        uint64_t ids_shape[1]{k};
+        uint64_t ids_strides[1]{sizeof(int64_t)};
+        uint64_t dists_shape[1]{k};
+        uint64_t dists_strides[1]{sizeof(float)};
 
         auto ids = py::array_t<int64_t>(ids_shape, ids_strides);
         auto dists = py::array_t<float>(dists_shape, dists_strides);
@@ -237,12 +240,12 @@ public:
         if (auto result = index_->RangeSearch(query, threshold, parameters); result.has_value()) {
             const auto* ids = result.value()->GetIds();
             const auto* distances = result.value()->GetDistances();
-            const auto count = static_cast<size_t>(result.value()->GetDim());
+            const auto count = static_cast<uint64_t>(result.value()->GetDim());
             labels.resize({count});
             dists.resize({count});
             auto* labels_data = labels.mutable_data();
             auto* dists_data = dists.mutable_data();
-            for (size_t i = 0; i < count; ++i) {
+            for (uint64_t i = 0; i < count; ++i) {
                 labels_data[i] = ids[i];
                 dists_data[i] = distances[i];
             }
@@ -277,7 +280,7 @@ public:
     }
 
     void
-    Add(py::array_t<float> vectors, py::array_t<int64_t> ids, size_t num_elements, size_t dim) {
+    Add(py::array_t<float> vectors, py::array_t<int64_t> ids, uint64_t num_elements, uint64_t dim) {
         auto dataset = vsag::Dataset::Make();
         dataset->Owner(false)
             ->Dim(to_int64(dim))

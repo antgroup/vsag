@@ -99,6 +99,7 @@ Update relevant docs when behavior changes:
 
 - Keep changes scoped and reviewable.
 - Be careful with performance-sensitive code and cross-platform behavior.
+- Prefer `uint64_t` over `size_t` in code changes to avoid potential macOS compile issues.
 - Avoid changing files under `extern/` unless the task explicitly requires third-party dependency changes.
 - If changing build logic or dependencies, document the rationale clearly.
 - Commit messages should follow Conventional Commits, such as `feat:`, `fix:`, `docs:`, or
