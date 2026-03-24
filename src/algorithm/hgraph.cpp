@@ -883,6 +883,9 @@ HGraph::KnnSearch(const DatasetPtr& query,
         search_param.topk = 1;
         search_param.ef = 1;
         search_param.is_inner_id_allowed = nullptr;
+        if (search_param.ep == INVALID_ENTRY_POINT) {
+            return DatasetImpl::MakeEmptyDataset();
+        }
         if (iter_filter_ctx->IsFirstUsed()) {
             for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
                 auto result = this->search_one_graph(query_data,
@@ -1087,6 +1090,14 @@ HGraph::RangeSearch(const DatasetPtr& query,
     search_param.ep = this->entry_point_id_;
     search_param.topk = 1;
     search_param.ef = 1;
+
+    if (search_param.ep == INVALID_ENTRY_POINT) {
+        SearchStatistics stats;
+        auto dataset_result = DatasetImpl::MakeEmptyDataset();
+        dataset_result->Statistics(stats.Dump());
+        return dataset_result;
+    }
+
     const auto* raw_query = get_data(query);
     for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
         auto result = this->search_one_graph(raw_query,
