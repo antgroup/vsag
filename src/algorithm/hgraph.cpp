@@ -884,7 +884,10 @@ HGraph::KnnSearch(const DatasetPtr& query,
         search_param.ef = 1;
         search_param.is_inner_id_allowed = nullptr;
         if (search_param.ep == INVALID_ENTRY_POINT) {
-            return DatasetImpl::MakeEmptyDataset();
+            SearchStatistics stats;
+            auto dataset_result = DatasetImpl::MakeEmptyDataset();
+            dataset_result->Statistics(stats.Dump());
+            return dataset_result;
         }
         if (iter_filter_ctx->IsFirstUsed()) {
             for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
