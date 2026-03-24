@@ -849,6 +849,17 @@ HGraph::KnnSearch(const DatasetPtr& query,
         ft = combined_filter;
     }
 
+    bool need_valid_entry_point = not is_last_filter;
+    if (iter_ctx != nullptr) {
+        auto* existing_iter_ctx = static_cast<IteratorFilterContext*>(iter_ctx);
+        need_valid_entry_point = need_valid_entry_point && existing_iter_ctx->IsFirstUsed();
+    }
+    if (need_valid_entry_point && this->entry_point_id_ == INVALID_ENTRY_POINT) {
+        auto dataset_result = DatasetImpl::MakeEmptyDataset();
+        dataset_result->Statistics(stats.Dump());
+        return dataset_result;
+    }
+
     if (iter_ctx == nullptr) {
         auto cur_count = this->total_count_.load();
 

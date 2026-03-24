@@ -13,9 +13,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <atomic>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
+#include <chrono>
 #include <limits>
+#include <random>
+#include <thread>
 
 #include "fixtures/test_dataset_pool.h"
 #include "fixtures/test_logger.h"
@@ -2364,6 +2368,136 @@ TEST_CASE("HGraph Concurrent Read Write", "[ft][hgraph][concurrent]") {
     for (auto& thread : *threads) {
         thread.join();
     }
+}
+
+TEST_CASE("HGraph Concurrent Iterator Filter Search", "[ft][hgraph][concurrent]") {
+    uint32_t op_num = 10000;
+    uint32_t dim = 128;
+    uint32_t top_k = 5;
+    float read_ratio = 0.8;
+    float thread_num = 5;
+
+    std::vector<std::vector<float>> dataset;
+    dataset.reserve(op_num);
+    auto seed = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+    std::mt19937 rng(seed);
+    std::uniform_real_distribution<float> dist(-10.0, 10.0);
+    for (uint32_t i = 0; i < op_num; ++i) {
+        std::vector<float> vector_data;
+        vector_data.reserve(dim);
+        for (uint32_t j = 0; j < dim; ++j) {
+            vector_data.emplace_back(dist(rng));
+        }
+        dataset.emplace_back(std::move(vector_data));
+    }
+
+    std::string search_params = R"({
+        "hgraph": {
+          "ef_search": 100
+        }
+    })";
+
+    std::string hgraph_params = R"({
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": 128,
+        "index_param": {
+            "base_quantization_type": "fp32",
+            "base_io_type": "block_memory_io",
+            "max_degree": 32,
+            "ef_construction": 100,
+            "alpha":1.2,
+            "use_reorder": false
+        }
+    })";
+    auto build_res = vsag::Factory::CreateIndex("hgraph", hgraph_params);
+    auto vsag_index = std::move(build_res.value());
+
+    std::atomic<uint32_t> actual_read_num{0};
+    std::atomic<uint32_t> actual_write_num{0};
+    std::atomic<bool> has_error{false};
+    uint32_t expect_read_num = op_num * read_ratio;
+    uint32_t expect_write_num = op_num - expect_read_num;
+
+    auto test_func = [&]() {
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::uniform_real_distribution<float> op_dist(0.0, 1.0);
+
+        auto write_func = [&]() {
+            uint32_t old_value = actual_write_num.fetch_add(1);
+            if (old_value >= expect_write_num) {
+                return;
+            }
+
+            int64_t vec_id = static_cast<int64_t>(old_value);
+            auto base = vsag::Dataset::Make();
+            base->NumElements(1)
+                ->Dim(dim)
+                ->Ids(&vec_id)
+                ->Float32Vectors(dataset[old_value].data())
+                ->Owner(false);
+
+            auto res = vsag_index->Add(base);
+            if (!res.has_value()) {
+                has_error.store(true, std::memory_order_relaxed);
+            }
+        };
+
+        auto read_func = [&]() {
+            uint32_t old_value = actual_read_num.fetch_add(1);
+            if (old_value >= expect_read_num) {
+                return;
+            }
+
+            auto query = vsag::Dataset::Make();
+            query->NumElements(1)
+                ->Dim(dim)
+                ->Float32Vectors(dataset[old_value].data())
+                ->Owner(false);
+
+            vsag::IteratorContext* filter_ctx = nullptr;
+            auto first =
+                vsag_index->KnnSearch(query, top_k, search_params, nullptr, filter_ctx, false);
+            if (!first.has_value()) {
+                has_error.store(true, std::memory_order_relaxed);
+            }
+            auto second =
+                vsag_index->KnnSearch(query, top_k, search_params, nullptr, filter_ctx, true);
+            if (!second.has_value()) {
+                has_error.store(true, std::memory_order_relaxed);
+            }
+            delete filter_ctx;
+        };
+
+        while (true) {
+            if (actual_read_num >= expect_read_num && actual_write_num >= expect_write_num) {
+                break;
+            }
+
+            if (actual_read_num >= expect_read_num) {
+                write_func();
+            } else if (actual_write_num >= expect_write_num) {
+                read_func();
+            } else if (op_dist(gen) > read_ratio) {
+                write_func();
+            } else {
+                read_func();
+            }
+        }
+    };
+
+    auto threads = std::make_unique<std::vector<std::thread>>();
+    threads->reserve(thread_num);
+    for (uint32_t i = 0; i < thread_num; ++i) {
+        threads->emplace_back(test_func);
+    }
+
+    for (auto& thread : *threads) {
+        thread.join();
+    }
+
+    REQUIRE_FALSE(has_error.load(std::memory_order_relaxed));
 }
 
 // Tests for hops_limit search parameter
