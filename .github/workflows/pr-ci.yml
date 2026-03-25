@@ -1,0 +1,326 @@
+name: PR CI
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: ["main", "0.*"]
+
+concurrency:
+  group: pr-ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      cpp: ${{ steps.changes.outputs.cpp }}
+      python: ${{ steps.changes.outputs.python }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: changes
+        with:
+          filters: |
+            cpp:
+              - 'src/**'
+              - 'include/**'
+              - 'tests/**'
+              - 'CMakeLists.txt'
+              - 'Makefile'
+              - 'extern/**'
+              - 'cmake/**'
+              - 'examples/cpp/**'
+              - '.github/workflows/**'
+              - 'scripts/**'
+              - '.clang-tidy'
+              - '.clang-format'
+            python:
+              - 'python/**'
+              - 'python_bindings/**'
+              - 'tests/python/**'
+              - '.github/workflows/**'
+              - 'scripts/**'
+
+  format:
+    name: Format Check
+    needs: changes
+    if: needs.changes.outputs.cpp == 'true' || needs.changes.outputs.python == 'true'
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Install Clang format
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-format-15
+          sudo ln -sf /usr/bin/clang-format-15 /usr/bin/clang-format
+          clang-format --version
+      - name: Run Clang format check
+        run: ./scripts/format/check_format.sh
+
+  build-asan-x86:
+    name: ASan Build X86
+    needs: [changes, format]
+    if: needs.changes.outputs.cpp == 'true'
+    runs-on: ubuntu-22.04
+    container:
+      image: vsaglib/vsag:ci-x86
+      volumes:
+        - /opt:/useless
+    steps:
+      - name: Free Disk Space
+        run: rm -rf /useless/hostedtoolcache
+      - uses: actions/checkout@v4
+      - name: Load Cache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          max-size: "2G"
+          save: ${{ github.event_name != 'pull_request' }}
+          key: build-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
+      - name: Make Asan
+        run: export CMAKE_GENERATOR="Ninja" CMAKE_EXPORT_COMPILE_COMMANDS=ON; make asan
+      - name: Install clang-tidy 15
+        run: sudo apt install clang-tidy-15 -y
+      - name: Run Lint
+        run: |
+          ./scripts/linters/run-clang-tidy-15.sh -p build/ -use-color -source-filter '^.*vsag\/src.*(?<!_test)\.cpp$$' -j 4
+      - name: Clean
+        run: |
+          find ./build -type f -name "*.o" -exec rm -f {} +
+          find ./build -type f -name "*.cpp" -exec rm -f {} +
+          find ./build -type f -name "*.a" -exec rm -f {} +
+          rm -rf ./build/hdf5
+          rm -rf ./build/boost
+          rm -rf ./build/tools
+      - name: Save Build
+        uses: actions/upload-artifact@v5
+        with:
+          path: ./build
+          name: build-x86-${{ github.run_id }}
+          compression-level: 1
+          retention-days: 1
+          overwrite: 'true'
+
+  build-python-x86:
+    name: Python Build X86
+    needs: [changes, format]
+    if: needs.changes.outputs.python == 'true'
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Free Disk Space
+        run: rm -rf /opt/hostedtoolcache
+      - uses: actions/checkout@v4
+      - name: Prepare Env
+        run: sudo bash ./scripts/deps/install_deps_ubuntu.sh
+      - name: Load Cache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          max-size: "2G"
+          save: ${{ github.event_name != 'pull_request' }}
+          key: build-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
+      - name: Make Python Wheel
+        run: |
+          sudo apt update
+          sudo apt install -y python3-venv
+          export CMAKE_GENERATOR="Ninja"; make pyvsag
+      - name: Save Wheel
+        uses: actions/upload-artifact@v5
+        with:
+          path: ./wheelhouse
+          name: wheelhouse-x86-${{ github.run_id }}
+          compression-level: 1
+          retention-days: 1
+          overwrite: 'true'
+
+  test-asan-x86-unittests:
+    name: Test X86 Unittests
+    needs: [changes, build-asan-x86]
+    if: needs.changes.outputs.cpp == 'true'
+    runs-on: ubuntu-22.04
+    container:
+      image: vsaglib/vsag:ci-x86
+      volumes:
+        - /opt:/useless
+    steps:
+      - name: Free Disk Space
+        run: rm -rf /opt/hostedtoolcache
+      - uses: actions/checkout@v4
+      - name: Clean Env
+        run: rm -rf ./build
+      - name: Download Build
+        uses: actions/download-artifact@v5
+        with:
+          name: build-x86-${{ github.run_id }}
+          path: ./build
+      - name: Run Unittests
+        run: |
+          echo leak:libomp.so > omp.supp
+          echo leak:libgomp.so >> omp.supp
+          export LSAN_OPTIONS=suppressions=omp.supp
+          chmod +x ./build/tests/unittests
+          ./scripts/testing/test_parallel_by_name.sh unittests
+      - name: Upload Log
+        uses: actions/upload-artifact@v5
+        with:
+          path: ./log
+          name: log-x86-unittests-${{ github.run_id }}
+          compression-level: 1
+          retention-days: 3
+          overwrite: 'true'
+
+  test-asan-x86-functests:
+    name: Test X86 Functests
+    needs: [changes, build-asan-x86]
+    if: needs.changes.outputs.cpp == 'true'
+    runs-on: ubuntu-22.04
+    container:
+      image: vsaglib/vsag:ci-x86
+      volumes:
+        - /opt:/useless
+    steps:
+      - name: Free Disk Space
+        run: rm -rf /opt/hostedtoolcache
+      - uses: actions/checkout@v4
+      - name: Clean Env
+        run: rm -rf ./build
+      - name: Download Build
+        uses: actions/download-artifact@v5
+        with:
+          name: build-x86-${{ github.run_id }}
+          path: ./build
+      - name: Run Functests
+        run: |
+          echo leak:libomp.so > omp.supp
+          echo leak:libgomp.so >> omp.supp
+          export LSAN_OPTIONS=suppressions=omp.supp
+          chmod +x ./build/tests/functests
+          ./scripts/testing/test_parallel_by_name.sh functests
+      - name: Upload Log
+        uses: actions/upload-artifact@v5
+        with:
+          path: ./log
+          name: log-x86-functests-${{ github.run_id }}
+          compression-level: 1
+          retention-days: 3
+          overwrite: 'true'
+
+  test-example-x86:
+    name: Test Example X86
+    needs: [changes, build-asan-x86]
+    if: needs.changes.outputs.cpp == 'true'
+    runs-on: ubuntu-22.04
+    container:
+      image: vsaglib/vsag:ci-x86
+      volumes:
+        - /opt:/useless
+    steps:
+      - name: Free Disk Space
+        run: rm -rf /opt/hostedtoolcache
+      - uses: actions/checkout@v4
+      - name: Clean Env
+        run: rm -rf ./build
+      - name: Download Build
+        uses: actions/download-artifact@v5
+        with:
+          name: build-x86-${{ github.run_id }}
+          path: ./build
+      - name: Run Examples
+        run: |
+          cd ./build/examples/cpp
+          for example in ./*; do
+            filename=$(basename "$example")
+            if [[ $filename =~ ^[0-9]{3} ]]; then
+              chmod +x $example
+              echo "Run $example"
+              $example
+            fi
+          done
+
+  compatibility:
+    name: Check Compatibility
+    needs: [changes, format]
+    if: needs.changes.outputs.cpp == 'true'
+    runs-on: ubuntu-latest
+    container:
+      image: vsaglib/vsag:ci-x86
+    steps:
+      - name: Install GitHub CLI
+        run: |
+          (type -p wget >/dev/null || (apt update && apt-get install wget -y)) \
+          && mkdir -p -m 755 /etc/apt/keyrings \
+          && wget -qO- https://cli.github.com/packages/githubcli-archive-keyring.gpg | tee /etc/apt/keyrings/githubcli.gpg >/dev/null \
+          && chmod go+r /etc/apt/keyrings/githubcli.gpg \
+          && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list >/dev/null \
+          && apt update \
+          && apt install gh -y
+      - name: Download Compatibility Indexes from Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download compatibility-indexes \
+            --repo antgroup/vsag \
+            --dir /tmp \
+            --pattern "*.index" \
+            --pattern "*.bin" \
+            --pattern "*.json" \
+            || echo "Warning: Failed to download compatibility indexes"
+      - uses: actions/checkout@v4
+      - name: Compile Check Compatibility Tools
+        run: export CMAKE_GENERATOR="Ninja"; make release
+      - name: Run Check Compatibility
+        run: bash ./scripts/check_compatibility.sh
+
+  test-python-x86:
+    name: Test Python X86
+    needs: [changes, build-python-x86]
+    if: needs.changes.outputs.python == 'true'
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Free Disk Space
+        run: rm -rf /opt/hostedtoolcache
+      - uses: actions/checkout@v4
+      - name: Prepare Env
+        run: sudo bash ./scripts/deps/install_deps_ubuntu.sh
+      - name: Download Wheel
+        uses: actions/download-artifact@v5
+        with:
+          name: wheelhouse-x86-${{ github.run_id }}
+          path: ./wheelhouse
+      - name: Install Python Wheel
+        run: |
+          pip3 uninstall pyvsag -y
+          pip3 install ./wheelhouse/*.whl
+          pip3 install numpy pyjson pytest
+      - name: Run Python Test
+        run: |
+          cd ./tests/python/
+          echo "=== Running pytest with detailed output ==="
+          python3 -m pytest . -v --tb=short 2>&1 | tee test-output.log
+          echo "=== Test execution completed ==="
+        continue-on-error: true
+      - name: Analyze Test Results
+        run: |
+          cd ./tests/python/
+          echo "=== Analyzing test results ==="
+          if grep -q "FAILED\|ERROR" test-output.log; then
+            echo "❌ Some tests failed!"
+            echo "=== Failed tests summary ==="
+            grep -A 5 "FAILED\|ERROR" test-output.log || true
+            exit 1
+          elif grep -q "passed" test-output.log && ! grep -q "FAILED" test-output.log; then
+            PASSED=$(grep -oP '\d+(?= passed)' test-output.log || echo "0")
+            echo "✅ All tests passed! ($PASSED tests)"
+          else
+            echo "⚠️ Could not determine test results"
+            cat test-output.log
+            exit 1
+          fi
+      - name: Upload Test Logs
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: pytest-logs-x86-${{ github.run_id }}
+          path: ./tests/python/test-output.log
+          retention-days: 30
+          if-no-files-found: ignore
