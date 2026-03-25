@@ -47,7 +47,7 @@ jobs:
           echo ${EXTRA_DEFINED}
           echo ${EXTRA_KEY}
           echo "SIMD_KEY=${EXTRA_KEY}" >> $GITHUB_ENV
-          export CMAKE_GENERATOR="Ninja"; make asan
+          export CMAKE_GENERATOR="Ninja"; make asan COMPILE_JOBS=4
       - name: Clean
         run: find ./build -type f -name "*.o" -exec rm -f {} +
       - name: Save Test
