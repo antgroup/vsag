@@ -85,16 +85,26 @@ get_stream_fd(Logger::Level log_level) {
 
 [[nodiscard]] bool
 supports_color(Logger::Level log_level) {
-    if (isatty(get_stream_fd(log_level)) == 0) {
-        return false;
-    }
+    static const auto check = [](int fd) {
+        if (isatty(fd) == 0) {
+            return false;
+        }
 
-    if (std::getenv("NO_COLOR") != nullptr) {
-        return false;
-    }
+        if (std::getenv("NO_COLOR") != nullptr) {
+            return false;
+        }
 
-    const auto* term = std::getenv("TERM");
-    return term != nullptr and std::string_view(term) != "dumb";
+        const auto* term = std::getenv("TERM");
+        return term != nullptr and std::string_view(term) != "dumb";
+    };
+
+    static const bool cout_supports_color = check(STDOUT_FILENO);
+    static const bool cerr_supports_color = check(STDERR_FILENO);
+
+    if (get_stream_fd(log_level) == STDERR_FILENO) {
+        return cerr_supports_color;
+    }
+    return cout_supports_color;
 }
 
 [[nodiscard]] std::string_view
@@ -147,7 +157,7 @@ DefaultLogger::log_message(Logger::Level log_level, std::string_view msg) {
     } else {
         stream << get_level_name(log_level);
     }
-    stream << "] " << msg << std::endl;
+    stream << "] " << msg << '\n';
 }
 
 void
