@@ -46,6 +46,14 @@
 
 namespace vsag {
 
+static DatasetPtr
+make_empty_dataset_with_stats() {
+    SearchStatistics stats;
+    auto dataset_result = DatasetImpl::MakeEmptyDataset();
+    dataset_result->Statistics(stats.Dump());
+    return dataset_result;
+}
+
 class HGraphAnalyzer;
 
 HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonParam& common_param)
@@ -853,10 +861,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
         auto cur_count = this->total_count_.load();
 
         if (cur_count == 0) {
-            SearchStatistics stats;
-            auto dataset_result = DatasetImpl::MakeEmptyDataset();
-            dataset_result->Statistics(stats.Dump());
-            return dataset_result;
+            return make_empty_dataset_with_stats();
         }
         auto* new_ctx = new IteratorFilterContext();
         if (auto ret = new_ctx->init(cur_count, params.ef_search, ctx.alloc); not ret.has_value()) {
@@ -883,6 +888,9 @@ HGraph::KnnSearch(const DatasetPtr& query,
         search_param.topk = 1;
         search_param.ef = 1;
         search_param.is_inner_id_allowed = nullptr;
+        if (search_param.ep == INVALID_ENTRY_POINT) {
+            return make_empty_dataset_with_stats();
+        }
         if (iter_filter_ctx->IsFirstUsed()) {
             for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
                 auto result = this->search_one_graph(query_data,
@@ -1087,6 +1095,11 @@ HGraph::RangeSearch(const DatasetPtr& query,
     search_param.ep = this->entry_point_id_;
     search_param.topk = 1;
     search_param.ef = 1;
+
+    if (search_param.ep == INVALID_ENTRY_POINT) {
+        return make_empty_dataset_with_stats();
+    }
+
     const auto* raw_query = get_data(query);
     for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
         auto result = this->search_one_graph(raw_query,
@@ -2128,10 +2141,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     search_param.is_inner_id_allowed = nullptr;
 
     if (search_param.ep == INVALID_ENTRY_POINT) {
-        SearchStatistics stats;
-        auto dataset_result = DatasetImpl::MakeEmptyDataset();
-        dataset_result->Statistics(stats.Dump());
-        return dataset_result;
+        return make_empty_dataset_with_stats();
     }
 
     auto vt = this->pool_->TakeOne();
