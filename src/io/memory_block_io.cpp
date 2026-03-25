@@ -22,6 +22,7 @@
 #include "index_common_param.h"
 #include "inner_string_params.h"
 #include "utils/prefetch.h"
+#include "vsag_exception.h"
 
 namespace vsag {
 
@@ -129,7 +130,11 @@ MemoryBlockIO::check_and_realloc(uint64_t size) {
     auto cur_block_size = this->blocks_.size();
     this->blocks_.reserve(new_block_count);
     while (cur_block_size < new_block_count) {
-        this->blocks_.emplace_back(static_cast<uint8_t*>(this->allocator_->Allocate(block_size_)));
+        auto* ptr = static_cast<uint8_t*>(this->allocator_->Allocate(block_size_));
+        if (ptr == nullptr) {
+            throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "MemoryBlockIO allocation failed");
+        }
+        this->blocks_.emplace_back(ptr);
         ++cur_block_size;
     }
 }
