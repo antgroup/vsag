@@ -47,7 +47,7 @@
 namespace vsag {
 
 static DatasetPtr
-MakeEmptyDatasetWithStats() {
+make_empty_dataset_with_stats() {
     SearchStatistics stats;
     auto dataset_result = DatasetImpl::MakeEmptyDataset();
     dataset_result->Statistics(stats.Dump());
@@ -861,7 +861,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
         auto cur_count = this->total_count_.load();
 
         if (cur_count == 0) {
-            return MakeEmptyDatasetWithStats();
+            return make_empty_dataset_with_stats();
         }
         auto* new_ctx = new IteratorFilterContext();
         if (auto ret = new_ctx->init(cur_count, params.ef_search, ctx.alloc); not ret.has_value()) {
@@ -889,7 +889,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
         search_param.ef = 1;
         search_param.is_inner_id_allowed = nullptr;
         if (search_param.ep == INVALID_ENTRY_POINT) {
-            return MakeEmptyDatasetWithStats();
+            return make_empty_dataset_with_stats();
         }
         if (iter_filter_ctx->IsFirstUsed()) {
             for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
@@ -1097,7 +1097,7 @@ HGraph::RangeSearch(const DatasetPtr& query,
     search_param.ef = 1;
 
     if (search_param.ep == INVALID_ENTRY_POINT) {
-        return MakeEmptyDatasetWithStats();
+        return make_empty_dataset_with_stats();
     }
 
     const auto* raw_query = get_data(query);
@@ -2141,7 +2141,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     search_param.is_inner_id_allowed = nullptr;
 
     if (search_param.ep == INVALID_ENTRY_POINT) {
-        return MakeEmptyDatasetWithStats();
+        return make_empty_dataset_with_stats();
     }
 
     auto vt = this->pool_->TakeOne();
