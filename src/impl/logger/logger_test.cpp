@@ -16,8 +16,54 @@
 #include "logger.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <vector>
 
-#include "spdlog/spdlog.h"
+#include "vsag/options.h"
+
+namespace {
+
+class CollectLogger : public vsag::Logger {
+public:
+    void
+    SetLevel(Level log_level) override {
+        level_ = log_level;
+    }
+
+    void
+    Trace(const std::string& msg) override {
+        messages_.emplace_back("trace:" + msg);
+    }
+
+    void
+    Debug(const std::string& msg) override {
+        messages_.emplace_back("debug:" + msg);
+    }
+
+    void
+    Info(const std::string& msg) override {
+        messages_.emplace_back("info:" + msg);
+    }
+
+    void
+    Warn(const std::string& msg) override {
+        messages_.emplace_back("warn:" + msg);
+    }
+
+    void
+    Error(const std::string& msg) override {
+        messages_.emplace_back("error:" + msg);
+    }
+
+    void
+    Critical(const std::string& msg) override {
+        messages_.emplace_back("critical:" + msg);
+    }
+
+    Level level_{Level::kINFO};
+    std::vector<std::string> messages_;
+};
+
+}  // namespace
 
 TEST_CASE("Logger Test", "[ut][logger]") {
     vsag::logger::set_level(vsag::logger::level::trace);
@@ -29,24 +75,21 @@ TEST_CASE("Logger Test", "[ut][logger]") {
     vsag::logger::critical("this is a critical level message");
 }
 
-TEST_CASE("spdlog usage test", "[ut][logger]") {
-    spdlog::info("Welcome to spdlog!");
-    spdlog::error("SomeError message with arg: {}", 1);
+TEST_CASE("Logger Format Test", "[ut][logger]") {
+    CollectLogger logger;
+    auto* origin_logger = vsag::Options::Instance().logger();
+    vsag::Options::Instance().set_logger(&logger);
 
-    spdlog::warn("Easy padding in numbers like {:08d}", 12);
-    spdlog::critical("Support for int: {0:d};  hex: {0:x};  oct: {0:o}; bin: {0:b}", 42);
-    spdlog::info("Support for floats {:03.2f}", 1.23456);
-    spdlog::info("Positional args are {1} {0}..", "too", "supported");
-    spdlog::info("{:<30}", "left aligned");
+    vsag::logger::set_level(vsag::logger::level::debug);
+    vsag::logger::info("Welcome {}", "logger");
+    vsag::logger::warn("Easy padding in numbers like {:08d}", 12);
+    vsag::logger::critical("Support for int: {0:d}; hex: {0:x}; oct: {0:o}; bin: {0:b}", 42);
 
-    spdlog::set_level(spdlog::level::debug);  // Set global log level to debug
-    spdlog::debug("This message should be displayed..");
+    REQUIRE(logger.level_ == vsag::Logger::Level::kDEBUG);
+    REQUIRE(logger.messages_.size() == 3);
+    REQUIRE(logger.messages_[0] == "info:Welcome logger");
+    REQUIRE(logger.messages_[1] == "warn:Easy padding in numbers like 00000012");
+    REQUIRE(logger.messages_[2] == "critical:Support for int: 42; hex: 2a; oct: 52; bin: 101010");
 
-    // change log pattern
-    spdlog::set_pattern("[%H:%M:%S %z] [%n] [%^---%L---%$] [thread %t] %v");
-
-    // Compile time log levels
-    // define SPDLOG_ACTIVE_LEVEL to desired level
-    SPDLOG_TRACE("Some trace message with param {}", 42);
-    SPDLOG_DEBUG("Some debug message");
+    vsag::Options::Instance().set_logger(origin_logger);
 }

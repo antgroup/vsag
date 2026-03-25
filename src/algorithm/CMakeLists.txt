@@ -23,7 +23,7 @@ list (FILTER ALGORITHM_SRCS EXCLUDE REGEX "_test.cpp")
 
 add_library(algorithm OBJECT ${ALGORITHM_SRCS})
 target_link_libraries (algorithm PUBLIC coverage_config)
-maybe_add_dependencies(algorithm spdlog fmt::fmt antlr4)
+maybe_add_dependencies(algorithm fmt::fmt antlr4)
 
 
 set (ALGORITHM_LIBS
@@ -37,5 +37,5 @@ if (ENABLE_TESTS)
     file (GLOB_RECURSE ALGORITHM_TESTS "*_test.cpp")
     add_library (algorithm_test STATIC ${ALGORITHM_TESTS})
     target_link_libraries (algorithm_test PRIVATE Catch2::Catch2 vsag)
-    add_dependencies (algorithm_test spdlog Catch2 antlr4)
+    add_dependencies (algorithm_test Catch2 antlr4)
 endif ()

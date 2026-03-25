@@ -36,7 +36,7 @@ set (eval_srcs
 add_library (eval_obj OBJECT ${eval_srcs})
 target_compile_options (eval_obj PRIVATE -fopenmp)
 target_link_libraries (eval_obj PRIVATE pthread)
-add_dependencies (eval_obj hdf5 spdlog yaml-cpp tabulate)
+add_dependencies (eval_obj hdf5 yaml-cpp tabulate)
 
 add_executable (eval_performance main.cpp)
 target_compile_options (eval_performance PRIVATE -fopenmp)

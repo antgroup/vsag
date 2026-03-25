@@ -24,4 +24,4 @@ set (IVF_PARTITION_SRCS
 
 add_library (ivf_partition OBJECT ${IVF_PARTITION_SRCS})
 target_link_libraries (ivf_partition PUBLIC coverage_config)
-maybe_add_dependencies (ivf_partition spdlog fmt::fmt)
+maybe_add_dependencies (ivf_partition fmt::fmt)

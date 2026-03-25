@@ -23,4 +23,3 @@ set (SEARCHER_SRC
 
 add_library (searcher OBJECT ${SEARCHER_SRC})
 target_link_libraries (searcher PRIVATE fmt::fmt coverage_config)
-maybe_add_dependencies (searcher spdlog)

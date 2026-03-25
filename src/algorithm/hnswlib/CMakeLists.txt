@@ -7,4 +7,4 @@ set (HNSWLIB_SRCS
 
 add_library (hnswlib OBJECT ${HNSWLIB_SRCS})
 target_link_libraries (hnswlib PUBLIC coverage_config)
-add_dependencies (hnswlib spdlog fmt::fmt)
+add_dependencies (hnswlib fmt::fmt)
