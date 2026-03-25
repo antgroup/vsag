@@ -62,6 +62,55 @@ jobs:
           cd ${GITHUB_WORKSPACE}/vsag_tag
           ./build-release/tools/create_old_version_index ${{ steps.set-version.outputs.version }}
           cd ../vsag_index
+      - name: Upload Index Files
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.set-version.outputs.version }}
+        run: |
+          cd ${GITHUB_WORKSPACE}/vsag_tag
+          
+          files=()
+          for algo in hgraph hnsw; do
+            for ext in index build.json search.json; do
+              file="${VERSION}_${algo}_${ext}"
+              if [ -f "$file" ]; then
+                files+=("$file")
+              fi
+            done
+          done
+          
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No index files found to upload"
+            exit 0
+          fi
+          
+          echo "Files to upload: ${files[*]}"
+          
+          release_error=$(gh release view compatibility-indexes --repo antgroup/vsag 2>&1)
+          if [ $? -eq 0 ]; then
+            echo "Uploading to existing release..."
+            if ! gh release upload compatibility-indexes "${files[@]}" --repo antgroup/vsag --clobber; then
+              echo "Error: Failed to upload files to release"
+              exit 1
+            fi
+          else
+            if echo "$release_error" | grep -qi "404\|not found\|notfound"; then
+              echo "Creating new release..."
+              if ! gh release create compatibility-indexes "${files[@]}" \
+                --repo antgroup/vsag \
+                --title "VSAG Compatibility Test Indexes" \
+                --notes "Index files for backward compatibility testing" \
+                --prerelease; then
+                echo "Error: Failed to create release"
+                exit 1
+              fi
+            else
+              echo "Error checking release existence: $release_error"
+              exit 1
+            fi
+          fi
+          
+          echo "Successfully uploaded ${#files[@]} file(s)"
       - name: Config Git And Push
         uses: peter-evans/create-pull-request@v7
         with:
