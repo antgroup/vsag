@@ -155,7 +155,8 @@ int generate_pq_data_from_pivots(std::stringstream &base_reader, uint32_t num_ce
 template <typename T>
 int generate_pq_data_from_pivots(const T* data, uint64_t num_points, uint64_t dim, const std::vector<uint64_t>& skip_locs, uint32_t num_centers, uint32_t num_pq_chunks,
                                  std::stringstream &pq_pivots_stream, std::stringstream &compressed_file_writer,
-                                 bool use_opq = false, std::shared_ptr<float[]> rotmat_tr = nullptr, bool use_bsa = false);
+                                 bool use_opq = false, std::shared_ptr<float[]> rotmat_tr = nullptr,
+                                 bool use_bsa = false, bool should_normalize = false);
 
 template <typename T>
 void generate_disk_quantized_data(const std::string &data_file_to_use, const std::string &disk_pq_pivots_path,
