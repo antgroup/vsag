@@ -43,8 +43,8 @@ ExternalProject_Add (
     TIMEOUT 30
 
     BUILD_BYPRODUCTS
-        ${CMAKE_CURRENT_BINARY_DIR}/${name}/build/bin/libhdf5_cpp.a
-        ${CMAKE_CURRENT_BINARY_DIR}/${name}/build/bin/libhdf5.a
+        ${HDF5_CPP_STATIC_LIBRARY}
+        ${HDF5_C_STATIC_LIBRARY}
 )
 
 add_library (vsag_hdf5_headers INTERFACE)

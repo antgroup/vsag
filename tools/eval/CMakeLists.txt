@@ -57,3 +57,4 @@ target_link_libraries (eval_performance PRIVATE
     ${HDF5_CPP_STATIC_LIBRARY}
     ${HDF5_C_STATIC_LIBRARY}
     z)
+add_dependencies (eval_performance hdf5)
