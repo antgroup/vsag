@@ -24,10 +24,10 @@ endif ()
 
 project (VSAG LANGUAGES C CXX)
 
-include (GNUInstallDirs)
-include (cmake/ColorizeMessage.cmake)
-include (cmake/VSAGHelpers.cmake)
-include (cmake/VSAGOptions.cmake)
+include (GNUInstallDirs)               # Standard install directory variables.
+include (cmake/ColorizeMessage.cmake)  # Colored status output helpers.
+include (cmake/VSAGHelpers.cmake)      # Shared helper functions.
+include (cmake/VSAGOptions.cmake)      # Cache options and build defaults.
 
 set (VSAG_TARGET_PROCESSOR "${CMAKE_SYSTEM_PROCESSOR}")
 if (NOT VSAG_TARGET_PROCESSOR)
@@ -36,12 +36,12 @@ endif ()
 
 message (STATUS "CPU ARCH: ${Yellow}${VSAG_TARGET_PROCESSOR}${CR}")
 
-include (cmake/VSAGCompilerConfig.cmake)
-include (cmake/VSAGSystemDeps.cmake)
-include (cmake/DarwinDep.cmake)
-include (cmake/VSAGExternalProjectConfig.cmake)
-include (cmake/VSAGThirdParty.cmake)
-include (cmake/VSAGDependencyTargets.cmake)
+include (cmake/VSAGCompilerConfig.cmake)        # Compiler, ABI, sanitizer, and linker setup.
+include (cmake/VSAGSystemDeps.cmake)            # System dependency discovery.
+include (cmake/DarwinDep.cmake)                 # macOS-specific dependency handling.
+include (cmake/VSAGExternalProjectConfig.cmake) # Shared ExternalProject flags and env.
+include (cmake/VSAGThirdParty.cmake)            # Third-party dependency declarations.
+include (cmake/VSAGDependencyTargets.cmake)     # Shared interface/header dependency targets.
 
 include_directories (${PROJECT_SOURCE_DIR}/include)
 include_directories (${PROJECT_SOURCE_DIR}/src)
@@ -65,6 +65,6 @@ if (ENABLE_TESTS)
     target_compile_definitions (vsag PRIVATE ENABLE_TESTS)
 endif ()
 
-include (cmake/VSAGPythonBindings.cmake)
-include (cmake/VSAGInstall.cmake)
-include (cmake/VSAGVersion.cmake)
+include (cmake/VSAGPythonBindings.cmake)  # Optional Python bindings.
+include (cmake/VSAGInstall.cmake)         # Install rules.
+include (cmake/VSAGVersion.cmake)         # Generated version header target.
