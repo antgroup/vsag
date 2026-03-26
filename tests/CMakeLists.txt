@@ -55,7 +55,7 @@ else()
         )
 endif()
 
-add_dependencies (unittests spdlog Catch2 vsag)
+add_dependencies (unittests Catch2 vsag)
 
 # function tests
 file (GLOB FUNCTION_TESTS "test_*.cpp")
@@ -67,7 +67,6 @@ add_executable (functests
         fixtures/test_logger.cpp
 )
 target_include_directories (functests PRIVATE
-        ${CMAKE_CURRENT_BINARY_DIR}/spdlog/install/include
         ${HDF5_INCLUDE_DIRS})
 target_link_libraries (functests PRIVATE Catch2::Catch2 vsag simd)
-add_dependencies (functests spdlog Catch2)
+add_dependencies (functests Catch2)

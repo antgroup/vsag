@@ -23,4 +23,3 @@ set (ODESCENT_SRC
 
 add_library (odescent OBJECT ${ODESCENT_SRC})
 target_link_libraries (odescent PRIVATE fmt::fmt coverage_config)
-maybe_add_dependencies (odescent spdlog)

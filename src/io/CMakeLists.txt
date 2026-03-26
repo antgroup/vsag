@@ -41,11 +41,9 @@ else ()
     message (STATUS "io module: libaio not available, async I/O disabled")
 endif ()
 
-maybe_add_dependencies (io spdlog)
-
 if (ENABLE_TESTS)
     file (GLOB_RECURSE IO_TESTS "*_test.cpp")
     add_library (io_test STATIC ${IO_TESTS})
     target_link_libraries (io_test PRIVATE Catch2::Catch2 vsag)
-    add_dependencies (io_test spdlog Catch2)
+    add_dependencies (io_test Catch2)
 endif ()

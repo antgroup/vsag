@@ -23,4 +23,3 @@ set (ALLOCATOR_SRC
 
 add_library (allocator OBJECT ${ALLOCATOR_SRC})
 target_link_libraries (allocator PRIVATE fmt::fmt coverage_config)
-maybe_add_dependencies (allocator spdlog)

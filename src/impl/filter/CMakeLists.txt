@@ -26,4 +26,3 @@ set (FILTER_SRC
 )
 add_library (filter OBJECT ${FILTER_SRC})
 target_link_libraries (filter PRIVATE fmt::fmt coverage_config)
-maybe_add_dependencies (filter spdlog)
