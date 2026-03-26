@@ -19,6 +19,7 @@
 
 #include "data_type.h"
 #include "fixtures.h"
+#include "impl/allocator/safe_allocator.h"
 #include "iostream"
 #include "quantization/computer.h"
 #include "quantizer.h"
@@ -426,3 +427,176 @@ TestSerializeAndDeserialize(Quantizer<T>& quant1,
         REQUIRE_THROWS(TestComputeCodes<T, metric>(quant2, dim, count, error, false));
     }
 }
+
+#define DEFINE_QUANTIZER_ENCODE_DECODE_TESTS(                                                      \
+    TestName, QuantizerT, dims_val, counts_val, error_val, code_max_val)                           \
+    TEST_CASE(TestName " Encode and Decode", "[ut][" TestName "]") {                               \
+        constexpr MetricType metrics[] = {MetricType::METRIC_TYPE_L2SQR,                           \
+                                          MetricType::METRIC_TYPE_IP};                             \
+        for (auto dim : dims_val) {                                                                \
+            for (auto count : counts_val) {                                                        \
+                for (auto metric : metrics) {                                                      \
+                    auto allocator = SafeAllocator::FactoryDefaultAllocator();                     \
+                    if (metric == MetricType::METRIC_TYPE_L2SQR) {                                 \
+                        QuantizerT<MetricType::METRIC_TYPE_L2SQR> quantizer(dim, allocator.get()); \
+                        TestQuantizerEncodeDecode(quantizer, dim, count, error_val);               \
+                        TestQuantizerEncodeDecodeSame(                                             \
+                            quantizer, dim, count, code_max_val, error_val);                       \
+                    } else {                                                                       \
+                        QuantizerT<MetricType::METRIC_TYPE_IP> quantizer(dim, allocator.get());    \
+                        TestQuantizerEncodeDecode(quantizer, dim, count, error_val);               \
+                        TestQuantizerEncodeDecodeSame(                                             \
+                            quantizer, dim, count, code_max_val, error_val);                       \
+                    }                                                                              \
+                }                                                                                  \
+            }                                                                                      \
+        }                                                                                          \
+    }
+
+#define DEFINE_QUANTIZER_ENCODE_DECODE_TESTS_SIMPLE(                                               \
+    TestName, QuantizerT, dims_val, counts_val, error_val)                                         \
+    TEST_CASE(TestName " Encode and Decode", "[ut][" TestName "]") {                               \
+        constexpr MetricType metrics[] = {MetricType::METRIC_TYPE_L2SQR,                           \
+                                          MetricType::METRIC_TYPE_IP};                             \
+        for (auto dim : dims_val) {                                                                \
+            for (auto count : counts_val) {                                                        \
+                for (auto metric : metrics) {                                                      \
+                    auto allocator = SafeAllocator::FactoryDefaultAllocator();                     \
+                    if (metric == MetricType::METRIC_TYPE_L2SQR) {                                 \
+                        QuantizerT<MetricType::METRIC_TYPE_L2SQR> quantizer(dim, allocator.get()); \
+                        TestQuantizerEncodeDecode(quantizer, dim, count, error_val);               \
+                    } else {                                                                       \
+                        QuantizerT<MetricType::METRIC_TYPE_IP> quantizer(dim, allocator.get());    \
+                        TestQuantizerEncodeDecode(quantizer, dim, count, error_val);               \
+                    }                                                                              \
+                }                                                                                  \
+            }                                                                                      \
+        }                                                                                          \
+    }
+
+#define DEFINE_QUANTIZER_COMPUTE_TESTS(TestName, QuantizerT, dims_val, counts_val, error_val)      \
+    TEST_CASE(TestName " Compute", "[ut][" TestName "]") {                                         \
+        constexpr MetricType metrics[] = {MetricType::METRIC_TYPE_L2SQR,                           \
+                                          MetricType::METRIC_TYPE_COSINE,                          \
+                                          MetricType::METRIC_TYPE_IP};                             \
+        for (auto dim : dims_val) {                                                                \
+            for (auto count : counts_val) {                                                        \
+                for (auto metric : metrics) {                                                      \
+                    auto allocator = SafeAllocator::FactoryDefaultAllocator();                     \
+                    if (metric == MetricType::METRIC_TYPE_L2SQR) {                                 \
+                        QuantizerT<MetricType::METRIC_TYPE_L2SQR> quantizer(dim, allocator.get()); \
+                        TestComputeCodes<QuantizerT<MetricType::METRIC_TYPE_L2SQR>,                \
+                                         MetricType::METRIC_TYPE_L2SQR>(                           \
+                            quantizer, dim, count, error_val);                                     \
+                        TestComputer<QuantizerT<MetricType::METRIC_TYPE_L2SQR>,                    \
+                                     MetricType::METRIC_TYPE_L2SQR>(                               \
+                            quantizer, dim, count, error_val);                                     \
+                    } else if (metric == MetricType::METRIC_TYPE_COSINE) {                         \
+                        QuantizerT<MetricType::METRIC_TYPE_COSINE> quantizer(dim,                  \
+                                                                             allocator.get());     \
+                        TestComputeCodes<QuantizerT<MetricType::METRIC_TYPE_COSINE>,               \
+                                         MetricType::METRIC_TYPE_COSINE>(                          \
+                            quantizer, dim, count, error_val);                                     \
+                        TestComputer<QuantizerT<MetricType::METRIC_TYPE_COSINE>,                   \
+                                     MetricType::METRIC_TYPE_COSINE>(                              \
+                            quantizer, dim, count, error_val);                                     \
+                    } else {                                                                       \
+                        QuantizerT<MetricType::METRIC_TYPE_IP> quantizer(dim, allocator.get());    \
+                        TestComputeCodes<QuantizerT<MetricType::METRIC_TYPE_IP>,                   \
+                                         MetricType::METRIC_TYPE_IP>(                              \
+                            quantizer, dim, count, error_val);                                     \
+                        TestComputer<QuantizerT<MetricType::METRIC_TYPE_IP>,                       \
+                                     MetricType::METRIC_TYPE_IP>(                                  \
+                            quantizer, dim, count, error_val);                                     \
+                    }                                                                              \
+                }                                                                                  \
+            }                                                                                      \
+        }                                                                                          \
+    }
+
+#define DEFINE_QUANTIZER_COMPUTE_TESTS_WITH_SAME(                                                  \
+    TestName, QuantizerT, dims_val, counts_val, error_val, code_max_val)                           \
+    TEST_CASE(TestName " Compute", "[ut][" TestName "]") {                                         \
+        constexpr MetricType metrics[] = {MetricType::METRIC_TYPE_L2SQR,                           \
+                                          MetricType::METRIC_TYPE_COSINE,                          \
+                                          MetricType::METRIC_TYPE_IP};                             \
+        for (auto dim : dims_val) {                                                                \
+            for (auto count : counts_val) {                                                        \
+                for (auto metric : metrics) {                                                      \
+                    auto allocator = SafeAllocator::FactoryDefaultAllocator();                     \
+                    if (metric == MetricType::METRIC_TYPE_L2SQR) {                                 \
+                        QuantizerT<MetricType::METRIC_TYPE_L2SQR> quantizer(dim, allocator.get()); \
+                        TestComputeCodes<QuantizerT<MetricType::METRIC_TYPE_L2SQR>,                \
+                                         MetricType::METRIC_TYPE_L2SQR>(                           \
+                            quantizer, dim, count, error_val);                                     \
+                        TestComputeCodesSame<QuantizerT<MetricType::METRIC_TYPE_L2SQR>,            \
+                                             MetricType::METRIC_TYPE_L2SQR>(                       \
+                            quantizer, dim, count, code_max_val);                                  \
+                        TestComputer<QuantizerT<MetricType::METRIC_TYPE_L2SQR>,                    \
+                                     MetricType::METRIC_TYPE_L2SQR>(                               \
+                            quantizer, dim, count, error_val);                                     \
+                    } else if (metric == MetricType::METRIC_TYPE_COSINE) {                         \
+                        QuantizerT<MetricType::METRIC_TYPE_COSINE> quantizer(dim,                  \
+                                                                             allocator.get());     \
+                        TestComputeCodes<QuantizerT<MetricType::METRIC_TYPE_COSINE>,               \
+                                         MetricType::METRIC_TYPE_COSINE>(                          \
+                            quantizer, dim, count, error_val);                                     \
+                        TestComputeCodesSame<QuantizerT<MetricType::METRIC_TYPE_COSINE>,           \
+                                             MetricType::METRIC_TYPE_COSINE>(                      \
+                            quantizer, dim, count, code_max_val);                                  \
+                        TestComputer<QuantizerT<MetricType::METRIC_TYPE_COSINE>,                   \
+                                     MetricType::METRIC_TYPE_COSINE>(                              \
+                            quantizer, dim, count, error_val);                                     \
+                    } else {                                                                       \
+                        QuantizerT<MetricType::METRIC_TYPE_IP> quantizer(dim, allocator.get());    \
+                        TestComputeCodes<QuantizerT<MetricType::METRIC_TYPE_IP>,                   \
+                                         MetricType::METRIC_TYPE_IP>(                              \
+                            quantizer, dim, count, error_val);                                     \
+                        TestComputeCodesSame<QuantizerT<MetricType::METRIC_TYPE_IP>,               \
+                                             MetricType::METRIC_TYPE_IP>(                          \
+                            quantizer, dim, count, code_max_val);                                  \
+                        TestComputer<QuantizerT<MetricType::METRIC_TYPE_IP>,                       \
+                                     MetricType::METRIC_TYPE_IP>(                                  \
+                            quantizer, dim, count, error_val);                                     \
+                    }                                                                              \
+                }                                                                                  \
+            }                                                                                      \
+        }                                                                                          \
+    }
+
+#define DEFINE_QUANTIZER_SERIALIZE_TESTS(TestName, QuantizerT, dims_val, counts_val, error_val)  \
+    TEST_CASE(TestName " Serialize and Deserialize", "[ut][" TestName "]") {                     \
+        constexpr MetricType metrics[] = {MetricType::METRIC_TYPE_L2SQR,                         \
+                                          MetricType::METRIC_TYPE_COSINE,                        \
+                                          MetricType::METRIC_TYPE_IP};                           \
+        for (auto dim : dims_val) {                                                              \
+            for (auto count : counts_val) {                                                      \
+                for (auto metric : metrics) {                                                    \
+                    auto allocator = SafeAllocator::FactoryDefaultAllocator();                   \
+                    if (metric == MetricType::METRIC_TYPE_L2SQR) {                               \
+                        QuantizerT<MetricType::METRIC_TYPE_L2SQR> quantizer1(dim,                \
+                                                                             allocator.get());   \
+                        QuantizerT<MetricType::METRIC_TYPE_L2SQR> quantizer2(dim,                \
+                                                                             allocator.get());   \
+                        TestSerializeAndDeserialize<QuantizerT<MetricType::METRIC_TYPE_L2SQR>,   \
+                                                    MetricType::METRIC_TYPE_L2SQR>(              \
+                            quantizer1, quantizer2, dim, count, error_val);                      \
+                    } else if (metric == MetricType::METRIC_TYPE_COSINE) {                       \
+                        QuantizerT<MetricType::METRIC_TYPE_COSINE> quantizer1(dim,               \
+                                                                              allocator.get());  \
+                        QuantizerT<MetricType::METRIC_TYPE_COSINE> quantizer2(dim,               \
+                                                                              allocator.get());  \
+                        TestSerializeAndDeserialize<QuantizerT<MetricType::METRIC_TYPE_COSINE>,  \
+                                                    MetricType::METRIC_TYPE_COSINE>(             \
+                            quantizer1, quantizer2, dim, count, error_val);                      \
+                    } else {                                                                     \
+                        QuantizerT<MetricType::METRIC_TYPE_IP> quantizer1(dim, allocator.get()); \
+                        QuantizerT<MetricType::METRIC_TYPE_IP> quantizer2(dim, allocator.get()); \
+                        TestSerializeAndDeserialize<QuantizerT<MetricType::METRIC_TYPE_IP>,      \
+                                                    MetricType::METRIC_TYPE_IP>(                 \
+                            quantizer1, quantizer2, dim, count, error_val);                      \
+                    }                                                                            \
+                }                                                                                \
+            }                                                                                    \
+        }                                                                                        \
+    }
