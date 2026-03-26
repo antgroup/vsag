@@ -4,8 +4,6 @@ on:
   workflow_dispatch:
   push:
     branches: [ "main", "0.*" ]
-  pull_request:
-    branches: [ "main", "0.*" ]
 
 jobs:
   build_python_wheel_x86:
