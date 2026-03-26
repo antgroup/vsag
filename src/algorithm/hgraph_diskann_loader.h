@@ -82,62 +82,62 @@ public:
     }
 
 public:
-    // Test-only accessor for unit testing
-    void
-    TestLoadDiskANNPQData(std::istream& pq_stream,
-                          std::istream& compressed_stream,
-                          uint64_t num_points) {
-        load_diskann_pq_data(pq_stream, compressed_stream, num_points);
-    }
+    // DiskANN-specific parameters extracted during loading (public for testing)
+    uint64_t diskann_num_points_{0};
+    uint64_t diskann_dim_{0};
+    uint64_t diskann_max_degree_{0};
+    bool has_precise_vectors_{false};
+    bool loaded_from_diskann_{false};
 
-    // Test-only accessor to get the flatten codes interface
+    // Store common param for creating FlattenInterface instances
+    IndexCommonParam common_param_;
+
+    /**
+     * Load PQ data (pivots and compressed vectors) from DiskANN format
+     */
+    void
+    load_diskann_pq_data(std::istream& pq_stream,
+                         std::istream& compressed_stream,
+                         uint64_t num_points);
+
+    /**
+     * Load graph structure from DiskANN format
+     */
+    void
+    load_diskann_graph(std::istream& graph_stream, uint64_t num_points);
+
+    /**
+     * Extract precise vectors from DiskANN disk layout
+     */
+    void
+    load_diskann_precise_vectors(std::istream& layout_stream,
+                                 uint64_t num_points,
+                                 uint64_t dim,
+                                 uint64_t max_degree);
+
+    // Accessor methods for HGraph members
     FlattenInterfacePtr
-    TestGetFlattenCodes() const {
+    get_basic_flatten_codes() const {
         return this->basic_flatten_codes_;
     }
 
-    // Test-only accessor for load_diskann_graph
-    void
-    TestLoadDiskANNGraph(std::istream& graph_stream, uint64_t num_points) {
-        load_diskann_graph(graph_stream, num_points);
-    }
-
-    // Test-only accessor to get the bottom graph
     GraphInterfacePtr
-    TestGetBottomGraph() const {
+    get_bottom_graph() const {
         return this->bottom_graph_;
     }
 
-    // Test-only accessor to get entry point
     InnerIdType
-    TestGetEntryPoint() const {
+    get_entry_point_id() const {
         return this->entry_point_id_;
     }
 
-    // Test-only accessor to get max degree from loading
-    uint64_t
-    TestGetDiskANNMaxDegree() const {
-        return this->diskann_max_degree_;
-    }
-
-    // Test-only accessor for load_diskann_precise_vectors
-    void
-    TestLoadDiskANNPreciseVectors(std::istream& layout_stream,
-                                  uint64_t num_points,
-                                  uint64_t dim,
-                                  uint64_t max_degree) {
-        load_diskann_precise_vectors(layout_stream, num_points, dim, max_degree);
-    }
-
-    // Test-only accessor to get precise codes
     FlattenInterfacePtr
-    TestGetPreciseCodes() const {
+    get_high_precise_codes() const {
         return this->high_precise_codes_;
     }
 
-    // Test-only accessor to set use_reorder flag
     void
-    TestSetUseReorder(bool use_reorder) {
+    set_use_reorder(bool use_reorder) {
         this->use_reorder_ = use_reorder;
     }
 
@@ -162,33 +162,10 @@ private:
     load_from_diskann(const ReaderSet& reader_set);
 
     /**
-     * Load PQ data (pivots and compressed vectors) from DiskANN format
-     */
-    void
-    load_diskann_pq_data(std::istream& pq_stream,
-                         std::istream& compressed_stream,
-                         uint64_t num_points);
-
-    /**
-     * Load graph structure from DiskANN format
-     */
-    void
-    load_diskann_graph(std::istream& graph_stream, uint64_t num_points);
-
-    /**
      * Load tags (ID mapping) from DiskANN format
      */
     void
     load_diskann_tags(std::istream& tag_stream);
-
-    /**
-     * Extract precise vectors from DiskANN disk layout
-     */
-    void
-    load_diskann_precise_vectors(std::istream& layout_stream,
-                                 uint64_t num_points,
-                                 uint64_t dim,
-                                 uint64_t max_degree);
 
     /**
      * Parse PQ pivot file header and setup ProductQuantizer
@@ -212,19 +189,6 @@ private:
      */
     void
     finalize_loading();
-
-private:
-    // DiskANN-specific parameters extracted during loading
-    uint64_t diskann_num_points_{0};
-    uint64_t diskann_dim_{0};
-    uint64_t diskann_max_degree_{0};
-    bool has_precise_vectors_{false};
-
-    // Track whether this was loaded from DiskANN format
-    bool loaded_from_diskann_{false};
-
-    // Store common param for creating FlattenInterface instances
-    IndexCommonParam common_param_;
 };
 
 }  // namespace vsag

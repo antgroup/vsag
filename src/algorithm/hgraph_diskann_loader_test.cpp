@@ -401,7 +401,7 @@ CreateReorderTestLoader(uint64_t max_degree,
     common_param.allocator_ = out_allocator;
 
     auto loader = std::make_shared<HGraphDiskANNLoader>(param, common_param);
-    loader->TestSetUseReorder(true);
+    loader->use_reorder_ = true;
     return loader;
 }
 
@@ -489,10 +489,10 @@ TEST_CASE("HGraphDiskANNLoader PQ Distance Consistency", "[ut][hgraph_diskann_lo
 
     pq_pivots_stream.seekg(0, std::ios::beg);
     compressed_stream.seekg(0, std::ios::beg);
-    loader->TestLoadDiskANNPQData(pq_pivots_stream, compressed_stream, num_vectors);
+    loader->load_diskann_pq_data(pq_pivots_stream, compressed_stream, num_vectors);
 
     // Verify codes
-    auto flatten_codes = loader->TestGetFlattenCodes();
+    auto flatten_codes = loader->get_basic_flatten_codes();
     REQUIRE(flatten_codes != nullptr);
     VerifyCodesMatch(flatten_codes, diskann_codes, num_vectors, pq_dim);
 
@@ -573,9 +573,9 @@ TEST_CASE("HGraphDiskANNLoader PQ Codebook and Dimensions", "[ut][hgraph_diskann
 
     pq_pivots_stream.seekg(0, std::ios::beg);
     compressed_stream.seekg(0, std::ios::beg);
-    loader->TestLoadDiskANNPQData(pq_pivots_stream, compressed_stream, num_vectors);
+    loader->load_diskann_pq_data(pq_pivots_stream, compressed_stream, num_vectors);
 
-    auto flatten_codes = loader->TestGetFlattenCodes();
+    auto flatten_codes = loader->get_basic_flatten_codes();
     REQUIRE(flatten_codes != nullptr);
 
     void* quantizer_ptr = flatten_codes->GetQuantizer();
@@ -636,12 +636,12 @@ TEST_CASE("HGraphDiskANNLoader Graph Structure Conversion", "[ut][hgraph_diskann
     std::shared_ptr<Allocator> allocator;
     auto loader = CreateGraphTestLoader(max_degree, allocator);
     graph_stream.seekg(0, std::ios::beg);
-    loader->TestLoadDiskANNGraph(graph_stream, num_nodes);
+    loader->load_diskann_graph(graph_stream, num_nodes);
 
-    auto hgraph = loader->TestGetBottomGraph();
+    auto hgraph = loader->get_bottom_graph();
     REQUIRE(hgraph != nullptr);
     REQUIRE(hgraph->TotalCount() == static_cast<InnerIdType>(num_nodes));
-    REQUIRE(loader->TestGetEntryPoint() == static_cast<InnerIdType>(entry_point));
+    REQUIRE(loader->get_entry_point_id() == static_cast<InnerIdType>(entry_point));
 
     // Verify structure
     auto hgraph_structure = ReadHGraphStructure(hgraph, num_nodes);
@@ -699,9 +699,9 @@ TEST_CASE("HGraphDiskANNLoader Graph Topologies", "[ut][hgraph_diskann_loader]")
     std::shared_ptr<Allocator> allocator;
     auto loader = CreateGraphTestLoader(max_degree, allocator);
     graph_stream.seekg(0, std::ios::beg);
-    loader->TestLoadDiskANNGraph(graph_stream, num_nodes);
+    loader->load_diskann_graph(graph_stream, num_nodes);
 
-    auto hgraph = loader->TestGetBottomGraph();
+    auto hgraph = loader->get_bottom_graph();
     REQUIRE(hgraph != nullptr);
 
     // Verify neighbor counts
@@ -725,9 +725,9 @@ TEST_CASE("HGraphDiskANNLoader Graph Degree Truncation", "[ut][hgraph_diskann_lo
     std::shared_ptr<Allocator> allocator;
     auto loader = CreateGraphTestLoader(loader_degree, allocator);
     graph_stream.seekg(0, std::ios::beg);
-    loader->TestLoadDiskANNGraph(graph_stream, num_nodes);
+    loader->load_diskann_graph(graph_stream, num_nodes);
 
-    auto hgraph = loader->TestGetBottomGraph();
+    auto hgraph = loader->get_bottom_graph();
     REQUIRE(hgraph != nullptr);
 
     // Verify truncation
@@ -779,9 +779,9 @@ TEST_CASE("HGraphDiskANNLoader Graph Edge Cases", "[ut][hgraph_diskann_loader]")
     std::shared_ptr<Allocator> allocator;
     auto loader = CreateGraphTestLoader(max_degree, allocator);
     graph_stream.seekg(0, std::ios::beg);
-    loader->TestLoadDiskANNGraph(graph_stream, expected_nodes);
+    loader->load_diskann_graph(graph_stream, expected_nodes);
 
-    auto hgraph = loader->TestGetBottomGraph();
+    auto hgraph = loader->get_bottom_graph();
     REQUIRE(hgraph != nullptr);
     REQUIRE(hgraph->TotalCount() == static_cast<InnerIdType>(expected_nodes));
 
@@ -794,7 +794,7 @@ TEST_CASE("HGraphDiskANNLoader Graph Edge Cases", "[ut][hgraph_diskann_loader]")
 
     if (edge_case == 1) {
         REQUIRE(hgraph->GetNeighborSize(0) == 0);
-        REQUIRE(loader->TestGetEntryPoint() == 0);
+        REQUIRE(loader->get_entry_point_id() == 0);
     }
 }
 
@@ -827,9 +827,9 @@ TEST_CASE("HGraphDiskANNLoader Precise Vectors Loading",
     auto loader = CreateReorderTestLoader(max_degree, dim, allocator);
 
     layout_stream.seekg(0, std::ios::beg);
-    loader->TestLoadDiskANNPreciseVectors(layout_stream, num_points, dim, max_degree);
+    loader->load_diskann_precise_vectors(layout_stream, num_points, dim, max_degree);
 
-    auto precise_codes = loader->TestGetPreciseCodes();
+    auto precise_codes = loader->get_high_precise_codes();
     REQUIRE(precise_codes != nullptr);
 
     VerifyPreciseVectors(precise_codes, vectors, num_points, dim);
@@ -863,9 +863,9 @@ TEST_CASE("HGraphDiskANNLoader Precise Vectors Sector Boundary",
     auto loader = CreateReorderTestLoader(max_degree, dim, allocator);
 
     layout_stream.seekg(0, std::ios::beg);
-    loader->TestLoadDiskANNPreciseVectors(layout_stream, num_points, dim, max_degree);
+    loader->load_diskann_precise_vectors(layout_stream, num_points, dim, max_degree);
 
-    auto precise_codes = loader->TestGetPreciseCodes();
+    auto precise_codes = loader->get_high_precise_codes();
     REQUIRE(precise_codes != nullptr);
 
     // Verify boundary nodes
@@ -906,9 +906,9 @@ TEST_CASE("HGraphDiskANNLoader Precise Vectors Large Degree",
     auto loader = CreateReorderTestLoader(max_degree, dim, allocator);
 
     layout_stream.seekg(0, std::ios::beg);
-    loader->TestLoadDiskANNPreciseVectors(layout_stream, num_points, dim, max_degree);
+    loader->load_diskann_precise_vectors(layout_stream, num_points, dim, max_degree);
 
-    auto precise_codes = loader->TestGetPreciseCodes();
+    auto precise_codes = loader->get_high_precise_codes();
     REQUIRE(precise_codes != nullptr);
 
     VerifyPreciseVectors(precise_codes, vectors, num_points, dim);
