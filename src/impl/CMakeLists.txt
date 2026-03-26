@@ -31,8 +31,8 @@ file (GLOB IMPL_SRCS "*.cpp")
 list (FILTER IMPL_SRCS EXCLUDE REGEX "_test.cpp")
 
 add_library (impl OBJECT ${IMPL_SRCS})
-target_link_libraries (impl PUBLIC transform thread_pool allocator heap vsag_blas
-    bitset logger filter cluster searcher odescent reorder fmt::fmt coverage_config)
+target_link_libraries (impl PRIVATE transform thread_pool allocator heap vsag_blas
+    bitset logger filter cluster searcher odescent reorder coverage_config vsag_src_common)
 
 set (IMPL_LIBS transform thread_pool allocator heap bitset vsag_blas
     logger filter impl cluster searcher odescent reorder PARENT_SCOPE)

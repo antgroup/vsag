@@ -1,0 +1,11 @@
+include_guard (GLOBAL)
+
+install (DIRECTORY include/
+         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
+
+install (TARGETS vsag
+         LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+         RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+
+install (TARGETS vsag_static
+         ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}")

@@ -73,24 +73,23 @@ endif ()
 if (DIST_CONTAINS_SVE)
     set_source_files_properties (sve.cpp PROPERTIES COMPILE_FLAGS "-march=armv8-a+sve")
 endif ()
-
-
-set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3")
-set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -ftree-vectorize")
-set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-builtin-malloc")
-set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-builtin-calloc")
-set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-builtin-realloc")
-set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-builtin-free")
-set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fopenmp -fopenmp-simd")
-set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -funroll-loops")
-
 add_library (simd STATIC ${SIMD_SRCS})
+target_compile_options (simd PRIVATE
+    -O3
+    -ftree-vectorize
+    -fno-builtin-malloc
+    -fno-builtin-calloc
+    -fno-builtin-realloc
+    -fno-builtin-free
+    -fopenmp
+    -fopenmp-simd
+    -funroll-loops)
 
-macro (simd_add_definitions flag1 flag2)
-    if (${flag1})
-        target_compile_definitions (simd PUBLIC ${flag2})
+function (simd_add_definitions flag_variable definition)
+    if (${flag_variable})
+        target_compile_definitions (simd PUBLIC ${definition})
     endif ()
-endmacro ()
+endfunction ()
 
 simd_add_definitions (DIST_CONTAINS_SSE -DENABLE_SSE=1)
 simd_add_definitions (DIST_CONTAINS_AVX -DENABLE_AVX=1)
@@ -101,9 +100,8 @@ simd_add_definitions (DIST_CONTAINS_NEON -DENABLE_NEON=1)
 simd_add_definitions (DIST_CONTAINS_SVE -DENABLE_SVE=1)
 
 target_link_libraries (simd
-  PRIVATE cpuinfo
-  INTERFACE coverage_config
-  )
+    PRIVATE cpuinfo
+    INTERFACE coverage_config)
 add_dependencies (simd cpuinfo)
 install (TARGETS simd ARCHIVE DESTINATION lib)
 
@@ -118,7 +116,7 @@ if (ENABLE_TESTS)
         target_compile_definitions (simd_test PRIVATE ENABLE_AVX=1)
     endif ()
     if (DIST_CONTAINS_AVX2)
-        target_compile_definitions (simd_test PRIVATE ENABLE_AVX2=1)    
+        target_compile_definitions (simd_test PRIVATE ENABLE_AVX2=1)
     endif ()
     if (DIST_CONTAINS_AVX512)
         target_compile_definitions (simd_test PRIVATE ENABLE_AVX512=1)
@@ -131,4 +129,4 @@ if (ENABLE_TESTS)
     endif ()
     target_link_libraries (simd_test PRIVATE Catch2::Catch2 vsag simd)
     add_dependencies (simd_test Catch2)
-endif()
+endif ()

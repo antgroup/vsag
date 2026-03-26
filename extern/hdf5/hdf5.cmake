@@ -1,22 +1,22 @@
 
-include(ExternalProject)
+include (ExternalProject)
 
-set(name hdf5)
-set(source_dir ${CMAKE_CURRENT_BINARY_DIR}/${name}/source)
-set(install_dir ${CMAKE_CURRENT_BINARY_DIR}/${name}/install)
+set (name hdf5)
+set (source_dir ${CMAKE_CURRENT_BINARY_DIR}/${name}/source)
+set (install_dir ${CMAKE_CURRENT_BINARY_DIR}/${name}/install)
 
-set(hdf5_urls
+set (hdf5_urls
     https://github.com/HDFGroup/hdf5/archive/refs/tags/hdf5_1.14.4.tar.gz
     # this url is maintained by the vsag project, if it's broken, please try
     #  the latest commit or contact the vsag project
     https://vsagcache.oss-rg-china-mainland.aliyuncs.com/hdf5/hdf5_1.14.4.tar.gz
 )
-if(DEFINED ENV{VSAG_THIRDPARTY_HDF5})
-    message(STATUS "Using local path for hdf5: $ENV{VSAG_THIRDPARTY_HDF5}")
-    list(PREPEND hdf5_urls "$ENV{VSAG_THIRDPARTY_HDF5}")
-endif()
+if (DEFINED ENV{VSAG_THIRDPARTY_HDF5})
+    message (STATUS "Using local path for hdf5: $ENV{VSAG_THIRDPARTY_HDF5}")
+    list (PREPEND hdf5_urls "$ENV{VSAG_THIRDPARTY_HDF5}")
+endif ()
 
-ExternalProject_Add(
+ExternalProject_Add (
     ${name}
     URL ${hdf5_urls}
     URL_HASH MD5=fdea52afcce07ed6c3e2a36e7fa11f21
@@ -45,5 +45,5 @@ ExternalProject_Add(
         ${CMAKE_CURRENT_BINARY_DIR}/${name}/build/bin/libhdf5.a
 )
 
-include_directories (${install_dir}/include)
-link_directories (${install_dir}/lib)
+add_library (vsag_hdf5_headers INTERFACE)
+target_include_directories (vsag_hdf5_headers INTERFACE ${install_dir}/include)

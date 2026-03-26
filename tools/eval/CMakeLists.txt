@@ -35,7 +35,10 @@ set (eval_srcs
         )
 add_library (eval_obj OBJECT ${eval_srcs})
 target_compile_options (eval_obj PRIVATE -fopenmp)
-target_link_libraries (eval_obj PRIVATE pthread)
+target_link_libraries (eval_obj PRIVATE pthread yaml-cpp argparse::argparse tabulate vsag_httplib)
+if (TARGET vsag_hdf5_headers)
+    target_link_libraries (eval_obj PRIVATE vsag_hdf5_headers)
+endif ()
 add_dependencies (eval_obj hdf5 yaml-cpp tabulate)
 
 add_executable (eval_performance main.cpp)
