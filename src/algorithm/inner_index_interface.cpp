@@ -254,7 +254,7 @@ InnerIndexInterface::Deserialize(std::istream& in_stream) {
         this->Deserialize(reader);
         return;
     } catch (const std::bad_alloc& e) {
-        throw VsagException(ErrorType::READ_ERROR, "failed to Deserialize: ", e.what());
+        throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "failed to Deserialize: ", e.what());
     }
 }
 

@@ -290,6 +290,14 @@ SparseTermDataCell::Deserialize(StreamReader& reader) {
         StreamReader::ReadVector(reader, term_datas_[i]);
     }
     StreamReader::ReadVector(reader, term_sizes_);
+
+    // Restore total_count_ from deserialized data (not serialized to maintain compatibility)
+    total_count_ = 0;
+    for (const auto& term_id_vec : term_ids_) {
+        for (uint32_t id : term_id_vec) {
+            total_count_ = std::max(total_count_, static_cast<int64_t>(id) + 1);
+        }
+    }
 }
 
 template void
