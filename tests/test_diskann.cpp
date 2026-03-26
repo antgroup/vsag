@@ -76,7 +76,7 @@ DiskANNTestIndex::GenerateDiskANNBuildParametersString(const std::string& metric
 }  // namespace fixtures
 TEST_CASE_METHOD(fixtures::DiskANNTestIndex, "diskann build test", "[ft][index][diskann]") {
     auto dims = fixtures::get_common_used_dims(3);
-    auto metric_type = GENERATE("l2", "ip");
+    auto metric_type = GENERATE("l2", "ip", "cosine");
     const std::string name = "diskann";
     for (auto dim : dims) {
         auto param = GenerateDiskANNBuildParametersString(metric_type, dim);
@@ -89,7 +89,7 @@ TEST_CASE_METHOD(fixtures::DiskANNTestIndex, "diskann build test", "[ft][index][
 
 TEST_CASE_METHOD(fixtures::DiskANNTestIndex, "diskann pq_dim test", "[ft][index][diskann]") {
     const std::vector<int> dims = {736, 1536, 2048, 2560, 3072};
-    auto metric_type = GENERATE("l2", "ip");
+    auto metric_type = GENERATE("l2", "ip", "cosine");
     const std::string name = "diskann";
     constexpr auto build_parameter_json = R"(
         {{
@@ -135,7 +135,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::DiskANNTestIndex,
                              "[ft][index][diskann]") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
     auto dims = fixtures::get_common_used_dims(1);
-    auto metric_type = GENERATE("l2", "ip");
+    auto metric_type = GENERATE("l2", "ip", "cosine");
     auto graph_type = GENERATE("vamana", "odescent");
     const std::string name = "diskann";
 
@@ -214,7 +214,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::DiskANNTestIndex,
                              "[ft][diskann][serialization]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("l2", "ip");
+    auto metric_type = GENERATE("l2", "ip", "cosine");
     const std::string name = "diskann";
     auto dim = 128;
     vsag::Options::Instance().set_block_size_limit(size);
