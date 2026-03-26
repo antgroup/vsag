@@ -30,15 +30,9 @@ JsonWrapper::~JsonWrapper() {
     }
 }
 
-JsonWrapper::JsonWrapper(const JsonWrapper& other) {
-    if (owns_json_) {
-        delete json_;
-    }
-    json_ = new nlohmann::json();
-    owns_json_ = true;
-    if (other.json_ != nullptr) {
-        *json_ = *other.json_;
-    }
+JsonWrapper::JsonWrapper(const JsonWrapper& other)
+    : json_(other.json_ != nullptr ? new nlohmann::json(*other.json_) : new nlohmann::json()),
+      owns_json_(true) {
 }
 
 JsonWrapper&
