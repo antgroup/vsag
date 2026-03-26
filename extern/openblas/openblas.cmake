@@ -177,6 +177,9 @@ if (NOT OPENBLAS_FOUND)
         DOWNLOAD_NO_PROGRESS 1
         INACTIVITY_TIMEOUT 5
         TIMEOUT 30
+
+        BUILD_BYPRODUCTS
+            ${install_dir}/lib/libopenblas.a
     )
 
     if (NOT APPLE)

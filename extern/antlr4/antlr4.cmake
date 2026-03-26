@@ -47,6 +47,9 @@ ExternalProject_Add (
         DOWNLOAD_NO_PROGRESS 1
         INACTIVITY_TIMEOUT 5
         TIMEOUT 30
+
+        BUILD_BYPRODUCTS
+        ${antlr4_runtime_library}
 )
 
 add_library (vsag_antlr4_runtime_headers INTERFACE)
@@ -56,6 +59,7 @@ if (NOT TARGET antlr4-runtime)
     add_library (antlr4-runtime STATIC IMPORTED GLOBAL)
     set_target_properties (antlr4-runtime PROPERTIES IMPORTED_LOCATION ${antlr4_runtime_library})
 endif ()
+add_dependencies (antlr4-runtime antlr4)
 
 add_library (vsag_antlr4_autogen_headers INTERFACE)
 target_include_directories (vsag_antlr4_autogen_headers INTERFACE
