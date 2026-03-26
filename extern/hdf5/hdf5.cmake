@@ -4,6 +4,8 @@ include (ExternalProject)
 set (name hdf5)
 set (source_dir ${CMAKE_CURRENT_BINARY_DIR}/${name}/source)
 set (install_dir ${CMAKE_CURRENT_BINARY_DIR}/${name}/install)
+set (HDF5_CPP_STATIC_LIBRARY ${install_dir}/lib/libhdf5_cpp.a)
+set (HDF5_C_STATIC_LIBRARY ${install_dir}/lib/libhdf5.a)
 
 set (hdf5_urls
     https://github.com/HDFGroup/hdf5/archive/refs/tags/hdf5_1.14.4.tar.gz

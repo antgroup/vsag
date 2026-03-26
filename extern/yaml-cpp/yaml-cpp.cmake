@@ -1,5 +1,9 @@
 include (FetchContent)
 
+set (YAML_CPP_BUILD_CONTRIB OFF CACHE BOOL "Disable yaml-cpp contrib targets" FORCE)
+set (YAML_CPP_BUILD_TOOLS OFF CACHE BOOL "Disable yaml-cpp utility targets" FORCE)
+set (YAML_CPP_BUILD_TESTS OFF CACHE BOOL "Disable yaml-cpp tests" FORCE)
+
 set (yaml_cpp_urls
     https://github.com/jbeder/yaml-cpp/archive/refs/tags/yaml-cpp-0.9.0.tar.gz
     # this url is maintained by the vsag project, if it's broken, please try
