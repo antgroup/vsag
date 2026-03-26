@@ -120,25 +120,32 @@ public:
 
     inline InnerIdType
     GetIdByLabel(LabelType label, bool return_even_removed = false) const {
+        auto [success, inner_id] = TryGetIdByLabel(label, return_even_removed);
+        if (not success) {
+            throw VsagException(ErrorType::INTERNAL_ERROR,
+                                fmt::format("label {} does not exist or is removed", label));
+        }
+        return inner_id;
+    }
+
+    inline std::pair<bool, InnerIdType>
+    TryGetIdByLabel(LabelType label, bool return_even_removed = false) const noexcept {
         if (use_reverse_map_ and not return_even_removed) {
-            if (this->label_remap_.count(label) == 0) {
-                throw VsagException(ErrorType::INTERNAL_ERROR,
-                                    fmt::format("label {} does not exist", label));
+            auto iter = this->label_remap_.find(label);
+            if (iter == this->label_remap_.end()) {
+                return {false, 0};
             }
-            auto id = this->label_remap_.at(label);
-            if (id != std::numeric_limits<InnerIdType>::max()) {
-                return id;
+            if (iter->second != std::numeric_limits<InnerIdType>::max()) {
+                return {true, iter->second};
             } else {
-                throw VsagException(ErrorType::INTERNAL_ERROR,
-                                    fmt::format("label {} is removed", label));
+                return {false, 0};
             }
         }
         auto result = std::find(label_table_.begin(), label_table_.end(), label);
         if (result == label_table_.end()) {
-            throw VsagException(ErrorType::INTERNAL_ERROR,
-                                fmt::format("label {} does not exist", label));
+            return {false, 0};
         }
-        return result - label_table_.begin();
+        return {true, result - label_table_.begin()};
     }
 
     inline bool
