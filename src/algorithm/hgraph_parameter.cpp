@@ -50,6 +50,10 @@ HGraphParameter::FromJson(const JsonType& json) {
         this->build_by_base = json[HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY].GetBool();
     }
 
+    if (json.Contains(HGRAPH_USE_REVERSE_EDGES_KEY)) {
+        this->use_reverse_edges = json[HGRAPH_USE_REVERSE_EDGES_KEY].GetBool();
+    }
+
     CHECK_ARGUMENT(json.Contains(BASE_CODES_KEY),
                    fmt::format("hgraph parameters must contains {}", BASE_CODES_KEY));
     const auto& base_codes_json = json[BASE_CODES_KEY];
@@ -133,6 +137,7 @@ HGraphParameter::ToJson() const {
 
     json[HGRAPH_USE_ELP_OPTIMIZER_KEY].SetBool(this->use_elp_optimizer);
     json[HGRAPH_IGNORE_REORDER_KEY].SetBool(this->ignore_reorder);
+    json[HGRAPH_USE_REVERSE_EDGES_KEY].SetBool(this->use_reverse_edges);
     json[BASE_CODES_KEY].SetJson(this->base_codes_param->ToJson());
     json[GRAPH_KEY].SetJson(this->bottom_graph_param->ToJson());
     json[EF_CONSTRUCTION_KEY].SetInt(this->ef_construction);
@@ -178,6 +183,10 @@ HGraphParameter::CheckCompatibility(const ParamPtr& other) const {
     }
     if (support_duplicate != hgraph_param->support_duplicate) {
         logger::error("HGraphParameter::CheckCompatibility: support_duplicate must be the same");
+        return false;
+    }
+    if (use_reverse_edges != hgraph_param->use_reverse_edges) {
+        logger::error("HGraphParameter::CheckCompatibility: use_reverse_edges must be the same");
         return false;
     }
     return true;
