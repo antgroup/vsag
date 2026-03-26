@@ -23,4 +23,4 @@ set (HEAP_SRC
 add_library (heap OBJECT ${HEAP_SRC})
 target_link_libraries (heap PUBLIC coverage_config)
 
-maybe_add_dependencies (heap spdlog fmt::fmt)
+maybe_add_dependencies (heap fmt::fmt)

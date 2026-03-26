@@ -26,4 +26,3 @@ set (BITSET_SRC
 
 add_library (bitset OBJECT ${BITSET_SRC})
 target_link_libraries (bitset PRIVATE roaring coverage_config)
-maybe_add_dependencies (bitset spdlog)

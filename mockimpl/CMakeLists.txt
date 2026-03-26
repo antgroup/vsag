@@ -31,8 +31,8 @@ add_library (vsag_mockimpl_static STATIC ${MOCK_SRCS})
 
 target_link_libraries (vsag_mockimpl roaring fmt::fmt-header-only simd)
 target_link_libraries (vsag_mockimpl_static roaring fmt::fmt-header-only simd)
-add_dependencies (vsag_mockimpl version_mockimpl roaring spdlog)
-add_dependencies (vsag_mockimpl_static version_mockimpl roaring spdlog)
+add_dependencies (vsag_mockimpl version_mockimpl roaring)
+add_dependencies (vsag_mockimpl_static version_mockimpl roaring)
 
 set_target_properties(vsag_mockimpl_static PROPERTIES OUTPUT_NAME "vsag_mockimpl")
 install(TARGETS vsag_mockimpl vsag_mockimpl_static
@@ -52,7 +52,6 @@ if (ENABLE_TESTS)
     add_executable (tests_mockimpl
             ../tests/test_factory.cpp
     )
-    target_include_directories(tests_mockimpl PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/spdlog/install/include)
     target_link_libraries (tests_mockimpl PRIVATE Catch2::Catch2WithMain vsag_mockimpl)
-    add_dependencies(tests_mockimpl spdlog Catch2)
+    add_dependencies(tests_mockimpl Catch2)
 endif ()

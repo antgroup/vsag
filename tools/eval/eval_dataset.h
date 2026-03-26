@@ -15,8 +15,6 @@
 
 #pragma once
 
-#include <spdlog/spdlog.h>
-
 #include <memory>
 #include <unordered_set>
 
