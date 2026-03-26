@@ -19,11 +19,11 @@ list (FILTER DATACELL_SRCS EXCLUDE REGEX "_test.cpp")
 
 add_library (datacell OBJECT ${DATACELL_SRCS})
 target_link_libraries(datacell PRIVATE transform quantizer io attr coverage_config)
-add_dependencies (datacell spdlog fmt::fmt)
+add_dependencies (datacell fmt::fmt)
 
 if (ENABLE_TESTS)
     file (GLOB_RECURSE DATACELL_TESTS "*_test.cpp")
     add_library (datacell_test STATIC ${DATACELL_TESTS})
     target_link_libraries (datacell_test PRIVATE Catch2::Catch2 vsag)
-    add_dependencies (datacell_test spdlog Catch2)
+    add_dependencies (datacell_test Catch2)
 endif ()

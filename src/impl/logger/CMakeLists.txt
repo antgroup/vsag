@@ -23,4 +23,3 @@ set (LOGGER_SRC
 
 add_library (logger OBJECT ${LOGGER_SRC})
 target_link_libraries (logger PRIVATE fmt::fmt coverage_config)
-maybe_add_dependencies (logger spdlog)

@@ -15,6 +15,10 @@
 
 #pragma once
 
+#include <atomic>
+#include <mutex>
+#include <string_view>
+
 #include "vsag/logger.h"
 #include "vsag/options.h"
 
@@ -42,6 +46,16 @@ public:
 
     void
     Critical(const std::string& msg) override;
+
+private:
+    [[nodiscard]] bool
+    should_log(Logger::Level log_level) const;
+
+    void
+    log_message(Logger::Level log_level, std::string_view msg);
+
+    std::atomic<int> level_{Logger::Level::kINFO};
+    std::mutex mutex_;
 };
 
 }  // namespace vsag

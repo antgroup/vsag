@@ -28,4 +28,3 @@ set (TRANSFORM_SRC
 )
 add_library (transform OBJECT ${TRANSFORM_SRC})
 target_link_libraries (transform PUBLIC fmt::fmt coverage_config)
-maybe_add_dependencies (transform spdlog)
