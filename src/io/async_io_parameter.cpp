@@ -22,8 +22,7 @@ namespace vsag {
 AsyncIOParameter::AsyncIOParameter() : IOParameter(IO_TYPE_VALUE_ASYNC_IO) {
 }
 
-AsyncIOParameter::AsyncIOParameter(const vsag::JsonType& json)
-    : IOParameter(IO_TYPE_VALUE_BUFFER_IO) {
+AsyncIOParameter::AsyncIOParameter(const vsag::JsonType& json) : AsyncIOParameter() {
     this->FromJson(json);  // NOLINT(clang-analyzer-optin.cplusplus.VirtualCall)
 }
 
