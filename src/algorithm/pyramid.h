@@ -123,7 +123,7 @@ public:
     explicit Pyramid(const ParamPtr& param, const IndexCommonParam& common_param)
         : Pyramid(std::dynamic_pointer_cast<PyramidParameters>(param), common_param){};
 
-    ~Pyramid() = default;
+    ~Pyramid() override = default;
 
     std::vector<int64_t>
     Add(const DatasetPtr& base, AddMode mode = AddMode::DEFAULT) override;

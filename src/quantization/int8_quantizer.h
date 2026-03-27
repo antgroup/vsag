@@ -47,7 +47,7 @@ public:
 
     INT8Quantizer(const QuantizerParamPtr& param, const IndexCommonParam& common_param);
 
-    ~INT8Quantizer() = default;
+    ~INT8Quantizer() override = default;
 
     bool
     TrainImpl(const DataType* data, uint64_t count);
