@@ -635,9 +635,17 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
 
     auto total = data->GetNumElements();
     const auto* labels = data->GetIds();
-    const auto* vectors = data->GetFloat32Vectors();
+    const auto* vectors = get_data(data);
     const auto* extra_infos = data->GetExtraInfos();
     auto inner_ids = this->get_unique_inner_ids(total);
+
+    size_t element_size = sizeof(float);
+    if (data_type_ == DataTypes::DATA_TYPE_FP16 || data_type_ == DataTypes::DATA_TYPE_BF16) {
+        element_size = sizeof(uint16_t);
+    } else if (data_type_ == DataTypes::DATA_TYPE_INT8) {
+        element_size = sizeof(int8_t);
+    }
+
     Vector<Vector<InnerIdType>> route_graph_ids(allocator_);
     InnerIdType cur_size = 0;
     for (int64_t i = 0; i < total; ++i) {
@@ -649,12 +657,13 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
         InnerIdType inner_id = inner_ids.at(cur_size);
         cur_size++;
         this->label_table_->Insert(inner_id, label);
-        this->basic_flatten_codes_->InsertVector(vectors + dim_ * i, inner_id);
+        const char* vec_ptr = static_cast<const char*>(vectors) + dim_ * i * element_size;
+        this->basic_flatten_codes_->InsertVector(vec_ptr, inner_id);
         if (use_reorder_) {
-            this->high_precise_codes_->InsertVector(vectors + dim_ * i, inner_id);
+            this->high_precise_codes_->InsertVector(vec_ptr, inner_id);
         }
         if (create_new_raw_vector_) {
-            this->raw_vector_->InsertVector(vectors + dim_ * i, inner_id);
+            this->raw_vector_->InsertVector(vec_ptr, inner_id);
         }
         auto level = this->get_random_level() - 1;
         if (level >= 0) {
@@ -874,7 +883,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
 
     auto* iter_filter_ctx = static_cast<IteratorFilterContext*>(iter_ctx);
     auto search_result = DistanceHeap::MakeInstanceBySize<true, false>(ctx.alloc, k);
-    const auto* query_data = get_data(query);
+    const auto* query_data = get_query_data(query);
     if (is_last_filter) {
         while (!iter_filter_ctx->Empty()) {
             uint32_t cur_inner_id = iter_filter_ctx->GetTopID();
@@ -1095,12 +1104,11 @@ HGraph::RangeSearch(const DatasetPtr& query,
     search_param.ep = this->entry_point_id_;
     search_param.topk = 1;
     search_param.ef = 1;
-
     if (search_param.ep == INVALID_ENTRY_POINT) {
         return make_empty_dataset_with_stats();
     }
 
-    const auto* raw_query = get_data(query);
+    const auto* raw_query = get_query_data(query);
     for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
         auto result = this->search_one_graph(raw_query,
                                              this->route_graphs_[i],
@@ -2146,7 +2154,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
 
     auto vt = this->pool_->TakeOne();
 
-    const auto* raw_query = get_data(query);
+    const auto* raw_query = get_query_data(query);
     for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
         auto result = this->search_one_graph(
             raw_query, this->route_graphs_[i], this->basic_flatten_codes_, search_param, vt, &ctx);

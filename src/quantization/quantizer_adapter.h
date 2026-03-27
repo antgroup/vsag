@@ -19,6 +19,7 @@
 #include <string>
 #include <type_traits>
 
+#include "data_type.h"
 #include "index_common_param.h"
 #include "quantization/computer.h"
 #include "quantization/product_quantization/product_quantizer.h"
@@ -29,8 +30,8 @@ namespace vsag {
 
 template <typename QuantT, typename DataT>
 class QuantizerAdapter : public Quantizer<QuantizerAdapter<QuantT, DataT>> {
-    static_assert(std::is_same_v<DataT, int8_t>,
-                  "QuantizerAdapter currently only supports int8_t data type");
+    static_assert(std::is_same_v<DataT, int8_t> || std::is_same_v<DataT, uint16_t>,
+                  "QuantizerAdapter currently only supports int8_t and uint16_t data types");
 
 public:
     explicit QuantizerAdapter(const QuantizerParamPtr& param, const IndexCommonParam& common_param);
@@ -87,6 +88,7 @@ public:
 private:
     using Base = Quantizer<QuantT>;
     std::shared_ptr<QuantT> inner_quantizer_{nullptr};
+    DataTypes data_type_{DataTypes::DATA_TYPE_FLOAT};
 };
 
 #define TEMPLATE_QUANTIZER_ADAPTER(QuantType, DataT)                                  \
