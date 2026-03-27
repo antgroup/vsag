@@ -37,11 +37,20 @@ set (VSAG_SRCS ${CPP_SRCS} ${CPP_INDEX_SRCS})
 add_library (vsag SHARED ${VSAG_SRCS})
 add_library (vsag_static STATIC ${VSAG_SRCS})
 
+set_target_properties (vsag PROPERTIES
+    C_VISIBILITY_PRESET default
+    CXX_VISIBILITY_PRESET default
+    VISIBILITY_INLINES_HIDDEN OFF)
+
 set (VSAG_DEP_LIBS antlr4-autogen antlr4-runtime diskann simd io quantizer storage utils factory analyzer
       datacell ${IMPL_LIBS} ${ALGORITHM_LIBS} attr pthread m dl fmt::fmt nlohmann_json::nlohmann_json roaring ${BLAS_LIBRARIES})
 
-target_link_libraries (vsag ${VSAG_DEP_LIBS} coverage_config)
-target_link_libraries (vsag_static ${VSAG_DEP_LIBS} coverage_config)
+target_link_libraries (vsag
+    PUBLIC vsag_src_common
+    PRIVATE ${VSAG_DEP_LIBS} coverage_config)
+target_link_libraries (vsag_static
+    PUBLIC vsag_src_common
+    PRIVATE ${VSAG_DEP_LIBS} coverage_config)
 
 maybe_add_dependencies (vsag antlr4 roaring boost)
 maybe_add_dependencies (vsag_static antlr4 roaring boost)

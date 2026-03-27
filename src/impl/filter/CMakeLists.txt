@@ -25,4 +25,4 @@ set (FILTER_SRC
         combined_filter.h
 )
 add_library (filter OBJECT ${FILTER_SRC})
-target_link_libraries (filter PRIVATE fmt::fmt coverage_config)
+target_link_libraries (filter PRIVATE coverage_config vsag_src_common)

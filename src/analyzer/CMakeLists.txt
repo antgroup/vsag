@@ -22,3 +22,4 @@ set (ANALYZER_SRC
 )
 
 add_library (analyzer OBJECT ${ANALYZER_SRC})
+target_link_libraries (analyzer PRIVATE vsag_src_common)
