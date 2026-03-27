@@ -27,7 +27,7 @@ public:
                                     int64_t dim,
                                     uint64_t retries = MAX_RETRIES);
 
-    virtual ~RandomOrthogonalMatrix() override = default;
+    ~RandomOrthogonalMatrix() override = default;
 
     TransformerMetaPtr
     Transform(const float* original_vec, float* transformed_vec) const override;
