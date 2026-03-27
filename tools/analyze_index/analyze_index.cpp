@@ -21,6 +21,8 @@
 
 #include "algorithm/hgraph.h"
 #include "algorithm/ivf.h"
+#include "algorithm/pyramid.h"
+#include "algorithm/pyramid_zparameters.h"
 #include "index/index_impl.h"
 #include "inner_string_params.h"
 #include "storage/serialization.h"
@@ -120,13 +122,15 @@ public:
 
     bool
     LoadIndex(const std::string& index_path) {
+        index_path_ = index_path;
         std::fstream in_stream(index_path);
         IOStreamReader reader(in_stream);
         if (not parse_reader(reader)) {
             return false;
         }
         if (build_param_ != DEFAULT_BUILD_PARAM) {
-            if (not create_index_with_param(index_name_, in_stream)) {
+            std::fstream new_stream(index_path_);
+            if (not create_index_with_param(index_name_, new_stream)) {
                 return false;
             }
             return true;
@@ -160,17 +164,61 @@ public:
 private:
     bool
     parse_reader(StreamReader& reader) {
+        logger::info("[parse_reader] Start parsing reader");
         auto footer = Footer::Parse(reader);
         if (not footer) {
-            logger::error("Failed to parse footer");
+            logger::error("[parse_reader] Failed to parse footer");
             return false;
         }
+        logger::info("[parse_reader] Footer parsed successfully");
         auto meta_data = footer->GetMetadata();
+        logger::info("[parse_reader] Got metadata");
         auto basic_info = meta_data->Get(BASIC_INFO);
+        logger::info("[parse_reader] Got basic_info");
+
+        logger::info("[parse_reader] build_param_ = {}", build_param_);
+        logger::info("[parse_reader] Checking if INDEX_PARAM exists in basic_info");
+
         if (not basic_info.Contains(INDEX_PARAM)) {
-            logger::error("Index parameter not found in metadata");
-            return false;
+            logger::info("[parse_reader] INDEX_PARAM not found in basic_info");
+            if (build_param_ == DEFAULT_BUILD_PARAM) {
+                logger::error("Index parameter not found in metadata and no build_param provided");
+                return false;
+            }
+            logger::info("[parse_reader] Parsing build_param_ to get index_name");
+            auto parsed = JsonType::Parse(build_param_);
+            logger::info("[parse_reader] Parsed build_param_, dump: {}", parsed.Dump(4));
+            if (parsed.Contains(TYPE_KEY)) {
+                index_name_ = parsed[TYPE_KEY].GetString();
+                logger::info("[parse_reader] index_name_ from TYPE_KEY: {}", index_name_);
+            } else if (parsed.Contains(INDEX_PARAM)) {
+                auto index_param = parsed[INDEX_PARAM];
+                logger::info("[parse_reader] INDEX_PARAM in build_param: {}", index_param.Dump(4));
+                if (index_param.Contains(TYPE_KEY)) {
+                    index_name_ = index_param[TYPE_KEY].GetString();
+                    logger::info("[parse_reader] index_name_ from INDEX_PARAM.TYPE_KEY: {}",
+                                 index_name_);
+                } else if (index_param.Contains("base_quantization_type") ||
+                           index_param.Contains("index_min_size")) {
+                    index_name_ = INDEX_PYRAMID;
+                    logger::info("[parse_reader] Detected pyramid params, using index_name: {}",
+                                 index_name_);
+                } else {
+                    logger::error("[parse_reader] TYPE_KEY not found in INDEX_PARAM");
+                    return false;
+                }
+            } else {
+                logger::error("[parse_reader] TYPE_KEY not found in build_param");
+                return false;
+            }
+            logger::info("index name (from build_param): {}", index_name_);
+            dim_ = 0;
+            extra_info_size_ = 0;
+            data_type_ = DataTypes::DATA_TYPE_FLOAT;
+            metric_type_ = MetricType::METRIC_TYPE_L2SQR;
+            return true;
         }
+        logger::info("[parse_reader] INDEX_PARAM found in basic_info");
         // parse basic info
         dim_ = basic_info[DIM].GetInt();
         extra_info_size_ = basic_info["extra_info_size"].GetInt();
@@ -231,6 +279,13 @@ private:
             inner_index->Deserialize(reader);
             index_ = std::make_shared<IndexImpl<IVF>>(inner_index, index_common_params);
             return true;
+        } else if (index_name_ == INDEX_PYRAMID) {
+            auto pyramid_parameter = std::make_shared<PyramidParameters>();
+            pyramid_parameter->FromJson(index_param_);
+            auto inner_index = std::make_shared<Pyramid>(pyramid_parameter, index_common_params);
+            inner_index->Deserialize(reader);
+            index_ = std::make_shared<IndexImpl<Pyramid>>(inner_index, index_common_params);
+            return true;
         } else {
             logger::error("Index type {} not supported", index_name_);
             return false;
@@ -240,6 +295,7 @@ private:
 private:
     IndexPtr index_{nullptr};
     std::string build_param_;
+    std::string index_path_;
     int64_t dim_;
     int64_t extra_info_size_;
     DataTypes data_type_;

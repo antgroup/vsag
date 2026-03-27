@@ -155,4 +155,15 @@ CompressedGraphDataCell::GetMemoryUsage() const {
     return static_cast<int64_t>(memory);
 }
 
+Vector<InnerIdType>
+CompressedGraphDataCell::GetIds() const {
+    Vector<InnerIdType> ids(allocator_);
+    for (InnerIdType id = 0; id < static_cast<InnerIdType>(neighbor_sets_.size()); ++id) {
+        if (neighbor_sets_[id] != nullptr) {
+            ids.push_back(id);
+        }
+    }
+    return ids;
+}
+
 }  // namespace vsag
