@@ -15,6 +15,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
+#include <nlohmann/json.hpp>
 
 #include "fixtures/test_dataset_pool.h"
 #include "fixtures/test_logger.h"
@@ -429,5 +430,33 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
         auto index = TestFactory(name, param, true);
         auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type, /*with_path=*/true);
         TestDuplicateAdd(index, dataset);
+    }
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
+                             "Pyramid Analyzer Test",
+                             "[ft][pyramid][analyzer]") {
+    auto metric_type = GENERATE("l2");
+    PyramidParam pyramid_param;
+    pyramid_param.no_build_levels = {0, 1, 2};
+    const std::string name = "pyramid";
+    auto search_param = GeneratePyramidSearchParametersString(100);
+    for (auto& dim : dims) {
+        INFO(fmt::format("metric_type={}, dim={}", metric_type, dim));
+        auto param = GeneratePyramidBuildParametersString(metric_type, dim, pyramid_param);
+        auto index = TestFactory(name, param, true);
+        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type, /*with_path=*/true);
+        TestBuildIndex(index, dataset, true);
+
+        auto stats_str = index->GetStats();
+        REQUIRE(!stats_str.empty());
+
+        auto stats = nlohmann::json::parse(stats_str);
+        REQUIRE(stats.contains("total_count"));
+        REQUIRE(stats["total_count"].get<int64_t>() == base_count);
+
+        REQUIRE(stats.contains("index_node_structure"));
+        REQUIRE(stats.contains("leaf_node_size_distribution"));
+        REQUIRE(stats.contains("subindex_quality"));
     }
 }
