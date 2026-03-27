@@ -443,7 +443,7 @@ Pyramid::Deserialize(StreamReader& reader) {
     auto metadata = footer->GetMetadata();
     auto basic_info = metadata->Get(BASIC_INFO);
     auto max_capacity = basic_info["max_capacity"].GetInt();
-    SetImmutable();
+
     BufferStreamReader buffer_reader(
         &reader, std::numeric_limits<uint64_t>::max(), this->allocator_);
 
