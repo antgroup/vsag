@@ -15,6 +15,8 @@
 
 #include "bf16_quantizer.h"
 
+#include <cstring>
+
 #include "simd/bf16_simd.h"
 #include "simd/normalize.h"
 #include "typing.h"
@@ -33,7 +35,9 @@ BF16Quantizer<metric>::BF16Quantizer(int dim, Allocator* allocator)
 template <MetricType metric>
 BF16Quantizer<metric>::BF16Quantizer(const BF16QuantizerParamPtr& param,
                                      const IndexCommonParam& common_param)
-    : BF16Quantizer<metric>(common_param.dim_, common_param.allocator_.get()){};
+    : BF16Quantizer<metric>(common_param.dim_, common_param.allocator_.get()) {
+    this->input_data_type_ = common_param.data_type_;
+};
 
 template <MetricType metric>
 BF16Quantizer<metric>::BF16Quantizer(const QuantizerParamPtr& param,
@@ -51,16 +55,38 @@ BF16Quantizer<metric>::TrainImpl(const DataType* data, uint64_t count) {
 template <MetricType metric>
 bool
 BF16Quantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) const {
-    const DataType* cur = data;
-    Vector<float> tmp(this->allocator_);
-    if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
-        tmp.resize(this->dim_);
-        Normalize(data, tmp.data(), this->dim_);
-        cur = tmp.data();
-    }
     auto* codes_bf16 = reinterpret_cast<uint16_t*>(codes);
+    const uint16_t* input_bf16 = nullptr;
+
+    if (input_data_type_ == DataTypes::DATA_TYPE_BF16) {
+        input_bf16 = reinterpret_cast<const uint16_t*>(data);
+    }
+
+    if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
+        Vector<float> tmp(this->allocator_);
+        tmp.resize(this->dim_);
+        if (input_bf16 != nullptr) {
+            for (int i = 0; i < this->dim_; ++i) {
+                tmp[i] = generic::BF16ToFloat(input_bf16[i]);
+            }
+        } else {
+            std::copy(data, data + this->dim_, tmp.begin());
+        }
+        Normalize(tmp.data(), tmp.data(), this->dim_);
+        for (int i = 0; i < this->dim_; ++i) {
+            codes_bf16[i] = generic::FloatToBF16(tmp[i]);
+        }
+        return true;
+    }
+
+    if (input_bf16 != nullptr) {
+        std::memcpy(codes_bf16, input_bf16, this->dim_ * sizeof(uint16_t));
+        return true;
+    }
+
     for (int i = 0; i < this->dim_; ++i) {
-        codes_bf16[i] = generic::FloatToBF16(cur[i]);
+        codes_bf16[i] =
+            generic::FloatToBF16(data[i]);  // NOLINT(clang-analyzer-core.NullDereference)
     }
 
     return true;
@@ -99,7 +125,17 @@ BF16Quantizer<metric>::ProcessQueryImpl(const DataType* query,
             computer.buf_ =
                 reinterpret_cast<uint8_t*>(this->allocator_->Allocate(this->query_code_size_));
         }
-        this->EncodeOneImpl(query, computer.buf_);
+        auto* codes_bf16 = reinterpret_cast<uint16_t*>(computer.buf_);
+        Vector<float> tmp(this->allocator_);
+        const DataType* cur = query;
+        if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
+            tmp.resize(this->dim_);
+            Normalize(query, tmp.data(), this->dim_);
+            cur = tmp.data();
+        }
+        for (int i = 0; i < this->dim_; ++i) {
+            codes_bf16[i] = generic::FloatToBF16(cur[i]);
+        }
     } catch (const std::bad_alloc& e) {
         throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "bad alloc when init computer buf");
     }

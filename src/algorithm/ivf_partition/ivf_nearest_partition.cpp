@@ -22,6 +22,7 @@
 
 #include "algorithm/hgraph.h"
 #include "algorithm/inner_index_interface.h"
+#include "data_type.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/cluster/kmeans_cluster.h"
 #include "inner_string_params.h"
@@ -157,8 +158,12 @@ IVFNearestPartition::factory_router_index(const IndexCommonParam& common_param) 
     hgraph_json["max_degree"].SetInt(64);
     hgraph_json["ef_construction"].SetInt(300);
 
-    param_ptr = HGraph::CheckAndMappingExternalParam(hgraph_json, common_param);
-    this->route_index_ptr_ = std::make_shared<HGraph>(param_ptr, common_param);
+    // Router index always uses FP32 data type
+    IndexCommonParam fp32_common_param = common_param;
+    fp32_common_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
+
+    param_ptr = HGraph::CheckAndMappingExternalParam(hgraph_json, fp32_common_param);
+    this->route_index_ptr_ = std::make_shared<HGraph>(param_ptr, fp32_common_param);
 }
 void
 IVFNearestPartition::GetCentroid(BucketIdType bucket_id, Vector<float>& centroid) {

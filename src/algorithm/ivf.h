@@ -40,6 +40,10 @@ public:
     CheckAndMappingExternalParam(const JsonType& external_param,
                                  const IndexCommonParam& common_param);
 
+private:
+    inline const void*
+    get_data(const DatasetPtr& data, int64_t index) const;
+
 public:
     explicit IVF(const IVFParameterPtr& param, const IndexCommonParam& common_param);
 
