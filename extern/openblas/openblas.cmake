@@ -1,15 +1,15 @@
 
-set(name openblas)
-set(source_dir ${CMAKE_CURRENT_BINARY_DIR}/${name}/source)
-set(install_dir ${CMAKE_CURRENT_BINARY_DIR}/${name}/install)
+set (name openblas)
+set (source_dir ${CMAKE_CURRENT_BINARY_DIR}/${name}/source)
+set (install_dir ${CMAKE_CURRENT_BINARY_DIR}/${name}/install)
 
-option(USE_SYSTEM_OPENBLAS "Use system-installed OpenBLAS instead of building from source" OFF)
+option (USE_SYSTEM_OPENBLAS "Use system-installed OpenBLAS instead of building from source" OFF)
 
-set(OPENBLAS_FOUND FALSE)
+set (OPENBLAS_FOUND FALSE)
 
-if(USE_SYSTEM_OPENBLAS)
+if (USE_SYSTEM_OPENBLAS)
     # Try to find system-installed OpenBLAS
-    find_library(OPENBLAS_LIB
+    find_library (OPENBLAS_LIB
         NAMES openblas
         PATHS
             /usr/lib
@@ -21,8 +21,8 @@ if(USE_SYSTEM_OPENBLAS)
             /opt/homebrew/lib
         NO_DEFAULT_PATH
     )
-    
-    find_path(OPENBLAS_INCLUDE
+
+    find_path (OPENBLAS_INCLUDE
         NAMES cblas.h
         PATHS
             /usr/include
@@ -34,8 +34,8 @@ if(USE_SYSTEM_OPENBLAS)
             /opt/homebrew/include
         NO_DEFAULT_PATH
     )
-    
-    find_path(LAPACKE_INCLUDE
+
+    find_path (LAPACKE_INCLUDE
         NAMES lapacke.h
         PATHS
             /usr/include
@@ -47,15 +47,15 @@ if(USE_SYSTEM_OPENBLAS)
             /opt/homebrew/include
         NO_DEFAULT_PATH
     )
-    
-    if(OPENBLAS_LIB AND OPENBLAS_INCLUDE AND LAPACKE_INCLUDE)
-        set(OPENBLAS_FOUND TRUE)
-        message(STATUS "Found system OpenBLAS library: ${OPENBLAS_LIB}")
-        message(STATUS "Found OpenBLAS include directory: ${OPENBLAS_INCLUDE}")
-        message(STATUS "Found LAPACKE include directory: ${LAPACKE_INCLUDE}")
-        
+
+    if (OPENBLAS_LIB AND OPENBLAS_INCLUDE AND LAPACKE_INCLUDE)
+        set (OPENBLAS_FOUND TRUE)
+        message (STATUS "Found system OpenBLAS library: ${OPENBLAS_LIB}")
+        message (STATUS "Found OpenBLAS include directory: ${OPENBLAS_INCLUDE}")
+        message (STATUS "Found LAPACKE include directory: ${LAPACKE_INCLUDE}")
+
         # Try to find LAPACKE library (separate from OpenBLAS on some systems)
-        find_library(LAPACKE_LIB
+        find_library (LAPACKE_LIB
             NAMES lapacke
             PATHS
                 /usr/lib
@@ -67,87 +67,91 @@ if(USE_SYSTEM_OPENBLAS)
                 /opt/homebrew/lib
             NO_DEFAULT_PATH
         )
-        
-        if(LAPACKE_LIB)
-            message(STATUS "Found LAPACKE library: ${LAPACKE_LIB}")
-            set(OPENBLAS_LAPACKE_LIB ${LAPACKE_LIB})
-        else()
-            message(STATUS "LAPACKE library not found as separate library, assuming it's included in OpenBLAS")
-            set(OPENBLAS_LAPACKE_LIB "")
-        endif()
-        
+
+        if (LAPACKE_LIB)
+            message (STATUS "Found LAPACKE library: ${LAPACKE_LIB}")
+            set (OPENBLAS_LAPACKE_LIB ${LAPACKE_LIB})
+        else ()
+            message (STATUS
+                     "LAPACKE library not found as separate library, assuming it's included in OpenBLAS")
+            set (OPENBLAS_LAPACKE_LIB "")
+        endif ()
+
         # Set install_dir to a dummy value for compatibility
-        set(install_dir ${CMAKE_CURRENT_BINARY_DIR}/${name}/system)
-        
-        set(OPENBLAS_INCLUDE_DIRS ${OPENBLAS_INCLUDE})
-        if(NOT "${OPENBLAS_INCLUDE}" STREQUAL "${LAPACKE_INCLUDE}")
-            list(APPEND OPENBLAS_INCLUDE_DIRS ${LAPACKE_INCLUDE})
-        endif()
-        include_directories(${OPENBLAS_INCLUDE_DIRS})
-        
+        set (install_dir ${CMAKE_CURRENT_BINARY_DIR}/${name}/system)
+
+        set (OPENBLAS_INCLUDE_DIRS ${OPENBLAS_INCLUDE})
+        if (NOT "${OPENBLAS_INCLUDE}" STREQUAL "${LAPACKE_INCLUDE}")
+            list (APPEND OPENBLAS_INCLUDE_DIRS ${LAPACKE_INCLUDE})
+        endif ()
+
         # Create a dummy target for consistency with dependencies
-        add_custom_target(${name})
-    else()
-        message(WARNING "System OpenBLAS not found (USE_SYSTEM_OPENBLAS=ON). Falling back to building from source.")
-        message(STATUS "  OPENBLAS_LIB: ${OPENBLAS_LIB}")
-        message(STATUS "  OPENBLAS_INCLUDE: ${OPENBLAS_INCLUDE}")
-        message(STATUS "  LAPACKE_INCLUDE: ${LAPACKE_INCLUDE}")
-    endif()
-endif()
+        add_custom_target (${name})
+    else ()
+        message (WARNING
+                 "System OpenBLAS not found (USE_SYSTEM_OPENBLAS=ON). Falling back to building from source.")
+        message (STATUS "  OPENBLAS_LIB: ${OPENBLAS_LIB}")
+        message (STATUS "  OPENBLAS_INCLUDE: ${OPENBLAS_INCLUDE}")
+        message (STATUS "  LAPACKE_INCLUDE: ${LAPACKE_INCLUDE}")
+    endif ()
+endif ()
 
-if(USE_SYSTEM_OPENBLAS AND OPENBLAS_FOUND)
-    set(BLAS_LIBRARIES ${OPENBLAS_LIB})
+if (USE_SYSTEM_OPENBLAS AND OPENBLAS_FOUND)
+    set (BLAS_LIBRARIES ${OPENBLAS_LIB})
 
-    if(DEFINED OPENBLAS_LAPACKE_LIB AND OPENBLAS_LAPACKE_LIB)
-        list(APPEND BLAS_LIBRARIES ${OPENBLAS_LAPACKE_LIB})
-    endif()
+    if (DEFINED OPENBLAS_LAPACKE_LIB AND OPENBLAS_LAPACKE_LIB)
+        list (APPEND BLAS_LIBRARIES ${OPENBLAS_LAPACKE_LIB})
+    endif ()
 
     if (APPLE AND DEFINED GFORTRAN_LIB AND EXISTS "${GFORTRAN_LIB}")
-        list(APPEND BLAS_LIBRARIES "${GFORTRAN_LIB}")
-    else()
-        list(APPEND BLAS_LIBRARIES gfortran)
+        list (APPEND BLAS_LIBRARIES "${GFORTRAN_LIB}")
+    else ()
+        list (APPEND BLAS_LIBRARIES gfortran)
     endif()
 
     if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-        list(PREPEND BLAS_LIBRARIES omp)
-    else()
-        list(PREPEND BLAS_LIBRARIES gomp)
-    endif()
+        list (PREPEND BLAS_LIBRARIES omp)
+    else ()
+        list (PREPEND BLAS_LIBRARIES gomp)
+    endif ()
 
-    message(STATUS "Using system OpenBLAS as BLAS backend: ${OPENBLAS_LIB}")
-else()
+    message (STATUS "Using system OpenBLAS as BLAS backend: ${OPENBLAS_LIB}")
+else ()
     if (APPLE AND DEFINED GFORTRAN_LIB AND EXISTS "${GFORTRAN_LIB}")
-        set(BLAS_LIBRARIES libopenblas.a "${GFORTRAN_LIB}")
-    else()
-        set(BLAS_LIBRARIES libopenblas.a gfortran)
-    endif()
+        set (BLAS_LIBRARIES ${install_dir}/lib/libopenblas.a "${GFORTRAN_LIB}")
+    else ()
+        set (BLAS_LIBRARIES ${install_dir}/lib/libopenblas.a gfortran)
+    endif ()
     if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-        list(PREPEND BLAS_LIBRARIES omp)
-    else()
-        list(PREPEND BLAS_LIBRARIES gomp)
-    endif()
-    set(OPENBLAS_INCLUDE_DIRS ${install_dir}/include)
-    message(STATUS "Enable OpenBLAS as BLAS backend")
-endif()
+        list (PREPEND BLAS_LIBRARIES omp)
+    else ()
+        list (PREPEND BLAS_LIBRARIES gomp)
+    endif ()
+    set (OPENBLAS_INCLUDE_DIRS ${install_dir}/include)
+    message (STATUS "Enable OpenBLAS as BLAS backend")
+endif ()
 
-set(BLAS_LIBRARIES "${BLAS_LIBRARIES}" CACHE STRING "Final list of BLAS libraries to link against." FORCE)
+add_library (vsag_openblas_headers INTERFACE)
+target_include_directories (vsag_openblas_headers INTERFACE ${OPENBLAS_INCLUDE_DIRS})
 
-if(NOT OPENBLAS_FOUND)
+set (BLAS_LIBRARIES "${BLAS_LIBRARIES}" CACHE STRING "Final list of BLAS libraries to link against." FORCE)
+
+if (NOT OPENBLAS_FOUND)
     # Build OpenBLAS from source
-    message(STATUS "Building OpenBLAS from source")
+    message (STATUS "Building OpenBLAS from source")
 
-    set(openblas_urls
+    set (openblas_urls
         https://github.com/OpenMathLib/OpenBLAS/releases/download/v0.3.23/OpenBLAS-0.3.23.tar.gz
         # this url is maintained by the vsag project, if it's broken, please try
         #  the latest commit or contact the vsag project
         https://vsagcache.oss-rg-china-mainland.aliyuncs.com/openblas/OpenBLAS-0.3.23.tar.gz
     )
-    if(DEFINED ENV{VSAG_THIRDPARTY_OPENBLAS})
-        message(STATUS "Using local path for openblas: $ENV{VSAG_THIRDPARTY_OPENBLAS}")
-        list(PREPEND openblas_urls "$ENV{VSAG_THIRDPARTY_OPENBLAS}")
-    endif()
+    if (DEFINED ENV{VSAG_THIRDPARTY_OPENBLAS})
+        message (STATUS "Using local path for openblas: $ENV{VSAG_THIRDPARTY_OPENBLAS}")
+        list (PREPEND openblas_urls "$ENV{VSAG_THIRDPARTY_OPENBLAS}")
+    endif ()
 
-    ExternalProject_Add(
+    ExternalProject_Add (
         ${name}
         URL ${openblas_urls}
         URL_HASH MD5=115634b39007de71eb7e75cf7591dfb2
@@ -173,33 +177,36 @@ if(NOT OPENBLAS_FOUND)
         DOWNLOAD_NO_PROGRESS 1
         INACTIVITY_TIMEOUT 5
         TIMEOUT 30
+
+        BUILD_BYPRODUCTS
+            ${install_dir}/lib/libopenblas.a
     )
-    
-    include_directories(${install_dir}/include)
-    link_directories (${install_dir}/lib)
+
     if (NOT APPLE)
-        link_directories (${install_dir}/lib64)
-    endif()
-    
-    file(GLOB LIB_DIR_EXIST CHECK_DIRECTORIES LIST_DIRECTORIES true ${install_dir}/lib)
-    if(LIB_DIR_EXIST)
-        file(GLOB LIB_FILES ${install_dir}/lib/lib*.a)
-        foreach(lib_file ${LIB_FILES})
-            install(FILES ${lib_file}
-                    DESTINATION ${CMAKE_INSTALL_PREFIX}/lib
-        )
-        endforeach()
-    endif()
-    
+        set (OPENBLAS_LIBRARY_DIRS ${install_dir}/lib ${install_dir}/lib64)
+    else ()
+        set (OPENBLAS_LIBRARY_DIRS ${install_dir}/lib)
+    endif ()
+
+    file (GLOB LIB_DIR_EXIST CHECK_DIRECTORIES LIST_DIRECTORIES true ${install_dir}/lib)
+    if (LIB_DIR_EXIST)
+        file (GLOB LIB_FILES ${install_dir}/lib/lib*.a)
+        foreach (lib_file ${LIB_FILES})
+            install (FILES ${lib_file}
+                     DESTINATION ${CMAKE_INSTALL_PREFIX}/lib)
+        endforeach ()
+    endif ()
+
     if (NOT APPLE)
-        file(GLOB LIB64_DIR_EXIST CHECK_DIRECTORIES LIST_DIRECTORIES true ${install_dir}/lib64)
-        if(LIB64_DIR_EXIST)
-            file(GLOB LIB64_FILES ${install_dir}/lib64/lib*.a)
-            foreach(lib64_file ${LIB64_FILES})
-                install(FILES ${lib64_file}
-                        DESTINATION ${CMAKE_INSTALL_PREFIX}/lib
-            )
-            endforeach()
-        endif()
-    endif()
-endif()
+        file (GLOB LIB64_DIR_EXIST CHECK_DIRECTORIES LIST_DIRECTORIES true ${install_dir}/lib64)
+        if (LIB64_DIR_EXIST)
+            file (GLOB LIB64_FILES ${install_dir}/lib64/lib*.a)
+            foreach (lib64_file ${LIB64_FILES})
+                install (FILES ${lib64_file}
+                         DESTINATION ${CMAKE_INSTALL_PREFIX}/lib)
+            endforeach ()
+        endif ()
+    endif ()
+else ()
+    set (OPENBLAS_LIBRARY_DIRS "")
+endif ()

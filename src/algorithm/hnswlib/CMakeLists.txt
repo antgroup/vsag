@@ -6,5 +6,4 @@ set (HNSWLIB_SRCS
 )
 
 add_library (hnswlib OBJECT ${HNSWLIB_SRCS})
-target_link_libraries (hnswlib PUBLIC coverage_config)
-add_dependencies (hnswlib fmt::fmt)
+target_link_libraries (hnswlib PRIVATE coverage_config vsag_src_common)
