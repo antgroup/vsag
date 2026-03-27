@@ -22,7 +22,7 @@ set (STORAGE_SRC
 )
 
 add_library (storage OBJECT ${STORAGE_SRC})
-target_link_libraries (storage PUBLIC fmt::fmt coverage_config)
+target_link_libraries (storage PRIVATE coverage_config vsag_src_common)
 
 if (ENABLE_TESTS)
     file (GLOB_RECURSE STORAGE_TESTS "*_test.cpp")

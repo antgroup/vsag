@@ -22,4 +22,4 @@ set (ODESCENT_SRC
 )
 
 add_library (odescent OBJECT ${ODESCENT_SRC})
-target_link_libraries (odescent PRIVATE fmt::fmt coverage_config)
+target_link_libraries (odescent PRIVATE coverage_config vsag_src_common)

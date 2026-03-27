@@ -24,7 +24,7 @@ set (FACTORY_SRC
 )
 
 add_library (factory OBJECT ${FACTORY_SRC})
-target_link_libraries (factory PUBLIC fmt::fmt coverage_config)
+target_link_libraries (factory PRIVATE coverage_config vsag_src_common)
 maybe_add_dependencies (factory diskann)
 
 if (ENABLE_TESTS)

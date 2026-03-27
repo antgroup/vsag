@@ -27,4 +27,4 @@ set (TRANSFORM_SRC
         vector_transformer_parameter.h
 )
 add_library (transform OBJECT ${TRANSFORM_SRC})
-target_link_libraries (transform PUBLIC fmt::fmt coverage_config)
+target_link_libraries (transform PRIVATE coverage_config vsag_src_common)

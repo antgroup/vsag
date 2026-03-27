@@ -32,12 +32,10 @@ set (IO_SRC
 
 add_library (io OBJECT ${IO_SRC})
 if (HAVE_LIBAIO)
-    target_compile_definitions (io PUBLIC -DHAVE_LIBAIO=1)
-    target_link_libraries (io PUBLIC fmt::fmt aio coverage_config)
+    target_link_libraries (io PRIVATE aio coverage_config vsag_src_common)
     message (STATUS "io module: linking with libaio")
 else ()
-    target_compile_definitions (io PUBLIC -DHAVE_LIBAIO=0)
-    target_link_libraries (io PUBLIC fmt::fmt coverage_config)
+    target_link_libraries (io PRIVATE coverage_config vsag_src_common)
     message (STATUS "io module: libaio not available, async I/O disabled")
 endif ()
 

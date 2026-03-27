@@ -27,8 +27,7 @@ set (UTILS_SRC
 )
 
 add_library (utils OBJECT ${UTILS_SRC})
-target_link_libraries (utils PUBLIC coverage_config)
-add_dependencies (utils fmt::fmt)
+target_link_libraries (utils PRIVATE coverage_config vsag_src_common)
 
 if (ENABLE_TESTS)
     file (GLOB_RECURSE UTILS_TESTS "*_test.cpp")

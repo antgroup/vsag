@@ -1,4 +1,3 @@
-
 # Copyright 2024-present the vsag project
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,13 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+include_guard (GLOBAL)
 
-set (SEARCHER_SRC
-    basic_searcher.cpp
-    basic_searcher.h
-    parallel_searcher.cpp
-    parallel_searcher.h
-)
+install (DIRECTORY include/
+         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
 
-add_library (searcher OBJECT ${SEARCHER_SRC})
-target_link_libraries (searcher PRIVATE coverage_config vsag_src_common)
+install (TARGETS vsag
+         LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+         RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+
+install (TARGETS vsag_static
+         ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}")

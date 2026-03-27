@@ -21,9 +21,9 @@ add_subdirectory (sindi)
 file (GLOB ALGORITHM_SRCS "*.cpp")
 list (FILTER ALGORITHM_SRCS EXCLUDE REGEX "_test.cpp")
 
-add_library(algorithm OBJECT ${ALGORITHM_SRCS})
-target_link_libraries (algorithm PUBLIC coverage_config)
-maybe_add_dependencies(algorithm fmt::fmt antlr4)
+add_library (algorithm OBJECT ${ALGORITHM_SRCS})
+target_link_libraries (algorithm PRIVATE coverage_config vsag_src_common)
+maybe_add_dependencies (algorithm antlr4)
 
 
 set (ALGORITHM_LIBS

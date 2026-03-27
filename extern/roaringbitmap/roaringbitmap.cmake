@@ -1,26 +1,27 @@
-include(FetchContent)
-set(roaringbitmap_urls
+include (FetchContent)
+
+set (roaringbitmap_urls
     https://github.com/RoaringBitmap/CRoaring/archive/refs/tags/v3.0.1.tar.gz
     # this url is maintained by the vsag project, if it's broken, please try
     #  the latest commit or contact the vsag project
     https://vsagcache.oss-rg-china-mainland.aliyuncs.com/roaringbitmap/v3.0.1.tar.gz
 )
-if(DEFINED ENV{VSAG_THIRDPARTY_ROARINGBITMAP})
-  message(STATUS "Using local path for roaringbitmap: $ENV{VSAG_THIRDPARTY_ROARINGBITMAP}")
-  list(PREPEND roaringbitmap_urls "$ENV{VSAG_THIRDPARTY_ROARINGBITMAP}")
-endif()
-FetchContent_Declare(
-        roaringbitmap
-        URL ${roaringbitmap_urls}
-        URL_HASH MD5=463db911f97d5da69393d4a3190f9201
-        DOWNLOAD_NO_PROGRESS 0
-        INACTIVITY_TIMEOUT 5
-        # filesize ~= 90MiB
-        TIMEOUT 90
+if (DEFINED ENV{VSAG_THIRDPARTY_ROARINGBITMAP})
+    message (STATUS "Using local path for roaringbitmap: $ENV{VSAG_THIRDPARTY_ROARINGBITMAP}")
+    list (PREPEND roaringbitmap_urls "$ENV{VSAG_THIRDPARTY_ROARINGBITMAP}")
+endif ()
+FetchContent_Declare (
+    roaringbitmap
+    URL ${roaringbitmap_urls}
+    URL_HASH MD5=463db911f97d5da69393d4a3190f9201
+    DOWNLOAD_NO_PROGRESS 0
+    INACTIVITY_TIMEOUT 5
+    # filesize ~= 90MiB
+    TIMEOUT 90
 )
 
-set(ROARING_USE_CPM OFF)
-set(ENABLE_ROARING_TESTS OFF)
+set (ROARING_USE_CPM OFF)
+set (ENABLE_ROARING_TESTS OFF)
 
 if (DISABLE_AVX_FORCE OR NOT COMPILER_AVX_SUPPORTED)
   set(ROARING_DISABLE_AVX ON)
@@ -31,9 +32,16 @@ if (DISABLE_AVX512_FORCE OR NOT COMPILER_AVX512_SUPPORTED)
 endif ()
 
 # exclude roaringbitmap in vsag installation
-FetchContent_GetProperties(roaringbitmap)
-if(NOT roaringbitmap_POPULATED)
-  FetchContent_Populate(roaringbitmap)
-  add_subdirectory(${roaringbitmap_SOURCE_DIR} ${roaringbitmap_BINARY_DIR} EXCLUDE_FROM_ALL)
-  target_compile_options(roaring PRIVATE -Wno-unused-function)
-endif()
+FetchContent_GetProperties (roaringbitmap)
+if (NOT roaringbitmap_POPULATED)
+    FetchContent_Populate (roaringbitmap)
+    add_subdirectory (${roaringbitmap_SOURCE_DIR} ${roaringbitmap_BINARY_DIR} EXCLUDE_FROM_ALL)
+    target_compile_options (roaring PRIVATE -Wno-unused-function)
+endif ()
+
+if (NOT TARGET vsag_roaring_headers)
+    add_library (vsag_roaring_headers INTERFACE)
+endif ()
+target_include_directories (vsag_roaring_headers INTERFACE
+    ${roaringbitmap_SOURCE_DIR}/include
+    ${roaringbitmap_SOURCE_DIR}/cpp)

@@ -15,4 +15,4 @@
 
 
 add_library (cluster OBJECT kmeans_cluster.cpp)
-target_link_libraries (cluster PRIVATE fmt::fmt)
+target_link_libraries (cluster PRIVATE vsag_src_common)
