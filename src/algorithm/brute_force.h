@@ -143,8 +143,6 @@ private:
 private:
     FlattenInterfacePtr inner_codes_{nullptr};
 
-    uint64_t total_count_{0};
-
     uint64_t delete_count_{0};
 
     uint64_t resize_increase_count_bit_{DEFAULT_RESIZE_BIT};
