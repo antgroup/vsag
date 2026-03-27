@@ -49,7 +49,21 @@ KMeansCluster::Run(uint32_t k,
                    int iter,
                    double* err,
                    bool use_mse_for_convergence,
-                   float threshold) {
+                   float threshold,
+                   KMeansInitMethod init_method) {
+    if (k == 0) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "k must be positive");
+    }
+    if (count == 0) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "count must be positive");
+    }
+    if (datas == nullptr) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "datas cannot be null");
+    }
+    if (k > count) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "k cannot be larger than count");
+    }
+
     if (k_centroids_ != nullptr) {
         allocator_->Deallocate(k_centroids_);
         k_centroids_ = nullptr;
@@ -59,18 +73,16 @@ KMeansCluster::Run(uint32_t k,
 
     std::random_device rd;
     std::mt19937 gen(rd());
-    std::uniform_int_distribution<uint64_t> dis(0, count - 1);
-    for (int i = 0; i < k; ++i) {
-        auto index = dis(gen);
-        for (int j = 0; j < dim_; ++j) {
-            k_centroids_[i * dim_ + j] = datas[index * dim_ + j];
-        }
+
+    if (init_method == KMeansInitMethod::KMEANS_PLUS_PLUS) {
+        select_initial_centroids_kmeans_plus_plus(datas, count, k, gen);
+    } else {
+        select_initial_centroids_random(datas, count, k, gen);
     }
 
     double total_err = std::numeric_limits<double>::max();
     double last_err = std::numeric_limits<double>::max();
     Vector<int32_t> labels(count, -1, this->allocator_);
-    std::vector<std::mutex> mutexes(k);
     std::vector<std::future<void>> futures;
     ByteBuffer y_sqr_buffer(static_cast<uint64_t>(k) * sizeof(float), allocator_);
     ByteBuffer distances_buffer(static_cast<uint64_t>(k) * QUERY_BS * sizeof(float), allocator_);
@@ -94,20 +106,40 @@ KMeansCluster::Run(uint32_t k,
 
         Vector<int> counts(k, 0, allocator_);
         Vector<float> new_centroids(static_cast<uint64_t>(k) * dim_, 0.0F, allocator_);
+        std::mutex merge_mutex;
 
         auto update_centroids_func = [&](uint64_t start, uint64_t end) {
             omp_set_num_threads(1);
+            Vector<int> local_counts(k, 0, allocator_);
+            Vector<float> local_centroids(static_cast<uint64_t>(k) * dim_, 0.0F, allocator_);
+
             for (uint64_t i = start; i < end; ++i) {
-                uint32_t label = labels[i];
-                {
-                    std::lock_guard<std::mutex> lock(mutexes[label]);
-                    counts[label]++;
-                    BlasFunction::Saxpy(dim_,
-                                        1.0F,
-                                        datas + i * dim_,
-                                        1,
-                                        new_centroids.data() + label * static_cast<uint64_t>(dim_),
-                                        1);
+                int32_t label = labels[i];
+                if (label >= 0 && label < static_cast<int32_t>(k)) {
+                    local_counts[label]++;
+                    BlasFunction::Saxpy(
+                        dim_,
+                        1.0F,
+                        datas + i * dim_,
+                        1,
+                        local_centroids.data() + label * static_cast<uint64_t>(dim_),
+                        1);
+                }
+            }
+
+            {
+                std::lock_guard<std::mutex> lock(merge_mutex);
+                for (uint32_t j = 0; j < k; ++j) {
+                    if (local_counts[j] > 0) {
+                        counts[j] += local_counts[j];
+                        BlasFunction::Saxpy(
+                            dim_,
+                            1.0F,
+                            local_centroids.data() + j * static_cast<uint64_t>(dim_),
+                            1,
+                            new_centroids.data() + j * static_cast<uint64_t>(dim_),
+                            1);
+                    }
                 }
             }
         };
@@ -120,6 +152,7 @@ KMeansCluster::Run(uint32_t k,
         }
         futures.clear();
 
+        std::uniform_int_distribution<uint64_t> dis(0, count - 1);
         for (int j = 0; j < k; ++j) {
             if (counts[j] > 0) {
                 BlasFunction::Sscal(dim_,
@@ -295,6 +328,76 @@ KMeansCluster::find_nearest_one_with_hgraph(const float* query,
         future.wait();
     }
     return error / static_cast<float>(query_count);
+}
+
+void
+// NOLINTNEXTLINE(readability-make-member-function-const)
+KMeansCluster::select_initial_centroids_random(const float* datas,
+                                               uint64_t count,
+                                               uint32_t k,
+                                               std::mt19937& gen) {
+    std::uniform_int_distribution<uint64_t> dis(0, count - 1);
+    for (uint32_t i = 0; i < k; ++i) {
+        auto index = dis(gen);
+        for (int32_t j = 0; j < dim_; ++j) {
+            k_centroids_[i * dim_ + j] = datas[index * dim_ + j];
+        }
+    }
+}
+
+void
+KMeansCluster::select_initial_centroids_kmeans_plus_plus(const float* datas,
+                                                         uint64_t count,
+                                                         uint32_t k,
+                                                         std::mt19937& gen) {
+    std::uniform_int_distribution<uint64_t> first_dis(0, count - 1);
+    uint64_t first_idx = first_dis(gen);
+    for (int32_t j = 0; j < dim_; ++j) {
+        k_centroids_[j] = datas[first_idx * dim_ + j];
+    }
+
+    Vector<float> min_distances(count, std::numeric_limits<float>::max(), allocator_);
+
+    for (uint32_t c = 1; c < k; ++c) {
+        const float* centroid =
+            k_centroids_ + static_cast<uint64_t>(c - 1) * static_cast<uint64_t>(dim_);
+
+        for (uint64_t i = 0; i < count; ++i) {
+            float dist = FP32ComputeL2Sqr(datas + i * dim_, centroid, dim_);
+            min_distances[i] = std::min(min_distances[i], dist);
+        }
+
+        double total_weight = 0.0;
+        for (uint64_t i = 0; i < count; ++i) {
+            total_weight += min_distances[i];
+        }
+
+        if (total_weight <= 0.0) {
+            std::uniform_int_distribution<uint64_t> dis(0, count - 1);
+            uint64_t idx = dis(gen);
+            for (int32_t j = 0; j < dim_; ++j) {
+                k_centroids_[c * dim_ + j] = datas[idx * dim_ + j];
+            }
+            continue;
+        }
+
+        std::uniform_real_distribution<double> prob_dis(0.0, total_weight);
+        double threshold = prob_dis(gen);
+        double cumulative = 0.0;
+        uint64_t selected_idx = count - 1;
+
+        for (uint64_t i = 0; i < count; ++i) {
+            cumulative += min_distances[i];
+            if (cumulative >= threshold) {
+                selected_idx = i;
+                break;
+            }
+        }
+
+        for (int32_t j = 0; j < dim_; ++j) {
+            k_centroids_[c * dim_ + j] = datas[selected_idx * dim_ + j];
+        }
+    }
 }
 
 }  // namespace vsag
