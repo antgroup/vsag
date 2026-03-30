@@ -38,22 +38,12 @@ ExternalProject_Add (
         env PATH=/usr/lib/ccache:$ENV{PATH}
         ./bootstrap.sh
             --without-icu
-            --without-libraries=python,test,stacktrace,mpi,log,graph,graph_parallel
+            --without-libraries=python,test,stacktrace,mpi,log,graph,graph_parallel,math,wave,serialization,wserialization,random,regex,locale,iostreams,chrono,timer,container,exception,date_time,thread,context,contract,coroutine,fiber,filesystem,atomic,signals,program_options,type_erasure
             --prefix=${install_dir}
     BUILD_COMMAND
-        env PATH=/usr/lib/ccache:$ENV{PATH}
-        ./b2 install
-            -d0
-            -j${NUM_BUILDING_JOBS}
-            --prefix=${install_dir}
-            --disable-icu
-            include=${install_dir}/include
-            linkflags=-L${install_dir}/lib
-            "cxxflags=-fPIC ${VSAG_THIRDPARTY_CXX_FLAGS}"
-            runtime-link=static
-            link=static
-            variant=release
-            toolset=${BOOST_TOOLSET}
+        ${CMAKE_COMMAND} -E make_directory ${install_dir}/include
+    COMMAND
+        ${CMAKE_COMMAND} -E copy_directory boost ${install_dir}/include/boost
     BUILD_IN_SOURCE 1
     INSTALL_COMMAND ""
     LOG_CONFIGURE TRUE
@@ -63,15 +53,6 @@ ExternalProject_Add (
     INACTIVITY_TIMEOUT 5
     # filesize ~= 90MiB
     TIMEOUT 90
-)
-
-ExternalProject_Add_Step (${name} setup-compiler
-    DEPENDEES configure
-    DEPENDERS build
-    COMMAND
-        echo "using gcc : : ${CMAKE_CXX_COMPILER} $<SEMICOLON>"
-            > ${source_dir}/tools/build/src/user-config.jam
-    WORKING_DIRECTORY ${source_dir}
 )
 
 ExternalProject_Add_Step (${name} clean
