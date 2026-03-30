@@ -571,9 +571,10 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
         param->precise_codes_param.reset();
         is_tune_precise_code = false;
     }
+    bool need_enable_reorder = false;
     if (not use_reorder_ and inner_parameter->use_reorder) {
         // [case 4] assign new precise_code
-        use_reorder_ = true;
+        need_enable_reorder = true;
         is_tune_precise_code = true;
     }
 
@@ -615,6 +616,11 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
         tune_and_rebuild(is_tune_base_code, basic_flatten_codes_, new_basic_code);
     high_precise_codes_ =
         tune_and_rebuild(is_tune_precise_code, high_precise_codes_, new_precise_code);
+
+    if (need_enable_reorder) {
+        use_reorder_ = true;
+        param->use_reorder = true;
+    }
 
     check_and_init_raw_vector(param->raw_vector_param, common_param, false);
     init_resize_bit_and_reorder();

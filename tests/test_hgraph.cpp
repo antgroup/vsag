@@ -993,6 +993,75 @@ TEST_CASE("(Daily) HGraph Tune", "[ft][hgraph][daily]") {
     TestHGraphTune(test_index, resource);
 }
 
+TEST_CASE("(PR) HGraph Tune with ignore_reorder", "[ft][hgraph][pr]") {
+    using namespace fixtures;
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = 1024 * 1024 * 2;
+    vsag::Options::Instance().set_block_size_limit(size);
+
+    int64_t dim = 128;
+    auto metric_type = "l2";
+
+    std::string param1 = fmt::format(R"({{
+        "dtype": "float32",
+        "metric_type": "{}",
+        "dim": {},
+        "index_param": {{
+            "base_quantization_type": "fp32",
+            "max_degree": 32,
+            "ef_construction": 100,
+            "build_thread_count": 0,
+            "store_raw_vector": true
+        }}
+    }})",
+                                     metric_type,
+                                     dim);
+
+    auto index = TestIndex::TestFactory("hgraph", param1, true);
+    auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(dim, 200, metric_type);
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    std::string param2 = fmt::format(R"({{
+        "dtype": "float32",
+        "metric_type": "{}",
+        "dim": {},
+        "index_param": {{
+            "use_reorder": true,
+            "ignore_reorder": true,
+            "base_quantization_type": "fp32",
+            "precise_quantization_type": "fp32",
+            "precise_io_type": "block_memory_io",
+            "max_degree": 32,
+            "ef_construction": 100,
+            "build_thread_count": 0
+        }}
+    }})",
+                                     metric_type,
+                                     dim);
+
+    auto tune_result = index->Tune(param2, true);
+    REQUIRE(tune_result.has_value());
+    REQUIRE(tune_result.value());
+
+    auto base_range = index->GetMinAndMaxId();
+    REQUIRE(base_range.has_value());
+
+    int64_t query_id = dataset->base_->GetIds()[0];
+    auto query_dataset = vsag::Dataset::Make();
+    query_dataset->Dim(dim)
+        ->NumElements(1)
+        ->Ids(&query_id)
+        ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+        ->Owner(false);
+    std::string search_param = fmt::format(fixtures::search_param_tmp, 200, false);
+    vsag::SearchParam search_param_obj(false, search_param, nullptr, nullptr);
+    auto search_result = index->KnnSearch(query_dataset, 5, search_param_obj);
+    REQUIRE(search_result.has_value());
+    REQUIRE(search_result.value()->GetDim() > 0);
+
+    vsag::Options::Instance().set_block_size_limit(origin_size);
+}
+
 static void
 TestHGraphODescentBuild(const fixtures::HGraphTestIndexPtr& test_index,
                         const fixtures::HGraphResourcePtr& resource) {
