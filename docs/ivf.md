@@ -75,7 +75,7 @@ For examples, refer to [106_index_ivf.cpp](https://github.com/antgroup/vsag/blob
 ### base_quantization_type
 - **Parameter Type**: string
 - **Parameter Description**: Coarse - ranking vector quantization type (encoding of in - bucket vectors)
-- **Optional Values**: "fp32", "fp16", "bf16", "sq8", "sq8_uniform", "sq4_uniform", "pq", "rabitq", "pqfs"
+- **Optional Values**: "fp32", "fp16", "bf16", "sq8", "sq8_uniform", "sq4_uniform", "pq", "rabitq", "turboquant", "pqfs"
 - **Default Value**: "fp32"
 
 ### base_io_type
@@ -99,7 +99,7 @@ For examples, refer to [106_index_ivf.cpp](https://github.com/antgroup/vsag/blob
 ### precise_quantization_type
 - **Parameter Type**: string
 - **Parameter Description**: Fine - ranking vector quantization type, used for re - ranking
-- **Optional Values**: "fp32", "fp16", "bf16", "sq8", "sq8_uniform", "sq4_uniform", "pq", "rabitq", "pqfs"
+- **Optional Values**: "fp32", "fp16", "bf16", "sq8", "sq8_uniform", "sq4_uniform", "pq", "rabitq", "turboquant", "pqfs"
 - **Default Value**: "fp32"
 
 ### precise_io_type

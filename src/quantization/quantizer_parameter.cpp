@@ -28,6 +28,7 @@
 #include "scalar_quantization/sq_parameter_headers.h"
 #include "sparse_quantization/sparse_quantizer_parameter.h"
 #include "transform_quantization/transform_quantizer_parameter.h"
+#include "turboquant_quantizer_parameter.h"
 
 namespace vsag {
 QuantizerParamPtr
@@ -62,6 +63,9 @@ QuantizerParameter::GetQuantizerParameterByJson(const JsonType& json) {
     } else if (type_name == QUANTIZATION_TYPE_VALUE_RABITQ) {
         quantizer_param = std::make_shared<RaBitQuantizerParameter>();
         quantizer_param->FromJson(json);
+    } else if (type_name == QUANTIZATION_TYPE_VALUE_TURBOQUANT) {
+        quantizer_param = std::make_shared<TurboQuantizerParameter>();
+        quantizer_param->FromJson(json);
     } else if (type_name == QUANTIZATION_TYPE_VALUE_SPARSE) {
         quantizer_param = std::make_shared<SparseQuantizerParameter>();
         quantizer_param->FromJson(json);
@@ -93,6 +97,7 @@ QuantizerParameter::IsValidQuantizationType(const std::string& type_name) {
                                                                 QUANTIZATION_TYPE_VALUE_BF16,
                                                                 QUANTIZATION_TYPE_VALUE_FP16,
                                                                 QUANTIZATION_TYPE_VALUE_RABITQ,
+                                                                QUANTIZATION_TYPE_VALUE_TURBOQUANT,
                                                                 QUANTIZATION_TYPE_VALUE_SPARSE,
                                                                 QUANTIZATION_TYPE_VALUE_PQFS,
                                                                 QUANTIZATION_TYPE_VALUE_TQ,
