@@ -106,6 +106,10 @@ INT8Quantizer<metric>::DecodeBatchImpl(const uint8_t* codes, DataType* data, uin
 template <MetricType metric>
 float
 INT8Quantizer<metric>::ComputeImpl(const uint8_t* codes1, const uint8_t* codes2) {
+    static_assert(metric == MetricType::METRIC_TYPE_IP ||
+                      metric == MetricType::METRIC_TYPE_COSINE ||
+                      metric == MetricType::METRIC_TYPE_L2SQR,
+                  "Unsupported metric type for INT8Quantizer");
     if constexpr (metric == MetricType::METRIC_TYPE_IP) {
         return 1.0F - INT8ComputeIP(reinterpret_cast<const int8_t*>(codes1),
                                     reinterpret_cast<const int8_t*>(codes2),
@@ -122,7 +126,7 @@ INT8Quantizer<metric>::ComputeImpl(const uint8_t* codes1, const uint8_t* codes2)
                                         this->dim_);
         similarity /= mold1[0] * mold2[0];
         return 1.0F - std::max(-1.0F, std::min(1.0F, similarity));
-    } else if (metric == MetricType::METRIC_TYPE_L2SQR) {
+    } else {
         return INT8ComputeL2Sqr(reinterpret_cast<const int8_t*>(codes1),
                                 reinterpret_cast<const int8_t*>(codes2),
                                 this->dim_);
