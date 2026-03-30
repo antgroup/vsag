@@ -1700,7 +1700,7 @@ int generate_pq_data_from_pivots(std::stringstream &base_reader, uint32_t num_ce
 template <typename T>
 int generate_pq_data_from_pivots(const T* data, size_t num_points, size_t dim, const std::vector<size_t>& skip_locs, uint32_t num_centers, uint32_t num_pq_chunks,
                                  std::stringstream &pq_pivots_stream, std::stringstream &compressed_file_writer,
-                                 bool use_opq, std::shared_ptr<float[]> rotmat_tr, bool use_bsa)
+                                 bool use_opq, std::shared_ptr<float[]> rotmat_tr, bool use_bsa, bool should_normalize)
 {
     size_t read_blk_size = 64 * 1024 * 1024;
     std::unique_ptr<float[]> full_pivot_data;
@@ -1756,6 +1756,9 @@ int generate_pq_data_from_pivots(const T* data, size_t num_points, size_t dim, c
             {
                 block_data_tmp[p * dim + d] -= centroid[d];
                 block_data_float[p * dim + d] = block_data_tmp[p * dim + d];
+            }
+            if (should_normalize) {
+                normalize(block_data_float.get() + p * dim, dim);
             }
         }
 
@@ -1941,12 +1944,15 @@ void generate_disk_quantized_data(const T* train_data, size_t train_size, size_t
                            disk_pq_pivots, false);
     }
 
+    bool should_normalize = (compare_metric == diskann::Metric::COSINE);
     if (compare_metric == diskann::Metric::INNER_PRODUCT)
-        generate_pq_data_from_pivots<float>((const float*)train_data, train_size, train_dim, skip_locs, 256, (uint32_t)disk_pq_dims, disk_pq_pivots,
-                                            disk_pq_compressed_vectors, use_opq, rotate, use_bsa);
+        generate_pq_data_from_pivots<float>((const float *)train_data, train_size, train_dim, skip_locs, 256,
+                                            (uint32_t)disk_pq_dims, disk_pq_pivots, disk_pq_compressed_vectors, use_opq,
+                                            rotate, use_bsa, should_normalize);
     else
-        generate_pq_data_from_pivots<T>(train_data, train_size, train_dim, skip_locs, 256, (uint32_t)disk_pq_dims, disk_pq_pivots,
-                                        disk_pq_compressed_vectors, use_opq, rotate, use_bsa);
+        generate_pq_data_from_pivots<T>(train_data, train_size, train_dim, skip_locs, 256, (uint32_t)disk_pq_dims,
+                                        disk_pq_pivots, disk_pq_compressed_vectors, use_opq, rotate, use_bsa,
+                                        should_normalize);
 }
 
 
@@ -2022,15 +2028,15 @@ template DISKANN_DLLEXPORT int generate_pq_data_from_pivots<float>(std::stringst
 
 template DISKANN_DLLEXPORT int generate_pq_data_from_pivots<float>(const float* data, size_t num_points, size_t dim, const std::vector<size_t>& skip_locs, uint32_t num_centers, uint32_t num_pq_chunks,
                                                                    std::stringstream &pq_pivots_stream, std::stringstream &compressed_file_writer,
-                                                                   bool use_opq, std::shared_ptr<float[]> rotmat_tr, bool use_bsa = false);
+                                                                   bool use_opq, std::shared_ptr<float[]> rotmat_tr, bool use_bsa = false, bool should_normalize);
 
 template DISKANN_DLLEXPORT int generate_pq_data_from_pivots<uint8_t>(const uint8_t* data, size_t num_points, size_t dim, const std::vector<size_t>& skip_locs, uint32_t num_centers, uint32_t num_pq_chunks,
                                                             std::stringstream &pq_pivots_stream, std::stringstream &compressed_file_writer,
-                                                            bool use_opq, std::shared_ptr<float[]> rotmat_tr, bool use_bsa = false);
+                                                            bool use_opq, std::shared_ptr<float[]> rotmat_tr, bool use_bsa = false, bool should_normalize);
 
 template DISKANN_DLLEXPORT int generate_pq_data_from_pivots<int8_t>(const int8_t* data, size_t num_points, size_t dim, const std::vector<size_t>& skip_locs, uint32_t num_centers, uint32_t num_pq_chunks,
                                                             std::stringstream &pq_pivots_stream, std::stringstream &compressed_file_writer,
-                                                            bool use_opq, std::shared_ptr<float[]> rotmat_tr, bool use_bsa = false);
+                                                            bool use_opq, std::shared_ptr<float[]> rotmat_tr, bool use_bsa = false, bool should_normalize);
 
 template DISKANN_DLLEXPORT void generate_disk_quantized_data<int8_t>(const std::string &data_file_to_use,
                                                                      const std::string &disk_pq_pivots_path,
