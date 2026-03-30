@@ -31,12 +31,10 @@ public:
     void
     FromJson(const JsonType& json) override;
 
-    [[nodiscard]]
-    JsonType
+    [[nodiscard]] JsonType
     ToJson() const override;
 
-    [[nodiscard]]
-    bool
+    [[nodiscard]] bool
     CheckCompatibility(const ParamPtr& other) const override;
 
     uint64_t bits_per_dim_{4};

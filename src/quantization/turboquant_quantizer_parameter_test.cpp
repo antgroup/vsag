@@ -42,11 +42,8 @@ generate_turboquant_param(const TurboQuantDefaultParam& param) {
             "turboquant_qjl_projection_dim": {}
         }}
     )";
-    return fmt::format(param_str,
-                       param.bits_per_dim,
-                       param.use_fht,
-                       param.enable_qjl,
-                       param.qjl_projection_dim);
+    return fmt::format(
+        param_str, param.bits_per_dim, param.use_fht, param.enable_qjl, param.qjl_projection_dim);
 }
 
 TEST_CASE("TurboQuant Quantizer Parameter ToJson Test", "[ut][TurboQuantQuantizerParameter]") {

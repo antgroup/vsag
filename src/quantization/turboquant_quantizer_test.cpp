@@ -49,7 +49,8 @@ void
 TestComputeMetricTurboQuant(uint64_t dim, int count) {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     TurboQuantizer<metric> quantizer(dim, 6, true, true, dim, allocator.get());
-    TestComputer<TurboQuantizer<metric>, metric>(quantizer, dim, count, 20.0F, 2.0F, true, 1.0F, 1.0F);
+    TestComputer<TurboQuantizer<metric>, metric>(
+        quantizer, dim, count, 20.0F, 2.0F, true, 1.0F, 1.0F);
 }
 
 TEST_CASE("TurboQuant Compute", "[ut][TurboQuantQuantizer]") {

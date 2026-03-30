@@ -28,6 +28,8 @@ TurboQuantizerParameter::TurboQuantizerParameter()
 
 void
 TurboQuantizerParameter::FromJson(const JsonType& json) {
+    auto qjl_projection_dim = static_cast<int64_t>(this->qjl_projection_dim_);
+
     if (json.Contains(TURBOQUANT_BITS_PER_DIM_KEY)) {
         this->bits_per_dim_ = json[TURBOQUANT_BITS_PER_DIM_KEY].GetInt();
     }
@@ -38,7 +40,7 @@ TurboQuantizerParameter::FromJson(const JsonType& json) {
         this->enable_qjl_ = json[TURBOQUANT_ENABLE_QJL_KEY].GetBool();
     }
     if (json.Contains(TURBOQUANT_QJL_PROJECTION_DIM_KEY)) {
-        this->qjl_projection_dim_ = json[TURBOQUANT_QJL_PROJECTION_DIM_KEY].GetInt();
+        qjl_projection_dim = json[TURBOQUANT_QJL_PROJECTION_DIM_KEY].GetInt();
     }
 
     if (this->bits_per_dim_ < 2 or this->bits_per_dim_ > 8) {
@@ -47,6 +49,16 @@ TurboQuantizerParameter::FromJson(const JsonType& json) {
             fmt::format("currently, only support turboquant_bits_per_dim in [2, 8], but got {}",
                         this->bits_per_dim_));
     }
+
+    if (qjl_projection_dim < 0) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "turboquant_qjl_projection_dim must be non-negative");
+    }
+    if (this->enable_qjl_ and qjl_projection_dim == 0) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "turboquant_qjl_projection_dim must be positive when QJL is enabled");
+    }
+    this->qjl_projection_dim_ = static_cast<uint64_t>(qjl_projection_dim);
 }
 
 JsonType
@@ -71,10 +83,11 @@ TurboQuantizerParameter::CheckCompatibility(const ParamPtr& other) const {
     }
 
     if (this->bits_per_dim_ != turboquant_param->bits_per_dim_) {
-        logger::error("TurboQuantizerParameter::CheckCompatibility: bits per dim do not match: "
-                      "{} vs {}",
-                      this->bits_per_dim_,
-                      turboquant_param->bits_per_dim_);
+        logger::error(
+            "TurboQuantizerParameter::CheckCompatibility: bits per dim do not match: "
+            "{} vs {}",
+            this->bits_per_dim_,
+            turboquant_param->bits_per_dim_);
         return false;
     }
     if (this->use_fht_ != turboquant_param->use_fht_) {
@@ -93,10 +106,11 @@ TurboQuantizerParameter::CheckCompatibility(const ParamPtr& other) const {
         return false;
     }
     if (this->qjl_projection_dim_ != turboquant_param->qjl_projection_dim_) {
-        logger::error("TurboQuantizerParameter::CheckCompatibility: qjl projection dim does not "
-                      "match: {} vs {}",
-                      this->qjl_projection_dim_,
-                      turboquant_param->qjl_projection_dim_);
+        logger::error(
+            "TurboQuantizerParameter::CheckCompatibility: qjl projection dim does not "
+            "match: {} vs {}",
+            this->qjl_projection_dim_,
+            turboquant_param->qjl_projection_dim_);
         return false;
     }
 

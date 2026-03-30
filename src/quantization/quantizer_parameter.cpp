@@ -27,8 +27,8 @@
 #include "rabitq_quantization/rabitq_quantizer_parameter.h"
 #include "scalar_quantization/sq_parameter_headers.h"
 #include "sparse_quantization/sparse_quantizer_parameter.h"
-#include "turboquant_quantizer_parameter.h"
 #include "transform_quantization/transform_quantizer_parameter.h"
+#include "turboquant_quantizer_parameter.h"
 
 namespace vsag {
 QuantizerParamPtr

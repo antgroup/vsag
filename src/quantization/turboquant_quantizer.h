@@ -49,7 +49,7 @@ public:
     EncodeOneImpl(const DataType* data, uint8_t* codes) const;
 
     bool
-    DecodeOneImpl(const uint8_t* codes, DataType* data);
+    DecodeOneImpl(const uint8_t* codes, DataType* data) const;
 
     float
     ComputeImpl(const uint8_t* codes1, const uint8_t* codes2) const;
@@ -80,6 +80,15 @@ private:
     [[nodiscard]] uint64_t
     get_qjl_code_size() const;
 
+    [[nodiscard]] uint64_t
+    get_query_workspace_size() const;
+
+    void
+    update_derived_sizes();
+
+    void
+    validate_configuration() const;
+
     [[nodiscard]] float
     get_metric_distance(const float* lhs,
                         const float* rhs,
@@ -87,16 +96,18 @@ private:
                         float rhs_raw_norm) const;
 
     void
-    rotate(const DataType* input, std::vector<float>& output) const;
+    rotate(const DataType* input, float* output) const;
 
     void
-    inverse_rotate(const float* input, std::vector<float>& output) const;
+    inverse_rotate(const float* input, float* output) const;
 
     void
     cartesian_to_polar(const float* input, float& radius, std::vector<float>& angles) const;
 
     void
-    polar_to_cartesian(float radius, const std::vector<float>& angles, std::vector<float>& output) const;
+    polar_to_cartesian(float radius,
+                       const std::vector<float>& angles,
+                       std::vector<float>& output) const;
 
     void
     encode_polar_coordinates(const std::vector<float>& angles, uint8_t* code) const;
@@ -105,17 +116,20 @@ private:
     decode_polar_coordinates(const uint8_t* code, std::vector<float>& angles) const;
 
     void
+    decode_to_rotated(const uint8_t* codes,
+                      float* rotated,
+                      float* angle_buffer,
+                      float* current_buffer,
+                      float* next_buffer) const;
+
+    void
     compute_qjl_projection(const float* data, std::vector<float>& projection) const;
 
     void
     encode_qjl(const std::vector<float>& projection, uint8_t* code) const;
 
-    void
-    decode_qjl(const uint8_t* code, std::vector<float>& projection) const;
-
     [[nodiscard]] float
-    compute_qjl_correction(const std::vector<float>& base_projection,
-                           const std::vector<float>& query_projection) const;
+    compute_qjl_correction(const uint8_t* base_code, const float* query_projection) const;
 
     [[nodiscard]] float
     load_float(const uint8_t* codes, uint64_t offset) const;
