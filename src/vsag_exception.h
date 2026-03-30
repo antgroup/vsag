@@ -20,7 +20,7 @@
 #include "vsag/errors.h"
 
 namespace vsag {
-class VsagException : std::exception {
+class VsagException : public std::exception {
 public:
     explicit VsagException(Error& error) : error_(error){};
 
