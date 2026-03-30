@@ -34,15 +34,7 @@ ExternalProject_Add (
     DOWNLOAD_DIR ${DOWNLOAD_DIR}
     SOURCE_DIR ${source_dir}
     CONFIGURE_COMMAND ""
-    CONFIGURE_COMMAND
-        env PATH=/usr/lib/ccache:$ENV{PATH}
-        ./bootstrap.sh
-            --without-icu
-            --without-libraries=python,test,stacktrace,mpi,log,graph,graph_parallel,math,wave,serialization,wserialization,random,regex,locale,iostreams,chrono,timer,container,exception,date_time,thread,context,contract,coroutine,fiber,filesystem,atomic,signals,program_options,type_erasure
-            --prefix=${install_dir}
     BUILD_COMMAND
-        ${CMAKE_COMMAND} -E make_directory ${install_dir}/include
-    COMMAND
         ${CMAKE_COMMAND} -E copy_directory boost ${install_dir}/include/boost
     BUILD_IN_SOURCE 1
     INSTALL_COMMAND ""
