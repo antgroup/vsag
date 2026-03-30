@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,61 +13,36 @@
 // limitations under the License.
 
 #include <pybind11/numpy.h>
-#include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
-#include <filesystem>
 #include <fstream>
-#include <map>
+#include <vector>
 
+#include "binding.h"
 #include "fmt/format.h"
-#include "iostream"
 #include "vsag/dataset.h"
 #include "vsag/vsag.h"
 
-namespace py = pybind11;
+namespace {
 
-void
-SetLoggerOff() {
-    vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kOFF);
+int64_t
+to_int64(uint64_t value) {
+    return static_cast<int64_t>(value);
 }
 
-void
-SetLoggerInfo() {
-    vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kINFO);
-}
-
-void
-SetLoggerDebug() {
-    vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
-}
-
-template <typename T>
-static void
-writeBinaryPOD(std::ostream& out, const T& podRef) {
-    out.write((char*)&podRef, sizeof(T));
-}
-
-template <typename T>
-static void
-readBinaryPOD(std::istream& in, T& podRef) {
-    in.read((char*)&podRef, sizeof(T));
-}
-
-struct SparseVectors {
+struct SparseVectors {  // NOLINT(readability-identifier-naming)
     std::vector<vsag::SparseVector> sparse_vectors;
     uint32_t num_elements;
-    uint32_t num_non_zeros;
+    uint32_t num_non_zeros = 0;
 
-    SparseVectors(uint32_t num_elements)
-        : sparse_vectors(num_elements), num_elements(num_elements), num_non_zeros(0) {
+    explicit SparseVectors(uint32_t count) : sparse_vectors(count), num_elements(count) {
     }
 };
 
 SparseVectors
-BuildSparseVectorsFromCSR(py::array_t<uint32_t> index_pointers,
-                          py::array_t<uint32_t> indices,
-                          py::array_t<float> values) {
+build_sparse_vectors_from_csr(const py::array_t<uint32_t>& index_pointers,
+                              const py::array_t<uint32_t>& indices,
+                              const py::array_t<float>& values) {
     auto buf_ptr = index_pointers.request();
     auto buf_idx = indices.request();
     auto buf_val = values.request();
@@ -80,21 +54,21 @@ BuildSparseVectorsFromCSR(py::array_t<uint32_t> index_pointers,
     if (buf_ptr.shape[0] < 2) {
         throw std::invalid_argument("index_pointers length must be at least 2");
     }
-    uint32_t num_elements = buf_ptr.shape[0] - 1;
+    const auto num_elements = static_cast<uint32_t>(buf_ptr.shape[0] - 1);
 
     const uint32_t* ptr_data = index_pointers.data();
     const uint32_t* idx_data = indices.data();
     const float* val_data = values.data();
 
-    uint32_t num_non_zeros = ptr_data[num_elements];
+    const uint32_t num_non_zeros = ptr_data[num_elements];
 
-    if (static_cast<size_t>(num_non_zeros) != buf_idx.shape[0]) {
+    if (static_cast<uint64_t>(num_non_zeros) != static_cast<uint64_t>(buf_idx.shape[0])) {
         throw std::invalid_argument(
             fmt::format("Size of 'indices'({}) must equal index_pointers[last]",
                         buf_idx.shape[0],
                         num_non_zeros));
     }
-    if (static_cast<size_t>(num_non_zeros) != buf_val.shape[0]) {
+    if (static_cast<uint64_t>(num_non_zeros) != static_cast<uint64_t>(buf_val.shape[0])) {
         throw std::invalid_argument(
             fmt::format("Size of 'values'({}) must equal index_pointers[last]({})",
                         buf_val.shape[0],
@@ -115,63 +89,66 @@ BuildSparseVectorsFromCSR(py::array_t<uint32_t> index_pointers,
         }
     }
 
-    SparseVectors svs(num_elements);
-    svs.num_non_zeros = num_non_zeros;
+    SparseVectors sparse_vectors(num_elements);
+    sparse_vectors.num_non_zeros = num_non_zeros;
 
     for (uint32_t i = 0; i < num_elements; ++i) {
-        uint32_t start = ptr_data[i];
-        uint32_t end = ptr_data[i + 1];
-        uint32_t len = end - start;
+        const uint32_t start = ptr_data[i];
+        const uint32_t end = ptr_data[i + 1];
+        const uint32_t len = end - start;
 
-        svs.sparse_vectors[i].len_ = len;
-        svs.sparse_vectors[i].ids_ = const_cast<uint32_t*>(idx_data + start);
-        svs.sparse_vectors[i].vals_ = const_cast<float*>(val_data + start);
+        sparse_vectors.sparse_vectors[i].len_ = len;
+        sparse_vectors.sparse_vectors[i].ids_ = const_cast<uint32_t*>(idx_data + start);
+        sparse_vectors.sparse_vectors[i].vals_ = const_cast<float*>(val_data + start);
     }
 
-    return svs;
+    return sparse_vectors;
 }
 
 class Index {
 public:
-    Index(std::string name, const std::string& parameters) {
+    Index(const std::string& name, const std::string& parameters) {
         if (auto index = vsag::Factory::CreateIndex(name, parameters)) {
             index_ = index.value();
         } else {
-            vsag::Error error_code = index.error();
-            if (error_code.type == vsag::ErrorType::UNSUPPORTED_INDEX) {
-                throw std::runtime_error("error type: UNSUPPORTED_INDEX");
-            } else if (error_code.type == vsag::ErrorType::INVALID_ARGUMENT) {
-                throw std::runtime_error("error type: invalid_parameter");
-            } else {
-                throw std::runtime_error("error type: unexpectedError");
+            const vsag::Error error_code = index.error();
+            switch (error_code.type) {
+                case vsag::ErrorType::UNSUPPORTED_INDEX:
+                    throw std::runtime_error("error type: UNSUPPORTED_INDEX");
+                case vsag::ErrorType::INVALID_ARGUMENT:
+                    throw std::runtime_error("error type: invalid_parameter");
+                default:
+                    throw std::runtime_error("error type: unexpectedError");
             }
         }
     }
 
-public:
     void
-    Build(py::array_t<float> vectors, py::array_t<int64_t> ids, size_t num_elements, size_t dim) {
+    Build(py::array_t<float> vectors,
+          py::array_t<int64_t> ids,
+          uint64_t num_elements,
+          uint64_t dim) {
         auto dataset = vsag::Dataset::Make();
         dataset->Owner(false)
-            ->Dim(dim)
-            ->NumElements(num_elements)
+            ->Dim(to_int64(dim))
+            ->NumElements(to_int64(num_elements))
             ->Ids(ids.mutable_data())
             ->Float32Vectors(vectors.mutable_data());
         index_->Build(dataset);
     }
 
     void
-    SparseBuild(py::array_t<uint32_t> index_pointers,
-                py::array_t<uint32_t> indices,
-                py::array_t<float> values,
-                py::array_t<int64_t> ids) {
-        auto batch = BuildSparseVectorsFromCSR(index_pointers, indices, values);
+    SparseBuild(const py::array_t<uint32_t>& index_pointers,
+                const py::array_t<uint32_t>& indices,
+                const py::array_t<float>& values,
+                const py::array_t<int64_t>& ids) {
+        auto batch = build_sparse_vectors_from_csr(index_pointers, indices, values);
 
         auto buf_id = ids.request();
         if (buf_id.ndim != 1) {
             throw std::invalid_argument("all inputs must be 1-dimensional");
         }
-        if (batch.num_elements != buf_id.shape[0]) {
+        if (batch.num_elements != static_cast<uint32_t>(buf_id.shape[0])) {
             throw std::invalid_argument(
                 fmt::format("Length of 'ids'({}) must match number of vectors({})",
                             buf_id.shape[0],
@@ -188,28 +165,27 @@ public:
     }
 
     py::object
-    KnnSearch(py::array_t<float> vector, size_t k, std::string& parameters) {
+    KnnSearch(py::array_t<float> vector, uint64_t k, std::string& parameters) {
         auto query = vsag::Dataset::Make();
-        size_t data_num = 1;
-        query->NumElements(data_num)
-            ->Dim(vector.size())
+        query->NumElements(1)
+            ->Dim(to_int64(vector.size()))
             ->Float32Vectors(vector.mutable_data())
             ->Owner(false);
 
-        size_t ids_shape[1]{k};
-        size_t ids_strides[1]{sizeof(int64_t)};
-        size_t dists_shape[1]{k};
-        size_t dists_strides[1]{sizeof(float)};
+        uint64_t ids_shape[1]{k};
+        uint64_t ids_strides[1]{sizeof(int64_t)};
+        uint64_t dists_shape[1]{k};
+        uint64_t dists_strides[1]{sizeof(float)};
 
         auto ids = py::array_t<int64_t>(ids_shape, ids_strides);
         auto dists = py::array_t<float>(dists_shape, dists_strides);
-        if (auto result = index_->KnnSearch(query, k, parameters); result.has_value()) {
+        if (auto result = index_->KnnSearch(query, to_int64(k), parameters); result.has_value()) {
             auto ids_view = ids.mutable_unchecked<1>();
             auto dists_view = dists.mutable_unchecked<1>();
 
-            auto vsag_ids = result.value()->GetIds();
-            auto vsag_distances = result.value()->GetDistances();
-            for (uint32_t i = 0; i < data_num * k; ++i) {
+            const auto* vsag_ids = result.value()->GetIds();
+            const auto* vsag_distances = result.value()->GetDistances();
+            for (uint32_t i = 0; i < k; ++i) {
                 ids_view(i) = vsag_ids[i];
                 dists_view(i) = vsag_distances[i];
             }
@@ -219,12 +195,12 @@ public:
     }
 
     py::tuple
-    SparseKnnSearch(py::array_t<uint32_t> index_pointers,
-                    py::array_t<uint32_t> indices,
-                    py::array_t<float> values,
+    SparseKnnSearch(const py::array_t<uint32_t>& index_pointers,
+                    const py::array_t<uint32_t>& indices,
+                    const py::array_t<float>& values,
                     uint32_t k,
                     const std::string& parameters) {
-        auto batch = BuildSparseVectorsFromCSR(index_pointers, indices, values);
+        auto batch = build_sparse_vectors_from_csr(index_pointers, indices, values);
 
         std::vector<uint32_t> shape{batch.num_elements, k};
         auto res_ids = py::array_t<int64_t>(shape);
@@ -254,23 +230,22 @@ public:
     py::object
     RangeSearch(py::array_t<float> point, float threshold, std::string& parameters) {
         auto query = vsag::Dataset::Make();
-        size_t data_num = 1;
-        query->NumElements(data_num)
-            ->Dim(point.size())
+        query->NumElements(1)
+            ->Dim(to_int64(point.size()))
             ->Float32Vectors(point.mutable_data())
             ->Owner(false);
 
         py::array_t<int64_t> labels;
         py::array_t<float> dists;
         if (auto result = index_->RangeSearch(query, threshold, parameters); result.has_value()) {
-            auto ids = result.value()->GetIds();
-            auto distances = result.value()->GetDistances();
-            auto k = result.value()->GetDim();
-            labels.resize({k});
-            dists.resize({k});
-            auto labels_data = labels.mutable_data();
-            auto dists_data = dists.mutable_data();
-            for (uint32_t i = 0; i < data_num * k; ++i) {
+            const auto* ids = result.value()->GetIds();
+            const auto* distances = result.value()->GetDistances();
+            const auto count = static_cast<uint64_t>(result.value()->GetDim());
+            labels.resize({count});
+            dists.resize({count});
+            auto* labels_data = labels.mutable_data();
+            auto* dists_data = dists.mutable_data();
+            for (uint64_t i = 0; i < count; ++i) {
                 labels_data[i] = ids[i];
                 dists_data[i] = distances[i];
             }
@@ -279,22 +254,22 @@ public:
         return py::make_tuple(labels, dists);
     }
 
-    int64_t
+    [[nodiscard]] int64_t
     GetNumElements() const {
         return index_->GetNumElements();
     }
 
-    int64_t
+    [[nodiscard]] int64_t
     GetMemoryUsage() const {
         return index_->GetMemoryUsage();
     }
 
-    bool
+    [[nodiscard]] bool
     CheckIdExist(int64_t id) const {
         return index_->CheckIdExist(id);
     }
 
-    py::tuple
+    [[nodiscard]] py::tuple
     GetMinAndMaxId() const {
         auto result = index_->GetMinAndMaxId();
         if (result.has_value()) {
@@ -305,11 +280,11 @@ public:
     }
 
     void
-    Add(py::array_t<float> vectors, py::array_t<int64_t> ids, size_t num_elements, size_t dim) {
+    Add(py::array_t<float> vectors, py::array_t<int64_t> ids, uint64_t num_elements, uint64_t dim) {
         auto dataset = vsag::Dataset::Make();
         dataset->Owner(false)
-            ->Dim(dim)
-            ->NumElements(num_elements)
+            ->Dim(to_int64(dim))
+            ->NumElements(to_int64(num_elements))
             ->Ids(ids.mutable_data())
             ->Float32Vectors(vectors.mutable_data());
 
@@ -320,7 +295,7 @@ public:
     }
 
     uint32_t
-    Remove(py::array_t<int64_t> ids) {
+    Remove(const py::array_t<int64_t>& ids) {
         auto buf = ids.request();
         if (buf.ndim != 1) {
             throw std::invalid_argument("ids must be 1-dimensional");
@@ -335,7 +310,7 @@ public:
     }
 
     py::array_t<float>
-    CalDistanceById(py::array_t<float> query, py::array_t<int64_t> ids) {
+    CalDistanceById(const py::array_t<float>& query, const py::array_t<int64_t>& ids) {
         auto buf_query = query.request();
         auto buf_ids = ids.request();
 
@@ -343,18 +318,18 @@ public:
             throw std::invalid_argument("query and ids must be 1-dimensional");
         }
 
-        int64_t count = buf_ids.shape[0];
+        const int64_t count = buf_ids.shape[0];
         auto distances = py::array_t<float>(count);
         auto dist_view = distances.mutable_unchecked<1>();
 
         for (int64_t i = 0; i < count; ++i) {
-            dist_view(i) = -1.0f;
+            dist_view(i) = -1.0F;
         }
 
         auto result = index_->CalDistanceById(query.data(), ids.data(), count);
 
         if (result.has_value()) {
-            auto dist_data = result.value()->GetDistances();
+            const auto* dist_data = result.value()->GetDistances();
             for (int64_t i = 0; i < count; ++i) {
                 dist_view(i) = dist_data[i];
             }
@@ -373,7 +348,6 @@ public:
     void
     Load(const std::string& filename) {
         std::ifstream file(filename, std::ios::binary);
-
         index_->Deserialize(file);
         file.close();
     }
@@ -382,39 +356,28 @@ private:
     std::shared_ptr<vsag::Index> index_;
 };
 
-PYBIND11_MODULE(_pyvsag, m) {
-    m.doc() = "VSAG (Vector Search Algorithm Group) Python binding module";
+}  // namespace
 
-    m.def("set_logger_off", &SetLoggerOff, "Disable all logging output from the VSAG library.");
-
-    m.def("set_logger_info",
-          &SetLoggerInfo,
-          "Set logger level to INFO. Only important information will be logged.");
-
-    m.def("set_logger_debug",
-          &SetLoggerDebug,
-          "Set logger level to DEBUG. Detailed debug information will be logged.");
-
-    py::class_<Index>(m, "Index", R"pbdoc(
+void
+bind_index(py::module_& module) {
+    py::class_<Index>(module, "Index", R"pbdoc(
         Vector search index class for efficient similarity search.
-        
+
         This class supports both dense and sparse vector indexing and searching.
         It provides methods for building indexes, performing k-NN and range searches,
         and saving/loading indexes to/from disk.
     )pbdoc")
-        .def(py::init<std::string, std::string&>(),
+        .def(py::init<const std::string&, const std::string&>(),
              py::arg("name"),
              py::arg("parameters"),
              R"pbdoc(
          Initialize a new Index instance.
-         
+
          Args:
              name (str): Name of the index type (e.g., "hgraph", "ivf", "sindi")
              parameters (str): JSON string containing index configuration parameters
 
          )pbdoc")
-
-        // Dense vector build
         .def("build",
              &Index::Build,
              py::arg("vectors"),
@@ -423,18 +386,16 @@ PYBIND11_MODULE(_pyvsag, m) {
              py::arg("dim"),
              R"pbdoc(
          Build index from dense float32 vectors.
-         
+
          Args:
              vectors (numpy.ndarray): 1D array of float32 values with total size num_elements * dim
              ids (numpy.ndarray): 1D array of int64 values with shape (num_elements,)
              num_elements (int): Number of vectors in the dataset
              dim (int): Dimensionality of each vector
-             
+
          Note:
              - The vectors array should contain num_elements * dim consecutive float32 values
          )pbdoc")
-
-        // Sparse vector build
         .def("build",
              &Index::SparseBuild,
              py::arg("index_pointers"),
@@ -443,21 +404,19 @@ PYBIND11_MODULE(_pyvsag, m) {
              py::arg("ids"),
              R"pbdoc(
          Build index from sparse vectors in CSR (Compressed Sparse Row) format.
-         
+
          Args:
              index_pointers (numpy.ndarray): 1D array of uint32 values with shape (num_elements + 1,)
              indices (numpy.ndarray): 1D array of uint32 values containing column indices
              values (numpy.ndarray): 1D array of float32 values containing non-zero element values
              ids (numpy.ndarray): 1D array of int64 values with shape (num_elements,)
-             
+
          CSR Format Requirements:
              - index_pointers[0] must be 0
              - index_pointers should be monotonically non-decreasing
              - len(indices) == len(values) == index_pointers[-1]
              - All arrays use 0-based indexing
          )pbdoc")
-
-        // Dense KNN search
         .def("knn_search",
              &Index::KnnSearch,
              py::arg("vector"),
@@ -465,23 +424,21 @@ PYBIND11_MODULE(_pyvsag, m) {
              py::arg("parameters"),
              R"pbdoc(
          Perform k-nearest neighbors search on a single dense query vector.
-         
+
          Args:
              vector (numpy.ndarray): 1D array of float32 values representing the query vector
              k (int): Number of nearest neighbors to retrieve
              parameters (str): JSON-formatted string containing search-specific parameters
-             
+
          Returns:
              tuple: (distances, ids) where:
                  - distances: numpy.ndarray of float32 with shape (k,) containing distances to neighbors
                  - ids: numpy.ndarray of int64 with shape (k,) containing neighbor IDs
-                 
+
          Note:
              - Distance metric depends on the index configuration (typically L2 or inner product)
              - Results are sorted by distance (closest first)
          )pbdoc")
-
-        // Sparse KNN search
         .def("knn_search",
              &Index::SparseKnnSearch,
              py::arg("index_pointers"),
@@ -491,20 +448,18 @@ PYBIND11_MODULE(_pyvsag, m) {
              py::arg("parameters"),
              R"pbdoc(
          Perform k-nearest neighbors search on a single sparse query vector in CSR format.
-         
+
          Args:
              index_pointers (numpy.ndarray): 1D array of uint32 with shape (2,) = [0, nnz]
              indices (numpy.ndarray): 1D array of uint32 containing column indices of non-zero elements
              values (numpy.ndarray): 1D array of float32 containing non-zero values
              k (int): Number of nearest neighbors to retrieve
              parameters (str): JSON-formatted string containing search-specific parameters
-             
+
          Returns:
              tuple: (distances, ids) with the same format as dense knn_search
-             
-         )pbdoc")
 
-        // Range search
+         )pbdoc")
         .def("range_search",
              &Index::RangeSearch,
              py::arg("point"),
@@ -512,98 +467,87 @@ PYBIND11_MODULE(_pyvsag, m) {
              py::arg("parameters"),
              R"pbdoc(
          Perform range search to find all vectors within a specified distance threshold.
-         
+
          Args:
              point (numpy.ndarray): 1D array of float32 values representing the query vector
              threshold (float): Maximum distance threshold for inclusion in results
              parameters (str): JSON-formatted string containing search-specific parameters
-             
+
          Returns:
              tuple: (distances, ids) where:
                  - distances: numpy.ndarray of float32 containing distances to all qualifying vectors
                  - ids: numpy.ndarray of int64 containing corresponding IDs
-                 
+
          Note:
              - The number of returned results varies based on data distribution and threshold
              - Results are not guaranteed to be sorted by distance
          )pbdoc")
-
-        // Save/Load methods
         .def("save",
              &Index::Save,
              py::arg("filename"),
              R"pbdoc(
          Save the built index to a binary file.
-         
+
          Args:
              filename (str): Path to the output file where the index will be saved
-             
+
          Note:
              The saved file can be loaded later using the load() method.
          )pbdoc")
-
         .def("load",
              &Index::Load,
              py::arg("filename"),
              R"pbdoc(
          Load a previously saved index from a binary file.
-         
+
          Args:
              filename (str): Path to the input file containing the saved index
-             
+
          Note:
              The Index object must be constructed with the same parameters
              that were used when the index was originally built and saved.
          )pbdoc")
-
-        // Statistics methods
         .def("get_num_elements",
              &Index::GetNumElements,
              R"pbdoc(
          Get the number of elements in the index.
-         
+
          Returns:
              int: Number of vectors currently stored in the index.
          )pbdoc")
-
         .def("get_memory_usage",
              &Index::GetMemoryUsage,
              R"pbdoc(
          Get the memory usage of the index in bytes.
-         
+
          Returns:
              int: Memory occupied by the index in bytes.
          )pbdoc")
-
-        // ID operations
         .def("check_id_exist",
              &Index::CheckIdExist,
              py::arg("id"),
              R"pbdoc(
          Check if a specific ID exists in the index.
-         
+
          Args:
              id (int): The ID to check for existence.
-             
+
          Returns:
              bool: True if the ID exists, False otherwise.
          )pbdoc")
-
         .def("get_min_max_id",
              &Index::GetMinAndMaxId,
              R"pbdoc(
          Get the minimum and maximum IDs in the index.
-         
+
          Returns:
              tuple: (min_id, max_id) where:
                  - min_id (int): Minimum ID in the index
                  - max_id (int): Maximum ID in the index
-                 
+
          Note:
              Returns (-1, -1) if the operation fails.
          )pbdoc")
-
-        // Dynamic operations
         .def("add",
              &Index::Add,
              py::arg("vectors"),
@@ -612,42 +556,39 @@ PYBIND11_MODULE(_pyvsag, m) {
              py::arg("dim"),
              R"pbdoc(
          Add new vectors to the index dynamically.
-         
+
          Args:
              vectors (numpy.ndarray): 1D array of float32 values with total size num_elements * dim
              ids (numpy.ndarray): 1D array of int64 values with shape (num_elements,)
              num_elements (int): Number of vectors to add
              dim (int): Dimensionality of each vector
-             
+
          Raises:
              RuntimeError: If the add operation fails.
          )pbdoc")
-
         .def("remove",
              &Index::Remove,
              py::arg("ids"),
              R"pbdoc(
          Remove vectors from the index by their IDs.
-         
+
          Args:
              ids (numpy.ndarray): 1D array of int64 IDs to remove
-             
+
          Returns:
              int: Number of vectors successfully removed from the index.
          )pbdoc")
-
-        // Distance calculation
         .def("cal_distance_by_id",
              &Index::CalDistanceById,
              py::arg("query"),
              py::arg("ids"),
              R"pbdoc(
          Calculate distances between a query vector and vectors specified by IDs.
-         
+
          Args:
              query (numpy.ndarray): 1D array of float32 values representing the query vector
              ids (numpy.ndarray): 1D array of int64 IDs to calculate distances for
-             
+
          Returns:
              numpy.ndarray: Array of float32 distances corresponding to each ID.
          )pbdoc");

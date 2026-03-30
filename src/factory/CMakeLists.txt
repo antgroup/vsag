@@ -17,17 +17,19 @@
 set (FACTORY_SRC
         engine.cpp
         factory.cpp
+        index_creators.cpp
+        index_registry.cpp
         resource.cpp
         resource_owner_wrapper.h
 )
 
 add_library (factory OBJECT ${FACTORY_SRC})
-target_link_libraries (factory PUBLIC fmt::fmt coverage_config)
-maybe_add_dependencies (factory spdlog diskann)
+target_link_libraries (factory PRIVATE coverage_config vsag_src_common)
+maybe_add_dependencies (factory diskann)
 
 if (ENABLE_TESTS)
     file (GLOB_RECURSE FACTORY_TESTS "*_test.cpp")
     add_library (factory_test STATIC ${FACTORY_TESTS})
     target_link_libraries (factory_test PRIVATE Catch2::Catch2 vsag)
-    add_dependencies (factory_test spdlog Catch2)
+    add_dependencies (factory_test Catch2)
 endif ()

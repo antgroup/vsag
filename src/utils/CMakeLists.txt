@@ -27,12 +27,11 @@ set (UTILS_SRC
 )
 
 add_library (utils OBJECT ${UTILS_SRC})
-target_link_libraries (utils PUBLIC coverage_config)
-add_dependencies (utils spdlog fmt::fmt)
+target_link_libraries (utils PRIVATE coverage_config vsag_src_common)
 
 if (ENABLE_TESTS)
     file (GLOB_RECURSE UTILS_TESTS "*_test.cpp")
     add_library (utils_test STATIC ${UTILS_TESTS})
     target_link_libraries (utils_test PRIVATE Catch2::Catch2 vsag)
-    add_dependencies (utils_test spdlog Catch2)
+    add_dependencies (utils_test Catch2)
 endif ()

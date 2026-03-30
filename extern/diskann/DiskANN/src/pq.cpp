@@ -1,9 +1,7 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT license.
 
-// #include "mkl.h"
-#include <cblas.h>
-#include <lapacke.h>
+#include "blas_compat.h"
 
 #include "pq.h"
 #include "partition.h"
@@ -977,9 +975,9 @@ int generate_opq_pivots(const float *passed_train_data, uint64_t num_train, uint
     for (uint32_t rnd = 0; rnd < MAX_OPQ_ITERS; rnd++)
     {
         // rotate the training data using the current rotation matrix
-        cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, (blasint)num_train, (blasint)dim, (blasint)dim, 1.0f,
-                    train_data.get(), (blasint)dim, rotmat_tr.get(), (blasint)dim, 0.0f, rotated_train_data.get(),
-                    (blasint)dim);
+        cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, (vsag_blasint)num_train, (vsag_blasint)dim, (vsag_blasint)dim, 1.0f,
+                    train_data.get(), (vsag_blasint)dim, rotmat_tr.get(), (vsag_blasint)dim, 0.0f, rotated_train_data.get(),
+                    (vsag_blasint)dim);
 
         // compute the PQ pivots on the rotated space
         for (uint64_t i = 0; i < num_pq_chunks; i++)
@@ -1035,15 +1033,15 @@ int generate_opq_pivots(const float *passed_train_data, uint64_t num_train, uint
 
         // compute the correlation matrix between the original data and the
         // quantized data to compute the new rotation
-        cblas_sgemm(CblasRowMajor, CblasTrans, CblasNoTrans, (blasint)dim, (blasint)dim, (blasint)num_train, 1.0f,
-                    train_data.get(), (blasint)dim, rotated_and_quantized_train_data.get(), (blasint)dim, 0.0f,
-                    correlation_matrix.get(), (blasint)dim);
+        cblas_sgemm(CblasRowMajor, CblasTrans, CblasNoTrans, (vsag_blasint)dim, (vsag_blasint)dim, (vsag_blasint)num_train, 1.0f,
+                    train_data.get(), (vsag_blasint)dim, rotated_and_quantized_train_data.get(), (vsag_blasint)dim, 0.0f,
+                    correlation_matrix.get(), (vsag_blasint)dim);
 
         // compute the SVD of the correlation matrix to help determine the new
         // rotation matrix
-        uint32_t errcode = (uint32_t)LAPACKE_sgesdd(LAPACK_ROW_MAJOR, 'A', (blasint)dim, (blasint)dim,
-                                                    correlation_matrix.get(), (blasint)dim, singular_values.get(),
-                                                    Umat.get(), (blasint)dim, Vmat_T.get(), (blasint)dim);
+        uint32_t errcode = (uint32_t)LAPACKE_sgesdd(LAPACK_ROW_MAJOR, 'A', (vsag_blasint)dim, (vsag_blasint)dim,
+                                                    correlation_matrix.get(), (vsag_blasint)dim, singular_values.get(),
+                                                    Umat.get(), (vsag_blasint)dim, Vmat_T.get(), (vsag_blasint)dim);
 
         if (errcode > 0)
         {
@@ -1053,8 +1051,8 @@ int generate_opq_pivots(const float *passed_train_data, uint64_t num_train, uint
 
         // compute the new rotation matrix from the singular vectors as R^T = U
         // V^T
-        cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, (blasint)dim, (blasint)dim, (blasint)dim, 1.0f,
-                    Umat.get(), (blasint)dim, Vmat_T.get(), (blasint)dim, 0.0f, rotmat_tr.get(), (blasint)dim);
+        cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, (vsag_blasint)dim, (vsag_blasint)dim, (vsag_blasint)dim, 1.0f,
+                    Umat.get(), (vsag_blasint)dim, Vmat_T.get(), (vsag_blasint)dim, 0.0f, rotmat_tr.get(), (vsag_blasint)dim);
     }
 
     std::vector<uint64_t> cumul_bytes(4, 0);
@@ -1179,9 +1177,9 @@ int generate_opq_pivots(const float *passed_train_data, uint64_t num_train, uint
     for (uint32_t rnd = 0; rnd < MAX_OPQ_ITERS; rnd++)
     {
         // rotate the training data using the current rotation matrix
-        cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, (blasint)num_train, (blasint)dim, (blasint)dim, 1.0f,
-                    train_data.get(), (blasint)dim, rotmat_tr.get(), (blasint)dim, 0.0f, rotated_train_data.get(),
-                    (blasint)dim);
+        cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, (vsag_blasint)num_train, (vsag_blasint)dim, (vsag_blasint)dim, 1.0f,
+                    train_data.get(), (vsag_blasint)dim, rotmat_tr.get(), (vsag_blasint)dim, 0.0f, rotated_train_data.get(),
+                    (vsag_blasint)dim);
 
         // compute the PQ pivots on the rotated space
         for (uint64_t i = 0; i < num_pq_chunks; i++)
@@ -1234,16 +1232,16 @@ int generate_opq_pivots(const float *passed_train_data, uint64_t num_train, uint
 
         // compute the correlation matrix between the original data and the
         // quantized data to compute the new rotation
-        cblas_sgemm(CblasRowMajor, CblasTrans, CblasNoTrans, (blasint)dim, (blasint)dim, (blasint)num_train, 1.0f,
-                    train_data.get(), (blasint)dim, rotated_and_quantized_train_data.get(), (blasint)dim, 0.0f,
-                    correlation_matrix.get(), (blasint)dim);
+        cblas_sgemm(CblasRowMajor, CblasTrans, CblasNoTrans, (vsag_blasint)dim, (vsag_blasint)dim, (vsag_blasint)num_train, 1.0f,
+                    train_data.get(), (vsag_blasint)dim, rotated_and_quantized_train_data.get(), (vsag_blasint)dim, 0.0f,
+                    correlation_matrix.get(), (vsag_blasint)dim);
 
         // compute the SVD of the correlation matrix to help determine the new
         // rotation matrix
         // FIXME: SVD decomposition is very time-consuming, and we will switch to the implementation by FAISS in the future.
-        uint32_t errcode = (uint32_t)LAPACKE_sgesdd(LAPACK_ROW_MAJOR, 'A', (blasint)dim, (blasint)dim,
-                                                    correlation_matrix.get(), (blasint)dim, singular_values.get(),
-                                                    Umat.get(), (blasint)dim, Vmat_T.get(), (blasint)dim);
+        uint32_t errcode = (uint32_t)LAPACKE_sgesdd(LAPACK_ROW_MAJOR, 'A', (vsag_blasint)dim, (vsag_blasint)dim,
+                                                    correlation_matrix.get(), (vsag_blasint)dim, singular_values.get(),
+                                                    Umat.get(), (vsag_blasint)dim, Vmat_T.get(), (vsag_blasint)dim);
 
         if (errcode > 0)
         {
@@ -1253,8 +1251,8 @@ int generate_opq_pivots(const float *passed_train_data, uint64_t num_train, uint
 
         // compute the new rotation matrix from the singular vectors as R^T = U
         // V^T
-        cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, (blasint)dim, (blasint)dim, (blasint)dim, 1.0f,
-                    Umat.get(), (blasint)dim, Vmat_T.get(), (blasint)dim, 0.0f, rotmat_tr.get(), (blasint)dim);
+        cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, (vsag_blasint)dim, (vsag_blasint)dim, (vsag_blasint)dim, 1.0f,
+                    Umat.get(), (vsag_blasint)dim, Vmat_T.get(), (vsag_blasint)dim, 0.0f, rotmat_tr.get(), (vsag_blasint)dim);
     }
 
     std::vector<uint64_t> cumul_bytes(5, 0);
@@ -1426,9 +1424,9 @@ int generate_pq_data_from_pivots(const std::string &data_file, uint32_t num_cent
         {
             // rotate the current block with the trained rotation matrix before
             // PQ
-            cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, (blasint)cur_blk_size, (blasint)dim, (blasint)dim,
-                        1.0f, block_data_float.get(), (blasint)dim, rotmat_tr.get(), (blasint)dim, 0.0f,
-                        block_data_tmp.get(), (blasint)dim);
+            cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, (vsag_blasint)cur_blk_size, (vsag_blasint)dim, (vsag_blasint)dim,
+                        1.0f, block_data_float.get(), (vsag_blasint)dim, rotmat_tr.get(), (vsag_blasint)dim, 0.0f,
+                        block_data_tmp.get(), (vsag_blasint)dim);
             std::memcpy(block_data_float.get(), block_data_tmp.get(), cur_blk_size * dim * sizeof(float));
         }
 
@@ -1632,9 +1630,9 @@ int generate_pq_data_from_pivots(std::stringstream &base_reader, uint32_t num_ce
         {
             // rotate the current block with the trained rotation matrix before
             // PQ
-            cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, (blasint)cur_blk_size, (blasint)dim, (blasint)dim,
-                        1.0f, block_data_float.get(), (blasint)dim, rotmat_tr.get(), (blasint)dim, 0.0f,
-                        block_data_tmp.get(), (blasint)dim);
+            cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, (vsag_blasint)cur_blk_size, (vsag_blasint)dim, (vsag_blasint)dim,
+                        1.0f, block_data_float.get(), (vsag_blasint)dim, rotmat_tr.get(), (vsag_blasint)dim, 0.0f,
+                        block_data_tmp.get(), (vsag_blasint)dim);
             std::memcpy(block_data_float.get(), block_data_tmp.get(), cur_blk_size * dim * sizeof(float));
         }
 
@@ -1700,7 +1698,7 @@ int generate_pq_data_from_pivots(std::stringstream &base_reader, uint32_t num_ce
 template <typename T>
 int generate_pq_data_from_pivots(const T* data, uint64_t num_points, uint64_t dim, const std::vector<uint64_t>& skip_locs, uint32_t num_centers, uint32_t num_pq_chunks,
                                  std::stringstream &pq_pivots_stream, std::stringstream &compressed_file_writer,
-                                 bool use_opq, std::shared_ptr<float[]> rotmat_tr, bool use_bsa)
+                                 bool use_opq, std::shared_ptr<float[]> rotmat_tr, bool use_bsa, bool should_normalize)
 {
     uint64_t read_blk_size = 64 * 1024 * 1024;
     std::unique_ptr<float[]> full_pivot_data;
@@ -1757,15 +1755,18 @@ int generate_pq_data_from_pivots(const T* data, uint64_t num_points, uint64_t di
                 block_data_tmp[p * dim + d] -= centroid[d];
                 block_data_float[p * dim + d] = block_data_tmp[p * dim + d];
             }
+            if (should_normalize) {
+                normalize(block_data_float.get() + p * dim, dim);
+            }
         }
 
         if (use_opq)
         {
             // rotate the current block with the trained rotation matrix before
             // PQ
-            cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, (blasint)cur_blk_size, (blasint)dim, (blasint)dim,
-                        1.0f, block_data_float.get(), (blasint)dim, rotmat_tr.get(), (blasint)dim, 0.0f,
-                        block_data_tmp.get(), (blasint)dim);
+            cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, (vsag_blasint)cur_blk_size, (vsag_blasint)dim, (vsag_blasint)dim,
+                        1.0f, block_data_float.get(), (vsag_blasint)dim, rotmat_tr.get(), (vsag_blasint)dim, 0.0f,
+                        block_data_tmp.get(), (vsag_blasint)dim);
             std::memcpy(block_data_float.get(), block_data_tmp.get(), cur_blk_size * dim * sizeof(float));
         }
 
@@ -1941,12 +1942,15 @@ void generate_disk_quantized_data(const T* train_data, uint64_t train_size, uint
                            disk_pq_pivots, false);
     }
 
+    bool should_normalize = (compare_metric == diskann::Metric::COSINE);
     if (compare_metric == diskann::Metric::INNER_PRODUCT)
-        generate_pq_data_from_pivots<float>((const float*)train_data, train_size, train_dim, skip_locs, 256, (uint32_t)disk_pq_dims, disk_pq_pivots,
-                                            disk_pq_compressed_vectors, use_opq, rotate, use_bsa);
+        generate_pq_data_from_pivots<float>((const float *)train_data, train_size, train_dim, skip_locs, 256,
+                                            (uint32_t)disk_pq_dims, disk_pq_pivots, disk_pq_compressed_vectors, use_opq,
+                                            rotate, use_bsa, should_normalize);
     else
-        generate_pq_data_from_pivots<T>(train_data, train_size, train_dim, skip_locs, 256, (uint32_t)disk_pq_dims, disk_pq_pivots,
-                                        disk_pq_compressed_vectors, use_opq, rotate, use_bsa);
+        generate_pq_data_from_pivots<T>(train_data, train_size, train_dim, skip_locs, 256, (uint32_t)disk_pq_dims,
+                                        disk_pq_pivots, disk_pq_compressed_vectors, use_opq, rotate, use_bsa,
+                                        should_normalize);
 }
 
 
@@ -2020,17 +2024,21 @@ template DISKANN_DLLEXPORT int generate_pq_data_from_pivots<float>(std::stringst
                                                                        std::stringstream &pq_pivots_stream, std::stringstream &compressed_file_writer,
                                                                        bool use_opq);
 
-template DISKANN_DLLEXPORT int generate_pq_data_from_pivots<float>(const float* data, uint64_t num_points, uint64_t dim, const std::vector<uint64_t>& skip_locs, uint32_t num_centers, uint32_t num_pq_chunks,
-                                                                   std::stringstream &pq_pivots_stream, std::stringstream &compressed_file_writer,
-                                                                   bool use_opq, std::shared_ptr<float[]> rotmat_tr, bool use_bsa = false);
+template DISKANN_DLLEXPORT int generate_pq_data_from_pivots<float>(
+    const float *data, uint64_t num_points, uint64_t dim, const std::vector<uint64_t> &skip_locs, uint32_t num_centers,
+    uint32_t num_pq_chunks, std::stringstream &pq_pivots_stream, std::stringstream &compressed_file_writer,
+    bool use_opq, std::shared_ptr<float[]> rotmat_tr, bool use_bsa, bool should_normalize);
 
-template DISKANN_DLLEXPORT int generate_pq_data_from_pivots<uint8_t>(const uint8_t* data, uint64_t num_points, uint64_t dim, const std::vector<uint64_t>& skip_locs, uint32_t num_centers, uint32_t num_pq_chunks,
-                                                            std::stringstream &pq_pivots_stream, std::stringstream &compressed_file_writer,
-                                                            bool use_opq, std::shared_ptr<float[]> rotmat_tr, bool use_bsa = false);
+template DISKANN_DLLEXPORT int generate_pq_data_from_pivots<uint8_t>(
+    const uint8_t *data, uint64_t num_points, uint64_t dim, const std::vector<uint64_t> &skip_locs,
+    uint32_t num_centers, uint32_t num_pq_chunks, std::stringstream &pq_pivots_stream,
+    std::stringstream &compressed_file_writer, bool use_opq, std::shared_ptr<float[]> rotmat_tr, bool use_bsa,
+    bool should_normalize);
 
-template DISKANN_DLLEXPORT int generate_pq_data_from_pivots<int8_t>(const int8_t* data, uint64_t num_points, uint64_t dim, const std::vector<uint64_t>& skip_locs, uint32_t num_centers, uint32_t num_pq_chunks,
-                                                            std::stringstream &pq_pivots_stream, std::stringstream &compressed_file_writer,
-                                                            bool use_opq, std::shared_ptr<float[]> rotmat_tr, bool use_bsa = false);
+template DISKANN_DLLEXPORT int generate_pq_data_from_pivots<int8_t>(
+    const int8_t *data, uint64_t num_points, uint64_t dim, const std::vector<uint64_t> &skip_locs, uint32_t num_centers,
+    uint32_t num_pq_chunks, std::stringstream &pq_pivots_stream, std::stringstream &compressed_file_writer,
+    bool use_opq, std::shared_ptr<float[]> rotmat_tr, bool use_bsa, bool should_normalize);
 
 template DISKANN_DLLEXPORT void generate_disk_quantized_data<int8_t>(const std::string &data_file_to_use,
                                                                      const std::string &disk_pq_pivots_path,

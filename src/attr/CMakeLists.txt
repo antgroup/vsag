@@ -27,13 +27,18 @@ list (APPEND ATTR_SRCS
 )
 
 add_library (attr OBJECT ${ATTR_SRCS})
-target_link_libraries (attr PUBLIC coverage_config)
-
-add_dependencies (attr spdlog fmt::fmt antlr4)
+target_link_libraries (attr PRIVATE coverage_config vsag_src_common)
+if (TARGET vsag_antlr4_runtime_headers)
+    target_link_libraries (attr PRIVATE vsag_antlr4_runtime_headers)
+endif ()
+if (TARGET vsag_antlr4_autogen_headers)
+    target_link_libraries (attr PRIVATE vsag_antlr4_autogen_headers)
+endif ()
+maybe_add_dependencies (attr antlr4)
 
 if (ENABLE_TESTS)
     file (GLOB_RECURSE ATTR_TESTS "*_test.cpp")
     add_library (attr_test STATIC ${ATTR_TESTS})
     target_link_libraries (attr_test PRIVATE Catch2::Catch2 vsag)
-    add_dependencies (attr_test spdlog Catch2 antlr4)
+    add_dependencies (attr_test Catch2 antlr4)
 endif ()

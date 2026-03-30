@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,25 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <Python.h>
+#pragma once
 
-static PyObject* hello(PyObject* self, PyObject* args) {
-    return Py_BuildValue("s", "Hello, world!");
-}
+namespace vsag {
 
-static PyMethodDef ExampleMethods[] = {
-    {"hello", hello, METH_VARARGS, "Greet the world."},
-    {NULL, NULL, 0, NULL}
-};
+void
+register_all_index_creators();
 
-static struct PyModuleDef examplemodule = {
-    PyModuleDef_HEAD_INIT,
-    "example",
-    NULL,
-    -1,
-    ExampleMethods
-};
-
-PyMODINIT_FUNC PyInit_example(void) {
-    return PyModule_Create(&examplemodule);
-}
+}  // namespace vsag

@@ -16,7 +16,7 @@
 #pragma once
 
 #include <string>
-#include <tabulate/tabulate.hpp>
+#include <tabulate/table.hpp>
 
 #include "./formatter.h"
 

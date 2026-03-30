@@ -41,13 +41,11 @@ set (QUANTIZER_SRC
 )
 
 add_library (quantizer OBJECT ${QUANTIZER_SRC})
-target_link_libraries(quantizer PUBLIC fmt::fmt coverage_config)
-
-maybe_add_dependencies (quantizer spdlog)
+target_link_libraries (quantizer PRIVATE coverage_config vsag_src_common)
 
 if (ENABLE_TESTS)
     file (GLOB_RECURSE QUANTIZER_TESTS "*_test.cpp")
     add_library (quantizer_test STATIC ${QUANTIZER_TESTS})
     target_link_libraries (quantizer_test PRIVATE Catch2::Catch2 vsag)
-    add_dependencies (quantizer_test spdlog Catch2)
+    add_dependencies (quantizer_test Catch2)
 endif ()

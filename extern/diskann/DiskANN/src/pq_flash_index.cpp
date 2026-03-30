@@ -2238,6 +2238,10 @@ void PQFlashIndex<T, LabelT>::cal_distance_by_ids(const float *query, const int6
     {
         aligned_query_T[i] = (float) query[i];
     }
+    
+    if (metric == diskann::Metric::COSINE) {
+        normalize(aligned_query_T.get(), this->data_dim);
+    }
 
     pq_table.preprocess_query(aligned_query_T.get());
     auto pq_dists = std::shared_ptr<float[]>(new float[NUM_CENTROID * this->n_chunks]);

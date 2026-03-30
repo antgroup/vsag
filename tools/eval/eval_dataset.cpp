@@ -15,6 +15,8 @@
 
 #include "eval_dataset.h"
 
+#include "impl/logger/logger.h"
+
 using namespace H5;
 namespace vsag::eval {
 
@@ -121,11 +123,11 @@ EvalDataset::Load(const std::string& filename) {
 
     // get and (should check shape)
     auto train_shape = get_shape(file, "train");
-    spdlog::debug("train.shape: " + to_string(train_shape));
+    logger::debug("train.shape: {}", to_string(train_shape));
     auto test_shape = get_shape(file, "test");
-    spdlog::debug("test.shape: " + to_string(test_shape));
+    logger::debug("test.shape: {}", to_string(test_shape));
     auto neighbors_shape = get_shape(file, "neighbors");
-    spdlog::debug("neighbors.shape: " + to_string(neighbors_shape));
+    logger::debug("neighbors.shape: {}", to_string(neighbors_shape));
     assert(train_shape.second == test_shape.second);
 
     auto obj = std::make_shared<EvalDataset>();

@@ -32,20 +32,16 @@ set (IO_SRC
 
 add_library (io OBJECT ${IO_SRC})
 if (HAVE_LIBAIO)
-    target_compile_definitions (io PUBLIC -DHAVE_LIBAIO=1)
-    target_link_libraries (io PUBLIC fmt::fmt aio coverage_config)
+    target_link_libraries (io PRIVATE aio coverage_config vsag_src_common)
     message (STATUS "io module: linking with libaio")
 else ()
-    target_compile_definitions (io PUBLIC -DHAVE_LIBAIO=0)
-    target_link_libraries (io PUBLIC fmt::fmt coverage_config)
+    target_link_libraries (io PRIVATE coverage_config vsag_src_common)
     message (STATUS "io module: libaio not available, async I/O disabled")
 endif ()
-
-maybe_add_dependencies (io spdlog)
 
 if (ENABLE_TESTS)
     file (GLOB_RECURSE IO_TESTS "*_test.cpp")
     add_library (io_test STATIC ${IO_TESTS})
     target_link_libraries (io_test PRIVATE Catch2::Catch2 vsag)
-    add_dependencies (io_test spdlog Catch2)
+    add_dependencies (io_test Catch2)
 endif ()

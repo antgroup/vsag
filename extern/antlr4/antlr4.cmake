@@ -1,7 +1,8 @@
-set(name antlr4)
-set(source_dir ${CMAKE_CURRENT_BINARY_DIR}/${name}/source)
-set(binary_dir ${source_dir}/runtime/Cpp)
-set(install_dir ${CMAKE_CURRENT_BINARY_DIR}/${name}/install)
+set (name antlr4)
+set (source_dir ${CMAKE_CURRENT_BINARY_DIR}/${name}/source)
+set (binary_dir ${source_dir}/runtime/Cpp)
+set (install_dir ${CMAKE_CURRENT_BINARY_DIR}/${name}/install)
+set (antlr4_runtime_library ${install_dir}/lib/libantlr4-runtime.a)
 
 # FIXME(wxyu): find a better way to set this definition
 if (ENABLE_CXX11_ABI)
@@ -10,20 +11,20 @@ else ()
     set (VSAG_ANTLR4_CXX11_ABI "-D_GLIBCXX_USE_CXX11_ABI=0")
 endif ()
 
-set (FULL_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${VSAG_ANTLR4_CXX11_ABI}")
+set (FULL_CXX_FLAGS "${VSAG_THIRDPARTY_CXX_FLAGS} ${VSAG_ANTLR4_CXX11_ABI}")
 
-set(antlr4_urls
+set (antlr4_urls
     https://github.com/antlr/antlr4/archive/refs/tags/4.13.2.tar.gz
     # this url is maintained by the vsag project, if it's broken, please try
     #  the latest commit or contact the vsag project
     https://vsagcache.oss-rg-china-mainland.aliyuncs.com/antlr4/v4.13.2.tar.gz
 )
-if(DEFINED ENV{VSAG_THIRDPARTY_ANTLR4})
-    message(STATUS "Using local path for antlr4: $ENV{VSAG_THIRDPARTY_ANTLR4}")
-    list(PREPEND antlr4_urls "$ENV{VSAG_THIRDPARTY_ANTLR4}")
-endif()
+if (DEFINED ENV{VSAG_THIRDPARTY_ANTLR4})
+    message (STATUS "Using local path for antlr4: $ENV{VSAG_THIRDPARTY_ANTLR4}")
+    list (PREPEND antlr4_urls "$ENV{VSAG_THIRDPARTY_ANTLR4}")
+endif ()
 
-ExternalProject_Add(
+ExternalProject_Add (
         ${name}
         URL ${antlr4_urls}
         URL_HASH MD5=3b75610fc8a827119258cba09a068be5
@@ -46,25 +47,36 @@ ExternalProject_Add(
         DOWNLOAD_NO_PROGRESS 1
         INACTIVITY_TIMEOUT 5
         TIMEOUT 30
+
+        BUILD_BYPRODUCTS
+        ${antlr4_runtime_library}
 )
 
-include_directories(${install_dir}/include/antlr4-runtime)
-link_directories(${install_dir}/lib)
-if (NOT APPLE)
-    link_directories(${install_dir}/lib64)
-endif()
+add_library (vsag_antlr4_runtime_headers INTERFACE)
+target_include_directories (vsag_antlr4_runtime_headers INTERFACE ${install_dir}/include/antlr4-runtime)
 
-include_directories(extern/antlr4/fc)
-file(GLOB ANTLR4_GEN_SRC "extern/antlr4/fc/*.cpp")
-add_library(antlr4-autogen STATIC ${ANTLR4_GEN_SRC})
-add_dependencies(antlr4-autogen antlr4)
-target_compile_options(antlr4-autogen PRIVATE ${common_cmake_args} ${VSAG_ANTLR4_CXX11_ABI})
-set_property(TARGET antlr4-autogen PROPERTY CXX_STANDARD 17)
-target_link_libraries(antlr4-autogen antlr4-runtime)
+if (NOT TARGET antlr4-runtime)
+    add_library (antlr4-runtime STATIC IMPORTED GLOBAL)
+    set_target_properties (antlr4-runtime PROPERTIES IMPORTED_LOCATION ${antlr4_runtime_library})
+endif ()
+add_dependencies (antlr4-runtime antlr4)
 
-file(COPY extern/antlr4/fc/
-        DESTINATION ${install_dir}/include/antlr4-autogen
-        FILES_MATCHING
-        PATTERN "*.h"
-        PATTERN "*.hpp")
-include_directories(${install_dir}/include)
+add_library (vsag_antlr4_autogen_headers INTERFACE)
+target_include_directories (vsag_antlr4_autogen_headers INTERFACE
+    ${install_dir}/include
+    ${install_dir}/include/antlr4-autogen)
+
+file (GLOB ANTLR4_GEN_SRC "extern/antlr4/fc/*.cpp")
+add_library (antlr4-autogen STATIC ${ANTLR4_GEN_SRC})
+add_dependencies (antlr4-autogen antlr4)
+target_link_libraries (antlr4-autogen PUBLIC vsag_antlr4_runtime_headers vsag_antlr4_autogen_headers)
+target_include_directories (antlr4-autogen PRIVATE extern/antlr4/fc)
+target_compile_options (antlr4-autogen PRIVATE ${VSAG_ANTLR4_CXX11_ABI})
+set_property (TARGET antlr4-autogen PROPERTY CXX_STANDARD 17)
+target_link_libraries (antlr4-autogen PRIVATE antlr4-runtime)
+
+file (COPY extern/antlr4/fc/
+      DESTINATION ${install_dir}/include/antlr4-autogen
+      FILES_MATCHING
+      PATTERN "*.h"
+      PATTERN "*.hpp")
