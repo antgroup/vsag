@@ -42,10 +42,7 @@ namespace vsag {
 
 static DatasetPtr
 make_empty_dataset_with_stats() {
-    SearchStatistics stats;
-    auto dataset_result = DatasetImpl::MakeEmptyDataset();
-    dataset_result->Statistics(stats.Dump());
-    return dataset_result;
+    return DatasetImpl::MakeEmptyDataset();
 }
 
 HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonParam& common_param)
