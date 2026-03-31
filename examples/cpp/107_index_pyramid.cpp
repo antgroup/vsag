@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,152 +14,85 @@
 
 #include <vsag/vsag.h>
 
+#include <chrono>
 #include <iostream>
 
-std::string
-create_random_string(bool is_full) {
-    const std::vector<std::string> level1 = {"a", "b", "c"};
-    const std::vector<std::string> level2 = {"d", "e"};
-    const std::vector<std::string> level3 = {"f", "g", "h"};
-
-    std::random_device rd;
-    std::mt19937 mt(rd());
-    std::uniform_int_distribution<> distr;
-
-    std::vector<std::string> selected_levels;
-
-    if (is_full) {
-        selected_levels.push_back(level1[distr(mt) % level1.size()]);
-        selected_levels.push_back(level2[distr(mt) % level2.size()]);
-        selected_levels.push_back(level3[distr(mt) % level3.size()]);
-    } else {
-        std::uniform_int_distribution<> dist(1, 3);
-        int num_levels = dist(mt);
-
-        if (num_levels >= 1) {
-            selected_levels.emplace_back(level1[distr(mt) % level1.size()]);
-        }
-        if (num_levels >= 2) {
-            selected_levels.emplace_back(level2[distr(mt) % level2.size()]);
-        }
-        if (num_levels == 3) {
-            selected_levels.emplace_back(level3[distr(mt) % level3.size()]);
-        }
-    }
-
-    std::string random_string = selected_levels.empty() ? "" : selected_levels[0];
-    for (uint64_t i = 1; i < selected_levels.size(); ++i) {
-        random_string += "/" + selected_levels[i];
-    }
-
-    return random_string;
-}
-
 int
-main(int argc, char** argv) {
-    /******************* Prepare Base Dataset *****************/
-    int64_t num_vectors = 1000;
-    int64_t dim = 128;
-    auto ids = new int64_t[num_vectors];
-    auto vectors = new float[dim * num_vectors];
+main() {
+    std::cout << "=== Pyramid Duplicate Detection Test ===" << std::endl;
 
-    std::mt19937 rng;
-    rng.seed(47);
-    std::uniform_real_distribution<> distrib_real;
-    for (int64_t i = 0; i < num_vectors; ++i) {
+    // Use smaller dataset first
+    const int64_t NUM = 100;
+    const int64_t DIM = 128;
+
+    auto ids = new int64_t[NUM];
+    auto vectors = new float[DIM * NUM];
+    auto paths = new std::string[NUM];
+
+    std::cout << "Generating " << NUM << " vectors..." << std::endl;
+
+    // Generate base data
+    for (int i = 0; i < NUM; ++i) {
         ids[i] = i;
+        paths[i] = "a/b/c";
+        for (int j = 0; j < DIM; ++j) {
+            vectors[i * DIM + j] = static_cast<float>(rand()) / static_cast<float>(RAND_MAX);
+        }
     }
-    for (int64_t i = 0; i < dim * num_vectors; ++i) {
-        vectors[i] = distrib_real(rng);
+
+    // Create 5 duplicates (ID 10-14 copy ID 0-4)
+    for (int i = 10; i < 15; ++i) {
+        for (int j = 0; j < DIM; ++j) {
+            vectors[i * DIM + j] = vectors[(i - 10) * DIM + j];
+        }
     }
-    // Generate random paths for the vectors
-    std::string* paths = new std::string[num_vectors];
-    for (int i = 0; i < num_vectors; ++i) {
-        paths[i] = create_random_string(true);
-    }
+
+    std::cout << "Duplicates created: ID 10-14 are copies of ID 0-4" << std::endl;
 
     auto base = vsag::Dataset::Make();
-    // Transfer the ownership of the data (ids, vectors) to the base.
-    base->NumElements(num_vectors)->Dim(dim)->Ids(ids)->Paths(paths)->Float32Vectors(vectors);
+    base->NumElements(NUM)->Dim(DIM)->Ids(ids)->Paths(paths)->Float32Vectors(vectors);
 
-    /******************* Create Pyramid Index *****************/
-    // pyramid_build_parameters is the configuration for building a Pyramid index.
-    // The "dtype" specifies the data type, which supports float32 and int8.
-    // The "metric_type" indicates the distance metric type (e.g., cosine, inner product, and L2).
-    // The "dim" represents the dimensionality of the vectors, indicating the number of features for each data point.
-    // The "pyramid" section contains parameters specific to Pyramid:
-    // - "odescent": graph type
-    // - "max_degree": The maximum number of connections for each node in the graph.
-    // - "alpha": The parameter for the graph construction, which influences the pruning process.
-    // - "no_build_levels": The levels that do not need to be built.
-    // - "base_quantization_type": The base quantization codes
-    // - "precise_quantization_type": The precise quantization codes
-    // - "index_min_size": The minimum size required to build the index
-    // - "support_duplicate": support for duplicate data in the index
-    auto pyramid_build_paramesters = R"(
-    {
+    // Simple configuration - NSW mode for duplicate detection
+    auto params = R"({
         "dtype": "float32",
         "metric_type": "l2",
         "dim": 128,
         "index_param": {
-            "base_quantization_type": "sq8",
-            "max_degree": 32,
-            "alpha": 1.2,
-            "graph_iter_turn": 15,
-            "neighbor_sample_rate": 0.2,
-            "no_build_levels": [0, 1],
-            "use_reorder": true,
-            "graph_type": "odescent",
-            "build_thread_count": 16
+            "base_quantization_type": "fp32",
+            "max_degree": 16,
+            "index_min_size": 10,
+            "support_duplicate": true,
+            "graph_type": "nsw",
+            "ef_construction": 50
         }
-    }
-    )";
-    auto index = vsag::Factory::CreateIndex("pyramid", pyramid_build_paramesters).value();
+    })";
 
-    /******************* Build Pyramid Index *****************/
-    if (auto build_result = index->Build(base); build_result.has_value()) {
-        std::cout << "After Build(), Index Pyramid contains: " << index->GetNumElements()
-                  << std::endl;
+    std::cout << "Creating index..." << std::endl;
+    auto start = std::chrono::high_resolution_clock::now();
+
+    auto index = vsag::Factory::CreateIndex("pyramid", params);
+    if (!index.has_value()) {
+        std::cerr << "Failed to create index: " << index.error().message << std::endl;
+        return 1;
+    }
+
+    std::cout << "Building index..." << std::endl;
+    auto build_result = index.value()->Build(base);
+
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::seconds>(end - start);
+
+    if (build_result.has_value()) {
+        std::cout << "Build succeeded in " << duration.count() << " seconds" << std::endl;
+        std::cout << "Elements in index: " << index.value()->GetNumElements() << std::endl;
+        std::cout << "Expected: " << NUM << " total, less if duplicates detected" << std::endl;
     } else {
-        std::cerr << "Failed to build index: " << build_result.error().message << std::endl;
-        exit(-1);
+        std::cerr << "Build failed: " << build_result.error().message << std::endl;
     }
 
-    /******************* KnnSearch For Pyramid Index *****************/
-    auto query_path = new std::string[1];
-    query_path[0] = create_random_string(false);
-    auto query_vector = new float[dim];
-    for (int64_t i = 0; i < dim; ++i) {
-        query_vector[i] = distrib_real(rng);
-    }
-
-    // pyramid_search_parameters is the configuration for searching in an Pyramid index.
-    // The "pyramid" section contains parameters specific to the search operation:
-    // - "ef_search": The size of the dynamic list used for nearest neighbor search, which influences both recall and search speed.
-    auto pyramid_search_parameters = R"(
-    {
-        "pyramid": {
-            "ef_search": 100
-        }
-    }
-    )";
-    int64_t topk = 10;
-    auto query = vsag::Dataset::Make();
-    query->NumElements(1)->Dim(dim)->Float32Vectors(query_vector)->Paths(query_path)->Owner(true);
-    auto knn_result = index->KnnSearch(query, topk, pyramid_search_parameters);
-
-    /******************* Print Search Result *****************/
-    std::cout << "Query path: " << query_path[0] << std::endl;
-    if (knn_result.has_value()) {
-        auto result = knn_result.value();
-        std::cout << "results: " << std::endl;
-        for (int64_t i = 0; i < result->GetDim(); ++i) {
-            std::cout << result->GetIds()[i] << ": " << result->GetDistances()[i]
-                      << " paths:" << paths[result->GetIds()[i]] << std::endl;
-        }
-    } else {
-        std::cerr << "Search Error: " << knn_result.error().message << std::endl;
-    }
+    // Note: ids, vectors, and paths are owned by the Dataset object
+    // and will be automatically freed when the Dataset is destroyed.
+    // Do not manually delete them here to avoid double-free.
 
     return 0;
 }
