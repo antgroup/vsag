@@ -163,6 +163,7 @@ extern const char* const HGRAPH_REMOVE_FLAG_BIT;
 // hgraph params
 extern const char* const HGRAPH_USE_REORDER;
 extern const char* const HGRAPH_USE_ELP_OPTIMIZER;
+extern const char* const HGRAPH_USE_REVERSE_EDGES;
 extern const char* const HGRAPH_IGNORE_REORDER;
 extern const char* const HGRAPH_BUILD_BY_BASE_QUANTIZATION;
 extern const char* const HGRAPH_BASE_QUANTIZATION_TYPE;

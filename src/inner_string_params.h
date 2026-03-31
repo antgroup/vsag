@@ -45,6 +45,7 @@ const char* const ATTR_PARAMS_KEY = "attr_params";
 const char* const HGRAPH_USE_ELP_OPTIMIZER_KEY = "use_elp_optimizer";
 const char* const HGRAPH_IGNORE_REORDER_KEY = "ignore_reorder";
 const char* const HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY = "build_by_base";
+const char* const HGRAPH_USE_REVERSE_EDGES_KEY = "use_reverse_edges";
 const char* const GRAPH_KEY = "graph";
 const char* const ALPHA_KEY = "alpha";
 

@@ -143,6 +143,7 @@ const char* const HGRAPH_SUPPORT_REMOVE = "support_remove";
 const char* const HGRAPH_REMOVE_FLAG_BIT = "remove_flag_bit";
 const char* const HGRAPH_USE_REORDER = USE_REORDER_KEY;
 const char* const HGRAPH_USE_ELP_OPTIMIZER = HGRAPH_USE_ELP_OPTIMIZER_KEY;
+const char* const HGRAPH_USE_REVERSE_EDGES = HGRAPH_USE_REVERSE_EDGES_KEY;
 const char* const HGRAPH_IGNORE_REORDER = "ignore_reorder";
 const char* const HGRAPH_BUILD_BY_BASE_QUANTIZATION = "build_by_base";
 const char* const HGRAPH_BASE_QUANTIZATION_TYPE = "base_quantization_type";

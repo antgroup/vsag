@@ -67,7 +67,8 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
       odescent_param_(hgraph_param->odescent_param),
       graph_type_(hgraph_param->graph_type),
       hierarchical_datacell_param_(hgraph_param->hierarchical_graph_param),
-      use_old_serial_format_(common_param.use_old_serial_format_) {
+      use_old_serial_format_(common_param.use_old_serial_format_),
+      use_reverse_edges_(hgraph_param->use_reverse_edges) {
     this->label_table_->compress_duplicate_data_ = hgraph_param->support_duplicate;
     this->label_table_->support_tombstone_ = hgraph_param->support_tombstone;
     neighbors_mutex_ = std::make_shared<PointsMutex>(0, common_param.allocator_.get());
@@ -98,6 +99,10 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
     }
     check_and_init_raw_vector(hgraph_param->raw_vector_param, common_param);
     resize(bottom_graph_->max_capacity_);
+
+    if (use_reverse_edges_) {
+        reverse_edges_ = std::make_unique<ReverseEdge>(this->allocator_);
+    }
 }
 void
 HGraph::Train(const DatasetPtr& base) {
@@ -146,6 +151,12 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             HGRAPH_USE_ELP_OPTIMIZER,
             {
                 HGRAPH_USE_ELP_OPTIMIZER_KEY,
+            },
+        },
+        {
+            HGRAPH_USE_REVERSE_EDGES,
+            {
+                HGRAPH_USE_REVERSE_EDGES_KEY,
             },
         },
         {
@@ -1457,6 +1468,10 @@ HGraph::Deserialize(StreamReader& reader) {
     }
     this->cal_memory_usage();
 
+    if (use_reverse_edges_ && reverse_edges_) {
+        this->rebuild_reverse_edges();
+    }
+
     // post serialize procedure
     if (use_elp_optimizer_) {
         elp_optimize();
@@ -1619,7 +1634,8 @@ HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
                                      flatten_codes,
                                      neighbors_mutex_,
                                      allocator_,
-                                     alpha_);
+                                     alpha_,
+                                     reverse_edges_.get());
     } else {
         LockGuard cur_lock(neighbors_mutex_, inner_id);
         bottom_graph_->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
@@ -1649,7 +1665,8 @@ HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
                                          flatten_codes,
                                          neighbors_mutex_,
                                          allocator_,
-                                         alpha_);
+                                         alpha_,
+                                         nullptr);
         } else {
             LockGuard cur_lock(neighbors_mutex_, inner_id);
             route_graphs_[j]->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
@@ -2445,8 +2462,28 @@ HGraph::cal_memory_usage() {
         memory += raw_vector_->GetMemoryUsage();
     }
 
+    if (reverse_edges_) {
+        memory += reverse_edges_->GetMemoryUsage();
+    }
+
     std::unique_lock lock(this->memory_usage_mutex_);
     this->current_memory_usage_.store(static_cast<int64_t>(memory));
+}
+
+void
+HGraph::rebuild_reverse_edges() {
+    if (!reverse_edges_) {
+        return;
+    }
+    reverse_edges_->Clear();
+    auto total_count = this->total_count_.load();
+    for (InnerIdType id = 0; id < total_count; ++id) {
+        Vector<InnerIdType> neighbors(allocator_);
+        this->bottom_graph_->GetNeighbors(id, neighbors);
+        for (const auto& neighbor : neighbors) {
+            reverse_edges_->AddReverseEdge(id, neighbor);
+        }
+    }
 }
 
 }  // namespace vsag
