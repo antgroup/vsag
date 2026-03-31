@@ -35,6 +35,7 @@
 #include "index_common_param.h"
 #include "index_feature_list.h"
 #include "inner_index_interface.h"
+#include "reverse_edge.h"
 #include "typing.h"
 #include "utils/lock_strategy.h"
 #include "utils/util_functions.h"
@@ -354,6 +355,9 @@ private:
     void
     cal_memory_usage();
 
+    void
+    rebuild_reverse_edges();
+
 private:
     FlattenInterfacePtr basic_flatten_codes_{nullptr};
     FlattenInterfacePtr high_precise_codes_{nullptr};
@@ -361,6 +365,9 @@ private:
     Vector<GraphInterfacePtr> route_graphs_;
     GraphInterfacePtr bottom_graph_{nullptr};
     SparseGraphDatacellParamPtr hierarchical_datacell_param_{nullptr};
+
+    std::unique_ptr<ReverseEdge> reverse_edges_{nullptr};
+    bool use_reverse_edges_{false};
 
     bool use_elp_optimizer_{false};
     bool ignore_reorder_{false};
