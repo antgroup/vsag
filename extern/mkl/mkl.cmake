@@ -105,7 +105,15 @@ else ()
     set (BLAS_LIBRARIES
         "${MKL_PATH}/libmkl_rt.so"
     )
-    set (MKL_INSTALL_LIBS ${BLAS_LIBRARIES})
+    
+    # Add GNU OpenMP for compatibility with diskann and other components
+    if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        list (APPEND BLAS_LIBRARIES omp)
+    else ()
+        list (APPEND BLAS_LIBRARIES gomp)
+    endif ()
+    
+    set (MKL_INSTALL_LIBS "${MKL_PATH}/libmkl_rt.so")
 
     foreach (mkllib ${MKL_INSTALL_LIBS})
         if (EXISTS ${mkllib})
