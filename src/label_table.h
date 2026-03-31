@@ -64,17 +64,27 @@ public:
 
     inline InnerIdType
     GetIdByLabel(LabelType label) const {
+        auto [success, inner_id] = TryGetIdByLabel(label);
+        if (not success) {
+            throw std::runtime_error(fmt::format("label {} is not exists", label));
+        }
+        return inner_id;
+    }
+
+    inline std::pair<bool, InnerIdType>
+    TryGetIdByLabel(LabelType label) const noexcept {
         if (use_reverse_map_) {
-            if (this->label_remap_.count(label) == 0) {
-                throw std::runtime_error(fmt::format("label {} is not exists", label));
+            auto iter = this->label_remap_.find(label);
+            if (iter == this->label_remap_.end()) {
+                return {false, 0};
             }
-            return this->label_remap_.at(label);
+            return {true, iter->second};
         }
         auto result = std::find(label_table_.begin(), label_table_.end(), label);
         if (result == label_table_.end()) {
-            throw std::runtime_error(fmt::format("label {} is not exists", label));
+            return {false, 0};
         }
-        return result - label_table_.begin();
+        return {true, static_cast<InnerIdType>(result - label_table_.begin())};
     }
 
     inline bool

@@ -952,7 +952,10 @@ HGraph::CalcDistanceById(const float* query, int64_t id) const {
     auto computer = flat->FactoryComputer(query);
     {
         std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
-        auto new_id = this->label_table_->GetIdByLabel(id);
+        auto [success, new_id] = this->label_table_->TryGetIdByLabel(id);
+        if (not success) {
+            throw std::runtime_error(fmt::format("label {} is not exists", id));
+        }
         flat->Query(&result, computer, &new_id, 1);
         return result;
     }
@@ -974,9 +977,10 @@ HGraph::CalDistanceById(const float* query, const int64_t* ids, int64_t count) c
     {
         std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
         for (int64_t i = 0; i < count; ++i) {
-            try {
-                inner_ids[i] = this->label_table_->GetIdByLabel(ids[i]);
-            } catch (std::runtime_error& e) {
+            auto [success, inner_id] = this->label_table_->TryGetIdByLabel(ids[i]);
+            if (success) {
+                inner_ids[i] = inner_id;
+            } else {
                 logger::debug(fmt::format("failed to find id: {}", ids[i]));
                 invalid_id_loc.push_back(i);
             }

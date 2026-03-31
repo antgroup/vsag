@@ -181,7 +181,10 @@ float
 BruteForce::CalcDistanceById(const float* vector, int64_t id) const {
     auto computer = this->inner_codes_->FactoryComputer(vector);
     float result = 0.0F;
-    InnerIdType inner_id = this->label_table_->GetIdByLabel(id);
+    auto [success, inner_id] = this->label_table_->TryGetIdByLabel(id);
+    if (not success) {
+        throw std::runtime_error(fmt::format("label {} is not exists", id));
+    }
     this->inner_codes_->Query(&result, computer, &inner_id, 1);
     return result;
 }
