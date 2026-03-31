@@ -104,7 +104,6 @@ else ()
 
     set (BLAS_LIBRARIES
         "${MKL_PATH}/libmkl_rt.so"
-        "${OMP_PATH}/libiomp5.so"
     )
     set (MKL_INSTALL_LIBS ${BLAS_LIBRARIES})
 
