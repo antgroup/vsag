@@ -19,13 +19,31 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
+#include <cerrno>
 #include <filesystem>
+#include <system_error>
 #include <utility>
 
 #include "index_common_param.h"
 #include "io_syscall.h"
 
 namespace vsag {
+
+namespace {
+
+void
+throw_mremap_error(uint64_t old_size, uint64_t new_size) {
+    const int saved_errno = errno;
+    throw VsagException(
+        ErrorType::INTERNAL_ERROR,
+        fmt::format("mremap(old_size={}, new_size={}) failed (errno={}): {}",
+                    old_size,
+                    new_size,
+                    saved_errno,
+                    std::error_code(saved_errno, std::system_category()).message()));
+}
+
+}  // namespace
 
 MMapIO::MMapIO(std::string filename, Allocator* allocator)
     : BasicIO<MMapIO>(allocator), filepath_(std::move(filename)) {
@@ -37,21 +55,33 @@ MMapIO::MMapIO(std::string filename, Allocator* allocator)
 
     this->fd_ = open(filepath_.c_str(), O_CREAT | O_RDWR, 0644);
     if (this->fd_ < 0) {
-        throw VsagException(ErrorType::INTERNAL_ERROR,
-                            fmt::format("open file {} error {}", this->filepath_, strerror(errno)));
+        auto saved_errno = errno;
+        throw VsagException(
+            ErrorType::INTERNAL_ERROR,
+            fmt::format("open file {} failed (errno={}): {}",
+                        this->filepath_,
+                        saved_errno,
+                        std::error_code(saved_errno, std::system_category()).message()));
     }
     auto mmap_size = this->size_;
     if (this->size_ == 0) {
         mmap_size = DEFAULT_INIT_MMAP_SIZE;
         auto ret = IOSyscall::FTruncate(this->fd_, mmap_size);
         if (ret == -1) {
+            close(this->fd_);
             throw VsagException(ErrorType::INTERNAL_ERROR, "ftruncate failed");
         }
     }
     void* addr = mmap(nullptr, mmap_size, PROT_READ | PROT_WRITE, MAP_SHARED, this->fd_, 0);
     if (addr == MAP_FAILED) {
-        throw VsagException(ErrorType::INTERNAL_ERROR,
-                            fmt::format("mmap failed: {}", strerror(errno)));
+        auto saved_errno = errno;
+        close(this->fd_);
+        throw VsagException(
+            ErrorType::INTERNAL_ERROR,
+            fmt::format("mmap(size={}) failed (errno={}): {}",
+                        mmap_size,
+                        saved_errno,
+                        std::error_code(saved_errno, std::system_category()).message()));
     }
     this->start_ = static_cast<uint8_t*>(addr);
 }
@@ -92,8 +122,11 @@ MMapIO::WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset) {
         }
         this->start_ = static_cast<uint8_t*>(addr);
 #else
-        this->start_ =
-            static_cast<uint8_t*>(mremap(this->start_, old_size, new_size, MREMAP_MAYMOVE));
+        void* new_addr = mremap(this->start_, old_size, new_size, MREMAP_MAYMOVE);
+        if (new_addr == MAP_FAILED) {
+            throw_mremap_error(old_size, new_size);
+        }
+        this->start_ = static_cast<uint8_t*>(new_addr);
 #endif
     }
     this->size_ = std::max(this->size_, new_size);
@@ -121,8 +154,11 @@ MMapIO::ResizeImpl(uint64_t size) {
         }
         this->start_ = static_cast<uint8_t*>(addr);
 #else
-        this->start_ =
-            static_cast<uint8_t*>(mremap(this->start_, old_size, new_size, MREMAP_MAYMOVE));
+        void* new_addr = mremap(this->start_, old_size, new_size, MREMAP_MAYMOVE);
+        if (new_addr == MAP_FAILED) {
+            throw_mremap_error(old_size, new_size);
+        }
+        this->start_ = static_cast<uint8_t*>(new_addr);
 #endif
     } else if (new_size < old_size) {
 #ifdef __APPLE__
@@ -133,8 +169,11 @@ MMapIO::ResizeImpl(uint64_t size) {
         }
         this->start_ = static_cast<uint8_t*>(addr);
 #else
-        this->start_ =
-            static_cast<uint8_t*>(mremap(this->start_, old_size, new_size, MREMAP_MAYMOVE));
+        void* new_addr = mremap(this->start_, old_size, new_size, MREMAP_MAYMOVE);
+        if (new_addr == MAP_FAILED) {
+            throw_mremap_error(old_size, new_size);
+        }
+        this->start_ = static_cast<uint8_t*>(new_addr);
 #endif
         auto ret = IOSyscall::FTruncate(this->fd_, new_size);
         if (ret == -1) {
