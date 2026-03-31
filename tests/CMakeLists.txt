@@ -44,15 +44,15 @@ if (APPLE)
         "-Wl,-force_load,$<TARGET_FILE:impl_test>"
         )
 else()
-        target_link_libraries (unittests
-                        PRIVATE
-                        Catch2::Catch2 
-                        "-Wl,--whole-archive"
-                        simd_test vsag_test algorithm_test factory_test attr_test
-                        datacell_test quantizer_test storage_test io_test utils_test impl_test
-                        "-Wl,--no-whole-archive"
-                        vsag
-        )
+	target_link_libraries (unittests
+					PRIVATE
+					Catch2::Catch2
+					"-Wl,--whole-archive"
+					simd_test vsag_test algorithm_test factory_test attr_test
+					datacell_test quantizer_test storage_test io_test utils_test impl_test
+					"-Wl,--no-whole-archive"
+					vsag roaring
+	)
 endif()
 
 add_dependencies (unittests Catch2 vsag)
