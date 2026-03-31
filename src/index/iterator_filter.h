@@ -64,9 +64,9 @@ public:
     GetDiscardElementNum();
 
 private:
-    constexpr static uint32_t BITS_PER_BYTE = 8;
-    constexpr static uint32_t BYTE_POS_MASK = 3;  // 2^3
-    constexpr static uint32_t BIT_POS_MASK = BITS_PER_BYTE - 1;
+    static constexpr uint32_t BITS_PER_BYTE = 8;
+    static constexpr uint32_t BYTE_POS_MASK = 3;  // 2^3
+    static constexpr uint32_t BIT_POS_MASK = BITS_PER_BYTE - 1;
 
     static inline uint32_t
     byte_pos(uint32_t pos) {

@@ -52,7 +52,7 @@ public:
 
     virtual ~InnerIndexInterface();
 
-    constexpr static char fast_string_delimiter = '|';
+    static constexpr char fast_string_delimiter = '|';
 
     static InnerIndexPtr
     FastCreateIndex(const std::string& index_fast_str, const IndexCommonParam& common_param);
