@@ -83,7 +83,7 @@ test_tsan: tsan          ## Run unit tests with ThreadSanitizer option.
 
 .PHONY: clean
 clean:                   ## Clear build/ directory.
-	rm -rf ${DEBUG_BUILD_DIR}/*
+	rm -rf ${DEBUG_BUILD_DIR} && mkdir -p ${DEBUG_BUILD_DIR}
 
 ##
 ## ================ integration ================
@@ -168,7 +168,7 @@ pyvsag-all:              ## Build wheels for all supported versions. Usage: make
 
 .PHONY: clean-release
 clean-release:           ## Clear build-release/ directory.
-	rm -rf ${RELEASE_BUILD_DIR}/*
+	rm -rf ${RELEASE_BUILD_DIR} && mkdir -p ${RELEASE_BUILD_DIR}
 
 .PHONY: install
 install:                 ## Build and install the release version of vsag.
