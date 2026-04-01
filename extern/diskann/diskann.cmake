@@ -36,6 +36,8 @@ target_include_directories (vsag_diskann_headers INTERFACE
 add_library (diskann STATIC ${DISKANN_SOURCES})
 target_link_libraries (diskann PUBLIC vsag_diskann_headers)
 target_compile_options (diskann PRIVATE
+    -fdata-sections
+    -ffunction-sections
     -ftree-vectorize
     -fno-builtin-malloc
     -fno-builtin-calloc
@@ -46,6 +48,10 @@ target_compile_options (diskann PRIVATE
     -funroll-loops
     -Wfatal-errors)
 target_compile_definitions (diskann PRIVATE ENABLE_CUSTOM_LOGGER=1)
+target_link_options (diskann PRIVATE -Wl,--gc-sections)
+if (CMAKE_BUILD_TYPE STREQUAL "Release")
+    target_compile_options (diskann PRIVATE -g1)
+endif ()
 if (ENABLE_ASAN)
     target_compile_options (diskann PRIVATE -Wno-pass-failed)
 endif ()
