@@ -407,7 +407,6 @@ TEST_CASE("serialize/deserialize hnswstatic with file stream", "[ft][index]") {
         "hnsw": {{
             "max_degree": 16,
             "ef_construction": 100,
-            "use_static": true,
             "use_conjugate_graph": true
         }},
         "diskann": {{
@@ -1350,8 +1349,7 @@ TEST_CASE("static hnsw + feedback without global optimum id", "[ft][index][hnsw]
         "hnsw": {{
             "max_degree": 16,
             "ef_construction": 20,
-            "use_conjugate_graph": true,
-            "use_static": true
+            "use_conjugate_graph": true
         }}
     }}
     )";
@@ -1504,8 +1502,7 @@ TEST_CASE("hnsw with pretrained by conjugate graph", "[ft][index][hnsw]") {
         "hnsw": {{
             "max_degree": 16,
             "ef_construction": 200,
-            "use_conjugate_graph": true,
-            "use_static": true
+            "use_conjugate_graph": true
         }}
     }}
     )";

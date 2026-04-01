@@ -71,10 +71,6 @@ HnswParameters::FromJson(const JsonType& hnsw_param_obj,
                                obj.max_degree,
                                construction_threshold));
 
-    // set obj.use_static
-    obj.use_static = hnsw_param_obj.Contains(HNSW_PARAMETER_USE_STATIC) &&
-                     hnsw_param_obj[HNSW_PARAMETER_USE_STATIC].GetBool();
-
     // set obj.use_conjugate_graph
     if (hnsw_param_obj.Contains(PARAMETER_USE_CONJUGATE_GRAPH)) {
         obj.use_conjugate_graph = hnsw_param_obj[PARAMETER_USE_CONJUGATE_GRAPH].GetBool();
@@ -125,7 +121,6 @@ HnswParameters
 FreshHnswParameters::FromJson(const JsonType& hnsw_param_obj,
                               const IndexCommonParam& index_common_param) {
     auto obj = HnswParameters::FromJson(hnsw_param_obj, index_common_param);
-    obj.use_static = false;
     // set obj.use_reversed_edges
     obj.use_reversed_edges = true;
     return obj;
