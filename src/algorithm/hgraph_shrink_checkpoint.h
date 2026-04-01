@@ -20,7 +20,7 @@ namespace vsag {
 
 class HgraphShrinkCheckPoint {
 public:
-    constexpr static uint64_t BATCH_SIZE = 10;
+    static constexpr uint64_t BATCH_SIZE = 10;
 
     HgraphShrinkCheckPoint() = default;
 
