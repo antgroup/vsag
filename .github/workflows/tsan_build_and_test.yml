@@ -68,5 +68,6 @@ jobs:
           echo race:fmt::v10::detail::format_decimal >> omp.supp
           echo "race:libmkl_intel_thread.so.2" >> omp.supp
           export TSAN_OPTIONS=suppressions=omp.supp
+          export MKL_THREADING_LAYER=GNU
           chmod +x ./build/tests/functests
           ./build/tests/functests "[concurrent]~[daily]"
