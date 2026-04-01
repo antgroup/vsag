@@ -86,7 +86,7 @@ TEST_CASE("SINDI Basic Test", "[ut][SINDI]") {
     auto base = vsag::Dataset::Make();
     base->NumElements(num_base)->SparseVectors(sv_base.data())->Ids(ids.data())->Owner(false);
 
-    constexpr static auto param_str = R"({{
+    static constexpr auto param_str = R"({{
         "use_reorder": true,
         "use_quantization": false,
         "doc_prune_ratio": 0.0,
@@ -271,7 +271,7 @@ TEST_CASE("SINDI Quantization Test", "[ut][SINDI]") {
     auto base = vsag::Dataset::Make();
     base->NumElements(num_base)->SparseVectors(sv_base.data())->Ids(ids.data())->Owner(false);
 
-    constexpr static auto param_str = R"({{
+    static constexpr auto param_str = R"({{
         "use_reorder": true,
         "use_quantization": true,
         "doc_prune_ratio": 0.0,

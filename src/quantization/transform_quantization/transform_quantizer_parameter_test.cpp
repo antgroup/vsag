@@ -38,7 +38,7 @@ using namespace vsag;
     }
 
 TEST_CASE("Transform Quantizer Parameter CheckCompatibility", "[ut][TransformQuantizerParameter]") {
-    constexpr static const char* param_template = R"(
+    static constexpr const char* param_template = R"(
         {{
             "tq_chain": "{}",
             "rabitq_use_fht": true,
@@ -89,7 +89,7 @@ TEST_CASE("TQ parameter Split Merge String Test", "[ut][TransformQuantizerParame
 }
 
 TEST_CASE("Invalid Cases Test", "[ut][TransformQuantizerParameter]") {
-    constexpr static const char* param_template = R"(
+    static constexpr const char* param_template = R"(
         {{
             "tq_chain": "{}"
         }}

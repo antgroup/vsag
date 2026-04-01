@@ -37,7 +37,7 @@ TEST_CASE("MMapIO Parameter", "[ut][MMapIO]") {
     fixtures::TempDir dir("mmap_io");
     auto path = dir.GenerateRandomFile();
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    constexpr static const char* param_str = R"(
+    static constexpr const char* param_str = R"(
     {{
         "type": "mmap_io",
         "file_path" : "{}"

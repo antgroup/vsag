@@ -49,8 +49,8 @@ public:
     void
     CopyFlip(uint8_t* out_flip) const;
 
-    constexpr static uint64_t BYTE_LEN = 8;
-    constexpr static int ROUND = 4;
+    static constexpr uint64_t BYTE_LEN = 8;
+    static constexpr int ROUND = 4;
 
 private:
     uint64_t flip_offset_{0};

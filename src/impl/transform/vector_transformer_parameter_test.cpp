@@ -38,7 +38,7 @@ using namespace vsag;
     }
 
 TEST_CASE("Transformer Parameter CheckCompatibility", "[ut][VectorTransformerParameter]") {
-    constexpr static const char* param_template = R"(
+    static constexpr const char* param_template = R"(
         {{
             "input_dim": {},
             "pca_dim": {}

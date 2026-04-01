@@ -36,7 +36,7 @@ TEST_CASE("BufferIO Parameter", "[ut][BufferIO]") {
     fixtures::TempDir dir("buffer_io");
     auto path = dir.GenerateRandomFile();
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    constexpr static const char* param_str = R"(
+    static constexpr const char* param_str = R"(
     {{
         "type": "buffer_io",
         "file_path" : "{}"
