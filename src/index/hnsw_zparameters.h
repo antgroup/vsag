@@ -35,7 +35,6 @@ public:
     int64_t max_degree;
     int64_t ef_construction;
     bool use_conjugate_graph{false};
-    bool use_static{false};
     bool normalize{false};
     bool use_reversed_edges{false};
     DataTypes type{DataTypes::DATA_TYPE_FLOAT};
