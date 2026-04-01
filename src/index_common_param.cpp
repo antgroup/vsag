@@ -22,7 +22,7 @@
 
 namespace vsag {
 
-constexpr static const int64_t MAX_DIM_SPARSE = 4096;
+static constexpr const int64_t MAX_DIM_SPARSE = 4096;
 
 static void
 fill_datatype(IndexCommonParam& result, const JsonType& datatype_obj) {

@@ -104,8 +104,8 @@ private:
     transpose_codebooks();
 
 public:
-    constexpr static int64_t PQ_BITS = 8L;
-    constexpr static int64_t CENTROIDS_PER_SUBSPACE = 256L;
+    static constexpr int64_t PQ_BITS = 8L;
+    static constexpr int64_t CENTROIDS_PER_SUBSPACE = 256L;
 
 public:
     int64_t pq_dim_{1};

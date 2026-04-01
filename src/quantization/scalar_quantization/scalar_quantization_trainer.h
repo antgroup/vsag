@@ -82,7 +82,7 @@ private:
 
     uint64_t max_sample_count_{MAX_DEFAULT_SAMPLE};
 
-    constexpr static uint64_t MAX_DEFAULT_SAMPLE{100000};
+    static constexpr uint64_t MAX_DEFAULT_SAMPLE{100000};
 };
 
 }  // namespace vsag
