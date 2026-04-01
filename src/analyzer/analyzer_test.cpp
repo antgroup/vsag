@@ -73,13 +73,13 @@ TEST_CASE("CreateAnalyzer with HGraph index", "[ut][analyzer]") {
     auto inner_index = std::dynamic_pointer_cast<vsag::IndexImpl<vsag::HGraph>>(index);
     REQUIRE(inner_index != nullptr);
 
-    auto analyzer_allocator = vsag::Engine::CreateDefaultAllocator();
-    vsag::AnalyzerParam analyzer_param(analyzer_allocator.get());
-    analyzer_param.topk = 10;
-    analyzer_param.base_sample_size = 5;
+    auto allocator = vsag::Engine::CreateDefaultAllocator();
+    vsag::AnalyzerParam param(allocator.get());
+    param.topk = 10;
+    param.base_sample_size = 5;
 
     {
-        auto analyzer = vsag::CreateAnalyzer(inner_index->GetInnerIndex().get(), analyzer_param);
+        auto analyzer = vsag::CreateAnalyzer(inner_index->GetInnerIndex().get(), param);
         REQUIRE(analyzer != nullptr);
     }
 }
