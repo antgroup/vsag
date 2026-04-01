@@ -52,7 +52,6 @@ static const std::string EMPTY_HNSW = "EMPTY_HNSW";
 
 HNSW::HNSW(HnswParameters hnsw_params, const IndexCommonParam& index_common_param)
     : space_(std::move(hnsw_params.space)),
-      use_static_(hnsw_params.use_static),
       use_conjugate_graph_(hnsw_params.use_conjugate_graph),
       use_reversed_edges_(hnsw_params.use_reversed_edges),
       type_(hnsw_params.type),
@@ -74,30 +73,15 @@ HNSW::HNSW(HnswParameters hnsw_params, const IndexCommonParam& index_common_para
         conjugate_graph_ = std::make_shared<ConjugateGraph>(allocator_.get());
     }
 
-    if (!use_static_) {
-        alg_hnsw_ =
-            std::make_shared<hnswlib::HierarchicalNSW>(space_.get(),
-                                                       DEFAULT_MAX_ELEMENT,
-                                                       allocator_.get(),
-                                                       M,
-                                                       hnsw_params.ef_construction,
-                                                       use_reversed_edges_,
-                                                       hnsw_params.normalize,
-                                                       Options::Instance().block_size_limit(),
-                                                       true);
-    } else {
-        if (dim_ % 4 != 0) {
-            // FIXME(wxyu): remove throw stmt from construct function
-            throw std::runtime_error("cannot build static hnsw while dim % 4 != 0");
-        }
-        alg_hnsw_ = std::make_shared<hnswlib::StaticHierarchicalNSW>(
-            space_.get(),
-            DEFAULT_MAX_ELEMENT,
-            allocator_.get(),
-            M,
-            hnsw_params.ef_construction,
-            Options::Instance().block_size_limit());
-    }
+    alg_hnsw_ = std::make_shared<hnswlib::HierarchicalNSW>(space_.get(),
+                                                           DEFAULT_MAX_ELEMENT,
+                                                           allocator_.get(),
+                                                           M,
+                                                           hnsw_params.ef_construction,
+                                                           use_reversed_edges_,
+                                                           hnsw_params.normalize,
+                                                           Options::Instance().block_size_limit(),
+                                                           true);
 
     this->init_feature_list();
 }
@@ -142,12 +126,6 @@ HNSW::build(const DatasetPtr& base) {
             }
         }
 
-        if (use_static_) {
-            SlowTaskTimer t("hnsw pq", 1000);
-            auto* hnsw = static_cast<hnswlib::StaticHierarchicalNSW*>(alg_hnsw_.get());
-            hnsw->encode_hnsw_data();
-        }
-
         return failed_ids;
     } catch (const std::invalid_argument& e) {
         LOG_ERROR_AND_RETURNS(
@@ -166,10 +144,6 @@ HNSW::add(const DatasetPtr& base) {
 #ifndef ENABLE_TESTS
     SlowTaskTimer t("hnsw add", 20);
 #endif
-    if (use_static_) {
-        LOG_ERROR_AND_RETURNS(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                              "static index does not support add");
-    }
     try {
         auto base_dim = base->GetDim();
         CHECK_ARGUMENT(base_dim == dim_,
@@ -415,11 +389,6 @@ HNSW::range_search(const DatasetPtr& query,
             auto ret = Dataset::Make();
             ret->Dim(0)->NumElements(1);
             return ret;
-        }
-
-        if (use_static_) {
-            LOG_ERROR_AND_RETURNS(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                                  "static index does not support rangesearch");
         }
 
         // check query vector
@@ -763,11 +732,6 @@ HNSW::update_id(int64_t old_id, int64_t new_id) {
             ErrorType::WRONG_STATUS, "index is in the wrong status({})", PrintStatus());
     }
 
-    if (use_static_) {
-        LOG_ERROR_AND_RETURNS(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                              "static hnsw does not support update");
-    }
-
     std::scoped_lock lock(rw_mutex_);
 
     if (old_id == new_id) {
@@ -785,11 +749,6 @@ HNSW::update_id(int64_t old_id, int64_t new_id) {
 
 tl::expected<bool, Error>
 HNSW::update_vector(int64_t id, const DatasetPtr& new_base, bool force_update) {
-    if (use_static_) {
-        LOG_ERROR_AND_RETURNS(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                              "static hnsw does not support update");
-    }
-
     // the validation of the new vector
     void* new_base_vec = nullptr;
     uint64_t data_size = 0;
@@ -847,10 +806,6 @@ HNSW::remove(const std::vector<int64_t>& ids) {
             ErrorType::WRONG_STATUS, "index is in the wrong status({})", PrintStatus());
     }
 
-    if (use_static_) {
-        LOG_ERROR_AND_RETURNS(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                              "static hnsw does not support remove");
-    }
     for (auto id : ids) {
         try {
             std::scoped_lock lock(rw_mutex_);
@@ -1149,9 +1104,6 @@ HNSW::ExtractDataAndGraph(FlattenInterfacePtr& data,
                           Vector<LabelType>& ids,
                           const IdMapFunction& func,
                           Allocator* allocator) {
-    if (use_static_) {
-        return false;
-    }
     auto hnsw = std::static_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_);
     auto cur_element_count = hnsw->getCurrentElementCount();
     int64_t origin_data_num = data->total_count_;
@@ -1183,9 +1135,6 @@ HNSW::ExtractDataAndGraph(FlattenInterfacePtr& data,
 
 bool
 HNSW::SetDataAndGraph(FlattenInterfacePtr& data, GraphInterfacePtr& graph, Vector<LabelType>& ids) {
-    if (use_static_) {
-        return false;
-    }
     auto hnsw = std::static_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_);
     hnsw->setDataAndGraph(data, graph, ids);
     return true;

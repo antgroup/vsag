@@ -100,7 +100,6 @@ const char* const GRAPH_TYPE_NSW = "nsw";
 const char* const HNSW_PARAMETER_EF_RUNTIME = "ef_search";
 const char* const HNSW_PARAMETER_M = "max_degree";
 const char* const HNSW_PARAMETER_CONSTRUCTION = "ef_construction";
-const char* const HNSW_PARAMETER_USE_STATIC = "use_static";
 const char* const HNSW_PARAMETER_REVERSED_EDGES = "use_reversed_edges";
 const char* const HNSW_PARAMETER_SKIP_RATIO = "skip_ratio";
 
