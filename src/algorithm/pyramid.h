@@ -72,6 +72,8 @@ public:
     void
     Deserialize(StreamReader& reader);
 
+    friend class PyramidAnalyzer;
+
 public:
     GraphInterfacePtr graph_{nullptr};
     InnerIdType entry_point_{0};
@@ -163,6 +165,9 @@ public:
     int64_t
     GetNumElements() const override;
 
+    std::string
+    GetStats() const override;
+
     void
     InitFeatures() override;
 
@@ -187,6 +192,11 @@ public:
 
     void
     Train(const vsag::DatasetPtr& base) override;
+
+    void
+    GetVectorByInnerId(InnerIdType inner_id, float* data) const override;
+
+    friend class PyramidAnalyzer;
 
 private:
     void
