@@ -51,7 +51,7 @@ if (ENABLE_TESTS)
 endif ()
 
 add_subdirectory (src)
-if (NOT APPLE)
+if (ENABLE_MOCKIMPL AND NOT APPLE)
     add_subdirectory (mockimpl)
 endif ()
 if (ENABLE_EXAMPLES)

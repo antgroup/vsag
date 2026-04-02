@@ -37,6 +37,6 @@ jobs:
             || echo "Warning: Failed to download compatibility indexes"
       - uses: actions/checkout@v4
       - name: Compile Check Compatibility Tools
-        run: export CMAKE_GENERATOR="Ninja"; make release
+        run: export CMAKE_GENERATOR="Ninja"; make release VSAG_ENABLE_TOOLS=ON
       - name: Run Check Compatibility
         run: bash ./scripts/check_compatibility.sh
