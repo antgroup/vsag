@@ -31,18 +31,25 @@ fill_datatype(IndexCommonParam& result, const JsonType& datatype_obj) {
     std::string datatype = datatype_obj.GetString();
     if (datatype == DATATYPE_FLOAT32) {
         result.data_type_ = DataTypes::DATA_TYPE_FLOAT;
+    } else if (datatype == DATATYPE_FLOAT16) {
+        result.data_type_ = DataTypes::DATA_TYPE_FP16;
+    } else if (datatype == DATATYPE_BFLOAT16) {
+        result.data_type_ = DataTypes::DATA_TYPE_BF16;
     } else if (datatype == DATATYPE_INT8) {
         result.data_type_ = DataTypes::DATA_TYPE_INT8;
     } else if (datatype == DATATYPE_SPARSE) {
         result.data_type_ = DataTypes::DATA_TYPE_SPARSE;
     } else {
-        throw VsagException(ErrorType::INVALID_ARGUMENT,
-                            fmt::format("parameters[{}] must in [{}, {}, {}], now is {}",
-                                        PARAMETER_DTYPE,
-                                        DATATYPE_FLOAT32,
-                                        DATATYPE_INT8,
-                                        DATATYPE_SPARSE,
-                                        datatype));
+        throw VsagException(
+            ErrorType::INVALID_ARGUMENT,
+            fmt::format("parameters[{}] must be one of [{}, {}, {}, {}, {}], now is {}",
+                        PARAMETER_DTYPE,
+                        DATATYPE_FLOAT32,
+                        DATATYPE_FLOAT16,
+                        DATATYPE_BFLOAT16,
+                        DATATYPE_INT8,
+                        DATATYPE_SPARSE,
+                        datatype));
     }
 }
 
