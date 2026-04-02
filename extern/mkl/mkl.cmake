@@ -62,6 +62,12 @@ if (MKL_STATIC_LINK)
         "${MKL_PATH}/libmkl_core.a"
         "${OMP_PATH}/libiomp5.a"
     )
+    
+    foreach (mkllib ${MKL_INSTALL_LIBS})
+        if (EXISTS ${mkllib})
+            install (FILES ${mkllib} DESTINATION ${CMAKE_INSTALL_LIBDIR})
+        endif ()
+    endforeach ()
     message (STATUS "Enabled Intel MKL as BLAS backend (STATIC linking).")
 
 else ()
