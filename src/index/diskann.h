@@ -64,7 +64,7 @@ public:
 
     DiskANN(DiskannParameters& diskann_params, const IndexCommonParam& index_common_param);
 
-    ~DiskANN() = default;
+    ~DiskANN() override = default;
 
     tl::expected<std::vector<int64_t>, Error>
     Build(const DatasetPtr& base) override {

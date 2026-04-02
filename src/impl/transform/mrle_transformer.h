@@ -31,7 +31,7 @@ public:
         this->type_ = VectorTransformerType::MRLE;
     }
 
-    virtual ~MRLETransformer() override = default;
+    ~MRLETransformer() override = default;
 
     TransformerMetaPtr
     Transform(const float* original_vec, float* transformed_vec) const override {
