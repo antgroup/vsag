@@ -245,6 +245,23 @@ public:
     GetFloat32Vectors() const = 0;
 
     /**
+     * @brief Sets the float16/bfloat16 vector array for the dataset.
+     *
+     * @param vectors Pointer to the array of float16/bfloat16 vectors (uint16_t*).
+     * @return DatasetPtr A shared pointer to the dataset with updated vectors.
+     */
+    virtual DatasetPtr
+    Float16Vectors(const uint16_t* vectors) = 0;
+
+    /**
+     * @brief Retrieves the float16/bfloat16 vector array of the dataset.
+     *
+     * @return const uint16_t* Pointer to the array of float16/bfloat16 vectors.
+     */
+    virtual const uint16_t*
+    GetFloat16Vectors() const = 0;
+
+    /**
      * @brief Sets the sparse vector array for the dataset.
      *
      * @param vectors Pointer to the struct of sparse vectors.
