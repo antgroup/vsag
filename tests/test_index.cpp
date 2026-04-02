@@ -1974,13 +1974,42 @@ TestIndex::TestShrinkIndex(const TestIndex::IndexPtr& index,
     REQUIRE(index->GetNumElements() == base_num);
 
     int64_t bias = 125;
-    int64_t remove_count = 100;
+    int64_t remove_count = 30;
     std::vector<int64_t> remove_ids(ids + bias, ids + bias + remove_count);
     auto remove_result = index->Remove(remove_ids, vsag::RemoveMode::MARK_REMOVE);
     REQUIRE(remove_result.has_value());
     REQUIRE(index->GetNumberRemoved() == remove_count);
 
-    index->ShrinkAndRepair();
+    SECTION("ShrinkAndRepair") {
+        index->ShrinkAndRepair();
+    }
+
+    SECTION("ShrinkAndRepair With Timeout") {
+        index->ShrinkAndRepair(1000);
+        index->ShrinkAndRepair(3000);
+    }
+
+    // Verify that removed ids cannot be searched after ShrinkAndRepair
+    for (int64_t i = 0; i < remove_count; ++i) {
+        auto query = vsag::Dataset::Make();
+        query->NumElements(1)
+            ->Dim(base_dim)
+            ->Float32Vectors(vectors + (bias + i) * base_dim)
+            ->Owner(false);
+
+        int64_t k = 10;
+        auto search_result = index->KnnSearch(query, k, search_param);
+        REQUIRE(search_result.has_value());
+
+        bool found_removed_id = false;
+        for (int64_t j = 0; j < search_result.value()->GetDim(); ++j) {
+            if (search_result.value()->GetIds()[j] == remove_ids[i]) {
+                found_removed_id = true;
+                break;
+            }
+        }
+        REQUIRE_FALSE(found_removed_id);
+    }
 
     for (int64_t i = 0; i < remove_count; ++i) {
         auto new_data = vsag::Dataset::Make();
