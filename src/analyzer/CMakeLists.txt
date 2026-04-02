@@ -1,4 +1,3 @@
-
 # Copyright 2024-present the vsag project
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,3 +22,11 @@ set (ANALYZER_SRC
 
 add_library (analyzer OBJECT ${ANALYZER_SRC})
 target_link_libraries (analyzer PRIVATE vsag_src_common)
+
+if (ENABLE_TESTS)
+    file (GLOB ANALYZER_TESTS "*_test.cpp")
+    add_library (analyzer_test STATIC ${ANALYZER_TESTS})
+    target_include_directories (analyzer_test PRIVATE ${CMAKE_SOURCE_DIR}/tests/fixtures)
+    target_link_libraries (analyzer_test PRIVATE Catch2::Catch2 vsag)
+    add_dependencies (analyzer_test Catch2)
+endif ()
