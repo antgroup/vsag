@@ -15,80 +15,43 @@
 
 #include "sq8_uniform_quantizer.h"
 
-#include <catch2/catch_test_macros.hpp>
-#include <vector>
-
-#include "fixtures.h"
-#include "impl/allocator/safe_allocator.h"
 #include "quantization/quantizer_test.h"
 
 using namespace vsag;
 
-const auto dims = fixtures::get_common_used_dims();
-const auto counts = {10, 101};
+TEST_CASE("SQ8UniformQuantizer Encode and Decode", "[ut][SQ8UniformQuantizer]") {
+    auto dims = fixtures::get_common_used_dims();
+    const std::vector<int> counts = {10, 101};
 
-template <MetricType metric>
-void
-TestQuantizerEncodeDecodeMetricSQ8Uniform(uint64_t dim,
-                                          int count,
-                                          float error = 1e-5,
-                                          float error_same = 1e-2) {
-    auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    SQ8UniformQuantizer<metric> quantizer(dim, allocator.get());
-    TestQuantizerEncodeDecode(quantizer, dim, count, error);
-    TestQuantizerEncodeDecodeSame(quantizer, dim, count, 255, error_same);
+    auto config = QuantizerTestConfig<SQ8UniformQuantizer>()
+                      .with_name("SQ8UniformQuantizer")
+                      .with_error_func([](int64_t dim) { return 2 * 1.0f / 255.0f; })
+                      .with_error_same_func([](int64_t dim) { return (float)(dim * 255 * 0.01); })
+                      .with_code_max(255);
+
+    RunQuantizerEncodeDecodeTests(dims, counts, config);
 }
 
-TEST_CASE("SQ8 Uniform Encode and Decode", "[ut][SQ8UniformQuantizer]") {
-    constexpr MetricType metrics[2] = {MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_IP};
-    float error = 2 * 1.0f / 255.0f;
-    for (auto dim : dims) {
-        for (auto count : counts) {
-            auto error_same = (float)(dim * 255 * 0.01);
-            TestQuantizerEncodeDecodeMetricSQ8Uniform<metrics[0]>(dim, count, error, error_same);
-            TestQuantizerEncodeDecodeMetricSQ8Uniform<metrics[1]>(dim, count, error, error_same);
-        }
-    }
+TEST_CASE("SQ8UniformQuantizer Compute", "[ut][SQ8UniformQuantizer]") {
+    auto dims = fixtures::get_common_used_dims();
+    const std::vector<int> counts = {10, 101};
+
+    auto config = QuantizerTestConfig<SQ8UniformQuantizer>()
+                      .with_name("SQ8UniformQuantizer")
+                      .with_compute_error(4 * 1.0f / 255.0f)
+                      .with_compute_codes_same()
+                      .with_code_max(255);
+
+    RunQuantizerComputeTests(dims, counts, config);
 }
 
-template <MetricType metric>
-void
-TestComputeMetricSQ8Uniform(uint64_t dim, int count, float error = 1e-5) {
-    auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    SQ8UniformQuantizer<metric> quantizer(dim, allocator.get());
-    TestComputeCodesSame<SQ8UniformQuantizer<metric>, metric>(quantizer, dim, count, error);
-}
+TEST_CASE("SQ8UniformQuantizer Serialize and Deserialize", "[ut][SQ8UniformQuantizer]") {
+    auto dims = fixtures::get_common_used_dims();
+    const std::vector<int> counts = {10, 101};
 
-TEST_CASE("SQ8 Uniform Compute", "[ut][SQ8UniformQuantizer]") {
-    constexpr MetricType metrics[2] = {MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_IP};
-    float error = 4 * 1.0f / 255.0f;
-    for (auto dim : dims) {
-        for (auto count : counts) {
-            TestComputeMetricSQ8Uniform<metrics[0]>(dim, count, error);
-            TestComputeMetricSQ8Uniform<metrics[1]>(dim, count, error);
-        }
-    }
-}
+    auto config = QuantizerTestConfig<SQ8UniformQuantizer>()
+                      .with_name("SQ8UniformQuantizer")
+                      .with_serialize_error_func([](int64_t dim) { return 4 * 1.0f / 255.0f; });
 
-template <MetricType metric>
-void
-TestSerializeAndDeserializeMetricSQ8Uniform(uint64_t dim, int count, float error = 1e-5) {
-    auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    SQ8UniformQuantizer<metric> quantizer1(dim, allocator.get());
-    SQ8UniformQuantizer<metric> quantizer2(dim, allocator.get());
-    TestSerializeAndDeserialize<SQ8UniformQuantizer<metric>, metric, true>(
-        quantizer1, quantizer2, dim, count, error);
-}
-
-TEST_CASE("SQ8 Uniform Serialize and Deserialize", "[ut][SQ8UniformQuantizer]") {
-    constexpr MetricType metrics[3] = {
-        MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_COSINE, MetricType::METRIC_TYPE_IP};
-    for (auto dim : dims) {
-        float error = 4 * 1.0f / 255.0f;
-        for (auto count : counts) {
-            TestSerializeAndDeserializeMetricSQ8Uniform<metrics[0]>(dim, count, error);
-            //            TestSerializeAndDeserializeMetricSQ8Uniform<metrics[1]>(dim, count, error);
-            TestSerializeAndDeserializeMetricSQ8Uniform<metrics[2]>(dim, count, error);
-        }
-    }
+    RunQuantizerSerializeTests(dims, counts, config);
 }

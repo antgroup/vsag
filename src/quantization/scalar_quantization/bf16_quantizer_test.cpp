@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,82 +14,43 @@
 
 #include "bf16_quantizer.h"
 
-#include <catch2/catch_test_macros.hpp>
-#include <vector>
-
-#include "fixtures.h"
-#include "impl/allocator/default_allocator.h"
-#include "impl/allocator/safe_allocator.h"
 #include "quantization/quantizer_test.h"
 
 using namespace vsag;
 
-const auto dims = fixtures::get_common_used_dims(3, 225);
-const auto counts = {10, 101};
-
-template <MetricType metric>
-void
-TestQuantizerEncodeDecodeMetricBF16(uint64_t dim, int count, float error = 1e-3) {
-    auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    BF16Quantizer<metric> quantizer(dim, allocator.get());
-    TestQuantizerEncodeDecode(quantizer, dim, count, error);
-    TestQuantizerEncodeDecodeSame(quantizer, dim, count, 65536, error);
-}
-
 TEST_CASE("BF16 Encode and Decode", "[ut][BF16Quantizer]") {
-    constexpr MetricType metrics[2] = {MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_IP};
-    float error = 6e-3F;
-    for (auto dim : dims) {
-        for (auto count : counts) {
-            TestQuantizerEncodeDecodeMetricBF16<metrics[0]>(dim, count, error);
-            TestQuantizerEncodeDecodeMetricBF16<metrics[1]>(dim, count, error);
-        }
-    }
-}
+    auto dims = fixtures::get_common_used_dims(3, 225);
+    const std::vector<int> counts = {10, 101};
 
-template <MetricType metric>
-void
-TestComputeMetricBF16(uint64_t dim, int count, float error = 1e-5) {
-    auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    BF16Quantizer<metric> quantizer(dim, allocator.get());
-    TestComputeCodes<BF16Quantizer<metric>, metric>(quantizer, dim, count, error);
-    TestComputer<BF16Quantizer<metric>, metric>(quantizer, dim, count, error, 1.0, true, 1.0, 1.0);
-    // TODO(LHT): fix quantize error
+    auto config = QuantizerTestConfig<BF16Quantizer>()
+                      .with_name("BF16Quantizer")
+                      .with_error(6e-3f)
+                      .with_code_max(65536);
+
+    RunQuantizerEncodeDecodeTests(dims, counts, config);
 }
 
 TEST_CASE("BF16 Compute", "[ut][BF16Quantizer]") {
-    constexpr MetricType metrics[3] = {
-        MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_COSINE, MetricType::METRIC_TYPE_IP};
-    float error = 6e-3F;
-    for (auto dim : dims) {
-        for (auto count : counts) {
-            TestComputeMetricBF16<metrics[0]>(dim, count, error);
-            TestComputeMetricBF16<metrics[1]>(dim, count, error);
-            TestComputeMetricBF16<metrics[2]>(dim, count, error);
-        }
-    }
-}
+    auto dims = fixtures::get_common_used_dims(3, 225);
+    const std::vector<int> counts = {10, 101};
 
-template <MetricType metric>
-void
-TestSerializeAndDeserializeMetricBF16(uint64_t dim, int count, float error = 1e-5) {
-    auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    BF16Quantizer<metric> quantizer1(dim, allocator.get());
-    BF16Quantizer<metric> quantizer2(dim, allocator.get());
-    TestSerializeAndDeserialize<BF16Quantizer<metric>, metric>(
-        quantizer1, quantizer2, dim, count, error, 1.0, 1.0, 1.0);
-    // TODO(LHT): fix quantize error
+    auto config = QuantizerTestConfig<BF16Quantizer>()
+                      .with_name("BF16Quantizer")
+                      .with_error(6e-3f)
+                      .with_code_max(65536)
+                      .with_unbounded_flag(true);
+
+    RunQuantizerComputeTests(dims, counts, config);
 }
 
 TEST_CASE("BF16 Serialize and Deserialize", "[ut][BF16Quantizer]") {
-    constexpr MetricType metrics[3] = {
-        MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_COSINE, MetricType::METRIC_TYPE_IP};
-    float error = 6e-3F;
-    for (auto dim : dims) {
-        for (auto count : counts) {
-            TestSerializeAndDeserializeMetricBF16<metrics[0]>(dim, count, error);
-            TestSerializeAndDeserializeMetricBF16<metrics[1]>(dim, count, error);
-            TestSerializeAndDeserializeMetricBF16<metrics[2]>(dim, count, error);
-        }
-    }
+    auto dims = fixtures::get_common_used_dims(3, 225);
+    const std::vector<int> counts = {10, 101};
+
+    auto config = QuantizerTestConfig<BF16Quantizer>()
+                      .with_name("BF16Quantizer")
+                      .with_error(6e-3f)
+                      .with_unbounded_flag(true);
+
+    RunQuantizerSerializeTests(dims, counts, config);
 }

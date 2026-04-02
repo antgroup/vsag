@@ -19,6 +19,7 @@
 
 #include "data_type.h"
 #include "fixtures.h"
+#include "impl/allocator/safe_allocator.h"
 #include "iostream"
 #include "quantization/computer.h"
 #include "quantizer.h"
@@ -424,5 +425,254 @@ TestSerializeAndDeserialize(Quantizer<T>& quant1,
                                 unbounded_related_error_rate);
         TestEncodeDecodeRaBitQ<T>(quant2, dim, count);
         REQUIRE_THROWS(TestComputeCodes<T, metric>(quant2, dim, count, error, false));
+    }
+}
+
+template <template <MetricType> class QuantizerTemplate>
+struct QuantizerTestConfig {
+    std::string name;
+    std::function<float(int64_t dim)> error_func;
+    std::function<float(int64_t dim)> error_same_func;
+    std::function<float(int64_t dim)> compute_error_func;
+    std::function<float(int64_t dim)> serialize_error_func;
+    int64_t code_max = 15;
+    bool test_encode_decode = true;
+    bool test_encode_decode_same = true;
+    bool test_compute_codes = true;
+    bool test_compute_codes_same = false;
+    bool test_computer = true;
+    bool test_serialize = true;
+    float related_error = 1.0F;
+    bool unbounded_flag = false;
+    float unbounded_numeric_error_rate = 1.0F;
+    float unbounded_related_error_rate = 1.0F;
+
+    auto&
+    with_name(const std::string& n) {
+        name = n;
+        return *this;
+    }
+
+    auto&
+    with_error(float e) {
+        error_func = [e](int64_t) { return e; };
+        return *this;
+    }
+
+    auto&
+    with_error_func(std::function<float(int64_t)> f) {
+        error_func = f;
+        return *this;
+    }
+
+    auto&
+    with_error_same_func(std::function<float(int64_t)> f) {
+        error_same_func = f;
+        return *this;
+    }
+
+    auto&
+    with_compute_error(float e) {
+        compute_error_func = [e](int64_t) { return e; };
+        return *this;
+    }
+
+    auto&
+    with_compute_error_func(std::function<float(int64_t)> f) {
+        compute_error_func = f;
+        return *this;
+    }
+
+    auto&
+    with_serialize_error(float e) {
+        serialize_error_func = [e](int64_t) { return e; };
+        return *this;
+    }
+
+    auto&
+    with_serialize_error_func(std::function<float(int64_t)> f) {
+        serialize_error_func = f;
+        return *this;
+    }
+
+    auto&
+    with_code_max(int64_t cm) {
+        code_max = cm;
+        return *this;
+    }
+
+    auto&
+    with_compute_codes_same() {
+        test_compute_codes_same = true;
+        test_compute_codes = false;
+        return *this;
+    }
+
+    auto&
+    without_encode_decode_same() {
+        test_encode_decode_same = false;
+        return *this;
+    }
+
+    auto&
+    without_compute_codes_same() {
+        test_compute_codes_same = false;
+        return *this;
+    }
+
+    auto&
+    without_serialize() {
+        test_serialize = false;
+        return *this;
+    }
+
+    auto&
+    with_related_error(float e) {
+        related_error = e;
+        return *this;
+    }
+
+    auto&
+    with_unbounded_flag(bool flag) {
+        unbounded_flag = flag;
+        return *this;
+    }
+
+    auto&
+    with_unbounded_numeric_error_rate(float rate) {
+        unbounded_numeric_error_rate = rate;
+        return *this;
+    }
+
+    auto&
+    with_unbounded_related_error_rate(float rate) {
+        unbounded_related_error_rate = rate;
+        return *this;
+    }
+};
+
+template <MetricType metric, template <MetricType> class QuantizerTemplate>
+void
+RunEncodeDecodeTestsForMetric(int64_t dim,
+                              int count,
+                              Allocator* allocator,
+                              const QuantizerTestConfig<QuantizerTemplate>& config) {
+    auto error = config.error_func(dim);
+    auto error_same = config.error_same_func ? config.error_same_func(dim) : error;
+    QuantizerTemplate<metric> quant(dim, allocator);
+
+    if (config.test_encode_decode) {
+        TestQuantizerEncodeDecode(quant, dim, count, error);
+    }
+
+    if (config.test_encode_decode_same) {
+        TestQuantizerEncodeDecodeSame(quant, dim, count, config.code_max, error_same);
+    }
+}
+
+template <MetricType metric, template <MetricType> class QuantizerTemplate>
+void
+RunComputeTestsForMetric(int64_t dim,
+                         int count,
+                         Allocator* allocator,
+                         const QuantizerTestConfig<QuantizerTemplate>& config) {
+    auto error =
+        config.compute_error_func ? config.compute_error_func(dim) : config.error_func(dim);
+    QuantizerTemplate<metric> quant(dim, allocator);
+
+    if (config.test_compute_codes) {
+        TestComputeCodes<QuantizerTemplate<metric>, metric>(quant, dim, count, error);
+    }
+
+    if (config.test_compute_codes_same) {
+        TestComputeCodesSame<QuantizerTemplate<metric>, metric>(quant, dim, count, config.code_max);
+    }
+
+    if (config.test_computer) {
+        TestComputer<QuantizerTemplate<metric>, metric>(quant,
+                                                        dim,
+                                                        count,
+                                                        error,
+                                                        config.related_error,
+                                                        config.unbounded_flag,
+                                                        config.unbounded_numeric_error_rate,
+                                                        config.unbounded_related_error_rate);
+    }
+}
+
+template <MetricType metric, template <MetricType> class QuantizerTemplate>
+void
+RunSerializeTestsForMetric(int64_t dim,
+                           int count,
+                           Allocator* allocator,
+                           const QuantizerTestConfig<QuantizerTemplate>& config) {
+    auto error =
+        config.serialize_error_func ? config.serialize_error_func(dim) : config.error_func(dim);
+    QuantizerTemplate<metric> quant1(dim, allocator);
+    QuantizerTemplate<metric> quant2(dim, allocator);
+
+    TestSerializeAndDeserialize<QuantizerTemplate<metric>, metric>(
+        quant1,
+        quant2,
+        dim,
+        count,
+        error,
+        config.related_error,
+        config.unbounded_numeric_error_rate,
+        config.unbounded_related_error_rate);
+}
+
+template <template <MetricType> class QuantizerTemplate>
+void
+RunQuantizerEncodeDecodeTests(const std::vector<int>& dims,
+                              const std::vector<int>& counts,
+                              const QuantizerTestConfig<QuantizerTemplate>& config) {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+
+    for (auto dim : dims) {
+        for (auto count : counts) {
+            RunEncodeDecodeTestsForMetric<MetricType::METRIC_TYPE_L2SQR, QuantizerTemplate>(
+                dim, count, allocator.get(), config);
+            RunEncodeDecodeTestsForMetric<MetricType::METRIC_TYPE_IP, QuantizerTemplate>(
+                dim, count, allocator.get(), config);
+        }
+    }
+}
+
+template <template <MetricType> class QuantizerTemplate>
+void
+RunQuantizerComputeTests(const std::vector<int>& dims,
+                         const std::vector<int>& counts,
+                         const QuantizerTestConfig<QuantizerTemplate>& config) {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+
+    for (auto dim : dims) {
+        for (auto count : counts) {
+            RunComputeTestsForMetric<MetricType::METRIC_TYPE_L2SQR, QuantizerTemplate>(
+                dim, count, allocator.get(), config);
+            RunComputeTestsForMetric<MetricType::METRIC_TYPE_COSINE, QuantizerTemplate>(
+                dim, count, allocator.get(), config);
+            RunComputeTestsForMetric<MetricType::METRIC_TYPE_IP, QuantizerTemplate>(
+                dim, count, allocator.get(), config);
+        }
+    }
+}
+
+template <template <MetricType> class QuantizerTemplate>
+void
+RunQuantizerSerializeTests(const std::vector<int>& dims,
+                           const std::vector<int>& counts,
+                           const QuantizerTestConfig<QuantizerTemplate>& config) {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+
+    for (auto dim : dims) {
+        for (auto count : counts) {
+            RunSerializeTestsForMetric<MetricType::METRIC_TYPE_L2SQR, QuantizerTemplate>(
+                dim, count, allocator.get(), config);
+            RunSerializeTestsForMetric<MetricType::METRIC_TYPE_COSINE, QuantizerTemplate>(
+                dim, count, allocator.get(), config);
+            RunSerializeTestsForMetric<MetricType::METRIC_TYPE_IP, QuantizerTemplate>(
+                dim, count, allocator.get(), config);
+        }
     }
 }
