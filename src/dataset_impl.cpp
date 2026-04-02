@@ -147,6 +147,7 @@ DatasetImpl::~DatasetImpl() {  // NOLINT
         allocator_->Deallocate(void_ptr(DatasetImpl::GetIds()));
         allocator_->Deallocate(void_ptr(DatasetImpl::GetDistances()));
         allocator_->Deallocate(void_ptr(DatasetImpl::GetInt8Vectors()));
+        allocator_->Deallocate(void_ptr(DatasetImpl::GetFloat16Vectors()));
         allocator_->Deallocate(void_ptr(DatasetImpl::GetFloat32Vectors()));
         allocator_->Deallocate(void_ptr(DatasetImpl::GetExtraInfos()));
         const auto* sparse_vectors = DatasetImpl::GetSparseVectors();
@@ -166,6 +167,7 @@ DatasetImpl::~DatasetImpl() {  // NOLINT
         delete[] DatasetImpl::GetIds();
         delete[] DatasetImpl::GetDistances();
         delete[] DatasetImpl::GetInt8Vectors();
+        delete[] DatasetImpl::GetFloat16Vectors();
         delete[] DatasetImpl::GetFloat32Vectors();
         delete[] DatasetImpl::GetExtraInfos();
 
@@ -214,6 +216,10 @@ DatasetImpl::DeepCopy(Allocator* allocator) const {
     if (this->GetFloat32Vectors() != nullptr) {
         copy_dataset->Float32Vectors(
             allocate_and_copy(this->GetFloat32Vectors(), num_elements * dim, allocator_ref));
+    }
+    if (this->GetFloat16Vectors() != nullptr) {
+        copy_dataset->Float16Vectors(
+            allocate_and_copy(this->GetFloat16Vectors(), num_elements * dim, allocator_ref));
     }
 
     if (this->GetExtraInfoSize() != 0) {
@@ -286,6 +292,7 @@ DatasetImpl::Append(const DatasetPtr& other) {
     APPEND_DATA(IDS, int64_t*, Ids, 1);
     APPEND_DATA(DISTS, float*, Distances, dim);
     APPEND_DATA(INT8_VECTORS, int8_t*, Int8Vectors, dim);
+    APPEND_DATA(FLOAT16_VECTORS, uint16_t*, Float16Vectors, dim);
     APPEND_DATA(FLOAT32_VECTORS, float*, Float32Vectors, dim);
     if (this->GetExtraInfoSize() != 0) {
         APPEND_DATA(EXTRA_INFOS, char*, ExtraInfos, this->GetExtraInfoSize());

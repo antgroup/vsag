@@ -236,6 +236,9 @@ private:
             return dataset->GetFloat32Vectors() + index * dim_;
         } else if (data_type_ == DataTypes::DATA_TYPE_INT8) {
             return dataset->GetInt8Vectors() + index * dim_;
+        } else if (data_type_ == DataTypes::DATA_TYPE_FP16 ||
+                   data_type_ == DataTypes::DATA_TYPE_BF16) {
+            return dataset->GetFloat16Vectors() + index * dim_;
         } else if (data_type_ == DataTypes::DATA_TYPE_SPARSE) {
             return dataset->GetSparseVectors() + index;
         }
