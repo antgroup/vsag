@@ -124,6 +124,15 @@ The YAML file consists of an optional `global` section and multiple test cases.
 
 - **Test Cases**: Every top-level key other than `global` represents an independent test case. The case name is user-defined (e.g., `hnsw_m16_ef200`). The parameters under each case are mostly identical to the command-line arguments.
 
+#### TurboQuant Example
+
+You can start from `tools/eval/turboquant_eval_example.yaml`, which includes both a
+`turboquant` case and a directly comparable `rabitq` case on HGraph. Run it with:
+
+```bash
+./build-release/tools/eval/eval_performance tools/eval/turboquant_eval_example.yaml
+```
+
 #### YAML Example
 
 Below is an example `config.yaml` that defines two different search test cases and exports the results to the screen as a table, and to files in Markdown and JSON formats.

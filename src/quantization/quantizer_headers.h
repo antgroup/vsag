@@ -23,3 +23,4 @@
 #include "scalar_quantization/sq_headers.h"
 #include "sparse_quantization/sparse_quantizer.h"
 #include "transform_quantization/transform_quantizer.h"
+#include "turboquant_quantizer.h"
