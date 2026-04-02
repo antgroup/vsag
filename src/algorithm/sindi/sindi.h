@@ -33,7 +33,7 @@ public:
     SINDI(const ParamPtr& param, const IndexCommonParam& common_param)
         : SINDI(std::dynamic_pointer_cast<SINDIParameter>(param), common_param){};
 
-    ~SINDI() = default;
+    ~SINDI() override = default;
 
     std::string
     GetName() const override {

@@ -43,7 +43,7 @@ public:
 
     FP32Quantizer(const QuantizerParamPtr& param, const IndexCommonParam& common_param);
 
-    ~FP32Quantizer() = default;
+    ~FP32Quantizer() override = default;
 
     bool
     TrainImpl(const DataType* data, uint64_t count);
