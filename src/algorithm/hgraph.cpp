@@ -69,8 +69,8 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
       hierarchical_datacell_param_(hgraph_param->hierarchical_graph_param),
       use_old_serial_format_(common_param.use_old_serial_format_),
       use_reverse_edges_(hgraph_param->use_reverse_edges) {
-    this->label_table_->compress_duplicate_data_ = hgraph_param->support_duplicate;
     this->label_table_->support_tombstone_ = hgraph_param->support_tombstone;
+    this->support_duplicate_ = hgraph_param->support_duplicate;
     neighbors_mutex_ = std::make_shared<PointsMutex>(0, common_param.allocator_.get());
     this->basic_flatten_codes_ =
         FlattenInterface::MakeInstance(hgraph_param->base_codes_param, common_param);
@@ -431,6 +431,13 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             },
         },
         {
+            HGRAPH_SUPPORT_DUPLICATE,
+            {
+                GRAPH_KEY,
+                SUPPORT_DUPLICATE,
+            },
+        },
+        {
             HGRAPH_SUPPORT_TOMBSTONE,
             {
                 SUPPORT_TOMBSTONE,
@@ -460,7 +467,8 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             "{GRAPH_PARAM_MAX_DEGREE_KEY}": 64,
             "{GRAPH_PARAM_INIT_MAX_CAPACITY_KEY}": 100,
             "{GRAPH_SUPPORT_REMOVE}": false,
-            "{REMOVE_FLAG_BIT}": 8
+            "{REMOVE_FLAG_BIT}": 8,
+            "{SUPPORT_DUPLICATE}": false
         },
         "{BASE_CODES_KEY}": {
             "{IO_PARAMS_KEY}": {
@@ -1304,10 +1312,11 @@ HGraph::deserialize_basic_info(const JsonType& jsonify_basic_info) {
 
 void
 HGraph::serialize_label_info(StreamWriter& writer) const {
-    if (this->label_table_->CompressDuplicateData()) {
+    if (this->support_duplicate_) {
         this->label_table_->Serialize(writer);
         return;
     }
+
     StreamWriter::WriteVector(writer, this->label_table_->label_table_);
     uint64_t size = this->label_table_->label_remap_.size();
     StreamWriter::WriteObj(writer, size);
@@ -1319,11 +1328,12 @@ HGraph::serialize_label_info(StreamWriter& writer) const {
 }
 
 void
-HGraph::deserialize_label_info(StreamReader& reader) const {
-    if (this->label_table_->CompressDuplicateData()) {
-        this->label_table_->Deserialize(reader);
+HGraph::deserialize_label_info(StreamReader& reader, bool is_legacy_duplicate_format) const {
+    if (this->support_duplicate_) {
+        this->label_table_->Deserialize(reader, is_legacy_duplicate_format);
         return;
     }
+
     StreamReader::ReadVector(reader, this->label_table_->label_table_);
     uint64_t size;
     StreamReader::ReadObj(reader, size);
@@ -1334,7 +1344,6 @@ HGraph::deserialize_label_info(StreamReader& reader) const {
         StreamReader::ReadObj(reader, value);
         this->label_table_->label_remap_.emplace(key, value);
     }
-    // Restore total_count from label_remap size (same as number of valid elements)
     this->label_table_->total_count_.store(static_cast<int64_t>(size));
 }
 
@@ -1387,6 +1396,9 @@ HGraph::Serialize(StreamWriter& writer) const {
     auto jsonify_basic_info = this->serialize_basic_info();
     auto metadata = std::make_shared<Metadata>();
     metadata->Set(BASIC_INFO, jsonify_basic_info);
+    if (this->support_duplicate_) {
+        metadata->Set("duplicate_format_version", 1);
+    }
     logger::debug(jsonify_basic_info.Dump());
 
     auto footer = std::make_shared<Footer>(metadata);
@@ -1434,7 +1446,18 @@ HGraph::Deserialize(StreamReader& reader) {
         auto metadata = footer->GetMetadata();
         // metadata should NOT be nullptr if footer is not nullptr
         this->deserialize_basic_info(metadata->Get(BASIC_INFO));
-        this->deserialize_label_info(buffer_reader);
+
+        int dup_version = 0;
+        if (metadata->Get("duplicate_format_version").IsNumberInteger()) {
+            dup_version = metadata->Get("duplicate_format_version").GetInt();
+        }
+        bool is_legacy_duplicate_format = (dup_version == 0);
+
+        if (this->support_duplicate_ && is_legacy_duplicate_format) {
+            this->label_table_->SetDuplicateTracker(this->bottom_graph_->GetDuplicateTracker());
+        }
+
+        this->deserialize_label_info(buffer_reader, is_legacy_duplicate_format);
 
         this->basic_flatten_codes_->Deserialize(buffer_reader);
         this->bottom_graph_->Deserialize(buffer_reader);
@@ -1602,7 +1625,7 @@ HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
 
     param.ef = this->ef_construct_;
     param.topk = static_cast<int64_t>(ef_construct_);
-    if (this->label_table_->CompressDuplicateData()) {
+    if (this->support_duplicate_) {
         param.find_duplicate = true;
     }
 
@@ -1614,9 +1637,9 @@ HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
                                   // to specify which overloaded function to call
                                   (VisitedListPtr) nullptr,
                                   nullptr);
-        if (this->label_table_->CompressDuplicateData() && param.duplicate_id >= 0) {
+        if (this->support_duplicate_ && param.duplicate_id >= 0) {
             std::unique_lock lock(this->label_lookup_mutex_);
-            label_table_->SetDuplicateId(static_cast<InnerIdType>(param.duplicate_id), inner_id);
+            bottom_graph_->SetDuplicateId(static_cast<InnerIdType>(param.duplicate_id), inner_id);
             return false;
         }
         auto filtered_result = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
@@ -1690,6 +1713,9 @@ HGraph::resize(uint64_t new_size) {
         pool_ = std::make_shared<VisitedListPool>(1, allocator_, new_size_power_2, allocator_);
         this->label_table_->Resize(new_size_power_2);
         bottom_graph_->Resize(new_size_power_2);
+        if (this->support_duplicate_ && bottom_graph_->GetDuplicateTracker()) {
+            bottom_graph_->GetDuplicateTracker()->Resize(new_size_power_2);
+        }
         this->basic_flatten_codes_->Resize(new_size_power_2);
         if (use_reorder_) {
             this->high_precise_codes_->Resize(new_size_power_2);

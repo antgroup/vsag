@@ -16,7 +16,6 @@
 #include "pyramid.h"
 
 #include <chrono>
-#include <iostream>
 
 #include "algorithm/inner_index_interface.h"
 #include "datacell/flatten_interface.h"
@@ -129,6 +128,9 @@ IndexNode::Deserialize(StreamReader& reader) {
     if (status_ == Status::GRAPH) {
         graph_ = std::make_shared<SparseGraphDataCell>(
             std::dynamic_pointer_cast<SparseGraphDatacellParameter>(graph_param_), allocator_);
+        if (graph_param_->support_duplicate_) {
+            graph_->InitDuplicateTracker();
+        }
         graph_->Deserialize(reader);
     } else if (status_ == Status::FLAT) {
         StreamReader::ReadVector(reader, ids_);
@@ -182,6 +184,9 @@ IndexNode::Init() {
             }
             graph_ = std::make_shared<SparseGraphDataCell>(
                 std::dynamic_pointer_cast<SparseGraphDatacellParameter>(graph_param_), allocator_);
+            if (graph_param_->support_duplicate_) {
+                graph_->InitDuplicateTracker();
+            }
             status_ = Status::GRAPH;
         } else {
             status_ = Status::FLAT;
@@ -252,7 +257,7 @@ Pyramid::KnnSearch(const DatasetPtr& query,
     search_param.topk = k;
     search_param.search_mode = KNN_SEARCH;
     search_param.parallel_search_thread_count = parsed_param.parallel_search_thread_count;
-    if (this->label_table_->CompressDuplicateData()) {
+    if (this->support_duplicate_) {
         search_param.consider_duplicate = true;
     }
 
@@ -299,7 +304,7 @@ Pyramid::RangeSearch(const DatasetPtr& query,
         search_param.time_cost->SetThreshold(parsed_param.timeout_ms);
     }
 
-    if (this->label_table_->CompressDuplicateData()) {
+    if (this->support_duplicate_) {
         search_param.consider_duplicate = true;
     }
 
@@ -461,7 +466,6 @@ Pyramid::Deserialize(StreamReader& reader) {
 
 std::vector<int64_t>
 Pyramid::Add(const DatasetPtr& base, AddMode mode) {
-    std::cout << "[ADD] Starting Add with " << base->GetNumElements() << " vectors" << std::endl;
     const auto* path = base->GetPaths();
     CHECK_ARGUMENT(path != nullptr, "path is required");
     int64_t data_num = base->GetNumElements();
@@ -500,16 +504,10 @@ Pyramid::Add(const DatasetPtr& base, AddMode mode) {
             }
         }
         cur_element_count_ += valid_id_count;
-        std::cout << "[ADD] Valid vectors: " << valid_id_count
-                  << ", total now: " << cur_element_count_ << std::endl;
     }
     std::shared_lock<std::shared_mutex> lock(resize_mutex_);
-    std::cout << "[ADD] Starting parallel add to nodes..." << std::endl;
 
     auto add_func = [&](int64_t i, int64_t data_bias) {
-        if (i < 20 || i % 20 == 0) {
-            std::cout << "[ADD_FUNC] Starting operation " << i << std::endl;
-        }
         std::string current_path = path[data_bias];
         auto path_slices = split(current_path, PART_SLASH);
         IndexNode* node = root_.get();
@@ -528,40 +526,26 @@ Pyramid::Add(const DatasetPtr& base, AddMode mode) {
                 no_build_level_index++;
                 continue;
             }
-            if (i < 5) {
-                std::cout << "[ADD_FUNC] i=" << i
-                          << " calling add_one_point for inner_id=" << inner_id
-                          << " at level=" << node->level_ << " (call " << ++add_count << ")"
-                          << std::endl;
-            }
+            ++add_count;
             add_one_point(node, inner_id, vector);
             node = new_node;
         }
     };
 
     Vector<std::future<void>> futures(allocator_);
-    std::cout << "[ADD] Starting " << data_biases.size() << " add operations..." << std::endl;
     for (int64_t i = 0; i < data_biases.size(); ++i) {
         auto data_bias = data_biases[i];
-        if (i % 10 == 0) {
-            std::cout << "[ADD] Submitting operation " << i << "/" << data_biases.size()
-                      << std::endl;
-        }
         if (this->thread_pool_ != nullptr) {
             futures.push_back(this->thread_pool_->GeneralEnqueue(add_func, i, data_bias));
         } else {
             add_func(i, data_bias);
         }
     }
-    std::cout << "[ADD] All operations submitted" << std::endl;
     if (this->thread_pool_ != nullptr) {
-        std::cout << "[ADD] Waiting for " << futures.size() << " threads..." << std::endl;
         for (auto& future : futures) {
             future.get();
         }
-        std::cout << "[ADD] All threads complete" << std::endl;
     }
-    std::cout << "[ADD] Add complete, " << failed_ids.size() << " failed" << std::endl;
     return failed_ids;
 }
 
@@ -645,7 +629,8 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
             "{GRAPH_PARAM_MAX_DEGREE_KEY}": 64,
             "{GRAPH_PARAM_INIT_MAX_CAPACITY_KEY}": 100,
             "{GRAPH_SUPPORT_REMOVE}": false,
-            "{REMOVE_FLAG_BIT}": 8
+            "{REMOVE_FLAG_BIT}": 8,
+            "{SUPPORT_DUPLICATE}": false
         },
         "{BASE_CODES_KEY}": {
             "{IO_PARAMS_KEY}": {
@@ -717,7 +702,8 @@ Pyramid::CheckAndMappingExternalParam(const JsonType& external_param,
         {ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE,
          {GRAPH_KEY, ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE}},
         {PYRAMID_INDEX_MIN_SIZE, {INDEX_MIN_SIZE}},
-        {PYRAMID_SUPPORT_DUPLICATE, {SUPPORT_DUPLICATE}}};
+        {PYRAMID_SUPPORT_DUPLICATE, {SUPPORT_DUPLICATE}},
+        {PYRAMID_SUPPORT_DUPLICATE, {GRAPH_KEY, SUPPORT_DUPLICATE}}};
 
     std::string str = format_map(HGRAPH_PARAMS_TEMPLATE, DEFAULT_MAP);
     auto inner_json = JsonType::Parse(str);
@@ -736,15 +722,12 @@ Pyramid::Train(const DatasetPtr& base) {
 }
 std::vector<int64_t>
 Pyramid::Build(const DatasetPtr& base) {
-    std::cout << "[BUILD] Starting Build..." << std::endl;
     CHECK_ARGUMENT(GetNumElements() == 0, "index is not empty");
-    std::cout << "[BUILD] Training..." << std::endl;
     this->Train(base);
     std::vector<int64_t> ret;
     const auto* path = base->GetPaths();
     CHECK_ARGUMENT(path != nullptr, "path is required");
     int64_t data_num = base->GetNumElements();
-    std::cout << "[BUILD] Assigning " << data_num << " vectors to nodes..." << std::endl;
     for (int i = 0; i < data_num; ++i) {
         std::string current_path = path[i];
         auto path_slices = split(current_path, PART_SLASH);
@@ -760,63 +743,40 @@ Pyramid::Build(const DatasetPtr& base) {
                 node->ids_.push_back(i);
             }
         }
-        if ((i + 1) % 100 == 0) {
-            std::cout << "[BUILD] Assigned " << (i + 1) << "/" << data_num << " vectors"
-                      << std::endl;
-        }
     }
-    std::cout << "[BUILD] Assignment complete, graph_type=" << graph_type_ << std::endl;
 
     if (graph_type_ == GRAPH_TYPE_VALUE_NSW) {
-        std::cout << "[BUILD] Calling Add()..." << std::endl;
         ret = this->Add(base);
-        std::cout << "[BUILD] Add() complete" << std::endl;
     } else {
-        std::cout << "[BUILD] Calling build_by_odescent()..." << std::endl;
         ret = this->build_by_odescent(base);
-        std::cout << "[BUILD] build_by_odescent() complete" << std::endl;
     }
     return ret;
 }
 
 void
 Pyramid::add_one_point(IndexNode* node, InnerIdType inner_id, const float* vector) {
-    auto t_start = std::chrono::high_resolution_clock::now();
-    std::cout << "[ADD_ONE] Enter id=" << inner_id << " level=" << node->level_
-              << " status=" << static_cast<int>(node->status_) << std::endl;
     std::unique_lock graph_lock(node->mutex_);
-    std::cout << "[ADD_ONE] id=" << inner_id << " got lock" << std::endl;
 
     if (node->status_ == IndexNode::Status::NO_INDEX) {
-        std::cout << "[ADD_ONE] id=" << inner_id << " calling Init()" << std::endl;
         node->Init();
         Vector<InnerIdType>(allocator_).swap(node->ids_);
-        std::cout << "[ADD_ONE] id=" << inner_id
-                  << " Init done, status=" << static_cast<int>(node->status_) << std::endl;
     }
 
     if (node->status_ == IndexNode::Status::FLAT) {
-        std::cout << "[ADD_ONE] id=" << inner_id << " FLAT mode" << std::endl;
         node->ids_.push_back(inner_id);
         return;
     }
 
-    std::cout << "[ADD_ONE] id=" << inner_id
-              << " GRAPH mode, graph_size=" << node->graph_->TotalCount() << std::endl;
-
     if (node->graph_->TotalCount() == 0) {
-        std::cout << "[ADD_ONE] id=" << inner_id << " first element" << std::endl;
         node->graph_->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
         node->entry_point_ = inner_id;
-        std::cout << "[ADD_ONE] id=" << inner_id << " first element done" << std::endl;
     } else {
-        std::cout << "[ADD_ONE] id=" << inner_id << " searching..." << std::endl;
         InnerSearchParam search_param;
         search_param.ef = ef_construction_;
         search_param.topk = static_cast<int64_t>(ef_construction_);
         search_param.search_mode = KNN_SEARCH;
         search_param.hops_limit = 10000;  // Add hops limit to prevent infinite loop
-        if (label_table_->CompressDuplicateData()) {
+        if (support_duplicate_) {
             search_param.find_duplicate = true;
         }
         auto codes = use_reorder_ ? precise_codes_ : base_codes_;
@@ -830,24 +790,13 @@ Pyramid::add_one_point(IndexNode* node, InnerIdType inner_id, const float* vecto
             graph_lock.unlock();
         }
 
-        auto t_search_start = std::chrono::high_resolution_clock::now();
-        std::cout << "[ADD_ONE] id=" << inner_id << " taking vl..." << std::endl;
         auto vl = pool_->TakeOne();
-        std::cout << "[ADD_ONE] id=" << inner_id << " vl taken, calling Search..." << std::endl;
         auto results = searcher_->Search(
             node->graph_, codes, vl, vector, search_param, (LabelTablePtr) nullptr, nullptr);
         pool_->ReturnOne(vl);
-        auto t_search_end = std::chrono::high_resolution_clock::now();
-        auto search_us =
-            std::chrono::duration_cast<std::chrono::microseconds>(t_search_end - t_search_start)
-                .count();
-        if (inner_id < 20) {
-            std::cout << "[PYRAMID] id=" << inner_id << " Search took " << search_us << "us"
-                      << std::endl;
-        }
-        if (this->label_table_->CompressDuplicateData() && search_param.duplicate_id >= 0) {
+        if (this->support_duplicate_ && search_param.duplicate_id >= 0) {
             std::unique_lock lock(this->label_lookup_mutex_);
-            label_table_->SetDuplicateId(static_cast<InnerIdType>(search_param.duplicate_id),
+            node->graph_->SetDuplicateId(static_cast<InnerIdType>(search_param.duplicate_id),
                                          inner_id);
             return;
         }

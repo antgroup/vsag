@@ -15,6 +15,8 @@
 
 #include "label_table.h"
 
+#include "datacell/dense_duplicate_tracker.h"
+
 namespace vsag {
 
 class RemoveListFilter : public Filter {
@@ -40,8 +42,6 @@ LabelTable::LabelTable(Allocator* allocator, bool use_reverse_map, bool compress
       label_remap_(0, allocator),
       use_reverse_map_(use_reverse_map),
       deleted_ids_(allocator),
-      compress_duplicate_data_(compress_redundant_data),
-      duplicate_ids_(0, allocator),
       hole_list_(0, allocator) {
     deleted_ids_filter_ = std::make_shared<RemoveListFilter>(deleted_ids_, delete_ids_mutex_);
 }
@@ -144,6 +144,29 @@ LabelTable::MarkRemove(const std::vector<LabelType>& labels) {
     }
     std::shared_lock rlock(delete_ids_mutex_);
     return this->deleted_ids_.size() - init_delete_size;
+}
+
+void
+LabelTable::Deserialize(StreamReader& reader, bool is_legacy_duplicate_format) {
+    StreamReader::ReadVector(reader, label_table_);
+    if (use_reverse_map_) {
+        for (InnerIdType id = 0; id < label_table_.size(); ++id) {
+            this->label_remap_[label_table_[id]] = id;
+        }
+    }
+
+    if (is_legacy_duplicate_format && duplicate_tracker_ != nullptr) {
+        auto dense_tracker = std::dynamic_pointer_cast<DenseDuplicateTracker>(duplicate_tracker_);
+        if (dense_tracker != nullptr) {
+            dense_tracker->DeserializeFromLegacyFormat(reader, label_table_.size());
+        }
+    }
+
+    if (support_tombstone_) {
+        StreamReader::ReadObj(reader, deleted_ids_);
+    }
+
+    this->total_count_.store(label_table_.size());
 }
 
 void

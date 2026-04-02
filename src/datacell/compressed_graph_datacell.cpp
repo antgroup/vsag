@@ -136,6 +136,9 @@ CompressedGraphDataCell::Resize(InnerIdType new_size) {
     }
     neighbor_sets_.resize(new_size);
     this->max_capacity_ = new_size;
+    if (this->duplicate_tracker_ != nullptr) {
+        this->duplicate_tracker_->Resize(new_size);
+    }
 }
 
 bool

@@ -21,6 +21,7 @@
 
 #include "algorithm/hnswlib/hnswalg.h"
 #include "common.h"
+#include "dense_duplicate_tracker.h"
 #include "graph_datacell_parameter.h"
 #include "graph_interface.h"
 #include "graph_interface_parameter.h"
@@ -112,6 +113,11 @@ public:
             memory += io_->GetMemoryUsage();
         }
         return memory;
+    }
+
+    DuplicateTrackerPtr
+    CreateDuplicateTracker() override {
+        return std::make_shared<DenseDuplicateTracker>(allocator_);
     }
 
 private:
@@ -270,6 +276,9 @@ GraphDataCell<IOTmpl>::Resize(InnerIdType new_size) {
     uint64_t io_size = static_cast<uint64_t>(new_size) * static_cast<uint64_t>(code_line_size_);
     this->io_->Resize(io_size);
     this->max_capacity_ = new_size;
+    if (this->duplicate_tracker_ != nullptr) {
+        this->duplicate_tracker_->Resize(new_size);
+    }
 }
 
 template <typename IOTmpl>

@@ -251,10 +251,6 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                            const InnerSearchParam& inner_search_param,
                            const LabelTablePtr& label_table,
                            QueryContext* ctx) const {
-    auto func_start = std::chrono::high_resolution_clock::now();
-    static int64_t search_count = 0;
-    search_count++;
-
     // set customize query alloctor
     Allocator* alloc = select_query_allocator(ctx, allocator_);
 
@@ -298,6 +294,17 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     if (check_func(ep)) {
         top_candidates->Push(dist, ep);
         lower_bound = top_candidates->Top().first;
+    }
+    if (inner_search_param.consider_duplicate) {
+        const auto duplicate_ids = graph->GetDuplicateIds(ep);
+        for (const auto& item : duplicate_ids) {
+            if (check_func(item)) {
+                top_candidates->Push(dist, item);
+            }
+        }
+        if (not top_candidates->Empty()) {
+            lower_bound = top_candidates->Top().first;
+        }
     }
     if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
         if (dist > inner_search_param.radius and not top_candidates->Empty()) {
@@ -354,9 +361,8 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                 if (check_func(to_be_visited_id[i])) {
                     top_candidates->Push(dist, to_be_visited_id[i]);
                 }
-                if (inner_search_param.consider_duplicate and label_table != nullptr and
-                    label_table->CompressDuplicateData()) {
-                    const auto& duplicate_ids = label_table->GetDuplicateId(to_be_visited_id[i]);
+                if (inner_search_param.consider_duplicate) {
+                    const auto duplicate_ids = graph->GetDuplicateIds(to_be_visited_id[i]);
                     for (const auto& item : duplicate_ids) {
                         if (check_func(item)) {
                             top_candidates->Push(dist, item);
@@ -395,7 +401,6 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
 
     // set duplicate id for query vector
     if (inner_search_param.find_duplicate) {
-        auto dup_start = std::chrono::high_resolution_clock::now();
         const auto* data = top_candidates->GetData();
         auto min_distance = data[0].first;
         auto min_index = data[0].second;
@@ -415,23 +420,6 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
         if (need_release) {
             flatten->Release(codes);
         }
-        auto dup_end = std::chrono::high_resolution_clock::now();
-        auto dup_duration =
-            std::chrono::duration_cast<std::chrono::microseconds>(dup_end - dup_start);
-        if (search_count % 10 == 0) {
-            logger::info("[SEARCH] find_duplicate logic took {}us", dup_duration.count());
-        }
-    }
-
-    auto func_end = std::chrono::high_resolution_clock::now();
-    auto func_duration =
-        std::chrono::duration_cast<std::chrono::microseconds>(func_end - func_start);
-    if (search_count % 10 == 0) {
-        logger::info("[SEARCH] Total search #{} took {}us, hops={}, dist_cmp={}",
-                     search_count,
-                     func_duration.count(),
-                     hops,
-                     dist_cmp);
     }
 
     if (ctx != nullptr and ctx->stats != nullptr) {

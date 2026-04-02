@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,32 +14,38 @@
 
 #pragma once
 
-#include "parameter.h"
+#include <memory>
+#include <vector>
+
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
+#include "typing.h"
 #include "utils/pointer_define.h"
+
 namespace vsag {
-DEFINE_POINTER2(GraphInterfaceParam, GraphInterfaceParameter);
 
-enum class GraphStorageTypes {
-    GRAPH_STORAGE_TYPE_VALUE_FLAT = 0,
-    GRAPH_STORAGE_TYPE_VALUE_COMPRESSED = 1,
-    GRAPH_STORAGE_TYPE_SPARSE = 2
+DEFINE_POINTER(DuplicateInterface);
+
+class DuplicateInterface {
+public:
+    virtual ~DuplicateInterface() = default;
+
+    virtual void
+    SetDuplicateId(InnerIdType original_id, InnerIdType duplicate_id) = 0;
+
+    virtual auto
+    GetDuplicateIds(InnerIdType id) const -> std::vector<InnerIdType> = 0;
+
+    virtual void
+    Serialize(StreamWriter& writer) const = 0;
+
+    virtual void
+    Deserialize(StreamReader& reader) = 0;
+
+    virtual void
+    Resize(InnerIdType new_size) = 0;
 };
 
-class GraphInterfaceParameter : public Parameter {
-public:
-    static GraphInterfaceParamPtr
-    GetGraphParameterByJson(GraphStorageTypes graph_type, const JsonType& json);
-
-public:
-    GraphStorageTypes graph_storage_type_{GraphStorageTypes::GRAPH_STORAGE_TYPE_VALUE_FLAT};
-
-    uint64_t max_degree_{64};
-
-    bool support_duplicate_{false};
-
-protected:
-    explicit GraphInterfaceParameter(GraphStorageTypes graph_type)
-        : graph_storage_type_(graph_type){};
-};
+using DuplicateTrackerPtr = std::shared_ptr<DuplicateInterface>;
 
 }  // namespace vsag

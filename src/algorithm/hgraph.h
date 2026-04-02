@@ -316,7 +316,7 @@ private:
     serialize_label_info(StreamWriter& writer) const;
 
     void
-    deserialize_label_info(StreamReader& reader) const;
+    deserialize_label_info(StreamReader& reader, bool is_legacy_duplicate_format = false) const;
 
     // used in version [0.12.*, 0.14.*]
     void
@@ -415,5 +415,7 @@ private:
     ReorderInterfacePtr reorder_{nullptr};
 
     bool use_old_serial_format_{false};
+
+    bool support_duplicate_{false};
 };
 }  // namespace vsag
