@@ -82,6 +82,26 @@ make_instance(const FlattenInterfaceParamPtr& param, const IndexCommonParam& com
             fmt::format("INT8 data type does not support {} quantization", quantization_string));
     }
 
+    // Handle FP16/BF16 data type specially
+    if (common_param.data_type_ == DataTypes::DATA_TYPE_FP16 ||
+        common_param.data_type_ == DataTypes::DATA_TYPE_BF16) {
+        if (quantization_string == QUANTIZATION_TYPE_VALUE_FP16) {
+            return make_instance_flatten<QuantizerAdapter<FP16Quantizer<metric>, uint16_t>, IOTemp>(
+                param, common_param);
+        }
+        if (quantization_string == QUANTIZATION_TYPE_VALUE_BF16) {
+            return make_instance_flatten<QuantizerAdapter<BF16Quantizer<metric>, uint16_t>, IOTemp>(
+                param, common_param);
+        }
+        if (quantization_string == QUANTIZATION_TYPE_VALUE_PQ) {
+            return make_instance_flatten<QuantizerAdapter<ProductQuantizer<metric>, uint16_t>,
+                                         IOTemp>(param, common_param);
+        }
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            fmt::format("FP16/BF16 data type does not support {} quantization",
+                                        quantization_string));
+    }
+
     // Determine the actual quantization type to use
     auto actual_quant_type = quantization_string;
     bool is_transform_quantizer = (quantization_string == QUANTIZATION_TYPE_VALUE_TQ);
