@@ -15,6 +15,8 @@
 
 #pragma once
 
+#include <atomic>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -30,7 +32,8 @@ public:
     GetAvgResult() const;
 
 private:
-    uint64_t count_ = 0;
+    std::atomic<uint64_t> count_{0};
     std::vector<float> queue_;
+    mutable std::mutex queue_mutex_;
 };
 }  // namespace vsag
