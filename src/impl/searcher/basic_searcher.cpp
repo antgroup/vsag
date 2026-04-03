@@ -16,6 +16,7 @@
 #include "basic_searcher.h"
 
 #include <atomic>
+#include <chrono>
 #include <limits>
 
 #include "algorithm/inner_index_interface.h"
@@ -349,9 +350,8 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                 if (check_func(to_be_visited_id[i])) {
                     top_candidates->Push(dist, to_be_visited_id[i]);
                 }
-                if (inner_search_param.consider_duplicate and label_table != nullptr and
-                    label_table->CompressDuplicateData()) {
-                    const auto& duplicate_ids = label_table->GetDuplicateId(to_be_visited_id[i]);
+                if (inner_search_param.consider_duplicate) {
+                    const auto duplicate_ids = graph->GetDuplicateIds(to_be_visited_id[i]);
                     for (const auto& item : duplicate_ids) {
                         if (check_func(item)) {
                             top_candidates->Push(dist, item);

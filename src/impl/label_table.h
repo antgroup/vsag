@@ -21,6 +21,7 @@
 #include <atomic>
 #include <shared_mutex>
 
+#include "datacell/duplicate_interface.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "typing.h"
@@ -202,24 +203,6 @@ public:
     void
     Serialize(StreamWriter& writer) const {
         StreamWriter::WriteVector(writer, label_table_);
-        if (compress_duplicate_data_) {
-            StreamWriter::WriteObj(writer, duplicate_count_);
-            Vector<bool> visited(label_table_.size(), false, allocator_);
-            for (InnerIdType i = 0; i < label_table_.size(); ++i) {
-                if (duplicate_ids_[i] != i and not visited[i]) {
-                    StreamWriter::WriteObj(writer, i);
-                    Vector<InnerIdType> id_list(allocator_);
-                    auto current_id = i;
-                    visited[current_id] = true;
-                    while (duplicate_ids_[current_id] != i) {
-                        id_list.emplace_back(duplicate_ids_[current_id]);
-                        current_id = duplicate_ids_[current_id];
-                        visited[current_id] = true;
-                    }
-                    StreamWriter::WriteVector(writer, id_list);
-                }
-            }
-        }
         if (support_tombstone_) {
             StreamWriter::WriteObj(writer, deleted_ids_);
         }
@@ -233,25 +216,6 @@ public:
                 this->label_remap_[label_table_[id]] = id;
             }
         }
-        if (compress_duplicate_data_) {
-            StreamReader::ReadObj(reader, duplicate_count_);
-            duplicate_ids_.resize(label_table_.size());
-            for (int i = total_count_; i < label_table_.size(); ++i) {
-                duplicate_ids_[i] = i;
-            }
-            for (InnerIdType i = 0; i < duplicate_count_; ++i) {
-                InnerIdType id;
-                StreamReader::ReadObj<InnerIdType>(reader, id);
-                Vector<InnerIdType> id_list(allocator_);
-                StreamReader::ReadVector(reader, id_list);
-                auto current_id = id;
-                for (const auto& duplicate_id : id_list) {
-                    duplicate_ids_[current_id] = duplicate_id;
-                    current_id = duplicate_id;
-                }
-                duplicate_ids_[current_id] = id;
-            }
-        }
         if (support_tombstone_) {
             StreamReader::ReadObj(reader, deleted_ids_);
         }
@@ -260,17 +224,14 @@ public:
     }
 
     void
+    Deserialize(StreamReader& reader);
+
+    void
     Resize(uint64_t new_size) {
         if (new_size < total_count_) {
             return;
         }
         label_table_.resize(new_size);
-        if (compress_duplicate_data_) {
-            duplicate_ids_.resize(new_size);
-            for (int i = total_count_; i < new_size; ++i) {
-                duplicate_ids_[i] = i;
-            }
-        }
     }
 
     int64_t
@@ -278,35 +239,9 @@ public:
         return total_count_;
     }
 
-    inline bool
-    CompressDuplicateData() const {
-        return compress_duplicate_data_;
-    }
-
-    inline void
-    SetDuplicateId(InnerIdType previous_id, InnerIdType current_id) {
-        std::scoped_lock duplicate_lock(duplicate_mutex_);
-        auto id = previous_id;
-        while (duplicate_ids_[id] != previous_id) {
-            id = duplicate_ids_[id];
-        }
-        if (duplicate_ids_[id] == id) {
-            duplicate_count_++;
-        }
-        duplicate_ids_[current_id] = duplicate_ids_[id];
-        duplicate_ids_[id] = current_id;
-    }
-
-    const UnorderedSet<InnerIdType>
-    GetDuplicateId(InnerIdType id) const {
-        std::shared_lock duplicate_lock(duplicate_mutex_);
-        UnorderedSet<InnerIdType> ids(allocator_);
-        auto current_id = id;
-        while (duplicate_ids_[current_id] != id) {
-            ids.insert(duplicate_ids_[current_id]);
-            current_id = duplicate_ids_[current_id];
-        }
-        return ids;
+    void
+    SetDuplicateTracker(DuplicateTrackerPtr tracker) {
+        duplicate_tracker_ = std::move(tracker);
     }
 
     void
@@ -320,9 +255,7 @@ public:
     GetMemoryUsage() {
         return sizeof(LabelTable) + label_table_.size() * sizeof(LabelType) +
                label_remap_.size() * (sizeof(LabelType) + sizeof(InnerIdType)) +
-               deleted_ids_.size() * sizeof(InnerIdType) +
-               duplicate_ids_.size() * sizeof(InnerIdType) +
-               hole_list_.size() * sizeof(InnerIdType);
+               deleted_ids_.size() * sizeof(InnerIdType) + hole_list_.size() * sizeof(InnerIdType);
     }
 
     /**
@@ -366,17 +299,16 @@ public:
     // Label table, map from id to label.
     Vector<LabelType> label_table_;
 
+    // Temporary compatibility switch for legacy duplicate payload layout.
+    bool is_legacy_duplicate_format_{false};
+
     // Whether to use reverse map to speed up GetIdByLabel.
     bool use_reverse_map_{true};
     // Reverse map from label to id.
     PGUnorderedMap<LabelType, InnerIdType> label_remap_;
 
-    bool compress_duplicate_data_{true};
     bool support_tombstone_{false};
-
-    mutable std::shared_mutex duplicate_mutex_;
-    uint64_t duplicate_count_{0L};
-    Vector<InnerIdType> duplicate_ids_;
+    DuplicateTrackerPtr duplicate_tracker_{nullptr};
 
     Allocator* allocator_{nullptr};
     std::atomic<int64_t> total_count_{0L};
