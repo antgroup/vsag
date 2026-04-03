@@ -17,6 +17,7 @@
 namespace vsag {
 
 extern const char* const INDEX_HGRAPH;
+extern const char* const INDEX_HGRAPH_DISKANN_LOADER;
 extern const char* const INDEX_DISKANN;
 extern const char* const INDEX_HNSW;
 extern const char* const INDEX_FRESH_HNSW;

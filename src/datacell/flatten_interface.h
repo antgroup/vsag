@@ -68,6 +68,14 @@ public:
     virtual void
     BatchInsertVector(const void* vectors, InnerIdType count, InnerIdType* idx_vec = nullptr) = 0;
 
+    // Insert pre-encoded codes directly without encoding
+    // This is used when loading already-encoded data (e.g., from DiskANN format)
+    virtual void
+    InsertCodes(const uint8_t* codes, InnerIdType idx) {
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            "InsertCodes not implemented in FlattenInterface");
+    };
+
     virtual float
     ComputePairVectors(InnerIdType id1, InnerIdType id2) = 0;
 
@@ -94,6 +102,13 @@ public:
 
     [[nodiscard]] virtual MetricType
     GetMetricType() = 0;
+
+    // Get raw pointer to quantizer for advanced operations (e.g., loading external codebook)
+    // Returns nullptr if the operation is not supported
+    [[nodiscard]] virtual void*
+    GetQuantizer() {
+        return nullptr;
+    }
 
     virtual void
     Resize(InnerIdType capacity) = 0;
