@@ -178,6 +178,9 @@ GraphDataCell<IOTmpl>::GraphDataCell(const GraphDataCellParamPtr& param,
     if (this->is_support_delete_) {
         node_versions_.resize(max_capacity_);
     }
+    if (param->support_duplicate_) {
+        this->InitDuplicateTracker();
+    }
 }
 
 template <typename IOTmpl>

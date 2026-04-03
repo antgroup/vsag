@@ -145,7 +145,7 @@ LabelTable::MarkRemove(const std::vector<LabelType>& labels) {
 }
 
 void
-LabelTable::Deserialize(StreamReader& reader, bool is_legacy_duplicate_format) {
+LabelTable::Deserialize(StreamReader& reader) {
     StreamReader::ReadVector(reader, label_table_);
     if (use_reverse_map_) {
         for (InnerIdType id = 0; id < label_table_.size(); ++id) {
@@ -153,9 +153,10 @@ LabelTable::Deserialize(StreamReader& reader, bool is_legacy_duplicate_format) {
         }
     }
 
-    if (is_legacy_duplicate_format && duplicate_tracker_ != nullptr) {
+    if (is_legacy_duplicate_format_ && duplicate_tracker_ != nullptr) {
         duplicate_tracker_->DeserializeFromLegacyFormat(reader, label_table_.size());
     }
+    is_legacy_duplicate_format_ = false;
 
     if (support_tombstone_) {
         StreamReader::ReadObj(reader, deleted_ids_);

@@ -25,47 +25,34 @@ namespace vsag {
 GraphInterfacePtr
 GraphInterface::MakeInstance(const GraphInterfaceParamPtr& graph_param,
                              const IndexCommonParam& common_param) {
-    GraphInterfacePtr graph{nullptr};
     switch (graph_param->graph_storage_type_) {
         case GraphStorageTypes::GRAPH_STORAGE_TYPE_SPARSE:
-            graph = std::make_shared<SparseGraphDataCell>(graph_param, common_param);
-            break;
+            return std::make_shared<SparseGraphDataCell>(graph_param, common_param);
         case GraphStorageTypes::GRAPH_STORAGE_TYPE_VALUE_COMPRESSED:
-            graph = std::make_shared<CompressedGraphDataCell>(graph_param, common_param);
-            break;
+            return std::make_shared<CompressedGraphDataCell>(graph_param, common_param);
         case GraphStorageTypes::GRAPH_STORAGE_TYPE_VALUE_FLAT:
             auto io_string = std::dynamic_pointer_cast<GraphDataCellParameter>(graph_param)
                                  ->io_parameter_->GetTypeName();
             if (io_string == IO_TYPE_VALUE_BLOCK_MEMORY_IO) {
-                graph = std::make_shared<GraphDataCell<MemoryBlockIO>>(graph_param, common_param);
-                break;
+                return std::make_shared<GraphDataCell<MemoryBlockIO>>(graph_param, common_param);
             }
             if (io_string == IO_TYPE_VALUE_MEMORY_IO) {
-                graph = std::make_shared<GraphDataCell<MemoryIO>>(graph_param, common_param);
-                break;
+                return std::make_shared<GraphDataCell<MemoryIO>>(graph_param, common_param);
             }
             if (io_string == IO_TYPE_VALUE_MMAP_IO) {
-                graph = std::make_shared<GraphDataCell<MMapIO>>(graph_param, common_param);
-                break;
+                return std::make_shared<GraphDataCell<MMapIO>>(graph_param, common_param);
             }
             if (io_string == IO_TYPE_VALUE_BUFFER_IO) {
-                graph = std::make_shared<GraphDataCell<BufferIO>>(graph_param, common_param);
-                break;
+                return std::make_shared<GraphDataCell<BufferIO>>(graph_param, common_param);
             }
             if (io_string == IO_TYPE_VALUE_ASYNC_IO) {
-                graph = std::make_shared<GraphDataCell<AsyncIO>>(graph_param, common_param);
-                break;
+                return std::make_shared<GraphDataCell<AsyncIO>>(graph_param, common_param);
             }
             if (io_string == IO_TYPE_VALUE_READER_IO) {
-                graph = std::make_shared<GraphDataCell<ReaderIO>>(graph_param, common_param);
-                break;
+                return std::make_shared<GraphDataCell<ReaderIO>>(graph_param, common_param);
             }
-            break;
+            return nullptr;
     }
-
-    if (graph != nullptr && graph_param->support_duplicate_) {
-        graph->InitDuplicateTracker();
-    }
-    return graph;
+    return nullptr;
 }
 }  // namespace vsag

@@ -1331,9 +1331,9 @@ HGraph::serialize_label_info(StreamWriter& writer) const {
 }
 
 void
-HGraph::deserialize_label_info(StreamReader& reader, bool is_legacy_duplicate_format) const {
+HGraph::deserialize_label_info(StreamReader& reader) const {
     if (this->support_duplicate_) {
-        this->label_table_->Deserialize(reader, is_legacy_duplicate_format);
+        this->label_table_->Deserialize(reader);
         return;
     }
 
@@ -1454,9 +1454,9 @@ HGraph::Deserialize(StreamReader& reader) {
         if (metadata->Get("duplicate_format_version").IsNumberInteger()) {
             dup_version = metadata->Get("duplicate_format_version").GetInt();
         }
-        bool is_legacy_duplicate_format = (dup_version == 0);
+        this->label_table_->is_legacy_duplicate_format_ = (dup_version == 0);
 
-        this->deserialize_label_info(buffer_reader, is_legacy_duplicate_format);
+        this->deserialize_label_info(buffer_reader);
 
         this->basic_flatten_codes_->Deserialize(buffer_reader);
         this->bottom_graph_->Deserialize(buffer_reader);
@@ -1712,9 +1712,6 @@ HGraph::resize(uint64_t new_size) {
         pool_ = std::make_shared<VisitedListPool>(1, allocator_, new_size_power_2, allocator_);
         this->label_table_->Resize(new_size_power_2);
         bottom_graph_->Resize(new_size_power_2);
-        if (this->support_duplicate_ && bottom_graph_->GetDuplicateTracker()) {
-            bottom_graph_->GetDuplicateTracker()->Resize(new_size_power_2);
-        }
         this->basic_flatten_codes_->Resize(new_size_power_2);
         if (use_reorder_) {
             this->high_precise_codes_->Resize(new_size_power_2);

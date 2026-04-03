@@ -316,7 +316,7 @@ private:
     serialize_label_info(StreamWriter& writer) const;
 
     void
-    deserialize_label_info(StreamReader& reader, bool is_legacy_duplicate_format = false) const;
+    deserialize_label_info(StreamReader& reader) const;
 
     // used in version [0.12.*, 0.14.*]
     void

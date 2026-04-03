@@ -224,7 +224,7 @@ public:
     }
 
     void
-    Deserialize(StreamReader& reader, bool is_legacy_duplicate_format);
+    Deserialize(StreamReader& reader);
 
     void
     Resize(uint64_t new_size) {
@@ -298,6 +298,9 @@ private:
 public:
     // Label table, map from id to label.
     Vector<LabelType> label_table_;
+
+    // Temporary compatibility switch for legacy duplicate payload layout.
+    bool is_legacy_duplicate_format_{false};
 
     // Whether to use reverse map to speed up GetIdByLabel.
     bool use_reverse_map_{true};

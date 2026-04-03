@@ -30,6 +30,10 @@ CompressedGraphDataCell::CompressedGraphDataCell(const CompressedGraphDatacellPa
     : allocator_(common_param.allocator_.get()), neighbor_sets_(allocator_) {
     this->maximum_degree_ = graph_param->max_degree_;
     this->max_capacity_ = 0;
+    GraphInterface::allocator_ = common_param.allocator_.get();
+    if (graph_param->support_duplicate_) {
+        this->InitDuplicateTracker();
+    }
 }
 
 CompressedGraphDataCell::~CompressedGraphDataCell() {

@@ -128,9 +128,6 @@ IndexNode::Deserialize(StreamReader& reader) {
     if (status_ == Status::GRAPH) {
         graph_ = std::make_shared<SparseGraphDataCell>(
             std::dynamic_pointer_cast<SparseGraphDatacellParameter>(graph_param_), allocator_);
-        if (graph_param_->support_duplicate_) {
-            graph_->InitDuplicateTracker();
-        }
         graph_->Deserialize(reader);
     } else if (status_ == Status::FLAT) {
         StreamReader::ReadVector(reader, ids_);
@@ -184,9 +181,6 @@ IndexNode::Init() {
             }
             graph_ = std::make_shared<SparseGraphDataCell>(
                 std::dynamic_pointer_cast<SparseGraphDatacellParameter>(graph_param_), allocator_);
-            if (graph_param_->support_duplicate_) {
-                graph_->InitDuplicateTracker();
-            }
             status_ = Status::GRAPH;
         } else {
             status_ = Status::FLAT;
