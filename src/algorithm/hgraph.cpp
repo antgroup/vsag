@@ -82,6 +82,9 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
 
     this->bottom_graph_ =
         GraphInterface::MakeInstance(hgraph_param->bottom_graph_param, common_param);
+    if (this->support_duplicate_) {
+        this->label_table_->SetDuplicateTracker(this->bottom_graph_->GetDuplicateTracker());
+    }
     mult_ = 1 / log(1.0 * static_cast<double>(this->bottom_graph_->MaximumDegree()));
 
     init_resize_bit_and_reorder();
@@ -1452,10 +1455,6 @@ HGraph::Deserialize(StreamReader& reader) {
             dup_version = metadata->Get("duplicate_format_version").GetInt();
         }
         bool is_legacy_duplicate_format = (dup_version == 0);
-
-        if (this->support_duplicate_ && is_legacy_duplicate_format) {
-            this->label_table_->SetDuplicateTracker(this->bottom_graph_->GetDuplicateTracker());
-        }
 
         this->deserialize_label_info(buffer_reader, is_legacy_duplicate_format);
 

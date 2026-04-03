@@ -295,17 +295,6 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
         top_candidates->Push(dist, ep);
         lower_bound = top_candidates->Top().first;
     }
-    if (inner_search_param.consider_duplicate) {
-        const auto duplicate_ids = graph->GetDuplicateIds(ep);
-        for (const auto& item : duplicate_ids) {
-            if (check_func(item)) {
-                top_candidates->Push(dist, item);
-            }
-        }
-        if (not top_candidates->Empty()) {
-            lower_bound = top_candidates->Top().first;
-        }
-    }
     if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
         if (dist > inner_search_param.radius and not top_candidates->Empty()) {
             top_candidates->Pop();

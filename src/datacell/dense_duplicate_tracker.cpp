@@ -89,7 +89,7 @@ void
 DenseDuplicateTracker::Deserialize(StreamReader& reader) {
     std::scoped_lock lock(mutex_);
 
-    if (duplicate_count_ > 0) {
+    if (has_deserialized_) {
         return;
     }
 
@@ -114,13 +114,14 @@ DenseDuplicateTracker::Deserialize(StreamReader& reader) {
         }
         duplicate_ids_[current_id] = head_id;
     }
+    has_deserialized_ = true;
 }
 
 void
 DenseDuplicateTracker::DeserializeFromLegacyFormat(StreamReader& reader, size_t total_size) {
     std::scoped_lock lock(mutex_);
 
-    if (duplicate_count_ > 0) {
+    if (has_deserialized_) {
         return;
     }
 
@@ -142,6 +143,7 @@ DenseDuplicateTracker::DeserializeFromLegacyFormat(StreamReader& reader, size_t 
         }
         duplicate_ids_[current_id] = id;
     }
+    has_deserialized_ = true;
 }
 
 void

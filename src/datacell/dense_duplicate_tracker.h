@@ -39,7 +39,7 @@ public:
     Deserialize(StreamReader& reader) override;
 
     void
-    DeserializeFromLegacyFormat(StreamReader& reader, size_t total_size);
+    DeserializeFromLegacyFormat(StreamReader& reader, size_t total_size) override;
 
     void
     Resize(InnerIdType new_size) override;
@@ -49,6 +49,7 @@ private:
     Vector<InnerIdType> duplicate_ids_;
     mutable std::shared_mutex mutex_;
     size_t duplicate_count_{0};
+    bool has_deserialized_{false};
 };
 
 }  // namespace vsag

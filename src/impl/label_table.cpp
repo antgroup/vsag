@@ -15,8 +15,6 @@
 
 #include "label_table.h"
 
-#include "datacell/dense_duplicate_tracker.h"
-
 namespace vsag {
 
 class RemoveListFilter : public Filter {
@@ -156,10 +154,7 @@ LabelTable::Deserialize(StreamReader& reader, bool is_legacy_duplicate_format) {
     }
 
     if (is_legacy_duplicate_format && duplicate_tracker_ != nullptr) {
-        auto dense_tracker = std::dynamic_pointer_cast<DenseDuplicateTracker>(duplicate_tracker_);
-        if (dense_tracker != nullptr) {
-            dense_tracker->DeserializeFromLegacyFormat(reader, label_table_.size());
-        }
+        duplicate_tracker_->DeserializeFromLegacyFormat(reader, label_table_.size());
     }
 
     if (support_tombstone_) {

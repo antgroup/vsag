@@ -91,7 +91,7 @@ void
 SparseDuplicateTracker::Deserialize(StreamReader& reader) {
     std::scoped_lock lock(mutex_);
 
-    if (duplicate_count_ > 0) {
+    if (has_deserialized_) {
         return;
     }
 
@@ -111,6 +111,36 @@ SparseDuplicateTracker::Deserialize(StreamReader& reader) {
             duplicate_to_original_[dup_id] = original_id;
         }
     }
+    has_deserialized_ = true;
+}
+
+void
+SparseDuplicateTracker::DeserializeFromLegacyFormat(StreamReader& reader, size_t total_size) {
+    std::scoped_lock lock(mutex_);
+
+    (void)total_size;
+
+    if (has_deserialized_) {
+        return;
+    }
+
+    StreamReader::ReadObj(reader, duplicate_count_);
+    for (size_t i = 0; i < duplicate_count_; ++i) {
+        InnerIdType original_id;
+        StreamReader::ReadObj(reader, original_id);
+        std::vector<InnerIdType> dup_list;
+        StreamReader::ReadVector(reader, dup_list);
+
+        if (dup_list.empty()) {
+            continue;
+        }
+
+        original_to_duplicates_[original_id] = dup_list;
+        for (const auto& dup_id : dup_list) {
+            duplicate_to_original_[dup_id] = original_id;
+        }
+    }
+    has_deserialized_ = true;
 }
 
 }  // namespace vsag

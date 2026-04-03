@@ -43,6 +43,9 @@ public:
     Deserialize(StreamReader& reader) = 0;
 
     virtual void
+    DeserializeFromLegacyFormat(StreamReader& reader, size_t total_size) = 0;
+
+    virtual void
     Resize(InnerIdType new_size) = 0;
 };
 
