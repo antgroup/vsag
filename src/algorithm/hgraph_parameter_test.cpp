@@ -126,35 +126,45 @@ generate_hgraph_param(const HGraphDefaultParam& param) {
                        param.support_duplicate);
 }
 
-TEST_CASE("HGraph Parameters CheckCompatibility", "[ut][HGraphParameter][CheckCompatibility]"){
-    SECTION("wrong parameter type"){HGraphDefaultParam default_param;
-auto param_str = generate_hgraph_param(default_param);
-auto param = std::make_shared<vsag::HGraphParameter>();
-param->FromString(param_str);
-REQUIRE(param->CheckCompatibility(param));
-REQUIRE_FALSE(param->CheckCompatibility(std::make_shared<vsag::EmptyParameter>()));
-}
+// clang-format off
+TEST_CASE("HGraph Parameters CheckCompatibility", "[ut][HGraphParameter][CheckCompatibility]") {
+    SECTION("wrong parameter type") {
+        HGraphDefaultParam default_param;
+        auto param_str = generate_hgraph_param(default_param);
+        auto param = std::make_shared<vsag::HGraphParameter>();
+        param->FromString(param_str);
+        REQUIRE(param->CheckCompatibility(param));
+        REQUIRE_FALSE(param->CheckCompatibility(std::make_shared<vsag::EmptyParameter>()));
+    }
 
-TEST_COMPATIBILITY_CASE(
-    "different base codes io type", base_codes_io_type, "memory_io", "block_memory_io", true)
-TEST_COMPATIBILITY_CASE("different pq dim", base_codes_pq_dim, 8, 16, false)
-TEST_COMPATIBILITY_CASE(
-    "different base codes quantization type", base_codes_quantization_type, "sq4", "sq8", false)
-TEST_COMPATIBILITY_CASE("different graph type", graph_storage_type, "flat", "compressed", false)
-TEST_COMPATIBILITY_CASE("different max degree", max_degree, 26, 30, false)
-TEST_COMPATIBILITY_CASE("different support remove", support_remove, true, false, false)
-TEST_COMPATIBILITY_CASE("different remove flag bit", remove_flag_bit, 8, 16, false)
-TEST_COMPATIBILITY_CASE("different use reorder", use_reorder, true, false, false)
-TEST_COMPATIBILITY_CASE(
-    "different precise codes io type", precise_codes_io_type, "memory_io", "block_memory_io", true)
-TEST_COMPATIBILITY_CASE("different precise codes quantization type",
-                        precise_codes_quantization_type,
-                        "fp32",
-                        "sq8",
-                        false)
-TEST_COMPATIBILITY_CASE("different use attribute filter", use_attribute_filter, true, false, false)
-TEST_COMPATIBILITY_CASE("different support duplicate", support_duplicate, true, false, false)
+    TEST_COMPATIBILITY_CASE(
+        "different base codes io type", base_codes_io_type, "memory_io", "block_memory_io", true)
+    TEST_COMPATIBILITY_CASE("different pq dim", base_codes_pq_dim, 8, 16, false)
+    TEST_COMPATIBILITY_CASE("different base codes quantization type",
+                            base_codes_quantization_type,
+                            "sq4",
+                            "sq8",
+                            false)
+    TEST_COMPATIBILITY_CASE("different graph type", graph_storage_type, "flat", "compressed", false)
+    TEST_COMPATIBILITY_CASE("different max degree", max_degree, 26, 30, false)
+    TEST_COMPATIBILITY_CASE("different support remove", support_remove, true, false, false)
+    TEST_COMPATIBILITY_CASE("different remove flag bit", remove_flag_bit, 8, 16, false)
+    TEST_COMPATIBILITY_CASE("different use reorder", use_reorder, true, false, false)
+    TEST_COMPATIBILITY_CASE("different precise codes io type",
+                            precise_codes_io_type,
+                            "memory_io",
+                            "block_memory_io",
+                            true)
+    TEST_COMPATIBILITY_CASE("different precise codes quantization type",
+                            precise_codes_quantization_type,
+                            "fp32",
+                            "sq8",
+                            false)
+    TEST_COMPATIBILITY_CASE(
+        "different use attribute filter", use_attribute_filter, true, false, false)
+    TEST_COMPATIBILITY_CASE("different support duplicate", support_duplicate, true, false, false)
 }
+// clang-format on
 
 TEST_CASE("HGraph maps support_duplicate to graph parameter", "[ut][HGraphParameter]") {
     auto param = vsag::JsonType::Parse(R"({
