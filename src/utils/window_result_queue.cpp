@@ -17,7 +17,7 @@
 
 namespace vsag {
 
-constexpr static int64_t DEFAULT_WATCH_WINDOW_SIZE = 20;
+static constexpr int64_t DEFAULT_WATCH_WINDOW_SIZE = 20;
 
 WindowResultQueue::WindowResultQueue() {
     queue_.resize(DEFAULT_WATCH_WINDOW_SIZE);

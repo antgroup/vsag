@@ -298,7 +298,7 @@ private:
     /**
      * @brief The size of the max buffer used for serialization.
      */
-    constexpr static uint64_t SERIALIZE_BUFFER_SIZE = 1024 * 1024 * 2;
+    static constexpr uint64_t SERIALIZE_BUFFER_SIZE = 1024 * 1024 * 2;
 
 private:
     /**

@@ -786,7 +786,7 @@ Pyramid::add_one_point(IndexNode* node, InnerIdType inner_id, const float* vecto
             return;
         }
         mutually_connect_new_element(
-            inner_id, results, node->graph_, codes, points_mutex_, allocator_, alpha_);
+            inner_id, results, node->graph_, codes, points_mutex_, allocator_, alpha_, nullptr);
         if (update_entry_point) {
             node->entry_point_ = inner_id;
         }

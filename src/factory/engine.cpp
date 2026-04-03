@@ -59,11 +59,11 @@ Engine::CreateIndex(const std::string& origin_name, const std::string& parameter
     } catch (const std::bad_alloc& e) {
         LOG_ERROR_AND_RETURNS(
             ErrorType::NO_ENOUGH_MEMORY, "failed to create index(not enough memory): ", e.what());
+    } catch (const vsag::VsagException& e) {
+        LOG_ERROR_AND_RETURNS(e.error_.type, "failed to create index: " + e.error_.message);
     } catch (const std::exception& e) {
         LOG_ERROR_AND_RETURNS(
             ErrorType::UNSUPPORTED_INDEX, "failed to create index(unknown error): ", e.what());
-    } catch (const vsag::VsagException& e) {
-        LOG_ERROR_AND_RETURNS(e.error_.type, "failed to create index: " + e.error_.message);
     }
 }
 

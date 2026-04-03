@@ -21,7 +21,6 @@
 #include "utils/lock_strategy.h"
 
 namespace vsag {
-
 HGraphShrinkContext::HGraphShrinkContext(HGraph* hgraph) : hgraph_(hgraph) {
 }
 
@@ -32,25 +31,15 @@ HGraphShrinkContext::Run(double timeout_ms) {
 
     if (state_ == HGraphShrinkState::IDLE) {
         timeout = prepare(timeout_ms);
-        if (timeout) {
-            return;
-        }
-        if (check_point_.deleted_nodes_.empty()) {
-            state_ = HGraphShrinkState::FINISHED;
+        if (timeout || check_point_.deleted_nodes_.empty()) {
             return;
         }
         state_ = HGraphShrinkState::COLLECT_FORWARD_EDGES;
     }
+
     if (state_ != HGraphShrinkState::IDLE) {
         while (this->check_point_.current_deleted_node_index_ <
                this->check_point_.deleted_nodes_.size()) {
-            auto node = check_point_.deleted_nodes_[check_point_.current_deleted_node_index_];
-            bool is_level0 = hgraph_->CheckIdLevel0(node);
-            if (not is_level0) {
-                this->check_point_.current_deleted_node_index_++;
-                continue;
-            }
-
             if (state_ == HGraphShrinkState::COLLECT_FORWARD_EDGES) {
                 timeout = collect_forward_edges(timeout_ms);
                 if (timeout) {
@@ -91,15 +80,24 @@ HGraphShrinkContext::Run(double timeout_ms) {
                 }
             }
             check_point_.current_deleted_node_index_++;
+            state_ = HGraphShrinkState::COLLECT_FORWARD_EDGES;
         }
+
         state_ = HGraphShrinkState::IDLE;
     }
 }
 
 bool
 HGraphShrinkContext::prepare(double timeout_ms) {
-    check_point_.deleted_nodes_ =
-        hgraph_->label_table_->GetDeletedIds(HgraphShrinkCheckPoint::BATCH_SIZE);
+    // Get all deleted IDs at once, keep only level 0 nodes
+    auto all_deleted_ids = hgraph_->label_table_->GetAllDeletedIds();
+    check_point_.deleted_nodes_.clear();
+    for (auto node : all_deleted_ids) {
+        if (hgraph_->CheckIdLevel0(node)) {
+            check_point_.deleted_nodes_.push_back(node);
+        }
+    }
+    check_point_.current_deleted_node_index_ = 0;
     return this->check_timeout(timeout_ms);
 }
 
@@ -274,5 +272,4 @@ HGraphShrinkContext::cleanup(double timeout_ms) {
     hgraph_->delete_count_--;
     return this->check_timeout(timeout_ms);
 }
-
 }  // namespace vsag

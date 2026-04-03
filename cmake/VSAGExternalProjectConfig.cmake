@@ -22,6 +22,11 @@ foreach (_warning_flag -Werror=suggest-override -Werror)
     string (REPLACE "${_warning_flag}" "" _vsag_external_cxx_flags "${_vsag_external_cxx_flags}")
 endforeach ()
 
+foreach (_sanitizer_pattern "-fsanitize=[^ ]+" "-fsanitize-recover=[^ ]+" "-fno-sanitize=[^ ]+" -fno-omit-frame-pointer -fno-optimize-sibling-calls -static-libasan)
+    string (REGEX REPLACE "${_sanitizer_pattern}" "" _vsag_external_c_flags "${_vsag_external_c_flags}")
+    string (REGEX REPLACE "${_sanitizer_pattern}" "" _vsag_external_cxx_flags "${_vsag_external_cxx_flags}")
+endforeach ()
+
 string (REGEX REPLACE "[ ]+" " " _vsag_external_c_flags "${_vsag_external_c_flags}")
 string (REGEX REPLACE "[ ]+" " " _vsag_external_cxx_flags "${_vsag_external_cxx_flags}")
 

@@ -22,7 +22,7 @@ namespace vsag {
 template <bool max_heap, bool fixed_size>
 DistHeapPtr
 DistanceHeap::MakeInstanceBySize(Allocator* allocator, int64_t max_size) {
-    constexpr static int64_t memmove_maxsize = 10;
+    static constexpr int64_t memmove_maxsize = 10;
     if (max_size < memmove_maxsize) {
         return std::make_shared<MemmoveHeap<max_heap, fixed_size>>(allocator, max_size);
     }
