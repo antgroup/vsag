@@ -42,7 +42,7 @@ public:
     DeserializeFromLegacyFormat(StreamReader& reader, size_t total_size) override;
 
     void
-    Resize(InnerIdType new_size) override {
+    Resize(InnerIdType) override {
     }
 
 private:

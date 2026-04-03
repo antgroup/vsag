@@ -508,7 +508,6 @@ Pyramid::Add(const DatasetPtr& base, AddMode mode) {
         auto inner_id = static_cast<InnerIdType>(i + local_cur_element_count);
         const auto* vector = data_vectors + dim_ * data_bias;
         int no_build_level_index = 0;
-        int add_count = 0;
         for (int j = 0; j <= path_slices.size(); ++j) {
             IndexNode* new_node = nullptr;
             if (j != path_slices.size()) {
@@ -520,7 +519,6 @@ Pyramid::Add(const DatasetPtr& base, AddMode mode) {
                 no_build_level_index++;
                 continue;
             }
-            ++add_count;
             add_one_point(node, inner_id, vector);
             node = new_node;
         }
