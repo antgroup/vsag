@@ -1515,7 +1515,7 @@ TEST_CASE("hnsw with pretrained by conjugate graph", "[ft][index][hnsw]") {
     std::shared_ptr<float[]> base_data(new float[dim * base_elements]);
     std::mt19937 rng;
     rng.seed(47);
-    std::uniform_real_distribution<> distribution_real(-1, 1);
+    std::uniform_real_distribution<float> distribution_real(-1, 1);
     for (int i = 0; i < base_elements; i++) {
         base_ids[i] = i;
 
@@ -1642,7 +1642,7 @@ TEST_CASE("HNSW filtered search", "[ft][index][hnsw]") {
 
     // Generate random data
     std::mt19937 rng(47);
-    std::uniform_real_distribution<> distrib_real;
+    std::uniform_real_distribution<float> distrib_real;
     int64_t* ids = new int64_t[max_elements];
     float* data = new float[dim * max_elements];
 
@@ -1828,7 +1828,7 @@ TEST_CASE("DiskAnn filtered knn search", "[ft][index][diskann]") {
     // Generate random data
     std::mt19937 rng;
     rng.seed(47);
-    std::uniform_real_distribution<> distrib_real;
+    std::uniform_real_distribution<float> distrib_real;
     std::uniform_int_distribution<> ids_random(0, max_elements - 1);
     int64_t* ids = new int64_t[max_elements];
     float* data = new float[dim * max_elements];
