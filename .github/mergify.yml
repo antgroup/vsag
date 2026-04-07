@@ -1,4 +1,3 @@
-
 pull_request_rules:
   - name: add module/cicd label
     conditions:
@@ -108,3 +107,5 @@ pull_request_rules:
       label:
         add:
           - module/testing
+merge_protections_settings:
+  reporting_method: check-runs
