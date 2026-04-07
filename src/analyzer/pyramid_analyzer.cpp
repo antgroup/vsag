@@ -458,11 +458,13 @@ PyramidAnalyzer::calculate_weighted_recall() {
         if (stats.size == 0 || stats.status != IndexNode::Status::GRAPH) {
             continue;
         }
-        total_weighted_recall += stats.recall * stats.size;
+        total_weighted_recall += stats.recall * static_cast<float>(stats.size);
         total_weight += stats.size;
     }
 
-    return total_weight > 0 ? static_cast<float>(total_weighted_recall / total_weight) : 0.0F;
+    return total_weight > 0
+               ? static_cast<float>(total_weighted_recall / static_cast<double>(total_weight))
+               : 0.0F;
 }
 
 void
@@ -594,14 +596,14 @@ PyramidAnalyzer::calculate_quantization_result(
         auto base_result =
             pyramid_->CalDistanceById(sample_datas.data() + static_cast<size_t>(i) * dim_,
                                       topk_labels.data(),
-                                      topk_labels.size(),
+                                      static_cast<int64_t>(topk_labels.size()),
                                       false);
         const auto* base_distance = base_result->GetDistances();
 
         auto precise_result =
             pyramid_->CalDistanceById(sample_datas.data() + static_cast<size_t>(i) * dim_,
                                       topk_labels.data(),
-                                      topk_labels.size(),
+                                      static_cast<int64_t>(topk_labels.size()),
                                       true);
         const auto* precise_distance = precise_result->GetDistances();
 
@@ -962,7 +964,7 @@ PyramidAnalyzer::get_node_degree_distribution(const IndexNode* node,
     }
 
     auto graph = node->graph_;
-    uint32_t total = static_cast<uint32_t>(node_ids.size());
+    auto total = static_cast<uint32_t>(node_ids.size());
     if (total == 0) {
         return result;
     }
@@ -1117,7 +1119,7 @@ PyramidAnalyzer::get_node_connectivity(const IndexNode* node, const Vector<Inner
     }
 
     auto graph = node->graph_;
-    uint32_t total = static_cast<uint32_t>(node_ids.size());
+    auto total = static_cast<uint32_t>(node_ids.size());
 
     UnorderedSet<InnerIdType> id_set(allocator_);
     for (auto id : node_ids) {
@@ -1178,7 +1180,7 @@ PyramidAnalyzer::analyze_entry_point(const IndexNode* node, const Vector<InnerId
     }
 
     auto graph = node->graph_;
-    uint32_t total = static_cast<uint32_t>(node_ids.size());
+    auto total = static_cast<uint32_t>(node_ids.size());
 
     UnorderedSet<InnerIdType> id_set(allocator_);
     for (auto id : node_ids) {
@@ -1435,7 +1437,7 @@ PyramidAnalyzer::GetDuplicateRatio() {
             }
 
             float duplicate_ratio = get_node_duplicate_ratio(node, node_ids);
-            uint32_t duplicate_count =
+            auto duplicate_count =
                 static_cast<uint32_t>(duplicate_ratio * static_cast<float>(node_ids.size()));
 
             total_duplicate_count += duplicate_count;
@@ -1467,7 +1469,7 @@ PyramidAnalyzer::get_node_duplicate_ratio(const IndexNode* node,
     Vector<Vector<InnerIdType>> groups(allocator_);
     groups.emplace_back(node_ids.begin(), node_ids.end(), allocator_);
 
-    uint32_t query_count = static_cast<uint32_t>(sample_ids_.size());
+    auto query_count = static_cast<uint32_t>(sample_ids_.size());
     for (uint32_t q = 0; q < query_count && !groups.empty(); ++q) {
         Vector<Vector<InnerIdType>> new_groups(allocator_);
         auto comp = codes->FactoryComputer(sample_datas_.data() + static_cast<size_t>(q) * dim_);

@@ -98,7 +98,7 @@ private:
     void
     analyze_subindexes(IndexNode* node, const std::string& path);
 
-    void
+    static void
     collect_subindex_ids(IndexNode* node, Vector<InnerIdType>& ids);
 
     float
