@@ -105,7 +105,7 @@ jobs:
   build-python-x86:
     name: Python Build X86
     needs: [changes, format]
-    if: needs.changes.outputs.python == 'true'
+    if: needs.changes.outputs.python == 'true' || needs.changes.outputs.cpp == 'true'
     runs-on: ubuntu-22.04
     steps:
       - name: Free Disk Space
@@ -274,7 +274,7 @@ jobs:
   test-python-x86:
     name: Test Python X86
     needs: [changes, build-python-x86]
-    if: needs.changes.outputs.python == 'true'
+    if: needs.changes.outputs.python == 'true' || needs.changes.outputs.cpp == 'true'
     runs-on: ubuntu-22.04
     steps:
       - name: Free Disk Space
