@@ -33,7 +33,8 @@ public:
                         bool with_path = false,
                         float valid_ratio = 0.8,
                         uint64_t extra_info_size = 0,
-                        int64_t id_shift = 16);
+                        int64_t id_shift = 16,
+                        bool is_multi_vector = false);
 
     TestDatasetPtr
     GetDuplicateDataset(uint64_t dim,
@@ -57,7 +58,8 @@ private:
             bool with_path = false,
             float filter_ratio = 0.8,
             uint64_t extra_info_size = 0,
-            int64_t id_shift = 16);
+            int64_t id_shift = 16,
+            bool is_multi_vector = false);
 
 private:
     std::unordered_map<std::string, TestDatasetPtr> pool_;
