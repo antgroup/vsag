@@ -15,7 +15,6 @@
 
 #include "pruning_strategy.h"
 
-#include "algorithm/reverse_edge.h"
 #include "datacell/flatten_datacell.h"
 #include "datacell/graph_interface.h"
 #include "impl/heap/standard_heap.h"
@@ -72,8 +71,7 @@ mutually_connect_new_element(InnerIdType cur_c,
                              const FlattenInterfacePtr& flatten,
                              const MutexArrayPtr& neighbors_mutexes,
                              Allocator* allocator,
-                             float alpha,
-                             ReverseEdge* reverse_edges) {
+                             float alpha) {
     const uint64_t max_size = graph->MaximumDegree();
     select_edges_by_heuristic(top_candidates, max_size, flatten, allocator, alpha);
     if (top_candidates->Size() > max_size) {
@@ -134,66 +132,6 @@ mutually_connect_new_element(InnerIdType cur_c,
             }
 
             graph->InsertNeighborsById(selected_neighbor, cand_neighbors);
-        }
-    }
-
-    // Update reverse edges after releasing node locks to avoid deadlock
-    if (reverse_edges != nullptr) {
-        for (auto selected_neighbor : selected_neighbors) {
-            if (selected_neighbor == cur_c) {
-                continue;
-            }
-
-            Vector<InnerIdType> neighbors(allocator);
-            graph->GetNeighbors(selected_neighbor, neighbors);
-
-            uint64_t sz_link_list_other = neighbors.size();
-            uint64_t max_size = graph->MaximumDegree();
-
-            if (sz_link_list_other < max_size) {
-                reverse_edges->AddReverseEdge(cur_c, selected_neighbor);
-                reverse_edges->AddReverseEdge(selected_neighbor, cur_c);
-            } else {
-                // For pruning case, compute the new neighbor set
-                float d_max = flatten->ComputePairVectors(cur_c, selected_neighbor);
-
-                auto candidates = std::make_shared<StandardHeap<true, false>>(allocator, -1);
-                candidates->Push(d_max, cur_c);
-
-                for (uint64_t j = 0; j < sz_link_list_other; j++) {
-                    candidates->Push(flatten->ComputePairVectors(neighbors[j], selected_neighbor),
-                                     neighbors[j]);
-                }
-
-                select_edges_by_heuristic(candidates, max_size, flatten, allocator, alpha);
-
-                Vector<InnerIdType> cand_neighbors(allocator);
-                while (not candidates->Empty()) {
-                    cand_neighbors.emplace_back(candidates->Top().second);
-                    candidates->Pop();
-                }
-
-                reverse_edges->AddReverseEdge(cur_c, selected_neighbor);
-
-                UnorderedSet<InnerIdType> old_neighbor_set(allocator);
-                UnorderedSet<InnerIdType> new_neighbor_set(allocator);
-                for (const auto& n : neighbors) {
-                    old_neighbor_set.insert(n);
-                }
-                for (const auto& n : cand_neighbors) {
-                    new_neighbor_set.insert(n);
-                }
-                for (const auto& new_neighbor : cand_neighbors) {
-                    if (old_neighbor_set.find(new_neighbor) == old_neighbor_set.end()) {
-                        reverse_edges->AddReverseEdge(selected_neighbor, new_neighbor);
-                    }
-                }
-                for (const auto& old_neighbor : neighbors) {
-                    if (new_neighbor_set.find(old_neighbor) == new_neighbor_set.end()) {
-                        reverse_edges->RemoveReverseEdge(selected_neighbor, old_neighbor);
-                    }
-                }
-            }
         }
     }
 

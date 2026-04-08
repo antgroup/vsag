@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "algorithm/reverse_edge.h"
+#include "reverse_edge.h"
 
 #include <algorithm>
 #include <catch2/catch_test_macros.hpp>

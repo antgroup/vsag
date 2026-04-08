@@ -186,7 +186,7 @@ TEST_CASE("Pruning Strategy Select Edges With Heuristic", "[ut][pruning_strategy
         auto mutexes = std::make_shared<EmptyMutex>();
         MutexArrayPtr mutex_array = std::make_shared<EmptyMutex>();
         auto entry_point = mutually_connect_new_element(
-            0, candidates, graph, flatten, mutexes, allocator.get(), 1.0F, nullptr);
+            0, candidates, graph, flatten, mutexes, allocator.get(), 1.0F);
 
         REQUIRE(entry_point == 1);
 

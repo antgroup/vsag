@@ -30,6 +30,8 @@
 #include "utils/pointer_define.h"
 
 namespace vsag {
+
+class ReverseEdge;
 DEFINE_POINTER(GraphInterface);
 
 class GraphInterface {
@@ -86,6 +88,11 @@ public:
     virtual int64_t
     GetMemoryUsage() const {
         return 0;
+    }
+
+    virtual void
+    GetIncomingNeighbors(InnerIdType id, Vector<InnerIdType>& neighbors) const {
+        neighbors.clear();
     }
 
 public:
