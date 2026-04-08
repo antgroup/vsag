@@ -63,6 +63,9 @@ public:
     int64_t
     GetMemoryUsage() const override;
 
+    Vector<InnerIdType>
+    GetIds() const override;
+
 private:
     Allocator* const allocator_{nullptr};
     Vector<std::unique_ptr<EliasFanoEncoder>> neighbor_sets_;

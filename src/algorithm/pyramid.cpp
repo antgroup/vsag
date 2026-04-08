@@ -16,6 +16,7 @@
 #include "pyramid.h"
 
 #include "algorithm/inner_index_interface.h"
+#include "analyzer/analyzer.h"
 #include "datacell/flatten_interface.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/odescent/odescent_graph_builder.h"
@@ -42,7 +43,7 @@ split(const std::string& str, char delimiter) {
 static inline uint64_t
 get_suitable_max_degree(int64_t data_num) {
     if (data_num < 100'000) {
-        return 16;
+        return 24;
     }
     if (data_num < 1000'000) {
         return 32;
@@ -133,7 +134,7 @@ IndexNode::Deserialize(StreamReader& reader) {
     // deserialize `children`
     uint64_t children_size = 0;
     StreamReader::ReadObj(reader, children_size);
-    for (int i = 0; i < children_size; ++i) {
+    for (uint64_t i = 0; i < children_size; ++i) {
         std::string key = StreamReader::ReadString(reader);
         AddChild(key);
         children_[key]->Deserialize(reader);
@@ -428,6 +429,7 @@ Pyramid::Serialize(StreamWriter& writer) const {
     // serialize footer (introduced since v0.15)
     JsonType basic_info;
     basic_info["max_capacity"].SetInt(max_capacity_);
+    basic_info[INDEX_PARAM].SetString(this->create_param_ptr_->ToString());
     auto metadata = std::make_shared<Metadata>();
     metadata->Set(BASIC_INFO, basic_info);
     auto footer = std::make_shared<Footer>(metadata);
@@ -903,4 +905,28 @@ Pyramid::CalDistanceById(const float* query,
     }
     return InnerIndexInterface::cal_distance_by_id(query, ids, count, flat);
 }
+
+void
+Pyramid::GetVectorByInnerId(InnerIdType inner_id, float* data) const {
+    std::shared_lock<std::shared_mutex> lock(resize_mutex_);
+    auto codes = (use_reorder_) ? precise_codes_ : base_codes_;
+    bool release = false;
+    const auto* buffer = codes->GetCodesById(inner_id, release);
+    codes->Decode(buffer, data);
+    if (release) {
+        codes->Release(buffer);
+    }
+}
+
+std::string
+Pyramid::GetStats() const {
+    AnalyzerParam analyzer_param(allocator_);
+    analyzer_param.topk = 10;
+    analyzer_param.base_sample_size = std::min<uint64_t>(10, this->GetNumElements());
+    analyzer_param.search_params = R"({"pyramid": {"ef_search": 500}})";
+    auto analyzer = CreateAnalyzer(this, analyzer_param);
+    JsonType stats = analyzer->GetStats();
+    return stats.Dump(4);
+}
+
 }  // namespace vsag
