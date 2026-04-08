@@ -44,7 +44,7 @@ TEST_CASE("Test Factory", "[ft][factory]") {
     // Generate random data
     std::mt19937 rng;
     rng.seed(47);
-    std::uniform_real_distribution<> distrib_real;
+    std::uniform_real_distribution<float> distrib_real;
     int64_t* ids = new int64_t[max_elements];
     float* data = new float[dim * max_elements];
     for (int i = 0; i < max_elements; i++) {
