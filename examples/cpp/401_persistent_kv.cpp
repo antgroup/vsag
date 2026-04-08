@@ -118,7 +118,7 @@ main(int32_t argc, char** argv) {
 
     std::mt19937 rng;
     rng.seed(47);
-    std::uniform_real_distribution<> distrib_real;
+    std::uniform_real_distribution<float> distrib_real;
     for (uint32_t i = 0; i < num_vectors; ++i) {
         ids[i] = i;
     }
