@@ -15,6 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       cpp: ${{ steps.changes.outputs.cpp }}
+      cmake: ${{ steps.changes.outputs.cmake }}
       python: ${{ steps.changes.outputs.python }}
     steps:
       - uses: actions/checkout@v4
@@ -35,6 +36,10 @@ jobs:
               - 'scripts/**'
               - '.clang-tidy'
               - '.clang-format'
+            cmake:
+              - 'CMakeLists.txt'
+              - 'Makefile'
+              - 'cmake/**'
             python:
               - 'python/**'
               - 'python_bindings/**'
@@ -105,7 +110,7 @@ jobs:
   build-python-x86:
     name: Python Build X86
     needs: [changes, format]
-    if: needs.changes.outputs.python == 'true' || needs.changes.outputs.cpp == 'true'
+    if: needs.changes.outputs.python == 'true' || needs.changes.outputs.cmake == 'true'
     runs-on: ubuntu-22.04
     steps:
       - name: Free Disk Space
@@ -274,7 +279,7 @@ jobs:
   test-python-x86:
     name: Test Python X86
     needs: [changes, build-python-x86]
-    if: needs.changes.outputs.python == 'true' || needs.changes.outputs.cpp == 'true'
+    if: needs.changes.outputs.python == 'true' || needs.changes.outputs.cmake == 'true'
     runs-on: ubuntu-22.04
     steps:
       - name: Free Disk Space
