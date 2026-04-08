@@ -30,7 +30,7 @@ float calc_distance(float *vec_1, float *vec_2, uint64_t dim)
 // to be pre-allocated
 void compute_vecs_l2sq(float *vecs_l2sq, float *data, const uint64_t num_points, const uint64_t dim)
 {
-//#pragma omp parallel for schedule(static, 8192)
+    // #pragma omp parallel for schedule(static, 8192)
     for (int64_t n_iter = 0; n_iter < (int64_t)num_points; n_iter++)
     {
         vecs_l2sq[n_iter] = cblas_snrm2((vsag_blasint)dim, (data + (n_iter * dim)), 1);
@@ -49,8 +49,8 @@ void rotate_data_randomly(float *data, uint64_t num_points, uint64_t dim, float 
     }
     // diskann::cout << "done Rotating data with random matrix.." << std::flush;
 
-    cblas_sgemm(CblasRowMajor, CblasNoTrans, transpose, (vsag_blasint)num_points, (vsag_blasint)dim, (vsag_blasint)dim, 1.0, data,
-                (vsag_blasint)dim, rot_mat, (vsag_blasint)dim, 0, new_mat, (vsag_blasint)dim);
+    cblas_sgemm(CblasRowMajor, CblasNoTrans, transpose, (vsag_blasint)num_points, (vsag_blasint)dim, (vsag_blasint)dim,
+                1.0, data, (vsag_blasint)dim, rot_mat, (vsag_blasint)dim, 0, new_mat, (vsag_blasint)dim);
 
     // diskann::cout << "done." << std::endl;
 }
@@ -88,18 +88,21 @@ void compute_closest_centers_in_block(const float *const data, const uint64_t nu
         ones_b[i] = 1.0;
     }
 
-    cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans, (vsag_blasint)num_points, (vsag_blasint)num_centers, (vsag_blasint)1, 1.0f,
-                docs_l2sq, (vsag_blasint)1, ones_a, (vsag_blasint)1, 0.0f, dist_matrix, (vsag_blasint)num_centers);
+    cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans, (vsag_blasint)num_points, (vsag_blasint)num_centers,
+                (vsag_blasint)1, 1.0f, docs_l2sq, (vsag_blasint)1, ones_a, (vsag_blasint)1, 0.0f, dist_matrix,
+                (vsag_blasint)num_centers);
 
-    cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans, (vsag_blasint)num_points, (vsag_blasint)num_centers, (vsag_blasint)1, 1.0f,
-                ones_b, (vsag_blasint)1, centers_l2sq, (vsag_blasint)1, 1.0f, dist_matrix, (vsag_blasint)num_centers);
+    cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans, (vsag_blasint)num_points, (vsag_blasint)num_centers,
+                (vsag_blasint)1, 1.0f, ones_b, (vsag_blasint)1, centers_l2sq, (vsag_blasint)1, 1.0f, dist_matrix,
+                (vsag_blasint)num_centers);
 
-    cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans, (vsag_blasint)num_points, (vsag_blasint)num_centers, (vsag_blasint)dim, -2.0f,
-                data, (vsag_blasint)dim, centers, (vsag_blasint)dim, 1.0f, dist_matrix, (vsag_blasint)num_centers);
+    cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans, (vsag_blasint)num_points, (vsag_blasint)num_centers,
+                (vsag_blasint)dim, -2.0f, data, (vsag_blasint)dim, centers, (vsag_blasint)dim, 1.0f, dist_matrix,
+                (vsag_blasint)num_centers);
 
     if (k == 1)
     {
-//#pragma omp parallel for schedule(static, 8192)
+        // #pragma omp parallel for schedule(static, 8192)
         for (int64_t i = 0; i < (int64_t)num_points; i++)
         {
             float min = std::numeric_limits<float>::max();
@@ -116,7 +119,7 @@ void compute_closest_centers_in_block(const float *const data, const uint64_t nu
     }
     else
     {
-//#pragma omp parallel for schedule(static, 8192)
+        // #pragma omp parallel for schedule(static, 8192)
         for (int64_t i = 0; i < (int64_t)num_points; i++)
         {
             std::priority_queue<PivotContainer> top_k_queue;
@@ -184,7 +187,7 @@ void compute_closest_centers(float *data, uint64_t num_points, uint64_t dim, flo
                                                      pts_norms_blk, pivs_norms_squared, closest_centers,
                                                      distance_matrix, k);
 
-//#pragma omp parallel for schedule(static, 1)
+        // #pragma omp parallel for schedule(static, 1)
         for (int64_t j = cur_blk * PAR_BLOCK_SIZE;
              j < std::min((int64_t)num_points, (int64_t)((cur_blk + 1) * PAR_BLOCK_SIZE)); j++)
         {
@@ -194,7 +197,7 @@ void compute_closest_centers(float *data, uint64_t num_points, uint64_t dim, flo
                 closest_centers_ivf[j * k + l] = (uint32_t)this_center_id;
                 if (inverted_index != NULL)
                 {
-//#pragma omp critical
+                    // #pragma omp critical
                     inverted_index[this_center_id].push_back(j);
                 }
             }
@@ -243,8 +246,8 @@ namespace kmeans
 // closest_centers == NULL, will allocate memory and return. Similarly, if
 // closest_docs == NULL, will allocate memory and return.
 
-float lloyds_iter(float *data, uint64_t num_points, uint64_t dim, float *centers, uint64_t num_centers, float *docs_l2sq,
-                  std::vector<uint64_t> *closest_docs, uint32_t *&closest_center)
+float lloyds_iter(float *data, uint64_t num_points, uint64_t dim, float *centers, uint64_t num_centers,
+                  float *docs_l2sq, std::vector<uint64_t> *closest_docs, uint32_t *&closest_center)
 {
     bool compute_residual = true;
     // Timer timer;
@@ -261,7 +264,7 @@ float lloyds_iter(float *data, uint64_t num_points, uint64_t dim, float *centers
                                         docs_l2sq);
 
     memset(centers, 0, sizeof(float) * (uint64_t)num_centers * (uint64_t)dim);
-//#pragma omp parallel for schedule(static, 1)
+    // #pragma omp parallel for schedule(static, 1)
     for (int64_t c = 0; c < (int64_t)num_centers; ++c)
     {
         float *center = centers + (uint64_t)c * (uint64_t)dim;
@@ -278,7 +281,8 @@ float lloyds_iter(float *data, uint64_t num_points, uint64_t dim, float *centers
         }
         if (closest_docs[c].size() > 0)
         {
-            for (uint64_t i = 0; i < dim; i++) {
+            for (uint64_t i = 0; i < dim; i++)
+            {
                 center[i] = (float)(cluster_sum[i] / ((double)closest_docs[c].size()));
             }
         }
@@ -293,11 +297,12 @@ float lloyds_iter(float *data, uint64_t num_points, uint64_t dim, float *centers
         uint64_t nchunks = num_points / CHUNK_SIZE + (num_points % CHUNK_SIZE == 0 ? 0 : 1);
         std::vector<float> residuals(nchunks * BUF_PAD, 0.0);
 
-//#pragma omp parallel for schedule(static, 32)
+        // #pragma omp parallel for schedule(static, 32)
         for (int64_t chunk = 0; chunk < (int64_t)nchunks; ++chunk)
-            for (uint64_t d = chunk * CHUNK_SIZE; d < num_points && d < (chunk + 1) * CHUNK_SIZE; ++d) {
-                residuals[chunk * BUF_PAD] +=
-                    math_utils::calc_distance(data + (d * dim), centers + (uint64_t)closest_center[d] * (uint64_t)dim, dim);
+            for (uint64_t d = chunk * CHUNK_SIZE; d < num_points && d < (chunk + 1) * CHUNK_SIZE; ++d)
+            {
+                residuals[chunk * BUF_PAD] += math_utils::calc_distance(
+                    data + (d * dim), centers + (uint64_t)closest_center[d] * (uint64_t)dim, dim);
             }
 
         for (uint64_t chunk = 0; chunk < nchunks; ++chunk)
@@ -398,7 +403,7 @@ void kmeanspp_selecting_pivots(float *data, uint64_t num_points, uint64_t dim, f
     std::vector<uint64_t> picked;
     std::random_device rd;
     auto x = rd();
-    std::mt19937 generator(x);
+    std::mt19937_64 generator(x);
     std::uniform_real_distribution<> distribution(0, 1);
     std::uniform_int_distribution<uint64_t> int_dist(0, num_points - 1);
     uint64_t init_id = int_dist(generator);
@@ -409,7 +414,7 @@ void kmeanspp_selecting_pivots(float *data, uint64_t num_points, uint64_t dim, f
 
     float *dist = new float[num_points];
 
-//#pragma omp parallel for schedule(static, 8192)
+    // #pragma omp parallel for schedule(static, 8192)
     for (int64_t i = 0; i < (int64_t)num_points; i++)
     {
         dist[i] = math_utils::calc_distance(data + i * dim, data + init_id * dim, dim);
@@ -450,7 +455,7 @@ void kmeanspp_selecting_pivots(float *data, uint64_t num_points, uint64_t dim, f
         picked.push_back(tmp_pivot);
         std::memcpy(pivot_data + num_picked * dim, data + tmp_pivot * dim, dim * sizeof(float));
 
-//#pragma omp parallel for schedule(static, 8192)
+        // #pragma omp parallel for schedule(static, 8192)
         for (int64_t i = 0; i < (int64_t)num_points; i++)
         {
             dist[i] = (std::min)(dist[i], math_utils::calc_distance(data + i * dim, data + tmp_pivot * dim, dim));

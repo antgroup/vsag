@@ -421,7 +421,7 @@ TEST_CASE("DiskAnn Filter Test", "[ft][diskann]") {
     // Generate random data
     std::mt19937 rng;
     rng.seed(47);
-    std::uniform_real_distribution<> distrib_real;
+    std::uniform_real_distribution<float> distrib_real;
     std::uniform_int_distribution<> ids_random(0, max_elements - 1);
 
     for (int64_t i = 0; i < max_elements; i++) {
@@ -566,7 +566,7 @@ TEST_CASE("DiskAnn Random Id", "[ft][diskann]") {
 
     // Generate random data
     std::mt19937 rng;
-    std::uniform_real_distribution<> distrib_real;
+    std::uniform_real_distribution<float> distrib_real;
     std::uniform_int_distribution<> ids_rand(0, max_elements - 1);
     for (int i = 0; i < max_elements; i++) {
         ids[i] = ids_rand(rng);
@@ -653,7 +653,7 @@ TEST_CASE("DiskANN small dimension", "[ft][diskann]") {
     // Generate random data
     std::mt19937 rng;
     rng.seed(47);
-    std::uniform_real_distribution<> distrib_real;
+    std::uniform_real_distribution<float> distrib_real;
     int64_t* ids = new int64_t[max_elements];
     float* data = new float[dim * max_elements];
     for (int i = 0; i < max_elements; i++) {
@@ -718,7 +718,7 @@ TEST_CASE("split building process", "[ft][diskann]") {
     // Generate random data
     std::mt19937 rng;
     rng.seed(47);
-    std::uniform_real_distribution<> distrib_real;
+    std::uniform_real_distribution<float> distrib_real;
     int64_t* ids = new int64_t[max_elements];
     float* data = new float[dim * max_elements];
     for (int i = 0; i < max_elements; i++) {

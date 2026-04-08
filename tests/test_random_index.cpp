@@ -89,7 +89,7 @@ TEST_CASE("Test Random Index", "[ft][random]") {
         {"hnsw", {{"ef_search", ef_search}}}};
 
     // Generate random data
-    std::uniform_real_distribution<> distrib_real;
+    std::uniform_real_distribution<float> distrib_real;
     int64_t* ids = new int64_t[max_elements];
     float* data = new float[dim * max_elements];
     for (int i = 0; i < max_elements; i++) {
