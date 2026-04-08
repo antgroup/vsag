@@ -122,25 +122,33 @@ Thrive together in VSAG community with users and developers from all around the 
 
 ## Our Publications
 
-1. VSAG: An Optimized Search Framework for Graph-based Approximate Nearest Neighbor Search [_VLDB (industry)_, 2025]  
-   **Xiaoyao Zhong, Haotian Li, Jiabao Jin, Mingyu Yang, Deming Chu, Xiangyu Wang, Zhitao Shen, Wei Jia**, George Gu, Yi Xie, Xuemin Lin, Heng Tao Shen, Jingkuan Song, Peng Cheng  
-   [PDF](https://www.vldb.org/pvldb/vol18/p5017-cheng.pdf) | [DOI](https://doi.org/10.14778/3750601.3750624)
+1. Elastic Index Selection for Label-Hybrid AKNN Search [_VLDB_, 2026]  
+   **Mingyu Yang**, Wenxuan Xia, Wentao Li, Raymond Chi-Wing Wong, Wei Wang  
+   [PDF](https://dl.acm.org/doi/pdf/10.14778/3785297.3785304) | [DOI](https://doi.org/10.14778/3785297.3785304)
 
-2. Effective and General Distance Computation for Approximate Nearest Neighbor Search [_ICDE_, 2025]  
-   **Mingyu Yang**, Wentao Li, **Jiabao Jin, Xiaoyao Zhong, Xiangyu Wang, Zhitao Shen**, **Wei Jia,** Wei Wang \
-   [PDF](https://arxiv.org/pdf/2404.16322) | [DOI](https://doi.org/10.1109/ICDE65448.2025.00087)  
+2. FGIM: a Fast Graph-based Indexes Merging Framework for Approximate Nearest Neighbor Search [_SIGMOD_, 2026]  
+   **Zekai Wu, Jiabao Jin**, Peng Cheng, **Xiaoyao Zhong**, Lei Chen, Yongxin Tong, **Zhitao Shen**, Jingkuan Song, Heng Tao Shen, Xuemin Lin  
+   [PDF](https://arxiv.org/pdf/2603.21710) | [DOI](https://doi.org/10.1145/3786651)
 
-3. SINDI: an Efficient Index for Approximate Maximum Inner Product Search on Sparse Vectors [_arxiv_, 2025]  
+3. SINDI: an Efficient Index for Approximate Maximum Inner Product Search on Sparse Vectors [_ICDE_, 2026]  
    **Ruoxuan Li, Xiaoyao Zhong, Jiabao Jin**, Peng Cheng, Wangze Ni, Lei Chen, **Zhitao Shen, Wei Jia, Xiangyu Wang**, Xuemin Lin, Heng Tao Shen, Jingkuan Song  
    [PDF](https://arxiv.org/pdf/2509.08395)
 
-4. EnhanceGraph: A Continuously Enhanced Graph-based Index for High-dimensional Approximate Nearest Neighbor Search [_arxiv_, 2025]  
+4. Quantization Meets Projection: A Happy Marriage for Approximate k-Nearest Neighbor Search [_VLDB_, 2026]  
+   **Mingyu Yang**, Liuchang Jing, Wentao Li, Wei Wang  
+   [PDF](https://arxiv.org/pdf/2411.06158)
+
+5. VSAG: An Optimized Search Framework for Graph-based Approximate Nearest Neighbor Search [_VLDB (industry)_, 2025]  
+   **Xiaoyao Zhong, Haotian Li, Jiabao Jin, Mingyu Yang, Deming Chu, Xiangyu Wang, Zhitao Shen, Wei Jia**, George Gu, Yi Xie, Xuemin Lin, Heng Tao Shen, Jingkuan Song, Peng Cheng  
+   [PDF](https://www.vldb.org/pvldb/vol18/p5017-cheng.pdf) | [DOI](https://doi.org/10.14778/3750601.3750624)
+
+6. Effective and General Distance Computation for Approximate Nearest Neighbor Search [_ICDE_, 2025]  
+   **Mingyu Yang**, Wentao Li, **Jiabao Jin, Xiaoyao Zhong, Xiangyu Wang, Zhitao Shen**, **Wei Jia,** Wei Wang \
+   [PDF](https://arxiv.org/pdf/2404.16322) | [DOI](https://doi.org/10.1109/ICDE65448.2025.00087)  
+
+7. EnhanceGraph: A Continuously Enhanced Graph-based Index for High-dimensional Approximate Nearest Neighbor Search [_arxiv_, 2025]  
    **Xiaoyao Zhong, Jiabao Jin**, Peng Cheng, **Mingyu Yang**, Lei Chen, Haoyang Li, **Zhitao Shen**, Xuemin Lin, Heng Tao Shen, Jingkuan Song  
    [PDF](https://arxiv.org/pdf/2506.13144)
-
-5. Fast High-dimensional Approximate Nearest Neighbor Search with Efficient Index Time and Space [_arxiv_, 2025]  
-   **Mingyu Yang**, Wentao Li, Wei Wang  
-   [PDF](https://arxiv.org/pdf/2411.06158)
 
 ## Reference
 VSAG referenced the following works during its implementation:
@@ -170,4 +178,3 @@ VSAG referenced the following works during its implementation:
 
 ## License
 [Apache License 2.0](./LICENSE)
-
