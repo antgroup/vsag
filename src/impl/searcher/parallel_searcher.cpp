@@ -137,8 +137,19 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
     Vector<float> line_dists(vector_size, alloc);
     Vector<std::pair<float, uint64_t>> node_pair(beam, alloc);
 
+    Filter* attr_ft = nullptr;
+    if (not inner_search_param.executors.empty() and inner_search_param.executors[0] != nullptr) {
+        inner_search_param.executors[0]->Clear();
+        attr_ft = inner_search_param.executors[0]->Run();
+    }
+
+    auto check_func = [&is_id_allowed, &attr_ft](InnerIdType id) {
+        return (is_id_allowed == nullptr or is_id_allowed->CheckValid(id)) and
+               (attr_ft == nullptr or attr_ft->CheckValid(id));
+    };
+
     flatten->Query(&dist, computer, &ep, 1, ctx);
-    if (not is_id_allowed || is_id_allowed->CheckValid(ep)) {
+    if (check_func(ep)) {
         top_candidates->Push(dist, ep);
         lower_bound = top_candidates->Top().first;
     }
@@ -248,14 +259,15 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
             if (top_candidates->Size() < ef || lower_bound > dist ||
                 (mode == RANGE_SEARCH && dist <= inner_search_param.radius)) {
                 candidate_set->Push(-dist, to_be_visited_id[i]);
-                if (not is_id_allowed || is_id_allowed->CheckValid(to_be_visited_id[i])) {
+                if (check_func(to_be_visited_id[i])) {
                     top_candidates->Push(dist, to_be_visited_id[i]);
                 }
-                if (inner_search_param.consider_duplicate && label_table &&
-                    label_table->CompressDuplicateData()) {
-                    const auto& duplicate_ids = label_table->GetDuplicateId(to_be_visited_id[i]);
+                if (inner_search_param.consider_duplicate) {
+                    const auto duplicate_ids = graph->GetDuplicateIds(to_be_visited_id[i]);
                     for (const auto& item : duplicate_ids) {
-                        top_candidates->Push(dist, item);
+                        if (check_func(item)) {
+                            top_candidates->Push(dist, item);
+                        }
                     }
                 }
 

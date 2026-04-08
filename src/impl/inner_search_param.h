@@ -64,22 +64,6 @@ public:
     std::shared_ptr<Timer> time_cost{nullptr};
 
     InnerSearchParam&
-    operator=(const InnerSearchParam& other) {
-        if (this != &other) {
-            topk = other.topk;
-            radius = other.radius;
-            ep = other.ep;
-            ef = other.ef;
-            skip_ratio = other.skip_ratio;
-            search_mode = other.search_mode;
-            range_search_limit_size = other.range_search_limit_size;
-            is_inner_id_allowed = other.is_inner_id_allowed;
-            scan_bucket_size = other.scan_bucket_size;
-            factor = other.factor;
-            first_order_scan_ratio = other.first_order_scan_ratio;
-            parallel_search_thread_count = other.parallel_search_thread_count;
-        }
-        return *this;
-    }
+    operator=(const InnerSearchParam& other) = default;
 };
 }  // namespace vsag

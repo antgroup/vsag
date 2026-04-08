@@ -120,6 +120,9 @@ HGraphParameter::FromJson(const JsonType& json) {
 
     if (json.Contains(SUPPORT_DUPLICATE)) {
         this->support_duplicate = json[SUPPORT_DUPLICATE].GetBool();
+        if (this->bottom_graph_param != nullptr) {
+            this->bottom_graph_param->support_duplicate_ = this->support_duplicate;
+        }
     }
     if (json.Contains(SUPPORT_TOMBSTONE)) {
         this->support_tombstone = json[SUPPORT_TOMBSTONE].GetBool();

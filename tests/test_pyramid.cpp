@@ -13,9 +13,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <algorithm>
+#include <array>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
+#include <cmath>
 #include <nlohmann/json.hpp>
+#include <set>
 
 #include "fixtures/test_dataset_pool.h"
 #include "fixtures/test_logger.h"
@@ -107,6 +111,68 @@ PyramidTestIndex::GeneratePyramidSearchParametersString(int64_t ef_search, doubl
 
 }  // namespace fixtures
 
+namespace {
+
+auto
+MakeDenseDataset(const std::vector<std::array<float, 4>>& vectors,
+                 const std::vector<int64_t>& ids,
+                 const std::vector<std::string>& paths) -> vsag::DatasetPtr {
+    REQUIRE(vectors.size() == ids.size());
+    REQUIRE(vectors.size() == paths.size());
+
+    auto dataset = vsag::Dataset::Make();
+    auto* raw_vectors = new float[vectors.size() * 4];
+    auto* raw_ids = new int64_t[ids.size()];
+    auto* raw_paths = new std::string[paths.size()];
+
+    for (size_t i = 0; i < vectors.size(); ++i) {
+        std::copy(vectors[i].begin(), vectors[i].end(), raw_vectors + i * 4);
+        raw_ids[i] = ids[i];
+        raw_paths[i] = paths[i];
+    }
+
+    dataset->NumElements(static_cast<int64_t>(vectors.size()))
+        ->Dim(4)
+        ->Float32Vectors(raw_vectors)
+        ->Ids(raw_ids)
+        ->Paths(raw_paths)
+        ->Owner(true);
+    return dataset;
+}
+
+auto
+MakeSingleQuery(const std::array<float, 4>& vector, const std::string& path) -> vsag::DatasetPtr {
+    auto dataset = vsag::Dataset::Make();
+    auto* raw_vector = new float[4];
+    auto* raw_path = new std::string[1];
+
+    std::copy(vector.begin(), vector.end(), raw_vector);
+    raw_path[0] = path;
+
+    dataset->NumElements(1)->Dim(4)->Float32Vectors(raw_vector)->Paths(raw_path)->Owner(true);
+    return dataset;
+}
+
+auto
+CollectIds(const vsag::DatasetPtr& result) -> std::set<int64_t> {
+    std::set<int64_t> ids;
+    for (int64_t i = 0; i < result->GetDim(); ++i) {
+        ids.insert(result->GetIds()[i]);
+    }
+    return ids;
+}
+
+void
+RequireDistancesNearZero(const vsag::DatasetPtr& result, const std::set<int64_t>& expected_ids) {
+    for (int64_t i = 0; i < result->GetDim(); ++i) {
+        if (expected_ids.count(result->GetIds()[i]) != 0) {
+            REQUIRE(std::abs(result->GetDistances()[i]) <= 1e-6F);
+        }
+    }
+}
+
+}  // namespace
+
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "Pyramid Build & ContinueAdd Test",
                              "[ft][pyramid]") {
@@ -142,6 +208,148 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
         TestRangeSearch(index, dataset, search_param, 0.94, 10, true);
         TestRangeSearch(index, dataset, search_param, 0.49, 5, true);
     }
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
+                             "Pyramid Duplicate Path Semantics Same Path",
+                             "[ft][pyramid]") {
+    PyramidParam pyramid_param;
+    pyramid_param.no_build_levels = {0, 1, 2};
+    pyramid_param.support_duplicate = true;
+
+    const auto param = GeneratePyramidBuildParametersString("l2", 4, pyramid_param);
+    auto index = TestFactory("pyramid", param, true);
+
+    const std::array<float, 4> shared_vector{1.0F, 2.0F, 3.0F, 4.0F};
+    const std::array<float, 4> other_vector{4.0F, 3.0F, 2.0F, 1.0F};
+    auto base = MakeDenseDataset(
+        {shared_vector, shared_vector, other_vector}, {101, 102, 103}, {"a/d/f", "a/d/f", "b/e/g"});
+    auto build_result = index->Build(base);
+    REQUIRE(build_result.has_value());
+
+    auto query = MakeSingleQuery(shared_vector, "a/d/f");
+    auto search_result = index->KnnSearch(query, 3, GeneratePyramidSearchParametersString(20));
+    REQUIRE(search_result.has_value());
+
+    auto result = search_result.value();
+    auto ids = CollectIds(result);
+    REQUIRE(ids.count(101) == 1);
+    REQUIRE(ids.count(102) == 1);
+    REQUIRE(ids.count(103) == 0);
+    RequireDistancesNearZero(result, {101, 102});
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
+                             "Pyramid Duplicate Path Semantics Prefix Descendant",
+                             "[ft][pyramid]") {
+    PyramidParam pyramid_param;
+    pyramid_param.no_build_levels = {0, 1, 2};
+    pyramid_param.support_duplicate = true;
+
+    const auto param = GeneratePyramidBuildParametersString("l2", 4, pyramid_param);
+    auto index = TestFactory("pyramid", param, true);
+
+    const std::array<float, 4> shared_vector{1.0F, 2.0F, 3.0F, 4.0F};
+    const std::array<float, 4> other_vector{4.0F, 3.0F, 2.0F, 1.0F};
+    auto base = MakeDenseDataset(
+        {shared_vector, shared_vector, other_vector}, {201, 202, 203}, {"a", "a/d/f", "b/e/g"});
+    auto build_result = index->Build(base);
+    REQUIRE(build_result.has_value());
+
+    auto leaf_query = MakeSingleQuery(shared_vector, "a/d/f");
+    auto leaf_result = index->KnnSearch(leaf_query, 3, GeneratePyramidSearchParametersString(20));
+    REQUIRE(leaf_result.has_value());
+    auto leaf_ids = CollectIds(leaf_result.value());
+    REQUIRE(leaf_ids.count(202) == 1);
+    REQUIRE(leaf_ids.count(201) == 0);
+    REQUIRE(leaf_ids.count(203) == 0);
+    RequireDistancesNearZero(leaf_result.value(), {202});
+
+    auto prefix_query = MakeSingleQuery(shared_vector, "a");
+    auto prefix_result =
+        index->KnnSearch(prefix_query, 3, GeneratePyramidSearchParametersString(20));
+    REQUIRE(prefix_result.has_value());
+    auto prefix_ids = CollectIds(prefix_result.value());
+    // Query path `a` only searches node `a`; descendants are visible only if they were folded into
+    // node `a`'s duplicate group during insertion.
+    REQUIRE(prefix_ids.count(202) == 1);
+    REQUIRE(prefix_ids.count(201) == 0);
+    REQUIRE(prefix_ids.count(203) == 0);
+    RequireDistancesNearZero(prefix_result.value(), {202});
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
+                             "Pyramid Duplicate Path Semantics Shared Prefix Visibility",
+                             "[ft][pyramid]") {
+    PyramidParam pyramid_param;
+    pyramid_param.no_build_levels = {0, 1, 2};
+    pyramid_param.support_duplicate = true;
+
+    const auto param = GeneratePyramidBuildParametersString("l2", 4, pyramid_param);
+    auto index = TestFactory("pyramid", param, true);
+
+    const std::array<float, 4> shared_vector{1.0F, 2.0F, 3.0F, 4.0F};
+    const std::array<float, 4> other_vector{4.0F, 3.0F, 2.0F, 1.0F};
+    auto base = MakeDenseDataset(
+        {shared_vector, shared_vector, other_vector}, {301, 302, 303}, {"a/d/f", "a/d/g", "b/e/g"});
+    auto build_result = index->Build(base);
+    REQUIRE(build_result.has_value());
+
+    auto query_adf = MakeSingleQuery(shared_vector, "a/d/f");
+    auto result_adf = index->KnnSearch(query_adf, 3, GeneratePyramidSearchParametersString(20));
+    REQUIRE(result_adf.has_value());
+    auto ids_adf = CollectIds(result_adf.value());
+    REQUIRE(ids_adf.count(301) == 1);
+    REQUIRE(ids_adf.count(302) == 0);
+    REQUIRE(ids_adf.count(303) == 0);
+    RequireDistancesNearZero(result_adf.value(), {301});
+
+    auto query_adg = MakeSingleQuery(shared_vector, "a/d/g");
+    auto result_adg = index->KnnSearch(query_adg, 3, GeneratePyramidSearchParametersString(20));
+    REQUIRE(result_adg.has_value());
+    auto ids_adg = CollectIds(result_adg.value());
+    REQUIRE(ids_adg.count(301) == 0);
+    REQUIRE(ids_adg.count(302) == 1);
+    REQUIRE(ids_adg.count(303) == 0);
+    RequireDistancesNearZero(result_adg.value(), {302});
+
+    auto query_ad = MakeSingleQuery(shared_vector, "a/d");
+    auto result_ad = index->KnnSearch(query_ad, 3, GeneratePyramidSearchParametersString(20));
+    REQUIRE(result_ad.has_value());
+    auto ids_ad = CollectIds(result_ad.value());
+    REQUIRE(ids_ad.count(301) == 1);
+    REQUIRE(ids_ad.count(302) == 1);
+    REQUIRE(ids_ad.count(303) == 0);
+    RequireDistancesNearZero(result_ad.value(), {301, 302});
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
+                             "Pyramid Duplicate Path Semantics Negative Control",
+                             "[ft][pyramid]") {
+    PyramidParam pyramid_param;
+    pyramid_param.no_build_levels = {0, 1, 2};
+    pyramid_param.support_duplicate = true;
+
+    const auto param = GeneratePyramidBuildParametersString("l2", 4, pyramid_param);
+    auto index = TestFactory("pyramid", param, true);
+
+    const std::array<float, 4> shared_vector{1.0F, 2.0F, 3.0F, 4.0F};
+    auto base = MakeDenseDataset({shared_vector, shared_vector}, {401, 402}, {"a/d/f", "b/e/g"});
+    auto build_result = index->Build(base);
+    REQUIRE(build_result.has_value());
+
+    auto query_adf = MakeSingleQuery(shared_vector, "a/d/f");
+    auto result_adf = index->KnnSearch(query_adf, 2, GeneratePyramidSearchParametersString(20));
+    REQUIRE(result_adf.has_value());
+    auto ids_adf = CollectIds(result_adf.value());
+    REQUIRE(ids_adf.count(401) == 1);
+    REQUIRE(ids_adf.count(402) == 0);
+
+    auto query_a = MakeSingleQuery(shared_vector, "a");
+    auto result_a = index->KnnSearch(query_a, 2, GeneratePyramidSearchParametersString(20));
+    REQUIRE(result_a.has_value());
+    auto ids_a = CollectIds(result_a.value());
+    REQUIRE(ids_a.count(402) == 0);
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex, "Pyramid Add Test", "[ft][pyramid]") {

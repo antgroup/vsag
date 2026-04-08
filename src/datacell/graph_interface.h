@@ -20,6 +20,7 @@
 #include <mutex>
 #include <vector>
 
+#include "duplicate_interface.h"
 #include "graph_interface_parameter.h"
 #include "index_common_param.h"
 #include "inner_string_params.h"
@@ -101,6 +102,10 @@ public:
         StreamWriter::WriteObj(writer, this->total_count_);
         StreamWriter::WriteObj(writer, this->max_capacity_);
         StreamWriter::WriteObj(writer, this->maximum_degree_);
+
+        if (duplicate_tracker_) {
+            duplicate_tracker_->Serialize(writer);
+        }
     }
 
     virtual void
@@ -108,6 +113,10 @@ public:
         StreamReader::ReadObj(reader, this->total_count_);
         StreamReader::ReadObj(reader, this->max_capacity_);
         StreamReader::ReadObj(reader, this->maximum_degree_);
+
+        if (duplicate_tracker_) {
+            duplicate_tracker_->Deserialize(reader);
+        }
     }
 
     uint64_t
@@ -158,11 +167,53 @@ public:
     }
 
 public:
+    virtual DuplicateTrackerPtr
+    CreateDuplicateTracker() {
+        return nullptr;
+    }
+
+    void
+    InitDuplicateTracker() {
+        duplicate_tracker_ = CreateDuplicateTracker();
+        if (duplicate_tracker_ != nullptr) {
+            duplicate_tracker_->Resize(max_capacity_);
+        }
+    }
+
+    DuplicateTrackerPtr
+    GetDuplicateTracker() const {
+        return duplicate_tracker_;
+    }
+
+    void
+    SetDuplicateTracker(DuplicateTrackerPtr tracker) {
+        duplicate_tracker_ = tracker;
+    }
+
+    void
+    SetDuplicateId(InnerIdType original_id, InnerIdType duplicate_id) {
+        if (duplicate_tracker_) {
+            duplicate_tracker_->SetDuplicateId(original_id, duplicate_id);
+        }
+    }
+
+    std::vector<InnerIdType>
+    GetDuplicateIds(InnerIdType id) const {
+        if (duplicate_tracker_) {
+            return duplicate_tracker_->GetDuplicateIds(id);
+        }
+        return {};
+    }
+
+public:
     InnerIdType max_capacity_{100};
     uint32_t maximum_degree_{0};
 
     std::atomic<InnerIdType> total_count_{0};
     Allocator* allocator_{nullptr};
+
+protected:
+    DuplicateTrackerPtr duplicate_tracker_{nullptr};
 };
 
 }  // namespace vsag
