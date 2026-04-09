@@ -106,8 +106,8 @@ public:
           ef_construction_(pyramid_param->ef_construction),
           max_degree_(pyramid_param->max_degree),
           index_min_size_(pyramid_param->index_min_size),
-          graph_type_(pyramid_param->graph_type) {
-        label_table_->compress_duplicate_data_ = pyramid_param->support_duplicate;
+          graph_type_(pyramid_param->graph_type),
+          support_duplicate_(pyramid_param->support_duplicate) {
         base_codes_ = FlattenInterface::MakeInstance(pyramid_param->base_codes_param, common_param);
         root_ =
             std::make_unique<IndexNode>(allocator_, pyramid_param->graph_param, index_min_size_);
@@ -247,6 +247,7 @@ private:
     int64_t max_capacity_{0};
     int64_t cur_element_count_{0};
     float alpha_{1.0F};
+    bool support_duplicate_{false};
 
     mutable std::shared_mutex resize_mutex_;
     std::mutex cur_element_count_mutex_;

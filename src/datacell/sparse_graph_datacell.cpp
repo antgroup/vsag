@@ -29,6 +29,10 @@ SparseGraphDataCell::SparseGraphDataCell(const SparseGraphDatacellParamPtr& grap
     this->remove_flag_bit_ = graph_param->remove_flag_bit_;
     this->id_bit_ = sizeof(InnerIdType) * 8 - this->remove_flag_bit_;
     this->remove_flag_mask_ = (1 << this->id_bit_) - 1;
+    GraphInterface::allocator_ = allocator;
+    if (graph_param->support_duplicate_) {
+        this->InitDuplicateTracker();
+    }
 }
 
 SparseGraphDataCell::SparseGraphDataCell(const SparseGraphDatacellParamPtr& graph_param,

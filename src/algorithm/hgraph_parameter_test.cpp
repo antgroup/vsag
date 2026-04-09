@@ -19,6 +19,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include "algorithm/hgraph.h"
 #include "parameter_test.h"
 
 #define TEST_COMPATIBILITY_CASE(section_name, param_member, val1, val2, expect_compatible) \
@@ -125,6 +126,7 @@ generate_hgraph_param(const HGraphDefaultParam& param) {
                        param.support_duplicate);
 }
 
+// clang-format off
 TEST_CASE("HGraph Parameters CheckCompatibility", "[ut][HGraphParameter][CheckCompatibility]") {
     SECTION("wrong parameter type") {
         HGraphDefaultParam default_param;
@@ -138,8 +140,11 @@ TEST_CASE("HGraph Parameters CheckCompatibility", "[ut][HGraphParameter][CheckCo
     TEST_COMPATIBILITY_CASE(
         "different base codes io type", base_codes_io_type, "memory_io", "block_memory_io", true)
     TEST_COMPATIBILITY_CASE("different pq dim", base_codes_pq_dim, 8, 16, false)
-    TEST_COMPATIBILITY_CASE(
-        "different base codes quantization type", base_codes_quantization_type, "sq4", "sq8", false)
+    TEST_COMPATIBILITY_CASE("different base codes quantization type",
+                            base_codes_quantization_type,
+                            "sq4",
+                            "sq8",
+                            false)
     TEST_COMPATIBILITY_CASE("different graph type", graph_storage_type, "flat", "compressed", false)
     TEST_COMPATIBILITY_CASE("different max degree", max_degree, 26, 30, false)
     TEST_COMPATIBILITY_CASE("different support remove", support_remove, true, false, false)
@@ -158,4 +163,31 @@ TEST_CASE("HGraph Parameters CheckCompatibility", "[ut][HGraphParameter][CheckCo
     TEST_COMPATIBILITY_CASE(
         "different use attribute filter", use_attribute_filter, true, false, false)
     TEST_COMPATIBILITY_CASE("different support duplicate", support_duplicate, true, false, false)
+}
+// clang-format on
+
+TEST_CASE("HGraph maps support_duplicate to graph parameter", "[ut][HGraphParameter]") {
+    auto param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "base_io_type": "block_memory_io",
+        "precise_quantization_type": "fp32",
+        "precise_io_type": "block_memory_io",
+        "graph_io_type": "block_memory_io",
+        "graph_storage_type": "flat",
+        "graph_type": "nsw",
+        "max_degree": 32,
+        "ef_construction": 100,
+        "support_duplicate": true,
+        "use_reorder": true
+    })");
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    auto hgraph_param = vsag::HGraph::CheckAndMappingExternalParam(param, common_param);
+    auto typed_param = std::dynamic_pointer_cast<vsag::HGraphParameter>(hgraph_param);
+
+    REQUIRE(typed_param != nullptr);
+    REQUIRE(typed_param->support_duplicate);
+    REQUIRE(typed_param->bottom_graph_param->support_duplicate_);
 }
