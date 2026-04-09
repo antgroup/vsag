@@ -408,5 +408,7 @@ private:
     ReorderInterfacePtr reorder_{nullptr};
 
     bool use_old_serial_format_{false};
+
+    bool support_duplicate_{false};
 };
 }  // namespace vsag

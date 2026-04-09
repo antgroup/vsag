@@ -40,9 +40,8 @@ LabelTable::LabelTable(Allocator* allocator, bool use_reverse_map, bool compress
       label_remap_(0, allocator),
       use_reverse_map_(use_reverse_map),
       deleted_ids_(allocator),
-      compress_duplicate_data_(compress_redundant_data),
-      duplicate_ids_(0, allocator),
       hole_list_(0, allocator) {
+    (void)compress_redundant_data;
     deleted_ids_filter_ = std::make_shared<RemoveListFilter>(deleted_ids_, delete_ids_mutex_);
 }
 
@@ -144,6 +143,27 @@ LabelTable::MarkRemove(const std::vector<LabelType>& labels) {
     }
     std::shared_lock rlock(delete_ids_mutex_);
     return this->deleted_ids_.size() - init_delete_size;
+}
+
+void
+LabelTable::Deserialize(StreamReader& reader) {
+    StreamReader::ReadVector(reader, label_table_);
+    if (use_reverse_map_) {
+        for (InnerIdType id = 0; id < label_table_.size(); ++id) {
+            this->label_remap_[label_table_[id]] = id;
+        }
+    }
+
+    if (is_legacy_duplicate_format_ && duplicate_tracker_ != nullptr) {
+        duplicate_tracker_->DeserializeFromLegacyFormat(reader, label_table_.size());
+    }
+    is_legacy_duplicate_format_ = false;
+
+    if (support_tombstone_) {
+        StreamReader::ReadObj(reader, deleted_ids_);
+    }
+
+    this->total_count_.store(static_cast<int64_t>(label_table_.size()));
 }
 
 void

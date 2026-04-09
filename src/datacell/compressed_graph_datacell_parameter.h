@@ -16,6 +16,7 @@
 #pragma once
 
 #include "graph_interface_parameter.h"
+#include "impl/logger/logger.h"
 #include "inner_string_params.h"
 #include "utils/pointer_define.h"
 
@@ -32,6 +33,9 @@ public:
         if (json.Contains(GRAPH_PARAM_MAX_DEGREE_KEY)) {
             this->max_degree_ = json[GRAPH_PARAM_MAX_DEGREE_KEY].GetInt();
         }
+        if (json.Contains(SUPPORT_DUPLICATE)) {
+            this->support_duplicate_ = json[SUPPORT_DUPLICATE].GetBool();
+        }
     }
 
     JsonType
@@ -39,7 +43,36 @@ public:
         JsonType json;
         json[GRAPH_PARAM_MAX_DEGREE_KEY].SetInt(this->max_degree_);
         json[GRAPH_STORAGE_TYPE_KEY].SetString(GRAPH_STORAGE_TYPE_VALUE_COMPRESSED);
+        json[SUPPORT_DUPLICATE].SetBool(this->support_duplicate_);
         return json;
+    }
+
+    bool
+    CheckCompatibility(const vsag::ParamPtr& other) const override {
+        auto graph_param = std::dynamic_pointer_cast<CompressedGraphDatacellParameter>(other);
+        if (not graph_param) {
+            logger::error(
+                "CompressedGraphDatacellParameter::CheckCompatibility: other parameter "
+                "is not a CompressedGraphDatacellParameter");
+            return false;
+        }
+        if (max_degree_ != graph_param->max_degree_) {
+            logger::error(
+                "CompressedGraphDatacellParameter::CheckCompatibility: max_degree_ "
+                "mismatch: {} vs {}",
+                max_degree_,
+                graph_param->max_degree_);
+            return false;
+        }
+        if (support_duplicate_ != graph_param->support_duplicate_) {
+            logger::error(
+                "CompressedGraphDatacellParameter::CheckCompatibility: "
+                "support_duplicate_ mismatch: {} vs {}",
+                support_duplicate_,
+                graph_param->support_duplicate_);
+            return false;
+        }
+        return true;
     }
 };
 }  // namespace vsag

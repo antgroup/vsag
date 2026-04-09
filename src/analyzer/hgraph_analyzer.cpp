@@ -19,23 +19,43 @@
 
 namespace vsag {
 
+namespace {
+
+void
+mark_duplicate_ids(const GraphInterfacePtr& graph,
+                   InnerIdType total_count,
+                   Vector<bool>& visited,
+                   Vector<bool>* is_duplicate_ids = nullptr) {
+    for (InnerIdType i = 0; i < total_count; ++i) {
+        if (visited[i]) {
+            continue;
+        }
+
+        const auto duplicate_ids = graph->GetDuplicateIds(i);
+        if (duplicate_ids.empty()) {
+            continue;
+        }
+
+        for (const auto& duplicate_id : duplicate_ids) {
+            if (duplicate_id < total_count) {
+                visited[duplicate_id] = true;
+                if (is_duplicate_ids != nullptr) {
+                    (*is_duplicate_ids)[duplicate_id] = true;
+                }
+            }
+        }
+    }
+}
+
+}  // namespace
+
 Vector<int64_t>
 HGraphAnalyzer::GetComponentCount() {
     // graph connection
     Vector<bool> visited(total_count_, false, allocator_);
     Vector<int64_t> component_sizes(allocator_);
-    if (hgraph_->label_table_->CompressDuplicateData()) {
-        for (InnerIdType i = 0; i < hgraph_->total_count_; ++i) {
-            if (visited[i]) {
-                continue;
-            }
-            const auto& dup_ids = hgraph_->label_table_->duplicate_ids_;
-            auto current_id = i;
-            while (dup_ids[current_id] != i) {
-                visited[dup_ids[current_id]] = true;
-                current_id = dup_ids[current_id];
-            }
-        }
+    if (hgraph_->support_duplicate_) {
+        mark_duplicate_ids(hgraph_->bottom_graph_, hgraph_->total_count_, visited);
     }
     for (int64_t i = 0; i < total_count_; ++i) {
         if (not visited[i] and not hgraph_->label_table_->IsRemoved(i)) {
@@ -69,20 +89,8 @@ HGraphAnalyzer::calculate_base_groundtruth() {
     }
     is_duplicate_ids_.resize(this->total_count_, false);
     Vector<bool> visited(this->total_count_, false, allocator_);
-    if (this->hgraph_->label_table_->CompressDuplicateData()) {
-        for (InnerIdType i = 0; i < this->total_count_; ++i) {
-            if (visited[i]) {
-                continue;
-            }
-            visited[i] = true;
-            const auto& dup_ids = hgraph_->label_table_->duplicate_ids_;
-            auto current_id = i;
-            while (dup_ids[current_id] != i) {
-                visited[dup_ids[current_id]] = true;
-                is_duplicate_ids_[dup_ids[current_id]] = true;
-                current_id = dup_ids[current_id];
-            }
-        }
+    if (this->hgraph_->support_duplicate_) {
+        mark_duplicate_ids(hgraph_->bottom_graph_, this->total_count_, visited, &is_duplicate_ids_);
     }
 
     {
@@ -149,11 +157,14 @@ HGraphAnalyzer::GetNeighborRecall() {
 
 float
 HGraphAnalyzer::GetDuplicateRatio() {
-    if (hgraph_->label_table_->CompressDuplicateData()) {
-        auto duplicate_count = 0;
-        for (int i = 0; i < hgraph_->label_table_->duplicate_ids_.size(); ++i) {
-            if (hgraph_->label_table_->duplicate_ids_[i] != i) {
-                is_duplicate_ids_[i] = true;
+    if (hgraph_->support_duplicate_) {
+        is_duplicate_ids_.assign(this->total_count_, false);
+        Vector<bool> visited(this->total_count_, false, allocator_);
+        mark_duplicate_ids(hgraph_->bottom_graph_, this->total_count_, visited, &is_duplicate_ids_);
+
+        int duplicate_count = 0;
+        for (bool is_duplicate : is_duplicate_ids_) {
+            if (is_duplicate) {
                 duplicate_count++;
             }
         }
