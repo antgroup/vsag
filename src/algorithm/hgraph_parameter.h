@@ -58,7 +58,6 @@ public:
     bool use_elp_optimizer{false};
     bool ignore_reorder{false};
     bool build_by_base{false};
-    bool use_reverse_edges{false};
 
     uint64_t ef_construction{400};
     float alpha{1.0F};
