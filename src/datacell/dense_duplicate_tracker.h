@@ -27,10 +27,13 @@ public:
     explicit DenseDuplicateTracker(Allocator* allocator);
 
     void
-    SetDuplicateId(InnerIdType original_id, InnerIdType duplicate_id) override;
+    SetDuplicateId(InnerIdType group_id, InnerIdType duplicate_id) override;
 
     auto
     GetDuplicateIds(InnerIdType id) const -> std::vector<InnerIdType> override;
+
+    [[nodiscard]] auto
+    GetGroupId(InnerIdType id) const -> InnerIdType override;
 
     void
     Serialize(StreamWriter& writer) const override;

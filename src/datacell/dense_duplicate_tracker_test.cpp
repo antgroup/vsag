@@ -46,6 +46,12 @@ TEST_CASE("DenseDuplicateTracker tracks duplicate groups", "[ut][DenseDuplicateT
     REQUIRE(sorted_duplicates(tracker.GetDuplicateIds(2)) == std::vector<InnerIdType>{0, 1});
     REQUIRE(sorted_duplicates(tracker.GetDuplicateIds(4)) == std::vector<InnerIdType>{5});
     REQUIRE(sorted_duplicates(tracker.GetDuplicateIds(5)) == std::vector<InnerIdType>{4});
+    REQUIRE(tracker.GetGroupId(0) == 0);
+    REQUIRE(tracker.GetGroupId(1) == 0);
+    REQUIRE(tracker.GetGroupId(2) == 0);
+    REQUIRE(tracker.GetGroupId(4) == 4);
+    REQUIRE(tracker.GetGroupId(5) == 4);
+    REQUIRE(tracker.GetGroupId(7) == 7);
 }
 
 TEST_CASE("DenseDuplicateTracker ignores duplicate reinsertion", "[ut][DenseDuplicateTracker]") {
@@ -79,6 +85,8 @@ TEST_CASE("DenseDuplicateTracker serialize and deserialize", "[ut][DenseDuplicat
     REQUIRE(sorted_duplicates(restored.GetDuplicateIds(0)) == std::vector<InnerIdType>{1, 2});
     REQUIRE(sorted_duplicates(restored.GetDuplicateIds(1)) == std::vector<InnerIdType>{0, 2});
     REQUIRE(sorted_duplicates(restored.GetDuplicateIds(4)) == std::vector<InnerIdType>{5});
+    REQUIRE(restored.GetGroupId(2) == 0);
+    REQUIRE(restored.GetGroupId(5) == 4);
 }
 
 TEST_CASE("DenseDuplicateTracker resize initializes new ids", "[ut][DenseDuplicateTracker]") {
@@ -119,4 +127,7 @@ TEST_CASE("DenseDuplicateTracker deserializes legacy format", "[ut][DenseDuplica
     REQUIRE(sorted_duplicates(tracker.GetDuplicateIds(0)) == std::vector<InnerIdType>{1, 2});
     REQUIRE(sorted_duplicates(tracker.GetDuplicateIds(2)) == std::vector<InnerIdType>{0, 1});
     REQUIRE(sorted_duplicates(tracker.GetDuplicateIds(4)) == std::vector<InnerIdType>{5});
+    REQUIRE(tracker.GetGroupId(0) == 0);
+    REQUIRE(tracker.GetGroupId(2) == 0);
+    REQUIRE(tracker.GetGroupId(5) == 4);
 }

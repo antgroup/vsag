@@ -191,9 +191,9 @@ public:
     }
 
     void
-    SetDuplicateId(InnerIdType original_id, InnerIdType duplicate_id) {
+    SetDuplicateId(InnerIdType group_id, InnerIdType duplicate_id) {
         if (duplicate_tracker_) {
-            duplicate_tracker_->SetDuplicateId(original_id, duplicate_id);
+            duplicate_tracker_->SetDuplicateId(group_id, duplicate_id);
         }
     }
 
@@ -203,6 +203,14 @@ public:
             return duplicate_tracker_->GetDuplicateIds(id);
         }
         return {};
+    }
+
+    [[nodiscard]] InnerIdType
+    GetGroupId(InnerIdType id) const {
+        if (duplicate_tracker_) {
+            return duplicate_tracker_->GetGroupId(id);
+        }
+        return id;
     }
 
 public:

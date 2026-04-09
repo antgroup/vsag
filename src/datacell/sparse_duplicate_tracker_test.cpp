@@ -38,26 +38,34 @@ TEST_CASE("SparseDuplicateTracker tracks duplicate groups", "[ut][SparseDuplicat
 
     tracker.SetDuplicateId(0, 1);
     tracker.SetDuplicateId(0, 2);
+    tracker.SetDuplicateId(0, 3);
     tracker.SetDuplicateId(4, 5);
 
-    REQUIRE(sorted_duplicates(tracker.GetDuplicateIds(0)) == std::vector<InnerIdType>{1, 2});
-    REQUIRE(sorted_duplicates(tracker.GetDuplicateIds(1)) == std::vector<InnerIdType>{0, 2});
-    REQUIRE(sorted_duplicates(tracker.GetDuplicateIds(2)) == std::vector<InnerIdType>{0, 1});
+    REQUIRE(sorted_duplicates(tracker.GetDuplicateIds(0)) == std::vector<InnerIdType>{1, 2, 3});
+    REQUIRE(sorted_duplicates(tracker.GetDuplicateIds(1)) == std::vector<InnerIdType>{0, 2, 3});
+    REQUIRE(sorted_duplicates(tracker.GetDuplicateIds(2)) == std::vector<InnerIdType>{0, 1, 3});
+    REQUIRE(sorted_duplicates(tracker.GetDuplicateIds(3)) == std::vector<InnerIdType>{0, 1, 2});
     REQUIRE(sorted_duplicates(tracker.GetDuplicateIds(4)) == std::vector<InnerIdType>{5});
     REQUIRE(sorted_duplicates(tracker.GetDuplicateIds(5)) == std::vector<InnerIdType>{4});
+    REQUIRE(tracker.GetGroupId(0) == 0);
+    REQUIRE(tracker.GetGroupId(1) == 0);
+    REQUIRE(tracker.GetGroupId(2) == 0);
+    REQUIRE(tracker.GetGroupId(3) == 0);
+    REQUIRE(tracker.GetGroupId(5) == 4);
+    REQUIRE(tracker.GetGroupId(7) == 7);
 }
 
-TEST_CASE("SparseDuplicateTracker resolves duplicate roots transitively",
-          "[ut][SparseDuplicateTracker]") {
+TEST_CASE("SparseDuplicateTracker requires canonical group ids", "[ut][SparseDuplicateTracker]") {
     auto allocator = std::make_shared<DefaultAllocator>();
     SparseDuplicateTracker tracker(allocator.get());
 
     tracker.SetDuplicateId(0, 1);
-    tracker.SetDuplicateId(1, 2);
-    tracker.SetDuplicateId(2, 3);
+    tracker.SetDuplicateId(0, 2);
+    tracker.SetDuplicateId(0, 3);
 
     REQUIRE(sorted_duplicates(tracker.GetDuplicateIds(0)) == std::vector<InnerIdType>{1, 2, 3});
     REQUIRE(sorted_duplicates(tracker.GetDuplicateIds(2)) == std::vector<InnerIdType>{0, 1, 3});
+    REQUIRE(tracker.GetGroupId(3) == 0);
 }
 
 TEST_CASE("SparseDuplicateTracker ignores duplicate reinsertion", "[ut][SparseDuplicateTracker]") {
@@ -89,4 +97,36 @@ TEST_CASE("SparseDuplicateTracker serialize and deserialize", "[ut][SparseDuplic
     REQUIRE(sorted_duplicates(restored.GetDuplicateIds(0)) == std::vector<InnerIdType>{1, 2});
     REQUIRE(sorted_duplicates(restored.GetDuplicateIds(1)) == std::vector<InnerIdType>{0, 2});
     REQUIRE(sorted_duplicates(restored.GetDuplicateIds(4)) == std::vector<InnerIdType>{5});
+    REQUIRE(restored.GetGroupId(2) == 0);
+    REQUIRE(restored.GetGroupId(5) == 4);
+}
+
+TEST_CASE("SparseDuplicateTracker deserializes legacy format", "[ut][SparseDuplicateTracker]") {
+    auto allocator = std::make_shared<DefaultAllocator>();
+
+    std::stringstream ss;
+    IOStreamWriter writer(ss);
+    size_t duplicate_count = 2;
+    StreamWriter::WriteObj(writer, duplicate_count);
+
+    InnerIdType head0 = 0;
+    std::vector<InnerIdType> group0{1, 2};
+    StreamWriter::WriteObj(writer, head0);
+    StreamWriter::WriteVector(writer, group0);
+
+    InnerIdType head1 = 4;
+    std::vector<InnerIdType> group1{5};
+    StreamWriter::WriteObj(writer, head1);
+    StreamWriter::WriteVector(writer, group1);
+
+    SparseDuplicateTracker tracker(allocator.get());
+    IOStreamReader reader(ss);
+    tracker.DeserializeFromLegacyFormat(reader, 6);
+
+    REQUIRE(sorted_duplicates(tracker.GetDuplicateIds(0)) == std::vector<InnerIdType>{1, 2});
+    REQUIRE(sorted_duplicates(tracker.GetDuplicateIds(2)) == std::vector<InnerIdType>{0, 1});
+    REQUIRE(sorted_duplicates(tracker.GetDuplicateIds(4)) == std::vector<InnerIdType>{5});
+    REQUIRE(tracker.GetGroupId(0) == 0);
+    REQUIRE(tracker.GetGroupId(2) == 0);
+    REQUIRE(tracker.GetGroupId(5) == 4);
 }

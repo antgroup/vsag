@@ -153,6 +153,9 @@ TEST_CASE("GraphDataCell duplicate tracker follows parameter", "[ut][GraphDataCe
 
     enabled_graph->Resize(4);
     enabled_graph->SetDuplicateId(0, 1);
+    REQUIRE(disabled_graph->GetGroupId(5) == 5);
+    REQUIRE(enabled_graph->GetGroupId(0) == 0);
+    REQUIRE(enabled_graph->GetGroupId(1) == 0);
     REQUIRE(enabled_graph->GetDuplicateIds(0) == std::vector<InnerIdType>{1});
     REQUIRE(enabled_graph->GetDuplicateIds(1) == std::vector<InnerIdType>{0});
 }

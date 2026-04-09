@@ -14,6 +14,8 @@
 
 #include "dense_duplicate_tracker.h"
 
+#include <algorithm>
+
 namespace vsag {
 
 DenseDuplicateTracker::DenseDuplicateTracker(Allocator* allocator)
@@ -21,10 +23,11 @@ DenseDuplicateTracker::DenseDuplicateTracker(Allocator* allocator)
 }
 
 void
-DenseDuplicateTracker::SetDuplicateId(InnerIdType original_id, InnerIdType duplicate_id) {
+DenseDuplicateTracker::SetDuplicateId(InnerIdType group_id, InnerIdType duplicate_id) {
     std::scoped_lock lock(mutex_);
 
-    if (duplicate_ids_.size() <= duplicate_id) {
+    if (group_id == duplicate_id || duplicate_ids_.size() <= duplicate_id ||
+        duplicate_ids_.size() <= group_id) {
         return;
     }
 
@@ -32,15 +35,11 @@ DenseDuplicateTracker::SetDuplicateId(InnerIdType original_id, InnerIdType dupli
         return;
     }
 
-    auto id = original_id;
-    while (duplicate_ids_[id] != original_id) {
-        id = duplicate_ids_[id];
-    }
-    if (duplicate_ids_[id] == id) {
+    if (duplicate_ids_[group_id] == group_id) {
         duplicate_count_++;
     }
-    duplicate_ids_[duplicate_id] = duplicate_ids_[id];
-    duplicate_ids_[id] = duplicate_id;
+    duplicate_ids_[duplicate_id] = duplicate_ids_[group_id];
+    duplicate_ids_[group_id] = duplicate_id;
 }
 
 auto
@@ -58,6 +57,23 @@ DenseDuplicateTracker::GetDuplicateIds(InnerIdType id) const -> std::vector<Inne
         current_id = duplicate_ids_[current_id];
     }
     return ids;
+}
+
+auto
+DenseDuplicateTracker::GetGroupId(InnerIdType id) const -> InnerIdType {
+    std::shared_lock lock(mutex_);
+
+    if (id >= duplicate_ids_.size()) {
+        return id;
+    }
+
+    InnerIdType group_id = id;
+    auto current_id = duplicate_ids_[id];
+    while (current_id != id) {
+        group_id = std::min(group_id, current_id);
+        current_id = duplicate_ids_[current_id];
+    }
+    return group_id;
 }
 
 void

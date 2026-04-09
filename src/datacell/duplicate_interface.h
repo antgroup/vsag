@@ -31,10 +31,13 @@ public:
     virtual ~DuplicateInterface() = default;
 
     virtual void
-    SetDuplicateId(InnerIdType original_id, InnerIdType duplicate_id) = 0;
+    SetDuplicateId(InnerIdType group_id, InnerIdType duplicate_id) = 0;
 
-    virtual auto
+    [[nodiscard]] virtual auto
     GetDuplicateIds(InnerIdType id) const -> std::vector<InnerIdType> = 0;
+
+    [[nodiscard]] virtual auto
+    GetGroupId(InnerIdType id) const -> InnerIdType = 0;
 
     virtual void
     Serialize(StreamWriter& writer) const = 0;

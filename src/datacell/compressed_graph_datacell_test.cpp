@@ -82,5 +82,8 @@ TEST_CASE("CompressedGraphDataCell duplicate tracker follows parameter",
     REQUIRE(enabled_graph->GetDuplicateTracker() != nullptr);
 
     enabled_graph->SetDuplicateId(0, 1);
+    REQUIRE(disabled_graph->GetGroupId(3) == 3);
+    REQUIRE(enabled_graph->GetGroupId(0) == 0);
+    REQUIRE(enabled_graph->GetGroupId(1) == 0);
     REQUIRE(enabled_graph->GetDuplicateIds(1) == std::vector<InnerIdType>{0});
 }

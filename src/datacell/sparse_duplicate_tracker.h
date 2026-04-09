@@ -27,10 +27,13 @@ public:
     explicit SparseDuplicateTracker(Allocator* allocator);
 
     void
-    SetDuplicateId(InnerIdType original_id, InnerIdType duplicate_id) override;
+    SetDuplicateId(InnerIdType group_id, InnerIdType duplicate_id) override;
 
     auto
     GetDuplicateIds(InnerIdType id) const -> std::vector<InnerIdType> override;
+
+    [[nodiscard]] auto
+    GetGroupId(InnerIdType id) const -> InnerIdType override;
 
     void
     Serialize(StreamWriter& writer) const override;
@@ -42,13 +45,13 @@ public:
     DeserializeFromLegacyFormat(StreamReader& reader, size_t total_size) override;
 
     void
-    Resize(InnerIdType) override {
+    Resize(InnerIdType new_size) override {
+        (void)new_size;
     }
 
 private:
     Allocator* allocator_;
-    UnorderedMap<InnerIdType, std::vector<InnerIdType>> original_to_duplicates_;
-    UnorderedMap<InnerIdType, InnerIdType> duplicate_to_original_;
+    UnorderedMap<InnerIdType, InnerIdType> next_ids_;
     mutable std::shared_mutex mutex_;
     size_t duplicate_count_{0};
     bool has_deserialized_{false};

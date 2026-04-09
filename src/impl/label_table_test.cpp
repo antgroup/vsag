@@ -294,6 +294,9 @@ TEST_CASE("LabelTable deserializes legacy duplicate payload", "[ut][LabelTable]"
     REQUIRE(sorted_duplicates(tracker->GetDuplicateIds(0)) == std::vector<InnerIdType>{1, 2});
     REQUIRE(sorted_duplicates(tracker->GetDuplicateIds(2)) == std::vector<InnerIdType>{0, 1});
     REQUIRE(sorted_duplicates(tracker->GetDuplicateIds(4)) == std::vector<InnerIdType>{5});
+    REQUIRE(tracker->GetGroupId(0) == 0);
+    REQUIRE(tracker->GetGroupId(2) == 0);
+    REQUIRE(tracker->GetGroupId(5) == 4);
 }
 
 TEST_CASE("LabelTable Hole List Operations", "[ut][LabelTable]") {
