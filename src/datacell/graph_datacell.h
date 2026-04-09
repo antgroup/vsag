@@ -24,6 +24,7 @@
 #include "graph_datacell_parameter.h"
 #include "graph_interface.h"
 #include "graph_interface_parameter.h"
+#include "impl/reverse_edge.h"
 #include "index_common_param.h"
 #include "io/basic_io.h"
 #include "vsag/constants.h"
@@ -111,11 +112,25 @@ public:
         if (IOTmpl::InMemory) {
             memory += io_->GetMemoryUsage();
         }
+        if (reverse_edges_) {
+            memory += reverse_edges_->GetMemoryUsage();
+        }
         return memory;
+    }
+
+    void
+    GetIncomingNeighbors(InnerIdType id, Vector<InnerIdType>& neighbors) const override {
+        if (reverse_edges_) {
+            reverse_edges_->GetIncomingNeighbors(id, neighbors);
+        } else {
+            neighbors.clear();
+        }
     }
 
 private:
     std::shared_ptr<BasicIO<IOTmpl>> io_{nullptr};
+
+    std::unique_ptr<ReverseEdge> reverse_edges_{nullptr};
 
     Vector<uint8_t> node_versions_;
 
@@ -172,6 +187,9 @@ GraphDataCell<IOTmpl>::GraphDataCell(const GraphDataCellParamPtr& param,
     if (this->is_support_delete_) {
         node_versions_.resize(max_capacity_);
     }
+    if (param->use_reverse_edges_) {
+        reverse_edges_ = std::make_unique<ReverseEdge>(this->allocator_);
+    }
 }
 
 template <typename IOTmpl>
@@ -189,6 +207,33 @@ GraphDataCell<IOTmpl>::InsertNeighborsById(InnerIdType id,
         throw std::invalid_argument(fmt::format(
             "insert neighbors count {} more than {}", neighbor_ids.size(), this->maximum_degree_));
     }
+
+    // Update reverse edges if enabled
+    if (reverse_edges_) {
+        Vector<InnerIdType> old_neighbors(allocator_);
+        if (id < this->total_count_) {
+            this->GetNeighbors(id, old_neighbors);
+        }
+        UnorderedSet<InnerIdType> old_set(allocator_);
+        UnorderedSet<InnerIdType> new_set(allocator_);
+        for (const auto& n : old_neighbors) {
+            old_set.insert(n);
+        }
+        for (const auto& n : neighbor_ids) {
+            new_set.insert(n);
+        }
+        for (const auto& old_n : old_neighbors) {
+            if (new_set.find(old_n) == new_set.end()) {
+                reverse_edges_->RemoveReverseEdge(id, old_n);
+            }
+        }
+        for (const auto& new_n : neighbor_ids) {
+            if (old_set.find(new_n) == old_set.end()) {
+                reverse_edges_->AddReverseEdge(id, new_n);
+            }
+        }
+    }
+
     InnerIdType current = total_count_.load();
     while (current < id + 1 && !total_count_.compare_exchange_weak(current, id + 1)) {
     }
