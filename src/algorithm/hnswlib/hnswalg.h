@@ -309,7 +309,7 @@ public:
     setBatchNeigohborsNoLock(InnerIdType internal_id,
                              int level,
                              const InnerIdType* neighbors,
-                             uint64_t neigbor_count);
+                             size_t neigbor_count);
 
     void
     appendNeigohbor(InnerIdType internal_id, int level, InnerIdType neighbor, size_t max_degree);
@@ -318,7 +318,7 @@ public:
     appendNeigohborNoLock(InnerIdType internal_id,
                           int level,
                           InnerIdType neighbor,
-                          uint64_t max_degree);
+                          size_t max_degree);
 
     linklistsizeint*
     getLinklist0(InnerIdType internal_id) const {

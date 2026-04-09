@@ -311,7 +311,7 @@ void
 HierarchicalNSW::setBatchNeigohborsNoLock(InnerIdType internal_id,
                                           int level,
                                           const InnerIdType* neighbors,
-                                          uint64_t neigbor_count) {
+                                          size_t neigbor_count) {
     linklistsizeint* ll_cur = getLinklistAtLevel(internal_id, level);
     for (int i = 1; i <= neigbor_count; ++i) {
         ll_cur[i] = neighbors[i - 1];
@@ -333,7 +333,7 @@ void
 HierarchicalNSW::appendNeigohborNoLock(InnerIdType internal_id,
                                        int level,
                                        InnerIdType neighbor,
-                                       uint64_t max_degree) {
+                                       size_t max_degree) {
     linklistsizeint* ll_cur = getLinklistAtLevel(internal_id, level);
     size_t neigbor_count = getListCount(ll_cur) + 1;
     if (neigbor_count <= max_degree) {
