@@ -1403,15 +1403,16 @@ TEST_CASE("HGraph Test NonstandardID", "[ft][hgraph][pr]") {
 }
 
 static void
-TestHGraphDuplicate(const fixtures::HGraphTestIndexPtr& test_index,
-                    const fixtures::HGraphResourcePtr& resource) {
+RunHGraphDuplicateChecks(const fixtures::HGraphTestIndexPtr& test_index,
+                         const fixtures::HGraphResourcePtr& resource,
+                         const std::string& graph_storage,
+                         bool run_full_search_checks,
+                         bool run_serialize_check) {
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto duplicate_pos = GENERATE("prefix", "suffix", "middle");
     auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
-    std::unordered_map<std::string, float> ratios{
-        {"prefix", 0.9}, {"suffix", 0.9}, {"middle", 1.0}};
     for (auto metric_type : resource->metric_types) {
         for (auto dim : resource->dims) {
             for (auto& [base_quantization_str, recall] : resource->test_cases) {
@@ -1440,29 +1441,46 @@ TestHGraphDuplicate(const fixtures::HGraphTestIndexPtr& test_index,
                 HGraphTestIndex::HGraphBuildParam build_param(
                     metric_type, dim, base_quantization_str);
                 build_param.support_duplicate = true;
+                build_param.graph_storage = graph_storage;
                 auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
                 auto index = TestIndex::TestFactory(test_index->name, param, true);
                 auto dataset = HGraphTestIndex::pool.GetDuplicateDataset(
                     dim, resource->base_count, metric_type);
                 TestIndex::TestBuildDuplicateIndex(index, dataset, duplicate_pos, true);
-                TestIndex::TestKnnSearch(index, dataset, search_param, recall, true);
-                // TODO(inabao): Fix knn search iter test
-                // TestIndex::TestKnnSearchIter(index, dataset, search_param, recall, true);
-                TestIndex::TestConcurrentKnnSearch(index, dataset, search_param, recall, true);
-                TestIndex::TestRangeSearch(index, dataset, search_param, recall, 10, true);
-                TestIndex::TestRangeSearch(index, dataset, search_param, recall / 2.0, 5, true);
-                TestIndex::TestFilterSearch(index, dataset, search_param, recall, true, true);
-                TestIndex::TestCheckIdExist(index, dataset);
-                TestIndex::TestCalcDistanceById(index, dataset);
-                TestIndex::TestGetRawVectorByIds(index, dataset);
-                TestIndex::TestBatchCalcDistanceById(index, dataset);
-                TestIndex::TestSearchAllocator(index, dataset, search_param, recall, true);
-                auto index2 = TestIndex::TestFactory(test_index->name, param, true);
-                TestIndex::TestSerializeFile(index, index2, dataset, search_param, true);
+                if (run_full_search_checks) {
+                    TestIndex::TestKnnSearch(index, dataset, search_param, recall, true);
+                    // TODO(inabao): Fix knn search iter test
+                    // TestIndex::TestKnnSearchIter(index, dataset, search_param, recall, true);
+                    TestIndex::TestConcurrentKnnSearch(index, dataset, search_param, recall, true);
+                    TestIndex::TestRangeSearch(index, dataset, search_param, recall, 10, true);
+                    TestIndex::TestRangeSearch(index, dataset, search_param, recall / 2.0, 5, true);
+                    TestIndex::TestFilterSearch(index, dataset, search_param, recall, true, true);
+                    TestIndex::TestCheckIdExist(index, dataset);
+                    TestIndex::TestCalcDistanceById(index, dataset);
+                    TestIndex::TestGetRawVectorByIds(index, dataset);
+                    TestIndex::TestBatchCalcDistanceById(index, dataset);
+                    TestIndex::TestSearchAllocator(index, dataset, search_param, recall, true);
+                }
+                if (run_serialize_check) {
+                    auto index2 = TestIndex::TestFactory(test_index->name, param, true);
+                    TestIndex::TestSerializeFile(index, index2, dataset, search_param, true);
+                }
                 vsag::Options::Instance().set_block_size_limit(origin_size);
             }
         }
     }
+}
+
+static void
+TestHGraphDuplicate(const fixtures::HGraphTestIndexPtr& test_index,
+                    const fixtures::HGraphResourcePtr& resource) {
+    RunHGraphDuplicateChecks(test_index, resource, "flat", true, true);
+}
+
+static void
+TestHGraphDuplicateSerializeCompressed(const fixtures::HGraphTestIndexPtr& test_index,
+                                       const fixtures::HGraphResourcePtr& resource) {
+    RunHGraphDuplicateChecks(test_index, resource, "compressed", false, true);
 }
 
 TEST_CASE("(PR) HGraph Duplicate", "[ft][hgraph][pr]") {
@@ -1475,6 +1493,12 @@ TEST_CASE("(Daily) HGraph Duplicate", "[ft][hgraph][daily]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(false);
     TestHGraphDuplicate(test_index, resource);
+}
+
+TEST_CASE("(PR) HGraph Duplicate Serialize Compressed", "[ft][hgraph][serialization][pr]") {
+    auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
+    auto resource = test_index->GetResource(true);
+    TestHGraphDuplicateSerializeCompressed(test_index, resource);
 }
 
 static void
@@ -1942,6 +1966,7 @@ TestHGraphDuplicateBuild(const fixtures::HGraphTestIndexPtr& test_index,
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
+    auto graph_storage = GENERATE("flat", "compressed");
     auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
     uint64_t extra_info_size = 64;
 
@@ -1961,6 +1986,8 @@ TestHGraphDuplicateBuild(const fixtures::HGraphTestIndexPtr& test_index,
 
                 HGraphTestIndex::HGraphBuildParam build_param(
                     metric_type, dim, base_quantization_str);
+                build_param.support_duplicate = true;
+                build_param.graph_storage = graph_storage;
                 auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
                 auto index = TestIndex::TestFactory(test_index->name, param, true);
                 auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(

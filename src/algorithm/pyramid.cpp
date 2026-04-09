@@ -15,6 +15,8 @@
 
 #include "pyramid.h"
 
+#include <chrono>
+
 #include "algorithm/inner_index_interface.h"
 #include "analyzer/analyzer.h"
 #include "datacell/flatten_interface.h"
@@ -250,7 +252,7 @@ Pyramid::KnnSearch(const DatasetPtr& query,
     search_param.topk = k;
     search_param.search_mode = KNN_SEARCH;
     search_param.parallel_search_thread_count = parsed_param.parallel_search_thread_count;
-    if (this->label_table_->CompressDuplicateData()) {
+    if (this->support_duplicate_) {
         search_param.consider_duplicate = true;
     }
 
@@ -297,7 +299,7 @@ Pyramid::RangeSearch(const DatasetPtr& query,
         search_param.time_cost->SetThreshold(parsed_param.timeout_ms);
     }
 
-    if (this->label_table_->CompressDuplicateData()) {
+    if (this->support_duplicate_) {
         search_param.consider_duplicate = true;
     }
 
@@ -621,7 +623,8 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
             "{GRAPH_PARAM_MAX_DEGREE_KEY}": 64,
             "{GRAPH_PARAM_INIT_MAX_CAPACITY_KEY}": 100,
             "{GRAPH_SUPPORT_REMOVE}": false,
-            "{REMOVE_FLAG_BIT}": 8
+            "{REMOVE_FLAG_BIT}": 8,
+            "{SUPPORT_DUPLICATE}": false
         },
         "{BASE_CODES_KEY}": {
             "{IO_PARAMS_KEY}": {
@@ -693,7 +696,8 @@ Pyramid::CheckAndMappingExternalParam(const JsonType& external_param,
         {ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE,
          {GRAPH_KEY, ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE}},
         {PYRAMID_INDEX_MIN_SIZE, {INDEX_MIN_SIZE}},
-        {PYRAMID_SUPPORT_DUPLICATE, {SUPPORT_DUPLICATE}}};
+        {PYRAMID_SUPPORT_DUPLICATE, {SUPPORT_DUPLICATE}},
+        {PYRAMID_SUPPORT_DUPLICATE, {GRAPH_KEY, SUPPORT_DUPLICATE}}};
 
     std::string str = format_map(HGRAPH_PARAMS_TEMPLATE, DEFAULT_MAP);
     auto inner_json = JsonType::Parse(str);
@@ -746,15 +750,17 @@ Pyramid::Build(const DatasetPtr& base) {
 void
 Pyramid::add_one_point(IndexNode* node, InnerIdType inner_id, const float* vector) {
     std::unique_lock graph_lock(node->mutex_);
-    // add one point
+
     if (node->status_ == IndexNode::Status::NO_INDEX) {
         node->Init();
         Vector<InnerIdType>(allocator_).swap(node->ids_);
     }
+
     if (node->status_ == IndexNode::Status::FLAT) {
         node->ids_.push_back(inner_id);
         return;
     }
+
     if (node->graph_->TotalCount() == 0) {
         node->graph_->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
         node->entry_point_ = inner_id;
@@ -763,7 +769,8 @@ Pyramid::add_one_point(IndexNode* node, InnerIdType inner_id, const float* vecto
         search_param.ef = ef_construction_;
         search_param.topk = static_cast<int64_t>(ef_construction_);
         search_param.search_mode = KNN_SEARCH;
-        if (label_table_->CompressDuplicateData()) {
+        search_param.hops_limit = 10000;  // Add hops limit to prevent infinite loop
+        if (support_duplicate_) {
             search_param.find_duplicate = true;
         }
         auto codes = use_reorder_ ? precise_codes_ : base_codes_;
@@ -781,9 +788,9 @@ Pyramid::add_one_point(IndexNode* node, InnerIdType inner_id, const float* vecto
         auto results = searcher_->Search(
             node->graph_, codes, vl, vector, search_param, (LabelTablePtr) nullptr, nullptr);
         pool_->ReturnOne(vl);
-        if (this->label_table_->CompressDuplicateData() && search_param.duplicate_id >= 0) {
+        if (this->support_duplicate_ && search_param.duplicate_id >= 0) {
             std::unique_lock lock(this->label_lookup_mutex_);
-            label_table_->SetDuplicateId(static_cast<InnerIdType>(search_param.duplicate_id),
+            node->graph_->SetDuplicateId(static_cast<InnerIdType>(search_param.duplicate_id),
                                          inner_id);
             return;
         }

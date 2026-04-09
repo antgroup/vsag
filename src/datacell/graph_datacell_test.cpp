@@ -18,9 +18,11 @@
 #include <catch2/catch_template_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 
+#include "graph_datacell_parameter.h"
 #include "graph_interface_parameter.h"
 #include "graph_interface_test.h"
 #include "impl/allocator/safe_allocator.h"
+#include "io/memory_io_parameter.h"
 
 using namespace vsag;
 
@@ -128,4 +130,32 @@ TEST_CASE("GraphDataCell Merge", "[ut][GraphDataCell]") {
     GraphInterfaceTest test(graph);
     auto other = GraphInterface::MakeInstance(graph_param, common_param);
     test.MergeTest(other, 1000);
+}
+
+TEST_CASE("GraphDataCell duplicate tracker follows parameter", "[ut][GraphDataCell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.dim_ = 32;
+    common_param.allocator_ = allocator;
+
+    auto disabled_param = std::make_shared<GraphDataCellParameter>();
+    disabled_param->io_parameter_ = std::make_shared<MemoryIOParameter>();
+    disabled_param->support_duplicate_ = false;
+    auto disabled_graph = GraphInterface::MakeInstance(disabled_param, common_param);
+    REQUIRE(disabled_graph->GetDuplicateTracker() == nullptr);
+    REQUIRE(disabled_graph->GetDuplicateIds(0).empty());
+
+    auto enabled_param = std::make_shared<GraphDataCellParameter>();
+    enabled_param->io_parameter_ = std::make_shared<MemoryIOParameter>();
+    enabled_param->support_duplicate_ = true;
+    auto enabled_graph = GraphInterface::MakeInstance(enabled_param, common_param);
+    REQUIRE(enabled_graph->GetDuplicateTracker() != nullptr);
+
+    enabled_graph->Resize(4);
+    enabled_graph->SetDuplicateId(0, 1);
+    REQUIRE(disabled_graph->GetGroupId(5) == 5);
+    REQUIRE(enabled_graph->GetGroupId(0) == 0);
+    REQUIRE(enabled_graph->GetGroupId(1) == 0);
+    REQUIRE(enabled_graph->GetDuplicateIds(0) == std::vector<InnerIdType>{1});
+    REQUIRE(enabled_graph->GetDuplicateIds(1) == std::vector<InnerIdType>{0});
 }

@@ -19,6 +19,7 @@
 
 #include "graph_interface.h"
 #include "io/memory_block_io.h"
+#include "sparse_duplicate_tracker.h"
 #include "sparse_graph_datacell_parameter.h"
 
 namespace vsag {
@@ -78,6 +79,11 @@ public:
 
     int64_t
     GetMemoryUsage() const override;
+
+    DuplicateTrackerPtr
+    CreateDuplicateTracker() override {
+        return std::make_shared<SparseDuplicateTracker>(allocator_);
+    }
 
 private:
     uint32_t code_line_size_{0};

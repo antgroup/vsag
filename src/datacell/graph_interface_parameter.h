@@ -37,6 +37,7 @@ public:
     uint64_t max_degree_{64};
 
     bool use_reverse_edges_{false};
+    bool support_duplicate_{false};
 
 protected:
     explicit GraphInterfaceParameter(GraphStorageTypes graph_type)
