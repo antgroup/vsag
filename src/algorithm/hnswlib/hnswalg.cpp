@@ -267,6 +267,14 @@ HierarchicalNSW::setBatchNeigohbors(InnerIdType internal_id,
                                     const InnerIdType* neighbors,
                                     size_t neigbor_count) {
     vsag::LockGuard lock(points_locks_, internal_id);
+    setBatchNeigohborsNoLock(internal_id, level, neighbors, neigbor_count);
+}
+
+void
+HierarchicalNSW::setBatchNeigohborsNoLock(InnerIdType internal_id,
+                                          int level,
+                                          const InnerIdType* neighbors,
+                                          uint64_t neigbor_count) {
     linklistsizeint* ll_cur = getLinklistAtLevel(internal_id, level);
     for (int i = 1; i <= neigbor_count; ++i) {
         ll_cur[i] = neighbors[i - 1];
@@ -281,6 +289,14 @@ HierarchicalNSW::appendNeigohbor(InnerIdType internal_id,
                                  InnerIdType neighbor,
                                  size_t max_degree) {
     vsag::LockGuard lock(points_locks_, internal_id);
+    appendNeigohborNoLock(internal_id, level, neighbor, max_degree);
+}
+
+void
+HierarchicalNSW::appendNeigohborNoLock(InnerIdType internal_id,
+                                       int level,
+                                       InnerIdType neighbor,
+                                       uint64_t max_degree) {
     linklistsizeint* ll_cur = getLinklistAtLevel(internal_id, level);
     size_t neigbor_count = getListCount(ll_cur) + 1;
     if (neigbor_count <= max_degree) {
@@ -294,8 +310,19 @@ HierarchicalNSW::updateConnections(InnerIdType internal_id,
                                    const vsag::Vector<InnerIdType>& cand_neighbors,
                                    int level,
                                    bool is_update) {
+    vsag::LockGuard lock(points_locks_, internal_id);
+    updateConnectionsNoLock(internal_id, cand_neighbors, level, is_update);
+}
+
+void
+HierarchicalNSW::updateConnectionsNoLock(InnerIdType internal_id,
+                                         const vsag::Vector<InnerIdType>& cand_neighbors,
+                                         int level,
+                                         bool is_update) {
     std::shared_ptr<char[]> link_data = std::shared_ptr<char[]>(new char[size_links_level0_]);
-    getLinklistAtLevel(internal_id, level, link_data.get());
+    auto* src = reinterpret_cast<char*>(getLinklistAtLevel(internal_id, level));
+    auto link_size = level == 0 ? size_links_level0_ : size_links_per_element_;
+    std::memcpy(link_data.get(), src, link_size);
     linklistsizeint* ll_cur = (linklistsizeint*)link_data.get();
 
     auto cur_size = getListCount(ll_cur);
@@ -316,7 +343,7 @@ HierarchicalNSW::updateConnections(InnerIdType internal_id,
             in_edges.insert(internal_id);
         }
     }
-    setBatchNeigohbors(internal_id, level, cand_neighbors.data(), cand_neighbors.size());
+    setBatchNeigohborsNoLock(internal_id, level, cand_neighbors.data(), cand_neighbors.size());
 }
 
 bool
@@ -380,6 +407,7 @@ HierarchicalNSW::bruteForce(const void* data_point,
 int
 HierarchicalNSW::getRandomLevel(double reverse_size) {
     std::uniform_real_distribution<double> distribution(0.0, 1.0);
+    std::lock_guard<std::mutex> lock(level_generator_mutex_);
     double r = -log(distribution(level_generator_)) * reverse_size;
     return (int)r;
 }
@@ -742,11 +770,18 @@ HierarchicalNSW::mutuallyConnectNewElement(InnerIdType cur_c,
 
     InnerIdType next_closest_entry_point = selectedNeighbors.back();
 
-    updateConnections(cur_c, selectedNeighbors, level, isUpdate);
+    if (isUpdate) {
+        updateConnections(cur_c, selectedNeighbors, level, isUpdate);
+    } else {
+        updateConnectionsNoLock(cur_c, selectedNeighbors, level, isUpdate);
+    }
 
     std::shared_ptr<char[]> ll_other_data = std::shared_ptr<char[]>(new char[size_links_level0_]);
     for (unsigned int selectedNeighbor : selectedNeighbors) {
-        getLinklistAtLevel(selectedNeighbor, level, ll_other_data.get());
+        vsag::LockGuard lock(points_locks_, selectedNeighbor);
+        auto* src = reinterpret_cast<char*>(getLinklistAtLevel(selectedNeighbor, level));
+        auto link_size = level == 0 ? size_links_level0_ : size_links_per_element_;
+        std::memcpy(ll_other_data.get(), src, link_size);
         linklistsizeint* ll_other = (linklistsizeint*)ll_other_data.get();
 
         size_t sz_link_list_other = getListCount(ll_other);
@@ -773,7 +808,7 @@ HierarchicalNSW::mutuallyConnectNewElement(InnerIdType cur_c,
         // If cur_c is already present in the neighboring connections of `selectedNeighbors[idx]` then no need to modify any connections or run the heuristics.
         if (!is_cur_c_present) {
             if (sz_link_list_other < m_curmax) {
-                appendNeigohbor(selectedNeighbor, level, cur_c, m_curmax);
+                appendNeigohborNoLock(selectedNeighbor, level, cur_c, m_curmax);
                 if (use_reversed_edges_) {
                     auto& cur_in_edges = getEdges(cur_c, level);
                     cur_in_edges.insert(selectedNeighbor);
@@ -801,7 +836,7 @@ HierarchicalNSW::mutuallyConnectNewElement(InnerIdType cur_c,
                     cand_neighbors.push_back(candidates.top().second);
                     candidates.pop();
                 }
-                updateConnections(selectedNeighbor, cand_neighbors, level, true);
+                updateConnectionsNoLock(selectedNeighbor, cand_neighbors, level, true);
                 // Nearest K:
                 /*int indx = -1;
                     for (int j = 0; j < sz_link_list_other; j++) {
@@ -1508,10 +1543,14 @@ HierarchicalNSW::addPoint(const void* data_point, LabelType label, int level) {
     std::shared_lock resize_lock(resize_mutex_);
     std::unique_lock lock(max_level_mutex_);
     int maxlevelcopy = max_level_;
-    if (curlevel <= maxlevelcopy)
-        lock.unlock();
     int64_t currObj = enterpoint_node_;
     int64_t enterpoint_copy = enterpoint_node_;
+    if (curlevel <= maxlevelcopy)
+        lock.unlock();
+
+    // Take the per-point lock after the global max-level lock to keep a consistent lock order.
+    // This still keeps the new point invisible before any neighbor starts pointing to it.
+    vsag::LockGuard point_lock(points_locks_, cur_c);
 
     if (curlevel) {
         auto new_link_lists = (char*)allocator_->Reallocate(link_lists_[cur_c],

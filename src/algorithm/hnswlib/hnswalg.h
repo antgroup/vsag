@@ -87,7 +87,6 @@ private:
         points_locks_;  // Ensures access safety for the link list and label of a specific point.
     mutable std::shared_mutex
         label_lookup_lock_{};  // Ensures access safety for the global label lookup table.
-
     InnerIdType enterpoint_node_{0};
 
     size_t size_links_level0_{0};
@@ -117,6 +116,7 @@ private:
     vsag::STLUnorderedMap<LabelType, InnerIdType> label_lookup_;
 
     std::default_random_engine level_generator_{2021};
+    mutable std::mutex level_generator_mutex_;
     mutable std::default_random_engine update_probability_generator_;
 
     vsag::Allocator* allocator_{nullptr};
@@ -221,6 +221,12 @@ public:
                       int level,
                       bool is_update);
 
+    void
+    updateConnectionsNoLock(InnerIdType internal_id,
+                            const vsag::Vector<InnerIdType>& cand_neighbors,
+                            int level,
+                            bool is_update);
+
     bool
     checkReverseConnection();
 
@@ -288,7 +294,19 @@ public:
                        size_t neigbor_count);
 
     void
+    setBatchNeigohborsNoLock(InnerIdType internal_id,
+                             int level,
+                             const InnerIdType* neighbors,
+                             uint64_t neigbor_count);
+
+    void
     appendNeigohbor(InnerIdType internal_id, int level, InnerIdType neighbor, size_t max_degree);
+
+    void
+    appendNeigohborNoLock(InnerIdType internal_id,
+                          int level,
+                          InnerIdType neighbor,
+                          uint64_t max_degree);
 
     linklistsizeint*
     getLinklist0(InnerIdType internal_id) const {
