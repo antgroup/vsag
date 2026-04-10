@@ -84,7 +84,7 @@ jobs:
           save: ${{ github.event_name != 'pull_request' }}
           key: build-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
       - name: Make Asan
-        run: export CMAKE_GENERATOR="Ninja" CMAKE_EXPORT_COMPILE_COMMANDS=ON; make asan
+        run: export VSAG_ENABLE_INTEL_MKL=ON CMAKE_GENERATOR="Ninja" CMAKE_EXPORT_COMPILE_COMMANDS=ON; make asan
       - name: Install clang-tidy 15
         run: sudo apt install clang-tidy-15 -y
       - name: Run Lint
