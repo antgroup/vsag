@@ -6,9 +6,13 @@
 ![GitHub License](https://img.shields.io/github/license/antgroup/vsag)
 ![GitHub Release](https://img.shields.io/github/v/release/antgroup/vsag?label=last%20release)
 ![GitHub Contributors](https://img.shields.io/github/contributors/antgroup/vsag)
-[![arXiv](https://badgen.net/static/arXiv/2404.16322/red)](http://arxiv.org/abs/2404.16322)
-[![arXiv](https://badgen.net/static/arXiv/2503.17911/red)](http://arxiv.org/abs/2503.17911)
+[![arXiv](https://badgen.net/static/arXiv/2505.03212/red)](https://arxiv.org/abs/2505.03212)
+[![arXiv](https://badgen.net/static/arXiv/2603.21710/red)](https://arxiv.org/abs/2603.21710)
 [![arXiv](https://badgen.net/static/arXiv/2509.08395/red)](https://arxiv.org/abs/2509.08395)
+[![arXiv](https://badgen.net/static/arXiv/2411.06158/red)](https://arxiv.org/abs/2411.06158)
+[![arXiv](https://badgen.net/static/arXiv/2503.17911/red)](https://arxiv.org/abs/2503.17911)
+[![arXiv](https://badgen.net/static/arXiv/2404.16322/red)](https://arxiv.org/abs/2404.16322)
+[![arXiv](https://badgen.net/static/arXiv/2506.13144/red)](https://arxiv.org/abs/2506.13144)
 
 ![PyPI - Version](https://img.shields.io/pypi/v/pyvsag)
 ![PyPI - Python Version](https://img.shields.io/pypi/pyversions/pyvsag)
@@ -124,7 +128,7 @@ Thrive together in VSAG community with users and developers from all around the 
 
 1. Elastic Index Selection for Label-Hybrid AKNN Search [_VLDB_, 2026]  
    **Mingyu Yang**, Wenxuan Xia, Wentao Li, Raymond Chi-Wing Wong, Wei Wang  
-   [PDF](https://dl.acm.org/doi/pdf/10.14778/3785297.3785304) | [DOI](https://doi.org/10.14778/3785297.3785304)
+   [PDF](https://arxiv.org/pdf/2505.03212) | [DOI](https://doi.org/10.14778/3785297.3785304)
 
 2. FGIM: a Fast Graph-based Indexes Merging Framework for Approximate Nearest Neighbor Search [_SIGMOD_, 2026]  
    **Zekai Wu, Jiabao Jin**, Peng Cheng, **Xiaoyao Zhong**, Lei Chen, Yongxin Tong, **Zhitao Shen**, Jingkuan Song, Heng Tao Shen, Xuemin Lin  
