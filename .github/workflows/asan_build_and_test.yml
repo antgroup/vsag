@@ -66,7 +66,7 @@ jobs:
           save: ${{ github.event_name != 'pull_request' }}
           key: build-aarch-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
       - name: Make Asan
-        run: export CMAKE_GENERATOR="Ninja"; make asan
+        run: export CMAKE_GENERATOR="Ninja"; COMPILE_JOBS=2 VSAG_ENABLE_PYBINDS=OFF VSAG_ENABLE_TOOLS=OFF make asan
       - name: Clean
         run: find ./build -type f -name "*.o" -exec rm -f {} +
       - name: Save Test

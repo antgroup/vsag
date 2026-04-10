@@ -552,6 +552,8 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
     // check which code need to tune and update create_param_ptr_
     bool is_tune_base_code = false;
     bool is_tune_precise_code = false;
+    bool new_use_reorder = use_reorder_;
+    bool drop_precise_codes = false;
     auto param = std::dynamic_pointer_cast<HGraphParameter>(create_param_ptr_);
     if (basic_flatten_codes_->GetQuantizerName() != new_basic_code->GetQuantizerName()) {
         // [case 1] base_code is not same
@@ -564,14 +566,14 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
     }
     if (not inner_parameter->use_reorder) {
         // [case 3] drop precise_code
-        use_reorder_ = false;
-        this->high_precise_codes_.reset();
+        new_use_reorder = false;
+        drop_precise_codes = true;
         param->precise_codes_param.reset();
         is_tune_precise_code = false;
     }
-    if (not use_reorder_ and inner_parameter->use_reorder) {
+    if (not new_use_reorder and inner_parameter->use_reorder) {
         // [case 4] assign new precise_code
-        use_reorder_ = true;
+        new_use_reorder = true;
         is_tune_precise_code = true;
     }
 
@@ -582,7 +584,7 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
     if (is_tune_precise_code) {
         param->precise_codes_param = hgraph_parameter->precise_codes_param;
     }
-    param->use_reorder = use_reorder_;
+    param->use_reorder = new_use_reorder;
 
     // export train data and train new_basic_code
     auto train_count = std::min(this->train_sample_count_, this->GetNumElements());
@@ -609,20 +611,33 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
             return new_code;
         };
 
-    basic_flatten_codes_ =
-        tune_and_rebuild(is_tune_base_code, basic_flatten_codes_, new_basic_code);
-    high_precise_codes_ =
+    auto new_basic = tune_and_rebuild(is_tune_base_code, basic_flatten_codes_, new_basic_code);
+    auto new_precise =
         tune_and_rebuild(is_tune_precise_code, high_precise_codes_, new_precise_code);
 
-    check_and_init_raw_vector(param->raw_vector_param, common_param, false);
-    init_resize_bit_and_reorder();
+    // Acquire exclusive global lock to atomically swap flatten codes,
+    // preventing concurrent searches from accessing partially updated state.
+    {
+        std::scoped_lock<std::shared_mutex> wlock(this->global_mutex_);
+        basic_flatten_codes_ = new_basic;
+        if (drop_precise_codes) {
+            high_precise_codes_.reset();
+        } else {
+            high_precise_codes_ = new_precise;
+        }
+        use_reorder_ = new_use_reorder;
+        param->use_reorder = new_use_reorder;
 
-    // set status
-    if (disable_future_tuning) {
-        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_TUNE, false);
-        this->raw_vector_.reset();
-        has_raw_vector_ = false;
-        create_new_raw_vector_ = false;
+        check_and_init_raw_vector(param->raw_vector_param, common_param, false);
+        init_resize_bit_and_reorder();
+
+        // set status
+        if (disable_future_tuning) {
+            this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_TUNE, false);
+            this->raw_vector_.reset();
+            has_raw_vector_ = false;
+            create_new_raw_vector_ = false;
+        }
     }
     return true;
 }
@@ -1074,6 +1089,8 @@ HGraph::RangeSearch(const DatasetPtr& query,
     // check limited_size
     CHECK_ARGUMENT(limited_size != 0,
                    fmt::format("limited_size({}) must not be equal to 0", limited_size));
+
+    std::shared_lock shared_lock(this->global_mutex_);
 
     InnerSearchParam search_param;
     search_param.ep = this->entry_point_id_;
