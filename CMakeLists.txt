@@ -66,5 +66,6 @@ if (ENABLE_TESTS)
 endif ()
 
 include (cmake/VSAGPythonBindings.cmake)  # Optional Python bindings.
+include (cmake/VSAGNodeBindings.cmake)    # Optional Node.js bindings.
 include (cmake/VSAGInstall.cmake)         # Install rules.
 include (cmake/VSAGVersion.cmake)         # Generated version header target.

@@ -20,7 +20,7 @@
 
 ## What is VSAG
 
-VSAG is a vector indexing library used for similarity search. The indexing algorithm allows users to search through various sizes of vector sets, especially those that cannot fit in memory. The library also provides methods for generating parameters based on vector dimensions and data scale, allowing developers to use it without understanding the algorithm’s principles. VSAG is written in C++ and provides a Python wrapper package called [pyvsag](https://pypi.org/project/pyvsag/).
+VSAG is a vector indexing library used for similarity search. The indexing algorithm allows users to search through various sizes of vector sets, especially those that cannot fit in memory. The library also provides methods for generating parameters based on vector dimensions and data scale, allowing developers to use it without understanding the algorithm’s principles. VSAG is written in C++ and provides a Python wrapper package called [pyvsag](https://pypi.org/project/pyvsag/) and a Node.js/TypeScript binding package called `vsag`.
 
 ## Performance
 The VSAG algorithm SINDI for sparse vector search achieves a breakthrough in performance, substantially outperforming previous **state-of-the-art (SOTA)** solutions. In our internal tests on a 40-core Intel(R) Xeon(R) Silver 4210R CPU, VSAG's QPS exceeds that of the previous SOTA algorithm, Zilliz, by 166% on the sparse-full(8M) at 98% recall. While the official ann-benchmarks on sparse track runs on an Azure Standard D8lds v5 VM, we plan to submit our results under the official benchmark environment soon to formally validate this performance leap.
@@ -36,6 +36,119 @@ The result is as follows:
 ![](./docs/gist-960-euclidean_10_euclidean.png)
 
 ## Getting Started
+
+### Quickstart
+
+Below is a minimal example of creating an HNSW index, building it with random vectors, and performing a k-NN search — shown in C++, Python, and TypeScript.
+
+<details>
+<summary><b>C++</b></summary>
+
+```cpp
+#include <vsag/vsag.h>
+#include <iostream>
+
+int main() {
+    // Prepare data
+    int64_t num_vectors = 1000, dim = 128;
+    auto ids = new int64_t[num_vectors];
+    auto vectors = new float[dim * num_vectors];
+    std::mt19937 rng(47);
+    std::uniform_real_distribution<float> dist;
+    for (int64_t i = 0; i < num_vectors; ++i) ids[i] = i;
+    for (int64_t i = 0; i < dim * num_vectors; ++i) vectors[i] = dist(rng);
+
+    auto base = vsag::Dataset::Make();
+    base->NumElements(num_vectors)->Dim(dim)->Ids(ids)->Float32Vectors(vectors);
+
+    // Create and build index
+    auto index = vsag::Factory::CreateIndex("hnsw", R"(
+        {"dtype":"float32","metric_type":"l2","dim":128,
+         "hnsw":{"max_degree":16,"ef_construction":100}})").value();
+    index->Build(base);
+
+    // Search
+    auto query_vector = new float[dim];
+    for (int64_t i = 0; i < dim; ++i) query_vector[i] = dist(rng);
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(dim)->Float32Vectors(query_vector)->Owner(true);
+
+    auto result = index->KnnSearch(query, 10, R"({"hnsw":{"ef_search":100}})").value();
+    for (int64_t i = 0; i < result->GetDim(); ++i)
+        std::cout << result->GetIds()[i] << ": " << result->GetDistances()[i] << std::endl;
+    return 0;
+}
+```
+
+</details>
+
+<details>
+<summary><b>Python</b></summary>
+
+```python
+import pyvsag
+import numpy as np
+import json
+
+dim = 128
+num_elements = 1000
+
+ids = list(range(num_elements))
+data = np.float32(np.random.random((num_elements, dim)))
+
+# Create and build index
+index_params = json.dumps({
+    "dtype": "float32", "metric_type": "l2", "dim": dim,
+    "hnsw": {"max_degree": 16, "ef_construction": 100},
+})
+index = pyvsag.Index("hnsw", index_params)
+index.build(vectors=data, ids=ids, num_elements=num_elements, dim=dim)
+
+# Search
+query = np.float32(np.random.random(dim))
+search_params = json.dumps({"hnsw": {"ef_search": 100}})
+result_ids, result_dists = index.knn_search(vector=query, k=10, parameters=search_params)
+for rid, rdist in zip(result_ids, result_dists):
+    print(f"{rid}: {rdist}")
+```
+
+</details>
+
+<details>
+<summary><b>TypeScript (Node.js)</b></summary>
+
+```typescript
+import { Index } from "vsag";
+
+const dim = 128;
+const numVectors = 1000;
+
+const ids = new BigInt64Array(numVectors);
+const vectors = new Float32Array(dim * numVectors);
+for (let i = 0; i < numVectors; i++) ids[i] = BigInt(i);
+for (let i = 0; i < dim * numVectors; i++) vectors[i] = Math.random();
+
+// Create and build index
+const indexParams = JSON.stringify({
+    dtype: "float32", metric_type: "l2", dim,
+    hnsw: { max_degree: 16, ef_construction: 100 },
+});
+const index = new Index("hnsw", indexParams);
+index.build(vectors, ids, numVectors, dim);
+
+// Search
+const query = new Float32Array(dim);
+for (let i = 0; i < dim; i++) query[i] = Math.random();
+
+const searchParams = JSON.stringify({ hnsw: { ef_search: 100 } });
+const { ids: resultIds, distances } = index.knnSearch(query, 10, searchParams);
+for (let i = 0; i < 10; i++) {
+    console.log(`${resultIds[i]}: ${distances[i]}`);
+}
+```
+
+</details>
+
 ### Integrate with CMake
 ```cmake
 # CMakeLists.txt
@@ -62,11 +175,15 @@ target_link_libraries (vsag-cmake-example PRIVATE vsag)
 # add dependency
 add_dependencies (vsag-cmake-example vsag)
 ```
+
 ### Examples
 
-Currently Python and C++ examples are provided, please explore [examples](./examples/) directory for details.
+C++, Python, and TypeScript examples are provided. Please explore the [examples](./examples/) directory for details.
 
-We suggest you start with [101_index_hnsw.cpp](./examples/cpp/101_index_hnsw.cpp) and [example_hnsw.py](./examples/python/example_hnsw.py).
+We suggest you start with:
+- **C++**: [101_index_hnsw.cpp](./examples/cpp/101_index_hnsw.cpp)
+- **Python**: [example_hnsw.py](./examples/python/example_hnsw.py)
+- **TypeScript**: [101_index_hnsw.ts](./examples/typescript/101_index_hnsw.ts)
 
 ## Building from Source
 Please read the [DEVELOPMENT](./DEVELOPMENT.md) guide for instructions on how to build.
