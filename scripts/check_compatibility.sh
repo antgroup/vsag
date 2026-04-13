@@ -1,21 +1,21 @@
 #!/usr/bin/env bash
 
-old_version_indexes=(
-    "v0.17.2_hgraph"
-    "v0.17.2_hnsw"
-    "v0.16.14_hgraph"
-    "v0.16.14_hnsw"
-    "v0.15.1_hgraph"
-    "v0.15.1_hnsw"
-    "v0.14.8_hgraph"
-    "v0.14.8_hnsw"
-    "v0.13.4_hgraph"
-    "v0.13.4_hnsw"
-    "v0.13.0_hnsw"
-    "v0.12.0_hnsw"
-    "v0.11.14_hnsw"
-    "v0.10.0_hnsw"
-)
+compatibility_index_dir="${COMPATIBILITY_INDEX_DIR:-/tmp}"
+
+old_version_indexes=()
+shopt -s nullglob
+for index_file in "${compatibility_index_dir}"/v*_*.index; do
+    if [[ -f "$index_file" ]]; then
+        name=$(basename "$index_file" .index)
+        old_version_indexes+=("$name")
+    fi
+done
+shopt -u nullglob
+
+if [[ ${#old_version_indexes[@]} -eq 0 ]]; then
+    echo "Error: No compatibility index files (v*_*.index) found in ${compatibility_index_dir}"
+    exit 1
+fi
 
 all_success=true
 
