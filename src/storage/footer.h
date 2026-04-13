@@ -22,30 +22,65 @@
 
 namespace vsag {
 
-static const std::string MAGIC_NUM = "43475048";  // means "CGPH"
+/// Magic number for identifying index files ("CGPH" = 0x43475048).
+static const std::string MAGIC_NUM = "43475048";
+/// Current serialization format version.
 static const std::string VERSION = "1";
-static const int FOOTER_SIZE = 4096;  // 4KB
+/// Fixed size of the footer section in bytes (4KB).
+static const int FOOTER_SIZE = 4096;
 
+/**
+ * @brief Footer section for serialized index files containing metadata.
+ *
+ * This class manages the footer section that stores metadata about the index,
+ * including format version, creation time, and custom key-value pairs.
+ */
 class SerializationFooter {
 public:
     SerializationFooter();
 
+    /**
+     * @brief Clears all metadata entries.
+     */
     void
     Clear();
 
+    /**
+     * @brief Sets a metadata key-value pair.
+     *
+     * @param key The metadata key.
+     * @param value The metadata value.
+     */
     void
     SetMetadata(const std::string& key, const std::string& value);
 
+    /**
+     * @brief Gets metadata value for a given key.
+     *
+     * @param key The metadata key to lookup.
+     * @return The metadata value, or empty string if key not found.
+     */
     std::string
     GetMetadata(const std::string& key) const;
 
+    /**
+     * @brief Serializes the footer to an output stream.
+     *
+     * @param out_stream The output stream to write to.
+     */
     void
     Serialize(std::ostream& out_stream) const;
 
+    /**
+     * @brief Deserializes the footer from an input stream.
+     *
+     * @param in_stream The stream reader to read from.
+     */
     void
     Deserialize(StreamReader& in_stream);
 
 private:
+    /// JSON object storing all metadata entries.
     JsonType json_;
 };
 

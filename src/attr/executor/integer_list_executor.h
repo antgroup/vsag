@@ -13,34 +13,67 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+/**
+ * @file integer_list_executor.h
+ * @brief Executor for integer list attribute expressions (IN/NOT IN).
+ */
+
 #pragma once
 
 #include "executor.h"
 #include "vsag/attribute.h"
 
 namespace vsag {
+/**
+ * @brief Executor for handling integer list attribute expressions.
+ *
+ * Processes IN and NOT IN expressions for integer attribute values.
+ */
 class IntegerListExecutor : public Executor {
 public:
+    /**
+     * @brief Constructs an integer list executor.
+     *
+     * @param allocator Memory allocator for resource management.
+     * @param expr The integer list expression to execute.
+     * @param attr_index Interface to the attribute inverted index.
+     */
     explicit IntegerListExecutor(Allocator* allocator,
                                  const ExprPtr& expr,
                                  const AttrInvertedInterfacePtr& attr_index);
 
+    /**
+     * @brief Clears the internal state and managers.
+     */
     void
     Clear() override;
 
+    /**
+     * @brief Initializes the executor with field and operator information.
+     */
     void
     Init() override;
 
+    /**
+     * @brief Executes the integer list expression for the specified bucket.
+     *
+     * @param bucket_id The bucket identifier to process.
+     * @return Filter* Pointer to the resulting filter.
+     */
     Filter*
     Run(BucketIdType bucket_id) override;
 
 private:
+    /// Name of the field being checked.
     std::string field_name_{};
 
+    /// Attribute value list for filtering.
     AttributePtr filter_attribute_{nullptr};
 
+    /// True if NOT IN operation, false for IN operation.
     bool is_not_in_{false};
 
+    /// Managers for multi-bitset operations.
     std::vector<const MultiBitsetManager*> managers_;
 };
 

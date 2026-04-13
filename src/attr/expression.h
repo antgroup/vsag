@@ -13,6 +13,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+/**
+ * @file expression.h
+ * @brief Expression AST (Abstract Syntax Tree) definitions for filter condition parsing.
+ *
+ * This file contains all expression types used in the VSAG filter condition system,
+ * including numeric constants, string constants, field references, arithmetic expressions,
+ * comparison expressions, and logical expressions.
+ */
+
 #pragma once
 
 #include <limits>
@@ -23,24 +32,33 @@
 #include <vector>
 
 namespace vsag {
+
+/**
+ * @enum OpType
+ * @brief Enumeration of operator types for expressions.
+ */
 enum class OpType {
-    kNone,
-    kUnary,
-    kBinary,
+    kNone,    ///< No operator (leaf expression)
+    kUnary,   ///< Unary operator (e.g., NOT)
+    kBinary,  ///< Binary operator (e.g., AND, OR, +, -)
 };
 
+/**
+ * @enum ExpressionType
+ * @brief Enumeration of all supported expression types in the AST.
+ */
 enum class ExpressionType {
-    kNumericConstant,
-    kFieldExpression,
-    kStringConstant,
-    kStrListConstant,
-    kIntListConstant,
-    kArithmeticExpression,
-    kComparisonExpression,
-    kIntListExpression,
-    kStrListExpression,
-    kNotExpression,
-    kLogicalExpression,
+    kNumericConstant,       ///< Numeric constant value
+    kFieldExpression,       ///< Field reference
+    kStringConstant,        ///< String constant value
+    kStrListConstant,       ///< String list constant
+    kIntListConstant,       ///< Integer list constant
+    kArithmeticExpression,  ///< Arithmetic operation (e.g., +, -, *, /)
+    kComparisonExpression,  ///< Comparison operation (e.g., =, !=, >, <)
+    kIntListExpression,     ///< Integer list membership (IN/NOT IN)
+    kStrListExpression,     ///< String list membership (IN/NOT IN)
+    kNotExpression,         ///< Logical NOT expression
+    kLogicalExpression,     ///< Logical operation (AND, OR)
 };
 
 /**
@@ -52,52 +70,90 @@ enum class ExpressionType {
  */
 class Expression {
 public:
+    /**
+     * @brief Constructs an Expression with the specified type and operator type.
+     * @param expr_type The type of the expression.
+     * @param op_type The operator type of the expression.
+     */
     Expression(ExpressionType expr_type, OpType op_type)
         : expr_type_(expr_type), op_type_(op_type) {
     }
 
     virtual ~Expression() = default;
+
+    /**
+     * @brief Converts the expression to a string representation.
+     * @return String representation of the expression.
+     */
     virtual std::string
     ToString() const = 0;
 
+    /**
+     * @brief Gets the expression type.
+     * @return The expression type.
+     */
     ExpressionType
     GetExprType() const {
         return expr_type_;
     }
 
+    /**
+     * @brief Gets the operator type.
+     * @return The operator type.
+     */
     OpType
     GetOpType() const {
         return op_type_;
     }
 
 protected:
-    ExpressionType expr_type_;
-    OpType op_type_;
+    ExpressionType expr_type_;  ///< The type of this expression
+    OpType op_type_;            ///< The operator type of this expression
 };
 
+/// Smart pointer type for Expression objects
 using ExprPtr = std::shared_ptr<Expression>;
 
-// Comparison operators
+/**
+ * @enum ComparisonOperator
+ * @brief Enumeration of comparison operators.
+ */
 enum class ComparisonOperator {
-    EQ,  // =
-    NE,  // !=
-    GT,  // >
-    LT,  // <
-    GE,  // >=
-    LE   // <=
+    EQ,  ///< Equal (=)
+    NE,  ///< Not equal (!=)
+    GT,  ///< Greater than (>)
+    LT,  ///< Less than (<)
+    GE,  ///< Greater than or equal (>=)
+    LE   ///< Less than or equal (<=)
 };
 
-// Logical operators
-enum class LogicalOperator { AND, OR, NOT };
+/**
+ * @enum LogicalOperator
+ * @brief Enumeration of logical operators.
+ */
+enum class LogicalOperator {
+    AND,  ///< Logical AND
+    OR,   ///< Logical OR
+    NOT   ///< Logical NOT
+};
 
-// Arithmetic operators
+/**
+ * @enum ArithmeticOperator
+ * @brief Enumeration of arithmetic operators.
+ */
 enum class ArithmeticOperator {
-    ADD,  // +
-    SUB,  // -
-    MUL,  // *
-    DIV   // /
+    ADD,  ///< Addition (+)
+    SUB,  ///< Subtraction (-)
+    MUL,  ///< Multiplication (*)
+    DIV   ///< Division (/)
 };
 
+/**
+ * @brief Converts an arithmetic operator to its string representation.
+ * @param op The arithmetic operator to convert.
+ * @return String representation of the operator.
+ * @throws std::runtime_error if the operator is not supported.
+ */
 static std::string
 ToString(const ArithmeticOperator& op) {
     switch (op) {
@@ -113,6 +169,12 @@ ToString(const ArithmeticOperator& op) {
     throw std::runtime_error("unsupported type");
 }
 
+/**
+ * @brief Converts a logical operator to its string representation.
+ * @param op The logical operator to convert.
+ * @return String representation of the operator.
+ * @throws std::runtime_error if the operator is not supported.
+ */
 static std::string
 ToString(const LogicalOperator& op) {
     switch (op) {
@@ -126,6 +188,12 @@ ToString(const LogicalOperator& op) {
     throw std::runtime_error("unsupported type");
 }
 
+/**
+ * @brief Converts a comparison operator to its string representation.
+ * @param op The comparison operator to convert.
+ * @return String representation of the operator.
+ * @throws std::runtime_error if the operator is not supported.
+ */
 static std::string
 ToString(const ComparisonOperator& op) {
     switch (op) {
@@ -145,9 +213,18 @@ ToString(const ComparisonOperator& op) {
     throw std::runtime_error("unsupported type");
 }
 
+/// Variant type for numeric values supporting int64_t, uint64_t, and double
 using NumericValue = std::variant<int64_t, uint64_t, double>;
+
+/// Vector of strings for string list constants
 using StrList = std::vector<std::string>;
 
+/**
+ * @brief Checks if two NumericValue variants hold the same type.
+ * @param lhs The left-hand side numeric value.
+ * @param rhs The right-hand side numeric value.
+ * @return True if both values have the same type, false otherwise.
+ */
 inline bool
 CheckSameVType(const NumericValue&& lhs, const NumericValue&& rhs) {
     return (std::holds_alternative<double>(lhs) && std::holds_alternative<double>(rhs)) ||
@@ -155,6 +232,13 @@ CheckSameVType(const NumericValue&& lhs, const NumericValue&& rhs) {
            (std::holds_alternative<uint64_t>(lhs) && std::holds_alternative<uint64_t>(rhs));
 }
 
+/**
+ * @brief Addition operator for NumericValue.
+ * @param lhs Left-hand side operand.
+ * @param rhs Right-hand side operand.
+ * @return Result of addition.
+ * @throws std::runtime_error if types don't match.
+ */
 inline NumericValue
 operator+(const NumericValue& lhs, const NumericValue& rhs) {
     return std::visit(
@@ -168,6 +252,13 @@ operator+(const NumericValue& lhs, const NumericValue& rhs) {
         rhs);
 }
 
+/**
+ * @brief Subtraction operator for NumericValue.
+ * @param lhs Left-hand side operand.
+ * @param rhs Right-hand side operand.
+ * @return Result of subtraction.
+ * @throws std::runtime_error if types don't match.
+ */
 inline NumericValue
 operator-(const NumericValue& lhs, const NumericValue& rhs) {
     return std::visit(
@@ -181,6 +272,13 @@ operator-(const NumericValue& lhs, const NumericValue& rhs) {
         rhs);
 }
 
+/**
+ * @brief Multiplication operator for NumericValue.
+ * @param lhs Left-hand side operand.
+ * @param rhs Right-hand side operand.
+ * @return Result of multiplication.
+ * @throws std::runtime_error if types don't match.
+ */
 inline NumericValue
 operator*(const NumericValue& lhs, const NumericValue& rhs) {
     return std::visit(
@@ -194,6 +292,13 @@ operator*(const NumericValue& lhs, const NumericValue& rhs) {
         rhs);
 }
 
+/**
+ * @brief Division operator for NumericValue.
+ * @param lhs Left-hand side operand.
+ * @param rhs Right-hand side operand.
+ * @return Result of division.
+ * @throws std::runtime_error if types don't match or division by zero.
+ */
 inline NumericValue
 operator/(const NumericValue& lhs, const NumericValue& rhs) {
     return std::visit(
@@ -207,6 +312,13 @@ operator/(const NumericValue& lhs, const NumericValue& rhs) {
         rhs);
 }
 
+/**
+ * @brief Extracts a numeric value of type T from a NumericValue variant.
+ * @tparam T The target numeric type.
+ * @param value The NumericValue variant to extract from.
+ * @return The extracted value of type T.
+ * @throws std::runtime_error if the conversion is invalid (e.g., type mismatch, out of range).
+ */
 template <typename T>
 T
 GetNumericValue(const NumericValue& value) {
@@ -239,11 +351,19 @@ GetNumericValue(const NumericValue& value) {
         value);
 }
 
-// Field reference
+/**
+ * @class FieldExpression
+ * @brief Expression representing a reference to a field in the attribute schema.
+ */
 class FieldExpression : public Expression {
 public:
+    /// Smart pointer type for FieldExpression
     using ptr = std::shared_ptr<FieldExpression>;
 
+    /**
+     * @brief Constructs a FieldExpression with the given field name.
+     * @param name The name of the field to reference.
+     */
     explicit FieldExpression(const std::string& name)
         : Expression(ExpressionType::kFieldExpression, OpType::kNone), fieldName(name) {
     }
@@ -253,14 +373,22 @@ public:
         return fieldName;
     }
 
-    std::string fieldName;
+    std::string fieldName;  ///< The name of the referenced field
 };
 
-// Numeric constant
+/**
+ * @class NumericConstant
+ * @brief Expression representing a numeric constant value.
+ */
 class NumericConstant : public Expression {
 public:
+    /// Smart pointer type for NumericConstant
     using ptr = std::shared_ptr<NumericConstant>;
 
+    /**
+     * @brief Constructs a NumericConstant with the given value.
+     * @param value The numeric value to store.
+     */
     explicit NumericConstant(NumericValue value)
         : Expression(ExpressionType::kNumericConstant, OpType::kNone), value(value) {
     }
@@ -287,14 +415,22 @@ public:
             value);
     }
 
-    NumericValue value;
+    NumericValue value;  ///< The stored numeric value
 };
 
-// String constant
+/**
+ * @class StringConstant
+ * @brief Expression representing a string constant value.
+ */
 class StringConstant : public Expression {
 public:
+    /// Smart pointer type for StringConstant
     using ptr = std::shared_ptr<StringConstant>;
 
+    /**
+     * @brief Constructs a StringConstant with the given value.
+     * @param value The string value to store.
+     */
     explicit StringConstant(const std::string& value)
         : Expression(ExpressionType::kStringConstant, OpType::kNone), value(value) {
     }
@@ -304,13 +440,22 @@ public:
         return '"' + value + '"';
     }
 
-    std::string value;
+    std::string value;  ///< The stored string value
 };
 
+/**
+ * @class StrListConstant
+ * @brief Expression representing a list of string constants.
+ */
 class StrListConstant : public Expression {
 public:
+    /// Smart pointer type for StrListConstant
     using ptr = std::shared_ptr<StrListConstant>;
 
+    /**
+     * @brief Constructs a StrListConstant with the given string values.
+     * @param values The list of string values to store.
+     */
     explicit StrListConstant(StrList values)
         : Expression(ExpressionType::kStrListConstant, OpType::kNone), values(std::move(values)) {
     }
@@ -326,14 +471,24 @@ public:
         return result + "]";
     }
 
-    StrList values;
+    StrList values;  ///< The stored list of string values
 };
 
+/**
+ * @class IntListConstant
+ * @brief Template expression representing a list of integer constants.
+ * @tparam V The integer type for the list elements.
+ */
 template <typename V>
 class IntListConstant : public Expression {
 public:
+    /// Smart pointer type for IntListConstant
     using ptr = std::shared_ptr<IntListConstant>;
 
+    /**
+     * @brief Constructs an IntListConstant with the given integer values.
+     * @param values The list of integer values to store.
+     */
     explicit IntListConstant(std::vector<V> values)
         : Expression(ExpressionType::kIntListConstant, OpType::kNone), values(std::move(values)) {
     }
@@ -349,12 +504,21 @@ public:
         return result + "]";
     }
 
-    std::vector<V> values;
+    std::vector<V> values;  ///< The stored list of integer values
 };
 
-// Arithmetic expression
+/**
+ * @class ArithmeticExpression
+ * @brief Expression representing an arithmetic operation between two operands.
+ */
 class ArithmeticExpression : public Expression {
 public:
+    /**
+     * @brief Constructs an ArithmeticExpression with the given operands and operator.
+     * @param left Left operand expression.
+     * @param op Arithmetic operator.
+     * @param right Right operand expression.
+     */
     ArithmeticExpression(ExprPtr left, ArithmeticOperator op, ExprPtr right)
         : Expression(ExpressionType::kArithmeticExpression, OpType::kBinary),
           left(std::move(left)),
@@ -367,14 +531,23 @@ public:
         return "(" + left->ToString() + " " + vsag::ToString(op) + " " + right->ToString() + ")";
     }
 
-    ExprPtr left;
-    ArithmeticOperator op;
-    ExprPtr right;
+    ExprPtr left;           ///< Left operand
+    ArithmeticOperator op;  ///< Arithmetic operator
+    ExprPtr right;          ///< Right operand
 };
 
-// Comparison expression
+/**
+ * @class ComparisonExpression
+ * @brief Expression representing a comparison between two operands.
+ */
 class ComparisonExpression : public Expression {
 public:
+    /**
+     * @brief Constructs a ComparisonExpression with the given operands and operator.
+     * @param left Left operand expression.
+     * @param op Comparison operator.
+     * @param right Right operand expression.
+     */
     ComparisonExpression(ExprPtr left, ComparisonOperator op, ExprPtr right)
         : Expression(ExpressionType::kComparisonExpression, OpType::kBinary),
           left(std::move(left)),
@@ -387,14 +560,23 @@ public:
         return "(" + left->ToString() + " " + vsag::ToString(op) + " " + right->ToString() + ")";
     }
 
-    ExprPtr left;
-    ComparisonOperator op;
-    ExprPtr right;
+    ExprPtr left;           ///< Left operand
+    ComparisonOperator op;  ///< Comparison operator
+    ExprPtr right;          ///< Right operand
 };
 
-// List membership expression
+/**
+ * @class IntListExpression
+ * @brief Expression representing integer list membership (IN/NOT IN) operation.
+ */
 class IntListExpression : public Expression {
 public:
+    /**
+     * @brief Constructs an IntListExpression for IN or NOT IN operation.
+     * @param field The field expression to check.
+     * @param is_not_in True for NOT IN, false for IN.
+     * @param values The list of integer values.
+     */
     IntListExpression(ExprPtr field, const bool is_not_in, ExprPtr values)
         : Expression(ExpressionType::kIntListExpression, OpType::kBinary),
           field(std::move(field)),
@@ -408,14 +590,23 @@ public:
         return "(" + field->ToString() + " " + op + " " + values->ToString() + ")";
     }
 
-    ExprPtr field;
-    bool is_not_in;  // true for NOT IN, false for IN
-    ExprPtr values;
+    ExprPtr field;   ///< The field expression to check
+    bool is_not_in;  ///< True for NOT IN, false for IN
+    ExprPtr values;  ///< The list of integer values
 };
 
-// List expression
+/**
+ * @class StrListExpression
+ * @brief Expression representing string list membership (IN/NOT IN) operation.
+ */
 class StrListExpression : public Expression {
 public:
+    /**
+     * @brief Constructs a StrListExpression for IN or NOT IN operation.
+     * @param field The field expression to check.
+     * @param is_not_in True for NOT IN, false for IN.
+     * @param values The list of string values.
+     */
     StrListExpression(ExprPtr field, const bool is_not_in, ExprPtr values)
         : Expression(ExpressionType::kStrListExpression, OpType::kBinary),
           field(std::move(field)),
@@ -429,14 +620,23 @@ public:
         return "(" + field->ToString() + " " + op + " " + values->ToString() + ")";
     }
 
-    ExprPtr field;
-    bool is_not_in;  // true for NOT IN, false for IN
-    ExprPtr values;
+    ExprPtr field;   ///< The field expression to check
+    bool is_not_in;  ///< True for NOT IN, false for IN
+    ExprPtr values;  ///< The list of string values
 };
 
-// Logical expression
+/**
+ * @class LogicalExpression
+ * @brief Expression representing a logical operation (AND/OR) between two operands.
+ */
 class LogicalExpression : public Expression {
 public:
+    /**
+     * @brief Constructs a LogicalExpression with the given operands and operator.
+     * @param left Left operand expression.
+     * @param op Logical operator (AND/OR).
+     * @param right Right operand expression.
+     */
     LogicalExpression(ExprPtr left, LogicalOperator op, ExprPtr right)
         : Expression(ExpressionType::kLogicalExpression, OpType::kBinary),
           left(std::move(left)),
@@ -449,14 +649,21 @@ public:
         return "(" + left->ToString() + " " + vsag::ToString(op) + " " + right->ToString() + ")";
     }
 
-    ExprPtr left;
-    LogicalOperator op;
-    ExprPtr right;
+    ExprPtr left;        ///< Left operand
+    LogicalOperator op;  ///< Logical operator
+    ExprPtr right;       ///< Right operand
 };
 
-// Not expression
+/**
+ * @class NotExpression
+ * @brief Expression representing a logical NOT operation on a single operand.
+ */
 class NotExpression : public Expression {
 public:
+    /**
+     * @brief Constructs a NotExpression with the given operand.
+     * @param expr The expression to negate.
+     */
     explicit NotExpression(ExprPtr expr)
         : Expression(ExpressionType::kNotExpression, OpType::kUnary), expr(std::move(expr)) {
     }
@@ -466,6 +673,6 @@ public:
         return "! (" + expr->ToString() + ")";
     }
 
-    ExprPtr expr;
+    ExprPtr expr;  ///< The expression to negate
 };
 }  // namespace vsag

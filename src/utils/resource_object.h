@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,12 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+/**
+ * @file resource_object.h
+ * @brief Base class for recyclable resource objects used in object pools.
+ */
+
 #pragma once
 
 #include <cstdint>
 
 namespace vsag {
 
+/**
+ * @brief Abstract base class for resource objects that can be pooled and reused.
+ *
+ * ResourceObject provides an interface for objects that can be stored in a
+ * ResourceObjectPool. Derived classes must implement the Reset() method to
+ * restore the object to its initial state and GetMemoryUsage() to report
+ * memory consumption.
+ */
 class ResourceObject {
 public:
     ResourceObject() = default;

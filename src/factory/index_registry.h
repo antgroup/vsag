@@ -25,12 +25,33 @@
 
 namespace vsag {
 
+/**
+ * @brief Function pointer type for index creation.
+ *
+ * @param parsed_params JSON configuration for the index.
+ * @param index_common_params Common parameters shared across all index types.
+ * @return tl::expected containing the created Index on success, or an Error on failure.
+ */
 using IndexCreator = tl::expected<std::shared_ptr<Index>, Error> (*)(
     JsonType& parsed_params, const IndexCommonParam& index_common_params);
 
+/**
+ * @brief Registers an index creator with the factory.
+ *
+ * @param index_name The name identifier for the index type.
+ * @param creator Function pointer that creates instances of the index.
+ */
 void
 register_index_creator(const std::string& index_name, IndexCreator creator);
 
+/**
+ * @brief Creates an index instance by name from the registry.
+ *
+ * @param index_name The name of the registered index type to create.
+ * @param parsed_params JSON configuration for the index.
+ * @param index_common_params Common parameters shared across all index types.
+ * @return tl::expected containing the created Index on success, or an Error on failure.
+ */
 tl::expected<std::shared_ptr<Index>, Error>
 create_registered_index(const std::string& index_name,
                         JsonType& parsed_params,

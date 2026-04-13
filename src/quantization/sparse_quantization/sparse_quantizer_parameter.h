@@ -13,14 +13,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+/**
+ * @file sparse_quantizer_parameter.h
+ * @brief Parameter class for sparse quantizer configuration.
+ */
+
 #pragma once
 
 #include "quantization/quantizer_parameter.h"
 #include "typing.h"
 #include "utils/pointer_define.h"
+
 namespace vsag {
 DEFINE_POINTER2(SparseQuantizerParam, SparseQuantizerParameter);
 
+/**
+ * @brief Parameter class for sparse quantizer.
+ *
+ * Simple parameter class with no additional configuration options.
+ */
 class SparseQuantizerParameter : public QuantizerParameter {
 public:
     SparseQuantizerParameter() : QuantizerParameter(QUANTIZATION_TYPE_VALUE_SPARSE) {
@@ -28,10 +39,18 @@ public:
 
     ~SparseQuantizerParameter() override = default;
 
+    /**
+     * @brief Parses parameters from JSON object (no-op for sparse).
+     * @param json JSON configuration object.
+     */
     void
     FromJson(const JsonType& json) override {
     }
 
+    /**
+     * @brief Converts parameters to JSON object.
+     * @return JSON configuration object with type name.
+     */
     JsonType
     ToJson() const override {
         JsonType json;

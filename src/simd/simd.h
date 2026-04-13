@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,6 +11,16 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
+/**
+ * @file simd.h
+ * @brief SIMD module entry point and initialization interface.
+ *
+ * This header provides the main interface for initializing and setting up
+ * SIMD (Single Instruction Multiple Data) capabilities in VSAG. It aggregates
+ * all SIMD-related headers including various data type implementations
+ * (FP32, FP16, BF16, INT8, etc.) and quantization schemes (SQ4, SQ8, etc.).
+ */
 
 #pragma once
 
@@ -37,6 +46,15 @@
 
 namespace vsag {
 
+/**
+ * @brief Initialize and configure SIMD capabilities at runtime.
+ *
+ * Detects available CPU SIMD instruction sets and initializes the optimal
+ * function pointers for distance computations and other vectorized operations.
+ *
+ * @return SimdStatus Status indicating which SIMD instruction sets are
+ *         supported by the compiled binary and available on the current CPU.
+ */
 SimdStatus
 setup_simd();
 

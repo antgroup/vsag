@@ -13,6 +13,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+/**
+ * @file transform_quantizer.h
+ * @brief Transform quantizer that applies transformation chain before base quantization.
+ */
+
 #pragma once
 
 #include <sstream>
@@ -46,74 +51,186 @@ namespace vsag {
  * - Transformers: PCA, FHT, ROM, MRLE
  * - Distance is recovered through chain of transformers
  */
+/**
+ * @brief Transform quantizer that applies a chain of transformations before base quantization.
+ *
+ * Supports transformer types: PCA, FHT, ROM, MRLE.
+ * Distance is recovered through chain of transformers during computation.
+ *
+ * @tparam QuantTmpl Base quantizer type.
+ * @tparam metric Distance metric type.
+ */
 template <typename QuantTmpl, MetricType metric = MetricType::METRIC_TYPE_L2SQR>
 class TransformQuantizer : public Quantizer<TransformQuantizer<QuantTmpl, metric>> {
 public:
+    /**
+     * @brief Constructs a transform quantizer from parameter pointer.
+     * @param param Transform quantizer parameter pointer.
+     * @param common_param Common index parameters.
+     */
     explicit TransformQuantizer(const TransformQuantizerParamPtr& param,
                                 const IndexCommonParam& common_param);
 
+    /**
+     * @brief Constructs a transform quantizer from base quantizer parameter pointer.
+     * @param param Quantizer parameter pointer.
+     * @param common_param Common index parameters.
+     */
     explicit TransformQuantizer(const QuantizerParamPtr& param,
                                 const IndexCommonParam& common_param);
 
+    /**
+     * @brief Trains the quantizer with given data.
+     * @param data Training data.
+     * @param count Number of vectors.
+     * @return True if training succeeded.
+     */
     bool
     TrainImpl(const float* data, uint64_t count);
 
+    /**
+     * @brief Encodes a single vector.
+     * @param data Input vector data.
+     * @param codes Output code buffer.
+     * @return True if encoding succeeded.
+     */
     bool
     EncodeOneImpl(const float* data, uint8_t* codes) const;
 
+    /**
+     * @brief Encodes a batch of vectors.
+     * @param data Input vector data.
+     * @param codes Output code buffer.
+     * @param count Number of vectors.
+     * @return True if encoding succeeded.
+     */
     bool
     EncodeBatchImpl(const float* data, uint8_t* codes, uint64_t count) const;
 
+    /**
+     * @brief Decodes a single code to vector (not supported).
+     * @param codes Input code buffer.
+     * @param data Output vector data.
+     * @return Always false.
+     */
     bool
     DecodeOneImpl(const uint8_t* codes, float* data) {
         return false;
     }
 
+    /**
+     * @brief Decodes a batch of codes to vectors (not supported).
+     * @param codes Input code buffer.
+     * @param data Output vector data.
+     * @param count Number of vectors.
+     * @return Always false.
+     */
     bool
     DecodeBatchImpl(const uint8_t* codes, float* data, uint64_t count) {
         return false;
     }
 
+    /**
+     * @brief Computes distance between two codes.
+     * @param codes1 First code buffer.
+     * @param codes2 Second code buffer.
+     * @return Computed distance.
+     */
     float
     ComputeImpl(const uint8_t* codes1, const uint8_t* codes2) const;
 
+    /**
+     * @brief Processes a query vector for distance computation.
+     * @param query Query vector data.
+     * @param computer Computer object to store query codes.
+     */
     void
     ProcessQueryImpl(const float* query,
                      Computer<TransformQuantizer<QuantTmpl, metric>>& computer) const;
 
+    /**
+     * @brief Computes distance between query code and base code.
+     * @param computer Computer object containing query codes.
+     * @param codes Base code buffer.
+     * @param dists Output distance array.
+     */
     void
     ComputeDistImpl(Computer<TransformQuantizer<QuantTmpl, metric>>& computer,
                     const uint8_t* codes,
                     float* dists) const;
 
+    /**
+     * @brief Computes distances for a batch of codes.
+     * @param computer Computer object containing query codes.
+     * @param count Number of codes.
+     * @param codes Base code buffer.
+     * @param dists Output distance array.
+     */
     void
     ScanBatchDistImpl(Computer<TransformQuantizer<QuantTmpl, metric>>& computer,
                       uint64_t count,
                       const uint8_t* codes,
                       float* dists) const;
 
+    /**
+     * @brief Releases resources held by computer.
+     * @param computer Computer object to release.
+     */
     void
     ReleaseComputerImpl(Computer<TransformQuantizer<QuantTmpl, metric>>& computer) const;
 
+    /**
+     * @brief Serializes the quantizer to stream.
+     * @param writer Stream writer.
+     */
     void
     SerializeImpl(StreamWriter& writer);
 
+    /**
+     * @brief Deserializes the quantizer from stream.
+     * @param reader Stream reader.
+     */
     void
     DeserializeImpl(StreamReader& reader);
 
+    /**
+     * @brief Gets the quantizer name.
+     * @return Quantizer type name string.
+     */
     [[nodiscard]] std::string
     NameImpl() const {
         return QUANTIZATION_TYPE_VALUE_TQ;
     }
 
 public:
+    /**
+     * @brief Creates a transformer instance from type string.
+     * @param transform_str Transformer type string (PCA, FHT, ROM, MRLE).
+     * @param param Transformer parameters.
+     * @return Pointer to transformer instance.
+     */
     VectorTransformerPtr
     MakeTransformerInstance(std::string transform_str,
                             const VectorTransformerParameter& param) const;
 
+    /**
+     * @brief Executes chain transformation on data.
+     * @param prev_data Input/output data buffer.
+     * @param meta_offsets Metadata offsets for each transformer.
+     * @param codes Output code buffer.
+     */
     void
     ExecuteChainTransform(float* prev_data, const uint32_t* meta_offsets, uint8_t* codes) const;
 
+    /**
+     * @brief Executes chain distance recovery.
+     * @param quantize_dist Quantized distance.
+     * @param meta_offsets_1 Metadata offsets for first code.
+     * @param meta_offsets_2 Metadata offsets for second code.
+     * @param codes_1 First code buffer.
+     * @param codes_2 Second code buffer.
+     * @return Recovered distance.
+     */
     float
     ExecuteChainDistanceRecovery(float quantize_dist,
                                  const uint32_t* meta_offsets_1,
@@ -122,14 +239,14 @@ public:
                                  const uint8_t* codes_2) const;
 
 public:
-    Vector<uint32_t> base_meta_offsets_;   // note that code(quantizer) offset is always 0
-    Vector<uint32_t> query_meta_offsets_;  // note that code(quantizer) offset is always 0
+    Vector<uint32_t> base_meta_offsets_;   ///< Metadata offsets for base codes.
+    Vector<uint32_t> query_meta_offsets_;  ///< Metadata offsets for query codes.
 
-    uint32_t align_size_{0};
+    uint32_t align_size_{0};  ///< Alignment size for codes.
 
-    std::shared_ptr<QuantTmpl> quantizer_;
+    std::shared_ptr<QuantTmpl> quantizer_;  ///< Inner base quantizer.
 
-    std::vector<VectorTransformerPtr> transform_chain_;
+    std::vector<VectorTransformerPtr> transform_chain_;  ///< Chain of transformers.
 };
 
 template <typename QuantTmpl, MetricType metric>
