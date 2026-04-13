@@ -385,3 +385,54 @@ TEST_CASE("LabelTable Hole List Serialization", "[ut][LabelTable]") {
         REQUIRE(s1 == false);
     }
 }
+
+TEST_CASE("LabelTable Move", "[ut][LabelTable]") {
+    auto allocator = std::make_shared<DefaultAllocator>();
+
+    SECTION("Move with reverse map") {
+        LabelTable label_table(allocator.get(), true);
+        label_table.Resize(5);
+        label_table.Insert(0, 100);
+        label_table.Insert(1, 200);
+        label_table.Insert(2, 300);
+
+        label_table.Move(0, 3);
+
+        REQUIRE(label_table.GetLabelById(3) == 100);
+        REQUIRE(label_table.GetIdByLabel(100) == 3);
+    }
+
+    SECTION("Move without reverse map") {
+        LabelTable label_table(allocator.get(), false);
+        label_table.Resize(5);
+        label_table.Insert(0, 100);
+        label_table.Insert(1, 200);
+
+        label_table.Move(0, 2);
+
+        REQUIRE(label_table.GetLabelById(2) == 100);
+    }
+
+    SECTION("Move updates reverse map correctly") {
+        LabelTable label_table(allocator.get(), true);
+        label_table.Resize(10);
+        label_table.Insert(0, 100);
+        label_table.Insert(1, 200);
+
+        label_table.Move(0, 5);
+
+        REQUIRE(label_table.GetIdByLabel(100) == 5);
+        REQUIRE(label_table.GetLabelById(5) == 100);
+    }
+
+    SECTION("Move to same id is no-op") {
+        LabelTable label_table(allocator.get(), true);
+        label_table.Resize(5);
+        label_table.Insert(0, 100);
+
+        label_table.Move(0, 0);
+
+        REQUIRE(label_table.GetLabelById(0) == 100);
+        REQUIRE(label_table.GetIdByLabel(100) == 0);
+    }
+}

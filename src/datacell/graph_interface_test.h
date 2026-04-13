@@ -33,6 +33,12 @@ public:
     void
     MergeTest(GraphInterfacePtr& other, int count);
 
+    void
+    ReverseEdgeTest(int count);
+
+    void
+    MoveTest(int count);
+
 public:
     GraphInterfacePtr graph_{nullptr};
     bool require_sorted_{false};

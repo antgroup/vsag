@@ -34,6 +34,10 @@ CompressedGraphDataCell::CompressedGraphDataCell(const CompressedGraphDatacellPa
     if (graph_param->support_duplicate_) {
         this->InitDuplicateTracker();
     }
+    if (graph_param->use_reverse_edges_) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "CompressedGraphDataCell does not support reverse edges");
+    }
 }
 
 CompressedGraphDataCell::~CompressedGraphDataCell() {
