@@ -1,4 +1,9 @@
 
+/**
+ * @file scalar_quantizer_parameter.h
+ * @brief Parameter class for scalar quantizer configuration.
+ */
+
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -19,16 +24,33 @@
 #include "quantization/quantizer_parameter.h"
 #include "utils/pointer_define.h"
 namespace vsag {
+
+/**
+ * @brief Parameter class for configuring scalar quantizer.
+ *
+ * @tparam bit Number of bits per dimension (4 or 8).
+ */
 template <int bit = 8>
 class ScalarQuantizerParameter : public QuantizerParameter {
 public:
+    /**
+     * @brief Constructs a ScalarQuantizerParameter with default settings.
+     */
     ScalarQuantizerParameter();
 
     ~ScalarQuantizerParameter() override = default;
 
+    /**
+     * @brief Loads parameter from JSON configuration.
+     * @param json JSON object containing parameter values.
+     */
     void
     FromJson(const JsonType& json) override;
 
+    /**
+     * @brief Exports parameter to JSON format.
+     * @return JSON object with parameter values.
+     */
     JsonType
     ToJson() const override;
 };

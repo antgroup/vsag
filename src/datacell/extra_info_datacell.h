@@ -12,6 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+/**
+ * @file extra_info_datacell.h
+ * @brief Extra info data cell implementation for storing additional metadata.
+ *
+ * This file provides the ExtraInfoDataCell class which implements the
+ * ExtraInfoInterface for storing and retrieving additional metadata
+ * associated with vectors.
+ */
+
 #pragma once
 
 #include <algorithm>
@@ -25,27 +34,62 @@
 #include "utils/byte_buffer.h"
 
 namespace vsag {
-/*
-* thread unsafe
-*/
+
+/**
+ * @brief Extra info data cell for storing additional metadata associated with vectors.
+ *
+ * This class implements ExtraInfoInterface and provides functionality for:
+ * - Storing arbitrary metadata with fixed size for each vector
+ * - Batch insertion and retrieval of extra info
+ * - IO-backed storage with memory and disk options
+ *
+ * @warning This class is thread-unsafe. External synchronization is required
+ *          for concurrent access.
+ *
+ * @tparam IOTmpl The IO template type for storage operations.
+ */
 template <typename IOTmpl>
 class ExtraInfoDataCell : public ExtraInfoInterface {
 public:
     ExtraInfoDataCell() = default;
 
+    /**
+     * @brief Constructs an ExtraInfoDataCell with IO parameters.
+     * @param io_param The IO parameters.
+     * @param common_param The common index parameters.
+     */
     explicit ExtraInfoDataCell(const IOParamPtr& io_param, const IndexCommonParam& common_param);
 
+    /**
+     * @brief Inserts extra info for a vector.
+     * @param extra_info Pointer to the extra info data.
+     * @param idx The internal ID for the extra info.
+     */
     void
     InsertExtraInfo(const char* extra_info, InnerIdType idx) override;
 
+    /**
+     * @brief Inserts multiple extra info entries in batch.
+     * @param extra_infos Pointer to the extra info data array.
+     * @param count Number of extra info entries to insert.
+     * @param idx Array of internal IDs (nullptr for auto-assignment).
+     */
     void
     BatchInsertExtraInfo(const char* extra_infos, InnerIdType count, InnerIdType* idx) override;
 
+    /**
+     * @brief Prefetches extra info for cache optimization.
+     * @param id The internal ID to prefetch.
+     */
     void
     Prefetch(InnerIdType id) override {
         io_->Prefetch(id * extra_info_size_, extra_info_size_);
     };
 
+    /**
+     * @brief Resizes the data cell capacity.
+     * @param new_capacity The new capacity size.
+     */
     void
     Resize(InnerIdType new_capacity) override {
         if (new_capacity <= this->max_capacity_) {
@@ -57,6 +101,10 @@ public:
         this->max_capacity_ = new_capacity;
     }
 
+    /**
+     * @brief Releases the extra info data obtained from GetExtraInfoById.
+     * @param extra_info Pointer to the extra info data to release.
+     */
     void
     Release(const char* extra_info) override {
         if (extra_info == nullptr) {
@@ -65,32 +113,66 @@ public:
         io_->Release(reinterpret_cast<const uint8_t*>(extra_info));
     }
 
+    /**
+     * @brief Checks if the data is stored in memory.
+     * @return True if stored in memory, false otherwise.
+     */
     [[nodiscard]] bool
     InMemory() const override;
 
+    /**
+     * @brief Gets the extra info for a given ID and writes to output buffer.
+     * @param id The internal ID.
+     * @param extra_info Output buffer for the extra info.
+     * @return True if successful, false otherwise.
+     */
     bool
     GetExtraInfoById(InnerIdType id, char* extra_info) const override;
 
+    /**
+     * @brief Gets the extra info for a given ID with release flag.
+     * @param id The internal ID.
+     * @param need_release Output flag indicating if the returned pointer needs release.
+     * @return Pointer to the extra info data.
+     */
     const char*
     GetExtraInfoById(InnerIdType id, bool& need_release) const override;
 
+    /**
+     * @brief Serializes the data cell to a stream.
+     * @param writer The stream writer for output.
+     */
     void
     Serialize(StreamWriter& writer) override;
 
+    /**
+     * @brief Deserializes the data cell from a stream.
+     * @param reader The stream reader for input.
+     */
     void
     Deserialize(StreamReader& reader) override;
 
+    /**
+     * @brief Gets the memory usage of this data cell.
+     * @return The memory usage in bytes.
+     */
     int64_t
     GetMemoryUsage() const override;
 
+    /**
+     * @brief Sets the IO instance.
+     * @param io The shared pointer to the IO instance.
+     */
     inline void
     SetIO(std::shared_ptr<BasicIO<IOTmpl>> io) {
         this->io_ = io;
     }
 
 public:
+    /// IO instance for storage operations
     std::shared_ptr<BasicIO<IOTmpl>> io_{nullptr};
 
+    /// Allocator for memory management
     Allocator* const allocator_{nullptr};
 };
 

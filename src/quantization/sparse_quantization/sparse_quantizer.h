@@ -13,6 +13,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+/**
+ * @file sparse_quantizer.h
+ * @brief Sparse quantizer for storing sparse vectors with only non-zero elements.
+ */
+
 #pragma once
 
 #include "index_common_param.h"
@@ -24,9 +29,12 @@
 
 namespace vsag {
 
+/**
+ * @brief Entry structure for sparse vector buffer.
+ */
 struct BufferEntry {
-    uint32_t id;
-    float val;
+    uint32_t id;  ///< Dimension index.
+    float val;    ///< Value at this dimension.
 };
 
 /***
@@ -44,54 +52,148 @@ struct BufferEntry {
  *   - val: value at this dimension (float)
  * - Only supports METRIC_TYPE_IP (inner product)
  */
+/**
+ * @brief Sparse quantizer that stores sparse vectors with only non-zero elements.
+ *
+ * Only supports METRIC_TYPE_IP (inner product) metric.
+ *
+ * @tparam metric Distance metric type.
+ */
 template <MetricType metric = MetricType::METRIC_TYPE_IP>
 class SparseQuantizer : public Quantizer<SparseQuantizer<metric>> {
 public:
+    /**
+     * @brief Constructs a sparse quantizer from parameter pointer.
+     * @param param Sparse quantizer parameter pointer.
+     * @param common_param Common index parameters.
+     */
     explicit SparseQuantizer(const SparseQuantizerParamPtr& param,
                              const IndexCommonParam& common_param);
+
+    /**
+     * @brief Constructs a sparse quantizer with allocator only.
+     * @param allocator Memory allocator.
+     */
     explicit SparseQuantizer(Allocator* allocator);
 
+    /**
+     * @brief Constructs a sparse quantizer from base parameter pointer.
+     * @param param Quantizer parameter pointer.
+     * @param common_param Common index parameters.
+     */
     explicit SparseQuantizer(const QuantizerParamPtr& param, const IndexCommonParam& common_param);
 
+    /**
+     * @brief Trains the quantizer with given data.
+     * @param data Training data.
+     * @param count Number of vectors.
+     * @return True if training succeeded.
+     */
     bool
     TrainImpl(const DataType* data, uint64_t count);
 
+    /**
+     * @brief Encodes a single sparse vector.
+     * @param data Input sparse vector data.
+     * @param codes Output code buffer.
+     * @return True if encoding succeeded.
+     */
     bool
     EncodeOneImpl(const DataType* data, uint8_t* codes) const;
 
+    /**
+     * @brief Encodes a batch of vectors (not supported).
+     * @param data Input vector data.
+     * @param codes Output code buffer.
+     * @param count Number of vectors.
+     * @return Always throws exception.
+     */
     bool
     EncodeBatchImpl(const DataType* data, uint8_t* codes, uint64_t count);
 
+    /**
+     * @brief Decodes a single code to vector (not supported).
+     * @param codes Input code buffer.
+     * @param data Output vector data.
+     * @return Always throws exception.
+     */
     bool
     DecodeOneImpl(const uint8_t* codes, DataType* data);
 
+    /**
+     * @brief Decodes a batch of codes to vectors (not supported).
+     * @param codes Input code buffer.
+     * @param data Output vector data.
+     * @param count Number of vectors.
+     * @return Always throws exception.
+     */
     bool
     DecodeBatchImpl(const uint8_t* codes, DataType* data, uint64_t count);
 
+    /**
+     * @brief Computes distance between two codes.
+     * @param codes1 First code buffer.
+     * @param codes2 Second code buffer.
+     * @return Computed distance.
+     */
     inline float
     ComputeImpl(const uint8_t* codes1, const uint8_t* codes2) const;
 
+    /**
+     * @brief Processes a query vector for distance computation.
+     * @param query Query vector data.
+     * @param computer Computer object to store query codes.
+     */
     inline void
     ProcessQueryImpl(const DataType* query, Computer<SparseQuantizer>& computer) const;
 
+    /**
+     * @brief Computes distance between query code and base code.
+     * @param computer Computer object containing query codes.
+     * @param codes Base code buffer.
+     * @param dists Output distance array.
+     */
     inline void
     ComputeDistImpl(Computer<SparseQuantizer>& computer, const uint8_t* codes, float* dists) const;
 
+    /**
+     * @brief Computes distances for a batch of codes (not supported).
+     * @param computer Computer object containing query codes.
+     * @param count Number of codes.
+     * @param codes Base code buffer.
+     * @param dists Output distance array.
+     */
     inline void
     ScanBatchDistImpl(Computer<SparseQuantizer<metric>>& computer,
                       uint64_t count,
                       const uint8_t* codes,
                       float* dists) const;
 
+    /**
+     * @brief Releases resources held by computer.
+     * @param computer Computer object to release.
+     */
     inline void
     ReleaseComputerImpl(Computer<SparseQuantizer<metric>>& computer) const;
 
+    /**
+     * @brief Serializes the quantizer to stream.
+     * @param writer Stream writer.
+     */
     inline void
     SerializeImpl(StreamWriter& writer);
 
+    /**
+     * @brief Deserializes the quantizer from stream.
+     * @param reader Stream reader.
+     */
     inline void
     DeserializeImpl(StreamReader& reader);
 
+    /**
+     * @brief Gets the quantizer name.
+     * @return Quantizer type name string.
+     */
     [[nodiscard]] std::string
     NameImpl() const {
         return QUANTIZATION_TYPE_VALUE_SPARSE;

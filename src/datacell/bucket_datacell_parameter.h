@@ -1,3 +1,7 @@
+/**
+ * @file bucket_datacell_parameter.h
+ * @brief Parameter class for bucket data cell configuration.
+ */
 
 // Copyright 2024-present the vsag project
 //
@@ -21,27 +25,52 @@
 
 namespace vsag {
 
+/**
+ * @brief Parameter class for bucket data cell configuration.
+ *
+ * This class provides configuration parameters for bucket-based data storage,
+ * supporting quantization, IO operations, and residual handling.
+ */
 class BucketDataCellParameter : public Parameter {
 public:
+    /**
+     * @brief Constructs a BucketDataCellParameter.
+     */
     explicit BucketDataCellParameter();
 
+    /**
+     * @brief Loads parameters from JSON configuration.
+     *
+     * @param json JSON configuration object.
+     */
     void
     FromJson(const JsonType& json) override;
 
+    /**
+     * @brief Exports parameters to JSON format.
+     *
+     * @return JSON object containing the parameter values.
+     */
     JsonType
     ToJson() const override;
 
+    /**
+     * @brief Checks compatibility with another parameter.
+     *
+     * @param other Another parameter to compare with.
+     * @return True if parameters are compatible, false otherwise.
+     */
     bool
     CheckCompatibility(const ParamPtr& other) const override;
 
 public:
-    QuantizerParamPtr quantizer_parameter{nullptr};
+    QuantizerParamPtr quantizer_parameter{nullptr};  ///< Quantizer configuration
 
-    IOParamPtr io_parameter{nullptr};
+    IOParamPtr io_parameter{nullptr};  ///< IO configuration
 
-    bool use_residual_{false};
+    bool use_residual_{false};  ///< Whether to use residual vectors
 
-    int64_t buckets_count{1};
+    int64_t buckets_count{1};  ///< Number of buckets in storage
 };
 
 using BucketDataCellParamPtr = std::shared_ptr<BucketDataCellParameter>;

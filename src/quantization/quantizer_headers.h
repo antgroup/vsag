@@ -13,6 +13,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+/**
+ * @file quantizer_headers.h
+ * @brief Unified header file including all quantizer implementations.
+ *
+ * This header provides a single include point for all quantizer types
+ * available in the VSAG library, including FP32, product quantization,
+ * scalar quantization, sparse quantization, and transform quantization.
+ */
+
 #pragma once
 
 #include "fp32_quantizer.h"

@@ -13,29 +13,57 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+/**
+ * @file product_quantizer_parameter.h
+ * @brief Parameter configuration for ProductQuantizer.
+ */
+
 #pragma once
 
 #include "quantization/quantizer_parameter.h"
 #include "utils/pointer_define.h"
 namespace vsag {
 DEFINE_POINTER2(ProductQuantizerParam, ProductQuantizerParameter);
+
+/**
+ * @brief Parameter class for ProductQuantizer configuration.
+ *
+ * Stores configuration parameters for product quantization including
+ * the number of subspaces and bits per code.
+ */
 class ProductQuantizerParameter : public QuantizerParameter {
 public:
+    /**
+     * @brief Constructs a ProductQuantizerParameter with default values.
+     */
     ProductQuantizerParameter();
 
     ~ProductQuantizerParameter() override = default;
 
+    /**
+     * @brief Loads parameters from JSON configuration.
+     * @param json JSON object containing parameter values.
+     */
     void
     FromJson(const JsonType& json) override;
 
+    /**
+     * @brief Exports parameters to JSON format.
+     * @return JSON object containing current parameter values.
+     */
     JsonType
     ToJson() const override;
 
+    /**
+     * @brief Checks compatibility with another parameter set.
+     * @param other Another parameter object to compare against.
+     * @return true if parameters are compatible, false otherwise.
+     */
     bool
     CheckCompatibility(const vsag::ParamPtr& other) const override;
 
 public:
-    int64_t pq_dim_{1};
-    int64_t pq_bits_{8};
+    int64_t pq_dim_{1};   /// Number of subspaces for product quantization
+    int64_t pq_bits_{8};  /// Bits per PQ code (typically 8)
 };
 }  // namespace vsag

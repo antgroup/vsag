@@ -1,3 +1,7 @@
+/**
+ * @file flatten_interface_parameter.h
+ * @brief Parameter class for flatten interface configuration.
+ */
 
 // Copyright 2024-present the vsag project
 //
@@ -23,18 +27,34 @@
 namespace vsag {
 DEFINE_POINTER2(FlattenInterfaceParam, FlattenInterfaceParameter);
 
+/**
+ * @brief Parameter class for flatten interface configuration.
+ *
+ * This class provides configuration parameters for flatten-based data storage,
+ * including quantizer and IO parameters.
+ */
 class FlattenInterfaceParameter : public Parameter {
 public:
+    /**
+     * @brief Constructs a FlattenInterfaceParameter with the given name.
+     *
+     * @param name The name identifier for this parameter.
+     */
     FlattenInterfaceParameter(std::string name) : name(std::move(name)) {
     }
 
-    QuantizerParamPtr quantizer_parameter{nullptr};
+    QuantizerParamPtr quantizer_parameter{nullptr};  ///< Quantizer configuration
+    IOParamPtr io_parameter{nullptr};                ///< IO configuration
 
-    IOParamPtr io_parameter{nullptr};
-
-    std::string name;
+    std::string name;  ///< Parameter name identifier
 };
 
+/**
+ * @brief Creates a FlattenInterfaceParameter from JSON configuration.
+ *
+ * @param json JSON configuration object.
+ * @return Shared pointer to the created FlattenInterfaceParameter.
+ */
 FlattenInterfaceParamPtr
 CreateFlattenParam(const JsonType& json);
 }  // namespace vsag

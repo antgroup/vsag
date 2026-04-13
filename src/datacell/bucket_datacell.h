@@ -13,6 +13,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+/**
+ * @file bucket_datacell.h
+ * @brief Bucket data cell implementation for bucket-based vector storage.
+ *
+ * This file provides the BucketDataCell class which implements the
+ * BucketInterface for storing vectors organized in multiple buckets,
+ * typically used in IVF-like index structures.
+ */
+
 #pragma once
 
 #include <shared_mutex>
@@ -27,15 +36,41 @@
 
 namespace vsag {
 
+/**
+ * @brief Bucket data cell for bucket-based vector storage and query.
+ *
+ * This class implements BucketInterface and provides functionality for:
+ * - Storing quantized vectors organized in multiple buckets
+ * - Bucket-based distance computation with optional residual coding
+ * - Support for IVF-like index structures
+ * - FastScan optimization for PQ quantizer
+ *
+ * @tparam QuantTmpl The quantizer template type.
+ * @tparam IOTmpl The IO template type for storage operations.
+ */
 template <typename QuantTmpl, typename IOTmpl>
 class BucketDataCell : public BucketInterface {
 public:
+    /**
+     * @brief Constructs a BucketDataCell with parameters.
+     * @param quantization_param The quantizer parameters.
+     * @param io_param The IO parameters.
+     * @param common_param The common index parameters.
+     * @param bucket_count Number of buckets to create.
+     * @param use_residual Whether to use residual coding.
+     */
     explicit BucketDataCell(const QuantizerParamPtr& quantization_param,
                             const IOParamPtr& io_param,
                             const IndexCommonParam& common_param,
                             BucketIdType bucket_count,
                             bool use_residual = false);
 
+    /**
+     * @brief Scans all vectors in a bucket and computes distances.
+     * @param result_dists Output array for distance results.
+     * @param computer The computer interface for distance calculation.
+     * @param bucket_id The bucket ID to scan.
+     */
     void
     ScanBucketById(float* result_dists,
                    const ComputerInterfacePtr& computer,
@@ -44,6 +79,13 @@ public:
         return this->scan_bucket_by_id(result_dists, comp, bucket_id);
     }
 
+    /**
+     * @brief Queries a single vector by bucket ID and offset.
+     * @param computer The computer interface for distance calculation.
+     * @param bucket_id The bucket ID.
+     * @param offset_id The offset ID within the bucket.
+     * @return The computed distance.
+     */
     float
     QueryOneById(const ComputerInterfacePtr& computer,
                  const BucketIdType& bucket_id,
@@ -52,27 +94,57 @@ public:
         return this->query_one_by_id(comp, bucket_id, offset_id);
     }
 
+    /**
+     * @brief Creates a computer interface for the query vector.
+     * @param query The query vector data.
+     * @return A shared pointer to the computer interface.
+     */
     ComputerInterfacePtr
     FactoryComputer(const void* query) override;
 
+    /**
+     * @brief Trains the quantizer with training data.
+     * @param data Pointer to the training data.
+     * @param count Number of training vectors.
+     */
     void
     Train(const void* data, uint64_t count) override;
 
+    /**
+     * @brief Inserts a vector into a specific bucket.
+     * @param vector Pointer to the vector data.
+     * @param bucket_id The target bucket ID.
+     * @param inner_id The internal ID for the vector.
+     * @return The offset ID within the bucket.
+     */
     InnerIdType
     InsertVector(const void* vector, BucketIdType bucket_id, InnerIdType inner_id) override;
 
+    /**
+     * @brief Gets the internal IDs for a bucket.
+     * @param bucket_id The bucket ID.
+     * @return Pointer to the array of internal IDs.
+     */
     InnerIdType*
     GetInnerIds(BucketIdType bucket_id) override {
         check_valid_bucket_id(bucket_id);
         return this->inner_ids_[bucket_id].data();
     }
 
+    /**
+     * @brief Prefetches data for cache optimization.
+     * @param bucket_id The bucket ID.
+     * @param offset_id The offset ID within the bucket.
+     */
     void
     Prefetch(BucketIdType bucket_id, InnerIdType offset_id) override {
         this->check_valid_bucket_id(bucket_id);
         this->datas_[bucket_id].Prefetch(offset_id * code_size_, code_size_);
     }
 
+    /**
+     * @brief Packages data for FastScan optimization.
+     */
     void
     Package() override {
         if (GetQuantizerName() == QUANTIZATION_TYPE_VALUE_PQFS) {
@@ -80,6 +152,9 @@ public:
         }
     }
 
+    /**
+     * @brief Unpacks data from FastScan format.
+     */
     void
     Unpack() override {
         if (GetQuantizerName() == QUANTIZATION_TYPE_VALUE_PQFS) {
@@ -87,37 +162,77 @@ public:
         }
     }
 
+    /**
+     * @brief Exports the quantizer model to another bucket data cell.
+     * @param other The target bucket interface to export to.
+     */
     void
     ExportModel(const BucketInterfacePtr& other) const override;
 
+    /**
+     * @brief Merges another bucket data cell into this one.
+     * @param other The other bucket interface to merge.
+     * @param bias The ID bias for merging.
+     */
     void
     MergeOther(const BucketInterfacePtr& other, InnerIdType bias) override;
 
+    /**
+     * @brief Serializes the bucket data cell to a stream.
+     * @param writer The stream writer for output.
+     */
     void
     Serialize(StreamWriter& writer) override;
 
+    /**
+     * @brief Deserializes the bucket data cell from a stream.
+     * @param reader The stream reader for input.
+     */
     void
     Deserialize(lvalue_or_rvalue<StreamReader> reader) override;
 
+    /**
+     * @brief Gets the quantizer name.
+     * @return The name of the quantizer.
+     */
     [[nodiscard]] std::string
     GetQuantizerName() override {
         return this->quantizer_->Name();
     }
 
+    /**
+     * @brief Gets the metric type used for distance calculation.
+     * @return The metric type.
+     */
     [[nodiscard]] MetricType
     GetMetricType() override {
         return metric_;
     }
 
+    /**
+     * @brief Gets the size (number of vectors) in a bucket.
+     * @param bucket_id The bucket ID.
+     * @return The number of vectors in the bucket.
+     */
     [[nodiscard]] InnerIdType
     GetBucketSize(BucketIdType bucket_id) override {
         check_valid_bucket_id(bucket_id);
         return this->bucket_sizes_[bucket_id];
     }
 
+    /**
+     * @brief Gets the codes for a vector by bucket ID and offset.
+     * @param bucket_id The bucket ID.
+     * @param offset_id The offset ID within the bucket.
+     * @param data Output buffer for the codes.
+     */
     void
     GetCodesById(BucketIdType bucket_id, InnerIdType offset_id, uint8_t* data) const override;
 
+    /**
+     * @brief Gets the memory usage of this data cell.
+     * @return The memory usage in bytes.
+     */
     [[nodiscard]] int64_t
     GetMemoryUsage() const override {
         int64_t memory = sizeof(BucketDataCell);
@@ -131,6 +246,11 @@ public:
     }
 
 private:
+    /**
+     * @brief Validates that a bucket ID is within valid range.
+     * @param bucket_id The bucket ID to validate.
+     * @throws VsagException if bucket_id is invalid.
+     */
     inline void
     check_valid_bucket_id(BucketIdType bucket_id) {
         if (bucket_id >= this->bucket_count_ or bucket_id < 0) {
@@ -138,37 +258,64 @@ private:
         }
     }
 
+    /**
+     * @brief Internal implementation for scanning a bucket.
+     * @param result_dists Output array for distance results.
+     * @param computer The computer for distance calculation.
+     * @param bucket_id The bucket ID to scan.
+     */
     inline void
     scan_bucket_by_id(float* result_dists,
                       Computer<QuantTmpl>* computer,
                       const BucketIdType& bucket_id);
 
+    /**
+     * @brief Internal implementation for querying a single vector.
+     * @param computer The computer for distance calculation.
+     * @param bucket_id The bucket ID.
+     * @param offset_id The offset ID within the bucket.
+     * @return The computed distance.
+     */
     inline float
     query_one_by_id(const std::shared_ptr<Computer<QuantTmpl>>& computer,
                     const BucketIdType& bucket_id,
                     const InnerIdType& offset_id);
 
+    /**
+     * @brief Packages data for FastScan optimization.
+     */
     inline void
     package_fastscan();
 
+    /**
+     * @brief Unpacks data from FastScan format.
+     */
     inline void
     unpack_fastscan();
 
 private:
+    /// Quantizer instance for encoding/decoding
     std::shared_ptr<QuantTmpl> quantizer_{nullptr};
 
+    /// IO array for storing bucket data
     IOArray<IOTmpl> datas_;
 
+    /// Size (number of vectors) for each bucket
     Vector<InnerIdType> bucket_sizes_;
 
+    /// Mutexes for thread-safe bucket access
     Vector<std::shared_mutex> bucket_mutexes_;
 
+    /// Internal IDs for vectors in each bucket
     Vector<Vector<InnerIdType>> inner_ids_;
 
+    /// Allocator for memory management
     Allocator* const allocator_{nullptr};
 
+    /// Residual bias values for each bucket (used in residual coding)
     Vector<Vector<float>> residual_bias_;
 
+    /// Metric type for distance calculation
     MetricType metric_{MetricType::METRIC_TYPE_L2SQR};
 };
 

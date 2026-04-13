@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -17,16 +16,43 @@
 
 namespace vsag {
 
+/**
+ * @file number.h
+ * @brief Numeric wrapper with range checking utilities.
+ */
+
+/**
+ * @struct Number
+ * @brief Template wrapper for numeric types with range checking.
+ *
+ * This struct wraps a numeric value and provides utility methods
+ * for range checking operations.
+ *
+ * @tparam T The underlying numeric type.
+ */
 template <typename T>
 struct Number {
+    /**
+     * @brief Constructs a Number with the given value.
+     * @param n The numeric value to wrap.
+     */
     explicit Number(T n) : num(n) {
     }
 
+    /**
+     * @brief Checks if the number is within a range [lower, upper].
+     * @param lower Lower bound (inclusive).
+     * @param upper Upper bound (inclusive).
+     * @return True if lower <= num <= upper, false otherwise.
+     *
+     * @note Uses unsigned arithmetic trick for efficiency.
+     */
     bool
     in_range(T lower, T upper) {
         return ((unsigned)(num - lower) <= (upper - lower));
     }
 
+    /// The wrapped numeric value
     T num;
 };
 }  // namespace vsag

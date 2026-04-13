@@ -13,6 +13,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+/**
+ * @file sparse_term_computer.h
+ * @brief Sparse term computer for sparse vector distance computation.
+ */
+
 #pragma once
 
 #include <cstdint>
@@ -22,20 +27,37 @@
 #include "metric_type.h"
 #include "utils/pointer_define.h"
 #include "utils/sparse_vector_transform.h"
+
 namespace vsag {
 
+/**
+ * @brief Parameters for quantization with min/max bounds.
+ */
 struct QuantizationParams {
-    float min_val = 0.0f;
-    float max_val = 0.0f;
-    float diff = 1.0f;
+    float min_val = 0.0f;  ///< Minimum value for quantization.
+    float max_val = 0.0f;  ///< Maximum value for quantization.
+    float diff = 1.0f;     ///< Difference between max and min values.
 };
 
-static constexpr int INVALID_TERM = -1;
+static constexpr int INVALID_TERM = -1;  ///< Invalid term marker.
+
 DEFINE_POINTER(SparseTermComputer)
+
+/**
+ * @brief Sparse term computer for efficient sparse vector distance computation.
+ *
+ * Manages query pruning and term-based distance accumulation for sparse vectors.
+ */
 class SparseTermComputer {
 public:
     ~SparseTermComputer() = default;
 
+    /**
+     * @brief Constructs a sparse term computer from query vector.
+     * @param sparse_query Sparse query vector.
+     * @param search_param SINDI search parameters for pruning.
+     * @param allocator Memory allocator.
+     */
     explicit SparseTermComputer(const SparseVector& sparse_query,
                                 const SINDISearchParameter& search_param,
                                 Allocator* allocator = nullptr)
@@ -46,6 +68,10 @@ public:
         SetQuery(sparse_query);
     }
 
+    /**
+     * @brief Sets the query vector for computation.
+     * @param sparse_query Sparse query vector.
+     */
     void
     SetQuery(const SparseVector& sparse_query) {
         sort_sparse_vector(sparse_query, sorted_query_);
@@ -62,6 +88,15 @@ public:
         }
     }
 
+    /**
+     * @brief Accumulates distance contributions from term data.
+     * @tparam T Data type for term values.
+     * @param term_iterator Iterator index for current term.
+     * @param term_ids Array of term IDs.
+     * @param term_datas Array of term values.
+     * @param term_count Number of terms.
+     * @param global_dists Global distance accumulator array.
+     */
     template <class T>
     void
     ScanForAccumulate(uint32_t term_iterator,
@@ -81,6 +116,15 @@ public:
         }
     }
 
+    /**
+     * @brief Calculates distance for a specific target ID.
+     * @param term_iterator Iterator index for current term.
+     * @param term_ids Array of term IDs.
+     * @param term_datas Array of term values.
+     * @param term_count Number of terms.
+     * @param target_id Target ID to find.
+     * @param dist Output distance accumulator.
+     */
     inline void
     ScanForCalculateDist(uint32_t term_iterator,
                          const uint16_t* term_ids,
@@ -98,39 +142,55 @@ public:
         }
     }
 
+    /**
+     * @brief Checks if there are more terms to process.
+     * @return True if more terms available.
+     */
     inline bool
     HasNextTerm() {
         return term_iterator_ < pruned_len_;
     }
 
+    /**
+     * @brief Gets the next term iterator and advances.
+     * @return Current term iterator value.
+     */
     inline uint32_t
     NextTermIter() {
         return term_iterator_++;
     }
 
+    /**
+     * @brief Resets the term iterator to beginning.
+     */
     inline void
     ResetTerm() {
         term_iterator_ = 0;
     }
 
+    /**
+     * @brief Gets the term ID at given iterator position.
+     * @param term_iterator Iterator position.
+     * @return Term ID.
+     */
     uint32_t
     GetTerm(uint32_t term_iterator) {
         return sorted_query_[term_iterator].first;
     }
 
 public:
-    Vector<std::pair<uint32_t, float>> sorted_query_;
+    Vector<std::pair<uint32_t, float>> sorted_query_;  ///< Sorted query (id, value) pairs.
 
-    const SparseVector& raw_query_;
+    const SparseVector& raw_query_;  ///< Reference to original query.
 
-    float query_retain_ratio_{0.0F};
+    float query_retain_ratio_{0.0F};  ///< Ratio of query terms to retain.
 
-    float term_retain_ratio_{0.0F};
+    float term_retain_ratio_{0.0F};  ///< Ratio of base terms to retain.
 
-    uint32_t pruned_len_{0};
+    uint32_t pruned_len_{0};  ///< Length after pruning.
 
-    uint32_t term_iterator_{0};
+    uint32_t term_iterator_{0};  ///< Current term iterator.
 
-    Allocator* const allocator_{nullptr};
+    Allocator* const allocator_{nullptr};  ///< Memory allocator.
 };
 }  // namespace vsag
