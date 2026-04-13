@@ -17,8 +17,10 @@
 #include <catch2/generators/catch_generators.hpp>
 #include <limits>
 
+#include "algorithm/hgraph.h"
 #include "fixtures/test_dataset_pool.h"
 #include "fixtures/test_logger.h"
+#include "index/index_impl.h"
 #include "inner_string_params.h"
 #include "test_index.h"
 #include "typing.h"
@@ -1366,6 +1368,58 @@ TEST_CASE("(Daily) HGraph Duplicate", "[ft][hgraph][daily]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(false);
     TestHGraphDuplicate(test_index, resource);
+}
+
+TEST_CASE("HGraph Deserialize Old Format With Duplicate Support", "[ft][hgraph][serialization][pr]") {
+    using fixtures::TestIndex;
+
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    vsag::Options::Instance().set_block_size_limit(1024 * 1024 * 2);
+
+    constexpr const char* build_param = R"({
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": 32,
+        "use_old_serial_format": true,
+        "index_param": {
+            "max_degree": 16,
+            "ef_construction": 100,
+            "base_quantization_type": "sq8",
+            "build_thread_count": 0,
+            "support_duplicate": true
+        }
+    })";
+
+    auto index_result = vsag::Factory::CreateIndex("hgraph", build_param);
+    REQUIRE(index_result.has_value());
+    auto index = index_result.value();
+
+    auto dataset =
+        fixtures::HGraphTestIndex::pool.GetDatasetAndCreate(32, 1000, "l2", false, 0.8, 0, 16);
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    auto serialized = index->Serialize();
+    REQUIRE(serialized.has_value());
+
+    auto index2_result = vsag::Factory::CreateIndex("hgraph", build_param);
+    REQUIRE(index2_result.has_value());
+    auto index2 = index2_result.value();
+    REQUIRE(index2->Deserialize(serialized.value()).has_value());
+
+    auto impl = std::dynamic_pointer_cast<vsag::IndexImpl<vsag::HGraph>>(index2);
+    REQUIRE(impl != nullptr);
+    auto hgraph = std::dynamic_pointer_cast<vsag::HGraph>(impl->GetInnerIndex());
+    REQUIRE(hgraph != nullptr);
+    REQUIRE(hgraph->label_table_->CompressDuplicateData());
+    REQUIRE(hgraph->label_table_->duplicate_records_.size() ==
+            hgraph->label_table_->label_table_.size());
+    REQUIRE(hgraph->label_table_->duplicate_count_ == 0);
+    for (const auto* duplicate_record : hgraph->label_table_->duplicate_records_) {
+        REQUIRE(duplicate_record == nullptr);
+    }
+    REQUIRE_NOTHROW(static_cast<void>(index2->GetStats()));
+
+    vsag::Options::Instance().set_block_size_limit(origin_size);
 }
 
 static void
