@@ -61,7 +61,7 @@ is_subset_of_sparse_vector(const SparseVector& sv1, const SparseVector& sv2) {
             return false;
         }
     }
-    return true;
+    return i == sv1.len_;
 }
 
 }  // namespace vsag
