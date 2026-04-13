@@ -897,6 +897,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
         search_param.ef = std::max(params.ef_search, k);
         search_param.is_inner_id_allowed = ft;
         search_param.topk = static_cast<int64_t>(search_param.ef);
+        search_param.consider_duplicate = this->label_table_->CompressDuplicateData();
         search_param.parallel_search_thread_count = params.parallel_search_thread_count;
 
         search_result = this->search_one_graph(query_data,
@@ -1041,7 +1042,7 @@ HGraph::search_one_graph(const void* query,
                          QueryContext* ctx) const {
     auto visited_list = this->pool_->TakeOne();
     auto result = this->searcher_->Search(
-        graph, flatten, visited_list, query, inner_search_param, iter_ctx, ctx);
+        graph, flatten, visited_list, query, inner_search_param, iter_ctx, ctx, this->label_table_);
     this->pool_->ReturnOne(visited_list);
     return result;
 }

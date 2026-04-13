@@ -153,6 +153,24 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
     candidate_set->Push(-dist, ep);
     vl->Set(ep);
 
+    if (inner_search_param.consider_duplicate && label_table &&
+        label_table->CompressDuplicateData()) {
+        const auto& duplicate_ids = label_table->GetDuplicateId(ep);
+        for (const auto& item : duplicate_ids) {
+            if (not is_id_allowed || is_id_allowed->CheckValid(item)) {
+                top_candidates->Push(dist, item);
+            }
+        }
+        if constexpr (mode == KNN_SEARCH) {
+            if (top_candidates->Size() > ef) {
+                top_candidates->Pop();
+            }
+        }
+        if (not top_candidates->Empty()) {
+            lower_bound = top_candidates->Top().first;
+        }
+    }
+
     auto num_threads = inner_search_param.parallel_search_thread_count - 1;
 
     std::vector<SPSCQueue<std::tuple<float*, InnerIdType*, uint64_t>, 1024>> queues(num_threads);

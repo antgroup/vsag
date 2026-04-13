@@ -2409,3 +2409,113 @@ TEST_CASE("(Daily) HGraph Hops Limit", "[ft][hgraph][daily]") {
     auto resource = test_index->GetResource(false);
     TestHGraphHopsLimit(test_index, resource);
 }
+
+TEST_CASE("HGraph Duplicate Vector Knn Search", "[ft][hgraph][duplicate][search]") {
+    const int dim = 32;
+    const int max_degree = 32;
+    const int ef_construction = 100;
+    const int ef_search_knn = 200;
+    const int k_groups = 4;
+    const int k_dup_per_group = 5;
+    const bool support_duplicate = true;
+    const int64_t topk = k_dup_per_group;
+
+    float l2_zero_eps = 1e-6;
+
+    std::vector<float> group_vecs(static_cast<size_t>(k_groups * dim));
+    for (int group_idx = 0; group_idx < k_groups; ++group_idx) {
+        const float base = 0.5F * static_cast<float>(group_idx + 1);
+        for (int d = 0; d < dim; ++d) {
+            group_vecs[static_cast<size_t>(group_idx * dim + d)] =
+                base + 0.03125F * static_cast<float>(d);
+        }
+    }
+
+    const std::string create_json = fmt::format(
+        R"({{
+            "dtype": "float32",
+            "metric_type": "l2",
+            "dim": {},
+            "index_param": {{
+                "base_quantization_type": "fp32",
+                "max_degree": {},
+                "ef_construction": {},
+                "build_thread_count": 0,
+                "support_duplicate": {},
+                "graph_type": "nsw",
+                "graph_storage_type": "flat"
+            }}
+        }})",
+        dim,
+        max_degree,
+        ef_construction,
+        support_duplicate ? "true" : "false");
+
+    auto index_exp = vsag::Factory::CreateIndex("hgraph", create_json);
+    REQUIRE(index_exp.has_value());
+    std::shared_ptr<vsag::Index> index = index_exp.value();
+
+    for (int g = 0; g < k_groups; ++g) {
+        float* gv = group_vecs.data() + static_cast<size_t>(g * dim);
+        const int64_t base_id = static_cast<int64_t>(g * k_dup_per_group + 1);
+        for (int k = 0; k < k_dup_per_group; ++k) {
+            int64_t vid = base_id + k;
+            vsag::DatasetPtr incremental = vsag::Dataset::Make();
+            incremental->Dim(dim)->NumElements(1)->Ids(&vid)->Float32Vectors(gv)->Owner(false);
+            auto add_res = index->Add(incremental);
+            REQUIRE(add_res.has_value());
+            REQUIRE(add_res.value().empty());
+        }
+    }
+
+    REQUIRE(static_cast<int64_t>(k_groups * k_dup_per_group) ==
+            static_cast<int64_t>(index->GetNumElements()));
+
+    std::vector<float> query(static_cast<size_t>(dim));
+    std::copy(group_vecs.begin(), group_vecs.begin() + dim, query.begin());
+
+    const std::string search_json = fmt::format(R"({{"hgraph":{{"ef_search":{}}}}})", ef_search_knn);
+
+    vsag::DatasetPtr query_ds = vsag::Dataset::Make();
+    query_ds->NumElements(1)->Dim(dim)->Float32Vectors(query.data())->Owner(false);
+
+    {
+        auto knn_res = index->KnnSearch(query_ds, topk, search_json);
+        REQUIRE(knn_res.has_value());
+        vsag::DatasetPtr knn_ds = knn_res.value();
+        const float* result_dist = knn_ds->GetDistances();
+        const int64_t* result_ids = knn_ds->GetIds();
+        const int64_t result_size = knn_ds->GetDim();
+
+        REQUIRE(result_size == topk);
+
+        std::set<int64_t> uniq_g0;
+        for (int64_t i = 0; i < result_size; ++i) {
+            if (result_dist[i] <= l2_zero_eps) {
+                uniq_g0.insert(result_ids[i]);
+            }
+        }
+        REQUIRE(static_cast<int>(uniq_g0.size()) == topk);
+    }
+
+    {  // iterator filter
+        vsag::IteratorContext* iter_ctx = nullptr;
+        auto knn_res = index->KnnSearch(query_ds, topk, search_json, nullptr, iter_ctx, false);
+        REQUIRE(knn_res.has_value());
+        vsag::DatasetPtr knn_ds = knn_res.value();
+        const float* result_dist = knn_ds->GetDistances();
+        const int64_t* result_ids = knn_ds->GetIds();
+        const int64_t result_size = knn_ds->GetDim();
+
+        REQUIRE(result_size == topk);
+
+        std::set<int64_t> uniq_g0;
+        for (int64_t i = 0; i < result_size; ++i) {
+            if (result_dist[i] <= l2_zero_eps) {
+                uniq_g0.insert(result_ids[i]);
+            }
+        }
+        REQUIRE(static_cast<int>(uniq_g0.size()) == topk);
+        delete iter_ctx;
+    }
+}

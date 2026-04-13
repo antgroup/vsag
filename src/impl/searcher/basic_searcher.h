@@ -56,7 +56,8 @@ public:
            const void* query,
            const InnerSearchParam& inner_search_param,
            IteratorFilterContext* iter_ctx,
-           QueryContext* ctx) const;
+           QueryContext* ctx,
+           const LabelTablePtr& label_table = nullptr) const;
 
     virtual bool
     SetRuntimeParameters(const UnorderedMap<std::string, float>& new_params);
@@ -106,7 +107,8 @@ private:
                 const void* query,
                 const InnerSearchParam& inner_search_param,
                 IteratorFilterContext* iter_ctx,
-                QueryContext* ctx) const;
+                QueryContext* ctx,
+                const LabelTablePtr& label_table = nullptr) const;
 
 private:
     Allocator* allocator_{nullptr};

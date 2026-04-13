@@ -94,9 +94,10 @@ BasicSearcher::Search(const GraphInterfacePtr& graph,
                       const void* query,
                       const InnerSearchParam& inner_search_param,
                       IteratorFilterContext* iter_ctx,
-                      QueryContext* ctx) const {
+                      QueryContext* ctx,
+                      const LabelTablePtr& label_table) const {
     return this->search_impl<KNN_SEARCH>(
-        graph, flatten, vl, query, inner_search_param, iter_ctx, ctx);
+        graph, flatten, vl, query, inner_search_param, iter_ctx, ctx, label_table);
 }
 
 template <InnerSearchMode mode>
@@ -107,7 +108,8 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                            const void* query,
                            const InnerSearchParam& inner_search_param,
                            IteratorFilterContext* iter_ctx,
-                           QueryContext* ctx) const {
+                           QueryContext* ctx,
+                           const LabelTablePtr& label_table) const {
     // set customize query alloctor
     Allocator* alloc = select_query_allocator(ctx, allocator_);
 
@@ -165,6 +167,29 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
         }
         candidate_set->Push(-dist, ep);
         vl->Set(ep);
+
+        if (inner_search_param.consider_duplicate and label_table != nullptr and
+            label_table->CompressDuplicateData()) {
+            const auto& duplicate_ids = label_table->GetDuplicateId(ep);
+            for (const auto& item : duplicate_ids) {
+                if ((not is_id_allowed || is_id_allowed->CheckValid(item)) and
+                    iter_ctx->CheckPoint(item)) {
+                    top_candidates->Push(dist, item);
+                }
+            }
+            if constexpr (mode == KNN_SEARCH) {
+                if (top_candidates->Size() > ef) {
+                    if (iter_ctx->CheckPoint(top_candidates->Top().second)) {
+                        auto cur_node_pair = top_candidates->Top();
+                        iter_ctx->AddDiscardNode(cur_node_pair.first, cur_node_pair.second);
+                    }
+                    top_candidates->Pop();
+                }
+            }
+            if (not top_candidates->Empty()) {
+                lower_bound = top_candidates->Top().first;
+            }
+        }
     }
 
     while (not candidate_set->Empty()) {
@@ -209,6 +234,18 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                 flatten->Prefetch(candidate_set->Top().second);
                 if (not is_id_allowed || is_id_allowed->CheckValid(to_be_visited_id[i])) {
                     top_candidates->Push(dist, to_be_visited_id[i]);
+                }
+
+                if (inner_search_param.consider_duplicate and label_table != nullptr and
+                    label_table->CompressDuplicateData()) {
+                    const auto& duplicate_ids =
+                        label_table->GetDuplicateId(to_be_visited_id[i]);
+                    for (const auto& item : duplicate_ids) {
+                        if ((not is_id_allowed || is_id_allowed->CheckValid(item)) and
+                            iter_ctx->CheckPoint(item)) {
+                            top_candidates->Push(dist, item);
+                        }
+                    }
                 }
 
                 if constexpr (mode == KNN_SEARCH) {
@@ -301,6 +338,24 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     }
     candidate_set->Push(-dist, ep);
     vl->Set(ep);
+
+    if (inner_search_param.consider_duplicate and label_table != nullptr and
+        label_table->CompressDuplicateData()) {
+        const auto& duplicate_ids = label_table->GetDuplicateId(ep);
+        for (const auto& item : duplicate_ids) {
+            if (check_func(item)) {
+                top_candidates->Push(dist, item);
+            }
+        }
+        if constexpr (mode == KNN_SEARCH) {
+            if (top_candidates->Size() > ef) {
+                top_candidates->Pop();
+            }
+        }
+        if (not top_candidates->Empty()) {
+            lower_bound = top_candidates->Top().first;
+        }
+    }
 
     while (not candidate_set->Empty()) {
         ++hops;
