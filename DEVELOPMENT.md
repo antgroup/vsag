@@ -85,7 +85,7 @@ VSAG provides several CMake options to customize the build:
 
 ### BLAS Library Options
 
-- **`ENABLE_INTEL_MKL`** (default: `ON` on x86_64, `OFF` otherwise)
+- **`ENABLE_INTEL_MKL`** (default: `OFF`)
   - Enable Intel MKL as the BLAS backend (x86_64 platforms only)
   - When disabled, OpenBLAS is used instead
   - MKL resolution uses `MKL_PATH`, `OMP_PATH`, and `MKL_INCLUDE_PATH` as CMake cache overrides when the libraries are not installed in standard locations
