@@ -22,8 +22,21 @@
 #include "utils/resource_object_pool.h"
 
 namespace vsag {
+
+/**
+ * @brief Linux libaio context for asynchronous IO operations.
+ *
+ * This class manages the io_context_t and associated control blocks (iocb)
+ * for performing asynchronous read/write operations using the Linux AIO subsystem.
+ * It is pooled via IOContextPool for efficient reuse across AsyncIO instances.
+ */
 class IOContext : public ResourceObject {
 public:
+    /**
+     * @brief Constructs an IOContext with default request count.
+     *
+     * Initializes the libaio context and allocates iocb structures for requests.
+     */
     IOContext() {
         memset(&ctx_, 0, sizeof(ctx_));
         io_setup(DEFAULT_REQUEST_COUNT, &this->ctx_);
@@ -32,6 +45,9 @@ public:
         }
     }
 
+    /**
+     * @brief Destructor that destroys the libaio context and frees iocb structures.
+     */
     ~IOContext() override {
         io_destroy(this->ctx_);
         for (int i = 0; i < DEFAULT_REQUEST_COUNT; ++i) {
@@ -39,25 +55,39 @@ public:
         }
     };
 
+    /**
+     * @brief Resets the context for reuse (no state to reset).
+     */
     void
     Reset() override{};
 
+    /**
+     * @brief Returns the memory usage of this context.
+     *
+     * Only counts heap-allocated iocb structures, as events_ array is inline member.
+     *
+     * @return Memory usage in bytes (sizeof(IOContext) plus heap-allocated iocb pointers).
+     */
     int64_t
     GetMemoryUsage() const override {
-        return sizeof(IOContext) +
-               DEFAULT_REQUEST_COUNT * (sizeof(struct iocb) + sizeof(struct io_event));
+        return sizeof(IOContext) + DEFAULT_REQUEST_COUNT * sizeof(struct iocb);
     }
 
 public:
+    /// Default number of concurrent AIO requests supported.
     static constexpr int64_t DEFAULT_REQUEST_COUNT = 100;
 
+    /// The libaio context handle.
     io_context_t ctx_;
 
+    /// Array of IO control blocks for submitting requests.
     struct iocb* cb_[DEFAULT_REQUEST_COUNT];
 
+    /// Array of IO events for receiving completion notifications.
     struct io_event events_[DEFAULT_REQUEST_COUNT];
 };
 
+/// Pool type for managing reusable IOContext objects.
 using IOContextPool = ResourceObjectPool<IOContext>;
 
 }  // namespace vsag

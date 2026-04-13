@@ -21,12 +21,31 @@
 namespace vsag {
 class Allocator;
 
+/**
+ * @brief Container for managing multiple IO objects with delayed creation.
+ *
+ * This template class manages a dynamic array of IO objects, creating them
+ * on-demand when the array is resized. It supports both in-memory and file-based
+ * IO implementations, with special handling for non-continuous storage allocation.
+ *
+ * @tparam IOTmpl The type of IO object to manage (e.g., MemoryIO, BufferIO).
+ */
 template <typename IOTmpl>
 class IOArray {
 public:
+    /// Inherits InMemory property from the IO template type.
     static constexpr bool InMemory = IOTmpl::InMemory;
 
 public:
+    /**
+     * @brief Constructs an IOArray with an allocator and creation arguments.
+     *
+     * Stores the arguments for delayed IO object creation when resizing.
+     *
+     * @tparam Args Types of the constructor arguments.
+     * @param allocator A pointer to the Allocator for memory management.
+     * @param args Arguments to pass when constructing IO objects.
+     */
     template <typename... Args>
     explicit IOArray(Allocator* allocator, Args&&... args)
         : allocator_(allocator), datas_(allocator) {
@@ -62,16 +81,35 @@ public:
         }
     }
 
+    /**
+     * @brief Access an IO object by index without bounds checking.
+     *
+     * @param index The index of the IO object.
+     * @return Reference to the IO object.
+     */
     IOTmpl&
     operator[](int64_t index) {
         return *datas_[index];
     }
 
+    /**
+     * @brief Access an IO object by index without bounds checking (const version).
+     *
+     * @param index The index of the IO object.
+     * @return Const reference to the IO object.
+     */
     const IOTmpl&
     operator[](int64_t index) const {
         return *datas_[index];
     }
 
+    /**
+     * @brief Access an IO object by index with bounds checking.
+     *
+     * @param index The index of the IO object.
+     * @return Reference to the IO object.
+     * @throws std::out_of_range if index is out of bounds.
+     */
     IOTmpl&
     At(int64_t index) {
         if (index >= datas_.size()) {
@@ -80,6 +118,13 @@ public:
         return *datas_[index];
     }
 
+    /**
+     * @brief Access an IO object by index with bounds checking (const version).
+     *
+     * @param index The index of the IO object.
+     * @return Const reference to the IO object.
+     * @throws std::out_of_range if index is out of bounds.
+     */
     const IOTmpl&
     At(int64_t index) const {
         if (index >= datas_.size()) {
@@ -88,6 +133,11 @@ public:
         return *datas_[index];
     }
 
+    /**
+     * @brief Resizes the array, creating new IO objects as needed.
+     *
+     * @param size The new size of the array.
+     */
     void
     Resize(int64_t size) {
         auto cur_size = datas_.size();
@@ -98,12 +148,16 @@ public:
     }
 
 private:
+    /// Allocator for memory management.
     Allocator* const allocator_{nullptr};
 
+    /// Vector of shared pointers to IO objects.
     Vector<std::shared_ptr<IOTmpl>> datas_;
 
+    /// Allocator for non-continuous storage (used by file-based IO).
     std::unique_ptr<NonContinuousAllocator> non_continuous_allocator_{nullptr};
 
+    /// Function for creating IO objects with stored arguments.
     std::function<std::shared_ptr<IOTmpl>()> io_create_func_;
 };
 }  // namespace vsag
