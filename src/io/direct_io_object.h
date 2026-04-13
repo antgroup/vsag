@@ -22,18 +22,45 @@
 
 namespace vsag {
 
+/**
+ * @brief Helper object for performing aligned direct IO operations.
+ *
+ * This class manages aligned memory buffers required for direct IO (O_DIRECT),
+ * which bypasses the kernel page cache. It calculates aligned offsets and sizes
+ * based on the configured alignment bit value.
+ */
 class DirectIOObject {
 public:
+    /**
+     * @brief Constructs a DirectIOObject with alignment from Options.
+     *
+     * Initializes alignment parameters from global Options configuration.
+     */
     DirectIOObject() {
         this->align_bit = Options::Instance().direct_IO_object_align_bit();
         this->align_size = 1 << align_bit;
         this->align_mask = (1 << align_bit) - 1;
     }
 
+    /**
+     * @brief Constructs a DirectIOObject with pre-set size and offset.
+     *
+     * @param size The requested size for the IO operation.
+     * @param offset The requested offset for the IO operation.
+     */
     DirectIOObject(uint64_t size, uint64_t offset) : DirectIOObject() {
         this->Set(size, offset);
     }
 
+    /**
+     * @brief Sets up aligned buffer for a given size and offset.
+     *
+     * Calculates the aligned offset and size, allocates aligned memory,
+     * and sets up the data pointer with the correct inner offset.
+     *
+     * @param size1 The requested size for the IO operation.
+     * @param offset1 The requested offset for the IO operation.
+     */
     void
     Set(uint64_t size1, uint64_t offset1) {
         this->size = size1;
@@ -50,6 +77,9 @@ public:
         this->offset = new_offset;
     }
 
+    /**
+     * @brief Releases the aligned memory buffer.
+     */
     void
     Release() {
         free(this->align_data);
@@ -58,15 +88,25 @@ public:
     }
 
 public:
+    /// Pointer to the usable data region within the aligned buffer.
     uint8_t* data{nullptr};
+
+    /// Aligned size for the IO operation.
     uint64_t size;
+
+    /// Aligned offset for the IO operation.
     uint64_t offset;
+
+    /// Pointer to the aligned memory buffer (base of aligned allocation).
     uint8_t* align_data{nullptr};
 
+    /// Bit count for alignment (e.g., 12 for 4KB alignment).
     int64_t align_bit;
 
+    /// Alignment size in bytes (1 << align_bit).
     int64_t align_size;
 
+    /// Mask for calculating inner offset within aligned block (align_size - 1).
     int64_t align_mask;
 };
 }  // namespace vsag

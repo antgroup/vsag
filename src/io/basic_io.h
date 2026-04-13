@@ -113,7 +113,7 @@ public:
      * If the IO object has a MultiReadImpl method, it is called.
      * Otherwise, a runtime error is thrown.
      *
-     * @param datas An array of pointers to the buffers where the read data will be stored.
+     * @param datas A pointer to a contiguous buffer where all read data will be stored sequentially.
      * @param sizes An array of sizes for each block of data to be read.
      * @param offsets An array of offsets for each block of data to be read.
      * @param count The number of blocks of data to be read.
