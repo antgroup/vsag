@@ -140,6 +140,9 @@ public:
     void
     PrefetchImpl(uint64_t offset, uint64_t cache_line = 64);
 
+    void
+    ShrinkImpl(uint64_t size);
+
 private:
     /**
      * @brief Updates internal parameters after block size change.

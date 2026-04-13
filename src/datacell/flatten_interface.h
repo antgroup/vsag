@@ -193,6 +193,15 @@ public:
         throw VsagException(ErrorType::INTERNAL_ERROR, "MergeOther not implemented");
     }
 
+    virtual void
+    Move(InnerIdType from, InnerIdType to) {
+        throw VsagException(ErrorType::INTERNAL_ERROR, "Move not implemented in FlattenInterface");
+    }
+
+    virtual void
+    ShrinkToFit(InnerIdType capacity) {
+    }
+
 public:
     mutable std::shared_mutex mutex_;
 

@@ -236,6 +236,17 @@ public:
         }
     }
 
+    inline void
+    Shrink(uint64_t size) {
+        if constexpr (has_ShrinkImpl<IOTmpl>::value) {
+            return cast().ShrinkImpl(size);
+        } else {
+            if (size <= this->size_) {
+                this->size_ = size;
+            }
+        }
+    }
+
     inline int64_t
     GetMemoryUsage() const {
         return this->size_;
@@ -333,5 +344,6 @@ private:
     GENERATE_HAS_MEMBER_FUNCTION(ReleaseImpl, void, std::declval<const uint8_t*>())
     GENERATE_HAS_MEMBER_FUNCTION(InitIOImpl, void, std::declval<const IOParamPtr&>())
     GENERATE_HAS_MEMBER_FUNCTION(ResizeImpl, void, std::declval<uint64_t>())
+    GENERATE_HAS_MEMBER_FUNCTION(ShrinkImpl, void, std::declval<uint64_t>())
 };
 }  // namespace vsag

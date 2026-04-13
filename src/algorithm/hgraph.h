@@ -324,6 +324,23 @@ private:
     void
     deserialize_basic_info_v0_14(StreamReader& reader);
 
+    uint32_t
+    force_remove_one(int64_t label);
+
+    void
+    find_new_entry_point();
+
+    void
+    graph_force_remove_one(const InnerIdType& inner_id,
+                           const FlattenInterfacePtr& flatten,
+                           const GraphInterfacePtr& graph);
+
+    void
+    move_id(InnerIdType from, InnerIdType to);
+
+    void
+    shrink_to_fit();
+
 private:
     void
     reorder(const void* query,
@@ -390,6 +407,7 @@ private:
     mutable std::shared_mutex global_mutex_;
     mutable MutexArrayPtr neighbors_mutex_;
     mutable std::shared_mutex add_mutex_;
+    mutable std::shared_mutex force_remove_mutex_;
 
     std::atomic<InnerIdType> max_capacity_{0};
 
