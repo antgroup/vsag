@@ -15,8 +15,7 @@
 
 #include "safe_thread_pool.h"
 
-#include <catch2/catch_test_macros.hpp>
-
+#include "unittest.h"
 TEST_CASE("SafeThreadPool Basic Test", "[ut][SafeThreadPool]") {
     auto thread_pool = vsag::SafeThreadPool::FactoryDefaultThreadPool();
     int data = 0;

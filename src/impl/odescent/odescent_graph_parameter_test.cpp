@@ -15,11 +15,8 @@
 
 #include "odescent_graph_parameter.h"
 
-#include <catch2/catch_test_macros.hpp>
-
-#include "fixtures.h"
 #include "parameter_test.h"
-
+#include "unittest.h"
 TEST_CASE("ODescent Parameyers Test", "[ut][pyramid_param]") {
     auto param_str = R"(
         {

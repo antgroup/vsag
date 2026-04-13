@@ -18,7 +18,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <iostream>
 
-#include "fixtures/test_logger.h"
+#include "functest.h"
 #include "vsag/vsag.h"
 
 TEST_CASE("Test Engine", "[ft][engine]") {

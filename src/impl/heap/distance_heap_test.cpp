@@ -15,13 +15,10 @@
 
 #include "distance_heap.h"
 
-#include <catch2/catch_test_macros.hpp>
-
-#include "fixtures.h"
 #include "impl/allocator/safe_allocator.h"
 #include "memmove_heap.h"
 #include "standard_heap.h"
-
+#include "unittest.h"
 using namespace vsag;
 
 class TestDistanceHeap {

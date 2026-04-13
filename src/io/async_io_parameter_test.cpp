@@ -17,8 +17,8 @@
 
 #include <fmt/format.h>
 
-#include "fixtures.h"
 #include "parameter_test.h"
+#include "unittest.h"
 
 using namespace vsag;
 

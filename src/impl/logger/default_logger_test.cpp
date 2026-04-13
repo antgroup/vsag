@@ -15,10 +15,8 @@
 
 #include "default_logger.h"
 
-#include <catch2/catch_test_macros.hpp>
-
+#include "unittest.h"
 #include "vsag/logger.h"
-
 TEST_CASE("DefaultLogger Basic Test", "[ut][logger]") {
     vsag::DefaultLogger logger;
     logger.SetLevel(vsag::Logger::Level::kTRACE);

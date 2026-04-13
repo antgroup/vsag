@@ -15,13 +15,11 @@
 
 #include "fht_kac_rotate_transformer.h"
 
-#include <catch2/catch_test_macros.hpp>
 #include <iostream>
 
-#include "fixtures.h"
 #include "impl/allocator/safe_allocator.h"
 #include "storage/serialization_template_test.h"
-
+#include "unittest.h"
 using namespace vsag;
 
 void

@@ -15,7 +15,6 @@
 
 #include "quantizer_adapter.h"
 
-#include <catch2/catch_test_macros.hpp>
 #include <cstdint>
 #include <iostream>
 #include <memory>
@@ -27,6 +26,7 @@
 #include "quantization/quantizer_parameter.h"
 #include "quantizer_adapter_test.h"
 #include "typing.h"
+#include "unittest.h"
 #include "vsag/constants.h"
 #include "vsag/engine.h"
 #include "vsag/resource.h"

@@ -15,8 +15,9 @@
 
 #include "prefetch.h"
 
-#include <catch2/catch_test_macros.hpp>
 #include <memory>
+
+#include "unittest.h"
 
 TEST_CASE("Prefetch Basic Test", "[ut][Prefetch]") {
     std::vector<int64_t> data(65536);

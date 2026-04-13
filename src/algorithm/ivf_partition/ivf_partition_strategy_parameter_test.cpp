@@ -15,10 +15,8 @@
 
 #include "ivf_partition_strategy_parameter.h"
 
-#include <catch2/catch_test_macros.hpp>
-
 #include "parameter_test.h"
-
+#include "unittest.h"
 TEST_CASE("IVF Partition Strategy Parameters Test", "[ut][IVFPartitionStrategyParameters]") {
     auto param_str = R"({
         "partition_strategy_type": "gno_imi",
