@@ -2475,12 +2475,34 @@ TEST_CASE("HGraph Duplicate Vector Knn Search", "[ft][hgraph][duplicate][search]
     std::copy(group_vecs.begin(), group_vecs.begin() + dim, query.begin());
 
     const std::string search_json = fmt::format(R"({{"hgraph":{{"ef_search":{}}}}})", ef_search_knn);
+    const std::string parallel_search_json =
+        fmt::format(R"({{"hgraph":{{"ef_search":{},"parallel_search_thread_count":2}}}})",
+                    ef_search_knn);
 
     vsag::DatasetPtr query_ds = vsag::Dataset::Make();
     query_ds->NumElements(1)->Dim(dim)->Float32Vectors(query.data())->Owner(false);
 
     {
         auto knn_res = index->KnnSearch(query_ds, topk, search_json);
+        REQUIRE(knn_res.has_value());
+        vsag::DatasetPtr knn_ds = knn_res.value();
+        const float* result_dist = knn_ds->GetDistances();
+        const int64_t* result_ids = knn_ds->GetIds();
+        const int64_t result_size = knn_ds->GetDim();
+
+        REQUIRE(result_size == topk);
+
+        std::set<int64_t> uniq_g0;
+        for (int64_t i = 0; i < result_size; ++i) {
+            if (result_dist[i] <= l2_zero_eps) {
+                uniq_g0.insert(result_ids[i]);
+            }
+        }
+        REQUIRE(static_cast<int>(uniq_g0.size()) == topk);
+    }
+
+    {
+        auto knn_res = index->KnnSearch(query_ds, topk, parallel_search_json);
         REQUIRE(knn_res.has_value());
         vsag::DatasetPtr knn_ds = knn_res.value();
         const float* result_dist = knn_ds->GetDistances();

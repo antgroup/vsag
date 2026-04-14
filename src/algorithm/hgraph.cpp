@@ -1021,7 +1021,7 @@ HGraph::search_one_graph(const void* query,
     DistHeapPtr result = nullptr;
     if (inner_search_param.parallel_search_thread_count > 1) {
         result = this->parallel_searcher_->Search(
-            graph, flatten, visited_list, query, inner_search_param);
+            graph, flatten, visited_list, query, inner_search_param, this->label_table_, ctx);
     } else {
         result = this->searcher_->Search(
             graph, flatten, visited_list, query, inner_search_param, this->label_table_, ctx);
