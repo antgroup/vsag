@@ -238,8 +238,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
 
                 if (inner_search_param.consider_duplicate and label_table != nullptr and
                     label_table->CompressDuplicateData()) {
-                    const auto& duplicate_ids =
-                        label_table->GetDuplicateId(to_be_visited_id[i]);
+                    const auto& duplicate_ids = label_table->GetDuplicateId(to_be_visited_id[i]);
                     for (const auto& item : duplicate_ids) {
                         if ((not is_id_allowed || is_id_allowed->CheckValid(item)) and
                             iter_ctx->CheckPoint(item)) {

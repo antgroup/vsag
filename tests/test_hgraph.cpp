@@ -2474,10 +2474,10 @@ TEST_CASE("HGraph Duplicate Vector Knn Search", "[ft][hgraph][duplicate][search]
     std::vector<float> query(static_cast<size_t>(dim));
     std::copy(group_vecs.begin(), group_vecs.begin() + dim, query.begin());
 
-    const std::string search_json = fmt::format(R"({{"hgraph":{{"ef_search":{}}}}})", ef_search_knn);
-    const std::string parallel_search_json =
-        fmt::format(R"({{"hgraph":{{"ef_search":{},"parallel_search_thread_count":2}}}})",
-                    ef_search_knn);
+    const std::string search_json =
+        fmt::format(R"({{"hgraph":{{"ef_search":{}}}}})", ef_search_knn);
+    const std::string parallel_search_json = fmt::format(
+        R"({{"hgraph":{{"ef_search":{},"parallel_search_thread_count":2}}}})", ef_search_knn);
 
     vsag::DatasetPtr query_ds = vsag::Dataset::Make();
     query_ds->NumElements(1)->Dim(dim)->Float32Vectors(query.data())->Owner(false);
