@@ -2012,9 +2012,49 @@ TEST_CASE("(Daily) HGraph Duplicate Build", "[ft][hgraph][daily]") {
     TestHGraphDuplicateBuild(test_index, resource);
 }
 
+TEST_CASE("HGraph deserialize old format with duplicate support", "[ft][hgraph][serialization][duplicate]") {
+    using fixtures::TestIndex;
+
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    vsag::Options::Instance().set_block_size_limit(1024 * 1024 * 2);
+
+    constexpr const char* build_param = R"({
+        "dim": 32,
+        "dtype": "float32",
+        "metric_type": "l2",
+        "use_old_serial_format": true,
+        "index_param": {
+            "ef_construction": 100,
+            "max_degree": 16,
+            "base_quantization_type": "sq8",
+            "build_thread_count": 0,
+            "support_duplicate": true
+        }
+    })";
+
+    auto index_result = vsag::Factory::CreateIndex("hgraph", build_param);
+    REQUIRE(index_result.has_value());
+    auto index = index_result.value();
+
+    auto dataset =
+        fixtures::HGraphTestIndex::pool.GetDatasetAndCreate(32, 100000, "l2", false, 0.8, 0, 16);
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    auto serialized = index->Serialize();
+    REQUIRE(serialized.has_value());
+
+    auto index2_result = vsag::Factory::CreateIndex("hgraph", build_param);
+    REQUIRE(index2_result.has_value());
+    auto index2 = index2_result.value();
+    REQUIRE(index2->Deserialize(serialized.value()).has_value());
+    REQUIRE_NOTHROW(static_cast<void>(index2->GetStats()));
+
+    vsag::Options::Instance().set_block_size_limit(origin_size);
+}
+
 static void
 TestHGraphEstimateMemoryAndGetMemoryUsage(const fixtures::HGraphTestIndexPtr& test_index,
-                                          const fixtures::HGraphResourcePtr& resource) {
+                                         const fixtures::HGraphResourcePtr& resource) {
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
