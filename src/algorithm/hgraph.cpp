@@ -1187,6 +1187,11 @@ HGraph::deserialize_basic_info_v0_14(StreamReader& reader) {
     StreamReader::ReadObj(reader, capacity);
     this->max_capacity_.store(capacity);
     StreamReader::ReadVector(reader, this->label_table_->label_table_);
+    if (this->label_table_->CompressDuplicateData()) {
+        this->label_table_->duplicate_records_.resize(this->label_table_->label_table_.size(),
+                                                      nullptr);
+        this->label_table_->duplicate_count_ = 0;
+    }
 
     uint64_t size;
     StreamReader::ReadObj(reader, size);
