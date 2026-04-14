@@ -1370,7 +1370,8 @@ TEST_CASE("(Daily) HGraph Duplicate", "[ft][hgraph][daily]") {
     TestHGraphDuplicate(test_index, resource);
 }
 
-TEST_CASE("HGraph Deserialize Old Format With Duplicate Support", "[ft][hgraph][serialization][pr]") {
+TEST_CASE("HGraph Deserialize Old Format With Duplicate Support",
+          "[ft][hgraph][serialization][pr]") {
     using fixtures::TestIndex;
 
     auto origin_size = vsag::Options::Instance().block_size_limit();
@@ -1932,7 +1933,7 @@ TEST_CASE("(Daily) HGraph Duplicate Build", "[ft][hgraph][daily]") {
 
 static void
 TestHGraphEstimateMemoryAndGetMemoryUsage(const fixtures::HGraphTestIndexPtr& test_index,
-                                         const fixtures::HGraphResourcePtr& resource) {
+                                          const fixtures::HGraphResourcePtr& resource) {
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
