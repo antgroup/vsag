@@ -21,8 +21,6 @@ Checks:
     - "-clang-analyzer-deadcode.DeadStores" # value stored but never read
     - "clang-diagnostic-*"
     - "-clang-diagnostic-deprecated-builtins"
-    - "# google-*"
-    - "# misc-*"
     - "modernize-*"
     - "-modernize-use-trailing-return-type"
     - "-modernize-avoid-c-arrays"
