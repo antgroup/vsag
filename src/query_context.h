@@ -24,10 +24,12 @@
 namespace vsag {
 
 class SearchStatistics;
+class ReasoningContext;
 
 struct QueryContext {
     Allocator* alloc = nullptr;
     SearchStatistics* stats = nullptr;
+    ReasoningContext* reasoning_ctx = nullptr;
 };
 
 class SearchStatistics {

@@ -16,6 +16,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #include "vsag/bitset.h"
 #include "vsag/dataset.h"
@@ -169,9 +170,18 @@ public:
 
     /**
      * @brief Flag indicating this is the final search in an iterator sequence
-     * @details When set to true, signals that no more results are expected from this iterator.ß
+     * @details When set to true, signals that no more results are expected from this iterator.
      */
     bool is_last_search_{false};
+
+    /**
+     * @brief Expected labels for reasoning analysis
+     * @details List of expected vector IDs that should be returned in the search result.
+     *          When non-empty, enables reasoning mechanism to analyze why these target
+     *          vectors were not recalled. Used for debugging and optimization purposes.
+     *          Default is empty (no reasoning enabled).
+     */
+    std::vector<int64_t> expected_labels_{};
 };
 
 }  // namespace vsag

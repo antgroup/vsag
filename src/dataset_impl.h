@@ -258,6 +258,17 @@ public:
         return this->Statistics_;
     }
 
+    DatasetPtr
+    Reasoning(const std::string& reasoning_json) override {
+        this->Reasoning_ = reasoning_json;
+        return shared_from_this();
+    }
+
+    const std::string&
+    GetReasoning() const override {
+        return this->Reasoning_;
+    }
+
     static DatasetPtr
     MakeEmptyDataset();
 
@@ -267,6 +278,7 @@ private:
     Allocator* allocator_ = nullptr;
 
     std::string Statistics_{"{}"};
+    std::string Reasoning_{"{}"};
 };
 
 };  // namespace vsag
