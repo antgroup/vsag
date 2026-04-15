@@ -13,27 +13,24 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-
-Checks: >
-    -*,
-    bugprone-*,
-    -bugprone-easily-swappable-parameters,
-    clang-analyzer-*,
-    -clang-analyzer-deadcode.DeadStores, # value stored but never read
-    clang-diagnostic-*,
-    -clang-diagnostic-deprecated-builtins,
-    # google-*,
-    # misc-*,
-    modernize-*,
-    -modernize-use-trailing-return-type,
-    -modernize-avoid-c-arrays,
-    openmp-*,
-    performance-*,
-    readability-*,
-    -readability-identifier-length,
-    -readability-magic-numbers,
-    -readability-function-cognitive-complexity, # enable after fix all
-    -readability-redundant-access-specifiers, # keep repeated public:/protected:/private: as visual separators between method groups
+Checks:
+    - "-*"
+    - "bugprone-*"
+    - "-bugprone-easily-swappable-parameters"
+    - "clang-analyzer-*"
+    - "-clang-analyzer-deadcode.DeadStores" # value stored but never read
+    - "clang-diagnostic-*"
+    - "-clang-diagnostic-deprecated-builtins"
+    - "modernize-*"
+    - "-modernize-use-trailing-return-type"
+    - "-modernize-avoid-c-arrays"
+    - "openmp-*"
+    - "performance-*"
+    - "readability-*"
+    - "-readability-identifier-length"
+    - "-readability-magic-numbers"
+    - "-readability-function-cognitive-complexity" # enable after fix all
+    - "-readability-redundant-access-specifiers" # keep repeated public:/protected:/private: as visual separators between method groups
 
 
 HeaderFilterRegex: ''
