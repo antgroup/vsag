@@ -13,34 +13,73 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+/**
+ * @file logical_executor.h
+ * @brief Executor for logical attribute expressions.
+ */
+
 #pragma once
 
 #include "executor.h"
 
 namespace vsag {
+/**
+ * @brief Executor for handling logical attribute expressions.
+ *
+ * Processes expressions involving logical operators (AND, OR, NOT)
+ * combining other executors.
+ */
 class LogicalExecutor : public Executor {
 public:
+    /**
+     * @brief Constructs a logical executor.
+     *
+     * @param allocator Memory allocator for resource management.
+     * @param expr The logical expression to execute.
+     * @param attr_index Interface to the attribute inverted index.
+     */
     explicit LogicalExecutor(Allocator* allocator,
                              const ExprPtr& expr,
                              const AttrInvertedInterfacePtr& attr_index);
 
+    /**
+     * @brief Clears the left and right child executors.
+     */
     void
     Clear() override;
 
+    /**
+     * @brief Initializes the left and right child executors.
+     */
     void
     Init() override;
 
+    /**
+     * @brief Executes the logical expression for the specified bucket.
+     *
+     * @param bucket_id The bucket identifier to process.
+     * @return Filter* Pointer to the resulting filter.
+     */
     Filter*
     Run(BucketIdType bucket_id) override;
 
 private:
+    /**
+     * @brief Performs the logical operation on child executor results.
+     *
+     * @return Filter* Pointer to the resulting filter.
+     */
     Filter*
     logical_run();
 
 private:
+    /// Left operand executor for binary logical operations.
     ExecutorPtr left_{nullptr};
+
+    /// Right operand executor for binary logical operations.
     ExecutorPtr right_{nullptr};
 
+    /// The logical operator to apply.
     LogicalOperator op_;
 };
 

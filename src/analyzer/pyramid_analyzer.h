@@ -19,8 +19,20 @@
 
 namespace vsag {
 
+/**
+ * @brief Analyzer for Pyramid indexes with hierarchical structure.
+ *
+ * This class provides analysis capabilities specifically designed for Pyramid indexes,
+ * including sub-index quality analysis, graph connectivity metrics, and recall evaluation.
+ */
 class PyramidAnalyzer : public AnalyzerBase {
 public:
+    /**
+     * @brief Constructs a Pyramid analyzer with the given Pyramid index and parameters.
+     *
+     * @param pyramid Pointer to the Pyramid index to be analyzed.
+     * @param param Analyzer parameters for configuration.
+     */
     PyramidAnalyzer(Pyramid* pyramid, const AnalyzerParam& param)
         : pyramid_(pyramid),
           sample_ids_(pyramid->allocator_),
@@ -36,50 +48,101 @@ public:
         this->search_params_ = param.search_params;
     }
 
+    /**
+     * @brief Gets statistical information about the Pyramid index.
+     *
+     * @return JsonType containing various statistics and metrics.
+     */
     JsonType
     GetStats() override;
 
+    /**
+     * @brief Analyzes the Pyramid index by performing searches.
+     *
+     * @param request The search request parameters.
+     * @return JsonType containing analysis results.
+     */
     JsonType
     AnalyzeIndexBySearch(const SearchRequest& request) override;
 
+    /**
+     * @brief Calculates the duplicate ratio in the Pyramid index.
+     *
+     * @return Duplicate ratio value.
+     */
     float
     GetDuplicateRatio();
 
 private:
+    /**
+     * @brief Statistics for a single sub-index within the Pyramid.
+     */
     struct SubIndexStats {
         SubIndexStats(Allocator* allocator) : ids(allocator) {
         }
+        /// Path identifier for the sub-index.
         std::string path;
+        /// Number of elements in the sub-index.
         uint32_t size{0};
+        /// Recall metric for the sub-index.
         float recall{0.0F};
+        /// Flag indicating if the sub-index has quality issues.
         bool is_problematic{false};
+        /// Status type of the index node.
         IndexNode::Status status{IndexNode::Status::FLAT};
+        /// IDs of elements in the sub-index.
         Vector<InnerIdType> ids;
     };
 
+    /**
+     * @brief Information about nodes with low recall scores.
+     */
     struct LowRecallNodeInfo {
+        /// Path identifier for the node.
         std::string path;
+        /// Number of elements in the node.
         uint32_t size;
+        /// Recall score for the node.
         float recall;
+        /// Duplicate ratio within the node.
         float duplicate_ratio{0.0F};
+        /// Flag indicating if entry point is duplicated.
         bool entry_point_duplicate{false};
+        /// Size of the duplicate group at entry point.
         uint32_t entry_point_group_size{0};
     };
 
+    /**
+     * @brief Analysis results for graph quality metrics.
+     */
     struct GraphQualityAnalysis {
+        /// Average degree of nodes in the graph.
         float avg_degree{0.0F};
+        /// Count of nodes with zero outgoing edges.
         uint32_t zero_out_degree_count{0};
+        /// Count of nodes with zero incoming edges.
         uint32_t zero_in_degree_count{0};
+        /// Maximum outgoing degree.
         uint32_t max_out_degree{0};
+        /// Maximum incoming degree.
         uint32_t max_in_degree{0};
+        /// Neighbor recall metric.
         float neighbor_recall{0.0F};
+        /// Count of connected components.
         uint32_t component_count{0};
+        /// Size of the largest connected component.
         uint32_t max_component_size{0};
+        /// Count of singleton nodes (isolated nodes).
         uint32_t singleton_count{0};
+        /// Connectivity ratio of the graph.
         float connectivity_ratio{0.0F};
+        /// Entry point ID for the graph.
         InnerIdType entry_point{0};
+        /// Maximum distance from entry point.
         uint32_t max_distance_from_entry{0};
+        /// Count of unreachable nodes from entry point.
         uint32_t unreachable_count{0};
+        /// Average distance from entry point.
         float avg_distance_from_entry{0.0F};
     };
 
@@ -196,19 +259,30 @@ private:
                                 const Vector<InnerIdType>& node_ids,
                                 uint32_t& duplicate_group_size);
 
+    /// Pointer to the Pyramid index being analyzed.
     Pyramid* pyramid_;
 
+    /// IDs of sampled vectors for analysis.
     Vector<InnerIdType> sample_ids_;
+    /// Data of sampled vectors for analysis.
     Vector<float> sample_datas_;
+    /// Number of vectors sampled for analysis.
     uint32_t sample_size_;
+    /// Statistics for each sub-index in the Pyramid.
     Vector<SubIndexStats> subindex_stats_;
 
+    /// Ground truth distances for sampled vectors.
     UnorderedMap<InnerIdType, DistHeapPtr> ground_truth_;
+    /// Search results for sampled vectors.
     UnorderedMap<InnerIdType, Vector<LabelType>> search_result_;
 
+    /// Number of top results to consider.
     uint32_t topk_{100};
+    /// Search parameters string for analysis queries.
     std::string search_params_;
+    /// Search time cost in milliseconds.
     float search_time_ms_{0.0F};
+    /// Information about nodes with low recall scores.
     Vector<LowRecallNodeInfo> low_recall_nodes_;
 };
 

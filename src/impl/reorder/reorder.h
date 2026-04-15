@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -22,10 +21,36 @@
 
 namespace vsag {
 
+/**
+ * @file reorder.h
+ * @brief Interface for result reordering in search pipelines.
+ */
+
 DEFINE_POINTER(ReorderInterface)
 
+/**
+ * @brief Abstract interface for reordering search results.
+ *
+ * ReorderInterface defines the contract for reordering components that
+ * refine search results by recomputing distances or applying additional
+ * criteria. Implementations can use different data representations
+ * for distance computation.
+ */
 class ReorderInterface {
 public:
+    /**
+     * @brief Reorders search results using more accurate distance computation.
+     *
+     * Takes a heap of candidate results and reorders them by computing
+     * distances using a potentially more accurate representation.
+     *
+     * @param input Input heap containing candidate results.
+     * @param query Query vector pointer.
+     * @param topk Number of top results to return.
+     * @param ctx Query context for execution.
+     * @param iter_ctx Optional iterator filter context for progressive filtering.
+     * @return DistHeapPtr Reordered heap containing refined results.
+     */
     virtual DistHeapPtr
     Reorder(const DistHeapPtr& input,
             const float* query,

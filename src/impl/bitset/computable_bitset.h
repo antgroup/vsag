@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,6 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+/**
+ * @file computable_bitset.h
+ * @brief Base class for bitsets supporting bitwise operations.
+ */
+
 #pragma once
 
 #include "storage/stream_reader.h"
@@ -22,25 +26,52 @@
 namespace vsag {
 DEFINE_POINTER(ComputableBitset);
 
+/**
+ * @brief Enumeration of computable bitset types.
+ */
 enum class ComputableBitsetType { SparseBitset, FastBitset };
 
 /**
- * @brief ComputableBitset is a base class for bitsets that can be computed.
+ * @brief Abstract base class for bitsets supporting bitwise operations.
+ *
+ * This class extends Bitset to provide bitwise operations (OR, AND, NOT)
+ * and serialization capabilities. It serves as the interface for various
+ * bitset implementations.
  *
  * @note ComputableBitset is a base class for bitsets that can be computed.
  *       It provides a set of methods that can be used to perform bitwise operations on the bitset.
  */
 class ComputableBitset : public Bitset {
 public:
+    /**
+     * @brief Factory method to create a computable bitset instance.
+     *
+     * @param type The type of bitset to create.
+     * @param allocator Pointer to the allocator for memory management.
+     * @return Smart pointer to the created bitset.
+     */
     static ComputableBitsetPtr
     MakeInstance(ComputableBitsetType type, Allocator* allocator = nullptr);
 
+    /**
+     * @brief Factory method to create a raw computable bitset instance.
+     *
+     * @param type The type of bitset to create.
+     * @param allocator Pointer to the allocator for memory management.
+     * @return Raw pointer to the created bitset.
+     */
     static ComputableBitset*
     MakeRawInstance(ComputableBitsetType type, Allocator* allocator = nullptr);
 
 public:
+    /**
+     * @brief Default constructor.
+     */
     ComputableBitset() = default;
 
+    /**
+     * @brief Default destructor.
+     */
     ~ComputableBitset() override = default;
 
     /**

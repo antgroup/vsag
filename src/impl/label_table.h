@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,6 +11,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
+/// @file label_table.h
+/// @brief Label table for managing mappings between internal IDs and external labels.
 
 #pragma once
 
@@ -32,16 +34,29 @@ namespace vsag {
 
 DEFINE_POINTER(LabelTable);
 
+/// @brief Function type for mapping IDs between tables.
 using IdMapFunction = std::function<std::tuple<bool, int64_t>(int64_t)>;
 
+/// @brief Label table for managing bidirectional mappings between internal IDs and external labels.
+///
+/// This class provides efficient label-to-ID and ID-to-label lookups, supports tombstone
+/// deletion, and handles serialization/deserialization for persistence.
 class LabelTable {
 public:
+    /// @brief Constructs a label table with the specified options.
+    /// @param allocator Allocator for memory management.
+    /// @param use_reverse_map Whether to maintain reverse map for fast label-to-ID lookup.
+    /// @param compress_redundant_data Whether to compress redundant data.
     explicit LabelTable(Allocator* allocator,
                         bool use_reverse_map = true,
                         bool compress_redundant_data = false);
 
+    /// Invalid ID constant, used to mark deleted or non-existent entries.
     static constexpr InnerIdType INVALID_ID = std::numeric_limits<InnerIdType>::max();
 
+    /// @brief Inserts a new label-ID mapping.
+    /// @param id Internal ID.
+    /// @param label External label.
     void
     Insert(InnerIdType id, LabelType label) {
         if (use_reverse_map_) {
@@ -54,6 +69,7 @@ public:
         total_count_++;
     }
 
+    /// @brief Marks the table as immutable and releases the reverse map.
     void
     SetImmutable() {
         this->use_reverse_map_ = false;
@@ -61,24 +77,23 @@ public:
         this->label_remap_.swap(empty_remap);
     }
 
-    /**
-     * Mark labels as removed.
-     * @param labels The labels to mark as removed.
-     * @return The number of labels marked as removed.
-     */
+    /// @brief Marks labels as removed.
+    /// @param labels The labels to mark as removed.
+    /// @return The number of labels marked as removed.
     uint32_t
     MarkRemove(const std::vector<LabelType>& labels);
 
-    /**
-     * Mark a label as removed.
-     * @param label The label to mark as removed.
-     * @return The number of labels marked as removed.
-     */
+    /// @brief Marks a label as removed.
+    /// @param label The label to mark as removed.
+    /// @return The number of labels marked as removed.
     uint32_t
     MarkRemove(const LabelType& label) {
         return MarkRemove(std::vector<LabelType>({label}));
     }
 
+    /// @brief Recovers a previously removed label.
+    /// @param label The label to recover.
+    /// @return True if recovery was successful.
     inline bool
     RecoverRemove(LabelType label) {
         // 1. check is removed
@@ -99,6 +114,9 @@ public:
         return true;
     }
 
+    /// @brief Checks if a label is a tombstone (marked for deletion).
+    /// @param label The label to check.
+    /// @return True if the label is a tombstone.
     inline bool
     IsTombstoneLabel(LabelType label) {
         if (not use_reverse_map_) {
@@ -109,50 +127,48 @@ public:
                 iter->second == std::numeric_limits<InnerIdType>::max());
     }
 
-    /**
-     * Check whether an id is removed.
-     * @param id The id to check.
-     * @return True if the id is removed, false otherwise.
-     */
+    /// @brief Checks whether an id is removed.
+    /// @param id The id to check.
+    /// @return True if the id is removed, false otherwise.
     bool
     IsRemoved(InnerIdType id) {
         std::shared_lock rlock(delete_ids_mutex_);
         return deleted_ids_.count(id) != 0;
     }
 
+    /// @brief Erases an ID from the deleted set.
+    /// @param id The ID to erase.
     void
     EraseFromDeletedIds(InnerIdType id) {
         std::scoped_lock wlock(delete_ids_mutex_);
         deleted_ids_.erase(id);
     }
 
-    /**
-     * Get id by label.
-     * @param label The label to query.
-     * @param return_even_removed Whether to return even if the id is removed.
-     * @return The id corresponding to the label.
-     * @throws VsagException if the label does not exist or is removed.
-     */
+    /// @brief Gets ID by label.
+    /// @param label The label to query.
+    /// @param return_even_removed Whether to return even if the id is removed.
+    /// @return The ID corresponding to the label.
+    /// @throws VsagException if the label does not exist or is removed.
     InnerIdType
     GetIdByLabel(LabelType label, bool return_even_removed = false) const;
 
-    /**
-     * Try to get id by label without throwing exception.
-     * @param label The label to query.
-     * @param return_even_removed Whether to return even if the id is removed.
-     * @return A pair where first indicates success and second is the inner_id.
-     */
+    /// @brief Tries to get ID by label without throwing exception.
+    /// @param label The label to query.
+    /// @param return_even_removed Whether to return even if the id is removed.
+    /// @return A pair where first indicates success and second is the inner_id.
     std::pair<bool, InnerIdType>
     TryGetIdByLabel(LabelType label, bool return_even_removed = false) const noexcept;
 
-    /**
-     * Check whether a label exists and not been removed.
-     * @param label The label to check.
-     * @return True if the label exists and not been removed, false otherwise.
-     */
+    /// @brief Checks whether a label exists and not been removed.
+    /// @param label The label to check.
+    /// @return True if the label exists and not been removed, false otherwise.
     bool
     CheckLabel(LabelType label) const;
 
+    /// @brief Updates a label to a new value.
+    /// @param old_label Old label to replace.
+    /// @param new_label New label to use.
+    /// @throws VsagException if new_label is already occupied or old_label does not exist.
     void
     UpdateLabel(LabelType old_label, LabelType new_label) {
         // 1. check whether new_label is occupied
@@ -185,6 +201,10 @@ public:
         }
     }
 
+    /// @brief Gets label by internal ID.
+    /// @param inner_id Internal ID to query.
+    /// @return The label corresponding to the internal ID.
+    /// @throws VsagException if the ID is out of range.
     LabelType
     GetLabelById(InnerIdType inner_id) const {
         if (inner_id >= label_table_.size()) {
@@ -195,11 +215,15 @@ public:
         return this->label_table_[inner_id];
     }
 
+    /// @brief Gets pointer to all labels array.
+    /// @return Pointer to the label array.
     inline const LabelType*
     GetAllLabels() const {
         return label_table_.data();
     }
 
+    /// @brief Serializes the label table to a stream writer.
+    /// @param writer Stream writer for output.
     void
     Serialize(StreamWriter& writer) const {
         StreamWriter::WriteVector(writer, label_table_);
@@ -208,6 +232,8 @@ public:
         }
     }
 
+    /// @brief Deserializes the label table from a stream reader.
+    /// @param reader Stream reader for input.
     void
     Deserialize(lvalue_or_rvalue<StreamReader> reader) {
         StreamReader::ReadVector(reader, label_table_);
@@ -223,9 +249,13 @@ public:
         this->total_count_.store(label_table_.size());
     }
 
+    /// @brief Deserializes the label table from a stream reader.
+    /// @param reader Stream reader for input.
     void
     Deserialize(StreamReader& reader);
 
+    /// @brief Resizes the label table.
+    /// @param new_size New size for the table.
     void
     Resize(uint64_t new_size) {
         if (new_size < total_count_) {
@@ -234,23 +264,28 @@ public:
         label_table_.resize(new_size);
     }
 
+    /// @brief Gets the total count of labels.
+    /// @return Total count of labels.
     int64_t
     GetTotalCount() {
         return total_count_;
     }
 
+    /// @brief Sets the duplicate tracker.
+    /// @param tracker Duplicate tracker to use.
     void
     SetDuplicateTracker(DuplicateTrackerPtr tracker) {
         duplicate_tracker_ = std::move(tracker);
     }
 
+    /// @brief Merges another label table into this one.
+    /// @param other Other label table to merge.
+    /// @param id_map Optional function to map IDs during merge.
     void
     MergeOther(const LabelTablePtr& other, const IdMapFunction& id_map = nullptr);
 
-    /**
-     * Get memory usage of the label table.
-     * @return The memory usage in bytes.
-     */
+    /// @brief Gets memory usage of the label table.
+    /// @return Memory usage in bytes.
     int64_t
     GetMemoryUsage() {
         return sizeof(LabelTable) + label_table_.size() * sizeof(LabelType) +
@@ -258,10 +293,8 @@ public:
                deleted_ids_.size() * sizeof(InnerIdType) + hole_list_.size() * sizeof(InnerIdType);
     }
 
-    /**
-     * Get filter to filter out deleted ids.
-     * @return The filter.
-     */
+    /// @brief Gets filter to filter out deleted IDs.
+    /// @return Filter for deleted IDs, or nullptr if no deleted IDs.
     FilterPtr
     GetDeletedIdsFilter() {
         std::shared_lock rlock(delete_ids_mutex_);
@@ -271,6 +304,9 @@ public:
         return deleted_ids_filter_;
     }
 
+    /// @brief Gets a limited number of deleted IDs.
+    /// @param max_count Maximum number of IDs to return.
+    /// @return Vector of deleted IDs.
     std::vector<InnerIdType>
     GetDeletedIds(InnerIdType max_count) {
         std::shared_lock rlock(delete_ids_mutex_);
@@ -282,6 +318,8 @@ public:
                                         std::next(deleted_ids_.begin(), size));
     }
 
+    /// @brief Gets all deleted IDs.
+    /// @return Vector of all deleted IDs.
     std::vector<InnerIdType>
     GetAllDeletedIds() {
         std::shared_lock rlock(delete_ids_mutex_);
@@ -289,36 +327,50 @@ public:
     }
 
 private:
+    /// @brief Gets ID by label using reverse map.
+    /// @param label Label to query.
+    /// @return Internal ID, or INVALID_ID if not found.
     InnerIdType
     get_id_by_label_with_reverse_map(LabelType label) const noexcept;
 
+    /// @brief Gets ID by label using linear scan of label table.
+    /// @param label Label to query.
+    /// @return Internal ID, or INVALID_ID if not found.
     InnerIdType
     get_id_by_label_with_label_table(LabelType label) const noexcept;
 
 public:
-    // Label table, map from id to label.
+    /// Label table, map from ID to label.
     Vector<LabelType> label_table_;
 
-    // Temporary compatibility switch for legacy duplicate payload layout.
+    /// Temporary compatibility switch for legacy duplicate payload layout.
     bool is_legacy_duplicate_format_{false};
 
-    // Whether to use reverse map to speed up GetIdByLabel.
+    /// Whether to use reverse map to speed up GetIdByLabel.
     bool use_reverse_map_{true};
-    // Reverse map from label to id.
+    /// Reverse map from label to ID.
     PGUnorderedMap<LabelType, InnerIdType> label_remap_;
 
+    /// Whether tombstone deletion is supported.
     bool support_tombstone_{false};
+    /// Duplicate tracker for handling duplicate labels.
     DuplicateTrackerPtr duplicate_tracker_{nullptr};
 
+    /// Allocator for memory management.
     Allocator* allocator_{nullptr};
+    /// Total count of labels in the table.
     std::atomic<int64_t> total_count_{0L};
 
+    /// @brief Pushes a hole (reusable ID) to the hole list.
+    /// @param id The ID to push.
     void
     PushHole(InnerIdType id) {
         std::scoped_lock wlock(hole_mutex_);
         hole_list_.push_back(id);
     }
 
+    /// @brief Pops a hole (reusable ID) from the hole list.
+    /// @return Pair of (success, id) where success indicates if a hole was available.
     std::pair<bool, InnerIdType>
     PopHole() {
         std::scoped_lock wlock(hole_mutex_);
@@ -330,18 +382,25 @@ public:
         return {true, id};
     }
 
+    /// @brief Checks if there are any holes available.
+    /// @return True if holes exist.
     bool
     HasHole() const {
         std::shared_lock rlock(hole_mutex_);
         return not hole_list_.empty();
     }
 
+    /// @brief Gets the count of holes.
+    /// @return Number of holes.
     size_t
     GetHoleCount() const {
         std::shared_lock rlock(hole_mutex_);
         return hole_list_.size();
     }
 
+    /// @brief Removes a specific ID from the hole list.
+    /// @param id The ID to remove.
+    /// @return True if the ID was found and removed.
     bool
     RemoveHole(InnerIdType id) {
         std::scoped_lock wlock(hole_mutex_);
@@ -354,12 +413,17 @@ public:
     }
 
 private:
-    UnorderedSet<InnerIdType> deleted_ids_;       // Record deleted ids.
-    FilterPtr deleted_ids_filter_{nullptr};       // Filter to filter out deleted ids.
-    mutable std::shared_mutex delete_ids_mutex_;  // Mutex to protect deleted_ids_.
+    /// Record of deleted IDs.
+    UnorderedSet<InnerIdType> deleted_ids_;
+    /// Filter to filter out deleted IDs.
+    FilterPtr deleted_ids_filter_{nullptr};
+    /// Mutex to protect deleted_ids_.
+    mutable std::shared_mutex delete_ids_mutex_;
 
-    Vector<InnerIdType> hole_list_;         // Reusable id list (stack structure).
-    mutable std::shared_mutex hole_mutex_;  // Mutex to protect hole_list_.
+    /// Reusable ID list (stack structure).
+    Vector<InnerIdType> hole_list_;
+    /// Mutex to protect hole_list_.
+    mutable std::shared_mutex hole_mutex_;
 };
 
 }  // namespace vsag

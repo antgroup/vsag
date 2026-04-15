@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -24,12 +23,41 @@
 #include "utils/pointer_define.h"
 
 namespace vsag {
+
+/**
+ * @file flatten_reorder.h
+ * @brief Flatten-based implementation of result reordering.
+ */
+
+/**
+ * @brief Reorders search results using flatten data cell for distance computation.
+ *
+ * FlattenReorder refines search results by recomputing distances using
+ * the original or higher-precision vectors stored in a flatten data cell.
+ * This provides more accurate distances than quantized representations.
+ */
 class FlattenReorder : public ReorderInterface {
 public:
+    /**
+     * @brief Constructs a FlattenReorder with the given flatten interface.
+     *
+     * @param flatten Flatten interface for vector data access.
+     * @param allocator Allocator for memory management.
+     */
     FlattenReorder(const FlattenInterfacePtr& flatten, Allocator* allocator)
         : flatten_(flatten), allocator_(allocator) {
     }
 
+    /**
+     * @brief Reorders search results using flatten data for distance computation.
+     *
+     * @param input Input heap containing candidate results.
+     * @param query Query vector pointer.
+     * @param topk Number of top results to return.
+     * @param ctx Query context for execution.
+     * @param iter_ctx Optional iterator filter context for progressive filtering.
+     * @return DistHeapPtr Reordered heap containing refined results.
+     */
     DistHeapPtr
     Reorder(const DistHeapPtr& input,
             const float* query,
@@ -38,7 +66,10 @@ public:
             IteratorFilterContext* iter_ctx = nullptr) override;
 
 private:
+    /// Flatten interface for accessing original vector data.
     const FlattenInterfacePtr flatten_;
+
+    /// Allocator for memory management.
     Allocator* allocator_{nullptr};
 };
 }  // namespace vsag

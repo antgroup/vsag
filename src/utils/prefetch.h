@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -19,6 +18,20 @@
 #include "simd/simd.h"
 
 namespace vsag {
+
+/**
+ * @file prefetch.h
+ * @brief Cache prefetching utilities for performance optimization.
+ */
+
+/**
+ * @brief Template function to prefetch multiple cache lines.
+ * @tparam N Number of cache lines to prefetch (max 24).
+ * @param data Pointer to the data to prefetch.
+ *
+ * Uses __builtin_prefetch to load cache lines into L1 cache,
+ * improving performance for subsequent memory accesses.
+ */
 template <int N>
 __inline void __attribute__((__always_inline__)) PrefetchImpl(const void* data) {
     if constexpr (N > 24) {
@@ -29,6 +42,14 @@ __inline void __attribute__((__always_inline__)) PrefetchImpl(const void* data) 
     }
 }
 
+/**
+ * @brief Prefetches memory region for improved cache performance.
+ * @param data Pointer to the data to prefetch.
+ * @param size Size of the memory region in bytes.
+ *
+ * Automatically calculates the number of cache lines to prefetch
+ * based on the specified size.
+ */
 void
 PrefetchLines(const void* data, uint64_t size);
 

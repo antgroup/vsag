@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -19,11 +18,23 @@
 
 namespace vsag {
 
+/**
+ * @file blas_function.h
+ * @brief BLAS and LAPACK function wrappers for linear algebra operations.
+ */
+
+/**
+ * @brief Wrapper class for BLAS and LAPACK operations.
+ *
+ * BlasFunction provides static methods wrapping standard BLAS (Basic Linear
+ * Algebra Subprograms) and LAPACK (Linear Algebra Package) routines for
+ * vector and matrix operations.
+ */
 class BlasFunction {
 public:
     /**
      * @brief Perform the operation y := alpha * x + y.
-     * 
+     *
      * @param n Number of elements in vector x and y.
      * @param alpha Scaling factor for vector x.
      * @param x Pointer to the input vector x.
@@ -36,7 +47,7 @@ public:
 
     /**
      * @brief Scale vector x by alpha.
-     * 
+     *
      * @param n Number of elements in vector x.
      * @param alpha Scaling factor.
      * @param x Pointer to the input/output vector x.
@@ -47,7 +58,7 @@ public:
 
     /**
      * @brief Perform the matrix-vector operation y := alpha * A * x + beta * y.
-     * 
+     *
      * @param order Specifies the matrix storage layout (RowMajor or ColMajor).
      * @param trans Specifies the operation (NoTrans, Trans, or ConjTrans).
      * @param m Number of rows in matrix A.
@@ -77,7 +88,7 @@ public:
 
     /**
      * @brief Perform the matrix-matrix operation C := alpha * A * B + beta * C.
-     * 
+     *
      * @param order Specifies the matrix storage layout (RowMajor or ColMajor).
      * @param transa Specifies the operation for matrix A (NoTrans, Trans, or ConjTrans).
      * @param transb Specifies the operation for matrix B (NoTrans, Trans, or ConjTrans).
@@ -111,7 +122,7 @@ public:
 
     /**
      * @brief Compute the QR factorization of a matrix A using the Gram-Schmidt process.
-     * 
+     *
      * @param order Specifies the matrix storage layout (RowMajor or ColMajor).
      * @param m Number of rows in matrix A.
      * @param n Number of columns in matrix A.
@@ -125,7 +136,7 @@ public:
 
     /**
      * @brief Compute the orthogonal matrix Q from the QR factorization computed by Sgeqrf.
-     * 
+     *
      * @param order Specifies the matrix storage layout (RowMajor or ColMajor).
      * @param m Number of rows in matrix A.
      * @param n Number of columns in matrix A.
@@ -140,7 +151,7 @@ public:
 
     /**
      * @brief Compute the LU factorization of a matrix A using partial pivoting.
-     * 
+     *
      * @param order Specifies the matrix storage layout (RowMajor or ColMajor).
      * @param m Number of rows in matrix A.
      * @param n Number of columns in matrix A.
@@ -154,7 +165,7 @@ public:
 
     /**
      * @brief Compute the eigenvalues and, optionally, the eigenvectors of a symmetric matrix A.
-     * 
+     *
      * @param order Specifies the matrix storage layout (RowMajor or ColMajor).
      * @param jobz Specifies whether to compute eigenvalues only (N) or eigenvalues and eigenvectors (V).
      * @param uplo Specifies whether the upper or lower triangle of A is stored (U or L).
@@ -167,18 +178,32 @@ public:
     static int32_t
     Ssyev(int32_t order, char jobz, char uplo, int32_t n, float* a, int32_t lda, float* w);
 
-    // Constants for BLAS operations
-    static constexpr int32_t RowMajor = 101;   // Row-major storage
-    static constexpr int32_t ColMajor = 102;   // Column-major storage
-    static constexpr int32_t NoTrans = 111;    // No transpose
-    static constexpr int32_t Trans = 112;      // Transpose
-    static constexpr int32_t ConjTrans = 113;  // Conjugate transpose
+    /// Row-major storage layout constant.
+    static constexpr int32_t RowMajor = 101;
 
-    // LAPACK specific constants
-    static constexpr char JobV = 'V';   // Compute eigenvectors
-    static constexpr char JobN = 'N';   // Do not compute eigenvectors
-    static constexpr char Upper = 'U';  // Upper triangular
-    static constexpr char Lower = 'L';  // Lower triangular
+    /// Column-major storage layout constant.
+    static constexpr int32_t ColMajor = 102;
+
+    /// No transpose operation constant.
+    static constexpr int32_t NoTrans = 111;
+
+    /// Transpose operation constant.
+    static constexpr int32_t Trans = 112;
+
+    /// Conjugate transpose operation constant.
+    static constexpr int32_t ConjTrans = 113;
+
+    /// Compute eigenvectors constant.
+    static constexpr char JobV = 'V';
+
+    /// Do not compute eigenvectors constant.
+    static constexpr char JobN = 'N';
+
+    /// Upper triangular storage constant.
+    static constexpr char Upper = 'U';
+
+    /// Lower triangular storage constant.
+    static constexpr char Lower = 'L';
 };
 
 }  // namespace vsag

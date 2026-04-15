@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -26,12 +25,43 @@
 
 namespace vsag {
 
+/**
+ * @file parallel_searcher.h
+ * @brief Parallel graph-based search implementation using thread pool.
+ */
+
+/**
+ * @brief Multi-threaded graph searcher for parallel nearest neighbor search.
+ *
+ * ParallelSearcher performs graph-based search using multiple threads to
+ * accelerate the search process. It supports concurrent neighbor exploration
+ * and distance computation.
+ */
 class ParallelSearcher {
 public:
+    /**
+     * @brief Constructs a ParallelSearcher with the given parameters.
+     *
+     * @param common_param Common index parameters including allocator and metrics.
+     * @param search_pool Thread pool for parallel execution.
+     * @param mutex_array Optional mutex array for thread-safe graph access.
+     */
     explicit ParallelSearcher(const IndexCommonParam& common_param,
                               std::shared_ptr<SafeThreadPool> search_pool,
                               MutexArrayPtr mutex_array = nullptr);
 
+    /**
+     * @brief Performs graph-based search for nearest neighbors.
+     *
+     * @param graph Graph interface for neighbor traversal.
+     * @param flatten Flatten interface for vector data access.
+     * @param vl Visited list for tracking explored nodes.
+     * @param query Query vector pointer.
+     * @param inner_search_param Search parameters including topk and ef.
+     * @param label_table Optional label table for label filtering.
+     * @param ctx Optional query context for attribute filtering.
+     * @return DistHeapPtr Heap containing search results.
+     */
     virtual DistHeapPtr
     Search(const GraphInterfacePtr& graph,
            const FlattenInterfacePtr& flatten,
@@ -41,12 +71,29 @@ public:
            const LabelTablePtr& label_table = nullptr,
            QueryContext* ctx = nullptr) const;
 
+    /**
+     * @brief Sets the mutex array for thread-safe graph access.
+     *
+     * @param new_mutex_array New mutex array to use.
+     */
     void
     SetMutexArray(MutexArrayPtr new_mutex_array);
 
 private:
-    // rid means the neighbor's rank (e.g., the first neighbor's rid == 0)
-    //  id means the neighbor's  id  (e.g., the first neighbor's  id == 12345)
+    /**
+     * @brief Visits neighbors and collects candidates for parallel exploration.
+     *
+     * @param graph Graph interface for neighbor retrieval.
+     * @param vl Visited list for tracking explored nodes.
+     * @param node_pair Current node with distance.
+     * @param filter Optional filter for candidate pruning.
+     * @param skip_ratio Ratio for skipping candidates.
+     * @param to_be_visited_rid Output vector for neighbor ranks to visit.
+     * @param to_be_visited_id Output vector for neighbor IDs to visit.
+     * @param neighbors Output vectors for neighbor lists per thread.
+     * @param point_visited_num Number of points already visited.
+     * @return Number of candidates added to visit lists.
+     */
     uint32_t
     visit(const GraphInterfacePtr& graph,
           const VisitedListPtr& vl,
@@ -58,6 +105,19 @@ private:
           std::vector<Vector<InnerIdType>>& neighbors,
           uint64_t point_visited_num) const;
 
+    /**
+     * @brief Internal implementation of parallel graph search.
+     *
+     * @tparam mode Search mode (KNN_SEARCH or RANGE_SEARCH).
+     * @param graph Graph interface for neighbor traversal.
+     * @param flatten Flatten interface for vector data access.
+     * @param vl Visited list for tracking explored nodes.
+     * @param query Query vector pointer.
+     * @param inner_search_param Search parameters including topk and ef.
+     * @param label_table Optional label table for label filtering.
+     * @param ctx Optional query context for attribute filtering.
+     * @return DistHeapPtr Heap containing search results.
+     */
     template <InnerSearchMode mode = KNN_SEARCH>
     DistHeapPtr
     search_impl(const GraphInterfacePtr& graph,
@@ -69,13 +129,16 @@ private:
                 QueryContext* ctx = nullptr) const;
 
 private:
+    /// Allocator for memory management.
     Allocator* allocator_{nullptr};
 
+    /// Thread pool for parallel execution.
     std::shared_ptr<SafeThreadPool> pool{nullptr};
 
+    /// Mutex array for thread-safe graph access.
     MutexArrayPtr mutex_array_{nullptr};
 
-    // runtime parameters
+    /// Prefetch stride for visit operations.
     uint32_t prefetch_stride_visit_{3};
 };
 

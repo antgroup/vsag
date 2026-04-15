@@ -13,6 +13,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+/**
+ * @file graph_datacell.h
+ * @brief Graph data cell implementation for storing and managing neighbor relationships.
+ *
+ * This file provides the GraphDataCell class which implements the GraphInterface
+ * for storing graph neighbor information using IO operations. The graph can be
+ * built via nn-descent algorithm or incremental insertion.
+ */
+
 #pragma once
 
 #include <limits>
@@ -32,60 +41,116 @@
 
 namespace vsag {
 
-/**
- * built by nn-descent or incremental insertion
- * add neighbors and pruning
- * retrieve neighbors
- */
 template <typename IOTmpl>
 class GraphDataCell;
 
+/**
+ * @brief Graph data cell for storing and managing neighbor relationships.
+ *
+ * This class implements the GraphInterface and provides functionality for:
+ * - Building graphs via nn-descent or incremental insertion
+ * - Adding neighbors with pruning support
+ * - Retrieving neighbors efficiently
+ * - Supporting delete and recovery operations
+ *
+ * @tparam IOTmpl The IO template type for storage operations.
+ */
 template <typename IOTmpl>
 class GraphDataCell : public GraphInterface {
 public:
+    /**
+     * @brief Constructs a GraphDataCell with graph interface parameters.
+     * @param graph_param The graph interface parameters.
+     * @param common_param The common index parameters.
+     */
     explicit GraphDataCell(const GraphInterfaceParamPtr& graph_param,
                            const IndexCommonParam& common_param);
 
+    /**
+     * @brief Constructs a GraphDataCell with graph data cell parameters.
+     * @param graph_param The graph data cell parameters.
+     * @param common_param The common index parameters.
+     */
     explicit GraphDataCell(const GraphDataCellParamPtr& graph_param,
                            const IndexCommonParam& common_param);
 
+    /**
+     * @brief Inserts neighbor IDs for a given node.
+     * @param id The internal ID of the node.
+     * @param neighbor_ids The vector of neighbor IDs to insert.
+     */
     void
     InsertNeighborsById(InnerIdType id, const Vector<InnerIdType>& neighbor_ids) override;
 
+    /**
+     * @brief Marks neighbors of a node as deleted.
+     * @param id The internal ID of the node to delete.
+     */
     void
     DeleteNeighborsById(vsag::InnerIdType id) override;
 
+    /**
+     * @brief Recovers previously deleted neighbors of a node.
+     * @param id The internal ID of the node to recover.
+     */
     void
     RecoverDeleteNeighborsById(vsag::InnerIdType id) override;
 
+    /**
+     * @brief Gets the number of neighbors for a given node.
+     * @param id The internal ID of the node.
+     * @return The number of neighbors.
+     */
     [[nodiscard]] uint32_t
     GetNeighborSize(InnerIdType id) const override;
 
+    /**
+     * @brief Retrieves the neighbor IDs for a given node.
+     * @param id The internal ID of the node.
+     * @param neighbor_ids Output vector to store the neighbor IDs.
+     */
     void
     GetNeighbors(InnerIdType id, Vector<InnerIdType>& neighbor_ids) const override;
 
+    /**
+     * @brief Checks if a node with the given ID exists.
+     * @param id The internal ID to check.
+     * @return True if the node exists, false otherwise.
+     */
     [[nodiscard]] bool
     CheckIdExists(InnerIdType id) const override {
         return id < this->total_count_ && id < this->max_capacity_;
     }
 
+    /**
+     * @brief Resizes the graph to accommodate more nodes.
+     * @param new_size The new capacity size.
+     */
     void
     Resize(InnerIdType new_size) override;
 
+    /**
+     * @brief Sets the IO instance for storage operations.
+     * @param io The shared pointer to the IO instance.
+     */
     inline void
     SetIO(std::shared_ptr<BasicIO<IOTmpl>> io) {
         this->io_ = io;
     }
 
+    /**
+     * @brief Initializes the IO with the given parameters.
+     * @param io_param The IO parameters.
+     */
     virtual void
     InitIO(const IOParamPtr& io_param) override {
         this->io_->InitIO(io_param);
     }
 
-    /****
-     * prefetch neighbors of a base point with id
-     * @param id of base point
-     * @param neighbor_i index of neighbor, 0 for neighbor size, 1 for first neighbor
+    /**
+     * @brief Prefetches neighbors of a base point for cache optimization.
+     * @param id The internal ID of the base point.
+     * @param neighbor_i The index of neighbor (0 for neighbor size, 1 for first neighbor).
      */
     void
     Prefetch(InnerIdType id, uint32_t neighbor_i) override {
@@ -93,20 +158,41 @@ public:
                       sizeof(uint32_t) + neighbor_i * sizeof(InnerIdType));
     }
 
+    /**
+     * @brief Serializes the graph data to a stream.
+     * @param writer The stream writer for output.
+     */
     void
     Serialize(StreamWriter& writer) override;
 
+    /**
+     * @brief Deserializes the graph data from a stream.
+     * @param reader The stream reader for input.
+     */
     void
     Deserialize(StreamReader& reader) override;
 
+    /**
+     * @brief Checks if the graph data is stored in memory.
+     * @return True if stored in memory, false otherwise.
+     */
     bool
     InMemory() const override {
         return IOTmpl::InMemory;
     }
 
+    /**
+     * @brief Merges another graph interface into this one.
+     * @param other The other graph interface to merge.
+     * @param bias The ID bias for merging.
+     */
     void
     MergeOther(GraphInterfacePtr other, uint64_t bias) override;
 
+    /**
+     * @brief Gets the memory usage of this data cell.
+     * @return The memory usage in bytes.
+     */
     int64_t
     GetMemoryUsage() const override {
         int64_t memory = sizeof(GraphDataCell) + node_versions_.size() * sizeof(uint8_t);
@@ -119,6 +205,11 @@ public:
         return memory;
     }
 
+    /**
+     * @brief Gets the incoming neighbors for a given node.
+     * @param id The internal ID of the node.
+     * @param neighbors Output vector to store the incoming neighbor IDs.
+     */
     void
     GetIncomingNeighbors(InnerIdType id, Vector<InnerIdType>& neighbors) const override {
         if (reverse_edges_) {
@@ -128,23 +219,35 @@ public:
         }
     }
 
+    /**
+     * @brief Creates a duplicate tracker instance.
+     * @return A shared pointer to the duplicate tracker.
+     */
     DuplicateTrackerPtr
     CreateDuplicateTracker() override {
         return std::make_shared<DenseDuplicateTracker>(allocator_);
     }
 
 private:
+    /// IO instance for storage operations
     std::shared_ptr<BasicIO<IOTmpl>> io_{nullptr};
 
+    /// Reverse edge storage for incoming neighbor lookup
     std::unique_ptr<ReverseEdge> reverse_edges_{nullptr};
 
+    /// Version tracking for each node (used for delete support)
     Vector<uint8_t> node_versions_;
 
+    /// Flag indicating whether delete operations are supported
     bool is_support_delete_{true};
+    /// Number of bits used for remove flag
     uint32_t remove_flag_bit_{8};
+    /// Number of bits used for ID storage
     uint32_t id_bit_{24};
+    /// Mask for extracting ID from combined value
     uint32_t remove_flag_mask_{0x00FFFFFF};
 
+    /// Size of one code line (neighbors + count)
     uint32_t code_line_size_{0};
 };
 

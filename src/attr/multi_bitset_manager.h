@@ -13,6 +13,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+/**
+ * @file multi_bitset_manager.h
+ * @brief Manager for multiple computable bitsets used in attribute filtering.
+ *
+ * This file provides the MultiBitsetManager class which manages a collection
+ * of ComputableBitset instances for efficient attribute-based filtering.
+ */
+
 #pragma once
 
 #include "impl/bitset/computable_bitset.h"

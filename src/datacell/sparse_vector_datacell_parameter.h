@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,6 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+/**
+ * @file sparse_vector_datacell_parameter.h
+ * @brief Parameter configuration for sparse vector data cell.
+ */
+
 #pragma once
 
 #include <fmt/format.h>
@@ -23,11 +27,28 @@
 
 namespace vsag {
 DEFINE_POINTER2(SparseVectorDataCellParam, SparseVectorDataCellParameter);
+
+/**
+ * @brief Parameter class for configuring sparse vector data cell.
+ *
+ * This class manages configuration parameters for sparse vector data cell,
+ * including IO and quantization settings. It inherits from FlattenInterfaceParameter
+ * and provides JSON serialization/deserialization support.
+ */
 class SparseVectorDataCellParameter : public FlattenInterfaceParameter {
 public:
+    /**
+     * @brief Constructs a sparse vector data cell parameter with default settings.
+     */
     explicit SparseVectorDataCellParameter() : FlattenInterfaceParameter(SPARSE_VECTOR_DATA_CELL) {
     }
 
+    /**
+     * @brief Parses parameters from JSON configuration.
+     *
+     * @param json JSON object containing parameter configuration
+     * @throws std::invalid_argument if required parameters are missing or invalid
+     */
     void
     FromJson(const JsonType& json) override {
         CHECK_ARGUMENT(json.Contains(IO_PARAMS_KEY),
@@ -43,6 +64,11 @@ public:
             fmt::format("sparse datacell only support {}", QUANTIZATION_TYPE_VALUE_SPARSE));
     }
 
+    /**
+     * @brief Converts parameters to JSON format.
+     *
+     * @return JSON object containing parameter configuration
+     */
     JsonType
     ToJson() const override {
         JsonType json;
@@ -53,6 +79,12 @@ public:
         return json;
     }
 
+    /**
+     * @brief Checks compatibility with another parameter set.
+     *
+     * @param other Another parameter to check compatibility with
+     * @return True if parameters are compatible
+     */
     bool
     CheckCompatibility(const vsag::ParamPtr& other) const override {
         auto sparse_param = std::dynamic_pointer_cast<SparseVectorDataCellParameter>(other);

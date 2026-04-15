@@ -33,15 +33,38 @@
 
 namespace vsag {
 
-// Metadata is using to describe how is the index create
+/// Metadata is using to describe how is the index create
 DEFINE_POINTER(Metadata);
+
+/**
+ * @brief Metadata container for index serialization information.
+ *
+ * This class stores and manages metadata about the index structure,
+ * including version information, creation parameters, and custom attributes.
+ * Reserved keys starting with underscore (_) are used for internal metadata.
+ */
 class Metadata {
 public:
+    /**
+     * @brief Gets a metadata value by name.
+     *
+     * @param name The metadata key to lookup.
+     * @return JsonType containing the metadata value.
+     */
     [[nodiscard]] JsonType
     Get(const std::string& name) const {
         return metadata_[name];
     }
 
+    /**
+     * @brief Sets a metadata value.
+     *
+     * Note: Keys starting with underscore (_) are reserved for internal use.
+     *
+     * @tparam T The type of the value (string, bool, int, float, or JsonType).
+     * @param name The metadata key.
+     * @param value The metadata value.
+     */
     template <typename T>
     void
     Set(const std::string& name, T value) {
@@ -63,6 +86,11 @@ public:
     }
 
 public:
+    /**
+     * @brief Gets the serialization format version.
+     *
+     * @return Version string, or empty if not set.
+     */
     [[nodiscard]] std::string
     Version() const {
         if (metadata_.Contains("_version")) {
@@ -71,28 +99,53 @@ public:
         return "";
     }
 
+    /**
+     * @brief Sets the serialization format version.
+     *
+     * @param version The version string to set.
+     */
     void
     SetVersion(const std::string& version) {
         metadata_["_version"].SetString(version);
     }
 
+    /**
+     * @brief Checks if this metadata represents an empty index.
+     *
+     * @return True if empty index flag is set, false otherwise.
+     */
     [[nodiscard]] bool
     EmptyIndex() const {
         return metadata_.Contains("_empty") and metadata_["_empty"].GetBool();
     }
 
+    /**
+     * @brief Sets the empty index flag.
+     *
+     * @param empty True if index is empty, false otherwise.
+     */
     void
     SetEmptyIndex(bool empty) {
         metadata_["_empty"].SetBool(empty);
     }
 
 public:
+    /**
+     * @brief Converts metadata to a JSON string.
+     *
+     * @return JSON string representation of the metadata.
+     */
     std::string
     ToString() {
         make_sure_metadata_not_null();
         return metadata_.Dump();
     }
 
+    /**
+     * @brief Converts metadata to a Binary object.
+     *
+     * @return Binary object containing the serialized metadata.
+     */
     Binary
     ToBinary() {
         auto str = this->ToString();
@@ -108,13 +161,28 @@ public:
     }
 
 public:
+    /**
+     * @brief Constructs metadata from a JSON string.
+     *
+     * @param str JSON string to parse.
+     */
     Metadata(std::string str) {
         metadata_ = JsonType::Parse(str);
     }
+    /**
+     * @brief Constructs metadata from a Binary object.
+     *
+     * @param binary Binary object containing serialized metadata.
+     */
     Metadata(const Binary& binary) {
         auto str = std::string((char*)binary.data.get(), binary.size);
         metadata_ = JsonType::Parse(str);
     }
+    /**
+     * @brief Constructs metadata from a JsonType object.
+     *
+     * @param metadata JsonType object to use as metadata.
+     */
     Metadata(JsonType metadata) : metadata_(std::move(metadata)) {
     }
     Metadata() = default;
@@ -125,38 +193,78 @@ private:
     make_sure_metadata_not_null();
 
 private:
+    /// JSON object storing all metadata entries.
     JsonType metadata_;
 };
 
-// Footer is a wrapper of metadata, only used in all-in-one serialize format
+/// Footer is a wrapper of metadata, only used in all-in-one serialize format
 DEFINE_POINTER(Footer);
+
+/**
+ * @brief Footer wrapper for metadata in all-in-one serialization format.
+ *
+ * This class wraps a Metadata object and provides serialization/deserialization
+ * with checksum validation for the footer section of index files.
+ */
 class Footer {
 public:
+    /**
+     * @brief Parses and constructs a Footer from a stream.
+     *
+     * @param reader The stream reader containing the footer data.
+     * @return FooterPtr pointing to the parsed Footer object.
+     */
     static FooterPtr
     Parse(StreamReader& reader);
 
-    /* [magic (8B)] [length_of_metadata (8B)] [metadata (*B)] [checksum (4B)] [length_of_footer (8B)] [cigam (8B)] */
+    /**
+     * @brief Writes the footer to a stream.
+     *
+     * Format: [magic (8B)] [length_of_metadata (8B)] [metadata (*B)] [checksum (4B)] [length_of_footer (8B)] [magic (8B)]
+     *
+     * @param writer The stream writer to write to.
+     */
     void
     Write(StreamWriter& writer);
 
 public:
+    /**
+     * @brief Gets the metadata contained in this footer.
+     *
+     * @return MetadataPtr pointing to the metadata object.
+     */
     [[nodiscard]] MetadataPtr
     GetMetadata() const {
         return metadata_;
     }
 
+    /**
+     * @brief Gets the total length of the footer section.
+     *
+     * @return Length in bytes.
+     */
     [[nodiscard]] uint64_t
     Length() const {
         return length_;
     }
 
 public:
+    /**
+     * @brief Constructs a Footer with the given metadata.
+     *
+     * @param metadata Pointer to the metadata object.
+     */
     Footer(MetadataPtr metadata) : metadata_(std::move(metadata)) {
     }
     virtual ~Footer() = default;
 
 private:
-    // TODO(wxyu): optimize performance
+    /**
+     * @brief Calculates CRC32 checksum for the given bytes.
+     *
+     * @param bytes The data to calculate checksum for.
+     * @return CRC32 checksum value.
+     */
     static uint32_t
     calculate_checksum(std::string_view bytes) {
         const uint32_t polynomial = 0xEDB88320;
@@ -173,7 +281,9 @@ private:
     }
 
 private:
+    /// Pointer to the metadata object.
     MetadataPtr metadata_{nullptr};
+    /// Total length of the footer section in bytes.
     uint64_t length_{0};
 };
 

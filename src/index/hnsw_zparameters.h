@@ -24,27 +24,51 @@
 
 namespace vsag {
 
+/**
+ * @brief Configuration parameters for HNSW index construction.
+ *
+ * This structure contains all parameters needed to configure an HNSW index,
+ * including graph structure settings, distance metric, and optimization options.
+ */
 struct HnswParameters {
 public:
+    /**
+     * @brief Creates HnswParameters from JSON configuration.
+     *
+     * @param hnsw_param_obj JSON object containing HNSW parameters.
+     * @param index_common_param Common index parameters.
+     * @return HnswParameters Parsed configuration structure.
+     */
     static HnswParameters
     FromJson(const JsonType& hnsw_param_obj, const IndexCommonParam& index_common_param);
 
 public:
-    // required vars
-    std::shared_ptr<hnswlib::SpaceInterface> space;
-    int64_t max_degree;
-    int64_t ef_construction;
-    bool use_conjugate_graph{false};
-    bool normalize{false};
-    bool use_reversed_edges{false};
-    DataTypes type{DataTypes::DATA_TYPE_FLOAT};
+    std::shared_ptr<hnswlib::SpaceInterface> space;  ///< Distance metric space
+    int64_t max_degree;                              ///< Maximum degree of each node in the graph
+    int64_t ef_construction;                         ///< Beam width during construction
+    bool use_conjugate_graph{false};                 ///< Enable conjugate graph optimization
+    bool normalize{false};                           ///< Normalize vectors before indexing
+    bool use_reversed_edges{false};                  ///< Enable reversed edges tracking
+    DataTypes type{DataTypes::DATA_TYPE_FLOAT};      ///< Data type of vectors
 
 protected:
     HnswParameters() = default;
 };
 
+/**
+ * @brief Configuration parameters for fresh HNSW index construction.
+ *
+ * Specialized parameters for creating a new HNSW index from scratch.
+ */
 struct FreshHnswParameters : public HnswParameters {
 public:
+    /**
+     * @brief Creates FreshHnswParameters from JSON configuration.
+     *
+     * @param hnsw_param_obj JSON object containing HNSW parameters.
+     * @param index_common_param Common index parameters.
+     * @return HnswParameters Parsed configuration structure.
+     */
     static HnswParameters
     FromJson(const JsonType& hnsw_param_obj, const IndexCommonParam& index_common_param);
 
@@ -52,16 +76,27 @@ private:
     FreshHnswParameters() = default;
 };
 
+/**
+ * @brief Configuration parameters for HNSW search operations.
+ *
+ * This structure contains parameters that control search behavior,
+ * including beam width and optimization settings.
+ */
 struct HnswSearchParameters {
 public:
+    /**
+     * @brief Creates HnswSearchParameters from JSON string.
+     *
+     * @param json_string JSON string containing search parameters.
+     * @return HnswSearchParameters Parsed search configuration.
+     */
     static HnswSearchParameters
     FromJson(const std::string& json_string);
 
 public:
-    // required vars
-    int64_t ef_search;
-    float skip_ratio{0.9};
-    bool use_conjugate_graph_search;
+    int64_t ef_search;                ///< Beam width during search
+    float skip_ratio{0.9};            ///< Skip ratio for early termination
+    bool use_conjugate_graph_search;  ///< Enable conjugate graph during search
 
 private:
     HnswSearchParameters() = default;

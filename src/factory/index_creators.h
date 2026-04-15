@@ -16,6 +16,12 @@
 
 namespace vsag {
 
+/**
+ * @brief Registers all built-in index creators with the index registry.
+ *
+ * This function initializes the factory system by registering all available
+ * index types that can be created through the factory pattern.
+ */
 void
 register_all_index_creators();
 

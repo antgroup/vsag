@@ -13,6 +13,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+/**
+ * @file quantizer.h
+ * @brief Base template class for vector quantization operations.
+ *
+ * This file defines the Quantizer template class which provides CRTP-based
+ * interface for encoding, decoding, and distance computation on quantized vectors.
+ */
+
 #pragma once
 
 #include <cstdint>
@@ -30,11 +38,23 @@ using DataType = float;
 
 /**
  * @class Quantizer
- * @brief This class is used for quantization and encoding/decoding of data.
+ * @brief CRTP base template class for vector quantization operations.
+ *
+ * This class provides a unified interface for encoding, decoding, training,
+ * and distance computation on quantized vectors. Derived classes must implement
+ * the required `*Impl` methods following the CRTP pattern.
+ *
+ * @tparam QuantT The derived quantizer type implementing the quantization logic.
  */
 template <typename QuantT>
 class Quantizer {
 public:
+    /**
+     * @brief Constructs a Quantizer with the specified dimension and allocator.
+     *
+     * @param dim The dimensionality of input vectors.
+     * @param allocator Pointer to the allocator for memory management.
+     */
     explicit Quantizer<QuantT>(int dim, Allocator* allocator)
         : dim_(dim), code_size_(dim * sizeof(DataType)), allocator_(allocator){};
 
@@ -159,6 +179,11 @@ public:
         return cast().ComputeImpl(codes1, codes2);
     }
 
+    /**
+     * @brief Serializes the quantizer state to a stream writer.
+     *
+     * @param writer The stream writer for output.
+     */
     inline void
     Serialize(StreamWriter& writer) {
         StreamWriter::WriteObj(writer, this->dim_);
@@ -168,6 +193,11 @@ public:
         return cast().SerializeImpl(writer);
     }
 
+    /**
+     * @brief Deserializes the quantizer state from a stream reader.
+     *
+     * @param reader The stream reader for input.
+     */
     inline void
     Deserialize(StreamReader& reader) {
         StreamReader::ReadObj(reader, this->dim_);
@@ -177,21 +207,46 @@ public:
         return cast().DeserializeImpl(reader);
     }
 
+    /**
+     * @brief Creates a computer object for distance computation.
+     *
+     * @return A shared pointer to the computer instance.
+     */
     std::shared_ptr<Computer<QuantT>>
     FactoryComputer() {
         return std::make_shared<Computer<QuantT>>(static_cast<QuantT*>(this), allocator_);
     }
 
+    /**
+     * @brief Processes a query vector for distance computation.
+     *
+     * @param query Pointer to the query vector data.
+     * @param computer Reference to the computer object for storing processed query.
+     */
     inline void
     ProcessQuery(const DataType* query, Computer<QuantT>& computer) const {
         return cast().ProcessQueryImpl(query, computer);
     }
 
+    /**
+     * @brief Computes distance between processed query and encoded codes.
+     *
+     * @param computer Reference to the computer containing processed query.
+     * @param codes Pointer to the encoded codes.
+     * @param dists Output array for computed distances.
+     */
     inline void
     ComputeDist(Computer<QuantT>& computer, const uint8_t* codes, float* dists) const {
         return cast().ComputeDistImpl(computer, codes, dists);
     }
 
+    /**
+     * @brief Computes a single distance between processed query and one encoded code.
+     *
+     * @param computer Reference to the computer containing processed query.
+     * @param codes Pointer to a single encoded code.
+     * @return The computed distance value.
+     */
     inline float
     ComputeDist(Computer<QuantT>& computer, const uint8_t* codes) const {
         float dist = 0.0F;
@@ -199,6 +254,14 @@ public:
         return dist;
     }
 
+    /**
+     * @brief Computes distances for a batch of encoded codes.
+     *
+     * @param computer Reference to the computer containing processed query.
+     * @param count Number of codes to process.
+     * @param codes Pointer to the batch of encoded codes.
+     * @param dists Output array for computed distances.
+     */
     inline void
     ScanBatchDists(Computer<QuantT>& computer,
                    uint64_t count,
@@ -207,6 +270,22 @@ public:
         return cast().ScanBatchDistImpl(computer, count, codes, dists);
     }
 
+    /**
+     * @brief Computes distances for four encoded codes in batch.
+     *
+     * This optimized batch method computes distances for four codes at once,
+     * potentially using SIMD instructions for better performance.
+     *
+     * @param computer Reference to the computer containing processed query.
+     * @param codes1 Pointer to the first encoded code.
+     * @param codes2 Pointer to the second encoded code.
+     * @param codes3 Pointer to the third encoded code.
+     * @param codes4 Pointer to the fourth encoded code.
+     * @param dists1 Output reference for the first distance.
+     * @param dists2 Output reference for the second distance.
+     * @param dists3 Output reference for the third distance.
+     * @param dists4 Output reference for the fourth distance.
+     */
     inline void
     ComputeDistsBatch4(Computer<QuantT>& computer,
                        const uint8_t* codes1,
@@ -228,6 +307,11 @@ public:
         }
     }
 
+    /**
+     * @brief Releases resources associated with the computer.
+     *
+     * @param computer Reference to the computer to release.
+     */
     inline void
     ReleaseComputer(Computer<QuantT>& computer) const {
         cast().ReleaseComputerImpl(computer);
@@ -256,23 +340,52 @@ public:
         }
     }
 
+    /**
+     * @brief Gets the name of the quantizer.
+     *
+     * @return The quantizer name string.
+     */
     [[nodiscard]] virtual std::string
     Name() const {
         return cast().NameImpl();
     }
 
+    /**
+     * @brief Gets the metric type used by this quantizer.
+     *
+     * @return The metric type enum value.
+     */
     [[nodiscard]] MetricType
     Metric() const {
         return this->metric_;
     }
+
+    /**
+     * @brief Checks if the quantizer holds mold (norm) data.
+     *
+     * @return True if molds are held, false otherwise.
+     */
     [[nodiscard]] bool
     HoldMolds() const {
         return this->hold_molds_;
     }
 
+    /**
+     * @brief Packages 32 codes into a compact format.
+     *
+     * @param codes Pointer to the original codes.
+     * @param packaged_codes Output buffer for packaged codes.
+     * @param valid_size Number of valid codes to package.
+     */
     virtual void
     Package32(const uint8_t* codes, uint8_t* packaged_codes, int64_t valid_size) const {};
 
+    /**
+     * @brief Unpacks 32 codes from compact format to original format.
+     *
+     * @param packaged_codes Pointer to the packaged codes.
+     * @param codes Output buffer for unpacked codes.
+     */
     virtual void
     Unpack32(const uint8_t* packaged_codes, uint8_t* codes) const {};
 
@@ -286,6 +399,11 @@ public:
         return this->code_size_;
     }
 
+    /**
+     * @brief Gets the code size for query vectors in bytes.
+     *
+     * @return The query code size in bytes.
+     */
     inline uint64_t
     GetQueryCodeSize() const {
         return this->query_code_size_;
@@ -315,13 +433,13 @@ private:
     friend QuantT;
 
 private:
-    uint64_t dim_{0};
-    uint64_t query_code_size_{0};
-    uint64_t code_size_{0};
-    bool is_trained_{false};
-    MetricType metric_{MetricType::METRIC_TYPE_L2SQR};
-    Allocator* const allocator_{nullptr};
-    bool hold_molds_{false};
+    uint64_t dim_{0};                                   /// Dimensionality of input vectors
+    uint64_t query_code_size_{0};                       /// Code size for query vectors
+    uint64_t code_size_{0};                             /// Code size for data vectors
+    bool is_trained_{false};                            /// Whether the quantizer has been trained
+    MetricType metric_{MetricType::METRIC_TYPE_L2SQR};  /// Distance metric type
+    Allocator* const allocator_{nullptr};               /// Memory allocator
+    bool hold_molds_{false};                            /// Whether to hold mold (norm) data
 
     GENERATE_HAS_MEMBER_FUNCTION(ComputeDistsBatch4Impl,
                                  void,

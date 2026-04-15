@@ -13,12 +13,34 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+/**
+ * @file argparse.h
+ * @brief AST parsing utilities for filter condition strings.
+ *
+ * This file provides the AstParse function for parsing filter condition
+ * strings into expression AST using ANTLR4.
+ */
+
 #pragma once
 
 #include "attr_type_schema.h"
 #include "expression.h"
 
 namespace vsag {
+
+/**
+ * @brief Parses a filter condition string into an expression AST.
+ *
+ * This function uses ANTLR4 to parse the filter condition string and
+ * constructs an expression AST that can be evaluated for filtering.
+ *
+ * @param filter_condition_str The filter condition string to parse.
+ * @param schema Optional pointer to the attribute type schema for type checking.
+ *              If nullptr, type checking is not performed.
+ * @return ExprPtr Smart pointer to the root of the expression AST.
+ * @throws std::runtime_error If the filter condition string has syntax errors.
+ */
 ExprPtr
 AstParse(const std::string& filter_condition_str, AttrTypeSchema* schema = nullptr);
+
 }  // namespace vsag

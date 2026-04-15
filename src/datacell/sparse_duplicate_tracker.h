@@ -1,3 +1,8 @@
+/**
+ * @file sparse_duplicate_tracker.h
+ * @brief Sparse duplicate ID tracker for graph indices.
+ */
+
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -22,39 +27,89 @@
 
 namespace vsag {
 
+/**
+ * @brief Sparse-based duplicate ID tracker for graph indices.
+ *
+ * This class implements DuplicateInterface to track duplicate IDs using
+ * a sparse data structure with thread-safe operations.
+ */
 class SparseDuplicateTracker : public DuplicateInterface {
 public:
+    /**
+     * @brief Constructs a SparseDuplicateTracker with the given allocator.
+     *
+     * @param allocator Memory allocator for internal data structures.
+     */
     explicit SparseDuplicateTracker(Allocator* allocator);
 
+    /**
+     * @brief Sets a duplicate ID relationship.
+     *
+     * @param group_id The group ID representing the primary ID.
+     * @param duplicate_id The duplicate ID to associate with the group.
+     */
     void
     SetDuplicateId(InnerIdType group_id, InnerIdType duplicate_id) override;
 
+    /**
+     * @brief Gets all duplicate IDs associated with a given ID.
+     *
+     * @param id The ID to query.
+     * @return Vector of duplicate IDs associated with the given ID.
+     */
     auto
     GetDuplicateIds(InnerIdType id) const -> std::vector<InnerIdType> override;
 
+    /**
+     * @brief Gets the group ID for a given ID.
+     *
+     * @param id The ID to query.
+     * @return The group ID associated with the given ID.
+     */
     [[nodiscard]] auto
     GetGroupId(InnerIdType id) const -> InnerIdType override;
 
+    /**
+     * @brief Serializes the tracker to a stream.
+     *
+     * @param writer The stream writer for output.
+     */
     void
     Serialize(StreamWriter& writer) const override;
 
+    /**
+     * @brief Deserializes the tracker from a stream.
+     *
+     * @param reader The stream reader for input.
+     */
     void
     Deserialize(StreamReader& reader) override;
 
+    /**
+     * @brief Deserializes from legacy format.
+     *
+     * @param reader The stream reader for input.
+     * @param total_size Total size of data to read.
+     */
     void
     DeserializeFromLegacyFormat(StreamReader& reader, size_t total_size) override;
 
+    /**
+     * @brief Resizes the internal storage (no-op for sparse implementation).
+     *
+     * @param new_size The new size (unused in sparse implementation).
+     */
     void
     Resize(InnerIdType new_size) override {
         (void)new_size;
     }
 
 private:
-    Allocator* allocator_;
-    UnorderedMap<InnerIdType, InnerIdType> next_ids_;
-    mutable std::shared_mutex mutex_;
-    size_t duplicate_count_{0};
-    bool has_deserialized_{false};
+    Allocator* allocator_;                             ///< Memory allocator
+    UnorderedMap<InnerIdType, InnerIdType> next_ids_;  ///< Map of ID to next duplicate ID
+    mutable std::shared_mutex mutex_;                  ///< Thread-safe mutex
+    size_t duplicate_count_{0};                        ///< Count of duplicate entries
+    bool has_deserialized_{false};                     ///< Flag indicating deserialization state
 };
 
 }  // namespace vsag

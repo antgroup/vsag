@@ -13,28 +13,56 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+/**
+ * @file pq_fastscan_quantizer_parameter.h
+ * @brief Parameter configuration for PQFastScanQuantizer.
+ */
+
 #pragma once
 
 #include "quantization/quantizer_parameter.h"
 #include "utils/pointer_define.h"
 namespace vsag {
 DEFINE_POINTER2(PQFastScanQuantizerParam, PQFastScanQuantizerParameter);
+
+/**
+ * @brief Parameter class for PQFastScanQuantizer configuration.
+ *
+ * Stores configuration parameters for PQ FastScan quantization,
+ * which uses 4-bit codes for SIMD-optimized distance computation.
+ */
 class PQFastScanQuantizerParameter : public QuantizerParameter {
 public:
+    /**
+     * @brief Constructs a PQFastScanQuantizerParameter with default values.
+     */
     PQFastScanQuantizerParameter();
 
     ~PQFastScanQuantizerParameter() override = default;
 
+    /**
+     * @brief Loads parameters from JSON configuration.
+     * @param json JSON object containing parameter values.
+     */
     void
     FromJson(const JsonType& json) override;
 
+    /**
+     * @brief Exports parameters to JSON format.
+     * @return JSON object containing current parameter values.
+     */
     JsonType
     ToJson() const override;
 
+    /**
+     * @brief Checks compatibility with another parameter set.
+     * @param other Another parameter object to compare against.
+     * @return true if parameters are compatible, false otherwise.
+     */
     bool
     CheckCompatibility(const vsag::ParamPtr& other) const override;
 
 public:
-    int64_t pq_dim_{1};
+    int64_t pq_dim_{1};  /// Number of subspaces for product quantization
 };
 }  // namespace vsag
