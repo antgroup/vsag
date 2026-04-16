@@ -167,8 +167,12 @@ VSAG referenced the following works during its implementation:
 
 ## Contributors
 
+<!-- prettier-ignore-start -->
+<!-- markdownlint-disable -->
 <!-- readme: contributors -start -->
 <!-- readme: contributors -end -->
+<!-- markdownlint-restore -->
+<!-- prettier-ignore-end -->
 
 ## Star History
 
