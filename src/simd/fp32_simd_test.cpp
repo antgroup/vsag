@@ -18,6 +18,7 @@
 #include <catch2/benchmark/catch_benchmark.hpp>
 
 #include "simd_status.h"
+#include "simd_test_macro.h"
 #include "unittest.h"
 
 using namespace vsag;
@@ -26,77 +27,89 @@ using namespace vsag;
     {                                                                                 \
         float gt, sse, avx, avx2, avx512, neon, sve;                                  \
         gt = generic::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim);        \
+        SIMD_TEST_SSE(                                                                \
         if (SimdStatus::SupportSSE()) {                                               \
             sse = sse::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim);       \
             REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(sse));                   \
-        }                                                                             \
+        })                                                                            \
+        SIMD_TEST_AVX(                                                                \
         if (SimdStatus::SupportAVX()) {                                               \
             avx = avx::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim);       \
             REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(avx));                   \
-        }                                                                             \
+        })                                                                            \
+        SIMD_TEST_AVX2(                                                               \
         if (SimdStatus::SupportAVX2()) {                                              \
             avx2 = avx2::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim);     \
             REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(avx2));                  \
-        }                                                                             \
+        })                                                                            \
+        SIMD_TEST_AVX512(                                                             \
         if (SimdStatus::SupportAVX512()) {                                            \
             avx512 = avx512::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim); \
             REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(avx512));                \
-        }                                                                             \
+        })                                                                            \
+        SIMD_TEST_NEON(                                                               \
         if (SimdStatus::SupportNEON()) {                                              \
             neon = neon::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim);     \
             REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(neon));                  \
-        }                                                                             \
+        })                                                                            \
+        SIMD_TEST_SVE(                                                                \
         if (SimdStatus::SupportSVE()) {                                               \
             sve = sve::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim);       \
             REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(sve));                   \
-        }                                                                             \
+        })                                                                            \
     };
 #define TEST_FP32_ARTHIMETIC_ACCURACY(Func)                                                    \
     {                                                                                          \
         std::vector<float> gt(dim, 0.0F);                                                      \
         generic::Func(vec1.data() + i * dim, vec2.data() + i * dim, gt.data(), dim);           \
+        SIMD_TEST_SSE(                                                                         \
         std::vector<float> sse_gt(dim, 0.0F);                                                  \
         if (SimdStatus::SupportSSE()) {                                                        \
             sse::Func(vec1.data() + i * dim, vec2.data() + i * dim, sse_gt.data(), dim);       \
             for (uint64_t j = 0; j < dim; ++j) {                                               \
                 REQUIRE(fixtures::dist_t(gt[j]) == fixtures::dist_t(sse_gt[j]));               \
             }                                                                                  \
-        }                                                                                      \
+        })                                                                                     \
+        SIMD_TEST_AVX(                                                                         \
         std::vector<float> avx_gt(dim, 0.0F);                                                  \
         if (SimdStatus::SupportAVX()) {                                                        \
             avx::Func(vec1.data() + i * dim, vec2.data() + i * dim, avx_gt.data(), dim);       \
             for (uint64_t j = 0; j < dim; ++j) {                                               \
                 REQUIRE(fixtures::dist_t(gt[j]) == fixtures::dist_t(avx_gt[j]));               \
             }                                                                                  \
-        }                                                                                      \
+        })                                                                                     \
+        SIMD_TEST_AVX2(                                                                        \
         std::vector<float> avx2_gt(dim, 0.0F);                                                 \
         if (SimdStatus::SupportAVX2()) {                                                       \
             avx2::Func(vec1.data() + i * dim, vec2.data() + i * dim, avx2_gt.data(), dim);     \
             for (uint64_t j = 0; j < dim; ++j) {                                               \
                 REQUIRE(fixtures::dist_t(gt[j]) == fixtures::dist_t(avx2_gt[j]));              \
             }                                                                                  \
-        }                                                                                      \
+        })                                                                                     \
+        SIMD_TEST_AVX512(                                                                      \
         std::vector<float> avx512_gt(dim, 0.0F);                                               \
         if (SimdStatus::SupportAVX512()) {                                                     \
             avx512::Func(vec1.data() + i * dim, vec2.data() + i * dim, avx512_gt.data(), dim); \
             for (uint64_t j = 0; j < dim; ++j) {                                               \
                 REQUIRE(fixtures::dist_t(gt[j]) == fixtures::dist_t(avx512_gt[j]));            \
             }                                                                                  \
-        }                                                                                      \
+        })                                                                                     \
+        SIMD_TEST_NEON(                                                                        \
         std::vector<float> neon(dim, 0.0F);                                                    \
         if (SimdStatus::SupportNEON()) {                                                       \
             neon::Func(vec1.data() + i * dim, vec2.data() + i * dim, neon.data(), dim);        \
             for (uint64_t j = 0; j < dim; ++j) {                                               \
                 REQUIRE(fixtures::dist_t(gt[j]) == fixtures::dist_t(neon[j]));                 \
             }                                                                                  \
-        }                                                                                      \
+        })                                                                                     \
+        SIMD_TEST_SVE(                                                                         \
         std::vector<float> sve(dim, 0.0F);                                                     \
         if (SimdStatus::SupportSVE()) {                                                        \
             sve::Func(vec1.data() + i * dim, vec2.data() + i * dim, sve.data(), dim);          \
             for (uint64_t j = 0; j < dim; ++j) {                                               \
                 REQUIRE(fixtures::dist_t(gt[j]) == fixtures::dist_t(sve[j]));                  \
             }                                                                                  \
-        }                                                                                      \
+        })                                                                                     \
     };
 
 #define TEST_FP32_COMPUTE_ACCURACY_BATCH4(Func, FuncBatch4)                              \
@@ -121,6 +134,7 @@ using namespace vsag;
         for (uint64_t j = 0; j < 4; ++j) {                                               \
             REQUIRE(fixtures::dist_t(gts[j]) == fixtures::dist_t(result[j]));            \
         }                                                                                \
+        SIMD_TEST_SSE(                                                               \
         if (SimdStatus::SupportSSE()) {                                                  \
             memset(result.data(), 0, 4 * sizeof(float));                                 \
             sse::FuncBatch4(vec1.data() + i * dim,                                       \
@@ -136,7 +150,8 @@ using namespace vsag;
             for (uint64_t j = 0; j < 4; ++j) {                                           \
                 REQUIRE(fixtures::dist_t(gts[j]) == fixtures::dist_t(result[j]));        \
             }                                                                            \
-        }                                                                                \
+        })                                                                               \
+        SIMD_TEST_AVX(                                                                   \
         if (SimdStatus::SupportAVX()) {                                                  \
             memset(result.data(), 0, 4 * sizeof(float));                                 \
             avx::FuncBatch4(vec1.data() + i * dim,                                       \
@@ -152,7 +167,8 @@ using namespace vsag;
             for (uint64_t j = 0; j < 4; ++j) {                                           \
                 REQUIRE(fixtures::dist_t(gts[j]) == fixtures::dist_t(result[j]));        \
             }                                                                            \
-        }                                                                                \
+        })                                                                               \
+        SIMD_TEST_AVX2(                                                                  \
         if (SimdStatus::SupportAVX2()) {                                                 \
             memset(result.data(), 0, 4 * sizeof(float));                                 \
             avx2::FuncBatch4(vec1.data() + i * dim,                                      \
@@ -168,7 +184,8 @@ using namespace vsag;
             for (uint64_t j = 0; j < 4; ++j) {                                           \
                 REQUIRE(fixtures::dist_t(gts[j]) == fixtures::dist_t(result[j]));        \
             }                                                                            \
-        }                                                                                \
+        })                                                                               \
+        SIMD_TEST_AVX512(                                                                \
         if (SimdStatus::SupportAVX512()) {                                               \
             memset(result.data(), 0, 4 * sizeof(float));                                 \
             avx512::FuncBatch4(vec1.data() + i * dim,                                    \
@@ -184,7 +201,8 @@ using namespace vsag;
             for (uint64_t j = 0; j < 4; ++j) {                                           \
                 REQUIRE(fixtures::dist_t(gts[j]) == fixtures::dist_t(result[j]));        \
             }                                                                            \
-        }                                                                                \
+        })                                                                               \
+        SIMD_TEST_NEON(                                                                  \
         if (SimdStatus::SupportNEON()) {                                                 \
             memset(result.data(), 0, 4 * sizeof(float));                                 \
             neon::FuncBatch4(vec1.data() + i * dim,                                      \
@@ -200,7 +218,8 @@ using namespace vsag;
             for (uint64_t j = 0; j < 4; ++j) {                                           \
                 REQUIRE(fixtures::dist_t(gts[j]) == fixtures::dist_t(result[j]));        \
             }                                                                            \
-        }                                                                                \
+        })                                                                               \
+        SIMD_TEST_SVE(                                                                   \
         if (SimdStatus::SupportSVE()) {                                                  \
             memset(result.data(), 0, 4 * sizeof(float));                                 \
             sve::FuncBatch4(vec1.data() + i * dim,                                       \
@@ -216,7 +235,7 @@ using namespace vsag;
             for (uint64_t j = 0; j < 4; ++j) {                                           \
                 REQUIRE(fixtures::dist_t(gts[j]) == fixtures::dist_t(result[j]));        \
             }                                                                            \
-        }                                                                                \
+        })                                                                               \
     };
 
 TEST_CASE("FP32 SIMD Compute", "[ut][simd]") {
@@ -254,44 +273,68 @@ TEST_CASE("FP32 Benchmark", "[ut][simd][!benchmark]") {
     auto vec1 = fixtures::generate_vectors(count * 2, dim);
     std::vector<float> vec2(vec1.begin() + count, vec1.end());
     BENCHMARK_SIMD_COMPUTE(generic, FP32ComputeIP);
+#ifdef ENABLE_SSE
     if (SimdStatus::SupportSSE()) {
         BENCHMARK_SIMD_COMPUTE(sse, FP32ComputeIP);
     }
+#endif
+#ifdef ENABLE_AVX
     if (SimdStatus::SupportAVX()) {
         BENCHMARK_SIMD_COMPUTE(avx, FP32ComputeIP);
     }
+#endif
+#ifdef ENABLE_AVX2
     if (SimdStatus::SupportAVX2()) {
         BENCHMARK_SIMD_COMPUTE(avx2, FP32ComputeIP);
     }
+#endif
+#ifdef ENABLE_AVX512
     if (SimdStatus::SupportAVX512()) {
         BENCHMARK_SIMD_COMPUTE(avx512, FP32ComputeIP);
     }
+#endif
+#ifdef ENABLE_NEON
     if (SimdStatus::SupportNEON()) {
         BENCHMARK_SIMD_COMPUTE(neon, FP32ComputeIP);
     }
+#endif
+#ifdef ENABLE_SVE
     if (SimdStatus::SupportSVE()) {
         BENCHMARK_SIMD_COMPUTE(sve, FP32ComputeIP);
     }
+#endif
 
     BENCHMARK_SIMD_COMPUTE(generic, FP32ComputeL2Sqr);
+#ifdef ENABLE_SSE
     if (SimdStatus::SupportSSE()) {
         BENCHMARK_SIMD_COMPUTE(sse, FP32ComputeL2Sqr);
     }
+#endif
+#ifdef ENABLE_AVX
     if (SimdStatus::SupportAVX()) {
         BENCHMARK_SIMD_COMPUTE(avx, FP32ComputeL2Sqr);
     }
+#endif
+#ifdef ENABLE_AVX2
     if (SimdStatus::SupportAVX2()) {
         BENCHMARK_SIMD_COMPUTE(avx2, FP32ComputeL2Sqr);
     }
+#endif
+#ifdef ENABLE_AVX512
     if (SimdStatus::SupportAVX512()) {
         BENCHMARK_SIMD_COMPUTE(avx512, FP32ComputeL2Sqr);
     }
+#endif
+#ifdef ENABLE_NEON
     if (SimdStatus::SupportNEON()) {
         BENCHMARK_SIMD_COMPUTE(neon, FP32ComputeL2Sqr);
     }
+#endif
+#ifdef ENABLE_SVE
     if (SimdStatus::SupportSVE()) {
         BENCHMARK_SIMD_COMPUTE(sve, FP32ComputeL2Sqr);
     }
+#endif
 }
 
 #define BENCHMARK_SIMD_COMPUTE_BATCH4(Simd, Comp)        \
@@ -319,42 +362,66 @@ TEST_CASE("FP32 Benchmark Batch4", "[ut][simd][!benchmark]") {
     auto vec1 = fixtures::generate_vectors(count * 2, dim);
     std::vector<float> vec2(vec1.begin() + count, vec1.end());
     BENCHMARK_SIMD_COMPUTE_BATCH4(generic, FP32ComputeIPBatch4);
+#ifdef ENABLE_SSE
     if (SimdStatus::SupportSSE()) {
         BENCHMARK_SIMD_COMPUTE_BATCH4(sse, FP32ComputeIPBatch4);
     }
+#endif
+#ifdef ENABLE_AVX
     if (SimdStatus::SupportAVX()) {
         BENCHMARK_SIMD_COMPUTE_BATCH4(avx, FP32ComputeIPBatch4);
     }
+#endif
+#ifdef ENABLE_AVX2
     if (SimdStatus::SupportAVX2()) {
         BENCHMARK_SIMD_COMPUTE_BATCH4(avx2, FP32ComputeIPBatch4);
     }
+#endif
+#ifdef ENABLE_AVX512
     if (SimdStatus::SupportAVX512()) {
         BENCHMARK_SIMD_COMPUTE_BATCH4(avx512, FP32ComputeIPBatch4);
     }
+#endif
+#ifdef ENABLE_NEON
     if (SimdStatus::SupportNEON()) {
         BENCHMARK_SIMD_COMPUTE_BATCH4(neon, FP32ComputeIPBatch4);
     }
+#endif
+#ifdef ENABLE_SVE
     if (SimdStatus::SupportSVE()) {
         BENCHMARK_SIMD_COMPUTE_BATCH4(sve, FP32ComputeIPBatch4);
     }
+#endif
 
     BENCHMARK_SIMD_COMPUTE_BATCH4(generic, FP32ComputeL2SqrBatch4);
+#ifdef ENABLE_SSE
     if (SimdStatus::SupportSSE()) {
         BENCHMARK_SIMD_COMPUTE_BATCH4(sse, FP32ComputeL2SqrBatch4);
     }
+#endif
+#ifdef ENABLE_AVX
     if (SimdStatus::SupportAVX()) {
         BENCHMARK_SIMD_COMPUTE_BATCH4(avx, FP32ComputeL2SqrBatch4);
     }
+#endif
+#ifdef ENABLE_AVX2
     if (SimdStatus::SupportAVX2()) {
         BENCHMARK_SIMD_COMPUTE_BATCH4(avx2, FP32ComputeL2SqrBatch4);
     }
+#endif
+#ifdef ENABLE_AVX512
     if (SimdStatus::SupportAVX512()) {
         BENCHMARK_SIMD_COMPUTE_BATCH4(avx512, FP32ComputeL2SqrBatch4);
     }
+#endif
+#ifdef ENABLE_NEON
     if (SimdStatus::SupportNEON()) {
         BENCHMARK_SIMD_COMPUTE_BATCH4(neon, FP32ComputeL2SqrBatch4);
     }
+#endif
+#ifdef ENABLE_SVE
     if (SimdStatus::SupportSVE()) {
         BENCHMARK_SIMD_COMPUTE_BATCH4(sve, FP32ComputeL2SqrBatch4);
     }
+#endif
 }
