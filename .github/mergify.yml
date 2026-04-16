@@ -107,23 +107,15 @@ pull_request_rules:
       label:
         add:
           - module/testing
-  - name: require kind label
-    conditions:
-      - -label~=^kind/
-    actions:
-      post_check:
-        title: kind label missing
-        summary: PR must have a `kind/*` label (e.g. kind/feature, kind/bug, kind/chore, kind/docs).
-        conclusion: failure
+merge_protections:
+  - name: Require kind label
+    if:
+      - base=main
+    success_conditions:
+      - label~=^kind/
 
-  - name: require version label
-    conditions:
-      - -label~=^version/
-    actions:
-      post_check:
-        title: version label missing
-        summary: PR must have a `version/*` label (e.g. version/major, version/minor, version/patch).
-        conclusion: failure
-
-merge_protections_settings:
-  reporting_method: check-runs
+  - name: Require version label
+    if:
+      - base=main
+    success_conditions:
+      - label~=^version/
