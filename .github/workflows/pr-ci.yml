@@ -84,7 +84,7 @@ jobs:
           save: ${{ github.event_name != 'pull_request' }}
           key: build-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
       - name: Make Asan
-        run: export VSAG_ENABLE_INTEL_MKL=ON CMAKE_GENERATOR="Ninja" CMAKE_EXPORT_COMPILE_COMMANDS=ON; make asan
+        run: export VSAG_ENABLE_INTEL_MKL=ON CMAKE_GENERATOR="Ninja" CMAKE_EXPORT_COMPILE_COMMANDS=ON; make asan VSAG_ENABLE_EXAMPLES=ON
       - name: Install clang-tidy 15
         run: sudo apt install clang-tidy-15 -y
       - name: Run Lint
@@ -272,7 +272,7 @@ jobs:
             || echo "Warning: Failed to download compatibility indexes"
       - uses: actions/checkout@v4
       - name: Compile Check Compatibility Tools
-        run: export CMAKE_GENERATOR="Ninja"; make release
+        run: export CMAKE_GENERATOR="Ninja"; make release VSAG_ENABLE_TOOLS=ON
       - name: Run Check Compatibility
         run: bash ./scripts/check_compatibility.sh
 
