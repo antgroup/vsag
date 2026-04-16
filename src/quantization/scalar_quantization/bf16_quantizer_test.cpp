@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "bf16_quantizer.h"
+#include "half_precision_quantizer.h"
 
 #include <vector>
 
