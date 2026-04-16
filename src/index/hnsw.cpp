@@ -272,9 +272,7 @@ HNSW::knn_search(const DatasetPtr& query,
             if (auto ret = filter_context->init(
                     alg_hnsw_->getMaxElements(), params.ef_search, search_allocator);
                 not ret.has_value()) {
-                auto err = ret.error();
-                logger::error("failed to init IteratorFilterContext: {}", err.message);
-                return tl::unexpected(err);
+                return tl::unexpected(std::move(ret).error());
             }
             *iter_ctx = filter_context.release();
         }
