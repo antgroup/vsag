@@ -16,7 +16,7 @@
 #include "parallel_searcher.h"
 
 #include "searcher_test.h"
-
+#include "unittest.h"
 using namespace vsag;
 
 TEST_CASE("Parallel search with HNSW", "[ut][ParallelSearcher]") {

@@ -16,7 +16,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 
-#include "fixtures/test_dataset_pool.h"
+#include "functest.h"
 #include "test_index.h"
 
 namespace fixtures {

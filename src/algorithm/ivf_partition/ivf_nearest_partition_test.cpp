@@ -15,15 +15,12 @@
 
 #include "ivf_nearest_partition.h"
 
-#include <catch2/catch_test_macros.hpp>
-
 #include "algorithm/inner_index_interface.h"
-#include "fixtures.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/inner_search_param.h"
 #include "impl/thread_pool/safe_thread_pool.h"
 #include "storage/serialization_template_test.h"
-
+#include "unittest.h"
 using namespace vsag;
 
 TEST_CASE("IVF Nearest Partition Basic Test", "[ut][IVFNearestPartition]") {

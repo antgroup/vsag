@@ -17,11 +17,9 @@
 
 #include <fmt/format.h>
 
-#include <catch2/catch_test_macros.hpp>
-
 #include "inner_string_params.h"
 #include "parameter_test.h"
-
+#include "unittest.h"
 using namespace vsag;
 
 #define TEST_COMPATIBILITY_CASE(section_name, param_str1, param_str2, expect_compatible) \

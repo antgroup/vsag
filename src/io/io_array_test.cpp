@@ -15,9 +15,6 @@
 
 #include "io_array.h"
 
-#include <catch2/catch_template_test_macros.hpp>
-#include <catch2/catch_test_macros.hpp>
-
 #include "async_io.h"
 #include "basic_io_test.h"
 #include "buffer_io.h"
@@ -26,6 +23,7 @@
 #include "memory_io.h"
 #include "mmap_io.h"
 #include "noncontinuous_io.h"
+#include "unittest.h"
 
 namespace vsag {
 template <typename IOType>

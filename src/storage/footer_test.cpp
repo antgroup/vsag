@@ -15,10 +15,10 @@
 
 #include "footer.h"
 
-#include <catch2/catch_test_macros.hpp>
 #include <sstream>
 
 #include "stream_reader.h"
+#include "unittest.h"
 
 TEST_CASE("Footer Basic Usage Test", "[ut][footer]") {
     vsag::SerializationFooter footer;

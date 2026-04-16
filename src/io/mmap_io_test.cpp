@@ -15,12 +15,12 @@
 
 #include "mmap_io.h"
 
-#include <catch2/catch_test_macros.hpp>
 #include <memory>
 
 #include "basic_io_test.h"
 #include "impl/allocator/safe_allocator.h"
 #include "index_common_param.h"
+#include "unittest.h"
 
 using namespace vsag;
 

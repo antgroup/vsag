@@ -15,8 +15,7 @@
 
 #include "vsag/bitset.h"
 
-#include <catch2/catch_test_macros.hpp>
-
+#include "unittest.h"
 TEST_CASE("Test Bitset Basic", "[ut][bitset]") {
     auto bitset = vsag::Bitset::Make();
 

@@ -15,8 +15,7 @@
 
 #include "index_feature_list.h"
 
-#include <catch2/catch_test_macros.hpp>
-
+#include "unittest.h"
 TEST_CASE("IndexFeatureList Set and Check Test", "[ut][IndexFeatureList]") {
     using namespace vsag;
     IndexFeatureList list;

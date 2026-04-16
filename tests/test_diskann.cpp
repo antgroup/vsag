@@ -20,8 +20,7 @@
 #include <iostream>
 #include <nlohmann/json.hpp>
 
-#include "fixtures/test_dataset_pool.h"
-#include "fixtures/test_logger.h"
+#include "functest.h"
 #include "test_index.h"
 #include "vsag/errors.h"
 #include "vsag/vsag.h"

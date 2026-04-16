@@ -15,8 +15,9 @@
 
 #include "inner_index_parameter.h"
 
-#include <catch2/catch_test_macros.hpp>
 #include <numeric>
+
+#include "unittest.h"
 
 TEST_CASE("Parameters Train Sample Count Test", "[ut][InnerIndexParameter][train_sample_count]") {
     constexpr const char* param_str = R"({})";

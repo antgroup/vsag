@@ -17,8 +17,7 @@
 #include <catch2/generators/catch_generators.hpp>
 #include <limits>
 
-#include "fixtures/test_dataset_pool.h"
-#include "fixtures/test_logger.h"
+#include "functest.h"
 #include "inner_string_params.h"
 #include "test_index.h"
 #include "typing.h"
