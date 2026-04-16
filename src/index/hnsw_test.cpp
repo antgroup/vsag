@@ -15,7 +15,9 @@
 
 #include "hnsw.h"
 
+#include <cstdlib>
 #include <memory>
+#include <new>
 #include <nlohmann/json.hpp>
 #include <vector>
 
@@ -192,6 +194,93 @@ TEST_CASE("knn_search", "[ut][hnsw]") {
         REQUIRE_FALSE(result.has_value());
         REQUIRE(result.error().type == ErrorType::INVALID_ARGUMENT);
     }
+}
+
+TEST_CASE("iterator filter init allocation failure", "[ut][hnsw]") {
+    logger::set_level(logger::level::debug);
+
+    class FailingAllocator : public Allocator {
+    public:
+        std::string
+        Name() override {
+            return "failing-allocator";
+        }
+
+        void*
+        Allocate(uint64_t size) override {
+            if (++allocate_count_ == fail_on_allocate_) {
+                throw std::bad_alloc();
+            }
+            auto* ptr = std::malloc(size);
+            if (ptr == nullptr) {
+                throw std::bad_alloc();
+            }
+            return ptr;
+        }
+
+        void
+        Deallocate(void* p) override {
+            std::free(p);
+        }
+
+        void*
+        Reallocate(void* p, uint64_t size) override {
+            if (++reallocate_count_ == fail_on_reallocate_) {
+                throw std::bad_alloc();
+            }
+            auto* ptr = std::realloc(p, size);
+            if (ptr == nullptr) {
+                throw std::bad_alloc();
+            }
+            return ptr;
+        }
+
+        uint64_t fail_on_allocate_{std::numeric_limits<uint64_t>::max()};
+        uint64_t fail_on_reallocate_{std::numeric_limits<uint64_t>::max()};
+        uint64_t allocate_count_{0};
+        uint64_t reallocate_count_{0};
+    };
+
+    const int64_t dim = 128;
+    const int64_t num_elements = 10;
+    IndexCommonParam common_param;
+    common_param.dim_ = dim;
+    common_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    common_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
+
+    HnswParameters hnsw_obj = parse_hnsw_params(common_param);
+    hnsw_obj.max_degree = 12;
+    hnsw_obj.ef_construction = 100;
+    auto index = std::make_shared<HNSW>(hnsw_obj, common_param);
+    index->InitMemorySpace();
+
+    auto [ids, vectors] = fixtures::generate_ids_and_vectors(num_elements, dim);
+
+    auto dataset = Dataset::Make();
+    dataset->Dim(dim)
+        ->NumElements(num_elements)
+        ->Ids(ids.data())
+        ->Float32Vectors(vectors.data())
+        ->Owner(false);
+    REQUIRE(index->Build(dataset).has_value());
+
+    auto query = Dataset::Make();
+    query->NumElements(1)->Dim(dim)->Float32Vectors(vectors.data())->Owner(false);
+
+    JsonType params;
+    params["hnsw"]["ef_search"].SetInt(100);
+    auto search_parameters = params.Dump();
+
+    FailingAllocator allocator;
+    allocator.fail_on_allocate_ = 1;
+    IteratorContext* iter_ctx = nullptr;
+    SearchParam search_param(true, search_parameters, nullptr, &allocator, iter_ctx, false);
+
+    auto result = index->KnnSearch(query, 10, search_param);
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(result.error().type == ErrorType::NO_ENOUGH_MEMORY);
+    REQUIRE(search_param.iter_ctx == nullptr);
 }
 
 TEST_CASE("range_search", "[ut][hnsw]") {
