@@ -140,6 +140,15 @@ $ bash scripts/testing/test_parallel_bg.sh
 $ bash scripts/coverage/collect_cpp_coverage.sh
 ```
 
+## Pull Request Labels
+
+Every pull request **must** have the following two labels before it can be merged:
+
+-   A **`kind/*`** label indicating the type of change, e.g. `kind/feature`, `kind/bug`, `kind/chore`, `kind/docs`.
+-   A **`version/*`** label indicating the version impact, e.g. `version/major`, `version/minor`, `version/patch`.
+
+Mergify enforces these labels via check runs. The PR merge will be blocked until both labels are present.
+
 ## Commit message and skip CI
 
 -   Follow Conventional Commits in the subject line, such as `feat:`, `fix:`, `docs:`, or `chore:`.

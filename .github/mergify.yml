@@ -107,5 +107,21 @@ pull_request_rules:
       label:
         add:
           - module/testing
+  - name: require kind label
+    conditions:
+      - -label~=^kind/
+    actions:
+      post_check:
+        title: kind label missing
+        summary: PR must have a `kind/*` label (e.g. kind/feature, kind/bug, kind/chore).
+
+  - name: require version label
+    conditions:
+      - -label~=^version/
+    actions:
+      post_check:
+        title: version label missing
+        summary: PR must have a `version/*` label (e.g. version/minor, version/patch).
+
 merge_protections_settings:
   reporting_method: check-runs

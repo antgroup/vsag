@@ -114,6 +114,15 @@ Update relevant docs when behavior changes:
 - When using skip-CI commit messages, follow the repository convention and place `[skip ci]` at the
   beginning of the subject line.
 
+## Pull Request Labels
+
+Every pull request **must** have two labels before it can be merged:
+
+- A `kind/*` label for the type of change (e.g. `kind/feature`, `kind/bug`, `kind/chore`, `kind/docs`).
+- A `version/*` label for the version impact (e.g. `version/major`, `version/minor`, `version/patch`).
+
+Mergify enforces these via check runs. Always add both labels when creating a PR.
+
 ## References
 
 - `README.md`
