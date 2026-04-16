@@ -127,6 +127,8 @@ if (ENABLE_TESTS)
     if (DIST_CONTAINS_NEON)
         target_compile_definitions (simd_test PRIVATE ENABLE_NEON=1)
     endif ()
-    target_link_libraries (simd_test PRIVATE Catch2::Catch2 vsag unittest_deps)
+    target_link_libraries (simd_test
+            PUBLIC simd
+            PRIVATE Catch2::Catch2 vsag unittest_deps)
     add_dependencies (simd_test Catch2)
 endif ()
