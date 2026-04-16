@@ -18,6 +18,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <cstdlib>
 #include <memory>
+#include <new>
 #include <nlohmann/json.hpp>
 #include <vector>
 
@@ -208,10 +209,14 @@ TEST_CASE("iterator filter init allocation failure", "[ut][hnsw]") {
 
         void*
         Allocate(uint64_t size) override {
-            if (size == failed_size_) {
+            if (++allocate_count_ == fail_on_allocate_) {
                 throw std::bad_alloc();
             }
-            return std::malloc(size);
+            auto* ptr = std::malloc(size);
+            if (ptr == nullptr) {
+                throw std::bad_alloc();
+            }
+            return ptr;
         }
 
         void
@@ -221,13 +226,20 @@ TEST_CASE("iterator filter init allocation failure", "[ut][hnsw]") {
 
         void*
         Reallocate(void* p, uint64_t size) override {
-            if (size == failed_size_) {
+            if (++reallocate_count_ == fail_on_reallocate_) {
                 throw std::bad_alloc();
             }
-            return std::realloc(p, size);
+            auto* ptr = std::realloc(p, size);
+            if (ptr == nullptr) {
+                throw std::bad_alloc();
+            }
+            return ptr;
         }
 
-        uint64_t failed_size_{0};
+        uint64_t fail_on_allocate_{std::numeric_limits<uint64_t>::max()};
+        uint64_t fail_on_reallocate_{std::numeric_limits<uint64_t>::max()};
+        uint64_t allocate_count_{0};
+        uint64_t reallocate_count_{0};
     };
 
     const int64_t dim = 128;
@@ -262,7 +274,7 @@ TEST_CASE("iterator filter init allocation failure", "[ut][hnsw]") {
     auto search_parameters = params.Dump();
 
     FailingAllocator allocator;
-    allocator.failed_size_ = 2;
+    allocator.fail_on_allocate_ = 1;
     IteratorContext* iter_ctx = nullptr;
     SearchParam search_param(true, search_parameters, nullptr, &allocator, iter_ctx, false);
 
