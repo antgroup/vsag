@@ -14,7 +14,6 @@
 // limitations under the License.
 
 #include "half_precision_quantizer_parameter.h"
-
 #include "parameter_test.h"
 #include "unittest.h"
 using namespace vsag;
