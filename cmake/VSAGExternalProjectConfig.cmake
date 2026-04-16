@@ -16,6 +16,8 @@ include_guard (GLOBAL)
 
 set (_vsag_external_c_flags "${VSAG_EXTERNAL_C_FLAGS}")
 set (_vsag_external_cxx_flags "${VSAG_EXTERNAL_CXX_FLAGS}")
+set (_vsag_external_exe_linker_flags "${VSAG_EXTERNAL_EXE_LINKER_FLAGS}")
+set (_vsag_external_shared_linker_flags "${VSAG_EXTERNAL_SHARED_LINKER_FLAGS}")
 
 foreach (_warning_flag -Werror=suggest-override -Werror)
     string (REPLACE "${_warning_flag}" "" _vsag_external_c_flags "${_vsag_external_c_flags}")
@@ -25,10 +27,14 @@ endforeach ()
 foreach (_sanitizer_pattern "-fsanitize=[^ ]+" "-fsanitize-recover=[^ ]+" "-fno-sanitize=[^ ]+" -fno-omit-frame-pointer -fno-optimize-sibling-calls -static-libasan)
     string (REGEX REPLACE "${_sanitizer_pattern}" "" _vsag_external_c_flags "${_vsag_external_c_flags}")
     string (REGEX REPLACE "${_sanitizer_pattern}" "" _vsag_external_cxx_flags "${_vsag_external_cxx_flags}")
+    string (REGEX REPLACE "${_sanitizer_pattern}" "" _vsag_external_exe_linker_flags "${_vsag_external_exe_linker_flags}")
+    string (REGEX REPLACE "${_sanitizer_pattern}" "" _vsag_external_shared_linker_flags "${_vsag_external_shared_linker_flags}")
 endforeach ()
 
 string (REGEX REPLACE "[ ]+" " " _vsag_external_c_flags "${_vsag_external_c_flags}")
 string (REGEX REPLACE "[ ]+" " " _vsag_external_cxx_flags "${_vsag_external_cxx_flags}")
+string (REGEX REPLACE "[ ]+" " " _vsag_external_exe_linker_flags "${_vsag_external_exe_linker_flags}")
+string (REGEX REPLACE "[ ]+" " " _vsag_external_shared_linker_flags "${_vsag_external_shared_linker_flags}")
 
 if (NOT _vsag_external_c_flags MATCHES "(^| )-fPIC($| )")
     string (APPEND _vsag_external_c_flags " -fPIC")
@@ -39,6 +45,8 @@ endif ()
 
 string (STRIP "${_vsag_external_c_flags}" VSAG_THIRDPARTY_C_FLAGS)
 string (STRIP "${_vsag_external_cxx_flags}" VSAG_THIRDPARTY_CXX_FLAGS)
+string (STRIP "${_vsag_external_exe_linker_flags}" VSAG_THIRDPARTY_EXE_LINKER_FLAGS)
+string (STRIP "${_vsag_external_shared_linker_flags}" VSAG_THIRDPARTY_SHARED_LINKER_FLAGS)
 
 set (vsag_ld_flags
     "-L${CMAKE_INSTALL_PREFIX}/lib"
@@ -67,8 +75,8 @@ set (common_cmake_args
     "-DCMAKE_POSITION_INDEPENDENT_CODE=ON"
     "-DCMAKE_CXX_FLAGS=${VSAG_THIRDPARTY_CXX_FLAGS}"
     "-DCMAKE_C_FLAGS=${VSAG_THIRDPARTY_C_FLAGS}"
-    "-DCMAKE_EXE_LINKER_FLAGS=${VSAG_EXTERNAL_EXE_LINKER_FLAGS}"
-    "-DCMAKE_SHARED_LINKER_FLAGS=${VSAG_EXTERNAL_SHARED_LINKER_FLAGS}"
+    "-DCMAKE_EXE_LINKER_FLAGS=${VSAG_THIRDPARTY_EXE_LINKER_FLAGS}"
+    "-DCMAKE_SHARED_LINKER_FLAGS=${VSAG_THIRDPARTY_SHARED_LINKER_FLAGS}"
     "-DCMAKE_INCLUDE_PATH=${CMAKE_INSTALL_PREFIX}/include"
     "-DCMAKE_LIBRARY_PATH=${CMAKE_INSTALL_PREFIX}/lib:/opt/alibaba-cloud-compiler/lib64")
 
@@ -79,7 +87,7 @@ set (common_configure_envs
     "CFLAGS=${VSAG_THIRDPARTY_C_FLAGS} -D_DEFAULT_SOURCE -D_GNU_SOURCE"
     "CXXFLAGS=${VSAG_THIRDPARTY_CXX_FLAGS} -D_DEFAULT_SOURCE -D_GNU_SOURCE"
     "CPPFLAGS=-isystem ${CMAKE_INSTALL_PREFIX}/include"
-    "LDFLAGS=${ld_flags_workaround} ${ld_flags} ${VSAG_EXTERNAL_SHARED_LINKER_FLAGS}"
+    "LDFLAGS=${ld_flags_workaround} ${ld_flags} ${VSAG_THIRDPARTY_SHARED_LINKER_FLAGS}"
     "PATH=${VSAG_EXTERNAL_PATH}")
 
 if (DEFINED ACLOCAL_PATH AND NOT ACLOCAL_PATH STREQUAL "")
