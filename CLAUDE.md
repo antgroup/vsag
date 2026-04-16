@@ -118,7 +118,7 @@ Update relevant docs when behavior changes:
 
 Every pull request **must** have two labels before it can be merged:
 
-- A `kind/*` label for the type of change (e.g. `kind/feature`, `kind/bug`, `kind/chore`, `kind/docs`).
+- A `kind/*` label for the type of change: `kind/bug` (bug fix), `kind/feature` (new feature), `kind/improvement` (refactor, chore, or minor improvement), or `kind/documentation` (documentation change).
 - A `version/*` label for the target version (e.g. `version/1.0`, `version/0.18`).
 
 Mergify enforces these via check runs. Always add both labels when creating a PR.
