@@ -19,6 +19,7 @@
 #include <catch2/catch_all.hpp>
 
 #include "simd_status.h"
+#include "simd_test_macro.h"
 #include "unittest.h"
 
 using namespace vsag;
@@ -46,30 +47,36 @@ TEST_CASE("Encode & Decode BF16", "[ut][simd]") {
     {                                                                                 \
         float gt, sse, avx, avx2, avx512, neon, sve;                                  \
         gt = generic::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim);        \
+        SIMD_TEST_SSE(                                                                \
         if (SimdStatus::SupportSSE()) {                                               \
             sse = sse::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim);       \
             REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(sse));                   \
-        }                                                                             \
+        })                                                                            \
+        SIMD_TEST_AVX(                                                                \
         if (SimdStatus::SupportAVX()) {                                               \
             avx = avx::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim);       \
             REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(avx));                   \
-        }                                                                             \
+        })                                                                            \
+        SIMD_TEST_AVX2(                                                               \
         if (SimdStatus::SupportAVX2()) {                                              \
             avx2 = avx2::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim);     \
             REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(avx2));                  \
-        }                                                                             \
+        })                                                                            \
+        SIMD_TEST_AVX512(                                                             \
         if (SimdStatus::SupportAVX512()) {                                            \
             avx512 = avx512::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim); \
             REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(avx512));                \
-        }                                                                             \
+        })                                                                            \
+        SIMD_TEST_NEON(                                                               \
         if (SimdStatus::SupportNEON()) {                                              \
             neon = neon::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim);     \
             REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(neon));                  \
-        }                                                                             \
+        })                                                                            \
+        SIMD_TEST_SVE(                                                                \
         if (SimdStatus::SupportSVE()) {                                               \
             sve = sve::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim);       \
             REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(sve));                   \
-        }                                                                             \
+        })                                                                            \
     };
 
 TEST_CASE("BF16 SIMD Compute", "[ut][simd]") {
@@ -103,42 +110,66 @@ TEST_CASE("BF16 Benchmark", "[ut][simd][!benchmark]") {
     auto vec2_fp32 = fixtures::generate_vectors(count, dim, false, 86);
     auto vec2 = encode_bf16(vec2_fp32, count * dim);
     BENCHMARK_SIMD_COMPUTE(generic, BF16ComputeIP);
+#ifdef ENABLE_SSE
     if (SimdStatus::SupportSSE()) {
         BENCHMARK_SIMD_COMPUTE(sse, BF16ComputeIP);
     }
+#endif
+#ifdef ENABLE_AVX
     if (SimdStatus::SupportAVX()) {
         BENCHMARK_SIMD_COMPUTE(avx, BF16ComputeIP);
     }
+#endif
+#ifdef ENABLE_AVX2
     if (SimdStatus::SupportAVX2()) {
         BENCHMARK_SIMD_COMPUTE(avx2, BF16ComputeIP);
     }
+#endif
+#ifdef ENABLE_AVX512
     if (SimdStatus::SupportAVX512()) {
         BENCHMARK_SIMD_COMPUTE(avx512, BF16ComputeIP);
     }
+#endif
+#ifdef ENABLE_NEON
     if (SimdStatus::SupportNEON()) {
         BENCHMARK_SIMD_COMPUTE(neon, BF16ComputeIP);
     }
+#endif
+#ifdef ENABLE_SVE
     if (SimdStatus::SupportSVE()) {
         BENCHMARK_SIMD_COMPUTE(sve, BF16ComputeIP);
     }
+#endif
 
     BENCHMARK_SIMD_COMPUTE(generic, BF16ComputeL2Sqr);
+#ifdef ENABLE_SSE
     if (SimdStatus::SupportSSE()) {
         BENCHMARK_SIMD_COMPUTE(sse, BF16ComputeL2Sqr);
     }
+#endif
+#ifdef ENABLE_AVX
     if (SimdStatus::SupportAVX()) {
         BENCHMARK_SIMD_COMPUTE(avx, BF16ComputeL2Sqr);
     }
+#endif
+#ifdef ENABLE_AVX2
     if (SimdStatus::SupportAVX2()) {
         BENCHMARK_SIMD_COMPUTE(avx2, BF16ComputeL2Sqr);
     }
+#endif
+#ifdef ENABLE_AVX512
     if (SimdStatus::SupportAVX512()) {
         BENCHMARK_SIMD_COMPUTE(avx512, BF16ComputeL2Sqr);
     }
+#endif
+#ifdef ENABLE_NEON
     if (SimdStatus::SupportNEON()) {
         BENCHMARK_SIMD_COMPUTE(neon, BF16ComputeL2Sqr);
     }
+#endif
+#ifdef ENABLE_SVE
     if (SimdStatus::SupportSVE()) {
         BENCHMARK_SIMD_COMPUTE(sve, BF16ComputeL2Sqr);
     }
+#endif
 }
