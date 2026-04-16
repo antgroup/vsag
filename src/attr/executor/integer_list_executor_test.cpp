@@ -15,12 +15,10 @@
 
 #include "integer_list_executor.h"
 
-#include <catch2/catch_test_macros.hpp>
-
 #include "attr/argparse.h"
 #include "executor_test.h"
 #include "impl/allocator/safe_allocator.h"
-
+#include "unittest.h"
 using namespace vsag;
 
 template <typename T>

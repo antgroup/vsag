@@ -15,9 +15,8 @@
 
 #include "brute_force_parameter.h"
 
-#include <catch2/catch_test_macros.hpp>
-
 #include "parameter_test.h"
+#include "unittest.h"
 
 TEST_CASE("BruteForce Parameters CheckCompatibility",
           "[ut][BruteForceParameter][CheckCompatibility]") {

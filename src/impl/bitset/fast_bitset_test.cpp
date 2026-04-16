@@ -15,13 +15,11 @@
 
 #include "fast_bitset.h"
 
-#include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers.hpp>
 
-#include "fixtures.h"
 #include "impl/allocator/safe_allocator.h"
+#include "unittest.h"
 #include "utils/util_functions.h"
-
 using namespace vsag;
 
 std::pair<FastBitsetPtr, std::vector<int>>

@@ -15,14 +15,13 @@
 
 #include "conjugate_graph.h"
 
-#include <catch2/catch_test_macros.hpp>
 #include <filesystem>
 #include <fstream>
 #include <nlohmann/json.hpp>
 
-#include "fixtures.h"
 #include "impl/allocator/safe_allocator.h"
 #include "storage/stream_reader.h"
+#include "unittest.h"
 
 TEST_CASE("ConjugateGraph Build, Add and Memory Usage", "[ut][ConjugateGraph]") {
     auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();

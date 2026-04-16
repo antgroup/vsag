@@ -17,10 +17,9 @@
 
 #include <fmt/format.h>
 
-#include <catch2/catch_test_macros.hpp>
-
 #include "algorithm/hgraph.h"
 #include "parameter_test.h"
+#include "unittest.h"
 
 #define TEST_COMPATIBILITY_CASE(section_name, param_member, val1, val2, expect_compatible) \
     SECTION(section_name) {                                                                \

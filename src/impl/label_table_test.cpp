@@ -15,13 +15,13 @@
 #include "label_table.h"
 
 #include <algorithm>
-#include <catch2/catch_test_macros.hpp>
 #include <iostream>
 #include <memory>
 #include <sstream>
 
 #include "datacell/dense_duplicate_tracker.h"
 #include "impl/allocator/default_allocator.h"
+#include "unittest.h"
 
 using namespace vsag;
 

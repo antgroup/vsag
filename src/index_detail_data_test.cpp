@@ -15,8 +15,7 @@
 
 #include "index_detail_data.h"
 
-#include <catch2/catch_test_macros.hpp>
-
+#include "unittest.h"
 using namespace vsag;
 
 TEST_CASE("DetailDataImpl Test", "[DetailDataImpl][ut]") {

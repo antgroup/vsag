@@ -14,13 +14,12 @@
 
 #include "combined_filter.h"
 
-#include <catch2/catch_test_macros.hpp>
 #include <memory>
 
 #include "impl/allocator/safe_allocator.h"
 #include "impl/bitset/fast_bitset.h"
+#include "unittest.h"
 #include "white_list_filter.h"
-
 using namespace vsag;
 
 TEST_CASE("CombinedFilter Basic Test", "[ut][CombinedFilter]") {

@@ -15,10 +15,8 @@
 
 #include "safe_allocator.h"
 
-#include <catch2/catch_test_macros.hpp>
-
 #include "allocator_wrapper.h"
-
+#include "unittest.h"
 TEST_CASE("SafeAllocator Basic Test", "[ut][SafeAllocator]") {
     auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
     REQUIRE(allocator->Name() == "DefaultAllocator_safewrapper");

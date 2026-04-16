@@ -15,17 +15,14 @@
 
 #include "rabitq_quantizer.h"
 
-#include <catch2/catch_test_macros.hpp>
-#include <catch2/generators/catch_generators.hpp>
 #include <vector>
 
-#include "fixtures.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/logger/logger.h"
 #include "quantization/quantizer_test.h"
 #include "quantization/scalar_quantization/sq4_uniform_quantizer.h"
+#include "unittest.h"
 #include "utils/util_functions.h"
-
 using namespace vsag;
 
 const auto dims = fixtures::get_common_used_dims(6, 129);

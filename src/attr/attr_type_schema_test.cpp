@@ -18,6 +18,7 @@
 #include <catch2/catch_all.hpp>
 
 #include "impl/allocator/safe_allocator.h"
+#include "unittest.h"
 
 using namespace vsag;
 

@@ -15,9 +15,10 @@
 
 #include "simd.h"
 
-#include <catch2/catch_test_macros.hpp>
 #include <iostream>
 #include <random>
+
+#include "unittest.h"
 
 namespace vsag {
 

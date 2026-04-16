@@ -15,8 +15,7 @@
 
 #include "default_allocator.h"
 
-#include <catch2/catch_test_macros.hpp>
-
+#include "unittest.h"
 TEST_CASE("DefaultAllocator Basic Test", "[ut][DefaultAllocator]") {
     vsag::DefaultAllocator allocator;
     int number = 69278;

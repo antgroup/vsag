@@ -15,13 +15,12 @@
 
 #include "noncontinuous_io.h"
 
-#include <catch2/catch_template_test_macros.hpp>
-
 #include "async_io.h"
 #include "basic_io_test.h"
 #include "buffer_io.h"
 #include "impl/allocator/safe_allocator.h"
 #include "mmap_io.h"
+#include "unittest.h"
 namespace vsag {
 template <typename IOTmpl>
 class NonContinuousIOTest {

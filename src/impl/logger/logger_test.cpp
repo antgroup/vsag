@@ -15,11 +15,10 @@
 
 #include "logger.h"
 
-#include <catch2/catch_test_macros.hpp>
 #include <vector>
 
+#include "unittest.h"
 #include "vsag/options.h"
-
 namespace {
 
 class CollectLogger : public vsag::Logger {

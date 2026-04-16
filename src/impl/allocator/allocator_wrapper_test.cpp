@@ -14,11 +14,10 @@
 
 #include "allocator_wrapper.h"
 
-#include <catch2/catch_test_macros.hpp>
 #include <vector>
 
 #include "impl/allocator/safe_allocator.h"
-
+#include "unittest.h"
 using namespace vsag;
 
 TEST_CASE("AllocatorWrapper Basic Test", "[ut][AllocatorWrapper]") {

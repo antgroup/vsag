@@ -20,7 +20,7 @@
 #include <chrono>
 #include <iomanip>
 
-#include "./fixtures/test_logger.h"
+#include "functest.h"
 #include "vsag/vsag.h"
 
 struct LogListener : Catch::EventListenerBase {

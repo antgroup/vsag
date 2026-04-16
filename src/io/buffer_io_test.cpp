@@ -15,11 +15,11 @@
 
 #include "buffer_io.h"
 
-#include <catch2/catch_test_macros.hpp>
 #include <memory>
 
 #include "basic_io_test.h"
 #include "impl/allocator/safe_allocator.h"
+#include "unittest.h"
 
 using namespace vsag;
 

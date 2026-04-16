@@ -15,10 +15,8 @@
 
 #include "gno_imi_parameter.h"
 
-#include <catch2/catch_test_macros.hpp>
-
 #include "parameter_test.h"
-
+#include "unittest.h"
 TEST_CASE("GNO-IMI Parameters Test", "[ut][GNOIMIParameter]") {
     auto param_str = R"({
         "first_order_buckets_count": 200,

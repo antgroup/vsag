@@ -15,14 +15,11 @@
 
 #include "transform_quantizer.h"
 
-#include <catch2/catch_test_macros.hpp>
-#include <catch2/generators/catch_generators.hpp>
 #include <vector>
 
-#include "fixtures.h"
 #include "impl/allocator/safe_allocator.h"
 #include "quantization/quantizer_test.h"
-
+#include "unittest.h"
 using namespace vsag;
 
 const auto dims = fixtures::get_common_used_dims(3, 114);

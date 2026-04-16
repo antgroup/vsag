@@ -15,11 +15,11 @@
 #include "reverse_edge.h"
 
 #include <algorithm>
-#include <catch2/catch_test_macros.hpp>
 #include <thread>
 #include <vector>
 
 #include "impl/allocator/safe_allocator.h"
+#include "unittest.h"
 
 namespace vsag {
 

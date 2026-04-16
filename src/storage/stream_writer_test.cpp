@@ -15,13 +15,11 @@
 
 #include "stream_writer.h"
 
-#include <catch2/catch_test_macros.hpp>
-#include <catch2/generators/catch_generators.hpp>
 #include <cstdint>
 #include <iostream>
 
-#include "fixtures.h"
 #include "impl/allocator/default_allocator.h"
+#include "unittest.h"
 
 TEST_CASE("BufferStreamWriter", "[ut][stream_reader]") {
     auto* buffer = new char[4096]{};

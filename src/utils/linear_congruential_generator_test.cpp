@@ -15,7 +15,7 @@
 
 #include "linear_congruential_generator.h"
 
-#include <catch2/catch_test_macros.hpp>
+#include "unittest.h"
 
 using namespace vsag;
 

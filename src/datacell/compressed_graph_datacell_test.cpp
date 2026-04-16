@@ -17,12 +17,10 @@
 
 #include <fmt/format.h>
 
-#include <catch2/catch_template_test_macros.hpp>
-#include <catch2/generators/catch_generators.hpp>
-
 #include "graph_datacell_parameter.h"
 #include "graph_interface_test.h"
 #include "impl/allocator/safe_allocator.h"
+#include "unittest.h"
 using namespace vsag;
 
 void
