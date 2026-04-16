@@ -268,9 +268,15 @@ HNSW::knn_search(const DatasetPtr& query,
 
         std::shared_lock lock_global(rw_mutex_);
         if (iter_ctx != nullptr && *iter_ctx == nullptr) {
-            auto* filter_context = new IteratorFilterContext();
-            filter_context->init(alg_hnsw_->getMaxElements(), params.ef_search, search_allocator);
-            *iter_ctx = filter_context;
+            auto filter_context = std::make_unique<IteratorFilterContext>();
+            if (auto ret = filter_context->init(
+                    alg_hnsw_->getMaxElements(), params.ef_search, search_allocator);
+                not ret.has_value()) {
+                auto err = ret.error();
+                logger::error("failed to init IteratorFilterContext: {}", err.message);
+                return tl::unexpected(err);
+            }
+            *iter_ctx = filter_context.release();
         }
         IteratorFilterContext* iter_filter_ctx = nullptr;
         if (iter_ctx != nullptr) {
