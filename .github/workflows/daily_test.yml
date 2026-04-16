@@ -29,7 +29,7 @@ jobs:
           save: false
           key: build-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
       - name: Make Asan
-        run: export VSAG_ENABLE_INTEL_MKL=ON CMAKE_GENERATOR="Ninja"; make asan COMPILE_JOBS=4
+        run: export VSAG_ENABLE_INTEL_MKL=ON CMAKE_GENERATOR="Ninja"; make asan COMPILE_JOBS=4 VSAG_ENABLE_EXAMPLES=ON
       - name: Clean
         run: find ./build -type f -name "*.o" -exec rm -f {} +
       - name: Save Test
@@ -62,7 +62,7 @@ jobs:
           save: false
           key: build-aarch-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
       - name: Make Asan
-        run: export CMAKE_GENERATOR="Ninja"; make asan
+        run: export CMAKE_GENERATOR="Ninja"; make asan VSAG_ENABLE_EXAMPLES=ON
       - name: Clean
         run: find ./build -type f -name "*.o" -exec rm -f {} +
       - name: Save Test
