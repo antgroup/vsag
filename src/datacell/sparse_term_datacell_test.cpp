@@ -15,10 +15,8 @@
 
 #include "sparse_term_datacell.h"
 
-#include <catch2/catch_template_test_macros.hpp>
-#include <catch2/generators/catch_generators.hpp>
-
 #include "impl/allocator/safe_allocator.h"
+#include "unittest.h"
 
 using namespace vsag;
 

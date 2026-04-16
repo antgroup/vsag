@@ -21,8 +21,8 @@
 #include <memory>
 
 #include "basic_io.h"
-#include "fixtures.h"
 #include "storage/serialization_template_test.h"
+#include "unittest.h"
 
 using namespace vsag;
 

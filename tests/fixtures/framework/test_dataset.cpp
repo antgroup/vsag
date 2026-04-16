@@ -19,7 +19,7 @@
 #include <cstring>
 #include <functional>
 
-#include "fixtures.h"
+#include "functest.h"
 #include "simd/fp32_simd.h"
 
 namespace fixtures {

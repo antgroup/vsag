@@ -16,15 +16,13 @@
 #include "bucket_datacell.h"
 
 #include <algorithm>
-#include <catch2/catch_test_macros.hpp>
-#include <catch2/generators/catch_generators.hpp>
 #include <utility>
 
-#include "fixtures.h"
 #include "impl/allocator/default_allocator.h"
 #include "impl/allocator/safe_allocator.h"
 #include "simd/simd.h"
 #include "storage/serialization_template_test.h"
+#include "unittest.h"
 
 using namespace vsag;
 

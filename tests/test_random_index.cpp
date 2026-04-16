@@ -16,7 +16,7 @@
 #include <nlohmann/json.hpp>
 #include <thread>
 
-#include "fixtures/test_logger.h"
+#include "functest.h"
 #include "vsag/vsag.h"
 
 using namespace std;

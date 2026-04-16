@@ -15,7 +15,6 @@
 
 #include "hnsw.h"
 
-#include <catch2/catch_test_macros.hpp>
 #include <cstdlib>
 #include <memory>
 #include <new>
@@ -24,11 +23,11 @@
 
 #include "data_type.h"
 #include "datacell/graph_datacell_parameter.h"
-#include "fixtures.h"
 #include "impl/logger/logger.h"
 #include "io/memory_io_parameter.h"
 #include "quantization/fp32_quantizer_parameter.h"
 #include "storage/serialization.h"
+#include "unittest.h"
 #include "vsag/bitset.h"
 #include "vsag/errors.h"
 #include "vsag/options.h"

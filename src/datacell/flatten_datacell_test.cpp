@@ -16,14 +16,12 @@
 #include "flatten_datacell.h"
 
 #include <algorithm>
-#include <catch2/catch_template_test_macros.hpp>
-#include <catch2/generators/catch_generators.hpp>
 #include <utility>
 
-#include "fixtures.h"
 #include "flatten_interface_test.h"
 #include "impl/allocator/default_allocator.h"
 #include "impl/allocator/safe_allocator.h"
+#include "unittest.h"
 
 using namespace vsag;
 

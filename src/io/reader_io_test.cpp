@@ -15,11 +15,11 @@
 
 #include "reader_io.h"
 
-#include <catch2/catch_test_macros.hpp>
 #include <memory>
 
 #include "basic_io_test.h"
 #include "reader_io_parameter.h"
+#include "unittest.h"
 
 class TestReader : public vsag::Reader {
 public:

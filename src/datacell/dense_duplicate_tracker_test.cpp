@@ -19,7 +19,7 @@
 #include <sstream>
 
 #include "impl/allocator/default_allocator.h"
-
+#include "unittest.h"
 using namespace vsag;
 
 namespace {

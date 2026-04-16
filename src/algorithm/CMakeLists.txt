@@ -36,6 +36,6 @@ set (ALGORITHM_LIBS
 if (ENABLE_TESTS)
     file (GLOB_RECURSE ALGORITHM_TESTS "*_test.cpp")
     add_library (algorithm_test STATIC ${ALGORITHM_TESTS})
-    target_link_libraries (algorithm_test PRIVATE Catch2::Catch2 vsag)
+    target_link_libraries (algorithm_test PRIVATE Catch2::Catch2 vsag unittest_deps)
     add_dependencies (algorithm_test Catch2 antlr4)
 endif ()

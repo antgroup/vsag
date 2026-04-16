@@ -16,8 +16,9 @@
 
 #include "stream_reader.h"
 
-#include <catch2/catch_test_macros.hpp>
 #include <cstdint>
+
+#include "unittest.h"
 
 // fill buffer with below and return a wrappered StreamReader object:
 // ['1' '1' ... repeats 1024 times]

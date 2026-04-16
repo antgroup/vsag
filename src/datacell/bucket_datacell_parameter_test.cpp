@@ -15,9 +15,8 @@
 
 #include "bucket_datacell_parameter.h"
 
-#include <catch2/catch_test_macros.hpp>
-
 #include "parameter_test.h"
+#include "unittest.h"
 
 using namespace vsag;
 

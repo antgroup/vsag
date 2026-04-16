@@ -13,16 +13,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <catch2/catch_template_test_macros.hpp>
-#include <catch2/generators/catch_generators.hpp>
-
 #include "datacell/sparse_vector_datacell_parameter.h"
-#include "fixtures.h"
+#include "framework/test_thread_pool.h"
 #include "impl/allocator/safe_allocator.h"
 #include "index_common_param.h"
 #include "quantization/sparse_quantization/sparse_quantizer_parameter.h"
 #include "storage/serialization_template_test.h"
-#include "thread_pool.h"
+#include "unittest.h"
 
 namespace vsag {
 
