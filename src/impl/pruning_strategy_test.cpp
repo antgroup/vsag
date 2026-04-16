@@ -16,7 +16,6 @@
 #include "pruning_strategy.h"
 
 #include <algorithm>
-#include <catch2/catch_test_macros.hpp>
 #include <cmath>
 #include <memory>
 #include <vector>
@@ -30,6 +29,7 @@
 #include "io/memory_io_parameter.h"
 #include "quantization/fp32_quantizer_parameter.h"
 #include "typing.h"
+#include "unittest.h"
 #include "utils/lock_strategy.h"
 #include "vsag/engine.h"
 

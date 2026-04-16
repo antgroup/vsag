@@ -15,12 +15,9 @@
 
 #include "sparse_term_computer.h"
 
-#include <catch2/catch_template_test_macros.hpp>
-#include <catch2/generators/catch_generators.hpp>
-
 #include "algorithm/sindi/sindi_parameter.h"
 #include "impl/allocator/safe_allocator.h"
-
+#include "unittest.h"
 using namespace vsag;
 
 TEST_CASE("SparseTermComputer Basic Test", "[ut][SparseTermComputer]") {

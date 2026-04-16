@@ -26,9 +26,8 @@
 #include <unordered_set>
 #include <utility>
 
-#include "fixtures/fixtures.h"
-#include "fixtures/random_allocator.h"
-#include "fixtures/test_dataset.h"
+#include "allocator/random_allocator.h"
+#include "functest.h"
 #include "vsag/dataset.h"
 #include "vsag/errors.h"
 #include "vsag/logger.h"

@@ -15,10 +15,10 @@
 
 #include "index_impl.h"
 
-#include <catch2/catch_test_macros.hpp>
 #include <sstream>
 
 #include "algorithm/hgraph.h"
+#include "unittest.h"
 #include "vsag/engine.h"
 
 TEST_CASE("immutable index test", "[ut][index_impl]") {

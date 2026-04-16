@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "fixtures/fixtures.h"
-#include "fixtures/test_dataset_pool.h"
+#include "functest.h"
 #include "storage/serialization_template_test.h"
 #include "test_index.h"
 namespace fixtures {

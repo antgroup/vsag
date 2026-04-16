@@ -14,9 +14,9 @@
 
 #include "json_wrapper.h"
 
-#include <catch2/catch_test_macros.hpp>
 #include <string>
 
+#include "unittest.h"
 TEST_CASE("JsonWrapper Copy Empty Wrapper", "[ut][json_wrapper]") {
     vsag::JsonWrapper w1;
     vsag::JsonWrapper w2 = w1;

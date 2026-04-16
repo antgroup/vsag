@@ -20,8 +20,7 @@
 #include <sstream>
 #include <thread>
 
-#include "fixtures/test_logger.h"
-#include "fixtures/thread_pool.h"
+#include "functest.h"
 #include "vsag/options.h"
 #include "vsag/vsag.h"
 

@@ -15,7 +15,7 @@
 
 #include "algorithm/pyramid.h"
 
-#include <catch2/catch_test_macros.hpp>
+#include "unittest.h"
 
 TEST_CASE("Split function tests", "[ut][pyramid]") {
     SECTION("Empty input string") {

@@ -15,10 +15,9 @@
 
 #include "algorithm/pyramid_zparameters.h"
 
-#include <catch2/catch_test_macros.hpp>
-
 #include "algorithm/pyramid.h"
 #include "parameter_test.h"
+#include "unittest.h"
 
 struct PyramidDefaultParam {
     int max_degree = 32;

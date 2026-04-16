@@ -40,6 +40,6 @@ set (IMPL_LIBS transform thread_pool allocator heap bitset vsag_blas
 if (ENABLE_TESTS)
     file (GLOB_RECURSE IMPL_TESTS "*_test.cpp")
     add_library (impl_test STATIC ${IMPL_TESTS})
-    target_link_libraries (impl_test PRIVATE Catch2::Catch2 vsag)
+    target_link_libraries (impl_test PRIVATE Catch2::Catch2 vsag unittest_deps)
     add_dependencies (impl_test Catch2)
 endif ()

@@ -15,14 +15,10 @@
 
 #include "dataset_impl.h"
 
-#include <catch2/catch_test_macros.hpp>
-#include <catch2/generators/catch_generators.hpp>
-
-#include "fixtures.h"
 #include "impl/allocator/default_allocator.h"
+#include "unittest.h"
 #include "vsag/dataset.h"
 #include "vsag/engine.h"
-
 TEST_CASE("Dataset Implement Test", "[ut][dataset]") {
     vsag::DefaultAllocator allocator;
     SECTION("allocator") {

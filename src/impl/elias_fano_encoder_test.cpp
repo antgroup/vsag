@@ -16,10 +16,10 @@
 #include "elias_fano_encoder.h"
 
 #include <algorithm>
-#include <catch2/catch_test_macros.hpp>
 #include <random>
 
 #include "impl/allocator/safe_allocator.h"
+#include "unittest.h"
 
 namespace vsag {
 

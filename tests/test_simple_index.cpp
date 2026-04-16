@@ -17,8 +17,7 @@
 #include <catch2/matchers/catch_matchers_exception.hpp>
 #include <fstream>
 
-#include "fixtures/fixtures.h"
-#include "fixtures/test_dataset_pool.h"
+#include "functest.h"
 #include "vsag/index.h"
 
 using namespace vsag;

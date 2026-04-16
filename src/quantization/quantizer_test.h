@@ -18,7 +18,6 @@
 #include <memory>
 
 #include "data_type.h"
-#include "fixtures.h"
 #include "iostream"
 #include "quantization/computer.h"
 #include "quantizer.h"
@@ -26,6 +25,7 @@
 #include "simd/normalize.h"
 #include "simd/simd.h"
 #include "storage/serialization_template_test.h"
+#include "unittest.h"
 #include "vsag/dataset.h"
 
 using namespace vsag;

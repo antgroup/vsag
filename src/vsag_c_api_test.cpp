@@ -16,13 +16,11 @@
 #include <sys/stat.h>
 #include <vsag/vsag_c_api.h>
 
-#include <catch2/catch_test_macros.hpp>
 #include <fstream>
 #include <random>
 
-#include "fixtures.h"
 #include "simd/fp32_simd.h"
-
+#include "unittest.h"
 static constexpr const char* index_param = R"(
     {
         "dtype": "float32",

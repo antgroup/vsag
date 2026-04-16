@@ -15,10 +15,7 @@
 
 #include "test_index.h"
 
-#include "fixtures/memory_record_allocator.h"
-#include "fixtures/test_logger.h"
-#include "fixtures/test_reader.h"
-#include "fixtures/thread_pool.h"
+#include "allocator/memory_record_allocator.h"
 #include "impl/allocator/default_allocator.h"
 #include "index/hnsw.h"
 #include "simd/fp32_simd.h"

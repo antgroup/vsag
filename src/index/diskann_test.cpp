@@ -15,15 +15,14 @@
 
 #include "diskann.h"
 
-#include <catch2/catch_test_macros.hpp>
 #include <fstream>
 #include <nlohmann/json.hpp>
 #include <tuple>
 
 #include "diskann_zparameters.h"
 #include "distance.h"
-#include "fixtures.h"
 #include "index_common_param.h"
+#include "unittest.h"
 #include "utils/timer.h"
 #include "vsag/errors.h"
 

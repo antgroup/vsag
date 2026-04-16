@@ -17,7 +17,7 @@
 
 #include <catch2/catch_all.hpp>
 
-#include "fixtures.h"
+#include "unittest.h"
 
 using namespace vsag;
 

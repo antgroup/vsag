@@ -14,12 +14,11 @@
 
 #include "mrle_transformer.h"
 
-#include <catch2/catch_test_macros.hpp>
 #include <cmath>
 #include <vector>
 
 #include "impl/allocator/safe_allocator.h"
-
+#include "unittest.h"
 using namespace vsag;
 
 static constexpr float EPSILON = 1e-5F;

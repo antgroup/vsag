@@ -15,16 +15,13 @@
 
 #include "gno_imi_partition.h"
 
-#include <catch2/catch_test_macros.hpp>
-
 #include "algorithm/inner_index_interface.h"
 #include "algorithm/ivf_parameter.h"
-#include "fixtures.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/inner_search_param.h"
 #include "impl/searcher/basic_searcher.h"
 #include "storage/serialization_template_test.h"
-
+#include "unittest.h"
 using namespace vsag;
 
 TEST_CASE("GNO-IMI Partition Basic Test", "[ut][GNOIMIPartition]") {

@@ -23,13 +23,13 @@
 #include <vector>
 
 #include "catch2/catch_test_macros.hpp"
-#include "fixtures.h"
 #include "impl/allocator/safe_allocator.h"
 #include "metric_type.h"
 #include "quantization/computer.h"
 #include "quantization/quantizer.h"
 #include "quantizer_test.h"
 #include "simd/basic_func.h"
+#include "unittest.h"
 
 namespace vsag {
 

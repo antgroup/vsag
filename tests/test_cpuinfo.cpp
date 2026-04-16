@@ -18,7 +18,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <iostream>
 
-#include "fixtures/test_logger.h"
+#include "functest.h"
 
 TEST_CASE("Test CPU Info", "[ft][cpu_info]") {
     cpuinfo_initialize();

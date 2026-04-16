@@ -47,7 +47,9 @@ include_directories (${PROJECT_SOURCE_DIR}/include)
 include_directories (${PROJECT_SOURCE_DIR}/src)
 
 if (ENABLE_TESTS)
+    # Create unittest_deps first so src test targets can use it
     include_directories (${PROJECT_SOURCE_DIR}/tests/fixtures)
+    add_subdirectory (tests/fixtures)
 endif ()
 
 add_subdirectory (src)

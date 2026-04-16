@@ -13,22 +13,27 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# fixtures is already added by top-level CMakeLists.txt before src
+
 
 #  unittests
 add_executable (unittests
         test_main.cpp
-        fixtures/fixtures.cpp
-        fixtures/test_logger.cpp
+        $<TARGET_OBJECTS:fixtures_allocator>
+        $<TARGET_OBJECTS:fixtures_core>
+        $<TARGET_OBJECTS:fixtures_data>
+        $<TARGET_OBJECTS:fixtures_framework>
+)
+
+target_link_libraries (unittests
+        PRIVATE
+        Catch2::Catch2 
+        simd_test vsag_test algorithm_test factory_test attr_test
+        datacell_test quantizer_test storage_test io_test utils_test impl_test
+        vsag
 )
 
 if (APPLE)
-        target_link_libraries (unittests
-                        PRIVATE
-                        Catch2::Catch2 
-                        simd_test vsag_test algorithm_test factory_test attr_test
-                        datacell_test quantizer_test storage_test io_test utils_test impl_test
-                        vsag
-        )
         # Ensure static test libraries are not dead-stripped on macOS.
         target_link_options (unittests PRIVATE
         "-Wl,-force_load,$<TARGET_FILE:simd_test>"
@@ -44,15 +49,13 @@ if (APPLE)
         "-Wl,-force_load,$<TARGET_FILE:impl_test>"
         )
 else()
-	target_link_libraries (unittests
-					PRIVATE
-					Catch2::Catch2
-					"-Wl,--whole-archive"
-					simd_test vsag_test algorithm_test factory_test attr_test
-					datacell_test quantizer_test storage_test io_test utils_test impl_test
-					"-Wl,--no-whole-archive"
-					vsag roaring
-	)
+        target_link_libraries (unittests
+                        PRIVATE
+                        "-Wl,--whole-archive"
+                        simd_test vsag_test algorithm_test factory_test attr_test
+                        datacell_test quantizer_test storage_test io_test utils_test impl_test
+                        "-Wl,--no-whole-archive"
+        )
 endif()
 
 add_dependencies (unittests Catch2 vsag)
@@ -61,12 +64,15 @@ add_dependencies (unittests Catch2 vsag)
 file (GLOB FUNCTION_TESTS "test_*.cpp")
 add_executable (functests
         ${FUNCTION_TESTS}
-        fixtures/fixtures.cpp
-        fixtures/test_dataset.cpp
-        fixtures/test_dataset_pool.cpp
-        fixtures/test_logger.cpp
+        $<TARGET_OBJECTS:fixtures_allocator>
+        $<TARGET_OBJECTS:fixtures_core>
+        $<TARGET_OBJECTS:fixtures_data>
+        $<TARGET_OBJECTS:fixtures_framework>
 )
-target_include_directories (functests PRIVATE
-        ${HDF5_INCLUDE_DIRS})
-target_link_libraries (functests PRIVATE Catch2::Catch2 vsag simd)
+
+target_link_libraries (functests PRIVATE
+        Catch2::Catch2 
+        vsag 
+        simd
+)
 add_dependencies (functests Catch2)

@@ -14,11 +14,10 @@
 
 #include "computable_bitset.h"
 
-#include <catch2/catch_test_macros.hpp>
 #include <vector>
 
 #include "impl/allocator/safe_allocator.h"
-
+#include "unittest.h"
 using namespace vsag;
 
 TEST_CASE("ComputableBitset MakeInstance Test", "[ut][ComputableBitset]") {

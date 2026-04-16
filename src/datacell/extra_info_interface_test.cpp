@@ -15,15 +15,14 @@
 
 #include "extra_info_interface_test.h"
 
-#include <catch2/catch_template_test_macros.hpp>
 #include <fstream>
 #include <iostream>
 
-#include "fixtures.h"
 #include "impl/allocator/default_allocator.h"
 #include "impl/allocator/safe_allocator.h"
 #include "simd/simd.h"
 #include "storage/serialization_template_test.h"
+#include "unittest.h"
 
 namespace vsag {
 void

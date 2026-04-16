@@ -15,10 +15,10 @@
 
 #include "ivf_parameter.h"
 
-#include <catch2/catch_test_macros.hpp>
 #include <numeric>
 
 #include "parameter_test.h"
+#include "unittest.h"
 #include "utils/util_functions.h"
 
 struct IVFDefaultParam {

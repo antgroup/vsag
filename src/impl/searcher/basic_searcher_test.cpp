@@ -18,8 +18,8 @@
 #include "algorithm/inner_index_interface.h"
 #include "datacell/flatten_interface.h"
 #include "searcher_test.h"
+#include "unittest.h"
 #include "utils/visited_list.h"
-
 using namespace vsag;
 
 TEST_CASE("Basic Usage for GraphDataCell (adapter of hnsw)", "[ut][GraphDataCell]") {

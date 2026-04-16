@@ -13,6 +13,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+/**
+ * @file test_thread_pool.h
+ * @brief Simple thread pool implementation for testing.
+ */
+
 #pragma once
 
 #include <functional>
@@ -23,8 +28,17 @@
 
 namespace fixtures {
 
+/**
+ * @class ThreadPool
+ * @brief Basic thread pool for parallel task execution in tests.
+ * Supports enqueueing tasks and returns futures for result retrieval.
+ */
 class ThreadPool {
 public:
+    /**
+     * @brief Constructs a thread pool with the specified number of threads.
+     * @param threads Number of worker threads to create.
+     */
     ThreadPool(uint64_t threads) : stop(false) {
         for (uint64_t i = 0; i < threads; ++i) {
             workers.emplace_back([this] {
@@ -45,6 +59,14 @@ public:
         }
     }
 
+    /**
+     * @brief Enqueues a task for execution by a worker thread.
+     * @tparam F Function type.
+     * @tparam Args Argument types.
+     * @param f The function to execute.
+     * @param args Arguments to pass to the function.
+     * @return Future for retrieving the result.
+     */
     template <class F, class... Args>
     auto
     enqueue(F&& f, Args&&... args) -> std::future<typename std::invoke_result<F, Args...>::type> {
@@ -64,6 +86,9 @@ public:
         return res;
     }
 
+    /**
+     * @brief Destructor that stops all threads and waits for completion.
+     */
     ~ThreadPool() {
         {
             std::unique_lock<std::mutex> lock(queue_mutex);
@@ -74,11 +99,10 @@ public:
     }
 
 private:
-    std::vector<std::thread> workers;
-    std::queue<std::function<void()>> tasks;
-
-    std::mutex queue_mutex;
-    std::condition_variable condition;
-    bool stop;
+    std::vector<std::thread> workers;         // Worker threads.
+    std::queue<std::function<void()>> tasks;  // Queue of pending tasks.
+    std::mutex queue_mutex;                   // Mutex for task queue access.
+    std::condition_variable condition;        // Condition variable for thread synchronization.
+    bool stop;                                // Flag to signal thread termination.
 };
 }  // namespace fixtures

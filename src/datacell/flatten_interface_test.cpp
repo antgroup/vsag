@@ -15,12 +15,11 @@
 
 #include "flatten_interface_test.h"
 
-#include <catch2/catch_template_test_macros.hpp>
 #include <fstream>
 
-#include "fixtures.h"
 #include "simd/simd.h"
 #include "storage/serialization_template_test.h"
+#include "unittest.h"
 
 namespace vsag {
 void

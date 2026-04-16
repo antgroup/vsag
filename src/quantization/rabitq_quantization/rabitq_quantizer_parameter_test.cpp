@@ -17,11 +17,8 @@
 
 #include <fmt/format.h>
 
-#include <catch2/catch_test_macros.hpp>
-#include <catch2/generators/catch_generators.hpp>
-
 #include "parameter_test.h"
-
+#include "unittest.h"
 using namespace vsag;
 
 struct RaBitQDefaultParam {
