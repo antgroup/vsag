@@ -119,3 +119,5 @@ merge_protections:
       - base=main
     success_conditions:
       - label~=^version/
+merge_protections_settings:
+  reporting_method: check-runs
