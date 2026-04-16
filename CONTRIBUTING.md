@@ -145,7 +145,7 @@ $ bash scripts/coverage/collect_cpp_coverage.sh
 Every pull request **must** have the following two labels before it can be merged:
 
 -   A **`kind/*`** label indicating the type of change, e.g. `kind/feature`, `kind/bug`, `kind/chore`, `kind/docs`.
--   A **`version/*`** label indicating the version impact, e.g. `version/major`, `version/minor`, `version/patch`.
+-   A **`version/*`** label indicating the target version, e.g. `version/1.0`, `version/0.18`.
 
 Mergify enforces these labels via check runs. The PR merge will be blocked until both labels are present.
 
