@@ -18,6 +18,7 @@
 #include <catch2/benchmark/catch_benchmark.hpp>
 
 #include "simd_status.h"
+#include "simd_test_macro.h"
 #include "unittest.h"
 
 using namespace vsag;
@@ -26,36 +27,42 @@ using namespace vsag;
     {                                                                                            \
         auto gt =                                                                                \
             generic::Func(codes1.data() + i * code_size, codes2.data() + i * code_size, dim);    \
+        SIMD_TEST_SSE(                                                                           \
         if (SimdStatus::SupportSSE()) {                                                          \
             auto sse =                                                                           \
                 sse::Func(codes1.data() + i * code_size, codes2.data() + i * code_size, dim);    \
             REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(sse));                              \
-        }                                                                                        \
+        })                                                                                       \
+        SIMD_TEST_AVX(                                                                           \
         if (SimdStatus::SupportAVX()) {                                                          \
             auto avx =                                                                           \
                 avx::Func(codes1.data() + i * code_size, codes2.data() + i * code_size, dim);    \
             REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(avx));                              \
-        }                                                                                        \
+        })                                                                                       \
+        SIMD_TEST_AVX2(                                                                          \
         if (SimdStatus::SupportAVX2()) {                                                         \
             auto avx2 =                                                                          \
                 avx2::Func(codes1.data() + i * code_size, codes2.data() + i * code_size, dim);   \
             REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(avx2));                             \
-        }                                                                                        \
+        })                                                                                       \
+        SIMD_TEST_AVX512(                                                                        \
         if (SimdStatus::SupportAVX512()) {                                                       \
             auto avx512 =                                                                        \
                 avx512::Func(codes1.data() + i * code_size, codes2.data() + i * code_size, dim); \
             REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(avx512));                           \
-        }                                                                                        \
+        })                                                                                       \
+        SIMD_TEST_NEON(                                                                          \
         if (SimdStatus::SupportNEON()) {                                                         \
             auto neon =                                                                          \
                 neon::Func(codes1.data() + i * code_size, codes2.data() + i * code_size, dim);   \
             REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(neon));                             \
-        }                                                                                        \
+        })                                                                                       \
+        SIMD_TEST_SVE(                                                                           \
         if (SimdStatus::SupportSVE()) {                                                          \
             auto sve =                                                                           \
                 sve::Func(codes1.data() + i * code_size, codes2.data() + i * code_size, dim);    \
             REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(sve));                              \
-        }                                                                                        \
+        })                                                                                       \
     }
 
 TEST_CASE("SQ8 Uniform SIMD Compute Codes", "[ut][simd]") {
@@ -87,22 +94,34 @@ TEST_CASE("SQ8 Uniform SIMD Compute Benchmark", "[ut][simd][!benchmark]") {
     auto codes1 = fixtures::generate_uint8_codes(count, dim, 114);
     auto codes2 = fixtures::generate_uint8_codes(count, dim, 514);
     BENCHMARK_SIMD_COMPUTE(generic, SQ8UniformComputeCodesIP);
+#ifdef ENABLE_SSE
     if (SimdStatus::SupportSSE()) {
         BENCHMARK_SIMD_COMPUTE(sse, SQ8UniformComputeCodesIP);
     }
+#endif
+#ifdef ENABLE_AVX
     if (SimdStatus::SupportAVX()) {
         BENCHMARK_SIMD_COMPUTE(avx, SQ8UniformComputeCodesIP);
     }
+#endif
+#ifdef ENABLE_AVX2
     if (SimdStatus::SupportAVX2()) {
         BENCHMARK_SIMD_COMPUTE(avx2, SQ8UniformComputeCodesIP);
     }
+#endif
+#ifdef ENABLE_AVX512
     if (SimdStatus::SupportAVX512()) {
         BENCHMARK_SIMD_COMPUTE(avx512, SQ8UniformComputeCodesIP);
     }
+#endif
+#ifdef ENABLE_NEON
     if (SimdStatus::SupportNEON()) {
         BENCHMARK_SIMD_COMPUTE(neon, SQ8UniformComputeCodesIP);
     }
+#endif
+#ifdef ENABLE_SVE
     if (SimdStatus::SupportSVE()) {
         BENCHMARK_SIMD_COMPUTE(sve, SQ8UniformComputeCodesIP);
     }
+#endif
 }
