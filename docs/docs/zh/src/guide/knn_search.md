@@ -17,9 +17,10 @@ VSAG 主要用于处理固定维度 d 的向量集合，通常维度为几百到
 
 ```cpp
     int64_t num_vectors = 10000;
-    int64_t dim = 128
+    int64_t dim = 128;
     int64_t *ids = new int64_t[num_vectors];
     float *datas = new float[num_vectors * dim];
+    std::mt19937 rng(47);
     std::uniform_real_distribution<float> distrib_real;
     for (int64_t i = 0; i < num_vectors; ++i) {
         ids[i] = i;

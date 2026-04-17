@@ -30,7 +30,7 @@ jobs:
 
       - name: Commit and Push to Repo VSAGIO
         run: |
-          cd repo-VSAGIO
+          cd repo-vsagio
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
