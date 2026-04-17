@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -21,6 +20,7 @@
 #include "index_common_param.h"
 #include "memory_io_parameter.h"
 #include "utils/prefetch.h"
+#include "vsag_exception.h"
 
 namespace vsag {
 
@@ -48,7 +48,11 @@ public:
      * @param allocator A pointer to the Allocator for memory management.
      */
     explicit MemoryIO(Allocator* allocator) : BasicIO<MemoryIO>(allocator) {
-        start_ = static_cast<uint8_t*>(allocator->Allocate(1));
+        buffer_ = static_cast<uint8_t*>(allocator->Allocate(1));
+        if (buffer_ == nullptr) {
+            throw VsagException(ErrorType::NO_ENOUGH_MEMORY,
+                                "failed to allocate initial buffer in MemoryIO");
+        }
     }
 
     /**
@@ -75,7 +79,7 @@ public:
      * @brief Destructor that deallocates the memory buffer.
      */
     ~MemoryIO() override {
-        this->allocator_->Deallocate(start_);
+        this->allocator_->Deallocate(buffer_);
     }
 
     /**
@@ -146,6 +150,10 @@ private:
     /**
      * @brief Checks the required size and reallocates the buffer if needed.
      *
+     * Uses a temporary pointer for Reallocate result to prevent memory leak
+     * on allocation failure. The original buffer pointer is only updated
+     * after successful reallocation.
+     *
      * @param size The required size for the buffer.
      */
     void
@@ -153,12 +161,18 @@ private:
         if (size <= this->size_) {
             return;
         }
-        start_ = reinterpret_cast<uint8_t*>(this->allocator_->Reallocate(start_, size));
+        uint8_t* new_buffer = static_cast<uint8_t*>(this->allocator_->Reallocate(buffer_, size));
+        if (new_buffer == nullptr) {
+            throw VsagException(ErrorType::NO_ENOUGH_MEMORY,
+                                "failed to reallocate memory in MemoryIO, requested size: ",
+                                size);
+        }
+        buffer_ = new_buffer;
         this->size_ = size;
     }
 
 private:
     /// Pointer to the start of the allocated memory buffer.
-    uint8_t* start_{nullptr};
+    uint8_t* buffer_{nullptr};
 };
 }  // namespace vsag
