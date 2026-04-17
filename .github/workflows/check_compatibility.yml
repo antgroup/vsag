@@ -11,19 +11,18 @@ jobs:
     runs-on: ubuntu-latest
     concurrency:
       group: compatibility-${{ github.event.pull_request.number || github.sha }}
-      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+      cancel-in-progress: ${{ github.event_name == "pull_request" }}
     container:
       image: vsaglib/vsag:ci-x86
     steps:
       - name: Install GitHub CLI
         run: |
-          (type -p wget >/dev/null || (apt update && apt-get install wget -y)) \
-          && mkdir -p -m 755 /etc/apt/keyrings \
-          && wget -qO- https://cli.github.com/packages/githubcli-archive-keyring.gpg | tee /etc/apt/keyrings/githubcli.gpg >/dev/null \
-          && chmod go+r /etc/apt/keyrings/githubcli.gpg \
-          && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list >/dev/null \
-          && apt update \
-          && apt install gh -y
+          GH_VERSION=$(wget -qO- https://api.github.com/repos/cli/cli/releases/latest | sed -n 's/.*"tag_name": "v\([^"]*\)".*/\1/p')
+          wget -q "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" -O /tmp/gh.tar.gz
+          tar xzf /tmp/gh.tar.gz -C /tmp
+          mv /tmp/gh_${GH_VERSION}_linux_amd64/bin/gh /usr/local/bin/gh
+          rm -rf /tmp/gh.tar.gz /tmp/gh_${GH_VERSION}_linux_amd64
+          gh --version
       - name: Download Compatibility Indexes from Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
