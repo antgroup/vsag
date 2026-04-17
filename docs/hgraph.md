@@ -73,7 +73,7 @@ For examples, refer to [103_index_hgraph.cpp](https://github.com/antgroup/vsag/b
 ### base_quantization_type
 - **Parameter Type**: string
 - **Parameter Description**: Base quantization type for vector compression
-- **Optional Values**: "fp32", "fp16", "bf16", "sq8", "sq8_uniform", "sq4_uniform", "pq", "rabitq", "pqfs"
+- **Optional Values**: "fp32", "fp16", "bf16", "sq8", "sq8_uniform", "sq4_uniform", "pq", "rabitq", "turboquant", "pqfs"
 - **Default Value**: Must be provided (no default value)
 
 ### use_reorder
@@ -85,7 +85,7 @@ For examples, refer to [103_index_hgraph.cpp](https://github.com/antgroup/vsag/b
 ### precise_quantization_type
 - **Parameter Type**: string
 - **Parameter Description**: High-precision quantization type used for reordering, only effective when use_reorder=true
-- **Optional Values**: "fp32", "fp16", "bf16", "sq8", "sq8_uniform", "sq4_uniform", "pq", "rabitq", "pqfs"
+- **Optional Values**: "fp32", "fp16", "bf16", "sq8", "sq8_uniform", "sq4_uniform", "pq", "rabitq", "turboquant", "pqfs"
 - **Default Value**: "fp32"
 
 ### max_degree
