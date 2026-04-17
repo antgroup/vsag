@@ -15,7 +15,11 @@
 
 #pragma once
 
+#ifdef _WIN32
+#include <io.h>
+#else
 #include <unistd.h>
+#endif
 
 #include <filesystem>
 
@@ -71,7 +75,11 @@ public:
      * If exist_file_ is false (file was newly created), the file is removed.
      */
     ~BufferIO() override {
+#ifdef _WIN32
+        _close(this->fd_);
+#else
         close(this->fd_);
+#endif
         // remove file
         if (not this->exist_file_) {
             std::filesystem::remove(this->filepath_);

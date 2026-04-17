@@ -18,9 +18,33 @@
 #include <cstdint>
 #include <cstdlib>
 
+#ifdef _WIN32
+#include <malloc.h>
+#endif
+
 #include "vsag/options.h"
 
 namespace vsag {
+
+#ifdef _WIN32
+inline void*
+vsag_aligned_alloc(size_t alignment, size_t size) {
+    return _aligned_malloc(size, alignment);
+}
+inline void
+vsag_aligned_free(void* ptr) {
+    _aligned_free(ptr);
+}
+#else
+inline void*
+vsag_aligned_alloc(size_t alignment, size_t size) {
+    return std::aligned_alloc(alignment, size);
+}
+inline void
+vsag_aligned_free(void* ptr) {
+    free(ptr);
+}
+#endif
 
 /**
  * @brief Helper object for performing aligned direct IO operations.
@@ -66,12 +90,12 @@ public:
         this->size = size1;
         this->offset = offset1;
         if (align_data) {
-            free(align_data);
+            vsag_aligned_free(align_data);
         }
         auto new_offset = (offset >> align_bit) << align_bit;
         auto inner_offset = offset & align_mask;
         auto new_size = (((size + inner_offset) + align_mask) >> align_bit) << align_bit;
-        this->align_data = static_cast<uint8_t*>(std::aligned_alloc(align_size, new_size));
+        this->align_data = static_cast<uint8_t*>(vsag_aligned_alloc(align_size, new_size));
         this->data = align_data + inner_offset;
         this->size = new_size;
         this->offset = new_offset;
@@ -82,7 +106,7 @@ public:
      */
     void
     Release() {
-        free(this->align_data);
+        vsag_aligned_free(this->align_data);
         this->align_data = nullptr;
         this->data = nullptr;
     }

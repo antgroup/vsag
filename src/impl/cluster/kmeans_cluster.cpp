@@ -17,6 +17,7 @@
 
 #include <omp.h>
 
+#include <numeric>
 #include <random>
 
 #include "algorithm/inner_index_interface.h"

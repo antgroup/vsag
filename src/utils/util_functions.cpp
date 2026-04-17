@@ -16,6 +16,7 @@
 #include "util_functions.h"
 
 #include <iomanip>
+#include <numeric>
 #include <nlohmann/json.hpp>
 #include <random>
 
@@ -165,7 +166,11 @@ get_current_time() {
     auto now = std::chrono::system_clock::now();
     auto now_c = std::chrono::system_clock::to_time_t(now);
     std::tm now_tm{};
+#ifdef _WIN32
+    if (localtime_s(&now_tm, &now_c) != 0) {
+#else
     if (localtime_r(&now_c, &now_tm) == nullptr) {
+#endif
         return "invalid time";
     }
     std::ostringstream oss;

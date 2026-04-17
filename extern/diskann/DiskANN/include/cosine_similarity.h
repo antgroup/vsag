@@ -79,9 +79,13 @@ static float NormScalarProductSIMD2(const int8_t *pVect1, const int8_t *pVect2, 
         cos = _mm256_hadd_ps(_mm256_hadd_ps(cos, cos), cos);
         p1Len = _mm256_hadd_ps(_mm256_hadd_ps(p1Len, p1Len), p1Len);
         p2Len = _mm256_hadd_ps(_mm256_hadd_ps(p2Len, p2Len), p2Len);
-        float denominator = max(numeric_limits<float>::min() * 2, sqrt(p1Len.m256_f32[0] + p1Len.m256_f32[4]) *
-                                                                      sqrt(p2Len.m256_f32[0] + p2Len.m256_f32[4]));
-        float cosine = (cos.m256_f32[0] + cos.m256_f32[4]) / denominator;
+        float __cos_tmp[8], __p1_tmp[8], __p2_tmp[8];
+        _mm256_storeu_ps(__cos_tmp, cos);
+        _mm256_storeu_ps(__p1_tmp, p1Len);
+        _mm256_storeu_ps(__p2_tmp, p2Len);
+        float denominator = max(numeric_limits<float>::min() * 2, sqrt(__p1_tmp[0] + __p1_tmp[4]) *
+                                                                      sqrt(__p2_tmp[0] + __p2_tmp[4]));
+        float cosine = (__cos_tmp[0] + __cos_tmp[4]) / denominator;
 
         return max(float(-1), min(float(1), cosine));
     }
@@ -114,8 +118,8 @@ static float NormScalarProductSIMD2(const int8_t *pVect1, const int8_t *pVect2, 
     cos = _mm_hadd_ps(_mm_hadd_ps(cos, cos), cos);
     p1Len = _mm_hadd_ps(_mm_hadd_ps(p1Len, p1Len), p1Len);
     p2Len = _mm_hadd_ps(_mm_hadd_ps(p2Len, p2Len), p2Len);
-    float norm1 = p1Len.m128_f32[0];
-    float norm2 = p2Len.m128_f32[0];
+    float norm1 = _mm_cvtss_f32(p1Len);
+    float norm2 = _mm_cvtss_f32(p2Len);
 
     static const float eps = numeric_limits<float>::min() * 2;
 
@@ -134,7 +138,7 @@ static float NormScalarProductSIMD2(const int8_t *pVect1, const int8_t *pVect2, 
      * Sometimes due to rounding errors, we get values > 1 or < -1.
      * This throws off other functions that use scalar product, e.g., acos
      */
-    return max(float(-1), min(float(1), cos.m128_f32[0] / sqrt(norm1) / sqrt(norm2)));
+    return max(float(-1), min(float(1), _mm_cvtss_f32(cos) / sqrt(norm1) / sqrt(norm2)));
 }
 
 static float NormScalarProductSIMD(const float *pVect1, const float *pVect2, uint32_t qty)
@@ -219,9 +223,13 @@ static float NormScalarProductSIMD(const float *pVect1, const float *pVect2, uin
         qty -= 4;
     }
 
-    float sum = sum_prod.m128_f32[0] + sum_prod.m128_f32[1] + sum_prod.m128_f32[2] + sum_prod.m128_f32[3];
-    float norm1 = sum_square1.m128_f32[0] + sum_square1.m128_f32[1] + sum_square1.m128_f32[2] + sum_square1.m128_f32[3];
-    float norm2 = sum_square2.m128_f32[0] + sum_square2.m128_f32[1] + sum_square2.m128_f32[2] + sum_square2.m128_f32[3];
+    float __sp_tmp[4], __sq1_tmp[4], __sq2_tmp[4];
+    _mm_storeu_ps(__sp_tmp, sum_prod);
+    _mm_storeu_ps(__sq1_tmp, sum_square1);
+    _mm_storeu_ps(__sq2_tmp, sum_square2);
+    float sum = __sp_tmp[0] + __sp_tmp[1] + __sp_tmp[2] + __sp_tmp[3];
+    float norm1 = __sq1_tmp[0] + __sq1_tmp[1] + __sq1_tmp[2] + __sq1_tmp[3];
+    float norm2 = __sq2_tmp[0] + __sq2_tmp[1] + __sq2_tmp[2] + __sq2_tmp[3];
 
     if (norm1 < eps)
     {

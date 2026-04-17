@@ -2,10 +2,15 @@ set (name antlr4)
 set (source_dir ${CMAKE_CURRENT_BINARY_DIR}/${name}/source)
 set (binary_dir ${source_dir}/runtime/Cpp)
 set (install_dir ${CMAKE_CURRENT_BINARY_DIR}/${name}/install)
-set (antlr4_runtime_library ${install_dir}/lib/libantlr4-runtime.a)
+if (WIN32)
+    set (antlr4_runtime_library ${install_dir}/lib/antlr4-runtime-static.lib)
+else ()
+    set (antlr4_runtime_library ${install_dir}/lib/libantlr4-runtime.a)
+endif ()
 
-# FIXME(wxyu): find a better way to set this definition
-if (ENABLE_CXX11_ABI)
+if (WIN32)
+    set (VSAG_ANTLR4_CXX11_ABI "-D_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH -DNOMINMAX -D_CRT_SECURE_NO_WARNINGS -DWIN32_LEAN_AND_MEAN /FIchrono /EHsc /GR")
+elseif (ENABLE_CXX11_ABI)
     set (VSAG_ANTLR4_CXX11_ABI "-D_GLIBCXX_USE_CXX11_ABI=1")
 else ()
     set (VSAG_ANTLR4_CXX11_ABI "-D_GLIBCXX_USE_CXX11_ABI=0")
@@ -37,7 +42,7 @@ ExternalProject_Add (
         BINARY_DIR ${binary_dir}
         BUILD_IN_SOURCE 0
         CONFIGURE_COMMAND
-        cmake ${common_cmake_args} -DCMAKE_CXX_FLAGS=${FULL_CXX_FLAGS} -DCMAKE_INSTALL_PREFIX=${install_dir} -DANTLR_BUILD_SHARED=OFF -DANTLR_BUILD_STATIC=ON -DWITH_DEMO=False -DANTLR_BUILD_CPP_TESTS=OFF -S . -B build
+        cmake ${common_cmake_args} -DCMAKE_CXX_FLAGS=${FULL_CXX_FLAGS} -DCMAKE_INSTALL_PREFIX=${install_dir} -DANTLR_BUILD_SHARED=OFF -DANTLR_BUILD_STATIC=ON -DWITH_DEMO=False -DANTLR_BUILD_CPP_TESTS=OFF -DWITH_STATIC_CRT=OFF -S . -B build
         BUILD_COMMAND
         cmake --build build --target install --parallel ${NUM_BUILDING_JOBS}
         INSTALL_COMMAND cmake --install build
@@ -72,6 +77,9 @@ add_dependencies (antlr4-autogen antlr4)
 target_link_libraries (antlr4-autogen PUBLIC vsag_antlr4_runtime_headers vsag_antlr4_autogen_headers)
 target_include_directories (antlr4-autogen PRIVATE extern/antlr4/fc)
 target_compile_options (antlr4-autogen PRIVATE ${VSAG_ANTLR4_CXX11_ABI})
+if (WIN32)
+    target_compile_definitions (antlr4-autogen PUBLIC ANTLR4CPP_STATIC)
+endif ()
 set_property (TARGET antlr4-autogen PROPERTY CXX_STANDARD 17)
 target_link_libraries (antlr4-autogen PRIVATE antlr4-runtime)
 

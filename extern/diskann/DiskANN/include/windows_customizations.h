@@ -3,6 +3,7 @@
 
 #pragma once
 
+#ifndef DISKANN_DLLEXPORT
 #ifdef _WINDOWS
 
 #ifdef _WINDLL
@@ -13,4 +14,5 @@
 
 #else
 #define DISKANN_DLLEXPORT
+#endif
 #endif

@@ -1,8 +1,6 @@
 
 #pragma once
 
-#ifndef _WINDOWS
-
 #ifdef __APPLE__
 #include <cstdlib>
 #else
@@ -54,6 +52,3 @@ public:
     void read(std::vector<AlignedRead> &read_reqs, bool async = false, CallBack callBack = nullptr);
 };
 
-
-
-#endif

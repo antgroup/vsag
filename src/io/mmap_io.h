@@ -15,6 +15,10 @@
 
 #pragma once
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 #include "basic_io.h"
 #include "mmap_io_parameter.h"
 
@@ -124,11 +128,24 @@ public:
     static constexpr int64_t DEFAULT_INIT_MMAP_SIZE = 4096;
 
 private:
+#ifdef _WIN32
+    void
+    RemapWin32(uint64_t old_size, uint64_t new_size);
+#endif
+
     /// Path to the file used for IO operations.
     std::string filepath_{};
 
+#ifdef _WIN32
+    /// Win32 file handle for the mapped file.
+    HANDLE hFile_{INVALID_HANDLE_VALUE};
+
+    /// Win32 file-mapping object handle.
+    HANDLE hMapping_{NULL};
+#else
     /// File descriptor for the mapped file.
     int fd_{-1};
+#endif
 
     /// Pointer to the start of the memory-mapped region.
     uint8_t* start_{nullptr};
