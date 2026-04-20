@@ -36,6 +36,11 @@ jobs:
           rsync -av --delete repo-vsag/docs/blog/zh/ repo-vsagio/blogs/zh/
           rsync -av --delete repo-vsag/docs/blog/en/ repo-vsagio/blogs/en/
 
+      - name: Sync landing page (site root)
+        run: |
+          mkdir -p repo-vsagio/landing
+          rsync -av --delete repo-vsag/docs/landing/ repo-vsagio/landing/
+
       - name: Commit and Push to sync branch
         run: |
           cd repo-vsagio
@@ -46,6 +51,6 @@ jobs:
             exit 0
           fi
           git checkout -B sync
-          git add docs blogs
+          git add docs blogs landing
           git commit -m "docs: sync from vsag@${{ github.sha }}"
           git push --force origin sync
