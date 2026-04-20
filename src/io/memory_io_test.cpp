@@ -58,6 +58,10 @@ public:
 
     void*
     Reallocate(void* p, uint64_t size) override {
+        if (reallocate_allowed_count_ > 0) {
+            --reallocate_allowed_count_;
+            return std::realloc(p, size);
+        }
         if (fail_on_reallocate_) {
             return nullptr;
         }
@@ -72,10 +76,15 @@ public:
     SetFailOnAllocate(bool fail) {
         fail_on_allocate_ = fail;
     }
+    void
+    SetReallocateAllowedCount(int count) {
+        reallocate_allowed_count_ = count;
+    }
 
 private:
     bool fail_on_allocate_ = false;
     bool fail_on_reallocate_ = false;
+    int reallocate_allowed_count_ = 0;
 };
 
 TEST_CASE("MemoryIO Allocation Failure", "[ut][MemoryIO]") {
@@ -103,23 +112,19 @@ TEST_CASE("MemoryIO Allocation Failure Error Type", "[ut][MemoryIO]") {
 
 TEST_CASE("MemoryIO Reallocate Failure", "[ut][MemoryIO]") {
     FailAllocator fail_allocator;
-    // Do not fail on initial allocate
     fail_allocator.SetFailOnAllocate(false);
+    fail_allocator.SetReallocateAllowedCount(1);
     fail_allocator.SetFailOnReallocate(true);
 
     auto io = std::make_unique<MemoryIO>(&fail_allocator);
 
-    // Write data to populate the buffer (triggers initial allocation)
     const char* test_data = "initial data";
     io->Write(reinterpret_cast<const uint8_t*>(test_data), strlen(test_data), 0);
 
-    // Trigger a growth that would require reallocation
-    // The reallocate will fail, but original buffer should remain valid
     REQUIRE_THROWS_AS(
         io->Write(reinterpret_cast<const uint8_t*>("more data"), strlen("more data"), 1000),
         VsagException);
 
-    // Verify the original buffer contents are still readable after the failure
     std::vector<uint8_t> read_buffer(strlen(test_data));
     REQUIRE(io->Read(strlen(test_data), 0, read_buffer.data()));
     REQUIRE(std::string(reinterpret_cast<char*>(read_buffer.data()), strlen(test_data)) ==
@@ -129,6 +134,7 @@ TEST_CASE("MemoryIO Reallocate Failure", "[ut][MemoryIO]") {
 TEST_CASE("MemoryIO Reallocate Failure Error Type", "[ut][MemoryIO]") {
     FailAllocator fail_allocator;
     fail_allocator.SetFailOnAllocate(false);
+    fail_allocator.SetReallocateAllowedCount(1);
     fail_allocator.SetFailOnReallocate(true);
 
     auto io = std::make_unique<MemoryIO>(&fail_allocator);
