@@ -1,4 +1,4 @@
-# .github/workflows/sync-docs.yml
+# .github/workflows/docs.yaml
 name: Sync Docs to Repo VSAGIO
 
 on:
@@ -24,22 +24,28 @@ jobs:
           token: ${{ secrets.GH_PAT }}
           path: repo-vsagio
 
-      - name: Sync docs directory
+      - name: Sync docs books (zh, en)
         run: |
-          rsync -av --delete --exclude='.git/' repo-vsag/docs/ repo-vsagio/
+          mkdir -p repo-vsagio/docs
+          rsync -av --delete repo-vsag/docs/docs/zh/ repo-vsagio/docs/zh/
+          rsync -av --delete repo-vsag/docs/docs/en/ repo-vsagio/docs/en/
 
-      - name: Commit and Push to Repo VSAGIO
+      - name: Sync blogs books (zh, en)
+        run: |
+          mkdir -p repo-vsagio/blogs
+          rsync -av --delete repo-vsag/docs/blog/zh/ repo-vsagio/blogs/zh/
+          rsync -av --delete repo-vsag/docs/blog/en/ repo-vsagio/blogs/en/
+
+      - name: Commit and Push to sync branch
         run: |
           cd repo-vsagio
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-
           if [[ -z $(git status --porcelain) ]]; then
             echo "No changes to commit."
             exit 0
           fi
-
           git checkout -B sync
-          git add .
-          git commit -m "docs: Sync from repo VSAG commit ${{ github.sha }}"
+          git add docs blogs
+          git commit -m "docs: sync from vsag@${{ github.sha }}"
           git push --force origin sync
