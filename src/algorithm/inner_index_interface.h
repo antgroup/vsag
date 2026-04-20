@@ -220,6 +220,11 @@ public:
     [[nodiscard]] virtual int64_t
     GetNumElements() const = 0;
 
+    [[nodiscard]] uint64_t
+    GetTotalCount() const {
+        return total_count_.load();
+    }
+
     [[nodiscard]] virtual int64_t
     GetNumberRemoved() const {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
@@ -455,6 +460,7 @@ public:
     bool immutable_{false};
 
 protected:
+    std::atomic<uint64_t> total_count_{0};
     std::atomic<int64_t> current_memory_usage_{0};
     mutable std::shared_mutex memory_usage_mutex_{};
 
