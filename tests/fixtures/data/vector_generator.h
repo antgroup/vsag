@@ -91,6 +91,14 @@ GenerateBinaryVectorsAndCodes(uint32_t count, uint32_t dim, int seed = 47);
 std::vector<float>
 generate_vectors(uint64_t count, uint32_t dim, bool need_normalize = true, int seed = 47);
 
+std::vector<float>
+generate_normal_vectors(uint64_t count,
+                        uint32_t dim,
+                        bool need_normalize = true,
+                        int seed = 47,
+                        float mean = 0.0f,
+                        float stddev = 1.0f);
+
 std::vector<uint8_t>
 generate_int4_codes(uint64_t count, uint32_t dim, int seed = 47);
 
