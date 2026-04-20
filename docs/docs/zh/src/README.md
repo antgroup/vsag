@@ -1,11 +1,21 @@
-# VSAG介绍
+# VSAG 介绍
 
-**VSAG** 全称（Vector Search Algorithm Group）是一个用于相似性检索的库。允许用户在各种规模的向量集合中进行高效搜索，尤其是那些无法完全加载到内存中的集合。同时，VSAG 还提供了基于向量维度和数据规模自动生成参数的方法，使开发者无需了解算法原理即可快速上手使用。VSAG 使用 C++ 编写，并提供一个简单的 Python 包装叫 pyvsag。该项目主要由蚂蚁集团开发。
+**VSAG** 全称 Vector Search Algorithm Group，是一个用于相似性检索的向量索引库。VSAG 允许用户在各种规模的向量集合中进行高效搜索，包括无法完全放入内存的集合，同时提供基于向量维度和数据规模自动生成参数的能力，使开发者无需深入了解底层算法原理即可快速上手。
 
-- 索引 **低内存用量** 可以降低使用成本
-- 多平台指令集适配提供 **高性能** 检索
-- 支持 bitmap 和 callback 两种 **混合搜索** 方式
-- 使用 C++ 编写，并提供 [基于 CMake 的集成方法](https://github.com/antgroup/vsag/blob/main/README.md#integrate-with-cmake)
+VSAG 使用 C++ 编写，并提供：
+
+- Python 包装 [`pyvsag`](https://pypi.org/project/pyvsag/)
+- Node.js / TypeScript 绑定 `vsag`（由 `napi-rs` 生成）
+
+该项目由蚂蚁集团发起并主导开发，目前以开源社区的方式维护。
+
+## 主要特性
+
+- **低内存占用**：通过量化（RaBitQ、PQ、SQ4/SQ8）与内存-磁盘混合索引降低使用成本；
+- **高性能检索**：针对 x86_64（SSE/AVX/AVX2/AVX512/AMX）和 ARM（Neon/SVE）做了指令集适配；
+- **丰富的索引类型**：HGraph、HNSW、DiskANN、IVF、Pyramid、BruteForce、SINDI（稀疏）等；
+- **灵活的过滤与混合搜索**：支持 bitmap 与 callback 两种过滤方式，以及混合 `(data vector, attribute)` 查询；
+- **易于集成**：提供基于 CMake 的集成方式，详见 [README](https://github.com/antgroup/vsag/blob/main/README.md#integrate-with-cmake)。
 
 ## Contributing
 

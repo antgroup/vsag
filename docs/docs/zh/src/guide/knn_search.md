@@ -1,6 +1,8 @@
 # k-近邻搜索
 
-以下内容，我们假设你已经安装 VSAG。我们提供了一些 C++ 和 Python 的代码示例，可以在 [`examples/`](https://github.com/antgroup/vsag/tree/main/examples) 目录找到。
+以下内容假设你已经安装 VSAG。我们提供了 C++、Python、TypeScript 三种语言的代码示例，可以在 [`examples/`](https://github.com/antgroup/vsag/tree/main/examples) 目录找到。本页以 C++ `BruteForce` 索引为例，完整示例见 [`examples/cpp/105_index_brute_force.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/105_index_brute_force.cpp)。
+
+> 在多数情况下，程序入口需要调用一次 `vsag::init()` 来完成一次性的初始化（如全局日志、分配器等）。本页示例中省略了其他辅助代码，以突出关键步骤。
 
 ## 获取一些向量
 

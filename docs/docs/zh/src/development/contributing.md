@@ -51,21 +51,36 @@ git checkout -b my-topic-branch
 
 ### 签署 DCO（Developer Certificate of Origin）
 
-对于本项目的所有贡献必须同意并附带 [Developer Certificate of Origin (后面简称为 DCO)](https://developercertificate.org/) 的确认。对于 DCO 的确认和同意*必须* 包含在每一个 Commit Message 中，并且*必须*采用 `Signed-off-by: {{Full Name}} <{{email address}}>` （不带 `{}`）的形式。如果贡献者不能或不愿意同意 DCO，则他们的贡献将不会被接收。
+对于本项目的所有贡献必须同意并附带 [Developer Certificate of Origin（后简称 DCO）](https://developercertificate.org/) 的确认。对 DCO 的确认和同意**必须**包含在每一个 Commit Message 中，并采用 `Signed-off-by: {{Full Name}} <{{email address}}>`（不带 `{}`）的形式。如果贡献者不能或不愿意同意 DCO，其贡献将不会被接收。
 
-贡献者可以通过在 Commit Message 中添加以下 Signed-off-by 行来签署他们遵守 DCO：
+贡献者可以通过在 Commit Message 中添加如下 Signed-off-by 行来签署 DCO：
 
-```bash
+```text
 This is my commit message
 
 Signed-off-by: Random J Developer <random@developer.example.org>
 ```
 
-Git 还有一个 `-s` 命令行选项，可以自动将其附加到你的提交消息中：
+Git 还有一个 `-s` 命令行选项，可以在提交时自动附加 Signed-off-by 行：
 
 ```bash
 git commit -s -m "This is my commit message"
 ```
+
+对于由人类开发者和 AI Coding Agent（如 OpenCode、Claude Code、Codex 等）共同完成的贡献，请为**每一位协作者**各添加一行 `Signed-off-by` trailer，例如：
+
+```text
+Signed-off-by: Random J Developer <random@developer.example.org>
+Signed-off-by: OpenCode (claude-sonnet-4.5) <noreply@opencode.ai>
+```
+
+### Commit 信息与 PR 标签
+
+- Commit 信息请遵循 [Conventional Commits](https://www.conventionalcommits.org/)，常用前缀包括 `feat:`、`fix:`、`docs:`、`chore:`、`refactor:`、`test:`、`ci:` 等；
+- 如果该 commit 无需触发 CI，请将 `[skip ci]` 放在 commit subject 的**开头**，例如 `[skip ci] docs: fix typo in README`；
+- 每一个 PR 都**必须**至少包含以下两类 label（由 Mergify 强制校验，否则无法合并）：
+  - `kind/*`：变更类型，可选值为 `kind/bug`、`kind/feature`、`kind/improvement`、`kind/documentation`；
+  - `version/*`：目标版本，例如 `version/1.0`、`version/0.18`。
 
 ### 编码风格
 

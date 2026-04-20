@@ -55,8 +55,8 @@ Targets:
 help:                    ## Show the help.
 ##
 ## ================ development ================
-debug:                   ## Build the default debug configuration.
-dev:                     ## Build the full developer configuration.
+debug:                   ## Build vsag with debug options.
+dev:                     ## Build full developer configuration.
 test:                    ## Build and run unit tests.
 asan:                    ## Build with AddressSanitizer option.
 test_asan: asan          ## Run unit tests with AddressSanitizer option.
@@ -67,15 +67,20 @@ clean:                   ## Clear build/ directory.
 ## ================ integration ================
 fmt:                     ## Format codes.
 cov:                     ## Build unit tests with code coverage enabled.
-test_parallel: debug     ## Run all tests parallel (used in CI).
+lint:                    ## Check coding styles defined in `.clang-tidy`.
+fix-lint:                ## Fix coding style issues in-place via clang-apply-replacements.
+test_parallel:           ## Run all tests parallel (used in CI).
 test_asan_parallel: asan ## Run unit tests parallel with AddressSanitizer option.
 test_tsan_parallel: tsan ## Run unit tests parallel with ThreadSanitizer option.
 ##
 ## ================ distribution ================
 release:                 ## Build vsag with release options.
-distribution:            ## Build vsag with distribution options.
-libcxx:                  ## Build vsag using libc++.
-pyvsag:                  ## Build pyvsag wheel.
+run-dist-tests:          ## Run distribution tests.
+dist-pre-cxx11-abi:      ## Build vsag with distribution options (pre C++11 ABI).
+dist-cxx11-abi:          ## Build vsag with distribution options (C++11 ABI).
+dist-libcxx:             ## Build vsag using libc++.
+pyvsag:                  ## Build a specific Python version wheel. Usage: make pyvsag PY_VERSION=3.10
+pyvsag-all:              ## Build wheels for all supported versions.
 clean-release:           ## Clear build-release/ directory.
 install:                 ## Build and install the release version of vsag.
 ```

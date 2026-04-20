@@ -1,6 +1,7 @@
-# 贡献者列表
+# Contributors
 
-以下是 VSAG 项目的贡献者（更新于 2026-04-21），按照第一次贡献的时间排序：
+The following is the list of VSAG contributors (updated 2026-04-21), ordered by the date of their
+first contribution:
 
 - 2024-07-25 [Ant OSS](https://github.com/antfin-oss) from AntGroup
 - 2024-07-26 Xiangyu Wang ([wxyucs](https://github.com/wxyucs/)) from AntGroup
