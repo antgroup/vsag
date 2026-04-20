@@ -266,9 +266,13 @@ HNSW::knn_search(const DatasetPtr& query,
             fmt::format(
                 "ef_search({}) must in range[1, {}]", params.ef_search, ef_search_threshold));
         if (iter_ctx != nullptr && *iter_ctx == nullptr) {
-            auto* filter_context = new IteratorFilterContext();
-            filter_context->init(alg_hnsw_->getMaxElements(), params.ef_search, search_allocator);
-            *iter_ctx = filter_context;
+            auto filter_context = std::make_unique<IteratorFilterContext>();
+            if (auto ret = filter_context->init(
+                    alg_hnsw_->getMaxElements(), params.ef_search, search_allocator);
+                not ret.has_value()) {
+                return tl::unexpected(std::move(ret).error());
+            }
+            *iter_ctx = filter_context.release();
         }
         IteratorFilterContext* iter_filter_ctx = nullptr;
         if (iter_ctx != nullptr) {
