@@ -21,8 +21,7 @@
 
 #include "quantization/computer.h"
 #include "quantization/quantizer.h"
-#include "quantization/scalar_quantization/bf16_quantizer.h"
-#include "quantization/scalar_quantization/fp16_quantizer.h"
+#include "quantization/scalar_quantization/half_precision_quantizer.h"
 #include "simd/bf16_simd.h"
 #include "simd/fp16_simd.h"
 
