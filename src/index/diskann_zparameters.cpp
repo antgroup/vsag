@@ -21,6 +21,7 @@
 #include "index_common_param.h"
 #include "inner_string_params.h"
 #include "vsag/constants.h"
+#include "vsag_exception.h"
 // NOLINTBEGIN(readability-simplify-boolean-expr)
 
 namespace vsag {
@@ -46,12 +47,13 @@ DiskannParameters::FromJson(
     } else if (index_common_param.metric_ == MetricType::METRIC_TYPE_COSINE) {
         obj.metric = diskann::Metric::COSINE;
     } else {
-        throw std::invalid_argument(fmt::format("parameters[{}] must in [{}, {}, {}], now is {}",
-                                                PARAMETER_METRIC_TYPE,
-                                                METRIC_L2,
-                                                METRIC_IP,
-                                                METRIC_COSINE,
-                                                (int)obj.metric));
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            fmt::format("parameters[{}] must be in [{}, {}, {}], now is {}",
+                                        PARAMETER_METRIC_TYPE,
+                                        METRIC_L2,
+                                        METRIC_IP,
+                                        METRIC_COSINE,
+                                        static_cast<int>(index_common_param.metric_)));
     }
 
     // set obj.max_degree
@@ -60,7 +62,7 @@ DiskannParameters::FromJson(
         fmt::format("parameters[{}] must contains {}", INDEX_DISKANN, DISKANN_PARAMETER_R));
     obj.max_degree = diskann_param_obj[DISKANN_PARAMETER_R].GetInt();
     CHECK_ARGUMENT((5 <= obj.max_degree) and (obj.max_degree <= 128),
-                   fmt::format("max_degree({}) must in range[5, 128]", obj.max_degree));
+                   fmt::format("max_degree({}) must be in range[5, 128]", obj.max_degree));
 
     // set obj.pq_dims
     CHECK_ARGUMENT(
@@ -106,17 +108,17 @@ DiskannParameters::FromJson(
             fmt::format("parameters[{}] must contains {}", INDEX_DISKANN, DISKANN_PARAMETER_L));
         obj.ef_construction = diskann_param_obj[DISKANN_PARAMETER_L].GetInt();
         CHECK_ARGUMENT((obj.max_degree <= obj.ef_construction) and (obj.ef_construction <= 1000),
-                       fmt::format("ef_construction({}) must in range[$max_degree({}), 64]",
+                       fmt::format("ef_construction({}) must be in range[$max_degree({}), 1000]",
                                    obj.ef_construction,
                                    obj.max_degree));
     } else if (obj.graph_type == GRAPH_TYPE_ODESCENT) {
         // set obj.alpha
         if (diskann_param_obj.Contains(ODESCENT_PARAMETER_ALPHA)) {
             obj.alpha = diskann_param_obj[ODESCENT_PARAMETER_ALPHA].GetFloat();
-            CHECK_ARGUMENT(
-                (obj.alpha >= 1.0 && obj.alpha <= 2.0),
-                fmt::format(
-                    "{} must in range[1.0, 2.0], now is {}", ODESCENT_PARAMETER_ALPHA, obj.alpha));
+            CHECK_ARGUMENT((obj.alpha >= 1.0 && obj.alpha <= 2.0),
+                           fmt::format("{} must be in range[1.0, 2.0], now is {}",
+                                       ODESCENT_PARAMETER_ALPHA,
+                                       obj.alpha));
         }
         // set obj.turn
         if (diskann_param_obj.Contains(ODESCENT_PARAMETER_GRAPH_ITER_TURN)) {
@@ -130,16 +132,17 @@ DiskannParameters::FromJson(
         if (diskann_param_obj.Contains(ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE)) {
             obj.sample_rate = diskann_param_obj[ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE].GetFloat();
             CHECK_ARGUMENT((obj.sample_rate > 0.05 && obj.sample_rate < 0.5),
-                           fmt::format("{} must in range[0.05, 0.5], now is {}",
+                           fmt::format("{} must be in range[0.05, 0.5], now is {}",
                                        ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE,
                                        obj.sample_rate));
         }
     } else {
-        throw std::invalid_argument(fmt::format("parameters[{}] must in [{}, {}], now is {}",
-                                                DISKANN_PARAMETER_GRAPH_TYPE,
-                                                DISKANN_GRAPH_TYPE_VAMANA,
-                                                GRAPH_TYPE_ODESCENT,
-                                                obj.graph_type));
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            fmt::format("parameters[{}] must be in [{}, {}], now is {}",
+                                        DISKANN_PARAMETER_GRAPH_TYPE,
+                                        DISKANN_GRAPH_TYPE_VAMANA,
+                                        GRAPH_TYPE_ODESCENT,
+                                        obj.graph_type));
     }
 
     if (diskann_param_obj.Contains(DISKANN_SUPPORT_CALC_DISTANCE_BY_ID)) {
@@ -162,21 +165,21 @@ DiskannSearchParameters::FromJson(const std::string& json_string) {
         obj.ef_search = params[INDEX_DISKANN][DISKANN_PARAMETER_EF_SEARCH].GetInt();
     }
     CHECK_ARGUMENT((1 <= obj.ef_search) and (obj.ef_search <= 1000),
-                   fmt::format("ef_search({}) must in range[1, 1000]", obj.ef_search));
+                   fmt::format("ef_search({}) must be in range[1, 1000]", obj.ef_search));
 
     // set obj.beam_search
     if (params[INDEX_DISKANN].Contains(DISKANN_PARAMETER_BEAM_SEARCH)) {
         obj.beam_search = params[INDEX_DISKANN][DISKANN_PARAMETER_BEAM_SEARCH].GetInt();
     }
     CHECK_ARGUMENT((1 <= obj.beam_search) and (obj.beam_search <= 64),
-                   fmt::format("beam_search({}) must in range[1, 64]", obj.beam_search));
+                   fmt::format("beam_search({}) must be in range[1, 64]", obj.beam_search));
 
     // set obj.io_limit
     if (params[INDEX_DISKANN].Contains(DISKANN_PARAMETER_IO_LIMIT)) {
         obj.io_limit = params[INDEX_DISKANN][DISKANN_PARAMETER_IO_LIMIT].GetInt();
     }
     CHECK_ARGUMENT((1 <= obj.io_limit) and (obj.io_limit <= 512),
-                   fmt::format("io_limit({}) must in range[1, 512]", obj.io_limit));
+                   fmt::format("io_limit({}) must be in range[1, 512]", obj.io_limit));
 
     // optional
     // set obj.use_reorder

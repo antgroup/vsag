@@ -15,6 +15,8 @@
 
 #include "expression_visitor.h"
 
+#include "vsag_exception.h"
+
 namespace vsag {
 
 static ComparisonOperator
@@ -37,7 +39,7 @@ trans_string_to_comparison_operator(const std::string& op) {
     if (op == "!=") {
         return ComparisonOperator::NE;
     }
-    throw std::runtime_error("Unknown comparison operator: " + op);
+    throw VsagException(ErrorType::INVALID_ARGUMENT, "Unknown comparison operator: " + op);
 }
 
 // Helper function to convert string to logical operator
@@ -49,7 +51,7 @@ trans_string_to_logical_operator(const std::string& op) {
     if (op == "OR" or op == "or" or op == "||") {
         return LogicalOperator::OR;
     }
-    throw std::runtime_error("Unknown logical operator: " + op);
+    throw VsagException(ErrorType::INVALID_ARGUMENT, "Unknown logical operator: " + op);
 }
 
 // Helper function to convert string to arithmetic operator
@@ -67,7 +69,7 @@ trans_string_to_arithmetic_operator(const std::string& op) {
     if (op == "/") {
         return ArithmeticOperator::DIV;
     }
-    throw std::runtime_error("Unknown arithmetic operator: " + op);
+    throw VsagException(ErrorType::INVALID_ARGUMENT, "Unknown arithmetic operator: " + op);
 }
 
 static NumericValue
@@ -166,7 +168,7 @@ std::any
 FCExpressionVisitor::visitStrPipeListExpr(FCParser::StrPipeListExprContext* ctx) {
     auto left = std::any_cast<ExprPtr>(visit(ctx->field_name()));
     if (schema_ != nullptr and not is_string_type(left)) {
-        throw std::runtime_error("attribute value type is not string type");
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "attribute value type is not string type");
     }
     auto right = std::any_cast<ExprPtr>(visit(ctx->str_pipe_list()));
     return std::make_any<ExprPtr>(std::make_shared<StrListExpression>(
@@ -190,7 +192,7 @@ std::any
 FCExpressionVisitor::visitStrListExpr(FCParser::StrListExprContext* ctx) {
     auto left = std::any_cast<ExprPtr>(visit(ctx->field_name()));
     if (schema_ != nullptr and not is_string_type(left)) {
-        throw std::runtime_error("attribute value type is not string type");
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "attribute value type is not string type");
     }
     auto right = std::any_cast<ExprPtr>(visit(ctx->str_value_list()));
     return std::make_any<ExprPtr>(std::make_shared<StrListExpression>(
@@ -211,7 +213,7 @@ std::any
 FCExpressionVisitor::visitStringComparison(FCParser::StringComparisonContext* ctx) {
     auto left = std::any_cast<ExprPtr>(visit(ctx->field_name()));
     if (schema_ != nullptr and not is_string_type(left)) {
-        throw std::runtime_error("attribute value type is not string type");
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "attribute value type is not string type");
     }
     auto str = ctx->STRING() != nullptr ? ctx->STRING()->getText() : ctx->INT_STRING()->getText();
     auto right = std::make_shared<StringConstant>(str.substr(1, str.size() - 2));
@@ -230,7 +232,8 @@ std::any
 FCExpressionVisitor::visitFieldRef(FCParser::FieldRefContext* ctx) {
     auto field_ref = std::any_cast<ExprPtr>(visit(ctx->field_name()));
     if (schema_ != nullptr and is_string_type(field_ref)) {
-        throw std::runtime_error("attribute value type is not numeric type");
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "attribute value type is not numeric type");
     }
     return field_ref;
 }
@@ -259,7 +262,8 @@ FCExpressionVisitor::visitArithmeticExpr(FCParser::ArithmeticExprContext* ctx) {
         return visit(numeric_ctx);
     }
 
-    throw std::runtime_error("Unsupported field expression: " + ctx->getText());
+    throw VsagException(ErrorType::INVALID_ARGUMENT,
+                        "Unsupported field expression: " + ctx->getText());
 }
 
 std::any
@@ -400,7 +404,7 @@ FCExpressionVisitor::visitNumeric(FCParser::NumericContext* ctx) {
         return std::make_any<ExprPtr>(
             std::make_shared<NumericConstant>(std::stod(ctx->FLOAT()->getText())));
     }
-    throw std::runtime_error("Invalid numeric value: " + ctx->getText());
+    throw VsagException(ErrorType::INVALID_ARGUMENT, "Invalid numeric value: " + ctx->getText());
 }
 
 bool
@@ -408,6 +412,7 @@ FCExpressionVisitor::is_string_type(const ExprPtr& expr) {
     if (auto field_expr = std::dynamic_pointer_cast<FieldExpression>(expr); field_expr != nullptr) {
         return schema_->GetTypeOfField(field_expr->fieldName) == STRING;
     }
-    throw std::runtime_error("Invalid field expression: " + expr->ToString());
+    throw VsagException(ErrorType::INVALID_ARGUMENT,
+                        "Invalid field expression: " + expr->ToString());
 }
 }  // namespace vsag

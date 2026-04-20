@@ -17,6 +17,7 @@
 
 #include "utils/util_functions.h"
 #include "vsag/allocator.h"
+#include "vsag_exception.h"
 namespace vsag {
 
 void
@@ -235,7 +236,8 @@ SparseTermDataCell::InsertVector(const SparseVector& sparse_base, uint16_t base_
         max_term_id = std::max(max_term_id, term_id);
     }
     if (max_term_id > term_id_limit_) {
-        throw std::runtime_error(
+        throw VsagException(
+            ErrorType::INVALID_ARGUMENT,
             fmt::format("max term id of sparse vector {} is greater than term id limit {}",
                         max_term_id,
                         term_id_limit_));
