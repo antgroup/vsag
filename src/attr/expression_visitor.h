@@ -28,6 +28,7 @@
 
 #include "attr_type_schema.h"
 #include "expression.h"
+#include "vsag_exception.h"
 
 namespace vsag {
 class FCErrorListener final : public antlr4::BaseErrorListener {
@@ -46,7 +47,8 @@ public:
         if (offendingSymbol) {
             offendingText = offendingSymbol->getText();
         }
-        throw std::runtime_error(
+        throw VsagException(
+            ErrorType::INVALID_ARGUMENT,
             fmt::format("Syntax error in filter condition, line({}), charPositionInLine({}), "
                         "msg({}), offendingText({}), input({})",
                         line,

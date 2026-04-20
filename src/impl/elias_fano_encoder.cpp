@@ -18,6 +18,8 @@
 #include <cmath>
 #include <iostream>
 
+#include "vsag_exception.h"
+
 namespace vsag {
 
 // Cross-platform implementation of ctzll (count trailing zeros)
@@ -98,7 +100,8 @@ EliasFanoEncoder::Encode(const Vector<InnerIdType>& values,
     if (values.size() <= UINT8_MAX) {
         num_elements = static_cast<uint8_t>(values.size());
     } else {
-        throw std::runtime_error("Error: Elias-Fano encoder, number of elements exceeds 255.");
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "Error: Elias-Fano encoder, number of elements exceeds 255.");
     }
 
     InnerIdType universe = max_value + 1;
