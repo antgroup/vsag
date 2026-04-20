@@ -3,12 +3,11 @@
 The following is the list of VSAG contributors (updated 2026-04-21), ordered by the date of their
 first contribution:
 
-- 2024-07-25 [Ant OSS](https://github.com/antfin-oss) from AntGroup
 - 2024-07-26 Xiangyu Wang ([wxyucs](https://github.com/wxyucs/)) from AntGroup
 - 2024-08-21 Jiabao Jin ([inabao](https://github.com/inabao)) from AntGroup
 - 2024-08-30 👑 Haotian Li ([LHT129](https://github.com/LHT129)) from AntGroup
 - 2024-09-04 Xiaoyao Zhong ([ShawnShawnYou](https://github.com/ShawnShawnYou)) from AntGroup
-- 2024-10-23 Jiacai Liu ([jiacai2050](https://github.com/jiacai2050)) from GreptimeDB
+- 2024-10-23 Jiacai Liu ([jiacai2050](https://github.com/jiacai2050))
 - 2024-10-28 [Coien-rr](https://github.com/Coien-rr)
 - 2024-12-16 Mingyu Yang ([mingyu-hkustgz](https://github.com/mingyu-hkustgz)) from HKUST(GZ)
 - 2025-01-24 [Carrot-77](https://github.com/Carrot-77) from OceanBase
