@@ -20,6 +20,7 @@
 #include "storage/serialization.h"
 #include "utils/util_functions.h"
 #include "vsag/allocator.h"
+#include "vsag_exception.h"
 
 namespace vsag {
 ParamPtr
@@ -121,6 +122,10 @@ SINDI::Add(const DatasetPtr& base, AddMode mode) {
         } catch (const std::runtime_error& e) {
             failed_ids.push_back(ids[i]);
             logger::warn("runtime error: {}", e.what());
+            continue;
+        } catch (const VsagException& e) {
+            failed_ids.push_back(ids[i]);
+            logger::warn("vsag exception: {}", e.what());
             continue;
         } catch (const std::bad_alloc& e) {
             failed_ids.push_back(ids[i]);
