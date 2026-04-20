@@ -15,82 +15,18 @@
 
 #include "normalize.h"
 
-#include "simd_status.h"
+#include "simd_dispatch.h"
 
 namespace vsag {
 
-static NormalizeType
-GetNormalize() {
-    if (SimdStatus::SupportAVX512()) {
-#if defined(ENABLE_AVX512)
-        return avx512::Normalize;
-#endif
-    } else if (SimdStatus::SupportAVX2()) {
-#if defined(ENABLE_AVX2)
-        return avx2::Normalize;
-#endif
-    } else if (SimdStatus::SupportAVX()) {
-#if defined(ENABLE_AVX)
-        return avx::Normalize;
-#endif
-    } else if (SimdStatus::SupportSSE()) {
-#if defined(ENABLE_SSE)
-        return sse::Normalize;
-#endif
-    } else if (SimdStatus::SupportSVE()) {
-#if defined(ENABLE_SVE)
-        return sve::Normalize;
-#endif
-    } else if (SimdStatus::SupportNEON()) {
-#if defined(ENABLE_NEON)
-        return neon::Normalize;
-#endif
-    }
-    return generic::Normalize;
-}
-NormalizeType Normalize = GetNormalize();
+VSAG_DEFINE_SIMD_DISPATCH(Normalize, NormalizeType);
+VSAG_DEFINE_SIMD_DISPATCH(DivScalar, DivScalarType);
 
-static NormalizeWithCentroidType
-GetNormalizeWithCentroid() {
-    return generic::NormalizeWithCentroid;
-}
-NormalizeWithCentroidType NormalizeWithCentroid = GetNormalizeWithCentroid();
-
-static InverseNormalizeWithCentroidType
-GetInverseNormalizeWithCentroid() {
-    return generic::InverseNormalizeWithCentroid;
-}
-InverseNormalizeWithCentroidType InverseNormalizeWithCentroid = GetInverseNormalizeWithCentroid();
-
-static DivScalarType
-GetDivScalar() {
-    if (SimdStatus::SupportAVX512()) {
-#if defined(ENABLE_AVX512)
-        return avx512::DivScalar;
-#endif
-    } else if (SimdStatus::SupportAVX2()) {
-#if defined(ENABLE_AVX2)
-        return avx2::DivScalar;
-#endif
-    } else if (SimdStatus::SupportAVX()) {
-#if defined(ENABLE_AVX)
-        return avx::DivScalar;
-#endif
-    } else if (SimdStatus::SupportSSE()) {
-#if defined(ENABLE_SSE)
-        return sse::DivScalar;
-#endif
-    } else if (SimdStatus::SupportSVE()) {
-#if defined(ENABLE_SVE)
-        return sve::DivScalar;
-#endif
-    } else if (SimdStatus::SupportNEON()) {
-#if defined(ENABLE_NEON)
-        return neon::DivScalar;
-#endif
-    }
-    return generic::DivScalar;
-}
-DivScalarType DivScalar = GetDivScalar();
+// NormalizeWithCentroid and InverseNormalizeWithCentroid currently only
+// have generic implementations. Keep them as explicit one-liners so the
+// lack of SIMD variants is obvious at the call site.
+NormalizeWithCentroidType NormalizeWithCentroid = generic::NormalizeWithCentroid;
+InverseNormalizeWithCentroidType InverseNormalizeWithCentroid =
+    generic::InverseNormalizeWithCentroid;
 
 }  // namespace vsag
