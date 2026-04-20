@@ -12,41 +12,11 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 #include "pqfs_simd.h"
 
-#include "simd_status.h"
+#include "simd_dispatch.h"
 
 namespace vsag {
 
-static PQFastScanLookUp32Type
-GetPQFastScanLookUp32() {
-    if (SimdStatus::SupportAVX512()) {
-#if defined(ENABLE_AVX512)
-        return avx512::PQFastScanLookUp32;
-#endif
-    } else if (SimdStatus::SupportAVX2()) {
-#if defined(ENABLE_AVX2)
-        return avx2::PQFastScanLookUp32;
-#endif
-    } else if (SimdStatus::SupportAVX()) {
-#if defined(ENABLE_AVX)
-        return avx::PQFastScanLookUp32;
-#endif
-    } else if (SimdStatus::SupportSSE()) {
-#if defined(ENABLE_SSE)
-        return sse::PQFastScanLookUp32;
-#endif
-    } else if (SimdStatus::SupportSVE()) {
-#if defined(ENABLE_SVE)
-        return sve::PQFastScanLookUp32;
-#endif
-    } else if (SimdStatus::SupportNEON()) {
-#if defined(ENABLE_NEON)
-        return neon::PQFastScanLookUp32;
-#endif
-    }
-    return generic::PQFastScanLookUp32;
-}
-PQFastScanLookUp32Type PQFastScanLookUp32 = GetPQFastScanLookUp32();
+VSAG_DEFINE_SIMD_DISPATCH(PQFastScanLookUp32, PQFastScanLookUp32Type);
 }  // namespace vsag
