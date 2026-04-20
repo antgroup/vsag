@@ -15,13 +15,13 @@
 
 #include "inner_index_interface.h"
 
-#include <catch2/catch_test_macros.hpp>
 #include <memory>
 #include <sstream>
 
 #include "brute_force.h"
 #include "hgraph.h"
 #include "impl/allocator/safe_allocator.h"
+#include "unittest.h"
 
 using namespace vsag;
 

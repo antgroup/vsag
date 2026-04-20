@@ -14,10 +14,10 @@
 
 #include "blas_function.h"
 
-#include <catch2/catch_test_macros.hpp>
 #include <cmath>
 #include <vector>
 
+#include "unittest.h"
 using namespace vsag;
 
 static constexpr float EPSILON = 1e-4F;

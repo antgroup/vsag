@@ -15,14 +15,12 @@
 
 #include "pq_fastscan_quantizer.h"
 
-#include <catch2/catch_test_macros.hpp>
 #include <vector>
 
-#include "fixtures.h"
 #include "impl/allocator/safe_allocator.h"
 #include "quantization/quantizer_test.h"
 #include "storage/serialization_template_test.h"
-
+#include "unittest.h"
 using namespace vsag;
 
 const auto dims = {128, 256};

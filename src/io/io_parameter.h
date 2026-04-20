@@ -21,23 +21,50 @@
 namespace vsag {
 DEFINE_POINTER2(IOParam, IOParameter);
 
+/**
+ * @brief Base class for IO configuration parameters.
+ *
+ * This class serves as the base for all IO-related parameter classes,
+ * providing a common interface for parameter creation from JSON configuration
+ * and type identification.
+ */
 class IOParameter : public Parameter {
 public:
+    /**
+     * @brief Creates an IO parameter object from JSON configuration.
+     *
+     * @param json The JSON object containing IO configuration.
+     * @return A shared pointer to the created IOParameter.
+     */
     static IOParamPtr
     GetIOParameterByJson(const JsonType& json);
 
 public:
+    /**
+     * @brief Returns the type name of this IO parameter.
+     *
+     * @return The name string identifying the IO type.
+     */
     inline std::string
     GetTypeName() {
         return this->name_;
     }
 
 protected:
+    /**
+     * @brief Constructs an IOParameter with a type name.
+     *
+     * @param name The type name for this IO parameter.
+     */
     explicit IOParameter(std::string name);
 
+    /**
+     * @brief Default destructor.
+     */
     ~IOParameter() override = default;
 
 private:
+    /// Type name identifying the IO implementation type.
     std::string name_{};
 };
 

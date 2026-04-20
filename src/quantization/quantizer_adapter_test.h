@@ -18,12 +18,12 @@
 #include <cstdint>
 #include <vector>
 
-#include "fixtures.h"
 #include "metric_type.h"
 #include "quantization/computer.h"
 #include "quantizer.h"
 #include "simd/basic_func.h"
 #include "storage/serialization_template_test.h"
+#include "unittest.h"
 
 namespace vsag {
 // NOTE(Coien.rr): Just used in CreateQuantizerParam in tests, escalated if needed in the future.

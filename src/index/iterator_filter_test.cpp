@@ -15,10 +15,8 @@
 
 #include "iterator_filter.h"
 
-#include <catch2/catch_test_macros.hpp>
-
-#include "fixtures.h"
 #include "impl/allocator/default_allocator.h"
+#include "unittest.h"
 #include "vsag/iterator_context.h"
 
 using namespace vsag;

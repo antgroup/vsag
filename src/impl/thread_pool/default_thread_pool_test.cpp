@@ -15,8 +15,8 @@
 #include "default_thread_pool.h"
 
 #include <atomic>
-#include <catch2/catch_test_macros.hpp>
 
+#include "unittest.h"
 using namespace vsag;
 
 TEST_CASE("DefaultThreadPool Basic Test", "[ut][DefaultThreadPool]") {

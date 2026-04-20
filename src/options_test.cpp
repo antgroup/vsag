@@ -15,8 +15,7 @@
 
 #include "vsag/options.h"
 
-#include <catch2/catch_test_macros.hpp>
-
+#include "unittest.h"
 TEST_CASE("Options Test", "[ut][option]") {
     uint64_t block_size_limit = 134217728;
     vsag::Options::Instance().set_block_size_limit(block_size_limit);

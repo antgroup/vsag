@@ -13,11 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <catch2/catch_test_macros.hpp>
-
 #include "factory/resource_owner_wrapper.h"
 #include "index_common_param.h"
-
+#include "unittest.h"
 TEST_CASE("IndexCommonParam Basic Test", "[ut][IndexCommonParam]") {
     std::shared_ptr<vsag::Resource> resource =
         std::make_shared<vsag::ResourceOwnerWrapper>(new vsag::Resource(), true);

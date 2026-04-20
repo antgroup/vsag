@@ -55,7 +55,8 @@ Targets:
 help:                    ## Show the help.
 ##
 ## ================ development ================
-debug:                   ## Build vsag with debug options.
+debug:                   ## Build the default debug configuration.
+dev:                     ## Build the full developer configuration.
 test:                    ## Build and run unit tests.
 asan:                    ## Build with AddressSanitizer option.
 test_asan: asan          ## Run unit tests with AddressSanitizer option.
@@ -79,13 +80,20 @@ clean-release:           ## Clear build-release/ directory.
 install:                 ## Build and install the release version of vsag.
 ```
 
+Build target behavior:
+
+- `make debug` builds the default minimal configuration. It does not enable tests, examples, tools, Python bindings, or `mockimpl` unless they are explicitly turned on.
+- `make dev` builds the full developer configuration with tests, examples, tools, Python bindings, and `mockimpl` enabled.
+- `make test`, `make asan`, `make tsan`, and the related parallel test targets automatically enable tests and `mockimpl`.
+- `make release` follows the same minimal defaults as `make debug`. Enable optional components explicitly when needed, for example `make release VSAG_ENABLE_TOOLS=ON`.
+
 ## CMake Build Options
 
 VSAG provides several CMake options to customize the build:
 
 ### BLAS Library Options
 
-- **`ENABLE_INTEL_MKL`** (default: `ON` on x86_64, `OFF` otherwise)
+- **`ENABLE_INTEL_MKL`** (default: `OFF`)
   - Enable Intel MKL as the BLAS backend (x86_64 platforms only)
   - When disabled, OpenBLAS is used instead
   - MKL resolution uses `MKL_PATH`, `OMP_PATH`, and `MKL_INCLUDE_PATH` as CMake cache overrides when the libraries are not installed in standard locations
@@ -112,7 +120,22 @@ VSAG provides several CMake options to customize the build:
 
 ### Other Build Options
 
-For a complete list of build options, see the `option()` directives in `CMakeLists.txt`.
+- **`ENABLE_TESTS`** (default: `OFF`)
+  - Build unit tests and functional tests
+
+- **`ENABLE_EXAMPLES`** (default: `OFF`)
+  - Build C++ example programs under `examples/cpp/`
+
+- **`ENABLE_TOOLS`** (default: `OFF`)
+  - Build tools under `tools/`
+
+- **`ENABLE_PYBINDS`** (default: `OFF`)
+  - Build the `_pyvsag` Python extension module
+
+- **`ENABLE_MOCKIMPL`** (default: `OFF`)
+  - Build the `mockimpl` targets used by interface and compatibility-style testing
+
+For a complete list of build options, see the `option()` directives in `cmake/VSAGOptions.cmake`.
 
 ## Project Structure
 - `cmake/`: cmake util functions

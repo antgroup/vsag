@@ -371,6 +371,23 @@ public:
      */
     virtual std::vector<std::string>
     GetStatistics(const std::vector<std::string>& stat_keys) const = 0;
+
+    /**
+     * @brief Sets the Reasoning report for the dataset.
+     *
+     * @param reasoning_json The Reasoning report as a JSON string.
+     * @return DatasetPtr A shared pointer to the dataset with updated Reasoning.
+     */
+    virtual DatasetPtr
+    Reasoning(const std::string& reasoning_json) = 0;
+
+    /**
+     * @brief Retrieves the Reasoning report of the dataset.
+     *
+     * @return const std::string& The Reasoning report JSON string.
+     */
+    virtual const std::string&
+    GetReasoning() const = 0;
 };
 
 };  // namespace vsag

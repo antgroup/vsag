@@ -1,0 +1,21 @@
+name: Update Contributors
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  contributors:
+    runs-on: ubuntu-latest
+    name: Update contributors in README
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Contribute List
+        uses: akhilmhdh/contributors-readme-action@v2.3.11
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -15,18 +15,15 @@
 
 #include "odescent_graph_builder.h"
 
-#include <catch2/catch_test_macros.hpp>
-#include <catch2/generators/catch_generators.hpp>
 #include <filesystem>
 #include <set>
 
 #include "datacell/flatten_interface.h"
 #include "datacell/graph_interface.h"
-#include "fixtures.h"
 #include "impl/allocator/safe_allocator.h"
 #include "io/memory_io_parameter.h"
 #include "quantization/fp32_quantizer_parameter.h"
-
+#include "unittest.h"
 uint64_t
 calculate_overlap(const vsag::Vector<uint32_t>& vec1, const vsag::Vector<uint32_t>& vec2, int K) {
     int size1 = std::min(K, static_cast<int>(vec1.size()));

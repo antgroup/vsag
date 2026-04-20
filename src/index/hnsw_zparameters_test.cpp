@@ -15,7 +15,7 @@
 
 #include "hnsw_zparameters.h"
 
-#include <catch2/catch_test_macros.hpp>
+#include "unittest.h"
 
 TEST_CASE("create hnsw with correct parameter", "[ut][hnsw]") {
     vsag::IndexCommonParam common_param;

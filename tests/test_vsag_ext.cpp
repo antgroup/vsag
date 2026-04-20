@@ -18,8 +18,7 @@
 #include <cstdint>
 #include <fstream>
 
-#include "fixtures/fixtures.h"
-#include "fixtures/test_reader.h"
+#include "functest.h"
 #include "vsag/dataset.h"
 #include "vsag/vsag_ext.h"
 

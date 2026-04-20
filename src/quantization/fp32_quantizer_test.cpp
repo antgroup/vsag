@@ -15,13 +15,12 @@
 
 #include "fp32_quantizer.h"
 
-#include <catch2/catch_test_macros.hpp>
 #include <memory>
 
-#include "fixtures.h"
 #include "impl/allocator/default_allocator.h"
 #include "impl/allocator/safe_allocator.h"
 #include "quantizer_test.h"
+#include "unittest.h"
 
 using namespace vsag;
 

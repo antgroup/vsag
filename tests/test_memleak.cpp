@@ -22,8 +22,8 @@
 #include <iostream>
 #include <unordered_map>
 
-#include "fixtures.h"
 #include "fmt/format.h"
+#include "functest.h"
 #include "vsag/allocator.h"
 #include "vsag/options.h"
 #include "vsag/vsag.h"
