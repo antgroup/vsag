@@ -128,4 +128,3 @@ Mergify enforces these via check runs. Always add both labels when creating a PR
 - `README.md`
 - `CONTRIBUTING.md`
 - `DEVELOPMENT.md`
-- `.github/copilot-instructions.md`
