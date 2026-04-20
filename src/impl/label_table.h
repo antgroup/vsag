@@ -353,6 +353,29 @@ public:
         return false;
     }
 
+    void
+    Move(InnerIdType from, InnerIdType to) {
+        if (from == to) {
+            return;
+        }
+
+        if (use_reverse_map_) {
+            label_remap_.erase(label_table_[to]);
+        }
+        label_table_[to] = label_table_[from];
+        if (use_reverse_map_) {
+            label_remap_[label_table_[to]] = to;
+        }
+    }
+
+    void
+    ShrinkToFit(InnerIdType capacity) {
+        label_table_.resize(capacity);
+        if (duplicate_tracker_ != nullptr) {
+            duplicate_tracker_->Resize(capacity);
+        }
+    }
+
 private:
     UnorderedSet<InnerIdType> deleted_ids_;       // Record deleted ids.
     FilterPtr deleted_ids_filter_{nullptr};       // Filter to filter out deleted ids.

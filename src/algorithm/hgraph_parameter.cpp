@@ -91,6 +91,7 @@ HGraphParameter::FromJson(const JsonType& json) {
         if (graph_param != nullptr) {
             hierarchical_graph_param->remove_flag_bit_ = graph_param->remove_flag_bit_;
             hierarchical_graph_param->support_delete_ = graph_param->support_remove_;
+            hierarchical_graph_param->use_reverse_edges_ = graph_param->use_reverse_edges_;
         } else {
             hierarchical_graph_param->support_delete_ = false;
         }

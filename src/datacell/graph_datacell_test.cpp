@@ -157,3 +157,110 @@ TEST_CASE("GraphDataCell duplicate tracker follows parameter", "[ut][GraphDataCe
     REQUIRE(enabled_graph->GetDuplicateIds(0) == std::vector<InnerIdType>{1});
     REQUIRE(enabled_graph->GetDuplicateIds(1) == std::vector<InnerIdType>{0});
 }
+
+TEST_CASE("GraphDataCell Reverse Edges", "[ut][GraphDataCell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto dim = 32;
+    auto max_degree = 32;
+    auto io_type = "block_memory_io";
+    constexpr const char* graph_param_temp =
+        R"(
+        {{
+            "io_params": {{
+                "type": "{}"
+            }},
+            "max_degree": {},
+            "use_reverse_edges": true
+        }}
+        )";
+
+    IndexCommonParam common_param;
+    common_param.dim_ = dim;
+    common_param.allocator_ = allocator;
+    auto param_str = fmt::format(graph_param_temp, io_type, max_degree);
+    auto param_json = JsonType::Parse(param_str);
+    auto graph_param = GraphInterfaceParameter::GetGraphParameterByJson(
+        GraphStorageTypes::GRAPH_STORAGE_TYPE_VALUE_FLAT, param_json);
+
+    auto graph = GraphInterface::MakeInstance(graph_param, common_param);
+    GraphInterfaceTest test(graph);
+    test.ReverseEdgeTest(10);
+}
+
+TEST_CASE("GraphDataCell Move", "[ut][GraphDataCell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto dim = 32;
+    auto max_degree = 32;
+    auto io_type = "block_memory_io";
+    constexpr const char* graph_param_temp =
+        R"(
+        {{
+            "io_params": {{
+                "type": "{}"
+            }},
+            "max_degree": {},
+            "use_reverse_edges": true
+        }}
+        )";
+
+    IndexCommonParam common_param;
+    common_param.dim_ = dim;
+    common_param.allocator_ = allocator;
+    auto param_str = fmt::format(graph_param_temp, io_type, max_degree);
+    auto param_json = JsonType::Parse(param_str);
+    auto graph_param = GraphInterfaceParameter::GetGraphParameterByJson(
+        GraphStorageTypes::GRAPH_STORAGE_TYPE_VALUE_FLAT, param_json);
+
+    auto graph = GraphInterface::MakeInstance(graph_param, common_param);
+    GraphInterfaceTest test(graph);
+    test.MoveTest(10);
+}
+
+TEST_CASE("GraphDataCell Move same id keeps neighbors", "[ut][GraphDataCell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr int dim = 32;
+    constexpr int max_degree = 8;
+    constexpr const char* graph_param_temp =
+        R"(
+        {{
+            "io_params": {{
+                "type": "block_memory_io"
+            }},
+            "max_degree": {},
+            "use_reverse_edges": true
+        }}
+        )";
+
+    IndexCommonParam common_param;
+    common_param.dim_ = dim;
+    common_param.allocator_ = allocator;
+    auto param_str = fmt::format(graph_param_temp, max_degree);
+    auto param_json = JsonType::Parse(param_str);
+    auto graph_param = GraphInterfaceParameter::GetGraphParameterByJson(
+        GraphStorageTypes::GRAPH_STORAGE_TYPE_VALUE_FLAT, param_json);
+
+    auto graph = GraphInterface::MakeInstance(graph_param, common_param);
+    graph->Resize(4);
+
+    Vector<InnerIdType> empty(allocator.get());
+    Vector<InnerIdType> neighbors(allocator.get());
+    neighbors.emplace_back(1);
+    neighbors.emplace_back(2);
+
+    graph->InsertNeighborsById(0, neighbors);
+    graph->InsertNeighborsById(1, empty);
+    graph->InsertNeighborsById(2, empty);
+
+    graph->Move(0, 0);
+
+    Vector<InnerIdType> moved_neighbors(allocator.get());
+    graph->GetNeighbors(0, moved_neighbors);
+    REQUIRE(moved_neighbors.size() == 2);
+    REQUIRE(moved_neighbors[0] == 1);
+    REQUIRE(moved_neighbors[1] == 2);
+
+    Vector<InnerIdType> incoming(allocator.get());
+    graph->GetIncomingNeighbors(1, incoming);
+    REQUIRE(incoming.size() == 1);
+    REQUIRE(incoming[0] == 0);
+}

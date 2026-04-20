@@ -83,6 +83,9 @@ public:
     int64_t
     GetMemoryUsage() const override;
 
+    void
+    Move(InnerIdType from, InnerIdType to) override;
+
     inline void
     SetIO(std::shared_ptr<BasicIO<IOTmpl>> io) {
         this->io_ = io;
@@ -180,5 +183,18 @@ ExtraInfoDataCell<IOTmpl>::GetMemoryUsage() const {
         memory += this->io_->GetMemoryUsage();
     }
     return memory;
+}
+
+template <typename IOTmpl>
+void
+ExtraInfoDataCell<IOTmpl>::Move(InnerIdType from, InnerIdType to) {
+    bool need_release = false;
+    const char* extra_info = this->GetExtraInfoById(from, need_release);
+    this->io_->Write(reinterpret_cast<const uint8_t*>(extra_info),
+                     extra_info_size_,
+                     static_cast<uint64_t>(to) * static_cast<uint64_t>(extra_info_size_));
+    if (need_release) {
+        this->io_->Release(reinterpret_cast<const uint8_t*>(extra_info));
+    }
 }
 }  // namespace vsag

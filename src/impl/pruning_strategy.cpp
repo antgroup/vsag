@@ -22,6 +22,28 @@
 namespace vsag {
 
 void
+select_edges_by_heuristic(Vector<InnerIdType>& neighbors,
+                          InnerIdType node_id,
+                          uint64_t max_size,
+                          const FlattenInterfacePtr& flatten,
+                          Allocator* allocator,
+                          float alpha) {
+    auto edges = std::make_shared<StandardHeap<true, false>>(allocator, -1);
+    for (const auto& neighbor : neighbors) {
+        float dist = flatten->ComputePairVectors(node_id, neighbor);
+        edges->Push(dist, neighbor);
+    }
+
+    select_edges_by_heuristic(edges, max_size, flatten, allocator, alpha);
+
+    neighbors.clear();
+    while (not edges->Empty()) {
+        neighbors.emplace_back(edges->Top().second);
+        edges->Pop();
+    }
+}
+
+void
 select_edges_by_heuristic(const DistHeapPtr& edges,
                           uint64_t max_size,
                           const FlattenInterfacePtr& flatten,

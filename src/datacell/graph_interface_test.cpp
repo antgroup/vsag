@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -250,4 +249,121 @@ GraphInterfaceTest::MergeTest(GraphInterfacePtr& other, int count) {
                     0);
         }
     }
+}
+
+void
+GraphInterfaceTest::ReverseEdgeTest(int count) {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto max_degree = this->graph_->MaximumDegree();
+    this->graph_->Resize(count);
+
+    std::unordered_map<InnerIdType, std::shared_ptr<Vector<InnerIdType>>> maps =
+        generate_graph(count, max_degree, allocator.get());
+
+    for (auto& [key, value] : maps) {
+        this->graph_->InsertNeighborsById(key, *value);
+    }
+
+    auto test_func = [&]() {
+        std::unordered_map<InnerIdType, std::vector<InnerIdType>> expected_reverse(count);
+        for (int i = 0; i < count; ++i) {
+            Vector<InnerIdType> neighs(allocator.get());
+            this->graph_->GetNeighbors(i, neighs);
+            for (auto nei : neighs) {
+                expected_reverse[nei].emplace_back(i);
+            }
+        }
+
+        for (int i = 0; i < count; ++i) {
+            Vector<InnerIdType> incoming(allocator.get());
+            this->graph_->GetIncomingNeighbors(i, incoming);
+            auto it = expected_reverse.find(i);
+            if (it != expected_reverse.end()) {
+                std::sort(incoming.begin(), incoming.end());
+                auto expected = it->second;
+                std::sort(expected.begin(), expected.end());
+                REQUIRE(incoming.size() == expected.size());
+                REQUIRE(memcmp(incoming.data(),
+                               expected.data(),
+                               incoming.size() * sizeof(InnerIdType)) == 0);
+            } else {
+                REQUIRE(incoming.empty());
+            }
+        }
+    };
+
+    SECTION("Test GetIncomingNeighbors") {
+        test_func();
+    }
+
+    SECTION("Test Update Reverse Edges") {
+        InnerIdType test_id = 0;
+        Vector<InnerIdType> old_neighbors(allocator.get());
+        this->graph_->GetNeighbors(test_id, old_neighbors);
+
+        Vector<InnerIdType> new_neighbors(allocator.get());
+        for (int i = 0; i < max_degree && i < count - 1; ++i) {
+            new_neighbors.push_back(i + 10);
+        }
+        this->graph_->InsertNeighborsById(test_id, new_neighbors);
+        Vector<InnerIdType> get_neighbors(allocator.get());
+        this->graph_->GetNeighbors(test_id, get_neighbors);
+        REQUIRE(memcmp(get_neighbors.data(),
+                       new_neighbors.data(),
+                       get_neighbors.size() * sizeof(InnerIdType)) == 0);
+        test_func();
+    }
+}
+
+void
+GraphInterfaceTest::MoveTest(int count) {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto max_degree = this->graph_->MaximumDegree();
+    this->graph_->Resize(count * 2);
+
+    std::unordered_map<InnerIdType, std::shared_ptr<Vector<InnerIdType>>> maps =
+        generate_graph(count, max_degree, allocator.get());
+
+    for (auto& [key, value] : maps) {
+        this->graph_->InsertNeighborsById(key, *value);
+    }
+    constexpr int move_count = 20;
+    for (int ii = 0; ii < move_count; ++ii) {
+        InnerIdType from = count - 1 - ii;
+        InnerIdType to = ii;
+
+        this->graph_->Move(from, to);
+    }
+    count -= move_count;
+
+    auto test_func = [&]() {
+        std::unordered_map<InnerIdType, std::vector<InnerIdType>> expected_reverse(count);
+        for (int i = 0; i < count; ++i) {
+            Vector<InnerIdType> neighs(allocator.get());
+            this->graph_->GetNeighbors(i, neighs);
+            for (auto nei : neighs) {
+                REQUIRE(nei < count);
+                expected_reverse[nei].emplace_back(i);
+            }
+        }
+
+        for (int i = 0; i < count; ++i) {
+            Vector<InnerIdType> incoming(allocator.get());
+            this->graph_->GetIncomingNeighbors(i, incoming);
+            auto it = expected_reverse.find(i);
+            if (it != expected_reverse.end()) {
+                std::sort(incoming.begin(), incoming.end());
+                auto expected = it->second;
+                std::sort(expected.begin(), expected.end());
+                REQUIRE(incoming.size() == expected.size());
+                REQUIRE(memcmp(incoming.data(),
+                               expected.data(),
+                               incoming.size() * sizeof(InnerIdType)) == 0);
+            } else {
+                REQUIRE(incoming.empty());
+            }
+        }
+    };
+
+    test_func();
 }

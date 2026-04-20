@@ -85,6 +85,16 @@ public:
         return std::make_shared<SparseDuplicateTracker>(allocator_);
     }
 
+    void
+    GetIncomingNeighbors(InnerIdType id, Vector<InnerIdType>& neighbors) const override;
+
+    void
+    Move(InnerIdType from, InnerIdType to) override;
+
+    void
+    ShrinkToFit(InnerIdType capacity) override {
+    }
+
 private:
     uint32_t code_line_size_{0};
     Allocator* const allocator_{nullptr};
