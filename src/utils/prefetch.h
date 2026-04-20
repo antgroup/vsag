@@ -16,16 +16,29 @@
 #pragma once
 #include <algorithm>
 
+#ifdef _MSC_VER
+#include <intrin.h>
+#endif
+
 #include "simd/simd.h"
 
 namespace vsag {
 template <int N>
+#ifdef _MSC_VER
+__forceinline void
+PrefetchImpl(const void* data) {
+#else
 __inline void __attribute__((__always_inline__)) PrefetchImpl(const void* data) {
+#endif
     if constexpr (N > 24) {
         return PrefetchImpl<24>(data);
     }
     for (int i = 0; i < N; ++i) {
+#ifdef _MSC_VER
+        _mm_prefetch(static_cast<const char*>(data) + i * 64, _MM_HINT_T0);
+#else
         __builtin_prefetch(static_cast<const char*>(data) + i * 64, 0, 3);
+#endif
     }
 }
 

@@ -35,24 +35,33 @@ target_include_directories (vsag_diskann_headers INTERFACE
 
 add_library (diskann STATIC ${DISKANN_SOURCES})
 target_link_libraries (diskann PUBLIC vsag_diskann_headers)
-target_compile_options (diskann PRIVATE
-    -fdata-sections
-    -ffunction-sections
-    -ftree-vectorize
-    -fno-builtin-malloc
-    -fno-builtin-calloc
-    -fno-builtin-realloc
-    -fno-builtin-free
-    -fopenmp
-    -fopenmp-simd
-    -funroll-loops
-    -Wfatal-errors)
-target_compile_definitions (diskann PRIVATE ENABLE_CUSTOM_LOGGER=1)
-target_link_options (diskann PRIVATE -Wl,--gc-sections)
-if (CMAKE_BUILD_TYPE STREQUAL "Release")
+if (MSVC)
+    target_compile_options (diskann PRIVATE /openmp /arch:AVX2)
+    target_compile_definitions (diskann PRIVATE
+        _WINDOWS
+        DISKANN_DLLEXPORT=
+        ENABLE_AVX
+        ENABLE_CUSTOM_LOGGER=1)
+else ()
+    target_compile_options (diskann PRIVATE
+        -fdata-sections
+        -ffunction-sections
+        -ftree-vectorize
+        -fno-builtin-malloc
+        -fno-builtin-calloc
+        -fno-builtin-realloc
+        -fno-builtin-free
+        -fopenmp
+        -fopenmp-simd
+        -funroll-loops
+        -Wfatal-errors)
+    target_compile_definitions (diskann PRIVATE ENABLE_CUSTOM_LOGGER=1)
+    target_link_options (diskann PRIVATE -Wl,--gc-sections)
+endif ()
+if (CMAKE_BUILD_TYPE STREQUAL "Release" AND NOT MSVC)
     target_compile_options (diskann PRIVATE -g1)
 endif ()
-if (ENABLE_ASAN)
+if (ENABLE_ASAN AND NOT MSVC)
     target_compile_options (diskann PRIVATE -Wno-pass-failed)
 endif ()
 if (VSAG_BLAS_BACKEND STREQUAL "openblas")
@@ -72,6 +81,15 @@ endif ()
 set_property (TARGET diskann PROPERTY CXX_STANDARD 17)
 add_dependencies (diskann boost)
 target_link_libraries (diskann PRIVATE ${BLAS_LIBRARIES})
+
+if (WIN32)
+    get_filename_component (_compiler_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    get_filename_component (_llvm_root "${_compiler_dir}" DIRECTORY)
+    find_library (_libomp libomp PATHS "${_llvm_root}/lib" NO_DEFAULT_PATH)
+    if (_libomp)
+        target_link_libraries (diskann PRIVATE ${_libomp})
+    endif ()
+endif ()
 
 install (
     TARGETS diskann

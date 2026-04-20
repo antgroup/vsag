@@ -10,11 +10,7 @@
 #include "pq_flash_index.h"
 #include "cosine_similarity.h"
 
-#ifdef _WINDOWS
-#include "windows_aligned_file_reader.h"
-#else
 #include "local_file_reader.h"
-#endif
 
 #define READ_U64(stream, val) stream.read((char *)&val, sizeof(uint64_t))
 #define READ_U32(stream, val) stream.read((char *)&val, sizeof(uint32_t))

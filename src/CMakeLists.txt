@@ -42,8 +42,20 @@ set_target_properties (vsag PROPERTIES
     CXX_VISIBILITY_PRESET default
     VISIBILITY_INLINES_HIDDEN OFF)
 
+if (WIN32)
+    get_filename_component (_compiler_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    get_filename_component (_llvm_root "${_compiler_dir}" DIRECTORY)
+    find_library (_libomp libomp PATHS "${_llvm_root}/lib" NO_DEFAULT_PATH)
+    set (VSAG_PLATFORM_LIBS "")
+    if (_libomp)
+        list (APPEND VSAG_PLATFORM_LIBS ${_libomp})
+    endif ()
+else ()
+    set (VSAG_PLATFORM_LIBS pthread m dl)
+endif ()
+
 set (VSAG_DEP_LIBS antlr4-autogen antlr4-runtime diskann simd io quantizer storage utils factory analyzer
-      datacell ${IMPL_LIBS} ${ALGORITHM_LIBS} attr pthread m dl fmt::fmt nlohmann_json::nlohmann_json roaring ${BLAS_LIBRARIES})
+      datacell ${IMPL_LIBS} ${ALGORITHM_LIBS} attr ${VSAG_PLATFORM_LIBS} fmt::fmt nlohmann_json::nlohmann_json roaring ${BLAS_LIBRARIES})
 
 target_link_libraries (vsag
     PUBLIC vsag_src_common

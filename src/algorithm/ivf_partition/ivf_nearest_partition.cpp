@@ -19,6 +19,7 @@
 
 #include <atomic>
 #include <cstdlib>
+#include <numeric>
 
 #include "algorithm/hgraph.h"
 #include "algorithm/inner_index_interface.h"

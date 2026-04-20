@@ -1819,7 +1819,7 @@ void Index<T, TagT, LabelT>::link(const IndexWriteParameters &parameters)
             _final_graph[node] = pruned_list;
             if (_partial_build)
             {
-                LockGuard guard(_builded_nodes_lock);
+                std::lock_guard<std::mutex> guard(_builded_nodes_lock);
                 _builded_nodes->insert(node);
                 if (_builded_nodes->size() * _batch_num >= _round * _nd)
                 {

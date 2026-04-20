@@ -16,7 +16,14 @@
 #include "buffer_io.h"
 
 #include <fcntl.h>
+
+#ifndef _WIN32
 #include <unistd.h>
+#endif
+#ifdef _WIN32
+#include <io.h>
+#include <share.h>
+#endif
 
 #include <filesystem>
 
@@ -31,7 +38,11 @@ BufferIO::BufferIO(std::string filename, Allocator* allocator)
         throw VsagException(ErrorType::INTERNAL_ERROR,
                             fmt::format("{} is a directory", this->filepath_));
     }
+#ifdef _WIN32
+    this->fd_ = _open(filepath_.c_str(), _O_CREAT | _O_RDWR | _O_BINARY, _S_IREAD | _S_IWRITE);
+#else
     this->fd_ = open(filepath_.c_str(), O_CREAT | O_RDWR, 0644);
+#endif
     if (this->fd_ < 0) {
         throw VsagException(ErrorType::INTERNAL_ERROR,
                             fmt::format("open file {} error {}", this->filepath_, strerror(errno)));

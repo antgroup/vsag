@@ -327,6 +327,13 @@ VSAG referenced the following works during its implementation:
                 </a>
             </td>
             <td align="center">
+                <a href="https://github.com/LINxiansheng">
+                    <img src="https://avatars.githubusercontent.com/u/18351861?v=4" width="100;" alt="LINxiansheng"/>
+                    <br />
+                    <sub><b>LIN</b></sub>
+                </a>
+            </td>
+            <td align="center">
                 <a href="https://github.com/mingyu-hkustgz">
                     <img src="https://avatars.githubusercontent.com/u/151442761?v=4" width="100;" alt="mingyu-hkustgz"/>
                     <br />
@@ -340,6 +347,8 @@ VSAG referenced the following works during its implementation:
                     <sub><b>Zihao Wang</b></sub>
                 </a>
             </td>
+		</tr>
+		<tr>
             <td align="center">
                 <a href="https://github.com/cubicc">
                     <img src="https://avatars.githubusercontent.com/u/51120671?v=4" width="100;" alt="cubicc"/>
@@ -347,8 +356,6 @@ VSAG referenced the following works during its implementation:
                     <sub><b>cubicc</b></sub>
                 </a>
             </td>
-		</tr>
-		<tr>
             <td align="center">
                 <a href="https://github.com/dasurax">
                     <img src="https://avatars.githubusercontent.com/u/9841872?v=4" width="100;" alt="dasurax"/>

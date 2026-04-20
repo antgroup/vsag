@@ -1137,7 +1137,7 @@ Normalize(const float* from, float* to, uint64_t dim) {
 void
 Prefetch(const void* data) {
 #if defined(ENABLE_SSE)
-    _mm_prefetch(data, _MM_HINT_T0);
+    _mm_prefetch(static_cast<const char*>(data), _MM_HINT_T0);
 #endif
 };
 

@@ -74,16 +74,23 @@ if (DIST_CONTAINS_SVE)
     set_source_files_properties (sve.cpp PROPERTIES COMPILE_FLAGS "-march=armv8-a+sve")
 endif ()
 add_library (simd STATIC ${SIMD_SRCS})
-target_compile_options (simd PRIVATE
-    -O3
-    -ftree-vectorize
-    -fno-builtin-malloc
-    -fno-builtin-calloc
-    -fno-builtin-realloc
-    -fno-builtin-free
-    -fopenmp
-    -fopenmp-simd
-    -funroll-loops)
+if (MSVC)
+    target_compile_options (simd PRIVATE /O2)
+    if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        target_compile_options (simd PRIVATE /openmp)
+    endif ()
+else ()
+    target_compile_options (simd PRIVATE
+        -O3
+        -ftree-vectorize
+        -fno-builtin-malloc
+        -fno-builtin-calloc
+        -fno-builtin-realloc
+        -fno-builtin-free
+        -fopenmp
+        -fopenmp-simd
+        -funroll-loops)
+endif ()
 
 function (simd_add_definitions flag_variable definition)
     if (${flag_variable})

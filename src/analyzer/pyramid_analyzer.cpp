@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <numeric>
 #include <random>
 
 #include "impl/heap/standard_heap.h"
