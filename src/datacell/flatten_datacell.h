@@ -68,6 +68,9 @@ public:
     void
     InsertVector(const void* vector, InnerIdType idx) override;
 
+    void
+    InsertCodes(const uint8_t* codes, InnerIdType idx) override;
+
     bool
     UpdateVector(const void* vector,
                  InnerIdType idx = std::numeric_limits<InnerIdType>::max()) override;
@@ -123,6 +126,11 @@ public:
 
     [[nodiscard]] MetricType
     GetMetricType() override;
+
+    [[nodiscard]] void*
+    GetQuantizer() override {
+        return quantizer_.get();
+    }
 
     [[nodiscard]] const uint8_t*
     GetCodesById(InnerIdType id, bool& need_release) const override;
@@ -240,6 +248,22 @@ FlattenDataCell<QuantTmpl, IOTmpl>::InsertVector(const void* vector, InnerIdType
     quantizer_->EncodeOne(static_cast<const float*>(vector), codes.data);
     io_->Write(
         codes.data, code_size_, static_cast<uint64_t>(idx) * static_cast<uint64_t>(code_size_));
+}
+
+template <typename QuantTmpl, typename IOTmpl>
+void
+FlattenDataCell<QuantTmpl, IOTmpl>::InsertCodes(const uint8_t* codes, InnerIdType idx) {
+    {
+        std::lock_guard lock(mutex_);
+        if (idx == std::numeric_limits<InnerIdType>::max()) {
+            idx = total_count_;
+            ++total_count_;
+        } else {
+            total_count_ = std::max(total_count_, idx + 1);
+        }
+    }
+    // Directly write codes without encoding
+    io_->Write(codes, code_size_, static_cast<uint64_t>(idx) * static_cast<uint64_t>(code_size_));
 }
 
 template <typename QuantTmpl, typename IOTmpl>

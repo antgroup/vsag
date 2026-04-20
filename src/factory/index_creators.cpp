@@ -20,6 +20,7 @@
 
 #include "algorithm/brute_force.h"
 #include "algorithm/hgraph.h"
+#include "algorithm/hgraph_diskann_loader.h"
 #include "algorithm/ivf.h"
 #include "algorithm/pyramid.h"
 #include "algorithm/pyramid_zparameters.h"
@@ -115,6 +116,13 @@ create_hgraph_index(JsonType& parsed_params, const IndexCommonParam& index_commo
 }
 
 tl::expected<std::shared_ptr<Index>, Error>
+create_hgraph_diskann_loader_index(JsonType& parsed_params,
+                                   const IndexCommonParam& index_common_params) {
+    return create_index_impl_with_param_log<HGraphDiskANNLoader>(
+        "created a hgraph_diskann_loader index", parsed_params, index_common_params);
+}
+
+tl::expected<std::shared_ptr<Index>, Error>
 create_ivf_index(JsonType& parsed_params, const IndexCommonParam& index_common_params) {
     return create_index_impl_with_param_log<IVF>(
         "created an ivf index", parsed_params, index_common_params);
@@ -143,6 +151,7 @@ register_all_index_creators() {
         register_index_creator(INDEX_BRUTE_FORCE, &create_brute_force_index);
         register_index_creator(INDEX_DISKANN, &create_diskann_index);
         register_index_creator(INDEX_HGRAPH, &create_hgraph_index);
+        register_index_creator(INDEX_HGRAPH_DISKANN_LOADER, &create_hgraph_diskann_loader_index);
         register_index_creator(INDEX_IVF, &create_ivf_index);
         register_index_creator(INDEX_PYRAMID, &create_pyramid_index);
         register_index_creator(INDEX_SPARSE, &create_sparse_index);
