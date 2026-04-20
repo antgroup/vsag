@@ -251,6 +251,26 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Serialize File", "
     vsag::Options::Instance().set_block_size_limit(origin_size);
 }
 
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
+                             "SINDI Deserialize Without Footer Defaults To NonBuffered Read",
+                             "[ft][sindi]") {
+    fixtures::SINDIParam writer_param;
+    writer_param.deserialize_without_footer = true;
+    writer_param.deserialize_without_buffer = true;
+    auto writer_build_param = fixtures::SINDITestIndex::GenerateBuildParameter(writer_param);
+
+    fixtures::SINDIParam reader_param;
+    reader_param.deserialize_without_footer = true;
+    reader_param.deserialize_without_buffer = false;
+    auto reader_build_param = fixtures::SINDITestIndex::GenerateBuildParameter(reader_param);
+
+    auto index = TestFactory("sindi", writer_build_param, true);
+    auto index2 = TestFactory("sindi", reader_build_param, true);
+    auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
+    TestBuildIndex(index, dataset, true);
+    TestSerializeFile(index, index2, dataset, fixtures::SINDITestIndex::search_param, true);
+}
+
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "Sindi Duplicate ID Test", "[ft][sindi]") {
     fixtures::SINDIParam param;
     param.use_reorder = GENERATE(true, false);
