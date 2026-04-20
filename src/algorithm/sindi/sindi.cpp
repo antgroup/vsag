@@ -372,7 +372,7 @@ SINDI::Deserialize(StreamReader& reader) {
 
     BufferStreamReader buffer_reader(
         &reader, std::numeric_limits<uint64_t>::max(), this->allocator_);
-    if (not deserialize_without_buffer_) {
+    if (not deserialize_without_buffer_ and not deserialize_without_footer_) {
         reader_ptr = &buffer_reader;
     }
     auto& reader_ref = *reader_ptr;
