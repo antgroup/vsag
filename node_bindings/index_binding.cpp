@@ -32,23 +32,22 @@ class VsagIndex : public Napi::ObjectWrap<VsagIndex> {
 public:
     static Napi::Function
     GetClass(Napi::Env env) {
-        return DefineClass(
-            env,
-            "Index",
-            {
-                InstanceMethod("build", &VsagIndex::Build),
-                InstanceMethod("add", &VsagIndex::Add),
-                InstanceMethod("remove", &VsagIndex::Remove),
-                InstanceMethod("knnSearch", &VsagIndex::KnnSearch),
-                InstanceMethod("rangeSearch", &VsagIndex::RangeSearch),
-                InstanceMethod("save", &VsagIndex::Save),
-                InstanceMethod("load", &VsagIndex::Load),
-                InstanceMethod("getNumElements", &VsagIndex::GetNumElements),
-                InstanceMethod("getMemoryUsage", &VsagIndex::GetMemoryUsage),
-                InstanceMethod("checkIdExist", &VsagIndex::CheckIdExist),
-                InstanceMethod("getMinMaxId", &VsagIndex::GetMinMaxId),
-                InstanceMethod("calDistanceById", &VsagIndex::CalDistanceById),
-            });
+        return DefineClass(env,
+                           "Index",
+                           {
+                               InstanceMethod("build", &VsagIndex::Build),
+                               InstanceMethod("add", &VsagIndex::Add),
+                               InstanceMethod("remove", &VsagIndex::Remove),
+                               InstanceMethod("knnSearch", &VsagIndex::KnnSearch),
+                               InstanceMethod("rangeSearch", &VsagIndex::RangeSearch),
+                               InstanceMethod("save", &VsagIndex::Save),
+                               InstanceMethod("load", &VsagIndex::Load),
+                               InstanceMethod("getNumElements", &VsagIndex::GetNumElements),
+                               InstanceMethod("getMemoryUsage", &VsagIndex::GetMemoryUsage),
+                               InstanceMethod("checkIdExist", &VsagIndex::CheckIdExist),
+                               InstanceMethod("getMinMaxId", &VsagIndex::GetMinMaxId),
+                               InstanceMethod("calDistanceById", &VsagIndex::CalDistanceById),
+                           });
     }
 
     VsagIndex(const Napi::CallbackInfo& info) : Napi::ObjectWrap<VsagIndex>(info) {
@@ -74,7 +73,7 @@ public:
                         .ThrowAsJavaScriptException();
                     break;
                 case vsag::ErrorType::INVALID_ARGUMENT:
-                    Napi::Error::New(env, "error type: invalid_parameter")
+                    Napi::Error::New(env, "error type: INVALID_ARGUMENT")
                         .ThrowAsJavaScriptException();
                     break;
                 default:
@@ -155,8 +154,7 @@ private:
         Napi::Env env = info.Env();
 
         if (info.Length() < 1) {
-            Napi::TypeError::New(env, "Expected (ids: BigInt64Array)")
-                .ThrowAsJavaScriptException();
+            Napi::TypeError::New(env, "Expected (ids: BigInt64Array)").ThrowAsJavaScriptException();
             return env.Undefined();
         }
 
@@ -192,17 +190,21 @@ private:
             ->Float32Vectors(vector.Data())
             ->Owner(false);
 
-        auto result_ids = Napi::BigInt64Array::New(env, k);
-        auto result_dists = Napi::Float32Array::New(env, k);
-
         auto result = index_->KnnSearch(query, to_int64(k), parameters);
-        if (result.has_value()) {
-            const auto* vsag_ids = result.value()->GetIds();
-            const auto* vsag_distances = result.value()->GetDistances();
-            for (uint64_t i = 0; i < k; ++i) {
-                result_ids[i] = vsag_ids[i];
-                result_dists[i] = vsag_distances[i];
-            }
+        if (!result.has_value()) {
+            Napi::Error::New(env, "KnnSearch failed").ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
+
+        const auto* vsag_ids = result.value()->GetIds();
+        const auto* vsag_distances = result.value()->GetDistances();
+        auto count = static_cast<uint64_t>(result.value()->GetDim());
+
+        auto result_ids = Napi::BigInt64Array::New(env, count);
+        auto result_dists = Napi::Float32Array::New(env, count);
+        for (uint64_t i = 0; i < count; ++i) {
+            result_ids[i] = vsag_ids[i];
+            result_dists[i] = vsag_distances[i];
         }
 
         auto obj = Napi::Object::New(env);
@@ -263,8 +265,7 @@ private:
         Napi::Env env = info.Env();
 
         if (info.Length() < 1 || !info[0].IsString()) {
-            Napi::TypeError::New(env, "Expected (filename: string)")
-                .ThrowAsJavaScriptException();
+            Napi::TypeError::New(env, "Expected (filename: string)").ThrowAsJavaScriptException();
             return env.Undefined();
         }
 
@@ -274,8 +275,11 @@ private:
             Napi::Error::New(env, "Failed to open file for writing").ThrowAsJavaScriptException();
             return env.Undefined();
         }
-        index_->Serialize(file);
+        auto serialize_result = index_->Serialize(file);
         file.close();
+        if (!serialize_result.has_value()) {
+            Napi::Error::New(env, "Failed to serialize index").ThrowAsJavaScriptException();
+        }
 
         return env.Undefined();
     }
@@ -285,8 +289,7 @@ private:
         Napi::Env env = info.Env();
 
         if (info.Length() < 1 || !info[0].IsString()) {
-            Napi::TypeError::New(env, "Expected (filename: string)")
-                .ThrowAsJavaScriptException();
+            Napi::TypeError::New(env, "Expected (filename: string)").ThrowAsJavaScriptException();
             return env.Undefined();
         }
 
@@ -296,8 +299,11 @@ private:
             Napi::Error::New(env, "Failed to open file for reading").ThrowAsJavaScriptException();
             return env.Undefined();
         }
-        index_->Deserialize(file);
+        auto deserialize_result = index_->Deserialize(file);
         file.close();
+        if (!deserialize_result.has_value()) {
+            Napi::Error::New(env, "Failed to deserialize index").ThrowAsJavaScriptException();
+        }
 
         return env.Undefined();
     }
