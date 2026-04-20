@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -44,12 +43,13 @@ GenerateRandomDataset(uint64_t dim,
                       uint64_t extra_info_size = 0,
                       std::string vector_type = "dense",
                       bool has_duplicate = false,
-                      int64_t id_shift = 16) {
+                      int64_t id_shift = 16,
+                      int seed = 47) {
     auto base = vsag::Dataset::Make();
     bool need_normalize = (metric_str != "cosine");
     auto vecs =
-        fixtures::generate_vectors(count, dim, need_normalize, fixtures::RandomValue(0, 564));
-    auto vecs_int8 = fixtures::generate_int8_codes(count, dim, fixtures::RandomValue(0, 564));
+        fixtures::generate_vectors(count, dim, need_normalize, seed);
+    auto vecs_int8 = fixtures::generate_int8_codes(count, dim, seed);
     auto attr_sets = fixtures::generate_attributes(count);
     auto paths = new std::string[count];
     for (int i = 0; i < count; ++i) {
@@ -91,11 +91,11 @@ GenerateNanRandomDataset(uint64_t dim, uint64_t count, std::string metric_str = 
     auto base = vsag::Dataset::Make();
     bool need_normalize = (metric_str != "cosine");
 
+    constexpr int nan_seed = 47;
     std::vector<float> vecs =
-        fixtures::generate_vectors(count, dim, need_normalize, fixtures::RandomValue(0, 564));
-    std::random_device rd;
-    std::mt19937 g(rd());
-    std::uniform_real_distribution real;
+        fixtures::generate_vectors(count, dim, need_normalize, nan_seed);
+    std::mt19937 g(nan_seed + 1);
+    std::uniform_real_distribution<float> real(0.0f, 1.0f);
     for (int i = 0; i < count; ++i) {
         float r = real(g);
         if (r < 0.001) {
@@ -257,7 +257,11 @@ TestDataset::CreateTestDataset(uint64_t dim,
                                std::string vector_type,
                                uint64_t extra_info_size,
                                bool has_duplicate,
-                               int64_t id_shift) {
+                               int64_t id_shift,
+                               bool use_fixed_seed) {
+    constexpr int fixed_seed = 47;
+    int seed = use_fixed_seed ? fixed_seed : fixtures::RandomValue(0, 564);
+
     TestDatasetPtr dataset = std::shared_ptr<TestDataset>(new TestDataset);
     dataset->dim_ = dim;
     dataset->id_shift = id_shift;
@@ -269,10 +273,11 @@ TestDataset::CreateTestDataset(uint64_t dim,
                                            extra_info_size,
                                            vector_type,
                                            has_duplicate,
-                                           dataset->id_shift);
+                                           dataset->id_shift,
+                                           seed);
     constexpr uint64_t query_count = 100;
     dataset->query_ =
-        GenerateRandomDataset(dim, query_count, metric_str, true, extra_info_size, vector_type);
+        GenerateRandomDataset(dim, query_count, metric_str, true, extra_info_size, vector_type, false, 16, seed + 1);
     dataset->filter_query_ = dataset->query_;
     dataset->range_query_ = dataset->query_;
     dataset->valid_ratio_ = valid_ratio;

@@ -28,7 +28,12 @@ namespace fixtures {
 
 template <typename T>
 typename std::enable_if<std::is_floating_point<T>::value, T>::type
-RandomValue(const T& min, const T& max) {
+RandomValue(const T& min, const T& max, int seed = -1) {
+    if (seed >= 0) {
+        std::mt19937 gen(seed);
+        std::uniform_real_distribution<T> dis(min, max);
+        return dis(gen);
+    }
     thread_local std::random_device rd;
     thread_local std::mt19937 gen(rd());
     std::uniform_real_distribution<T> dis(min, max);
@@ -37,7 +42,12 @@ RandomValue(const T& min, const T& max) {
 
 template <typename T>
 typename std::enable_if<std::is_integral<T>::value, T>::type
-RandomValue(const T& min, const T& max) {
+RandomValue(const T& min, const T& max, int seed = -1) {
+    if (seed >= 0) {
+        std::mt19937 gen(seed);
+        std::uniform_int_distribution<T> dis(min, max);
+        return dis(gen);
+    }
     thread_local std::random_device rd;
     thread_local std::mt19937 gen(rd());
     std::uniform_int_distribution<T> dis(min, max);
