@@ -487,6 +487,13 @@ VSAG referenced the following works during its implementation:
                     <sub><b>stuBirdFly</b></sub>
                 </a>
             </td>
+            <td align="center">
+                <a href="https://github.com/jiaweizone">
+                    <img src="https://avatars.githubusercontent.com/u/251354?v=4" width="100;" alt="jiaweizone"/>
+                    <br />
+                    <sub><b>wei</b></sub>
+                </a>
+            </td>
 		</tr>
 	<tbody>
 </table>
