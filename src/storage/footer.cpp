@@ -15,6 +15,8 @@
 
 #include "footer.h"
 
+#include "vsag_exception.h"
+
 namespace vsag {
 
 SerializationFooter::SerializationFooter() {
@@ -45,14 +47,15 @@ SerializationFooter::SetMetadata(const std::string& key, const std::string& valu
         } else {
             json_.Erase(key);
         }
-        throw std::runtime_error("Serialized footer size exceeds 4KB");
+        throw VsagException(ErrorType::INVALID_BINARY, "Serialized footer size exceeds 4KB");
     }
 }
 
 std::string
 SerializationFooter::GetMetadata(const std::string& key) const {
     if (not json_.Contains(key)) {
-        throw std::runtime_error(fmt::format("Footer doesn't contain key ({})", key));
+        throw VsagException(ErrorType::INVALID_BINARY,
+                            fmt::format("Footer doesn't contain key ({})", key));
     }
     return json_[key].GetString();
 }
@@ -81,7 +84,7 @@ SerializationFooter::Deserialize(StreamReader& in_stream) {
     uint32_t serialized_data_size;
     in_stream.Read(reinterpret_cast<char*>(&serialized_data_size), sizeof(serialized_data_size));
     if (serialized_data_size > FOOTER_SIZE - sizeof(uint32_t)) {
-        throw std::runtime_error("Serialized footer size exceeds 4KB");
+        throw VsagException(ErrorType::INVALID_BINARY, "Serialized footer size exceeds 4KB");
     }
 
     // read footer
@@ -92,18 +95,20 @@ SerializationFooter::Deserialize(StreamReader& in_stream) {
     std::string serialized_data(buffer.begin(), buffer.begin() + FOOTER_SIZE - sizeof(uint32_t));
     json_ = JsonType::Parse(serialized_data, false);
     if (json_.IsDiscarded()) {
-        throw std::runtime_error("Failed to parse JSON data");
+        throw VsagException(ErrorType::INVALID_BINARY, "Failed to parse JSON data");
     }
 
     // check
     std::string magic_num = this->GetMetadata(SERIALIZE_MAGIC_NUM);
     if (magic_num != MAGIC_NUM) {
-        throw std::runtime_error(fmt::format("Incorrect footer.MAGIC_NUM: {}", magic_num));
+        throw VsagException(ErrorType::INVALID_BINARY,
+                            fmt::format("Incorrect footer.MAGIC_NUM: {}", magic_num));
     }
 
     std::string version = this->GetMetadata(SERIALIZE_VERSION);
     if (version != VERSION) {
-        throw std::runtime_error(fmt::format("Incorrect footer.VERSION: {}", version));
+        throw VsagException(ErrorType::INVALID_BINARY,
+                            fmt::format("Incorrect footer.VERSION: {}", version));
     }
 }
 

@@ -18,6 +18,7 @@
 #include <fmt/format.h>
 
 #include "vsag/constants.h"
+#include "vsag_exception.h"
 
 namespace vsag {
 
@@ -31,8 +32,10 @@ HnswParameters::FromJson(const JsonType& hnsw_param_obj,
     } else if (index_common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {
         obj.type = DataTypes::DATA_TYPE_INT8;
         if (index_common_param.metric_ != MetricType::METRIC_TYPE_IP) {
-            throw std::invalid_argument(fmt::format(
-                "no support for INT8 when using {}, {} as metric", METRIC_L2, METRIC_COSINE));
+            throw VsagException(
+                ErrorType::INVALID_ARGUMENT,
+                fmt::format(
+                    "no support for INT8 when using {}, {} as metric", METRIC_L2, METRIC_COSINE));
         }
     }
 
@@ -47,7 +50,7 @@ HnswParameters::FromJson(const JsonType& hnsw_param_obj,
 
     // set obj.max_degree
     CHECK_ARGUMENT(hnsw_param_obj.Contains(HNSW_PARAMETER_M),
-                   fmt::format("parameters[{}] must contains {}", INDEX_HNSW, HNSW_PARAMETER_M));
+                   fmt::format("parameters[{}] must contain {}", INDEX_HNSW, HNSW_PARAMETER_M));
     CHECK_ARGUMENT(hnsw_param_obj[HNSW_PARAMETER_M].IsNumberInteger(),
                    fmt::format("parameters[{}] must be integer type", HNSW_PARAMETER_M));
     obj.max_degree = hnsw_param_obj[HNSW_PARAMETER_M].GetInt();
@@ -59,7 +62,7 @@ HnswParameters::FromJson(const JsonType& hnsw_param_obj,
     // set obj.ef_construction
     CHECK_ARGUMENT(
         hnsw_param_obj.Contains(HNSW_PARAMETER_CONSTRUCTION),
-        fmt::format("parameters[{}] must contains {}", INDEX_HNSW, HNSW_PARAMETER_CONSTRUCTION));
+        fmt::format("parameters[{}] must contain {}", INDEX_HNSW, HNSW_PARAMETER_CONSTRUCTION));
     CHECK_ARGUMENT(hnsw_param_obj[HNSW_PARAMETER_CONSTRUCTION].IsNumberInteger(),
                    fmt::format("parameters[{}] must be integer type", HNSW_PARAMETER_CONSTRUCTION));
     obj.ef_construction = hnsw_param_obj[HNSW_PARAMETER_CONSTRUCTION].GetInt();
@@ -93,13 +96,14 @@ HnswSearchParameters::FromJson(const std::string& json_string) {
     } else if (params.Contains(INDEX_FRESH_HNSW)) {
         index_name = INDEX_FRESH_HNSW;
     } else {
-        throw std::invalid_argument(
-            fmt::format("parameters must contains {}/{}", INDEX_HNSW, INDEX_FRESH_HNSW));
+        throw VsagException(
+            ErrorType::INVALID_ARGUMENT,
+            fmt::format("parameters must contain {}/{}", INDEX_HNSW, INDEX_FRESH_HNSW));
     }
 
     CHECK_ARGUMENT(
         params[index_name].Contains(HNSW_PARAMETER_EF_RUNTIME),
-        fmt::format("parameters[{}] must contains {}", index_name, HNSW_PARAMETER_EF_RUNTIME));
+        fmt::format("parameters[{}] must contain {}", index_name, HNSW_PARAMETER_EF_RUNTIME));
     obj.ef_search = params[index_name][HNSW_PARAMETER_EF_RUNTIME].GetInt();
 
     // set obj.use_conjugate_graph search
