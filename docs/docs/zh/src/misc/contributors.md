@@ -1,6 +1,6 @@
 # 贡献者列表
 
-以下是 VSAG 项目的贡献者（更新于 2025-11-11），按照第一次贡献时间排序：
+以下是 VSAG 项目的贡献者（更新于 2025-11-20），按照第一次贡献时间排序：
 
 - 2024-07-26 Xiangyu Wang ([wxyucs](https://github.com/wxyucs/)) from AntGroup
 - 2024-08-21 Jiabao Jin ([inabao](https://github.com/inabao)) from AntGroup
