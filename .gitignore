@@ -19,6 +19,11 @@
 *.out
 *.app
 .ccls-cache/
+
+# local files
+.DS_Store
+._.DS_Store
+
 # python
 __pycache__/
 *.py[cod]
