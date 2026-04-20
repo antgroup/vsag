@@ -30,8 +30,7 @@ target_link_libraries (unittests
         Catch2::Catch2 
         simd_test vsag_test algorithm_test factory_test attr_test
         datacell_test quantizer_test storage_test io_test utils_test impl_test
-        simd
-        vsag
+        vsag_static
 )
 
 if (APPLE)
