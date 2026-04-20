@@ -3,8 +3,12 @@ name: Tsan Build & Test Parallel
 on:
   push:
     branches: [ "main", "0.*" ]
+    paths-ignore:
+      - 'docs/**'
   pull_request:
     branches: [ "main", "0.*" ]
+    paths-ignore:
+      - 'docs/**'
   workflow_dispatch:
 
 jobs:
