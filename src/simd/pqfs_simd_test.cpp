@@ -20,6 +20,8 @@
 #include "simd_status.h"
 #include "unittest.h"
 
+#include "simd_test_macro.h"
+
 using namespace vsag;
 
 template <class T>
@@ -46,31 +48,43 @@ compare_vector(std::vector<T>& v1, std::vector<T>& v2) {
         std::vector<int32_t> neon_data(32, 0);                                                  \
         std::vector<int32_t> sve_data(32, 0);                                                   \
         generic::Func(lut.data() + i * dim, codes.data() + i * dim, pq_dim, gt.data());         \
+        SIMD_TEST_SSE(                                                                          \
         if (SimdStatus::SupportSSE()) {                                                         \
             sse::Func(lut.data() + i * dim, codes.data() + i * dim, pq_dim, sse_data.data());   \
             REQUIRE(compare_vector(gt, sse_data) == true);                                      \
         }                                                                                       \
+        )                                                                                       \
+        SIMD_TEST_AVX(                                                                          \
         if (SimdStatus::SupportAVX()) {                                                         \
             avx::Func(lut.data() + i * dim, codes.data() + i * dim, pq_dim, avx_data.data());   \
             REQUIRE(compare_vector(gt, avx_data) == true);                                      \
         }                                                                                       \
+        )                                                                                       \
+        SIMD_TEST_AVX2(                                                                         \
         if (SimdStatus::SupportAVX2()) {                                                        \
             avx2::Func(lut.data() + i * dim, codes.data() + i * dim, pq_dim, avx2_data.data()); \
             REQUIRE(compare_vector(gt, avx2_data) == true);                                     \
         }                                                                                       \
+        )                                                                                       \
+        SIMD_TEST_AVX512(                                                                       \
         if (SimdStatus::SupportAVX512()) {                                                      \
             avx512::Func(                                                                       \
                 lut.data() + i * dim, codes.data() + i * dim, pq_dim, avx512_data.data());      \
             REQUIRE(compare_vector(gt, avx512_data) == true);                                   \
         }                                                                                       \
+        )                                                                                       \
+        SIMD_TEST_NEON(                                                                         \
         if (SimdStatus::SupportNEON()) {                                                        \
             neon::Func(lut.data() + i * dim, codes.data() + i * dim, pq_dim, neon_data.data()); \
             REQUIRE(compare_vector(gt, neon_data) == true);                                     \
         }                                                                                       \
+        )                                                                                       \
+        SIMD_TEST_SVE(                                                                          \
         if (SimdStatus::SupportSVE()) {                                                         \
             sve::Func(lut.data() + i * dim, codes.data() + i * dim, pq_dim, sve_data.data());   \
             REQUIRE(compare_vector(gt, sve_data) == true);                                      \
         }                                                                                       \
+        )                                                                                       \
     };
 
 TEST_CASE("PQFastScan SIMD Compute", "[ut][simd]") {
@@ -105,22 +119,34 @@ TEST_CASE("PQFastScan Benchmark", "[ut][simd][!benchmark]") {
     std::vector<int32_t> gt(32);
 
     BENCHMARK_SIMD_COMPUTE(generic, PQFastScanLookUp32);
+#ifdef ENABLE_SSE
     if (SimdStatus::SupportSSE()) {
         BENCHMARK_SIMD_COMPUTE(sse, PQFastScanLookUp32);
     }
+#endif
+#ifdef ENABLE_AVX
     if (SimdStatus::SupportAVX()) {
         BENCHMARK_SIMD_COMPUTE(avx, PQFastScanLookUp32);
     }
+#endif
+#ifdef ENABLE_AVX2
     if (SimdStatus::SupportAVX2()) {
         BENCHMARK_SIMD_COMPUTE(avx2, PQFastScanLookUp32);
     }
+#endif
+#ifdef ENABLE_AVX512
     if (SimdStatus::SupportAVX512()) {
         BENCHMARK_SIMD_COMPUTE(avx512, PQFastScanLookUp32);
     }
+#endif
+#ifdef ENABLE_NEON
     if (SimdStatus::SupportNEON()) {
         BENCHMARK_SIMD_COMPUTE(neon, PQFastScanLookUp32);
     }
+#endif
+#ifdef ENABLE_SVE
     if (SimdStatus::SupportSVE()) {
         BENCHMARK_SIMD_COMPUTE(sve, PQFastScanLookUp32);
     }
+#endif
 }

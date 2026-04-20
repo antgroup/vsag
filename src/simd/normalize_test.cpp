@@ -20,6 +20,8 @@
 #include "simd_status.h"
 #include "unittest.h"
 
+#include "simd_test_macro.h"
+
 using namespace vsag;
 
 TEST_CASE("Normalize Compute", "[ut][simd]") {
@@ -38,6 +40,7 @@ TEST_CASE("Normalize Compute", "[ut][simd]") {
             auto gt = generic::Normalize(vec1.data() + i * dim, tmp_value.data(), dim);
             REQUIRE(gt_zero_centroid == gt);
 
+#ifdef ENABLE_SSE
             if (SimdStatus::SupportSSE()) {
                 auto sse = sse::Normalize(vec1.data() + i * dim, tmp_value.data() + dim, dim);
                 REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(sse));
@@ -46,6 +49,8 @@ TEST_CASE("Normalize Compute", "[ut][simd]") {
                             fixtures::dist_t(tmp_value[j + dim * 1]));
                 }
             }
+#endif
+#ifdef ENABLE_AVX2
             if (SimdStatus::SupportAVX2()) {
                 auto avx2 = avx2::Normalize(vec1.data() + i * dim, tmp_value.data() + dim * 2, dim);
                 REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(avx2));
@@ -54,6 +59,8 @@ TEST_CASE("Normalize Compute", "[ut][simd]") {
                             fixtures::dist_t(tmp_value[j + dim * 2]));
                 }
             }
+#endif
+#ifdef ENABLE_AVX512
             if (SimdStatus::SupportAVX512()) {
                 auto avx512 =
                     avx512::Normalize(vec1.data() + i * dim, tmp_value.data() + dim * 3, dim);
@@ -63,6 +70,8 @@ TEST_CASE("Normalize Compute", "[ut][simd]") {
                             fixtures::dist_t(tmp_value[j + dim * 3]));
                 }
             }
+#endif
+#ifdef ENABLE_NEON
             if (SimdStatus::SupportNEON()) {
                 auto neon = neon::Normalize(vec1.data() + i * dim, tmp_value.data() + dim * 3, dim);
                 REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(neon));
@@ -71,6 +80,8 @@ TEST_CASE("Normalize Compute", "[ut][simd]") {
                             fixtures::dist_t(tmp_value[j + dim * 3]));
                 }
             }
+#endif
+#ifdef ENABLE_SVE
             if (SimdStatus::SupportSVE()) {
                 auto sve = sve::Normalize(vec1.data() + i * dim, tmp_value.data() + dim * 3, dim);
                 REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(sve));
@@ -79,6 +90,7 @@ TEST_CASE("Normalize Compute", "[ut][simd]") {
                             fixtures::dist_t(tmp_value[j + dim * 3]));
                 }
             }
+#endif
         }
     }
 }
@@ -97,19 +109,29 @@ TEST_CASE("Normalize Benchmark", "[ut][simd][!benchmark]") {
     auto vec1 = fixtures::generate_vectors(count * 2, dim);
     std::vector<float> vec2(vec1.begin() + count, vec1.end());
     BENCHMARK_SIMD_COMPUTE(generic, Normalize);
+#ifdef ENABLE_SSE
     if (SimdStatus::SupportSSE()) {
         BENCHMARK_SIMD_COMPUTE(sse, Normalize);
     }
+#endif
+#ifdef ENABLE_AVX2
     if (SimdStatus::SupportAVX2()) {
         BENCHMARK_SIMD_COMPUTE(avx2, Normalize);
     }
+#endif
+#ifdef ENABLE_AVX512
     if (SimdStatus::SupportAVX512()) {
         BENCHMARK_SIMD_COMPUTE(avx512, Normalize);
     }
+#endif
+#ifdef ENABLE_NEON
     if (SimdStatus::SupportNEON()) {
         BENCHMARK_SIMD_COMPUTE(neon, Normalize);
     }
+#endif
+#ifdef ENABLE_SVE
     if (SimdStatus::SupportSVE()) {
         BENCHMARK_SIMD_COMPUTE(sve, Normalize);
     }
+#endif
 }

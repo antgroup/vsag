@@ -18,38 +18,45 @@
 #include <catch2/benchmark/catch_benchmark.hpp>
 
 #include "simd_status.h"
+#include "simd_test_macro.h"
 #include "unittest.h"
 
 using namespace vsag;
 
 #define TEST_INT8_COMPUTE_ACCURACY(Func)                                              \
     {                                                                                 \
-        float gt, sse, avx, avx2, avx512, neon, sve;                                  \
+        float gt;                                                                     \
         gt = generic::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim);        \
+        SIMD_TEST_SSE(                                                                \
         if (SimdStatus::SupportSSE()) {                                               \
-            sse = sse::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim);       \
+            float sse = sse::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim); \
             REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(sse));                   \
-        }                                                                             \
+        })                                                                            \
+        SIMD_TEST_AVX(                                                                \
         if (SimdStatus::SupportAVX()) {                                               \
-            avx = avx::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim);       \
+            float avx = avx::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim); \
             REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(avx));                   \
-        }                                                                             \
+        })                                                                            \
+        SIMD_TEST_AVX2(                                                               \
         if (SimdStatus::SupportAVX2()) {                                              \
-            avx2 = avx2::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim);     \
+            float avx2 = avx2::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim); \
             REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(avx2));                  \
-        }                                                                             \
+        })                                                                            \
+        SIMD_TEST_AVX512(                                                             \
         if (SimdStatus::SupportAVX512()) {                                            \
-            avx512 = avx512::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim); \
+            float avx512 = avx512::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim); \
             REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(avx512));                \
-        }                                                                             \
+        })                                                                            \
+        SIMD_TEST_NEON(                                                               \
         if (SimdStatus::SupportNEON()) {                                              \
-            neon = neon::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim);     \
+            float neon = neon::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim); \
             REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(neon));                  \
-        }                                                                             \
+        })                                                                            \
+        SIMD_TEST_SVE(                                                                \
         if (SimdStatus::SupportSVE()) {                                               \
-            sve = sve::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim);       \
+            float sve = sve::Func(vec1.data() + i * dim, vec2.data() + i * dim, dim); \
             REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(sve));                   \
-        }                                                                             \
+        })                                                                            \
     };
 
 TEST_CASE("INT8 SIMD Compute", "[ut][simd][int8]") {
@@ -75,20 +82,26 @@ TEST_CASE("INT8 SIMD Compute", "[ut][simd][int8]") {
         }                                                                  \
     }
 
-#define TEST_ALL_BACKENDS(func)      \
-    BENCHMARK_ONE(generic, func);    \
-    if (SimdStatus::SupportSSE())    \
-        BENCHMARK_ONE(sse, func);    \
-    if (SimdStatus::SupportAVX())    \
-        BENCHMARK_ONE(avx, func);    \
-    if (SimdStatus::SupportAVX2())   \
-        BENCHMARK_ONE(avx2, func);   \
-    if (SimdStatus::SupportAVX512()) \
-        BENCHMARK_ONE(avx512, func); \
-    if (SimdStatus::SupportNEON())   \
-        BENCHMARK_ONE(neon, func);   \
-    if (SimdStatus::SupportSVE())    \
-        BENCHMARK_ONE(sve, func);
+#define TEST_ALL_BACKENDS(func)                  \
+    BENCHMARK_ONE(generic, func);                \
+    SIMD_TEST_SSE(                               \
+    if (SimdStatus::SupportSSE())                \
+        BENCHMARK_ONE(sse, func);)               \
+    SIMD_TEST_AVX(                               \
+    if (SimdStatus::SupportAVX())                \
+        BENCHMARK_ONE(avx, func);)               \
+    SIMD_TEST_AVX2(                              \
+    if (SimdStatus::SupportAVX2())               \
+        BENCHMARK_ONE(avx2, func);)              \
+    SIMD_TEST_AVX512(                            \
+    if (SimdStatus::SupportAVX512())             \
+        BENCHMARK_ONE(avx512, func);)            \
+    SIMD_TEST_NEON(                              \
+    if (SimdStatus::SupportNEON())               \
+        BENCHMARK_ONE(neon, func);)              \
+    SIMD_TEST_SVE(                               \
+    if (SimdStatus::SupportSVE())                \
+        BENCHMARK_ONE(sve, func);)
 
 TEST_CASE("INT8 Benchmark", "[ut][simd][int8][!benchmark]") {
     int64_t count = 500;

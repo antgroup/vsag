@@ -18,6 +18,7 @@
 #include <catch2/benchmark/catch_benchmark.hpp>
 
 #include "simd_status.h"
+#include "simd_test_macro.h"
 #include "unittest.h"
 
 using namespace vsag;
@@ -26,30 +27,36 @@ using namespace vsag;
     {                                                                                  \
         float gt, sse, avx, avx2, avx512, neon, sve;                                   \
         gt = generic::Func(vec1.data() + i * dim, vec2.data() + i * dim, &dim);        \
+        SIMD_TEST_SSE(                                                                 \
         if (SimdStatus::SupportSSE()) {                                                \
             sse = sse::Func(vec1.data() + i * dim, vec2.data() + i * dim, &dim);       \
             REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(sse));                    \
-        }                                                                              \
+        })                                                                             \
+        SIMD_TEST_AVX(                                                                 \
         if (SimdStatus::SupportAVX()) {                                                \
             avx = avx::Func(vec1.data() + i * dim, vec2.data() + i * dim, &dim);       \
             REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(avx));                    \
-        }                                                                              \
+        })                                                                             \
+        SIMD_TEST_AVX2(                                                                \
         if (SimdStatus::SupportAVX2()) {                                               \
             avx2 = avx2::Func(vec1.data() + i * dim, vec2.data() + i * dim, &dim);     \
             REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(avx2));                   \
-        }                                                                              \
+        })                                                                             \
+        SIMD_TEST_AVX512(                                                              \
         if (SimdStatus::SupportAVX512()) {                                             \
             avx512 = avx512::Func(vec1.data() + i * dim, vec2.data() + i * dim, &dim); \
             REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(avx512));                 \
-        }                                                                              \
+        })                                                                             \
+        SIMD_TEST_NEON(                                                                \
         if (SimdStatus::SupportNEON()) {                                               \
             neon = neon::Func(vec1.data() + i * dim, vec2.data() + i * dim, &dim);     \
             REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(neon));                   \
-        }                                                                              \
+        })                                                                             \
+        SIMD_TEST_SVE(                                                                 \
         if (SimdStatus::SupportSVE()) {                                                \
             sve = sve::Func(vec1.data() + i * dim, vec2.data() + i * dim, &dim);       \
             REQUIRE(fixtures::dist_t(gt) == fixtures::dist_t(sve));                    \
-        }                                                                              \
+        })                                                                             \
     };
 
 TEST_CASE("L2Sqr & InnerProduct SIMD Compute", "[ut][simd]") {
@@ -96,28 +103,40 @@ TEST_CASE("PQ Calculation", "[ut][simd]") {
         }
         memset(results, 0, 256 * sizeof(float));
     };
+#ifdef ENABLE_SSE
     if (SimdStatus::SupportSSE()) {
         sse::PQDistanceFloat256(vectors.data(), single_dim_value, results);
         check_func();
     }
+#endif
+#ifdef ENABLE_AVX
     if (SimdStatus::SupportAVX()) {
         avx::PQDistanceFloat256(vectors.data(), single_dim_value, results);
         check_func();
     }
+#endif
+#ifdef ENABLE_AVX2
     if (SimdStatus::SupportAVX2()) {
         avx2::PQDistanceFloat256(vectors.data(), single_dim_value, results);
         check_func();
     }
+#endif
+#ifdef ENABLE_AVX512
     if (SimdStatus::SupportAVX512()) {
         avx512::PQDistanceFloat256(vectors.data(), single_dim_value, results);
         check_func();
     }
+#endif
+#ifdef ENABLE_SVE
     if (SimdStatus::SupportSVE()) {
         sve::PQDistanceFloat256(vectors.data(), single_dim_value, results);
         check_func();
     }
+#endif
+#ifdef ENABLE_NEON
     if (SimdStatus::SupportNEON()) {
         neon::PQDistanceFloat256(vectors.data(), single_dim_value, results);
         check_func();
     }
+#endif
 }
