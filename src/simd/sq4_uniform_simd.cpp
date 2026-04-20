@@ -12,41 +12,11 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 #include "sq4_uniform_simd.h"
 
-#include "simd_status.h"
+#include "simd_dispatch.h"
 
 namespace vsag {
 
-static SQ4UniformComputeCodesType
-GetSQ4UniformComputeCodesIP() {
-    if (SimdStatus::SupportAVX512()) {
-#if defined(ENABLE_AVX512)
-        return avx512::SQ4UniformComputeCodesIP;
-#endif
-    } else if (SimdStatus::SupportAVX2()) {
-#if defined(ENABLE_AVX2)
-        return avx2::SQ4UniformComputeCodesIP;
-#endif
-    } else if (SimdStatus::SupportAVX()) {
-#if defined(ENABLE_AVX)
-        return avx::SQ4UniformComputeCodesIP;
-#endif
-    } else if (SimdStatus::SupportSSE()) {
-#if defined(ENABLE_SSE)
-        return sse::SQ4UniformComputeCodesIP;
-#endif
-    } else if (SimdStatus::SupportSVE()) {
-#if defined(ENABLE_SVE)
-        return sve::SQ4UniformComputeCodesIP;
-#endif
-    } else if (SimdStatus::SupportNEON()) {
-#if defined(ENABLE_NEON)
-        return neon::SQ4UniformComputeCodesIP;
-#endif
-    }
-    return generic::SQ4UniformComputeCodesIP;
-}
-SQ4UniformComputeCodesType SQ4UniformComputeCodesIP = GetSQ4UniformComputeCodesIP();
+VSAG_DEFINE_SIMD_DISPATCH(SQ4UniformComputeCodesIP, SQ4UniformComputeCodesType);
 }  // namespace vsag
