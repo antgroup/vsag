@@ -122,14 +122,10 @@ generate_vectors(uint64_t count, uint32_t dim, bool need_normalize, int seed) {
 }
 
 std::vector<float>
-generate_normal_vectors(uint64_t count,
-                        uint32_t dim,
-                        bool need_normalize,
-                        int seed,
-                        float mean,
-                        float stddev) {
-    using EngineType = std::conditional_t<(sizeof(float) > 4), std::mt19937_64, std::mt19937>;
-    EngineType rng(seed);
+generate_normal_vectors(
+    uint64_t count, uint32_t dim, bool need_normalize, int seed, float mean, float stddev) {
+    std::mt19937 rng(seed);
+
     std::normal_distribution<float> distrib(mean, stddev);
     std::vector<float> vectors(dim * count);
     for (int64_t i = 0; i < dim * count; ++i) {
@@ -194,7 +190,7 @@ FillStringValues(vsag::AttributeValue<std::string>* attr,
                  uint32_t max_len,
                  Gen& gen) {
     std::uniform_int_distribution<uint32_t> len_dist(1, max_len);
-    std::uniform_int_distribution<int> char_dist(a, z);
+    std::uniform_int_distribution<int> char_dist('a', 'z');
     for (uint32_t i = 0; i < count; ++i) {
         uint32_t len = len_dist(gen);
         std::string str;

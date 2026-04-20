@@ -29,13 +29,20 @@ namespace fixtures {
 template <typename T>
 typename std::enable_if<std::is_floating_point<T>::value, T>::type
 RandomValue(const T& min, const T& max, int seed = -1) {
+    thread_local std::mt19937 gen;
+    thread_local int current_seed = -1;
     if (seed >= 0) {
-        std::mt19937 gen(seed);
-        std::uniform_real_distribution<T> dis(min, max);
-        return dis(gen);
+        if (seed != current_seed) {
+            gen.seed(seed);
+            current_seed = seed;
+        }
+    } else {
+        if (current_seed != -2) {
+            std::random_device rd;
+            gen.seed(rd());
+            current_seed = -2;
+        }
     }
-    thread_local std::random_device rd;
-    thread_local std::mt19937 gen(rd());
     std::uniform_real_distribution<T> dis(min, max);
     return dis(gen);
 }
@@ -43,13 +50,20 @@ RandomValue(const T& min, const T& max, int seed = -1) {
 template <typename T>
 typename std::enable_if<std::is_integral<T>::value, T>::type
 RandomValue(const T& min, const T& max, int seed = -1) {
+    thread_local std::mt19937 gen;
+    thread_local int current_seed = -1;
     if (seed >= 0) {
-        std::mt19937 gen(seed);
-        std::uniform_int_distribution<T> dis(min, max);
-        return dis(gen);
+        if (seed != current_seed) {
+            gen.seed(seed);
+            current_seed = seed;
+        }
+    } else {
+        if (current_seed != -2) {
+            std::random_device rd;
+            gen.seed(rd());
+            current_seed = -2;
+        }
     }
-    thread_local std::random_device rd;
-    thread_local std::mt19937 gen(rd());
     std::uniform_int_distribution<T> dis(min, max);
     return dis(gen);
 }
