@@ -13,8 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "bf16_quantizer_parameter.h"
-
+#include "half_precision_quantizer_parameter.h"
 #include "parameter_test.h"
 #include "unittest.h"
 using namespace vsag;
