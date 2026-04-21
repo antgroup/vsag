@@ -13,10 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "fp16_quantizer.h"
-
 #include <vector>
 
+#include "half_precision_quantizer.h"
 #include "impl/allocator/safe_allocator.h"
 #include "quantization/quantizer_test.h"
 #include "unittest.h"
