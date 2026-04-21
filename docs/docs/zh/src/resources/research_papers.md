@@ -10,7 +10,8 @@
 
 摘要（翻译）：近似最近邻搜索（ANNS）是向量数据库和人工智能基础设施中的一个基础问题。近期的基于图的ANNS算法在实现高搜索精度的同时，也达到了实用的效率。尽管取得了这些进展，但由于基于图的搜索所带来的随机内存访问模式以及向量距离计算的高昂开销，这些算法在生产环境中仍然面临性能瓶颈。此外，基于图的ANNS算法的性能对参数高度敏感，而选择最优参数的成本又极其高昂——例如，手动调参需要反复重建索引。本文介绍了VSAG，一个旨在提升基于图的ANNS算法在生产环境中性能的开源框架。VSAG已在蚂蚁集团的各项服务中大规模部署，并集成了三项关键优化：(i) 高效的内存访问：通过预取技术和缓存友好的向量组织方式，减少L3缓存未命中；(ii) 自动化参数调优：无需重建索引即可自动选择性能最优的参数；(iii) 高效的距离计算：利用现代硬件、标量量化技术，并智能地切换至低精度表示，从而显著降低距离计算的成本。我们在真实数据集上对VSAG进行了评估。实验结果表明，在保证同等精度的前提下，VSAG达到了业界顶尖的性能水平，且相比业界标准库HNSWlib，其加速比可高达4倍。
 
-> 该功能已集成于 VSAG 库中，通过 `Optimizer->optimize()` 启用。
+> 该功能已集成于 VSAG 库中，通过统一的 [`Tune`](../advanced/optimizer.md) 接口启用（历史上称为
+> "ELP Optimizer"，底层实现键为 `use_elp_optimizer`）。
 
 ## 3. EnhanceGraph: A Continuously Enhanced Graph-based Index for High-dimensional Approximate Nearest Neighbor Search [[arxiv]](https://arxiv.org/abs/2506.13144)
 
