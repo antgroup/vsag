@@ -38,9 +38,10 @@ if (result.has_value()) {
 auto result = index->RangeSearch(query, radius, search_params, /*limited_size=*/100);
 ```
 
-- `limited_size = -1`（默认）：返回所有满足条件的结果。
-- `limited_size = 0`：仅返回命中数量（常用于计数场景）。
+- `limited_size = -1`（默认）：返回所有满足条件的结果（不限）。
 - `limited_size > 0`：在满足半径条件的候选中返回最多这么多条。
+- `limited_size = 0`：非法取值，实现中会显式拒绝
+  （`CHECK_ARGUMENT(limited_size != 0, ...)`）。
 
 ## 与 Filter 组合
 

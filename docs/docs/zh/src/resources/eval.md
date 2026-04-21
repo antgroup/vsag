@@ -5,8 +5,16 @@
 
 ## 构建
 
+`tools/` 默认不会编译，需要显式开启：
+
 ```bash
-make release
+# 通过项目 Makefile
+VSAG_ENABLE_TOOLS=ON make release
+# 或：make dev
+
+# 也可直接通过 CMake
+cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release -DENABLE_TOOLS=ON
+cmake --build build-release -j
 # 产物：./build-release/tools/eval/eval_performance
 ```
 

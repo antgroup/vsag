@@ -68,7 +68,7 @@ clean:                   ## Clear build/ directory.
 fmt:                     ## Format codes.
 cov:                     ## Build unit tests with code coverage enabled.
 lint:                    ## Check coding styles defined in `.clang-tidy`.
-fix-lint:                ## Fix coding style issues in-place via clang-apply-replacements.
+fix-lint:                ## Fix coding style issues in-place via clang-apply-replacements (destructive).
 test_parallel:           ## Run all tests parallel (used in CI).
 test_asan_parallel: asan ## Run unit tests parallel with AddressSanitizer option.
 test_tsan_parallel: tsan ## Run unit tests parallel with ThreadSanitizer option.

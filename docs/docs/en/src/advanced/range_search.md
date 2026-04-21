@@ -40,9 +40,10 @@ if (result.has_value()) {
 auto result = index->RangeSearch(query, radius, search_params, /*limited_size=*/100);
 ```
 
-- `limited_size = -1` (default): return every result inside the radius.
-- `limited_size = 0`: return only the hit count (useful for counting).
+- `limited_size = -1` (default): return every result inside the radius (unlimited).
 - `limited_size > 0`: return at most this many results.
+- `limited_size = 0`: invalid; the implementation explicitly rejects this value
+  (`CHECK_ARGUMENT(limited_size != 0, ...)`).
 
 ## Combining with Filter
 

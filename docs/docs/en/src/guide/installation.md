@@ -9,8 +9,8 @@ The official development image includes the full toolchain (GCC 9.4+, CMake 3.18
 `clang-format`/`clang-tidy` 15, HDF5, etc.):
 
 ```bash
-docker pull vsaglib/vsag:ubuntu-latest
-docker run -it --rm -v $(pwd):/work -w /work vsaglib/vsag:ubuntu-latest bash
+docker pull vsaglib/vsag:ubuntu
+docker run -it --rm -v $(pwd):/work -w /work vsaglib/vsag:ubuntu bash
 ```
 
 ## Building from Source
@@ -32,10 +32,11 @@ make release
 
 Other common Makefile targets:
 
-- `make debug` — debug build, includes sanitizers and tests.
-- `make dev` — developer configuration: debug + tests + examples + tools.
-- `make test` — run unit and functional tests.
-- `make cov` — generate coverage report.
+- `make debug` — plain debug build (no sanitizers; tests/tools/examples disabled by default).
+- `make dev` — developer configuration: debug + tests + tools + examples.
+- `make test` — build with tests enabled and run the unit + functional suites.
+- `make cov` — build with coverage instrumentation; run tests afterwards to generate the report.
+- `make asan` / `make tsan` — sanitizer-enabled builds.
 - `make pyvsag PY_VERSION=3.10` — build the Python wheel.
 - `make dist-pre-cxx11-abi` / `dist-cxx11-abi` / `dist-libcxx` — build redistributable tarballs.
 
@@ -57,8 +58,13 @@ The bindings source lives under `typescript/` and the npm package name is `vsag`
 
 ## Optional Features
 
-Enable or disable at configure time:
+Enable or disable at CMake configure time with these cache options:
 
-- `VSAG_ENABLE_INTEL_MKL=ON` — Intel MKL acceleration.
-- `VSAG_ENABLE_LIBAIO=ON` — Linux AIO for DiskANN async IO.
-- `VSAG_ENABLE_TOOLS=ON` — build tools under `tools/` (including `eval_performance`).
+- `ENABLE_INTEL_MKL=ON` — Intel MKL acceleration.
+- `ENABLE_LIBAIO=ON` — Linux AIO for DiskANN async IO.
+- `ENABLE_TOOLS=ON` — build tools under `tools/` (including `eval_performance`).
+- `ENABLE_EXAMPLES=ON` — build sample programs under `examples/cpp/`.
+
+If you build through the project Makefile, the corresponding environment variables are
+`VSAG_ENABLE_INTEL_MKL=ON`, `VSAG_ENABLE_LIBAIO=ON`, `VSAG_ENABLE_TOOLS=ON`, and
+`VSAG_ENABLE_EXAMPLES=ON`.

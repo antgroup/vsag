@@ -7,8 +7,16 @@ combinations.
 
 ## Building
 
+Tools are not built by default — enable them explicitly:
+
 ```bash
-make release
+# via the project Makefile
+VSAG_ENABLE_TOOLS=ON make release
+# or: make dev
+
+# or directly through CMake
+cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release -DENABLE_TOOLS=ON
+cmake --build build-release -j
 # Output: ./build-release/tools/eval/eval_performance
 ```
 

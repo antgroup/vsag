@@ -11,7 +11,9 @@
 - **内存**：足够覆盖索引 + 操作系统 page cache 的 DDR4/DDR5
 - **磁盘**：NVMe SSD（DiskANN 场景）
 - **操作系统**：Ubuntu 20.04 / 22.04 或 CentOS 7 / 8
-- **编译**：`make release`，默认启用 Intel MKL（若可用）
+- **编译**：`make release`，MKL 默认**关闭**（`VSAG_ENABLE_INTEL_MKL=OFF`）。
+  如需启用请显式设置 `VSAG_ENABLE_INTEL_MKL=ON make release`
+  （或直接使用 CMake 时使用 `-DENABLE_INTEL_MKL=ON`）
 
 ## 参考数据集
 

@@ -13,7 +13,7 @@ This page documents how to build VSAG from source.
 We recommend using the official Docker dev image, which already contains the matching toolchain:
 
 ```bash
-docker pull vsaglib/vsag:ubuntu-latest
+docker pull vsaglib/vsag:ubuntu
 ```
 
 ## Makefile Targets
@@ -21,15 +21,16 @@ docker pull vsaglib/vsag:ubuntu-latest
 Running `make help` prints a concise list; the most common targets are:
 
 ```text
-debug       Build debug binaries (with sanitizers)
-release     Build release binaries
-dev         Developer build: debug + tests + examples + tools
-test        Run all unit and functional tests
-cov         Generate coverage report
-asan        Build and run with AddressSanitizer
+debug       Build debug binaries (no sanitizers; tests/tools/examples OFF by default)
+release     Build release binaries (tests/tools/examples OFF by default)
+dev         Developer build: debug + tests + tools + examples
+test        Build with tests enabled and run unit + functional tests
+cov         Build with coverage instrumentation enabled
+asan        Build with AddressSanitizer
+tsan        Build with ThreadSanitizer
 fmt         Run clang-format
 lint        Run clang-tidy
-fix-lint    Apply clang-tidy fix-its
+fix-lint    Apply clang-tidy fix-its in-place (destructive)
 pyvsag      Build pyvsag for a specific Python version (PY_VERSION=...)
 pyvsag-all  Build pyvsag wheels for all supported Python versions
 dist-pre-cxx11-abi  Build redistributable tarball (pre-C++11 ABI)
@@ -46,25 +47,31 @@ cd vsag
 make release
 ```
 
-Resulting binaries:
+Resulting binaries from a plain `make release`:
 
 - Library: `build-release/src/libvsag.{a,so}`
-- Examples: `build-release/examples/cpp/`
-- Tools: `build-release/tools/`
+
+Examples and tools are not built by default. To include them, either use `make dev`, or enable
+the corresponding Makefile variables (`VSAG_ENABLE_EXAMPLES=ON`, `VSAG_ENABLE_TOOLS=ON`) or the
+underlying CMake cache options (`-DENABLE_EXAMPLES=ON`, `-DENABLE_TOOLS=ON`).
 
 ## Environment Variables / CMake Options
 
-| Option | Default | Effect |
-|--------|---------|--------|
-| `VSAG_ENABLE_INTEL_MKL` | `ON` when MKL detected | Use Intel MKL for BLAS kernels |
-| `VSAG_ENABLE_LIBAIO` | `ON` on Linux | Enable DiskANN async IO via libaio |
-| `VSAG_ENABLE_TOOLS` | `ON` | Build utilities under `tools/` |
-| `CMAKE_BUILD_TYPE` | driven by Makefile target | Debug / Release |
+The Makefile exposes a few `VSAG_ENABLE_*` environment variables that are translated into CMake
+cache options (`ENABLE_*`). Defaults below reflect a plain `make release`.
 
-Pass options through CMake directly when not using `make`:
+| Makefile env var | CMake option | Default | Effect |
+|------------------|--------------|---------|--------|
+| `VSAG_ENABLE_INTEL_MKL` | `ENABLE_INTEL_MKL` | `OFF` | Use Intel MKL for BLAS kernels |
+| `VSAG_ENABLE_LIBAIO` | `ENABLE_LIBAIO` | `ON` on Linux | Enable DiskANN async IO via libaio |
+| `VSAG_ENABLE_TOOLS` | `ENABLE_TOOLS` | `OFF` | Build utilities under `tools/` |
+| `VSAG_ENABLE_EXAMPLES` | `ENABLE_EXAMPLES` | `OFF` | Build sample programs under `examples/cpp/` |
+| n/a | `CMAKE_BUILD_TYPE` | driven by Makefile target | Debug / Release |
+
+When invoking CMake directly instead of using `make`, use the underlying CMake cache option names:
 
 ```bash
-cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release -DVSAG_ENABLE_INTEL_MKL=ON
+cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release -DENABLE_INTEL_MKL=ON
 cmake --build build-release -j
 ```
 

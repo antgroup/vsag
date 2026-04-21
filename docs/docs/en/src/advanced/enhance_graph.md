@@ -18,10 +18,17 @@ At build time:
 }
 ```
 
-At search time, toggle it via `SearchParam` or a direct argument:
+At search time, toggle it via the `use_conjugate_graph_search` key in the search-parameter JSON
+(there is no boolean overload on `KnnSearch`):
 
 ```cpp
-auto result = index->KnnSearch(query, k, search_param_json, /*use_conjugate_graph=*/true);
+std::string search_param_json = R"({
+    "hnsw": {
+        "ef_search": 100,
+        "use_conjugate_graph_search": true
+    }
+})";
+auto result = index->KnnSearch(query, k, search_param_json);
 ```
 
 ## How It Works

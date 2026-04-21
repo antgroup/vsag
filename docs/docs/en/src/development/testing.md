@@ -10,18 +10,21 @@ VSAG uses [Catch2](https://github.com/catchorg/Catch2) for testing, organized in
 
 ## Run the Full Suite
 
-Build a debug (or dev) configuration first, then:
+`make test` configures a Debug build with tests enabled and runs the full unit + functional
+suite:
 
 ```bash
-make debug      # or: make dev
 make test
 ```
 
-This runs unit + functional tests and collects coverage data. Generate an HTML coverage report
-with:
+Note: `make test` does not enable coverage instrumentation. To produce a coverage report, use
+`make cov` — it configures the build with `ENABLE_COVERAGE=ON`; run the test binaries afterwards
+to collect and aggregate coverage data:
 
 ```bash
 make cov
+# then run the test binaries, e.g.:
+./build-debug/tests/functional_tests
 # open build-debug/coverage/index.html
 ```
 
@@ -37,7 +40,7 @@ Catch2 supports filtering by name, tag, and wildcards — see `--help`.
 ## Coverage Expectations
 
 Contributions are expected to keep the C++ line coverage over `src/` and `include/` at **90%** or
-higher, as measured by the `make test` / CI coverage job.
+higher, as measured by the `make cov` flow and the CI coverage job.
 
 ## Memory & Concurrency
 

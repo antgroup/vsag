@@ -18,10 +18,17 @@ VSAG 通过 **Conjugate Graph**（共轭图）机制对这类查询进行在线/
 }
 ```
 
-搜索时通过 `SearchParam` 或直接参数控制是否启用：
+搜索时通过搜索参数 JSON 中的 `use_conjugate_graph_search` 字段控制是否启用
+（`KnnSearch` 并不存在额外的布尔参数重载）：
 
 ```cpp
-auto result = index->KnnSearch(query, k, search_param_json, /*use_conjugate_graph=*/true);
+std::string search_param_json = R"({
+    "hnsw": {
+        "ef_search": 100,
+        "use_conjugate_graph_search": true
+    }
+})";
+auto result = index->KnnSearch(query, k, search_param_json);
 ```
 
 ## 工作原理

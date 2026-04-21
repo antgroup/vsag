@@ -17,15 +17,17 @@ Every index requires these top-level fields at build time:
 | `dtype` | `float32` / `fp16` / `bf16` / `int8` | Vector data type; determines internal representation |
 | `metric_type` | `l2` / `ip` / `cosine` | Distance metric |
 
-## HNSW / HGraph
+## HNSW
+
+HNSW uses the `hnsw` sub-object for build parameters. It does not accept HGraph-only keys
+such as `base_quantization_type`.
 
 ```json
 {
     "dim": 128,
     "dtype": "float32",
     "metric_type": "l2",
-    "hgraph": {
-        "base_quantization_type": "fp32",
+    "hnsw": {
         "max_degree": 32,
         "ef_construction": 400,
         "use_conjugate_graph": false
@@ -37,8 +39,37 @@ Every index requires these top-level fields at build time:
 |-------|---------|-------------|
 | `max_degree` | 16–48 | Maximum out-degree per node |
 | `ef_construction` | 200–500 | Candidate set size during build; larger = higher recall, slower build |
-| `base_quantization_type` | `fp32` / `fp16` / `bf16` / `sq8` / `sq4` / `pq` | Quantization of the base storage |
 | `use_conjugate_graph` | bool | Build the [conjugate graph](../advanced/enhance_graph.md) |
+
+At search time:
+
+```json
+{"hnsw": {"ef_search": 100, "use_conjugate_graph_search": false}}
+```
+
+## HGraph
+
+HGraph places its build parameters under the generic `index_param` key (see
+`examples/cpp/103_index_hgraph.cpp`); the `hgraph` key is reserved for search-time parameters.
+
+```json
+{
+    "dim": 128,
+    "dtype": "float32",
+    "metric_type": "l2",
+    "index_param": {
+        "base_quantization_type": "fp32",
+        "max_degree": 32,
+        "ef_construction": 400
+    }
+}
+```
+
+| Field | Typical | Description |
+|-------|---------|-------------|
+| `max_degree` | 16–48 | Maximum out-degree per node |
+| `ef_construction` | 200–500 | Candidate set size during build; larger = higher recall, slower build |
+| `base_quantization_type` | `fp32` / `fp16` / `bf16` / `sq8` / `sq4` / `pq` | Quantization of the base storage |
 
 At search time:
 

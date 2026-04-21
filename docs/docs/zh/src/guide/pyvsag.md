@@ -32,7 +32,7 @@ import pyvsag
 dim = 128
 num_elements = 1000
 
-ids = list(range(num_elements))
+ids = np.arange(num_elements, dtype=np.int64)
 data = np.float32(np.random.random((num_elements, dim)))
 
 index_params = json.dumps({
