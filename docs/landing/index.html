@@ -1,0 +1,463 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>VSAG — High-performance vector indexing library</title>
+    <meta
+      name="description"
+      content="VSAG is a high-performance C++ vector indexing library for similarity search, with Python bindings (pyvsag) and ready-to-use indexes such as HGraph, HNSW, DiskANN, IVF, Pyramid and SINDI."
+    />
+    <meta property="og:title" content="VSAG — High-performance vector indexing library" />
+    <meta
+      property="og:description"
+      content="High-performance C++ library for approximate nearest neighbor search. HGraph, HNSW, DiskANN, IVF, Pyramid, SINDI."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://vsag.io/" />
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+
+    <header class="nav">
+      <div class="container nav-inner">
+        <a class="brand" href="/" aria-label="VSAG home">
+          <svg class="brand-mark" width="28" height="28" viewBox="0 0 24 24" aria-hidden="true">
+            <defs>
+              <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0" stop-color="#fce897" />
+                <stop offset="1" stop-color="#f4bd37" />
+              </linearGradient>
+            </defs>
+            <path
+              fill="url(#gold)"
+              d="M12 2 3 6v6c0 5 3.9 9.4 9 10 5.1-.6 9-5 9-10V6l-9-4Z"
+            />
+            <path
+              fill="#1a1614"
+              d="M8.3 9.2h1.7l2 5.1 2-5.1h1.7L12.7 16h-1.4L8.3 9.2Z"
+            />
+          </svg>
+          <span class="brand-name">VSAG</span>
+        </a>
+        <nav class="nav-links" aria-label="Primary">
+          <a href="https://vsag.io/docs/en/">Docs</a>
+          <a href="https://vsag.io/blogs/en/">Blog</a>
+          <a href="#features">Features</a>
+          <a href="#quickstart">Quickstart</a>
+          <a href="#ecosystem">Ecosystem</a>
+          <a class="gh" href="https://github.com/antgroup/vsag" aria-label="GitHub">
+            <svg width="18" height="18" viewBox="0 0 16 16" aria-hidden="true">
+              <path
+                fill="currentColor"
+                d="M8 .2a8 8 0 0 0-2.5 15.6c.4.1.6-.2.6-.4v-1.5c-2.2.5-2.7-1-2.7-1-.4-.9-.9-1.2-.9-1.2-.7-.5.1-.5.1-.5.8.1 1.2.8 1.2.8.7 1.3 1.9.9 2.4.7.1-.5.3-.9.5-1.1-1.8-.2-3.6-.9-3.6-3.9 0-.9.3-1.6.8-2.1-.1-.2-.4-1 .1-2.1 0 0 .7-.2 2.2.8a7.6 7.6 0 0 1 4 0c1.5-1 2.2-.8 2.2-.8.5 1.1.2 1.9.1 2.1.5.5.8 1.2.8 2.1 0 3-1.8 3.7-3.6 3.9.3.3.5.8.5 1.6v2.3c0 .2.2.5.6.4A8 8 0 0 0 8 .2Z"
+              />
+            </svg>
+            <span class="sr-only">GitHub</span>
+          </a>
+        </nav>
+      </div>
+    </header>
+
+    <main id="main">
+      <section class="hero">
+        <div class="container hero-inner">
+          <p class="eyebrow">C++ · Python · Open source (Apache&nbsp;2.0)</p>
+          <h1>
+            High-performance vector indexing,<br />
+            <span class="grad">built for billion-scale search.</span>
+          </h1>
+          <p class="lede">
+            VSAG is a C++ library for approximate nearest-neighbor search. It
+            ships production-ready HGraph, HNSW, DiskANN, IVF, Pyramid and SINDI
+            indexes with SIMD-accelerated distance kernels, quantization, and a
+            unified builder API — with first-class Python bindings via
+            <code>pyvsag</code>.
+          </p>
+          <div class="cta-row">
+            <a class="btn btn-primary" href="#quickstart">Get started</a>
+            <a class="btn btn-ghost" href="https://github.com/antgroup/vsag">
+              Star on GitHub
+              <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  d="M7 17 17 7M9 7h8v8"
+                />
+              </svg>
+            </a>
+          </div>
+          <dl class="stats" aria-label="Project highlights">
+            <div><dt>Index types</dt><dd>7+</dd></div>
+            <div><dt>License</dt><dd>Apache 2.0</dd></div>
+            <div><dt>Language bindings</dt><dd>C++ · Python · Node.js</dd></div>
+            <div><dt>Built at</dt><dd>Ant Group</dd></div>
+          </dl>
+        </div>
+        <div class="hero-glow" aria-hidden="true"></div>
+      </section>
+
+      <section id="features" class="section">
+        <div class="container">
+          <p class="eyebrow center">Why VSAG</p>
+          <h2 class="section-title">Engineered for production similarity search</h2>
+          <div class="grid-3">
+            <article class="card">
+              <div class="icon">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    d="M4 12h4l2-6 4 12 2-6h4"
+                  />
+                </svg>
+              </div>
+              <h3>SIMD-accelerated kernels</h3>
+              <p>
+                AVX2 / AVX-512 / NEON distance kernels, integer and float
+                quantization (SQ4/SQ8, PQ, RaBitQ), and careful memory layout
+                for hot paths.
+              </p>
+            </article>
+            <article class="card">
+              <div class="icon">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    d="M4 7h16M4 12h16M4 17h10"
+                  />
+                </svg>
+              </div>
+              <h3>A family of indexes</h3>
+              <p>
+                HGraph, HNSW, DiskANN, IVF, Pyramid, SINDI and brute force — one
+                builder-style API, one serialization format, one set of ops.
+              </p>
+            </article>
+            <article class="card">
+              <div class="icon">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M5.6 18.4l2.8-2.8M15.6 8.4l2.8-2.8"
+                  />
+                </svg>
+              </div>
+              <h3>Adaptive runtime</h3>
+              <p>
+                <code>Index::Tune</code> with the ELP optimizer searches the
+                graph entry-point and beam parameters to keep recall and latency
+                on target as workloads drift.
+              </p>
+            </article>
+            <article class="card">
+              <div class="icon">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    d="M4 6h16v4H4zM4 14h16v4H4z"
+                  />
+                </svg>
+              </div>
+              <h3>Flexible serialization</h3>
+              <p>
+                Serialize to <code>BinarySet</code>, streams, or user-supplied
+                write callbacks. Zero-copy <code>ReaderSet</code> keeps cold
+                indexes on disk and hot tiers in memory.
+              </p>
+            </article>
+            <article class="card">
+              <div class="icon">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"
+                  />
+                </svg>
+              </div>
+              <h3>Range &amp; hybrid search</h3>
+              <p>
+                Radius search, filtered search with user predicates, and a
+                hybrid dense + sparse index for RAG and retrieval pipelines.
+              </p>
+            </article>
+            <article class="card">
+              <div class="icon">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    d="M12 2a10 10 0 1 0 10 10M22 2l-10 10"
+                  />
+                </svg>
+              </div>
+              <h3>Pluggable resources</h3>
+              <p>
+                Bring your own <code>Allocator</code> and <code>ThreadPool</code>
+                via <code>Resource</code> to integrate cleanly with the host
+                database or service runtime.
+              </p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section id="quickstart" class="section section-alt">
+        <div class="container">
+          <p class="eyebrow center">Quickstart</p>
+          <h2 class="section-title">Up and running in a few lines</h2>
+          <div class="qs-grid">
+            <div class="qs-panel">
+              <h3>Python (pyvsag)</h3>
+              <pre><code><span class="c">pip install pyvsag</span></code></pre>
+              <pre><code><span class="k">import</span> pyvsag, numpy <span class="k">as</span> np
+
+index = pyvsag.Index(<span class="s">"hgraph"</span>, <span class="s">"""</span>
+<span class="s">{</span>
+<span class="s">  "dtype": "float32",</span>
+<span class="s">  "metric_type": "l2",</span>
+<span class="s">  "dim": 128,</span>
+<span class="s">  "index_param": { "base_quantization_type": "sq8" }</span>
+<span class="s">}</span><span class="s">"""</span>)
+
+ids  = np.arange(10000, dtype=np.int64)
+vecs = np.random.rand(10000, 128).astype(<span class="s">"float32"</span>)
+index.build(vectors=vecs, ids=ids, num_elements=10000, dim=128)
+
+q = np.random.rand(128).astype(<span class="s">"float32"</span>)
+I, D = index.knn_search(vector=q, k=10, parameters=<span class="s">'{"hgraph":{"ef_search":100}}'</span>)</code></pre>
+            </div>
+            <div class="qs-panel">
+              <h3>C++</h3>
+              <pre><code><span class="c">// link against libvsag, C++17</span>
+<span class="pp">#include</span> <span class="s">&lt;vsag/vsag.h&gt;</span>
+
+<span class="k">auto</span> result = vsag::Factory::CreateIndex(<span class="s">"hgraph"</span>, R<span class="s">"({
+  "dtype": "float32", "metric_type": "l2", "dim": 128,
+  "index_param": { "base_quantization_type": "sq8" }
+})"</span>);
+<span class="k">auto</span> index = result.value();
+
+<span class="k">auto</span> dataset = vsag::Dataset::Make();
+dataset-&gt;Dim(128)-&gt;NumElements(n)-&gt;Float32Vectors(data)-&gt;Ids(ids)-&gt;Owner(<span class="k">false</span>);
+index-&gt;Build(dataset);
+
+<span class="k">auto</span> q = vsag::Dataset::Make();
+q-&gt;Dim(128)-&gt;NumElements(1)-&gt;Float32Vectors(query)-&gt;Owner(<span class="k">false</span>);
+<span class="k">auto</span> r = index-&gt;KnnSearch(q, <span class="n">10</span>, R<span class="s">"({"hgraph":{"ef_search":100}})"</span>);</code></pre>
+            </div>
+          </div>
+          <p class="qs-foot">
+            Need more? Read the
+            <a href="https://vsag.io/docs/en/">full documentation</a>,
+            browse <a href="https://github.com/antgroup/vsag/tree/main/examples">examples/</a>,
+            or try the
+            <a href="https://vsag.io/docs/en/resources/index_parameters.html">parameter reference</a>.
+          </p>
+        </div>
+      </section>
+
+      <section id="indexes" class="section">
+        <div class="container">
+          <p class="eyebrow center">Indexes</p>
+          <h2 class="section-title">Pick the right algorithm for your workload</h2>
+          <div class="table-wrap">
+            <table class="matrix">
+              <thead>
+                <tr>
+                  <th scope="col">Index</th>
+                  <th scope="col">Best for</th>
+                  <th scope="col">Memory</th>
+                  <th scope="col">Build</th>
+                  <th scope="col">Query</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row"><code>hgraph</code></th>
+                  <td>General-purpose, high recall, quantized graph</td>
+                  <td>Medium</td>
+                  <td>Fast</td>
+                  <td>Very fast</td>
+                </tr>
+                <tr>
+                  <th scope="row"><code>hnsw</code></th>
+                  <td>Classic hierarchical navigable small world</td>
+                  <td>High</td>
+                  <td>Medium</td>
+                  <td>Fast</td>
+                </tr>
+                <tr>
+                  <th scope="row"><code>diskann</code></th>
+                  <td>Billion-scale corpora on SSD</td>
+                  <td>Low (RAM)</td>
+                  <td>Medium</td>
+                  <td>Fast (I/O bound)</td>
+                </tr>
+                <tr>
+                  <th scope="row"><code>ivf</code></th>
+                  <td>High-throughput batch search, GPU-friendly training</td>
+                  <td>Low–Medium</td>
+                  <td>Fast</td>
+                  <td>Fast</td>
+                </tr>
+                <tr>
+                  <th scope="row"><code>pyramid</code></th>
+                  <td>Multi-tenant / partitioned corpora</td>
+                  <td>Medium</td>
+                  <td>Fast</td>
+                  <td>Fast</td>
+                </tr>
+                <tr>
+                  <th scope="row"><code>sindi</code></th>
+                  <td>Sparse vectors (BM25-style, learned sparse)</td>
+                  <td>Low</td>
+                  <td>Fast</td>
+                  <td>Very fast</td>
+                </tr>
+                <tr>
+                  <th scope="row"><code>brute_force</code></th>
+                  <td>Exact ground-truth baseline, small datasets</td>
+                  <td>High</td>
+                  <td>Instant</td>
+                  <td>Slow</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section id="ecosystem" class="section section-alt">
+        <div class="container">
+          <p class="eyebrow center">Ecosystem</p>
+          <h2 class="section-title">Where VSAG runs today</h2>
+          <div class="grid-3">
+            <article class="card">
+              <h3>Databases &amp; search engines</h3>
+              <p>
+                VSAG powers vector search in production systems including
+                OceanBase, TuGraph and internal services at Ant Group.
+              </p>
+            </article>
+            <article class="card">
+              <h3>Language bindings</h3>
+              <p>
+                Native C++ API, <code>pyvsag</code> on PyPI, and a TypeScript /
+                Node.js binding published as
+                <a href="https://www.npmjs.com/package/vsag">vsag</a> on npm.
+              </p>
+            </article>
+            <article class="card">
+              <h3>Benchmarks &amp; tooling</h3>
+              <p>
+                A first-class <code>tools/eval</code> runner, dataset loaders
+                for SIFT / GIST / MS&nbsp;MARCO, and scripts to reproduce the
+                numbers in our papers.
+              </p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section id="community" class="section">
+        <div class="container community">
+          <div>
+            <p class="eyebrow">Community</p>
+            <h2 class="section-title left">Built in the open</h2>
+            <p class="lede left">
+              VSAG is developed by engineers and researchers across industry and
+              academia. Open issues, send pull requests, or join the
+              conversation.
+            </p>
+            <div class="cta-row">
+              <a class="btn btn-primary" href="https://github.com/antgroup/vsag/issues"
+                >Open an issue</a
+              >
+              <a
+                class="btn btn-ghost"
+                href="https://vsag.io/docs/en/development/contributing.html"
+                >Contributing guide</a
+              >
+            </div>
+          </div>
+          <div class="community-right">
+            <blockquote>
+              <p>
+                &ldquo;A unified builder API for graph, inverted and disk-based
+                indexes — with honest benchmarks and a serialization layer that
+                actually survives production upgrades.&rdquo;
+              </p>
+            </blockquote>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="container footer-inner">
+        <div class="foot-brand">
+          <span class="brand-name">VSAG</span>
+          <p>High-performance vector indexing library. Apache License 2.0.</p>
+        </div>
+        <div class="foot-cols">
+          <div>
+            <h4>Docs</h4>
+            <ul>
+              <li><a href="https://vsag.io/docs/en/guide/installation.html">Installation</a></li>
+              <li><a href="https://vsag.io/docs/en/guide/create_index.html">Create an index</a></li>
+              <li><a href="https://vsag.io/docs/en/guide/knn_search.html">KNN search</a></li>
+              <li><a href="https://vsag.io/docs/en/resources/index_parameters.html">Parameters</a></li>
+            </ul>
+          </div>
+          <div>
+            <h4>Project</h4>
+            <ul>
+              <li><a href="https://github.com/antgroup/vsag">GitHub</a></li>
+              <li><a href="https://github.com/antgroup/vsag/releases">Releases</a></li>
+              <li><a href="https://vsag.io/docs/en/resources/roadmap_2025.html">Roadmap</a></li>
+              <li><a href="https://vsag.io/docs/en/misc/contributors.html">Contributors</a></li>
+            </ul>
+          </div>
+          <div>
+            <h4>Language</h4>
+            <ul>
+              <li><a href="https://vsag.io/docs/en/">English</a></li>
+              <li><a href="https://vsag.io/docs/zh/">中文</a></li>
+            </ul>
+          </div>
+        </div>
+      </div>
+      <div class="container foot-bottom">
+        <small>© VSAG contributors. Built with care at Ant Group and by the community.</small>
+      </div>
+    </footer>
+  </body>
+</html>

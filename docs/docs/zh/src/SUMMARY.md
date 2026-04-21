@@ -33,6 +33,7 @@
 - [关联项目](resources/related_projects.md)
 - [科研论文](resources/research_papers.md)
 - [最佳实践](resources/best_practices.md)
+- [索引参数](resources/index_parameters.md)
 - [标准环境性能参考](resources/performance.md)
 - [性能评估工具](resources/eval.md)
 
