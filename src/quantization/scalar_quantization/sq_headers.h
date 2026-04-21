@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,8 +14,7 @@
 
 #pragma once
 
-#include "bf16_quantizer.h"
-#include "fp16_quantizer.h"
+#include "half_precision_quantizer.h"
 #include "scalar_quantizer.h"
 #include "sq4_uniform_quantizer.h"
 #include "sq8_uniform_quantizer.h"
