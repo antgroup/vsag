@@ -31,14 +31,18 @@ TestRandomness(FhtKacRotator& rom1, FhtKacRotator& rom2, int dim) {
     std::vector<uint8_t> mat2(flip_len);
     rom2.CopyFlip(mat2.data());
 
-    uint64_t count_same = 0, count_non_zero = 0;
+    uint64_t count_same = 0;
     for (uint64_t i = 0; i < flip_len; i++) {
         if (mat1[i] == mat2[i]) {
             count_same++;
         }
-        count_non_zero++;
     }
-    uint64_t threshold = std::max<uint64_t>(1UL, static_cast<uint64_t>(0.1 * count_non_zero));
+    // For small samples (e.g., dim=32, flip_len=16), the 10% threshold truncates
+    // to 1. With random uniform bytes, the probability of 2+ byte collisions
+    // in 16 elements is P(X>=2) for B(16, 1/256) ~ 0.17%, which causes
+    // intermittent CI failures. A minimum floor of 2 eliminates this flakiness.
+    constexpr uint64_t kMinCollisionThreshold = 2;
+    uint64_t threshold = std::max<uint64_t>(kMinCollisionThreshold, flip_len / 10);
     REQUIRE(count_same <= threshold);
 }
 
