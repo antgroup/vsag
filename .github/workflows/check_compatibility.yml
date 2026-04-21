@@ -3,6 +3,8 @@ name: Check Compatibility
 on:
   push:
     branches: [ "main", "0.*" ]
+    paths-ignore:
+      - 'docs/**'
   workflow_dispatch:
 
 jobs:
