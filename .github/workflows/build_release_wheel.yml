@@ -11,6 +11,9 @@ on:
         description: 'Architecture to build (x86_64 or aarch64). If empty, builds all.'
         required: false
         type: string
+  release:
+    types:
+      - published
 
 jobs:
   setup-matrix:
@@ -153,9 +156,7 @@ jobs:
     name: Publish packages
     needs: [build_wheels_modern, build_wheels_py36]
     runs-on: ubuntu-latest
-    # The `if: always()` ensures this job runs even if one of the build jobs is skipped
-    # because its matrix was empty. We check for files later.
-    if: always() && (github.event_name == 'release' || (github.event_name == 'push' && github.ref == 'refs/heads/main'))
+    if: ${{ github.event_name == 'release' && github.event.action == 'published' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
     steps:
       - uses: actions/download-artifact@v5
         with:
@@ -174,25 +175,15 @@ jobs:
             echo "should_publish=true" >> $GITHUB_OUTPUT
           fi
 
-      - name: Publish to TestPyPI
-        if: steps.list_files.outputs.should_publish == 'true' && github.event_name == 'push'
-        uses: pypa/gh-action-pypi-publish@v1
-        with:
-          repository-url: https://test.pypi.org/legacy/
-          password: ${{ secrets.TEST_PYPI_API_TOKEN }}
-          skip-existing: true
-          verbose: true
-
       - name: Publish to PyPI
-        if: steps.list_files.outputs.should_publish == 'true' && github.event_name == 'release' && github.event.action == 'published'
+        if: steps.list_files.outputs.should_publish == 'true'
         uses: pypa/gh-action-pypi-publish@v1
         with:
           password: ${{ secrets.PYPI_API_TOKEN }}
           verbose: true
 
       - name: Upload to GitHub Release
-        if: steps.list_files.outputs.should_publish == 'true' && github.event_name == 'release' && github.event.action == 'published'
+        if: steps.list_files.outputs.should_publish == 'true'
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*.whl
-
