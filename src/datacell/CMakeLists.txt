@@ -23,6 +23,6 @@ target_link_libraries (datacell PRIVATE transform quantizer io attr coverage_con
 if (ENABLE_TESTS)
     file (GLOB_RECURSE DATACELL_TESTS "*_test.cpp")
     add_library (datacell_test STATIC ${DATACELL_TESTS})
-    target_link_libraries (datacell_test PRIVATE Catch2::Catch2 vsag unittest_deps)
+    target_link_libraries (datacell_test PRIVATE Catch2::Catch2 vsag_static unittest_deps)
     add_dependencies (datacell_test Catch2)
 endif ()
