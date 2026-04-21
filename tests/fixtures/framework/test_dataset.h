@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -48,6 +47,7 @@ public:
      * @param extra_info_size Size of extra info per vector.
      * @param has_duplicate Whether to include duplicate vectors.
      * @param id_shift Offset for generated IDs.
+     * @param use_fixed_seed Whether to use a fixed seed for reproducible data generation.
      * @return Shared pointer to the created TestDataset.
      */
     static std::shared_ptr<TestDataset>
@@ -59,7 +59,8 @@ public:
                       std::string vector_type = "dense",
                       uint64_t extra_info_size = 0,
                       bool has_duplicate = false,
-                      int64_t id_shift = 16);
+                      int64_t id_shift = 16,
+                      bool use_fixed_seed = true);
 
     /**
      * @brief Creates a test dataset with NaN values.

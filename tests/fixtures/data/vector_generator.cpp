@@ -121,6 +121,24 @@ generate_vectors(uint64_t count, uint32_t dim, bool need_normalize, int seed) {
     return std::move(GenerateVectors<float>(count, dim, seed, need_normalize));
 }
 
+std::vector<float>
+generate_normal_vectors(
+    uint64_t count, uint32_t dim, bool need_normalize, int seed, float mean, float stddev) {
+    std::mt19937 rng(seed);
+
+    std::normal_distribution<float> distrib(mean, stddev);
+    std::vector<float> vectors(dim * count);
+    for (int64_t i = 0; i < dim * count; ++i) {
+        vectors[i] = distrib(rng);
+    }
+    if (need_normalize) {
+        for (int64_t i = 0; i < count; ++i) {
+            vsag::Normalize(vectors.data() + i * dim, vectors.data() + i * dim, dim);
+        }
+    }
+    return vectors;
+}
+
 std::vector<int8_t>
 generate_int8_codes(uint64_t count, uint32_t dim, int seed) {
     return GenerateVectors<int8_t>(count, dim, seed);
