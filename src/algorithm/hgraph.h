@@ -55,6 +55,7 @@ public:
 
     friend class HGraphAnalyzer;
     friend class HGraphShrinkContext;
+    friend class HGraphDiskANNLoader;
 
 public:
     HGraph(const HGraphParameterPtr& param, const IndexCommonParam& common_param);

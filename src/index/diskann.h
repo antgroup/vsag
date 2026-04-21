@@ -268,8 +268,8 @@ private:
 
 private:
     std::shared_ptr<LocalFileReader> reader_;
-    std::shared_ptr<diskann::PQFlashIndex<float, int64_t>> index_;
-    std::shared_ptr<diskann::Index<float, int64_t, int64_t>> build_index_;
+    std::shared_ptr<::diskann::PQFlashIndex<float, int64_t>> index_;
+    std::shared_ptr<::diskann::Index<float, int64_t, int64_t>> build_index_;
     std::stringstream pq_pivots_stream_;
     std::stringstream disk_pq_compressed_vectors_;
     std::stringstream disk_layout_stream_;
@@ -281,7 +281,7 @@ private:
     IndexFeatureListPtr feature_list_{nullptr};
 
     std::function<void(const std::vector<read_request>&, bool, CallBack)> batch_read_;
-    diskann::Metric metric_;
+    ::diskann::Metric metric_;
     std::shared_ptr<Reader> disk_layout_reader_;
 
     int L_ = 200;
