@@ -444,6 +444,13 @@ VSAG referenced the following works during its implementation:
                 </a>
             </td>
             <td align="center">
+                <a href="https://github.com/LINxiansheng">
+                    <img src="https://avatars.githubusercontent.com/u/18351861?v=4" width="100;" alt="LINxiansheng"/>
+                    <br />
+                    <sub><b>LIN</b></sub>
+                </a>
+            </td>
+            <td align="center">
                 <a href="https://github.com/mingyu-hkustgz">
                     <img src="https://avatars.githubusercontent.com/u/151442761?v=4" width="100;" alt="mingyu-hkustgz"/>
                     <br />

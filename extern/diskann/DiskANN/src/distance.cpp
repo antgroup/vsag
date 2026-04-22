@@ -156,7 +156,8 @@ float DistanceL2Int8::compare(const int8_t *a, const int8_t *b, uint32_t size) c
         size -= 4;
     }
     r = _mm256_hadd_ps(_mm256_hadd_ps(r, r), r);
-    return r.m256_f32[0] + r.m256_f32[4];
+    float __r_tmp[8]; _mm256_storeu_ps(__r_tmp, r);
+    return __r_tmp[0] + __r_tmp[4];
 #else
     int32_t result = 0;
 #pragma omp simd reduction(+ : result) aligned(a, b : 8)
@@ -261,7 +262,7 @@ float AVXDistanceL2Int8::compare(const int8_t *a, const int8_t *b, uint32_t leng
         length -= 16;
     }
     r = _mm_hadd_ps(_mm_hadd_ps(r, r), r);
-    float res = r.m128_f32[0];
+    float res = _mm_cvtss_f32(r);
 
     if (length >= 8)
     {
@@ -272,7 +273,7 @@ float AVXDistanceL2Int8::compare(const int8_t *a, const int8_t *b, uint32_t leng
         b += 8;
         length -= 8;
         r2 = _mm_hadd_ps(_mm_hadd_ps(r2, r2), r2);
-        res += r2.m128_f32[0];
+        res += _mm_cvtss_f32(r2);
     }
 
     if (length >= 4)
@@ -280,7 +281,8 @@ float AVXDistanceL2Int8::compare(const int8_t *a, const int8_t *b, uint32_t leng
         __m128 r2 = _mm_setzero_ps();
         __m128i r3 = _mm_subs_epi8(_mm_load_si128((__m128i *)(a - 12)), _mm_load_si128((__m128i *)(b - 12)));
         r2 = _mm_add_ps(r2, _mm_mulhi_epi8_shift32(r3));
-        res += r2.m128_f32[0] + r2.m128_f32[1];
+        float __r2_tmp[4]; _mm_storeu_ps(__r2_tmp, r2);
+        res += __r2_tmp[0] + __r2_tmp[1];
     }
 
     return res;
@@ -302,7 +304,8 @@ float AVXDistanceL2Float::compare(const float *a, const float *b, uint32_t lengt
         length -= 4;
     }
 
-    return sum.m128_f32[0] + sum.m128_f32[1] + sum.m128_f32[2] + sum.m128_f32[3];
+    float __sum_tmp[4]; _mm_storeu_ps(__sum_tmp, sum);
+    return __sum_tmp[0] + __sum_tmp[1] + __sum_tmp[2] + __sum_tmp[3];
 }
 #else
 float AVXDistanceL2Int8::compare(const int8_t *, const int8_t *, uint32_t) const

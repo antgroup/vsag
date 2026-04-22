@@ -15,7 +15,18 @@
 
 #include "default_logger.h"
 
+#ifdef _WIN32
+#include <io.h>
+#ifndef STDOUT_FILENO
+#define STDOUT_FILENO 1
+#endif
+#ifndef STDERR_FILENO
+#define STDERR_FILENO 2
+#endif
+#define isatty _isatty
+#else
 #include <unistd.h>
+#endif
 
 #include <chrono>
 #include <cstdlib>
@@ -36,7 +47,11 @@ format_timestamp() {
         std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
 
     std::tm time_info{};
+#ifdef _WIN32
+    localtime_s(&time_info, &seconds);
+#else
     localtime_r(&seconds, &time_info);
+#endif
 
     std::ostringstream stream;
     stream << std::put_time(&time_info, "%Y-%m-%d %H:%M:%S") << '.' << std::setfill('0')

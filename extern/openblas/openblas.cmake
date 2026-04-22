@@ -7,7 +7,7 @@ option (USE_SYSTEM_OPENBLAS "Use system-installed OpenBLAS instead of building f
 
 set (OPENBLAS_FOUND FALSE)
 
-if (USE_SYSTEM_OPENBLAS)
+if (USE_SYSTEM_OPENBLAS AND NOT WIN32)
     # Try to find system-installed OpenBLAS
     find_library (OPENBLAS_LIB
         NAMES openblas
@@ -116,6 +116,13 @@ if (USE_SYSTEM_OPENBLAS AND OPENBLAS_FOUND)
     endif ()
 
     message (STATUS "Using system OpenBLAS as BLAS backend: ${OPENBLAS_LIB}")
+elseif (WIN32)
+    # On Windows: link via the interface target `openblas_imported` created below.
+    set (BLAS_LIBRARIES openblas_imported)
+    # OpenBLAS on Windows installs its public headers (cblas.h, lapacke.h, ...)
+    # under `<install>/include/openblas/`, so expose that directory directly.
+    set (OPENBLAS_INCLUDE_DIRS ${install_dir}/include ${install_dir}/include/openblas)
+    message (STATUS "Enable OpenBLAS as BLAS backend (Windows)")
 else ()
     if (APPLE AND DEFINED GFORTRAN_LIB AND EXISTS "${GFORTRAN_LIB}")
         set (BLAS_LIBRARIES ${install_dir}/lib/libopenblas.a "${GFORTRAN_LIB}")
@@ -151,38 +158,89 @@ if (NOT OPENBLAS_FOUND)
         list (PREPEND openblas_urls "$ENV{VSAG_THIRDPARTY_OPENBLAS}")
     endif ()
 
-    ExternalProject_Add (
-        ${name}
-        URL ${openblas_urls}
-        URL_HASH MD5=115634b39007de71eb7e75cf7591dfb2
-        DOWNLOAD_NAME OpenBLAS-v0.3.23.tar.gz
-        PREFIX ${CMAKE_CURRENT_BINARY_DIR}/${name}
-        TMP_DIR ${BUILD_INFO_DIR}
-        STAMP_DIR ${BUILD_INFO_DIR}
-        DOWNLOAD_DIR ${DOWNLOAD_DIR}
-        SOURCE_DIR ${source_dir}
-        CONFIGURE_COMMAND ""
-        BUILD_COMMAND
-            ${common_configure_envs}
-            OMP_NUM_THREADS=1
-            PATH=/usr/lib/ccache:$ENV{PATH}
-            LD_LIBRARY_PATH=/opt/alibaba-cloud-compiler/lib64/:$ENV{LD_LIBRARY_PATH}
-            make USE_THREAD=0 USE_LOCKING=1 DYNAMIC_ARCH=1 -j${NUM_BUILDING_JOBS}
-        INSTALL_COMMAND
-            make DYNAMIC_ARCH=1 PREFIX=${install_dir} install
-        BUILD_IN_SOURCE 1
-        LOG_CONFIGURE TRUE
-        LOG_BUILD TRUE
-        LOG_INSTALL TRUE
-        DOWNLOAD_NO_PROGRESS 1
-        INACTIVITY_TIMEOUT 5
-        TIMEOUT 30
+    if (WIN32)
+        file (TO_CMAKE_PATH "${CMAKE_C_COMPILER}" _c_compiler_fwd)
+        ExternalProject_Add (
+            ${name}
+            URL ${openblas_urls}
+            URL_HASH MD5=115634b39007de71eb7e75cf7591dfb2
+            DOWNLOAD_NAME OpenBLAS-v0.3.23.tar.gz
+            PREFIX ${CMAKE_CURRENT_BINARY_DIR}/${name}
+            TMP_DIR ${BUILD_INFO_DIR}
+            STAMP_DIR ${BUILD_INFO_DIR}
+            DOWNLOAD_DIR ${DOWNLOAD_DIR}
+            SOURCE_DIR ${source_dir}
+            CONFIGURE_COMMAND
+                cmake -S ${source_dir} -B ${source_dir}/build
+                    -DCMAKE_INSTALL_PREFIX=${install_dir}
+                    -DBUILD_SHARED_LIBS=OFF
+                    -DBUILD_WITHOUT_LAPACK=OFF
+                    -DNOFORTRAN=1
+                    -DUSE_THREAD=0
+                    -DUSE_LOCKING=1
+                    -DDYNAMIC_ARCH=OFF
+                    -DTARGET=HASWELL
+                    -DC_LAPACK=ON
+                    -DCMAKE_C_COMPILER=${_c_compiler_fwd}
+                    -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+                    "-G" "NMake Makefiles"
+            BUILD_COMMAND
+                cmake --build ${source_dir}/build --parallel ${NUM_BUILDING_JOBS}
+            INSTALL_COMMAND
+                cmake --install ${source_dir}/build
+            BUILD_IN_SOURCE 0
+            LOG_CONFIGURE TRUE
+            LOG_BUILD TRUE
+            LOG_INSTALL TRUE
+            DOWNLOAD_NO_PROGRESS 1
+            INACTIVITY_TIMEOUT 5
+            TIMEOUT 30
+        )
 
-        BUILD_BYPRODUCTS
-            ${install_dir}/lib/libopenblas.a
-    )
+        # Interface import target so the `.lib` file is passed directly to the
+        # linker without CMake treating it as a tracked build output that Ninja
+        # would need a rule for.
+        if (NOT TARGET openblas_imported)
+            add_library (openblas_imported INTERFACE IMPORTED GLOBAL)
+            target_link_options (openblas_imported INTERFACE "${install_dir}/lib/openblas.lib")
+            add_dependencies (openblas_imported openblas)
+        endif ()
+    else ()
+        ExternalProject_Add (
+            ${name}
+            URL ${openblas_urls}
+            URL_HASH MD5=115634b39007de71eb7e75cf7591dfb2
+            DOWNLOAD_NAME OpenBLAS-v0.3.23.tar.gz
+            PREFIX ${CMAKE_CURRENT_BINARY_DIR}/${name}
+            TMP_DIR ${BUILD_INFO_DIR}
+            STAMP_DIR ${BUILD_INFO_DIR}
+            DOWNLOAD_DIR ${DOWNLOAD_DIR}
+            SOURCE_DIR ${source_dir}
+            CONFIGURE_COMMAND ""
+            BUILD_COMMAND
+                ${common_configure_envs}
+                OMP_NUM_THREADS=1
+                PATH=/usr/lib/ccache:$ENV{PATH}
+                LD_LIBRARY_PATH=/opt/alibaba-cloud-compiler/lib64/:$ENV{LD_LIBRARY_PATH}
+                make USE_THREAD=0 USE_LOCKING=1 DYNAMIC_ARCH=1 -j${NUM_BUILDING_JOBS}
+            INSTALL_COMMAND
+                make DYNAMIC_ARCH=1 PREFIX=${install_dir} install
+            BUILD_IN_SOURCE 1
+            LOG_CONFIGURE TRUE
+            LOG_BUILD TRUE
+            LOG_INSTALL TRUE
+            DOWNLOAD_NO_PROGRESS 1
+            INACTIVITY_TIMEOUT 5
+            TIMEOUT 30
 
-    if (NOT APPLE)
+            BUILD_BYPRODUCTS
+                ${install_dir}/lib/libopenblas.a
+        )
+    endif ()
+
+    if (WIN32)
+        set (OPENBLAS_LIBRARY_DIRS ${install_dir}/lib)
+    elseif (NOT APPLE)
         set (OPENBLAS_LIBRARY_DIRS ${install_dir}/lib ${install_dir}/lib64)
     else ()
         set (OPENBLAS_LIBRARY_DIRS ${install_dir}/lib)
@@ -190,14 +248,18 @@ if (NOT OPENBLAS_FOUND)
 
     file (GLOB LIB_DIR_EXIST CHECK_DIRECTORIES LIST_DIRECTORIES true ${install_dir}/lib)
     if (LIB_DIR_EXIST)
-        file (GLOB LIB_FILES ${install_dir}/lib/lib*.a)
+        if (WIN32)
+            file (GLOB LIB_FILES ${install_dir}/lib/*.lib)
+        else ()
+            file (GLOB LIB_FILES ${install_dir}/lib/lib*.a)
+        endif ()
         foreach (lib_file ${LIB_FILES})
             install (FILES ${lib_file}
                      DESTINATION ${CMAKE_INSTALL_PREFIX}/lib)
         endforeach ()
     endif ()
 
-    if (NOT APPLE)
+    if (NOT APPLE AND NOT WIN32)
         file (GLOB LIB64_DIR_EXIST CHECK_DIRECTORIES LIST_DIRECTORIES true ${install_dir}/lib64)
         if (LIB64_DIR_EXIST)
             file (GLOB LIB64_FILES ${install_dir}/lib64/lib*.a)

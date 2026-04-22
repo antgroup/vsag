@@ -18,6 +18,8 @@
 #if defined(__cplusplus)
 #if defined(__GNUC__) || defined(__clang__)
 #define RESTRICT __restrict__
+#elif defined(_MSC_VER)
+#define RESTRICT __restrict
 #else
 #define RESTRICT
 #endif
@@ -28,6 +30,9 @@
 #if defined(__GNUC__) || defined(__clang__)
 #define PORTABLE_ALIGN32 __attribute__((aligned(32)))
 #define PORTABLE_ALIGN64 __attribute__((aligned(64)))
+#elif defined(_MSC_VER)
+#define PORTABLE_ALIGN32 __declspec(align(32))
+#define PORTABLE_ALIGN64 __declspec(align(64))
 #else
 #define PORTABLE_ALIGN32
 #define PORTABLE_ALIGN64

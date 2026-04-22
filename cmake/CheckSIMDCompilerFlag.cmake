@@ -78,60 +78,73 @@ try_compile(COMPILER_NEON_SUPPORTED
     OUTPUT_VARIABLE COMPILE_OUTPUT
     )
 
-file(WRITE ${CMAKE_BINARY_DIR}/instructions_test_avx512vpopcntdq.cpp "#include <immintrin.h>\nint main() { __m512i a, b; b = _mm512_popcnt_epi64(a); return 0; }")
-try_compile(RUNTIME_AVX512VPOPCNTDQ_SUPPORTED
-    ${CMAKE_BINARY_DIR}/instructions_test_avx512vpopcntdq
-    ${CMAKE_BINARY_DIR}/instructions_test_avx512vpopcntdq.cpp
-    COMPILE_DEFINITIONS "-march=native"
-    OUTPUT_VARIABLE COMPILE_OUTPUT
+# Runtime checks using -march=native (not applicable on MSVC/clang-cl; use explicit flags instead)
+if (MSVC)
+    set (NATIVE_FLAG "")
+    # On MSVC/clang-cl, runtime support mirrors compiler support for x86
+    set (RUNTIME_AVX512VPOPCNTDQ_SUPPORTED ${COMPILER_AVX512VPOPCNTDQ_SUPPORTED})
+    set (RUNTIME_AVX512_SUPPORTED ${COMPILER_AVX512_SUPPORTED})
+    set (RUNTIME_AVX2_SUPPORTED ${COMPILER_AVX2_SUPPORTED})
+    set (RUNTIME_AVX_SUPPORTED ${COMPILER_AVX_SUPPORTED})
+    set (RUNTIME_SSE_SUPPORTED ${COMPILER_SSE_SUPPORTED})
+    set (RUNTIME_SVE_SUPPORTED FALSE)
+    set (RUNTIME_NEON_SUPPORTED FALSE)
+else ()
+    file(WRITE ${CMAKE_BINARY_DIR}/instructions_test_avx512vpopcntdq.cpp "#include <immintrin.h>\nint main() { __m512i a, b; b = _mm512_popcnt_epi64(a); return 0; }")
+    try_compile(RUNTIME_AVX512VPOPCNTDQ_SUPPORTED
+        ${CMAKE_BINARY_DIR}/instructions_test_avx512vpopcntdq
+        ${CMAKE_BINARY_DIR}/instructions_test_avx512vpopcntdq.cpp
+        COMPILE_DEFINITIONS "-march=native"
+        OUTPUT_VARIABLE COMPILE_OUTPUT
+        )
+
+    file(WRITE ${CMAKE_BINARY_DIR}/instructions_test_avx512.cpp "#include <immintrin.h>\nint main() { __m512 a, b; a = _mm512_sub_ps(a, b); return 0; }")
+    try_compile(RUNTIME_AVX512_SUPPORTED
+        ${CMAKE_BINARY_DIR}/instructions_test_avx512
+        ${CMAKE_BINARY_DIR}/instructions_test_avx512.cpp
+        COMPILE_DEFINITIONS "-march=native"
+        OUTPUT_VARIABLE COMPILE_OUTPUT
+        )
+
+    file(WRITE ${CMAKE_BINARY_DIR}/instructions_test_avx2.cpp "#include <immintrin.h>\nint main() { __m256 a, b, c; c = _mm256_fmadd_ps(a, b, c); return 0; }")
+    try_compile(RUNTIME_AVX2_SUPPORTED
+        ${CMAKE_BINARY_DIR}/instructions_test_avx2
+        ${CMAKE_BINARY_DIR}/instructions_test_avx2.cpp
+        COMPILE_DEFINITIONS "-march=native"
+        OUTPUT_VARIABLE COMPILE_OUTPUT
+        )
+
+    file(WRITE ${CMAKE_BINARY_DIR}/instructions_test_avx.cpp "#include <immintrin.h>\nint main() { __m256 a, b; a = _mm256_sub_ps(a, b); return 0; }")
+    try_compile(RUNTIME_AVX_SUPPORTED
+        ${CMAKE_BINARY_DIR}/instructions_test_avx
+        ${CMAKE_BINARY_DIR}/instructions_test_avx.cpp
+        COMPILE_DEFINITIONS "-march=native"
+        OUTPUT_VARIABLE COMPILE_OUTPUT
+        )
+
+    file(WRITE ${CMAKE_BINARY_DIR}/instructions_test_sse.cpp "#include <immintrin.h>\nint main() { __m128 a, b; a = _mm_sub_ps(a, b); return 0; }")
+    try_compile(RUNTIME_SSE_SUPPORTED
+        ${CMAKE_BINARY_DIR}/instructions_test_sse
+        ${CMAKE_BINARY_DIR}/instructions_test_sse.cpp
+        COMPILE_DEFINITIONS "-march=native"
+        OUTPUT_VARIABLE COMPILE_OUTPUT
+        )
+
+    try_compile(RUNTIME_SVE_SUPPORTED
+        ${CMAKE_BINARY_DIR}/instructions_test_sve
+        ${CMAKE_BINARY_DIR}/instructions_test_sve.cpp
+        COMPILE_DEFINITIONS "-march=native"
+        OUTPUT_VARIABLE COMPILE_OUTPUT
     )
 
-file(WRITE ${CMAKE_BINARY_DIR}/instructions_test_avx512.cpp "#include <immintrin.h>\nint main() { __m512 a, b; a = _mm512_sub_ps(a, b); return 0; }")
-try_compile(RUNTIME_AVX512_SUPPORTED
-    ${CMAKE_BINARY_DIR}/instructions_test_avx512
-    ${CMAKE_BINARY_DIR}/instructions_test_avx512.cpp
-    COMPILE_DEFINITIONS "-march=native"
-    OUTPUT_VARIABLE COMPILE_OUTPUT
-    )
-
-file(WRITE ${CMAKE_BINARY_DIR}/instructions_test_avx2.cpp "#include <immintrin.h>\nint main() { __m256 a, b, c; c = _mm256_fmadd_ps(a, b, c); return 0; }")
-try_compile(RUNTIME_AVX2_SUPPORTED
-    ${CMAKE_BINARY_DIR}/instructions_test_avx2
-    ${CMAKE_BINARY_DIR}/instructions_test_avx2.cpp
-    COMPILE_DEFINITIONS "-march=native"
-    OUTPUT_VARIABLE COMPILE_OUTPUT
-    )
-
-file(WRITE ${CMAKE_BINARY_DIR}/instructions_test_avx.cpp "#include <immintrin.h>\nint main() { __m256 a, b; a = _mm256_sub_ps(a, b); return 0; }")
-try_compile(RUNTIME_AVX_SUPPORTED
-    ${CMAKE_BINARY_DIR}/instructions_test_avx
-    ${CMAKE_BINARY_DIR}/instructions_test_avx.cpp
-    COMPILE_DEFINITIONS "-march=native"
-    OUTPUT_VARIABLE COMPILE_OUTPUT
-    )
-
-file(WRITE ${CMAKE_BINARY_DIR}/instructions_test_sse.cpp "#include <immintrin.h>\nint main() { __m128 a, b; a = _mm_sub_ps(a, b); return 0; }")
-try_compile(RUNTIME_SSE_SUPPORTED
-    ${CMAKE_BINARY_DIR}/instructions_test_sse
-    ${CMAKE_BINARY_DIR}/instructions_test_sse.cpp
-    COMPILE_DEFINITIONS "-march=native"
-    OUTPUT_VARIABLE COMPILE_OUTPUT
-    )
-
-try_compile(RUNTIME_SVE_SUPPORTED
-    ${CMAKE_BINARY_DIR}/instructions_test_sve
-    ${CMAKE_BINARY_DIR}/instructions_test_sve.cpp
-    COMPILE_DEFINITIONS "-march=native" 
-    OUTPUT_VARIABLE COMPILE_OUTPUT
-)
-
-file(WRITE ${CMAKE_BINARY_DIR}/instructions_test_neon.cpp "#include <arm_neon.h>\nint main() { float32x4_t a, b; a = vdupq_n_f32(1.0f); b = vdupq_n_f32(2.0f); a = vaddq_f32(a, b); return 0; }")
-try_compile(RUNTIME_NEON_SUPPORTED
-    ${CMAKE_BINARY_DIR}/instructions_test_neon
-    ${CMAKE_BINARY_DIR}/instructions_test_neon.cpp
-    COMPILE_DEFINITIONS "-march=armv8-a"
-    OUTPUT_VARIABLE COMPILE_OUTPUT
-    )
+    file(WRITE ${CMAKE_BINARY_DIR}/instructions_test_neon.cpp "#include <arm_neon.h>\nint main() { float32x4_t a, b; a = vdupq_n_f32(1.0f); b = vdupq_n_f32(2.0f); a = vaddq_f32(a, b); return 0; }")
+    try_compile(RUNTIME_NEON_SUPPORTED
+        ${CMAKE_BINARY_DIR}/instructions_test_neon
+        ${CMAKE_BINARY_DIR}/instructions_test_neon.cpp
+        COMPILE_DEFINITIONS "-march=armv8-a"
+        OUTPUT_VARIABLE COMPILE_OUTPUT
+        )
+endif ()
 
 # determine which instructions can be package into distribution
 set (COMPILER_SUPPORTED "compiler support instructions: ")

@@ -13,7 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-if (APPLE)
+if (WIN32)
+    set (ld_flags_workaround "")
+elseif (APPLE)
     set (ld_flags_workaround "-Wl,-rpath,@loader_path")
     # Find OpenMP - will locate libomp on macOS
     find_package (OpenMP REQUIRED)

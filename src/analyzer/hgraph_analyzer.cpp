@@ -15,6 +15,8 @@
 
 #include "hgraph_analyzer.h"
 
+#include <numeric>
+
 #include "impl/heap/standard_heap.h"
 
 namespace vsag {
