@@ -174,7 +174,7 @@ RequireDistancesNearZero(const vsag::DatasetPtr& result, const std::set<int64_t>
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "Pyramid Build & ContinueAdd Test",
-                             "[ft][pyramid]") {
+                             "[ft][build][pyramid]") {
     auto metric_type = GENERATE("l2", "ip", "cosine");
     auto use_reorder = GENERATE(true, false);
     auto immutable = GENERATE(true, false);
@@ -211,7 +211,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "Pyramid Duplicate Path Semantics Same Path",
-                             "[ft][pyramid]") {
+                             "[ft][build][pyramid]") {
     PyramidParam pyramid_param;
     pyramid_param.no_build_levels = {0, 1, 2};
     pyramid_param.support_duplicate = true;
@@ -240,7 +240,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "Pyramid Duplicate Path Semantics Prefix Descendant",
-                             "[ft][pyramid]") {
+                             "[ft][build][pyramid]") {
     PyramidParam pyramid_param;
     pyramid_param.no_build_levels = {0, 1, 2};
     pyramid_param.support_duplicate = true;
@@ -279,7 +279,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "Pyramid Duplicate Path Semantics Shared Prefix Visibility",
-                             "[ft][pyramid]") {
+                             "[ft][build][pyramid]") {
     PyramidParam pyramid_param;
     pyramid_param.no_build_levels = {0, 1, 2};
     pyramid_param.support_duplicate = true;
@@ -324,7 +324,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "Pyramid Duplicate Path Semantics Negative Control",
-                             "[ft][pyramid]") {
+                             "[ft][build][pyramid]") {
     PyramidParam pyramid_param;
     pyramid_param.no_build_levels = {0, 1, 2};
     pyramid_param.support_duplicate = true;
@@ -351,7 +351,9 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
     REQUIRE(ids_a.count(402) == 0);
 }
 
-TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex, "Pyramid Add Test", "[ft][pyramid]") {
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
+                             "Pyramid Add Test",
+                             "[ft][build][pyramid]") {
     auto metric_type = GENERATE("l2");
     std::string base_quantization_str = GENERATE("fp32");
     PyramidParam pyramid_param;
@@ -374,7 +376,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex, "Pyramid Add Test", "[f
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "Pyramid Multi-Levels Test",
-                             "[ft][pyramid]") {
+                             "[ft][build][pyramid]") {
     auto metric_type = GENERATE("l2");
     std::string base_quantization_str = GENERATE("fp32");
     const std::string name = "pyramid";
@@ -400,7 +402,9 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
     }
 }
 
-TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex, "Pyramid No Path Test", "[ft][pyramid]") {
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
+                             "Pyramid No Path Test",
+                             "[ft][build][pyramid]") {
     auto metric_type = GENERATE("l2");
     std::string base_quantization_str = GENERATE("fp32");
     const std::string name = "pyramid";
@@ -432,7 +436,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex, "Pyramid No Path Test",
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "Pyramid Serialize File",
-                             "[ft][pyramid][serialization]") {
+                             "[ft][pyramid][serialization][serialize]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("l2");
@@ -476,7 +480,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
     vsag::Options::Instance().set_block_size_limit(origin_size);
 }
 
-TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex, "Pyramid Clone", "[ft][pyramid]") {
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex, "Pyramid Clone", "[ft][clone][pyramid]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("l2");
@@ -498,7 +502,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex, "Pyramid Clone", "[ft][
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "Pyramid Build Test With Random Allocator",
-                             "[ft][pyramid]") {
+                             "[ft][build][pyramid]") {
     auto allocator = std::make_shared<fixtures::RandomAllocator>();
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
@@ -521,7 +525,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
 }
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "Pyramid Concurrent Test",
-                             "[ft][pyramid][concurrent]") {
+                             "[ft][concurrent][pyramid][build]") {
     auto metric_type = GENERATE("l2");
     PyramidParam pyramid_param;
     pyramid_param.no_build_levels = {0, 1};
@@ -543,7 +547,9 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
     }
 }
 
-TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex, "Pyramid OverTime Test", "[ft][pyramid]") {
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
+                             "Pyramid OverTime Test",
+                             "[ft][search][pyramid]") {
     auto metric_type = GENERATE("l2");
     PyramidParam pyramid_param;
     pyramid_param.no_build_levels = {0, 1};
@@ -577,7 +583,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex, "Pyramid OverTime Test"
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "Pyramid Duplicate Test",
-                             "[ft][pyramid][concurrent]") {
+                             "[ft][concurrent][pyramid][build][duplicate]") {
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto metric_type = GENERATE("l2", "cosine");
@@ -626,7 +632,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "Pyramid Duplicate ID Test",
-                             "[ft][pyramid]") {
+                             "[ft][build][pyramid][duplicate]") {
     auto metric_type = GENERATE("l2");
     PyramidParam pyramid_param;
     pyramid_param.no_build_levels = {0, 1};
@@ -642,7 +648,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "Pyramid Analyzer Test",
-                             "[ft][pyramid][analyzer]") {
+                             "[ft][pyramid][analyzer][build]") {
     auto metric_type = GENERATE("l2");
     PyramidParam pyramid_param;
     pyramid_param.no_build_levels = {0, 1, 2};

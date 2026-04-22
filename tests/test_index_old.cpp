@@ -17,7 +17,7 @@
 #include "simd/simd.h"
 #include "test_index.h"
 
-TEST_CASE("hnsw int8 recall", "[ft][index][hnsw]") {
+TEST_CASE("hnsw int8 recall", "[ft][search][hnsw]") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
 
     int64_t num_vectors = 1000;
@@ -81,7 +81,7 @@ TEST_CASE("hnsw int8 recall", "[ft][index][hnsw]") {
     }
 }
 
-TEST_CASE("index search distance", "[ft][index]") {
+TEST_CASE("index search distance", "[ft][search][distance][hnsw][diskann]") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
 
     uint64_t num_vectors = 1000;
@@ -233,7 +233,7 @@ TEST_CASE("index search distance", "[ft][index]") {
     }
 }
 
-TEST_CASE("create two hnsw index in the same time", "[ft][index][hnsw]") {
+TEST_CASE("create two hnsw index in the same time", "[ft][build][hnsw]") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
 
     int64_t num_vectors = 1000;
@@ -291,7 +291,7 @@ TEST_CASE("create two hnsw index in the same time", "[ft][index][hnsw]") {
 // index->serialize/deserialize
 /////////////////////////////////////////////////////////
 
-TEST_CASE("serialize/deserialize with file stream", "[ft][index]") {
+TEST_CASE("serialize/deserialize with file stream", "[ft][serialize][hnsw]") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
 
     int64_t num_vectors = 1000;
@@ -391,7 +391,7 @@ TEST_CASE("serialize/deserialize with file stream", "[ft][index]") {
     // }
 }
 
-TEST_CASE("search on a deserialized empty index", "[ft][index]") {
+TEST_CASE("search on a deserialized empty index", "[ft][search][serialize][hnsw][diskann]") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
 
     int64_t num_vectors = 1000;
@@ -452,7 +452,7 @@ TEST_CASE("search on a deserialized empty index", "[ft][index]") {
     REQUIRE(rangesearch.value()->GetDim() == 0);
 }
 
-TEST_CASE("remove vectors from the index", "[ft][index]") {
+TEST_CASE("remove vectors from the index", "[ft][remove][hnsw][diskann]") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
     int64_t num_vectors = 1000;
     int64_t dim = 64;
@@ -569,7 +569,7 @@ TEST_CASE("remove vectors from the index", "[ft][index]") {
     }
 }
 
-TEST_CASE("index with bsa", "[ft][index]") {
+TEST_CASE("index with bsa", "[ft][diskann]") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
     int64_t num_vectors = 1000;
     int64_t dim = 128;
@@ -625,7 +625,7 @@ TEST_CASE("index with bsa", "[ft][index]") {
     REQUIRE(recall > 0.99);
 }
 
-TEST_CASE("io for diskann", "[ft][index]") {
+TEST_CASE("io for diskann", "[ft][io][diskann]") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
     int64_t num_vectors = 1000;
     int64_t dim = 128;
@@ -685,7 +685,7 @@ TEST_CASE("io for diskann", "[ft][index]") {
     REQUIRE(recall > 0.99);
 }
 
-TEST_CASE("different parameter of io_limit", "[ft][index]") {
+TEST_CASE("different parameter of io_limit", "[ft][io][diskann]") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
     int64_t num_vectors = 1000;
     int64_t dim = 128;
@@ -750,7 +750,7 @@ TEST_CASE("different parameter of io_limit", "[ft][index]") {
 // utility functions
 /////////////////////////////////////////////////////////
 
-TEST_CASE("check correct build parameters", "[ft][index]") {
+TEST_CASE("check correct build parameters", "[ft][factory]") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
 
     auto json_string = R"(
@@ -774,7 +774,7 @@ TEST_CASE("check correct build parameters", "[ft][index]") {
     REQUIRE(res.has_value());
 }
 
-TEST_CASE("check incorrect build parameters", "[ft][index]") {
+TEST_CASE("check incorrect build parameters", "[ft][factory]") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
 
     auto json_string = R"(
@@ -798,7 +798,7 @@ TEST_CASE("check incorrect build parameters", "[ft][index]") {
     REQUIRE(res.error().type == vsag::ErrorType::INVALID_ARGUMENT);
 }
 
-TEST_CASE("check correct search parameters", "[ft][index]") {
+TEST_CASE("check correct search parameters", "[ft][factory]") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
 
     auto json_string = R"(
@@ -818,7 +818,7 @@ TEST_CASE("check correct search parameters", "[ft][index]") {
     REQUIRE(res.has_value());
 }
 
-TEST_CASE("check incorrect search parameters", "[ft][index]") {
+TEST_CASE("check incorrect search parameters", "[ft][factory]") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
 
     auto json_string = R"(
@@ -839,7 +839,7 @@ TEST_CASE("check incorrect search parameters", "[ft][index]") {
     REQUIRE(res.error().type == vsag::ErrorType::INVALID_ARGUMENT);
 }
 
-TEST_CASE("generate build parameters", "[ft][index]") {
+TEST_CASE("generate build parameters", "[ft][factory]") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
 
     auto metric_type = GENERATE("l2", "IP");
@@ -864,7 +864,7 @@ TEST_CASE("generate build parameters", "[ft][index]") {
     REQUIRE(json["diskann"]["pq_dims"].GetInt() == dim / 4);
 }
 
-TEST_CASE("estimate search cost", "[ft][index]") {
+TEST_CASE("estimate search cost", "[ft][factory]") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
 
     constexpr auto search_parameters_json = R"(
@@ -913,7 +913,7 @@ TEST_CASE("estimate search cost", "[ft][index]") {
     }
 }
 
-TEST_CASE("generate build parameters with invalid num_elements", "[ft][index]") {
+TEST_CASE("generate build parameters with invalid num_elements", "[ft][factory]") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
 
     auto metric_type = GENERATE("l2", "IP");
@@ -926,7 +926,7 @@ TEST_CASE("generate build parameters with invalid num_elements", "[ft][index]") 
     REQUIRE(parameters.error().type == vsag::ErrorType::INVALID_ARGUMENT);
 }
 
-TEST_CASE("generate build parameters with invalid dim", "[ft][index]") {
+TEST_CASE("generate build parameters with invalid dim", "[ft][factory]") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
 
     auto metric_type = GENERATE("l2", "IP");
@@ -939,7 +939,7 @@ TEST_CASE("generate build parameters with invalid dim", "[ft][index]") {
     REQUIRE(parameters.error().type == vsag::ErrorType::INVALID_ARGUMENT);
 }
 
-TEST_CASE("build index with generated_build_parameters", "[ft][index]") {
+TEST_CASE("build index with generated_build_parameters", "[ft][factory][hnsw]") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
 
     int64_t num_vectors = 1000;
@@ -991,7 +991,7 @@ TEST_CASE("build index with generated_build_parameters", "[ft][index]") {
     REQUIRE(recall > 0.95);
 }
 
-TEST_CASE("int8 + freshhnsw + feedback + update", "[ft][index][hnsw]") {
+TEST_CASE("int8 + freshhnsw + feedback + update", "[ft][feedback][update][hnsw]") {
     auto logger = vsag::Options::Instance().logger();
     logger->SetLevel(vsag::Logger::Level::kDEBUG);
 
@@ -1110,7 +1110,7 @@ TEST_CASE("int8 + freshhnsw + feedback + update", "[ft][index][hnsw]") {
     REQUIRE(fixtures::time_t(recall[1]) == fixtures::time_t(1.0f));
 }
 
-TEST_CASE("hnsw + feedback with global optimum id + remove", "[ft][index][hnsw]") {
+TEST_CASE("hnsw + feedback with global optimum id + remove", "[ft][feedback][remove][hnsw]") {
     auto logger = vsag::Options::Instance().logger();
     logger->SetLevel(vsag::Logger::Level::kDEBUG);
 
@@ -1235,7 +1235,7 @@ TEST_CASE("hnsw + feedback with global optimum id + remove", "[ft][index][hnsw]"
     }
 }
 
-TEST_CASE("using indexes that do not support conjugate graph", "[ft][index]") {
+TEST_CASE("using indexes that do not support conjugate graph", "[ft][diskann]") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
     int64_t num_vectors = 1000;
     int64_t dim = 64;
@@ -1266,7 +1266,7 @@ TEST_CASE("using indexes that do not support conjugate graph", "[ft][index]") {
     REQUIRE_THROWS(index->Pretrain(base_tag_ids, k, search_parameters));
 }
 
-TEST_CASE("hnsw with pretrained by conjugate graph", "[ft][index][hnsw]") {
+TEST_CASE("hnsw with pretrained by conjugate graph", "[ft][feedback][hnsw]") {
     auto logger = vsag::Options::Instance().logger();
     logger->SetLevel(vsag::Logger::Level::kDEBUG);
 
@@ -1394,7 +1394,7 @@ TEST_CASE("hnsw with pretrained by conjugate graph", "[ft][index][hnsw]") {
     }
 }
 
-TEST_CASE("HNSW filtered search", "[ft][index][hnsw]") {
+TEST_CASE("HNSW filtered search", "[ft][filter_search][hnsw]") {
     auto logger = vsag::Options::Instance().logger();
     logger->SetLevel(vsag::Logger::Level::kDEBUG);
 
@@ -1568,7 +1568,7 @@ TEST_CASE("HNSW filtered search", "[ft][index][hnsw]") {
     }
 }
 
-TEST_CASE("DiskAnn filtered knn search", "[ft][index][diskann]") {
+TEST_CASE("DiskAnn filtered knn search", "[ft][filter_search][diskann]") {
     auto logger = vsag::Options::Instance().logger();
     logger->SetLevel(vsag::Logger::Level::kDEBUG);
 

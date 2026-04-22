@@ -93,7 +93,7 @@ TestDatasetPool SINDITestIndex::pool{};
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
                              "Invalid Build and Search Parameter",
-                             "[ft][sindi]") {
+                             "[ft][build][search][sindi]") {
     SECTION("invalid doc_prune_ratio") {
         fixtures::SINDIParam param;
         param.doc_prune_ratio = 0.99;
@@ -178,7 +178,9 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
     REQUIRE_FALSE(search_result.has_value());
 }
 
-TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Build and Search", "[ft][sindi]") {
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
+                             "SINDI Build and Search",
+                             "[ft][build][search][sindi]") {
     fixtures::SINDIParam param;
     param.use_reorder = GENERATE(true, false);
     auto build_param = fixtures::SINDITestIndex::GenerateBuildParameter(param);
@@ -202,7 +204,9 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Build and Search",
     TestIndexStatus(index);
 }
 
-TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Concurrent", "[ft][sindi]") {
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
+                             "SINDI Concurrent",
+                             "[ft][concurrent][sindi]") {
     fixtures::SINDIParam param;
     param.use_reorder = GENERATE(true, false);
     auto build_param = fixtures::SINDITestIndex::GenerateBuildParameter(param);
@@ -212,7 +216,9 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Concurrent", "[ft]
     TestConcurrentAddSearch(index, dataset, search_param, 0.99, true);
 }
 
-TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Serialize File", "[ft][sindi]") {
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
+                             "SINDI Serialize File",
+                             "[ft][serialize][sindi]") {
     fixtures::SINDIParam param;
     param.deserialize_without_footer = GENERATE(true, false);
     param.deserialize_without_buffer = true;
@@ -251,7 +257,9 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Serialize File", "
     vsag::Options::Instance().set_block_size_limit(origin_size);
 }
 
-TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "Sindi Duplicate ID Test", "[ft][sindi]") {
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
+                             "Sindi Duplicate ID Test",
+                             "[ft][build][duplicate][sindi]") {
     fixtures::SINDIParam param;
     param.use_reorder = GENERATE(true, false);
     auto build_param = fixtures::SINDITestIndex::GenerateBuildParameter(param);

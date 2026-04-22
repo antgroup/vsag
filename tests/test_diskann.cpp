@@ -77,7 +77,7 @@ DiskANNTestIndex::GenerateDiskANNBuildParametersString(const std::string& metric
     return build_parameters_str;
 }
 }  // namespace fixtures
-TEST_CASE_METHOD(fixtures::DiskANNTestIndex, "diskann build test", "[ft][index][diskann]") {
+TEST_CASE_METHOD(fixtures::DiskANNTestIndex, "diskann build test", "[ft][build][diskann]") {
     auto dims = fixtures::get_common_used_dims(3);
     auto metric_type = GENERATE("l2", "ip");
     const std::string name = "diskann";
@@ -90,7 +90,9 @@ TEST_CASE_METHOD(fixtures::DiskANNTestIndex, "diskann build test", "[ft][index][
     }
 }
 
-TEST_CASE_METHOD(fixtures::DiskANNTestIndex, "diskann cal distance by id", "[ft][index][diskann]") {
+TEST_CASE_METHOD(fixtures::DiskANNTestIndex,
+                 "diskann cal distance by id",
+                 "[ft][distance][diskann]") {
     auto dims = fixtures::get_common_used_dims(3);
     auto metric_type = GENERATE("l2", "ip", "cosine");
     const std::string name = "diskann";
@@ -144,7 +146,7 @@ TEST_CASE_METHOD(fixtures::DiskANNTestIndex, "diskann cal distance by id", "[ft]
     }
 }
 
-TEST_CASE_METHOD(fixtures::DiskANNTestIndex, "diskann pq_dim test", "[ft][index][diskann]") {
+TEST_CASE_METHOD(fixtures::DiskANNTestIndex, "diskann pq_dim test", "[ft][diskann]") {
     const std::vector<int> dims = {736, 1536, 2048, 2560, 3072};
     auto metric_type = GENERATE("l2", "ip", "cosine");
     const std::string name = "diskann";
@@ -189,7 +191,7 @@ TEST_CASE_METHOD(fixtures::DiskANNTestIndex, "diskann pq_dim test", "[ft][index]
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::DiskANNTestIndex,
                              "diskann build and search",
-                             "[ft][index][diskann]") {
+                             "[ft][build][search][diskann]") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
     auto dims = fixtures::get_common_used_dims(1);
     auto metric_type = GENERATE("l2", "ip", "cosine");
@@ -228,7 +230,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::DiskANNTestIndex,
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::DiskANNTestIndex,
                              "diskann async_io test",
-                             "[ft][index][diskann]") {
+                             "[ft][io][diskann]") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
     auto dims = fixtures::get_common_used_dims(1);
     auto metric_type = GENERATE("l2");
@@ -248,7 +250,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::DiskANNTestIndex,
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::DiskANNTestIndex,
                              "diskann beam_with test",
-                             "[ft][index][diskann]") {
+                             "[ft][diskann]") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
     auto dims = fixtures::get_common_used_dims(1);
     auto metric_type = GENERATE("l2");
@@ -268,7 +270,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::DiskANNTestIndex,
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::DiskANNTestIndex,
                              "DiskANN Serialize File",
-                             "[ft][diskann][serialization]") {
+                             "[ft][serialize][diskann]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("l2", "ip", "cosine");
@@ -294,7 +296,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::DiskANNTestIndex,
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::DiskANNTestIndex,
                              "DiskANN Search with Dirty Vector",
-                             "[ft][diskann]") {
+                             "[ft][search][diskann]") {
     // bug issue #360
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
@@ -313,7 +315,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::DiskANNTestIndex,
 }
 
 /* FIXME: segmentation fault on some platform
-TEST_CASE("DiskAnn OPQ", "[ft][diskann]") {
+TEST_CASE("DiskAnn OPQ", "[ft][search][diskann]") {
     int dim = 128;            // Dimension of the elements
     int max_elements = 1000;  // Maximum number of elements, should be known beforehand
     int max_degree = 16;      // Tightly connected with internal dimensionality of the data
@@ -383,7 +385,7 @@ TEST_CASE("DiskAnn OPQ", "[ft][diskann]") {
 }
 */
 
-TEST_CASE("DiskAnn Filter Test", "[ft][diskann]") {
+TEST_CASE("DiskAnn Filter Test", "[ft][filter_search][diskann]") {
     int dim = 65;             // Dimension of the elements
     int max_elements = 1000;  // Maximum number of elements, should be known beforehand
     int label_num = 100;      // Total number of labels
@@ -623,7 +625,7 @@ TEST_CASE("DiskAnn Random Id", "[ft][diskann]") {
     REQUIRE(recall >= 0.99);
 }
 
-TEST_CASE("DiskANN small dimension", "[ft][diskann]") {
+TEST_CASE("DiskANN small dimension", "[ft][build][diskann]") {
     int dim = 3;
     int max_elements = 1000;
     int max_degree = 16;
@@ -692,7 +694,7 @@ TEST_CASE("DiskANN small dimension", "[ft][diskann]") {
     REQUIRE(recall > 0.85);
 }
 
-TEST_CASE("split building process", "[ft][diskann]") {
+TEST_CASE("split building process", "[ft][build][diskann]") {
     int64_t dim = 128;
     int64_t ef_construction = 100;
     int64_t max_degree = 12;
