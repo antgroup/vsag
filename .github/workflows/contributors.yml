@@ -55,11 +55,10 @@ jobs:
           git commit -m "docs(contributor): stable contributors readme update"
           git push --force-with-lease origin "$branch"
 
-          pr_number="$(gh pr list --base main --head "$branch" --state open --json number --jq '.[0].number')"
+          pr_number="$(gh pr list --base main --head "$branch" --state open --json number --jq '.[0].number // empty')"
 
           if [ -z "$pr_number" ]; then
-            gh pr create --base main --head "$branch" --title "$title" --body ""
-            pr_number="$(gh pr list --base main --head "$branch" --state open --json number --jq '.[0].number')"
+            pr_number="$(gh pr create --base main --head "$branch" --title "$title" --body "" --json number --jq '.number')"
           else
             gh pr edit "$pr_number" --title "$title" --body ""
           fi
