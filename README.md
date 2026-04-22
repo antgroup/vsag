@@ -292,42 +292,42 @@ VSAG referenced the following works during its implementation:
         <tr>
             <td align="center">
                 <a href="https://github.com/LHT129">
-                    <img src="https://avatars.githubusercontent.com/u/176897537?v=4" width="100;" alt="LHT129"/>
+                    <img src="https://avatars.githubusercontent.com/u/176897537?v=4" width="100" alt="LHT129"/>
                     <br />
                     <sub><b>LHT129</b></sub>
                 </a>
             </td>
             <td align="center">
                 <a href="https://github.com/inabao">
-                    <img src="https://avatars.githubusercontent.com/u/37021995?v=4" width="100;" alt="inabao"/>
+                    <img src="https://avatars.githubusercontent.com/u/37021995?v=4" width="100" alt="inabao"/>
                     <br />
                     <sub><b>inabao</b></sub>
                 </a>
             </td>
             <td align="center">
                 <a href="https://github.com/wxyucs">
-                    <img src="https://avatars.githubusercontent.com/u/12595343?v=4" width="100;" alt="wxyucs"/>
+                    <img src="https://avatars.githubusercontent.com/u/12595343?v=4" width="100" alt="wxyucs"/>
                     <br />
                     <sub><b>Xiangyu Wang</b></sub>
                 </a>
             </td>
             <td align="center">
                 <a href="https://github.com/ShawnShawnYou">
-                    <img src="https://avatars.githubusercontent.com/u/58975154?v=4" width="100;" alt="ShawnShawnYou"/>
+                    <img src="https://avatars.githubusercontent.com/u/58975154?v=4" width="100" alt="ShawnShawnYou"/>
                     <br />
                     <sub><b>ShawnShawnYou</b></sub>
                 </a>
             </td>
             <td align="center">
                 <a href="https://github.com/Coien-rr">
-                    <img src="https://avatars.githubusercontent.com/u/83146518?v=4" width="100;" alt="Coien-rr"/>
+                    <img src="https://avatars.githubusercontent.com/u/83146518?v=4" width="100" alt="Coien-rr"/>
                     <br />
                     <sub><b>Cooper</b></sub>
                 </a>
             </td>
             <td align="center">
                 <a href="https://github.com/Carrot-77">
-                    <img src="https://avatars.githubusercontent.com/u/61344086?v=4" width="100;" alt="Carrot-77"/>
+                    <img src="https://avatars.githubusercontent.com/u/61344086?v=4" width="100" alt="Carrot-77"/>
                     <br />
                     <sub><b>Carrot-77</b></sub>
                 </a>
@@ -336,42 +336,42 @@ VSAG referenced the following works during its implementation:
         <tr>
             <td align="center">
                 <a href="https://github.com/jac0626">
-                    <img src="https://avatars.githubusercontent.com/u/118544282?v=4" width="100;" alt="jac0626"/>
+                    <img src="https://avatars.githubusercontent.com/u/118544282?v=4" width="100" alt="jac0626"/>
                     <br />
                     <sub><b>jac</b></sub>
                 </a>
             </td>
             <td align="center">
                 <a href="https://github.com/nedchu">
-                    <img src="https://avatars.githubusercontent.com/u/11944144?v=4" width="100;" alt="nedchu"/>
+                    <img src="https://avatars.githubusercontent.com/u/11944144?v=4" width="100" alt="nedchu"/>
                     <br />
                     <sub><b>Deming Chu</b></sub>
                 </a>
             </td>
             <td align="center">
                 <a href="https://github.com/shadowao">
-                    <img src="https://avatars.githubusercontent.com/u/13804928?v=4" width="100;" alt="shadowao"/>
+                    <img src="https://avatars.githubusercontent.com/u/13804928?v=4" width="100" alt="shadowao"/>
                     <br />
                     <sub><b>azl</b></sub>
                 </a>
             </td>
             <td align="center">
                 <a href="https://github.com/yulijunzj">
-                    <img src="https://avatars.githubusercontent.com/u/22726506?v=4" width="100;" alt="yulijunzj"/>
+                    <img src="https://avatars.githubusercontent.com/u/22726506?v=4" width="100" alt="yulijunzj"/>
                     <br />
                     <sub><b>L J. Yun</b></sub>
                 </a>
             </td>
             <td align="center">
                 <a href="https://github.com/Roxanne0321">
-                    <img src="https://avatars.githubusercontent.com/u/188438858?v=4" width="100;" alt="Roxanne0321"/>
+                    <img src="https://avatars.githubusercontent.com/u/188438858?v=4" width="100" alt="Roxanne0321"/>
                     <br />
                     <sub><b>Roxanne</b></sub>
                 </a>
             </td>
             <td align="center">
                 <a href="https://github.com/jingyueob">
-                    <img src="https://avatars.githubusercontent.com/u/212298588?v=4" width="100;" alt="jingyueob"/>
+                    <img src="https://avatars.githubusercontent.com/u/212298588?v=4" width="100" alt="jingyueob"/>
                     <br />
                     <sub><b>jingyueob</b></sub>
                 </a>
@@ -380,42 +380,42 @@ VSAG referenced the following works during its implementation:
         <tr>
             <td align="center">
                 <a href="https://github.com/antfin-oss">
-                    <img src="https://avatars.githubusercontent.com/u/48939886?v=4" width="100;" alt="antfin-oss"/>
+                    <img src="https://avatars.githubusercontent.com/u/48939886?v=4" width="100" alt="antfin-oss"/>
                     <br />
                     <sub><b>Ant OSS</b></sub>
                 </a>
             </td>
             <td align="center">
                 <a href="https://github.com/misaka0714">
-                    <img src="https://avatars.githubusercontent.com/u/129934985?v=4" width="100;" alt="misaka0714"/>
+                    <img src="https://avatars.githubusercontent.com/u/129934985?v=4" width="100" alt="misaka0714"/>
                     <br />
                     <sub><b>baoyuan</b></sub>
                 </a>
             </td>
             <td align="center">
                 <a href="https://github.com/Danbaiwq">
-                    <img src="https://avatars.githubusercontent.com/u/212493818?v=4" width="100;" alt="Danbaiwq"/>
+                    <img src="https://avatars.githubusercontent.com/u/212493818?v=4" width="100" alt="Danbaiwq"/>
                     <br />
                     <sub><b>Danbaiwq</b></sub>
                 </a>
             </td>
             <td align="center">
                 <a href="https://github.com/HeHuMing">
-                    <img src="https://avatars.githubusercontent.com/u/223064905?v=4" width="100;" alt="HeHuMing"/>
+                    <img src="https://avatars.githubusercontent.com/u/223064905?v=4" width="100" alt="HeHuMing"/>
                     <br />
                     <sub><b>HuMing He</b></sub>
                 </a>
             </td>
             <td align="center">
                 <a href="https://github.com/jiacai2050">
-                    <img src="https://avatars.githubusercontent.com/u/3848910?v=4" width="100;" alt="jiacai2050"/>
+                    <img src="https://avatars.githubusercontent.com/u/3848910?v=4" width="100" alt="jiacai2050"/>
                     <br />
                     <sub><b>Jiacai Liu</b></sub>
                 </a>
             </td>
             <td align="center">
                 <a href="https://github.com/lyxiong0">
-                    <img src="https://avatars.githubusercontent.com/u/29161506?v=4" width="100;" alt="lyxiong0"/>
+                    <img src="https://avatars.githubusercontent.com/u/29161506?v=4" width="100" alt="lyxiong0"/>
                     <br />
                     <sub><b>Liyao Xiong</b></sub>
                 </a>
@@ -424,42 +424,42 @@ VSAG referenced the following works during its implementation:
         <tr>
             <td align="center">
                 <a href="https://github.com/mly5269">
-                    <img src="https://avatars.githubusercontent.com/u/130448862?v=4" width="100;" alt="mly5269"/>
+                    <img src="https://avatars.githubusercontent.com/u/130448862?v=4" width="100" alt="mly5269"/>
                     <br />
                     <sub><b>mly</b></sub>
                 </a>
             </td>
             <td align="center">
                 <a href="https://github.com/Ningsir">
-                    <img src="https://avatars.githubusercontent.com/u/34963409?v=4" width="100;" alt="Ningsir"/>
+                    <img src="https://avatars.githubusercontent.com/u/34963409?v=4" width="100" alt="Ningsir"/>
                     <br />
                     <sub><b>Xinger</b></sub>
                 </a>
             </td>
             <td align="center">
                 <a href="https://github.com/pkusunjy">
-                    <img src="https://avatars.githubusercontent.com/u/11880269?v=4" width="100;" alt="pkusunjy"/>
+                    <img src="https://avatars.githubusercontent.com/u/11880269?v=4" width="100" alt="pkusunjy"/>
                     <br />
                     <sub><b>Sun Jiayu</b></sub>
                 </a>
             </td>
             <td align="center">
                 <a href="https://github.com/cubicc">
-                    <img src="https://avatars.githubusercontent.com/u/51120671?v=4" width="100;" alt="cubicc"/>
+                    <img src="https://avatars.githubusercontent.com/u/51120671?v=4" width="100" alt="cubicc"/>
                     <br />
                     <sub><b>cubicc</b></sub>
                 </a>
             </td>
             <td align="center">
                 <a href="https://github.com/dasurax">
-                    <img src="https://avatars.githubusercontent.com/u/9841872?v=4" width="100;" alt="dasurax"/>
+                    <img src="https://avatars.githubusercontent.com/u/9841872?v=4" width="100" alt="dasurax"/>
                     <br />
                     <sub><b>dasurax</b></sub>
                 </a>
             </td>
             <td align="center">
                 <a href="https://github.com/hhy3">
-                    <img src="https://avatars.githubusercontent.com/u/44047980?v=4" width="100;" alt="hhy3"/>
+                    <img src="https://avatars.githubusercontent.com/u/44047980?v=4" width="100" alt="hhy3"/>
                     <br />
                     <sub><b>Zihao Wang</b></sub>
                 </a>
@@ -468,35 +468,35 @@ VSAG referenced the following works during its implementation:
         <tr>
             <td align="center">
                 <a href="https://github.com/jiaweizone">
-                    <img src="https://avatars.githubusercontent.com/u/251354?v=4" width="100;" alt="jiaweizone"/>
+                    <img src="https://avatars.githubusercontent.com/u/251354?v=4" width="100" alt="jiaweizone"/>
                     <br />
                     <sub><b>wei</b></sub>
                 </a>
             </td>
             <td align="center">
                 <a href="https://github.com/mingyu-hkustgz">
-                    <img src="https://avatars.githubusercontent.com/u/151442761?v=4" width="100;" alt="mingyu-hkustgz"/>
+                    <img src="https://avatars.githubusercontent.com/u/151442761?v=4" width="100" alt="mingyu-hkustgz"/>
                     <br />
                     <sub><b>Mingyu Yang</b></sub>
                 </a>
             </td>
             <td align="center">
                 <a href="https://github.com/skylhd">
-                    <img src="https://avatars.githubusercontent.com/u/13144296?v=4" width="100;" alt="skylhd"/>
+                    <img src="https://avatars.githubusercontent.com/u/13144296?v=4" width="100" alt="skylhd"/>
                     <br />
                     <sub><b>lhd</b></sub>
                 </a>
             </td>
             <td align="center">
                 <a href="https://github.com/stuBirdFly">
-                    <img src="https://avatars.githubusercontent.com/u/84010733?v=4" width="100;" alt="stuBirdFly"/>
+                    <img src="https://avatars.githubusercontent.com/u/84010733?v=4" width="100" alt="stuBirdFly"/>
                     <br />
                     <sub><b>stuBirdFly</b></sub>
                 </a>
             </td>
             <td align="center">
                 <a href="https://github.com/xfmeng17">
-                    <img src="https://avatars.githubusercontent.com/u/32661584?v=4" width="100;" alt="xfmeng17"/>
+                    <img src="https://avatars.githubusercontent.com/u/32661584?v=4" width="100" alt="xfmeng17"/>
                     <br />
                     <sub><b>XFMENG17</b></sub>
                 </a>
