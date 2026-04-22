@@ -7,16 +7,16 @@ VSAG 中所有检索能力都围绕 `Index` 接口展开。要使用某种索引
 
 ## 当前支持的索引类型
 
-| 名称           | `name` 字符串   | 适用场景                                            |
-| -------------- | --------------- | --------------------------------------------------- |
-| HNSW           | `hnsw`          | 纯内存图索引，兼容 HNSWLIB 的序列化格式（参见：`include/vsag/constants.h` 的 `INDEX_HNSW`） |
-| HGraph         | `hgraph`        | VSAG 自研图索引，支持多级量化和调优（详见 `examples/cpp/103_index_hgraph.cpp`） |
-| DiskANN        | `diskann`       | 内存-磁盘混合索引，适合超出内存规模的数据集         |
-| IVF            | `ivf`           | 倒排索引，适合大 `k` 和批量查询                     |
-| Pyramid        | `pyramid`       | 多层级索引结构                                      |
-| GNO-IMI        | `gno_imi`       | 基于 GNO-IMI 的倒排索引变体                         |
-| SINDI          | `sindi`         | 稀疏向量上的倒排索引                                |
-| BruteForce     | `brute_force`   | 暴力搜索，用作基准或小数据集                        |
+| 名称           | `name` 字符串   | 文档                                  | 适用场景                                            |
+| -------------- | --------------- | ------------------------------------- | --------------------------------------------------- |
+| HGraph         | `hgraph`        | [HGraph](../indexes/hgraph.md)        | VSAG 自研图索引，支持多级量化和调优（详见 `examples/cpp/103_index_hgraph.cpp`） |
+| IVF            | `ivf`           | [IVF](../indexes/ivf.md)              | 倒排索引，适合大 `k` 和批量查询                     |
+| SINDI          | `sindi`         | [SINDI](../indexes/sindi.md)          | 稀疏向量上的倒排索引                                |
+| Pyramid        | `pyramid`       | [Pyramid](../indexes/pyramid.md)      | 多层级 / 按路径分区的索引结构                       |
+| BruteForce     | `brute_force`   | —                                     | 暴力搜索，用作基准或小数据集                        |
+| HNSW           | `hnsw`          | —                                     | 纯内存图索引（**已弃用**，新部署请改用 `hgraph`）   |
+| DiskANN        | `diskann`       | —                                     | 内存-磁盘混合索引（**已弃用**，新部署请改用 `ivf`） |
+| GNO-IMI        | `gno_imi`       | —                                     | 基于 GNO-IMI 的倒排索引变体（作为 `ivf` 的 `partition_strategy_type`）|
 
 > 完整示例可在 [`examples/cpp/`](https://github.com/antgroup/vsag/tree/main/examples/cpp) 目录中按照前缀编号依次查看（`101_` ~ `109_` 为索引类型，`2xx_` 为自定义资源，`3xx_` 为功能特性）。
 
