@@ -31,6 +31,15 @@ function escapeHtml(value) {
         .replaceAll("'", '&#39;');
 }
 
+function unescapeHtml(value) {
+    return value
+        .replaceAll('&quot;', '"')
+        .replaceAll('&#39;', "'")
+        .replaceAll('&lt;', '<')
+        .replaceAll('&gt;', '>')
+        .replaceAll('&amp;', '&');
+}
+
 async function githubRequest(path, token) {
     const response = await fetch(`https://api.github.com${path}`, {
         headers: {
@@ -81,7 +90,7 @@ function parseExistingNames(readmeContent) {
     let match = contributorCellPattern.exec(existingBlock);
 
     while (match !== null) {
-        namesByLogin.set(match[1], match[2]);
+        namesByLogin.set(match[1], unescapeHtml(match[2]));
         match = contributorCellPattern.exec(existingBlock);
     }
 
@@ -107,7 +116,7 @@ function renderContributorCell(contributor) {
     return [
         '            <td align="center">',
         `                <a href="https://github.com/${login}">`,
-        `                    <img src="${avatarUrl}" width="100;" alt="${login}"/>`,
+        `                    <img src="${avatarUrl}" width="100" alt="${login}"/>`,
         '                    <br />',
         `                    <sub><b>${displayName}</b></sub>`,
         '                </a>',
@@ -131,6 +140,21 @@ function renderContributorsTable(contributors) {
     lines.push('    </tbody>', '</table>', END_MARKER);
 
     return `${lines.join('\n')}\n`;
+}
+
+function sliceTrailingContent(readmeContent, endIndex) {
+    const contentAfterEndMarkerIndex = endIndex + END_MARKER.length;
+    const contentAfterEndMarker = readmeContent.slice(contentAfterEndMarkerIndex);
+
+    if (contentAfterEndMarker.startsWith('\r\n')) {
+        return contentAfterEndMarker.slice(2);
+    }
+
+    if (contentAfterEndMarker.startsWith('\n')) {
+        return contentAfterEndMarker.slice(1);
+    }
+
+    return contentAfterEndMarker;
 }
 
 async function main() {
@@ -164,20 +188,18 @@ async function main() {
                 right.contributions - left.contributions || left.login.localeCompare(right.login)
         );
 
-    const contributorsWithNames = [];
-
-    for (const contributor of contributors) {
-        contributorsWithNames.push({
+    const contributorsWithNames = await Promise.all(
+        contributors.map(async contributor => ({
             ...contributor,
             name: await resolveDisplayName(contributor.login, existingNames, token)
-        });
-    }
+        }))
+    );
 
     const updatedBlock = renderContributorsTable(contributorsWithNames);
     const updatedReadme =
         readmeContent.slice(0, startIndex) +
         updatedBlock +
-        readmeContent.slice(endIndex + END_MARKER.length + 1);
+        sliceTrailingContent(readmeContent, endIndex);
 
     if (updatedReadme === readmeContent) {
         return;
