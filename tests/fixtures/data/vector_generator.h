@@ -108,6 +108,19 @@ generate_int8_codes(uint64_t count, uint32_t dim, int seed = 47);
 std::vector<uint8_t>
 generate_uint8_codes(uint64_t count, uint32_t dim, int seed = 47);
 
+// Generate FP16/BF16 codes from float values in [0.1, 0.9] range
+std::vector<uint16_t>
+generate_fp16_codes(uint64_t count, uint32_t dim, int seed = 47);
+
+std::vector<uint16_t>
+generate_bf16_codes(uint64_t count, uint32_t dim, int seed = 47);
+
+std::pair<std::vector<uint16_t>, std::vector<float>>
+generate_fp16_codes_with_floats(uint64_t count, uint32_t dim, int seed = 47);
+
+std::pair<std::vector<uint16_t>, std::vector<float>>
+generate_bf16_codes_with_floats(uint64_t count, uint32_t dim, int seed = 47);
+
 std::tuple<std::vector<int64_t>, std::vector<float>>
 generate_ids_and_vectors(int64_t num_elements,
                          int64_t dim,
