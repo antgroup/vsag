@@ -18,10 +18,36 @@
 #include <catch2/reporters/catch_reporter_event_listener.hpp>
 #include <catch2/reporters/catch_reporter_registrars.hpp>
 #include <chrono>
+#include <ctime>
 #include <iomanip>
+#include <sstream>
 
 #include "functest.h"
 #include "vsag/vsag.h"
+
+static std::tm*
+LocalTime(std::time_t time_value, std::tm* tm_buf) {
+#if defined(_WIN32)
+    return localtime_s(tm_buf, &time_value) == 0 ? tm_buf : nullptr;
+#else
+    return localtime_r(&time_value, tm_buf);
+#endif
+}
+
+static std::string
+GetCurrentTimestamp() {
+    auto now = std::chrono::system_clock::now();
+    auto time_t = std::chrono::system_clock::to_time_t(now);
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
+    std::tm tm_buf{};
+    if (LocalTime(time_t, &tm_buf) == nullptr) {
+        return "[0000-00-00 00:00:00.000]";
+    }
+    std::ostringstream oss;
+    oss << "[" << std::put_time(&tm_buf, "%Y-%m-%d %H:%M:%S") << '.' << std::setfill('0')
+        << std::setw(3) << ms.count() << "]";
+    return oss.str();
+}
 
 struct LogListener : Catch::EventListenerBase {
     using EventListenerBase::EventListenerBase;
@@ -31,16 +57,16 @@ struct LogListener : Catch::EventListenerBase {
     void
     testCaseStarting(Catch::TestCaseInfo const& testInfo) override {
         start_ = std::chrono::high_resolution_clock::now();
-        std::cout << testInfo.name << ": Test Begin" << std::endl;
+        std::cout << GetCurrentTimestamp() << " " << testInfo.name << ": Test Begin" << std::endl;
     }
 
     void
     testCaseEnded(Catch::TestCaseStats const& testCaseStats) override {
         auto end = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start_).count();
-        std::cout << std::fixed << std::setprecision(3) << testCaseStats.testInfo->name
-                  << ": Executed in " << (duration > 10000 ? "\033[31m" : "") << duration / 1000.0F
-                  << "\033[0m"
+        std::cout << GetCurrentTimestamp() << " " << std::fixed << std::setprecision(3)
+                  << testCaseStats.testInfo->name << ": Executed in "
+                  << (duration > 10000 ? "\033[31m" : "") << duration / 1000.0F << "\033[0m"
                   << " seconds" << std::endl;
     }
 
