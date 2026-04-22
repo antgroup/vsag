@@ -288,8 +288,8 @@ VSAG referenced the following works during its implementation:
 <!-- markdownlint-disable -->
 <!-- readme: contributors -start -->
 <table>
-	<tbody>
-		<tr>
+    <tbody>
+        <tr>
             <td align="center">
                 <a href="https://github.com/LHT129">
                     <img src="https://avatars.githubusercontent.com/u/176897537?v=4" width="100;" alt="LHT129"/>
@@ -326,14 +326,14 @@ VSAG referenced the following works during its implementation:
                 </a>
             </td>
             <td align="center">
-                <a href="https://github.com/nedchu">
-                    <img src="https://avatars.githubusercontent.com/u/11944144?v=4" width="100;" alt="nedchu"/>
+                <a href="https://github.com/Carrot-77">
+                    <img src="https://avatars.githubusercontent.com/u/61344086?v=4" width="100;" alt="Carrot-77"/>
                     <br />
-                    <sub><b>Deming Chu</b></sub>
+                    <sub><b>Carrot-77</b></sub>
                 </a>
             </td>
-		</tr>
-		<tr>
+        </tr>
+        <tr>
             <td align="center">
                 <a href="https://github.com/jac0626">
                     <img src="https://avatars.githubusercontent.com/u/118544282?v=4" width="100;" alt="jac0626"/>
@@ -342,17 +342,17 @@ VSAG referenced the following works during its implementation:
                 </a>
             </td>
             <td align="center">
+                <a href="https://github.com/nedchu">
+                    <img src="https://avatars.githubusercontent.com/u/11944144?v=4" width="100;" alt="nedchu"/>
+                    <br />
+                    <sub><b>Deming Chu</b></sub>
+                </a>
+            </td>
+            <td align="center">
                 <a href="https://github.com/shadowao">
                     <img src="https://avatars.githubusercontent.com/u/13804928?v=4" width="100;" alt="shadowao"/>
                     <br />
                     <sub><b>azl</b></sub>
-                </a>
-            </td>
-            <td align="center">
-                <a href="https://github.com/Carrot-77">
-                    <img src="https://avatars.githubusercontent.com/u/61344086?v=4" width="100;" alt="Carrot-77"/>
-                    <br />
-                    <sub><b>Carrot-77</b></sub>
                 </a>
             </td>
             <td align="center">
@@ -376,8 +376,8 @@ VSAG referenced the following works during its implementation:
                     <sub><b>jingyueob</b></sub>
                 </a>
             </td>
-		</tr>
-		<tr>
+        </tr>
+        <tr>
             <td align="center">
                 <a href="https://github.com/antfin-oss">
                     <img src="https://avatars.githubusercontent.com/u/48939886?v=4" width="100;" alt="antfin-oss"/>
@@ -392,6 +392,36 @@ VSAG referenced the following works during its implementation:
                     <sub><b>baoyuan</b></sub>
                 </a>
             </td>
+            <td align="center">
+                <a href="https://github.com/Danbaiwq">
+                    <img src="https://avatars.githubusercontent.com/u/212493818?v=4" width="100;" alt="Danbaiwq"/>
+                    <br />
+                    <sub><b>Danbaiwq</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/HeHuMing">
+                    <img src="https://avatars.githubusercontent.com/u/223064905?v=4" width="100;" alt="HeHuMing"/>
+                    <br />
+                    <sub><b>HuMing He</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/jiacai2050">
+                    <img src="https://avatars.githubusercontent.com/u/3848910?v=4" width="100;" alt="jiacai2050"/>
+                    <br />
+                    <sub><b>Jiacai Liu</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/lyxiong0">
+                    <img src="https://avatars.githubusercontent.com/u/29161506?v=4" width="100;" alt="lyxiong0"/>
+                    <br />
+                    <sub><b>Liyao Xiong</b></sub>
+                </a>
+            </td>
+        </tr>
+        <tr>
             <td align="center">
                 <a href="https://github.com/mly5269">
                     <img src="https://avatars.githubusercontent.com/u/130448862?v=4" width="100;" alt="mly5269"/>
@@ -414,59 +444,6 @@ VSAG referenced the following works during its implementation:
                 </a>
             </td>
             <td align="center">
-                <a href="https://github.com/lyxiong0">
-                    <img src="https://avatars.githubusercontent.com/u/29161506?v=4" width="100;" alt="lyxiong0"/>
-                    <br />
-                    <sub><b>Liyao Xiong</b></sub>
-                </a>
-            </td>
-		</tr>
-		<tr>
-            <td align="center">
-                <a href="https://github.com/jiacai2050">
-                    <img src="https://avatars.githubusercontent.com/u/3848910?v=4" width="100;" alt="jiacai2050"/>
-                    <br />
-                    <sub><b>Jiacai Liu</b></sub>
-                </a>
-            </td>
-            <td align="center">
-                <a href="https://github.com/HeHuMing">
-                    <img src="https://avatars.githubusercontent.com/u/223064905?v=4" width="100;" alt="HeHuMing"/>
-                    <br />
-                    <sub><b>HuMing He</b></sub>
-                </a>
-            </td>
-            <td align="center">
-                <a href="https://github.com/Danbaiwq">
-                    <img src="https://avatars.githubusercontent.com/u/212493818?v=4" width="100;" alt="Danbaiwq"/>
-                    <br />
-                    <sub><b>Danbaiwq</b></sub>
-                </a>
-            </td>
-            <td align="center">
-                <a href="https://github.com/mingyu-hkustgz">
-                    <img src="https://avatars.githubusercontent.com/u/151442761?v=4" width="100;" alt="mingyu-hkustgz"/>
-                    <br />
-                    <sub><b>Mingyu Yang</b></sub>
-                </a>
-            </td>
-            <td align="center">
-                <a href="https://github.com/xfmeng17">
-                    <img src="https://avatars.githubusercontent.com/u/32661584?v=4" width="100;" alt="xfmeng17"/>
-                    <br />
-                    <sub><b>XFMENG17</b></sub>
-                </a>
-            </td>
-            <td align="center">
-                <a href="https://github.com/hhy3">
-                    <img src="https://avatars.githubusercontent.com/u/44047980?v=4" width="100;" alt="hhy3"/>
-                    <br />
-                    <sub><b>Zihao Wang</b></sub>
-                </a>
-            </td>
-		</tr>
-		<tr>
-            <td align="center">
                 <a href="https://github.com/cubicc">
                     <img src="https://avatars.githubusercontent.com/u/51120671?v=4" width="100;" alt="cubicc"/>
                     <br />
@@ -478,6 +455,29 @@ VSAG referenced the following works during its implementation:
                     <img src="https://avatars.githubusercontent.com/u/9841872?v=4" width="100;" alt="dasurax"/>
                     <br />
                     <sub><b>dasurax</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/hhy3">
+                    <img src="https://avatars.githubusercontent.com/u/44047980?v=4" width="100;" alt="hhy3"/>
+                    <br />
+                    <sub><b>Zihao Wang</b></sub>
+                </a>
+            </td>
+        </tr>
+        <tr>
+            <td align="center">
+                <a href="https://github.com/jiaweizone">
+                    <img src="https://avatars.githubusercontent.com/u/251354?v=4" width="100;" alt="jiaweizone"/>
+                    <br />
+                    <sub><b>wei</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/mingyu-hkustgz">
+                    <img src="https://avatars.githubusercontent.com/u/151442761?v=4" width="100;" alt="mingyu-hkustgz"/>
+                    <br />
+                    <sub><b>Mingyu Yang</b></sub>
                 </a>
             </td>
             <td align="center">
@@ -495,14 +495,14 @@ VSAG referenced the following works during its implementation:
                 </a>
             </td>
             <td align="center">
-                <a href="https://github.com/jiaweizone">
-                    <img src="https://avatars.githubusercontent.com/u/251354?v=4" width="100;" alt="jiaweizone"/>
+                <a href="https://github.com/xfmeng17">
+                    <img src="https://avatars.githubusercontent.com/u/32661584?v=4" width="100;" alt="xfmeng17"/>
                     <br />
-                    <sub><b>wei</b></sub>
+                    <sub><b>XFMENG17</b></sub>
                 </a>
             </td>
-		</tr>
-	<tbody>
+        </tr>
+    </tbody>
 </table>
 <!-- readme: contributors -end -->
 <!-- markdownlint-restore -->
