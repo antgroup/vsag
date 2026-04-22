@@ -283,6 +283,14 @@ DiskANN::DiskANN(DiskannParameters& diskann_params, const IndexCommonParam& inde
 
     this->feature_list_ = std::make_shared<IndexFeatureList>();
     this->init_feature_list();
+    result_queues_.try_emplace(STATSTIC_KNN_IO);
+    result_queues_.try_emplace(STATSTIC_KNN_TIME);
+    result_queues_.try_emplace(STATSTIC_KNN_IO_TIME);
+    result_queues_.try_emplace(STATSTIC_RANGE_IO);
+    result_queues_.try_emplace(STATSTIC_RANGE_HOP);
+    result_queues_.try_emplace(STATSTIC_RANGE_TIME);
+    result_queues_.try_emplace(STATSTIC_RANGE_CACHE_HIT);
+    result_queues_.try_emplace(STATSTIC_RANGE_IO_TIME);
 }
 
 tl::expected<std::vector<int64_t>, Error>
@@ -517,13 +525,15 @@ DiskANN::knn_search(const DatasetPtr& query,
                                                        query_stats.data() + i);
                     }
                 }
-                {
-                    std::lock_guard<std::mutex> lock(stats_mutex_);
-                    result_queues_[STATSTIC_KNN_IO].Push(static_cast<float>(query_stats[i].n_ios));
-                    result_queues_[STATSTIC_KNN_TIME].Push(static_cast<float>(time_cost));
-                    result_queues_[STATSTIC_KNN_IO_TIME].Push(
+                result_queues_.at(STATSTIC_KNN_IO).Push(static_cast<float>(query_stats[i].n_ios));
+                result_queues_.at(STATSTIC_KNN_TIME).Push(static_cast<float>(time_cost));
+                auto& io_time_queue = result_queues_.at(STATSTIC_KNN_IO_TIME);
+                if (query_stats[i].n_ios > 0) {
+                    io_time_queue.Push(
                         (query_stats[i].io_us / static_cast<float>(query_stats[i].n_ios)) /
                         MACRO_TO_MILLI);
+                } else {
+                    io_time_queue.Push(0.0F);
                 }
 
             } catch (const std::runtime_error& e) {
@@ -647,16 +657,17 @@ DiskANN::range_search(const DatasetPtr& query,
                                      params.use_async_io,
                                      &query_stats);
             }
-            {
-                std::lock_guard<std::mutex> lock(stats_mutex_);
-
-                result_queues_[STATSTIC_RANGE_IO].Push(static_cast<float>(query_stats.n_ios));
-                result_queues_[STATSTIC_RANGE_HOP].Push(static_cast<float>(query_stats.n_hops));
-                result_queues_[STATSTIC_RANGE_TIME].Push(static_cast<float>(time_cost));
-                result_queues_[STATSTIC_RANGE_CACHE_HIT].Push(
-                    static_cast<float>(query_stats.n_cache_hits));
-                result_queues_[STATSTIC_RANGE_IO_TIME].Push(
+            result_queues_.at(STATSTIC_RANGE_IO).Push(static_cast<float>(query_stats.n_ios));
+            result_queues_.at(STATSTIC_RANGE_HOP).Push(static_cast<float>(query_stats.n_hops));
+            result_queues_.at(STATSTIC_RANGE_TIME).Push(static_cast<float>(time_cost));
+            result_queues_.at(STATSTIC_RANGE_CACHE_HIT)
+                .Push(static_cast<float>(query_stats.n_cache_hits));
+            auto& range_io_time_queue = result_queues_.at(STATSTIC_RANGE_IO_TIME);
+            if (query_stats.n_ios > 0) {
+                range_io_time_queue.Push(
                     (query_stats.io_us / static_cast<float>(query_stats.n_ios)) / MACRO_TO_MILLI);
+            } else {
+                range_io_time_queue.Push(0.0F);
             }
         } catch (const std::runtime_error& e) {
             LOG_ERROR_AND_RETURNS(
@@ -1082,11 +1093,8 @@ DiskANN::GetStats() const {
     j[STATSTIC_INDEX_NAME].SetString(INDEX_DISKANN);
     j[STATSTIC_MEMORY].SetInt(GetMemoryUsage());
 
-    {
-        std::lock_guard<std::mutex> lock(stats_mutex_);
-        for (auto& item : result_queues_) {
-            j[item.first].SetFloat(item.second.GetAvgResult());
-        }
+    for (auto& item : result_queues_) {
+        j[item.first].SetFloat(item.second.GetAvgResult());
     }
 
     return j.Dump(4);

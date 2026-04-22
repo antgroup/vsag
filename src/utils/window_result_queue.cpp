@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -25,13 +24,15 @@ WindowResultQueue::WindowResultQueue() {
 
 void
 WindowResultQueue::Push(float value) {
+    std::lock_guard<std::mutex> lock(queue_mutex_);
+    uint64_t pos = count_++;
     uint64_t window_size = queue_.size();
-    queue_[count_ % window_size] = value;
-    count_++;
+    queue_[pos % window_size] = value;
 }
 
 float
 WindowResultQueue::GetAvgResult() const {
+    std::lock_guard<std::mutex> lock(queue_mutex_);
     uint64_t statistic_num = std::min<uint64_t>(count_, queue_.size());
     if (statistic_num == 0) {
         return 0.0F;
