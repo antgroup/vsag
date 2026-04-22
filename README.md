@@ -326,21 +326,14 @@ VSAG referenced the following works during its implementation:
                 </a>
             </td>
             <td align="center">
-                <a href="https://github.com/nedchu">
-                    <img src="https://avatars.githubusercontent.com/u/11944144?v=4" width="100;" alt="nedchu"/>
+                <a href="https://github.com/Carrot-77">
+                    <img src="https://avatars.githubusercontent.com/u/61344086?v=4" width="100;" alt="Carrot-77"/>
                     <br />
-                    <sub><b>Deming Chu</b></sub>
+                    <sub><b>Carrot-77</b></sub>
                 </a>
             </td>
 		</tr>
 		<tr>
-            <td align="center">
-                <a href="https://github.com/jac0626">
-                    <img src="https://avatars.githubusercontent.com/u/118544282?v=4" width="100;" alt="jac0626"/>
-                    <br />
-                    <sub><b>jac</b></sub>
-                </a>
-            </td>
             <td align="center">
                 <a href="https://github.com/shadowao">
                     <img src="https://avatars.githubusercontent.com/u/13804928?v=4" width="100;" alt="shadowao"/>
@@ -349,10 +342,17 @@ VSAG referenced the following works during its implementation:
                 </a>
             </td>
             <td align="center">
-                <a href="https://github.com/Carrot-77">
-                    <img src="https://avatars.githubusercontent.com/u/61344086?v=4" width="100;" alt="Carrot-77"/>
+                <a href="https://github.com/jac0626">
+                    <img src="https://avatars.githubusercontent.com/u/118544282?v=4" width="100;" alt="jac0626"/>
                     <br />
-                    <sub><b>Carrot-77</b></sub>
+                    <sub><b>jac</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/nedchu">
+                    <img src="https://avatars.githubusercontent.com/u/11944144?v=4" width="100;" alt="nedchu"/>
+                    <br />
+                    <sub><b>Deming Chu</b></sub>
                 </a>
             </td>
             <td align="center">
