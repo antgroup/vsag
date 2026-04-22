@@ -71,7 +71,7 @@
           </h1>
           <p class="lede">
             VSAG is a C++ library for approximate nearest-neighbor search. It
-            ships production-ready HGraph, IVF, SINDI, Pyramid and brute-force
+            ships production-ready HGraph, IVF, SINDI, Pyramid and brute force
             indexes with SIMD-accelerated distance kernels, quantization, and a
             unified builder API — with first-class Python bindings via
             <code>pyvsag</code>.
@@ -284,6 +284,7 @@ index-&gt;Build(dataset);
 <span class="k">auto</span> q = vsag::Dataset::Make();
 q-&gt;Dim(128)-&gt;NumElements(1)-&gt;Float32Vectors(query)-&gt;Owner(<span class="k">false</span>);
 <span class="k">auto</span> r = index-&gt;KnnSearch(q, <span class="n">10</span>, R<span class="s">"({"hgraph":{"ef_search":100}})"</span>);
+<span class="k">if</span> (!r.has_value()) { std::cerr &lt;&lt; r.error().message &lt;&lt; <span class="s">"\n"</span>; <span class="k">return</span> <span class="n">1</span>; }
 <span class="k">auto</span> res = r.value();
 <span class="k">for</span> (int64_t i = <span class="n">0</span>; i &lt; res-&gt;GetDim(); ++i) {
   std::cout &lt;&lt; res-&gt;GetIds()[i] &lt;&lt; <span class="s">" "</span> &lt;&lt; res-&gt;GetDistances()[i] &lt;&lt; <span class="s">"\n"</span>;
@@ -482,44 +483,71 @@ q-&gt;Dim(128)-&gt;NumElements(1)-&gt;Float32Vectors(query)-&gt;Owner(<span clas
         <small>© VSAG contributors. Built with care at Ant Group and by the community.</small>
       </div>
     </footer>
+    <div id="copy-status" class="sr-only" role="status" aria-live="polite"></div>
     <script>
       (function () {
+        var status = document.getElementById('copy-status');
+        function announce(msg) {
+          if (!status) return;
+          // Toggle content to ensure AT picks up repeated announcements.
+          status.textContent = '';
+          setTimeout(function () { status.textContent = msg; }, 30);
+        }
         document.querySelectorAll('.code-block').forEach(function (block) {
           var btn = block.querySelector('.copy-btn');
           var code = block.querySelector('pre code');
           if (!btn || !code) return;
+          var original = btn.textContent || 'Copy';
+          var timer = null;
+          btn.setAttribute('data-label', original);
+          function reset() {
+            btn.textContent = original;
+            btn.classList.remove('copied', 'failed');
+            btn.setAttribute('aria-label', 'Copy code');
+          }
+          function flash(state, label, announcement) {
+            if (timer) { clearTimeout(timer); timer = null; }
+            btn.textContent = label;
+            btn.classList.remove('copied', 'failed');
+            btn.classList.add(state);
+            btn.setAttribute('aria-label', announcement);
+            announce(announcement);
+            timer = setTimeout(reset, 1600);
+          }
           btn.addEventListener('click', function () {
             var text = code.innerText;
-            var done = function () {
-              var original = btn.textContent;
-              btn.textContent = 'Copied';
-              btn.classList.add('copied');
-              setTimeout(function () {
-                btn.textContent = original || 'Copy';
-                btn.classList.remove('copied');
-              }, 1600);
-            };
             if (navigator.clipboard && navigator.clipboard.writeText) {
-              navigator.clipboard.writeText(text).then(done, function () {
-                fallback(text);
-                done();
-              });
+              navigator.clipboard.writeText(text).then(
+                function () { flash('copied', 'Copied', 'Code copied to clipboard'); },
+                function () {
+                  if (fallback(text)) {
+                    flash('copied', 'Copied', 'Code copied to clipboard');
+                  } else {
+                    flash('failed', 'Copy failed', 'Copy failed');
+                  }
+                }
+              );
             } else {
-              fallback(text);
-              done();
+              if (fallback(text)) {
+                flash('copied', 'Copied', 'Code copied to clipboard');
+              } else {
+                flash('failed', 'Copy failed', 'Copy failed');
+              }
             }
           });
         });
         function fallback(text) {
           var ta = document.createElement('textarea');
+          var copied = false;
           ta.value = text;
           ta.setAttribute('readonly', '');
           ta.style.position = 'absolute';
           ta.style.left = '-9999px';
           document.body.appendChild(ta);
           ta.select();
-          try { document.execCommand('copy'); } catch (e) {}
+          try { copied = document.execCommand('copy'); } catch (e) { copied = false; }
           document.body.removeChild(ta);
+          return copied;
         }
       })();
     </script>

@@ -312,6 +312,12 @@ p  { margin: 0 0 1em; color: var(--fg-subtle); }
   color: var(--gold-100);
   opacity: 1;
 }
+.copy-btn.failed {
+  background: rgba(220, 80, 80, 0.22);
+  border-color: rgba(220, 80, 80, 0.5);
+  color: #ffd6d0;
+  opacity: 1;
+}
 .qs-panel code { background: transparent; border: 0; padding: 0; color: inherit; font-size: inherit; }
 .qs-panel .k  { color: #f4bd37; }
 .qs-panel .s  { color: #fce897; }
