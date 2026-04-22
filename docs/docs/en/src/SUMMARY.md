@@ -9,6 +9,14 @@
 - [Creating an Index](guide/create_index.md)
 - [pyvsag](guide/pyvsag.md)
 
+# Indexes
+
+- [Overview](indexes/README.md)
+- [HGraph](indexes/hgraph.md)
+- [IVF](indexes/ivf.md)
+- [SINDI](indexes/sindi.md)
+- [Pyramid](indexes/pyramid.md)
+
 # Developer Guide
 
 - [Code Structure](development/code_structure.md)

@@ -9,6 +9,14 @@
 - [创建索引](guide/create_index.md)
 - [pyvsag](guide/pyvsag.md)
 
+# 索引
+
+- [总览](indexes/README.md)
+- [HGraph](indexes/hgraph.md)
+- [IVF](indexes/ivf.md)
+- [SINDI](indexes/sindi.md)
+- [Pyramid](indexes/pyramid.md)
+
 # 开发者指南
 
 - [代码目录结构](development/code_structure.md)
