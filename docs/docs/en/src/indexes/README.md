@@ -27,7 +27,7 @@ All indexes share the same top-level build fields:
 | Field | Values | Notes |
 |-------|--------|-------|
 | `dim` | positive integer | Vector dimensionality; fixed after build |
-| `dtype` | `float32` / `fp16` / `bf16` / `int8` / `sparse` | `sparse` is SINDI only |
+| `dtype` | `float32` / `float16` / `bfloat16` / `int8` / `sparse` | `sparse` is SINDI only |
 | `metric_type` | `l2` / `ip` / `cosine` | Must match at query time (SINDI is `ip` only) |
 
 Index-specific build parameters live under the `index_param` sub-object; search-time

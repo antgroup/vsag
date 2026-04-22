@@ -67,7 +67,7 @@ and `metric_type` **must** be `"ip"`.
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `dim` | int | — (required) | Maximum number of non-zero elements per sparse vector. *Not* the vocabulary size. |
-| `term_id_limit` | int | `10000000` | Upper bound on term id values (≥ max term id + 1). |
+| `term_id_limit` | int | `1000000` | Upper bound on term id values (≥ max term id + 1). |
 | `window_size` | int | `50000` | Documents per window (range: 10 000 – 60 000). |
 | `doc_prune_ratio` | float | `0.0` | Fraction of lowest-weight terms dropped per doc at build time (0.0 – 0.9). |
 | `use_quantization` | bool | `false` | Quantize stored term values to cut memory. |
@@ -85,7 +85,7 @@ Search-time parameters live under the `sindi` sub-object:
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `n_candidate` | int | — (required) | Candidate heap size. Must satisfy `1 ≤ n_candidate ≤ AMPLIFICATION_FACTOR · topk`. |
+| `n_candidate` | int | `0` | Candidate heap size. When `0`, defaults to `SPARSE_AMPLIFICATION_FACTOR · topk` (500×). If set, must satisfy `1 ≤ n_candidate ≤ SPARSE_AMPLIFICATION_FACTOR · topk`. |
 | `query_prune_ratio` | float | `0.0` | Fraction of lowest-weight query terms skipped (0.0 – 0.9). |
 | `term_prune_ratio` | float | `0.0` | Fraction of term-list entries skipped (0.0 – 0.9). |
 | `use_term_lists_heap_insert` | bool | `true` | Term-list-ordered heap insertion; usually faster. |

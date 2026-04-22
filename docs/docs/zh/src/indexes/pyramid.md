@@ -53,7 +53,8 @@ base->NumElements(n)
     ->Dim(128)
     ->Ids(ids)
     ->Paths(paths)          // std::string* 长度为 n，例如 "a/d/f"
-    ->Float32Vectors(data);
+    ->Float32Vectors(data)
+    ->Owner(false);
 index->Build(base);
 
 // 按路径前缀执行检索。
@@ -87,7 +88,7 @@ auto result = index->KnnSearch(
 | `precise_quantization_type` | string | `"fp32"` | 精排使用的量化类型 |
 | `index_min_size` | int | `0` | 子索引的最小规模；小于该值的分区会退化为线性扫描 |
 | `support_duplicate` | bool | `false` | 是否允许重复 ID |
-| `build_thread_count` | int | `100` | 构建阶段并发线程数 |
+| `build_thread_count` | int | `1` | 构建阶段并发线程数 |
 
 ## 检索参数
 

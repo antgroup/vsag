@@ -58,7 +58,8 @@ base->NumElements(n)
     ->Dim(128)
     ->Ids(ids)
     ->Paths(paths)          // std::string* of length n, e.g. "a/d/f"
-    ->Float32Vectors(data);
+    ->Float32Vectors(data)
+    ->Owner(false);
 index->Build(base);
 
 // Search restricted to a path prefix.
@@ -92,7 +93,7 @@ Build-time parameters live under `index_param`.
 | `precise_quantization_type` | string | `"fp32"` | Quantizer for reordering. |
 | `index_min_size` | int | `0` | Minimum sub-index size; smaller groups fall back to scan. |
 | `support_duplicate` | bool | `false` | Allow duplicate ids. |
-| `build_thread_count` | int | `100` | Threads used for parallel build. |
+| `build_thread_count` | int | `1` | Threads used for parallel build. |
 
 ## Search parameters
 

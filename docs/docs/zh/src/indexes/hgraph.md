@@ -64,14 +64,14 @@ auto result = index->KnnSearch(
 | `graph_type` | string | `"nsw"` | 构图算法：`nsw` 或 `odescent` |
 | `use_reorder` | bool | `false` | 是否额外保留一份高精度副本用于精排 |
 | `precise_quantization_type` | string | `"fp32"` | 精排使用的量化类型（仅在 `use_reorder: true` 时生效） |
-| `base_pq_dim` | int | `128` | PQ 子空间数（`pq` / `pqfs` 时必填） |
+| `base_pq_dim` | int | `1` | PQ 子空间数（`pq` / `pqfs` 时必填） |
 | `build_thread_count` | int | `100` | 构建阶段并发线程数 |
 | `support_duplicate` | bool | `false` | 是否在插入时做重复 ID 检测 |
 | `support_remove` | bool | `false` | 是否支持 `Remove()` |
 | `store_raw_vector` | bool | `false` | 除量化副本外再保留原始向量（`cosine` 场景有用） |
 | `use_elp_optimizer` | bool | `false` | 构建完成后自动调优检索参数 |
 | `base_io_type` / `precise_io_type` | string | `"block_memory_io"` | 存储后端（`memory_io`、`block_memory_io`、`buffer_io`、`async_io`、`mmap_io`） |
-| `base_file_path` / `precise_file_path` | string | `"./default_file_path"` | 当使用磁盘后端时的文件路径 |
+| `base_file_path` / `precise_file_path` | string | — | 磁盘后端时的文件路径（使用 `mmap_io` / `async_io` / `buffer_io` 时必填） |
 | `hgraph_init_capacity` | int | `100` | 初始容量提示（不会限制最终规模） |
 
 ## 检索参数

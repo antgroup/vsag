@@ -71,14 +71,14 @@ and `docs/hgraph.md` in the repository.
 | `graph_type` | string | `"nsw"` | Graph algorithm: `nsw` or `odescent` |
 | `use_reorder` | bool | `false` | Keep a high-precision copy and re-rank after the coarse search |
 | `precise_quantization_type` | string | `"fp32"` | Quantizer used for reordering (takes effect only with `use_reorder: true`) |
-| `base_pq_dim` | int | `128` | Number of PQ subspaces (required with `pq` / `pqfs`) |
+| `base_pq_dim` | int | `1` | Number of PQ subspaces. When using `pq` / `pqfs`, set this explicitly instead of relying on the default. |
 | `build_thread_count` | int | `100` | Threads used to parallelise build |
 | `support_duplicate` | bool | `false` | Enable duplicate-ID detection on insert |
 | `support_remove` | bool | `false` | Enable `Remove()` on the built index |
 | `store_raw_vector` | bool | `false` | Keep the raw vector in addition to the quantized copy (useful for `cosine`) |
 | `use_elp_optimizer` | bool | `false` | Auto-tune search parameters after build |
 | `base_io_type` / `precise_io_type` | string | `"block_memory_io"` | Storage backend (`memory_io`, `block_memory_io`, `buffer_io`, `async_io`, `mmap_io`) |
-| `base_file_path` / `precise_file_path` | string | `"./default_file_path"` | File path when using a disk-backed IO type |
+| `base_file_path` / `precise_file_path` | string | — | File path; required when the corresponding `*_io_type` is disk-backed (`buffer_io`, `async_io`, `mmap_io`) |
 | `hgraph_init_capacity` | int | `100` | Initial capacity hint (doesn't cap the final size) |
 
 ## Search parameters
