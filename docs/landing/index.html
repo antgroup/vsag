@@ -6,12 +6,12 @@
     <title>VSAG — High-performance vector indexing library</title>
     <meta
       name="description"
-      content="VSAG is a high-performance C++ vector indexing library for similarity search, with Python bindings (pyvsag) and ready-to-use indexes such as HGraph, HNSW, DiskANN, IVF, Pyramid and SINDI."
+      content="VSAG is a high-performance C++ vector indexing library for similarity search, with Python bindings (pyvsag) and ready-to-use indexes such as HGraph, IVF, SINDI, Pyramid and brute force."
     />
     <meta property="og:title" content="VSAG — High-performance vector indexing library" />
     <meta
       property="og:description"
-      content="High-performance C++ library for approximate nearest neighbor search. HGraph, HNSW, DiskANN, IVF, Pyramid, SINDI."
+      content="High-performance C++ library for approximate nearest neighbor search. HGraph, IVF, SINDI, Pyramid, brute force."
     />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://vsag.io/" />
@@ -71,7 +71,7 @@
           </h1>
           <p class="lede">
             VSAG is a C++ library for approximate nearest-neighbor search. It
-            ships production-ready HGraph, HNSW, DiskANN, IVF, Pyramid and SINDI
+            ships production-ready HGraph, IVF, SINDI, Pyramid and brute-force
             indexes with SIMD-accelerated distance kernels, quantization, and a
             unified builder API — with first-class Python bindings via
             <code>pyvsag</code>.
@@ -142,8 +142,9 @@
               </div>
               <h3>A family of indexes</h3>
               <p>
-                HGraph, HNSW, DiskANN, IVF, Pyramid, SINDI and brute force — one
-                builder-style API, one serialization format, one set of ops.
+                HGraph, IVF, SINDI, Pyramid and brute force — one builder-style
+                API, one serialization format, one set of ops. Legacy HNSW and
+                DiskANN remain available.
               </p>
             </article>
             <article class="card">
@@ -236,8 +237,13 @@
           <div class="qs-grid">
             <div class="qs-panel">
               <h3>Python (pyvsag)</h3>
-              <pre><code><span class="c">pip install pyvsag</span></code></pre>
-              <pre><code><span class="k">import</span> pyvsag, numpy <span class="k">as</span> np
+              <div class="code-block">
+                <button class="copy-btn" type="button" aria-label="Copy code">Copy</button>
+                <pre><code><span class="c">pip install numpy pyvsag</span></code></pre>
+              </div>
+              <div class="code-block">
+                <button class="copy-btn" type="button" aria-label="Copy code">Copy</button>
+                <pre><code><span class="k">import</span> pyvsag, numpy <span class="k">as</span> np
 
 index = pyvsag.Index(<span class="s">"hgraph"</span>, <span class="s">"""</span>
 <span class="s">{</span>
@@ -252,12 +258,18 @@ vecs = np.random.rand(10000, 128).astype(<span class="s">"float32"</span>)
 index.build(vectors=vecs, ids=ids, num_elements=10000, dim=128)
 
 q = np.random.rand(128).astype(<span class="s">"float32"</span>)
-I, D = index.knn_search(vector=q, k=10, parameters=<span class="s">'{"hgraph":{"ef_search":100}}'</span>)</code></pre>
+I, D = index.knn_search(vector=q, k=10, parameters=<span class="s">'{"hgraph":{"ef_search":100}}'</span>)
+<span class="k">print</span>(<span class="s">"ids:"</span>, I)
+<span class="k">print</span>(<span class="s">"distances:"</span>, D)</code></pre>
+              </div>
             </div>
             <div class="qs-panel">
               <h3>C++</h3>
-              <pre><code><span class="c">// link against libvsag, C++17</span>
+              <div class="code-block">
+                <button class="copy-btn" type="button" aria-label="Copy code">Copy</button>
+                <pre><code><span class="c">// link against libvsag, C++17</span>
 <span class="pp">#include</span> <span class="s">&lt;vsag/vsag.h&gt;</span>
+<span class="pp">#include</span> <span class="s">&lt;iostream&gt;</span>
 
 <span class="k">auto</span> result = vsag::Factory::CreateIndex(<span class="s">"hgraph"</span>, R<span class="s">"({
   "dtype": "float32", "metric_type": "l2", "dim": 128,
@@ -271,7 +283,12 @@ index-&gt;Build(dataset);
 
 <span class="k">auto</span> q = vsag::Dataset::Make();
 q-&gt;Dim(128)-&gt;NumElements(1)-&gt;Float32Vectors(query)-&gt;Owner(<span class="k">false</span>);
-<span class="k">auto</span> r = index-&gt;KnnSearch(q, <span class="n">10</span>, R<span class="s">"({"hgraph":{"ef_search":100}})"</span>);</code></pre>
+<span class="k">auto</span> r = index-&gt;KnnSearch(q, <span class="n">10</span>, R<span class="s">"({"hgraph":{"ef_search":100}})"</span>);
+<span class="k">auto</span> res = r.value();
+<span class="k">for</span> (int64_t i = <span class="n">0</span>; i &lt; res-&gt;GetDim(); ++i) {
+  std::cout &lt;&lt; res-&gt;GetIds()[i] &lt;&lt; <span class="s">" "</span> &lt;&lt; res-&gt;GetDistances()[i] &lt;&lt; <span class="s">"\n"</span>;
+}</code></pre>
+              </div>
             </div>
           </div>
           <p class="qs-foot">
@@ -301,6 +318,13 @@ q-&gt;Dim(128)-&gt;NumElements(1)-&gt;Float32Vectors(query)-&gt;Owner(<span clas
               </thead>
               <tbody>
                 <tr>
+                  <th scope="row"><code>brute_force</code></th>
+                  <td>Exact ground-truth baseline, small datasets</td>
+                  <td>High</td>
+                  <td>Instant</td>
+                  <td>Slow</td>
+                </tr>
+                <tr>
                   <th scope="row"><code>hgraph</code></th>
                   <td>General-purpose, high recall, quantized graph</td>
                   <td>Medium</td>
@@ -308,30 +332,9 @@ q-&gt;Dim(128)-&gt;NumElements(1)-&gt;Float32Vectors(query)-&gt;Owner(<span clas
                   <td>Very fast</td>
                 </tr>
                 <tr>
-                  <th scope="row"><code>hnsw</code></th>
-                  <td>Classic hierarchical navigable small world</td>
-                  <td>High</td>
-                  <td>Medium</td>
-                  <td>Fast</td>
-                </tr>
-                <tr>
-                  <th scope="row"><code>diskann</code></th>
-                  <td>Billion-scale corpora on SSD</td>
-                  <td>Low (RAM)</td>
-                  <td>Medium</td>
-                  <td>Fast (I/O bound)</td>
-                </tr>
-                <tr>
                   <th scope="row"><code>ivf</code></th>
                   <td>High-throughput batch search, GPU-friendly training</td>
                   <td>Low–Medium</td>
-                  <td>Fast</td>
-                  <td>Fast</td>
-                </tr>
-                <tr>
-                  <th scope="row"><code>pyramid</code></th>
-                  <td>Multi-tenant / partitioned corpora</td>
-                  <td>Medium</td>
                   <td>Fast</td>
                   <td>Fast</td>
                 </tr>
@@ -343,11 +346,25 @@ q-&gt;Dim(128)-&gt;NumElements(1)-&gt;Float32Vectors(query)-&gt;Owner(<span clas
                   <td>Very fast</td>
                 </tr>
                 <tr>
-                  <th scope="row"><code>brute_force</code></th>
-                  <td>Exact ground-truth baseline, small datasets</td>
+                  <th scope="row"><code>pyramid</code></th>
+                  <td>Multi-tenant / partitioned corpora</td>
+                  <td>Medium</td>
+                  <td>Fast</td>
+                  <td>Fast</td>
+                </tr>
+                <tr class="deprecated">
+                  <th scope="row"><code>hnsw</code> <span class="badge-deprecated">Deprecated</span></th>
+                  <td>Classic hierarchical navigable small world</td>
                   <td>High</td>
-                  <td>Instant</td>
-                  <td>Slow</td>
+                  <td>Medium</td>
+                  <td>Fast</td>
+                </tr>
+                <tr class="deprecated">
+                  <th scope="row"><code>diskann</code> <span class="badge-deprecated">Deprecated</span></th>
+                  <td>Billion-scale corpora on SSD</td>
+                  <td>Low (RAM)</td>
+                  <td>Medium</td>
+                  <td>Fast (I/O bound)</td>
                 </tr>
               </tbody>
             </table>
@@ -363,9 +380,15 @@ q-&gt;Dim(128)-&gt;NumElements(1)-&gt;Float32Vectors(query)-&gt;Owner(<span clas
             <article class="card">
               <h3>Databases &amp; search engines</h3>
               <p>
-                VSAG powers vector search in production systems including
-                OceanBase, TuGraph and internal services at Ant Group.
+                VSAG powers vector search in production systems including:
               </p>
+              <ul class="users-list">
+                <li><a href="https://github.com/oceanbase/oceanbase">OceanBase</a></li>
+                <li><a href="https://github.com/TuGraph-family/tugraph-db">TuGraph</a></li>
+                <li><a href="https://github.com/GreptimeTeam/greptimedb">GreptimeDB</a></li>
+                <li><a href="https://www.alibabacloud.com/product/hologres">Hologres</a></li>
+                <li><a href="https://www.alibabacloud.com/product/polardb">PolarDB</a></li>
+              </ul>
             </article>
             <article class="card">
               <h3>Language bindings</h3>
@@ -459,5 +482,46 @@ q-&gt;Dim(128)-&gt;NumElements(1)-&gt;Float32Vectors(query)-&gt;Owner(<span clas
         <small>© VSAG contributors. Built with care at Ant Group and by the community.</small>
       </div>
     </footer>
+    <script>
+      (function () {
+        document.querySelectorAll('.code-block').forEach(function (block) {
+          var btn = block.querySelector('.copy-btn');
+          var code = block.querySelector('pre code');
+          if (!btn || !code) return;
+          btn.addEventListener('click', function () {
+            var text = code.innerText;
+            var done = function () {
+              var original = btn.textContent;
+              btn.textContent = 'Copied';
+              btn.classList.add('copied');
+              setTimeout(function () {
+                btn.textContent = original || 'Copy';
+                btn.classList.remove('copied');
+              }, 1600);
+            };
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              navigator.clipboard.writeText(text).then(done, function () {
+                fallback(text);
+                done();
+              });
+            } else {
+              fallback(text);
+              done();
+            }
+          });
+        });
+        function fallback(text) {
+          var ta = document.createElement('textarea');
+          ta.value = text;
+          ta.setAttribute('readonly', '');
+          ta.style.position = 'absolute';
+          ta.style.left = '-9999px';
+          document.body.appendChild(ta);
+          ta.select();
+          try { document.execCommand('copy'); } catch (e) {}
+          document.body.removeChild(ta);
+        }
+      })();
+    </script>
   </body>
 </html>
