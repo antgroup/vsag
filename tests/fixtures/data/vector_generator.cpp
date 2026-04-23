@@ -25,6 +25,8 @@
 #include "core/common.h"
 #include "core/random.h"
 #include "fmt/format.h"
+#include "simd/bf16_simd.h"
+#include "simd/fp16_simd.h"
 #include "vsag/dataset.h"
 
 namespace fixtures {
@@ -118,7 +120,7 @@ GenerateBinaryVectorsAndCodes(uint32_t count, uint32_t dim, int seed) {
 
 std::vector<float>
 generate_vectors(uint64_t count, uint32_t dim, bool need_normalize, int seed) {
-    return std::move(GenerateVectors<float>(count, dim, seed, need_normalize));
+    return std::move(fixtures::GenerateVectors<float>(count, dim, seed, need_normalize));
 }
 
 std::vector<float>
@@ -399,3 +401,42 @@ GetSparseDistance(const vsag::SparseVector& vec1, const vsag::SparseVector& vec2
 }
 
 }  // namespace fixtures
+std::vector<uint16_t>
+generate_fp16_codes(uint64_t count, uint32_t dim, int seed) {
+    auto floats = fixtures::GenerateVectors<float>(count, dim, seed, false);
+    std::vector<uint16_t> codes(floats.size());
+    for (size_t i = 0; i < floats.size(); ++i) {
+        codes[i] = vsag::generic::FloatToFP16(floats[i]);
+    }
+    return codes;
+}
+
+std::vector<uint16_t>
+generate_bf16_codes(uint64_t count, uint32_t dim, int seed) {
+    auto floats = fixtures::GenerateVectors<float>(count, dim, seed, false);
+    std::vector<uint16_t> codes(floats.size());
+    for (size_t i = 0; i < floats.size(); ++i) {
+        codes[i] = vsag::generic::FloatToBF16(floats[i]);
+    }
+    return codes;
+}
+
+std::pair<std::vector<uint16_t>, std::vector<float>>
+fixtures::generate_fp16_codes_with_floats(uint64_t count, uint32_t dim, int seed) {
+    auto floats = fixtures::GenerateVectors<float>(count, dim, seed, false);
+    std::vector<uint16_t> codes(floats.size());
+    for (size_t i = 0; i < floats.size(); ++i) {
+        codes[i] = vsag::generic::FloatToFP16(floats[i]);
+    }
+    return {std::move(codes), std::move(floats)};
+}
+
+std::pair<std::vector<uint16_t>, std::vector<float>>
+fixtures::generate_bf16_codes_with_floats(uint64_t count, uint32_t dim, int seed) {
+    auto floats = fixtures::GenerateVectors<float>(count, dim, seed, false);
+    std::vector<uint16_t> codes(floats.size());
+    for (size_t i = 0; i < floats.size(); ++i) {
+        codes[i] = vsag::generic::FloatToBF16(floats[i]);
+    }
+    return {std::move(codes), std::move(floats)};
+}

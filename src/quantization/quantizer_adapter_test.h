@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -22,11 +21,12 @@
 #include "quantization/computer.h"
 #include "quantizer.h"
 #include "simd/basic_func.h"
+#include "simd/bf16_simd.h"
+#include "simd/fp16_simd.h"
 #include "storage/serialization_template_test.h"
 #include "unittest.h"
 
 namespace vsag {
-// NOTE(Coien.rr): Just used in CreateQuantizerParam in tests, escalated if needed in the future.
 enum class QuantizerType {
     QUANTIZER_TYPE_SQ8 = 0,
     QUANTIZER_TYPE_SQ8_UNIFORM = 1,
@@ -48,20 +48,28 @@ using namespace vsag;
 
 template <typename T, typename DataT = float>
 void
-TestQuantizerAdapterEncodeDecode(
-    Quantizer<T>& quant, int64_t dim, int count, float error = 1e-5, bool retrain = true) {
+TestQuantizerAdapterEncodeDecode(Quantizer<T>& quant,
+                                 int64_t dim,
+                                 int count,
+                                 float error = 1e-5,
+                                 bool retrain = true,
+                                 const std::string& dtype = DATATYPE_FLOAT32) {
     std::vector<DataT> vecs;
     if constexpr (std::is_same<DataT, float>::value == true) {
         vecs = fixtures::generate_vectors(count, dim, true);
     } else if constexpr (std::is_same<DataT, int8_t>::value == true) {
         vecs = fixtures::generate_int8_codes(count, dim, true);
+    } else if constexpr (std::is_same<DataT, uint16_t>::value == true) {
+        auto [codes, floats] = (dtype == DATATYPE_FLOAT16)
+                                   ? fixtures::generate_fp16_codes_with_floats(count, dim, 42)
+                                   : fixtures::generate_bf16_codes_with_floats(count, dim, 42);
+        vecs = std::move(codes);
     } else {
         static_assert("Unsupported DataT type");
     }
     if (retrain) {
         quant.ReTrain(reinterpret_cast<DataType*>(vecs.data()), count);
     }
-    // Test EncodeOne & DecodeOne
     for (uint64_t i = 0; i < count; ++i) {
         std::vector<uint8_t> codes(quant.GetCodeSize());
         quant.EncodeOne(reinterpret_cast<DataType*>(vecs.data() + i * dim), codes.data());
@@ -69,13 +77,21 @@ TestQuantizerAdapterEncodeDecode(
         quant.DecodeOne(codes.data(), reinterpret_cast<DataType*>(out_vec.data()));
         float sum = 0.0F;
         for (int j = 0; j < dim; ++j) {
-            sum += std::abs(static_cast<DataType>(vecs[i * dim + j]) -
-                            static_cast<DataType>(out_vec[j]));
+            if constexpr (std::is_same<DataT, uint16_t>::value == true) {
+                float original = (dtype == DATATYPE_FLOAT16)
+                                     ? generic::FP16ToFloat(vecs[i * dim + j])
+                                     : generic::BF16ToFloat(vecs[i * dim + j]);
+                float decoded = (dtype == DATATYPE_FLOAT16) ? generic::FP16ToFloat(out_vec[j])
+                                                            : generic::BF16ToFloat(out_vec[j]);
+                sum += std::abs(original - decoded);
+            } else {
+                sum += std::abs(static_cast<DataType>(vecs[i * dim + j]) -
+                                static_cast<DataType>(out_vec[j]));
+            }
         }
         REQUIRE(sum < error * dim);
     }
 
-    // Test EncodeBatch & DecodeBatch
     std::vector<uint8_t> codes(quant.GetCodeSize() * count);
     quant.EncodeBatch(reinterpret_cast<DataType*>(vecs.data()), codes.data(), count);
     std::vector<DataT> out_vec(dim * count);
@@ -83,8 +99,18 @@ TestQuantizerAdapterEncodeDecode(
     for (int64_t i = 0; i < count; ++i) {
         float sum = 0.0F;
         for (int j = 0; j < dim; ++j) {
-            sum += std::abs(static_cast<DataType>(vecs[i * dim + j]) -
-                            static_cast<DataType>(out_vec[i * dim + j]));
+            if constexpr (std::is_same<DataT, uint16_t>::value == true) {
+                float original = (dtype == DATATYPE_FLOAT16)
+                                     ? generic::FP16ToFloat(vecs[i * dim + j])
+                                     : generic::BF16ToFloat(vecs[i * dim + j]);
+                float decoded = (dtype == DATATYPE_FLOAT16)
+                                    ? generic::FP16ToFloat(out_vec[i * dim + j])
+                                    : generic::BF16ToFloat(out_vec[i * dim + j]);
+                sum += std::abs(original - decoded);
+            } else {
+                sum += std::abs(static_cast<DataType>(vecs[i * dim + j]) -
+                                static_cast<DataType>(out_vec[i * dim + j]));
+            }
         }
         REQUIRE(sum < error * dim);
     }
@@ -96,12 +122,18 @@ TestQuantizerAdapterComputeCodes(Quantizer<T>& quantizer,
                                  uint64_t dim,
                                  uint32_t count,
                                  float error = 1e-4f,
-                                 bool retrain = true) {
+                                 bool retrain = true,
+                                 const std::string& dtype = DATATYPE_FLOAT32) {
     std::vector<DataT> vecs;
     if constexpr (std::is_same<DataT, float>::value == true) {
         vecs = fixtures::generate_vectors(count, dim, false);
     } else if constexpr (std::is_same<DataT, int8_t>::value == true) {
         vecs = fixtures::generate_int8_codes(count, dim, false);
+    } else if constexpr (std::is_same<DataT, uint16_t>::value == true) {
+        auto [codes, floats] = (dtype == DATATYPE_FLOAT16)
+                                   ? fixtures::generate_fp16_codes_with_floats(count, dim, 43)
+                                   : fixtures::generate_bf16_codes_with_floats(count, dim, 43);
+        vecs = std::move(codes);
     } else {
         static_assert("Unsupported DataT type");
     }
@@ -119,11 +151,42 @@ TestQuantizerAdapterComputeCodes(Quantizer<T>& quantizer,
         quantizer.EncodeOne(reinterpret_cast<DataType*>(vecs.data() + idx2 * dim), codes2.data());
         float gt = 0.0;
         float value = quantizer.Compute(codes1.data(), codes2.data());
-        if constexpr (metric == MetricType::METRIC_TYPE_IP ||
-                      metric == MetricType::METRIC_TYPE_COSINE) {
-            gt = 1 - INT8InnerProduct(vecs.data() + idx1 * dim, vecs.data() + idx2 * dim, &dim);
-        } else if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
-            gt = INT8L2Sqr(vecs.data() + idx1 * dim, vecs.data() + idx2 * dim, &dim);
+        if constexpr (std::is_same<DataT, int8_t>::value == true) {
+            if constexpr (metric == MetricType::METRIC_TYPE_IP ||
+                          metric == MetricType::METRIC_TYPE_COSINE) {
+                gt = 1 - INT8InnerProduct(vecs.data() + idx1 * dim, vecs.data() + idx2 * dim, &dim);
+            } else if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
+                gt = INT8L2Sqr(vecs.data() + idx1 * dim, vecs.data() + idx2 * dim, &dim);
+            }
+        } else if constexpr (std::is_same<DataT, uint16_t>::value == true) {
+            std::vector<float> float_vec1(dim), float_vec2(dim);
+            for (uint64_t d = 0; d < dim; ++d) {
+                if (dtype == DATATYPE_FLOAT16) {
+                    float_vec1[d] = generic::FP16ToFloat(vecs[idx1 * dim + d]);
+                    float_vec2[d] = generic::FP16ToFloat(vecs[idx2 * dim + d]);
+                } else {
+                    float_vec1[d] = generic::BF16ToFloat(vecs[idx1 * dim + d]);
+                    float_vec2[d] = generic::BF16ToFloat(vecs[idx2 * dim + d]);
+                }
+            }
+            if constexpr (metric == MetricType::METRIC_TYPE_IP ||
+                          metric == MetricType::METRIC_TYPE_COSINE) {
+                gt = 1 - InnerProduct(float_vec1.data(), float_vec2.data(), &dim);
+            } else if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
+                gt = L2Sqr(float_vec1.data(), float_vec2.data(), &dim);
+            }
+        } else {
+            std::vector<float> float_vec1(dim), float_vec2(dim);
+            for (uint64_t d = 0; d < dim; ++d) {
+                float_vec1[d] = static_cast<float>(vecs[idx1 * dim + d]);
+                float_vec2[d] = static_cast<float>(vecs[idx2 * dim + d]);
+            }
+            if constexpr (metric == MetricType::METRIC_TYPE_IP ||
+                          metric == MetricType::METRIC_TYPE_COSINE) {
+                gt = 1 - InnerProduct(float_vec1.data(), float_vec2.data(), &dim);
+            } else if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
+                gt = L2Sqr(float_vec1.data(), float_vec2.data(), &dim);
+            }
         }
         if (gt != 0.0) {
             REQUIRE(std::abs((gt - value) / gt) < error);
@@ -142,7 +205,8 @@ TestQuantizerAdapterComputer(Quantizer<T>& quant,
                              float related_error = 1.0f,
                              bool retrain = true,
                              float unbounded_numeric_error_rate = 1.0f,
-                             float unbounded_related_error_rate = 1.0f) {
+                             float unbounded_related_error_rate = 1.0f,
+                             const std::string& dtype = DATATYPE_FLOAT32) {
     auto query_count = 10;
     bool need_normalize = false;
     std::vector<DataT> vecs;
@@ -153,15 +217,25 @@ TestQuantizerAdapterComputer(Quantizer<T>& quant,
     } else if constexpr (std::is_same<DataT, int8_t>::value == true) {
         vecs = fixtures::generate_int8_codes(count, dim);
         queries = fixtures::generate_int8_codes(query_count, dim, 165);
+    } else if constexpr (std::is_same<DataT, uint16_t>::value == true) {
+        auto [codes_v, floats_v] = (dtype == DATATYPE_FLOAT16)
+                                       ? fixtures::generate_fp16_codes_with_floats(count, dim)
+                                       : fixtures::generate_bf16_codes_with_floats(count, dim);
+        vecs = std::move(codes_v);
+        auto [codes_q, floats_q] =
+            (dtype == DATATYPE_FLOAT16)
+                ? fixtures::generate_fp16_codes_with_floats(query_count, dim, 165)
+                : fixtures::generate_bf16_codes_with_floats(query_count, dim, 165);
+        queries = std::move(codes_q);
     } else {
         static_assert("Unsupported DataT type");
     }
 
     for (int d = 0; d < dim; d++) {
-        vecs[d] = 0.0f;
+        vecs[d] = 0;
     }
     for (int d = 0; d < dim; d++) {
-        queries[query_count * dim / 2 + d] = 0.0f;
+        queries[query_count * dim / 2 + d] = 0;
     }
 
     if (retrain) {
@@ -175,6 +249,18 @@ TestQuantizerAdapterComputer(Quantizer<T>& quant,
                 return 1 - INT8InnerProduct(vecs.data() + base_idx * dim,
                                             queries.data() + query_idx * dim,
                                             &dim);
+            } else if constexpr (std::is_same<DataT, uint16_t>::value == true) {
+                std::vector<float> float_base(dim), float_query(dim);
+                for (uint64_t d = 0; d < dim; ++d) {
+                    if (dtype == DATATYPE_FLOAT16) {
+                        float_base[d] = generic::FP16ToFloat(vecs[base_idx * dim + d]);
+                        float_query[d] = generic::FP16ToFloat(queries[query_idx * dim + d]);
+                    } else {
+                        float_base[d] = generic::BF16ToFloat(vecs[base_idx * dim + d]);
+                        float_query[d] = generic::BF16ToFloat(queries[query_idx * dim + d]);
+                    }
+                }
+                return 1 - InnerProduct(float_base.data(), float_query.data(), &dim);
             } else {
                 return 1 - InnerProduct(vecs.data() + base_idx * dim,
                                         queries.data() + query_idx * dim,
@@ -184,6 +270,18 @@ TestQuantizerAdapterComputer(Quantizer<T>& quant,
             if constexpr (std::is_same<DataT, int8_t>::value == true) {
                 return INT8L2Sqr(
                     vecs.data() + base_idx * dim, queries.data() + query_idx * dim, &dim);
+            } else if constexpr (std::is_same<DataT, uint16_t>::value == true) {
+                std::vector<float> float_base(dim), float_query(dim);
+                for (uint64_t d = 0; d < dim; ++d) {
+                    if (dtype == DATATYPE_FLOAT16) {
+                        float_base[d] = generic::FP16ToFloat(vecs[base_idx * dim + d]);
+                        float_query[d] = generic::FP16ToFloat(queries[query_idx * dim + d]);
+                    } else {
+                        float_base[d] = generic::BF16ToFloat(vecs[base_idx * dim + d]);
+                        float_query[d] = generic::BF16ToFloat(queries[query_idx * dim + d]);
+                    }
+                }
+                return L2Sqr(float_base.data(), float_query.data(), &dim);
             } else {
                 return L2Sqr(vecs.data() + base_idx * dim, queries.data() + query_idx * dim, &dim);
             }
@@ -195,7 +293,6 @@ TestQuantizerAdapterComputer(Quantizer<T>& quant,
         auto computer = quant.FactoryComputer();
         computer->SetQuery(reinterpret_cast<DataType*>(queries.data() + i * dim));
 
-        // Test Compute One Dist;
         std::vector<uint8_t> codes1(quant.GetCodeSize() * count, 0);
         std::vector<float> dists1(count);
         for (int j = 0; j < count; ++j) {
@@ -212,7 +309,6 @@ TestQuantizerAdapterComputer(Quantizer<T>& quant,
             }
         }
 
-        // Test Compute Batch
         std::vector<uint8_t> codes2(quant.GetCodeSize() * count);
         std::vector<float> dists2(count);
         quant.EncodeBatch(reinterpret_cast<DataType*>(vecs.data()), codes2.data(), count);
@@ -235,12 +331,18 @@ TestQuantizerAdapterSerializeAndDeserialize(Quantizer<QuantT>& quant1,
                                             float related_error = 1.0f,
                                             float unbounded_numeric_error_rate = 1.0f,
                                             float unbounded_related_error_rate = 1.0f,
-                                            bool retrain = true) {
+                                            bool retrain = true,
+                                            const std::string& dtype = DATATYPE_FLOAT32) {
     std::vector<DataT> vecs;
     if constexpr (std::is_same<DataT, float>::value == true) {
         vecs = fixtures::generate_vectors(count, dim, false);
     } else if constexpr (std::is_same<DataT, int8_t>::value == true) {
         vecs = fixtures::generate_int8_codes(count, dim, false);
+    } else if constexpr (std::is_same<DataT, uint16_t>::value == true) {
+        auto [codes, floats] = (dtype == DATATYPE_FLOAT16)
+                                   ? fixtures::generate_fp16_codes_with_floats(count, dim, 43)
+                                   : fixtures::generate_bf16_codes_with_floats(count, dim, 43);
+        vecs = std::move(codes);
     } else {
         static_assert("Unsupported DataT type");
     }
@@ -252,7 +354,15 @@ TestQuantizerAdapterSerializeAndDeserialize(Quantizer<QuantT>& quant1,
     REQUIRE(quant1.GetCodeSize() == quant2.GetCodeSize());
     REQUIRE(quant1.GetDim() == quant2.GetDim());
 
-    TestQuantizerAdapterEncodeDecode<QuantT, int8_t>(quant2, dim, count, error);
-    TestQuantizerAdapterComputeCodes<QuantT, metric, int8_t>(quant2, dim, count, error);
-    TestQuantizerAdapterComputer<QuantT, metric, int8_t>(quant2, dim, count, error);
+    TestQuantizerAdapterEncodeDecode<QuantT, DataT>(quant2, dim, count, error, true, dtype);
+    TestQuantizerAdapterComputeCodes<QuantT, metric, DataT>(quant2, dim, count, error, true, dtype);
+    TestQuantizerAdapterComputer<QuantT, metric, DataT>(quant2,
+                                                        dim,
+                                                        count,
+                                                        error,
+                                                        related_error,
+                                                        true,
+                                                        unbounded_numeric_error_rate,
+                                                        unbounded_related_error_rate,
+                                                        dtype);
 }

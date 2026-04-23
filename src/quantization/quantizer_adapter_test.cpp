@@ -24,6 +24,8 @@
 #include "metric_type.h"
 #include "quantization/product_quantization/product_quantizer.h"
 #include "quantization/quantizer_parameter.h"
+#include "quantization/scalar_quantization/half_precision_quantizer.h"
+#include "quantization/scalar_quantization/half_precision_quantizer_parameter.h"
 #include "quantizer_adapter_test.h"
 #include "typing.h"
 #include "unittest.h"
@@ -84,8 +86,12 @@ CreateQuantizerParam(const QuantizerType& quantization_type, uint64_t dim) {
         case QuantizerType::QUANTIZER_TYPE_SQ4:
         case QuantizerType::QUANTIZER_TYPE_SQ4_UNIFORM:
         case QuantizerType::QUANTIZER_TYPE_FP32:
-        case QuantizerType::QUANTIZER_TYPE_FP16:
-        case QuantizerType::QUANTIZER_TYPE_BF16:
+        case QuantizerType::QUANTIZER_TYPE_FP16: {
+            return std::make_shared<FP16QuantizerParameter>();
+        }
+        case QuantizerType::QUANTIZER_TYPE_BF16: {
+            return std::make_shared<BF16QuantizerParameter>();
+        }
         case QuantizerType::QUANTIZER_TYPE_INT8:
         case QuantizerType::QUANTIZER_TYPE_PQFS:
         case QuantizerType::QUANTIZER_TYPE_RABITQ:
@@ -100,7 +106,8 @@ CreateQuantizerParam(const QuantizerType& quantization_type, uint64_t dim) {
 IndexCommonParam
 CreateIndexCommonParam(uint64_t dim,
                        std::shared_ptr<Resource> res,
-                       MetricType metric_type = MetricType::METRIC_TYPE_L2SQR) {
+                       MetricType metric_type = MetricType::METRIC_TYPE_L2SQR,
+                       const std::string& dtype = DATATYPE_INT8) {
     std::string metric_str;
     switch (metric_type) {
         case MetricType::METRIC_TYPE_L2SQR:
@@ -118,7 +125,7 @@ CreateIndexCommonParam(uint64_t dim,
     }
 
     JsonType params;
-    params[PARAMETER_DTYPE].SetString(DATATYPE_INT8);
+    params[PARAMETER_DTYPE].SetString(dtype.c_str());
     params[PARAMETER_METRIC_TYPE].SetString(metric_str);
     params[PARAMETER_DIM].SetInt(dim);
     return IndexCommonParam::CheckAndCreate(params, res);
@@ -235,6 +242,172 @@ TEST_CASE("QuantizerAdapter Serialize AND Deserialize", "[ut][QuantizerAdapter][
                 TestAdapterSerializeAndDeserialize<ProductQuantizer<MetricType::METRIC_TYPE_L2SQR>,
                                                    MetricType::METRIC_TYPE_L2SQR>(
                     config.quantizer_type, dim, count, error);
+            }
+        }
+    }
+}
+
+// ==================== FP16/BF16 Data Type Tests ====================
+
+template <typename QuantT, MetricType metric>
+void
+TestQuantizerAdapterEncodeDecodeUInt16(QuantizerType quantizer_type,
+                                       uint64_t dim,
+                                       int count,
+                                       const std::string& dtype,
+                                       float error = 1e-5) {
+    vsag::Resource resource(vsag::Engine::CreateDefaultAllocator(), nullptr);
+    try {
+        const QuantizerParamPtr quantizer_param = CreateQuantizerParam(quantizer_type, dim);
+        if (quantizer_param == nullptr) {
+            return;
+        }
+        const IndexCommonParam common_param =
+            CreateIndexCommonParam(dim, std::make_shared<Resource>(resource), metric, dtype);
+        auto adapter =
+            std::make_shared<QuantizerAdapter<QuantT, uint16_t>>(quantizer_param, common_param);
+        TestQuantizerAdapterEncodeDecode<QuantizerAdapter<QuantT, uint16_t>, uint16_t>(
+            *adapter, dim, count, error, true, dtype);
+    } catch (const vsag::VsagException& e) {
+        std::cerr << "Exception: " << e.what() << std::endl;
+        throw;
+    }
+}
+
+template <typename QuantT, MetricType metric>
+void
+TestQuantizerAdapterComputeUInt16(QuantizerType quantizer_type,
+                                  uint64_t dim,
+                                  int count,
+                                  const std::string& dtype,
+                                  float error = 1e-5) {
+    vsag::Resource resource(vsag::Engine::CreateDefaultAllocator(), nullptr);
+    try {
+        const QuantizerParamPtr quantizer_param = CreateQuantizerParam(quantizer_type, dim);
+        if (quantizer_param == nullptr) {
+            return;
+        }
+        const IndexCommonParam common_param =
+            CreateIndexCommonParam(dim, std::make_shared<Resource>(resource), metric, dtype);
+        auto adapter =
+            std::make_shared<QuantizerAdapter<QuantT, uint16_t>>(quantizer_param, common_param);
+        TestQuantizerAdapterComputeCodes<QuantizerAdapter<QuantT, uint16_t>, metric, uint16_t>(
+            *adapter, dim, count, error, true, dtype);
+        TestQuantizerAdapterComputer<QuantizerAdapter<QuantT, uint16_t>, metric, uint16_t>(
+            *adapter, dim, count, error, 1.0f, true, 1.0f, 1.0f, dtype);
+    } catch (const vsag::VsagException& e) {
+        std::cerr << "Exception: " << e.what() << std::endl;
+        throw;
+    }
+}
+
+template <typename QuantT, MetricType metric>
+void
+TestAdapterSerializeAndDeserializeUInt16(QuantizerType quantizer_type,
+                                         uint64_t dim,
+                                         int count,
+                                         const std::string& dtype,
+                                         float error = 1e-5) {
+    vsag::Resource resource(vsag::Engine::CreateDefaultAllocator(), nullptr);
+    try {
+        const QuantizerParamPtr quantizer_param = CreateQuantizerParam(quantizer_type, dim);
+        if (quantizer_param == nullptr) {
+            return;
+        }
+        const IndexCommonParam common_param =
+            CreateIndexCommonParam(dim, std::make_shared<Resource>(resource), metric, dtype);
+        auto adapter1 =
+            std::make_shared<QuantizerAdapter<QuantT, uint16_t>>(quantizer_param, common_param);
+        auto adapter2 =
+            std::make_shared<QuantizerAdapter<QuantT, uint16_t>>(quantizer_param, common_param);
+        TestQuantizerAdapterSerializeAndDeserialize<QuantizerAdapter<QuantT, uint16_t>,
+                                                    metric,
+                                                    uint16_t>(
+            *adapter1, *adapter2, dim, count, error, 1.0f, 1.0f, 1.0f, true, dtype);
+    } catch (const vsag::VsagException& e) {
+        std::cerr << "Exception: " << e.what() << std::endl;
+        throw;
+    }
+}
+
+TEST_CASE("QuantizerAdapter FP16/BF16 Encode and Decode", "[ut][QuantizerAdapter][FP16][BF16]") {
+    for (const auto& config : quantizer_test_configs) {
+        if (config.quantizer_type != QuantizerType::QUANTIZER_TYPE_FP16 &&
+            config.quantizer_type != QuantizerType::QUANTIZER_TYPE_BF16) {
+            continue;
+        }
+        const std::string dtype = (config.quantizer_type == QuantizerType::QUANTIZER_TYPE_FP16)
+                                      ? DATATYPE_FLOAT16
+                                      : DATATYPE_BFLOAT16;
+        for (auto dim : config.dims) {
+            for (auto count : config.counts) {
+                float error = config.error_threshold * config.error_multiplier_encode_decode;
+                if (config.quantizer_type == QuantizerType::QUANTIZER_TYPE_FP16) {
+                    TestQuantizerAdapterEncodeDecodeUInt16<
+                        FP16Quantizer<MetricType::METRIC_TYPE_L2SQR>,
+                        MetricType::METRIC_TYPE_L2SQR>(
+                        config.quantizer_type, dim, count, dtype, error);
+                } else {
+                    TestQuantizerAdapterEncodeDecodeUInt16<
+                        BF16Quantizer<MetricType::METRIC_TYPE_L2SQR>,
+                        MetricType::METRIC_TYPE_L2SQR>(
+                        config.quantizer_type, dim, count, dtype, error);
+                }
+            }
+        }
+    }
+}
+
+TEST_CASE("QuantizerAdapter FP16/BF16 Compute", "[ut][QuantizerAdapter][FP16][BF16]") {
+    for (const auto& config : quantizer_test_configs) {
+        if (config.quantizer_type != QuantizerType::QUANTIZER_TYPE_FP16 &&
+            config.quantizer_type != QuantizerType::QUANTIZER_TYPE_BF16) {
+            continue;
+        }
+        const std::string dtype = (config.quantizer_type == QuantizerType::QUANTIZER_TYPE_FP16)
+                                      ? DATATYPE_FLOAT16
+                                      : DATATYPE_BFLOAT16;
+        for (auto dim : config.dims) {
+            for (auto count : config.counts) {
+                float error = config.error_threshold * config.error_multiplier_compute;
+                if (config.quantizer_type == QuantizerType::QUANTIZER_TYPE_FP16) {
+                    TestQuantizerAdapterComputeUInt16<FP16Quantizer<MetricType::METRIC_TYPE_L2SQR>,
+                                                      MetricType::METRIC_TYPE_L2SQR>(
+                        config.quantizer_type, dim, count, dtype, error);
+                } else {
+                    TestQuantizerAdapterComputeUInt16<BF16Quantizer<MetricType::METRIC_TYPE_L2SQR>,
+                                                      MetricType::METRIC_TYPE_L2SQR>(
+                        config.quantizer_type, dim, count, dtype, error);
+                }
+            }
+        }
+    }
+}
+
+TEST_CASE("QuantizerAdapter FP16/BF16 Serialize AND Deserialize",
+          "[ut][QuantizerAdapter][FP16][BF16]") {
+    for (const auto& config : quantizer_test_configs) {
+        if (config.quantizer_type != QuantizerType::QUANTIZER_TYPE_FP16 &&
+            config.quantizer_type != QuantizerType::QUANTIZER_TYPE_BF16) {
+            continue;
+        }
+        const std::string dtype = (config.quantizer_type == QuantizerType::QUANTIZER_TYPE_FP16)
+                                      ? DATATYPE_FLOAT16
+                                      : DATATYPE_BFLOAT16;
+        for (auto dim : config.dims) {
+            for (auto count : config.counts) {
+                float error = config.error_threshold * config.error_multiplier_serialize;
+                if (config.quantizer_type == QuantizerType::QUANTIZER_TYPE_FP16) {
+                    TestAdapterSerializeAndDeserializeUInt16<
+                        FP16Quantizer<MetricType::METRIC_TYPE_L2SQR>,
+                        MetricType::METRIC_TYPE_L2SQR>(
+                        config.quantizer_type, dim, count, dtype, error);
+                } else {
+                    TestAdapterSerializeAndDeserializeUInt16<
+                        BF16Quantizer<MetricType::METRIC_TYPE_L2SQR>,
+                        MetricType::METRIC_TYPE_L2SQR>(
+                        config.quantizer_type, dim, count, dtype, error);
+                }
             }
         }
     }
