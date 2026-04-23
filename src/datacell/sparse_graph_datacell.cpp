@@ -16,6 +16,7 @@
 #include "sparse_graph_datacell.h"
 
 #include "sparse_graph_datacell_parameter.h"
+#include "vsag_exception.h"
 
 namespace vsag {
 
@@ -49,8 +50,10 @@ SparseGraphDataCell::SparseGraphDataCell(const GraphInterfaceParamPtr& param,
 void
 SparseGraphDataCell::InsertNeighborsById(InnerIdType id, const Vector<InnerIdType>& neighbor_ids) {
     if (neighbor_ids.size() > this->maximum_degree_) {
-        throw std::invalid_argument(fmt::format(
-            "insert neighbors count {} more than {}", neighbor_ids.size(), this->maximum_degree_));
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            fmt::format("insert neighbors count {} more than {}",
+                                        neighbor_ids.size(),
+                                        this->maximum_degree_));
     }
     auto size = std::min(this->maximum_degree_, (uint32_t)(neighbor_ids.size()));
     std::unique_lock<std::shared_mutex> wlock(this->neighbors_map_mutex_);

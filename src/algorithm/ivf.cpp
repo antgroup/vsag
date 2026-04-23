@@ -37,6 +37,7 @@
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "utils/util_functions.h"
+#include "vsag_exception.h"
 
 namespace vsag {
 static constexpr const char* IVF_PARAMS_TEMPLATE =
@@ -1087,7 +1088,7 @@ JsonType
 get_data_stats(const Vector<float>& data) {
     JsonType json;
     if (data.empty()) {
-        throw std::invalid_argument("Vector cannot be empty.");
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "Vector cannot be empty.");
     }
 
     float sum = 0.0;

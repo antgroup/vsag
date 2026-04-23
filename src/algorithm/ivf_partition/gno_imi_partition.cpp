@@ -29,6 +29,7 @@
 #include "inner_string_params.h"
 #include "query_context.h"
 #include "utils/util_functions.h"
+#include "vsag_exception.h"
 
 namespace vsag {
 
@@ -422,8 +423,11 @@ GNOIMIPartition::inner_joint_classify_datas(const float* datas,
 
 void
 GNOIMIPartition::GetCentroid(BucketIdType bucket_id, Vector<float>& centroid) {
-    if (!is_trained_ || bucket_id >= bucket_count_) {
-        throw std::runtime_error("Invalid bucket_id or partition not trained");
+    if (!is_trained_) {
+        throw VsagException(ErrorType::WRONG_STATUS, "Partition not trained");
+    }
+    if (bucket_id >= bucket_count_) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "Invalid bucket_id");
     }
     auto bucket_id_s = bucket_id / bucket_count_t_;
     auto bucket_id_t = bucket_id % bucket_count_t_;
