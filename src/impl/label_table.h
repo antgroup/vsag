@@ -277,7 +277,7 @@ public:
         if (deleted_ids_.empty()) {
             return {};
         }
-        auto size = std::min(static_cast<uint64_t>(max_count), deleted_ids_.size());
+        auto size = std::min<uint64_t>(static_cast<uint64_t>(max_count), deleted_ids_.size());
         return std::vector<InnerIdType>(deleted_ids_.begin(),
                                         std::next(deleted_ids_.begin(), size));
     }
