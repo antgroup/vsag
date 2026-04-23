@@ -50,10 +50,20 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+          # Fetch the remote automation branch (if any) so --force-with-lease
+          # has an up-to-date lease ref and does not fail with "stale info".
+          git fetch origin "$branch":"refs/remotes/origin/$branch" || true
+
           git checkout -B "$branch"
           git add README.md
           git commit -m "docs(contributor): stable contributors readme update"
-          git push --force-with-lease origin "$branch"
+
+          if git rev-parse --verify --quiet "refs/remotes/origin/$branch" >/dev/null; then
+            lease_sha="$(git rev-parse "refs/remotes/origin/$branch")"
+            git push --force-with-lease="$branch:$lease_sha" origin "$branch"
+          else
+            git push origin "$branch"
+          fi
 
           pr_number="$(gh pr list --base main --head "$branch" --state open --json number --jq '.[0].number // empty')"
 
