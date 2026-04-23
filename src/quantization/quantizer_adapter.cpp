@@ -226,9 +226,9 @@ QuantizerAdapter<QuantT, DataT>::ProcessQueryImpl(
         Vector<DataType> vec(this->dim_, this->allocator_);
         for (int64_t i = 0; i < this->dim_; i++) {
             if (data_type_ == DataTypes::DATA_TYPE_FP16) {
-                vec[i] = FloatToFP16(query_int16[i]);
+                vec[i] = FP16ToFloat(query_int16[i]);
             } else {
-                vec[i] = FloatToBF16(query_int16[i]);
+                vec[i] = BF16ToFloat(query_int16[i]);
             }
         }
         this->inner_quantizer_->ProcessQueryImpl(vec.data(), inner_computer);
