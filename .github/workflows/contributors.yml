@@ -50,15 +50,34 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          # Fetch the remote automation branch (if any) so --force-with-lease
-          # has an up-to-date lease ref and does not fail with "stale info".
-          git fetch origin "$branch":"refs/remotes/origin/$branch" || true
+          # Probe the remote for the automation branch. git ls-remote
+          # --exit-code returns 0 when the ref exists, 2 when it does not,
+          # and other codes on real errors (auth/network/etc.) that must
+          # not be silently ignored.
+          set +e
+          git ls-remote --exit-code --heads origin "$branch" >/dev/null
+          ls_remote_rc=$?
+          set -e
+          if [ "$ls_remote_rc" -eq 0 ]; then
+            remote_branch_exists=1
+          elif [ "$ls_remote_rc" -eq 2 ]; then
+            remote_branch_exists=0
+          else
+            echo "git ls-remote failed with exit code $ls_remote_rc" >&2
+            exit "$ls_remote_rc"
+          fi
+
+          if [ "$remote_branch_exists" -eq 1 ]; then
+            # Populate a remote-tracking ref so --force-with-lease has an
+            # up-to-date lease and does not fail with "stale info".
+            git fetch origin "$branch":"refs/remotes/origin/$branch"
+          fi
 
           git checkout -B "$branch"
           git add README.md
           git commit -m "docs(contributor): stable contributors readme update"
 
-          if git rev-parse --verify --quiet "refs/remotes/origin/$branch" >/dev/null; then
+          if [ "$remote_branch_exists" -eq 1 ]; then
             lease_sha="$(git rev-parse "refs/remotes/origin/$branch")"
             git push --force-with-lease="$branch:$lease_sha" origin "$branch"
           else
