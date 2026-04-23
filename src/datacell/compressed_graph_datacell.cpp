@@ -16,6 +16,7 @@
 #include "compressed_graph_datacell.h"
 
 #include "graph_datacell_parameter.h"
+#include "vsag_exception.h"
 
 namespace vsag {
 
@@ -49,8 +50,10 @@ void
 CompressedGraphDataCell::InsertNeighborsById(InnerIdType id,
                                              const Vector<InnerIdType>& neighbor_ids) {
     if (neighbor_ids.size() > this->maximum_degree_) {
-        throw std::invalid_argument(fmt::format(
-            "insert neighbors count {} more than {}", neighbor_ids.size(), this->maximum_degree_));
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            fmt::format("insert neighbors count {} more than {}",
+                                        neighbor_ids.size(),
+                                        this->maximum_degree_));
     }
 
     Vector<InnerIdType> tmp(neighbor_ids.begin(), neighbor_ids.end(), allocator_);

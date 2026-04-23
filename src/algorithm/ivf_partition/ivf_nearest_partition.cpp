@@ -27,6 +27,7 @@
 #include "inner_string_params.h"
 #include "query_context.h"
 #include "utils/util_functions.h"
+#include "vsag_exception.h"
 
 namespace vsag {
 
@@ -162,8 +163,11 @@ IVFNearestPartition::factory_router_index(const IndexCommonParam& common_param) 
 }
 void
 IVFNearestPartition::GetCentroid(BucketIdType bucket_id, Vector<float>& centroid) {
-    if (!is_trained_ || bucket_id >= bucket_count_) {
-        throw std::runtime_error("Invalid bucket_id or partition not trained");
+    if (!is_trained_) {
+        throw VsagException(ErrorType::WRONG_STATUS, "Partition not trained");
+    }
+    if (bucket_id >= bucket_count_) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "Invalid bucket_id");
     }
     this->route_index_ptr_->GetCodeByInnerId(bucket_id, (uint8_t*)centroid.data());
 }
