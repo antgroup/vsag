@@ -135,7 +135,7 @@ BruteForceTestIndex::TestGeneral(const IndexPtr& index,
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::BruteForceTestIndex,
                              "BruteForce Factory Test With Exceptions",
-                             "[ft][bruteforce]") {
+                             "[ft][factory][bruteforce]") {
     auto name = "brute_force";
     SECTION("Empty parameters") {
         auto param = "{}";
@@ -233,12 +233,12 @@ TestBruteForceBuildAndContinueAdd(const fixtures::BruteForceResourcePtr& resourc
     vsag::Options::Instance().set_block_size_limit(origin_size);
 }
 
-TEST_CASE("(PR) BruteForce Build & ContinueAdd Test", "[ft][BruteForce][pr]") {
+TEST_CASE("(PR) BruteForce Build & ContinueAdd Test", "[ft][build][bruteforce][pr]") {
     auto resource = fixtures::BruteForceTestIndex::GetResource(true);
     TestBruteForceBuildAndContinueAdd(resource);
 }
 
-TEST_CASE("(Daily) BruteForce Build & ContinueAdd Test", "[ft][BruteForce][daily]") {
+TEST_CASE("(Daily) BruteForce Build & ContinueAdd Test", "[ft][build][bruteforce][daily]") {
     auto resource = fixtures::BruteForceTestIndex::GetResource(false);
     TestBruteForceBuildAndContinueAdd(resource);
 }
@@ -273,12 +273,12 @@ TestBruteForceBuild(const fixtures::BruteForceResourcePtr& resource) {
     }
 }
 
-TEST_CASE("(PR) BruteForce Build Test", "[ft][BruteForce][pr]") {
+TEST_CASE("(PR) BruteForce Build Test", "[ft][build][bruteforce][pr]") {
     auto resource = fixtures::BruteForceTestIndex::GetResource(true);
     TestBruteForceBuild(resource);
 }
 
-TEST_CASE("(Daily) BruteForce Build Test", "[ft][BruteForce][daily]") {
+TEST_CASE("(Daily) BruteForce Build Test", "[ft][build][bruteforce][daily]") {
     auto resource = fixtures::BruteForceTestIndex::GetResource(false);
     TestBruteForceBuild(resource);
 }
@@ -307,12 +307,12 @@ TestBruteForceAdd(const fixtures::BruteForceResourcePtr& resource) {
     }
 }
 
-TEST_CASE("(PR) BruteForce Add Test", "[ft][BruteForce][pr]") {
+TEST_CASE("(PR) BruteForce Add Test", "[ft][build][bruteforce][pr]") {
     auto resource = fixtures::BruteForceTestIndex::GetResource(true);
     TestBruteForceAdd(resource);
 }
 
-TEST_CASE("(Daily) BruteForce Add Test", "[ft][BruteForce][daily]") {
+TEST_CASE("(Daily) BruteForce Add Test", "[ft][build][bruteforce][daily]") {
     auto resource = fixtures::BruteForceTestIndex::GetResource(false);
     TestBruteForceAdd(resource);
 }
@@ -341,12 +341,12 @@ TestBruteForceConcurrentAdd(const fixtures::BruteForceResourcePtr& resource) {
     }
 }
 
-TEST_CASE("(PR) BruteForce Concurrent Add Test", "[ft][BruteForce][pr][concurrent]") {
+TEST_CASE("(PR) BruteForce Concurrent Add Test", "[ft][build][bruteforce][concurrent][pr]") {
     auto resource = fixtures::BruteForceTestIndex::GetResource(true);
     TestBruteForceConcurrentAdd(resource);
 }
 
-TEST_CASE("(Daily) BruteForce Concurrent Add Test", "[ft][BruteForce][daily][concurrent]") {
+TEST_CASE("(Daily) BruteForce Concurrent Add Test", "[ft][build][bruteforce][concurrent][daily]") {
     auto resource = fixtures::BruteForceTestIndex::GetResource(false);
     TestBruteForceConcurrentAdd(resource);
 }
@@ -380,12 +380,12 @@ TestBruteForceSerializeFile(const fixtures::BruteForceResourcePtr& resource) {
     }
 }
 
-TEST_CASE("(PR) BruteForce Serialize File Test", "[ft][BruteForce][pr][serialization]") {
+TEST_CASE("(PR) BruteForce Serialize File Test", "[ft][serialize][bruteforce][pr]") {
     auto resource = fixtures::BruteForceTestIndex::GetResource(true);
     TestBruteForceSerializeFile(resource);
 }
 
-TEST_CASE("(Daily) BruteForce Serialize File Test", "[ft][BruteForce][daily][serialization]") {
+TEST_CASE("(Daily) BruteForce Serialize File Test", "[ft][serialize][bruteforce][daily]") {
     auto resource = fixtures::BruteForceTestIndex::GetResource(false);
     TestBruteForceSerializeFile(resource);
 }
@@ -413,12 +413,12 @@ TestBruteForceClone(const fixtures::BruteForceResourcePtr& resource) {
     }
 }
 
-TEST_CASE("(PR) BruteForce Clone Test", "[ft][BruteForce][pr]") {
+TEST_CASE("(PR) BruteForce Clone Test", "[ft][clone][bruteforce][pr]") {
     auto resource = fixtures::BruteForceTestIndex::GetResource(true);
     TestBruteForceClone(resource);
 }
 
-TEST_CASE("(Daily) BruteForce Clone Test", "[ft][BruteForce][daily]") {
+TEST_CASE("(Daily) BruteForce Clone Test", "[ft][clone][bruteforce][daily]") {
     auto resource = fixtures::BruteForceTestIndex::GetResource(false);
     TestBruteForceClone(resource);
 }
@@ -450,13 +450,13 @@ TestBruteForceRandomAllocator(const fixtures::BruteForceResourcePtr& resource) {
 }
 
 TEST_CASE("(PR) BruteForce Build & ContinueAdd Test With Random Allocator",
-          "[ft][BruteForce][pr]") {
+          "[ft][build][bruteforce][pr]") {
     auto resource = fixtures::BruteForceTestIndex::GetResource(true);
     TestBruteForceRandomAllocator(resource);
 }
 
 TEST_CASE("(Daily) BruteForce Build & ContinueAdd Test With Random Allocator",
-          "[ft][BruteForce][daily]") {
+          "[ft][build][bruteforce][daily]") {
     auto resource = fixtures::BruteForceTestIndex::GetResource(false);
     TestBruteForceRandomAllocator(resource);
 }
@@ -483,12 +483,12 @@ TestBruteForceCalcDistanceById(const fixtures::BruteForceResourcePtr& resource) 
     }
 }
 
-TEST_CASE("(PR) BruteForce GetDistance By ID Test", "[ft][BruteForce][pr]") {
+TEST_CASE("(PR) BruteForce GetDistance By ID Test", "[ft][distance][bruteforce][pr]") {
     auto resource = fixtures::BruteForceTestIndex::GetResource(true);
     TestBruteForceCalcDistanceById(resource);
 }
 
-TEST_CASE("(Daily) BruteForce GetDistance By ID Test", "[ft][BruteForce][daily]") {
+TEST_CASE("(Daily) BruteForce GetDistance By ID Test", "[ft][distance][bruteforce][daily]") {
     auto resource = fixtures::BruteForceTestIndex::GetResource(false);
     TestBruteForceCalcDistanceById(resource);
 }
@@ -515,12 +515,12 @@ TestBruteForceDuplicateBuild(const fixtures::BruteForceResourcePtr& resource) {
     }
 }
 
-TEST_CASE("(PR) BruteForce Duplicate Build Test", "[ft][BruteForce][pr]") {
+TEST_CASE("(PR) BruteForce Duplicate Build Test", "[ft][build][duplicate][bruteforce][pr]") {
     auto resource = fixtures::BruteForceTestIndex::GetResource(true);
     TestBruteForceDuplicateBuild(resource);
 }
 
-TEST_CASE("(Daily) BruteForce Duplicate Build Test", "[ft][BruteForce][daily]") {
+TEST_CASE("(Daily) BruteForce Duplicate Build Test", "[ft][build][duplicate][bruteforce][daily]") {
     auto resource = fixtures::BruteForceTestIndex::GetResource(false);
     TestBruteForceDuplicateBuild(resource);
 }
@@ -553,12 +553,13 @@ TestBruteForceWithAttrFilter(const fixtures::BruteForceResourcePtr& resource) {
     }
 }
 
-TEST_CASE("(PR) BruteForce With Attribute Filter Test", "[ft][BruteForce][pr]") {
+TEST_CASE("(PR) BruteForce With Attribute Filter Test", "[ft][filter_search][bruteforce][pr]") {
     auto resource = fixtures::BruteForceTestIndex::GetResource(true);
     TestBruteForceWithAttrFilter(resource);
 }
 
-TEST_CASE("(Daily) BruteForce With Attribute Filter Test", "[ft][BruteForce][daily]") {
+TEST_CASE("(Daily) BruteForce With Attribute Filter Test",
+          "[ft][filter_search][bruteforce][daily]") {
     auto resource = fixtures::BruteForceTestIndex::GetResource(false);
     TestBruteForceWithAttrFilter(resource);
 }
@@ -585,13 +586,13 @@ TestBruteForceMarkRemove(const fixtures::BruteForceResourcePtr& resource) {
     }
 }
 
-TEST_CASE("(PR) BruteForce Mark Remove", "[ft][BruteForce][pr]") {
+TEST_CASE("(PR) BruteForce Mark Remove", "[ft][remove][bruteforce][pr]") {
     auto test_index = std::make_shared<fixtures::BruteForceTestIndex>();
     auto resource = test_index->GetResource(true);
     TestBruteForceMarkRemove(resource);
 }
 
-TEST_CASE("(Daily) BruteForce Mark Remove", "[ft][BruteForce][daily]") {
+TEST_CASE("(Daily) BruteForce Mark Remove", "[ft][remove][bruteforce][daily]") {
     auto test_index = std::make_shared<fixtures::BruteForceTestIndex>();
     auto resource = test_index->GetResource(false);
     TestBruteForceMarkRemove(resource);
@@ -628,12 +629,12 @@ TestBruteForceRemoveById(const fixtures::BruteForceResourcePtr& resource) {
     }
 }
 
-TEST_CASE("(PR) BruteForce Remove By ID Test", "[ft][BruteForce][pr]") {
+TEST_CASE("(PR) BruteForce Remove By ID Test", "[ft][remove][bruteforce][pr]") {
     auto resource = fixtures::BruteForceTestIndex::GetResource(true);
     TestBruteForceRemoveById(resource);
 }
 
-TEST_CASE("(Daily) BruteForce Remove By ID Test", "[ft][BruteForce][daily]") {
+TEST_CASE("(Daily) BruteForce Remove By ID Test", "[ft][remove][bruteforce][daily]") {
     auto resource = fixtures::BruteForceTestIndex::GetResource(false);
     TestBruteForceRemoveById(resource);
 }
@@ -659,12 +660,12 @@ TestBruteForceEstimateMemory(const fixtures::BruteForceResourcePtr& resource) {
     }
 }
 
-TEST_CASE("(PR) BruteForce BruteForce Estimate Memory Test", "[ft][BruteForce][pr]") {
+TEST_CASE("(PR) BruteForce BruteForce Estimate Memory Test", "[ft][memory][bruteforce][pr]") {
     auto resource = fixtures::BruteForceTestIndex::GetResource(true);
     TestBruteForceEstimateMemory(resource);
 }
 
-TEST_CASE("(Daily) BruteForce BruteForce Estimate Memory Test", "[ft][BruteForce][daily]") {
+TEST_CASE("(Daily) BruteForce BruteForce Estimate Memory Test", "[ft][memory][bruteforce][daily]") {
     auto resource = fixtures::BruteForceTestIndex::GetResource(false);
     TestBruteForceEstimateMemory(resource);
 }
