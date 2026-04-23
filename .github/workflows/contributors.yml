@@ -58,7 +58,8 @@ jobs:
           pr_number="$(gh pr list --base main --head "$branch" --state open --json number --jq '.[0].number // empty')"
 
           if [ -z "$pr_number" ]; then
-            pr_number="$(gh pr create --base main --head "$branch" --title "$title" --body "" --json number --jq '.number')"
+            pr_url="$(gh pr create --base main --head "$branch" --title "$title" --body "")"
+            pr_number="${pr_url##*/}"
           else
             gh pr edit "$pr_number" --title "$title" --body ""
           fi
