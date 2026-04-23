@@ -391,31 +391,31 @@ TEST_CASE("Test NumericComparison", "[ft][expression_visitor]") {
     // 错误语法判断
     {
         auto filter_condition_str = "age >";  // 缺少右侧数值
-        REQUIRE_THROWS_AS(AstParse(filter_condition_str), std::runtime_error);
+        REQUIRE_THROWS_AS(AstParse(filter_condition_str), VsagException);
     }
     {
         auto filter_condition_str = "age 18";  // 缺少比较操作符
-        REQUIRE_THROWS_AS(AstParse(filter_condition_str), std::runtime_error);
+        REQUIRE_THROWS_AS(AstParse(filter_condition_str), VsagException);
     }
     {
         auto filter_condition_str = "age > 18.5.5";  // 错误的浮点数格式
-        REQUIRE_THROWS_AS(AstParse(filter_condition_str), std::runtime_error);
+        REQUIRE_THROWS_AS(AstParse(filter_condition_str), VsagException);
     }
     {
         auto filter_condition_str = "age > 18 19";  // 多余的数值
-        REQUIRE_THROWS_AS(AstParse(filter_condition_str), std::runtime_error);
+        REQUIRE_THROWS_AS(AstParse(filter_condition_str), VsagException);
     }
     {
         auto filter_condition_str = "age > 18 AND";  // 缺少右侧表达式
-        REQUIRE_THROWS_AS(AstParse(filter_condition_str), std::runtime_error);
+        REQUIRE_THROWS_AS(AstParse(filter_condition_str), VsagException);
     }
     {
         auto filter_condition_str = "age > 18 AND age";  // 缺少右侧比较操作符和数值
-        REQUIRE_THROWS_AS(AstParse(filter_condition_str), std::runtime_error);
+        REQUIRE_THROWS_AS(AstParse(filter_condition_str), VsagException);
     }
     {
         auto filter_condition_str = "age > 18 AND age >";  // 缺少右侧数值
-        REQUIRE_THROWS_AS(AstParse(filter_condition_str), std::runtime_error);
+        REQUIRE_THROWS_AS(AstParse(filter_condition_str), VsagException);
     }
 
     {
@@ -423,7 +423,7 @@ TEST_CASE("Test NumericComparison", "[ft][expression_visitor]") {
         auto allocator = SafeAllocator::FactoryDefaultAllocator();
         auto schema = std::make_unique<AttrTypeSchema>(allocator.get());
         schema->SetTypeOfField("age", STRING);
-        REQUIRE_THROWS_AS(AstParse(filter_condition_str, schema.get()), std::runtime_error);
+        REQUIRE_THROWS_AS(AstParse(filter_condition_str, schema.get()), VsagException);
     }
 
     {
@@ -482,7 +482,7 @@ TEST_CASE("Test ArithmeticExpression", "[ft][expression_visitor]") {
         auto allocator = SafeAllocator::FactoryDefaultAllocator();
         auto schema = std::make_unique<AttrTypeSchema>(allocator.get());
         schema->SetTypeOfField("age", STRING);
-        REQUIRE_THROWS_AS(AstParse(filter_condition_str, schema.get()), std::runtime_error);
+        REQUIRE_THROWS_AS(AstParse(filter_condition_str, schema.get()), VsagException);
     }
 
     {
@@ -509,7 +509,7 @@ TEST_CASE("Test NotExpression", "[ft][expression_visitor]") {
         auto allocator = SafeAllocator::FactoryDefaultAllocator();
         auto schema = std::make_unique<AttrTypeSchema>(allocator.get());
         schema->SetTypeOfField("name", INT32);
-        REQUIRE_THROWS_AS(AstParse(filter_condition_str, schema.get()), std::runtime_error);
+        REQUIRE_THROWS_AS(AstParse(filter_condition_str, schema.get()), VsagException);
     }
 }
 
@@ -551,7 +551,7 @@ TEST_CASE("Test StringComparison", "[ft][expression_visitor]") {
     }
     {
         auto filter_condition_str = R"(name = ")";  // 缺少右侧"
-        REQUIRE_THROWS_AS(AstParse(filter_condition_str), std::runtime_error);
+        REQUIRE_THROWS_AS(AstParse(filter_condition_str), VsagException);
     }
 
     {
@@ -559,7 +559,7 @@ TEST_CASE("Test StringComparison", "[ft][expression_visitor]") {
         auto allocator = SafeAllocator::FactoryDefaultAllocator();
         auto schema = std::make_unique<AttrTypeSchema>(allocator.get());
         schema->SetTypeOfField("name", INT32);
-        REQUIRE_THROWS_AS(AstParse(filter_condition_str, schema.get()), std::runtime_error);
+        REQUIRE_THROWS_AS(AstParse(filter_condition_str, schema.get()), VsagException);
     }
 
     {
@@ -653,7 +653,7 @@ TEST_CASE("Test InStrListExpression", "[ft][expression_visitor]") {
         auto allocator = SafeAllocator::FactoryDefaultAllocator();
         auto schema = std::make_unique<AttrTypeSchema>(allocator.get());
         schema->SetTypeOfField("name", INT32);
-        REQUIRE_THROWS_AS(AstParse(filter_condition_str, schema.get()), std::runtime_error);
+        REQUIRE_THROWS_AS(AstParse(filter_condition_str, schema.get()), VsagException);
     }
 
     {
@@ -661,7 +661,7 @@ TEST_CASE("Test InStrListExpression", "[ft][expression_visitor]") {
         auto allocator = SafeAllocator::FactoryDefaultAllocator();
         auto schema = std::make_unique<AttrTypeSchema>(allocator.get());
         schema->SetTypeOfField("name", INT32);
-        REQUIRE_THROWS_AS(AstParse(filter_condition_str, schema.get()), std::runtime_error);
+        REQUIRE_THROWS_AS(AstParse(filter_condition_str, schema.get()), VsagException);
     }
 
     {
@@ -730,7 +730,7 @@ TEST_CASE("Test InStrListExpression", "[ft][expression_visitor]") {
         auto allocator = SafeAllocator::FactoryDefaultAllocator();
         auto schema = std::make_unique<AttrTypeSchema>(allocator.get());
         schema->SetTypeOfField("age", INT32);
-        REQUIRE_THROWS_AS(AstParse(filter_condition_str, schema.get()), std::runtime_error);
+        REQUIRE_THROWS_AS(AstParse(filter_condition_str, schema.get()), VsagException);
     }
 }
 

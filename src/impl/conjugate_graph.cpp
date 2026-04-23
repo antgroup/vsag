@@ -176,7 +176,8 @@ tl::expected<void, Error>
 ConjugateGraph::Deserialize(const Binary& binary) {
     auto func = [&](uint64_t offset, uint64_t len, void* dest) -> void {
         if (len + offset > binary.size) {
-            throw std::runtime_error(
+            throw VsagException(
+                ErrorType::INVALID_BINARY,
                 fmt::format("offset({}) + len({}) > size({})", offset, len, binary.size));
         }
         std::memcpy(dest, binary.data.get() + offset, len);
@@ -203,8 +204,8 @@ ConjugateGraph::Deserialize(StreamReader& in_stream) {
 
         read_var_from_stream(in_stream, &offset, &memory_usage_);
         if (memory_usage_ <= FOOTER_SIZE) {
-            throw std::runtime_error(
-                fmt::format("Incorrect header: memory_usage_({})", memory_usage_));
+            throw VsagException(ErrorType::INVALID_BINARY,
+                                fmt::format("Incorrect header: memory_usage_({})", memory_usage_));
         }
         footer_offset = memory_usage_ - FOOTER_SIZE;
         in_stream.Seek(cur_pos + footer_offset);
@@ -232,7 +233,7 @@ ConjugateGraph::Deserialize(StreamReader& in_stream) {
         LOG_ERROR_AND_RETURNS(ErrorType::READ_ERROR, "failed to deserialize: ", e.what());
     } catch (const vsag::VsagException& e) {
         clear();
-        LOG_ERROR_AND_RETURNS(ErrorType::READ_ERROR, "failed to deserialize: ", e.what());
+        LOG_ERROR_AND_RETURNS(e.error_.type, "failed to deserialize: ", e.what());
     }
 }
 

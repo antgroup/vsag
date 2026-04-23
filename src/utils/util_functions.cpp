@@ -99,9 +99,10 @@ select_k_numbers(int64_t n, int k) {
 uint64_t
 next_multiple_of_power_of_two(uint64_t x, uint64_t n) {
     if (n > 63) {
-        throw std::runtime_error(fmt::format("n is larger than 63, n is {}", n));
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            fmt::format("n is larger than 63, n is {}", n));
     }
-    uint64_t y = 1 << n;
+    uint64_t y = uint64_t{1} << n;
     auto result = (x + y - 1) & ~(y - 1);
     return result;
 }
@@ -239,7 +240,8 @@ get_vectors(DataTypes type,
         *vectors_ptr = (void*)base->GetFloat16Vectors();
         *data_size_ptr = dim * sizeof(uint16_t);
     } else {
-        throw std::invalid_argument(fmt::format("no support for this type: {}", (int)type));
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            fmt::format("no support for this type: {}", (int)type));
     }
 }
 
@@ -259,7 +261,8 @@ set_dataset(DataTypes type,
             ->Owner(false)
             ->NumElements(num_element);
     } else {
-        throw std::invalid_argument(fmt::format("no support for this type: {}", (int)type));
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            fmt::format("no support for this type: {}", (int)type));
     }
 }
 
