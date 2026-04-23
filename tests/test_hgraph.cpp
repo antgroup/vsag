@@ -546,13 +546,13 @@ TestHGraphBuildAndContinueAdd(const fixtures::HGraphTestIndexPtr& test_index,
     }
 }
 
-TEST_CASE("(PR) HGraph Build & ContinueAdd Test", "[ft][hgraph][pr]") {
+TEST_CASE("(PR) HGraph Build & ContinueAdd Test", "[ft][build][hgraph][pr]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(true);
     TestHGraphBuildAndContinueAdd(test_index, resource);
 }
 
-TEST_CASE("(Daily) HGraph Build & ContinueAdd Test", "[ft][hgraph][daily]") {
+TEST_CASE("(Daily) HGraph Build & ContinueAdd Test", "[ft][build][hgraph][daily]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(false);
     TestHGraphBuildAndContinueAdd(test_index, resource);
@@ -603,7 +603,7 @@ TestHGraphFactor(const fixtures::HGraphTestIndexPtr& test_index,
     }
 }
 
-TEST_CASE("HGraph Factor Test", "[ft][hgraph][pr]") {
+TEST_CASE("HGraph Factor Test", "[ft][factory][hgraph][pr]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(true);
     TestHGraphFactor(test_index, resource);
@@ -643,13 +643,13 @@ TestHGraphTrainAndAddTest(const fixtures::HGraphTestIndexPtr& test_index,
     }
 }
 
-TEST_CASE("(PR) HGraph Train & Add Test", "[ft][hgraph][pr]") {
+TEST_CASE("(PR) HGraph Train & Add Test", "[ft][build][hgraph][pr]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(true);
     TestHGraphTrainAndAddTest(test_index, resource);
 }
 
-TEST_CASE("(Daily) HGraph Train & Add Test", "[ft][hgraph][daily]") {
+TEST_CASE("(Daily) HGraph Train & Add Test", "[ft][build][hgraph][daily]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(false);
     TestHGraphTrainAndAddTest(test_index, resource);
@@ -742,13 +742,13 @@ TestHGraphBuild(const fixtures::HGraphTestIndexPtr& test_index,
     }
 }
 
-TEST_CASE("(PR) HGraph Build Test", "[ft][hgraph][pr]") {
+TEST_CASE("(PR) HGraph Build Test", "[ft][build][hgraph][pr]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(true);
     TestHGraphBuild(test_index, resource);
 }
 
-TEST_CASE("(Daily) HGraph Build Test", "[ft][hgraph][daily]") {
+TEST_CASE("(Daily) HGraph Build Test", "[ft][build][hgraph][daily]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(false);
     TestHGraphBuild(test_index, resource);
@@ -809,13 +809,13 @@ TestHGraphWithAttr(const fixtures::HGraphTestIndexPtr& test_index,
     }
 }
 
-TEST_CASE("(PR) HGraph With Attr", "[ft][hgraph][pr]") {
+TEST_CASE("(PR) HGraph With Attr", "[ft][filter_search][hgraph][pr]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(true);
     TestHGraphWithAttr(test_index, resource);
 }
 
-TEST_CASE("(Daily) HGraph With Attr", "[ft][hgraph][daily]") {
+TEST_CASE("(Daily) HGraph With Attr", "[ft][filter_search][hgraph][daily]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(false);
     TestHGraphWithAttr(test_index, resource);
@@ -870,13 +870,13 @@ TestHGraphGetRawVector(const fixtures::HGraphTestIndexPtr& test_index,
     }
 }
 
-TEST_CASE("(PR) HGraph Support Get Raw Vector", "[ft][hgraph][pr]") {
+TEST_CASE("(PR) HGraph Support Get Raw Vector", "[ft][update][hgraph][pr]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(true);
     TestHGraphGetRawVector(test_index, resource);
 }
 
-TEST_CASE("(Daily) HGraph Support Get Raw Vector", "[ft][hgraph][daily]") {
+TEST_CASE("(Daily) HGraph Support Get Raw Vector", "[ft][update][hgraph][daily]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(false);
     TestHGraphGetRawVector(test_index, resource);
@@ -980,19 +980,19 @@ TestHGraphTune(const fixtures::HGraphTestIndexPtr& test_index,
     }
 }
 
-TEST_CASE("(PR) HGraph Tune", "[ft][hgraph][pr]") {
+TEST_CASE("(PR) HGraph Tune", "[ft][search][hgraph][pr]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(true);
     TestHGraphTune(test_index, resource);
 }
 
-TEST_CASE("(Daily) HGraph Tune", "[ft][hgraph][daily]") {
+TEST_CASE("(Daily) HGraph Tune", "[ft][search][hgraph][daily]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(false);
     TestHGraphTune(test_index, resource);
 }
 
-TEST_CASE("(PR) HGraph Tune with ignore_reorder", "[ft][hgraph][pr]") {
+TEST_CASE("(PR) HGraph Tune with ignore_reorder", "[ft][search][hgraph][pr]") {
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = 1024 * 1024 * 2;
@@ -1107,13 +1107,13 @@ TestHGraphODescentBuild(const fixtures::HGraphTestIndexPtr& test_index,
     }
 }
 
-TEST_CASE("(PR) HGraph ODescent Build", "[ft][hgraph][pr]") {
+TEST_CASE("(PR) HGraph ODescent Build", "[ft][build][hgraph][pr]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(true);
     TestHGraphODescentBuild(test_index, resource);
 }
 
-TEST_CASE("(Daily) HGraph ODescent Build", "[ft][hgraph][daily]") {
+TEST_CASE("(Daily) HGraph ODescent Build", "[ft][build][hgraph][daily]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(false);
     TestHGraphODescentBuild(test_index, resource);
@@ -1154,13 +1154,13 @@ TestHGraphMarkRemove(const fixtures::HGraphTestIndexPtr& test_index,
     }
 }
 
-TEST_CASE("(PR) HGraph Mark Remove", "[ft][hgraph][pr]") {
+TEST_CASE("(PR) HGraph Mark Remove", "[ft][remove][hgraph][pr]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(true);
     TestHGraphMarkRemove(test_index, resource);
 }
 
-TEST_CASE("(Daily) HGraph Mark Remove", "[ft][hgraph][daily]") {
+TEST_CASE("(Daily) HGraph Mark Remove", "[ft][remove][hgraph][daily]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(false);
     TestHGraphMarkRemove(test_index, resource);
@@ -1200,13 +1200,13 @@ TestHGraphShrink(const fixtures::HGraphTestIndexPtr& test_index,
     }
 }
 
-TEST_CASE("(PR) HGraph Shrink", "[ft][hgraph][pr]") {
+TEST_CASE("(PR) HGraph Shrink", "[ft][build][hgraph][pr]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(true);
     TestHGraphShrink(test_index, resource);
 }
 
-TEST_CASE("(Daily) HGraph Shrink", "[ft][hgraph][daily]") {
+TEST_CASE("(Daily) HGraph Shrink", "[ft][build][hgraph][daily]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(false);
     TestHGraphShrink(test_index, resource);
@@ -1248,13 +1248,13 @@ TestHGraphCompressedBuild(const fixtures::HGraphTestIndexPtr& test_index,
     }
 }
 
-TEST_CASE("(PR) HGraph Compressed Graph Build", "[ft][hgraph][pr]") {
+TEST_CASE("(PR) HGraph Compressed Graph Build", "[ft][build][hgraph][pr]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(true);
     TestHGraphCompressedBuild(test_index, resource);
 }
 
-TEST_CASE("(Daily) HGraph Compressed Graph Build", "[ft][hgraph][daily]") {
+TEST_CASE("(Daily) HGraph Compressed Graph Build", "[ft][build][hgraph][daily]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(false);
     TestHGraphCompressedBuild(test_index, resource);
@@ -1297,13 +1297,13 @@ TestHGraphMerge(const fixtures::HGraphTestIndexPtr& test_index,
     }
 }
 
-TEST_CASE("(PR) HGraph Merge", "[ft][hgraph][pr]") {
+TEST_CASE("(PR) HGraph Merge", "[ft][merge][hgraph][pr]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(true);
     TestHGraphMerge(test_index, resource);
 }
 
-TEST_CASE("(Daily) HGraph Merge", "[ft][hgraph][daily]") {
+TEST_CASE("(Daily) HGraph Merge", "[ft][merge][hgraph][daily]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(false);
     TestHGraphMerge(test_index, resource);
@@ -1346,13 +1346,13 @@ TestHGraphAdd(const fixtures::HGraphTestIndexPtr& test_index,
     }
 }
 
-TEST_CASE("(PR) HGraph Add", "[ft][hgraph][pr]") {
+TEST_CASE("(PR) HGraph Add", "[ft][build][hgraph][pr]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(true);
     TestHGraphAdd(test_index, resource);
 }
 
-TEST_CASE("(Daily) HGraph Add", "[ft][hgraph][daily]") {
+TEST_CASE("(Daily) HGraph Add", "[ft][build][hgraph][daily]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(false);
     TestHGraphAdd(test_index, resource);
@@ -1395,7 +1395,7 @@ TestHGraphNonstandardID(const fixtures::HGraphTestIndexPtr& test_index,
     }
 }
 
-TEST_CASE("HGraph Test NonstandardID", "[ft][hgraph][pr]") {
+TEST_CASE("HGraph Test NonstandardID", "[ft][build][hgraph][pr]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(true);
     TestHGraphNonstandardID(test_index, resource);
@@ -1482,19 +1482,20 @@ TestHGraphDuplicateSerializeCompressed(const fixtures::HGraphTestIndexPtr& test_
     RunHGraphDuplicateChecks(test_index, resource, "compressed", false, true);
 }
 
-TEST_CASE("(PR) HGraph Duplicate", "[ft][hgraph][pr]") {
+TEST_CASE("(PR) HGraph Duplicate", "[ft][build][hgraph][duplicate][pr]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(true);
     TestHGraphDuplicate(test_index, resource);
 }
 
-TEST_CASE("(Daily) HGraph Duplicate", "[ft][hgraph][daily]") {
+TEST_CASE("(Daily) HGraph Duplicate", "[ft][build][hgraph][duplicate][daily]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(false);
     TestHGraphDuplicate(test_index, resource);
 }
 
-TEST_CASE("(PR) HGraph Duplicate Serialize Compressed", "[ft][hgraph][serialization][pr]") {
+TEST_CASE("(PR) HGraph Duplicate Serialize Compressed",
+          "[ft][build][duplicate][serialize][hgraph][pr]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(true);
     TestHGraphDuplicateSerializeCompressed(test_index, resource);
@@ -1533,13 +1534,13 @@ TestHGraphSearchWithDirtyVector(const fixtures::HGraphTestIndexPtr& test_index,
     }
 }
 
-TEST_CASE("(PR) HGraph Search with Dirty Vector", "[ft][hgraph][pr]") {
+TEST_CASE("(PR) HGraph Search with Dirty Vector", "[ft][search][hgraph][pr]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(true);
     TestHGraphSearchWithDirtyVector(test_index, resource);
 }
 
-TEST_CASE("(Daily) HGraph Search with Dirty Vector", "[ft][hgraph][daily]") {
+TEST_CASE("(Daily) HGraph Search with Dirty Vector", "[ft][search][hgraph][daily]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(false);
     TestHGraphSearchWithDirtyVector(test_index, resource);
@@ -1547,7 +1548,7 @@ TEST_CASE("(Daily) HGraph Search with Dirty Vector", "[ft][hgraph][daily]") {
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::HGraphTestIndex,
                              "HGraph Search with Sparse Vector",
-                             "[ft][hgraph][concurrent]") {
+                             "[ft][concurrent][hgraph]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = "ip";
@@ -1612,13 +1613,13 @@ TestHGraphConcurrentAdd(const fixtures::HGraphTestIndexPtr& test_index,
     }
 }
 
-TEST_CASE("(PR) HGraph Concurrent Add", "[ft][hgraph][pr][concurrent]") {
+TEST_CASE("(PR) HGraph Concurrent Add", "[ft][build][concurrent][hgraph][pr]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(true);
     TestHGraphConcurrentAdd(test_index, resource);
 }
 
-TEST_CASE("(Daily) HGraph Concurrent Add", "[ft][hgraph][daily][concurrent]") {
+TEST_CASE("(Daily) HGraph Concurrent Add", "[ft][build][concurrent][hgraph][daily]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(false);
     TestHGraphConcurrentAdd(test_index, resource);
@@ -1665,13 +1666,13 @@ TestHGraphConcurrentAddSearchRemove(const fixtures::HGraphTestIndexPtr& test_ind
     }
 }
 
-TEST_CASE("(PR) HGraph Concurrent Add Search Remove", "[ft][hgraph][pr][concurrent]") {
+TEST_CASE("(PR) HGraph Concurrent Add Search Remove", "[ft][build][concurrent][hgraph][pr]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(true);
     TestHGraphConcurrentAddSearchRemove(test_index, resource);
 }
 
-TEST_CASE("(Daily) HGraph Concurrent Add Search Remove", "[ft][hgraph][daily][concurrent]") {
+TEST_CASE("(Daily) HGraph Concurrent Add Search Remove", "[ft][build][concurrent][hgraph][daily]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(false);
     TestHGraphConcurrentAddSearchRemove(test_index, resource);
@@ -1726,13 +1727,13 @@ TestHGraphSerialize(const fixtures::HGraphTestIndexPtr& test_index,
     }
 }
 
-TEST_CASE("(PR) HGraph Serialize File", "[ft][hgraph][serialization][pr]") {
+TEST_CASE("(PR) HGraph Serialize File", "[ft][serialize][hgraph][serialization][pr]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(true);
     TestHGraphSerialize(test_index, resource);
 }
 
-TEST_CASE("(Daily) HGraph Serialize File", "[ft][hgraph][serialization][daily]") {
+TEST_CASE("(Daily) HGraph Serialize File", "[ft][serialize][hgraph][serialization][daily]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(false);
     TestHGraphSerialize(test_index, resource);
@@ -1787,13 +1788,13 @@ TestHGraphReaderIO(const fixtures::HGraphTestIndexPtr& test_index,
     }
 }
 
-TEST_CASE("(PR) HGraph Reader IO", "[ft][hgraph][serialization][pr]") {
+TEST_CASE("(PR) HGraph Reader IO", "[ft][serialize][hgraph][pr]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(true);
     TestHGraphReaderIO(test_index, resource);
 }
 
-TEST_CASE("(Daily) HGraph Reader IO", "[ft][hgraph][serialization][daily]") {
+TEST_CASE("(Daily) HGraph Reader IO", "[ft][serialize][hgraph][daily]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(false);
     TestHGraphReaderIO(test_index, resource);
@@ -1840,13 +1841,13 @@ TestHGraphClone(const fixtures::HGraphTestIndexPtr& test_index,
     }
 }
 
-TEST_CASE("(PR) HGraph Clone", "[ft][hgraph][pr]") {
+TEST_CASE("(PR) HGraph Clone", "[ft][clone][hgraph][pr]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(true);
     TestHGraphClone(test_index, resource);
 }
 
-TEST_CASE("(Daily) HGraph Clone", "[ft][hgraph][daily]") {
+TEST_CASE("(Daily) HGraph Clone", "[ft][clone][hgraph][daily]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(false);
     TestHGraphClone(test_index, resource);
@@ -1894,13 +1895,13 @@ TestHGraphExportModel(const fixtures::HGraphTestIndexPtr& test_index,
     }
 }
 
-TEST_CASE("(PR) HGraph Export Model", "[ft][hgraph][pr]") {
+TEST_CASE("(PR) HGraph Export Model", "[ft][export][hgraph][pr]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(true);
     TestHGraphExportModel(test_index, resource);
 }
 
-TEST_CASE("(Daily) HGraph Export Model", "[ft][hgraph][daily]") {
+TEST_CASE("(Daily) HGraph Export Model", "[ft][export][hgraph][daily]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(false);
     TestHGraphExportModel(test_index, resource);
@@ -1947,13 +1948,14 @@ TestHGraphRandomAllocator(const fixtures::HGraphTestIndexPtr& test_index,
     }
 }
 
-TEST_CASE("(PR) HGraph Build & ContinueAdd Test With Random Allocator", "[ft][hgraph][pr]") {
+TEST_CASE("(PR) HGraph Build & ContinueAdd Test With Random Allocator", "[ft][build][hgraph][pr]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(true);
     TestHGraphRandomAllocator(test_index, resource);
 }
 
-TEST_CASE("(Daily) HGraph Build & ContinueAdd Test With Random Allocator", "[ft][hgraph][daily]") {
+TEST_CASE("(Daily) HGraph Build & ContinueAdd Test With Random Allocator",
+          "[ft][build][hgraph][daily]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(false);
     TestHGraphRandomAllocator(test_index, resource);
@@ -1999,13 +2001,13 @@ TestHGraphDuplicateBuild(const fixtures::HGraphTestIndexPtr& test_index,
     }
 }
 
-TEST_CASE("(PR) HGraph Duplicate Build", "[ft][hgraph][pr]") {
+TEST_CASE("(PR) HGraph Duplicate Build", "[ft][build][duplicate][hgraph][pr]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(true);
     TestHGraphDuplicateBuild(test_index, resource);
 }
 
-TEST_CASE("(Daily) HGraph Duplicate Build", "[ft][hgraph][daily]") {
+TEST_CASE("(Daily) HGraph Duplicate Build", "[ft][build][duplicate][hgraph][daily]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(false);
     TestHGraphDuplicateBuild(test_index, resource);
@@ -2053,19 +2055,21 @@ TestHGraphEstimateMemoryAndGetMemoryUsage(const fixtures::HGraphTestIndexPtr& te
     }
 }
 
-TEST_CASE("(PR) HGraph Estimate Memory And Get Memory Usage", "[ft][hgraph][pr]") {
+TEST_CASE("(PR) HGraph Estimate Memory And Get Memory Usage", "[ft][memory][hgraph][pr]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(true);
     TestHGraphEstimateMemoryAndGetMemoryUsage(test_index, resource);
 }
 
-TEST_CASE("(Daily) HGraph Estimate Memory", "[ft][hgraph][daily]") {
+TEST_CASE("(Daily) HGraph Estimate Memory", "[ft][memory][hgraph][daily]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(false);
     TestHGraphEstimateMemoryAndGetMemoryUsage(test_index, resource);
 }
 
-TEST_CASE_PERSISTENT_FIXTURE(fixtures::HGraphTestIndex, "HGraph ELP Optimizer", "[ft][hgraph]") {
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HGraphTestIndex,
+                             "HGraph ELP Optimizer",
+                             "[ft][build][hgraph]") {
     fixtures::logger::LoggerReplacer _;
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
 
@@ -2142,13 +2146,13 @@ TestHGraphIgnoreReorder(const fixtures::HGraphTestIndexPtr& test_index,
     }
 }
 
-TEST_CASE("(PR) HGraph Ignore Reorder", "[ft][hgraph][pr]") {
+TEST_CASE("(PR) HGraph Ignore Reorder", "[ft][search][hgraph][pr]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(true);
     TestHGraphIgnoreReorder(test_index, resource);
 }
 
-TEST_CASE("(Daily) HGraph Ignore Reorder", "[ft][hgraph][daily]") {
+TEST_CASE("(Daily) HGraph Ignore Reorder", "[ft][search][hgraph][daily]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(false);
     TestHGraphIgnoreReorder(test_index, resource);
@@ -2206,13 +2210,13 @@ TestHGraphWithExtraInfo(const fixtures::HGraphTestIndexPtr& test_index,
     }
 }
 
-TEST_CASE("(PR) HGraph With Extra Info", "[ft][hgraph][pr]") {
+TEST_CASE("(PR) HGraph With Extra Info", "[ft][search][hgraph][pr]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(true);
     TestHGraphWithExtraInfo(test_index, resource);
 }
 
-TEST_CASE("(Daily) HGraph With Extra Info", "[ft][hgraph][daily]") {
+TEST_CASE("(Daily) HGraph With Extra Info", "[ft][search][hgraph][daily]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(false);
     TestHGraphWithExtraInfo(test_index, resource);
@@ -2257,13 +2261,13 @@ TestHGraphSearchOverTime(const fixtures::HGraphTestIndexPtr& test_index,
     }
 }
 
-TEST_CASE("(PR) HGraph Search Over Time", "[ft][hgraph][pr]") {
+TEST_CASE("(PR) HGraph Search Over Time", "[ft][search][hgraph][pr]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(true);
     TestHGraphSearchOverTime(test_index, resource);
 }
 
-TEST_CASE("(Daily) HGraph Search Over Time", "[ft][hgraph][daily]") {
+TEST_CASE("(Daily) HGraph Search Over Time", "[ft][search][hgraph][daily]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(false);
     TestHGraphSearchOverTime(test_index, resource);
@@ -2319,19 +2323,19 @@ TestHGraphDiskIOType(const fixtures::HGraphTestIndexPtr& test_index,
     }
 }
 
-TEST_CASE("(PR) HGraph Disk IO Type Index", "[ft][hgraph][serialization][pr]") {
+TEST_CASE("(PR) HGraph Disk IO Type Index", "[ft][serialize][hgraph][pr]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(true);
     TestHGraphDiskIOType(test_index, resource);
 }
 
-TEST_CASE("(Daily) HGraph Disk IO Type Index", "[ft][hgraph][serialization][daily]") {
+TEST_CASE("(Daily) HGraph Disk IO Type Index", "[ft][serialize][hgraph][daily]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(false);
     TestHGraphDiskIOType(test_index, resource);
 }
 
-TEST_CASE("HGraph Concurrent Read Write", "[ft][hgraph][concurrent]") {
+TEST_CASE("HGraph Concurrent Read Write", "[ft][concurrent][hgraph]") {
     uint32_t op_num = 10000;
     uint32_t dim = 128;
     uint32_t top_k = 5;
@@ -2533,13 +2537,13 @@ TestHGraphHopsLimit(const fixtures::HGraphTestIndexPtr& test_index,
     }
 }
 
-TEST_CASE("(PR) HGraph Hops Limit", "[ft][hgraph][pr]") {
+TEST_CASE("(PR) HGraph Hops Limit", "[ft][search][hgraph][pr]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(true);
     TestHGraphHopsLimit(test_index, resource);
 }
 
-TEST_CASE("(Daily) HGraph Hops Limit", "[ft][hgraph][daily]") {
+TEST_CASE("(Daily) HGraph Hops Limit", "[ft][search][hgraph][daily]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(false);
     TestHGraphHopsLimit(test_index, resource);
@@ -2622,13 +2626,13 @@ TestHGraphReverseEdges(const fixtures::HGraphTestIndexPtr& test_index,
     }
 }
 
-TEST_CASE("(PR) HGraph Reverse Edges", "[ft][hgraph][pr]") {
+TEST_CASE("(PR) HGraph Reverse Edges", "[ft][build][hgraph][pr]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(true);
     TestHGraphReverseEdges(test_index, resource);
 }
 
-TEST_CASE("(Daily) HGraph Reverse Edges", "[ft][hgraph][daily]") {
+TEST_CASE("(Daily) HGraph Reverse Edges", "[ft][build][hgraph][daily]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(false);
     TestHGraphReverseEdges(test_index, resource);
