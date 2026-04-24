@@ -1,0 +1,105 @@
+<!-- Language toggle button injected into mdBook's top menu bar. -->
+<!-- Shared across docs/{en,zh} and blog/{en,zh}. Keep these four copies in sync. -->
+<style>
+  #lang-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 2.2em;
+    height: 2.2em;
+    padding: 0 0.55em;
+    margin-left: 0.2em;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--icons);
+    font: inherit;
+    font-size: 0.95em;
+    line-height: 1;
+    cursor: pointer;
+    text-decoration: none;
+    user-select: none;
+  }
+  #lang-toggle:hover {
+    color: var(--icons-hover);
+    background: var(--theme-hover, rgba(0, 0, 0, 0.05));
+  }
+  #lang-toggle[aria-busy="true"] {
+    opacity: 0.6;
+    cursor: progress;
+  }
+</style>
+<script>
+  (function () {
+    // Site layout (deployed at https://vsag.io/):
+    //   /docs/en/...   /docs/zh/...
+    //   /blogs/en/...  /blogs/zh/...
+    // mdBook sources in this repo live under docs/docs/{en,zh} and docs/blog/{en,zh};
+    // the deploy workflow renames blog -> blogs, so runtime paths use /blogs/.
+    var PAIRS = [
+      { a: '/docs/en/',  b: '/docs/zh/'  },
+      { a: '/blogs/en/', b: '/blogs/zh/' }
+    ];
+
+    function detect(pathname) {
+      for (var i = 0; i < PAIRS.length; i++) {
+        var p = PAIRS[i];
+        if (pathname.indexOf(p.a) === 0) {
+          return { current: 'en', other: 'zh', currentRoot: p.a, otherRoot: p.b };
+        }
+        if (pathname.indexOf(p.b) === 0) {
+          return { current: 'zh', other: 'en', currentRoot: p.b, otherRoot: p.a };
+        }
+      }
+      return null;
+    }
+
+    function buildTargetUrl(info, pathname) {
+      var rest = pathname.slice(info.currentRoot.length);
+      return info.otherRoot + rest;
+    }
+
+    function insertButton() {
+      var bar = document.querySelector('.right-buttons');
+      if (!bar) return false;
+      if (document.getElementById('lang-toggle')) return true;
+
+      var info = detect(window.location.pathname);
+      // On local `mdbook serve`, paths look like "/" instead of "/docs/en/";
+      // hide the button in that case to avoid sending users to nonexistent URLs.
+      if (!info) return true;
+
+      var btn = document.createElement('a');
+      btn.id = 'lang-toggle';
+      btn.href = info.otherRoot;
+      btn.setAttribute('role', 'button');
+      // Show the *target* language so users know what clicking does.
+      btn.textContent = info.other === 'zh' ? '\u4e2d' : 'EN';
+      btn.title = info.other === 'zh' ? '\u5207\u6362\u4e3a\u4e2d\u6587' : 'Switch to English';
+      btn.setAttribute('aria-label', btn.title);
+
+      btn.addEventListener('click', function (e) {
+        e.preventDefault();
+        var target = buildTargetUrl(info, window.location.pathname);
+        var hash = window.location.hash || '';
+        btn.setAttribute('aria-busy', 'true');
+        // Prefer HEAD to check existence without downloading the page.
+        fetch(target, { method: 'HEAD' }).then(function (r) {
+          window.location.assign(r.ok ? (target + hash) : info.otherRoot);
+        }).catch(function () {
+          // Network error / CORS / offline -> fall back to language root.
+          window.location.assign(info.otherRoot);
+        });
+      });
+
+      bar.insertBefore(btn, bar.firstChild);
+      return true;
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', insertButton);
+    } else {
+      insertButton();
+    }
+  })();
+</script>
