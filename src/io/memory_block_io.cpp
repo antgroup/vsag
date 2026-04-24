@@ -148,6 +148,20 @@ MemoryBlockIO::ResizeImpl(uint64_t size) {
     this->size_ = size;
 }
 
+void
+MemoryBlockIO::ShrinkImpl(uint64_t size) {
+    if (size >= this->size_) {
+        return;
+    }
+    uint64_t new_block_count = (size + this->block_size_ - 1) >> this->block_bit_;
+    while (this->blocks_.size() > new_block_count) {
+        auto* block = this->blocks_.back();
+        this->allocator_->Deallocate(block);
+        this->blocks_.pop_back();
+    }
+    this->size_ = size;
+}
+
 static int
 countr_zero(uint64_t x) {
     if (x == 0) {

@@ -118,6 +118,16 @@ public:
     void
     MergeOther(const FlattenInterfacePtr& other, InnerIdType bias) override;
 
+    void
+    Move(InnerIdType from, InnerIdType to) override;
+
+    void
+    ShrinkToFit(InnerIdType capacity) override {
+        uint64_t io_size = static_cast<uint64_t>(capacity) * static_cast<uint64_t>(code_size_);
+        this->io_->Shrink(io_size);
+        this->max_capacity_ = capacity;
+    }
+
     [[nodiscard]] std::string
     GetQuantizerName() override;
 
@@ -498,6 +508,18 @@ FlattenDataCell<QuantTmpl, IOTmpl>::GetMemoryUsage() const {
     }
     memory += sizeof(QuantTmpl);
     return memory;
+}
+
+template <typename QuantTmpl, typename IOTmpl>
+void
+FlattenDataCell<QuantTmpl, IOTmpl>::Move(InnerIdType from, InnerIdType to) {
+    bool need_release = false;
+    const uint8_t* codes = this->GetCodesById(from, need_release);
+    this->io_->Write(
+        codes, code_size_, static_cast<uint64_t>(to) * static_cast<uint64_t>(code_size_));
+    if (need_release) {
+        this->io_->Release(codes);
+    }
 }
 
 }  // namespace vsag

@@ -41,3 +41,26 @@ TEST_CASE("MemoryBlockIO Serialize and Deserialize Test", "[ut][MemoryBlockIO]")
         TestSerializeAndDeserialize(*wio, *rio);
     }
 }
+
+TEST_CASE("MemoryBlockIO Shrink Test", "[ut][MemoryBlockIO]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto block_size = 4096;
+    auto io = std::make_unique<MemoryBlockIO>(block_size, allocator.get());
+
+    std::vector<uint8_t> data(10000, 0xAB);
+    io->Write(data.data(), data.size(), 0);
+    REQUIRE(io->size_ == data.size());
+
+    io->Shrink(5000);
+    REQUIRE(io->size_ == 5000);
+
+    std::vector<uint8_t> read_data(5000);
+    io->Read(5000, 0, read_data.data());
+    REQUIRE(memcmp(read_data.data(), data.data(), 5000) == 0);
+
+    io->Shrink(1000);
+    REQUIRE(io->size_ == 1000);
+
+    io->Shrink(2000);
+    REQUIRE(io->size_ == 1000);
+}
