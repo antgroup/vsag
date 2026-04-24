@@ -139,8 +139,15 @@ p  { margin: 0 0 1em; color: var(--fg-subtle); }
   border: 1px solid var(--border); background: var(--surface-alt);
 }
 .nav-links .gh:hover { color: var(--fg); border-color: var(--border-strong); }
+.nav-links .lang {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 34px; height: 34px; padding: 0 10px; border-radius: 10px;
+  color: var(--fg-subtle); border: 1px solid var(--border);
+  background: var(--surface-alt); font-weight: 600;
+}
+.nav-links .lang:hover { color: var(--fg); border-color: var(--border-strong); }
 @media (max-width: 720px) {
-  .nav-links a:not(.gh) { display: none; }
+  .nav-links a:not(.gh):not(.lang) { display: none; }
 }
 
 /* Hero */
