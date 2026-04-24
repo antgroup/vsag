@@ -20,6 +20,7 @@ Checks:
     - "clang-analyzer-*"
     - "-clang-analyzer-deadcode.DeadStores" # value stored but never read
     - "clang-diagnostic-*"
+    - "-clang-diagnostic-error"
     - "-clang-diagnostic-deprecated-builtins"
     - "modernize-*"
     - "-modernize-use-trailing-return-type"
