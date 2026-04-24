@@ -69,25 +69,37 @@
       // hide the button in that case to avoid sending users to nonexistent URLs.
       if (!info) return true;
 
-      var btn = document.createElement('a');
+      // Use a real <button> so keyboard activation (Enter/Space) and focus
+      // styles match the other icons in mdBook's .right-buttons toolbar.
+      var btn = document.createElement('button');
       btn.id = 'lang-toggle';
-      btn.href = info.otherRoot;
-      btn.setAttribute('role', 'button');
-      // Show the *target* language so users know what clicking does.
+      btn.type = 'button';
+      // Show the *target* language so users know what clicking does. Set
+      // `lang` so screen readers pronounce "中" / "EN" in the right voice.
       btn.textContent = info.other === 'zh' ? '\u4e2d' : 'EN';
+      btn.lang = info.other;
       btn.title = info.other === 'zh' ? '\u5207\u6362\u4e3a\u4e2d\u6587' : 'Switch to English';
       btn.setAttribute('aria-label', btn.title);
 
-      btn.addEventListener('click', function (e) {
-        e.preventDefault();
+      btn.addEventListener('click', function () {
+        // Guard against rapid double-clicks firing concurrent probes.
+        if (btn.getAttribute('aria-busy') === 'true') return;
         var target = buildTargetUrl(info, window.location.pathname);
         var hash = window.location.hash || '';
         btn.setAttribute('aria-busy', 'true');
+        // Bound the HEAD probe so a stalled network does not leave the
+        // toggle stuck in the busy state forever.
+        var controller = (typeof AbortController === 'function') ? new AbortController() : null;
+        var timer = setTimeout(function () { if (controller) controller.abort(); }, 3000);
+        var opts = { method: 'HEAD' };
+        if (controller) opts.signal = controller.signal;
         // Prefer HEAD to check existence without downloading the page.
-        fetch(target, { method: 'HEAD' }).then(function (r) {
+        fetch(target, opts).then(function (r) {
+          clearTimeout(timer);
           window.location.assign(r.ok ? (target + hash) : info.otherRoot);
         }).catch(function () {
-          // Network error / CORS / offline -> fall back to language root.
+          clearTimeout(timer);
+          // Network error / CORS / offline / timeout -> fall back to language root.
           window.location.assign(info.otherRoot);
         });
       });
