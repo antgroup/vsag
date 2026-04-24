@@ -356,12 +356,6 @@ public:
         return this->Remove(std::vector<int64_t>({id}), mode);
     }
 
-    virtual void
-    ShrinkAndRepair(double timeout_ms = std::numeric_limits<double>::max()) {
-        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                            "Index doesn't support ShrinkAndRepair");
-    }
-
     [[nodiscard]] virtual DatasetPtr
     SearchWithRequest(const SearchRequest& request) const {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,

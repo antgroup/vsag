@@ -44,8 +44,6 @@
 
 namespace vsag {
 
-class HGraphShrinkContext;
-
 // HGraph index was introduced since v0.12
 class HGraph : public InnerIndexInterface {
 public:
@@ -54,7 +52,6 @@ public:
                                  const IndexCommonParam& common_param);
 
     friend class HGraphAnalyzer;
-    friend class HGraphShrinkContext;
 
 public:
     HGraph(const HGraphParameterPtr& param, const IndexCommonParam& common_param);
@@ -181,9 +178,6 @@ public:
     Remove(const std::vector<int64_t>& ids, RemoveMode mode = RemoveMode::MARK_REMOVE) override;
 
     void
-    ShrinkAndRepair(double timeout_ms = std::numeric_limits<double>::max()) override;
-
-    void
     Serialize(StreamWriter& writer) const override;
 
     void
@@ -212,20 +206,6 @@ public:
                     const AttributeSet& new_attrs,
                     const AttributeSet& origin_attrs) override;
 
-    bool
-    CheckIdLevel0(InnerIdType id) const {
-        if (id == entry_point_id_) {
-            return false;
-        }
-        for (auto& graph : route_graphs_) {
-            if (graph->CheckIdExists(id)) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-private:
     static JsonType
     map_hgraph_param(const JsonType& hgraph_json);
 
