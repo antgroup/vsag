@@ -28,7 +28,7 @@
 
 using namespace vsag;
 
-TEST_CASE("Test BaseVisitor", "[ft][expression_visitor]") {
+TEST_CASE("Test BaseVisitor", "[ut][expression_visitor]") {
     {
         auto filter_condition_str = "age > 18";
         antlr4::ANTLRInputStream input(filter_condition_str);
@@ -111,7 +111,7 @@ TEST_CASE("Test BaseVisitor", "[ft][expression_visitor]") {
     }
 }
 
-TEST_CASE("Test NumericComparison", "[ft][expression_visitor]") {
+TEST_CASE("Test NumericComparison", "[ut][expression_visitor]") {
     {
         auto filter_condition_str = "age > 18";
         auto expr_ptr = AstParse(filter_condition_str);
@@ -435,7 +435,7 @@ TEST_CASE("Test NumericComparison", "[ft][expression_visitor]") {
     }
 }
 
-TEST_CASE("Test ArithmeticExpression", "[ft][expression_visitor]") {
+TEST_CASE("Test ArithmeticExpression", "[ut][expression_visitor]") {
     {
         auto filter_condition_str = R"((age + 10) = 60)";
         auto expr_ptr = AstParse(filter_condition_str);
@@ -494,7 +494,7 @@ TEST_CASE("Test ArithmeticExpression", "[ft][expression_visitor]") {
     }
 }
 
-TEST_CASE("Test NotExpression", "[ft][expression_visitor]") {
+TEST_CASE("Test NotExpression", "[ut][expression_visitor]") {
     {
         auto filter_condition_str = R"(!(name = "Alice"))";
         auto expr_ptr = AstParse(filter_condition_str);
@@ -513,7 +513,7 @@ TEST_CASE("Test NotExpression", "[ft][expression_visitor]") {
     }
 }
 
-TEST_CASE("Test StringComparison", "[ft][expression_visitor]") {
+TEST_CASE("Test StringComparison", "[ut][expression_visitor]") {
     {
         auto filter_condition_str = R"(name = "Alice")";
         auto expr_ptr = AstParse(filter_condition_str);
@@ -579,7 +579,7 @@ TEST_CASE("Test StringComparison", "[ft][expression_visitor]") {
     }
 }
 
-TEST_CASE("Test InStrListExpression", "[ft][expression_visitor]") {
+TEST_CASE("Test InStrListExpression", "[ut][expression_visitor]") {
     {
         auto filter_condition_str = R"(name IN ["Alice", "Bob"])";
         auto expr_ptr = AstParse(filter_condition_str);
@@ -734,7 +734,7 @@ TEST_CASE("Test InStrListExpression", "[ft][expression_visitor]") {
     }
 }
 
-TEST_CASE("Test LogicalExpression", "[ft][expression_visitor]") {
+TEST_CASE("Test LogicalExpression", "[ut][expression_visitor]") {
     {
         auto filter_condition_str = R"((age >= 18) and (age <= 60))";
         auto expr_ptr = AstParse(filter_condition_str);
@@ -768,7 +768,7 @@ TEST_CASE("Test LogicalExpression", "[ft][expression_visitor]") {
     }
 }
 
-TEST_CASE("Test InIntListExpression", "[ft][expression_visitor]") {
+TEST_CASE("Test InIntListExpression", "[ut][expression_visitor]") {
     {
         auto filter_condition_str = "id IN [1, 2, 3]";
         auto expr_ptr = AstParse(filter_condition_str);
@@ -895,7 +895,7 @@ TEST_CASE("Test InIntListExpression", "[ft][expression_visitor]") {
     }
 }
 
-TEST_CASE("Test LongMultiInExpression", "[ft][expression_visitor]") {
+TEST_CASE("Test LongMultiInExpression", "[ut][expression_visitor]") {
     {
         auto filter_condition_str =
             R"(multi_notin(rta_uniq_id,"1961100458546670265|8669342430913282238|4295511754643557149|3820165547219126739|1615416169623352709|6314578306465646238|8519232450117756233|2756461647811536678|7246372942013239063|6016028506275409733|3202937297212420206|7510237410486928689|2693897507874692550|7942461091316593098|8468109175693762333|2246205382807091008|4762936000914802423|6797061107232090018|8530742052452506732|3327382205450771314|6522909056849751446|2097254881891107942|9081283293213749162|7659202351373227815|2426484522154290531|9028175612421629988|3979294040747128108|7616191334060074064|2216336493100479083|6983229653395630143|7061041066005578122|3196243134178854499|1239316581789112809|4146619685878866397|2993398114247915385|5239079003920071893|7306779578940296486|8664775826449197998|7292236495175168278|3792060204756314668|943879882149209231|67786373045767393|5460974927050884095|3985833378458068290|7260385150729580290|1471584193443402819|1093004338684365583|3888227820969699574|2263550131772636927|4925893694984496472|4053461338322378105|2309747396698563821|6079754561320324176|160623819949859655|2024781313054920143|8988650033226888193|6672705482565606954|3463594972398901639|4011710098241765573|2628278965639395857|7430455255531202418|9127158149800262638|6615696035589714492|6463699161937835373|4524875330387178960|8052583455002209669|7438806969338678071|765272482175117030|3216643116160913287|8937191440708183065|3599927177086139360|4603694906434758431|4839962215257436741|7951576000074314225|5404201438195616115|1933117509111472906|4420843354467922436|6949401081268099700|8286688749939713010|7471024169212191085|5756165102291555444|7855894148486084345|5425421488718376732|4212694001066848701|9207657085406962396|3201372394618115663|9089499071344019177|4485876234743098538|4261325010202841032|8937647154994060117|5363833089632775568|8563220203728265761|8757703765922223628|7720373886526897000|6940990643005730592|1422105493879373245|2371341722325808920|7660148443976918122|6952169319874687609|7406880929185273462|2114067842011407513|189373988687663231|8153479507569108764|3355979313800702697|9171725698747800278|8777056532130596413|3339864690631806628|3727437985819132169|4413544153042575492|7498777981318184046|7355443397257156893|5999546154177100186|3412685935113877458|2571149021240417685|8457673131098490986|5749328167325148894|5341841126750918352|257263441440370798","|"))";
@@ -1086,7 +1086,7 @@ TEST_CASE("Test LongMultiInExpression", "[ft][expression_visitor]") {
     }
 }
 
-TEST_CASE("Test ComplexExpression", "[ft][expression_visitor]") {
+TEST_CASE("Test ComplexExpression", "[ut][expression_visitor]") {
     {
         auto filter_condition_str =
             R"(notin(id,"6475634789599348344|195756431|189279530|216140542|213432363|4510564146827331015|3843306077049549813|217536181|198561015|216460872|198254807|3524173534128122501|215845445|209827459|217559498|169981625|214545359|214544614|192847772|193580054"))";
