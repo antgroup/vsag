@@ -727,6 +727,7 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
 
 std::vector<int64_t>
 HGraph::Add(const DatasetPtr& data, AddMode mode) {
+    std::shared_lock force_remove_rlock(this->force_remove_mutex_);
     std::vector<int64_t> failed_ids;
     auto base_dim = data->GetDim();
     if (data_type_ != DataTypes::DATA_TYPE_SPARSE) {
@@ -867,6 +868,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
         (1 <= params.ef_search) and (params.ef_search <= ef_search_threshold),
         fmt::format("ef_search({}) must in range[1, {}]", params.ef_search, ef_search_threshold));
 
+    std::shared_lock force_remove_rlock(this->force_remove_mutex_);
     std::shared_lock shared_lock(this->global_mutex_);
     // check k
     CHECK_ARGUMENT(k > 0, fmt::format("k({}) must be greater than 0", k));
@@ -1125,6 +1127,7 @@ HGraph::RangeSearch(const DatasetPtr& query,
     CHECK_ARGUMENT(limited_size != 0,
                    fmt::format("limited_size({}) must not be equal to 0", limited_size));
 
+    std::shared_lock force_remove_rlock(this->force_remove_mutex_);
     std::shared_lock shared_lock(this->global_mutex_);
 
     InnerSearchParam search_param;
@@ -1912,46 +1915,168 @@ HGraph::Remove(const std::vector<int64_t>& ids, RemoveMode mode) {
         delete_count_ += delete_count;
         return delete_count;
     }
-    for (const auto& id : ids) {
-        InnerIdType inner_id;
-        {
-            std::shared_lock lock(this->label_lookup_mutex_);
-            inner_id = this->label_table_->GetIdByLabel(id);
+
+    if (mode == RemoveMode::FORCE_REMOVE) {
+        std::unique_lock<std::shared_mutex> wlock(this->force_remove_mutex_);
+        for (const auto& id : ids) {
+            delete_count += this->force_remove_one(id);
         }
-        if (inner_id == this->entry_point_id_) {
-            bool find_new_ep = false;
-            while (not route_graphs_.empty()) {
-                auto& upper_graph = route_graphs_.back();
-                Vector<InnerIdType> neighbors(allocator_);
-                upper_graph->GetNeighbors(this->entry_point_id_, neighbors);
-                for (const auto& nb_id : neighbors) {
-                    if (inner_id == nb_id) {
-                        continue;
-                    }
-                    this->entry_point_id_ = nb_id;
-                    find_new_ep = true;
-                    break;
-                }
-                if (find_new_ep) {
-                    break;
-                }
-                route_graphs_.pop_back();
-            }
+        if (delete_count != 0) {
+            this->shrink_to_fit();
         }
-        {
-            {
-                std::scoped_lock<std::shared_mutex> wlock(this->global_mutex_);
-                for (int level = static_cast<int>(route_graphs_.size()) - 1; level >= 0; --level) {
-                    this->route_graphs_[level]->DeleteNeighborsById(inner_id);
-                }
-                this->bottom_graph_->DeleteNeighborsById(inner_id);
+        return delete_count;
+    }
+
+    throw VsagException(ErrorType::INVALID_ARGUMENT, "RemoveMode not supported");
+}
+
+void
+HGraph::find_new_entry_point() {
+    bool find_new_ep = false;
+    auto inner_id = this->entry_point_id_;
+    while (not route_graphs_.empty()) {
+        auto& upper_graph = route_graphs_.back();
+        Vector<InnerIdType> neighbors(allocator_);
+        upper_graph->GetNeighbors(this->entry_point_id_, neighbors);
+        for (const auto& nb_id : neighbors) {
+            if (inner_id == nb_id) {
+                continue;
             }
-            std::scoped_lock label_lock(this->label_lookup_mutex_);
-            this->label_table_->MarkRemove(id);
-            delete_count++;
+            this->entry_point_id_ = nb_id;
+            find_new_ep = true;
+            break;
+        }
+        if (find_new_ep) {
+            break;
+        }
+        route_graphs_.pop_back();
+    }
+}
+
+void
+HGraph::graph_force_remove_one(const InnerIdType& inner_id,
+                               const FlattenInterfacePtr& flatten,
+                               const GraphInterfacePtr& graph) {
+    Vector<InnerIdType> forward_neighbors(allocator_);
+    graph->GetNeighbors(inner_id, forward_neighbors);
+    Vector<InnerIdType> reverse_neighbors(allocator_);
+    graph->GetIncomingNeighbors(inner_id, reverse_neighbors);
+    if (forward_neighbors.empty() && reverse_neighbors.empty()) {
+        return;
+    }
+
+    UnorderedSet<InnerIdType> affected_nodes(allocator_);
+    auto current_count = this->total_count_.load();
+    for (const auto& n : forward_neighbors) {
+        if (n < current_count) {
+            affected_nodes.insert(n);
         }
     }
-    return delete_count;
+    for (const auto& n : reverse_neighbors) {
+        if (n < current_count) {
+            affected_nodes.insert(n);
+        }
+    }
+
+    auto max_degree = graph->MaximumDegree();
+
+    for (const auto& neighbor : affected_nodes) {
+        LockGuard lock(neighbors_mutex_, neighbor);
+
+        Vector<InnerIdType> neighbors_of_neighbor(allocator_);
+        graph->GetNeighbors(neighbor, neighbors_of_neighbor);
+
+        UnorderedSet<InnerIdType> candidate_set(allocator_);
+        for (const auto& nb : neighbors_of_neighbor) {
+            if (nb != inner_id) {
+                candidate_set.insert(nb);
+            }
+        }
+        for (const auto& nb : forward_neighbors) {
+            if (nb != inner_id && nb != neighbor) {
+                candidate_set.insert(nb);
+            }
+        }
+
+        Vector<InnerIdType> candidate_list(allocator_);
+        auto current_count = this->total_count_.load();
+        for (const auto& candidate : candidate_set) {
+            if (candidate < current_count) {
+                candidate_list.emplace_back(candidate);
+            }
+        }
+
+        select_edges_by_heuristic(
+            candidate_list, neighbor, max_degree, flatten, allocator_, alpha_);
+
+        graph->InsertNeighborsById(neighbor, candidate_list);
+    }
+
+    Vector<InnerIdType> empty_neighbor(allocator_);
+    graph->InsertNeighborsById(inner_id, empty_neighbor);
+}
+
+void
+HGraph::move_id(InnerIdType from, InnerIdType to) {
+    basic_flatten_codes_->Move(from, to);
+    if (high_precise_codes_) {
+        high_precise_codes_->Move(from, to);
+    }
+
+    if (extra_infos_) {
+        extra_infos_->Move(from, to);
+    }
+
+    bottom_graph_->Move(from, to);
+    for (const auto& route_graph : route_graphs_) {
+        route_graph->Move(from, to);
+    }
+
+    label_table_->Move(from, to);
+
+    if (entry_point_id_ == from) {
+        entry_point_id_ = to;
+    }
+}
+
+uint32_t
+HGraph::force_remove_one(int64_t label) {
+    InnerIdType inner_id;
+    {
+        std::shared_lock lock(this->label_lookup_mutex_);
+        inner_id = this->label_table_->GetIdByLabel(label);
+    }
+    if (inner_id == this->entry_point_id_) {
+        this->find_new_entry_point();
+    }
+
+    graph_force_remove_one(inner_id, basic_flatten_codes_, bottom_graph_);
+
+    for (const auto& route_graph : route_graphs_) {
+        graph_force_remove_one(inner_id, basic_flatten_codes_, route_graph);
+    }
+    InnerIdType swap_id = this->total_count_.load() - 1;
+
+    if (swap_id != inner_id) {
+        this->move_id(swap_id, inner_id);
+    }
+    this->total_count_--;
+    return 1;
+}
+
+void
+HGraph::shrink_to_fit() {
+    auto total_count = this->total_count_.load();
+
+    basic_flatten_codes_->ShrinkToFit(total_count);
+    if (high_precise_codes_) {
+        high_precise_codes_->ShrinkToFit(total_count);
+    }
+    bottom_graph_->ShrinkToFit(total_count);
+    for (const auto& route_graph : route_graphs_) {
+        route_graph->ShrinkToFit(total_count);
+    }
+    label_table_->ShrinkToFit(total_count);
 }
 
 void
@@ -2173,6 +2298,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         (1 <= params.ef_search) and (params.ef_search <= ef_search_threshold),
         fmt::format("ef_search({}) must in range[1, {}]", params.ef_search, ef_search_threshold));
 
+    std::shared_lock force_remove_rlock(this->force_remove_mutex_);
     std::shared_lock shared_lock(this->global_mutex_);
     // check k
     CHECK_ARGUMENT(k > 0, fmt::format("k({}) must be greater than 0", k));

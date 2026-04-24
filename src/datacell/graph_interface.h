@@ -22,6 +22,7 @@
 
 #include "duplicate_interface.h"
 #include "graph_interface_parameter.h"
+#include "impl/reverse_edge.h"
 #include "index_common_param.h"
 #include "inner_string_params.h"
 #include "io/io_parameter.h"
@@ -93,10 +94,22 @@ public:
 
     virtual void
     GetIncomingNeighbors(InnerIdType id, Vector<InnerIdType>& neighbors) const {
-        neighbors.clear();
+        if (reverse_edges_) {
+            reverse_edges_->GetIncomingNeighbors(id, neighbors);
+        } else {
+            neighbors.clear();
+        }
     }
 
-public:
+    virtual void
+    Move(InnerIdType from, InnerIdType to) {
+        throw VsagException(ErrorType::INTERNAL_ERROR, "Move not implemented in GraphInterface");
+    }
+
+    virtual void
+    ShrinkToFit(InnerIdType capacity) {
+    }
+
     virtual void
     Serialize(StreamWriter& writer) {
         StreamWriter::WriteObj(writer, this->total_count_);
@@ -166,6 +179,12 @@ public:
     InitIO(const IOParamPtr& io_param) {
     }
 
+protected:
+    void
+    UpdateReverseEdges(InnerIdType id,
+                       const Vector<InnerIdType>& old_neighbors,
+                       const Vector<InnerIdType>& new_neighbors);
+
 public:
     virtual DuplicateTrackerPtr
     CreateDuplicateTracker() {
@@ -222,6 +241,7 @@ public:
 
 protected:
     DuplicateTrackerPtr duplicate_tracker_{nullptr};
+    std::unique_ptr<ReverseEdge> reverse_edges_{nullptr};
 };
 
 }  // namespace vsag
