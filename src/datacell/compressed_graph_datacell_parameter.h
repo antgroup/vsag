@@ -36,6 +36,9 @@ public:
         if (json.Contains(SUPPORT_DUPLICATE)) {
             this->support_duplicate_ = json[SUPPORT_DUPLICATE].GetBool();
         }
+        if (json.Contains(HGRAPH_USE_REVERSE_EDGES_KEY)) {
+            this->use_reverse_edges_ = json[HGRAPH_USE_REVERSE_EDGES_KEY].GetBool();
+        }
     }
 
     JsonType
@@ -44,6 +47,7 @@ public:
         json[GRAPH_PARAM_MAX_DEGREE_KEY].SetInt(this->max_degree_);
         json[GRAPH_STORAGE_TYPE_KEY].SetString(GRAPH_STORAGE_TYPE_VALUE_COMPRESSED);
         json[SUPPORT_DUPLICATE].SetBool(this->support_duplicate_);
+        json[HGRAPH_USE_REVERSE_EDGES_KEY].SetBool(this->use_reverse_edges_);
         return json;
     }
 
@@ -70,6 +74,14 @@ public:
                 "support_duplicate_ mismatch: {} vs {}",
                 support_duplicate_,
                 graph_param->support_duplicate_);
+            return false;
+        }
+        if (use_reverse_edges_ != graph_param->use_reverse_edges_) {
+            logger::error(
+                "CompressedGraphDatacellParameter::CheckCompatibility: "
+                "use_reverse_edges_ mismatch: {} vs {}",
+                use_reverse_edges_,
+                graph_param->use_reverse_edges_);
             return false;
         }
         return true;

@@ -22,6 +22,32 @@
 
 namespace vsag {
 
+void
+GraphInterface::UpdateReverseEdges(InnerIdType id,
+                                   const Vector<InnerIdType>& old_neighbors,
+                                   const Vector<InnerIdType>& new_neighbors) {
+    if (reverse_edges_) {
+        UnorderedSet<InnerIdType> old_set(allocator_);
+        UnorderedSet<InnerIdType> new_set(allocator_);
+        for (const auto& n : old_neighbors) {
+            old_set.insert(n);
+        }
+        for (const auto& n : new_neighbors) {
+            new_set.insert(n);
+        }
+        for (const auto& old_n : old_neighbors) {
+            if (new_set.find(old_n) == new_set.end()) {
+                reverse_edges_->RemoveReverseEdge(id, old_n);
+            }
+        }
+        for (const auto& new_n : new_neighbors) {
+            if (old_set.find(new_n) == old_set.end()) {
+                reverse_edges_->AddReverseEdge(id, new_n);
+            }
+        }
+    }
+}
+
 GraphInterfacePtr
 GraphInterface::MakeInstance(const GraphInterfaceParamPtr& graph_param,
                              const IndexCommonParam& common_param) {

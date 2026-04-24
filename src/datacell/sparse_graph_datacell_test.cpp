@@ -87,3 +87,113 @@ TEST_CASE("SparseGraphDataCell Merge Test", "[ut][SparseGraphDataCell]") {
     auto other = GraphInterface::MakeInstance(graph_param, common_param);
     test.MergeTest(other, count);
 }
+
+TEST_CASE("SparseGraphDataCell Reverse Edges", "[ut][SparseGraphDataCell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto dim = 32;
+    auto max_degree = 32;
+
+    IndexCommonParam common_param;
+    common_param.dim_ = dim;
+    common_param.allocator_ = allocator;
+    auto graph_param = std::make_shared<SparseGraphDatacellParameter>();
+    graph_param->max_degree_ = max_degree;
+    graph_param->use_reverse_edges_ = true;
+
+    auto graph = GraphInterface::MakeInstance(graph_param, common_param);
+    GraphInterfaceTest test(graph);
+    test.ReverseEdgeTest(100);
+}
+
+TEST_CASE("SparseGraphDataCell Move", "[ut][SparseGraphDataCell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto dim = 32;
+    auto max_degree = 32;
+
+    IndexCommonParam common_param;
+    common_param.dim_ = dim;
+    common_param.allocator_ = allocator;
+    auto graph_param = std::make_shared<SparseGraphDatacellParameter>();
+    graph_param->max_degree_ = max_degree;
+    graph_param->use_reverse_edges_ = true;
+
+    auto graph = GraphInterface::MakeInstance(graph_param, common_param);
+    GraphInterfaceTest test(graph);
+    test.MoveTest(100);
+}
+
+TEST_CASE("SparseGraphDataCell Move same id keeps neighbors", "[ut][SparseGraphDataCell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+
+    IndexCommonParam common_param;
+    common_param.dim_ = 32;
+    common_param.allocator_ = allocator;
+    auto graph_param = std::make_shared<SparseGraphDatacellParameter>();
+    graph_param->max_degree_ = 8;
+    graph_param->use_reverse_edges_ = true;
+
+    auto graph = GraphInterface::MakeInstance(graph_param, common_param);
+
+    Vector<InnerIdType> empty(allocator.get());
+    Vector<InnerIdType> neighbors(allocator.get());
+    neighbors.emplace_back(1);
+    neighbors.emplace_back(2);
+
+    graph->InsertNeighborsById(0, neighbors);
+    graph->InsertNeighborsById(1, empty);
+    graph->InsertNeighborsById(2, empty);
+
+    graph->Move(0, 0);
+
+    Vector<InnerIdType> moved_neighbors(allocator.get());
+    graph->GetNeighbors(0, moved_neighbors);
+    REQUIRE(moved_neighbors.size() == 2);
+    REQUIRE(moved_neighbors[0] == 1);
+    REQUIRE(moved_neighbors[1] == 2);
+
+    Vector<InnerIdType> incoming(allocator.get());
+    graph->GetIncomingNeighbors(1, incoming);
+    REQUIRE(incoming.size() == 1);
+    REQUIRE(incoming[0] == 0);
+}
+
+TEST_CASE("SparseGraphDataCell decodes stored neighbors for reverse-edge updates",
+          "[ut][SparseGraphDataCell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+
+    IndexCommonParam common_param;
+    common_param.dim_ = 32;
+    common_param.allocator_ = allocator;
+    auto graph_param = std::make_shared<SparseGraphDatacellParameter>();
+    graph_param->max_degree_ = 8;
+    graph_param->support_delete_ = true;
+    graph_param->remove_flag_bit_ = 4;
+    graph_param->use_reverse_edges_ = true;
+
+    auto graph = GraphInterface::MakeInstance(graph_param, common_param);
+
+    Vector<InnerIdType> empty(allocator.get());
+    Vector<InnerIdType> to_two(allocator.get());
+    Vector<InnerIdType> to_three(allocator.get());
+    to_two.emplace_back(2);
+    to_three.emplace_back(3);
+
+    graph->InsertNeighborsById(2, empty);
+    graph->InsertNeighborsById(3, empty);
+    graph->DeleteNeighborsById(2);
+    graph->InsertNeighborsById(1, to_two);
+
+    Vector<InnerIdType> incoming(allocator.get());
+    graph->GetIncomingNeighbors(2, incoming);
+    REQUIRE(incoming.size() == 1);
+    REQUIRE(incoming[0] == 1);
+
+    graph->InsertNeighborsById(1, to_three);
+
+    graph->GetIncomingNeighbors(2, incoming);
+    REQUIRE(incoming.empty());
+
+    graph->GetIncomingNeighbors(3, incoming);
+    REQUIRE(incoming.size() == 1);
+    REQUIRE(incoming[0] == 1);
+}

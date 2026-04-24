@@ -114,6 +114,12 @@ public:
     virtual void
     DisableForceInMemory(){};
 
+    virtual void
+    Move(InnerIdType from, InnerIdType to) {
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            "Move not implemented in ExtraInfoInterface");
+    }
+
 public:
     InnerIdType total_count_{0};
     InnerIdType max_capacity_{0};
