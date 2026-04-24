@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,6 +14,8 @@
 
 #pragma once
 
+#include <cstdint>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -30,7 +31,8 @@ public:
     GetAvgResult() const;
 
 private:
-    uint64_t count_ = 0;
+    uint64_t count_{0};
     std::vector<float> queue_;
+    mutable std::mutex queue_mutex_;
 };
 }  // namespace vsag
