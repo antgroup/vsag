@@ -5,13 +5,14 @@
 # 用户指南
 
 - [安装](guide/installation.md)
-- [k-近邻搜索](guide/knn_search.md)
 - [创建索引](guide/create_index.md)
+- [k-近邻搜索](guide/knn_search.md)
 - [pyvsag](guide/pyvsag.md)
 
 # 索引
 
 - [总览](indexes/README.md)
+- [索引参数](resources/index_parameters.md)
 - [HGraph](indexes/hgraph.md)
 - [IVF](indexes/ivf.md)
 - [SINDI](indexes/sindi.md)
@@ -27,11 +28,17 @@
 # 高级功能
 
 - [范围搜索](advanced/range_search.md)
-- [优化器](advanced/optimizer.md)
 - [序列化格式](advanced/serialization.md)
 - [内存管理](advanced/memory.md)
 - [图索引增强](advanced/enhance_graph.md)
 - [内存-磁盘混合索引](advanced/hybrid_index.md)
+
+# 性能与调优
+
+- [最佳实践](resources/best_practices.md)
+- [优化器](advanced/optimizer.md)
+- [标准环境性能参考](resources/performance.md)
+- [性能评估工具](resources/eval.md)
 
 # 资源
 
@@ -40,10 +47,4 @@
 - [开源社区](resources/community.md)
 - [关联项目](resources/related_projects.md)
 - [科研论文](resources/research_papers.md)
-- [最佳实践](resources/best_practices.md)
-- [索引参数](resources/index_parameters.md)
-- [标准环境性能参考](resources/performance.md)
-- [性能评估工具](resources/eval.md)
-
------------
-[贡献者列表](misc/contributors.md)
+- [贡献者列表](misc/contributors.md)

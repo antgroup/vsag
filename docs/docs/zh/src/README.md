@@ -17,6 +17,15 @@ VSAG 使用 C++ 编写，并提供：
 - **灵活的过滤与混合搜索**：支持 bitmap 与 callback 两种过滤方式，以及混合 `(data vector, attribute)` 查询；
 - **易于集成**：提供基于 CMake 的集成方式，详见 [README](https://github.com/antgroup/vsag/blob/main/README.md#integrate-with-cmake)。
 
+## 如何阅读本文档
+
+- **用户指南**：如果你是新用户，请从安装、创建索引和搜索开始。
+- **索引**：比较不同索引类型，并查询索引参数。
+- **高级功能**：深入了解搜索、序列化、内存管理和混合索引能力。
+- **性能与调优**：查看最佳实践、`Tune`、性能参考和评估工具。
+- **开发者指南**：了解源码构建、测试和贡献流程。
+- **资源**：查看版本日志、路线图、社区、关联项目、论文和贡献者信息。
+
 ## Contributing
 
 VSAG 是免费和开源的。你可以在 [GitHub](https://github.com/antgroup/vsag) 上获取到源代码，以及提交错误报告和功能请求到 [GitHub问题跟踪器](https://github.com/antgroup/vsag/issues) 上。VSAG 依靠社区来修复错误和增加功能：如果你想做出贡献，请阅读 [贡献指南](https://github.com/antgroup/vsag/blob/main/CONTRIBUTING.md) 并考虑 [创建合并请求](https://github.com/antgroup/vsag/pulls)。

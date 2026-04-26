@@ -5,13 +5,14 @@
 # User Guide
 
 - [Installation](guide/installation.md)
-- [k-Nearest Neighbor Search](guide/knn_search.md)
 - [Creating an Index](guide/create_index.md)
+- [k-Nearest Neighbor Search](guide/knn_search.md)
 - [pyvsag](guide/pyvsag.md)
 
 # Indexes
 
 - [Overview](indexes/README.md)
+- [Index Parameters](resources/index_parameters.md)
 - [HGraph](indexes/hgraph.md)
 - [IVF](indexes/ivf.md)
 - [SINDI](indexes/sindi.md)
@@ -27,21 +28,23 @@
 # Advanced Features
 
 - [Range Search](advanced/range_search.md)
-- [Optimizer (Tune)](advanced/optimizer.md)
 - [Serialization](advanced/serialization.md)
 - [Memory Management](advanced/memory.md)
 - [Graph Enhancement](advanced/enhance_graph.md)
 - [Hybrid Memory-Disk Index](advanced/hybrid_index.md)
 
-# Resources
+# Performance and Tuning
 
-- [Release Notes](resources/release_notes.md)
-- [Community](resources/community.md)
-- [Related Projects](resources/related_projects.md)
 - [Best Practices](resources/best_practices.md)
-- [Index Parameters](resources/index_parameters.md)
+- [Optimizer (Tune)](advanced/optimizer.md)
 - [Benchmarks](resources/performance.md)
 - [Evaluation Tool](resources/eval.md)
 
------------
-[Contributors](misc/contributors.md)
+# Resources
+
+- [Release Notes](resources/release_notes.md)
+- [Roadmap](resources/roadmap_2025.md)
+- [Community](resources/community.md)
+- [Related Projects](resources/related_projects.md)
+- [Research Papers](resources/research_papers.md)
+- [Contributors](misc/contributors.md)

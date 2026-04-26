@@ -17,10 +17,12 @@ Apache 2.0 license.
 
 ## How to Read This Documentation
 
-- **User Guide** — start here if you are new to VSAG.
-- **Developer Guide** — building from source, running tests, contributing.
-- **Advanced Features** — deep dives into specific capabilities.
-- **Resources** — release notes, community links, parameter reference, benchmarks.
+- **User Guide** — start here if you are new to VSAG: install, create an index, and run search.
+- **Indexes** — compare supported index types and look up their parameters.
+- **Advanced Features** — deep dives into specific search, serialization, memory, and hybrid-index capabilities.
+- **Performance and Tuning** — best practices, `Tune`, benchmarks, and evaluation tooling.
+- **Developer Guide** — building from source, running tests, and contributing.
+- **Resources** — release notes, roadmap, community links, related projects, papers, and contributors.
 
 The Chinese version of the same documentation is available under `docs/docs/zh/`.
 
