@@ -21,6 +21,8 @@
 #include <variant>
 #include <vector>
 
+#include "impl/allocator/allocator_wrapper.h"
+#include "typing.h"
 #include "vsag/allocator.h"
 #include "vsag/attribute.h"
 #include "vsag/constants.h"
@@ -33,6 +35,18 @@ struct SparseVector {
                                // (The ids_ will be sorted in ascending order inside the index.
                                // it is recommended to sort them before putting them into VSAG.)
     float* vals_ = nullptr;    // contains vals with size of len_
+    SparseVector() = default;
+    SparseVector(uint32_t len, uint32_t* ids, float* vals) : len_(len), ids_(ids), vals_(vals) {
+    }
+    SparseVector(const Vector<std::pair<uint32_t, float>>& paired_vec, Allocator* allocator) {
+        len_ = static_cast<uint32_t>(paired_vec.size());
+        ids_ = static_cast<uint32_t*>(allocator->Allocate(len_ * sizeof(uint32_t)));
+        vals_ = static_cast<float*>(allocator->Allocate(len_ * sizeof(float)));
+        for (size_t i = 0; i < paired_vec.size(); i++) {
+            ids_[i] = paired_vec[i].first;
+            vals_[i] = paired_vec[i].second;
+        }
+    }
 };
 
 class Dataset;

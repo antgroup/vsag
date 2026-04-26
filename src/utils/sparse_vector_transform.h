@@ -23,9 +23,38 @@
 
 namespace vsag {
 
+enum class SortTarget { ID, VALUE };
+enum class SortOrder { ASCENDING, DESCENDING };
+
+template <SortTarget Target = SortTarget::VALUE, SortOrder Order = SortOrder::DESCENDING>
 void
 sort_sparse_vector(const SparseVector& sparse_vector,
-                   Vector<std::pair<uint32_t, float>>& sorted_query);
+                   Vector<std::pair<uint32_t, float>>& sorted_query) {
+    sorted_query.clear();
+    sorted_query.reserve(sparse_vector.len_);
+
+    for (auto i = 0; i < sparse_vector.len_; i++) {
+        sorted_query.emplace_back(sparse_vector.ids_[i], sparse_vector.vals_[i]);
+    }
+
+    std::sort(sorted_query.begin(),
+              sorted_query.end(),
+              [](const std::pair<uint32_t, float>& a, const std::pair<uint32_t, float>& b) {
+                  auto get_key = [](const std::pair<uint32_t, float>& p) {
+                      if constexpr (Target == SortTarget::ID) {
+                          return p.first;
+                      } else {
+                          return p.second;
+                      }
+                  };
+
+                  if constexpr (Order == SortOrder::ASCENDING) {
+                      return get_key(a) < get_key(b);
+                  } else {
+                      return get_key(a) > get_key(b);
+                  }
+              });
+}
 
 /**
  * check whether sv1 is a subset of sv2

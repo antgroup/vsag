@@ -2144,7 +2144,7 @@ TestIndex::TestRecoverRemoveIndex(const IndexPtr& index,
                 }
             }
         }
-        float recall_removed = ((float)correct) / (base_num / 2);
+        float recall_removed = ((float)correct) / ((float)base_num / 2);
         REQUIRE(recall_removed >= 0.90);
 
         // [step 3] add <original data> into index again for recovery

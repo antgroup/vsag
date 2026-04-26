@@ -15,11 +15,15 @@
 
 #include "sindi.h"
 
+#include <cmath>
+
 #include "impl/heap/standard_heap.h"
 #include "index_feature_list.h"
 #include "storage/serialization.h"
+#include "utils/sparse_vector_transform.h"
 #include "utils/util_functions.h"
 #include "vsag/allocator.h"
+#include "vsag/dataset.h"
 #include "vsag_exception.h"
 
 namespace vsag {
@@ -70,12 +74,8 @@ SINDI::Add(const DatasetPtr& base, AddMode mode) {
             const auto& vec = sparse_vectors[i];
             for (int j = 0; j < vec.len_; ++j) {
                 float val = vec.vals_[j];
-                if (val < min_val) {
-                    min_val = val;
-                }
-                if (val > max_val) {
-                    max_val = val;
-                }
+                min_val = std::min(min_val, val);
+                max_val = std::max(max_val, val);
             }
         }
         quantization_params_->min_val = min_val;
@@ -178,10 +178,15 @@ SINDI::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) {
         index->GetSparseVectorByInnerId(inner_id, &old_sv, this->allocator_);
 
         const auto& new_sv = *new_base->GetSparseVectors();
+        Vector<std::pair<uint32_t, float>> sorted_query(this->allocator_);
+        sort_sparse_vector<SortTarget::ID, SortOrder::ASCENDING>(new_sv, sorted_query);
+        SparseVector sorted_new_sv{sorted_query, this->allocator_};
         bool ret = is_subset_of_sparse_vector(old_sv, new_sv);
 
         this->allocator_->Deallocate(old_sv.vals_);
         this->allocator_->Deallocate(old_sv.ids_);
+        this->allocator_->Deallocate(sorted_new_sv.vals_);
+        this->allocator_->Deallocate(sorted_new_sv.ids_);
         return ret;
     };
 
@@ -293,8 +298,10 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
         float cur_heap_top = std::numeric_limits<float>::max();
         auto candidate_size = heap.size();
         auto high_precise_heap = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
-        auto [sorted_ids, sorted_vals] =
-            rerank_flat_index_->sort_sparse_vector(computer->raw_query_);
+        // raw_query_ should be sorted by id already, so we can directly use it without sorting again
+        const auto [len, raw_ids, raw_vals] = computer->raw_query_;
+        Vector<uint32_t> sorted_ids(raw_ids, raw_ids + len, allocator_);
+        Vector<float> sorted_vals(raw_vals, raw_vals + len, allocator_);
         for (auto i = 0; i < candidate_size; i++) {
             auto inner_id = heap.top().second;
             auto high_precise_distance = rerank_flat_index_->CalDistanceByIdUnsafe(

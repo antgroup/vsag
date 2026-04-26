@@ -110,6 +110,7 @@ main(int argc, char** argv) {
         query_vector.ids_[d] = u_id;
         query_vector.vals_[d] = distrib_real(rng);
     }
+    // NOTE: it is important that query vector should be sorted by id ascendingly, otherwise the search result is incorrect.
     std::sort(query_vector.ids_, query_vector.ids_ + query_vector.len_);
 
     auto query = vsag::Dataset::Make();
