@@ -16,6 +16,7 @@
 #include "sindi.h"
 
 #include <cmath>
+#include <memory>
 
 #include "impl/heap/standard_heap.h"
 #include "index_feature_list.h"
@@ -168,7 +169,21 @@ SINDI::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) {
     // Note:
     // 1. we only check whether the old vector is a subset of the new vector
     // 2. we do not actually update the vector
-    auto check_and_cleanup = [this, id, &new_base](InnerIndexInterface* index) -> bool {
+    const auto& new_sv = *new_base->GetSparseVectors();
+    Vector<std::pair<uint32_t, float>> sorted_query(this->allocator_);
+    sort_sparse_vector<SortTarget::ID, SortOrder::ASCENDING>(new_sv, sorted_query);
+    SparseVector* sorted_new_sv = new SparseVector{sorted_query, this->allocator_};
+
+    auto defer = std::unique_ptr<SparseVector, std::function<void(SparseVector*)>>(
+        sorted_new_sv, [this](SparseVector* sv) {
+            if (sv != nullptr) {
+                this->allocator_->Deallocate(sv->vals_);
+                this->allocator_->Deallocate(sv->ids_);
+                delete sv;
+            }
+        });
+
+    auto check_and_cleanup = [this, id, &sorted_new_sv](InnerIndexInterface* index) -> bool {
         SparseVector old_sv;
         uint32_t inner_id;
         {
@@ -176,17 +191,10 @@ SINDI::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) {
             inner_id = this->label_table_->GetIdByLabel(id);
         }
         index->GetSparseVectorByInnerId(inner_id, &old_sv, this->allocator_);
-
-        const auto& new_sv = *new_base->GetSparseVectors();
-        Vector<std::pair<uint32_t, float>> sorted_query(this->allocator_);
-        sort_sparse_vector<SortTarget::ID, SortOrder::ASCENDING>(new_sv, sorted_query);
-        SparseVector sorted_new_sv{sorted_query, this->allocator_};
-        bool ret = is_subset_of_sparse_vector(old_sv, new_sv);
+        bool ret = is_subset_of_sparse_vector(old_sv, *sorted_new_sv);
 
         this->allocator_->Deallocate(old_sv.vals_);
         this->allocator_->Deallocate(old_sv.ids_);
-        this->allocator_->Deallocate(sorted_new_sv.vals_);
-        this->allocator_->Deallocate(sorted_new_sv.ids_);
         return ret;
     };
 
