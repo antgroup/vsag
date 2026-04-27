@@ -16,10 +16,12 @@ AnalyzeIndexBySearch(const SearchRequest& request);
 
 - **输入**：`SearchRequest`（查询数据集 + `topk` + 搜索参数 JSON）。
 - **输出**：JSON 字符串，包含基于查询的动态指标。
-- **支持的索引类型**：当前支持 `HGraph`、`IVF`、`Pyramid`。其他索引会抛出
-  `std::runtime_error("Index not support analyze index by search")`。
+- **支持的索引类型**：当前支持 `HGraph` 与 `IVF`。`Pyramid` 仅通过 `GetStats()` 提供静态分析，
+  尚未 override `AnalyzeIndexBySearch`。未实现该接口的索引在调用时会抛出异常。
 
 该接口与 `Index::GetStats()` 互为补充：后者无需查询数据，只输出索引的静态结构指标。
+对于基于图的索引，度分布、入口点质量、子索引召回率以及低召回热点节点等图健康度信息，
+通过 `GetStats()` 而非 `AnalyzeIndexBySearch` 输出。
 
 ### `GetStats()` 输出的静态指标
 
@@ -28,7 +30,7 @@ AnalyzeIndexBySearch(const SearchRequest& request);
 | `total_count` | 索引中向量总数 |
 | `deleted_count` | 被标记为删除的向量数 |
 | `connect_components` | 邻近图中的连通分量数 |
-| `duplicate_rate` | 数据集中重复向量比例 |
+| `duplicate_ratio` | 数据集中重复向量比例 |
 | `avg_distance_base` | 基础数据集采样向量的平均距离 |
 | `recall_base` | 基础数据集采样向量的自召回率（健康度自检） |
 | `proximity_recall_neighbor` | 邻居列表相对真实最近邻的召回率 |
@@ -37,16 +39,25 @@ AnalyzeIndexBySearch(const SearchRequest& request);
 
 ### `AnalyzeIndexBySearch` 输出的动态指标
 
+HGraph 输出的通用查询指标（**IVF 当前不输出** 以下召回 / 距离 / 时延字段，详见下方说明）：
+
 | 指标 | 含义 |
 | --- | --- |
 | `recall_query` | 用户查询集相对真实最近邻的召回率 |
 | `avg_distance_query` | 查询向量与检索结果之间的平均距离 |
 | `time_cost_query` | 平均单次查询耗时（毫秒） |
-| `quantization_bias_ratio` | 搜索阶段观察到的量化偏差 |
-| `quantization_inversion_count_rate` | 搜索阶段量化引起的距离顺序倒置率 |
 
-对于基于图的索引（HGraph、Pyramid），分析器会额外检查度分布、入口点质量、子索引召回率以及
-低召回热点节点等信息，并在适用情况下通过 JSON 输出。
+量化相关字段在不同索引下命名不一致：
+
+| 索引 | 字段 | 含义 |
+| --- | --- | --- |
+| `HGraph` | `quantization_bias_ratio_query` | 搜索阶段观察到的量化偏差 |
+| `HGraph` | `quantization_inversion_count_rate_query` | 搜索阶段量化引起的距离顺序倒置率 |
+| `IVF` | `quantization_bias_ratio` | 搜索阶段观察到的量化偏差（仅在 `use_reorder_` 启用时输出） |
+| `IVF` | `quantization_inversion_count_rate` | 搜索阶段量化引起的距离顺序倒置率（仅在 `use_reorder_` 启用时输出） |
+
+如需度分布、入口点分析或子索引质量分布等图健康度信息，请查看 `GetStats()` 的 JSON 输出——
+`AnalyzeIndexBySearch` 仅关注查询驱动的动态信号。
 
 ## `analyze_index` 工具
 
@@ -108,7 +119,7 @@ cmake --build build-release -j
 - **召回率回归排查**：根据指标定位问题来源——是量化质量（`quantization_*`）、图结构
   （`connect_components`、`proximity_recall_neighbor`），还是查询端参数
   （对比 `recall_query` 与 `recall_base`）。
-- **数据健康度体检**：发现重复数据（`duplicate_rate`）、断连分量或过多删除等情况。
+- **数据健康度体检**：发现重复数据（`duplicate_ratio`）、断连分量或过多删除等情况。
 - **参数调优**：使用不同的 `search_parameter` 反复运行 `AnalyzeIndexBySearch`，
   在 `recall_query` 与 `time_cost_query` 之间选择合适的工作点，无需重建索引。
 - **假设性实验**：通过 `--build_parameter` 在加载时覆盖原始构建参数，对未在文件中嵌入参数的索引

@@ -17,11 +17,14 @@ AnalyzeIndexBySearch(const SearchRequest& request);
 
 - **Input**: a `SearchRequest` (query dataset + `topk` + search parameter JSON).
 - **Output**: a JSON-formatted string containing dynamic, query-driven metrics.
-- **Supported indexes**: currently `HGraph`, `IVF`, and `Pyramid`. Other indexes throw
-  `std::runtime_error("Index not support analyze index by search")`.
+- **Supported indexes**: currently `HGraph` and `IVF`. `Pyramid` only supports static analysis
+  through `GetStats()` — it does not yet override `AnalyzeIndexBySearch`. Indexes that do not
+  implement this API will throw an exception when called.
 
 It is complementary to `Index::GetStats()`, which reports static structural properties of the
-index without needing query data.
+index without needing query data. For graph-based indexes, additional graph-health details such
+as degree distribution, entry-point quality, sub-index recall and low-recall hot-spots are
+exposed through `GetStats()` rather than through `AnalyzeIndexBySearch`.
 
 ### Static metrics from `GetStats()`
 
@@ -30,7 +33,7 @@ index without needing query data.
 | `total_count` | Total number of vectors in the index |
 | `deleted_count` | Vectors marked for deletion |
 | `connect_components` | Connected components in the proximity graph |
-| `duplicate_rate` | Proportion of duplicate vectors in the dataset |
+| `duplicate_ratio` | Proportion of duplicate vectors in the dataset |
 | `avg_distance_base` | Average pairwise distance on a sample of base vectors |
 | `recall_base` | Self-recall on a sample of base vectors (sanity check) |
 | `proximity_recall_neighbor` | Recall of neighbor lists vs. the true nearest neighbors |
@@ -39,17 +42,27 @@ index without needing query data.
 
 ### Dynamic metrics from `AnalyzeIndexBySearch`
 
+Common query-driven metrics produced by HGraph (IVF currently does **not** emit these recall /
+distance / latency fields — see below):
+
 | Metric | Meaning |
 | --- | --- |
 | `recall_query` | Recall on the supplied query set against true nearest neighbors |
 | `avg_distance_query` | Average distance between query vectors and retrieved neighbors |
 | `time_cost_query` | Average per-query latency (milliseconds) |
-| `quantization_bias_ratio` | Quantization bias observed during search |
-| `quantization_inversion_count_rate` | Quantization-induced ordering errors during search |
 
-For graph-based indexes (HGraph, Pyramid) the analyzer additionally inspects degree distribution,
-entry-point quality, sub-index recall, and low-recall hot-spots — these are surfaced through the
-JSON output where applicable.
+Quantization-related fields differ by index type — they are not unified across implementations:
+
+| Index | Field | Meaning |
+| --- | --- | --- |
+| `HGraph` | `quantization_bias_ratio_query` | Quantization bias observed during search |
+| `HGraph` | `quantization_inversion_count_rate_query` | Quantization-induced ordering errors during search |
+| `IVF` | `quantization_bias_ratio` | Quantization bias observed during search (only when `use_reorder_` is enabled) |
+| `IVF` | `quantization_inversion_count_rate` | Quantization-induced ordering errors during search (only when `use_reorder_` is enabled) |
+
+If you also need degree distribution, entry-point analysis or sub-index quality breakdown, look
+in the `GetStats()` JSON instead — `AnalyzeIndexBySearch` focuses on dynamic, query-driven
+signals.
 
 ## The `analyze_index` Tool
 
@@ -113,7 +126,7 @@ In addition to the static section, prints a `Search Analyze: { ... }` JSON block
 - **Recall regression triage**: confirm whether a drop is caused by quantization
   (`quantization_*` metrics), graph structure (`connect_components`,
   `proximity_recall_neighbor`), or query-side parameters (`recall_query` vs. `recall_base`).
-- **Capacity / health checks**: detect duplicated data (`duplicate_rate`), disconnected
+- **Capacity / health checks**: detect duplicated data (`duplicate_ratio`), disconnected
   components, or excessive deletions.
 - **Parameter tuning**: re-run `AnalyzeIndexBySearch` with different `search_parameter` values to
   pick an operating point that balances `recall_query` and `time_cost_query` — without rebuilding
