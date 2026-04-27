@@ -15,8 +15,11 @@
 
 #include "io_parameter.h"
 
+#include <mutex>
+
 #include "async_io_parameter.h"
 #include "buffer_io_parameter.h"
+#include "impl/logger/logger.h"
 #include "inner_string_params.h"
 #include "memory_block_io_parameter.h"
 #include "memory_io_parameter.h"
@@ -24,6 +27,10 @@
 #include "reader_io_parameter.h"
 
 namespace vsag {
+
+namespace {
+std::once_flag async_io_fallback_warn_once;
+}  // namespace
 
 IOParamPtr
 IOParameter::GetIOParameterByJson(const JsonType& json) {
@@ -40,7 +47,14 @@ IOParameter::GetIOParameterByJson(const JsonType& json) {
             io_ptr = std::make_shared<BufferIOParameter>();
             io_ptr->FromJson(json);
         } else if (type_name == IO_TYPE_VALUE_ASYNC_IO) {
+#if HAVE_LIBAIO
             io_ptr = std::make_shared<AsyncIOParameter>();
+#else
+            std::call_once(async_io_fallback_warn_once, []() {
+                logger::warn("libaio is unavailable, async_io is falling back to buffer_io");
+            });
+            io_ptr = std::make_shared<BufferIOParameter>();
+#endif
             io_ptr->FromJson(json);
         } else if (type_name == IO_TYPE_VALUE_MMAP_IO) {
             io_ptr = std::make_shared<MMapIOParameter>();
