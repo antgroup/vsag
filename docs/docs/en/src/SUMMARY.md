@@ -39,6 +39,7 @@
 - [Optimizer (Tune)](advanced/optimizer.md)
 - [Benchmarks](resources/performance.md)
 - [Evaluation Tool](resources/eval.md)
+- [Index Analysis Tool](resources/analyze_index.md)
 
 # Resources
 
