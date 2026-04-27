@@ -31,8 +31,8 @@ ScalarQuantizer<metric, bit>::ScalarQuantizer(int dim, Allocator* allocator)
     this->code_size_ = align_up(bit_count, 8) / 8;
     this->query_code_size_ = this->dim_ * sizeof(float);
     this->metric_ = metric;
-    lower_bound_.resize(dim, std::numeric_limits<DataType>::max());
-    diff_.resize(dim, std::numeric_limits<DataType>::lowest());
+    lower_bound_.resize(dim, std::numeric_limits<float>::max());
+    diff_.resize(dim, std::numeric_limits<float>::lowest());
 }
 
 template <MetricType metric, int bit>
@@ -49,7 +49,7 @@ ScalarQuantizer<metric, bit>::ScalarQuantizer(const QuantizerParamPtr& param,
 
 template <MetricType metric, int bit>
 bool
-ScalarQuantizer<metric, bit>::TrainImpl(const DataType* data, uint64_t count) {
+ScalarQuantizer<metric, bit>::TrainImpl(const float* data, uint64_t count) {
     if (data == nullptr) {
         return false;
     }
@@ -83,10 +83,10 @@ fill_codes(uint8_t* codes, uint8_t value, uint8_t value_bit_size, uint64_t index
 
 template <MetricType metric, int bit>
 bool
-ScalarQuantizer<metric, bit>::EncodeOneImpl(const DataType* data, uint8_t* codes) const {
+ScalarQuantizer<metric, bit>::EncodeOneImpl(const float* data, uint8_t* codes) const {
     float delta = 0;
     uint8_t scaled = 0;
-    const DataType* cur = data;
+    const float* cur = data;
     Vector<float> tmp(this->allocator_);
     if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
         tmp.resize(this->dim_);
@@ -114,7 +114,7 @@ ScalarQuantizer<metric, bit>::EncodeOneImpl(const DataType* data, uint8_t* codes
 
 template <MetricType metric, int bit>
 bool
-ScalarQuantizer<metric, bit>::DecodeOneImpl(const uint8_t* codes, DataType* data) {
+ScalarQuantizer<metric, bit>::DecodeOneImpl(const uint8_t* codes, float* data) {
     for (uint64_t d = 0; d < this->dim_; d++) {
         auto idx = (d * BIT_PER_DIM) / 8;
         auto offset = (d * BIT_PER_DIM) % 8;
@@ -154,7 +154,7 @@ ScalarQuantizer<metric, bit>::ComputeImpl(const uint8_t* codes1, const uint8_t* 
 
 template <MetricType metric, int bit>
 void
-ScalarQuantizer<metric, bit>::ProcessQueryImpl(const DataType* query,
+ScalarQuantizer<metric, bit>::ProcessQueryImpl(const float* query,
                                                Computer<ScalarQuantizer>& computer) const {
     try {
         if (computer.buf_ == nullptr) {

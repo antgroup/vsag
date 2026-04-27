@@ -48,14 +48,14 @@ public:
     }
 
     bool
-    Decode(const uint8_t* codes, DataType* vector) override {
+    Decode(const uint8_t* codes, float* vector) override {
         // TODO(inabao): Implement the decode function
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                             "Decode function is not implemented for SparseVectorDataCell");
     }
 
     bool
-    Encode(const DataType* vector, uint8_t* codes) override {
+    Encode(const float* vector, uint8_t* codes) override {
         // TODO(inabao): Implement the decode function
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                             "Encode function is not implemented for SparseVectorDataCell");

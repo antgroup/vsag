@@ -26,8 +26,6 @@
 
 namespace vsag {
 
-using DataType = float;
-
 /**
  * @class Quantizer
  * @brief This class is used for quantization and encoding/decoding of data.
@@ -36,7 +34,7 @@ template <typename QuantT>
 class Quantizer {
 public:
     explicit Quantizer<QuantT>(int dim, Allocator* allocator)
-        : dim_(dim), code_size_(dim * sizeof(DataType)), allocator_(allocator){};
+        : dim_(dim), code_size_(dim * sizeof(float)), allocator_(allocator){};
 
     virtual ~Quantizer() = default;
 
@@ -48,7 +46,7 @@ public:
      * @return True if training was successful; False otherwise.
      */
     bool
-    Train(const DataType* data, uint64_t count) {
+    Train(const float* data, uint64_t count) {
         if (this->is_trained_) {
             return true;
         }
@@ -63,7 +61,7 @@ public:
      * @return True if training was successful; False otherwise.
      */
     bool
-    ReTrain(const DataType* data, uint64_t count) {
+    ReTrain(const float* data, uint64_t count) {
         this->is_trained_ = false;
         return cast().TrainImpl(data, count);
     }
@@ -76,7 +74,7 @@ public:
      * @return True if encoding was successful; False otherwise.
      */
     bool
-    EncodeOne(const DataType* data, uint8_t* codes) {
+    EncodeOne(const float* data, uint8_t* codes) {
         return cast().EncodeOneImpl(data, codes);
     }
 
@@ -89,7 +87,7 @@ public:
      * @return True if encoding was successful; False otherwise.
      */
     bool
-    EncodeBatch(const DataType* data, uint8_t* codes, uint64_t count) {
+    EncodeBatch(const float* data, uint8_t* codes, uint64_t count) {
         return cast().EncodeBatchImpl(data, codes, count);
     }
 
@@ -98,7 +96,7 @@ public:
      * Subclasses can override for optimized batch encoding.
      */
     bool
-    EncodeBatchImpl(const DataType* data, uint8_t* codes, uint64_t count) {
+    EncodeBatchImpl(const float* data, uint8_t* codes, uint64_t count) {
         for (uint64_t i = 0; i < count; ++i) {
             if (!cast().EncodeOneImpl(data + i * dim_, codes + i * code_size_)) {
                 return false;
@@ -115,7 +113,7 @@ public:
      * @return True if decoding was successful; False otherwise.
      */
     bool
-    DecodeOne(const uint8_t* codes, DataType* data) {
+    DecodeOne(const uint8_t* codes, float* data) {
         return cast().DecodeOneImpl(codes, data);
     }
 
@@ -128,7 +126,7 @@ public:
      * @return True if decoding was successful; False otherwise.
      */
     bool
-    DecodeBatch(const uint8_t* codes, DataType* data, uint64_t count) {
+    DecodeBatch(const uint8_t* codes, float* data, uint64_t count) {
         return cast().DecodeBatchImpl(codes, data, count);
     }
 
@@ -137,7 +135,7 @@ public:
      * Subclasses can override for optimized batch decoding.
      */
     bool
-    DecodeBatchImpl(const uint8_t* codes, DataType* data, uint64_t count) {
+    DecodeBatchImpl(const uint8_t* codes, float* data, uint64_t count) {
         for (uint64_t i = 0; i < count; ++i) {
             if (!cast().DecodeOneImpl(codes + i * code_size_, data + i * dim_)) {
                 return false;
@@ -183,7 +181,7 @@ public:
     }
 
     inline void
-    ProcessQuery(const DataType* query, Computer<QuantT>& computer) const {
+    ProcessQuery(const float* query, Computer<QuantT>& computer) const {
         return cast().ProcessQueryImpl(query, computer);
     }
 

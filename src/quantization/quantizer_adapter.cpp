@@ -45,17 +45,17 @@ QuantizerAdapter<QuantT, DataT>::QuantizerAdapter(const QuantizerParamPtr& param
 
 template <typename QuantT, typename DataT>
 bool
-QuantizerAdapter<QuantT, DataT>::TrainImpl(const DataType* data, uint64_t count) {
+QuantizerAdapter<QuantT, DataT>::TrainImpl(const float* data, uint64_t count) {
     if constexpr (std::is_same_v<DataT, int8_t>) {
         const auto* data_int8 = reinterpret_cast<const int8_t*>(data);
-        Vector<DataType> vec(this->dim_ * count, this->allocator_);
+        Vector<float> vec(this->dim_ * count, this->allocator_);
         for (int64_t i = 0; i < this->dim_ * count; ++i) {
-            vec[i] = static_cast<DataType>(data_int8[i]);
+            vec[i] = static_cast<float>(data_int8[i]);
         }
         return this->inner_quantizer_->TrainImpl(vec.data(), count);
     } else if constexpr (std::is_same_v<DataT, uint16_t>) {
         const auto* data_fp16 = reinterpret_cast<const uint16_t*>(data);
-        Vector<DataType> vec(this->dim_ * count, this->allocator_);
+        Vector<float> vec(this->dim_ * count, this->allocator_);
         for (int64_t i = 0; i < this->dim_ * count; ++i) {
             if (data_type_ == DataTypes::DATA_TYPE_FP16) {
                 vec[i] = FP16ToFloat(data_fp16[i]);
@@ -73,19 +73,19 @@ QuantizerAdapter<QuantT, DataT>::TrainImpl(const DataType* data, uint64_t count)
 
 template <typename QuantT, typename DataT>
 bool
-QuantizerAdapter<QuantT, DataT>::EncodeOneImpl(const DataType* data, uint8_t* codes) {
+QuantizerAdapter<QuantT, DataT>::EncodeOneImpl(const float* data, uint8_t* codes) {
     static_assert(std::is_same_v<DataT, int8_t> || std::is_same_v<DataT, uint16_t>,
                   "QuantizerAdapter::EncodeOneImpl only supports int8_t and uint16_t data types");
     if constexpr (std::is_same_v<DataT, int8_t>) {
         const auto* data_int8 = reinterpret_cast<const int8_t*>(data);
-        Vector<DataType> vec(this->dim_, this->allocator_);
+        Vector<float> vec(this->dim_, this->allocator_);
         for (int64_t i = 0; i < this->dim_; i++) {
-            vec[i] = static_cast<DataType>(data_int8[i]);
+            vec[i] = static_cast<float>(data_int8[i]);
         }
         return this->inner_quantizer_->EncodeOneImpl(vec.data(), codes);
     } else if constexpr (std::is_same_v<DataT, uint16_t>) {
         const auto* data_fp16 = reinterpret_cast<const uint16_t*>(data);
-        Vector<DataType> vec(this->dim_, this->allocator_);
+        Vector<float> vec(this->dim_, this->allocator_);
         for (int64_t i = 0; i < this->dim_; i++) {
             if (data_type_ == DataTypes::DATA_TYPE_FP16) {
                 vec[i] = FP16ToFloat(data_fp16[i]);
@@ -99,21 +99,21 @@ QuantizerAdapter<QuantT, DataT>::EncodeOneImpl(const DataType* data, uint8_t* co
 
 template <typename QuantT, typename DataT>
 bool
-QuantizerAdapter<QuantT, DataT>::EncodeBatchImpl(const DataType* data,
+QuantizerAdapter<QuantT, DataT>::EncodeBatchImpl(const float* data,
                                                  uint8_t* codes,
                                                  uint64_t count) {
     static_assert(std::is_same_v<DataT, int8_t> || std::is_same_v<DataT, uint16_t>,
                   "QuantizerAdapter::EncodeBatchImpl only supports int8_t and uint16_t data types");
     if constexpr (std::is_same_v<DataT, int8_t>) {
         const auto* data_int8 = reinterpret_cast<const int8_t*>(data);
-        Vector<DataType> vec(this->dim_ * count, this->allocator_);
+        Vector<float> vec(this->dim_ * count, this->allocator_);
         for (int64_t i = 0; i < this->dim_ * count; ++i) {
-            vec[i] = static_cast<DataType>(data_int8[i]);
+            vec[i] = static_cast<float>(data_int8[i]);
         }
         return this->inner_quantizer_->EncodeBatchImpl(vec.data(), codes, count);
     } else if constexpr (std::is_same_v<DataT, uint16_t>) {
         const auto* data_fp16 = reinterpret_cast<const uint16_t*>(data);
-        Vector<DataType> vec(this->dim_ * count, this->allocator_);
+        Vector<float> vec(this->dim_ * count, this->allocator_);
         for (int64_t i = 0; i < this->dim_ * count; ++i) {
             if (data_type_ == DataTypes::DATA_TYPE_FP16) {
                 vec[i] = FP16ToFloat(data_fp16[i]);
@@ -127,11 +127,11 @@ QuantizerAdapter<QuantT, DataT>::EncodeBatchImpl(const DataType* data,
 
 template <typename QuantT, typename DataT>
 bool
-QuantizerAdapter<QuantT, DataT>::DecodeOneImpl(const uint8_t* codes, DataType* data) {
+QuantizerAdapter<QuantT, DataT>::DecodeOneImpl(const uint8_t* codes, float* data) {
     static_assert(std::is_same_v<DataT, int8_t> || std::is_same_v<DataT, uint16_t>,
                   "QuantizerAdapter::DecodeOneImpl only supports int8_t and uint16_t data types");
     if constexpr (std::is_same_v<DataT, int8_t>) {
-        Vector<DataType> vec(this->dim_, this->allocator_);
+        Vector<float> vec(this->dim_, this->allocator_);
         if (!this->inner_quantizer_->DecodeOneImpl(codes, vec.data())) {
             return false;
         }
@@ -140,7 +140,7 @@ QuantizerAdapter<QuantT, DataT>::DecodeOneImpl(const uint8_t* codes, DataType* d
         }
         return true;
     } else if constexpr (std::is_same_v<DataT, uint16_t>) {
-        Vector<DataType> vec(this->dim_, this->allocator_);
+        Vector<float> vec(this->dim_, this->allocator_);
         if (!this->inner_quantizer_->DecodeOneImpl(codes, vec.data())) {
             return false;
         }
@@ -159,12 +159,12 @@ QuantizerAdapter<QuantT, DataT>::DecodeOneImpl(const uint8_t* codes, DataType* d
 template <typename QuantT, typename DataT>
 bool
 QuantizerAdapter<QuantT, DataT>::DecodeBatchImpl(const uint8_t* codes,
-                                                 DataType* data,
+                                                 float* data,
                                                  uint64_t count) {
     static_assert(std::is_same_v<DataT, int8_t> || std::is_same_v<DataT, uint16_t>,
                   "QuantizerAdapter::DecodeBatchImpl only supports int8_t and uint16_t data types");
     if constexpr (std::is_same_v<DataT, int8_t>) {
-        Vector<DataType> vec(this->dim_ * count, this->allocator_);
+        Vector<float> vec(this->dim_ * count, this->allocator_);
         if (!this->inner_quantizer_->DecodeBatchImpl(codes, vec.data(), count)) {
             return false;
         }
@@ -173,7 +173,7 @@ QuantizerAdapter<QuantT, DataT>::DecodeBatchImpl(const uint8_t* codes,
         }
         return true;
     } else if constexpr (std::is_same_v<DataT, uint16_t>) {
-        Vector<DataType> vec(this->dim_ * count, this->allocator_);
+        Vector<float> vec(this->dim_ * count, this->allocator_);
         if (!this->inner_quantizer_->DecodeBatchImpl(codes, vec.data(), count)) {
             return false;
         }
@@ -209,21 +209,21 @@ QuantizerAdapter<QuantT, DataT>::DeserializeImpl(StreamReader& reader) {
 template <typename QuantT, typename DataT>
 void
 QuantizerAdapter<QuantT, DataT>::ProcessQueryImpl(
-    const DataType* query, Computer<QuantizerAdapter<QuantT, DataT>>& computer) const {
+    const float* query, Computer<QuantizerAdapter<QuantT, DataT>>& computer) const {
     static_assert(
         std::is_same_v<DataT, int8_t> || std::is_same_v<DataT, uint16_t>,
         "QuantizerAdapter::ProcessQueryImpl only supports int8_t and uint16_t data types");
     auto& inner_computer = reinterpret_cast<Computer<QuantT>&>(computer);
     if constexpr (std::is_same_v<DataT, int8_t>) {
         const auto* query_int8 = reinterpret_cast<const int8_t*>(query);
-        Vector<DataType> vec(this->dim_, this->allocator_);
+        Vector<float> vec(this->dim_, this->allocator_);
         for (int64_t i = 0; i < this->dim_; i++) {
-            vec[i] = static_cast<DataType>(query_int8[i]);
+            vec[i] = static_cast<float>(query_int8[i]);
         }
         this->inner_quantizer_->ProcessQueryImpl(vec.data(), inner_computer);
     } else if constexpr (std::is_same_v<DataT, uint16_t>) {
         const auto* query_int16 = reinterpret_cast<const uint16_t*>(query);
-        Vector<DataType> vec(this->dim_, this->allocator_);
+        Vector<float> vec(this->dim_, this->allocator_);
         for (int64_t i = 0; i < this->dim_; i++) {
             if (data_type_ == DataTypes::DATA_TYPE_FP16) {
                 vec[i] = FP16ToFloat(query_int16[i]);

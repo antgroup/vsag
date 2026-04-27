@@ -56,21 +56,21 @@ public:
                                 const IndexCommonParam& common_param);
 
     bool
-    TrainImpl(const DataType* data, uint64_t count);
+    TrainImpl(const float* data, uint64_t count);
 
     bool
-    EncodeOneImpl(const DataType* data, uint8_t* codes) const;
+    EncodeOneImpl(const float* data, uint8_t* codes) const;
 
     bool
-    EncodeBatchImpl(const DataType* data, uint8_t* codes, uint64_t count) const;
+    EncodeBatchImpl(const float* data, uint8_t* codes, uint64_t count) const;
 
     bool
-    DecodeOneImpl(const uint8_t* codes, DataType* data) {
+    DecodeOneImpl(const uint8_t* codes, float* data) {
         return false;
     }
 
     bool
-    DecodeBatchImpl(const uint8_t* codes, DataType* data, uint64_t count) {
+    DecodeBatchImpl(const uint8_t* codes, float* data, uint64_t count) {
         return false;
     }
 
@@ -78,7 +78,7 @@ public:
     ComputeImpl(const uint8_t* codes1, const uint8_t* codes2) const;
 
     void
-    ProcessQueryImpl(const DataType* query,
+    ProcessQueryImpl(const float* query,
                      Computer<TransformQuantizer<QuantTmpl, metric>>& computer) const;
 
     void
@@ -112,7 +112,7 @@ public:
                             const VectorTransformerParameter& param) const;
 
     void
-    ExecuteChainTransform(DataType* prev_data, const uint32_t* meta_offsets, uint8_t* codes) const;
+    ExecuteChainTransform(float* prev_data, const uint32_t* meta_offsets, uint8_t* codes) const;
 
     float
     ExecuteChainDistanceRecovery(float quantize_dist,
@@ -228,14 +228,14 @@ TransformQuantizer<QuantTmpl, metric>::MakeTransformerInstance(
 
 template <typename QuantTmpl, MetricType metric>
 bool
-TransformQuantizer<QuantTmpl, metric>::TrainImpl(const DataType* data, uint64_t count) {
+TransformQuantizer<QuantTmpl, metric>::TrainImpl(const float* data, uint64_t count) {
     // 1. train transformer based on original data
     for (const auto& vector_transformer : this->transform_chain_) {
         vector_transformer->Train(data, count);
     }
 
     // 2. execute transform on original data
-    Vector<DataType> transformed_data(this->dim_ * count, 0, this->allocator_);
+    Vector<float> transformed_data(this->dim_ * count, 0, this->allocator_);
     Vector<uint8_t> tmp_codes(this->code_size_, 0, this->allocator_);
     transformed_data.assign(data, data + count * this->dim_);
     for (auto i = 0; i < count; i++) {
@@ -250,10 +250,10 @@ TransformQuantizer<QuantTmpl, metric>::TrainImpl(const DataType* data, uint64_t 
 
 template <typename QuantTmpl, MetricType metric>
 void
-TransformQuantizer<QuantTmpl, metric>::ExecuteChainTransform(DataType* prev_data,
+TransformQuantizer<QuantTmpl, metric>::ExecuteChainTransform(float* prev_data,
                                                              const uint32_t* meta_offsets,
                                                              uint8_t* codes) const {
-    Vector<DataType> next_data(this->dim_, 0, this->allocator_);
+    Vector<float> next_data(this->dim_, 0, this->allocator_);
 
     for (uint32_t i = 0; i < this->transform_chain_.size(); i++) {
         auto vector_transformer = this->transform_chain_[i];
@@ -262,15 +262,15 @@ TransformQuantizer<QuantTmpl, metric>::ExecuteChainTransform(DataType* prev_data
         auto meta = vector_transformer->Transform(prev_data, next_data.data());
         meta->EncodeMeta(codes + meta_offset);
 
-        memcpy(prev_data, next_data.data(), this->dim_ * sizeof(DataType));
+        memcpy(prev_data, next_data.data(), this->dim_ * sizeof(float));
     }
 }
 
 template <typename QuantTmpl, MetricType metric>
 bool
-TransformQuantizer<QuantTmpl, metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) const {
+TransformQuantizer<QuantTmpl, metric>::EncodeOneImpl(const float* data, uint8_t* codes) const {
     // 1. execute transform
-    Vector<DataType> data_buffer(this->code_size_, 0, this->allocator_);
+    Vector<float> data_buffer(this->dim_, 0, this->allocator_);
     data_buffer.assign(data, data + this->dim_);
     ExecuteChainTransform(data_buffer.data(), base_meta_offsets_.data(), codes);
 
@@ -281,7 +281,7 @@ TransformQuantizer<QuantTmpl, metric>::EncodeOneImpl(const DataType* data, uint8
 template <typename QuantTmpl, MetricType metric>
 void
 TransformQuantizer<QuantTmpl, metric>::ProcessQueryImpl(
-    const vsag::DataType* query, Computer<TransformQuantizer>& computer) const {
+    const float* query, Computer<TransformQuantizer>& computer) const {
     // 0. allocate
     try {
         computer.inner_computer_->buf_ =
@@ -292,7 +292,7 @@ TransformQuantizer<QuantTmpl, metric>::ProcessQueryImpl(
     }
 
     // 1. execute transform
-    Vector<DataType> data_buffer(this->code_size_, 0, this->allocator_);
+    Vector<float> data_buffer(this->dim_, 0, this->allocator_);
     data_buffer.assign(query, query + this->dim_);
     ExecuteChainTransform(
         data_buffer.data(), query_meta_offsets_.data(), computer.inner_computer_->buf_);
@@ -371,7 +371,7 @@ TransformQuantizer<QuantTmpl, metric>::ReleaseComputerImpl(
 
 template <typename QuantTmpl, MetricType metric>
 bool
-TransformQuantizer<QuantTmpl, metric>::EncodeBatchImpl(const DataType* data,
+TransformQuantizer<QuantTmpl, metric>::EncodeBatchImpl(const float* data,
                                                        uint8_t* codes,
                                                        uint64_t count) const {
     for (uint64_t i = 0; i < count; ++i) {

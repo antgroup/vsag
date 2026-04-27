@@ -48,14 +48,14 @@ FP32Quantizer<metric>::FP32Quantizer(const QuantizerParamPtr& param,
 
 template <MetricType metric>
 bool
-FP32Quantizer<metric>::TrainImpl(const DataType* data, uint64_t count) {
+FP32Quantizer<metric>::TrainImpl(const float* data, uint64_t count) {
     this->is_trained_ = true;
     return true;
 }
 
 template <MetricType metric>
 bool
-FP32Quantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) {
+FP32Quantizer<metric>::EncodeOneImpl(const float* data, uint8_t* codes) {
     if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
         if (this->hold_molds_) {
             // Store the mold for cosine similarity
@@ -74,7 +74,7 @@ FP32Quantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) {
 
 template <MetricType metric>
 bool
-FP32Quantizer<metric>::EncodeBatchImpl(const DataType* data, uint8_t* codes, uint64_t count) {
+FP32Quantizer<metric>::EncodeBatchImpl(const float* data, uint8_t* codes, uint64_t count) {
     for (uint64_t i = 0; i < count; ++i) {
         EncodeOneImpl(data + i * this->dim_, codes + i * this->code_size_);
     }
@@ -83,14 +83,14 @@ FP32Quantizer<metric>::EncodeBatchImpl(const DataType* data, uint8_t* codes, uin
 
 template <MetricType metric>
 bool
-FP32Quantizer<metric>::DecodeOneImpl(const uint8_t* codes, DataType* data) {
+FP32Quantizer<metric>::DecodeOneImpl(const uint8_t* codes, float* data) {
     memcpy(data, codes, this->dim_ * sizeof(float));
     return true;
 }
 
 template <MetricType metric>
 bool
-FP32Quantizer<metric>::DecodeBatchImpl(const uint8_t* codes, DataType* data, uint64_t count) {
+FP32Quantizer<metric>::DecodeBatchImpl(const uint8_t* codes, float* data, uint64_t count) {
     for (uint64_t i = 0; i < count; ++i) {
         memcpy(data + i * this->dim_, codes + i * this->code_size_, this->code_size_);
     }
@@ -138,7 +138,7 @@ FP32Quantizer<metric>::ScanBatchDistImpl(Computer<FP32Quantizer<metric>>& comput
 
 template <MetricType metric>
 void
-FP32Quantizer<metric>::ProcessQueryImpl(const DataType* query,
+FP32Quantizer<metric>::ProcessQueryImpl(const float* query,
                                         Computer<FP32Quantizer<metric>>& computer) const {
     try {
         if (computer.buf_ == nullptr) {

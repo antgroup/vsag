@@ -57,14 +57,14 @@ INT8Quantizer<metric>::INT8Quantizer(const QuantizerParamPtr& param,
 
 template <MetricType metric>
 bool
-INT8Quantizer<metric>::TrainImpl(const DataType* data, uint64_t count) {
+INT8Quantizer<metric>::TrainImpl(const float* data, uint64_t count) {
     this->is_trained_ = true;
     return true;
 }
 
 template <MetricType metric>
 bool
-INT8Quantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) {
+INT8Quantizer<metric>::EncodeOneImpl(const float* data, uint8_t* codes) {
     memcpy(codes, data, this->dim_);
     if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
         // Store the mold for cosine similarity
@@ -77,7 +77,7 @@ INT8Quantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) {
 
 template <MetricType metric>
 bool
-INT8Quantizer<metric>::EncodeBatchImpl(const DataType* data, uint8_t* codes, uint64_t count) {
+INT8Quantizer<metric>::EncodeBatchImpl(const float* data, uint8_t* codes, uint64_t count) {
     const auto* data_ptr = reinterpret_cast<const int8_t*>(data);
     for (uint64_t i = 0; i < count; ++i) {
         EncodeOneImpl(reinterpret_cast<const float*>(data_ptr + i * this->dim_),
@@ -88,14 +88,14 @@ INT8Quantizer<metric>::EncodeBatchImpl(const DataType* data, uint8_t* codes, uin
 
 template <MetricType metric>
 bool
-INT8Quantizer<metric>::DecodeOneImpl(const uint8_t* codes, DataType* data) {
+INT8Quantizer<metric>::DecodeOneImpl(const uint8_t* codes, float* data) {
     memcpy(data, codes, this->dim_);
     return true;
 }
 
 template <MetricType metric>
 bool
-INT8Quantizer<metric>::DecodeBatchImpl(const uint8_t* codes, DataType* data, uint64_t count) {
+INT8Quantizer<metric>::DecodeBatchImpl(const uint8_t* codes, float* data, uint64_t count) {
     auto* data_ptr = reinterpret_cast<int8_t*>(data);
     for (uint64_t i = 0; i < count; ++i) {
         memcpy(data_ptr + i * this->dim_, codes + i * this->code_size_, this->dim_);
@@ -135,7 +135,7 @@ INT8Quantizer<metric>::ComputeImpl(const uint8_t* codes1, const uint8_t* codes2)
 
 template <MetricType metric>
 void
-INT8Quantizer<metric>::ProcessQueryImpl(const DataType* query,
+INT8Quantizer<metric>::ProcessQueryImpl(const float* query,
                                         Computer<INT8Quantizer<metric>>& computer) const {
     try {
         if (computer.buf_ == nullptr) {

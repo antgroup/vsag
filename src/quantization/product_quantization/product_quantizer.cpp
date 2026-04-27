@@ -57,7 +57,7 @@ ProductQuantizer<metric>::ProductQuantizer(const QuantizerParamPtr& param,
 
 template <MetricType metric>
 bool
-ProductQuantizer<metric>::TrainImpl(const vsag::DataType* data, uint64_t count) {
+ProductQuantizer<metric>::TrainImpl(const float* data, uint64_t count) {
     if (this->is_trained_) {
         return true;
     }
@@ -94,8 +94,8 @@ ProductQuantizer<metric>::TrainImpl(const vsag::DataType* data, uint64_t count) 
 
 template <MetricType metric>
 bool
-ProductQuantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) {
-    const DataType* cur = data;
+ProductQuantizer<metric>::EncodeOneImpl(const float* data, uint8_t* codes) {
+    const float* cur = data;
     Vector<float> tmp(this->allocator_);
     if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
         tmp.resize(this->dim_);
@@ -122,7 +122,7 @@ ProductQuantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) {
 
 template <MetricType metric>
 bool
-ProductQuantizer<metric>::DecodeOneImpl(const uint8_t* codes, DataType* data) {
+ProductQuantizer<metric>::DecodeOneImpl(const uint8_t* codes, float* data) {
     for (int i = 0; i < pq_dim_; ++i) {
         auto idx = codes[i];
         memcpy(data + i * subspace_dim_,
@@ -286,7 +286,7 @@ ProductQuantizer<metric>::transpose_codebooks() {
 
 template <MetricType metric>
 void
-ProductQuantizer<metric>::ProcessQueryImpl(const DataType* query,
+ProductQuantizer<metric>::ProcessQueryImpl(const float* query,
                                            Computer<ProductQuantizer>& computer) const {
     try {
         const float* cur_query = query;

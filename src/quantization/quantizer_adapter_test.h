@@ -68,13 +68,13 @@ TestQuantizerAdapterEncodeDecode(Quantizer<T>& quant,
         static_assert("Unsupported DataT type");
     }
     if (retrain) {
-        quant.ReTrain(reinterpret_cast<DataType*>(vecs.data()), count);
+        quant.ReTrain(reinterpret_cast<float*>(vecs.data()), count);
     }
     for (uint64_t i = 0; i < count; ++i) {
         std::vector<uint8_t> codes(quant.GetCodeSize());
-        quant.EncodeOne(reinterpret_cast<DataType*>(vecs.data() + i * dim), codes.data());
+        quant.EncodeOne(reinterpret_cast<float*>(vecs.data() + i * dim), codes.data());
         std::vector<DataT> out_vec(dim);
-        quant.DecodeOne(codes.data(), reinterpret_cast<DataType*>(out_vec.data()));
+        quant.DecodeOne(codes.data(), reinterpret_cast<float*>(out_vec.data()));
         float sum = 0.0F;
         for (int j = 0; j < dim; ++j) {
             if constexpr (std::is_same<DataT, uint16_t>::value == true) {
@@ -85,17 +85,17 @@ TestQuantizerAdapterEncodeDecode(Quantizer<T>& quant,
                                                             : generic::BF16ToFloat(out_vec[j]);
                 sum += std::abs(original - decoded);
             } else {
-                sum += std::abs(static_cast<DataType>(vecs[i * dim + j]) -
-                                static_cast<DataType>(out_vec[j]));
+                sum += std::abs(static_cast<float>(vecs[i * dim + j]) -
+                                static_cast<float>(out_vec[j]));
             }
         }
         REQUIRE(sum < error * dim);
     }
 
     std::vector<uint8_t> codes(quant.GetCodeSize() * count);
-    quant.EncodeBatch(reinterpret_cast<DataType*>(vecs.data()), codes.data(), count);
+    quant.EncodeBatch(reinterpret_cast<float*>(vecs.data()), codes.data(), count);
     std::vector<DataT> out_vec(dim * count);
-    quant.DecodeBatch(codes.data(), reinterpret_cast<DataType*>(out_vec.data()), count);
+    quant.DecodeBatch(codes.data(), reinterpret_cast<float*>(out_vec.data()), count);
     for (int64_t i = 0; i < count; ++i) {
         float sum = 0.0F;
         for (int j = 0; j < dim; ++j) {
@@ -108,8 +108,8 @@ TestQuantizerAdapterEncodeDecode(Quantizer<T>& quant,
                                     : generic::BF16ToFloat(out_vec[i * dim + j]);
                 sum += std::abs(original - decoded);
             } else {
-                sum += std::abs(static_cast<DataType>(vecs[i * dim + j]) -
-                                static_cast<DataType>(out_vec[i * dim + j]));
+                sum += std::abs(static_cast<float>(vecs[i * dim + j]) -
+                                static_cast<float>(out_vec[i * dim + j]));
             }
         }
         REQUIRE(sum < error * dim);
@@ -139,7 +139,7 @@ TestQuantizerAdapterComputeCodes(Quantizer<T>& quantizer,
     }
 
     if (retrain) {
-        quantizer.ReTrain(reinterpret_cast<DataType*>(vecs.data()), count);
+        quantizer.ReTrain(reinterpret_cast<float*>(vecs.data()), count);
     }
 
     for (int64_t i = 0; i < count; ++i) {
@@ -147,8 +147,8 @@ TestQuantizerAdapterComputeCodes(Quantizer<T>& quantizer,
         auto idx2 = random() % count;
         std::vector<uint8_t> codes1(quantizer.GetCodeSize());
         std::vector<uint8_t> codes2(quantizer.GetCodeSize());
-        quantizer.EncodeOne(reinterpret_cast<DataType*>(vecs.data() + idx1 * dim), codes1.data());
-        quantizer.EncodeOne(reinterpret_cast<DataType*>(vecs.data() + idx2 * dim), codes2.data());
+        quantizer.EncodeOne(reinterpret_cast<float*>(vecs.data() + idx1 * dim), codes1.data());
+        quantizer.EncodeOne(reinterpret_cast<float*>(vecs.data() + idx2 * dim), codes2.data());
         float gt = 0.0;
         float value = quantizer.Compute(codes1.data(), codes2.data());
         if constexpr (std::is_same<DataT, int8_t>::value == true) {
@@ -239,7 +239,7 @@ TestQuantizerAdapterComputer(Quantizer<T>& quant,
     }
 
     if (retrain) {
-        quant.ReTrain(reinterpret_cast<DataType*>(vecs.data()), count);
+        quant.ReTrain(reinterpret_cast<float*>(vecs.data()), count);
     }
 
     auto gt_func = [&](int base_idx, int query_idx) -> float {
@@ -291,14 +291,14 @@ TestQuantizerAdapterComputer(Quantizer<T>& quant,
     float count_unbounded_related_error = 0, count_unbounded_numeric_error = 0;
     for (int i = 0; i < query_count; ++i) {
         auto computer = quant.FactoryComputer();
-        computer->SetQuery(reinterpret_cast<DataType*>(queries.data() + i * dim));
+        computer->SetQuery(reinterpret_cast<float*>(queries.data() + i * dim));
 
         std::vector<uint8_t> codes1(quant.GetCodeSize() * count, 0);
         std::vector<float> dists1(count);
         for (int j = 0; j < count; ++j) {
             auto gt = gt_func(j, i);
             uint8_t* code = codes1.data() + j * quant.GetCodeSize();
-            quant.EncodeOne(reinterpret_cast<DataType*>(vecs.data() + j * dim), code);
+            quant.EncodeOne(reinterpret_cast<float*>(vecs.data() + j * dim), code);
             quant.ComputeDist(*computer, code, dists1.data() + j);
             REQUIRE(quant.ComputeDist(*computer, code) == dists1[j]);
             if (std::abs(gt - dists1[j]) > error) {
@@ -311,7 +311,7 @@ TestQuantizerAdapterComputer(Quantizer<T>& quant,
 
         std::vector<uint8_t> codes2(quant.GetCodeSize() * count);
         std::vector<float> dists2(count);
-        quant.EncodeBatch(reinterpret_cast<DataType*>(vecs.data()), codes2.data(), count);
+        quant.EncodeBatch(reinterpret_cast<float*>(vecs.data()), codes2.data(), count);
         quant.ScanBatchDists(*computer, count, codes2.data(), dists2.data());
         for (int j = 0; j < count; ++j) {
             REQUIRE(fixtures::dist_t(dists1[j]) == fixtures::dist_t(dists2[j]));
@@ -347,7 +347,7 @@ TestQuantizerAdapterSerializeAndDeserialize(Quantizer<QuantT>& quant1,
         static_assert("Unsupported DataT type");
     }
 
-    quant1.ReTrain(reinterpret_cast<DataType*>(vecs.data()), count);
+    quant1.ReTrain(reinterpret_cast<float*>(vecs.data()), count);
 
     test_serializion(quant1, quant2);
 

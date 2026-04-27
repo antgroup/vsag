@@ -28,8 +28,8 @@ namespace vsag {
 template <MetricType metric>
 SQ8UniformQuantizer<metric>::SQ8UniformQuantizer(int dim, Allocator* allocator)
     : Quantizer<SQ8UniformQuantizer<metric>>(dim, allocator) {
-    lower_bound_ = std::numeric_limits<DataType>::max();
-    diff_ = std::numeric_limits<DataType>::lowest();
+    lower_bound_ = std::numeric_limits<float>::max();
+    diff_ = std::numeric_limits<float>::lowest();
 
     uint64_t align_size = 1;
     if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
@@ -71,7 +71,7 @@ SQ8UniformQuantizer<metric>::SQ8UniformQuantizer(const QuantizerParamPtr& param,
 
 template <MetricType metric>
 bool
-SQ8UniformQuantizer<metric>::TrainImpl(const DataType* data, uint64_t count) {
+SQ8UniformQuantizer<metric>::TrainImpl(const float* data, uint64_t count) {
     if (data == nullptr) {
         return false;
     }
@@ -97,13 +97,13 @@ SQ8UniformQuantizer<metric>::TrainImpl(const DataType* data, uint64_t count) {
 
 template <MetricType metric>
 bool
-SQ8UniformQuantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) const {
+SQ8UniformQuantizer<metric>::EncodeOneImpl(const float* data, uint8_t* codes) const {
     float delta = 0;
     uint8_t scaled = 0;
     norm_type norm = 0;
     sum_type sum = 0;
 
-    Vector<DataType> norm_data(this->allocator_);
+    Vector<float> norm_data(this->allocator_);
     if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
         norm_data.resize(this->dim_);
         Normalize(data, norm_data.data(), this->dim_);
@@ -138,7 +138,7 @@ SQ8UniformQuantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes)
 
 template <MetricType metric>
 bool
-SQ8UniformQuantizer<metric>::DecodeOneImpl(const uint8_t* codes, DataType* data) {
+SQ8UniformQuantizer<metric>::DecodeOneImpl(const uint8_t* codes, float* data) {
     for (uint64_t d = 0; d < this->dim_; d++) {
         data[d] = codes[d] / 255.0 * diff_ + lower_bound_;
     }
@@ -177,7 +177,7 @@ SQ8UniformQuantizer<metric>::ComputeImpl(const uint8_t* codes1, const uint8_t* c
 
 template <MetricType metric>
 void
-SQ8UniformQuantizer<metric>::ProcessQueryImpl(const DataType* query,
+SQ8UniformQuantizer<metric>::ProcessQueryImpl(const float* query,
                                               Computer<SQ8UniformQuantizer>& computer) const {
     try {
         if (computer.buf_ == nullptr) {

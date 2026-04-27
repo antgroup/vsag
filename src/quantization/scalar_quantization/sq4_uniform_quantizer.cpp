@@ -32,8 +32,8 @@ using norm_type = uint64_t;
 template <MetricType metric>
 SQ4UniformQuantizer<metric>::SQ4UniformQuantizer(int dim, Allocator* allocator, float trunc_rate)
     : Quantizer<SQ4UniformQuantizer<metric>>(dim, allocator), trunc_rate_(trunc_rate) {
-    lower_bound_ = std::numeric_limits<DataType>::max();
-    diff_ = std::numeric_limits<DataType>::lowest();
+    lower_bound_ = std::numeric_limits<float>::max();
+    diff_ = std::numeric_limits<float>::lowest();
 
     uint64_t align_size = 1;
     if constexpr (metric == MetricType::METRIC_TYPE_L2SQR or
@@ -82,7 +82,7 @@ SQ4UniformQuantizer<metric>::SQ4UniformQuantizer(const QuantizerParamPtr& param,
 
 template <MetricType metric>
 bool
-SQ4UniformQuantizer<metric>::TrainImpl(const DataType* data, uint64_t count) {
+SQ4UniformQuantizer<metric>::TrainImpl(const float* data, uint64_t count) {
     if (data == nullptr) {
         return false;
     }
@@ -108,14 +108,14 @@ SQ4UniformQuantizer<metric>::TrainImpl(const DataType* data, uint64_t count) {
 
 template <MetricType metric>
 bool
-SQ4UniformQuantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) const {
+SQ4UniformQuantizer<metric>::EncodeOneImpl(const float* data, uint8_t* codes) const {
     float delta = 0;
     uint8_t scaled = 0;
     norm_type norm = 0;
     sum_type sum = 0;
     sum_type codes_sum = 0;
 
-    Vector<DataType> norm_data(this->allocator_);
+    Vector<float> norm_data(this->allocator_);
     if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
         norm_data.resize(this->dim_);
         Normalize(data, norm_data.data(), this->dim_);
@@ -157,7 +157,7 @@ SQ4UniformQuantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes)
 
 template <MetricType metric>
 bool
-SQ4UniformQuantizer<metric>::DecodeOneImpl(const uint8_t* codes, DataType* data) {
+SQ4UniformQuantizer<metric>::DecodeOneImpl(const uint8_t* codes, float* data) {
     for (uint64_t d = 0; d < this->dim_; d++) {
         if ((d & 1) != 0U) {
             data[d] = ((codes[d >> 1] & 0xf0) >> 4) / 15.0 * diff_ + lower_bound_;
@@ -201,7 +201,7 @@ SQ4UniformQuantizer<metric>::ComputeImpl(const uint8_t* codes1, const uint8_t* c
 
 template <MetricType metric>
 void
-SQ4UniformQuantizer<metric>::ProcessQueryImpl(const DataType* query,
+SQ4UniformQuantizer<metric>::ProcessQueryImpl(const float* query,
                                               Computer<SQ4UniformQuantizer>& computer) const {
     try {
         computer.buf_ = reinterpret_cast<uint8_t*>(this->allocator_->Allocate(this->code_size_));
