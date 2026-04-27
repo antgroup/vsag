@@ -56,12 +56,70 @@ sort_sparse_vector(const SparseVector& sparse_vector,
               });
 }
 
+struct SparseVectorAccessor {
+    const SparseVector& ref;
+    size_t
+    size() const {
+        return ref.len_;
+    }
+    uint32_t
+    id(size_t i) const {
+        return ref.ids_[i];
+    }
+    float
+    val(size_t i) const {
+        return ref.vals_[i];
+    }
+};
+
+struct PairVectorAccessor {
+    const Vector<std::pair<uint32_t, float>>& ref;
+    size_t
+    size() const {
+        return ref.size();
+    }
+    uint32_t
+    id(size_t i) const {
+        return ref[i].first;
+    }
+    float
+    val(size_t i) const {
+        return ref[i].second;
+    }
+};
+
 /**
- * check whether sv1 is a subset of sv2
- * @param sv1
- * @param sv2
- * @return true iff sv1 is a subset of sv2
+ * check whether a is a subset of b
+ * @param a
+ * @param b
+ * @return true if a is a subset of b
  */
+template <typename T1, typename T2>
+bool
+is_subset_of_sparse_vector_impl(const T1& a, const T2& b) {
+    if (a.size() > b.size())
+        return false;
+
+    uint32_t i = 0, j = 0;
+    while (i < a.size() && j < b.size()) {
+        uint32_t id1 = a.id(i), id2 = b.id(j);
+        if (id1 == id2) {
+            if (std::abs(a.val(i) - b.val(j)) > 1e-3)
+                return false;
+            i++;
+            j++;
+        } else if (id1 > id2) {
+            j++;
+        } else {
+            return false;
+        }
+    }
+    return i == a.size();
+}
+
 bool
 is_subset_of_sparse_vector(const SparseVector& sv1, const SparseVector& sv2);
+
+bool
+is_subset_of_sparse_vector(const SparseVector& sv1, const Vector<std::pair<uint32_t, float>>& sv2);
 }  // namespace vsag

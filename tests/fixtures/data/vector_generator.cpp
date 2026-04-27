@@ -58,7 +58,6 @@ GenerateSparseVectors(
             sparse_vectors[i].ids_[d] = u_id;
             sparse_vectors[i].vals_[d] = distrib_real(rng);
         }
-        std::sort(sparse_vectors[i].ids_, sparse_vectors[i].ids_ + sparse_vectors[i].len_);
     }
 
     return sparse_vectors;

@@ -54,6 +54,6 @@ if (ENABLE_TESTS)
     add_executable (tests_mockimpl
             ../tests/test_factory.cpp
     )
-    target_link_libraries (tests_mockimpl PRIVATE Catch2::Catch2WithMain vsag_mockimpl_static tsl::robin_map nlohmann_json::nlohmann_json)
+    target_link_libraries (tests_mockimpl PRIVATE Catch2::Catch2WithMain vsag_mockimpl_static)
     add_dependencies (tests_mockimpl Catch2)
 endif ()

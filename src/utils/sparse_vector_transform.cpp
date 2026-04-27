@@ -16,36 +16,18 @@
 
 #include "sparse_vector_transform.h"
 
+#include "vsag/dataset.h"
+
 namespace vsag {
 
 bool
 is_subset_of_sparse_vector(const SparseVector& sv1, const SparseVector& sv2) {
-    if (sv1.len_ > sv2.len_) {
-        // [case 1]: sv1 is larger than sv2
-        return false;
-    }
+    return is_subset_of_sparse_vector_impl(SparseVectorAccessor{sv1}, SparseVectorAccessor{sv2});
+}
 
-    uint32_t i = 0;
-    uint32_t j = 0;
-
-    // sv1 and sv2 term IDs need to be sorted in ascending order
-    while (i < sv1.len_ && j < sv2.len_) {
-        if (sv1.ids_[i] == sv2.ids_[j]) {
-            if (std::abs(sv1.vals_[i] - sv2.vals_[j]) > 1e-3) {
-                // [case 3]: The term VALUE in the sv1 is not equal to that in the sv2
-                return false;
-            }
-            i++;
-            j++;
-        } else if (sv1.ids_[i] > sv2.ids_[j]) {
-            j++;
-        } else {
-            // sv1.ids_[i] < sv2.ids_[j]
-            // [case 2]: The term ID in the sv1 does not exist in the sv2
-            return false;
-        }
-    }
-    return i == sv1.len_;
+bool
+is_subset_of_sparse_vector(const SparseVector& sv1, const Vector<std::pair<uint32_t, float>>& sv2) {
+    return is_subset_of_sparse_vector_impl(SparseVectorAccessor{sv1}, PairVectorAccessor{sv2});
 }
 
 }  // namespace vsag
