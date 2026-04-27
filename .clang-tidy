@@ -13,24 +13,34 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-Checks:
-    - "-*"
-    - "bugprone-*"
-    - "-bugprone-easily-swappable-parameters"
-    - "clang-analyzer-*"
-    - "-clang-analyzer-deadcode.DeadStores" # value stored but never read
-    - "clang-diagnostic-*"
-    - "-clang-diagnostic-deprecated-builtins"
-    - "modernize-*"
-    - "-modernize-use-trailing-return-type"
-    - "-modernize-avoid-c-arrays"
-    - "openmp-*"
-    - "performance-*"
-    - "readability-*"
-    - "-readability-identifier-length"
-    - "-readability-magic-numbers"
-    - "-readability-function-cognitive-complexity" # enable after fix all
-    - "-readability-redundant-access-specifiers" # keep repeated public:/protected:/private: as visual separators between method groups
+# Disabled checks and reasons:
+#   -clang-analyzer-deadcode.DeadStores        : value stored but never read (too noisy)
+#   -clang-diagnostic-deprecated-builtins      : deprecated builtins required for toolchain/platform compatibility
+#   -bugprone-easily-swappable-parameters      : too many false positives in current codebase
+#   -modernize-use-trailing-return-type        : conflicts with project style
+#   -modernize-avoid-c-arrays                  : C arrays are intentionally used in SIMD/low-level code
+#   -readability-identifier-length             : short names are acceptable in this codebase
+#   -readability-magic-numbers                 : too noisy for numeric-heavy vector index code
+#   -readability-function-cognitive-complexity : enable after fix all
+#   -readability-redundant-access-specifiers   : keep repeated public:/protected:/private: as visual separators between method groups
+Checks: >
+  -*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  clang-analyzer-*,
+  -clang-analyzer-deadcode.DeadStores,
+  clang-diagnostic-*,
+  -clang-diagnostic-deprecated-builtins,
+  modernize-*,
+  -modernize-use-trailing-return-type,
+  -modernize-avoid-c-arrays,
+  openmp-*,
+  performance-*,
+  readability-*,
+  -readability-identifier-length,
+  -readability-magic-numbers,
+  -readability-function-cognitive-complexity,
+  -readability-redundant-access-specifiers
 
 
 HeaderFilterRegex: ''
