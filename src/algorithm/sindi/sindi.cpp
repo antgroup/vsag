@@ -23,7 +23,6 @@
 #include "utils/sparse_vector_transform.h"
 #include "utils/util_functions.h"
 #include "vsag/allocator.h"
-#include "vsag/dataset.h"
 #include "vsag_exception.h"
 
 namespace vsag {

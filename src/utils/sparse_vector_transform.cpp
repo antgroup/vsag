@@ -16,8 +16,6 @@
 
 #include "sparse_vector_transform.h"
 
-#include "vsag/dataset.h"
-
 namespace vsag {
 
 bool
