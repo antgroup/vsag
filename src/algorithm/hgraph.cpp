@@ -29,7 +29,6 @@
 #include "datacell/flatten_interface.h"
 #include "datacell/sparse_graph_datacell.h"
 #include "dataset_impl.h"
-#include "hgraph_shrink_context.h"
 #include "impl/filter/filter_headers.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/odescent/odescent_graph_builder.h"
@@ -2077,12 +2076,6 @@ HGraph::shrink_to_fit() {
         route_graph->ShrinkToFit(total_count);
     }
     label_table_->ShrinkToFit(total_count);
-}
-
-void
-HGraph::ShrinkAndRepair(double timeout_ms) {
-    HGraphShrinkContext ctx(this);
-    ctx.Run(timeout_ms);
 }
 
 void
