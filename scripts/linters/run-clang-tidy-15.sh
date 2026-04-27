@@ -46,6 +46,77 @@ fi
 
 echo "Using clang-tidy version $ACTUAL_VERSION (required: $REQUIRED_VERSION)"
 
+VERIFY_CONFIG_ARGS=()
+RUN_CLANG_TIDY_ARGS=()
+EXPECT_CONFIG_VALUE=0
+EXPECT_RUN_CONFIG_VALUE=0
+for arg in "$@"; do
+    if [ "$EXPECT_CONFIG_VALUE" -eq 1 ]; then
+        VERIFY_CONFIG_ARGS+=("$arg")
+        EXPECT_CONFIG_VALUE=0
+    fi
+
+    if [ "$EXPECT_RUN_CONFIG_VALUE" -eq 1 ]; then
+        RUN_CLANG_TIDY_ARGS+=("$arg")
+        EXPECT_RUN_CONFIG_VALUE=0
+        continue
+    fi
+
+    case "$arg" in
+        --config-file)
+            # clang-tidy uses --config-file; run-clang-tidy.py uses -config-file
+            VERIFY_CONFIG_ARGS+=("$arg")
+            EXPECT_CONFIG_VALUE=1
+            RUN_CLANG_TIDY_ARGS+=("-config-file")
+            EXPECT_RUN_CONFIG_VALUE=1
+            ;;
+        -config-file)
+            # run-clang-tidy.py form; clang-tidy --verify-config uses --config-file
+            VERIFY_CONFIG_ARGS+=("--config-file")
+            EXPECT_CONFIG_VALUE=1
+            RUN_CLANG_TIDY_ARGS+=("$arg")
+            EXPECT_RUN_CONFIG_VALUE=1
+            ;;
+        -config)
+            VERIFY_CONFIG_ARGS+=("$arg")
+            EXPECT_CONFIG_VALUE=1
+            RUN_CLANG_TIDY_ARGS+=("$arg")
+            EXPECT_RUN_CONFIG_VALUE=1
+            ;;
+        --config-file=*)
+            VERIFY_CONFIG_ARGS+=("$arg")
+            RUN_CLANG_TIDY_ARGS+=("-config-file=${arg#--config-file=}")
+            ;;
+        -config-file=*)
+            VERIFY_CONFIG_ARGS+=("--config-file=${arg#-config-file=}")
+            RUN_CLANG_TIDY_ARGS+=("$arg")
+            ;;
+        -config=*)
+            VERIFY_CONFIG_ARGS+=("$arg")
+            RUN_CLANG_TIDY_ARGS+=("$arg")
+            ;;
+        *)
+            RUN_CLANG_TIDY_ARGS+=("$arg")
+            ;;
+    esac
+done
+
+if [ "$EXPECT_CONFIG_VALUE" -eq 1 ]; then
+    echo "ERROR: Missing value for clang-tidy config argument."
+    exit 1
+fi
+
+if [ "$EXPECT_RUN_CONFIG_VALUE" -eq 1 ]; then
+    echo "ERROR: Missing value for run-clang-tidy config argument."
+    exit 1
+fi
+
+# Verify the same clang-tidy config that will be used for linting is parseable.
+if ! "$CLANG_TIDY" --verify-config "${VERIFY_CONFIG_ARGS[@]}" 2>&1; then
+    echo "ERROR: clang-tidy config is invalid. Fix the config before running lint."
+    exit 1
+fi
+
 if printf '%s\n' "$@" | grep -qx -- '-fix'; then
     # Find clang-apply-replacements-15 binary
     if command -v clang-apply-replacements-15 &> /dev/null; then
@@ -74,7 +145,7 @@ if printf '%s\n' "$@" | grep -qx -- '-fix'; then
     exec ./scripts/linters/run-clang-tidy.py \
         -clang-tidy-binary "$CLANG_TIDY" \
         -clang-apply-replacements-binary "$CLANG_APPLY" \
-        "$@"
+        "${RUN_CLANG_TIDY_ARGS[@]}"
 fi
 
-exec ./scripts/linters/run-clang-tidy.py -clang-tidy-binary "$CLANG_TIDY" "$@"
+    exec ./scripts/linters/run-clang-tidy.py -clang-tidy-binary "$CLANG_TIDY" "${RUN_CLANG_TIDY_ARGS[@]}"
