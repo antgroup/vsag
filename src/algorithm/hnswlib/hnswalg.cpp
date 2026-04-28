@@ -45,6 +45,8 @@ HierarchicalNSW::HierarchicalNSW(SpaceInterface* s,
       normalize_(normalize),
       label_lookup_(allocator),
       deleted_elements_(allocator) {
+    label_lookup_.max_load_factor(0.75F);
+    deleted_elements_.max_load_factor(0.75F);
     max_elements_ = max_elements;
     num_deleted_ = 0;
     data_size_ = s->get_data_size();
@@ -1122,6 +1124,8 @@ HierarchicalNSW::DeserializeImpl(StreamReader& reader, SpaceInterface* s, uint64
     this->points_locks_->Resize(max_elements);
 
     rev_size_ = 1.0 / mult_;
+    label_lookup_.clear();
+    label_lookup_.reserve(cur_element_count_);
     for (uint64_t i = 0; i < cur_element_count_; i++) {
         label_lookup_[getExternalLabel(i)] = i;
         unsigned int link_list_size;
@@ -1160,6 +1164,8 @@ HierarchicalNSW::DeserializeImpl(StreamReader& reader, SpaceInterface* s, uint64
         }
     }
 
+    num_deleted_ = 0;
+    deleted_elements_.clear();
     for (uint64_t i = 0; i < cur_element_count_; i++) {
         if (isMarkedDeleted(i)) {
             num_deleted_ += 1;

@@ -1057,7 +1057,8 @@ TEST_CASE("update mark-deleted vector", "[ut][hnsw]") {
     for (auto i = 0; i < delete_size; i++) {
         REQUIRE(alg_hnsw->getCurrentElementCount() == base_size);
         REQUIRE(alg_hnsw->getDeletedCount() == i);
-        REQUIRE(alg_hnsw->getDeletedElements().size() == i);
+        const auto& deleted_elements = alg_hnsw->getDeletedElements();
+        REQUIRE(deleted_elements.size() == i);
 
         alg_hnsw->markDelete(base_ids[i]);
 
@@ -1071,9 +1072,10 @@ TEST_CASE("update mark-deleted vector", "[ut][hnsw]") {
         bool is_deleted = alg_hnsw->isMarkedDeleted(old_label);
         alg_hnsw->updateLabel(old_label, new_label);
         if (is_deleted) {
-            REQUIRE(alg_hnsw->getDeletedElements().count(old_label) == 0);
-            REQUIRE(alg_hnsw->getDeletedElements().count(new_label) != 0);
-            REQUIRE(alg_hnsw->getDeletedElements()[new_label] == old_label);
+            const auto& deleted_elements = alg_hnsw->getDeletedElements();
+            REQUIRE(deleted_elements.count(old_label) == 0);
+            REQUIRE(deleted_elements.count(new_label) != 0);
+            REQUIRE(deleted_elements.at(new_label) == old_label);
         } else {
             REQUIRE(not alg_hnsw->isValidLabel(old_label));
             REQUIRE(alg_hnsw->isValidLabel(new_label));

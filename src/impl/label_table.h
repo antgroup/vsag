@@ -58,6 +58,7 @@ public:
     SetImmutable() {
         this->use_reverse_map_ = false;
         PGUnorderedMap<LabelType, InnerIdType> empty_remap(allocator_);
+        empty_remap.max_load_factor(0.75F);
         this->label_remap_.swap(empty_remap);
     }
 
@@ -212,6 +213,8 @@ public:
     Deserialize(lvalue_or_rvalue<StreamReader> reader) {
         StreamReader::ReadVector(reader, label_table_);
         if (use_reverse_map_) {
+            this->label_remap_.clear();
+            this->label_remap_.reserve(label_table_.size());
             for (InnerIdType id = 0; id < label_table_.size(); ++id) {
                 this->label_remap_[label_table_[id]] = id;
             }
