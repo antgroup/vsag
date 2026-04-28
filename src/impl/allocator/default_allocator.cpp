@@ -73,11 +73,13 @@ DefaultAllocator::Reallocate(void* p, uint64_t size) {
             ErrorType::INTERNAL_ERROR,
             fmt::format("reallocate: address {} is not allocated by {}", p, Name()));
     }
-    allocated_ptrs_.erase(p);
 #endif
     auto* ptr = realloc(p, size);
 #ifndef NDEBUG
-    allocated_ptrs_.insert(ptr);
+    if (ptr != nullptr) {
+        allocated_ptrs_.erase(p);
+        allocated_ptrs_.insert(ptr);
+    }
 #endif
     return ptr;
 }
