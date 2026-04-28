@@ -1244,6 +1244,8 @@ HGraph::deserialize_basic_info_v0_14(StreamReader& reader) {
 
     uint64_t size;
     StreamReader::ReadObj(reader, size);
+    this->label_table_->label_remap_.clear();
+    this->label_table_->label_remap_.reserve(size);
     for (uint64_t i = 0; i < size; ++i) {
         LabelType key;
         StreamReader::ReadObj(reader, key);
@@ -1350,6 +1352,8 @@ HGraph::deserialize_label_info(StreamReader& reader) const {
     StreamReader::ReadVector(reader, this->label_table_->label_table_);
     uint64_t size;
     StreamReader::ReadObj(reader, size);
+    this->label_table_->label_remap_.clear();
+    this->label_table_->label_remap_.reserve(size);
     for (uint64_t i = 0; i < size; ++i) {
         LabelType key;
         StreamReader::ReadObj(reader, key);

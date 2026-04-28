@@ -270,8 +270,8 @@ public:
         return num_deleted_;
     }
 
-    vsag::PGUnorderedMap<LabelType, InnerIdType>
-    getDeletedElements() override {
+    const vsag::PGUnorderedMap<LabelType, InnerIdType>&
+    getDeletedElements() const override {
         return deleted_elements_;
     }
 
