@@ -14,10 +14,7 @@
 
 #include "search_reasoning.h"
 
-#include <cmath>
-
-#include "simd/bf16_simd.h"
-#include "simd/fp16_simd.h"
+#include <nlohmann/json.hpp>
 
 namespace vsag {
 
@@ -33,19 +30,9 @@ ReasoningContext::~ReasoningContext() = default;
 
 void
 ReasoningContext::InitializeExpectedTargets(
-    const Vector<int64_t>& labels,
-    const UnorderedMap<int64_t, InnerIdType>& label_to_inner_id,
-    const float* query,
-    const void* precise_vectors,
-    DataTypes data_type,
-    uint64_t dim) {
+    const Vector<int64_t>& labels, const UnorderedMap<int64_t, InnerIdType>& label_to_inner_id) {
     expected_inner_ids_.clear();
     expected_traces_.clear();
-
-    float* casted_vec = nullptr;
-    if (data_type != DataTypes::DATA_TYPE_FLOAT) {
-        casted_vec = new float[dim];
-    }
 
     for (const auto& label : labels) {
         auto it = label_to_inner_id.find(label);
@@ -57,48 +44,17 @@ ReasoningContext::InitializeExpectedTargets(
             trace.label = label;
             trace.inner_id = inner_id;
 
-            const float* vec = nullptr;
-
-            if (data_type == DataTypes::DATA_TYPE_FLOAT) {
-                vec = static_cast<const float*>(precise_vectors) +
-                      static_cast<uint64_t>(inner_id) * dim;
-            } else if (data_type == DataTypes::DATA_TYPE_INT8) {
-                const int8_t* int8_vec = static_cast<const int8_t*>(precise_vectors) +
-                                         static_cast<uint64_t>(inner_id) * dim;
-                for (uint64_t i = 0; i < dim; ++i) {
-                    casted_vec[i] = static_cast<float>(int8_vec[i]);
-                }
-                vec = casted_vec;
-            } else if (data_type == DataTypes::DATA_TYPE_FP16) {
-                const uint16_t* fp16_vec = static_cast<const uint16_t*>(precise_vectors) +
-                                           static_cast<uint64_t>(inner_id) * dim;
-                for (uint64_t i = 0; i < dim; ++i) {
-                    casted_vec[i] = generic::FP16ToFloat(fp16_vec[i]);
-                }
-                vec = casted_vec;
-            } else if (data_type == DataTypes::DATA_TYPE_BF16) {
-                const uint16_t* bf16_vec = static_cast<const uint16_t*>(precise_vectors) +
-                                           static_cast<uint64_t>(inner_id) * dim;
-                for (uint64_t i = 0; i < dim; ++i) {
-                    casted_vec[i] = generic::BF16ToFloat(bf16_vec[i]);
-                }
-                vec = casted_vec;
-            }
-
-            if (vec != nullptr) {
-                float true_dist = 0.0F;
-                for (uint64_t i = 0; i < dim; ++i) {
-                    float diff = query[i] - vec[i];
-                    true_dist += diff * diff;
-                }
-                trace.true_distance = std::sqrt(true_dist);
-            }
-
             expected_traces_.insert(std::make_pair(inner_id, trace));
         }
     }
+}
 
-    delete[] casted_vec;
+void
+ReasoningContext::SetTrueDistance(InnerIdType id, float dist) {
+    auto it = expected_traces_.find(id);
+    if (it != expected_traces_.end()) {
+        it.value().true_distance = dist;
+    }
 }
 
 void
@@ -137,17 +93,30 @@ ReasoningContext::RecordFilterReject(InnerIdType id) {
 void
 ReasoningContext::RecordReorder(InnerIdType id, float dist_before, float dist_after) {
     auto it = expected_traces_.find(id);
-    if (it != expected_traces_.end()) {
-        it.value().reorder_evicted = true;
-        it.value().quantized_distance = dist_before;
-        it.value().true_distance = dist_after;
+    if (it == expected_traces_.end()) {
+        return;
     }
+
+    it.value().quantized_distance = dist_before;
+    it.value().true_distance = dist_after;
 
     ReorderRecord record;
     record.id = id;
     record.dist_before = dist_before;
     record.dist_after = dist_after;
     reorder_changes_.push_back(record);
+}
+
+void
+ReasoningContext::RecordReorderEviction(InnerIdType id, uint32_t hop) {
+    auto it = expected_traces_.find(id);
+    if (it != expected_traces_.end()) {
+        it.value().reorder_evicted = true;
+        if (!it.value().was_visited) {
+            it.value().was_visited = true;
+            it.value().visited_at_hop = static_cast<int32_t>(hop);
+        }
+    }
 }
 
 void
@@ -204,6 +173,7 @@ ReasoningContext::DiagnoseTarget(const ExpectedTargetTrace& trace) {
 std::string
 ReasoningContext::GenerateReport() const {
     JsonType report;
+    nlohmann::json missed_targets = nlohmann::json::array();
 
     int found_count = 0;
     int missed_count = 0;
@@ -214,6 +184,19 @@ ReasoningContext::GenerateReport() const {
             found_count++;
         } else {
             missed_count++;
+
+            nlohmann::json detail;
+            detail["label"] = trace.label;
+            detail["inner_id"] = trace.inner_id;
+            detail["diagnosis"] = trace.diagnosis;
+            detail["true_distance"] = trace.true_distance;
+            detail["quantized_distance"] = trace.quantized_distance;
+            detail["was_visited"] = trace.was_visited;
+            detail["visited_at_hop"] = trace.visited_at_hop;
+            detail["was_evicted"] = trace.was_evicted;
+            detail["filter_rejected"] = trace.filter_rejected;
+            detail["reorder_evicted"] = trace.reorder_evicted;
+            missed_targets.push_back(detail);
         }
     }
 
@@ -222,6 +205,11 @@ ReasoningContext::GenerateReport() const {
                           std::to_string(missed_count) + " missed";
 
     report["expected_analysis"]["summary"].SetString(summary);
+    if (not missed_targets.empty()) {
+        JsonType missed_targets_json;
+        *missed_targets_json.GetInnerJson() = std::move(missed_targets);
+        report["expected_analysis"]["missed_targets"].SetJson(missed_targets_json);
+    }
 
     return report.Dump();
 }

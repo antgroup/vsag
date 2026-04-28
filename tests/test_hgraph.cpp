@@ -21,7 +21,9 @@
 #include "inner_string_params.h"
 #include "test_index.h"
 #include "typing.h"
+#include "vsag/filter.h"
 #include "vsag/options.h"
+#include "vsag/search_request.h"
 
 namespace fixtures {
 
@@ -90,6 +92,24 @@ public:
     static const std::vector<std::pair<std::string, float>> all_test_cases;
 };
 using HGraphTestIndexPtr = std::shared_ptr<HGraphTestIndex>;
+
+class RejectAllFilter : public vsag::Filter {
+public:
+    bool
+    CheckValid(int64_t) const override {
+        return false;
+    }
+
+    bool
+    CheckValid(const char*) const override {
+        return false;
+    }
+
+    float
+    ValidRatio() const override {
+        return 0.0F;
+    }
+};
 
 TestDatasetPool HGraphTestIndex::pool{};
 fixtures::TempDir HGraphTestIndex::dir{"hgraph_test"};
@@ -819,6 +839,44 @@ TEST_CASE("(Daily) HGraph With Attr", "[ft][filter_search][hgraph][daily]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(false);
     TestHGraphWithAttr(test_index, resource);
+}
+
+TEST_CASE("(PR) HGraph SearchWithRequest Reasoning", "[ft][hgraph][pr]") {
+    using namespace fixtures;
+
+    HGraphTestIndex::HGraphBuildParam build_param("l2", 16, "fp32");
+    auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+
+    auto index = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+    auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(16, 256, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)
+        ->Dim(dataset->base_->GetDim())
+        ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+        ->Owner(false);
+
+    vsag::SearchRequest req;
+    req.topk_ = 5;
+    req.params_str_ = fmt::format(fixtures::search_param_tmp, 32, false);
+    req.query_ = query;
+    req.expected_labels_ = {dataset->base_->GetIds()[0]};
+
+    auto result = index->SearchWithRequest(req);
+    REQUIRE(result.has_value());
+    REQUIRE_FALSE(result.value()->GetReasoning().empty());
+    REQUIRE(result.value()->GetReasoning().find("missed_targets") != std::string::npos);
+
+    req.enable_filter_ = true;
+    req.filter_ = std::make_shared<RejectAllFilter>();
+
+    auto empty_result = index->SearchWithRequest(req);
+    REQUIRE(empty_result.has_value());
+    REQUIRE(empty_result.value()->GetDim() == 0);
+    REQUIRE_FALSE(empty_result.value()->GetReasoning().empty());
+    REQUIRE(empty_result.value()->GetReasoning().find("missed_targets") != std::string::npos);
+    REQUIRE(empty_result.value()->GetReasoning().find("diagnosis") != std::string::npos);
 }
 
 static void

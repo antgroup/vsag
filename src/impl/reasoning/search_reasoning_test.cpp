@@ -15,6 +15,7 @@
 #include "search_reasoning.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <string_view>
 
 #include "impl/allocator/default_allocator.h"
 
@@ -61,12 +62,8 @@ TEST_CASE("ReasoningContext with expected targets", "[reasoning]") {
     label_to_inner_id[100] = 0;
     label_to_inner_id[200] = 1;
 
-    float query[4] = {1.0F, 0.0F, 0.0F, 0.0F};
-    float vectors[2][4] = {{1.0F, 0.0F, 0.0F, 0.0F}, {0.0F, 1.0F, 0.0F, 0.0F}};
-
     SECTION("InitializeExpectedTargets") {
-        ctx.InitializeExpectedTargets(
-            labels, label_to_inner_id, query, vectors, DataTypes::DATA_TYPE_FLOAT, 4);
+        ctx.InitializeExpectedTargets(labels, label_to_inner_id);
         REQUIRE(ctx.expected_traces_.size() == 2);
         REQUIRE(ctx.expected_inner_ids_.size() == 2);
 
@@ -78,7 +75,7 @@ TEST_CASE("ReasoningContext with expected targets", "[reasoning]") {
         auto it2 = ctx.expected_traces_.find(1);
         REQUIRE(it2 != ctx.expected_traces_.end());
         REQUIRE(it2.value().label == 200);
-        REQUIRE(it2.value().true_distance > 0.0F);
+        REQUIRE(it2.value().true_distance == 0.0F);
     }
 }
 
@@ -92,10 +89,7 @@ TEST_CASE("ReasoningContext event recording", "[reasoning]") {
     UnorderedMap<int64_t, InnerIdType> label_to_inner_id(&allocator);
     label_to_inner_id[100] = 0;
 
-    float query[4] = {1.0F, 0.0F, 0.0F, 0.0F};
-    float vectors[1][4] = {{1.0F, 0.0F, 0.0F, 0.0F}};
-    ctx.InitializeExpectedTargets(
-        labels, label_to_inner_id, query, vectors, DataTypes::DATA_TYPE_FLOAT, 4);
+    ctx.InitializeExpectedTargets(labels, label_to_inner_id);
 
     SECTION("RecordVisit") {
         ctx.RecordVisit(0, 0.5F, 1);
@@ -123,15 +117,37 @@ TEST_CASE("ReasoningContext event recording", "[reasoning]") {
         REQUIRE(it.value().was_visited == true);
     }
 
+    SECTION("RecordFilterReject keeps visited hop") {
+        ctx.RecordVisit(0, 0.2F, 3);
+        ctx.RecordFilterReject(0);
+        auto it = ctx.expected_traces_.find(0);
+        REQUIRE(it != ctx.expected_traces_.end());
+        REQUIRE(it.value().visited_at_hop == 3);
+    }
+
     SECTION("RecordReorder") {
         ctx.RecordVisit(0, 0.3F, 1);
         ctx.RecordReorder(0, 0.3F, 0.5F);
         auto it = ctx.expected_traces_.find(0);
         REQUIRE(it != ctx.expected_traces_.end());
-        REQUIRE(it.value().reorder_evicted == true);
+        REQUIRE(it.value().reorder_evicted == false);
         REQUIRE(it.value().quantized_distance == 0.3F);
         REQUIRE(it.value().true_distance == 0.5F);
         REQUIRE(ctx.reorder_changes_.size() == 1);
+    }
+
+    SECTION("RecordReorder ignores non-expected target") {
+        ctx.RecordReorder(99, 0.3F, 0.5F);
+        REQUIRE(ctx.reorder_changes_.empty());
+    }
+
+    SECTION("RecordReorderEviction") {
+        ctx.RecordReorderEviction(0, 2);
+        auto it = ctx.expected_traces_.find(0);
+        REQUIRE(it != ctx.expected_traces_.end());
+        REQUIRE(it.value().reorder_evicted == true);
+        REQUIRE(it.value().was_visited == true);
+        REQUIRE(it.value().visited_at_hop == 2);
     }
 }
 
@@ -157,18 +173,7 @@ TEST_CASE("ReasoningContext diagnosis logic", "[reasoning]") {
     label_to_inner_id[600] = 5;
     label_to_inner_id[700] = 6;
 
-    float query[4] = {1.0F, 0.0F, 0.0F, 0.0F};
-    float vectors[7][4] = {
-        {1.0F, 0.0F, 0.0F, 0.0F},
-        {0.5F, 0.5F, 0.0F, 0.0F},
-        {0.0F, 1.0F, 0.0F, 0.0F},
-        {0.5F, 0.5F, 0.0F, 0.0F},
-        {0.0F, 1.0F, 0.0F, 0.0F},
-        {0.0F, 1.0F, 0.0F, 0.0F},
-        {0.0F, 1.0F, 0.0F, 0.0F},
-    };
-    ctx.InitializeExpectedTargets(
-        labels, label_to_inner_id, query, vectors, DataTypes::DATA_TYPE_FLOAT, 4);
+    ctx.InitializeExpectedTargets(labels, label_to_inner_id);
 
     SECTION("Diagnose: not_reachable") {
         ctx.DiagnoseExpectedTargets();
@@ -207,6 +212,7 @@ TEST_CASE("ReasoningContext diagnosis logic", "[reasoning]") {
     SECTION("Diagnose: reorder_evicted") {
         ctx.RecordVisit(6, 0.3F, 1);
         ctx.RecordReorder(6, 0.3F, 0.8F);
+        ctx.RecordReorderEviction(6, 2);
         ctx.DiagnoseExpectedTargets();
         auto it = ctx.expected_traces_.find(6);
         REQUIRE(it != ctx.expected_traces_.end());
@@ -237,10 +243,9 @@ TEST_CASE("ReasoningContext GenerateReport", "[reasoning]") {
     label_to_inner_id[100] = 0;
     label_to_inner_id[200] = 1;
 
-    float query[4] = {1.0F, 0.0F, 0.0F, 0.0F};
-    float vectors[2][4] = {{1.0F, 0.0F, 0.0F, 0.0F}, {0.0F, 1.0F, 0.0F, 0.0F}};
-    ctx.InitializeExpectedTargets(
-        labels, label_to_inner_id, query, vectors, DataTypes::DATA_TYPE_FLOAT, 4);
+    ctx.InitializeExpectedTargets(labels, label_to_inner_id);
+    ctx.SetTrueDistance(0, 0.0F);
+    ctx.SetTrueDistance(1, 1.4142135F);
 
     ctx.RecordVisit(0, 0.0F, 1);
     Vector<InnerIdType> result_ids(&allocator);
@@ -253,6 +258,17 @@ TEST_CASE("ReasoningContext GenerateReport", "[reasoning]") {
     REQUIRE(report.find("expected_analysis") != std::string::npos);
     REQUIRE(report.find("1/2") != std::string::npos);
     REQUIRE(report.find("1 missed") != std::string::npos);
+    REQUIRE(report.find("missed_targets") != std::string::npos);
+    REQUIRE(report.find("not_reachable") != std::string::npos);
+    REQUIRE(report.find("1.4142135") != std::string::npos);
+}
+
+TEST_CASE("ReasoningContext termination reasons are centralized", "[reasoning]") {
+    REQUIRE(std::string_view(ReasoningContext::kTerminationLowerBoundReached) ==
+            "lower_bound_reached");
+    REQUIRE(std::string_view(ReasoningContext::kTerminationHopsLimitReached) ==
+            "hops_limit_reached");
+    REQUIRE(std::string_view(ReasoningContext::kTerminationTimeout) == "timeout");
 }
 
 }  // namespace vsag
