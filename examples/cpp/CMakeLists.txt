@@ -121,3 +121,6 @@ target_link_libraries (501_quantization_transform vsag)
 
 add_executable (321_index_fp16_hgraph 321_index_fp16_hgraph.cpp)
 target_link_libraries (321_index_fp16_hgraph vsag)
+
+add_executable(322_feature_pyramid_duplicate 322_feature_pyramid_duplicate.cpp)
+target_link_libraries(322_feature_pyramid_duplicate vsag)
