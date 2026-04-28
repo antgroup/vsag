@@ -20,7 +20,7 @@ namespace vsag {
 void
 MemoryIO::WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset) {
     check_and_realloc(size + offset);
-    memcpy(start_ + offset, data, size);
+    memcpy(buffer_ + offset, data, size);
 }
 
 void
@@ -37,7 +37,7 @@ bool
 MemoryIO::ReadImpl(uint64_t size, uint64_t offset, uint8_t* data) const {
     bool ret = check_valid_offset(size + offset);
     if (ret) {
-        memcpy(data, start_ + offset, size);
+        memcpy(data, buffer_ + offset, size);
     }
     return ret;
 }
@@ -46,7 +46,7 @@ const uint8_t*
 MemoryIO::DirectReadImpl(uint64_t size, uint64_t offset, bool& need_release) const {
     need_release = false;
     if (check_valid_offset(size + offset)) {
-        return start_ + offset;
+        return buffer_ + offset;
     }
     return nullptr;
 }
@@ -61,6 +61,6 @@ MemoryIO::MultiReadImpl(uint8_t* datas, uint64_t* sizes, uint64_t* offsets, uint
 }
 void
 MemoryIO::PrefetchImpl(uint64_t offset, uint64_t cache_line) {
-    PrefetchLines(this->start_ + offset, cache_line);
+    PrefetchLines(this->buffer_ + offset, cache_line);
 }
 }  // namespace vsag
