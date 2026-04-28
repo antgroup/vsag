@@ -77,11 +77,11 @@ parse_args(argparse::ArgumentParser& parser, int argc, char** argv) {
             "if not set, will use default parameter in index file");
 
     parser.add_argument<std::string>("--query_path", "-qp")
-        .default_value(DEFAULT_SEARCH_PARAM)
+        .default_value(EMPTY_QUERY_PATH)
         .help("The query dataset path, if not set, will not do query analysis");
 
     parser.add_argument<std::string>("--search_parameter", "-sp")
-        .default_value(EMPTY_QUERY_PATH)
+        .default_value(DEFAULT_SEARCH_PARAM)
         .help("The parameter for search, if not set, will use default parameter");
 
     parser.add_argument("--topk", "-k")
