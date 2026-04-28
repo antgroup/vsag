@@ -62,7 +62,7 @@ PQFastScanQuantizer<metric>::PQFastScanQuantizer(const QuantizerParamPtr& param,
 
 template <MetricType metric>
 bool
-PQFastScanQuantizer<metric>::TrainImpl(const vsag::DataType* data, uint64_t count) {
+PQFastScanQuantizer<metric>::TrainImpl(const float* data, uint64_t count) {
     if (this->is_trained_) {
         return true;
     }
@@ -98,8 +98,8 @@ PQFastScanQuantizer<metric>::TrainImpl(const vsag::DataType* data, uint64_t coun
 
 template <MetricType metric>
 bool
-PQFastScanQuantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) {
-    const DataType* cur = data;
+PQFastScanQuantizer<metric>::EncodeOneImpl(const float* data, uint8_t* codes) {
+    const float* cur = data;
     Vector<float> tmp(this->allocator_);
     if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
         tmp.resize(this->dim_);
@@ -130,7 +130,7 @@ PQFastScanQuantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes)
 
 template <MetricType metric>
 bool
-PQFastScanQuantizer<metric>::EncodeBatchImpl(const DataType* data, uint8_t* codes, uint64_t count) {
+PQFastScanQuantizer<metric>::EncodeBatchImpl(const float* data, uint8_t* codes, uint64_t count) {
     for (uint64_t i = 0; i < count; ++i) {
         this->EncodeOneImpl(data + i * this->dim_, codes + i * this->code_size_);
     }
@@ -139,7 +139,7 @@ PQFastScanQuantizer<metric>::EncodeBatchImpl(const DataType* data, uint8_t* code
 
 template <MetricType metric>
 bool
-PQFastScanQuantizer<metric>::DecodeBatchImpl(const uint8_t* codes, DataType* data, uint64_t count) {
+PQFastScanQuantizer<metric>::DecodeBatchImpl(const uint8_t* codes, float* data, uint64_t count) {
     for (uint64_t i = 0; i < count; ++i) {
         this->DecodeOneImpl(codes + i * this->code_size_, data + i * this->dim_);
     }
@@ -148,7 +148,7 @@ PQFastScanQuantizer<metric>::DecodeBatchImpl(const uint8_t* codes, DataType* dat
 
 template <MetricType metric>
 bool
-PQFastScanQuantizer<metric>::DecodeOneImpl(const uint8_t* codes, DataType* data) {
+PQFastScanQuantizer<metric>::DecodeOneImpl(const uint8_t* codes, float* data) {
     for (int i = 0; i < pq_dim_; ++i) {
         auto idx = codes[i / 2];
         if (i % 2 == 0) {
@@ -297,7 +297,7 @@ PQFastScanQuantizer<metric>::Unpack32(const uint8_t* packaged_codes, uint8_t* co
 
 template <MetricType metric>
 void
-PQFastScanQuantizer<metric>::ProcessQueryImpl(const DataType* query,
+PQFastScanQuantizer<metric>::ProcessQueryImpl(const float* query,
                                               Computer<PQFastScanQuantizer>& computer) const {
     try {
         const float* cur_query = query;

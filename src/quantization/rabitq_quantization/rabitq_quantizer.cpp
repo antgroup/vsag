@@ -73,8 +73,7 @@ RaBitQuantizer<metric>::RaBitQuantizer(int dim,
     inv_sqrt_d_ = 1.0F / sqrt(this->dim_);
 
     // base code layout
-    uint64_t align_size =
-        std::max(std::max(sizeof(error_type), sizeof(norm_type)), sizeof(DataType));
+    uint64_t align_size = std::max(std::max(sizeof(error_type), sizeof(norm_type)), sizeof(float));
 
     uint64_t code_original_size = (this->dim_ + 7) / 8;
     code_original_size *= num_bits_per_dim_base_;
@@ -117,12 +116,13 @@ RaBitQuantizer<metric>::RaBitQuantizer(int dim,
         this->query_code_size_ = (sq_code_size / align_size) * align_size;
 
         query_offset_lb_ = this->query_code_size_;
-        this->query_code_size_ += ((sizeof(DataType) + align_size - 1) / align_size) * align_size;
+        this->query_code_size_ += ((sizeof(float) + align_size - 1) / align_size) * align_size;
 
         query_offset_delta_ = this->query_code_size_;
-        this->query_code_size_ += ((sizeof(DataType) + align_size - 1) / align_size) * align_size;
+        this->query_code_size_ += ((sizeof(float) + align_size - 1) / align_size) * align_size;
     } else {
-        this->query_code_size_ = ((sizeof(DataType) * this->dim_) / align_size) * align_size;
+        this->query_code_size_ =
+            ((sizeof(float) * this->dim_ + align_size - 1) / align_size) * align_size;
     }
 
     if (num_bits_per_dim_query_ == 4 or num_bits_per_dim_base_ != 1) {
@@ -168,7 +168,7 @@ RaBitQuantizer<metric>::RaBitQuantizer(const QuantizerParamPtr& param,
 
 template <MetricType metric>
 bool
-RaBitQuantizer<metric>::TrainImpl(const DataType* data, uint64_t count) {
+RaBitQuantizer<metric>::TrainImpl(const float* data, uint64_t count) {
     if (count == 0 or data == nullptr) {
         return false;
     }
@@ -187,7 +187,7 @@ RaBitQuantizer<metric>::TrainImpl(const DataType* data, uint64_t count) {
         centroid_[d] = 0;
     }
     for (uint64_t i = 0; i < count; ++i) {
-        Vector<DataType> pca_data(this->original_dim_, 0, this->allocator_);
+        Vector<float> pca_data(this->original_dim_, 0, this->allocator_);
         if (pca_dim_ != this->original_dim_) {
             pca_->Transform(data + i * original_dim_, pca_data.data());
         } else {
@@ -205,7 +205,7 @@ RaBitQuantizer<metric>::TrainImpl(const DataType* data, uint64_t count) {
     rom_->Train(data, count);
 
     // transform centroid
-    Vector<DataType> rp_centroids(this->dim_, 0, this->allocator_);
+    Vector<float> rp_centroids(this->dim_, 0, this->allocator_);
     rom_->Transform(centroid_.data(), rp_centroids.data());
     centroid_.assign(rp_centroids.begin(), rp_centroids.end());
 
@@ -416,11 +416,11 @@ RaBitQuantizer<metric>::EncodeExtendRaBitQ(const float* o_prime,
 
 template <MetricType metric>
 bool
-RaBitQuantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) const {
+RaBitQuantizer<metric>::EncodeOneImpl(const float* data, uint8_t* codes) const {
     // 0. init
-    Vector<DataType> pca_data(this->original_dim_, 0, this->allocator_);
-    Vector<DataType> transformed_data(this->dim_, 0, this->allocator_);
-    Vector<DataType> normed_data(this->dim_, 0, this->allocator_);
+    Vector<float> pca_data(this->original_dim_, 0, this->allocator_);
+    Vector<float> transformed_data(this->dim_, 0, this->allocator_);
+    Vector<float> normed_data(this->dim_, 0, this->allocator_);
     memset(codes, 0, this->code_size_);
 
     float raw_norm = 0;
@@ -505,7 +505,7 @@ RaBitQuantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) cons
 
 template <MetricType metric>
 bool
-RaBitQuantizer<metric>::EncodeBatchImpl(const DataType* data, uint8_t* codes, uint64_t count) {
+RaBitQuantizer<metric>::EncodeBatchImpl(const float* data, uint8_t* codes, uint64_t count) {
     for (uint64_t i = 0; i < count; ++i) {
         // TODO(ZXY): use batch optimize
         this->EncodeOneImpl(data + i * this->original_dim_, codes + i * this->code_size_);
@@ -515,14 +515,14 @@ RaBitQuantizer<metric>::EncodeBatchImpl(const DataType* data, uint8_t* codes, ui
 
 template <MetricType metric>
 bool
-RaBitQuantizer<metric>::DecodeOneImpl(const uint8_t* codes, DataType* data) {
+RaBitQuantizer<metric>::DecodeOneImpl(const uint8_t* codes, float* data) {
     if (pca_dim_ != this->original_dim_) {
         return false;
     }
 
     // 1. init
-    Vector<DataType> normed_data(this->dim_, 0, this->allocator_);
-    Vector<DataType> transformed_data(this->dim_, 0, this->allocator_);
+    Vector<float> normed_data(this->dim_, 0, this->allocator_);
+    Vector<float> transformed_data(this->dim_, 0, this->allocator_);
 
     // 2. decode with BQ
     if (num_bits_per_dim_base_ == 1) {
@@ -547,7 +547,7 @@ RaBitQuantizer<metric>::DecodeOneImpl(const uint8_t* codes, DataType* data) {
 
 template <MetricType metric>
 bool
-RaBitQuantizer<metric>::DecodeBatchImpl(const uint8_t* codes, DataType* data, uint64_t count) {
+RaBitQuantizer<metric>::DecodeBatchImpl(const uint8_t* codes, float* data, uint64_t count) {
     if (pca_dim_ != this->original_dim_) {
         return false;
     }
@@ -599,20 +599,21 @@ RaBitQuantizer<metric>::ComputeQueryBaseImpl(const uint8_t* query_codes,
 
         ip_bq_estimate = RaBitQSQ4UBinaryIP(query_codes, tmp.data(), aligned_dim_);
 
-        sum_type base_sum = *((sum_type*)(base_codes + offset_sum_));
+        sum_type base_sum = *reinterpret_cast<const sum_type*>(base_codes + offset_sum_);
         sum_type query_sum = *((sum_type*)(query_codes + query_offset_sum_));
-        DataType lower_bound = *((DataType*)(query_codes + query_offset_lb_));
-        DataType delta = *((DataType*)(query_codes + query_offset_delta_));
+        float lower_bound = *((float*)(query_codes + query_offset_lb_));
+        float delta = *((float*)(query_codes + query_offset_delta_));
 
         ip_bq_estimate = recover_dist_between_sq4u_and_fp32(
             ip_bq_estimate, base_sum, query_sum, lower_bound, delta, this->inv_sqrt_d_, this->dim_);
     } else if (num_bits_per_dim_query_ == 32 and num_bits_per_dim_base_ == 1) {
-        ip_bq_estimate =
-            RaBitQFloatBinaryIP((DataType*)query_codes, base_codes, this->dim_, inv_sqrt_d_);
+        ip_bq_estimate = RaBitQFloatBinaryIP(
+            reinterpret_cast<const float*>(query_codes), base_codes, this->dim_, inv_sqrt_d_);
     } else if (num_bits_per_dim_query_ == 32 and num_bits_per_dim_base_ != 1) {
         sum_type query_raw_sum = *((sum_type*)(query_codes + query_offset_sum_));
 
-        float ip_yu_q = RaBitQFloatSQIPByPlanes((DataType*)query_codes, base_codes + offset_code_);
+        float ip_yu_q = RaBitQFloatSQIPByPlanes(reinterpret_cast<const float*>(query_codes),
+                                                base_codes + offset_code_);
 
         ip_bq_estimate = ip_obar_q(ip_yu_q,
                                    query_raw_sum,
@@ -726,7 +727,7 @@ RaBitQuantizer<metric>::RecoverOrderSQ4(const uint8_t* output, uint8_t* input) c
 
 template <MetricType metric>
 void
-RaBitQuantizer<metric>::EncodeSQ(const DataType* normed_data,
+RaBitQuantizer<metric>::EncodeSQ(const float* normed_data,
                                  uint8_t* quantized_data,
                                  float& upper_bound,
                                  float& lower_bound,
@@ -768,7 +769,7 @@ RaBitQuantizer<metric>::ReOrderSQ(const uint8_t* quantized_data, uint8_t* reorde
 template <MetricType metric>
 void
 RaBitQuantizer<metric>::DecodeSQ(const uint8_t* codes,
-                                 DataType* data,
+                                 float* data,
                                  const float upper_bound,
                                  const float lower_bound) const {
     for (uint64_t d = 0; d < this->dim_; d++) {
@@ -807,7 +808,7 @@ RaBitQuantizer<metric>::RecoverOrderSQ(const uint8_t* output, uint8_t* input) co
 
 template <MetricType metric>
 void
-RaBitQuantizer<metric>::ProcessQueryImpl(const DataType* query,
+RaBitQuantizer<metric>::ProcessQueryImpl(const float* query,
                                          Computer<RaBitQuantizer>& computer) const {
     try {
         if (computer.buf_ == nullptr) {
@@ -817,9 +818,9 @@ RaBitQuantizer<metric>::ProcessQueryImpl(const DataType* query,
         std::fill(computer.buf_, computer.buf_ + this->query_code_size_, 0);
 
         // use residual term in pca, so it's this->original_dim_
-        Vector<DataType> pca_data(this->original_dim_, 0, this->allocator_);
-        Vector<DataType> transformed_data(this->dim_, 0, this->allocator_);
-        Vector<DataType> normed_data(this->dim_, 0, this->allocator_);
+        Vector<float> pca_data(this->original_dim_, 0, this->allocator_);
+        Vector<float> transformed_data(this->dim_, 0, this->allocator_);
+        Vector<float> normed_data(this->dim_, 0, this->allocator_);
 
         float query_raw_norm = 0;
         if constexpr (metric == MetricType::METRIC_TYPE_IP or
@@ -866,12 +867,12 @@ RaBitQuantizer<metric>::ProcessQueryImpl(const DataType* query,
                      query_sum);
             ReOrderSQ(quantized_data.data(), reinterpret_cast<uint8_t*>(computer.buf_));
             // store info
-            *(DataType*)(computer.buf_ + query_offset_lb_) = lower_bound;
-            *(DataType*)(computer.buf_ + query_offset_delta_) = delta;
+            *(float*)(computer.buf_ + query_offset_lb_) = lower_bound;
+            *(float*)(computer.buf_ + query_offset_delta_) = delta;
             *(sum_type*)(computer.buf_ + query_offset_sum_) = query_sum;
         } else {
             // store codes
-            memcpy(computer.buf_, normed_data.data(), normed_data.size() * sizeof(DataType));
+            memcpy(computer.buf_, normed_data.data(), normed_data.size() * sizeof(float));
         }
 
         if (num_bits_per_dim_base_ != 1) {

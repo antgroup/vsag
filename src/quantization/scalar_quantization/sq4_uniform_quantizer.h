@@ -40,19 +40,19 @@ public:
                                  const IndexCommonParam& common_param);
 
     bool
-    TrainImpl(const DataType* data, uint64_t count);
+    TrainImpl(const float* data, uint64_t count);
 
     bool
-    EncodeOneImpl(const DataType* data, uint8_t* codes) const;
+    EncodeOneImpl(const float* data, uint8_t* codes) const;
 
     bool
-    DecodeOneImpl(const uint8_t* codes, DataType* data);
+    DecodeOneImpl(const uint8_t* codes, float* data);
 
     float
     ComputeImpl(const uint8_t* codes1, const uint8_t* codes2) const;
 
     void
-    ProcessQueryImpl(const DataType* query, Computer<SQ4UniformQuantizer>& computer) const;
+    ProcessQueryImpl(const float* query, Computer<SQ4UniformQuantizer>& computer) const;
 
     void
     ComputeDistImpl(Computer<SQ4UniformQuantizer>& computer,
@@ -71,19 +71,19 @@ public:
     }
 
 public:
-    [[nodiscard]] std::pair<DataType, DataType>
+    [[nodiscard]] std::pair<float, float>
     GetLBandDiff() const {
         return {lower_bound_, diff_};
     }
 
-    DataType
+    float
     GetCodesSum(const uint8_t* codes) const {
         return *(sum_type*)(codes + offset_codes_sum_);
     }
 
 private:
-    DataType lower_bound_{0};
-    DataType diff_{0};
+    float lower_bound_{0};
+    float diff_{0};
 
     /***
      * code layout: sq-code(fixed) + norm(opt) + sum(opt)
