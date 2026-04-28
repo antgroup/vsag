@@ -17,6 +17,7 @@
 
 #include "datacell/flatten_interface.h"
 #include "impl/heap/standard_heap.h"
+#include "impl/reasoning/search_reasoning.h"
 #include "query_context.h"
 
 namespace vsag {
@@ -41,12 +42,19 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
     }
     flatten_->Query(dists.data(), computer, ids.data(), candidate_size, &ctx);
     for (int i = 0; i < candidate_size; ++i) {
+        if (ctx.reasoning_ctx != nullptr) {
+            ctx.reasoning_ctx->RecordReorder(
+                candidate_result[i].second, candidate_result[i].first, dists[i]);
+        }
         if (reorder_heap->Size() < topk || dists[i] < reorder_heap->Top().first) {
             reorder_heap->Push(dists[i], candidate_result[i].second);
             if (reorder_heap->Size() > topk) {
                 if (iter_ctx != nullptr) {
                     auto curr = reorder_heap->Top();
                     iter_ctx->AddDiscardNode(curr.first, curr.second);
+                }
+                if (ctx.reasoning_ctx != nullptr) {
+                    ctx.reasoning_ctx->RecordReorderEviction(reorder_heap->Top().second, 0);
                 }
                 reorder_heap->Pop();
             }

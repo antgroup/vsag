@@ -17,7 +17,6 @@
 #include <cstdint>
 #include <string>
 
-#include "data_type.h"
 #include "impl/allocator/allocator_wrapper.h"
 #include "json_wrapper.h"
 #include "typing.h"
@@ -54,11 +53,10 @@ public:
 
     void
     InitializeExpectedTargets(const Vector<int64_t>& labels,
-                              const UnorderedMap<int64_t, InnerIdType>& label_to_inner_id,
-                              const float* query,
-                              const void* precise_vectors,
-                              DataTypes data_type,
-                              uint64_t dim);
+                              const UnorderedMap<int64_t, InnerIdType>& label_to_inner_id);
+
+    void
+    SetTrueDistance(InnerIdType id, float dist);
 
     void
     RecordVisit(InnerIdType id, float dist, uint32_t hop);
@@ -71,6 +69,9 @@ public:
 
     void
     RecordReorder(InnerIdType id, float dist_before, float dist_after);
+
+    void
+    RecordReorderEviction(InnerIdType id, uint32_t hop);
 
     void
     SetTermination(const std::string& reason);
@@ -95,6 +96,10 @@ public:
 
     void
     AddDistanceComputation(uint32_t count = 1);
+
+    static constexpr const char* kTerminationLowerBoundReached = "lower_bound_reached";
+    static constexpr const char* kTerminationHopsLimitReached = "hops_limit_reached";
+    static constexpr const char* kTerminationTimeout = "timeout";
 
 public:
     int64_t topk_{0};
