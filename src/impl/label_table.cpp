@@ -42,6 +42,7 @@ LabelTable::LabelTable(Allocator* allocator, bool use_reverse_map, bool compress
       deleted_ids_(allocator),
       hole_list_(0, allocator) {
     (void)compress_redundant_data;
+    label_remap_.max_load_factor(0.75F);
     deleted_ids_filter_ = std::make_shared<RemoveListFilter>(deleted_ids_, delete_ids_mutex_);
 }
 
@@ -149,6 +150,8 @@ void
 LabelTable::Deserialize(StreamReader& reader) {
     StreamReader::ReadVector(reader, label_table_);
     if (use_reverse_map_) {
+        this->label_remap_.clear();
+        this->label_remap_.reserve(label_table_.size());
         for (InnerIdType id = 0; id < label_table_.size(); ++id) {
             this->label_remap_[label_table_[id]] = id;
         }
@@ -169,12 +172,24 @@ LabelTable::Deserialize(StreamReader& reader) {
 void
 LabelTable::MergeOther(const LabelTablePtr& other, const IdMapFunction& id_map) {
     auto other_size = other->GetTotalCount();
-    this->label_table_.resize(total_count_ + other_size);
-    for (int64_t i = 0; i < other_size; ++i) {
-        auto new_label = std::get<1>(id_map(other->label_table_[i]));
-        this->label_table_[i + total_count_] = new_label;
-        this->label_remap_[new_label] = i + total_count_;
+    auto current_total_count = total_count_.load();
+    auto other_size_u = static_cast<uint64_t>(other_size);
+    auto current_total_count_u = static_cast<uint64_t>(current_total_count);
+    this->label_table_.resize(current_total_count_u + other_size_u);
+    if (use_reverse_map_) {
+        this->label_remap_.reserve(this->label_remap_.size() + other_size_u);
+        for (uint64_t i = 0; i < other_size_u; ++i) {
+            auto new_label = std::get<1>(id_map(other->label_table_[i]));
+            auto new_inner_id = static_cast<InnerIdType>(i + current_total_count_u);
+            this->label_table_[i + current_total_count_u] = new_label;
+            this->label_remap_[new_label] = new_inner_id;
+        }
+    } else {
+        for (uint64_t i = 0; i < other_size_u; ++i) {
+            auto new_label = std::get<1>(id_map(other->label_table_[i]));
+            this->label_table_[i + current_total_count_u] = new_label;
+        }
     }
-    total_count_ += other_size;
+    total_count_ += static_cast<int64_t>(other_size_u);
 }
 }  // namespace vsag
