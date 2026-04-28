@@ -47,14 +47,14 @@ HalfPrecisionQuantizer<Format, metric>::HalfPrecisionQuantizer(const QuantizerPa
 
 template <typename Format, MetricType metric>
 bool
-HalfPrecisionQuantizer<Format, metric>::TrainImpl(const DataType* data, uint64_t count) {
+HalfPrecisionQuantizer<Format, metric>::TrainImpl(const float* data, uint64_t count) {
     this->is_trained_ = true;
     return data != nullptr;
 }
 
 template <typename Format, MetricType metric>
 bool
-HalfPrecisionQuantizer<Format, metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) const {
+HalfPrecisionQuantizer<Format, metric>::EncodeOneImpl(const float* data, uint8_t* codes) const {
     auto* codes_half = reinterpret_cast<uint16_t*>(codes);
     if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
         Vector<float> tmp(this->dim_, this->allocator_);
@@ -72,7 +72,7 @@ HalfPrecisionQuantizer<Format, metric>::EncodeOneImpl(const DataType* data, uint
 
 template <typename Format, MetricType metric>
 bool
-HalfPrecisionQuantizer<Format, metric>::DecodeOneImpl(const uint8_t* codes, DataType* data) {
+HalfPrecisionQuantizer<Format, metric>::DecodeOneImpl(const uint8_t* codes, float* data) {
     const auto* codes_half = reinterpret_cast<const uint16_t*>(codes);
     for (uint64_t d = 0; d < this->dim_; d++) {
         data[d] = Format::HalfToFloat(codes_half[d]);
@@ -97,7 +97,7 @@ HalfPrecisionQuantizer<Format, metric>::ComputeImpl(const uint8_t* codes1,
 template <typename Format, MetricType metric>
 void
 HalfPrecisionQuantizer<Format, metric>::ProcessQueryImpl(
-    const DataType* query, Computer<HalfPrecisionQuantizer<Format, metric>>& computer) const {
+    const float* query, Computer<HalfPrecisionQuantizer<Format, metric>>& computer) const {
     try {
         if (computer.buf_ == nullptr) {
             computer.buf_ =
