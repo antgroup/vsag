@@ -54,19 +54,19 @@ public:
     ~ProductQuantizer() = default;
 
     bool
-    TrainImpl(const DataType* data, uint64_t count);
+    TrainImpl(const float* data, uint64_t count);
 
     bool
-    EncodeOneImpl(const DataType* data, uint8_t* codes);
+    EncodeOneImpl(const float* data, uint8_t* codes);
 
     bool
-    DecodeOneImpl(const uint8_t* codes, DataType* data);
+    DecodeOneImpl(const uint8_t* codes, float* data);
 
     float
     ComputeImpl(const uint8_t* codes1, const uint8_t* codes2);
 
     void
-    ProcessQueryImpl(const DataType* query, Computer<ProductQuantizer>& computer) const;
+    ProcessQueryImpl(const float* query, Computer<ProductQuantizer>& computer) const;
 
     void
     ComputeDistImpl(Computer<ProductQuantizer>& computer, const uint8_t* codes, float* dists) const;

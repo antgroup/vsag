@@ -39,19 +39,19 @@ public:
     virtual ~QuantizerAdapter() = default;
 
     bool
-    TrainImpl(const DataType* data, uint64_t count);
+    TrainImpl(const float* data, uint64_t count);
 
     bool
-    EncodeOneImpl(const DataType* data, uint8_t* codes);
+    EncodeOneImpl(const float* data, uint8_t* codes);
 
     bool
-    EncodeBatchImpl(const DataType* data, uint8_t* codes, uint64_t count);
+    EncodeBatchImpl(const float* data, uint8_t* codes, uint64_t count);
 
     bool
-    DecodeOneImpl(const uint8_t* codes, DataType* data);
+    DecodeOneImpl(const uint8_t* codes, float* data);
 
     bool
-    DecodeBatchImpl(const uint8_t* codes, DataType* data, uint64_t count);
+    DecodeBatchImpl(const uint8_t* codes, float* data, uint64_t count);
 
     float
     ComputeImpl(const uint8_t* codes1, const uint8_t* codes2);
@@ -63,8 +63,7 @@ public:
     DeserializeImpl(StreamReader& reader);
 
     void
-    ProcessQueryImpl(const DataType* query,
-                     Computer<QuantizerAdapter<QuantT, DataT>>& computer) const;
+    ProcessQueryImpl(const float* query, Computer<QuantizerAdapter<QuantT, DataT>>& computer) const;
 
     void
     ComputeDistImpl(Computer<QuantizerAdapter<QuantT, DataT>>& computer,

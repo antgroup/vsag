@@ -76,12 +76,12 @@ public:
     BatchInsertVector(const void* vectors, InnerIdType count, InnerIdType* idx_vec) override;
 
     bool
-    Decode(const uint8_t* codes, DataType* data) override {
+    Decode(const uint8_t* codes, float* data) override {
         return this->quantizer_->DecodeOne(codes, data);
     }
 
     bool
-    Encode(const DataType* data, uint8_t* codes) override {
+    Encode(const float* data, uint8_t* codes) override {
         return this->quantizer_->EncodeOne(data, codes);
     }
 

@@ -136,10 +136,10 @@ public:
     }
 
     virtual bool
-    Decode(const uint8_t* codes, DataType* vector) = 0;
+    Decode(const uint8_t* codes, float* vector) = 0;
 
     virtual bool
-    Encode(const DataType* vector, uint8_t* codes) = 0;
+    Encode(const float* vector, uint8_t* codes) = 0;
 
     [[nodiscard]] virtual const uint8_t*
     GetCodesById(InnerIdType id, bool& need_release) const = 0;

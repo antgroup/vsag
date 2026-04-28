@@ -55,19 +55,19 @@ public:
     explicit RaBitQuantizer(const QuantizerParamPtr& param, const IndexCommonParam& common_param);
 
     bool
-    TrainImpl(const DataType* data, uint64_t count);
+    TrainImpl(const float* data, uint64_t count);
 
     bool
-    EncodeOneImpl(const DataType* data, uint8_t* codes) const;
+    EncodeOneImpl(const float* data, uint8_t* codes) const;
 
     bool
-    EncodeBatchImpl(const DataType* data, uint8_t* codes, uint64_t count);
+    EncodeBatchImpl(const float* data, uint8_t* codes, uint64_t count);
 
     bool
-    DecodeOneImpl(const uint8_t* codes, DataType* data);
+    DecodeOneImpl(const uint8_t* codes, float* data);
 
     bool
-    DecodeBatchImpl(const uint8_t* codes, DataType* data, uint64_t count);
+    DecodeBatchImpl(const uint8_t* codes, float* data, uint64_t count);
 
     float
     ComputeImpl(const uint8_t* codes1, const uint8_t* codes2) const;
@@ -76,7 +76,7 @@ public:
     ComputeQueryBaseImpl(const uint8_t* query_codes, const uint8_t* base_codes) const;
 
     void
-    ProcessQueryImpl(const DataType* query, Computer<RaBitQuantizer>& computer) const;
+    ProcessQueryImpl(const float* query, Computer<RaBitQuantizer>& computer) const;
 
     void
     ComputeDistImpl(Computer<RaBitQuantizer>& computer, const uint8_t* codes, float* dists) const;
@@ -110,7 +110,7 @@ public:
     RecoverOrderSQ4(const uint8_t* output, uint8_t* input) const;
 
     void
-    EncodeSQ(const DataType* normed_data,
+    EncodeSQ(const float* normed_data,
              uint8_t* quantized_data,
              float& upper_bound,
              float& lower_bound,
@@ -118,7 +118,7 @@ public:
              sum_type& query_sum) const;
     void
     DecodeSQ(const uint8_t* codes,
-             DataType* data,
+             float* data,
              const float upper_bound,
              const float lower_bound) const;
 

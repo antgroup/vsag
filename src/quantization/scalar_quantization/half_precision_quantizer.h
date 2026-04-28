@@ -48,19 +48,19 @@ public:
                                     const IndexCommonParam& common_param);
 
     bool
-    TrainImpl(const DataType* data, uint64_t count);
+    TrainImpl(const float* data, uint64_t count);
 
     bool
-    EncodeOneImpl(const DataType* data, uint8_t* codes) const;
+    EncodeOneImpl(const float* data, uint8_t* codes) const;
 
     bool
-    DecodeOneImpl(const uint8_t* codes, DataType* data);
+    DecodeOneImpl(const uint8_t* codes, float* data);
 
     float
     ComputeImpl(const uint8_t* codes1, const uint8_t* codes2) const;
 
     void
-    ProcessQueryImpl(const DataType* query,
+    ProcessQueryImpl(const float* query,
                      Computer<HalfPrecisionQuantizer<Format, metric>>& computer) const;
 
     void

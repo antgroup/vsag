@@ -54,25 +54,25 @@ public:
     explicit SparseQuantizer(const QuantizerParamPtr& param, const IndexCommonParam& common_param);
 
     bool
-    TrainImpl(const DataType* data, uint64_t count);
+    TrainImpl(const float* data, uint64_t count);
 
     bool
-    EncodeOneImpl(const DataType* data, uint8_t* codes) const;
+    EncodeOneImpl(const float* data, uint8_t* codes) const;
 
     bool
-    EncodeBatchImpl(const DataType* data, uint8_t* codes, uint64_t count);
+    EncodeBatchImpl(const float* data, uint8_t* codes, uint64_t count);
 
     bool
-    DecodeOneImpl(const uint8_t* codes, DataType* data);
+    DecodeOneImpl(const uint8_t* codes, float* data);
 
     bool
-    DecodeBatchImpl(const uint8_t* codes, DataType* data, uint64_t count);
+    DecodeBatchImpl(const uint8_t* codes, float* data, uint64_t count);
 
     inline float
     ComputeImpl(const uint8_t* codes1, const uint8_t* codes2) const;
 
     inline void
-    ProcessQueryImpl(const DataType* query, Computer<SparseQuantizer>& computer) const;
+    ProcessQueryImpl(const float* query, Computer<SparseQuantizer>& computer) const;
 
     inline void
     ComputeDistImpl(Computer<SparseQuantizer>& computer, const uint8_t* codes, float* dists) const;
@@ -154,7 +154,7 @@ SparseQuantizer<metric>::ComputeDistImpl(Computer<SparseQuantizer>& computer,
 
 template <MetricType metric>
 void
-SparseQuantizer<metric>::ProcessQueryImpl(const DataType* query,
+SparseQuantizer<metric>::ProcessQueryImpl(const float* query,
                                           Computer<SparseQuantizer>& computer) const {
     const auto* sparse_query = reinterpret_cast<const SparseVector*>(query);
     try {
@@ -204,26 +204,26 @@ SparseQuantizer<metric>::ComputeImpl(const uint8_t* codes1, const uint8_t* codes
 
 template <MetricType metric>
 bool
-SparseQuantizer<metric>::DecodeBatchImpl(const uint8_t* codes, DataType* data, uint64_t count) {
+SparseQuantizer<metric>::DecodeBatchImpl(const uint8_t* codes, float* data, uint64_t count) {
     throw VsagException(ErrorType::INTERNAL_ERROR, "no support for decode in sparse quantizer");
 }
 
 template <MetricType metric>
 bool
-SparseQuantizer<metric>::DecodeOneImpl(const uint8_t* codes, DataType* data) {
+SparseQuantizer<metric>::DecodeOneImpl(const uint8_t* codes, float* data) {
     throw VsagException(ErrorType::INTERNAL_ERROR, "no support for decode in sparse quantizer");
 }
 
 template <MetricType metric>
 bool
-SparseQuantizer<metric>::EncodeBatchImpl(const DataType* data, uint8_t* codes, uint64_t count) {
+SparseQuantizer<metric>::EncodeBatchImpl(const float* data, uint8_t* codes, uint64_t count) {
     throw VsagException(ErrorType::INTERNAL_ERROR,
                         "no support for batch encode in sparse quantizer");
 }
 
 template <MetricType metric>
 bool
-SparseQuantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) const {
+SparseQuantizer<metric>::EncodeOneImpl(const float* data, uint8_t* codes) const {
     const SparseVector& sv = *reinterpret_cast<const SparseVector*>(data);
     *reinterpret_cast<uint32_t*>(codes) = sv.len_;
     auto* entries = reinterpret_cast<BufferEntry*>(codes + sizeof(uint32_t));
@@ -239,7 +239,7 @@ SparseQuantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) con
 
 template <MetricType metric>
 bool
-SparseQuantizer<metric>::TrainImpl(const DataType* data, uint64_t count) {
+SparseQuantizer<metric>::TrainImpl(const float* data, uint64_t count) {
     this->is_trained_ = true;
     return true;
 }
