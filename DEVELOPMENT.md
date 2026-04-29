@@ -24,6 +24,7 @@ docker pull vsaglib/vsag:ubuntu
 - Operating System:
   - Ubuntu 20.04 or later
   - or CentOS 7 or later
+  - or macOS 14 or later (arm64, C++ build path)
 - Compiler:
   - GCC version 9.4.0 or later
   - or Clang version 13.0.0 or later
@@ -32,18 +33,17 @@ docker pull vsaglib/vsag:ubuntu
   - clang-tidy version 15 EXACTLY (not higher, not lower - required for consistent lint diagnostics)
   - clang-format version 15 EXACTLY (not higher, not lower - required for consistent formatting)
 - Additional Dependencies:
-  - gfortran
-  - python 3.6+
-  - omp
-  - aio
-  - curl
+  - Linux: gfortran, python 3.6+, OpenMP, libaio, curl
+  - macOS: Xcode Command Line Tools, Homebrew
 
 ```bash
-# for Debian/Ubuntu
-$ ./scripts/deps/install_deps_ubuntu.sh
+# auto-detect the local OS / distro
+$ ./scripts/deps/install_deps.sh
 
-# for CentOS/AliOS
+# optional: call the platform-specific script directly
+$ ./scripts/deps/install_deps_ubuntu.sh
 $ ./scripts/deps/install_deps_centos.sh
+$ ./scripts/deps/install_deps_macos.sh
 ```
 
 ## VSAG Build Tool
@@ -91,6 +91,7 @@ Build target behavior:
 - `make dev` builds the full developer configuration with tests, examples, tools, Python bindings, and `mockimpl` enabled.
 - `make test`, `make asan`, `make tsan`, and the related parallel test targets automatically enable tests and `mockimpl`.
 - `make release` follows the same minimal defaults as `make debug`. Enable optional components explicitly when needed, for example `make release VSAG_ENABLE_TOOLS=ON`.
+- Linux and macOS use the same dependency-script plus `make` entry points for the core C++ build. Use `./scripts/deps/install_deps.sh` first, then run the usual `make` target. The current macOS validation scope is `make debug`, `make release`, and `make test` on arm64; Python wheel packaging remains Linux-focused.
 
 ## CMake Build Options
 
@@ -101,19 +102,24 @@ VSAG provides several CMake options to customize the build:
 - **`ENABLE_INTEL_MKL`** (default: `OFF`)
   - Enable Intel MKL as the BLAS backend (x86_64 platforms only)
   - When disabled, OpenBLAS is used instead
-  - MKL resolution uses `MKL_PATH`, `OMP_PATH`, and `MKL_INCLUDE_PATH` as CMake cache overrides when the libraries are not installed in standard locations
+  - MKL resolution uses `MKL_PATH`, `OMP_PATH`, and `MKL_INCLUDE_PATH` as CMake cache
+    overrides when the libraries are not installed in standard locations
 
 ### System Third-Party Dependencies
 
-VSAG can reuse third-party libraries already provided by the host system or by a parent CMake project instead of always building bundled copies.
+VSAG can reuse third-party libraries already provided by the host system or by a parent CMake
+project instead of always building bundled copies.
 
 - **`VSAG_USE_SYSTEM_DEPS`** (default: `AUTO`)
-  - `AUTO` — use a system / pre-existing copy when one is found, fall back to the bundled build otherwise.
-  - `ON` — require a system copy of every supported dependency; fail configuration if any of them is missing.
+  - `AUTO` — use a system / pre-existing copy when one is found, fall back to the bundled
+    build otherwise.
+  - `ON` — require a system copy of every supported dependency; fail configuration if any
+    of them is missing.
   - `OFF` — always build bundled copies, ignoring system packages.
 
 - **`VSAG_USE_SYSTEM_<DEP>`** (default: empty — inherit `VSAG_USE_SYSTEM_DEPS`)
-  - Per-dependency override. Set to `AUTO`, `ON`, or `OFF` to override the global policy for a single dependency.
+  - Per-dependency override. Set to `AUTO`, `ON`, or `OFF` to override the global policy
+    for a single dependency.
 
 **Currently supported dependencies for system reuse:** `OPENBLAS`.
 
@@ -121,11 +127,13 @@ Additional dependencies will be enabled in follow-up changes.
 
 #### OpenBLAS
 
-When `VSAG_USE_SYSTEM_OPENBLAS=ON` (or inherited via `VSAG_USE_SYSTEM_DEPS=ON`), VSAG looks for OpenBLAS in the following order and stops at the first hit:
+When `VSAG_USE_SYSTEM_OPENBLAS=ON` (or inherited via `VSAG_USE_SYSTEM_DEPS=ON`), VSAG
+looks for OpenBLAS in the following order and stops at the first hit:
 
 1. an `OpenBLAS::OpenBLAS` target already defined by a parent project,
 2. `find_package(OpenBLAS CONFIG)`,
-3. a manual search for `libopenblas` plus `cblas.h` / `lapacke.h` under common system prefixes.
+3. a manual search for `libopenblas` plus `cblas.h` / `lapacke.h` under common system
+   prefixes, including Homebrew's OpenBLAS prefixes on macOS.
 
 Example:
 
@@ -133,12 +141,19 @@ Example:
 # Install OpenBLAS on Ubuntu/Debian
 sudo apt-get install libopenblas-dev liblapacke-dev
 
+# Install OpenBLAS on macOS
+brew install openblas
+
 # Build with system OpenBLAS
 cmake -DVSAG_USE_SYSTEM_OPENBLAS=ON -DENABLE_INTEL_MKL=OFF -B build
 cmake --build build
 ```
 
-The legacy switch **`USE_SYSTEM_OPENBLAS`** (default: `OFF`) is kept as a deprecated alias. When `VSAG_USE_SYSTEM_OPENBLAS` is empty, setting `USE_SYSTEM_OPENBLAS=ON` preserves its previous "try system, fall back to bundled" behaviour (equivalent to `VSAG_USE_SYSTEM_OPENBLAS=AUTO` — it does **not** hard-require a system copy). Prefer the new option in new scripts.
+The legacy switch **`USE_SYSTEM_OPENBLAS`** (default: `OFF`) is kept as a deprecated
+alias. When `VSAG_USE_SYSTEM_OPENBLAS` is empty, setting `USE_SYSTEM_OPENBLAS=ON`
+preserves its previous "try system, fall back to bundled" behaviour (equivalent to
+`VSAG_USE_SYSTEM_OPENBLAS=AUTO` — it does **not** hard-require a system copy). Prefer
+the new option in new scripts.
 
 ### Third-Party Source Overrides
 

@@ -15,12 +15,32 @@
 
 if (APPLE)
     set (ld_flags_workaround "-Wl,-rpath,@loader_path")
-    # Find OpenMP - will locate libomp on macOS
-    find_package (OpenMP REQUIRED)
+    if (NOT TARGET vsag_openmp)
+        add_library (vsag_openmp INTERFACE)
+    endif ()
+
+    # Prefer Homebrew's libomp when using AppleClang.
+    find_program (BREW_EXECUTABLE brew)
+    if (BREW_EXECUTABLE)
+        execute_process (
+            COMMAND ${BREW_EXECUTABLE} --prefix libomp
+            OUTPUT_VARIABLE LIBOMP_PREFIX
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET
+        )
+    endif ()
+
+    find_package (OpenMP QUIET COMPONENTS CXX)
     if (OpenMP_CXX_FOUND)
-        message (STATUS "Found OpenMP: ${OpenMP_CXX_INCLUDE_DIRS}")
-        set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
-        set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+        message (STATUS "Found OpenMP via CMake: ${OpenMP_CXX_LIB_NAMES}")
+        target_link_libraries (vsag_openmp INTERFACE OpenMP::OpenMP_CXX)
+    elseif (DEFINED LIBOMP_PREFIX AND EXISTS "${LIBOMP_PREFIX}/lib/libomp.dylib")
+        message (STATUS "Configuring OpenMP from Homebrew libomp: ${LIBOMP_PREFIX}")
+        target_compile_options (vsag_openmp INTERFACE -Xclang -fopenmp)
+        target_include_directories (vsag_openmp INTERFACE "${LIBOMP_PREFIX}/include")
+        target_link_libraries (vsag_openmp INTERFACE "${LIBOMP_PREFIX}/lib/libomp.dylib")
+    else ()
+        message (FATAL_ERROR "OpenMP not found on macOS. Install dependencies via scripts/deps/install_deps.sh.")
     endif ()
 
     # Find LAPACK - will automatically use Accelerate framework on macOS
