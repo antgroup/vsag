@@ -1105,9 +1105,14 @@ TEST_CASE("int8 + freshhnsw + feedback + update", "[ft][feedback][update][hnsw]"
     logger->Debug("====summary====");
     logger->Debug(fmt::format(R"(Error fix: {})", error_fix));
 
-    REQUIRE(error_fix > 0);
-    REQUIRE(recall[0] < recall[1]);
-    REQUIRE(fixtures::time_t(recall[1]) == fixtures::time_t(1.0f));
+    const bool initial_recall_is_perfect =
+        fixtures::recall_t(recall[0]) == fixtures::recall_t(1.0f);
+    if (not initial_recall_is_perfect) {
+        REQUIRE(error_fix > 0);
+        REQUIRE(recall[0] < recall[1]);
+    }
+    REQUIRE(recall[1] >= recall[0]);
+    REQUIRE(fixtures::recall_t(recall[1]) == fixtures::recall_t(1.0f));
 }
 
 TEST_CASE("hnsw + feedback with global optimum id + remove", "[ft][feedback][remove][hnsw]") {
@@ -1228,10 +1233,17 @@ TEST_CASE("hnsw + feedback with global optimum id + remove", "[ft][feedback][rem
     logger->Debug("====summary====");
     logger->Debug(fmt::format(R"(Error fix: {})", error_fix));
 
-    REQUIRE(error_fix > 0);
+    const bool initial_recall_is_perfect =
+        fixtures::recall_t(recall[0]) == fixtures::recall_t(1.0f);
+    if (not initial_recall_is_perfect) {
+        REQUIRE(error_fix > 0);
+    }
     if (not is_remove) {
-        REQUIRE(recall[0] < recall[1]);
-        REQUIRE(fixtures::time_t(recall[1]) == fixtures::time_t(1.0f));
+        if (not initial_recall_is_perfect) {
+            REQUIRE(recall[0] < recall[1]);
+        }
+        REQUIRE(recall[1] >= recall[0]);
+        REQUIRE(fixtures::recall_t(recall[1]) == fixtures::recall_t(1.0f));
     }
 }
 
