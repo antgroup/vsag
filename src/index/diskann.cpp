@@ -63,7 +63,7 @@ const static std::string EMPTY_DISKANN = "EMPTY_DISKANN";
 template <typename T>
 Binary
 to_binary(T& value) {
-    Binary binary;
+    Binary binary{};
     binary.size = sizeof(T);
     binary.data = std::shared_ptr<int8_t[]>(new int8_t[binary.size]);
     std::memcpy(binary.data.get(), &value, binary.size);

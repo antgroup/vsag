@@ -157,11 +157,12 @@ for (let i = 0; i < 10; i++) {
 ### Integrate with CMake
 ```cmake
 # CMakeLists.txt
-cmake_minimum_required(VERSION 3.11)
+cmake_minimum_required(VERSION 3.18)
 
 project (myproject)
 
-set (CMAKE_CXX_STANDARD 17)
+set (CMAKE_CXX_STANDARD 11)
+set (CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # download and compile vsag
 include (FetchContent)
@@ -174,7 +175,7 @@ FetchContent_MakeAvailable (vsag)
 
 # compile executable and link to vsag
 add_executable (vsag-cmake-example src/main.cpp)
-target_include_directories (vsag-cmake-example PRIVATE ${vsag_SOURCE_DIR}/include)
+target_include_directories (vsag-cmake-example SYSTEM PRIVATE ${vsag_SOURCE_DIR}/include)
 target_link_libraries (vsag-cmake-example PRIVATE vsag)
 
 # add dependency
