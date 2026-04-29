@@ -254,7 +254,10 @@ bool
 ArePathArraysDeepCopied(const std::string* original,
                         const std::string* copy,
                         uint64_t num_elements) {
-    if (original == copy) {
+    if (num_elements == 0) {
+        return true;
+    }
+    if (original == nullptr || copy == nullptr || original == copy) {
         return false;
     }
     for (uint64_t i = 0; i < num_elements; ++i) {
