@@ -62,6 +62,12 @@ if (MKL_STATIC_LINK)
         "${MKL_PATH}/libmkl_core.a"
         "${OMP_PATH}/libiomp5.a"
     )
+    
+    foreach (mkllib ${MKL_INSTALL_LIBS})
+        if (EXISTS ${mkllib})
+            install (FILES ${mkllib} DESTINATION ${CMAKE_INSTALL_LIBDIR})
+        endif ()
+    endforeach ()
     message (STATUS "Enabled Intel MKL as BLAS backend (STATIC linking).")
 
 else ()
@@ -76,15 +82,6 @@ else ()
             "/opt/intel/mkl/lib/intel64"
     )
 
-    find_path(OMP_PATH
-        NAMES libiomp5.so
-        HINTS
-            "/opt/intel/oneapi/compiler/2024.2/lib"
-            "/opt/intel/oneapi/compiler/latest/linux/compiler/lib/intel64_lin"
-            "/usr/lib/x86_64-linux-gnu"
-            "/opt/intel/lib/intel64_lin"
-    )
-
     find_path(MKL_INCLUDE_PATH
         NAMES mkl.h
         HINTS
@@ -93,20 +90,26 @@ else ()
             "/opt/intel/mkl/include"
     )
 
-    if (NOT MKL_PATH OR NOT OMP_PATH OR NOT MKL_INCLUDE_PATH)
-        message (FATAL_ERROR "Could not find Intel MKL (dynamic) or OpenMP libraries/headers. "
+    if (NOT MKL_PATH OR NOT MKL_INCLUDE_PATH)
+        message (FATAL_ERROR "Could not find Intel MKL (dynamic) libraries/headers. "
                               "Please check your MKL installation or disable ENABLE_INTEL_MKL.")
     else ()
         message (STATUS "Found MKL dynamic libraries in: ${MKL_PATH}")
         message (STATUS "Found MKL include path: ${MKL_INCLUDE_PATH}")
-        message (STATUS "Found OpenMP dynamic library in: ${OMP_PATH}")
     endif ()
 
     set (BLAS_LIBRARIES
         "${MKL_PATH}/libmkl_rt.so"
-        "${OMP_PATH}/libiomp5.so"
     )
-    set (MKL_INSTALL_LIBS ${BLAS_LIBRARIES})
+    
+    # Add GNU OpenMP for compatibility with diskann and other components
+    if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        list (APPEND BLAS_LIBRARIES omp)
+    else ()
+        list (APPEND BLAS_LIBRARIES gomp)
+    endif ()
+    
+    set (MKL_INSTALL_LIBS "${MKL_PATH}/libmkl_rt.so")
 
     foreach (mkllib ${MKL_INSTALL_LIBS})
         if (EXISTS ${mkllib})
@@ -118,9 +121,6 @@ endif ()
 
 target_include_directories (vsag_mkl_headers INTERFACE ${MKL_INCLUDE_PATH})
 
-foreach (mkllib ${MKL_INSTALL_LIBS})
-    install (FILES ${mkllib} DESTINATION ${CMAKE_INSTALL_LIBDIR})
-endforeach ()
 message (STATUS "enable ${Yellow}intel-mkl${CR} as blas backend")
 
 set (BLAS_LIBRARIES "${BLAS_LIBRARIES}" CACHE STRING "Final list of BLAS libraries to link against." FORCE)
