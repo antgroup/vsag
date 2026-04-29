@@ -16,6 +16,9 @@
 
 #include <cmath>
 
+#include "simd/bf16_simd.h"
+#include "simd/fp16_simd.h"
+
 namespace vsag {
 
 ReasoningContext::ReasoningContext(Allocator* allocator)
@@ -39,6 +42,11 @@ ReasoningContext::InitializeExpectedTargets(
     expected_inner_ids_.clear();
     expected_traces_.clear();
 
+    float* casted_vec = nullptr;
+    if (data_type != DataTypes::DATA_TYPE_FLOAT) {
+        casted_vec = new float[dim];
+    }
+
     for (const auto& label : labels) {
         auto it = label_to_inner_id.find(label);
         if (it != label_to_inner_id.end()) {
@@ -50,7 +58,6 @@ ReasoningContext::InitializeExpectedTargets(
             trace.inner_id = inner_id;
 
             const float* vec = nullptr;
-            float* casted_vec = nullptr;
 
             if (data_type == DataTypes::DATA_TYPE_FLOAT) {
                 vec = static_cast<const float*>(precise_vectors) +
@@ -58,7 +65,6 @@ ReasoningContext::InitializeExpectedTargets(
             } else if (data_type == DataTypes::DATA_TYPE_INT8) {
                 const int8_t* int8_vec = static_cast<const int8_t*>(precise_vectors) +
                                          static_cast<uint64_t>(inner_id) * dim;
-                casted_vec = new float[dim];
                 for (uint64_t i = 0; i < dim; ++i) {
                     casted_vec[i] = static_cast<float>(int8_vec[i]);
                 }
@@ -66,9 +72,15 @@ ReasoningContext::InitializeExpectedTargets(
             } else if (data_type == DataTypes::DATA_TYPE_FP16) {
                 const uint16_t* fp16_vec = static_cast<const uint16_t*>(precise_vectors) +
                                            static_cast<uint64_t>(inner_id) * dim;
-                casted_vec = new float[dim];
                 for (uint64_t i = 0; i < dim; ++i) {
-                    casted_vec[i] = static_cast<float>(fp16_vec[i]) / 32768.0F;
+                    casted_vec[i] = generic::FP16ToFloat(fp16_vec[i]);
+                }
+                vec = casted_vec;
+            } else if (data_type == DataTypes::DATA_TYPE_BF16) {
+                const uint16_t* bf16_vec = static_cast<const uint16_t*>(precise_vectors) +
+                                           static_cast<uint64_t>(inner_id) * dim;
+                for (uint64_t i = 0; i < dim; ++i) {
+                    casted_vec[i] = generic::BF16ToFloat(bf16_vec[i]);
                 }
                 vec = casted_vec;
             }
@@ -82,11 +94,11 @@ ReasoningContext::InitializeExpectedTargets(
                 trace.true_distance = std::sqrt(true_dist);
             }
 
-            delete[] casted_vec;
-
             expected_traces_.insert(std::make_pair(inner_id, trace));
         }
     }
+
+    delete[] casted_vec;
 }
 
 void
