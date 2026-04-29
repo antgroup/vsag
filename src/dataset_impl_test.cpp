@@ -250,6 +250,24 @@ AreAllPointersDifferent(T* original, T* copy, uint64_t num_elements) {
     return true;
 }
 
+bool
+ArePathArraysDeepCopied(const std::string* original,
+                        const std::string* copy,
+                        uint64_t num_elements) {
+    if (num_elements == 0) {
+        return true;
+    }
+    if (original == nullptr || copy == nullptr || original == copy) {
+        return false;
+    }
+    for (uint64_t i = 0; i < num_elements; ++i) {
+        if (original[i] != copy[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
 TEST_CASE("Dataset Copy and Append Test", "[ut][Dataset]") {
     std::random_device rd;
     std::mt19937 gen(rd());
@@ -277,7 +295,7 @@ TEST_CASE("Dataset Copy and Append Test", "[ut][Dataset]") {
         REQUIRE(AreAllPointersDifferent(
             original->GetAttributeSets(), copy->GetAttributeSets(), num_elements));
 
-        REQUIRE(AreAllPointersDifferent(original->GetPaths(), copy->GetPaths(), num_elements));
+        REQUIRE(ArePathArraysDeepCopied(original->GetPaths(), copy->GetPaths(), num_elements));
     }
     SECTION("Append") {
         auto copy = original->DeepCopy();
