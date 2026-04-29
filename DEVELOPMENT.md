@@ -24,6 +24,7 @@ docker pull vsaglib/vsag:ubuntu
 - Operating System:
   - Ubuntu 20.04 or later
   - or CentOS 7 or later
+  - or macOS 14 or later (arm64, C++ build path)
 - Compiler:
   - GCC version 9.4.0 or later
   - or Clang version 13.0.0 or later
@@ -32,18 +33,17 @@ docker pull vsaglib/vsag:ubuntu
   - clang-tidy version 15 EXACTLY (not higher, not lower - required for consistent lint diagnostics)
   - clang-format version 15 EXACTLY (not higher, not lower - required for consistent formatting)
 - Additional Dependencies:
-  - gfortran
-  - python 3.6+
-  - omp
-  - aio
-  - curl
+  - Linux: gfortran, python 3.6+, OpenMP, libaio, curl
+  - macOS: Xcode Command Line Tools, Homebrew
 
 ```bash
-# for Debian/Ubuntu
-$ ./scripts/deps/install_deps_ubuntu.sh
+# auto-detect the local OS / distro
+$ ./scripts/deps/install_deps.sh
 
-# for CentOS/AliOS
+# optional: call the platform-specific script directly
+$ ./scripts/deps/install_deps_ubuntu.sh
 $ ./scripts/deps/install_deps_centos.sh
+$ ./scripts/deps/install_deps_macos.sh
 ```
 
 ## VSAG Build Tool
@@ -91,6 +91,7 @@ Build target behavior:
 - `make dev` builds the full developer configuration with tests, examples, tools, Python bindings, and `mockimpl` enabled.
 - `make test`, `make asan`, `make tsan`, and the related parallel test targets automatically enable tests and `mockimpl`.
 - `make release` follows the same minimal defaults as `make debug`. Enable optional components explicitly when needed, for example `make release VSAG_ENABLE_TOOLS=ON`.
+- Linux and macOS use the same dependency-script plus `make` entry points for the core C++ build. Use `./scripts/deps/install_deps.sh` first, then run the usual `make` target. The current macOS validation scope is `make debug`, `make release`, and `make test` on arm64; Python wheel packaging remains Linux-focused.
 
 ## CMake Build Options
 
@@ -105,7 +106,7 @@ VSAG provides several CMake options to customize the build:
 
 - **`USE_SYSTEM_OPENBLAS`** (default: `OFF`)
   - Use system-installed OpenBLAS instead of building from source
-  - Requires `libopenblas-dev` and `liblapacke-dev` to be installed
+  - Requires OpenBLAS development files to be installed (`libopenblas-dev`/`liblapacke-dev` on Linux, `brew install openblas` on macOS)
   - Falls back to building from source if system OpenBLAS is not found
   - Example:
     ```bash

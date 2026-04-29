@@ -26,5 +26,6 @@ target_include_directories(fixtures_core PUBLIC
 )
 
 target_link_libraries(fixtures_core PUBLIC vsag_src_common)
+vsag_link_openmp_private(fixtures_core)
 
 set_target_properties(fixtures_core PROPERTIES POSITION_INDEPENDENT_CODE ON)

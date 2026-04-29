@@ -81,9 +81,10 @@ target_compile_options (simd PRIVATE
     -fno-builtin-calloc
     -fno-builtin-realloc
     -fno-builtin-free
-    -fopenmp
-    -fopenmp-simd
     -funroll-loops)
+if (NOT APPLE)
+    target_compile_options (simd PRIVATE -fopenmp -fopenmp-simd)
+endif ()
 
 function (simd_add_definitions flag_variable definition)
     if (${flag_variable})
@@ -102,6 +103,9 @@ simd_add_definitions (DIST_CONTAINS_SVE -DENABLE_SVE=1)
 target_link_libraries (simd
     PRIVATE cpuinfo
     INTERFACE coverage_config)
+if (TARGET vsag_openmp)
+    target_link_libraries (simd PRIVATE vsag_openmp)
+endif ()
 add_dependencies (simd cpuinfo)
 install (TARGETS simd ARCHIVE DESTINATION lib)
 

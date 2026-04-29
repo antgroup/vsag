@@ -32,5 +32,6 @@ target_link_libraries(fixtures_framework PUBLIC
     vsag_src_common
     Catch2::Catch2
 )
+vsag_link_openmp_private(fixtures_framework)
 
 set_target_properties(fixtures_framework PROPERTIES POSITION_INDEPENDENT_CODE ON)

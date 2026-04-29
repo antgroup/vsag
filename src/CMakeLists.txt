@@ -43,7 +43,7 @@ set_target_properties (vsag PROPERTIES
     VISIBILITY_INLINES_HIDDEN OFF)
 
 set (VSAG_DEP_LIBS antlr4-autogen antlr4-runtime diskann simd io quantizer storage utils factory analyzer
-      datacell ${IMPL_LIBS} ${ALGORITHM_LIBS} attr pthread m dl fmt::fmt nlohmann_json::nlohmann_json roaring ${BLAS_LIBRARIES})
+      datacell ${IMPL_LIBS} ${ALGORITHM_LIBS} attr pthread m dl ${BLAS_LIBRARIES})
 
 target_link_libraries (vsag
     PUBLIC vsag_src_common
@@ -51,6 +51,14 @@ target_link_libraries (vsag
 target_link_libraries (vsag_static
     PUBLIC vsag_src_common
     PRIVATE ${VSAG_DEP_LIBS} coverage_config)
+
+if (TARGET vsag_openmp)
+    foreach (_vsag_openmp_target IN ITEMS algorithm analyzer cluster factory odescent)
+        vsag_link_openmp_private (${_vsag_openmp_target})
+    endforeach ()
+    vsag_link_openmp_private (vsag)
+    vsag_link_openmp_private (vsag_static)
+endif ()
 
 maybe_add_dependencies (vsag antlr4 roaring boost)
 maybe_add_dependencies (vsag_static antlr4 roaring boost)
@@ -68,5 +76,6 @@ if (ENABLE_TESTS)
     list (APPEND VSAG_TESTS ${INDEX_TESTS})
     add_library (vsag_test STATIC ${VSAG_TESTS})
     target_link_libraries (vsag_test PRIVATE Catch2::Catch2 vsag_static unittest_deps)
+    vsag_link_openmp_private (vsag_test)
     add_dependencies (vsag_test Catch2)
 endif ()
