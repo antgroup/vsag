@@ -159,22 +159,45 @@ SparseIndex::KnnSearch(const DatasetPtr& query,
                        const std::string& parameters,
                        const FilterPtr& filter) const {
     const auto* sparse_vectors = query->GetSparseVectors();
-    CHECK_ARGUMENT(query->GetNumElements() == 1, "num of query should be 1");
-    auto results = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
+    int64_t query_count = query->GetNumElements();
+    CHECK_ARGUMENT(query_count >= 1, "query count must be at least 1");
 
-    auto [sorted_ids, sorted_vals] = sort_sparse_vector(sparse_vectors[0]);
-    for (int j = 0; j < cur_element_count_; ++j) {
-        auto distance = CalDistanceByIdUnsafe(sorted_ids, sorted_vals, j);
-        auto label = label_table_->GetLabelById(j);
-        if (not filter || filter->CheckValid(label)) {
-            results->Push(distance, label);
-            if (results->Size() > k) {
-                results->Pop();
+    Vector<float> all_dists(allocator_);
+    Vector<int64_t> all_ids(allocator_);
+
+    for (int64_t q_idx = 0; q_idx < query_count; ++q_idx) {
+        auto results = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
+        auto [sorted_ids, sorted_vals] = sort_sparse_vector(sparse_vectors[q_idx]);
+        for (int j = 0; j < cur_element_count_; ++j) {
+            auto distance = CalDistanceByIdUnsafe(sorted_ids, sorted_vals, j);
+            auto label = label_table_->GetLabelById(j);
+            if (not filter || filter->CheckValid(label)) {
+                results->Push(distance, label);
+                if (results->Size() > k) {
+                    results->Pop();
+                }
             }
         }
+        for (auto j = static_cast<int64_t>(results->Size() - 1); j >= 0; --j) {
+            all_dists.push_back(results->Top().first);
+            all_ids.push_back(results->Top().second);
+            results->Pop();
+        }
     }
-    // return result
-    return collect_results(results);
+
+    int64_t total_count = static_cast<int64_t>(all_dists.size());
+    auto [result, dists, ids] = create_fast_dataset(total_count, allocator_);
+    if (total_count == 0) {
+        result->Dim(0)->NumElements(query_count);
+        return result;
+    }
+
+    for (int64_t j = 0; j < total_count; ++j) {
+        dists[j] = all_dists[j];
+        ids[j] = all_ids[j];
+    }
+    result->NumElements(total_count);
+    return result;
 }
 
 DatasetPtr
@@ -184,23 +207,47 @@ SparseIndex::RangeSearch(const DatasetPtr& query,
                          const FilterPtr& filter,
                          int64_t limited_size) const {
     const auto* sparse_vectors = query->GetSparseVectors();
-    CHECK_ARGUMENT(query->GetNumElements() == 1, "num of query should be 1");
-    auto results = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
-    auto [sorted_ids, sorted_vals] = sort_sparse_vector(sparse_vectors[0]);
-    for (int j = 0; j < cur_element_count_; ++j) {
-        auto distance = CalDistanceByIdUnsafe(sorted_ids, sorted_vals, j);
-        auto label = label_table_->GetLabelById(j);
-        if ((not filter || filter->CheckValid(label)) && distance <= radius + 2e-6) {
-            results->Push(distance, label);
+    int64_t query_count = query->GetNumElements();
+    CHECK_ARGUMENT(query_count >= 1, "query count must be at least 1");
+
+    Vector<float> all_dists(allocator_);
+    Vector<int64_t> all_ids(allocator_);
+
+    for (int64_t q_idx = 0; q_idx < query_count; ++q_idx) {
+        auto results = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
+        auto [sorted_ids, sorted_vals] = sort_sparse_vector(sparse_vectors[q_idx]);
+        for (int j = 0; j < cur_element_count_; ++j) {
+            auto distance = CalDistanceByIdUnsafe(sorted_ids, sorted_vals, j);
+            auto label = label_table_->GetLabelById(j);
+            if ((not filter || filter->CheckValid(label)) && distance <= radius + 2e-6) {
+                results->Push(distance, label);
+            }
+        }
+
+        while (results->Size() > limited_size) {
+            results->Pop();
+        }
+
+        for (auto j = static_cast<int64_t>(results->Size() - 1); j >= 0; --j) {
+            all_dists.push_back(results->Top().first);
+            all_ids.push_back(results->Top().second);
+            results->Pop();
         }
     }
 
-    while (results->Size() > limited_size) {
-        results->Pop();
+    int64_t total_count = static_cast<int64_t>(all_dists.size());
+    auto [result, dists, ids] = create_fast_dataset(total_count, allocator_);
+    if (total_count == 0) {
+        result->Dim(0)->NumElements(query_count);
+        return result;
     }
 
-    // return result
-    return collect_results(results);
+    for (int64_t j = 0; j < total_count; ++j) {
+        dists[j] = all_dists[j];
+        ids[j] = all_ids[j];
+    }
+    result->NumElements(total_count);
+    return result;
 }
 
 DatasetPtr
