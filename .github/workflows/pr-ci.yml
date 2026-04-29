@@ -107,6 +107,178 @@ jobs:
           retention-days: 1
           overwrite: 'true'
 
+  build-asan-macos-arm64:
+    name: ASan Build macOS arm64
+    needs: [changes, format]
+    if: needs.changes.outputs.cpp == 'true'
+    runs-on: macos-15
+    steps:
+      - name: Free Disk Space
+        run: rm -rf "${RUNNER_TOOL_CACHE:-/Users/runner/hostedtoolcache}"
+      - uses: actions/checkout@v4
+      - name: Install Dependencies
+        run: bash ./scripts/deps/install_deps.sh
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: "1"
+      - name: Show Toolchain
+        run: |
+          clang++ --version
+          cmake --version
+      - name: Load Cache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          max-size: "2G"
+          save: ${{ github.event_name != 'pull_request' }}
+          key: build-macos-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
+      - name: Make Asan
+        run: export CMAKE_GENERATOR="Ninja" CMAKE_EXPORT_COMPILE_COMMANDS=ON; make asan VSAG_ENABLE_EXAMPLES=ON COMPILE_JOBS=3
+      - name: Clean
+        run: |
+          find ./build -type f -name "*.o" -exec rm -f {} +
+          find ./build -type f -name "*.cpp" -exec rm -f {} +
+          find ./build -type f -name "*.a" -exec rm -f {} +
+          find ./build -type d -name "*.dSYM" -prune -exec rm -rf {} +
+          rm -rf ./build/hdf5
+          rm -rf ./build/boost
+          rm -rf ./build/tools
+      - name: Save Build
+        uses: actions/upload-artifact@v5
+        with:
+          path: ./build
+          name: build-macos-arm64-${{ github.run_id }}
+          compression-level: 1
+          retention-days: 1
+          overwrite: 'true'
+
+  build-release-macos-arm64:
+    name: Release Build macOS arm64
+    needs: [changes, format]
+    if: needs.changes.outputs.cpp == 'true'
+    runs-on: macos-15
+    steps:
+      - name: Free Disk Space
+        run: rm -rf "${RUNNER_TOOL_CACHE:-/Users/runner/hostedtoolcache}"
+      - uses: actions/checkout@v4
+      - name: Install Dependencies
+        run: bash ./scripts/deps/install_deps.sh
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: "1"
+      - name: Show Toolchain
+        run: |
+          clang++ --version
+          cmake --version
+      - name: Load Cache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          max-size: "2G"
+          save: ${{ github.event_name != 'pull_request' }}
+          key: release-macos-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
+      - name: Make Release
+        run: export CMAKE_GENERATOR="Ninja"; make release COMPILE_JOBS=3
+
+  test-asan-macos-unittests:
+    name: Test macOS Unittests
+    needs: [changes, build-asan-macos-arm64]
+    if: needs.changes.outputs.cpp == 'true'
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Dependencies
+        run: bash ./scripts/deps/install_deps.sh
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: "1"
+      - name: Clean Env
+        run: rm -rf ./build
+      - name: Download Build
+        uses: actions/download-artifact@v5
+        with:
+          path: ./build
+          name: build-macos-arm64-${{ github.run_id }}
+      - name: Run Unittests
+        env:
+          ASAN_OPTIONS: detect_container_overflow=0
+        run: |
+          chmod +x ./build/tests/unittests
+          ./scripts/testing/test_parallel_by_name.sh unittests
+      - name: Upload Log
+        uses: actions/upload-artifact@v5
+        with:
+          path: ./log
+          name: log-macos-unittests-${{ github.run_id }}
+          compression-level: 1
+          retention-days: 3
+          overwrite: 'true'
+
+  test-asan-macos-functests:
+    name: Test macOS Functests
+    needs: [changes, build-asan-macos-arm64]
+    if: needs.changes.outputs.cpp == 'true'
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Dependencies
+        run: bash ./scripts/deps/install_deps.sh
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: "1"
+      - name: Clean Env
+        run: rm -rf ./build
+      - name: Download Build
+        uses: actions/download-artifact@v5
+        with:
+          path: ./build
+          name: build-macos-arm64-${{ github.run_id }}
+      - name: Run Functests
+        env:
+          ASAN_OPTIONS: detect_container_overflow=0
+        run: |
+          chmod +x ./build/tests/functests
+          ./scripts/testing/test_parallel_by_name.sh functests
+      - name: Upload Log
+        uses: actions/upload-artifact@v5
+        with:
+          path: ./log
+          name: log-macos-functests-${{ github.run_id }}
+          compression-level: 1
+          retention-days: 3
+          overwrite: 'true'
+
+  test-example-macos-arm64:
+    name: Test Example macOS arm64
+    needs: [changes, build-asan-macos-arm64]
+    if: needs.changes.outputs.cpp == 'true'
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Dependencies
+        run: bash ./scripts/deps/install_deps.sh
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: "1"
+      - name: Clean Env
+        run: rm -rf ./build
+      - name: Download Build
+        uses: actions/download-artifact@v5
+        with:
+          path: ./build
+          name: build-macos-arm64-${{ github.run_id }}
+      - name: Test C++ Examples
+        env:
+          ASAN_OPTIONS: detect_container_overflow=0
+        run: |
+          cd ./build/examples/cpp
+          for example in ./*; do
+            filename=$(basename "$example")
+            if [[ $filename =~ ^[0-9]{3} ]]; then
+              chmod +x $example
+              echo "Run $example"
+              $example
+            fi
+          done
+
   build-python-x86:
     name: Python Build X86
     needs: [changes, format]
