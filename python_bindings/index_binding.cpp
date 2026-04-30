@@ -146,6 +146,9 @@ public:
         if (buf.ndim != 1) {
             throw std::invalid_argument("vectors must be 1-dimensional");
         }
+        if (buf.strides[0] != buf.itemsize) {
+            throw std::invalid_argument("vectors must be contiguous");
+        }
         if (static_cast<uint64_t>(buf.shape[0]) != num_elements * dim) {
             throw std::invalid_argument(
                 fmt::format("vectors length ({}) must equal num_elements * dim ({})",
@@ -156,6 +159,9 @@ public:
         if (buf_ids.ndim != 1 || static_cast<uint64_t>(buf_ids.shape[0]) != num_elements) {
             throw std::invalid_argument(fmt::format(
                 "ids length ({}) must equal num_elements ({})", buf_ids.shape[0], num_elements));
+        }
+        if (buf_ids.strides[0] != buf_ids.itemsize) {
+            throw std::invalid_argument("ids must be contiguous");
         }
         auto dataset = vsag::Dataset::Make();
         dataset->Owner(false)
@@ -182,6 +188,9 @@ public:
         if (buf.ndim != 1) {
             throw std::invalid_argument("vectors must be 1-dimensional");
         }
+        if (buf.strides[0] != buf.itemsize) {
+            throw std::invalid_argument("vectors must be contiguous");
+        }
         if (static_cast<uint64_t>(buf.shape[0]) != num_elements * dim) {
             throw std::invalid_argument(
                 fmt::format("vectors length ({}) must equal num_elements * dim ({})",
@@ -192,6 +201,9 @@ public:
         if (buf_ids.ndim != 1 || static_cast<uint64_t>(buf_ids.shape[0]) != num_elements) {
             throw std::invalid_argument(fmt::format(
                 "ids length ({}) must equal num_elements ({})", buf_ids.shape[0], num_elements));
+        }
+        if (buf_ids.strides[0] != buf_ids.itemsize) {
+            throw std::invalid_argument("ids must be contiguous");
         }
         auto dataset = vsag::Dataset::Make();
         dataset->Owner(false)
@@ -528,6 +540,9 @@ public:
         if (buf.ndim != 1) {
             throw std::invalid_argument("vectors must be 1-dimensional");
         }
+        if (buf.strides[0] != buf.itemsize) {
+            throw std::invalid_argument("vectors must be contiguous");
+        }
         if (static_cast<uint64_t>(buf.shape[0]) != num_elements * dim) {
             throw std::invalid_argument(
                 fmt::format("vectors length ({}) must equal num_elements * dim ({})",
@@ -538,6 +553,9 @@ public:
         if (buf_ids.ndim != 1 || static_cast<uint64_t>(buf_ids.shape[0]) != num_elements) {
             throw std::invalid_argument(fmt::format(
                 "ids length ({}) must equal num_elements ({})", buf_ids.shape[0], num_elements));
+        }
+        if (buf_ids.strides[0] != buf_ids.itemsize) {
+            throw std::invalid_argument("ids must be contiguous");
         }
         auto dataset = vsag::Dataset::Make();
         dataset->Owner(false)
@@ -561,6 +579,9 @@ public:
         if (buf.ndim != 1) {
             throw std::invalid_argument("vectors must be 1-dimensional");
         }
+        if (buf.strides[0] != buf.itemsize) {
+            throw std::invalid_argument("vectors must be contiguous");
+        }
         if (static_cast<uint64_t>(buf.shape[0]) != num_elements * dim) {
             throw std::invalid_argument(
                 fmt::format("vectors length ({}) must equal num_elements * dim ({})",
@@ -571,6 +592,9 @@ public:
         if (buf_ids.ndim != 1 || static_cast<uint64_t>(buf_ids.shape[0]) != num_elements) {
             throw std::invalid_argument(fmt::format(
                 "ids length ({}) must equal num_elements ({})", buf_ids.shape[0], num_elements));
+        }
+        if (buf_ids.strides[0] != buf_ids.itemsize) {
+            throw std::invalid_argument("ids must be contiguous");
         }
         auto dataset = vsag::Dataset::Make();
         dataset->Owner(false)
