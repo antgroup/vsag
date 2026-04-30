@@ -1,5 +1,38 @@
 include (FetchContent)
 
+vsag_get_system_dep_policy (CPUINFO _vsag_dep_policy)
+if (TARGET cpuinfo::cpuinfo OR TARGET cpuinfo)
+    if (NOT TARGET cpuinfo AND TARGET cpuinfo::cpuinfo)
+        add_library (cpuinfo ALIAS cpuinfo::cpuinfo)
+    endif ()
+    if (NOT TARGET vsag_cpuinfo_headers)
+        add_library (vsag_cpuinfo_headers INTERFACE)
+    endif ()
+    target_link_libraries (vsag_cpuinfo_headers INTERFACE cpuinfo)
+    vsag_note_system_dep (cpuinfo cpuinfo)
+    return ()
+elseif (NOT _vsag_dep_policy STREQUAL "OFF")
+    find_path (CPUINFO_INCLUDE_DIR NAMES cpuinfo.h)
+    find_library (CPUINFO_LIBRARY NAMES cpuinfo)
+    if (CPUINFO_INCLUDE_DIR AND CPUINFO_LIBRARY)
+        add_library (cpuinfo UNKNOWN IMPORTED GLOBAL)
+        set_target_properties (cpuinfo PROPERTIES
+            IMPORTED_LOCATION ${CPUINFO_LIBRARY}
+            INTERFACE_INCLUDE_DIRECTORIES ${CPUINFO_INCLUDE_DIR})
+        if (NOT TARGET cpuinfo::cpuinfo)
+            add_library (cpuinfo::cpuinfo ALIAS cpuinfo)
+        endif ()
+        if (NOT TARGET vsag_cpuinfo_headers)
+            add_library (vsag_cpuinfo_headers INTERFACE)
+        endif ()
+        target_link_libraries (vsag_cpuinfo_headers INTERFACE cpuinfo)
+        vsag_note_system_dep (cpuinfo cpuinfo)
+        return ()
+    elseif (_vsag_dep_policy STREQUAL "ON")
+        vsag_fail_missing_system_dep (CPUINFO cpuinfo "cpuinfo::cpuinfo, cpuinfo")
+    endif ()
+endif ()
+
 set (cpuinfo_urls
     https://github.com/pytorch/cpuinfo/archive/ca678952a9a8eaa6de112d154e8e104b22f9ab3f.tar.gz
     # this url is maintained by the vsag project, if it's broken, please try

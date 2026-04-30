@@ -58,7 +58,7 @@ else()
         )
 endif()
 
-add_dependencies (unittests Catch2 vsag)
+maybe_add_dependencies (unittests Catch2 vsag)
 
 # function tests
 file (GLOB FUNCTION_TESTS "test_*.cpp")
@@ -75,4 +75,4 @@ target_link_libraries (functests PRIVATE
         vsag 
         simd
 )
-add_dependencies (functests Catch2)
+maybe_add_dependencies (functests Catch2)

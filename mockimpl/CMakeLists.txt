@@ -31,8 +31,8 @@ add_library (vsag_mockimpl_static STATIC ${MOCK_SRCS})
 
 target_link_libraries (vsag_mockimpl PRIVATE roaring fmt::fmt-header-only simd vsag_src_common)
 target_link_libraries (vsag_mockimpl_static PRIVATE roaring fmt::fmt-header-only simd vsag_src_common)
-add_dependencies (vsag_mockimpl version_mockimpl roaring)
-add_dependencies (vsag_mockimpl_static version_mockimpl roaring)
+maybe_add_dependencies (vsag_mockimpl version_mockimpl roaring)
+maybe_add_dependencies (vsag_mockimpl_static version_mockimpl roaring)
 
 set_target_properties (vsag_mockimpl_static PROPERTIES OUTPUT_NAME "vsag_mockimpl")
 install (TARGETS vsag_mockimpl
@@ -47,13 +47,13 @@ add_custom_target (version_mockimpl
                    -D GIT_EXECUTABLE=${GIT_EXECUTABLE}
                    -P ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/GenerateVersionHeader.cmake
   )
-add_dependencies (vsag_mockimpl version_mockimpl)
-add_dependencies (vsag_mockimpl_static version_mockimpl)
+maybe_add_dependencies (vsag_mockimpl version_mockimpl)
+maybe_add_dependencies (vsag_mockimpl_static version_mockimpl)
 
 if (ENABLE_TESTS)
     add_executable (tests_mockimpl
             ../tests/test_factory.cpp
     )
     target_link_libraries (tests_mockimpl PRIVATE Catch2::Catch2WithMain vsag_mockimpl_static)
-    add_dependencies (tests_mockimpl Catch2)
+    maybe_add_dependencies (tests_mockimpl Catch2)
 endif ()

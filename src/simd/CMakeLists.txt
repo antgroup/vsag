@@ -102,7 +102,7 @@ simd_add_definitions (DIST_CONTAINS_SVE -DENABLE_SVE=1)
 target_link_libraries (simd
     PRIVATE cpuinfo
     INTERFACE coverage_config)
-add_dependencies (simd cpuinfo)
+maybe_add_dependencies (simd cpuinfo)
 install (TARGETS simd ARCHIVE DESTINATION lib)
 
 if (ENABLE_TESTS)
@@ -128,5 +128,5 @@ if (ENABLE_TESTS)
         target_compile_definitions (simd_test PRIVATE ENABLE_NEON=1)
     endif ()
     target_link_libraries (simd_test PRIVATE Catch2::Catch2 unittest_deps)
-    add_dependencies (simd_test Catch2)
+    maybe_add_dependencies (simd_test Catch2)
 endif ()

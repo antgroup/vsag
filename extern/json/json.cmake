@@ -1,6 +1,20 @@
 
 include (FetchContent)
 
+vsag_get_system_dep_policy (NLOHMANN_JSON _vsag_dep_policy)
+if (TARGET nlohmann_json::nlohmann_json)
+    vsag_note_system_dep (nlohmann_json nlohmann_json::nlohmann_json)
+    return ()
+elseif (NOT _vsag_dep_policy STREQUAL "OFF")
+    find_package (nlohmann_json CONFIG QUIET)
+    if (TARGET nlohmann_json::nlohmann_json)
+        vsag_note_system_dep (nlohmann_json nlohmann_json::nlohmann_json)
+        return ()
+    elseif (_vsag_dep_policy STREQUAL "ON")
+        vsag_fail_missing_system_dep (NLOHMANN_JSON nlohmann_json "nlohmann_json::nlohmann_json")
+    endif ()
+endif ()
+
 set (nlohmann_json_urls
     https://github.com/nlohmann/json/archive/refs/tags/v3.11.3.tar.gz
     # this url is maintained by the vsag project, if it's broken, please try
