@@ -1,5 +1,19 @@
 include(FetchContent)
 
+vsag_get_system_dep_policy (PYBIND11 _vsag_dep_policy)
+if (TARGET pybind11::pybind11 OR TARGET pybind11::module)
+    vsag_note_system_dep (pybind11 pybind11::pybind11)
+    return ()
+elseif (NOT _vsag_dep_policy STREQUAL "OFF")
+    find_package (pybind11 CONFIG QUIET)
+    if (TARGET pybind11::pybind11 OR TARGET pybind11::module)
+        vsag_note_system_dep (pybind11 pybind11::pybind11)
+        return ()
+    elseif (_vsag_dep_policy STREQUAL "ON")
+        vsag_fail_missing_system_dep (PYBIND11 pybind11 "pybind11::pybind11, pybind11::module")
+    endif ()
+endif ()
+
 set(pybind11_urls
     https://github.com/pybind/pybind11/archive/refs/tags/v2.11.1.tar.gz
     # this url is maintained by the vsag project, if it's broken, please try

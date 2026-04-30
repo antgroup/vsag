@@ -1,5 +1,38 @@
 include (FetchContent)
 
+vsag_get_system_dep_policy (ROARING _vsag_dep_policy)
+if (TARGET roaring::roaring OR TARGET roaring)
+    if (NOT TARGET roaring AND TARGET roaring::roaring)
+        add_library (roaring ALIAS roaring::roaring)
+    endif ()
+    if (NOT TARGET vsag_roaring_headers)
+        add_library (vsag_roaring_headers INTERFACE)
+    endif ()
+    target_link_libraries (vsag_roaring_headers INTERFACE roaring)
+    vsag_note_system_dep (roaring roaring)
+    return ()
+elseif (NOT _vsag_dep_policy STREQUAL "OFF")
+    find_path (ROARING_INCLUDE_DIR NAMES roaring.hh)
+    find_library (ROARING_LIBRARY NAMES roaring)
+    if (ROARING_INCLUDE_DIR AND ROARING_LIBRARY)
+        add_library (roaring UNKNOWN IMPORTED GLOBAL)
+        set_target_properties (roaring PROPERTIES
+            IMPORTED_LOCATION ${ROARING_LIBRARY}
+            INTERFACE_INCLUDE_DIRECTORIES ${ROARING_INCLUDE_DIR})
+        if (NOT TARGET roaring::roaring)
+            add_library (roaring::roaring ALIAS roaring)
+        endif ()
+        if (NOT TARGET vsag_roaring_headers)
+            add_library (vsag_roaring_headers INTERFACE)
+        endif ()
+        target_link_libraries (vsag_roaring_headers INTERFACE roaring)
+        vsag_note_system_dep (roaring roaring)
+        return ()
+    elseif (_vsag_dep_policy STREQUAL "ON")
+        vsag_fail_missing_system_dep (ROARING roaring "roaring::roaring, roaring")
+    endif ()
+endif ()
+
 set (roaringbitmap_urls
     https://github.com/RoaringBitmap/CRoaring/archive/refs/tags/v3.0.1.tar.gz
     # this url is maintained by the vsag project, if it's broken, please try

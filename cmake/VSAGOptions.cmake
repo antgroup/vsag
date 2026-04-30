@@ -47,6 +47,35 @@ set (BUILD_INFO_DIR "${CMAKE_BINARY_DIR}/.vsag-build-info" CACHE PATH "Metadata 
 set (DOWNLOAD_DIR "${CMAKE_BINARY_DIR}/.vsag-downloads" CACHE PATH "Download cache directory for ExternalProject archives.")
 set (BUILDING_PATH "" CACHE STRING "Optional PATH prefix for third-party build tools.")
 
+set (VSAG_USE_SYSTEM_DEPS "AUTO" CACHE STRING "Use externally supplied third-party dependencies: AUTO, ON, or OFF.")
+set_property (CACHE VSAG_USE_SYSTEM_DEPS PROPERTY STRINGS AUTO ON OFF)
+
+set (_vsag_system_deps
+    ANTLR4
+    ARGPARSE
+    BOOST
+    CATCH2
+    CPUINFO
+    FMT
+    HDF5
+    HTTPLIB
+    MKL
+    NLOHMANN_JSON
+    OPENBLAS
+    PYBIND11
+    ROARING
+    TABULATE
+    THREAD_POOL
+    TSL
+    YAML_CPP)
+foreach (_vsag_dep ${_vsag_system_deps})
+    set (VSAG_USE_SYSTEM_${_vsag_dep} "" CACHE STRING
+         "Override VSAG_USE_SYSTEM_DEPS for ${_vsag_dep}: AUTO, ON, OFF, or empty to inherit.")
+    set_property (CACHE VSAG_USE_SYSTEM_${_vsag_dep} PROPERTY STRINGS "" AUTO ON OFF)
+endforeach ()
+unset (_vsag_dep)
+unset (_vsag_system_deps)
+
 set (_default_aclocal_path "")
 if (DEFINED ENV{ACLOCAL_PATH} AND NOT "$ENV{ACLOCAL_PATH}" STREQUAL "")
     set (_default_aclocal_path "$ENV{ACLOCAL_PATH}")

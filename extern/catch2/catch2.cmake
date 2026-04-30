@@ -1,4 +1,25 @@
 Include(FetchContent)
+
+vsag_get_system_dep_policy (CATCH2 _vsag_dep_policy)
+if (TARGET Catch2::Catch2 OR TARGET Catch2::Catch2WithMain)
+    if (NOT TARGET Catch2)
+        add_custom_target (Catch2)
+    endif ()
+    vsag_note_system_dep (catch2 Catch2::Catch2)
+    return ()
+elseif (NOT _vsag_dep_policy STREQUAL "OFF")
+    find_package (Catch2 CONFIG QUIET)
+    if (TARGET Catch2::Catch2 OR TARGET Catch2::Catch2WithMain)
+        if (NOT TARGET Catch2)
+            add_custom_target (Catch2)
+        endif ()
+        vsag_note_system_dep (catch2 Catch2::Catch2)
+        return ()
+    elseif (_vsag_dep_policy STREQUAL "ON")
+        vsag_fail_missing_system_dep (CATCH2 Catch2 "Catch2::Catch2, Catch2::Catch2WithMain")
+    endif ()
+endif ()
+
 set(catch2_urls
     https://github.com/catchorg/Catch2/archive/refs/tags/v3.7.1.tar.gz
     # this url is maintained by the vsag project, if it's broken, please try

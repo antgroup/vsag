@@ -1,5 +1,19 @@
 include (FetchContent)
 
+vsag_get_system_dep_policy (ARGPARSE _vsag_dep_policy)
+if (TARGET argparse::argparse)
+    vsag_note_system_dep (argparse argparse::argparse)
+    return ()
+elseif (NOT _vsag_dep_policy STREQUAL "OFF")
+    find_package (argparse CONFIG QUIET)
+    if (TARGET argparse::argparse)
+        vsag_note_system_dep (argparse argparse::argparse)
+        return ()
+    elseif (_vsag_dep_policy STREQUAL "ON")
+        vsag_fail_missing_system_dep (ARGPARSE argparse "argparse::argparse")
+    endif ()
+endif ()
+
 set (argparse_urls
     https://github.com/p-ranav/argparse/archive/refs/tags/v3.1.tar.gz
     # this url is maintained by the vsag project, if it's broken, please try
