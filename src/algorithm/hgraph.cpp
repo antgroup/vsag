@@ -33,6 +33,7 @@
 #include "impl/heap/standard_heap.h"
 #include "impl/odescent/odescent_graph_builder.h"
 #include "impl/pruning_strategy.h"
+#include "impl/reasoning/search_reasoning.h"
 #include "index/index_impl.h"
 #include "index/iterator_filter.h"
 #include "io/reader_io_parameter.h"
@@ -2298,12 +2299,49 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
 
     std::shared_lock force_remove_rlock(this->force_remove_mutex_);
     std::shared_lock shared_lock(this->global_mutex_);
+
     // check k
     CHECK_ARGUMENT(k > 0, fmt::format("k({}) must be greater than 0", k));
     k = std::min(k, GetNumElements());
 
     // check query vector
     CHECK_ARGUMENT(query->GetNumElements() == 1, "query dataset should contain 1 vector only");
+
+    // Setup reasoning context if expected labels are provided.
+    std::shared_ptr<ReasoningContext> reasoning_ctx;
+    if (not request.expected_labels_.empty()) {
+        reasoning_ctx = std::make_shared<ReasoningContext>(this->allocator_);
+        reasoning_ctx->SetSearchParams(k, "HGraph", use_reorder_, request.filter_ != nullptr);
+
+        UnorderedMap<int64_t, InnerIdType> label_to_inner_id(this->allocator_);
+        for (const auto& label : request.expected_labels_) {
+            auto [success, inner_id] = label_table_->TryGetIdByLabel(label, true);
+            if (success) {
+                label_to_inner_id[label] = inner_id;
+            }
+        }
+
+        Vector<int64_t> expected_labels_vec(
+            request.expected_labels_.begin(), request.expected_labels_.end(), this->allocator_);
+        reasoning_ctx->InitializeExpectedTargets(expected_labels_vec, label_to_inner_id);
+
+        const auto* const query_vector = get_data(query);
+        auto precise_flatten = this->basic_flatten_codes_;
+        if (use_reorder_) {
+            precise_flatten = this->high_precise_codes_;
+        }
+        if (create_new_raw_vector_) {
+            precise_flatten = this->raw_vector_;
+        }
+        auto computer = precise_flatten->FactoryComputer(query_vector);
+        for (const auto& pair : label_to_inner_id) {
+            float dist = 0.0F;
+            const auto inner_id = pair.second;
+            precise_flatten->Query(&dist, computer, &inner_id, 1);
+            reasoning_ctx->SetTrueDistance(inner_id, dist);
+        }
+        ctx.reasoning_ctx = reasoning_ctx.get();
+    }
 
     InnerSearchParam search_param;
     search_param.ep = this->entry_point_id_;
@@ -2393,9 +2431,16 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     if (search_result->Empty()) {
         auto dataset_result = DatasetImpl::MakeEmptyDataset();
         dataset_result->Statistics(stats.Dump());
+        if (reasoning_ctx) {
+            reasoning_ctx->DiagnoseExpectedTargets();
+            dataset_result->Reasoning(reasoning_ctx->GenerateReport());
+        }
         return dataset_result;
     }
     auto count = static_cast<const int64_t>(search_result->Size());
+
+    Vector<InnerIdType> result_inner_ids(static_cast<size_t>(count), this->allocator_);
+
     auto [dataset_results, dists, ids] = create_fast_dataset(count, ctx.alloc);
     char* extra_infos = nullptr;
     if (extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
@@ -2404,15 +2449,24 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         dataset_results->ExtraInfos(extra_infos);
     }
     for (int64_t j = count - 1; j >= 0; --j) {
-        dists[j] = search_result->Top().first;
-        ids[j] = this->label_table_->GetLabelById(search_result->Top().second);
+        const auto& top = search_result->Top();
+        dists[j] = top.first;
+        ids[j] = this->label_table_->GetLabelById(top.second);
+        result_inner_ids[j] = top.second;
         if (extra_infos != nullptr) {
-            this->extra_infos_->GetExtraInfoById(search_result->Top().second,
-                                                 extra_infos + extra_info_size_ * j);
+            this->extra_infos_->GetExtraInfoById(top.second, extra_infos + extra_info_size_ * j);
         }
         search_result->Pop();
     }
     dataset_results->Statistics(stats.Dump());
+
+    // Generate reasoning report if reasoning context was created
+    if (reasoning_ctx) {
+        reasoning_ctx->MarkResult(result_inner_ids);
+        reasoning_ctx->DiagnoseExpectedTargets();
+        dataset_results->Reasoning(reasoning_ctx->GenerateReport());
+    }
+
     return std::move(dataset_results);
 }
 
