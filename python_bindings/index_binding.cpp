@@ -138,6 +138,87 @@ public:
     }
 
     void
+    BuildFloat16(py::array vectors, py::array_t<int64_t> ids, uint64_t num_elements, uint64_t dim) {
+        auto buf = vectors.request();
+        if (buf.format != "e") {
+            throw std::invalid_argument("vectors must be float16 (numpy.float16) array");
+        }
+        if (buf.ndim != 1) {
+            throw std::invalid_argument("vectors must be 1-dimensional");
+        }
+        if (buf.strides[0] != buf.itemsize) {
+            throw std::invalid_argument("vectors must be contiguous");
+        }
+        if (static_cast<uint64_t>(buf.shape[0]) != num_elements * dim) {
+            throw std::invalid_argument(
+                fmt::format("vectors length ({}) must equal num_elements * dim ({})",
+                            buf.shape[0],
+                            num_elements * dim));
+        }
+        auto buf_ids = ids.request();
+        if (buf_ids.ndim != 1 || static_cast<uint64_t>(buf_ids.shape[0]) != num_elements) {
+            throw std::invalid_argument(fmt::format(
+                "ids length ({}) must equal num_elements ({})", buf_ids.shape[0], num_elements));
+        }
+        if (buf_ids.strides[0] != buf_ids.itemsize) {
+            throw std::invalid_argument("ids must be contiguous");
+        }
+        auto dataset = vsag::Dataset::Make();
+        dataset->Owner(false)
+            ->Dim(to_int64(dim))
+            ->NumElements(to_int64(num_elements))
+            ->Ids(ids.data())
+            ->Float16Vectors(static_cast<const uint16_t*>(buf.ptr));
+        auto build_result = index_->Build(dataset);
+        if (!build_result.has_value()) {
+            throw std::runtime_error(
+                fmt::format("BuildFloat16 failed: {}", build_result.error().message));
+        }
+    }
+
+    void
+    BuildBfloat16(py::array vectors,
+                  py::array_t<int64_t> ids,
+                  uint64_t num_elements,
+                  uint64_t dim) {
+        auto buf = vectors.request();
+        if (buf.format != "H") {
+            throw std::invalid_argument("vectors must be uint16 (raw bfloat16 bits) array");
+        }
+        if (buf.ndim != 1) {
+            throw std::invalid_argument("vectors must be 1-dimensional");
+        }
+        if (buf.strides[0] != buf.itemsize) {
+            throw std::invalid_argument("vectors must be contiguous");
+        }
+        if (static_cast<uint64_t>(buf.shape[0]) != num_elements * dim) {
+            throw std::invalid_argument(
+                fmt::format("vectors length ({}) must equal num_elements * dim ({})",
+                            buf.shape[0],
+                            num_elements * dim));
+        }
+        auto buf_ids = ids.request();
+        if (buf_ids.ndim != 1 || static_cast<uint64_t>(buf_ids.shape[0]) != num_elements) {
+            throw std::invalid_argument(fmt::format(
+                "ids length ({}) must equal num_elements ({})", buf_ids.shape[0], num_elements));
+        }
+        if (buf_ids.strides[0] != buf_ids.itemsize) {
+            throw std::invalid_argument("ids must be contiguous");
+        }
+        auto dataset = vsag::Dataset::Make();
+        dataset->Owner(false)
+            ->Dim(to_int64(dim))
+            ->NumElements(to_int64(num_elements))
+            ->Ids(ids.data())
+            ->Float16Vectors(static_cast<const uint16_t*>(buf.ptr));
+        auto build_result = index_->Build(dataset);
+        if (!build_result.has_value()) {
+            throw std::runtime_error(
+                fmt::format("BuildBfloat16 failed: {}", build_result.error().message));
+        }
+    }
+
+    void
     SparseBuild(const py::array_t<uint32_t>& index_pointers,
                 const py::array_t<uint32_t>& indices,
                 const py::array_t<float>& values,
@@ -186,6 +267,92 @@ public:
             const auto* vsag_ids = result.value()->GetIds();
             const auto* vsag_distances = result.value()->GetDistances();
             for (uint32_t i = 0; i < k; ++i) {
+                ids_view(i) = vsag_ids[i];
+                dists_view(i) = vsag_distances[i];
+            }
+        }
+
+        return py::make_tuple(ids, dists);
+    }
+
+    py::object
+    KnnSearchFloat16(py::array vector, uint64_t k, std::string& parameters) {
+        auto buf = vector.request();
+        if (buf.format != "e") {
+            throw std::invalid_argument("vector must be float16 (numpy.float16) array");
+        }
+        if (buf.ndim != 1) {
+            throw std::invalid_argument("vector must be 1-dimensional");
+        }
+
+        auto query = vsag::Dataset::Make();
+        query->NumElements(1)
+            ->Dim(to_int64(buf.shape[0]))
+            ->Float16Vectors(static_cast<const uint16_t*>(buf.ptr))
+            ->Owner(false);
+
+        uint64_t ids_shape[1]{k};
+        uint64_t ids_strides[1]{sizeof(int64_t)};
+        uint64_t dists_shape[1]{k};
+        uint64_t dists_strides[1]{sizeof(float)};
+
+        auto ids = py::array_t<int64_t>(ids_shape, ids_strides);
+        auto dists = py::array_t<float>(dists_shape, dists_strides);
+        auto ids_view = ids.mutable_unchecked<1>();
+        auto dists_view = dists.mutable_unchecked<1>();
+        for (uint32_t i = 0; i < k; ++i) {
+            ids_view(i) = -1;
+            dists_view(i) = -1.0f;
+        }
+
+        if (auto result = index_->KnnSearch(query, to_int64(k), parameters); result.has_value()) {
+            const auto* vsag_ids = result.value()->GetIds();
+            const auto* vsag_distances = result.value()->GetDistances();
+            const auto count = static_cast<uint32_t>(result.value()->GetDim());
+            for (uint32_t i = 0; i < k && i < count; ++i) {
+                ids_view(i) = vsag_ids[i];
+                dists_view(i) = vsag_distances[i];
+            }
+        }
+
+        return py::make_tuple(ids, dists);
+    }
+
+    py::object
+    KnnSearchBfloat16(py::array vector, uint64_t k, std::string& parameters) {
+        auto buf = vector.request();
+        if (buf.format != "H") {
+            throw std::invalid_argument("vector must be uint16 (raw bfloat16 bits) array");
+        }
+        if (buf.ndim != 1) {
+            throw std::invalid_argument("vector must be 1-dimensional");
+        }
+
+        auto query = vsag::Dataset::Make();
+        query->NumElements(1)
+            ->Dim(to_int64(buf.shape[0]))
+            ->Float16Vectors(static_cast<const uint16_t*>(buf.ptr))
+            ->Owner(false);
+
+        uint64_t ids_shape[1]{k};
+        uint64_t ids_strides[1]{sizeof(int64_t)};
+        uint64_t dists_shape[1]{k};
+        uint64_t dists_strides[1]{sizeof(float)};
+
+        auto ids = py::array_t<int64_t>(ids_shape, ids_strides);
+        auto dists = py::array_t<float>(dists_shape, dists_strides);
+        auto ids_view = ids.mutable_unchecked<1>();
+        auto dists_view = dists.mutable_unchecked<1>();
+        for (uint32_t i = 0; i < k; ++i) {
+            ids_view(i) = -1;
+            dists_view(i) = -1.0f;
+        }
+
+        if (auto result = index_->KnnSearch(query, to_int64(k), parameters); result.has_value()) {
+            const auto* vsag_ids = result.value()->GetIds();
+            const auto* vsag_distances = result.value()->GetDistances();
+            const auto count = static_cast<uint32_t>(result.value()->GetDim());
+            for (uint32_t i = 0; i < k && i < count; ++i) {
                 ids_view(i) = vsag_ids[i];
                 dists_view(i) = vsag_distances[i];
             }
@@ -254,6 +421,76 @@ public:
         return py::make_tuple(labels, dists);
     }
 
+    py::object
+    RangeSearchFloat16(py::array point, float threshold, std::string& parameters) {
+        auto buf = point.request();
+        if (buf.format != "e") {
+            throw std::invalid_argument("point must be float16 (numpy.float16) array");
+        }
+        if (buf.ndim != 1) {
+            throw std::invalid_argument("point must be 1-dimensional");
+        }
+
+        auto query = vsag::Dataset::Make();
+        query->NumElements(1)
+            ->Dim(to_int64(buf.shape[0]))
+            ->Float16Vectors(static_cast<const uint16_t*>(buf.ptr))
+            ->Owner(false);
+
+        py::array_t<int64_t> labels;
+        py::array_t<float> dists;
+        if (auto result = index_->RangeSearch(query, threshold, parameters); result.has_value()) {
+            const auto* ids = result.value()->GetIds();
+            const auto* distances = result.value()->GetDistances();
+            const auto count = static_cast<uint64_t>(result.value()->GetDim());
+            labels.resize({count});
+            dists.resize({count});
+            auto* labels_data = labels.mutable_data();
+            auto* dists_data = dists.mutable_data();
+            for (uint64_t i = 0; i < count; ++i) {
+                labels_data[i] = ids[i];
+                dists_data[i] = distances[i];
+            }
+        }
+
+        return py::make_tuple(labels, dists);
+    }
+
+    py::object
+    RangeSearchBfloat16(py::array point, float threshold, std::string& parameters) {
+        auto buf = point.request();
+        if (buf.format != "H") {
+            throw std::invalid_argument("point must be uint16 (raw bfloat16 bits) array");
+        }
+        if (buf.ndim != 1) {
+            throw std::invalid_argument("point must be 1-dimensional");
+        }
+
+        auto query = vsag::Dataset::Make();
+        query->NumElements(1)
+            ->Dim(to_int64(buf.shape[0]))
+            ->Float16Vectors(static_cast<const uint16_t*>(buf.ptr))
+            ->Owner(false);
+
+        py::array_t<int64_t> labels;
+        py::array_t<float> dists;
+        if (auto result = index_->RangeSearch(query, threshold, parameters); result.has_value()) {
+            const auto* ids = result.value()->GetIds();
+            const auto* distances = result.value()->GetDistances();
+            const auto count = static_cast<uint64_t>(result.value()->GetDim());
+            labels.resize({count});
+            dists.resize({count});
+            auto* labels_data = labels.mutable_data();
+            auto* dists_data = dists.mutable_data();
+            for (uint64_t i = 0; i < count; ++i) {
+                labels_data[i] = ids[i];
+                dists_data[i] = distances[i];
+            }
+        }
+
+        return py::make_tuple(labels, dists);
+    }
+
     [[nodiscard]] int64_t
     GetNumElements() const {
         return index_->GetNumElements();
@@ -291,6 +528,84 @@ public:
         auto result = index_->Add(dataset);
         if (!result.has_value()) {
             throw std::runtime_error("Failed to add vectors to index");
+        }
+    }
+
+    void
+    AddFloat16(py::array vectors, py::array_t<int64_t> ids, uint64_t num_elements, uint64_t dim) {
+        auto buf = vectors.request();
+        if (buf.format != "e") {
+            throw std::invalid_argument("vectors must be float16 (numpy.float16) array");
+        }
+        if (buf.ndim != 1) {
+            throw std::invalid_argument("vectors must be 1-dimensional");
+        }
+        if (buf.strides[0] != buf.itemsize) {
+            throw std::invalid_argument("vectors must be contiguous");
+        }
+        if (static_cast<uint64_t>(buf.shape[0]) != num_elements * dim) {
+            throw std::invalid_argument(
+                fmt::format("vectors length ({}) must equal num_elements * dim ({})",
+                            buf.shape[0],
+                            num_elements * dim));
+        }
+        auto buf_ids = ids.request();
+        if (buf_ids.ndim != 1 || static_cast<uint64_t>(buf_ids.shape[0]) != num_elements) {
+            throw std::invalid_argument(fmt::format(
+                "ids length ({}) must equal num_elements ({})", buf_ids.shape[0], num_elements));
+        }
+        if (buf_ids.strides[0] != buf_ids.itemsize) {
+            throw std::invalid_argument("ids must be contiguous");
+        }
+        auto dataset = vsag::Dataset::Make();
+        dataset->Owner(false)
+            ->Dim(to_int64(dim))
+            ->NumElements(to_int64(num_elements))
+            ->Ids(ids.data())
+            ->Float16Vectors(static_cast<const uint16_t*>(buf.ptr));
+
+        auto result = index_->Add(dataset);
+        if (!result.has_value()) {
+            throw std::runtime_error("Failed to add fp16 vectors to index");
+        }
+    }
+
+    void
+    AddBfloat16(py::array vectors, py::array_t<int64_t> ids, uint64_t num_elements, uint64_t dim) {
+        auto buf = vectors.request();
+        if (buf.format != "H") {
+            throw std::invalid_argument("vectors must be uint16 (raw bfloat16 bits) array");
+        }
+        if (buf.ndim != 1) {
+            throw std::invalid_argument("vectors must be 1-dimensional");
+        }
+        if (buf.strides[0] != buf.itemsize) {
+            throw std::invalid_argument("vectors must be contiguous");
+        }
+        if (static_cast<uint64_t>(buf.shape[0]) != num_elements * dim) {
+            throw std::invalid_argument(
+                fmt::format("vectors length ({}) must equal num_elements * dim ({})",
+                            buf.shape[0],
+                            num_elements * dim));
+        }
+        auto buf_ids = ids.request();
+        if (buf_ids.ndim != 1 || static_cast<uint64_t>(buf_ids.shape[0]) != num_elements) {
+            throw std::invalid_argument(fmt::format(
+                "ids length ({}) must equal num_elements ({})", buf_ids.shape[0], num_elements));
+        }
+        if (buf_ids.strides[0] != buf_ids.itemsize) {
+            throw std::invalid_argument("ids must be contiguous");
+        }
+        auto dataset = vsag::Dataset::Make();
+        dataset->Owner(false)
+            ->Dim(to_int64(dim))
+            ->NumElements(to_int64(num_elements))
+            ->Ids(ids.data())
+            ->Float16Vectors(static_cast<const uint16_t*>(buf.ptr));
+
+        auto result = index_->Add(dataset);
+        if (!result.has_value()) {
+            throw std::runtime_error("Failed to add bf16 vectors to index");
         }
     }
 
@@ -366,6 +681,11 @@ bind_index(py::module_& module) {
         This class supports both dense and sparse vector indexing and searching.
         It provides methods for building indexes, performing k-NN and range searches,
         and saving/loading indexes to/from disk.
+
+        Supported data types:
+        - float32: standard 32-bit floating point vectors
+        - float16: 16-bit IEEE 754 half-precision vectors (use build_fp16, knn_search_fp16, etc.)
+        - bfloat16: 16-bit brain floating point vectors (use build_bf16, knn_search_bf16, etc.)
     )pbdoc")
         .def(py::init<const std::string&, const std::string&>(),
              py::arg("name"),
@@ -395,6 +715,46 @@ bind_index(py::module_& module) {
 
          Note:
              - The vectors array should contain num_elements * dim consecutive float32 values
+         )pbdoc")
+        .def("build_fp16",
+             &Index::BuildFloat16,
+             py::arg("vectors"),
+             py::arg("ids"),
+             py::arg("num_elements"),
+             py::arg("dim"),
+             R"pbdoc(
+         Build index from dense float16 (FP16) vectors.
+
+         Args:
+             vectors (numpy.ndarray): 1D array of numpy.float16 values with total size num_elements * dim
+             ids (numpy.ndarray): 1D array of int64 values with shape (num_elements,)
+             num_elements (int): Number of vectors in the dataset
+             dim (int): Dimensionality of each vector
+
+         Note:
+             - The vectors array must have dtype numpy.float16
+             - The index parameters must specify "dtype": "float16"
+             - Memory layout of numpy.float16 is identical to uint16, so no conversion is needed
+         )pbdoc")
+        .def("build_bf16",
+             &Index::BuildBfloat16,
+             py::arg("vectors"),
+             py::arg("ids"),
+             py::arg("num_elements"),
+             py::arg("dim"),
+             R"pbdoc(
+         Build index from dense bfloat16 (BF16) vectors.
+
+         Args:
+             vectors (numpy.ndarray): 1D array of uint16 values (raw bfloat16 bits) with total size num_elements * dim
+             ids (numpy.ndarray): 1D array of int64 values with shape (num_elements,)
+             num_elements (int): Number of vectors in the dataset
+             dim (int): Dimensionality of each vector
+
+         Note:
+             - The vectors array must have dtype numpy.uint16, representing raw bfloat16 bit patterns
+             - The index parameters must specify "dtype": "bfloat16"
+             - Since numpy has no native bfloat16 dtype, users must convert bfloat16 data to uint16
          )pbdoc")
         .def("build",
              &Index::SparseBuild,
@@ -431,13 +791,57 @@ bind_index(py::module_& module) {
              parameters (str): JSON-formatted string containing search-specific parameters
 
          Returns:
-             tuple: (distances, ids) where:
-                 - distances: numpy.ndarray of float32 with shape (k,) containing distances to neighbors
+             tuple: (ids, distances) where:
                  - ids: numpy.ndarray of int64 with shape (k,) containing neighbor IDs
+                 - distances: numpy.ndarray of float32 with shape (k,) containing distances to neighbors
 
          Note:
              - Distance metric depends on the index configuration (typically L2 or inner product)
              - Results are sorted by distance (closest first)
+         )pbdoc")
+        .def("knn_search_fp16",
+             &Index::KnnSearchFloat16,
+             py::arg("vector"),
+             py::arg("k"),
+             py::arg("parameters"),
+             R"pbdoc(
+         Perform k-nearest neighbors search on a single float16 (FP16) query vector.
+
+         Args:
+             vector (numpy.ndarray): 1D array of numpy.float16 values representing the query vector
+             k (int): Number of nearest neighbors to retrieve
+             parameters (str): JSON-formatted string containing search-specific parameters
+
+         Returns:
+             tuple: (ids, distances) where:
+                 - ids: numpy.ndarray of int64 with shape (k,) containing neighbor IDs
+                 - distances: numpy.ndarray of float32 with shape (k,) containing distances to neighbors
+
+         Note:
+             - The vector array must have dtype numpy.float16
+             - The index must be built with "dtype": "float16"
+         )pbdoc")
+        .def("knn_search_bf16",
+             &Index::KnnSearchBfloat16,
+             py::arg("vector"),
+             py::arg("k"),
+             py::arg("parameters"),
+             R"pbdoc(
+         Perform k-nearest neighbors search on a single bfloat16 (BF16) query vector.
+
+         Args:
+             vector (numpy.ndarray): 1D array of uint16 values (raw bfloat16 bits) representing the query vector
+             k (int): Number of nearest neighbors to retrieve
+             parameters (str): JSON-formatted string containing search-specific parameters
+
+         Returns:
+             tuple: (ids, distances) where:
+                 - ids: numpy.ndarray of int64 with shape (k,) containing neighbor IDs
+                 - distances: numpy.ndarray of float32 with shape (k,) containing distances to neighbors
+
+         Note:
+             - The vector array must have dtype numpy.uint16, representing raw bfloat16 bit patterns
+             - The index must be built with "dtype": "bfloat16"
          )pbdoc")
         .def("knn_search",
              &Index::SparseKnnSearch,
@@ -457,7 +861,7 @@ bind_index(py::module_& module) {
              parameters (str): JSON-formatted string containing search-specific parameters
 
          Returns:
-             tuple: (distances, ids) with the same format as dense knn_search
+             tuple: (ids, distances) with the same format as dense knn_search
 
          )pbdoc")
         .def("range_search",
@@ -474,13 +878,57 @@ bind_index(py::module_& module) {
              parameters (str): JSON-formatted string containing search-specific parameters
 
          Returns:
-             tuple: (distances, ids) where:
-                 - distances: numpy.ndarray of float32 containing distances to all qualifying vectors
+             tuple: (ids, distances) where:
                  - ids: numpy.ndarray of int64 containing corresponding IDs
+                 - distances: numpy.ndarray of float32 containing distances to all qualifying vectors
 
          Note:
              - The number of returned results varies based on data distribution and threshold
              - Results are not guaranteed to be sorted by distance
+         )pbdoc")
+        .def("range_search_fp16",
+             &Index::RangeSearchFloat16,
+             py::arg("point"),
+             py::arg("threshold"),
+             py::arg("parameters"),
+             R"pbdoc(
+         Perform range search on a single float16 (FP16) query vector.
+
+         Args:
+             point (numpy.ndarray): 1D array of numpy.float16 values representing the query vector
+             threshold (float): Maximum distance threshold for inclusion in results
+             parameters (str): JSON-formatted string containing search-specific parameters
+
+         Returns:
+             tuple: (ids, distances) where:
+                 - ids: numpy.ndarray of int64 containing corresponding IDs
+                 - distances: numpy.ndarray of float32 containing distances to all qualifying vectors
+
+         Note:
+             - The point array must have dtype numpy.float16
+             - The index must be built with "dtype": "float16"
+         )pbdoc")
+        .def("range_search_bf16",
+             &Index::RangeSearchBfloat16,
+             py::arg("point"),
+             py::arg("threshold"),
+             py::arg("parameters"),
+             R"pbdoc(
+         Perform range search on a single bfloat16 (BF16) query vector.
+
+         Args:
+             point (numpy.ndarray): 1D array of uint16 values (raw bfloat16 bits) representing the query vector
+             threshold (float): Maximum distance threshold for inclusion in results
+             parameters (str): JSON-formatted string containing search-specific parameters
+
+         Returns:
+             tuple: (ids, distances) where:
+                 - ids: numpy.ndarray of int64 containing corresponding IDs
+                 - distances: numpy.ndarray of float32 containing distances to all qualifying vectors
+
+         Note:
+             - The point array must have dtype numpy.uint16, representing raw bfloat16 bit patterns
+             - The index must be built with "dtype": "bfloat16"
          )pbdoc")
         .def("save",
              &Index::Save,
@@ -559,6 +1007,42 @@ bind_index(py::module_& module) {
 
          Args:
              vectors (numpy.ndarray): 1D array of float32 values with total size num_elements * dim
+             ids (numpy.ndarray): 1D array of int64 values with shape (num_elements,)
+             num_elements (int): Number of vectors to add
+             dim (int): Dimensionality of each vector
+
+         Raises:
+             RuntimeError: If the add operation fails.
+         )pbdoc")
+        .def("add_fp16",
+             &Index::AddFloat16,
+             py::arg("vectors"),
+             py::arg("ids"),
+             py::arg("num_elements"),
+             py::arg("dim"),
+             R"pbdoc(
+         Add new float16 (FP16) vectors to the index dynamically.
+
+         Args:
+             vectors (numpy.ndarray): 1D array of numpy.float16 values with total size num_elements * dim
+             ids (numpy.ndarray): 1D array of int64 values with shape (num_elements,)
+             num_elements (int): Number of vectors to add
+             dim (int): Dimensionality of each vector
+
+         Raises:
+             RuntimeError: If the add operation fails.
+         )pbdoc")
+        .def("add_bf16",
+             &Index::AddBfloat16,
+             py::arg("vectors"),
+             py::arg("ids"),
+             py::arg("num_elements"),
+             py::arg("dim"),
+             R"pbdoc(
+         Add new bfloat16 (BF16) vectors to the index dynamically.
+
+         Args:
+             vectors (numpy.ndarray): 1D array of uint16 values (raw bfloat16 bits) with total size num_elements * dim
              ids (numpy.ndarray): 1D array of int64 values with shape (num_elements,)
              num_elements (int): Number of vectors to add
              dim (int): Dimensionality of each vector
