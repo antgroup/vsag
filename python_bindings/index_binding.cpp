@@ -165,7 +165,8 @@ public:
             ->Float16Vectors(static_cast<const uint16_t*>(buf.ptr));
         auto build_result = index_->Build(dataset);
         if (!build_result.has_value()) {
-            throw std::runtime_error(fmt::format("BuildFloat16 failed: {}", build_result.error()));
+            throw std::runtime_error(
+                fmt::format("BuildFloat16 failed: {}", build_result.error().message));
         }
     }
 
@@ -197,10 +198,11 @@ public:
             ->Dim(to_int64(dim))
             ->NumElements(to_int64(num_elements))
             ->Ids(ids.data())
-            ->BFloat16Vectors(static_cast<const uint16_t*>(buf.ptr));
+            ->Float16Vectors(static_cast<const uint16_t*>(buf.ptr));
         auto build_result = index_->Build(dataset);
         if (!build_result.has_value()) {
-            throw std::runtime_error(fmt::format("BuildBfloat16 failed: {}", build_result.error()));
+            throw std::runtime_error(
+                fmt::format("BuildBfloat16 failed: {}", build_result.error().message));
         }
     }
 
@@ -575,7 +577,7 @@ public:
             ->Dim(to_int64(dim))
             ->NumElements(to_int64(num_elements))
             ->Ids(ids.data())
-            ->BFloat16Vectors(static_cast<const uint16_t*>(buf.ptr));
+            ->Float16Vectors(static_cast<const uint16_t*>(buf.ptr));
 
         auto result = index_->Add(dataset);
         if (!result.has_value()) {
