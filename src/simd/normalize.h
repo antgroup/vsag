@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -19,15 +18,24 @@
 
 namespace vsag {
 
-#define DECLARE_NORMALIZE_FUNCTIONS(ns)                                  \
-    namespace ns {                                                       \
-    void                                                                 \
-    DivScalar(const float* from, float* to, uint64_t dim, float scalar); \
-    float                                                                \
-    Normalize(const float* from, float* to, uint64_t dim);               \
+#define DECLARE_NORMALIZE_FUNCTIONS(ns)                                                       \
+    namespace ns {                                                                            \
+    void                                                                                      \
+    DivScalar(const float* from, float* to, uint64_t dim, float scalar);                      \
+    float                                                                                     \
+    Normalize(const float* from, float* to, uint64_t dim);                                    \
+    float                                                                                     \
+    NormalizeWithCentroid(const float* from, const float* centroid, float* to, uint64_t dim); \
+    void                                                                                      \
+    InverseNormalizeWithCentroid(                                                             \
+        const float* from, const float* centroid, float* to, uint64_t dim, float norm);       \
     }  // namespace ns
 
 namespace generic {
+void
+DivScalar(const float* from, float* to, uint64_t dim, float scalar);
+float
+Normalize(const float* from, float* to, uint64_t dim);
 float
 NormalizeWithCentroid(const float* from, const float* centroid, float* to, uint64_t dim);
 void
@@ -35,7 +43,6 @@ InverseNormalizeWithCentroid(
     const float* from, const float* centroid, float* to, uint64_t dim, float norm);
 }  // namespace generic
 
-DECLARE_NORMALIZE_FUNCTIONS(generic)
 DECLARE_NORMALIZE_FUNCTIONS(sse)
 DECLARE_NORMALIZE_FUNCTIONS(avx)
 DECLARE_NORMALIZE_FUNCTIONS(avx2)
