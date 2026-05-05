@@ -81,6 +81,7 @@ TermIdMapper::Deserialize(StreamReader& reader) {
 
     // Rebuild the forward map from the deserialized reverse map
     orig_to_compact_.clear();
+    orig_to_compact_.reserve(compact_to_orig_.size());
     for (uint32_t i = 0; i < compact_to_orig_.size(); ++i) {
         orig_to_compact_[compact_to_orig_[i]] = i;
     }
