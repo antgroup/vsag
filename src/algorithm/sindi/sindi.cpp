@@ -260,8 +260,9 @@ SINDI::KnnSearch(const DatasetPtr& query,
     }
 
     auto computer = std::make_shared<SparseTermComputer>(effective_query, search_param, allocator_);
+    const SparseVector* rerank_query = (remap_term_ids_ && use_reorder_) ? &sparse_query : nullptr;
     return search_impl<KNN_SEARCH>(
-        computer, inner_param, allocator, search_param.use_term_lists_heap_insert);
+        computer, inner_param, allocator, search_param.use_term_lists_heap_insert, rerank_query);
 }
 
 template <InnerSearchMode mode>
@@ -269,7 +270,8 @@ DatasetPtr
 SINDI::search_impl(const SparseTermComputerPtr& computer,
                    const InnerSearchParam& inner_param,
                    Allocator* allocator,
-                   bool use_term_lists_heap_insert) const {
+                   bool use_term_lists_heap_insert,
+                   const SparseVector* original_query) const {
     // computer and heap
     MaxHeap heap(allocator);
     int64_t k = 0;
@@ -316,7 +318,8 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
         auto candidate_size = heap.size();
         auto high_precise_heap = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
         auto [sorted_ids, sorted_vals] =
-            rerank_flat_index_->sort_sparse_vector(computer->raw_query_);
+            rerank_flat_index_->sort_sparse_vector(
+                original_query ? *original_query : computer->raw_query_);
         for (auto i = 0; i < candidate_size; i++) {
             auto inner_id = heap.top().second;
             auto high_precise_distance = rerank_flat_index_->CalDistanceByIdUnsafe(
@@ -419,8 +422,9 @@ SINDI::RangeSearch(const DatasetPtr& query,
     }
 
     auto computer = std::make_shared<SparseTermComputer>(effective_query, search_param, allocator_);
+    const SparseVector* rerank_query = (remap_term_ids_ && use_reorder_) ? &sparse_query : nullptr;
     return search_impl<RANGE_SEARCH>(
-        computer, inner_param, allocator_, search_param.use_term_lists_heap_insert);
+        computer, inner_param, allocator_, search_param.use_term_lists_heap_insert, rerank_query);
 }
 
 void

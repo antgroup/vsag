@@ -130,7 +130,8 @@ private:
     search_impl(const SparseTermComputerPtr& computer,
                 const InnerSearchParam& inner_param,
                 Allocator* allocator,
-                bool use_term_lists_heap_insert) const;
+                bool use_term_lists_heap_insert,
+                const SparseVector* original_query = nullptr) const;
 
     std::pair<int64_t, int64_t>
     get_min_max_window_id(const FilterPtr& filter) const;

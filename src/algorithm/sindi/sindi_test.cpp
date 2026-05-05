@@ -344,11 +344,11 @@ TEST_CASE("SINDI Remap Basic Test", "[ut][SINDI]") {
     IndexCommonParam common_param;
     common_param.allocator_ = allocator;
 
-    // Sparse term IDs in [0, 5000000] range, but only ~1000 unique terms
-    uint32_t num_base = 500;
-    uint32_t num_query = 50;
-    int64_t max_dim = 64;
-    int64_t max_id = 5000000;  // large sparse range
+    // Same density as original SINDI test but with large sparse term IDs
+    uint32_t num_base = 1000;
+    uint32_t num_query = 100;
+    int64_t max_dim = 128;
+    int64_t max_id = 30000;  // same as original test for good overlap
     float min_val = 0;
     float max_val = 10;
     int seed_base = 42;
@@ -361,6 +361,16 @@ TEST_CASE("SINDI Remap Basic Test", "[ut][SINDI]") {
 
     auto sv_base =
         fixtures::GenerateSparseVectors(num_base, max_dim, max_id, min_val, max_val, seed_base);
+
+    // Shift all term IDs by a large offset to make them sparse in uint32 range
+    // This simulates real-world vocabulary IDs that are non-contiguous
+    constexpr uint32_t id_offset = 3000000;
+    for (uint32_t i = 0; i < num_base; ++i) {
+        for (uint32_t j = 0; j < sv_base[i].len_; ++j) {
+            sv_base[i].ids_[j] += id_offset;
+        }
+    }
+
     auto base = vsag::Dataset::Make();
     base->NumElements(num_base)->SparseVectors(sv_base.data())->Ids(ids.data())->Owner(false);
 
@@ -371,16 +381,16 @@ TEST_CASE("SINDI Remap Basic Test", "[ut][SINDI]") {
             unique_terms.insert(sv_base[i].ids_[j]);
         }
     }
-    uint32_t term_id_limit = static_cast<uint32_t>(unique_terms.size()) + 100;  // some headroom
+    uint32_t term_id_limit = static_cast<uint32_t>(unique_terms.size()) + 3000;
 
     auto param_str = fmt::format(R"({{
-        "use_reorder": false,
+        "use_reorder": true,
         "use_quantization": false,
         "doc_prune_ratio": 0.0,
         "window_size": 10000,
         "term_id_limit": {},
         "remap_term_ids": true,
-        "avg_doc_term_length": 64
+        "avg_doc_term_length": 100
     }})",
                                  term_id_limit);
 
@@ -390,12 +400,11 @@ TEST_CASE("SINDI Remap Basic Test", "[ut][SINDI]") {
     auto index = std::make_unique<SINDI>(index_param, common_param);
     auto another_index = std::make_unique<SINDI>(index_param, common_param);
 
-    // Build a brute-force index for ground truth
+    // Build a brute-force index for ground truth (uses original sparse IDs directly)
     SparseIndexParameterPtr bf_param = std::make_shared<SparseIndexParameters>();
     bf_param->need_sort = true;
     auto bf_index = std::make_unique<SparseIndex>(bf_param, common_param);
 
-    // test build
     bf_index->Build(base);
     auto build_res = index->Build(base);
     REQUIRE(build_res.size() == 0);
@@ -437,20 +446,20 @@ TEST_CASE("SINDI Remap Basic Test", "[ut][SINDI]") {
         }
     }
 
-    // test unknown query terms (terms not in the index)
+    // test unknown query terms
     {
         SparseVector unknown_query;
-        uint32_t unknown_ids[] = {max_id + 100, max_id + 200};
+        uint32_t unknown_ids[] = {1, 2};  // IDs not in [id_offset, id_offset+max_id]
         float unknown_vals[] = {1.0f, 2.0f};
         unknown_query.len_ = 2;
         unknown_query.ids_ = unknown_ids;
         unknown_query.vals_ = unknown_vals;
         query->NumElements(1)->SparseVectors(&unknown_query)->Owner(false);
         auto result = index->KnnSearch(query, k, search_param_str, nullptr);
-        REQUIRE(result->GetDim() == 0);  // no matches since all terms are unknown
+        REQUIRE(result->GetDim() == 0);
     }
 
-    // test incremental add with new terms
+    // test incremental add
     {
         uint32_t num_add = 100;
         std::vector<int64_t> add_ids(num_add);
@@ -459,6 +468,11 @@ TEST_CASE("SINDI Remap Basic Test", "[ut][SINDI]") {
         }
         auto sv_add =
             fixtures::GenerateSparseVectors(num_add, max_dim, max_id, min_val, max_val, 99);
+        for (uint32_t i = 0; i < num_add; ++i) {
+            for (uint32_t j = 0; j < sv_add[i].len_; ++j) {
+                sv_add[i].ids_[j] += id_offset;
+            }
+        }
         auto add_data = vsag::Dataset::Make();
         add_data->NumElements(num_add)
             ->SparseVectors(sv_add.data())
@@ -467,7 +481,6 @@ TEST_CASE("SINDI Remap Basic Test", "[ut][SINDI]") {
         auto add_res = index->Add(add_data);
         REQUIRE(index->GetNumElements() == num_base + num_add);
 
-        // search still works after incremental add
         query->NumElements(1)->SparseVectors(sv_add.data())->Owner(false);
         auto result = index->KnnSearch(query, k, search_param_str, nullptr);
         REQUIRE(result->GetDim() == k);
@@ -484,19 +497,21 @@ TEST_CASE("SINDI Remap Basic Test", "[ut][SINDI]") {
     }
 }
 
+
 TEST_CASE("SINDI Remap with Reorder Test", "[ut][SINDI]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     IndexCommonParam common_param;
     common_param.allocator_ = allocator;
 
-    uint32_t num_base = 300;
-    uint32_t num_query = 30;
-    int64_t max_dim = 64;
-    int64_t max_id = 1000000;
+    uint32_t num_base = 1000;
+    uint32_t num_query = 100;
+    int64_t max_dim = 128;
+    int64_t max_id = 30000;
     float min_val = 0;
     float max_val = 10;
     int seed_base = 77;
     int64_t k = 10;
+    constexpr uint32_t id_offset = 2000000;
 
     std::vector<int64_t> ids(num_base);
     for (int64_t i = 0; i < num_base; ++i) {
@@ -505,6 +520,11 @@ TEST_CASE("SINDI Remap with Reorder Test", "[ut][SINDI]") {
 
     auto sv_base =
         fixtures::GenerateSparseVectors(num_base, max_dim, max_id, min_val, max_val, seed_base);
+    for (uint32_t i = 0; i < num_base; ++i) {
+        for (uint32_t j = 0; j < sv_base[i].len_; ++j) {
+            sv_base[i].ids_[j] += id_offset;
+        }
+    }
     auto base = vsag::Dataset::Make();
     base->NumElements(num_base)->SparseVectors(sv_base.data())->Ids(ids.data())->Owner(false);
 
@@ -523,7 +543,7 @@ TEST_CASE("SINDI Remap with Reorder Test", "[ut][SINDI]") {
         "window_size": 10000,
         "term_id_limit": {},
         "remap_term_ids": true,
-        "avg_doc_term_length": 64
+        "avg_doc_term_length": 100
     }})",
                                  term_id_limit);
 
@@ -576,41 +596,389 @@ TEST_CASE("SINDI Remap Term ID Limit Exceeded", "[ut][SINDI]") {
     IndexCommonParam common_param;
     common_param.allocator_ = allocator;
 
-    // Create index with very small term_id_limit
-    auto param_str = R"({
+    // Use small max_id so first doc has reasonable unique term count
+    auto sv_base = fixtures::GenerateSparseVectors(10, 10, 50, 0, 10, 123);
+
+    // Count unique terms in first doc to set a limit that allows first doc but not all
+    std::set<uint32_t> first_doc_terms;
+    for (uint32_t j = 0; j < sv_base[0].len_; ++j) {
+        first_doc_terms.insert(sv_base[0].ids_[j]);
+    }
+    uint32_t term_id_limit = static_cast<uint32_t>(first_doc_terms.size()) + 2;
+
+    auto param_str = fmt::format(R"({{
         "use_reorder": false,
         "use_quantization": false,
         "doc_prune_ratio": 0.0,
         "window_size": 10000,
-        "term_id_limit": 5,
+        "term_id_limit": {},
         "remap_term_ids": true,
-        "avg_doc_term_length": 64
-    })";
+        "avg_doc_term_length": 10
+    }})",
+                                 term_id_limit);
 
     vsag::JsonType param_json = vsag::JsonType::Parse(param_str);
     auto index_param = std::make_shared<vsag::SINDIParameter>();
     index_param->FromJson(param_json);
     auto index = std::make_unique<SINDI>(index_param, common_param);
 
-    // Generate data with more than 5 unique terms
-    uint32_t num_base = 10;
-    int64_t max_dim = 10;
-    int64_t max_id = 1000;
-    auto sv_base = fixtures::GenerateSparseVectors(num_base, max_dim, max_id, 0, 10, 123);
+    std::vector<int64_t> ids(10);
+    for (int64_t i = 0; i < 10; ++i) {
+        ids[i] = i;
+    }
+
+    auto base = vsag::Dataset::Make();
+    base->NumElements(10)->SparseVectors(sv_base.data())->Ids(ids.data())->Owner(false);
+
+    auto failed = index->Build(base);
+    REQUIRE(failed.size() > 0);
+    REQUIRE(index->GetNumElements() > 0);
+
+    for (auto& item : sv_base) {
+        delete[] item.vals_;
+        delete[] item.ids_;
+    }
+}
+
+TEST_CASE("SINDI Remap with Quantization Test", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+
+    uint32_t num_base = 1000;
+    uint32_t num_query = 100;
+    int64_t max_dim = 128;
+    int64_t max_id = 30000;
+    float min_val = 0;
+    float max_val = 10;
+    int seed_base = 55;
+    int64_t k = 10;
+    constexpr uint32_t id_offset = 2000000;
 
     std::vector<int64_t> ids(num_base);
     for (int64_t i = 0; i < num_base; ++i) {
         ids[i] = i;
     }
 
+    auto sv_base =
+        fixtures::GenerateSparseVectors(num_base, max_dim, max_id, min_val, max_val, seed_base);
+    for (uint32_t i = 0; i < num_base; ++i) {
+        for (uint32_t j = 0; j < sv_base[i].len_; ++j) {
+            sv_base[i].ids_[j] += id_offset;
+        }
+    }
     auto base = vsag::Dataset::Make();
     base->NumElements(num_base)->SparseVectors(sv_base.data())->Ids(ids.data())->Owner(false);
 
-    // Some docs should fail because term_id_limit=5 is too small
-    auto failed = index->Build(base);
-    REQUIRE(failed.size() > 0);  // at least some should fail
-    // But some should succeed (the first few docs with <= 5 unique terms total)
-    REQUIRE(index->GetNumElements() > 0);
+    std::set<uint32_t> unique_terms;
+    for (uint32_t i = 0; i < num_base; ++i) {
+        for (uint32_t j = 0; j < sv_base[i].len_; ++j) {
+            unique_terms.insert(sv_base[i].ids_[j]);
+        }
+    }
+    uint32_t term_id_limit = static_cast<uint32_t>(unique_terms.size()) + 100;
+
+    auto param_str = fmt::format(R"({{
+        "use_reorder": true,
+        "use_quantization": true,
+        "doc_prune_ratio": 0.0,
+        "window_size": 10000,
+        "term_id_limit": {},
+        "remap_term_ids": true,
+        "avg_doc_term_length": 100
+    }})",
+                                 term_id_limit);
+
+    vsag::JsonType param_json = vsag::JsonType::Parse(param_str);
+    auto index_param = std::make_shared<vsag::SINDIParameter>();
+    index_param->FromJson(param_json);
+    auto index = std::make_unique<SINDI>(index_param, common_param);
+
+    SparseIndexParameterPtr bf_param = std::make_shared<SparseIndexParameters>();
+    bf_param->need_sort = true;
+    auto bf_index = std::make_unique<SparseIndex>(bf_param, common_param);
+
+    bf_index->Build(base);
+    auto build_res = index->Build(base);
+    REQUIRE(build_res.size() == 0);
+
+    std::string search_param_str = R"(
+    {
+        "sindi": {
+            "query_prune_ratio": 0.0,
+            "term_prune_ratio": 0.0,
+            "n_candidate": 20,
+            "use_term_lists_heap_insert": false
+        }
+    }
+    )";
+
+    auto query = vsag::Dataset::Make();
+    int64_t correct_count = 0;
+    for (int i = 0; i < num_query; ++i) {
+        query->NumElements(1)->SparseVectors(sv_base.data() + i)->Owner(false);
+
+        auto bf_result = bf_index->KnnSearch(query, k, search_param_str, nullptr);
+        auto result = index->KnnSearch(query, k, search_param_str, nullptr);
+
+        REQUIRE(result->GetDim() == bf_result->GetDim());
+
+        std::unordered_set<int64_t> gt_ids;
+        for (int j = 0; j < k; j++) {
+            gt_ids.insert(bf_result->GetIds()[j]);
+        }
+        for (int j = 0; j < k; j++) {
+            if (gt_ids.find(result->GetIds()[j]) != gt_ids.end()) {
+                correct_count++;
+            }
+        }
+    }
+
+    float recall = static_cast<float>(correct_count) / (num_query * k);
+    REQUIRE(recall > 0.95);
+
+    for (auto& item : sv_base) {
+        delete[] item.vals_;
+        delete[] item.ids_;
+    }
+}
+
+TEST_CASE("SINDI Remap with Filter Test", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+
+    uint32_t num_base = 1000;
+    uint32_t num_query = 100;
+    int64_t max_dim = 128;
+    int64_t max_id = 30000;
+    float min_val = 0;
+    float max_val = 10;
+    int seed_base = 66;
+    int64_t k = 10;
+    constexpr uint32_t id_offset = 2000000;
+
+    std::vector<int64_t> ids(num_base);
+    for (int64_t i = 0; i < num_base; ++i) {
+        ids[i] = i;
+    }
+
+    auto sv_base =
+        fixtures::GenerateSparseVectors(num_base, max_dim, max_id, min_val, max_val, seed_base);
+    for (uint32_t i = 0; i < num_base; ++i) {
+        for (uint32_t j = 0; j < sv_base[i].len_; ++j) {
+            sv_base[i].ids_[j] += id_offset;
+        }
+    }
+    auto base = vsag::Dataset::Make();
+    base->NumElements(num_base)->SparseVectors(sv_base.data())->Ids(ids.data())->Owner(false);
+
+    std::set<uint32_t> unique_terms;
+    for (uint32_t i = 0; i < num_base; ++i) {
+        for (uint32_t j = 0; j < sv_base[i].len_; ++j) {
+            unique_terms.insert(sv_base[i].ids_[j]);
+        }
+    }
+    uint32_t term_id_limit = static_cast<uint32_t>(unique_terms.size()) + 100;
+
+    auto param_str = fmt::format(R"({{
+        "use_reorder": false,
+        "use_quantization": false,
+        "doc_prune_ratio": 0.0,
+        "window_size": 10000,
+        "term_id_limit": {},
+        "remap_term_ids": true,
+        "avg_doc_term_length": 100
+    }})",
+                                 term_id_limit);
+
+    vsag::JsonType param_json = vsag::JsonType::Parse(param_str);
+    auto index_param = std::make_shared<vsag::SINDIParameter>();
+    index_param->FromJson(param_json);
+    auto index = std::make_unique<SINDI>(index_param, common_param);
+
+    auto build_res = index->Build(base);
+    REQUIRE(build_res.size() == 0);
+
+    std::string search_param_str = R"(
+    {
+        "sindi": {
+            "query_prune_ratio": 0.0,
+            "term_prune_ratio": 0.0,
+            "n_candidate": 20,
+            "use_term_lists_heap_insert": false
+        }
+    }
+    )";
+
+    auto mock_filter = std::make_shared<MockFilter>();
+    auto query = vsag::Dataset::Make();
+
+    for (int i = 0; i < num_query; ++i) {
+        query->NumElements(1)->SparseVectors(sv_base.data() + i)->Owner(false);
+
+        auto result = index->KnnSearch(query, k, search_param_str, nullptr);
+        auto filter_result = index->KnnSearch(query, k, search_param_str, mock_filter);
+
+        REQUIRE(filter_result->GetDim() == k);
+        for (int j = 0; j < filter_result->GetDim(); j++) {
+            REQUIRE(mock_filter->CheckValid(filter_result->GetIds()[j]));
+        }
+
+        auto cur = 0;
+        for (int j = 0; j < k && cur < filter_result->GetDim(); j++) {
+            if (mock_filter->CheckValid(result->GetIds()[j])) {
+                REQUIRE(result->GetIds()[j] == filter_result->GetIds()[cur]);
+                cur++;
+            }
+        }
+    }
+
+    for (auto& item : sv_base) {
+        delete[] item.vals_;
+        delete[] item.ids_;
+    }
+}
+
+TEST_CASE("SINDI Remap GetSparseVectorByInnerId Reverse Mapping", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+
+    uint32_t num_base = 50;
+    int64_t max_dim = 32;
+    int64_t max_id = 5000;
+    float min_val = 0;
+    float max_val = 10;
+    int seed_base = 88;
+    constexpr uint32_t id_offset = 4000000;
+
+    std::vector<int64_t> ids(num_base);
+    for (int64_t i = 0; i < num_base; ++i) {
+        ids[i] = i;
+    }
+
+    auto sv_base =
+        fixtures::GenerateSparseVectors(num_base, max_dim, max_id, min_val, max_val, seed_base);
+    for (uint32_t i = 0; i < num_base; ++i) {
+        for (uint32_t j = 0; j < sv_base[i].len_; ++j) {
+            sv_base[i].ids_[j] += id_offset;
+        }
+    }
+    auto base = vsag::Dataset::Make();
+    base->NumElements(num_base)->SparseVectors(sv_base.data())->Ids(ids.data())->Owner(false);
+
+    std::set<uint32_t> unique_terms;
+    for (uint32_t i = 0; i < num_base; ++i) {
+        for (uint32_t j = 0; j < sv_base[i].len_; ++j) {
+            unique_terms.insert(sv_base[i].ids_[j]);
+        }
+    }
+    uint32_t term_id_limit = static_cast<uint32_t>(unique_terms.size()) + 100;
+
+    auto param_str = fmt::format(R"({{
+        "use_reorder": false,
+        "use_quantization": false,
+        "doc_prune_ratio": 0.0,
+        "window_size": 10000,
+        "term_id_limit": {},
+        "remap_term_ids": true,
+        "avg_doc_term_length": 32
+    }})",
+                                 term_id_limit);
+
+    vsag::JsonType param_json = vsag::JsonType::Parse(param_str);
+    auto index_param = std::make_shared<vsag::SINDIParameter>();
+    index_param->FromJson(param_json);
+    auto index = std::make_unique<SINDI>(index_param, common_param);
+
+    auto build_res = index->Build(base);
+    REQUIRE(build_res.size() == 0);
+
+    for (uint32_t i = 0; i < num_base; ++i) {
+        SparseVector retrieved;
+        index->GetSparseVectorByInnerId(i, &retrieved, allocator.get());
+
+        std::set<uint32_t> original_ids;
+        for (uint32_t j = 0; j < sv_base[i].len_; ++j) {
+            original_ids.insert(sv_base[i].ids_[j]);
+        }
+
+        for (uint32_t j = 0; j < retrieved.len_; ++j) {
+            REQUIRE(original_ids.count(retrieved.ids_[j]) > 0);
+        }
+
+        allocator->Deallocate(retrieved.ids_);
+        allocator->Deallocate(retrieved.vals_);
+    }
+
+    for (auto& item : sv_base) {
+        delete[] item.vals_;
+        delete[] item.ids_;
+    }
+}
+
+TEST_CASE("SINDI Remap UpdateVector Compatibility", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+
+    uint32_t num_base = 50;
+    int64_t max_dim = 32;
+    int64_t max_id = 5000;
+    float min_val = 0;
+    float max_val = 10;
+    int seed_base = 33;
+    constexpr uint32_t id_offset = 4000000;
+
+    std::vector<int64_t> ids(num_base);
+    for (int64_t i = 0; i < num_base; ++i) {
+        ids[i] = i;
+    }
+
+    auto sv_base =
+        fixtures::GenerateSparseVectors(num_base, max_dim, max_id, min_val, max_val, seed_base);
+    for (uint32_t i = 0; i < num_base; ++i) {
+        for (uint32_t j = 0; j < sv_base[i].len_; ++j) {
+            sv_base[i].ids_[j] += id_offset;
+        }
+    }
+    auto base = vsag::Dataset::Make();
+    base->NumElements(num_base)->SparseVectors(sv_base.data())->Ids(ids.data())->Owner(false);
+
+    std::set<uint32_t> unique_terms;
+    for (uint32_t i = 0; i < num_base; ++i) {
+        for (uint32_t j = 0; j < sv_base[i].len_; ++j) {
+            unique_terms.insert(sv_base[i].ids_[j]);
+        }
+    }
+    uint32_t term_id_limit = static_cast<uint32_t>(unique_terms.size()) + 100;
+
+    auto param_str = fmt::format(R"({{
+        "use_reorder": false,
+        "use_quantization": false,
+        "doc_prune_ratio": 0.0,
+        "window_size": 10000,
+        "term_id_limit": {},
+        "remap_term_ids": true,
+        "avg_doc_term_length": 32
+    }})",
+                                 term_id_limit);
+
+    vsag::JsonType param_json = vsag::JsonType::Parse(param_str);
+    auto index_param = std::make_shared<vsag::SINDIParameter>();
+    index_param->FromJson(param_json);
+    auto index = std::make_unique<SINDI>(index_param, common_param);
+
+    auto build_res = index->Build(base);
+    REQUIRE(build_res.size() == 0);
+
+    for (uint32_t i = 0; i < std::min(num_base, 10u); ++i) {
+        auto update_data = vsag::Dataset::Make();
+        update_data->NumElements(1)->SparseVectors(sv_base.data() + i)->Owner(false);
+        bool result = index->UpdateVector(ids[i], update_data);
+        REQUIRE(result == true);
+    }
 
     for (auto& item : sv_base) {
         delete[] item.vals_;
