@@ -76,6 +76,10 @@ SINDIParameter::FromJson(const JsonType& json) {
     if (json.Contains(SPARSE_DESERIALIZE_WITHOUT_BUFFER)) {
         deserialize_without_buffer = json[SPARSE_DESERIALIZE_WITHOUT_BUFFER].GetBool();
     }
+
+    if (json.Contains(SPARSE_REMAP_TERM_IDS)) {
+        remap_term_ids = json[SPARSE_REMAP_TERM_IDS].GetBool();
+    }
 }
 
 JsonType
@@ -87,6 +91,7 @@ SINDIParameter::ToJson() const {
     json[USE_QUANTIZATION].SetBool(use_quantization);
     json[SPARSE_WINDOW_SIZE].SetInt(window_size);
     json[SPARSE_AVG_DOC_TERM_LENGTH].SetInt(avg_doc_term_length);
+    json[SPARSE_REMAP_TERM_IDS].SetBool(remap_term_ids);
     return json;
 }
 
@@ -112,6 +117,9 @@ SINDIParameter::CheckCompatibility(const vsag::ParamPtr& other) const {
         return false;
     }
     if (this->avg_doc_term_length != sindi_param->avg_doc_term_length) {
+        return false;
+    }
+    if (this->remap_term_ids != sindi_param->remap_term_ids) {
         return false;
     }
     return true;

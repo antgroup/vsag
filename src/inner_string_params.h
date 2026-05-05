@@ -113,6 +113,7 @@ const char* const SPARSE_DESERIALIZE_WITHOUT_FOOTER = "deserialize_without_foote
 const char* const SPARSE_DESERIALIZE_WITHOUT_BUFFER = "deserialize_without_buffer";
 const char* const SPARSE_USE_TERM_LISTS_HEAP_INSERT = "use_term_lists_heap_insert";
 const char* const SPARSE_AVG_DOC_TERM_LENGTH = "avg_doc_term_length";
+const char* const SPARSE_REMAP_TERM_IDS = "remap_term_ids";
 
 // graph param value
 const char* const GRAPH_PARAM_MAX_DEGREE_KEY = "max_degree";

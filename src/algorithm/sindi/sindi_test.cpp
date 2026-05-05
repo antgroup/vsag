@@ -15,6 +15,8 @@
 
 #include "sindi.h"
 
+#include <set>
+
 #include "impl/allocator/safe_allocator.h"
 #include "storage/serialization_template_test.h"
 #include "unittest.h"
@@ -330,6 +332,285 @@ TEST_CASE("SINDI Quantization Test", "[ut][SINDI]") {
 
     float recall = static_cast<float>(correct_count) / (num_query * k);
     REQUIRE(recall > 0.99);
+
+    for (auto& item : sv_base) {
+        delete[] item.vals_;
+        delete[] item.ids_;
+    }
+}
+
+TEST_CASE("SINDI Remap Basic Test", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+
+    // Sparse term IDs in [0, 5000000] range, but only ~1000 unique terms
+    uint32_t num_base = 500;
+    uint32_t num_query = 50;
+    int64_t max_dim = 64;
+    int64_t max_id = 5000000;  // large sparse range
+    float min_val = 0;
+    float max_val = 10;
+    int seed_base = 42;
+    int64_t k = 10;
+
+    std::vector<int64_t> ids(num_base);
+    for (int64_t i = 0; i < num_base; ++i) {
+        ids[i] = i;
+    }
+
+    auto sv_base =
+        fixtures::GenerateSparseVectors(num_base, max_dim, max_id, min_val, max_val, seed_base);
+    auto base = vsag::Dataset::Make();
+    base->NumElements(num_base)->SparseVectors(sv_base.data())->Ids(ids.data())->Owner(false);
+
+    // Count unique terms to set term_id_limit
+    std::set<uint32_t> unique_terms;
+    for (uint32_t i = 0; i < num_base; ++i) {
+        for (uint32_t j = 0; j < sv_base[i].len_; ++j) {
+            unique_terms.insert(sv_base[i].ids_[j]);
+        }
+    }
+    uint32_t term_id_limit = static_cast<uint32_t>(unique_terms.size()) + 100;  // some headroom
+
+    auto param_str = fmt::format(R"({{
+        "use_reorder": false,
+        "use_quantization": false,
+        "doc_prune_ratio": 0.0,
+        "window_size": 10000,
+        "term_id_limit": {},
+        "remap_term_ids": true,
+        "avg_doc_term_length": 64
+    }})",
+                                 term_id_limit);
+
+    vsag::JsonType param_json = vsag::JsonType::Parse(param_str);
+    auto index_param = std::make_shared<vsag::SINDIParameter>();
+    index_param->FromJson(param_json);
+    auto index = std::make_unique<SINDI>(index_param, common_param);
+    auto another_index = std::make_unique<SINDI>(index_param, common_param);
+
+    // Build a brute-force index for ground truth
+    SparseIndexParameterPtr bf_param = std::make_shared<SparseIndexParameters>();
+    bf_param->need_sort = true;
+    auto bf_index = std::make_unique<SparseIndex>(bf_param, common_param);
+
+    // test build
+    bf_index->Build(base);
+    auto build_res = index->Build(base);
+    REQUIRE(build_res.size() == 0);
+    REQUIRE(index->GetNumElements() == num_base);
+
+    // test serialize/deserialize
+    test_serializion(*index, *another_index);
+    REQUIRE(another_index->GetNumElements() == num_base);
+
+    // test search
+    std::string search_param_str = R"(
+    {
+        "sindi": {
+            "query_prune_ratio": 0.0,
+            "term_prune_ratio": 0.0,
+            "n_candidate": 20,
+            "use_term_lists_heap_insert": false
+        }
+    }
+    )";
+
+    auto query = vsag::Dataset::Make();
+    for (int i = 0; i < num_query; ++i) {
+        query->NumElements(1)->SparseVectors(sv_base.data() + i)->Owner(false);
+
+        auto bf_result = bf_index->KnnSearch(query, k, search_param_str, nullptr);
+        auto result = index->KnnSearch(query, k, search_param_str, nullptr);
+
+        REQUIRE(result->GetDim() == bf_result->GetDim());
+        for (int j = 0; j < result->GetDim(); j++) {
+            REQUIRE(result->GetIds()[j] == bf_result->GetIds()[j]);
+            REQUIRE(std::abs(result->GetDistances()[j] - bf_result->GetDistances()[j]) < 1e-3);
+        }
+
+        // test serialized index gives same results
+        auto another_result = another_index->KnnSearch(query, k, search_param_str, nullptr);
+        for (int j = 0; j < another_result->GetDim(); j++) {
+            REQUIRE(result->GetIds()[j] == another_result->GetIds()[j]);
+        }
+    }
+
+    // test unknown query terms (terms not in the index)
+    {
+        SparseVector unknown_query;
+        uint32_t unknown_ids[] = {max_id + 100, max_id + 200};
+        float unknown_vals[] = {1.0f, 2.0f};
+        unknown_query.len_ = 2;
+        unknown_query.ids_ = unknown_ids;
+        unknown_query.vals_ = unknown_vals;
+        query->NumElements(1)->SparseVectors(&unknown_query)->Owner(false);
+        auto result = index->KnnSearch(query, k, search_param_str, nullptr);
+        REQUIRE(result->GetDim() == 0);  // no matches since all terms are unknown
+    }
+
+    // test incremental add with new terms
+    {
+        uint32_t num_add = 100;
+        std::vector<int64_t> add_ids(num_add);
+        for (uint32_t i = 0; i < num_add; ++i) {
+            add_ids[i] = num_base + i;
+        }
+        auto sv_add =
+            fixtures::GenerateSparseVectors(num_add, max_dim, max_id, min_val, max_val, 99);
+        auto add_data = vsag::Dataset::Make();
+        add_data->NumElements(num_add)
+            ->SparseVectors(sv_add.data())
+            ->Ids(add_ids.data())
+            ->Owner(false);
+        auto add_res = index->Add(add_data);
+        REQUIRE(index->GetNumElements() == num_base + num_add);
+
+        // search still works after incremental add
+        query->NumElements(1)->SparseVectors(sv_add.data())->Owner(false);
+        auto result = index->KnnSearch(query, k, search_param_str, nullptr);
+        REQUIRE(result->GetDim() == k);
+
+        for (auto& item : sv_add) {
+            delete[] item.vals_;
+            delete[] item.ids_;
+        }
+    }
+
+    for (auto& item : sv_base) {
+        delete[] item.vals_;
+        delete[] item.ids_;
+    }
+}
+
+TEST_CASE("SINDI Remap with Reorder Test", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+
+    uint32_t num_base = 300;
+    uint32_t num_query = 30;
+    int64_t max_dim = 64;
+    int64_t max_id = 1000000;
+    float min_val = 0;
+    float max_val = 10;
+    int seed_base = 77;
+    int64_t k = 10;
+
+    std::vector<int64_t> ids(num_base);
+    for (int64_t i = 0; i < num_base; ++i) {
+        ids[i] = i;
+    }
+
+    auto sv_base =
+        fixtures::GenerateSparseVectors(num_base, max_dim, max_id, min_val, max_val, seed_base);
+    auto base = vsag::Dataset::Make();
+    base->NumElements(num_base)->SparseVectors(sv_base.data())->Ids(ids.data())->Owner(false);
+
+    std::set<uint32_t> unique_terms;
+    for (uint32_t i = 0; i < num_base; ++i) {
+        for (uint32_t j = 0; j < sv_base[i].len_; ++j) {
+            unique_terms.insert(sv_base[i].ids_[j]);
+        }
+    }
+    uint32_t term_id_limit = static_cast<uint32_t>(unique_terms.size()) + 100;
+
+    auto param_str = fmt::format(R"({{
+        "use_reorder": true,
+        "use_quantization": false,
+        "doc_prune_ratio": 0.0,
+        "window_size": 10000,
+        "term_id_limit": {},
+        "remap_term_ids": true,
+        "avg_doc_term_length": 64
+    }})",
+                                 term_id_limit);
+
+    vsag::JsonType param_json = vsag::JsonType::Parse(param_str);
+    auto index_param = std::make_shared<vsag::SINDIParameter>();
+    index_param->FromJson(param_json);
+    auto index = std::make_unique<SINDI>(index_param, common_param);
+
+    SparseIndexParameterPtr bf_param = std::make_shared<SparseIndexParameters>();
+    bf_param->need_sort = true;
+    auto bf_index = std::make_unique<SparseIndex>(bf_param, common_param);
+
+    bf_index->Build(base);
+    auto build_res = index->Build(base);
+    REQUIRE(build_res.size() == 0);
+
+    std::string search_param_str = R"(
+    {
+        "sindi": {
+            "query_prune_ratio": 0.0,
+            "term_prune_ratio": 0.0,
+            "n_candidate": 20,
+            "use_term_lists_heap_insert": false
+        }
+    }
+    )";
+
+    auto query = vsag::Dataset::Make();
+    for (int i = 0; i < num_query; ++i) {
+        query->NumElements(1)->SparseVectors(sv_base.data() + i)->Owner(false);
+
+        auto bf_result = bf_index->KnnSearch(query, k, search_param_str, nullptr);
+        auto result = index->KnnSearch(query, k, search_param_str, nullptr);
+
+        REQUIRE(result->GetDim() == bf_result->GetDim());
+        for (int j = 0; j < result->GetDim(); j++) {
+            REQUIRE(result->GetIds()[j] == bf_result->GetIds()[j]);
+            REQUIRE(std::abs(result->GetDistances()[j] - bf_result->GetDistances()[j]) < 1e-3);
+        }
+    }
+
+    for (auto& item : sv_base) {
+        delete[] item.vals_;
+        delete[] item.ids_;
+    }
+}
+
+TEST_CASE("SINDI Remap Term ID Limit Exceeded", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+
+    // Create index with very small term_id_limit
+    auto param_str = R"({
+        "use_reorder": false,
+        "use_quantization": false,
+        "doc_prune_ratio": 0.0,
+        "window_size": 10000,
+        "term_id_limit": 5,
+        "remap_term_ids": true,
+        "avg_doc_term_length": 64
+    })";
+
+    vsag::JsonType param_json = vsag::JsonType::Parse(param_str);
+    auto index_param = std::make_shared<vsag::SINDIParameter>();
+    index_param->FromJson(param_json);
+    auto index = std::make_unique<SINDI>(index_param, common_param);
+
+    // Generate data with more than 5 unique terms
+    uint32_t num_base = 10;
+    int64_t max_dim = 10;
+    int64_t max_id = 1000;
+    auto sv_base = fixtures::GenerateSparseVectors(num_base, max_dim, max_id, 0, 10, 123);
+
+    std::vector<int64_t> ids(num_base);
+    for (int64_t i = 0; i < num_base; ++i) {
+        ids[i] = i;
+    }
+
+    auto base = vsag::Dataset::Make();
+    base->NumElements(num_base)->SparseVectors(sv_base.data())->Ids(ids.data())->Owner(false);
+
+    // Some docs should fail because term_id_limit=5 is too small
+    auto failed = index->Build(base);
+    REQUIRE(failed.size() > 0);  // at least some should fail
+    // But some should succeed (the first few docs with <= 5 unique terms total)
+    REQUIRE(index->GetNumElements() > 0);
 
     for (auto& item : sv_base) {
         delete[] item.vals_;

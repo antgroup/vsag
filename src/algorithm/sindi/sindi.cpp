@@ -42,7 +42,12 @@ SINDI::SINDI(const SINDIParameterPtr& param, const IndexCommonParam& common_para
       deserialize_without_footer_(param->deserialize_without_footer),
       deserialize_without_buffer_(param->deserialize_without_buffer),
       quantization_params_(std::make_shared<QuantizationParams>()),
-      avg_doc_term_length_(param->avg_doc_term_length) {
+      avg_doc_term_length_(param->avg_doc_term_length),
+      remap_term_ids_(param->remap_term_ids) {
+    if (remap_term_ids_) {
+        term_id_mapper_ =
+            std::make_shared<TermIdMapper>(term_id_limit_, common_param.allocator_.get());
+    }
     if (use_reorder_) {
         SparseIndexParameterPtr rerank_param = std::make_shared<SparseIndexParameters>();
         rerank_param->need_sort = true;
@@ -118,7 +123,13 @@ SINDI::Add(const DatasetPtr& base, AddMode mode) {
         auto inner_id = static_cast<uint16_t>(cur_element_count_ - window_start_id);
 
         try {
-            window_term_list_[cur_window]->InsertVector(sparse_vector, inner_id);
+            if (remap_term_ids_) {
+                Vector<uint32_t> tmp_ids(allocator_);
+                auto remapped = remap_sparse_vector_for_build(sparse_vector, tmp_ids);
+                window_term_list_[cur_window]->InsertVector(remapped, inner_id);
+            } else {
+                window_term_list_[cur_window]->InsertVector(sparse_vector, inner_id);
+            }
         } catch (const std::runtime_error& e) {
             failed_ids.push_back(ids[i]);
             logger::warn("runtime error: {}", e.what());
@@ -237,7 +248,18 @@ SINDI::KnnSearch(const DatasetPtr& query,
     }
     inner_param.is_inner_id_allowed = ft;
 
-    auto computer = std::make_shared<SparseTermComputer>(sparse_query, search_param, allocator_);
+    SparseVector effective_query = sparse_query;
+    Vector<uint32_t> tmp_ids(allocator_);
+    Vector<float> tmp_vals(allocator_);
+    if (remap_term_ids_) {
+        effective_query = remap_sparse_vector_for_query(sparse_query, tmp_ids, tmp_vals);
+        if (effective_query.len_ == 0) {
+            auto [results, ret_dists, ret_ids] = create_fast_dataset(0, allocator);
+            return results;
+        }
+    }
+
+    auto computer = std::make_shared<SparseTermComputer>(effective_query, search_param, allocator_);
     return search_impl<KNN_SEARCH>(
         computer, inner_param, allocator, search_param.use_term_lists_heap_insert);
 }
@@ -385,7 +407,18 @@ SINDI::RangeSearch(const DatasetPtr& query,
     }
     inner_param.is_inner_id_allowed = ft;
 
-    auto computer = std::make_shared<SparseTermComputer>(sparse_query, search_param, allocator_);
+    SparseVector effective_query = sparse_query;
+    Vector<uint32_t> tmp_ids(allocator_);
+    Vector<float> tmp_vals(allocator_);
+    if (remap_term_ids_) {
+        effective_query = remap_sparse_vector_for_query(sparse_query, tmp_ids, tmp_vals);
+        if (effective_query.len_ == 0) {
+            auto [results, ret_dists, ret_ids] = create_fast_dataset(0, allocator_);
+            return results;
+        }
+    }
+
+    auto computer = std::make_shared<SparseTermComputer>(effective_query, search_param, allocator_);
     return search_impl<RANGE_SEARCH>(
         computer, inner_param, allocator_, search_param.use_term_lists_heap_insert);
 }
@@ -428,6 +461,10 @@ SINDI::Serialize(StreamWriter& writer) const {
 
     if (use_reorder_) {
         rerank_flat_index_->Serialize(writer);
+    }
+
+    if (remap_term_ids_ && term_id_mapper_) {
+        term_id_mapper_->Serialize(writer);
     }
 
     JsonType jsonify_basic_info;
@@ -491,6 +528,11 @@ SINDI::Deserialize(StreamReader& reader) {
     if (use_reorder_) {
         rerank_flat_index_->Deserialize(reader_ref);
     }
+
+    if (remap_term_ids_ && term_id_mapper_) {
+        term_id_mapper_->Deserialize(reader_ref);
+    }
+
     this->cal_memory_usage();
 }
 
@@ -534,6 +576,11 @@ SINDI::EstimateMemory(uint64_t num_elements) const {
     // size of term list
     mem += sizeof(std::vector<float>) * 2 * term_id_limit_;
 
+    // size of term id mapper (unordered_map ~50B per entry + vector 4B per entry)
+    if (remap_term_ids_) {
+        mem += static_cast<uint64_t>(term_id_limit_) * 54;
+    }
+
     return mem;
 }
 
@@ -553,6 +600,13 @@ SINDI::GetSparseVectorByInnerId(InnerIdType inner_id,
     auto term_list = this->window_term_list_[cur_window];
 
     term_list->GetSparseVector(inner_id - window_start_id, data, specified_allocator);
+
+    // Reverse map compact IDs back to original term IDs
+    if (remap_term_ids_ && term_id_mapper_) {
+        for (uint32_t i = 0; i < data->len_; ++i) {
+            data->ids_[i] = term_id_mapper_->ReverseMap(data->ids_[i]);
+        }
+    }
 }
 
 float
@@ -570,7 +624,12 @@ SINDI::CalcDistanceById(const DatasetPtr& vector,
     auto window_start_id = cur_window * window_size_;
     auto term_list = this->window_term_list_[cur_window];
 
-    const auto sparse_query = vector->GetSparseVectors()[0];
+    auto sparse_query = vector->GetSparseVectors()[0];
+    Vector<uint32_t> tmp_ids(allocator_);
+    Vector<float> tmp_vals(allocator_);
+    if (remap_term_ids_) {
+        sparse_query = remap_sparse_vector_for_query(sparse_query, tmp_ids, tmp_vals);
+    }
     SINDISearchParameter search_param;
     search_param.query_prune_ratio = 0;
     search_param.term_prune_ratio = 0;
@@ -703,6 +762,39 @@ SINDI::get_min_max_window_id(const FilterPtr& filter) const {
     }
 
     return {min_window_id, max_window_id};
+}
+
+SparseVector
+SINDI::remap_sparse_vector_for_query(const SparseVector& input,
+                                     Vector<uint32_t>& tmp_ids,
+                                     Vector<float>& tmp_vals) const {
+    tmp_ids.clear();
+    tmp_vals.clear();
+    for (uint32_t i = 0; i < input.len_; ++i) {
+        auto compact = term_id_mapper_->TryMap(input.ids_[i]);
+        if (compact.has_value()) {
+            tmp_ids.push_back(compact.value());
+            tmp_vals.push_back(input.vals_[i]);
+        }
+    }
+    SparseVector remapped;
+    remapped.len_ = static_cast<uint32_t>(tmp_ids.size());
+    remapped.ids_ = tmp_ids.data();
+    remapped.vals_ = tmp_vals.data();
+    return remapped;
+}
+
+SparseVector
+SINDI::remap_sparse_vector_for_build(const SparseVector& input, Vector<uint32_t>& tmp_ids) {
+    tmp_ids.resize(input.len_);
+    for (uint32_t i = 0; i < input.len_; ++i) {
+        tmp_ids[i] = term_id_mapper_->Map(input.ids_[i]);
+    }
+    SparseVector remapped;
+    remapped.len_ = input.len_;
+    remapped.ids_ = tmp_ids.data();
+    remapped.vals_ = input.vals_;
+    return remapped;
 }
 
 }  // namespace vsag
