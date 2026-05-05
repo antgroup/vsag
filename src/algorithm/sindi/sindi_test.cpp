@@ -497,7 +497,6 @@ TEST_CASE("SINDI Remap Basic Test", "[ut][SINDI]") {
     }
 }
 
-
 TEST_CASE("SINDI Remap with Reorder Test", "[ut][SINDI]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     IndexCommonParam common_param;
@@ -979,6 +978,255 @@ TEST_CASE("SINDI Remap UpdateVector Compatibility", "[ut][SINDI]") {
         bool result = index->UpdateVector(ids[i], update_data);
         REQUIRE(result == true);
     }
+
+    for (auto& item : sv_base) {
+        delete[] item.vals_;
+        delete[] item.ids_;
+    }
+}
+
+TEST_CASE("SINDI Remap Memory Comparison", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+
+    // Generate data with dense overlap but large sparse term IDs
+    uint32_t num_base = 500;
+    int64_t max_dim = 64;
+    int64_t max_id = 30000;
+    float min_val = 0;
+    float max_val = 10;
+    int seed_base = 42;
+    constexpr uint32_t id_offset = 5000000;  // shift IDs to simulate sparse vocab
+
+    std::vector<int64_t> ids(num_base);
+    for (int64_t i = 0; i < num_base; ++i) {
+        ids[i] = i;
+    }
+
+    auto sv_base =
+        fixtures::GenerateSparseVectors(num_base, max_dim, max_id, min_val, max_val, seed_base);
+
+    // Make a copy before shifting (for the no-remap index)
+    std::vector<SparseVector> sv_base_shifted(num_base);
+    for (uint32_t i = 0; i < num_base; ++i) {
+        sv_base_shifted[i].len_ = sv_base[i].len_;
+        sv_base_shifted[i].ids_ = new uint32_t[sv_base[i].len_];
+        sv_base_shifted[i].vals_ = new float[sv_base[i].len_];
+        for (uint32_t j = 0; j < sv_base[i].len_; ++j) {
+            sv_base_shifted[i].ids_[j] = sv_base[i].ids_[j] + id_offset;
+            sv_base_shifted[i].vals_[j] = sv_base[i].vals_[j];
+        }
+    }
+
+    // Count unique terms
+    std::set<uint32_t> unique_terms;
+    for (uint32_t i = 0; i < num_base; ++i) {
+        for (uint32_t j = 0; j < sv_base_shifted[i].len_; ++j) {
+            unique_terms.insert(sv_base_shifted[i].ids_[j]);
+        }
+    }
+    uint32_t unique_count = static_cast<uint32_t>(unique_terms.size());
+
+    // Index WITHOUT remap: needs term_id_limit >= max_shifted_id
+    uint32_t no_remap_limit = id_offset + max_id + 1;  // ~5030001
+    auto no_remap_param_str = fmt::format(R"({{
+        "use_reorder": false,
+        "use_quantization": false,
+        "doc_prune_ratio": 0.0,
+        "window_size": 10000,
+        "term_id_limit": {},
+        "remap_term_ids": false,
+        "avg_doc_term_length": 64
+    }})",
+                                          no_remap_limit);
+
+    auto no_remap_json = vsag::JsonType::Parse(no_remap_param_str);
+    auto no_remap_param = std::make_shared<vsag::SINDIParameter>();
+    no_remap_param->FromJson(no_remap_json);
+    auto no_remap_index = std::make_unique<SINDI>(no_remap_param, common_param);
+
+    auto base_no_remap = vsag::Dataset::Make();
+    base_no_remap->NumElements(num_base)
+        ->SparseVectors(sv_base_shifted.data())
+        ->Ids(ids.data())
+        ->Owner(false);
+    auto res1 = no_remap_index->Build(base_no_remap);
+    REQUIRE(res1.size() == 0);
+
+    // Index WITH remap: term_id_limit = unique terms + headroom
+    uint32_t remap_limit = unique_count + 100;
+    auto remap_param_str = fmt::format(R"({{
+        "use_reorder": false,
+        "use_quantization": false,
+        "doc_prune_ratio": 0.0,
+        "window_size": 10000,
+        "term_id_limit": {},
+        "remap_term_ids": true,
+        "avg_doc_term_length": 64
+    }})",
+                                       remap_limit);
+
+    auto remap_json = vsag::JsonType::Parse(remap_param_str);
+    auto remap_param = std::make_shared<vsag::SINDIParameter>();
+    remap_param->FromJson(remap_json);
+    auto remap_index = std::make_unique<SINDI>(remap_param, common_param);
+
+    auto base_remap = vsag::Dataset::Make();
+    base_remap->NumElements(num_base)
+        ->SparseVectors(sv_base_shifted.data())
+        ->Ids(ids.data())
+        ->Owner(false);
+    auto res2 = remap_index->Build(base_remap);
+    REQUIRE(res2.size() == 0);
+
+    // Compare memory usage
+    auto mem_no_remap = no_remap_index->EstimateMemory(num_base);
+    auto mem_remap = remap_index->EstimateMemory(num_base);
+
+    // Remap should use significantly less memory
+    // no_remap: ~5M slots × 20B = ~100MB overhead
+    // remap: ~30K slots × 20B + mapper = ~2MB overhead
+    REQUIRE(mem_remap < mem_no_remap);
+    float savings_ratio = 1.0f - static_cast<float>(mem_remap) / static_cast<float>(mem_no_remap);
+    WARN("Memory comparison: no_remap=" << mem_no_remap << " remap=" << mem_remap << " savings=" << savings_ratio << " unique_terms=" << unique_count);
+    REQUIRE(savings_ratio > 0.9f);  // at least 90% memory reduction
+
+    for (auto& item : sv_base) {
+        delete[] item.vals_;
+        delete[] item.ids_;
+    }
+    for (auto& item : sv_base_shifted) {
+        delete[] item.ids_;
+        delete[] item.vals_;
+    }
+}
+
+TEST_CASE("SINDI Remap Memory Comparison - MD5 Vocabulary", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+
+    // Simulate MD5 hash-based tokenizer: term IDs scattered across uint32 range
+    // Actual unique terms ~5M, but raw IDs could be anywhere in [0, 2^32)
+    // Without remap: term_id_limit must be >= max_raw_id (impossible if > 10M)
+    // With remap: term_id_limit = 5M (fits within 10M limit)
+
+    // We can't actually test with 5M terms (too slow in QEMU), so we use
+    // a scaled-down version that demonstrates the same principle:
+    // 50K unique terms with raw IDs scattered in [0, 10M) range
+    uint32_t num_base = 500;
+    int64_t max_dim = 64;
+    int64_t max_id = 10000;  // base range for generation
+    float min_val = 0;
+    float max_val = 10;
+    int seed_base = 77;
+
+    std::vector<int64_t> ids(num_base);
+    for (int64_t i = 0; i < num_base; ++i) {
+        ids[i] = i;
+    }
+
+    auto sv_base =
+        fixtures::GenerateSparseVectors(num_base, max_dim, max_id, min_val, max_val, seed_base);
+
+    // Simulate MD5: scatter term IDs across a large range using a hash-like transform
+    std::mt19937 rng(12345);
+    std::unordered_map<uint32_t, uint32_t> id_scatter;
+    for (uint32_t i = 0; i < num_base; ++i) {
+        for (uint32_t j = 0; j < sv_base[i].len_; ++j) {
+            uint32_t orig = sv_base[i].ids_[j];
+            if (id_scatter.find(orig) == id_scatter.end()) {
+                // Map to a random ID in [0, 9999999] (simulating MD5 spread)
+                id_scatter[orig] = rng() % 10000000;
+            }
+            sv_base[i].ids_[j] = id_scatter[orig];
+        }
+    }
+
+    // Find max scattered ID
+    uint32_t max_scattered_id = 0;
+    std::set<uint32_t> unique_terms;
+    for (uint32_t i = 0; i < num_base; ++i) {
+        for (uint32_t j = 0; j < sv_base[i].len_; ++j) {
+            unique_terms.insert(sv_base[i].ids_[j]);
+            max_scattered_id = std::max(max_scattered_id, sv_base[i].ids_[j]);
+        }
+    }
+    uint32_t unique_count = static_cast<uint32_t>(unique_terms.size());
+
+    // Without remap: needs term_id_limit >= max_scattered_id + 1
+    uint32_t no_remap_limit = max_scattered_id + 1;
+
+    // With remap: only needs unique_count
+    uint32_t remap_limit = unique_count + 100;
+
+    auto base = vsag::Dataset::Make();
+    base->NumElements(num_base)->SparseVectors(sv_base.data())->Ids(ids.data())->Owner(false);
+
+    // Build without remap
+    auto no_remap_param_str = fmt::format(R"({{
+        "use_reorder": false,
+        "use_quantization": false,
+        "doc_prune_ratio": 0.0,
+        "window_size": 10000,
+        "term_id_limit": {},
+        "remap_term_ids": false,
+        "avg_doc_term_length": 64
+    }})",
+                                          no_remap_limit);
+
+    auto no_remap_json = vsag::JsonType::Parse(no_remap_param_str);
+    auto no_remap_param = std::make_shared<vsag::SINDIParameter>();
+    no_remap_param->FromJson(no_remap_json);
+    auto no_remap_index = std::make_unique<SINDI>(no_remap_param, common_param);
+    auto res1 = no_remap_index->Build(base);
+    REQUIRE(res1.size() == 0);
+
+    // Build with remap
+    auto remap_param_str = fmt::format(R"({{
+        "use_reorder": false,
+        "use_quantization": false,
+        "doc_prune_ratio": 0.0,
+        "window_size": 10000,
+        "term_id_limit": {},
+        "remap_term_ids": true,
+        "avg_doc_term_length": 64
+    }})",
+                                       remap_limit);
+
+    auto remap_json = vsag::JsonType::Parse(remap_param_str);
+    auto remap_param = std::make_shared<vsag::SINDIParameter>();
+    remap_param->FromJson(remap_json);
+    auto remap_index = std::make_unique<SINDI>(remap_param, common_param);
+    auto res2 = remap_index->Build(base);
+    REQUIRE(res2.size() == 0);
+
+    // Compare memory
+    auto mem_no_remap = no_remap_index->EstimateMemory(num_base);
+    auto mem_remap = remap_index->EstimateMemory(num_base);
+    float savings_ratio = 1.0f - static_cast<float>(mem_remap) / static_cast<float>(mem_no_remap);
+    WARN("MD5 vocab comparison: no_remap=" << mem_no_remap << " remap=" << mem_remap << " savings=" << savings_ratio << " unique_terms=" << unique_count << " max_id=" << max_scattered_id);
+
+    REQUIRE(mem_remap < mem_no_remap);
+    REQUIRE(savings_ratio > 0.9f);
+
+    // Verify search still works with remap
+    std::string search_param_str = R"(
+    {
+        "sindi": {
+            "query_prune_ratio": 0.0,
+            "term_prune_ratio": 0.0,
+            "n_candidate": 20,
+            "use_term_lists_heap_insert": false
+        }
+    }
+    )";
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->SparseVectors(sv_base.data())->Owner(false);
+    auto result = remap_index->KnnSearch(query, 5, search_param_str, nullptr);
+    REQUIRE(result->GetDim() > 0);
 
     for (auto& item : sv_base) {
         delete[] item.vals_;

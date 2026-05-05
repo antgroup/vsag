@@ -104,6 +104,7 @@ SINDI::Add(const DatasetPtr& base, AddMode mode) {
     }
 
     // add process
+    Vector<uint32_t> tmp_ids(allocator_);
     for (uint32_t i = 0; i < data_num; ++i) {
         auto cur_window = cur_element_count_ / window_size_;
         auto window_start_id = cur_window * window_size_;
@@ -124,7 +125,6 @@ SINDI::Add(const DatasetPtr& base, AddMode mode) {
 
         try {
             if (remap_term_ids_) {
-                Vector<uint32_t> tmp_ids(allocator_);
                 auto remapped = remap_sparse_vector_for_build(sparse_vector, tmp_ids);
                 window_term_list_[cur_window]->InsertVector(remapped, inner_id);
             } else {
@@ -317,9 +317,8 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
         float cur_heap_top = std::numeric_limits<float>::max();
         auto candidate_size = heap.size();
         auto high_precise_heap = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
-        auto [sorted_ids, sorted_vals] =
-            rerank_flat_index_->sort_sparse_vector(
-                original_query ? *original_query : computer->raw_query_);
+        auto [sorted_ids, sorted_vals] = rerank_flat_index_->sort_sparse_vector(
+            original_query ? *original_query : computer->raw_query_);
         for (auto i = 0; i < candidate_size; i++) {
             auto inner_id = heap.top().second;
             auto high_precise_distance = rerank_flat_index_->CalDistanceByIdUnsafe(
@@ -774,6 +773,8 @@ SINDI::remap_sparse_vector_for_query(const SparseVector& input,
                                      Vector<float>& tmp_vals) const {
     tmp_ids.clear();
     tmp_vals.clear();
+    tmp_ids.reserve(input.len_);
+    tmp_vals.reserve(input.len_);
     for (uint32_t i = 0; i < input.len_; ++i) {
         auto compact = term_id_mapper_->TryMap(input.ids_[i]);
         if (compact.has_value()) {
