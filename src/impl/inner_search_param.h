@@ -74,6 +74,7 @@ public:
             ep = other.ep;
             ef = other.ef;
             skip_ratio = other.skip_ratio;
+            skip_strategy_type = other.skip_strategy_type;
             search_mode = other.search_mode;
             range_search_limit_size = other.range_search_limit_size;
             is_inner_id_allowed = other.is_inner_id_allowed;

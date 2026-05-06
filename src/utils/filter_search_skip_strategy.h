@@ -29,7 +29,7 @@ public:
     virtual ~FilterSearchSkipStrategy() = default;
 
     virtual bool
-    ShouldSkipInvalid() = 0;
+    ShouldSkipFilterCheck() = 0;
 };
 
 using FilterSearchSkipStrategyPtr = std::unique_ptr<FilterSearchSkipStrategy>;

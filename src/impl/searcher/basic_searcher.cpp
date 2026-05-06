@@ -35,8 +35,7 @@ BasicSearcher::visit(const GraphInterfacePtr& graph,
                      const VisitedListPtr& vl,
                      const std::pair<float, uint64_t>& current_node_pair,
                      const FilterPtr& filter,
-                     float skip_ratio,
-                     FilterSearchSkipStrategyType skip_strategy_type,
+                     FilterSearchSkipStrategy* skip_strategy,
                      Vector<InnerIdType>& to_be_visited_rid,
                      Vector<InnerIdType>& to_be_visited_id,
                      Vector<InnerIdType>& neighbors) const {
@@ -49,16 +48,13 @@ BasicSearcher::visit(const GraphInterfacePtr& graph,
         graph->GetNeighbors(current_node_pair.second, neighbors);
     }
 
-    auto skip_strategy = create_filter_search_skip_strategy(
-        skip_strategy_type, filter != nullptr ? filter->ValidRatio() : 1.0F, skip_ratio);
-
     for (uint32_t i = 0; i < neighbors.size(); i++) {
         if (i + prefetch_stride_visit_ < neighbors.size()) {
             vl->Prefetch(neighbors[i + prefetch_stride_visit_]);
         }
         if (not vl->Get(neighbors[i])) {
-            if (not filter || count_no_visited == 0 || filter->CheckValid(neighbors[i]) ||
-                not skip_strategy->ShouldSkipInvalid()) {
+            if (not filter || count_no_visited == 0 || skip_strategy->ShouldSkipFilterCheck() ||
+                filter->CheckValid(neighbors[i])) {
                 to_be_visited_rid[count_no_visited] = i;
                 to_be_visited_id[count_no_visited] = neighbors[i];
                 count_no_visited++;
@@ -135,6 +131,12 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     Vector<InnerIdType> to_be_visited_id(graph->MaximumDegree(), alloc);
     Vector<InnerIdType> neighbors(graph->MaximumDegree(), alloc);
     Vector<float> line_dists(graph->MaximumDegree(), alloc);
+    auto skip_strategy = create_filter_search_skip_strategy(
+        inner_search_param.skip_strategy_type,
+        inner_search_param.is_inner_id_allowed != nullptr
+            ? inner_search_param.is_inner_id_allowed->ValidRatio()
+            : 1.0F,
+        inner_search_param.skip_ratio);
 
     if (!iter_ctx->IsFirstUsed()) {
         if (iter_ctx->Empty()) {
@@ -212,8 +214,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                                  vl,
                                  current_node_pair,
                                  inner_search_param.is_inner_id_allowed,
-                                 inner_search_param.skip_ratio,
-                                 inner_search_param.skip_strategy_type,
+                                 skip_strategy.get(),
                                  to_be_visited_rid,
                                  to_be_visited_id,
                                  neighbors);
@@ -311,6 +312,12 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     Vector<InnerIdType> to_be_visited_id(graph->MaximumDegree(), alloc);
     Vector<InnerIdType> neighbors(graph->MaximumDegree(), alloc);
     Vector<float> line_dists(graph->MaximumDegree(), alloc);
+    auto skip_strategy = create_filter_search_skip_strategy(
+        inner_search_param.skip_strategy_type,
+        inner_search_param.is_inner_id_allowed != nullptr
+            ? inner_search_param.is_inner_id_allowed->ValidRatio()
+            : 1.0F,
+        inner_search_param.skip_ratio);
 
     Filter* attr_ft = nullptr;
     if (not inner_search_param.executors.empty() and inner_search_param.executors[0] != nullptr) {
@@ -385,8 +392,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                                  vl,
                                  current_node_pair,
                                  inner_search_param.is_inner_id_allowed,
-                                 inner_search_param.skip_ratio,
-                                 inner_search_param.skip_strategy_type,
+                                 skip_strategy.get(),
                                  to_be_visited_rid,
                                  to_be_visited_id,
                                  neighbors);

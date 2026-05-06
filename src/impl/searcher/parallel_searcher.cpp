@@ -38,8 +38,7 @@ ParallelSearcher::visit(const GraphInterfacePtr& graph,
                         const VisitedListPtr& vl,
                         const Vector<std::pair<float, uint64_t>>& node_pair,
                         const FilterPtr& filter,
-                        float skip_ratio,
-                        FilterSearchSkipStrategyType skip_strategy_type,
+                        FilterSearchSkipStrategy* skip_strategy,
                         Vector<InnerIdType>& to_be_visited_rid,
                         Vector<InnerIdType>& to_be_visited_id,
                         std::vector<Vector<InnerIdType>>& neighbors,
@@ -57,16 +56,14 @@ ParallelSearcher::visit(const GraphInterfacePtr& graph,
         }
     }
 
-    auto skip_strategy = create_filter_search_skip_strategy(
-        skip_strategy_type, filter != nullptr ? filter->ValidRatio() : 1.0F, skip_ratio);
     for (uint64_t i = 0; i < point_visited_num; i++) {
         for (uint32_t j = 0; j < neighbors[i].size(); j++) {
             if (j + prefetch_stride_visit_ < neighbors[i].size()) {
                 vl->Prefetch(neighbors[i][j + prefetch_stride_visit_]);
             }
             if (not vl->Get(neighbors[i][j])) {
-                if (not filter || count_no_visited == 0 || filter->CheckValid(neighbors[i][j]) ||
-                    not skip_strategy->ShouldSkipInvalid()) {
+                if (not filter || count_no_visited == 0 || skip_strategy->ShouldSkipFilterCheck() ||
+                    filter->CheckValid(neighbors[i][j])) {
                     to_be_visited_rid[count_no_visited] = j;
                     to_be_visited_id[count_no_visited] = neighbors[i][j];
                     count_no_visited++;
@@ -134,6 +131,12 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
                                                Vector<InnerIdType>(graph->MaximumDegree(), alloc));
     Vector<float> line_dists(vector_size, alloc);
     Vector<std::pair<float, uint64_t>> node_pair(beam, alloc);
+    auto skip_strategy = create_filter_search_skip_strategy(
+        inner_search_param.skip_strategy_type,
+        inner_search_param.is_inner_id_allowed != nullptr
+            ? inner_search_param.is_inner_id_allowed->ValidRatio()
+            : 1.0F,
+        inner_search_param.skip_ratio);
 
     flatten->Query(&dist, computer, &ep, 1, ctx);
     if (not is_id_allowed || is_id_allowed->CheckValid(ep)) {
@@ -216,8 +219,7 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
                                  vl,
                                  node_pair,
                                  inner_search_param.is_inner_id_allowed,
-                                 inner_search_param.skip_ratio,
-                                 inner_search_param.skip_strategy_type,
+                                 skip_strategy.get(),
                                  to_be_visited_rid,
                                  to_be_visited_id,
                                  neighbors,

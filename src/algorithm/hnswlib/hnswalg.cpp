@@ -611,10 +611,15 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
             }
             if (visited_array[candidate_id] != visited_array_tag) {
                 visited_array[candidate_id] = visited_array_tag;
+                bool candidate_valid = true;
+                bool candidate_valid_checked = false;
                 if (is_id_allowed && not candidate_set.empty() &&
-                    not is_id_allowed->CheckValid(getExternalLabel(candidate_id)) &&
-                    skip_strategy->ShouldSkipInvalid()) {
-                    continue;
+                    not skip_strategy->ShouldSkipFilterCheck()) {
+                    candidate_valid = is_id_allowed->CheckValid(getExternalLabel(candidate_id));
+                    candidate_valid_checked = true;
+                    if (not candidate_valid) {
+                        continue;
+                    }
                 }
                 float dist = 0;
                 char* currObj1 = getDataByInternalId(candidate_id);
@@ -626,7 +631,7 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
                     vsag::PrefetchLines(vector_data_ptr, 64);
 
                     if ((!has_deletions || !isMarkedDeleted(candidate_id)) &&
-                        ((!is_id_allowed) ||
+                        ((!is_id_allowed) || candidate_valid_checked ||
                          is_id_allowed->CheckValid(getExternalLabel(candidate_id)))) {
                         if (iter_ctx != nullptr && !iter_ctx->CheckPoint(candidate_id)) {
                             continue;
