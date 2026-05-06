@@ -22,7 +22,7 @@
 #include "algorithm/inner_index_interface.h"
 #include "datacell/flatten_interface.h"
 #include "impl/heap/standard_heap.h"
-#include "utils/linear_congruential_generator.h"
+#include "utils/filter_search_skip_strategy.h"
 #include "vsag/allocator.h"
 
 namespace vsag {
@@ -37,10 +37,10 @@ BasicSearcher::visit(const GraphInterfacePtr& graph,
                      const std::pair<float, uint64_t>& current_node_pair,
                      const FilterPtr& filter,
                      float skip_ratio,
+                     FilterSearchSkipStrategyType skip_strategy_type,
                      Vector<InnerIdType>& to_be_visited_rid,
                      Vector<InnerIdType>& to_be_visited_id,
                      Vector<InnerIdType>& neighbors) const {
-    LinearCongruentialGenerator generator;
     uint32_t count_no_visited = 0;
 
     if (this->mutex_array_ != nullptr) {
@@ -50,18 +50,16 @@ BasicSearcher::visit(const GraphInterfacePtr& graph,
         graph->GetNeighbors(current_node_pair.second, neighbors);
     }
 
-    float skip_threshold =
-        (filter != nullptr
-             ? (filter->ValidRatio() == 1.0F ? 0 : (1 - ((1 - filter->ValidRatio()) * skip_ratio)))
-             : 0.0F);
+    auto skip_strategy = create_filter_search_skip_strategy(
+        skip_strategy_type, filter != nullptr ? filter->ValidRatio() : 1.0F, skip_ratio);
 
     for (uint32_t i = 0; i < neighbors.size(); i++) {
         if (i + prefetch_stride_visit_ < neighbors.size()) {
             vl->Prefetch(neighbors[i + prefetch_stride_visit_]);
         }
         if (not vl->Get(neighbors[i])) {
-            if (not filter || count_no_visited == 0 || generator.NextFloat() > skip_threshold ||
-                filter->CheckValid(neighbors[i])) {
+            if (not filter || count_no_visited == 0 || filter->CheckValid(neighbors[i]) ||
+                not skip_strategy->ShouldSkipInvalid()) {
                 to_be_visited_rid[count_no_visited] = i;
                 to_be_visited_id[count_no_visited] = neighbors[i];
                 count_no_visited++;
@@ -188,10 +186,11 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
 
         count_no_visited = visit(graph,
                                  vl,
-                                 current_node_pair,
-                                 inner_search_param.is_inner_id_allowed,
-                                 inner_search_param.skip_ratio,
-                                 to_be_visited_rid,
+                                  current_node_pair,
+                                  inner_search_param.is_inner_id_allowed,
+                                  inner_search_param.skip_ratio,
+                                  inner_search_param.skip_strategy_type,
+                                  to_be_visited_rid,
                                  to_be_visited_id,
                                  neighbors);
 
@@ -331,10 +330,11 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
 
         count_no_visited = visit(graph,
                                  vl,
-                                 current_node_pair,
-                                 inner_search_param.is_inner_id_allowed,
-                                 inner_search_param.skip_ratio,
-                                 to_be_visited_rid,
+                                  current_node_pair,
+                                  inner_search_param.is_inner_id_allowed,
+                                  inner_search_param.skip_ratio,
+                                  inner_search_param.skip_strategy_type,
+                                  to_be_visited_rid,
                                  to_be_visited_id,
                                  neighbors);
 

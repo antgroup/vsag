@@ -117,6 +117,10 @@ HnswSearchParameters::FromJson(const std::string& json_string) {
     if (params[index_name].Contains(HNSW_PARAMETER_SKIP_RATIO)) {
         obj.skip_ratio = params[index_name][HNSW_PARAMETER_SKIP_RATIO].GetFloat();
     }
+    if (params[index_name].Contains(HNSW_PARAMETER_SKIP_STRATEGY)) {
+        obj.skip_strategy_type = parse_filter_search_skip_strategy_type(
+            params[index_name][HNSW_PARAMETER_SKIP_STRATEGY].GetString());
+    }
 
     return obj;
 }
