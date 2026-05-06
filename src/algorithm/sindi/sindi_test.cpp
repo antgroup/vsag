@@ -1089,7 +1089,8 @@ TEST_CASE("SINDI Remap Memory Comparison", "[ut][SINDI]") {
     // remap: ~30K slots × 20B + mapper = ~2MB overhead
     REQUIRE(mem_remap < mem_no_remap);
     float savings_ratio = 1.0f - static_cast<float>(mem_remap) / static_cast<float>(mem_no_remap);
-    WARN("Memory comparison: no_remap=" << mem_no_remap << " remap=" << mem_remap << " savings=" << savings_ratio << " unique_terms=" << unique_count);
+    WARN("Memory comparison: no_remap=" << mem_no_remap << " remap=" << mem_remap << " savings="
+                                        << savings_ratio << " unique_terms=" << unique_count);
     REQUIRE(savings_ratio > 0.9f);  // at least 90% memory reduction
 
     for (auto& item : sv_base) {
@@ -1206,7 +1207,9 @@ TEST_CASE("SINDI Remap Memory Comparison - MD5 Vocabulary", "[ut][SINDI]") {
     auto mem_no_remap = no_remap_index->EstimateMemory(num_base);
     auto mem_remap = remap_index->EstimateMemory(num_base);
     float savings_ratio = 1.0f - static_cast<float>(mem_remap) / static_cast<float>(mem_no_remap);
-    WARN("MD5 vocab comparison: no_remap=" << mem_no_remap << " remap=" << mem_remap << " savings=" << savings_ratio << " unique_terms=" << unique_count << " max_id=" << max_scattered_id);
+    WARN("MD5 vocab comparison: no_remap=" << mem_no_remap << " remap=" << mem_remap << " savings="
+                                           << savings_ratio << " unique_terms=" << unique_count
+                                           << " max_id=" << max_scattered_id);
 
     REQUIRE(mem_remap < mem_no_remap);
     REQUIRE(savings_ratio > 0.9f);
