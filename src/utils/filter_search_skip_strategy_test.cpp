@@ -44,31 +44,31 @@ TEST_CASE("Accumulative filter search skip strategy is deterministic",
         FilterSearchSkipStrategyType::DETERMINISTIC_ACCUMULATIVE, valid_ratio, skip_ratio);
 
     for (uint64_t i = 0; i < 20; ++i) {
-        first_sequence.emplace_back(first_strategy->ShouldSkipInvalid());
-        second_sequence.emplace_back(second_strategy->ShouldSkipInvalid());
+        first_sequence.emplace_back(first_strategy->ShouldSkipFilterCheck());
+        second_sequence.emplace_back(second_strategy->ShouldSkipFilterCheck());
     }
 
     REQUIRE(first_sequence == second_sequence);
-    REQUIRE(first_sequence == std::vector<bool>{true,
-                                                true,
+    REQUIRE(first_sequence == std::vector<bool>{false,
                                                 false,
                                                 true,
                                                 false,
                                                 true,
-                                                true,
+                                                false,
                                                 false,
                                                 true,
                                                 false,
                                                 true,
-                                                true,
+                                                false,
                                                 false,
                                                 true,
                                                 false,
                                                 true,
-                                                true,
+                                                false,
                                                 false,
                                                 true,
-                                                false});
+                                                false,
+                                                true});
 }
 
 TEST_CASE("Accumulative filter search skip strategy edge cases",
@@ -77,7 +77,7 @@ TEST_CASE("Accumulative filter search skip strategy edge cases",
         auto strategy = create_filter_search_skip_strategy(
             FilterSearchSkipStrategyType::DETERMINISTIC_ACCUMULATIVE, 1.0F, 0.8F);
         for (uint64_t i = 0; i < 10; ++i) {
-            REQUIRE_FALSE(strategy->ShouldSkipInvalid());
+            REQUIRE(strategy->ShouldSkipFilterCheck());
         }
     }
 
@@ -85,7 +85,7 @@ TEST_CASE("Accumulative filter search skip strategy edge cases",
         auto strategy = create_filter_search_skip_strategy(
             FilterSearchSkipStrategyType::DETERMINISTIC_ACCUMULATIVE, 0.5F, 0.0F);
         for (uint64_t i = 0; i < 10; ++i) {
-            REQUIRE(strategy->ShouldSkipInvalid());
+            REQUIRE_FALSE(strategy->ShouldSkipFilterCheck());
         }
     }
 }

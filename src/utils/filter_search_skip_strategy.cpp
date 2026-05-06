@@ -23,60 +23,64 @@ namespace {
 constexpr const char* RANDOM_SKIP_STRATEGY = "random";
 constexpr const char* DETERMINISTIC_ACCUMULATIVE_SKIP_STRATEGY = "deterministic_accumulative";
 
-float
+double
 get_retain_ratio(float valid_ratio, float skip_ratio) {
     if (valid_ratio == 1.0F) {
-        return 1.0F;
+        return 1.0;
     }
-    return (1.0F - valid_ratio) * skip_ratio;
+    return static_cast<double>(1.0F - valid_ratio) * static_cast<double>(skip_ratio);
 }
 
 class RandomFilterSearchSkipStrategy : public FilterSearchSkipStrategy {
 public:
-    explicit RandomFilterSearchSkipStrategy(float retain_ratio) : skip_threshold_(1.0F - retain_ratio) {
+    explicit RandomFilterSearchSkipStrategy(double retain_ratio)
+        : skip_threshold_(1.0 - retain_ratio) {
     }
 
     bool
-    ShouldSkipInvalid() override {
-        return generator_.NextFloat() < skip_threshold_;
+    ShouldSkipFilterCheck() override {
+        return generator_.NextFloat() > skip_threshold_;
     }
 
 private:
     LinearCongruentialGenerator generator_;
-    float skip_threshold_{0.0F};
+    double skip_threshold_{0.0};
 };
 
 class AccumulativeFilterSearchSkipStrategy : public FilterSearchSkipStrategy {
 public:
-    explicit AccumulativeFilterSearchSkipStrategy(float retain_ratio) : retain_ratio_(retain_ratio) {
+    explicit AccumulativeFilterSearchSkipStrategy(double retain_ratio) : retain_ratio_(retain_ratio) {
     }
 
     bool
-    ShouldSkipInvalid() override {
+    ShouldSkipFilterCheck() override {
         accumulative_alpha_ += retain_ratio_;
-        if (accumulative_alpha_ >= 1.0F) {
-            accumulative_alpha_ -= 1.0F;
-            return false;
+        if (accumulative_alpha_ >= 1.0) {
+            accumulative_alpha_ -= 1.0;
+            return true;
         }
-        return true;
+        return false;
     }
 
 private:
-    float retain_ratio_{1.0F};
-    float accumulative_alpha_{0.0F};
+    double retain_ratio_{1.0};
+    double accumulative_alpha_{0.0};
 };
 
 }  // namespace
 
 FilterSearchSkipStrategyPtr
 create_filter_search_skip_strategy(FilterSearchSkipStrategyType type,
-                               float valid_ratio,
-                               float skip_ratio) {
+                                   float valid_ratio,
+                                   float skip_ratio) {
     auto retain_ratio = get_retain_ratio(valid_ratio, skip_ratio);
-    if (type == FilterSearchSkipStrategyType::RANDOM) {
-        return std::make_unique<RandomFilterSearchSkipStrategy>(retain_ratio);
+    switch (type) {
+        case FilterSearchSkipStrategyType::RANDOM:
+            return std::make_unique<RandomFilterSearchSkipStrategy>(retain_ratio);
+        case FilterSearchSkipStrategyType::DETERMINISTIC_ACCUMULATIVE:
+            return std::make_unique<AccumulativeFilterSearchSkipStrategy>(retain_ratio);
     }
-    return std::make_unique<AccumulativeFilterSearchSkipStrategy>(retain_ratio);
+    throw VsagException(ErrorType::INVALID_ARGUMENT, "Unknown FilterSearchSkipStrategyType");
 }
 
 FilterSearchSkipStrategyType
@@ -93,10 +97,13 @@ parse_filter_search_skip_strategy_type(const std::string& strategy_name) {
 
 const char*
 filter_search_skip_strategy_type_to_string(FilterSearchSkipStrategyType type) {
-    if (type == FilterSearchSkipStrategyType::RANDOM) {
-        return RANDOM_SKIP_STRATEGY;
+    switch (type) {
+        case FilterSearchSkipStrategyType::RANDOM:
+            return RANDOM_SKIP_STRATEGY;
+        case FilterSearchSkipStrategyType::DETERMINISTIC_ACCUMULATIVE:
+            return DETERMINISTIC_ACCUMULATIVE_SKIP_STRATEGY;
     }
-    return DETERMINISTIC_ACCUMULATIVE_SKIP_STRATEGY;
+    throw VsagException(ErrorType::INVALID_ARGUMENT, "Unknown FilterSearchSkipStrategyType");
 }
 
 }  // namespace vsag

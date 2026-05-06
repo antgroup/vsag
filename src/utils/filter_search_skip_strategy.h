@@ -29,15 +29,15 @@ public:
     virtual ~FilterSearchSkipStrategy() = default;
 
     virtual bool
-    ShouldSkipInvalid() = 0;
+    ShouldSkipFilterCheck() = 0;
 };
 
 using FilterSearchSkipStrategyPtr = std::unique_ptr<FilterSearchSkipStrategy>;
 
 FilterSearchSkipStrategyPtr
 create_filter_search_skip_strategy(FilterSearchSkipStrategyType type,
-                               float valid_ratio,
-                               float skip_ratio);
+                                   float valid_ratio,
+                                   float skip_ratio);
 
 FilterSearchSkipStrategyType
 parse_filter_search_skip_strategy_type(const std::string& strategy_name);
