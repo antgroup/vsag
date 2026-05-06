@@ -16,6 +16,7 @@
 #include "warp.h"
 
 #include <atomic>
+#include <limits>
 #include <mutex>
 #include <numeric>
 #include <optional>
@@ -37,6 +38,11 @@
 #include "utils/slow_task_timer.h"
 #include "utils/util_functions.h"
 namespace vsag {
+
+namespace {
+constexpr InnerIdType MIN_PARALLEL_SEARCH_DOC_COUNT = 1000;
+constexpr float INITIAL_BEST_VECTOR_DISTANCE = std::numeric_limits<float>::infinity();
+}  // namespace
 
 WARP::WARP(const WarpParameterPtr& param, const IndexCommonParam& common_param)
     : InnerIndexInterface(param, common_param), doc_offsets_(allocator_) {
@@ -213,17 +219,17 @@ WARP::compute_maxsin_similarity(const float* query_vectors,
     Vector<float> dists(doc_vec_count, allocator_);
     std::iota(vec_indices.begin(), vec_indices.end(), doc_start_vec_idx);
 
-    // For each query vector, find max similarity with any document vector
+    // FactoryComputer returns distances; keep the best document-vector distance per query vector.
     for (uint32_t q = 0; q < query_vec_count; ++q) {
         const float* query_vec = query_vectors + q * dim_;
         auto computer = this->inner_codes_->FactoryComputer(query_vec);
 
-        float min_sim = std::numeric_limits<float>::max();
+        float best_dist = INITIAL_BEST_VECTOR_DISTANCE;
         this->inner_codes_->Query(dists.data(), computer, vec_indices.data(), doc_vec_count);
-        for (const auto& sim : dists) {
-            min_sim = std::min(min_sim, sim);
+        for (const float dist : dists) {
+            best_dist = std::min(best_dist, dist);
         }
-        total_score += min_sim;
+        total_score += best_dist;
     }
     return total_score;
 }
@@ -299,7 +305,8 @@ WARP::SearchWithRequest(const SearchRequest& request) const {
 
     DistHeapPtr heap = nullptr;
 
-    if (parallel_count == 1 || this->thread_pool_ == nullptr || total_count_ < 1000) {
+    if (parallel_count == 1 || this->thread_pool_ == nullptr ||
+        total_count_ < MIN_PARALLEL_SEARCH_DOC_COUNT) {
         heap = search_func(0, total_count_);
     } else {
         std::vector<std::future<DistHeapPtr>> futures;
@@ -375,7 +382,8 @@ WARP::RangeSearch(const vsag::DatasetPtr& query,
     auto parallel_count = warp_params.parallel_search_thread_count;
 
     // Use serial version if no thread pool or small dataset
-    if (parallel_count == 1 || this->thread_pool_ == nullptr || total_count_ < 1000) {
+    if (parallel_count == 1 || this->thread_pool_ == nullptr ||
+        total_count_ < MIN_PARALLEL_SEARCH_DOC_COUNT) {
         auto heap = std::make_shared<StandardHeap<true, true>>(this->allocator_, limited_size);
 
         for (InnerIdType doc_id = 0; doc_id < total_count_; ++doc_id) {
