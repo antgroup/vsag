@@ -14,31 +14,22 @@ jobs:
     name: Detect Changes
     runs-on: ubuntu-latest
     outputs:
-      cpp: ${{ steps.changes.outputs.cpp }}
+      non_markdown: ${{ steps.changes.outputs.non_markdown }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
         id: changes
         with:
           filters: |
-            cpp:
-              - 'src/**'
-              - 'include/**'
-              - 'tests/**'
-              - 'CMakeLists.txt'
-              - 'Makefile'
-              - 'extern/**'
-              - 'cmake/**'
-              - 'examples/cpp/**'
-              - '.github/workflows/**'
-              - 'scripts/**'
-              - '.clang-tidy'
-              - '.clang-format'
+            non_markdown:
+              - '**'
+              - '!*.md'
+              - '!**/*.md'
 
   build_tsan:
     name: Build with TSAN
     needs: changes
-    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.cpp == 'true'
+    if: github.event_name != 'pull_request' || needs.changes.outputs.non_markdown == 'true'
     runs-on: ubuntu-22.04
     concurrency:
       group: test_tsan_x86-${{ github.event.pull_request.number || github.sha }}
@@ -75,7 +66,7 @@ jobs:
   test_tsan:
     name: Run TSAN Tests
     needs: [changes, build_tsan]
-    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.cpp == 'true'
+    if: github.event_name != 'pull_request' || needs.changes.outputs.non_markdown == 'true'
     runs-on: ubuntu-22.04
     concurrency:
       group: test_tsan_x86-${{ github.event.pull_request.number || github.sha }}
