@@ -53,6 +53,7 @@ private:
           const Vector<std::pair<float, uint64_t>>& node_pair,
           const FilterPtr& filter,
           float skip_ratio,
+          FilterSearchSkipStrategyType skip_strategy_type,
           Vector<InnerIdType>& to_be_visited_rid,
           Vector<InnerIdType>& to_be_visited_id,
           std::vector<Vector<InnerIdType>>& neighbors,
