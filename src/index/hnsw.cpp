@@ -318,11 +318,11 @@ HNSW::knn_search(const DatasetPtr& query,
             }
             results = alg_hnsw_->searchKnn((const void*)(vector),
                                            k,
-                                            std::max(params.ef_search, k),
-                                            filter_ptr,
-                                            params.skip_ratio,
-                                            params.skip_strategy_type,
-                                            allocator,
+                                           std::max(params.ef_search, k),
+                                           filter_ptr,
+                                           params.skip_ratio,
+                                           params.skip_strategy_type,
+                                           allocator,
                                            iter_filter_ctx,
                                            is_last_filter);
         } catch (const std::runtime_error& e) {

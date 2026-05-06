@@ -541,8 +541,8 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
     MaxHeap candidate_set(search_allocator);
 
     float valid_ratio = is_id_allowed ? is_id_allowed->ValidRatio() : 1.0F;
-    auto skip_strategy = vsag::create_filter_search_skip_strategy(
-        skip_strategy_type, valid_ratio, skip_ratio);
+    auto skip_strategy =
+        vsag::create_filter_search_skip_strategy(skip_strategy_type, valid_ratio, skip_ratio);
 
     float lower_bound;
     if (iter_ctx != nullptr && !iter_ctx->IsFirstUsed()) {

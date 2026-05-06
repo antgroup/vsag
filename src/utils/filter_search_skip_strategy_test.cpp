@@ -15,7 +15,6 @@
 #include "filter_search_skip_strategy.h"
 
 #include <catch2/catch_test_macros.hpp>
-
 #include <vector>
 
 using namespace vsag;
@@ -49,26 +48,9 @@ TEST_CASE("Accumulative filter search skip strategy is deterministic",
     }
 
     REQUIRE(first_sequence == second_sequence);
-    REQUIRE(first_sequence == std::vector<bool>{false,
-                                                false,
-                                                true,
-                                                false,
-                                                true,
-                                                false,
-                                                false,
-                                                true,
-                                                false,
-                                                true,
-                                                false,
-                                                false,
-                                                true,
-                                                false,
-                                                true,
-                                                false,
-                                                false,
-                                                true,
-                                                false,
-                                                true});
+    REQUIRE(first_sequence == std::vector<bool>{false, false, true,  false, true,  false, false,
+                                                true,  false, true,  false, false, true,  false,
+                                                true,  false, false, true,  false, true});
 }
 
 TEST_CASE("Accumulative filter search skip strategy edge cases",
