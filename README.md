@@ -446,6 +446,13 @@ VSAG referenced the following works during its implementation:
                 </a>
             </td>
             <td align="center">
+                <a href="https://github.com/xfmeng17">
+                    <img src="https://avatars.githubusercontent.com/u/32661584?v=4" width="100" alt="xfmeng17"/>
+                    <br />
+                    <sub><b>XFMENG17</b></sub>
+                </a>
+            </td>
+            <td align="center">
                 <a href="https://github.com/cubicc">
                     <img src="https://avatars.githubusercontent.com/u/51120671?v=4" width="100" alt="cubicc"/>
                     <br />
@@ -459,6 +466,8 @@ VSAG referenced the following works during its implementation:
                     <sub><b>dasurax</b></sub>
                 </a>
             </td>
+        </tr>
+        <tr>
             <td align="center">
                 <a href="https://github.com/hhy3">
                     <img src="https://avatars.githubusercontent.com/u/44047980?v=4" width="100" alt="hhy3"/>
@@ -466,8 +475,6 @@ VSAG referenced the following works during its implementation:
                     <sub><b>Zihao Wang</b></sub>
                 </a>
             </td>
-        </tr>
-        <tr>
             <td align="center">
                 <a href="https://github.com/jiaweizone">
                     <img src="https://avatars.githubusercontent.com/u/251354?v=4" width="100" alt="jiaweizone"/>
@@ -494,13 +501,6 @@ VSAG referenced the following works during its implementation:
                     <img src="https://avatars.githubusercontent.com/u/84010733?v=4" width="100" alt="stuBirdFly"/>
                     <br />
                     <sub><b>stuBirdFly</b></sub>
-                </a>
-            </td>
-            <td align="center">
-                <a href="https://github.com/xfmeng17">
-                    <img src="https://avatars.githubusercontent.com/u/32661584?v=4" width="100" alt="xfmeng17"/>
-                    <br />
-                    <sub><b>XFMENG17</b></sub>
                 </a>
             </td>
         </tr>
