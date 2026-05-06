@@ -49,7 +49,8 @@ private:
 
 class AccumulativeFilterSearchSkipStrategy : public FilterSearchSkipStrategy {
 public:
-    explicit AccumulativeFilterSearchSkipStrategy(double retain_ratio) : retain_ratio_(retain_ratio) {
+    explicit AccumulativeFilterSearchSkipStrategy(double retain_ratio)
+        : retain_ratio_(retain_ratio) {
     }
 
     bool

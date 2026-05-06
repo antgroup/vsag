@@ -49,12 +49,12 @@ public:
     searchKnn(const void* query_data,
               uint64_t k,
               uint64_t ef,
-               const vsag::FilterPtr is_id_allowed = nullptr,
-               float skip_ratio = 0.9f,
-               vsag::FilterSearchSkipStrategyType skip_strategy_type =
-                   vsag::FilterSearchSkipStrategyType::DETERMINISTIC_ACCUMULATIVE,
-               vsag::Allocator* allocator = nullptr,
-               vsag::IteratorFilterContext* iter_ctx = nullptr,
+              const vsag::FilterPtr is_id_allowed = nullptr,
+              float skip_ratio = 0.9f,
+              vsag::FilterSearchSkipStrategyType skip_strategy_type =
+                  vsag::FilterSearchSkipStrategyType::DETERMINISTIC_ACCUMULATIVE,
+              vsag::Allocator* allocator = nullptr,
+              vsag::IteratorFilterContext* iter_ctx = nullptr,
               bool is_last_filter = false) const = 0;
 
     virtual std::priority_queue<std::pair<dist_t, LabelType>>

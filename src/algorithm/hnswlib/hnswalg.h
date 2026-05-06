@@ -282,13 +282,13 @@ public:
     MaxHeap
     searchBaseLayerST(InnerIdType ep_id,
                       const void* data_point,
-                       uint64_t ef,
-                       const vsag::FilterPtr is_id_allowed = nullptr,
-                       const float skip_ratio = 0.9f,
-                       vsag::FilterSearchSkipStrategyType skip_strategy_type =
-                           vsag::FilterSearchSkipStrategyType::DETERMINISTIC_ACCUMULATIVE,
-                       vsag::Allocator* allocator = nullptr,
-                       vsag::IteratorFilterContext* iter_ctx = nullptr) const;
+                      uint64_t ef,
+                      const vsag::FilterPtr is_id_allowed = nullptr,
+                      const float skip_ratio = 0.9f,
+                      vsag::FilterSearchSkipStrategyType skip_strategy_type =
+                          vsag::FilterSearchSkipStrategyType::DETERMINISTIC_ACCUMULATIVE,
+                      vsag::Allocator* allocator = nullptr,
+                      vsag::IteratorFilterContext* iter_ctx = nullptr) const;
 
     template <bool has_deletions, bool collect_metrics = false>
     MaxHeap

@@ -543,8 +543,8 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
     MaxHeap candidate_set(search_allocator);
 
     float valid_ratio = is_id_allowed ? is_id_allowed->ValidRatio() : 1.0F;
-    auto skip_strategy = vsag::create_filter_search_skip_strategy(
-        skip_strategy_type, valid_ratio, skip_ratio);
+    auto skip_strategy =
+        vsag::create_filter_search_skip_strategy(skip_strategy_type, valid_ratio, skip_ratio);
 
     float lower_bound;
     if (iter_ctx != nullptr && !iter_ctx->IsFirstUsed()) {
@@ -1683,11 +1683,11 @@ std::priority_queue<std::pair<float, LabelType>>
 HierarchicalNSW::searchKnn(const void* query_data,
                            uint64_t k,
                            uint64_t ef,
-                            const vsag::FilterPtr is_id_allowed,
-                            const float skip_ratio,
-                            vsag::FilterSearchSkipStrategyType skip_strategy_type,
-                            vsag::Allocator* allocator,
-                            vsag::IteratorFilterContext* iter_ctx,
+                           const vsag::FilterPtr is_id_allowed,
+                           const float skip_ratio,
+                           vsag::FilterSearchSkipStrategyType skip_strategy_type,
+                           vsag::Allocator* allocator,
+                           vsag::IteratorFilterContext* iter_ctx,
                            bool is_last_filter) const {
     std::shared_lock resize_lock(resize_mutex_);
     std::priority_queue<std::pair<float, LabelType>> result;
@@ -1713,11 +1713,11 @@ HierarchicalNSW::searchKnn(const void* query_data,
         top_candidates = searchBaseLayerST<false, true>(UNUSED_ENTRY_POINT_NODE,
                                                         query_data,
                                                         std::max(ef, k),
-                                                         is_id_allowed,
-                                                         skip_ratio,
-                                                         skip_strategy_type,
-                                                         allocator,
-                                                         iter_ctx);
+                                                        is_id_allowed,
+                                                        skip_ratio,
+                                                        skip_strategy_type,
+                                                        allocator,
+                                                        iter_ctx);
     } else {
         int64_t currObj;
         int max_level_copy;
@@ -1762,11 +1762,11 @@ HierarchicalNSW::searchKnn(const void* query_data,
             top_candidates = searchBaseLayerST<false, true>(currObj,
                                                             query_data,
                                                             std::max(ef, k),
-                                                             is_id_allowed,
-                                                             skip_ratio,
-                                                             skip_strategy_type,
-                                                             allocator,
-                                                             iter_ctx);
+                                                            is_id_allowed,
+                                                            skip_ratio,
+                                                            skip_strategy_type,
+                                                            allocator,
+                                                            iter_ctx);
         } else {
             top_candidates = searchBaseLayerST<true, true>(currObj,
                                                            query_data,

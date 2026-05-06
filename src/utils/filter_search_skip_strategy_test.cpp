@@ -49,26 +49,9 @@ TEST_CASE("Accumulative filter search skip strategy is deterministic",
     }
 
     REQUIRE(first_sequence == second_sequence);
-    REQUIRE(first_sequence == std::vector<bool>{false,
-                                                false,
-                                                true,
-                                                false,
-                                                true,
-                                                false,
-                                                false,
-                                                true,
-                                                false,
-                                                true,
-                                                false,
-                                                false,
-                                                true,
-                                                false,
-                                                true,
-                                                false,
-                                                false,
-                                                true,
-                                                false,
-                                                true});
+    REQUIRE(first_sequence == std::vector<bool>{false, false, true,  false, true,  false, false,
+                                                true,  false, true,  false, false, true,  false,
+                                                true,  false, false, true,  false, true});
 }
 
 TEST_CASE("Accumulative filter search skip strategy edge cases",

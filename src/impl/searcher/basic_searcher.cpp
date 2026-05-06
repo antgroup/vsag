@@ -188,10 +188,10 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
 
         count_no_visited = visit(graph,
                                  vl,
-                                  current_node_pair,
-                                  inner_search_param.is_inner_id_allowed,
-                                  skip_strategy.get(),
-                                  to_be_visited_rid,
+                                 current_node_pair,
+                                 inner_search_param.is_inner_id_allowed,
+                                 skip_strategy.get(),
+                                 to_be_visited_rid,
                                  to_be_visited_id,
                                  neighbors);
 
@@ -337,10 +337,10 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
 
         count_no_visited = visit(graph,
                                  vl,
-                                  current_node_pair,
-                                  inner_search_param.is_inner_id_allowed,
-                                  skip_strategy.get(),
-                                  to_be_visited_rid,
+                                 current_node_pair,
+                                 inner_search_param.is_inner_id_allowed,
+                                 skip_strategy.get(),
+                                 to_be_visited_rid,
                                  to_be_visited_id,
                                  neighbors);
 
