@@ -94,9 +94,9 @@ eval_case1:
 - 目标：
     - `stdout` — 输出到标准输出。
     - `file://<path>` — 写入文件（覆盖）。
-    - `appendfile://<path>` — 追加写入文件。
     - `influxdb://<host>:<port>/<path>?<query>` — POST 到 InfluxDB v2 接口；
-      需要使用 `format: line_protocol`，并通过 `vars.token` 传入鉴权令牌。
+      需要使用 `format: line_protocol`，并通过 `vars.token` 传入鉴权令牌
+      （值需包含 `Token ` 前缀，例如 `Token <your-influxdb-token>`）。
 
 如未配置任何导出器，结果默认以 `table` 格式打印到 stdout。
 

@@ -98,9 +98,9 @@ Each exporter combines a `format` with a `to` destination.
 - Destinations:
     - `stdout` — print to standard output.
     - `file://<path>` — write (overwrite) to a file.
-    - `appendfile://<path>` — append to a file.
     - `influxdb://<host>:<port>/<path>?<query>` — POST to an InfluxDB v2 endpoint. Use
-      `format: line_protocol` and pass an authentication token via `vars.token`.
+      `format: line_protocol` and pass an authentication token via `vars.token` (the value must
+      include the `Token ` prefix, e.g. `Token <your-influxdb-token>`).
 
 If no exporter is configured, results are printed to stdout in `table` format by default.
 

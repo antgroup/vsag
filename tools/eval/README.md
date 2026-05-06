@@ -17,7 +17,7 @@ This is a powerful command-line tool for comprehensive performance benchmarking 
     - **Latency**: Average Latency, Percentile Latency (P50, P95, P99, etc.)
     - **Resources**: Peak Memory Usage
 - **Flexible Configuration**: Supports configuring all test parameters via either command-line arguments or a YAML file.
-- **Multiple Export Targets**: Results can be sent to stdout, written to a file (overwrite or append), or pushed to InfluxDB.
+- **Multiple Export Targets**: Results can be sent to stdout, written to a file, or pushed to InfluxDB.
 - **Multiple Output Formats**: `table` / `text`, `json`, and `line_protocol` (for InfluxDB).
 - **Built-in HTTP Monitor (optional)**: Expose live progress and metrics via an embedded HTTP server while a batch is running.
 
@@ -151,8 +151,7 @@ global:
 - `to`: the export destination, one of:
     - `stdout` — print to standard output.
     - `file://<path>` — write (overwrite) to the given file path.
-    - `appendfile://<path>` — append to the given file path.
-    - `influxdb://<host>:<port>/<path>?<query>` — POST to an InfluxDB v2 endpoint. The `influxdb://` prefix is internally rewritten to `http://`. Requires `format: line_protocol` and a `token` entry in `vars`.
+    - `influxdb://<host>:<port>/<path>?<query>` — POST to an InfluxDB v2 endpoint. The `influxdb://` prefix is internally rewritten to `http://`. Requires `format: line_protocol` and a `token` entry in `vars` (the value must include the `Token ` prefix, e.g. `Token <your-influxdb-token>`).
 - `format`: the result format, one of `table` (or `text`, equivalent), `json`, `line_protocol`.
 - `vars` (optional): additional variables required by the exporter, e.g. `token` for InfluxDB.
 

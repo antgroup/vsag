@@ -17,7 +17,7 @@
     - **延迟**：平均延迟, 不同百分位的延迟 (P50, P95, P99 等)
     - **资源**：峰值内存使用
 - **灵活的配置**：支持通过命令行或 YAML 文件配置所有测试参数。
-- **多种导出目标**：结果可输出到 stdout、写入文件（覆盖或追加）或推送到 InfluxDB。
+- **多种导出目标**：结果可输出到 stdout、写入文件或推送到 InfluxDB。
 - **多种输出格式**：`table` / `text`、`json`、以及用于 InfluxDB 的 `line_protocol`。
 - **可选的内置 HTTP 监控**：在批量评估运行期间，通过内嵌 HTTP 服务实时查看进度和指标。
 
@@ -151,8 +151,7 @@ global:
 - `to`: 导出目标，可选：
     - `stdout` — 输出到标准输出。
     - `file://<path>` — 写入到指定文件（覆盖）。
-    - `appendfile://<path>` — 追加到指定文件。
-    - `influxdb://<host>:<port>/<path>?<query>` — POST 到 InfluxDB v2 接口。`influxdb://` 前缀会被内部重写为 `http://`。需要 `format: line_protocol`，并在 `vars` 中提供 `token`。
+    - `influxdb://<host>:<port>/<path>?<query>` — POST 到 InfluxDB v2 接口。`influxdb://` 前缀会被内部重写为 `http://`。需要 `format: line_protocol`，并在 `vars` 中提供 `token`（值需包含 `Token ` 前缀，例如 `Token <your-influxdb-token>`）。
 - `format`: 导出格式，可选 `table`（或等价的 `text`）、`json`、`line_protocol`。
 - `vars`（可选）: 导出器所需的额外变量，例如 InfluxDB 的 `token`。
 
