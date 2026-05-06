@@ -106,4 +106,14 @@ TEST_CASE("parse hnsw search skip strategy", "[ut][hnsw]") {
             }
         })"));
     }
+
+    SECTION("non-string strategy") {
+        REQUIRE_THROWS(vsag::HnswSearchParameters::FromJson(R"(
+        {
+            "hnsw": {
+                "ef_search": 100,
+                "skip_strategy": 1
+            }
+        })"));
+    }
 }

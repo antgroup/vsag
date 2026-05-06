@@ -56,7 +56,7 @@ TEST_CASE("Accumulative filter search skip strategy is deterministic",
 
 TEST_CASE("Accumulative filter search skip strategy edge cases",
           "[ut][filter_search_skip_strategy]") {
-    SECTION("valid ratio one keeps invalid candidates") {
+    SECTION("valid ratio one skips filter checks") {
         auto strategy = create_filter_search_skip_strategy(
             FilterSearchSkipStrategyType::DETERMINISTIC_ACCUMULATIVE, 1.0F, 0.8F);
         for (uint64_t i = 0; i < 10; ++i) {
