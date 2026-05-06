@@ -1414,6 +1414,16 @@ HGraph::Serialize(StreamWriter& writer, bool with_footer) const {
 
 void
 HGraph::serialize_without_footer(StreamWriter& writer) const {
+    if (this->create_new_raw_vector_) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "HGraph no-footer serialization does not support raw vector data");
+    }
+    if (this->label_table_->support_tombstone_ and this->delete_count_ > 0) {
+        throw VsagException(
+            ErrorType::UNSUPPORTED_INDEX_OPERATION,
+            "HGraph no-footer serialization does not support indexes with tombstone deletions");
+    }
+
     this->serialize_basic_info_v0_14(writer);
     this->basic_flatten_codes_->Serialize(writer);
     this->bottom_graph_->Serialize(writer);

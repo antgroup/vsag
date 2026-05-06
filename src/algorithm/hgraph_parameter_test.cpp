@@ -247,6 +247,7 @@ TEST_CASE("HGraph serialize and deserialize without footer", "[ut][HGraph][seria
     auto after = index_after_deserialize->KnnSearch(query, 10, search_param, nullptr);
     REQUIRE(before != nullptr);
     REQUIRE(after != nullptr);
+    REQUIRE(before->GetDim() == after->GetDim());
     for (int64_t i = 0; i < before->GetDim(); ++i) {
         REQUIRE(before->GetIds()[i] == after->GetIds()[i]);
     }
