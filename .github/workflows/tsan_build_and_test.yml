@@ -7,13 +7,38 @@ on:
       - 'docs/**'
   pull_request:
     branches: [ "main", "0.*" ]
-    paths-ignore:
-      - 'docs/**'
   workflow_dispatch:
 
 jobs:
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      cpp: ${{ steps.changes.outputs.cpp }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: changes
+        with:
+          filters: |
+            cpp:
+              - 'src/**'
+              - 'include/**'
+              - 'tests/**'
+              - 'CMakeLists.txt'
+              - 'Makefile'
+              - 'extern/**'
+              - 'cmake/**'
+              - 'examples/cpp/**'
+              - '.github/workflows/**'
+              - 'scripts/**'
+              - '.clang-tidy'
+              - '.clang-format'
+
   build_tsan:
     name: Build with TSAN
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.cpp == 'true'
     runs-on: ubuntu-22.04
     concurrency:
       group: test_tsan_x86-${{ github.event.pull_request.number || github.sha }}
@@ -49,7 +74,8 @@ jobs:
 
   test_tsan:
     name: Run TSAN Tests
-    needs: build_tsan
+    needs: [changes, build_tsan]
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.cpp == 'true'
     runs-on: ubuntu-22.04
     concurrency:
       group: test_tsan_x86-${{ github.event.pull_request.number || github.sha }}
