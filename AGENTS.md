@@ -5,6 +5,20 @@
 VSAG is a high-performance vector indexing library for similarity search, written primarily in C++
 with Python bindings provided by `pyvsag`.
 
+## Where To Learn About The Project
+
+Before making non-trivial changes, consult the project documentation:
+
+- The official documentation site: <https://vsag.io/docs> (English and Chinese versions are
+  available, including index parameters, best practices, performance references, and the
+  `eval_performance` tool guide).
+- The in-repo `docs/` directory, which mirrors the website source under `docs/docs/{en,zh}/src/`
+  and also contains design notes (e.g. `docs/hgraph.md`, `docs/ivf.md`, `docs/sindi.md`,
+  `docs/eval_performance.md`, `docs/dataset_format.md`).
+
+When updating user-facing behavior, keep both the website docs and any related in-repo READMEs
+(`tools/eval/README.md`, `tools/eval/README_zh.md`, etc.) in sync.
+
 ## What To Optimize For
 
 - Preserve API compatibility unless a breaking change is explicitly intended.
