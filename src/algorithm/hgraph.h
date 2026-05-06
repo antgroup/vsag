@@ -87,6 +87,9 @@ public:
     void
     Deserialize(StreamReader& reader) override;
 
+    void
+    Deserialize(StreamReader& reader, bool with_footer);
+
     InnerIndexPtr
     ExportModel(const IndexCommonParam& param) const override;
 
@@ -179,6 +182,9 @@ public:
 
     void
     Serialize(StreamWriter& writer) const override;
+
+    void
+    Serialize(StreamWriter& writer, bool with_footer) const;
 
     void
     SetBuildThreadsCount(uint64_t count) {
@@ -296,6 +302,15 @@ private:
 
     void
     deserialize_label_info(StreamReader& reader) const;
+
+    void
+    serialize_without_footer(StreamWriter& writer) const;
+
+    void
+    deserialize_without_footer(StreamReader& reader);
+
+    void
+    deserialize_data(StreamReader& reader);
 
     // used in version [0.12.*, 0.14.*]
     void

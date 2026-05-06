@@ -1366,27 +1366,17 @@ HGraph::deserialize_label_info(StreamReader& reader) const {
 
 void
 HGraph::Serialize(StreamWriter& writer) const {
+    this->Serialize(writer, not this->use_old_serial_format_);
+}
+
+void
+HGraph::Serialize(StreamWriter& writer, bool with_footer) const {
     if (this->ignore_reorder_) {
         this->use_reorder_ = false;
     }
 
-    // FIXME(wxyu): this option is used for special purposes, like compatibility testing
-    if (this->use_old_serial_format_) {
-        this->serialize_basic_info_v0_14(writer);
-        this->basic_flatten_codes_->Serialize(writer);
-        this->bottom_graph_->Serialize(writer);
-        if (this->use_reorder_) {
-            this->high_precise_codes_->Serialize(writer);
-        }
-        for (const auto& route_graph : this->route_graphs_) {
-            route_graph->Serialize(writer);
-        }
-        if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
-            this->extra_infos_->Serialize(writer);
-        }
-        if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
-            this->attr_filter_index_->Serialize(writer);
-        }
+    if (not with_footer) {
+        this->serialize_without_footer(writer);
         return;
     }
 
@@ -1423,37 +1413,81 @@ HGraph::Serialize(StreamWriter& writer) const {
 }
 
 void
+HGraph::serialize_without_footer(StreamWriter& writer) const {
+    this->serialize_basic_info_v0_14(writer);
+    this->basic_flatten_codes_->Serialize(writer);
+    this->bottom_graph_->Serialize(writer);
+    if (this->use_reorder_) {
+        this->high_precise_codes_->Serialize(writer);
+    }
+    for (const auto& route_graph : this->route_graphs_) {
+        route_graph->Serialize(writer);
+    }
+    if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
+        this->extra_infos_->Serialize(writer);
+    }
+    if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
+        this->attr_filter_index_->Serialize(writer);
+    }
+}
+
+void
+HGraph::deserialize_without_footer(StreamReader& reader) {
+    this->deserialize_basic_info_v0_14(reader);
+    this->basic_flatten_codes_->Deserialize(reader);
+    this->bottom_graph_->Deserialize(reader);
+    if (this->use_reorder_) {
+        this->high_precise_codes_->Deserialize(reader);
+    }
+
+    for (auto& route_graph : this->route_graphs_) {
+        route_graph->Deserialize(reader);
+    }
+    this->deserialize_data(reader);
+}
+
+void
+HGraph::deserialize_data(StreamReader& reader) {
+    auto new_size = max_capacity_.load();
+    this->neighbors_mutex_->Resize(new_size);
+
+    pool_ = std::make_shared<VisitedListPool>(1, allocator_, new_size, allocator_);
+
+    if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
+        this->extra_infos_->Deserialize(reader);
+    }
+    this->total_count_ = this->basic_flatten_codes_->TotalCount();
+
+    if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
+        this->attr_filter_index_->Deserialize(reader);
+    }
+}
+
+void
 HGraph::Deserialize(StreamReader& reader) {
+    this->Deserialize(reader, true);
+}
+
+void
+HGraph::Deserialize(StreamReader& reader, bool with_footer) {
+    if (not with_footer) {
+        this->deserialize_without_footer(reader);
+        this->cal_memory_usage();
+
+        // post serialize procedure
+        if (use_elp_optimizer_) {
+            elp_optimize();
+        }
+        return;
+    }
+
     // try to deserialize footer (only in new version)
     auto footer = Footer::Parse(reader);
 
     if (footer == nullptr) {  // old format, DON'T EDIT, remove in the future
         logger::debug("parse with v0.14 version format");
 
-        this->deserialize_basic_info_v0_14(reader);
-
-        this->basic_flatten_codes_->Deserialize(reader);
-        this->bottom_graph_->Deserialize(reader);
-        if (this->use_reorder_) {
-            this->high_precise_codes_->Deserialize(reader);
-        }
-
-        for (auto& route_graph : this->route_graphs_) {
-            route_graph->Deserialize(reader);
-        }
-        auto new_size = max_capacity_.load();
-        this->neighbors_mutex_->Resize(new_size);
-
-        pool_ = std::make_shared<VisitedListPool>(1, allocator_, new_size, allocator_);
-
-        if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
-            this->extra_infos_->Deserialize(reader);
-        }
-        this->total_count_ = this->basic_flatten_codes_->TotalCount();
-
-        if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
-            this->attr_filter_index_->Deserialize(reader);
-        }
+        this->deserialize_without_footer(reader);
     } else {  // create like `else if ( ver in [v0.15, v0.17] )` here if need in the future
         logger::debug("parse with new version format");
 
@@ -1481,19 +1515,7 @@ HGraph::Deserialize(StreamReader& reader) {
         for (auto& route_graph : this->route_graphs_) {
             route_graph->Deserialize(buffer_reader);
         }
-        auto new_size = max_capacity_.load();
-        this->neighbors_mutex_->Resize(new_size);
-
-        pool_ = std::make_shared<VisitedListPool>(1, allocator_, new_size, allocator_);
-
-        if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
-            this->extra_infos_->Deserialize(buffer_reader);
-        }
-        this->total_count_ = this->basic_flatten_codes_->TotalCount();
-
-        if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
-            this->attr_filter_index_->Deserialize(buffer_reader);
-        }
+        this->deserialize_data(buffer_reader);
 
         if (create_new_raw_vector_) {
             this->raw_vector_->Deserialize(buffer_reader);
