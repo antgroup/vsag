@@ -232,7 +232,6 @@ private:
             throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "allocate memory failed");
         }
         std::iota(ret.begin(), ret.end(), start);
-        this->total_count_ += count;
         return ret;
     }
 
