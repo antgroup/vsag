@@ -233,6 +233,7 @@ public:
 
     Vector<InnerIdType>
     get_unique_inner_ids(InnerIdType count) {
+        // Callers commit total_count_ only after resize succeeds.
         Vector<InnerIdType> ret(count, this->allocator_);
         if (ret.size() != count) {
             throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "allocate memory failed");
