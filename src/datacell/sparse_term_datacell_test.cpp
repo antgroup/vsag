@@ -296,16 +296,16 @@ TEST_CASE("SparseTermDatacell handles missing term lists", "[ut][SparseTermDatac
 
     std::vector<uint32_t> query_ids = {1};
     std::vector<float> query_vals = {1.0F};
-    SparseVector query;
+    SparseVector query{};
     query.len_ = static_cast<uint32_t>(query_ids.size());
     query.ids_ = query_ids.data();
     query.vals_ = query_vals.data();
 
-    SINDISearchParameter search_params;
+    SINDISearchParameter search_params{};
     search_params.term_prune_ratio = 0;
     search_params.query_prune_ratio = 0;
 
-    InnerSearchParam inner_param;
+    InnerSearchParam inner_param{};
     inner_param.ef = 2;
 
     SECTION("null term list is skipped") {
