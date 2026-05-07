@@ -15,6 +15,8 @@
 
 #include "sparse_term_datacell.h"
 
+#include <algorithm>
+
 #include "utils/util_functions.h"
 #include "vsag/allocator.h"
 #include "vsag_exception.h"
@@ -140,14 +142,16 @@ SparseTermDataCell::InsertHeapByTermLists(float* dists,
     while (computer->HasNextTerm()) {
         auto it = computer->NextTermIter();
         auto term = computer->GetTerm(it);
-        if (term >= term_ids_.size()) {
+        if (term >= term_ids_.size() || term >= term_sizes_.size() || term_sizes_[term] == 0 ||
+            term_ids_[term] == nullptr) {
             continue;
         }
 
         uint32_t i = 0;
+        auto& one_term_ids = *term_ids_[term];
         auto term_size = static_cast<uint32_t>(static_cast<float>(term_sizes_[term]) *
                                                computer->term_retain_ratio_);
-        auto& one_term_ids = *term_ids_[term];
+        term_size = std::min<uint32_t>(term_size, one_term_ids.size());
         if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
             if (heap.size() < n_candidate) {
                 for (; i < term_size; i++) {
