@@ -19,8 +19,12 @@
 #include <vsag/filter.h>
 
 #include <atomic>
+#include <functional>
+#include <memory>
 #include <shared_mutex>
+#include <tuple>
 
+#include "common.h"
 #include "datacell/duplicate_interface.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
@@ -36,16 +40,71 @@ using IdMapFunction = std::function<std::tuple<bool, int64_t>(int64_t)>;
 
 class LabelTable {
 public:
+    class LabelRemap {
+    public:
+        explicit LabelRemap(Allocator* allocator, LabelRemapType remap_type = LabelRemapType::PG);
+
+        void
+        Clear();
+
+        void
+        Reset();
+
+        void
+        Reserve(uint64_t size);
+
+        uint64_t
+        Size() const;
+
+        void
+        InsertOrAssign(LabelType label, InnerIdType inner_id);
+
+        void
+        Emplace(LabelType label, InnerIdType inner_id);
+
+        bool
+        Erase(LabelType label);
+
+        bool
+        Find(LabelType label, InnerIdType& inner_id) const;
+
+        template <typename Func>
+        void
+        ForEach(Func&& func) const {
+            if (pg_map_ != nullptr) {
+                for (const auto& [label, inner_id] : *pg_map_) {
+                    func(label, inner_id);
+                }
+                return;
+            }
+            for (const auto& [label, inner_id] : *robin_map_) {
+                func(label, inner_id);
+            }
+        }
+
+        [[nodiscard]] LabelRemapType
+        GetType() const {
+            return remap_type_;
+        }
+
+    private:
+        Allocator* allocator_{nullptr};
+        LabelRemapType remap_type_{LabelRemapType::PG};
+        std::unique_ptr<UnorderedMap<LabelType, InnerIdType>> robin_map_{};
+        std::unique_ptr<PGUnorderedMap<LabelType, InnerIdType>> pg_map_{};
+    };
+
     explicit LabelTable(Allocator* allocator,
                         bool use_reverse_map = true,
-                        bool compress_redundant_data = false);
+                        bool compress_redundant_data = false,
+                        LabelRemapType label_remap_type = LabelRemapType::PG);
 
     static constexpr InnerIdType INVALID_ID = std::numeric_limits<InnerIdType>::max();
 
     void
     Insert(InnerIdType id, LabelType label) {
         if (use_reverse_map_) {
-            label_remap_[label] = id;
+            label_remap_.InsertOrAssign(label, id);
         }
         if (id + 1 > label_table_.size()) {
             label_table_.resize(id + 1);
@@ -57,9 +116,7 @@ public:
     void
     SetImmutable() {
         this->use_reverse_map_ = false;
-        PGUnorderedMap<LabelType, InnerIdType> empty_remap(allocator_);
-        empty_remap.max_load_factor(0.75F);
-        this->label_remap_.swap(empty_remap);
+        this->label_remap_.Reset();
     }
 
     /**
@@ -86,17 +143,17 @@ public:
         if (not use_reverse_map_) {
             return false;
         }
-        auto iter = label_remap_.find(label);
-        if (iter == label_remap_.end() or iter->second != std::numeric_limits<InnerIdType>::max()) {
+        InnerIdType inner_id = INVALID_ID;
+        if (not label_remap_.Find(label, inner_id) or inner_id != INVALID_ID) {
             return false;
         }
 
         // 2. find inner_id
-        auto inner_id = GetIdByLabel(label, true);
+        inner_id = GetIdByLabel(label, true);
 
         // 3. recover
         deleted_ids_.erase(inner_id);
-        label_remap_[label] = inner_id;
+        label_remap_.InsertOrAssign(label, inner_id);
         return true;
     }
 
@@ -105,9 +162,11 @@ public:
         if (not use_reverse_map_) {
             return false;
         }
-        auto iter = label_remap_.find(label);
-        return (iter != label_remap_.end() and
-                iter->second == std::numeric_limits<InnerIdType>::max());
+        InnerIdType inner_id = INVALID_ID;
+        if (not label_remap_.Find(label, inner_id)) {
+            return false;
+        }
+        return inner_id == INVALID_ID;
     }
 
     /**
@@ -179,10 +238,12 @@ public:
         // 3. update label_remap_
         if (use_reverse_map_) {
             // note that currently, old_label must exist
-            auto iter_old = label_remap_.find(old_label);
-            auto internal_id = iter_old->second;
-            label_remap_.erase(iter_old);
-            label_remap_[new_label] = internal_id;
+            InnerIdType internal_id = INVALID_ID;
+            bool remap_found = label_remap_.Find(old_label, internal_id);
+            CHECK_ARGUMENT(remap_found,
+                           fmt::format("old label {} does not exist in remap", old_label));
+            label_remap_.Erase(old_label);
+            label_remap_.InsertOrAssign(new_label, internal_id);
         }
     }
 
@@ -213,10 +274,10 @@ public:
     Deserialize(lvalue_or_rvalue<StreamReader> reader) {
         StreamReader::ReadVector(reader, label_table_);
         if (use_reverse_map_) {
-            this->label_remap_.clear();
-            this->label_remap_.reserve(label_table_.size());
+            this->label_remap_.Clear();
+            this->label_remap_.Reserve(label_table_.size());
             for (InnerIdType id = 0; id < label_table_.size(); ++id) {
-                this->label_remap_[label_table_[id]] = id;
+                this->label_remap_.InsertOrAssign(label_table_[id], id);
             }
         }
         if (support_tombstone_) {
@@ -257,8 +318,32 @@ public:
     int64_t
     GetMemoryUsage() {
         return sizeof(LabelTable) + label_table_.size() * sizeof(LabelType) +
-               label_remap_.size() * (sizeof(LabelType) + sizeof(InnerIdType)) +
+               label_remap_.Size() * (sizeof(LabelType) + sizeof(InnerIdType)) +
                deleted_ids_.size() * sizeof(InnerIdType) + hole_list_.size() * sizeof(InnerIdType);
+    }
+
+    uint64_t
+    GetRemapSize() const {
+        return label_remap_.Size();
+    }
+
+    template <typename Visitor>
+    void
+    ForEachRemap(Visitor&& visitor) const {
+        label_remap_.ForEach(visitor);
+    }
+
+    void
+    ResetRemap(uint64_t size = 0) {
+        label_remap_.Clear();
+        if (size > 0) {
+            label_remap_.Reserve(size);
+        }
+    }
+
+    void
+    InsertRemap(LabelType label, InnerIdType inner_id) {
+        label_remap_.Emplace(label, inner_id);
     }
 
     /**
@@ -308,7 +393,7 @@ public:
     // Whether to use reverse map to speed up GetIdByLabel.
     bool use_reverse_map_{true};
     // Reverse map from label to id.
-    PGUnorderedMap<LabelType, InnerIdType> label_remap_;
+    LabelRemap label_remap_;
 
     bool support_tombstone_{false};
     DuplicateTrackerPtr duplicate_tracker_{nullptr};
@@ -363,11 +448,11 @@ public:
         }
 
         if (use_reverse_map_) {
-            label_remap_.erase(label_table_[to]);
+            label_remap_.Erase(label_table_[to]);
         }
         label_table_[to] = label_table_[from];
         if (use_reverse_map_) {
-            label_remap_[label_table_[to]] = to;
+            label_remap_.InsertOrAssign(label_table_[to], to);
         }
     }
 

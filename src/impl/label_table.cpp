@@ -21,7 +21,8 @@ class RemoveListFilter : public Filter {
 public:
     explicit RemoveListFilter(const UnorderedSet<InnerIdType>& remove_ids,
                               std::shared_mutex& delete_ids_mutex)
-        : Filter(), remove_ids_(remove_ids), delete_ids_mutex_(delete_ids_mutex){};
+        : Filter(), remove_ids_(remove_ids), delete_ids_mutex_(delete_ids_mutex) {
+    }
 
     [[nodiscard]] bool
     CheckValid(int64_t inner_id) const override {
@@ -34,29 +35,123 @@ private:
     std::shared_mutex& delete_ids_mutex_;
 };
 
-LabelTable::LabelTable(Allocator* allocator, bool use_reverse_map, bool compress_redundant_data)
-    : allocator_(allocator),
-      label_table_(0, allocator),
-      label_remap_(0, allocator),
+LabelTable::LabelRemap::LabelRemap(Allocator* allocator, LabelRemapType remap_type)
+    : allocator_(allocator), remap_type_(remap_type) {
+    if (remap_type_ == LabelRemapType::ROBIN) {
+        robin_map_ = std::make_unique<UnorderedMap<LabelType, InnerIdType>>(0, allocator);
+        robin_map_->max_load_factor(0.75F);
+    } else {
+        pg_map_ = std::make_unique<PGUnorderedMap<LabelType, InnerIdType>>(0, allocator);
+        pg_map_->max_load_factor(0.75F);
+    }
+}
+
+void
+LabelTable::LabelRemap::Reset() {
+    if (remap_type_ == LabelRemapType::ROBIN) {
+        robin_map_ = std::make_unique<UnorderedMap<LabelType, InnerIdType>>(0, allocator_);
+        robin_map_->max_load_factor(0.75F);
+        return;
+    }
+
+    pg_map_ = std::make_unique<PGUnorderedMap<LabelType, InnerIdType>>(0, allocator_);
+    pg_map_->max_load_factor(0.75F);
+}
+
+void
+LabelTable::LabelRemap::Clear() {
+    if (pg_map_ != nullptr) {
+        pg_map_->clear();
+        return;
+    }
+    robin_map_->clear();
+}
+
+void
+LabelTable::LabelRemap::Reserve(uint64_t size) {
+    if (pg_map_ != nullptr) {
+        pg_map_->reserve(size);
+        return;
+    }
+    robin_map_->reserve(size);
+}
+
+uint64_t
+LabelTable::LabelRemap::Size() const {
+    if (pg_map_ != nullptr) {
+        return pg_map_->size();
+    }
+    return robin_map_->size();
+}
+
+void
+LabelTable::LabelRemap::InsertOrAssign(LabelType label, InnerIdType inner_id) {
+    if (pg_map_ != nullptr) {
+        (*pg_map_)[label] = inner_id;
+        return;
+    }
+    (*robin_map_)[label] = inner_id;
+}
+
+void
+LabelTable::LabelRemap::Emplace(LabelType label, InnerIdType inner_id) {
+    if (pg_map_ != nullptr) {
+        pg_map_->emplace(label, inner_id);
+        return;
+    }
+    robin_map_->emplace(label, inner_id);
+}
+
+bool
+LabelTable::LabelRemap::Erase(LabelType label) {
+    if (pg_map_ != nullptr) {
+        return pg_map_->erase(label) > 0;
+    }
+    return robin_map_->erase(label) > 0;
+}
+
+bool
+LabelTable::LabelRemap::Find(LabelType label, InnerIdType& inner_id) const {
+    if (pg_map_ != nullptr) {
+        const auto iter = pg_map_->find(label);
+        if (iter == pg_map_->end()) {
+            return false;
+        }
+        inner_id = iter->second;
+        return true;
+    }
+
+    const auto iter = robin_map_->find(label);
+    if (iter == robin_map_->end()) {
+        return false;
+    }
+    inner_id = iter->second;
+    return true;
+}
+
+LabelTable::LabelTable(Allocator* allocator,
+                       bool use_reverse_map,
+                       bool compress_redundant_data,
+                       LabelRemapType label_remap_type)
+    : label_table_(0, allocator),
       use_reverse_map_(use_reverse_map),
+      label_remap_(allocator, label_remap_type),
+      allocator_(allocator),
       deleted_ids_(allocator),
       hole_list_(0, allocator) {
     (void)compress_redundant_data;
-    label_remap_.max_load_factor(0.75F);
     deleted_ids_filter_ = std::make_shared<RemoveListFilter>(deleted_ids_, delete_ids_mutex_);
 }
 
 bool
 LabelTable::CheckLabel(LabelType label) const {
     bool is_exist = false;
-    InnerIdType inner_id;
+    InnerIdType inner_id = INVALID_ID;
     if (use_reverse_map_) {
-        auto iter = label_remap_.find(label);
-        is_exist = iter != label_remap_.end();
+        is_exist = label_remap_.Find(label, inner_id);
         if (not is_exist) {
             return false;
         }
-        inner_id = iter->second;
     } else {
         auto result = std::find(label_table_.begin(), label_table_.end(), label);
         is_exist = (result != label_table_.end());
@@ -76,11 +171,11 @@ LabelTable::CheckLabel(LabelType label) const {
 
 InnerIdType
 LabelTable::get_id_by_label_with_reverse_map(LabelType label) const noexcept {
-    const auto iter = this->label_remap_.find(label);
-    if (iter == this->label_remap_.end()) {
+    InnerIdType inner_id = INVALID_ID;
+    if (not this->label_remap_.Find(label, inner_id)) {
         return INVALID_ID;
     }
-    return iter->second;
+    return inner_id;
 }
 
 InnerIdType
@@ -150,10 +245,10 @@ void
 LabelTable::Deserialize(StreamReader& reader) {
     StreamReader::ReadVector(reader, label_table_);
     if (use_reverse_map_) {
-        this->label_remap_.clear();
-        this->label_remap_.reserve(label_table_.size());
+        this->label_remap_.Clear();
+        this->label_remap_.Reserve(label_table_.size());
         for (InnerIdType id = 0; id < label_table_.size(); ++id) {
-            this->label_remap_[label_table_[id]] = id;
+            this->label_remap_.InsertOrAssign(label_table_[id], id);
         }
     }
 
@@ -177,12 +272,12 @@ LabelTable::MergeOther(const LabelTablePtr& other, const IdMapFunction& id_map) 
     auto current_total_count_u = static_cast<uint64_t>(current_total_count);
     this->label_table_.resize(current_total_count_u + other_size_u);
     if (use_reverse_map_) {
-        this->label_remap_.reserve(this->label_remap_.size() + other_size_u);
+        this->label_remap_.Reserve(this->label_remap_.Size() + other_size_u);
         for (uint64_t i = 0; i < other_size_u; ++i) {
             auto new_label = std::get<1>(id_map(other->label_table_[i]));
             auto new_inner_id = static_cast<InnerIdType>(i + current_total_count_u);
             this->label_table_[i + current_total_count_u] = new_label;
-            this->label_remap_[new_label] = new_inner_id;
+            this->label_remap_.InsertOrAssign(new_label, new_inner_id);
         }
     } else {
         for (uint64_t i = 0; i < other_size_u; ++i) {

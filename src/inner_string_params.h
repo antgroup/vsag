@@ -34,6 +34,7 @@ const char* const USE_QUANTIZATION = "use_quantization";
 const char* const EXTRA_INFO_KEY = "extra_info";
 const char* const USE_ATTRIBUTE_FILTER_KEY = "use_attribute_filter";
 const char* const BUILD_THREAD_COUNT_KEY = "build_thread_count";
+const char* const LABEL_REMAP_TYPE_KEY = "label_remap_type";
 const char* const BASE_CODES_KEY = "base_codes";
 const char* const PRECISE_CODES_KEY = "precise_codes";
 const char* const STORE_RAW_VECTOR_KEY = "store_raw_vector";
@@ -46,6 +47,8 @@ const char* const HGRAPH_USE_ELP_OPTIMIZER_KEY = "use_elp_optimizer";
 const char* const HGRAPH_IGNORE_REORDER_KEY = "ignore_reorder";
 const char* const HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY = "build_by_base";
 const char* const HGRAPH_USE_REVERSE_EDGES_KEY = "use_reverse_edges";
+const char* const LABEL_REMAP_TYPE_VALUE_ROBIN = "robin";
+const char* const LABEL_REMAP_TYPE_VALUE_PG = "pg";
 const char* const GRAPH_KEY = "graph";
 const char* const ALPHA_KEY = "alpha";
 
@@ -247,6 +250,9 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"IVF_PARTITION_STRATEGY_TYPE_NEAREST", IVF_PARTITION_STRATEGY_TYPE_NEAREST},
     {"IVF_TRAIN_TYPE_KMEANS", IVF_TRAIN_TYPE_KMEANS},
     {"BUILD_THREAD_COUNT_KEY", BUILD_THREAD_COUNT_KEY},
+    {"LABEL_REMAP_TYPE_KEY", LABEL_REMAP_TYPE_KEY},
+    {"LABEL_REMAP_TYPE_VALUE_ROBIN", LABEL_REMAP_TYPE_VALUE_ROBIN},
+    {"LABEL_REMAP_TYPE_VALUE_PG", LABEL_REMAP_TYPE_VALUE_PG},
     {"SEARCH_PARALLELISM", SEARCH_PARALLELISM},
     {"GRAPH_SUPPORT_REMOVE", GRAPH_SUPPORT_REMOVE},
     {"REMOVE_FLAG_BIT", REMOVE_FLAG_BIT},
