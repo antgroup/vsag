@@ -16,9 +16,17 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
+#include <iosfwd>
 #include <limits>
+#include <memory>
 #include <stdexcept>
+#include <string>
+#include <tuple>
+#include <utility>
+#include <vector>
 
+#include "vsag/allocator.h"
 #include "vsag/binaryset.h"
 #include "vsag/bitset.h"
 #include "vsag/dataset.h"
