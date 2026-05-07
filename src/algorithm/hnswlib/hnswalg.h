@@ -29,6 +29,7 @@
 #include <random>
 #include <shared_mutex>
 #include <stdexcept>
+#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -422,6 +423,7 @@ public:
     template <typename T>
     static inline T
     readUnaligned(const void* ptr) {
+        static_assert(std::is_trivially_copyable<T>::value, "T must be trivially copyable");
         T value;
         std::memcpy(&value, ptr, sizeof(T));
         return value;
@@ -430,8 +432,12 @@ public:
     template <typename T>
     static inline void
     writeUnaligned(void* ptr, T value) {
+        static_assert(std::is_trivially_copyable<T>::value, "T must be trivially copyable");
         std::memcpy(ptr, &value, sizeof(T));
     }
+
+    static_assert(sizeof(InnerIdType) == sizeof(linklistsizeint),
+                  "HNSW link-list storage uses linklistsizeint-sized neighbor words");
 
     static inline const char*
     linkWordPtr(const linklistsizeint* ptr, uint64_t index) {

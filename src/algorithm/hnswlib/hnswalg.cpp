@@ -315,7 +315,7 @@ HierarchicalNSW::setBatchNeigohborsNoLock(InnerIdType internal_id,
                                           const InnerIdType* neighbors,
                                           uint64_t neigbor_count) {
     linklistsizeint* ll_cur = getLinklistAtLevel(internal_id, level);
-    for (int i = 1; i <= neigbor_count; ++i) {
+    for (uint64_t i = 1; i <= neigbor_count; ++i) {
         setLinkAt(ll_cur, i, neighbors[i - 1]);
     }
 
@@ -1552,7 +1552,8 @@ HierarchicalNSW::removePoint(LabelType label) {
         }
 
         for (int i = 0; i < size_cur; ++i) {
-            getEdges(getLinkAt(data_cur, i + 1), level).erase(cur_c);
+            auto neighbor = getLinkAt(data_cur, i + 1);
+            getEdges(neighbor, level).erase(cur_c);
         }
     }
 }
