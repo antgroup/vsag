@@ -21,6 +21,7 @@
 
 #include "vsag/binaryset.h"
 #include "vsag/bitset.h"
+#include "vsag/build_cache.h"
 #include "vsag/dataset.h"
 #include "vsag/errors.h"
 #include "vsag/expected.hpp"
@@ -745,6 +746,68 @@ public:
     virtual tl::expected<void, Error>
     SetImmutable() {
         throw std::runtime_error("Index doesn't support SetImmutable");
+    }
+
+public:
+    // [build cache methods]
+
+    /**
+     * @brief Check whether the index supports Build Cache functionality.
+     *
+     * Not all index types support Build Cache. Callers should probe this
+     * before calling ExportBuildCache / BuildWithCache.
+     *
+     * @return true if Build Cache is supported, false otherwise.
+     */
+    [[nodiscard]] virtual bool
+    SupportsBuildCache() const {
+        return false;
+    }
+
+    /**
+     * @brief Export the build cache from the current index to an output stream.
+     *
+     * The cache contains the bottom graph neighbor relationships and the
+     * FeatureID-to-inner_id mapping table. It should be called after a
+     * successful index build.
+     *
+     * @param out_stream Output stream to write the cache data to.
+     * @return void on success, or Error if export fails.
+     */
+    virtual tl::expected<void, Error>
+    ExportBuildCache(std::ostream& out_stream) const {
+        throw std::runtime_error("Index doesn't support ExportBuildCache");
+    }
+
+    /**
+     * @brief Build the index using a cache from a previous build for warm start.
+     *
+     * This is the core entry point for the Build Cache mechanism. It uses
+     * cached neighbor relationships to initialize the bottom graph with
+     * high-quality starting points, then performs differentiated Refine
+     * iterations based on cache hit/miss status.
+     *
+     * @param base The new dataset, containing dim, num_elements, ids, vectors,
+     *             and FeatureIds (fixed-length string field).
+     * @param in_stream Input stream from a previous ExportBuildCache call.
+     * @param options Behavior control options for warm start and refine.
+     * @return IDs that failed to insert, or Error if build fails.
+     */
+    virtual tl::expected<std::vector<int64_t>, Error>
+    BuildWithCache(const DatasetPtr& base,
+                   std::istream& in_stream,
+                   const BuildCacheOptions& options = BuildCacheOptions{}) {
+        throw std::runtime_error("Index doesn't support BuildWithCache");
+    }
+
+    /**
+     * @brief Get statistics from the most recent BuildWithCache operation.
+     *
+     * @return BuildCacheStats containing hit/miss counts, refine metrics, etc.
+     */
+    [[nodiscard]] virtual tl::expected<BuildCacheStats, Error>
+    GetBuildCacheStats() const {
+        throw std::runtime_error("Index doesn't support GetBuildCacheStats");
     }
 
 public:
