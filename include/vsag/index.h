@@ -72,11 +72,6 @@ enum class RemoveMode {
     /** remove the vector from index and repair the index, this mode is heavy */
     FORCE_REMOVE = 1,
 
-    /** backward-compatible alias kept for existing public API users */
-    REMOVE_AND_REPAIR = FORCE_REMOVE,
-
-    /** backward-compatible alias for the mixed-style enumerator introduced earlier */
-    ForceRemove = FORCE_REMOVE,
 };
 
 class Index {
