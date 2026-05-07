@@ -25,6 +25,7 @@
 #include "space_interface.h"
 #include "storage/stream_reader.h"
 #include "typing.h"
+#include "utils/filter_search_skip_strategy.h"
 #include "vsag/dataset.h"
 #include "vsag/errors.h"
 #include "vsag/expected.hpp"
@@ -50,6 +51,8 @@ public:
               uint64_t ef,
               const vsag::FilterPtr is_id_allowed = nullptr,
               float skip_ratio = 0.9f,
+              vsag::FilterSearchSkipStrategyType skip_strategy_type =
+                  vsag::FilterSearchSkipStrategyType::DETERMINISTIC_ACCUMULATIVE,
               vsag::Allocator* allocator = nullptr,
               vsag::IteratorFilterContext* iter_ctx = nullptr,
               bool is_last_filter = false) const = 0;

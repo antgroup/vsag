@@ -16,6 +16,7 @@
 
 set (UTILS_SRC
         util_functions.cpp
+        filter_search_skip_strategy.cpp
         linear_congruential_generator.cpp
         visited_list.cpp
         slow_task_timer.cpp

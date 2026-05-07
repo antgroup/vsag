@@ -16,6 +16,7 @@
 #pragma once
 
 #include "algorithm/inner_index_interface.h"
+#include "algorithm/sindi/term_id_mapper.h"
 #include "algorithm/sparse_index.h"
 #include "datacell/sparse_term_datacell.h"
 #include "vsag/allocator.h"
@@ -129,13 +130,22 @@ private:
     search_impl(const SparseTermComputerPtr& computer,
                 const InnerSearchParam& inner_param,
                 Allocator* allocator,
-                bool use_term_lists_heap_insert) const;
+                bool use_term_lists_heap_insert,
+                const SparseVector* original_query = nullptr) const;
 
     std::pair<int64_t, int64_t>
     get_min_max_window_id(const FilterPtr& filter) const;
 
     void
     cal_memory_usage();
+
+    SparseVector
+    remap_sparse_vector_for_build(const SparseVector& input, Vector<uint32_t>& tmp_ids);
+
+    SparseVector
+    remap_sparse_vector_for_query(const SparseVector& input,
+                                  Vector<uint32_t>& tmp_ids,
+                                  Vector<float>& tmp_vals) const;
 
 private:
     mutable std::shared_mutex global_mutex_;
@@ -161,6 +171,9 @@ private:
 
     std::shared_ptr<QuantizationParams> quantization_params_;
     uint32_t avg_doc_term_length_{100};
+
+    bool remap_term_ids_{false};
+    std::shared_ptr<TermIdMapper> term_id_mapper_{nullptr};
 };
 
 }  // namespace vsag
