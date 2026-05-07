@@ -99,6 +99,52 @@ copy_sparse_vector(const SparseVector& src, SparseVector* dest, Allocator* alloc
     std::memcpy(dest->vals_, src.vals_, len * sizeof(float));
 }
 
+static void
+copy_multi_vector(const MultiVector& src,
+                  MultiVector* dest,
+                  int64_t multi_vector_dim,
+                  Allocator* allocator) {
+    dest->len_ = src.len_;
+    if (src.len_ == 0) {
+        dest->vectors_ = nullptr;
+        return;
+    }
+    uint64_t num_floats = static_cast<uint64_t>(src.len_) * multi_vector_dim;
+    if (allocator != nullptr) {
+        dest->vectors_ = static_cast<float*>(allocator->Allocate(num_floats * sizeof(float)));
+    } else {
+        dest->vectors_ = new float[num_floats];
+    }
+    std::memcpy(dest->vectors_, src.vectors_, num_floats * sizeof(float));
+}
+
+static MultiVector*
+allocate_and_copy_multi_vectors(const MultiVector* src,
+                                uint64_t count,
+                                int64_t multi_vector_dim,
+                                Allocator* allocator,
+                                MultiVector* old_dest = nullptr,
+                                uint64_t old_count = 0) {
+    if (src == nullptr || count == 0) {
+        return old_dest;
+    }
+
+    uint64_t new_total = old_count + count;
+    MultiVector* dest = nullptr;
+
+    if (allocator != nullptr) {
+        dest = allocator_element<MultiVector>(allocator, old_dest, new_total * sizeof(MultiVector));
+    } else {
+        dest = new_element<MultiVector>(old_dest, old_count, new_total);
+    }
+
+    for (uint64_t i = old_count; i < new_total; ++i) {
+        const MultiVector& src_vec = src[i - old_count];
+        copy_multi_vector(src_vec, &dest[i], multi_vector_dim, allocator);
+    }
+    return dest;
+}
+
 static SparseVector*
 allocate_and_copy_sparse_vectors(const SparseVector* src,
                                  uint64_t count,
@@ -253,6 +299,12 @@ DatasetImpl::DeepCopy(Allocator* allocator) const {
     if (this->GetSparseVectors() != nullptr) {
         copy_dataset->SparseVectors(allocate_and_copy_sparse_vectors(
             this->GetSparseVectors(), num_elements, allocator_ref));
+    }
+    if (this->GetMultiVectors() != nullptr) {
+        int64_t mv_dim = this->GetMultiVectorDim();
+        copy_dataset->MultiVectorDim(mv_dim);
+        copy_dataset->MultiVectors(allocate_and_copy_multi_vectors(
+            this->GetMultiVectors(), num_elements, mv_dim, allocator_ref));
     }
     if (this->GetPaths() != nullptr) {
         auto* paths = new std::string[num_elements];
