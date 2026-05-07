@@ -362,8 +362,47 @@ DatasetImpl::Append(const DatasetPtr& other) {
     auto new_num_elements = other->GetNumElements();
     auto dim = this->GetDim();
 
+    // check paths
+    if (this->data_.find(DATASET_PATHS) != this->data_.end() && other->GetPaths() == nullptr) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "Cannot append dataset without paths to dataset with paths");
+    }
+
+    // check sparse-vectors
+    if (this->data_.find(SPARSE_VECTORS) != this->data_.end() &&
+        other->GetSparseVectors() == nullptr) {
+        throw VsagException(
+            ErrorType::INVALID_ARGUMENT,
+            "Cannot append dataset without sparse vectors to dataset with sparse vectors");
+    }
+
+    // check multi-vectors
+    if (this->data_.find(MULTI_VECTORS) != this->data_.end()) {
+        if (other->GetMultiVectors() == nullptr) {
+            throw VsagException(
+                ErrorType::INVALID_ARGUMENT,
+                "Cannot append dataset without multi vectors to dataset with multi vectors");
+        }
+        int64_t mv_dim = this->GetMultiVectorDim();
+        if (mv_dim <= 0 || other->GetMultiVectorDim() != mv_dim) {
+            throw VsagException(
+                ErrorType::INVALID_ARGUMENT,
+                "Cannot append datasets with different multi vector dimensions");
+        }
+    }
+
+    // check attribute-sets
+    if (this->data_.find(ATTRIBUTE_SETS) != this->data_.end() &&
+        other->GetAttributeSets() == nullptr) {
+        throw VsagException(
+            ErrorType::INVALID_ARGUMENT,
+            "Cannot append dataset without attribute sets to dataset with attribute sets");
+    }
+
+    // all validation passed; safe to mutate state (destructor relies on NumElements for cleanup)
     this->NumElements(old_num_elements + new_num_elements);
 
+    // append contiguous arrays via realloc-and-copy
     APPEND_DATA(IDS, int64_t*, Ids, 1);
     APPEND_DATA(DISTS, float*, Distances, dim);
     APPEND_DATA(INT8_VECTORS, int8_t*, Int8Vectors, dim);
@@ -376,16 +415,12 @@ DatasetImpl::Append(const DatasetPtr& other) {
 
     // append paths
     if (auto iter = this->data_.find(DATASET_PATHS); iter != this->data_.end()) {
-        if (other->GetPaths() == nullptr) {
-            throw VsagException(ErrorType::INVALID_ARGUMENT,
-                                "Cannot append dataset without paths to dataset with paths");
-        }
         auto* ptr = const_cast<std::string*>(std::get<const std::string*>(iter->second));
         auto* paths_copy = new std::string[old_num_elements + new_num_elements];
         for (int i = 0; i < old_num_elements; ++i) {
             paths_copy[i] += ptr[i];
         }
-        delete[] ptr;  // Free the old memory if it was allocated with new[]
+        delete[] ptr;
         ptr = nullptr;
         for (int i = 0; i < new_num_elements; ++i) {
             paths_copy[old_num_elements + i] += other->GetPaths()[i];
@@ -393,43 +428,23 @@ DatasetImpl::Append(const DatasetPtr& other) {
         this->Paths(paths_copy);
     }
 
-    // append sparse vectors
+    // append sparse-vectors
     if (auto iter = this->data_.find(SPARSE_VECTORS); iter != this->data_.end()) {
-        if (other->GetSparseVectors() == nullptr) {
-            throw VsagException(
-                ErrorType::INVALID_ARGUMENT,
-                "Cannot append dataset without sparse vectors to dataset with sparse vectors");
-        }
         auto* ptr = const_cast<SparseVector*>(std::get<const SparseVector*>(iter->second));
         this->SparseVectors(allocate_and_copy_sparse_vectors(
             other->GetSparseVectors(), new_num_elements, this->allocator_, ptr, old_num_elements));
     }
 
-    // append multi vectors
+    // append multi-vectors
     if (auto iter = this->data_.find(MULTI_VECTORS); iter != this->data_.end()) {
-        if (other->GetMultiVectors() == nullptr) {
-            throw VsagException(
-                ErrorType::INVALID_ARGUMENT,
-                "Cannot append dataset without multi vectors to dataset with multi vectors");
-        }
         int64_t mv_dim = this->GetMultiVectorDim();
-        if (mv_dim <= 0 || other->GetMultiVectorDim() != mv_dim) {
-            throw VsagException(
-                ErrorType::INVALID_ARGUMENT,
-                "Cannot append datasets with different multi vector dimensions");
-        }
         MultiVector* ptr = const_cast<MultiVector*>(std::get<const MultiVector*>(iter->second));
         this->MultiVectors(allocate_and_copy_multi_vectors(
             other->GetMultiVectors(), new_num_elements, mv_dim, this->allocator_, ptr, old_num_elements));
     }
 
-    // append attribute sets
+    // append attribute-sets
     if (auto iter = this->data_.find(ATTRIBUTE_SETS); iter != this->data_.end()) {
-        if (other->GetAttributeSets() == nullptr) {
-            throw VsagException(
-                ErrorType::INVALID_ARGUMENT,
-                "Cannot append dataset without attribute sets to dataset with attribute sets");
-        }
         auto* ptr = const_cast<AttributeSet*>(std::get<const AttributeSet*>(iter->second));
         auto* attrsets_copy = new AttributeSet[new_num_elements + old_num_elements];
         this->AttributeSets(attrsets_copy);
@@ -447,6 +462,7 @@ DatasetImpl::Append(const DatasetPtr& other) {
             }
         }
     }
+
     return shared_from_this();
 }
 
