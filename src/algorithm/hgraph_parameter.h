@@ -80,6 +80,7 @@ public:
     uint32_t hops_limit{std::numeric_limits<uint32_t>::max()};
     bool use_reorder{false};
     bool use_extra_info_filter{false};
+    bool rabitq_one_bit_search{false};
 
 private:
     HGraphSearchParameters() = default;

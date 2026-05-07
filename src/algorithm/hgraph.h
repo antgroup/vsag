@@ -254,6 +254,12 @@ public:
     void
     add_one_point(const void* data, int level, InnerIdType id);
 
+    void
+    insert_persistent_codes(const void* data, InnerIdType inner_id);
+
+    void
+    add_one_point(const void* data, int level, InnerIdType id, bool insert_codes);
+
     bool
     graph_add_one(const void* data, int level, InnerIdType inner_id);
 
@@ -271,7 +277,8 @@ public:
                      InnerSearchParam& inner_search_param,
                      const VisitedListPtr& vt,
                      // ctx can be nullptr in adding scenario
-                     QueryContext* ctx) const;
+                     QueryContext* ctx,
+                     DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
 
     template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH>
     DistHeapPtr
@@ -281,7 +288,8 @@ public:
                      InnerSearchParam& inner_search_param,
                      IteratorFilterContext* iter_ctx,
                      // ctx can be nullptr in adding scenario
-                     QueryContext* ctx) const;
+                     QueryContext* ctx,
+                     DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
 
 private:
     // since v0.15
@@ -328,7 +336,8 @@ private:
             DistHeapPtr& candidate_heap,
             int64_t k,
             IteratorFilterContext* iter_ctx,
-            QueryContext& ctx) const;
+            QueryContext& ctx,
+            const DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
 
     void
     elp_optimize();
@@ -354,6 +363,16 @@ private:
     void
     cal_memory_usage();
 
+    [[nodiscard]] bool
+    has_precise_reorder() const {
+        return use_reorder_ and not reorder_by_base_;
+    }
+
+    [[nodiscard]] FlattenInterfacePtr
+    get_reorder_codes() const {
+        return reorder_by_base_ ? basic_flatten_codes_ : high_precise_codes_;
+    }
+
 private:
     FlattenInterfacePtr basic_flatten_codes_{nullptr};
     FlattenInterfacePtr high_precise_codes_{nullptr};
@@ -365,6 +384,7 @@ private:
     bool use_elp_optimizer_{false};
     bool ignore_reorder_{false};
     bool build_by_base_{false};
+    bool reorder_by_base_{false};
 
     BasicSearcherPtr searcher_;
     ParallelSearcherPtr parallel_searcher_;
@@ -401,6 +421,7 @@ private:
     std::shared_ptr<Optimizer<BasicSearcher>> optimizer_;
 
     bool create_new_raw_vector_{false};
+    FlattenInterfacePtr temporary_build_flatten_codes_{nullptr};
     FlattenInterfacePtr raw_vector_{nullptr};
 
     ReorderInterfacePtr reorder_{nullptr};

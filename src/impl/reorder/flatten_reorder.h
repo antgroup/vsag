@@ -35,7 +35,8 @@ public:
             const float* query,
             int64_t topk,
             QueryContext& ctx,
-            IteratorFilterContext* iter_ctx = nullptr) override;
+            IteratorFilterContext* iter_ctx = nullptr,
+            const DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) override;
 
 private:
     const FlattenInterfacePtr flatten_;

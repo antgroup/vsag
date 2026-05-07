@@ -47,7 +47,8 @@ public:
            const void* query,
            const InnerSearchParam& inner_search_param,
            const LabelTablePtr& label_table,
-           QueryContext* ctx) const;
+           QueryContext* ctx,
+           DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
 
     virtual DistHeapPtr
     Search(const GraphInterfacePtr& graph,
@@ -56,7 +57,8 @@ public:
            const void* query,
            const InnerSearchParam& inner_search_param,
            IteratorFilterContext* iter_ctx,
-           QueryContext* ctx) const;
+           QueryContext* ctx,
+           DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
 
     virtual bool
     SetRuntimeParameters(const UnorderedMap<std::string, float>& new_params);
@@ -96,7 +98,8 @@ private:
                 const void* query,
                 const InnerSearchParam& inner_search_param,
                 const LabelTablePtr& label_table,
-                QueryContext* ctx) const;
+                QueryContext* ctx,
+                DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
 
     template <InnerSearchMode mode = KNN_SEARCH>
     DistHeapPtr
@@ -106,7 +109,8 @@ private:
                 const void* query,
                 const InnerSearchParam& inner_search_param,
                 IteratorFilterContext* iter_ctx,
-                QueryContext* ctx) const;
+                QueryContext* ctx,
+                DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
 
 private:
     Allocator* allocator_{nullptr};
