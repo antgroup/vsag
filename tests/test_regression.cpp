@@ -19,6 +19,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <cstdlib>
+#include <limits>
 #include <new>
 #include <nlohmann/json.hpp>
 #include <numeric>
@@ -105,6 +106,21 @@ TEST_CASE("gh#369", "[ft][github]") {
 TEST_CASE("gh#1974", "[ft][github]") {
     using namespace nlohmann;
 
+    class BlockSizeLimitGuard {
+    public:
+        explicit BlockSizeLimitGuard(uint64_t block_size_limit)
+            : origin_size_(vsag::Options::Instance().block_size_limit()) {
+            vsag::Options::Instance().set_block_size_limit(block_size_limit);
+        }
+
+        ~BlockSizeLimitGuard() {
+            vsag::Options::Instance().set_block_size_limit(origin_size_);
+        }
+
+    private:
+        uint64_t origin_size_;
+    };
+
     class LimitedAllocator : public Allocator {
     public:
         std::string
@@ -172,8 +188,7 @@ TEST_CASE("gh#1974", "[ft][github]") {
         std::unordered_map<void*, size_t> sizes_;
     };
 
-    auto origin_size = vsag::Options::Instance().block_size_limit();
-    vsag::Options::Instance().set_block_size_limit(512ULL * 1024ULL);
+    BlockSizeLimitGuard block_size_limit_guard(512ULL * 1024ULL);
 
     constexpr int64_t dim = 32;
     constexpr int64_t base_count = 4096;
@@ -232,6 +247,4 @@ TEST_CASE("gh#1974", "[ft][github]") {
     auto tune_result = hgraph->Tune(tune_param.dump());
     REQUIRE(tune_result.has_value());
     REQUIRE(tune_result.value());
-
-    vsag::Options::Instance().set_block_size_limit(origin_size);
 }
