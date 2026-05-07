@@ -29,6 +29,7 @@ struct SINDIParam {
     bool deserialize_without_buffer = false;
     int term_id_limit = 2000;
     bool use_quantization = false;
+    bool remap_term_ids = false;
 };
 
 class SINDITestIndex : public fixtures::TestIndex {
@@ -59,7 +60,8 @@ public:
                 "term_id_limit": {},
                 "deserialize_without_footer": {},
                 "deserialize_without_buffer": {},
-                "use_quantization": {}
+                "use_quantization": {},
+                "remap_term_ids": {}
             }}
         }})";
         return fmt::format(build_param_template,
@@ -69,7 +71,8 @@ public:
                            param.term_id_limit,
                            param.deserialize_without_footer,
                            param.deserialize_without_buffer,
-                           param.use_quantization);
+                           param.use_quantization,
+                           param.remap_term_ids);
     }
 
     static std::string
@@ -209,6 +212,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
                              "[ft][concurrent][sindi]") {
     fixtures::SINDIParam param;
     param.use_reorder = GENERATE(true, false);
+    param.remap_term_ids = GENERATE(true, false);
     auto build_param = fixtures::SINDITestIndex::GenerateBuildParameter(param);
     auto index = TestFactory("sindi", build_param, true);
     auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
@@ -224,6 +228,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
     param.deserialize_without_buffer = true;
     param.use_reorder = GENERATE(true, false);
     param.use_quantization = GENERATE(true, false);
+    param.remap_term_ids = GENERATE(true, false);
     auto build_param = fixtures::SINDITestIndex::GenerateBuildParameter(param);
     auto search_param_with_heap_insert =
         fixtures::SINDITestIndex::GenerateSearchParameter(GENERATE(true, false));
@@ -262,8 +267,25 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
                              "[ft][build][duplicate][sindi]") {
     fixtures::SINDIParam param;
     param.use_reorder = GENERATE(true, false);
+    param.remap_term_ids = GENERATE(true, false);
     auto build_param = fixtures::SINDITestIndex::GenerateBuildParameter(param);
     auto index = TestFactory("sindi", build_param, true);
     auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
     TestDuplicateAdd(index, dataset);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
+                             "SINDI Remap Build and Search",
+                             "[ft][build][search][sindi]") {
+    fixtures::SINDIParam param;
+    param.use_reorder = GENERATE(true, false);
+    param.remap_term_ids = true;
+    auto build_param = fixtures::SINDITestIndex::GenerateBuildParameter(param);
+    auto index = TestFactory("sindi", build_param, true);
+    auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
+    REQUIRE(index->GetIndexType() == vsag::IndexType::SINDI);
+    TestBuildIndex(index, dataset, true);
+    TestKnnSearch(index, dataset, search_param, 0.99, true);
+    TestRangeSearch(index, dataset, search_param, 0.99, 10, true);
+    TestFilterSearch(index, dataset, search_param, 0.99, true);
 }

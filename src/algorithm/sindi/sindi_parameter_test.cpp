@@ -46,6 +46,7 @@ struct SINDIDefaultParam {
     int window_size = 55555;
     int term_id_limit = 10000;
     int avg_doc_term_length = 100;
+    bool remap_term_ids = false;
 };
 
 std::string
@@ -57,6 +58,7 @@ generate_sindi_param(const SINDIDefaultParam& param) {
     json[SPARSE_WINDOW_SIZE].SetInt(param.window_size);
     json[SPARSE_TERM_ID_LIMIT].SetInt(param.term_id_limit);
     json[SPARSE_AVG_DOC_TERM_LENGTH].SetInt(param.avg_doc_term_length);
+    json[SPARSE_REMAP_TERM_IDS].SetBool(param.remap_term_ids);
     return json.Dump();
 }
 
@@ -72,6 +74,7 @@ TEST_CASE("SINDI Index Parameters Test", "[ut][SINDIParameter]") {
     REQUIRE(param->window_size == default_param.window_size);
     REQUIRE(param->term_id_limit == default_param.term_id_limit);
     REQUIRE(param->avg_doc_term_length == default_param.avg_doc_term_length);
+    REQUIRE(param->remap_term_ids == default_param.remap_term_ids);
 
     vsag::ParameterTest::TestToJson(param);
 
@@ -97,4 +100,45 @@ TEST_CASE("SINDI Index Parameters Compatibility Test", "[ut][SINDIParameter]") {
     TEST_COMPATIBILITY_CASE("term_id_limit compatibility", term_id_limit, 10000, 10001, false);
     TEST_COMPATIBILITY_CASE(
         "avg_doc_term_length compatibility", avg_doc_term_length, 100, 200, false);
+    TEST_COMPATIBILITY_CASE("remap_term_ids compatibility", remap_term_ids, false, true, false);
+}
+
+TEST_CASE("SINDI remap_term_ids Parameter", "[ut][SINDIParameter]") {
+    SECTION("default is false when not specified") {
+        auto param_str = R"({"term_id_limit": 1000, "window_size": 50000})";
+        auto param = std::make_shared<vsag::SINDIParameter>();
+        param->FromJson(vsag::JsonType::Parse(param_str));
+        REQUIRE(param->remap_term_ids == false);
+    }
+
+    SECTION("parse true") {
+        SINDIDefaultParam dp;
+        dp.remap_term_ids = true;
+        auto param_str = generate_sindi_param(dp);
+        auto param = std::make_shared<vsag::SINDIParameter>();
+        param->FromString(param_str);
+        REQUIRE(param->remap_term_ids == true);
+    }
+
+    SECTION("parse false") {
+        SINDIDefaultParam dp;
+        dp.remap_term_ids = false;
+        auto param_str = generate_sindi_param(dp);
+        auto param = std::make_shared<vsag::SINDIParameter>();
+        param->FromString(param_str);
+        REQUIRE(param->remap_term_ids == false);
+    }
+
+    SECTION("round-trip: FromJson -> ToJson -> FromJson") {
+        SINDIDefaultParam dp;
+        dp.remap_term_ids = true;
+        auto param_str = generate_sindi_param(dp);
+        auto param1 = std::make_shared<vsag::SINDIParameter>();
+        param1->FromString(param_str);
+
+        auto json2 = param1->ToJson();
+        auto param2 = std::make_shared<vsag::SINDIParameter>();
+        param2->FromJson(json2);
+        REQUIRE(param2->remap_term_ids == true);
+    }
 }

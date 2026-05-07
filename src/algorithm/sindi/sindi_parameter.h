@@ -48,6 +48,8 @@ public:
 
     bool use_quantization{false};
 
+    bool remap_term_ids{false};
+
     // temporal parameter
     bool deserialize_without_footer{false};
     bool deserialize_without_buffer{false};
