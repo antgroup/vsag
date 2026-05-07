@@ -738,42 +738,27 @@ static void
 TestHGraphWithAttr(const fixtures::HGraphTestIndexPtr& test_index,
                    const fixtures::HGraphResourcePtr& resource) {
     using namespace fixtures;
-    auto origin_size = vsag::Options::Instance().block_size_limit();
     auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
 
-    auto size = GENERATE(1024 * 1024 * 2);
     std::vector<std::pair<std::string, float>> tmp_test_cases = {
         {"fp32", 0.75},
     };
-    for (auto metric_type : resource->metric_types) {
-        for (auto dim : resource->dims) {
-            for (auto& [base_quantization_str, recall] : tmp_test_cases) {
-                INFO(fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, recall: {}",
-                                 metric_type,
-                                 dim,
-                                 base_quantization_str,
-                                 recall));
-                if (HGraphTestIndex::IsRaBitQ(base_quantization_str) &&
-                    dim < fixtures::RABITQ_MIN_RACALL_DIM) {
-                    dim = fixtures::RABITQ_MIN_RACALL_DIM;
-                }
-
-                // Set block size limit for current test iteration
-                vsag::Options::Instance().set_block_size_limit(size);
-
-                // Generate index parameters with attribute support enabled
+    ForEachHGraphCase(
+        resource,
+        tmp_test_cases,
+        [&](const auto& metric_type, int64_t dim, const auto& base_quantization_str, float recall) {
+            RunWithGeneratedBlockSizeLimit([&] {
                 HGraphTestIndex::HGraphBuildParam build_param(
                     metric_type, dim, base_quantization_str);
                 build_param.use_attr_filter = true;
                 auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
 
-                // Create index and dataset
                 auto index = TestIndex::TestFactory(test_index->name, param, true);
                 auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(
                     dim, resource->base_count, metric_type);
 
                 if (not index->CheckFeature(vsag::SUPPORT_BUILD)) {
-                    continue;
+                    return;
                 }
                 auto build_result = index->Build(dataset->base_);
                 REQUIRE(build_result.has_value());
@@ -782,12 +767,8 @@ TestHGraphWithAttr(const fixtures::HGraphTestIndexPtr& test_index,
 
                 REQUIRE_NOTHROW(test_serializion_file(*index, *index2, "serialize_hgraph"));
                 TestIndex::TestWithAttr(index2, dataset, search_param, true);
-
-                // Restore original block size limit
-                vsag::Options::Instance().set_block_size_limit(origin_size);
-            }
-        }
-    }
+            });
+        });
 }
 
 HGRAPH_PR_DAILY_CASE("HGraph With Attr", "[ft][filter_search][hgraph]", TestHGraphWithAttr)
@@ -796,49 +777,27 @@ static void
 TestHGraphGetRawVector(const fixtures::HGraphTestIndexPtr& test_index,
                        const fixtures::HGraphResourcePtr& resource) {
     using namespace fixtures;
-    auto origin_size = vsag::Options::Instance().block_size_limit();
-    auto size = GENERATE(1024 * 1024 * 2);
     const std::vector<std::pair<std::string, float>> test_cases = {
         {"fp32", 0.99}, {"sq8", 0.99}, {"sq4_uniform,fp32", 0.95}};
     auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
-    for (auto metric_type : resource->metric_types) {
-        for (auto dim : resource->dims) {
-            for (auto& [base_quantization_str, recall] : test_cases) {
-                INFO(fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, recall: {}",
-                                 metric_type,
-                                 dim,
-                                 base_quantization_str,
-                                 recall));
-                if (HGraphTestIndex::IsRaBitQ(base_quantization_str) &&
-                    dim < fixtures::RABITQ_MIN_RACALL_DIM) {
-                    dim = fixtures::RABITQ_MIN_RACALL_DIM;
-                }
-
-                // Set block size limit for current test iteration
-                vsag::Options::Instance().set_block_size_limit(size);
-
-                // Generate index parameters with attribute support enabled
+    ForEachHGraphCase(
+        resource,
+        test_cases,
+        [&](const auto& metric_type, int64_t dim, const auto& base_quantization_str, float recall) {
+            RunWithGeneratedBlockSizeLimit([&] {
                 HGraphTestIndex::HGraphBuildParam build_param(
                     metric_type, dim, base_quantization_str);
                 build_param.store_raw_vector = true;
                 auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
 
-                // Create index and dataset
                 auto index = TestIndex::TestFactory(test_index->name, param, true);
-
                 auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(
                     dim, resource->base_count, metric_type);
 
                 TestIndex::TestBuildIndex(index, dataset, true);
-
-                // Execute attribute-aware build test
                 HGraphTestIndex::TestGeneral(index, dataset, search_param, recall);
-
-                // Restore original block size limit
-                vsag::Options::Instance().set_block_size_limit(origin_size);
-            }
-        }
-    }
+            });
+        });
 }
 
 HGRAPH_PR_DAILY_CASE("HGraph Support Get Raw Vector",
