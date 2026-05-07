@@ -152,8 +152,9 @@ SparseTermDataCell::InsertHeapByTermLists(float* dists,
         auto& one_term_ids = *term_ids_[term];
         auto term_size = static_cast<uint32_t>(static_cast<float>(term_sizes_[term]) *
                                                computer->term_retain_ratio_);
-        auto max_term_size = static_cast<uint32_t>(std::min(
-            one_term_ids.size(), static_cast<size_t>(std::numeric_limits<uint32_t>::max())));
+        auto max_term_size = static_cast<uint32_t>(
+            std::min<size_t>(static_cast<size_t>(one_term_ids.size()),
+                             static_cast<size_t>(std::numeric_limits<uint32_t>::max())));
         term_size = std::min(term_size, max_term_size);
         if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
             if (heap.size() < n_candidate) {
