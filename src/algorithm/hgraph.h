@@ -37,8 +37,10 @@
 #include "inner_index_interface.h"
 #include "typing.h"
 #include "utils/lock_strategy.h"
+#include "utils/open_addressing_hashmap.h"
 #include "utils/util_functions.h"
 #include "utils/visited_list.h"
+#include "vsag/build_cache.h"
 #include "vsag/index.h"
 #include "vsag/index_features.h"
 
@@ -206,6 +208,24 @@ public:
                     const AttributeSet& new_attrs,
                     const AttributeSet& origin_attrs) override;
 
+    // --- Build Cache public interface ---
+
+    [[nodiscard]] bool
+    SupportsBuildCache() const override;
+
+    tl::expected<void, Error>
+    ExportBuildCache(std::ostream& out_stream) const override;
+
+    tl::expected<std::vector<int64_t>, Error>
+    BuildWithCache(const DatasetPtr& base,
+                   std::istream& in_stream,
+                   const BuildCacheOptions& options = BuildCacheOptions{}) override;
+
+    [[nodiscard]] tl::expected<BuildCacheStats, Error>
+    GetBuildCacheStats() const override;
+
+    // --- End Build Cache public interface ---
+
     static JsonType
     map_hgraph_param(const JsonType& hgraph_json);
 
@@ -354,6 +374,56 @@ private:
     void
     cal_memory_usage();
 
+    // --- Build Cache private helper methods ---
+
+    JsonType
+    SerializeBuildCacheHeader() const;
+
+    tl::expected<void, Error>
+    ValidateBuildCacheHeader(const JsonType& header) const;
+
+    void
+    ExportOldFeatureIds(StreamWriter& writer) const;
+
+    void
+    ExportOldNeighbors(StreamWriter& writer) const;
+
+    void
+    LoadOldFeatureIds(StreamReader& reader,
+                      std::vector<std::string>& feature_ids,
+                      uint64_t node_count,
+                      uint32_t feature_id_len);
+
+    void
+    LoadOldNeighbors(StreamReader& reader,
+                     std::vector<std::vector<uint32_t>>& neighbors,
+                     uint64_t node_count,
+                     uint32_t max_degree);
+
+    void
+    BuildFeatureIdToNewIdMap(
+        const DatasetPtr& base,
+        OpenAddressingHashMap<uint32_t>& fid_to_new_id);
+
+    void
+    BuildOldToNewMapping(const std::vector<std::string>& old_feature_ids,
+                         const OpenAddressingHashMap<uint32_t>& fid_to_new_id,
+                         std::vector<uint32_t>& old_to_new);
+
+    void
+    NormalizeMappedNeighbors(std::vector<std::vector<uint32_t>>& neighbors,
+                             const BuildCacheOptions& options);
+
+    void
+    ApplyWarmStartNeighbors(const std::vector<uint32_t>& old_to_new,
+                            const std::vector<std::vector<uint32_t>>& old_neighbors,
+                            const BuildCacheOptions& options);
+
+    uint64_t
+    ComputeBuildParamHash() const;
+
+    // --- End Build Cache private helper methods ---
+
 private:
     FlattenInterfacePtr basic_flatten_codes_{nullptr};
     FlattenInterfacePtr high_precise_codes_{nullptr};
@@ -408,5 +478,8 @@ private:
     bool use_old_serial_format_{false};
 
     bool support_duplicate_{false};
+
+    // Build Cache statistics, populated by BuildWithCache, returned by GetBuildCacheStats
+    BuildCacheStats build_cache_stats_{};
 };
 }  // namespace vsag
