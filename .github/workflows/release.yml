@@ -1,11 +1,10 @@
-# .github/workflows/release.yml
-name: Create Release
+name: Build and Publish Release
 
 on:
   workflow_dispatch:
     inputs:
       branch:
-        description: 'The branch to create the release from'
+        description: 'The branch, tag, or commit SHA to release from'
         required: true
         default: 'main'
         type: string
@@ -13,10 +12,22 @@ on:
         description: 'The tag for the new release (e.g., v1.0.0)'
         required: true
         type: string
+      prerelease:
+        description: 'Mark this release as a prerelease'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ inputs.tag_name }}
+  cancel-in-progress: false
 
 jobs:
   build-and-release:
-    name: Build and Release
+    name: Build, Test, and Publish Release
     runs-on: ubuntu-22.04
 
     steps:
@@ -34,22 +45,97 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.branch }}
+          ref: ${{ inputs.branch }}
           fetch-depth: 0
+
+      - name: Validate release target
+        id: release_target
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ inputs.tag_name }}
+        run: |
+          set -euo pipefail
+
+          case "$TAG_NAME" in
+            v*) ;;
+            *)
+              echo "Release tag must start with 'v' because release assets are named from v* tags."
+              exit 1
+              ;;
+          esac
+
+          if ! git check-ref-format --allow-onelevel "$TAG_NAME"; then
+            echo "Release tag '$TAG_NAME' is not a valid Git tag name."
+            exit 1
+          fi
+
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG_NAME" >/dev/null 2>&1; then
+            echo "Tag '$TAG_NAME' already exists on origin. Refusing to overwrite an existing release tag."
+            exit 1
+          fi
+
+          if gh release view "$TAG_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "GitHub Release '$TAG_NAME' already exists. Refusing to overwrite existing release assets."
+            exit 1
+          fi
+
+          release_sha="$(git rev-parse HEAD)"
+          git tag "$TAG_NAME" "$release_sha"
+          echo "sha=$release_sha" >> "$GITHUB_OUTPUT"
 
       - name: Package release assets
         run: |
-          echo "Packaging release assets..."
+          set -euo pipefail
+          echo "Packaging release assets for ${{ inputs.tag_name }}..."
           bash ./scripts/release/dist.sh
+
+      - name: Add build metadata to release assets
+        env:
+          RELEASE_SHA: ${{ steps.release_target.outputs.sha }}
+          SOURCE_REF: ${{ inputs.branch }}
+          TAG_NAME: ${{ inputs.tag_name }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          assets=(dist/*.tar.gz)
+          if [ ${#assets[@]} -eq 0 ]; then
+            echo "No release assets found in dist/."
+            exit 1
+          fi
+
+          workdir="$(mktemp -d)"
+          trap 'rm -rf "$workdir"' EXIT
+
+          cat > "$workdir/BUILD_INFO" <<EOF
+          tag=$TAG_NAME
+          commit=$RELEASE_SHA
+          source_ref=$SOURCE_REF
+          repository=$GITHUB_REPOSITORY
+          run_url=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
+          built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          EOF
+
+          for asset in "${assets[@]}"; do
+            asset_name="$(basename "$asset")"
+            asset_dir="$workdir/$asset_name.contents"
+            mkdir -p "$asset_dir"
+
+            tar -xzf "$asset" -C "$asset_dir"
+            install -m 0644 "$workdir/BUILD_INFO" "$asset_dir/vsag/BUILD_INFO"
+            tar -czf "$asset" -C "$asset_dir" vsag
+          done
 
       - name: Create GitHub Release and Upload Assets
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.inputs.tag_name }}
-          name: ${{ github.event.inputs.tag_name }}
+          tag_name: ${{ inputs.tag_name }}
+          name: ${{ inputs.tag_name }}
+          target_commitish: ${{ steps.release_target.outputs.sha }}
           generate_release_notes: true
           files: dist/*.tar.gz
+          fail_on_unmatched_files: true
           draft: false
-          prerelease: false
+          prerelease: ${{ inputs.prerelease }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
