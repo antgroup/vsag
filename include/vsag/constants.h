@@ -39,6 +39,7 @@ extern const char* const DATASET_PATHS;
 extern const char* const EXTRA_INFOS;
 extern const char* const EXTRA_INFO_SIZE;
 extern const char* const VECTOR_COUNTS;
+extern const char* const FEATURE_IDS;
 
 extern const char* const HNSW_DATA;
 extern const char* const CONJUGATE_GRAPH_DATA;
