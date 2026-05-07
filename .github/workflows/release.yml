@@ -89,6 +89,43 @@ jobs:
           echo "Packaging release assets for ${{ inputs.tag_name }}..."
           bash ./scripts/release/dist.sh
 
+      - name: Add build metadata to release assets
+        env:
+          RELEASE_SHA: ${{ steps.release_target.outputs.sha }}
+          SOURCE_REF: ${{ inputs.branch }}
+          TAG_NAME: ${{ inputs.tag_name }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          assets=(dist/*.tar.gz)
+          if [ ${#assets[@]} -eq 0 ]; then
+            echo "No release assets found in dist/."
+            exit 1
+          fi
+
+          workdir="$(mktemp -d)"
+          trap 'rm -rf "$workdir"' EXIT
+
+          cat > "$workdir/BUILD_INFO" <<EOF
+          tag=$TAG_NAME
+          commit=$RELEASE_SHA
+          source_ref=$SOURCE_REF
+          repository=$GITHUB_REPOSITORY
+          run_url=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
+          built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          EOF
+
+          for asset in "${assets[@]}"; do
+            asset_name="$(basename "$asset")"
+            asset_dir="$workdir/$asset_name.contents"
+            mkdir -p "$asset_dir"
+
+            tar -xzf "$asset" -C "$asset_dir"
+            install -m 0644 "$workdir/BUILD_INFO" "$asset_dir/vsag/BUILD_INFO"
+            tar -czf "$asset" -C "$asset_dir" vsag
+          done
+
       - name: Create GitHub Release and Upload Assets
         uses: softprops/action-gh-release@v2
         with:
