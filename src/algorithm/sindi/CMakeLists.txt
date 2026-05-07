@@ -17,8 +17,8 @@
 set (SINDI_SRCS
         sindi.cpp
         sindi_parameter.cpp
+        term_id_mapper.cpp
 )
 
 add_library (sindi OBJECT ${SINDI_SRCS})
-target_link_libraries (sindi PUBLIC coverage_config)
-maybe_add_dependencies (sindi spdlog fmt::fmt mkl openblas)
+target_link_libraries (sindi PRIVATE coverage_config vsag_src_common)

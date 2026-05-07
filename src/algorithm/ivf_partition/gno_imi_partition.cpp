@@ -15,7 +15,6 @@
 
 #include "gno_imi_partition.h"
 
-#include <cblas.h>
 #include <fmt/format.h>
 
 #include <atomic>
@@ -25,9 +24,12 @@
 
 #include "algorithm/inner_index_interface.h"
 #include "impl/allocator/safe_allocator.h"
+#include "impl/blas/blas_function.h"
 #include "impl/cluster/kmeans_cluster.h"
 #include "inner_string_params.h"
+#include "query_context.h"
 #include "utils/util_functions.h"
+#include "vsag_exception.h"
 
 namespace vsag {
 
@@ -42,20 +44,20 @@ static constexpr const char* SEARCH_PARAM_TEMPLATE_STR = R"(
 // C = A * B^T
 void
 matmul(const float* A, const float* B, float* C, int64_t M, int64_t N, int64_t K) {
-    cblas_sgemm(CblasColMajor,
-                CblasTrans,
-                CblasNoTrans,
-                static_cast<blasint>(N),
-                static_cast<blasint>(M),
-                static_cast<blasint>(K),
-                1.0F,
-                B,
-                static_cast<blasint>(K),
-                A,
-                static_cast<blasint>(K),
-                0.0F,
-                C,
-                static_cast<blasint>(N));
+    BlasFunction::Sgemm(BlasFunction::ColMajor,
+                        BlasFunction::Trans,
+                        BlasFunction::NoTrans,
+                        static_cast<int32_t>(N),
+                        static_cast<int32_t>(M),
+                        static_cast<int32_t>(K),
+                        1.0F,
+                        B,
+                        static_cast<int32_t>(K),
+                        A,
+                        static_cast<int32_t>(K),
+                        0.0F,
+                        C,
+                        static_cast<int32_t>(N));
 }
 
 GNOIMIPartition::GNOIMIPartition(const IndexCommonParam& common_param,
@@ -138,7 +140,7 @@ GNOIMIPartition::Train(const DatasetPtr dataset) {
 
     // train loop
     double min_err = std::numeric_limits<double>::max();
-    for (size_t i = 0; i < 2; ++i) {
+    for (uint64_t i = 0; i < 2; ++i) {
         double err_to_s = 0.0;
         double err_to_t = 0.0;
         train_and_get_residual(centroids_s, data_centroids_s_tmp.data(), &err_to_s);
@@ -177,8 +179,8 @@ GNOIMIPartition::Train(const DatasetPtr dataset) {
     std::vector<float> temp_data(bucket_count_t_ * dim_, 0.0);
     for (BucketIdType i = 0; i < bucket_count_t_; ++i) {
         BucketIdType src_idx = norms_t[i].second;
-        size_t src_offset = src_idx * dim_;
-        size_t dst_offset = i * dim_;
+        uint64_t src_offset = src_idx * dim_;
+        uint64_t dst_offset = i * dim_;
         std::copy(data_centroids_t_.data() + src_offset,
                   data_centroids_t_.data() + src_offset + dim_,
                   temp_data.data() + dst_offset);
@@ -205,10 +207,10 @@ Vector<BucketIdType>
 GNOIMIPartition::ClassifyDatas(const void* datas,
                                int64_t count,
                                BucketIdType buckets_per_data,
-                               Statistics& stats) const {
+                               QueryContext* ctx) const {
     Vector<BucketIdType> result(buckets_per_data * count, this->allocator_);
     inner_joint_classify_datas(
-        reinterpret_cast<const float*>(datas), count, buckets_per_data, result.data(), stats);
+        reinterpret_cast<const float*>(datas), count, buckets_per_data, result.data(), ctx);
     return result;
 }
 
@@ -216,7 +218,7 @@ Vector<BucketIdType>
 GNOIMIPartition::ClassifyDatasForSearch(const void* datas,
                                         int64_t count,
                                         const InnerSearchParam& param,
-                                        Statistics& stats) {
+                                        QueryContext* ctx) {
     Vector<float> norm_vectors(allocator_);
     if (metric_type_ == MetricType::METRIC_TYPE_COSINE) {
         norm_vectors.resize(count * dim_);
@@ -251,13 +253,13 @@ GNOIMIPartition::ClassifyDatasForSearch(const void* datas,
            bucket_count_t_,
            dim_);
 
-    for (size_t i = 0; i < count; i++) {
+    for (uint64_t i = 0; i < count; i++) {
         auto qnorm = FP32ComputeIP(reinterpret_cast<const float*>(datas) + i * dim_,
                                    reinterpret_cast<const float*>(datas) + i * dim_,
                                    dim_) /
                      2;
         MaxHeap heap(this->allocator_);
-        for (size_t j = 0; j < bucket_count_s_; ++j) {
+        for (uint64_t j = 0; j < bucket_count_s_; ++j) {
             auto dist_term_s = norms_s_[j] - dist_to_s_data[i * bucket_count_s_ + j];
             if (heap.size() < candidate_count_s || dist_term_s < heap.top().first) {
                 heap.emplace(dist_term_s, j);
@@ -276,8 +278,8 @@ GNOIMIPartition::ClassifyDatasForSearch(const void* datas,
         auto scan_bucket_count_s = static_cast<BucketIdType>(
             std::floor(static_cast<float>(bucket_count_s_) * param.first_order_scan_ratio));
         scan_bucket_count_s = std::max(scan_bucket_count_s, 1);
-        for (size_t j = 0; j < scan_bucket_count_s; ++j) {
-            for (size_t k = 0; k < bucket_count_t_; ++k) {
+        for (uint64_t j = 0; j < scan_bucket_count_s; ++j) {
+            for (uint64_t k = 0; k < bucket_count_t_; ++k) {
                 auto cur_bucket_id_s = candidate_s_id_data[j];
                 auto cur_bucket_id_t = k;
                 float dist_term_st = candidate_s_dist_data[j] +
@@ -338,8 +340,9 @@ GNOIMIPartition::inner_classify_datas(BruteForce& route_index, const float* data
             ->Float32Vectors(datas + i * this->dim_)
             ->NumElements(1)
             ->Owner(false);
-        auto search_param = fmt::format(
-            SEARCH_PARAM_TEMPLATE_STR, std::max(10L, static_cast<int64_t>(buckets_per_data * 1.2)));
+        auto search_param =
+            fmt::format(SEARCH_PARAM_TEMPLATE_STR,
+                        std::max<int64_t>(10, static_cast<int64_t>(buckets_per_data * 1.2)));
         FilterPtr filter = nullptr;
         auto search_result = route_index.KnnSearch(query, buckets_per_data, search_param, filter);
         const auto* result_ids = search_result->GetIds();
@@ -356,7 +359,7 @@ GNOIMIPartition::inner_joint_classify_datas(const float* datas,
                                             int64_t count,
                                             BucketIdType buckets_per_data,
                                             BucketIdType* result,
-                                            Statistics& stats) const {
+                                            QueryContext* ctx) const {
     Vector<float> dist_to_s(bucket_count_s_ * count, this->allocator_);
     Vector<float> dist_to_t(bucket_count_t_ * count, this->allocator_);
     Vector<std::pair<float, BucketIdType>> precomputed_terms_s(bucket_count_s_, this->allocator_);
@@ -368,7 +371,7 @@ GNOIMIPartition::inner_joint_classify_datas(const float* datas,
     // precomputed_terms_st: |t|^2 + 2st
     float total_err = 0.0;
     uint32_t dist_cmp = 0;
-    for (size_t i = 0; i < count; ++i) {
+    for (uint64_t i = 0; i < count; ++i) {
         auto data_norm = FP32ComputeIP(datas + i * dim_, datas + i * dim_, dim_);
         for (BucketIdType j = 0; j < bucket_count_s_; ++j) {
             precomputed_terms_s[j].first =
@@ -378,7 +381,7 @@ GNOIMIPartition::inner_joint_classify_datas(const float* datas,
         std::sort(precomputed_terms_s.begin(), precomputed_terms_s.end());
 
         MaxHeap heap(this->allocator_);
-        for (size_t j = 0; j < bucket_count_s_; ++j) {
+        for (uint64_t j = 0; j < bucket_count_s_; ++j) {
             float cur_precomputed_term_s = precomputed_terms_s[j].first;
             BucketIdType cur_bucket_id_s = precomputed_terms_s[j].second;
 
@@ -413,13 +416,18 @@ GNOIMIPartition::inner_joint_classify_datas(const float* datas,
         }
     }
 
-    stats.dist_cmp.fetch_add(dist_cmp, std::memory_order_relaxed);
+    if (ctx != nullptr and ctx->stats != nullptr) {
+        ctx->stats->dist_cmp.fetch_add(dist_cmp, std::memory_order_relaxed);
+    }
 }
 
 void
 GNOIMIPartition::GetCentroid(BucketIdType bucket_id, Vector<float>& centroid) {
-    if (!is_trained_ || bucket_id >= bucket_count_) {
-        throw std::runtime_error("Invalid bucket_id or partition not trained");
+    if (!is_trained_) {
+        throw VsagException(ErrorType::WRONG_STATUS, "Partition not trained");
+    }
+    if (bucket_id >= bucket_count_) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "Invalid bucket_id");
     }
     auto bucket_id_s = bucket_id / bucket_count_t_;
     auto bucket_id_t = bucket_id % bucket_count_t_;

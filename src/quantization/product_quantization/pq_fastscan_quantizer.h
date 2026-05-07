@@ -22,6 +22,25 @@
 
 namespace vsag {
 
+/***
+ * @brief PQ FastScan Quantizer uses 4-bit packed storage for optimized distance computation.
+ *
+ * code layout (32 vectors packed):
+ * +--------+--------+-----+--------+
+ * | sub0   | sub1   | ... | subN   |
+ * | [32*4b]| [32*4b]|     | [32*4b]|
+ * +--------+--------+-----+--------+
+ *
+ * query layout:
+ * +------------------+--------+--------+
+ * | lookup-table     | diff   | lower  |
+ * | [pq_dim*16*4B]   | [4B]   | [4B]   |
+ * +------------------+--------+--------+
+ *
+ * - pqfs-code: 4 bits per subspace, packed for 32 vectors at once
+ * - Each subspace has 16 centroids (2^4 = 16 possible indices)
+ * - Optimized for SIMD batch distance computation
+ */
 template <MetricType metric = MetricType::METRIC_TYPE_L2SQR>
 class PQFastScanQuantizer : public Quantizer<PQFastScanQuantizer<metric>> {
 public:
@@ -35,25 +54,25 @@ public:
     ~PQFastScanQuantizer() override = default;
 
     bool
-    TrainImpl(const DataType* data, uint64_t count);
+    TrainImpl(const float* data, uint64_t count);
 
     bool
-    EncodeOneImpl(const DataType* data, uint8_t* codes);
+    EncodeOneImpl(const float* data, uint8_t* codes);
 
     bool
-    EncodeBatchImpl(const DataType* data, uint8_t* codes, uint64_t count);
+    EncodeBatchImpl(const float* data, uint8_t* codes, uint64_t count);
 
     bool
-    DecodeOneImpl(const uint8_t* codes, DataType* data);
+    DecodeOneImpl(const uint8_t* codes, float* data);
 
     bool
-    DecodeBatchImpl(const uint8_t* codes, DataType* data, uint64_t count);
+    DecodeBatchImpl(const uint8_t* codes, float* data, uint64_t count);
 
     float
     ComputeImpl(const uint8_t* codes1, const uint8_t* codes2);
 
     void
-    ProcessQueryImpl(const DataType* query, Computer<PQFastScanQuantizer>& computer) const;
+    ProcessQueryImpl(const float* query, Computer<PQFastScanQuantizer>& computer) const;
 
     void
     ComputeDistImpl(Computer<PQFastScanQuantizer>& computer,
@@ -94,9 +113,12 @@ private:
     }
 
 public:
-    constexpr static int64_t PQ_BITS = 4L;
-    constexpr static int64_t CENTROIDS_PER_SUBSPACE = 16L;
-    constexpr static int64_t BLOCK_SIZE_PACKAGE = 32L;
+    static constexpr int64_t PQ_BITS = 4L;
+    static constexpr int64_t CENTROIDS_PER_SUBSPACE = 16L;
+    static constexpr int64_t BLOCK_SIZE_PACKAGE = 32L;
+    static constexpr int32_t MAPPER[32] = {0,  16, 8,  24, 1,  17, 9,  25, 2,  18, 10,
+                                           26, 3,  19, 11, 27, 4,  20, 12, 28, 5,  21,
+                                           13, 29, 6,  22, 14, 30, 7,  23, 15, 31};
 
 public:
     int64_t pq_dim_{1};

@@ -15,10 +15,10 @@
 
 #include "index_impl.h"
 
-#include <catch2/catch_test_macros.hpp>
 #include <sstream>
 
 #include "algorithm/hgraph.h"
+#include "unittest.h"
 #include "vsag/engine.h"
 
 TEST_CASE("immutable index test", "[ut][index_impl]") {
@@ -67,7 +67,7 @@ TEST_CASE("immutable index test", "[ut][index_impl]") {
     REQUIRE_FALSE(result_add.has_value());
     REQUIRE(result_add.error().type == vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION);
 
-    auto result_remove = index->Remove(0);
+    auto result_remove = index->Remove({0});
     REQUIRE_FALSE(result_remove.has_value());
     REQUIRE(result_remove.error().type == vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION);
 
@@ -196,8 +196,8 @@ public:
     }
 
     void*
-    Allocate(size_t size) override {
-        auto addr = (void*)malloc(size);
+    Allocate(uint64_t size) override {
+        auto addr = static_cast<void*>(malloc(size));
         return addr;
     }
 
@@ -207,8 +207,8 @@ public:
     }
 
     void*
-    Reallocate(void* p, size_t size) override {
-        auto addr = (void*)realloc(p, size);
+    Reallocate(void* p, uint64_t size) override {
+        auto addr = static_cast<void*>(realloc(p, size));
         return addr;
     }
 

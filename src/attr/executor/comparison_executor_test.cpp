@@ -15,13 +15,11 @@
 
 #include "comparison_executor.h"
 
-#include <catch2/catch_test_macros.hpp>
-
 #include "attr/argparse.h"
 #include "datacell/attribute_inverted_interface.h"
 #include "executor_test.h"
 #include "impl/allocator/safe_allocator.h"
-
+#include "unittest.h"
 using namespace vsag;
 
 template <typename T>

@@ -15,7 +15,13 @@
 
 #include "default_allocator.h"
 
-#include <catch2/catch_test_macros.hpp>
+#include "unittest.h"
+
+#if defined(__has_feature)
+#define VSAG_HAS_ADDRESS_SANITIZER __has_feature(address_sanitizer)
+#else
+#define VSAG_HAS_ADDRESS_SANITIZER 0
+#endif
 
 TEST_CASE("DefaultAllocator Basic Test", "[ut][DefaultAllocator]") {
     vsag::DefaultAllocator allocator;
@@ -34,7 +40,7 @@ TEST_CASE("DefaultAllocator Basic Test", "[ut][DefaultAllocator]") {
 TEST_CASE("DefaultAllocator Mismatch of Malloc and Free", "[ut][DefaultAllocator]") {
 #ifndef NDEBUG
     vsag::DefaultAllocator allocator;
-    size_t alloc_size = 1024;
+    uint64_t alloc_size = 1024;
     auto p = malloc(alloc_size);
     REQUIRE_THROWS(allocator.Reallocate(p, alloc_size));
     REQUIRE_THROWS(allocator.Deallocate(p));
@@ -45,3 +51,22 @@ TEST_CASE("DefaultAllocator Mismatch of Malloc and Free", "[ut][DefaultAllocator
     allocator.Deallocate(nullptr);
 #endif
 }
+
+TEST_CASE("DefaultAllocator Reallocate Failure Keeps Tracking", "[ut][DefaultAllocator]") {
+#ifndef NDEBUG
+#if defined(__SANITIZE_ADDRESS__) || VSAG_HAS_ADDRESS_SANITIZER
+    SKIP("ASan aborts oversize realloc before DefaultAllocator can observe a nullptr result");
+#else
+    vsag::DefaultAllocator allocator;
+    auto* p = allocator.Allocate(1ULL << 20);
+    REQUIRE(p != nullptr);
+
+    auto* ret = allocator.Reallocate(p, UINT64_MAX);
+    REQUIRE(ret == nullptr);
+
+    REQUIRE_NOTHROW(allocator.Deallocate(p));
+#endif
+#endif
+}
+
+#undef VSAG_HAS_ADDRESS_SANITIZER

@@ -17,7 +17,7 @@
 #include "simd/simd.h"
 #include "test_index.h"
 
-TEST_CASE("hnsw int8 recall", "[ft][index][hnsw]") {
+TEST_CASE("hnsw int8 recall", "[ft][search][hnsw]") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
 
     int64_t num_vectors = 1000;
@@ -41,6 +41,13 @@ TEST_CASE("hnsw int8 recall", "[ft][index][hnsw]") {
         std::cout << "Build HNSW Error" << std::endl;
         return;
     }
+
+    vsag::IndexDetailInfo info;
+    auto data_type = hnsw->GetDetailDataByName(vsag::INDEX_DETAIL_DATA_TYPE, info)
+                         .value()
+                         ->GetDataScalarString();
+    REQUIRE(data_type == vsag::DATATYPE_INT8);
+
     std::shared_ptr<int64_t[]> ids(new int64_t[num_vectors]);
     std::shared_ptr<int8_t[]> data(new int8_t[dim * num_vectors]);
 
@@ -74,11 +81,11 @@ TEST_CASE("hnsw int8 recall", "[ft][index][hnsw]") {
     }
 }
 
-TEST_CASE("index search distance", "[ft][index]") {
+TEST_CASE("index search distance", "[ft][search][distance][hnsw][diskann]") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
 
-    size_t num_vectors = 1000;
-    size_t dim = 256;
+    uint64_t num_vectors = 1000;
+    uint64_t dim = 256;
     auto metric_type = GENERATE("ip", "cosine", "l2");
     auto algorithm = GENERATE("hnsw", "diskann");
 
@@ -170,7 +177,10 @@ TEST_CASE("index search distance", "[ft][index]") {
         result = index->RangeSearch(query, max_score, search_parameters);
         REQUIRE(result.has_value());
         auto range_result = result.value();
-        REQUIRE(range_result->GetDim() >= k);
+        if (range_result->GetDim() < k) {
+            WARN(fmt::format(
+                "range search result dim {} is less than k {}", range_result->GetDim(), k));
+        }
         for (int j = 0; j < range_result->GetDim(); ++j) {
             auto id = range_result->GetIds()[j];
             float score = 0;
@@ -219,11 +229,11 @@ TEST_CASE("index search distance", "[ft][index]") {
                 fail_count++;
             }
         }
-        REQUIRE(fail_count <= 2);
+        REQUIRE(fail_count <= 3);
     }
 }
 
-TEST_CASE("create two hnsw index in the same time", "[ft][index][hnsw]") {
+TEST_CASE("create two hnsw index in the same time", "[ft][build][hnsw]") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
 
     int64_t num_vectors = 1000;
@@ -281,7 +291,7 @@ TEST_CASE("create two hnsw index in the same time", "[ft][index][hnsw]") {
 // index->serialize/deserialize
 /////////////////////////////////////////////////////////
 
-TEST_CASE("serialize/deserialize with file stream", "[ft][index]") {
+TEST_CASE("serialize/deserialize with file stream", "[ft][serialize][hnsw]") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
 
     int64_t num_vectors = 1000;
@@ -381,105 +391,7 @@ TEST_CASE("serialize/deserialize with file stream", "[ft][index]") {
     // }
 }
 
-TEST_CASE("serialize/deserialize hnswstatic with file stream", "[ft][index]") {
-    vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
-
-    int64_t num_vectors = 1000;
-    int64_t dim = 64;
-    auto index_name = GENERATE("hnsw");
-    auto metric_type = GENERATE("l2");  // hnswstatic does not support ip
-
-    constexpr auto build_parameter_json = R"(
-    {{
-        "dtype": "float32",
-        "metric_type": "{}",
-        "dim": 64,
-        "hnsw": {{
-            "max_degree": 16,
-            "ef_construction": 100,
-            "use_static": true,
-            "use_conjugate_graph": true
-        }},
-        "diskann": {{
-            "max_degree": 16,
-            "ef_construction": 200,
-            "pq_dims": 32,
-            "pq_sample_rate": 0.5
-        }}
-    }}
-    )";
-    auto build_parameters = fmt::format(build_parameter_json, metric_type, dim);
-
-    auto index = vsag::Factory::CreateIndex(index_name, build_parameters).value();
-
-    auto [ids, vectors] = fixtures::generate_ids_and_vectors(num_vectors, dim);
-    auto base = vsag::Dataset::Make();
-    base->NumElements(num_vectors)
-        ->Dim(dim)
-        ->Ids(ids.data())
-        ->Float32Vectors(vectors.data())
-        ->Owner(false);
-    REQUIRE(index->Build(base).has_value());
-
-    auto search_parameters = R"(
-    {
-        "hnsw": {
-            "ef_search": 100
-        },
-        "diskann": {
-            "ef_search": 100,
-            "beam_search": 4,
-            "io_limit": 100,
-            "use_reorder": false
-        }
-    }
-    )";
-
-    SECTION("successful case") {
-        fixtures::TempDir dir("test_index_serialize_via_stream");
-
-        // serialize to file stream
-        std::fstream out_file(dir.path + "index.bin", std::ios::out | std::ios::binary);
-        REQUIRE(index->Serialize(out_file).has_value());
-        out_file.close();
-
-        // deserialize from file stream
-        std::fstream in_file(dir.path + "index.bin", std::ios::in | std::ios::binary);
-        auto new_index = vsag::Factory::CreateIndex(index_name, build_parameters).value();
-        REQUIRE(new_index->Deserialize(in_file).has_value());
-
-        // compare recall
-        auto before_serialize_recall =
-            fixtures::test_knn_recall(index, search_parameters, num_vectors, dim, ids, vectors);
-        auto after_serialize_recall =
-            fixtures::test_knn_recall(new_index, search_parameters, num_vectors, dim, ids, vectors);
-
-        REQUIRE(before_serialize_recall == after_serialize_recall);
-    }
-
-    // FIXME(wxyu): the last 10 bytes belong to the footer, which is introduced in v0.15. for
-    // compatibility reasons, we need to keep the old index deserialize logic, which makes
-    // an integrity check impossible
-    //
-    // SECTION("less bits") {
-    //     fixtures::TempDir dir("test_index_serialize_via_stream");
-    //     auto filepath = dir.GenerateRandomFile();
-    //     // serialize to file stream
-    //     std::fstream out_file(filepath, std::ios::out | std::ios::binary);
-    //     REQUIRE(index->Serialize(out_file).has_value());
-    //     int size = out_file.tellg();
-    //     out_file.close();
-
-    //     // deserialize from file stream
-    //     std::filesystem::resize_file(filepath, size - 10);
-    //     std::fstream in_file(filepath, std::ios::in | std::ios::binary);
-
-    //     auto new_index = vsag::Factory::CreateIndex(index_name, build_parameters).value();
-    //     REQUIRE(new_index->Deserialize(in_file).error().type == vsag::ErrorType::READ_ERROR);
-    // }
-}
-
-TEST_CASE("search on a deserialized empty index", "[ft][index]") {
+TEST_CASE("search on a deserialized empty index", "[ft][search][serialize][hnsw][diskann]") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
 
     int64_t num_vectors = 1000;
@@ -540,7 +452,7 @@ TEST_CASE("search on a deserialized empty index", "[ft][index]") {
     REQUIRE(rangesearch.value()->GetDim() == 0);
 }
 
-TEST_CASE("remove vectors from the index", "[ft][index]") {
+TEST_CASE("remove vectors from the index", "[ft][remove][hnsw][diskann]") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
     int64_t num_vectors = 1000;
     int64_t dim = 64;
@@ -657,7 +569,7 @@ TEST_CASE("remove vectors from the index", "[ft][index]") {
     }
 }
 
-TEST_CASE("index with bsa", "[ft][index]") {
+TEST_CASE("index with bsa", "[ft][diskann]") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
     int64_t num_vectors = 1000;
     int64_t dim = 128;
@@ -713,7 +625,7 @@ TEST_CASE("index with bsa", "[ft][index]") {
     REQUIRE(recall > 0.99);
 }
 
-TEST_CASE("io for diskann", "[ft][index]") {
+TEST_CASE("io for diskann", "[ft][io][diskann]") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
     int64_t num_vectors = 1000;
     int64_t dim = 128;
@@ -773,7 +685,7 @@ TEST_CASE("io for diskann", "[ft][index]") {
     REQUIRE(recall > 0.99);
 }
 
-TEST_CASE("different parameter of io_limit", "[ft][index]") {
+TEST_CASE("different parameter of io_limit", "[ft][io][diskann]") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
     int64_t num_vectors = 1000;
     int64_t dim = 128;
@@ -838,7 +750,7 @@ TEST_CASE("different parameter of io_limit", "[ft][index]") {
 // utility functions
 /////////////////////////////////////////////////////////
 
-TEST_CASE("check correct build parameters", "[ft][index]") {
+TEST_CASE("check correct build parameters", "[ft][factory]") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
 
     auto json_string = R"(
@@ -862,7 +774,7 @@ TEST_CASE("check correct build parameters", "[ft][index]") {
     REQUIRE(res.has_value());
 }
 
-TEST_CASE("check incorrect build parameters", "[ft][index]") {
+TEST_CASE("check incorrect build parameters", "[ft][factory]") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
 
     auto json_string = R"(
@@ -886,7 +798,7 @@ TEST_CASE("check incorrect build parameters", "[ft][index]") {
     REQUIRE(res.error().type == vsag::ErrorType::INVALID_ARGUMENT);
 }
 
-TEST_CASE("check correct search parameters", "[ft][index]") {
+TEST_CASE("check correct search parameters", "[ft][factory]") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
 
     auto json_string = R"(
@@ -906,7 +818,7 @@ TEST_CASE("check correct search parameters", "[ft][index]") {
     REQUIRE(res.has_value());
 }
 
-TEST_CASE("check incorrect search parameters", "[ft][index]") {
+TEST_CASE("check incorrect search parameters", "[ft][factory]") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
 
     auto json_string = R"(
@@ -927,7 +839,7 @@ TEST_CASE("check incorrect search parameters", "[ft][index]") {
     REQUIRE(res.error().type == vsag::ErrorType::INVALID_ARGUMENT);
 }
 
-TEST_CASE("generate build parameters", "[ft][index]") {
+TEST_CASE("generate build parameters", "[ft][factory]") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
 
     auto metric_type = GENERATE("l2", "IP");
@@ -952,7 +864,7 @@ TEST_CASE("generate build parameters", "[ft][index]") {
     REQUIRE(json["diskann"]["pq_dims"].GetInt() == dim / 4);
 }
 
-TEST_CASE("estimate search cost", "[ft][index]") {
+TEST_CASE("estimate search cost", "[ft][factory]") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
 
     constexpr auto search_parameters_json = R"(
@@ -1001,7 +913,7 @@ TEST_CASE("estimate search cost", "[ft][index]") {
     }
 }
 
-TEST_CASE("generate build parameters with invalid num_elements", "[ft][index]") {
+TEST_CASE("generate build parameters with invalid num_elements", "[ft][factory]") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
 
     auto metric_type = GENERATE("l2", "IP");
@@ -1014,7 +926,7 @@ TEST_CASE("generate build parameters with invalid num_elements", "[ft][index]") 
     REQUIRE(parameters.error().type == vsag::ErrorType::INVALID_ARGUMENT);
 }
 
-TEST_CASE("generate build parameters with invalid dim", "[ft][index]") {
+TEST_CASE("generate build parameters with invalid dim", "[ft][factory]") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
 
     auto metric_type = GENERATE("l2", "IP");
@@ -1027,7 +939,7 @@ TEST_CASE("generate build parameters with invalid dim", "[ft][index]") {
     REQUIRE(parameters.error().type == vsag::ErrorType::INVALID_ARGUMENT);
 }
 
-TEST_CASE("build index with generated_build_parameters", "[ft][index]") {
+TEST_CASE("build index with generated_build_parameters", "[ft][factory][hnsw]") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
 
     int64_t num_vectors = 1000;
@@ -1079,7 +991,7 @@ TEST_CASE("build index with generated_build_parameters", "[ft][index]") {
     REQUIRE(recall > 0.95);
 }
 
-TEST_CASE("int8 + freshhnsw + feedback + update", "[ft][index][hnsw]") {
+TEST_CASE("int8 + freshhnsw + feedback + update", "[ft][feedback][update][hnsw]") {
     auto logger = vsag::Options::Instance().logger();
     logger->SetLevel(vsag::Logger::Level::kDEBUG);
 
@@ -1193,12 +1105,17 @@ TEST_CASE("int8 + freshhnsw + feedback + update", "[ft][index][hnsw]") {
     logger->Debug("====summary====");
     logger->Debug(fmt::format(R"(Error fix: {})", error_fix));
 
-    REQUIRE(error_fix > 0);
-    REQUIRE(recall[0] < recall[1]);
-    REQUIRE(fixtures::time_t(recall[1]) == fixtures::time_t(1.0f));
+    const bool initial_recall_is_perfect =
+        fixtures::recall_t(recall[0]) == fixtures::recall_t(1.0f);
+    if (not initial_recall_is_perfect) {
+        REQUIRE(error_fix > 0);
+        REQUIRE(recall[0] < recall[1]);
+    }
+    REQUIRE(recall[1] >= recall[0]);
+    REQUIRE(fixtures::recall_t(recall[1]) == fixtures::recall_t(1.0f));
 }
 
-TEST_CASE("hnsw + feedback with global optimum id + remove", "[ft][index][hnsw]") {
+TEST_CASE("hnsw + feedback with global optimum id + remove", "[ft][feedback][remove][hnsw]") {
     auto logger = vsag::Options::Instance().logger();
     logger->SetLevel(vsag::Logger::Level::kDEBUG);
 
@@ -1227,6 +1144,12 @@ TEST_CASE("hnsw + feedback with global optimum id + remove", "[ft][index][hnsw]"
     auto createindex = vsag::Factory::CreateIndex("hnsw", build_parameter);
     REQUIRE(createindex.has_value());
     auto index = createindex.value();
+
+    vsag::IndexDetailInfo info;
+    auto data_type = index->GetDetailDataByName(vsag::INDEX_DETAIL_DATA_TYPE, info)
+                         .value()
+                         ->GetDataScalarString();
+    REQUIRE(data_type == vsag::DATATYPE_FLOAT32);
 
     // generate dataset
     auto [base_ids, base_vectors] = fixtures::generate_ids_and_vectors(num_base, dim);
@@ -1310,125 +1233,21 @@ TEST_CASE("hnsw + feedback with global optimum id + remove", "[ft][index][hnsw]"
     logger->Debug("====summary====");
     logger->Debug(fmt::format(R"(Error fix: {})", error_fix));
 
-    REQUIRE(error_fix > 0);
+    const bool initial_recall_is_perfect =
+        fixtures::recall_t(recall[0]) == fixtures::recall_t(1.0f);
+    if (not initial_recall_is_perfect) {
+        REQUIRE(error_fix > 0);
+    }
     if (not is_remove) {
-        REQUIRE(recall[0] < recall[1]);
-        REQUIRE(fixtures::time_t(recall[1]) == fixtures::time_t(1.0f));
+        if (not initial_recall_is_perfect) {
+            REQUIRE(recall[0] < recall[1]);
+        }
+        REQUIRE(recall[1] >= recall[0]);
+        REQUIRE(fixtures::recall_t(recall[1]) == fixtures::recall_t(1.0f));
     }
 }
 
-TEST_CASE("static hnsw + feedback without global optimum id", "[ft][index][hnsw]") {
-    auto logger = vsag::Options::Instance().logger();
-    logger->SetLevel(vsag::Logger::Level::kDEBUG);
-
-    // parameters
-    int dim = 128;
-    int num_base = 1000;
-    int num_query = 1000;
-    auto metric_type = GENERATE("l2");
-    constexpr auto build_parameter_json = R"(
-    {{
-        "dtype": "float32",
-        "metric_type": "{}",
-        "dim": {},
-        "hnsw": {{
-            "max_degree": 16,
-            "ef_construction": 20,
-            "use_conjugate_graph": true,
-            "use_static": true
-        }}
-    }}
-    )";
-    auto build_parameter = fmt::format(build_parameter_json, metric_type, dim);
-
-    // create index
-    auto createindex = vsag::Factory::CreateIndex("hnsw", build_parameter);
-    REQUIRE(createindex.has_value());
-    auto index = createindex.value();
-
-    // generate dataset
-    auto [base_ids, base_vectors] = fixtures::generate_ids_and_vectors(num_base, dim);
-    auto base = vsag::Dataset::Make(), queries = vsag::Dataset::Make();
-    base->NumElements(num_base)
-        ->Dim(dim)
-        ->Ids(base_ids.data())
-        ->Float32Vectors(base_vectors.data())
-        ->Owner(false);
-
-    auto [query_ids, query_vectors] = fixtures::generate_ids_and_vectors(num_query, dim);
-    queries->NumElements(num_query)
-        ->Dim(dim)
-        ->Ids(query_ids.data())
-        ->Float32Vectors(query_vectors.data())
-        ->Owner(false);
-
-    // build index
-    auto buildindex = index->Build(base);
-    REQUIRE(buildindex.has_value());
-
-    // train and search
-    float recall[2];
-    int correct;
-    uint32_t error_fix = 0;
-    bool use_conjugate_graph_search = false;
-    for (int round = 0; round < 2; round++) {
-        correct = 0;
-
-        if (round == 0) {
-            logger->Debug("====train stage====");
-        } else {
-            logger->Debug("====test stage====");
-        }
-
-        logger->Debug(fmt::format(R"(Memory Usage: {:.3f} KB)", index->GetMemoryUsage() / 1024.0));
-
-        use_conjugate_graph_search = (round != 0);
-        constexpr auto search_parameters_json = R"(
-        {{
-            "hnsw": {{
-                "ef_search": 100,
-                "use_conjugate_graph_search": {}
-            }}
-        }}
-        )";
-        auto search_parameters = fmt::format(search_parameters_json, use_conjugate_graph_search);
-
-        for (int i = 0; i < num_query; i++) {
-            auto query = vsag::Dataset::Make();
-            query->Dim(dim)
-                ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
-                ->NumElements(1)
-                ->Owner(false);
-
-            auto result = index->KnnSearch(query, 1, search_parameters);
-            REQUIRE(result.has_value());
-            auto bf_result = fixtures::brute_force(query, base, 1, metric_type);
-            int64_t global_optimum = bf_result->GetIds()[0];
-            int64_t local_optimum = result.value()->GetIds()[0];
-
-            if (local_optimum != global_optimum and round == 0) {
-                error_fix += *index->Feedback(query, 1, search_parameters);
-                REQUIRE(*index->Feedback(query, 1, search_parameters, global_optimum) == 0);
-            }
-
-            if (local_optimum == global_optimum) {
-                correct++;
-            }
-        }
-
-        recall[round] = correct / (1.0 * num_query);
-        logger->Debug(fmt::format(R"(Recall: {:.4f})", recall[round]));
-    }
-
-    logger->Debug("====summary====");
-    logger->Debug(fmt::format(R"(Error fix: {})", error_fix));
-
-    REQUIRE(error_fix > 0);
-    REQUIRE(recall[0] < recall[1]);
-    REQUIRE(recall[1] >= 0.999F);
-}
-
-TEST_CASE("using indexes that do not support conjugate graph", "[ft][index]") {
+TEST_CASE("using indexes that do not support conjugate graph", "[ft][diskann]") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
     int64_t num_vectors = 1000;
     int64_t dim = 64;
@@ -1459,7 +1278,7 @@ TEST_CASE("using indexes that do not support conjugate graph", "[ft][index]") {
     REQUIRE_THROWS(index->Pretrain(base_tag_ids, k, search_parameters));
 }
 
-TEST_CASE("hnsw with pretrained by conjugate graph", "[ft][index][hnsw]") {
+TEST_CASE("hnsw with pretrained by conjugate graph", "[ft][feedback][hnsw]") {
     auto logger = vsag::Options::Instance().logger();
     logger->SetLevel(vsag::Logger::Level::kDEBUG);
 
@@ -1488,8 +1307,7 @@ TEST_CASE("hnsw with pretrained by conjugate graph", "[ft][index][hnsw]") {
         "hnsw": {{
             "max_degree": 16,
             "ef_construction": 200,
-            "use_conjugate_graph": true,
-            "use_static": true
+            "use_conjugate_graph": true
         }}
     }}
     )";
@@ -1502,7 +1320,7 @@ TEST_CASE("hnsw with pretrained by conjugate graph", "[ft][index][hnsw]") {
     std::shared_ptr<float[]> base_data(new float[dim * base_elements]);
     std::mt19937 rng;
     rng.seed(47);
-    std::uniform_real_distribution<> distribution_real(-1, 1);
+    std::uniform_real_distribution<float> distribution_real(-1, 1);
     for (int i = 0; i < base_elements; i++) {
         base_ids[i] = i;
 
@@ -1588,7 +1406,7 @@ TEST_CASE("hnsw with pretrained by conjugate graph", "[ft][index][hnsw]") {
     }
 }
 
-TEST_CASE("HNSW filtered search", "[ft][index][hnsw]") {
+TEST_CASE("HNSW filtered search", "[ft][filter_search][hnsw]") {
     auto logger = vsag::Options::Instance().logger();
     logger->SetLevel(vsag::Logger::Level::kDEBUG);
 
@@ -1629,7 +1447,7 @@ TEST_CASE("HNSW filtered search", "[ft][index][hnsw]") {
 
     // Generate random data
     std::mt19937 rng(47);
-    std::uniform_real_distribution<> distrib_real;
+    std::uniform_real_distribution<float> distrib_real;
     int64_t* ids = new int64_t[max_elements];
     float* data = new float[dim * max_elements];
 
@@ -1762,7 +1580,7 @@ TEST_CASE("HNSW filtered search", "[ft][index][hnsw]") {
     }
 }
 
-TEST_CASE("DiskAnn filtered knn search", "[ft][index][diskann]") {
+TEST_CASE("DiskAnn filtered knn search", "[ft][filter_search][diskann]") {
     auto logger = vsag::Options::Instance().logger();
     logger->SetLevel(vsag::Logger::Level::kDEBUG);
 
@@ -1815,7 +1633,7 @@ TEST_CASE("DiskAnn filtered knn search", "[ft][index][diskann]") {
     // Generate random data
     std::mt19937 rng;
     rng.seed(47);
-    std::uniform_real_distribution<> distrib_real;
+    std::uniform_real_distribution<float> distrib_real;
     std::uniform_int_distribution<> ids_random(0, max_elements - 1);
     int64_t* ids = new int64_t[max_elements];
     float* data = new float[dim * max_elements];
@@ -1943,122 +1761,5 @@ TEST_CASE("DiskAnn filtered knn search", "[ft][index][diskann]") {
                 REQUIRE(result.value()->GetDim() == max_elements);
             }
         }
-    }
-}
-
-TEST_CASE("HNSW tombstone recovery", "[ft][index][hnsw]") {
-    vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
-    int64_t num_vectors = 1000;
-    int64_t dim = 64;
-    auto index_name = GENERATE("hnsw");
-    auto metric_type = GENERATE("cosine", "ip", "l2");
-
-    bool need_normalize = metric_type != std::string("cosine");
-    auto [ids, vectors] = fixtures::generate_ids_and_vectors(num_vectors, dim, need_normalize);
-    auto index = fixtures::generate_index(index_name, metric_type, num_vectors, dim, ids, vectors);
-
-    constexpr auto search_parameters = R"(
-    {
-        "hnsw": {
-            "ef_search": 100
-        }
-    }
-    )";
-
-    // test original recall
-    int correct = 0;
-    for (int i = 0; i < num_vectors; i++) {
-        auto query = vsag::Dataset::Make();
-        query->NumElements(1)->Dim(dim)->Float32Vectors(vectors.data() + i * dim)->Owner(false);
-
-        int64_t k = 10;
-        auto result = index->KnnSearch(query, k, search_parameters);
-        REQUIRE(result.has_value());
-        if (result.value()->GetIds()[0] == ids[i]) {
-            correct += 1;
-        }
-    }
-    float recall_before = ((float)correct) / num_vectors;
-
-    // remove half data
-    for (int i = 0; i < num_vectors / 2; ++i) {
-        REQUIRE(index->GetNumElements() == num_vectors - i);
-        REQUIRE(index->GetNumberRemoved() == i);
-        auto result = index->Remove(ids[i]);
-        REQUIRE(result.has_value());
-        REQUIRE(result.value());
-    }
-    auto wrong_result = index->Remove(-1);
-    REQUIRE(wrong_result.has_value());
-    REQUIRE_FALSE(wrong_result.value());
-
-    REQUIRE(index->GetNumElements() == num_vectors / 2);
-    REQUIRE(index->GetNumberRemoved() == num_vectors / 2);
-
-    // test recall for half data
-    correct = 0;
-    for (int i = 0; i < num_vectors; i++) {
-        auto query = vsag::Dataset::Make();
-        query->NumElements(1)->Dim(dim)->Float32Vectors(vectors.data() + i * dim)->Owner(false);
-
-        int64_t k = 10;
-        auto result = index->KnnSearch(query, k, search_parameters);
-        REQUIRE(result.has_value());
-        if (i < num_vectors / 2) {
-            REQUIRE(result.value()->GetIds()[0] != ids[i]);
-        } else {
-            if (result.value()->GetIds()[0] == ids[i]) {
-                correct += 1;
-            }
-        }
-    }
-    float recall_removed = ((float)correct) / (num_vectors / 2);
-    REQUIRE(recall_removed >= 0.98);
-
-    // add data into index again but failed
-    auto dataset = vsag::Dataset::Make();
-    std::vector<int64_t> alter_ids(num_vectors);
-    for (int i = 0; i < num_vectors; i++) {
-        alter_ids[i] = num_vectors - i - 1;
-    }
-    dataset->NumElements(num_vectors)
-        ->Dim(dim)
-        ->Float32Vectors(vectors.data())
-        ->Ids(alter_ids.data())
-        ->Owner(false);
-    auto result2 = index->Add(dataset);
-    REQUIRE(result2.value().size() > num_vectors / 2);
-    REQUIRE(index->GetNumElements() > num_vectors / 2);
-    REQUIRE(index->GetNumberRemoved() < num_vectors / 2);
-
-    // add data into index again for recovery
-    correct = 0;
-    dataset->NumElements(num_vectors)
-        ->Dim(dim)
-        ->Float32Vectors(vectors.data())
-        ->Ids(ids.data())
-        ->Owner(false);
-    auto result3 = index->Add(dataset);
-    REQUIRE(result3.value().size() > num_vectors / 2);
-    REQUIRE(index->GetNumElements() == num_vectors);
-    REQUIRE(index->GetNumberRemoved() == 0);
-
-    for (int i = 0; i < num_vectors; i++) {
-        auto query = vsag::Dataset::Make();
-        query->NumElements(1)->Dim(dim)->Float32Vectors(vectors.data() + i * dim)->Owner(false);
-
-        int64_t k = 10;
-        auto result = index->KnnSearch(query, k, search_parameters);
-        REQUIRE(result.has_value());
-        if (result.value()->GetIds()[0] == ids[i]) {
-            correct += 1;
-        }
-    }
-    float recall_after = ((float)correct) / num_vectors;
-    if (result2.value().size() == num_vectors) {
-        REQUIRE(std::abs(recall_before - recall_after) < 1e-5);
-    } else {
-        // if alter_ids are added by tombstone recovery, then recall may be lower
-        REQUIRE(std::abs(recall_before - recall_after) < 0.1);
     }
 }

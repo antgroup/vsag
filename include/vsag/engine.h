@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -24,6 +23,7 @@
 #include "vsag/thread_pool.h"
 
 namespace vsag {
+
 /**
  * @class Engine
  * @brief A class representing the core engine responsible for creating default resource
@@ -65,7 +65,7 @@ public:
      * why creation failed.
      * @see Index
      */
-    tl::expected<std::shared_ptr<Index>, Error>
+    [[nodiscard]] tl::expected<std::shared_ptr<Index>, Error>
     CreateIndex(const std::string& name, const std::string& parameters);
 
     /**
@@ -80,7 +80,7 @@ public:
      * @return std::shared_ptr<Allocator> A shared pointer to the created Allocator, or an empty
      *         pointer if creation failed. The caller must check for null to handle allocation errors.
      */
-    static std::shared_ptr<Allocator>
+    [[nodiscard]] static std::shared_ptr<Allocator>
     CreateDefaultAllocator();
 
     /**
@@ -94,10 +94,11 @@ public:
      * @return tl::expected<std::shared_ptr<ThreadPool>, Error> An expected value that contains either
      * a shared pointer to the successfully created `ThreadPool` or an `Error` detailing
      */
-    static tl::expected<std::shared_ptr<ThreadPool>, Error>
+    [[nodiscard]] static tl::expected<std::shared_ptr<ThreadPool>, Error>
     CreateThreadPool(uint32_t num_threads);
 
 private:
     std::shared_ptr<Resource> resource_;  ///< The resource used by this engine.
 };
+
 }  // namespace vsag

@@ -16,6 +16,7 @@
 #include "compressed_graph_datacell.h"
 
 #include "graph_datacell_parameter.h"
+#include "vsag_exception.h"
 
 namespace vsag {
 
@@ -30,6 +31,14 @@ CompressedGraphDataCell::CompressedGraphDataCell(const CompressedGraphDatacellPa
     : allocator_(common_param.allocator_.get()), neighbor_sets_(allocator_) {
     this->maximum_degree_ = graph_param->max_degree_;
     this->max_capacity_ = 0;
+    GraphInterface::allocator_ = common_param.allocator_.get();
+    if (graph_param->support_duplicate_) {
+        this->InitDuplicateTracker();
+    }
+    if (graph_param->use_reverse_edges_) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "CompressedGraphDataCell does not support reverse edges");
+    }
 }
 
 CompressedGraphDataCell::~CompressedGraphDataCell() {
@@ -45,8 +54,10 @@ void
 CompressedGraphDataCell::InsertNeighborsById(InnerIdType id,
                                              const Vector<InnerIdType>& neighbor_ids) {
     if (neighbor_ids.size() > this->maximum_degree_) {
-        throw std::invalid_argument(fmt::format(
-            "insert neighbors count {} more than {}", neighbor_ids.size(), this->maximum_degree_));
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            fmt::format("insert neighbors count {} more than {}",
+                                        neighbor_ids.size(),
+                                        this->maximum_degree_));
     }
 
     Vector<InnerIdType> tmp(neighbor_ids.begin(), neighbor_ids.end(), allocator_);
@@ -96,7 +107,7 @@ CompressedGraphDataCell::Serialize(StreamWriter& writer) {
             StreamWriter::WriteObj(writer, encoder.low_bits_width);
             StreamWriter::WriteObj(writer, encoder.low_bits_size);
             StreamWriter::WriteObj(writer, encoder.high_bits_size);
-            for (size_t j = 0; j < encoder.low_bits_size + encoder.high_bits_size; j++) {
+            for (uint64_t j = 0; j < encoder.low_bits_size + encoder.high_bits_size; j++) {
                 StreamWriter::WriteObj(writer, encoder.bits[j]);
             }
         }
@@ -122,7 +133,7 @@ CompressedGraphDataCell::Deserialize(StreamReader& reader) {
 
             encoder.bits = static_cast<uint64_t*>(allocator_->Allocate(
                 (encoder.low_bits_size + encoder.high_bits_size) * sizeof(uint64_t)));
-            for (size_t j = 0; j < encoder.low_bits_size + encoder.high_bits_size; j++) {
+            for (uint64_t j = 0; j < encoder.low_bits_size + encoder.high_bits_size; j++) {
                 StreamReader::ReadObj(reader, encoder.bits[j]);
             }
         }
@@ -136,6 +147,37 @@ CompressedGraphDataCell::Resize(InnerIdType new_size) {
     }
     neighbor_sets_.resize(new_size);
     this->max_capacity_ = new_size;
+    if (this->duplicate_tracker_ != nullptr) {
+        this->duplicate_tracker_->Resize(new_size);
+    }
+}
+
+bool
+CompressedGraphDataCell::CheckIdExists(InnerIdType id) const {
+    return id < neighbor_sets_.size() && neighbor_sets_[id] != nullptr;
+}
+
+int64_t
+CompressedGraphDataCell::GetMemoryUsage() const {
+    auto memory = sizeof(CompressedGraphDataCell);
+    memory += neighbor_sets_.size() * sizeof(std::nullptr_t);
+    for (const auto& encoder : neighbor_sets_) {
+        if (encoder) {
+            memory += encoder->SizeInBytes();
+        }
+    }
+    return static_cast<int64_t>(memory);
+}
+
+Vector<InnerIdType>
+CompressedGraphDataCell::GetIds() const {
+    Vector<InnerIdType> ids(allocator_);
+    for (InnerIdType id = 0; id < static_cast<InnerIdType>(neighbor_sets_.size()); ++id) {
+        if (neighbor_sets_[id] != nullptr) {
+            ids.push_back(id);
+        }
+    }
+    return ids;
 }
 
 }  // namespace vsag

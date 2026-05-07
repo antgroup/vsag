@@ -24,9 +24,6 @@
 
 #include "simd.h"
 
-#define PORTABLE_ALIGN32 __attribute__((aligned(32)))
-#define PORTABLE_ALIGN64 __attribute__((aligned(64)))
-
 namespace vsag::sse {
 
 float
@@ -62,7 +59,7 @@ float
 INT8InnerProduct(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
     auto* pVect1 = (int8_t*)pVect1v;
     auto* pVect2 = (int8_t*)pVect2v;
-    auto qty = *((size_t*)qty_ptr);
+    auto qty = *((uint64_t*)qty_ptr);
     return sse::INT8ComputeIP(pVect1, pVect2, qty);
 }
 
@@ -109,17 +106,15 @@ FP32ComputeIP(const float* RESTRICT query, const float* RESTRICT codes, uint64_t
     if (n == 0) {
         return generic::FP32ComputeIP(query, codes, dim);
     }
-    // process 4 floats at a time
-    __m128 sum = _mm_setzero_ps();  // initialize to 0
+    __m128 sum = _mm_setzero_ps();
     for (int i = 0; i < n; ++i) {
-        __m128 a = _mm_loadu_ps(query + i * 4);   // load 4 floats from memory
-        __m128 b = _mm_loadu_ps(codes + i * 4);   // load 4 floats from memory
-        sum = _mm_add_ps(sum, _mm_mul_ps(a, b));  // accumulate the product
+        __m128 a = _mm_loadu_ps(query + i * 4);
+        __m128 b = _mm_loadu_ps(codes + i * 4);
+        sum = _mm_add_ps(sum, _mm_mul_ps(a, b));
     }
     alignas(16) float result[4];
-    _mm_store_ps(result, sum);  // store the accumulated result into an array
-    float ip = result[0] + result[1] + result[2] +
-               result[3];  // calculate the sum of the accumulated results
+    _mm_store_ps(result, sum);
+    float ip = result[0] + result[1] + result[2] + result[3];
     ip += generic::FP32ComputeIP(query + n * 4, codes + n * 4, dim - n * 4);
     return ip;
 #else
@@ -513,7 +508,6 @@ INT8ComputeIP(const int8_t* __restrict query, const int8_t* __restrict codes, ui
     if (n == 0) {
         return generic::INT8ComputeIP(query, codes, dim);
     }
-
     __m128i sum_sq = _mm_setzero_si128();
 
     for (uint64_t i = 0; i < n; ++i) {
@@ -714,7 +708,72 @@ SQ4ComputeIP(const float* RESTRICT query,
              const float* RESTRICT lower_bound,
              const float* RESTRICT diff,
              uint64_t dim) {
+#if defined(ENABLE_SSE)
+    if (dim == 0) {
+        return 0;
+    }
+
+    float result = 0;
+    uint64_t d = 0;
+
+    // Process 8 values at a time (4 bytes containing 8 4-bit values)
+    for (; d + 7 < dim; d += 8) {
+        // Load 4 bytes (8 4-bit values)
+        __m128i code_vec = load_4_char(codes + (d >> 1));
+
+        // Extract low nibbles (values 0,2,4,6) - even indices
+        __m128i low_nibbles = _mm_and_si128(code_vec, _mm_set1_epi8(0x0F));
+        // Extract high nibbles (values 1,3,5,7) - odd indices
+        __m128i high_nibbles = _mm_and_si128(_mm_srli_epi16(code_vec, 4), _mm_set1_epi8(0x0F));
+
+        // Interleave low and high nibbles to get correct order: [d0, d1, d2, d3, d4, d5, d6, d7]
+        __m128i interleaved = _mm_unpacklo_epi8(low_nibbles, high_nibbles);
+
+        // Convert to float and scale
+        __m128i low_part = _mm_cvtepu8_epi32(interleaved);
+        __m128i high_part = _mm_cvtepu8_epi32(_mm_srli_si128(interleaved, 4));
+        __m128 values0 = _mm_cvtepi32_ps(low_part);
+        __m128 values1 = _mm_cvtepi32_ps(high_part);
+
+        // Scale by 1/15.0
+        __m128 scale = _mm_set1_ps(1.0f / 15.0f);
+        values0 = _mm_mul_ps(values0, scale);
+        values1 = _mm_mul_ps(values1, scale);
+
+        // Apply diff and lower_bound
+        __m128 diff_vec0 = _mm_loadu_ps(diff + d);
+        __m128 diff_vec1 = _mm_loadu_ps(diff + d + 4);
+        __m128 lb_vec0 = _mm_loadu_ps(lower_bound + d);
+        __m128 lb_vec1 = _mm_loadu_ps(lower_bound + d + 4);
+
+        values0 = _mm_add_ps(_mm_mul_ps(values0, diff_vec0), lb_vec0);
+        values1 = _mm_add_ps(_mm_mul_ps(values1, diff_vec1), lb_vec1);
+
+        // Load query vectors
+        __m128 query_vec0 = _mm_loadu_ps(query + d);
+        __m128 query_vec1 = _mm_loadu_ps(query + d + 4);
+
+        // Compute dot products
+        __m128 prod0 = _mm_mul_ps(query_vec0, values0);
+        __m128 prod1 = _mm_mul_ps(query_vec1, values1);
+
+        // Horizontal sum
+        __m128 sum01 = _mm_add_ps(prod0, prod1);
+        __m128 sum23 = _mm_shuffle_ps(sum01, sum01, _MM_SHUFFLE(2, 3, 0, 1));
+        __m128 sum0123 = _mm_add_ps(sum01, sum23);
+        __m128 sum4567 = _mm_movehl_ps(sum0123, sum0123);
+        __m128 sum = _mm_add_ss(sum0123, sum4567);
+
+        result += _mm_cvtss_f32(sum);
+    }
+
+    // Process remaining elements with generic implementation
+    result +=
+        generic::SQ4ComputeIP(query + d, codes + (d >> 1), lower_bound + d, diff + d, dim - d);
+    return result;
+#else
     return generic::SQ4ComputeIP(query, codes, lower_bound, diff, dim);
+#endif
 }
 
 float
@@ -723,7 +782,76 @@ SQ4ComputeL2Sqr(const float* RESTRICT query,
                 const float* RESTRICT lower_bound,
                 const float* RESTRICT diff,
                 uint64_t dim) {
+#if defined(ENABLE_SSE)
+    if (dim == 0) {
+        return 0;
+    }
+
+    float result = 0;
+    uint64_t d = 0;
+
+    // Process 8 values at a time (4 bytes containing 8 4-bit values)
+    for (; d + 7 < dim; d += 8) {
+        // Load 4 bytes (8 4-bit values)
+        __m128i code_vec = load_4_char(codes + (d >> 1));
+
+        // Extract low nibbles (values 0,2,4,6) - even indices
+        __m128i low_nibbles = _mm_and_si128(code_vec, _mm_set1_epi8(0x0F));
+        // Extract high nibbles (values 1,3,5,7) - odd indices
+        __m128i high_nibbles = _mm_and_si128(_mm_srli_epi16(code_vec, 4), _mm_set1_epi8(0x0F));
+
+        // Interleave low and high nibbles to get correct order: [d0, d1, d2, d3, d4, d5, d6, d7]
+        __m128i interleaved = _mm_unpacklo_epi8(low_nibbles, high_nibbles);
+
+        // Convert to float and scale
+        __m128i low_part = _mm_cvtepu8_epi32(interleaved);
+        __m128i high_part = _mm_cvtepu8_epi32(_mm_srli_si128(interleaved, 4));
+        __m128 values0 = _mm_cvtepi32_ps(low_part);
+        __m128 values1 = _mm_cvtepi32_ps(high_part);
+
+        // Scale by 1/15.0
+        __m128 scale = _mm_set1_ps(1.0f / 15.0f);
+        values0 = _mm_mul_ps(values0, scale);
+        values1 = _mm_mul_ps(values1, scale);
+
+        // Apply diff and lower_bound
+        __m128 diff_vec0 = _mm_loadu_ps(diff + d);
+        __m128 diff_vec1 = _mm_loadu_ps(diff + d + 4);
+        __m128 lb_vec0 = _mm_loadu_ps(lower_bound + d);
+        __m128 lb_vec1 = _mm_loadu_ps(lower_bound + d + 4);
+
+        values0 = _mm_add_ps(_mm_mul_ps(values0, diff_vec0), lb_vec0);
+        values1 = _mm_add_ps(_mm_mul_ps(values1, diff_vec1), lb_vec1);
+
+        // Load query vectors
+        __m128 query_vec0 = _mm_loadu_ps(query + d);
+        __m128 query_vec1 = _mm_loadu_ps(query + d + 4);
+
+        // Compute differences
+        __m128 diff0 = _mm_sub_ps(query_vec0, values0);
+        __m128 diff1 = _mm_sub_ps(query_vec1, values1);
+
+        // Square differences
+        __m128 sq_diff0 = _mm_mul_ps(diff0, diff0);
+        __m128 sq_diff1 = _mm_mul_ps(diff1, diff1);
+
+        // Horizontal sum
+        __m128 sum01 = _mm_add_ps(sq_diff0, sq_diff1);
+        __m128 sum23 = _mm_shuffle_ps(sum01, sum01, _MM_SHUFFLE(2, 3, 0, 1));
+        __m128 sum0123 = _mm_add_ps(sum01, sum23);
+        __m128 sum4567 = _mm_movehl_ps(sum0123, sum0123);
+        __m128 sum = _mm_add_ss(sum0123, sum4567);
+
+        result += _mm_cvtss_f32(sum);
+    }
+
+    // Process remaining elements with generic implementation
+    result +=
+        generic::SQ4ComputeL2Sqr(query + d, codes + (d >> 1), lower_bound + d, diff + d, dim - d);
+    return result;
+#else
     return generic::SQ4ComputeL2Sqr(query, codes, lower_bound, diff, dim);
+#endif
 }
 
 float
@@ -732,7 +860,81 @@ SQ4ComputeCodesIP(const uint8_t* RESTRICT codes1,
                   const float* RESTRICT lower_bound,
                   const float* RESTRICT diff,
                   uint64_t dim) {
+#if defined(ENABLE_SSE)
+    if (dim == 0) {
+        return 0;
+    }
+
+    float result = 0;
+    uint64_t d = 0;
+
+    // Process 8 values at a time (4 bytes containing 8 4-bit values)
+    for (; d + 7 < dim; d += 8) {
+        // Load 4 bytes from each code vector (8 4-bit values)
+        __m128i code1_vec = load_4_char(codes1 + (d >> 1));
+        __m128i code2_vec = load_4_char(codes2 + (d >> 1));
+
+        // Extract and interleave nibbles for code1
+        __m128i code1_low = _mm_and_si128(code1_vec, _mm_set1_epi8(0x0F));
+        __m128i code1_high = _mm_and_si128(_mm_srli_epi16(code1_vec, 4), _mm_set1_epi8(0x0F));
+        __m128i code1_interleaved = _mm_unpacklo_epi8(code1_low, code1_high);
+
+        // Extract and interleave nibbles for code2
+        __m128i code2_low = _mm_and_si128(code2_vec, _mm_set1_epi8(0x0F));
+        __m128i code2_high = _mm_and_si128(_mm_srli_epi16(code2_vec, 4), _mm_set1_epi8(0x0F));
+        __m128i code2_interleaved = _mm_unpacklo_epi8(code2_low, code2_high);
+
+        // Convert to float and scale for code1
+        __m128i code1_low_part = _mm_cvtepu8_epi32(code1_interleaved);
+        __m128i code1_high_part = _mm_cvtepu8_epi32(_mm_srli_si128(code1_interleaved, 4));
+        __m128 code1_values0 = _mm_cvtepi32_ps(code1_low_part);
+        __m128 code1_values1 = _mm_cvtepi32_ps(code1_high_part);
+
+        // Convert to float and scale for code2
+        __m128i code2_low_part = _mm_cvtepu8_epi32(code2_interleaved);
+        __m128i code2_high_part = _mm_cvtepu8_epi32(_mm_srli_si128(code2_interleaved, 4));
+        __m128 code2_values0 = _mm_cvtepi32_ps(code2_low_part);
+        __m128 code2_values1 = _mm_cvtepi32_ps(code2_high_part);
+
+        // Scale by 1/15.0
+        __m128 scale = _mm_set1_ps(1.0f / 15.0f);
+        code1_values0 = _mm_mul_ps(code1_values0, scale);
+        code1_values1 = _mm_mul_ps(code1_values1, scale);
+        code2_values0 = _mm_mul_ps(code2_values0, scale);
+        code2_values1 = _mm_mul_ps(code2_values1, scale);
+
+        // Apply diff and lower_bound
+        __m128 diff_vec0 = _mm_loadu_ps(diff + d);
+        __m128 diff_vec1 = _mm_loadu_ps(diff + d + 4);
+        __m128 lb_vec0 = _mm_loadu_ps(lower_bound + d);
+        __m128 lb_vec1 = _mm_loadu_ps(lower_bound + d + 4);
+
+        code1_values0 = _mm_add_ps(_mm_mul_ps(code1_values0, diff_vec0), lb_vec0);
+        code1_values1 = _mm_add_ps(_mm_mul_ps(code1_values1, diff_vec1), lb_vec1);
+        code2_values0 = _mm_add_ps(_mm_mul_ps(code2_values0, diff_vec0), lb_vec0);
+        code2_values1 = _mm_add_ps(_mm_mul_ps(code2_values1, diff_vec1), lb_vec1);
+
+        // Compute dot products
+        __m128 prod0 = _mm_mul_ps(code1_values0, code2_values0);
+        __m128 prod1 = _mm_mul_ps(code1_values1, code2_values1);
+
+        // Horizontal sum
+        __m128 sum01 = _mm_add_ps(prod0, prod1);
+        __m128 sum23 = _mm_shuffle_ps(sum01, sum01, _MM_SHUFFLE(2, 3, 0, 1));
+        __m128 sum0123 = _mm_add_ps(sum01, sum23);
+        __m128 sum4567 = _mm_movehl_ps(sum0123, sum0123);
+        __m128 sum = _mm_add_ss(sum0123, sum4567);
+
+        result += _mm_cvtss_f32(sum);
+    }
+
+    // Process remaining elements with generic implementation
+    result += generic::SQ4ComputeCodesIP(
+        codes1 + (d >> 1), codes2 + (d >> 1), lower_bound + d, diff + d, dim - d);
+    return result;
+#else
     return generic::SQ4ComputeCodesIP(codes1, codes2, lower_bound, diff, dim);
+#endif
 }
 
 float
@@ -741,7 +943,85 @@ SQ4ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
                      const float* RESTRICT lower_bound,
                      const float* RESTRICT diff,
                      uint64_t dim) {
+#if defined(ENABLE_SSE)
+    if (dim == 0) {
+        return 0;
+    }
+
+    float result = 0;
+    uint64_t d = 0;
+
+    // Process 8 values at a time (4 bytes containing 8 4-bit values)
+    for (; d + 7 < dim; d += 8) {
+        // Load 4 bytes from each code vector (8 4-bit values)
+        __m128i code1_vec = load_4_char(codes1 + (d >> 1));
+        __m128i code2_vec = load_4_char(codes2 + (d >> 1));
+
+        // Extract and interleave nibbles for code1
+        __m128i code1_low = _mm_and_si128(code1_vec, _mm_set1_epi8(0x0F));
+        __m128i code1_high = _mm_and_si128(_mm_srli_epi16(code1_vec, 4), _mm_set1_epi8(0x0F));
+        __m128i code1_interleaved = _mm_unpacklo_epi8(code1_low, code1_high);
+
+        // Extract and interleave nibbles for code2
+        __m128i code2_low = _mm_and_si128(code2_vec, _mm_set1_epi8(0x0F));
+        __m128i code2_high = _mm_and_si128(_mm_srli_epi16(code2_vec, 4), _mm_set1_epi8(0x0F));
+        __m128i code2_interleaved = _mm_unpacklo_epi8(code2_low, code2_high);
+
+        // Convert to float and scale for code1
+        __m128i code1_low_part = _mm_cvtepu8_epi32(code1_interleaved);
+        __m128i code1_high_part = _mm_cvtepu8_epi32(_mm_srli_si128(code1_interleaved, 4));
+        __m128 code1_values0 = _mm_cvtepi32_ps(code1_low_part);
+        __m128 code1_values1 = _mm_cvtepi32_ps(code1_high_part);
+
+        // Convert to float and scale for code2
+        __m128i code2_low_part = _mm_cvtepu8_epi32(code2_interleaved);
+        __m128i code2_high_part = _mm_cvtepu8_epi32(_mm_srli_si128(code2_interleaved, 4));
+        __m128 code2_values0 = _mm_cvtepi32_ps(code2_low_part);
+        __m128 code2_values1 = _mm_cvtepi32_ps(code2_high_part);
+
+        // Scale by 1/15.0
+        __m128 scale = _mm_set1_ps(1.0f / 15.0f);
+        code1_values0 = _mm_mul_ps(code1_values0, scale);
+        code1_values1 = _mm_mul_ps(code1_values1, scale);
+        code2_values0 = _mm_mul_ps(code2_values0, scale);
+        code2_values1 = _mm_mul_ps(code2_values1, scale);
+
+        // Apply diff and lower_bound
+        __m128 diff_vec0 = _mm_loadu_ps(diff + d);
+        __m128 diff_vec1 = _mm_loadu_ps(diff + d + 4);
+        __m128 lb_vec0 = _mm_loadu_ps(lower_bound + d);
+        __m128 lb_vec1 = _mm_loadu_ps(lower_bound + d + 4);
+
+        code1_values0 = _mm_add_ps(_mm_mul_ps(code1_values0, diff_vec0), lb_vec0);
+        code1_values1 = _mm_add_ps(_mm_mul_ps(code1_values1, diff_vec1), lb_vec1);
+        code2_values0 = _mm_add_ps(_mm_mul_ps(code2_values0, diff_vec0), lb_vec0);
+        code2_values1 = _mm_add_ps(_mm_mul_ps(code2_values1, diff_vec1), lb_vec1);
+
+        // Compute differences
+        __m128 diff0 = _mm_sub_ps(code1_values0, code2_values0);
+        __m128 diff1 = _mm_sub_ps(code1_values1, code2_values1);
+
+        // Square differences
+        __m128 sq_diff0 = _mm_mul_ps(diff0, diff0);
+        __m128 sq_diff1 = _mm_mul_ps(diff1, diff1);
+
+        // Horizontal sum
+        __m128 sum01 = _mm_add_ps(sq_diff0, sq_diff1);
+        __m128 sum23 = _mm_shuffle_ps(sum01, sum01, _MM_SHUFFLE(2, 3, 0, 1));
+        __m128 sum0123 = _mm_add_ps(sum01, sum23);
+        __m128 sum4567 = _mm_movehl_ps(sum0123, sum0123);
+        __m128 sum = _mm_add_ss(sum0123, sum4567);
+
+        result += _mm_cvtss_f32(sum);
+    }
+
+    // Process remaining elements with generic implementation
+    result += generic::SQ4ComputeCodesL2Sqr(
+        codes1 + (d >> 1), codes2 + (d >> 1), lower_bound + d, diff + d, dim - d);
+    return result;
+#else
     return generic::SQ4ComputeCodesL2Sqr(codes1, codes2, lower_bound, diff, dim);
+#endif
 }
 
 float

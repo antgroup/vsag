@@ -21,10 +21,12 @@
 #include <functional>
 #include <future>
 #include <iterator>
+#include <memory>
 #include <new>
 #include <nlohmann/json.hpp>
 #include <stdexcept>
 #include <utility>
+#include <vector>
 
 #include "datacell/flatten_datacell.h"
 #include "dataset_impl.h"
@@ -45,13 +47,13 @@ namespace vsag {
 
 const static float MACRO_TO_MILLI = 1000;
 const static int64_t DATA_LIMIT = 2;
-const static size_t MAXIMAL_BEAM_SEARCH = 64;
-const static size_t MINIMAL_BEAM_SEARCH = 1;
+const static uint64_t MAXIMAL_BEAM_SEARCH = 64;
+const static uint64_t MINIMAL_BEAM_SEARCH = 1;
 const static int MINIMAL_R = 8;
 const static int MAXIMAL_R = 64;
 const static int VECTOR_PER_BLOCK = 1;
 const static float GRAPH_SLACK = 1.3 * 1.05;
-const static size_t MINIMAL_SECTOR_LEN = 4096;
+const static uint64_t MINIMAL_SECTOR_LEN = 4096;
 const static std::string BUILD_STATUS = "status";
 const static std::string BUILD_CURRENT_ROUND = "round";
 const static std::string BUILD_NODES = "builded_nodes";
@@ -61,7 +63,7 @@ const static std::string EMPTY_DISKANN = "EMPTY_DISKANN";
 template <typename T>
 Binary
 to_binary(T& value) {
-    Binary binary;
+    Binary binary{};
     binary.size = sizeof(T);
     binary.data = std::shared_ptr<int8_t[]>(new int8_t[binary.size]);
     std::memcpy(binary.data.get(), &value, binary.size);
@@ -170,7 +172,7 @@ convert_stream_to_binary(const std::stringstream& stream) {
     buf->sgetn((char*)binary_data.get(), size);
     Binary binary{
         .data = binary_data,
-        .size = (size_t)size,
+        .size = (uint64_t)size,
     };
     return std::move(binary);
 }
@@ -230,6 +232,7 @@ DiskANN::DiskANN(DiskannParameters& diskann_params, const IndexCommonParam& inde
       use_reference_(diskann_params.use_reference),
       use_opq_(diskann_params.use_opq),
       use_bsa_(diskann_params.use_bsa),
+      support_calc_distance_by_id_(diskann_params.support_calc_distance_by_id),
       diskann_params_(diskann_params),
       common_param_(index_common_param) {
     status_ = IndexStatus::EMPTY;
@@ -274,12 +277,20 @@ DiskANN::DiskANN(DiskannParameters& diskann_params, const IndexCommonParam& inde
 
     // When the length of the vector is too long, set sector_len_ to the size of storing a vector along with its linkage list.
     sector_len_ = std::max(
-        MINIMAL_SECTOR_LEN,                                                           // NOLINT
-        (size_t)(dim_ * sizeof(float) + (R_ * GRAPH_SLACK + 1) * sizeof(uint32_t)) *  // NOLINT
-            VECTOR_PER_BLOCK);                                                        // NOLINT
+        MINIMAL_SECTOR_LEN,                                                             // NOLINT
+        (uint64_t)(dim_ * sizeof(float) + (R_ * GRAPH_SLACK + 1) * sizeof(uint32_t)) *  // NOLINT
+            VECTOR_PER_BLOCK);                                                          // NOLINT
 
     this->feature_list_ = std::make_shared<IndexFeatureList>();
     this->init_feature_list();
+    result_queues_.try_emplace(STATSTIC_KNN_IO);
+    result_queues_.try_emplace(STATSTIC_KNN_TIME);
+    result_queues_.try_emplace(STATSTIC_KNN_IO_TIME);
+    result_queues_.try_emplace(STATSTIC_RANGE_IO);
+    result_queues_.try_emplace(STATSTIC_RANGE_HOP);
+    result_queues_.try_emplace(STATSTIC_RANGE_TIME);
+    result_queues_.try_emplace(STATSTIC_RANGE_CACHE_HIT);
+    result_queues_.try_emplace(STATSTIC_RANGE_IO_TIME);
 }
 
 tl::expected<std::vector<int64_t>, Error>
@@ -304,7 +315,7 @@ DiskANN::build(const DatasetPtr& base) {
         const auto* ids = base->GetIds();
         auto data_num = base->GetNumElements();
 
-        std::vector<size_t> failed_locs;
+        std::vector<uint64_t> failed_locs;
         if (diskann_params_.graph_type == GRAPH_TYPE_ODESCENT) {
             SlowTaskTimer t("odescent build full (graph)");
             FlattenDataCellParamPtr flatten_param =
@@ -381,7 +392,7 @@ DiskANN::build(const DatasetPtr& base) {
         disk_layout_reader_ = std::make_shared<LocalMemoryReader>(disk_layout_stream_);
         reader_.reset(new LocalFileReader(batch_read_));
         index_.reset(new diskann::PQFlashIndex<float, int64_t>(
-            reader_, metric_, sector_len_, dim_, use_bsa_));
+            reader_, metric_, sector_len_, dim_, use_bsa_, support_calc_distance_by_id_));
         index_->load_from_separate_paths(
             pq_pivots_stream_, disk_pq_compressed_vectors_, tag_stream_);
         if (preload_) {
@@ -447,7 +458,7 @@ DiskANN::knn_search(const DatasetPtr& query,
         // check search parameters
         auto params = DiskannSearchParameters::FromJson(parameters);
         int64_t ef_search = params.ef_search;
-        size_t beam_search = params.beam_search;
+        uint64_t beam_search = params.beam_search;
         int64_t io_limit = params.io_limit;
         bool reorder = params.use_reorder;
 
@@ -465,10 +476,10 @@ DiskANN::knn_search(const DatasetPtr& query,
         beam_search = std::min(beam_search, MAXIMAL_BEAM_SEARCH);
         beam_search = std::max(beam_search, MINIMAL_BEAM_SEARCH);
 
-        uint64_t labels[query_num * k];
-        auto* distances = new float[query_num * k];
-        auto* ids = new int64_t[query_num * k];
-        diskann::QueryStats query_stats[query_num];
+        std::vector<uint64_t> labels(query_num * k);
+        auto distances = std::unique_ptr<float[]>(new float[query_num * k]);
+        auto ids = std::unique_ptr<int64_t[]>(new int64_t[query_num * k]);
+        std::vector<diskann::QueryStats> query_stats(query_num);
         for (int i = 0; i < query_num; i++) {
             try {
                 double time_cost = 0;
@@ -481,51 +492,51 @@ DiskANN::knn_search(const DatasetPtr& query,
                                 query->GetFloat32Vectors() + i * dim_,
                                 k,
                                 ef_search,
-                                labels + i * k,
-                                distances + i * k,
+                                labels.data() + i * k,
+                                distances.get() + i * k,
                                 beam_search,
                                 filter,
                                 io_limit,
                                 reorder,
-                                query_stats + i);
+                                query_stats.data() + i);
                         } else {
                             k = index_->cached_beam_search_memory(
                                 query->GetFloat32Vectors() + i * dim_,
                                 k,
                                 ef_search,
-                                labels + i * k,
-                                distances + i * k,
+                                labels.data() + i * k,
+                                distances.get() + i * k,
                                 beam_search,
                                 filter,
                                 io_limit,
                                 reorder,
-                                query_stats + i);
+                                query_stats.data() + i);
                         }
                     } else {
                         k = index_->cached_beam_search(query->GetFloat32Vectors() + i * dim_,
                                                        k,
                                                        ef_search,
-                                                       labels + i * k,
-                                                       distances + i * k,
+                                                       labels.data() + i * k,
+                                                       distances.get() + i * k,
                                                        beam_search,
                                                        filter,
                                                        io_limit,
                                                        false,
-                                                       query_stats + i);
+                                                       query_stats.data() + i);
                     }
                 }
-                {
-                    std::lock_guard<std::mutex> lock(stats_mutex_);
-                    result_queues_[STATSTIC_KNN_IO].Push(static_cast<float>(query_stats[i].n_ios));
-                    result_queues_[STATSTIC_KNN_TIME].Push(static_cast<float>(time_cost));
-                    result_queues_[STATSTIC_KNN_IO_TIME].Push(
+                result_queues_.at(STATSTIC_KNN_IO).Push(static_cast<float>(query_stats[i].n_ios));
+                result_queues_.at(STATSTIC_KNN_TIME).Push(static_cast<float>(time_cost));
+                auto& io_time_queue = result_queues_.at(STATSTIC_KNN_IO_TIME);
+                if (query_stats[i].n_ios > 0) {
+                    io_time_queue.Push(
                         (query_stats[i].io_us / static_cast<float>(query_stats[i].n_ios)) /
                         MACRO_TO_MILLI);
+                } else {
+                    io_time_queue.Push(0.0F);
                 }
 
             } catch (const std::runtime_error& e) {
-                delete[] distances;
-                delete[] ids;
                 LOG_ERROR_AND_RETURNS(ErrorType::INTERNAL_ERROR,
                                       "failed to perform knn search on diskann: ",
                                       e.what());
@@ -536,15 +547,13 @@ DiskANN::knn_search(const DatasetPtr& query,
         result->NumElements(query->GetNumElements())->Dim(0);
 
         if (k == 0) {
-            delete[] distances;
-            delete[] ids;
             return std::move(result);
         }
         for (int i = 0; i < query_num * k; ++i) {
             ids[i] = static_cast<int64_t>(labels[i]);
         }
 
-        result->NumElements(query_num)->Dim(k)->Distances(distances)->Ids(ids);
+        result->NumElements(query_num)->Dim(k)->Distances(distances.release())->Ids(ids.release());
         return std::move(result);
     } catch (const std::invalid_argument& e) {
         LOG_ERROR_AND_RETURNS(ErrorType::INVALID_ARGUMENT,
@@ -615,7 +624,7 @@ DiskANN::range_search(const DatasetPtr& query,
 
         // check search parameters
         auto params = DiskannSearchParameters::FromJson(parameters);
-        size_t beam_search = params.beam_search;
+        uint64_t beam_search = params.beam_search;
         int64_t ef_search = params.ef_search;
         CHECK_ARGUMENT(ef_search > 0,
                        fmt::format("ef_search({}) must be greater than 0", ef_search));
@@ -648,16 +657,17 @@ DiskANN::range_search(const DatasetPtr& query,
                                      params.use_async_io,
                                      &query_stats);
             }
-            {
-                std::lock_guard<std::mutex> lock(stats_mutex_);
-
-                result_queues_[STATSTIC_RANGE_IO].Push(static_cast<float>(query_stats.n_ios));
-                result_queues_[STATSTIC_RANGE_HOP].Push(static_cast<float>(query_stats.n_hops));
-                result_queues_[STATSTIC_RANGE_TIME].Push(static_cast<float>(time_cost));
-                result_queues_[STATSTIC_RANGE_CACHE_HIT].Push(
-                    static_cast<float>(query_stats.n_cache_hits));
-                result_queues_[STATSTIC_RANGE_IO_TIME].Push(
+            result_queues_.at(STATSTIC_RANGE_IO).Push(static_cast<float>(query_stats.n_ios));
+            result_queues_.at(STATSTIC_RANGE_HOP).Push(static_cast<float>(query_stats.n_hops));
+            result_queues_.at(STATSTIC_RANGE_TIME).Push(static_cast<float>(time_cost));
+            result_queues_.at(STATSTIC_RANGE_CACHE_HIT)
+                .Push(static_cast<float>(query_stats.n_cache_hits));
+            auto& range_io_time_queue = result_queues_.at(STATSTIC_RANGE_IO_TIME);
+            if (query_stats.n_ios > 0) {
+                range_io_time_queue.Push(
                     (query_stats.io_us / static_cast<float>(query_stats.n_ios)) / MACRO_TO_MILLI);
+            } else {
+                range_io_time_queue.Push(0.0F);
             }
         } catch (const std::runtime_error& e) {
             LOG_ERROR_AND_RETURNS(
@@ -665,27 +675,27 @@ DiskANN::range_search(const DatasetPtr& query,
         }
 
         auto k = static_cast<int64_t>(labels.size());
-        size_t target_size = k;
+        uint64_t target_size = k;
 
         auto result = Dataset::Make();
         if (k == 0) {
             return std::move(result);
         }
         if (limited_size >= 1) {
-            target_size = std::min((size_t)limited_size, target_size);
+            target_size = std::min((uint64_t)limited_size, target_size);
         }
 
-        auto* dis = new float[target_size];
-        auto* ids = new int64_t[target_size];
-        for (int i = 0; i < target_size; ++i) {
+        auto dis = std::unique_ptr<float[]>(new float[target_size]);
+        auto ids = std::unique_ptr<int64_t[]>(new int64_t[target_size]);
+        for (uint64_t i = 0; i < target_size; ++i) {
             ids[i] = static_cast<int64_t>(labels[i]);
             dis[i] = range_distances[i];
         }
 
         result->NumElements(query_num)
             ->Dim(static_cast<int64_t>(target_size))
-            ->Distances(dis)
-            ->Ids(ids);
+            ->Distances(dis.release())
+            ->Ids(ids.release());
         return std::move(result);
     } catch (const std::invalid_argument& e) {
         LOG_ERROR_AND_RETURNS(ErrorType::INVALID_ARGUMENT,
@@ -871,7 +881,7 @@ DiskANN::deserialize(const ReaderSet& reader_set) {
         disk_layout_reader_ = reader_set.Get(DISKANN_LAYOUT_FILE);
         reader_.reset(new LocalFileReader(batch_read_));
         index_.reset(new diskann::PQFlashIndex<float, int64_t>(
-            reader_, metric_, sector_len_, dim_, use_bsa_));
+            reader_, metric_, sector_len_, dim_, use_bsa_, support_calc_distance_by_id_));
         index_->load_from_separate_paths(pq_pivots_stream, disk_pq_compressed_vectors, tag_stream);
 
         auto graph_reader = reader_set.Get(DISKANN_GRAPH);
@@ -936,8 +946,8 @@ DiskANN::deserialize(const ReaderSet& reader_set) {
 
     disk_layout_reader_ = reader_set.Get(DISKANN_LAYOUT_FILE);
     reader_.reset(new LocalFileReader(batch_read_));
-    index_.reset(
-        new diskann::PQFlashIndex<float, int64_t>(reader_, metric_, sector_len_, dim_, use_bsa_));
+    index_.reset(new diskann::PQFlashIndex<float, int64_t>(
+        reader_, metric_, sector_len_, dim_, use_bsa_, support_calc_distance_by_id_));
     index_->load_from_separate_paths(pq_pivots_stream, disk_pq_compressed_vectors, tag_stream);
 
     auto graph_reader = reader_set.Get(DISKANN_GRAPH);
@@ -1052,7 +1062,7 @@ DiskANN::deserialize(std::istream& in_stream) {
 
         reader_.reset(new LocalFileReader(batch_read_));
         index_.reset(new diskann::PQFlashIndex<float, int64_t>(
-            reader_, metric_, sector_len_, dim_, use_bsa_));
+            reader_, metric_, sector_len_, dim_, use_bsa_, support_calc_distance_by_id_));
         index_->load_from_separate_paths(pq_pivots_stream, disk_pq_compressed_vectors, tag_stream);
 
         if (preload_) {
@@ -1083,11 +1093,8 @@ DiskANN::GetStats() const {
     j[STATSTIC_INDEX_NAME].SetString(INDEX_DISKANN);
     j[STATSTIC_MEMORY].SetInt(GetMemoryUsage());
 
-    {
-        std::lock_guard<std::mutex> lock(stats_mutex_);
-        for (auto& item : result_queues_) {
-            j[item.first].SetFloat(item.second.GetAvgResult());
-        }
+    for (auto& item : result_queues_) {
+        j[item.first].SetFloat(item.second.GetAvgResult());
     }
 
     return j.Dump(4);
@@ -1128,7 +1135,7 @@ template <typename Container>
 Binary
 serialize_to_binary(const Container& container) {
     using ValueType = typename Container::value_type;
-    size_t total_size = container.size() * sizeof(ValueType);
+    uint64_t total_size = container.size() * sizeof(ValueType);
     std::shared_ptr<int8_t[]> raw_data(new int8_t[total_size], std::default_delete<int8_t[]>());
 
     int8_t* data_ptr = raw_data.get();
@@ -1148,9 +1155,9 @@ deserialize_from_binary(const Binary& binary_data) {
 
     Container deserialized_container;
     const int8_t* data_ptr = binary_data.data.get();
-    size_t num_elements = binary_data.size / sizeof(ValueType);
+    uint64_t num_elements = binary_data.size / sizeof(ValueType);
 
-    for (size_t i = 0; i < num_elements; ++i) {
+    for (uint64_t i = 0; i < num_elements; ++i) {
         ValueType value;
         std::memcpy(&value, data_ptr, sizeof(ValueType));
         deserialized_container.insert(deserialized_container.end(), value);
@@ -1166,7 +1173,7 @@ serialize_vector_to_binary(std::vector<T> data) {
     if (data.empty()) {
         return {};
     }
-    size_t total_size = data.size() * sizeof(T);
+    uint64_t total_size = data.size() * sizeof(T);
     std::shared_ptr<int8_t[]> raw_data(new int8_t[total_size], std::default_delete<int8_t[]>());
     int8_t* data_ptr = raw_data.get();
     std::memcpy(data_ptr, data.data(), total_size);
@@ -1182,7 +1189,7 @@ deserialize_vector_from_binary(const Binary& binary_data) {
         return std::move(deserialized_container);
     }
     const int8_t* data_ptr = binary_data.data.get();
-    size_t num_elements = binary_data.size / sizeof(T);
+    uint64_t num_elements = binary_data.size / sizeof(T);
     deserialized_container.resize(num_elements);
     std::memcpy(deserialized_container.data(), data_ptr, num_elements * sizeof(T));
     return std::move(deserialized_container);
@@ -1241,8 +1248,8 @@ DiskANN::continue_build(const DatasetPtr& base, const BinarySet& binary_set) {
             }
             case PQ: {
                 SlowTaskTimer t(fmt::format("diskann build (pq)"));
-                auto failed_locs =
-                    deserialize_vector_from_binary<size_t>(after_binary_set.Get(BUILD_FAILED_LOC));
+                auto failed_locs = deserialize_vector_from_binary<uint64_t>(
+                    after_binary_set.Get(BUILD_FAILED_LOC));
                 diskann::generate_disk_quantized_data<float>(base->GetFloat32Vectors(),
                                                              base->GetNumElements(),
                                                              dim_,
@@ -1262,8 +1269,8 @@ DiskANN::continue_build(const DatasetPtr& base, const BinarySet& binary_set) {
             }
             case DISK_LAYOUT: {
                 SlowTaskTimer t(fmt::format("diskann build (disk layout)"));
-                auto failed_locs =
-                    deserialize_vector_from_binary<size_t>(after_binary_set.Get(BUILD_FAILED_LOC));
+                auto failed_locs = deserialize_vector_from_binary<uint64_t>(
+                    after_binary_set.Get(BUILD_FAILED_LOC));
                 convert_binary_to_stream(binary_set.Get(DISKANN_GRAPH), graph_stream_);
                 diskann::create_disk_layout<float>(base->GetFloat32Vectors(),
                                                    base->GetNumElements(),
@@ -1320,7 +1327,7 @@ DiskANN::build_partial_graph(const DatasetPtr& base,
         auto index_build_params = diskann::IndexWriteParametersBuilder(L_, R_)
                                       .with_num_threads(Options::Instance().num_threads_building())
                                       .build();
-        std::vector<size_t> failed_locs =
+        std::vector<uint64_t> failed_locs =
             build_index_->build(vectors,
                                 dim_,
                                 index_build_params,
@@ -1332,7 +1339,7 @@ DiskANN::build_partial_graph(const DatasetPtr& base,
         build_index_->save(graph_stream_, tag_stream_);
         after_binary_set.Set(BUILD_NODES,
                              serialize_to_binary<std::unordered_set<uint32_t>>(builded_nodes));
-        after_binary_set.Set(BUILD_FAILED_LOC, serialize_vector_to_binary<size_t>(failed_locs));
+        after_binary_set.Set(BUILD_FAILED_LOC, serialize_vector_to_binary<uint64_t>(failed_locs));
         build_index_.reset();
     }
     after_binary_set.Set(DISKANN_GRAPH, convert_stream_to_binary(graph_stream_));
@@ -1344,8 +1351,8 @@ tl::expected<void, Error>
 DiskANN::load_disk_index(const BinarySet& binary_set) {
     disk_layout_reader_ = std::make_shared<LocalMemoryReader>(disk_layout_stream_);
     reader_.reset(new LocalFileReader(batch_read_));
-    index_.reset(
-        new diskann::PQFlashIndex<float, int64_t>(reader_, metric_, sector_len_, dim_, use_bsa_));
+    index_.reset(new diskann::PQFlashIndex<float, int64_t>(
+        reader_, metric_, sector_len_, dim_, use_bsa_, support_calc_distance_by_id_));
 
     convert_binary_to_stream(binary_set.Get(DISKANN_COMPRESSED_VECTOR),
                              disk_pq_compressed_vectors_);
@@ -1390,6 +1397,30 @@ DiskANN::init_feature_list() {
                                       IndexFeature::SUPPORT_DESERIALIZE_READER_SET,
                                       IndexFeature::SUPPORT_SERIALIZE_BINARY_SET,
                                       IndexFeature::SUPPORT_SERIALIZE_FILE});
+    // calculate distance by id
+    this->feature_list_->SetFeatures({
+        SUPPORT_CAL_DISTANCE_BY_ID,
+    });
+}
+
+DatasetPtr
+DiskANN::cal_distance_by_id(const float* query,
+                            const int64_t* ids,
+                            int64_t count,
+                            bool calculate_precise_distance) const {
+    auto dataset = Dataset::Make();
+    auto* dists = new float[count];
+    dataset->NumElements(count)->Distances(dists)->Owner(true);
+    this->index_->cal_distance_by_ids(query, ids, count, dists, calculate_precise_distance);
+    return dataset;
+}
+float
+DiskANN::calc_distance_by_id(const float* vector,
+                             int64_t id,
+                             bool calculate_precise_distance) const {
+    float dist;
+    this->index_->cal_distance_by_ids(vector, &id, 1, &dist, calculate_precise_distance);
+    return dist;
 }
 
 }  // namespace vsag

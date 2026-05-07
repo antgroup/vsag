@@ -25,6 +25,7 @@
 #include "inner_index_interface.h"
 #include "ivf_parameter.h"
 #include "ivf_partition/ivf_partition_strategy.h"
+#include "query_context.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "typing.h"
@@ -48,7 +49,7 @@ public:
     ~IVF() override = default;
 
     std::vector<int64_t>
-    Add(const DatasetPtr& base) override;
+    Add(const DatasetPtr& base, AddMode mode = AddMode::DEFAULT) override;
 
     std::string
     AnalyzeIndexBySearch(const vsag::SearchRequest& request) override;
@@ -57,10 +58,15 @@ public:
     Build(const DatasetPtr& base) override;
 
     DatasetPtr
-    CalDistanceById(const float* query, const int64_t* ids, int64_t count) const override;
+    CalDistanceById(const float* query,
+                    const int64_t* ids,
+                    int64_t count,
+                    bool calculate_precise_distance = true) const override;
 
     float
-    CalcDistanceById(const float* query, int64_t id) const override;
+    CalcDistanceById(const float* query,
+                     int64_t id,
+                     bool calculate_precise_distance = true) const override;
 
     void
     Deserialize(StreamReader& reader) override;
@@ -92,6 +98,11 @@ public:
     [[nodiscard]] int64_t
     GetNumElements() const override;
 
+    [[nodiscard]] int64_t
+    GetNumberRemoved() const override {
+        return this->delete_count_;
+    }
+
     void
     GetVectorByInnerId(InnerIdType inner_id, float* data) const override;
 
@@ -117,6 +128,9 @@ public:
                 const FilterPtr& filter,
                 int64_t limited_size = -1) const override;
 
+    uint32_t
+    Remove(const std::vector<int64_t>& ids, RemoveMode mode = RemoveMode::MARK_REMOVE) override;
+
     [[nodiscard]] DatasetPtr
     SearchWithRequest(const SearchRequest& request) const override;
 
@@ -134,20 +148,23 @@ public:
                     const AttributeSet& new_attrs,
                     const AttributeSet& origin_attrs) override;
 
+    [[nodiscard]] int64_t
+    GetMemoryUsage() const override;
+
 private:
     InnerSearchParam
     create_search_param(const std::string& parameters, const FilterPtr& filter) const;
 
     template <InnerSearchMode mode = KNN_SEARCH>
     DistHeapPtr
-    search(const DatasetPtr& query, const InnerSearchParam& param, Statistics& stats) const;
+    search(const DatasetPtr& query, const InnerSearchParam& param, QueryContext& ctx) const;
 
     DatasetPtr
     reorder(int64_t topk,
             DistHeapPtr& input,
             const float* query,
             const InnerSearchParam& param,
-            Statistics& stats) const;
+            QueryContext& ctx) const;
 
     void
     merge_one_unit(const MergeUnit& unit);
@@ -161,6 +178,9 @@ private:
     std::pair<BucketIdType, InnerIdType>
     get_location(InnerIdType inner_id) const;
 
+    void
+    cal_memory_usage();
+
 private:
     BucketInterfacePtr bucket_{nullptr};
 
@@ -168,7 +188,6 @@ private:
     BucketIdType buckets_per_data_;
 
     int64_t total_elements_{0};
-    int64_t train_sample_count_{65536L};
     bool is_trained_{false};
 
     FlattenInterfacePtr reorder_codes_{nullptr};
@@ -179,5 +198,11 @@ private:
     Vector<uint64_t> location_map_;
 
     static const uint64_t LOCATION_SPLIT_BIT = 32;
+
+    std::atomic<int64_t> delete_count_{0};
+
+    // last_cal_memory_element_ is used to avoid cal memory usage too frequently
+    int64_t last_cal_memory_element_{0};
+    int64_t cal_memory_element_interval_{1024L};
 };
 }  // namespace vsag

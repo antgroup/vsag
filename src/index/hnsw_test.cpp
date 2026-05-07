@@ -15,18 +15,19 @@
 
 #include "hnsw.h"
 
-#include <catch2/catch_test_macros.hpp>
+#include <cstdlib>
 #include <memory>
+#include <new>
 #include <nlohmann/json.hpp>
 #include <vector>
 
 #include "data_type.h"
 #include "datacell/graph_datacell_parameter.h"
-#include "fixtures.h"
 #include "impl/logger/logger.h"
 #include "io/memory_io_parameter.h"
 #include "quantization/fp32_quantizer_parameter.h"
 #include "storage/serialization.h"
+#include "unittest.h"
 #include "vsag/bitset.h"
 #include "vsag/errors.h"
 #include "vsag/options.h"
@@ -195,6 +196,93 @@ TEST_CASE("knn_search", "[ut][hnsw]") {
     }
 }
 
+TEST_CASE("iterator filter init allocation failure", "[ut][hnsw]") {
+    logger::set_level(logger::level::debug);
+
+    class FailingAllocator : public Allocator {
+    public:
+        std::string
+        Name() override {
+            return "failing-allocator";
+        }
+
+        void*
+        Allocate(uint64_t size) override {
+            if (++allocate_count_ == fail_on_allocate_) {
+                throw std::bad_alloc();
+            }
+            auto* ptr = std::malloc(size);
+            if (ptr == nullptr) {
+                throw std::bad_alloc();
+            }
+            return ptr;
+        }
+
+        void
+        Deallocate(void* p) override {
+            std::free(p);
+        }
+
+        void*
+        Reallocate(void* p, uint64_t size) override {
+            if (++reallocate_count_ == fail_on_reallocate_) {
+                throw std::bad_alloc();
+            }
+            auto* ptr = std::realloc(p, size);
+            if (ptr == nullptr) {
+                throw std::bad_alloc();
+            }
+            return ptr;
+        }
+
+        uint64_t fail_on_allocate_{std::numeric_limits<uint64_t>::max()};
+        uint64_t fail_on_reallocate_{std::numeric_limits<uint64_t>::max()};
+        uint64_t allocate_count_{0};
+        uint64_t reallocate_count_{0};
+    };
+
+    const int64_t dim = 128;
+    const int64_t num_elements = 10;
+    IndexCommonParam common_param;
+    common_param.dim_ = dim;
+    common_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    common_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
+
+    HnswParameters hnsw_obj = parse_hnsw_params(common_param);
+    hnsw_obj.max_degree = 12;
+    hnsw_obj.ef_construction = 100;
+    auto index = std::make_shared<HNSW>(hnsw_obj, common_param);
+    index->InitMemorySpace();
+
+    auto [ids, vectors] = fixtures::generate_ids_and_vectors(num_elements, dim);
+
+    auto dataset = Dataset::Make();
+    dataset->Dim(dim)
+        ->NumElements(num_elements)
+        ->Ids(ids.data())
+        ->Float32Vectors(vectors.data())
+        ->Owner(false);
+    REQUIRE(index->Build(dataset).has_value());
+
+    auto query = Dataset::Make();
+    query->NumElements(1)->Dim(dim)->Float32Vectors(vectors.data())->Owner(false);
+
+    JsonType params;
+    params["hnsw"]["ef_search"].SetInt(100);
+    auto search_parameters = params.Dump();
+
+    FailingAllocator allocator;
+    allocator.fail_on_allocate_ = 1;
+    IteratorContext* iter_ctx = nullptr;
+    SearchParam search_param(true, search_parameters, nullptr, &allocator, iter_ctx, false);
+
+    auto result = index->KnnSearch(query, 10, search_param);
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(result.error().type == ErrorType::NO_ENOUGH_MEMORY);
+    REQUIRE(search_param.iter_ctx == nullptr);
+}
+
 TEST_CASE("range_search", "[ut][hnsw]") {
     logger::set_level(logger::level::debug);
 
@@ -323,7 +411,7 @@ TEST_CASE("serialize empty index", "[ut][hnsw]") {
         REQUIRE(result.has_value());
         out_stream.close();
         std::fstream in_stream(dir.path + "empty_index.bin", std::ios::in | std::ios::binary);
-        IOStreamReader reader(in_stream);
+        vsag::IOStreamReader reader(in_stream);
         auto footer = Footer::Parse(reader);
         REQUIRE(footer->GetMetadata()->EmptyIndex());
     }
@@ -384,72 +472,6 @@ TEST_CASE("deserialize on not empty index", "[ut][hnsw]") {
         REQUIRE(voidresult.error().type == ErrorType::INDEX_NOT_EMPTY);
         in_stream.close();
     }
-}
-
-TEST_CASE("static hnsw", "[ut][hnsw]") {
-    logger::set_level(logger::level::debug);
-
-    int64_t dim = 128;
-    IndexCommonParam common_param;
-    common_param.dim_ = dim;
-    common_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
-    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
-    common_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
-
-    HnswParameters hnsw_obj = parse_hnsw_params(common_param);
-    hnsw_obj.max_degree = 12;
-    hnsw_obj.ef_construction = 100;
-    hnsw_obj.use_static = true;
-    auto index = std::make_shared<HNSW>(hnsw_obj, common_param);
-    index->InitMemorySpace();
-
-    const int64_t num_elements = 10;
-    auto [ids, vectors] = fixtures::generate_ids_and_vectors(num_elements, dim);
-
-    auto dataset = Dataset::Make();
-    dataset->Dim(dim)
-        ->NumElements(9)
-        ->Ids(ids.data())
-        ->Float32Vectors(vectors.data())
-        ->Owner(false);
-    auto result = index->Build(dataset);
-    REQUIRE(result.has_value());
-
-    auto one_vector = Dataset::Make();
-    one_vector->Dim(dim)
-        ->NumElements(1)
-        ->Ids(ids.data() + 9)
-        ->Float32Vectors(vectors.data() + 9 * dim)
-        ->Owner(false);
-    result = index->Add(one_vector);
-    REQUIRE_FALSE(result.has_value());
-    REQUIRE(result.error().type == ErrorType::UNSUPPORTED_INDEX_OPERATION);
-
-    JsonType params;
-    params["hnsw"]["ef_search"].SetInt(100);
-
-    auto knn_result = index->KnnSearch(one_vector, 1, params.Dump());
-    REQUIRE(knn_result.has_value());
-
-    auto range_result = index->RangeSearch(one_vector, 1, params.Dump());
-    REQUIRE_FALSE(range_result.has_value());
-    REQUIRE(range_result.error().type == ErrorType::UNSUPPORTED_INDEX_OPERATION);
-
-    SECTION("incorrect dim") {
-        IndexCommonParam incorrect_common_param;
-        incorrect_common_param.dim_ = 127;
-        incorrect_common_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
-        incorrect_common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
-        HnswParameters incorrect_hnsw_obj = parse_hnsw_params(incorrect_common_param);
-        incorrect_hnsw_obj.use_static = true;
-        incorrect_hnsw_obj.max_degree = 12;
-        incorrect_hnsw_obj.ef_construction = 100;
-        REQUIRE_THROWS(std::make_shared<HNSW>(incorrect_hnsw_obj, incorrect_common_param));
-    }
-
-    auto remove_result = index->Remove(ids[0]);
-    REQUIRE_FALSE(remove_result.has_value());
-    REQUIRE(remove_result.error().type == ErrorType::UNSUPPORTED_INDEX_OPERATION);
 }
 
 TEST_CASE("hnsw add vector with duplicated id", "[ut][hnsw]") {
@@ -876,17 +898,6 @@ TEST_CASE("get distance by label", "[ut][hnsw]") {
         REQUIRE_THROWS(alg_hnsw->getDistanceByLabel(-1, base_vectors.data()));
         delete alg_hnsw;
     }
-
-    SECTION("static hnsw test") {
-        DefaultAllocator allocator;
-        auto* alg_hnsw_static = new hnswlib::StaticHierarchicalNSW(&space, 100, &allocator);
-        alg_hnsw_static->init_memory_space();
-        alg_hnsw_static->addPoint(base_vectors.data(), 0);
-        fixtures::dist_t distance = alg_hnsw_static->getDistanceByLabel(0, base_vectors.data());
-        REQUIRE(distance == 0);
-        REQUIRE_THROWS(alg_hnsw_static->getDistanceByLabel(-1, base_vectors.data()));
-        delete alg_hnsw_static;
-    }
 }
 
 TEST_CASE("get min and max id", "[ut][hnsw]") {
@@ -916,21 +927,6 @@ TEST_CASE("get min and max id", "[ut][hnsw]") {
         REQUIRE(max_id == 5);
         delete alg_hnsw;
     }
-
-    SECTION("static hnsw test") {
-        DefaultAllocator allocator;
-        auto* alg_hnsw_static = new hnswlib::StaticHierarchicalNSW(&space, 100, &allocator);
-        alg_hnsw_static->init_memory_space();
-        alg_hnsw_static->addPoint(base_vectors.data(), 0);
-        alg_hnsw_static->addPoint(base_vectors.data(), 5);
-        auto get_min_max_res = alg_hnsw_static->getMinAndMaxId();
-        int64_t min_id = get_min_max_res.first;
-        int64_t max_id = get_min_max_res.second;
-
-        REQUIRE(min_id == 0);
-        REQUIRE(max_id == 5);
-        delete alg_hnsw_static;
-    }
 }
 
 TEST_CASE("get data by label", "[ut][hnsw]") {
@@ -949,37 +945,18 @@ TEST_CASE("get data by label", "[ut][hnsw]") {
     SECTION("hnsw test") {
         DefaultAllocator allocator;
         auto* alg_hnsw = new hnswlib::HierarchicalNSW(&space, 100, &allocator);
-        std::shared_ptr<int8_t[]> base_data(new int8_t[dim * sizeof(float)]);
+        std::vector<int8_t> base_data(dim * sizeof(float));
         alg_hnsw->init_memory_space();
         alg_hnsw->addPoint(base_vectors.data(), 0);
         fixtures::dist_t distance = alg_hnsw->getDistanceByLabel(0, alg_hnsw->getDataByLabel(0));
 
-        alg_hnsw->copyDataByLabel(0, base_data.get());
-        fixtures::dist_t distance_validate = alg_hnsw->getDistanceByLabel(0, base_data.get());
+        alg_hnsw->copyDataByLabel(0, base_data.data());
+        fixtures::dist_t distance_validate = alg_hnsw->getDistanceByLabel(0, base_data.data());
 
         REQUIRE(distance == 0);
         REQUIRE(distance == distance_validate);
         REQUIRE_THROWS(alg_hnsw->getDistanceByLabel(-1, base_vectors.data()));
         delete alg_hnsw;
-    }
-
-    SECTION("static hnsw test") {
-        DefaultAllocator allocator;
-        auto* alg_hnsw_static = new hnswlib::StaticHierarchicalNSW(&space, 100, &allocator);
-        std::shared_ptr<int8_t[]> base_data(new int8_t[dim * sizeof(float)]);
-        alg_hnsw_static->init_memory_space();
-        alg_hnsw_static->addPoint(base_vectors.data(), 0);
-        fixtures::dist_t distance =
-            alg_hnsw_static->getDistanceByLabel(0, alg_hnsw_static->getDataByLabel(0));
-
-        alg_hnsw_static->copyDataByLabel(0, base_data.get());
-        fixtures::dist_t distance_validate =
-            alg_hnsw_static->getDistanceByLabel(0, base_data.get());
-
-        REQUIRE(distance == 0);
-        REQUIRE(distance == distance_validate);
-        REQUIRE_THROWS(alg_hnsw_static->getDistanceByLabel(-1, base_vectors.data()));
-        delete alg_hnsw_static;
     }
 }
 
@@ -1038,7 +1015,7 @@ TEST_CASE("extract/set data and graph", "[ut][hnsw]") {
         ->Ids(ids.data() + num_elements / 2)
         ->Float32Vectors(vectors.data() + num_elements / 2 * dim)
         ->Owner(false);
-    another_index->Add(dataset);
+    another_index->Add(dataset, AddMode::DEFAULT);
 
     JsonType search_parameters;
 
@@ -1080,7 +1057,8 @@ TEST_CASE("update mark-deleted vector", "[ut][hnsw]") {
     for (auto i = 0; i < delete_size; i++) {
         REQUIRE(alg_hnsw->getCurrentElementCount() == base_size);
         REQUIRE(alg_hnsw->getDeletedCount() == i);
-        REQUIRE(alg_hnsw->getDeletedElements().size() == i);
+        const auto& deleted_elements = alg_hnsw->getDeletedElements();
+        REQUIRE(deleted_elements.size() == i);
 
         alg_hnsw->markDelete(base_ids[i]);
 
@@ -1094,9 +1072,10 @@ TEST_CASE("update mark-deleted vector", "[ut][hnsw]") {
         bool is_deleted = alg_hnsw->isMarkedDeleted(old_label);
         alg_hnsw->updateLabel(old_label, new_label);
         if (is_deleted) {
-            REQUIRE(alg_hnsw->getDeletedElements().count(old_label) == 0);
-            REQUIRE(alg_hnsw->getDeletedElements().count(new_label) != 0);
-            REQUIRE(alg_hnsw->getDeletedElements()[new_label] == old_label);
+            const auto& deleted_elements = alg_hnsw->getDeletedElements();
+            REQUIRE(deleted_elements.count(old_label) == 0);
+            REQUIRE(deleted_elements.count(new_label) != 0);
+            REQUIRE(deleted_elements.at(new_label) == old_label);
         } else {
             REQUIRE(not alg_hnsw->isValidLabel(old_label));
             REQUIRE(alg_hnsw->isValidLabel(new_label));

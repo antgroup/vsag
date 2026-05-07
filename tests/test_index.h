@@ -26,9 +26,8 @@
 #include <unordered_set>
 #include <utility>
 
-#include "fixtures/fixtures.h"
-#include "fixtures/random_allocator.h"
-#include "fixtures/test_dataset.h"
+#include "allocator/random_allocator.h"
+#include "functest.h"
 #include "vsag/dataset.h"
 #include "vsag/errors.h"
 #include "vsag/logger.h"
@@ -71,6 +70,12 @@ public:
                  bool expected_success = true);
 
     static void
+    TestMarkRemoveIndex(const IndexPtr& index,
+                        const TestDatasetPtr& dataset,
+                        const std::string& search_param,
+                        bool expected_success = true);
+
+    static void
     TestRemoveIndex(const IndexPtr& index,
                     const TestDatasetPtr& dataset,
                     bool expected_success = true);
@@ -91,6 +96,11 @@ public:
                      const TestDatasetPtr& dataset,
                      const std::string& search_param,
                      bool expected_success = true);
+
+    static void
+    TestUpdateVectorSparse(const IndexPtr& index,
+                           const TestDatasetPtr& dataset,
+                           bool expected_success = true);
 
     static void
     TestContinueAdd(const IndexPtr& index,
@@ -252,6 +262,11 @@ public:
 
     static void
     TestEstimateMemory(const std::string& index_name,
+                       const std::string& build_param,
+                       const TestDatasetPtr& dataset);
+
+    static void
+    TestGetMemoryUsage(const std::string& index_name,
                        const std::string& build_param,
                        const TestDatasetPtr& dataset);
 

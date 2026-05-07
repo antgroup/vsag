@@ -108,6 +108,11 @@ public:
     void
     SaveGraph(GraphInterfacePtr& graph_storage);
 
+    void
+    SetMaxDegree(int32_t max_degree) {
+        odescent_param_->max_degree = max_degree;
+    }
+
 private:
     inline float
     get_distance(uint32_t loc1, uint32_t loc2) {
@@ -149,7 +154,7 @@ private:
     void
     parallelize_task(const std::function<void(int64_t i, int64_t end)>& task);
 
-    size_t dim_;
+    uint64_t dim_;
     int64_t data_num_;
     Vector<Linklist> graph_;
     Vector<std::mutex> points_lock_;

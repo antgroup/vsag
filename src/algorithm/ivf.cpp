@@ -22,6 +22,7 @@
 #include "algorithm/inner_index_interface.h"
 #include "attr/argparse.h"
 #include "attr/executor/executor.h"
+#include "datacell/flatten_interface.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/inner_search_param.h"
 #include "impl/reorder/flatten_reorder.h"
@@ -31,10 +32,12 @@
 #include "inner_string_params.h"
 #include "ivf_partition/gno_imi_partition.h"
 #include "ivf_partition/ivf_nearest_partition.h"
+#include "query_context.h"
 #include "storage/serialization.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "utils/util_functions.h"
+#include "vsag_exception.h"
 
 namespace vsag {
 static constexpr const char* IVF_PARAMS_TEMPLATE =
@@ -215,9 +218,9 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
             },
         },
         {
-            IVF_TRAIN_SAMPLE_COUNT_KEY,
+            TRAIN_SAMPLE_COUNT_KEY,
             {
-                IVF_TRAIN_SAMPLE_COUNT_KEY,
+                TRAIN_SAMPLE_COUNT_KEY,
             },
         },
     };
@@ -240,7 +243,6 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
 IVF::IVF(const IVFParameterPtr& param, const IndexCommonParam& common_param)
     : InnerIndexInterface(param, common_param),
       buckets_per_data_(param->buckets_per_data),
-      train_sample_count_(param->train_sample_count),
       location_map_(common_param.allocator_.get()) {
     this->bucket_ = BucketInterface::MakeInstance(param->bucket_param, common_param);
     if (this->bucket_ == nullptr) {
@@ -335,6 +337,7 @@ IVF::InitFeatures() {
 
     this->index_feature_list_->SetFeatures({IndexFeature::SUPPORT_CLONE,
                                             IndexFeature::SUPPORT_EXPORT_MODEL,
+                                            IndexFeature::SUPPORT_GET_MEMORY_USAGE,
                                             IndexFeature::SUPPORT_MERGE_INDEX});
 
     if (this->bucket_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_PQFS) {
@@ -373,7 +376,7 @@ IVF::Train(const DatasetPtr& data) {
 }
 
 std::vector<int64_t>
-IVF::Add(const DatasetPtr& base) {
+IVF::Add(const DatasetPtr& base, AddMode mode) {
     // TODO(LHT): duplicate
     if (not partition_strategy_->is_trained_) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "ivf index add without train error");
@@ -385,11 +388,11 @@ IVF::Add(const DatasetPtr& base) {
     const auto* attr_sets = base->GetAttributeSets();
     const auto* extra_info = base->GetExtraInfos();
     const auto extra_info_size = base->GetExtraInfoSize();
-    Statistics discard_stats;
     auto buckets =
-        partition_strategy_->ClassifyDatas(vectors, num_element, buckets_per_data_, discard_stats);
+        partition_strategy_->ClassifyDatas(vectors, num_element, buckets_per_data_, nullptr);
 
     int64_t current_num;
+    bool need_cal_memory_usage = false;
     {
         std::lock_guard lock(label_lookup_mutex_);
         if (use_reorder_) {
@@ -401,6 +404,10 @@ IVF::Add(const DatasetPtr& base) {
         }
         current_num = this->total_elements_;
         this->total_elements_ += num_element;
+        if (this->total_elements_ - last_cal_memory_element_ >= cal_memory_element_interval_) {
+            need_cal_memory_usage = true;
+            last_cal_memory_element_ = this->total_elements_;
+        }
         location_map_.resize(this->total_elements_);
     }
 
@@ -443,6 +450,9 @@ IVF::Add(const DatasetPtr& base) {
         }
     }
     this->bucket_->Package();
+    if (need_cal_memory_usage) {
+        this->cal_memory_usage();
+    }
     return {};
 }
 
@@ -451,16 +461,21 @@ IVF::KnnSearch(const DatasetPtr& query,
                int64_t k,
                const std::string& parameters,
                const FilterPtr& filter) const {
+    SearchStatistics stats;
+    QueryContext ctx{.stats = &stats};
+
     auto param = this->create_search_param(parameters, filter);
     param.search_mode = KNN_SEARCH;
     param.topk = k;
     if (use_reorder_) {
+        CHECK_ARGUMENT(
+            param.factor > 0.0F,
+            fmt::format("factor must be positive when use_reorder is true, got {}", param.factor));
         param.topk = static_cast<int64_t>(param.factor * static_cast<float>(k));
     }
-    Statistics stats;
-    auto search_result = this->search<KNN_SEARCH>(query, param, stats);
+    auto search_result = this->search<KNN_SEARCH>(query, param, ctx);
     if (use_reorder_) {
-        auto dataset_results = reorder(k, search_result, query->GetFloat32Vectors(), param, stats);
+        auto dataset_results = reorder(k, search_result, query->GetFloat32Vectors(), param, ctx);
         dataset_results->Statistics(stats.Dump());
         return std::move(dataset_results);
     }
@@ -481,19 +496,24 @@ IVF::RangeSearch(const DatasetPtr& query,
                  const std::string& parameters,
                  const FilterPtr& filter,
                  int64_t limited_size) const {
+    SearchStatistics stats;
+    QueryContext ctx{.stats = &stats};
+
     auto param = this->create_search_param(parameters, filter);
     param.search_mode = RANGE_SEARCH;
     param.radius = radius;
     param.range_search_limit_size = static_cast<int>(limited_size);
     if (use_reorder_ and limited_size > 0) {
+        CHECK_ARGUMENT(
+            param.factor > 0.0F,
+            fmt::format("factor must be positive when use_reorder is true, got {}", param.factor));
         param.range_search_limit_size =
             static_cast<int>(param.factor * static_cast<float>(limited_size));
     }
-    Statistics stats;
-    auto search_result = this->search<RANGE_SEARCH>(query, param, stats);
+    auto search_result = this->search<RANGE_SEARCH>(query, param, ctx);
     if (use_reorder_) {
         int64_t k = (limited_size > 0) ? limited_size : static_cast<int64_t>(search_result->Size());
-        return reorder(k, search_result, query->GetFloat32Vectors(), param, stats);
+        return reorder(k, search_result, query->GetFloat32Vectors(), param, ctx);
     }
     auto count = static_cast<const int64_t>(search_result->Size());
     auto [dataset_results, dists, labels] = create_fast_dataset(count, allocator_);
@@ -509,7 +529,7 @@ IVF::RangeSearch(const DatasetPtr& query,
 
 int64_t
 IVF::GetNumElements() const {
-    return this->total_elements_;
+    return this->total_elements_ - this->delete_count_;
 }
 
 void
@@ -529,6 +549,17 @@ IVF::get_location(InnerIdType inner_id) const {
     auto bucket_id = static_cast<BucketIdType>(loc >> LOCATION_SPLIT_BIT);
     auto offset_id = static_cast<InnerIdType>(loc & mask);
     return {bucket_id, offset_id};
+}
+
+uint32_t
+IVF::Remove(const std::vector<int64_t>& ids, RemoveMode mode) {
+    uint32_t delete_count = 0;
+    if (mode == RemoveMode::MARK_REMOVE) {
+        std::scoped_lock label_lock(this->label_lookup_mutex_);
+        delete_count = this->label_table_->MarkRemove(ids);
+        delete_count_ += delete_count;
+    }
+    return delete_count;
 }
 
 void
@@ -667,16 +698,21 @@ IVF::Deserialize(StreamReader& reader) {
         }
     }
     this->fill_location_map();
-
-    // post serialize procedure
+    this->cal_memory_usage();
 }
 
 InnerSearchParam
 IVF::create_search_param(const std::string& parameters, const FilterPtr& filter) const {
     InnerSearchParam param;
-    std::shared_ptr<InnerIdWrapperFilter> ft = nullptr;
+    auto combined_filter = std::make_shared<CombinedFilter>();
+    combined_filter->AppendFilter(this->label_table_->GetDeletedIdsFilter());
     if (filter != nullptr) {
-        ft = std::make_shared<InnerIdWrapperFilter>(filter, *this->label_table_);
+        combined_filter->AppendFilter(
+            std::make_shared<InnerIdWrapperFilter>(filter, *this->label_table_));
+    }
+    FilterPtr ft = nullptr;
+    if (not combined_filter->IsEmpty()) {
+        ft = combined_filter;
     }
     param.is_inner_id_allowed = ft;
     auto search_param = IVFSearchParameters::FromJson(parameters);
@@ -697,9 +733,9 @@ IVF::reorder(int64_t topk,
              DistHeapPtr& input,
              const float* query,
              const InnerSearchParam& param,
-             Statistics& stats) const {
+             QueryContext& ctx) const {
     auto [dataset_results, dists, labels] = create_fast_dataset(topk, allocator_);
-    auto reorder_heap = reorder_->Reorder(input, query, topk, allocator_);
+    auto reorder_heap = reorder_->Reorder(input, query, topk, ctx);
     auto size = static_cast<int64_t>(reorder_heap->Size());
     for (int64_t j = size - 1; j >= 0; --j) {
         dists[j] = reorder_heap->Top().first;
@@ -723,11 +759,11 @@ IVF::ExportModel(const IndexCommonParam& param) const {
 
 template <InnerSearchMode mode>
 DistHeapPtr
-IVF::search(const DatasetPtr& query, const InnerSearchParam& param, Statistics& stats) const {
+IVF::search(const DatasetPtr& query, const InnerSearchParam& param, QueryContext& ctx) const {
     const auto* query_data = query->GetFloat32Vectors();
     Vector<float> normalize_data(dim_, allocator_);
     auto candidate_buckets =
-        partition_strategy_->ClassifyDatasForSearch(query_data, 1, param, stats);
+        partition_strategy_->ClassifyDatasForSearch(query_data, 1, param, &ctx);
     auto computer = bucket_->FactoryComputer(query_data);
 
     auto cur_heap_top = std::numeric_limits<float>::max();
@@ -765,8 +801,9 @@ IVF::search(const DatasetPtr& query, const InnerSearchParam& param, Statistics& 
         Vector<float> dist(allocator_);
         uint64_t i = cur_bucket_num.fetch_add(1);
         for (; i < bucket_count; i = cur_bucket_num.fetch_add(1)) {
-            if (param.time_cost != nullptr and param.time_cost->CheckOvertime()) {
-                stats.is_timeout.store(true, std::memory_order_relaxed);
+            if (param.time_cost != nullptr and param.time_cost->CheckOvertime() and
+                ctx.stats != nullptr) {
+                ctx.stats->is_timeout.store(true, std::memory_order_relaxed);
                 break;
             }
             auto bucket_id = candidate_buckets[i];
@@ -907,20 +944,10 @@ IVF::check_merge_illegal(const vsag::MergeUnit& unit) const {
     IOStreamWriter writer1(ss1);
     cur_model->Serialize(writer1);
 
-    // std::ofstream of1("/tmp/vsag-f1.index", std::ios::binary | std::ios::out);
-    // IOStreamWriter os1(of1);
-    // cur_model->Serialize(os1);
-    // of1.close();
-
     cur_model.reset();
     auto other_model = other_ivf_index->ExportModel(index->GetCommonParam());
     IOStreamWriter writer2(ss2);
     other_model->Serialize(writer2);
-
-    // std::ofstream of2("/tmp/vsag-f2.index", std::ios::binary | std::ios::out);
-    // IOStreamWriter os2(of2);
-    // other_model->Serialize(os2);
-    // of2.close();
 
     other_model.reset();
 
@@ -933,10 +960,16 @@ IVF::check_merge_illegal(const vsag::MergeUnit& unit) const {
 
 DatasetPtr
 IVF::SearchWithRequest(const SearchRequest& request) const {
+    SearchStatistics stats;
+    QueryContext ctx{.alloc = request.search_allocator_, .stats = &stats};
+
     auto param = this->create_search_param(request.params_str_, request.filter_);
     param.search_mode = KNN_SEARCH;
     param.topk = request.topk_;
     if (use_reorder_) {
+        CHECK_ARGUMENT(
+            param.factor > 0.0F,
+            fmt::format("factor must be positive when use_reorder is true, got {}", param.factor));
         param.topk = static_cast<int64_t>(param.factor * static_cast<float>(request.topk_));
     }
     auto query = request.query_;
@@ -950,10 +983,9 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
             param.executors.emplace_back(executor);
         }
     }
-    Statistics stats;
-    auto search_result = this->search<KNN_SEARCH>(query, param, stats);
+    auto search_result = this->search<KNN_SEARCH>(query, param, ctx);
     if (use_reorder_) {
-        return reorder(request.topk_, search_result, query->GetFloat32Vectors(), param, stats);
+        return reorder(request.topk_, search_result, query->GetFloat32Vectors(), param, ctx);
     }
     auto count = static_cast<const int64_t>(search_result->Size());
     auto [dataset_results, dists, labels] = create_fast_dataset(count, allocator_);
@@ -991,12 +1023,15 @@ IVF::GetAttributeSetByInnerId(InnerIdType inner_id, AttributeSet* attr) const {
 }
 
 DatasetPtr
-IVF::CalDistanceById(const float* query, const int64_t* ids, int64_t count) const {
+IVF::CalDistanceById(const float* query,
+                     const int64_t* ids,
+                     int64_t count,
+                     bool calculate_precise_distance) const {
     auto result = Dataset::Make();
     result->Owner(true, allocator_);
-    auto* distances = (float*)allocator_->Allocate(sizeof(float) * count);
+    auto* distances = static_cast<float*>(allocator_->Allocate(sizeof(float) * count));
     result->Distances(distances);
-    if (this->use_reorder_) {
+    if (this->use_reorder_ && calculate_precise_distance) {
         auto computer = this->reorder_codes_->FactoryComputer(query);
         Vector<InnerIdType> inner_ids(count, allocator_);
         for (int64_t i = 0; i < count; ++i) {
@@ -1014,8 +1049,8 @@ IVF::CalDistanceById(const float* query, const int64_t* ids, int64_t count) cons
     return result;
 }
 float
-IVF::CalcDistanceById(const float* query, int64_t id) const {
-    if (this->use_reorder_) {
+IVF::CalcDistanceById(const float* query, int64_t id, bool calculate_precise_distance) const {
+    if (this->use_reorder_ && calculate_precise_distance) {
         float dist = 0.0F;
         auto computer = this->reorder_codes_->FactoryComputer(query);
         auto inner_id = this->label_table_->GetIdByLabel(id);
@@ -1036,10 +1071,10 @@ IVF::GetVectorByInnerId(InnerIdType inner_id, float* data) const {
 
 float
 calculate_percentile(const std::vector<float>& sorted_data, float percentile) {
-    size_t n = sorted_data.size();
+    uint64_t n = sorted_data.size();
     float index = percentile * static_cast<float>(n - 1);
-    auto floor_index = static_cast<size_t>(std::floor(index));
-    size_t ceil_index = floor_index + 1;
+    auto floor_index = static_cast<uint64_t>(std::floor(index));
+    uint64_t ceil_index = floor_index + 1;
 
     if (ceil_index >= n) {
         return sorted_data[floor_index];
@@ -1053,7 +1088,7 @@ JsonType
 get_data_stats(const Vector<float>& data) {
     JsonType json;
     if (data.empty()) {
-        throw std::invalid_argument("Vector cannot be empty.");
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "Vector cannot be empty.");
     }
 
     float sum = 0.0;
@@ -1127,6 +1162,36 @@ IVF::AnalyzeIndexBySearch(const SearchRequest& request) {
     // quantization error
     this->analyze_quantizer(stats, querys->GetFloat32Vectors(), num_elements, topk, param_str);
     return stats.Dump(4);
+}
+
+void
+IVF::cal_memory_usage() {
+    auto memory = sizeof(IVF);
+    memory += this->bucket_->GetMemoryUsage();
+    if (use_reorder_) {
+        memory += this->reorder_codes_->GetMemoryUsage();
+    }
+    if (this->extra_info_size_ > 0 and this->extra_infos_ != nullptr) {
+        memory += this->extra_infos_->GetMemoryUsage();
+    }
+    memory += this->label_table_->GetMemoryUsage();
+    memory += location_map_.size() * sizeof(uint64_t);
+    memory += partition_strategy_->GetMemoryUsage();
+    std::unique_lock lock(this->memory_usage_mutex_);
+    this->current_memory_usage_.store(static_cast<int64_t>(memory));
+}
+
+int64_t
+IVF::GetMemoryUsage() const {
+    int64_t memory = 0;
+    {
+        std::shared_lock lock(this->memory_usage_mutex_);
+        memory = this->current_memory_usage_.load();
+    }
+    if (this->attr_filter_index_ != nullptr) {
+        memory += this->attr_filter_index_->GetMemoryUsage();
+    }
+    return memory;
 }
 
 }  // namespace vsag

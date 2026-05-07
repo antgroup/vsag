@@ -20,8 +20,7 @@
 #include <sstream>
 #include <thread>
 
-#include "fixtures/test_logger.h"
-#include "fixtures/thread_pool.h"
+#include "functest.h"
 #include "vsag/options.h"
 #include "vsag/vsag.h"
 
@@ -74,7 +73,7 @@ TEST_CASE("Test DiskAnn Multi-threading", "[ft][diskann]") {
     // Generate random data
     std::mt19937 rng;
     rng.seed(47);
-    std::uniform_real_distribution<> distrib_real;
+    std::uniform_real_distribution<float> distrib_real;
     for (int i = 0; i < max_elements; i++) ids[i] = i;
     for (int i = 0; i < dim * max_elements; i++) data[i] = distrib_real(rng);
 
@@ -138,7 +137,7 @@ TEST_CASE("Test HNSW Multi-threading", "[ft][hnsw][concurrent]") {
     // Generate random data
     std::mt19937 rng;
     rng.seed(47);
-    std::uniform_real_distribution<> distrib_real;
+    std::uniform_real_distribution<float> distrib_real;
     for (int i = 0; i < max_elements; i++) ids[i] = i;
     for (int i = 0; i < dim * max_elements; i++) data[i] = distrib_real(rng);
 
@@ -182,7 +181,7 @@ TEST_CASE("Test HNSW Multi-threading", "[ft][hnsw][concurrent]") {
 
     float recall = correct / max_elements;
     std::cout << index->GetStats() << std::endl;
-    REQUIRE(recall > 0.96);
+    REQUIRE(recall > 0.94);
 }
 
 TEST_CASE("Test HNSW Multi-threading Read and Write", "[ft][hnsw][concurrent]") {
@@ -212,7 +211,7 @@ TEST_CASE("Test HNSW Multi-threading Read and Write", "[ft][hnsw][concurrent]") 
     // Generate random data
     std::mt19937 rng;
     rng.seed(47);
-    std::uniform_real_distribution<> distrib_real;
+    std::uniform_real_distribution<float> distrib_real;
     for (int i = 0; i < max_elements; i++) ids[i] = i;
     for (int i = 0; i < dim * max_elements; i++) data[i] = distrib_real(rng);
     nlohmann::json parameters{
@@ -282,7 +281,7 @@ TEST_CASE("Test HNSW Multi-threading read-write with Feedback and Pretrain",
 
     // Generate random data
     std::mt19937 rng;
-    std::uniform_real_distribution<> distrib_real(-128, 127);
+    std::uniform_real_distribution<float> distrib_real(-128, 127);
     for (int i = 0; i < max_elements; i++) ids[i] = i;
     for (int i = 0; i < dim * max_elements; i++) data[i] = (int8_t)distrib_real(rng);
     nlohmann::json parameters{

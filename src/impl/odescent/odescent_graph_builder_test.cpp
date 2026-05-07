@@ -15,19 +15,16 @@
 
 #include "odescent_graph_builder.h"
 
-#include <catch2/catch_test_macros.hpp>
-#include <catch2/generators/catch_generators.hpp>
 #include <filesystem>
 #include <set>
 
 #include "datacell/flatten_interface.h"
 #include "datacell/graph_interface.h"
-#include "fixtures.h"
 #include "impl/allocator/safe_allocator.h"
 #include "io/memory_io_parameter.h"
 #include "quantization/fp32_quantizer_parameter.h"
-
-size_t
+#include "unittest.h"
+uint64_t
 calculate_overlap(const vsag::Vector<uint32_t>& vec1, const vsag::Vector<uint32_t>& vec2, int K) {
     int size1 = std::min(K, static_cast<int>(vec1.size()));
     int size2 = std::min(K, static_cast<int>(vec2.size()));
@@ -52,7 +49,7 @@ calculate_overlap(const vsag::Vector<uint32_t>& vec1, const vsag::Vector<uint32_
 
 TEST_CASE("ODescent Build Test", "[ut][ODescent]") {
     auto num_vectors = GENERATE(2, 4, 11, 2000);
-    size_t dim = 128;
+    uint64_t dim = 128;
     int64_t max_degree = 32;
     auto partial_data = GENERATE(true, false);
     auto use_thread_pool = GENERATE(true);

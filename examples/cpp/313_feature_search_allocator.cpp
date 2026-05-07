@@ -22,13 +22,15 @@
 
 class ExampleAllocator : public vsag::Allocator {
 public:
+    ~ExampleAllocator() override = default;
+
     std::string
     Name() override {
         return "example-allocator";
     }
 
     void*
-    Allocate(size_t size) override {
+    Allocate(uint64_t size) override {
         vsag::Options::Instance().logger()->Debug("allocate " + std::to_string(size) + " bytes.");
         auto addr = (void*)malloc(size);
         sizes_[addr] = size;
@@ -37,8 +39,9 @@ public:
 
     void
     Deallocate(void* p) override {
-        if (sizes_.find(p) == sizes_.end())
+        if (sizes_.find(p) == sizes_.end()) {
             return;
+        }
         vsag::Options::Instance().logger()->Debug("deallocate " + std::to_string(sizes_[p]) +
                                                   " bytes.");
         sizes_.erase(p);
@@ -46,8 +49,12 @@ public:
     }
 
     void*
-    Reallocate(void* p, size_t size) override {
+    Reallocate(void* p, uint64_t size) override {
         vsag::Options::Instance().logger()->Debug("reallocate " + std::to_string(size) + " bytes.");
+        if (p == nullptr) {
+            sizes_[p] = size;
+            return Allocate(size);
+        }
         auto addr = (void*)realloc(p, size);
         sizes_.erase(p);
         sizes_[addr] = size;
@@ -55,7 +62,7 @@ public:
     }
 
 private:
-    std::unordered_map<void*, size_t> sizes_;
+    std::unordered_map<void*, uint64_t> sizes_;
 };
 
 int
@@ -63,6 +70,7 @@ main() {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::kINFO);
 
     ExampleAllocator allocator;
+
     vsag::Resource resource(&allocator, nullptr);
     vsag::Engine engine(&resource);
 
@@ -90,7 +98,7 @@ main() {
 
     std::mt19937 rng;
     rng.seed(47);
-    std::uniform_real_distribution<> distrib_real;
+    std::uniform_real_distribution<float> distrib_real;
     for (int64_t i = 0; i < num_vectors; ++i) {
         ids[i] = i;
     }
@@ -106,46 +114,40 @@ main() {
     index->Build(base);
 
     // search on the index
-    auto query_vector = new float[dim];  // memory will be released by query the dataset
+    std::vector<float> query_vector(dim);  // memory will be released by query the dataset
     for (int64_t i = 0; i < dim; ++i) {
         query_vector[i] = distrib_real(rng);
     }
 
     int64_t topk = 10;
     auto query = vsag::Dataset::Make();
-    query->NumElements(1)->Dim(dim)->Float32Vectors(query_vector)->Owner(true);
+    query->NumElements(1)->Dim(dim)->Float32Vectors(query_vector.data())->Owner(false);
 
     /******************* HNSW Search *****************/
     {
         nlohmann::json search_parameters = {
             {"hnsw", {{"ef_search", 100}, {"skip_ratio", 0.7f}}},
         };
-        int64_t topk = 10;
-        auto query = vsag::Dataset::Make();
-        query->NumElements(1)->Dim(dim)->Float32Vectors(query_vector)->Owner(true);
 
         std::string param_str = search_parameters.dump();
         vsag::SearchParam search_param(false, param_str, nullptr, &allocator);
         auto result = index->KnnSearch(query, topk, search_param).value();
 
         // print the results
+
         std::cout << "results: " << std::endl;
         for (int64_t i = 0; i < result->GetDim(); ++i) {
             std::cout << result->GetIds()[i] << ": " << result->GetDistances()[i] << std::endl;
         }
-
-        allocator.Deallocate((void*)result->GetIds());
-        allocator.Deallocate((void*)result->GetDistances());
     }
 
     /******************* HNSW Iterator Filter *****************/
     {
-        vsag::IteratorContext* iter_ctx = nullptr;
         nlohmann::json search_parameters = {
             {"hnsw", {{"ef_search", 100}, {"skip_ratio", 0.7f}}},
         };
         std::string param_str = search_parameters.dump();
-        vsag::SearchParam search_param(true, param_str, nullptr, &allocator, iter_ctx, false);
+        vsag::SearchParam search_param(true, param_str, nullptr, &allocator, nullptr, false);
 
         /* first search */
         {
@@ -156,9 +158,6 @@ main() {
             for (int64_t i = 0; i < result->GetDim(); ++i) {
                 std::cout << result->GetIds()[i] << ": " << result->GetDistances()[i] << std::endl;
             }
-
-            allocator.Deallocate((void*)result->GetIds());
-            allocator.Deallocate((void*)result->GetDistances());
         }
 
         /* last search */
@@ -171,10 +170,9 @@ main() {
             for (int64_t i = 0; i < result->GetDim(); ++i) {
                 std::cout << result->GetIds()[i] << ": " << result->GetDistances()[i] << std::endl;
             }
-
-            allocator.Deallocate((void*)result->GetIds());
-            allocator.Deallocate((void*)result->GetDistances());
         }
+
+        delete search_param.iter_ctx;
     }
 
     std::cout << "delete index" << std::endl;

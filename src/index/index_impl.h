@@ -70,10 +70,10 @@ public:
 
 public:
     tl::expected<std::vector<int64_t>, Error>
-    Add(const DatasetPtr& base) override {
+    Add(const DatasetPtr& base, AddMode mode = AddMode::DEFAULT) override {
         CHECK_IMMUTABLE_INDEX("add");
         CHECK_NONEMPTY_DATASET(base);
-        SAFE_CALL(return this->inner_index_->Add(base));
+        SAFE_CALL(return this->inner_index_->Add(base, mode));
     }
 
     std::string
@@ -88,24 +88,44 @@ public:
         SAFE_CALL(return this->inner_index_->Build(base));
     }
 
-    tl::expected<float, Error>
-    CalcDistanceById(const DatasetPtr& vector, int64_t id) const override {
-        SAFE_CALL(return this->inner_index_->CalcDistanceById(vector, id));
+    tl::expected<bool, Error>
+    Tune(const std::string& parameters, bool disable_future_tuning = false) override {
+        CHECK_IMMUTABLE_INDEX("tune");
+        SAFE_CALL(return this->inner_index_->Tune(parameters, disable_future_tuning));
     }
 
     tl::expected<float, Error>
-    CalcDistanceById(const float* vector, int64_t id) const override {
-        SAFE_CALL(return this->inner_index_->CalcDistanceById(vector, id));
+    CalcDistanceById(const DatasetPtr& vector,
+                     int64_t id,
+                     bool calculate_precise_distance = true) const override {
+        SAFE_CALL(
+            return this->inner_index_->CalcDistanceById(vector, id, calculate_precise_distance));
+    }
+
+    tl::expected<float, Error>
+    CalcDistanceById(const float* vector,
+                     int64_t id,
+                     bool calculate_precise_distance = true) const override {
+        SAFE_CALL(
+            return this->inner_index_->CalcDistanceById(vector, id, calculate_precise_distance));
     }
 
     tl::expected<DatasetPtr, Error>
-    CalDistanceById(const float* query, const int64_t* ids, int64_t count) const override {
-        SAFE_CALL(return this->inner_index_->CalDistanceById(query, ids, count));
+    CalDistanceById(const float* query,
+                    const int64_t* ids,
+                    int64_t count,
+                    bool calculate_precise_distance = true) const override {
+        SAFE_CALL(return this->inner_index_->CalDistanceById(
+            query, ids, count, calculate_precise_distance));
     }
 
     tl::expected<DatasetPtr, Error>
-    CalDistanceById(const DatasetPtr& query, const int64_t* ids, int64_t count) const override {
-        SAFE_CALL(return this->inner_index_->CalDistanceById(query, ids, count));
+    CalDistanceById(const DatasetPtr& query,
+                    const int64_t* ids,
+                    int64_t count,
+                    bool calculate_precise_distance = true) const override {
+        SAFE_CALL(return this->inner_index_->CalDistanceById(
+            query, ids, count, calculate_precise_distance));
     }
 
     [[nodiscard]] bool
@@ -233,13 +253,15 @@ public:
         return this->inner_index_->GetNumberRemoved();
     }
 
-    virtual tl::expected<DatasetPtr, Error>
-    GetRawVectorByIds(const int64_t* ids, int64_t count) const override {
+    tl::expected<DatasetPtr, Error>
+    GetRawVectorByIds(const int64_t* ids,
+                      int64_t count,
+                      Allocator* specified_allocator) const override {
         if (not CheckFeature(IndexFeature::SUPPORT_GET_RAW_VECTOR_BY_IDS)) {
             return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                                         "index no support to get raw vector by ids"));
         }
-        SAFE_CALL(return this->inner_index_->GetVectorByIds(ids, count));
+        SAFE_CALL(return this->inner_index_->GetVectorByIds(ids, count, specified_allocator));
     };
 
     [[nodiscard]] std::string
@@ -380,10 +402,10 @@ public:
             query, radius, parameters, filter, limited_size));
     }
 
-    tl::expected<bool, Error>
-    Remove(int64_t id) override {
+    tl::expected<uint32_t, Error>
+    Remove(const std::vector<int64_t>& ids, RemoveMode mode = RemoveMode::MARK_REMOVE) override {
         CHECK_IMMUTABLE_INDEX("remove");
-        SAFE_CALL(return this->inner_index_->Remove(id));
+        SAFE_CALL(return this->inner_index_->Remove(ids, mode));
     }
 
     [[nodiscard]] tl::expected<BinarySet, Error>

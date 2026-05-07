@@ -44,13 +44,15 @@ public:
     ~BruteForce() override = default;
 
     std::vector<int64_t>
-    Add(const DatasetPtr& data) override;
+    Add(const DatasetPtr& data, AddMode mode = AddMode::DEFAULT) override;
 
     std::vector<int64_t>
     Build(const DatasetPtr& data) override;
 
     float
-    CalcDistanceById(const float* vector, int64_t id) const override;
+    CalcDistanceById(const float* vector,
+                     int64_t id,
+                     bool calculate_precise_distance = true) const override;
 
     void
     Deserialize(StreamReader& reader) override;
@@ -78,7 +80,12 @@ public:
 
     [[nodiscard]] int64_t
     GetNumElements() const override {
-        return this->total_count_;
+        return this->total_count_ - this->delete_count_;
+    }
+
+    [[nodiscard]] int64_t
+    GetNumberRemoved() const override {
+        return this->delete_count_;
     }
 
     void
@@ -100,8 +107,8 @@ public:
                 const FilterPtr& filter,
                 int64_t limited_size = -1) const override;
 
-    bool
-    Remove(int64_t label) override;
+    uint32_t
+    Remove(const std::vector<int64_t>& ids, RemoveMode mode = RemoveMode::MARK_REMOVE) override;
 
     [[nodiscard]] DatasetPtr
     SearchWithRequest(const SearchRequest& request) const override;
@@ -120,6 +127,9 @@ public:
                     const AttributeSet& new_attrs,
                     const AttributeSet& origin_attrs) override;
 
+    int64_t
+    GetMemoryUsage() const override;
+
 private:
     void
     resize(uint64_t new_size);
@@ -127,10 +137,15 @@ private:
     void
     add_one(const float* data, InnerIdType inner_id);
 
+    void
+    cal_memory_usage();
+
 private:
     FlattenInterfacePtr inner_codes_{nullptr};
 
     uint64_t total_count_{0};
+
+    uint64_t delete_count_{0};
 
     uint64_t resize_increase_count_bit_{DEFAULT_RESIZE_BIT};
 

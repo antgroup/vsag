@@ -113,7 +113,7 @@ public:
      * If the IO object has a MultiReadImpl method, it is called.
      * Otherwise, a runtime error is thrown.
      *
-     * @param datas An array of pointers to the buffers where the read data will be stored.
+     * @param datas A pointer to a contiguous buffer where all read data will be stored sequentially.
      * @param sizes An array of sizes for each block of data to be read.
      * @param offsets An array of offsets for each block of data to be read.
      * @param count The number of blocks of data to be read.
@@ -218,6 +218,40 @@ public:
         }
     }
 
+    inline void
+    Resize(uint64_t size) {
+        if constexpr (has_ResizeImpl<IOTmpl>::value) {
+            return cast().ResizeImpl(size);
+        } else {
+            if (size <= this->size_) {
+                return;
+            }
+            ByteBuffer buffer(SERIALIZE_BUFFER_SIZE, this->allocator_);
+            uint64_t offset = this->size_;
+            while (offset < size) {
+                auto cur_size = std::min(SERIALIZE_BUFFER_SIZE, size - offset);
+                this->Write(buffer.data, cur_size, offset);
+                offset += cur_size;
+            }
+        }
+    }
+
+    inline void
+    Shrink(uint64_t size) {
+        if constexpr (has_ShrinkImpl<IOTmpl>::value) {
+            return cast().ShrinkImpl(size);
+        } else {
+            if (size <= this->size_) {
+                this->size_ = size;
+            }
+        }
+    }
+
+    inline int64_t
+    GetMemoryUsage() const {
+        return this->size_;
+    }
+
 public:
     /**
      * @brief The size of the IO object.
@@ -275,7 +309,7 @@ private:
     /**
      * @brief The size of the max buffer used for serialization.
      */
-    constexpr static uint64_t SERIALIZE_BUFFER_SIZE = 1024 * 1024 * 2;
+    static constexpr uint64_t SERIALIZE_BUFFER_SIZE = 1024 * 1024 * 2;
 
 private:
     /**
@@ -309,5 +343,7 @@ private:
                                  std::declval<uint64_t>())
     GENERATE_HAS_MEMBER_FUNCTION(ReleaseImpl, void, std::declval<const uint8_t*>())
     GENERATE_HAS_MEMBER_FUNCTION(InitIOImpl, void, std::declval<const IOParamPtr&>())
+    GENERATE_HAS_MEMBER_FUNCTION(ResizeImpl, void, std::declval<uint64_t>())
+    GENERATE_HAS_MEMBER_FUNCTION(ShrinkImpl, void, std::declval<uint64_t>())
 };
 }  // namespace vsag

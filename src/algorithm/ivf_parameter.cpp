@@ -31,18 +31,6 @@ IVFParameter::FromJson(const JsonType& json) {
 
     this->bucket_param = std::make_shared<BucketDataCellParameter>();
 
-    if (json.Contains(IVF_TRAIN_SAMPLE_COUNT_KEY)) {
-        this->train_sample_count = json[IVF_TRAIN_SAMPLE_COUNT_KEY].GetInt();
-        CHECK_ARGUMENT(
-            this->train_sample_count >= 512,
-            fmt::format("ivf_train_sample_count must be greater than or equal to 512, got: {}",
-                        this->train_sample_count));
-        CHECK_ARGUMENT(
-            this->train_sample_count <= 65536L,
-            fmt::format("ivf_train_sample_count must be less than or equal to 65536, got: {}",
-                        this->train_sample_count));
-    }
-
     CHECK_ARGUMENT(json.Contains(BUCKET_PARAMS_KEY),
                    fmt::format("ivf parameters must contains {}", BUCKET_PARAMS_KEY));
 
@@ -69,7 +57,6 @@ IVFParameter::ToJson() const {
     json[IVF_PARTITION_STRATEGY_PARAMS_KEY].SetJson(
         this->ivf_partition_strategy_parameter->ToJson());
     json[BUCKET_PER_DATA_KEY].SetInt(this->buckets_per_data);
-    json[IVF_TRAIN_SAMPLE_COUNT_KEY].SetInt(this->train_sample_count);
     return json;
 }
 bool
@@ -121,16 +108,12 @@ IVFSearchParameters::FromJson(const std::string& json_string) {
                                IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT));
     obj.scan_buckets_count = params[INDEX_TYPE_IVF][IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT].GetInt();
 
-    // set obj.topk_factor
-    if (params[INDEX_TYPE_IVF].Contains(SEARCH_PARAM_FACTOR)) {
-        obj.topk_factor = params[INDEX_TYPE_IVF][SEARCH_PARAM_FACTOR].GetFloat();
-    }
-
     // set obj.first_order_scan_ratio
     if (params[INDEX_TYPE_IVF].Contains(GNO_IMI_SEARCH_PARAM_FIRST_ORDER_SCAN_RATIO)) {
         obj.first_order_scan_ratio =
             params[INDEX_TYPE_IVF][GNO_IMI_SEARCH_PARAM_FIRST_ORDER_SCAN_RATIO].GetFloat();
     }
+
     return obj;
 }
 }  // namespace vsag

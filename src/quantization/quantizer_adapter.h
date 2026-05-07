@@ -19,6 +19,7 @@
 #include <string>
 #include <type_traits>
 
+#include "data_type.h"
 #include "index_common_param.h"
 #include "quantization/computer.h"
 #include "quantization/product_quantization/product_quantizer.h"
@@ -29,8 +30,8 @@ namespace vsag {
 
 template <typename QuantT, typename DataT>
 class QuantizerAdapter : public Quantizer<QuantizerAdapter<QuantT, DataT>> {
-    static_assert(std::is_same_v<DataT, int8_t>,
-                  "QuantizerAdapter currently only supports int8_t data type");
+    static_assert(std::is_same_v<DataT, int8_t> || std::is_same_v<DataT, uint16_t>,
+                  "QuantizerAdapter currently only supports int8_t and uint16_t data types");
 
 public:
     explicit QuantizerAdapter(const QuantizerParamPtr& param, const IndexCommonParam& common_param);
@@ -38,19 +39,19 @@ public:
     virtual ~QuantizerAdapter() = default;
 
     bool
-    TrainImpl(const DataType* data, uint64_t count);
+    TrainImpl(const float* data, uint64_t count);
 
     bool
-    EncodeOneImpl(const DataType* data, uint8_t* codes);
+    EncodeOneImpl(const float* data, uint8_t* codes);
 
     bool
-    EncodeBatchImpl(const DataType* data, uint8_t* codes, uint64_t count);
+    EncodeBatchImpl(const float* data, uint8_t* codes, uint64_t count);
 
     bool
-    DecodeOneImpl(const uint8_t* codes, DataType* data);
+    DecodeOneImpl(const uint8_t* codes, float* data);
 
     bool
-    DecodeBatchImpl(const uint8_t* codes, DataType* data, uint64_t count);
+    DecodeBatchImpl(const uint8_t* codes, float* data, uint64_t count);
 
     float
     ComputeImpl(const uint8_t* codes1, const uint8_t* codes2);
@@ -62,8 +63,7 @@ public:
     DeserializeImpl(StreamReader& reader);
 
     void
-    ProcessQueryImpl(const DataType* query,
-                     Computer<QuantizerAdapter<QuantT, DataT>>& computer) const;
+    ProcessQueryImpl(const float* query, Computer<QuantizerAdapter<QuantT, DataT>>& computer) const;
 
     void
     ComputeDistImpl(Computer<QuantizerAdapter<QuantT, DataT>>& computer,
@@ -87,6 +87,7 @@ public:
 private:
     using Base = Quantizer<QuantT>;
     std::shared_ptr<QuantT> inner_quantizer_{nullptr};
+    DataTypes data_type_{DataTypes::DATA_TYPE_FLOAT};
 };
 
 #define TEMPLATE_QUANTIZER_ADAPTER(QuantType, DataT)                                  \

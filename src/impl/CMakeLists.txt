@@ -25,22 +25,22 @@ add_subdirectory (logger)
 add_subdirectory (searcher)
 add_subdirectory (odescent)
 add_subdirectory (reorder)
+add_subdirectory (blas)
+add_subdirectory (reasoning)
 
 file (GLOB IMPL_SRCS "*.cpp")
 list (FILTER IMPL_SRCS EXCLUDE REGEX "_test.cpp")
-list (FILTER IMPL_SRCS EXCLUDE REGEX kmeans_cluster.cpp)
 
 add_library (impl OBJECT ${IMPL_SRCS})
-target_link_libraries (impl PUBLIC transform thread_pool allocator heap 
-    bitset logger filter cluster searcher odescent reorder fmt::fmt coverage_config)
-maybe_add_dependencies (impl spdlog)
+target_link_libraries (impl PRIVATE transform thread_pool allocator heap vsag_blas
+    bitset logger filter cluster searcher odescent reorder reasoning coverage_config vsag_src_common)
 
-set (IMPL_LIBS transform thread_pool allocator heap bitset 
-    logger filter impl cluster searcher odescent reorder PARENT_SCOPE)
+set (IMPL_LIBS transform thread_pool allocator heap bitset vsag_blas
+    logger filter impl cluster searcher odescent reorder reasoning PARENT_SCOPE)
 
 if (ENABLE_TESTS)
     file (GLOB_RECURSE IMPL_TESTS "*_test.cpp")
     add_library (impl_test STATIC ${IMPL_TESTS})
-    target_link_libraries (impl_test PRIVATE Catch2::Catch2 vsag)
-    add_dependencies (impl_test spdlog Catch2)
+    target_link_libraries (impl_test PRIVATE Catch2::Catch2 vsag_static unittest_deps)
+    add_dependencies (impl_test Catch2)
 endif ()

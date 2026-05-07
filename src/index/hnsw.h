@@ -87,13 +87,15 @@ public:
     }
 
     tl::expected<std::vector<int64_t>, Error>
-    Add(const DatasetPtr& base) override {
+    Add(const DatasetPtr& base, AddMode mode = AddMode::DEFAULT) override {
+        // TODO(LHT): HNSW only support KEEP_TOMBSTONE mode
         SAFE_CALL(return this->add(base));
     }
 
-    tl::expected<bool, Error>
-    Remove(int64_t id) override {
-        SAFE_CALL(return this->remove(id));
+    tl::expected<uint32_t, Error>
+    Remove(const std::vector<int64_t>& ids, RemoveMode mode = RemoveMode::MARK_REMOVE) override {
+        // TODO(LHT): HNSW only support MARK_DELETE mode
+        SAFE_CALL(return this->remove(ids));
     }
 
     tl::expected<bool, Error>
@@ -202,12 +204,17 @@ public:
     };
 
     virtual tl::expected<float, Error>
-    CalcDistanceById(const float* vector, int64_t id) const override {
+    CalcDistanceById(const float* vector,
+                     int64_t id,
+                     bool calculate_precise_distance = true) const override {
         SAFE_CALL(return this->calc_distance_by_id(vector, id));
     };
 
     virtual tl::expected<DatasetPtr, Error>
-    CalDistanceById(const float* vector, const int64_t* ids, int64_t count) const override {
+    CalDistanceById(const float* vector,
+                    const int64_t* ids,
+                    int64_t count,
+                    bool calculate_precise_distance = true) const override {
         SAFE_CALL(return this->calc_distance_by_id(vector, ids, count));
     };
 
@@ -215,6 +222,18 @@ public:
     GetMinAndMaxId() const override {
         SAFE_CALL(return this->get_min_and_max_id());
     };
+
+    tl::expected<DetailDataPtr, Error>
+    GetDetailDataByName(const std::string& name, IndexDetailInfo& info) const override {
+        SAFE_CALL(return this->get_detail_data_by_name(name, info));
+    }
+
+    tl::expected<DatasetPtr, Error>
+    GetRawVectorByIds(const int64_t* ids,
+                      int64_t count,
+                      Allocator* specified_allocator = nullptr) const override {
+        SAFE_CALL(return this->get_vectors_by_id(ids, count, specified_allocator));
+    }
 
 public:
     tl::expected<BinarySet, Error>
@@ -332,8 +351,8 @@ private:
     tl::expected<std::vector<int64_t>, Error>
     add(const DatasetPtr& base);
 
-    tl::expected<bool, Error>
-    remove(int64_t id);
+    tl::expected<uint32_t, Error>
+    remove(const std::vector<int64_t>& ids);
 
     tl::expected<bool, Error>
     update_id(int64_t old_id, int64_t new_id);
@@ -414,6 +433,9 @@ private:
     tl::expected<std::pair<int64_t, int64_t>, Error>
     get_min_and_max_id() const;
 
+    tl::expected<DatasetPtr, Error>
+    get_vectors_by_id(const int64_t* ids, int64_t count, Allocator* specified_allocator) const;
+
     bool
     check_id_exist(int64_t id) const;
 
@@ -435,6 +457,9 @@ private:
     void
     set_immutable();
 
+    DetailDataPtr
+    get_detail_data_by_name(const std::string& name, IndexDetailInfo& info) const;
+
 private:
     std::shared_ptr<hnswlib::AlgorithmInterface<float>> alg_hnsw_;
     std::shared_ptr<hnswlib::SpaceInterface> space_;
@@ -443,7 +468,6 @@ private:
     std::shared_ptr<ConjugateGraph> conjugate_graph_;
 
     int64_t dim_;
-    bool use_static_ = false;
     bool empty_index_ = false;
     bool use_reversed_edges_ = false;
     bool is_init_memory_ = false;

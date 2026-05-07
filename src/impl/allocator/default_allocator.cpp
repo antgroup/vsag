@@ -18,12 +18,15 @@
 #include <fmt/format.h>
 
 #include "impl/logger/logger.h"
+#include "vsag_exception.h"
 
 namespace vsag {
 #ifndef NDEBUG
 DefaultAllocator::~DefaultAllocator() {
     if (not allocated_ptrs_.empty()) {
-        logger::error(fmt::format("There is a memory leak in {}.", DefaultAllocator::Name()));
+        logger::error(fmt::format("There is a memory leak in {}, size: {}",
+                                  DefaultAllocator::Name(),
+                                  allocated_ptrs_.size()));
         abort();
     }
 }
@@ -32,7 +35,7 @@ DefaultAllocator::~DefaultAllocator() = default;
 #endif
 
 void*
-DefaultAllocator::Allocate(size_t size) {
+DefaultAllocator::Allocate(uint64_t size) {
     auto* ptr = malloc(size);
 #ifndef NDEBUG
     std::lock_guard<std::mutex> guard(set_mutex_);
@@ -49,7 +52,8 @@ DefaultAllocator::Deallocate(void* p) {
     }
     std::lock_guard<std::mutex> guard(set_mutex_);
     if (allocated_ptrs_.find(p) == allocated_ptrs_.end()) {
-        throw std::runtime_error(
+        throw VsagException(
+            ErrorType::INTERNAL_ERROR,
             fmt::format("deallocate: address {} is not allocated by {}", p, Name()));
     }
     allocated_ptrs_.erase(p);
@@ -58,21 +62,24 @@ DefaultAllocator::Deallocate(void* p) {
 }
 
 void*
-DefaultAllocator::Reallocate(void* p, size_t size) {
+DefaultAllocator::Reallocate(void* p, uint64_t size) {
 #ifndef NDEBUG
     if (p == nullptr) {
         return Allocate(size);
     }
     std::lock_guard<std::mutex> guard(set_mutex_);
     if (allocated_ptrs_.find(p) == allocated_ptrs_.end()) {
-        throw std::runtime_error(
+        throw VsagException(
+            ErrorType::INTERNAL_ERROR,
             fmt::format("reallocate: address {} is not allocated by {}", p, Name()));
     }
-    allocated_ptrs_.erase(p);
 #endif
     auto* ptr = realloc(p, size);
 #ifndef NDEBUG
-    allocated_ptrs_.insert(ptr);
+    if (ptr != nullptr) {
+        allocated_ptrs_.erase(p);
+        allocated_ptrs_.insert(ptr);
+    }
 #endif
     return ptr;
 }

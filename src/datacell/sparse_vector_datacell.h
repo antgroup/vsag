@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include "algorithm/inner_index_interface.h"
 #include "flatten_interface.h"
 #include "io/basic_io.h"
 #include "io/memory_block_io.h"
@@ -36,21 +37,28 @@ public:
           const ComputerInterfacePtr& computer,
           const InnerIdType* idx,
           InnerIdType id_count,
-          Allocator* allocator = nullptr) override {
+          QueryContext* ctx = nullptr) override {
         auto comp = std::static_pointer_cast<Computer<QuantTmpl>>(computer);
         this->query(result_dists, comp, idx, id_count);
     }
 
     ComputerInterfacePtr
     FactoryComputer(const void* query) override {
-        return this->factory_computer((const float*)query);
+        return this->factory_computer(static_cast<const float*>(query));
     }
 
     bool
-    Decode(const uint8_t* codes, DataType* vector) override {
+    Decode(const uint8_t* codes, float* vector) override {
         // TODO(inabao): Implement the decode function
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                             "Decode function is not implemented for SparseVectorDataCell");
+    }
+
+    bool
+    Encode(const float* vector, uint8_t* codes) override {
+        // TODO(inabao): Implement the decode function
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Encode function is not implemented for SparseVectorDataCell");
     }
 
     float
@@ -70,12 +78,10 @@ public:
         if (new_capacity <= this->max_capacity_) {
             return;
         }
-        size_t io_size = (new_capacity - total_count_) * max_code_size_ + current_offset_;
+        uint64_t io_size = (new_capacity - total_count_) * max_code_size_ + current_offset_;
+        this->io_->Resize(io_size);
+        this->offset_io_->Resize(static_cast<uint64_t>(new_capacity) * sizeof(uint32_t));
         this->max_capacity_ = new_capacity;
-        uint8_t end_flag =
-            127;  // the value is meaingless, only to occupy the position for io allocate
-        this->io_->Write(&end_flag, 1, io_size);
-        this->offset_io_->Write(&end_flag, 1, new_capacity * sizeof(uint32_t));
     }
 
     void
@@ -105,6 +111,9 @@ public:
     [[nodiscard]] const uint8_t*
     GetCodesById(InnerIdType id, bool& need_release) const override;
 
+    void
+    Release(const uint8_t* data) const override;
+
     [[nodiscard]] bool
     InMemory() const override;
 
@@ -127,6 +136,9 @@ public:
         this->io_ = io;
     }
 
+    int64_t
+    GetMemoryUsage() const override;
+
 private:
     inline void
     query(float* result_dists,
@@ -141,6 +153,7 @@ private:
         return computer;
     }
 
+private:
     std::shared_ptr<Quantizer<QuantTmpl>> quantizer_{nullptr};
     std::shared_ptr<BasicIO<IOTmpl>> io_{nullptr};
 

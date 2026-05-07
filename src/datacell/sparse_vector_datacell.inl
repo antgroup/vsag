@@ -87,7 +87,7 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::InsertVector(const void* vector, InnerI
         total_count_ = std::max(total_count_, idx + 1);
     }
     auto sparse_vector = (const SparseVector*)vector;
-    size_t code_size = (sparse_vector->len_ * 2 + 1) * sizeof(uint32_t);
+    uint64_t code_size = (sparse_vector->len_ * 2 + 1) * sizeof(uint32_t);
     if (code_size > max_code_size_) {
         throw VsagException(ErrorType::INVALID_ARGUMENT, fmt::format("code size ({}) of sparse vector more than max code size ({})", code_size, max_code_size_));
     }
@@ -119,10 +119,16 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::GetCodesById(InnerIdType id, bool& need
     uint32_t length;
     io_->Read(sizeof(length), offset, (uint8_t*)&length);
     need_release = true;
-    size_t read_size = sizeof(uint32_t) * (2 * length + 1);
+    uint64_t read_size = sizeof(uint32_t) * (2 * length + 1);
     auto* codes = (uint8_t*)allocator_->Allocate(read_size);
     io_->Read(read_size, offset, codes);
     return codes;
+}
+
+template <typename QuantTmpl, typename IOTmpl>
+void
+SparseVectorDataCell<QuantTmpl, IOTmpl>::Release(const uint8_t* data) const {
+    io_->Release(data);
 }
 
 template <typename QuantTmpl, typename IOTmpl>
@@ -170,4 +176,15 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::SparseVectorDataCell(
     this->code_size_ = this->quantizer_->GetCodeSize();
 }
 
+template <typename QuantTmpl, typename IOTmpl>
+int64_t
+SparseVectorDataCell<QuantTmpl, IOTmpl>::GetMemoryUsage() const {
+    int64_t memory = sizeof(SparseVectorDataCell<QuantTmpl, IOTmpl>);
+    memory += this->offset_io_->size_;
+    if (IOTmpl::InMemory) {
+        memory += this->io_->GetMemoryUsage();
+    }
+    memory += sizeof(QuantTmpl);
+    return memory;
 }
+} // namespace vsag

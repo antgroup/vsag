@@ -21,6 +21,7 @@
 #include "impl/label_table.h"
 #include "index_feature_list.h"
 #include "utils/util_functions.h"
+#include "vsag/allocator.h"
 namespace vsag {
 
 static float
@@ -72,7 +73,7 @@ SparseIndex::Deserialize(StreamReader& reader) {
     for (int i = 0; i < cur_element_count_; ++i) {
         uint32_t len;
         StreamReader::ReadObj(reader, len);
-        datas_[i] = (uint32_t*)allocator_->Allocate((2 * len + 1) * sizeof(uint32_t));
+        datas_[i] = static_cast<uint32_t*>(allocator_->Allocate((2 * len + 1) * sizeof(uint32_t)));
         datas_[i][0] = len;
         reader.Read((char*)(datas_[i] + 1), static_cast<uint64_t>(2 * len) * sizeof(uint32_t));
     }
@@ -106,7 +107,7 @@ SparseIndex::sort_sparse_vector(const SparseVector& vector) const {
     });
     Vector<uint32_t> sorted_ids(vector.len_, allocator_);
     Vector<float> sorted_vals(vector.len_, allocator_);
-    for (size_t j = 0; j < vector.len_; ++j) {
+    for (uint64_t j = 0; j < vector.len_; ++j) {
         sorted_ids[j] = vector.ids_[indices[j]];
         sorted_vals[j] = vector.vals_[indices[j]];
     }
@@ -114,7 +115,7 @@ SparseIndex::sort_sparse_vector(const SparseVector& vector) const {
 }
 
 std::vector<int64_t>
-SparseIndex::Add(const DatasetPtr& base) {
+SparseIndex::Add(const DatasetPtr& base, AddMode mode) {
     const auto* sparse_vectors = base->GetSparseVectors();
     auto data_num = base->GetNumElements();
     CHECK_ARGUMENT(data_num > 0, "data_num is zero when add vectors");
@@ -135,7 +136,7 @@ SparseIndex::Add(const DatasetPtr& base) {
         const auto& vector = sparse_vectors[i];
         auto size = (vector.len_ + 1) * sizeof(uint32_t);  // vector index + array size
         size += (vector.len_) * sizeof(float);             // vector value
-        datas_[i + cur_element_count_] = (uint32_t*)allocator_->Allocate(size);
+        datas_[i + cur_element_count_] = static_cast<uint32_t*>(allocator_->Allocate(size));
         datas_[i + cur_element_count_][0] = vector.len_;
         auto* data = datas_[i + cur_element_count_] + 1;
         label_table_->Insert(i + cur_element_count_, ids[i]);
@@ -232,7 +233,9 @@ SparseIndex::CalDistanceByIdUnsafe(Vector<uint32_t>& sorted_ids,
 }
 
 float
-SparseIndex::CalcDistanceById(const DatasetPtr& vector, int64_t id) const {
+SparseIndex::CalcDistanceById(const DatasetPtr& vector,
+                              int64_t id,
+                              bool calculate_precise_distance) const {
     const auto* sparse_vectors = vector->GetSparseVectors();
     uint32_t inner_id = this->label_table_->GetIdByLabel(id);
     auto [sorted_ids, sorted_vals] = sort_sparse_vector(sparse_vectors[0]);
@@ -240,21 +243,28 @@ SparseIndex::CalcDistanceById(const DatasetPtr& vector, int64_t id) const {
 }
 
 void
-SparseIndex::GetSparseVectorByInnerId(InnerIdType inner_id, SparseVector* data) const {
+SparseIndex::GetSparseVectorByInnerId(InnerIdType inner_id,
+                                      SparseVector* data,
+                                      Allocator* specified_allocator) const {
+    Allocator* allocator = specified_allocator != nullptr ? specified_allocator : allocator_;
+
     data->len_ = datas_[inner_id][0];
-    data->ids_ = (uint32_t*)allocator_->Allocate(sizeof(uint32_t) * data->len_);
-    data->vals_ = (float*)allocator_->Allocate(sizeof(float) * data->len_);
+    data->ids_ = static_cast<uint32_t*>(allocator->Allocate(sizeof(uint32_t) * data->len_));
+    data->vals_ = static_cast<float*>(allocator->Allocate(sizeof(float) * data->len_));
 
     memcpy(data->ids_, datas_[inner_id] + 1, data->len_ * sizeof(uint32_t));
     memcpy(data->vals_, datas_[inner_id] + 1 + datas_[inner_id][0], data->len_ * sizeof(float));
 }
 
 DatasetPtr
-SparseIndex::CalDistanceById(const DatasetPtr& query, const int64_t* ids, int64_t count) const {
+SparseIndex::CalDistanceById(const DatasetPtr& query,
+                             const int64_t* ids,
+                             int64_t count,
+                             bool calculate_precise_distance) const {
     // prepare result
     auto result = Dataset::Make();
     result->Owner(true, allocator_);
-    auto* distances = (float*)allocator_->Allocate(sizeof(float) * count);
+    auto* distances = static_cast<float*>(allocator_->Allocate(sizeof(float) * count));
     result->Distances(distances);
 
     // key optimization: only sort once for one query
@@ -263,14 +273,28 @@ SparseIndex::CalDistanceById(const DatasetPtr& query, const int64_t* ids, int64_
 
     // cal distances one by one
     for (int64_t i = 0; i < count; i++) {
-        try {
-            uint32_t inner_id = this->label_table_->GetIdByLabel(ids[i]);
+        auto [success, inner_id] = this->label_table_->TryGetIdByLabel(ids[i]);
+        if (success) {
             distances[i] = CalDistanceByIdUnsafe(sorted_ids, sorted_vals, inner_id);
-        } catch (std::runtime_error& e) {
+        } else {
             distances[i] = -1;
         }
     }
     return result;
+}
+
+int64_t
+SparseIndex::GetMemoryUsage() const {
+    auto memory = sizeof(SparseIndex);
+    memory += datas_.size() * sizeof(uint8_t*);
+    for (const auto& data : datas_) {
+        if (data == nullptr) {
+            continue;
+        }
+        memory += data[0] * sizeof(uint32_t) + data[0] * sizeof(float) + sizeof(uint32_t);
+    }
+    memory += static_cast<uint64_t>(this->label_table_->GetMemoryUsage());
+    return static_cast<int64_t>(memory);
 }
 
 void

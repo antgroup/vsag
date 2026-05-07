@@ -30,7 +30,7 @@ If you have improvements to vsag, send us your pull requests! For those just get
 
 ### GitHub workflow
 
-Please create a new branch from an up-to-date master on your fork.
+Please create a new branch from an up-to-date main on your fork.
 
 1.  Fork the repository on GitHub.
 2.  Clone your fork to your local machine with `git clone git@github.com:<yourname>/vsag.git`.
@@ -42,8 +42,8 @@ If you have an existing local repository, please update it before you start, to 
 
 ```shell
 git remote add upstream git@github.com:antgroup/vsag.git
-git checkout master
-git pull upstream master
+git checkout main
+git pull upstream main
 git checkout -b my-topic-branch
 ```
 
@@ -84,14 +84,46 @@ And we made the following changes based on the guide:
 
 ### Format code
 
-Install clang-format-13, or later
+**Important**: VSAG requires **clang-format version 15 EXACTLY**. Do not use higher or lower versions as they may produce different formatting.
+
+Install clang-format-15:
 ```shell
-$ sudo apt-get install clang-format
+# Ubuntu/Debian
+$ sudo apt-get install clang-format-15
 ```
-To format the code
+
+To format the code:
 ```shell
 $ make fmt
 ```
+
+The format script will automatically verify you're using clang-format-15 and will fail if a different version is detected.
+
+### Run clang-tidy
+
+**Important**: VSAG requires **clang-tidy version 15 EXACTLY**. Do not use higher or lower versions as they may produce different diagnostics.
+
+Install clang-tidy-15:
+```shell
+# Ubuntu/Debian
+$ sudo apt-get install clang-tidy-15
+```
+
+To run lint checks:
+
+`make lint` reads compile commands from `build-release/`, so run `make release` first.
+
+```shell
+$ make release
+$ make lint
+```
+
+To apply clang-tidy fixes in place:
+```shell
+$ make fix-lint
+```
+
+The lint wrapper will automatically verify you're using clang-tidy-15 and will fail if a different version is detected.
 
 ## Run tests with code coverage
 
@@ -101,7 +133,29 @@ Install lcov
 ```shell
 $ sudo apt-get install lcov
 ```
-Run tests and generate code coverage report
+Compile with coverage flags, run tests, and collect the coverage report:
 ```shell
-$ make test_cov
+$ make cov
+$ bash scripts/testing/test_parallel_bg.sh
+$ bash scripts/coverage/collect_cpp_coverage.sh
+```
+
+## Pull Request Labels
+
+Every pull request **must** have the following two labels before it can be merged:
+
+-   A **`kind/*`** label indicating the type of change: `kind/bug` (bug fix), `kind/feature` (new feature), `kind/improvement` (refactor, chore, or minor improvement), or `kind/documentation` (documentation change).
+-   A **`version/*`** label indicating the target version, e.g. `version/1.0`, `version/0.18`.
+
+Mergify enforces these labels via check runs. The PR merge will be blocked until both labels are present.
+
+## Commit message and skip CI
+
+-   Follow Conventional Commits in the subject line, such as `feat:`, `fix:`, `docs:`, or `chore:`.
+-   If you need to skip CI, put `[skip ci]` at the beginning of the commit subject.
+
+Example:
+
+```text
+[skip ci] docs: update contribution examples
 ```

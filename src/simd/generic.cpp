@@ -502,10 +502,33 @@ RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, floa
 
     float result = 0.0f;
 
+    float neg = 0, pos = 0;
+    if (inv_sqrt_d > 1e-3) {
+        pos = inv_sqrt_d;
+        neg = -inv_sqrt_d;
+    } else {
+        pos = 1.0f;
+        neg = 0;
+    }
+
     for (uint64_t d = 0; d < dim; ++d) {
         bool bit = ((bits[d / 8] >> (d % 8)) & 1) != 0;
-        float b_i = bit ? inv_sqrt_d : -inv_sqrt_d;
+        float b_i = bit ? pos : neg;
         result += b_i * vector[d];
+    }
+
+    return result;
+}
+
+float
+RaBitQFloatSQIP(const float* vector, const uint8_t* codes, uint64_t dim) {
+    if (dim == 0) {
+        return 0.0f;
+    }
+
+    float result = 0.0f;
+    for (uint64_t d = 0; d < dim; ++d) {
+        result += float(codes[d]) * vector[d];
     }
 
     return result;

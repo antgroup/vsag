@@ -21,13 +21,13 @@
 #include "algorithm/hnswlib/hnswalg.h"
 #include "algorithm/hnswlib/space_l2.h"
 #include "datacell/flatten_datacell.h"
-#include "fixtures.h"
+#include "framework/test_logger.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/basic_optimizer.h"
 #include "io/memory_io.h"
 #include "quantization/fp32_quantizer.h"
 #include "quantization/scalar_quantization/sq4_uniform_quantizer.h"
-#include "test_logger.h"
+#include "unittest.h"
 #include "utils/visited_list.h"
 
 namespace vsag {
@@ -55,6 +55,11 @@ public:
     GetNeighborSize(InnerIdType id) const override {
         int* data = (int*)alg_hnsw_->get_linklist0(id);
         return alg_hnsw_->getListCount((hnswlib::linklistsizeint*)data);
+    }
+
+    [[nodiscard]] bool
+    CheckIdExists(InnerIdType id) const override {
+        return id < alg_hnsw_->getCurrentElementCount();
     }
 
     void

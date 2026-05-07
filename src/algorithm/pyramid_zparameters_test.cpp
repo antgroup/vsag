@@ -15,14 +15,14 @@
 
 #include "algorithm/pyramid_zparameters.h"
 
-#include <catch2/catch_test_macros.hpp>
-
+#include "algorithm/pyramid.h"
 #include "parameter_test.h"
+#include "unittest.h"
 
 struct PyramidDefaultParam {
-    int max_degree = 16;
-    float alpha = 1.2f;
-    int ef_construction = 200;
+    int max_degree = 32;
+    float alpha = 1.3f;
+    int ef_construction = 400;
     bool use_reorder = true;
     std::string base_quantization_type = "fp32";
     std::vector<int> no_build_levels = {0, 1, 2};
@@ -33,8 +33,10 @@ struct PyramidDefaultParam {
     std::string precise_quantization_type = "fp32";
     int base_pq_dim = 0;
     std::string base_file_path = "base_path";
-    std::string precise_io_type = "memory_io";
+    std::string precise_io_type = "block_memory_io";
     std::string precise_file_path = "precise_path";
+    uint32_t index_min_size = 1000;
+    bool support_duplicate = false;
 };
 
 std::string
@@ -93,7 +95,9 @@ generate_pyramid(const PyramidDefaultParam& param) {
                 }}
             }},
             "type": "pyramid",
-            "use_reorder": {}
+            "use_reorder": {},
+            "index_min_size": {},
+            "support_duplicate": {}
         }}
     )";
     return fmt::format(param_str,
@@ -111,7 +115,9 @@ generate_pyramid(const PyramidDefaultParam& param) {
                        param.precise_file_path,
                        param.precise_io_type,
                        param.precise_quantization_type,
-                       param.use_reorder);
+                       param.use_reorder,
+                       param.index_min_size,
+                       param.support_duplicate);
 }
 
 TEST_CASE("Pyramid Parameters Test", "[ut][PyramidParameters]") {
@@ -170,4 +176,34 @@ TEST_CASE("Pyramid Parameters CheckCompatibility", "[ut][PyramidParameter][Check
     TEST_COMPATIBILITY_CASE("different build thread count", build_thread_count, 4, 8, true);
     TEST_COMPATIBILITY_CASE(
         "different precise quantization type", precise_quantization_type, "fp32", "fp16", false);
+    TEST_COMPATIBILITY_CASE("different index min size", index_min_size, 500, 1500, false);
+    TEST_COMPATIBILITY_CASE("different support duplicate", support_duplicate, false, true, false);
+}
+
+TEST_CASE("Pyramid maps support_duplicate to graph parameter", "[ut][PyramidParameters]") {
+    auto param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "base_io_type": "memory_io",
+        "precise_quantization_type": "fp32",
+        "precise_io_type": "block_memory_io",
+        "graph_storage_type": "compressed",
+        "graph_type": "odescent",
+        "max_degree": 32,
+        "alpha": 1.2,
+        "build_thread_count": 1,
+        "ef_construction": 100,
+        "index_min_size": 0,
+        "support_duplicate": true,
+        "use_reorder": true
+    })");
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    auto pyramid_param = vsag::Pyramid::CheckAndMappingExternalParam(param, common_param);
+    auto typed_param = std::dynamic_pointer_cast<vsag::PyramidParameters>(pyramid_param);
+
+    REQUIRE(typed_param != nullptr);
+    REQUIRE(typed_param->support_duplicate);
+    REQUIRE(typed_param->graph_param->support_duplicate_);
 }

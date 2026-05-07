@@ -20,9 +20,12 @@
 #include "vsag/errors.h"
 
 namespace vsag {
-class VsagException : std::exception {
+class VsagException : public std::exception {
 public:
-    explicit VsagException(Error& error) : error_(error){};
+    explicit VsagException(const Error& error) : error_(error){};
+
+    explicit VsagException(ErrorType type, std::string msg) : error_(type, std::move(msg)) {
+    }
 
     template <typename... Args>
     explicit VsagException(ErrorType error_type, Args&&... args)

@@ -22,6 +22,18 @@
 
 namespace vsag {
 
+/***
+ * @brief FP32 Quantizer stores vectors in 32-bit floating-point format.
+ *
+ * code layout:
+ * +----------------+----------------+
+ * | float32-code   | mold (opt)     |
+ * | [dim * 4B]     | [4B]           |
+ * +----------------+----------------+
+ *
+ * - float32-code: original vector data (required)
+ * - mold: sqrt(sum(vec^2)) for cosine similarity (optional, cosine with hold_molds)
+ */
 template <MetricType metric = MetricType::METRIC_TYPE_L2SQR>
 class FP32Quantizer : public Quantizer<FP32Quantizer<metric>> {
 public:
@@ -31,22 +43,22 @@ public:
 
     FP32Quantizer(const QuantizerParamPtr& param, const IndexCommonParam& common_param);
 
-    ~FP32Quantizer() = default;
+    ~FP32Quantizer() override = default;
 
     bool
-    TrainImpl(const DataType* data, uint64_t count);
+    TrainImpl(const float* data, uint64_t count);
 
     bool
-    EncodeOneImpl(const DataType* data, uint8_t* codes);
+    EncodeOneImpl(const float* data, uint8_t* codes);
 
     bool
-    EncodeBatchImpl(const DataType* data, uint8_t* codes, uint64_t count);
+    EncodeBatchImpl(const float* data, uint8_t* codes, uint64_t count);
 
     bool
-    DecodeOneImpl(const uint8_t* codes, DataType* data);
+    DecodeOneImpl(const uint8_t* codes, float* data);
 
     bool
-    DecodeBatchImpl(const uint8_t* codes, DataType* data, uint64_t count);
+    DecodeBatchImpl(const uint8_t* codes, float* data, uint64_t count);
 
     float
     ComputeImpl(const uint8_t* codes1, const uint8_t* codes2);
@@ -58,7 +70,7 @@ public:
     DeserializeImpl(StreamReader& reader){};
 
     void
-    ProcessQueryImpl(const DataType* query, Computer<FP32Quantizer<metric>>& computer) const;
+    ProcessQueryImpl(const float* query, Computer<FP32Quantizer<metric>>& computer) const;
 
     void
     ComputeDistImpl(Computer<FP32Quantizer<metric>>& computer,

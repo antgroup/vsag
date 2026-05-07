@@ -15,11 +15,8 @@
 
 #include "kmeans_cluster.h"
 
-#include <catch2/catch_test_macros.hpp>
-
-#include "fixtures.h"
 #include "impl/allocator/safe_allocator.h"
-
+#include "unittest.h"
 std::vector<float>
 GenerateDataset(int32_t k, int32_t dim, uint64_t count, std::vector<int>& labels) {
     std::vector<float> result(dim * count);

@@ -15,8 +15,7 @@
 
 #include "product_quantizer.h"
 
-#include <cblas.h>
-
+#include "impl/blas/blas_function.h"
 #include "impl/cluster/kmeans_cluster.h"
 #include "simd/fp32_simd.h"
 #include "simd/normalize.h"
@@ -58,11 +57,11 @@ ProductQuantizer<metric>::ProductQuantizer(const QuantizerParamPtr& param,
 
 template <MetricType metric>
 bool
-ProductQuantizer<metric>::TrainImpl(const vsag::DataType* data, uint64_t count) {
+ProductQuantizer<metric>::TrainImpl(const float* data, uint64_t count) {
     if (this->is_trained_) {
         return true;
     }
-    count = std::min(count, 65536UL);
+    count = std::min<uint64_t>(count, 65536UL);
     Vector<float> slice(this->allocator_);
     slice.resize(count * subspace_dim_);
     Vector<float> norm_data(this->allocator_);
@@ -95,8 +94,8 @@ ProductQuantizer<metric>::TrainImpl(const vsag::DataType* data, uint64_t count) 
 
 template <MetricType metric>
 bool
-ProductQuantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) {
-    const DataType* cur = data;
+ProductQuantizer<metric>::EncodeOneImpl(const float* data, uint8_t* codes) {
+    const float* cur = data;
     Vector<float> tmp(this->allocator_);
     if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
         tmp.resize(this->dim_);
@@ -123,25 +122,7 @@ ProductQuantizer<metric>::EncodeOneImpl(const DataType* data, uint8_t* codes) {
 
 template <MetricType metric>
 bool
-ProductQuantizer<metric>::EncodeBatchImpl(const DataType* data, uint8_t* codes, uint64_t count) {
-    for (uint64_t i = 0; i < count; ++i) {
-        this->EncodeOneImpl(data + i * this->dim_, codes + i * this->code_size_);
-    }
-    return true;
-}
-
-template <MetricType metric>
-bool
-ProductQuantizer<metric>::DecodeBatchImpl(const uint8_t* codes, DataType* data, uint64_t count) {
-    for (uint64_t i = 0; i < count; ++i) {
-        this->DecodeOneImpl(codes + i * this->code_size_, data + i * this->dim_);
-    }
-    return true;
-}
-
-template <MetricType metric>
-bool
-ProductQuantizer<metric>::DecodeOneImpl(const uint8_t* codes, DataType* data) {
+ProductQuantizer<metric>::DecodeOneImpl(const uint8_t* codes, float* data) {
     for (int i = 0; i < pq_dim_; ++i) {
         auto idx = codes[i];
         memcpy(data + i * subspace_dim_,
@@ -275,18 +256,6 @@ ProductQuantizer<metric>::ComputeDistsBatch4Impl(Computer<ProductQuantizer<metri
 
 template <MetricType metric>
 void
-ProductQuantizer<metric>::ScanBatchDistImpl(Computer<ProductQuantizer<metric>>& computer,
-                                            uint64_t count,
-                                            const uint8_t* codes,
-                                            float* dists) const {
-    // TODO(LHT): Optimize batch for simd
-    for (uint64_t i = 0; i < count; ++i) {
-        this->ComputeDistImpl(computer, codes + i * this->code_size_, dists + i);
-    }
-}
-
-template <MetricType metric>
-void
 ProductQuantizer<metric>::SerializeImpl(StreamWriter& writer) {
     StreamWriter::WriteObj(writer, this->pq_dim_);
     StreamWriter::WriteObj(writer, this->subspace_dim_);
@@ -304,12 +273,6 @@ ProductQuantizer<metric>::DeserializeImpl(StreamReader& reader) {
 
 template <MetricType metric>
 void
-ProductQuantizer<metric>::ReleaseComputerImpl(Computer<ProductQuantizer<metric>>& computer) const {
-    this->allocator_->Deallocate(computer.buf_);
-}
-
-template <MetricType metric>
-void
 ProductQuantizer<metric>::transpose_codebooks() {
     for (int64_t i = 0; i < this->pq_dim_; ++i) {
         for (int64_t j = 0; j < CENTROIDS_PER_SUBSPACE; ++j) {
@@ -323,7 +286,7 @@ ProductQuantizer<metric>::transpose_codebooks() {
 
 template <MetricType metric>
 void
-ProductQuantizer<metric>::ProcessQueryImpl(const DataType* query,
+ProductQuantizer<metric>::ProcessQueryImpl(const float* query,
                                            Computer<ProductQuantizer>& computer) const {
     try {
         const float* cur_query = query;
@@ -345,18 +308,18 @@ ProductQuantizer<metric>::ProcessQueryImpl(const DataType* query,
             auto* per_result = lookup_table + i * CENTROIDS_PER_SUBSPACE;
             if constexpr (metric == MetricType::METRIC_TYPE_IP or
                           metric == MetricType::METRIC_TYPE_COSINE) {
-                cblas_sgemv(CblasRowMajor,
-                            CblasNoTrans,
-                            CENTROIDS_PER_SUBSPACE,
-                            subspace_dim_,
-                            1.0F,
-                            per_code_book,
-                            subspace_dim_,
-                            per_query,
-                            1,
-                            0.0F,
-                            per_result,
-                            1);
+                BlasFunction::Sgemv(BlasFunction::RowMajor,
+                                    BlasFunction::NoTrans,
+                                    CENTROIDS_PER_SUBSPACE,
+                                    subspace_dim_,
+                                    1.0F,
+                                    per_code_book,
+                                    subspace_dim_,
+                                    per_query,
+                                    1,
+                                    0.0F,
+                                    per_result,
+                                    1);
             } else if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
                 // TODO(LHT): use blas opt
                 for (int64_t j = 0; j < CENTROIDS_PER_SUBSPACE; ++j) {

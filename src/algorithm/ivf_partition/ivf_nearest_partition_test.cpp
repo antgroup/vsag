@@ -15,15 +15,12 @@
 
 #include "ivf_nearest_partition.h"
 
-#include <catch2/catch_test_macros.hpp>
-
 #include "algorithm/inner_index_interface.h"
-#include "fixtures.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/inner_search_param.h"
 #include "impl/thread_pool/safe_thread_pool.h"
 #include "storage/serialization_template_test.h"
-
+#include "unittest.h"
 using namespace vsag;
 
 TEST_CASE("IVF Nearest Partition Basic Test", "[ut][IVFNearestPartition]") {
@@ -49,8 +46,7 @@ TEST_CASE("IVF Nearest Partition Basic Test", "[ut][IVFNearestPartition]") {
         dataset->Float32Vectors(vec.data())->Dim(dim)->NumElements(data_count)->Owner(false);
 
         partition->Train(dataset);
-        Statistics stats;
-        auto class_result = partition->ClassifyDatas(vec.data(), data_count, 1, stats);
+        auto class_result = partition->ClassifyDatas(vec.data(), data_count, 1, nullptr);
         REQUIRE(class_result.size() == data_count);
 
         auto index = partition->route_index_ptr_;
@@ -90,8 +86,7 @@ TEST_CASE("IVF Nearest Partition Serialize Test", "[ut][IVFNearestPartition]") {
     dataset->Float32Vectors(vec.data())->Dim(dim)->NumElements(data_count)->Owner(false);
 
     partition->Train(dataset);
-    Statistics stats;
-    auto class_result = partition->ClassifyDatas(vec.data(), data_count, 1, stats);
+    auto class_result = partition->ClassifyDatas(vec.data(), data_count, 1, nullptr);
     REQUIRE(class_result.size() == data_count);
 
     auto partition2 = std::make_unique<IVFNearestPartition>(bucket_count, param, strategy_param);

@@ -31,7 +31,7 @@ main(int argc, char** argv) {
     std::shared_ptr<float[]> base_data(new float[dim * base_elements]);
     std::mt19937 rng;
     rng.seed(47);
-    std::uniform_real_distribution<> distribution_real(-1, 1);
+    std::uniform_real_distribution<float> distribution_real(-1, 1);
     for (int i = 0; i < base_elements; i++) {
         base_ids[i] = i;
 

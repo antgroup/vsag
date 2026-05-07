@@ -31,6 +31,7 @@
 #include "impl/allocator/safe_allocator.h"
 #include "impl/odescent/odescent_graph_builder.h"
 #include "index/hnsw_zparameters.h"
+#include "index_detail_data.h"
 #include "io/memory_block_io_parameter.h"
 #include "quantization/fp32_quantizer_parameter.h"
 #include "storage/empty_index_binary_set.h"
@@ -51,7 +52,6 @@ static const std::string EMPTY_HNSW = "EMPTY_HNSW";
 
 HNSW::HNSW(HnswParameters hnsw_params, const IndexCommonParam& index_common_param)
     : space_(std::move(hnsw_params.space)),
-      use_static_(hnsw_params.use_static),
       use_conjugate_graph_(hnsw_params.use_conjugate_graph),
       use_reversed_edges_(hnsw_params.use_reversed_edges),
       type_(hnsw_params.type),
@@ -73,32 +73,18 @@ HNSW::HNSW(HnswParameters hnsw_params, const IndexCommonParam& index_common_para
         conjugate_graph_ = std::make_shared<ConjugateGraph>(allocator_.get());
     }
 
-    if (!use_static_) {
-        alg_hnsw_ =
-            std::make_shared<hnswlib::HierarchicalNSW>(space_.get(),
-                                                       DEFAULT_MAX_ELEMENT,
-                                                       allocator_.get(),
-                                                       M,
-                                                       hnsw_params.ef_construction,
-                                                       use_reversed_edges_,
-                                                       hnsw_params.normalize,
-                                                       Options::Instance().block_size_limit(),
-                                                       true);
-    } else {
-        if (dim_ % 4 != 0) {
-            // FIXME(wxyu): remove throw stmt from construct function
-            throw std::runtime_error("cannot build static hnsw while dim % 4 != 0");
-        }
-        alg_hnsw_ = std::make_shared<hnswlib::StaticHierarchicalNSW>(
-            space_.get(),
-            DEFAULT_MAX_ELEMENT,
-            allocator_.get(),
-            M,
-            hnsw_params.ef_construction,
-            Options::Instance().block_size_limit());
-    }
+    alg_hnsw_ = std::make_shared<hnswlib::HierarchicalNSW>(space_.get(),
+                                                           DEFAULT_MAX_ELEMENT,
+                                                           allocator_.get(),
+                                                           M,
+                                                           hnsw_params.ef_construction,
+                                                           use_reversed_edges_,
+                                                           hnsw_params.normalize,
+                                                           Options::Instance().block_size_limit(),
+                                                           true);
 
     this->init_feature_list();
+    result_queues_.try_emplace(STATSTIC_KNN_TIME);
 }
 
 tl::expected<std::vector<int64_t>, Error>
@@ -123,11 +109,11 @@ HNSW::build(const DatasetPtr& base) {
 
         int64_t num_elements = base->GetNumElements();
 
-        std::unique_lock lock(rw_mutex_);
+        std::scoped_lock lock(rw_mutex_);
 
         const auto* ids = base->GetIds();
         void* vectors = nullptr;
-        size_t data_size = 0;
+        uint64_t data_size = 0;
         get_vectors(type_, dim_, base, &vectors, &data_size);
         std::vector<int64_t> failed_ids;
         {
@@ -139,12 +125,6 @@ HNSW::build(const DatasetPtr& base) {
                     failed_ids.emplace_back(ids[i]);
                 }
             }
-        }
-
-        if (use_static_) {
-            SlowTaskTimer t("hnsw pq", 1000);
-            auto* hnsw = static_cast<hnswlib::StaticHierarchicalNSW*>(alg_hnsw_.get());
-            hnsw->encode_hnsw_data();
         }
 
         return failed_ids;
@@ -165,10 +145,6 @@ HNSW::add(const DatasetPtr& base) {
 #ifndef ENABLE_TESTS
     SlowTaskTimer t("hnsw add", 20);
 #endif
-    if (use_static_) {
-        LOG_ERROR_AND_RETURNS(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                              "static index does not support add");
-    }
     try {
         auto base_dim = base->GetDim();
         CHECK_ARGUMENT(base_dim == dim_,
@@ -177,7 +153,7 @@ HNSW::add(const DatasetPtr& base) {
         int64_t num_elements = base->GetNumElements();
         const auto* ids = base->GetIds();
         void* vectors = nullptr;
-        size_t data_size = 0;
+        uint64_t data_size = 0;
         get_vectors(type_, dim_, base, &vectors, &data_size);
         std::vector<int64_t> failed_ids;
         bool is_tombstone = false;
@@ -214,9 +190,6 @@ HNSW::add(const DatasetPtr& base) {
                     std::scoped_lock lock(rw_mutex_);
                     index->markDelete(ids[i]);
                 }
-                logger::debug("duplicate point: {}", i);
-                failed_ids.push_back(ids[i]);
-                continue;
             }
 
             std::shared_lock lock(rw_mutex_);
@@ -275,7 +248,7 @@ HNSW::knn_search(const DatasetPtr& query,
         // check query vector
         CHECK_ARGUMENT(query->GetNumElements() == 1, "query dataset should contain 1 vector only");
         void* vector = nullptr;
-        size_t data_size = 0;
+        uint64_t data_size = 0;
         get_vectors(type_, dim_, query, &vector, &data_size);
         int64_t query_dim = query->GetDim();
         CHECK_ARGUMENT(
@@ -284,7 +257,7 @@ HNSW::knn_search(const DatasetPtr& query,
 
         // check search parameters
         auto params = HnswSearchParameters::FromJson(parameters);
-        auto ef_search_threshold = std::max(AMPLIFICATION_FACTOR * k, 1000L);
+        auto ef_search_threshold = std::max<int64_t>(AMPLIFICATION_FACTOR * k, 1000);
         CHECK_ARGUMENT(  // NOLINT
             (1 <= params.ef_search) and (params.ef_search <= ef_search_threshold),
             fmt::format(
@@ -296,9 +269,13 @@ HNSW::knn_search(const DatasetPtr& query,
 
         std::shared_lock lock_global(rw_mutex_);
         if (iter_ctx != nullptr && *iter_ctx == nullptr) {
-            auto* filter_context = new IteratorFilterContext();
-            filter_context->init(alg_hnsw_->getMaxElements(), params.ef_search, search_allocator);
-            *iter_ctx = filter_context;
+            auto filter_context = std::make_unique<IteratorFilterContext>();
+            if (auto ret = filter_context->init(
+                    alg_hnsw_->getMaxElements(), params.ef_search, search_allocator);
+                not ret.has_value()) {
+                return tl::unexpected(std::move(ret).error());
+            }
+            *iter_ctx = filter_context.release();
         }
         IteratorFilterContext* iter_filter_ctx = nullptr;
         if (iter_ctx != nullptr) {
@@ -319,6 +296,7 @@ HNSW::knn_search(const DatasetPtr& query,
                                            std::max(params.ef_search, k),
                                            filter_ptr,
                                            params.skip_ratio,
+                                           params.skip_strategy_type,
                                            allocator,
                                            iter_filter_ctx,
                                            is_last_filter);
@@ -328,11 +306,7 @@ HNSW::knn_search(const DatasetPtr& query,
                                   e.what());
         }
 
-        // update stats
-        {
-            std::lock_guard<std::mutex> lock(stats_mutex_);
-            result_queues_[STATSTIC_KNN_TIME].Push(static_cast<float>(time_cost));
-        }
+        result_queues_.at(STATSTIC_KNN_TIME).Push(static_cast<float>(time_cost));
 
         // return result
         if (results.empty()) {
@@ -419,15 +393,10 @@ HNSW::range_search(const DatasetPtr& query,
             return ret;
         }
 
-        if (use_static_) {
-            LOG_ERROR_AND_RETURNS(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                                  "static index does not support rangesearch");
-        }
-
         // check query vector
         CHECK_ARGUMENT(query->GetNumElements() == 1, "query dataset should contain 1 vector only");
         void* vector = nullptr;
-        size_t data_size = 0;
+        uint64_t data_size = 0;
         get_vectors(type_, dim_, query, &vector, &data_size);
         int64_t query_dim = query->GetDim();
         CHECK_ARGUMENT(
@@ -460,11 +429,7 @@ HNSW::range_search(const DatasetPtr& query,
                                   e.what());
         }
 
-        // update stats
-        {
-            std::lock_guard<std::mutex> lock(stats_mutex_);
-            result_queues_[STATSTIC_KNN_TIME].Push(static_cast<float>(time_cost));
-        }
+        result_queues_.at(STATSTIC_KNN_TIME).Push(static_cast<float>(time_cost));
 
         // return result
         auto target_size = static_cast<int64_t>(results.size());
@@ -525,7 +490,7 @@ HNSW::serialize() const {
     }
 
     SlowTaskTimer t("hnsw serialize");
-    size_t num_bytes = alg_hnsw_->calcSerializeSize();
+    uint64_t num_bytes = alg_hnsw_->calcSerializeSize();
     try {
         std::shared_ptr<int8_t[]> bin(new int8_t[num_bytes]);
         std::shared_lock lock(rw_mutex_);
@@ -589,7 +554,7 @@ HNSW::deserialize(const BinarySet& binary_set) {
     };
 
     try {
-        std::unique_lock lock(rw_mutex_);
+        std::scoped_lock lock(rw_mutex_);
         int64_t cursor = 0;
         ReadFuncStreamReader reader(func, cursor, b.size);
         BufferStreamReader buffer_reader(&reader, b.size, allocator_.get());
@@ -651,7 +616,7 @@ HNSW::deserialize(const ReaderSet& reader_set) {
     };
 
     try {
-        std::unique_lock lock(rw_mutex_);
+        std::scoped_lock lock(rw_mutex_);
 
         int64_t cursor = 0;
         ReadFuncStreamReader reader(func, cursor, hnsw_data->Size());
@@ -712,7 +677,7 @@ HNSW::deserialize(std::istream& in_stream) {
 
     SlowTaskTimer t("hnsw deserialize");
     try {
-        std::unique_lock lock(rw_mutex_);
+        std::scoped_lock lock(rw_mutex_);
 
         IOStreamReader reader(in_stream);
         auto footer = Footer::Parse(reader);
@@ -749,7 +714,6 @@ HNSW::GetStats() const {
     j[STATSTIC_MEMORY].SetInt(GetMemoryUsage());
 
     {
-        std::lock_guard<std::mutex> lock(stats_mutex_);
         for (auto& item : result_queues_) {
             j[item.first].SetFloat(item.second.GetAvgResult());
         }
@@ -763,11 +727,6 @@ HNSW::update_id(int64_t old_id, int64_t new_id) {
     if (not this->IsValidStatus()) {
         LOG_ERROR_AND_RETURNS(
             ErrorType::WRONG_STATUS, "index is in the wrong status({})", PrintStatus());
-    }
-
-    if (use_static_) {
-        LOG_ERROR_AND_RETURNS(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                              "static hnsw does not support update");
     }
 
     std::scoped_lock lock(rw_mutex_);
@@ -787,14 +746,9 @@ HNSW::update_id(int64_t old_id, int64_t new_id) {
 
 tl::expected<bool, Error>
 HNSW::update_vector(int64_t id, const DatasetPtr& new_base, bool force_update) {
-    if (use_static_) {
-        LOG_ERROR_AND_RETURNS(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                              "static hnsw does not support update");
-    }
-
     // the validation of the new vector
     void* new_base_vec = nullptr;
-    size_t data_size = 0;
+    uint64_t data_size = 0;
     get_vectors(type_, dim_, new_base, &new_base_vec, &data_size);
     auto index = std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_);
 
@@ -814,7 +768,8 @@ HNSW::update_vector(int64_t id, const DatasetPtr& new_base, bool force_update) {
         index->getNeighborsInternalId(internal_id, neighbors);
         for (auto neighbor_internal_id : neighbors) {
             // don't compare with itself
-            if (neighbor_internal_id == internal_id) {
+            if (neighbor_internal_id == internal_id or
+                index->isMarkedDeleted(neighbor_internal_id)) {
                 continue;
             }
 
@@ -838,33 +793,32 @@ HNSW::update_vector(int64_t id, const DatasetPtr& new_base, bool force_update) {
     return true;
 }
 
-tl::expected<bool, Error>
-HNSW::remove(int64_t id) {
+tl::expected<uint32_t, Error>
+HNSW::remove(const std::vector<int64_t>& ids) {
+    uint32_t remove_count = 0;
+
     std::shared_lock status_lock(index_status_mutex_);
     if (not this->IsValidStatus()) {
         LOG_ERROR_AND_RETURNS(
             ErrorType::WRONG_STATUS, "index is in the wrong status({})", PrintStatus());
     }
 
-    if (use_static_) {
-        LOG_ERROR_AND_RETURNS(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                              "static hnsw does not support remove");
-    }
+    for (auto id : ids) {
+        try {
+            std::scoped_lock lock(rw_mutex_);
 
-    try {
-        std::unique_lock lock(rw_mutex_);
-
-        if (use_reversed_edges_) {
-            std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)->removePoint(id);
-        } else {
-            std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)->markDelete(id);
+            if (use_reversed_edges_) {
+                std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)->removePoint(id);
+            } else {
+                std::reinterpret_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_)->markDelete(id);
+            }
+            ++remove_count;
+        } catch (const std::runtime_error& e) {
+            logger::warn("mark delete error for id {}: {}", id, e.what());
         }
-    } catch (const std::runtime_error& e) {
-        logger::warn("mark delete error for id {}: {}", id, e.what());
-        return false;
     }
 
-    return true;
+    return remove_count;
 }
 
 tl::expected<uint32_t, Error>
@@ -904,7 +858,7 @@ HNSW::feedback(const DatasetPtr& query,
                               result.error().message);
     }
 
-    std::unique_lock lock(rw_mutex_);
+    std::scoped_lock lock(rw_mutex_);
 
     return this->feedback(*result, global_optimum_tag_id, k);
 }
@@ -960,7 +914,7 @@ HNSW::brute_force(const DatasetPtr& query, int64_t k) {
         result->Distances(dists);
 
         void* vector = nullptr;
-        size_t data_size = 0;
+        uint64_t data_size = 0;
         get_vectors(type_, dim_, query, &vector, &data_size);
 
         std::shared_lock lock(rw_mutex_);
@@ -1017,10 +971,10 @@ HNSW::pretrain(const std::vector<int64_t>& base_tag_ids,
     } else {
         data_size = dim_ * 4;
     }
-    std::shared_ptr<int8_t[]> base_data(new int8_t[data_size]);
-    std::shared_ptr<int8_t[]> topk_data(new int8_t[data_size]);
+    std::unique_ptr<int8_t[]> base_data(new int8_t[data_size]);
+    std::unique_ptr<int8_t[]> topk_data(new int8_t[data_size]);
 
-    std::shared_ptr<int8_t[]> generated_data(new int8_t[data_size]);
+    std::unique_ptr<int8_t[]> generated_data(new int8_t[data_size]);
     set_dataset(type_, dim_, generated_query, generated_data.get(), 1);
 
     for (const int64_t& base_tag_id : base_tag_ids) {
@@ -1136,6 +1090,7 @@ HNSW::init_feature_list() {
     // other
     feature_list_.SetFeatures({IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID,
                                IndexFeature::SUPPORT_CHECK_ID_EXIST,
+                               IndexFeature::SUPPORT_GET_RAW_VECTOR_BY_IDS,
                                IndexFeature::SUPPORT_MERGE_INDEX,
                                IndexFeature::SUPPORT_ESTIMATE_MEMORY});
 }
@@ -1146,9 +1101,6 @@ HNSW::ExtractDataAndGraph(FlattenInterfacePtr& data,
                           Vector<LabelType>& ids,
                           const IdMapFunction& func,
                           Allocator* allocator) {
-    if (use_static_) {
-        return false;
-    }
     auto hnsw = std::static_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_);
     auto cur_element_count = hnsw->getCurrentElementCount();
     int64_t origin_data_num = data->total_count_;
@@ -1164,7 +1116,7 @@ HNSW::ExtractDataAndGraph(FlattenInterfacePtr& data,
         char* vector_data = hnsw->getDataByInternalId(i);
         data->InsertVector(reinterpret_cast<float*>(vector_data));
         int* link_data = (int*)hnsw->getLinklistAtLevel(i, 0);
-        size_t size = hnsw->getListCount((unsigned int*)link_data);
+        uint64_t size = hnsw->getListCount((unsigned int*)link_data);
         Vector<InnerIdType> edge(allocator);
         for (int j = 0; j < size; ++j) {
             if (not bitset->Test(*(link_data + 1 + j))) {
@@ -1180,9 +1132,6 @@ HNSW::ExtractDataAndGraph(FlattenInterfacePtr& data,
 
 bool
 HNSW::SetDataAndGraph(FlattenInterfacePtr& data, GraphInterfacePtr& graph, Vector<LabelType>& ids) {
-    if (use_static_) {
-        return false;
-    }
     auto hnsw = std::static_pointer_cast<hnswlib::HierarchicalNSW>(alg_hnsw_);
     hnsw->setDataAndGraph(data, graph, ids);
     return true;
@@ -1287,6 +1236,50 @@ HNSW::get_min_and_max_id() const {
     return alg_hnsw_->getMinAndMaxId();
 }
 
+tl::expected<DatasetPtr, Error>
+HNSW::get_vectors_by_id(const int64_t* ids, int64_t count, Allocator* specified_allocator) const {
+    std::shared_lock status_lock(index_status_mutex_);
+    std::shared_lock lock(rw_mutex_);
+    bool has_specified_allocator = specified_allocator != nullptr;
+    Allocator* allocator = has_specified_allocator ? specified_allocator : allocator_.get();
+
+    if (not this->IsValidStatus()) {
+        LOG_ERROR_AND_RETURNS(
+            ErrorType::WRONG_STATUS, "index is in the wrong status({})", PrintStatus());
+    }
+
+    DatasetPtr vectors = Dataset::Make();
+    vectors->NumElements(count)->Dim(dim_)->Owner(/*auto release=*/not has_specified_allocator,
+                                                  allocator);
+
+    uint32_t data_size = 0;
+    if (type_ == DataTypes::DATA_TYPE_INT8) {
+        data_size = dim_;
+    } else {
+        data_size = dim_ * 4;
+    }
+
+    auto* vectors_blob = allocator->Allocate(data_size * count);
+
+    if (type_ == DataTypes::DATA_TYPE_INT8) {
+        vectors->Int8Vectors((int8_t*)vectors_blob);
+    } else {
+        vectors->Float32Vectors((float*)vectors_blob);
+    }
+
+    for (auto i = 0; i < count; i++) {
+        try {
+            alg_hnsw_->copyDataByLabel(ids[i],
+                                       (char*)vectors_blob + static_cast<size_t>(i * data_size));
+        } catch (std::runtime_error& e) {
+            throw std::runtime_error(
+                fmt::format("fail to get vector by id({}): {}, ", ids[i], e.what()));
+        }
+    }
+
+    return vectors;
+}
+
 bool
 HNSW::check_id_exist(int64_t id) const {
     std::shared_lock status_lock(index_status_mutex_);
@@ -1357,8 +1350,20 @@ HNSW::knn_search_internal<std::function<bool(int64_t)>>(
 
 void
 HNSW::set_immutable() {
-    std::unique_lock lock(rw_mutex_);
+    std::scoped_lock lock(rw_mutex_);
     alg_hnsw_->setImmutable();
+}
+
+DetailDataPtr
+HNSW::get_detail_data_by_name(const std::string& name, IndexDetailInfo& info) const {
+    auto data = std::make_shared<DetailDataImpl>();
+    if (name == INDEX_DETAIL_DATA_TYPE) {
+        data->SetDataScalarString(ToString(type_));
+    } else {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "Index doesn't have detail data name: " + name);
+    }
+    return data;
 }
 
 }  // namespace vsag

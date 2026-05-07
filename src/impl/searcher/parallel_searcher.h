@@ -38,7 +38,8 @@ public:
            const VisitedListPtr& vl,
            const void* query,
            const InnerSearchParam& inner_search_param,
-           const LabelTablePtr& label_table = nullptr) const;
+           const LabelTablePtr& label_table = nullptr,
+           QueryContext* ctx = nullptr) const;
 
     void
     SetMutexArray(MutexArrayPtr new_mutex_array);
@@ -51,7 +52,7 @@ private:
           const VisitedListPtr& vl,
           const Vector<std::pair<float, uint64_t>>& node_pair,
           const FilterPtr& filter,
-          float skip_ratio,
+          FilterSearchSkipStrategy* skip_strategy,
           Vector<InnerIdType>& to_be_visited_rid,
           Vector<InnerIdType>& to_be_visited_id,
           std::vector<Vector<InnerIdType>>& neighbors,
@@ -64,7 +65,8 @@ private:
                 const VisitedListPtr& vl,
                 const void* query,
                 const InnerSearchParam& inner_search_param,
-                const LabelTablePtr& label_table = nullptr) const;
+                const LabelTablePtr& label_table = nullptr,
+                QueryContext* ctx = nullptr) const;
 
 private:
     Allocator* allocator_{nullptr};

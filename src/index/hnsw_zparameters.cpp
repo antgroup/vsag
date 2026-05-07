@@ -18,6 +18,7 @@
 #include <fmt/format.h>
 
 #include "vsag/constants.h"
+#include "vsag_exception.h"
 
 namespace vsag {
 
@@ -31,8 +32,10 @@ HnswParameters::FromJson(const JsonType& hnsw_param_obj,
     } else if (index_common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {
         obj.type = DataTypes::DATA_TYPE_INT8;
         if (index_common_param.metric_ != MetricType::METRIC_TYPE_IP) {
-            throw std::invalid_argument(fmt::format(
-                "no support for INT8 when using {}, {} as metric", METRIC_L2, METRIC_COSINE));
+            throw VsagException(
+                ErrorType::INVALID_ARGUMENT,
+                fmt::format(
+                    "no support for INT8 when using {}, {} as metric", METRIC_L2, METRIC_COSINE));
         }
     }
 
@@ -47,11 +50,11 @@ HnswParameters::FromJson(const JsonType& hnsw_param_obj,
 
     // set obj.max_degree
     CHECK_ARGUMENT(hnsw_param_obj.Contains(HNSW_PARAMETER_M),
-                   fmt::format("parameters[{}] must contains {}", INDEX_HNSW, HNSW_PARAMETER_M));
+                   fmt::format("parameters[{}] must contain {}", INDEX_HNSW, HNSW_PARAMETER_M));
     CHECK_ARGUMENT(hnsw_param_obj[HNSW_PARAMETER_M].IsNumberInteger(),
                    fmt::format("parameters[{}] must be integer type", HNSW_PARAMETER_M));
     obj.max_degree = hnsw_param_obj[HNSW_PARAMETER_M].GetInt();
-    auto max_degree_threshold = std::max(index_common_param.dim_, 128L);
+    auto max_degree_threshold = std::max<int64_t>(index_common_param.dim_, 128);
     CHECK_ARGUMENT(  // NOLINT
         (4 <= obj.max_degree) and (obj.max_degree <= max_degree_threshold),
         fmt::format("max_degree({}) must in range[4, {}]", obj.max_degree, max_degree_threshold));
@@ -59,21 +62,17 @@ HnswParameters::FromJson(const JsonType& hnsw_param_obj,
     // set obj.ef_construction
     CHECK_ARGUMENT(
         hnsw_param_obj.Contains(HNSW_PARAMETER_CONSTRUCTION),
-        fmt::format("parameters[{}] must contains {}", INDEX_HNSW, HNSW_PARAMETER_CONSTRUCTION));
+        fmt::format("parameters[{}] must contain {}", INDEX_HNSW, HNSW_PARAMETER_CONSTRUCTION));
     CHECK_ARGUMENT(hnsw_param_obj[HNSW_PARAMETER_CONSTRUCTION].IsNumberInteger(),
                    fmt::format("parameters[{}] must be integer type", HNSW_PARAMETER_CONSTRUCTION));
     obj.ef_construction = hnsw_param_obj[HNSW_PARAMETER_CONSTRUCTION].GetInt();
-    auto construction_threshold = std::max(1000L, AMPLIFICATION_FACTOR * obj.max_degree);
+    auto construction_threshold = std::max<int64_t>(1000, AMPLIFICATION_FACTOR * obj.max_degree);
     CHECK_ARGUMENT((obj.max_degree <= obj.ef_construction) and  // NOLINT
                        (obj.ef_construction <= construction_threshold),
                    fmt::format("ef_construction({}) must in range[$max_degree({}), {}]",
                                obj.ef_construction,
                                obj.max_degree,
                                construction_threshold));
-
-    // set obj.use_static
-    obj.use_static = hnsw_param_obj.Contains(HNSW_PARAMETER_USE_STATIC) &&
-                     hnsw_param_obj[HNSW_PARAMETER_USE_STATIC].GetBool();
 
     // set obj.use_conjugate_graph
     if (hnsw_param_obj.Contains(PARAMETER_USE_CONJUGATE_GRAPH)) {
@@ -97,13 +96,14 @@ HnswSearchParameters::FromJson(const std::string& json_string) {
     } else if (params.Contains(INDEX_FRESH_HNSW)) {
         index_name = INDEX_FRESH_HNSW;
     } else {
-        throw std::invalid_argument(
-            fmt::format("parameters must contains {}/{}", INDEX_HNSW, INDEX_FRESH_HNSW));
+        throw VsagException(
+            ErrorType::INVALID_ARGUMENT,
+            fmt::format("parameters must contain {}/{}", INDEX_HNSW, INDEX_FRESH_HNSW));
     }
 
     CHECK_ARGUMENT(
         params[index_name].Contains(HNSW_PARAMETER_EF_RUNTIME),
-        fmt::format("parameters[{}] must contains {}", index_name, HNSW_PARAMETER_EF_RUNTIME));
+        fmt::format("parameters[{}] must contain {}", index_name, HNSW_PARAMETER_EF_RUNTIME));
     obj.ef_search = params[index_name][HNSW_PARAMETER_EF_RUNTIME].GetInt();
 
     // set obj.use_conjugate_graph search
@@ -117,6 +117,13 @@ HnswSearchParameters::FromJson(const std::string& json_string) {
     if (params[index_name].Contains(HNSW_PARAMETER_SKIP_RATIO)) {
         obj.skip_ratio = params[index_name][HNSW_PARAMETER_SKIP_RATIO].GetFloat();
     }
+    if (params[index_name].Contains(HNSW_PARAMETER_SKIP_STRATEGY)) {
+        CHECK_ARGUMENT(
+            params[index_name][HNSW_PARAMETER_SKIP_STRATEGY].IsString(),
+            fmt::format("parameters[{}] must be string type", HNSW_PARAMETER_SKIP_STRATEGY));
+        obj.skip_strategy_type = parse_filter_search_skip_strategy_type(
+            params[index_name][HNSW_PARAMETER_SKIP_STRATEGY].GetString());
+    }
 
     return obj;
 }
@@ -125,7 +132,6 @@ HnswParameters
 FreshHnswParameters::FromJson(const JsonType& hnsw_param_obj,
                               const IndexCommonParam& index_common_param) {
     auto obj = HnswParameters::FromJson(hnsw_param_obj, index_common_param);
-    obj.use_static = false;
     // set obj.use_reversed_edges
     obj.use_reversed_edges = true;
     return obj;

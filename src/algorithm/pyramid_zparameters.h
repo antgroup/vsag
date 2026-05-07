@@ -53,6 +53,9 @@ public:
     int64_t max_degree{64};
     std::string graph_type{GRAPH_TYPE_VALUE_NSW};
     float alpha{1.2F};
+    uint32_t index_min_size{0};
+
+    bool support_duplicate{false};
 };
 
 class PyramidSearchParameters : public IndexSearchParameter {
@@ -61,7 +64,8 @@ public:
     FromJson(const std::string& json_string);
 
 public:
-    int64_t ef_search{100};
+    uint64_t ef_search{100};
+    uint64_t subindex_ef_search{50};
 
 private:
     PyramidSearchParameters() = default;

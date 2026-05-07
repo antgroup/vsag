@@ -24,6 +24,7 @@
 
 #include "direct_io_object.h"
 #include "io_context.h"
+#include "io_syscall.h"
 
 namespace vsag {
 
@@ -66,8 +67,8 @@ AsyncIO::~AsyncIO() {
 
 void
 AsyncIO::WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset) {
-    auto ret = pwrite64(this->wfd_, data, size, static_cast<int64_t>(offset));
-    if (ret != size) {
+    auto ret = IOSyscall::PWrite(this->wfd_, data, size, offset);
+    if (ret != static_cast<ssize_t>(size)) {
         throw VsagException(ErrorType::INTERNAL_ERROR,
                             fmt::format("write bytes {} less than {}", ret, size));
     }
@@ -75,6 +76,15 @@ AsyncIO::WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset) {
         this->size_ = size + offset;
     }
     fsync(wfd_);
+}
+
+void
+AsyncIO::ResizeImpl(uint64_t size) {
+    auto ret = IOSyscall::FTruncate(this->wfd_, size);
+    if (ret == -1) {
+        throw VsagException(ErrorType::INTERNAL_ERROR, "ftruncate failed");
+    }
+    this->size_ = size;
 }
 
 bool
@@ -96,9 +106,9 @@ AsyncIO::DirectReadImpl(uint64_t size, uint64_t offset, bool& need_release) cons
         return nullptr;
     }
     DirectIOObject obj(size, offset);
-    auto ret = pread64(this->rfd_, obj.align_data, obj.size, static_cast<int64_t>(obj.offset));
+    auto ret = IOSyscall::PRead(this->rfd_, obj.align_data, obj.size, obj.offset);
     if (ret < 0) {
-        throw VsagException(ErrorType::INTERNAL_ERROR, fmt::format("pread64 error {}", ret));
+        throw VsagException(ErrorType::INTERNAL_ERROR, fmt::format("pread error {}", ret));
     }
     return obj.data;
 }

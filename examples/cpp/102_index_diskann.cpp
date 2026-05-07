@@ -30,7 +30,7 @@ main(int argc, char** argv) {
 
     std::mt19937 rng;
     rng.seed(47);
-    std::uniform_real_distribution<> distrib_real;
+    std::uniform_real_distribution<float> distrib_real;
     for (int64_t i = 0; i < num_vectors; ++i) {
         ids[i] = i;
     }
@@ -121,7 +121,7 @@ main(int argc, char** argv) {
     }
 
     /******************* Serialize and Clean Index *****************/
-    std::unordered_map<std::string, size_t> meta_info;
+    std::unordered_map<std::string, uint64_t> meta_info;
     {
         if (auto bs = index->Serialize(); bs.has_value()) {
             index = nullptr;

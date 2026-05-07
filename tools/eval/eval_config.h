@@ -43,6 +43,7 @@ public:
     std::string search_mode{"knn"};
     int top_k{10};
     float radius{0.5F};
+    uint64_t search_query_count{100'000L};
     bool delete_index_after_search{false};
 
     int32_t num_threads_building{1};

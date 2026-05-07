@@ -13,15 +13,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "fp16_quantizer.h"
-
-#include <catch2/catch_test_macros.hpp>
 #include <vector>
 
-#include "fixtures.h"
+#include "half_precision_quantizer.h"
 #include "impl/allocator/safe_allocator.h"
 #include "quantization/quantizer_test.h"
-
+#include "unittest.h"
 using namespace vsag;
 
 const auto dims = fixtures::get_common_used_dims(3, 225);

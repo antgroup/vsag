@@ -16,15 +16,15 @@
 #include "elias_fano_encoder.h"
 
 #include <algorithm>
-#include <catch2/catch_test_macros.hpp>
 #include <random>
 
 #include "impl/allocator/safe_allocator.h"
+#include "unittest.h"
 
 namespace vsag {
 
 TEST_CASE("EliasFanoEncoder, original seq equal to decoded seq", "[ut][EliasFanoEncoder]") {
-    const size_t max_size = 250;
+    const uint64_t max_size = 250;
     const int max_id = 1000000;
 
     std::random_device rd;
@@ -39,7 +39,7 @@ TEST_CASE("EliasFanoEncoder, original seq equal to decoded seq", "[ut][EliasFano
         values.reserve(size);
 
         // generate an ordered seq with length ${size}
-        for (size_t i = 0; i < size; i++) {
+        for (uint64_t i = 0; i < size; i++) {
             values.push_back(dist(gen));
         }
         std::sort(values.begin(), values.end());
@@ -51,7 +51,7 @@ TEST_CASE("EliasFanoEncoder, original seq equal to decoded seq", "[ut][EliasFano
         Vector<InnerIdType> decompressed(allocator.get());
         encoder->DecompressAll(decompressed);
         REQUIRE(decompressed.size() == values.size());
-        for (size_t i = 0; i < values.size(); i++) {
+        for (uint64_t i = 0; i < values.size(); i++) {
             REQUIRE(decompressed[i] == values[i]);
         }
     }

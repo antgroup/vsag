@@ -36,13 +36,18 @@ public:
     ~SparseIndex() override;
 
     std::vector<int64_t>
-    Add(const DatasetPtr& base) override;
+    Add(const DatasetPtr& base, AddMode mode = AddMode::DEFAULT) override;
 
     DatasetPtr
-    CalDistanceById(const DatasetPtr& query, const int64_t* ids, int64_t count) const override;
+    CalDistanceById(const DatasetPtr& query,
+                    const int64_t* ids,
+                    int64_t count,
+                    bool calculate_precise_distance = true) const override;
 
     float
-    CalcDistanceById(const DatasetPtr& vector, int64_t id) const override;
+    CalcDistanceById(const DatasetPtr& vector,
+                     int64_t id,
+                     bool calculate_precise_distance = true) const override;
 
     void
     Deserialize(StreamReader& reader) override;
@@ -53,7 +58,9 @@ public:
     }
 
     void
-    GetSparseVectorByInnerId(InnerIdType inner_id, SparseVector* data) const override;
+    GetSparseVectorByInnerId(InnerIdType inner_id,
+                             SparseVector* data,
+                             Allocator* specified_allocator) const override;
 
     IndexType
     GetIndexType() const override {
@@ -93,6 +100,9 @@ public:
     CalDistanceByIdUnsafe(Vector<uint32_t>& sorted_ids,
                           Vector<float>& sorted_vals,
                           uint32_t inner_id) const;
+
+    int64_t
+    GetMemoryUsage() const override;
 
     DatasetPtr
     collect_results(const DistHeapPtr& results) const;

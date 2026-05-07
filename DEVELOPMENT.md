@@ -27,7 +27,10 @@ docker pull vsaglib/vsag:ubuntu
 - Compiler:
   - GCC version 9.4.0 or later
   - or Clang version 13.0.0 or later
-- Build Tools: CMake version 3.18.0 or later
+- Build Tools: 
+  - CMake version 3.18.0 or later
+  - clang-tidy version 15 EXACTLY (not higher, not lower - required for consistent lint diagnostics)
+  - clang-format version 15 EXACTLY (not higher, not lower - required for consistent formatting)
 - Additional Dependencies:
   - gfortran
   - python 3.6+
@@ -53,6 +56,7 @@ help:                    ## Show the help.
 ##
 ## ================ development ================
 debug:                   ## Build vsag with debug options.
+dev:                     ## Build full developer configuration.
 test:                    ## Build and run unit tests.
 asan:                    ## Build with AddressSanitizer option.
 test_asan: asan          ## Run unit tests with AddressSanitizer option.
@@ -63,18 +67,80 @@ clean:                   ## Clear build/ directory.
 ## ================ integration ================
 fmt:                     ## Format codes.
 cov:                     ## Build unit tests with code coverage enabled.
-test_parallel: debug     ## Run all tests parallel (used in CI).
+lint:                    ## Check coding styles defined in `.clang-tidy`.
+fix-lint:                ## Fix coding style issues in-place via clang-apply-replacements (destructive).
+test_parallel:           ## Run all tests parallel (used in CI).
 test_asan_parallel: asan ## Run unit tests parallel with AddressSanitizer option.
 test_tsan_parallel: tsan ## Run unit tests parallel with ThreadSanitizer option.
 ##
 ## ================ distribution ================
 release:                 ## Build vsag with release options.
-distribution:            ## Build vsag with distribution options.
-libcxx:                  ## Build vsag using libc++.
-pyvsag:                  ## Build pyvsag wheel.
+run-dist-tests:          ## Run distribution tests.
+dist-pre-cxx11-abi:      ## Build vsag with distribution options (pre C++11 ABI).
+dist-cxx11-abi:          ## Build vsag with distribution options (C++11 ABI).
+dist-libcxx:             ## Build vsag using libc++.
+pyvsag:                  ## Build a specific Python version wheel. Usage: make pyvsag PY_VERSION=3.10
+pyvsag-all:              ## Build wheels for all supported versions.
 clean-release:           ## Clear build-release/ directory.
 install:                 ## Build and install the release version of vsag.
 ```
+
+Build target behavior:
+
+- `make debug` builds the default minimal configuration. It does not enable tests, examples, tools, Python bindings, or `mockimpl` unless they are explicitly turned on.
+- `make dev` builds the full developer configuration with tests, examples, tools, Python bindings, and `mockimpl` enabled.
+- `make test`, `make asan`, `make tsan`, and the related parallel test targets automatically enable tests and `mockimpl`.
+- `make release` follows the same minimal defaults as `make debug`. Enable optional components explicitly when needed, for example `make release VSAG_ENABLE_TOOLS=ON`.
+
+## CMake Build Options
+
+VSAG provides several CMake options to customize the build:
+
+### BLAS Library Options
+
+- **`ENABLE_INTEL_MKL`** (default: `OFF`)
+  - Enable Intel MKL as the BLAS backend (x86_64 platforms only)
+  - When disabled, OpenBLAS is used instead
+  - MKL resolution uses `MKL_PATH`, `OMP_PATH`, and `MKL_INCLUDE_PATH` as CMake cache overrides when the libraries are not installed in standard locations
+
+- **`USE_SYSTEM_OPENBLAS`** (default: `OFF`)
+  - Use system-installed OpenBLAS instead of building from source
+  - Requires `libopenblas-dev` and `liblapacke-dev` to be installed
+  - Falls back to building from source if system OpenBLAS is not found
+  - Example:
+    ```bash
+    # Install OpenBLAS on Ubuntu/Debian
+    sudo apt-get install libopenblas-dev liblapacke-dev
+    
+    # Build with system OpenBLAS
+     cmake -DUSE_SYSTEM_OPENBLAS=ON -DENABLE_INTEL_MKL=OFF -B build
+     cmake --build build
+     ```
+
+### Third-Party Source Overrides
+
+- **`VSAG_THIRDPARTY_OPENBLAS`**
+  - Override the OpenBLAS source archive URL/path used by `ExternalProject_Add`
+  - Useful for offline builds, local mirrors, or pre-downloaded archives
+
+### Other Build Options
+
+- **`ENABLE_TESTS`** (default: `OFF`)
+  - Build unit tests and functional tests
+
+- **`ENABLE_EXAMPLES`** (default: `OFF`)
+  - Build C++ example programs under `examples/cpp/`
+
+- **`ENABLE_TOOLS`** (default: `OFF`)
+  - Build tools under `tools/`
+
+- **`ENABLE_PYBINDS`** (default: `OFF`)
+  - Build the `_pyvsag` Python extension module
+
+- **`ENABLE_MOCKIMPL`** (default: `OFF`)
+  - Build the `mockimpl` targets used by interface and compatibility-style testing
+
+For a complete list of build options, see the `option()` directives in `cmake/VSAGOptions.cmake`.
 
 ## Project Structure
 - `cmake/`: cmake util functions

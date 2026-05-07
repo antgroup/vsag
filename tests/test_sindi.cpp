@@ -16,7 +16,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 
-#include "fixtures/test_dataset_pool.h"
+#include "functest.h"
 #include "test_index.h"
 
 namespace fixtures {
@@ -26,7 +26,10 @@ struct SINDIParam {
     float doc_prune_ratio = 0.0;
     int window_size = 10000;
     bool deserialize_without_footer = false;
+    bool deserialize_without_buffer = false;
     int term_id_limit = 2000;
+    bool use_quantization = false;
+    bool remap_term_ids = false;
 };
 
 class SINDITestIndex : public fixtures::TestIndex {
@@ -55,7 +58,10 @@ public:
                 "doc_prune_ratio": {},
                 "window_size": {},
                 "term_id_limit": {},
-                "deserialize_without_footer": {}
+                "deserialize_without_footer": {},
+                "deserialize_without_buffer": {},
+                "use_quantization": {},
+                "remap_term_ids": {}
             }}
         }})";
         return fmt::format(build_param_template,
@@ -63,7 +69,25 @@ public:
                            param.doc_prune_ratio,
                            param.window_size,
                            param.term_id_limit,
-                           param.deserialize_without_footer);
+                           param.deserialize_without_footer,
+                           param.deserialize_without_buffer,
+                           param.use_quantization,
+                           param.remap_term_ids);
+    }
+
+    static std::string
+    GenerateSearchParameter(bool use_term_lists_heap_insert) {
+        constexpr static const char* search_param_template = R"(
+        {{
+            "sindi":
+            {{
+                "n_candidate": 20,
+                "query_prune_ratio": 0.0,
+                "term_prune_ratio": 0.0,
+                "use_term_lists_heap_insert": {}
+            }}
+        }})";
+        return fmt::format(search_param_template, use_term_lists_heap_insert);
     }
 };
 TestDatasetPool SINDITestIndex::pool{};
@@ -72,7 +96,7 @@ TestDatasetPool SINDITestIndex::pool{};
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
                              "Invalid Build and Search Parameter",
-                             "[ft][sindi]") {
+                             "[ft][build][search][sindi]") {
     SECTION("invalid doc_prune_ratio") {
         fixtures::SINDIParam param;
         param.doc_prune_ratio = 0.99;
@@ -157,7 +181,9 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
     REQUIRE_FALSE(search_result.has_value());
 }
 
-TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Build and Search", "[ft][sindi]") {
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
+                             "SINDI Build and Search",
+                             "[ft][build][search][sindi]") {
     fixtures::SINDIParam param;
     param.use_reorder = GENERATE(true, false);
     auto build_param = fixtures::SINDITestIndex::GenerateBuildParameter(param);
@@ -175,14 +201,18 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Build and Search",
     TestGetMinAndMaxId(index, dataset, true);
     TestCalcDistanceById(index, dataset, 1e-4, true, true);
     TestBatchCalcDistanceById(index, dataset, 1e-4, true, true);
+    TestUpdateVectorSparse(index, dataset, true);
     TestUpdateId(index, dataset, search_param, true);
     TestEstimateMemory("sindi", build_param, dataset);
     TestIndexStatus(index);
 }
 
-TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Concurrent", "[ft][sindi]") {
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
+                             "SINDI Concurrent",
+                             "[ft][concurrent][sindi]") {
     fixtures::SINDIParam param;
     param.use_reorder = GENERATE(true, false);
+    param.remap_term_ids = GENERATE(true, false);
     auto build_param = fixtures::SINDITestIndex::GenerateBuildParameter(param);
     auto index = TestFactory("sindi", build_param, true);
     auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
@@ -190,11 +220,18 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Concurrent", "[ft]
     TestConcurrentAddSearch(index, dataset, search_param, 0.99, true);
 }
 
-TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Serialize File", "[ft][sindi]") {
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
+                             "SINDI Serialize File",
+                             "[ft][serialize][sindi]") {
     fixtures::SINDIParam param;
     param.deserialize_without_footer = GENERATE(true, false);
+    param.deserialize_without_buffer = true;
     param.use_reorder = GENERATE(true, false);
+    param.use_quantization = GENERATE(true, false);
+    param.remap_term_ids = GENERATE(true, false);
     auto build_param = fixtures::SINDITestIndex::GenerateBuildParameter(param);
+    auto search_param_with_heap_insert =
+        fixtures::SINDITestIndex::GenerateSearchParameter(GENERATE(true, false));
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("ip");
@@ -212,15 +249,43 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Serialize File", "
     TestBuildIndex(index, dataset, true);
     SECTION("serialize/deserialize by binary") {
         auto index2 = TestFactory(name, build_param, true);
-        TestSerializeBinarySet(index, index2, dataset, search_param, true);
+        TestSerializeBinarySet(index, index2, dataset, search_param_with_heap_insert, true);
     }
     SECTION("serialize/deserialize by readerset") {
         auto index2 = TestFactory(name, build_param, true);
-        TestSerializeReaderSet(index, index2, dataset, search_param, name, true);
+        TestSerializeReaderSet(index, index2, dataset, search_param_with_heap_insert, name, true);
     }
     SECTION("serialize/deserialize by file") {
         auto index2 = TestFactory(name, build_param, true);
-        TestSerializeFile(index, index2, dataset, search_param, true);
+        TestSerializeFile(index, index2, dataset, search_param_with_heap_insert, true);
     }
     vsag::Options::Instance().set_block_size_limit(origin_size);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
+                             "Sindi Duplicate ID Test",
+                             "[ft][build][duplicate][sindi]") {
+    fixtures::SINDIParam param;
+    param.use_reorder = GENERATE(true, false);
+    param.remap_term_ids = GENERATE(true, false);
+    auto build_param = fixtures::SINDITestIndex::GenerateBuildParameter(param);
+    auto index = TestFactory("sindi", build_param, true);
+    auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
+    TestDuplicateAdd(index, dataset);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
+                             "SINDI Remap Build and Search",
+                             "[ft][build][search][sindi]") {
+    fixtures::SINDIParam param;
+    param.use_reorder = GENERATE(true, false);
+    param.remap_term_ids = true;
+    auto build_param = fixtures::SINDITestIndex::GenerateBuildParameter(param);
+    auto index = TestFactory("sindi", build_param, true);
+    auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
+    REQUIRE(index->GetIndexType() == vsag::IndexType::SINDI);
+    TestBuildIndex(index, dataset, true);
+    TestKnnSearch(index, dataset, search_param, 0.99, true);
+    TestRangeSearch(index, dataset, search_param, 0.99, 10, true);
+    TestFilterSearch(index, dataset, search_param, 0.99, true);
 }

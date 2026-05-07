@@ -15,13 +15,13 @@
 
 #include "inner_index_interface.h"
 
-#include <catch2/catch_test_macros.hpp>
 #include <memory>
 #include <sstream>
 
 #include "brute_force.h"
 #include "hgraph.h"
 #include "impl/allocator/safe_allocator.h"
+#include "unittest.h"
 
 using namespace vsag;
 
@@ -71,8 +71,7 @@ TEST_CASE("Fast Create Index", "[ut][InnerIndexInterface]") {
 
 class EmptyInnerIndex : public InnerIndexInterface {
 public:
-    EmptyInnerIndex() : InnerIndexInterface() {
-    }
+    EmptyInnerIndex() = default;
 
     std::string
     GetName() const override {
@@ -86,11 +85,10 @@ public:
 
     void
     InitFeatures() override {
-        return;
     }
 
     std::vector<int64_t>
-    Add(const DatasetPtr& base) override {
+    Add(const DatasetPtr& base, AddMode mode) override {
         return {};
     }
 
@@ -113,12 +111,10 @@ public:
 
     void
     Serialize(StreamWriter& writer) const override {
-        return;
     }
 
     void
     Deserialize(StreamReader& reader) override {
-        return;
     }
 
     int64_t

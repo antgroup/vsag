@@ -33,6 +33,12 @@ SparseGraphDatacellParameter::FromJson(const JsonType& json) {
     if (json.Contains(REMOVE_FLAG_BIT)) {
         this->remove_flag_bit_ = static_cast<uint32_t>(json[REMOVE_FLAG_BIT].GetInt());
     }
+    if (json.Contains(SUPPORT_DUPLICATE)) {
+        this->support_duplicate_ = json[SUPPORT_DUPLICATE].GetBool();
+    }
+    if (json.Contains(HGRAPH_USE_REVERSE_EDGES_KEY)) {
+        this->use_reverse_edges_ = json[HGRAPH_USE_REVERSE_EDGES_KEY].GetBool();
+    }
 }
 
 JsonType
@@ -41,6 +47,8 @@ SparseGraphDatacellParameter::ToJson() const {
     json[GRAPH_PARAM_MAX_DEGREE_KEY].SetInt(this->max_degree_);
     json[GRAPH_SUPPORT_REMOVE].SetBool(this->support_delete_);
     json[REMOVE_FLAG_BIT].SetInt(this->remove_flag_bit_);
+    json[SUPPORT_DUPLICATE].SetBool(this->support_duplicate_);
+    json[HGRAPH_USE_REVERSE_EDGES_KEY].SetBool(this->use_reverse_edges_);
     return json;
 }
 
@@ -72,6 +80,22 @@ SparseGraphDatacellParameter::CheckCompatibility(const ParamPtr& other) const {
             "SparseGraphDatacellParameter::CheckCompatibility: remove_flag_bit_ mismatch: {} vs {}",
             remove_flag_bit_,
             graph_param->remove_flag_bit_);
+        return false;
+    }
+    if (support_duplicate_ != graph_param->support_duplicate_) {
+        logger::error(
+            "SparseGraphDatacellParameter::CheckCompatibility: support_duplicate_ mismatch: {} vs "
+            "{}",
+            support_duplicate_,
+            graph_param->support_duplicate_);
+        return false;
+    }
+    if (use_reverse_edges_ != graph_param->use_reverse_edges_) {
+        logger::error(
+            "SparseGraphDatacellParameter::CheckCompatibility: use_reverse_edges_ mismatch: {} "
+            "vs {}",
+            use_reverse_edges_,
+            graph_param->use_reverse_edges_);
         return false;
     }
     return true;

@@ -15,17 +15,14 @@
 
 #include "transform_quantizer.h"
 
-#include <catch2/catch_test_macros.hpp>
-#include <catch2/generators/catch_generators.hpp>
 #include <vector>
 
-#include "fixtures.h"
 #include "impl/allocator/safe_allocator.h"
 #include "quantization/quantizer_test.h"
-
+#include "unittest.h"
 using namespace vsag;
 
-const auto dims = fixtures::get_common_used_dims(10, 114);
+const auto dims = fixtures::get_common_used_dims(3, 114);
 const auto counts = {101, 1001};
 
 template <typename T, MetricType metric>
@@ -33,13 +30,14 @@ void
 TestComputeMetricTQ(std::string tq_chain, uint64_t dim, int count, float error = 2.0) {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     auto param = std::make_shared<TransformQuantizerParameter>();
-    constexpr static const char* param_template = R"(
+    static constexpr const char* param_template = R"(
         {{
             "tq_chain": "{}",
-            "pca_dim": {}
+            "pca_dim": {},
+            "mrle_dim": {}
         }}
     )";
-    auto param_str = fmt::format(param_template, tq_chain, dim - 1);
+    auto param_str = fmt::format(param_template, tq_chain, dim, dim - 1);
     auto param_json = vsag::JsonType::Parse(param_str);
     param->FromJson(param_json);
 
@@ -63,13 +61,14 @@ TestSerializeDeserializeTQ(std::string tq_chain, uint64_t dim, int count) {
 
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     auto param = std::make_shared<TransformQuantizerParameter>();
-    constexpr static const char* param_template = R"(
+    static constexpr const char* param_template = R"(
                 {{
                     "tq_chain": "{}",
-                    "pca_dim": {}
+                    "pca_dim": {},
+                    "mrle_dim": {}
                 }}
             )";
-    auto param_str = fmt::format(param_template, tq_chain, dim - 2);
+    auto param_str = fmt::format(param_template, tq_chain, dim, dim - 1);
     auto param_json = vsag::JsonType::Parse(param_str);
     param->FromJson(param_json);
 
@@ -92,7 +91,7 @@ TestSerializeDeserializeTQ(std::string tq_chain, uint64_t dim, int count) {
 
 TEST_CASE("TQ Compute", "[ut][TransformQuantizer]") {
     constexpr MetricType metrics[1] = {MetricType::METRIC_TYPE_L2SQR};
-    std::string tq_chain = GENERATE("rom, pca, fp32", "rom, fp32", "fht, fp32");
+    std::string tq_chain = GENERATE("rom, pca, fp32", "rom, fp32", "fht, fp32", "mrle, fp32");
 
     for (auto dim : dims) {
         if (dim < 100) {

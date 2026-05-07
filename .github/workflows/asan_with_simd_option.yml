@@ -5,10 +5,6 @@ on:
     paths:
       - 'src/simd/**'
     branches: [ "main", "0.*" ]
-  pull_request:
-    paths:
-      - 'src/simd/**'
-    branches: [ "main", "0.*" ]
   workflow_dispatch:
 
 jobs:
@@ -28,11 +24,11 @@ jobs:
           "generic;-DDISABLE_SSE_FORCE=1",
         ]
     concurrency:
-      group: build-${{ matrix.simd_option }}-${{ github.event.pull_request.number }}
+      group: build-${{ matrix.simd_option }}-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
       - name: Free Disk Space
-        run: rm -rf /useless/hostedtoolcache
+        run: rm -rf /useless/*
       - uses: actions/checkout@v4
       - name: Load Cache
         uses: hendrikmuhs/ccache-action@v1.2
@@ -47,7 +43,7 @@ jobs:
           echo ${EXTRA_DEFINED}
           echo ${EXTRA_KEY}
           echo "SIMD_KEY=${EXTRA_KEY}" >> $GITHUB_ENV
-          export CMAKE_GENERATOR="Ninja"; make asan
+          export VSAG_ENABLE_INTEL_MKL=ON CMAKE_GENERATOR="Ninja"; make asan COMPILE_JOBS=4
       - name: Clean
         run: find ./build -type f -name "*.o" -exec rm -f {} +
       - name: Save Test
@@ -56,7 +52,7 @@ jobs:
           path: ./build
           name: test-x86-${{ env.SIMD_KEY }}-${{ github.run_id }}
           compression-level: 1
-          retention-days: 1
+          retention-days: 3
           overwrite: 'true'
 
   test_asan_simd:
@@ -73,7 +69,7 @@ jobs:
           generic
         ]
     concurrency:
-      group: test-${{ matrix.simd_key }}-${{ matrix.test_type }}-${{ github.event.pull_request.number }}
+      group: test-${{ matrix.simd_key }}-${{ matrix.test_type }}-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     container:
       image: vsaglib/vsag:ci-x86
@@ -81,7 +77,7 @@ jobs:
         - /opt:/useless
     steps:
       - name: Free Disk Space
-        run: rm -rf /useless/hostedtoolcache
+        run: rm -rf /useless/*
       - uses: actions/checkout@v4
       - name: Clean Env
         run: rm -rf ./build
@@ -118,5 +114,5 @@ jobs:
           path: /tmp/clean_up
           name: test-x86-${{ matrix.simd_key }}-${{ github.run_id }}
           compression-level: 1
-          retention-days: 1
+          retention-days: 3
           overwrite: 'true'

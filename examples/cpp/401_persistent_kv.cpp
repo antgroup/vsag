@@ -28,7 +28,7 @@
 
 class LocalKvStore {
 public:
-    LocalKvStore(const std::string& path) : path_(path), meta_filename_(path + "/" + "_meta") {
+    LocalKvStore(const std::string& path) : path_(path), keys_filename_(path + "/" + "_keys") {
         struct stat info;
         if (stat(path.c_str(), &info) != 0) {
             if (mkdir(path.c_str(), 0755) != 0) {
@@ -51,17 +51,17 @@ public:
         value_file.write(value.c_str(), value.length());
         value_file.close();
 
-        // update metadata if it's a new key
+        // update keys if it's a new key
         auto keys = GetKeys();
         if (not keys.count(key)) {
             keys.insert(key);
-            std::ofstream new_meta_file(meta_filename_);
+            std::ofstream new_keys_file(keys_filename_);
             while (not keys.empty()) {
                 auto key = *keys.begin();
-                new_meta_file << key << std::endl;
+                new_keys_file << key << std::endl;
                 keys.erase(key);
             }
-            new_meta_file.close();
+            new_keys_file.close();
         }
     }
 
@@ -89,21 +89,21 @@ public:
 
     std::unordered_set<std::string>
     GetKeys() {
-        std::ifstream meta_file(meta_filename_);
-        if (not meta_file.is_open()) {
+        std::ifstream keys_file(keys_filename_);
+        if (not keys_file.is_open()) {
             return {};
         }
         std::unordered_set<std::string> keys;
         std::string line;
-        while (std::getline(meta_file, line)) {
+        while (std::getline(keys_file, line)) {
             keys.insert(line);
         }
-        meta_file.close();
+        keys_file.close();
         return keys;
     }
 
 private:
-    const std::string meta_filename_;
+    const std::string keys_filename_;
     const std::string path_;
     std::mutex mutex_;
 };
@@ -118,7 +118,7 @@ main(int32_t argc, char** argv) {
 
     std::mt19937 rng;
     rng.seed(47);
-    std::uniform_real_distribution<> distrib_real;
+    std::uniform_real_distribution<float> distrib_real;
     for (uint32_t i = 0; i < num_vectors; ++i) {
         ids[i] = i;
     }
@@ -150,7 +150,7 @@ main(int32_t argc, char** argv) {
     }
 
     auto base = vsag::Dataset::Make();
-    base->NumElements(num_vectors)->Dim(dim)->Ids(ids)->Float32Vectors(vectors)->Owner(false);
+    base->NumElements(num_vectors)->Dim(dim)->Ids(ids)->Float32Vectors(vectors)->Owner(true);
     if (auto build_index = index->Build(base); not build_index.has_value()) {
         std::cerr << "build index failed: " << build_index.error().message << std::endl;
         abort();
@@ -208,7 +208,7 @@ main(int32_t argc, char** argv) {
         query_vector[i] = distrib_real(rng);
     }
     auto query = vsag::Dataset::Make();
-    query->NumElements(1)->Dim(dim)->Float32Vectors(query_vector)->Owner(false);
+    query->NumElements(1)->Dim(dim)->Float32Vectors(query_vector)->Owner(true);
     auto search_parameters = R"(
     {
         "hnsw": {

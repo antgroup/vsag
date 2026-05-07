@@ -164,7 +164,7 @@ private:
 
         for (const char& byte : bytes) {
             crc ^= byte;
-            for (size_t j = 0; j < 8; ++j) {
+            for (uint64_t j = 0; j < 8; ++j) {
                 crc = (crc >> 1) ^ ((crc & 1) == 1 ? polynomial : 0);
             }
         }

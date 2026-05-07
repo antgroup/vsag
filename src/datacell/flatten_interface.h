@@ -24,6 +24,7 @@
 #include "index_common_param.h"
 #include "io/reader_io.h"
 #include "quantization/computer.h"
+#include "query_context.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "typing.h"
@@ -31,6 +32,7 @@
 #include "vsag/constants.h"
 
 namespace vsag {
+
 DEFINE_POINTER(FlattenInterface);
 
 class FlattenInterface {
@@ -46,7 +48,7 @@ public:
           const ComputerInterfacePtr& computer,
           const InnerIdType* idx,
           InnerIdType id_count,
-          Allocator* allocator = nullptr) = 0;
+          QueryContext* ctx = nullptr) = 0;
 
     virtual ComputerInterfacePtr
     FactoryComputer(const void* query) = 0;
@@ -69,6 +71,21 @@ public:
     virtual float
     ComputePairVectors(InnerIdType id1, InnerIdType id2) = 0;
 
+    bool
+    CompareVectors(InnerIdType id1, InnerIdType id2) {
+        bool release1, release2;
+        const auto* codes1 = this->GetCodesById(id1, release1);
+        const auto* codes2 = this->GetCodesById(id2, release2);
+        bool result = (std::memcmp(codes1, codes2, this->code_size_) == 0);
+        if (release1) {
+            this->Release(codes1);
+        }
+        if (release2) {
+            this->Release(codes2);
+        }
+        return result;
+    }
+
     virtual void
     Prefetch(InnerIdType id) = 0;
 
@@ -88,6 +105,15 @@ public:
     InitIO(const IOParamPtr& io_param) {
         throw VsagException(ErrorType::INTERNAL_ERROR,
                             "InitIO not implemented in FlattenInterface");
+    }
+    virtual int64_t
+    GetMemoryUsage() const {
+        return 0;
+    }
+
+    virtual IndexCommonParam
+    ExportCommonParam() {
+        throw VsagException(ErrorType::INTERNAL_ERROR, "ExportCommonParam is not implemented");
     }
 
 public:
@@ -110,10 +136,16 @@ public:
     }
 
     virtual bool
-    Decode(const uint8_t* codes, DataType* vector) = 0;
+    Decode(const uint8_t* codes, float* vector) = 0;
+
+    virtual bool
+    Encode(const float* vector, uint8_t* codes) = 0;
 
     [[nodiscard]] virtual const uint8_t*
     GetCodesById(InnerIdType id, bool& need_release) const = 0;
+
+    virtual void
+    Release(const uint8_t* data) const = 0;
 
     virtual bool
     GetCodesById(InnerIdType id, uint8_t* codes) const = 0;
@@ -159,6 +191,15 @@ public:
     virtual void
     MergeOther(const FlattenInterfacePtr& other, InnerIdType bias) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "MergeOther not implemented");
+    }
+
+    virtual void
+    Move(InnerIdType from, InnerIdType to) {
+        throw VsagException(ErrorType::INTERNAL_ERROR, "Move not implemented in FlattenInterface");
+    }
+
+    virtual void
+    ShrinkToFit(InnerIdType capacity) {
     }
 
 public:

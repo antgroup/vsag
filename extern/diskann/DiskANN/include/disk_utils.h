@@ -33,7 +33,7 @@ typedef int FileHandle;
 
 namespace diskann
 {
-const size_t MAX_SAMPLE_POINTS_FOR_WARMUP = 100000;
+const uint64_t MAX_SAMPLE_POINTS_FOR_WARMUP = 100000;
 const double PQ_TRAINING_SET_FRACTION = 0.1;
 const double SPACE_FOR_CACHED_NODES_IN_GB = 0.25;
 const double THRESHOLD_FOR_CACHING_IN_GB = 1.0;
@@ -47,7 +47,7 @@ DISKANN_DLLEXPORT double get_memory_budget(const std::string &mem_budget_str);
 DISKANN_DLLEXPORT double get_memory_budget(double search_ram_budget_in_gb);
 DISKANN_DLLEXPORT void add_new_file_to_single_index(std::string index_file, std::string new_file);
 
-DISKANN_DLLEXPORT size_t calculate_num_pq_chunks(double final_index_ram_limit, size_t points_num, uint32_t dim);
+DISKANN_DLLEXPORT uint64_t calculate_num_pq_chunks(double final_index_ram_limit, uint64_t points_num, uint32_t dim);
 
 DISKANN_DLLEXPORT void read_idmap(const std::string &fname, std::vector<uint32_t> &ivecs);
 
@@ -78,7 +78,7 @@ template <typename T, typename LabelT = uint32_t>
 DISKANN_DLLEXPORT int build_merged_vamana_index(std::string base_file, diskann::Metric _compareMetric, uint32_t L,
                                                 uint32_t R, double sampling_rate, double ram_budget,
                                                 std::string mem_index_path, std::string medoids_file,
-                                                std::string centroids_file, size_t build_pq_bytes, bool use_opq,
+                                                std::string centroids_file, uint64_t build_pq_bytes, bool use_opq,
                                                 uint32_t num_threads, bool use_filters = false,
                                                 const std::string &label_file = std::string(""),
                                                 const std::string &labels_to_medoids_file = std::string(""),
@@ -105,6 +105,6 @@ DISKANN_DLLEXPORT void create_disk_layout(const std::string base_file, const std
                                           const std::string output_file,
                                           const std::string reorder_data_file = std::string(""));
 template <typename T>
-void create_disk_layout(const T *data, uint32_t npts, uint32_t ndims, const std::vector<size_t>& skip_locs, std::stringstream &vamana_reader,
-                        std::stringstream &diskann_writer, size_t sector_len, diskann::Metric metric);
+void create_disk_layout(const T *data, uint32_t npts, uint32_t ndims, const std::vector<uint64_t>& skip_locs, std::stringstream &vamana_reader,
+                        std::stringstream &diskann_writer, uint64_t sector_len, diskann::Metric metric);
 } // namespace diskann

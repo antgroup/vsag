@@ -16,6 +16,7 @@
 #include "sparse_graph_datacell.h"
 
 #include "sparse_graph_datacell_parameter.h"
+#include "vsag_exception.h"
 
 namespace vsag {
 
@@ -29,6 +30,13 @@ SparseGraphDataCell::SparseGraphDataCell(const SparseGraphDatacellParamPtr& grap
     this->remove_flag_bit_ = graph_param->remove_flag_bit_;
     this->id_bit_ = sizeof(InnerIdType) * 8 - this->remove_flag_bit_;
     this->remove_flag_mask_ = (1 << this->id_bit_) - 1;
+    GraphInterface::allocator_ = allocator;
+    if (graph_param->support_duplicate_) {
+        this->InitDuplicateTracker();
+    }
+    if (graph_param->use_reverse_edges_) {
+        this->reverse_edges_ = std::make_unique<ReverseEdge>(allocator);
+    }
 }
 
 SparseGraphDataCell::SparseGraphDataCell(const SparseGraphDatacellParamPtr& graph_param,
@@ -45,12 +53,16 @@ SparseGraphDataCell::SparseGraphDataCell(const GraphInterfaceParamPtr& param,
 void
 SparseGraphDataCell::InsertNeighborsById(InnerIdType id, const Vector<InnerIdType>& neighbor_ids) {
     if (neighbor_ids.size() > this->maximum_degree_) {
-        throw std::invalid_argument(fmt::format(
-            "insert neighbors count {} more than {}", neighbor_ids.size(), this->maximum_degree_));
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            fmt::format("insert neighbors count {} more than {}",
+                                        neighbor_ids.size(),
+                                        this->maximum_degree_));
     }
     auto size = std::min(this->maximum_degree_, (uint32_t)(neighbor_ids.size()));
     std::unique_lock<std::shared_mutex> wlock(this->neighbors_map_mutex_);
     this->max_capacity_ = std::max(this->max_capacity_, id + 1);
+
+    Vector<InnerIdType> old_neighbors(allocator_);
     auto iter = this->neighbors_.find(id);
     if (iter == this->neighbors_.end()) {
         iter =
@@ -59,7 +71,23 @@ SparseGraphDataCell::InsertNeighborsById(InnerIdType id, const Vector<InnerIdTyp
         if (is_support_delete_) {
             node_version_[id] = 0;
         }
+    } else {
+        old_neighbors.reserve(iter->second->size());
+        for (const auto& old_neighbor : *iter->second) {
+            old_neighbors.emplace_back(is_support_delete_ ? (old_neighbor & remove_flag_mask_)
+                                                          : old_neighbor);
+        }
     }
+
+    wlock.unlock();
+    UpdateReverseEdges(id, old_neighbors, neighbor_ids);
+    wlock.lock();
+    iter = this->neighbors_.find(id);
+    if (iter == this->neighbors_.end()) {
+        iter =
+            this->neighbors_.emplace(id, std::make_unique<Vector<InnerIdType>>(allocator_)).first;
+    }
+
     if (is_support_delete_) {
         iter->second->resize(size);
         for (int i = 0; i < size; ++i) {
@@ -154,6 +182,12 @@ SparseGraphDataCell::Deserialize(StreamReader& reader) {
 void
 SparseGraphDataCell::Resize(InnerIdType new_size){};
 
+bool
+SparseGraphDataCell::CheckIdExists(InnerIdType id) const {
+    std::shared_lock<std::shared_mutex> rlock(this->neighbors_map_mutex_);
+    return this->neighbors_.find(id) != this->neighbors_.end();
+}
+
 void
 SparseGraphDataCell::DeleteNeighborsById(vsag::InnerIdType id) {
     if (is_support_delete_) {
@@ -230,6 +264,75 @@ SparseGraphDataCell::GetIds() const {
         ids.push_back(item.first);
     }
     return ids;
+}
+
+int64_t
+SparseGraphDataCell::GetMemoryUsage() const {
+    auto memory = sizeof(SparseGraphDataCell);
+    memory += neighbors_.size() * (sizeof(InnerIdType) + maximum_degree_ * sizeof(InnerIdType) +
+                                   sizeof(std::nullptr_t));
+    memory += node_version_.size() * (sizeof(uint8_t) + sizeof(InnerIdType));
+    if (reverse_edges_) {
+        memory += reverse_edges_->GetMemoryUsage();
+    }
+    return static_cast<int64_t>(memory);
+}
+
+void
+SparseGraphDataCell::GetIncomingNeighbors(InnerIdType id, Vector<InnerIdType>& neighbors) const {
+    if (reverse_edges_) {
+        reverse_edges_->GetIncomingNeighbors(id, neighbors);
+    } else {
+        neighbors.clear();
+    }
+}
+
+void
+SparseGraphDataCell::Move(InnerIdType from, InnerIdType to) {
+    if (from == to) {
+        return;
+    }
+
+    {
+        std::shared_lock<std::shared_mutex> rlock(this->neighbors_map_mutex_);
+        if (neighbors_.count(from) == 0) {
+            return;
+        }
+    }
+
+    Vector<InnerIdType> reverse_neighbors(allocator_);
+    this->GetIncomingNeighbors(from, reverse_neighbors);
+
+    Vector<InnerIdType> neighbors(allocator_);
+    this->InsertNeighborsById(to, neighbors);
+    for (const auto& reverse_nb : reverse_neighbors) {
+        this->GetNeighbors(reverse_nb, neighbors);
+        Vector<InnerIdType> new_neighbors(allocator_);
+        bool has_to = false;
+        for (const auto& nb : neighbors) {
+            if (nb != from) {
+                new_neighbors.emplace_back(nb);
+            }
+            if (nb == to) {
+                has_to = true;
+            }
+        }
+        if (not has_to) {
+            new_neighbors.emplace_back(to);
+        }
+        this->InsertNeighborsById(reverse_nb, new_neighbors);
+        neighbors.clear();
+    }
+
+    Vector<InnerIdType> from_neighbors(allocator_);
+    this->GetNeighbors(from, from_neighbors);
+    this->InsertNeighborsById(to, from_neighbors);
+
+    from_neighbors.clear();
+    this->InsertNeighborsById(from, from_neighbors);
+
+    std::unique_lock<std::shared_mutex> wlock(this->neighbors_map_mutex_);
+    this->neighbors_.erase(from);
 }
 
 }  // namespace vsag

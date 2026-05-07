@@ -51,7 +51,7 @@ try_parse_parameters(JsonType param_obj, IndexCommonParam index_common_param) {
 }
 
 static inline __attribute__((always_inline)) int64_t
-ceil_int(const int64_t& value, int64_t base) {
+align_up(const int64_t& value, int64_t base) {
     return ((value + base - 1) / base) * base;
 }
 
@@ -121,7 +121,7 @@ get_vectors(DataTypes type,
             int64_t dim,
             const vsag::DatasetPtr& base,
             void** vectors_ptr,
-            size_t* data_size_ptr);
+            uint64_t* data_size_ptr);
 
 void
 set_dataset(DataTypes type,

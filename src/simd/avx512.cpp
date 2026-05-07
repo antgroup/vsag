@@ -21,9 +21,6 @@
 
 #include "simd.h"
 
-#define PORTABLE_ALIGN32 __attribute__((aligned(32)))
-#define PORTABLE_ALIGN64 __attribute__((aligned(64)))
-
 namespace vsag::avx512 {
 float
 L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
@@ -385,7 +382,24 @@ FP32Div(const float* x, const float* y, float* z, uint64_t dim) {
 
 float
 FP32ReduceAdd(const float* x, uint64_t dim) {
+#if defined(ENABLE_AVX512)
+    if (dim < 16) {
+        return avx2::FP32ReduceAdd(x, dim);
+    }
+    __m512 sum = _mm512_setzero_ps();
+    uint64_t i = 0;
+    for (; i + 15 < dim; i += 16) {
+        __m512 a = _mm512_loadu_ps(x + i);
+        sum = _mm512_add_ps(sum, a);
+    }
+    float result = _mm512_reduce_add_ps(sum);
+    if (i < dim) {
+        result += avx2::FP32ReduceAdd(x + i, dim - i);
+    }
+    return result;
+#else
     return sse::FP32ReduceAdd(x, dim);
+#endif
 }
 
 #if defined(ENABLE_AVX512)
@@ -735,13 +749,76 @@ SQ8ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
 #endif
 }
 
+#if defined(ENABLE_AVX512)
+// Helper: unpack 16 bytes (32 x 4-bit) into two __m512 scaled floats [0..1]
+static inline void
+unpack_4bit_to_m512(const uint8_t* codes,
+                    __m512* out0,  // first 16 values (v0..v15)
+                    __m512* out1   // next 16 values (v16..v31)
+) {
+    __m128i code_vec = _mm_loadu_si128((const __m128i*)codes);
+
+    __m128i low_nibbles = _mm_and_si128(code_vec, _mm_set1_epi8(0x0F));
+    __m128i high_nibbles = _mm_and_si128(_mm_srli_epi16(code_vec, 4), _mm_set1_epi8(0x0F));
+
+    __m128i unpacked_lo = _mm_unpacklo_epi8(low_nibbles, high_nibbles);  // 16 bytes: v0..v15
+    __m128i unpacked_hi = _mm_unpackhi_epi8(low_nibbles, high_nibbles);  // 16 bytes: v16..v31
+
+    __m512i indices0 = _mm512_cvtepu8_epi32(unpacked_lo);
+    __m512i indices1 = _mm512_cvtepu8_epi32(unpacked_hi);
+
+    __m512 floats0 = _mm512_cvtepi32_ps(indices0);
+    __m512 floats1 = _mm512_cvtepi32_ps(indices1);
+
+    const __m512 scale = _mm512_set1_ps(1.0f / 15.0f);
+    *out0 = _mm512_mul_ps(floats0, scale);
+    *out1 = _mm512_mul_ps(floats1, scale);
+}
+#endif
+
 float
 SQ4ComputeIP(const float* RESTRICT query,
              const uint8_t* RESTRICT codes,
              const float* RESTRICT lower_bound,
              const float* RESTRICT diff,
              uint64_t dim) {
+#if defined(ENABLE_AVX512)
+    if (dim == 0) {
+        return 0;
+    }
+
+    float result = 0;
+    uint64_t d = 0;
+
+    // Process 32 elements at a time (16 bytes of codes)
+    for (; d + 31 < dim; d += 32) {
+        __m512 decoded0, decoded1;
+        unpack_4bit_to_m512(codes + (d >> 1), &decoded0, &decoded1);
+
+        // Apply affine transform: value = lower_bound + decoded * diff
+        __m512 lb0 = _mm512_loadu_ps(lower_bound + d);
+        __m512 lb1 = _mm512_loadu_ps(lower_bound + d + 16);
+        __m512 diff0 = _mm512_loadu_ps(diff + d);
+        __m512 diff1 = _mm512_loadu_ps(diff + d + 16);
+
+        __m512 val0 = _mm512_fmadd_ps(decoded0, diff0, lb0);
+        __m512 val1 = _mm512_fmadd_ps(decoded1, diff1, lb1);
+
+        // Load query
+        __m512 q0 = _mm512_loadu_ps(query + d);
+        __m512 q1 = _mm512_loadu_ps(query + d + 16);
+
+        // Dot product
+        __m512 prod0 = _mm512_mul_ps(q0, val0);
+        __m512 prod1 = _mm512_mul_ps(q1, val1);
+
+        result += _mm512_reduce_add_ps(prod0) + _mm512_reduce_add_ps(prod1);
+    }
+    result += avx2::SQ4ComputeIP(query + d, codes + (d >> 1), lower_bound + d, diff + d, dim - d);
+    return result;
+#else
     return avx2::SQ4ComputeIP(query, codes, lower_bound, diff, dim);
+#endif
 }
 
 float
@@ -750,7 +827,46 @@ SQ4ComputeL2Sqr(const float* RESTRICT query,
                 const float* RESTRICT lower_bound,
                 const float* RESTRICT diff,
                 uint64_t dim) {
+#if defined(ENABLE_AVX512)
+    if (dim == 0) {
+        return 0;
+    }
+
+    float result = 0;
+    uint64_t d = 0;
+    __m512 sum0 = _mm512_setzero_ps();
+    __m512 sum1 = _mm512_setzero_ps();
+    // Process 32 elements at a time (16 bytes of codes)
+    for (; d + 31 < dim; d += 32) {
+        __m512 decoded0, decoded1;
+        unpack_4bit_to_m512(codes + (d >> 1), &decoded0, &decoded1);
+
+        // Apply affine transform: value = lower_bound + decoded * diff
+        __m512 lb0 = _mm512_loadu_ps(lower_bound + d);
+        __m512 lb1 = _mm512_loadu_ps(lower_bound + d + 16);
+        __m512 diff0 = _mm512_loadu_ps(diff + d);
+        __m512 diff1 = _mm512_loadu_ps(diff + d + 16);
+
+        __m512 val0 = _mm512_fmadd_ps(decoded0, diff0, lb0);
+        __m512 val1 = _mm512_fmadd_ps(decoded1, diff1, lb1);
+
+        // Load query
+        __m512 q0 = _mm512_loadu_ps(query + d);
+        __m512 q1 = _mm512_loadu_ps(query + d + 16);
+
+        __m512 q0_sub = _mm512_sub_ps(q0, val0);
+        __m512 q1_sub = _mm512_sub_ps(q1, val1);
+
+        sum0 = _mm512_fmadd_ps(q0_sub, q0_sub, sum0);
+        sum1 = _mm512_fmadd_ps(q1_sub, q1_sub, sum1);
+    }
+    result += _mm512_reduce_add_ps(sum0) + _mm512_reduce_add_ps(sum1);
+    result +=
+        avx2::SQ4ComputeL2Sqr(query + d, codes + (d >> 1), lower_bound + d, diff + d, dim - d);
+    return result;
+#else
     return avx2::SQ4ComputeL2Sqr(query, codes, lower_bound, diff, dim);
+#endif
 }
 
 float
@@ -759,7 +875,43 @@ SQ4ComputeCodesIP(const uint8_t* RESTRICT codes1,
                   const float* RESTRICT lower_bound,
                   const float* RESTRICT diff,
                   uint64_t dim) {
+#if defined(ENABLE_AVX512)
+    if (dim == 0) {
+        return 0;
+    }
+    float result = 0;
+    uint64_t d = 0;
+
+    // Process 32 elements at a time (16 bytes of codes)
+    for (; d + 31 < dim; d += 32) {
+        __m512 decoded0, decoded1, decoded2, decoded3;
+        unpack_4bit_to_m512(codes1 + (d >> 1), &decoded0, &decoded1);
+        unpack_4bit_to_m512(codes2 + (d >> 1), &decoded2, &decoded3);
+
+        // Apply affine transform: value = lower_bound + decoded * diff
+        __m512 lb0 = _mm512_loadu_ps(lower_bound + d);
+        __m512 lb1 = _mm512_loadu_ps(lower_bound + d + 16);
+        __m512 diff0 = _mm512_loadu_ps(diff + d);
+        __m512 diff1 = _mm512_loadu_ps(diff + d + 16);
+        __m512 val0 = _mm512_fmadd_ps(decoded0, diff0, lb0);
+        __m512 val1 = _mm512_fmadd_ps(decoded1, diff1, lb1);
+
+        __m512 val2 = _mm512_fmadd_ps(decoded2, diff0, lb0);
+        __m512 val3 = _mm512_fmadd_ps(decoded3, diff1, lb1);
+
+        // Dot product
+        __m512 prod0 = _mm512_mul_ps(val2, val0);
+        __m512 prod1 = _mm512_mul_ps(val3, val1);
+
+        result += _mm512_reduce_add_ps(prod0) + _mm512_reduce_add_ps(prod1);
+    }
+    result += avx2::SQ4ComputeCodesIP(
+        codes1 + (d >> 1), codes2 + (d >> 1), lower_bound + d, diff + d, dim - d);
+    return result;
+
+#else
     return avx2::SQ4ComputeCodesIP(codes1, codes2, lower_bound, diff, dim);
+#endif
 }
 
 float
@@ -768,7 +920,48 @@ SQ4ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
                      const float* RESTRICT lower_bound,
                      const float* RESTRICT diff,
                      uint64_t dim) {
+#if defined(ENABLE_AVX512)
+    if (dim == 0) {
+        return 0;
+    }
+    float result = 0;
+    uint64_t d = 0;
+
+    __m512 sum0 = _mm512_setzero_ps();
+    __m512 sum1 = _mm512_setzero_ps();
+
+    // Process 32 elements at a time (16 bytes of codes)
+    for (; d + 31 < dim; d += 32) {
+        __m512 decoded0, decoded1, decoded2, decoded3;
+        unpack_4bit_to_m512(codes1 + (d >> 1), &decoded0, &decoded1);
+        unpack_4bit_to_m512(codes2 + (d >> 1), &decoded2, &decoded3);
+
+        // Apply affine transform: value = lower_bound + decoded * diff
+        __m512 lb0 = _mm512_loadu_ps(lower_bound + d);
+        __m512 lb1 = _mm512_loadu_ps(lower_bound + d + 16);
+        __m512 diff0 = _mm512_loadu_ps(diff + d);
+        __m512 diff1 = _mm512_loadu_ps(diff + d + 16);
+        __m512 val0 = _mm512_fmadd_ps(decoded0, diff0, lb0);
+        __m512 val1 = _mm512_fmadd_ps(decoded1, diff1, lb1);
+
+        __m512 val2 = _mm512_fmadd_ps(decoded2, diff0, lb0);
+        __m512 val3 = _mm512_fmadd_ps(decoded3, diff1, lb1);
+
+        __m512 sub0 = _mm512_sub_ps(val2, val0);
+        __m512 sub1 = _mm512_sub_ps(val3, val1);
+
+        // Dot product
+        sum0 = _mm512_fmadd_ps(sub0, sub0, sum0);
+        sum1 = _mm512_fmadd_ps(sub1, sub1, sum1);
+    }
+    result += _mm512_reduce_add_ps(sum0) + _mm512_reduce_add_ps(sum1);
+    result += avx2::SQ4ComputeCodesL2Sqr(
+        codes1 + (d >> 1), codes2 + (d >> 1), lower_bound + d, diff + d, dim - d);
+    return result;
+
+#else
     return avx2::SQ4ComputeCodesL2Sqr(codes1, codes2, lower_bound, diff, dim);
+#endif
 }
 
 float
@@ -854,15 +1047,21 @@ RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, floa
 
     uint64_t d = 0;
     __m512 sum = _mm512_setzero_ps();
-    const __m512 inv_sqrt_d_vec = _mm512_set1_ps(inv_sqrt_d);
-    const __m512 neg_inv_sqrt_d_vec = _mm512_set1_ps(-inv_sqrt_d);
+    __m512 pos, neg;
+    if (inv_sqrt_d > 1e-3) {
+        pos = _mm512_set1_ps(inv_sqrt_d);
+        neg = _mm512_set1_ps(-inv_sqrt_d);
+    } else {
+        pos = _mm512_set1_ps(1.0f);
+        neg = _mm512_setzero_ps();
+    }
 
     for (; d + 16 <= dim; d += 16) {
         __m512 vec = _mm512_loadu_ps(vector + d);
 
         __mmask16 mask = static_cast<__mmask16>(bits[d / 8 + 1] << 8 | bits[d / 8]);
 
-        __m512 b_vec = _mm512_mask_blend_ps(mask, neg_inv_sqrt_d_vec, inv_sqrt_d_vec);
+        __m512 b_vec = _mm512_mask_blend_ps(mask, neg, pos);
 
         sum = _mm512_fmadd_ps(b_vec, vec, sum);
     }

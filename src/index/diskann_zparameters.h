@@ -50,6 +50,8 @@ public:
     int64_t turn = 40;
     float sample_rate = 0.3;
 
+    bool support_calc_distance_by_id = false;
+
 private:
     DiskannParameters() = default;
 };
@@ -61,9 +63,9 @@ public:
 
 public:
     // required vars
-    int64_t ef_search{-1};
-    uint64_t beam_search{0};
-    int64_t io_limit{-1};
+    int64_t ef_search{400};
+    uint64_t beam_search{4};
+    int64_t io_limit{200};
 
     // optional vars with default value
     bool use_reorder = false;

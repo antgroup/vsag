@@ -39,6 +39,12 @@ GraphDataCellParameter::FromJson(const JsonType& json) {
     if (json.Contains(REMOVE_FLAG_BIT)) {
         this->remove_flag_bit_ = json[REMOVE_FLAG_BIT].GetInt();
     }
+    if (json.Contains(HGRAPH_USE_REVERSE_EDGES_KEY)) {
+        this->use_reverse_edges_ = json[HGRAPH_USE_REVERSE_EDGES_KEY].GetBool();
+    }
+    if (json.Contains(SUPPORT_DUPLICATE)) {
+        this->support_duplicate_ = json[SUPPORT_DUPLICATE].GetBool();
+    }
 }
 
 JsonType
@@ -49,6 +55,8 @@ GraphDataCellParameter::ToJson() const {
     json[GRAPH_PARAM_INIT_MAX_CAPACITY_KEY].SetInt(this->init_max_capacity_);
     json[GRAPH_SUPPORT_REMOVE].SetBool(this->support_remove_);
     json[REMOVE_FLAG_BIT].SetInt(this->remove_flag_bit_);
+    json[HGRAPH_USE_REVERSE_EDGES_KEY].SetBool(this->use_reverse_edges_);
+    json[SUPPORT_DUPLICATE].SetBool(this->support_duplicate_);
     return json;
 }
 bool
@@ -78,6 +86,20 @@ GraphDataCellParameter::CheckCompatibility(const ParamPtr& other) const {
             "GraphDataCellParameter::CheckCompatibility: remove_flag_bit_ mismatch: {} vs {}",
             remove_flag_bit_,
             graph_param->remove_flag_bit_);
+        return false;
+    }
+    if (use_reverse_edges_ != graph_param->use_reverse_edges_) {
+        logger::error(
+            "GraphDataCellParameter::CheckCompatibility: use_reverse_edges_ mismatch: {} vs {}",
+            use_reverse_edges_,
+            graph_param->use_reverse_edges_);
+        return false;
+    }
+    if (support_duplicate_ != graph_param->support_duplicate_) {
+        logger::error(
+            "GraphDataCellParameter::CheckCompatibility: support_duplicate_ mismatch: {} vs {}",
+            support_duplicate_,
+            graph_param->support_duplicate_);
         return false;
     }
     return true;

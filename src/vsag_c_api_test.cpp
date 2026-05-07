@@ -16,13 +16,11 @@
 #include <sys/stat.h>
 #include <vsag/vsag_c_api.h>
 
-#include <catch2/catch_test_macros.hpp>
 #include <fstream>
 #include <random>
 
-#include "fixtures.h"
 #include "simd/fp32_simd.h"
-
+#include "unittest.h"
 static constexpr const char* index_param = R"(
     {
         "dtype": "float32",
@@ -347,7 +345,7 @@ TEST_CASE("vsag_c_api calculate distance by ids", "[vsag_c_api][ut]") {
     REQUIRE(ret.code == VSAG_SUCCESS);
 
     // Verify distances are calculated (should be non-negative)
-    for (size_t i = 0; i < distances.size(); ++i) {
+    for (uint64_t i = 0; i < distances.size(); ++i) {
         auto gt_dist = vsag::FP32ComputeL2Sqr(
             test_case.datas.data() + 5 * dim, test_case.datas.data() + query_ids[i] * dim, dim);
         REQUIRE(distances[i] == gt_dist);
@@ -372,7 +370,7 @@ TEST_CASE("vsag_c_api update operations and get vector by ids", "[vsag_c_api][ut
     ret = vsag_index_get_vector_by_ids(index, get_ids.data(), get_ids.size(), vectors.data());
     REQUIRE(ret.code == VSAG_SUCCESS);
 
-    for (size_t i = 0; i < get_ids.size(); ++i) {
+    for (uint64_t i = 0; i < get_ids.size(); ++i) {
         auto* gt_vec = test_case.datas.data() + get_ids[i] * dim;
         for (int64_t j = 0; j < dim; ++j) {
             REQUIRE(vectors[i * dim + j] == gt_vec[j]);
@@ -388,7 +386,7 @@ TEST_CASE("vsag_c_api update operations and get vector by ids", "[vsag_c_api][ut
     ret = vsag_index_get_vector_by_ids(index, new_ids.data(), new_ids.size(), vectors.data());
     REQUIRE(ret.code == VSAG_SUCCESS);
 
-    for (size_t i = 0; i < new_ids.size(); ++i) {
+    for (uint64_t i = 0; i < new_ids.size(); ++i) {
         auto* gt_vec = test_case.datas.data() + old_ids[i] * dim;
         for (int64_t j = 0; j < dim; ++j) {
             REQUIRE(vectors[i * dim + j] == gt_vec[j]);

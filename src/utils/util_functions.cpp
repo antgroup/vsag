@@ -30,7 +30,7 @@ format_map(const std::string& str, const std::unordered_map<std::string, std::st
     std::string result = str;
 
     for (const auto& [key, value] : mappings) {
-        size_t pos = result.find("{" + key + "}");
+        uint64_t pos = result.find("{" + key + "}");
         while (pos != std::string::npos) {
             result.replace(pos, key.length() + 2, value);
             pos = result.find("{" + key + "}");
@@ -99,9 +99,10 @@ select_k_numbers(int64_t n, int k) {
 uint64_t
 next_multiple_of_power_of_two(uint64_t x, uint64_t n) {
     if (n > 63) {
-        throw std::runtime_error(fmt::format("n is larger than 63, n is {}", n));
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            fmt::format("n is larger than 63, n is {}", n));
     }
-    uint64_t y = 1 << n;
+    uint64_t y = uint64_t{1} << n;
     auto result = (x + y - 1) & ~(y - 1);
     return result;
 }
@@ -181,7 +182,7 @@ static const std::string BASE64_CHARS =
 std::string
 base64_encode(const std::string& in) {
     std::string out;
-    int32_t val = 0;
+    uint32_t val = 0;
     int32_t valb = -6;
     for (unsigned char c : in) {
         val = (val << 8) + c;
@@ -207,7 +208,7 @@ base64_decode(const std::string& in) {
     for (int i = 0; i < 64; i++) {
         t[BASE64_CHARS[i]] = i;
     }
-    int32_t val = 0;
+    uint32_t val = 0;
     int32_t valb = -8;
     for (unsigned char c : in) {
         if (t[c] == -1) {
@@ -228,15 +229,19 @@ get_vectors(DataTypes type,
             int64_t dim,
             const vsag::DatasetPtr& base,
             void** vectors_ptr,
-            size_t* data_size_ptr) {
+            uint64_t* data_size_ptr) {
     if (type == DataTypes::DATA_TYPE_FLOAT) {
         *vectors_ptr = (void*)base->GetFloat32Vectors();
         *data_size_ptr = dim * sizeof(float);
     } else if (type == DataTypes::DATA_TYPE_INT8) {
         *vectors_ptr = (void*)base->GetInt8Vectors();
         *data_size_ptr = dim * sizeof(int8_t);
+    } else if (type == DataTypes::DATA_TYPE_FP16 || type == DataTypes::DATA_TYPE_BF16) {
+        *vectors_ptr = (void*)base->GetFloat16Vectors();
+        *data_size_ptr = dim * sizeof(uint16_t);
     } else {
-        throw std::invalid_argument(fmt::format("no support for this metric: {}", (int)type));
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            fmt::format("no support for this type: {}", (int)type));
     }
 }
 
@@ -250,8 +255,14 @@ set_dataset(DataTypes type,
         base->Float32Vectors((float*)vectors_ptr)->Dim(dim)->Owner(false)->NumElements(num_element);
     } else if (type == DataTypes::DATA_TYPE_INT8) {
         base->Int8Vectors((int8_t*)vectors_ptr)->Dim(dim)->Owner(false)->NumElements(num_element);
+    } else if (type == DataTypes::DATA_TYPE_FP16 || type == DataTypes::DATA_TYPE_BF16) {
+        base->Float16Vectors((uint16_t*)vectors_ptr)
+            ->Dim(dim)
+            ->Owner(false)
+            ->NumElements(num_element);
     } else {
-        throw std::invalid_argument(fmt::format("no support for this type: {}", (int)type));
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            fmt::format("no support for this type: {}", (int)type));
     }
 }
 

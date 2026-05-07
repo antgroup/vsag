@@ -15,14 +15,13 @@
 
 #include "conjugate_graph.h"
 
-#include <catch2/catch_test_macros.hpp>
 #include <filesystem>
 #include <fstream>
 #include <nlohmann/json.hpp>
 
-#include "fixtures.h"
 #include "impl/allocator/safe_allocator.h"
 #include "storage/stream_reader.h"
+#include "unittest.h"
 
 TEST_CASE("ConjugateGraph Build, Add and Memory Usage", "[ut][ConjugateGraph]") {
     auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
@@ -71,7 +70,8 @@ TEST_CASE("ConjugateGraph Serialize and Deserialize with Binary", "[ut][Conjugat
 
         invalid_memory_usage = 0;
         std::memcpy((char*)binary.data.get(), &invalid_memory_usage, sizeof(invalid_memory_usage));
-        REQUIRE(conjugate_graph->Deserialize(binary).error().type == vsag::ErrorType::READ_ERROR);
+        REQUIRE(conjugate_graph->Deserialize(binary).error().type ==
+                vsag::ErrorType::INVALID_BINARY);
 
         invalid_memory_usage = 60 + vsag::FOOTER_SIZE;
         std::memcpy((char*)binary.data.get(), &invalid_memory_usage, sizeof(invalid_memory_usage));
@@ -114,7 +114,8 @@ TEST_CASE("ConjugateGraph Serialize and Deserialize with Binary", "[ut][Conjugat
             json_str.c_str(),
             json_str.size());
 
-        REQUIRE(conjugate_graph->Deserialize(binary).error().type == vsag::ErrorType::READ_ERROR);
+        REQUIRE(conjugate_graph->Deserialize(binary).error().type ==
+                vsag::ErrorType::INVALID_BINARY);
         REQUIRE(conjugate_graph->GetMemoryUsage() == 4 + vsag::FOOTER_SIZE);
         binary = *conjugate_graph->Serialize();
         REQUIRE(binary.size == 4 + vsag::FOOTER_SIZE);
@@ -138,7 +139,8 @@ TEST_CASE("ConjugateGraph Serialize and Deserialize with Binary", "[ut][Conjugat
             json_str.c_str(),
             json_str.size());
 
-        REQUIRE(conjugate_graph->Deserialize(binary).error().type == vsag::ErrorType::READ_ERROR);
+        REQUIRE(conjugate_graph->Deserialize(binary).error().type ==
+                vsag::ErrorType::INVALID_BINARY);
         REQUIRE(conjugate_graph->GetMemoryUsage() == 4 + vsag::FOOTER_SIZE);
         binary = *conjugate_graph->Serialize();
         REQUIRE(binary.size == 4 + vsag::FOOTER_SIZE);
@@ -167,7 +169,7 @@ TEST_CASE("ConjugateGraph Serialize and Deserialize with Stream", "[ut][Conjugat
         in_stream.seekg(0, std::ios::end);
         REQUIRE(in_stream.tellg() == 60 + vsag::FOOTER_SIZE);
         in_stream.seekg(0, std::ios::beg);
-        IOStreamReader reader(in_stream);
+        vsag::IOStreamReader reader(in_stream);
         REQUIRE(conjugate_graph->Deserialize(reader).has_value());
         in_stream.close();
 
@@ -195,8 +197,9 @@ TEST_CASE("ConjugateGraph Serialize and Deserialize with Stream", "[ut][Conjugat
         out_stream.close();
 
         std::fstream in_stream(dir.path + "conjugate_graph.bin", std::ios::in | std::ios::binary);
-        IOStreamReader reader(in_stream);
-        REQUIRE(conjugate_graph->Deserialize(reader).error().type == vsag::ErrorType::READ_ERROR);
+        vsag::IOStreamReader reader(in_stream);
+        REQUIRE(conjugate_graph->Deserialize(reader).error().type ==
+                vsag::ErrorType::INVALID_BINARY);
         in_stream.close();
     }
 
@@ -218,8 +221,9 @@ TEST_CASE("ConjugateGraph Serialize and Deserialize with Stream", "[ut][Conjugat
         out_stream.close();
 
         std::fstream in_stream(dir.path + "conjugate_graph.bin", std::ios::in | std::ios::binary);
-        IOStreamReader reader(in_stream);
-        REQUIRE(conjugate_graph->Deserialize(reader).error().type == vsag::ErrorType::READ_ERROR);
+        vsag::IOStreamReader reader(in_stream);
+        REQUIRE(conjugate_graph->Deserialize(reader).error().type ==
+                vsag::ErrorType::INVALID_BINARY);
         in_stream.close();
     }
 
@@ -233,7 +237,7 @@ TEST_CASE("ConjugateGraph Serialize and Deserialize with Stream", "[ut][Conjugat
         std::filesystem::resize_file(dir.path + "conjugate_graph.bin", 55 + vsag::FOOTER_SIZE);
 
         std::fstream in_stream(dir.path + "conjugate_graph.bin", std::ios::in | std::ios::binary);
-        IOStreamReader reader(in_stream);
+        vsag::IOStreamReader reader(in_stream);
         REQUIRE(conjugate_graph->Deserialize(reader).error().type == vsag::ErrorType::READ_ERROR);
         in_stream.close();
     }
@@ -249,8 +253,9 @@ TEST_CASE("ConjugateGraph Serialize and Deserialize with Stream", "[ut][Conjugat
         out_stream.close();
 
         std::fstream in_stream(dir.path + "conjugate_graph.bin", std::ios::in | std::ios::binary);
-        IOStreamReader reader(in_stream);
-        REQUIRE(conjugate_graph->Deserialize(reader).error().type == vsag::ErrorType::READ_ERROR);
+        vsag::IOStreamReader reader(in_stream);
+        REQUIRE(conjugate_graph->Deserialize(reader).error().type ==
+                vsag::ErrorType::INVALID_BINARY);
         in_stream.close();
     }
 
@@ -264,7 +269,7 @@ TEST_CASE("ConjugateGraph Serialize and Deserialize with Stream", "[ut][Conjugat
         std::filesystem::resize_file(dir.path + "conjugate_graph.bin", 55 + vsag::FOOTER_SIZE);
 
         std::fstream in_stream(dir.path + "conjugate_graph.bin", std::ios::in | std::ios::binary);
-        IOStreamReader reader(in_stream);
+        vsag::IOStreamReader reader(in_stream);
         REQUIRE(conjugate_graph->Deserialize(reader).error().type == vsag::ErrorType::READ_ERROR);
         in_stream.close();
 
@@ -278,7 +283,7 @@ TEST_CASE("ConjugateGraph Serialize and Deserialize with Stream", "[ut][Conjugat
 
         std::fstream re_in_stream(dir.path + "conjugate_graph.bin",
                                   std::ios::in | std::ios::binary);
-        IOStreamReader re_reader(re_in_stream);
+        vsag::IOStreamReader re_reader(re_in_stream);
         REQUIRE(conjugate_graph->Deserialize(re_reader).has_value());
         REQUIRE(conjugate_graph->GetMemoryUsage() == 4 + vsag::FOOTER_SIZE);
         re_in_stream.close();

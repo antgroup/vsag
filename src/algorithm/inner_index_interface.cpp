@@ -28,6 +28,7 @@
 #include "storage/serialization.h"
 #include "utils/slow_task_timer.h"
 #include "utils/util_functions.h"
+#include "vsag/allocator.h"
 
 namespace vsag {
 
@@ -40,9 +41,9 @@ InnerIndexInterface::InnerIndexInterface(const InnerIndexParameterPtr& index_par
       data_type_(common_param.data_type_),
       build_thread_count_(index_param->build_thread_count),
       use_attribute_filter_(index_param->use_attribute_filter),
+      train_sample_count_(index_param->train_sample_count),
       use_reorder_(index_param->use_reorder) {
     this->label_table_ = std::make_shared<LabelTable>(allocator_);
-    this->tomb_label_table_ = std::make_shared<LabelTable>(allocator_);
     this->index_feature_list_ = std::make_unique<IndexFeatureList>();
     this->index_feature_list_->SetFeature(SUPPORT_EXPORT_IDS);
     this->extra_info_size_ = common_param.extra_info_size_;
@@ -51,12 +52,12 @@ InnerIndexInterface::InnerIndexInterface(const InnerIndexParameterPtr& index_par
             ExtraInfoInterface::MakeInstance(index_param->extra_info_param, common_param);
     }
 
-    this->build_pool_ = common_param.thread_pool_;
-    if (this->build_pool_ == nullptr) {
-        this->build_pool_ = SafeThreadPool::FactoryDefaultThreadPool();
-    }
+    this->thread_pool_ = common_param.thread_pool_;
     if (this->build_thread_count_ > 1) {
-        this->build_pool_->SetPoolSize(build_thread_count_);
+        if (this->thread_pool_ == nullptr) {
+            this->thread_pool_ = SafeThreadPool::FactoryDefaultThreadPool();
+        }
+        this->thread_pool_->SetPoolSize(build_thread_count_);
     }
 
     if (this->use_attribute_filter_) {
@@ -71,6 +72,22 @@ InnerIndexInterface::~InnerIndexInterface() = default;
 std::vector<int64_t>
 InnerIndexInterface::Build(const DatasetPtr& base) {
     return this->Add(base);
+}
+
+bool
+InnerIndexInterface::UpdateId(int64_t old_id, int64_t new_id) {
+    if (old_id == new_id) {
+        return true;
+    }
+
+    std::scoped_lock label_lock(this->label_lookup_mutex_);
+    if (this->label_table_) {
+        this->label_table_->UpdateLabel(old_id, new_id);
+    } else {
+        throw VsagException(ErrorType::INDEX_EMPTY, "label_table is empty");
+    }
+
+    return true;
 }
 
 DatasetPtr
@@ -225,7 +242,7 @@ InnerIndexInterface::Deserialize(const ReaderSet& reader_set) {
         this->SetIO(index_reader);
         return;
     } catch (const std::bad_alloc& e) {
-        throw VsagException(ErrorType::READ_ERROR, "failed to Deserialize: ", e.what());
+        throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "failed to Deserialize: ", e.what());
     }
 }
 
@@ -264,7 +281,7 @@ InnerIndexInterface::Deserialize(std::istream& in_stream) {
         this->Deserialize(reader);
         return;
     } catch (const std::bad_alloc& e) {
-        throw VsagException(ErrorType::READ_ERROR, "failed to Deserialize: ", e.what());
+        throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "failed to Deserialize: ", e.what());
     }
 }
 
@@ -277,10 +294,13 @@ InnerIndexInterface::CalSerializeSize() const {
 }
 
 DatasetPtr
-InnerIndexInterface::CalDistanceById(const float* query, const int64_t* ids, int64_t count) const {
+InnerIndexInterface::CalDistanceById(const float* query,
+                                     const int64_t* ids,
+                                     int64_t count,
+                                     bool calculate_precise_distance) const {
     auto result = Dataset::Make();
     result->Owner(true, allocator_);
-    auto* distances = (float*)allocator_->Allocate(sizeof(float) * count);
+    auto* distances = static_cast<float*>(allocator_->Allocate(sizeof(float) * count));
     result->Distances(distances);
     for (int64_t i = 0; i < count; ++i) {
         distances[i] = this->CalcDistanceById(query, ids[i]);
@@ -291,10 +311,11 @@ InnerIndexInterface::CalDistanceById(const float* query, const int64_t* ids, int
 DatasetPtr
 InnerIndexInterface::CalDistanceById(const DatasetPtr& query,
                                      const int64_t* ids,
-                                     int64_t count) const {
+                                     int64_t count,
+                                     bool calculate_precise_distance) const {
     auto result = Dataset::Make();
     result->Owner(true, allocator_);
-    auto* distances = (float*)allocator_->Allocate(sizeof(float) * count);
+    auto* distances = static_cast<float*>(allocator_->Allocate(sizeof(float) * count));
     result->Distances(distances);
     for (int64_t i = 0; i < count; ++i) {
         try {
@@ -373,28 +394,39 @@ InnerIndexInterface::FastCreateIndex(const std::string& index_fast_str,
 }
 
 DatasetPtr
-InnerIndexInterface::GetVectorByIds(const int64_t* ids, int64_t count) const {
-    DatasetPtr vectors = Dataset::Make();
+InnerIndexInterface::GetVectorByIds(const int64_t* ids,
+                                    int64_t count,
+                                    Allocator* specified_allocator) const {
+    bool has_specified_allocator = specified_allocator != nullptr;
+    Allocator* allocator = has_specified_allocator ? specified_allocator : allocator_;
 
+    DatasetPtr vectors = Dataset::Make();
     if (GetIndexType() == IndexType::SINDI or GetIndexType() == IndexType::SPARSE) {
-        auto* sparse_vectors = (SparseVector*)allocator_->Allocate(sizeof(SparseVector) * count);
+        auto* sparse_vectors =
+            static_cast<SparseVector*>(allocator->Allocate(sizeof(SparseVector) * count));
         if (sparse_vectors == nullptr) {
             throw VsagException(ErrorType::NO_ENOUGH_MEMORY,
                                 "failed to allocate memory for vectors");
         }
-        vectors->NumElements(count)->SparseVectors(sparse_vectors)->Owner(true, allocator_);
+        std::uninitialized_default_construct_n(sparse_vectors, count);
+        vectors->NumElements(count)
+            ->SparseVectors(sparse_vectors)
+            ->Owner(/*auto release=*/not has_specified_allocator, allocator);
         for (int i = 0; i < count; ++i) {
             InnerIdType inner_id = this->label_table_->GetIdByLabel(ids[i]);
-            this->GetSparseVectorByInnerId(inner_id, sparse_vectors + i);
+            this->GetSparseVectorByInnerId(inner_id, sparse_vectors + i, allocator);
         }
         return vectors;
     }
 
-    auto* float_vectors = (float*)allocator_->Allocate(sizeof(float) * count * dim_);
+    auto* float_vectors = static_cast<float*>(allocator->Allocate(sizeof(float) * count * dim_));
     if (float_vectors == nullptr) {
         throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "failed to allocate memory for vectors");
     }
-    vectors->NumElements(count)->Dim(dim_)->Float32Vectors(float_vectors)->Owner(true, allocator_);
+    vectors->NumElements(count)
+        ->Dim(dim_)
+        ->Float32Vectors(float_vectors)
+        ->Owner(/*auto release=*/not has_specified_allocator, allocator);
     for (int i = 0; i < count; ++i) {
         InnerIdType inner_id = this->label_table_->GetIdByLabel(ids[i]);
         this->GetVectorByInnerId(inner_id, float_vectors + i * dim_);
@@ -407,7 +439,7 @@ InnerIndexInterface::ExportIDs() const {
     std::shared_lock lock(this->label_lookup_mutex_);
     DatasetPtr result = Dataset::Make();
     auto num_element = this->label_table_->GetTotalCount();
-    auto* labels = (LabelType*)allocator_->Allocate(sizeof(LabelType) * num_element);
+    auto* labels = static_cast<LabelType*>(allocator_->Allocate(sizeof(LabelType) * num_element));
     const auto* origin_label = this->label_table_->GetAllLabels();
     memcpy(labels, origin_label, sizeof(LabelType) * num_element);
     result->NumElements(num_element)->Ids(labels)->Dim(1)->Owner(true, allocator_);
@@ -458,12 +490,12 @@ InnerIndexInterface::GetDataByIdsWithFlag(const int64_t* ids,
                 this->GetVectorByInnerId(inner_id, fp32_data + i * this->dim_);
             }
         };
-        if (this->build_pool_ != nullptr) {
+        if (this->thread_pool_ != nullptr) {
             std::vector<std::future<void>> futures;
             for (int64_t i = 0; i < thread_count; ++i) {
                 int64_t begin = i * item_per_thread;
                 int64_t end = std::min(begin + item_per_thread, count);
-                futures.emplace_back(this->build_pool_->GeneralEnqueue(get_vec_func, begin, end));
+                futures.emplace_back(this->thread_pool_->GeneralEnqueue(get_vec_func, begin, end));
             }
             for (auto& future : futures) {
                 future.get();
@@ -485,12 +517,12 @@ InnerIndexInterface::GetDataByIdsWithFlag(const int64_t* ids,
                 this->GetAttributeSetByInnerId(inner_id, attribute_data + i);
             }
         };
-        if (this->build_pool_ != nullptr) {
+        if (this->thread_pool_ != nullptr) {
             std::vector<std::future<void>> futures;
             for (int64_t i = 0; i < thread_count; ++i) {
                 int64_t begin = i * item_per_thread;
                 int64_t end = std::min(begin + item_per_thread, count);
-                futures.emplace_back(this->build_pool_->GeneralEnqueue(get_attr_func, begin, end));
+                futures.emplace_back(this->thread_pool_->GeneralEnqueue(get_attr_func, begin, end));
             }
             for (auto& future : futures) {
                 future.get();
@@ -513,13 +545,13 @@ InnerIndexInterface::GetDataByIdsWithFlag(const int64_t* ids,
                 this->extra_infos_->GetExtraInfoById(inner_id, extra_info + i * extra_info_size_);
             }
         };
-        if (this->build_pool_ != nullptr) {
+        if (this->thread_pool_ != nullptr) {
             std::vector<std::future<void>> futures;
             for (int64_t i = 0; i < thread_count; ++i) {
                 int64_t begin = i * item_per_thread;
                 int64_t end = std::min(begin + item_per_thread, count);
                 futures.emplace_back(
-                    this->build_pool_->GeneralEnqueue(get_extra_info_func, begin, end));
+                    this->thread_pool_->GeneralEnqueue(get_extra_info_func, begin, end));
             }
             for (auto& future : futures) {
                 future.get();
@@ -548,6 +580,10 @@ InnerIndexInterface::GetIndexDetailInfos() const {
                        "Label table of current index, label table is a 2D array, "
                        "table[x][0] is label, table[x][1] is inner id",
                        IndexDetailDataType::TYPE_2DArray_INT64);
+
+    infos.emplace_back(INDEX_DETAIL_DATA_TYPE,
+                       "Data type of current index (e.g., float32, int8, sparse...)",
+                       IndexDetailDataType::TYPE_SCALAR_STRING);
     return infos;
 }
 
@@ -662,8 +698,49 @@ InnerIndexInterface::get_detail_data_by_info(const IndexDetailInfo& info) const 
             label_tables.emplace_back(std::vector<int64_t>{key, value});
         }
         data->SetData2DArrayInt64(label_tables);
+    } else if (name == INDEX_DETAIL_DATA_TYPE) {
+        data->SetDataScalarString(ToString(data_type_));
     }
     return data;
+}
+
+float
+InnerIndexInterface::calc_distance_by_id(const float* query,
+                                         int64_t id,
+                                         const FlattenInterfacePtr& data) const {
+    auto result = cal_distance_by_id(query, &id, 1, data);
+    return result->GetDistances()[0];
+}
+
+DatasetPtr
+InnerIndexInterface::cal_distance_by_id(const float* query,
+                                        const int64_t* ids,
+                                        int64_t count,
+                                        const FlattenInterfacePtr& data) const {
+    auto result = Dataset::Make();
+    result->Owner(true, allocator_);
+    auto* distances = (float*)allocator_->Allocate(sizeof(float) * count);
+    result->Distances(distances);
+    auto computer = data->FactoryComputer(query);
+    Vector<InnerIdType> inner_ids(count, 0, allocator_);
+    Vector<InnerIdType> invalid_id_loc(allocator_);
+    {
+        std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
+        for (int64_t i = 0; i < count; ++i) {
+            auto [success, inner_id] = this->label_table_->TryGetIdByLabel(ids[i]);
+            if (success) {
+                inner_ids[i] = inner_id;
+            } else {
+                logger::debug(fmt::format("failed to find id: {}", ids[i]));
+                invalid_id_loc.push_back(i);
+            }
+        }
+    }
+    data->Query(distances, computer, inner_ids.data(), count);
+    for (unsigned int i : invalid_id_loc) {
+        distances[i] = -1;
+    }
+    return result;
 }
 
 }  // namespace vsag

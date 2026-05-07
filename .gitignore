@@ -19,6 +19,11 @@
 *.out
 *.app
 .ccls-cache/
+
+# local files
+.DS_Store
+._.DS_Store
+
 # python
 __pycache__/
 *.py[cod]
@@ -163,6 +168,7 @@ flycheck_*.el
 # vsag
 _deps
 /build/
+/build_*/
 .idea/
 .vscode/
 venv/
@@ -174,6 +180,7 @@ third-party/downloads/
 third-party/install/
 dist/
 data/
+!tests/fixtures/data/
 /src/version.h
 /mockimpl/vsag/version.h
 /coverage_ut.info
@@ -189,4 +196,6 @@ data/
 /coverage/
 *.gcov
 /dist/
-/experiments/
+opencode.json
+_codeql_detected_source_root
+wheelhouse/

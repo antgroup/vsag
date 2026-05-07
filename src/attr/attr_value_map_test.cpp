@@ -17,9 +17,9 @@
 
 #include <catch2/catch_all.hpp>
 
-#include "fixtures.h"
 #include "impl/allocator/safe_allocator.h"
 #include "storage/serialization_template_test.h"
+#include "unittest.h"
 
 using namespace vsag;
 

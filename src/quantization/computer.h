@@ -26,8 +26,6 @@
 namespace vsag {
 DEFINE_POINTER(ComputerInterface);
 
-using DataType = float;
-
 class ComputerInterface {
 public:
     ComputerInterface() = default;
@@ -42,11 +40,13 @@ public:
         : quantizer_(quantizer), allocator_(allocator), raw_query_(allocator){};
 
     ~Computer() override {
-        quantizer_->ReleaseComputer(*this);
+        if (quantizer_) {
+            quantizer_->ReleaseComputer(*this);
+        }
     }
 
     void
-    SetQuery(const DataType* query) {
+    SetQuery(const float* query) {
         quantizer_->ProcessQuery(query, *this);
     }
 
@@ -92,12 +92,14 @@ public:
     }
 
     ~Computer() override {
-        quantizer_->ReleaseComputer(*this);
+        if (quantizer_) {
+            quantizer_->ReleaseComputer(*this);
+        }
         delete inner_computer_;
     }
 
     void
-    SetQuery(const DataType* query) {
+    SetQuery(const float* query) {
         quantizer_->ProcessQuery(query, *this);
     }
 

@@ -19,6 +19,7 @@
 
 #include "graph_interface.h"
 #include "io/memory_block_io.h"
+#include "sparse_duplicate_tracker.h"
 #include "sparse_graph_datacell_parameter.h"
 
 namespace vsag {
@@ -48,6 +49,9 @@ public:
     void
     GetNeighbors(InnerIdType id, Vector<InnerIdType>& neighbor_ids) const override;
 
+    [[nodiscard]] bool
+    CheckIdExists(InnerIdType id) const override;
+
     void
     Resize(InnerIdType new_size) override;
 
@@ -72,6 +76,24 @@ public:
 
     Vector<InnerIdType>
     GetIds() const override;
+
+    int64_t
+    GetMemoryUsage() const override;
+
+    DuplicateTrackerPtr
+    CreateDuplicateTracker() override {
+        return std::make_shared<SparseDuplicateTracker>(allocator_);
+    }
+
+    void
+    GetIncomingNeighbors(InnerIdType id, Vector<InnerIdType>& neighbors) const override;
+
+    void
+    Move(InnerIdType from, InnerIdType to) override;
+
+    void
+    ShrinkToFit(InnerIdType capacity) override {
+    }
 
 private:
     uint32_t code_line_size_{0};

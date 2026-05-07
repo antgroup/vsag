@@ -51,12 +51,10 @@ public:
         if (new_capacity <= this->max_capacity_) {
             return;
         }
-        this->max_capacity_ = new_capacity;
         uint64_t io_size =
             static_cast<uint64_t>(new_capacity) * static_cast<uint64_t>(extra_info_size_);
-        uint8_t end_flag =
-            127;  // the value is meaningless, only to occupy the position for io allocate
-        this->io_->Write(&end_flag, 1, io_size);
+        this->io_->Resize(io_size);
+        this->max_capacity_ = new_capacity;
     }
 
     void
@@ -81,6 +79,12 @@ public:
 
     void
     Deserialize(StreamReader& reader) override;
+
+    int64_t
+    GetMemoryUsage() const override;
+
+    void
+    Move(InnerIdType from, InnerIdType to) override;
 
     inline void
     SetIO(std::shared_ptr<BasicIO<IOTmpl>> io) {
@@ -169,5 +173,28 @@ void
 ExtraInfoDataCell<IOTmpl>::Deserialize(StreamReader& reader) {
     ExtraInfoInterface::Deserialize(reader);
     this->io_->Deserialize(reader);
+}
+
+template <typename IOTmpl>
+int64_t
+ExtraInfoDataCell<IOTmpl>::GetMemoryUsage() const {
+    int64_t memory = sizeof(ExtraInfoDataCell<IOTmpl>);
+    if (IOTmpl::InMemory) {
+        memory += this->io_->GetMemoryUsage();
+    }
+    return memory;
+}
+
+template <typename IOTmpl>
+void
+ExtraInfoDataCell<IOTmpl>::Move(InnerIdType from, InnerIdType to) {
+    bool need_release = false;
+    const char* extra_info = this->GetExtraInfoById(from, need_release);
+    this->io_->Write(reinterpret_cast<const uint8_t*>(extra_info),
+                     extra_info_size_,
+                     static_cast<uint64_t>(to) * static_cast<uint64_t>(extra_info_size_));
+    if (need_release) {
+        this->io_->Release(reinterpret_cast<const uint8_t*>(extra_info));
+    }
 }
 }  // namespace vsag

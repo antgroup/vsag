@@ -15,13 +15,13 @@
 
 #include "vsag/factory.h"
 
-#include <catch2/catch_test_macros.hpp>
 #include <fstream>
 #include <nlohmann/json.hpp>
 
 #include "impl/logger/logger.h"
 #include "impl/thread_pool/safe_thread_pool.h"
 #include "typing.h"
+#include "unittest.h"
 #include "vsag/errors.h"
 
 TEST_CASE("Create Index with Full Parameters", "[ut][factory]") {

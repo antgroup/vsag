@@ -16,11 +16,14 @@
 #include "basic_searcher.h"
 
 #include <atomic>
+#include <chrono>
 #include <limits>
 
 #include "algorithm/inner_index_interface.h"
+#include "datacell/flatten_interface.h"
 #include "impl/heap/standard_heap.h"
-#include "utils/linear_congruential_generator.h"
+#include "utils/filter_search_skip_strategy.h"
+#include "vsag/allocator.h"
 
 namespace vsag {
 
@@ -33,11 +36,10 @@ BasicSearcher::visit(const GraphInterfacePtr& graph,
                      const VisitedListPtr& vl,
                      const std::pair<float, uint64_t>& current_node_pair,
                      const FilterPtr& filter,
-                     float skip_ratio,
+                     FilterSearchSkipStrategy* skip_strategy,
                      Vector<InnerIdType>& to_be_visited_rid,
                      Vector<InnerIdType>& to_be_visited_id,
                      Vector<InnerIdType>& neighbors) const {
-    LinearCongruentialGenerator generator;
     uint32_t count_no_visited = 0;
 
     if (this->mutex_array_ != nullptr) {
@@ -47,17 +49,12 @@ BasicSearcher::visit(const GraphInterfacePtr& graph,
         graph->GetNeighbors(current_node_pair.second, neighbors);
     }
 
-    float skip_threshold =
-        (filter != nullptr
-             ? (filter->ValidRatio() == 1.0F ? 0 : (1 - ((1 - filter->ValidRatio()) * skip_ratio)))
-             : 0.0F);
-
     for (uint32_t i = 0; i < neighbors.size(); i++) {
         if (i + prefetch_stride_visit_ < neighbors.size()) {
             vl->Prefetch(neighbors[i + prefetch_stride_visit_]);
         }
         if (not vl->Get(neighbors[i])) {
-            if (not filter || count_no_visited == 0 || generator.NextFloat() > skip_threshold ||
+            if (not filter || count_no_visited == 0 || skip_strategy->ShouldSkipFilterCheck() ||
                 filter->CheckValid(neighbors[i])) {
                 to_be_visited_rid[count_no_visited] = i;
                 to_be_visited_id[count_no_visited] = neighbors[i];
@@ -76,13 +73,13 @@ BasicSearcher::Search(const GraphInterfacePtr& graph,
                       const void* query,
                       const InnerSearchParam& inner_search_param,
                       const LabelTablePtr& label_table,
-                      Statistics& stats) const {
+                      QueryContext* ctx) const {
     if (inner_search_param.search_mode == KNN_SEARCH) {
         return this->search_impl<KNN_SEARCH>(
-            graph, flatten, vl, query, inner_search_param, label_table, stats);
+            graph, flatten, vl, query, inner_search_param, label_table, ctx);
     }
     return this->search_impl<RANGE_SEARCH>(
-        graph, flatten, vl, query, inner_search_param, label_table, stats);
+        graph, flatten, vl, query, inner_search_param, label_table, ctx);
 }
 
 DistHeapPtr
@@ -92,9 +89,9 @@ BasicSearcher::Search(const GraphInterfacePtr& graph,
                       const void* query,
                       const InnerSearchParam& inner_search_param,
                       IteratorFilterContext* iter_ctx,
-                      Statistics& stats) const {
+                      QueryContext* ctx) const {
     return this->search_impl<KNN_SEARCH>(
-        graph, flatten, vl, query, inner_search_param, iter_ctx, stats);
+        graph, flatten, vl, query, inner_search_param, iter_ctx, ctx);
 }
 
 template <InnerSearchMode mode>
@@ -105,9 +102,10 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                            const void* query,
                            const InnerSearchParam& inner_search_param,
                            IteratorFilterContext* iter_ctx,
-                           Statistics& stats) const {
-    Allocator* alloc =
-        inner_search_param.search_alloc == nullptr ? allocator_ : inner_search_param.search_alloc;
+                           QueryContext* ctx) const {
+    // set customize query alloctor
+    Allocator* alloc = select_query_allocator(ctx, allocator_);
+
     auto top_candidates = std::make_shared<StandardHeap<true, false>>(alloc, -1);
     auto candidate_set = std::make_shared<StandardHeap<true, false>>(alloc, -1);
 
@@ -132,6 +130,12 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     Vector<InnerIdType> to_be_visited_id(graph->MaximumDegree(), alloc);
     Vector<InnerIdType> neighbors(graph->MaximumDegree(), alloc);
     Vector<float> line_dists(graph->MaximumDegree(), alloc);
+    auto skip_strategy = create_filter_search_skip_strategy(
+        inner_search_param.skip_strategy_type,
+        inner_search_param.is_inner_id_allowed != nullptr
+            ? inner_search_param.is_inner_id_allowed->ValidRatio()
+            : 1.0F,
+        inner_search_param.skip_ratio);
 
     if (!iter_ctx->IsFirstUsed()) {
         if (iter_ctx->Empty()) {
@@ -140,10 +144,10 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
         while (!iter_ctx->Empty()) {
             uint32_t cur_inner_id = iter_ctx->GetTopID();
             float cur_dist = iter_ctx->GetTopDist();
-            if (!vl->Get(cur_inner_id) && iter_ctx->CheckPoint(cur_inner_id)) {
-                vl->Set(cur_inner_id);
+            vl->Set(cur_inner_id);
+            if (iter_ctx->CheckPoint(cur_inner_id)) {
                 lower_bound = std::max(lower_bound, cur_dist);
-                flatten->Query(&cur_dist, computer, &cur_inner_id, 1, alloc);
+                flatten->Query(&cur_dist, computer, &cur_inner_id, 1, ctx);
                 top_candidates->Push(cur_dist, cur_inner_id);
                 candidate_set->Push(cur_dist, cur_inner_id);
                 if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
@@ -155,7 +159,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
             iter_ctx->PopDiscard();
         }
     } else {
-        flatten->Query(&dist, computer, &ep, 1, alloc);
+        flatten->Query(&dist, computer, &ep, 1, ctx);
         if (not is_id_allowed || is_id_allowed->CheckValid(ep)) {
             top_candidates->Push(dist, ep);
             lower_bound = top_candidates->Top().first;
@@ -166,6 +170,9 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
 
     while (not candidate_set->Empty()) {
         hops++;
+        if (hops >= inner_search_param.hops_limit) {
+            break;
+        }
         auto current_node_pair = candidate_set->Top();
 
         if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
@@ -183,21 +190,17 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                                  vl,
                                  current_node_pair,
                                  inner_search_param.is_inner_id_allowed,
-                                 inner_search_param.skip_ratio,
+                                 skip_strategy.get(),
                                  to_be_visited_rid,
                                  to_be_visited_id,
                                  neighbors);
 
         dist_cmp += count_no_visited;
 
-        flatten->Query(
-            line_dists.data(), computer, to_be_visited_id.data(), count_no_visited, alloc);
+        flatten->Query(line_dists.data(), computer, to_be_visited_id.data(), count_no_visited, ctx);
 
         for (uint32_t i = 0; i < count_no_visited; i++) {
             dist = line_dists[i];
-            if (dist < THRESHOLD_ERROR) {
-                inner_search_param.duplicate_id = to_be_visited_id[i];
-            }
             if (top_candidates->Size() < ef || lower_bound > dist ||
                 (mode == RANGE_SEARCH && dist <= inner_search_param.radius)) {
                 if (!iter_ctx->CheckPoint(to_be_visited_id[i])) {
@@ -247,9 +250,10 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                            const void* query,
                            const InnerSearchParam& inner_search_param,
                            const LabelTablePtr& label_table,
-                           Statistics& stats) const {
-    Allocator* alloc =
-        inner_search_param.search_alloc == nullptr ? allocator_ : inner_search_param.search_alloc;
+                           QueryContext* ctx) const {
+    // set customize query alloctor
+    Allocator* alloc = select_query_allocator(ctx, allocator_);
+
     auto top_candidates = std::make_shared<StandardHeap<true, false>>(alloc, -1);
     auto candidate_set = std::make_shared<StandardHeap<true, false>>(alloc, -1);
 
@@ -273,6 +277,12 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     Vector<InnerIdType> to_be_visited_id(graph->MaximumDegree(), alloc);
     Vector<InnerIdType> neighbors(graph->MaximumDegree(), alloc);
     Vector<float> line_dists(graph->MaximumDegree(), alloc);
+    auto skip_strategy = create_filter_search_skip_strategy(
+        inner_search_param.skip_strategy_type,
+        inner_search_param.is_inner_id_allowed != nullptr
+            ? inner_search_param.is_inner_id_allowed->ValidRatio()
+            : 1.0F,
+        inner_search_param.skip_ratio);
 
     Filter* attr_ft = nullptr;
     if (not inner_search_param.executors.empty() and inner_search_param.executors[0] != nullptr) {
@@ -285,7 +295,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                (attr_ft == nullptr or attr_ft->CheckValid(id));
     };
 
-    flatten->Query(&dist, computer, &ep, 1, alloc);
+    flatten->Query(&dist, computer, &ep, 1, ctx);
     ++dist_cmp;
     if (check_func(ep)) {
         top_candidates->Push(dist, ep);
@@ -296,19 +306,21 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
             top_candidates->Pop();
         }
     }
-    if (dist < THRESHOLD_ERROR) {
-        inner_search_param.duplicate_id = ep;
-    }
     candidate_set->Push(-dist, ep);
     vl->Set(ep);
 
     while (not candidate_set->Empty()) {
         ++hops;
+        if (hops >= inner_search_param.hops_limit) {
+            break;
+        }
         auto current_node_pair = candidate_set->Top();
 
         if (inner_search_param.time_cost != nullptr and
             inner_search_param.time_cost->CheckOvertime()) {
-            stats.is_timeout.store(true, std::memory_order_relaxed);
+            if (ctx != nullptr and ctx->stats != nullptr) {
+                ctx->stats->is_timeout.store(true, std::memory_order_relaxed);
+            }
             break;
         }
 
@@ -327,20 +339,16 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                                  vl,
                                  current_node_pair,
                                  inner_search_param.is_inner_id_allowed,
-                                 inner_search_param.skip_ratio,
+                                 skip_strategy.get(),
                                  to_be_visited_rid,
                                  to_be_visited_id,
                                  neighbors);
 
-        flatten->Query(
-            line_dists.data(), computer, to_be_visited_id.data(), count_no_visited, alloc);
+        flatten->Query(line_dists.data(), computer, to_be_visited_id.data(), count_no_visited, ctx);
         dist_cmp += count_no_visited;
 
         for (uint32_t i = 0; i < count_no_visited; i++) {
             dist = line_dists[i];
-            if (dist < THRESHOLD_ERROR) {
-                inner_search_param.duplicate_id = to_be_visited_id[i];
-            }
             if (top_candidates->Size() < ef || lower_bound > dist ||
                 (mode == RANGE_SEARCH && dist <= inner_search_param.radius)) {
                 candidate_set->Push(-dist, to_be_visited_id[i]);
@@ -348,9 +356,8 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                 if (check_func(to_be_visited_id[i])) {
                     top_candidates->Push(dist, to_be_visited_id[i]);
                 }
-                if (inner_search_param.consider_duplicate and label_table != nullptr and
-                    label_table->CompressDuplicateData()) {
-                    const auto& duplicate_ids = label_table->GetDuplicateId(to_be_visited_id[i]);
+                if (inner_search_param.consider_duplicate) {
+                    const auto duplicate_ids = graph->GetDuplicateIds(to_be_visited_id[i]);
                     for (const auto& item : duplicate_ids) {
                         if (check_func(item)) {
                             top_candidates->Push(dist, item);
@@ -387,8 +394,34 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
         }
     }
 
-    stats.dist_cmp.fetch_add(dist_cmp, std::memory_order_relaxed);
-    stats.hops.fetch_add(hops, std::memory_order_relaxed);
+    // set duplicate id for query vector
+    if (inner_search_param.find_duplicate) {
+        const auto* data = top_candidates->GetData();
+        auto min_distance = data[0].first;
+        auto min_index = data[0].second;
+        for (uint32_t i = 1; i < top_candidates->Size(); ++i) {
+            if (data[i].first < min_distance) {
+                min_distance = data[i].first;
+                min_index = data[i].second;
+            }
+        }
+        bool need_release;
+        const auto* codes = flatten->GetCodesById(min_index, need_release);
+        Vector<uint8_t> encoded_query(flatten->code_size_, allocator_);
+        flatten->Encode(static_cast<const float*>(query), encoded_query.data());
+        if (std::memcmp(codes, encoded_query.data(), flatten->code_size_) == 0) {
+            inner_search_param.duplicate_id = min_index;
+        }
+        if (need_release) {
+            flatten->Release(codes);
+        }
+    }
+
+    if (ctx != nullptr and ctx->stats != nullptr) {
+        auto& stats = *ctx->stats;
+        stats.dist_cmp.fetch_add(dist_cmp, std::memory_order_relaxed);
+        stats.hops.fetch_add(hops, std::memory_order_relaxed);
+    }
 
     return top_candidates;
 }
@@ -422,7 +455,7 @@ BasicSearcher::SetMockParameters(const GraphInterfacePtr& graph,
 }
 
 double
-BasicSearcher::MockRun(Statistics& stats) const {
+BasicSearcher::MockRun(SearchStatistics& stats) const {
     uint64_t n_trials = std::min(mock_n_trials_, mock_flatten_->TotalCount());
 
     double time_cost = 0;
@@ -443,7 +476,7 @@ BasicSearcher::MockRun(Statistics& stats) const {
                raw_data.data(),
                mock_inner_search_param_,
                (LabelTablePtr) nullptr,
-               stats);
+               nullptr);
         auto ed = std::chrono::high_resolution_clock::now();
         time_cost += std::chrono::duration<double>(ed - st).count();
 

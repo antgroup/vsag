@@ -14,10 +14,10 @@
 // limitations under the License.
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_exception.hpp>
 #include <fstream>
 
-#include "fixtures/fixtures.h"
-#include "fixtures/test_dataset_pool.h"
+#include "functest.h"
 #include "vsag/index.h"
 
 using namespace vsag;
@@ -101,7 +101,7 @@ TEST_CASE("Test Simple Index", "[ft][simple_index]") {
     auto pool = std::make_shared<fixtures::TestDatasetPool>();
     auto dim = 12;
     auto base_count = 100;
-    auto dataset = pool->GetDatasetAndCreate(dim, base_count, "fp32");
+    auto dataset = pool->GetDatasetAndCreate(dim, base_count, "l2");
     BinarySet binary;
     std::vector<int64_t> pretrain_ids;
     FilterPtr filter = nullptr;
@@ -116,7 +116,9 @@ TEST_CASE("Test Simple Index", "[ft][simple_index]") {
     REQUIRE_THROWS(index->EstimateMemory(1000));
     REQUIRE_THROWS(index->GetEstimateBuildMemory(1000));
     REQUIRE_THROWS(index->Feedback(dataset->query_, 10, ""));
-    REQUIRE_THROWS(index->GetStats());
+    REQUIRE_THROWS_MATCHES(index->GetStats(),
+                           std::runtime_error,
+                           Catch::Matchers::Message("Index not support GetStats"));
     REQUIRE_THROWS(index->UpdateId(0, 1));
     REQUIRE_THROWS(index->UpdateVector(0, dataset->query_));
     REQUIRE_THROWS(index->ContinueBuild(dataset->base_, binary));

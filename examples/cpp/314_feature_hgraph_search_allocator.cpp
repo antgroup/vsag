@@ -28,7 +28,7 @@ public:
     }
 
     void*
-    Allocate(size_t size) override {
+    Allocate(uint64_t size) override {
         vsag::Options::Instance().logger()->Debug("allocate " + std::to_string(size) + " bytes.");
         auto addr = (void*)malloc(size);
         sizes_[addr] = size;
@@ -46,7 +46,7 @@ public:
     }
 
     void*
-    Reallocate(void* p, size_t size) override {
+    Reallocate(void* p, uint64_t size) override {
         vsag::Options::Instance().logger()->Debug("reallocate " + std::to_string(size) + " bytes.");
         auto addr = (void*)realloc(p, size);
         sizes_.erase(p);
@@ -55,7 +55,7 @@ public:
     }
 
 private:
-    std::unordered_map<void*, size_t> sizes_;
+    std::unordered_map<void*, uint64_t> sizes_;
 };
 
 int
@@ -152,12 +152,13 @@ main() {
 
     /******************* Hgraph sq8 Iterator Filter *****************/
     {
-        vsag::IteratorContext* iter_ctx = nullptr;
         nlohmann::json search_parameters = {
             {"hgraph", {{"ef_search", 100}, {"skip_ratio", 0.7f}}},
         };
         std::string param_str = search_parameters.dump();
-        vsag::SearchParam search_param(true, param_str, nullptr, &allocator, iter_ctx, false);
+        vsag::SearchParam search_param(true, param_str, nullptr, &allocator);
+        search_param.iter_ctx = nullptr;
+        search_param.is_last_search = false;
 
         /* first search */
         {
@@ -187,6 +188,8 @@ main() {
             allocator.Deallocate((void*)result->GetIds());
             allocator.Deallocate((void*)result->GetDistances());
         }
+
+        delete search_param.iter_ctx;
     }
 
     engine.Shutdown();

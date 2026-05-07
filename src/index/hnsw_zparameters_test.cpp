@@ -15,7 +15,7 @@
 
 #include "hnsw_zparameters.h"
 
-#include <catch2/catch_test_macros.hpp>
+#include "unittest.h"
 
 TEST_CASE("create hnsw with correct parameter", "[ut][hnsw]") {
     vsag::IndexCommonParam common_param;
@@ -38,7 +38,7 @@ TEST_CASE("create hnsw with wrong parameter", "[ut][hnsw]") {
     common_param.dim_ = 128;
     common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
     common_param.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
-    constexpr static const char* build_parameter_json = R"(
+    static constexpr const char* build_parameter_json = R"(
         {{
             "max_degree": {},
             "ef_construction": {}
@@ -69,5 +69,51 @@ TEST_CASE("create hnsw with wrong parameter", "[ut][hnsw]") {
         auto correct_param_str = fmt::format(build_parameter_json, 16, 1600);
         auto correct_parsed_params = vsag::JsonType::Parse(correct_param_str);
         vsag::HnswParameters::FromJson(correct_parsed_params, common_param);
+    }
+}
+
+TEST_CASE("parse hnsw search skip strategy", "[ut][hnsw]") {
+    SECTION("default deterministic accumulative strategy") {
+        auto params = vsag::HnswSearchParameters::FromJson(R"(
+        {
+            "hnsw": {
+                "ef_search": 100,
+                "skip_ratio": 0.3
+            }
+        })");
+        REQUIRE(params.skip_strategy_type ==
+                vsag::FilterSearchSkipStrategyType::DETERMINISTIC_ACCUMULATIVE);
+    }
+
+    SECTION("explicit random strategy") {
+        auto params = vsag::HnswSearchParameters::FromJson(R"(
+        {
+            "hnsw": {
+                "ef_search": 100,
+                "skip_ratio": 0.3,
+                "skip_strategy": "random"
+            }
+        })");
+        REQUIRE(params.skip_strategy_type == vsag::FilterSearchSkipStrategyType::RANDOM);
+    }
+
+    SECTION("invalid strategy") {
+        REQUIRE_THROWS(vsag::HnswSearchParameters::FromJson(R"(
+        {
+            "hnsw": {
+                "ef_search": 100,
+                "skip_strategy": "invalid"
+            }
+        })"));
+    }
+
+    SECTION("non-string strategy") {
+        REQUIRE_THROWS(vsag::HnswSearchParameters::FromJson(R"(
+        {
+            "hnsw": {
+                "ef_search": 100,
+                "skip_strategy": 1
+            }
+        })"));
     }
 }

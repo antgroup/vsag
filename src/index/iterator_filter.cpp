@@ -39,7 +39,7 @@ IteratorFilterContext::init(InnerIdType max_size, int64_t ef_search, Allocator* 
         allocator_ = allocator;
         max_size_ = max_size;
         discard_ = std::make_unique<MaxHeap>(allocator);
-        size_t byte_len = ceil_int(max_size, BITS_PER_BYTE) / BITS_PER_BYTE;
+        uint64_t byte_len = align_up(max_size, BITS_PER_BYTE) / BITS_PER_BYTE;
         list_ = reinterpret_cast<uint8_t*>(allocator_->Allocate(byte_len));
         memset(list_, 0, byte_len);
     } catch (const std::bad_alloc& e) {
@@ -94,12 +94,15 @@ IteratorFilterContext::SetOFFFirstUsed() {
 
 void
 IteratorFilterContext::SetPoint(InnerIdType inner_id) {
+    if (inner_id >= max_size_) {
+        return;
+    }
     list_[byte_pos(inner_id)] |= (1 << bit_pos(inner_id));
 }
 
 bool
 IteratorFilterContext::CheckPoint(InnerIdType inner_id) {
-    return (list_[byte_pos(inner_id)] & (1 << bit_pos(inner_id))) == 0;
+    return inner_id < max_size_ && (list_[byte_pos(inner_id)] & (1 << bit_pos(inner_id))) == 0;
 }
 
 int64_t

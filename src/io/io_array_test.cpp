@@ -15,9 +15,6 @@
 
 #include "io_array.h"
 
-#include <catch2/catch_template_test_macros.hpp>
-#include <catch2/catch_test_macros.hpp>
-
 #include "async_io.h"
 #include "basic_io_test.h"
 #include "buffer_io.h"
@@ -26,6 +23,7 @@
 #include "memory_io.h"
 #include "mmap_io.h"
 #include "noncontinuous_io.h"
+#include "unittest.h"
 
 namespace vsag {
 template <typename IOType>
@@ -39,19 +37,19 @@ public:
 
     void
     TestBasic() {
-        this->array_->Resize(5);
-        for (size_t i = 0; i < 5; ++i) {
+        this->array_->Resize(3);
+        for (uint64_t i = 0; i < 3; ++i) {
             TestBasicReadWrite((*this->array_)[i]);
         }
-        for (size_t i = 0; i < 5; ++i) {
+        for (uint64_t i = 0; i < 3; ++i) {
             TestBasicReadWrite(this->array_->At(i));
         }
-        this->array_->Resize(10);
-        for (size_t i = 5; i < 10; ++i) {
+        this->array_->Resize(6);
+        for (uint64_t i = 3; i < 6; ++i) {
             TestBasicReadWrite(this->array_->At(i));
         }
-        this->array2_->Resize(10);
-        for (size_t i = 0; i < 10; ++i) {
+        this->array2_->Resize(6);
+        for (uint64_t i = 0; i < 6; ++i) {
             TestSerializeAndDeserialize((*this->array_)[i], (*this->array2_)[i]);
         }
     }

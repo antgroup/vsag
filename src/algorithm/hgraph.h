@@ -51,6 +51,8 @@ public:
     CheckAndMappingExternalParam(const JsonType& external_param,
                                  const IndexCommonParam& common_param);
 
+    friend class HGraphAnalyzer;
+
 public:
     HGraph(const HGraphParameterPtr& param, const IndexCommonParam& common_param);
 
@@ -60,7 +62,7 @@ public:
     ~HGraph() override = default;
 
     std::vector<int64_t>
-    Add(const DatasetPtr& data) override;
+    Add(const DatasetPtr& data, AddMode mode = AddMode::DEFAULT) override;
 
     std::string
     AnalyzeIndexBySearch(const SearchRequest& request) override;
@@ -68,11 +70,19 @@ public:
     std::vector<int64_t>
     Build(const DatasetPtr& data) override;
 
+    bool
+    Tune(const std::string& parameters, bool disable_future_tuning) override;
+
     float
-    CalcDistanceById(const float* query, int64_t id) const override;
+    CalcDistanceById(const float* query,
+                     int64_t id,
+                     bool calculate_precise_distance = true) const override;
 
     DatasetPtr
-    CalDistanceById(const float* query, const int64_t* ids, int64_t count) const override;
+    CalDistanceById(const float* query,
+                    const int64_t* ids,
+                    int64_t count,
+                    bool calculate_precise_distance = true) const override;
 
     void
     Deserialize(StreamReader& reader) override;
@@ -88,11 +98,6 @@ public:
 
     void
     GetCodeByInnerId(InnerIdType inner_id, uint8_t* data) const override;
-
-    int64_t
-    GetMemoryUsage() const override {
-        return static_cast<int64_t>(this->CalSerializeSize());
-    }
 
     std::string
     GetMemoryUsageDetail() const override;
@@ -169,8 +174,8 @@ public:
     [[nodiscard]] DatasetPtr
     SearchWithRequest(const SearchRequest& request) const override;
 
-    bool
-    Remove(int64_t id) override;
+    uint32_t
+    Remove(const std::vector<int64_t>& ids, RemoveMode mode = RemoveMode::MARK_REMOVE) override;
 
     void
     Serialize(StreamWriter& writer) const override;
@@ -178,7 +183,7 @@ public:
     void
     SetBuildThreadsCount(uint64_t count) {
         this->build_thread_count_ = count;
-        this->build_pool_->SetPoolSize(count);
+        this->thread_pool_->SetPoolSize(count);
     }
 
     void
@@ -191,9 +196,6 @@ public:
     Train(const DatasetPtr& base) override;
 
     bool
-    UpdateId(int64_t old_id, int64_t new_id) override;
-
-    bool
     UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update = false) override;
 
     void
@@ -204,13 +206,18 @@ public:
                     const AttributeSet& new_attrs,
                     const AttributeSet& origin_attrs) override;
 
-private:
+    static JsonType
+    map_hgraph_param(const JsonType& hgraph_json);
+
     const void*
     get_data(const DatasetPtr& dataset, uint32_t index = 0) const {
         if (data_type_ == DataTypes::DATA_TYPE_FLOAT) {
             return dataset->GetFloat32Vectors() + index * dim_;
         } else if (data_type_ == DataTypes::DATA_TYPE_INT8) {
             return dataset->GetInt8Vectors() + index * dim_;
+        } else if (data_type_ == DataTypes::DATA_TYPE_FP16 ||
+                   data_type_ == DataTypes::DATA_TYPE_BF16) {
+            return dataset->GetFloat16Vectors() + index * dim_;
         } else if (data_type_ == DataTypes::DATA_TYPE_SPARSE) {
             return dataset->GetSparseVectors() + index;
         }
@@ -226,13 +233,18 @@ private:
 
     Vector<InnerIdType>
     get_unique_inner_ids(InnerIdType count) {
-        auto start = static_cast<InnerIdType>(this->total_count_);
         Vector<InnerIdType> ret(count, this->allocator_);
         if (ret.size() != count) {
             throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "allocate memory failed");
         }
-        std::iota(ret.begin(), ret.end(), start);
-        this->total_count_ += count;
+        for (InnerIdType i = 0; i < count; ++i) {
+            auto [success, id] = this->label_table_->PopHole();
+            if (success) {
+                ret[i] = id;
+            } else {
+                ret[i] = static_cast<InnerIdType>(this->total_count_++);
+            }
+        }
         return ret;
     }
 
@@ -258,7 +270,8 @@ private:
                      const FlattenInterfacePtr& flatten,
                      InnerSearchParam& inner_search_param,
                      const VisitedListPtr& vt,
-                     Statistics& stats) const;
+                     // ctx can be nullptr in adding scenario
+                     QueryContext* ctx) const;
 
     template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH>
     DistHeapPtr
@@ -267,7 +280,8 @@ private:
                      const FlattenInterfacePtr& flatten,
                      InnerSearchParam& inner_search_param,
                      IteratorFilterContext* iter_ctx,
-                     Statistics& stats) const;
+                     // ctx can be nullptr in adding scenario
+                     QueryContext* ctx) const;
 
 private:
     // since v0.15
@@ -290,12 +304,31 @@ private:
     void
     deserialize_basic_info_v0_14(StreamReader& reader);
 
+    uint32_t
+    force_remove_one(int64_t label);
+
+    void
+    find_new_entry_point();
+
+    void
+    graph_force_remove_one(const InnerIdType& inner_id,
+                           const FlattenInterfacePtr& flatten,
+                           const GraphInterfacePtr& graph);
+
+    void
+    move_id(InnerIdType from, InnerIdType to);
+
+    void
+    shrink_to_fit();
+
 private:
     void
     reorder(const void* query,
             const FlattenInterfacePtr& flatten,
             DistHeapPtr& candidate_heap,
-            int64_t k) const;
+            int64_t k,
+            IteratorFilterContext* iter_ctx,
+            QueryContext& ctx) const;
 
     void
     elp_optimize();
@@ -311,18 +344,15 @@ private:
 
 private:
     void
-    analyze_graph_recall(JsonType& stats,
-                         Vector<float>& data,
-                         uint64_t sample_data_size,
-                         int64_t topk,
-                         const std::string& search_param) const;
-
-    void
-    analyze_graph_connection(JsonType& stats) const;
-
-    void
     check_and_init_raw_vector(const FlattenInterfaceParamPtr& raw_vector_param,
-                              const IndexCommonParam& common_param);
+                              const IndexCommonParam& common_param,
+                              bool is_create_new = true);
+
+    void
+    init_resize_bit_and_reorder();
+
+    void
+    cal_memory_usage();
 
 private:
     FlattenInterfacePtr basic_flatten_codes_{nullptr};
@@ -342,7 +372,7 @@ private:
     std::default_random_engine level_generator_{2021};
     double mult_{1.0};
 
-    InnerIdType entry_point_id_{std::numeric_limits<InnerIdType>::max()};
+    InnerIdType entry_point_id_{INVALID_ENTRY_POINT};
 
     ODescentParameterPtr odescent_param_{nullptr};
     std::string graph_type_{GRAPH_TYPE_VALUE_NSW};
@@ -357,6 +387,7 @@ private:
     mutable std::shared_mutex global_mutex_;
     mutable MutexArrayPtr neighbors_mutex_;
     mutable std::shared_mutex add_mutex_;
+    mutable std::shared_mutex force_remove_mutex_;
 
     std::atomic<InnerIdType> max_capacity_{0};
 
@@ -375,5 +406,7 @@ private:
     ReorderInterfacePtr reorder_{nullptr};
 
     bool use_old_serial_format_{false};
+
+    bool support_duplicate_{false};
 };
 }  // namespace vsag

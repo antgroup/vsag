@@ -23,6 +23,14 @@ namespace vsag {
 class ThreadPool {
 public:
     /**
+      * Destructor.
+      *
+      * Cleans up resources used by the thread pool.
+      */
+    virtual ~ThreadPool() = default;
+
+public:
+    /**
       * Blocks until all tasks in the thread pool have completed.
       *
       * This function will wait until all tasks that have been
@@ -39,7 +47,7 @@ public:
       *              depending on the specific implementation.
       */
     virtual void
-    SetQueueSizeLimit(std::size_t limit) = 0;
+    SetQueueSizeLimit(std::uint64_t limit) = 0;
 
     /**
       * Sets the limit on the size of the thread pool.
@@ -48,14 +56,7 @@ public:
       *              No additional threads will be created beyond this limit.
       */
     virtual void
-    SetPoolSize(std::size_t limit) = 0;
-
-    /**
-      * Destructor.
-      *
-      * Cleans up resources used by the thread pool.
-      */
-    virtual ~ThreadPool() = default;
+    SetPoolSize(std::uint64_t limit) = 0;
 
     /**
       * Enqueues a new task to be executed by the thread pool.

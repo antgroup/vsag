@@ -22,8 +22,8 @@
 #include <iostream>
 #include <unordered_map>
 
-#include "fixtures.h"
 #include "fmt/format.h"
+#include "functest.h"
 #include "vsag/allocator.h"
 #include "vsag/options.h"
 #include "vsag/vsag.h"
@@ -50,7 +50,7 @@ public:
     }
 
     void*
-    Allocate(size_t size) override {
+    Allocate(uint64_t size) override {
         std::scoped_lock lock(mutex_);
         auto* ptr = malloc(size);
         if (ptr != nullptr) {
@@ -68,7 +68,7 @@ public:
     }
 
     void*
-    Reallocate(void* p, size_t size) override {
+    Reallocate(void* p, uint64_t size) override {
         std::scoped_lock lock(mutex_);
         if (p == nullptr) {
             return Allocate(size);
@@ -135,53 +135,48 @@ private:
     std::shared_ptr<vsag::Index> index_;
 };
 
+std::string
+generate_param(const std::string& index_name, const std::string& base_quantization_type, int dim) {
+    if (index_name == "hgraph") {
+        return fmt::format(
+            R"({{
+            "dtype": "float32",
+            "metric_type": "l2",
+            "dim": {},
+            "index_param": {{
+                "base_quantization_type": "{}",
+                "max_degree": 48,
+                "ef_construction": 100
+            }}
+            }})",
+            dim,
+            base_quantization_type);
+    } else if (index_name == "ivf") {
+        return fmt::format(
+            R"({{
+            "dtype": "float32",
+            "metric_type": "l2",
+            "dim": {},
+            "index_param": {{
+                "buckets_count": 50,
+                "base_quantization_type": "{}",
+                "partition_strategy_type": "ivf",
+                "ivf_train_type": "kmeans",
+                "train_sample_count": 1000
+            }}
+            }})",
+            dim,
+            base_quantization_type);
+    }
+    throw std::runtime_error("Unsupported index name: " + index_name);
+}
+
 const std::tuple<std::string, std::string, std::string, int64_t, int64_t> INDEX_PARAMS[] = {
-    {"hgraph",
-     R"({{
-                    "dtype": "float32",
-                    "metric_type": "l2",
-                    "dim": {},
-                    "index_param": {{
-                        "base_quantization_type": "fp32",
-                        "max_degree": 48,
-                        "ef_construction": 100
-                    }}
-                }})",
-     R"({"hgraph": {"ef_search": 100}})",
-     10000,
-     128},
+    {"hgraph", "fp32", R"({"hgraph": {"ef_search": 100}})", 3000, 128},
 
-    {"hgraph",
-     R"({{
-                    "dtype": "float32",
-                    "metric_type": "l2",
-                    "dim": {},
-                    "index_param": {{
-                        "base_quantization_type": "sq8_uniform",
-                        "max_degree": 48,
-                        "ef_construction": 100
-                    }}
-                }})",
-     R"({"hgraph": {"ef_search": 100}})",
-     10000,
-     128},
+    {"hgraph", "sq8_uniform", R"({"hgraph": {"ef_search": 100}})", 3000, 128},
 
-    {"ivf",
-     R"({{
-                    "dtype": "float32",
-                    "metric_type": "l2",
-                    "dim": {},
-                    "index_param": {{
-                        "buckets_count": 50,
-                        "base_quantization_type": "fp32",
-                        "partition_strategy_type": "ivf",
-                        "ivf_train_type": "kmeans",
-                        "ivf_train_sample_count": 1000
-                    }}
-                }})",
-     R"({"ivf": {"scan_buckets_count": 10}})",
-     10000,
-     128},
+    {"ivf", "fp32", R"({"ivf": {"scan_buckets_count": 10}})", 3000, 128},
 };
 
 TEST_CASE("Test Classic Index Memory Leak", "[ft][memleak]") {

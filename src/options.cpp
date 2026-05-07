@@ -18,6 +18,7 @@
 #include <fmt/format.h>
 
 #include "impl/logger/default_logger.h"
+#include "vsag_exception.h"
 namespace vsag {
 
 Options&
@@ -36,10 +37,12 @@ Options::logger() {
 }
 
 void
-Options::set_direct_IO_object_align_bit(size_t align_bit) {
+Options::set_direct_IO_object_align_bit(uint64_t align_bit) {
     if (align_bit > 21) {
-        throw std::runtime_error(
-            fmt::format("size ({}) should be smaller than 2^21(2M).", align_bit));
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            fmt::format("align_bit ({}) should be no greater than 21 (maximum "
+                                        "alignment size is 2^21 bytes, or 2 MiB).",
+                                        align_bit));
     }
     if (!direct_IO_object_align_bit_flag.exchange(true, std::memory_order_acq_rel)) {
         direct_IO_object_align_bit_.store(align_bit, std::memory_order_release);
@@ -47,26 +50,29 @@ Options::set_direct_IO_object_align_bit(size_t align_bit) {
 }
 
 void
-Options::set_block_size_limit(size_t size) {
+Options::set_block_size_limit(uint64_t size) {
     if (size < 256UL * 1024) {
-        throw std::runtime_error(fmt::format("size ({}) should be greater than 256K.", size));
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            fmt::format("size ({}) should be greater than 256K.", size));
     }
     block_size_limit_.store(size, std::memory_order_release);
 }
 
 void
-Options::set_num_threads_io(size_t num_threads) {
+Options::set_num_threads_io(uint64_t num_threads) {
     if (num_threads < 1 || num_threads > 200) {
-        throw std::runtime_error(
+        throw VsagException(
+            ErrorType::INVALID_ARGUMENT,
             fmt::format("num_threads must be set between 1 and 200, but found {}.", num_threads));
     }
     num_threads_io_.store(num_threads, std::memory_order_release);
 }
 
 void
-Options::set_num_threads_building(size_t num_threads) {
+Options::set_num_threads_building(uint64_t num_threads) {
     if (num_threads < 1 || num_threads > 200) {
-        throw std::runtime_error(
+        throw VsagException(
+            ErrorType::INVALID_ARGUMENT,
             fmt::format("num_threads must be set between 1 and 200, but found {}.", num_threads));
     }
     num_threads_building_.store(num_threads, std::memory_order_release);

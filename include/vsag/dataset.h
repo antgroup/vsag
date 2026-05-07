@@ -28,26 +28,78 @@
 namespace vsag {
 
 struct SparseVector {
-    uint32_t len_;   // the length of the vector (i.e., the count of non-zero vals)
-    uint32_t* ids_;  // contains ids with size of len_
-                     // (The ids_ will be sorted in ascending order inside the index.
-                     // it is recommended to sort them before putting them into VSAG.)
-    float* vals_;    // contains vals with size of len_
-
-    SparseVector() : len_{0}, ids_{nullptr}, vals_{nullptr} {
-    }
+    uint32_t len_ = 0;         // the length of the vector (i.e., the count of non-zero vals)
+    uint32_t* ids_ = nullptr;  // contains ids with size of len_
+                               // (The ids_ will be sorted in ascending order inside the index.
+                               // it is recommended to sort them before putting them into VSAG.)
+    float* vals_ = nullptr;    // contains vals with size of len_
 };
 
 class Dataset;
 using DatasetPtr = std::shared_ptr<Dataset>;
 
 /**
- * @class Dataset
- *
  * @brief This class represents a dataset with various attributes such as
- * dimensions, ids, vectors, and more. It serves a dual purpose:
- * - As an input provider for index.
- * - As a container for storing search results.
+ * dimensions, ids, vectors, and more.
+ *
+ * @details
+ * The core design employs the "Fluent Interface" or "Builder Pattern". Almost all setter
+ * methods return a shared pointer to the instance (`DatasetPtr`), enabling method chaining.
+ * This makes the process of constructing a dataset both intuitive and concise.
+ *
+ * @verbatim
+ *
+ *  [How to Build a Dataset]
+ *
+ *  +------------------+
+ *  | Dataset::Make()  |  <-- 1. Create instance via static factory method
+ *  +------------------+
+ *          |
+ *          v
+ *  .----------------------------------------------------------.
+ *  |                      Dataset Object                      |
+ *  |                                                          |
+ *  |  [Metadata]               [Core Data Pointers]           |
+ *  |  - num_elements           - ids*                         |
+ *  |  - dim                    - distances*                   |
+ *  |                           - vectors* (float, int8, etc.) |
+ *  |  [Ownership]              - sparse_vectors*              |
+ *  |  - is_owner               - ...                          |
+ *  |  - allocator*                                            |
+ *  '----------------------------------------------------------'
+ *          |         ^
+ *          |         |
+ *          '---------'  <-- 2. Chain setter methods; each returns the
+ *                           updated object pointer.
+ *
+ *      .Dim(128)
+ *      .NumElements(1000)
+ *      .Float32Vectors(data)
+ *      .Ids(ids)
+ *      ...
+ *
+ * @endverbatim
+ *
+ * @code
+ * // Example: How to create a dataset using method chaining
+ * #include "dataset.h"
+ *
+ * void example() {
+ *     // Assume data_vectors and data_ids are already prepared
+ *     const float* data_vectors = new float[128 * 10000]; // Example data
+ *     const int64_t* data_ids = new int64_t[10000];      // Example ids
+ *
+ *     // Fluently construct a Dataset object using method chaining
+ *     DatasetPtr my_dataset = vsag::Dataset::Make()
+ *                                 ->Dim(128)
+ *                                 ->NumElements(10000)
+ *                                 ->Float32Vectors(data_vectors)
+ *                                 ->Ids(data_ids)
+ *                                 ->Owner(true); // Declare that this instance takes ownership of the data
+ *
+ *     // my_dataset is now configured and ready for use.
+ * }
+ * @endcode
  */
 class Dataset : public std::enable_shared_from_this<Dataset> {
 public:
@@ -193,6 +245,23 @@ public:
     GetFloat32Vectors() const = 0;
 
     /**
+     * @brief Sets the float16/bfloat16 vector array for the dataset.
+     *
+     * @param vectors Pointer to the array of float16/bfloat16 vectors (uint16_t*).
+     * @return DatasetPtr A shared pointer to the dataset with updated vectors.
+     */
+    virtual DatasetPtr
+    Float16Vectors(const uint16_t* vectors) = 0;
+
+    /**
+     * @brief Retrieves the float16/bfloat16 vector array of the dataset.
+     *
+     * @return const uint16_t* Pointer to the array of float16/bfloat16 vectors.
+     */
+    virtual const uint16_t*
+    GetFloat16Vectors() const = 0;
+
+    /**
      * @brief Sets the sparse vector array for the dataset.
      *
      * @param vectors Pointer to the struct of sparse vectors.
@@ -302,6 +371,40 @@ public:
      */
     virtual std::vector<std::string>
     GetStatistics(const std::vector<std::string>& stat_keys) const = 0;
+
+    /**
+     * @brief Sets the Reasoning report for the dataset.
+     *
+     * @param reasoning_json The Reasoning report as a JSON string.
+     * @return DatasetPtr A shared pointer to the dataset with updated Reasoning.
+     */
+    virtual DatasetPtr
+    Reasoning(const std::string& reasoning_json) = 0;
+
+    /**
+     * @brief Retrieves the Reasoning report of the dataset.
+     *
+     * @return const std::string& The Reasoning report JSON string.
+     */
+    virtual const std::string&
+    GetReasoning() const = 0;
+
+    /**
+     * @brief Sets the vector counts array for the dataset (for multi-vector documents).
+     *
+     * @param counts Pointer to the array of vector counts per document.
+     * @return DatasetPtr A shared pointer to the dataset with updated vector counts.
+     */
+    virtual DatasetPtr
+    VectorCounts(const uint32_t* counts) = 0;
+
+    /**
+     * @brief Retrieves the vector counts array of the dataset.
+     *
+     * @return const uint32_t* Pointer to the array of vector counts per document.
+     */
+    virtual const uint32_t*
+    GetVectorCounts() const = 0;
 };
 
 };  // namespace vsag

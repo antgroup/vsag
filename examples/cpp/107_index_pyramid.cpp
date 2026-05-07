@@ -49,7 +49,7 @@ create_random_string(bool is_full) {
     }
 
     std::string random_string = selected_levels.empty() ? "" : selected_levels[0];
-    for (size_t i = 1; i < selected_levels.size(); ++i) {
+    for (uint64_t i = 1; i < selected_levels.size(); ++i) {
         random_string += "/" + selected_levels[i];
     }
 
@@ -66,7 +66,7 @@ main(int argc, char** argv) {
 
     std::mt19937 rng;
     rng.seed(47);
-    std::uniform_real_distribution<> distrib_real;
+    std::uniform_real_distribution<float> distrib_real;
     for (int64_t i = 0; i < num_vectors; ++i) {
         ids[i] = i;
     }
@@ -90,12 +90,13 @@ main(int argc, char** argv) {
     // The "dim" represents the dimensionality of the vectors, indicating the number of features for each data point.
     // The "pyramid" section contains parameters specific to Pyramid:
     // - "odescent": graph type
-    //    - "io_params": The parameters for the I/O operation, which can be "memory" or "block_memory_io".
-    //    - "max_degree": The maximum number of connections for each node in the graph.
-    //    - "alpha": The parameter for the graph construction, which influences the pruning process.
-    //    - "graph_iter_turn": The number of iterations for graph construction.
-    //    - "neighbor_sample_rate": The ratio of the number of neighbors to be selected for iteration of graph update.
+    // - "max_degree": The maximum number of connections for each node in the graph.
+    // - "alpha": The parameter for the graph construction, which influences the pruning process.
     // - "no_build_levels": The levels that do not need to be built.
+    // - "base_quantization_type": The base quantization codes
+    // - "precise_quantization_type": The precise quantization codes
+    // - "index_min_size": The minimum size required to build the index
+    // - "support_duplicate": support for duplicate data in the index
     auto pyramid_build_paramesters = R"(
     {
         "dtype": "float32",
@@ -109,7 +110,8 @@ main(int argc, char** argv) {
             "neighbor_sample_rate": 0.2,
             "no_build_levels": [0, 1],
             "use_reorder": true,
-            "graph_type": "odescent"
+            "graph_type": "odescent",
+            "build_thread_count": 16
         }
     }
     )";

@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,14 +14,19 @@
 
 #pragma once
 
-#include <vsag/allocator.h>
-#include <vsag/filter.h>
-#include <vsag/iterator_context.h>
-
 #include <memory>
+
+#include "vsag/allocator.h"
+#include "vsag/filter.h"
+#include "vsag/iterator_context.h"
 
 namespace vsag {
 
+/**
+ * [[deprecated("Use SearchRequest instead")]]
+ *
+ * @brief Search parameters structure
+ */
 struct SearchParam {
 public:
     SearchParam(bool iter_filter_flag,

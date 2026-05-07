@@ -32,6 +32,8 @@ class ExtraInfoInterface {
 public:
     ExtraInfoInterface() = default;
 
+    virtual ~ExtraInfoInterface() = default;
+
     static ExtraInfoInterfacePtr
     MakeInstance(const ExtraInfoDataCellParamPtr& param, const IndexCommonParam& common_param);
 
@@ -65,6 +67,11 @@ public:
 
     virtual bool
     GetExtraInfoById(InnerIdType id, char* extra_info) const = 0;
+
+    virtual int64_t
+    GetMemoryUsage() const {
+        return 0;
+    }
 
     [[nodiscard]] virtual InnerIdType
     TotalCount() const {
@@ -106,6 +113,12 @@ public:
 
     virtual void
     DisableForceInMemory(){};
+
+    virtual void
+    Move(InnerIdType from, InnerIdType to) {
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            "Move not implemented in ExtraInfoInterface");
+    }
 
 public:
     InnerIdType total_count_{0};

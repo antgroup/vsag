@@ -20,7 +20,9 @@
 #include <mutex>
 #include <vector>
 
+#include "duplicate_interface.h"
 #include "graph_interface_parameter.h"
+#include "impl/reverse_edge.h"
 #include "index_common_param.h"
 #include "inner_string_params.h"
 #include "io/io_parameter.h"
@@ -30,6 +32,8 @@
 #include "utils/pointer_define.h"
 
 namespace vsag {
+
+class ReverseEdge;
 DEFINE_POINTER(GraphInterface);
 
 class GraphInterface {
@@ -62,6 +66,9 @@ public:
     virtual void
     GetNeighbors(InnerIdType id, Vector<InnerIdType>& neighbor_ids) const = 0;
 
+    [[nodiscard]] virtual bool
+    CheckIdExists(InnerIdType id) const = 0;
+
     virtual void
     Resize(InnerIdType new_size) = 0;
 
@@ -80,12 +87,38 @@ public:
                             "GetIds in GraphInterface is not implemented");
     }
 
-public:
+    virtual int64_t
+    GetMemoryUsage() const {
+        return 0;
+    }
+
+    virtual void
+    GetIncomingNeighbors(InnerIdType id, Vector<InnerIdType>& neighbors) const {
+        if (reverse_edges_) {
+            reverse_edges_->GetIncomingNeighbors(id, neighbors);
+        } else {
+            neighbors.clear();
+        }
+    }
+
+    virtual void
+    Move(InnerIdType from, InnerIdType to) {
+        throw VsagException(ErrorType::INTERNAL_ERROR, "Move not implemented in GraphInterface");
+    }
+
+    virtual void
+    ShrinkToFit(InnerIdType capacity) {
+    }
+
     virtual void
     Serialize(StreamWriter& writer) {
         StreamWriter::WriteObj(writer, this->total_count_);
         StreamWriter::WriteObj(writer, this->max_capacity_);
         StreamWriter::WriteObj(writer, this->maximum_degree_);
+
+        if (duplicate_tracker_) {
+            duplicate_tracker_->Serialize(writer);
+        }
     }
 
     virtual void
@@ -93,6 +126,10 @@ public:
         StreamReader::ReadObj(reader, this->total_count_);
         StreamReader::ReadObj(reader, this->max_capacity_);
         StreamReader::ReadObj(reader, this->maximum_degree_);
+
+        if (duplicate_tracker_) {
+            duplicate_tracker_->Deserialize(reader);
+        }
     }
 
     uint64_t
@@ -142,12 +179,69 @@ public:
     InitIO(const IOParamPtr& io_param) {
     }
 
+protected:
+    void
+    UpdateReverseEdges(InnerIdType id,
+                       const Vector<InnerIdType>& old_neighbors,
+                       const Vector<InnerIdType>& new_neighbors);
+
+public:
+    virtual DuplicateTrackerPtr
+    CreateDuplicateTracker() {
+        return nullptr;
+    }
+
+    void
+    InitDuplicateTracker() {
+        duplicate_tracker_ = CreateDuplicateTracker();
+        if (duplicate_tracker_ != nullptr) {
+            duplicate_tracker_->Resize(max_capacity_);
+        }
+    }
+
+    DuplicateTrackerPtr
+    GetDuplicateTracker() const {
+        return duplicate_tracker_;
+    }
+
+    void
+    SetDuplicateTracker(DuplicateTrackerPtr tracker) {
+        duplicate_tracker_ = tracker;
+    }
+
+    void
+    SetDuplicateId(InnerIdType group_id, InnerIdType duplicate_id) {
+        if (duplicate_tracker_) {
+            duplicate_tracker_->SetDuplicateId(group_id, duplicate_id);
+        }
+    }
+
+    std::vector<InnerIdType>
+    GetDuplicateIds(InnerIdType id) const {
+        if (duplicate_tracker_) {
+            return duplicate_tracker_->GetDuplicateIds(id);
+        }
+        return {};
+    }
+
+    [[nodiscard]] InnerIdType
+    GetGroupId(InnerIdType id) const {
+        if (duplicate_tracker_) {
+            return duplicate_tracker_->GetGroupId(id);
+        }
+        return id;
+    }
+
 public:
     InnerIdType max_capacity_{100};
     uint32_t maximum_degree_{0};
 
     std::atomic<InnerIdType> total_count_{0};
     Allocator* allocator_{nullptr};
+
+protected:
+    DuplicateTrackerPtr duplicate_tracker_{nullptr};
+    std::unique_ptr<ReverseEdge> reverse_edges_{nullptr};
 };
 
 }  // namespace vsag

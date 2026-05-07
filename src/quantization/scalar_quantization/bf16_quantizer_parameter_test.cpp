@@ -13,12 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "bf16_quantizer_parameter.h"
-
-#include <catch2/catch_test_macros.hpp>
-
+#include "half_precision_quantizer_parameter.h"
 #include "parameter_test.h"
-
+#include "unittest.h"
 using namespace vsag;
 
 TEST_CASE("BF16 Quantizer Parameter ToJson Test", "[ut][BF16QuantizerParameter]") {

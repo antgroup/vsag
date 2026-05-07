@@ -16,15 +16,20 @@
 #pragma once
 
 #include <algorithm>
+#include <atomic>
+#include <cstdint>
 #include <limits>
 #include <memory>
 
+#include "algorithm/inner_index_interface.h"
 #include "common.h"
 #include "flatten_interface.h"
 #include "io/basic_io.h"
 #include "io/memory_block_io.h"
 #include "quantization/quantizer.h"
+#include "query_context.h"
 #include "utils/byte_buffer.h"
+#include "utils/timer.h"
 
 namespace vsag {
 /*
@@ -44,14 +49,14 @@ public:
           const ComputerInterfacePtr& computer,
           const InnerIdType* idx,
           InnerIdType id_count,
-          Allocator* allocator = nullptr) override {
+          QueryContext* ctx = nullptr) override {
         auto comp = static_cast<Computer<QuantTmpl>*>(computer.get());
-        this->query(result_dists, comp, idx, id_count, allocator);
+        this->query(result_dists, comp, idx, id_count, ctx);
     }
 
     ComputerInterfacePtr
     FactoryComputer(const void* query) override {
-        return this->factory_computer((const float*)query);
+        return this->factory_computer(static_cast<const float*>(query));
     }
 
     float
@@ -71,8 +76,13 @@ public:
     BatchInsertVector(const void* vectors, InnerIdType count, InnerIdType* idx_vec) override;
 
     bool
-    Decode(const uint8_t* codes, DataType* data) override {
+    Decode(const uint8_t* codes, float* data) override {
         return this->quantizer_->DecodeOne(codes, data);
+    }
+
+    bool
+    Encode(const float* data, uint8_t* codes) override {
+        return this->quantizer_->EncodeOne(data, codes);
     }
 
     void
@@ -80,11 +90,9 @@ public:
         if (new_capacity <= this->max_capacity_) {
             return;
         }
-        this->max_capacity_ = new_capacity;
         uint64_t io_size = static_cast<uint64_t>(new_capacity) * static_cast<uint64_t>(code_size_);
-        uint8_t end_flag =
-            127;  // the value is meaningless, only to occupy the position for io allocate
-        this->io_->Write(&end_flag, 1, io_size);
+        this->io_->Resize(io_size);
+        this->max_capacity_ = new_capacity;
     }
 
     void
@@ -110,6 +118,16 @@ public:
     void
     MergeOther(const FlattenInterfacePtr& other, InnerIdType bias) override;
 
+    void
+    Move(InnerIdType from, InnerIdType to) override;
+
+    void
+    ShrinkToFit(InnerIdType capacity) override {
+        uint64_t io_size = static_cast<uint64_t>(capacity) * static_cast<uint64_t>(code_size_);
+        this->io_->Shrink(io_size);
+        this->max_capacity_ = capacity;
+    }
+
     [[nodiscard]] std::string
     GetQuantizerName() override;
 
@@ -118,6 +136,9 @@ public:
 
     [[nodiscard]] const uint8_t*
     GetCodesById(InnerIdType id, bool& need_release) const override;
+
+    void
+    Release(const uint8_t* data) const override;
 
     [[nodiscard]] bool
     InMemory() const override;
@@ -150,7 +171,17 @@ public:
         this->io_->InitIO(io_param);
     }
 
+    IndexCommonParam
+    ExportCommonParam() override {
+        return common_param_;
+    }
+
+    int64_t
+    GetMemoryUsage() const override;
+
 public:
+    IndexCommonParam common_param_;
+
     std::shared_ptr<Quantizer<QuantTmpl>> quantizer_{nullptr};
     std::shared_ptr<BasicIO<IOTmpl>> io_{nullptr};
 
@@ -162,7 +193,7 @@ private:
           Computer<QuantTmpl>* computer,
           const InnerIdType* idx,
           InnerIdType id_count,
-          Allocator* allocator);
+          QueryContext* ctx);
 
     ComputerInterfacePtr
     factory_computer(const float* query) {
@@ -171,6 +202,13 @@ private:
         return computer;
     }
 };
+
+template <typename QuantTmpl, typename IOTmpl>
+void
+FlattenDataCell<QuantTmpl, IOTmpl>::Release(const uint8_t* data) const {
+    this->io_->Release(data);
+}
+
 template <typename QuantTmpl, typename IOTmpl>
 bool
 FlattenDataCell<QuantTmpl, IOTmpl>::HoldMolds() const {
@@ -182,6 +220,7 @@ FlattenDataCell<QuantTmpl, IOTmpl>::FlattenDataCell(const QuantizerParamPtr& qua
                                                     const IOParamPtr& io_param,
                                                     const IndexCommonParam& common_param)
     : allocator_(common_param.allocator_.get()) {
+    this->common_param_ = common_param;
     this->quantizer_ = std::make_shared<QuantTmpl>(quantization_param, common_param);
     this->io_ = std::make_shared<IOTmpl>(io_param, common_param);
     this->code_size_ = quantizer_->GetCodeSize();
@@ -191,7 +230,7 @@ template <typename QuantTmpl, typename IOTmpl>
 void
 FlattenDataCell<QuantTmpl, IOTmpl>::Train(const void* data, uint64_t count) {
     if (this->quantizer_) {
-        this->quantizer_->Train((const float*)data, count);
+        this->quantizer_->Train(static_cast<const float*>(data), count);
     }
 }
 
@@ -208,7 +247,7 @@ FlattenDataCell<QuantTmpl, IOTmpl>::InsertVector(const void* vector, InnerIdType
         }
     }
     ByteBuffer codes(static_cast<uint64_t>(code_size_), allocator_);
-    quantizer_->EncodeOne((const float*)vector, codes.data);
+    quantizer_->EncodeOne(static_cast<const float*>(vector), codes.data);
     io_->Write(
         codes.data, code_size_, static_cast<uint64_t>(idx) * static_cast<uint64_t>(code_size_));
 }
@@ -221,7 +260,7 @@ FlattenDataCell<QuantTmpl, IOTmpl>::UpdateVector(const void* vector, InnerIdType
     }
     std::lock_guard lock(mutex_);
     ByteBuffer codes(static_cast<uint64_t>(code_size_), allocator_);
-    quantizer_->EncodeOne((const float*)vector, codes.data);
+    quantizer_->EncodeOne(static_cast<const float*>(vector), codes.data);
     io_->Write(
         codes.data, code_size_, static_cast<uint64_t>(idx) * static_cast<uint64_t>(code_size_));
     return true;
@@ -235,7 +274,7 @@ FlattenDataCell<QuantTmpl, IOTmpl>::BatchInsertVector(const void* vectors,
     if (idx_vec == nullptr) {
         ByteBuffer codes(static_cast<uint64_t>(count) * static_cast<uint64_t>(code_size_),
                          allocator_);
-        quantizer_->EncodeBatch((const float*)vectors, codes.data, count);
+        quantizer_->EncodeBatch(static_cast<const float*>(vectors), codes.data, count);
         uint64_t cur_count;
         {
             std::lock_guard lock(mutex_);
@@ -248,7 +287,7 @@ FlattenDataCell<QuantTmpl, IOTmpl>::BatchInsertVector(const void* vectors,
     } else {
         auto dim = quantizer_->GetDim();
         for (int64_t i = 0; i < count; ++i) {
-            this->InsertVector((const float*)vectors + dim * i, idx_vec[i]);
+            this->InsertVector(static_cast<const float*>(vectors) + dim * i, idx_vec[i]);
         }
     }
 }
@@ -277,8 +316,9 @@ FlattenDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
                                           Computer<QuantTmpl>* computer,
                                           const InnerIdType* idx,
                                           InnerIdType id_count,
-                                          Allocator* allocator) {
-    Allocator* search_alloc = allocator == nullptr ? allocator_ : allocator;
+                                          QueryContext* ctx) {
+    Allocator* search_alloc = select_query_allocator(ctx, allocator_);
+
     for (uint32_t i = 0; i < this->prefetch_stride_code_ and i < id_count; i++) {
         this->io_->Prefetch(static_cast<uint64_t>(idx[i]) * static_cast<uint64_t>(code_size_),
                             this->prefetch_depth_code_ * 64);
@@ -291,7 +331,19 @@ FlattenDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
             for (int64_t i = 0; i < id_count; ++i) {
                 offsets[i] = static_cast<uint64_t>(idx[i]) * this->code_size_;
             }
-            this->io_->MultiRead(codes.data, sizes.data(), offsets.data(), id_count);
+
+            double io_cost_ms = 0.0F;
+            {
+                Timer timer(io_cost_ms);
+                this->io_->MultiRead(codes.data, sizes.data(), offsets.data(), id_count);
+            }
+
+            if (ctx != nullptr and ctx->stats != nullptr) {
+                ctx->stats->io_cnt.fetch_add(id_count, std::memory_order_relaxed);
+                ctx->stats->io_time_ms.fetch_add(static_cast<uint32_t>(io_cost_ms),
+                                                 std::memory_order_relaxed);
+            }
+
             computer->ScanBatchDists(id_count, codes.data, result_dists);
             return;
         }
@@ -308,41 +360,57 @@ FlattenDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
                     this->prefetch_depth_code_ * 64);
             }
         }
-        bool release1 = false;
-        const auto* codes1 = this->GetCodesById(idx[i], release1);
-        bool release2 = false;
-        const auto* codes2 = this->GetCodesById(idx[i + 1], release2);
-        bool release3 = false;
-        const auto* codes3 = this->GetCodesById(idx[i + 2], release3);
-        bool release4 = false;
-        const auto* codes4 = this->GetCodesById(idx[i + 3], release4);
-        computer->ComputeDistsBatch4(codes1,
-                                     codes2,
-                                     codes3,
-                                     codes4,
-                                     result_dists[i],
-                                     result_dists[i + 1],
-                                     result_dists[i + 2],
-                                     result_dists[i + 3]);
-
-        if (release1) {
-            this->io_->Release(codes1);
+        bool release1 = false, release2 = false, release3 = false, release4 = false;
+        const uint8_t* codes1 = nullptr;
+        const uint8_t* codes2 = nullptr;
+        const uint8_t* codes3 = nullptr;
+        const uint8_t* codes4 = nullptr;
+        auto release_batch = [&]() {
+            if (release1 && codes1) {
+                this->io_->Release(codes1);
+            }
+            if (release2 && codes2) {
+                this->io_->Release(codes2);
+            }
+            if (release3 && codes3) {
+                this->io_->Release(codes3);
+            }
+            if (release4 && codes4) {
+                this->io_->Release(codes4);
+            }
+        };
+        try {
+            codes1 = this->GetCodesById(idx[i], release1);
+            codes2 = this->GetCodesById(idx[i + 1], release2);
+            codes3 = this->GetCodesById(idx[i + 2], release3);
+            codes4 = this->GetCodesById(idx[i + 3], release4);
+            computer->ComputeDistsBatch4(codes1,
+                                         codes2,
+                                         codes3,
+                                         codes4,
+                                         result_dists[i],
+                                         result_dists[i + 1],
+                                         result_dists[i + 2],
+                                         result_dists[i + 3]);
+        } catch (...) {
+            release_batch();
+            throw;
         }
-        if (release2) {
-            this->io_->Release(codes2);
-        }
-        if (release3) {
-            this->io_->Release(codes3);
-        }
-        if (release4) {
-            this->io_->Release(codes4);
-        }
+        release_batch();
     }
     for (; i < id_count; ++i) {
         bool release = false;
-        const auto* codes = this->GetCodesById(idx[i], release);
-        computer->ComputeDist(codes, result_dists + i);
-        if (release) {
+        const uint8_t* codes = nullptr;
+        try {
+            codes = this->GetCodesById(idx[i], release);
+            computer->ComputeDist(codes, result_dists + i);
+        } catch (...) {
+            if (release && codes) {
+                this->io_->Release(codes);
+            }
+            throw;
+        }
+        if (release && codes) {
             this->io_->Release(codes);
         }
     }
@@ -351,18 +419,27 @@ FlattenDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
 template <typename QuantTmpl, typename IOTmpl>
 float
 FlattenDataCell<QuantTmpl, IOTmpl>::ComputePairVectors(InnerIdType id1, InnerIdType id2) {
-    bool release1, release2;
-    const auto* codes1 = this->GetCodesById(id1, release1);
-    const auto* codes2 = this->GetCodesById(id2, release2);
-    auto result = this->quantizer_->Compute(codes1, codes2);
-    if (release1) {
-        this->io_->Release(codes1);
+    bool release1 = false, release2 = false;
+    const uint8_t* codes1 = nullptr;
+    const uint8_t* codes2 = nullptr;
+    auto release_pair = [&]() {
+        if (release1 && codes1) {
+            this->io_->Release(codes1);
+        }
+        if (release2 && codes2) {
+            this->io_->Release(codes2);
+        }
+    };
+    try {
+        codes1 = this->GetCodesById(id1, release1);
+        codes2 = this->GetCodesById(id2, release2);
+        auto result = this->quantizer_->Compute(codes1, codes2);
+        release_pair();
+        return result;
+    } catch (...) {
+        release_pair();
+        throw;
     }
-    if (release2) {
-        this->io_->Release(codes2);
-    }
-
-    return result;
 }
 
 template <typename QuantTmpl, typename IOTmpl>
@@ -421,4 +498,28 @@ FlattenDataCell<QuantTmpl, IOTmpl>::MergeOther(const FlattenInterfacePtr& other,
     }
     this->total_count_ += total_count;
 }
+
+template <typename QuantTmpl, typename IOTmpl>
+int64_t
+FlattenDataCell<QuantTmpl, IOTmpl>::GetMemoryUsage() const {
+    int64_t memory = sizeof(FlattenDataCell<QuantTmpl, IOTmpl>);
+    if (IOTmpl::InMemory) {
+        memory += this->io_->GetMemoryUsage();
+    }
+    memory += sizeof(QuantTmpl);
+    return memory;
+}
+
+template <typename QuantTmpl, typename IOTmpl>
+void
+FlattenDataCell<QuantTmpl, IOTmpl>::Move(InnerIdType from, InnerIdType to) {
+    bool need_release = false;
+    const uint8_t* codes = this->GetCodesById(from, need_release);
+    this->io_->Write(
+        codes, code_size_, static_cast<uint64_t>(to) * static_cast<uint64_t>(code_size_));
+    if (need_release) {
+        this->io_->Release(codes);
+    }
+}
+
 }  // namespace vsag

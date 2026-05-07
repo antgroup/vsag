@@ -15,10 +15,8 @@
 
 #include "sq8_uniform_quantizer_parameter.h"
 
-#include <catch2/catch_test_macros.hpp>
-
 #include "parameter_test.h"
-
+#include "unittest.h"
 using namespace vsag;
 
 TEST_CASE("SQ8 Uniform Quantizer Parameter ToJson Test", "[ut][SQ8UniformQuantizerParameter]") {

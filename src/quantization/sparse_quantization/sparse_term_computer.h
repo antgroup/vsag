@@ -24,6 +24,12 @@
 #include "utils/sparse_vector_transform.h"
 namespace vsag {
 
+struct QuantizationParams {
+    float min_val = 0.0f;
+    float max_val = 0.0f;
+    float diff = 1.0f;
+};
+
 static constexpr int INVALID_TERM = -1;
 DEFINE_POINTER(SparseTermComputer)
 class SparseTermComputer {
@@ -37,18 +43,7 @@ public:
           query_retain_ratio_(1.0F - search_param.query_prune_ratio),
           term_retain_ratio_(1.0F - search_param.term_prune_ratio),
           raw_query_(sparse_query) {
-        sort_sparse_vector(sparse_query, sorted_query_);
-
-        pruned_len_ = (uint32_t)(query_retain_ratio_ * sparse_query.len_);
-        if (pruned_len_ == 0) {
-            if (sorted_query_.size() != 0) {
-                pruned_len_ = 1;
-            }
-        }
-
-        for (auto i = 0; i < sorted_query_.size(); i++) {
-            sorted_query_[i].second *= -1;  // note that: dist_ip = -1 * query * base
-        }
+        SetQuery(sparse_query);
     }
 
     void
@@ -67,10 +62,11 @@ public:
         }
     }
 
-    inline void
+    template <class T>
+    void
     ScanForAccumulate(uint32_t term_iterator,
-                      const uint32_t* term_ids,
-                      const float* term_datas,
+                      const uint16_t* term_ids,
+                      const T* term_datas,
                       uint32_t term_count,
                       float* global_dists) {
         float query_val = sorted_query_[term_iterator].second;
@@ -87,10 +83,10 @@ public:
 
     inline void
     ScanForCalculateDist(uint32_t term_iterator,
-                         const uint32_t* term_ids,
+                         const uint16_t* term_ids,
                          const float* term_datas,
                          uint32_t term_count,
-                         uint32_t target_id,
+                         uint16_t target_id,
                          float* dist) {
         float query_val = sorted_query_[term_iterator].second;
 

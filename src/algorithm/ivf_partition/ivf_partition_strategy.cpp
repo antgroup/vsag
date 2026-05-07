@@ -15,19 +15,23 @@
 
 #include "ivf_partition_strategy.h"
 
-#include <cblas.h>
+#include "impl/blas/blas_function.h"
 
 namespace vsag {
 
 void
 IVFPartitionStrategy::GetResidual(
-    size_t n, const float* x, float* residuals, float* centroids, BucketIdType* assign) {
+    uint64_t n, const float* x, float* residuals, float* centroids, BucketIdType* assign) {
     // TODO: Directly implement c = a - b.
     memcpy(residuals, x, sizeof(float) * n * dim_);
-    for (size_t i = 0; i < n; ++i) {
+    for (uint64_t i = 0; i < n; ++i) {
         BucketIdType bucket_id = assign[i];
-        cblas_saxpy(
-            static_cast<int>(dim_), -1.0, centroids + bucket_id * dim_, 1, residuals + i * dim_, 1);
+        BlasFunction::Saxpy(static_cast<int32_t>(dim_),
+                            -1.0,
+                            centroids + bucket_id * dim_,
+                            1,
+                            residuals + i * dim_,
+                            1);
     }
 }
 

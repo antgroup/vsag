@@ -3,9 +3,8 @@ name: Asan Build & Test Parallel
 on:
   push:
     branches: [ "main", "0.*" ]
-  pull_request:
-    branches: [ "main", "0.*" ]
-
+    paths-ignore:
+      - 'docs/**'
   workflow_dispatch:
 jobs:
   build_asan_x86:
@@ -16,7 +15,7 @@ jobs:
       volumes:
         - /opt:/useless
     concurrency:
-      group: asan_build_x86-${{ github.event.pull_request.number }}
+      group: asan_build_x86-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
       - name: Free Disk Space
@@ -29,10 +28,14 @@ jobs:
           save: ${{ github.event_name != 'pull_request' }}
           key: build-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
       - name: Make Asan
-        run: export CMAKE_GENERATOR="Ninja"; make asan
+        run: export VSAG_ENABLE_INTEL_MKL=ON CMAKE_GENERATOR="Ninja"; make asan COMPILE_JOBS=4 VSAG_ENABLE_EXAMPLES=ON
       - name: Clean
         run: |
           find ./build -type f -name "*.o" -exec rm -f {} +
+          find ./build -type f -name "*.cpp" -exec rm -f {} +
+          find ./build -type f -name "*.a" -exec rm -f {} +
+          rm -rf ./build/hdf5
+          rm -rf ./build/boost
           rm -rf ./build/tools
       - name: Save Test
         uses: actions/upload-artifact@v5
@@ -40,14 +43,14 @@ jobs:
           path: ./build
           name: test_x86-${{ github.run_id }}
           compression-level: 1
-          retention-days: 1
+          retention-days: 3
           overwrite: 'true'
 
   build_asan_aarch64:
     name: Asan Build Aarch64
     runs-on: ubuntu-22.04-arm
     concurrency:
-      group: asan_build_aarch-${{ github.event.pull_request.number }}
+      group: asan_build_aarch-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
       - name: Free Disk Space
@@ -62,7 +65,7 @@ jobs:
           save: ${{ github.event_name != 'pull_request' }}
           key: build-aarch-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
       - name: Make Asan
-        run: export CMAKE_GENERATOR="Ninja"; make asan
+        run: export CMAKE_GENERATOR="Ninja"; make asan COMPILE_JOBS=4 VSAG_ENABLE_EXAMPLES=ON
       - name: Clean
         run: find ./build -type f -name "*.o" -exec rm -f {} +
       - name: Save Test
@@ -71,7 +74,7 @@ jobs:
           path: ./build/
           name: test_aarch64-${{ github.run_id }}
           compression-level: 1
-          retention-days: 1
+          retention-days: 3
           overwrite: 'true'
 
   test_asan_x86:
@@ -79,7 +82,7 @@ jobs:
     needs: build_asan_x86
     runs-on: ubuntu-22.04
     concurrency:
-      group: test_asan_x86-${{ matrix.test_type }}-${{ github.event.pull_request.number }}
+      group: test_asan_x86-${{ matrix.test_type }}-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     strategy:
       matrix:
@@ -102,6 +105,7 @@ jobs:
       - name: Do Asan Test In ${{ matrix.test_type }}
         run: |
           echo leak:libomp.so > omp.supp
+          echo leak:libgomp.so >> omp.supp
           export LSAN_OPTIONS=suppressions=omp.supp
           chmod +x ./build/tests/${{ matrix.test_type }}
           ./scripts/testing/test_parallel_by_name.sh ${{ matrix.test_type }}
@@ -111,7 +115,7 @@ jobs:
           path: ./log
           name: log-x86-${{ matrix.test_type }}-${{ github.run_id }}
           compression-level: 1
-          retention-days: 1
+          retention-days: 3
           overwrite: 'true'
 
   test_asan_aarch64:
@@ -122,7 +126,7 @@ jobs:
       matrix:
         test_type: [ unittests, functests ]
     concurrency:
-      group: test_asan_aarch64-${{ matrix.test_type }}-${{ github.event.pull_request.number }}
+      group: test_asan_aarch64-${{ matrix.test_type }}-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
       - name: Free Disk Space
@@ -140,6 +144,7 @@ jobs:
       - name: Do Asan Test In ${{ matrix.test_type }}
         run: |
           echo leak:libomp.so > omp.supp
+          echo leak:libgomp.so >> omp.supp
           export LSAN_OPTIONS=suppressions=omp.supp
           chmod +x ./build/tests/${{ matrix.test_type }}
           ./scripts/testing/test_parallel_by_name.sh ${{ matrix.test_type }}
@@ -149,8 +154,75 @@ jobs:
           path: ./log
           name: log-aarch64-${{ matrix.test_type }}-${{ github.run_id }}
           compression-level: 1
-          retention-days: 1
+          retention-days: 3
           overwrite: 'true'
+
+  test_example_x86:
+    name: Test Example X86
+    needs: build_asan_x86
+    runs-on: ubuntu-22.04
+    container:
+      image: vsaglib/vsag:ci-x86
+      volumes:
+        - /opt:/useless
+    concurrency:
+      group: test_example_x86-${{ matrix.test_type }}-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    steps:
+      - name: Free Disk Space
+        run: rm -rf /opt/hostedtoolcache
+      - uses: actions/checkout@v4
+      - name: Clean Env
+        run: rm -rf ./build
+      - name: Download Test
+        uses: actions/download-artifact@v5
+        with:
+          name: test_x86-${{ github.run_id }}
+          path: ./build
+      - name: Do Test In example
+        run: |
+          cd ./build/examples/cpp
+          for example in ./*; do
+            filename=$(basename "$example")
+            if [[ $filename =~ ^[0-9]{3} ]]; then
+              chmod +x $example
+              echo "Run $example"
+              $example
+            fi
+          done
+  
+  test_example_aarch64:
+    name: Test Example Aarch64
+    needs: build_asan_aarch64
+    runs-on: ubuntu-22.04-arm
+    concurrency:
+      group: test_example_aarch64-${{ matrix.test_type }}-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    steps:
+      - name: Free Disk Space
+        run: rm -rf /opt/hostedtoolcache
+      - uses: actions/checkout@v4
+      - name: Clean Env
+        run: rm -rf ./build
+      - name: Download Test
+        uses: actions/download-artifact@v5
+        with:
+          name: test_aarch64-${{ github.run_id }}
+          path: ./build
+      - name: Do Test In example
+        run: |
+          cd ./build/examples/cpp
+          echo "leak:libgomp.so" > lsan.supp
+          echo "leak:libgomp.so.1" >> lsan.supp
+          export LSAN_OPTIONS=suppressions=$(pwd)/lsan.supp
+          for example in ./*; do
+            filename=$(basename "$example")
+            if [[ $filename =~ ^[0-9]{3} ]]; then
+              chmod +x $example
+              echo "Run $example"
+              $example
+            fi
+          done
 
   clean_up:
     name: Clean Up
@@ -165,7 +237,7 @@ jobs:
           path: /tmp/clean_up
           name: test_x86-${{ github.run_id }}
           compression-level: 1
-          retention-days: 1
+          retention-days: 3
           overwrite: 'true'
       - name: Overwrite Test Artifact Aarch64
         uses: actions/upload-artifact@v5
@@ -173,5 +245,5 @@ jobs:
           path: /tmp/clean_up
           name: test_aarch64-${{ github.run_id }}
           compression-level: 1
-          retention-days: 1
+          retention-days: 3
           overwrite: 'true'

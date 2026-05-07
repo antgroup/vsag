@@ -21,9 +21,11 @@
 
 #include "algorithm/hnswlib/hnswalg.h"
 #include "common.h"
+#include "dense_duplicate_tracker.h"
 #include "graph_datacell_parameter.h"
 #include "graph_interface.h"
 #include "graph_interface_parameter.h"
+#include "impl/reverse_edge.h"
 #include "index_common_param.h"
 #include "io/basic_io.h"
 #include "vsag/constants.h"
@@ -61,6 +63,11 @@ public:
 
     void
     GetNeighbors(InnerIdType id, Vector<InnerIdType>& neighbor_ids) const override;
+
+    [[nodiscard]] bool
+    CheckIdExists(InnerIdType id) const override {
+        return id < this->total_count_ && id < this->max_capacity_;
+    }
 
     void
     Resize(InnerIdType new_size) override;
@@ -100,7 +107,46 @@ public:
     void
     MergeOther(GraphInterfacePtr other, uint64_t bias) override;
 
-private:
+    int64_t
+    GetMemoryUsage() const override {
+        int64_t memory = sizeof(GraphDataCell) + node_versions_.size() * sizeof(uint8_t);
+        if (IOTmpl::InMemory) {
+            memory += io_->GetMemoryUsage();
+        }
+        if (reverse_edges_) {
+            memory += reverse_edges_->GetMemoryUsage();
+        }
+        return memory;
+    }
+
+    void
+    GetIncomingNeighbors(InnerIdType id, Vector<InnerIdType>& neighbors) const override {
+        if (reverse_edges_) {
+            reverse_edges_->GetIncomingNeighbors(id, neighbors);
+        } else {
+            neighbors.clear();
+        }
+    }
+
+    DuplicateTrackerPtr
+    CreateDuplicateTracker() override {
+        return std::make_shared<DenseDuplicateTracker>(allocator_);
+    }
+
+    void
+    Move(InnerIdType from, InnerIdType to) override;
+
+    void
+    ShrinkToFit(InnerIdType capacity) override {
+        uint64_t io_size = static_cast<uint64_t>(capacity) * static_cast<uint64_t>(code_line_size_);
+        this->io_->Shrink(io_size);
+        if (is_support_delete_) {
+            node_versions_.resize(capacity);
+        }
+        this->max_capacity_ = capacity;
+    }
+
+protected:
     std::shared_ptr<BasicIO<IOTmpl>> io_{nullptr};
 
     Vector<uint8_t> node_versions_;
@@ -108,7 +154,7 @@ private:
     bool is_support_delete_{true};
     uint32_t remove_flag_bit_{8};
     uint32_t id_bit_{24};
-    uint32_t remove_flag_mask_{0x00ffffff};
+    uint32_t remove_flag_mask_{0x00FFFFFF};
 
     uint32_t code_line_size_{0};
 };
@@ -158,6 +204,13 @@ GraphDataCell<IOTmpl>::GraphDataCell(const GraphDataCellParamPtr& param,
     if (this->is_support_delete_) {
         node_versions_.resize(max_capacity_);
     }
+    if (param->use_reverse_edges_) {
+        reverse_edges_ = std::make_unique<ReverseEdge>(this->allocator_);
+    }
+
+    if (param->support_duplicate_) {
+        this->InitDuplicateTracker();
+    }
 }
 
 template <typename IOTmpl>
@@ -175,6 +228,14 @@ GraphDataCell<IOTmpl>::InsertNeighborsById(InnerIdType id,
         throw std::invalid_argument(fmt::format(
             "insert neighbors count {} more than {}", neighbor_ids.size(), this->maximum_degree_));
     }
+
+    // Update reverse edges if enabled
+    Vector<InnerIdType> old_neighbors(allocator_);
+    if (reverse_edges_ && id < this->total_count_) {
+        this->GetNeighbors(id, old_neighbors);
+    }
+    UpdateReverseEdges(id, old_neighbors, neighbor_ids);
+
     InnerIdType current = total_count_.load();
     while (current < id + 1 && !total_count_.compare_exchange_weak(current, id + 1)) {
     }
@@ -216,6 +277,10 @@ GraphDataCell<IOTmpl>::GetNeighbors(InnerIdType id, Vector<InnerIdType>& neighbo
     auto start = static_cast<uint64_t>(id) * static_cast<uint64_t>(this->code_line_size_);
     uint32_t neighbor_count = 0;
     this->io_->Read(sizeof(neighbor_count), start, (uint8_t*)(&neighbor_count));
+    if (neighbor_count > this->maximum_degree_) {
+        neighbor_ids.clear();
+        return;
+    }
     if (is_support_delete_) {
         neighbor_count &= remove_flag_mask_;
         start += sizeof(neighbor_count);
@@ -253,11 +318,12 @@ GraphDataCell<IOTmpl>::Resize(InnerIdType new_size) {
         }
         node_versions_.resize(new_size);
     }
-    this->max_capacity_ = new_size;
     uint64_t io_size = static_cast<uint64_t>(new_size) * static_cast<uint64_t>(code_line_size_);
-    uint8_t end_flag =
-        127;  // the value is meaningless, only to occupy the position for io allocate
-    this->io_->Write(&end_flag, 1, io_size);
+    this->io_->Resize(io_size);
+    this->max_capacity_ = new_size;
+    if (this->duplicate_tracker_ != nullptr) {
+        this->duplicate_tracker_->Resize(new_size);
+    }
 }
 
 template <typename IOTmpl>
@@ -321,6 +387,49 @@ GraphDataCell<IOTmpl>::RecoverDeleteNeighborsById(vsag::InnerIdType id) {
     } else {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                             "disable delete in graph datacell");
+    }
+}
+
+template <typename IOTmpl>
+void
+GraphDataCell<IOTmpl>::Move(InnerIdType from, InnerIdType to) {
+    if (from == to) {
+        return;
+    }
+
+    Vector<InnerIdType> reverse_neighbors(allocator_);
+    this->GetIncomingNeighbors(from, reverse_neighbors);
+
+    Vector<InnerIdType> neighbors(allocator_);
+    this->InsertNeighborsById(to, neighbors);
+    for (const auto& reverse_nb : reverse_neighbors) {
+        this->GetNeighbors(reverse_nb, neighbors);
+        Vector<InnerIdType> new_neighbors(allocator_);
+        bool has_to = false;
+        for (const auto& nb : neighbors) {
+            if (nb != from) {
+                new_neighbors.emplace_back(nb);
+            }
+            if (nb == to) {
+                has_to = true;
+            }
+        }
+        if (not has_to) {
+            new_neighbors.emplace_back(to);
+        }
+        this->InsertNeighborsById(reverse_nb, new_neighbors);
+        neighbors.clear();
+    }
+
+    Vector<InnerIdType> from_neighbors(allocator_);
+    this->GetNeighbors(from, from_neighbors);
+    this->InsertNeighborsById(to, from_neighbors);
+
+    from_neighbors.clear();
+    this->InsertNeighborsById(from, from_neighbors);
+
+    if (is_support_delete_) {
+        node_versions_[to] = node_versions_[from];
     }
 }
 

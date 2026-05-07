@@ -26,7 +26,7 @@ namespace vsag {
 
 class DefaultThreadPool : public ThreadPool {
 public:
-    explicit DefaultThreadPool(std::size_t threads);
+    explicit DefaultThreadPool(std::uint64_t threads);
 
     std::future<void>
     Enqueue(std::function<void(void)> task) override;
@@ -35,10 +35,10 @@ public:
     WaitUntilEmpty() override;
 
     void
-    SetQueueSizeLimit(std::size_t limit) override;
+    SetQueueSizeLimit(std::uint64_t limit) override;
 
     void
-    SetPoolSize(std::size_t limit) override;
+    SetPoolSize(std::uint64_t limit) override;
 
 private:
     std::unique_ptr<progschj::ThreadPool> pool_;

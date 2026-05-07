@@ -15,9 +15,10 @@
 
 #include "simd.h"
 
-#include <catch2/catch_test_macros.hpp>
 #include <iostream>
 #include <random>
+
+#include "unittest.h"
 
 namespace vsag {
 
@@ -57,7 +58,7 @@ TEST_CASE("Test InnerProduct Instructions", "[ut][simd]") {
     std::random_device rd;
     std::mt19937 rng(rd());
     for (uint64_t dim = 1; dim < 1026; dim++) {
-        std::uniform_real_distribution<> distrib_real;
+        std::uniform_real_distribution<float> distrib_real;
         float vector1[dim];
         float vector2[dim];
         for (int j = 0; j < dim; j++) {
@@ -74,7 +75,7 @@ TEST_CASE("Test L2 Instructions", "[ut][simd]") {
     std::random_device rd;
     std::mt19937 rng(rd());
     for (uint64_t dim = 1; dim < 1026; dim++) {
-        std::uniform_real_distribution<> distrib_real;
+        std::uniform_real_distribution<float> distrib_real;
         float vector1[dim];
         float vector2[dim];
         for (int j = 0; j < dim; j++) {

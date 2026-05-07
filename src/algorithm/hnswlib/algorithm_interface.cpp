@@ -20,15 +20,15 @@ namespace hnswlib {
 template <typename dist_t>
 std::vector<std::pair<dist_t, LabelType>>
 AlgorithmInterface<dist_t>::searchKnnCloserFirst(const void* query_data,
-                                                 size_t k,
-                                                 size_t ef,
+                                                 uint64_t k,
+                                                 uint64_t ef,
                                                  const vsag::FilterPtr& is_id_allowed) const {
     std::vector<std::pair<dist_t, LabelType>> result;
 
     // here searchKnn returns the result in the order of further first
     auto ret = searchKnn(query_data, k, ef, is_id_allowed);
     {
-        size_t sz = ret.size();
+        uint64_t sz = ret.size();
         result.resize(sz);
         while (!ret.empty()) {
             result[--sz] = ret.top();
@@ -38,4 +38,12 @@ AlgorithmInterface<dist_t>::searchKnnCloserFirst(const void* query_data,
 
     return result;
 }
+
+// Explicit template instantiation
+template std::vector<std::pair<float, LabelType>>
+AlgorithmInterface<float>::searchKnnCloserFirst(const void* query_data,
+                                                uint64_t k,
+                                                uint64_t ef,
+                                                const vsag::FilterPtr& is_id_allowed) const;
+
 }  // namespace hnswlib

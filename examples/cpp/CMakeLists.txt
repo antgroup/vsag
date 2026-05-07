@@ -41,6 +41,9 @@ target_link_libraries (108_index_gno_imi vsag)
 add_executable (109_index_sindi 109_index_sindi.cpp)
 target_link_libraries (109_index_sindi vsag)
 
+add_executable (110_index_warp 110_index_warp.cpp)
+target_link_libraries (110_index_warp vsag)
+
 add_executable (201_custom_allocator 201_custom_allocator.cpp)
 target_link_libraries (201_custom_allocator vsag)
 
@@ -62,8 +65,8 @@ target_link_libraries (303_feature_remove vsag)
 add_executable(304_feature_enhance_graph 304_feature_enhance_graph.cpp)
 target_link_libraries(304_feature_enhance_graph vsag)
 
-add_executable(305_feature_update 305_feature_update.cpp)
-target_link_libraries(305_feature_update vsag)
+# add_executable(305_feature_update 305_feature_update.cpp)
+# target_link_libraries(305_feature_update vsag)
 
 add_executable(306_feature_calculate_distance_by_id 306_feature_calculate_distance_by_id.cpp)
 target_link_libraries(306_feature_calculate_distance_by_id vsag)
@@ -83,8 +86,11 @@ target_link_libraries(310_feature_export_model vsag)
 add_executable(311_feature_train 311_feature_train.cpp)
 target_link_libraries(311_feature_train vsag)
 
-add_executable(313_feature_search_allocator 313_feature_search_allocator.cpp)
-target_link_libraries(313_feature_search_allocator vsag)
+add_executable(312_feature_odescent 312_feature_odescent.cpp)
+target_link_libraries(312_feature_odescent vsag)
+
+ add_executable(313_feature_search_allocator 313_feature_search_allocator.cpp)
+ target_link_libraries(313_feature_search_allocator vsag)
 
 add_executable(314_feature_hgraph_search_allocator 314_feature_hgraph_search_allocator.cpp)
 target_link_libraries(314_feature_hgraph_search_allocator vsag)
@@ -98,6 +104,15 @@ target_link_libraries (316_index_int8_hgraph vsag)
 add_executable(317_feature_get_detail_data 317_feature_get_detail_data.cpp)
 target_link_libraries(317_feature_get_detail_data vsag)
 
+add_executable(318_feature_tune 318_feature_tune.cpp)
+target_link_libraries(318_feature_tune vsag)
+
+add_executable(319_feature_get_memory_usage 319_feature_get_memory_usage.cpp)
+target_link_libraries(319_feature_get_memory_usage vsag)
+
+add_executable(320_feature_extra_info 320_feature_extra_info.cpp)
+target_link_libraries(320_feature_extra_info vsag)
+
 add_executable (401_persistent_kv 401_persistent_kv.cpp)
 target_link_libraries (401_persistent_kv vsag)
 
@@ -106,3 +121,6 @@ target_link_libraries (402_persistent_streaming vsag)
 
 add_executable (501_quantization_transform 501_quantization_transform.cpp)
 target_link_libraries (501_quantization_transform vsag)
+
+add_executable (321_index_fp16_hgraph 321_index_fp16_hgraph.cpp)
+target_link_libraries (321_index_fp16_hgraph vsag)

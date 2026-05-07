@@ -1,4 +1,3 @@
-
 pull_request_rules:
   - name: add module/cicd label
     conditions:
@@ -108,3 +107,17 @@ pull_request_rules:
       label:
         add:
           - module/testing
+merge_protections:
+  - name: Require kind label
+    if:
+      - base=main
+    success_conditions:
+      - label~=^kind/
+
+  - name: Require version label
+    if:
+      - base=main
+    success_conditions:
+      - label~=^version/
+merge_protections_settings:
+  reporting_method: check-runs

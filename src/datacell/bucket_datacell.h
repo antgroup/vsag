@@ -118,6 +118,18 @@ public:
     void
     GetCodesById(BucketIdType bucket_id, InnerIdType offset_id, uint8_t* data) const override;
 
+    [[nodiscard]] int64_t
+    GetMemoryUsage() const override {
+        int64_t memory = sizeof(BucketDataCell);
+        for (BucketIdType bucket_id = 0; bucket_id < this->bucket_count_; bucket_id++) {
+            memory += this->datas_[bucket_id].GetMemoryUsage();
+            memory += this->inner_ids_[bucket_id].size() * sizeof(InnerIdType);
+            memory += this->residual_bias_[bucket_id].size() * sizeof(float);
+            memory += sizeof(std::shared_mutex) + sizeof(InnerIdType);
+        }
+        return memory;
+    }
+
 private:
     inline void
     check_valid_bucket_id(BucketIdType bucket_id) {
@@ -299,8 +311,7 @@ BucketDataCell<QuantTmpl, IOTmpl>::Train(const void* data, uint64_t count) {
             data_ptr = train_data_buffer.data();
         }
         Vector<float> centroid(this->quantizer_->GetDim(), allocator_);
-        Statistics stats;
-        auto buckets = strategy_->ClassifyDatas(data_ptr, count, 1, stats);
+        auto buckets = strategy_->ClassifyDatas(data_ptr, count, 1, nullptr);
         for (int i = 0; i < count; ++i) {
             strategy_->GetCentroid(buckets[i], centroid);
             for (int j = 0; j < dim; ++j) {

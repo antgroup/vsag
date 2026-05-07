@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <memory>
 #include <utility>
 
 #include "datacell/graph_interface.h"
@@ -29,6 +30,7 @@
 #include "io/memory_io_parameter.h"
 #include "pyramid_zparameters.h"
 #include "quantization/fp32_quantizer_parameter.h"
+#include "query_context.h"
 #include "utils/lock_strategy.h"
 
 namespace vsag {
@@ -41,24 +43,27 @@ split(const std::string& str, char delimiter);
 
 class IndexNode {
 public:
-    IndexNode(IndexCommonParam* common_param, GraphInterfaceParamPtr graph_param);
+    enum class Status { NO_INDEX = 0, GRAPH = 1, FLAT = 2 };
+
+public:
+    IndexNode(Allocator* allocator_, GraphInterfaceParamPtr graph_param, uint32_t index_min_size);
 
     void
-    BuildGraph(ODescent& odescent);
+    Build(ODescent& odescent);
 
     void
-    InitGraph();
+    Init();
 
     void
-    SearchGraph(const SearchFunc& search_func,
-                const VisitedListPtr& vl,
-                const DistHeapPtr& search_result,
-                int64_t ef_search) const;
+    Search(const SearchFunc& search_func,
+           const VisitedListPtr& vl,
+           const DistHeapPtr& search_result,
+           uint64_t ef_search) const;
 
     void
     AddChild(const std::string& key);
 
-    std::shared_ptr<IndexNode>
+    IndexNode*
     GetChild(const std::string& key, bool need_init = false);
 
     void
@@ -67,6 +72,8 @@ public:
     void
     Deserialize(StreamReader& reader);
 
+    friend class PyramidAnalyzer;
+
 public:
     GraphInterfacePtr graph_{nullptr};
     InnerIdType entry_point_{0};
@@ -74,11 +81,12 @@ public:
     mutable std::shared_mutex mutex_;
 
     Vector<InnerIdType> ids_;
-    bool has_index_{false};
+    uint32_t index_min_size_{0};
+    Status status_{Status::NO_INDEX};
 
 private:
-    UnorderedMap<std::string, std::shared_ptr<IndexNode>> children_;
-    IndexCommonParam* common_param_{nullptr};
+    UnorderedMap<std::string, std::unique_ptr<IndexNode>> children_;
+    Allocator* allocator_{nullptr};
     GraphInterfaceParamPtr graph_param_{nullptr};
 };
 
@@ -92,17 +100,24 @@ public:
 public:
     Pyramid(const PyramidParamPtr& pyramid_param, const IndexCommonParam& common_param)
         : InnerIndexInterface(pyramid_param, common_param),
-          pyramid_param_(pyramid_param),
-          common_param_(common_param),
-          alpha_(pyramid_param->alpha) {
-        base_codes_ =
-            FlattenInterface::MakeInstance(pyramid_param_->base_codes_param, common_param_);
-        root_ = std::make_shared<IndexNode>(&common_param_, pyramid_param_->graph_param);
+          alpha_(pyramid_param->alpha),
+          no_build_levels_(common_param.allocator_.get()),
+          odescent_param_(pyramid_param->odescent_param),
+          ef_construction_(pyramid_param->ef_construction),
+          max_degree_(pyramid_param->max_degree),
+          index_min_size_(pyramid_param->index_min_size),
+          graph_type_(pyramid_param->graph_type),
+          support_duplicate_(pyramid_param->support_duplicate) {
+        base_codes_ = FlattenInterface::MakeInstance(pyramid_param->base_codes_param, common_param);
+        root_ =
+            std::make_unique<IndexNode>(allocator_, pyramid_param->graph_param, index_min_size_);
         points_mutex_ = std::make_shared<PointsMutex>(max_capacity_, allocator_);
-        searcher_ = std::make_unique<BasicSearcher>(common_param_, points_mutex_);
+        searcher_ = std::make_unique<BasicSearcher>(common_param, points_mutex_);
+        no_build_levels_.assign(pyramid_param->no_build_levels.begin(),
+                                pyramid_param->no_build_levels.end());
         if (use_reorder_) {
             precise_codes_ =
-                FlattenInterface::MakeInstance(pyramid_param_->precise_codes_param, common_param_);
+                FlattenInterface::MakeInstance(pyramid_param->precise_codes_param, common_param);
             reorder_ = std::make_shared<FlattenReorder>(precise_codes_, allocator_);
         }
     }
@@ -110,13 +125,24 @@ public:
     explicit Pyramid(const ParamPtr& param, const IndexCommonParam& common_param)
         : Pyramid(std::dynamic_pointer_cast<PyramidParameters>(param), common_param){};
 
-    ~Pyramid() = default;
+    ~Pyramid() override = default;
 
     std::vector<int64_t>
-    Add(const DatasetPtr& base) override;
+    Add(const DatasetPtr& base, AddMode mode = AddMode::DEFAULT) override;
 
     std::vector<int64_t>
     Build(const DatasetPtr& base) override;
+
+    float
+    CalcDistanceById(const float* query,
+                     int64_t id,
+                     bool calculate_precise_distance = true) const override;
+
+    DatasetPtr
+    CalDistanceById(const float* query,
+                    const int64_t* ids,
+                    int64_t count,
+                    bool calculate_precise_distance = true) const override;
 
     void
     Deserialize(StreamReader& reader) override;
@@ -139,6 +165,9 @@ public:
     int64_t
     GetNumElements() const override;
 
+    std::string
+    GetStats() const override;
+
     void
     InitFeatures() override;
 
@@ -159,7 +188,15 @@ public:
     Serialize(StreamWriter& writer) const override;
 
     void
+    SetImmutable() override;
+
+    void
     Train(const vsag::DatasetPtr& base) override;
+
+    void
+    GetVectorByInnerId(InnerIdType inner_id, float* data) const override;
+
+    friend class PyramidAnalyzer;
 
 private:
     void
@@ -167,9 +204,8 @@ private:
 
     DatasetPtr
     search_impl(const DatasetPtr& query,
-                int64_t limit,
                 const SearchFunc& search_func,
-                int64_t ef_search) const;
+                InnerSearchParam& search_param) const;
 
     bool
     is_update_entry_point(uint64_t total_count) {
@@ -182,17 +218,26 @@ private:
     build_by_odescent(const DatasetPtr& base);
 
     void
-    add_one_point(const std::shared_ptr<IndexNode>& node,
-                  InnerIdType inner_id,
-                  const float* vector);
+    add_one_point(IndexNode* node, InnerIdType inner_id, const float* vector);
 
     static std::vector<std::vector<std::string>>
     parse_path(const std::string& path);
 
+    DistHeapPtr
+    search_node(const IndexNode* node,
+                const VisitedListPtr& vl,
+                const InnerSearchParam& search_param,
+                const DatasetPtr& query,
+                const FlattenInterfacePtr& codes,
+                QueryContext& ctx,
+                uint64_t subindex_ef_search) const;
+
 private:
-    IndexCommonParam common_param_;
-    PyramidParamPtr pyramid_param_{nullptr};
-    std::shared_ptr<IndexNode> root_{nullptr};
+    ODescentParameterPtr odescent_param_{nullptr};
+    Vector<int32_t> no_build_levels_;
+    uint64_t ef_construction_{400};
+    int64_t max_degree_{64};
+    std::unique_ptr<IndexNode> root_{nullptr};
     FlattenInterfacePtr base_codes_{nullptr};
     FlattenInterfacePtr precise_codes_{nullptr};
     std::unique_ptr<VisitedListPool> pool_ = nullptr;
@@ -202,14 +247,19 @@ private:
     int64_t max_capacity_{0};
     int64_t cur_element_count_{0};
     float alpha_{1.0F};
+    bool support_duplicate_{false};
 
-    std::shared_mutex resize_mutex_;
+    mutable std::shared_mutex resize_mutex_;
     std::mutex cur_element_count_mutex_;
     std::string graph_type_{GRAPH_TYPE_VALUE_NSW};
 
     std::mutex entry_point_mutex_;
     std::default_random_engine level_generator_{2021};
     ReorderInterfacePtr reorder_{nullptr};
+
+    // static
+    uint32_t index_min_size_{0};
+    bool immutable_{false};
 };
 
 }  // namespace vsag

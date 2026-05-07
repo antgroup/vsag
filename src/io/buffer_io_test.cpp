@@ -15,11 +15,11 @@
 
 #include "buffer_io.h"
 
-#include <catch2/catch_test_macros.hpp>
 #include <memory>
 
 #include "basic_io_test.h"
 #include "impl/allocator/safe_allocator.h"
+#include "unittest.h"
 
 using namespace vsag;
 
@@ -36,7 +36,7 @@ TEST_CASE("BufferIO Parameter", "[ut][BufferIO]") {
     fixtures::TempDir dir("buffer_io");
     auto path = dir.GenerateRandomFile();
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    constexpr static const char* param_str = R"(
+    static constexpr const char* param_str = R"(
     {{
         "type": "buffer_io",
         "file_path" : "{}"

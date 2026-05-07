@@ -15,12 +15,12 @@
 
 #include "mmap_io.h"
 
-#include <catch2/catch_test_macros.hpp>
 #include <memory>
 
 #include "basic_io_test.h"
 #include "impl/allocator/safe_allocator.h"
 #include "index_common_param.h"
+#include "unittest.h"
 
 using namespace vsag;
 
@@ -37,7 +37,7 @@ TEST_CASE("MMapIO Parameter", "[ut][MMapIO]") {
     fixtures::TempDir dir("mmap_io");
     auto path = dir.GenerateRandomFile();
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    constexpr static const char* param_str = R"(
+    static constexpr const char* param_str = R"(
     {{
         "type": "mmap_io",
         "file_path" : "{}"

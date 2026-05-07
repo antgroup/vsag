@@ -22,6 +22,26 @@
 
 namespace vsag {
 
+/***
+ * @brief Product Quantizer divides vectors into subspaces and quantizes each subspace.
+ *
+ * code layout:
+ * +------+------+------+------+
+ * | sub0 | sub1 | ...  | subN |
+ * | [1B] | [1B] |      | [1B] |
+ * +------+------+------+------+
+ *
+ * query layout (lookup table):
+ * +------------------+------------------+          +------------------+
+ * | lut[0][0..255]   | lut[1][0..255]   |   ...    | lut[N][0..255]   |
+ * | [256 floats]     | [256 floats]     |          | [256 floats]     |
+ * +------------------+------------------+          +------------------+
+ *
+ * - pq-code: 1 byte per subspace, index into codebook (required)
+ * - pq_dim: number of subspaces
+ * - Each subspace has 256 centroids (2^8 = 256 possible indices)
+ * - Lookup table: precomputed distances for query to all centroids
+ */
 template <MetricType metric = MetricType::METRIC_TYPE_L2SQR>
 class ProductQuantizer : public Quantizer<ProductQuantizer<metric>> {
 public:
@@ -34,34 +54,22 @@ public:
     ~ProductQuantizer() = default;
 
     bool
-    TrainImpl(const DataType* data, uint64_t count);
+    TrainImpl(const float* data, uint64_t count);
 
     bool
-    EncodeOneImpl(const DataType* data, uint8_t* codes);
+    EncodeOneImpl(const float* data, uint8_t* codes);
 
     bool
-    EncodeBatchImpl(const DataType* data, uint8_t* codes, uint64_t count);
-
-    bool
-    DecodeOneImpl(const uint8_t* codes, DataType* data);
-
-    bool
-    DecodeBatchImpl(const uint8_t* codes, DataType* data, uint64_t count);
+    DecodeOneImpl(const uint8_t* codes, float* data);
 
     float
     ComputeImpl(const uint8_t* codes1, const uint8_t* codes2);
 
     void
-    ProcessQueryImpl(const DataType* query, Computer<ProductQuantizer>& computer) const;
+    ProcessQueryImpl(const float* query, Computer<ProductQuantizer>& computer) const;
 
     void
     ComputeDistImpl(Computer<ProductQuantizer>& computer, const uint8_t* codes, float* dists) const;
-
-    void
-    ScanBatchDistImpl(Computer<ProductQuantizer<metric>>& computer,
-                      uint64_t count,
-                      const uint8_t* codes,
-                      float* dists) const;
 
     void
     ComputeDistsBatch4Impl(Computer<ProductQuantizer<metric>>& computer,
@@ -80,9 +88,6 @@ public:
     void
     DeserializeImpl(StreamReader& reader);
 
-    void
-    ReleaseComputerImpl(Computer<ProductQuantizer<metric>>& computer) const;
-
     [[nodiscard]] std::string
     NameImpl() const {
         return QUANTIZATION_TYPE_VALUE_PQ;
@@ -99,8 +104,8 @@ private:
     transpose_codebooks();
 
 public:
-    constexpr static int64_t PQ_BITS = 8L;
-    constexpr static int64_t CENTROIDS_PER_SUBSPACE = 256L;
+    static constexpr int64_t PQ_BITS = 8L;
+    static constexpr int64_t CENTROIDS_PER_SUBSPACE = 256L;
 
 public:
     int64_t pq_dim_{1};

@@ -3,8 +3,8 @@ name: Check Compatibility
 on:
   push:
     branches: [ "main", "0.*" ]
-  pull_request:
-    branches: [ "main", "0.*" ]
+    paths-ignore:
+      - 'docs/**'
   workflow_dispatch:
 
 jobs:
@@ -12,17 +12,32 @@ jobs:
     name: Check Compatibility
     runs-on: ubuntu-latest
     concurrency:
-      group: compatibility-${{ github.event.pull_request.number }}
-      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+      group: compatibility-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: ${{ github.event_name == "pull_request" }}
     container:
       image: vsaglib/vsag:ci-x86
     steps:
-      - name: Prepare Data
+      - name: Install GitHub CLI
         run: |
-          git clone -b old_version_index https://github.com/antgroup/vsag.git
-          cp -r ./vsag/* /tmp/
+          GH_VERSION=$(wget -qO- https://api.github.com/repos/cli/cli/releases/latest | sed -n 's/.*"tag_name": "v\([^"]*\)".*/\1/p')
+          wget -q "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" -O /tmp/gh.tar.gz
+          tar xzf /tmp/gh.tar.gz -C /tmp
+          mv /tmp/gh_${GH_VERSION}_linux_amd64/bin/gh /usr/local/bin/gh
+          rm -rf /tmp/gh.tar.gz /tmp/gh_${GH_VERSION}_linux_amd64
+          gh --version
+      - name: Download Compatibility Indexes from Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download compatibility-indexes \
+            --repo antgroup/vsag \
+            --dir /tmp \
+            --pattern "*.index" \
+            --pattern "*.bin" \
+            --pattern "*.json" \
+            || echo "Warning: Failed to download compatibility indexes"
       - uses: actions/checkout@v4
       - name: Compile Check Compatibility Tools
-        run: export CMAKE_GENERATOR="Ninja"; make release
+        run: export CMAKE_GENERATOR="Ninja"; make release VSAG_ENABLE_TOOLS=ON
       - name: Run Check Compatibility
         run: bash ./scripts/check_compatibility.sh

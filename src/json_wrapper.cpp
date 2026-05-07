@@ -30,12 +30,7 @@ JsonWrapper::~JsonWrapper() {
     }
 }
 
-JsonWrapper::JsonWrapper(const JsonWrapper& other) {
-    if (owns_json_) {
-        delete json_;
-    }
-    json_ = new nlohmann::json();
-    owns_json_ = true;
+JsonWrapper::JsonWrapper(const JsonWrapper& other) : json_(new nlohmann::json()), owns_json_(true) {
     if (other.json_ != nullptr) {
         *json_ = *other.json_;
     }
@@ -121,8 +116,9 @@ JsonWrapper::SetInt(uint64_t value) {
     (*json_) = value;
 }
 
+template <class T>
 void
-JsonWrapper::SetVector(const std::vector<int32_t>& value) {
+JsonWrapper::SetVector(std::vector<T> value) {
     (*json_) = value;
 }
 
@@ -175,5 +171,11 @@ void
 JsonWrapper::UpdateJson(const JsonWrapper& json) {
     (*json_).update(*json.json_);
 }
+
+template void
+JsonWrapper::SetVector<uint32_t>(std::vector<uint32_t> value);
+
+template void
+JsonWrapper::SetVector<int32_t>(std::vector<int32_t> value);
 
 }  // namespace vsag

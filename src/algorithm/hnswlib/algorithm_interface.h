@@ -25,6 +25,7 @@
 #include "space_interface.h"
 #include "storage/stream_reader.h"
 #include "typing.h"
+#include "utils/filter_search_skip_strategy.h"
 #include "vsag/dataset.h"
 #include "vsag/errors.h"
 #include "vsag/expected.hpp"
@@ -34,6 +35,9 @@ namespace hnswlib {
 
 using LabelType = vsag::LabelType;
 using InnerIdType = vsag::InnerIdType;
+using vsag::StreamReader;
+using vsag::StreamWriter;
+using vsag::WriteFuncStreamWriter;
 
 template <typename dist_t>
 class AlgorithmInterface {
@@ -43,10 +47,12 @@ public:
 
     virtual std::priority_queue<std::pair<dist_t, LabelType>>
     searchKnn(const void* query_data,
-              size_t k,
-              size_t ef,
+              uint64_t k,
+              uint64_t ef,
               const vsag::FilterPtr is_id_allowed = nullptr,
               float skip_ratio = 0.9f,
+              vsag::FilterSearchSkipStrategyType skip_strategy_type =
+                  vsag::FilterSearchSkipStrategyType::DETERMINISTIC_ACCUMULATIVE,
               vsag::Allocator* allocator = nullptr,
               vsag::IteratorFilterContext* iter_ctx = nullptr,
               bool is_last_filter = false) const = 0;
@@ -54,20 +60,20 @@ public:
     virtual std::priority_queue<std::pair<dist_t, LabelType>>
     searchRange(const void* query_data,
                 float radius,
-                size_t ef,
+                uint64_t ef,
                 const vsag::FilterPtr is_id_allowed = nullptr) const = 0;
 
     // Return k nearest neighbor in the order of closer fist
     virtual std::vector<std::pair<dist_t, LabelType>>
     searchKnnCloserFirst(const void* query_data,
-                         size_t k,
-                         size_t ef,
+                         uint64_t k,
+                         uint64_t ef,
                          const vsag::FilterPtr& is_id_allowed = nullptr) const;
 
     virtual void
     saveIndex(StreamWriter& writer) = 0;
 
-    virtual size_t
+    virtual uint64_t
     getMaxElements() = 0;
 
     virtual float
@@ -101,22 +107,22 @@ public:
                const vsag::FilterPtr is_id_allowed = nullptr) const = 0;
 
     virtual void
-    resizeIndex(size_t new_max_elements) = 0;
+    resizeIndex(uint64_t new_max_elements) = 0;
 
-    virtual size_t
+    virtual uint64_t
     calcSerializeSize() = 0;
 
     virtual void
-    loadIndex(StreamReader& reader, SpaceInterface* s, size_t max_elements_i = 0) = 0;
+    loadIndex(StreamReader& reader, SpaceInterface* s, uint64_t max_elements_i = 0) = 0;
 
-    virtual size_t
+    virtual uint64_t
     getCurrentElementCount() = 0;
 
-    virtual size_t
+    virtual uint64_t
     getDeletedCount() = 0;
 
-    virtual vsag::STLUnorderedMap<LabelType, InnerIdType>
-    getDeletedElements() = 0;
+    virtual const vsag::PGUnorderedMap<LabelType, InnerIdType>&
+    getDeletedElements() const = 0;
 
     virtual bool
     isValidLabel(LabelType label) = 0;

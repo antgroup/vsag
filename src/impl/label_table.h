@@ -16,13 +16,17 @@
 #pragma once
 
 #include <fmt/format.h>
+#include <vsag/filter.h>
 
 #include <atomic>
+#include <shared_mutex>
 
+#include "datacell/duplicate_interface.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "typing.h"
 #include "utils/pointer_define.h"
+#include "vsag_exception.h"
 
 namespace vsag {
 
@@ -30,33 +34,15 @@ DEFINE_POINTER(LabelTable);
 
 using IdMapFunction = std::function<std::tuple<bool, int64_t>(int64_t)>;
 
-struct DuplicateRecord {
-    std::mutex duplicate_mutex;
-    Vector<InnerIdType> duplicate_ids;
-    DuplicateRecord(Allocator* allocator) : duplicate_ids(allocator) {
-    }
-};
-
 class LabelTable {
 public:
     explicit LabelTable(Allocator* allocator,
                         bool use_reverse_map = true,
-                        bool compress_redundant_data = false)
-        : allocator_(allocator),
-          label_table_(0, allocator),
-          label_remap_(0, allocator),
-          use_reverse_map_(use_reverse_map),
-          deleted_ids_(allocator),
-          compress_duplicate_data_(compress_redundant_data),
-          duplicate_records_(0, allocator){};
+                        bool compress_redundant_data = false);
 
-    ~LabelTable() {
-        for (int i = 0; i < duplicate_records_.size(); ++i) {
-            allocator_->Delete(duplicate_records_[i]);
-        }
-    }
+    static constexpr InnerIdType INVALID_ID = std::numeric_limits<InnerIdType>::max();
 
-    inline void
+    void
     Insert(InnerIdType id, LabelType label) {
         if (use_reverse_map_) {
             label_remap_[label] = id;
@@ -68,19 +54,30 @@ public:
         total_count_++;
     }
 
-    inline bool
-    Remove(LabelType label) {
-        if (not use_reverse_map_) {
-            return true;
-        }
-        auto iter = label_remap_.find(label);
-        if (iter == label_remap_.end() or iter->second == std::numeric_limits<InnerIdType>::max()) {
-            return false;
-        }
-        deleted_ids_.insert(iter->second);
+    void
+    SetImmutable() {
+        this->use_reverse_map_ = false;
+        PGUnorderedMap<LabelType, InnerIdType> empty_remap(allocator_);
+        empty_remap.max_load_factor(0.75F);
+        this->label_remap_.swap(empty_remap);
+    }
 
-        label_remap_[label] = std::numeric_limits<InnerIdType>::max();
-        return true;
+    /**
+     * Mark labels as removed.
+     * @param labels The labels to mark as removed.
+     * @return The number of labels marked as removed.
+     */
+    uint32_t
+    MarkRemove(const std::vector<LabelType>& labels);
+
+    /**
+     * Mark a label as removed.
+     * @param label The label to mark as removed.
+     * @return The number of labels marked as removed.
+     */
+    uint32_t
+    MarkRemove(const LabelType& label) {
+        return MarkRemove(std::vector<LabelType>({label}));
     }
 
     inline bool
@@ -113,72 +110,87 @@ public:
                 iter->second == std::numeric_limits<InnerIdType>::max());
     }
 
-    inline bool
+    /**
+     * Check whether an id is removed.
+     * @param id The id to check.
+     * @return True if the id is removed, false otherwise.
+     */
+    bool
     IsRemoved(InnerIdType id) {
-        return not deleted_ids_.empty() && deleted_ids_.count(id) != 0;
+        std::shared_lock rlock(delete_ids_mutex_);
+        return deleted_ids_.count(id) != 0;
     }
 
-    inline InnerIdType
-    GetIdByLabel(LabelType label, bool return_even_removed = false) const {
-        if (use_reverse_map_ and not return_even_removed) {
-            if (this->label_remap_.count(label) == 0) {
-                throw std::runtime_error(fmt::format("label {} is not exists", label));
-            }
-            auto id = this->label_remap_.at(label);
-            if (id != std::numeric_limits<InnerIdType>::max()) {
-                return id;
-            } else {
-                throw std::runtime_error(fmt::format("label {} is removed", label));
-            }
-        }
-        auto result = std::find(label_table_.begin(), label_table_.end(), label);
-        if (result == label_table_.end()) {
-            throw std::runtime_error(fmt::format("label {} is not exists", label));
-        }
-        return result - label_table_.begin();
+    void
+    EraseFromDeletedIds(InnerIdType id) {
+        std::scoped_lock wlock(delete_ids_mutex_);
+        deleted_ids_.erase(id);
     }
 
-    inline bool
-    CheckLabel(LabelType label) const {
-        // return true when label exists and not been deleted
-        if (use_reverse_map_) {
-            auto iter = label_remap_.find(label);
-            return iter != label_remap_.end() and
-                   iter->second != std::numeric_limits<InnerIdType>::max();
-        }
-        auto result = std::find(label_table_.begin(), label_table_.end(), label);
-        return result != label_table_.end();
-    }
+    /**
+     * Get id by label.
+     * @param label The label to query.
+     * @param return_even_removed Whether to return even if the id is removed.
+     * @return The id corresponding to the label.
+     * @throws VsagException if the label does not exist or is removed.
+     */
+    InnerIdType
+    GetIdByLabel(LabelType label, bool return_even_removed = false) const;
 
-    inline void
+    /**
+     * Try to get id by label without throwing exception.
+     * @param label The label to query.
+     * @param return_even_removed Whether to return even if the id is removed.
+     * @return A pair where first indicates success and second is the inner_id.
+     */
+    std::pair<bool, InnerIdType>
+    TryGetIdByLabel(LabelType label, bool return_even_removed = false) const noexcept;
+
+    /**
+     * Check whether a label exists and not been removed.
+     * @param label The label to check.
+     * @return True if the label exists and not been removed, false otherwise.
+     */
+    bool
+    CheckLabel(LabelType label) const;
+
+    void
     UpdateLabel(LabelType old_label, LabelType new_label) {
         // 1. check whether new_label is occupied
         if (CheckLabel(new_label)) {
-            throw std::runtime_error(fmt::format("new label {} has been in HGraph", new_label));
+            throw VsagException(ErrorType::INTERNAL_ERROR,
+                                fmt::format("new label {} has been in Index", new_label));
         }
 
         // 2. update label_table_
-        auto result = std::find(label_table_.begin(), label_table_.end(), old_label);
-        if (result == label_table_.end()) {
-            throw std::runtime_error(fmt::format("old label {} is not exists", old_label));
+        // Important: there may be multiple occurrences of old_label, so we need to update every one
+        bool found = false;
+        for (size_t i = 0; i < label_table_.size(); ++i) {
+            if (label_table_[i] == old_label) {
+                label_table_[i] = new_label;
+                found = true;
+            }
         }
-        InnerIdType internal_id = result - label_table_.begin();
-        label_table_[internal_id] = new_label;
+        if (not found) {
+            throw VsagException(ErrorType::INTERNAL_ERROR,
+                                fmt::format("old label {} does not exist", old_label));
+        }
 
         // 3. update label_remap_
         if (use_reverse_map_) {
             // note that currently, old_label must exist
             auto iter_old = label_remap_.find(old_label);
-            internal_id = iter_old->second;
+            auto internal_id = iter_old->second;
             label_remap_.erase(iter_old);
             label_remap_[new_label] = internal_id;
         }
     }
 
-    inline LabelType
+    LabelType
     GetLabelById(InnerIdType inner_id) const {
         if (inner_id >= label_table_.size()) {
-            throw std::runtime_error(
+            throw VsagException(
+                ErrorType::INTERNAL_ERROR,
                 fmt::format("id is too large {} >= {}", inner_id, label_table_.size()));
         }
         return this->label_table_[inner_id];
@@ -192,15 +204,6 @@ public:
     void
     Serialize(StreamWriter& writer) const {
         StreamWriter::WriteVector(writer, label_table_);
-        if (compress_duplicate_data_) {
-            StreamWriter::WriteObj(writer, duplicate_count_);
-            for (InnerIdType i = 0; i < label_table_.size(); ++i) {
-                if (duplicate_records_[i] != nullptr) {
-                    StreamWriter::WriteObj(writer, i);
-                    StreamWriter::WriteVector(writer, duplicate_records_[i]->duplicate_ids);
-                }
-            }
-        }
         if (support_tombstone_) {
             StreamWriter::WriteObj(writer, deleted_ids_);
         }
@@ -210,25 +213,21 @@ public:
     Deserialize(lvalue_or_rvalue<StreamReader> reader) {
         StreamReader::ReadVector(reader, label_table_);
         if (use_reverse_map_) {
+            this->label_remap_.clear();
+            this->label_remap_.reserve(label_table_.size());
             for (InnerIdType id = 0; id < label_table_.size(); ++id) {
                 this->label_remap_[label_table_[id]] = id;
-            }
-        }
-        if (compress_duplicate_data_) {
-            StreamReader::ReadObj(reader, duplicate_count_);
-            duplicate_records_.resize(label_table_.size(), nullptr);
-            for (InnerIdType i = 0; i < duplicate_count_; ++i) {
-                InnerIdType id;
-                StreamReader::ReadObj<InnerIdType>(reader, id);
-                duplicate_records_[id] = allocator_->New<DuplicateRecord>(allocator_);
-                StreamReader::ReadVector(reader, duplicate_records_[id]->duplicate_ids);
             }
         }
         if (support_tombstone_) {
             StreamReader::ReadObj(reader, deleted_ids_);
         }
+
         this->total_count_.store(label_table_.size());
     }
+
+    void
+    Deserialize(StreamReader& reader);
 
     void
     Resize(uint64_t new_size) {
@@ -236,9 +235,6 @@ public:
             return;
         }
         label_table_.resize(new_size);
-        if (compress_duplicate_data_) {
-            duplicate_records_.resize(new_size, nullptr);
-        }
     }
 
     int64_t
@@ -246,49 +242,150 @@ public:
         return total_count_;
     }
 
-    inline bool
-    CompressDuplicateData() const {
-        return compress_duplicate_data_;
-    }
-
-    inline void
-    SetDuplicateId(InnerIdType previous_id, InnerIdType current_id) {
-        std::lock_guard duplicate_lock(duplicate_mutex_);
-        if (duplicate_records_[previous_id] == nullptr) {
-            duplicate_records_[previous_id] = allocator_->New<DuplicateRecord>(allocator_);
-            duplicate_count_++;
-        }
-        std::lock_guard lock(duplicate_records_[previous_id]->duplicate_mutex);
-        duplicate_records_[previous_id]->duplicate_ids.push_back(current_id);
-    }
-
-    const Vector<InnerIdType>
-    GetDuplicateId(InnerIdType id) const {
-        if (duplicate_records_[id] == nullptr) {
-            return Vector<InnerIdType>(allocator_);
-        }
-        std::lock_guard lock(duplicate_records_[id]->duplicate_mutex);
-        return duplicate_records_[id]->duplicate_ids;
+    void
+    SetDuplicateTracker(DuplicateTrackerPtr tracker) {
+        duplicate_tracker_ = std::move(tracker);
     }
 
     void
     MergeOther(const LabelTablePtr& other, const IdMapFunction& id_map = nullptr);
 
+    /**
+     * Get memory usage of the label table.
+     * @return The memory usage in bytes.
+     */
+    int64_t
+    GetMemoryUsage() {
+        return sizeof(LabelTable) + label_table_.size() * sizeof(LabelType) +
+               label_remap_.size() * (sizeof(LabelType) + sizeof(InnerIdType)) +
+               deleted_ids_.size() * sizeof(InnerIdType) + hole_list_.size() * sizeof(InnerIdType);
+    }
+
+    /**
+     * Get filter to filter out deleted ids.
+     * @return The filter.
+     */
+    FilterPtr
+    GetDeletedIdsFilter() {
+        std::shared_lock rlock(delete_ids_mutex_);
+        if (deleted_ids_.empty()) {
+            return nullptr;
+        }
+        return deleted_ids_filter_;
+    }
+
+    std::vector<InnerIdType>
+    GetDeletedIds(InnerIdType max_count) {
+        std::shared_lock rlock(delete_ids_mutex_);
+        if (deleted_ids_.empty()) {
+            return {};
+        }
+        auto size = std::min<uint64_t>(static_cast<uint64_t>(max_count), deleted_ids_.size());
+        return std::vector<InnerIdType>(deleted_ids_.begin(),
+                                        std::next(deleted_ids_.begin(), size));
+    }
+
+    std::vector<InnerIdType>
+    GetAllDeletedIds() {
+        std::shared_lock rlock(delete_ids_mutex_);
+        return std::vector<InnerIdType>(deleted_ids_.begin(), deleted_ids_.end());
+    }
+
+private:
+    InnerIdType
+    get_id_by_label_with_reverse_map(LabelType label) const noexcept;
+
+    InnerIdType
+    get_id_by_label_with_label_table(LabelType label) const noexcept;
+
 public:
+    // Label table, map from id to label.
     Vector<LabelType> label_table_;
-    STLUnorderedMap<LabelType, InnerIdType> label_remap_;
-    UnorderedSet<InnerIdType> deleted_ids_;
 
-    bool compress_duplicate_data_{true};
+    // Temporary compatibility switch for legacy duplicate payload layout.
+    bool is_legacy_duplicate_format_{false};
+
+    // Whether to use reverse map to speed up GetIdByLabel.
+    bool use_reverse_map_{true};
+    // Reverse map from label to id.
+    PGUnorderedMap<LabelType, InnerIdType> label_remap_;
+
     bool support_tombstone_{false};
-
-    std::mutex duplicate_mutex_;
-    uint64_t duplicate_count_{0L};
-    Vector<DuplicateRecord*> duplicate_records_;
+    DuplicateTrackerPtr duplicate_tracker_{nullptr};
 
     Allocator* allocator_{nullptr};
     std::atomic<int64_t> total_count_{0L};
-    bool use_reverse_map_{true};
+
+    void
+    PushHole(InnerIdType id) {
+        std::scoped_lock wlock(hole_mutex_);
+        hole_list_.push_back(id);
+    }
+
+    std::pair<bool, InnerIdType>
+    PopHole() {
+        std::scoped_lock wlock(hole_mutex_);
+        if (hole_list_.empty()) {
+            return {false, 0};
+        }
+        InnerIdType id = hole_list_.back();
+        hole_list_.pop_back();
+        return {true, id};
+    }
+
+    bool
+    HasHole() const {
+        std::shared_lock rlock(hole_mutex_);
+        return not hole_list_.empty();
+    }
+
+    size_t
+    GetHoleCount() const {
+        std::shared_lock rlock(hole_mutex_);
+        return hole_list_.size();
+    }
+
+    bool
+    RemoveHole(InnerIdType id) {
+        std::scoped_lock wlock(hole_mutex_);
+        auto it = std::find(hole_list_.begin(), hole_list_.end(), id);
+        if (it != hole_list_.end()) {
+            hole_list_.erase(it);
+            return true;
+        }
+        return false;
+    }
+
+    void
+    Move(InnerIdType from, InnerIdType to) {
+        if (from == to) {
+            return;
+        }
+
+        if (use_reverse_map_) {
+            label_remap_.erase(label_table_[to]);
+        }
+        label_table_[to] = label_table_[from];
+        if (use_reverse_map_) {
+            label_remap_[label_table_[to]] = to;
+        }
+    }
+
+    void
+    ShrinkToFit(InnerIdType capacity) {
+        label_table_.resize(capacity);
+        if (duplicate_tracker_ != nullptr) {
+            duplicate_tracker_->Resize(capacity);
+        }
+    }
+
+private:
+    UnorderedSet<InnerIdType> deleted_ids_;       // Record deleted ids.
+    FilterPtr deleted_ids_filter_{nullptr};       // Filter to filter out deleted ids.
+    mutable std::shared_mutex delete_ids_mutex_;  // Mutex to protect deleted_ids_.
+
+    Vector<InnerIdType> hole_list_;         // Reusable id list (stack structure).
+    mutable std::shared_mutex hole_mutex_;  // Mutex to protect hole_list_.
 };
 
 }  // namespace vsag

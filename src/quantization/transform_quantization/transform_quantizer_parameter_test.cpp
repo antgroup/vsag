@@ -17,11 +17,9 @@
 
 #include <fmt/format.h>
 
-#include <catch2/catch_test_macros.hpp>
-
 #include "inner_string_params.h"
 #include "parameter_test.h"
-
+#include "unittest.h"
 using namespace vsag;
 
 #define TEST_COMPATIBILITY_CASE(section_name, param_str1, param_str2, expect_compatible) \
@@ -38,7 +36,7 @@ using namespace vsag;
     }
 
 TEST_CASE("Transform Quantizer Parameter CheckCompatibility", "[ut][TransformQuantizerParameter]") {
-    constexpr static const char* param_template = R"(
+    static constexpr const char* param_template = R"(
         {{
             "tq_chain": "{}",
             "rabitq_use_fht": true,
@@ -89,7 +87,7 @@ TEST_CASE("TQ parameter Split Merge String Test", "[ut][TransformQuantizerParame
 }
 
 TEST_CASE("Invalid Cases Test", "[ut][TransformQuantizerParameter]") {
-    constexpr static const char* param_template = R"(
+    static constexpr const char* param_template = R"(
         {{
             "tq_chain": "{}"
         }}

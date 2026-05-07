@@ -1,0 +1,96 @@
+name: Update Contributors
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: update-contributors
+  cancel-in-progress: true
+
+jobs:
+  contributors:
+    runs-on: ubuntu-latest
+    name: Update contributors in README
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Update contributors list
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node .github/scripts/update-contributors-readme.mjs
+
+      - name: Check for README changes
+        id: changes
+        run: |
+          if git diff --quiet -- README.md; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create or update contributors PR
+        if: steps.changes.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          branch="automation/contributors-readme"
+          title="docs(contributor): contributors readme action update"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Probe the remote for the automation branch. git ls-remote
+          # --exit-code returns 0 when the ref exists, 2 when it does not,
+          # and other codes on real errors (auth/network/etc.) that must
+          # not be silently ignored.
+          set +e
+          git ls-remote --exit-code --heads origin "$branch" >/dev/null
+          ls_remote_rc=$?
+          set -e
+          if [ "$ls_remote_rc" -eq 0 ]; then
+            remote_branch_exists=1
+          elif [ "$ls_remote_rc" -eq 2 ]; then
+            remote_branch_exists=0
+          else
+            echo "git ls-remote failed with exit code $ls_remote_rc" >&2
+            exit "$ls_remote_rc"
+          fi
+
+          if [ "$remote_branch_exists" -eq 1 ]; then
+            # Populate a remote-tracking ref so --force-with-lease has an
+            # up-to-date lease and does not fail with "stale info".
+            git fetch origin "$branch":"refs/remotes/origin/$branch"
+          fi
+
+          git checkout -B "$branch"
+          git add README.md
+          git commit -m "docs(contributor): stable contributors readme update"
+
+          if [ "$remote_branch_exists" -eq 1 ]; then
+            lease_sha="$(git rev-parse "refs/remotes/origin/$branch")"
+            git push --force-with-lease="$branch:$lease_sha" origin "$branch"
+          else
+            git push origin "$branch"
+          fi
+
+          pr_number="$(gh pr list --base main --head "$branch" --state open --json number --jq '.[0].number // empty')"
+
+          if [ -z "$pr_number" ]; then
+            pr_url="$(gh pr create --base main --head "$branch" --title "$title" --body "")"
+            pr_number="${pr_url##*/}"
+          else
+            gh pr edit "$pr_number" --title "$title" --body ""
+          fi
+
+          gh pr edit "$pr_number" --add-label kind/documentation --add-label version/1.0

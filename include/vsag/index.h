@@ -43,7 +43,7 @@ struct MergeUnit {
     IdMapFunction id_map_func = nullptr;
 };
 
-enum class IndexType { HNSW, DISKANN, HGRAPH, IVF, PYRAMID, BRUTEFORCE, SPARSE, SINDI };
+enum class IndexType { HNSW, DISKANN, HGRAPH, IVF, PYRAMID, BRUTEFORCE, SPARSE, SINDI, WARP };
 
 #define DATA_FLAG_FLOAT32_VECTOR 0x01
 #define DATA_FLAG_INT8_VECTOR 0x02
@@ -56,7 +56,40 @@ using OffsetType = uint64_t;
 using SizeType = uint64_t;
 using WriteFuncType = std::function<void(OffsetType, SizeType, const void*)>;
 
+enum class AddMode {
+    /** try to reuse the memory of the deleted vector, no recovery check */
+    DEFAULT = 0,
+
+    /** always allocate new memory for the vector, but also check whether recovery from the same id */
+    KEEP_TOMBSTONE = 1,
+};
+
+enum class RemoveMode {
+    /** mark the vector as deleted, but not remove it from index, no shrink and repair,
+        * this mode is fast */
+    MARK_REMOVE = 0,
+
+    /** remove the vector from index and repair the index, this mode is heavy */
+    FORCE_REMOVE = 1,
+
+    /** backward-compatible alias kept for existing public API users */
+    REMOVE_AND_REPAIR = FORCE_REMOVE,
+
+    /** backward-compatible alias for the mixed-style enumerator introduced earlier */
+    ForceRemove = FORCE_REMOVE,
+};
+
 class Index {
+public:
+    /**
+     * @brief Get Index Type
+     * @return IndexType
+     */
+    [[nodiscard]] virtual IndexType
+    GetIndexType() const {
+        throw std::runtime_error("Index not support GetIndexType");
+    }
+
 public:
     // [basic methods]
 
@@ -70,12 +103,17 @@ public:
     Build(const DatasetPtr& base) = 0;
 
     /**
-     * @brief Get Index Type
-     * @return IndexType
+     * @brief Tunes the index using the specified parameters.
+     *
+     * @param parameters Parameters used to configure the tuning process.
+     * @param disable_future_tuning If true, further tuning will be disabled after this call.
+     * @return An expected containing:
+     *         - bool: true if tuning was applied successfully; false otherwise.
+     *         - Error: error details if the tuning operation fails.
      */
-    virtual IndexType
-    GetIndexType() const {
-        throw std::runtime_error("Index not support GetIndexType");
+    virtual tl::expected<bool, Error>
+    Tune(const std::string& parameters, bool disable_future_tuning = false) {
+        throw std::runtime_error("Tune is not supported by this index");
     }
 
     /**
@@ -107,25 +145,36 @@ public:
     }
 
     /**
-      * @brief Adding vectors into a built index, only HNSW supported now, called on other index will cause exception
-      * 
+      * @brief Add new vectors into the index
+      *
       * @param base should contains dim, num_elements, ids and vectors
       * @return IDs that failed to insert into the index
       */
-    virtual tl::expected<std::vector<int64_t>, Error>
-    Add(const DatasetPtr& base) {
+    [[nodiscard]] virtual tl::expected<std::vector<int64_t>, Error>
+    Add(const DatasetPtr& base, AddMode mode = AddMode::DEFAULT) {
         throw std::runtime_error("Index not support adding vectors");
     }
 
     /**
-      * @brief Remove the vector corresponding to the given ID from the index
-      *
-      * @param id of the vector that need to be removed from the index
-      * @return result indicates whether the remove operation is successful.
-      */
-    virtual tl::expected<bool, Error>
-    Remove(int64_t id) {
-        throw std::runtime_error("Index not support delete vector");
+     * @brief Remove the vectors corresponding to the given IDs from the index
+     *
+     * @param ids of the vectors that need to be removed from the index
+     * @return number of vectors that successfully removed from the index
+     */
+    virtual tl::expected<uint32_t, Error>
+    Remove(const std::vector<int64_t>& ids, RemoveMode mode = RemoveMode::MARK_REMOVE) {
+        throw std::runtime_error("Index not support Remove");
+    }
+
+    /**
+     * @brief Remove the vector corresponding to the given ID from the index
+     *
+     * @param id of the vector that need to be removed from the index
+     * @return number of vectors that successfully removed from the index
+     */
+    virtual tl::expected<uint32_t, Error>
+    Remove(int64_t id, RemoveMode mode = RemoveMode::MARK_REMOVE) {
+        return this->Remove(std::vector<int64_t>({id}), mode);
     }
 
     /**
@@ -184,6 +233,9 @@ public:
         throw std::runtime_error("Index not support update attribute with origin attributes");
     }
 
+public:
+    // [search methods]
+
     /**
       * @brief Performing single KNN search on index
       * 
@@ -210,7 +262,7 @@ public:
       *                - num_elements: 1
       *                - ids, distances: length is (num_elements * k)
       */
-    virtual tl::expected<DatasetPtr, Error>
+    [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     KnnSearch(const DatasetPtr& query,
               int64_t k,
               const std::string& parameters,
@@ -226,7 +278,7 @@ public:
       *                - num_elements: 1
       *                - ids, distances: length is (num_elements * k)
       */
-    virtual tl::expected<DatasetPtr, Error>
+    [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     KnnSearch(const DatasetPtr& query,
               int64_t k,
               const std::string& parameters,
@@ -242,7 +294,7 @@ public:
       *                - num_elements: 1
       *                - ids, distances: length is (num_elements * k)               
       */
-    virtual tl::expected<DatasetPtr, Error>
+    [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     SearchWithRequest(const SearchRequest& request) const {
         throw std::runtime_error("Index doesn't support Search With Request");
     }
@@ -259,7 +311,7 @@ public:
       *                - num_elements: 1
       *                - ids, distances: length is (num_elements * k)
       */
-    virtual tl::expected<DatasetPtr, Error>
+    [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     KnnSearch(const DatasetPtr& query,
               int64_t k,
               const std::string& parameters,
@@ -270,6 +322,8 @@ public:
     }
 
     /**
+      * [[deprecated("use SearchWithrequest instead")]]
+      *
       * @brief Performing single KNN search on index
       *
       * @param query should contains dim, num_elements and vectors
@@ -279,7 +333,7 @@ public:
       *                - num_elements: 1
       *                - ids, distances: length is (num_elements * k)
       */
-    virtual tl::expected<DatasetPtr, Error>
+    [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     KnnSearch(const DatasetPtr& query, int64_t k, SearchParam& search_param) const {
         throw std::runtime_error("Index doesn't support new filter");
     }
@@ -341,7 +395,7 @@ public:
       *                - dim: the size of results
       *                - ids, distances: length is dim
       */
-    virtual tl::expected<DatasetPtr, Error>
+    [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     RangeSearch(const DatasetPtr& query,
                 float radius,
                 const std::string& parameters,
@@ -363,7 +417,7 @@ public:
       *                - dim: the size of results
       *                - ids, distances: length is dim
       */
-    virtual tl::expected<DatasetPtr, Error>
+    [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     RangeSearch(const DatasetPtr& query,
                 float radius,
                 const std::string& parameters,
@@ -403,12 +457,18 @@ public:
     /**
      * @brief Calculate the distance between the query and the vector of the given ID.
      *
-     * @param vector is the embedding of query
-     * @param id is the unique identifier of the vector to be calculated in the index.
+     * @param vector The embedding of the query.
+     * @param id The unique identifier of the vector in the index for which the distance is computed.
+     * @param calculate_precise_distance If true, the function will attempt to use high-precision
+     *        vectors (e.g., full-precision float32) for distance computation, even if it requires
+     *        loading data from disk, which may incur I/O overhead. If false, the implementation may
+     *        use quantized or approximate representations for faster computation.
      * @return result is the distance between the query and the vector of the given ID.
      */
-    virtual tl::expected<float, Error>
-    CalcDistanceById(const float* vector, int64_t id) const {
+    [[nodiscard]] virtual tl::expected<float, Error>
+    CalcDistanceById(const float* vector,
+                     int64_t id,
+                     bool calculate_precise_distance = true) const {
         throw std::runtime_error("Index doesn't support get distance by id");
     };
 
@@ -417,10 +477,16 @@ public:
      *
      * @param vector is the embedding of query
      * @param id is the unique identifier of the vector to be calculated in the index.
+     * @param calculate_precise_distance If true, the function will attempt to use high-precision
+     *        vectors (e.g., full-precision float32) for distance computation, even if it requires
+     *        loading data from disk, which may incur I/O overhead. If false, the implementation may
+     *        use quantized or approximate representations for faster computation.
      * @return result is the distance between the query and the vector of the given ID.
      */
-    virtual tl::expected<float, Error>
-    CalcDistanceById(const DatasetPtr& vector, int64_t id) const {
+    [[nodiscard]] virtual tl::expected<float, Error>
+    CalcDistanceById(const DatasetPtr& vector,
+                     int64_t id,
+                     bool calculate_precise_distance = true) const {
         throw std::runtime_error("Index doesn't support get distance by id");
     };
 
@@ -430,10 +496,17 @@ public:
      * @param query is the embedding of query
      * @param ids is the unique identifier of the vector to be calculated in the index.
      * @param count is the count of ids
+     * @param calculate_precise_distance If true, the function will attempt to use high-precision
+     *        vectors (e.g., full-precision float32) for distance computation, even if it requires
+     *        loading data from disk, which may incur I/O overhead. If false, the implementation may
+     *        use quantized or approximate representations for faster computation.
      * @return result is valid distance of input ids. '-1' indicates an invalid distance.
      */
-    virtual tl::expected<DatasetPtr, Error>
-    CalDistanceById(const float* query, const int64_t* ids, int64_t count) const {
+    [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
+    CalDistanceById(const float* query,
+                    const int64_t* ids,
+                    int64_t count,
+                    bool calculate_precise_distance = true) const {
         throw std::runtime_error("Index doesn't support get distance by id");
     };
 
@@ -443,10 +516,17 @@ public:
      * @param query is the embedding of query
      * @param ids is the unique identifier of the vector to be calculated in the index.
      * @param count is the count of ids
+     * @param calculate_precise_distance If true, the function will attempt to use high-precision
+     *        vectors (e.g., full-precision float32) for distance computation, even if it requires
+     *        loading data from disk, which may incur I/O overhead. If false, the implementation may
+     *        use quantized or approximate representations for faster computation.
      * @return result is valid distance of input ids. '-1' indicates an invalid distance.
      */
-    virtual tl::expected<DatasetPtr, Error>
-    CalDistanceById(const DatasetPtr& query, const int64_t* ids, int64_t count) const {
+    [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
+    CalDistanceById(const DatasetPtr& query,
+                    const int64_t* ids,
+                    int64_t count,
+                    bool calculate_precise_distance = true) const {
         throw std::runtime_error("Index doesn't support get distance by id");
     };
 
@@ -456,7 +536,7 @@ public:
      * @param min_id The minimum id returned
      * @param max_id The maximum id returned
      */
-    virtual tl::expected<std::pair<int64_t, int64_t>, Error>
+    [[nodiscard]] virtual tl::expected<std::pair<int64_t, int64_t>, Error>
     GetMinAndMaxId() const {
         throw std::runtime_error("Index doesn't support get Min and Max id");
     }
@@ -492,6 +572,7 @@ public:
      *
      * @param ids Array of vector IDs for which raw data is requested.
      * @param count Number of IDs in the 'ids' array.
+     * @param specified_allocator Optional Allocator for memory management (default is nullptr).
      * @return tl::expected<DatasetPtr, Error>
      *         - On success: A DatasetPtr containing the raw vector data
      *           (format depends on implementation, but typically includes vector arrays).
@@ -509,8 +590,10 @@ public:
      * Users should not assume bitwise identicality between the returned vectors and the originally
      * inserted ones, even if the IDs match.
      */
-    virtual tl::expected<DatasetPtr, Error>
-    GetRawVectorByIds(const int64_t* ids, int64_t count) const {
+    [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
+    GetRawVectorByIds(const int64_t* ids,
+                      int64_t count,
+                      Allocator* specified_allocator = nullptr) const {
         throw std::runtime_error("Index doesn't support GetRawVectorByIds");
     };
 
@@ -529,7 +612,7 @@ public:
      * @throws std::runtime_error If the index implementation does not support this operation
      *            (default behavior for base class).
      */
-    virtual tl::expected<DatasetPtr, Error>
+    [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     GetDataByIdsWithFlag(const int64_t* ids, int64_t count, uint64_t selected_data_flag) const {
         throw std::runtime_error("Index doesn't support GetDataByIdsWithFlag");
     };
@@ -546,7 +629,7 @@ public:
      * @throws std::runtime_error If the index implementation does not support this operation
      *            (default behavior for base class).
      */
-    virtual tl::expected<std::vector<IndexDetailInfo>, Error>
+    [[nodiscard]] virtual tl::expected<std::vector<IndexDetailInfo>, Error>
     GetIndexDetailInfos() const {
         throw std::runtime_error("Index doesn't support GetIndexDetailInfos");
     };
@@ -582,7 +665,7 @@ public:
      *            (default behavior for base class).
      * @note The default implementation returns all data which in current index
      */
-    virtual tl::expected<DatasetPtr, Error>
+    [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     GetDataByIds(const int64_t* ids, int64_t count) const {
         throw std::runtime_error("Index doesn't support GetDataByIds");
     };
@@ -626,7 +709,7 @@ public:
      *
      * @return IndexPtr A pointer to the cloned index.
      */
-    virtual tl::expected<IndexPtr, Error>
+    [[nodiscard]] virtual tl::expected<IndexPtr, Error>
     Clone(const std::shared_ptr<Allocator>& allocator = nullptr) const {
         throw std::runtime_error("Index doesn't support Clone");
     }
@@ -637,7 +720,7 @@ public:
      * @return IndexPtr A pointer to the exported model index.
      * @throws std::runtime_error If the index does not support exporting the model.
      */
-    virtual tl::expected<IndexPtr, Error>
+    [[nodiscard]] virtual tl::expected<IndexPtr, Error>
     ExportModel() const {
         throw std::runtime_error("Index doesn't support ExportModel");
     }
@@ -648,7 +731,7 @@ public:
      * @return DatasetPtr A pointer to the exported IDs dataset.
      * @throws std::runtime_error If the index does not support exporting the IDs.
      */
-    virtual tl::expected<DatasetPtr, Error>
+    [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     ExportIDs() const {
         throw std::runtime_error("Index doesn't support ExportIDs");
     }
@@ -756,10 +839,10 @@ public:
     GetMemoryUsage() const = 0;
 
     /**
-  * @brief Return the memory usage of every component in the index
-  *
-  * @return a json object that contains the memory usage of every component in the index
-  */
+      * @brief Return the memory usage of every component in the index
+      *
+      * @return a json object that contains the memory usage of every component in the index
+      */
     // TODO(deming): implement func for every types of index
     // [[nodiscard]] virtual JsonType
     // GetMemoryUsageDetail() const = 0;
@@ -797,7 +880,7 @@ public:
       */
     [[nodiscard]] virtual std::string
     GetStats() const {
-        throw std::runtime_error("Index not support range search");
+        throw std::runtime_error("Index not support GetStats");
     }
 
     /**

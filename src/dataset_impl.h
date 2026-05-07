@@ -32,60 +32,17 @@ class DatasetImpl : public Dataset {
                              const float*,
                              const char*,
                              const int8_t*,
+                             const uint16_t*,
                              const int64_t*,
                              const std::string*,
                              const SparseVector*,
-                             const AttributeSet*>;
+                             const AttributeSet*,
+                             const uint32_t*>;
 
 public:
     DatasetImpl() = default;
 
-    ~DatasetImpl() override {
-        if (not owner_) {
-            return;
-        }
-
-        if (allocator_ != nullptr) {
-            allocator_->Deallocate((void*)(DatasetImpl::GetIds()));
-            allocator_->Deallocate((void*)(DatasetImpl::GetDistances()));
-            allocator_->Deallocate((void*)(DatasetImpl::GetInt8Vectors()));
-            allocator_->Deallocate((void*)(DatasetImpl::GetFloat32Vectors()));
-            allocator_->Deallocate((void*)(DatasetImpl::GetExtraInfos()));
-
-            if (DatasetImpl::GetSparseVectors() != nullptr) {
-                for (int i = 0; i < DatasetImpl::GetNumElements(); i++) {
-                    allocator_->Deallocate((void*)DatasetImpl::GetSparseVectors()[i].ids_);
-                    allocator_->Deallocate((void*)DatasetImpl::GetSparseVectors()[i].vals_);
-                }
-                allocator_->Deallocate((void*)DatasetImpl::GetSparseVectors());
-            }
-
-        } else {
-            delete[] DatasetImpl::GetIds();
-            delete[] DatasetImpl::GetDistances();
-            delete[] DatasetImpl::GetInt8Vectors();
-            delete[] DatasetImpl::GetFloat32Vectors();
-            delete[] DatasetImpl::GetExtraInfos();
-
-            if (DatasetImpl::GetSparseVectors() != nullptr) {
-                for (int i = 0; i < DatasetImpl::GetNumElements(); i++) {
-                    delete[] DatasetImpl::GetSparseVectors()[i].ids_;
-                    delete[] DatasetImpl::GetSparseVectors()[i].vals_;
-                }
-                delete[] DatasetImpl::GetSparseVectors();
-            }
-        }
-        delete[] DatasetImpl::GetPaths();
-        if (DatasetImpl::GetAttributeSets() != nullptr) {
-            const auto* attrsets = DatasetImpl::GetAttributeSets();
-            for (int i = 0; i < DatasetImpl::GetNumElements(); ++i) {
-                for (auto* attr : attrsets[i].attrs_) {
-                    delete attr;
-                }
-            }
-            delete[] attrsets;
-        }
-    }
+    ~DatasetImpl() override;
 
     DatasetImpl(const DatasetImpl&) = delete;
     DatasetImpl&
@@ -203,6 +160,21 @@ public:
     }
 
     DatasetPtr
+    Float16Vectors(const uint16_t* vectors) override {
+        this->data_[FLOAT16_VECTORS] = vectors;
+        return shared_from_this();
+    }
+
+    const uint16_t*
+    GetFloat16Vectors() const override {
+        if (auto iter = this->data_.find(FLOAT16_VECTORS); iter != this->data_.end()) {
+            return std::get<const uint16_t*>(iter->second);
+        }
+
+        return nullptr;
+    }
+
+    DatasetPtr
     SparseVectors(const SparseVector* sparse_vectors) override {
         this->data_[SPARSE_VECTORS] = sparse_vectors;
         return shared_from_this();
@@ -287,6 +259,31 @@ public:
         return this->Statistics_;
     }
 
+    DatasetPtr
+    Reasoning(const std::string& reasoning_json) override {
+        this->Reasoning_ = reasoning_json;
+        return shared_from_this();
+    }
+
+    const std::string&
+    GetReasoning() const override {
+        return this->Reasoning_;
+    }
+
+    DatasetPtr
+    VectorCounts(const uint32_t* counts) override {
+        this->data_[VECTOR_COUNTS] = counts;
+        return shared_from_this();
+    }
+
+    const uint32_t*
+    GetVectorCounts() const override {
+        if (auto iter = this->data_.find(VECTOR_COUNTS); iter != this->data_.end()) {
+            return std::get<const uint32_t*>(iter->second);
+        }
+        return nullptr;
+    }
+
     static DatasetPtr
     MakeEmptyDataset();
 
@@ -296,6 +293,7 @@ private:
     Allocator* allocator_ = nullptr;
 
     std::string Statistics_{"{}"};
+    std::string Reasoning_{"{}"};
 };
 
 };  // namespace vsag

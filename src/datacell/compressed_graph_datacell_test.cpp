@@ -17,12 +17,10 @@
 
 #include <fmt/format.h>
 
-#include <catch2/catch_template_test_macros.hpp>
-#include <catch2/generators/catch_generators.hpp>
-
 #include "graph_datacell_parameter.h"
 #include "graph_interface_test.h"
 #include "impl/allocator/safe_allocator.h"
+#include "unittest.h"
 using namespace vsag;
 
 void
@@ -63,4 +61,27 @@ TEST_CASE("CompressedGraphDataCell Basic Test", "[ut][CompressedGraphDataCell]")
     REQUIRE(graph_param->graph_storage_type_ ==
             GraphStorageTypes::GRAPH_STORAGE_TYPE_VALUE_COMPRESSED);
     TestCompressedGraphDataCell(graph_param, common_param);
+}
+
+TEST_CASE("CompressedGraphDataCell duplicate tracker follows parameter",
+          "[ut][CompressedGraphDataCell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.dim_ = 32;
+    common_param.allocator_ = allocator;
+
+    auto disabled_param = std::make_shared<CompressedGraphDatacellParameter>();
+    auto disabled_graph = GraphInterface::MakeInstance(disabled_param, common_param);
+    REQUIRE(disabled_graph->GetDuplicateTracker() == nullptr);
+
+    auto enabled_param = std::make_shared<CompressedGraphDatacellParameter>();
+    enabled_param->support_duplicate_ = true;
+    auto enabled_graph = GraphInterface::MakeInstance(enabled_param, common_param);
+    REQUIRE(enabled_graph->GetDuplicateTracker() != nullptr);
+
+    enabled_graph->SetDuplicateId(0, 1);
+    REQUIRE(disabled_graph->GetGroupId(3) == 3);
+    REQUIRE(enabled_graph->GetGroupId(0) == 0);
+    REQUIRE(enabled_graph->GetGroupId(1) == 0);
+    REQUIRE(enabled_graph->GetDuplicateIds(1) == std::vector<InnerIdType>{0});
 }

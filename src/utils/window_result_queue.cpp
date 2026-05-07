@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -17,7 +16,7 @@
 
 namespace vsag {
 
-constexpr static int64_t DEFAULT_WATCH_WINDOW_SIZE = 20;
+static constexpr int64_t DEFAULT_WATCH_WINDOW_SIZE = 20;
 
 WindowResultQueue::WindowResultQueue() {
     queue_.resize(DEFAULT_WATCH_WINDOW_SIZE);
@@ -25,16 +24,21 @@ WindowResultQueue::WindowResultQueue() {
 
 void
 WindowResultQueue::Push(float value) {
-    size_t window_size = queue_.size();
-    queue_[count_ % window_size] = value;
-    count_++;
+    std::lock_guard<std::mutex> lock(queue_mutex_);
+    uint64_t pos = count_++;
+    uint64_t window_size = queue_.size();
+    queue_[pos % window_size] = value;
 }
 
 float
 WindowResultQueue::GetAvgResult() const {
-    size_t statistic_num = std::min(count_, queue_.size());
+    std::lock_guard<std::mutex> lock(queue_mutex_);
+    uint64_t statistic_num = std::min<uint64_t>(count_, queue_.size());
+    if (statistic_num == 0) {
+        return 0.0F;
+    }
     float result = 0;
-    for (int i = 0; i < statistic_num; i++) {
+    for (uint64_t i = 0; i < statistic_num; i++) {
         result += queue_[i];
     }
     return result / static_cast<float>(statistic_num);

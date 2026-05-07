@@ -25,7 +25,9 @@
 #include "impl/allocator/safe_allocator.h"
 #include "impl/cluster/kmeans_cluster.h"
 #include "inner_string_params.h"
+#include "query_context.h"
 #include "utils/util_functions.h"
+#include "vsag_exception.h"
 
 namespace vsag {
 
@@ -90,7 +92,7 @@ Vector<BucketIdType>
 IVFNearestPartition::ClassifyDatas(const void* datas,
                                    int64_t count,
                                    BucketIdType buckets_per_data,
-                                   Statistics& stats) const {
+                                   QueryContext* ctx) const {
     std::mutex dist_cmp_reduce_mutex;
     uint32_t dist_cmp = 0;
     Vector<BucketIdType> result(buckets_per_data * count, -1, this->allocator_);
@@ -100,8 +102,9 @@ IVFNearestPartition::ClassifyDatas(const void* datas,
             ->Float32Vectors(reinterpret_cast<const float*>(datas) + i * this->dim_)
             ->NumElements(1)
             ->Owner(false);
-        auto search_param = fmt::format(
-            SEARCH_PARAM_TEMPLATE_STR, std::max(10L, static_cast<int64_t>(buckets_per_data * 1.2)));
+        auto search_param =
+            fmt::format(SEARCH_PARAM_TEMPLATE_STR,
+                        std::max<int64_t>(10, static_cast<int64_t>(buckets_per_data * 1.2)));
         FilterPtr filter = nullptr;
         auto search_result =
             this->route_index_ptr_->KnnSearch(query, buckets_per_data, search_param, filter);
@@ -130,7 +133,9 @@ IVFNearestPartition::ClassifyDatas(const void* datas,
         }
     }
 
-    stats.dist_cmp.fetch_add(dist_cmp, std::memory_order_relaxed);
+    if (ctx != nullptr and ctx->stats != nullptr) {
+        ctx->stats->dist_cmp.fetch_add(dist_cmp, std::memory_order_relaxed);
+    }
 
     return std::move(result);
 }
@@ -158,9 +163,18 @@ IVFNearestPartition::factory_router_index(const IndexCommonParam& common_param) 
 }
 void
 IVFNearestPartition::GetCentroid(BucketIdType bucket_id, Vector<float>& centroid) {
-    if (!is_trained_ || bucket_id >= bucket_count_) {
-        throw std::runtime_error("Invalid bucket_id or partition not trained");
+    if (!is_trained_) {
+        throw VsagException(ErrorType::WRONG_STATUS, "Partition not trained");
+    }
+    if (bucket_id >= bucket_count_) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "Invalid bucket_id");
     }
     this->route_index_ptr_->GetCodeByInnerId(bucket_id, (uint8_t*)centroid.data());
+}
+
+[[nodiscard]] int64_t
+IVFNearestPartition::GetMemoryUsage() const {
+    return static_cast<int64_t>(sizeof(IVFNearestPartition) +
+                                this->route_index_ptr_->GetMemoryUsage());
 }
 }  // namespace vsag

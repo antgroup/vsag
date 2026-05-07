@@ -29,7 +29,7 @@ namespace vsag {
  */
 struct Binary {
     std::shared_ptr<int8_t[]> data;  ///< The binary data.
-    size_t size = 0;                 ///< The size of the binary data.
+    uint64_t size;                   ///< The size of the binary data.
 };
 
 /**
@@ -63,10 +63,12 @@ public:
      */
     Binary
     Get(const std::string& name) const {
-        if (data_.find(name) == data_.end()) {
-            return Binary();
+        auto it = data_.find(name);
+        if (it == data_.end()) {
+            return {nullptr, 0};
         }
-        return data_.at(name);
+
+        return it->second;
     }
 
     /**

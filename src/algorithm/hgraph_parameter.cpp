@@ -91,6 +91,7 @@ HGraphParameter::FromJson(const JsonType& json) {
         if (graph_param != nullptr) {
             hierarchical_graph_param->remove_flag_bit_ = graph_param->remove_flag_bit_;
             hierarchical_graph_param->support_delete_ = graph_param->support_remove_;
+            hierarchical_graph_param->use_reverse_edges_ = graph_param->use_reverse_edges_;
         } else {
             hierarchical_graph_param->support_delete_ = false;
         }
@@ -120,6 +121,9 @@ HGraphParameter::FromJson(const JsonType& json) {
 
     if (json.Contains(SUPPORT_DUPLICATE)) {
         this->support_duplicate = json[SUPPORT_DUPLICATE].GetBool();
+        if (this->bottom_graph_param != nullptr) {
+            this->bottom_graph_param->support_duplicate_ = this->support_duplicate;
+        }
     }
     if (json.Contains(SUPPORT_TOMBSTONE)) {
         this->support_tombstone = json[SUPPORT_TOMBSTONE].GetBool();
@@ -132,11 +136,13 @@ HGraphParameter::ToJson() const {
     json[TYPE_KEY].SetString(INDEX_TYPE_HGRAPH);
 
     json[HGRAPH_USE_ELP_OPTIMIZER_KEY].SetBool(this->use_elp_optimizer);
+    json[HGRAPH_IGNORE_REORDER_KEY].SetBool(this->ignore_reorder);
     json[BASE_CODES_KEY].SetJson(this->base_codes_param->ToJson());
     json[GRAPH_KEY].SetJson(this->bottom_graph_param->ToJson());
     json[EF_CONSTRUCTION_KEY].SetInt(this->ef_construction);
     json[ALPHA_KEY].SetFloat(this->alpha);
     json[SUPPORT_DUPLICATE].SetBool(this->support_duplicate);
+    json[TRAIN_SAMPLE_COUNT_KEY].SetInt(this->train_sample_count);
     return json;
 }
 
@@ -198,13 +204,12 @@ HGraphSearchParameters::FromJson(const std::string& json_string) {
         fmt::format(
             "parameters[{}] must contains {}", INDEX_TYPE_HGRAPH, HGRAPH_PARAMETER_EF_RUNTIME));
     obj.ef_search = params[INDEX_TYPE_HGRAPH][HGRAPH_PARAMETER_EF_RUNTIME].GetInt();
+    if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_PARAMETER_HOPS_LIMIT)) {
+        obj.hops_limit = params[INDEX_TYPE_HGRAPH][HGRAPH_PARAMETER_HOPS_LIMIT].GetInt();
+    }
     if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_USE_EXTRA_INFO_FILTER)) {
         obj.use_extra_info_filter =
             params[INDEX_TYPE_HGRAPH][HGRAPH_USE_EXTRA_INFO_FILTER].GetBool();
-    }
-
-    if (params[INDEX_TYPE_HGRAPH].Contains(SEARCH_PARAM_FACTOR)) {
-        obj.topk_factor = params[INDEX_TYPE_HGRAPH][SEARCH_PARAM_FACTOR].GetFloat();
     }
 
     return obj;

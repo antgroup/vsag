@@ -21,6 +21,7 @@
 #include "graph_interface.h"
 #include "impl/elias_fano_encoder.h"
 #include "io/memory_block_io.h"
+#include "sparse_duplicate_tracker.h"
 
 namespace vsag {
 
@@ -43,12 +44,14 @@ public:
     void
     GetNeighbors(InnerIdType id, Vector<InnerIdType>& neighbor_ids) const override;
 
+    [[nodiscard]] bool
+    CheckIdExists(InnerIdType id) const override;
+
     void
     Resize(InnerIdType new_size) override;
 
     void
     Prefetch(InnerIdType id, uint32_t neighbor_i) override {
-        // Not supposed to use
     }
 
     void
@@ -56,6 +59,17 @@ public:
 
     void
     Deserialize(StreamReader& reader) override;
+
+    int64_t
+    GetMemoryUsage() const override;
+
+    Vector<InnerIdType>
+    GetIds() const override;
+
+    DuplicateTrackerPtr
+    CreateDuplicateTracker() override {
+        return std::make_shared<SparseDuplicateTracker>(allocator_);
+    }
 
 private:
     Allocator* const allocator_{nullptr};

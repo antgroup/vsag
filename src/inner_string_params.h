@@ -30,6 +30,7 @@ const char* const INDEX_TYPE_PYRAMID = "pyramid";
 
 const char* const TYPE_KEY = "type";
 const char* const USE_REORDER_KEY = "use_reorder";
+const char* const USE_QUANTIZATION = "use_quantization";
 const char* const EXTRA_INFO_KEY = "extra_info";
 const char* const USE_ATTRIBUTE_FILTER_KEY = "use_attribute_filter";
 const char* const BUILD_THREAD_COUNT_KEY = "build_thread_count";
@@ -44,6 +45,7 @@ const char* const ATTR_PARAMS_KEY = "attr_params";
 const char* const HGRAPH_USE_ELP_OPTIMIZER_KEY = "use_elp_optimizer";
 const char* const HGRAPH_IGNORE_REORDER_KEY = "ignore_reorder";
 const char* const HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY = "build_by_base";
+const char* const HGRAPH_USE_REVERSE_EDGES_KEY = "use_reverse_edges";
 const char* const GRAPH_KEY = "graph";
 const char* const ALPHA_KEY = "alpha";
 
@@ -82,17 +84,20 @@ const char* const QUANTIZATION_TYPE_VALUE_TQ = "tq";
 const char* const TRANSFORMER_TYPE_VALUE_PCA = "pca";
 const char* const TRANSFORMER_TYPE_VALUE_ROM = "rom";
 const char* const TRANSFORMER_TYPE_VALUE_FHT = "fht";
+const char* const TRANSFORMER_TYPE_VALUE_MRLE = "mrle";
 const char* const TRANSFORMER_TYPE_VALUE_RESIDUAL = "residual";
 const char* const TRANSFORMER_TYPE_VALUE_NORMALIZE = "normalize";
 
 // vector transformer param
 const char* const INPUT_DIM_KEY = "input_dim";
 const char* const PCA_DIM_KEY = "pca_dim";
+const char* const MRLE_DIM_KEY = "mrle_dim";
 const char* const USE_FHT_KEY = "use_fht";
 
 // quantization param
 const char* const TQ_CHAIN_KEY = "tq_chain";
 const char* const RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY = "rabitq_bits_per_dim_query";
+const char* const RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY = "rabitq_bits_per_dim_base";
 const char* const SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE_KEY = "sq4_uniform_trunc_rate";
 const char* const PRODUCT_QUANTIZATION_DIM_KEY = "pq_dim";
 const char* const PRODUCT_QUANTIZATION_BITS_KEY = "pq_bits";
@@ -105,6 +110,10 @@ const char* const SPARSE_TERM_PRUNE_RATIO = "term_prune_ratio";
 const char* const SPARSE_TERM_ID_LIMIT = "term_id_limit";
 const char* const SPARSE_WINDOW_SIZE = "window_size";
 const char* const SPARSE_DESERIALIZE_WITHOUT_FOOTER = "deserialize_without_footer";
+const char* const SPARSE_DESERIALIZE_WITHOUT_BUFFER = "deserialize_without_buffer";
+const char* const SPARSE_USE_TERM_LISTS_HEAP_INSERT = "use_term_lists_heap_insert";
+const char* const SPARSE_AVG_DOC_TERM_LENGTH = "avg_doc_term_length";
+const char* const SPARSE_REMAP_TERM_IDS = "remap_term_ids";
 
 // graph param value
 const char* const GRAPH_PARAM_MAX_DEGREE_KEY = "max_degree";
@@ -129,7 +138,8 @@ const char* const IVF_TRAIN_TYPE_KEY = "ivf_train_type";
 const char* const IVF_TRAIN_TYPE_RANDOM = "random";
 const char* const IVF_TRAIN_TYPE_KMEANS = "kmeans";
 
-const char* const IVF_TRAIN_SAMPLE_COUNT_KEY = "ivf_train_sample_count";
+const char* const TRAIN_SAMPLE_COUNT_KEY =
+    "train_sample_count";  // used after v0.18 for both Hgraph and IVF
 const char* const IVF_PARTITION_STRATEGY_PARAMS_KEY = "partition_strategy";
 const char* const IVF_PARTITION_STRATEGY_TYPE_KEY = "partition_strategy_type";
 const char* const IVF_PARTITION_STRATEGY_TYPE_NEAREST = "ivf";
@@ -144,12 +154,14 @@ const char* const SPARSE_VECTOR_DATA_CELL = "sparse_vector_data_cell";
 
 // for pyramid index
 const char* const NO_BUILD_LEVELS = "no_build_levels";
+const char* const INDEX_MIN_SIZE = "index_min_size";
 
 const char* const GRAPH_SUPPORT_REMOVE = "support_remove";
 const char* const REMOVE_FLAG_BIT = "remove_flag_bit";
 const char* const HOLD_MOLDS = "hold_molds";
 const char* const SUPPORT_DUPLICATE = "support_duplicate";
 const char* const SUPPORT_TOMBSTONE = "support_tombstone";
+const char* const SUPPORT_AUTOTUNE = "support_autotune";
 
 const char* const DATACELL_OFFSETS = "datacell_offsets";
 const char* const DATACELL_SIZES = "datacell_sizes";
@@ -164,6 +176,8 @@ const char* const SEARCH_PARAM_FACTOR = "factor";
 const char* const SEARCH_PARALLELISM = "parallelism";
 const char* const SEARCH_MAX_TIME_COST_MS = "timeout_ms";
 const char* const SPARSE_N_CANDIDATE = "n_candidate";
+
+const char* const DISKANN_SUPPORT_CALC_DISTANCE_BY_ID = "support_calc_distance_by_id";
 
 const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"INDEX_TYPE_HGRAPH", INDEX_TYPE_HGRAPH},
@@ -236,6 +250,7 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"SEARCH_PARALLELISM", SEARCH_PARALLELISM},
     {"GRAPH_SUPPORT_REMOVE", GRAPH_SUPPORT_REMOVE},
     {"REMOVE_FLAG_BIT", REMOVE_FLAG_BIT},
+    {"SUPPORT_DUPLICATE", SUPPORT_DUPLICATE},
     {"HOLD_MOLDS", HOLD_MOLDS},
     {"IVF_PARTITION_STRATEGY_TYPE_GNO_IMI", IVF_PARTITION_STRATEGY_TYPE_GNO_IMI},
     {"STORE_RAW_VECTOR_KEY", STORE_RAW_VECTOR_KEY},

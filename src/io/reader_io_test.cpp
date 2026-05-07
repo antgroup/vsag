@@ -15,15 +15,15 @@
 
 #include "reader_io.h"
 
-#include <catch2/catch_test_macros.hpp>
 #include <memory>
 
 #include "basic_io_test.h"
 #include "reader_io_parameter.h"
+#include "unittest.h"
 
 class TestReader : public vsag::Reader {
 public:
-    TestReader(uint8_t* data, size_t size) : data_(data), size_(size) {
+    TestReader(uint8_t* data, uint64_t size) : data_(data), size_(size) {
     }
 
     void
@@ -44,7 +44,7 @@ public:
 
 private:
     const uint8_t* data_{nullptr};
-    size_t size_{0};
+    uint64_t size_{0};
 };
 
 TEST_CASE("ReaderIO Read Test", "[ut][ReaderIO]") {

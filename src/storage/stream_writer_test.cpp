@@ -15,21 +15,19 @@
 
 #include "stream_writer.h"
 
-#include <catch2/catch_test_macros.hpp>
-#include <catch2/generators/catch_generators.hpp>
 #include <cstdint>
 #include <iostream>
 
-#include "fixtures.h"
 #include "impl/allocator/default_allocator.h"
+#include "unittest.h"
 
 TEST_CASE("BufferStreamWriter", "[ut][stream_reader]") {
     auto* buffer = new char[4096]{};
-    BufferStreamWriter writer(buffer);
+    vsag::BufferStreamWriter writer(buffer);
 
     SECTION("float") {
         float number = 1.234567;
-        StreamWriter::WriteObj(writer, number);
+        vsag::StreamWriter::WriteObj(writer, number);
         float number2 = 0.0F;
         memcpy(&number2, buffer, sizeof(float));
         REQUIRE(number == number2);
@@ -37,7 +35,7 @@ TEST_CASE("BufferStreamWriter", "[ut][stream_reader]") {
 
     SECTION("string") {
         std::string text{"hello world!"};
-        StreamWriter::WriteString(writer, text);
+        vsag::StreamWriter::WriteString(writer, text);
 
         struct {
             uint64_t size;
@@ -51,12 +49,12 @@ TEST_CASE("BufferStreamWriter", "[ut][stream_reader]") {
 
     SECTION("empty string") {
         std::string empty_text;
-        CHECK_NOTHROW(StreamWriter::WriteString(writer, empty_text));
+        CHECK_NOTHROW(vsag::StreamWriter::WriteString(writer, empty_text));
     }
 
     SECTION("std::vector") {
         std::vector<float> numbers{1.1, 2.2, 3.3, 4.4, 5.5};
-        StreamWriter::WriteVector(writer, numbers);
+        vsag::StreamWriter::WriteVector(writer, numbers);
 
         struct {
             uint64_t size;
@@ -74,7 +72,7 @@ TEST_CASE("BufferStreamWriter", "[ut][stream_reader]") {
 
     SECTION("empty std::vector") {
         std::vector<float> numbers{};
-        CHECK_NOTHROW(StreamWriter::WriteVector(writer, numbers));
+        CHECK_NOTHROW(vsag::StreamWriter::WriteVector(writer, numbers));
     }
 
     SECTION("vsag::Vector") {
@@ -84,7 +82,7 @@ TEST_CASE("BufferStreamWriter", "[ut][stream_reader]") {
         numbers[1] = 3;
         numbers[2] = 5;
         numbers[3] = 7;
-        StreamWriter::WriteVector(writer, numbers);
+        vsag::StreamWriter::WriteVector(writer, numbers);
 
         struct {
             uint64_t size;
@@ -101,7 +99,7 @@ TEST_CASE("BufferStreamWriter", "[ut][stream_reader]") {
 
     SECTION("empty vsag::Vector") {
         std::vector<float> numbers{};
-        CHECK_NOTHROW(StreamWriter::WriteVector(writer, numbers));
+        CHECK_NOTHROW(vsag::StreamWriter::WriteVector(writer, numbers));
     }
 
     delete[] buffer;

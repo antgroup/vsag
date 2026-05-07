@@ -64,7 +64,7 @@ BruteForce::Train(const DatasetPtr& data) {
 }
 
 std::vector<int64_t>
-BruteForce::Add(const DatasetPtr& data) {
+BruteForce::Add(const DatasetPtr& data, AddMode mode) {
     std::vector<int64_t> failed_ids;
     auto base_dim = data->GetDim();
     CHECK_ARGUMENT(base_dim == dim_,
@@ -118,12 +118,12 @@ BruteForce::Add(const DatasetPtr& data) {
                 continue;
             }
         }
-        if (this->build_pool_ != nullptr) {
-            auto future = this->build_pool_->GeneralEnqueue(add_func,
-                                                            vectors + j * dim_,
-                                                            label,
-                                                            attrs == nullptr ? nullptr : attrs + j,
-                                                            extra_info + j * extra_info_size);
+        if (this->thread_pool_ != nullptr) {
+            auto future = this->thread_pool_->GeneralEnqueue(add_func,
+                                                             vectors + j * dim_,
+                                                             label,
+                                                             attrs == nullptr ? nullptr : attrs + j,
+                                                             extra_info + j * extra_info_size);
             futures.emplace_back(std::move(future));
         } else {
             if (auto add_res = add_func(vectors + j * dim_,
@@ -136,7 +136,7 @@ BruteForce::Add(const DatasetPtr& data) {
         }
     }
 
-    if (this->build_pool_ != nullptr) {
+    if (this->thread_pool_ != nullptr) {
         for (auto& future : futures) {
             if (auto reply = future.get(); reply.has_value()) {
                 failed_ids.emplace_back(reply.value());
@@ -146,34 +146,44 @@ BruteForce::Add(const DatasetPtr& data) {
     return failed_ids;
 }
 
-bool
-BruteForce::Remove(int64_t label) {
+uint32_t
+BruteForce::Remove(const std::vector<int64_t>& ids, RemoveMode mode) {
     CHECK_ARGUMENT(not use_attribute_filter_,
                    "remove is not supported when use_attribute_filter is true");
 
-    std::scoped_lock lock(this->add_mutex_, this->label_lookup_mutex_);
-    const auto last_inner_id = static_cast<InnerIdType>(this->total_count_ - 1);
-    const auto inner_id = this->label_table_->GetIdByLabel(label);
-
-    CHECK_ARGUMENT(inner_id <= last_inner_id, "the element to be remove is invalid");
-
-    const auto last_label = this->label_table_->GetLabelById(last_inner_id);
-    this->label_table_->Remove(label);
-    --this->label_table_->total_count_;
-
-    if (inner_id < last_inner_id) {
-        Vector<float> data(dim_, allocator_);
-        GetVectorByInnerId(last_inner_id, data.data());
-
-        this->label_table_->Remove(last_label);
-        --this->label_table_->total_count_;
-
-        this->inner_codes_->InsertVector(data.data(), inner_id);
-        this->label_table_->Insert(inner_id, last_label);
+    uint32_t delete_count = 0;
+    if (mode == RemoveMode::MARK_REMOVE) {
+        std::scoped_lock label_lock(this->label_lookup_mutex_);
+        delete_count = this->label_table_->MarkRemove(ids);
+        delete_count_ += delete_count;
+        return delete_count;
     }
 
-    this->total_count_--;
-    return true;
+    std::scoped_lock lock(this->add_mutex_, this->label_lookup_mutex_);
+    for (auto label : ids) {
+        const auto last_inner_id = static_cast<InnerIdType>(this->total_count_ - 1);
+        const auto inner_id = this->label_table_->GetIdByLabel(label);
+
+        CHECK_ARGUMENT(inner_id <= last_inner_id, "the element to be remove is invalid");
+
+        const auto last_label = this->label_table_->GetLabelById(last_inner_id);
+        this->label_table_->MarkRemove(label);
+        --this->label_table_->total_count_;
+
+        if (inner_id < last_inner_id) {
+            Vector<float> data(dim_, allocator_);
+            GetVectorByInnerId(last_inner_id, data.data());
+
+            this->label_table_->MarkRemove(last_label);
+            --this->label_table_->total_count_;
+
+            this->inner_codes_->InsertVector(data.data(), inner_id);
+            this->label_table_->Insert(inner_id, last_label);
+        }
+
+        this->total_count_--;
+    }
+    return 1;
 }
 
 DatasetPtr
@@ -199,10 +209,18 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
     DistHeapPtr heap = nullptr;
     ExecutorPtr executor = nullptr;
     Filter* attr_filter = nullptr;
-    Filter* filter = nullptr;
+
+    auto combined_filter = std::make_shared<CombinedFilter>();
+    combined_filter->AppendFilter(this->label_table_->GetDeletedIdsFilter());
     if (request.filter_ != nullptr) {
-        filter = request.filter_.get();
+        combined_filter->AppendFilter(
+            std::make_shared<InnerIdWrapperFilter>(request.filter_, *this->label_table_));
     }
+    FilterPtr ft = nullptr;
+    if (not combined_filter->IsEmpty()) {
+        ft = combined_filter;
+    }
+
     if (request.enable_attribute_filter_) {
         auto& schema = this->attr_filter_index_->field_type_map_;
         auto expr = AstParse(request.attribute_filter_str_, &schema);
@@ -228,7 +246,7 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
             if (attr_filter != nullptr and not attr_filter->CheckValid(i)) {
                 continue;
             }
-            if (filter == nullptr or filter->CheckValid(this->label_table_->GetLabelById(i))) {
+            if (ft == nullptr or ft->CheckValid(i)) {
                 inner_codes_->Query(&dist, computer, &i, 1);
                 ++dist_cmp_local;
                 cur_heap->Push(dist, i);
@@ -238,7 +256,7 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
         dist_cmp.fetch_add(dist_cmp_local, std::memory_order_relaxed);
     };
 
-    if (parallel_count == 1) {
+    if (parallel_count == 1 || this->thread_pool_ == nullptr) {
         search_func(0, total_count_, heaps[0]);
         heap = heaps[0];
     } else {
@@ -247,7 +265,7 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
         for (auto i = 0; i < parallel_count; ++i) {
             auto start = i * chunk_size;
             auto end = std::min(start + chunk_size, total_count_);
-            auto future = this->build_pool_->GeneralEnqueue(search_func, start, end, heaps[i]);
+            auto future = this->thread_pool_->GeneralEnqueue(search_func, start, end, heaps[i]);
             futures.emplace_back(std::move(future));
         }
         for (auto& future : futures) {
@@ -308,7 +326,9 @@ BruteForce::RangeSearch(const vsag::DatasetPtr& query,
 }
 
 float
-BruteForce::CalcDistanceById(const float* vector, int64_t id) const {
+BruteForce::CalcDistanceById(const float* vector,
+                             int64_t id,
+                             bool calculate_precise_distance) const {
     auto computer = this->inner_codes_->FactoryComputer(vector);
     float result = 0.0F;
     InnerIdType inner_id = this->label_table_->GetIdByLabel(id);
@@ -384,15 +404,15 @@ BruteForce::Deserialize(StreamReader& reader) {
         this->inner_codes_->Deserialize(buffer_reader);
         this->label_table_->Deserialize(buffer_reader);
     }
-
-    // post serialize procedure
+    this->cal_memory_usage();
 }
 
 void
 BruteForce::InitFeatures() {
     // About Train
     auto name = this->inner_codes_->GetQuantizerName();
-    if (name != QUANTIZATION_TYPE_VALUE_FP32 and name != QUANTIZATION_TYPE_VALUE_BF16) {
+    if (name != QUANTIZATION_TYPE_VALUE_FP32 and name != QUANTIZATION_TYPE_VALUE_BF16 and
+        name != QUANTIZATION_TYPE_VALUE_FP16) {
         this->index_feature_list_->SetFeature(IndexFeature::NEED_TRAIN);
     } else {
         this->index_feature_list_->SetFeatures({IndexFeature::SUPPORT_ADD_FROM_EMPTY,
@@ -438,6 +458,7 @@ BruteForce::InitFeatures() {
     // others
     this->index_feature_list_->SetFeatures({
         IndexFeature::SUPPORT_ESTIMATE_MEMORY,
+        IndexFeature::SUPPORT_GET_MEMORY_USAGE,
         IndexFeature::SUPPORT_CHECK_ID_EXIST,
         IndexFeature::SUPPORT_CLONE,
     });
@@ -601,6 +622,7 @@ BruteForce::resize(uint64_t new_size) {
     if (cur_size < new_size_power_2) {
         this->inner_codes_->Resize(new_size_power_2);
         this->max_capacity_.store(new_size_power_2);
+        this->cal_memory_usage();
     }
 }
 
@@ -633,6 +655,28 @@ BruteForce::UpdateAttribute(int64_t id,
 void
 BruteForce::GetAttributeSetByInnerId(InnerIdType inner_id, AttributeSet* attr) const {
     this->attr_filter_index_->GetAttribute(0, inner_id, attr);
+}
+
+void
+BruteForce::cal_memory_usage() {
+    auto memory_usage = this->inner_codes_->GetMemoryUsage();
+    memory_usage += sizeof(BruteForce);
+    memory_usage += this->label_table_->GetMemoryUsage();
+    std::unique_lock lock(this->memory_usage_mutex_);
+    this->current_memory_usage_.store(memory_usage);
+}
+
+int64_t
+BruteForce::GetMemoryUsage() const {
+    int64_t memory = 0;
+    {
+        std::shared_lock lock(this->memory_usage_mutex_);
+        memory = this->current_memory_usage_.load();
+    }
+    if (this->attr_filter_index_ != nullptr) {
+        memory += this->attr_filter_index_->GetMemoryUsage();
+    }
+    return memory;
 }
 
 }  // namespace vsag

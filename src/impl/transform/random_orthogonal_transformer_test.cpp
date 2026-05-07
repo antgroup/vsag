@@ -15,14 +15,10 @@
 
 #include "random_orthogonal_transformer.h"
 
-#include <cblas.h>
-
-#include <catch2/catch_test_macros.hpp>
-
-#include "fixtures.h"
 #include "impl/allocator/safe_allocator.h"
+#include "impl/blas/blas_function.h"
 #include "storage/serialization_template_test.h"
-
+#include "unittest.h"
 using namespace vsag;
 
 void
@@ -71,20 +67,20 @@ TestOrthogonality(RandomOrthogonalMatrix& rom, uint64_t dim) {
 
     // compute Q ^ T * Q
     std::vector<float> result(dim * dim, 0.0);
-    cblas_sgemm(CblasRowMajor,
-                CblasTrans,
-                CblasNoTrans,
-                dim,
-                dim,
-                dim,
-                1.0f,
-                Q.data(),
-                dim,
-                Q.data(),
-                dim,
-                0.0f,
-                result.data(),
-                dim);
+    BlasFunction::Sgemm(BlasFunction::RowMajor,
+                        BlasFunction::Trans,
+                        BlasFunction::NoTrans,
+                        dim,
+                        dim,
+                        dim,
+                        1.0F,
+                        Q.data(),
+                        dim,
+                        Q.data(),
+                        dim,
+                        0.0F,
+                        result.data(),
+                        dim);
 
     // constructing unit matrices
     std::vector<float> identity(dim * dim, 0.0);
@@ -94,7 +90,7 @@ TestOrthogonality(RandomOrthogonalMatrix& rom, uint64_t dim) {
 
     // verify that Q ^ T * Q is close to the unit matrix
     REQUIRE(result.size() == identity.size());
-    for (size_t i = 0; i < result.size(); ++i) {
+    for (uint64_t i = 0; i < result.size(); ++i) {
         REQUIRE(std::fabs(result[i] - identity[i]) < 1e-4);
     }
 }
