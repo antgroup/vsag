@@ -19,6 +19,7 @@
 #include <fmt/format.h>
 
 #include <atomic>
+#include <chrono>
 #include <memory>
 #include <stdexcept>
 
@@ -38,7 +39,9 @@
 #include "io/reader_io_parameter.h"
 #include "storage/serialization.h"
 #include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
 #include "typing.h"
+#include "utils/open_addressing_hashmap.h"
 #include "utils/util_functions.h"
 #include "utils/visited_list.h"
 #include "vsag/options.h"
@@ -2612,6 +2615,678 @@ HGraph::cal_memory_usage() {
 
     std::unique_lock lock(this->memory_usage_mutex_);
     this->current_memory_usage_.store(static_cast<int64_t>(memory));
+}
+
+// ============================================================================
+// Build Cache implementation
+// ============================================================================
+
+// Cache file format constants
+static constexpr uint64_t BUILD_CACHE_MAGIC = 0x5653414743484500ULL;  // "VSAGCHE\0"
+static constexpr uint32_t BUILD_CACHE_VERSION = 1;
+static constexpr uint64_t BUILD_CACHE_HEADER_SIZE = 128;
+
+bool
+HGraph::SupportsBuildCache() const {
+    return true;
+}
+
+tl::expected<void, Error>
+HGraph::ExportBuildCache(std::ostream& out_stream) const {
+    try {
+        IOStreamWriter writer(out_stream);
+
+        // Section 0: Header (128 bytes)
+        // Write raw header fields in binary
+        uint64_t magic = BUILD_CACHE_MAGIC;
+        uint32_t version = BUILD_CACHE_VERSION;
+        uint64_t node_count = static_cast<uint64_t>(this->GetNumElements());
+        uint32_t max_degree = this->bottom_graph_->MaximumDegree();
+
+        // feature_id_len semantics:
+        //   0 = label-based cache (labels stored as int64)
+        //   0xFFFFFFFF = variable-length FeatureID cache (length-prefixed strings)
+        // Currently only label-based export is supported from the index itself.
+        uint32_t feature_id_len = 0;  // label-based
+
+        uint64_t build_param_hash = ComputeBuildParamHash();
+        uint64_t create_time = static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::seconds>(
+                std::chrono::system_clock::now().time_since_epoch())
+                .count());
+
+        StreamWriter::WriteObj(writer, magic);
+        StreamWriter::WriteObj(writer, version);
+        StreamWriter::WriteObj(writer, node_count);
+        StreamWriter::WriteObj(writer, max_degree);
+        StreamWriter::WriteObj(writer, feature_id_len);
+        StreamWriter::WriteObj(writer, build_param_hash);
+        StreamWriter::WriteObj(writer, create_time);
+
+        // Reserved bytes to fill up to 128 bytes
+        // Already written: 8+4+8+4+4+8+8 = 44 bytes
+        uint64_t reserved_size = BUILD_CACHE_HEADER_SIZE - 44;
+        std::vector<char> reserved(reserved_size, 0);
+        writer.Write(reserved.data(), reserved_size);
+
+        // Section 1: Label list (int64 for label-based cache)
+        // When feature_id_len == 0, each entry is sizeof(LabelType) = 8 bytes.
+        const auto& labels = this->label_table_->label_table_;
+        for (InnerIdType id = 0; id < static_cast<InnerIdType>(node_count); ++id) {
+            LabelType label = (id < labels.size()) ? labels[id] : LabelType(-1);
+            StreamWriter::WriteObj(writer, label);
+        }
+
+        // Section 2: Neighbor lists from bottom_graph_
+        ExportOldNeighbors(writer);
+
+        return {};
+    } catch (const std::exception& e) {
+        return tl::unexpected(Error(ErrorType::INTERNAL_ERROR,
+                                    fmt::format("ExportBuildCache failed: {}", e.what())));
+    }
+}
+
+tl::expected<std::vector<int64_t>, Error>
+HGraph::BuildWithCache(const DatasetPtr& base,
+                       std::istream& in_stream,
+                       const BuildCacheOptions& options) {
+    auto start_time = std::chrono::steady_clock::now();
+
+    // Reset stats
+    build_cache_stats_ = BuildCacheStats{};
+
+    if (!options.enable_warm_start) {
+        // Fallback to normal Build
+        return this->Build(base);
+    }
+
+    CHECK_ARGUMENT(GetNumElements() == 0, "index is not empty, cannot BuildWithCache");
+
+    try {
+        IOStreamReader reader(in_stream);
+
+        // Step 1: Read and validate header
+        uint64_t magic = 0;
+        StreamReader::ReadObj(reader, magic);
+        if (magic != BUILD_CACHE_MAGIC) {
+            return tl::unexpected(Error(
+                ErrorType::INVALID_BINARY,
+                fmt::format("Invalid cache file: magic mismatch, expected 0x{:016X}, got 0x{:016X}",
+                            BUILD_CACHE_MAGIC, magic)));
+        }
+
+        uint32_t version = 0;
+        StreamReader::ReadObj(reader, version);
+        if (version != BUILD_CACHE_VERSION) {
+            return tl::unexpected(Error(
+                ErrorType::INVALID_BINARY,
+                fmt::format("Cache version incompatible: expected v{}, got v{}",
+                            BUILD_CACHE_VERSION, version)));
+        }
+
+        uint64_t node_count = 0;
+        StreamReader::ReadObj(reader, node_count);
+
+        uint32_t cached_max_degree = 0;
+        StreamReader::ReadObj(reader, cached_max_degree);
+
+        uint32_t feature_id_len = 0;
+        StreamReader::ReadObj(reader, feature_id_len);
+
+        uint64_t cached_param_hash = 0;
+        StreamReader::ReadObj(reader, cached_param_hash);
+
+        uint64_t create_time = 0;
+        StreamReader::ReadObj(reader, create_time);
+        // Suppress unused warning
+        (void)create_time;
+
+        // Skip reserved bytes
+        uint64_t reserved_size = BUILD_CACHE_HEADER_SIZE - 44;
+        std::vector<char> reserved(reserved_size);
+        reader.Read(reserved.data(), reserved_size);
+
+        // Validate build_param_hash
+        uint64_t current_param_hash = ComputeBuildParamHash();
+        if (cached_param_hash != current_param_hash) {
+            return tl::unexpected(Error(
+                ErrorType::INVALID_BINARY,
+                fmt::format("Build params changed: old_hash=0x{:016X}, new_hash=0x{:016X}",
+                            cached_param_hash, current_param_hash)));
+        }
+
+        // Validate max_degree
+        if (cached_max_degree != this->bottom_graph_->MaximumDegree()) {
+            return tl::unexpected(Error(
+                ErrorType::INVALID_BINARY,
+                fmt::format("max_degree mismatch: cache={}, current={}",
+                            cached_max_degree, this->bottom_graph_->MaximumDegree())));
+        }
+
+        build_cache_stats_.cached_nodes = node_count;
+
+        auto cache_loaded_time = std::chrono::steady_clock::now();
+
+        // Determine feature_id_len: from dataset FeatureIds or default LabelType size
+        const std::string* dataset_feature_ids = base->GetFeatureIds();
+        int64_t num_elements = base->GetNumElements();
+        build_cache_stats_.total_nodes = static_cast<uint64_t>(num_elements);
+
+        // feature_id_len semantics from cache header:
+        //   0 = label-based cache (labels stored as int64)
+        //   0xFFFFFFFF = variable-length FeatureID cache (length-prefixed strings)
+        //   other = fixed-length FeatureID (legacy, treated as variable-length)
+        bool use_feature_ids = (dataset_feature_ids != nullptr &&
+                                feature_id_len != 0);
+
+        // Step 2: Build mapping table 1 (FeatureID -> new inner_id) from new dataset
+        OpenAddressingHashMap<uint32_t> fid_to_new_id(
+            static_cast<uint64_t>(num_elements));
+
+        // Also need to Train and prepare the index structures
+        this->Train(base);
+
+        // Assign inner_ids and build label_table_
+        std::vector<int64_t> failed_ids;
+        auto inner_ids = this->get_unique_inner_ids(static_cast<InnerIdType>(num_elements));
+        this->resize(static_cast<uint64_t>(num_elements));
+
+        const auto* labels = base->GetIds();
+        for (int64_t j = 0; j < num_elements; ++j) {
+            InnerIdType inner_id = inner_ids[static_cast<uint32_t>(j)];
+            this->label_table_->Insert(inner_id, labels[j]);
+        }
+
+        // Insert vector data into flatten codes (required for graph_add_one refine)
+        for (int64_t j = 0; j < num_elements; ++j) {
+            InnerIdType inner_id = inner_ids[static_cast<uint32_t>(j)];
+            const void* vec_data = this->get_data(base, j);
+            this->basic_flatten_codes_->InsertVector(vec_data, inner_id);
+            if (this->use_reorder_) {
+                this->high_precise_codes_->InsertVector(vec_data, inner_id);
+            }
+            if (this->create_new_raw_vector_) {
+                this->raw_vector_->InsertVector(vec_data, inner_id);
+            }
+        }
+
+        // Build FeatureID -> new inner_id mapping
+        if (use_feature_ids) {
+            for (int64_t j = 0; j < num_elements; ++j) {
+                InnerIdType inner_id = inner_ids[static_cast<uint32_t>(j)];
+                fid_to_new_id.Insert(std::string(dataset_feature_ids[j]), inner_id);
+            }
+        }
+
+        // Step 3: Load mapping table 2 (old inner_id -> FeatureID) and old neighbor lists
+        std::vector<std::string> old_feature_ids;
+        std::vector<uint32_t> old_to_new;
+
+        if (use_feature_ids && feature_id_len == 0xFFFFFFFF) {
+            // Variable-length FeatureID cache: each entry is [uint32_t len][char[len] data]
+            old_feature_ids.resize(node_count);
+            for (uint64_t i = 0; i < node_count; ++i) {
+                uint32_t fid_len = 0;
+                StreamReader::ReadObj(reader, fid_len);
+                old_feature_ids[i].resize(fid_len);
+                reader.Read(old_feature_ids[i].data(), fid_len);
+            }
+        } else if (use_feature_ids) {
+            // Fixed-length FeatureID cache (legacy): read feature_id_len bytes per entry
+            LoadOldFeatureIds(reader, old_feature_ids, node_count, feature_id_len);
+        } else {
+            // Label-based cache: load labels as int64
+            old_feature_ids.resize(node_count);
+            for (uint64_t i = 0; i < node_count; ++i) {
+                LabelType label;
+                StreamReader::ReadObj(reader, label);
+                old_feature_ids[i] = std::to_string(label);
+            }
+        }
+
+        // Step 4: Load old neighbor lists
+        std::vector<std::vector<uint32_t>> old_neighbors;
+        LoadOldNeighbors(reader, old_neighbors, node_count, cached_max_degree);
+
+        auto neighbor_loaded_time = std::chrono::steady_clock::now();
+
+        // Step 5: Build mapping table 3 (old inner_id -> new inner_id)
+        if (use_feature_ids) {
+            BuildOldToNewMapping(old_feature_ids, fid_to_new_id, old_to_new);
+        } else {
+            // For label-based cache: old label -> new inner_id via label_table_
+            old_to_new.resize(node_count, std::numeric_limits<uint32_t>::max());
+            for (uint64_t old_id = 0; old_id < node_count; ++old_id) {
+                LabelType old_label = std::stoll(old_feature_ids[old_id]);
+                auto [found, new_id] = this->label_table_->TryGetIdByLabel(old_label);
+                if (found && !this->label_table_->IsRemoved(new_id)) {
+                    old_to_new[old_id] = new_id;
+                }
+                // else: remains UINT32_MAX (deleted)
+            }
+        }
+
+        // Release mapping table 1 (fid_to_new_id) and mapping table 2 (old_feature_ids) to free memory
+        {
+            OpenAddressingHashMap<uint32_t> empty_map(1);
+            fid_to_new_id = std::move(empty_map);
+        }
+        {
+            std::vector<std::string>().swap(old_feature_ids);
+        }
+
+        auto mapping_built_time = std::chrono::steady_clock::now();
+
+        // Step 6: Count hit/miss nodes
+        for (uint64_t old_id = 0; old_id < old_to_new.size(); ++old_id) {
+            if (old_to_new[old_id] != std::numeric_limits<uint32_t>::max()) {
+                build_cache_stats_.hit_nodes++;
+            }
+        }
+        build_cache_stats_.missed_nodes =
+            build_cache_stats_.total_nodes - build_cache_stats_.hit_nodes;
+
+        // Step 7: Normalize mapped neighbors
+        NormalizeMappedNeighbors(old_neighbors, options);
+
+        auto warm_start_apply_start = std::chrono::steady_clock::now();
+
+        // Step 8: Apply warm start neighbors and refine
+        ApplyWarmStartNeighbors(old_to_new, old_neighbors, options);
+
+        // Release mapping table 3 and old_neighbors
+        {
+            std::vector<uint32_t>().swap(old_to_new);
+        }
+        {
+            std::vector<std::vector<uint32_t>>().swap(old_neighbors);
+        }
+
+        auto end_time = std::chrono::steady_clock::now();
+
+        // Step 9: Generate route graphs (no cache, build from scratch)
+        // Route graphs are built during add_one_point calls which are part of
+        // the refine above. However, we need to ensure entry_point is set.
+        if (this->bottom_graph_->TotalCount() > 0) {
+            // The entry_point has been set during the process
+        }
+
+        auto duration_us = [](auto start, auto end) -> uint64_t {
+            return static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::microseconds>(end - start).count());
+        };
+
+        build_cache_stats_.cache_load_us = duration_us(start_time, cache_loaded_time);
+        build_cache_stats_.warm_start_apply_us = duration_us(warm_start_apply_start, end_time);
+        build_cache_stats_.cache_hit_rate =
+            (build_cache_stats_.total_nodes > 0)
+                ? static_cast<float>(build_cache_stats_.hit_nodes) /
+                      static_cast<float>(build_cache_stats_.total_nodes)
+                : 0.0F;
+
+        return failed_ids;
+    } catch (const std::exception& e) {
+        return tl::unexpected(Error(ErrorType::INTERNAL_ERROR,
+                                    fmt::format("BuildWithCache failed: {}", e.what())));
+    }
+}
+
+tl::expected<BuildCacheStats, Error>
+HGraph::GetBuildCacheStats() const {
+    return build_cache_stats_;
+}
+
+JsonType
+HGraph::SerializeBuildCacheHeader() const {
+    JsonType header;
+    header["magic"].SetInt(static_cast<int64_t>(BUILD_CACHE_MAGIC));
+    header["version"].SetInt(BUILD_CACHE_VERSION);
+    header["node_count"].SetInt(static_cast<int64_t>(this->GetNumElements()));
+    header["max_degree"].SetInt(static_cast<int64_t>(this->bottom_graph_->MaximumDegree()));
+    header["build_param_hash"].SetInt(static_cast<int64_t>(ComputeBuildParamHash()));
+    return header;
+}
+
+tl::expected<void, Error>
+HGraph::ValidateBuildCacheHeader(const JsonType& header) const {
+    // Validate magic
+    if (!header.Contains("magic") ||
+        static_cast<uint64_t>(header["magic"].GetInt()) != BUILD_CACHE_MAGIC) {
+        return tl::unexpected(
+            Error(ErrorType::INVALID_BINARY,
+                  fmt::format("Invalid cache file: magic mismatch, expected 0x{:016X}",
+                              BUILD_CACHE_MAGIC)));
+    }
+
+    // Validate version
+    if (!header.Contains("version") ||
+        static_cast<uint32_t>(header["version"].GetInt()) != BUILD_CACHE_VERSION) {
+        return tl::unexpected(
+            Error(ErrorType::INVALID_BINARY,
+                  fmt::format("Cache version incompatible: expected v{}, got v{}",
+                              BUILD_CACHE_VERSION,
+                              header.Contains("version") ? header["version"].GetInt() : -1)));
+    }
+
+    // Validate build_param_hash
+    if (header.Contains("build_param_hash")) {
+        uint64_t cached_hash = static_cast<uint64_t>(header["build_param_hash"].GetInt());
+        uint64_t current_hash = ComputeBuildParamHash();
+        if (cached_hash != current_hash) {
+            return tl::unexpected(
+                Error(ErrorType::INVALID_BINARY,
+                      fmt::format("Build params changed: old_hash=0x{:016X}, new_hash=0x{:016X}",
+                                  cached_hash, current_hash)));
+        }
+    }
+
+    return {};
+}
+
+void
+HGraph::ExportOldFeatureIds(StreamWriter& writer) const {
+    // Export labels as the FeatureID representation
+    // In the standard path, each label is an int64_t
+    const auto& labels = this->label_table_->label_table_;
+    uint64_t node_count = static_cast<uint64_t>(this->GetNumElements());
+    for (uint64_t id = 0; id < node_count; ++id) {
+        LabelType label = (id < labels.size()) ? labels[id] : LabelType(-1);
+        StreamWriter::WriteObj(writer, label);
+    }
+}
+
+void
+HGraph::ExportOldNeighbors(StreamWriter& writer) const {
+    uint64_t node_count = static_cast<uint64_t>(this->GetNumElements());
+    uint32_t max_degree = this->bottom_graph_->MaximumDegree();
+
+    for (uint64_t id = 0; id < node_count; ++id) {
+        Vector<InnerIdType> neighbors(this->allocator_);
+        this->bottom_graph_->GetNeighbors(static_cast<InnerIdType>(id), neighbors);
+
+        uint16_t degree = static_cast<uint16_t>(neighbors.size());
+        StreamWriter::WriteObj(writer, degree);
+
+        for (uint32_t j = 0; j < max_degree; ++j) {
+            uint32_t neighbor_id = (j < degree) ? static_cast<uint32_t>(neighbors[j]) : 0U;
+            StreamWriter::WriteObj(writer, neighbor_id);
+        }
+    }
+}
+
+void
+HGraph::LoadOldFeatureIds(StreamReader& reader,
+                          std::vector<std::string>& feature_ids,
+                          uint64_t node_count,
+                          uint32_t feature_id_len) {
+    feature_ids.resize(node_count);
+    std::vector<char> buffer(feature_id_len);
+    for (uint64_t i = 0; i < node_count; ++i) {
+        reader.Read(buffer.data(), feature_id_len);
+        feature_ids[i] = std::string(buffer.data(), feature_id_len);
+    }
+}
+
+void
+HGraph::LoadOldNeighbors(StreamReader& reader,
+                         std::vector<std::vector<uint32_t>>& neighbors,
+                         uint64_t node_count,
+                         uint32_t max_degree) {
+    neighbors.resize(node_count);
+    for (uint64_t id = 0; id < node_count; ++id) {
+        uint16_t degree = 0;
+        StreamReader::ReadObj(reader, degree);
+        neighbors[id].resize(max_degree);
+        for (uint32_t j = 0; j < max_degree; ++j) {
+            uint32_t neighbor_id = 0;
+            StreamReader::ReadObj(reader, neighbor_id);
+            neighbors[id][j] = neighbor_id;
+        }
+        // Trim to actual degree
+        if (degree < max_degree) {
+            neighbors[id].resize(degree);
+        }
+    }
+}
+
+void
+HGraph::BuildFeatureIdToNewIdMap(const DatasetPtr& base,
+                                 OpenAddressingHashMap<uint32_t>& fid_to_new_id) {
+    const std::string* feature_ids = base->GetFeatureIds();
+    if (feature_ids == nullptr) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "BuildWithCache requires FeatureIds in the dataset");
+    }
+    int64_t num_elements = base->GetNumElements();
+    const auto* labels = base->GetIds();
+
+    for (int64_t j = 0; j < num_elements; ++j) {
+        auto [success, id] = this->label_table_->TryGetIdByLabel(labels[j]);
+        if (success) {
+            fid_to_new_id.Insert(std::string(feature_ids[j]), id);
+        }
+    }
+}
+
+void
+HGraph::BuildOldToNewMapping(const std::vector<std::string>& old_feature_ids,
+                             const OpenAddressingHashMap<uint32_t>& fid_to_new_id,
+                             std::vector<uint32_t>& old_to_new) {
+    uint64_t node_count = old_feature_ids.size();
+    old_to_new.resize(node_count, std::numeric_limits<uint32_t>::max());
+
+    for (uint64_t old_id = 0; old_id < node_count; ++old_id) {
+        uint32_t new_id = 0;
+        if (fid_to_new_id.Lookup(old_feature_ids[old_id], new_id)) {
+            old_to_new[old_id] = new_id;
+        }
+        // else: remains UINT32_MAX (not found in new dataset)
+    }
+}
+
+void
+HGraph::NormalizeMappedNeighbors(std::vector<std::vector<uint32_t>>& neighbors,
+                                 const BuildCacheOptions& options) {
+    uint64_t node_count = neighbors.size();
+    uint32_t max_degree = this->bottom_graph_->MaximumDegree();
+    const uint32_t DELETED_MARKER = std::numeric_limits<uint32_t>::max();
+
+    for (uint64_t id = 0; id < node_count; ++id) {
+        auto& nbrs = neighbors[id];
+        uint32_t invalid_count = 0;
+        uint32_t write_pos = 0;
+
+        for (uint32_t read_pos = 0; read_pos < nbrs.size(); ++read_pos) {
+            uint32_t nbr = nbrs[read_pos];
+
+            // Skip deleted markers
+            if (nbr == DELETED_MARKER) {
+                invalid_count++;
+                continue;
+            }
+
+            // Skip self-loops
+            if (nbr == static_cast<uint32_t>(id)) {
+                continue;
+            }
+
+            // Skip duplicates (simple check within remaining elements)
+            bool is_dup = false;
+            for (uint32_t k = 0; k < write_pos; ++k) {
+                if (nbrs[k] == nbr) {
+                    is_dup = true;
+                    break;
+                }
+            }
+            if (is_dup) {
+                continue;
+            }
+
+            nbrs[write_pos++] = nbr;
+        }
+
+        // Trim to actual count
+        nbrs.resize(write_pos);
+
+        // Trim to max_degree
+        if (nbrs.size() > max_degree) {
+            nbrs.resize(max_degree);
+        }
+
+        build_cache_stats_.invalid_neighbors += invalid_count;
+        if (options.drop_invalid_neighbors) {
+            build_cache_stats_.dropped_neighbors += invalid_count;
+        }
+    }
+}
+
+void
+HGraph::ApplyWarmStartNeighbors(const std::vector<uint32_t>& old_to_new,
+                                const std::vector<std::vector<uint32_t>>& old_neighbors,
+                                const BuildCacheOptions& options) {
+    const uint32_t DELETED_MARKER = std::numeric_limits<uint32_t>::max();
+    uint64_t new_node_count = static_cast<uint64_t>(this->total_count_.load());
+    uint32_t max_degree = this->bottom_graph_->MaximumDegree();
+
+    auto warm_start_start = std::chrono::steady_clock::now();
+
+    // Phase 1: Warm start — inject cached neighbors or empty initialization
+    // First, insert all vectors into the flatten codes
+    // (This is already handled by the caller via Train + label setup)
+
+    // Create a mapping from new inner_id to whether it's a cache hit
+    std::vector<bool> is_hit(new_node_count, false);
+    std::vector<bool> is_valid_node(new_node_count, false);
+
+    // Mark valid nodes
+    for (uint64_t new_id = 0; new_id < new_node_count; ++new_id) {
+        if (new_id < this->label_table_->label_table_.size() &&
+            this->label_table_->label_table_[new_id] != std::numeric_limits<LabelType>::max()) {
+            is_valid_node[new_id] = true;
+        }
+    }
+
+    // Build reverse mapping: for each new inner_id, find old neighbors
+    // We need to know which new_id corresponds to which old_id
+    std::vector<uint32_t> new_to_old(new_node_count, DELETED_MARKER);
+    for (uint64_t old_id = 0; old_id < old_to_new.size(); ++old_id) {
+        uint32_t new_id = old_to_new[old_id];
+        if (new_id != DELETED_MARKER && new_id < new_node_count) {
+            new_to_old[new_id] = static_cast<uint32_t>(old_id);
+            is_hit[new_id] = true;
+        }
+    }
+
+    // Initialize bottom_graph_ with cached or empty neighbors
+    for (uint64_t new_id = 0; new_id < new_node_count; ++new_id) {
+        if (!is_valid_node[new_id]) {
+            continue;
+        }
+
+        Vector<InnerIdType> cached_nbrs(this->allocator_);
+        uint32_t old_id = new_to_old[new_id];
+
+        if (old_id != DELETED_MARKER && old_id < old_neighbors.size()) {
+            // Cache hit: use mapped neighbors (convert old inner_id -> new inner_id)
+            const auto& old_nbrs = old_neighbors[old_id];
+            for (uint32_t old_nbr : old_nbrs) {
+                if (old_nbr == DELETED_MARKER) {
+                    continue;
+                }
+                // Map old neighbor inner_id to new inner_id via old_to_new
+                if (old_nbr < old_to_new.size()) {
+                    uint32_t new_nbr = old_to_new[old_nbr];
+                    if (new_nbr != DELETED_MARKER) {
+                        cached_nbrs.push_back(static_cast<InnerIdType>(new_nbr));
+                    }
+                }
+            }
+        }
+        // else: cache miss, empty neighbors
+
+        this->bottom_graph_->InsertNeighborsById(static_cast<InnerIdType>(new_id), cached_nbrs);
+    }
+
+    // Set entry point
+    if (new_node_count > 0) {
+        this->entry_point_id_ = 0;
+    }
+
+    auto warm_start_end = std::chrono::steady_clock::now();
+
+    // Phase 2: Differentiated Refine
+    // Collect hit and missed node IDs
+    std::vector<InnerIdType> missed_nodes;
+    std::vector<InnerIdType> hit_nodes;
+    for (uint64_t new_id = 0; new_id < new_node_count; ++new_id) {
+        if (!is_valid_node[new_id]) {
+            continue;
+        }
+        if (is_hit[new_id]) {
+            hit_nodes.push_back(static_cast<InnerIdType>(new_id));
+        } else {
+            missed_nodes.push_back(static_cast<InnerIdType>(new_id));
+        }
+    }
+
+    auto flatten_codes = basic_flatten_codes_;
+    if (use_reorder_ && !build_by_base_) {
+        flatten_codes = high_precise_codes_;
+    }
+
+    // Refine missed nodes first (more iterations needed)
+    if (options.missed_refine_rounds > 0 && !missed_nodes.empty()) {
+        auto missed_start = std::chrono::steady_clock::now();
+        for (uint32_t round = 0; round < options.missed_refine_rounds; ++round) {
+            for (InnerIdType id : missed_nodes) {
+                // Get actual vector data for this node
+                Vector<float> vec_data(this->allocator_);
+                vec_data.resize(this->dim_);
+                this->GetVectorByInnerId(id, vec_data.data());
+                graph_add_one(vec_data.data(), 0, id);
+            }
+        }
+        auto missed_end = std::chrono::steady_clock::now();
+        build_cache_stats_.missed_refine_rounds = options.missed_refine_rounds;
+        build_cache_stats_.missed_refine_us = static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::microseconds>(missed_end - missed_start)
+                .count());
+    }
+
+    // Refine hit nodes (fewer iterations needed)
+    if (options.hit_refine_rounds > 0 && !hit_nodes.empty()) {
+        auto hit_start = std::chrono::steady_clock::now();
+        for (uint32_t round = 0; round < options.hit_refine_rounds; ++round) {
+            for (InnerIdType id : hit_nodes) {
+                Vector<float> vec_data(this->allocator_);
+                vec_data.resize(this->dim_);
+                this->GetVectorByInnerId(id, vec_data.data());
+                graph_add_one(vec_data.data(), 0, id);
+            }
+        }
+        auto hit_end = std::chrono::steady_clock::now();
+        build_cache_stats_.hit_refine_rounds = options.hit_refine_rounds;
+        build_cache_stats_.hit_refine_us = static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::microseconds>(hit_end - hit_start).count());
+    }
+
+    build_cache_stats_.warm_start_apply_us = static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(warm_start_end - warm_start_start)
+            .count());
+}
+
+uint64_t
+HGraph::ComputeBuildParamHash() const {
+    // Hash key build parameters that affect cache validity
+    uint64_t hash = 0;
+    hash ^= static_cast<uint64_t>(this->dim_) + 0x9e3779b97f4a7c15ULL + (hash << 6) + (hash >> 2);
+    hash ^= static_cast<uint64_t>(this->bottom_graph_->MaximumDegree()) + 0x9e3779b97f4a7c15ULL +
+            (hash << 6) + (hash >> 2);
+    hash ^= static_cast<uint64_t>(this->metric_) + 0x9e3779b97f4a7c15ULL + (hash << 6) + (hash >> 2);
+    hash ^= static_cast<uint64_t>(this->ef_construct_) + 0x9e3779b97f4a7c15ULL + (hash << 6) + (hash >> 2);
+    hash ^= static_cast<uint64_t>(this->data_type_) + 0x9e3779b97f4a7c15ULL + (hash << 6) + (hash >> 2);
+    return hash;
 }
 
 }  // namespace vsag
