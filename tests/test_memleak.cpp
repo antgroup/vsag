@@ -95,13 +95,12 @@ private:
 class ScopedIndex {
 public:
     explicit ScopedIndex(const std::string& name,
-                         const std::string& parameter,
+                         const std::string& build_parameters,
                          int64_t num_vectors,
                          int64_t dim,
                          Allocator* allocator) {
         resource_ = std::make_unique<vsag::Resource>(allocator, nullptr);
         engine_ = std::make_unique<vsag::Engine>(resource_.get());
-        std::string build_parameters = fmt::format(parameter, dim);
 
         index_ = engine_->CreateIndex(name, build_parameters).value();
 
@@ -183,8 +182,9 @@ TEST_CASE("Test Classic Index Memory Leak", "[ft][memleak]") {
     Options::Instance().set_block_size_limit(4ULL * 1024 * 1024);
     auto* allocator = new MyAllocator();
     REQUIRE(allocator->UsedMemory() == 0);
-    for (const auto& [index_name, index_parameter, search_parameter, num_vectors, dim] :
+    for (const auto& [index_name, base_quantization_type, search_parameter, num_vectors, dim] :
          INDEX_PARAMS) {
+        auto index_parameter = generate_param(index_name, base_quantization_type, dim);
         ScopedIndex scoped_index(index_name, index_parameter, num_vectors, dim, allocator);
 
         const int64_t num_queries = 1'000;
