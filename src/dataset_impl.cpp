@@ -405,6 +405,24 @@ DatasetImpl::Append(const DatasetPtr& other) {
             other->GetSparseVectors(), new_num_elements, this->allocator_, ptr, old_num_elements));
     }
 
+    // append multi vectors
+    if (auto iter = this->data_.find(MULTI_VECTORS); iter != this->data_.end()) {
+        if (other->GetMultiVectors() == nullptr) {
+            throw VsagException(
+                ErrorType::INVALID_ARGUMENT,
+                "Cannot append dataset without multi vectors to dataset with multi vectors");
+        }
+        int64_t mv_dim = this->GetMultiVectorDim();
+        if (mv_dim <= 0 || other->GetMultiVectorDim() != mv_dim) {
+            throw VsagException(
+                ErrorType::INVALID_ARGUMENT,
+                "Cannot append datasets with different multi vector dimensions");
+        }
+        MultiVector* ptr = const_cast<MultiVector*>(std::get<const MultiVector*>(iter->second));
+        this->MultiVectors(allocate_and_copy_multi_vectors(
+            other->GetMultiVectors(), new_num_elements, mv_dim, this->allocator_, ptr, old_num_elements));
+    }
+
     // append attribute sets
     if (auto iter = this->data_.find(ATTRIBUTE_SETS); iter != this->data_.end()) {
         if (other->GetAttributeSets() == nullptr) {
