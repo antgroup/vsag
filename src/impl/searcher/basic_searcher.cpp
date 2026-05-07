@@ -22,7 +22,7 @@
 #include "algorithm/inner_index_interface.h"
 #include "datacell/flatten_interface.h"
 #include "impl/heap/standard_heap.h"
-#include "utils/linear_congruential_generator.h"
+#include "utils/filter_search_skip_strategy.h"
 #include "vsag/allocator.h"
 
 namespace vsag {
@@ -36,11 +36,10 @@ BasicSearcher::visit(const GraphInterfacePtr& graph,
                      const VisitedListPtr& vl,
                      const std::pair<float, uint64_t>& current_node_pair,
                      const FilterPtr& filter,
-                     float skip_ratio,
+                     FilterSearchSkipStrategy* skip_strategy,
                      Vector<InnerIdType>& to_be_visited_rid,
                      Vector<InnerIdType>& to_be_visited_id,
                      Vector<InnerIdType>& neighbors) const {
-    LinearCongruentialGenerator generator;
     uint32_t count_no_visited = 0;
 
     if (this->mutex_array_ != nullptr) {
@@ -50,17 +49,12 @@ BasicSearcher::visit(const GraphInterfacePtr& graph,
         graph->GetNeighbors(current_node_pair.second, neighbors);
     }
 
-    float skip_threshold =
-        (filter != nullptr
-             ? (filter->ValidRatio() == 1.0F ? 0 : (1 - ((1 - filter->ValidRatio()) * skip_ratio)))
-             : 0.0F);
-
     for (uint32_t i = 0; i < neighbors.size(); i++) {
         if (i + prefetch_stride_visit_ < neighbors.size()) {
             vl->Prefetch(neighbors[i + prefetch_stride_visit_]);
         }
         if (not vl->Get(neighbors[i])) {
-            if (not filter || count_no_visited == 0 || generator.NextFloat() > skip_threshold ||
+            if (not filter || count_no_visited == 0 || skip_strategy->ShouldSkipFilterCheck() ||
                 filter->CheckValid(neighbors[i])) {
                 to_be_visited_rid[count_no_visited] = i;
                 to_be_visited_id[count_no_visited] = neighbors[i];
@@ -136,6 +130,12 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     Vector<InnerIdType> to_be_visited_id(graph->MaximumDegree(), alloc);
     Vector<InnerIdType> neighbors(graph->MaximumDegree(), alloc);
     Vector<float> line_dists(graph->MaximumDegree(), alloc);
+    auto skip_strategy = create_filter_search_skip_strategy(
+        inner_search_param.skip_strategy_type,
+        inner_search_param.is_inner_id_allowed != nullptr
+            ? inner_search_param.is_inner_id_allowed->ValidRatio()
+            : 1.0F,
+        inner_search_param.skip_ratio);
 
     if (!iter_ctx->IsFirstUsed()) {
         if (iter_ctx->Empty()) {
@@ -190,7 +190,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                                  vl,
                                  current_node_pair,
                                  inner_search_param.is_inner_id_allowed,
-                                 inner_search_param.skip_ratio,
+                                 skip_strategy.get(),
                                  to_be_visited_rid,
                                  to_be_visited_id,
                                  neighbors);
@@ -277,6 +277,12 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     Vector<InnerIdType> to_be_visited_id(graph->MaximumDegree(), alloc);
     Vector<InnerIdType> neighbors(graph->MaximumDegree(), alloc);
     Vector<float> line_dists(graph->MaximumDegree(), alloc);
+    auto skip_strategy = create_filter_search_skip_strategy(
+        inner_search_param.skip_strategy_type,
+        inner_search_param.is_inner_id_allowed != nullptr
+            ? inner_search_param.is_inner_id_allowed->ValidRatio()
+            : 1.0F,
+        inner_search_param.skip_ratio);
 
     Filter* attr_ft = nullptr;
     if (not inner_search_param.executors.empty() and inner_search_param.executors[0] != nullptr) {
@@ -333,7 +339,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                                  vl,
                                  current_node_pair,
                                  inner_search_param.is_inner_id_allowed,
-                                 inner_search_param.skip_ratio,
+                                 skip_strategy.get(),
                                  to_be_visited_rid,
                                  to_be_visited_id,
                                  neighbors);
