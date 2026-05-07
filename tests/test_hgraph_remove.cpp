@@ -93,7 +93,7 @@ TEST_CASE("HGraph Sequential Add and ForceRemove", "[ft][hgraph]") {
     REQUIRE(index->GetNumElements() == NUM_ELEMENTS);
 
     for (int64_t i = 0; i < NUM_ELEMENTS / 2; ++i) {
-        auto result = index->Remove(ids[i], vsag::RemoveMode::ForceRemove);
+        auto result = index->Remove(ids[i], vsag::RemoveMode::FORCE_REMOVE);
         REQUIRE(result.has_value());
     }
 
@@ -146,7 +146,7 @@ TEST_CASE("HGraph Concurrent Add and ForceRemove", "[ft][hgraph][concurrent]") {
     };
 
     auto remove_func = [&](int64_t i) -> bool {
-        auto remove_result = index->Remove(ids[i], vsag::RemoveMode::ForceRemove);
+        auto remove_result = index->Remove(ids[i], vsag::RemoveMode::FORCE_REMOVE);
         if (remove_result.has_value()) {
             remove_success++;
             return true;
@@ -210,7 +210,7 @@ TEST_CASE("HGraph Sequential Add Remove ReAdd", "[ft][hgraph]") {
     REQUIRE(index->GetNumElements() == NUM_ELEMENTS);
 
     for (int64_t i = 0; i < NUM_ELEMENTS / 2; ++i) {
-        auto result = index->Remove(ids[i], vsag::RemoveMode::ForceRemove);
+        auto result = index->Remove(ids[i], vsag::RemoveMode::FORCE_REMOVE);
         REQUIRE(result.has_value());
     }
 
@@ -274,7 +274,7 @@ TEST_CASE("HGraph ForceRemove All Elements", "[ft][hgraph]") {
     }
 
     for (int64_t i = 0; i < NUM_ELEMENTS; ++i) {
-        auto remove_result = index->Remove(ids[i], vsag::RemoveMode::ForceRemove);
+        auto remove_result = index->Remove(ids[i], vsag::RemoveMode::FORCE_REMOVE);
         REQUIRE(remove_result.has_value());
         REQUIRE(remove_result.value() > 0);
     }
@@ -288,7 +288,7 @@ TEST_CASE("HGraph ForceRemove All Elements", "[ft][hgraph]") {
     REQUIRE(empty_result.value()->GetDim() == 0);
 }
 
-TEST_CASE("HGraph Batch ForceRemove supports legacy remove alias", "[ft][hgraph]") {
+TEST_CASE("HGraph Batch ForceRemove", "[ft][hgraph]") {
     fixtures::logger::LoggerReplacer _;
 
     auto index = CreateHGraphIndex();
@@ -314,7 +314,7 @@ TEST_CASE("HGraph Batch ForceRemove supports legacy remove alias", "[ft][hgraph]
     REQUIRE(build_result.has_value());
 
     std::vector<int64_t> remove_ids(ids.begin(), ids.begin() + 5);
-    auto remove_result = index->Remove(remove_ids, vsag::RemoveMode::REMOVE_AND_REPAIR);
+    auto remove_result = index->Remove(remove_ids, vsag::RemoveMode::FORCE_REMOVE);
     REQUIRE(remove_result.has_value());
     REQUIRE(remove_result.value() == remove_ids.size());
     REQUIRE(index->GetNumElements() == NUM_ELEMENTS - remove_ids.size());
