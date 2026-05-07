@@ -34,7 +34,7 @@ main(int argc, char** argv) {
     std::uniform_int_distribution<int> vec_count_dist(5, 10);
 
     // Generate MultiVector array: each document owns its own vectors buffer
-    std::vector<vsag::MultiVector> multi_vectors(num_elements);
+    vsag::MultiVector* multi_vectors = new vsag::MultiVector[num_elements];
     uint64_t total_vectors = 0;
     for (int64_t i = 0; i < num_elements; ++i) {
         ids[i] = i;
@@ -47,14 +47,14 @@ main(int argc, char** argv) {
         total_vectors += len;
     }
 
-    // Create dataset with MultiVectors API
+    // Create dataset with MultiVectors API (Owner(true) transfers memory ownership to Dataset)
     vsag::DatasetPtr base = vsag::Dataset::Make();
     base->NumElements(num_elements)
         ->Dim(dim)
         ->Ids(ids.data())
-        ->MultiVectors(multi_vectors.data())
+        ->MultiVectors(multi_vectors)
         ->MultiVectorDim(dim)
-        ->Owner(false);
+        ->Owner(true);
 
     std::cout << "Created multi-vector dataset with " << num_elements << " elements (documents)"
               << std::endl;
@@ -70,7 +70,8 @@ main(int argc, char** argv) {
         "dim": 128
     }
     )";
-    std::shared_ptr<vsag::Index> index = vsag::Factory::CreateIndex("warp", warp_build_parameters).value();
+    std::shared_ptr<vsag::Index> index =
+        vsag::Factory::CreateIndex("warp", warp_build_parameters).value();
 
     /******************* Build WARP Index *****************/
     if (auto build_result = index->Build(base); build_result.has_value()) {
@@ -114,11 +115,6 @@ main(int argc, char** argv) {
     for (int64_t i = 0; i < result->GetDim(); ++i) {
         std::cout << "  Document " << result->GetIds()[i]
                   << ": score = " << result->GetDistances()[i] << std::endl;
-    }
-
-    // Cleanup multi-vector buffers
-    for (int64_t i = 0; i < num_elements; ++i) {
-        delete[] multi_vectors[i].vectors_;
     }
 
     return 0;
