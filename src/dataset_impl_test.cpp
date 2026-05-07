@@ -559,7 +559,8 @@ TEST_CASE("Dataset MultiVector Append Test", "[ut][dataset]") {
             mv2[i].vectors_ = new float[2 * 32];
         }
         auto ds2 = vsag::Dataset::Make();
-        ds2->NumElements(3)->Dim(mv_dim)->MultiVectorDim(32)->MultiVectors(mv2)->Owner(true, nullptr);
+        ds2->NumElements(3)->Dim(mv_dim)->MultiVectorDim(32)->MultiVectors(mv2)->Owner(true,
+                                                                                       nullptr);
 
         REQUIRE_THROWS(ds1->Append(ds2));
     }
@@ -633,8 +634,8 @@ TEST_CASE("Dataset MultiVector DeepCopy Test", "[ut][dataset]") {
             REQUIRE(dst_mv[i].len_ == src_mv[i].len_);
             REQUIRE(dst_mv[i].vectors_ != src_mv[i].vectors_);
             uint64_t num_floats = static_cast<uint64_t>(src_mv[i].len_) * mv_dim;
-            REQUIRE(std::memcmp(dst_mv[i].vectors_, src_mv[i].vectors_, num_floats * sizeof(float)) ==
-                    0);
+            REQUIRE(std::memcmp(
+                        dst_mv[i].vectors_, src_mv[i].vectors_, num_floats * sizeof(float)) == 0);
         }
     }
 

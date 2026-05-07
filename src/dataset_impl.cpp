@@ -385,9 +385,8 @@ DatasetImpl::Append(const DatasetPtr& other) {
         }
         int64_t mv_dim = this->GetMultiVectorDim();
         if (mv_dim <= 0 || other->GetMultiVectorDim() != mv_dim) {
-            throw VsagException(
-                ErrorType::INVALID_ARGUMENT,
-                "Cannot append datasets with different multi vector dimensions");
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "Cannot append datasets with different multi vector dimensions");
         }
     }
 
@@ -439,8 +438,12 @@ DatasetImpl::Append(const DatasetPtr& other) {
     if (auto iter = this->data_.find(MULTI_VECTORS); iter != this->data_.end()) {
         int64_t mv_dim = this->GetMultiVectorDim();
         MultiVector* ptr = const_cast<MultiVector*>(std::get<const MultiVector*>(iter->second));
-        this->MultiVectors(allocate_and_copy_multi_vectors(
-            other->GetMultiVectors(), new_num_elements, mv_dim, this->allocator_, ptr, old_num_elements));
+        this->MultiVectors(allocate_and_copy_multi_vectors(other->GetMultiVectors(),
+                                                           new_num_elements,
+                                                           mv_dim,
+                                                           this->allocator_,
+                                                           ptr,
+                                                           old_num_elements));
     }
 
     // append attribute-sets

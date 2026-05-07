@@ -90,8 +90,7 @@ CalMultiVectorDistance(const vsag::DatasetPtr query,
     for (uint32_t qv = 0; qv < q_mv.len_; ++qv) {
         float min_dist = std::numeric_limits<float>::max();
         for (uint32_t bv = 0; bv < b_mv.len_; ++bv) {
-            float dist = dist_func(
-                q_mv.vectors_ + qv * dim, b_mv.vectors_ + bv * dim, dim);
+            float dist = dist_func(q_mv.vectors_ + qv * dim, b_mv.vectors_ + bv * dim, dim);
             if (dist < min_dist) {
                 min_dist = dist;
             }

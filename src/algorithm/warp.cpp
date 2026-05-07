@@ -78,10 +78,9 @@ WARP::Train(const DatasetPtr& data) {
     CHECK_ARGUMENT(multi_vectors != nullptr, "data.multi_vectors is nullptr");
 
     int64_t mv_dim = data->GetMultiVectorDim();
-    CHECK_ARGUMENT(mv_dim == dim_,
-                   fmt::format("data.multi_vector_dim({}) must be equal to index.dim({})",
-                               mv_dim,
-                               dim_));
+    CHECK_ARGUMENT(
+        mv_dim == dim_,
+        fmt::format("data.multi_vector_dim({}) must be equal to index.dim({})", mv_dim, dim_));
 
     int64_t num_elements = data->GetNumElements();
     uint64_t total_vectors = 0;
@@ -105,10 +104,9 @@ WARP::Add(const DatasetPtr& data, AddMode mode) {
     CHECK_ARGUMENT(multi_vectors != nullptr, "data.multi_vectors is nullptr");
 
     int64_t mv_dim = data->GetMultiVectorDim();
-    CHECK_ARGUMENT(mv_dim == dim_,
-                   fmt::format("data.multi_vector_dim({}) must be equal to index.dim({})",
-                               mv_dim,
-                               dim_));
+    CHECK_ARGUMENT(
+        mv_dim == dim_,
+        fmt::format("data.multi_vector_dim({}) must be equal to index.dim({})", mv_dim, dim_));
 
     {
         std::lock_guard lock(this->add_mutex_);
