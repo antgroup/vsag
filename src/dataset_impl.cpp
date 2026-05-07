@@ -163,6 +163,15 @@ DatasetImpl::~DatasetImpl() {  // NOLINT
             }
             allocator_->Deallocate(void_ptr(DatasetImpl::GetSparseVectors()));
         }
+        const MultiVector* multi_vectors = DatasetImpl::GetMultiVectors();
+        if (multi_vectors != nullptr) {
+            for (int64_t i = 0; i < DatasetImpl::GetNumElements(); i++) {
+                if (multi_vectors[i].vectors_ != nullptr) {
+                    allocator_->Deallocate(void_ptr(multi_vectors[i].vectors_));
+                }
+            }
+            allocator_->Deallocate(void_ptr(DatasetImpl::GetMultiVectors()));
+        }
 
     } else {
         delete[] DatasetImpl::GetIds();
@@ -179,6 +188,13 @@ DatasetImpl::~DatasetImpl() {  // NOLINT
                 delete[] DatasetImpl::GetSparseVectors()[i].vals_;
             }
             delete[] DatasetImpl::GetSparseVectors();
+        }
+
+        if (DatasetImpl::GetMultiVectors() != nullptr) {
+            for (int64_t i = 0; i < DatasetImpl::GetNumElements(); i++) {
+                delete[] DatasetImpl::GetMultiVectors()[i].vectors_;
+            }
+            delete[] DatasetImpl::GetMultiVectors();
         }
     }
     delete[] DatasetImpl::GetPaths();
