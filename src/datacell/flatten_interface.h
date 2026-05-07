@@ -18,16 +18,18 @@
 #include <shared_mutex>
 #include <string>
 
+#include "basic_types.h"
 #include "flatten_datacell_parameter.h"
 #include "flatten_interface_parameter.h"
+#include "hash_types.h"
 #include "impl/runtime_parameter.h"
-#include "index_common_param.h"
+#include "index_common_param_fwd.h"
 #include "io/reader_io.h"
 #include "quantization/computer.h"
 #include "query_context.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
-#include "typing.h"
+#include "type_helpers.h"
 #include "utils/pointer_define.h"
 #include "vsag/constants.h"
 
@@ -112,9 +114,7 @@ public:
     }
 
     virtual IndexCommonParam
-    ExportCommonParam() {
-        throw VsagException(ErrorType::INTERNAL_ERROR, "ExportCommonParam is not implemented");
-    }
+    ExportCommonParam();
 
 public:
     virtual bool

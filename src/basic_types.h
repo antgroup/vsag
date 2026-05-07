@@ -14,8 +14,15 @@
 
 #pragma once
 
-#include "basic_types.h"
-#include "container_types.h"
-#include "hash_types.h"
-#include "json_types.h"
-#include "type_helpers.h"
+#include <cstdint>
+
+namespace vsag {
+
+using InnerIdType = uint32_t;  // inner id's type; index's vector count may less than 2^31 - 1
+using LabelType = int64_t;     // external id's type
+
+enum class LabelRemapType : uint8_t { ROBIN, PG };
+
+using BucketIdType = int32_t;
+
+}  // namespace vsag

@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -19,9 +18,11 @@
 #include <functional>
 #include <istream>
 #include <stack>
+#include <vector>
 
-#include "../typing.h"
+#include "../container_types.h"
 #include "impl/logger/logger.h"
+#include "type_helpers.h"
 
 namespace vsag {
 

@@ -15,6 +15,7 @@
 #include "flatten_interface.h"
 
 #include "flatten_datacell.h"
+#include "index_common_param.h"
 #include "inner_string_params.h"
 #include "io/io_headers.h"
 #include "quantization/int8_quantizer.h"
@@ -25,6 +26,11 @@
 #include "sparse_vector_datacell.h"
 
 namespace vsag {
+
+IndexCommonParam
+FlattenInterface::ExportCommonParam() {
+    throw VsagException(ErrorType::INTERNAL_ERROR, "ExportCommonParam is not implemented");
+}
 template <typename QuantTemp, typename IOTemp>
 static FlattenInterfacePtr
 make_instance_flatten(const FlattenInterfaceParamPtr& param, const IndexCommonParam& common_param) {

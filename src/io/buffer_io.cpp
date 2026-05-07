@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -20,6 +19,7 @@
 
 #include <filesystem>
 
+#include "index_common_param.h"
 #include "io_syscall.h"
 
 namespace vsag {
@@ -39,10 +39,12 @@ BufferIO::BufferIO(std::string filename, Allocator* allocator)
 }
 
 BufferIO::BufferIO(const BufferIOParameterPtr& io_param, const IndexCommonParam& common_param)
-    : BufferIO(io_param->path_, common_param.allocator_.get()){};
+    : BufferIO(io_param->path_, common_param.allocator_.get()) {
+}
 
 BufferIO::BufferIO(const IOParamPtr& param, const IndexCommonParam& common_param)
-    : BufferIO(std::dynamic_pointer_cast<BufferIOParameter>(param), common_param){};
+    : BufferIO(std::dynamic_pointer_cast<BufferIOParameter>(param), common_param) {
+}
 
 void
 BufferIO::WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset) {
