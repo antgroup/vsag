@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+include (CheckCXXCompilerFlag)
 
 set (SIMD_SRCS
         generic.cpp
@@ -51,20 +52,32 @@ endif ()
 if (DIST_CONTAINS_AVX2)
     set_source_files_properties (avx2.cpp PROPERTIES COMPILE_FLAGS "-mavx2 -mfma -mf16c")
 endif ()
+
+set(AVX512_FLAGS "-mavx512f -mavx512cd -mavx512vl -mavx512bw -mavx512dq -mavx512ifma -mavx512vbmi")
+check_cxx_compiler_flag("-mavx512pf" COMPILER_SUPPORTS_AVX512PF)
+check_cxx_compiler_flag("-mavx512er" COMPILER_SUPPORTS_AVX512ER)
+if (COMPILER_SUPPORTS_AVX512PF)
+    set(AVX512_FLAGS "${AVX512_FLAGS} -mavx512pf")
+endif ()
+if (COMPILER_SUPPORTS_AVX512ER)
+    set(AVX512_FLAGS "${AVX512_FLAGS} -mavx512er")
+endif ()
+
 if (DIST_CONTAINS_AVX512)
     set_source_files_properties (
             avx512.cpp
             PROPERTIES
             COMPILE_FLAGS
-            "-mavx512f -mavx512pf -mavx512er -mavx512cd -mavx512vl -mavx512bw -mavx512dq -mavx512ifma -mavx512vbmi"
+            "${AVX512_FLAGS}"
     )
 endif ()
 if (DIST_CONTAINS_AVX512VPOPCNTDQ)
+    set(AVX512VPOPCNTDQ_FLAGS "${AVX512_FLAGS} -mavx512vpopcntdq")
     set_source_files_properties (
             avx512vpopcntdq.cpp
             PROPERTIES
             COMPILE_FLAGS
-            "-mavx512f -mavx512pf -mavx512er -mavx512cd -mavx512vl -mavx512bw -mavx512dq -mavx512ifma -mavx512vbmi -mavx512vpopcntdq"
+            "${AVX512VPOPCNTDQ_FLAGS}"
     )
 endif ()
 if (DIST_CONTAINS_NEON)
