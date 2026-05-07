@@ -13,9 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <vsag/options.h>
 #include <vsag/vsag.h>
 #include <vsag/vsag_ext.h>
-#include <vsag/options.h>
 
 #include <catch2/catch_test_macros.hpp>
 #include <cstdlib>
@@ -207,14 +207,10 @@ TEST_CASE("gh#1974", "[ft][github]") {
                     {"store_raw_vector", true}};
     json tuned_param = base_param;
     tuned_param["base_quantization_type"] = "bf16";
-    json index_param{{"dtype", "float32"},
-                     {"metric_type", "l2"},
-                     {"dim", dim},
-                     {"index_param", base_param}};
-    json tune_param{{"dtype", "float32"},
-                    {"metric_type", "l2"},
-                    {"dim", dim},
-                    {"index_param", tuned_param}};
+    json index_param{
+        {"dtype", "float32"}, {"metric_type", "l2"}, {"dim", dim}, {"index_param", base_param}};
+    json tune_param{
+        {"dtype", "float32"}, {"metric_type", "l2"}, {"dim", dim}, {"index_param", tuned_param}};
 
     LimitedAllocator allocator;
     auto create_result = vsag::Factory::CreateIndex("hgraph", index_param.dump(), &allocator);
