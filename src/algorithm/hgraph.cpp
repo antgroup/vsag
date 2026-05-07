@@ -671,15 +671,25 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
     const auto* vectors = data->GetFloat32Vectors();
     const auto* extra_infos = data->GetExtraInfos();
     auto inner_ids = this->get_unique_inner_ids(total);
-    Vector<Vector<InnerIdType>> route_graph_ids(allocator_);
-    InnerIdType cur_size = 0;
+    Vector<InnerIdType> valid_inner_ids(allocator_);
     for (int64_t i = 0; i < total; ++i) {
         auto label = labels[i];
         if (this->label_table_->CheckLabel(label)) {
             failed_ids.emplace_back(label);
             continue;
         }
-        InnerIdType inner_id = inner_ids.at(cur_size);
+        valid_inner_ids.emplace_back(inner_ids[valid_inner_ids.size()]);
+    }
+    this->resize(total_count_.load() + valid_inner_ids.size());
+    this->total_count_ += valid_inner_ids.size();
+    Vector<Vector<InnerIdType>> route_graph_ids(allocator_);
+    InnerIdType cur_size = 0;
+    for (int64_t i = 0; i < total; ++i) {
+        auto label = labels[i];
+        if (this->label_table_->CheckLabel(label)) {
+            continue;
+        }
+        InnerIdType inner_id = valid_inner_ids.at(cur_size);
         cur_size++;
         this->label_table_->Insert(inner_id, label);
         this->basic_flatten_codes_->InsertVector(vectors + dim_ * i, inner_id);
@@ -702,7 +712,6 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
             }
         }
     }
-    this->resize(total_count_);
     auto build_data = (use_reorder_ and not build_by_base_) ? this->high_precise_codes_
                                                             : this->basic_flatten_codes_;
     {
@@ -777,8 +786,10 @@ HGraph::Add(const DatasetPtr& data, AddMode mode) {
         {
             std::scoped_lock lock(this->add_mutex_);
             inner_id = this->get_unique_inner_ids(1).at(0);
-            uint64_t new_count = total_count_;
-            this->resize(new_count);
+            if (inner_id >= total_count_) {
+                this->resize(total_count_.load() + 1);
+                ++total_count_;
+            }
         }
 
         {
@@ -2243,6 +2254,10 @@ HGraph::GetVectorByInnerId(InnerIdType inner_id, float* data) const {
     codes = (create_new_raw_vector_) ? raw_vector_ : codes;
     bool release;
     const auto* buffer = codes->GetCodesById(inner_id, release);
+    if (buffer == nullptr) {
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            fmt::format("failed to get vector by inner id {}", inner_id));
+    }
     codes->Decode(buffer, data);
     if (release) {
         codes->Release(buffer);
