@@ -481,6 +481,34 @@ public:
         SAFE_CALL(return this->inner_index_->UpdateVector(id, new_base, force_update));
     }
 
+    // --- Build Cache forwarding ---
+
+    [[nodiscard]] bool
+    SupportsBuildCache() const override {
+        return this->inner_index_->SupportsBuildCache();
+    }
+
+    tl::expected<void, Error>
+    ExportBuildCache(std::ostream& out_stream) const override {
+        SAFE_CALL(this->inner_index_->ExportBuildCache(out_stream));
+    }
+
+    tl::expected<std::vector<int64_t>, Error>
+    BuildWithCache(const DatasetPtr& base,
+                   std::istream& in_stream,
+                   const BuildCacheOptions& options = BuildCacheOptions{}) override {
+        CHECK_IMMUTABLE_INDEX("build with cache");
+        CHECK_NONEMPTY_DATASET(base);
+        SAFE_CALL(return this->inner_index_->BuildWithCache(base, in_stream, options));
+    }
+
+    [[nodiscard]] tl::expected<BuildCacheStats, Error>
+    GetBuildCacheStats() const override {
+        SAFE_CALL(return this->inner_index_->GetBuildCacheStats());
+    }
+
+    // --- End Build Cache forwarding ---
+
 public:
     [[nodiscard]] inline InnerIndexPtr
     GetInnerIndex() const {
