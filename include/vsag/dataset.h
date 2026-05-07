@@ -405,6 +405,27 @@ public:
      */
     virtual const uint32_t*
     GetVectorCounts() const = 0;
+
+    /**
+     * @brief Sets the FeatureID array for the dataset.
+     *
+     * FeatureIDs are fixed-length strings used as cross-build-cycle stable identifiers
+     * for Build Cache warm start. Each FeatureID uniquely identifies a vector across
+     * different index build cycles, enabling neighbor cache mapping.
+     *
+     * @param feature_ids Pointer to the array of FeatureID strings.
+     * @return DatasetPtr A shared pointer to the dataset with FeatureIDs set.
+     */
+    virtual DatasetPtr
+    FeatureIds(const std::string* feature_ids) = 0;
+
+    /**
+     * @brief Retrieves the FeatureID array of the dataset.
+     *
+     * @return const std::string* Pointer to the array of FeatureID strings.
+     */
+    virtual const std::string*
+    GetFeatureIds() const = 0;
 };
 
 };  // namespace vsag
