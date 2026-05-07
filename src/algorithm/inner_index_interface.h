@@ -57,6 +57,35 @@ public:
     static InnerIndexPtr
     FastCreateIndex(const std::string& index_fast_str, const IndexCommonParam& common_param);
 
+    // --- Build Cache virtual methods ---
+
+    [[nodiscard]] virtual bool
+    SupportsBuildCache() const {
+        return false;
+    }
+
+    virtual tl::expected<void, Error>
+    ExportBuildCache(std::ostream& out_stream) const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index doesn't support ExportBuildCache");
+    }
+
+    virtual tl::expected<std::vector<int64_t>, Error>
+    BuildWithCache(const DatasetPtr& base,
+                   std::istream& in_stream,
+                   const BuildCacheOptions& options = BuildCacheOptions{}) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index doesn't support BuildWithCache");
+    }
+
+    [[nodiscard]] virtual tl::expected<BuildCacheStats, Error>
+    GetBuildCacheStats() const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index doesn't support GetBuildCacheStats");
+    }
+
+    // --- End Build Cache virtual methods ---
+
     virtual std::vector<int64_t>
     Add(const DatasetPtr& base, AddMode mode = AddMode::DEFAULT) = 0;
 
