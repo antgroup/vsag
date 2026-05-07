@@ -43,6 +43,8 @@ const char* const DATASET_PATHS = "paths";
 const char* const EXTRA_INFOS = "extra_infos";
 const char* const EXTRA_INFO_SIZE = "extra_info_size";
 const char* const VECTOR_COUNTS = "vector_counts";
+const char* const MULTI_VECTORS = "multi_vectors";
+const char* const MULTI_VECTOR_DIM = "multi_vector_dim";
 
 const char* const HNSW_DATA = "hnsw_data";
 const char* const CONJUGATE_GRAPH_DATA = "conjugate_graph_data";

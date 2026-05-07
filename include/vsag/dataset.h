@@ -35,6 +35,23 @@ struct SparseVector {
     float* vals_ = nullptr;    // contains vals with size of len_
 };
 
+/**
+ * @brief Represents one document's multi-vector data.
+ *
+ * @details
+ * Each document may contain a variable number of dense sub-vectors.
+ * The sub-vector dimensionality is defined at the Dataset level via
+ * MultiVectorDim(), not per-element.
+ *
+ * @note When Owner(true) is set on the Dataset, each element's vectors_
+ * pointer must be independently allocated (not an offset into a shared
+ * buffer), because the Dataset destructor will free each vectors_ separately.
+ */
+struct MultiVector {
+    uint32_t len_ = 0;          // number of sub-vectors in this document
+    float* vectors_ = nullptr;  // flat array of len_ * MultiVectorDim floats
+};
+
 class Dataset;
 using DatasetPtr = std::shared_ptr<Dataset>;
 
