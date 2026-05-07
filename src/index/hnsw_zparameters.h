@@ -21,6 +21,7 @@
 #include "algorithm/hnswlib/hnswlib.h"
 #include "data_type.h"
 #include "index_common_param.h"
+#include "utils/filter_search_skip_strategy.h"
 
 namespace vsag {
 
@@ -61,6 +62,8 @@ public:
     // required vars
     int64_t ef_search;
     float skip_ratio{0.9};
+    FilterSearchSkipStrategyType skip_strategy_type{
+        FilterSearchSkipStrategyType::DETERMINISTIC_ACCUMULATIVE};
     bool use_conjugate_graph_search;
 
 private:

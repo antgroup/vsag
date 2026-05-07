@@ -296,6 +296,7 @@ HNSW::knn_search(const DatasetPtr& query,
                                            std::max(params.ef_search, k),
                                            filter_ptr,
                                            params.skip_ratio,
+                                           params.skip_strategy_type,
                                            allocator,
                                            iter_filter_ctx,
                                            is_last_filter);
