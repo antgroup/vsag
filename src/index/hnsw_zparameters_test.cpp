@@ -71,3 +71,49 @@ TEST_CASE("create hnsw with wrong parameter", "[ut][hnsw]") {
         vsag::HnswParameters::FromJson(correct_parsed_params, common_param);
     }
 }
+
+TEST_CASE("parse hnsw search skip strategy", "[ut][hnsw]") {
+    SECTION("default deterministic accumulative strategy") {
+        auto params = vsag::HnswSearchParameters::FromJson(R"(
+        {
+            "hnsw": {
+                "ef_search": 100,
+                "skip_ratio": 0.3
+            }
+        })");
+        REQUIRE(params.skip_strategy_type ==
+                vsag::FilterSearchSkipStrategyType::DETERMINISTIC_ACCUMULATIVE);
+    }
+
+    SECTION("explicit random strategy") {
+        auto params = vsag::HnswSearchParameters::FromJson(R"(
+        {
+            "hnsw": {
+                "ef_search": 100,
+                "skip_ratio": 0.3,
+                "skip_strategy": "random"
+            }
+        })");
+        REQUIRE(params.skip_strategy_type == vsag::FilterSearchSkipStrategyType::RANDOM);
+    }
+
+    SECTION("invalid strategy") {
+        REQUIRE_THROWS(vsag::HnswSearchParameters::FromJson(R"(
+        {
+            "hnsw": {
+                "ef_search": 100,
+                "skip_strategy": "invalid"
+            }
+        })"));
+    }
+
+    SECTION("non-string strategy") {
+        REQUIRE_THROWS(vsag::HnswSearchParameters::FromJson(R"(
+        {
+            "hnsw": {
+                "ef_search": 100,
+                "skip_strategy": 1
+            }
+        })"));
+    }
+}

@@ -19,7 +19,7 @@
 #include <utility>
 
 #include "impl/heap/standard_heap.h"
-#include "utils/linear_congruential_generator.h"
+#include "utils/filter_search_skip_strategy.h"
 
 namespace vsag {
 
@@ -36,12 +36,11 @@ ParallelSearcher::visit(const GraphInterfacePtr& graph,
                         const VisitedListPtr& vl,
                         const Vector<std::pair<float, uint64_t>>& node_pair,
                         const FilterPtr& filter,
-                        float skip_ratio,
+                        FilterSearchSkipStrategy* skip_strategy,
                         Vector<InnerIdType>& to_be_visited_rid,
                         Vector<InnerIdType>& to_be_visited_id,
                         std::vector<Vector<InnerIdType>>& neighbors,
                         uint64_t point_visited_num) const {
-    LinearCongruentialGenerator generator;
     uint32_t count_no_visited = 0;
 
     if (this->mutex_array_ != nullptr) {
@@ -55,17 +54,13 @@ ParallelSearcher::visit(const GraphInterfacePtr& graph,
         }
     }
 
-    float skip_threshold =
-        (filter != nullptr
-             ? (filter->ValidRatio() == 1.0F ? 0 : (1 - ((1 - filter->ValidRatio()) * skip_ratio)))
-             : 0.0F);
     for (uint64_t i = 0; i < point_visited_num; i++) {
         for (uint32_t j = 0; j < neighbors[i].size(); j++) {
             if (j + prefetch_stride_visit_ < neighbors[i].size()) {
                 vl->Prefetch(neighbors[i][j + prefetch_stride_visit_]);
             }
             if (not vl->Get(neighbors[i][j])) {
-                if (not filter || count_no_visited == 0 || generator.NextFloat() > skip_threshold ||
+                if (not filter || count_no_visited == 0 || skip_strategy->ShouldSkipFilterCheck() ||
                     filter->CheckValid(neighbors[i][j])) {
                     to_be_visited_rid[count_no_visited] = j;
                     to_be_visited_id[count_no_visited] = neighbors[i][j];
@@ -133,6 +128,12 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
     Vector<float> line_dists(vector_size, alloc);
     Vector<std::pair<float, uint64_t>> node_pair(
         inner_search_param.parallel_search_thread_count_per_query, alloc);
+    auto skip_strategy = create_filter_search_skip_strategy(
+        inner_search_param.skip_strategy_type,
+        inner_search_param.is_inner_id_allowed != nullptr
+            ? inner_search_param.is_inner_id_allowed->ValidRatio()
+            : 1.0F,
+        inner_search_param.skip_ratio);
     Vector<uint32_t> tasks_per_thread(inner_search_param.parallel_search_thread_count_per_query,
                                       alloc);
     Vector<uint32_t> start_index(inner_search_param.parallel_search_thread_count_per_query, alloc);
@@ -179,7 +180,7 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
                                  vl,
                                  node_pair,
                                  inner_search_param.is_inner_id_allowed,
-                                 inner_search_param.skip_ratio,
+                                 skip_strategy.get(),
                                  to_be_visited_rid,
                                  to_be_visited_id,
                                  neighbors,
