@@ -1453,4 +1453,75 @@ FHTRotate(float* data, uint64_t dim_) {
     return generic::FHTRotate(data, dim_);
 #endif
 }
+
+float
+NormalizeWithCentroid(const float* from, const float* centroid, float* to, uint64_t dim) {
+#if defined(ENABLE_AVX512)
+    float norm_sq = 0;
+    uint64_t i = 0;
+    if (dim >= 16) {
+        __m512 sum = _mm512_setzero_ps();
+        for (; i + 15 < dim; i += 16) {
+            __m512 f = _mm512_loadu_ps(from + i);
+            __m512 c = _mm512_loadu_ps(centroid + i);
+            __m512 diff = _mm512_sub_ps(f, c);
+            sum = _mm512_fmadd_ps(diff, diff, sum);
+        }
+        norm_sq = _mm512_reduce_add_ps(sum);
+        for (; i < dim; ++i) {
+            auto diff = from[i] - centroid[i];
+            norm_sq += diff * diff;
+        }
+    } else {
+        norm_sq = generic::FP32ComputeL2Sqr(from, centroid, dim);
+    }
+
+    float norm = 0;
+    if (norm_sq < 1e-5f) {
+        norm = 1.0f;
+    } else {
+        norm = std::sqrt(norm_sq);
+    }
+
+    __m512 normVec = _mm512_set1_ps(norm);
+    for (i = 0; i + 15 < dim; i += 16) {
+        __m512 f = _mm512_loadu_ps(from + i);
+        __m512 c = _mm512_loadu_ps(centroid + i);
+        __m512 diff = _mm512_sub_ps(f, c);
+        __m512 result = _mm512_div_ps(diff, normVec);
+        _mm512_storeu_ps(to + i, result);
+    }
+    if (i < dim) {
+        for (; i < dim; ++i) {
+            to[i] = (from[i] - centroid[i]) / norm;
+        }
+    }
+    return norm;
+#else
+    return avx2::NormalizeWithCentroid(from, centroid, to, dim);
+#endif
+}
+
+void
+InverseNormalizeWithCentroid(
+    const float* from, const float* centroid, float* to, uint64_t dim, float norm) {
+#if defined(ENABLE_AVX512)
+    uint64_t i = 0;
+    __m512 normVec = _mm512_set1_ps(norm);
+    for (; i + 15 < dim; i += 16) {
+        __m512 f = _mm512_loadu_ps(from + i);
+        __m512 c = _mm512_loadu_ps(centroid + i);
+        __m512 result = _mm512_fmadd_ps(f, normVec, c);
+        _mm512_storeu_ps(to + i, result);
+    }
+    if (i < dim) {
+        for (; i < dim; ++i) {
+            to[i] = from[i] * norm + centroid[i];
+        }
+    }
+#else
+    avx2::InverseNormalizeWithCentroid(from, centroid, to, dim, norm);
+#endif
+}
+
 }  // namespace vsag::avx512

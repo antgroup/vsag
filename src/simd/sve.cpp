@@ -1428,4 +1428,78 @@ FHTRotate(float* data, uint64_t dim_) {
 #endif
 }
 
+float
+NormalizeWithCentroid(const float* from, const float* centroid, float* to, uint64_t dim) {
+#if defined(ENABLE_SVE)
+    if (dim == 0) {
+        return 1.0f;
+    }
+
+    svfloat32_t sum = svdup_f32(0.0f);
+    uint64_t i = 0;
+    const uint64_t step = svcntw();
+
+    svbool_t predicate = svwhilelt_b32(i, dim);
+    do {
+        svfloat32_t f_vec = svld1_f32(predicate, from + i);
+        svfloat32_t c_vec = svld1_f32(predicate, centroid + i);
+        svfloat32_t diff = svsub_f32_z(predicate, f_vec, c_vec);
+        sum = svmla_f32_m(predicate, sum, diff, diff);
+        i += step;
+        predicate = svwhilelt_b32(i, dim);
+    } while (svptest_first(svptrue_b32(), predicate));
+
+    float norm_sq = svaddv_f32(svptrue_b32(), sum);
+    float norm = 0;
+    if (norm_sq < 1e-5f) {
+        norm = 1.0f;
+    } else {
+        norm = std::sqrt(norm_sq);
+    }
+
+    svfloat32_t normVec = svdup_f32(norm);
+    i = 0;
+    predicate = svwhilelt_b32(i, dim);
+    do {
+        svfloat32_t f_vec = svld1_f32(predicate, from + i);
+        svfloat32_t c_vec = svld1_f32(predicate, centroid + i);
+        svfloat32_t diff = svsub_f32_z(predicate, f_vec, c_vec);
+        svfloat32_t result = svdiv_f32_z(predicate, diff, normVec);
+        svst1_f32(predicate, to + i, result);
+        i += step;
+        predicate = svwhilelt_b32(i, dim);
+    } while (svptest_first(svptrue_b32(), predicate));
+
+    return norm;
+#else
+    return neon::NormalizeWithCentroid(from, centroid, to, dim);
+#endif
+}
+
+void
+InverseNormalizeWithCentroid(
+    const float* from, const float* centroid, float* to, uint64_t dim, float norm) {
+#if defined(ENABLE_SVE)
+    if (dim == 0) {
+        return;
+    }
+
+    svfloat32_t normVec = svdup_f32(norm);
+    uint64_t i = 0;
+    const uint64_t step = svcntw();
+
+    svbool_t predicate = svwhilelt_b32(i, dim);
+    do {
+        svfloat32_t f_vec = svld1_f32(predicate, from + i);
+        svfloat32_t c_vec = svld1_f32(predicate, centroid + i);
+        svfloat32_t result = svmad_f32_z(predicate, f_vec, normVec, c_vec);
+        svst1_f32(predicate, to + i, result);
+        i += step;
+        predicate = svwhilelt_b32(i, dim);
+    } while (svptest_first(svptrue_b32(), predicate));
+#else
+    neon::InverseNormalizeWithCentroid(from, centroid, to, dim, norm);
+#endif
+}
+
 }  // namespace vsag::sve
