@@ -205,11 +205,9 @@ ReasoningContext::GenerateReport() const {
                           std::to_string(missed_count) + " missed";
 
     report["expected_analysis"]["summary"].SetString(summary);
-    if (not missed_targets.empty()) {
-        JsonType missed_targets_json;
-        *missed_targets_json.GetInnerJson() = std::move(missed_targets);
-        report["expected_analysis"]["missed_targets"].SetJson(missed_targets_json);
-    }
+    JsonType missed_targets_json;
+    *missed_targets_json.GetInnerJson() = std::move(missed_targets);
+    report["expected_analysis"]["missed_targets"].SetJson(missed_targets_json);
 
     return report.Dump();
 }
