@@ -233,16 +233,18 @@ public:
 
     Vector<InnerIdType>
     get_unique_inner_ids(InnerIdType count) {
+        // Callers commit total_count_ only after resize succeeds.
         Vector<InnerIdType> ret(count, this->allocator_);
         if (ret.size() != count) {
             throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "allocate memory failed");
         }
+        auto next_id = static_cast<InnerIdType>(this->total_count_.load());
         for (InnerIdType i = 0; i < count; ++i) {
             auto [success, id] = this->label_table_->PopHole();
             if (success) {
                 ret[i] = id;
             } else {
-                ret[i] = static_cast<InnerIdType>(this->total_count_++);
+                ret[i] = next_id++;
             }
         }
         return ret;

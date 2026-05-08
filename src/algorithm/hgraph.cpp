@@ -737,7 +737,27 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
     const auto* labels = data->GetIds();
     const auto* vectors = data->GetFloat32Vectors();
     const auto* extra_infos = data->GetExtraInfos();
-    auto inner_ids = this->get_unique_inner_ids(total);
+    Vector<int64_t> valid_indices(allocator_);
+    UnorderedSet<LabelType> seen_labels(allocator_);
+    for (int64_t i = 0; i < total; ++i) {
+        auto label = labels[i];
+        if (this->label_table_->CheckLabel(label) or seen_labels.find(label) != seen_labels.end()) {
+            failed_ids.emplace_back(label);
+            continue;
+        }
+        seen_labels.insert(label);
+        valid_indices.emplace_back(i);
+    }
+    auto inner_ids = this->get_unique_inner_ids(static_cast<InnerIdType>(valid_indices.size()));
+    auto current_count = total_count_.load();
+    uint64_t new_ids_count = 0;
+    for (auto inner_id : inner_ids) {
+        if (inner_id >= current_count) {
+            ++new_ids_count;
+        }
+    }
+    this->resize(current_count + new_ids_count);
+    this->total_count_ += new_ids_count;
     Vector<Vector<InnerIdType>> route_graph_ids(allocator_);
     auto need_sq8_build_data =
         need_temporary_sq8_build_data(this->basic_flatten_codes_, this->has_precise_reorder());
@@ -756,15 +776,10 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
         this->Train(data);
     }
     Vector<std::pair<InnerIdType, int64_t>> deferred_code_ids(allocator_);
-    InnerIdType cur_size = 0;
-    for (int64_t i = 0; i < total; ++i) {
+    for (InnerIdType cur_size = 0; cur_size < valid_indices.size(); ++cur_size) {
+        auto i = valid_indices[cur_size];
         auto label = labels[i];
-        if (this->label_table_->CheckLabel(label)) {
-            failed_ids.emplace_back(label);
-            continue;
-        }
         InnerIdType inner_id = inner_ids.at(cur_size);
-        cur_size++;
         this->label_table_->Insert(inner_id, label);
         if (not defer_persistent_codes) {
             this->insert_persistent_codes(vectors + dim_ * i, inner_id);
@@ -787,7 +802,6 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
             }
         }
     }
-    this->resize(total_count_);
     auto build_data = (has_precise_reorder() and not build_by_base_) ? this->high_precise_codes_
                                                                      : this->basic_flatten_codes_;
     if (need_sq8_build_data) {
@@ -903,8 +917,10 @@ HGraph::Add(const DatasetPtr& data, AddMode mode) {
         {
             std::scoped_lock lock(this->add_mutex_);
             inner_id = this->get_unique_inner_ids(1).at(0);
-            uint64_t new_count = total_count_;
-            this->resize(new_count);
+            if (inner_id >= total_count_) {
+                this->resize(total_count_.load() + 1);
+                ++total_count_;
+            }
         }
 
         {
@@ -2462,6 +2478,10 @@ HGraph::GetVectorByInnerId(InnerIdType inner_id, float* data) const {
     codes = (create_new_raw_vector_) ? raw_vector_ : codes;
     bool release;
     const auto* buffer = codes->GetCodesById(inner_id, release);
+    if (buffer == nullptr) {
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            fmt::format("failed to get vector by inner id {}", inner_id));
+    }
     codes->Decode(buffer, data);
     if (release) {
         codes->Release(buffer);
