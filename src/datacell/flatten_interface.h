@@ -18,11 +18,8 @@
 #include <shared_mutex>
 #include <string>
 
-#include "flatten_datacell_parameter.h"
 #include "flatten_interface_parameter.h"
-#include "impl/runtime_parameter.h"
 #include "index_common_param.h"
-#include "io/reader_io.h"
 #include "quantization/computer.h"
 #include "query_context.h"
 #include "storage/stream_reader.h"
@@ -39,10 +36,6 @@ class FlattenInterface {
 public:
     FlattenInterface() = default;
 
-    static FlattenInterfacePtr
-    MakeInstance(const FlattenInterfaceParamPtr& param, const IndexCommonParam& common_param);
-
-public:
     virtual void
     Query(float* result_dists,
           const ComputerInterfacePtr& computer,

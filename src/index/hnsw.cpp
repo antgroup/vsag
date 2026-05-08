@@ -27,7 +27,10 @@
 #include "algorithm/hnswlib/hnswlib.h"
 #include "common.h"
 #include "datacell/flatten_datacell.h"
+#include "datacell/flatten_datacell_parameter.h"
+#include "datacell/flatten_factory.h"
 #include "datacell/graph_datacell_parameter.h"
+#include "datacell/graph_factory.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/odescent/odescent_graph_builder.h"
 #include "index/hnsw_zparameters.h"
@@ -1172,10 +1175,8 @@ HNSW::merge(const std::vector<MergeUnit>& merge_units) {
     graph_param_ptr->io_parameter_ = std::make_shared<vsag::MemoryBlockIOParameter>();
     graph_param_ptr->max_degree_ = max_degree_ * 2;
 
-    FlattenInterfacePtr flatten_interface =
-        FlattenInterface::MakeInstance(param, index_common_param_);
-    GraphInterfacePtr graph_interface =
-        GraphInterface::MakeInstance(graph_param_ptr, index_common_param_);
+    FlattenInterfacePtr flatten_interface = MakeFlattenInstance(param, index_common_param_);
+    GraphInterfacePtr graph_interface = MakeGraphInstance(graph_param_ptr, index_common_param_);
     Vector<LabelType> ids(allocator_.get());
     // extract data and graph
     IdMapFunction id_map = [](int64_t id) -> std::tuple<bool, int64_t> {

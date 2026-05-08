@@ -18,6 +18,8 @@
 #include <memory>
 #include <utility>
 
+#include "datacell/flatten_factory.h"
+#include "datacell/graph_factory.h"
 #include "datacell/graph_interface.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/filter/filter_headers.h"
@@ -108,7 +110,7 @@ public:
           index_min_size_(pyramid_param->index_min_size),
           graph_type_(pyramid_param->graph_type),
           support_duplicate_(pyramid_param->support_duplicate) {
-        base_codes_ = FlattenInterface::MakeInstance(pyramid_param->base_codes_param, common_param);
+        base_codes_ = MakeFlattenInstance(pyramid_param->base_codes_param, common_param);
         root_ =
             std::make_unique<IndexNode>(allocator_, pyramid_param->graph_param, index_min_size_);
         points_mutex_ = std::make_shared<PointsMutex>(max_capacity_, allocator_);
@@ -116,8 +118,7 @@ public:
         no_build_levels_.assign(pyramid_param->no_build_levels.begin(),
                                 pyramid_param->no_build_levels.end());
         if (use_reorder_) {
-            precise_codes_ =
-                FlattenInterface::MakeInstance(pyramid_param->precise_codes_param, common_param);
+            precise_codes_ = MakeFlattenInstance(pyramid_param->precise_codes_param, common_param);
             reorder_ = std::make_shared<FlattenReorder>(precise_codes_, allocator_);
         }
     }

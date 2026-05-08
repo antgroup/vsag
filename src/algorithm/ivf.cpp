@@ -22,6 +22,7 @@
 #include "algorithm/inner_index_interface.h"
 #include "attr/argparse.h"
 #include "attr/executor/executor.h"
+#include "datacell/flatten_factory.h"
 #include "datacell/flatten_interface.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/inner_search_param.h"
@@ -258,8 +259,7 @@ IVF::IVF(const IVFParameterPtr& param, const IndexCommonParam& common_param)
             common_param, param->ivf_partition_strategy_parameter);
     }
     if (this->use_reorder_) {
-        this->reorder_codes_ =
-            FlattenInterface::MakeInstance(param->precise_codes_param, common_param);
+        this->reorder_codes_ = MakeFlattenInstance(param->precise_codes_param, common_param);
         reorder_ = std::make_shared<FlattenReorder>(this->reorder_codes_, allocator_);
     }
     if (param->bucket_param->use_residual_) {

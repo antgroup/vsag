@@ -18,6 +18,7 @@
 #include <fmt/format.h>
 
 #include "graph_datacell_parameter.h"
+#include "graph_factory.h"
 #include "graph_interface_test.h"
 #include "impl/allocator/safe_allocator.h"
 #include "unittest.h"
@@ -29,9 +30,9 @@ TestCompressedGraphDataCell(const GraphInterfaceParamPtr& param,
     auto count = GENERATE(1000, 2000);
     auto max_id = 10000;
 
-    auto graph = GraphInterface::MakeInstance(param, common_param);
+    auto graph = MakeGraphInstance(param, common_param);
     GraphInterfaceTest test(graph, true);
-    auto other = GraphInterface::MakeInstance(param, common_param);
+    auto other = MakeGraphInstance(param, common_param);
     test.BasicTest(max_id, count, other, false);
 }
 
@@ -71,12 +72,12 @@ TEST_CASE("CompressedGraphDataCell duplicate tracker follows parameter",
     common_param.allocator_ = allocator;
 
     auto disabled_param = std::make_shared<CompressedGraphDatacellParameter>();
-    auto disabled_graph = GraphInterface::MakeInstance(disabled_param, common_param);
+    auto disabled_graph = MakeGraphInstance(disabled_param, common_param);
     REQUIRE(disabled_graph->GetDuplicateTracker() == nullptr);
 
     auto enabled_param = std::make_shared<CompressedGraphDatacellParameter>();
     enabled_param->support_duplicate_ = true;
-    auto enabled_graph = GraphInterface::MakeInstance(enabled_param, common_param);
+    auto enabled_graph = MakeGraphInstance(enabled_param, common_param);
     REQUIRE(enabled_graph->GetDuplicateTracker() != nullptr);
 
     enabled_graph->SetDuplicateId(0, 1);

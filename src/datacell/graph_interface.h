@@ -16,15 +16,11 @@
 #pragma once
 
 #include <cstdint>
-#include <memory>
 #include <mutex>
 #include <vector>
 
 #include "duplicate_interface.h"
-#include "graph_interface_parameter.h"
 #include "impl/reverse_edge.h"
-#include "index_common_param.h"
-#include "inner_string_params.h"
 #include "io/io_parameter.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
@@ -42,10 +38,6 @@ public:
 
     virtual ~GraphInterface() = default;
 
-    static GraphInterfacePtr
-    MakeInstance(const GraphInterfaceParamPtr& graph_param, const IndexCommonParam& common_param);
-
-public:
     virtual void
     InsertNeighborsById(InnerIdType id, const Vector<InnerIdType>& neighbor_ids) = 0;
 

@@ -12,4 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "flatten_interface.h"
+#pragma once
+
+#include "graph_interface.h"
+#include "graph_interface_parameter.h"
+#include "index_common_param.h"
+
+namespace vsag {
+
+GraphInterfacePtr
+MakeGraphInstance(const GraphInterfaceParamPtr& graph_param, const IndexCommonParam& common_param);
+
+}  // namespace vsag

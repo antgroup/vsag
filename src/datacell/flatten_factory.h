@@ -12,4 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#pragma once
+
 #include "flatten_interface.h"
+#include "flatten_interface_parameter.h"
+#include "index_common_param.h"
+
+namespace vsag {
+
+FlattenInterfacePtr
+MakeFlattenInstance(const FlattenInterfaceParamPtr& param, const IndexCommonParam& common_param);
+
+}  // namespace vsag

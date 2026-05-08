@@ -22,7 +22,9 @@
 #include <vector>
 
 #include "data_type.h"
+#include "datacell/flatten_factory.h"
 #include "datacell/graph_datacell_parameter.h"
+#include "datacell/graph_factory.h"
 #include "impl/logger/logger.h"
 #include "io/memory_io_parameter.h"
 #include "quantization/fp32_quantizer_parameter.h"
@@ -996,8 +998,8 @@ TEST_CASE("extract/set data and graph", "[ut][hnsw]") {
     vsag::GraphDataCellParamPtr graph_param_ptr = std::make_shared<vsag::GraphDataCellParameter>();
     graph_param_ptr->io_parameter_ = std::make_shared<vsag::MemoryIOParameter>();
 
-    FlattenInterfacePtr flatten_interface = FlattenInterface::MakeInstance(param, common_param);
-    GraphInterfacePtr graph_interface = GraphInterface::MakeInstance(graph_param_ptr, common_param);
+    FlattenInterfacePtr flatten_interface = MakeFlattenInstance(param, common_param);
+    GraphInterfacePtr graph_interface = MakeGraphInstance(graph_param_ptr, common_param);
     Vector<LabelType> ids_vector(allocator.get());
 
     IdMapFunction id_map = [](int64_t id) -> std::tuple<bool, int64_t> {

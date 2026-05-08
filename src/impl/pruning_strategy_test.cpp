@@ -20,10 +20,10 @@
 #include <memory>
 #include <vector>
 
-#include "datacell/flatten_datacell.h"
 #include "datacell/flatten_datacell_parameter.h"
+#include "datacell/flatten_factory.h"
 #include "datacell/graph_datacell_parameter.h"
-#include "datacell/graph_interface.h"
+#include "datacell/graph_factory.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/heap/standard_heap.h"
 #include "io/memory_io_parameter.h"
@@ -51,7 +51,7 @@ TEST_CASE("Pruning Strategy Select Edges With Heuristic", "[ut][pruning_strategy
     common_param.dim_ = 128;
 
     // Create flatten interface instance with configured parameters
-    auto flatten = FlattenInterface::MakeInstance(flatten_param, common_param);
+    auto flatten = MakeFlattenInstance(flatten_param, common_param);
     REQUIRE(flatten != nullptr);
 
     float vectors[5][128] = {0};
@@ -175,7 +175,7 @@ TEST_CASE("Pruning Strategy Select Edges With Heuristic", "[ut][pruning_strategy
         auto graph_param = std::make_shared<GraphDataCellParameter>();
         graph_param->io_parameter_ = std::make_shared<MemoryIOParameter>();
         graph_param->max_degree_ = 4;
-        auto graph = GraphInterface::MakeInstance(graph_param, common_param);
+        auto graph = MakeGraphInstance(graph_param, common_param);
 
         auto candidates = std::make_shared<StandardHeap<true, false>>(allocator.get(), -1);
         candidates->Push(d01, 1);

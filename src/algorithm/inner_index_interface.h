@@ -23,7 +23,6 @@
 #include "datacell/attribute_inverted_interface.h"
 #include "datacell/extra_info_interface.h"
 #include "datacell/flatten_interface.h"
-#include "dataset_impl.h"
 #include "inner_index_parameter.h"
 #include "metric_type.h"
 #include "parameter.h"

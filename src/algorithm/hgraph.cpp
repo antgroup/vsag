@@ -26,7 +26,9 @@
 #include "analyzer/analyzer.h"
 #include "attr/argparse.h"
 #include "common.h"
+#include "datacell/flatten_factory.h"
 #include "datacell/flatten_interface.h"
+#include "datacell/graph_factory.h"
 #include "datacell/sparse_graph_datacell.h"
 #include "dataset_impl.h"
 #include "impl/filter/filter_headers.h"
@@ -70,16 +72,14 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
     this->label_table_->support_tombstone_ = hgraph_param->support_tombstone;
     this->support_duplicate_ = hgraph_param->support_duplicate;
     neighbors_mutex_ = std::make_shared<PointsMutex>(0, common_param.allocator_.get());
-    this->basic_flatten_codes_ =
-        FlattenInterface::MakeInstance(hgraph_param->base_codes_param, common_param);
+    this->basic_flatten_codes_ = MakeFlattenInstance(hgraph_param->base_codes_param, common_param);
     if (use_reorder_) {
         this->high_precise_codes_ =
-            FlattenInterface::MakeInstance(hgraph_param->precise_codes_param, common_param);
+            MakeFlattenInstance(hgraph_param->precise_codes_param, common_param);
     }
     this->searcher_ = std::make_shared<BasicSearcher>(common_param, neighbors_mutex_);
 
-    this->bottom_graph_ =
-        GraphInterface::MakeInstance(hgraph_param->bottom_graph_param, common_param);
+    this->bottom_graph_ = MakeGraphInstance(hgraph_param->bottom_graph_param, common_param);
     if (this->support_duplicate_) {
         this->label_table_->SetDuplicateTracker(this->bottom_graph_->GetDuplicateTracker());
     }
@@ -559,12 +559,10 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
 
     // init new_basic_code obj
     auto common_param = this->basic_flatten_codes_->ExportCommonParam();
-    auto new_basic_code =
-        FlattenInterface::MakeInstance(hgraph_parameter->base_codes_param, common_param);
+    auto new_basic_code = MakeFlattenInstance(hgraph_parameter->base_codes_param, common_param);
     FlattenInterfacePtr new_precise_code;
     if (inner_parameter->use_reorder) {
-        new_precise_code =
-            FlattenInterface::MakeInstance(hgraph_parameter->precise_codes_param, common_param);
+        new_precise_code = MakeFlattenInstance(hgraph_parameter->precise_codes_param, common_param);
     }
 
     std::scoped_lock lock(this->add_mutex_);
@@ -2475,7 +2473,7 @@ HGraph::check_and_init_raw_vector(const FlattenInterfaceParamPtr& raw_vector_par
     }
 
     if (is_create_new) {
-        raw_vector_ = FlattenInterface::MakeInstance(raw_vector_param, common_param);
+        raw_vector_ = MakeFlattenInstance(raw_vector_param, common_param);
     }
 
     if (basic_flatten_codes_->GetQuantizerName() != QUANTIZATION_TYPE_VALUE_FP32 and

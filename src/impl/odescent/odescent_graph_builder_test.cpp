@@ -18,8 +18,8 @@
 #include <filesystem>
 #include <set>
 
-#include "datacell/flatten_interface.h"
-#include "datacell/graph_interface.h"
+#include "datacell/flatten_factory.h"
+#include "datacell/graph_factory.h"
 #include "impl/allocator/safe_allocator.h"
 #include "io/memory_io_parameter.h"
 #include "quantization/fp32_quantizer_parameter.h"
@@ -86,7 +86,7 @@ TEST_CASE("ODescent Build Test", "[ut][ODescent]") {
     flatten_param->quantizer_parameter = std::make_shared<vsag::FP32QuantizerParameter>();
     flatten_param->io_parameter = std::make_shared<vsag::MemoryIOParameter>();
     vsag::FlattenInterfacePtr flatten_interface_ptr =
-        vsag::FlattenInterface::MakeInstance(flatten_param, param);
+        vsag::MakeFlattenInstance(flatten_param, param);
     flatten_interface_ptr->Train(vectors.data(), num_vectors);
     flatten_interface_ptr->BatchInsertVector(vectors.data(), num_vectors);
 
@@ -119,12 +119,10 @@ TEST_CASE("ODescent Build Test", "[ut][ODescent]") {
     auto id_map = [&](uint32_t id) -> uint32_t { return partial_data ? valid_ids[id] : id; };
 
     // check result
-    vsag::GraphInterfacePtr graph_interface =
-        vsag::GraphInterface::MakeInstance(graph_param_ptr, param);
-    vsag::GraphInterfacePtr half_graph_interface =
-        vsag::GraphInterface::MakeInstance(graph_param_ptr, param);
+    vsag::GraphInterfacePtr graph_interface = vsag::MakeGraphInstance(graph_param_ptr, param);
+    vsag::GraphInterfacePtr half_graph_interface = vsag::MakeGraphInstance(graph_param_ptr, param);
     vsag::GraphInterfacePtr merged_graph_interface =
-        vsag::GraphInterface::MakeInstance(graph_param_ptr, param);
+        vsag::MakeGraphInstance(graph_param_ptr, param);
     graph.Build(valid_ids);
     graph.SaveGraph(graph_interface);
 

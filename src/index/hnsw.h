@@ -35,7 +35,6 @@
 #include "impl/allocator/safe_allocator.h"
 #include "impl/conjugate_graph.h"
 #include "impl/filter/filter_headers.h"
-#include "impl/logger/logger.h"
 #include "index_common_param.h"
 #include "index_feature_list.h"
 #include "index_impl.h"
