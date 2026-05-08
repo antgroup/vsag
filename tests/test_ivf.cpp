@@ -291,6 +291,77 @@ IVFTestIndex::TestGeneral(const TestIndex::IndexPtr& index,
 }
 }  // namespace fixtures
 
+namespace {
+
+template <typename Fn>
+void
+RunWithGeneratedBlockSizeLimit(Fn&& fn) {
+    const auto origin_size = vsag::Options::Instance().block_size_limit();
+    const auto size = GENERATE(1024 * 1024 * 2);
+    vsag::Options::Instance().set_block_size_limit(size);
+    fn();
+    vsag::Options::Instance().set_block_size_limit(origin_size);
+}
+
+inline float
+AdjustIVFRecall(float recall,
+                const std::string& train_type,
+                const std::string& base_quantization_str,
+                int64_t dim) {
+    if (train_type == "kmeans") {
+        recall *= 0.8F;
+    }
+    if (base_quantization_str == "fp16") {
+        recall *= (dim < 8192 ? (1.0F - static_cast<float>(dim) / 8192.0F) : 0.0F);
+    }
+    return recall;
+}
+
+template <typename Cases, typename RecallFn, typename Fn>
+void
+ForEachIVFCase(const fixtures::IVFResourcePtr& resource,
+               const Cases& test_cases,
+               RecallFn&& recall_fn,
+               Fn&& fn) {
+    for (const auto& metric_type : resource->metric_types) {
+        for (auto dim : resource->dims) {
+            for (const auto& train_type : resource->train_types) {
+                for (const auto& [base_quantization_str, base_recall] : test_cases) {
+                    const auto recall =
+                        recall_fn(base_recall, train_type, base_quantization_str, dim);
+                    INFO(
+                        fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, "
+                                    "train_type: {}, recall: {}",
+                                    metric_type,
+                                    dim,
+                                    base_quantization_str,
+                                    train_type,
+                                    recall));
+                    fn(metric_type, dim, train_type, base_quantization_str, recall);
+                }
+            }
+        }
+    }
+}
+
+template <typename Cases, typename Fn>
+void
+ForEachIVFCase(const fixtures::IVFResourcePtr& resource, const Cases& test_cases, Fn&& fn) {
+    ForEachIVFCase(resource, test_cases, AdjustIVFRecall, std::forward<Fn>(fn));
+}
+
+#define IVF_PR_DAILY_CASE(title, tags, helper)                      \
+    TEST_CASE("(PR) " title, tags "[pr]") {                         \
+        auto resource = fixtures::IVFTestIndex::GetResource(true);  \
+        helper(resource);                                           \
+    }                                                               \
+    TEST_CASE("(Daily) " title, tags "[daily]") {                   \
+        auto resource = fixtures::IVFTestIndex::GetResource(false); \
+        helper(resource);                                           \
+    }
+
+}  // namespace
+
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
                              "IVF Factory Test With Exceptions",
                              "[ft][ivf]") {
@@ -418,64 +489,38 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
 static void
 TestIVFBuildAndContinueAdd(const fixtures::IVFResourcePtr& resource) {
     using namespace fixtures;
-    auto origin_size = vsag::Options::Instance().block_size_limit();
-    auto size = GENERATE(1024 * 1024 * 2);
-    for (auto metric_type : resource->metric_types) {
-        for (auto dim : resource->dims) {
-            for (auto train_type : resource->train_types) {
-                for (auto [base_quantization_str, recall] : resource->test_cases) {
-                    if (train_type == "kmeans") {
-                        recall *= 0.8F;  // Kmeans may not achieve high recall in random datasets
-                    }
-                    if (base_quantization_str == "fp16") {
-                        recall *= (1 - dim / 8192.0F);
-                    }
-                    auto count = std::min(300, static_cast<int32_t>(dim / 4));
-                    auto search_param =
-                        fmt::format(fixtures::search_param_tmp, std::max(250, count));
-                    INFO(
-                        fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, "
-                                    "train_type: {}, recall: {}",
-                                    metric_type,
-                                    dim,
-                                    base_quantization_str,
-                                    train_type,
-                                    recall));
-                    vsag::Options::Instance().set_block_size_limit(size);
-                    auto param = IVFTestIndex::GenerateIVFBuildParametersString(
-                        metric_type, dim, base_quantization_str, 300, train_type);
-                    auto index = TestIndex::TestFactory(IVFTestIndex::name, param, true);
-                    auto dataset = IVFTestIndex::pool.GetDatasetAndCreate(
-                        dim, resource->base_count, metric_type);
-                    TestIndex::TestContinueAdd(index, dataset, true);
-                    if (index->CheckFeature(vsag::SUPPORT_ADD_AFTER_BUILD)) {
-                        IVFTestIndex::TestGeneral(index, dataset, search_param, recall);
-                        TestIndex::TestExportIDs(index, dataset);
-                    }
-                    vsag::Options::Instance().set_block_size_limit(origin_size);
-                }
-            }
-        }
-    }
+    ForEachIVFCase(resource,
+                   resource->test_cases,
+                   [&](const auto& metric_type,
+                       int64_t dim,
+                       const auto& train_type,
+                       const auto& base_quantization_str,
+                       float recall) {
+                       RunWithGeneratedBlockSizeLimit([&] {
+                           const auto count = std::min(300, static_cast<int32_t>(dim / 4));
+                           const auto search_param =
+                               fmt::format(fixtures::search_param_tmp, std::max(250, count));
+                           auto param = IVFTestIndex::GenerateIVFBuildParametersString(
+                               metric_type, dim, base_quantization_str, 300, train_type);
+                           auto index = TestIndex::TestFactory(IVFTestIndex::name, param, true);
+                           auto dataset = IVFTestIndex::pool.GetDatasetAndCreate(
+                               dim, resource->base_count, metric_type);
+                           TestIndex::TestContinueAdd(index, dataset, true);
+                           if (index->CheckFeature(vsag::SUPPORT_ADD_AFTER_BUILD)) {
+                               IVFTestIndex::TestGeneral(index, dataset, search_param, recall);
+                               TestIndex::TestExportIDs(index, dataset);
+                           }
+                       });
+                   });
 }
 
-TEST_CASE("(PR) IVF Build & ContinueAdd Test", "[ft][build][concurrent][ivf][pr]") {
-    auto test_index = std::make_shared<fixtures::IVFTestIndex>();
-    auto resource = test_index->GetResource(true);
-    TestIVFBuildAndContinueAdd(resource);
-}
-
-TEST_CASE("(Daily) IVF Build & ContinueAdd Test", "[ft][build][concurrent][ivf][daily]") {
-    auto test_index = std::make_shared<fixtures::IVFTestIndex>();
-    auto resource = test_index->GetResource(false);
-    TestIVFBuildAndContinueAdd(resource);
-}
+IVF_PR_DAILY_CASE("IVF Build & ContinueAdd Test",
+                  "[ft][build][concurrent][ivf]",
+                  TestIVFBuildAndContinueAdd)
 
 static void
 TestIVFBuildWithResidual(const fixtures::IVFResourcePtr& resource) {
     using namespace fixtures;
-    auto origin_size = vsag::Options::Instance().block_size_limit();
-    auto size = GENERATE(1024 * 1024 * 2);
     std::vector<std::pair<std::string, float>> tmp_test_cases = {
         {"fp32", 0.90},
         {"bf16", 0.88},
@@ -484,61 +529,35 @@ TestIVFBuildWithResidual(const fixtures::IVFResourcePtr& resource) {
         {"pq,fp32", 0.82},
         {"pqfs,fp32", 0.82},
     };
-    for (auto metric_type : resource->metric_types) {
-        for (auto dim : resource->dims) {
-            for (auto train_type : resource->train_types) {
-                for (auto [base_quantization_str, recall] : tmp_test_cases) {
-                    auto count = std::min(300, static_cast<int32_t>(dim / 4));
-                    if (train_type == "kmeans") {
-                        recall *= 0.8F;  // Kmeans may not achieve high recall in random datasets
-                    }
-                    if (base_quantization_str == "fp16") {
-                        recall *= (1 - dim / 8192.0F);
-                    }
-                    auto search_param =
-                        fmt::format(fixtures::search_param_tmp, std::max(250, count));
-                    INFO(
-                        fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, "
-                                    "train_type: {}, recall: {}",
-                                    metric_type,
-                                    dim,
-                                    base_quantization_str,
-                                    train_type,
-                                    recall));
-                    vsag::Options::Instance().set_block_size_limit(size);
-                    auto param = IVFTestIndex::GenerateIVFBuildParametersString(
-                        metric_type, dim, base_quantization_str, 300, train_type, true);
-                    auto index = IVFTestIndex::TestFactory(IVFTestIndex::name, param, true);
-                    auto dataset = IVFTestIndex::pool.GetDatasetAndCreate(
-                        dim, resource->base_count, metric_type);
-                    IVFTestIndex::TestContinueAdd(index, dataset, true);
-                    if (index->CheckFeature(vsag::SUPPORT_ADD_AFTER_BUILD)) {
-                        IVFTestIndex::TestGeneral(index, dataset, search_param, recall);
-                    }
-                    vsag::Options::Instance().set_block_size_limit(origin_size);
-                }
-            }
-        }
-    }
+    ForEachIVFCase(resource,
+                   tmp_test_cases,
+                   [&](const auto& metric_type,
+                       int64_t dim,
+                       const auto& train_type,
+                       const auto& base_quantization_str,
+                       float recall) {
+                       RunWithGeneratedBlockSizeLimit([&] {
+                           const auto count = std::min(300, static_cast<int32_t>(dim / 4));
+                           const auto search_param =
+                               fmt::format(fixtures::search_param_tmp, std::max(250, count));
+                           auto param = IVFTestIndex::GenerateIVFBuildParametersString(
+                               metric_type, dim, base_quantization_str, 300, train_type, true);
+                           auto index = IVFTestIndex::TestFactory(IVFTestIndex::name, param, true);
+                           auto dataset = IVFTestIndex::pool.GetDatasetAndCreate(
+                               dim, resource->base_count, metric_type);
+                           IVFTestIndex::TestContinueAdd(index, dataset, true);
+                           if (index->CheckFeature(vsag::SUPPORT_ADD_AFTER_BUILD)) {
+                               IVFTestIndex::TestGeneral(index, dataset, search_param, recall);
+                           }
+                       });
+                   });
 }
 
-TEST_CASE("(PR) IVF Build with Residual", "[ft][build][ivf][pr]") {
-    auto test_index = std::make_shared<fixtures::IVFTestIndex>();
-    auto resource = test_index->GetResource(true);
-    TestIVFBuildWithResidual(resource);
-}
-
-TEST_CASE("(Daily) IVF Build with Residual", "[ft][build][ivf][daily]") {
-    auto test_index = std::make_shared<fixtures::IVFTestIndex>();
-    auto resource = test_index->GetResource(false);
-    TestIVFBuildWithResidual(resource);
-}
+IVF_PR_DAILY_CASE("IVF Build with Residual", "[ft][build][ivf]", TestIVFBuildWithResidual)
 
 static void
 TestIVFBuild(const fixtures::IVFResourcePtr& resource) {
     using namespace fixtures;
-    auto origin_size = vsag::Options::Instance().block_size_limit();
-    auto size = GENERATE(1024 * 1024 * 2);
     std::vector<int32_t> search_threads_counts{1, 3};
     constexpr static const char* search_param_tmp2 = R"(
         {{
@@ -549,66 +568,34 @@ TestIVFBuild(const fixtures::IVFResourcePtr& resource) {
                 "parallelism": {}
             }}
         }})";
-    for (auto metric_type : resource->metric_types) {
-        for (auto dim : resource->dims) {
-            for (auto train_type : resource->train_types) {
-                for (auto [base_quantization_str, recall] : resource->test_cases) {
-                    auto count = std::min(300, static_cast<int32_t>(dim / 4));
-                    if (train_type == "kmeans") {
-                        recall *= 0.8F;  // Kmeans may not achieve high recall in random datasets
+    ForEachIVFCase(
+        resource,
+        resource->test_cases,
+        [&](const auto& metric_type,
+            int64_t dim,
+            const auto& train_type,
+            const auto& base_quantization_str,
+            float recall) {
+            RunWithGeneratedBlockSizeLimit([&] {
+                const auto count = std::min(300, static_cast<int32_t>(dim / 4));
+                auto param = IVFTestIndex::GenerateIVFBuildParametersString(
+                    metric_type, dim, base_quantization_str, 300, train_type, false, 1, false, 3);
+                auto index = IVFTestIndex::TestFactory(IVFTestIndex::name, param, true);
+                auto dataset =
+                    IVFTestIndex::pool.GetDatasetAndCreate(dim, resource->base_count, metric_type);
+                IVFTestIndex::TestBuildIndex(index, dataset, true);
+                if (index->CheckFeature(vsag::SUPPORT_BUILD)) {
+                    for (auto search_thread_count : search_threads_counts) {
+                        auto search_param = fmt::format(
+                            search_param_tmp2, std::max(200, count), search_thread_count);
+                        IVFTestIndex::TestGeneral(index, dataset, search_param, recall);
                     }
-                    if (base_quantization_str == "fp16") {
-                        recall *= (1 - dim / 8192.0F);
-                    }
-
-                    INFO(
-                        fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, "
-                                    "train_type: {}, recall: {}",
-                                    metric_type,
-                                    dim,
-                                    base_quantization_str,
-                                    train_type,
-                                    recall));
-                    vsag::Options::Instance().set_block_size_limit(size);
-                    auto param =
-                        IVFTestIndex::GenerateIVFBuildParametersString(metric_type,
-                                                                       dim,
-                                                                       base_quantization_str,
-                                                                       300,
-                                                                       train_type,
-                                                                       false,
-                                                                       1,
-                                                                       false,
-                                                                       3);
-                    auto index = IVFTestIndex::TestFactory(IVFTestIndex::name, param, true);
-                    auto dataset = IVFTestIndex::pool.GetDatasetAndCreate(
-                        dim, resource->base_count, metric_type);
-                    IVFTestIndex::TestBuildIndex(index, dataset, true);
-                    if (index->CheckFeature(vsag::SUPPORT_BUILD)) {
-                        for (auto search_thread_count : search_threads_counts) {
-                            auto search_param = fmt::format(
-                                search_param_tmp2, std::max(200, count), search_thread_count);
-                            IVFTestIndex::TestGeneral(index, dataset, search_param, recall);
-                        }
-                    }
-                    vsag::Options::Instance().set_block_size_limit(origin_size);
                 }
-            }
-        }
-    }
+            });
+        });
 }
 
-TEST_CASE("(PR) IVF Build", "[ft][build][ivf][pr]") {
-    auto test_index = std::make_shared<fixtures::IVFTestIndex>();
-    auto resource = test_index->GetResource(true);
-    TestIVFBuild(resource);
-}
-
-TEST_CASE("(Daily) IVF Build", "[ft][build][ivf][daily]") {
-    auto test_index = std::make_shared<fixtures::IVFTestIndex>();
-    auto resource = test_index->GetResource(false);
-    TestIVFBuild(resource);
-}
+IVF_PR_DAILY_CASE("IVF Build", "[ft][build][ivf]", TestIVFBuild)
 
 static void
 TestIVFSearchOvertime(const fixtures::IVFResourcePtr& resource) {
@@ -667,17 +654,7 @@ TestIVFSearchOvertime(const fixtures::IVFResourcePtr& resource) {
     }
 }
 
-TEST_CASE("(PR) IVF Search Overtime", "[ft][search][ivf][pr]") {
-    auto test_index = std::make_shared<fixtures::IVFTestIndex>();
-    auto resource = test_index->GetResource(true);
-    TestIVFSearchOvertime(resource);
-}
-
-TEST_CASE("(Daily) IVF Search Overtime", "[ft][search][ivf][daily]") {
-    auto test_index = std::make_shared<fixtures::IVFTestIndex>();
-    auto resource = test_index->GetResource(false);
-    TestIVFSearchOvertime(resource);
-}
+IVF_PR_DAILY_CASE("IVF Search Overtime", "[ft][search][ivf]", TestIVFSearchOvertime)
 
 static void
 TestIVFBuildWithLargeK(const fixtures::IVFResourcePtr& resource) {
@@ -720,70 +697,34 @@ TestIVFBuildWithLargeK(const fixtures::IVFResourcePtr& resource) {
     }
 }
 
-TEST_CASE("(PR) IVF Build With Large K", "[ft][build][ivf][pr]") {
-    auto test_index = std::make_shared<fixtures::IVFTestIndex>();
-    auto resource = test_index->GetResource(true);
-    TestIVFBuildWithLargeK(resource);
-}
-
-TEST_CASE("(Daily) IVF Build With Large K", "[ft][build][ivf][daily]") {
-    auto test_index = std::make_shared<fixtures::IVFTestIndex>();
-    auto resource = test_index->GetResource(false);
-    TestIVFBuildWithLargeK(resource);
-}
+IVF_PR_DAILY_CASE("IVF Build With Large K", "[ft][build][ivf]", TestIVFBuildWithLargeK)
 
 static void
 TestIVFMarkRemove(const fixtures::IVFResourcePtr& resource) {
     using namespace fixtures;
-    auto origin_size = vsag::Options::Instance().block_size_limit();
-    auto size = GENERATE(1024 * 1024 * 2);
-    for (auto metric_type : resource->metric_types) {
-        for (auto dim : resource->dims) {
-            for (auto train_type : resource->train_types) {
-                for (auto [base_quantization_str, recall] : resource->test_cases) {
-                    if (train_type == "kmeans") {
-                        recall *= 0.8F;  // Kmeans may not achieve high recall in random datasets
-                    }
-                    if (base_quantization_str == "fp16") {
-                        recall *= (1 - dim / 8192.0F);
-                    }
-                    auto count = std::min(300, static_cast<int32_t>(dim / 4));
-                    auto search_param =
-                        fmt::format(fixtures::search_param_tmp, std::max(250, count));
-                    INFO(
-                        fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, "
-                                    "train_type: {}, recall: {}",
-                                    metric_type,
-                                    dim,
-                                    base_quantization_str,
-                                    train_type,
-                                    recall));
-                    vsag::Options::Instance().set_block_size_limit(size);
-                    auto param = IVFTestIndex::GenerateIVFBuildParametersString(
-                        metric_type, dim, base_quantization_str, 300, train_type);
-                    auto index = TestIndex::TestFactory(IVFTestIndex::name, param, true);
-                    auto dataset = IVFTestIndex::pool.GetDatasetAndCreate(
-                        dim, resource->base_count, metric_type);
-                    TestIndex::TestMarkRemoveIndex(index, dataset, search_param, true);
-                    IVFTestIndex::TestGeneral(index, dataset, search_param, recall);
-                    vsag::Options::Instance().set_block_size_limit(origin_size);
-                }
-            }
-        }
-    }
+    ForEachIVFCase(resource,
+                   resource->test_cases,
+                   [&](const auto& metric_type,
+                       int64_t dim,
+                       const auto& train_type,
+                       const auto& base_quantization_str,
+                       float recall) {
+                       RunWithGeneratedBlockSizeLimit([&] {
+                           const auto count = std::min(300, static_cast<int32_t>(dim / 4));
+                           const auto search_param =
+                               fmt::format(fixtures::search_param_tmp, std::max(250, count));
+                           auto param = IVFTestIndex::GenerateIVFBuildParametersString(
+                               metric_type, dim, base_quantization_str, 300, train_type);
+                           auto index = TestIndex::TestFactory(IVFTestIndex::name, param, true);
+                           auto dataset = IVFTestIndex::pool.GetDatasetAndCreate(
+                               dim, resource->base_count, metric_type);
+                           TestIndex::TestMarkRemoveIndex(index, dataset, search_param, true);
+                           IVFTestIndex::TestGeneral(index, dataset, search_param, recall);
+                       });
+                   });
 }
 
-TEST_CASE("(PR) IVF Mark Remove", "[ft][remove][ivf][pr]") {
-    auto test_index = std::make_shared<fixtures::IVFTestIndex>();
-    auto resource = test_index->GetResource(true);
-    TestIVFMarkRemove(resource);
-}
-
-TEST_CASE("(Daily) IVF Mark Remove", "[ft][remove][ivf][daily]") {
-    auto test_index = std::make_shared<fixtures::IVFTestIndex>();
-    auto resource = test_index->GetResource(false);
-    TestIVFMarkRemove(resource);
-}
+IVF_PR_DAILY_CASE("IVF Mark Remove", "[ft][remove][ivf]", TestIVFMarkRemove)
 
 static void
 TestIVFWithAttr(const fixtures::IVFResourcePtr& resource) {
@@ -849,17 +790,7 @@ TestIVFWithAttr(const fixtures::IVFResourcePtr& resource) {
     }
 }
 
-TEST_CASE("(PR) IVF Build With Attribute", "[ft][filter_search][ivf][build][pr]") {
-    auto test_index = std::make_shared<fixtures::IVFTestIndex>();
-    auto resource = test_index->GetResource(true);
-    TestIVFWithAttr(resource);
-}
-
-TEST_CASE("(Daily) IVF Build With Attribute", "[ft][filter_search][ivf][build][daily]") {
-    auto test_index = std::make_shared<fixtures::IVFTestIndex>();
-    auto resource = test_index->GetResource(false);
-    TestIVFWithAttr(resource);
-}
+IVF_PR_DAILY_CASE("IVF Build With Attribute", "[ft][filter_search][ivf][build]", TestIVFWithAttr)
 
 static void
 TestIVFExportModel(const fixtures::IVFResourcePtr& resource) {
@@ -917,249 +848,157 @@ TEST_CASE("(Daily) IVF IVF Export Model", "[ft][export][ivf][daily]") {
 static void
 TestIVFAdd(const fixtures::IVFResourcePtr& resource) {
     using namespace fixtures;
-    auto origin_size = vsag::Options::Instance().block_size_limit();
-    auto size = GENERATE(1024 * 1024 * 2);
-    for (auto metric_type : resource->metric_types) {
-        for (auto dim : resource->dims) {
-            for (auto train_type : resource->train_types) {
-                for (auto [base_quantization_str, recall] : resource->test_cases) {
-                    if (train_type == "kmeans") {
-                        recall *= 0.8F;  // Kmeans may not achieve high recall in random datasets
-                    }
-                    auto count = std::min(300, static_cast<int32_t>(dim / 4));
-                    auto search_param =
-                        fmt::format(fixtures::search_param_tmp, std::max(200, count));
-                    INFO(
-                        fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, "
-                                    "train_type: {}, recall: {}",
-                                    metric_type,
-                                    dim,
-                                    base_quantization_str,
-                                    train_type,
-                                    recall));
-                    vsag::Options::Instance().set_block_size_limit(size);
-                    auto param = IVFTestIndex::GenerateIVFBuildParametersString(
-                        metric_type, dim, base_quantization_str, 300, train_type);
-                    auto index = IVFTestIndex::TestFactory(IVFTestIndex::name, param, true);
-                    auto dataset = IVFTestIndex::pool.GetDatasetAndCreate(
-                        dim, resource->base_count, metric_type);
-                    IVFTestIndex::TestAddIndex(index, dataset, true);
-                    if (index->CheckFeature(vsag::SUPPORT_ADD_FROM_EMPTY)) {
-                        IVFTestIndex::TestGeneral(index, dataset, search_param, recall);
-                    }
-                    vsag::Options::Instance().set_block_size_limit(origin_size);
-                }
-            }
-        }
-    }
+    ForEachIVFCase(resource,
+                   resource->test_cases,
+                   [&](const auto& metric_type,
+                       int64_t dim,
+                       const auto& train_type,
+                       const auto& base_quantization_str,
+                       float recall) {
+                       RunWithGeneratedBlockSizeLimit([&] {
+                           const auto count = std::min(300, static_cast<int32_t>(dim / 4));
+                           const auto search_param =
+                               fmt::format(fixtures::search_param_tmp, std::max(200, count));
+                           auto param = IVFTestIndex::GenerateIVFBuildParametersString(
+                               metric_type, dim, base_quantization_str, 300, train_type);
+                           auto index = IVFTestIndex::TestFactory(IVFTestIndex::name, param, true);
+                           auto dataset = IVFTestIndex::pool.GetDatasetAndCreate(
+                               dim, resource->base_count, metric_type);
+                           IVFTestIndex::TestAddIndex(index, dataset, true);
+                           if (index->CheckFeature(vsag::SUPPORT_ADD_FROM_EMPTY)) {
+                               IVFTestIndex::TestGeneral(index, dataset, search_param, recall);
+                           }
+                       });
+                   });
 }
 
-TEST_CASE("(PR) IVF Add", "[ft][build][ivf][pr]") {
-    auto test_index = std::make_shared<fixtures::IVFTestIndex>();
-    auto resource = test_index->GetResource(true);
-    TestIVFAdd(resource);
-}
-
-TEST_CASE("(Daily) IVF Add", "[ft][build][ivf][daily]") {
-    auto test_index = std::make_shared<fixtures::IVFTestIndex>();
-    auto resource = test_index->GetResource(false);
-    TestIVFAdd(resource);
-}
+IVF_PR_DAILY_CASE("IVF Add", "[ft][build][ivf]", TestIVFAdd)
 
 static void
 TestIVFMerge(const fixtures::IVFResourcePtr& resource) {
     using namespace fixtures;
-    auto origin_size = vsag::Options::Instance().block_size_limit();
-    auto size = GENERATE(1024 * 1024 * 2);
-    for (auto metric_type : resource->metric_types) {
-        for (auto dim : resource->dims) {
-            for (auto train_type : resource->train_types) {
-                for (auto [base_quantization_str, recall] : resource->test_cases) {
-                    if (train_type == "kmeans") {
-                        recall *= 0.8F;  // Kmeans may not achieve high recall in random datasets
-                    }
-                    if (base_quantization_str == "fp16") {
-                        recall *= (1 - dim / 8192.0F);
-                    }
-                    auto count = std::min(300, static_cast<int32_t>(dim / 4));
-                    auto search_param =
-                        fmt::format(fixtures::search_param_tmp, std::max(200, count));
-                    INFO(
-                        fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, "
-                                    "train_type: {}, recall: {}",
-                                    metric_type,
-                                    dim,
-                                    base_quantization_str,
-                                    train_type,
-                                    recall));
-                    vsag::Options::Instance().set_block_size_limit(size);
-                    auto param = IVFTestIndex::GenerateIVFBuildParametersString(
-                        metric_type, dim, base_quantization_str, 300, train_type);
-                    auto model = IVFTestIndex::TestFactory(IVFTestIndex::name, param, true);
-                    auto dataset = IVFTestIndex::pool.GetDatasetAndCreate(
-                        dim, resource->base_count, metric_type);
-                    auto ret = model->Train(dataset->base_);
-                    REQUIRE(ret.has_value() == true);
-                    auto merge_index =
-                        IVFTestIndex::TestMergeIndexWithSameModel(model, dataset, 5, true);
-                    if (model->CheckFeature(vsag::SUPPORT_MERGE_INDEX)) {
-                        IVFTestIndex::TestGeneral(merge_index, dataset, search_param, recall);
-                    }
-                    vsag::Options::Instance().set_block_size_limit(origin_size);
+    ForEachIVFCase(
+        resource,
+        resource->test_cases,
+        [&](const auto& metric_type,
+            int64_t dim,
+            const auto& train_type,
+            const auto& base_quantization_str,
+            float recall) {
+            RunWithGeneratedBlockSizeLimit([&] {
+                const auto count = std::min(300, static_cast<int32_t>(dim / 4));
+                const auto search_param =
+                    fmt::format(fixtures::search_param_tmp, std::max(200, count));
+                auto param = IVFTestIndex::GenerateIVFBuildParametersString(
+                    metric_type, dim, base_quantization_str, 300, train_type);
+                auto model = IVFTestIndex::TestFactory(IVFTestIndex::name, param, true);
+                auto dataset =
+                    IVFTestIndex::pool.GetDatasetAndCreate(dim, resource->base_count, metric_type);
+                auto ret = model->Train(dataset->base_);
+                REQUIRE(ret.has_value() == true);
+                auto merge_index =
+                    IVFTestIndex::TestMergeIndexWithSameModel(model, dataset, 5, true);
+                if (model->CheckFeature(vsag::SUPPORT_MERGE_INDEX)) {
+                    IVFTestIndex::TestGeneral(merge_index, dataset, search_param, recall);
                 }
-            }
-        }
-    }
+            });
+        });
 }
 
-TEST_CASE("(PR) IVF Merge", "[ft][merge][ivf][pr]") {
-    auto test_index = std::make_shared<fixtures::IVFTestIndex>();
-    auto resource = test_index->GetResource(true);
-    TestIVFMerge(resource);
-}
-
-TEST_CASE("(Daily) IVF Merge", "[ft][merge][ivf][daily]") {
-    auto test_index = std::make_shared<fixtures::IVFTestIndex>();
-    auto resource = test_index->GetResource(false);
-    TestIVFMerge(resource);
-}
+IVF_PR_DAILY_CASE("IVF Merge", "[ft][merge][ivf]", TestIVFMerge)
 
 static void
 TestIVFConcurrentAdd(const fixtures::IVFResourcePtr& resource) {
     using namespace fixtures;
-    auto origin_size = vsag::Options::Instance().block_size_limit();
-    auto size = GENERATE(1024 * 1024 * 2);
-    for (auto metric_type : resource->metric_types) {
-        for (auto dim : resource->dims) {
-            for (auto train_type : resource->train_types) {
-                for (auto [base_quantization_str, recall] : resource->test_cases) {
-                    if (train_type == "kmeans") {
-                        recall *= 0.8F;  // Kmeans may not achieve high recall in random datasets
-                    }
-                    if (base_quantization_str == "pqfs,fp16") {
-                        continue;
-                    }
-                    if (base_quantization_str == "fp16") {
-                        recall *= (1 - dim / 8192.0F);
-                    }
-                    auto count = std::min(300, static_cast<int32_t>(dim / 4));
-                    auto search_param =
-                        fmt::format(fixtures::search_param_tmp, std::max(200, count));
-                    INFO(
-                        fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, "
-                                    "train_type: {}, recall: {}",
-                                    metric_type,
-                                    dim,
-                                    base_quantization_str,
-                                    train_type,
-                                    recall));
-                    vsag::Options::Instance().set_block_size_limit(size);
-                    auto param = IVFTestIndex::GenerateIVFBuildParametersString(
-                        metric_type, dim, base_quantization_str, 300, train_type);
-                    auto index = IVFTestIndex::TestFactory(IVFTestIndex::name, param, true);
-                    auto dataset = IVFTestIndex::pool.GetDatasetAndCreate(
-                        dim, resource->base_count, metric_type);
-                    IVFTestIndex::TestConcurrentAdd(index, dataset, true);
-                    if (index->CheckFeature(vsag::SUPPORT_ADD_CONCURRENT)) {
-                        IVFTestIndex::TestGeneral(index, dataset, search_param, recall);
-                    }
-                    vsag::Options::Instance().set_block_size_limit(origin_size);
-                }
-            }
-        }
-    }
+    ForEachIVFCase(resource,
+                   resource->test_cases,
+                   AdjustIVFRecall,
+                   [&](const auto& metric_type,
+                       int64_t dim,
+                       const auto& train_type,
+                       const auto& base_quantization_str,
+                       float recall) {
+                       if (base_quantization_str == "pqfs,fp16") {
+                           return;
+                       }
+                       RunWithGeneratedBlockSizeLimit([&] {
+                           const auto count = std::min(300, static_cast<int32_t>(dim / 4));
+                           const auto search_param =
+                               fmt::format(fixtures::search_param_tmp, std::max(200, count));
+                           auto param = IVFTestIndex::GenerateIVFBuildParametersString(
+                               metric_type, dim, base_quantization_str, 300, train_type);
+                           auto index = IVFTestIndex::TestFactory(IVFTestIndex::name, param, true);
+                           auto dataset = IVFTestIndex::pool.GetDatasetAndCreate(
+                               dim, resource->base_count, metric_type);
+                           IVFTestIndex::TestConcurrentAdd(index, dataset, true);
+                           if (index->CheckFeature(vsag::SUPPORT_ADD_CONCURRENT)) {
+                               IVFTestIndex::TestGeneral(index, dataset, search_param, recall);
+                           }
+                       });
+                   });
 }
 
-TEST_CASE("(PR) IVF Concurrent Add", "[ft][build][concurrent][ivf][pr]") {
-    auto test_index = std::make_shared<fixtures::IVFTestIndex>();
-    auto resource = test_index->GetResource(true);
-    TestIVFConcurrentAdd(resource);
-}
-
-TEST_CASE("(Daily) IVF Concurrent Add", "[ft][build][concurrent][ivf][daily]") {
-    auto test_index = std::make_shared<fixtures::IVFTestIndex>();
-    auto resource = test_index->GetResource(false);
-    TestIVFConcurrentAdd(resource);
-}
+IVF_PR_DAILY_CASE("IVF Concurrent Add", "[ft][build][concurrent][ivf]", TestIVFConcurrentAdd)
 
 static void
 TestIVFSerialize(const fixtures::IVFResourcePtr& resource) {
     using namespace fixtures;
-    auto origin_size = vsag::Options::Instance().block_size_limit();
-    auto size = GENERATE(1024 * 1024 * 2);
-    for (auto metric_type : resource->metric_types) {
-        for (auto dim : resource->dims) {
-            for (auto train_type : resource->train_types) {
-                for (auto [base_quantization_str, recall] : resource->test_cases) {
-                    if (train_type == "kmeans") {
-                        recall *= 0.8F;  // Kmeans may not achieve high recall in random datasets
-                    }
-                    auto count = std::min(300, static_cast<int32_t>(dim / 4));
-                    auto search_param =
-                        fmt::format(fixtures::search_param_tmp, std::max(200, count));
-                    INFO(
-                        fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, "
-                                    "train_type: {}, recall: {}",
-                                    metric_type,
-                                    dim,
-                                    base_quantization_str,
-                                    train_type,
-                                    recall));
-                    vsag::Options::Instance().set_block_size_limit(size);
-                    auto param = IVFTestIndex::GenerateIVFBuildParametersString(
-                        metric_type, dim, base_quantization_str, 300, train_type);
-                    auto index = IVFTestIndex::TestFactory(IVFTestIndex::name, param, true);
-
-                    if (index->CheckFeature(vsag::SUPPORT_BUILD)) {
-                        auto dataset = IVFTestIndex::pool.GetDatasetAndCreate(
-                            dim, resource->base_count, metric_type);
-                        IVFTestIndex::TestBuildIndex(index, dataset, true);
-                        if (index->CheckFeature(vsag::SUPPORT_SERIALIZE_FILE) and
-                            index->CheckFeature(vsag::SUPPORT_DESERIALIZE_FILE)) {
-                            auto index2 =
-                                IVFTestIndex::TestFactory(IVFTestIndex::name, param, true);
-                            IVFTestIndex::TestSerializeFile(
-                                index, index2, dataset, search_param, true);
-                        }
-                        if (index->CheckFeature(vsag::SUPPORT_SERIALIZE_BINARY_SET) and
-                            index->CheckFeature(vsag::SUPPORT_DESERIALIZE_BINARY_SET)) {
-                            auto index2 =
-                                IVFTestIndex::TestFactory(IVFTestIndex::name, param, true);
-                            IVFTestIndex::TestSerializeBinarySet(
-                                index, index2, dataset, search_param, true);
-                        }
-                        if (index->CheckFeature(vsag::SUPPORT_SERIALIZE_FILE) and
-                            index->CheckFeature(vsag::SUPPORT_DESERIALIZE_READER_SET)) {
-                            auto index2 =
-                                IVFTestIndex::TestFactory(IVFTestIndex::name, param, true);
-                            IVFTestIndex::TestSerializeReaderSet(
-                                index, index2, dataset, search_param, IVFTestIndex::name, true);
-                        }
-                        if (index->CheckFeature(vsag::SUPPORT_SERIALIZE_WRITE_FUNC)) {
-                            auto index2 =
-                                IVFTestIndex::TestFactory(IVFTestIndex::name, param, true);
-                            IVFTestIndex::TestSerializeWriteFunc(
-                                index, index2, dataset, search_param, true);
-                        }
-                    }
-                    vsag::Options::Instance().set_block_size_limit(origin_size);
-                }
+    auto adjust_serialize_recall =
+        [](float recall, const std::string& train_type, const std::string&, int64_t) {
+            if (train_type == "kmeans") {
+                recall *= 0.8F;
             }
-        }
-    }
+            return recall;
+        };
+    ForEachIVFCase(
+        resource,
+        resource->test_cases,
+        adjust_serialize_recall,
+        [&](const auto& metric_type,
+            int64_t dim,
+            const auto& train_type,
+            const auto& base_quantization_str,
+            float recall) {
+            RunWithGeneratedBlockSizeLimit([&] {
+                const auto count = std::min(300, static_cast<int32_t>(dim / 4));
+                const auto search_param =
+                    fmt::format(fixtures::search_param_tmp, std::max(200, count));
+                auto param = IVFTestIndex::GenerateIVFBuildParametersString(
+                    metric_type, dim, base_quantization_str, 300, train_type);
+                auto index = IVFTestIndex::TestFactory(IVFTestIndex::name, param, true);
+
+                if (index->CheckFeature(vsag::SUPPORT_BUILD)) {
+                    auto dataset = IVFTestIndex::pool.GetDatasetAndCreate(
+                        dim, resource->base_count, metric_type);
+                    IVFTestIndex::TestBuildIndex(index, dataset, true);
+                    if (index->CheckFeature(vsag::SUPPORT_SERIALIZE_FILE) and
+                        index->CheckFeature(vsag::SUPPORT_DESERIALIZE_FILE)) {
+                        auto index2 = IVFTestIndex::TestFactory(IVFTestIndex::name, param, true);
+                        IVFTestIndex::TestSerializeFile(index, index2, dataset, search_param, true);
+                    }
+                    if (index->CheckFeature(vsag::SUPPORT_SERIALIZE_BINARY_SET) and
+                        index->CheckFeature(vsag::SUPPORT_DESERIALIZE_BINARY_SET)) {
+                        auto index2 = IVFTestIndex::TestFactory(IVFTestIndex::name, param, true);
+                        IVFTestIndex::TestSerializeBinarySet(
+                            index, index2, dataset, search_param, true);
+                    }
+                    if (index->CheckFeature(vsag::SUPPORT_SERIALIZE_FILE) and
+                        index->CheckFeature(vsag::SUPPORT_DESERIALIZE_READER_SET)) {
+                        auto index2 = IVFTestIndex::TestFactory(IVFTestIndex::name, param, true);
+                        IVFTestIndex::TestSerializeReaderSet(
+                            index, index2, dataset, search_param, IVFTestIndex::name, true);
+                    }
+                    if (index->CheckFeature(vsag::SUPPORT_SERIALIZE_WRITE_FUNC)) {
+                        auto index2 = IVFTestIndex::TestFactory(IVFTestIndex::name, param, true);
+                        IVFTestIndex::TestSerializeWriteFunc(
+                            index, index2, dataset, search_param, true);
+                    }
+                }
+            });
+        });
 }
 
-TEST_CASE("(PR) IVF Serialize File", "[ft][serialize][ivf][pr]") {
-    auto test_index = std::make_shared<fixtures::IVFTestIndex>();
-    auto resource = test_index->GetResource(true);
-    TestIVFSerialize(resource);
-}
-
-TEST_CASE("(Daily) IVF Serialize File", "[ft][serialize][ivf][daily]") {
-    auto test_index = std::make_shared<fixtures::IVFTestIndex>();
-    auto resource = test_index->GetResource(false);
-    TestIVFSerialize(resource);
-}
+IVF_PR_DAILY_CASE("IVF Serialize File", "[ft][serialize][ivf]", TestIVFSerialize)
 
 static void
 TestIVFClone(const fixtures::IVFResourcePtr& resource) {
@@ -1200,17 +1039,7 @@ TestIVFClone(const fixtures::IVFResourcePtr& resource) {
     }
 }
 
-TEST_CASE("(PR) IVF Clone", "[ft][clone][ivf][pr]") {
-    auto test_index = std::make_shared<fixtures::IVFTestIndex>();
-    auto resource = test_index->GetResource(true);
-    TestIVFClone(resource);
-}
-
-TEST_CASE("(Daily) IVF Clone", "[ft][clone][ivf][daily]") {
-    auto test_index = std::make_shared<fixtures::IVFTestIndex>();
-    auto resource = test_index->GetResource(false);
-    TestIVFClone(resource);
-}
+IVF_PR_DAILY_CASE("IVF Clone", "[ft][clone][ivf]", TestIVFClone)
 
 static void
 TestIVFRandomAllocator(const fixtures::IVFResourcePtr& resource) {
@@ -1254,19 +1083,9 @@ TestIVFRandomAllocator(const fixtures::IVFResourcePtr& resource) {
     }
 }
 
-TEST_CASE("(PR) IVF Build & ContinueAdd Test With Random Allocator",
-          "[ft][build][concurrent][ivf][pr]") {
-    auto test_index = std::make_shared<fixtures::IVFTestIndex>();
-    auto resource = test_index->GetResource(true);
-    TestIVFRandomAllocator(resource);
-}
-
-TEST_CASE("(Daily) IVF Build & ContinueAdd Test With Random Allocator",
-          "[ft][build][concurrent][ivf][daily]") {
-    auto test_index = std::make_shared<fixtures::IVFTestIndex>();
-    auto resource = test_index->GetResource(false);
-    TestIVFRandomAllocator(resource);
-}
+IVF_PR_DAILY_CASE("IVF Build & ContinueAdd Test With Random Allocator",
+                  "[ft][build][concurrent][ivf]",
+                  TestIVFRandomAllocator)
 
 static void
 TestIVFEstimateMemoryAndGetMemoryUsage(const fixtures::IVFResourcePtr& resource) {
@@ -1362,17 +1181,9 @@ TestIVFBuildMultiBucketsPerData(const fixtures::IVFResourcePtr& resource) {
     }
 }
 
-TEST_CASE("(PR) IVF Build Multi Buckets Per Data", "[ft][build][ivf][pr]") {
-    auto test_index = std::make_shared<fixtures::IVFTestIndex>();
-    auto resource = test_index->GetResource(true);
-    TestIVFBuildMultiBucketsPerData(resource);
-}
-
-TEST_CASE("(Daily) IVF Build Multi Buckets Per Data", "[ft][build][ivf][daily]") {
-    auto test_index = std::make_shared<fixtures::IVFTestIndex>();
-    auto resource = test_index->GetResource(false);
-    TestIVFBuildMultiBucketsPerData(resource);
-}
+IVF_PR_DAILY_CASE("IVF Build Multi Buckets Per Data",
+                  "[ft][build][ivf]",
+                  TestIVFBuildMultiBucketsPerData)
 
 static void
 TestIVFGNOIMIBuild(const fixtures::IVFResourcePtr& resource) {
@@ -1414,17 +1225,7 @@ TestIVFGNOIMIBuild(const fixtures::IVFResourcePtr& resource) {
     }
 }
 
-TEST_CASE("(PR) IVF GNO-IMI Build", "[ft][build][ivf][pr]") {
-    auto test_index = std::make_shared<fixtures::IVFTestIndex>();
-    auto resource = test_index->GetResource(true);
-    TestIVFGNOIMIBuild(resource);
-}
-
-TEST_CASE("(Daily) IVF GNO-IMI Build", "[ft][build][ivf][daily]") {
-    auto test_index = std::make_shared<fixtures::IVFTestIndex>();
-    auto resource = test_index->GetResource(false);
-    TestIVFGNOIMIBuild(resource);
-}
+IVF_PR_DAILY_CASE("IVF GNO-IMI Build", "[ft][build][ivf]", TestIVFGNOIMIBuild)
 
 static void
 TestIVFGNOIMIBuildWithResidual(const fixtures::IVFResourcePtr& resource) {
@@ -1473,14 +1274,6 @@ TestIVFGNOIMIBuildWithResidual(const fixtures::IVFResourcePtr& resource) {
     }
 }
 
-TEST_CASE("(PR) IVF GNO-IMI Build with Residual", "[ft][build][ivf][pr]") {
-    auto test_index = std::make_shared<fixtures::IVFTestIndex>();
-    auto resource = test_index->GetResource(true);
-    TestIVFGNOIMIBuildWithResidual(resource);
-}
-
-TEST_CASE("(Daily) IVF GNO-IMI Build with Residual", "[ft][build][ivf][daily]") {
-    auto test_index = std::make_shared<fixtures::IVFTestIndex>();
-    auto resource = test_index->GetResource(false);
-    TestIVFGNOIMIBuildWithResidual(resource);
-}
+IVF_PR_DAILY_CASE("IVF GNO-IMI Build with Residual",
+                  "[ft][build][ivf]",
+                  TestIVFGNOIMIBuildWithResidual)
