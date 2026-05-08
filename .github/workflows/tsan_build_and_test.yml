@@ -20,10 +20,14 @@ jobs:
       - uses: dorny/paths-filter@v3
         id: changes
         with:
+          # 'every' is REQUIRED here: with the default 'some' quantifier, the broad '**'
+          # pattern would always match and the negation patterns ('!docs/**', '!**/*.md')
+          # would have no effect, causing docs-only PRs to incorrectly trigger TSan.
+          predicate-quantifier: 'every'
           filters: |
             non_markdown:
               - '**'
-              - '!*.md'
+              - '!docs/**'
               - '!**/*.md'
 
   build_tsan:
