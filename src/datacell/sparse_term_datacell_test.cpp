@@ -309,6 +309,7 @@ TEST_CASE("SparseTermDatacell handles missing term lists", "[ut][SparseTermDatac
     inner_param.ef = 2;
 
     SECTION("null term list is skipped") {
+        data_cell->term_ids_[1].reset();
         data_cell->term_sizes_[1] = 1;
         auto computer = std::make_shared<SparseTermComputer>(query, search_params, allocator.get());
         std::vector<float> dists(1, -1.0F);
