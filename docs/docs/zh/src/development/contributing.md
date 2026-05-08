@@ -67,12 +67,19 @@ Git 还有一个 `-s` 命令行选项，可以在提交时自动附加 Signed-of
 git commit -s -m "This is my commit message"
 ```
 
-对于由人类开发者和 AI Coding Agent（如 OpenCode、Claude Code、Codex 等）共同完成的贡献，请为**每一位协作者**各添加一行 `Signed-off-by` trailer，例如：
+对于借助 AI Coding Agent（如 OpenCode、Claude Code、Codex 等）完成的贡献，**仅由人类贡献者**
+签署 DCO；AI Agent **不得**添加自己的 `Signed-off-by` trailer，因为只有人类才能合法地证明
+DCO。每一位人类贡献者仍按常规各自添加自己的 `Signed-off-by:` trailer。除签名外，请按
+[Linux 内核 AI Coding Assistants 规范](https://docs.kernel.org/process/coding-assistants.html)
+使用 `Assisted-by:` trailer 标注 AI 协助，格式为 `Assisted-by: AgentName:ModelVersion`。
+在 trailer 顺序上，请将人类的 `Signed-off-by:` 放在前面，`Assisted-by:` 放在其后，例如：
 
 ```text
 Signed-off-by: Random J Developer <random@developer.example.org>
-Signed-off-by: OpenCode (claude-sonnet-4.5) <noreply@opencode.ai>
+Assisted-by: OpenCode:claude-opus-4.7
 ```
+
+人类提交者需对 AI 生成的修改进行审阅、确保许可证合规，并对该贡献承担全部责任。
 
 ### Commit 信息与 PR 标签
 
