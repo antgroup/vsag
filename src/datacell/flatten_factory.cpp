@@ -13,10 +13,10 @@
 // limitations under the License.
 
 #include "flatten_factory.h"
-#include "index_common_param.h"
 
 #include "flatten_datacell.h"
 #include "flatten_datacell_parameter.h"
+#include "index_common_param.h"
 #include "inner_string_params.h"
 #include "io/io_headers.h"
 #include "quantization/int8_quantizer.h"

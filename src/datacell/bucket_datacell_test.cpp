@@ -14,13 +14,13 @@
 // limitations under the License.
 
 #include "bucket_datacell.h"
-#include "index_common_param.h"
 
 #include <algorithm>
 #include <utility>
 
 #include "impl/allocator/default_allocator.h"
 #include "impl/allocator/safe_allocator.h"
+#include "index_common_param.h"
 #include "simd/simd.h"
 #include "storage/serialization_template_test.h"
 #include "unittest.h"

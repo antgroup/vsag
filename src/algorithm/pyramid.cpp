@@ -18,9 +18,9 @@
 #include <chrono>
 
 #include "algorithm/inner_index_interface.h"
-#include "dataset_impl.h"
 #include "analyzer/analyzer.h"
 #include "datacell/flatten_interface.h"
+#include "dataset_impl.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/odescent/odescent_graph_builder.h"
 #include "impl/pruning_strategy.h"

@@ -16,11 +16,11 @@
 #include <fmt/format.h>
 
 #include "graph_datacell_parameter.h"
-#include "index_common_param.h"
 #include "graph_factory.h"
 #include "graph_interface_parameter.h"
 #include "graph_interface_test.h"
 #include "impl/allocator/safe_allocator.h"
+#include "index_common_param.h"
 #include "io/memory_io_parameter.h"
 #include "unittest.h"
 

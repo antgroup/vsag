@@ -14,11 +14,11 @@
 // limitations under the License.
 
 #include "extra_info_interface.h"
-#include "index_common_param.h"
 
 #include <fmt/format.h>
 
 #include "extra_info_datacell.h"
+#include "index_common_param.h"
 #include "inner_string_params.h"
 #include "io/io_headers.h"
 #include "quantization/quantizer_headers.h"

@@ -18,8 +18,8 @@
 #include <filesystem>
 #include <set>
 
-#include "datacell/flatten_factory.h"
 #include "datacell/flatten_datacell_parameter.h"
+#include "datacell/flatten_factory.h"
 #include "datacell/graph_factory.h"
 #include "impl/allocator/safe_allocator.h"
 #include "io/memory_io_parameter.h"

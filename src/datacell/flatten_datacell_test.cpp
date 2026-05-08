@@ -14,16 +14,16 @@
 // limitations under the License.
 
 #include "flatten_datacell.h"
-#include "flatten_datacell_parameter.h"
-#include "index_common_param.h"
 
 #include <algorithm>
 #include <utility>
 
+#include "flatten_datacell_parameter.h"
 #include "flatten_factory.h"
 #include "flatten_interface_test.h"
 #include "impl/allocator/default_allocator.h"
 #include "impl/allocator/safe_allocator.h"
+#include "index_common_param.h"
 #include "unittest.h"
 
 using namespace vsag;

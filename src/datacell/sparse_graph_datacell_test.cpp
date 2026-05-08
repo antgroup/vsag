@@ -14,13 +14,13 @@
 // limitations under the License.
 
 #include "sparse_graph_datacell.h"
-#include "index_common_param.h"
 
 #include <fmt/format.h>
 
 #include "graph_factory.h"
 #include "graph_interface_test.h"
 #include "impl/allocator/safe_allocator.h"
+#include "index_common_param.h"
 #include "sparse_graph_datacell_parameter.h"
 #include "unittest.h"
 using namespace vsag;
