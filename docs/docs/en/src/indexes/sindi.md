@@ -38,7 +38,8 @@ std::string params = R"({
         "window_size": 50000,
         "doc_prune_ratio": 0.0,
         "use_quantization": false,
-        "use_reorder": false
+        "use_reorder": false,
+        "remap_term_ids": false
     }
 })";
 auto index = vsag::Factory::CreateIndex("sindi", params).value();
@@ -70,8 +71,9 @@ and `metric_type` **must** be `"ip"`.
 | `term_id_limit` | int | `1000000` | Upper bound on term id values (≥ max term id + 1). |
 | `window_size` | int | `50000` | Documents per window (range: 10 000 – 60 000). |
 | `doc_prune_ratio` | float | `0.0` | Fraction of lowest-weight terms dropped per doc at build time (0.0 – 0.9). |
-| `use_quantization` | bool | `false` | Quantize stored term values to cut memory. |
+| `use_quantization` | bool | `false` | Quantize stored term values to cut memory; when enabled, uses 8-bit scalar quantization (SQ8). |
 | `use_reorder` | bool | `false` | Keep a high-precision flat copy and rescore results (~2× memory). |
+| `remap_term_ids` | bool | `false` | Remap term IDs before indexing; useful when term IDs are sparse or have large gaps. |
 | `avg_doc_term_length` | int | `100` | Hint for memory estimation only. |
 
 > **`dim` vs `term_id_limit`.** For the sparse vector `{0:0.1, 2:0.5, 177:0.8}`,
@@ -107,6 +109,35 @@ auto result = index->KnnSearch(
 
 SINDI does **not** accept dense vectors and supports only inner-product similarity.
 Range search and id-based filtering are supported; see the example for usage.
+
+## Practical guidance
+
+- For Chinese corpora, we recommend encoding sparse vectors with BGE-M3. For
+    English corpora, SPLADE is the more common default.
+- BGE-M3 can emit both sparse and dense vectors. Today SINDI handles the sparse
+    leg, and VSAG plans to support fused sparse+dense scoring in a future release.
+- Sparse vectors are not a complete replacement for BM25 full-text retrieval. In
+    practice, three-way recall with BM25 + sparse + dense usually outperforms any
+    two-way combination.
+- At the index level, SINDI can also serve BM25-style scoring: use inverse
+    document frequency as the query-side term weight, and use term-frequency-based
+    weights as the document-side term value.
+
+## Common configurations
+
+1. Flat brute-force sparse index. Keep all non-zero terms in the inverted index
+     (`doc_prune_ratio: 0.0`), disable the flat reranker (`use_reorder: false`),
+     and disable quantization (`use_quantization: false`). This is the simplest
+     high-recall baseline.
+2. Pruned high-accuracy index. Prune most low-weight terms during build
+     (`doc_prune_ratio: 0.4`), keep the flat copy for reranking
+     (`use_reorder: true`), and enable quantization to shrink inverted-list memory
+     (`use_quantization: true`). This is a common balance between memory and
+     recall.
+3. Very large sparse vocabularies. When term IDs are sparse within the `uint32`
+     range, such as hash-based tokenizers, external vocabulary IDs, or vocabularies
+     with large gaps, enable `remap_term_ids: true`. This avoids managing many
+     empty posting lists and helps stay below the `term_id_limit` ceiling.
 
 ## See also
 

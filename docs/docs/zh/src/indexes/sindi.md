@@ -34,7 +34,8 @@ std::string params = R"({
         "window_size": 50000,
         "doc_prune_ratio": 0.0,
         "use_quantization": false,
-        "use_reorder": false
+        "use_reorder": false,
+        "remap_term_ids": false
     }
 })";
 auto index = vsag::Factory::CreateIndex("sindi", params).value();
@@ -66,8 +67,9 @@ auto result = index->KnnSearch(
 | `term_id_limit` | int | `1000000` | 词项 ID 的上界（应 ≥ 最大词项 ID + 1） |
 | `window_size` | int | `50000` | 每个窗口容纳的文档数（取值范围 10 000 – 60 000） |
 | `doc_prune_ratio` | float | `0.0` | 构建阶段按文档丢弃权重最低词项的比例（0.0 – 0.9） |
-| `use_quantization` | bool | `false` | 是否量化词项权重以降低内存 |
+| `use_quantization` | bool | `false` | 是否量化词项权重以降低内存；开启后使用 8-bit 标量量化（SQ8） |
 | `use_reorder` | bool | `false` | 是否保留一份高精度扁平副本用于精排（内存约翻倍） |
+| `remap_term_ids` | bool | `false` | 是否在建索引前重映射词项 ID，适用于词项 ID 很稀疏或存在大量空洞的词表 |
 | `avg_doc_term_length` | int | `100` | 仅用于内存估算 |
 
 > **`dim` 与 `term_id_limit` 的区别。** 对于稀疏向量 `{0:0.1, 2:0.5, 177:0.8}`，
@@ -100,6 +102,30 @@ auto result = index->KnnSearch(
 
 SINDI **不支持** 稠密向量，只支持内积相似度。范围检索与基于 ID 的过滤均已支持，
 具体用法参见示例代码。
+
+## 实践建议
+
+- 中文数据集的稀疏向量，推荐使用 BGE-M3 编码；英文数据集更常见的默认选择是
+    SPLADE。
+- BGE-M3 同时支持 sparse 和 dense 输出。当前 SINDI 负责稀疏一路，VSAG 未来计划
+    支持稀疏与稠密融合打分检索。
+- 稀疏向量不能完全替代 BM25 全文检索。实践中，BM25 + 稀疏向量 + 稠密向量的三路
+    召回通常优于任意两路组合。
+- 在索引层面，SINDI 也可以承载 BM25 风格打分：查询侧用逆文档频率作为词项权重，
+    文档侧用词频等特征计算出的词项权重作为向量值即可。
+
+## 常用配置
+
+1. 扁平暴力搜索索引。倒排索引保留全部非零项（`doc_prune_ratio: 0.0`），不保留正排索引
+    重排（`use_reorder: false`），不开启量化（`use_quantization: false`）。这是最直接的
+     高召回基线。
+2. 剪枝高精索引。构建时剪掉大部分低权重词项（`doc_prune_ratio: 0.4`），保留正排索引
+     用于重排（`use_reorder: true`），并开启量化减少倒排索引内存
+     （`use_quantization: true`）。这是常见的精度与内存折中配置。
+3. 超大稀疏词表支持。对于词项 ID 在 `uint32` 范围内非常稀疏的场景，例如基于哈希的
+     分词器、外部词表 ID，或存在大量空白区间的词表，建议设置 `remap_term_ids: true`。
+     这样可以避免管理大量空倒排列表带来的内存浪费，也能降低触达 `term_id_limit`
+     上限的风险。
 
 ## 相关文档
 
