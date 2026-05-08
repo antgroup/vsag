@@ -51,7 +51,7 @@ TEST_CASE("Pruning Strategy Select Edges With Heuristic", "[ut][pruning_strategy
     common_param.dim_ = 128;
 
     // Create flatten interface instance with configured parameters
-    auto flatten = FlattenInterface::MakeInstance(flatten_param, common_param);
+    auto flatten = FlattenInterfaceFactory::MakeInstance(flatten_param, common_param);
     REQUIRE(flatten != nullptr);
 
     float vectors[5][128] = {0};
@@ -175,7 +175,7 @@ TEST_CASE("Pruning Strategy Select Edges With Heuristic", "[ut][pruning_strategy
         auto graph_param = std::make_shared<GraphDataCellParameter>();
         graph_param->io_parameter_ = std::make_shared<MemoryIOParameter>();
         graph_param->max_degree_ = 4;
-        auto graph = GraphInterface::MakeInstance(graph_param, common_param);
+        auto graph = GraphInterfaceFactory::MakeInstance(graph_param, common_param);
 
         auto candidates = std::make_shared<StandardHeap<true, false>>(allocator.get(), -1);
         candidates->Push(d01, 1);

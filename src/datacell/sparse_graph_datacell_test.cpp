@@ -30,9 +30,9 @@ TestSparseGraphDataCell(const GraphInterfaceParamPtr& param,
     auto count = GENERATE(1000, 2000);
     auto max_id = 10000;
 
-    auto graph = GraphInterface::MakeInstance(param, common_param);
+    auto graph = GraphInterfaceFactory::MakeInstance(param, common_param);
     GraphInterfaceTest test(graph);
-    auto other = GraphInterface::MakeInstance(param, common_param);
+    auto other = GraphInterfaceFactory::MakeInstance(param, common_param);
     test.BasicTest(max_id, count, other, test_delete);
 }
 
@@ -82,9 +82,9 @@ TEST_CASE("SparseGraphDataCell Merge Test", "[ut][SparseGraphDataCell]") {
     graph_param->max_degree_ = max_degree;
     graph_param->support_delete_ = is_support_delete;
 
-    auto graph = GraphInterface::MakeInstance(graph_param, common_param);
+    auto graph = GraphInterfaceFactory::MakeInstance(graph_param, common_param);
     GraphInterfaceTest test(graph);
-    auto other = GraphInterface::MakeInstance(graph_param, common_param);
+    auto other = GraphInterfaceFactory::MakeInstance(graph_param, common_param);
     test.MergeTest(other, count);
 }
 
@@ -100,7 +100,7 @@ TEST_CASE("SparseGraphDataCell Reverse Edges", "[ut][SparseGraphDataCell]") {
     graph_param->max_degree_ = max_degree;
     graph_param->use_reverse_edges_ = true;
 
-    auto graph = GraphInterface::MakeInstance(graph_param, common_param);
+    auto graph = GraphInterfaceFactory::MakeInstance(graph_param, common_param);
     GraphInterfaceTest test(graph);
     test.ReverseEdgeTest(100);
 }
@@ -117,7 +117,7 @@ TEST_CASE("SparseGraphDataCell Move", "[ut][SparseGraphDataCell]") {
     graph_param->max_degree_ = max_degree;
     graph_param->use_reverse_edges_ = true;
 
-    auto graph = GraphInterface::MakeInstance(graph_param, common_param);
+    auto graph = GraphInterfaceFactory::MakeInstance(graph_param, common_param);
     GraphInterfaceTest test(graph);
     test.MoveTest(100);
 }
@@ -132,7 +132,7 @@ TEST_CASE("SparseGraphDataCell Move same id keeps neighbors", "[ut][SparseGraphD
     graph_param->max_degree_ = 8;
     graph_param->use_reverse_edges_ = true;
 
-    auto graph = GraphInterface::MakeInstance(graph_param, common_param);
+    auto graph = GraphInterfaceFactory::MakeInstance(graph_param, common_param);
 
     Vector<InnerIdType> empty(allocator.get());
     Vector<InnerIdType> neighbors(allocator.get());
@@ -170,7 +170,7 @@ TEST_CASE("SparseGraphDataCell decodes stored neighbors for reverse-edge updates
     graph_param->remove_flag_bit_ = 4;
     graph_param->use_reverse_edges_ = true;
 
-    auto graph = GraphInterface::MakeInstance(graph_param, common_param);
+    auto graph = GraphInterfaceFactory::MakeInstance(graph_param, common_param);
 
     Vector<InnerIdType> empty(allocator.get());
     Vector<InnerIdType> to_two(allocator.get());

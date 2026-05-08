@@ -39,9 +39,6 @@ class FlattenInterface {
 public:
     FlattenInterface() = default;
 
-    static FlattenInterfacePtr
-    MakeInstance(const FlattenInterfaceParamPtr& param, const IndexCommonParam& common_param);
-
 public:
     virtual void
     Query(float* result_dists,

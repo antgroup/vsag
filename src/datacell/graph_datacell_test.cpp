@@ -31,9 +31,9 @@ TestGraphDataCell(const GraphInterfaceParamPtr& param,
     auto count = GENERATE(1000, 2000);
     auto max_id = 10000;
 
-    auto graph = GraphInterface::MakeInstance(param, common_param);
+    auto graph = GraphInterfaceFactory::MakeInstance(param, common_param);
     GraphInterfaceTest test(graph);
-    auto other = GraphInterface::MakeInstance(param, common_param);
+    auto other = GraphInterfaceFactory::MakeInstance(param, common_param);
     test.BasicTest(max_id, count, other, test_delete);
 }
 
@@ -124,9 +124,9 @@ TEST_CASE("GraphDataCell Merge", "[ut][GraphDataCell]") {
     auto graph_param = GraphInterfaceParameter::GetGraphParameterByJson(
         GraphStorageTypes::GRAPH_STORAGE_TYPE_VALUE_FLAT, param_json);
 
-    auto graph = GraphInterface::MakeInstance(graph_param, common_param);
+    auto graph = GraphInterfaceFactory::MakeInstance(graph_param, common_param);
     GraphInterfaceTest test(graph);
-    auto other = GraphInterface::MakeInstance(graph_param, common_param);
+    auto other = GraphInterfaceFactory::MakeInstance(graph_param, common_param);
     test.MergeTest(other, 1000);
 }
 
@@ -139,14 +139,14 @@ TEST_CASE("GraphDataCell duplicate tracker follows parameter", "[ut][GraphDataCe
     auto disabled_param = std::make_shared<GraphDataCellParameter>();
     disabled_param->io_parameter_ = std::make_shared<MemoryIOParameter>();
     disabled_param->support_duplicate_ = false;
-    auto disabled_graph = GraphInterface::MakeInstance(disabled_param, common_param);
+    auto disabled_graph = GraphInterfaceFactory::MakeInstance(disabled_param, common_param);
     REQUIRE(disabled_graph->GetDuplicateTracker() == nullptr);
     REQUIRE(disabled_graph->GetDuplicateIds(0).empty());
 
     auto enabled_param = std::make_shared<GraphDataCellParameter>();
     enabled_param->io_parameter_ = std::make_shared<MemoryIOParameter>();
     enabled_param->support_duplicate_ = true;
-    auto enabled_graph = GraphInterface::MakeInstance(enabled_param, common_param);
+    auto enabled_graph = GraphInterfaceFactory::MakeInstance(enabled_param, common_param);
     REQUIRE(enabled_graph->GetDuplicateTracker() != nullptr);
 
     enabled_graph->Resize(4);
@@ -182,7 +182,7 @@ TEST_CASE("GraphDataCell Reverse Edges", "[ut][GraphDataCell]") {
     auto graph_param = GraphInterfaceParameter::GetGraphParameterByJson(
         GraphStorageTypes::GRAPH_STORAGE_TYPE_VALUE_FLAT, param_json);
 
-    auto graph = GraphInterface::MakeInstance(graph_param, common_param);
+    auto graph = GraphInterfaceFactory::MakeInstance(graph_param, common_param);
     GraphInterfaceTest test(graph);
     test.ReverseEdgeTest(100);
 }
@@ -213,7 +213,7 @@ TEST_CASE("GraphDataCell Move", "[ut][GraphDataCell]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = 1024 * 1024 * 2ULL;
     vsag::Options::Instance().set_block_size_limit(size);
-    auto graph = GraphInterface::MakeInstance(graph_param, common_param);
+    auto graph = GraphInterfaceFactory::MakeInstance(graph_param, common_param);
     GraphInterfaceTest test(graph);
     test.MoveTest(100);
     vsag::Options::Instance().set_block_size_limit(origin_size);
@@ -242,7 +242,7 @@ TEST_CASE("GraphDataCell Move same id keeps neighbors", "[ut][GraphDataCell]") {
     auto graph_param = GraphInterfaceParameter::GetGraphParameterByJson(
         GraphStorageTypes::GRAPH_STORAGE_TYPE_VALUE_FLAT, param_json);
 
-    auto graph = GraphInterface::MakeInstance(graph_param, common_param);
+    auto graph = GraphInterfaceFactory::MakeInstance(graph_param, common_param);
     graph->Resize(4);
 
     Vector<InnerIdType> empty(allocator.get());

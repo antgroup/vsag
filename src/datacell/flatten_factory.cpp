@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "flatten_interface.h"
+#include "flatten_factory.h"
 
 #include "flatten_datacell.h"
+#include "flatten_interface.h"
 #include "inner_string_params.h"
 #include "io/io_headers.h"
 #include "quantization/int8_quantizer.h"
@@ -184,6 +185,31 @@ make_instance(const FlattenInterfaceParamPtr& param, const IndexCommonParam& com
     }
     if (metric == MetricType::METRIC_TYPE_COSINE) {
         return make_instance<MetricType::METRIC_TYPE_COSINE, IOTemp>(param, common_param);
+    }
+    return nullptr;
+}
+
+FlattenInterfacePtr
+FlattenInterfaceFactory::MakeInstance(const FlattenInterfaceParamPtr& param,
+                                      const IndexCommonParam& common_param) {
+    auto io_type_name = param->io_parameter->GetTypeName();
+    if (io_type_name == IO_TYPE_VALUE_BLOCK_MEMORY_IO) {
+        return make_instance<MemoryBlockIO>(param, common_param);
+    }
+    if (io_type_name == IO_TYPE_VALUE_MEMORY_IO) {
+        return make_instance<MemoryIO>(param, common_param);
+    }
+    if (io_type_name == IO_TYPE_VALUE_BUFFER_IO) {
+        return make_instance<BufferIO>(param, common_param);
+    }
+    if (io_type_name == IO_TYPE_VALUE_ASYNC_IO) {
+        return make_instance<AsyncIO>(param, common_param);
+    }
+    if (io_type_name == IO_TYPE_VALUE_MMAP_IO) {
+        return make_instance<MMapIO>(param, common_param);
+    }
+    if (io_type_name == IO_TYPE_VALUE_READER_IO) {
+        return make_instance<ReaderIO>(param, common_param);
     }
     return nullptr;
 }

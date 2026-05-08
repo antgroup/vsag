@@ -29,9 +29,9 @@ TestCompressedGraphDataCell(const GraphInterfaceParamPtr& param,
     auto count = GENERATE(1000, 2000);
     auto max_id = 10000;
 
-    auto graph = GraphInterface::MakeInstance(param, common_param);
+    auto graph = GraphInterfaceFactory::MakeInstance(param, common_param);
     GraphInterfaceTest test(graph, true);
-    auto other = GraphInterface::MakeInstance(param, common_param);
+    auto other = GraphInterfaceFactory::MakeInstance(param, common_param);
     test.BasicTest(max_id, count, other, false);
 }
 
@@ -71,12 +71,12 @@ TEST_CASE("CompressedGraphDataCell duplicate tracker follows parameter",
     common_param.allocator_ = allocator;
 
     auto disabled_param = std::make_shared<CompressedGraphDatacellParameter>();
-    auto disabled_graph = GraphInterface::MakeInstance(disabled_param, common_param);
+    auto disabled_graph = GraphInterfaceFactory::MakeInstance(disabled_param, common_param);
     REQUIRE(disabled_graph->GetDuplicateTracker() == nullptr);
 
     auto enabled_param = std::make_shared<CompressedGraphDatacellParameter>();
     enabled_param->support_duplicate_ = true;
-    auto enabled_graph = GraphInterface::MakeInstance(enabled_param, common_param);
+    auto enabled_graph = GraphInterfaceFactory::MakeInstance(enabled_param, common_param);
     REQUIRE(enabled_graph->GetDuplicateTracker() != nullptr);
 
     enabled_graph->SetDuplicateId(0, 1);

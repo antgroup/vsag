@@ -29,6 +29,7 @@
 #include <vector>
 
 #include "datacell/flatten_datacell.h"
+#include "datacell/flatten_factory.h"
 #include "dataset_impl.h"
 #include "impl/odescent/odescent_graph_builder.h"
 #include "io/memory_io_parameter.h"
@@ -323,7 +324,7 @@ DiskANN::build(const DatasetPtr& base) {
             flatten_param->quantizer_parameter = std::make_shared<FP32QuantizerParameter>();
             flatten_param->io_parameter = std::make_shared<MemoryIOParameter>();
             vsag::FlattenInterfacePtr flatten_interface_ptr =
-                vsag::FlattenInterface::MakeInstance(flatten_param, this->common_param_);
+                vsag::FlattenInterfaceFactory::MakeInstance(flatten_param, this->common_param_);
             flatten_interface_ptr->Train(vectors, data_num);
             flatten_interface_ptr->BatchInsertVector(vectors, data_num);
             auto param = std::make_shared<ODescentParameter>();

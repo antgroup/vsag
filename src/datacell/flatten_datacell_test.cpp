@@ -30,11 +30,11 @@ TestFlattenDataCell(FlattenDataCellParamPtr& param,
                     IndexCommonParam& common_param,
                     float error = 1e-3) {
     auto count = GENERATE(100, 1000);
-    auto flatten = FlattenInterface::MakeInstance(param, common_param);
+    auto flatten = FlattenInterfaceFactory::MakeInstance(param, common_param);
 
     FlattenInterfaceTest test(flatten, common_param.metric_);
     test.BasicTest(common_param.dim_, count, error);
-    auto other = FlattenInterface::MakeInstance(param, common_param);
+    auto other = FlattenInterfaceFactory::MakeInstance(param, common_param);
     test.TestSerializeAndDeserialize(common_param.dim_, other, error);
 }
 

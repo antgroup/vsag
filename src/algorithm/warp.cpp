@@ -25,6 +25,7 @@
 #include "datacell/attribute_inverted_interface.h"
 #include "datacell/flatten_datacell.h"
 #include "datacell/flatten_datacell_parameter.h"
+#include "datacell/flatten_factory.h"
 #include "datacell/flatten_interface.h"
 #include "fmt/chrono.h"
 #include "impl/heap/distance_heap.h"
@@ -40,7 +41,7 @@ namespace vsag {
 
 WARP::WARP(const WarpParameterPtr& param, const IndexCommonParam& common_param)
     : InnerIndexInterface(param, common_param), doc_offsets_(allocator_) {
-    inner_codes_ = FlattenInterface::MakeInstance(param->base_codes_param, common_param);
+    inner_codes_ = FlattenInterfaceFactory::MakeInstance(param->base_codes_param, common_param);
     auto code_size = this->inner_codes_->code_size_;
     auto increase_count = Options::Instance().block_size_limit() / code_size;
     this->resize_increase_count_bit_ = std::max(

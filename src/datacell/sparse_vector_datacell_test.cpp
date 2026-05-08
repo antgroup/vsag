@@ -45,7 +45,7 @@ TEST_CASE("SparseDataCell Basic Test", "[ut][SparseDataCell] ") {
     index_common_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
     index_common_param.metric_ = MetricType::METRIC_TYPE_IP;
     index_common_param.dim_ = max_dim;
-    auto data_cell = FlattenInterface::MakeInstance(param, index_common_param);
+    auto data_cell = FlattenInterfaceFactory::MakeInstance(param, index_common_param);
     REQUIRE(data_cell->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_SPARSE);
     REQUIRE(data_cell->GetMetricType() == MetricType::METRIC_TYPE_IP);
 
@@ -82,7 +82,7 @@ TEST_CASE("SparseDataCell Basic Test", "[ut][SparseDataCell] ") {
         }
     }
     SECTION("serialize and deserialize") {
-        auto new_data_cell = FlattenInterface::MakeInstance(param, index_common_param);
+        auto new_data_cell = FlattenInterfaceFactory::MakeInstance(param, index_common_param);
         test_serializion(*data_cell, *new_data_cell);
         auto computer = new_data_cell->FactoryComputer(query_sparse_vectors.data());
         std::vector<float> dist(base_count);
@@ -126,7 +126,7 @@ TEST_CASE("SparseDataCell Concurrent Test", "[ut][SparseDataCell][concurrent] ")
     index_common_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
     index_common_param.metric_ = MetricType::METRIC_TYPE_IP;
     index_common_param.dim_ = max_dim;
-    auto data_cell = FlattenInterface::MakeInstance(param, index_common_param);
+    auto data_cell = FlattenInterfaceFactory::MakeInstance(param, index_common_param);
     REQUIRE(data_cell->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_SPARSE);
     REQUIRE(data_cell->GetMetricType() == MetricType::METRIC_TYPE_IP);
 

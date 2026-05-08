@@ -42,9 +42,6 @@ public:
 
     virtual ~GraphInterface() = default;
 
-    static GraphInterfacePtr
-    MakeInstance(const GraphInterfaceParamPtr& graph_param, const IndexCommonParam& common_param);
-
 public:
     virtual void
     InsertNeighborsById(InnerIdType id, const Vector<InnerIdType>& neighbor_ids) = 0;
