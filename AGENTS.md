@@ -120,11 +120,16 @@ Update relevant docs when behavior changes:
 - Commit messages should follow Conventional Commits, such as `feat:`, `fix:`, `docs:`, or
   `chore:`.
 - Commits in this project are expected to use DCO sign-off (`git commit -s`).
-- For co-developed changes, include a `Signed-off-by:` trailer for each contributor.
-- If dual sign-off is requested, include both the requester's identity and the current agent
-  identity in the `Signed-off-by:` trailers.
-- Determine the agent sign-off at execution time from the active agent name and model name, and use
-  the format `AgentName (ModelName)`.
+- Only humans can legally certify the DCO; AI coding agents **must not** add their own
+  `Signed-off-by` trailer. The human submitter is responsible for reviewing AI-generated
+  changes, ensuring license compliance, and taking full responsibility for the contribution.
+- For changes produced with AI assistance, attribute the agent with an `Assisted-by:` trailer
+  in the form `Assisted-by: AgentName:ModelVersion` (see the
+  [Linux kernel AI Coding Assistants policy](https://docs.kernel.org/process/coding-assistants.html)).
+  Determine `AgentName` and `ModelVersion` at execution time from the active agent name and
+  model name (e.g. `Assisted-by: OpenCode:claude-opus-4.7`).
+- Trailer order: place the human `Signed-off-by:` first, followed by the `Assisted-by:` line
+  for the AI agent.
 - When using skip-CI commit messages, follow the repository convention and place `[skip ci]` at the
   beginning of the subject line.
 
