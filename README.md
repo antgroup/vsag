@@ -210,6 +210,11 @@ Although VSAG is initially developed by the Vector Database Team at Ant Group, i
 the [community](https://github.com/antgroup/vsag/graphs/contributors), and contributions are always welcome!
 See [CONTRIBUTING](./CONTRIBUTING.md) for ways to get started.
 
+Need help filing an issue? Run `/create-issue` inside Claude Code, OpenCode or
+Codex, or use the [`tools/issue-helper/`](./tools/issue-helper/README.md)
+shell wrapper. The drafting rules live in
+[`.github/ISSUE_TEMPLATE/ISSUE_GUIDE.md`](./.github/ISSUE_TEMPLATE/ISSUE_GUIDE.md).
+
 ## Community
 ![Discord](https://img.shields.io/discord/1298249687836393523?logo=discord&label=Discord)
 
