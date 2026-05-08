@@ -14,7 +14,11 @@
 
 #pragma once
 
+#include <cstdint>
+#include <exception>
+#include <new>
 #include <string>
+#include <utility>
 
 namespace vsag {
 

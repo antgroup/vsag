@@ -14,13 +14,18 @@
 
 #pragma once
 
+#include <cstdint>
 #include <memory>
+#include <string>
 
 #include "vsag/allocator.h"
-#include "vsag/index.h"
-#include "vsag/readerset.h"
+#include "vsag/errors.h"
+#include "vsag/expected.hpp"
 
 namespace vsag {
+
+class Index;
+class Reader;
 
 class Factory {
 public:
