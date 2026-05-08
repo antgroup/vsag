@@ -303,7 +303,17 @@ InnerIndexInterface::CalDistanceById(const float* query,
     auto* distances = static_cast<float*>(allocator_->Allocate(sizeof(float) * count));
     result->Distances(distances);
     for (int64_t i = 0; i < count; ++i) {
-        distances[i] = this->CalcDistanceById(query, ids[i]);
+        bool exists = false;
+        {
+            std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
+            exists = this->label_table_->TryGetIdByLabel(ids[i]).first;
+        }
+        if (exists) {
+            distances[i] = this->CalcDistanceById(query, ids[i], calculate_precise_distance);
+        } else {
+            logger::debug(fmt::format("failed to find id: {}", ids[i]));
+            distances[i] = -1;
+        }
     }
     return result;
 }
@@ -319,8 +329,8 @@ InnerIndexInterface::CalDistanceById(const DatasetPtr& query,
     result->Distances(distances);
     for (int64_t i = 0; i < count; ++i) {
         try {
-            distances[i] = this->CalcDistanceById(query, ids[i]);
-        } catch (std::runtime_error& e) {
+            distances[i] = this->CalcDistanceById(query, ids[i], calculate_precise_distance);
+        } catch (const std::exception&) {
             logger::debug(fmt::format("failed to find id: {}", ids[i]));
             distances[i] = -1;
         }
