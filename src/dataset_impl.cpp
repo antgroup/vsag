@@ -437,7 +437,7 @@ DatasetImpl::Append(const DatasetPtr& other) {
     // append multi-vectors
     if (auto iter = this->data_.find(MULTI_VECTORS); iter != this->data_.end()) {
         int64_t mv_dim = this->GetMultiVectorDim();
-        MultiVector* ptr = const_cast<MultiVector*>(std::get<const MultiVector*>(iter->second));
+        auto* ptr = const_cast<MultiVector*>(std::get<const MultiVector*>(iter->second));
         this->MultiVectors(allocate_and_copy_multi_vectors(other->GetMultiVectors(),
                                                            new_num_elements,
                                                            mv_dim,
