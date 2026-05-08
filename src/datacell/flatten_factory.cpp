@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #include "flatten_factory.h"
+#include "index_common_param.h"
 
 #include "flatten_datacell.h"
 #include "flatten_datacell_parameter.h"

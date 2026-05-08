@@ -14,6 +14,7 @@
 // limitations under the License.
 
 #include "extra_info_interface.h"
+#include "index_common_param.h"
 
 #include <fmt/format.h>
 

@@ -14,6 +14,7 @@
 // limitations under the License.
 
 #include "bucket_datacell.h"
+#include "index_common_param.h"
 
 #include <algorithm>
 #include <utility>

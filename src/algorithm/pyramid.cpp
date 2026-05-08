@@ -18,6 +18,7 @@
 #include <chrono>
 
 #include "algorithm/inner_index_interface.h"
+#include "dataset_impl.h"
 #include "analyzer/analyzer.h"
 #include "datacell/flatten_interface.h"
 #include "impl/heap/standard_heap.h"

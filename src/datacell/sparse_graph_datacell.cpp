@@ -14,6 +14,7 @@
 // limitations under the License.
 
 #include "sparse_graph_datacell.h"
+#include "index_common_param.h"
 
 #include "sparse_graph_datacell_parameter.h"
 #include "vsag_exception.h"

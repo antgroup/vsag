@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #include "graph_factory.h"
+#include "index_common_param.h"
 
 #include "compressed_graph_datacell.h"
 #include "graph_datacell.h"

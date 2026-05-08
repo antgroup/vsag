@@ -16,6 +16,7 @@
 #include "compressed_graph_datacell.h"
 
 #include "graph_datacell_parameter.h"
+#include "index_common_param.h"
 #include "vsag_exception.h"
 
 namespace vsag {

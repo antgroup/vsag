@@ -22,6 +22,8 @@
 #include <numeric>
 #include <vector>
 
+#include "datacell/flatten_datacell_parameter.h"
+
 #include "algorithm/inner_index_interface.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/blas/blas_function.h"

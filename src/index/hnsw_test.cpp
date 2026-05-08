@@ -23,6 +23,7 @@
 
 #include "data_type.h"
 #include "datacell/flatten_factory.h"
+#include "datacell/flatten_datacell_parameter.h"
 #include "datacell/graph_datacell_parameter.h"
 #include "datacell/graph_factory.h"
 #include "impl/logger/logger.h"
