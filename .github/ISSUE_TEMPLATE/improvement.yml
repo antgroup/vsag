@@ -1,0 +1,72 @@
+name: Improvement
+description: Refactor, performance tweak, chore, or test-only change.
+title: "[improve](<area>): <short imperative summary>"
+labels: ["kind/improvement"]
+assignees: ["wxyucs"]
+body:
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind of improvement
+      options:
+        - refactor
+        - perf
+        - chore
+        - test
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - hgraph
+        - ivf
+        - sindi
+        - pyvsag
+        - eval_performance
+        - build
+        - docs
+        - other
+    validations:
+      required: true
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What should change and why?
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected_benefit
+    attributes:
+      label: Expected benefit
+      description: |
+        Maintenance, readability, build time, runtime perf, etc. Be concrete.
+    validations:
+      required: true
+
+  - type: textarea
+    id: benchmark_evidence
+    attributes:
+      label: Benchmark evidence
+      description: |
+        Required for `perf` improvements. Include dataset, parameters, and
+        before/after numbers (latency, recall, memory). Reference
+        `tools/eval/` or `benchs/` whenever possible.
+
+  - type: textarea
+    id: references
+    attributes:
+      label: References
+      description: |
+        Optional. Links to relevant code (`path:line`), docs, or related
+        issues/PRs.
+
+  - type: textarea
+    id: additional_context
+    attributes:
+      label: Additional context

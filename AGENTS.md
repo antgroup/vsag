@@ -142,8 +142,35 @@ Every pull request **must** have two labels before it can be merged:
 
 Mergify enforces these via check runs. Always add both labels when creating a PR.
 
+## Filing Issues With An Agent
+
+Agents are also expected to help users file high-quality issues. The shared
+workflow lives in `.github/agent-prompts/create-issue.md` and the writing
+rules live in `.github/ISSUE_TEMPLATE/ISSUE_GUIDE.md`. Both Claude Code,
+OpenCode and Codex expose this workflow as a `/create-issue` slash command
+(see `.claude/commands/`, `.opencode/command/`, `.codex/prompts/`).
+
+When drafting an issue:
+
+- Map every required field of the chosen YAML template under
+  `.github/ISSUE_TEMPLATE/`. Use `// TODO` for genuinely unknown values.
+- Cite sources as `path:line` for repo references and full URLs for
+  `vsag.io/docs` pages.
+- Run `gh issue list --repo antgroup/vsag --search ... --state all --limit 5`
+  and append the matches under a `## Related issues` section. Do not block
+  creation on duplicates; the maintainers will close as needed.
+- Append a footer of the form
+  `_Drafted with AI assistant: <AgentName>:<ModelVersion>_` for transparency.
+  Do **not** add `Signed-off-by:` to issues — DCO applies only to commits.
+- Show a dry-run preview and only call `gh issue create` after the user
+  confirms. On failure, fall back to `gh issue create --web`.
+
+A shell wrapper is provided at `tools/issue-helper/new-issue.sh` for users
+who prefer not to drive the agent's slash command directly.
+
 ## References
 
 - `README.md`
 - `CONTRIBUTING.md`
 - `DEVELOPMENT.md`
+- `.github/ISSUE_TEMPLATE/ISSUE_GUIDE.md`

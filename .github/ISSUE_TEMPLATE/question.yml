@@ -1,0 +1,58 @@
+name: Question / usage help
+description: Ask how to use VSAG. For long discussions, prefer GitHub Discussions.
+title: "[q](<area>): <short summary>"
+labels: ["question"]
+assignees: ["wxyucs"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        > Before opening a question issue, please consider:
+        > - Searching the [docs](https://vsag.io/docs) and existing issues.
+        > - Posting in [GitHub Discussions](https://github.com/antgroup/vsag/discussions)
+        >   if the topic is open-ended.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - hgraph
+        - ivf
+        - sindi
+        - pyvsag
+        - eval_performance
+        - build
+        - docs
+        - other
+    validations:
+      required: true
+
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+    validations:
+      required: true
+
+  - type: textarea
+    id: what_you_tried
+    attributes:
+      label: What you have already tried
+      description: Docs read, configurations attempted, error messages observed.
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment (optional)
+      description: |
+        If your question depends on environment, run
+        `bash scripts/check_environment.sh` and paste the output.
+      render: shell
+
+  - type: textarea
+    id: references
+    attributes:
+      label: References
