@@ -75,13 +75,22 @@ Git provides a `-s` flag that appends the trailer automatically:
 git commit -s -m "This is my commit message"
 ```
 
-For contributions co-authored by a human developer and an AI coding agent (OpenCode, Claude Code,
-Codex, etc.), include a `Signed-off-by` trailer for **each** collaborator, for example:
+For contributions made with the help of an AI coding agent (OpenCode, Claude Code, Codex,
+etc.), only human contributors sign off on the DCO; the AI agent **must not** add its
+own `Signed-off-by` trailer, because only a human can legally certify the DCO. Each human
+contributor still adds their own `Signed-off-by:` trailer as usual. Instead of signing off,
+attribute the AI agent with an `Assisted-by:` trailer that follows the
+[Linux kernel AI Coding Assistants policy](https://docs.kernel.org/process/coding-assistants.html),
+in the form `Assisted-by: AgentName:ModelVersion`. Place the human `Signed-off-by:` line(s) first,
+followed by the `Assisted-by:` line, for example:
 
 ```text
 Signed-off-by: Random J Developer <random@developer.example.org>
-Signed-off-by: OpenCode (claude-sonnet-4.5) <noreply@opencode.ai>
+Assisted-by: OpenCode:claude-opus-4.7
 ```
+
+The human submitter is responsible for reviewing AI-generated changes, ensuring license
+compliance, and taking full responsibility for the contribution.
 
 ## Commit Messages and PR Labels
 
