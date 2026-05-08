@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -20,13 +19,8 @@
 namespace vsag {
 
 VSAG_DEFINE_SIMD_DISPATCH(Normalize, NormalizeType);
+VSAG_DEFINE_SIMD_DISPATCH(NormalizeWithCentroid, NormalizeWithCentroidType);
+VSAG_DEFINE_SIMD_DISPATCH(InverseNormalizeWithCentroid, InverseNormalizeWithCentroidType);
 VSAG_DEFINE_SIMD_DISPATCH(DivScalar, DivScalarType);
-
-// NormalizeWithCentroid and InverseNormalizeWithCentroid currently only
-// have generic implementations. Keep them as explicit one-liners so the
-// lack of SIMD variants is obvious at the call site.
-NormalizeWithCentroidType NormalizeWithCentroid = generic::NormalizeWithCentroid;
-InverseNormalizeWithCentroidType InverseNormalizeWithCentroid =
-    generic::InverseNormalizeWithCentroid;
 
 }  // namespace vsag

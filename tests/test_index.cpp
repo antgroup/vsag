@@ -39,22 +39,19 @@ Intersection(const int64_t* x, int64_t x_count, const int64_t* y, int64_t y_coun
 
 vsag::DatasetPtr
 get_one_query(const vsag::DatasetPtr& queries, int i) {
-    auto query = vsag::Dataset::Make();
-    query->NumElements(1)
-        ->Dim(queries->GetDim())
-        ->SparseVectors(queries->GetSparseVectors() + i)
-        ->Owner(false);
+    vsag::DatasetPtr query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(queries->GetDim())->Owner(false);
 
-    // Support multi-vector query - calculate correct vector offset
-    const auto* vector_counts = queries->GetVectorCounts();
-    if (vector_counts != nullptr) {
-        uint32_t vec_offset = 0;
-        for (int j = 0; j < i; ++j) {
-            vec_offset += vector_counts[j];
-        }
-        query->Float32Vectors(queries->GetFloat32Vectors() + vec_offset * queries->GetDim());
-        query->VectorCounts(vector_counts + i);
-    } else {
+    if (queries->GetSparseVectors() != nullptr) {
+        query->SparseVectors(queries->GetSparseVectors() + i);
+    }
+
+    if (queries->GetMultiVectors() != nullptr) {
+        query->MultiVectors(queries->GetMultiVectors() + i);
+        query->MultiVectorDim(queries->GetMultiVectorDim());
+    }
+
+    if (queries->GetFloat32Vectors() != nullptr) {
         query->Float32Vectors(queries->GetFloat32Vectors() + i * queries->GetDim());
     }
 

@@ -483,6 +483,13 @@ VSAG referenced the following works during its implementation:
                 </a>
             </td>
             <td align="center">
+                <a href="https://github.com/liric24">
+                    <img src="https://avatars.githubusercontent.com/u/11338347?v=4" width="100" alt="liric24"/>
+                    <br />
+                    <sub><b>liric24</b></sub>
+                </a>
+            </td>
+            <td align="center">
                 <a href="https://github.com/mingyu-hkustgz">
                     <img src="https://avatars.githubusercontent.com/u/151442761?v=4" width="100" alt="mingyu-hkustgz"/>
                     <br />

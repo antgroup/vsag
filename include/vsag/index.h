@@ -16,9 +16,17 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
+#include <iosfwd>
 #include <limits>
+#include <memory>
 #include <stdexcept>
+#include <string>
+#include <tuple>
+#include <utility>
+#include <vector>
 
+#include "vsag/allocator.h"
 #include "vsag/binaryset.h"
 #include "vsag/bitset.h"
 #include "vsag/dataset.h"
@@ -72,11 +80,6 @@ enum class RemoveMode {
     /** remove the vector from index and repair the index, this mode is heavy */
     FORCE_REMOVE = 1,
 
-    /** backward-compatible alias kept for existing public API users */
-    REMOVE_AND_REPAIR = FORCE_REMOVE,
-
-    /** backward-compatible alias for the mixed-style enumerator introduced earlier */
-    ForceRemove = FORCE_REMOVE,
 };
 
 class Index {
@@ -457,7 +460,12 @@ public:
     /**
      * @brief Calculate the distance between the query and the vector of the given ID.
      *
-     * @param vector The embedding of the query.
+     * Suitable for dense vector indexes (HGraph, BruteForce, IVF, DiskANN, HNSW).
+     * The query must be a contiguous float32 array with dimension matching the index.
+     * For sparse vector indexes (SINDI, SparseIndex), this overload is not applicable;
+     * use CalcDistanceById(DatasetPtr, int64_t, bool) instead.
+     *
+     * @param vector The embedding of the query (float32 array for dense vectors).
      * @param id The unique identifier of the vector in the index for which the distance is computed.
      * @param calculate_precise_distance If true, the function will attempt to use high-precision
      *        vectors (e.g., full-precision float32) for distance computation, even if it requires
@@ -475,7 +483,13 @@ public:
     /**
      * @brief Calculate the distance between the query and the vector of the given ID.
      *
-     * @param vector is the embedding of query
+     * Suitable for sparse vector indexes (SINDI, SparseIndex) where vectors
+     * cannot be represented as a simple float pointer. The Dataset should
+     * contain sparse vectors via GetSparseVectors().
+     * For dense vector indexes (HGraph, BruteForce, IVF, DiskANN, HNSW),
+     * this overload is also available and internally calls GetFloat32Vectors().
+     *
+     * @param vector is the embedding of query (sparse or dense format via DatasetPtr).
      * @param id is the unique identifier of the vector to be calculated in the index.
      * @param calculate_precise_distance If true, the function will attempt to use high-precision
      *        vectors (e.g., full-precision float32) for distance computation, even if it requires
@@ -493,7 +507,12 @@ public:
     /**
      * @brief Calculate the distance between the query and the vector of the given ID for batch.
      *
-     * @param query is the embedding of query
+     * Suitable for dense vector indexes (HGraph, BruteForce, IVF, DiskANN, HNSW).
+     * The query must be a contiguous float32 array. For sparse vector indexes
+     * (SINDI, SparseIndex), this overload is not applicable; use
+     * CalDistanceById(DatasetPtr, const int64_t*, int64_t, bool) instead.
+     *
+     * @param query is the embedding of query (float32 array for dense vectors).
      * @param ids is the unique identifier of the vector to be calculated in the index.
      * @param count is the count of ids
      * @param calculate_precise_distance If true, the function will attempt to use high-precision
@@ -513,7 +532,13 @@ public:
     /**
      * @brief Calculate the distance between the query and the vector of the given ID for batch.
      *
-     * @param query is the embedding of query
+     * Suitable for sparse vector indexes (SINDI, SparseIndex) where vectors
+     * cannot be represented as a simple float pointer. The Dataset should
+     * contain sparse vectors via GetSparseVectors().
+     * For dense vector indexes (HGraph, BruteForce, IVF, DiskANN, HNSW),
+     * this overload is also available and internally calls GetFloat32Vectors().
+     *
+     * @param query is the embedding of query (sparse or dense format via DatasetPtr).
      * @param ids is the unique identifier of the vector to be calculated in the index.
      * @param count is the count of ids
      * @param calculate_precise_distance If true, the function will attempt to use high-precision

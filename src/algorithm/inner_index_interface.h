@@ -69,6 +69,23 @@ public:
     virtual std::vector<int64_t>
     Build(const DatasetPtr& base);
 
+    /**
+     * @brief Calculate distance by ID using DatasetPtr.
+     *
+     * Suitable for sparse vector indexes (SINDI, SparseIndex) where vectors
+     * cannot be represented as a simple float pointer. The Dataset should
+     * contain sparse vectors via GetSparseVectors().
+     * For dense vector indexes, this overload is also available via default
+     * implementation that calls GetFloat32Vectors().
+     *
+     * Default implementation throws exception; indexes must override appropriately.
+     *
+     * @param vector DatasetPtr containing the query vector (sparse or dense format).
+     * @param id The unique identifier of the vector in the index.
+     * @param calculate_precise_distance If true, use high-precision vectors for computation.
+     * @return The distance between the query and the vector of the given ID.
+     * @throws VsagException If the index doesn't support calculate distance by id.
+     */
     virtual float
     CalcDistanceById(const DatasetPtr& vector,
                      int64_t id,
@@ -77,18 +94,67 @@ public:
                             "Index doesn't support calculate distance by id");
     };
 
+    /**
+     * @brief Calculate distance by ID using raw float pointer.
+     *
+     * Suitable for dense vector indexes (HGraph, BruteForce, IVF, DiskANN, HNSW).
+     * The query must be a contiguous float32 array with dimension matching the index.
+     * For sparse vector indexes (SINDI, SparseIndex), this overload is not applicable.
+     *
+     * Default implementation throws exception; dense indexes must override.
+     *
+     * @param query Pointer to the float32 query vector (dense format).
+     * @param id The unique identifier of the vector in the index.
+     * @param calculate_precise_distance If true, use high-precision vectors for computation.
+     * @return The distance between the query and the vector of the given ID.
+     * @throws VsagException If the index doesn't support calculate distance by id.
+     */
     virtual float
     CalcDistanceById(const float* query, int64_t id, bool calculate_precise_distance = true) const {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                             "Index doesn't support calculate distance by id");
     }
 
+    /**
+     * @brief Calculate distances by IDs (batch) using raw float pointer.
+     *
+     * Suitable for dense vector indexes (HGraph, BruteForce, IVF, DiskANN, HNSW).
+     * The query must be a contiguous float32 array. For sparse vector indexes,
+     * this overload is not applicable.
+     *
+     * Default implementation loops through IDs calling CalcDistanceById.
+     * Dense indexes may override for batch optimization.
+     *
+     * @param query Pointer to the float32 query vector (dense format).
+     * @param ids Array of unique identifiers of vectors to be calculated.
+     * @param count Number of IDs in the array.
+     * @param calculate_precise_distance If true, use high-precision vectors for computation.
+     * @return DatasetPtr containing distances. '-1' indicates an invalid ID.
+     */
     virtual DatasetPtr
     CalDistanceById(const float* query,
                     const int64_t* ids,
                     int64_t count,
                     bool calculate_precise_distance = true) const;
 
+    /**
+     * @brief Calculate distances by IDs (batch) using DatasetPtr.
+     *
+     * Suitable for sparse vector indexes (SINDI, SparseIndex) where vectors
+     * cannot be represented as a simple float pointer. The Dataset should
+     * contain sparse vectors via GetSparseVectors().
+     * For dense vector indexes, this overload is also available via default
+     * implementation that calls GetFloat32Vectors().
+     *
+     * Default implementation loops through IDs calling CalcDistanceById.
+     * Sparse indexes must override for proper sparse vector handling.
+     *
+     * @param query DatasetPtr containing the query vector (sparse or dense format).
+     * @param ids Array of unique identifiers of vectors to be calculated.
+     * @param count Number of IDs in the array.
+     * @param calculate_precise_distance If true, use high-precision vectors for computation.
+     * @return DatasetPtr containing distances. '-1' indicates an invalid ID.
+     */
     virtual DatasetPtr
     CalDistanceById(const DatasetPtr& query,
                     const int64_t* ids,

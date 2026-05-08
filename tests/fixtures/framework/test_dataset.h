@@ -43,12 +43,11 @@ public:
      * @param metric_str Distance metric type ("l2", "ip", etc.).
      * @param with_path Whether to include path information.
      * @param valid_ratio Ratio of valid vectors.
-     * @param vector_type Type of vectors ("dense", "sparse", etc.).
+     * @param vector_type Type of vectors ("dense", "sparse", "multi").
      * @param extra_info_size Size of extra info per vector.
      * @param has_duplicate Whether to include duplicate vectors.
      * @param id_shift Offset for generated IDs.
      * @param use_fixed_seed Whether to use a fixed seed for reproducible data generation.
-     * @param is_multi_vector Whether to generate multi-vector documents.
      * @return Shared pointer to the created TestDataset.
      */
     static std::shared_ptr<TestDataset>
@@ -61,8 +60,7 @@ public:
                       uint64_t extra_info_size = 0,
                       bool has_duplicate = false,
                       int64_t id_shift = 16,
-                      bool use_fixed_seed = true,
-                      bool is_multi_vector = false);
+                      bool use_fixed_seed = true);
 
     /**
      * @brief Creates a test dataset with NaN values.

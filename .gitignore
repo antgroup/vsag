@@ -203,3 +203,6 @@ wheelhouse/
 # generated benchmark artifacts
 /benchs/indexes/gist1m/
 /acore.*
+
+# claude-code
+.claude/
