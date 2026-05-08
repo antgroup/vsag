@@ -1353,4 +1353,72 @@ KacsWalk(float* data, uint64_t len) {
     return generic::KacsWalk(data, len);
 #endif
 }
+
+float
+NormalizeWithCentroid(const float* from, const float* centroid, float* to, uint64_t dim) {
+#if defined(ENABLE_SSE)
+    float norm_sq = 0;
+    uint64_t i = 0;
+    if (dim >= 4) {
+        __m128 sum = _mm_setzero_ps();
+        for (; i + 3 < dim; i += 4) {
+            __m128 f = _mm_loadu_ps(from + i);
+            __m128 c = _mm_loadu_ps(centroid + i);
+            __m128 diff = _mm_sub_ps(f, c);
+            sum = _mm_add_ps(sum, _mm_mul_ps(diff, diff));
+        }
+        alignas(16) float result[4];
+        _mm_store_ps(result, sum);
+        norm_sq = result[0] + result[1] + result[2] + result[3];
+        norm_sq += generic::FP32ComputeL2Sqr(from + i, centroid + i, dim - i);
+    } else {
+        norm_sq = generic::FP32ComputeL2Sqr(from, centroid, dim);
+    }
+
+    float norm = 0;
+    if (norm_sq < 1e-5f) {
+        norm = 1.0f;
+    } else {
+        norm = std::sqrt(norm_sq);
+    }
+
+    __m128 normVec = _mm_set1_ps(norm);
+    for (i = 0; i + 3 < dim; i += 4) {
+        __m128 f = _mm_loadu_ps(from + i);
+        __m128 c = _mm_loadu_ps(centroid + i);
+        __m128 diff = _mm_sub_ps(f, c);
+        __m128 result = _mm_div_ps(diff, normVec);
+        _mm_storeu_ps(to + i, result);
+    }
+    if (i < dim) {
+        for (; i < dim; ++i) {
+            to[i] = (from[i] - centroid[i]) / norm;
+        }
+    }
+    return norm;
+#else
+    return generic::NormalizeWithCentroid(from, centroid, to, dim);
+#endif
+}
+
+void
+InverseNormalizeWithCentroid(
+    const float* from, const float* centroid, float* to, uint64_t dim, float norm) {
+#if defined(ENABLE_SSE)
+    uint64_t i = 0;
+    __m128 normVec = _mm_set1_ps(norm);
+    for (; i + 3 < dim; i += 4) {
+        __m128 f = _mm_loadu_ps(from + i);
+        __m128 c = _mm_loadu_ps(centroid + i);
+        __m128 result = _mm_add_ps(_mm_mul_ps(f, normVec), c);
+        _mm_storeu_ps(to + i, result);
+    }
+    for (; i < dim; i++) {
+        to[i] = from[i] * norm + centroid[i];
+    }
+#else
+    generic::InverseNormalizeWithCentroid(from, centroid, to, dim, norm);
+#endif
+}
+
 }  // namespace vsag::sse
