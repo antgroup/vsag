@@ -14,8 +14,6 @@
 
 #include "search_reasoning.h"
 
-#include <nlohmann/json.hpp>
-
 namespace vsag {
 
 ReasoningContext::ReasoningContext(Allocator* allocator)
@@ -173,7 +171,7 @@ ReasoningContext::DiagnoseTarget(const ExpectedTargetTrace& trace) {
 std::string
 ReasoningContext::GenerateReport() const {
     JsonType report;
-    nlohmann::json missed_targets = nlohmann::json::array();
+    JsonType missed_targets = JsonType::Parse("[]");
 
     int found_count = 0;
     int missed_count = 0;
@@ -185,18 +183,18 @@ ReasoningContext::GenerateReport() const {
         } else {
             missed_count++;
 
-            nlohmann::json detail;
-            detail["label"] = trace.label;
-            detail["inner_id"] = trace.inner_id;
-            detail["diagnosis"] = trace.diagnosis;
-            detail["true_distance"] = trace.true_distance;
-            detail["quantized_distance"] = trace.quantized_distance;
-            detail["was_visited"] = trace.was_visited;
-            detail["visited_at_hop"] = trace.visited_at_hop;
-            detail["was_evicted"] = trace.was_evicted;
-            detail["filter_rejected"] = trace.filter_rejected;
-            detail["reorder_evicted"] = trace.reorder_evicted;
-            missed_targets.push_back(detail);
+            JsonType detail;
+            detail["label"].SetJson(JsonType::Parse(std::to_string(trace.label)));
+            detail["inner_id"].SetJson(JsonType::Parse(std::to_string(trace.inner_id)));
+            detail["diagnosis"].SetString(trace.diagnosis);
+            detail["true_distance"].SetFloat(trace.true_distance);
+            detail["quantized_distance"].SetFloat(trace.quantized_distance);
+            detail["was_visited"].SetBool(trace.was_visited);
+            detail["visited_at_hop"].SetJson(JsonType::Parse(std::to_string(trace.visited_at_hop)));
+            detail["was_evicted"].SetBool(trace.was_evicted);
+            detail["filter_rejected"].SetBool(trace.filter_rejected);
+            detail["reorder_evicted"].SetBool(trace.reorder_evicted);
+            missed_targets.AppendJson(detail);
         }
     }
 
@@ -205,9 +203,7 @@ ReasoningContext::GenerateReport() const {
                           std::to_string(missed_count) + " missed";
 
     report["expected_analysis"]["summary"].SetString(summary);
-    JsonType missed_targets_json;
-    *missed_targets_json.GetInnerJson() = std::move(missed_targets);
-    report["expected_analysis"]["missed_targets"].SetJson(missed_targets_json);
+    report["expected_analysis"]["missed_targets"].SetJson(missed_targets);
 
     return report.Dump();
 }
