@@ -16,6 +16,8 @@
 #include "warp.h"
 
 #include <atomic>
+#include <cstring>
+#include <limits>
 #include <mutex>
 #include <numeric>
 #include <optional>
@@ -37,6 +39,11 @@
 #include "utils/slow_task_timer.h"
 #include "utils/util_functions.h"
 namespace vsag {
+
+namespace {
+constexpr InnerIdType MIN_PARALLEL_SEARCH_DOC_COUNT = 1000;
+constexpr float INITIAL_BEST_VECTOR_DISTANCE = std::numeric_limits<float>::infinity();
+}  // namespace
 
 WARP::WARP(const WarpParameterPtr& param, const IndexCommonParam& common_param)
     : InnerIndexInterface(param, common_param), doc_offsets_(allocator_) {
@@ -61,32 +68,45 @@ WARP::EstimateMemory(uint64_t num_elements) const {
 std::vector<int64_t>
 WARP::Build(const vsag::DatasetPtr& data) {
     this->Train(data);
-    return this->Add(data);
+    std::vector<int64_t> failed_ids = this->Add(data);
+    return failed_ids;
 }
 
 void
 WARP::Train(const DatasetPtr& data) {
-    const float* vectors = data->GetFloat32Vectors();
-    const uint32_t* vector_counts = data->GetVectorCounts();
-    uint64_t train_count = data->GetNumElements();
-    if (vector_counts != nullptr) {
-        train_count = std::accumulate(
-            vector_counts, vector_counts + data->GetNumElements(), static_cast<uint64_t>(0));
+    const MultiVector* multi_vectors = data->GetMultiVectors();
+    CHECK_ARGUMENT(multi_vectors != nullptr, "data.multi_vectors is nullptr");
+
+    int64_t mv_dim = data->GetMultiVectorDim();
+    CHECK_ARGUMENT(
+        mv_dim == dim_,
+        fmt::format("data.multi_vector_dim({}) must be equal to index.dim({})", mv_dim, dim_));
+
+    int64_t num_elements = data->GetNumElements();
+    uint64_t total_vectors = 0;
+    for (int64_t i = 0; i < num_elements; ++i) {
+        total_vectors += multi_vectors[i].len_;
     }
-    this->inner_codes_->Train(vectors, train_count);
+    Vector<float> buffer(total_vectors * mv_dim, allocator_);
+    uint64_t offset = 0;
+    for (int64_t i = 0; i < num_elements; ++i) {
+        uint64_t num_floats = static_cast<uint64_t>(multi_vectors[i].len_) * mv_dim;
+        std::memcpy(buffer.data() + offset, multi_vectors[i].vectors_, num_floats * sizeof(float));
+        offset += num_floats;
+    }
+    this->inner_codes_->Train(buffer.data(), total_vectors);
 }
 
 std::vector<int64_t>
 WARP::Add(const DatasetPtr& data, AddMode mode) {
     std::vector<int64_t> failed_ids;
-    auto base_dim = data->GetDim();
-    CHECK_ARGUMENT(base_dim == dim_,
-                   fmt::format("base.dim({}) must be equal to index.dim({})", base_dim, dim_));
-    CHECK_ARGUMENT(data->GetFloat32Vectors() != nullptr, "base.float_vector is nullptr");
+    const MultiVector* multi_vectors = data->GetMultiVectors();
+    CHECK_ARGUMENT(multi_vectors != nullptr, "data.multi_vectors is nullptr");
 
-    // For multi-vector support, vector counts per document is required
-    const uint32_t* vector_counts = data->GetVectorCounts();
-    CHECK_ARGUMENT(vector_counts != nullptr, "base.vector_counts is nullptr");
+    int64_t mv_dim = data->GetMultiVectorDim();
+    CHECK_ARGUMENT(
+        mv_dim == dim_,
+        fmt::format("data.multi_vector_dim({}) must be equal to index.dim({})", mv_dim, dim_));
 
     {
         std::lock_guard lock(this->add_mutex_);
@@ -95,21 +115,19 @@ WARP::Add(const DatasetPtr& data, AddMode mode) {
         }
     }
 
-    // Multi-vector document handling
-    const auto total = data->GetNumElements();
-    const auto* labels = data->GetIds();
-    const auto* vectors = data->GetFloat32Vectors();
-    const auto* attrs = data->GetAttributeSets();
-    const auto* extra_info = data->GetExtraInfos();
-    const auto extra_info_size = data->GetExtraInfoSize();
+    const int64_t num_elements = data->GetNumElements();
+    const int64_t* labels = data->GetIds();
+    const AttributeSet* attrs = data->GetAttributeSets();
+    const char* extra_info = data->GetExtraInfos();
+    const int64_t extra_info_size = data->GetExtraInfoSize();
 
     // Pre-calculate total vectors and reserve capacity once
     uint64_t total_vectors_to_add = 0;
-    for (int64_t j = 0; j < total; ++j) {
-        total_vectors_to_add += vector_counts[j];
+    for (int64_t i = 0; i < num_elements; ++i) {
+        total_vectors_to_add += multi_vectors[i].len_;
     }
     uint64_t required_vec_capacity = this->inner_codes_->TotalCount() + total_vectors_to_add;
-    auto cur_vec_capacity = this->max_vector_capacity_.load();
+    uint64_t cur_vec_capacity = this->max_vector_capacity_.load();
     if (cur_vec_capacity < required_vec_capacity) {
         std::lock_guard lock(this->global_mutex_);
         cur_vec_capacity = this->max_vector_capacity_.load();
@@ -147,17 +165,16 @@ WARP::Add(const DatasetPtr& data, AddMode mode) {
     };
 
     std::vector<std::future<std::optional<int64_t>>> futures;
-    uint64_t vec_offset = 0;
 
-    for (int64_t j = 0; j < total; ++j) {
-        const auto label = labels[j];
-        uint32_t doc_vec_count = vector_counts[j];
+    for (int64_t i = 0; i < num_elements; ++i) {
+        const int64_t label = labels[i];
+        uint32_t doc_vec_count = multi_vectors[i].len_;
+        const float* doc_vectors = multi_vectors[i].vectors_;
 
         {
             std::lock_guard label_lock(this->label_lookup_mutex_);
             if (this->label_table_->CheckLabel(label)) {
                 failed_ids.emplace_back(label);
-                vec_offset += doc_vec_count;
                 continue;
             }
         }
@@ -165,25 +182,23 @@ WARP::Add(const DatasetPtr& data, AddMode mode) {
         if (this->thread_pool_ != nullptr) {
             auto future = this->thread_pool_->GeneralEnqueue(
                 add_func,
-                vectors + vec_offset * dim_,
+                doc_vectors,
                 doc_vec_count,
                 label,
-                attrs == nullptr ? nullptr : attrs + j,
-                extra_info == nullptr ? nullptr : extra_info + j * extra_info_size);
+                attrs == nullptr ? nullptr : attrs + i,
+                extra_info == nullptr ? nullptr : extra_info + i * extra_info_size);
             futures.emplace_back(std::move(future));
         } else {
             if (auto add_res =
-                    add_func(vectors + vec_offset * dim_,
+                    add_func(doc_vectors,
                              doc_vec_count,
                              label,
-                             attrs == nullptr ? nullptr : attrs + j,
-                             extra_info == nullptr ? nullptr : extra_info + j * extra_info_size);
+                             attrs == nullptr ? nullptr : attrs + i,
+                             extra_info == nullptr ? nullptr : extra_info + i * extra_info_size);
                 add_res.has_value()) {
                 failed_ids.emplace_back(add_res.value());
             }
         }
-
-        vec_offset += doc_vec_count;
     }
 
     if (this->thread_pool_ != nullptr) {
@@ -213,17 +228,17 @@ WARP::compute_maxsin_similarity(const float* query_vectors,
     Vector<float> dists(doc_vec_count, allocator_);
     std::iota(vec_indices.begin(), vec_indices.end(), doc_start_vec_idx);
 
-    // For each query vector, find max similarity with any document vector
+    // FactoryComputer returns distances; keep the best document-vector distance per query vector.
     for (uint32_t q = 0; q < query_vec_count; ++q) {
         const float* query_vec = query_vectors + q * dim_;
         auto computer = this->inner_codes_->FactoryComputer(query_vec);
 
-        float min_sim = std::numeric_limits<float>::max();
+        float best_dist = INITIAL_BEST_VECTOR_DISTANCE;
         this->inner_codes_->Query(dists.data(), computer, vec_indices.data(), doc_vec_count);
-        for (const auto& sim : dists) {
-            min_sim = std::min(min_sim, sim);
+        for (const float dist : dists) {
+            best_dist = std::min(best_dist, dist);
         }
-        total_score += min_sim;
+        total_score += best_dist;
     }
     return total_score;
 }
@@ -247,12 +262,12 @@ DatasetPtr
 WARP::SearchWithRequest(const SearchRequest& request) const {
     std::shared_lock read_lock(this->global_mutex_);
 
-    // Get query information
-    const float* query_vectors = request.query_->GetFloat32Vectors();
-    const uint32_t* query_vec_counts = request.query_->GetVectorCounts();
-    CHECK_ARGUMENT(query_vec_counts != nullptr, "query.vector_counts is nullptr");
+    // Get query information from MultiVectors
+    const MultiVector* query_multi_vectors = request.query_->GetMultiVectors();
+    CHECK_ARGUMENT(query_multi_vectors != nullptr, "query.multi_vectors is nullptr");
 
-    uint32_t query_vec_count = query_vec_counts[0];
+    const float* query_vectors = query_multi_vectors[0].vectors_;
+    uint32_t query_vec_count = query_multi_vectors[0].len_;
 
     FilterPtr ft = nullptr;
     auto combined_filter = std::make_shared<CombinedFilter>();
@@ -299,7 +314,8 @@ WARP::SearchWithRequest(const SearchRequest& request) const {
 
     DistHeapPtr heap = nullptr;
 
-    if (parallel_count == 1 || this->thread_pool_ == nullptr || total_count_ < 1000) {
+    if (parallel_count == 1 || this->thread_pool_ == nullptr ||
+        total_count_ < MIN_PARALLEL_SEARCH_DOC_COUNT) {
         heap = search_func(0, total_count_);
     } else {
         std::vector<std::future<DistHeapPtr>> futures;
@@ -359,12 +375,12 @@ WARP::RangeSearch(const vsag::DatasetPtr& query,
                   int64_t limited_size) const {
     std::shared_lock read_lock(this->global_mutex_);
 
-    // Get query information
-    const float* query_vectors = query->GetFloat32Vectors();
-    const uint32_t* query_vec_counts = query->GetVectorCounts();
-    CHECK_ARGUMENT(query_vec_counts != nullptr, "query.vector_counts is nullptr");
+    // Get query information from MultiVectors
+    const MultiVector* query_multi_vectors = query->GetMultiVectors();
+    CHECK_ARGUMENT(query_multi_vectors != nullptr, "query.multi_vectors is nullptr");
 
-    uint32_t query_vec_count = query_vec_counts[0];
+    const float* query_vectors = query_multi_vectors[0].vectors_;
+    uint32_t query_vec_count = query_multi_vectors[0].len_;
 
     if (limited_size < 0) {
         limited_size = std::numeric_limits<int64_t>::max();
@@ -375,7 +391,8 @@ WARP::RangeSearch(const vsag::DatasetPtr& query,
     auto parallel_count = warp_params.parallel_search_thread_count;
 
     // Use serial version if no thread pool or small dataset
-    if (parallel_count == 1 || this->thread_pool_ == nullptr || total_count_ < 1000) {
+    if (parallel_count == 1 || this->thread_pool_ == nullptr ||
+        total_count_ < MIN_PARALLEL_SEARCH_DOC_COUNT) {
         auto heap = std::make_shared<StandardHeap<true, true>>(this->allocator_, limited_size);
 
         for (InnerIdType doc_id = 0; doc_id < total_count_; ++doc_id) {

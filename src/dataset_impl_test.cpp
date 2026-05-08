@@ -341,3 +341,317 @@ TEST_CASE("Dataset Copy and Append Test", "[ut][Dataset]") {
         REQUIRE(EqualDataset(sub_original, append_dataset));
     }
 }
+
+TEST_CASE("Dataset MultiVector Basic Test", "[ut][dataset]") {
+    SECTION("MultiVectorDim default is 0") {
+        auto dataset = vsag::Dataset::Make();
+        REQUIRE(dataset->GetMultiVectorDim() == 0);
+    }
+
+    SECTION("MultiVectorDim setter/getter round-trip") {
+        auto dataset = vsag::Dataset::Make();
+        dataset->MultiVectorDim(128);
+        REQUIRE(dataset->GetMultiVectorDim() == 128);
+    }
+
+    SECTION("MultiVectors getter returns nullptr by default") {
+        auto dataset = vsag::Dataset::Make();
+        REQUIRE(dataset->GetMultiVectors() == nullptr);
+    }
+
+    SECTION("MultiVectors setter/getter round-trip") {
+        constexpr int64_t num_elements = 10;
+        constexpr int64_t mv_dim = 16;
+
+        auto* multi_vectors = new vsag::MultiVector[num_elements];
+        for (int64_t i = 0; i < num_elements; ++i) {
+            multi_vectors[i].len_ = 3;
+            multi_vectors[i].vectors_ = new float[3 * mv_dim];
+            for (int j = 0; j < 3 * mv_dim; ++j) {
+                multi_vectors[i].vectors_[j] = static_cast<float>(i * 100 + j);
+            }
+        }
+
+        auto dataset = vsag::Dataset::Make();
+        dataset->NumElements(num_elements)->MultiVectorDim(mv_dim)->MultiVectors(multi_vectors);
+
+        REQUIRE(dataset->GetMultiVectors() == multi_vectors);
+        REQUIRE(dataset->GetMultiVectors()[0].len_ == 3);
+        REQUIRE(dataset->GetMultiVectors()[0].vectors_[0] == 0.0f);
+        REQUIRE(dataset->GetMultiVectors()[1].vectors_[0] == 100.0f);
+
+        dataset->Owner(true, nullptr);
+    }
+
+    SECTION("Owner(true) destructor releases MultiVector without crash") {
+        constexpr int64_t num_elements = 5;
+        constexpr int64_t mv_dim = 8;
+
+        auto* multi_vectors = new vsag::MultiVector[num_elements];
+        for (int64_t i = 0; i < num_elements; ++i) {
+            multi_vectors[i].len_ = 2;
+            multi_vectors[i].vectors_ = new float[2 * mv_dim];
+        }
+        multi_vectors[2].len_ = 0;
+        delete[] multi_vectors[2].vectors_;
+        multi_vectors[2].vectors_ = nullptr;
+
+        auto dataset = vsag::Dataset::Make();
+        dataset->NumElements(num_elements)
+            ->MultiVectorDim(mv_dim)
+            ->MultiVectors(multi_vectors)
+            ->Owner(true, nullptr);
+    }
+
+    SECTION("Owner(true) with allocator releases MultiVector without crash") {
+        vsag::DefaultAllocator allocator;
+        constexpr int64_t num_elements = 5;
+        constexpr int64_t mv_dim = 8;
+
+        auto* multi_vectors = static_cast<vsag::MultiVector*>(
+            allocator.Allocate(num_elements * sizeof(vsag::MultiVector)));
+        for (int64_t i = 0; i < num_elements; ++i) {
+            multi_vectors[i].len_ = 2;
+            multi_vectors[i].vectors_ =
+                static_cast<float*>(allocator.Allocate(2 * mv_dim * sizeof(float)));
+        }
+
+        auto dataset = vsag::Dataset::Make();
+        dataset->NumElements(num_elements)
+            ->MultiVectorDim(mv_dim)
+            ->MultiVectors(multi_vectors)
+            ->Owner(true, &allocator);
+    }
+}
+
+TEST_CASE("Dataset MultiVector Append Test", "[ut][dataset]") {
+    constexpr int64_t mv_dim = 16;
+
+    auto use_allocator = GENERATE(true, false);
+    std::shared_ptr<vsag::Allocator> allocator =
+        use_allocator ? vsag::Engine::CreateDefaultAllocator() : nullptr;
+
+    auto make_multi_vector_dataset = [&](int64_t num_elements, uint32_t len_per_doc) {
+        vsag::MultiVector* multi_vectors = nullptr;
+        if (allocator) {
+            multi_vectors = static_cast<vsag::MultiVector*>(
+                allocator->Allocate(num_elements * sizeof(vsag::MultiVector)));
+        } else {
+            multi_vectors = new vsag::MultiVector[num_elements];
+        }
+        for (int64_t i = 0; i < num_elements; ++i) {
+            multi_vectors[i].len_ = len_per_doc;
+            uint64_t num_floats = static_cast<uint64_t>(len_per_doc) * mv_dim;
+            if (allocator) {
+                multi_vectors[i].vectors_ =
+                    static_cast<float*>(allocator->Allocate(num_floats * sizeof(float)));
+            } else {
+                multi_vectors[i].vectors_ = new float[num_floats];
+            }
+            for (uint64_t j = 0; j < num_floats; ++j) {
+                multi_vectors[i].vectors_[j] = static_cast<float>(i * 1000 + j);
+            }
+        }
+        auto dataset = vsag::Dataset::Make();
+        dataset->NumElements(num_elements)
+            ->Dim(mv_dim)
+            ->MultiVectorDim(mv_dim)
+            ->MultiVectors(multi_vectors)
+            ->Owner(true, allocator.get());
+        return dataset;
+    };
+
+    SECTION("Append preserves data") {
+        constexpr int64_t n1 = 10;
+        constexpr int64_t n2 = 7;
+        constexpr uint32_t len = 3;
+
+        auto ds1 = make_multi_vector_dataset(n1, len);
+        auto ds2 = make_multi_vector_dataset(n2, len);
+
+        const vsag::MultiVector* mv2_before = ds2->GetMultiVectors();
+        std::vector<float> mv2_first_vec(mv_dim * len);
+        std::memcpy(mv2_first_vec.data(), mv2_before[0].vectors_, mv_dim * len * sizeof(float));
+
+        ds1->Append(ds2);
+
+        REQUIRE(ds1->GetNumElements() == n1 + n2);
+        REQUIRE(ds1->GetMultiVectors() != nullptr);
+
+        const vsag::MultiVector* result_mv = ds1->GetMultiVectors();
+        for (int64_t i = 0; i < n1; ++i) {
+            REQUIRE(result_mv[i].len_ == len);
+            REQUIRE(result_mv[i].vectors_[0] == static_cast<float>(i * 1000));
+        }
+        for (int64_t i = 0; i < n2; ++i) {
+            REQUIRE(result_mv[n1 + i].len_ == len);
+            REQUIRE(std::memcmp(result_mv[n1 + i].vectors_,
+                                mv2_before[i].vectors_,
+                                len * mv_dim * sizeof(float)) == 0);
+        }
+    }
+
+    SECTION("Append with variable-length MultiVectors") {
+        constexpr int64_t n1 = 5;
+        constexpr int64_t n2 = 3;
+
+        auto make_varlen_dataset = [&](int64_t num_elements, int seed) {
+            std::mt19937 gen(seed);
+            std::uniform_int_distribution<uint32_t> len_dist(1, 6);
+
+            vsag::MultiVector* multi_vectors = nullptr;
+            if (allocator) {
+                multi_vectors = static_cast<vsag::MultiVector*>(
+                    allocator->Allocate(num_elements * sizeof(vsag::MultiVector)));
+            } else {
+                multi_vectors = new vsag::MultiVector[num_elements];
+            }
+            for (int64_t i = 0; i < num_elements; ++i) {
+                uint32_t len = len_dist(gen);
+                multi_vectors[i].len_ = len;
+                uint64_t num_floats = static_cast<uint64_t>(len) * mv_dim;
+                if (allocator) {
+                    multi_vectors[i].vectors_ =
+                        static_cast<float*>(allocator->Allocate(num_floats * sizeof(float)));
+                } else {
+                    multi_vectors[i].vectors_ = new float[num_floats];
+                }
+                for (uint64_t j = 0; j < num_floats; ++j) {
+                    multi_vectors[i].vectors_[j] = static_cast<float>(seed * 10000 + i * 100 + j);
+                }
+            }
+            auto dataset = vsag::Dataset::Make();
+            dataset->NumElements(num_elements)
+                ->Dim(mv_dim)
+                ->MultiVectorDim(mv_dim)
+                ->MultiVectors(multi_vectors)
+                ->Owner(true, allocator.get());
+            return dataset;
+        };
+
+        auto ds1 = make_varlen_dataset(n1, 42);
+        auto ds2 = make_varlen_dataset(n2, 99);
+
+        std::vector<uint32_t> expected_lens(n1 + n2);
+        for (int64_t i = 0; i < n1; ++i) {
+            expected_lens[i] = ds1->GetMultiVectors()[i].len_;
+        }
+        for (int64_t i = 0; i < n2; ++i) {
+            expected_lens[n1 + i] = ds2->GetMultiVectors()[i].len_;
+        }
+
+        ds1->Append(ds2);
+
+        REQUIRE(ds1->GetNumElements() == n1 + n2);
+        const vsag::MultiVector* result_mv = ds1->GetMultiVectors();
+        for (int64_t i = 0; i < n1 + n2; ++i) {
+            REQUIRE(result_mv[i].len_ == expected_lens[i]);
+            REQUIRE(result_mv[i].vectors_ != nullptr);
+        }
+    }
+
+    SECTION("Append mismatch MultiVectorDim throws") {
+        auto ds1 = make_multi_vector_dataset(5, 2);
+
+        auto* mv2 = new vsag::MultiVector[3];
+        for (int i = 0; i < 3; ++i) {
+            mv2[i].len_ = 2;
+            mv2[i].vectors_ = new float[2 * 32];
+        }
+        auto ds2 = vsag::Dataset::Make();
+        ds2->NumElements(3)->Dim(mv_dim)->MultiVectorDim(32)->MultiVectors(mv2)->Owner(true,
+                                                                                       nullptr);
+
+        REQUIRE_THROWS(ds1->Append(ds2));
+    }
+
+    SECTION("Append this has MultiVectors but other does not throws") {
+        auto ds1 = make_multi_vector_dataset(5, 2);
+        auto ds2 = vsag::Dataset::Make();
+        ds2->NumElements(3)->Dim(mv_dim)->Owner(false);
+
+        REQUIRE_THROWS(ds1->Append(ds2));
+    }
+}
+
+TEST_CASE("Dataset MultiVector DeepCopy Test", "[ut][dataset]") {
+    constexpr int64_t num_elements = 50;
+    constexpr int64_t mv_dim = 32;
+
+    bool use_allocator = GENERATE(true, false);
+    std::shared_ptr<vsag::Allocator> allocator =
+        use_allocator ? vsag::Engine::CreateDefaultAllocator() : nullptr;
+
+    std::mt19937 gen(42);
+    std::uniform_int_distribution<uint32_t> len_dist(1, 8);
+    std::uniform_real_distribution<float> val_dist(-1.0f, 1.0f);
+
+    vsag::MultiVector* multi_vectors = nullptr;
+    if (allocator) {
+        multi_vectors = static_cast<vsag::MultiVector*>(
+            allocator->Allocate(num_elements * sizeof(vsag::MultiVector)));
+    } else {
+        multi_vectors = new vsag::MultiVector[num_elements];
+    }
+
+    for (int64_t i = 0; i < num_elements; ++i) {
+        uint32_t len = len_dist(gen);
+        multi_vectors[i].len_ = len;
+        uint64_t num_floats = static_cast<uint64_t>(len) * mv_dim;
+        if (allocator) {
+            multi_vectors[i].vectors_ =
+                static_cast<float*>(allocator->Allocate(num_floats * sizeof(float)));
+        } else {
+            multi_vectors[i].vectors_ = new float[num_floats];
+        }
+        for (uint64_t j = 0; j < num_floats; ++j) {
+            multi_vectors[i].vectors_[j] = val_dist(gen);
+        }
+    }
+
+    vsag::DatasetPtr dataset = vsag::Dataset::Make();
+    dataset->NumElements(num_elements)
+        ->Dim(mv_dim)
+        ->MultiVectorDim(mv_dim)
+        ->MultiVectors(multi_vectors)
+        ->Owner(true, allocator.get());
+
+    SECTION("DeepCopy preserves data") {
+        bool use_copy_allocator = GENERATE(true, false);
+        std::shared_ptr<vsag::Allocator> copy_allocator =
+            use_copy_allocator ? vsag::Engine::CreateDefaultAllocator() : nullptr;
+
+        vsag::DatasetPtr copy = dataset->DeepCopy(copy_allocator.get());
+
+        REQUIRE(copy->GetNumElements() == num_elements);
+        REQUIRE(copy->GetMultiVectorDim() == mv_dim);
+        REQUIRE(copy->GetMultiVectors() != nullptr);
+        REQUIRE(copy->GetMultiVectors() != dataset->GetMultiVectors());
+
+        const vsag::MultiVector* src_mv = dataset->GetMultiVectors();
+        const vsag::MultiVector* dst_mv = copy->GetMultiVectors();
+        for (int64_t i = 0; i < num_elements; ++i) {
+            REQUIRE(dst_mv[i].len_ == src_mv[i].len_);
+            REQUIRE(dst_mv[i].vectors_ != src_mv[i].vectors_);
+            uint64_t num_floats = static_cast<uint64_t>(src_mv[i].len_) * mv_dim;
+            REQUIRE(std::memcmp(
+                        dst_mv[i].vectors_, src_mv[i].vectors_, num_floats * sizeof(float)) == 0);
+        }
+    }
+
+    SECTION("DeepCopy with zero-length MultiVector element") {
+        multi_vectors[0].len_ = 0;
+        if (allocator) {
+            allocator->Deallocate(multi_vectors[0].vectors_);
+        } else {
+            delete[] multi_vectors[0].vectors_;
+        }
+        multi_vectors[0].vectors_ = nullptr;
+
+        vsag::DatasetPtr copy = dataset->DeepCopy(nullptr);
+        const vsag::MultiVector* dst_mv = copy->GetMultiVectors();
+        REQUIRE(dst_mv[0].len_ == 0);
+        REQUIRE(dst_mv[0].vectors_ == nullptr);
+        REQUIRE(dst_mv[1].len_ == dataset->GetMultiVectors()[1].len_);
+    }
+}

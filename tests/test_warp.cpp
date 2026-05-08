@@ -111,7 +111,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::WarpTestIndex, "Warp Add Test", "[ft][war
         auto index = TestFactory(name, param, true);
         REQUIRE(index->GetIndexType() == vsag::IndexType::WARP);
         auto dataset =
-            pool.GetDatasetAndCreate(dim, base_count, metric_type, false, 0.8, 0, 16, true);
+            pool.GetDatasetAndCreate(dim, base_count, metric_type, false, 0.8, 0, 16, "multi");
         TestAddIndex(index, dataset, true);
         TestKnnSearch(index, dataset, search_param, 0.99, true);
         TestRangeSearch(index, dataset, search_param, 0.99, 10, true);
@@ -142,7 +142,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::WarpTestIndex,
             REQUIRE(deserialize_index.has_value());
         }
         auto dataset =
-            pool.GetDatasetAndCreate(dim, base_count, metric_type, false, 0.8, 0, 16, true);
+            pool.GetDatasetAndCreate(dim, base_count, metric_type, false, 0.8, 0, 16, "multi");
         TestBuildIndex(index, dataset, true);
         SECTION("serialize/deserialize by binary") {
             auto index2 = TestFactory(name, param, true);

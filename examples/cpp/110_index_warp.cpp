@@ -23,44 +23,43 @@ main(int argc, char** argv) {
     vsag::init();
 
     /******************* Prepare Multi-Vector Base Dataset *****************/
-    // In ColBERT-style retrieval, each document has multiple vectors (one per token)
-    // We'll create 100 documents, each with variable number of vectors (5-10)
-    int64_t num_docs = 100;
+    // In ColBERT-style retrieval, each element (document) has multiple vectors (one per token)
+    // We'll create 100 elements (documents), each with variable number of vectors (5-10)
+    int64_t num_elements = 100;
     int64_t dim = 128;
 
-    std::vector<int64_t> ids(num_docs);
-    std::vector<uint32_t> vector_counts(num_docs);
-    std::vector<float> datas;
+    std::vector<int64_t> ids(num_elements);
     std::mt19937 rng(47);
     std::uniform_real_distribution<float> distrib_real;
     std::uniform_int_distribution<int> vec_count_dist(5, 10);
 
-    // Generate document IDs and variable vector counts
+    // Generate MultiVector array: each document owns its own vectors buffer
+    vsag::MultiVector* multi_vectors = new vsag::MultiVector[num_elements];
     uint64_t total_vectors = 0;
-    for (int64_t i = 0; i < num_docs; ++i) {
+    for (int64_t i = 0; i < num_elements; ++i) {
         ids[i] = i;
-        vector_counts[i] = vec_count_dist(rng);
-        total_vectors += vector_counts[i];
+        uint32_t len = vec_count_dist(rng);
+        multi_vectors[i].len_ = len;
+        multi_vectors[i].vectors_ = new float[len * dim];
+        for (uint32_t j = 0; j < len * dim; ++j) {
+            multi_vectors[i].vectors_[j] = distrib_real(rng);
+        }
+        total_vectors += len;
     }
 
-    // Generate all vectors
-    datas.reserve(total_vectors * dim);
-    for (uint64_t i = 0; i < total_vectors * dim; ++i) {
-        datas.push_back(distrib_real(rng));
-    }
-
-    // Create dataset with VectorCounts for multi-vector support
-    auto base = vsag::Dataset::Make();
-    base->NumElements(num_docs)
+    // Create dataset with MultiVectors API (Owner(true) transfers memory ownership to Dataset)
+    vsag::DatasetPtr base = vsag::Dataset::Make();
+    base->NumElements(num_elements)
         ->Dim(dim)
         ->Ids(ids.data())
-        ->Float32Vectors(datas.data())
-        ->VectorCounts(vector_counts.data())  // Specify number of vectors per document
-        ->Owner(false);
+        ->MultiVectors(multi_vectors)
+        ->MultiVectorDim(dim)
+        ->Owner(true);
 
-    std::cout << "Created multi-vector dataset with " << num_docs << " documents" << std::endl;
-    std::cout << "Total vectors: " << total_vectors << " (avg " << (double)total_vectors / num_docs
-              << " vectors per doc)" << std::endl;
+    std::cout << "Created multi-vector dataset with " << num_elements << " elements (documents)"
+              << std::endl;
+    std::cout << "Total vectors: " << total_vectors << " (avg "
+              << (double)total_vectors / num_elements << " vectors per element)" << std::endl;
 
     /******************* Create WARP Index *****************/
     // WARP index for ColBERT-style maxsin similarity
@@ -71,12 +70,13 @@ main(int argc, char** argv) {
         "dim": 128
     }
     )";
-    auto index = vsag::Factory::CreateIndex("warp", warp_build_parameters).value();
+    std::shared_ptr<vsag::Index> index =
+        vsag::Factory::CreateIndex("warp", warp_build_parameters).value();
 
     /******************* Build WARP Index *****************/
     if (auto build_result = index->Build(base); build_result.has_value()) {
         std::cout << "After Build(), Index WARP contains: " << index->GetNumElements()
-                  << " documents" << std::endl;
+                  << " elements (documents)" << std::endl;
     } else {
         std::cerr << "Failed to build index: " << build_result.error().message << std::endl;
         exit(-1);
@@ -90,11 +90,15 @@ main(int argc, char** argv) {
         query_vectors[i] = distrib_real(rng);
     }
 
-    auto query = vsag::Dataset::Make();
+    vsag::MultiVector query_multi_vectors;
+    query_multi_vectors.len_ = query_vec_count;
+    query_multi_vectors.vectors_ = query_vectors.data();
+
+    vsag::DatasetPtr query = vsag::Dataset::Make();
     query->NumElements(1)
         ->Dim(dim)
-        ->Float32Vectors(query_vectors.data())
-        ->VectorCounts(&query_vec_count)  // Specify query has multiple vectors
+        ->MultiVectors(&query_multi_vectors)
+        ->MultiVectorDim(dim)
         ->Owner(false);
 
     std::cout << "Query has " << query_vec_count << " vectors" << std::endl;
@@ -102,9 +106,9 @@ main(int argc, char** argv) {
     /******************* KnnSearch For WARP Index *****************/
     // WARP performs maxsin similarity: for each query vector, find max similarity
     // with any document vector, sum across query vectors
-    auto warp_search_parameters = R"({})";
+    std::string warp_search_parameters = R"({})";
     int64_t topk = 5;
-    auto result = index->KnnSearch(query, topk, warp_search_parameters).value();
+    vsag::DatasetPtr result = index->KnnSearch(query, topk, warp_search_parameters).value();
 
     /******************* Print Search Result *****************/
     std::cout << "Top-" << topk << " results (maxsin similarity): " << std::endl;

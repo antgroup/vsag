@@ -57,17 +57,17 @@ using MaxHeap = std::priority_queue<std::pair<float, int64_t>,
                                     CompareByFirst>;
 
 static std::pair<std::vector<uint32_t>, uint64_t>
-GenerateVectorCounts(uint64_t count, int seed, uint32_t min_count = 1, uint32_t max_count = 5) {
+GenerateMultiVectorLens(uint64_t count, int seed, uint32_t min_len = 1, uint32_t max_len = 5) {
     std::mt19937 gen(seed);
-    std::uniform_int_distribution<uint32_t> dist(min_count, max_count);
+    std::uniform_int_distribution<uint32_t> dist(min_len, max_len);
 
-    std::vector<uint32_t> vector_counts(count);
-    uint64_t total_vectors = 0;
+    std::vector<uint32_t> vector_lens(count);
+    uint64_t total_vector_len = 0;
     for (uint64_t i = 0; i < count; ++i) {
-        vector_counts[i] = dist(gen);
-        total_vectors += vector_counts[i];
+        vector_lens[i] = dist(gen);
+        total_vector_len += vector_lens[i];
     }
-    return {vector_counts, total_vectors};
+    return {vector_lens, total_vector_len};
 }
 
 // Calculate distance between two multi-vector documents using MaxSim similarity
@@ -77,30 +77,20 @@ CalMultiVectorDistance(const vsag::DatasetPtr query,
                        uint64_t query_idx,
                        const vsag::DatasetPtr base,
                        uint64_t base_idx) {
-    auto dim = base->GetDim();
-    auto* query_counts = query->GetVectorCounts();
-    auto* base_counts = base->GetVectorCounts();
-    auto* query_vecs = query->GetFloat32Vectors();
-    auto* base_vecs = base->GetFloat32Vectors();
+    int64_t dim = base->GetMultiVectorDim();
+    const vsag::MultiVector* query_mvs = query->GetMultiVectors();
+    const vsag::MultiVector* base_mvs = base->GetMultiVectors();
     auto dist_func = get_distance_func("ip");
 
-    // Calculate vector start offsets
-    uint32_t q_vec_start = 0;
-    for (uint64_t i = 0; i < query_idx; ++i) {
-        q_vec_start += query_counts[i];
-    }
-    uint32_t b_vec_start = 0;
-    for (uint64_t i = 0; i < base_idx; ++i) {
-        b_vec_start += base_counts[i];
-    }
+    const vsag::MultiVector& q_mv = query_mvs[query_idx];
+    const vsag::MultiVector& b_mv = base_mvs[base_idx];
 
     // MaxSim: for each query vector, find min distance (max similarity), then sum
     float total_score = 0.0F;
-    for (uint32_t qv = 0; qv < query_counts[query_idx]; ++qv) {
+    for (uint32_t qv = 0; qv < q_mv.len_; ++qv) {
         float min_dist = std::numeric_limits<float>::max();
-        for (uint32_t bv = 0; bv < base_counts[base_idx]; ++bv) {
-            float dist = dist_func(
-                query_vecs + (q_vec_start + qv) * dim, base_vecs + (b_vec_start + bv) * dim, dim);
+        for (uint32_t bv = 0; bv < b_mv.len_; ++bv) {
+            float dist = dist_func(q_mv.vectors_ + qv * dim, b_mv.vectors_ + bv * dim, dim);
             if (dist < min_dist) {
                 min_dist = dist;
             }
@@ -147,28 +137,17 @@ GenerateRandomDataset(uint64_t dim,
                       std::string vector_type = "dense",
                       bool has_duplicate = false,
                       int64_t id_shift = 16,
-                      int seed = 47,
-                      bool is_multi_vector = false) {
+                      int seed = 47) {
     auto base = vsag::Dataset::Make();
     bool need_normalize = (metric_str != "cosine");
 
-    std::vector<uint32_t> vector_counts;
-    uint64_t num_vectors = count;
-    if (is_multi_vector) {
-        uint64_t total_vectors;
-        std::tie(vector_counts, total_vectors) = GenerateVectorCounts(count, seed + 2);
-        num_vectors = total_vectors;
-    }
-
-    auto vecs = fixtures::generate_vectors(num_vectors, dim, need_normalize, seed);
-    auto vecs_int8 = fixtures::generate_int8_codes(num_vectors, dim, seed);
     auto attr_sets = fixtures::generate_attributes(count);
     auto paths = new std::string[count];
-    for (int i = 0; i < count; ++i) {
+    for (uint64_t i = 0; i < count; ++i) {
         paths[i] = create_random_string(!is_query);
     }
     std::vector<int64_t> ids(count);
-    for (int64_t i = 0; i < count; ++i) {
+    for (int64_t i = 0; i < static_cast<int64_t>(count); ++i) {
         ids[i] = (i << id_shift);
     }
     base->Dim(dim)
@@ -177,26 +156,49 @@ GenerateRandomDataset(uint64_t dim,
         ->AttributeSets(attr_sets)
         ->NumElements(count)
         ->Owner(true);
-    if (not has_duplicate) {
-        base->Float32Vectors(CopyVector(vecs))->Int8Vectors(CopyVector(vecs_int8));
-    } else {
-        base->Float32Vectors(DuplicateCopyVector(vecs))
-            ->Int8Vectors(DuplicateCopyVector(vecs_int8));
-    }
+
     if (vector_type == "sparse") {
+        auto vecs = fixtures::generate_vectors(count, dim, need_normalize, seed);
+        auto vecs_int8 = fixtures::generate_int8_codes(count, dim, seed);
         if (not has_duplicate) {
+            base->Float32Vectors(CopyVector(vecs))->Int8Vectors(CopyVector(vecs_int8));
             base->SparseVectors(CopyVector(GenerateSparseVectors(count, dim)));
         } else {
+            base->Float32Vectors(DuplicateCopyVector(vecs))
+                ->Int8Vectors(DuplicateCopyVector(vecs_int8));
             base->SparseVectors(DuplicateCopyVector(GenerateSparseVectors(count, dim)));
         }
+    } else if (vector_type == "multi") {
+        auto [vector_lens, total_vector_len] = GenerateMultiVectorLens(count, seed + 2);
+        auto vecs = fixtures::generate_vectors(total_vector_len, dim, need_normalize, seed);
+        auto* multi_vectors = new vsag::MultiVector[count];
+        uint64_t vec_offset = 0;
+        for (uint64_t i = 0; i < count; ++i) {
+            uint32_t len = vector_lens[i];
+            multi_vectors[i].len_ = len;
+            uint64_t num_floats = static_cast<uint64_t>(len) * dim;
+            multi_vectors[i].vectors_ = new float[num_floats];
+            std::memcpy(multi_vectors[i].vectors_,
+                        vecs.data() + vec_offset * dim,
+                        num_floats * sizeof(float));
+            vec_offset += len;
+        }
+        base->MultiVectorDim(dim)->MultiVectors(multi_vectors);
+    } else {
+        auto vecs = fixtures::generate_vectors(count, dim, need_normalize, seed);
+        auto vecs_int8 = fixtures::generate_int8_codes(count, dim, seed);
+        if (not has_duplicate) {
+            base->Float32Vectors(CopyVector(vecs))->Int8Vectors(CopyVector(vecs_int8));
+        } else {
+            base->Float32Vectors(DuplicateCopyVector(vecs))
+                ->Int8Vectors(DuplicateCopyVector(vecs_int8));
+        }
     }
+
     if (extra_info_size != 0) {
         auto extra_infos = fixtures::generate_extra_infos(count, extra_info_size);
         base->ExtraInfos(CopyVector(extra_infos));
         base->ExtraInfoSize(extra_info_size);
-    }
-    if (is_multi_vector) {
-        base->VectorCounts(CopyVector(vector_counts));
     }
     return base;
 }
@@ -359,8 +361,7 @@ TestDataset::CreateTestDataset(uint64_t dim,
                                uint64_t extra_info_size,
                                bool has_duplicate,
                                int64_t id_shift,
-                               bool use_fixed_seed,
-                               bool is_multi_vector) {
+                               bool use_fixed_seed) {
     constexpr int fixed_seed = 47;
     int seed = use_fixed_seed ? fixed_seed : fixtures::RandomValue(0, 564);
 
@@ -376,8 +377,7 @@ TestDataset::CreateTestDataset(uint64_t dim,
                                            vector_type,
                                            has_duplicate,
                                            dataset->id_shift,
-                                           seed,
-                                           is_multi_vector);
+                                           seed);
     constexpr uint64_t query_count = 100;
     dataset->query_ = GenerateRandomDataset(dim,
                                             query_count,
@@ -387,8 +387,7 @@ TestDataset::CreateTestDataset(uint64_t dim,
                                             vector_type,
                                             false,
                                             dataset->id_shift,
-                                            seed + 1,
-                                            is_multi_vector);
+                                            seed + 1);
     dataset->filter_query_ = dataset->query_;
     dataset->range_query_ = dataset->query_;
     dataset->valid_ratio_ = valid_ratio;
@@ -413,7 +412,7 @@ TestDataset::CreateTestDataset(uint64_t dim,
         };
 
         std::pair<float*, int64_t*> result;
-        if (is_multi_vector) {
+        if (vector_type == "multi") {
             result = CalMultiVectorDistanceMatrix(dataset->query_, dataset->base_);
         } else {
             result =

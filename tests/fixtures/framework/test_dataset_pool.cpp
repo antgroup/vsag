@@ -13,9 +13,9 @@ TestDatasetPool::GetDatasetAndCreate(uint64_t dim,
                                      float valid_ratio,
                                      uint64_t extra_info_size,
                                      int64_t id_shift,
-                                     bool is_multi_vector) {
+                                     const std::string& vector_type) {
     auto key = key_gen(
-        dim, count, metric_str, with_path, valid_ratio, extra_info_size, id_shift, is_multi_vector);
+        dim, count, metric_str, with_path, valid_ratio, extra_info_size, id_shift, vector_type);
     if (this->pool_.find(key) == this->pool_.end()) {
         this->dim_counts_.emplace_back(dim, count);
         this->pool_[key] = TestDataset::CreateTestDataset(dim,
@@ -23,12 +23,11 @@ TestDatasetPool::GetDatasetAndCreate(uint64_t dim,
                                                           metric_str,
                                                           with_path,
                                                           valid_ratio,
-                                                          "dense",
+                                                          vector_type,
                                                           extra_info_size,
                                                           false,
                                                           id_shift,
-                                                          true,
-                                                          is_multi_vector);
+                                                          true);
     }
     return this->pool_.at(key);
 }
@@ -40,11 +39,10 @@ TestDatasetPool::key_gen(int64_t dim,
                          float filter_ratio,
                          uint64_t extra_info_size,
                          int64_t id_shift,
-                         bool is_multi_vector) {
+                         const std::string& vector_type) {
     return std::to_string(dim) + "_" + std::to_string(count) + "_" + metric_str + "_" +
            std::to_string(with_path) + "_" + std::to_string(filter_ratio) +
-           std::to_string(extra_info_size) + "_" + std::to_string(id_shift) + "_" +
-           std::to_string(is_multi_vector);
+           std::to_string(extra_info_size) + "_" + std::to_string(id_shift) + "_" + vector_type;
 }
 
 TestDatasetPtr
