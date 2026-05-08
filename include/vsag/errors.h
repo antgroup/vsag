@@ -18,6 +18,9 @@
 #include <string>
 #include <utility>
 
+#include "vsag/expected.hpp"
+#include "vsag/options.h"
+
 namespace vsag {
 
 enum class ErrorType {
@@ -65,10 +68,12 @@ _concatenate(std::stringstream& ss, const T& value, const Args&... args) {
     _concatenate(ss, args...);
 }
 
-#define LOG_ERROR_AND_RETURNS(t, ...) \
-    std::stringstream ss;             \
-    _concatenate(ss, __VA_ARGS__);    \
-    logger::error(ss.str());          \
+#define LOG_ERROR_AND_RETURNS(t, ...)                  \
+    std::stringstream ss;                              \
+    _concatenate(ss, __VA_ARGS__);                     \
+    if (auto* logger = Options::Instance().logger()) { \
+        logger->Error(ss.str());                       \
+    }                                                  \
     return tl::unexpected(Error(t, ss.str()));
 
 }  //namespace vsag

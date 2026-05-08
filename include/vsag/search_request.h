@@ -18,6 +18,7 @@
 #include <string>
 #include <vector>
 
+#include "vsag/allocator.h"
 #include "vsag/bitset.h"
 #include "vsag/dataset.h"
 #include "vsag/filter.h"
