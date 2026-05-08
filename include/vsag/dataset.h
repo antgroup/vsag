@@ -35,6 +35,23 @@ struct SparseVector {
     float* vals_ = nullptr;    // contains vals with size of len_
 };
 
+/**
+ * @brief Represents one document's multi-vector data.
+ *
+ * @details
+ * Each document may contain a variable number of dense sub-vectors.
+ * The sub-vector dimensionality is defined at the Dataset level via
+ * MultiVectorDim(), not per-element.
+ *
+ * @note When Owner(true) is set on the Dataset, each element's vectors_
+ * pointer must be independently allocated (not an offset into a shared
+ * buffer), because the Dataset destructor will free each vectors_ separately.
+ */
+struct MultiVector {
+    uint32_t len_ = 0;          // number of sub-vectors in this document
+    float* vectors_ = nullptr;  // flat array of len_ * MultiVectorDim floats
+};
+
 class Dataset;
 using DatasetPtr = std::shared_ptr<Dataset>;
 
@@ -405,6 +422,52 @@ public:
      */
     virtual const uint32_t*
     GetVectorCounts() const = 0;
+
+    /**
+     * @brief Sets the multi-vector array for the dataset.
+     *
+     * @details
+     * Each element in the array represents one document's multi-vector data.
+     * The sub-vector dimensionality is defined by MultiVectorDim().
+     *
+     * @note When Owner(true) is set, each MultiVector element's vectors_ pointer
+     * must be independently allocated (not an offset into a shared buffer),
+     * because the destructor will free each vectors_ separately.
+     *
+     * @param multi_vectors Pointer to the array of MultiVector structs (length = NumElements).
+     * @return DatasetPtr A shared pointer to the dataset with updated multi-vectors.
+     */
+    virtual DatasetPtr
+    MultiVectors(const MultiVector* multi_vectors) = 0;
+
+    /**
+     * @brief Retrieves the multi-vector array of the dataset.
+     *
+     * @return const MultiVector* Pointer to the array of MultiVector structs, or nullptr if not set.
+     */
+    virtual const MultiVector*
+    GetMultiVectors() const = 0;
+
+    /**
+     * @brief Sets the sub-vector dimensionality for multi-vector data.
+     *
+     * @details
+     * This defines the number of floats per sub-vector in each MultiVector element.
+     * It is independent of Dim(), which describes the dense single-vector dimensionality.
+     *
+     * @param dim The sub-vector dimensionality (must be > 0 when MultiVectors is used).
+     * @return DatasetPtr A shared pointer to the dataset with updated multi-vector dim.
+     */
+    virtual DatasetPtr
+    MultiVectorDim(int64_t dim) = 0;
+
+    /**
+     * @brief Retrieves the sub-vector dimensionality for multi-vector data.
+     *
+     * @return int64_t The sub-vector dimensionality, or 0 if not set.
+     */
+    virtual int64_t
+    GetMultiVectorDim() const = 0;
 };
 
 };  // namespace vsag

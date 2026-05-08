@@ -45,7 +45,7 @@ public:
      * @param valid_ratio Ratio of valid vectors.
      * @param extra_info_size Size of extra info per vector.
      * @param id_shift Offset for generated IDs.
-     * @param is_multi_vector Whether to generate multi-vector documents.
+     * @param vector_type Type of vectors ("dense", "sparse", "multi").
      * @return Shared pointer to the TestDataset.
      */
     TestDatasetPtr
@@ -56,7 +56,7 @@ public:
                         float valid_ratio = 0.8,
                         uint64_t extra_info_size = 0,
                         int64_t id_shift = 16,
-                        bool is_multi_vector = false);
+                        const std::string& vector_type = "dense");
 
     /**
      * @brief Gets a test dataset with duplicate vectors.
@@ -104,7 +104,7 @@ private:
      * @param filter_ratio Ratio of valid vectors.
      * @param extra_info_size Size of extra info per vector.
      * @param id_shift Offset for generated IDs.
-     * @param is_multi_vector Whether to include multi-vector mode in the key.
+     * @param vector_type Type of vectors ("dense", "sparse", "multi").
      * @return Unique string key for the dataset.
      */
     static std::string
@@ -115,7 +115,7 @@ private:
             float filter_ratio = 0.8,
             uint64_t extra_info_size = 0,
             int64_t id_shift = 16,
-            bool is_multi_vector = false);
+            const std::string& vector_type = "dense");
 
 private:
     std::unordered_map<std::string, TestDatasetPtr> pool_;   // Cache of TestDataset objects.
