@@ -109,14 +109,16 @@ TEST_CASE("RaBitQ Quantizer Parameter Defaults", "[ut][RaBitQuantizerParameter]"
 }
 
 TEST_CASE("RaBitQ Split Version Parameter", "[ut][RaBitQuantizerParameter]") {
+    auto rabitq_bits_per_dim_base = GENERATE(1, 8);
     RaBitQDefaultParam default_param;
     default_param.rabitq_version = RaBitQuantizerParameter::RABITQ_VERSION_SPLIT_1BIT_7BIT;
     default_param.rabitq_bits_per_dim_query = 32;
-    default_param.rabitq_bits_per_dim_base = 8;
+    default_param.rabitq_bits_per_dim_base = rabitq_bits_per_dim_base;
     default_param.rabitq_error_rate = 1.25F;
     auto param = std::make_shared<vsag::RaBitQuantizerParameter>();
     param->FromString(generate_rabitq_param(default_param));
     REQUIRE(param->rabitq_version_ == RaBitQuantizerParameter::RABITQ_VERSION_SPLIT_1BIT_7BIT);
+    REQUIRE(param->num_bits_per_dim_base_ == rabitq_bits_per_dim_base);
     REQUIRE(std::abs(param->rabitq_error_rate_ - 1.25F) < 1e-5F);
 }
 

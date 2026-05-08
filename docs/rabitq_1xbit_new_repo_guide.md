@@ -20,13 +20,14 @@ x = B - 1
 | --- | --- | --- |
 | `rabitq_version` | `"split_1bit_7bit"` | 启用 split storage。名字保留 1+7bit，但底层按 `B` 参数化。 |
 | `rabitq_bits_per_dim_query` | `32` | split path 只支持 fp32 query code。 |
-| `rabitq_bits_per_dim_base` | `2..8` | 因此 `x=1..7`。`x=8` 需要 `B=9`，当前参数校验不允许。 |
+| `rabitq_bits_per_dim_base` | `1..8` | 因此 `x=0..7`。`x=8` 需要 `B=9`，当前参数校验不允许。 |
 | `base_codes_type` | `"rabitq_split"` | 选择 split datacell，而不是普通 flatten datacell。 |
 
 示例：
 
 | 配置 | 实际含义 |
 | --- | --- |
+| `rabitq_bits_per_dim_base = 1` | `1+0bit` |
 | `rabitq_bits_per_dim_base = 2` | `1+1bit` |
 | `rabitq_bits_per_dim_base = 4` | `1+3bit` |
 | `rabitq_bits_per_dim_base = 8` | `1+7bit` |
@@ -129,7 +130,8 @@ lower_bound = dist_1bit
 ```
 
 HGraph 会把 one-bit graph search 中收集到的 lower-bound candidates 传给 reorder。reorder
-按 lower bound 过滤候选，必要时再合并完整 `1+xbit` code 计算 full distance。
+按 lower bound 过滤候选，必要时直接读取 one-bit record 和 supplement record 计算 `1+xbit`
+full distance，避免在每个候选上先合并完整 full-code buffer。
 
 ## 3. 代码实现位置
 
@@ -141,8 +143,8 @@ HGraph 会把 one-bit graph search 中收集到的 lower-bound candidates 传给
 
 - 校验 `rabitq_bits_per_dim_query` 只能是 `4` 或 `32`。
 - 校验 `rabitq_bits_per_dim_base` 在 `[1, 8]`。
-- 校验 split version 只支持 `rabitq_bits_per_dim_query = 32` 且
-  `rabitq_bits_per_dim_base > 1`。
+- 校验 split version 只支持 `rabitq_bits_per_dim_query = 32`，base bits 沿用全局 `[1, 8]`
+  约束，因此 split path 覆盖 `x=0..7`。
 - 把 `rabitq_version` 和 `rabitq_error_rate` 写入兼容性检查。
 
 ### 3.2 RabitQ quantizer
@@ -156,10 +158,13 @@ HGraph 会把 one-bit graph search 中收集到的 lower-bound candidates 传给
 | `EncodeExtendRaBitQ` | 把归一化 base 向量编码成 `B` bit 标量 code。 |
 | `PackIntoPlanes` | 把每维 `u_i` 拆成 `B` 个 bit-plane。 |
 | `StoredPlaneIndex` | split storage 中把逻辑最高位 `B-1` 放到物理 plane 0。 |
-| `RaBitQFloatSQIPByPlanes` | final full distance 中逐 plane 调 `RaBitQFloatBinaryIP` 并按 `2^b` 加权。 |
+| `RaBitQFloatSQIPByPlanes` | full-code layout 入口，会把 one-bit plane 和 supplement planes 交给 fused kernel。 |
+| `RaBitQFloatSQIPBySplitCode` | final reorder 中直接从 one-bit plane 和 supplement planes 计算 `ip_yu_q`。 |
+| `RaBitQFloatSplitCodeIP` | fused SIMD kernel，一次 query pass 解码 one-bit 和 `x=0..7` 个 supplement planes。 |
 | `SplitCode` | 把完整 code 拆成 one-bit record 和 supplement record。 |
-| `MergeSplitCode` | 把 one-bit record 和 supplement record 合回完整 code。 |
+| `MergeSplitCode` | 把 one-bit record 和 supplement record 合回完整 code，保留给兼容接口和 fallback。 |
 | `ComputeDistWithOneBitLowerBound` | one-bit search 距离和 lower bound 计算。 |
+| `ComputeDistWithSplitCode` | 直接基于 split records 计算 full distance，避免 reorder 热路径 merge full code。 |
 | `ComputeQueryBaseImpl` | full distance 的入口，处理 binary、multi-bit RabitQ 等路径。 |
 
 核心 full-distance 逻辑等价于：
@@ -183,7 +188,10 @@ ip_est = ip_bq_estimate / base_error;
 - 维护两个 IO：`one_bit_io_` 和 `supplement_io_`。
 - `write_encoded_vector` 构建完整 RabitQ code 后调用 `SplitCode` 拆分存储。
 - `QueryWithDistanceLowerBound` 只读取 one-bit record，用于图搜索。
-- `Query` 和 `compute_full_dist` 读取 one-bit 和 supplement，调用 `MergeSplitCode` 后计算 full distance。
+- `Query` 和 `GetCodesById` 仍可合并出完整 full code，服务兼容调用路径。
+- `compute_full_dist` 是 final reorder 热路径，会直接读取 one-bit 和 supplement 并调用
+  `ComputeDistWithSplitCode` 计算 full distance；只有 direct split compute 不可用时才 fallback 到
+  `MergeSplitCode`。
 
 ### 3.4 HGraph search 和 reorder
 
@@ -201,6 +209,9 @@ ip_est = ip_bq_estimate / base_error;
   precise codes。
 - one-bit search 且 base reorder 时，HGraph 会把 lower-bound candidates 从 searcher 传给
   reorder。
+- `FlattenReorder` 已有 lower-bound 排序结果后，会直接对仍可能进入 topK 的候选调用 full
+  `Query`；不再先走 `QueryWithDistanceFilter` 重算 one-bit lower bound，避免 final reorder 中
+  重复读取 one-bit record。
 - RabitQ base-only 建图不能直接用 RabitQ base-base distance，因此 HGraph 中有临时 SQ8 build data
   路径，用于保持 build 可用。
 
@@ -269,7 +280,8 @@ one-bit plane = 120 bytes
 ```
 
 这样做的目的，是让图搜索阶段只读物理 plane 0，也就是 one-bit search plane。final reorder
-需要完整距离时，再把物理 plane 0 和 supplement 中的剩余 plane 合并回完整 full code。
+需要完整距离时，会把物理 plane 0 作为最高逻辑位、把 supplement 中的剩余 planes 作为低位，
+直接按逻辑权重计算 full distance。
 
 ### 4.3 one-bit record 布局
 
@@ -349,15 +361,19 @@ GetSupplementCodeSize() = SupplementPlanesSize() + (full_code_size - CodeMetaOff
 | 1+6bit | 7 | 6 | 720B |
 | 1+7bit | 8 | 7 | 840B |
 
-final full-distance 计算时，`GetCodesById` 会同时读取：
+final full-distance 热路径计算时，`compute_full_dist` 会同时读取：
 
 ```text
 one_bit_io_[id]
 supplement_io_[id]
 ```
 
-然后调用 `MergeSplitCode(one_bit, supplement, full_code)` 合并回完整 RabitQ full code，再进入
-`ComputeQueryBaseImpl` 计算完整距离。
+然后调用 `ComputeDistWithSplitCode(computer, one_bit, supplement, dist)`。该函数直接读取
+supplement meta 中的 `norm_code`、`base_error` 等字段，并调用 `RaBitQFloatSQIPBySplitCode`
+从 split bit-planes 计算完整多 bit RabitQ 距离。
+
+`GetCodesById` 仍会调用 `MergeSplitCode(one_bit, supplement, full_code)` 生成完整 code，用于需要
+完整 code buffer 的兼容接口；它不再是 final reorder 的默认热路径。
 
 ### 4.5 datacell 序列化顺序
 
@@ -462,7 +478,7 @@ datacell、bottom graph、route graph 等内容。对于 split RabitQ，base spl
 参数要点：
 
 - `base_codes_type = "rabitq_split"` 和 `rabitq_version = "split_1bit_7bit"` 必须同时出现。
-- `rabitq_bits_per_dim_base = x + 1`，当前支持 `x=1..7`。
+- `rabitq_bits_per_dim_base = x + 1`，当前支持 `x=0..7`。
 - `reorder_source = "base"` 是本次迁移的关键参数，表示 final reorder 使用 base split full code。
 - YAML 中保留 `precise_quantization_type = "sq8"` 不会改变 base final reorder 语义；
   `reorder_source = "base"` 时 high precise reorder codes 不参与 final reorder。
@@ -478,8 +494,18 @@ datacell、bottom graph、route graph 等内容。对于 split RabitQ，base spl
 
 - 传统 RabitQ one-bit search 加 precise/SQ8 reorder 的 baseline。
 - split `1+7bit`，并设置 `reorder_source = "base"`。
-- split `1+xbit` sweep，其中 `rabitq_bits_per_dim_base = x + 1`，`x=1..7`。
+- split `1+xbit` sweep，其中 `rabitq_bits_per_dim_base = x + 1`，`x=0..7`。
 - `rabitq_one_bit_search = true` 时不同 `ef_search` 和 `parallelism` 的性能点。
+
+本地 GIST1M sweep 结果文件约定：
+
+- 合并表：`/root/vsag/benchs/results/gist1m_rabitq_1xbit_sweep_merged_table.csv`
+- 高召回 QPS/Recall 图：`/root/vsag/benchs/results/figures/gist1m_recall_vs_qps_1xbit_sweep_high_recall.svg`
+- 报告：`/root/vsag/benchs/results/gist1m_rabitq_1xbit_sweep_report.md`
+
+当前 `1+7bit base reorder` 行已刷新为 direct split-code full-distance 结果；对应曲线在高召回图中
+使用菱形 marker，方便和其他 `1+xbit` 曲线区分。由于本次只复用已有索引重测 search/reorder，CSV
+中 build time、build memory 和 TPS 仍保留原建图结果。
 
 ## 7. 索引保存和加载
 

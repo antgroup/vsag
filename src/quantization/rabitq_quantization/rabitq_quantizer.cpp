@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <limits>
 #include <queue>
 #include <utility>
@@ -275,14 +276,26 @@ RaBitQuantizer<metric>::GetStoredPlane(uint8_t* planes,
 template <MetricType metric>
 float
 RaBitQuantizer<metric>::RaBitQFloatSQIPByPlanes(const float* query, const uint8_t* planes) const {
-    float ip_yu_q = 0.0F;
     uint64_t plane_bytes = (this->dim_ + 7) / 8;
-    for (int b = 0; b < num_bits_per_dim_base_; ++b) {
-        float sb = RaBitQFloatBinaryIP(
-            query, GetStoredPlane(planes, static_cast<uint32_t>(b), plane_bytes), this->dim_, 0);
-        ip_yu_q += sb * float(1U << b);
-    }
-    return ip_yu_q;
+    const auto supplement_bits = static_cast<uint32_t>(num_bits_per_dim_base_ - 1);
+    const auto* one_bit_code =
+        GetStoredPlane(planes, static_cast<uint32_t>(num_bits_per_dim_base_ - 1), plane_bytes);
+    const auto* supplement_code =
+        supplement_bits == 0 ? nullptr : GetStoredPlane(planes, 0, plane_bytes);
+    return RaBitQFloatSplitCodeIP(
+        query, one_bit_code, supplement_code, this->dim_, supplement_bits);
+}
+
+template <MetricType metric>
+float
+RaBitQuantizer<metric>::RaBitQFloatSQIPBySplitCode(const float* query,
+                                                   const uint8_t* one_bit_code,
+                                                   const uint8_t* supplement_code) const {
+    return RaBitQFloatSplitCodeIP(query,
+                                  one_bit_code,
+                                  supplement_code,
+                                  this->dim_,
+                                  static_cast<uint32_t>(num_bits_per_dim_base_ - 1));
 }
 
 template <MetricType metric>
@@ -558,6 +571,11 @@ RaBitQuantizer<metric>::EncodeOneImpl(const float* data, uint8_t* codes) const {
         *(norm_type*)(codes + offset_norm_) = norm;
         *(error_type*)(codes + offset_error_) = error;
 
+        if (SupportSplitCodeStorage()) {
+            *(error_type*)(codes + offset_one_bit_error_) = error;
+            *(error_type*)(codes + offset_low_bound_error_) = 0.0F;
+        }
+
         if (num_bits_per_dim_query_ != 32) {
             *(sum_type*)(codes + offset_sum_) = sum;
         }
@@ -696,7 +714,7 @@ template <MetricType metric>
 bool
 RaBitQuantizer<metric>::SupportSplitCodeStorage() const {
     return rabitq_version_ == RaBitQuantizerParameter::RABITQ_VERSION_SPLIT_1BIT_7BIT &&
-           num_bits_per_dim_query_ == 32 && num_bits_per_dim_base_ > 1;
+           num_bits_per_dim_query_ == 32 && num_bits_per_dim_base_ >= 1;
 }
 
 template <MetricType metric>
@@ -905,6 +923,192 @@ RaBitQuantizer<metric>::ComputeDistWithOneBitLowerBound(Computer<RaBitQuantizer>
     if (std::isfinite(lower_bound_result)) {
         *lower_bound = lower_bound_result - 1e-5F * std::max(1.0F, std::fabs(lower_bound_result));
     }
+    return true;
+}
+
+template <MetricType metric>
+void
+RaBitQuantizer<metric>::ComputeDistsWithOneBitLowerBoundBatch4(Computer<RaBitQuantizer>& computer,
+                                                               const uint8_t* one_bit_code1,
+                                                               const uint8_t* one_bit_code2,
+                                                               const uint8_t* one_bit_code3,
+                                                               const uint8_t* one_bit_code4,
+                                                               float& dist1,
+                                                               float& dist2,
+                                                               float& dist3,
+                                                               float& dist4,
+                                                               float* lower_bound1,
+                                                               float* lower_bound2,
+                                                               float* lower_bound3,
+                                                               float* lower_bound4,
+                                                               bool& computed1,
+                                                               bool& computed2,
+                                                               bool& computed3,
+                                                               bool& computed4) const {
+    if constexpr (metric != MetricType::METRIC_TYPE_L2SQR) {
+        computed1 =
+            this->ComputeDistWithOneBitLowerBound(computer, one_bit_code1, &dist1, lower_bound1);
+        computed2 =
+            this->ComputeDistWithOneBitLowerBound(computer, one_bit_code2, &dist2, lower_bound2);
+        computed3 =
+            this->ComputeDistWithOneBitLowerBound(computer, one_bit_code3, &dist3, lower_bound3);
+        computed4 =
+            this->ComputeDistWithOneBitLowerBound(computer, one_bit_code4, &dist4, lower_bound4);
+        return;
+    }
+
+    const auto* query = computer.buf_;
+    const auto* query_data = reinterpret_cast<const float*>(query);
+    const norm_type query_norm = *((norm_type*)(query + query_offset_norm_));
+    const norm_type query_mrq_norm_sqr = pca_dim_ != this->original_dim_ and use_mrq_
+                                             ? *(norm_type*)(query + query_offset_mrq_norm_)
+                                             : 0.0F;
+
+    if (not SupportSplitCodeStorage()) {
+        computed1 = false;
+        computed2 = false;
+        computed3 = false;
+        computed4 = false;
+        return;
+    }
+
+    float ip_sign_qs[4] = {0.0F, 0.0F, 0.0F, 0.0F};
+    RaBitQFloatBinaryIPBatch4(query_data,
+                              one_bit_code1,
+                              one_bit_code2,
+                              one_bit_code3,
+                              one_bit_code4,
+                              this->dim_,
+                              inv_sqrt_d_,
+                              ip_sign_qs);
+
+    auto compute_one =
+        [&](const uint8_t* one_bit_code, float ip_sign_q, float& dist, float* lower_bound) {
+            if (lower_bound != nullptr) {
+                *lower_bound = std::numeric_limits<float>::max();
+            }
+
+            error_type one_bit_error =
+                *((error_type*)(one_bit_code + OneBitRecordOneBitErrorOffset()));
+            if (one_bit_error <= 1e-5F) {
+                return false;
+            }
+
+            const float ip_est = ip_sign_q / one_bit_error;
+            const norm_type base_norm = *((norm_type*)(one_bit_code + OneBitRecordNormOffset()));
+            float result = l2_ube(base_norm, query_norm, ip_est);
+
+            if (pca_dim_ != this->original_dim_ and use_mrq_) {
+                const norm_type base_mrq_norm_sqr =
+                    *(norm_type*)(one_bit_code + OneBitRecordMrqNormOffset());
+                result += (query_mrq_norm_sqr + base_mrq_norm_sqr);
+            }
+
+            if (not std::isfinite(result)) {
+                return false;
+            }
+
+            dist = result;
+            if (lower_bound == nullptr) {
+                return true;
+            }
+
+            const error_type low_bound_error =
+                *((error_type*)(one_bit_code + OneBitRecordLowBoundErrorOffset()));
+            const float lower_bound_error_term =
+                2.0F * base_norm * query_norm * low_bound_error / one_bit_error;
+            const float lower_bound_result = result - lower_bound_error_term;
+            if (std::isfinite(lower_bound_result)) {
+                *lower_bound =
+                    lower_bound_result - 1e-5F * std::max(1.0F, std::fabs(lower_bound_result));
+            }
+            return true;
+        };
+
+    computed1 = compute_one(one_bit_code1, ip_sign_qs[0], dist1, lower_bound1);
+    computed2 = compute_one(one_bit_code2, ip_sign_qs[1], dist2, lower_bound2);
+    computed3 = compute_one(one_bit_code3, ip_sign_qs[2], dist3, lower_bound3);
+    computed4 = compute_one(one_bit_code4, ip_sign_qs[3], dist4, lower_bound4);
+}
+
+template <MetricType metric>
+bool
+RaBitQuantizer<metric>::ComputeDistWithSplitCode(Computer<RaBitQuantizer>& computer,
+                                                 const uint8_t* one_bit_code,
+                                                 const uint8_t* supplement_code,
+                                                 float* dists) const {
+    if (not SupportSplitCodeStorage()) {
+        return false;
+    }
+
+    const auto* query = computer.buf_;
+    const auto* split_meta = supplement_code + SupplementMetaOffset();
+    const auto code_meta_offset = CodeMetaOffset();
+    auto meta_field = [split_meta, code_meta_offset](uint64_t offset) {
+        return split_meta + (offset - code_meta_offset);
+    };
+
+    float ip_bq_estimate = 0.0F;
+    if (num_bits_per_dim_base_ == 1) {
+        ip_bq_estimate = RaBitQFloatBinaryIP(
+            reinterpret_cast<const float*>(query), one_bit_code, this->dim_, inv_sqrt_d_);
+    } else {
+        sum_type query_raw_sum = *((sum_type*)(query + query_offset_sum_));
+        float ip_yu_q = RaBitQFloatSQIPBySplitCode(
+            reinterpret_cast<const float*>(query), one_bit_code, supplement_code);
+
+        norm_type base_norm_code = 0;
+        memcpy(&base_norm_code, meta_field(offset_norm_code_), sizeof(base_norm_code));
+        ip_bq_estimate = ip_obar_q(ip_yu_q, query_raw_sum, base_norm_code, num_bits_per_dim_base_);
+    }
+
+    norm_type query_norm = *((norm_type*)(query + query_offset_norm_));
+    norm_type base_norm = 0;
+    memcpy(&base_norm, meta_field(offset_norm_), sizeof(base_norm));
+
+    norm_type query_raw_norm = 0;
+    norm_type base_raw_norm = 0;
+    if constexpr (metric == MetricType::METRIC_TYPE_IP or
+                  metric == MetricType::METRIC_TYPE_COSINE) {
+        query_raw_norm = *((norm_type*)(query + query_offset_raw_norm_));
+        memcpy(&base_raw_norm, meta_field(offset_raw_norm_), sizeof(base_raw_norm));
+    }
+
+    error_type base_error = 0;
+    memcpy(&base_error, meta_field(offset_error_), sizeof(base_error));
+    if (std::abs(base_error) < 1e-5) {
+        base_error = (base_error > 0) ? 1.0F : -1.0F;
+    }
+
+    float ip_est = ip_bq_estimate / base_error;
+    float result = l2_ube(base_norm, query_norm, ip_est);
+
+    if (pca_dim_ != this->original_dim_ and use_mrq_) {
+        norm_type query_mrq_norm_sqr = *(norm_type*)(query + query_offset_mrq_norm_);
+        norm_type base_mrq_norm_sqr = 0;
+        memcpy(&base_mrq_norm_sqr, meta_field(offset_mrq_norm_), sizeof(base_mrq_norm_sqr));
+        result += (query_mrq_norm_sqr + base_mrq_norm_sqr);
+    }
+    if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
+        if (is_approx_zero(query_raw_norm) or is_approx_zero(base_raw_norm)) {
+            result = 1;
+        } else {
+            result =
+                1 - (query_raw_norm * query_raw_norm + base_raw_norm * base_raw_norm - result) *
+                        0.5F / (query_raw_norm * base_raw_norm);
+        }
+    }
+    if constexpr (metric == MetricType::METRIC_TYPE_IP) {
+        if (is_approx_zero(query_raw_norm) or is_approx_zero(base_raw_norm)) {
+            result = 1;
+        } else {
+            result =
+                1 -
+                (query_raw_norm * query_raw_norm + base_raw_norm * base_raw_norm - result) * 0.5F;
+        }
+    }
+
+    *dists = result;
     return true;
 }
 

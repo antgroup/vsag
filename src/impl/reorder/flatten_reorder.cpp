@@ -186,8 +186,7 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
             break;
         }
 
-        flatten_->QueryWithDistanceFilter(
-            dists.data(), computer, ids.data(), batch_count, threshold, &ctx);
+        flatten_->Query(dists.data(), computer, ids.data(), batch_count, &ctx);
         for (uint64_t i = 0; i < batch_count; ++i) {
             if (dists[i] < reorder_heap->Top().first) {
                 reorder_heap->Push(dists[i], ids[i]);

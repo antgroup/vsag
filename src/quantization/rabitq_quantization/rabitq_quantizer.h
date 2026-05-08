@@ -144,6 +144,11 @@ public:
     float
     RaBitQFloatSQIPByPlanes(const float* query, const uint8_t* planes) const;
 
+    float
+    RaBitQFloatSQIPBySplitCode(const float* query,
+                               const uint8_t* one_bit_code,
+                               const uint8_t* supplement_code) const;
+
     [[nodiscard]] uint64_t
     StoredPlaneIndex(uint32_t logical_bit) const;
 
@@ -175,6 +180,31 @@ public:
                                     const uint8_t* one_bit_code,
                                     float* dists,
                                     float* lower_bound) const;
+
+    void
+    ComputeDistsWithOneBitLowerBoundBatch4(Computer<RaBitQuantizer>& computer,
+                                           const uint8_t* one_bit_code1,
+                                           const uint8_t* one_bit_code2,
+                                           const uint8_t* one_bit_code3,
+                                           const uint8_t* one_bit_code4,
+                                           float& dist1,
+                                           float& dist2,
+                                           float& dist3,
+                                           float& dist4,
+                                           float* lower_bound1,
+                                           float* lower_bound2,
+                                           float* lower_bound3,
+                                           float* lower_bound4,
+                                           bool& computed1,
+                                           bool& computed2,
+                                           bool& computed3,
+                                           bool& computed4) const;
+
+    bool
+    ComputeDistWithSplitCode(Computer<RaBitQuantizer>& computer,
+                             const uint8_t* one_bit_code,
+                             const uint8_t* supplement_code,
+                             float* dists) const;
 
     [[nodiscard]] uint64_t
     OneBitRecordNormOffset() const;

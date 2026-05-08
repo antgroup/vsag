@@ -61,11 +61,9 @@ RaBitQuantizerParameter::FromJson(const JsonType& json) {
                             fmt::format("unsupported rabitq_version: {}", rabitq_version_));
     }
     if (this->rabitq_version_ == RABITQ_VERSION_SPLIT_1BIT_7BIT &&
-        (this->num_bits_per_dim_query_ != 32 || this->num_bits_per_dim_base_ <= 1)) {
-        throw VsagException(
-            ErrorType::INVALID_ARGUMENT,
-            "rabitq_version=split_1bit_7bit requires rabitq_bits_per_dim_query=32 and "
-            "rabitq_bits_per_dim_base>1");
+        this->num_bits_per_dim_query_ != 32) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "rabitq_version=split_1bit_7bit requires rabitq_bits_per_dim_query=32");
     }
     if (json.Contains(RABITQ_QUANTIZATION_ERROR_RATE_KEY)) {
         this->rabitq_error_rate_ = json[RABITQ_QUANTIZATION_ERROR_RATE_KEY].GetFloat();
