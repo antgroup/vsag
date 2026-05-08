@@ -329,8 +329,8 @@ InnerIndexInterface::CalDistanceById(const DatasetPtr& query,
     result->Distances(distances);
     for (int64_t i = 0; i < count; ++i) {
         try {
-            distances[i] = this->CalcDistanceById(query, ids[i], calculate_precise_distance);
-        } catch (const std::exception&) {
+            distances[i] = this->CalcDistanceById(query, ids[i]);
+        } catch (std::runtime_error& e) {
             logger::debug(fmt::format("failed to find id: {}", ids[i]));
             distances[i] = -1;
         }
