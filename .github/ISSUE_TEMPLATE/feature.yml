@@ -1,0 +1,76 @@
+name: Feature request
+description: Propose a new capability or public API for VSAG.
+title: "[feat](<area>): <short imperative summary>"
+labels: ["kind/feature", "enhancement"]
+assignees: ["wxyucs"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting a new feature. Before filing, please skim the
+        [docs](https://vsag.io/docs) and the existing issues to avoid duplicates.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - hgraph
+        - ivf
+        - sindi
+        - pyvsag
+        - eval_performance
+        - build
+        - docs
+        - other
+    validations:
+      required: true
+
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Motivation
+      description: |
+        What problem are you trying to solve? Who benefits? Quantify when possible
+        (workload size, QPS, recall target, memory budget, etc.).
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed_solution
+    attributes:
+      label: Proposed solution
+      description: |
+        Describe the feature, the user-facing API surface, and any new
+        configuration knobs. Pseudocode is welcome.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+
+  - type: dropdown
+    id: api_compat_impact
+    attributes:
+      label: API / ABI compatibility impact
+      options:
+        - none
+        - additive only (no break)
+        - breaking change
+    validations:
+      required: true
+
+  - type: textarea
+    id: references
+    attributes:
+      label: References
+      description: |
+        Optional. Links to relevant code (`path:line`), docs
+        (`https://vsag.io/docs/...`), papers, or related issues/PRs.
+
+  - type: textarea
+    id: additional_context
+    attributes:
+      label: Additional context

@@ -1,0 +1,112 @@
+name: Bug report
+description: Report a defect or unexpected behavior in VSAG.
+title: "[bug](<area>): <short imperative summary>"
+labels: ["kind/bug", "bug"]
+assignees: ["wxyucs"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report. Please fill in every
+        required field. If you genuinely cannot provide a value, write `N/A`
+        and explain in **Additional context**.
+
+        Tip: you can let an AI agent draft this issue for you. See
+        [tools/issue-helper](../../tools/issue-helper/README.md) or run
+        `/create-issue` inside Claude Code, OpenCode or Codex.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      description: Which subsystem does this bug touch?
+      options:
+        - hgraph
+        - ivf
+        - sindi
+        - pyvsag
+        - eval_performance
+        - build
+        - docs
+        - other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: interface
+    attributes:
+      label: Interface
+      options:
+        - cpp
+        - python
+        - both
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: VSAG version
+      description: Tag (e.g. `v0.11.0`) or commit SHA.
+      placeholder: v0.11.0
+    validations:
+      required: true
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: A clear and concise description of what the bug is.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce_code
+    attributes:
+      label: Minimal reproducer
+      description: |
+        Smallest C++ or Python snippet that reproduces the bug. Wrap it in a
+        fenced code block with the appropriate language tag (```cpp or
+        ```python).
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: |
+        Run `bash scripts/check_environment.sh` from the repository root and paste
+        the output here. Add anything the script does not capture (containerized?
+        CPU model, NUMA, etc.).
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected_behavior
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual_behavior
+    attributes:
+      label: Actual behavior
+      description: Include error messages, stack traces, or numerical results.
+    validations:
+      required: true
+
+  - type: textarea
+    id: references
+    attributes:
+      label: References
+      description: |
+        Optional. Links to relevant code (`path:line`), docs
+        (`https://vsag.io/docs/...`), or related issues/PRs.
+
+  - type: textarea
+    id: additional_context
+    attributes:
+      label: Additional context
