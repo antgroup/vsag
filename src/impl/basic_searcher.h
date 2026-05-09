@@ -23,6 +23,7 @@
 #include "index/iterator_filter.h"
 #include "inner_search_param.h"
 #include "lock_strategy.h"
+#include "utils/filter_search_skip_strategy.h"
 #include "utils/timer.h"
 #include "utils/visited_list.h"
 
@@ -78,7 +79,7 @@ private:
           const VisitedListPtr& vl,
           const std::pair<float, uint64_t>& current_node_pair,
           const FilterPtr& filter,
-          float skip_ratio,
+          FilterSearchSkipStrategy* skip_strategy,
           Vector<InnerIdType>& to_be_visited_rid,
           Vector<InnerIdType>& to_be_visited_id,
           Vector<InnerIdType>& neighbors) const;
