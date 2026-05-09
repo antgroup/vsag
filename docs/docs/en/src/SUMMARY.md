@@ -28,6 +28,8 @@
 # Advanced Features
 
 - [Range Search](advanced/range_search.md)
+- [Filtered Search](advanced/filtered_search.md)
+- [Attribute Filter (Hybrid Search)](advanced/attribute_filter.md)
 - [Serialization](advanced/serialization.md)
 - [Memory Management](advanced/memory.md)
 - [Graph Enhancement](advanced/enhance_graph.md)

@@ -1,5 +1,10 @@
 # Memory + Disk Hybrid Index (DiskANN)
 
+> "Hybrid index" on this page refers to **memory + disk storage**. If you are looking for
+> **vector + structured-attribute** hybrid search (sometimes called *hybrid search* in the
+> literature), see [Attribute Filter (Hybrid Search)](attribute_filter.md). For id-based
+> filtering during search, see [Filtered Search](filtered_search.md).
+
 For billion-scale vector datasets, fitting the full graph index in memory is expensive and
 wasteful. VSAG's `diskann` index splits storage:
 
