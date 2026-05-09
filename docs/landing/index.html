@@ -2,6 +2,20 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
+
+    <!-- Google tag (gtag.js) -->
+    <!-- Shared with docs/{docs,blog}/{en,zh}/theme/head.hbs. Keep these five copies in sync. -->
+    <!-- Hostname-gated so local previews and fork deploys do not pollute the production GA4 property. -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-WL7YCF91WW"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      if (location.hostname === 'vsag.io') {
+        gtag('config', 'G-WL7YCF91WW');
+      }
+    </script>
+
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>VSAG — High-performance vector indexing library</title>
     <meta
