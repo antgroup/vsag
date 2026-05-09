@@ -440,6 +440,12 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             {
                 SUPPORT_TOMBSTONE,
             },
+        },
+        {
+            HGRAPH_LABEL_REMAP_TYPE,
+            {
+                LABEL_REMAP_TYPE_KEY,
+            },
         }};
     const std::string hgraph_params_template =
         R"(
@@ -501,6 +507,7 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             }
         },
         "{STORE_RAW_VECTOR_KEY}": false,
+        "{LABEL_REMAP_TYPE_KEY}": "{LABEL_REMAP_TYPE_VALUE_PG}",
         "{RAW_VECTOR_KEY}": {
             "{IO_PARAMS_KEY}": {
                 "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
@@ -1231,13 +1238,12 @@ HGraph::serialize_basic_info_v0_14(StreamWriter& writer) const {
     StreamWriter::WriteObj(writer, capacity);
     StreamWriter::WriteVector(writer, this->label_table_->label_table_);
 
-    uint64_t size = this->label_table_->label_remap_.size();
+    uint64_t size = this->label_table_->GetRemapSize();
     StreamWriter::WriteObj(writer, size);
-    for (const auto& pair : this->label_table_->label_remap_) {
-        auto key = pair.first;
+    this->label_table_->ForEachRemap([&writer](LabelType key, InnerIdType value) {
         StreamWriter::WriteObj(writer, key);
-        StreamWriter::WriteObj(writer, pair.second);
-    }
+        StreamWriter::WriteObj(writer, value);
+    });
 }
 
 void
@@ -1260,14 +1266,13 @@ HGraph::deserialize_basic_info_v0_14(StreamReader& reader) {
 
     uint64_t size;
     StreamReader::ReadObj(reader, size);
-    this->label_table_->label_remap_.clear();
-    this->label_table_->label_remap_.reserve(size);
+    this->label_table_->ResetRemap(size);
     for (uint64_t i = 0; i < size; ++i) {
         LabelType key;
         StreamReader::ReadObj(reader, key);
         InnerIdType value;
         StreamReader::ReadObj(reader, value);
-        this->label_table_->label_remap_.emplace(key, value);
+        this->label_table_->InsertRemap(key, value);
     }
     // Restore total_count from label_remap size
     this->label_table_->total_count_.store(static_cast<int64_t>(size));
@@ -1349,13 +1354,12 @@ HGraph::serialize_label_info(StreamWriter& writer) const {
     }
 
     StreamWriter::WriteVector(writer, this->label_table_->label_table_);
-    uint64_t size = this->label_table_->label_remap_.size();
+    uint64_t size = this->label_table_->GetRemapSize();
     StreamWriter::WriteObj(writer, size);
-    for (const auto& pair : this->label_table_->label_remap_) {
-        auto key = pair.first;
+    this->label_table_->ForEachRemap([&writer](LabelType key, InnerIdType value) {
         StreamWriter::WriteObj(writer, key);
-        StreamWriter::WriteObj(writer, pair.second);
-    }
+        StreamWriter::WriteObj(writer, value);
+    });
 }
 
 void
@@ -1368,14 +1372,13 @@ HGraph::deserialize_label_info(StreamReader& reader) const {
     StreamReader::ReadVector(reader, this->label_table_->label_table_);
     uint64_t size;
     StreamReader::ReadObj(reader, size);
-    this->label_table_->label_remap_.clear();
-    this->label_table_->label_remap_.reserve(size);
+    this->label_table_->ResetRemap(size);
     for (uint64_t i = 0; i < size; ++i) {
         LabelType key;
         StreamReader::ReadObj(reader, key);
         InnerIdType value;
         StreamReader::ReadObj(reader, value);
-        this->label_table_->label_remap_.emplace(key, value);
+        this->label_table_->InsertRemap(key, value);
     }
     this->label_table_->total_count_.store(static_cast<int64_t>(size));
 }

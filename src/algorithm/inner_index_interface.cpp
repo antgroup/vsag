@@ -43,7 +43,8 @@ InnerIndexInterface::InnerIndexInterface(const InnerIndexParameterPtr& index_par
       use_attribute_filter_(index_param->use_attribute_filter),
       train_sample_count_(index_param->train_sample_count),
       use_reorder_(index_param->use_reorder) {
-    this->label_table_ = std::make_shared<LabelTable>(allocator_);
+    this->label_table_ =
+        std::make_shared<LabelTable>(allocator_, true, false, index_param->label_remap_type);
     this->index_feature_list_ = std::make_unique<IndexFeatureList>();
     this->index_feature_list_->SetFeature(SUPPORT_EXPORT_IDS);
     this->extra_info_size_ = common_param.extra_info_size_;
@@ -694,9 +695,9 @@ InnerIndexInterface::get_detail_data_by_info(const IndexDetailInfo& info) const 
         data->SetDataScalarInt64(this->GetNumElements());
     } else if (name == INDEX_DETAIL_NAME_LABEL_TABLE) {
         std::vector<std::vector<int64_t>> label_tables;
-        for (const auto& [key, value] : this->label_table_->label_remap_) {
+        this->label_table_->ForEachRemap([&label_tables](LabelType key, InnerIdType value) {
             label_tables.emplace_back(std::vector<int64_t>{key, value});
-        }
+        });
         data->SetData2DArrayInt64(label_tables);
     } else if (name == INDEX_DETAIL_DATA_TYPE) {
         data->SetDataScalarString(ToString(data_type_));
