@@ -60,7 +60,9 @@ ParallelSearcher::visit(const GraphInterfacePtr& graph,
                 vl->Prefetch(neighbors[i][j + prefetch_stride_visit_]);
             }
             if (not vl->Get(neighbors[i][j])) {
-                if (not filter || count_no_visited == 0 || skip_strategy->ShouldSkipFilterCheck() ||
+                auto skip_filter_check =
+                    filter != nullptr && skip_strategy->ShouldSkipFilterCheck();
+                if (not filter || count_no_visited == 0 || skip_filter_check ||
                     filter->CheckValid(neighbors[i][j])) {
                     to_be_visited_rid[count_no_visited] = j;
                     to_be_visited_id[count_no_visited] = neighbors[i][j];
