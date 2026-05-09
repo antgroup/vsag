@@ -1027,27 +1027,31 @@ IVF::CalDistanceById(const float* query,
                      const int64_t* ids,
                      int64_t count,
                      bool calculate_precise_distance) const {
+    if (this->use_reorder_ && calculate_precise_distance) {
+        return this->cal_distance_by_id(query, ids, count, this->reorder_codes_);
+    }
     auto result = Dataset::Make();
     result->Owner(true, allocator_);
     auto* distances = static_cast<float*>(allocator_->Allocate(sizeof(float) * count));
     result->Distances(distances);
-    if (this->use_reorder_ && calculate_precise_distance) {
-        auto computer = this->reorder_codes_->FactoryComputer(query);
-        Vector<InnerIdType> inner_ids(count, allocator_);
-        for (int64_t i = 0; i < count; ++i) {
-            inner_ids[i] = this->label_table_->GetIdByLabel(ids[i]);
-        }
-        this->reorder_codes_->Query(distances, computer, inner_ids.data(), count);
-        return result;
-    }
     auto computer = this->bucket_->FactoryComputer(query);
     for (int64_t i = 0; i < count; ++i) {
-        auto inner_id = this->label_table_->GetIdByLabel(ids[i]);
+        bool success = false;
+        InnerIdType inner_id = 0;
+        {
+            std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
+            std::tie(success, inner_id) = this->label_table_->TryGetIdByLabel(ids[i]);
+        }
+        if (not success) {
+            distances[i] = -1;
+            continue;
+        }
         auto location = this->get_location(inner_id);
         distances[i] = this->bucket_->QueryOneById(computer, location.first, location.second);
     }
     return result;
 }
+
 float
 IVF::CalcDistanceById(const float* query, int64_t id, bool calculate_precise_distance) const {
     if (this->use_reorder_ && calculate_precise_distance) {
