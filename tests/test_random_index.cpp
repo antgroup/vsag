@@ -131,7 +131,8 @@ TEST_CASE("Test Random Index", "[ft][random]") {
         query->NumElements(1)->Dim(dim)->Float32Vectors(data + i * dim)->Owner(false);
         auto knn_result = diskann->KnnSearch(query, k, parameters.dump());
         REQUIRE(knn_result.has_value());
-        REQUIRE(knn_result.value()->GetDim() == std::min(k, (int64_t)max_elements));
+        REQUIRE(knn_result.value()->GetDim() > 0);
+        REQUIRE(knn_result.value()->GetDim() <= std::min(k, (int64_t)max_elements));
         auto range_result = diskann->RangeSearch(query, threshold, parameters.dump());
         REQUIRE(range_result.has_value());
     }

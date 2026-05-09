@@ -17,8 +17,15 @@
 
 #include <fmt/format.h>
 
+#include <sstream>
+
 #include "algorithm/hgraph.h"
+#include "data/vector_generator.h"
+#include "impl/allocator/safe_allocator.h"
 #include "parameter_test.h"
+#include "storage/serialization.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
 #include "unittest.h"
 
 #define TEST_COMPATIBILITY_CASE(section_name, param_member, val1, val2, expect_compatible) \
@@ -189,4 +196,59 @@ TEST_CASE("HGraph maps support_duplicate to graph parameter", "[ut][HGraphParame
     REQUIRE(typed_param != nullptr);
     REQUIRE(typed_param->support_duplicate);
     REQUIRE(typed_param->bottom_graph_param->support_duplicate_);
+}
+
+TEST_CASE("HGraph serialize and deserialize without footer", "[ut][HGraph][serialization]") {
+    constexpr int64_t dim = 16;
+    constexpr int64_t count = 100;
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = dim;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    common_param.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+    common_param.allocator_ = vsag::SafeAllocator::FactoryDefaultAllocator();
+
+    vsag::JsonType external_param;
+    external_param[vsag::HGRAPH_GRAPH_MAX_DEGREE].SetInt(16);
+    external_param[vsag::HGRAPH_BUILD_EF_CONSTRUCTION].SetInt(100);
+    external_param[vsag::HGRAPH_INIT_CAPACITY].SetInt(count);
+    external_param[vsag::HGRAPH_USE_REORDER].SetBool(false);
+    external_param[vsag::HGRAPH_BASE_QUANTIZATION_TYPE].SetString("fp32");
+
+    auto param = vsag::HGraph::CheckAndMappingExternalParam(external_param, common_param);
+    auto index = std::make_shared<vsag::HGraph>(param, common_param);
+    auto index_after_deserialize = std::make_shared<vsag::HGraph>(param, common_param);
+
+    auto [ids, vectors] = fixtures::generate_ids_and_vectors(count, dim);
+    auto base = vsag::Dataset::Make();
+    base->Dim(dim)
+        ->NumElements(count)
+        ->Ids(ids.data())
+        ->Float32Vectors(vectors.data())
+        ->Owner(false);
+    index->Build(base);
+
+    std::stringstream ss;
+    vsag::IOStreamWriter writer(ss);
+    index->Serialize(writer, false);
+
+    vsag::IOStreamReader footer_reader(ss);
+    REQUIRE(vsag::Footer::Parse(footer_reader) == nullptr);
+
+    ss.clear();
+    ss.seekg(0, std::ios::beg);
+    vsag::IOStreamReader reader(ss);
+    index_after_deserialize->Deserialize(reader, false);
+
+    auto query = vsag::Dataset::Make();
+    query->Dim(dim)->NumElements(1)->Float32Vectors(vectors.data())->Owner(false);
+    const std::string search_param = R"({"hgraph":{"ef_search":100}})";
+    auto before = index->KnnSearch(query, 10, search_param, nullptr);
+    auto after = index_after_deserialize->KnnSearch(query, 10, search_param, nullptr);
+    REQUIRE(before != nullptr);
+    REQUIRE(after != nullptr);
+    REQUIRE(before->GetDim() == after->GetDim());
+    for (int64_t i = 0; i < before->GetDim(); ++i) {
+        REQUIRE(before->GetIds()[i] == after->GetIds()[i]);
+    }
 }
