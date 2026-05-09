@@ -22,6 +22,7 @@
 #include "impl/inner_search_param.h"
 #include "index/iterator_filter.h"
 #include "index_common_param.h"
+#include "utils/filter_search_skip_strategy.h"
 #include "utils/lock_strategy.h"
 #include "utils/pointer_define.h"
 #include "utils/timer.h"

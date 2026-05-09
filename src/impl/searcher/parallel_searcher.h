@@ -21,6 +21,7 @@
 #include "datacell/graph_interface.h"
 #include "impl/heap/distance_heap.h"
 #include "index_common_param.h"
+#include "utils/filter_search_skip_strategy.h"
 #include "utils/lock_strategy.h"
 #include "utils/visited_list.h"
 
