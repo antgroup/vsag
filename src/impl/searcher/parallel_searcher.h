@@ -21,6 +21,7 @@
 #include "datacell/graph_interface.h"
 #include "impl/heap/distance_heap.h"
 #include "index_common_param.h"
+#include "utils/filter_search_skip_strategy.h"
 #include "utils/lock_strategy.h"
 #include "utils/visited_list.h"
 
@@ -51,7 +52,7 @@ private:
           const VisitedListPtr& vl,
           const Vector<std::pair<float, uint64_t>>& node_pair,
           const FilterPtr& filter,
-          float skip_ratio,
+          FilterSearchSkipStrategy* skip_strategy,
           Vector<InnerIdType>& to_be_visited_rid,
           Vector<InnerIdType>& to_be_visited_id,
           std::vector<Vector<InnerIdType>>& neighbors,
