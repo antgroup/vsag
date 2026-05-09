@@ -16,6 +16,7 @@
 #include <vsag/vsag.h>
 
 #include <iostream>
+#include <memory>
 #include <vector>
 
 int
@@ -28,7 +29,7 @@ main(int argc, char** argv) {
     int64_t num_elements = 100;
     int64_t dim = 128;
 
-    std::vector<int64_t> ids(num_elements);
+    auto ids = std::make_unique<int64_t[]>(num_elements);
     std::mt19937 rng(47);
     std::uniform_real_distribution<float> distrib_real;
     std::uniform_int_distribution<int> vec_count_dist(5, 10);
@@ -51,7 +52,7 @@ main(int argc, char** argv) {
     vsag::DatasetPtr base = vsag::Dataset::Make();
     base->NumElements(num_elements)
         ->Dim(dim)
-        ->Ids(ids.data())
+        ->Ids(ids.release())
         ->MultiVectors(multi_vectors)
         ->MultiVectorDim(dim)
         ->Owner(true);
