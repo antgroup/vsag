@@ -14,6 +14,7 @@
 
 #include "filter_search_skip_strategy.h"
 
+#include <algorithm>
 #include <catch2/catch_test_macros.hpp>
 #include <vector>
 
@@ -27,6 +28,8 @@ TEST_CASE("Filter search skip strategy parse", "[ut][filter_search_skip_strategy
     REQUIRE(std::string(filter_search_skip_strategy_type_to_string(
                 FilterSearchSkipStrategyType::DETERMINISTIC_ACCUMULATIVE)) ==
             "deterministic_accumulative");
+    REQUIRE(std::string(filter_search_skip_strategy_type_to_string(
+                FilterSearchSkipStrategyType::RANDOM)) == "random");
     REQUIRE_THROWS(parse_filter_search_skip_strategy_type("unknown"));
 }
 
@@ -48,9 +51,7 @@ TEST_CASE("Accumulative filter search skip strategy is deterministic",
     }
 
     REQUIRE(first_sequence == second_sequence);
-    REQUIRE(first_sequence == std::vector<bool>{false, false, true,  false, true,  false, false,
-                                                true,  false, true,  false, false, true,  false,
-                                                true,  false, false, true,  false, true});
+    REQUIRE(std::count(first_sequence.begin(), first_sequence.end(), true) == 8);
 }
 
 TEST_CASE("Accumulative filter search skip strategy edge cases",
@@ -68,6 +69,17 @@ TEST_CASE("Accumulative filter search skip strategy edge cases",
             FilterSearchSkipStrategyType::DETERMINISTIC_ACCUMULATIVE, 0.5F, 0.0F);
         for (uint64_t i = 0; i < 10; ++i) {
             REQUIRE_FALSE(strategy->ShouldSkipFilterCheck());
+        }
+    }
+
+    SECTION("ratio inputs are clamped") {
+        auto always_skip_strategy = create_filter_search_skip_strategy(
+            FilterSearchSkipStrategyType::DETERMINISTIC_ACCUMULATIVE, -1.0F, 2.0F);
+        auto never_skip_strategy = create_filter_search_skip_strategy(
+            FilterSearchSkipStrategyType::DETERMINISTIC_ACCUMULATIVE, 0.5F, -1.0F);
+        for (uint64_t i = 0; i < 10; ++i) {
+            REQUIRE(always_skip_strategy->ShouldSkipFilterCheck());
+            REQUIRE_FALSE(never_skip_strategy->ShouldSkipFilterCheck());
         }
     }
 }

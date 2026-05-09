@@ -23,6 +23,7 @@
 #include "index/iterator_filter.h"
 #include "inner_search_param.h"
 #include "lock_strategy.h"
+#include "utils/filter_search_skip_strategy.h"
 #include "utils/timer.h"
 #include "utils/visited_list.h"
 

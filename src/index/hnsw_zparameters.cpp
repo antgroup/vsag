@@ -118,9 +118,10 @@ HnswSearchParameters::FromJson(const std::string& json_string) {
         obj.skip_ratio = params[index_name][HNSW_PARAMETER_SKIP_RATIO];
     }
     if (params[index_name].contains(HNSW_PARAMETER_SKIP_STRATEGY)) {
-        CHECK_ARGUMENT(
-            params[index_name][HNSW_PARAMETER_SKIP_STRATEGY].is_string(),
-            fmt::format("parameters[{}] must be string type", HNSW_PARAMETER_SKIP_STRATEGY));
+        CHECK_ARGUMENT(params[index_name][HNSW_PARAMETER_SKIP_STRATEGY].is_string(),
+                       fmt::format("parameters[{}][{}] must be string type",
+                                   index_name,
+                                   HNSW_PARAMETER_SKIP_STRATEGY));
         obj.skip_strategy_type = parse_filter_search_skip_strategy_type(
             params[index_name][HNSW_PARAMETER_SKIP_STRATEGY]);
     }

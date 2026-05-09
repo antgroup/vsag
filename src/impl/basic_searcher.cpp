@@ -22,6 +22,20 @@
 
 namespace vsag {
 
+namespace {
+
+FilterSearchSkipStrategyPtr
+create_filter_search_skip_strategy(const InnerSearchParam& inner_search_param) {
+    return create_filter_search_skip_strategy(
+        inner_search_param.skip_strategy_type,
+        inner_search_param.is_inner_id_allowed != nullptr
+            ? inner_search_param.is_inner_id_allowed->ValidRatio()
+            : 1.0F,
+        inner_search_param.skip_ratio);
+}
+
+}  // namespace
+
 BasicSearcher::BasicSearcher(const IndexCommonParam& common_param, MutexArrayPtr mutex_array)
     : allocator_(common_param.allocator_.get()), mutex_array_(std::move(mutex_array)) {
 }
@@ -49,7 +63,8 @@ BasicSearcher::visit(const GraphInterfacePtr& graph,
             vl->Prefetch(neighbors[i + prefetch_stride_visit_]);
         }
         if (not vl->Get(neighbors[i])) {
-            if (not filter || count_no_visited == 0 || skip_strategy->ShouldSkipFilterCheck() ||
+            auto skip_filter_check = filter != nullptr && skip_strategy->ShouldSkipFilterCheck();
+            if (not filter || count_no_visited == 0 || skip_filter_check ||
                 filter->CheckValid(neighbors[i])) {
                 to_be_visited_rid[count_no_visited] = i;
                 to_be_visited_id[count_no_visited] = neighbors[i];
@@ -120,12 +135,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     Vector<InnerIdType> to_be_visited_id(graph->MaximumDegree(), alloc);
     Vector<InnerIdType> neighbors(graph->MaximumDegree(), alloc);
     Vector<float> line_dists(graph->MaximumDegree(), alloc);
-    auto skip_strategy = create_filter_search_skip_strategy(
-        inner_search_param.skip_strategy_type,
-        inner_search_param.is_inner_id_allowed != nullptr
-            ? inner_search_param.is_inner_id_allowed->ValidRatio()
-            : 1.0F,
-        inner_search_param.skip_ratio);
+    auto skip_strategy = create_filter_search_skip_strategy(inner_search_param);
 
     if (!iter_ctx->IsFirstUsed()) {
         if (iter_ctx->Empty()) {
@@ -266,12 +276,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     Vector<InnerIdType> to_be_visited_id(graph->MaximumDegree(), alloc);
     Vector<InnerIdType> neighbors(graph->MaximumDegree(), alloc);
     Vector<float> line_dists(graph->MaximumDegree(), alloc);
-    auto skip_strategy = create_filter_search_skip_strategy(
-        inner_search_param.skip_strategy_type,
-        inner_search_param.is_inner_id_allowed != nullptr
-            ? inner_search_param.is_inner_id_allowed->ValidRatio()
-            : 1.0F,
-        inner_search_param.skip_ratio);
+    auto skip_strategy = create_filter_search_skip_strategy(inner_search_param);
 
     Filter* attr_ft = nullptr;
     if (not inner_search_param.executors.empty() and inner_search_param.executors[0] != nullptr) {
