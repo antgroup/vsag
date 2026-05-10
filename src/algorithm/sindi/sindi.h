@@ -16,6 +16,7 @@
 #pragma once
 
 #include "algorithm/inner_index_interface.h"
+#include "algorithm/sindi/proximity_scorer.h"
 #include "algorithm/sindi/term_id_mapper.h"
 #include "algorithm/sparse_index.h"
 #include "datacell/sparse_term_datacell.h"
@@ -131,7 +132,12 @@ private:
                 const InnerSearchParam& inner_param,
                 Allocator* allocator,
                 bool use_term_lists_heap_insert,
-                const SparseVector* original_query = nullptr) const;
+                const SparseVector* original_query = nullptr,
+                float proximity_weight = 0.0f,
+                bool proximity_ordered = false,
+                uint32_t proximity_candidates = 10000,
+                bool proximity_boost_multiplicative = true,
+                uint32_t query_term_count = 0) const;
 
     std::pair<int64_t, int64_t>
     get_min_max_window_id(const FilterPtr& filter) const;
@@ -174,6 +180,9 @@ private:
 
     bool remap_term_ids_{false};
     std::shared_ptr<TermIdMapper> term_id_mapper_{nullptr};
+
+    bool store_positions_{false};
+    uint32_t max_positions_per_term_{64};
 };
 
 }  // namespace vsag

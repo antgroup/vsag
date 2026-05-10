@@ -15,6 +15,8 @@
 
 #include "sindi.h"
 
+#include <algorithm>
+
 #include "impl/heap/standard_heap.h"
 #include "index_feature_list.h"
 #include "storage/serialization.h"
@@ -43,7 +45,9 @@ SINDI::SINDI(const SINDIParameterPtr& param, const IndexCommonParam& common_para
       deserialize_without_buffer_(param->deserialize_without_buffer),
       quantization_params_(std::make_shared<QuantizationParams>()),
       avg_doc_term_length_(param->avg_doc_term_length),
-      remap_term_ids_(param->remap_term_ids) {
+      remap_term_ids_(param->remap_term_ids),
+      store_positions_(param->store_positions),
+      max_positions_per_term_(param->max_positions_per_term) {
     if (remap_term_ids_) {
         term_id_mapper_ =
             std::make_shared<TermIdMapper>(term_id_limit_, common_param.allocator_.get());
@@ -95,11 +99,14 @@ SINDI::Add(const DatasetPtr& base, AddMode mode) {
     int64_t final_add_window = align_up(cur_element_count_ + data_num, window_size_) / window_size_;
     bool window_changed = false;
     while (window_term_list_.size() < final_add_window) {
-        window_term_list_.emplace_back(std::make_shared<SparseTermDataCell>(doc_retain_ratio_,
-                                                                            term_id_limit_,
-                                                                            allocator_,
-                                                                            use_quantization_,
-                                                                            quantization_params_));
+        window_term_list_.emplace_back(
+            std::make_shared<SparseTermDataCell>(doc_retain_ratio_,
+                                                 term_id_limit_,
+                                                 allocator_,
+                                                 use_quantization_,
+                                                 quantization_params_,
+                                                 store_positions_,
+                                                 max_positions_per_term_));
         window_changed = true;
     }
 
@@ -126,6 +133,18 @@ SINDI::Add(const DatasetPtr& base, AddMode mode) {
         try {
             if (remap_term_ids_) {
                 auto remapped = remap_sparse_vector_for_build(sparse_vector, tmp_ids);
+                // Remap token_sequence if present: replace original term IDs with compact IDs
+                Vector<uint32_t> remapped_token_seq(allocator_);
+                if (sparse_vector.token_sequence_ != nullptr && sparse_vector.token_seq_len_ > 0) {
+                    remapped_token_seq.resize(sparse_vector.token_seq_len_);
+                    for (uint32_t ti = 0; ti < sparse_vector.token_seq_len_; ++ti) {
+                        auto mapped = term_id_mapper_->TryMap(sparse_vector.token_sequence_[ti]);
+                        remapped_token_seq[ti] =
+                            mapped.has_value() ? mapped.value() : sparse_vector.token_sequence_[ti];
+                    }
+                    remapped.token_seq_len_ = sparse_vector.token_seq_len_;
+                    remapped.token_sequence_ = remapped_token_seq.data();
+                }
                 window_term_list_[cur_window]->InsertVector(remapped, inner_id);
             } else {
                 window_term_list_[cur_window]->InsertVector(sparse_vector, inner_id);
@@ -261,8 +280,16 @@ SINDI::KnnSearch(const DatasetPtr& query,
 
     auto computer = std::make_shared<SparseTermComputer>(effective_query, search_param, allocator_);
     const SparseVector* rerank_query = (remap_term_ids_ && use_reorder_) ? &sparse_query : nullptr;
-    return search_impl<KNN_SEARCH>(
-        computer, inner_param, allocator, search_param.use_term_lists_heap_insert, rerank_query);
+    return search_impl<KNN_SEARCH>(computer,
+                                   inner_param,
+                                   allocator,
+                                   search_param.use_term_lists_heap_insert,
+                                   rerank_query,
+                                   search_param.proximity_weight,
+                                   search_param.proximity_ordered,
+                                   search_param.proximity_candidates,
+                                   search_param.proximity_boost_multiplicative,
+                                   effective_query.len_);
 }
 
 template <InnerSearchMode mode>
@@ -271,7 +298,12 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
                    const InnerSearchParam& inner_param,
                    Allocator* allocator,
                    bool use_term_lists_heap_insert,
-                   const SparseVector* original_query) const {
+                   const SparseVector* original_query,
+                   float proximity_weight,
+                   bool proximity_ordered,
+                   uint32_t proximity_candidates,
+                   bool proximity_boost_multiplicative,
+                   uint32_t query_term_count) const {
     // computer and heap
     MaxHeap heap(allocator);
     int64_t k = 0;
@@ -290,6 +322,60 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
 
         // compute
         term_list->Query(dists.data(), computer);
+
+        // proximity boost: modify dists before heap insertion
+        if (store_positions_ && proximity_weight > 0.0f) {
+            const auto& raw_query = computer->raw_query_;
+
+            // Collect candidate doc_ids with non-zero scores, cap at proximity_candidates
+            std::vector<uint32_t> candidates;
+            candidates.reserve(std::min(static_cast<uint32_t>(window_size_), proximity_candidates));
+            for (uint32_t doc_idx = 0; doc_idx < window_size_; ++doc_idx) {
+                if (dists[doc_idx] < 0.0f) {
+                    candidates.push_back(doc_idx);
+                    if (candidates.size() >= proximity_candidates) {
+                        break;
+                    }
+                }
+            }
+
+            // For each candidate, binary search posting lists to get positions
+            for (uint32_t doc_idx : candidates) {
+                std::vector<std::vector<uint16_t>> position_lists;
+                position_lists.reserve(raw_query.len_);
+                auto doc_id = static_cast<uint16_t>(doc_idx);
+
+                for (uint32_t qi = 0; qi < raw_query.len_; ++qi) {
+                    uint32_t term = raw_query.ids_[qi];
+                    if (term >= term_list->term_capacity_ || term_list->term_sizes_[term] == 0 ||
+                        !term_list->term_pos_offsets_[term]) {
+                        position_lists.emplace_back();
+                        continue;
+                    }
+                    auto& term_doc_ids = *term_list->term_ids_[term];
+                    auto it = std::lower_bound(term_doc_ids.begin(), term_doc_ids.end(), doc_id);
+                    if (it != term_doc_ids.end() && *it == doc_id) {
+                        uint32_t posting_idx = static_cast<uint32_t>(it - term_doc_ids.begin());
+                        position_lists.push_back(term_list->GetPositions(term, posting_idx));
+                    } else {
+                        position_lists.emplace_back();
+                    }
+                }
+
+                float raw_boost = compute_pairwise_proximity(position_lists, proximity_ordered);
+                if (raw_boost > 0.0f) {
+                    // Normalize by C(query_term_count, 2)
+                    float pair_count = static_cast<float>(query_term_count) *
+                                       static_cast<float>(query_term_count - 1) / 2.0f;
+                    float normalized_boost = (pair_count > 0.0f) ? raw_boost / pair_count : 0.0f;
+                    if (proximity_boost_multiplicative) {
+                        dists[doc_idx] *= (1.0f + proximity_weight * normalized_boost);
+                    } else {
+                        dists[doc_idx] -= proximity_weight * normalized_boost;
+                    }
+                }
+            }
+        }
 
         // insert heap
         if (use_term_lists_heap_insert) {
@@ -422,8 +508,16 @@ SINDI::RangeSearch(const DatasetPtr& query,
 
     auto computer = std::make_shared<SparseTermComputer>(effective_query, search_param, allocator_);
     const SparseVector* rerank_query = (remap_term_ids_ && use_reorder_) ? &sparse_query : nullptr;
-    return search_impl<RANGE_SEARCH>(
-        computer, inner_param, allocator_, search_param.use_term_lists_heap_insert, rerank_query);
+    return search_impl<RANGE_SEARCH>(computer,
+                                     inner_param,
+                                     allocator_,
+                                     search_param.use_term_lists_heap_insert,
+                                     rerank_query,
+                                     search_param.proximity_weight,
+                                     search_param.proximity_ordered,
+                                     search_param.proximity_candidates,
+                                     search_param.proximity_boost_multiplicative,
+                                     effective_query.len_);
 }
 
 void
@@ -521,8 +615,13 @@ SINDI::Deserialize(StreamReader& reader) {
     StreamReader::ReadObj(reader_ref, window_term_list_size);
     window_term_list_.resize(window_term_list_size);
     for (auto& window : window_term_list_) {
-        window = std::make_shared<SparseTermDataCell>(
-            doc_retain_ratio_, term_id_limit_, allocator_, use_quantization_, quantization_params_);
+        window = std::make_shared<SparseTermDataCell>(doc_retain_ratio_,
+                                                      term_id_limit_,
+                                                      allocator_,
+                                                      use_quantization_,
+                                                      quantization_params_,
+                                                      store_positions_,
+                                                      max_positions_per_term_);
         window->Deserialize(reader_ref);
     }
 

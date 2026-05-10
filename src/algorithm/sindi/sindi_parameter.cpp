@@ -80,6 +80,17 @@ SINDIParameter::FromJson(const JsonType& json) {
     if (json.Contains(SPARSE_REMAP_TERM_IDS)) {
         remap_term_ids = json[SPARSE_REMAP_TERM_IDS].GetBool();
     }
+
+    if (json.Contains(SPARSE_STORE_POSITIONS)) {
+        store_positions = json[SPARSE_STORE_POSITIONS].GetBool();
+    }
+
+    if (json.Contains(SPARSE_MAX_POSITIONS_PER_TERM)) {
+        max_positions_per_term = json[SPARSE_MAX_POSITIONS_PER_TERM].GetInt();
+        CHECK_ARGUMENT((0 < max_positions_per_term and max_positions_per_term <= 256),
+                       fmt::format("max_positions_per_term must in (0, 256], but now is {}",
+                                   max_positions_per_term));
+    }
 }
 
 JsonType
@@ -92,6 +103,8 @@ SINDIParameter::ToJson() const {
     json[SPARSE_WINDOW_SIZE].SetInt(window_size);
     json[SPARSE_AVG_DOC_TERM_LENGTH].SetInt(avg_doc_term_length);
     json[SPARSE_REMAP_TERM_IDS].SetBool(remap_term_ids);
+    json[SPARSE_STORE_POSITIONS].SetBool(store_positions);
+    json[SPARSE_MAX_POSITIONS_PER_TERM].SetInt(max_positions_per_term);
     return json;
 }
 
@@ -120,6 +133,12 @@ SINDIParameter::CheckCompatibility(const vsag::ParamPtr& other) const {
         return false;
     }
     if (this->remap_term_ids != sindi_param->remap_term_ids) {
+        return false;
+    }
+    if (this->store_positions != sindi_param->store_positions) {
+        return false;
+    }
+    if (this->max_positions_per_term != sindi_param->max_positions_per_term) {
         return false;
     }
     return true;
@@ -156,6 +175,23 @@ SINDISearchParameter::FromJson(const JsonType& json) {
     } else {
         use_term_lists_heap_insert = true;
     }
+
+    if (json[INDEX_SINDI].Contains(SPARSE_PROXIMITY_CANDIDATES)) {
+        proximity_candidates = json[INDEX_SINDI][SPARSE_PROXIMITY_CANDIDATES].GetInt();
+    }
+
+    if (json[INDEX_SINDI].Contains(SPARSE_PROXIMITY_WEIGHT)) {
+        proximity_weight = json[INDEX_SINDI][SPARSE_PROXIMITY_WEIGHT].GetFloat();
+    }
+
+    if (json[INDEX_SINDI].Contains(SPARSE_PROXIMITY_ORDERED)) {
+        proximity_ordered = json[INDEX_SINDI][SPARSE_PROXIMITY_ORDERED].GetBool();
+    }
+
+    if (json[INDEX_SINDI].Contains(SPARSE_PROXIMITY_BOOST_MULTIPLICATIVE)) {
+        proximity_boost_multiplicative =
+            json[INDEX_SINDI][SPARSE_PROXIMITY_BOOST_MULTIPLICATIVE].GetBool();
+    }
 }
 JsonType
 SINDISearchParameter::ToJson() const {
@@ -165,6 +201,11 @@ SINDISearchParameter::ToJson() const {
     json[INDEX_SINDI][SPARSE_N_CANDIDATE].SetInt(n_candidate);
     json[INDEX_SINDI][SPARSE_TERM_PRUNE_RATIO].SetFloat(term_prune_ratio);
     json[INDEX_SINDI][SPARSE_USE_TERM_LISTS_HEAP_INSERT].SetBool(use_term_lists_heap_insert);
+    json[INDEX_SINDI][SPARSE_PROXIMITY_CANDIDATES].SetInt(proximity_candidates);
+    json[INDEX_SINDI][SPARSE_PROXIMITY_WEIGHT].SetFloat(proximity_weight);
+    json[INDEX_SINDI][SPARSE_PROXIMITY_ORDERED].SetBool(proximity_ordered);
+    json[INDEX_SINDI][SPARSE_PROXIMITY_BOOST_MULTIPLICATIVE].SetBool(
+        proximity_boost_multiplicative);
     return json;
 }
 

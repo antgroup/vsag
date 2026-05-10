@@ -18,6 +18,7 @@ set (SINDI_SRCS
         sindi.cpp
         sindi_parameter.cpp
         term_id_mapper.cpp
+        proximity_scorer.cpp
 )
 
 add_library (sindi OBJECT ${SINDI_SRCS})

@@ -15,6 +15,9 @@
 
 #include "sparse_term_datacell.h"
 
+#include <unordered_map>
+#include <unordered_set>
+
 #include "utils/util_functions.h"
 #include "vsag/allocator.h"
 #include "vsag_exception.h"
@@ -258,6 +261,10 @@ SparseTermDataCell::InsertVector(const SparseVector& sparse_base, uint16_t base_
         if (term_sizes_[term] == 0) {  // create term until needed
             term_ids_[term] = std::make_unique<Vector<uint16_t>>(allocator_);
             term_datas_[term] = std::make_unique<Vector<uint8_t>>(allocator_);
+            if (store_positions_) {
+                term_pos_offsets_[term] = std::make_unique<Vector<uint32_t>>(allocator_);
+                term_pos_pool_[term] = std::make_unique<Vector<uint16_t>>(allocator_);
+            }
         }
 
         term_ids_[term]->push_back(base_id);
@@ -275,6 +282,52 @@ SparseTermDataCell::InsertVector(const SparseVector& sparse_base, uint16_t base_
 
         term_sizes_[term] += 1;
     }
+
+    // Extract and store positions from token_sequence if enabled
+    if (store_positions_ && sparse_base.token_sequence_ != nullptr &&
+        sparse_base.token_seq_len_ > 0) {
+        // Build set of term IDs that survived doc pruning (present in sorted_base)
+        std::unordered_set<uint32_t> surviving_terms;
+        for (auto& item : sorted_base) {
+            surviving_terms.insert(item.first);
+        }
+
+        // Collect positions per surviving term from token_sequence
+        std::unordered_map<uint32_t, std::vector<uint16_t>> positions;
+        for (uint32_t pos = 0; pos < sparse_base.token_seq_len_; ++pos) {
+            uint32_t token = sparse_base.token_sequence_[pos];
+            if (surviving_terms.count(token) > 0) {
+                auto& pos_list = positions[token];
+                if (pos_list.size() < max_positions_per_term_) {
+                    pos_list.push_back(static_cast<uint16_t>(pos));
+                }
+            }
+        }
+
+        // Append positions to offset+pool for each surviving term
+        for (auto& item : sorted_base) {
+            auto term = item.first;
+            auto& offsets = *term_pos_offsets_[term];
+            auto& pool = *term_pos_pool_[term];
+            uint32_t pool_start = pool.size();
+            offsets.push_back(pool_start);
+            auto it = positions.find(term);
+            if (it != positions.end()) {
+                for (auto p : it->second) {
+                    pool.push_back(p);
+                }
+            }
+        }
+    } else if (store_positions_) {
+        // No token_sequence provided: append empty entries for each surviving term
+        for (auto& item : sorted_base) {
+            auto term = item.first;
+            if (term_pos_offsets_[term]) {
+                term_pos_offsets_[term]->push_back(term_pos_pool_[term]->size());
+            }
+        }
+    }
+
     total_count_++;
 }
 
@@ -294,6 +347,16 @@ SparseTermDataCell::ResizeTermList(InnerIdType new_term_capacity) {
     term_ids_.swap(new_ids);
     term_datas_.swap(new_datas);
     term_sizes_.swap(new_sizes);
+
+    if (store_positions_) {
+        Vector<std::unique_ptr<Vector<uint32_t>>> new_offsets(new_term_capacity, allocator_);
+        Vector<std::unique_ptr<Vector<uint16_t>>> new_pool(new_term_capacity, allocator_);
+        std::move(term_pos_offsets_.begin(), term_pos_offsets_.end(), new_offsets.begin());
+        std::move(term_pos_pool_.begin(), term_pos_pool_.end(), new_pool.begin());
+        term_pos_offsets_.swap(new_offsets);
+        term_pos_pool_.swap(new_pool);
+    }
+
     term_capacity_ = new_term_capacity;
 }
 
@@ -427,6 +490,22 @@ SparseTermDataCell::Serialize(StreamWriter& writer) const {
         }
     }
     StreamWriter::WriteVector(writer, term_sizes_);
+
+    // Serialize position data if enabled
+    if (store_positions_) {
+        StreamWriter::WriteObj(writer, static_cast<uint8_t>(1));  // position data marker
+        for (uint32_t i = 0; i < term_capacity_; i++) {
+            if (term_pos_offsets_[i] && !term_pos_offsets_[i]->empty()) {
+                StreamWriter::WriteVector(writer, *term_pos_offsets_[i]);
+                StreamWriter::WriteVector(writer, *term_pos_pool_[i]);
+            } else {
+                Vector<uint32_t> empty_offsets(allocator_);
+                Vector<uint16_t> empty_pool(allocator_);
+                StreamWriter::WriteVector(writer, empty_offsets);
+                StreamWriter::WriteVector(writer, empty_pool);
+            }
+        }
+    }
 }
 
 void
@@ -462,6 +541,41 @@ SparseTermDataCell::Deserialize(StreamReader& reader) {
             }
         }
     }
+
+    // Deserialize position data if enabled
+    if (store_positions_) {
+        uint8_t marker;
+        StreamReader::ReadObj(reader, marker);
+        if (marker == 1) {
+            for (uint32_t i = 0; i < term_capacity; i++) {
+                Vector<uint32_t> offsets_buf(allocator_);
+                Vector<uint16_t> pool_buf(allocator_);
+                StreamReader::ReadVector(reader, offsets_buf);
+                StreamReader::ReadVector(reader, pool_buf);
+                if (!offsets_buf.empty()) {
+                    term_pos_offsets_[i] = std::make_unique<Vector<uint32_t>>(allocator_);
+                    term_pos_pool_[i] = std::make_unique<Vector<uint16_t>>(allocator_);
+                    *term_pos_offsets_[i] = std::move(offsets_buf);
+                    *term_pos_pool_[i] = std::move(pool_buf);
+                }
+            }
+        }
+    }
+}
+
+std::vector<uint16_t>
+SparseTermDataCell::GetPositions(uint32_t term_id, uint32_t posting_index) const {
+    if (!store_positions_ || term_id >= term_capacity_ || !term_pos_offsets_[term_id] ||
+        posting_index >= term_pos_offsets_[term_id]->size()) {
+        return {};
+    }
+
+    auto& offsets = *term_pos_offsets_[term_id];
+    auto& pool = *term_pos_pool_[term_id];
+    uint32_t start = offsets[posting_index];
+    uint32_t end = (posting_index + 1 < offsets.size()) ? offsets[posting_index + 1] : pool.size();
+
+    return std::vector<uint16_t>(pool.begin() + start, pool.begin() + end);
 }
 
 void

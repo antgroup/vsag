@@ -1236,3 +1236,877 @@ TEST_CASE("SINDI Remap Memory Comparison - MD5 Vocabulary", "[ut][SINDI]") {
         delete[] item.ids_;
     }
 }
+
+TEST_CASE("SINDI Proximity Basic Test", "[ut][SINDI][Proximity]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+
+    // Create controlled data: 3 docs, same terms, different positions
+    // Doc 0: terms [10, 20, 30] clustered at positions [0, 1, 2] → high proximity
+    // Doc 1: terms [10, 20, 30] scattered at positions [0, 50, 100] → low proximity
+    // Doc 2: terms [10, 20] at positions [0, 1] → partial match, high proximity
+    uint32_t num_base = 3;
+
+    SparseVector sv_base_prox[3];
+
+    uint32_t ids0[] = {10, 20, 30};
+    float vals0[] = {0.3f, 0.3f, 0.3f};
+    uint32_t seq0[] = {10, 20, 30};
+    sv_base_prox[0] = {3, ids0, vals0, 3, seq0};
+
+    uint32_t ids1[] = {10, 20, 30};
+    float vals1[] = {0.3f, 0.3f, 0.3f};
+    std::vector<uint32_t> seq1_vec(101, 99);
+    seq1_vec[0] = 10;
+    seq1_vec[50] = 20;
+    seq1_vec[100] = 30;
+    sv_base_prox[1] = {3, ids1, vals1, 101, seq1_vec.data()};
+
+    uint32_t ids2[] = {10, 20};
+    float vals2[] = {0.3f, 0.3f};
+    uint32_t seq2[] = {10, 20};
+    sv_base_prox[2] = {2, ids2, vals2, 2, seq2};
+
+    std::vector<int64_t> base_ids = {0, 1, 2};
+    auto base = vsag::Dataset::Make();
+    base->NumElements(num_base)->SparseVectors(sv_base_prox)->Ids(base_ids.data())->Owner(false);
+
+    auto param_str_prox = R"({
+        "use_reorder": false,
+        "use_quantization": false,
+        "doc_prune_ratio": 0.0,
+        "window_size": 10000,
+        "term_id_limit": 200,
+        "store_positions": true,
+        "max_positions_per_term": 64,
+        "avg_doc_term_length": 10
+    })";
+
+    vsag::JsonType param_json = vsag::JsonType::Parse(param_str_prox);
+    auto index_param = std::make_shared<vsag::SINDIParameter>();
+    index_param->FromJson(param_json);
+    auto index = std::make_unique<SINDI>(index_param, common_param);
+
+    auto build_res = index->Build(base);
+    REQUIRE(build_res.size() == 0);
+    REQUIRE(index->GetNumElements() == 3);
+
+    // Query: terms [10, 20, 30]
+    uint32_t q_ids[] = {10, 20, 30};
+    float q_vals[] = {0.3f, 0.3f, 0.3f};
+    SparseVector query_sv = {3, q_ids, q_vals, 0, nullptr};
+    auto query_ds = vsag::Dataset::Make();
+    query_ds->NumElements(1)->SparseVectors(&query_sv)->Owner(false);
+
+    // Search WITHOUT proximity boost
+    std::string search_no_prox = R"({
+        "sindi": {
+            "query_prune_ratio": 0.0,
+            "term_prune_ratio": 0.0,
+            "n_candidate": 10,
+            "proximity_weight": 0.0
+        }
+    })";
+    auto result_no_prox = index->KnnSearch(query_ds, 3, search_no_prox, nullptr);
+    REQUIRE(result_no_prox->GetDim() == 3);
+    // Doc 0 and Doc 1 have same IP score (both have terms 10,20,30 with weight 0.3)
+    // IP = 0.3*0.3 * 3 = 0.27, distance = 1 - 0.27 = 0.73
+    REQUIRE(result_no_prox->GetDistances()[0] == result_no_prox->GetDistances()[1]);
+
+    // Search WITH proximity boost
+    std::string search_with_prox = R"({
+        "sindi": {
+            "query_prune_ratio": 0.0,
+            "term_prune_ratio": 0.0,
+            "n_candidate": 10,
+            "proximity_weight": 0.5,
+            "proximity_ordered": false,
+            "proximity_candidates": 10000
+        }
+    })";
+    auto result_prox = index->KnnSearch(query_ds, 3, search_with_prox, nullptr);
+    REQUIRE(result_prox->GetDim() == 3);
+    // Doc 0 (clustered) should rank before Doc 1 (scattered)
+    REQUIRE(result_prox->GetIds()[0] == 0);
+    REQUIRE(result_prox->GetDistances()[0] < result_prox->GetDistances()[1]);
+}
+
+TEST_CASE("SINDI Proximity Disabled Regression", "[ut][SINDI][Proximity]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+
+    uint32_t num_base = 100;
+    int64_t max_dim = 32;
+    int64_t max_id = 500;
+    int64_t k = 10;
+
+    std::vector<int64_t> ids(num_base);
+    for (int64_t i = 0; i < num_base; ++i) {
+        ids[i] = i;
+    }
+
+    auto sv_base_reg = fixtures::GenerateSparseVectors(num_base, max_dim, max_id, 0, 10, 42);
+
+    // Add token sequences
+    std::mt19937 rng(42);
+    std::vector<std::vector<uint32_t>> token_seqs(num_base);
+    for (uint32_t i = 0; i < num_base; ++i) {
+        uint32_t seq_len = 50 + rng() % 100;
+        token_seqs[i].resize(seq_len);
+        for (uint32_t j = 0; j < seq_len; ++j) {
+            token_seqs[i][j] = rng() % max_id;
+        }
+        sv_base_reg[i].token_seq_len_ = seq_len;
+        sv_base_reg[i].token_sequence_ = token_seqs[i].data();
+    }
+
+    auto base_reg = vsag::Dataset::Make();
+    base_reg->NumElements(num_base)
+        ->SparseVectors(sv_base_reg.data())
+        ->Ids(ids.data())
+        ->Owner(false);
+
+    auto param_str_reg = R"({
+        "use_reorder": false,
+        "use_quantization": false,
+        "doc_prune_ratio": 0.0,
+        "window_size": 10000,
+        "term_id_limit": 501,
+        "store_positions": true,
+        "max_positions_per_term": 64,
+        "avg_doc_term_length": 32
+    })";
+
+    vsag::JsonType param_json_reg = vsag::JsonType::Parse(param_str_reg);
+    auto index_param_reg = std::make_shared<vsag::SINDIParameter>();
+    index_param_reg->FromJson(param_json_reg);
+    auto index_reg = std::make_unique<SINDI>(index_param_reg, common_param);
+    auto build_res_reg = index_reg->Build(base_reg);
+    REQUIRE(build_res_reg.size() == 0);
+
+    // proximity_weight=0 should be deterministic and consistent
+    std::string search_no_prox_reg = R"({
+        "sindi": {
+            "query_prune_ratio": 0.0,
+            "term_prune_ratio": 0.0,
+            "n_candidate": 20,
+            "proximity_weight": 0.0
+        }
+    })";
+
+    auto query_reg = vsag::Dataset::Make();
+    for (int i = 0; i < 10; ++i) {
+        query_reg->NumElements(1)->SparseVectors(sv_base_reg.data() + i)->Owner(false);
+        auto result1 = index_reg->KnnSearch(query_reg, k, search_no_prox_reg, nullptr);
+        auto result2 = index_reg->KnnSearch(query_reg, k, search_no_prox_reg, nullptr);
+        REQUIRE(result1->GetDim() == result2->GetDim());
+        for (int j = 0; j < result1->GetDim(); ++j) {
+            REQUIRE(result1->GetIds()[j] == result2->GetIds()[j]);
+        }
+    }
+
+    for (auto& item : sv_base_reg) {
+        delete[] item.vals_;
+        delete[] item.ids_;
+    }
+}
+
+TEST_CASE("SINDI Proximity Score Verification", "[ut][SINDI][Proximity]") {
+    // Verify exact scores for both multiplicative and additive modes
+    // Use small weights so distance falls in [0, 1]
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+
+    // 2 docs, both contain [10, 20, 30] with weight 0.3
+    // Doc 0: clustered at [0, 1, 2]
+    // Doc 1: scattered at [0, 50, 100]
+    SparseVector sv_docs[2];
+    uint32_t ids0[] = {10, 20, 30};
+    float vals0[] = {0.3f, 0.3f, 0.3f};
+    uint32_t seq0[] = {10, 20, 30};
+    sv_docs[0] = {3, ids0, vals0, 3, seq0};
+
+    uint32_t ids1[] = {10, 20, 30};
+    float vals1[] = {0.3f, 0.3f, 0.3f};
+    std::vector<uint32_t> seq1_vec(101, 99);
+    seq1_vec[0] = 10;
+    seq1_vec[50] = 20;
+    seq1_vec[100] = 30;
+    sv_docs[1] = {3, ids1, vals1, 101, seq1_vec.data()};
+
+    std::vector<int64_t> base_ids = {0, 1};
+    auto base = vsag::Dataset::Make();
+    base->NumElements(2)->SparseVectors(sv_docs)->Ids(base_ids.data())->Owner(false);
+
+    auto param_str = R"({
+        "use_reorder": false,
+        "use_quantization": false,
+        "doc_prune_ratio": 0.0,
+        "window_size": 10000,
+        "term_id_limit": 200,
+        "store_positions": true,
+        "max_positions_per_term": 64,
+        "avg_doc_term_length": 10
+    })";
+
+    vsag::JsonType pj = vsag::JsonType::Parse(param_str);
+    auto ip = std::make_shared<vsag::SINDIParameter>();
+    ip->FromJson(pj);
+    auto index = std::make_unique<SINDI>(ip, common_param);
+    index->Build(base);
+
+    uint32_t q_ids[] = {10, 20, 30};
+    float q_vals[] = {0.3f, 0.3f, 0.3f};
+    SparseVector qsv = {3, q_ids, q_vals, 0, nullptr};
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->SparseVectors(&qsv)->Owner(false);
+
+    // IP score for both docs: 0.3*0.3 + 0.3*0.3 + 0.3*0.3 = 0.27
+    // Without proximity: distance = 1 - 0.27 = 0.73
+    float ip_score = 0.27f;
+
+    // Doc 0 proximity:
+    // pairs: (10,20) dist=1→1/2, (10,30) dist=2→1/3, (20,30) dist=1→1/2
+    // raw_boost = 1/2 + 1/3 + 1/2 = 4/3
+    float raw_boost_0 = 1.0f / 2.0f + 1.0f / 3.0f + 1.0f / 2.0f;
+
+    // Doc 1 proximity:
+    // pairs: (10,20) dist=50→1/51, (10,30) dist=100→1/101, (20,30) dist=50→1/51
+    float raw_boost_1 = 1.0f / 51.0f + 1.0f / 101.0f + 1.0f / 51.0f;
+
+    // C(3,2) = 3
+    float pair_count = 3.0f;
+    float norm_boost_0 = raw_boost_0 / pair_count;
+    float norm_boost_1 = raw_boost_1 / pair_count;
+
+    float beta = 0.3f;
+
+    SECTION("multiplicative mode") {
+        std::string sp = R"({
+            "sindi": {
+                "query_prune_ratio": 0.0,
+                "term_prune_ratio": 0.0,
+                "n_candidate": 10,
+                "proximity_weight": 0.3,
+                "proximity_boost_multiplicative": true
+            }
+        })";
+        auto result = index->KnnSearch(query, 2, sp, nullptr);
+        // dists[doc] = -0.27 (negative IP)
+        // multiplicative: dists *= (1 + beta * norm_boost)
+        // final_distance = 1 + dists_after
+        float expected_0 = 1.0f + (-ip_score) * (1.0f + beta * norm_boost_0);
+        float expected_1 = 1.0f + (-ip_score) * (1.0f + beta * norm_boost_1);
+        // expected_0 ≈ 1 - 0.27 * 1.133 = 1 - 0.306 = 0.694
+        // expected_1 ≈ 1 - 0.27 * 1.005 = 1 - 0.271 = 0.729
+        REQUIRE(result->GetIds()[0] == 0);
+        REQUIRE(result->GetDistances()[0] > 0.0f);  // distance in [0,1]
+        REQUIRE(result->GetDistances()[0] < 1.0f);
+        REQUIRE(result->GetDistances()[1] > 0.0f);
+        REQUIRE(result->GetDistances()[1] < 1.0f);
+        REQUIRE(std::abs(result->GetDistances()[0] - expected_0) < 1e-4f);
+        REQUIRE(std::abs(result->GetDistances()[1] - expected_1) < 1e-4f);
+    }
+
+    SECTION("additive mode") {
+        std::string sp = R"({
+            "sindi": {
+                "query_prune_ratio": 0.0,
+                "term_prune_ratio": 0.0,
+                "n_candidate": 10,
+                "proximity_weight": 0.3,
+                "proximity_boost_multiplicative": false
+            }
+        })";
+        auto result = index->KnnSearch(query, 2, sp, nullptr);
+        // additive: dists -= beta * norm_boost
+        // final_distance = 1 + (dists - beta * norm_boost) = 1 - ip - beta * norm_boost
+        float expected_0 = 1.0f - ip_score - beta * norm_boost_0;
+        float expected_1 = 1.0f - ip_score - beta * norm_boost_1;
+        // expected_0 ≈ 1 - 0.27 - 0.3*0.444 = 1 - 0.27 - 0.133 = 0.597
+        // expected_1 ≈ 1 - 0.27 - 0.3*0.016 = 1 - 0.27 - 0.005 = 0.725
+        REQUIRE(result->GetIds()[0] == 0);
+        REQUIRE(result->GetDistances()[0] > 0.0f);
+        REQUIRE(result->GetDistances()[0] < 1.0f);
+        REQUIRE(result->GetDistances()[1] > 0.0f);
+        REQUIRE(result->GetDistances()[1] < 1.0f);
+        REQUIRE(std::abs(result->GetDistances()[0] - expected_0) < 1e-4f);
+        REQUIRE(std::abs(result->GetDistances()[1] - expected_1) < 1e-4f);
+    }
+}
+
+TEST_CASE("SINDI Proximity Additive Mode", "[ut][SINDI][Proximity]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+
+    // Same setup as basic test with small weights
+    SparseVector sv_docs[2];
+    uint32_t ids0[] = {10, 20, 30};
+    float vals0[] = {0.3f, 0.3f, 0.3f};
+    uint32_t seq0[] = {10, 20, 30};
+    sv_docs[0] = {3, ids0, vals0, 3, seq0};
+
+    uint32_t ids1[] = {10, 20, 30};
+    float vals1[] = {0.3f, 0.3f, 0.3f};
+    std::vector<uint32_t> seq1_vec(101, 99);
+    seq1_vec[0] = 10;
+    seq1_vec[50] = 20;
+    seq1_vec[100] = 30;
+    sv_docs[1] = {3, ids1, vals1, 101, seq1_vec.data()};
+
+    std::vector<int64_t> base_ids = {0, 1};
+    auto base = vsag::Dataset::Make();
+    base->NumElements(2)->SparseVectors(sv_docs)->Ids(base_ids.data())->Owner(false);
+
+    auto param_str = R"({
+        "use_reorder": false,
+        "use_quantization": false,
+        "doc_prune_ratio": 0.0,
+        "window_size": 10000,
+        "term_id_limit": 200,
+        "store_positions": true,
+        "max_positions_per_term": 64,
+        "avg_doc_term_length": 10
+    })";
+
+    vsag::JsonType pj = vsag::JsonType::Parse(param_str);
+    auto ip_param = std::make_shared<vsag::SINDIParameter>();
+    ip_param->FromJson(pj);
+    auto index = std::make_unique<SINDI>(ip_param, common_param);
+    index->Build(base);
+
+    uint32_t q_ids[] = {10, 20, 30};
+    float q_vals[] = {0.3f, 0.3f, 0.3f};
+    SparseVector qsv = {3, q_ids, q_vals, 0, nullptr};
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->SparseVectors(&qsv)->Owner(false);
+
+    // Additive mode
+    std::string sp = R"({
+        "sindi": {
+            "query_prune_ratio": 0.0,
+            "term_prune_ratio": 0.0,
+            "n_candidate": 10,
+            "proximity_weight": 0.3,
+            "proximity_boost_multiplicative": false,
+            "proximity_candidates": 10000
+        }
+    })";
+    auto result = index->KnnSearch(query, 2, sp, nullptr);
+    REQUIRE(result->GetIds()[0] == 0);
+    REQUIRE(result->GetDistances()[0] < result->GetDistances()[1]);
+    // Distances should be in [0, 1]
+    REQUIRE(result->GetDistances()[0] > 0.0f);
+    REQUIRE(result->GetDistances()[0] < 1.0f);
+    REQUIRE(result->GetDistances()[1] > 0.0f);
+    REQUIRE(result->GetDistances()[1] < 1.0f);
+}
+
+TEST_CASE("SINDI Proximity Serialize Round-Trip", "[ut][SINDI][Proximity]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+
+    SparseVector sv_docs[2];
+    uint32_t ids0[] = {10, 20, 30};
+    float vals0[] = {1.0f, 1.0f, 1.0f};
+    uint32_t seq0[] = {10, 20, 30};
+    sv_docs[0] = {3, ids0, vals0, 3, seq0};
+
+    uint32_t ids1[] = {10, 20, 30};
+    float vals1[] = {1.0f, 1.0f, 1.0f};
+    std::vector<uint32_t> seq1_vec(101, 99);
+    seq1_vec[0] = 10;
+    seq1_vec[50] = 20;
+    seq1_vec[100] = 30;
+    sv_docs[1] = {3, ids1, vals1, 101, seq1_vec.data()};
+
+    std::vector<int64_t> base_ids = {0, 1};
+    auto base = vsag::Dataset::Make();
+    base->NumElements(2)->SparseVectors(sv_docs)->Ids(base_ids.data())->Owner(false);
+
+    auto param_str = R"({
+        "use_reorder": false,
+        "use_quantization": false,
+        "doc_prune_ratio": 0.0,
+        "window_size": 10000,
+        "term_id_limit": 200,
+        "store_positions": true,
+        "max_positions_per_term": 64,
+        "avg_doc_term_length": 10
+    })";
+
+    vsag::JsonType pj = vsag::JsonType::Parse(param_str);
+    auto ip1 = std::make_shared<vsag::SINDIParameter>();
+    ip1->FromJson(pj);
+    auto index1 = std::make_unique<SINDI>(ip1, common_param);
+    index1->Build(base);
+
+    // Search before serialize
+    uint32_t q_ids[] = {10, 20, 30};
+    float q_vals[] = {1.0f, 1.0f, 1.0f};
+    SparseVector qsv = {3, q_ids, q_vals, 0, nullptr};
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->SparseVectors(&qsv)->Owner(false);
+
+    std::string sp = R"({
+        "sindi": {
+            "query_prune_ratio": 0.0,
+            "term_prune_ratio": 0.0,
+            "n_candidate": 10,
+            "proximity_weight": 0.5,
+            "proximity_boost_multiplicative": true
+        }
+    })";
+    auto result_before = index1->KnnSearch(query, 2, sp, nullptr);
+
+    // Serialize → Deserialize
+    auto ip2 = std::make_shared<vsag::SINDIParameter>();
+    ip2->FromJson(pj);
+    auto index2 = std::make_unique<SINDI>(ip2, common_param);
+    test_serializion(*index1, *index2);
+
+    // Search after deserialize — results should match
+    auto result_after = index2->KnnSearch(query, 2, sp, nullptr);
+    REQUIRE(result_after->GetDim() == result_before->GetDim());
+    for (int j = 0; j < result_after->GetDim(); ++j) {
+        REQUIRE(result_after->GetIds()[j] == result_before->GetIds()[j]);
+        REQUIRE(std::abs(result_after->GetDistances()[j] - result_before->GetDistances()[j]) <
+                1e-6f);
+    }
+}
+
+TEST_CASE("SINDI Proximity with Remap", "[ut][SINDI][Proximity]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+
+    // Use large term IDs to trigger remap
+    constexpr uint32_t offset = 2000000;
+
+    SparseVector sv_docs[2];
+    uint32_t ids0[] = {offset + 10, offset + 20, offset + 30};
+    float vals0[] = {1.0f, 1.0f, 1.0f};
+    uint32_t seq0[] = {offset + 10, offset + 20, offset + 30};
+    sv_docs[0] = {3, ids0, vals0, 3, seq0};
+
+    uint32_t ids1[] = {offset + 10, offset + 20, offset + 30};
+    float vals1[] = {1.0f, 1.0f, 1.0f};
+    std::vector<uint32_t> seq1_vec(101, offset + 99);
+    seq1_vec[0] = offset + 10;
+    seq1_vec[50] = offset + 20;
+    seq1_vec[100] = offset + 30;
+    sv_docs[1] = {3, ids1, vals1, 101, seq1_vec.data()};
+
+    std::vector<int64_t> base_ids = {0, 1};
+    auto base = vsag::Dataset::Make();
+    base->NumElements(2)->SparseVectors(sv_docs)->Ids(base_ids.data())->Owner(false);
+
+    auto param_str = R"({
+        "use_reorder": false,
+        "use_quantization": false,
+        "doc_prune_ratio": 0.0,
+        "window_size": 10000,
+        "term_id_limit": 100,
+        "remap_term_ids": true,
+        "store_positions": true,
+        "max_positions_per_term": 64,
+        "avg_doc_term_length": 10
+    })";
+
+    vsag::JsonType pj = vsag::JsonType::Parse(param_str);
+    auto ip = std::make_shared<vsag::SINDIParameter>();
+    ip->FromJson(pj);
+    auto index = std::make_unique<SINDI>(ip, common_param);
+    auto build_res = index->Build(base);
+    REQUIRE(build_res.size() == 0);
+
+    // Query with original (large) term IDs
+    uint32_t q_ids[] = {offset + 10, offset + 20, offset + 30};
+    float q_vals[] = {1.0f, 1.0f, 1.0f};
+    SparseVector qsv = {3, q_ids, q_vals, 0, nullptr};
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->SparseVectors(&qsv)->Owner(false);
+
+    std::string sp = R"({
+        "sindi": {
+            "query_prune_ratio": 0.0,
+            "term_prune_ratio": 0.0,
+            "n_candidate": 10,
+            "proximity_weight": 0.5,
+            "proximity_boost_multiplicative": true
+        }
+    })";
+    auto result = index->KnnSearch(query, 2, sp, nullptr);
+    REQUIRE(result->GetDim() == 2);
+    // Doc 0 (clustered) should still rank before Doc 1 (scattered) even with remap
+    REQUIRE(result->GetIds()[0] == 0);
+    REQUIRE(result->GetDistances()[0] < result->GetDistances()[1]);
+}
+
+TEST_CASE("SINDI Proximity with Reorder", "[ut][SINDI][Proximity]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+
+    SparseVector sv_docs[2];
+    uint32_t ids0[] = {10, 20, 30};
+    float vals0[] = {1.0f, 1.0f, 1.0f};
+    uint32_t seq0[] = {10, 20, 30};
+    sv_docs[0] = {3, ids0, vals0, 3, seq0};
+
+    uint32_t ids1[] = {10, 20, 30};
+    float vals1[] = {1.0f, 1.0f, 1.0f};
+    std::vector<uint32_t> seq1_vec(101, 99);
+    seq1_vec[0] = 10;
+    seq1_vec[50] = 20;
+    seq1_vec[100] = 30;
+    sv_docs[1] = {3, ids1, vals1, 101, seq1_vec.data()};
+
+    std::vector<int64_t> base_ids = {0, 1};
+    auto base = vsag::Dataset::Make();
+    base->NumElements(2)->SparseVectors(sv_docs)->Ids(base_ids.data())->Owner(false);
+
+    auto param_str = R"({
+        "use_reorder": true,
+        "use_quantization": false,
+        "doc_prune_ratio": 0.0,
+        "window_size": 10000,
+        "term_id_limit": 200,
+        "store_positions": true,
+        "max_positions_per_term": 64,
+        "avg_doc_term_length": 10
+    })";
+
+    vsag::JsonType pj = vsag::JsonType::Parse(param_str);
+    auto ip = std::make_shared<vsag::SINDIParameter>();
+    ip->FromJson(pj);
+    auto index = std::make_unique<SINDI>(ip, common_param);
+    index->Build(base);
+
+    uint32_t q_ids[] = {10, 20, 30};
+    float q_vals[] = {1.0f, 1.0f, 1.0f};
+    SparseVector qsv = {3, q_ids, q_vals, 0, nullptr};
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->SparseVectors(&qsv)->Owner(false);
+
+    // With reorder + proximity, both should work together
+    std::string sp = R"({
+        "sindi": {
+            "query_prune_ratio": 0.0,
+            "term_prune_ratio": 0.0,
+            "n_candidate": 10,
+            "proximity_weight": 0.5,
+            "proximity_boost_multiplicative": true
+        }
+    })";
+    auto result = index->KnnSearch(query, 2, sp, nullptr);
+    REQUIRE(result->GetDim() == 2);
+    // Doc 0 (clustered) should rank first
+    REQUIRE(result->GetIds()[0] == 0);
+}
+
+TEST_CASE("SINDI Proximity with DocPrune", "[ut][SINDI][Proximity]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+
+    // Doc with many terms, doc_prune will remove low-weight ones
+    SparseVector sv_docs[2];
+    uint32_t ids0[] = {10, 20, 30, 40, 50};
+    float vals0[] = {5.0f, 4.0f, 0.1f, 0.1f, 0.1f};  // 30,40,50 will be pruned
+    uint32_t seq0[] = {10, 20, 30, 40, 50};
+    sv_docs[0] = {5, ids0, vals0, 5, seq0};
+
+    uint32_t ids1[] = {10, 20, 30, 40, 50};
+    float vals1[] = {5.0f, 4.0f, 0.1f, 0.1f, 0.1f};
+    std::vector<uint32_t> seq1_vec(101, 99);
+    seq1_vec[0] = 10;
+    seq1_vec[50] = 20;
+    seq1_vec[60] = 30;
+    seq1_vec[70] = 40;
+    seq1_vec[80] = 50;
+    sv_docs[1] = {5, ids1, vals1, 101, seq1_vec.data()};
+
+    std::vector<int64_t> base_ids = {0, 1};
+    auto base = vsag::Dataset::Make();
+    base->NumElements(2)->SparseVectors(sv_docs)->Ids(base_ids.data())->Owner(false);
+
+    // doc_prune_ratio=0.5 will prune ~50% of term mass
+    auto param_str = R"({
+        "use_reorder": false,
+        "use_quantization": false,
+        "doc_prune_ratio": 0.5,
+        "window_size": 10000,
+        "term_id_limit": 200,
+        "store_positions": true,
+        "max_positions_per_term": 64,
+        "avg_doc_term_length": 10
+    })";
+
+    vsag::JsonType pj = vsag::JsonType::Parse(param_str);
+    auto ip = std::make_shared<vsag::SINDIParameter>();
+    ip->FromJson(pj);
+    auto index = std::make_unique<SINDI>(ip, common_param);
+    auto build_res = index->Build(base);
+    REQUIRE(build_res.size() == 0);
+
+    // Should not crash — pruned terms just have no positions
+    uint32_t q_ids[] = {10, 20};
+    float q_vals[] = {1.0f, 1.0f};
+    SparseVector qsv = {2, q_ids, q_vals, 0, nullptr};
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->SparseVectors(&qsv)->Owner(false);
+
+    std::string sp = R"({
+        "sindi": {
+            "query_prune_ratio": 0.0,
+            "term_prune_ratio": 0.0,
+            "n_candidate": 10,
+            "proximity_weight": 0.5
+        }
+    })";
+    auto result = index->KnnSearch(query, 2, sp, nullptr);
+    REQUIRE(result->GetDim() == 2);
+}
+
+TEST_CASE("SINDI Proximity with Filter", "[ut][SINDI][Proximity]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+
+    SparseVector sv_docs[3];
+    uint32_t ids0[] = {10, 20, 30};
+    float vals0[] = {1.0f, 1.0f, 1.0f};
+    uint32_t seq0[] = {10, 20, 30};
+    sv_docs[0] = {3, ids0, vals0, 3, seq0};  // id=0 even → pass filter
+
+    uint32_t ids1[] = {10, 20, 30};
+    float vals1[] = {1.0f, 1.0f, 1.0f};
+    uint32_t seq1[] = {10, 20, 30};
+    sv_docs[1] = {3, ids1, vals1, 3, seq1};  // id=1 odd → filtered out
+
+    uint32_t ids2[] = {10, 20, 30};
+    float vals2[] = {1.0f, 1.0f, 1.0f};
+    std::vector<uint32_t> seq2_vec(101, 99);
+    seq2_vec[0] = 10;
+    seq2_vec[50] = 20;
+    seq2_vec[100] = 30;
+    sv_docs[2] = {3, ids2, vals2, 101, seq2_vec.data()};  // id=2 even → pass filter
+
+    std::vector<int64_t> base_ids = {0, 1, 2};
+    auto base = vsag::Dataset::Make();
+    base->NumElements(3)->SparseVectors(sv_docs)->Ids(base_ids.data())->Owner(false);
+
+    auto param_str = R"({
+        "use_reorder": false,
+        "use_quantization": false,
+        "doc_prune_ratio": 0.0,
+        "window_size": 10000,
+        "term_id_limit": 200,
+        "store_positions": true,
+        "max_positions_per_term": 64,
+        "avg_doc_term_length": 10
+    })";
+
+    vsag::JsonType pj = vsag::JsonType::Parse(param_str);
+    auto ip = std::make_shared<vsag::SINDIParameter>();
+    ip->FromJson(pj);
+    auto index = std::make_unique<SINDI>(ip, common_param);
+    index->Build(base);
+
+    uint32_t q_ids[] = {10, 20, 30};
+    float q_vals[] = {1.0f, 1.0f, 1.0f};
+    SparseVector qsv = {3, q_ids, q_vals, 0, nullptr};
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->SparseVectors(&qsv)->Owner(false);
+
+    auto mock_filter = std::make_shared<MockFilter>();  // even IDs only
+
+    std::string sp = R"({
+        "sindi": {
+            "query_prune_ratio": 0.0,
+            "term_prune_ratio": 0.0,
+            "n_candidate": 10,
+            "proximity_weight": 0.5
+        }
+    })";
+    auto result = index->KnnSearch(query, 3, sp, mock_filter);
+    // Only doc 0 and doc 2 should be returned (even IDs)
+    REQUIRE(result->GetDim() == 2);
+    // Doc 0 (clustered, id=0) should rank before Doc 2 (scattered, id=2)
+    REQUIRE(result->GetIds()[0] == 0);
+    REQUIRE(result->GetIds()[1] == 2);
+}
+
+TEST_CASE("SINDI Proximity Multi-Window", "[ut][SINDI][Proximity]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+
+    // Use small window_size to force multiple windows
+    uint32_t num_base = 200;
+    uint32_t window_size = 10000;  // min allowed
+
+    std::vector<int64_t> ids(num_base);
+    std::vector<SparseVector> sv_base(num_base);
+    std::vector<std::vector<uint32_t>> all_ids(num_base);
+    std::vector<std::vector<float>> all_vals(num_base);
+    std::vector<std::vector<uint32_t>> all_seqs(num_base);
+
+    std::mt19937 rng(123);
+    for (uint32_t i = 0; i < num_base; ++i) {
+        ids[i] = i;
+        uint32_t n_terms = 5 + rng() % 10;
+        all_ids[i].resize(n_terms);
+        all_vals[i].resize(n_terms);
+        all_seqs[i].resize(20 + rng() % 30);
+        for (uint32_t j = 0; j < n_terms; ++j) {
+            all_ids[i][j] = rng() % 100;
+            all_vals[i][j] = 1.0f + static_cast<float>(rng() % 10);
+        }
+        // Sort and dedup ids
+        std::sort(all_ids[i].begin(), all_ids[i].end());
+        all_ids[i].erase(std::unique(all_ids[i].begin(), all_ids[i].end()), all_ids[i].end());
+        all_vals[i].resize(all_ids[i].size());
+        n_terms = all_ids[i].size();
+
+        for (uint32_t j = 0; j < all_seqs[i].size(); ++j) {
+            all_seqs[i][j] = rng() % 100;
+        }
+
+        sv_base[i].len_ = n_terms;
+        sv_base[i].ids_ = all_ids[i].data();
+        sv_base[i].vals_ = all_vals[i].data();
+        sv_base[i].token_seq_len_ = all_seqs[i].size();
+        sv_base[i].token_sequence_ = all_seqs[i].data();
+    }
+
+    auto base = vsag::Dataset::Make();
+    base->NumElements(num_base)->SparseVectors(sv_base.data())->Ids(ids.data())->Owner(false);
+
+    auto param_str = fmt::format(R"({{
+        "use_reorder": false,
+        "use_quantization": false,
+        "doc_prune_ratio": 0.0,
+        "window_size": {},
+        "term_id_limit": 200,
+        "store_positions": true,
+        "max_positions_per_term": 64,
+        "avg_doc_term_length": 10
+    }})",
+                                 window_size);
+
+    vsag::JsonType pj = vsag::JsonType::Parse(param_str);
+    auto ip = std::make_shared<vsag::SINDIParameter>();
+    ip->FromJson(pj);
+    auto index = std::make_unique<SINDI>(ip, common_param);
+    auto build_res = index->Build(base);
+    REQUIRE(build_res.size() == 0);
+
+    // Search with proximity — should not crash across windows
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->SparseVectors(sv_base.data())->Owner(false);
+
+    std::string sp = R"({
+        "sindi": {
+            "query_prune_ratio": 0.0,
+            "term_prune_ratio": 0.0,
+            "n_candidate": 20,
+            "proximity_weight": 0.3
+        }
+    })";
+    auto result = index->KnnSearch(query, 10, sp, nullptr);
+    REQUIRE(result->GetDim() > 0);
+
+    // Also verify proximity_weight=0 gives results
+    std::string sp_no = R"({
+        "sindi": {
+            "query_prune_ratio": 0.0,
+            "term_prune_ratio": 0.0,
+            "n_candidate": 20,
+            "proximity_weight": 0.0
+        }
+    })";
+    auto result_no = index->KnnSearch(query, 10, sp_no, nullptr);
+    REQUIRE(result_no->GetDim() > 0);
+}
+
+TEST_CASE("SINDI Proximity Ordered Integration", "[ut][SINDI][Proximity]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+
+    // Doc 0: terms in forward order [10, 20] at positions [0, 1]
+    // Doc 1: terms in reverse order [10, 20] but 20 at pos 0, 10 at pos 1
+    SparseVector sv_docs[2];
+    uint32_t ids0[] = {10, 20};
+    float vals0[] = {1.0f, 1.0f};
+    uint32_t seq0[] = {10, 20};  // forward: 10@0, 20@1
+    sv_docs[0] = {2, ids0, vals0, 2, seq0};
+
+    uint32_t ids1[] = {10, 20};
+    float vals1[] = {1.0f, 1.0f};
+    uint32_t seq1[] = {20, 10};  // reverse: 20@0, 10@1
+    sv_docs[1] = {2, ids1, vals1, 2, seq1};
+
+    std::vector<int64_t> base_ids = {0, 1};
+    auto base = vsag::Dataset::Make();
+    base->NumElements(2)->SparseVectors(sv_docs)->Ids(base_ids.data())->Owner(false);
+
+    auto param_str = R"({
+        "use_reorder": false,
+        "use_quantization": false,
+        "doc_prune_ratio": 0.0,
+        "window_size": 10000,
+        "term_id_limit": 200,
+        "store_positions": true,
+        "max_positions_per_term": 64,
+        "avg_doc_term_length": 10
+    })";
+
+    vsag::JsonType pj = vsag::JsonType::Parse(param_str);
+    auto ip = std::make_shared<vsag::SINDIParameter>();
+    ip->FromJson(pj);
+    auto index = std::make_unique<SINDI>(ip, common_param);
+    index->Build(base);
+
+    // Query [10, 20] — ordered mode: 10 should come before 20
+    uint32_t q_ids[] = {10, 20};
+    float q_vals[] = {1.0f, 1.0f};
+    SparseVector qsv = {2, q_ids, q_vals, 0, nullptr};
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->SparseVectors(&qsv)->Owner(false);
+
+    // Unordered: both docs have same dist=1, same boost
+    std::string sp_unordered = R"({
+        "sindi": {
+            "query_prune_ratio": 0.0,
+            "term_prune_ratio": 0.0,
+            "n_candidate": 10,
+            "proximity_weight": 0.5,
+            "proximity_ordered": false
+        }
+    })";
+    auto result_unordered = index->KnnSearch(query, 2, sp_unordered, nullptr);
+    REQUIRE(result_unordered->GetDistances()[0] == result_unordered->GetDistances()[1]);
+
+    // Ordered: Doc 0 is forward (dist=1), Doc 1 is reverse (dist=1*2=2)
+    std::string sp_ordered = R"({
+        "sindi": {
+            "query_prune_ratio": 0.0,
+            "term_prune_ratio": 0.0,
+            "n_candidate": 10,
+            "proximity_weight": 0.5,
+            "proximity_ordered": true
+        }
+    })";
+    auto result_ordered = index->KnnSearch(query, 2, sp_ordered, nullptr);
+    // Doc 0 should rank first in ordered mode
+    REQUIRE(result_ordered->GetIds()[0] == 0);
+    REQUIRE(result_ordered->GetDistances()[0] < result_ordered->GetDistances()[1]);
+}

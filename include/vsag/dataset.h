@@ -33,6 +33,12 @@ struct SparseVector {
                                // (The ids_ will be sorted in ascending order inside the index.
                                // it is recommended to sort them before putting them into VSAG.)
     float* vals_ = nullptr;    // contains vals with size of len_
+
+    // Optional: raw token sequence for position-aware proximity scoring.
+    // If token_sequence_ is non-null, SINDI extracts per-term positions from this sequence
+    // and stores them alongside the inverted posting lists.
+    uint32_t token_seq_len_ = 0;          // length of the raw token sequence
+    uint32_t* token_sequence_ = nullptr;  // the original tokenized document as a term_id array
 };
 
 /**

@@ -50,6 +50,10 @@ public:
 
     bool remap_term_ids{false};
 
+    bool store_positions{false};
+
+    uint32_t max_positions_per_term{64};
+
     // temporal parameter
     bool deserialize_without_footer{false};
     bool deserialize_without_buffer{false};
@@ -76,6 +80,12 @@ public:
     // data cell
     float query_prune_ratio{0};
     float term_prune_ratio{0};
+
+    // proximity scoring
+    uint32_t proximity_candidates{10000};
+    float proximity_weight{0.0f};
+    bool proximity_ordered{false};
+    bool proximity_boost_multiplicative{true};  // true=multiplicative, false=additive
 };
 
 }  // namespace vsag

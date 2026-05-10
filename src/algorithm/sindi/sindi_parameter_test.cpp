@@ -47,6 +47,8 @@ struct SINDIDefaultParam {
     int term_id_limit = 10000;
     int avg_doc_term_length = 100;
     bool remap_term_ids = false;
+    bool store_positions = false;
+    int max_positions_per_term = 64;
 };
 
 std::string
@@ -59,6 +61,8 @@ generate_sindi_param(const SINDIDefaultParam& param) {
     json[SPARSE_TERM_ID_LIMIT].SetInt(param.term_id_limit);
     json[SPARSE_AVG_DOC_TERM_LENGTH].SetInt(param.avg_doc_term_length);
     json[SPARSE_REMAP_TERM_IDS].SetBool(param.remap_term_ids);
+    json[SPARSE_STORE_POSITIONS].SetBool(param.store_positions);
+    json[SPARSE_MAX_POSITIONS_PER_TERM].SetInt(param.max_positions_per_term);
     return json.Dump();
 }
 
@@ -75,6 +79,9 @@ TEST_CASE("SINDI Index Parameters Test", "[ut][SINDIParameter]") {
     REQUIRE(param->term_id_limit == default_param.term_id_limit);
     REQUIRE(param->avg_doc_term_length == default_param.avg_doc_term_length);
     REQUIRE(param->remap_term_ids == default_param.remap_term_ids);
+    REQUIRE(param->store_positions == default_param.store_positions);
+    REQUIRE(param->max_positions_per_term ==
+            static_cast<uint32_t>(default_param.max_positions_per_term));
 
     vsag::ParameterTest::TestToJson(param);
 
@@ -83,12 +90,20 @@ TEST_CASE("SINDI Index Parameters Test", "[ut][SINDIParameter]") {
             "query_prune_ratio": 0.2,
             "n_candidate": 20,
             "term_prune_ratio": 0.1,
-            "use_term_lists_heap_insert": false
+            "use_term_lists_heap_insert": false,
+            "proximity_candidates": 5000,
+            "proximity_weight": 0.3,
+            "proximity_ordered": true,
+            "proximity_boost_multiplicative": false
         }
     })";
     auto search_param = std::make_shared<vsag::SINDISearchParameter>();
     vsag::JsonType search_param_json = vsag::JsonType::Parse(search_param_str);
     search_param->FromJson(search_param_json);
+    REQUIRE(search_param->proximity_candidates == 5000);
+    REQUIRE(std::abs(search_param->proximity_weight - 0.3f) < 1e-6f);
+    REQUIRE(search_param->proximity_ordered == true);
+    REQUIRE(search_param->proximity_boost_multiplicative == false);
     vsag::ParameterTest::TestToJson(search_param);
 }
 
@@ -101,6 +116,9 @@ TEST_CASE("SINDI Index Parameters Compatibility Test", "[ut][SINDIParameter]") {
     TEST_COMPATIBILITY_CASE(
         "avg_doc_term_length compatibility", avg_doc_term_length, 100, 200, false);
     TEST_COMPATIBILITY_CASE("remap_term_ids compatibility", remap_term_ids, false, true, false);
+    TEST_COMPATIBILITY_CASE("store_positions compatibility", store_positions, false, true, false);
+    TEST_COMPATIBILITY_CASE(
+        "max_positions_per_term compatibility", max_positions_per_term, 64, 32, false);
 }
 
 TEST_CASE("SINDI remap_term_ids Parameter", "[ut][SINDIParameter]") {
@@ -140,5 +158,41 @@ TEST_CASE("SINDI remap_term_ids Parameter", "[ut][SINDIParameter]") {
         auto param2 = std::make_shared<vsag::SINDIParameter>();
         param2->FromJson(json2);
         REQUIRE(param2->remap_term_ids == true);
+    }
+}
+
+TEST_CASE("SINDI store_positions Parameter", "[ut][SINDIParameter]") {
+    SECTION("default is false when not specified") {
+        auto param_str = R"({"term_id_limit": 1000, "window_size": 50000})";
+        auto param = std::make_shared<vsag::SINDIParameter>();
+        param->FromJson(vsag::JsonType::Parse(param_str));
+        REQUIRE(param->store_positions == false);
+        REQUIRE(param->max_positions_per_term == 64);
+    }
+
+    SECTION("parse store_positions true") {
+        SINDIDefaultParam dp;
+        dp.store_positions = true;
+        dp.max_positions_per_term = 32;
+        auto param_str = generate_sindi_param(dp);
+        auto param = std::make_shared<vsag::SINDIParameter>();
+        param->FromString(param_str);
+        REQUIRE(param->store_positions == true);
+        REQUIRE(param->max_positions_per_term == 32);
+    }
+
+    SECTION("round-trip: FromJson -> ToJson -> FromJson") {
+        SINDIDefaultParam dp;
+        dp.store_positions = true;
+        dp.max_positions_per_term = 128;
+        auto param_str = generate_sindi_param(dp);
+        auto param1 = std::make_shared<vsag::SINDIParameter>();
+        param1->FromString(param_str);
+
+        auto json2 = param1->ToJson();
+        auto param2 = std::make_shared<vsag::SINDIParameter>();
+        param2->FromJson(json2);
+        REQUIRE(param2->store_positions == true);
+        REQUIRE(param2->max_positions_per_term == 128);
     }
 }
