@@ -494,6 +494,18 @@ SQ8UniformComputeCodesIP(const uint8_t* RESTRICT codes1,
     return static_cast<float>(result);
 }
 
+void
+SQ8UniformComputeCodesIPBatch(const uint8_t* RESTRICT query,
+                              const uint8_t* RESTRICT codes,
+                              uint64_t dim,
+                              uint64_t n_codes,
+                              uint64_t code_stride,
+                              float* RESTRICT out) {
+    for (uint64_t i = 0; i < n_codes; ++i) {
+        out[i] = generic::SQ8UniformComputeCodesIP(query, codes + i * code_stride, dim);
+    }
+}
+
 float
 RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, float inv_sqrt_d) {
     if (dim == 0) {

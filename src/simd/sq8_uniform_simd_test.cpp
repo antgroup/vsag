@@ -106,3 +106,113 @@ TEST_CASE("SQ8 Uniform SIMD Compute Benchmark", "[ut][simd][!benchmark]") {
         BENCHMARK_SIMD_COMPUTE(sve, SQ8UniformComputeCodesIP);
     }
 }
+
+// ---------------- batch IP correctness + benchmark ----------------
+
+namespace {
+
+// Compute the ground-truth batch result using generic per-pair IP.
+inline void
+GenericBatch(const uint8_t* query,
+             const uint8_t* codes,
+             uint64_t dim,
+             uint64_t n_codes,
+             uint64_t code_stride,
+             float* out) {
+    for (uint64_t i = 0; i < n_codes; ++i) {
+        out[i] = generic::SQ8UniformComputeCodesIP(query, codes + i * code_stride, dim);
+    }
+}
+
+}  // namespace
+
+TEST_CASE("SQ8 Uniform SIMD Compute Codes Batch", "[ut][simd]") {
+    // Cover dims that are AMX-friendly (multiples of 64), AVX-512-aligned
+    // (multiples of 32), and odd ones to exercise the tail handling on
+    // the AMX path.
+    const std::vector<int64_t> dims = {32, 48, 64, 96, 128, 192, 200, 256, 384, 512};
+    // n_codes mix: smaller than the AMX 16-block, exactly one block,
+    // multiple blocks plus a small remainder.
+    const std::vector<int64_t> ns = {1, 7, 15, 16, 17, 33, 100};
+    // Exercise tightly-packed (stride=dim) and strided (stride=dim+pad).
+    const std::vector<int64_t> pads = {0, 8};
+
+    for (auto dim : dims) {
+        for (auto n : ns) {
+            for (auto pad : pads) {
+                const uint64_t code_stride = dim + pad;
+                auto query = fixtures::generate_uint8_codes(1, dim, 31);
+                auto codes = fixtures::generate_uint8_codes(n, code_stride, 17);
+                std::vector<float> gt(n), got(n);
+                GenericBatch(query.data(), codes.data(), dim, n, code_stride, gt.data());
+
+                // Always exercise the dispatch entry point.
+                std::fill(got.begin(), got.end(), 0.F);
+                SQ8UniformComputeCodesIPBatch(
+                    query.data(), codes.data(), dim, n, code_stride, got.data());
+                for (int64_t i = 0; i < n; ++i) {
+                    REQUIRE(fixtures::dist_t(gt[i]) == fixtures::dist_t(got[i]));
+                }
+
+                // And every available ISA's per-namespace implementation.
+#define TEST_BATCH_NS(NS, Cond)                                           \
+    if (Cond) {                                                           \
+        std::fill(got.begin(), got.end(), 0.F);                           \
+        NS::SQ8UniformComputeCodesIPBatch(                                \
+            query.data(), codes.data(), dim, n, code_stride, got.data()); \
+        for (int64_t i = 0; i < n; ++i) {                                 \
+            REQUIRE(fixtures::dist_t(gt[i]) == fixtures::dist_t(got[i])); \
+        }                                                                 \
+    }
+                TEST_BATCH_NS(generic, true);
+                TEST_BATCH_NS(sse, SimdStatus::SupportSSE());
+                TEST_BATCH_NS(avx, SimdStatus::SupportAVX());
+                TEST_BATCH_NS(avx2, SimdStatus::SupportAVX2());
+                TEST_BATCH_NS(avx512, SimdStatus::SupportAVX512());
+#if defined(ENABLE_AMX)
+                TEST_BATCH_NS(amx, SimdStatus::SupportAMX());
+#endif
+                TEST_BATCH_NS(neon, SimdStatus::SupportNEON());
+                TEST_BATCH_NS(sve, SimdStatus::SupportSVE());
+#undef TEST_BATCH_NS
+            }
+        }
+    }
+}
+
+#define BENCHMARK_SIMD_BATCH(Simd)                                                      \
+    BENCHMARK_ADVANCED(#Simd "SQ8UniformComputeCodesIPBatch") {                         \
+        for (int q = 0; q < n_queries; ++q) {                                           \
+            Simd::SQ8UniformComputeCodesIPBatch(                                        \
+                queries.data() + q * dim, codes.data(), dim, n_codes, dim, out.data()); \
+        }                                                                               \
+        return;                                                                         \
+    }
+
+TEST_CASE("SQ8 Uniform SIMD Compute Codes Batch Benchmark", "[ut][simd][!benchmark]") {
+    const int64_t dim = 256;
+    const int64_t n_queries = 100;
+    const int64_t n_codes = 1000;
+
+    auto queries = fixtures::generate_uint8_codes(n_queries, dim, 91);
+    auto codes = fixtures::generate_uint8_codes(n_codes, dim, 92);
+    std::vector<float> out(n_codes);
+
+    BENCHMARK_SIMD_BATCH(generic);
+    if (SimdStatus::SupportSSE())
+        BENCHMARK_SIMD_BATCH(sse);
+    if (SimdStatus::SupportAVX())
+        BENCHMARK_SIMD_BATCH(avx);
+    if (SimdStatus::SupportAVX2())
+        BENCHMARK_SIMD_BATCH(avx2);
+    if (SimdStatus::SupportAVX512())
+        BENCHMARK_SIMD_BATCH(avx512);
+#if defined(ENABLE_AMX)
+    if (SimdStatus::SupportAMX())
+        BENCHMARK_SIMD_BATCH(amx);
+#endif
+    if (SimdStatus::SupportNEON())
+        BENCHMARK_SIMD_BATCH(neon);
+    if (SimdStatus::SupportSVE())
+        BENCHMARK_SIMD_BATCH(sve);
+}

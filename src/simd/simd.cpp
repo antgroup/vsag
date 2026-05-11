@@ -89,6 +89,16 @@ setup_simd() {
     ret.dist_support_sve = true;
 #endif
 
+#if defined(ENABLE_AMX)
+    // Runtime AMX support requires both the CPUID feature bits and a
+    // successful XFEATURE_XTILEDATA permission grant from the kernel.
+    // SimdStatus::SupportAMX() encapsulates both checks.
+    if (SimdStatus::SupportAMX()) {
+        ret.runtime_has_amx = true;
+    }
+    ret.dist_support_amx = true;
+#endif
+
     return ret;
 }
 

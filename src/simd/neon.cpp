@@ -1842,6 +1842,18 @@ SQ8UniformComputeCodesIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t 
 #endif
 }
 
+void
+SQ8UniformComputeCodesIPBatch(const uint8_t* RESTRICT query,
+                              const uint8_t* RESTRICT codes,
+                              uint64_t dim,
+                              uint64_t n_codes,
+                              uint64_t code_stride,
+                              float* RESTRICT out) {
+    for (uint64_t i = 0; i < n_codes; ++i) {
+        out[i] = neon::SQ8UniformComputeCodesIP(query, codes + i * code_stride, dim);
+    }
+}
+
 #if defined(ENABLE_NEON)
 __inline void __attribute__((__always_inline__)) extract_12_bits_to_mask(const uint8_t* bits,
                                                                          uint64_t bit_offset,

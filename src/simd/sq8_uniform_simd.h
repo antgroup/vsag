@@ -21,18 +21,26 @@
 
 namespace vsag {
 
-#define DECLARE_SQ8_UNIFORM_FUNCTIONS(ns)                    \
-    namespace ns {                                           \
-    float                                                    \
-    SQ8UniformComputeCodesIP(const uint8_t* RESTRICT codes1, \
-                             const uint8_t* RESTRICT codes2, \
-                             uint64_t dim);                  \
+#define DECLARE_SQ8_UNIFORM_FUNCTIONS(ns)                        \
+    namespace ns {                                               \
+    float                                                        \
+    SQ8UniformComputeCodesIP(const uint8_t* RESTRICT codes1,     \
+                             const uint8_t* RESTRICT codes2,     \
+                             uint64_t dim);                      \
+    void                                                         \
+    SQ8UniformComputeCodesIPBatch(const uint8_t* RESTRICT query, \
+                                  const uint8_t* RESTRICT codes, \
+                                  uint64_t dim,                  \
+                                  uint64_t n_codes,              \
+                                  uint64_t code_stride,          \
+                                  float* RESTRICT out);          \
     }  // namespace ns
 DECLARE_SQ8_UNIFORM_FUNCTIONS(generic)
 DECLARE_SQ8_UNIFORM_FUNCTIONS(sse)
 DECLARE_SQ8_UNIFORM_FUNCTIONS(avx)
 DECLARE_SQ8_UNIFORM_FUNCTIONS(avx2)
 DECLARE_SQ8_UNIFORM_FUNCTIONS(avx512)
+DECLARE_SQ8_UNIFORM_FUNCTIONS(amx)
 DECLARE_SQ8_UNIFORM_FUNCTIONS(neon)
 DECLARE_SQ8_UNIFORM_FUNCTIONS(sve)
 
@@ -42,4 +50,19 @@ using SQ8UniformComputeCodesType = float (*)(const uint8_t* RESTRICT codes1,
                                              const uint8_t* RESTRICT codes2,
                                              uint64_t dim);
 extern SQ8UniformComputeCodesType SQ8UniformComputeCodesIP;
+
+// Batch inner-product: one query against n_codes SQ8-uniform codes
+// of `dim` bytes each, with row stride `code_stride` (>= dim).
+// `code_stride` lets callers pass codes that have trailing per-row
+// metadata bytes (e.g. norm/sum) without copying.  Use code_stride==dim
+// for tightly-packed input.  Implementations may require dim % some_factor
+// == 0 only when it would change semantics; the generic implementation
+// handles every dim.
+using SQ8UniformComputeCodesIPBatchType = void (*)(const uint8_t* RESTRICT query,
+                                                   const uint8_t* RESTRICT codes,
+                                                   uint64_t dim,
+                                                   uint64_t n_codes,
+                                                   uint64_t code_stride,
+                                                   float* RESTRICT out);
+extern SQ8UniformComputeCodesIPBatchType SQ8UniformComputeCodesIPBatch;
 }  // namespace vsag
