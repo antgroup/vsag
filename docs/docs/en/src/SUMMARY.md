@@ -35,6 +35,7 @@
 - [Graph Enhancement](advanced/enhance_graph.md)
 - [Hybrid Memory-Disk Index](advanced/hybrid_index.md)
 - [Extra Info](advanced/extra_info.md)
+- [Index Lifecycle Management](advanced/index_lifecycle.md)
 
 # Performance and Tuning
 
