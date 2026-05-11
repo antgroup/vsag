@@ -62,6 +62,9 @@ public:
     SetJson(const JsonWrapper& json);
 
     void
+    AppendJson(const JsonWrapper& json);
+
+    void
     SetInt(uint64_t value);
 
     void
