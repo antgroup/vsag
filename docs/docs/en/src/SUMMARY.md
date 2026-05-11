@@ -42,6 +42,7 @@
 - [Optimizer (Tune)](advanced/optimizer.md)
 - [Benchmarks](resources/performance.md)
 - [Evaluation Tool](resources/eval.md)
+- [HDF5 Dataset Format](resources/dataset_format.md)
 - [Index Analysis Tool](resources/analyze_index.md)
 
 # Resources
