@@ -52,6 +52,7 @@ public:
                                  const IndexCommonParam& common_param);
 
     friend class HGraphAnalyzer;
+    friend class HGraphSerializer;
 
 public:
     HGraph(const HGraphParameterPtr& param, const IndexCommonParam& common_param);
@@ -286,25 +287,7 @@ public:
                      QueryContext* ctx) const;
 
 private:
-    // since v0.15
-    JsonType
-    serialize_basic_info() const;
 
-    void
-    deserialize_basic_info(const JsonType& jsonify_basic_info);
-
-    void
-    serialize_label_info(StreamWriter& writer) const;
-
-    void
-    deserialize_label_info(StreamReader& reader) const;
-
-    // used in version [0.12.*, 0.14.*]
-    void
-    serialize_basic_info_v0_14(StreamWriter& writer) const;
-
-    void
-    deserialize_basic_info_v0_14(StreamReader& reader);
 
     uint32_t
     force_remove_one(int64_t label);
