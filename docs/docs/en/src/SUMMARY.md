@@ -28,6 +28,7 @@
 
 # Advanced Features
 
+- [Build and Train](advanced/build_and_train.md)
 - [Range Search](advanced/range_search.md)
 - [Filtered Search](advanced/filtered_search.md)
 - [Attribute Filter (Hybrid Search)](advanced/attribute_filter.md)
