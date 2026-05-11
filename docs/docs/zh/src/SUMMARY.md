@@ -42,6 +42,7 @@
 - [优化器](advanced/optimizer.md)
 - [标准环境性能参考](resources/performance.md)
 - [性能评估工具](resources/eval.md)
+- [HDF5 数据集格式](resources/dataset_format.md)
 - [索引分析工具](resources/analyze_index.md)
 
 # 资源
