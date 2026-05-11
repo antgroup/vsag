@@ -81,6 +81,119 @@ and `docs/hgraph.md` in the repository.
 | `base_file_path` / `precise_file_path` | string | — | File path; required when the corresponding `*_io_type` is disk-backed (`buffer_io`, `async_io`, `mmap_io`) |
 | `hgraph_init_capacity` | int | `100` | Initial capacity hint (doesn't cap the final size) |
 
+## Supported input data types
+
+The `dtype` field in the top-level build config selects how `Dataset` interprets the raw vector
+bytes. HGraph supports four input types; the `dtype` value, the corresponding `Dataset` setter,
+and the example demonstrating each combination are summarised below.
+
+| `dtype`     | Element type | `Dataset` setter         | Example                                                                                                |
+|-------------|--------------|--------------------------|--------------------------------------------------------------------------------------------------------|
+| `float32`   | `float`      | `Float32Vectors`         | [`103_index_hgraph.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/103_index_hgraph.cpp) |
+| `int8`      | `int8_t`     | `Int8Vectors`            | [`316_index_int8_hgraph.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/316_index_int8_hgraph.cpp) |
+| `float16`   | `uint16_t` (IEEE 754 binary16, bit-pattern packed) | `Float16Vectors` | [`321_index_fp16_hgraph.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/321_index_fp16_hgraph.cpp) |
+| `bfloat16`  | `uint16_t` (Brain Float, bit-pattern packed) | `Float16Vectors` (shared with FP16) | adapt `321_index_fp16_hgraph.cpp` per the notes below                                                  |
+
+The `dim` value is the logical vector dimensionality (number of elements), not the byte length, so
+the same `dim` is reused across all four data types.
+
+### `int8` input
+
+Quantized `int8` vectors are passed directly via `Int8Vectors`:
+
+```cpp
+std::vector<int8_t> data(num_vectors * dim);  // populate with int8 elements
+auto base = vsag::Dataset::Make();
+base->NumElements(num_vectors)->Dim(dim)->Ids(ids)
+    ->Int8Vectors(data.data())->Owner(false);
+```
+
+Build config (note `dtype: "int8"`):
+
+```json
+{
+    "dtype": "int8",
+    "metric_type": "l2",
+    "dim": 128,
+    "index_param": {
+        "base_quantization_type": "pq",
+        "max_degree": 26,
+        "ef_construction": 100,
+        "alpha": 1.2
+    }
+}
+```
+
+Queries use the same `Int8Vectors` setter and the same `dtype`. A runnable example is
+[`316_index_int8_hgraph.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/316_index_int8_hgraph.cpp).
+
+### `float16` / `bfloat16` input
+
+FP16 and BF16 vectors are both passed through `Float16Vectors`, which takes a `const uint16_t*`
+that points at the 16-bit storage of each element. Conversion from `float` is up to the caller;
+inside the VSAG source tree there are convenience helpers (`vsag::generic::FloatToFP16` in
+[`src/simd/fp16_simd.h`](https://github.com/antgroup/vsag/blob/main/src/simd/fp16_simd.h)
+and `vsag::generic::FloatToBF16` in
+[`src/simd/bf16_simd.h`](https://github.com/antgroup/vsag/blob/main/src/simd/bf16_simd.h)),
+but these are **internal headers** that are not installed under `include/vsag/`. Application code
+linking against an installed VSAG library should provide its own conversion (for example, copy
+the small helper, use `_cvtss_sh` / F16C intrinsics, or any FP16 library of choice). The snippet
+below uses the in-tree helper for brevity:
+
+```cpp
+// The fp16/bf16 helpers below live in src/simd/ and are not part of the public
+// installed headers. Replace with your own float -> uint16_t conversion when
+// linking against an installed VSAG.
+#include "simd/fp16_simd.h"  // FloatToFP16 (for BF16, use simd/bf16_simd.h / FloatToBF16)
+
+std::vector<uint16_t> data(num_vectors * dim);
+for (size_t i = 0; i < data.size(); ++i) {
+    data[i] = vsag::generic::FloatToFP16(some_float_source());
+}
+auto base = vsag::Dataset::Make();
+base->NumElements(num_vectors)->Dim(dim)->Ids(ids)
+    ->Float16Vectors(data.data())->Owner(false);
+```
+
+Build config:
+
+```json
+{
+    "dtype": "float16",
+    "metric_type": "l2",
+    "dim": 128,
+    "index_param": {
+        "base_quantization_type": "pq",
+        "max_degree": 26,
+        "ef_construction": 100,
+        "alpha": 1.2
+    }
+}
+```
+
+To switch the example to BF16, change `dtype` to `"bfloat16"` and replace `FloatToFP16` with
+`FloatToBF16`; the `Float16Vectors` setter and the rest of the build/search flow stay the same.
+A runnable FP16 example is
+[`321_index_fp16_hgraph.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/321_index_fp16_hgraph.cpp).
+
+> **Note.** The header comment at the top of `321_index_fp16_hgraph.cpp` currently mentions a
+> `BFloat16Vectors()` setter, but no such setter exists — `Float16Vectors` is the single entry
+> point for both FP16 and BF16. Use it for both `dtype: "float16"` and `dtype: "bfloat16"`.
+
+### Choosing an input type
+
+- Pick `float32` when accuracy matters most and memory budget allows; this is the default.
+- Pick `float16` / `bfloat16` to halve the input storage. FP16 has a smaller exponent range; BF16
+  has fewer mantissa bits but the same exponent range as FP32, which is often preferable for
+  embedding-style vectors.
+- Pick `int8` when your data is already integer-quantised (e.g. produced by an upstream quantiser
+  or by a model with int8 outputs). With `int8` input you typically still combine a coarse
+  quantizer such as `pq` / `sq8` for the in-index storage.
+
+The chosen `dtype` only constrains the **input** representation. The on-disk / in-memory storage is
+still controlled by `base_quantization_type` (and optionally `precise_quantization_type` when
+`use_reorder: true`), so e.g. `dtype: "float16"` + `base_quantization_type: "sq8"` is valid.
+
 ## Search parameters
 
 Search-time parameters live under the `hgraph` sub-object:
