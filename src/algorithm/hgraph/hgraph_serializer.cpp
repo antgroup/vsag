@@ -15,7 +15,6 @@
 #include "hgraph_serializer.h"
 
 #include "hgraph.h"
-
 #include "storage/serialization.h"
 
 namespace vsag {
@@ -258,7 +257,8 @@ HGraphSerializer::Deserialize(HGraph& graph, StreamReader& reader) {
         auto new_size = graph.max_capacity_.load();
         graph.neighbors_mutex_->Resize(new_size);
 
-        graph.pool_ = std::make_shared<VisitedListPool>(1, graph.allocator_, new_size, graph.allocator_);
+        graph.pool_ =
+            std::make_shared<VisitedListPool>(1, graph.allocator_, new_size, graph.allocator_);
 
         if (graph.extra_info_size_ > 0 && graph.extra_infos_ != nullptr) {
             graph.extra_infos_->Deserialize(reader);
@@ -297,7 +297,8 @@ HGraphSerializer::Deserialize(HGraph& graph, StreamReader& reader) {
         auto new_size = graph.max_capacity_.load();
         graph.neighbors_mutex_->Resize(new_size);
 
-        graph.pool_ = std::make_shared<VisitedListPool>(1, graph.allocator_, new_size, graph.allocator_);
+        graph.pool_ =
+            std::make_shared<VisitedListPool>(1, graph.allocator_, new_size, graph.allocator_);
 
         if (graph.extra_info_size_ > 0 && graph.extra_infos_ != nullptr) {
             graph.extra_infos_->Deserialize(buffer_reader);

@@ -19,17 +19,16 @@
 
 #include "basic_types.h"
 #include "common.h"
-#include "vsag/index.h"
 #include "datacell/flatten_interface.h"
 #include "datacell/graph_interface.h"
 #include "vsag/attribute.h"
+#include "vsag/index.h"
 
 namespace vsag {
 
 class HGraph;
 class Dataset;
 using DatasetPtr = std::shared_ptr<Dataset>;
-
 
 class HGraphModifier {
 public:
@@ -40,7 +39,10 @@ public:
     UpdateAttribute(HGraph& graph, int64_t id, const AttributeSet& new_attrs);
 
     static void
-    UpdateAttribute(HGraph& graph, int64_t id, const AttributeSet& new_attrs, const AttributeSet& origin_attrs);
+    UpdateAttribute(HGraph& graph,
+                    int64_t id,
+                    const AttributeSet& new_attrs,
+                    const AttributeSet& origin_attrs);
 
     static bool
     UpdateVector(HGraph& graph, int64_t id, const DatasetPtr& new_base, bool force_update);
@@ -60,9 +62,9 @@ private:
 
     static void
     GraphForceRemoveOne(HGraph& graph,
-                         const InnerIdType& inner_id,
-                         const FlattenInterfacePtr& flatten,
-                         const GraphInterfacePtr& graph_ptr);
+                        const InnerIdType& inner_id,
+                        const FlattenInterfacePtr& flatten,
+                        const GraphInterfacePtr& graph_ptr);
 
     static void
     MoveId(HGraph& graph, InnerIdType from, InnerIdType to);

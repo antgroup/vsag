@@ -14,11 +14,10 @@
 
 #include "hgraph_builder.h"
 
-#include "hgraph.h"
-
 #include "dataset_impl.h"
-#include "impl/odescent/odescent_graph_builder.h"
+#include "hgraph.h"
 #include "impl/heap/standard_heap.h"
+#include "impl/odescent/odescent_graph_builder.h"
 #include "impl/pruning_strategy.h"
 #include "impl/searcher/basic_searcher.h"
 #include "storage/stream_reader.h"
@@ -31,8 +30,8 @@ void
 HGraphBuilder::Train(HGraph& graph, const DatasetPtr& base) {
     int64_t total_elements = base->GetNumElements();
     int64_t dim = base->GetDim();
-    DatasetPtr train_data =
-        vsag::sample_train_data(base, total_elements, dim, graph.train_sample_count_, graph.allocator_);
+    DatasetPtr train_data = vsag::sample_train_data(
+        base, total_elements, dim, graph.train_sample_count_, graph.allocator_);
 
     const auto* data_ptr = graph.get_data(train_data);
     graph.basic_flatten_codes_->Train(data_ptr, train_data->GetNumElements());
@@ -99,8 +98,9 @@ HGraphBuilder::BuildByODescent(HGraph& graph, const DatasetPtr& data) {
             }
         }
     }
-    auto build_data = (graph.use_reorder_ and not graph.build_by_base_) ? graph.high_precise_codes_
-                                                            : graph.basic_flatten_codes_;
+    auto build_data = (graph.use_reorder_ and not graph.build_by_base_)
+                          ? graph.high_precise_codes_
+                          : graph.basic_flatten_codes_;
     {
         graph.odescent_param_->max_degree = graph.bottom_graph_->MaximumDegree();
         ODescent odescent_builder(
@@ -133,7 +133,8 @@ HGraphBuilder::AddOnePoint(HGraph& graph, const void* data, int level, InnerIdTy
         }
     }
     std::unique_lock add_lock(graph.add_mutex_);
-    if (level >= static_cast<int>(graph.route_graphs_.size()) || graph.bottom_graph_->TotalCount() == 0) {
+    if (level >= static_cast<int>(graph.route_graphs_.size()) ||
+        graph.bottom_graph_->TotalCount() == 0) {
         std::scoped_lock<std::shared_mutex> wlock(graph.global_mutex_);
         for (auto j = static_cast<int>(graph.route_graphs_.size()); j <= level; ++j) {
             graph.route_graphs_.emplace_back(graph.generate_one_route_graph());
@@ -179,15 +180,12 @@ HGraphBuilder::GraphAddOne(HGraph& graph, const void* data, int level, InnerIdTy
     }
 
     if (graph.bottom_graph_->TotalCount() != 0) {
-        result = graph.search_one_graph(data,
-                                  graph.bottom_graph_,
-                                  flatten_codes,
-                                  param,
-                                  (VisitedListPtr) nullptr,
-                                  nullptr);
+        result = graph.search_one_graph(
+            data, graph.bottom_graph_, flatten_codes, param, (VisitedListPtr) nullptr, nullptr);
         if (graph.support_duplicate_ && param.duplicate_id >= 0) {
             std::unique_lock lock(graph.label_lookup_mutex_);
-            graph.bottom_graph_->SetDuplicateId(static_cast<InnerIdType>(param.duplicate_id), inner_id);
+            graph.bottom_graph_->SetDuplicateId(static_cast<InnerIdType>(param.duplicate_id),
+                                                inner_id);
             return false;
         }
         auto filtered_result = std::make_shared<StandardHeap<true, false>>(graph.allocator_, -1);
@@ -214,12 +212,13 @@ HGraphBuilder::GraphAddOne(HGraph& graph, const void* data, int level, InnerIdTy
     for (int64_t j = 0; j <= level; ++j) {
         if (graph.route_graphs_[j]->TotalCount() != 0) {
             result = graph.search_one_graph(data,
-                                      graph.route_graphs_[j],
-                                      flatten_codes,
-                                      param,
-                                      (VisitedListPtr) nullptr,
-                                      nullptr);
-            auto filtered_result = std::make_shared<StandardHeap<true, false>>(graph.allocator_, -1);
+                                            graph.route_graphs_[j],
+                                            flatten_codes,
+                                            param,
+                                            (VisitedListPtr) nullptr,
+                                            nullptr);
+            auto filtered_result =
+                std::make_shared<StandardHeap<true, false>>(graph.allocator_, -1);
             while (not result->Empty()) {
                 auto [dist, id] = result->Top();
                 result->Pop();
@@ -237,7 +236,8 @@ HGraphBuilder::GraphAddOne(HGraph& graph, const void* data, int level, InnerIdTy
                                          graph.alpha_);
         } else {
             LockGuard cur_lock(graph.neighbors_mutex_, inner_id);
-            graph.route_graphs_[j]->InsertNeighborsById(inner_id, Vector<InnerIdType>(graph.allocator_));
+            graph.route_graphs_[j]->InsertNeighborsById(inner_id,
+                                                        Vector<InnerIdType>(graph.allocator_));
         }
     }
     return true;
@@ -255,7 +255,8 @@ HGraphBuilder::Resize(HGraph& graph, uint64_t new_size) {
     cur_size = graph.max_capacity_.load();
     if (cur_size < new_size_power_2) {
         graph.neighbors_mutex_->Resize(new_size_power_2);
-        graph.pool_ = std::make_shared<VisitedListPool>(1, graph.allocator_, new_size_power_2, graph.allocator_);
+        graph.pool_ = std::make_shared<VisitedListPool>(
+            1, graph.allocator_, new_size_power_2, graph.allocator_);
         graph.label_table_->Resize(new_size_power_2);
         graph.bottom_graph_->Resize(new_size_power_2);
         graph.basic_flatten_codes_->Resize(new_size_power_2);
@@ -280,7 +281,8 @@ HGraphBuilder::ELPOptimize(HGraph& graph) {
     param.ef = 80;
     param.topk = 10;
     param.is_inner_id_allowed = nullptr;
-    graph.searcher_->SetMockParameters(graph.bottom_graph_, graph.basic_flatten_codes_, graph.pool_, param, graph.dim_);
+    graph.searcher_->SetMockParameters(
+        graph.bottom_graph_, graph.basic_flatten_codes_, graph.pool_, param, graph.dim_);
     graph.optimizer_->RegisterParameter(RuntimeParameter(PREFETCH_STRIDE_CODE, 1, 10, 1));
     graph.optimizer_->RegisterParameter(RuntimeParameter(PREFETCH_STRIDE_VISIT, 1, 10, 1));
     graph.optimizer_->Optimize(graph.searcher_);

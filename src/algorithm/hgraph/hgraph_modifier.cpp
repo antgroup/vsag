@@ -50,13 +50,19 @@ HGraphModifier::UpdateAttribute(HGraph& graph, int64_t id, const AttributeSet& n
 }
 
 void
-HGraphModifier::UpdateAttribute(HGraph& graph, int64_t id, const AttributeSet& new_attrs, const AttributeSet& origin_attrs) {
+HGraphModifier::UpdateAttribute(HGraph& graph,
+                                int64_t id,
+                                const AttributeSet& new_attrs,
+                                const AttributeSet& origin_attrs) {
     auto inner_id = graph.label_table_->GetIdByLabel(id);
     graph.attr_filter_index_->UpdateBitsetsByAttr(new_attrs, inner_id, 0, origin_attrs);
 }
 
 bool
-HGraphModifier::UpdateVector(HGraph& graph, int64_t id, const DatasetPtr& new_base, bool force_update) {
+HGraphModifier::UpdateVector(HGraph& graph,
+                             int64_t id,
+                             const DatasetPtr& new_base,
+                             bool force_update) {
     uint32_t inner_id = 0;
     {
         std::shared_lock label_lock(graph.label_lookup_mutex_);
@@ -87,8 +93,9 @@ HGraphModifier::UpdateVector(HGraph& graph, int64_t id, const DatasetPtr& new_ba
 
             float neighbor_dist = 0;
             try {
-                neighbor_dist = graph.CalcDistanceById(static_cast<float*>(new_base_vec),
-                                                       graph.label_table_->GetLabelById(neighbor_inner_id));
+                neighbor_dist =
+                    graph.CalcDistanceById(static_cast<float*>(new_base_vec),
+                                           graph.label_table_->GetLabelById(neighbor_inner_id));
             } catch (const std::runtime_error& e) {
                 continue;
             }
@@ -101,7 +108,8 @@ HGraphModifier::UpdateVector(HGraph& graph, int64_t id, const DatasetPtr& new_ba
     auto codes = (graph.use_reorder_) ? graph.high_precise_codes_ : graph.basic_flatten_codes_;
     bool update_status = graph.basic_flatten_codes_->UpdateVector(new_base_vec, inner_id);
     if (graph.use_reorder_) {
-        update_status = update_status && graph.high_precise_codes_->UpdateVector(new_base_vec, inner_id);
+        update_status =
+            update_status && graph.high_precise_codes_->UpdateVector(new_base_vec, inner_id);
     }
     return update_status;
 }
@@ -116,7 +124,9 @@ HGraphModifier::RecoverRemove(HGraph& graph, int64_t id) {
 }
 
 bool
-HGraphModifier::TryRecoverTombstone(HGraph& graph, const DatasetPtr& data, std::vector<int64_t>& failed_ids) {
+HGraphModifier::TryRecoverTombstone(HGraph& graph,
+                                    const DatasetPtr& data,
+                                    std::vector<int64_t>& failed_ids) {
     auto label = data->GetIds()[0];
 
     bool is_label_valid = false;
@@ -163,10 +173,12 @@ HGraphModifier::ForceRemoveOne(HGraph& graph, int64_t label) {
         HGraphModifier::FindNewEntryPoint(graph);
     }
 
-    HGraphModifier::GraphForceRemoveOne(graph, inner_id, graph.basic_flatten_codes_, graph.bottom_graph_);
+    HGraphModifier::GraphForceRemoveOne(
+        graph, inner_id, graph.basic_flatten_codes_, graph.bottom_graph_);
 
     for (const auto& route_graph : graph.route_graphs_) {
-        HGraphModifier::GraphForceRemoveOne(graph, inner_id, graph.basic_flatten_codes_, route_graph);
+        HGraphModifier::GraphForceRemoveOne(
+            graph, inner_id, graph.basic_flatten_codes_, route_graph);
     }
     InnerIdType swap_id = graph.total_count_.load() - 1;
 
@@ -202,9 +214,9 @@ HGraphModifier::FindNewEntryPoint(HGraph& graph) {
 
 void
 HGraphModifier::GraphForceRemoveOne(HGraph& graph,
-                                     const InnerIdType& inner_id,
-                                     const FlattenInterfacePtr& flatten,
-                                     const GraphInterfacePtr& graph_ptr) {
+                                    const InnerIdType& inner_id,
+                                    const FlattenInterfacePtr& flatten,
+                                    const GraphInterfacePtr& graph_ptr) {
     Vector<InnerIdType> forward_neighbors(graph.allocator_);
     graph_ptr->GetNeighbors(inner_id, forward_neighbors);
     Vector<InnerIdType> reverse_neighbors(graph.allocator_);
@@ -254,7 +266,8 @@ HGraphModifier::GraphForceRemoveOne(HGraph& graph,
             }
         }
 
-        select_edges_by_heuristic(candidate_list, neighbor, max_degree, flatten, graph.allocator_, graph.alpha_);
+        select_edges_by_heuristic(
+            candidate_list, neighbor, max_degree, flatten, graph.allocator_, graph.alpha_);
 
         graph_ptr->InsertNeighborsById(neighbor, candidate_list);
     }

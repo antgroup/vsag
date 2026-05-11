@@ -14,7 +14,6 @@
 // limitations under the License.
 
 #include "hgraph.h"
-#include "hgraph_serializer.h"
 
 #include <datacell/compressed_graph_datacell_parameter.h>
 #include <fmt/format.h>
@@ -30,6 +29,7 @@
 #include "datacell/flatten_interface.h"
 #include "datacell/sparse_graph_datacell.h"
 #include "dataset_impl.h"
+#include "hgraph_serializer.h"
 #include "impl/filter/filter_headers.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/odescent/odescent_graph_builder.h"
