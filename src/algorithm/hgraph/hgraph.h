@@ -53,6 +53,8 @@ public:
 
     friend class HGraphAnalyzer;
     friend class HGraphSerializer;
+    friend class HGraphBuilder;
+    friend class HGraphModifier;
 
 public:
     HGraph(const HGraphParameterPtr& param, const IndexCommonParam& common_param);
