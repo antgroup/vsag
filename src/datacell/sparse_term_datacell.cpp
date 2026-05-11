@@ -307,11 +307,10 @@ SparseTermDataCell::CalcDistanceByInnerId(const SparseTermComputerPtr& computer,
         if (computer->HasNextTerm()) {
             auto next_it = it + 1;
             auto next_term = computer->GetTerm(next_it);
-            if (next_term >= term_ids_.size()) {
-                continue;
+            if (next_term < term_ids_.size() && term_sizes_[next_term] != 0) {
+                __builtin_prefetch(term_ids_[next_term]->data(), 0, 3);
+                __builtin_prefetch(term_datas_[next_term]->data(), 0, 3);
             }
-            __builtin_prefetch(term_ids_[next_term]->data(), 0, 3);
-            __builtin_prefetch(term_datas_[next_term]->data(), 0, 3);
         }
         // Fix: Check term_sizes_[term] == 0 to avoid null pointer dereference
         if (term >= term_ids_.size() || term_sizes_[term] == 0) {
