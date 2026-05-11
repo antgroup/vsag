@@ -34,7 +34,7 @@
 #include "index/iterator_filter.h"
 #include "index_common_param.h"
 #include "index_feature_list.h"
-#include "inner_index_interface.h"
+#include "../inner_index_interface.h"
 #include "typing.h"
 #include "utils/lock_strategy.h"
 #include "utils/util_functions.h"

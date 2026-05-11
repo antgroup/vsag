@@ -18,8 +18,8 @@
 #include <limits>
 
 #include "data_type.h"
-#include "index_search_parameter.h"
-#include "inner_index_parameter.h"
+#include "../index_search_parameter.h"
+#include "../inner_index_parameter.h"
 #include "utils/pointer_define.h"
 #include "vsag/constants.h"
 

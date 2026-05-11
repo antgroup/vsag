@@ -17,7 +17,7 @@
 
 #include <fmt/format.h>
 
-#include "algorithm/hgraph.h"
+#include "hgraph.h"
 #include "index_common_param.h"
 #include "parameter_test.h"
 #include "unittest.h"
