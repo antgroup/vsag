@@ -42,8 +42,53 @@ auto result = index->KnnSearch(query, k, search_param);
 
 ## 估算与查询内存占用
 
-- `Index::EstimateMemory(data_num)`：在构建前估算索引将占用的内存（示例：`examples/cpp/308_feature_estimate_memory.cpp`）。
-- `Index::GetMemoryUsage()`：查询当前实际占用的字节数（示例：`examples/cpp/319_feature_get_memory_usage.cpp`）。
+### `EstimateMemory(data_num)`
+
+`Index::EstimateMemory(data_num)` 返回索引在插入 `data_num` 条向量后预期占用的字节数。它仅基于
+构建参数（dim、量化方式、`max_degree` 等）推算，不会分配任何向量存储，因此可以在空索引上安全
+调用，是入库前评估节点规格的推荐方式：
+
+```cpp
+if (index->CheckFeature(vsag::SUPPORT_ESTIMATE_MEMORY)) {
+    uint64_t estimated = index->EstimateMemory(1'000'000);  // 字节
+}
+```
+
+完整示例：`examples/cpp/308_feature_estimate_memory.cpp`。
+
+### `GetMemoryUsage()`
+
+`Index::GetMemoryUsage()` 返回索引**当前**占用的字节数：
+
+```cpp
+int64_t bytes = index->GetMemoryUsage();
+```
+
+特性：
+
+- 所有索引类型均实现了该方法，但只有通过 `CheckFeature` 公布 `vsag::SUPPORT_GET_MEMORY_USAGE`
+  的索引才保证返回有意义的数值。HGraph、IVF、BruteForce、Pyramid、WARP 均声明了该能力
+  （见 `src/algorithm/{hgraph,ivf,brute_force,pyramid,warp}.cpp`）；SINDI 出于
+  接口纯虚函数的要求实现了该方法，但当前未设置该 feature flag，请仅把返回值视为参考信息。
+- 线程安全；可与搜索并发轮询。
+- 延迟在微秒量级 —— 适合生产环境的实时内存监控。
+- 统计的是索引自身占用的内存（向量、图、量化器状态）。该值通常小于操作系统层面观察到的 RSS：
+  RSS 还包含 allocator 的开销、临时 scratch buffer、以及索引外部持有的数据（例如用户自有的输入
+  向量缓冲）。SINDI 索引尤其建议在构建完成**之后**调用 `GetMemoryUsage()` 才能拿到具有代表性的
+  数值。
+
+可运行示例：`examples/cpp/319_feature_get_memory_usage.cpp`，其中包含一个辅助函数将接口值与进程
+驻留内存进行对照。
+
+### 能力标志
+
+| 标志                              | 含义                                  |
+|-----------------------------------|---------------------------------------|
+| `vsag::SUPPORT_ESTIMATE_MEMORY`   | 支持 `EstimateMemory(data_num)`。     |
+| `vsag::SUPPORT_GET_MEMORY_USAGE`  | 支持 `GetMemoryUsage()`。             |
+
+两个标志均可通过 `index->CheckFeature(...)` 查询 —— 参见
+[索引自省](introspection.md)。
 
 ## 线程池
 

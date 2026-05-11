@@ -43,10 +43,58 @@ See `examples/cpp/313_feature_search_allocator.cpp` and
 
 ## Estimating and Querying Memory
 
-- `Index::EstimateMemory(data_num)` — estimate memory usage before building
-  (`examples/cpp/308_feature_estimate_memory.cpp`).
-- `Index::GetMemoryUsage()` — query the current memory footprint
-  (`examples/cpp/319_feature_get_memory_usage.cpp`).
+### `EstimateMemory(data_num)`
+
+`Index::EstimateMemory(data_num)` returns a byte-level estimate of the memory the index will
+occupy once `data_num` vectors have been inserted. It is computed from the build parameters
+(dimension, quantization, `max_degree`, etc.) without allocating any vector storage, so it is
+safe to call on an empty index and is the recommended way to size a node before ingest:
+
+```cpp
+if (index->CheckFeature(vsag::SUPPORT_ESTIMATE_MEMORY)) {
+    uint64_t estimated = index->EstimateMemory(1'000'000);  // bytes
+}
+```
+
+See `examples/cpp/308_feature_estimate_memory.cpp` for a full run.
+
+### `GetMemoryUsage()`
+
+`Index::GetMemoryUsage()` returns the **current** memory footprint of an index in bytes:
+
+```cpp
+int64_t bytes = index->GetMemoryUsage();
+```
+
+Properties:
+
+- Implemented by every index type, but only indexes that advertise
+  `vsag::SUPPORT_GET_MEMORY_USAGE` via `CheckFeature` are formally guaranteed to return a
+  meaningful value. HGraph, IVF, BruteForce, Pyramid and WARP set the flag
+  (see `src/algorithm/{hgraph,ivf,brute_force,pyramid,warp}.cpp`); SINDI implements the call
+  (since the method is pure-virtual on `Index`) but does not currently set the feature flag, so
+  treat its value as informational only.
+- Thread-safe; can be polled concurrently with searches.
+- Latency is on the order of microseconds — suitable for production-grade real-time
+  monitoring loops.
+- Reports memory attributable to the index itself (vectors, graph, quantizer state). The number
+  is typically smaller than the resident set size observed at the OS level, which also includes
+  allocator overhead, scratch buffers, and any data held outside the index (e.g. user-owned input
+  vectors). For SINDI in particular, call `GetMemoryUsage()` **after** the build completes to get
+  a representative value.
+
+See `examples/cpp/319_feature_get_memory_usage.cpp` for a runnable example, including a helper
+that compares the interface value with the process resident size.
+
+### Capability Flags
+
+| Flag                          | Meaning                                          |
+|-------------------------------|--------------------------------------------------|
+| `vsag::SUPPORT_ESTIMATE_MEMORY` | `EstimateMemory(data_num)` is available.       |
+| `vsag::SUPPORT_GET_MEMORY_USAGE` | `GetMemoryUsage()` is available.              |
+
+Both flags can be checked via `index->CheckFeature(...)` — see
+[Index Introspection](introspection.md).
 
 ## Thread Pool
 
