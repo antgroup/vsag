@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -21,7 +20,7 @@
 
 #include "basic_io.h"
 #include "buffer_io_parameter.h"
-#include "index_common_param.h"
+#include "index_common_param_fwd.h"
 
 namespace vsag {
 

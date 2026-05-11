@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -18,8 +17,9 @@
 #include <cstdint>
 #include <functional>
 #include <ostream>
+#include <vector>
 
-#include "typing.h"
+#include "container_types.h"
 
 namespace vsag {
 

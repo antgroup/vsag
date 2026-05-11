@@ -21,6 +21,7 @@
 #include "extra_info_interface_test.h"
 #include "impl/allocator/default_allocator.h"
 #include "impl/allocator/safe_allocator.h"
+#include "index_common_param.h"
 #include "parameter_test.h"
 #include "unittest.h"
 

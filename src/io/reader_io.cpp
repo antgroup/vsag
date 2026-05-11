@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -19,11 +18,23 @@
 
 #include <future>
 
+#include "index_common_param.h"
+
 namespace vsag {
+
+ReaderIO::ReaderIO(Allocator* allocator) : BasicIO<ReaderIO>(allocator) {
+}
+
+ReaderIO::ReaderIO(const ReaderIOParamPtr& /*param*/, const IndexCommonParam& common_param)
+    : ReaderIO(common_param.allocator_.get()) {
+}
+
+ReaderIO::ReaderIO(const IOParamPtr& param, const IndexCommonParam& common_param)
+    : ReaderIO(std::dynamic_pointer_cast<ReaderIOParameter>(param), common_param) {
+}
 
 void
 ReaderIO::WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset) {
-    // ReaderIO is read-only, so we do nothing here. Just for deserialization.
     this->size_ += size;
 }
 

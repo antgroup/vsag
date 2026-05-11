@@ -14,8 +14,8 @@
 
 #pragma once
 
-#include "basic_types.h"
-#include "container_types.h"
-#include "hash_types.h"
-#include "json_types.h"
-#include "type_helpers.h"
+namespace vsag {
+
+class IndexCommonParam;
+
+}  // namespace vsag

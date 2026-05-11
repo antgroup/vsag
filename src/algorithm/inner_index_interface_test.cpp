@@ -21,6 +21,7 @@
 #include "brute_force.h"
 #include "hgraph.h"
 #include "impl/allocator/safe_allocator.h"
+#include "index_common_param.h"
 #include "unittest.h"
 
 using namespace vsag;

@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -16,14 +15,18 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 
 #include "data_type.h"
 #include "impl/thread_pool/safe_thread_pool.h"
+#include "json_types.h"
 #include "metric_type.h"
-#include "typing.h"
-#include "vsag/resource.h"
+#include "vsag/allocator.h"
 
 namespace vsag {
+
+class Resource;
+
 class IndexCommonParam {
 public:
     MetricType metric_{MetricType::METRIC_TYPE_L2SQR};

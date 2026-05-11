@@ -14,8 +14,10 @@
 
 #pragma once
 
-#include "basic_types.h"
-#include "container_types.h"
-#include "hash_types.h"
-#include "json_types.h"
-#include "type_helpers.h"
+#include "json_wrapper.h"
+
+namespace vsag {
+
+using JsonType = JsonWrapper;  // alias for nlohmann::json type
+
+}  // namespace vsag
