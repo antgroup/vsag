@@ -66,6 +66,9 @@ VSAG 的评测与基准工具（尤其是 [`eval_performance`](eval.md)）使用
     - `"angular"` —— 余弦距离（`1 - 余弦相似度`）
 - **稀疏向量可选值**：
     - `"ip"` —— 稀疏内积距离（`1 - 稀疏内积`），稀疏向量暂不支持其他度量
+- **多向量可选值**：
+    - 与稠密向量相同（`"euclidean"`、`"ip"`、`"angular"`）；多向量使用与稠密
+      向量相同的逐子向量距离函数
 
 ## 可选数据集
 
@@ -86,6 +89,36 @@ VSAG 的评测与基准工具（尤其是 [`eval_performance`](eval.md)）使用
   非负整数，且 `L` 必须严格大于最大 label 值（通常为 `L > max(label)`，下标范围
   `0..L-1`）。数据集作者需自行保证该数组足够大，能覆盖 `/train_labels` 与
   `/test_labels` 中出现的所有 label。
+
+## 多向量数据集
+
+当 `type="multi_vector"` 时，文件采用平坦展开布局：将每个文档的子向量拼接为一个
+二维矩阵，并辅以 `vector_counts` 数组记录每个文档包含多少子向量。
+
+### 额外全局属性
+
+| 属性               | 类型    | 必填 | 说明                                  |
+|--------------------|---------|------|---------------------------------------|
+| `multi_vector_dim` | `INT64` | 是   | 子向量维度（每个子向量的 float 个数） |
+
+### 额外数据集
+
+| 数据集                 | 形状                    | 类型      | 说明                         |
+|------------------------|-------------------------|-----------|------------------------------|
+| `/train_multi_vectors` | `(sum_counts_train, D)` | `FLOAT32` | 所有训练子向量，按行平坦拼接 |
+| `/test_multi_vectors`  | `(sum_counts_test, D)`  | `FLOAT32` | 所有查询子向量，按行平坦拼接 |
+| `/train_vector_counts` | `(N,)`                  | `UINT32`  | 每个训练文档的子向量数       |
+| `/test_vector_counts`  | `(Q,)`                  | `UINT32`  | 每个查询文档的子向量数       |
+
+> `D` 等于 `multi_vector_dim`。`sum_counts_train` 是 `/train_vector_counts` 所有值
+> 之和，`sum_counts_test` 是 `/test_vector_counts` 所有值之和。
+
+当 `type="multi_vector"` 时，标准的 `/train` 和 `/test` 数据集**不是必需的**，
+文档数量（`N`、`Q`）分别从 `/train_vector_counts` 和 `/test_vector_counts` 推导。
+其余数据集（`/neighbors`、`/distances`、可选标签）仍然是必填的。
+
+评测工具会从平坦数组和 counts 重建每个文档的 `vsag::MultiVector`，然后将完整数组
+传递给 `vsag::Dataset::MultiVectors()`、`VectorCounts()` 和 `MultiVectorDim()`。
 
 ## 结构性要求
 

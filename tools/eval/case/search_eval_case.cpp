@@ -164,28 +164,30 @@ SearchEvalCase::do_knn_search() {
             auto i = id % query_count;
             auto query = vsag::Dataset::Make();
             query->NumElements(1)->Dim(this->dataset_ptr_->GetDim())->Owner(false);
-            const void* query_vector = this->dataset_ptr_->GetOneTest(i);
+            const void* query_vector = nullptr;
             if (this->dataset_ptr_->GetVectorType() == DENSE_VECTORS) {
+                query_vector = this->dataset_ptr_->GetOneTest(i);
                 if (this->dataset_ptr_->GetTestDataType() == vsag::DATATYPE_FLOAT32) {
                     query->Float32Vectors((const float*)query_vector);
                 } else if (this->dataset_ptr_->GetTestDataType() == vsag::DATATYPE_INT8) {
                     query->Int8Vectors((const int8_t*)query_vector);
                 }
-            } else {
+            } else if (this->dataset_ptr_->GetVectorType() == SPARSE_VECTORS) {
+                query_vector = this->dataset_ptr_->GetOneTest(i);
                 query->SparseVectors((const SparseVector*)query_vector);
+            } else if (this->dataset_ptr_->GetVectorType() == MULTI_VECTORS) {
+                query->MultiVectors(this->dataset_ptr_->GetMultiTestVectors() + i);
+                query->VectorCounts(this->dataset_ptr_->GetTestVectorCounts() + i);
+                query->MultiVectorDim(this->dataset_ptr_->GetMultiVectorDim());
             }
             auto result = this->index_->KnnSearch(query, topk, config_.search_param);
             if (not result.has_value()) {
                 std::cerr << "query error: " << result.error().message << std::endl;
                 exit(-1);
             }
-            const int64_t* neighbors = result.value()->GetIds();
-            int64_t* ground_truth_neighbors = dataset_ptr_->GetNeighbors(i);
-            auto record = std::make_tuple(neighbors,
-                                          ground_truth_neighbors,
-                                          dataset_ptr_.get(),
-                                          query_vector,
-                                          result.value()->GetDim());
+            auto record = std::make_tuple(result.value()->GetDistances(),
+                                          dataset_ptr_->GetDistances(i),
+                                          static_cast<uint64_t>(result.value()->GetDim()));
             monitor->Record(&record);
         }
         monitor->Stop();
@@ -216,11 +218,18 @@ SearchEvalCase::do_knn_filter_search() {
             auto i = id % query_count;
             auto query = vsag::Dataset::Make();
             query->NumElements(1)->Dim(this->dataset_ptr_->GetDim())->Owner(false);
-            const void* query_vector = this->dataset_ptr_->GetOneTest(i);
-            if (this->dataset_ptr_->GetTestDataType() == vsag::DATATYPE_FLOAT32) {
-                query->Float32Vectors((const float*)query_vector);
-            } else if (this->dataset_ptr_->GetTestDataType() == vsag::DATATYPE_INT8) {
-                query->Int8Vectors((const int8_t*)query_vector);
+            const void* query_vector = nullptr;
+            if (this->dataset_ptr_->GetVectorType() == MULTI_VECTORS) {
+                query->MultiVectors(this->dataset_ptr_->GetMultiTestVectors() + i);
+                query->VectorCounts(this->dataset_ptr_->GetTestVectorCounts() + i);
+                query->MultiVectorDim(this->dataset_ptr_->GetMultiVectorDim());
+            } else {
+                query_vector = this->dataset_ptr_->GetOneTest(i);
+                if (this->dataset_ptr_->GetTestDataType() == vsag::DATATYPE_FLOAT32) {
+                    query->Float32Vectors((const float*)query_vector);
+                } else if (this->dataset_ptr_->GetTestDataType() == vsag::DATATYPE_INT8) {
+                    query->Int8Vectors((const int8_t*)query_vector);
+                }
             }
             auto test_label = test_labels[i];
             auto filter = std::make_shared<FilterObj>(
@@ -230,10 +239,8 @@ SearchEvalCase::do_knn_filter_search() {
                 std::cerr << "query error: " << result.error().message << std::endl;
                 exit(-1);
             }
-            const int64_t* neighbors = result.value()->GetIds();
-            int64_t* ground_truth_neighbors = dataset_ptr_->GetNeighbors(i);
             auto record = std::make_tuple(
-                neighbors, ground_truth_neighbors, dataset_ptr_.get(), query_vector, topk);
+                result.value()->GetDistances(), dataset_ptr_->GetDistances(i), topk);
             monitor->Record(&record);
         }
         monitor->Stop();
