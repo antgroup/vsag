@@ -35,6 +35,7 @@
 - [图索引增强](advanced/enhance_graph.md)
 - [内存-磁盘混合索引](advanced/hybrid_index.md)
 - [Extra Info（附加信息）](advanced/extra_info.md)
+- [索引生命周期管理](advanced/index_lifecycle.md)
 
 # 性能与调优
 
