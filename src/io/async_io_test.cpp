@@ -21,6 +21,7 @@
 #include "basic_io_test.h"
 #include "buffer_io_parameter.h"
 #include "impl/allocator/safe_allocator.h"
+#include "index_common_param.h"
 #include "unittest.h"
 
 using namespace vsag;

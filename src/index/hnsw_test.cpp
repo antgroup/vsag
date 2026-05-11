@@ -24,6 +24,7 @@
 #include "data_type.h"
 #include "datacell/graph_datacell_parameter.h"
 #include "impl/logger/logger.h"
+#include "index_common_param.h"
 #include "io/memory_io_parameter.h"
 #include "quantization/fp32_quantizer_parameter.h"
 #include "storage/serialization.h"

@@ -19,17 +19,19 @@
 #include <shared_mutex>
 #include <vector>
 
+#include "container_types.h"
 #include "data_type.h"
 #include "datacell/attribute_inverted_interface.h"
 #include "datacell/extra_info_interface.h"
 #include "datacell/flatten_interface.h"
 #include "dataset_impl.h"
 #include "inner_index_parameter.h"
+#include "json_types.h"
 #include "metric_type.h"
 #include "parameter.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
-#include "typing.h"
+#include "type_helpers.h"
 #include "utils/function_exists_check.h"
 #include "utils/pointer_define.h"
 #include "vsag/dataset.h"
@@ -40,6 +42,7 @@ namespace vsag {
 DEFINE_POINTER2(InnerIndex, InnerIndexInterface);
 DEFINE_POINTER(LabelTable);
 DEFINE_POINTER(IndexFeatureList);
+DEFINE_POINTER(SafeThreadPool);
 
 class IndexCommonParam;
 

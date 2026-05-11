@@ -28,6 +28,7 @@
 
 #include "algorithm/hnswlib/hnswlib.h"
 #include "common.h"
+#include "container_types.h"
 #include "data_type.h"
 #include "datacell/flatten_interface.h"
 #include "datacell/graph_interface.h"
@@ -39,7 +40,6 @@
 #include "index_common_param.h"
 #include "index_feature_list.h"
 #include "index_impl.h"
-#include "typing.h"
 #include "utils/util_functions.h"
 #include "utils/window_result_queue.h"
 #include "vsag/binaryset.h"

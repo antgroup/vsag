@@ -20,6 +20,7 @@
 #include "graph_datacell_parameter.h"
 #include "graph_interface_test.h"
 #include "impl/allocator/safe_allocator.h"
+#include "index_common_param.h"
 #include "unittest.h"
 using namespace vsag;
 

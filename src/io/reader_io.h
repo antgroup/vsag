@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -16,7 +15,7 @@
 #pragma once
 
 #include "basic_io.h"
-#include "index_common_param.h"
+#include "index_common_param_fwd.h"
 #include "reader_io_parameter.h"
 
 namespace vsag {
@@ -44,8 +43,7 @@ public:
      *
      * @param allocator A pointer to the Allocator for memory management.
      */
-    explicit ReaderIO(Allocator* allocator) : BasicIO<ReaderIO>(allocator) {
-    }
+    explicit ReaderIO(Allocator* allocator);
 
     /**
      * @brief Constructs a ReaderIO object from ReaderIOParameter.
@@ -53,9 +51,7 @@ public:
      * @param param The IO parameter containing configuration.
      * @param common_param The common index parameters.
      */
-    explicit ReaderIO(const ReaderIOParamPtr& param, const IndexCommonParam& common_param)
-        : ReaderIO(common_param.allocator_.get()) {
-    }
+    explicit ReaderIO(const ReaderIOParamPtr& param, const IndexCommonParam& common_param);
 
     /**
      * @brief Constructs a ReaderIO object from generic IOParamPtr.
@@ -63,9 +59,7 @@ public:
      * @param param The generic IO parameter pointer.
      * @param common_param The common index parameters.
      */
-    explicit ReaderIO(const IOParamPtr& param, const IndexCommonParam& common_param)
-        : ReaderIO(std::dynamic_pointer_cast<ReaderIOParameter>(param), common_param) {
-    }
+    explicit ReaderIO(const IOParamPtr& param, const IndexCommonParam& common_param);
 
     /**
      * @brief Default destructor.

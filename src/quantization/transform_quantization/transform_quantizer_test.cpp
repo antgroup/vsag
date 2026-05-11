@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "impl/allocator/safe_allocator.h"
+#include "index_common_param.h"
 #include "quantization/quantizer_test.h"
 #include "unittest.h"
 using namespace vsag;

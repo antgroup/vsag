@@ -18,6 +18,7 @@
 #include <sstream>
 
 #include "algorithm/hgraph.h"
+#include "index_common_param.h"
 #include "unittest.h"
 #include "vsag/engine.h"
 

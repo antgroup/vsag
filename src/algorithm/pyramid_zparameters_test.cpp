@@ -16,6 +16,7 @@
 #include "algorithm/pyramid_zparameters.h"
 
 #include "algorithm/pyramid.h"
+#include "index_common_param.h"
 #include "parameter_test.h"
 #include "unittest.h"
 

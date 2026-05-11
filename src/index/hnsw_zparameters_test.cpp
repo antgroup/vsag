@@ -15,6 +15,7 @@
 
 #include "hnsw_zparameters.h"
 
+#include "index_common_param.h"
 #include "unittest.h"
 
 TEST_CASE("create hnsw with correct parameter", "[ut][hnsw]") {
