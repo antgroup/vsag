@@ -261,8 +261,9 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
 
         dist_cmp += count_no_visited;
         num_points.store(0, std::memory_order_relaxed);
-        auto point_per_thread = count_no_visited / (num_threads + 1);
-        auto hard_task_count = point_per_thread % (num_threads + 1);
+        const auto task_count = num_threads + 1;
+        auto point_per_thread = count_no_visited / task_count;
+        auto hard_task_count = count_no_visited % task_count;
 
         uint64_t offset = 0;
         for (uint64_t i = 0; i < num_threads; ++i) {

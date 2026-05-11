@@ -11,7 +11,7 @@ code 计算最终距离。
 - base code 存储：`base_codes_type = "rabitq_split"`
 - RabitQ 版本：`rabitq_version = "split_1bit_7bit"`
 - query bits：必须是 `rabitq_bits_per_dim_query = 32`
-- base bits：必须大于 1，推荐 `rabitq_bits_per_dim_base = 8`
+- base bits：支持 `rabitq_bits_per_dim_base` 在 `[1, 8]`，其中 `1` 表示 `1+0bit`，推荐 `8`（即 `1+7bit`）
 
 默认路径不变。如果不显式设置 `rabitq_version = "split_1bit_7bit"` 和
 `base_codes_type = "rabitq_split"`，HGraph 仍使用已有 RabitQ/flatten datacell 路径。
@@ -50,7 +50,7 @@ code 计算最终距离。
 参数约束：
 
 - `rabitq_version = "split_1bit_7bit"` 只支持 `rabitq_bits_per_dim_query = 32`。
-- `rabitq_version = "split_1bit_7bit"` 要求 `rabitq_bits_per_dim_base > 1`。
+- `rabitq_version = "split_1bit_7bit"` 支持 `rabitq_bits_per_dim_base` 在 `[1, 8]`；`1` 是合法的 `1+0bit` 配置，`8` 是推荐的 `1+7bit` 配置。
 - `rabitq_error_rate` 必须是有限正数。
 - `rabitq_error_rate` 会进入索引参数兼容性检查；修改该值后应重建索引。
 

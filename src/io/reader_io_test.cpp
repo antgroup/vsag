@@ -18,6 +18,7 @@
 #include <memory>
 
 #include "basic_io_test.h"
+#include "index_common_param.h"
 #include "reader_io_parameter.h"
 #include "unittest.h"
 

@@ -25,6 +25,28 @@
 
 namespace vsag {
 
+namespace {
+
+auto
+parse_label_remap_type(const std::string& remap_type) -> LabelRemapType {
+    if (remap_type == LABEL_REMAP_TYPE_VALUE_PG) {
+        return LabelRemapType::PG;
+    }
+    if (remap_type == LABEL_REMAP_TYPE_VALUE_ROBIN) {
+        return LabelRemapType::ROBIN;
+    }
+    throw VsagException(ErrorType::INVALID_ARGUMENT,
+                        fmt::format("invalid label_remap_type: {}", remap_type));
+}
+
+auto
+dump_label_remap_type(LabelRemapType remap_type) -> const char* {
+    return remap_type == LabelRemapType::ROBIN ? LABEL_REMAP_TYPE_VALUE_ROBIN
+                                               : LABEL_REMAP_TYPE_VALUE_PG;
+}
+
+}  // namespace
+
 void
 InnerIndexParameter::FromJson(const JsonType& json) {
     if (json.Contains(USE_REORDER_KEY)) {
@@ -34,6 +56,12 @@ InnerIndexParameter::FromJson(const JsonType& json) {
     if (json.Contains(REORDER_SOURCE_KEY)) {
         this->reorder_source = json[REORDER_SOURCE_KEY].GetString();
     }
+    CHECK_ARGUMENT(this->reorder_source == HGRAPH_REORDER_SOURCE_PRECISE ||
+                       this->reorder_source == HGRAPH_REORDER_SOURCE_BASE,
+                   fmt::format("invalid reorder_source: {}, supported values are \"{}\" and \"{}\"",
+                               this->reorder_source,
+                               HGRAPH_REORDER_SOURCE_PRECISE,
+                               HGRAPH_REORDER_SOURCE_BASE));
 
     if (json.Contains(USE_ATTRIBUTE_FILTER_KEY)) {
         this->use_attribute_filter = json[USE_ATTRIBUTE_FILTER_KEY].GetBool();
@@ -49,6 +77,10 @@ InnerIndexParameter::FromJson(const JsonType& json) {
 
     if (json.Contains(BUILD_THREAD_COUNT_KEY)) {
         this->build_thread_count = json[BUILD_THREAD_COUNT_KEY].GetInt();
+    }
+
+    if (json.Contains(LABEL_REMAP_TYPE_KEY)) {
+        this->label_remap_type = parse_label_remap_type(json[LABEL_REMAP_TYPE_KEY].GetString());
     }
 
     if (this->use_reorder && this->reorder_source != HGRAPH_REORDER_SOURCE_BASE) {
@@ -90,6 +122,7 @@ InnerIndexParameter::ToJson() const {
     json[USE_REORDER_KEY].SetBool(this->use_reorder);
     json[REORDER_SOURCE_KEY].SetString(this->reorder_source);
     json[BUILD_THREAD_COUNT_KEY].SetInt(this->build_thread_count);
+    json[LABEL_REMAP_TYPE_KEY].SetString(dump_label_remap_type(this->label_remap_type));
     json[USE_ATTRIBUTE_FILTER_KEY].SetBool(this->use_attribute_filter);
     if (use_reorder && this->reorder_source != HGRAPH_REORDER_SOURCE_BASE) {
         json[PRECISE_CODES_KEY].SetJson(this->precise_codes_param->ToJson());
@@ -136,6 +169,11 @@ InnerIndexParameter::CheckCompatibility(const ParamPtr& other) const {
 
     if (this->use_attribute_filter != inner_index_param->use_attribute_filter) {
         logger::error("InnerIndexParameter::CheckCompatibility: use_attribute_filter mismatch");
+        return false;
+    }
+
+    if (this->label_remap_type != inner_index_param->label_remap_type) {
+        logger::error("InnerIndexParameter::CheckCompatibility: label_remap_type mismatch");
         return false;
     }
 

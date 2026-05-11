@@ -36,8 +36,9 @@ For RabitQ split 1bit + 7bit storage/search, see [rabitq_split_1bit_7bit.md](rab
 | **Quantization** | base_codes_type | string | "flatten" | No | Base code storage type; use "rabitq_split" for RabitQ split 1bit + 7bit storage |
 | **Quantization** | rabitq_version | string | "standard" | No | RabitQ implementation version; use "split_1bit_7bit" with RabitQ split storage |
 | **Quantization** | rabitq_error_rate | float | 1.9 | No | Error-rate multiplier used by RabitQ one-bit lower-bound search |
-| **Quantization** | use_reorder | bool | false | No | Enable high-precision reordering |
-| **Quantization** | precise_quantization_type | string | "fp32" | Conditional | High-precision type for reordering |
+| **Quantization** | use_reorder | bool | false | No | Enable result reordering/reranking after base search |
+| **Quantization** | reorder_source | string | "precise" | Conditional | Source used for reorder when `use_reorder=true`: "precise" uses precise codes, "base" uses base codes |
+| **Quantization** | precise_quantization_type | string | "fp32" | Conditional | Precise quantization type used for reorder when `use_reorder=true` and `reorder_source="precise"` |
 | **Graph** | max_degree | int | 64 | No | Max edges per node |
 | **Graph** | ef_construction | int | 400 | No | Candidate list size during construction |
 | **Graph** | graph_type | string | "nsw" | No | Graph algorithm: nsw, odescent |
@@ -101,13 +102,19 @@ For RabitQ split 1bit + 7bit storage/search, see [rabitq_split_1bit_7bit.md](rab
 
 ### use_reorder
 - **Parameter Type**: bool
-- **Parameter Description**: Whether to use high-precision quantization for reordering to improve accuracy
+- **Parameter Description**: Whether to reorder/rerank search results after base graph search. The reorder source is controlled by `reorder_source`.
 - **Optional Values**: true, false
 - **Default Value**: false
 
+### reorder_source
+- **Parameter Type**: string
+- **Parameter Description**: Source codes used for reorder when `use_reorder=true`. Set to "precise" to use precise reorder codes, or "base" to reuse base codes for reorder. With `reorder_source="base"`, HGraph does not require `precise_quantization_type` or precise reorder codes.
+- **Optional Values**: "precise", "base"
+- **Default Value**: "precise"
+
 ### precise_quantization_type
 - **Parameter Type**: string
-- **Parameter Description**: High-precision quantization type used for reordering, only effective when use_reorder=true
+- **Parameter Description**: Precise quantization type used for reordering, only effective when `use_reorder=true` and `reorder_source="precise"`
 - **Optional Values**: "fp32", "fp16", "bf16", "sq8", "sq8_uniform", "sq4_uniform", "pq", "rabitq", "pqfs"
 - **Default Value**: "fp32"
 

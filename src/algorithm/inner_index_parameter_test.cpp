@@ -88,3 +88,26 @@ TEST_CASE("Sampling Logic Test", "[ut][InnerIndexParameter][sampling]") {
         REQUIRE(param->train_sample_count != 65536L);
     }
 }
+
+TEST_CASE("Label remap type parameter test", "[ut][InnerIndexParameter][label_remap_type]") {
+    auto param = std::make_shared<vsag::InnerIndexParameter>();
+    auto json_obj = vsag::JsonType::Parse(R"({})");
+
+    SECTION("default is pg") {
+        param->FromJson(json_obj);
+        REQUIRE(param->label_remap_type == vsag::LabelRemapType::PG);
+        REQUIRE(param->ToJson()["label_remap_type"].GetString() == "pg");
+    }
+
+    SECTION("parse robin") {
+        json_obj["label_remap_type"].SetString("robin");
+        param->FromJson(json_obj);
+        REQUIRE(param->label_remap_type == vsag::LabelRemapType::ROBIN);
+        REQUIRE(param->ToJson()["label_remap_type"].GetString() == "robin");
+    }
+
+    SECTION("reject invalid value") {
+        json_obj["label_remap_type"].SetString("invalid");
+        REQUIRE_THROWS_AS(param->FromJson(json_obj), vsag::VsagException);
+    }
+}

@@ -23,6 +23,7 @@
 #include "flatten_interface_test.h"
 #include "impl/allocator/default_allocator.h"
 #include "impl/allocator/safe_allocator.h"
+#include "index_common_param.h"
 #include "quantization/rabitq_quantization/rabitq_quantizer.h"
 #include "unittest.h"
 

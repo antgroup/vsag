@@ -17,6 +17,7 @@
 - [IVF](indexes/ivf.md)
 - [SINDI](indexes/sindi.md)
 - [Pyramid](indexes/pyramid.md)
+- [BruteForce](indexes/brute_force.md)
 
 # 开发者指南
 
@@ -28,11 +29,14 @@
 # 高级功能
 
 - [范围搜索](advanced/range_search.md)
+- [带过滤的搜索](advanced/filtered_search.md)
+- [属性过滤（混合搜索）](advanced/attribute_filter.md)
 - [序列化格式](advanced/serialization.md)
 - [内存管理](advanced/memory.md)
 - [图索引增强](advanced/enhance_graph.md)
 - [内存-磁盘混合索引](advanced/hybrid_index.md)
 - [Extra Info（附加信息）](advanced/extra_info.md)
+- [索引生命周期管理](advanced/index_lifecycle.md)
 
 # 性能与调优
 
@@ -40,6 +44,7 @@
 - [优化器](advanced/optimizer.md)
 - [标准环境性能参考](resources/performance.md)
 - [性能评估工具](resources/eval.md)
+- [HDF5 数据集格式](resources/dataset_format.md)
 - [索引分析工具](resources/analyze_index.md)
 
 # 资源

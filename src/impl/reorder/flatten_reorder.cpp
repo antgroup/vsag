@@ -22,6 +22,7 @@
 
 #include "datacell/flatten_interface.h"
 #include "impl/heap/standard_heap.h"
+#include "impl/reasoning/search_reasoning.h"
 #include "query_context.h"
 
 namespace vsag {
@@ -48,12 +49,19 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
         }
         flatten_->Query(dists.data(), computer, ids.data(), heap_candidate_size, &ctx);
         for (uint64_t i = 0; i < heap_candidate_size; ++i) {
+            if (ctx.reasoning_ctx != nullptr) {
+                ctx.reasoning_ctx->RecordReorder(
+                    candidate_result[i].second, candidate_result[i].first, dists[i]);
+            }
             if (reorder_heap->Size() < topk || dists[i] < reorder_heap->Top().first) {
                 reorder_heap->Push(dists[i], candidate_result[i].second);
                 if (reorder_heap->Size() > topk) {
                     if (iter_ctx != nullptr) {
                         auto curr = reorder_heap->Top();
                         iter_ctx->AddDiscardNode(curr.first, curr.second);
+                    }
+                    if (ctx.reasoning_ctx != nullptr) {
+                        ctx.reasoning_ctx->RecordReorderEviction(reorder_heap->Top().second, 0);
                     }
                     reorder_heap->Pop();
                 }
@@ -128,6 +136,10 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
         flatten_->Query(
             lower_bound_probe_dists.data(), computer, all_ids.data(), candidate_size, &ctx);
         for (uint64_t i = 0; i < candidate_size; ++i) {
+            if (ctx.reasoning_ctx != nullptr) {
+                ctx.reasoning_ctx->RecordReorder(
+                    all_ids[i], lower_bounds[i], lower_bound_probe_dists[i]);
+            }
             if (reorder_heap->Size() < topk or
                 lower_bound_probe_dists[i] < reorder_heap->Top().first) {
                 reorder_heap->Push(lower_bound_probe_dists[i], all_ids[i]);
@@ -135,6 +147,9 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
                     if (iter_ctx != nullptr) {
                         auto curr = reorder_heap->Top();
                         iter_ctx->AddDiscardNode(curr.first, curr.second);
+                    }
+                    if (ctx.reasoning_ctx != nullptr) {
+                        ctx.reasoning_ctx->RecordReorderEviction(reorder_heap->Top().second, 0);
                     }
                     reorder_heap->Pop();
                 }
@@ -154,12 +169,17 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
     const auto buffer_size = std::max<uint64_t>(bootstrap_size, BATCH_SIZE);
     Vector<InnerIdType> ids(buffer_size, query_allocator);
     Vector<float> dists(buffer_size, query_allocator);
+    Vector<uint64_t> batch_indices(buffer_size, query_allocator);
 
     for (uint64_t i = 0; i < bootstrap_size; ++i) {
         ids[i] = all_ids[order[i]];
     }
     flatten_->Query(dists.data(), computer, ids.data(), bootstrap_size, &ctx);
     for (uint64_t i = 0; i < bootstrap_size; ++i) {
+        if (ctx.reasoning_ctx != nullptr) {
+            const auto idx = order[i];
+            ctx.reasoning_ctx->RecordReorder(ids[i], lower_bound_probe_dists[idx], dists[i]);
+        }
         reorder_heap->Push(dists[i], ids[i]);
     }
 
@@ -178,6 +198,7 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
                 break;
             }
             ids[batch_count] = all_ids[idx];
+            batch_indices[batch_count] = idx;
             ++batch_count;
             ++cursor;
         }
@@ -188,12 +209,19 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
 
         flatten_->Query(dists.data(), computer, ids.data(), batch_count, &ctx);
         for (uint64_t i = 0; i < batch_count; ++i) {
+            if (ctx.reasoning_ctx != nullptr) {
+                ctx.reasoning_ctx->RecordReorder(
+                    ids[i], lower_bound_probe_dists[batch_indices[i]], dists[i]);
+            }
             if (dists[i] < reorder_heap->Top().first) {
                 reorder_heap->Push(dists[i], ids[i]);
                 if (reorder_heap->Size() > topk) {
                     if (iter_ctx != nullptr) {
                         auto curr = reorder_heap->Top();
                         iter_ctx->AddDiscardNode(curr.first, curr.second);
+                    }
+                    if (ctx.reasoning_ctx != nullptr) {
+                        ctx.reasoning_ctx->RecordReorderEviction(reorder_heap->Top().second, 0);
                     }
                     reorder_heap->Pop();
                 }

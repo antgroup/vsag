@@ -1,0 +1,65 @@
+name: Documentation issue
+description: Report incorrect, missing, or unclear documentation.
+title: "[docs](<area>): <short imperative summary>"
+labels: ["kind/documentation"]
+assignees: ["wxyucs"]
+body:
+  - type: dropdown
+    id: doc_source
+    attributes:
+      label: Documentation source
+      options:
+        - vsag.io (website)
+        - in-repo docs/
+        - README.md / CONTRIBUTING.md / DEVELOPMENT.md / AGENTS.md
+        - Doxygen / source comments
+        - tools/* README
+    validations:
+      required: true
+
+  - type: input
+    id: doc_url_or_path
+    attributes:
+      label: URL or repository path
+      description: e.g. `https://vsag.io/docs/en/indexes/hgraph` or `docs/hgraph.md:42`.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - hgraph
+        - ivf
+        - sindi
+        - pyvsag
+        - eval_performance
+        - build
+        - docs
+        - other
+    validations:
+      required: true
+
+  - type: textarea
+    id: current_text
+    attributes:
+      label: Current text
+      description: Quote the existing wording (or note that it is missing).
+      render: markdown
+    validations:
+      required: true
+
+  - type: textarea
+    id: suggested_text
+    attributes:
+      label: Suggested text
+      description: How should it read instead?
+      render: markdown
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional_context
+    attributes:
+      label: Additional context

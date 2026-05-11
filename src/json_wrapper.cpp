@@ -112,6 +112,11 @@ JsonWrapper::SetJson(const JsonWrapper& json) {
 }
 
 void
+JsonWrapper::AppendJson(const JsonWrapper& json) {
+    json_->push_back(*json.json_);
+}
+
+void
 JsonWrapper::SetInt(uint64_t value) {
     (*json_) = value;
 }

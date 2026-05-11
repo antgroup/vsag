@@ -121,7 +121,7 @@ public:
     virtual uint64_t
     getDeletedCount() = 0;
 
-    virtual const vsag::PGUnorderedMap<LabelType, InnerIdType>&
+    virtual const vsag::UnorderedMap<LabelType, InnerIdType>&
     getDeletedElements() const = 0;
 
     virtual bool

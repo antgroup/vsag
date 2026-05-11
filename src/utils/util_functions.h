@@ -20,6 +20,7 @@
 #include <string>
 
 #include "index_common_param.h"
+#include "type_helpers.h"
 #include "vsag/dataset.h"
 #include "vsag/expected.hpp"
 #include "vsag_exception.h"

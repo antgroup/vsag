@@ -22,6 +22,7 @@
 #include "algorithm/inner_index_interface.h"
 #include "datacell/flatten_interface.h"
 #include "impl/heap/standard_heap.h"
+#include "impl/reasoning/search_reasoning.h"
 #include "utils/filter_search_skip_strategy.h"
 #include "vsag/allocator.h"
 
@@ -139,6 +140,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     auto is_id_allowed = inner_search_param.is_inner_id_allowed;
     auto ep = inner_search_param.ep;
     auto ef = inner_search_param.ef;
+    auto* reasoning = ctx == nullptr ? nullptr : ctx->reasoning_ctx;
 
     float dist = 0.0F;
     uint64_t ids_cnt = 1;
@@ -206,6 +208,9 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
 
         if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
             if ((-current_node_pair.first) > lower_bound && top_candidates->Size() == ef) {
+                if (reasoning != nullptr) {
+                    reasoning->SetTermination(ReasoningContext::kTerminationLowerBoundReached);
+                }
                 break;
             }
         }
@@ -356,6 +361,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
         return (is_id_allowed == nullptr or is_id_allowed->CheckValid(id)) and
                (attr_ft == nullptr or attr_ft->CheckValid(id));
     };
+    auto* reasoning = ctx == nullptr ? nullptr : ctx->reasoning_ctx;
 
     if (inner_search_param.enable_rabitq_one_bit_search) {
         flatten->QueryWithDistanceLowerBound(&dist, nullptr, computer, &ep, 1, ctx);
@@ -378,7 +384,13 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     while (not candidate_set->Empty()) {
         ++hops;
         if (hops >= inner_search_param.hops_limit) {
+            if (reasoning != nullptr) {
+                reasoning->SetTermination(ReasoningContext::kTerminationHopsLimitReached);
+            }
             break;
+        }
+        if (reasoning != nullptr) {
+            reasoning->AddSearchHop();
         }
         auto current_node_pair = candidate_set->Top();
 
@@ -387,11 +399,17 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
             if (ctx != nullptr and ctx->stats != nullptr) {
                 ctx->stats->is_timeout.store(true, std::memory_order_relaxed);
             }
+            if (reasoning != nullptr) {
+                reasoning->SetTermination(ReasoningContext::kTerminationTimeout);
+            }
             break;
         }
 
         if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
             if ((-current_node_pair.first) > lower_bound && top_candidates->Size() == ef) {
+                if (reasoning != nullptr) {
+                    reasoning->SetTermination(ReasoningContext::kTerminationLowerBoundReached);
+                }
                 break;
             }
         }
@@ -436,6 +454,9 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
         for (uint32_t i = 0; i < count_no_visited; i++) {
             dist = line_dists[i];
             const auto cur_id = to_be_visited_id[i];
+            if (reasoning != nullptr) {
+                reasoning->RecordVisit(cur_id, dist, hops);
+            }
             if constexpr (mode == KNN_SEARCH) {
                 if (collect_rabitq_lower_bound and lower_bound_dists[i] < lower_bound and
                     check_func(cur_id)) {
@@ -448,6 +469,8 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                 //                flatten->Prefetch(candidate_set->Top().second);
                 if (check_func(cur_id)) {
                     top_candidates->Push(dist, cur_id);
+                } else if (reasoning != nullptr) {
+                    reasoning->RecordFilterReject(cur_id);
                 }
                 if (inner_search_param.consider_duplicate) {
                     const auto duplicate_ids = graph->GetDuplicateIds(cur_id);
@@ -460,6 +483,9 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
 
                 if constexpr (mode == KNN_SEARCH) {
                     if (top_candidates->Size() > ef) {
+                        if (reasoning != nullptr) {
+                            reasoning->RecordEviction(top_candidates->Top().second, hops);
+                        }
                         top_candidates->Pop();
                     }
                 }

@@ -20,15 +20,16 @@
 #include <mutex>
 #include <vector>
 
+#include "basic_types.h"
+#include "container_types.h"
 #include "duplicate_interface.h"
 #include "graph_interface_parameter.h"
 #include "impl/reverse_edge.h"
-#include "index_common_param.h"
+#include "index_common_param_fwd.h"
 #include "inner_string_params.h"
 #include "io/io_parameter.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
-#include "typing.h"
 #include "utils/pointer_define.h"
 
 namespace vsag {

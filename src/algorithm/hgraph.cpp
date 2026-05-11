@@ -34,6 +34,7 @@
 #include "impl/heap/standard_heap.h"
 #include "impl/odescent/odescent_graph_builder.h"
 #include "impl/pruning_strategy.h"
+#include "impl/reasoning/search_reasoning.h"
 #include "index/index_impl.h"
 #include "index/iterator_filter.h"
 #include "io/memory_io_parameter.h"
@@ -501,6 +502,12 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             {
                 SUPPORT_TOMBSTONE,
             },
+        },
+        {
+            HGRAPH_LABEL_REMAP_TYPE,
+            {
+                LABEL_REMAP_TYPE_KEY,
+            },
         }};
     const std::string hgraph_params_template =
         R"(
@@ -565,6 +572,7 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             }
         },
         "{STORE_RAW_VECTOR_KEY}": false,
+        "{LABEL_REMAP_TYPE_KEY}": "{LABEL_REMAP_TYPE_VALUE_PG}",
         "{RAW_VECTOR_KEY}": {
             "{IO_PARAMS_KEY}": {
                 "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
@@ -763,12 +771,13 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
         need_temporary_sq8_build_data(this->basic_flatten_codes_, this->has_precise_reorder());
     FlattenInterfacePtr temporary_sq8_build_data = nullptr;
     if (need_sq8_build_data and raw_vector_ == nullptr) {
-        temporary_sq8_build_data = make_temporary_sq8_flatten(this->metric_,
-                                                              this->data_type_,
-                                                              this->dim_,
-                                                              this->extra_info_size_,
-                                                              this->thread_pool_,
-                                                              this->allocator_);
+        temporary_sq8_build_data =
+            make_temporary_sq8_flatten(this->metric_,
+                                       this->data_type_,
+                                       this->dim_,
+                                       static_cast<int64_t>(this->extra_info_size_),
+                                       this->thread_pool_,
+                                       this->allocator_);
         temporary_sq8_build_data->Train(vectors, total);
     }
     bool defer_persistent_codes = temporary_sq8_build_data != nullptr;
@@ -849,29 +858,30 @@ HGraph::Add(const DatasetPtr& data, AddMode mode) {
         need_temporary_sq8_build_data(this->basic_flatten_codes_, this->has_precise_reorder());
     CHECK_ARGUMENT(not(need_sq8_build_data and this->total_count_ != 0 and
                        raw_vector_ == nullptr and temporary_build_flatten_codes_ == nullptr),
-                   "adding to an existing HGraph with RabitQ base-only reorder requires raw "
-                   "vectors");
+                   "adding to a non-empty HGraph that needs temporary SQ8 build data requires "
+                   "raw vectors");
     bool created_temporary_build_data = false;
     if (need_sq8_build_data and this->total_count_ == 0 and raw_vector_ == nullptr and
         temporary_build_flatten_codes_ == nullptr) {
-        temporary_build_flatten_codes_ = make_temporary_sq8_flatten(this->metric_,
-                                                                    this->data_type_,
-                                                                    this->dim_,
-                                                                    this->extra_info_size_,
-                                                                    this->thread_pool_,
-                                                                    this->allocator_);
+        temporary_build_flatten_codes_ =
+            make_temporary_sq8_flatten(this->metric_,
+                                       this->data_type_,
+                                       this->dim_,
+                                       static_cast<int64_t>(this->extra_info_size_),
+                                       this->thread_pool_,
+                                       this->allocator_);
         temporary_build_flatten_codes_->Train(get_data(data), data->GetNumElements());
         created_temporary_build_data = true;
     }
-    struct TemporaryBuildFlattenGuard {
+    struct temporary_build_flatten_guard {
         HGraph* hgraph;
         bool enabled;
-        ~TemporaryBuildFlattenGuard() {
+        ~temporary_build_flatten_guard() {
             if (enabled) {
                 hgraph->temporary_build_flatten_codes_.reset();
             }
         }
-    } temporary_build_flatten_guard{this, created_temporary_build_data};
+    } temporary_build_flatten_guard_instance{this, created_temporary_build_data};
     bool defer_persistent_codes = created_temporary_build_data;
 
     {
@@ -965,7 +975,9 @@ HGraph::Add(const DatasetPtr& data, AddMode mode) {
             this->Train(data);
         }
         futures.clear();
-        for (const auto& [inner_id, local_idx] : inner_ids) {
+        for (const auto& id_pair : inner_ids) {
+            auto inner_id = id_pair.first;
+            auto local_idx = id_pair.second;
             if (use_parallel_add) {
                 auto future =
                     this->thread_pool_->GeneralEnqueue([this, data, inner_id, local_idx]() {
@@ -1427,13 +1439,12 @@ HGraph::serialize_basic_info_v0_14(StreamWriter& writer) const {
     StreamWriter::WriteObj(writer, capacity);
     StreamWriter::WriteVector(writer, this->label_table_->label_table_);
 
-    uint64_t size = this->label_table_->label_remap_.size();
+    uint64_t size = this->label_table_->GetRemapSize();
     StreamWriter::WriteObj(writer, size);
-    for (const auto& pair : this->label_table_->label_remap_) {
-        auto key = pair.first;
+    this->label_table_->ForEachRemap([&writer](LabelType key, InnerIdType value) {
         StreamWriter::WriteObj(writer, key);
-        StreamWriter::WriteObj(writer, pair.second);
-    }
+        StreamWriter::WriteObj(writer, value);
+    });
 }
 
 void
@@ -1456,14 +1467,13 @@ HGraph::deserialize_basic_info_v0_14(StreamReader& reader) {
 
     uint64_t size;
     StreamReader::ReadObj(reader, size);
-    this->label_table_->label_remap_.clear();
-    this->label_table_->label_remap_.reserve(size);
+    this->label_table_->ResetRemap(size);
     for (uint64_t i = 0; i < size; ++i) {
         LabelType key;
         StreamReader::ReadObj(reader, key);
         InnerIdType value;
         StreamReader::ReadObj(reader, value);
-        this->label_table_->label_remap_.emplace(key, value);
+        this->label_table_->InsertRemap(key, value);
     }
     // Restore total_count from label_remap size
     this->label_table_->total_count_.store(static_cast<int64_t>(size));
@@ -1547,13 +1557,12 @@ HGraph::serialize_label_info(StreamWriter& writer) const {
     }
 
     StreamWriter::WriteVector(writer, this->label_table_->label_table_);
-    uint64_t size = this->label_table_->label_remap_.size();
+    uint64_t size = this->label_table_->GetRemapSize();
     StreamWriter::WriteObj(writer, size);
-    for (const auto& pair : this->label_table_->label_remap_) {
-        auto key = pair.first;
+    this->label_table_->ForEachRemap([&writer](LabelType key, InnerIdType value) {
         StreamWriter::WriteObj(writer, key);
-        StreamWriter::WriteObj(writer, pair.second);
-    }
+        StreamWriter::WriteObj(writer, value);
+    });
 }
 
 void
@@ -1566,14 +1575,13 @@ HGraph::deserialize_label_info(StreamReader& reader) const {
     StreamReader::ReadVector(reader, this->label_table_->label_table_);
     uint64_t size;
     StreamReader::ReadObj(reader, size);
-    this->label_table_->label_remap_.clear();
-    this->label_table_->label_remap_.reserve(size);
+    this->label_table_->ResetRemap(size);
     for (uint64_t i = 0; i < size; ++i) {
         LabelType key;
         StreamReader::ReadObj(reader, key);
         InnerIdType value;
         StreamReader::ReadObj(reader, value);
-        this->label_table_->label_remap_.emplace(key, value);
+        this->label_table_->InsertRemap(key, value);
     }
     this->label_table_->total_count_.store(static_cast<int64_t>(size));
 }
@@ -2537,12 +2545,49 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
 
     std::shared_lock force_remove_rlock(this->force_remove_mutex_);
     std::shared_lock shared_lock(this->global_mutex_);
+
     // check k
     CHECK_ARGUMENT(k > 0, fmt::format("k({}) must be greater than 0", k));
     k = std::min(k, GetNumElements());
 
     // check query vector
     CHECK_ARGUMENT(query->GetNumElements() == 1, "query dataset should contain 1 vector only");
+
+    // Setup reasoning context if expected labels are provided.
+    std::shared_ptr<ReasoningContext> reasoning_ctx;
+    if (not request.expected_labels_.empty()) {
+        reasoning_ctx = std::make_shared<ReasoningContext>(this->allocator_);
+        reasoning_ctx->SetSearchParams(k, "HGraph", use_reorder_, request.filter_ != nullptr);
+
+        UnorderedMap<int64_t, InnerIdType> label_to_inner_id(this->allocator_);
+        for (const auto& label : request.expected_labels_) {
+            auto [success, inner_id] = label_table_->TryGetIdByLabel(label, true);
+            if (success) {
+                label_to_inner_id[label] = inner_id;
+            }
+        }
+
+        Vector<int64_t> expected_labels_vec(
+            request.expected_labels_.begin(), request.expected_labels_.end(), this->allocator_);
+        reasoning_ctx->InitializeExpectedTargets(expected_labels_vec, label_to_inner_id);
+
+        const auto* const query_vector = get_data(query);
+        auto precise_flatten = this->basic_flatten_codes_;
+        if (use_reorder_) {
+            precise_flatten = this->high_precise_codes_;
+        }
+        if (create_new_raw_vector_) {
+            precise_flatten = this->raw_vector_;
+        }
+        auto computer = precise_flatten->FactoryComputer(query_vector);
+        for (const auto& pair : label_to_inner_id) {
+            float dist = 0.0F;
+            const auto inner_id = pair.second;
+            precise_flatten->Query(&dist, computer, &inner_id, 1);
+            reasoning_ctx->SetTrueDistance(inner_id, dist);
+        }
+        ctx.reasoning_ctx = reasoning_ctx.get();
+    }
 
     InnerSearchParam search_param;
     search_param.ep = this->entry_point_id_;
@@ -2652,9 +2697,16 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     if (search_result->Empty()) {
         auto dataset_result = DatasetImpl::MakeEmptyDataset();
         dataset_result->Statistics(stats.Dump());
+        if (reasoning_ctx) {
+            reasoning_ctx->DiagnoseExpectedTargets();
+            dataset_result->Reasoning(reasoning_ctx->GenerateReport());
+        }
         return dataset_result;
     }
     auto count = static_cast<const int64_t>(search_result->Size());
+
+    Vector<InnerIdType> result_inner_ids(static_cast<size_t>(count), this->allocator_);
+
     auto [dataset_results, dists, ids] = create_fast_dataset(count, ctx.alloc);
     char* extra_infos = nullptr;
     if (extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
@@ -2663,15 +2715,24 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         dataset_results->ExtraInfos(extra_infos);
     }
     for (int64_t j = count - 1; j >= 0; --j) {
-        dists[j] = search_result->Top().first;
-        ids[j] = this->label_table_->GetLabelById(search_result->Top().second);
+        const auto& top = search_result->Top();
+        dists[j] = top.first;
+        ids[j] = this->label_table_->GetLabelById(top.second);
+        result_inner_ids[j] = top.second;
         if (extra_infos != nullptr) {
-            this->extra_infos_->GetExtraInfoById(search_result->Top().second,
-                                                 extra_infos + extra_info_size_ * j);
+            this->extra_infos_->GetExtraInfoById(top.second, extra_infos + extra_info_size_ * j);
         }
         search_result->Pop();
     }
     dataset_results->Statistics(stats.Dump());
+
+    // Generate reasoning report if reasoning context was created
+    if (reasoning_ctx) {
+        reasoning_ctx->MarkResult(result_inner_ids);
+        reasoning_ctx->DiagnoseExpectedTargets();
+        dataset_results->Reasoning(reasoning_ctx->GenerateReport());
+    }
+
     return std::move(dataset_results);
 }
 

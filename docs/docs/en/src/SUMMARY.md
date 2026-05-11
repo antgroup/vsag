@@ -17,6 +17,7 @@
 - [IVF](indexes/ivf.md)
 - [SINDI](indexes/sindi.md)
 - [Pyramid](indexes/pyramid.md)
+- [BruteForce](indexes/brute_force.md)
 
 # Developer Guide
 
@@ -28,11 +29,14 @@
 # Advanced Features
 
 - [Range Search](advanced/range_search.md)
+- [Filtered Search](advanced/filtered_search.md)
+- [Attribute Filter (Hybrid Search)](advanced/attribute_filter.md)
 - [Serialization](advanced/serialization.md)
 - [Memory Management](advanced/memory.md)
 - [Graph Enhancement](advanced/enhance_graph.md)
 - [Hybrid Memory-Disk Index](advanced/hybrid_index.md)
 - [Extra Info](advanced/extra_info.md)
+- [Index Lifecycle Management](advanced/index_lifecycle.md)
 
 # Performance and Tuning
 
@@ -40,6 +44,7 @@
 - [Optimizer (Tune)](advanced/optimizer.md)
 - [Benchmarks](resources/performance.md)
 - [Evaluation Tool](resources/eval.md)
+- [HDF5 Dataset Format](resources/dataset_format.md)
 - [Index Analysis Tool](resources/analyze_index.md)
 
 # Resources
