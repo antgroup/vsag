@@ -17,6 +17,7 @@
 - [IVF](indexes/ivf.md)
 - [SINDI](indexes/sindi.md)
 - [Pyramid](indexes/pyramid.md)
+- [BruteForce](indexes/brute_force.md)
 
 # Developer Guide
 
