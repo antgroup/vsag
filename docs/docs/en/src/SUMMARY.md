@@ -33,6 +33,7 @@
 - [Attribute Filter (Hybrid Search)](advanced/attribute_filter.md)
 - [Serialization](advanced/serialization.md)
 - [Memory Management](advanced/memory.md)
+- [Index Introspection](advanced/introspection.md)
 - [Graph Enhancement](advanced/enhance_graph.md)
 - [Hybrid Memory-Disk Index](advanced/hybrid_index.md)
 - [Extra Info](advanced/extra_info.md)
