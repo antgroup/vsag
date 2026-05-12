@@ -87,9 +87,7 @@ parse_sparse_vectors(const char* src_data,
 // Parse token sequences from a binary blob and attach to existing sparse vectors.
 // Format per vector: [seq_len(uint32), token_id_0(uint32), token_id_1(uint32), ...]
 void
-parse_token_sequences(const char* src_data,
-                      size_t data_size,
-                      std::vector<SparseVector>& vectors) {
+parse_token_sequences(const char* src_data, size_t data_size, std::vector<SparseVector>& vectors) {
     const char* ptr = src_data;
     const char* end = src_data + data_size;
     size_t vec_idx = 0;

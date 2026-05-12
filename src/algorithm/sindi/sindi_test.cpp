@@ -2551,7 +2551,7 @@ TEST_CASE("SINDI Proximity Benchmark", "[ut][SINDI][Proximity][benchmark]") {
 
     WARN("=== SINDI Proximity Benchmark ===");
     WARN("Data: " << num_base << " docs, " << num_query << " queries, vocab=" << vocab_size
-                   << ", doc_len=" << doc_len);
+                  << ", doc_len=" << doc_len);
     WARN("Proximity recall@" << k << " vs brute-force GT: " << avg_recall);
     WARN("Proximity search: " << prox_ms << " ms total, QPS=" << static_cast<int>(prox_qps));
     WARN("Baseline+proximity search: " << base_ms << " ms total (" << num_query << " x 2 queries)");
