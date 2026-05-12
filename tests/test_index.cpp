@@ -523,9 +523,11 @@ TestIndex::TestRangeSearch(const IndexPtr& index,
         auto res_dim = res.value()->GetDim();
         auto gt_count = std::max<int64_t>(0, gt_topK - 1);
         auto val = Intersection(gt, gt_count, result, res_dim);
-        auto recall_denominator = std::min(gt_count, res_dim);
-        if (recall_denominator > 0) {
-            cur_recall += static_cast<float>(val) / static_cast<float>(recall_denominator);
+        auto denominator = std::min(gt_count, res_dim);
+        // Skip recall calculation if denominator is 0 to avoid NaN when RangeSearch returns
+        // empty result.
+        if (denominator > 0) {
+            cur_recall += static_cast<float>(val) / static_cast<float>(denominator);
         }
     }
     if (cur_recall <= expected_recall * query_count) {
