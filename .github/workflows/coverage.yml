@@ -3,13 +3,33 @@ name: Coverage
 on:
   push:
     branches: [ "main", "0.*" ]
-    paths-ignore:
-      - 'docs/**'
   workflow_dispatch:
 
 jobs:
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      non_markdown: ${{ steps.changes.outputs.non_markdown }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: changes
+        with:
+          # 'every' is REQUIRED here: with the default 'some' quantifier, the broad '**'
+          # pattern would always match and the negation patterns ('!docs/**', '!**/*.md')
+          # would have no effect, causing docs-only pushes to incorrectly trigger Coverage.
+          predicate-quantifier: 'every'
+          filters: |
+            non_markdown:
+              - '**'
+              - '!docs/**'
+              - '!**/*.md'
+
   coverage:
     name: Test Coverage
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.non_markdown == 'true'
     runs-on: ubuntu-latest
     concurrency:
       group: coverage-${{ github.event.pull_request.number || github.sha }}
