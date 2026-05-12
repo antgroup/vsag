@@ -521,8 +521,10 @@ TestIndex::TestRangeSearch(const IndexPtr& index,
         auto result = res.value()->GetIds();
         auto gt = gts->GetIds() + gt_topK * i;
         auto val = Intersection(gt, gt_topK - 1, result, res.value()->GetDim());
-        cur_recall += static_cast<float>(val) /
-                      static_cast<float>(std::min(gt_topK - 1, res.value()->GetDim()));
+        auto recall_denominator = std::min(gt_topK - 1, res.value()->GetDim());
+        if (recall_denominator > 0) {
+            cur_recall += static_cast<float>(val) / static_cast<float>(recall_denominator);
+        }
     }
     if (cur_recall <= expected_recall * query_count) {
         WARN(fmt::format("cur_result({}) <= expected_recall * query_count({})",
