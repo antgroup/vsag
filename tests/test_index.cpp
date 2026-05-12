@@ -518,9 +518,9 @@ TestIndex::TestRangeSearch(const IndexPtr& index,
         if (limited_size > 0) {
             REQUIRE(res.value()->GetDim() <= limited_size);
         }
+        auto res_dim = res.value()->GetDim();
         auto result = res.value()->GetIds();
         auto gt = gts->GetIds() + gt_topK * i;
-        auto res_dim = res.value()->GetDim();
         auto gt_count = std::max<int64_t>(0, gt_topK - 1);
         auto val = Intersection(gt, gt_count, result, res_dim);
         auto denominator = std::min(gt_count, res_dim);
