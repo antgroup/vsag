@@ -34,6 +34,7 @@
 #include "impl/heap/standard_heap.h"
 #include "impl/odescent/odescent_graph_builder.h"
 #include "impl/pruning_strategy.h"
+#include "impl/reorder/flatten_reorder.h"
 #include "impl/reasoning/search_reasoning.h"
 #include "index/index_impl.h"
 #include "index/iterator_filter.h"
@@ -2092,12 +2093,16 @@ HGraph::reorder(const void* query,
     if (k <= 0) {
         k = static_cast<int64_t>(size);
     }
-    auto reorder_heap = reorder_->Reorder(candidate_heap,
-                                          static_cast<const float*>(query),
-                                          k,
-                                          ctx,
-                                          iter_ctx,
-                                          rabitq_lower_bound_candidates);
+    auto reorder_impl = reorder_;
+    if (reorder_impl == nullptr) {
+        reorder_impl = std::make_shared<FlattenReorder>(flatten, allocator_);
+    }
+    auto reorder_heap = reorder_impl->Reorder(candidate_heap,
+                                              static_cast<const float*>(query),
+                                              k,
+                                              ctx,
+                                              iter_ctx,
+                                              rabitq_lower_bound_candidates);
     candidate_heap = reorder_heap;
 }
 
