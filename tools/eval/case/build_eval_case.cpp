@@ -65,12 +65,8 @@ BuildEvalCase::do_build() {
         } else if (this->dataset_ptr_->GetTrainDataType() == vsag::DATATYPE_INT8) {
             base->Int8Vectors((const int8_t*)this->dataset_ptr_->GetTrain());
         }
-    } else if (this->dataset_ptr_->GetVectorType() == SPARSE_VECTORS) {
+    } else {
         base->SparseVectors((const SparseVector*)this->dataset_ptr_->GetTrain());
-    } else if (this->dataset_ptr_->GetVectorType() == MULTI_VECTORS) {
-        base->MultiVectors(this->dataset_ptr_->GetMultiTrainVectors());
-        base->VectorCounts(this->dataset_ptr_->GetTrainVectorCounts());
-        base->MultiVectorDim(this->dataset_ptr_->GetMultiVectorDim());
     }
     for (auto& monitor : monitors_) {
         monitor->Start();
