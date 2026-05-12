@@ -400,6 +400,13 @@ VSAG referenced the following works during its implementation:
                 </a>
             </td>
             <td align="center">
+                <a href="https://github.com/pkusunjy">
+                    <img src="https://avatars.githubusercontent.com/u/11880269?v=4" width="100" alt="pkusunjy"/>
+                    <br />
+                    <sub><b>Sun Jiayu</b></sub>
+                </a>
+            </td>
+            <td align="center">
                 <a href="https://github.com/xfmeng17">
                     <img src="https://avatars.githubusercontent.com/u/32661584?v=4" width="100" alt="xfmeng17"/>
                     <br />
@@ -420,6 +427,8 @@ VSAG referenced the following works during its implementation:
                     <sub><b>HuMing He</b></sub>
                 </a>
             </td>
+        </tr>
+        <tr>
             <td align="center">
                 <a href="https://github.com/jiacai2050">
                     <img src="https://avatars.githubusercontent.com/u/3848910?v=4" width="100" alt="jiacai2050"/>
@@ -427,8 +436,6 @@ VSAG referenced the following works during its implementation:
                     <sub><b>Jiacai Liu</b></sub>
                 </a>
             </td>
-        </tr>
-        <tr>
             <td align="center">
                 <a href="https://github.com/lyxiong0">
                     <img src="https://avatars.githubusercontent.com/u/29161506?v=4" width="100" alt="lyxiong0"/>
@@ -448,13 +455,6 @@ VSAG referenced the following works during its implementation:
                     <img src="https://avatars.githubusercontent.com/u/34963409?v=4" width="100" alt="Ningsir"/>
                     <br />
                     <sub><b>Xinger</b></sub>
-                </a>
-            </td>
-            <td align="center">
-                <a href="https://github.com/pkusunjy">
-                    <img src="https://avatars.githubusercontent.com/u/11880269?v=4" width="100" alt="pkusunjy"/>
-                    <br />
-                    <sub><b>Sun Jiayu</b></sub>
                 </a>
             </td>
             <td align="center">
