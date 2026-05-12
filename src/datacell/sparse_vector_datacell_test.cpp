@@ -207,7 +207,8 @@ TEST_CASE("SparseDataCell Direct Read and Sparse Vector Retrieval", "[ut][Sparse
     auto len = *reinterpret_cast<const uint32_t*>(codes);
     REQUIRE(len == sparse_vectors[2].len_);
 
-    auto code_size = sizeof(uint32_t) * (2 * sparse_vectors[2].len_ + 1);
+    auto code_size = sizeof(uint32_t) + sparse_vectors[2].len_ * sizeof(uint32_t) +
+                     sparse_vectors[2].len_ * sizeof(float);
     std::vector<uint8_t> copied_codes(code_size);
     REQUIRE(data_cell->GetCodesById(2, copied_codes.data()));
     REQUIRE(std::memcmp(codes, copied_codes.data(), code_size) == 0);
@@ -242,6 +243,49 @@ TEST_CASE("SparseDataCell Direct Read and Sparse Vector Retrieval", "[ut][Sparse
         delete[] item.vals_;
         delete[] item.ids_;
     }
+}
+
+TEST_CASE("SparseDataCell Allows Sparse Length Larger Than Dim", "[ut][SparseDataCell]") {
+    constexpr const char* param_str = R"(
+        {
+            "io_params": {
+                "type": "memory_io"
+            },
+            "quantization_params": {
+                "type": "sparse"
+            }
+        }
+        )";
+    auto param = std::make_shared<SparseVectorDataCellParameter>();
+    param->FromJson(JsonType::Parse(param_str));
+    IndexCommonParam index_common_param;
+    index_common_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
+    index_common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    index_common_param.dim_ = 16;
+    auto data_cell = FlattenInterface::MakeInstance(param, index_common_param);
+
+    std::vector<uint32_t> ids(71);
+    std::vector<float> vals(71);
+    for (uint32_t i = 0; i < ids.size(); ++i) {
+        ids[i] = ids.size() - i;
+        vals[i] = static_cast<float>(i + 1);
+    }
+    SparseVector sparse_vector;
+    sparse_vector.len_ = ids.size();
+    sparse_vector.ids_ = ids.data();
+    sparse_vector.vals_ = vals.data();
+
+    data_cell->InsertVector(&sparse_vector, 0);
+
+    SparseVector retrieved;
+    data_cell->GetSparseVectorByInnerId(0, &retrieved, index_common_param.allocator_.get());
+    REQUIRE(retrieved.len_ == sparse_vector.len_);
+    for (uint32_t i = 0; i < retrieved.len_; ++i) {
+        REQUIRE(retrieved.ids_[i] == i + 1);
+        REQUIRE(retrieved.vals_[i] == vals[ids.size() - i - 1]);
+    }
+    index_common_param.allocator_->Deallocate(retrieved.ids_);
+    index_common_param.allocator_->Deallocate(retrieved.vals_);
 }
 
 TEST_CASE("SparseDataCell Rejects Old Format", "[ut][SparseDataCell]") {

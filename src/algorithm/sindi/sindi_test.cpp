@@ -29,22 +29,6 @@ using namespace vsag;
 
 namespace {
 
-std::tuple<Vector<uint32_t>, Vector<float>>
-SortSparseVector(const SparseVector& vector, Allocator* allocator) {
-    Vector<uint32_t> indices(vector.len_, allocator);
-    std::iota(indices.begin(), indices.end(), 0);
-    std::sort(indices.begin(), indices.end(), [&](uint32_t a, uint32_t b) {
-        return vector.ids_[a] < vector.ids_[b];
-    });
-    Vector<uint32_t> sorted_ids(vector.len_, allocator);
-    Vector<float> sorted_vals(vector.len_, allocator);
-    for (uint64_t j = 0; j < vector.len_; ++j) {
-        sorted_ids[j] = vector.ids_[indices[j]];
-        sorted_vals[j] = vector.vals_[indices[j]];
-    }
-    return std::make_tuple(sorted_ids, sorted_vals);
-}
-
 DatasetPtr
 SparseKnnSearch(const DatasetPtr& base,
                 const DatasetPtr& query,
@@ -55,9 +39,9 @@ SparseKnnSearch(const DatasetPtr& base,
     const auto* base_vectors = base->GetSparseVectors();
     const auto* labels = base->GetIds();
     const auto* query_vectors = query->GetSparseVectors();
-    auto [query_ids, query_vals] = SortSparseVector(query_vectors[0], allocator);
+    auto [query_ids, query_vals] = sort_sparse_vector(query_vectors[0], allocator);
     for (int64_t i = 0; i < base->GetNumElements(); ++i) {
-        auto [base_ids, base_vals] = SortSparseVector(base_vectors[i], allocator);
+        auto [base_ids, base_vals] = sort_sparse_vector(base_vectors[i], allocator);
         auto distance = get_distance(static_cast<uint32_t>(query_ids.size()),
                                      query_ids.data(),
                                      query_vals.data(),

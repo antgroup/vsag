@@ -15,6 +15,7 @@
 
 #include "sindi.h"
 
+#include <cstring>
 #include <numeric>
 
 #include "algorithm/sparse_distance.h"
@@ -32,22 +33,6 @@ namespace vsag {
 
 namespace {
 
-std::tuple<Vector<uint32_t>, Vector<float>>
-sort_sparse_vector(const SparseVector& vector, Allocator* allocator) {
-    Vector<uint32_t> indices(vector.len_, allocator);
-    std::iota(indices.begin(), indices.end(), 0);
-    std::sort(indices.begin(), indices.end(), [&](uint32_t a, uint32_t b) {
-        return vector.ids_[a] < vector.ids_[b];
-    });
-    Vector<uint32_t> sorted_ids(vector.len_, allocator);
-    Vector<float> sorted_vals(vector.len_, allocator);
-    for (uint64_t j = 0; j < vector.len_; ++j) {
-        sorted_ids[j] = vector.ids_[indices[j]];
-        sorted_vals[j] = vector.vals_[indices[j]];
-    }
-    return std::make_tuple(sorted_ids, sorted_vals);
-}
-
 float
 cal_distance_by_id_unsafe(const FlattenInterfacePtr& flat,
                           const Vector<uint32_t>& sorted_ids,
@@ -55,16 +40,10 @@ cal_distance_by_id_unsafe(const FlattenInterfacePtr& flat,
                           uint32_t inner_id) {
     bool need_release = false;
     const auto* codes = flat->GetCodesById(inner_id, need_release);
-    auto len = *reinterpret_cast<const uint32_t*>(codes);
-    const auto* ids = reinterpret_cast<const uint32_t*>(codes + sizeof(uint32_t));
-    const auto* vals = reinterpret_cast<const float*>(codes + sizeof(uint32_t) +
-                                                     len * sizeof(uint32_t));
-    auto distance = get_distance(static_cast<uint32_t>(sorted_ids.size()),
-                                 sorted_ids.data(),
-                                 sorted_vals.data(),
-                                 len,
-                                 ids,
-                                 vals);
+    auto distance = get_distance_from_sparse_code(static_cast<uint32_t>(sorted_ids.size()),
+                                                  sorted_ids.data(),
+                                                  sorted_vals.data(),
+                                                  codes);
     if (need_release) {
         flat->Release(codes);
     }

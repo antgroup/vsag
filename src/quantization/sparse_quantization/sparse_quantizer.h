@@ -15,10 +15,12 @@
 
 #pragma once
 
+#include <cstring>
 #include <vector>
 
 #include "index_common_param.h"
 #include "inner_string_params.h"
+#include "algorithm/sparse_distance.h"
 #include "quantization/quantizer.h"
 #include "quantization/quantizer_parameter.h"
 #include "sparse_quantizer_parameter.h"
@@ -182,24 +184,26 @@ SparseQuantizer<metric>::ComputeImpl(const uint8_t* codes1, const uint8_t* codes
         throw VsagException(ErrorType::INTERNAL_ERROR,
                             "no support for other metric type in sparse quantizer");
     }
-    const uint32_t len1 = *reinterpret_cast<const uint32_t*>(codes1);
-    const auto* ids1 = reinterpret_cast<const uint32_t*>(codes1 + sizeof(uint32_t));
-    const auto* vals1 = reinterpret_cast<const float*>(codes1 + sizeof(uint32_t) +
-                                                      len1 * sizeof(uint32_t));
+    uint32_t len1 = 0;
+    std::memcpy(&len1, codes1, sizeof(len1));
+    const auto* ids1 = codes1 + sizeof(uint32_t);
+    const auto* vals1 = codes1 + sizeof(uint32_t) + len1 * sizeof(uint32_t);
 
-    const uint32_t len2 = *reinterpret_cast<const uint32_t*>(codes2);
-    const auto* ids2 = reinterpret_cast<const uint32_t*>(codes2 + sizeof(uint32_t));
-    const auto* vals2 = reinterpret_cast<const float*>(codes2 + sizeof(uint32_t) +
-                                                      len2 * sizeof(uint32_t));
+    uint32_t len2 = 0;
+    std::memcpy(&len2, codes2, sizeof(len2));
+    const auto* ids2 = codes2 + sizeof(uint32_t);
+    const auto* vals2 = codes2 + sizeof(uint32_t) + len2 * sizeof(uint32_t);
     float inner_product = 0.0f;
     uint32_t idx1 = 0, idx2 = 0;
     while (idx1 < len1 && idx2 < len2) {
-        if (ids1[idx1] < ids2[idx2]) {
+        auto id1 = read_sparse_code_id(ids1, idx1);
+        auto id2 = read_sparse_code_id(ids2, idx2);
+        if (id1 < id2) {
             idx1++;
-        } else if (ids1[idx1] > ids2[idx2]) {
+        } else if (id1 > id2) {
             idx2++;
         } else {
-            inner_product += vals1[idx1] * vals2[idx2];
+            inner_product += read_sparse_code_val(vals1, idx1) * read_sparse_code_val(vals2, idx2);
             idx1++;
             idx2++;
         }
@@ -230,7 +234,7 @@ template <MetricType metric>
 bool
 SparseQuantizer<metric>::EncodeOneImpl(const float* data, uint8_t* codes) const {
     const SparseVector& sv = *reinterpret_cast<const SparseVector*>(data);
-    *reinterpret_cast<uint32_t*>(codes) = sv.len_;
+    std::memcpy(codes, &sv.len_, sizeof(sv.len_));
     std::vector<BufferEntry> entries(sv.len_);
     for (uint32_t i = 0; i < sv.len_; ++i) {
         entries[i].id = sv.ids_[i];
@@ -239,11 +243,11 @@ SparseQuantizer<metric>::EncodeOneImpl(const float* data, uint8_t* codes) const 
     std::sort(entries.begin(), entries.end(), [](const BufferEntry& a, const BufferEntry& b) {
         return a.id < b.id;
     });
-    auto* ids = reinterpret_cast<uint32_t*>(codes + sizeof(uint32_t));
-    auto* vals = reinterpret_cast<float*>(codes + sizeof(uint32_t) + sv.len_ * sizeof(uint32_t));
+    auto* ids = codes + sizeof(uint32_t);
+    auto* vals = codes + sizeof(uint32_t) + sv.len_ * sizeof(uint32_t);
     for (uint32_t i = 0; i < sv.len_; ++i) {
-        ids[i] = entries[i].id;
-        vals[i] = entries[i].val;
+        std::memcpy(ids + i * sizeof(entries[i].id), &entries[i].id, sizeof(entries[i].id));
+        std::memcpy(vals + i * sizeof(entries[i].val), &entries[i].val, sizeof(entries[i].val));
     }
     return true;
 }

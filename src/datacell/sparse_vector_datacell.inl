@@ -95,9 +95,6 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::InsertVector(const void* vector, InnerI
     }
     auto sparse_vector = (const SparseVector*)vector;
     uint64_t code_size = (sparse_vector->len_ * 2 + 1) * sizeof(uint32_t);
-    if (code_size > max_code_size_) {
-        throw VsagException(ErrorType::INVALID_ARGUMENT, fmt::format("code size ({}) of sparse vector more than max code size ({})", code_size, max_code_size_));
-    }
     auto* codes = reinterpret_cast<uint8_t*>(allocator_->Allocate(code_size));
     quantizer_->EncodeOne((const float*)vector, codes);
     DocLocation loc;
@@ -133,14 +130,13 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::GetSparseVectorByInnerId(
     Allocator* allocator = specified_allocator != nullptr ? specified_allocator : allocator_;
     bool need_release = false;
     const auto* codes = this->GetCodesById(inner_id, need_release);
-    data->len_ = *reinterpret_cast<const uint32_t*>(codes);
-    const auto* ids = reinterpret_cast<const uint32_t*>(codes + sizeof(uint32_t));
-    const auto* vals = reinterpret_cast<const float*>(codes + sizeof(uint32_t) +
-                                                     data->len_ * sizeof(uint32_t));
+    std::memcpy(&data->len_, codes, sizeof(data->len_));
     data->ids_ = static_cast<uint32_t*>(allocator->Allocate(sizeof(uint32_t) * data->len_));
     data->vals_ = static_cast<float*>(allocator->Allocate(sizeof(float) * data->len_));
-    std::memcpy(data->ids_, ids, sizeof(uint32_t) * data->len_);
-    std::memcpy(data->vals_, vals, sizeof(float) * data->len_);
+    std::memcpy(data->ids_, codes + sizeof(uint32_t), sizeof(uint32_t) * data->len_);
+    std::memcpy(data->vals_,
+                codes + sizeof(uint32_t) + data->len_ * sizeof(uint32_t),
+                sizeof(float) * data->len_);
     if (need_release) {
         this->Release(codes);
     }
@@ -194,8 +190,7 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::SparseVectorDataCell(
     : allocator_(common_param.allocator_.get()) {
     this->quantizer_ = std::make_shared<QuantTmpl>(quantization_param, common_param);
     this->io_ = std::make_shared<IOTmpl>(io_param, common_param);
-    this->offset_io_ =
-        std::make_shared<MemoryBlockIO>(Options::Instance().block_size_limit(), allocator_);
+    this->offset_io_ = std::make_shared<MemoryIO>(allocator_);
     this->max_code_size_ = (this->quantizer_->GetDim() * 2 + 1) * sizeof(uint32_t);
     this->max_capacity_ = 0;
     this->code_size_ = this->quantizer_->GetCodeSize();

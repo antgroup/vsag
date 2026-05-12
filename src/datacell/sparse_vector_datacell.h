@@ -18,7 +18,7 @@
 #include "algorithm/inner_index_interface.h"
 #include "flatten_interface.h"
 #include "io/basic_io.h"
-#include "io/memory_block_io.h"
+#include "io/memory_io.h"
 #include "vsag/dataset.h"
 
 namespace vsag {
@@ -170,7 +170,7 @@ private:
     std::shared_ptr<BasicIO<IOTmpl>> io_{nullptr};
 
     Allocator* const allocator_{nullptr};
-    std::shared_ptr<MemoryBlockIO> offset_io_{nullptr};
+    std::shared_ptr<MemoryIO> offset_io_{nullptr};
     uint32_t current_offset_{0};
     uint64_t max_code_size_{0};
     std::mutex current_offset_mutex_;
