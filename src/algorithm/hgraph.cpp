@@ -1516,6 +1516,7 @@ void
 HGraph::deserialize_basic_info(const JsonType& jsonify_basic_info) {
     logger::debug("jsonify_basic_info: {}", jsonify_basic_info.Dump());
     FROM_JSON(jsonify_basic_info, use_reorder, Bool);
+    this->reorder_by_base_ = false;
     FROM_JSON(jsonify_basic_info, reorder_by_base, Bool);
     FROM_JSON(jsonify_basic_info, dim, Int);
     if (jsonify_basic_info.Contains("metric")) {

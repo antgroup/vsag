@@ -1081,7 +1081,7 @@ RaBitQuantizer<metric>::ComputeDistWithSplitCode(Computer<RaBitQuantizer>& compu
     error_type base_error = 0;
     memcpy(&base_error, meta_field(offset_error_), sizeof(base_error));
     if (std::abs(base_error) < 1e-5) {
-        base_error = (base_error > 0) ? 1.0F : -1.0F;
+        base_error = (base_error >= 0) ? 1.0F : -1.0F;
     }
 
     float ip_est = ip_bq_estimate / base_error;
@@ -1167,7 +1167,7 @@ RaBitQuantizer<metric>::ComputeQueryBaseImpl(const uint8_t* query_codes,
 
     error_type base_error = *((error_type*)(base_codes + offset_error_));
     if (std::abs(base_error) < 1e-5) {
-        base_error = (base_error > 0) ? 1.0F : -1.0F;
+        base_error = (base_error >= 0) ? 1.0F : -1.0F;
     }
 
     float ip_bb_1_32 = base_error;
