@@ -42,6 +42,11 @@ Node.js/TypeScript bindings provided by `vsag`.
 - **Pull requests need two labels:** one `kind/*` (`kind/bug`,
   `kind/feature`, `kind/improvement`, `kind/documentation`) and one
   `version/*` (e.g. `version/1.0`). Mergify enforces both.
+- **`kind/bug` / `kind/feature` PRs must link an issue** in the
+  description using a GitHub auto-closing keyword (`Fixes: #N`,
+  `Closes: #N`, `Resolves: #N`; cross-repo or full issue URL also OK).
+  `kind/improvement` and `kind/documentation` PRs are exempt. Enforced
+  by the `PR Issue Link Check` Action and a Mergify protection.
 - **Issues do NOT carry `Signed-off-by:`** — DCO only applies to commits.
 
 ## Quick Command Reference

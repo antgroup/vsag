@@ -1,0 +1,99 @@
+name: PR Issue Link Check
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize, labeled, unlabeled]
+    branches:
+      - main
+      - "0.*"
+
+permissions:
+  pull-requests: read
+
+concurrency:
+  group: pr-issue-link-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  check-issue-link:
+    name: Require linked issue for feature/bug PRs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate PR description references an issue
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          import sys
+
+          body = os.environ.get("PR_BODY") or ""
+          try:
+              labels = json.loads(os.environ.get("PR_LABELS") or "[]")
+          except json.JSONDecodeError:
+              labels = []
+
+          requires_link = any(label in ("kind/feature", "kind/bug") for label in labels)
+
+          if not requires_link:
+              # kind/improvement, kind/documentation, or no kind/* yet
+              # (the latter is already blocked by the existing
+              # "Require kind label" Mergify protection, so we don't
+              # need to fail here too).
+              print(
+                  "PR is not labeled `kind/feature` or `kind/bug`; "
+                  "issue link is optional. Skipping check."
+              )
+              sys.exit(0)
+
+          # Accept GitHub auto-closing keywords (close/closes/closed,
+          # fix/fixes/fixed, resolve/resolves/resolved), case-insensitive,
+          # optionally followed by a colon, then a reference to either:
+          #   - #1234
+          #   - owner/repo#1234
+          #   - https://github.com/owner/repo/issues/1234
+          pattern = re.compile(
+              r"(?im)"
+              r"(?:^|[\s\-\*])"
+              r"(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)"
+              r"\s*:?\s+"
+              r"(?:"
+              r"#\d+"
+              r"|[\w.\-]+/[\w.\-]+#\d+"
+              r"|https?://github\.com/[\w.\-]+/[\w.\-]+/issues/\d+"
+              r")"
+          )
+
+          # Strip HTML comments so the placeholder in the PR template
+          # (e.g. "<!-- e.g. #1234 -->") does not count as a real link.
+          body_no_comments = re.sub(r"<!--.*?-->", "", body, flags=re.DOTALL)
+
+          match = pattern.search(body_no_comments)
+          if match:
+              print(
+                  "Found linked issue reference: "
+                  f"`{match.group(0).strip()}`. Check passed."
+              )
+              sys.exit(0)
+
+          print("::error::PR is labeled `kind/feature` or `kind/bug` but the "
+                "description does not link an issue.")
+          print("")
+          print("Please edit the PR description to include one of the "
+                "following (GitHub-recognized auto-closing keywords):")
+          print("")
+          print("    Fixes: #1234")
+          print("    Closes: #1234")
+          print("    Resolves: #1234")
+          print("")
+          print("Cross-repo references (`owner/repo#1234`) and full issue "
+                "URLs are also accepted.")
+          print("")
+          print("See .github/pull_request_template.md and CONTRIBUTING.md "
+                "for details.")
+          sys.exit(1)
+          PY
