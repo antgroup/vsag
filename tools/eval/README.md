@@ -1,3 +1,16 @@
+<!-- agent-hints
+canonical: tools/eval/README.md
+purpose: Usage guide for the eval_performance tool (build, run, datasets, metrics)
+key-facts:
+  - Binary built with ENABLE_TOOLS=ON; lives at build-release/tools/eval/eval_performance
+  - Consumes HDF5 datasets in the ann-benchmarks layout (see docs/dataset_format.md)
+  - Reports throughput, latency, and recall across indexes/params
+related:
+  - README_zh.md
+  - ../../docs/docs/en/src/resources/eval.md
+  - ../../docs/eval_performance.md
+last-reviewed: 2026-05-12
+-->
 # VSAG Performance Evaluation Tool
 
 [\[中文\]](README_zh.md)

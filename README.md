@@ -1,3 +1,16 @@
+<!-- agent-hints
+canonical: README.md
+purpose: VSAG project landing page (intro, performance, Quickstart, links)
+key-facts:
+  - VSAG is a C++ vector indexing library with pyvsag (Python) and vsag (Node.js/TS) bindings
+  - SINDI (sparse) and HGraph (dense) are the headline indexes
+  - Quickstart blocks exist for C++, Python, and TypeScript
+related:
+  - AGENTS.md
+  - DEVELOPMENT.md
+  - docs/docs/en/src/guide/installation.md
+last-reviewed: 2026-05-12
+-->
 <div align="center">
   <h1><img alt="vsag-pages" src="docs/banner.svg" width=500/></h1>
 
