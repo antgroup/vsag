@@ -525,10 +525,10 @@ RaBitQuantizer<metric>::EncodeOneImpl(const float* data, uint8_t* codes) const {
         error_type one_bit_error = 0.0F;
         if (SupportSplitCodeStorage()) {
             uint64_t plane_bytes = (this->dim_ + 7) / 8;
-            const auto* one_bit_plane = GetStoredPlane(
-                codes + offset_code_,
-                static_cast<uint32_t>(num_bits_per_dim_base_ - 1),
-                plane_bytes);
+            const auto* one_bit_plane =
+                GetStoredPlane(codes + offset_code_,
+                               static_cast<uint32_t>(num_bits_per_dim_base_ - 1),
+                               plane_bytes);
             one_bit_error =
                 RaBitQFloatBinaryIP(normed_data.data(), one_bit_plane, this->dim_, inv_sqrt_d_);
         }
