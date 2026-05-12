@@ -99,7 +99,7 @@ generic `IndexSearchParameter` fields are honored:
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `parallelism` | int | `1` | Split the linear scan of a single query across this many threads in the index's internal thread pool. Larger values cut single-query latency on large corpora at the cost of using more cores. Values `<= 0` are clamped to `1`. |
+| `parallelism` | int | `1` | Split the linear scan of a single query across this many threads in the index's internal thread pool. It applies to both `KnnSearch` and `RangeSearch`. Larger values cut single-query latency on large corpora at the cost of using more cores. Values `<= 0` are clamped to `1`. |
 
 ```cpp
 // Single-threaded scan (default).
@@ -107,10 +107,12 @@ auto r1 = index->KnnSearch(query, topk, "{}").value();
 
 // Use 8 threads to scan a single query in parallel.
 auto r2 = index->KnnSearch(query, topk, R"({"parallelism": 8})").value();
+
+// RangeSearch uses the same parallelism parameter.
+auto r3 = index->RangeSearch(query, radius, R"({"parallelism": 8})").value();
 ```
 
-For range search, see [Range Search](../advanced/range_search.md). `RangeSearch` on BruteForce
-always runs single-threaded regardless of `parallelism`.
+For range search semantics, see [Range Search](../advanced/range_search.md).
 
 ## Capabilities
 

@@ -23,6 +23,23 @@
 
 namespace fixtures {
 
+class EvenIdFilter : public vsag::Filter {
+public:
+    bool
+    CheckValid(int64_t id) const override {
+        return id % 2 == 0;
+    }
+};
+
+static void
+CheckSameRangeSearchResults(const vsag::DatasetPtr& lhs, const vsag::DatasetPtr& rhs) {
+    REQUIRE(lhs->GetDim() == rhs->GetDim());
+    for (int64_t i = 0; i < lhs->GetDim(); ++i) {
+        REQUIRE(lhs->GetIds()[i] == rhs->GetIds()[i]);
+        REQUIRE(lhs->GetDistances()[i] == rhs->GetDistances()[i]);
+    }
+}
+
 class BruteForceTestResource {
 public:
     std::vector<int> dims;
@@ -276,6 +293,59 @@ TestBruteForceBuild(const fixtures::BruteForceResourcePtr& resource) {
 TEST_CASE("(PR) BruteForce Build Test", "[ft][build][bruteforce][pr]") {
     auto resource = fixtures::BruteForceTestIndex::GetResource(true);
     TestBruteForceBuild(resource);
+}
+
+TEST_CASE("(PR) BruteForce Parallel RangeSearch Test", "[ft][range_search][bruteforce][pr]") {
+    constexpr int64_t dim = 2;
+    constexpr int64_t base_count = 8;
+    std::vector<int64_t> ids{0, 1, 2, 3, 4, 5, 6, 7};
+    std::vector<float> vectors{0.0F,
+                               0.0F,
+                               1.0F,
+                               0.0F,
+                               2.0F,
+                               0.0F,
+                               3.0F,
+                               0.0F,
+                               4.0F,
+                               0.0F,
+                               5.0F,
+                               0.0F,
+                               6.0F,
+                               0.0F,
+                               7.0F,
+                               0.0F};
+    std::vector<float> query_vector{0.0F, 0.0F};
+
+    auto base = vsag::Dataset::Make();
+    base->NumElements(base_count)
+        ->Dim(dim)
+        ->Ids(ids.data())
+        ->Float32Vectors(vectors.data())
+        ->Owner(false);
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(dim)->Float32Vectors(query_vector.data())->Owner(false);
+
+    auto param =
+        fixtures::BruteForceTestIndex::GenerateBruteForceBuildParametersString("l2", dim, "fp32");
+    auto index = fixtures::TestIndex::TestFactory(fixtures::BruteForceTestIndex::name, param, true);
+    REQUIRE(index->Build(base).has_value());
+
+    auto single = index->RangeSearch(query, 16.0F, "{}", 4).value();
+    auto parallel = index->RangeSearch(query, 16.0F, R"({"parallelism": 4})", 4).value();
+    fixtures::CheckSameRangeSearchResults(single, parallel);
+
+    REQUIRE_FALSE(index->RangeSearch(query, 16.0F, R"({"parallelism": 4})", 0).has_value());
+
+    auto excessive_parallelism =
+        index->RangeSearch(query, 16.0F, R"({"parallelism": 32})", 4).value();
+    fixtures::CheckSameRangeSearchResults(single, excessive_parallelism);
+
+    auto filter = std::make_shared<fixtures::EvenIdFilter>();
+    auto filtered_single = index->RangeSearch(query, 64.0F, "{}", filter, 3).value();
+    auto filtered_parallel =
+        index->RangeSearch(query, 64.0F, R"({"parallelism": 4})", filter, 3).value();
+    fixtures::CheckSameRangeSearchResults(filtered_single, filtered_parallel);
 }
 
 TEST_CASE("(Daily) BruteForce Build Test", "[ft][build][bruteforce][daily]") {
