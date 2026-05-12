@@ -15,6 +15,8 @@
 
 #pragma once
 
+#include <vector>
+
 #include "index_common_param.h"
 #include "inner_string_params.h"
 #include "quantization/quantizer.h"
@@ -34,14 +36,13 @@ struct BufferEntry {
  *
  * code layout:
  * +----------+------------------+------------------+-----+------------------+
- * | len      | entry[0]         | entry[1]         | ... | entry[len-1]     |
- * | [4B]     | id[4B] + val[4B] | id[4B] + val[4B] |     | id[4B] + val[4B] |
+ * | len      | ids[0] | ids[1] | ... | ids[len-1] | vals[0] | ... | vals[len-1] |
+ * | [4B]     | [4B]   | [4B]   |     | [4B]       | [4B]    |     | [4B]        |
  * +----------+------------------+------------------+-----+------------------+
  *
  * - len: number of non-zero elements (uint32)
- * - entry[i]: sorted by id in ascending order
- *   - id: dimension index (uint32)
- *   - val: value at this dimension (float)
+ * - ids: dimension indexes sorted in ascending order
+ * - vals: values matching ids by position
  * - Only supports METRIC_TYPE_IP (inner product)
  */
 template <MetricType metric = MetricType::METRIC_TYPE_IP>
@@ -182,19 +183,23 @@ SparseQuantizer<metric>::ComputeImpl(const uint8_t* codes1, const uint8_t* codes
                             "no support for other metric type in sparse quantizer");
     }
     const uint32_t len1 = *reinterpret_cast<const uint32_t*>(codes1);
-    const auto* entries1 = reinterpret_cast<const BufferEntry*>(codes1 + sizeof(uint32_t));
+    const auto* ids1 = reinterpret_cast<const uint32_t*>(codes1 + sizeof(uint32_t));
+    const auto* vals1 = reinterpret_cast<const float*>(codes1 + sizeof(uint32_t) +
+                                                      len1 * sizeof(uint32_t));
 
     const uint32_t len2 = *reinterpret_cast<const uint32_t*>(codes2);
-    const auto* entries2 = reinterpret_cast<const BufferEntry*>(codes2 + sizeof(uint32_t));
+    const auto* ids2 = reinterpret_cast<const uint32_t*>(codes2 + sizeof(uint32_t));
+    const auto* vals2 = reinterpret_cast<const float*>(codes2 + sizeof(uint32_t) +
+                                                      len2 * sizeof(uint32_t));
     float inner_product = 0.0f;
     uint32_t idx1 = 0, idx2 = 0;
     while (idx1 < len1 && idx2 < len2) {
-        if (entries1[idx1].id < entries2[idx2].id) {
+        if (ids1[idx1] < ids2[idx2]) {
             idx1++;
-        } else if (entries1[idx1].id > entries2[idx2].id) {
+        } else if (ids1[idx1] > ids2[idx2]) {
             idx2++;
         } else {
-            inner_product += entries1[idx1].val * entries2[idx2].val;
+            inner_product += vals1[idx1] * vals2[idx2];
             idx1++;
             idx2++;
         }
@@ -226,14 +231,20 @@ bool
 SparseQuantizer<metric>::EncodeOneImpl(const float* data, uint8_t* codes) const {
     const SparseVector& sv = *reinterpret_cast<const SparseVector*>(data);
     *reinterpret_cast<uint32_t*>(codes) = sv.len_;
-    auto* entries = reinterpret_cast<BufferEntry*>(codes + sizeof(uint32_t));
+    std::vector<BufferEntry> entries(sv.len_);
     for (uint32_t i = 0; i < sv.len_; ++i) {
         entries[i].id = sv.ids_[i];
         entries[i].val = sv.vals_[i];
     }
-    std::sort(entries, entries + sv.len_, [](const BufferEntry& a, const BufferEntry& b) {
+    std::sort(entries.begin(), entries.end(), [](const BufferEntry& a, const BufferEntry& b) {
         return a.id < b.id;
     });
+    auto* ids = reinterpret_cast<uint32_t*>(codes + sizeof(uint32_t));
+    auto* vals = reinterpret_cast<float*>(codes + sizeof(uint32_t) + sv.len_ * sizeof(uint32_t));
+    for (uint32_t i = 0; i < sv.len_; ++i) {
+        ids[i] = entries[i].id;
+        vals[i] = entries[i].val;
+    }
     return true;
 }
 

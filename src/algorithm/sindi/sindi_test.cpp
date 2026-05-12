@@ -15,13 +15,77 @@
 
 #include "sindi.h"
 
+#include <numeric>
 #include <set>
 
+#include "algorithm/sparse_distance.h"
+#include "impl/heap/standard_heap.h"
 #include "impl/allocator/safe_allocator.h"
 #include "index_common_param.h"
 #include "storage/serialization_template_test.h"
 #include "unittest.h"
+#include "utils/util_functions.h"
 using namespace vsag;
+
+namespace {
+
+std::tuple<Vector<uint32_t>, Vector<float>>
+SortSparseVector(const SparseVector& vector, Allocator* allocator) {
+    Vector<uint32_t> indices(vector.len_, allocator);
+    std::iota(indices.begin(), indices.end(), 0);
+    std::sort(indices.begin(), indices.end(), [&](uint32_t a, uint32_t b) {
+        return vector.ids_[a] < vector.ids_[b];
+    });
+    Vector<uint32_t> sorted_ids(vector.len_, allocator);
+    Vector<float> sorted_vals(vector.len_, allocator);
+    for (uint64_t j = 0; j < vector.len_; ++j) {
+        sorted_ids[j] = vector.ids_[indices[j]];
+        sorted_vals[j] = vector.vals_[indices[j]];
+    }
+    return std::make_tuple(sorted_ids, sorted_vals);
+}
+
+DatasetPtr
+SparseKnnSearch(const DatasetPtr& base,
+                const DatasetPtr& query,
+                int64_t k,
+                const FilterPtr& filter,
+                Allocator* allocator) {
+    auto results = std::make_shared<StandardHeap<true, false>>(allocator, -1);
+    const auto* base_vectors = base->GetSparseVectors();
+    const auto* labels = base->GetIds();
+    const auto* query_vectors = query->GetSparseVectors();
+    auto [query_ids, query_vals] = SortSparseVector(query_vectors[0], allocator);
+    for (int64_t i = 0; i < base->GetNumElements(); ++i) {
+        auto [base_ids, base_vals] = SortSparseVector(base_vectors[i], allocator);
+        auto distance = get_distance(static_cast<uint32_t>(query_ids.size()),
+                                     query_ids.data(),
+                                     query_vals.data(),
+                                     static_cast<uint32_t>(base_ids.size()),
+                                     base_ids.data(),
+                                     base_vals.data());
+        if (not filter || filter->CheckValid(labels[i])) {
+            results->Push(distance, labels[i]);
+            if (results->Size() > k) {
+                results->Pop();
+            }
+        }
+    }
+
+    auto [result, dists, ids] = create_fast_dataset(static_cast<int64_t>(results->Size()), allocator);
+    if (results->Empty()) {
+        result->Dim(0)->NumElements(1);
+        return result;
+    }
+    for (auto j = static_cast<int64_t>(results->Size() - 1); j >= 0; --j) {
+        dists[j] = results->Top().first;
+        ids[j] = results->Top().second;
+        results->Pop();
+    }
+    return result;
+}
+
+}  // namespace
 
 class MockFilter : public Filter {
 public:
@@ -100,12 +164,8 @@ TEST_CASE("SINDI Basic Test", "[ut][SINDI]") {
     index_param->FromJson(param_json);
     auto index = std::make_unique<SINDI>(index_param, common_param);
     auto another_index = std::make_unique<SINDI>(index_param, common_param);
-    SparseIndexParameterPtr bf_param = std::make_shared<SparseIndexParameters>();
-    bf_param->need_sort = true;
-    auto bf_index = std::make_unique<SparseIndex>(bf_param, common_param);
 
     // test build
-    bf_index->Build(base);
     auto build_res = index->Build(base);
     REQUIRE(build_res.size() == 0);
     REQUIRE(index->GetNumElements() == num_base);
@@ -156,7 +216,7 @@ TEST_CASE("SINDI Basic Test", "[ut][SINDI]") {
         query->NumElements(1)->SparseVectors(sv_base.data() + i)->Owner(false);
 
         // gt
-        auto bf_result = bf_index->KnnSearch(query, k, search_param_str, nullptr);
+        auto bf_result = SparseKnnSearch(base, query, k, nullptr, allocator.get());
 
         // test basic performance
         auto result = index->KnnSearch(query, k, search_param_str, nullptr);
@@ -284,12 +344,8 @@ TEST_CASE("SINDI Quantization Test", "[ut][SINDI]") {
     auto index_param = std::make_shared<vsag::SINDIParameter>();
     index_param->FromJson(param_json);
     auto index = std::make_unique<SINDI>(index_param, common_param);
-    SparseIndexParameterPtr bf_param = std::make_shared<SparseIndexParameters>();
-    bf_param->need_sort = true;
-    auto bf_index = std::make_unique<SparseIndex>(bf_param, common_param);
 
     // test build
-    bf_index->Build(base);
     auto build_res = index->Build(base);
     REQUIRE(build_res.size() == 0);
     REQUIRE(index->GetNumElements() == num_base);
@@ -313,7 +369,7 @@ TEST_CASE("SINDI Quantization Test", "[ut][SINDI]") {
         query->NumElements(1)->SparseVectors(sv_base.data() + i)->Owner(false);
 
         // gt
-        auto bf_result = bf_index->KnnSearch(query, k, search_param_str, nullptr);
+        auto bf_result = SparseKnnSearch(base, query, k, nullptr, allocator.get());
 
         // test basic performance
         auto result = index->KnnSearch(query, k, search_param_str, nullptr);
@@ -401,12 +457,6 @@ TEST_CASE("SINDI Remap Basic Test", "[ut][SINDI]") {
     auto index = std::make_unique<SINDI>(index_param, common_param);
     auto another_index = std::make_unique<SINDI>(index_param, common_param);
 
-    // Build a brute-force index for ground truth (uses original sparse IDs directly)
-    SparseIndexParameterPtr bf_param = std::make_shared<SparseIndexParameters>();
-    bf_param->need_sort = true;
-    auto bf_index = std::make_unique<SparseIndex>(bf_param, common_param);
-
-    bf_index->Build(base);
     auto build_res = index->Build(base);
     REQUIRE(build_res.size() == 0);
     REQUIRE(index->GetNumElements() == num_base);
@@ -431,7 +481,7 @@ TEST_CASE("SINDI Remap Basic Test", "[ut][SINDI]") {
     for (int i = 0; i < num_query; ++i) {
         query->NumElements(1)->SparseVectors(sv_base.data() + i)->Owner(false);
 
-        auto bf_result = bf_index->KnnSearch(query, k, search_param_str, nullptr);
+        auto bf_result = SparseKnnSearch(base, query, k, nullptr, allocator.get());
         auto result = index->KnnSearch(query, k, search_param_str, nullptr);
 
         REQUIRE(result->GetDim() == bf_result->GetDim());
@@ -552,11 +602,6 @@ TEST_CASE("SINDI Remap with Reorder Test", "[ut][SINDI]") {
     index_param->FromJson(param_json);
     auto index = std::make_unique<SINDI>(index_param, common_param);
 
-    SparseIndexParameterPtr bf_param = std::make_shared<SparseIndexParameters>();
-    bf_param->need_sort = true;
-    auto bf_index = std::make_unique<SparseIndex>(bf_param, common_param);
-
-    bf_index->Build(base);
     auto build_res = index->Build(base);
     REQUIRE(build_res.size() == 0);
 
@@ -575,7 +620,7 @@ TEST_CASE("SINDI Remap with Reorder Test", "[ut][SINDI]") {
     for (int i = 0; i < num_query; ++i) {
         query->NumElements(1)->SparseVectors(sv_base.data() + i)->Owner(false);
 
-        auto bf_result = bf_index->KnnSearch(query, k, search_param_str, nullptr);
+        auto bf_result = SparseKnnSearch(base, query, k, nullptr, allocator.get());
         auto result = index->KnnSearch(query, k, search_param_str, nullptr);
 
         REQUIRE(result->GetDim() == bf_result->GetDim());
@@ -694,11 +739,6 @@ TEST_CASE("SINDI Remap with Quantization Test", "[ut][SINDI]") {
     index_param->FromJson(param_json);
     auto index = std::make_unique<SINDI>(index_param, common_param);
 
-    SparseIndexParameterPtr bf_param = std::make_shared<SparseIndexParameters>();
-    bf_param->need_sort = true;
-    auto bf_index = std::make_unique<SparseIndex>(bf_param, common_param);
-
-    bf_index->Build(base);
     auto build_res = index->Build(base);
     REQUIRE(build_res.size() == 0);
 
@@ -718,7 +758,7 @@ TEST_CASE("SINDI Remap with Quantization Test", "[ut][SINDI]") {
     for (int i = 0; i < num_query; ++i) {
         query->NumElements(1)->SparseVectors(sv_base.data() + i)->Owner(false);
 
-        auto bf_result = bf_index->KnnSearch(query, k, search_param_str, nullptr);
+        auto bf_result = SparseKnnSearch(base, query, k, nullptr, allocator.get());
         auto result = index->KnnSearch(query, k, search_param_str, nullptr);
 
         REQUIRE(result->GetDim() == bf_result->GetDim());

@@ -18,7 +18,7 @@ SINDI organizes sparse vectors using a **window-based inverted list structure**:
 
 - **Quantization Support**: Optional quantization (controlled by `use_quantization`) can compress term values to reduce memory usage.
 
-- **Reordering Support**: When `use_reorder` is enabled, SINDI maintains a high-precision flat index for accurate distance recalculation during search.
+- **Reordering Support**: When `use_reorder` is enabled, SINDI maintains original sparse vectors in `SparseVectorDataCell` for high-precision distance recalculation during search.
 
 ### 2. Search Phase
 
@@ -30,7 +30,7 @@ When a query sparse vector is provided:
 
 3. **Heap-based Selection**: Top-k candidates are maintained using a max-heap structure for efficient retrieval.
 
-4. **Reordering (Optional)**: If `use_reorder` is enabled, candidates are re-scored using high-precision calculations to improve accuracy.
+4. **Reordering (Optional)**: If `use_reorder` is enabled, candidates are re-scored against the original sparse-vector payloads stored in `SparseVectorDataCell` to improve accuracy.
 
 5. **Result Return**: The final results are returned with distances converted from inner product scores (using `distance = 1 - inner_product`).
 
@@ -155,7 +155,7 @@ This creates a SINDI index allowing sparse vectors with a term ID limit of 5000,
 }
 ```
 
-This creates a SINDI index with reordering and quantization enabled for better accuracy and memory efficiency.
+This creates a SINDI index with reordering and quantization enabled for better accuracy and memory efficiency. Reordering uses the unquantized sparse vectors kept in `SparseVectorDataCell`, while `use_quantization` applies to the inverted term data.
 
 ## Detailed Explanation of Search Parameters
 
@@ -233,6 +233,6 @@ This searches with 200 candidates, 10% query term pruning, 5% term list pruning,
 
 5. Larger `window_size` values generally improve search performance but increase memory usage per window.
 
-6. When `use_reorder` is enabled, memory usage approximately doubles but accuracy improves significantly.
+6. When `use_reorder` is enabled, SINDI keeps an additional `SparseVectorDataCell` forward store for exact sparse-vector reranking, so memory usage increases but accuracy improves significantly.
 
 7. Quantization reduces memory usage but may slightly decrease accuracy.

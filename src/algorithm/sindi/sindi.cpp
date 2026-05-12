@@ -15,14 +15,81 @@
 
 #include "sindi.h"
 
+#include <numeric>
+
+#include "algorithm/sparse_distance.h"
+#include "datacell/sparse_vector_datacell_parameter.h"
 #include "impl/heap/standard_heap.h"
 #include "index_feature_list.h"
+#include "io/memory_io_parameter.h"
+#include "quantization/sparse_quantization/sparse_quantizer_parameter.h"
 #include "storage/serialization.h"
 #include "utils/util_functions.h"
 #include "vsag/allocator.h"
 #include "vsag_exception.h"
 
 namespace vsag {
+
+namespace {
+
+std::tuple<Vector<uint32_t>, Vector<float>>
+sort_sparse_vector(const SparseVector& vector, Allocator* allocator) {
+    Vector<uint32_t> indices(vector.len_, allocator);
+    std::iota(indices.begin(), indices.end(), 0);
+    std::sort(indices.begin(), indices.end(), [&](uint32_t a, uint32_t b) {
+        return vector.ids_[a] < vector.ids_[b];
+    });
+    Vector<uint32_t> sorted_ids(vector.len_, allocator);
+    Vector<float> sorted_vals(vector.len_, allocator);
+    for (uint64_t j = 0; j < vector.len_; ++j) {
+        sorted_ids[j] = vector.ids_[indices[j]];
+        sorted_vals[j] = vector.vals_[indices[j]];
+    }
+    return std::make_tuple(sorted_ids, sorted_vals);
+}
+
+float
+cal_distance_by_id_unsafe(const FlattenInterfacePtr& flat,
+                          const Vector<uint32_t>& sorted_ids,
+                          const Vector<float>& sorted_vals,
+                          uint32_t inner_id) {
+    bool need_release = false;
+    const auto* codes = flat->GetCodesById(inner_id, need_release);
+    auto len = *reinterpret_cast<const uint32_t*>(codes);
+    const auto* ids = reinterpret_cast<const uint32_t*>(codes + sizeof(uint32_t));
+    const auto* vals = reinterpret_cast<const float*>(codes + sizeof(uint32_t) +
+                                                     len * sizeof(uint32_t));
+    auto distance = get_distance(static_cast<uint32_t>(sorted_ids.size()),
+                                 sorted_ids.data(),
+                                 sorted_vals.data(),
+                                 len,
+                                 ids,
+                                 vals);
+    if (need_release) {
+        flat->Release(codes);
+    }
+    return distance;
+}
+
+DatasetPtr
+collect_results(const DistHeapPtr& results, Allocator* allocator) {
+    auto [result, dists, ids] =
+        create_fast_dataset(static_cast<int64_t>(results->Size()), allocator);
+    if (results->Empty()) {
+        result->Dim(0)->NumElements(1);
+        return result;
+    }
+
+    for (auto j = static_cast<int64_t>(results->Size() - 1); j >= 0; --j) {
+        dists[j] = results->Top().first;
+        ids[j] = results->Top().second;
+        results->Pop();
+    }
+    return result;
+}
+
+}  // namespace
+
 ParamPtr
 SINDI::CheckAndMappingExternalParam(const JsonType& external_param,
                                     const IndexCommonParam& common_param) {
@@ -49,9 +116,16 @@ SINDI::SINDI(const SINDIParameterPtr& param, const IndexCommonParam& common_para
             std::make_shared<TermIdMapper>(term_id_limit_, common_param.allocator_.get());
     }
     if (use_reorder_) {
-        SparseIndexParameterPtr rerank_param = std::make_shared<SparseIndexParameters>();
-        rerank_param->need_sort = true;
-        rerank_flat_index_ = std::make_shared<SparseIndex>(rerank_param, common_param);
+        auto rerank_param = std::make_shared<SparseVectorDataCellParameter>();
+        rerank_param->io_parameter = std::make_shared<MemoryIOParameter>();
+        rerank_param->quantizer_parameter = std::make_shared<SparseQuantizerParameter>();
+        auto rerank_common_param = common_param;
+        rerank_common_param.metric_ = MetricType::METRIC_TYPE_IP;
+        if (rerank_common_param.dim_ == 0) {
+            rerank_common_param.dim_ = term_id_limit_;
+        }
+        rerank_flat_ = FlattenInterface::MakeInstance(rerank_param, rerank_common_param);
+        rerank_label_table_ = std::make_shared<LabelTable>(allocator_);
     }
 }
 
@@ -154,12 +228,8 @@ SINDI::Add(const DatasetPtr& base, AddMode mode) {
 
         // high precision part
         if (use_reorder_) {
-            auto single_base = Dataset::Make();
-            single_base->NumElements(1)
-                ->SparseVectors(sparse_vectors + i)
-                ->Ids(ids + i)
-                ->Owner(false);
-            rerank_flat_index_->Add(single_base);
+            rerank_flat_->InsertVector(sparse_vectors + i, cur_element_count_ - 1);
+            rerank_label_table_->Insert(cur_element_count_ - 1, ids[i]);
         }
     }
     if (window_changed) {
@@ -179,14 +249,14 @@ SINDI::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) {
     // Note:
     // 1. we only check whether the old vector is a subset of the new vector
     // 2. we do not actually update the vector
-    auto check_and_cleanup = [this, id, &new_base](InnerIndexInterface* index) -> bool {
+    auto check_and_cleanup = [this, id, &new_base](auto get_sparse_vector) -> bool {
         SparseVector old_sv;
         uint32_t inner_id;
         {
             std::scoped_lock rlock(this->global_mutex_);
             inner_id = this->label_table_->GetIdByLabel(id);
         }
-        index->GetSparseVectorByInnerId(inner_id, &old_sv, this->allocator_);
+        get_sparse_vector(inner_id, &old_sv);
 
         const auto& new_sv = *new_base->GetSparseVectors();
         bool ret = is_subset_of_sparse_vector(old_sv, new_sv);
@@ -197,12 +267,16 @@ SINDI::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) {
     };
 
     if (use_reorder_) {
-        if (not check_and_cleanup(rerank_flat_index_.get())) {
+        if (not check_and_cleanup([this](InnerIdType inner_id, SparseVector* data) {
+                rerank_flat_->GetSparseVectorByInnerId(inner_id, data, allocator_);
+            })) {
             return false;
         }
     }
 
-    return check_and_cleanup(this);
+    return check_and_cleanup([this](InnerIdType inner_id, SparseVector* data) {
+        this->GetSparseVectorByInnerId(inner_id, data, allocator_);
+    });
 }
 
 DatasetPtr
@@ -317,14 +391,12 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
         float cur_heap_top = std::numeric_limits<float>::max();
         auto candidate_size = heap.size();
         auto high_precise_heap = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
-        auto [sorted_ids, sorted_vals] = rerank_flat_index_->sort_sparse_vector(
-            original_query ? *original_query : computer->raw_query_);
+        auto [sorted_ids, sorted_vals] =
+            sort_sparse_vector(original_query ? *original_query : computer->raw_query_, allocator_);
         for (auto i = 0; i < candidate_size; i++) {
             auto inner_id = heap.top().second;
-            auto high_precise_distance = rerank_flat_index_->CalDistanceByIdUnsafe(
-                sorted_ids,
-                sorted_vals,
-                inner_id);  // TODO(ZXY): use flat to replace rerank_flat_index_
+            auto high_precise_distance =
+                cal_distance_by_id_unsafe(rerank_flat_, sorted_ids, sorted_vals, inner_id);
             auto label = label_table_->GetLabelById(inner_id);
             if constexpr (mode == KNN_SEARCH) {
                 if (high_precise_distance < cur_heap_top or high_precise_heap->Size() < k) {
@@ -347,7 +419,7 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
             heap.pop();
         }
 
-        return rerank_flat_index_->collect_results(high_precise_heap);
+        return collect_results(high_precise_heap, allocator);
     }
 
     // low precision
@@ -433,8 +505,11 @@ SINDI::cal_memory_usage() {
     for (auto& window : window_term_list_) {
         memory += window->GetMemoryUsage();
     }
-    if (this->rerank_flat_index_ != nullptr) {
-        memory += this->rerank_flat_index_->GetMemoryUsage();
+    if (this->rerank_flat_ != nullptr) {
+        memory += this->rerank_flat_->GetMemoryUsage();
+    }
+    if (this->rerank_label_table_ != nullptr) {
+        memory += this->rerank_label_table_->GetMemoryUsage();
     }
     memory += sizeof(QuantizationParams);
 
@@ -463,7 +538,8 @@ SINDI::Serialize(StreamWriter& writer) const {
     label_table_->Serialize(writer);
 
     if (use_reorder_) {
-        rerank_flat_index_->Serialize(writer);
+        rerank_flat_->Serialize(writer);
+        rerank_label_table_->Serialize(writer);
     }
 
     if (remap_term_ids_ && term_id_mapper_) {
@@ -529,7 +605,8 @@ SINDI::Deserialize(StreamReader& reader) {
     label_table_->Deserialize(reader_ref);
 
     if (use_reorder_) {
-        rerank_flat_index_->Deserialize(reader_ref);
+        rerank_flat_->Deserialize(reader_ref);
+        rerank_label_table_->Deserialize(reader_ref);
     }
 
     if (remap_term_ids_ && term_id_mapper_) {
@@ -594,8 +671,7 @@ SINDI::GetSparseVectorByInnerId(InnerIdType inner_id,
     std::shared_lock rlock(this->global_mutex_);
 
     if (use_reorder_) {
-        return this->rerank_flat_index_->GetSparseVectorByInnerId(
-            inner_id, data, specified_allocator);
+        return this->rerank_flat_->GetSparseVectorByInnerId(inner_id, data, specified_allocator);
     }
 
     auto cur_window = inner_id / window_size_;
@@ -619,7 +695,10 @@ SINDI::CalcDistanceById(const DatasetPtr& vector,
     std::shared_lock rlock(this->global_mutex_);
 
     if (use_reorder_ && calculate_precise_distance) {
-        return this->rerank_flat_index_->CalcDistanceById(vector, id);
+        auto inner_id = this->rerank_label_table_->GetIdByLabel(id);
+        const auto* sparse_vectors = vector->GetSparseVectors();
+        auto [sorted_ids, sorted_vals] = sort_sparse_vector(sparse_vectors[0], allocator_);
+        return cal_distance_by_id_unsafe(rerank_flat_, sorted_ids, sorted_vals, inner_id);
     }
 
     auto inner_id = this->label_table_->GetIdByLabel(id);
@@ -648,7 +727,23 @@ SINDI::CalDistanceById(const DatasetPtr& query,
                        bool calculate_precise_distance) const {
     if (use_reorder_ && calculate_precise_distance) {
         std::shared_lock rlock(this->global_mutex_);
-        return this->rerank_flat_index_->CalDistanceById(query, ids, count);
+        auto result = Dataset::Make();
+        result->Owner(true, allocator_);
+        auto* distances = static_cast<float*>(allocator_->Allocate(sizeof(float) * count));
+        result->Distances(distances);
+
+        const auto* sparse_vectors = query->GetSparseVectors();
+        auto [sorted_ids, sorted_vals] = sort_sparse_vector(sparse_vectors[0], allocator_);
+        for (int64_t i = 0; i < count; i++) {
+            auto [success, inner_id] = this->rerank_label_table_->TryGetIdByLabel(ids[i]);
+            if (success) {
+                distances[i] =
+                    cal_distance_by_id_unsafe(rerank_flat_, sorted_ids, sorted_vals, inner_id);
+            } else {
+                distances[i] = -1;
+            }
+        }
+        return result;
     }
 
     // prepare result

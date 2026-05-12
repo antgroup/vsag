@@ -32,6 +32,7 @@
 #include "type_helpers.h"
 #include "utils/pointer_define.h"
 #include "vsag/constants.h"
+#include "vsag/dataset.h"
 
 namespace vsag {
 
@@ -149,6 +150,14 @@ public:
 
     virtual bool
     GetCodesById(InnerIdType id, uint8_t* codes) const = 0;
+
+    virtual void
+    GetSparseVectorByInnerId(InnerIdType inner_id,
+                             SparseVector* data,
+                             Allocator* specified_allocator) const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "GetSparseVectorByInnerId not implemented in FlattenInterface");
+    }
 
     [[nodiscard]] virtual InnerIdType
     TotalCount() const {

@@ -29,13 +29,19 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
         auto codes = this->GetCodesById(idx[i], need_release);
         computer->ComputeDist(codes, result_dists + i);
         if (need_release) {
-            allocator_->Deallocate((void*)codes);
+            this->Release(codes);
         }
     }
 }
 template <typename QuantTmpl, typename IOTmpl>
 void
 SparseVectorDataCell<QuantTmpl, IOTmpl>::Deserialize(lvalue_or_rvalue<StreamReader> reader) {
+    uint32_t format_version = 0;
+    StreamReader::ReadObj(reader, format_version);
+    if (format_version != FORMAT_VERSION) {
+        throw VsagException(ErrorType::INVALID_BINARY,
+                            "SparseVectorDataCell v1 no longer supported");
+    }
     FlattenInterface::Deserialize(reader);
     StreamReader::ReadObj(reader, current_offset_);
     this->io_->Deserialize(reader);
@@ -46,6 +52,7 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::Deserialize(lvalue_or_rvalue<StreamRead
 template <typename QuantTmpl, typename IOTmpl>
 void
 SparseVectorDataCell<QuantTmpl, IOTmpl>::Serialize(StreamWriter& writer) {
+    StreamWriter::WriteObj(writer, FORMAT_VERSION);
     FlattenInterface::Serialize(writer);
     StreamWriter::WriteObj(writer, current_offset_);
     this->io_->Serialize(writer);
@@ -56,9 +63,9 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::Serialize(StreamWriter& writer) {
 template <typename QuantTmpl, typename IOTmpl>
 bool
 SparseVectorDataCell<QuantTmpl, IOTmpl>::GetCodesById(InnerIdType id, uint8_t* codes) const {
-    throw VsagException(
-        ErrorType::INTERNAL_ERROR,
-        "no implement in SparseVectorDataCell for GetCodesById without need_release");
+    DocLocation loc;
+    offset_io_->Read(sizeof(loc), id * sizeof(loc), reinterpret_cast<uint8_t*>(&loc));
+    return io_->Read(loc.size, loc.offset, codes);
 }
 
 template <typename QuantTmpl, typename IOTmpl>
@@ -93,15 +100,15 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::InsertVector(const void* vector, InnerI
     }
     auto* codes = reinterpret_cast<uint8_t*>(allocator_->Allocate(code_size));
     quantizer_->EncodeOne((const float*)vector, codes);
-    uint32_t old_offset = 0;
+    DocLocation loc;
+    loc.size = static_cast<uint32_t>(code_size);
     {
         std::lock_guard lock(current_offset_mutex_);
-        old_offset = current_offset_;
+        loc.offset = current_offset_;
         current_offset_ += code_size;
     }
-    offset_io_->Write(
-        (uint8_t*)&old_offset, sizeof(current_offset_), idx * sizeof(current_offset_));
-    io_->Write(codes, code_size, old_offset);
+    offset_io_->Write(reinterpret_cast<uint8_t*>(&loc), sizeof(loc), idx * sizeof(loc));
+    io_->Write(codes, code_size, loc.offset);
     allocator_->Deallocate(codes);
 }
 
@@ -114,15 +121,29 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::InMemory() const {
 template <typename QuantTmpl, typename IOTmpl>
 const uint8_t*
 SparseVectorDataCell<QuantTmpl, IOTmpl>::GetCodesById(InnerIdType id, bool& need_release) const {
-    uint32_t offset;
-    offset_io_->Read(sizeof(offset), id * sizeof(offset), (uint8_t*)&offset);
-    uint32_t length;
-    io_->Read(sizeof(length), offset, (uint8_t*)&length);
-    need_release = true;
-    uint64_t read_size = sizeof(uint32_t) * (2 * length + 1);
-    auto* codes = (uint8_t*)allocator_->Allocate(read_size);
-    io_->Read(read_size, offset, codes);
-    return codes;
+    DocLocation loc;
+    offset_io_->Read(sizeof(loc), id * sizeof(loc), reinterpret_cast<uint8_t*>(&loc));
+    return io_->Read(loc.size, loc.offset, need_release);
+}
+
+template <typename QuantTmpl, typename IOTmpl>
+void
+SparseVectorDataCell<QuantTmpl, IOTmpl>::GetSparseVectorByInnerId(
+    InnerIdType inner_id, SparseVector* data, Allocator* specified_allocator) const {
+    Allocator* allocator = specified_allocator != nullptr ? specified_allocator : allocator_;
+    bool need_release = false;
+    const auto* codes = this->GetCodesById(inner_id, need_release);
+    data->len_ = *reinterpret_cast<const uint32_t*>(codes);
+    const auto* ids = reinterpret_cast<const uint32_t*>(codes + sizeof(uint32_t));
+    const auto* vals = reinterpret_cast<const float*>(codes + sizeof(uint32_t) +
+                                                     data->len_ * sizeof(uint32_t));
+    data->ids_ = static_cast<uint32_t*>(allocator->Allocate(sizeof(uint32_t) * data->len_));
+    data->vals_ = static_cast<float*>(allocator->Allocate(sizeof(float) * data->len_));
+    std::memcpy(data->ids_, ids, sizeof(uint32_t) * data->len_);
+    std::memcpy(data->vals_, vals, sizeof(float) * data->len_);
+    if (need_release) {
+        this->Release(codes);
+    }
 }
 
 template <typename QuantTmpl, typename IOTmpl>
@@ -156,8 +177,12 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::ComputePairVectors(InnerIdType id1, Inn
     auto* codes1 = this->GetCodesById(id1, release1);
     auto* codes2 = this->GetCodesById(id2, release2);
     auto result = this->quantizer_->Compute(codes1, codes2);
-    allocator_->Deallocate((void*)codes1);
-    allocator_->Deallocate((void*)codes2);
+    if (release1) {
+        this->Release(codes1);
+    }
+    if (release2) {
+        this->Release(codes2);
+    }
     return result;
 }
 

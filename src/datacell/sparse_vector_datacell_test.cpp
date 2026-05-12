@@ -13,6 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <unordered_map>
+
 #include "datacell/sparse_vector_datacell_parameter.h"
 #include "framework/test_thread_pool.h"
 #include "impl/allocator/safe_allocator.h"
@@ -174,6 +176,100 @@ TEST_CASE("SparseDataCell Concurrent Test", "[ut][SparseDataCell][concurrent] ")
         delete[] item.vals_;
         delete[] item.ids_;
     }
+}
+
+TEST_CASE("SparseDataCell Direct Read and Sparse Vector Retrieval", "[ut][SparseDataCell]") {
+    constexpr const char* param_str = R"(
+        {
+            "io_params": {
+                "type": "memory_io"
+            },
+            "quantization_params": {
+                "type": "sparse"
+            }
+        }
+        )";
+    auto param = std::make_shared<SparseVectorDataCellParameter>();
+    param->FromJson(JsonType::Parse(param_str));
+    IndexCommonParam index_common_param;
+    index_common_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
+    index_common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    index_common_param.dim_ = 16;
+    auto data_cell = FlattenInterface::MakeInstance(param, index_common_param);
+
+    auto sparse_vectors = fixtures::GenerateSparseVectors(4, index_common_param.dim_);
+    data_cell->Train(sparse_vectors.data(), sparse_vectors.size());
+    data_cell->BatchInsertVector(sparse_vectors.data(), sparse_vectors.size());
+
+    bool need_release = true;
+    const auto* codes = data_cell->GetCodesById(2, need_release);
+    REQUIRE_FALSE(need_release);
+    auto len = *reinterpret_cast<const uint32_t*>(codes);
+    REQUIRE(len == sparse_vectors[2].len_);
+
+    auto code_size = sizeof(uint32_t) * (2 * sparse_vectors[2].len_ + 1);
+    std::vector<uint8_t> copied_codes(code_size);
+    REQUIRE(data_cell->GetCodesById(2, copied_codes.data()));
+    REQUIRE(std::memcmp(codes, copied_codes.data(), code_size) == 0);
+
+    SparseVector retrieved;
+    data_cell->GetSparseVectorByInnerId(2, &retrieved, index_common_param.allocator_.get());
+    REQUIRE(retrieved.len_ == sparse_vectors[2].len_);
+    std::unordered_map<uint32_t, float> expected;
+    for (uint32_t i = 0; i < sparse_vectors[2].len_; ++i) {
+        expected[sparse_vectors[2].ids_[i]] = sparse_vectors[2].vals_[i];
+    }
+    for (uint32_t i = 0; i < retrieved.len_; ++i) {
+        REQUIRE(expected.count(retrieved.ids_[i]) == 1);
+        REQUIRE(retrieved.vals_[i] == expected[retrieved.ids_[i]]);
+    }
+    index_common_param.allocator_->Deallocate(retrieved.ids_);
+    index_common_param.allocator_->Deallocate(retrieved.vals_);
+
+    auto new_data_cell = FlattenInterface::MakeInstance(param, index_common_param);
+    test_serializion(*data_cell, *new_data_cell);
+    SparseVector restored;
+    new_data_cell->GetSparseVectorByInnerId(2, &restored, index_common_param.allocator_.get());
+    REQUIRE(restored.len_ == sparse_vectors[2].len_);
+    for (uint32_t i = 0; i < restored.len_; ++i) {
+        REQUIRE(expected.count(restored.ids_[i]) == 1);
+        REQUIRE(restored.vals_[i] == expected[restored.ids_[i]]);
+    }
+    index_common_param.allocator_->Deallocate(restored.ids_);
+    index_common_param.allocator_->Deallocate(restored.vals_);
+
+    for (auto& item : sparse_vectors) {
+        delete[] item.vals_;
+        delete[] item.ids_;
+    }
+}
+
+TEST_CASE("SparseDataCell Rejects Old Format", "[ut][SparseDataCell]") {
+    constexpr const char* param_str = R"(
+        {
+            "io_params": {
+                "type": "memory_io"
+            },
+            "quantization_params": {
+                "type": "sparse"
+            }
+        }
+        )";
+    auto param = std::make_shared<SparseVectorDataCellParameter>();
+    param->FromJson(JsonType::Parse(param_str));
+    IndexCommonParam index_common_param;
+    index_common_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
+    index_common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    index_common_param.dim_ = 16;
+    auto data_cell = FlattenInterface::MakeInstance(param, index_common_param);
+
+    std::stringstream ss;
+    IOStreamWriter writer(ss);
+    uint32_t old_format_marker = 1;
+    StreamWriter::WriteObj(writer, old_format_marker);
+    ss.seekg(0, std::ios::beg);
+    IOStreamReader reader(ss);
+    REQUIRE_THROWS_AS(data_cell->Deserialize(reader), VsagException);
 }
 
 }  // namespace vsag
