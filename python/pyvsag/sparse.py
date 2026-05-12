@@ -65,10 +65,11 @@ def decode_sparse_bytes(buffer: Any) -> List[Dict[int, float]]:
     """Decode a raw eval-format sparse byte stream into a list of dicts.
 
     Args:
-        buffer: Any object that supports the buffer protocol (``bytes``,
-            ``bytearray``, ``memoryview``, or a 1-D ``numpy.ndarray`` of
-            ``int8`` / ``uint8``). The buffer is wrapped in a
-            ``memoryview`` and read without copying.
+        buffer: Any object that supports the buffer protocol and exposes
+            a contiguous byte view (``bytes``, ``bytearray``,
+            ``memoryview``, or a contiguous 1-D ``numpy.ndarray``). The
+            buffer is reinterpreted as raw bytes via
+            ``memoryview(...).cast("B")`` and read without copying.
 
     Returns:
         A list where each element is ``{feature_index: value}`` for one
@@ -77,10 +78,21 @@ def decode_sparse_bytes(buffer: Any) -> List[Dict[int, float]]:
 
     Raises:
         ValueError: If the byte stream is truncated or has trailing bytes
-            that cannot be parsed as a complete record.
+            that cannot be parsed as a complete record, or if ``buffer``
+            cannot be cast to a contiguous byte view.
     """
-    view = memoryview(buffer)
-    total = len(view)
+    try:
+        # Force a byte-granular view: for ndarrays / typed memoryviews
+        # whose ``itemsize`` is > 1, ``len(view)`` would otherwise be an
+        # element count rather than a byte count, which would mis-parse
+        # the stream.
+        view = memoryview(buffer).cast("B")
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "decode_sparse_bytes requires a contiguous byte buffer "
+            "(bytes, bytearray, or a contiguous int8/uint8 ndarray)"
+        ) from exc
+    total = view.nbytes
     pos = 0
     result: List[Dict[int, float]] = []
 
@@ -207,9 +219,10 @@ def load_sparse_hdf5(
                 continue
             dset = f[split]
             if vec_type == "sparse":
-                # Sparse splits are 1-D INT8 byte streams. Pass the
-                # ndarray straight through; decode_sparse_bytes wraps it
-                # in a memoryview and reads it without copying.
+                # Sparse splits are 1-D INT8 byte streams. ``dset[()]``
+                # materializes the dataset as a numpy ndarray (one copy
+                # out of HDF5); decode_sparse_bytes then reinterprets
+                # that buffer as bytes without an additional copy.
                 out[split] = decode_sparse_bytes(dset[()])
             else:
                 out[split] = dset[()]
