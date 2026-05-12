@@ -518,11 +518,17 @@ TestIndex::TestRangeSearch(const IndexPtr& index,
         if (limited_size > 0) {
             REQUIRE(res.value()->GetDim() <= limited_size);
         }
+        auto res_dim = res.value()->GetDim();
         auto result = res.value()->GetIds();
         auto gt = gts->GetIds() + gt_topK * i;
-        auto val = Intersection(gt, gt_topK - 1, result, res.value()->GetDim());
-        cur_recall += static_cast<float>(val) /
-                      static_cast<float>(std::min(gt_topK - 1, res.value()->GetDim()));
+        auto gt_count = std::max<int64_t>(0, gt_topK - 1);
+        auto val = Intersection(gt, gt_count, result, res_dim);
+        auto denominator = std::min(gt_count, res_dim);
+        // Skip recall calculation if denominator is 0 to avoid NaN when RangeSearch returns
+        // empty result.
+        if (denominator > 0) {
+            cur_recall += static_cast<float>(val) / static_cast<float>(denominator);
+        }
     }
     if (cur_recall <= expected_recall * query_count) {
         WARN(fmt::format("cur_result({}) <= expected_recall * query_count({})",
