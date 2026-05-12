@@ -170,6 +170,28 @@ RequireDistancesNearZero(const vsag::DatasetPtr& result, const std::set<int64_t>
     }
 }
 
+class BlockSizeLimitGuard {
+public:
+    explicit BlockSizeLimitGuard(uint64_t block_size_limit)
+        : origin_size_(vsag::Options::Instance().block_size_limit()) {
+        vsag::Options::Instance().set_block_size_limit(block_size_limit);
+    }
+
+    BlockSizeLimitGuard(const BlockSizeLimitGuard&) = delete;
+    BlockSizeLimitGuard&
+    operator=(const BlockSizeLimitGuard&) = delete;
+    BlockSizeLimitGuard(BlockSizeLimitGuard&&) = delete;
+    BlockSizeLimitGuard&
+    operator=(BlockSizeLimitGuard&&) = delete;
+
+    ~BlockSizeLimitGuard() {
+        vsag::Options::Instance().set_block_size_limit(origin_size_);
+    }
+
+private:
+    uint64_t origin_size_;
+};
+
 }  // namespace
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
@@ -498,6 +520,33 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex, "Pyramid Clone", "[ft][
         TestClone(index, dataset, search_param);
     }
     vsag::Options::Instance().set_block_size_limit(origin_size);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
+                             "Pyramid Export Model",
+                             "[ft][export][pyramid]") {
+    auto size = GENERATE(1024 * 1024 * 2);
+    BlockSizeLimitGuard block_size_limit_guard(size);
+    auto metric_type = GENERATE("l2");
+    auto use_reorder = GENERATE(true, false);
+    PyramidParam pyramid_param;
+    pyramid_param.no_build_levels = {0, 1, 2};
+    pyramid_param.use_reorder = use_reorder;
+    if (use_reorder) {
+        pyramid_param.base_quantization_type = "rabitq";
+        pyramid_param.precise_quantization_type = "fp32";
+    }
+    const std::string name = "pyramid";
+    auto search_param = GeneratePyramidSearchParametersString(100);
+    for (auto& dim : dims) {
+        INFO(fmt::format("metric_type={}, dim={}, use_reorder={}", metric_type, dim, use_reorder));
+        auto param = GeneratePyramidBuildParametersString(metric_type, dim, pyramid_param);
+        auto index = TestFactory(name, param, true);
+        auto index2 = TestFactory(name, param, true);
+        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type, /*with_path=*/true);
+        TestBuildIndex(index, dataset, true);
+        TestExportModel(index, index2, dataset, search_param);
+    }
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
