@@ -105,6 +105,61 @@ VSAG 的评测与基准工具（尤其是 [`eval_performance`](eval.md)）使用
     - 向量元素连续存放：
         - `/train` 总大小 = `N × D × element_size`（每元素 1 或 4 字节）。
 
+## Sparse 布局
+
+当全局属性 `type` 取值为 `"sparse"` 时，`/train` 与 `/test` **不再**遵循 `(N, D)` 的
+稠密矩阵布局，而是以 1 维 `INT8`（`H5T_INTEGER`，size 1）数据集存储原始字节流。
+此处的 `int8` 仅是传输形式，**字节本身并不是 int8 向量元素**。
+
+### `/train`、`/test`（稀疏字节流）
+
+- **HDF5 类型**：`H5T_INTEGER`，size 1（`INT8`）
+- **HDF5 形状**：1 维；总长度等于所有向量记录大小之和
+- **字节序**：小端（little-endian）
+- **内容**：按向量顺序首尾相接的记录序列，每条记录包含以下字段，紧密拼接，
+  无填充、无分隔符：
+
+  | 字段        | 类型        | 大小            | 说明                              |
+  |-------------|-------------|-----------------|-----------------------------------|
+  | `len`       | `uint32`    | 4 字节          | 该向量的非零项个数                |
+  | `ids[len]`  | `uint32[]`  | `4 * len` 字节  | 非零项的特征下标（column ids）    |
+  | `vals[len]` | `float32[]` | `4 * len` 字节  | 与 `ids` 对应的取值               |
+
+  允许 `len == 0` 的记录，此时仅占 4 字节的长度字段。
+
+- **键的顺序**：eval 工具在读取时会对每条向量按 `ids` 升序排序（`vals` 同步重排）。
+  写入侧可以输出无序键，但读取侧不应假设无序。
+
+### 真值与距离
+
+`/neighbors` 与 `/distances` 的形状与类型规则与上文稠密布局相同。`distance` 属性
+对稀疏向量仅支持 `"ip"`（稀疏内积距离，`1 - 稀疏内积`）。
+
+### Python 辅助函数
+
+Python 包 `pyvsag` 在 [`pyvsag.sparse`](https://github.com/antgroup/vsag/blob/main/python/pyvsag/sparse.py)
+中提供解码工具：
+
+```python
+from pyvsag.sparse import load_sparse_hdf5
+
+data = load_sparse_hdf5("sparse.hdf5")
+# data["type"]      -> "sparse"
+# data["distance"]  -> "ip"
+# data["train"]     -> list[dict[int, float]]   每条稀疏向量一个字典，键升序
+# data["test"]      -> list[dict[int, float]]
+# data["neighbors"] -> numpy.ndarray  shape (Q, K) int64
+# data["distances"] -> numpy.ndarray  shape (Q, K) float32
+```
+
+如果已经拿到原始字节流，可以直接调用 `pyvsag.sparse.decode_sparse_bytes(buffer)`。
+
+### 参考实现
+
+字节流的编码/解码逻辑位于
+[`tools/eval/eval_dataset.cpp`](https://github.com/antgroup/vsag/blob/main/tools/eval/eval_dataset.cpp)
+（参见 `parse_sparse_vectors` 与 `serialize_sparse_vectors`）。
+
 ## 参考
 
 - 与该格式兼容的公开基准数据集可在
