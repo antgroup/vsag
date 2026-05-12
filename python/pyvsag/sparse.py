@@ -104,9 +104,12 @@ def decode_sparse_bytes(buffer: Any) -> List[Dict[int, float]]:
                 f"expected {ids_size + vals_size} bytes for len={length}"
             )
 
-        ids = np.frombuffer(view, dtype=np.uint32, count=length, offset=pos)
+        # Use explicit little-endian dtypes so the decode is correct on
+        # big-endian hosts (``np.uint32`` / ``np.float32`` are native-
+        # endian, while the on-disk layout is always little-endian).
+        ids = np.frombuffer(view, dtype="<u4", count=length, offset=pos)
         pos += ids_size
-        vals = np.frombuffer(view, dtype=np.float32, count=length, offset=pos)
+        vals = np.frombuffer(view, dtype="<f4", count=length, offset=pos)
         pos += vals_size
 
         # Build dict; sorting by key keeps the output stable regardless
@@ -185,6 +188,11 @@ def load_sparse_hdf5(
         vec_type = _read_str_attr(f, "type")
         if vec_type is None:
             vec_type = "dense"
+        elif vec_type not in ("dense", "sparse"):
+            raise ValueError(
+                f"{path!r} has unknown type attribute {vec_type!r}; "
+                "expected 'dense' or 'sparse'."
+            )
         out["type"] = vec_type
         out["distance"] = _read_str_attr(f, "distance")
 
@@ -214,15 +222,22 @@ def load_sparse_hdf5(
 
 
 def _read_str_attr(h5obj, name: str) -> Optional[str]:
-    """Read a string attribute, handling both Python ``str`` and any
-    bytes-like value (``bytes``, ``numpy.bytes_``) that h5py may return
-    depending on the on-disk string type."""
+    """Read a string attribute, normalizing the various forms h5py may
+    return (``str``, ``bytes``, ``numpy.bytes_``, ``numpy.str_``, 0-d
+    arrays, or 1-element arrays) into a plain Python ``str``."""
     if name not in h5obj.attrs:
         return None
     value = h5obj.attrs[name]
-    # ``hasattr('decode')`` catches both ``bytes`` and ``numpy.bytes_``
-    # (the latter is a ``bytes`` subclass on numpy 2.x but not on 1.x),
-    # while plain ``str`` / ``numpy.str_`` falls through to ``str(value)``.
-    if hasattr(value, "decode"):
+    # Unwrap 0-d / single-element numpy arrays first; ``.item()`` yields
+    # a Python ``str`` or ``bytes`` (numpy scalars also support it).
+    if isinstance(value, np.ndarray):
+        if value.size != 1:
+            raise ValueError(
+                f"attribute {name!r} is not a scalar string (shape={value.shape})"
+            )
+        value = value.item()
+    elif isinstance(value, np.generic):
+        value = value.item()
+    if isinstance(value, bytes):
         return value.decode("utf-8")
     return str(value)
