@@ -126,7 +126,9 @@ merge_protections:
     # refuses to merge `kind/feature` / `kind/bug` PRs whose description
     # does not reference an issue via a GitHub auto-closing keyword.
     if:
-      - base=main
+      - or:
+          - base=main
+          - base~=^0\.
       - or:
           - label=kind/feature
           - label=kind/bug

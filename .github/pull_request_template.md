@@ -12,16 +12,16 @@
 REQUIRED for `kind/bug` and `kind/feature` PRs. Use a GitHub-recognized
 auto-closing keyword so the linked issue is closed when this PR merges:
 
-  Fixes: #1234
-  Closes: #1234
-  Resolves: #1234
+  Fixes: #<number>
+  Closes: #<number>
+  Resolves: #<number>
 
-Cross-repo references (`owner/repo#1234`) and full issue URLs are also
-accepted. `kind/improvement` and `kind/documentation` PRs may leave this
-blank (delete the line below or keep it empty).
+Cross-repo references (`owner/repo#<number>`) and full issue URLs are
+also accepted. `kind/improvement` and `kind/documentation` PRs may leave
+this blank (delete the line below or keep it empty).
 -->
 
-- Fixes: <!-- #1234 -->
+- Fixes: <!-- #<number> -->
 
 ## What Changed
 

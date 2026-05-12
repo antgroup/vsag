@@ -167,8 +167,10 @@ exempt from this requirement.
 
 This rule is enforced by:
 
-1.  The `PR Issue Link Check` GitHub Action (a required status check on
-    `main` and `0.*` branches), and
+1.  The `PR Issue Link Check` GitHub Action, which runs on every PR
+    targeting `main` or `0.*` branches. Repo administrators are expected
+    to add it to the **required status checks** for those branches so
+    that a failed check actually blocks merge.
 2.  A Mergify `merge_protections` rule as a defense-in-depth fallback.
 
 If the check fails, edit the PR description to add the required keyword

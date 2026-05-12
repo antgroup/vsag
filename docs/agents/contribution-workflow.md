@@ -96,7 +96,9 @@ reference.
 Enforcement happens in two places:
 
 1. The `PR Issue Link Check` GitHub Action runs on every PR open / edit /
-   sync and is a required status check on `main` and `0.*` branches.
+   sync targeting `main` or `0.*` branches. Repo administrators are
+   expected to add it to the **required status checks** on those
+   branches so a failed check actually blocks merge.
 2. A Mergify `merge_protections` rule (`Require linked issue for
    feature/bug PRs`) blocks merge as a defense-in-depth fallback.
 
