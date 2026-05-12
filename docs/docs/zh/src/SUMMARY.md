@@ -36,6 +36,7 @@
 - [内存管理](advanced/memory.md)
 - [搜索路径 Allocator](advanced/search_allocator.md)
 - [索引自省](advanced/introspection.md)
+- [可扩展性](advanced/extensibility.md)
 - [图索引增强](advanced/enhance_graph.md)
 - [内存-磁盘混合索引](advanced/hybrid_index.md)
 - [Extra Info（附加信息）](advanced/extra_info.md)
