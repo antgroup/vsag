@@ -76,10 +76,9 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
     if (topk <= 0) {
         topk = static_cast<int64_t>(max_candidate_size);
     }
-    auto reorder_heap = std::make_shared<StandardHeap<true, false>>(query_allocator, topk);
     auto computer = flatten_->FactoryComputer(query);
     if (topk == 0 || max_candidate_size == 0) {
-        return reorder_heap;
+        return std::make_shared<StandardHeap<true, false>>(query_allocator, 0);
     }
 
     Vector<InnerIdType> all_ids(max_candidate_size, query_allocator);
@@ -117,6 +116,7 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
     }
 
     topk = std::min(topk, static_cast<int64_t>(candidate_size));
+    auto reorder_heap = std::make_shared<StandardHeap<true, false>>(query_allocator, topk);
     if (topk == 0 || candidate_size == 0) {
         return reorder_heap;
     }

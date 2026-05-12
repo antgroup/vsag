@@ -525,8 +525,10 @@ RaBitQuantizer<metric>::EncodeOneImpl(const float* data, uint8_t* codes) const {
         error_type one_bit_error = 0.0F;
         if (SupportSplitCodeStorage()) {
             uint64_t plane_bytes = (this->dim_ + 7) / 8;
-            const auto* one_bit_plane =
-                GetStoredPlane(codes + offset_code_, num_bits_per_dim_base_ - 1, plane_bytes);
+            const auto* one_bit_plane = GetStoredPlane(
+                codes + offset_code_,
+                static_cast<uint32_t>(num_bits_per_dim_base_ - 1),
+                plane_bytes);
             one_bit_error =
                 RaBitQFloatBinaryIP(normed_data.data(), one_bit_plane, this->dim_, inv_sqrt_d_);
         }
@@ -545,6 +547,7 @@ RaBitQuantizer<metric>::EncodeOneImpl(const float* data, uint8_t* codes) const {
         *(norm_type*)(codes + offset_norm_) = norm;
         *(error_type*)(codes + offset_error_) = error;
         if (SupportSplitCodeStorage()) {
+            one_bit_error = std::fabs(one_bit_error);
             const float safe_one_bit_error = std::clamp(one_bit_error, 1e-5F, 1.0F);
             error_type low_bound_error =
                 rabitq_error_rate_ *
@@ -855,7 +858,8 @@ RaBitQuantizer<metric>::ComputeDistWithOneBitLowerBound(Computer<RaBitQuantizer>
     }
 
     const auto* query = computer.buf_;
-    error_type one_bit_error = *((error_type*)(one_bit_code + OneBitRecordOneBitErrorOffset()));
+    const error_type one_bit_error =
+        std::fabs(*((error_type*)(one_bit_code + OneBitRecordOneBitErrorOffset())));
     if (one_bit_error <= 1e-5F) {
         return false;
     }
@@ -988,8 +992,8 @@ RaBitQuantizer<metric>::ComputeDistsWithOneBitLowerBoundBatch4(Computer<RaBitQua
                 *lower_bound = std::numeric_limits<float>::max();
             }
 
-            error_type one_bit_error =
-                *((error_type*)(one_bit_code + OneBitRecordOneBitErrorOffset()));
+            const error_type one_bit_error =
+                std::fabs(*((error_type*)(one_bit_code + OneBitRecordOneBitErrorOffset())));
             if (one_bit_error <= 1e-5F) {
                 return false;
             }
