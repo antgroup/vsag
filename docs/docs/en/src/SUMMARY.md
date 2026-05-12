@@ -41,6 +41,7 @@
 - [Hybrid Memory-Disk Index](advanced/hybrid_index.md)
 - [Extra Info](advanced/extra_info.md)
 - [Index Lifecycle Management](advanced/index_lifecycle.md)
+- [Quantization Transform](advanced/quantization_transform.md)
 
 # Performance and Tuning
 
