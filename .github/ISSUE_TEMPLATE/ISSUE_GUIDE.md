@@ -59,7 +59,7 @@ new feature
 ## Labels
 
 The issue templates pre-apply a `kind/*` label that mirrors the PR
-[`kind/*`](../../AGENTS.md#pull-request-labels) policy, so triage and release
+[`kind/*`](../../docs/agents/contribution-workflow.md#pull-request-labels) policy, so triage and release
 notes stay consistent. The one exception is `question.yml`, which applies the
 plain `question` label — usage questions do not normally produce a PR and so
 do not need a `kind/*` value.
