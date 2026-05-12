@@ -17,12 +17,16 @@
 
 #include <numeric>
 #include <set>
+#include <sstream>
 
 #include "algorithm/sparse_distance.h"
-#include "impl/heap/standard_heap.h"
 #include "impl/allocator/safe_allocator.h"
+#include "impl/heap/standard_heap.h"
+#include "impl/label_table.h"
 #include "index_common_param.h"
 #include "storage/serialization_template_test.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
 #include "unittest.h"
 #include "utils/util_functions.h"
 using namespace vsag;
@@ -1008,6 +1012,72 @@ TEST_CASE("SINDI Remap UpdateVector Compatibility", "[ut][SINDI]") {
         delete[] item.vals_;
         delete[] item.ids_;
     }
+}
+
+TEST_CASE("SINDI Deserialize Legacy SparseIndex Rerank", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+
+    static constexpr auto param_str = R"({{
+        "use_reorder": true,
+        "use_quantization": false,
+        "doc_prune_ratio": 0.0,
+        "term_prune_ratio": 0.0,
+        "window_size": 10000,
+        "term_id_limit": 100,
+        "avg_doc_term_length": 100,
+        "deserialize_without_footer": true
+    }})";
+
+    vsag::JsonType param_json = vsag::JsonType::Parse(fmt::format(param_str));
+    auto index_param = std::make_shared<vsag::SINDIParameter>();
+    index_param->FromJson(param_json);
+    auto index = std::make_unique<SINDI>(index_param, common_param);
+
+    std::stringstream stream;
+    IOStreamWriter writer(stream);
+    int64_t cur_element_count = 2;
+    StreamWriter::WriteObj(writer, cur_element_count);
+    uint32_t window_term_list_size = 0;
+    StreamWriter::WriteObj(writer, window_term_list_size);
+
+    LabelTable label_table(allocator.get());
+    label_table.Insert(0, 100);
+    label_table.Insert(1, 200);
+    label_table.Serialize(writer);
+
+    StreamWriter::WriteObj(writer, cur_element_count);
+    auto write_sparse_vector = [&writer](const uint32_t* ids, const float* vals, uint32_t len) {
+        StreamWriter::WriteObj(writer, len);
+        writer.Write(reinterpret_cast<const char*>(ids), len * sizeof(uint32_t));
+        writer.Write(reinterpret_cast<const char*>(vals), len * sizeof(float));
+    };
+    uint32_t ids0[] = {1, 3};
+    float vals0[] = {1.5F, 2.5F};
+    uint32_t ids1[] = {2, 8, 13};
+    float vals1[] = {3.5F, 4.5F, 5.5F};
+    write_sparse_vector(ids0, vals0, 2);
+    write_sparse_vector(ids1, vals1, 3);
+
+    LabelTable rerank_label_table(allocator.get());
+    rerank_label_table.Insert(0, 100);
+    rerank_label_table.Insert(1, 200);
+    rerank_label_table.Serialize(writer);
+
+    stream.seekg(0, std::ios::beg);
+    IOStreamReader reader(stream);
+    index->Deserialize(reader);
+
+    SparseVector restored;
+    index->GetSparseVectorByInnerId(1, &restored, allocator.get());
+    REQUIRE(restored.len_ == 3);
+    for (uint32_t i = 0; i < restored.len_; ++i) {
+        REQUIRE(restored.ids_[i] == ids1[i]);
+        REQUIRE(restored.vals_[i] == vals1[i]);
+    }
+    allocator->Deallocate(restored.ids_);
+    allocator->Deallocate(restored.vals_);
 }
 
 TEST_CASE("SINDI Remap Memory Comparison", "[ut][SINDI]") {

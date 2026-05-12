@@ -67,6 +67,47 @@ collect_results(const DistHeapPtr& results, Allocator* allocator) {
     return result;
 }
 
+bool
+is_legacy_sparse_index_rerank(StreamReader& reader, InnerIdType expected_count) {
+    auto cursor = reader.GetCursor();
+    int64_t legacy_count = 0;
+    StreamReader::ReadObj(reader, legacy_count);
+    reader.Seek(cursor);
+    return legacy_count == static_cast<int64_t>(expected_count);
+}
+
+void
+deserialize_legacy_sparse_index_rerank(StreamReader& reader,
+                                       const FlattenInterfacePtr& rerank_flat,
+                                       const LabelTablePtr& rerank_label_table,
+                                       Allocator* allocator,
+                                       InnerIdType expected_count) {
+    int64_t legacy_count = 0;
+    StreamReader::ReadObj(reader, legacy_count);
+    if (legacy_count != static_cast<int64_t>(expected_count)) {
+        throw VsagException(ErrorType::INVALID_BINARY,
+                            fmt::format("legacy SparseIndex count {} does not match SINDI count {}",
+                                        legacy_count,
+                                        expected_count));
+    }
+
+    for (int64_t inner_id = 0; inner_id < legacy_count; ++inner_id) {
+        uint32_t len = 0;
+        StreamReader::ReadObj(reader, len);
+        Vector<uint32_t> ids(len, allocator);
+        Vector<float> vals(len, allocator);
+        reader.Read(reinterpret_cast<char*>(ids.data()), len * sizeof(uint32_t));
+        reader.Read(reinterpret_cast<char*>(vals.data()), len * sizeof(float));
+
+        SparseVector sparse_vector;
+        sparse_vector.len_ = len;
+        sparse_vector.ids_ = ids.data();
+        sparse_vector.vals_ = vals.data();
+        rerank_flat->InsertVector(&sparse_vector, static_cast<InnerIdType>(inner_id));
+    }
+    rerank_label_table->Deserialize(reader);
+}
+
 }  // namespace
 
 ParamPtr
@@ -584,8 +625,13 @@ SINDI::Deserialize(StreamReader& reader) {
     label_table_->Deserialize(reader_ref);
 
     if (use_reorder_) {
-        rerank_flat_->Deserialize(reader_ref);
-        rerank_label_table_->Deserialize(reader_ref);
+        if (is_legacy_sparse_index_rerank(reader_ref, cur_element_count_)) {
+            deserialize_legacy_sparse_index_rerank(
+                reader_ref, rerank_flat_, rerank_label_table_, allocator_, cur_element_count_);
+        } else {
+            rerank_flat_->Deserialize(reader_ref);
+            rerank_label_table_->Deserialize(reader_ref);
+        }
     }
 
     if (remap_term_ids_ && term_id_mapper_) {
