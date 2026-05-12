@@ -97,6 +97,12 @@ setup_simd() {
         ret.runtime_has_amx = true;
     }
     ret.dist_support_amx = true;
+    // AMX-BF16 is a strict superset feature; SupportAMXBF16() also performs
+    // the AMX permission grant via SupportAMX().
+    if (SimdStatus::SupportAMXBF16()) {
+        ret.runtime_has_amx_bf16 = true;
+    }
+    ret.dist_support_amx_bf16 = true;
 #endif
 
     return ret;

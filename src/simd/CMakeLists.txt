@@ -73,7 +73,7 @@ if (DIST_CONTAINS_AMX)
             amx.cpp
             PROPERTIES
             COMPILE_FLAGS
-            "-mavx512f -mavx512vl -mavx512bw -mavx512dq -mavx512vnni -mamx-tile -mamx-int8"
+            "-mavx512f -mavx512vl -mavx512bw -mavx512dq -mavx512vnni -mavx512bf16 -mamx-tile -mamx-int8 -mamx-bf16"
     )
 endif ()
 if (DIST_CONTAINS_NEON)

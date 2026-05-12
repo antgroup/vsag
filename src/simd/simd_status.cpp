@@ -66,4 +66,24 @@ SimdStatus::SupportAMX() {
 #endif
 }
 
+bool
+SimdStatus::SupportAMXBF16() {
+#if defined(ENABLE_AMX) && defined(__linux__) && (defined(__x86_64__) || defined(_M_X64))
+    static const bool supported = []() -> bool {
+        // Require AMX_TILE + INT8 + the kernel XFEATURE_XTILEDATA grant
+        // first; AMX_BF16 is meaningless without those.
+        if (!SimdStatus::SupportAMX()) {
+            return false;
+        }
+        // CPUID leaf 7, sub-leaf 0, EDX bit 22 == AMX_BF16.
+        unsigned int eax = 7, ebx = 0, ecx = 0, edx = 0;
+        __asm__ volatile("cpuid" : "+a"(eax), "=b"(ebx), "+c"(ecx), "=d"(edx));
+        return ((edx >> 22) & 1u) != 0;
+    }();
+    return supported;
+#else
+    return false;
+#endif
+}
+
 }  // namespace vsag

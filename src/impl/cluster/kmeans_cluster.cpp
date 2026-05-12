@@ -23,7 +23,9 @@
 #include "diskann_logger.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/blas/blas_function.h"
+#include "simd/amx_bf16_matmul.h"
 #include "simd/fp32_simd.h"
+#include "simd/simd_status.h"
 #include "utils/byte_buffer.h"
 #include "utils/util_functions.h"
 
@@ -228,20 +230,51 @@ KMeansCluster::find_nearest_one_with_blas(const float* query,
         auto cur_query_count = end - i;
         auto* cur_label = labels.data() + i;
 
-        BlasFunction::Sgemm(BlasFunction::ColMajor,
-                            BlasFunction::Trans,
-                            BlasFunction::NoTrans,
-                            static_cast<int32_t>(k),
-                            static_cast<int32_t>(cur_query_count),
-                            dim_,
-                            -2.0F,
-                            k_centroids_,
-                            dim_,
-                            query + i * dim_,
-                            dim_,
-                            0.0F,
-                            distances,
-                            static_cast<int32_t>(k));
+        // Try the AMX BF16 GEMM fast path first.  It returns false if
+        // AMX-BF16 isn't available at runtime; in that case (or when the
+        // shape is too small to amortize tile-config / packing overhead)
+        // fall back to the BLAS SGEMM path.
+        //
+        // Math equivalence:
+        //   SGEMM(ColMajor, Trans, NoTrans, M=k, N=cur_query_count, K=dim,
+        //         alpha=-2, A=k_centroids_ (lda=dim), B=query+i*dim (ldb=dim),
+        //         beta=0, C=distances (ldc=k))
+        //   produces  distances[m + n*k] = -2 * < centroid_m, query_{i+n} >
+        // The AMX kernel takes the same inputs interpreted as row-major
+        // (k x dim) and (cur_query_count x dim) and writes the same
+        // column-major output.
+        constexpr uint64_t amx_bf16_min_dim = 32;
+        constexpr uint64_t amx_bf16_min_m = 16;
+        constexpr uint64_t amx_bf16_min_n = 16;
+        bool used_amx = false;
+        if (static_cast<uint64_t>(dim_) >= amx_bf16_min_dim &&
+            static_cast<uint64_t>(k) >= amx_bf16_min_m && cur_query_count >= amx_bf16_min_n &&
+            SimdStatus::SupportAMXBF16()) {
+            used_amx = amx::SgemmBF16IPColMajorOut(static_cast<int64_t>(k),
+                                                   static_cast<int64_t>(cur_query_count),
+                                                   static_cast<int64_t>(dim_),
+                                                   -2.0F,
+                                                   k_centroids_,
+                                                   query + i * dim_,
+                                                   distances,
+                                                   static_cast<int64_t>(k));
+        }
+        if (!used_amx) {
+            BlasFunction::Sgemm(BlasFunction::ColMajor,
+                                BlasFunction::Trans,
+                                BlasFunction::NoTrans,
+                                static_cast<int32_t>(k),
+                                static_cast<int32_t>(cur_query_count),
+                                dim_,
+                                -2.0F,
+                                k_centroids_,
+                                dim_,
+                                query + i * dim_,
+                                dim_,
+                                0.0F,
+                                distances,
+                                static_cast<int32_t>(k));
+        }
 
         auto assign_labels_func = [&](uint64_t start, uint64_t end) -> void {
             omp_set_num_threads(1);

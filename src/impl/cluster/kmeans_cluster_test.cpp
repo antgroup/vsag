@@ -64,3 +64,41 @@ TEST_CASE("Kmeans Basic Test", "[ut][KMeansCluster]") {
         }
     }
 }
+
+// Exercises the centroid-assignment path with shape parameters that meet the
+// AMX-BF16 fast-path thresholds in `find_nearest_one_with_blas` (k >= 16,
+// dim >= 32, query batches >= 16).  On hosts without AMX-BF16 support, the
+// kernel returns false and the SGEMM path is used; either way the test
+// verifies KMeans converges to the cluster sizes implied by the synthetic
+// dataset.
+TEST_CASE("Kmeans Larger Dim (AMX BF16 path)", "[ut][KMeansCluster]") {
+    std::vector<int> labels;
+    int32_t k = 32;
+    int32_t dim = 128;
+    uint64_t count = 3000;
+    auto datas = GenerateDataset(k, dim, count, labels);
+
+    auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+
+    std::vector<int> new_labels(k);
+    vsag::KMeansCluster cluster(dim, allocator.get());
+    int iter = 0;
+    bool converged = false;
+    while (iter < 500) {
+        iter += 25;
+        std::fill(new_labels.begin(), new_labels.end(), 0);
+        auto pos = cluster.Run(k, datas.data(), count, iter, nullptr, false);
+        for (uint64_t i = 0; i < count; ++i) {
+            new_labels[pos[i]]++;
+        }
+        std::sort(new_labels.begin(), new_labels.end());
+        if (new_labels[0] != 0) {
+            for (int i = 0; i < k; ++i) {
+                REQUIRE(new_labels[i] == labels[i]);
+            }
+            converged = true;
+            break;
+        }
+    }
+    REQUIRE(converged);
+}

@@ -35,6 +35,7 @@ public:
     bool dist_support_sve = false;
     bool dist_support_avx512vpopcntdq = false;
     bool dist_support_amx = false;
+    bool dist_support_amx_bf16 = false;
     bool runtime_has_sse = false;
     bool runtime_has_avx = false;
     bool runtime_has_avx2 = false;
@@ -46,6 +47,7 @@ public:
     bool runtime_has_sve = false;
     bool runtime_has_avx512vpopcntdq = false;
     bool runtime_has_amx = false;
+    bool runtime_has_amx_bf16 = false;
 
     static bool is_inited;
 
@@ -90,6 +92,14 @@ public:
     // builds without AMX support never invoke arch_prctl.
     static bool
     SupportAMX();
+
+    // Intel AMX-BF16 (TDPBF16PS instruction).  Returns true only when both
+    // `SupportAMX()` succeeds *and* CPUID leaf 7 sub-leaf 0 EDX bit 22
+    // (AMX_BF16) is set on the running CPU.  Granite Rapids and Sapphire
+    // Rapids expose this; earlier silicon does not.  Same lazy-cached
+    // semantics as `SupportAMX()`.
+    static bool
+    SupportAMXBF16();
 
     static inline bool
     SupportAVX2() {
@@ -198,6 +208,11 @@ public:
     [[nodiscard]] std::string
     amx() const {
         return status_to_string(dist_support_amx, runtime_has_amx);
+    }
+
+    [[nodiscard]] std::string
+    amx_bf16() const {
+        return status_to_string(dist_support_amx_bf16, runtime_has_amx_bf16);
     }
 
     static std::string
