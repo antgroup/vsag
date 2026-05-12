@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <limits>
 #include <unordered_map>
 
@@ -103,6 +104,111 @@ compute_pairwise_proximity(const std::vector<std::vector<uint16_t>>& position_li
     }
 
     return boost;
+}
+
+bool
+check_phrase_constraint(const std::vector<std::vector<uint16_t>>& phrase_term_positions,
+                        uint32_t slop,
+                        bool ordered) {
+    uint64_t n = phrase_term_positions.size();
+    if (n == 0) {
+        return true;
+    }
+
+    // All terms must be present
+    for (uint64_t i = 0; i < n; ++i) {
+        if (phrase_term_positions[i].empty()) {
+            return false;
+        }
+    }
+
+    if (n == 1) {
+        return true;
+    }
+
+    uint32_t max_span = slop + static_cast<uint32_t>(n) - 1;
+
+    if (!ordered) {
+        // Unordered: find minimum span window covering one position from each term.
+        // Use multi-pointer approach: merge all positions with term index,
+        // sort by position, then slide a window that covers all terms.
+        struct PosEntry {
+            uint16_t pos;
+            uint64_t term_idx;
+        };
+        std::vector<PosEntry> all_positions;
+        for (uint64_t i = 0; i < n; ++i) {
+            for (auto pos : phrase_term_positions[i]) {
+                all_positions.push_back({pos, i});
+            }
+        }
+        std::sort(all_positions.begin(),
+                  all_positions.end(),
+                  [](const PosEntry& a, const PosEntry& b) { return a.pos < b.pos; });
+
+        // Sliding window: track count of each term in window
+        std::vector<uint32_t> term_count(n, 0);
+        uint64_t terms_covered = 0;
+        uint64_t left = 0;
+
+        for (uint64_t right = 0; right < all_positions.size(); ++right) {
+            auto idx = all_positions[right].term_idx;
+            if (term_count[idx] == 0) {
+                terms_covered++;
+            }
+            term_count[idx]++;
+
+            // Shrink window from left while all terms still covered
+            while (terms_covered == n) {
+                uint32_t span = all_positions[right].pos - all_positions[left].pos;
+                if (span <= max_span) {
+                    return true;
+                }
+                auto left_idx = all_positions[left].term_idx;
+                term_count[left_idx]--;
+                if (term_count[left_idx] == 0) {
+                    terms_covered--;
+                }
+                left++;
+            }
+        }
+        return false;
+    } else {
+        // Ordered: find positions p0 < p1 < ... < p_{n-1} with span <= max_span.
+        // Use recursive/backtracking with pruning, or multi-pointer approach.
+        // For small n (typically 2-5 terms), brute force over sorted positions is fine.
+
+        // Build sorted position lists (should already be sorted from extraction)
+        // Use a greedy approach: for each starting position of term 0,
+        // find the smallest valid position for term 1 > prev, etc.
+        std::function<bool(uint64_t, uint16_t, uint16_t)> find_ordered;
+        find_ordered = [&](uint64_t term_idx, uint16_t min_pos, uint16_t start_pos) -> bool {
+            if (term_idx == n) {
+                return true;  // all terms placed
+            }
+            const auto& positions = phrase_term_positions[term_idx];
+            for (auto pos : positions) {
+                if (pos < min_pos) {
+                    continue;
+                }
+                if (pos - start_pos > max_span) {
+                    break;  // positions are sorted, further ones will exceed span too
+                }
+                if (find_ordered(term_idx + 1, pos + 1, start_pos)) {
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        // Try each position of term 0 as the starting point
+        for (auto start : phrase_term_positions[0]) {
+            if (find_ordered(1, start + 1, start)) {
+                return true;
+            }
+        }
+        return false;
+    }
 }
 
 void

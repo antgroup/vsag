@@ -137,6 +137,81 @@ TEST_CASE("ProximityScorer Empty Position List Skipped", "[ut][ProximityScorer]"
     REQUIRE(boost == 0.0f);
 }
 
+// ===== check_phrase_constraint tests =====
+
+TEST_CASE("PhraseFilter All Terms Present Within Slop", "[ut][ProximityScorer][PhraseFilter]") {
+    // terms at [0, 1, 2], slop=0 → span=2, max_span = 0+3-1=2 → pass
+    std::vector<std::vector<uint16_t>> positions = {{0}, {1}, {2}};
+    REQUIRE(check_phrase_constraint(positions, 0, false) == true);
+}
+
+TEST_CASE("PhraseFilter Exceeds Slop", "[ut][ProximityScorer][PhraseFilter]") {
+    // terms at [0, 1, 100], slop=5 → span=100, max_span=5+3-1=7 → fail
+    std::vector<std::vector<uint16_t>> positions = {{0}, {1}, {100}};
+    REQUIRE(check_phrase_constraint(positions, 5, false) == false);
+}
+
+TEST_CASE("PhraseFilter Missing Term", "[ut][ProximityScorer][PhraseFilter]") {
+    // term B has no positions → fail (all terms must be present)
+    std::vector<std::vector<uint16_t>> positions = {{0}, {}, {2}};
+    REQUIRE(check_phrase_constraint(positions, 100, false) == false);
+}
+
+TEST_CASE("PhraseFilter Single Term Always Passes", "[ut][ProximityScorer][PhraseFilter]") {
+    // Only 1 term → span=0, always passes
+    std::vector<std::vector<uint16_t>> positions = {{5}};
+    REQUIRE(check_phrase_constraint(positions, 0, false) == true);
+}
+
+TEST_CASE("PhraseFilter Multiple Positions Best Span", "[ut][ProximityScorer][PhraseFilter]") {
+    // term A at [0, 50], term B at [3, 48]
+    // Best span: [48, 50] = 2, or [0, 3] = 3
+    // With slop=2: max_span = 2+2-1 = 3 → span=2 passes
+    std::vector<std::vector<uint16_t>> positions = {{0, 50}, {3, 48}};
+    REQUIRE(check_phrase_constraint(positions, 2, false) == true);
+}
+
+TEST_CASE("PhraseFilter Multiple Positions Fail", "[ut][ProximityScorer][PhraseFilter]") {
+    // term A at [0, 50], term B at [10, 60]
+    // Best span: min(|0-10|, |50-60|) → [0,10]=10 or [50,60]=10
+    // slop=5: max_span = 5+2-1 = 6 → 10 > 6 → fail
+    std::vector<std::vector<uint16_t>> positions = {{0, 50}, {10, 60}};
+    REQUIRE(check_phrase_constraint(positions, 5, false) == false);
+}
+
+TEST_CASE("PhraseFilter Ordered Pass", "[ut][ProximityScorer][PhraseFilter]") {
+    // terms A at [0], B at [2] → ordered: A before B → pass
+    std::vector<std::vector<uint16_t>> positions = {{0}, {2}};
+    REQUIRE(check_phrase_constraint(positions, 5, true) == true);
+}
+
+TEST_CASE("PhraseFilter Ordered Fail Reverse", "[ut][ProximityScorer][PhraseFilter]") {
+    // terms A at [5], B at [2] → ordered requires A before B, but pos_A > pos_B → fail
+    std::vector<std::vector<uint16_t>> positions = {{5}, {2}};
+    REQUIRE(check_phrase_constraint(positions, 5, true) == false);
+}
+
+TEST_CASE("PhraseFilter Ordered Multiple Positions", "[ut][ProximityScorer][PhraseFilter]") {
+    // terms A at [5, 10], B at [2, 12]
+    // Ordered: need pos_A < pos_B. Pair (10, 12) works: span=2, slop=5 → pass
+    std::vector<std::vector<uint16_t>> positions = {{5, 10}, {2, 12}};
+    REQUIRE(check_phrase_constraint(positions, 5, true) == true);
+}
+
+TEST_CASE("PhraseFilter Three Terms Ordered", "[ut][ProximityScorer][PhraseFilter]") {
+    // A at [2], B at [5], C at [7]
+    // Ordered: 2 < 5 < 7, span = 7-2 = 5, max_span = slop+3-1 = 3+3-1=5 → pass
+    std::vector<std::vector<uint16_t>> positions = {{2}, {5}, {7}};
+    REQUIRE(check_phrase_constraint(positions, 3, true) == true);
+}
+
+TEST_CASE("PhraseFilter Three Terms Ordered Fail", "[ut][ProximityScorer][PhraseFilter]") {
+    // A at [2], B at [5], C at [3] → no ordered combination with span ≤ slop+2
+    // Only valid ordered combo: A=2, B=5, C=? → C must be > 5, but C only at 3 → fail
+    std::vector<std::vector<uint16_t>> positions = {{2}, {5}, {3}};
+    REQUIRE(check_phrase_constraint(positions, 3, true) == false);
+}
+
 // ===== extract_positions_from_token_sequence tests =====
 
 TEST_CASE("ExtractPositions Basic", "[ut][ProximityScorer]") {

@@ -84,6 +84,42 @@ parse_sparse_vectors(const char* src_data,
     }
 }
 
+// Parse token sequences from a binary blob and attach to existing sparse vectors.
+// Format per vector: [seq_len(uint32), token_id_0(uint32), token_id_1(uint32), ...]
+void
+parse_token_sequences(const char* src_data,
+                      size_t data_size,
+                      std::vector<SparseVector>& vectors) {
+    const char* ptr = src_data;
+    const char* end = src_data + data_size;
+    size_t vec_idx = 0;
+    while (ptr < end && vec_idx < vectors.size()) {
+        if (ptr + sizeof(uint32_t) > end) {
+            break;
+        }
+        uint32_t seq_len = 0;
+        memcpy(&seq_len, ptr, sizeof(uint32_t));
+        ptr += sizeof(uint32_t);
+
+        if (seq_len == 0) {
+            vectors[vec_idx].token_seq_len_ = 0;
+            vectors[vec_idx].token_sequence_ = nullptr;
+            vec_idx++;
+            continue;
+        }
+        const size_t seq_size = seq_len * sizeof(uint32_t);
+        if (ptr + seq_size > end) {
+            break;
+        }
+        auto* seq = new uint32_t[seq_len];
+        memcpy(seq, ptr, seq_size);
+        ptr += seq_size;
+        vectors[vec_idx].token_seq_len_ = seq_len;
+        vectors[vec_idx].token_sequence_ = seq;
+        vec_idx++;
+    }
+}
+
 float
 get_distance(const SparseVector* vector1, const SparseVector* vector2, const void* qty_ptr) {
     float sum = 0.0f;
@@ -233,6 +269,28 @@ EvalDataset::Load(const std::string& filename) {
                 obj->test_.get(), obj->test_data_size_, obj->sparse_test_, obj->dim_);
             obj->test_.reset();
             obj->number_of_query_ = obj->sparse_test_.size();
+        }
+
+        // Optional: load token sequences for proximity-aware indexing
+        auto datasets = get_datasets(file);
+        if (datasets.count("train_token_sequences") > 0) {
+            H5::DataSet ds = file.openDataSet("/train_token_sequences");
+            H5::DataSpace dataspace = ds.getSpace();
+            hsize_t dims_out[2];
+            dataspace.getSimpleExtentDims(dims_out, NULL);
+            std::vector<char> buf(dims_out[0]);
+            ds.read(buf.data(), H5::PredType::ALPHA_I8, dataspace);
+            parse_token_sequences(buf.data(), buf.size(), obj->sparse_train_);
+            obj->has_token_sequences_ = true;
+        }
+        if (datasets.count("test_token_sequences") > 0) {
+            H5::DataSet ds = file.openDataSet("/test_token_sequences");
+            H5::DataSpace dataspace = ds.getSpace();
+            hsize_t dims_out[2];
+            dataspace.getSimpleExtentDims(dims_out, NULL);
+            std::vector<char> buf(dims_out[0]);
+            ds.read(buf.data(), H5::PredType::ALPHA_I8, dataspace);
+            parse_token_sequences(buf.data(), buf.size(), obj->sparse_test_);
         }
     }
 

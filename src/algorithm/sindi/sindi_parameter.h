@@ -86,6 +86,11 @@ public:
     float proximity_weight{0.0f};
     bool proximity_ordered{false};
     bool proximity_boost_multiplicative{true};  // true=multiplicative, false=additive
+
+    // phrase filter
+    std::vector<uint32_t> phrase_terms;
+    uint32_t phrase_slop{0};
+    bool phrase_ordered{false};
 };
 
 }  // namespace vsag

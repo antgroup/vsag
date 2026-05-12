@@ -32,6 +32,18 @@ namespace vsag {
 float
 compute_pairwise_proximity(const std::vector<std::vector<uint16_t>>& position_lists, bool ordered);
 
+// Check if a set of terms satisfy a phrase constraint.
+//
+// All terms in phrase_term_positions must be present (non-empty position list).
+// The minimum span covering one position from each term must be <= slop + num_terms - 1.
+// If ordered=true, the chosen positions must also be in strictly increasing order.
+//
+// Returns true if the constraint is satisfied, false otherwise.
+bool
+check_phrase_constraint(const std::vector<std::vector<uint16_t>>& phrase_term_positions,
+                        uint32_t slop,
+                        bool ordered);
+
 // Extract per-term positions from a raw token sequence.
 //
 // For each term in ids[0..ids_len), scans token_sequence to find all positions

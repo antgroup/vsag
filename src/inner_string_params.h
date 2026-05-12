@@ -123,6 +123,9 @@ const char* const SPARSE_PROXIMITY_CANDIDATES = "proximity_candidates";
 const char* const SPARSE_PROXIMITY_WEIGHT = "proximity_weight";
 const char* const SPARSE_PROXIMITY_ORDERED = "proximity_ordered";
 const char* const SPARSE_PROXIMITY_BOOST_MULTIPLICATIVE = "proximity_boost_multiplicative";
+const char* const SPARSE_PHRASE_TERMS = "phrase_terms";
+const char* const SPARSE_PHRASE_SLOP = "phrase_slop";
+const char* const SPARSE_PHRASE_ORDERED = "phrase_ordered";
 
 // graph param value
 const char* const GRAPH_PARAM_MAX_DEGREE_KEY = "max_degree";

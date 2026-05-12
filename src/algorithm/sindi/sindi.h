@@ -137,7 +137,10 @@ private:
                 bool proximity_ordered = false,
                 uint32_t proximity_candidates = 10000,
                 bool proximity_boost_multiplicative = true,
-                uint32_t query_term_count = 0) const;
+                uint32_t query_term_count = 0,
+                const std::vector<uint32_t>* phrase_terms = nullptr,
+                uint32_t phrase_slop = 0,
+                bool phrase_ordered = false) const;
 
     std::pair<int64_t, int64_t>
     get_min_max_window_id(const FilterPtr& filter) const;

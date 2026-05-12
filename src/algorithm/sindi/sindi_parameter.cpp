@@ -192,6 +192,24 @@ SINDISearchParameter::FromJson(const JsonType& json) {
         proximity_boost_multiplicative =
             json[INDEX_SINDI][SPARSE_PROXIMITY_BOOST_MULTIPLICATIVE].GetBool();
     }
+
+    if (json[INDEX_SINDI].Contains(SPARSE_PHRASE_TERMS) &&
+        json[INDEX_SINDI][SPARSE_PHRASE_TERMS].IsArray()) {
+        auto terms_i32 = json[INDEX_SINDI][SPARSE_PHRASE_TERMS].GetVector();
+        phrase_terms.clear();
+        phrase_terms.reserve(terms_i32.size());
+        for (auto t : terms_i32) {
+            phrase_terms.push_back(static_cast<uint32_t>(t));
+        }
+    }
+
+    if (json[INDEX_SINDI].Contains(SPARSE_PHRASE_SLOP)) {
+        phrase_slop = json[INDEX_SINDI][SPARSE_PHRASE_SLOP].GetInt();
+    }
+
+    if (json[INDEX_SINDI].Contains(SPARSE_PHRASE_ORDERED)) {
+        phrase_ordered = json[INDEX_SINDI][SPARSE_PHRASE_ORDERED].GetBool();
+    }
 }
 JsonType
 SINDISearchParameter::ToJson() const {

@@ -168,11 +168,18 @@ public:
         for (auto& i : sparse_train_) {
             delete[] i.ids_;
             delete[] i.vals_;
+            delete[] i.token_sequence_;
         }
         for (auto& i : sparse_test_) {
             delete[] i.ids_;
             delete[] i.vals_;
+            delete[] i.token_sequence_;
         }
+    }
+
+    bool
+    HasTokenSequences() const {
+        return has_token_sequences_;
     }
 
 private:
@@ -234,6 +241,8 @@ private:
 
     std::vector<SparseVector> sparse_train_;
     std::vector<SparseVector> sparse_test_;
+
+    bool has_token_sequences_{false};
 
     std::string vector_type_ = DENSE_VECTORS;
 };
