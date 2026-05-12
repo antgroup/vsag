@@ -110,6 +110,65 @@ formulas below.
     - Feature vectors stored contiguously:
         - `/train` total size = `N × D × element_size` (1 or 4 bytes per element).
 
+## Sparse layout
+
+When the global attribute `type` equals `"sparse"`, `/train` and `/test` do **not** follow
+the `(N, D)` dense matrix layout. They are instead stored as one-dimensional `INT8`
+(`H5T_INTEGER`, size 1) datasets whose payload is a raw byte stream of packed sparse
+vectors. The `int8` storage class is a transport detail only; the bytes are not int8
+vector elements.
+
+### `/train`, `/test` (sparse byte stream)
+
+- **HDF5 type**: `H5T_INTEGER`, size 1 (`INT8`)
+- **HDF5 shape**: 1-D; total length equals the sum of per-vector record sizes
+- **Endianness**: little-endian
+- **Content**: a contiguous sequence of records, one per sparse vector, in order. Each
+  record has the following fields, concatenated with no padding or separators:
+
+  | Field        | Type        | Size            | Description                              |
+  |--------------|-------------|-----------------|------------------------------------------|
+  | `len`        | `uint32`    | 4 bytes         | Number of non-zero entries in the vector |
+  | `ids[len]`   | `uint32[]`  | `4 * len` bytes | Feature indices (column ids)             |
+  | `vals[len]`  | `float32[]` | `4 * len` bytes | Values associated with `ids`             |
+
+  A `len == 0` record is allowed and occupies only the 4-byte length field.
+
+- **Key ordering**: on load, the eval tool sorts each vector's `ids` in ascending order
+  (and reorders `vals` accordingly). Writers may emit unordered keys, but readers should
+  not rely on that.
+
+### Ground truth and metric
+
+`/neighbors` and `/distances` follow the same shape and type rules as in the dense
+layout above. Only `"ip"` (sparse inner-product distance, `1 - sparse_inner_product`)
+is supported via the `distance` attribute.
+
+### Python helper
+
+The Python package `pyvsag` ships a decoder in [`pyvsag.sparse`](https://github.com/antgroup/vsag/blob/main/python/pyvsag/sparse.py):
+
+```python
+from pyvsag.sparse import load_sparse_hdf5
+
+data = load_sparse_hdf5("sparse.hdf5")
+# data["type"]      -> "sparse"
+# data["distance"]  -> "ip"
+# data["train"]     -> list[dict[int, float]]   one dict per sparse vector, keys ascending
+# data["test"]      -> list[dict[int, float]]
+# data["neighbors"] -> numpy.ndarray  shape (Q, K) int64
+# data["distances"] -> numpy.ndarray  shape (Q, K) float32
+```
+
+`pyvsag.sparse.decode_sparse_bytes(buffer)` is also exposed for callers that already
+hold the raw byte stream.
+
+### Reference implementation
+
+The byte-stream encoder/decoder lives at
+[`tools/eval/eval_dataset.cpp`](https://github.com/antgroup/vsag/blob/main/tools/eval/eval_dataset.cpp)
+(see `parse_sparse_vectors` and `serialize_sparse_vectors`).
+
 ## References
 
 - Public benchmark datasets compatible with this layout are available from

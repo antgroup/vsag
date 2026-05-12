@@ -61,11 +61,14 @@ _LEN_STRUCT = struct.Struct("<I")
 _LEN_SIZE = _LEN_STRUCT.size  # 4
 
 
-def decode_sparse_bytes(buffer: bytes) -> List[Dict[int, float]]:
+def decode_sparse_bytes(buffer: Any) -> List[Dict[int, float]]:
     """Decode a raw eval-format sparse byte stream into a list of dicts.
 
     Args:
-        buffer: Bytes read from a sparse ``/train`` or ``/test`` dataset.
+        buffer: Any object that supports the buffer protocol (``bytes``,
+            ``bytearray``, ``memoryview``, or a 1-D ``numpy.ndarray`` of
+            ``int8`` / ``uint8``). The buffer is wrapped in a
+            ``memoryview`` and read without copying.
 
     Returns:
         A list where each element is ``{feature_index: value}`` for one
@@ -196,13 +199,10 @@ def load_sparse_hdf5(
                 continue
             dset = f[split]
             if vec_type == "sparse":
-                # Sparse splits are 1-D INT8 byte streams.
-                raw = dset[()]
-                if isinstance(raw, np.ndarray):
-                    buf = raw.tobytes()
-                else:  # pragma: no cover - defensive
-                    buf = bytes(raw)
-                out[split] = decode_sparse_bytes(buf)
+                # Sparse splits are 1-D INT8 byte streams. Pass the
+                # ndarray straight through; decode_sparse_bytes wraps it
+                # in a memoryview and reads it without copying.
+                out[split] = decode_sparse_bytes(dset[()])
             else:
                 out[split] = dset[()]
 
@@ -214,11 +214,15 @@ def load_sparse_hdf5(
 
 
 def _read_str_attr(h5obj, name: str) -> Optional[str]:
-    """Read a string attribute, handling both ``bytes`` and ``str`` h5py
-    return types."""
+    """Read a string attribute, handling both Python ``str`` and any
+    bytes-like value (``bytes``, ``numpy.bytes_``) that h5py may return
+    depending on the on-disk string type."""
     if name not in h5obj.attrs:
         return None
     value = h5obj.attrs[name]
-    if isinstance(value, bytes):
+    # ``hasattr('decode')`` catches both ``bytes`` and ``numpy.bytes_``
+    # (the latter is a ``bytes`` subclass on numpy 2.x but not on 1.x),
+    # while plain ``str`` / ``numpy.str_`` falls through to ``str(value)``.
+    if hasattr(value, "decode"):
         return value.decode("utf-8")
     return str(value)
