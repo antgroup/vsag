@@ -34,6 +34,7 @@
 - [属性过滤（混合搜索）](advanced/attribute_filter.md)
 - [序列化格式](advanced/serialization.md)
 - [内存管理](advanced/memory.md)
+- [搜索路径 Allocator](advanced/search_allocator.md)
 - [索引自省](advanced/introspection.md)
 - [图索引增强](advanced/enhance_graph.md)
 - [内存-磁盘混合索引](advanced/hybrid_index.md)
