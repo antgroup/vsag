@@ -460,6 +460,25 @@ Pyramid::Deserialize(StreamReader& reader) {
     this->current_memory_usage_ = static_cast<int64_t>(this->CalSerializeSize());
 }
 
+InnerIndexPtr
+Pyramid::ExportModel(const IndexCommonParam& param) const {
+    auto index = std::make_shared<Pyramid>(this->create_param_ptr_, param);
+    if (index->use_reorder_ != this->use_reorder_) {
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            "Export model's pyramid reorder config mismatched");
+    }
+    this->base_codes_->ExportModel(index->base_codes_);
+    if (use_reorder_) {
+        if (index->precise_codes_ == nullptr) {
+            throw VsagException(ErrorType::INTERNAL_ERROR,
+                                "Export model's pyramid precise codes is empty");
+        }
+        this->precise_codes_->ExportModel(index->precise_codes_);
+    }
+    index->current_memory_usage_ = static_cast<int64_t>(index->CalSerializeSize());
+    return index;
+}
+
 std::vector<int64_t>
 Pyramid::Add(const DatasetPtr& base, AddMode mode) {
     const auto* path = base->GetPaths();
@@ -599,6 +618,7 @@ Pyramid::InitFeatures() {
     // other
     this->index_feature_list_->SetFeatures({
         IndexFeature::SUPPORT_CLONE,
+        IndexFeature::SUPPORT_EXPORT_MODEL,
         IndexFeature::SUPPORT_GET_MEMORY_USAGE,
     });
 }
