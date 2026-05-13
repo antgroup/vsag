@@ -44,6 +44,21 @@ TestDatasetPool SparseTestIndex::pool{};
 
 }  // namespace fixtures
 
+namespace {
+
+int64_t
+GetMissingId(const vsag::DatasetPtr& base) {
+    std::unordered_set<int64_t> existing_ids(base->GetIds(),
+                                             base->GetIds() + base->GetNumElements());
+    int64_t missing_id = 0;
+    while (existing_ids.count(missing_id) != 0) {
+        ++missing_id;
+    }
+    return missing_id;
+}
+
+}  // namespace
+
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::SparseTestIndex,
                              "SparseIndex Build and Search",
                              "[ft][build][search][sparse_index]") {
@@ -58,6 +73,21 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SparseTestIndex,
     TestFilterSearch(index, dataset, search_param, 0.99, true);
     TestCalcDistanceById(index, dataset, 1e-4, true, true);
     TestBatchCalcDistanceById(index, dataset, 1e-4, true, true);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::SparseTestIndex,
+                             "SparseIndex returns -1 for missing id",
+                             "[ft][distance][sparse_index]") {
+    auto index = TestFactory("sparse_index", build_param, true);
+    auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
+    TestBuildIndex(index, dataset, true);
+
+    auto query = fixtures::get_one_query(dataset->query_, 0);
+    const auto missing_id = GetMissingId(dataset->base_);
+    auto distance = index->CalcDistanceById(query, missing_id);
+
+    REQUIRE(distance.has_value());
+    REQUIRE(distance.value() == -1.0F);
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::SparseTestIndex,

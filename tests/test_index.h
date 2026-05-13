@@ -35,6 +35,9 @@
 #include "vsag/vsag.h"
 
 namespace fixtures {
+vsag::DatasetPtr
+get_one_query(const vsag::DatasetPtr& queries, int i);
+
 class TestIndex {
 public:
     using IndexPtr = vsag::IndexPtr;

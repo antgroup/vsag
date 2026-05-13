@@ -237,7 +237,10 @@ SparseIndex::CalcDistanceById(const DatasetPtr& vector,
                               int64_t id,
                               bool calculate_precise_distance) const {
     const auto* sparse_vectors = vector->GetSparseVectors();
-    uint32_t inner_id = this->label_table_->GetIdByLabel(id);
+    auto [success, inner_id] = this->label_table_->TryGetIdByLabel(id);
+    if (not success) {
+        return -1.0F;
+    }
     auto [sorted_ids, sorted_vals] = sort_sparse_vector(sparse_vectors[0]);
     return CalDistanceByIdUnsafe(sorted_ids, sorted_vals, inner_id);
 }
