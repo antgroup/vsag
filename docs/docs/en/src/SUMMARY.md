@@ -46,6 +46,7 @@
 # Performance and Tuning
 
 - [Best Practices](resources/best_practices.md)
+- [Metric Semantics](resources/metric_semantics.md)
 - [Optimizer (Tune)](advanced/optimizer.md)
 - [Benchmarks](resources/performance.md)
 - [Evaluation Tool](resources/eval.md)
