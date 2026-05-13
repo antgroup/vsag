@@ -29,6 +29,8 @@ public:
     CheckAndMappingExternalParam(const JsonType& external_param,
                                  const IndexCommonParam& common_param);
 
+    friend class SINDIAnalyzer;
+
     explicit SINDI(const SINDIParameterPtr& param, const IndexCommonParam& common_param);
 
     SINDI(const ParamPtr& param, const IndexCommonParam& common_param)
@@ -48,6 +50,12 @@ public:
     GetMemoryUsageDetail() const override {
         return "";
     }
+
+    std::string
+    GetStats() const override;
+
+    std::string
+    AnalyzeIndexBySearch(const SearchRequest& request) override;
 
     std::vector<int64_t>
     Add(const DatasetPtr& base, AddMode mode = AddMode::DEFAULT) override;

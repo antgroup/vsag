@@ -15,6 +15,7 @@
 
 #include "sindi.h"
 
+#include "analyzer/analyzer.h"
 #include "impl/heap/standard_heap.h"
 #include "index_feature_list.h"
 #include "storage/serialization.h"
@@ -53,6 +54,35 @@ SINDI::SINDI(const SINDIParameterPtr& param, const IndexCommonParam& common_para
         rerank_param->need_sort = true;
         rerank_flat_index_ = std::make_shared<SparseIndex>(rerank_param, common_param);
     }
+}
+
+constexpr int64_t K_ANALYZE_DEFAULT_TOPK = 10;
+constexpr uint64_t K_ANALYZE_BASE_SAMPLE_SIZE = 10;
+
+std::string
+SINDI::GetStats() const {
+    AnalyzerParam analyzer_param(allocator_);
+    analyzer_param.topk = K_ANALYZE_DEFAULT_TOPK;
+    analyzer_param.base_sample_size =
+        std::min<uint64_t>(K_ANALYZE_BASE_SAMPLE_SIZE, cur_element_count_);
+    analyzer_param.search_params =
+        R"({"sindi": {"query_prune_ratio": 0, "term_prune_ratio": 0, "n_candidate": 500, "use_term_lists_heap_insert": true}})";
+    auto analyzer = CreateAnalyzer(this, analyzer_param);
+    JsonType stats = analyzer->GetStats();
+    return stats.Dump(4);
+}
+
+std::string
+SINDI::AnalyzeIndexBySearch(const SearchRequest& request) {
+    AnalyzerParam analyzer_param(allocator_);
+    analyzer_param.topk = request.topk_;
+    analyzer_param.base_sample_size =
+        std::min<uint64_t>(K_ANALYZE_BASE_SAMPLE_SIZE, cur_element_count_);
+    analyzer_param.search_params = request.params_str_;
+    auto analyzer = CreateAnalyzer(this, analyzer_param);
+    JsonType stats =
+        request.query_ == nullptr ? analyzer->GetStats() : analyzer->AnalyzeIndexBySearch(request);
+    return stats.Dump(4);
 }
 
 std::vector<int64_t>

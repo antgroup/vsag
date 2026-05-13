@@ -207,6 +207,42 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
     TestIndexStatus(index);
 }
 
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Analyze", "[ft][analyze][sindi]") {
+    fixtures::SINDIParam param;
+    param.use_reorder = GENERATE(true, false);
+    param.use_quantization = GENERATE(true, false);
+    auto build_param = fixtures::SINDITestIndex::GenerateBuildParameter(param);
+    auto index = TestFactory("sindi", build_param, true);
+    auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
+    REQUIRE(index->GetIndexType() == vsag::IndexType::SINDI);
+    TestBuildIndex(index, dataset, true);
+
+    auto stats = vsag::JsonType::Parse(index->GetStats());
+    REQUIRE(stats.Contains("total_count"));
+    REQUIRE(stats.Contains("window_count"));
+    REQUIRE(stats.Contains("active_term_count"));
+    REQUIRE(stats.Contains("posting_length_distribution"));
+    REQUIRE(stats.Contains("mean_doc_retained"));
+    REQUIRE(stats.Contains("recall_base"));
+
+    vsag::SearchRequest request;
+    request.topk_ = 10;
+    request.params_str_ = fixtures::SINDITestIndex::GenerateSearchParameter(true);
+    request.query_ = dataset->query_;
+    auto raw_query_count = dataset->query_->GetNumElements();
+    dataset->query_->NumElements(5);
+    auto analyze = vsag::JsonType::Parse(index->AnalyzeIndexBySearch(request));
+    dataset->query_->NumElements(raw_query_count);
+
+    REQUIRE(analyze.Contains("recall_query"));
+    REQUIRE(analyze.Contains("time_cost_query"));
+    REQUIRE(analyze.Contains("postings_scanned"));
+    REQUIRE(analyze.Contains("doc_prune_recall"));
+    if (param.use_quantization) {
+        REQUIRE(analyze.Contains("quantization_recall"));
+    }
+}
+
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
                              "SINDI Concurrent",
                              "[ft][concurrent][sindi]") {
