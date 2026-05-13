@@ -108,16 +108,18 @@ EvalDatasetPtr
 EvalDataset::Load(const std::string& filename) {
     H5::H5File file(filename, H5F_ACC_RDONLY);
 
-    // check datasets exist
+    std::unordered_set<std::string> datasets;
     bool has_labels = false;
     bool has_valid_ratio = false;
     bool has_multi_vectors = false;
+
+    // check datasets exist
     {
-        auto datasets = get_datasets(file);
+        datasets = get_datasets(file);
         has_multi_vectors =
             datasets.count("train_multi_vectors") && datasets.count("test_multi_vectors") &&
             datasets.count("train_vector_counts") && datasets.count("test_vector_counts");
-        if (!has_multi_vectors) {
+        if (not has_multi_vectors) {
             assert(datasets.count("train"));
             assert(datasets.count("test"));
         }
@@ -129,33 +131,6 @@ EvalDataset::Load(const std::string& filename) {
 
     auto obj = std::make_shared<EvalDataset>();
     obj->file_path_ = filename;
-
-    // get and check shapes
-    shape_t train_shape(0, 0);
-    shape_t test_shape(0, 0);
-    auto neighbors_shape = get_shape(file, "neighbors");
-    logger::debug("neighbors.shape: {}", to_string(neighbors_shape));
-
-    if (has_multi_vectors) {
-        // For multi-vector datasets, N and Q come from vector_counts
-        auto train_counts_shape = get_shape(file, "train_vector_counts");
-        auto test_counts_shape = get_shape(file, "test_vector_counts");
-        train_shape = std::make_pair(train_counts_shape.first, 0);
-        test_shape = std::make_pair(test_counts_shape.first, 0);
-    } else {
-        train_shape = get_shape(file, "train");
-        logger::debug("train.shape: {}", to_string(train_shape));
-        test_shape = get_shape(file, "test");
-        logger::debug("test.shape: {}", to_string(test_shape));
-        assert(train_shape.second == test_shape.second);
-    }
-
-    obj->train_shape_ = train_shape;
-    obj->test_shape_ = test_shape;
-    obj->neighbors_shape_ = neighbors_shape;
-    obj->dim_ = train_shape.second;
-    obj->number_of_base_ = train_shape.first;
-    obj->number_of_query_ = test_shape.first;
 
     // compatible with the hdf5 files from internet
     if (not file.attrExists("type")) {
@@ -177,6 +152,43 @@ EvalDataset::Load(const std::string& filename) {
             throw std::runtime_error("fail to read metric: there is no 'type' in the dataset");
         }
     }
+
+    if (obj->vector_type_ == MULTI_VECTORS and not has_multi_vectors) {
+        throw std::runtime_error(
+            "multi_vector dataset requires train/test multi-vector datasets and vector counts");
+    }
+
+    if (obj->vector_type_ != MULTI_VECTORS and has_multi_vectors) {
+        throw std::runtime_error(
+            "multi_vector datasets are only allowed when type is set to 'multi_vector'");
+    }
+
+    // get and check shapes
+    shape_t train_shape(0, 0);
+    shape_t test_shape(0, 0);
+    auto neighbors_shape = get_shape(file, "neighbors");
+    logger::debug("neighbors.shape: {}", to_string(neighbors_shape));
+
+    if (obj->vector_type_ == MULTI_VECTORS) {
+        // For multi-vector datasets, N and Q come from vector_counts
+        auto train_counts_shape = get_shape(file, "train_vector_counts");
+        auto test_counts_shape = get_shape(file, "test_vector_counts");
+        train_shape = std::make_pair(train_counts_shape.first, 0);
+        test_shape = std::make_pair(test_counts_shape.first, 0);
+    } else {
+        train_shape = get_shape(file, "train");
+        logger::debug("train.shape: {}", to_string(train_shape));
+        test_shape = get_shape(file, "test");
+        logger::debug("test.shape: {}", to_string(test_shape));
+        assert(train_shape.second == test_shape.second);
+    }
+
+    obj->train_shape_ = train_shape;
+    obj->test_shape_ = test_shape;
+    obj->neighbors_shape_ = neighbors_shape;
+    obj->dim_ = train_shape.second;
+    obj->number_of_base_ = train_shape.first;
+    obj->number_of_query_ = test_shape.first;
 
     if (obj->vector_type_ == DENSE_VECTORS || obj->vector_type_ == MULTI_VECTORS) {
         // read from file
@@ -228,7 +240,7 @@ EvalDataset::Load(const std::string& filename) {
         }
 
         // Load multi-vector data if present
-        if (has_multi_vectors) {
+        if (obj->vector_type_ == MULTI_VECTORS) {
             // Read multi_vector_dim attribute
             if (file.attrExists("multi_vector_dim")) {
                 H5::Attribute attr = file.openAttribute("multi_vector_dim");
@@ -258,6 +270,18 @@ EvalDataset::Load(const std::string& filename) {
                 mv_space.getSimpleExtentDims(mv_dims, NULL);
                 auto total_train_vectors = mv_dims[0];
                 auto mv_dim = mv_dims[1];
+                if (mv_dim != obj->multi_vector_dim_) {
+                    throw std::runtime_error(
+                        "train_multi_vectors shape does not match multi_vector_dim");
+                }
+                uint64_t total_count = 0;
+                for (int64_t i = 0; i < obj->number_of_base_; ++i) {
+                    total_count += obj->train_vector_counts_[i];
+                }
+                if (total_count != total_train_vectors) {
+                    throw std::runtime_error(
+                        "sum(train_vector_counts) does not match train_multi_vectors shape");
+                }
                 auto flat_train = std::shared_ptr<float[]>(new float[total_train_vectors * mv_dim]);
                 mv_ds.read(flat_train.get(), H5::PredType::NATIVE_FLOAT);
 
@@ -292,6 +316,18 @@ EvalDataset::Load(const std::string& filename) {
                 mv_space.getSimpleExtentDims(mv_dims, NULL);
                 auto total_test_vectors = mv_dims[0];
                 auto mv_dim = mv_dims[1];
+                if (mv_dim != obj->multi_vector_dim_) {
+                    throw std::runtime_error(
+                        "test_multi_vectors shape does not match multi_vector_dim");
+                }
+                uint64_t total_count = 0;
+                for (int64_t i = 0; i < obj->number_of_query_; ++i) {
+                    total_count += obj->test_vector_counts_[i];
+                }
+                if (total_count != total_test_vectors) {
+                    throw std::runtime_error(
+                        "sum(test_vector_counts) does not match test_multi_vectors shape");
+                }
                 auto flat_test = std::shared_ptr<float[]>(new float[total_test_vectors * mv_dim]);
                 mv_ds.read(flat_test.get(), H5::PredType::NATIVE_FLOAT);
 
@@ -516,7 +552,7 @@ EvalDataset::Save(const EvalDatasetPtr& dataset, const std::string& filename) {
             throw std::runtime_error("Unsupported train data type");
         }
 
-    } else {
+    } else if (dataset->vector_type_ == SPARSE_VECTORS) {
         size_t total_size;
         std::vector<char> buffer = serialize_sparse_vectors(dataset->sparse_train_, total_size);
         hsize_t dims[1] = {static_cast<hsize_t>(total_size)};
@@ -539,7 +575,7 @@ EvalDataset::Save(const EvalDatasetPtr& dataset, const std::string& filename) {
         } else {
             throw std::runtime_error("Unsupported test data type");
         }
-    } else {
+    } else if (dataset->vector_type_ == SPARSE_VECTORS) {
         size_t total_size;
         std::vector<char> buffer = serialize_sparse_vectors(dataset->sparse_test_, total_size);
         hsize_t dims[1] = {static_cast<hsize_t>(total_size)};

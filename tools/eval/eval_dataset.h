@@ -31,6 +31,14 @@ class EvalDataset;
 using EvalDatasetPtr = std::shared_ptr<EvalDataset>;
 class EvalDataset {
 public:
+    EvalDataset() = default;
+    EvalDataset(const EvalDataset&) = delete;
+    EvalDataset&
+    operator=(const EvalDataset&) = delete;
+    EvalDataset(EvalDataset&&) = delete;
+    EvalDataset&
+    operator=(EvalDataset&&) = delete;
+
     static EvalDatasetPtr
     Load(const std::string& filename);
 
@@ -238,6 +246,12 @@ private:
         H5::DataSpace dataspace = dataset.getSpace();
         hsize_t dims_out[2];
         int ndims = dataspace.getSimpleExtentDims(dims_out, NULL);
+        if (ndims == 1) {
+            return std::make_pair<int64_t, int64_t>(dims_out[0], 0);
+        }
+        if (ndims != 2) {
+            throw std::runtime_error("unsupported dataset rank: " + std::to_string(ndims));
+        }
         return std::make_pair<int64_t, int64_t>(dims_out[0], dims_out[1]);
     }
 
