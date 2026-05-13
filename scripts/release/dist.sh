@@ -10,12 +10,17 @@ build() {
     local dockerfile=$2
     local makefile_target=$3
     local dist_name_suffix=$4
+    local compile_jobs=${COMPILE_JOBS:-6}
+
+    if ! [[ "$compile_jobs" =~ ^[0-9]+$ ]]; then
+        compile_jobs=6
+    fi
 
     docker build -t $image_name -f $dockerfile .
 
     docker run -u $CURRENT_UID:$CURRENT_GID --rm -v $(pwd):/work $image_name \
            bash -c "\
-           export COMPILE_JOBS=48 && \
+           export COMPILE_JOBS=\"$compile_jobs\" && \
            export CMAKE_INSTALL_PREFIX=/tmp/vsag && \
            make clean-release && make $makefile_target && make run-dist-tests && make install && \
            mkdir -p ./dist && \
@@ -43,7 +48,7 @@ build "vsag-builder-cxx11" \
 # libcxx version
 # docker run -u $CURRENT_UID:$CURRENT_GID --rm -v $(pwd):/work vsag-builder \
 #        bash -c "\
-#        export COMPILE_JOBS=48 && \
+#        export COMPILE_JOBS=6 && \
 #        export CMAKE_INSTALL_PREFIX=/tmp/vsag && \
 #        make clean-release && make dist-libcxx && make install && \
 #        mkdir -p ./dist && \

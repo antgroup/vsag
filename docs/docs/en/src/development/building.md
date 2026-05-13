@@ -96,3 +96,21 @@ make dist-libcxx          # libc++ (Clang)
 ```
 
 The produced tarballs contain headers, static/shared libraries, and version metadata.
+
+## Release Publishing
+
+To publish a new GitHub Release, use the `Build and Publish Release` workflow in the GitHub
+Actions tab and run it manually with:
+
+- `branch`: the branch, tag, or commit SHA to release from
+- `tag_name`: the new release tag, such as `v1.0.0`
+- `prerelease`: whether to mark the release as a prerelease
+
+For a local dry run of the same packaging script, run:
+
+```bash
+COMPILE_JOBS=6 bash ./scripts/release/dist.sh
+```
+
+You can increase `COMPILE_JOBS` if your machine has enough memory, but the default is conservative
+to avoid out-of-memory failures in CI runners.
