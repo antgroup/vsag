@@ -149,6 +149,33 @@ Every pull request **must** have the following two labels before it can be merge
 
 Mergify enforces these labels via check runs. The PR merge will be blocked until both labels are present.
 
+## Linking an Issue
+
+PRs labeled **`kind/bug`** or **`kind/feature`** must reference an existing
+issue in the PR description using a GitHub-recognized auto-closing keyword,
+so the issue closes automatically when the PR merges:
+
+```text
+Fixes: #1234
+Closes: #1234
+Resolves: #1234
+```
+
+Cross-repo references (`owner/repo#1234`) and full issue URLs are also
+accepted. PRs labeled `kind/improvement` or `kind/documentation` are
+exempt from this requirement.
+
+This rule is enforced by:
+
+1.  The `PR Issue Link Check` GitHub Action, which runs on every PR
+    targeting `main` or `0.*` branches. Repo administrators are expected
+    to add it to the **required status checks** for those branches so
+    that a failed check actually blocks merge.
+2.  A Mergify `merge_protections` rule as a defense-in-depth fallback.
+
+If the check fails, edit the PR description to add the required keyword
+and the check will re-run automatically.
+
 ## Commit message and skip CI
 
 -   Follow Conventional Commits in the subject line, such as `feat:`, `fix:`, `docs:`, or `chore:`.

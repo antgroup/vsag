@@ -6,6 +6,7 @@ key-facts:
   - AI agents: do NOT use `git commit -s` (it appends Signed-off-by last, with a blank line before it). Write both trailers manually in the commit body, deriving the human Signed-off-by from `git config user.name`/`user.email`
   - Trailer order: Signed-off-by first, Assisted-by immediately after, no blank line between them
   - Every PR needs both a kind/* and a version/* label
+  - PRs labeled kind/bug or kind/feature must link an issue with Fixes:/Closes:/Resolves: #N (or owner/repo#N / issue URL)
 related:
   - ../../CONTRIBUTING.md
   - ../../.github/pull_request_template.md
@@ -70,6 +71,36 @@ Every pull request **must** have two labels before it can be merged:
 
 Mergify enforces these via check runs. Always add both labels when creating
 a PR.
+
+## Linking an issue
+
+PRs labeled `kind/bug` or `kind/feature` **must** reference an existing
+issue in the PR description using a GitHub-recognized auto-closing keyword
+(`close[sd]?`, `fix(e[sd])?`, `resolve[sd]?`, case-insensitive, optionally
+with a colon), followed by `#N`, `owner/repo#N`, or a full issue URL.
+Examples:
+
+```text
+Fixes: #1234
+Closes #1234
+Resolves: antgroup/vsag#999
+Closes: https://github.com/antgroup/vsag/issues/100
+```
+
+`kind/improvement` and `kind/documentation` PRs are exempt — link an issue
+only if it helps reviewers. The placeholder line in
+`.github/pull_request_template.md` lives inside an HTML comment and does
+**not** satisfy the rule on its own; you must replace it with a real
+reference.
+
+Enforcement happens in two places:
+
+1. The `PR Issue Link Check` GitHub Action runs on every PR open / edit /
+   sync targeting `main` or `0.*` branches. Repo administrators are
+   expected to add it to the **required status checks** on those
+   branches so a failed check actually blocks merge.
+2. A Mergify `merge_protections` rule (`Require linked issue for
+   feature/bug PRs`) blocks merge as a defense-in-depth fallback.
 
 ## Documentation expectations
 

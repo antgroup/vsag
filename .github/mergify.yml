@@ -119,5 +119,21 @@ merge_protections:
       - base=main
     success_conditions:
       - label~=^version/
+
+  - name: Require linked issue for feature/bug PRs
+    # Defense-in-depth fallback for the `PR Issue Link Check` GitHub
+    # Action. If the Action is ever disabled or skipped, Mergify still
+    # refuses to merge `kind/feature` / `kind/bug` PRs whose description
+    # does not reference an issue via a GitHub auto-closing keyword.
+    if:
+      - or:
+          - base=main
+          - base~=^0\.
+      - or:
+          - label=kind/feature
+          - label=kind/bug
+    success_conditions:
+      - >-
+        body~=(?im)(?:^|[\s\-\*])(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s+(?:#\d+|[\w.\-]+/[\w.\-]+#\d+|https?://github\.com/[\w.\-]+/[\w.\-]+/issues/\d+)
 merge_protections_settings:
   reporting_method: check-runs

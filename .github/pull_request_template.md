@@ -8,7 +8,20 @@
 
 ## Linked Issue
 
-- Issue: <!-- e.g. #1234 -->
+<!--
+REQUIRED for `kind/bug` and `kind/feature` PRs. Use a GitHub-recognized
+auto-closing keyword so the linked issue is closed when this PR merges:
+
+  Fixes: #<number>
+  Closes: #<number>
+  Resolves: #<number>
+
+Cross-repo references (`owner/repo#<number>`) and full issue URLs are
+also accepted. `kind/improvement` and `kind/documentation` PRs may leave
+this blank (delete the line below or keep it empty).
+-->
+
+- Fixes: <!-- #<number> -->
 
 ## What Changed
 
@@ -54,7 +67,7 @@ Test details:
 
 ## Checklist
 
-- [ ] I have linked the relevant issue (or explained why not applicable)
+- [ ] I have linked the relevant issue (required for `kind/bug` and `kind/feature`; see "Linked Issue" above)
 - [ ] I have added/updated tests for new behavior or bug fixes
 - [ ] I have considered API compatibility impact
 - [ ] I have updated docs if behavior/workflow changed
