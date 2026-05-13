@@ -138,3 +138,19 @@ make pyvsag-all
 - `VSAG_ENABLE_INTEL_MKL`：是否启用 Intel MKL 作为 BLAS 后端，默认 `OFF`；关闭时使用 OpenBLAS；
 - `VSAG_ENABLE_LIBAIO`：是否启用 `libaio`，默认 `ON`。
 
+## 发布流程
+
+如果要在 GitHub 上手动发布 Release，请到 GitHub Actions 页面运行 `Build and Publish Release` 工作流，并填写以下参数：
+
+- `branch`：要发布的分支、tag 或 commit SHA
+- `tag_name`：新的发布标签，例如 `v1.0.0`
+- `prerelease`：是否标记为预发布版本
+
+如果你想在本地手动执行同样的打包流程，可以运行：
+
+```bash
+COMPILE_JOBS=6 bash ./scripts/release/dist.sh
+```
+
+如果机器内存足够，可以适当调大 `COMPILE_JOBS`；默认值会比较保守，以避免 CI 里再次触发
+内存不足。
