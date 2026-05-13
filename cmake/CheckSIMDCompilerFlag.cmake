@@ -133,6 +133,40 @@ try_compile(RUNTIME_NEON_SUPPORTED
     OUTPUT_VARIABLE COMPILE_OUTPUT
     )
 
+
+file(WRITE ${CMAKE_BINARY_DIR}/instructions_test_amx.cpp "#include <immintrin.h>
+int main() {
+    _tile_loadconfig((const void*)0);
+    _tile_zero(0);
+    _tile_dpbuud(0, 1, 2);
+    _tile_dpbf16ps(0, 1, 2);
+    __m512bh a = (__m512bh)_mm512_setzero_si512();
+    __m512bh b = (__m512bh)_mm512_setzero_si512();
+    __m512  c = _mm512_setzero_ps();
+    c = _mm512_dpbf16_ps(c, a, b);
+    _tile_release();
+    return 0;
+}")
+# Probe with the same flag set that src/simd/CMakeLists.txt applies to
+# amx.cpp. The AMX translation unit uses AMX_INT8 (tdpbuud), AMX_BF16
+# (tdpbf16ps), AVX-512 BF16 helpers, and VNNI lane ops, so a probe that
+# only covered -mamx-tile -mamx-int8 would let configure succeed on
+# toolchains where the build later fails with "target specific option
+# mismatch" on the BF16 intrinsics.
+try_compile(COMPILER_AMX_SUPPORTED
+    ${CMAKE_BINARY_DIR}/instructions_test_amx
+    ${CMAKE_BINARY_DIR}/instructions_test_amx.cpp
+    COMPILE_DEFINITIONS "-mavx512f -mavx512vl -mavx512bw -mavx512dq -mavx512vnni -mavx512bf16 -mamx-tile -mamx-int8 -mamx-bf16"
+    OUTPUT_VARIABLE COMPILE_OUTPUT
+    )
+
+try_compile(RUNTIME_AMX_SUPPORTED
+    ${CMAKE_BINARY_DIR}/instructions_test_amx
+    ${CMAKE_BINARY_DIR}/instructions_test_amx.cpp
+    COMPILE_DEFINITIONS "-march=native"
+    OUTPUT_VARIABLE COMPILE_OUTPUT
+    )
+
 # determine which instructions can be package into distribution
 set (COMPILER_SUPPORTED "compiler support instructions: ")
 if (COMPILER_SSE_SUPPORTED)
@@ -149,6 +183,9 @@ if (COMPILER_AVX512_SUPPORTED)
 endif ()
 if (COMPILER_AVX512VPOPCNTDQ_SUPPORTED)
   set (COMPILER_SUPPORTED "${COMPILER_SUPPORTED} AVX512VPOPCNTDQ")
+endif ()
+if (COMPILER_AMX_SUPPORTED)
+  set (COMPILER_SUPPORTED "${COMPILER_SUPPORTED} AMX")
 endif ()
 if (COMPILER_NEON_SUPPORTED)
   set (COMPILER_SUPPORTED "${COMPILER_SUPPORTED} NEON")
@@ -175,6 +212,9 @@ if (RUNTIME_AVX512_SUPPORTED)
 endif ()
 if (RUNTIME_AVX512VPOPCNTDQ_SUPPORTED)
   set (RUNTIME_SUPPORTED "${RUNTIME_SUPPORTED} AVX512VPOPCNTDQ")
+endif ()
+if (RUNTIME_AMX_SUPPORTED)
+  set (RUNTIME_SUPPORTED "${RUNTIME_SUPPORTED} AMX")
 endif ()
 if (RUNTIME_NEON_SUPPORTED)
   set (RUNTIME_SUPPORTED "${RUNTIME_SUPPORTED} NEON")
@@ -207,6 +247,10 @@ endif ()
 if (NOT DISABLE_AVX512VPOPCNTDQ_FORCE AND COMPILER_AVX512VPOPCNTDQ_SUPPORTED AND DIST_CONTAINS_AVX512)
   set (DIST_CONTAINS_AVX512VPOPCNTDQ ON)
   set (DIST_CONTAINS_INSTRUCTIONS "${DIST_CONTAINS_INSTRUCTIONS} AVX512VPOPCNTDQ")
+endif ()
+if (NOT DISABLE_AMX_FORCE AND COMPILER_AMX_SUPPORTED AND DIST_CONTAINS_AVX512)
+  set (DIST_CONTAINS_AMX ON)
+  set (DIST_CONTAINS_INSTRUCTIONS "${DIST_CONTAINS_INSTRUCTIONS} AMX")
 endif ()
 if (NOT DISABLE_NEON_FORCE AND COMPILER_NEON_SUPPORTED)
   set (DIST_CONTAINS_NEON ON)

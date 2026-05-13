@@ -22,6 +22,7 @@ set (SIMD_SRCS
         avx2.cpp
         avx512.cpp
         avx512vpopcntdq.cpp
+        amx.cpp
         neon.cpp
         sve.cpp
         simd.cpp
@@ -80,6 +81,14 @@ if (DIST_CONTAINS_AVX512VPOPCNTDQ)
             "${AVX512VPOPCNTDQ_FLAGS}"
     )
 endif ()
+if (DIST_CONTAINS_AMX)
+    set_source_files_properties (
+            amx.cpp
+            PROPERTIES
+            COMPILE_FLAGS
+            "-mavx512f -mavx512vl -mavx512bw -mavx512dq -mavx512vnni -mavx512bf16 -mamx-tile -mamx-int8 -mamx-bf16"
+    )
+endif ()
 if (DIST_CONTAINS_NEON)
     set_source_files_properties (neon.cpp PROPERTIES COMPILE_FLAGS "-march=armv8-a")
 endif ()
@@ -109,6 +118,7 @@ simd_add_definitions (DIST_CONTAINS_AVX -DENABLE_AVX=1)
 simd_add_definitions (DIST_CONTAINS_AVX2 -DENABLE_AVX2=1)
 simd_add_definitions (DIST_CONTAINS_AVX512 -DENABLE_AVX512=1)
 simd_add_definitions (DIST_CONTAINS_AVX512VPOPCNTDQ -DENABLE_AVX512VPOPCNTDQ=1)
+simd_add_definitions (DIST_CONTAINS_AMX -DENABLE_AMX=1)
 simd_add_definitions (DIST_CONTAINS_NEON -DENABLE_NEON=1)
 simd_add_definitions (DIST_CONTAINS_SVE -DENABLE_SVE=1)
 
@@ -136,6 +146,9 @@ if (ENABLE_TESTS)
     endif ()
     if (DIST_CONTAINS_AVX512VPOPCNTDQ)
         target_compile_definitions (simd_test PRIVATE ENABLE_AVX512VPOPCNTDQ=1)
+    endif ()
+    if (DIST_CONTAINS_AMX)
+        target_compile_definitions (simd_test PRIVATE ENABLE_AMX=1)
     endif ()
     if (DIST_CONTAINS_NEON)
         target_compile_definitions (simd_test PRIVATE ENABLE_NEON=1)

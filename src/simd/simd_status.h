@@ -34,6 +34,8 @@ public:
     bool dist_support_neon = false;
     bool dist_support_sve = false;
     bool dist_support_avx512vpopcntdq = false;
+    bool dist_support_amx = false;
+    bool dist_support_amx_bf16 = false;
     bool runtime_has_sse = false;
     bool runtime_has_avx = false;
     bool runtime_has_avx2 = false;
@@ -44,6 +46,8 @@ public:
     bool runtime_has_neon = false;
     bool runtime_has_sve = false;
     bool runtime_has_avx512vpopcntdq = false;
+    bool runtime_has_amx = false;
+    bool runtime_has_amx_bf16 = false;
 
     static bool is_inited;
 
@@ -76,6 +80,26 @@ public:
         return false;
 #endif
     }
+
+    // Intel AMX (Advanced Matrix Extensions) — INT8/BF16 tile multiplications.
+    // Returns true only when:
+    //   * the binary was built with ENABLE_AMX (CMake flag),
+    //   * cpuinfo reports the running CPU exposes amx_tile + amx_int8,
+    //   * the kernel granted XFEATURE_XTILEDATA permission to this process
+    //     (one-time arch_prctl on first call; cached afterwards).
+    // The kernel-level permission step is required since Linux 5.16: without
+    // it any tile* instruction faults with #UD.  We probe lazily so that
+    // builds without AMX support never invoke arch_prctl.
+    static bool
+    SupportAMX();
+
+    // Intel AMX-BF16 (TDPBF16PS instruction).  Returns true only when both
+    // `SupportAMX()` succeeds *and* CPUID leaf 7 sub-leaf 0 EDX bit 22
+    // (AMX_BF16) is set on the running CPU.  Granite Rapids and Sapphire
+    // Rapids expose this; earlier silicon does not.  Same lazy-cached
+    // semantics as `SupportAMX()`.
+    static bool
+    SupportAMXBF16();
 
     static inline bool
     SupportAVX2() {
@@ -179,6 +203,16 @@ public:
     [[nodiscard]] std::string
     avx512vpopcntdq() const {
         return status_to_string(dist_support_avx512vpopcntdq, runtime_has_avx512vpopcntdq);
+    }
+
+    [[nodiscard]] std::string
+    amx() const {
+        return status_to_string(dist_support_amx, runtime_has_amx);
+    }
+
+    [[nodiscard]] std::string
+    amx_bf16() const {
+        return status_to_string(dist_support_amx_bf16, runtime_has_amx_bf16);
     }
 
     static std::string

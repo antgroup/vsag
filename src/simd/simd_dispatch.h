@@ -55,6 +55,12 @@ namespace vsag {
 // AVX512VPOPCNTDQ, or that unconditionally return the generic
 // implementation) are intentionally left outside of these macros.
 
+#if defined(ENABLE_AMX)
+#define VSAG_SIMD_DISPATCH_BODY_AMX(fn) return amx::fn;
+#else
+#define VSAG_SIMD_DISPATCH_BODY_AMX(fn)
+#endif
+
 #if defined(ENABLE_AVX512)
 #define VSAG_SIMD_DISPATCH_BODY_AVX512(fn) return avx512::fn;
 #else

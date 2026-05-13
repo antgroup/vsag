@@ -16,6 +16,7 @@
 #include "sq8_uniform_quantizer.h"
 
 #include <cstddef>
+#include <cstring>
 
 #include "scalar_quantization_trainer.h"
 #include "simd/normalize.h"
@@ -196,6 +197,79 @@ SQ8UniformQuantizer<metric>::ComputeDistImpl(Computer<SQ8UniformQuantizer>& comp
                                              const uint8_t* codes,
                                              float* dists) const {
     dists[0] = this->ComputeImpl(computer.buf_, codes);
+}
+
+// Batch-scan one query against `count` codes laid out with row stride =
+// code_size_ (fixed by the quantizer; includes optional trailing norm/sum
+// metadata). Computes raw IP via SQ8UniformComputeCodesIPBatch -- a single
+// AMX/AVX-512 call -- then folds in the per-row metric correction.
+template <MetricType metric>
+void
+SQ8UniformQuantizer<metric>::ScanBatchDistImpl(Computer<SQ8UniformQuantizer>& computer,
+                                               uint64_t count,
+                                               const uint8_t* codes,
+                                               float* dists) const {
+    if (count == 0) {
+        return;
+    }
+    if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
+        // Stash raw IPs into the output buffer (sized for `count` floats).
+        SQ8UniformComputeCodesIPBatch(
+            computer.buf_, codes, this->dim_, count, this->code_size_, dists);
+
+        norm_type query_norm = 0;
+        std::memcpy(&query_norm, computer.buf_ + offset_norm_, sizeof(norm_type));
+        const auto query_norm_f = static_cast<float>(query_norm);
+        for (uint64_t i = 0; i < count; ++i) {
+            norm_type code_norm = 0;
+            std::memcpy(&code_norm, codes + i * this->code_size_ + offset_norm_, sizeof(norm_type));
+            dists[i] =
+                (query_norm_f + static_cast<float>(code_norm) - 2.F * dists[i]) * scalar_rate_;
+        }
+    } else if constexpr (metric == MetricType::METRIC_TYPE_IP or
+                         metric == MetricType::METRIC_TYPE_COSINE) {
+        SQ8UniformComputeCodesIPBatch(
+            computer.buf_, codes, this->dim_, count, this->code_size_, dists);
+
+        sum_type query_sum = 0;
+        std::memcpy(&query_sum, computer.buf_ + offset_sum_, sizeof(sum_type));
+        const float lb = lower_bound_;
+        const float lb2 = lb * lb;
+        for (uint64_t i = 0; i < count; ++i) {
+            sum_type code_sum = 0;
+            std::memcpy(&code_sum, codes + i * this->code_size_ + offset_sum_, sizeof(sum_type));
+            const float ip = lb * (query_sum + code_sum) + scalar_rate_ * dists[i] + lb2;
+            dists[i] = 1.F - ip;
+        }
+    } else {
+        // Fallback for unsupported metric: per-pair compute. Skip the batch
+        // IP call so we don't compute results that would be immediately
+        // overwritten.
+        for (uint64_t i = 0; i < count; ++i) {
+            dists[i] = this->ComputeImpl(computer.buf_, codes + i * this->code_size_);
+        }
+    }
+}
+
+template <MetricType metric>
+void
+SQ8UniformQuantizer<metric>::ComputeDistsBatch4Impl(Computer<SQ8UniformQuantizer>& computer,
+                                                    const uint8_t* codes1,
+                                                    const uint8_t* codes2,
+                                                    const uint8_t* codes3,
+                                                    const uint8_t* codes4,
+                                                    float& dists1,
+                                                    float& dists2,
+                                                    float& dists3,
+                                                    float& dists4) const {
+    // The 4 codes are not contiguous in memory (HGraph passes pointers
+    // from a neighbor list). Calling SQ8UniformComputeCodesIPBatch four
+    // times with n_codes=1 throws away the batching benefit, so for
+    // batch4 we just delegate to the per-pair ComputeImpl.
+    dists1 = this->ComputeImpl(computer.buf_, codes1);
+    dists2 = this->ComputeImpl(computer.buf_, codes2);
+    dists3 = this->ComputeImpl(computer.buf_, codes3);
+    dists4 = this->ComputeImpl(computer.buf_, codes4);
 }
 
 template <MetricType metric>
