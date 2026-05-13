@@ -300,18 +300,55 @@ BruteForce::RangeSearch(const vsag::DatasetPtr& query,
                         int64_t limited_size) const {
     std::shared_lock read_lock(this->global_mutex_);
     auto computer = this->inner_codes_->FactoryComputer(query->GetFloat32Vectors());
+    CHECK_ARGUMENT(limited_size != 0,
+                   fmt::format("limited_size({}) must not be equal to 0", limited_size));
     if (limited_size < 0) {
         limited_size = std::numeric_limits<int64_t>::max();
     }
-    auto heap = std::make_shared<StandardHeap<true, true>>(this->allocator_, limited_size);
-    for (InnerIdType i = 0; i < total_count_; ++i) {
-        float dist;
-        if (filter == nullptr or filter->CheckValid(this->label_table_->GetLabelById(i))) {
-            inner_codes_->Query(&dist, computer, &i, 1);
-            if (dist > radius) {
-                continue;
+    if (total_count_ == 0) {
+        auto [dataset_results, dists, ids] = create_fast_dataset(0, allocator_);
+        return std::move(dataset_results);
+    }
+
+    auto brute_force_params = BruteForceSearchParameters::FromJson(parameters);
+    auto parallel_count = static_cast<uint64_t>(brute_force_params.parallel_search_thread_count);
+    auto search_func = [&](InnerIdType start, InnerIdType end) -> DistHeapPtr {
+        auto cur_heap =
+            DistanceHeap::MakeInstanceBySize<true, true>(this->allocator_, limited_size);
+        for (InnerIdType i = start; i < end; ++i) {
+            float dist;
+            if (filter == nullptr or filter->CheckValid(this->label_table_->GetLabelById(i))) {
+                inner_codes_->Query(&dist, computer, &i, 1);
+                if (dist > radius) {
+                    continue;
+                }
+                cur_heap->Push(dist, i);
             }
-            heap->Push(dist, i);
+        }
+        return cur_heap;
+    };
+
+    DistHeapPtr heap = nullptr;
+    parallel_count = std::min(parallel_count, total_count_);
+    if (parallel_count <= 1 or this->thread_pool_ == nullptr) {
+        heap = search_func(0, total_count_);
+    } else {
+        std::vector<std::future<DistHeapPtr>> futures;
+        futures.reserve(parallel_count);
+        auto chunk_size = (total_count_ + parallel_count - 1) / parallel_count;
+        for (uint64_t i = 0; i < parallel_count; ++i) {
+            auto start = static_cast<InnerIdType>(i * chunk_size);
+            auto end = static_cast<InnerIdType>(std::min(start + chunk_size, total_count_));
+            futures.emplace_back(this->thread_pool_->GeneralEnqueue(search_func, start, end));
+        }
+
+        for (uint64_t i = 0; i < futures.size(); ++i) {
+            auto cur_heap = futures[i].get();
+            if (i == 0) {
+                heap = cur_heap;
+            } else {
+                heap->Merge(*cur_heap);
+            }
         }
     }
 
