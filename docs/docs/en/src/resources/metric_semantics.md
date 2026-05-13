@@ -14,21 +14,20 @@ types.
 
 ## `l2`
 
-- The user-facing metric is L2 distance.
+- The distance is `L2Sqr` (squared L2 distance).
 - Internally, many kernels work with `L2Sqr` for speed.
-- The squared form is an implementation detail; ranking remains consistent
-  with L2 distance.
+- The squared form is used for performance; ranking remains consistent with
+  L2 distance. Returned distance values and range-search thresholds are
+  squared.
 
 ## `ip`
 
-- VSAG represents inner product as a distance-like score.
-- The common form is `1 - inner_product`.
+- The distance is `1 - inner_product`.
 - Larger inner product means smaller distance.
 
 ## `cosine`
 
-- VSAG treats cosine as a distance-like score as well.
-- The common form is `1 - cosine_similarity`.
+- The distance is `1 - cosine_similarity`.
 - For performance, implementations may normalize vectors or store extra norm
   information so cosine can reuse IP-oriented kernels.
 
