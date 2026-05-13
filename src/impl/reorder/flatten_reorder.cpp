@@ -85,6 +85,7 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
     Vector<float> lower_bound_probe_dists(max_candidate_size, query_allocator);
     Vector<float> lower_bounds(max_candidate_size, query_allocator);
     UnorderedSet<InnerIdType> merged_ids(query_allocator);
+    merged_ids.reserve(max_candidate_size);
 
     uint64_t candidate_size = 0;
     const auto* candidate_result = input == nullptr ? nullptr : input->GetData();
@@ -165,8 +166,8 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
     });
 
     const uint64_t bootstrap_size = std::min<uint64_t>(static_cast<uint64_t>(topk), candidate_size);
-    constexpr uint64_t BATCH_SIZE = 256;
-    const auto buffer_size = std::max<uint64_t>(bootstrap_size, BATCH_SIZE);
+    constexpr uint64_t batch_size = 256;
+    const auto buffer_size = std::max<uint64_t>(bootstrap_size, batch_size);
     Vector<InnerIdType> ids(buffer_size, query_allocator);
     Vector<float> dists(buffer_size, query_allocator);
     Vector<uint64_t> batch_indices(buffer_size, query_allocator);
@@ -192,7 +193,7 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
 
         const auto threshold = reorder_heap->Top().first;
         uint64_t batch_count = 0;
-        while (cursor < candidate_size && batch_count < BATCH_SIZE) {
+        while (cursor < candidate_size && batch_count < batch_size) {
             const auto idx = order[cursor];
             if (lower_bounds[idx] >= threshold) {
                 break;
