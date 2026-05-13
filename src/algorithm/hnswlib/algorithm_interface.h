@@ -118,8 +118,8 @@ public:
     virtual size_t
     getDeletedCount() = 0;
 
-    virtual vsag::PGUnorderedMap<LabelType, InnerIdType>
-    getDeletedElements() = 0;
+    virtual const vsag::UnorderedMap<LabelType, InnerIdType>&
+    getDeletedElements() const = 0;
 
     virtual bool
     isValidLabel(LabelType label) = 0;

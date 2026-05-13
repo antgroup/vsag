@@ -880,12 +880,10 @@ Pyramid::SetImmutable() {
     if (this->immutable_) {
         return;
     }
-    label_table_->use_reverse_map_ = false;
+    label_table_->SetImmutable();
     this->points_mutex_.reset();
     this->points_mutex_ = std::make_shared<EmptyMutex>();
     this->searcher_->SetMutexArray(this->points_mutex_);
-    PGUnorderedMap<LabelType, InnerIdType> empty_remap(allocator_);
-    this->label_table_->label_remap_.swap(empty_remap);
     immutable_ = true;
 }
 

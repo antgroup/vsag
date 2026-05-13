@@ -179,6 +179,10 @@ HGraphParameter::CheckCompatibility(const ParamPtr& other) const {
         logger::error("HGraphParameter::CheckCompatibility: support_duplicate must be the same");
         return false;
     }
+    if (label_remap_type != hgraph_param->label_remap_type) {
+        logger::error("HGraphParameter::CheckCompatibility: label_remap_type must be the same");
+        return false;
+    }
     return true;
 }
 

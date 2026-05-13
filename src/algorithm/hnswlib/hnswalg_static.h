@@ -248,8 +248,8 @@ public:
         return num_deleted_;
     }
 
-    vsag::PGUnorderedMap<LabelType, InnerIdType>
-    getDeletedElements() override {
+    const vsag::UnorderedMap<LabelType, InnerIdType>&
+    getDeletedElements() const override {
         throw std::runtime_error("Static HNSW doesn't support delete");
     };
 

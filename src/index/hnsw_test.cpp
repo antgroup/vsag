@@ -1185,7 +1185,7 @@ TEST_CASE("update mark-deleted vector", "[ut][hnsw]") {
         if (is_deleted) {
             REQUIRE(alg_hnsw->getDeletedElements().count(old_label) == 0);
             REQUIRE(alg_hnsw->getDeletedElements().count(new_label) != 0);
-            REQUIRE(alg_hnsw->getDeletedElements()[new_label] == old_label);
+            REQUIRE(alg_hnsw->getDeletedElements().at(new_label) == old_label);
         } else {
             REQUIRE(not alg_hnsw->isValidLabel(old_label));
             REQUIRE(alg_hnsw->isValidLabel(new_label));

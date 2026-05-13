@@ -17,7 +17,14 @@
 
 #include <fmt/format.h>
 
+#include <algorithm>
 #include <atomic>
+#include <functional>
+#include <limits>
+#include <memory>
+#include <mutex>
+#include <tuple>
+#include <utility>
 
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
@@ -40,12 +47,67 @@ struct DuplicateRecord {
 
 class LabelTable {
 public:
+    class LabelRemap {
+    public:
+        explicit LabelRemap(Allocator* allocator, LabelRemapType remap_type = LabelRemapType::PG);
+
+        void
+        Clear();
+
+        void
+        Reset();
+
+        void
+        Reserve(uint64_t size);
+
+        uint64_t
+        Size() const;
+
+        void
+        InsertOrAssign(LabelType label, InnerIdType inner_id);
+
+        void
+        Emplace(LabelType label, InnerIdType inner_id);
+
+        bool
+        Erase(LabelType label);
+
+        bool
+        Find(LabelType label, InnerIdType& inner_id) const;
+
+        template <typename Func>
+        void
+        ForEach(Func&& func) const {
+            if (pg_map_ != nullptr) {
+                for (const auto& [label, inner_id] : *pg_map_) {
+                    func(label, inner_id);
+                }
+                return;
+            }
+            for (const auto& [label, inner_id] : *robin_map_) {
+                func(label, inner_id);
+            }
+        }
+
+        [[nodiscard]] LabelRemapType
+        GetType() const {
+            return remap_type_;
+        }
+
+    private:
+        Allocator* allocator_{nullptr};
+        LabelRemapType remap_type_{LabelRemapType::PG};
+        std::unique_ptr<UnorderedMap<LabelType, InnerIdType>> robin_map_{};
+        std::unique_ptr<PGUnorderedMap<LabelType, InnerIdType>> pg_map_{};
+    };
+
     explicit LabelTable(Allocator* allocator,
                         bool use_reverse_map = true,
-                        bool compress_redundant_data = false)
+                        bool compress_redundant_data = false,
+                        LabelRemapType label_remap_type = LabelRemapType::PG)
         : allocator_(allocator),
           label_table_(0, allocator),
-          label_remap_(0, allocator),
+          label_remap_(allocator, label_remap_type),
           use_reverse_map_(use_reverse_map),
           deleted_ids_(allocator),
           compress_duplicate_data_(compress_redundant_data),
@@ -60,7 +122,7 @@ public:
     inline void
     Insert(InnerIdType id, LabelType label) {
         if (use_reverse_map_) {
-            label_remap_[label] = id;
+            label_remap_.InsertOrAssign(label, id);
         }
         if (id + 1 > label_table_.size()) {
             label_table_.resize(id + 1);
@@ -74,12 +136,13 @@ public:
         if (not use_reverse_map_) {
             return true;
         }
-        auto iter = label_remap_.find(label);
-        if (iter == label_remap_.end() or iter->second == std::numeric_limits<InnerIdType>::max()) {
+        InnerIdType inner_id;
+        if (not label_remap_.Find(label, inner_id) or
+            inner_id == std::numeric_limits<InnerIdType>::max()) {
             return false;
         }
-        deleted_ids_.insert(iter->second);
-        label_remap_[label] = std::numeric_limits<InnerIdType>::max();
+        deleted_ids_.insert(inner_id);
+        label_remap_.InsertOrAssign(label, std::numeric_limits<InnerIdType>::max());
         return true;
     }
 
@@ -89,17 +152,18 @@ public:
         if (not use_reverse_map_) {
             return false;
         }
-        auto iter = label_remap_.find(label);
-        if (iter == label_remap_.end() or iter->second != std::numeric_limits<InnerIdType>::max()) {
+        InnerIdType inner_id;
+        if (not label_remap_.Find(label, inner_id) or
+            inner_id != std::numeric_limits<InnerIdType>::max()) {
             return false;
         }
 
         // 2. find inner_id
-        auto inner_id = GetIdByLabel(label, true);
+        inner_id = GetIdByLabel(label, true);
 
         // 3. recover
         deleted_ids_.erase(inner_id);
-        label_remap_[label] = inner_id;
+        label_remap_.InsertOrAssign(label, inner_id);
         return true;
     }
 
@@ -108,9 +172,9 @@ public:
         if (not use_reverse_map_) {
             return false;
         }
-        auto iter = label_remap_.find(label);
-        return (iter != label_remap_.end() and
-                iter->second == std::numeric_limits<InnerIdType>::max());
+        InnerIdType inner_id;
+        return label_remap_.Find(label, inner_id) and
+               inner_id == std::numeric_limits<InnerIdType>::max();
     }
 
     inline bool
@@ -131,12 +195,12 @@ public:
     inline std::pair<bool, InnerIdType>
     TryGetIdByLabel(LabelType label, bool return_even_removed = false) const noexcept {
         if (use_reverse_map_ and not return_even_removed) {
-            auto iter = this->label_remap_.find(label);
-            if (iter == this->label_remap_.end()) {
+            InnerIdType inner_id;
+            if (not this->label_remap_.Find(label, inner_id)) {
                 return {false, 0};
             }
-            if (iter->second != std::numeric_limits<InnerIdType>::max()) {
-                return {true, iter->second};
+            if (inner_id != std::numeric_limits<InnerIdType>::max()) {
+                return {true, inner_id};
             } else {
                 return {false, 0};
             }
@@ -152,9 +216,9 @@ public:
     CheckLabel(LabelType label) const {
         // return true when label exists and not been deleted
         if (use_reverse_map_) {
-            auto iter = label_remap_.find(label);
-            return iter != label_remap_.end() and
-                   iter->second != std::numeric_limits<InnerIdType>::max();
+            InnerIdType inner_id;
+            return label_remap_.Find(label, inner_id) and
+                   inner_id != std::numeric_limits<InnerIdType>::max();
         }
         auto result = std::find(label_table_.begin(), label_table_.end(), label);
         return result != label_table_.end();
@@ -185,11 +249,20 @@ public:
         // 3. update label_remap_
         if (use_reverse_map_) {
             // note that currently, old_label must exist
-            auto iter_old = label_remap_.find(old_label);
-            auto internal_id = iter_old->second;
-            label_remap_.erase(iter_old);
-            label_remap_[new_label] = internal_id;
+            InnerIdType internal_id;
+            if (not label_remap_.Find(old_label, internal_id)) {
+                throw VsagException(ErrorType::INTERNAL_ERROR,
+                                    fmt::format("old label {} does not exist", old_label));
+            }
+            label_remap_.Erase(old_label);
+            label_remap_.InsertOrAssign(new_label, internal_id);
         }
+    }
+
+    void
+    SetImmutable() {
+        this->use_reverse_map_ = false;
+        this->label_remap_.Reset();
     }
 
     inline LabelType
@@ -232,8 +305,10 @@ public:
     Deserialize(lvalue_or_rvalue<StreamReader> reader) {
         StreamReader::ReadVector(reader, label_table_);
         if (use_reverse_map_) {
+            this->label_remap_.Clear();
+            this->label_remap_.Reserve(label_table_.size());
             for (InnerIdType id = 0; id < label_table_.size(); ++id) {
-                this->label_remap_[label_table_[id]] = id;
+                this->label_remap_.InsertOrAssign(label_table_[id], id);
             }
         }
         if (compress_duplicate_data_) {
@@ -272,6 +347,30 @@ public:
         return total_count_;
     }
 
+    uint64_t
+    GetRemapSize() const {
+        return label_remap_.Size();
+    }
+
+    template <typename Visitor>
+    void
+    ForEachRemap(Visitor&& visitor) const {
+        label_remap_.ForEach(std::forward<Visitor>(visitor));
+    }
+
+    void
+    ResetRemap(uint64_t size = 0) {
+        label_remap_.Clear();
+        if (size > 0) {
+            label_remap_.Reserve(size);
+        }
+    }
+
+    void
+    InsertRemap(LabelType label, InnerIdType inner_id) {
+        label_remap_.Emplace(label, inner_id);
+    }
+
     inline bool
     CompressDuplicateData() const {
         return compress_duplicate_data_;
@@ -303,7 +402,7 @@ public:
     int64_t
     GetMemoryUsage() {
         return sizeof(LabelTable) + label_table_.size() * sizeof(LabelType) +
-               label_remap_.size() * (sizeof(LabelType) + sizeof(InnerIdType)) +
+               label_remap_.Size() * (sizeof(LabelType) + sizeof(InnerIdType)) +
                deleted_ids_.size() * sizeof(InnerIdType) +
                duplicate_records_.size() * (sizeof(DuplicateRecord*) + sizeof(DuplicateRecord));
     }
@@ -313,7 +412,7 @@ public:
     // Whether to use reverse map to speed up GetIdByLabel.
     bool use_reverse_map_{true};
     // Reverse map from label to id.
-    PGUnorderedMap<LabelType, InnerIdType> label_remap_;
+    LabelRemap label_remap_;
     UnorderedSet<InnerIdType> deleted_ids_;
 
     bool compress_duplicate_data_{true};
