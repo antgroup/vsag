@@ -1,0 +1,26 @@
+global:
+  num_threads_building: 16
+  num_threads_searching: 16
+  exporters:
+    - to: stdout
+      format: table
+
+turboquant_hgraph_sift128:
+  datapath: /data/sift-128-euclidean.hdf5
+  type: search
+  index_name: hgraph
+  create_params: '{"dim":128,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"turboquant","turboquant_bits_per_dim":6,"turboquant_enable_qjl":true,"turboquant_qjl_projection_dim":128,"use_fht":true,"max_degree":32,"ef_construction":400}}'
+  search_params: '{"hgraph":{"ef_search":100}}'
+  index_path: /tmp/vsag_eval/turboquant_hgraph_sift128
+  search_mode: knn
+  topk: 10
+
+rabitq_hgraph_sift128:
+  datapath: /data/sift-128-euclidean.hdf5
+  type: search
+  index_name: hgraph
+  create_params: '{"dim":128,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"rabitq","rabitq_bits_per_dim_query":32,"rabitq_bits_per_dim_base":2,"use_fht":true,"max_degree":32,"ef_construction":400}}'
+  search_params: '{"hgraph":{"ef_search":100}}'
+  index_path: /tmp/vsag_eval/rabitq_hgraph_sift128
+  search_mode: knn
+  topk: 10

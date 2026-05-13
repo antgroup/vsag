@@ -184,6 +184,15 @@ Each named case accepts the same fields as the command-line parameters. Common f
 - `num_threads_building`, `num_threads_searching` (override the `global` values for this case)
 - `disable_recall`, `disable_percent_recall`, `disable_qps`, `disable_tps`, `disable_memory`, `disable_latency`, `disable_percent_latency`
 
+#### TurboQuant Example
+
+You can start from `tools/eval/turboquant_eval_example.yaml`, which includes both a
+`turboquant` case and a directly comparable `rabitq` case on HGraph. Run it with:
+
+```bash
+./build-release/tools/eval/eval_performance tools/eval/turboquant_eval_example.yaml
+```
+
 #### YAML Example
 
 The example below defines two search test cases. Results are printed as a table to stdout, also written to a JSON file, and finally pushed to InfluxDB in line-protocol format.
