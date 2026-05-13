@@ -31,11 +31,17 @@ types.
 - For performance, implementations may normalize vectors or store extra norm
   information so cosine can reuse IP-oriented kernels.
 
+Cosine search generally assumes normalized vectors on the internal compute path.
+Because the implementation may normalize or cache norms, the returned value is
+intended to behave like a distance, but floating-point error can still push it
+slightly outside the ideal mathematical range.
+
 ## Return Value Range
 
 - `l2`: `0` to `+infinity`
 - `ip`: unbounded; values may be negative when `inner_product > 1`
-- `cosine`: `0` to `2` for cosine similarity in `[-1, 1]`
+- `cosine`: ideally `0` to `2` when cosine similarity is in `[-1, 1]`, but
+  small floating-point deviations are possible
 
 ## Why this matters
 
