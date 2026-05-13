@@ -1,0 +1,16 @@
+global:
+  exporters:
+    print-directly:
+      format: "table"
+      to: "stdout"
+    save-to-file:
+      format: "json"
+      to: "file:///home/gubaoyuan.gby/vector-data/whole-30m-768-euclidean-day1-build-with-featureids-result.json"
+
+whole_30m_768_hgraph_build:
+  datapath: "/home/gubaoyuan.gby/vector-data/whole-30m-768-euclidean-day1-self-top1-with-featureids.hdf5"
+  type: "build"
+  index_name: "hgraph"
+  create_params: '{"dim":768,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"fp32","max_degree":64,"ef_construction":400}}'
+  index_path: "/home/gubaoyuan.gby/vector-data/indexes/whole-30m-768-euclidean-day1/hgraph_fp32_d64_ef400_with_featureids"
+  num_threads_building: 16

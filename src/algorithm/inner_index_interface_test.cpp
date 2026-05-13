@@ -21,7 +21,6 @@
 #include "brute_force.h"
 #include "hgraph.h"
 #include "impl/allocator/safe_allocator.h"
-#include "index_common_param.h"
 #include "unittest.h"
 
 using namespace vsag;
@@ -146,6 +145,13 @@ TEST_CASE("InnerIndexInterface NOT Implemented", "[ut][InnerIndexInterface]") {
     REQUIRE_THROWS(empty_index->UpdateVector(0, nullptr));
     REQUIRE_THROWS(empty_index->UpdateExtraInfo(nullptr));
     REQUIRE_THROWS(empty_index->ContinueBuild(nullptr, binary));
+    REQUIRE_FALSE(empty_index->SupportsBuildCache());
+    std::stringstream cache_out;
+    std::stringstream cache_in;
+    BuildCacheOptions build_cache_options;
+    REQUIRE_THROWS(empty_index->ExportBuildCache(cache_out));
+    REQUIRE_THROWS(empty_index->BuildWithCache(nullptr, cache_in, build_cache_options));
+    REQUIRE_THROWS(empty_index->GetBuildCacheStats());
     REQUIRE_THROWS(empty_index->Pretrain(pretrain_ids, 10, ""));
     REQUIRE_THROWS(empty_index->CalcDistanceById(nullptr, 1));
     REQUIRE_THROWS(empty_index->ExportModel(common_param));

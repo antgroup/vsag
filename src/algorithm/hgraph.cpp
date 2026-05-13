@@ -16,11 +16,18 @@
 #include "hgraph.h"
 
 #include <datacell/compressed_graph_datacell_parameter.h>
+
+#include <future>
 #include <fmt/format.h>
 
 #include <atomic>
+#include <chrono>
+#include <cstring>
+#include <iostream>
 #include <memory>
 #include <stdexcept>
+#include <unordered_map>
+#include <unordered_set>
 
 #include "algorithm/inner_index_interface.h"
 #include "analyzer/analyzer.h"
@@ -33,7 +40,6 @@
 #include "impl/heap/standard_heap.h"
 #include "impl/odescent/odescent_graph_builder.h"
 #include "impl/pruning_strategy.h"
-#include "impl/reasoning/search_reasoning.h"
 #include "index/index_impl.h"
 #include "index/iterator_filter.h"
 #include "io/reader_io_parameter.h"
@@ -45,6 +51,78 @@
 #include "vsag/options.h"
 
 namespace vsag {
+
+namespace {
+
+constexpr uint64_t kBuildCacheMagic = 0x5653414743484500ULL;
+constexpr uint32_t kBuildCacheVersion = 1;
+constexpr uint32_t kBuildCacheFeatureModeVariableText = 1;
+constexpr uint32_t kInvalidOldId = std::numeric_limits<uint32_t>::max();
+constexpr int64_t kFeatureIdsFormatVersion = 1;
+constexpr std::string_view kFeatureIdsFormatVersionKey = "feature_ids_format_version";
+
+struct BuildCacheHeader {
+    uint64_t magic = kBuildCacheMagic;
+    uint32_t version = kBuildCacheVersion;
+    uint32_t feature_id_mode = kBuildCacheFeatureModeVariableText;
+    uint64_t node_count = 0;
+    uint32_t max_degree = 0;
+    uint32_t reserved0 = 0;
+    uint64_t feature_id_count = 0;
+    uint64_t feature_id_bytes = 0;
+    uint64_t build_param_hash = 0;
+    uint64_t create_time = 0;
+    uint8_t reserved[64] = {0};
+};
+
+static_assert(sizeof(BuildCacheHeader) == 128, "BuildCacheHeader must be 128 bytes");
+
+struct FeatureIdIndexEntry {
+    uint64_t offset = 0;
+    uint32_t length = 0;
+    uint32_t reserved = 0;
+};
+
+static_assert(sizeof(FeatureIdIndexEntry) == 16,
+              "FeatureIdIndexEntry must be 16 bytes");
+
+struct NeighborRecordHeader {
+    uint16_t degree = 0;
+};
+
+uint64_t
+hash_combine_u64(uint64_t seed, uint64_t value) {
+    seed ^= value + 0x9e3779b97f4a7c15ULL + (seed << 6U) + (seed >> 2U);
+    return seed;
+}
+
+uint64_t
+now_us() {
+    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+                                     std::chrono::steady_clock::now().time_since_epoch())
+                                     .count());
+}
+
+uint64_t
+now_unix_seconds() {
+    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::seconds>(
+                                     std::chrono::system_clock::now().time_since_epoch())
+                                     .count());
+}
+
+void
+log_build_cache_detail(const std::string& message) {
+    std::cerr << "[hgraph_build_cache] " << message << std::endl;
+}
+
+void
+log_build_cache_detail_elapsed(const std::string& stage_name, uint64_t duration_us) {
+    std::cerr << "[hgraph_build_cache] " << stage_name << " finished in "
+              << fmt::format("{:.3f}", static_cast<double>(duration_us) / 1000000.0) << "s"
+              << std::endl;
+}
+
+}  // namespace
 
 static DatasetPtr
 make_empty_dataset_with_stats() {
@@ -118,6 +196,703 @@ HGraph::Train(const DatasetPtr& base) {
         // nothing to do since raw_vector_ is fp32
         this->raw_vector_->Train(data_ptr, train_data->GetNumElements());
     }
+}
+
+bool
+HGraph::SupportsBuildCache() const {
+    return true;
+}
+
+void
+HGraph::validate_feature_ids_dataset(const DatasetPtr& data) const {
+    CHECK_ARGUMENT(data != nullptr, "dataset is nullptr");
+    CHECK_ARGUMENT(data->GetFeatureIds() != nullptr, "base.feature_ids is nullptr");
+    CHECK_ARGUMENT(data->GetIds() != nullptr, "base.ids is nullptr");
+    CHECK_ARGUMENT(get_data(data) != nullptr, "base.vector is nullptr");
+
+    const auto total = data->GetNumElements();
+    const auto* feature_ids = data->GetFeatureIds();
+    std::unordered_set<std::string> unique_feature_ids;
+    unique_feature_ids.reserve(static_cast<size_t>(total));
+    for (int64_t i = 0; i < total; ++i) {
+        CHECK_ARGUMENT(not feature_ids[i].empty(), "base.feature_ids contains empty value");
+        auto inserted = unique_feature_ids.emplace(feature_ids[i]);
+        CHECK_ARGUMENT(inserted.second,
+                       fmt::format("duplicate feature_id found: {}", feature_ids[i]));
+    }
+}
+
+void
+HGraph::PrepareFeatureIdsForBuildCache(const DatasetPtr& data) {
+    CHECK_ARGUMENT(data != nullptr, "dataset is nullptr");
+    CHECK_ARGUMENT(data->GetFeatureIds() != nullptr, "base.feature_ids is nullptr");
+    CHECK_ARGUMENT(data->GetIds() != nullptr, "base.ids is nullptr");
+    CHECK_ARGUMENT(data->GetNumElements() > 0, "dataset is empty");
+    CHECK_ARGUMENT(this->total_count_.load() > 0, "index is empty");
+
+    const auto total = data->GetNumElements();
+    const auto* labels = data->GetIds();
+    const auto* feature_ids = data->GetFeatureIds();
+
+    std::unordered_set<std::string> unique_feature_ids;
+    unique_feature_ids.reserve(static_cast<size_t>(total));
+    this->feature_ids_.clear();
+    this->feature_ids_.resize(this->total_count_.load());
+
+    std::unordered_map<LabelType, InnerIdType> label_to_inner_id;
+    label_to_inner_id.reserve(static_cast<size_t>(this->total_count_.load()));
+    for (uint64_t inner_id = 0; inner_id < static_cast<uint64_t>(this->total_count_.load()); ++inner_id) {
+        auto label = this->label_table_->GetLabelById(static_cast<InnerIdType>(inner_id));
+        auto [iter, inserted] = label_to_inner_id.emplace(label, static_cast<InnerIdType>(inner_id));
+        CHECK_ARGUMENT(inserted || this->support_duplicate_,
+                       fmt::format("duplicate label {} found in index when preparing feature ids",
+                                   label));
+        if (!inserted && this->support_duplicate_) {
+            iter->second = static_cast<InnerIdType>(inner_id);
+        }
+    }
+
+    uint64_t mapped_count = 0;
+    uint64_t found_by_label_count = 0;
+    bool row_order_consistent = true;
+    for (int64_t i = 0; i < total; ++i) {
+        CHECK_ARGUMENT(not feature_ids[i].empty(), "base.feature_ids contains empty value");
+        auto inserted = unique_feature_ids.emplace(feature_ids[i]);
+        CHECK_ARGUMENT(inserted.second,
+                       fmt::format("duplicate feature_id found: {}", feature_ids[i]));
+
+        auto iter = label_to_inner_id.find(labels[i]);
+        if (iter == label_to_inner_id.end()) {
+            continue;
+        }
+        auto inner_id = iter->second;
+        ++found_by_label_count;
+        CHECK_ARGUMENT(inner_id < this->feature_ids_.size(),
+                       fmt::format("inner_id {} out of range when preparing feature ids",
+                                   inner_id));
+        row_order_consistent = row_order_consistent &&
+                               (static_cast<uint64_t>(i) == static_cast<uint64_t>(inner_id));
+        CHECK_ARGUMENT(this->feature_ids_[inner_id].empty() || this->feature_ids_[inner_id] == feature_ids[i],
+                       fmt::format("label {} maps to conflicting feature ids", labels[i]));
+        if (this->feature_ids_[inner_id].empty()) {
+            this->feature_ids_[inner_id] = feature_ids[i];
+            ++mapped_count;
+        }
+    }
+
+    const auto expected_count = static_cast<uint64_t>(this->total_count_.load());
+    const bool can_use_row_order_fallback = this->delete_count_.load() == 0 &&
+                                            static_cast<uint64_t>(total) == expected_count &&
+                                            row_order_consistent;
+    if (mapped_count != expected_count && can_use_row_order_fallback) {
+        for (uint64_t i = 0; i < expected_count; ++i) {
+            if (this->feature_ids_[i].empty()) {
+                this->feature_ids_[i] = feature_ids[i];
+                ++mapped_count;
+            } else {
+                CHECK_ARGUMENT(this->feature_ids_[i] == feature_ids[i],
+                               fmt::format("row-order fallback found conflicting feature id at row {}",
+                                           i));
+            }
+        }
+    }
+
+    CHECK_ARGUMENT(mapped_count == expected_count,
+                   fmt::format("feature_ids metadata is incomplete after preparation: mapped={}, expected={}, found_by_label={}, row_order_consistent={}",
+                               mapped_count,
+                               expected_count,
+                               found_by_label_count,
+                               row_order_consistent));
+}
+
+uint64_t
+HGraph::calculate_build_cache_param_hash() const {
+    uint64_t seed = 0;
+    seed = hash_combine_u64(seed, static_cast<uint64_t>(this->dim_));
+    seed = hash_combine_u64(seed, static_cast<uint64_t>(this->metric_));
+    seed = hash_combine_u64(seed, static_cast<uint64_t>(this->data_type_));
+    seed = hash_combine_u64(seed, static_cast<uint64_t>(this->bottom_graph_->MaximumDegree()));
+    seed = hash_combine_u64(seed, static_cast<uint64_t>(this->ef_construct_));
+    uint32_t alpha_bits = 0;
+    static_assert(sizeof(alpha_bits) == sizeof(this->alpha_));
+    std::memcpy(&alpha_bits, &this->alpha_, sizeof(alpha_bits));
+    seed = hash_combine_u64(seed, alpha_bits);
+    return seed;
+}
+
+DistHeapPtr
+HGraph::collect_refine_candidates(const DatasetPtr& data,
+                                  InnerIdType inner_id,
+                                  uint32_t input_idx,
+                                  const FlattenInterfacePtr& flatten_codes) const {
+    auto candidates = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
+    std::unordered_set<InnerIdType> seen;
+
+    Vector<InnerIdType> current_neighbors(allocator_);
+    this->bottom_graph_->GetNeighbors(inner_id, current_neighbors);
+    seen.reserve(current_neighbors.size() + this->ef_construct_);
+    for (const auto neighbor : current_neighbors) {
+        if (neighbor == inner_id || !seen.emplace(neighbor).second) {
+            continue;
+        }
+        candidates->Push(flatten_codes->ComputePairVectors(neighbor, inner_id), neighbor);
+    }
+
+    if (this->entry_point_id_ != INVALID_ENTRY_POINT && this->bottom_graph_->TotalCount() > 0) {
+        InnerSearchParam param;
+        param.topk = static_cast<int64_t>(this->ef_construct_);
+        param.ef = this->ef_construct_;
+        param.ep = this->entry_point_id_;
+        param.is_inner_id_allowed = nullptr;
+        auto result = this->search_one_graph(get_data(data, input_idx),
+                                             this->bottom_graph_,
+                                             flatten_codes,
+                                             param,
+                                             (VisitedListPtr) nullptr,
+                                             nullptr);
+        while (not result->Empty()) {
+            auto candidate = result->Top().second;
+            result->Pop();
+            if (candidate == inner_id || !seen.emplace(candidate).second) {
+                continue;
+            }
+            candidates->Push(flatten_codes->ComputePairVectors(candidate, inner_id), candidate);
+        }
+    }
+
+    return candidates;
+}
+
+void
+HGraph::refine_single_node(const DatasetPtr& data,
+                           InnerIdType inner_id,
+                           uint32_t input_idx,
+                           const FlattenInterfacePtr& flatten_codes) {
+    auto candidates = this->collect_refine_candidates(data, inner_id, input_idx, flatten_codes);
+
+    LockGuard cur_lock(neighbors_mutex_, inner_id);
+    if (candidates->Empty()) {
+        Vector<InnerIdType> empty_neighbors(allocator_);
+        this->bottom_graph_->InsertNeighborsById(inner_id, empty_neighbors);
+        return;
+    }
+
+    mutually_connect_new_element(inner_id,
+                                 candidates,
+                                 this->bottom_graph_,
+                                 flatten_codes,
+                                 neighbors_mutex_,
+                                 allocator_,
+                                 alpha_);
+}
+
+HGraph::RefineExecutionStats
+HGraph::refine_nodes_for_build_cache(
+    const DatasetPtr& data,
+    const std::vector<InnerIdType>& ids_to_refine,
+    std::string_view phase_name,
+    uint32_t rounds,
+    bool enable_parallel_refine,
+    uint32_t requested_parallelism,
+    const FlattenInterfacePtr& flatten_codes,
+    const std::unordered_map<InnerIdType, uint32_t>& inner_id_to_input_idx) {
+    RefineExecutionStats stats;
+    if (ids_to_refine.empty() || rounds == 0) {
+        return stats;
+    }
+
+    uint32_t effective_parallelism = 1;
+    if (enable_parallel_refine && this->thread_pool_ != nullptr && this->build_thread_count_ > 1 &&
+        ids_to_refine.size() > 1) {
+        effective_parallelism = requested_parallelism > 0
+                                    ? std::min<uint32_t>(requested_parallelism,
+                                                         this->build_thread_count_)
+                                    : static_cast<uint32_t>(this->build_thread_count_);
+        effective_parallelism =
+            std::min<uint32_t>(effective_parallelism, static_cast<uint32_t>(ids_to_refine.size()));
+    }
+    stats.effective_parallelism = effective_parallelism;
+
+    log_build_cache_detail(fmt::format("starting {} nodes={} rounds={} parallelism={}",
+                                       phase_name,
+                                       ids_to_refine.size(),
+                                       rounds,
+                                       effective_parallelism));
+
+    const auto begin = now_us();
+    stats.round_stats.reserve(rounds);
+    for (uint32_t round = 0; round < rounds; ++round) {
+        const auto round_begin = now_us();
+        if (effective_parallelism <= 1) {
+            for (const auto inner_id : ids_to_refine) {
+                auto data_iter = inner_id_to_input_idx.find(inner_id);
+                CHECK_ARGUMENT(data_iter != inner_id_to_input_idx.end(),
+                               fmt::format("missing input row for inner_id {}", inner_id));
+                this->refine_single_node(data, inner_id, data_iter->second, flatten_codes);
+            }
+        } else {
+            const size_t chunk_count =
+                std::min<size_t>(effective_parallelism, ids_to_refine.size());
+            const size_t chunk_size = (ids_to_refine.size() + chunk_count - 1) / chunk_count;
+            std::vector<std::future<void>> futures;
+            futures.reserve(chunk_count);
+
+            for (size_t chunk = 0; chunk < chunk_count; ++chunk) {
+                const size_t begin_idx = chunk * chunk_size;
+                const size_t end_idx = std::min(ids_to_refine.size(), begin_idx + chunk_size);
+                if (begin_idx >= end_idx) {
+                    break;
+                }
+
+                futures.emplace_back(this->thread_pool_->GeneralEnqueue(
+                    [this,
+                     &data,
+                     &ids_to_refine,
+                     &inner_id_to_input_idx,
+                     &flatten_codes,
+                     begin_idx,
+                     end_idx]() {
+                        for (size_t index = begin_idx; index < end_idx; ++index) {
+                            const auto inner_id = ids_to_refine[index];
+                            auto data_iter = inner_id_to_input_idx.find(inner_id);
+                            CHECK_ARGUMENT(data_iter != inner_id_to_input_idx.end(),
+                                           fmt::format("missing input row for inner_id {}",
+                                                       inner_id));
+                            this->refine_single_node(data,
+                                                     inner_id,
+                                                     data_iter->second,
+                                                     flatten_codes);
+                        }
+                    }));
+            }
+
+            for (auto& future : futures) {
+                future.get();
+            }
+        }
+        const auto round_elapsed = now_us() - round_begin;
+        stats.round_stats.emplace_back(
+            RefineRoundStats{.elapsed_us = round_elapsed,
+                             .processed_nodes = static_cast<uint64_t>(ids_to_refine.size())});
+        log_build_cache_detail(fmt::format("{} round {}/{} finished in {:.3f}s processed_nodes={}",
+                                           phase_name,
+                                           round + 1,
+                                           rounds,
+                                           static_cast<double>(round_elapsed) / 1000000.0,
+                                           ids_to_refine.size()));
+    }
+    stats.elapsed_us = now_us() - begin;
+    stats.executed_rounds = rounds;
+    log_build_cache_detail_elapsed(std::string(phase_name), stats.elapsed_us);
+    return stats;
+}
+
+void
+HGraph::ExportBuildCache(std::ostream& out_stream) const {
+    CHECK_ARGUMENT(this->total_count_.load() > 0, "index is empty");
+    CHECK_ARGUMENT(this->delete_count_.load() == 0,
+                   "ExportBuildCache requires index without removed nodes");
+    CHECK_ARGUMENT(this->feature_ids_.size() >= this->total_count_.load(),
+                   "feature_ids metadata is incomplete");
+
+    IOStreamWriter writer(out_stream);
+    BuildCacheHeader header;
+    header.node_count = this->total_count_.load();
+    header.max_degree = this->bottom_graph_->MaximumDegree();
+    header.feature_id_count = header.node_count;
+    header.build_param_hash = this->calculate_build_cache_param_hash();
+    header.create_time = now_unix_seconds();
+
+    std::vector<FeatureIdIndexEntry> index_entries(header.node_count);
+    uint64_t feature_blob_bytes = 0;
+    for (uint64_t i = 0; i < header.node_count; ++i) {
+        const auto& feature_id = this->feature_ids_[i];
+        CHECK_ARGUMENT(not feature_id.empty(),
+                       fmt::format("feature_id missing for inner_id {}", i));
+        index_entries[i].offset = feature_blob_bytes;
+        index_entries[i].length = static_cast<uint32_t>(feature_id.size());
+        feature_blob_bytes += feature_id.size();
+    }
+    header.feature_id_bytes = feature_blob_bytes;
+
+    StreamWriter::WriteObj(writer, header);
+    for (const auto& entry : index_entries) {
+        StreamWriter::WriteObj(writer, entry);
+    }
+    for (uint64_t i = 0; i < header.node_count; ++i) {
+        const auto& feature_id = this->feature_ids_[i];
+        if (not feature_id.empty()) {
+            writer.Write(feature_id.data(), static_cast<uint64_t>(feature_id.size()));
+        }
+    }
+
+    for (uint64_t i = 0; i < header.node_count; ++i) {
+        Vector<InnerIdType> neighbors(allocator_);
+        this->bottom_graph_->GetNeighbors(static_cast<InnerIdType>(i), neighbors);
+        NeighborRecordHeader record_header{.degree = static_cast<uint16_t>(neighbors.size())};
+        StreamWriter::WriteObj(writer, record_header);
+        for (uint32_t j = 0; j < header.max_degree; ++j) {
+            uint32_t neighbor = UINT32_MAX;
+            if (j < neighbors.size()) {
+                neighbor = neighbors[j];
+            }
+            StreamWriter::WriteObj(writer, neighbor);
+        }
+    }
+}
+
+std::vector<int64_t>
+HGraph::BuildWithCache(const DatasetPtr& data,
+                       std::istream& in_stream,
+                       const BuildCacheOptions& options) {
+    CHECK_ARGUMENT(GetNumElements() == 0, "index is not empty");
+    if (not options.enable_warm_start) {
+        build_cache_stats_ = BuildCacheStats{};
+        build_cache_stats_.total_nodes = data->GetNumElements();
+        return this->Build(data);
+    }
+
+    this->validate_feature_ids_dataset(data);
+    this->Train(data);
+    this->build_cache_stats_ = BuildCacheStats{};
+    this->build_cache_stats_.total_nodes = static_cast<uint64_t>(data->GetNumElements());
+
+    IOStreamReader reader(in_stream);
+    const auto cache_load_begin = now_us();
+
+    BuildCacheHeader header;
+    StreamReader::ReadObj(reader, header);
+    CHECK_ARGUMENT(header.magic == kBuildCacheMagic,
+                   fmt::format("Invalid cache file: magic mismatch, expected {}", kBuildCacheMagic));
+    CHECK_ARGUMENT(header.version == kBuildCacheVersion,
+                   fmt::format("Cache version incompatible: expected v{}, got v{}",
+                               kBuildCacheVersion,
+                               header.version));
+    CHECK_ARGUMENT(header.feature_id_mode == kBuildCacheFeatureModeVariableText,
+                   "FeatureID metadata mismatch: unsupported feature_id_mode");
+    CHECK_ARGUMENT(header.feature_id_count == header.node_count,
+                   "FeatureID metadata mismatch: feature_id_count != node_count");
+    CHECK_ARGUMENT(header.build_param_hash == this->calculate_build_cache_param_hash(),
+                   fmt::format("Build params changed: old_hash={}, new_hash={}",
+                               header.build_param_hash,
+                               this->calculate_build_cache_param_hash()));
+
+    std::vector<FeatureIdIndexEntry> old_feature_index(header.node_count);
+    for (uint64_t i = 0; i < header.node_count; ++i) {
+        StreamReader::ReadObj(reader, old_feature_index[i]);
+    }
+    std::string feature_blob(header.feature_id_bytes, '\0');
+    if (header.feature_id_bytes > 0) {
+        reader.Read(feature_blob.data(), header.feature_id_bytes);
+    }
+
+    std::vector<std::string> old_feature_ids(header.node_count);
+    for (uint64_t i = 0; i < header.node_count; ++i) {
+        const auto& entry = old_feature_index[i];
+        CHECK_ARGUMENT(entry.offset + entry.length <= feature_blob.size(),
+                       fmt::format("Cache stream read error at feature entry {}", i));
+        old_feature_ids[i] = feature_blob.substr(entry.offset, entry.length);
+    }
+
+    std::vector<std::vector<uint32_t>> old_neighbors(header.node_count);
+    for (uint64_t i = 0; i < header.node_count; ++i) {
+        NeighborRecordHeader record_header;
+        StreamReader::ReadObj(reader, record_header);
+        CHECK_ARGUMENT(record_header.degree <= header.max_degree,
+                       fmt::format("Cache stream read error at neighbor record {}", i));
+        old_neighbors[i].reserve(record_header.degree);
+        for (uint32_t j = 0; j < header.max_degree; ++j) {
+            uint32_t neighbor = UINT32_MAX;
+            StreamReader::ReadObj(reader, neighbor);
+            if (j < record_header.degree) {
+                old_neighbors[i].push_back(neighbor);
+            }
+        }
+    }
+    build_cache_stats_.cache_load_us = now_us() - cache_load_begin;
+    build_cache_stats_.cached_nodes = header.node_count;
+
+    const auto total = data->GetNumElements();
+    const auto* labels = data->GetIds();
+    const auto* feature_ids = data->GetFeatureIds();
+    const auto* extra_infos = data->GetExtraInfos();
+    const auto* attr_sets = data->GetAttributeSets();
+
+    auto inner_ids = this->get_unique_inner_ids(total);
+    Vector<Vector<InnerIdType>> route_graph_ids(allocator_);
+    this->feature_ids_.clear();
+    this->feature_ids_.resize(this->total_count_.load());
+
+    std::unordered_map<std::string, uint32_t> fid_to_new_id;
+    fid_to_new_id.reserve(static_cast<size_t>(total));
+    std::vector<InnerIdType> inserted_inner_ids;
+    inserted_inner_ids.reserve(static_cast<size_t>(total));
+    std::unordered_map<InnerIdType, uint32_t> inner_id_to_input_idx;
+    inner_id_to_input_idx.reserve(static_cast<size_t>(total));
+    std::vector<int64_t> failed_ids;
+    for (int64_t i = 0; i < total; ++i) {
+        auto [it, inserted] = fid_to_new_id.emplace(feature_ids[i], inner_ids[i]);
+        CHECK_ARGUMENT(inserted, fmt::format("duplicate feature_id found: {}", feature_ids[i]));
+        auto label = labels[i];
+        if (this->label_table_->CheckLabel(label)) {
+            failed_ids.emplace_back(label);
+            continue;
+        }
+
+        InnerIdType inner_id = inner_ids[i];
+        this->label_table_->Insert(inner_id, label);
+        this->basic_flatten_codes_->InsertVector(get_data(data, static_cast<uint32_t>(i)), inner_id);
+        if (use_reorder_) {
+            this->high_precise_codes_->InsertVector(get_data(data, static_cast<uint32_t>(i)), inner_id);
+        }
+        if (create_new_raw_vector_) {
+            this->raw_vector_->InsertVector(get_data(data, static_cast<uint32_t>(i)), inner_id);
+        }
+        if (this->extra_infos_ != nullptr && extra_infos != nullptr) {
+            this->extra_infos_->InsertExtraInfo(extra_infos + i * extra_info_size_, inner_id);
+        }
+        if (attr_sets != nullptr && this->use_attribute_filter_) {
+            this->attr_filter_index_->Insert(attr_sets[i], inner_id);
+        }
+
+        if (inner_id >= this->feature_ids_.size()) {
+            this->feature_ids_.resize(inner_id + 1);
+        }
+        this->feature_ids_[inner_id] = feature_ids[i];
+        inserted_inner_ids.push_back(inner_id);
+        inner_id_to_input_idx.emplace(inner_id, static_cast<uint32_t>(i));
+
+        auto level = this->get_random_level() - 1;
+        if (level >= 0) {
+            if (level >= static_cast<int>(route_graph_ids.size()) || route_graph_ids.empty()) {
+                for (auto k = static_cast<int>(route_graph_ids.size()); k <= level; ++k) {
+                    route_graph_ids.emplace_back(allocator_);
+                }
+                entry_point_id_ = inner_id;
+            }
+            for (int j = 0; j <= level; ++j) {
+                route_graph_ids[j].emplace_back(inner_id);
+            }
+        }
+    }
+    this->resize(total_count_);
+    if (entry_point_id_ == INVALID_ENTRY_POINT && not inserted_inner_ids.empty()) {
+        entry_point_id_ = inserted_inner_ids.front();
+    }
+
+    std::vector<uint32_t> old_to_new(header.node_count, UINT32_MAX);
+    std::unordered_map<std::string, uint32_t> old_fid_to_old_id;
+    old_fid_to_old_id.reserve(static_cast<size_t>(header.node_count));
+    for (uint32_t old_id = 0; old_id < header.node_count; ++old_id) {
+        old_fid_to_old_id.emplace(old_feature_ids[old_id], old_id);
+        auto iter = fid_to_new_id.find(old_feature_ids[old_id]);
+        if (iter != fid_to_new_id.end()) {
+            old_to_new[old_id] = iter->second;
+        }
+    }
+
+    std::vector<InnerIdType> hit_ids;
+    std::vector<InnerIdType> missed_ids;
+    hit_ids.reserve(inserted_inner_ids.size());
+    missed_ids.reserve(inserted_inner_ids.size());
+
+    struct WarmStartChunkResult {
+        std::vector<InnerIdType> hit_ids;
+        std::vector<InnerIdType> missed_ids;
+        uint64_t hit_seed_neighbor_total{0};
+        uint64_t missed_seed_neighbor_total{0};
+        uint64_t hit_empty_seed_nodes{0};
+        uint64_t missed_empty_seed_nodes{0};
+        uint64_t invalid_neighbors{0};
+        uint64_t dropped_neighbors{0};
+    };
+
+    const auto warm_start_begin = now_us();
+    log_build_cache_detail(fmt::format("starting warm_start nodes={} cached_nodes={} build_threads={}",
+                                       inserted_inner_ids.size(),
+                                       header.node_count,
+                                       this->build_thread_count_));
+    const auto process_warm_start_range =
+        [&](size_t begin, size_t end) -> WarmStartChunkResult {
+        WarmStartChunkResult result;
+        result.hit_ids.reserve(end - begin);
+        result.missed_ids.reserve(end - begin);
+
+        for (size_t i = begin; i < end; ++i) {
+            const auto inner_id = inserted_inner_ids[i];
+            auto old_id_iter = old_fid_to_old_id.find(this->feature_ids_[inner_id]);
+            Vector<InnerIdType> mapped_neighbors(allocator_);
+            std::unordered_set<InnerIdType> dedup;
+            dedup.reserve(header.max_degree);
+
+            if (old_id_iter != old_fid_to_old_id.end()) {
+                const auto old_id = old_id_iter->second;
+                for (auto neighbor_old_id : old_neighbors[old_id]) {
+                    if (neighbor_old_id >= old_to_new.size()) {
+                        ++result.invalid_neighbors;
+                        continue;
+                    }
+                    auto new_neighbor_id = old_to_new[neighbor_old_id];
+                    if (new_neighbor_id == UINT32_MAX) {
+                        ++result.invalid_neighbors;
+                        if (options.drop_invalid_neighbors) {
+                            ++result.dropped_neighbors;
+                            continue;
+                        }
+                        continue;
+                    }
+                    if (new_neighbor_id == inner_id) {
+                        continue;
+                    }
+                    if (dedup.emplace(new_neighbor_id).second) {
+                        mapped_neighbors.emplace_back(new_neighbor_id);
+                    }
+                }
+                if (mapped_neighbors.size() > this->bottom_graph_->MaximumDegree()) {
+                    mapped_neighbors.resize(this->bottom_graph_->MaximumDegree());
+                }
+                result.hit_seed_neighbor_total += mapped_neighbors.size();
+                if (mapped_neighbors.empty()) {
+                    ++result.hit_empty_seed_nodes;
+                }
+                this->bottom_graph_->InsertNeighborsById(inner_id, mapped_neighbors);
+                result.hit_ids.push_back(inner_id);
+            } else {
+                result.missed_seed_neighbor_total += mapped_neighbors.size();
+                if (mapped_neighbors.empty()) {
+                    ++result.missed_empty_seed_nodes;
+                }
+                this->bottom_graph_->InsertNeighborsById(inner_id, mapped_neighbors);
+                result.missed_ids.push_back(inner_id);
+            }
+        }
+        return result;
+    };
+
+    if (this->thread_pool_ != nullptr && this->build_thread_count_ > 1 &&
+        inserted_inner_ids.size() > 1) {
+        const size_t chunk_count =
+            std::min<size_t>(static_cast<size_t>(this->build_thread_count_), inserted_inner_ids.size());
+        const size_t chunk_size = (inserted_inner_ids.size() + chunk_count - 1) / chunk_count;
+
+        std::vector<std::future<WarmStartChunkResult>> futures;
+        futures.reserve(chunk_count);
+        for (size_t chunk = 0; chunk < chunk_count; ++chunk) {
+            const size_t begin = chunk * chunk_size;
+            const size_t end = std::min(inserted_inner_ids.size(), begin + chunk_size);
+            if (begin >= end) {
+                break;
+            }
+            futures.emplace_back(
+                this->thread_pool_->GeneralEnqueue(process_warm_start_range, begin, end));
+        }
+
+        for (auto& future : futures) {
+            auto chunk_result = future.get();
+            build_cache_stats_.hit_seed_neighbor_total += chunk_result.hit_seed_neighbor_total;
+            build_cache_stats_.missed_seed_neighbor_total += chunk_result.missed_seed_neighbor_total;
+            build_cache_stats_.hit_empty_seed_nodes += chunk_result.hit_empty_seed_nodes;
+            build_cache_stats_.missed_empty_seed_nodes += chunk_result.missed_empty_seed_nodes;
+            build_cache_stats_.invalid_neighbors += chunk_result.invalid_neighbors;
+            build_cache_stats_.dropped_neighbors += chunk_result.dropped_neighbors;
+            hit_ids.insert(hit_ids.end(), chunk_result.hit_ids.begin(), chunk_result.hit_ids.end());
+            missed_ids.insert(
+                missed_ids.end(), chunk_result.missed_ids.begin(), chunk_result.missed_ids.end());
+        }
+    } else {
+        auto chunk_result = process_warm_start_range(0, inserted_inner_ids.size());
+        build_cache_stats_.hit_seed_neighbor_total += chunk_result.hit_seed_neighbor_total;
+        build_cache_stats_.missed_seed_neighbor_total += chunk_result.missed_seed_neighbor_total;
+        build_cache_stats_.hit_empty_seed_nodes += chunk_result.hit_empty_seed_nodes;
+        build_cache_stats_.missed_empty_seed_nodes += chunk_result.missed_empty_seed_nodes;
+        build_cache_stats_.invalid_neighbors += chunk_result.invalid_neighbors;
+        build_cache_stats_.dropped_neighbors += chunk_result.dropped_neighbors;
+        hit_ids = std::move(chunk_result.hit_ids);
+        missed_ids = std::move(chunk_result.missed_ids);
+    }
+    build_cache_stats_.hit_nodes = hit_ids.size();
+    build_cache_stats_.missed_nodes = missed_ids.size();
+    build_cache_stats_.cache_hit_rate = total > 0 ? static_cast<float>(hit_ids.size()) / total : 0.0F;
+    build_cache_stats_.warm_start_apply_us = now_us() - warm_start_begin;
+    log_build_cache_detail(fmt::format(
+        "warm_start summary hit_nodes={} missed_nodes={} hit_empty_seed_nodes={} missed_empty_seed_nodes={} hit_seed_neighbor_total={} missed_seed_neighbor_total={} invalid_neighbors={} dropped_neighbors={}",
+        build_cache_stats_.hit_nodes,
+        build_cache_stats_.missed_nodes,
+        build_cache_stats_.hit_empty_seed_nodes,
+        build_cache_stats_.missed_empty_seed_nodes,
+        build_cache_stats_.hit_seed_neighbor_total,
+        build_cache_stats_.missed_seed_neighbor_total,
+        build_cache_stats_.invalid_neighbors,
+        build_cache_stats_.dropped_neighbors));
+    log_build_cache_detail_elapsed("warm_start", build_cache_stats_.warm_start_apply_us);
+
+    auto flatten_codes = this->basic_flatten_codes_;
+    if (use_reorder_ && not build_by_base_) {
+        flatten_codes = this->high_precise_codes_;
+    }
+
+    auto missed_refine_stats = this->refine_nodes_for_build_cache(data,
+                                                                  missed_ids,
+                                                                  "missed_refine",
+                                                                  options.missed_refine_rounds,
+                                                                  options.enable_parallel_refine,
+                                                                  options.refine_parallelism,
+                                                                  flatten_codes,
+                                                                  inner_id_to_input_idx);
+    build_cache_stats_.missed_refine_us = missed_refine_stats.elapsed_us;
+    build_cache_stats_.missed_refine_rounds = missed_refine_stats.executed_rounds;
+    build_cache_stats_.missed_refine_parallelism = missed_refine_stats.effective_parallelism;
+
+    auto hit_refine_stats = this->refine_nodes_for_build_cache(data,
+                                                               hit_ids,
+                                                               "hit_refine",
+                                                               options.hit_refine_rounds,
+                                                               options.enable_parallel_refine,
+                                                               options.refine_parallelism,
+                                                               flatten_codes,
+                                                               inner_id_to_input_idx);
+    build_cache_stats_.hit_refine_us = hit_refine_stats.elapsed_us;
+    build_cache_stats_.hit_refine_rounds = hit_refine_stats.executed_rounds;
+    build_cache_stats_.hit_refine_parallelism = hit_refine_stats.effective_parallelism;
+
+    this->route_graphs_.clear();
+    if (options.build_route_graph) {
+        const auto route_graph_begin = now_us();
+        log_build_cache_detail(
+            fmt::format("starting route_graph_build levels_to_build={}", route_graph_ids.size()));
+        auto build_data = (use_reorder_ && not build_by_base_) ? this->high_precise_codes_
+                                                               : this->basic_flatten_codes_;
+        for (auto& route_graph_id : route_graph_ids) {
+            odescent_param_->max_degree = bottom_graph_->MaximumDegree() / 2;
+            ODescent sparse_odescent_builder(
+                odescent_param_, build_data, allocator_, this->thread_pool_.get());
+            auto graph = this->generate_one_route_graph();
+            sparse_odescent_builder.Build(route_graph_id);
+            sparse_odescent_builder.SaveGraph(graph);
+            this->route_graphs_.emplace_back(graph);
+        }
+        build_cache_stats_.route_graph_build_us = now_us() - route_graph_begin;
+        build_cache_stats_.route_graph_levels = this->route_graphs_.size();
+        log_build_cache_detail(fmt::format("route_graph_build summary levels={}",
+                                           build_cache_stats_.route_graph_levels));
+        log_build_cache_detail_elapsed("route_graph_build",
+                                       build_cache_stats_.route_graph_build_us);
+    } else {
+        build_cache_stats_.route_graph_build_us = 0;
+        build_cache_stats_.route_graph_levels = 0;
+        log_build_cache_detail("route_graph_build skipped");
+    }
+
+    if (use_elp_optimizer_) {
+        elp_optimize();
+    }
+
+    return failed_ids;
+}
+
+BuildCacheStats
+HGraph::GetBuildCacheStats() const {
+    return this->build_cache_stats_;
 }
 
 std::vector<int64_t>
@@ -441,12 +1216,6 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             {
                 SUPPORT_TOMBSTONE,
             },
-        },
-        {
-            HGRAPH_LABEL_REMAP_TYPE,
-            {
-                LABEL_REMAP_TYPE_KEY,
-            },
         }};
     const std::string hgraph_params_template =
         R"(
@@ -508,7 +1277,6 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             }
         },
         "{STORE_RAW_VECTOR_KEY}": false,
-        "{LABEL_REMAP_TYPE_KEY}": "{LABEL_REMAP_TYPE_VALUE_PG}",
         "{RAW_VECTOR_KEY}": {
             "{IO_PARAMS_KEY}": {
                 "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
@@ -676,41 +1444,35 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
 
     auto total = data->GetNumElements();
     const auto* labels = data->GetIds();
+    const auto* feature_ids = data->GetFeatureIds();
     const auto* vectors = data->GetFloat32Vectors();
     const auto* extra_infos = data->GetExtraInfos();
-    Vector<int64_t> valid_indices(allocator_);
-    UnorderedSet<LabelType> seen_labels(allocator_);
+    auto inner_ids = this->get_unique_inner_ids(total);
+    this->feature_ids_.clear();
+    this->feature_ids_.resize(this->total_count_.load());
+    Vector<Vector<InnerIdType>> route_graph_ids(allocator_);
+    InnerIdType cur_size = 0;
     for (int64_t i = 0; i < total; ++i) {
         auto label = labels[i];
-        if (this->label_table_->CheckLabel(label) or seen_labels.find(label) != seen_labels.end()) {
+        if (this->label_table_->CheckLabel(label)) {
             failed_ids.emplace_back(label);
             continue;
         }
-        seen_labels.insert(label);
-        valid_indices.emplace_back(i);
-    }
-    auto inner_ids = this->get_unique_inner_ids(static_cast<InnerIdType>(valid_indices.size()));
-    auto current_count = total_count_.load();
-    uint64_t new_ids_count = 0;
-    for (auto inner_id : inner_ids) {
-        if (inner_id >= current_count) {
-            ++new_ids_count;
-        }
-    }
-    this->resize(current_count + new_ids_count);
-    this->total_count_ += new_ids_count;
-    Vector<Vector<InnerIdType>> route_graph_ids(allocator_);
-    for (InnerIdType cur_size = 0; cur_size < valid_indices.size(); ++cur_size) {
-        auto i = valid_indices[cur_size];
-        auto label = labels[i];
         InnerIdType inner_id = inner_ids.at(cur_size);
+        cur_size++;
         this->label_table_->Insert(inner_id, label);
+        if (feature_ids != nullptr && inner_id < this->feature_ids_.size()) {
+            this->feature_ids_[inner_id] = feature_ids[i];
+        }
         this->basic_flatten_codes_->InsertVector(vectors + dim_ * i, inner_id);
         if (use_reorder_) {
             this->high_precise_codes_->InsertVector(vectors + dim_ * i, inner_id);
         }
         if (create_new_raw_vector_) {
             this->raw_vector_->InsertVector(vectors + dim_ * i, inner_id);
+        }
+        if (this->extra_infos_ != nullptr && extra_infos != nullptr) {
+            this->extra_infos_->InsertExtraInfo(extra_infos + i * extra_info_size_, inner_id);
         }
         auto level = this->get_random_level() - 1;
         if (level >= 0) {
@@ -725,6 +1487,7 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
             }
         }
     }
+    this->resize(total_count_);
     auto build_data = (use_reorder_ and not build_by_base_) ? this->high_precise_codes_
                                                             : this->basic_flatten_codes_;
     {
@@ -781,6 +1544,7 @@ HGraph::Add(const DatasetPtr& data, AddMode mode) {
     std::vector<std::future<void>> futures;
     auto total = data->GetNumElements();
     const auto* labels = data->GetIds();
+    const auto* feature_ids = data->GetFeatureIds();
     const auto* extra_infos = data->GetExtraInfos();
     const auto* attr_sets = data->GetAttributeSets();
     Vector<std::pair<InnerIdType, LabelType>> inner_ids(allocator_);
@@ -799,16 +1563,20 @@ HGraph::Add(const DatasetPtr& data, AddMode mode) {
         {
             std::scoped_lock lock(this->add_mutex_);
             inner_id = this->get_unique_inner_ids(1).at(0);
-            if (inner_id >= total_count_) {
-                this->resize(total_count_.load() + 1);
-                ++total_count_;
-            }
+            uint64_t new_count = total_count_;
+            this->resize(new_count);
         }
 
         {
             std::scoped_lock label_lock(this->label_lookup_mutex_);
             this->label_table_->Insert(inner_id, labels[j]);
             inner_ids.emplace_back(inner_id, j);
+        }
+        if (feature_ids != nullptr) {
+            if (inner_id >= this->feature_ids_.size()) {
+                this->feature_ids_.resize(this->total_count_.load());
+            }
+            this->feature_ids_[inner_id] = feature_ids[j];
         }
     }
     for (auto& [inner_id, local_idx] : inner_ids) {
@@ -1239,12 +2007,13 @@ HGraph::serialize_basic_info_v0_14(StreamWriter& writer) const {
     StreamWriter::WriteObj(writer, capacity);
     StreamWriter::WriteVector(writer, this->label_table_->label_table_);
 
-    uint64_t size = this->label_table_->GetRemapSize();
+    uint64_t size = this->label_table_->label_remap_.size();
     StreamWriter::WriteObj(writer, size);
-    this->label_table_->ForEachRemap([&writer](LabelType key, InnerIdType value) {
+    for (const auto& pair : this->label_table_->label_remap_) {
+        auto key = pair.first;
         StreamWriter::WriteObj(writer, key);
-        StreamWriter::WriteObj(writer, value);
-    });
+        StreamWriter::WriteObj(writer, pair.second);
+    }
 }
 
 void
@@ -1267,16 +2036,42 @@ HGraph::deserialize_basic_info_v0_14(StreamReader& reader) {
 
     uint64_t size;
     StreamReader::ReadObj(reader, size);
-    this->label_table_->ResetRemap(size);
+    this->label_table_->label_remap_.clear();
+    this->label_table_->label_remap_.reserve(size);
     for (uint64_t i = 0; i < size; ++i) {
         LabelType key;
         StreamReader::ReadObj(reader, key);
         InnerIdType value;
         StreamReader::ReadObj(reader, value);
-        this->label_table_->InsertRemap(key, value);
+        this->label_table_->label_remap_.emplace(key, value);
     }
     // Restore total_count from label_remap size
     this->label_table_->total_count_.store(static_cast<int64_t>(size));
+}
+
+void
+HGraph::serialize_feature_ids(StreamWriter& writer) const {
+    const auto count = this->total_count_.load();
+    StreamWriter::WriteObj(writer, count);
+    for (uint64_t i = 0; i < count; ++i) {
+        StreamWriter::WriteString(writer, this->feature_ids_[i]);
+    }
+}
+
+void
+HGraph::deserialize_feature_ids(StreamReader& reader, uint64_t expected_count) {
+    uint64_t count = 0;
+    StreamReader::ReadObj(reader, count);
+    CHECK_ARGUMENT(count == expected_count,
+                   fmt::format("FeatureID count mismatch: expected {}, got {}",
+                               expected_count,
+                               count));
+
+    this->feature_ids_.clear();
+    this->feature_ids_.resize(count);
+    for (uint64_t i = 0; i < count; ++i) {
+        this->feature_ids_[i] = StreamReader::ReadString(reader);
+    }
 }
 
 #define TO_JSON_BASE64(json_obj, var) json_obj[#var].SetString(base64_encode_obj(this->var##_));
@@ -1355,12 +2150,13 @@ HGraph::serialize_label_info(StreamWriter& writer) const {
     }
 
     StreamWriter::WriteVector(writer, this->label_table_->label_table_);
-    uint64_t size = this->label_table_->GetRemapSize();
+    uint64_t size = this->label_table_->label_remap_.size();
     StreamWriter::WriteObj(writer, size);
-    this->label_table_->ForEachRemap([&writer](LabelType key, InnerIdType value) {
+    for (const auto& pair : this->label_table_->label_remap_) {
+        auto key = pair.first;
         StreamWriter::WriteObj(writer, key);
-        StreamWriter::WriteObj(writer, value);
-    });
+        StreamWriter::WriteObj(writer, pair.second);
+    }
 }
 
 void
@@ -1373,13 +2169,14 @@ HGraph::deserialize_label_info(StreamReader& reader) const {
     StreamReader::ReadVector(reader, this->label_table_->label_table_);
     uint64_t size;
     StreamReader::ReadObj(reader, size);
-    this->label_table_->ResetRemap(size);
+    this->label_table_->label_remap_.clear();
+    this->label_table_->label_remap_.reserve(size);
     for (uint64_t i = 0; i < size; ++i) {
         LabelType key;
         StreamReader::ReadObj(reader, key);
         InnerIdType value;
         StreamReader::ReadObj(reader, value);
-        this->label_table_->InsertRemap(key, value);
+        this->label_table_->label_remap_.emplace(key, value);
     }
     this->label_table_->total_count_.store(static_cast<int64_t>(size));
 }
@@ -1436,7 +2233,15 @@ HGraph::Serialize(StreamWriter& writer) const {
     if (this->support_duplicate_) {
         metadata->Set("duplicate_format_version", 1);
     }
+    const bool has_feature_ids = this->feature_ids_.size() >= this->total_count_.load();
+    if (has_feature_ids) {
+        metadata->Set(std::string(kFeatureIdsFormatVersionKey), kFeatureIdsFormatVersion);
+    }
     logger::debug(jsonify_basic_info.Dump());
+
+    if (has_feature_ids) {
+        this->serialize_feature_ids(writer);
+    }
 
     auto footer = std::make_shared<Footer>(metadata);
     footer->Write(writer);
@@ -1520,6 +2325,17 @@ HGraph::Deserialize(StreamReader& reader) {
         }
         if (this->raw_vector_ != nullptr) {
             this->has_raw_vector_ = true;
+        }
+
+        int64_t feature_ids_version = 0;
+        if (metadata->Get(std::string(kFeatureIdsFormatVersionKey)).IsNumberInteger()) {
+            feature_ids_version = metadata->Get(std::string(kFeatureIdsFormatVersionKey)).GetInt();
+        }
+        if (feature_ids_version >= kFeatureIdsFormatVersion) {
+            this->deserialize_feature_ids(buffer_reader,
+                                          static_cast<uint64_t>(this->total_count_.load()));
+        } else {
+            this->feature_ids_.clear();
         }
     }
     this->cal_memory_usage();
@@ -2058,6 +2874,14 @@ HGraph::move_id(InnerIdType from, InnerIdType to) {
 
     label_table_->Move(from, to);
 
+    if (from < this->feature_ids_.size()) {
+        if (to >= this->feature_ids_.size()) {
+            this->feature_ids_.resize(to + 1);
+        }
+        this->feature_ids_[to] = std::move(this->feature_ids_[from]);
+        this->feature_ids_[from].clear();
+    }
+
     if (entry_point_id_ == from) {
         entry_point_id_ = to;
     }
@@ -2101,6 +2925,7 @@ HGraph::shrink_to_fit() {
         route_graph->ShrinkToFit(total_count);
     }
     label_table_->ShrinkToFit(total_count);
+    this->feature_ids_.resize(total_count);
 }
 
 void
@@ -2263,10 +3088,6 @@ HGraph::GetVectorByInnerId(InnerIdType inner_id, float* data) const {
     codes = (create_new_raw_vector_) ? raw_vector_ : codes;
     bool release;
     const auto* buffer = codes->GetCodesById(inner_id, release);
-    if (buffer == nullptr) {
-        throw VsagException(ErrorType::INTERNAL_ERROR,
-                            fmt::format("failed to get vector by inner id {}", inner_id));
-    }
     codes->Decode(buffer, data);
     if (release) {
         codes->Release(buffer);
@@ -2322,49 +3143,12 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
 
     std::shared_lock force_remove_rlock(this->force_remove_mutex_);
     std::shared_lock shared_lock(this->global_mutex_);
-
     // check k
     CHECK_ARGUMENT(k > 0, fmt::format("k({}) must be greater than 0", k));
     k = std::min(k, GetNumElements());
 
     // check query vector
     CHECK_ARGUMENT(query->GetNumElements() == 1, "query dataset should contain 1 vector only");
-
-    // Setup reasoning context if expected labels are provided.
-    std::shared_ptr<ReasoningContext> reasoning_ctx;
-    if (not request.expected_labels_.empty()) {
-        reasoning_ctx = std::make_shared<ReasoningContext>(this->allocator_);
-        reasoning_ctx->SetSearchParams(k, "HGraph", use_reorder_, request.filter_ != nullptr);
-
-        UnorderedMap<int64_t, InnerIdType> label_to_inner_id(this->allocator_);
-        for (const auto& label : request.expected_labels_) {
-            auto [success, inner_id] = label_table_->TryGetIdByLabel(label, true);
-            if (success) {
-                label_to_inner_id[label] = inner_id;
-            }
-        }
-
-        Vector<int64_t> expected_labels_vec(
-            request.expected_labels_.begin(), request.expected_labels_.end(), this->allocator_);
-        reasoning_ctx->InitializeExpectedTargets(expected_labels_vec, label_to_inner_id);
-
-        const auto* const query_vector = get_data(query);
-        auto precise_flatten = this->basic_flatten_codes_;
-        if (use_reorder_) {
-            precise_flatten = this->high_precise_codes_;
-        }
-        if (create_new_raw_vector_) {
-            precise_flatten = this->raw_vector_;
-        }
-        auto computer = precise_flatten->FactoryComputer(query_vector);
-        for (const auto& pair : label_to_inner_id) {
-            float dist = 0.0F;
-            const auto inner_id = pair.second;
-            precise_flatten->Query(&dist, computer, &inner_id, 1);
-            reasoning_ctx->SetTrueDistance(inner_id, dist);
-        }
-        ctx.reasoning_ctx = reasoning_ctx.get();
-    }
 
     InnerSearchParam search_param;
     search_param.ep = this->entry_point_id_;
@@ -2454,16 +3238,9 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     if (search_result->Empty()) {
         auto dataset_result = DatasetImpl::MakeEmptyDataset();
         dataset_result->Statistics(stats.Dump());
-        if (reasoning_ctx) {
-            reasoning_ctx->DiagnoseExpectedTargets();
-            dataset_result->Reasoning(reasoning_ctx->GenerateReport());
-        }
         return dataset_result;
     }
     auto count = static_cast<const int64_t>(search_result->Size());
-
-    Vector<InnerIdType> result_inner_ids(static_cast<size_t>(count), this->allocator_);
-
     auto [dataset_results, dists, ids] = create_fast_dataset(count, ctx.alloc);
     char* extra_infos = nullptr;
     if (extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
@@ -2472,24 +3249,15 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         dataset_results->ExtraInfos(extra_infos);
     }
     for (int64_t j = count - 1; j >= 0; --j) {
-        const auto& top = search_result->Top();
-        dists[j] = top.first;
-        ids[j] = this->label_table_->GetLabelById(top.second);
-        result_inner_ids[j] = top.second;
+        dists[j] = search_result->Top().first;
+        ids[j] = this->label_table_->GetLabelById(search_result->Top().second);
         if (extra_infos != nullptr) {
-            this->extra_infos_->GetExtraInfoById(top.second, extra_infos + extra_info_size_ * j);
+            this->extra_infos_->GetExtraInfoById(search_result->Top().second,
+                                                 extra_infos + extra_info_size_ * j);
         }
         search_result->Pop();
     }
     dataset_results->Statistics(stats.Dump());
-
-    // Generate reasoning report if reasoning context was created
-    if (reasoning_ctx) {
-        reasoning_ctx->MarkResult(result_inner_ids);
-        reasoning_ctx->DiagnoseExpectedTargets();
-        dataset_results->Reasoning(reasoning_ctx->GenerateReport());
-    }
-
     return std::move(dataset_results);
 }
 

@@ -19,19 +19,17 @@
 #include <shared_mutex>
 #include <vector>
 
-#include "container_types.h"
 #include "data_type.h"
 #include "datacell/attribute_inverted_interface.h"
 #include "datacell/extra_info_interface.h"
 #include "datacell/flatten_interface.h"
 #include "dataset_impl.h"
 #include "inner_index_parameter.h"
-#include "json_types.h"
 #include "metric_type.h"
 #include "parameter.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
-#include "type_helpers.h"
+#include "typing.h"
 #include "utils/function_exists_check.h"
 #include "utils/pointer_define.h"
 #include "vsag/dataset.h"
@@ -42,7 +40,6 @@ namespace vsag {
 DEFINE_POINTER2(InnerIndex, InnerIndexInterface);
 DEFINE_POINTER(LabelTable);
 DEFINE_POINTER(IndexFeatureList);
-DEFINE_POINTER(SafeThreadPool);
 
 class IndexCommonParam;
 
@@ -72,23 +69,6 @@ public:
     virtual std::vector<int64_t>
     Build(const DatasetPtr& base);
 
-    /**
-     * @brief Calculate distance by ID using DatasetPtr.
-     *
-     * Suitable for sparse vector indexes (SINDI, SparseIndex) where vectors
-     * cannot be represented as a simple float pointer. The Dataset should
-     * contain sparse vectors via GetSparseVectors().
-     * For dense vector indexes, this overload is also available via default
-     * implementation that calls GetFloat32Vectors().
-     *
-     * Default implementation throws exception; indexes must override appropriately.
-     *
-     * @param vector DatasetPtr containing the query vector (sparse or dense format).
-     * @param id The unique identifier of the vector in the index.
-     * @param calculate_precise_distance If true, use high-precision vectors for computation.
-     * @return The distance between the query and the vector of the given ID.
-     * @throws VsagException If the index doesn't support calculate distance by id.
-     */
     virtual float
     CalcDistanceById(const DatasetPtr& vector,
                      int64_t id,
@@ -97,67 +77,18 @@ public:
                             "Index doesn't support calculate distance by id");
     };
 
-    /**
-     * @brief Calculate distance by ID using raw float pointer.
-     *
-     * Suitable for dense vector indexes (HGraph, BruteForce, IVF, DiskANN, HNSW).
-     * The query must be a contiguous float32 array with dimension matching the index.
-     * For sparse vector indexes (SINDI, SparseIndex), this overload is not applicable.
-     *
-     * Default implementation throws exception; dense indexes must override.
-     *
-     * @param query Pointer to the float32 query vector (dense format).
-     * @param id The unique identifier of the vector in the index.
-     * @param calculate_precise_distance If true, use high-precision vectors for computation.
-     * @return The distance between the query and the vector of the given ID.
-     * @throws VsagException If the index doesn't support calculate distance by id.
-     */
     virtual float
     CalcDistanceById(const float* query, int64_t id, bool calculate_precise_distance = true) const {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                             "Index doesn't support calculate distance by id");
     }
 
-    /**
-     * @brief Calculate distances by IDs (batch) using raw float pointer.
-     *
-     * Suitable for dense vector indexes (HGraph, BruteForce, IVF, DiskANN, HNSW).
-     * The query must be a contiguous float32 array. For sparse vector indexes,
-     * this overload is not applicable.
-     *
-     * Default implementation loops through IDs calling CalcDistanceById.
-     * Dense indexes may override for batch optimization.
-     *
-     * @param query Pointer to the float32 query vector (dense format).
-     * @param ids Array of unique identifiers of vectors to be calculated.
-     * @param count Number of IDs in the array.
-     * @param calculate_precise_distance If true, use high-precision vectors for computation.
-     * @return DatasetPtr containing distances. '-1' indicates an invalid ID.
-     */
     virtual DatasetPtr
     CalDistanceById(const float* query,
                     const int64_t* ids,
                     int64_t count,
                     bool calculate_precise_distance = true) const;
 
-    /**
-     * @brief Calculate distances by IDs (batch) using DatasetPtr.
-     *
-     * Suitable for sparse vector indexes (SINDI, SparseIndex) where vectors
-     * cannot be represented as a simple float pointer. The Dataset should
-     * contain sparse vectors via GetSparseVectors().
-     * For dense vector indexes, this overload is also available via default
-     * implementation that calls GetFloat32Vectors().
-     *
-     * Default implementation loops through IDs calling CalcDistanceById.
-     * Sparse indexes must override for proper sparse vector handling.
-     *
-     * @param query DatasetPtr containing the query vector (sparse or dense format).
-     * @param ids Array of unique identifiers of vectors to be calculated.
-     * @param count Number of IDs in the array.
-     * @param calculate_precise_distance If true, use high-precision vectors for computation.
-     * @return DatasetPtr containing distances. '-1' indicates an invalid ID.
-     */
     virtual DatasetPtr
     CalDistanceById(const DatasetPtr& query,
                     const int64_t* ids,
@@ -180,6 +111,37 @@ public:
     ContinueBuild(const DatasetPtr& base, const BinarySet& binary_set) {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                             "Index doesn't support ContinueBuild");
+    }
+
+    [[nodiscard]] virtual bool
+    SupportsBuildCache() const {
+        return false;
+    }
+
+    virtual void
+    ExportBuildCache(std::ostream& out_stream) const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index doesn't support ExportBuildCache");
+    }
+
+    virtual std::vector<int64_t>
+    BuildWithCache(const DatasetPtr& base,
+                   std::istream& in_stream,
+                   const BuildCacheOptions& options) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index doesn't support BuildWithCache");
+    }
+
+    virtual void
+    PrepareFeatureIdsForBuildCache(const DatasetPtr& base) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index doesn't support PrepareFeatureIdsForBuildCache");
+    }
+
+    [[nodiscard]] virtual BuildCacheStats
+    GetBuildCacheStats() const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index doesn't support GetBuildCacheStats");
     }
 
     virtual bool

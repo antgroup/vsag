@@ -16,17 +16,9 @@
 #pragma once
 
 #include <cstdint>
-#include <functional>
-#include <iosfwd>
 #include <limits>
-#include <memory>
 #include <stdexcept>
-#include <string>
-#include <tuple>
-#include <utility>
-#include <vector>
 
-#include "vsag/allocator.h"
 #include "vsag/binaryset.h"
 #include "vsag/bitset.h"
 #include "vsag/dataset.h"
@@ -49,6 +41,40 @@ using IdMapFunction = std::function<std::tuple<bool, int64_t>(int64_t)>;
 struct MergeUnit {
     IndexPtr index = nullptr;
     IdMapFunction id_map_func = nullptr;
+};
+
+struct BuildCacheOptions {
+  bool enable_warm_start = true;
+  uint32_t hit_refine_rounds = 2;
+  uint32_t missed_refine_rounds = 4;
+  bool enable_parallel_refine = false;
+  uint32_t refine_parallelism = 0;
+  bool drop_invalid_neighbors = true;
+  bool build_route_graph = true;
+};
+
+struct BuildCacheStats {
+  uint64_t total_nodes = 0;
+  uint64_t cached_nodes = 0;
+  uint64_t hit_nodes = 0;
+  uint64_t missed_nodes = 0;
+  uint64_t hit_seed_neighbor_total = 0;
+  uint64_t missed_seed_neighbor_total = 0;
+  uint64_t hit_empty_seed_nodes = 0;
+  uint64_t missed_empty_seed_nodes = 0;
+  uint64_t dropped_neighbors = 0;
+  uint64_t invalid_neighbors = 0;
+  uint64_t hit_refine_rounds = 0;
+  uint64_t missed_refine_rounds = 0;
+  uint32_t hit_refine_parallelism = 0;
+  uint32_t missed_refine_parallelism = 0;
+  uint64_t cache_load_us = 0;
+  uint64_t warm_start_apply_us = 0;
+  uint64_t hit_refine_us = 0;
+  uint64_t missed_refine_us = 0;
+  uint64_t route_graph_build_us = 0;
+  uint64_t route_graph_levels = 0;
+  float cache_hit_rate = 0;
 };
 
 enum class IndexType { HNSW, DISKANN, HGRAPH, IVF, PYRAMID, BRUTEFORCE, SPARSE, SINDI, WARP };
@@ -145,6 +171,33 @@ public:
     virtual tl::expected<Checkpoint, Error>
     ContinueBuild(const DatasetPtr& base, const BinarySet& binary_set) {
         throw std::runtime_error("Index not support partial build");
+    }
+
+    [[nodiscard]] virtual bool
+    SupportsBuildCache() const {
+      return false;
+    }
+
+    virtual tl::expected<void, Error>
+    ExportBuildCache(std::ostream& out_stream) const {
+      throw std::runtime_error("Index doesn't support ExportBuildCache");
+    }
+
+    virtual tl::expected<std::vector<int64_t>, Error>
+    BuildWithCache(const DatasetPtr& base,
+             std::istream& in_stream,
+             const BuildCacheOptions& options = BuildCacheOptions{}) {
+      throw std::runtime_error("Index doesn't support BuildWithCache");
+    }
+
+    virtual tl::expected<void, Error>
+    PrepareFeatureIdsForBuildCache(const DatasetPtr& base) {
+      throw std::runtime_error("Index doesn't support PrepareFeatureIdsForBuildCache");
+    }
+
+    [[nodiscard]] virtual tl::expected<BuildCacheStats, Error>
+    GetBuildCacheStats() const {
+      throw std::runtime_error("Index doesn't support GetBuildCacheStats");
     }
 
     /**
@@ -460,12 +513,7 @@ public:
     /**
      * @brief Calculate the distance between the query and the vector of the given ID.
      *
-     * Suitable for dense vector indexes (HGraph, BruteForce, IVF, DiskANN, HNSW).
-     * The query must be a contiguous float32 array with dimension matching the index.
-     * For sparse vector indexes (SINDI, SparseIndex), this overload is not applicable;
-     * use CalcDistanceById(DatasetPtr, int64_t, bool) instead.
-     *
-     * @param vector The embedding of the query (float32 array for dense vectors).
+     * @param vector The embedding of the query.
      * @param id The unique identifier of the vector in the index for which the distance is computed.
      * @param calculate_precise_distance If true, the function will attempt to use high-precision
      *        vectors (e.g., full-precision float32) for distance computation, even if it requires
@@ -483,13 +531,7 @@ public:
     /**
      * @brief Calculate the distance between the query and the vector of the given ID.
      *
-     * Suitable for sparse vector indexes (SINDI, SparseIndex) where vectors
-     * cannot be represented as a simple float pointer. The Dataset should
-     * contain sparse vectors via GetSparseVectors().
-     * For dense vector indexes (HGraph, BruteForce, IVF, DiskANN, HNSW),
-     * this overload is also available and internally calls GetFloat32Vectors().
-     *
-     * @param vector is the embedding of query (sparse or dense format via DatasetPtr).
+     * @param vector is the embedding of query
      * @param id is the unique identifier of the vector to be calculated in the index.
      * @param calculate_precise_distance If true, the function will attempt to use high-precision
      *        vectors (e.g., full-precision float32) for distance computation, even if it requires
@@ -507,12 +549,7 @@ public:
     /**
      * @brief Calculate the distance between the query and the vector of the given ID for batch.
      *
-     * Suitable for dense vector indexes (HGraph, BruteForce, IVF, DiskANN, HNSW).
-     * The query must be a contiguous float32 array. For sparse vector indexes
-     * (SINDI, SparseIndex), this overload is not applicable; use
-     * CalDistanceById(DatasetPtr, const int64_t*, int64_t, bool) instead.
-     *
-     * @param query is the embedding of query (float32 array for dense vectors).
+     * @param query is the embedding of query
      * @param ids is the unique identifier of the vector to be calculated in the index.
      * @param count is the count of ids
      * @param calculate_precise_distance If true, the function will attempt to use high-precision
@@ -532,13 +569,7 @@ public:
     /**
      * @brief Calculate the distance between the query and the vector of the given ID for batch.
      *
-     * Suitable for sparse vector indexes (SINDI, SparseIndex) where vectors
-     * cannot be represented as a simple float pointer. The Dataset should
-     * contain sparse vectors via GetSparseVectors().
-     * For dense vector indexes (HGraph, BruteForce, IVF, DiskANN, HNSW),
-     * this overload is also available and internally calls GetFloat32Vectors().
-     *
-     * @param query is the embedding of query (sparse or dense format via DatasetPtr).
+     * @param query is the embedding of query
      * @param ids is the unique identifier of the vector to be calculated in the index.
      * @param count is the count of ids
      * @param calculate_precise_distance If true, the function will attempt to use high-precision

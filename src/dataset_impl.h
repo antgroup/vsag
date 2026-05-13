@@ -37,8 +37,7 @@ class DatasetImpl : public Dataset {
                              const std::string*,
                              const SparseVector*,
                              const AttributeSet*,
-                             const uint32_t*,
-                             const MultiVector*>;
+                             const uint32_t*>;
 
 public:
     DatasetImpl() = default;
@@ -219,6 +218,20 @@ public:
     }
 
     DatasetPtr
+    FeatureIds(const std::string* feature_ids) override {
+        this->data_[FEATURE_IDS] = feature_ids;
+        return shared_from_this();
+    }
+
+    const std::string*
+    GetFeatureIds() const override {
+        if (auto iter = this->data_.find(FEATURE_IDS); iter != this->data_.end()) {
+            return std::get<const std::string*>(iter->second);
+        }
+        return nullptr;
+    }
+
+    DatasetPtr
     ExtraInfos(const char* extra_info) override {
         this->data_[EXTRA_INFOS] = extra_info;
         return shared_from_this();
@@ -283,34 +296,6 @@ public:
             return std::get<const uint32_t*>(iter->second);
         }
         return nullptr;
-    }
-
-    DatasetPtr
-    MultiVectors(const MultiVector* multi_vectors) override {
-        this->data_[MULTI_VECTORS] = multi_vectors;
-        return shared_from_this();
-    }
-
-    const MultiVector*
-    GetMultiVectors() const override {
-        if (auto iter = this->data_.find(MULTI_VECTORS); iter != this->data_.end()) {
-            return std::get<const MultiVector*>(iter->second);
-        }
-        return nullptr;
-    }
-
-    DatasetPtr
-    MultiVectorDim(int64_t dim) override {
-        this->data_[MULTI_VECTOR_DIM] = dim;
-        return shared_from_this();
-    }
-
-    int64_t
-    GetMultiVectorDim() const override {
-        if (auto iter = this->data_.find(MULTI_VECTOR_DIM); iter != this->data_.end()) {
-            return std::get<int64_t>(iter->second);
-        }
-        return 0;
     }
 
     static DatasetPtr

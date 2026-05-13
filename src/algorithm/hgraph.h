@@ -41,6 +41,7 @@
 #include "utils/visited_list.h"
 #include "vsag/index.h"
 #include "vsag/index_features.h"
+#include <unordered_map>
 
 namespace vsag {
 
@@ -69,6 +70,23 @@ public:
 
     std::vector<int64_t>
     Build(const DatasetPtr& data) override;
+
+    [[nodiscard]] bool
+    SupportsBuildCache() const override;
+
+    void
+    ExportBuildCache(std::ostream& out_stream) const override;
+
+    std::vector<int64_t>
+    BuildWithCache(const DatasetPtr& data,
+                   std::istream& in_stream,
+                   const BuildCacheOptions& options) override;
+
+    void
+    PrepareFeatureIdsForBuildCache(const DatasetPtr& data) override;
+
+    [[nodiscard]] BuildCacheStats
+    GetBuildCacheStats() const override;
 
     bool
     Tune(const std::string& parameters, bool disable_future_tuning) override;
@@ -233,18 +251,16 @@ public:
 
     Vector<InnerIdType>
     get_unique_inner_ids(InnerIdType count) {
-        // Callers commit total_count_ only after resize succeeds.
         Vector<InnerIdType> ret(count, this->allocator_);
         if (ret.size() != count) {
             throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "allocate memory failed");
         }
-        auto next_id = static_cast<InnerIdType>(this->total_count_.load());
         for (InnerIdType i = 0; i < count; ++i) {
             auto [success, id] = this->label_table_->PopHole();
             if (success) {
                 ret[i] = id;
             } else {
-                ret[i] = next_id++;
+                ret[i] = static_cast<InnerIdType>(this->total_count_++);
             }
         }
         return ret;
@@ -306,6 +322,12 @@ private:
     void
     deserialize_basic_info_v0_14(StreamReader& reader);
 
+    void
+    serialize_feature_ids(StreamWriter& writer) const;
+
+    void
+    deserialize_feature_ids(StreamReader& reader, uint64_t expected_count);
+
     uint32_t
     force_remove_one(int64_t label);
 
@@ -322,6 +344,46 @@ private:
 
     void
     shrink_to_fit();
+
+    void
+    validate_feature_ids_dataset(const DatasetPtr& data) const;
+
+    uint64_t
+    calculate_build_cache_param_hash() const;
+
+    struct RefineRoundStats {
+        uint64_t elapsed_us = 0;
+        uint64_t processed_nodes = 0;
+    };
+
+    struct RefineExecutionStats {
+        uint64_t elapsed_us = 0;
+        uint64_t executed_rounds = 0;
+        uint32_t effective_parallelism = 0;
+        std::vector<RefineRoundStats> round_stats;
+    };
+
+    DistHeapPtr
+    collect_refine_candidates(const DatasetPtr& data,
+                              InnerIdType inner_id,
+                              uint32_t input_idx,
+                              const FlattenInterfacePtr& flatten_codes) const;
+
+    void
+    refine_single_node(const DatasetPtr& data,
+                       InnerIdType inner_id,
+                       uint32_t input_idx,
+                       const FlattenInterfacePtr& flatten_codes);
+
+    RefineExecutionStats
+    refine_nodes_for_build_cache(const DatasetPtr& data,
+                                 const std::vector<InnerIdType>& ids_to_refine,
+                                 std::string_view phase_name,
+                                 uint32_t rounds,
+                                 bool enable_parallel_refine,
+                                 uint32_t requested_parallelism,
+                                 const FlattenInterfacePtr& flatten_codes,
+                                 const std::unordered_map<InnerIdType, uint32_t>& inner_id_to_input_idx);
 
 private:
     void
@@ -410,5 +472,8 @@ private:
     bool use_old_serial_format_{false};
 
     bool support_duplicate_{false};
+
+    std::vector<std::string> feature_ids_{};
+    BuildCacheStats build_cache_stats_{};
 };
 }  // namespace vsag

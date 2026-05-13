@@ -56,9 +56,22 @@ void
 BuildEvalCase::do_build() {
     auto base = vsag::Dataset::Make();
     int64_t total_base = this->dataset_ptr_->GetNumberOfBase();
-    std::vector<int64_t> ids(total_base);
-    std::iota(ids.begin(), ids.end(), 0);
-    base->NumElements(total_base)->Dim(this->dataset_ptr_->GetDim())->Ids(ids.data())->Owner(false);
+    std::vector<int64_t> fallback_ids;
+    const int64_t* ids_ptr = nullptr;
+    auto train_labels = this->dataset_ptr_->GetTrainLabels();
+    if (train_labels != nullptr) {
+        ids_ptr = train_labels.get();
+    } else {
+        fallback_ids.resize(total_base);
+        std::iota(fallback_ids.begin(), fallback_ids.end(), 0);
+        ids_ptr = fallback_ids.data();
+    }
+
+    base->NumElements(total_base)->Dim(this->dataset_ptr_->GetDim())->Ids(ids_ptr)->Owner(false);
+    auto train_feature_ids = this->dataset_ptr_->GetTrainFeatureIds();
+    if (train_feature_ids != nullptr) {
+        base->FeatureIds(train_feature_ids.get());
+    }
     if (this->dataset_ptr_->GetVectorType() == DENSE_VECTORS) {
         if (this->dataset_ptr_->GetTrainDataType() == vsag::DATATYPE_FLOAT32) {
             base->Float32Vectors((const float*)this->dataset_ptr_->GetTrain());

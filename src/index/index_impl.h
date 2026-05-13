@@ -157,6 +157,38 @@ public:
         SAFE_CALL(return this->inner_index_->ContinueBuild(base, binary_set));
     }
 
+    [[nodiscard]] bool
+    SupportsBuildCache() const override {
+        return this->inner_index_->SupportsBuildCache();
+    }
+
+    tl::expected<void, Error>
+    ExportBuildCache(std::ostream& out_stream) const override {
+        SAFE_CALL(this->inner_index_->ExportBuildCache(out_stream));
+    }
+
+    tl::expected<std::vector<int64_t>, Error>
+    BuildWithCache(const DatasetPtr& base,
+                   std::istream& in_stream,
+                   const BuildCacheOptions& options = BuildCacheOptions{}) override {
+        CHECK_IMMUTABLE_INDEX("build with cache");
+        CHECK_NONEMPTY_DATASET(base);
+        SAFE_CALL(return this->inner_index_->BuildWithCache(base, in_stream, options));
+    }
+
+    tl::expected<void, Error>
+    PrepareFeatureIdsForBuildCache(const DatasetPtr& base) override {
+        if (base->GetNumElements() == 0) {
+            return {};
+        }
+        SAFE_CALL(this->inner_index_->PrepareFeatureIdsForBuildCache(base));
+    }
+
+    [[nodiscard]] tl::expected<BuildCacheStats, Error>
+    GetBuildCacheStats() const override {
+        SAFE_CALL(return this->inner_index_->GetBuildCacheStats());
+    }
+
     tl::expected<void, Error>
     Deserialize(const BinarySet& binary_set) override {
         SAFE_CALL(this->inner_index_->Deserialize(binary_set));
