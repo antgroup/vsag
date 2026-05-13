@@ -31,6 +31,12 @@ types.
 - For performance, implementations may normalize vectors or store extra norm
   information so cosine can reuse IP-oriented kernels.
 
+## Return Value Range
+
+- `l2`: `0` to `+infinity`
+- `ip`: unbounded; values may be negative when `inner_product > 1`
+- `cosine`: `0` to `2` for cosine similarity in `[-1, 1]`
+
 ## Why this matters
 
 - Dataset ground truth, query semantics, and index internals need to agree on
