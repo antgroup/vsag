@@ -15,12 +15,18 @@
 
 #include "fast_bitset.h"
 
+#include <limits>
+#include <memory>
+#include <string>
+
 #include "simd/bit_simd.h"
 #include "vsag_exception.h"
 
 namespace vsag {
 
 static constexpr uint64_t FILL_ONE = 0xFFFFFFFFFFFFFFFF;
+// The high bit of capacity_ stores fill_bit, so serialized word count must fit in 31 bits.
+static constexpr uint64_t MAX_FAST_BITSET_WORDS = std::numeric_limits<uint32_t>::max() >> 1;
 
 void
 FastBitset::Set(int64_t pos, bool value) {
@@ -217,10 +223,29 @@ FastBitset::Deserialize(StreamReader& reader) {
     StreamReader::ReadObj(reader, fill_bit);
     uint64_t size;
     StreamReader::ReadObj(reader, size);
-    data_ = new uint64_t[size];
-    reader.Read(reinterpret_cast<char*>(data_), size * sizeof(uint64_t));
-    this->size_ = size;
-    this->set_capacity(size);
+    if (size > MAX_FAST_BITSET_WORDS) {
+        throw VsagException(ErrorType::READ_ERROR,
+                            "bitset word size too large: " + std::to_string(size) +
+                                ", max: " + std::to_string(MAX_FAST_BITSET_WORDS));
+    }
+    const auto max_byte_words = std::numeric_limits<size_t>::max() / sizeof(uint64_t);
+    if (size > max_byte_words) {
+        throw VsagException(ErrorType::READ_ERROR,
+                            "bitset byte size too large, words: " + std::to_string(size) +
+                                ", max words: " + std::to_string(max_byte_words));
+    }
+
+    std::unique_ptr<uint64_t[]> new_data;
+    if (size > 0) {
+        new_data.reset(new uint64_t[size]);
+        reader.Read(reinterpret_cast<char*>(new_data.get()), size * sizeof(uint64_t));
+    }
+
+    const auto size32 = static_cast<uint32_t>(size);
+    delete[] data_;
+    data_ = new_data.release();
+    this->size_ = size32;
+    this->set_capacity(size32);
     this->set_fill_bit(fill_bit);
 }
 
@@ -234,7 +259,9 @@ void
 FastBitset::resize(uint32_t new_size, uint64_t fill) {
     if (new_size > this->get_capacity()) {
         auto* tmp = new uint64_t[new_size];
-        std::memcpy(tmp, data_, size_ * sizeof(uint64_t));
+        if (size_ > 0) {
+            std::memcpy(tmp, data_, size_ * sizeof(uint64_t));
+        }
         delete[] data_;
         this->data_ = tmp;
         this->set_capacity(new_size);
