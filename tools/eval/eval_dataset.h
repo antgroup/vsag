@@ -31,6 +31,14 @@ class EvalDataset;
 using EvalDatasetPtr = std::shared_ptr<EvalDataset>;
 class EvalDataset {
 public:
+    EvalDataset() = default;
+    EvalDataset(const EvalDataset&) = delete;
+    EvalDataset&
+    operator=(const EvalDataset&) = delete;
+    EvalDataset(EvalDataset&&) = delete;
+    EvalDataset&
+    operator=(EvalDataset&&) = delete;
+
     static EvalDatasetPtr
     Load(const std::string& filename);
 
@@ -42,18 +50,47 @@ public:
     GetTrain() const {
         if (vector_type_ == DENSE_VECTORS) {
             return train_.get();
-        } else {
+        }
+        if (vector_type_ == SPARSE_VECTORS) {
             return sparse_train_.data();
         }
+        return nullptr;
     }
 
     [[nodiscard]] const void*
     GetTest() const {
         if (vector_type_ == DENSE_VECTORS) {
             return test_.get();
-        } else {
+        }
+        if (vector_type_ == SPARSE_VECTORS) {
             return sparse_test_.data();
         }
+        return nullptr;
+    }
+
+    [[nodiscard]] const vsag::MultiVector*
+    GetMultiTrainVectors() const {
+        return multi_train_vectors_.data();
+    }
+
+    [[nodiscard]] const vsag::MultiVector*
+    GetMultiTestVectors() const {
+        return multi_test_vectors_.data();
+    }
+
+    [[nodiscard]] const uint32_t*
+    GetTrainVectorCounts() const {
+        return train_vector_counts_.get();
+    }
+
+    [[nodiscard]] const uint32_t*
+    GetTestVectorCounts() const {
+        return test_vector_counts_.get();
+    }
+
+    [[nodiscard]] int64_t
+    GetMultiVectorDim() const {
+        return multi_vector_dim_;
     }
 
     [[nodiscard]] const std::shared_ptr<int64_t[]>
@@ -75,18 +112,22 @@ public:
     GetOneTrain(int64_t id) const {
         if (vector_type_ == DENSE_VECTORS) {
             return train_.get() + id * dim_ * train_data_size_;
-        } else {
+        }
+        if (vector_type_ == SPARSE_VECTORS) {
             return sparse_train_.data() + id;
         }
+        return nullptr;
     }
 
     [[nodiscard]] const void*
     GetOneTest(int64_t id) const {
         if (vector_type_ == DENSE_VECTORS) {
             return test_.get() + id * dim_ * test_data_size_;
-        } else {
+        }
+        if (vector_type_ == SPARSE_VECTORS) {
             return sparse_test_.data() + id;
         }
+        return nullptr;
     }
 
     [[nodiscard]] int64_t
@@ -173,6 +214,12 @@ public:
             delete[] i.ids_;
             delete[] i.vals_;
         }
+        for (auto& mv : multi_train_vectors_) {
+            delete[] mv.vectors_;
+        }
+        for (auto& mv : multi_test_vectors_) {
+            delete[] mv.vectors_;
+        }
     }
 
 private:
@@ -199,6 +246,12 @@ private:
         H5::DataSpace dataspace = dataset.getSpace();
         hsize_t dims_out[2];
         int ndims = dataspace.getSimpleExtentDims(dims_out, NULL);
+        if (ndims == 1) {
+            return std::make_pair<int64_t, int64_t>(dims_out[0], 0);
+        }
+        if (ndims != 2) {
+            throw std::runtime_error("unsupported dataset rank: " + std::to_string(ndims));
+        }
         return std::make_pair<int64_t, int64_t>(dims_out[0], dims_out[1]);
     }
 
@@ -234,6 +287,12 @@ private:
 
     std::vector<SparseVector> sparse_train_;
     std::vector<SparseVector> sparse_test_;
+
+    std::vector<vsag::MultiVector> multi_train_vectors_;
+    std::vector<vsag::MultiVector> multi_test_vectors_;
+    std::shared_ptr<uint32_t[]> train_vector_counts_;
+    std::shared_ptr<uint32_t[]> test_vector_counts_;
+    int64_t multi_vector_dim_{0};
 
     std::string vector_type_ = DENSE_VECTORS;
 };

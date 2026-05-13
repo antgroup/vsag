@@ -70,6 +70,9 @@ formulas below.
 - **Allowed values for sparse vectors**:
     - `"ip"` — sparse inner-product distance (`1 - sparse_inner_product`); other metrics
       are not supported for sparse vectors
+- **Allowed values for multi-vector**:
+    - Same as dense vectors (`"euclidean"`, `"ip"`, `"angular"`); multi-vector uses the
+      same per-sub-vector distance function as dense vectors
 
 ## Optional Datasets
 
@@ -91,6 +94,40 @@ formulas below.
   be strictly greater than the maximum label value (typically `L > max(label)` with valid
   indices `0..L-1`). It is the dataset author's responsibility to keep the array large
   enough to cover every label that appears in `/train_labels` and `/test_labels`.
+
+## Multi-Vector Datasets
+
+When `type="multi_vector"`, the file uses a flat-expanded layout where each document’s
+sub-vectors are concatenated into a single 2D matrix, and a companion `vector_counts`
+array records how many sub-vectors belong to each document.
+
+### Additional Global Attribute
+
+| Attribute           | Type    | Required | Description                                          |
+|---------------------|---------|----------|------------------------------------------------------|
+| `multi_vector_dim`  | `INT64` | yes      | Sub-vector dimensionality (number of floats per sub-vector) |
+
+### Additional Datasets
+
+| Dataset                  | Shape                    | Type     | Description                                                        |
+|--------------------------|--------------------------|----------|--------------------------------------------------------------------|
+| `/train_multi_vectors`   | `(sum_counts_train, D)`  | `FLOAT32`| All training sub-vectors, flat-concatenated row by row              |
+| `/test_multi_vectors`    | `(sum_counts_test, D)`   | `FLOAT32`| All query sub-vectors, flat-concatenated row by row                 |
+| `/train_vector_counts`   | `(N,)`                   | `UINT32` | Number of sub-vectors per training document                         |
+| `/test_vector_counts`    | `(Q,)`                   | `UINT32` | Number of sub-vectors per query document                            |
+
+> `D` equals `multi_vector_dim`. `sum_counts_train` is the sum of all values in
+> `/train_vector_counts`, and `sum_counts_test` is the sum of all values in
+> `/test_vector_counts`.
+
+When `type="multi_vector"`, the standard `/train` and `/test` datasets are **not
+required** — the document count (`N`, `Q`) is derived from `/train_vector_counts`
+and `/test_vector_counts` instead. All other datasets (`/neighbors`, `/distances`,
+optional labels) remain mandatory.
+
+The evaluation tool reconstructs one `vsag::MultiVector` per document from the
+flat array plus the counts, then passes the full array to
+`vsag::Dataset::MultiVectors()`, `VectorCounts()`, and `MultiVectorDim()`.
 
 ## Structural Requirements
 
