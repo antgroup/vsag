@@ -38,6 +38,9 @@ namespace fixtures {
 vsag::DatasetPtr
 get_one_query(const vsag::DatasetPtr& queries, int i);
 
+int64_t
+get_missing_id(const vsag::DatasetPtr& base);
+
 class TestIndex {
 public:
     using IndexPtr = vsag::IndexPtr;

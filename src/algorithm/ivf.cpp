@@ -1054,6 +1054,7 @@ IVF::CalDistanceById(const float* query,
 
 float
 IVF::CalcDistanceById(const float* query, int64_t id, bool calculate_precise_distance) const {
+    std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
     auto [success, inner_id] = this->label_table_->TryGetIdByLabel(id);
     if (not success) {
         return -1.0F;
