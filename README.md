@@ -369,17 +369,17 @@ VSAG referenced the following works during its implementation:
                 </a>
             </td>
             <td align="center">
-                <a href="https://github.com/shadowao">
-                    <img src="https://avatars.githubusercontent.com/u/13804928?v=4" width="100" alt="shadowao"/>
-                    <br />
-                    <sub><b>azl</b></sub>
-                </a>
-            </td>
-            <td align="center">
                 <a href="https://github.com/Roxanne0321">
                     <img src="https://avatars.githubusercontent.com/u/188438858?v=4" width="100" alt="Roxanne0321"/>
                     <br />
                     <sub><b>Roxanne</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/shadowao">
+                    <img src="https://avatars.githubusercontent.com/u/13804928?v=4" width="100" alt="shadowao"/>
+                    <br />
+                    <sub><b>azl</b></sub>
                 </a>
             </td>
             <td align="center">
