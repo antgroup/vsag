@@ -17,9 +17,22 @@
 
 #include <limits>
 
-#include "utils/linear_congruential_generator.h"
 #include "utils/standard_heap.h"
 namespace vsag {
+
+namespace {
+
+FilterSearchSkipStrategyPtr
+create_filter_search_skip_strategy(const InnerSearchParam& inner_search_param) {
+    return create_filter_search_skip_strategy(
+        inner_search_param.skip_strategy_type,
+        inner_search_param.is_inner_id_allowed != nullptr
+            ? inner_search_param.is_inner_id_allowed->ValidRatio()
+            : 1.0F,
+        inner_search_param.skip_ratio);
+}
+
+}  // namespace
 
 BasicSearcher::BasicSearcher(const IndexCommonParam& common_param, MutexArrayPtr mutex_array)
     : allocator_(common_param.allocator_.get()), mutex_array_(std::move(mutex_array)) {
@@ -30,11 +43,10 @@ BasicSearcher::visit(const GraphInterfacePtr& graph,
                      const VisitedListPtr& vl,
                      const std::pair<float, uint64_t>& current_node_pair,
                      const FilterPtr& filter,
-                     float skip_ratio,
+                     FilterSearchSkipStrategy* skip_strategy,
                      Vector<InnerIdType>& to_be_visited_rid,
                      Vector<InnerIdType>& to_be_visited_id,
                      Vector<InnerIdType>& neighbors) const {
-    LinearCongruentialGenerator generator;
     uint32_t count_no_visited = 0;
 
     if (this->mutex_array_ != nullptr) {
@@ -44,17 +56,13 @@ BasicSearcher::visit(const GraphInterfacePtr& graph,
         graph->GetNeighbors(current_node_pair.second, neighbors);
     }
 
-    float skip_threshold =
-        (filter != nullptr
-             ? (filter->ValidRatio() == 1.0F ? 0 : (1 - ((1 - filter->ValidRatio()) * skip_ratio)))
-             : 0.0F);
-
     for (uint32_t i = 0; i < neighbors.size(); i++) {
         if (i + prefetch_stride_visit_ < neighbors.size()) {
             vl->Prefetch(neighbors[i + prefetch_stride_visit_]);
         }
         if (not vl->Get(neighbors[i])) {
-            if (not filter || count_no_visited == 0 || generator.NextFloat() > skip_threshold ||
+            auto skip_filter_check = filter != nullptr && skip_strategy->ShouldSkipFilterCheck();
+            if (not filter || count_no_visited == 0 || skip_filter_check ||
                 filter->CheckValid(neighbors[i])) {
                 to_be_visited_rid[count_no_visited] = i;
                 to_be_visited_id[count_no_visited] = neighbors[i];
@@ -122,6 +130,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     Vector<InnerIdType> to_be_visited_id(graph->MaximumDegree(), alloc);
     Vector<InnerIdType> neighbors(graph->MaximumDegree(), alloc);
     Vector<float> line_dists(graph->MaximumDegree(), alloc);
+    auto skip_strategy = create_filter_search_skip_strategy(inner_search_param);
 
     if (!iter_ctx->IsFirstUsed()) {
         if (iter_ctx->Empty()) {
@@ -173,7 +182,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                                  vl,
                                  current_node_pair,
                                  inner_search_param.is_inner_id_allowed,
-                                 inner_search_param.skip_ratio,
+                                 skip_strategy.get(),
                                  to_be_visited_rid,
                                  to_be_visited_id,
                                  neighbors);
@@ -258,6 +267,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     Vector<InnerIdType> to_be_visited_id(graph->MaximumDegree(), alloc);
     Vector<InnerIdType> neighbors(graph->MaximumDegree(), alloc);
     Vector<float> line_dists(graph->MaximumDegree(), alloc);
+    auto skip_strategy = create_filter_search_skip_strategy(inner_search_param);
 
     flatten->Query(&dist, computer, &ep, 1, alloc);
     if (not is_id_allowed || is_id_allowed->CheckValid(ep)) {
@@ -291,7 +301,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                                  vl,
                                  current_node_pair,
                                  inner_search_param.is_inner_id_allowed,
-                                 inner_search_param.skip_ratio,
+                                 skip_strategy.get(),
                                  to_be_visited_rid,
                                  to_be_visited_id,
                                  neighbors);
