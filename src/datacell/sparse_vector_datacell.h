@@ -80,7 +80,7 @@ public:
         }
         uint64_t io_size = (new_capacity - total_count_) * max_code_size_ + current_offset_;
         this->io_->Resize(io_size);
-        this->offset_io_->Resize(static_cast<uint64_t>(new_capacity) * sizeof(uint32_t));
+        this->offset_io_->Resize(static_cast<uint64_t>(new_capacity) * sizeof(DocLocation));
         this->max_capacity_ = new_capacity;
     }
 
@@ -110,6 +110,11 @@ public:
 
     [[nodiscard]] const uint8_t*
     GetCodesById(InnerIdType id, bool& need_release) const override;
+
+    void
+    GetSparseVectorByInnerId(InnerIdType inner_id,
+                             SparseVector* data,
+                             Allocator* specified_allocator) const override;
 
     void
     Release(const uint8_t* data) const override;
@@ -154,6 +159,11 @@ private:
     }
 
 private:
+    struct DocLocation {
+        uint32_t offset{0};
+        uint32_t size{0};
+    };
+
     std::shared_ptr<Quantizer<QuantTmpl>> quantizer_{nullptr};
     std::shared_ptr<BasicIO<IOTmpl>> io_{nullptr};
 

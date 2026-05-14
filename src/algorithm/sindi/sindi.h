@@ -17,7 +17,7 @@
 
 #include "algorithm/inner_index_interface.h"
 #include "algorithm/sindi/term_id_mapper.h"
-#include "algorithm/sparse_index.h"
+#include "datacell/flatten_interface.h"
 #include "datacell/sparse_term_datacell.h"
 #include "vsag/allocator.h"
 
@@ -172,7 +172,7 @@ private:
 
     float doc_retain_ratio_{0};
 
-    std::shared_ptr<SparseIndex> rerank_flat_index_{nullptr};
+    FlattenInterfacePtr rerank_flat_{nullptr};
 
     bool deserialize_without_footer_{false};
     bool deserialize_without_buffer_{false};

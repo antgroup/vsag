@@ -69,6 +69,24 @@ TEST_CASE("SparseDataCell Basic Test", "[ut][SparseDataCell] ") {
         fixtures::dist_t distance = data_cell->ComputePairVectors(idx[i], idx[i + 1]);
         REQUIRE(distance == fixtures::GetSparseDistance(sparse_vectors[i], sparse_vectors[i + 1]));
     }
+    SECTION("get sparse vector by inner id") {
+        for (int i = 0; i < 10; ++i) {
+            SparseVector data;
+            data_cell->GetSparseVectorByInnerId(idx[i], &data, index_common_param.allocator_.get());
+            std::vector<std::pair<uint32_t, float>> expected;
+            std::vector<std::pair<uint32_t, float>> actual;
+            for (uint32_t j = 0; j < sparse_vectors[i].len_; ++j) {
+                expected.emplace_back(sparse_vectors[i].ids_[j], sparse_vectors[i].vals_[j]);
+            }
+            for (uint32_t j = 0; j < data.len_; ++j) {
+                actual.emplace_back(data.ids_[j], data.vals_[j]);
+            }
+            std::sort(expected.begin(), expected.end());
+            REQUIRE(actual == expected);
+            index_common_param.allocator_->Deallocate(data.ids_);
+            index_common_param.allocator_->Deallocate(data.vals_);
+        }
+    }
     auto query_sparse_vectors = fixtures::GenerateSparseVectors(1, 100);
     SECTION("accuracy") {
         auto computer = data_cell->FactoryComputer(query_sparse_vectors.data());
