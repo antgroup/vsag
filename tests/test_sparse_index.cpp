@@ -61,6 +61,21 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SparseTestIndex,
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::SparseTestIndex,
+                             "SparseIndex returns -1 for missing id",
+                             "[ft][distance][sparse_index]") {
+    auto index = TestFactory("sparse_index", build_param, true);
+    auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
+    TestBuildIndex(index, dataset, true);
+
+    auto query = fixtures::get_one_query(dataset->query_, 0);
+    const auto missing_id = fixtures::get_missing_id(dataset->base_);
+    auto distance = index->CalcDistanceById(query, missing_id);
+
+    REQUIRE(distance.has_value());
+    REQUIRE(distance.value() == -1.0F);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::SparseTestIndex,
                              "Sparse Index Serialize File",
                              "[ft][serialize][sparse_index]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();

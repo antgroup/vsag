@@ -291,8 +291,6 @@ IVFTestIndex::TestGeneral(const TestIndex::IndexPtr& index,
 }
 }  // namespace fixtures
 
-namespace {
-
 template <typename Fn>
 void
 RunWithGeneratedBlockSizeLimit(Fn&& fn) {
@@ -359,8 +357,6 @@ ForEachIVFCase(const fixtures::IVFResourcePtr& resource, const Cases& test_cases
         auto resource = fixtures::IVFTestIndex::GetResource(false); \
         helper(resource);                                           \
     }
-
-}  // namespace
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
                              "IVF Factory Test With Exceptions",
@@ -596,6 +592,36 @@ TestIVFBuild(const fixtures::IVFResourcePtr& resource) {
 }
 
 IVF_PR_DAILY_CASE("IVF Build", "[ft][build][ivf]", TestIVFBuild)
+
+static void
+TestIVFCalcDistanceByIdMissingId(const fixtures::IVFResourcePtr& resource) {
+    using namespace fixtures;
+    const auto base_count = resource->base_count;
+    ForEachIVFCase(
+        resource,
+        resource->test_cases,
+        [base_count](const auto& metric_type,
+                     auto dim,
+                     const auto& train_type,
+                     const auto& base_quantization_str,
+                     auto recall) {
+            const auto build_param = IVFTestIndex::GenerateIVFBuildParametersString(
+                metric_type, dim, base_quantization_str, 210, train_type);
+            auto index = TestIndex::TestFactory(IVFTestIndex::name, build_param, true);
+            auto dataset = IVFTestIndex::pool.GetDatasetAndCreate(dim, base_count, metric_type);
+            TestIndex::TestBuildIndex(index, dataset, true);
+
+            auto query = get_one_query(dataset->query_, 0);
+            const auto missing_id = fixtures::get_missing_id(dataset->base_);
+            auto distance = index->CalcDistanceById(query->GetFloat32Vectors(), missing_id);
+
+            REQUIRE(distance.has_value());
+            REQUIRE(distance.value() == -1.0F);
+        });
+}
+IVF_PR_DAILY_CASE("IVF CalcDistanceById missing id returns -1",
+                  "[ft][distance][ivf]",
+                  TestIVFCalcDistanceByIdMissingId)
 
 static void
 TestIVFSearchOvertime(const fixtures::IVFResourcePtr& resource) {
