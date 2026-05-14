@@ -501,6 +501,13 @@ VSAG referenced the following works during its implementation:
                 </a>
             </td>
             <td align="center">
+                <a href="https://github.com/LightWant">
+                    <img src="https://avatars.githubusercontent.com/u/32861432?v=4" width="100" alt="LightWant"/>
+                    <br />
+                    <sub><b>LightWant</b></sub>
+                </a>
+            </td>
+            <td align="center">
                 <a href="https://github.com/liric24">
                     <img src="https://avatars.githubusercontent.com/u/11338347?v=4" width="100" alt="liric24"/>
                     <br />
@@ -521,6 +528,8 @@ VSAG referenced the following works during its implementation:
                     <sub><b>lhd</b></sub>
                 </a>
             </td>
+        </tr>
+        <tr>
             <td align="center">
                 <a href="https://github.com/stuBirdFly">
                     <img src="https://avatars.githubusercontent.com/u/84010733?v=4" width="100" alt="stuBirdFly"/>
