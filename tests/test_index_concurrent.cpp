@@ -212,7 +212,9 @@ TestIndex::TestConcurrentDestruct(TestIndex::IndexPtr& index,
 
         if (i == (dataset->base_->GetNumElements() * 3) / 4) {
             std::unique_lock status_lock(index_mutex);
-            std::dynamic_pointer_cast<vsag::HNSW>(index)->SetStatus(vsag::VSAGIndexStatus::ALIVE);
+            if (auto hnsw = std::dynamic_pointer_cast<vsag::HNSW>(index)) {
+                hnsw->SetStatus(vsag::VSAGIndexStatus::ALIVE);
+            }
             index.reset();
             return true;
         }
@@ -278,12 +280,14 @@ TestIndex::TestConcurrentDestruct(TestIndex::IndexPtr& index,
             case 20:
                 return index->GetMemoryUsage() > 0;
             case 21:
-                std::dynamic_pointer_cast<vsag::HNSW>(index)->SetStatus(
-                    vsag::VSAGIndexStatus::DESTROYED);
+                if (auto hnsw = std::dynamic_pointer_cast<vsag::HNSW>(index)) {
+                    hnsw->SetStatus(vsag::VSAGIndexStatus::DESTROYED);
+                }
                 return true;
             default:
-                std::dynamic_pointer_cast<vsag::HNSW>(index)->SetStatus(
-                    vsag::VSAGIndexStatus::ALIVE);
+                if (auto hnsw = std::dynamic_pointer_cast<vsag::HNSW>(index)) {
+                    hnsw->SetStatus(vsag::VSAGIndexStatus::ALIVE);
+                }
                 return true;
         }
     };
@@ -330,7 +334,7 @@ TestIndex::TestConcurrentAddSearchRemove(const TestIndex::IndexPtr& index,
         auto add_index = index->Add(data_one);
         auto search_index = index->KnnSearch(data_one, 1, search_param);
         auto remove_index = index->Remove(*(dataset->base_->GetIds() + i));
-        return add_index.has_value() & search_index.has_value() & remove_index.has_value();
+        return add_index.has_value() && search_index.has_value() && remove_index.has_value();
     };
 
     for (uint64_t j = temp_count; j < base_count; ++j) {

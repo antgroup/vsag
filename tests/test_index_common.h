@@ -14,6 +14,8 @@
 
 #pragma once
 
+#include <algorithm>
+
 #include "allocator/memory_record_allocator.h"
 #include "impl/allocator/default_allocator.h"
 #include "index/hnsw.h"
@@ -27,7 +29,7 @@ namespace fixtures {
 inline int64_t
 Intersection(const int64_t* x, int64_t x_count, const int64_t* y, int64_t y_count) {
     std::unordered_set<int64_t> set_x(x, x + x_count);
-    int result = 0;
+    int64_t result = 0;
 
     for (int i = 0; i < y_count; ++i) {
         if (set_x.count(y[i])) {

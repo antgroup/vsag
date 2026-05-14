@@ -101,7 +101,7 @@ TestIndex::TestCheckIdExist(const TestIndex::IndexPtr& index,
         REQUIRE(index->CheckIdExist(good_id) == expected_success);
     }
     std::unordered_set<int64_t> exist_ids(ids, ids + data_count);
-    int bad_id = 97;
+    int64_t bad_id = 97;
     while (N > 0) {
         for (; bad_id < data_count * N; ++bad_id) {
             if (exist_ids.count(bad_id) == 0) {

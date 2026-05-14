@@ -30,7 +30,7 @@ TestIndex::TestCalcDistanceById(const IndexPtr& index,
     auto dim = queries->GetDim();
     auto gts = dataset->ground_truth_;
     auto gt_topK = dataset->top_k;
-    for (auto i = 0; i < query_count; ++i) {
+    for (int64_t i = 0; i < query_count; ++i) {
         auto query = get_one_query(queries, i);
         for (auto j = 0; j < gt_topK; ++j) {
             auto id = gts->GetIds()[i * gt_topK + j];
@@ -66,7 +66,7 @@ TestIndex::TestBatchCalcDistanceById(const IndexPtr& index,
     auto dim = queries->GetDim();
     auto gts = dataset->ground_truth_;
     auto gt_topK = dataset->top_k;
-    for (auto i = 0; i < query_count; ++i) {
+    for (int64_t i = 0; i < query_count; ++i) {
         auto query = get_one_query(queries, i);
         tl::expected<DatasetPtr, vsag::Error> result;
         if (is_sparse) {
@@ -129,10 +129,9 @@ TestIndex::TestGetMinAndMaxId(const IndexPtr& index,
     int64_t res_max_id = INT64_MIN;
     int64_t res_min_id = INT64_MAX;
     for (uint64_t j = 0; j < base_count; ++j) {
-        res_max_id =
-            res_max_id > dataset->base_->GetIds()[j] ? res_max_id : dataset->base_->GetIds()[j];
-        res_min_id =
-            res_min_id < dataset->base_->GetIds()[j] ? res_min_id : dataset->base_->GetIds()[j];
+        const auto base_id = dataset->base_->GetIds()[j];
+        res_max_id = std::max(res_max_id, base_id);
+        res_min_id = std::min(res_min_id, base_id);
     }
     get_min_max_res = index->GetMinAndMaxId();
     REQUIRE(get_min_max_res.has_value() == true);
