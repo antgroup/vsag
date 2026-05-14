@@ -30,6 +30,7 @@ const char* const INDEX_TYPE_PYRAMID = "pyramid";
 
 const char* const TYPE_KEY = "type";
 const char* const USE_REORDER_KEY = "use_reorder";
+const char* const REORDER_SOURCE_KEY = "reorder_source";
 const char* const USE_QUANTIZATION = "use_quantization";
 const char* const EXTRA_INFO_KEY = "extra_info";
 const char* const USE_ATTRIBUTE_FILTER_KEY = "use_attribute_filter";
@@ -99,8 +100,10 @@ const char* const USE_FHT_KEY = "use_fht";
 
 // quantization param
 const char* const TQ_CHAIN_KEY = "tq_chain";
+const char* const RABITQ_QUANTIZATION_VERSION_KEY = "rabitq_version";
 const char* const RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY = "rabitq_bits_per_dim_query";
 const char* const RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY = "rabitq_bits_per_dim_base";
+const char* const RABITQ_QUANTIZATION_ERROR_RATE_KEY = "rabitq_error_rate";
 const char* const SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE_KEY = "sq4_uniform_trunc_rate";
 const char* const PRODUCT_QUANTIZATION_DIM_KEY = "pq_dim";
 const char* const PRODUCT_QUANTIZATION_BITS_KEY = "pq_bits";
@@ -153,6 +156,7 @@ const char* const GNO_IMI_SECOND_ORDER_BUCKETS_COUNT_KEY = "second_order_buckets
 
 const char* const GNO_IMI_SEARCH_PARAM_FIRST_ORDER_SCAN_RATIO = "first_order_scan_ratio";
 const char* const FLATTEN_DATA_CELL = "flatten_data_cell";
+const char* const RABITQ_SPLIT_DATA_CELL = "rabitq_split_data_cell";
 const char* const SPARSE_VECTOR_DATA_CELL = "sparse_vector_data_cell";
 
 // for pyramid index
@@ -172,6 +176,7 @@ const char* const BASIC_INFO = "basic_info";
 
 const char* const CODES_TYPE_KEY = "codes_type";
 const char* const FLATTEN_CODES = "flatten";
+const char* const RABITQ_SPLIT_CODES = "rabitq_split";
 const char* const SPARSE_CODES = "sparse";
 
 const char* const IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT = "scan_buckets_count";
@@ -263,7 +268,10 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"RAW_VECTOR_KEY", RAW_VECTOR_KEY},
     {"ATTR_HAS_BUCKETS_KEY", ATTR_HAS_BUCKETS_KEY},
     {"ATTR_PARAMS_KEY", ATTR_PARAMS_KEY},
+    {"RABITQ_QUANTIZATION_VERSION_KEY", RABITQ_QUANTIZATION_VERSION_KEY},
     {"RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY", RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY},
+    {"RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY", RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY},
+    {"RABITQ_QUANTIZATION_ERROR_RATE_KEY", RABITQ_QUANTIZATION_ERROR_RATE_KEY},
     {"TQ_CHAIN_KEY", TQ_CHAIN_KEY},
     {"NO_BUILD_LEVELS", NO_BUILD_LEVELS},
     {"GRAPH_TYPE_KEY", GRAPH_TYPE_KEY}};

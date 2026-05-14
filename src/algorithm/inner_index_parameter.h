@@ -18,6 +18,7 @@
 #include "parameter.h"
 #include "typing.h"
 #include "utils/pointer_define.h"
+#include "vsag/constants.h"
 
 namespace vsag {
 DEFINE_POINTER(InnerIndexParameter);
@@ -42,6 +43,7 @@ public:
 
 public:
     bool use_reorder{false};
+    std::string reorder_source{HGRAPH_REORDER_SOURCE_PRECISE};
     FlattenInterfaceParamPtr precise_codes_param{nullptr};
 
     bool use_attribute_filter{false};

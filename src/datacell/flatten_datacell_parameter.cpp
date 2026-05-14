@@ -37,12 +37,16 @@ FlattenDataCellParameter::FromJson(const JsonType& json) {
     this->quantizer_parameter =
         QuantizerParameter::GetQuantizerParameterByJson(json[QUANTIZATION_PARAMS_KEY]);
     this->name = FLATTEN_DATA_CELL;
+    if (json.Contains(CODES_TYPE_KEY) && json[CODES_TYPE_KEY].GetString() == RABITQ_SPLIT_CODES) {
+        this->name = RABITQ_SPLIT_DATA_CELL;
+    }
 }
 
 JsonType
 FlattenDataCellParameter::ToJson() const {
     JsonType json;
-    json[CODES_TYPE_KEY].SetString(FLATTEN_CODES);
+    json[CODES_TYPE_KEY].SetString(this->name == RABITQ_SPLIT_DATA_CELL ? RABITQ_SPLIT_CODES
+                                                                        : FLATTEN_CODES);
     json[IO_PARAMS_KEY].SetJson(this->io_parameter->ToJson());
     json[QUANTIZATION_PARAMS_KEY].SetJson(this->quantizer_parameter->ToJson());
     return json;
@@ -54,6 +58,10 @@ FlattenDataCellParameter::CheckCompatibility(const ParamPtr& other) const {
         logger::error(
             "FlattenDataCellParameter::CheckCompatibility: "
             "other parameter is not FlattenDataCellParameter");
+        return false;
+    }
+    if (this->name != flatten_other->name) {
+        logger::error("FlattenDataCellParameter::CheckCompatibility: codes_type mismatch");
         return false;
     }
     return this->quantizer_parameter->CheckCompatibility(flatten_other->quantizer_parameter);

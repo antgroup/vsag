@@ -26,6 +26,7 @@
 #include "analyzer/analyzer.h"
 #include "attr/argparse.h"
 #include "common.h"
+#include "datacell/flatten_datacell_parameter.h"
 #include "datacell/flatten_interface.h"
 #include "datacell/sparse_graph_datacell.h"
 #include "dataset_impl.h"
@@ -34,9 +35,12 @@
 #include "impl/odescent/odescent_graph_builder.h"
 #include "impl/pruning_strategy.h"
 #include "impl/reasoning/search_reasoning.h"
+#include "impl/reorder/flatten_reorder.h"
 #include "index/index_impl.h"
 #include "index/iterator_filter.h"
+#include "io/memory_io_parameter.h"
 #include "io/reader_io_parameter.h"
+#include "quantization/scalar_quantization/scalar_quantizer_parameter.h"
 #include "storage/serialization.h"
 #include "storage/stream_reader.h"
 #include "typing.h"
@@ -54,6 +58,34 @@ make_empty_dataset_with_stats() {
     return dataset_result;
 }
 
+static FlattenInterfacePtr
+make_temporary_sq8_flatten(MetricType metric,
+                           DataTypes data_type,
+                           int64_t dim,
+                           int64_t extra_info_size,
+                           const std::shared_ptr<SafeThreadPool>& thread_pool,
+                           Allocator* allocator) {
+    auto sq8_param = std::make_shared<FlattenDataCellParameter>();
+    sq8_param->quantizer_parameter = std::make_shared<ScalarQuantizerParameter<8>>();
+    sq8_param->io_parameter = std::make_shared<MemoryIOParameter>();
+
+    IndexCommonParam common_param;
+    common_param.metric_ = metric;
+    common_param.data_type_ = data_type;
+    common_param.dim_ = dim;
+    common_param.extra_info_size_ = extra_info_size;
+    common_param.thread_pool_ = thread_pool;
+    common_param.allocator_ = std::shared_ptr<Allocator>(allocator, [](Allocator*) {});
+    return FlattenInterface::MakeInstance(sq8_param, common_param);
+}
+
+static bool
+need_temporary_sq8_build_data(const FlattenInterfacePtr& basic_flatten_codes,
+                              bool has_precise_reorder) {
+    return not has_precise_reorder and
+           basic_flatten_codes->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_RABITQ;
+}
+
 class HGraphAnalyzer;
 
 HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonParam& common_param)
@@ -62,6 +94,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
       use_elp_optimizer_(hgraph_param->use_elp_optimizer),
       ignore_reorder_(hgraph_param->ignore_reorder),
       build_by_base_(hgraph_param->build_by_base),
+      reorder_by_base_(hgraph_param->reorder_source == HGRAPH_REORDER_SOURCE_BASE),
       ef_construct_(hgraph_param->ef_construction),
       alpha_(hgraph_param->alpha),
       odescent_param_(hgraph_param->odescent_param),
@@ -73,7 +106,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
     neighbors_mutex_ = std::make_shared<PointsMutex>(0, common_param.allocator_.get());
     this->basic_flatten_codes_ =
         FlattenInterface::MakeInstance(hgraph_param->base_codes_param, common_param);
-    if (use_reorder_) {
+    if (has_precise_reorder()) {
         this->high_precise_codes_ =
             FlattenInterface::MakeInstance(hgraph_param->precise_codes_param, common_param);
     }
@@ -111,7 +144,7 @@ HGraph::Train(const DatasetPtr& base) {
 
     const auto* data_ptr = get_data(train_data);
     this->basic_flatten_codes_->Train(data_ptr, train_data->GetNumElements());
-    if (use_reorder_) {
+    if (has_precise_reorder()) {
         this->high_precise_codes_->Train(data_ptr, train_data->GetNumElements());
     }
     if (create_new_raw_vector_) {
@@ -143,6 +176,12 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             HGRAPH_USE_REORDER,
             {
                 USE_REORDER_KEY,
+            },
+        },
+        {
+            HGRAPH_REORDER_SOURCE,
+            {
+                REORDER_SOURCE_KEY,
             },
         },
         {
@@ -198,6 +237,13 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
                 BASE_CODES_KEY,
                 IO_PARAMS_KEY,
                 TYPE_KEY,
+            },
+        },
+        {
+            HGRAPH_BASE_CODES_TYPE,
+            {
+                BASE_CODES_KEY,
+                CODES_TYPE_KEY,
             },
         },
         {
@@ -400,6 +446,22 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             },
         },
         {
+            RABITQ_VERSION,
+            {
+                BASE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                RABITQ_QUANTIZATION_VERSION_KEY,
+            },
+        },
+        {
+            RABITQ_ERROR_RATE,
+            {
+                BASE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                RABITQ_QUANTIZATION_ERROR_RATE_KEY,
+            },
+        },
+        {
             HGRAPH_BASE_PQ_DIM,
             {
                 BASE_CODES_KEY,
@@ -486,7 +548,10 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
                 "{TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
                 "{SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE_KEY}": 0.05,
                 "{PCA_DIM_KEY}": 0,
+                "{RABITQ_QUANTIZATION_VERSION_KEY}": "standard",
                 "{RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY}": 32,
+                "{RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY}": 1,
+                "{RABITQ_QUANTIZATION_ERROR_RATE_KEY}": 1.9,
                 "{TQ_CHAIN_KEY}": "",
                 "nbits": 8,
                 "{PRODUCT_QUANTIZATION_DIM_KEY}": 1,
@@ -570,7 +635,8 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
     auto new_basic_code =
         FlattenInterface::MakeInstance(hgraph_parameter->base_codes_param, common_param);
     FlattenInterfacePtr new_precise_code;
-    if (inner_parameter->use_reorder) {
+    bool new_reorder_by_base = inner_parameter->reorder_source == HGRAPH_REORDER_SOURCE_BASE;
+    if (inner_parameter->use_reorder && not new_reorder_by_base) {
         new_precise_code =
             FlattenInterface::MakeInstance(hgraph_parameter->precise_codes_param, common_param);
     }
@@ -587,19 +653,19 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
         // [case 1] base_code is not same
         is_tune_base_code = true;
     }
-    if (use_reorder_ and inner_parameter->use_reorder and
+    if (has_precise_reorder() and inner_parameter->use_reorder and not new_reorder_by_base and
         this->high_precise_codes_->GetQuantizerName() != new_precise_code->GetQuantizerName()) {
         // [case 2] precise code is not same
         is_tune_precise_code = true;
     }
-    if (not inner_parameter->use_reorder) {
+    if (not inner_parameter->use_reorder or new_reorder_by_base) {
         // [case 3] drop precise_code
-        new_use_reorder = false;
+        new_use_reorder = inner_parameter->use_reorder;
         drop_precise_codes = true;
         param->precise_codes_param.reset();
         is_tune_precise_code = false;
     }
-    if (not new_use_reorder and inner_parameter->use_reorder) {
+    if (not new_use_reorder and inner_parameter->use_reorder and not new_reorder_by_base) {
         // [case 4] assign new precise_code
         new_use_reorder = true;
         is_tune_precise_code = true;
@@ -613,6 +679,7 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
         param->precise_codes_param = hgraph_parameter->precise_codes_param;
     }
     param->use_reorder = new_use_reorder;
+    param->reorder_source = inner_parameter->reorder_source;
 
     // export train data and train new_basic_code
     auto train_count = std::min(this->train_sample_count_, this->GetNumElements());
@@ -654,6 +721,7 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
             high_precise_codes_ = new_precise;
         }
         use_reorder_ = new_use_reorder;
+        reorder_by_base_ = new_reorder_by_base;
         param->use_reorder = new_use_reorder;
 
         check_and_init_raw_vector(param->raw_vector_param, common_param, false);
@@ -700,17 +768,36 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
     this->resize(current_count + new_ids_count);
     this->total_count_ += new_ids_count;
     Vector<Vector<InnerIdType>> route_graph_ids(allocator_);
+    auto need_sq8_build_data =
+        need_temporary_sq8_build_data(this->basic_flatten_codes_, this->has_precise_reorder());
+    FlattenInterfacePtr temporary_sq8_build_data = nullptr;
+    if (need_sq8_build_data and raw_vector_ == nullptr) {
+        temporary_sq8_build_data =
+            make_temporary_sq8_flatten(this->metric_,
+                                       this->data_type_,
+                                       this->dim_,
+                                       static_cast<int64_t>(this->extra_info_size_),
+                                       this->thread_pool_,
+                                       this->allocator_);
+        temporary_sq8_build_data->Train(vectors, total);
+    }
+    bool defer_persistent_codes = temporary_sq8_build_data != nullptr;
+    if (not defer_persistent_codes) {
+        this->Train(data);
+    }
+    Vector<std::pair<InnerIdType, int64_t>> deferred_code_ids(allocator_);
     for (InnerIdType cur_size = 0; cur_size < valid_indices.size(); ++cur_size) {
         auto i = valid_indices[cur_size];
         auto label = labels[i];
         InnerIdType inner_id = inner_ids.at(cur_size);
         this->label_table_->Insert(inner_id, label);
-        this->basic_flatten_codes_->InsertVector(vectors + dim_ * i, inner_id);
-        if (use_reorder_) {
-            this->high_precise_codes_->InsertVector(vectors + dim_ * i, inner_id);
+        if (not defer_persistent_codes) {
+            this->insert_persistent_codes(vectors + dim_ * i, inner_id);
+        } else {
+            deferred_code_ids.emplace_back(inner_id, i);
         }
-        if (create_new_raw_vector_) {
-            this->raw_vector_->InsertVector(vectors + dim_ * i, inner_id);
+        if (temporary_sq8_build_data != nullptr) {
+            temporary_sq8_build_data->InsertVector(vectors + dim_ * i, inner_id);
         }
         auto level = this->get_random_level() - 1;
         if (level >= 0) {
@@ -725,8 +812,11 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
             }
         }
     }
-    auto build_data = (use_reorder_ and not build_by_base_) ? this->high_precise_codes_
-                                                            : this->basic_flatten_codes_;
+    auto build_data = (has_precise_reorder() and not build_by_base_) ? this->high_precise_codes_
+                                                                     : this->basic_flatten_codes_;
+    if (need_sq8_build_data) {
+        build_data = raw_vector_ != nullptr ? raw_vector_ : temporary_sq8_build_data;
+    }
     {
         odescent_param_->max_degree = bottom_graph_->MaximumDegree();
         ODescent odescent_builder(
@@ -743,6 +833,14 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
         sparse_odescent_builder.SaveGraph(graph);
         this->route_graphs_.emplace_back(graph);
     }
+    if (defer_persistent_codes) {
+        build_data.reset();
+        temporary_sq8_build_data.reset();
+        this->Train(data);
+        for (const auto& [inner_id, local_idx] : deferred_code_ids) {
+            this->insert_persistent_codes(vectors + dim_ * local_idx, inner_id);
+        }
+    }
     return failed_ids;
 }
 
@@ -757,9 +855,39 @@ HGraph::Add(const DatasetPtr& data, AddMode mode) {
     }
     CHECK_ARGUMENT(get_data(data) != nullptr, "base.float_vector is nullptr");
 
+    auto need_sq8_build_data =
+        need_temporary_sq8_build_data(this->basic_flatten_codes_, this->has_precise_reorder());
+    CHECK_ARGUMENT(not(need_sq8_build_data and this->total_count_ != 0 and
+                       raw_vector_ == nullptr and temporary_build_flatten_codes_ == nullptr),
+                   "adding to a non-empty HGraph that needs temporary SQ8 build data requires "
+                   "raw vectors");
+    bool created_temporary_build_data = false;
+    if (need_sq8_build_data and this->total_count_ == 0 and raw_vector_ == nullptr and
+        temporary_build_flatten_codes_ == nullptr) {
+        temporary_build_flatten_codes_ =
+            make_temporary_sq8_flatten(this->metric_,
+                                       this->data_type_,
+                                       this->dim_,
+                                       static_cast<int64_t>(this->extra_info_size_),
+                                       this->thread_pool_,
+                                       this->allocator_);
+        temporary_build_flatten_codes_->Train(get_data(data), data->GetNumElements());
+        created_temporary_build_data = true;
+    }
+    struct temporary_build_flatten_guard {
+        HGraph* hgraph;
+        bool enabled;
+        ~temporary_build_flatten_guard() {
+            if (enabled) {
+                hgraph->temporary_build_flatten_codes_.reset();
+            }
+        }
+    } temporary_build_flatten_guard_instance{this, created_temporary_build_data};
+    bool defer_persistent_codes = created_temporary_build_data;
+
     {
         std::scoped_lock lock(this->add_mutex_);
-        if (this->total_count_ == 0) {
+        if (this->total_count_ == 0 and not defer_persistent_codes) {
             this->Train(data);
         }
     }
@@ -775,7 +903,7 @@ HGraph::Add(const DatasetPtr& data, AddMode mode) {
         if (attrs != nullptr and this->use_attribute_filter_) {
             this->attr_filter_index_->Insert(*attrs, inner_id);
         }
-        this->add_one_point(data, level, inner_id);
+        this->add_one_point(data, level, inner_id, not defer_persistent_codes);
     };
 
     std::vector<std::future<void>> futures;
@@ -783,6 +911,7 @@ HGraph::Add(const DatasetPtr& data, AddMode mode) {
     const auto* labels = data->GetIds();
     const auto* extra_infos = data->GetExtraInfos();
     const auto* attr_sets = data->GetAttributeSets();
+    bool use_parallel_add = this->thread_pool_ != nullptr;
     Vector<std::pair<InnerIdType, LabelType>> inner_ids(allocator_);
     for (int64_t j = 0; j < total; ++j) {
         InnerIdType inner_id;
@@ -811,6 +940,11 @@ HGraph::Add(const DatasetPtr& data, AddMode mode) {
             inner_ids.emplace_back(inner_id, j);
         }
     }
+    if (temporary_build_flatten_codes_ != nullptr) {
+        for (const auto& [inner_id, local_idx] : inner_ids) {
+            temporary_build_flatten_codes_->InsertVector(get_data(data, local_idx), inner_id);
+        }
+    }
     for (auto& [inner_id, local_idx] : inner_ids) {
         int level;
         {
@@ -822,7 +956,7 @@ HGraph::Add(const DatasetPtr& data, AddMode mode) {
         if (attr_sets != nullptr) {
             cur_attr_set = attr_sets + local_idx;
         }
-        if (this->thread_pool_ != nullptr) {
+        if (use_parallel_add) {
             auto future = this->thread_pool_->GeneralEnqueue(
                 add_func, get_data(data, local_idx), level, inner_id, extra_info, cur_attr_set);
             futures.emplace_back(std::move(future));
@@ -830,9 +964,35 @@ HGraph::Add(const DatasetPtr& data, AddMode mode) {
             add_func(get_data(data, local_idx), level, inner_id, extra_info, cur_attr_set);
         }
     }
-    if (this->thread_pool_ != nullptr) {
+    if (use_parallel_add) {
         for (auto& future : futures) {
             future.get();
+        }
+    }
+    if (defer_persistent_codes) {
+        temporary_build_flatten_codes_.reset();
+        {
+            std::scoped_lock lock(this->add_mutex_);
+            this->Train(data);
+        }
+        futures.clear();
+        for (const auto& id_pair : inner_ids) {
+            auto inner_id = id_pair.first;
+            auto local_idx = id_pair.second;
+            if (use_parallel_add) {
+                auto future =
+                    this->thread_pool_->GeneralEnqueue([this, data, inner_id, local_idx]() {
+                        this->insert_persistent_codes(get_data(data, local_idx), inner_id);
+                    });
+                futures.emplace_back(std::move(future));
+            } else {
+                this->insert_persistent_codes(get_data(data, local_idx), inner_id);
+            }
+        }
+        if (use_parallel_add) {
+            for (auto& future : futures) {
+                future.get();
+            }
         }
     }
     return failed_ids;
@@ -966,18 +1126,34 @@ HGraph::KnnSearch(const DatasetPtr& query,
         search_param.is_inner_id_allowed = ft;
         search_param.topk = static_cast<int64_t>(search_param.ef);
         search_param.parallel_search_thread_count = params.parallel_search_thread_count;
+        search_param.enable_rabitq_one_bit_search = params.rabitq_one_bit_search;
+
+        DistanceRecordVector rabitq_lower_bound_candidates(ctx.alloc);
+        auto* rabitq_lower_bound_candidates_ptr =
+            search_param.enable_rabitq_one_bit_search and use_reorder_ and reorder_by_base_
+                ? &rabitq_lower_bound_candidates
+                : nullptr;
 
         search_result = this->search_one_graph(query_data,
                                                this->bottom_graph_,
                                                this->basic_flatten_codes_,
                                                search_param,
                                                iter_filter_ctx,
-                                               &ctx);
-    }
+                                               &ctx,
+                                               rabitq_lower_bound_candidates_ptr);
 
-    if (use_reorder_) {
-        this->reorder(
-            query_data, this->high_precise_codes_, search_result, k, iter_filter_ctx, ctx);
+        if (use_reorder_) {
+            this->reorder(query_data,
+                          this->get_reorder_codes(),
+                          search_result,
+                          k,
+                          iter_filter_ctx,
+                          ctx,
+                          rabitq_lower_bound_candidates_ptr);
+        } else if (params.rabitq_one_bit_search) {
+            this->reorder(
+                query_data, this->basic_flatten_codes_, search_result, k, iter_filter_ctx, ctx);
+        }
     }
 
     while (search_result->Size() > k) {
@@ -1038,7 +1214,8 @@ HGraph::EstimateMemory(uint64_t num_elements) const {
         estimate_memory += block_memory_ceil(bottom_graph_memory, block_size);
     }
 
-    if (use_reorder_ && this->high_precise_codes_->InMemory() && not this->ignore_reorder_) {
+    if (has_precise_reorder() && this->high_precise_codes_->InMemory() &&
+        not this->ignore_reorder_) {
         auto precise_memory = this->high_precise_codes_->code_size_ * element_count;
         estimate_memory += block_memory_ceil(precise_memory, block_size);
     }
@@ -1076,7 +1253,8 @@ HGraph::search_one_graph(const void* query,
                          const FlattenInterfacePtr& flatten,
                          InnerSearchParam& inner_search_param,
                          const VisitedListPtr& vt,
-                         QueryContext* ctx) const {
+                         QueryContext* ctx,
+                         DistanceRecordVector* rabitq_lower_bound_candidates) const {
     bool new_visited_list = vt == nullptr;
     VisitedListPtr visited_list;
     if (new_visited_list) {
@@ -1087,11 +1265,23 @@ HGraph::search_one_graph(const void* query,
     }
     DistHeapPtr result = nullptr;
     if (inner_search_param.parallel_search_thread_count > 1) {
-        result = this->parallel_searcher_->Search(
-            graph, flatten, visited_list, query, inner_search_param);
+        result = this->parallel_searcher_->Search(graph,
+                                                  flatten,
+                                                  visited_list,
+                                                  query,
+                                                  inner_search_param,
+                                                  this->label_table_,
+                                                  ctx,
+                                                  rabitq_lower_bound_candidates);
     } else {
-        result = this->searcher_->Search(
-            graph, flatten, visited_list, query, inner_search_param, this->label_table_, ctx);
+        result = this->searcher_->Search(graph,
+                                         flatten,
+                                         visited_list,
+                                         query,
+                                         inner_search_param,
+                                         this->label_table_,
+                                         ctx,
+                                         rabitq_lower_bound_candidates);
     }
     if (new_visited_list) {
         this->pool_->ReturnOne(visited_list);
@@ -1106,10 +1296,17 @@ HGraph::search_one_graph(const void* query,
                          const FlattenInterfacePtr& flatten,
                          InnerSearchParam& inner_search_param,
                          IteratorFilterContext* iter_ctx,
-                         QueryContext* ctx) const {
+                         QueryContext* ctx,
+                         DistanceRecordVector* rabitq_lower_bound_candidates) const {
     auto visited_list = this->pool_->TakeOne();
-    auto result = this->searcher_->Search(
-        graph, flatten, visited_list, query, inner_search_param, iter_ctx, ctx);
+    auto result = this->searcher_->Search(graph,
+                                          flatten,
+                                          visited_list,
+                                          query,
+                                          inner_search_param,
+                                          iter_ctx,
+                                          ctx,
+                                          rabitq_lower_bound_candidates);
     this->pool_->ReturnOne(visited_list);
     return result;
 }
@@ -1184,6 +1381,7 @@ HGraph::RangeSearch(const DatasetPtr& query,
     search_param.consider_duplicate = true;
     search_param.range_search_limit_size = static_cast<int>(limited_size);
     search_param.parallel_search_thread_count = params.parallel_search_thread_count;
+    search_param.enable_rabitq_one_bit_search = params.rabitq_one_bit_search;
 
     auto search_result = this->search_one_graph(raw_query,
                                                 this->bottom_graph_,
@@ -1194,7 +1392,10 @@ HGraph::RangeSearch(const DatasetPtr& query,
 
     if (use_reorder_) {
         this->reorder(
-            raw_query, this->high_precise_codes_, search_result, limited_size, nullptr, ctx);
+            raw_query, this->get_reorder_codes(), search_result, limited_size, nullptr, ctx);
+    } else if (params.rabitq_one_bit_search) {
+        this->reorder(
+            raw_query, this->basic_flatten_codes_, search_result, limited_size, nullptr, ctx);
     }
 
     if (limited_size > 0) {
@@ -1285,6 +1486,7 @@ JsonType
 HGraph::serialize_basic_info() const {
     JsonType jsonify_basic_info;
     jsonify_basic_info["use_reorder"].SetBool(this->use_reorder_);
+    jsonify_basic_info["reorder_by_base"].SetBool(this->reorder_by_base_);
     jsonify_basic_info["dim"].SetInt(this->dim_);
     jsonify_basic_info["metric"].SetInt(static_cast<int64_t>(this->metric_));
     jsonify_basic_info["entry_point_id"].SetInt(this->entry_point_id_);
@@ -1314,6 +1516,8 @@ void
 HGraph::deserialize_basic_info(const JsonType& jsonify_basic_info) {
     logger::debug("jsonify_basic_info: {}", jsonify_basic_info.Dump());
     FROM_JSON(jsonify_basic_info, use_reorder, Bool);
+    this->reorder_by_base_ = false;
+    FROM_JSON(jsonify_basic_info, reorder_by_base, Bool);
     FROM_JSON(jsonify_basic_info, dim, Int);
     if (jsonify_basic_info.Contains("metric")) {
         this->metric_ = static_cast<MetricType>(jsonify_basic_info["metric"].GetInt());
@@ -1395,7 +1599,7 @@ HGraph::Serialize(StreamWriter& writer) const {
         this->serialize_basic_info_v0_14(writer);
         this->basic_flatten_codes_->Serialize(writer);
         this->bottom_graph_->Serialize(writer);
-        if (this->use_reorder_) {
+        if (this->has_precise_reorder()) {
             this->high_precise_codes_->Serialize(writer);
         }
         for (const auto& route_graph : this->route_graphs_) {
@@ -1413,7 +1617,7 @@ HGraph::Serialize(StreamWriter& writer) const {
     this->serialize_label_info(writer);
     this->basic_flatten_codes_->Serialize(writer);
     this->bottom_graph_->Serialize(writer);
-    if (this->use_reorder_) {
+    if (this->has_precise_reorder()) {
         this->high_precise_codes_->Serialize(writer);
     }
     for (const auto& route_graph : this->route_graphs_) {
@@ -1454,7 +1658,7 @@ HGraph::Deserialize(StreamReader& reader) {
 
         this->basic_flatten_codes_->Deserialize(reader);
         this->bottom_graph_->Deserialize(reader);
-        if (this->use_reorder_) {
+        if (this->has_precise_reorder()) {
             this->high_precise_codes_->Deserialize(reader);
         }
 
@@ -1494,7 +1698,7 @@ HGraph::Deserialize(StreamReader& reader) {
 
         this->basic_flatten_codes_->Deserialize(buffer_reader);
         this->bottom_graph_->Deserialize(buffer_reader);
-        if (this->use_reorder_) {
+        if (this->has_precise_reorder()) {
             this->high_precise_codes_->Deserialize(buffer_reader);
         }
 
@@ -1538,7 +1742,7 @@ HGraph::GetMemoryUsageDetail() const {
     }
     memory_usage["basic_flatten_codes"].SetInt(this->basic_flatten_codes_->CalcSerializeSize());
     memory_usage["bottom_graph"].SetInt(this->bottom_graph_->CalcSerializeSize());
-    if (this->use_reorder_) {
+    if (this->has_precise_reorder()) {
         memory_usage["high_precise_codes"].SetInt(this->high_precise_codes_->CalcSerializeSize());
     }
     uint64_t route_graph_size = 0;
@@ -1556,7 +1760,7 @@ HGraph::GetMemoryUsageDetail() const {
 float
 HGraph::CalcDistanceById(const float* query, int64_t id, bool calculate_precise_distance) const {
     auto flat = this->basic_flatten_codes_;
-    if (use_reorder_ && calculate_precise_distance) {
+    if (has_precise_reorder() && calculate_precise_distance) {
         flat = this->high_precise_codes_;
     }
     if (create_new_raw_vector_ && calculate_precise_distance) {
@@ -1571,7 +1775,7 @@ HGraph::CalDistanceById(const float* query,
                         int64_t count,
                         bool calculate_precise_distance) const {
     auto flat = this->basic_flatten_codes_;
-    if (use_reorder_ && calculate_precise_distance) {
+    if (has_precise_reorder() && calculate_precise_distance) {
         flat = this->high_precise_codes_;
     }
     if (create_new_raw_vector_ && calculate_precise_distance) {
@@ -1601,15 +1805,25 @@ HGraph::GetMinAndMaxId() const {
 
 void
 HGraph::add_one_point(const void* data, int level, InnerIdType inner_id) {
-    {
-        std::shared_lock add_lock(add_mutex_);
-        this->basic_flatten_codes_->InsertVector(data, inner_id);
-        if (use_reorder_) {
-            this->high_precise_codes_->InsertVector(data, inner_id);
-        }
-        if (create_new_raw_vector_) {
-            raw_vector_->InsertVector(data, inner_id);
-        }
+    this->add_one_point(data, level, inner_id, true);
+}
+
+void
+HGraph::insert_persistent_codes(const void* data, InnerIdType inner_id) {
+    std::shared_lock add_lock(add_mutex_);
+    this->basic_flatten_codes_->InsertVector(data, inner_id);
+    if (has_precise_reorder()) {
+        this->high_precise_codes_->InsertVector(data, inner_id);
+    }
+    if (create_new_raw_vector_) {
+        raw_vector_->InsertVector(data, inner_id);
+    }
+}
+
+void
+HGraph::add_one_point(const void* data, int level, InnerIdType inner_id, bool insert_codes) {
+    if (insert_codes) {
+        this->insert_persistent_codes(data, inner_id);
     }
     std::unique_lock add_lock(add_mutex_);
     if (level >= static_cast<int>(this->route_graphs_.size()) || bottom_graph_->TotalCount() == 0) {
@@ -1642,7 +1856,13 @@ HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
     param.is_inner_id_allowed = nullptr;
 
     auto flatten_codes = basic_flatten_codes_;
-    if (use_reorder_ and not build_by_base_) {
+    if (temporary_build_flatten_codes_ != nullptr) {
+        flatten_codes = temporary_build_flatten_codes_;
+    } else if (need_temporary_sq8_build_data(this->basic_flatten_codes_,
+                                             this->has_precise_reorder()) and
+               raw_vector_ != nullptr) {
+        flatten_codes = raw_vector_;
+    } else if (has_precise_reorder() and not build_by_base_) {
         flatten_codes = high_precise_codes_;
     }
 
@@ -1741,7 +1961,7 @@ HGraph::resize(uint64_t new_size) {
         this->label_table_->Resize(new_size_power_2);
         bottom_graph_->Resize(new_size_power_2);
         this->basic_flatten_codes_->Resize(new_size_power_2);
-        if (use_reorder_) {
+        if (has_precise_reorder()) {
             this->high_precise_codes_->Resize(new_size_power_2);
         }
         if (create_new_raw_vector_) {
@@ -1816,7 +2036,7 @@ HGraph::InitFeatures() {
         have_fp32 = true;
         hold_molds |= this->basic_flatten_codes_->HoldMolds();
     }
-    if (use_reorder_ and not ignore_reorder_ and
+    if (has_precise_reorder() and not ignore_reorder_ and
         this->high_precise_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
         have_fp32 = true;
         hold_molds |= this->high_precise_codes_->HoldMolds();
@@ -1868,13 +2088,22 @@ HGraph::reorder(const void* query,
                 DistHeapPtr& candidate_heap,
                 int64_t k,
                 IteratorFilterContext* iter_ctx,
-                QueryContext& ctx) const {
+                QueryContext& ctx,
+                const DistanceRecordVector* rabitq_lower_bound_candidates) const {
     uint64_t size = candidate_heap->Size();
     if (k <= 0) {
         k = static_cast<int64_t>(size);
     }
-    auto reorder_heap =
-        reorder_->Reorder(candidate_heap, static_cast<const float*>(query), k, ctx, iter_ctx);
+    auto reorder_impl = reorder_;
+    if (reorder_impl == nullptr) {
+        reorder_impl = std::make_shared<FlattenReorder>(flatten, allocator_);
+    }
+    auto reorder_heap = reorder_impl->Reorder(candidate_heap,
+                                              static_cast<const float*>(query),
+                                              k,
+                                              ctx,
+                                              iter_ctx,
+                                              rabitq_lower_bound_candidates);
     candidate_heap = reorder_heap;
 }
 
@@ -1911,7 +2140,7 @@ InnerIndexPtr
 HGraph::ExportModel(const IndexCommonParam& param) const {
     auto index = std::make_shared<HGraph>(this->create_param_ptr_, param);
     this->basic_flatten_codes_->ExportModel(index->basic_flatten_codes_);
-    if (use_reorder_) {
+    if (has_precise_reorder()) {
         this->high_precise_codes_->ExportModel(index->high_precise_codes_);
     }
     return index;
@@ -1923,7 +2152,7 @@ HGraph::GetCodeByInnerId(InnerIdType inner_id, uint8_t* data) const {
         return;
     }
 
-    if (use_reorder_) {
+    if (has_precise_reorder()) {
         high_precise_codes_->GetCodesById(inner_id, data);
     } else {
         basic_flatten_codes_->GetCodesById(inner_id, data);
@@ -2214,7 +2443,7 @@ HGraph::Merge(const std::vector<MergeUnit>& merge_units) {
         }
         basic_flatten_codes_->MergeOther(other_index->basic_flatten_codes_, this->total_count_);
         label_table_->MergeOther(other_index->label_table_, merge_unit.id_map_func);
-        if (use_reorder_) {
+        if (has_precise_reorder()) {
             high_precise_codes_->MergeOther(other_index->high_precise_codes_, this->total_count_);
         }
         bottom_graph_->MergeOther(other_index->bottom_graph_, this->total_count_);
@@ -2231,8 +2460,8 @@ HGraph::Merge(const std::vector<MergeUnit>& merge_units) {
         odescent_param_ = std::make_shared<ODescentParameter>();
     }
 
-    auto build_data = (use_reorder_ and not build_by_base_) ? this->high_precise_codes_
-                                                            : this->basic_flatten_codes_;
+    auto build_data = (has_precise_reorder() and not build_by_base_) ? this->high_precise_codes_
+                                                                     : this->basic_flatten_codes_;
     for (InnerIdType inner_id = 0; inner_id < this->total_count_; ++inner_id) {
         Vector<InnerIdType> neighbors(this->allocator_);
         this->bottom_graph_->GetNeighbors(inner_id, neighbors);
@@ -2259,7 +2488,7 @@ HGraph::Merge(const std::vector<MergeUnit>& merge_units) {
 
 void
 HGraph::GetVectorByInnerId(InnerIdType inner_id, float* data) const {
-    auto codes = (use_reorder_) ? high_precise_codes_ : basic_flatten_codes_;
+    auto codes = (has_precise_reorder()) ? high_precise_codes_ : basic_flatten_codes_;
     codes = (create_new_raw_vector_) ? raw_vector_ : codes;
     bool release;
     const auto* buffer = codes->GetCodesById(inner_id, release);
@@ -2289,7 +2518,7 @@ void
 HGraph::SetIO(const std::shared_ptr<Reader> reader) {
     auto reader_param = std::make_shared<ReaderIOParameter>();
     reader_param->reader = reader;
-    if (use_reorder_) {
+    if (has_precise_reorder()) {
         high_precise_codes_->InitIO(reader_param);
     }
     basic_flatten_codes_->InitIO(reader_param);
@@ -2417,6 +2646,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
             search_param.topk, static_cast<int64_t>(static_cast<float>(k) * params.topk_factor));
     }
     search_param.consider_duplicate = true;
+    search_param.enable_rabitq_one_bit_search = params.rabitq_one_bit_search;
     if (params.enable_time_record) {
         search_param.time_cost = std::make_shared<Timer>();
         search_param.time_cost->SetThreshold(params.timeout_ms);
@@ -2437,13 +2667,32 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         search_param.hops_limit = params.hops_limit;
     }
 
-    auto search_result = this->search_one_graph(
-        raw_query, this->bottom_graph_, this->basic_flatten_codes_, search_param, vt, &ctx);
+    DistanceRecordVector rabitq_lower_bound_candidates(ctx.alloc);
+    auto* rabitq_lower_bound_candidates_ptr =
+        search_param.enable_rabitq_one_bit_search and use_reorder_ and reorder_by_base_
+            ? &rabitq_lower_bound_candidates
+            : nullptr;
+
+    auto search_result = this->search_one_graph(raw_query,
+                                                this->bottom_graph_,
+                                                this->basic_flatten_codes_,
+                                                search_param,
+                                                vt,
+                                                &ctx,
+                                                rabitq_lower_bound_candidates_ptr);
 
     this->pool_->ReturnOne(vt);
 
     if (use_reorder_) {
-        this->reorder(raw_query, this->high_precise_codes_, search_result, k, nullptr, ctx);
+        this->reorder(raw_query,
+                      this->get_reorder_codes(),
+                      search_result,
+                      k,
+                      nullptr,
+                      ctx,
+                      rabitq_lower_bound_candidates_ptr);
+    } else if (params.rabitq_one_bit_search) {
+        this->reorder(raw_query, this->basic_flatten_codes_, search_result, k, nullptr, ctx);
     }
 
     while (search_result->Size() > k) {
@@ -2530,9 +2779,9 @@ HGraph::init_resize_bit_and_reorder() {
         std::max(block_size_per_vector,
                  static_cast<uint32_t>(this->bottom_graph_->maximum_degree_ * sizeof(InnerIdType)));
     if (use_reorder_) {
-        block_size_per_vector =
-            std::max(block_size_per_vector, this->high_precise_codes_->code_size_);
-        reorder_ = std::make_shared<FlattenReorder>(this->high_precise_codes_, allocator_);
+        auto reorder_codes = this->get_reorder_codes();
+        block_size_per_vector = std::max(block_size_per_vector, reorder_codes->code_size_);
+        reorder_ = std::make_shared<FlattenReorder>(reorder_codes, allocator_);
     }
     if (this->extra_infos_ != nullptr) {
         block_size_per_vector =
@@ -2642,9 +2891,9 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
 
     // note that only modify vector need to obtain unique lock
     // and the lock has been obtained inside datacell
-    auto codes = (use_reorder_) ? high_precise_codes_ : basic_flatten_codes_;
+    auto codes = (has_precise_reorder()) ? high_precise_codes_ : basic_flatten_codes_;
     bool update_status = basic_flatten_codes_->UpdateVector(new_base_vec, inner_id);
-    if (use_reorder_) {
+    if (has_precise_reorder()) {
         update_status = update_status && high_precise_codes_->UpdateVector(new_base_vec, inner_id);
     }
     return update_status;
@@ -2675,7 +2924,7 @@ HGraph::cal_memory_usage() {
     for (auto& graph : this->route_graphs_) {
         memory += graph->GetMemoryUsage();
     }
-    if (use_reorder_) {
+    if (has_precise_reorder()) {
         memory += this->high_precise_codes_->GetMemoryUsage();
     }
 

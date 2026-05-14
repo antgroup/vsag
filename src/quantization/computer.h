@@ -55,9 +55,27 @@ public:
         quantizer_->ComputeDist(*this, codes, dists);
     }
 
+    inline bool
+    ComputeDistWithThreshold(const uint8_t* codes, float threshold, float* dists) {
+        return quantizer_->ComputeDistWithThreshold(*this, codes, threshold, dists);
+    }
+
+    inline bool
+    ComputeDistWithLowerBound(const uint8_t* codes, float* dists, float* lower_bound) {
+        return quantizer_->ComputeDistWithLowerBound(*this, codes, dists, lower_bound);
+    }
+
     inline void
     ScanBatchDists(uint64_t count, const uint8_t* codes, float* dists) {
         quantizer_->ScanBatchDists(*this, count, codes, dists);
+    }
+
+    inline void
+    ScanBatchDistsWithThreshold(uint64_t count,
+                                const uint8_t* codes,
+                                float threshold,
+                                float* dists) {
+        quantizer_->ScanBatchDistsWithThreshold(*this, count, codes, threshold, dists);
     }
 
     inline void
@@ -108,9 +126,27 @@ public:
         quantizer_->ComputeDist(*this, codes, dists);
     }
 
+    inline bool
+    ComputeDistWithThreshold(const uint8_t* codes, float threshold, float* dists) {
+        return quantizer_->ComputeDistWithThreshold(*this, codes, threshold, dists);
+    }
+
+    inline bool
+    ComputeDistWithLowerBound(const uint8_t* codes, float* dists, float* lower_bound) {
+        return quantizer_->ComputeDistWithLowerBound(*this, codes, dists, lower_bound);
+    }
+
     inline void
     ScanBatchDists(uint64_t count, const uint8_t* codes, float* dists) {
         quantizer_->ScanBatchDists(*this, count, codes, dists);
+    }
+
+    inline void
+    ScanBatchDistsWithThreshold(uint64_t count,
+                                const uint8_t* codes,
+                                float threshold,
+                                float* dists) {
+        quantizer_->ScanBatchDistsWithThreshold(*this, count, codes, threshold, dists);
     }
 
     inline void

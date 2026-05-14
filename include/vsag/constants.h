@@ -158,8 +158,10 @@ extern const char* const SERIALIZE_VERSION;
 
 extern const char* const SQ4_UNIFORM_TRUNC_RATE;
 extern const char* const RABITQ_PCA_DIM;
+extern const char* const RABITQ_VERSION;
 extern const char* const RABITQ_BITS_PER_DIM_QUERY;
 extern const char* const RABITQ_BITS_PER_DIM_BASE;
+extern const char* const RABITQ_ERROR_RATE;
 extern const char* const RABITQ_USE_FHT;
 extern const char* const INDEX_TQ_CHAIN;
 
@@ -168,10 +170,14 @@ extern const char* const HGRAPH_REMOVE_FLAG_BIT;
 
 // hgraph params
 extern const char* const HGRAPH_USE_REORDER;
+extern const char* const HGRAPH_REORDER_SOURCE;
+extern const char* const HGRAPH_REORDER_SOURCE_PRECISE;
+extern const char* const HGRAPH_REORDER_SOURCE_BASE;
 extern const char* const HGRAPH_USE_ELP_OPTIMIZER;
 extern const char* const HGRAPH_USE_REVERSE_EDGES;
 extern const char* const HGRAPH_IGNORE_REORDER;
 extern const char* const HGRAPH_BUILD_BY_BASE_QUANTIZATION;
+extern const char* const HGRAPH_BASE_CODES_TYPE;
 extern const char* const HGRAPH_BASE_QUANTIZATION_TYPE;
 extern const char* const HGRAPH_GRAPH_MAX_DEGREE;
 extern const char* const HGRAPH_BUILD_EF_CONSTRUCTION;
@@ -190,6 +196,7 @@ extern const char* const HGRAPH_PRECISE_IO_TYPE;
 extern const char* const HGRAPH_PRECISE_FILE_PATH;
 extern const char* const HGRAPH_PARAMETER_EF_RUNTIME;
 extern const char* const HGRAPH_PARAMETER_HOPS_LIMIT;
+extern const char* const HGRAPH_PARAMETER_RABITQ_ONE_BIT_SEARCH;
 extern const char* const HGRAPH_EXTRA_INFO_SIZE;
 extern const char* const HGRAPH_SUPPORT_DUPLICATE;
 extern const char* const HGRAPH_SUPPORT_TOMBSTONE;

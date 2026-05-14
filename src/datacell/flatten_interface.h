@@ -15,6 +15,8 @@
 
 #pragma once
 
+#include <algorithm>
+#include <limits>
 #include <shared_mutex>
 #include <string>
 
@@ -51,6 +53,29 @@ public:
           const InnerIdType* idx,
           InnerIdType id_count,
           QueryContext* ctx = nullptr) = 0;
+
+    virtual void
+    QueryWithDistanceFilter(float* result_dists,
+                            const ComputerInterfacePtr& computer,
+                            const InnerIdType* idx,
+                            InnerIdType id_count,
+                            float threshold,
+                            QueryContext* ctx = nullptr) {
+        this->Query(result_dists, computer, idx, id_count, ctx);
+    }
+
+    virtual void
+    QueryWithDistanceLowerBound(float* result_dists,
+                                float* lower_bounds,
+                                const ComputerInterfacePtr& computer,
+                                const InnerIdType* idx,
+                                InnerIdType id_count,
+                                QueryContext* ctx = nullptr) {
+        this->Query(result_dists, computer, idx, id_count, ctx);
+        if (lower_bounds != nullptr) {
+            std::fill(lower_bounds, lower_bounds + id_count, std::numeric_limits<float>::max());
+        }
+    }
 
     virtual ComputerInterfacePtr
     FactoryComputer(const void* query) = 0;

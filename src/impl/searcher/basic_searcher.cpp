@@ -24,7 +24,6 @@
 #include "impl/heap/standard_heap.h"
 #include "impl/reasoning/search_reasoning.h"
 #include "utils/filter_search_skip_strategy.h"
-#include "utils/linear_congruential_generator.h"
 #include "vsag/allocator.h"
 
 namespace vsag {
@@ -75,13 +74,26 @@ BasicSearcher::Search(const GraphInterfacePtr& graph,
                       const void* query,
                       const InnerSearchParam& inner_search_param,
                       const LabelTablePtr& label_table,
-                      QueryContext* ctx) const {
+                      QueryContext* ctx,
+                      DistanceRecordVector* rabitq_lower_bound_candidates) const {
     if (inner_search_param.search_mode == KNN_SEARCH) {
-        return this->search_impl<KNN_SEARCH>(
-            graph, flatten, vl, query, inner_search_param, label_table, ctx);
+        return this->search_impl<KNN_SEARCH>(graph,
+                                             flatten,
+                                             vl,
+                                             query,
+                                             inner_search_param,
+                                             label_table,
+                                             ctx,
+                                             rabitq_lower_bound_candidates);
     }
-    return this->search_impl<RANGE_SEARCH>(
-        graph, flatten, vl, query, inner_search_param, label_table, ctx);
+    return this->search_impl<RANGE_SEARCH>(graph,
+                                           flatten,
+                                           vl,
+                                           query,
+                                           inner_search_param,
+                                           label_table,
+                                           ctx,
+                                           rabitq_lower_bound_candidates);
 }
 
 DistHeapPtr
@@ -91,9 +103,16 @@ BasicSearcher::Search(const GraphInterfacePtr& graph,
                       const void* query,
                       const InnerSearchParam& inner_search_param,
                       IteratorFilterContext* iter_ctx,
-                      QueryContext* ctx) const {
-    return this->search_impl<KNN_SEARCH>(
-        graph, flatten, vl, query, inner_search_param, iter_ctx, ctx);
+                      QueryContext* ctx,
+                      DistanceRecordVector* rabitq_lower_bound_candidates) const {
+    return this->search_impl<KNN_SEARCH>(graph,
+                                         flatten,
+                                         vl,
+                                         query,
+                                         inner_search_param,
+                                         iter_ctx,
+                                         ctx,
+                                         rabitq_lower_bound_candidates);
 }
 
 template <InnerSearchMode mode>
@@ -104,7 +123,8 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                            const void* query,
                            const InnerSearchParam& inner_search_param,
                            IteratorFilterContext* iter_ctx,
-                           QueryContext* ctx) const {
+                           QueryContext* ctx,
+                           DistanceRecordVector* rabitq_lower_bound_candidates) const {
     // set customize query alloctor
     Allocator* alloc = select_query_allocator(ctx, allocator_);
 
@@ -120,7 +140,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     auto is_id_allowed = inner_search_param.is_inner_id_allowed;
     auto ep = inner_search_param.ep;
     auto ef = inner_search_param.ef;
-    ReasoningContext* reasoning = (ctx != nullptr) ? ctx->reasoning_ctx : nullptr;
+    auto* reasoning = ctx == nullptr ? nullptr : ctx->reasoning_ctx;
 
     float dist = 0.0F;
     uint64_t ids_cnt = 1;
@@ -133,12 +153,16 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     Vector<InnerIdType> to_be_visited_id(graph->MaximumDegree(), alloc);
     Vector<InnerIdType> neighbors(graph->MaximumDegree(), alloc);
     Vector<float> line_dists(graph->MaximumDegree(), alloc);
+    Vector<float> lower_bound_dists(graph->MaximumDegree(), alloc);
     auto skip_strategy = create_filter_search_skip_strategy(
         inner_search_param.skip_strategy_type,
         inner_search_param.is_inner_id_allowed != nullptr
             ? inner_search_param.is_inner_id_allowed->ValidRatio()
             : 1.0F,
         inner_search_param.skip_ratio);
+    if (rabitq_lower_bound_candidates != nullptr) {
+        rabitq_lower_bound_candidates->clear();
+    }
 
     if (!iter_ctx->IsFirstUsed()) {
         if (iter_ctx->Empty()) {
@@ -162,7 +186,11 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
             iter_ctx->PopDiscard();
         }
     } else {
-        flatten->Query(&dist, computer, &ep, 1, ctx);
+        if (inner_search_param.enable_rabitq_one_bit_search) {
+            flatten->QueryWithDistanceLowerBound(&dist, nullptr, computer, &ep, 1, ctx);
+        } else {
+            flatten->Query(&dist, computer, &ep, 1, ctx);
+        }
         if (not is_id_allowed || is_id_allowed->CheckValid(ep)) {
             top_candidates->Push(dist, ep);
             lower_bound = top_candidates->Top().first;
@@ -203,19 +231,47 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
 
         dist_cmp += count_no_visited;
 
-        flatten->Query(line_dists.data(), computer, to_be_visited_id.data(), count_no_visited, ctx);
+        bool collect_rabitq_lower_bound = false;
+        if (inner_search_param.enable_rabitq_one_bit_search and top_candidates->Size() == ef and
+            rabitq_lower_bound_candidates != nullptr) {
+            collect_rabitq_lower_bound = true;
+            flatten->QueryWithDistanceLowerBound(line_dists.data(),
+                                                 lower_bound_dists.data(),
+                                                 computer,
+                                                 to_be_visited_id.data(),
+                                                 count_no_visited,
+                                                 ctx);
+        } else if (inner_search_param.enable_rabitq_one_bit_search) {
+            flatten->QueryWithDistanceLowerBound(line_dists.data(),
+                                                 nullptr,
+                                                 computer,
+                                                 to_be_visited_id.data(),
+                                                 count_no_visited,
+                                                 ctx);
+        } else {
+            flatten->Query(
+                line_dists.data(), computer, to_be_visited_id.data(), count_no_visited, ctx);
+        }
 
         for (uint32_t i = 0; i < count_no_visited; i++) {
             dist = line_dists[i];
+            const auto cur_id = to_be_visited_id[i];
+            const bool id_allowed = not is_id_allowed || is_id_allowed->CheckValid(cur_id);
+            if constexpr (mode == KNN_SEARCH) {
+                if (collect_rabitq_lower_bound and lower_bound_dists[i] < lower_bound and
+                    id_allowed and iter_ctx->CheckPoint(cur_id)) {
+                    rabitq_lower_bound_candidates->emplace_back(lower_bound_dists[i], cur_id);
+                }
+            }
             if (top_candidates->Size() < ef || lower_bound > dist ||
                 (mode == RANGE_SEARCH && dist <= inner_search_param.radius)) {
-                if (!iter_ctx->CheckPoint(to_be_visited_id[i])) {
+                if (!iter_ctx->CheckPoint(cur_id)) {
                     continue;
                 }
-                candidate_set->Push(-dist, to_be_visited_id[i]);
+                candidate_set->Push(-dist, cur_id);
                 flatten->Prefetch(candidate_set->Top().second);
-                if (not is_id_allowed || is_id_allowed->CheckValid(to_be_visited_id[i])) {
-                    top_candidates->Push(dist, to_be_visited_id[i]);
+                if (id_allowed) {
+                    top_candidates->Push(dist, cur_id);
                 }
 
                 if constexpr (mode == KNN_SEARCH) {
@@ -256,10 +312,10 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                            const void* query,
                            const InnerSearchParam& inner_search_param,
                            const LabelTablePtr& label_table,
-                           QueryContext* ctx) const {
+                           QueryContext* ctx,
+                           DistanceRecordVector* rabitq_lower_bound_candidates) const {
     // set customize query alloctor
     Allocator* alloc = select_query_allocator(ctx, allocator_);
-    ReasoningContext* reasoning = (ctx != nullptr) ? ctx->reasoning_ctx : nullptr;
 
     auto top_candidates = std::make_shared<StandardHeap<true, false>>(alloc, -1);
     auto candidate_set = std::make_shared<StandardHeap<true, false>>(alloc, -1);
@@ -284,12 +340,16 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     Vector<InnerIdType> to_be_visited_id(graph->MaximumDegree(), alloc);
     Vector<InnerIdType> neighbors(graph->MaximumDegree(), alloc);
     Vector<float> line_dists(graph->MaximumDegree(), alloc);
+    Vector<float> lower_bound_dists(graph->MaximumDegree(), alloc);
     auto skip_strategy = create_filter_search_skip_strategy(
         inner_search_param.skip_strategy_type,
         inner_search_param.is_inner_id_allowed != nullptr
             ? inner_search_param.is_inner_id_allowed->ValidRatio()
             : 1.0F,
         inner_search_param.skip_ratio);
+    if (rabitq_lower_bound_candidates != nullptr) {
+        rabitq_lower_bound_candidates->clear();
+    }
 
     Filter* attr_ft = nullptr;
     if (not inner_search_param.executors.empty() and inner_search_param.executors[0] != nullptr) {
@@ -301,17 +361,17 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
         return (is_id_allowed == nullptr or is_id_allowed->CheckValid(id)) and
                (attr_ft == nullptr or attr_ft->CheckValid(id));
     };
+    auto* reasoning = ctx == nullptr ? nullptr : ctx->reasoning_ctx;
 
-    flatten->Query(&dist, computer, &ep, 1, ctx);
-    ++dist_cmp;
-    if (reasoning != nullptr) {
-        reasoning->RecordVisit(ep, dist, 0);
+    if (inner_search_param.enable_rabitq_one_bit_search) {
+        flatten->QueryWithDistanceLowerBound(&dist, nullptr, computer, &ep, 1, ctx);
+    } else {
+        flatten->Query(&dist, computer, &ep, 1, ctx);
     }
+    ++dist_cmp;
     if (check_func(ep)) {
         top_candidates->Push(dist, ep);
         lower_bound = top_candidates->Top().first;
-    } else if (reasoning != nullptr) {
-        reasoning->RecordFilterReject(ep);
     }
     if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
         if (dist > inner_search_param.radius and not top_candidates->Empty()) {
@@ -368,25 +428,52 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                                  to_be_visited_id,
                                  neighbors);
 
-        flatten->Query(line_dists.data(), computer, to_be_visited_id.data(), count_no_visited, ctx);
+        bool collect_rabitq_lower_bound = false;
+        if (inner_search_param.enable_rabitq_one_bit_search and top_candidates->Size() == ef and
+            rabitq_lower_bound_candidates != nullptr) {
+            collect_rabitq_lower_bound = true;
+            flatten->QueryWithDistanceLowerBound(line_dists.data(),
+                                                 lower_bound_dists.data(),
+                                                 computer,
+                                                 to_be_visited_id.data(),
+                                                 count_no_visited,
+                                                 ctx);
+        } else if (inner_search_param.enable_rabitq_one_bit_search) {
+            flatten->QueryWithDistanceLowerBound(line_dists.data(),
+                                                 nullptr,
+                                                 computer,
+                                                 to_be_visited_id.data(),
+                                                 count_no_visited,
+                                                 ctx);
+        } else {
+            flatten->Query(
+                line_dists.data(), computer, to_be_visited_id.data(), count_no_visited, ctx);
+        }
         dist_cmp += count_no_visited;
 
         for (uint32_t i = 0; i < count_no_visited; i++) {
             dist = line_dists[i];
+            const auto cur_id = to_be_visited_id[i];
             if (reasoning != nullptr) {
-                reasoning->RecordVisit(to_be_visited_id[i], dist, hops);
+                reasoning->RecordVisit(cur_id, dist, hops);
+            }
+            if constexpr (mode == KNN_SEARCH) {
+                if (collect_rabitq_lower_bound and lower_bound_dists[i] < lower_bound and
+                    check_func(cur_id)) {
+                    rabitq_lower_bound_candidates->emplace_back(lower_bound_dists[i], cur_id);
+                }
             }
             if (top_candidates->Size() < ef || lower_bound > dist ||
                 (mode == RANGE_SEARCH && dist <= inner_search_param.radius)) {
-                candidate_set->Push(-dist, to_be_visited_id[i]);
+                candidate_set->Push(-dist, cur_id);
                 //                flatten->Prefetch(candidate_set->Top().second);
-                if (check_func(to_be_visited_id[i])) {
-                    top_candidates->Push(dist, to_be_visited_id[i]);
+                if (check_func(cur_id)) {
+                    top_candidates->Push(dist, cur_id);
                 } else if (reasoning != nullptr) {
-                    reasoning->RecordFilterReject(to_be_visited_id[i]);
+                    reasoning->RecordFilterReject(cur_id);
                 }
                 if (inner_search_param.consider_duplicate) {
-                    const auto duplicate_ids = graph->GetDuplicateIds(to_be_visited_id[i]);
+                    const auto duplicate_ids = graph->GetDuplicateIds(cur_id);
                     for (const auto& item : duplicate_ids) {
                         if (check_func(item)) {
                             top_candidates->Push(dist, item);

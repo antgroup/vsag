@@ -532,6 +532,66 @@ RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, floa
     return result;
 }
 
+void
+RaBitQFloatBinaryIPBatch4(const float* vector,
+                          const uint8_t* bits1,
+                          const uint8_t* bits2,
+                          const uint8_t* bits3,
+                          const uint8_t* bits4,
+                          uint64_t dim,
+                          float inv_sqrt_d,
+                          float* results) {
+    results[0] = 0.0F;
+    results[1] = 0.0F;
+    results[2] = 0.0F;
+    results[3] = 0.0F;
+    if (dim == 0) {
+        return;
+    }
+
+    const float pos = inv_sqrt_d > 1e-3F ? inv_sqrt_d : 1.0F;
+    const float neg = inv_sqrt_d > 1e-3F ? -inv_sqrt_d : 0.0F;
+    for (uint64_t d = 0; d < dim; ++d) {
+        const uint64_t byte_id = d >> 3;
+        const uint8_t bit_mask = static_cast<uint8_t>(1U << (d & 7));
+        const float value = vector[d];
+        results[0] += ((bits1[byte_id] & bit_mask) != 0U ? pos : neg) * value;
+        results[1] += ((bits2[byte_id] & bit_mask) != 0U ? pos : neg) * value;
+        results[2] += ((bits3[byte_id] & bit_mask) != 0U ? pos : neg) * value;
+        results[3] += ((bits4[byte_id] & bit_mask) != 0U ? pos : neg) * value;
+    }
+}
+
+float
+RaBitQFloatSplitCodeIP(const float* vector,
+                       const uint8_t* one_bit_code,
+                       const uint8_t* supplement_code,
+                       uint64_t dim,
+                       uint32_t supplement_bits) {
+    if (dim == 0) {
+        return 0.0f;
+    }
+
+    const uint64_t plane_bytes = (dim + 7) / 8;
+    const uint32_t one_bit_weight = 1U << supplement_bits;
+    float result = 0.0f;
+
+    for (uint64_t d = 0; d < dim; ++d) {
+        const uint64_t byte_idx = d >> 3;
+        const uint8_t bit_mask = static_cast<uint8_t>(1U << (d & 7));
+        uint32_t code = (one_bit_code[byte_idx] & bit_mask) != 0 ? one_bit_weight : 0U;
+        for (uint32_t bit = 0; bit < supplement_bits; ++bit) {
+            const auto* plane = supplement_code + static_cast<uint64_t>(bit) * plane_bytes;
+            if ((plane[byte_idx] & bit_mask) != 0) {
+                code += 1U << bit;
+            }
+        }
+        result += vector[d] * static_cast<float>(code);
+    }
+
+    return result;
+}
+
 float
 RaBitQFloatSQIP(const float* vector, const uint8_t* codes, uint64_t dim) {
     if (dim == 0) {

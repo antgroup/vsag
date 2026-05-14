@@ -15,12 +15,18 @@
 
 #pragma once
 
+#include <string>
+
 #include "quantization/quantizer_parameter.h"
 #include "utils/pointer_define.h"
 namespace vsag {
 DEFINE_POINTER2(RaBitQuantizerParam, RaBitQuantizerParameter);
 class RaBitQuantizerParameter : public QuantizerParameter {
 public:
+    static constexpr const char* DEFAULT_RABITQ_VERSION = "standard";
+    static constexpr const char* RABITQ_VERSION_SPLIT_1BIT_7BIT = "split_1bit_7bit";
+    static constexpr float DEFAULT_RABITQ_ERROR_RATE = 1.9F;
+
     RaBitQuantizerParameter();
 
     ~RaBitQuantizerParameter() override = default;
@@ -38,6 +44,8 @@ public:
     uint64_t pca_dim_{0};
     uint64_t num_bits_per_dim_query_{32};
     uint64_t num_bits_per_dim_base_{1};
+    std::string rabitq_version_{DEFAULT_RABITQ_VERSION};
+    float rabitq_error_rate_{DEFAULT_RABITQ_ERROR_RATE};
     bool use_fht_{false};
 };
 }  // namespace vsag

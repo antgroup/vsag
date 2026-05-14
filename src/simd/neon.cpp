@@ -2083,6 +2083,29 @@ RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, floa
 }
 
 void
+RaBitQFloatBinaryIPBatch4(const float* vector,
+                          const uint8_t* bits1,
+                          const uint8_t* bits2,
+                          const uint8_t* bits3,
+                          const uint8_t* bits4,
+                          uint64_t dim,
+                          float inv_sqrt_d,
+                          float* results) {
+    generic::RaBitQFloatBinaryIPBatch4(
+        vector, bits1, bits2, bits3, bits4, dim, inv_sqrt_d, results);
+}
+
+float
+RaBitQFloatSplitCodeIP(const float* vector,
+                       const uint8_t* one_bit_code,
+                       const uint8_t* supplement_code,
+                       uint64_t dim,
+                       uint32_t supplement_bits) {
+    return generic::RaBitQFloatSplitCodeIP(
+        vector, one_bit_code, supplement_code, dim, supplement_bits);
+}
+
+void
 DivScalar(const float* from, float* to, uint64_t dim, float scalar) {
 #if defined(ENABLE_NEON)
     if (dim == 0)

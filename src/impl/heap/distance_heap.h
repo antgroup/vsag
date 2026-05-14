@@ -89,4 +89,6 @@ protected:
     Allocator* allocator_{nullptr};
     int64_t max_size_{-1};
 };
+
+using DistanceRecordVector = Vector<DistanceHeap::DistanceRecord>;
 }  // namespace vsag

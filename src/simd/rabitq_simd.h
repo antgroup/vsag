@@ -30,6 +30,23 @@ namespace avx512 {
 float
 RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, float inv_sqrt_d);
 
+void
+RaBitQFloatBinaryIPBatch4(const float* vector,
+                          const uint8_t* bits1,
+                          const uint8_t* bits2,
+                          const uint8_t* bits3,
+                          const uint8_t* bits4,
+                          uint64_t dim,
+                          float inv_sqrt_d,
+                          float* results);
+
+float
+RaBitQFloatSplitCodeIP(const float* vector,
+                       const uint8_t* one_bit_code,
+                       const uint8_t* supplement_code,
+                       uint64_t dim,
+                       uint32_t supplement_bits);
+
 uint32_t
 RaBitQSQ4UBinaryIP(const uint8_t* codes, const uint8_t* bits, uint64_t dim);
 
@@ -54,6 +71,23 @@ float
 RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, float inv_sqrt_d);
 
 void
+RaBitQFloatBinaryIPBatch4(const float* vector,
+                          const uint8_t* bits1,
+                          const uint8_t* bits2,
+                          const uint8_t* bits3,
+                          const uint8_t* bits4,
+                          uint64_t dim,
+                          float inv_sqrt_d,
+                          float* results);
+
+float
+RaBitQFloatSplitCodeIP(const float* vector,
+                       const uint8_t* one_bit_code,
+                       const uint8_t* supplement_code,
+                       uint64_t dim,
+                       uint32_t supplement_bits);
+
+void
 FHTRotate(float* data, uint64_t dim_);
 
 void
@@ -69,6 +103,23 @@ KacsWalk(float* data, uint64_t len);
 namespace avx {
 float
 RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, float inv_sqrt_d);
+
+void
+RaBitQFloatBinaryIPBatch4(const float* vector,
+                          const uint8_t* bits1,
+                          const uint8_t* bits2,
+                          const uint8_t* bits3,
+                          const uint8_t* bits4,
+                          uint64_t dim,
+                          float inv_sqrt_d,
+                          float* results);
+
+float
+RaBitQFloatSplitCodeIP(const float* vector,
+                       const uint8_t* one_bit_code,
+                       const uint8_t* supplement_code,
+                       uint64_t dim,
+                       uint32_t supplement_bits);
 
 void
 VecRescale(float* data, uint64_t dim, float val);
@@ -91,6 +142,23 @@ float
 RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, float inv_sqrt_d);
 
 void
+RaBitQFloatBinaryIPBatch4(const float* vector,
+                          const uint8_t* bits1,
+                          const uint8_t* bits2,
+                          const uint8_t* bits3,
+                          const uint8_t* bits4,
+                          uint64_t dim,
+                          float inv_sqrt_d,
+                          float* results);
+
+float
+RaBitQFloatSplitCodeIP(const float* vector,
+                       const uint8_t* one_bit_code,
+                       const uint8_t* supplement_code,
+                       uint64_t dim,
+                       uint32_t supplement_bits);
+
+void
 FHTRotate(float* data, uint64_t dim_);
 
 void
@@ -106,6 +174,23 @@ KacsWalk(float* data, uint64_t len);
 namespace generic {
 float
 RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, float inv_sqrt_d);
+
+void
+RaBitQFloatBinaryIPBatch4(const float* vector,
+                          const uint8_t* bits1,
+                          const uint8_t* bits2,
+                          const uint8_t* bits3,
+                          const uint8_t* bits4,
+                          uint64_t dim,
+                          float inv_sqrt_d,
+                          float* results);
+
+float
+RaBitQFloatSplitCodeIP(const float* vector,
+                       const uint8_t* one_bit_code,
+                       const uint8_t* supplement_code,
+                       uint64_t dim,
+                       uint32_t supplement_bits);
 
 float
 RaBitQFloatSQIP(const float* vector, const uint8_t* codes, uint64_t dim);
@@ -133,6 +218,23 @@ namespace neon {
 float
 RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, float inv_sqrt_d);
 
+void
+RaBitQFloatBinaryIPBatch4(const float* vector,
+                          const uint8_t* bits1,
+                          const uint8_t* bits2,
+                          const uint8_t* bits3,
+                          const uint8_t* bits4,
+                          uint64_t dim,
+                          float inv_sqrt_d,
+                          float* results);
+
+float
+RaBitQFloatSplitCodeIP(const float* vector,
+                       const uint8_t* one_bit_code,
+                       const uint8_t* supplement_code,
+                       uint64_t dim,
+                       uint32_t supplement_bits);
+
 uint32_t
 RaBitQSQ4UBinaryIP(const uint8_t* codes, const uint8_t* bits, uint64_t dim);
 
@@ -155,6 +257,23 @@ RotateOp(float* data, int idx, int dim_, int step);
 namespace sve {
 float
 RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, float inv_sqrt_d);
+
+void
+RaBitQFloatBinaryIPBatch4(const float* vector,
+                          const uint8_t* bits1,
+                          const uint8_t* bits2,
+                          const uint8_t* bits3,
+                          const uint8_t* bits4,
+                          uint64_t dim,
+                          float inv_sqrt_d,
+                          float* results);
+
+float
+RaBitQFloatSplitCodeIP(const float* vector,
+                       const uint8_t* one_bit_code,
+                       const uint8_t* supplement_code,
+                       uint64_t dim,
+                       uint32_t supplement_bits);
 
 uint32_t
 RaBitQSQ4UBinaryIP(const uint8_t* codes, const uint8_t* bits, uint64_t dim);
@@ -180,6 +299,21 @@ using RaBitQFloatBinaryType = float (*)(const float* vector,
                                         uint64_t dim,
                                         float inv_sqrt_d);
 
+using RaBitQFloatBinaryBatch4Type = void (*)(const float* vector,
+                                             const uint8_t* bits1,
+                                             const uint8_t* bits2,
+                                             const uint8_t* bits3,
+                                             const uint8_t* bits4,
+                                             uint64_t dim,
+                                             float inv_sqrt_d,
+                                             float* results);
+
+using RaBitQFloatSplitCodeType = float (*)(const float* vector,
+                                           const uint8_t* one_bit_code,
+                                           const uint8_t* supplement_code,
+                                           uint64_t dim,
+                                           uint32_t supplement_bits);
+
 using RaBitQSQ4UBinaryType = uint32_t (*)(const uint8_t* codes, const uint8_t* bits, uint64_t dim);
 
 using RaBitQFloatSQType = float (*)(const float* vector, const uint8_t* codes, uint64_t dim);
@@ -194,6 +328,8 @@ using FlipSignType = void (*)(const uint8_t* flip, float* data, uint64_t dim);
 
 using RotateOpType = void (*)(float* data, int idx, int dim_, int step);
 extern RaBitQFloatBinaryType RaBitQFloatBinaryIP;
+extern RaBitQFloatBinaryBatch4Type RaBitQFloatBinaryIPBatch4;
+extern RaBitQFloatSplitCodeType RaBitQFloatSplitCodeIP;
 extern RaBitQFloatSQType RaBitQFloatSQIP;
 extern RaBitQSQ4UBinaryType RaBitQSQ4UBinaryIP;
 extern FHTRotateType FHTRotate;
