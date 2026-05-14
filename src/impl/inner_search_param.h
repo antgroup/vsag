@@ -60,6 +60,7 @@ public:
     // deal with duplicate ids
     mutable int64_t duplicate_id{-1};
     bool find_duplicate{false};
+    float duplicate_distance_threshold{0.0F};
 
     // use in search process with duplicate ids
     bool consider_duplicate{false};
