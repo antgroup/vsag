@@ -74,6 +74,7 @@ and `docs/hgraph.md` in the repository.
 | `base_pq_dim` | int | `1` | Number of PQ subspaces. When using `pq` / `pqfs`, set this explicitly instead of relying on the default. |
 | `build_thread_count` | int | `100` | Threads used to parallelise build |
 | `support_duplicate` | bool | `false` | Enable duplicate-ID detection on insert |
+| `duplicate_distance_threshold` | float | `0.0` | Duplicate-detection distance threshold. When greater than `0`, deduplicate by the nearest candidate distance; when `0`, fall back to the current code `memcmp` check |
 | `support_remove` | bool | `false` | Enable `Remove()` on the built index |
 | `store_raw_vector` | bool | `false` | Keep the raw vector in addition to the quantized copy (useful for `cosine`) |
 | `use_elp_optimizer` | bool | `false` | Auto-tune search parameters after build |
