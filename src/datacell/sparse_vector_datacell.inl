@@ -88,9 +88,7 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::InsertVector(const void* vector, InnerI
     }
     auto sparse_vector = (const SparseVector*)vector;
     uint64_t code_size = (sparse_vector->len_ * 2 + 1) * sizeof(uint32_t);
-    if (code_size > max_code_size_) {
-        throw VsagException(ErrorType::INVALID_ARGUMENT, fmt::format("code size ({}) of sparse vector more than max code size ({})", code_size, max_code_size_));
-    }
+    max_code_size_ = std::max(max_code_size_, code_size);
     auto* codes = reinterpret_cast<uint8_t*>(allocator_->Allocate(code_size));
     quantizer_->EncodeOne((const float*)vector, codes);
     DocLocation location;
@@ -133,7 +131,16 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::GetSparseVectorByInnerId(
     data->len_ = *reinterpret_cast<const uint32_t*>(codes);
     const auto* entries = reinterpret_cast<const BufferEntry*>(codes + sizeof(uint32_t));
     data->ids_ = static_cast<uint32_t*>(allocator->Allocate(sizeof(uint32_t) * data->len_));
-    data->vals_ = static_cast<float*>(allocator->Allocate(sizeof(float) * data->len_));
+    try {
+        data->vals_ = static_cast<float*>(allocator->Allocate(sizeof(float) * data->len_));
+    } catch (...) {
+        allocator->Deallocate(data->ids_);
+        data->ids_ = nullptr;
+        if (need_release) {
+            this->Release(codes);
+        }
+        throw;
+    }
     for (uint32_t i = 0; i < data->len_; ++i) {
         data->ids_[i] = entries[i].id;
         data->vals_[i] = entries[i].val;
@@ -193,7 +200,7 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::SparseVectorDataCell(
     this->io_ = std::make_shared<IOTmpl>(io_param, common_param);
     this->offset_io_ =
         std::make_shared<MemoryBlockIO>(Options::Instance().block_size_limit(), allocator_);
-    this->max_code_size_ = (this->quantizer_->GetDim() * 2 + 1) * sizeof(uint32_t);
+    this->max_code_size_ = sizeof(uint32_t);
     this->max_capacity_ = 0;
     this->code_size_ = this->quantizer_->GetCodeSize();
 }
@@ -209,4 +216,4 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::GetMemoryUsage() const {
     memory += sizeof(QuantTmpl);
     return memory;
 }
-} // namespace vsag
+}  // namespace vsag

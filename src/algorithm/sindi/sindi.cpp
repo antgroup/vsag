@@ -39,8 +39,8 @@ constexpr int64_t SINDI_RERANK_FLAT_FORMAT_DATACELL = 2;
 
 float
 cal_distance_by_id_unsafe(const FlattenInterfacePtr& flat,
-                          Vector<uint32_t>& sorted_ids,
-                          Vector<float>& sorted_vals,
+                          const Vector<uint32_t>& sorted_ids,
+                          const Vector<float>& sorted_vals,
                           uint32_t inner_id) {
     bool need_release{false};
     const auto* codes = flat->GetCodesById(inner_id, need_release);
@@ -314,7 +314,7 @@ SINDI::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) {
     // 2. we do not actually update the vector
     uint32_t inner_id;
     {
-        std::scoped_lock rlock(this->global_mutex_);
+        std::shared_lock rlock(this->global_mutex_);
         inner_id = this->label_table_->GetIdByLabel(id);
     }
     const auto& new_sv = *new_base->GetSparseVectors();
