@@ -656,6 +656,63 @@ l2_ube(float norm_base_raw, float norm_query_raw, float est_ip_norm) {
     return ret;
 }
 
+static uint64_t
+count_plane_ones(const uint8_t* plane, uint64_t dim) {
+    const uint64_t full_bytes = dim / 8;
+    const uint64_t tail_bits = dim % 8;
+    uint64_t count = 0;
+
+    for (uint64_t index = 0; index < full_bytes; ++index) {
+        count += __builtin_popcount(static_cast<unsigned>(plane[index]));
+    }
+
+    if (tail_bits != 0) {
+        const uint8_t mask = static_cast<uint8_t>((1U << tail_bits) - 1U);
+        count += __builtin_popcount(static_cast<unsigned>(plane[full_bytes] & mask));
+    }
+
+    return count;
+}
+
+static uint64_t
+count_plane_overlap(const uint8_t* lhs, const uint8_t* rhs, uint64_t dim) {
+    const uint64_t full_bytes = dim / 8;
+    const uint64_t tail_bits = dim % 8;
+    uint64_t count = 0;
+
+    for (uint64_t index = 0; index < full_bytes; ++index) {
+        count += __builtin_popcount(static_cast<unsigned>(lhs[index] & rhs[index]));
+    }
+
+    if (tail_bits != 0) {
+        const uint8_t mask = static_cast<uint8_t>((1U << tail_bits) - 1U);
+        count +=
+            __builtin_popcount(static_cast<unsigned>((lhs[full_bytes] & rhs[full_bytes]) & mask));
+    }
+
+    return count;
+}
+
+static float
+compute_binary_plane_ip(const uint8_t* lhs, const uint8_t* rhs, uint64_t dim) {
+    const uint64_t full_bytes = dim / 8;
+    const uint64_t tail_bits = dim % 8;
+    uint64_t mismatch = 0;
+
+    for (uint64_t index = 0; index < full_bytes; ++index) {
+        mismatch += __builtin_popcount(static_cast<unsigned>(lhs[index] ^ rhs[index]));
+    }
+
+    if (tail_bits != 0) {
+        const uint8_t mask = static_cast<uint8_t>((1U << tail_bits) - 1U);
+        mismatch +=
+            __builtin_popcount(static_cast<unsigned>((lhs[full_bytes] ^ rhs[full_bytes]) & mask));
+    }
+
+    return static_cast<float>(static_cast<double>(dim) - 2.0 * static_cast<double>(mismatch)) /
+           static_cast<float>(dim);
+}
+
 float
 recover_dist_between_sq4u_and_fp32(uint32_t ip_bq_1_4,
                                    float base_sum,
@@ -716,7 +773,7 @@ RaBitQuantizer<metric>::SupplementMetaOffset() const {
 template <MetricType metric>
 bool
 RaBitQuantizer<metric>::SupportSplitCodeStorage() const {
-    return rabitq_version_ == RaBitQuantizerParameter::RABITQ_VERSION_SPLIT_1BIT_7BIT &&
+    return rabitq_version_ == RaBitQuantizerParameter::RABITQ_VERSION_SPLIT_1BIT_XBIT &&
            num_bits_per_dim_query_ == 32 && num_bits_per_dim_base_ >= 1;
 }
 
@@ -1206,8 +1263,96 @@ RaBitQuantizer<metric>::ComputeQueryBaseImpl(const uint8_t* query_codes,
 template <MetricType metric>
 float
 RaBitQuantizer<metric>::ComputeImpl(const uint8_t* codes1, const uint8_t* codes2) const {
-    throw VsagException(ErrorType::INTERNAL_ERROR,
-                        "building the index is not supported using RabbitQ alone");
+    float ip_bq_estimate = 0.0F;
+    if (num_bits_per_dim_base_ == 1) {
+        ip_bq_estimate =
+            compute_binary_plane_ip(codes1 + offset_code_, codes2 + offset_code_, this->dim_);
+    } else {
+        const auto plane_bytes = PlaneBytes();
+        const auto* planes1 = codes1 + offset_code_;
+        const auto* planes2 = codes2 + offset_code_;
+
+        double sum_u1 = 0.0;
+        double sum_u2 = 0.0;
+        double dot_u1_u2 = 0.0;
+        for (uint64_t dim_index = 0; dim_index < this->dim_; ++dim_index) {
+            uint32_t scalar_code1 = 0;
+            uint32_t scalar_code2 = 0;
+            for (uint32_t bit_index = 0; bit_index < num_bits_per_dim_base_; ++bit_index) {
+                const auto* plane1 = GetStoredPlane(planes1, bit_index, plane_bytes);
+                const auto* plane2 = GetStoredPlane(planes2, bit_index, plane_bytes);
+                const bool bit1 = ((plane1[dim_index / 8] >> (dim_index % 8)) & 1U) != 0;
+                const bool bit2 = ((plane2[dim_index / 8] >> (dim_index % 8)) & 1U) != 0;
+                scalar_code1 |= static_cast<uint32_t>(bit1) << bit_index;
+                scalar_code2 |= static_cast<uint32_t>(bit2) << bit_index;
+            }
+            sum_u1 += static_cast<double>(scalar_code1);
+            sum_u2 += static_cast<double>(scalar_code2);
+            dot_u1_u2 += static_cast<double>(scalar_code1) * static_cast<double>(scalar_code2);
+        }
+
+        const auto norm_code1 = *reinterpret_cast<const norm_type*>(codes1 + offset_norm_code_);
+        const auto norm_code2 = *reinterpret_cast<const norm_type*>(codes2 + offset_norm_code_);
+        if (norm_code1 > 0.0F && norm_code2 > 0.0F) {
+            const double center = 0.5 * static_cast<double>((1U << num_bits_per_dim_base_) - 1U);
+            const double centered_dot = dot_u1_u2 - center * sum_u1 - center * sum_u2 +
+                                        center * center * static_cast<double>(this->dim_);
+            ip_bq_estimate = static_cast<float>(
+                centered_dot / (static_cast<double>(norm_code1) * static_cast<double>(norm_code2)));
+        }
+    }
+
+    const auto norm1 = *reinterpret_cast<const norm_type*>(codes1 + offset_norm_);
+    const auto norm2 = *reinterpret_cast<const norm_type*>(codes2 + offset_norm_);
+
+    norm_type raw_norm1 = 0;
+    norm_type raw_norm2 = 0;
+    if constexpr (metric == MetricType::METRIC_TYPE_IP or
+                  metric == MetricType::METRIC_TYPE_COSINE) {
+        raw_norm1 = *reinterpret_cast<const norm_type*>(codes1 + offset_raw_norm_);
+        raw_norm2 = *reinterpret_cast<const norm_type*>(codes2 + offset_raw_norm_);
+    }
+
+    auto error1 = *reinterpret_cast<const error_type*>(codes1 + offset_error_);
+    auto error2 = *reinterpret_cast<const error_type*>(codes2 + offset_error_);
+    if (std::abs(error1) < 1e-5F) {
+        error1 = (error1 >= 0.0F) ? 1.0F : -1.0F;
+    }
+    if (std::abs(error2) < 1e-5F) {
+        error2 = (error2 >= 0.0F) ? 1.0F : -1.0F;
+    }
+
+    float ip_est = ip_bq_estimate / (error1 * error2);
+    ip_est = std::clamp(ip_est, -1.0F, 1.0F);
+    float result = l2_ube(norm1, norm2, ip_est);
+
+    if (pca_dim_ != this->original_dim_ and use_mrq_) {
+        const auto mrq_norm_sqr1 = *reinterpret_cast<const norm_type*>(codes1 + offset_mrq_norm_);
+        const auto mrq_norm_sqr2 = *reinterpret_cast<const norm_type*>(codes2 + offset_mrq_norm_);
+        result += mrq_norm_sqr1 + mrq_norm_sqr2;
+    }
+    if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
+        if (is_approx_zero(raw_norm1) or is_approx_zero(raw_norm2)) {
+            result = 1;
+        } else {
+            float inner_product = (raw_norm1 * raw_norm1 + raw_norm2 * raw_norm2 - result) * 0.5F;
+            inner_product =
+                std::clamp(inner_product, -raw_norm1 * raw_norm2, raw_norm1 * raw_norm2);
+            result = 1.0F - inner_product / (raw_norm1 * raw_norm2);
+        }
+    }
+    if constexpr (metric == MetricType::METRIC_TYPE_IP) {
+        if (is_approx_zero(raw_norm1) or is_approx_zero(raw_norm2)) {
+            result = 1;
+        } else {
+            float inner_product = (raw_norm1 * raw_norm1 + raw_norm2 * raw_norm2 - result) * 0.5F;
+            inner_product =
+                std::clamp(inner_product, -raw_norm1 * raw_norm2, raw_norm1 * raw_norm2);
+            result = 1.0F - inner_product;
+        }
+    }
+
+    return result;
 }
 
 template <MetricType metric>

@@ -196,6 +196,9 @@ public:
                              const uint8_t* codes,
                              float threshold,
                              float* dists) const {
+        // Return true only when a specialized threshold-aware path can prune without
+        // computing the full distance. The fallback computes the exact distance and
+        // therefore reports false.
         if constexpr (has_ComputeDistWithThresholdImpl<QuantT>::value) {
             return cast().ComputeDistWithThresholdImpl(computer, codes, threshold, dists);
         } else {

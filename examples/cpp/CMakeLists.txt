@@ -113,6 +113,9 @@ target_link_libraries(319_feature_get_memory_usage vsag)
 add_executable(320_feature_extra_info 320_feature_extra_info.cpp)
 target_link_libraries(320_feature_extra_info vsag)
 
+add_executable(322_index_rabitq_split_hgraph 322_index_rabitq_split_hgraph.cpp)
+target_link_libraries(322_index_rabitq_split_hgraph vsag)
+
 add_executable (401_persistent_kv 401_persistent_kv.cpp)
 target_link_libraries (401_persistent_kv vsag)
 

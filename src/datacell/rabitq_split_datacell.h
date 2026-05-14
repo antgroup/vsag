@@ -45,7 +45,7 @@ public:
             std::make_shared<RaBitQuantizer<metric>>(quantization_param, common_param);
         if (not this->quantizer_->SupportSplitCodeStorage()) {
             throw VsagException(ErrorType::INVALID_ARGUMENT,
-                                "rabitq split data cell requires rabitq_version=split_1bit_7bit, "
+                                "rabitq split data cell requires rabitq_version=split_1bit_xbit, "
                                 "rabitq_bits_per_dim_query=32, and "
                                 "rabitq_bits_per_dim_base in [1, 8]");
         }

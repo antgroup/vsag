@@ -91,7 +91,6 @@ TEST_CASE("RaBitQSplitDataCell direct split compute", "[ut][RaBitQSplitDataCell]
             }},
             "quantization_params": {{
                 "type": "rabitq",
-                "rabitq_version": "split_1bit_7bit",
                 "rabitq_bits_per_dim_query": 32,
                 "rabitq_bits_per_dim_base": {}
             }}

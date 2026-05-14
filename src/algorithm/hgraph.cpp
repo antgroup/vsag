@@ -40,6 +40,7 @@
 #include "index/iterator_filter.h"
 #include "io/memory_io_parameter.h"
 #include "io/reader_io_parameter.h"
+#include "quantization/rabitq_quantization/rabitq_quantizer_parameter.h"
 #include "quantization/scalar_quantization/scalar_quantizer_parameter.h"
 #include "storage/serialization.h"
 #include "storage/stream_reader.h"
@@ -81,8 +82,9 @@ make_temporary_sq8_flatten(MetricType metric,
 
 static bool
 need_temporary_sq8_build_data(const FlattenInterfacePtr& basic_flatten_codes,
-                              bool has_precise_reorder) {
-    return not has_precise_reorder and
+                              bool has_precise_reorder,
+                              bool build_by_base) {
+    return not build_by_base and not has_precise_reorder and
            basic_flatten_codes->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_RABITQ;
 }
 
@@ -604,6 +606,38 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
     auto inner_json = JsonType::Parse(str);
     mapping_external_param_to_inner(hgraph_json, external_mapping, inner_json);
 
+    const bool uses_rabitq_split_codes =
+        inner_json[BASE_CODES_KEY].Contains(CODES_TYPE_KEY) &&
+        inner_json[BASE_CODES_KEY][CODES_TYPE_KEY].GetString() == RABITQ_SPLIT_CODES;
+    if (uses_rabitq_split_codes) {
+        CHECK_ARGUMENT(inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][TYPE_KEY].GetString() ==
+                           QUANTIZATION_TYPE_VALUE_RABITQ,
+                       "base_codes_type=rabitq_split requires base_quantization_type=rabitq");
+        CHECK_ARGUMENT(not hgraph_json.Contains(HGRAPH_USE_REORDER) ||
+                           hgraph_json[HGRAPH_USE_REORDER].GetBool(),
+                       "base_codes_type=rabitq_split requires use_reorder=true");
+        CHECK_ARGUMENT(
+            not hgraph_json.Contains(HGRAPH_REORDER_SOURCE) ||
+                hgraph_json[HGRAPH_REORDER_SOURCE].GetString() == HGRAPH_REORDER_SOURCE_BASE,
+            "base_codes_type=rabitq_split requires reorder_source=base");
+        CHECK_ARGUMENT(not hgraph_json.Contains(RABITQ_VERSION) ||
+                           hgraph_json[RABITQ_VERSION].GetString() ==
+                               RaBitQuantizerParameter::RABITQ_VERSION_SPLIT_1BIT_XBIT,
+                       fmt::format("base_codes_type=rabitq_split requires rabitq_version={}",
+                                   RaBitQuantizerParameter::RABITQ_VERSION_SPLIT_1BIT_XBIT));
+        inner_json[USE_REORDER_KEY].SetBool(true);
+        inner_json[REORDER_SOURCE_KEY].SetString(HGRAPH_REORDER_SOURCE_BASE);
+        if (not hgraph_json.Contains(HGRAPH_BUILD_BY_BASE_QUANTIZATION)) {
+            inner_json[HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY].SetBool(false);
+        }
+        inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][RABITQ_QUANTIZATION_VERSION_KEY]
+            .SetString(RaBitQuantizerParameter::RABITQ_VERSION_SPLIT_1BIT_XBIT);
+    } else if (hgraph_json.Contains(RABITQ_VERSION)) {
+        CHECK_ARGUMENT(hgraph_json[RABITQ_VERSION].GetString() !=
+                           RaBitQuantizerParameter::RABITQ_VERSION_SPLIT_1BIT_XBIT,
+                       "rabitq_version=split_1bit_xbit requires base_codes_type=rabitq_split");
+    }
+
     return inner_json;
 }
 
@@ -768,8 +802,8 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
     this->resize(current_count + new_ids_count);
     this->total_count_ += new_ids_count;
     Vector<Vector<InnerIdType>> route_graph_ids(allocator_);
-    auto need_sq8_build_data =
-        need_temporary_sq8_build_data(this->basic_flatten_codes_, this->has_precise_reorder());
+    auto need_sq8_build_data = need_temporary_sq8_build_data(
+        this->basic_flatten_codes_, this->has_precise_reorder(), this->build_by_base_);
     FlattenInterfacePtr temporary_sq8_build_data = nullptr;
     if (need_sq8_build_data and raw_vector_ == nullptr) {
         temporary_sq8_build_data =
@@ -855,8 +889,8 @@ HGraph::Add(const DatasetPtr& data, AddMode mode) {
     }
     CHECK_ARGUMENT(get_data(data) != nullptr, "base.float_vector is nullptr");
 
-    auto need_sq8_build_data =
-        need_temporary_sq8_build_data(this->basic_flatten_codes_, this->has_precise_reorder());
+    auto need_sq8_build_data = need_temporary_sq8_build_data(
+        this->basic_flatten_codes_, this->has_precise_reorder(), this->build_by_base_);
     CHECK_ARGUMENT(not(need_sq8_build_data and this->total_count_ != 0 and
                        raw_vector_ == nullptr and temporary_build_flatten_codes_ == nullptr),
                    "adding to a non-empty HGraph that needs temporary SQ8 build data requires "
@@ -1859,7 +1893,8 @@ HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
     if (temporary_build_flatten_codes_ != nullptr) {
         flatten_codes = temporary_build_flatten_codes_;
     } else if (need_temporary_sq8_build_data(this->basic_flatten_codes_,
-                                             this->has_precise_reorder()) and
+                                             this->has_precise_reorder(),
+                                             this->build_by_base_) and
                raw_vector_ != nullptr) {
         flatten_codes = raw_vector_;
     } else if (has_precise_reorder() and not build_by_base_) {

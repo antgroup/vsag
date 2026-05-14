@@ -1,0 +1,40 @@
+global:
+    exporters:
+        stdout_table:
+            format: "table"
+            to: "stdout"
+        json_file:
+            format: "json"
+            to: "file:///root/vsag/benchs/results/gist1m_rabitq_split_sq8_vs_base_build_compare.json"
+    num_threads_building: 32
+    num_threads_searching: 16
+
+# Default split RabitQ path: omit build_by_base and HGraph will use SQ8 fallback
+# during graph construction, while persistent storage and search still use split RabitQ.
+rabitq_split_default_sq8_build_ef50:
+    datapath: "/root/data/gist1M/gist-960-euclidean.hdf5"
+    type: "build,search"
+    index_name: "hgraph"
+    create_params: '{"dim":960,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"rabitq","base_codes_type":"rabitq_split","rabitq_bits_per_dim_query":32,"rabitq_bits_per_dim_base":8,"rabitq_error_rate":1.9,"max_degree":64,"ef_construction":300,"build_thread_count":32,"graph_storage_type":"compressed"}}'
+    search_params: '{"hgraph":{"ef_search":50,"rabitq_one_bit_search":true}}'
+    index_path: "/root/vsag/benchs/indexes/gist1m/vsag_hgraph_rabitq_split_1bit_xbit_default_sq8_build_compare"
+    topk: 64
+    search_mode: "knn"
+    range: 0.5
+    search_query_count: 1000
+    delete_index_after_search: false
+
+# Explicit base-build override: build_by_base=true disables the SQ8 fallback and
+# makes graph construction use RabitQ base-base distance directly.
+rabitq_split_explicit_base_build_ef50:
+    datapath: "/root/data/gist1M/gist-960-euclidean.hdf5"
+    type: "build,search"
+    index_name: "hgraph"
+    create_params: '{"dim":960,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"rabitq","base_codes_type":"rabitq_split","rabitq_bits_per_dim_query":32,"rabitq_bits_per_dim_base":8,"rabitq_error_rate":1.9,"max_degree":64,"ef_construction":300,"build_by_base":true,"build_thread_count":32,"graph_storage_type":"compressed"}}'
+    search_params: '{"hgraph":{"ef_search":50,"rabitq_one_bit_search":true}}'
+    index_path: "/root/vsag/benchs/indexes/gist1m/vsag_hgraph_rabitq_split_1bit_xbit_explicit_base_build_compare"
+    topk: 64
+    search_mode: "knn"
+    range: 0.5
+    search_query_count: 1000
+    delete_index_after_search: false

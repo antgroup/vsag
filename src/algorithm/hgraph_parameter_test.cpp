@@ -18,8 +18,10 @@
 #include <fmt/format.h>
 
 #include "algorithm/hgraph.h"
+#include "datacell/flatten_datacell_parameter.h"
 #include "index_common_param.h"
 #include "parameter_test.h"
+#include "quantization/rabitq_quantization/rabitq_quantizer_parameter.h"
 #include "unittest.h"
 
 #define TEST_COMPATIBILITY_CASE(section_name, param_member, val1, val2, expect_compatible) \
@@ -216,4 +218,67 @@ TEST_CASE("HGraph maps label_remap_type to inner index parameter", "[ut][HGraphP
     REQUIRE(typed_param != nullptr);
     REQUIRE(typed_param->bottom_graph_param != nullptr);
     REQUIRE(typed_param->label_remap_type == vsag::LabelRemapType::ROBIN);
+}
+
+TEST_CASE("HGraph minimal split RabitQ parameters", "[ut][HGraphParameter]") {
+    auto param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "rabitq",
+        "base_codes_type": "rabitq_split",
+        "rabitq_bits_per_dim_query": 32,
+        "rabitq_bits_per_dim_base": 8,
+        "rabitq_error_rate": 1.9,
+        "graph_io_type": "block_memory_io",
+        "graph_storage_type": "flat",
+        "graph_type": "nsw",
+        "max_degree": 32,
+        "ef_construction": 100
+    })");
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+
+    SECTION("minimal split config infers base reorder and split version") {
+        auto hgraph_param = vsag::HGraph::CheckAndMappingExternalParam(param, common_param);
+        auto typed_param = std::dynamic_pointer_cast<vsag::HGraphParameter>(hgraph_param);
+        REQUIRE(typed_param != nullptr);
+        REQUIRE(typed_param->use_reorder);
+        REQUIRE(typed_param->reorder_source == vsag::HGRAPH_REORDER_SOURCE_BASE);
+        REQUIRE_FALSE(typed_param->build_by_base);
+
+        auto base_param = std::dynamic_pointer_cast<vsag::FlattenDataCellParameter>(
+            typed_param->base_codes_param);
+        REQUIRE(base_param != nullptr);
+        auto rabitq_param = std::dynamic_pointer_cast<vsag::RaBitQuantizerParameter>(
+            base_param->quantizer_parameter);
+        REQUIRE(rabitq_param != nullptr);
+        REQUIRE(rabitq_param->rabitq_version_ ==
+                vsag::RaBitQuantizerParameter::RABITQ_VERSION_SPLIT_1BIT_XBIT);
+    }
+
+    SECTION("explicit base build override is preserved") {
+        param["build_by_base"].SetBool(true);
+        auto hgraph_param = vsag::HGraph::CheckAndMappingExternalParam(param, common_param);
+        auto typed_param = std::dynamic_pointer_cast<vsag::HGraphParameter>(hgraph_param);
+        REQUIRE(typed_param != nullptr);
+        REQUIRE(typed_param->build_by_base);
+    }
+
+    SECTION("explicit disabled reorder is rejected") {
+        param["use_reorder"].SetBool(false);
+        REQUIRE_THROWS_AS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param),
+                          vsag::VsagException);
+    }
+
+    SECTION("explicit precise reorder is rejected") {
+        param["reorder_source"].SetString(vsag::HGRAPH_REORDER_SOURCE_PRECISE);
+        REQUIRE_THROWS_AS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param),
+                          vsag::VsagException);
+    }
+
+    SECTION("old split version is rejected") {
+        param["rabitq_version"].SetString("split_1bit_7bit");
+        REQUIRE_THROWS_AS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param),
+                          vsag::VsagException);
+    }
 }

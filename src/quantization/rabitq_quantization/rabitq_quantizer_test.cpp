@@ -110,7 +110,7 @@ TEST_CASE("RaBitQ Split Code Storage", "[ut][RaBitQuantizer]") {
             false,
             false,
             allocator.get(),
-            RaBitQuantizerParameter::RABITQ_VERSION_SPLIT_1BIT_7BIT,
+            RaBitQuantizerParameter::RABITQ_VERSION_SPLIT_1BIT_XBIT,
             RaBitQuantizerParameter::DEFAULT_RABITQ_ERROR_RATE);
         REQUIRE(quantizer.SupportSplitCodeStorage());
         quantizer.TrainImpl(vecs.data(), count);
@@ -198,7 +198,7 @@ TEST_CASE("RaBitQ Encode and Decode", "[ut][RaBitQuantizer]") {
 TEST_CASE("RaBitQ Compute", "[ut][RaBitQuantizer]") {
     auto use_fht = GENERATE(true, false);
     auto num_bits_per_dim_query = GENERATE(4, 32);
-    auto num_bits_per_dim_base = GENERATE(2, 4);
+    auto num_bits_per_dim_base = GENERATE(1, 2, 4);
     for (auto dim : dims) {
         float numeric_error = 1 / std::sqrt(dim) * dim;
         float related_error = 0.05F;
@@ -236,9 +236,9 @@ TEST_CASE("RaBitQ Compute", "[ut][RaBitQuantizer]") {
                                                          true,
                                                          unbounded_numeric_error_rate,
                                                          unbounded_related_error_rate);
-            REQUIRE_THROWS(TestComputeCodes<RaBitQuantizer<MetricType::METRIC_TYPE_COSINE>,
-                                            MetricType::METRIC_TYPE_COSINE>(
-                quantizer, dim, count, numeric_error, false));
+            TestComputeCodes<RaBitQuantizer<MetricType::METRIC_TYPE_COSINE>,
+                             MetricType::METRIC_TYPE_COSINE>(
+                quantizer, dim, count, numeric_error, false);
 
             RaBitQuantizer<MetricType::METRIC_TYPE_IP> quantizer_ip(dim,
                                                                     dim,
@@ -257,9 +257,9 @@ TEST_CASE("RaBitQ Compute", "[ut][RaBitQuantizer]") {
                 true,
                 unbounded_numeric_error_rate,
                 unbounded_related_error_rate);
-            REQUIRE_THROWS(TestComputeCodes<RaBitQuantizer<MetricType::METRIC_TYPE_IP>,
-                                            MetricType::METRIC_TYPE_IP>(
-                quantizer_ip, dim, count, numeric_error, false));
+            TestComputeCodes<RaBitQuantizer<MetricType::METRIC_TYPE_IP>,
+                             MetricType::METRIC_TYPE_IP>(
+                quantizer_ip, dim, count, numeric_error, false);
 
             RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR> quantizer_l2(dim,
                                                                        dim,
@@ -278,9 +278,9 @@ TEST_CASE("RaBitQ Compute", "[ut][RaBitQuantizer]") {
                                                         true,
                                                         unbounded_numeric_error_rate,
                                                         unbounded_related_error_rate);
-            REQUIRE_THROWS(TestComputeCodes<RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR>,
-                                            MetricType::METRIC_TYPE_L2SQR>(
-                quantizer_l2, dim, count, numeric_error, false));
+            TestComputeCodes<RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR>,
+                             MetricType::METRIC_TYPE_L2SQR>(
+                quantizer_l2, dim, count, numeric_error, false);
         }
     }
 }

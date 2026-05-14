@@ -24,7 +24,7 @@ DEFINE_POINTER2(RaBitQuantizerParam, RaBitQuantizerParameter);
 class RaBitQuantizerParameter : public QuantizerParameter {
 public:
     static constexpr const char* DEFAULT_RABITQ_VERSION = "standard";
-    static constexpr const char* RABITQ_VERSION_SPLIT_1BIT_7BIT = "split_1bit_7bit";
+    static constexpr const char* RABITQ_VERSION_SPLIT_1BIT_XBIT = "split_1bit_xbit";
     static constexpr float DEFAULT_RABITQ_ERROR_RATE = 1.9F;
 
     RaBitQuantizerParameter();

@@ -23,7 +23,7 @@ HGraph (Hierarchical Graph) is a **graph-based** index structure that constructs
 ## Usage
 For examples, refer to [103_index_hgraph.cpp](https://github.com/antgroup/vsag/blob/main/examples/cpp/103_index_hgraph.cpp).
 
-For RabitQ split 1bit + 7bit storage/search, see [rabitq_split_1bit_7bit.md](rabitq_split_1bit_7bit.md).
+For RabitQ split 1bit + xbit storage/search, see [rabitq_split_1bit_xbit.md](rabitq_split_1bit_xbit.md).
 
 ## Factory Parameter Overview Table
 
@@ -33,8 +33,8 @@ For RabitQ split 1bit + 7bit storage/search, see [rabitq_split_1bit_7bit.md](rab
 | **Basic** | metric_type | string | "l2" | Yes | Distance metric: l2, ip, cosine |
 | **Basic** | dim | int | - | Yes | Vector dimension [1, 4096] |
 | **Quantization** | base_quantization_type | string | - | Yes | Base quantization type |
-| **Quantization** | base_codes_type | string | "flatten" | No | Base code storage type; use "rabitq_split" for RabitQ split 1bit + 7bit storage |
-| **Quantization** | rabitq_version | string | "standard" | No | RabitQ implementation version; use "split_1bit_7bit" with RabitQ split storage |
+| **Quantization** | base_codes_type | string | "flatten" | No | Base code storage type; use "rabitq_split" for RabitQ split 1bit + xbit storage |
+| **Quantization** | rabitq_version | string | "standard" | No | Internal RabitQ implementation version; inferred as "split_1bit_xbit" when `base_codes_type="rabitq_split"` |
 | **Quantization** | rabitq_error_rate | float | 1.9 | No | Error-rate multiplier used by RabitQ one-bit lower-bound search |
 | **Quantization** | use_reorder | bool | false | No | Enable result reordering/reranking after base search |
 | **Quantization** | reorder_source | string | "precise" | Conditional | Source used for reorder when `use_reorder=true`: "precise" uses precise codes, "base" uses base codes |
@@ -84,14 +84,14 @@ For RabitQ split 1bit + 7bit storage/search, see [rabitq_split_1bit_7bit.md](rab
 
 ### base_codes_type
 - **Parameter Type**: string
-- **Parameter Description**: Base code storage type. Set to "rabitq_split" together with base_quantization_type="rabitq" and rabitq_version="split_1bit_7bit" to use RabitQ split 1bit + 7bit storage.
+- **Parameter Description**: Base code storage type. Set to "rabitq_split" together with base_quantization_type="rabitq" to use RabitQ split 1bit + xbit storage. This also infers internal rabitq_version="split_1bit_xbit" and enables base-code reorder.
 - **Optional Values**: "flatten", "rabitq_split"
 - **Default Value**: "flatten"
 
 ### rabitq_version
 - **Parameter Type**: string
-- **Parameter Description**: RabitQ implementation version. The default keeps the existing RabitQ path; "split_1bit_7bit" enables the opt-in split storage path.
-- **Optional Values**: "standard", "split_1bit_7bit"
+- **Parameter Description**: Internal RabitQ implementation version. Users normally do not need to set it for split storage; base_codes_type="rabitq_split" infers "split_1bit_xbit".
+- **Optional Values**: "standard", "split_1bit_xbit"
 - **Default Value**: "standard"
 
 ### rabitq_error_rate
@@ -102,13 +102,13 @@ For RabitQ split 1bit + 7bit storage/search, see [rabitq_split_1bit_7bit.md](rab
 
 ### use_reorder
 - **Parameter Type**: bool
-- **Parameter Description**: Whether to reorder/rerank search results after base graph search. The reorder source is controlled by `reorder_source`.
+- **Parameter Description**: Whether to reorder/rerank search results after base graph search. For base_codes_type="rabitq_split", this is forced to true.
 - **Optional Values**: true, false
 - **Default Value**: false
 
 ### reorder_source
 - **Parameter Type**: string
-- **Parameter Description**: Source codes used for reorder when `use_reorder=true`. Set to "precise" to use precise reorder codes, or "base" to reuse base codes for reorder. With `reorder_source="base"`, HGraph does not require `precise_quantization_type` or precise reorder codes.
+- **Parameter Description**: Source codes used for reorder when `use_reorder=true`. Set to "precise" to use precise reorder codes, or "base" to reuse base codes for reorder. For base_codes_type="rabitq_split", this is forced to "base" and HGraph does not require `precise_quantization_type` or precise reorder codes.
 - **Optional Values**: "precise", "base"
 - **Default Value**: "precise"
 
@@ -180,7 +180,7 @@ For RabitQ split 1bit + 7bit storage/search, see [rabitq_split_1bit_7bit.md](rab
 
 ### build_by_base
 - **Parameter Type**: bool
-- **Parameter Description**: Whether to build the index using base quantization codes instead of precise codes
+- **Parameter Description**: Whether to build the index using base quantization codes instead of precise codes. For RabitQ base codes, `true` uses RabitQ base-base distance directly during graph construction; `false` keeps the historical temporary SQ8/raw-vector build fallback. For `base_codes_type="rabitq_split"`, the default remains `false`, so split RabitQ uses SQ8 fallback build unless `build_by_base=true` is set explicitly.
 - **Optional Values**: true, false
 - **Default Value**: false
 
@@ -249,7 +249,7 @@ means that the index uses PQ quantization with 64 subspaces, enables reordering 
 
 ### rabitq_one_bit_search
 - **Parameter Type**: bool
-- **Parameter Description**: Whether to use the RabitQ split one-bit search path when the index was built with base_codes_type="rabitq_split" and rabitq_version="split_1bit_7bit".
+- **Parameter Description**: Whether to use the RabitQ split one-bit search path when the index was built with base_codes_type="rabitq_split" and rabitq_version="split_1bit_xbit".
 - **Optional Values**: true, false
 - **Default Value**: false
 - **Note**: This mode supports the `parallelism` search parameter for parallel search within a single query.

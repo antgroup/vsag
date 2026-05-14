@@ -45,6 +45,12 @@ dump_label_remap_type(LabelRemapType remap_type) -> const char* {
                                                : LABEL_REMAP_TYPE_VALUE_PG;
 }
 
+bool
+uses_rabitq_split_codes(const JsonType& json) {
+    return json.Contains(BASE_CODES_KEY) && json[BASE_CODES_KEY].Contains(CODES_TYPE_KEY) &&
+           json[BASE_CODES_KEY][CODES_TYPE_KEY].GetString() == RABITQ_SPLIT_CODES;
+}
+
 }  // namespace
 
 void
@@ -62,6 +68,21 @@ InnerIndexParameter::FromJson(const JsonType& json) {
                                this->reorder_source,
                                HGRAPH_REORDER_SOURCE_PRECISE,
                                HGRAPH_REORDER_SOURCE_BASE));
+
+    if (uses_rabitq_split_codes(json)) {
+        CHECK_ARGUMENT(json[BASE_CODES_KEY].Contains(QUANTIZATION_PARAMS_KEY) &&
+                           json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY].Contains(TYPE_KEY) &&
+                           json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][TYPE_KEY].GetString() ==
+                               QUANTIZATION_TYPE_VALUE_RABITQ,
+                       "rabitq_split codes require base_quantization_type=rabitq");
+        CHECK_ARGUMENT(not json.Contains(USE_REORDER_KEY) || this->use_reorder,
+                       "rabitq_split codes require use_reorder=true");
+        CHECK_ARGUMENT(not json.Contains(REORDER_SOURCE_KEY) ||
+                           this->reorder_source == HGRAPH_REORDER_SOURCE_BASE,
+                       "rabitq_split codes require reorder_source=base");
+        this->use_reorder = true;
+        this->reorder_source = HGRAPH_REORDER_SOURCE_BASE;
+    }
 
     if (json.Contains(USE_ATTRIBUTE_FILTER_KEY)) {
         this->use_attribute_filter = json[USE_ATTRIBUTE_FILTER_KEY].GetBool();

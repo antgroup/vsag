@@ -19,6 +19,7 @@
 
 #include "impl/logger/logger.h"
 #include "inner_string_params.h"
+#include "quantization/rabitq_quantization/rabitq_quantizer_parameter.h"
 
 namespace vsag {
 FlattenDataCellParameter::FlattenDataCellParameter()
@@ -34,12 +35,28 @@ FlattenDataCellParameter::FromJson(const JsonType& json) {
     CHECK_ARGUMENT(
         json.Contains(QUANTIZATION_PARAMS_KEY),
         fmt::format("flatten interface parameters must contains {}", QUANTIZATION_PARAMS_KEY));
-    this->quantizer_parameter =
-        QuantizerParameter::GetQuantizerParameterByJson(json[QUANTIZATION_PARAMS_KEY]);
     this->name = FLATTEN_DATA_CELL;
-    if (json.Contains(CODES_TYPE_KEY) && json[CODES_TYPE_KEY].GetString() == RABITQ_SPLIT_CODES) {
+    auto quantization_json = json[QUANTIZATION_PARAMS_KEY];
+    const bool use_rabitq_split_codes =
+        json.Contains(CODES_TYPE_KEY) && json[CODES_TYPE_KEY].GetString() == RABITQ_SPLIT_CODES;
+    if (use_rabitq_split_codes) {
+        CHECK_ARGUMENT(
+            quantization_json.Contains(TYPE_KEY) &&
+                quantization_json[TYPE_KEY].GetString() == QUANTIZATION_TYPE_VALUE_RABITQ,
+            "rabitq_split codes require base_quantization_type=rabitq");
+        CHECK_ARGUMENT(not quantization_json.Contains(RABITQ_QUANTIZATION_VERSION_KEY) ||
+                           quantization_json[RABITQ_QUANTIZATION_VERSION_KEY].GetString() ==
+                               RaBitQuantizerParameter::RABITQ_VERSION_SPLIT_1BIT_XBIT ||
+                           quantization_json[RABITQ_QUANTIZATION_VERSION_KEY].GetString() ==
+                               RaBitQuantizerParameter::DEFAULT_RABITQ_VERSION,
+                       fmt::format("rabitq_split codes require rabitq_version={}, but got {}",
+                                   RaBitQuantizerParameter::RABITQ_VERSION_SPLIT_1BIT_XBIT,
+                                   quantization_json[RABITQ_QUANTIZATION_VERSION_KEY].GetString()));
+        quantization_json[RABITQ_QUANTIZATION_VERSION_KEY].SetString(
+            RaBitQuantizerParameter::RABITQ_VERSION_SPLIT_1BIT_XBIT);
         this->name = RABITQ_SPLIT_DATA_CELL;
     }
+    this->quantizer_parameter = QuantizerParameter::GetQuantizerParameterByJson(quantization_json);
 }
 
 JsonType

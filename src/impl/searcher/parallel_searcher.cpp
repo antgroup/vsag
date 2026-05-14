@@ -148,7 +148,8 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
     std::vector<Vector<InnerIdType>> neighbors(beam,
                                                Vector<InnerIdType>(graph->MaximumDegree(), alloc));
     Vector<float> line_dists(vector_size, alloc);
-    Vector<float> lower_bound_dists(vector_size, alloc);
+    Vector<float> lower_bound_dists(
+        inner_search_param.enable_rabitq_one_bit_search ? vector_size : 0, alloc);
     Vector<std::pair<float, uint64_t>> node_pair(beam, alloc);
     auto skip_strategy = create_filter_search_skip_strategy(
         inner_search_param.skip_strategy_type,

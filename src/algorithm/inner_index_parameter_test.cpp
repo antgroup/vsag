@@ -111,3 +111,40 @@ TEST_CASE("Label remap type parameter test", "[ut][InnerIndexParameter][label_re
         REQUIRE_THROWS_AS(param->FromJson(json_obj), vsag::VsagException);
     }
 }
+
+TEST_CASE("Split RabitQ normalizes reorder parameters", "[ut][InnerIndexParameter]") {
+    auto split_json = vsag::JsonType::Parse(R"({
+        "base_codes": {
+            "codes_type": "rabitq_split",
+            "quantization_params": {
+                "type": "rabitq"
+            }
+        }
+    })");
+
+    SECTION("minimal split config enables base reorder") {
+        auto param = std::make_shared<vsag::InnerIndexParameter>();
+        param->FromJson(split_json);
+        REQUIRE(param->use_reorder);
+        REQUIRE(param->reorder_source == vsag::HGRAPH_REORDER_SOURCE_BASE);
+    }
+
+    SECTION("explicit disabled reorder is rejected") {
+        split_json["use_reorder"].SetBool(false);
+        auto param = std::make_shared<vsag::InnerIndexParameter>();
+        REQUIRE_THROWS_AS(param->FromJson(split_json), vsag::VsagException);
+    }
+
+    SECTION("explicit precise reorder is rejected") {
+        split_json["reorder_source"].SetString(vsag::HGRAPH_REORDER_SOURCE_PRECISE);
+        auto param = std::make_shared<vsag::InnerIndexParameter>();
+        REQUIRE_THROWS_AS(param->FromJson(split_json), vsag::VsagException);
+    }
+}
+
+TEST_CASE("Non split RabitQ keeps reorder defaults", "[ut][InnerIndexParameter]") {
+    auto param = std::make_shared<vsag::InnerIndexParameter>();
+    param->FromJson(vsag::JsonType::Parse(R"({})"));
+    REQUIRE_FALSE(param->use_reorder);
+    REQUIRE(param->reorder_source == vsag::HGRAPH_REORDER_SOURCE_PRECISE);
+}
