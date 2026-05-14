@@ -16,6 +16,7 @@
 #include "scalar_quantizer.h"
 
 #include "scalar_quantization_trainer.h"
+#include "scalar_quantization_utils.h"
 #include "simd/normalize.h"
 #include "simd/sq4_simd.h"
 #include "simd/sq8_simd.h"
@@ -100,11 +101,7 @@ ScalarQuantizer<metric, bit>::EncodeOneImpl(const float* data, uint8_t* codes) c
         } else {
             delta = 1.0F * (cur[d] - lower_bound_[d]) / diff_[d];
         }
-        if (delta < 0.0F) {
-            delta = 0;
-        } else if (delta > 0.999F) {
-            delta = 1;
-        }
+        delta = ClampScalarQuantizationDelta(delta);
         scaled = static_cast<uint8_t>(static_cast<float>(MAX_CODE_PER_DIM - 1) * delta);
         fill_codes(codes, scaled, BIT_PER_DIM, d);
     }
