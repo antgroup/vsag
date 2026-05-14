@@ -357,12 +357,16 @@ TEST_CASE("BasicSearcher duplicate threshold keeps nearest owner",
         1, allocator.get(), vector_data_cell->TotalCount(), allocator.get());
     auto searcher = std::make_shared<BasicSearcher>(common);
 
-    auto run_search = [&](const std::vector<float>& query, float threshold) {
+    auto run_search = [&](const std::vector<float>& query,
+                          float threshold,
+                          InnerIdType duplicate_query_id =
+                              std::numeric_limits<InnerIdType>::max()) {
         InnerSearchParam search_param;
         search_param.ep = 0;
         search_param.ef = 2;
         search_param.topk = 2;
         search_param.find_duplicate = true;
+        search_param.duplicate_query_id = duplicate_query_id;
         search_param.duplicate_distance_threshold = threshold;
         auto vl = pool->TakeOne();
         QueryContext* ctx = nullptr;
@@ -380,5 +384,5 @@ TEST_CASE("BasicSearcher duplicate threshold keeps nearest owner",
 
     REQUIRE(run_search({0.12F, 0.0F}, 0.01F) == -1);
     REQUIRE(run_search({0.12F, 0.0F}, 0.02F) == 0);
-    REQUIRE(run_search({0.3F, 0.0F}, 0.0F) == 1);
+    REQUIRE(run_search({0.3F, 0.0F}, 0.0F, 1) == 1);
 }

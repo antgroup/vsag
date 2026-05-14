@@ -1884,6 +1884,7 @@ HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
     param.topk = static_cast<int64_t>(ef_construct_);
     if (this->support_duplicate_) {
         param.find_duplicate = true;
+        param.duplicate_query_id = inner_id;
         param.duplicate_distance_threshold = this->duplicate_distance_threshold_;
     }
 

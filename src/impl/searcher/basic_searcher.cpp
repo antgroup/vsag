@@ -529,17 +529,9 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
             if (min_distance <= inner_search_param.duplicate_distance_threshold) {
                 inner_search_param.duplicate_id = min_index;
             }
-        } else {
-            bool need_release;
-            const auto* codes = flatten->GetCodesById(min_index, need_release);
-            Vector<uint8_t> encoded_query(flatten->code_size_, allocator_);
-            flatten->Encode(static_cast<const float*>(query), encoded_query.data());
-            if (std::memcmp(codes, encoded_query.data(), flatten->code_size_) == 0) {
-                inner_search_param.duplicate_id = min_index;
-            }
-            if (need_release) {
-                flatten->Release(codes);
-            }
+        } else if (inner_search_param.duplicate_query_id < flatten->TotalCount() &&
+                   flatten->CompareVectors(inner_search_param.duplicate_query_id, min_index)) {
+            inner_search_param.duplicate_id = min_index;
         }
     }
 
