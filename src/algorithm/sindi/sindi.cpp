@@ -28,6 +28,7 @@
 #include "storage/serialization.h"
 #include "utils/util_functions.h"
 #include "vsag/allocator.h"
+#include "vsag/options.h"
 #include "vsag_exception.h"
 
 namespace vsag {
@@ -721,9 +722,14 @@ SINDI::EstimateMemory(uint64_t num_elements) const {
         mem += avg_doc_term_length_ * num_elements * (sizeof(float) + sizeof(uint16_t));
     }
 
-    // size of rerank index is same as sindi
     if (use_reorder_) {
-        mem *= 2;
+        mem += num_elements *
+               (sizeof(uint32_t) +
+                avg_doc_term_length_ * (sizeof(uint32_t) + sizeof(float)));
+
+        const auto block_size = Options::Instance().block_size_limit();
+        const auto offset_bytes = num_elements * 2 * sizeof(uint32_t);
+        mem += ((offset_bytes + block_size - 1) / block_size) * block_size;
     }
 
     // size of term list
