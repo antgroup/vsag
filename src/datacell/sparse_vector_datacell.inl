@@ -82,25 +82,26 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::BatchInsertVector(const void* vectors,
 template <typename QuantTmpl, typename IOTmpl>
 void
 SparseVectorDataCell<QuantTmpl, IOTmpl>::InsertVector(const void* vector, InnerIdType idx) {
-    {
-        std::lock_guard lock(mutex_);
-        total_count_ = std::max(total_count_, idx + 1);
-    }
     auto sparse_vector = (const SparseVector*)vector;
     uint64_t code_size = (sparse_vector->len_ * 2 + 1) * sizeof(uint32_t);
-    max_code_size_ = std::max(max_code_size_, code_size);
     auto* codes = reinterpret_cast<uint8_t*>(allocator_->Allocate(code_size));
     quantizer_->EncodeOne((const float*)vector, codes);
     DocLocation location;
     {
-        std::lock_guard lock(current_offset_mutex_);
+        std::scoped_lock lock(mutex_, current_offset_mutex_);
+        total_count_ = std::max(total_count_, idx + 1);
+        max_code_size_ = std::max(max_code_size_, code_size);
+        const auto required_size = static_cast<uint64_t>(current_offset_) + code_size;
+        if (required_size > this->io_->size_) {
+            this->io_->Resize(required_size);
+        }
         location.offset = current_offset_;
         location.size = static_cast<uint32_t>(code_size);
         current_offset_ += code_size;
+        offset_io_->Write(
+            reinterpret_cast<uint8_t*>(&location), sizeof(location), idx * sizeof(location));
+        io_->Write(codes, code_size, location.offset);
     }
-    offset_io_->Write(
-        reinterpret_cast<uint8_t*>(&location), sizeof(location), idx * sizeof(location));
-    io_->Write(codes, code_size, location.offset);
     allocator_->Deallocate(codes);
 }
 
