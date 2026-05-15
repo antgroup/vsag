@@ -158,6 +158,9 @@ const char* const GNO_IMI_SEARCH_PARAM_FIRST_ORDER_SCAN_RATIO = "first_order_sca
 const char* const FLATTEN_DATA_CELL = "flatten_data_cell";
 const char* const RABITQ_SPLIT_DATA_CELL = "rabitq_split_data_cell";
 const char* const SPARSE_VECTOR_DATA_CELL = "sparse_vector_data_cell";
+const char* const MULTI_VECTOR_DATA_CELL = "multi_vector_data_cell";
+
+const char* const MULTI_VECTOR_CODES = "multi_vector";
 
 // for pyramid index
 const char* const NO_BUILD_LEVELS = "no_build_levels";
