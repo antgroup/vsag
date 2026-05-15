@@ -16,6 +16,7 @@
 #pragma once
 
 #include <cstdint>
+#include <limits>
 #include <memory>
 
 #include "computer.h"
@@ -190,6 +191,35 @@ public:
         return cast().ComputeDistImpl(computer, codes, dists);
     }
 
+    inline bool
+    ComputeDistWithThreshold(Computer<QuantT>& computer,
+                             const uint8_t* codes,
+                             float threshold,
+                             float* dists) const {
+        if constexpr (has_ComputeDistWithThresholdImpl<QuantT>::value) {
+            return cast().ComputeDistWithThresholdImpl(computer, codes, threshold, dists);
+        } else {
+            cast().ComputeDistImpl(computer, codes, dists);
+            return false;
+        }
+    }
+
+    inline bool
+    ComputeDistWithLowerBound(Computer<QuantT>& computer,
+                              const uint8_t* codes,
+                              float* dists,
+                              float* lower_bound) const {
+        if constexpr (has_ComputeDistWithLowerBoundImpl<QuantT>::value) {
+            return cast().ComputeDistWithLowerBoundImpl(computer, codes, dists, lower_bound);
+        } else {
+            cast().ComputeDistImpl(computer, codes, dists);
+            if (lower_bound != nullptr) {
+                *lower_bound = std::numeric_limits<float>::max();
+            }
+            return false;
+        }
+    }
+
     inline float
     ComputeDist(Computer<QuantT>& computer, const uint8_t* codes) const {
         float dist = 0.0F;
@@ -203,6 +233,17 @@ public:
                    const uint8_t* codes,
                    float* dists) const {
         return cast().ScanBatchDistImpl(computer, count, codes, dists);
+    }
+
+    inline void
+    ScanBatchDistsWithThreshold(Computer<QuantT>& computer,
+                                uint64_t count,
+                                const uint8_t* codes,
+                                float threshold,
+                                float* dists) const {
+        for (uint64_t i = 0; i < count; ++i) {
+            this->ComputeDistWithThreshold(computer, codes + i * code_size_, threshold, dists + i);
+        }
     }
 
     inline void
@@ -332,6 +373,18 @@ private:
                                  std::declval<float&>(),
                                  std::declval<float&>(),
                                  std::declval<float&>())
+    GENERATE_HAS_MEMBER_FUNCTION(ComputeDistWithThresholdImpl,
+                                 bool,
+                                 std::declval<Computer<QuantT>&>(),
+                                 std::declval<const uint8_t*>(),
+                                 std::declval<float>(),
+                                 std::declval<float*>())
+    GENERATE_HAS_MEMBER_FUNCTION(ComputeDistWithLowerBoundImpl,
+                                 bool,
+                                 std::declval<Computer<QuantT>&>(),
+                                 std::declval<const uint8_t*>(),
+                                 std::declval<float*>(),
+                                 std::declval<float*>())
 };
 
 #define TEMPLATE_QUANTIZER(Name)                        \

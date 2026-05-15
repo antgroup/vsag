@@ -15,6 +15,8 @@
 
 #include "rabitq_quantizer_parameter.h"
 
+#include <cmath>
+
 #include "impl/logger/logger.h"
 #include "inner_string_params.h"
 
@@ -50,6 +52,27 @@ RaBitQuantizerParameter::FromJson(const JsonType& json) {
             fmt::format("currently, only support rabitq_bits_per_dim_base in [1, 8], but got {}",
                         num_bits_per_dim_base_));
     }
+    if (json.Contains(RABITQ_QUANTIZATION_VERSION_KEY)) {
+        this->rabitq_version_ = json[RABITQ_QUANTIZATION_VERSION_KEY].GetString();
+    }
+    if (this->rabitq_version_ != DEFAULT_RABITQ_VERSION &&
+        this->rabitq_version_ != RABITQ_VERSION_SPLIT_1BIT_7BIT) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            fmt::format("unsupported rabitq_version: {}", rabitq_version_));
+    }
+    if (this->rabitq_version_ == RABITQ_VERSION_SPLIT_1BIT_7BIT &&
+        this->num_bits_per_dim_query_ != 32) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "rabitq_version=split_1bit_7bit requires rabitq_bits_per_dim_query=32");
+    }
+    if (json.Contains(RABITQ_QUANTIZATION_ERROR_RATE_KEY)) {
+        this->rabitq_error_rate_ = json[RABITQ_QUANTIZATION_ERROR_RATE_KEY].GetFloat();
+    }
+    if (not std::isfinite(this->rabitq_error_rate_) || this->rabitq_error_rate_ <= 0.0F) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            fmt::format("rabitq_error_rate must be finite and positive, got {}",
+                                        rabitq_error_rate_));
+    }
     if (json.Contains(USE_FHT_KEY)) {
         this->use_fht_ = json[USE_FHT_KEY].GetBool();
     }
@@ -60,8 +83,10 @@ RaBitQuantizerParameter::ToJson() const {
     JsonType json;
     json[TYPE_KEY].SetString(QUANTIZATION_TYPE_VALUE_RABITQ);
     json[PCA_DIM_KEY].SetInt(this->pca_dim_);
+    json[RABITQ_QUANTIZATION_VERSION_KEY].SetString(this->rabitq_version_);
     json[RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY].SetInt(this->num_bits_per_dim_query_);
     json[RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY].SetInt(this->num_bits_per_dim_base_);
+    json[RABITQ_QUANTIZATION_ERROR_RATE_KEY].SetFloat(this->rabitq_error_rate_);
     json[USE_FHT_KEY].SetBool(this->use_fht_);
     return json;
 }
@@ -96,6 +121,21 @@ RaBitQuantizerParameter::CheckCompatibility(const ParamPtr& other) const {
             "not match: {} vs {}",
             this->num_bits_per_dim_base_,
             rabitq_param->num_bits_per_dim_base_);
+        return false;
+    }
+    if (this->rabitq_version_ != rabitq_param->rabitq_version_) {
+        logger::error(
+            "RaBitQuantizerParameter::CheckCompatibility: RabitQ version does not match: {} vs {}",
+            this->rabitq_version_,
+            rabitq_param->rabitq_version_);
+        return false;
+    }
+    if (this->rabitq_error_rate_ != rabitq_param->rabitq_error_rate_) {
+        logger::error(
+            "RaBitQuantizerParameter::CheckCompatibility: RabitQ error rate does not match: {} "
+            "vs {}",
+            this->rabitq_error_rate_,
+            rabitq_param->rabitq_error_rate_);
         return false;
     }
     if (this->use_fht_ != rabitq_param->use_fht_) {

@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,24 +14,19 @@
 
 #pragma once
 
-#include "algorithm/inner_index_interface.h"
-#include "impl/heap/distance_heap.h"
-#include "index/iterator_filter.h"
-#include "utils/pointer_define.h"
-
 namespace vsag {
 
-DEFINE_POINTER(ReorderInterface)
+inline constexpr float kScalarQuantizationUpperClamp = 0.999F;
 
-class ReorderInterface {
-public:
-    virtual DistHeapPtr
-    Reorder(const DistHeapPtr& input,
-            const float* query,
-            int64_t topk,
-            QueryContext& ctx,
-            IteratorFilterContext* iter_ctx = nullptr,
-            const DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) = 0;
-};
+inline float
+ClampScalarQuantizationDelta(float delta) {
+    if (!(delta >= 0.0F)) {
+        return 0.0F;
+    }
+    if (delta > kScalarQuantizationUpperClamp) {
+        return 1.0F;
+    }
+    return delta;
+}
 
 }  // namespace vsag

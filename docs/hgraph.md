@@ -23,6 +23,8 @@ HGraph (Hierarchical Graph) is a **graph-based** index structure that constructs
 ## Usage
 For examples, refer to [103_index_hgraph.cpp](https://github.com/antgroup/vsag/blob/main/examples/cpp/103_index_hgraph.cpp).
 
+For RabitQ split 1bit + 7bit storage/search, see [rabitq_split_1bit_7bit.md](rabitq_split_1bit_7bit.md).
+
 ## Factory Parameter Overview Table
 
 | **Category** | **Parameter** | **Type** | **Default Value** | **Required** | **Description** |
@@ -31,8 +33,12 @@ For examples, refer to [103_index_hgraph.cpp](https://github.com/antgroup/vsag/b
 | **Basic** | metric_type | string | "l2" | Yes | Distance metric: l2, ip, cosine |
 | **Basic** | dim | int | - | Yes | Vector dimension [1, 4096] |
 | **Quantization** | base_quantization_type | string | - | Yes | Base quantization type |
-| **Quantization** | use_reorder | bool | false | No | Enable high-precision reordering |
-| **Quantization** | precise_quantization_type | string | "fp32" | Conditional | High-precision type for reordering |
+| **Quantization** | base_codes_type | string | "flatten" | No | Base code storage type; use "rabitq_split" for RabitQ split 1bit + 7bit storage |
+| **Quantization** | rabitq_version | string | "standard" | No | RabitQ implementation version; use "split_1bit_7bit" with RabitQ split storage |
+| **Quantization** | rabitq_error_rate | float | 1.9 | No | Error-rate multiplier used by RabitQ one-bit lower-bound search |
+| **Quantization** | use_reorder | bool | false | No | Enable result reordering/reranking after base search |
+| **Quantization** | reorder_source | string | "precise" | Conditional | Source used for reorder when `use_reorder=true`: "precise" uses precise codes, "base" uses base codes |
+| **Quantization** | precise_quantization_type | string | "fp32" | Conditional | Precise quantization type used for reorder when `use_reorder=true` and `reorder_source="precise"` |
 | **Graph** | max_degree | int | 64 | No | Max edges per node |
 | **Graph** | ef_construction | int | 400 | No | Candidate list size during construction |
 | **Graph** | graph_type | string | "nsw" | No | Graph algorithm: nsw, odescent |
@@ -46,6 +52,7 @@ For examples, refer to [103_index_hgraph.cpp](https://github.com/antgroup/vsag/b
 | **Advanced** | ignore_reorder | bool | false | No | Skip precise quantization serialization |
 | **Advanced** | build_by_base | bool | false | No | Build index using base quantization |
 | **Features** | support_duplicate | bool | false | No | Enable duplicate data detection |
+| **Features** | duplicate_distance_threshold | float | 0.0 | No | Deduplicate by nearest-candidate distance when greater than 0; otherwise fall back to code memcmp |
 | **Features** | support_remove | bool | false | No | Enable deletion support |
 | **Features** | store_raw_vector | bool | false | No | Store raw vectors (cosine metric) |
 | **Features** | use_elp_optimizer | bool | false | No | Auto parameter optimization |
@@ -76,15 +83,39 @@ For examples, refer to [103_index_hgraph.cpp](https://github.com/antgroup/vsag/b
 - **Optional Values**: "fp32", "fp16", "bf16", "sq8", "sq8_uniform", "sq4_uniform", "pq", "rabitq", "pqfs"
 - **Default Value**: Must be provided (no default value)
 
+### base_codes_type
+- **Parameter Type**: string
+- **Parameter Description**: Base code storage type. Set to "rabitq_split" together with base_quantization_type="rabitq" and rabitq_version="split_1bit_7bit" to use RabitQ split 1bit + 7bit storage.
+- **Optional Values**: "flatten", "rabitq_split"
+- **Default Value**: "flatten"
+
+### rabitq_version
+- **Parameter Type**: string
+- **Parameter Description**: RabitQ implementation version. The default keeps the existing RabitQ path; "split_1bit_7bit" enables the opt-in split storage path.
+- **Optional Values**: "standard", "split_1bit_7bit"
+- **Default Value**: "standard"
+
+### rabitq_error_rate
+- **Parameter Type**: float
+- **Parameter Description**: Error-rate multiplier for RabitQ one-bit lower-bound search. This parameter is stored with the index and must match when loading a serialized index.
+- **Optional Values**: finite positive float
+- **Default Value**: 1.9
+
 ### use_reorder
 - **Parameter Type**: bool
-- **Parameter Description**: Whether to use high-precision quantization for reordering to improve accuracy
+- **Parameter Description**: Whether to reorder/rerank search results after base graph search. The reorder source is controlled by `reorder_source`.
 - **Optional Values**: true, false
 - **Default Value**: false
 
+### reorder_source
+- **Parameter Type**: string
+- **Parameter Description**: Source codes used for reorder when `use_reorder=true`. Set to "precise" to use precise reorder codes, or "base" to reuse base codes for reorder. With `reorder_source="base"`, HGraph does not require `precise_quantization_type` or precise reorder codes.
+- **Optional Values**: "precise", "base"
+- **Default Value**: "precise"
+
 ### precise_quantization_type
 - **Parameter Type**: string
-- **Parameter Description**: High-precision quantization type used for reordering, only effective when use_reorder=true
+- **Parameter Description**: Precise quantization type used for reordering, only effective when `use_reorder=true` and `reorder_source="precise"`
 - **Optional Values**: "fp32", "fp16", "bf16", "sq8", "sq8_uniform", "sq4_uniform", "pq", "rabitq", "pqfs"
 - **Default Value**: "fp32"
 
@@ -166,6 +197,12 @@ For examples, refer to [103_index_hgraph.cpp](https://github.com/antgroup/vsag/b
 - **Optional Values**: true, false
 - **Default Value**: false
 
+### duplicate_distance_threshold
+- **Parameter Type**: float
+- **Parameter Description**: Duplicate-detection distance threshold. When greater than 0, the nearest candidate is treated as the duplicate owner if its distance is within the threshold; when 0, duplicate detection falls back to code memcmp with the nearest candidate
+- **Optional Values**: Any non-negative float
+- **Default Value**: 0.0
+
 ### store_raw_vector
 - **Parameter Type**: bool
 - **Parameter Description**: Whether to store raw vectors in the index, useful for cosine metric
@@ -204,10 +241,11 @@ means that the index is built using SQ8 quantization, with a maximum degree of 3
     "ef_construction": 400,
     "build_thread_count": 50,
     "support_duplicate": true,
+    "duplicate_distance_threshold": 0.02,
     "support_remove": true
 }
 ```
-means that the index uses PQ quantization with 64 subspaces, enables reordering with FP16 precision, supports duplicate detection and deletion, with maximum degree 64 and ef_construction 400.
+means that the index uses PQ quantization with 64 subspaces, enables reordering with FP16 precision, deduplicates inserts within distance threshold 0.02, supports deletion, with maximum degree 64 and ef_construction 400.
 
 ## Detailed Explanation of Search Parameters
 
@@ -217,10 +255,19 @@ means that the index uses PQ quantization with 64 subspaces, enables reordering 
 - **Optional Values**: 1 to INT_MAX
 - **Default Value**: Must be provided (no default value)
 
+### rabitq_one_bit_search
+- **Parameter Type**: bool
+- **Parameter Description**: Whether to use the RabitQ split one-bit search path when the index was built with base_codes_type="rabitq_split" and rabitq_version="split_1bit_7bit".
+- **Optional Values**: true, false
+- **Default Value**: false
+- **Note**: This mode supports the `parallelism` search parameter for parallel search within a single query.
+
 ## Examples for Search Parameter String
 ```json
 "hgraph": {
-    "ef_search": 200
+    "ef_search": 200,
+    "parallelism": 4,
+    "rabitq_one_bit_search": true
 }
 ```
-means that the search will use an ef_search value of 200 to control the search quality and performance trade-off.
+means that the search will use an ef_search value of 200 to control the search quality and performance trade-off. When the index uses RabitQ split storage, rabitq_one_bit_search=true enables one-bit graph search and parallelism=4 enables parallel search within a single query.

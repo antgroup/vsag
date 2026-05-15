@@ -49,6 +49,7 @@ public:
     InnerSearchMode search_mode{KNN_SEARCH};
     int range_search_limit_size{-1};
     int64_t parallel_search_thread_count{1};
+    bool enable_rabitq_one_bit_search{false};
 
     // for ivf
     int scan_bucket_size{1};
@@ -58,7 +59,9 @@ public:
 
     // deal with duplicate ids
     mutable int64_t duplicate_id{-1};
+    InnerIdType duplicate_query_id{std::numeric_limits<InnerIdType>::max()};
     bool find_duplicate{false};
+    float duplicate_distance_threshold{0.0F};
 
     // use in search process with duplicate ids
     bool consider_duplicate{false};

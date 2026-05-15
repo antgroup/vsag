@@ -15,9 +15,10 @@
 
 #include "scalar_quantizer.h"
 
+#include <cmath>
+#include <limits>
 #include <vector>
 
-#include "impl/allocator/default_allocator.h"
 #include "impl/allocator/safe_allocator.h"
 #include "quantization/quantizer_test.h"
 #include "unittest.h"
@@ -95,6 +96,42 @@ TEST_CASE("SQ4 Serialize and Deserialize", "[ut][SQ4Quantizer]") {
             TestSerializeAndDeserializeMetricSQ4<metrics[2]>(dim, count, error);
         }
     }
+}
+
+TEST_CASE("SQ8 Encode handles NaN delta before uint8 cast", "[ut][SQ8Quantizer]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    SQ8Quantizer<MetricType::METRIC_TYPE_L2SQR> quantizer(2, allocator.get());
+    std::vector<float> train = {0.0F, 0.0F, 1.0F, 1.0F};
+    std::vector<float> query = {std::numeric_limits<float>::quiet_NaN(), 0.5F};
+    std::vector<uint8_t> codes(quantizer.GetCodeSize());
+    std::vector<float> decoded(2);
+
+    REQUIRE(quantizer.Train(train.data(), 2));
+    REQUIRE(quantizer.EncodeOne(query.data(), codes.data()));
+    REQUIRE(quantizer.DecodeOne(codes.data(), decoded.data()));
+    REQUIRE(codes[0] == 0);
+    REQUIRE(codes[1] == static_cast<uint8_t>(255.0F * 0.5F));
+    REQUIRE(std::isfinite(decoded[0]));
+    REQUIRE(std::abs(decoded[0]) <= 1e-6F);
+    REQUIRE(std::abs(decoded[1] - 127.0F / 255.0F) <= 1e-6F);
+}
+
+TEST_CASE("SQ4 Encode handles NaN delta before uint8 cast", "[ut][SQ4Quantizer]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    SQ4Quantizer<MetricType::METRIC_TYPE_L2SQR> quantizer(2, allocator.get());
+    std::vector<float> train = {0.0F, 0.0F, 1.0F, 1.0F};
+    std::vector<float> query = {std::numeric_limits<float>::quiet_NaN(), 0.5F};
+    std::vector<uint8_t> codes(quantizer.GetCodeSize());
+    std::vector<float> decoded(2);
+
+    REQUIRE(quantizer.Train(train.data(), 2));
+    REQUIRE(quantizer.EncodeOne(query.data(), codes.data()));
+    REQUIRE(quantizer.DecodeOne(codes.data(), decoded.data()));
+    REQUIRE((codes[0] & 0x0F) == 0);
+    REQUIRE(((codes[0] >> 4) & 0x0F) == static_cast<uint8_t>(15.0F * 0.5F));
+    REQUIRE(std::isfinite(decoded[0]));
+    REQUIRE(std::abs(decoded[0]) <= 1e-6F);
+    REQUIRE(std::abs(decoded[1] - 7.0F / 15.0F) <= 1e-6F);
 }
 
 template <MetricType metric>

@@ -15,6 +15,8 @@
 
 #pragma once
 
+#include <string>
+
 #include "impl/transform/pca_transformer.h"
 #include "index_common_param.h"
 #include "inner_string_params.h"
@@ -41,13 +43,16 @@ public:
     using error_type = float;
     using sum_type = float;
 
-    explicit RaBitQuantizer(int dim,
-                            uint64_t pca_dim,
-                            uint64_t num_bits_per_dim_query,
-                            uint64_t num_bits_per_dim_base,
-                            bool use_fht,
-                            bool use_mrq,
-                            Allocator* allocator);
+    explicit RaBitQuantizer(
+        int dim,
+        uint64_t pca_dim,
+        uint64_t num_bits_per_dim_query,
+        uint64_t num_bits_per_dim_base,
+        bool use_fht,
+        bool use_mrq,
+        Allocator* allocator,
+        std::string rabitq_version = RaBitQuantizerParameter::DEFAULT_RABITQ_VERSION,
+        float rabitq_error_rate = RaBitQuantizerParameter::DEFAULT_RABITQ_ERROR_RATE);
 
     explicit RaBitQuantizer(const RaBitQuantizerParamPtr& param,
                             const IndexCommonParam& common_param);
@@ -139,6 +144,104 @@ public:
     float
     RaBitQFloatSQIPByPlanes(const float* query, const uint8_t* planes) const;
 
+    float
+    RaBitQFloatSQIPBySplitCode(const float* query,
+                               const uint8_t* one_bit_code,
+                               const uint8_t* supplement_code) const;
+
+    [[nodiscard]] uint64_t
+    StoredPlaneIndex(uint32_t logical_bit) const;
+
+    [[nodiscard]] const uint8_t*
+    GetStoredPlane(const uint8_t* planes, uint32_t logical_bit, uint64_t plane_bytes) const;
+
+    [[nodiscard]] uint8_t*
+    GetStoredPlane(uint8_t* planes, uint32_t logical_bit, uint64_t plane_bytes) const;
+
+    [[nodiscard]] bool
+    SupportSplitCodeStorage() const;
+
+    [[nodiscard]] uint64_t
+    GetOneBitCodeSize() const;
+
+    [[nodiscard]] uint64_t
+    GetSupplementCodeSize() const;
+
+    void
+    SplitCode(const uint8_t* full_code, uint8_t* one_bit_code, uint8_t* supplement_code) const;
+
+    void
+    MergeSplitCode(const uint8_t* one_bit_code,
+                   const uint8_t* supplement_code,
+                   uint8_t* full_code) const;
+
+    bool
+    ComputeDistWithOneBitLowerBound(Computer<RaBitQuantizer>& computer,
+                                    const uint8_t* one_bit_code,
+                                    float* dists,
+                                    float* lower_bound) const;
+
+    void
+    ComputeDistsWithOneBitLowerBoundBatch4(Computer<RaBitQuantizer>& computer,
+                                           const uint8_t* one_bit_code1,
+                                           const uint8_t* one_bit_code2,
+                                           const uint8_t* one_bit_code3,
+                                           const uint8_t* one_bit_code4,
+                                           float& dist1,
+                                           float& dist2,
+                                           float& dist3,
+                                           float& dist4,
+                                           float* lower_bound1,
+                                           float* lower_bound2,
+                                           float* lower_bound3,
+                                           float* lower_bound4,
+                                           bool& computed1,
+                                           bool& computed2,
+                                           bool& computed3,
+                                           bool& computed4) const;
+
+    bool
+    ComputeDistWithSplitCode(Computer<RaBitQuantizer>& computer,
+                             const uint8_t* one_bit_code,
+                             const uint8_t* supplement_code,
+                             float* dists) const;
+
+    [[nodiscard]] uint64_t
+    OneBitRecordNormOffset() const;
+
+    [[nodiscard]] uint64_t
+    OneBitRecordLowBoundErrorOffset() const;
+
+    [[nodiscard]] uint64_t
+    OneBitRecordOneBitErrorOffset() const;
+
+    [[nodiscard]] uint64_t
+    OneBitRecordMrqNormOffset() const;
+
+    [[nodiscard]] uint64_t
+    OneBitRecordRawNormOffset() const;
+
+    [[nodiscard]] uint64_t
+    OneBitRecordSize() const;
+
+    [[nodiscard]] uint64_t
+    PlaneBytes() const;
+
+    [[nodiscard]] uint64_t
+    CodePlanesSize() const;
+
+    [[nodiscard]] uint64_t
+    CodeMetaOffset() const;
+
+    [[nodiscard]] uint64_t
+    SupplementPlanesSize() const;
+
+    [[nodiscard]] uint64_t
+    SupplementMetaOffset() const;
+
+    [[nodiscard]] uint64_t
+    AlignCodeField(uint64_t size) const;
+
 private:
     // bit related
     uint64_t num_bits_per_dim_query_{32};
@@ -146,6 +249,8 @@ private:
 
     // compute related
     float inv_sqrt_d_{0.0F};
+    std::string rabitq_version_{RaBitQuantizerParameter::DEFAULT_RABITQ_VERSION};
+    float rabitq_error_rate_{RaBitQuantizerParameter::DEFAULT_RABITQ_ERROR_RATE};
 
     // random projection related
     bool use_fht_{false};
@@ -179,6 +284,8 @@ private:
     uint64_t offset_sum_{0};
     uint64_t offset_mrq_norm_{0};
     uint64_t offset_raw_norm_{0};
+    uint64_t offset_low_bound_error_{0};
+    uint64_t offset_one_bit_error_{0};
 };
 
 }  // namespace vsag

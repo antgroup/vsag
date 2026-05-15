@@ -95,6 +95,55 @@ TEST_CASE("Extend RaBitQ Basic Test", "[ut][RaBitQuantizer]") {
     }
 }
 
+TEST_CASE("RaBitQ Split Code Storage", "[ut][RaBitQuantizer]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr auto dim = 64;
+    constexpr auto count = 32;
+    auto vecs = fixtures::generate_vectors(count, dim);
+
+    for (uint64_t base_bits = 1; base_bits <= 8; ++base_bits) {
+        RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR> quantizer(
+            dim,
+            dim,
+            32,
+            base_bits,
+            false,
+            false,
+            allocator.get(),
+            RaBitQuantizerParameter::RABITQ_VERSION_SPLIT_1BIT_7BIT,
+            RaBitQuantizerParameter::DEFAULT_RABITQ_ERROR_RATE);
+        REQUIRE(quantizer.SupportSplitCodeStorage());
+        quantizer.TrainImpl(vecs.data(), count);
+
+        std::vector<uint8_t> full_code(quantizer.GetCodeSize());
+        std::vector<uint8_t> merged_code(quantizer.GetCodeSize());
+        std::vector<uint8_t> one_bit_code(quantizer.GetOneBitCodeSize());
+        std::vector<uint8_t> supplement_code(quantizer.GetSupplementCodeSize());
+
+        const auto* base = vecs.data();
+        REQUIRE(quantizer.EncodeOne(base, full_code.data()));
+        quantizer.SplitCode(full_code.data(), one_bit_code.data(), supplement_code.data());
+        quantizer.MergeSplitCode(one_bit_code.data(), supplement_code.data(), merged_code.data());
+        REQUIRE(std::memcmp(full_code.data(), merged_code.data(), full_code.size()) == 0);
+
+        auto computer = quantizer.FactoryComputer();
+        computer->SetQuery(base);
+        auto full_dist = quantizer.ComputeDist(*computer, full_code.data());
+        float split_dist = 0.0F;
+        REQUIRE(quantizer.ComputeDistWithSplitCode(
+            *computer, one_bit_code.data(), supplement_code.data(), &split_dist));
+        REQUIRE(std::abs(full_dist - split_dist) <= 1e-6F);
+
+        float one_bit_dist = 0.0F;
+        float lower_bound = std::numeric_limits<float>::max();
+        REQUIRE(quantizer.ComputeDistWithOneBitLowerBound(
+            *computer, one_bit_code.data(), &one_bit_dist, &lower_bound));
+        REQUIRE(std::isfinite(one_bit_dist));
+        REQUIRE(std::isfinite(lower_bound));
+        REQUIRE(lower_bound <= one_bit_dist + 1e-5F);
+    }
+}
+
 TEST_CASE("RaBitQ Encode and Decode", "[ut][RaBitQuantizer]") {
     bool use_fht = GENERATE(true, false);
     auto num_bits_per_dim_query = GENERATE(4, 32);

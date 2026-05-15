@@ -19,6 +19,8 @@
 namespace vsag {
 
 VSAG_DEFINE_SIMD_DISPATCH(RaBitQFloatBinaryIP, RaBitQFloatBinaryType);
+VSAG_DEFINE_SIMD_DISPATCH(RaBitQFloatBinaryIPBatch4, RaBitQFloatBinaryBatch4Type);
+VSAG_DEFINE_SIMD_DISPATCH(RaBitQFloatSplitCodeIP, RaBitQFloatSplitCodeType);
 VSAG_DEFINE_SIMD_DISPATCH_VPOPCNTDQ(RaBitQSQ4UBinaryIP, RaBitQSQ4UBinaryType);
 VSAG_DEFINE_SIMD_DISPATCH(FHTRotate, FHTRotateType);
 VSAG_DEFINE_SIMD_DISPATCH(KacsWalk, KacsWalkType);

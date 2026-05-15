@@ -15,10 +15,9 @@
 
 #include "sq4_uniform_quantizer.h"
 
-#include <vector>
-
 #include "impl/allocator/safe_allocator.h"
 #include "quantization/quantizer_test.h"
+#include "scalar_quantizer_test_utils.h"
 #include "unittest.h"
 using namespace vsag;
 
@@ -47,6 +46,13 @@ TEST_CASE("SQ4 Uniform Encode and Decode", "[ut][SQ4UniformQuantizer]") {
             TestQuantizerEncodeDecodeMetricSQ4Uniform<metrics[1]>(dim, count, error, error_same);
         }
     }
+}
+
+TEST_CASE("SQ4 Uniform encodes zero range to zero", "[ut][SQ4UniformQuantizer]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr uint64_t dim = 4;
+    SQ4UniformQuantizer<MetricType::METRIC_TYPE_L2SQR> quantizer(dim, allocator.get());
+    TestUniformZeroRangeEncodesToZero(quantizer, dim, dim / 2);
 }
 
 template <MetricType metric>

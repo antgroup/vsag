@@ -23,6 +23,7 @@
 #include "quantization/quantizer_headers.h"
 #include "quantization/sparse_quantization/sparse_quantizer.h"
 #include "quantization/transform_quantization/transform_quantizer_parameter.h"
+#include "rabitq_split_datacell.h"
 #include "sparse_vector_datacell.h"
 
 namespace vsag {
@@ -160,6 +161,14 @@ make_instance(const FlattenInterfaceParamPtr& param, const IndexCommonParam& com
             param, common_param, is_transform_quantizer);
     }
     if (actual_quant_type == QUANTIZATION_TYPE_VALUE_RABITQ) {
+        if (param->name == RABITQ_SPLIT_DATA_CELL) {
+            if (is_transform_quantizer) {
+                throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                    "rabitq split data cell does not support transform quantizer");
+            }
+            return std::make_shared<RaBitQSplitDataCell<metric, IOTemp>>(
+                param->quantizer_parameter, param->io_parameter, common_param);
+        }
         return make_instance_with_tq<RaBitQuantizer<metric>, IOTemp, metric>(
             param, common_param, is_transform_quantizer);
     }

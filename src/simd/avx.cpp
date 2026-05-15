@@ -1067,6 +1067,93 @@ RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, floa
 }
 
 void
+RaBitQFloatBinaryIPBatch4(const float* vector,
+                          const uint8_t* bits1,
+                          const uint8_t* bits2,
+                          const uint8_t* bits3,
+                          const uint8_t* bits4,
+                          uint64_t dim,
+                          float inv_sqrt_d,
+                          float* results) {
+#if defined(ENABLE_AVX)
+    generic::RaBitQFloatBinaryIPBatch4(
+        vector, bits1, bits2, bits3, bits4, dim, inv_sqrt_d, results);
+#else
+    sse::RaBitQFloatBinaryIPBatch4(vector, bits1, bits2, bits3, bits4, dim, inv_sqrt_d, results);
+#endif
+}
+
+float
+RaBitQFloatSplitCodeIP(const float* vector,
+                       const uint8_t* one_bit_code,
+                       const uint8_t* supplement_code,
+                       uint64_t dim,
+                       uint32_t supplement_bits) {
+#if defined(ENABLE_AVX)
+    if (dim == 0) {
+        return 0.0F;
+    }
+
+    const uint64_t plane_bytes = (dim + 7) / 8;
+    const uint32_t one_bit_weight = 1U << supplement_bits;
+    __m256 sum = _mm256_setzero_ps();
+
+    uint64_t d = 0;
+    for (; d + 8 <= dim; d += 8) {
+        float code_values[8];
+        const uint64_t byte_idx = d >> 3;
+        const uint8_t one_bit_byte = one_bit_code[byte_idx];
+        for (uint32_t lane = 0; lane < 8; ++lane) {
+            const uint8_t bit_mask = static_cast<uint8_t>(1U << lane);
+            uint32_t code = (one_bit_byte & bit_mask) != 0 ? one_bit_weight : 0U;
+            for (uint32_t bit = 0; bit < supplement_bits; ++bit) {
+                const auto* plane = supplement_code + static_cast<uint64_t>(bit) * plane_bytes;
+                if ((plane[byte_idx] & bit_mask) != 0) {
+                    code += 1U << bit;
+                }
+            }
+            code_values[lane] = static_cast<float>(code);
+        }
+
+        const __m256 code = _mm256_set_ps(code_values[7],
+                                          code_values[6],
+                                          code_values[5],
+                                          code_values[4],
+                                          code_values[3],
+                                          code_values[2],
+                                          code_values[1],
+                                          code_values[0]);
+        const __m256 vec = _mm256_loadu_ps(vector + d);
+        sum = _mm256_add_ps(_mm256_mul_ps(code, vec), sum);
+    }
+
+    alignas(32) float temp[8];
+    _mm256_store_ps(temp, sum);
+    float result = 0.0F;
+    for (float value : temp) {
+        result += value;
+    }
+
+    for (; d < dim; ++d) {
+        const uint64_t byte_idx = d >> 3;
+        const uint8_t bit_mask = static_cast<uint8_t>(1U << (d & 7));
+        uint32_t code = (one_bit_code[byte_idx] & bit_mask) != 0 ? one_bit_weight : 0U;
+        for (uint32_t bit = 0; bit < supplement_bits; ++bit) {
+            const auto* plane = supplement_code + static_cast<uint64_t>(bit) * plane_bytes;
+            if ((plane[byte_idx] & bit_mask) != 0) {
+                code += 1U << bit;
+            }
+        }
+        result += vector[d] * static_cast<float>(code);
+    }
+
+    return result;
+#else
+    return sse::RaBitQFloatSplitCodeIP(vector, one_bit_code, supplement_code, dim, supplement_bits);
+#endif
+}
+
+void
 DivScalar(const float* from, float* to, uint64_t dim, float scalar) {
 #if defined(ENABLE_AVX)
     if (dim == 0) {

@@ -54,6 +54,7 @@ struct HGraphDefaultParam {
     int remove_flag_bit = 8;
     bool use_attribute_filter = false;
     bool support_duplicate = false;
+    float duplicate_distance_threshold = 0.0F;
     bool use_reorder = true;
 };
 
@@ -108,7 +109,8 @@ generate_hgraph_param(const HGraphDefaultParam& param) {
         "type": "hgraph",
         "use_attribute_filter": {},
         "use_reorder": {},
-        "support_duplicate": {}
+        "support_duplicate": {},
+        "duplicate_distance_threshold": {}
     }})";
 
     return fmt::format(param_str,
@@ -123,7 +125,8 @@ generate_hgraph_param(const HGraphDefaultParam& param) {
                        param.precise_codes_quantization_type,
                        param.use_attribute_filter,
                        param.use_reorder,
-                       param.support_duplicate);
+                       param.support_duplicate,
+                       param.duplicate_distance_threshold);
 }
 
 // clang-format off
@@ -163,6 +166,11 @@ TEST_CASE("HGraph Parameters CheckCompatibility", "[ut][HGraphParameter][CheckCo
     TEST_COMPATIBILITY_CASE(
         "different use attribute filter", use_attribute_filter, true, false, false)
     TEST_COMPATIBILITY_CASE("different support duplicate", support_duplicate, true, false, false)
+    TEST_COMPATIBILITY_CASE("different duplicate distance threshold",
+                            duplicate_distance_threshold,
+                            0.0F,
+                            0.1F,
+                            false)
 }
 // clang-format on
 
@@ -178,6 +186,7 @@ TEST_CASE("HGraph maps support_duplicate to graph parameter", "[ut][HGraphParame
         "max_degree": 32,
         "ef_construction": 100,
         "support_duplicate": true,
+        "duplicate_distance_threshold": 0.25,
         "use_reorder": true
     })");
 
@@ -189,6 +198,7 @@ TEST_CASE("HGraph maps support_duplicate to graph parameter", "[ut][HGraphParame
 
     REQUIRE(typed_param != nullptr);
     REQUIRE(typed_param->support_duplicate);
+    REQUIRE(typed_param->duplicate_distance_threshold == 0.25F);
     REQUIRE(typed_param->bottom_graph_param->support_duplicate_);
 }
 

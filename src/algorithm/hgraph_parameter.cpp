@@ -55,7 +55,7 @@ HGraphParameter::FromJson(const JsonType& json) {
     const auto& base_codes_json = json[BASE_CODES_KEY];
     this->base_codes_param = CreateFlattenParam(base_codes_json);
 
-    if (use_reorder) {
+    if (use_reorder && this->reorder_source != HGRAPH_REORDER_SOURCE_BASE) {
         CHECK_ARGUMENT(json.Contains(PRECISE_CODES_KEY),
                        fmt::format("hgraph parameters must contains {}", PRECISE_CODES_KEY));
         const auto& precise_codes_json = json[PRECISE_CODES_KEY];
@@ -125,6 +125,9 @@ HGraphParameter::FromJson(const JsonType& json) {
             this->bottom_graph_param->support_duplicate_ = this->support_duplicate;
         }
     }
+    if (json.Contains(DUPLICATE_DISTANCE_THRESHOLD)) {
+        this->duplicate_distance_threshold = json[DUPLICATE_DISTANCE_THRESHOLD].GetFloat();
+    }
     if (json.Contains(SUPPORT_TOMBSTONE)) {
         this->support_tombstone = json[SUPPORT_TOMBSTONE].GetBool();
     }
@@ -137,11 +140,13 @@ HGraphParameter::ToJson() const {
 
     json[HGRAPH_USE_ELP_OPTIMIZER_KEY].SetBool(this->use_elp_optimizer);
     json[HGRAPH_IGNORE_REORDER_KEY].SetBool(this->ignore_reorder);
+    json[REORDER_SOURCE_KEY].SetString(this->reorder_source);
     json[BASE_CODES_KEY].SetJson(this->base_codes_param->ToJson());
     json[GRAPH_KEY].SetJson(this->bottom_graph_param->ToJson());
     json[EF_CONSTRUCTION_KEY].SetInt(this->ef_construction);
     json[ALPHA_KEY].SetFloat(this->alpha);
     json[SUPPORT_DUPLICATE].SetBool(this->support_duplicate);
+    json[DUPLICATE_DISTANCE_THRESHOLD].SetFloat(this->duplicate_distance_threshold);
     json[TRAIN_SAMPLE_COUNT_KEY].SetInt(this->train_sample_count);
     return json;
 }
@@ -164,7 +169,11 @@ HGraphParameter::CheckCompatibility(const ParamPtr& other) const {
         logger::error("HGraphParameter::CheckCompatibility: base_codes_param is not compatible");
         return false;
     }
-    if (have_reorder) {
+    if (have_reorder && this->reorder_source != hgraph_param->reorder_source) {
+        logger::error("HGraphParameter::CheckCompatibility: reorder_source is not compatible");
+        return false;
+    }
+    if (have_reorder && this->reorder_source != HGRAPH_REORDER_SOURCE_BASE) {
         if (not this->precise_codes_param ||
             not this->precise_codes_param->CheckCompatibility(hgraph_param->precise_codes_param)) {
             logger::error(
@@ -182,6 +191,11 @@ HGraphParameter::CheckCompatibility(const ParamPtr& other) const {
     }
     if (support_duplicate != hgraph_param->support_duplicate) {
         logger::error("HGraphParameter::CheckCompatibility: support_duplicate must be the same");
+        return false;
+    }
+    if (duplicate_distance_threshold != hgraph_param->duplicate_distance_threshold) {
+        logger::error(
+            "HGraphParameter::CheckCompatibility: duplicate_distance_threshold must be the same");
         return false;
     }
     return true;
@@ -210,6 +224,10 @@ HGraphSearchParameters::FromJson(const std::string& json_string) {
     if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_USE_EXTRA_INFO_FILTER)) {
         obj.use_extra_info_filter =
             params[INDEX_TYPE_HGRAPH][HGRAPH_USE_EXTRA_INFO_FILTER].GetBool();
+    }
+    if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_PARAMETER_RABITQ_ONE_BIT_SEARCH)) {
+        obj.rabitq_one_bit_search =
+            params[INDEX_TYPE_HGRAPH][HGRAPH_PARAMETER_RABITQ_ONE_BIT_SEARCH].GetBool();
     }
 
     return obj;

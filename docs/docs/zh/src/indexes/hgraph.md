@@ -67,6 +67,7 @@ auto result = index->KnnSearch(
 | `base_pq_dim` | int | `1` | PQ 子空间数（`pq` / `pqfs` 时必填） |
 | `build_thread_count` | int | `100` | 构建阶段并发线程数 |
 | `support_duplicate` | bool | `false` | 是否在插入时做重复 ID 检测 |
+| `duplicate_distance_threshold` | float | `0.0` | 重复判定距离阈值。大于 `0` 时按最近候选的距离判重；等于 `0` 时退化为当前编码 `memcmp` 判重 |
 | `support_remove` | bool | `false` | 是否支持 `Remove()` |
 | `store_raw_vector` | bool | `false` | 除量化副本外再保留原始向量（`cosine` 场景有用） |
 | `use_elp_optimizer` | bool | `false` | 构建完成后自动调优检索参数 |

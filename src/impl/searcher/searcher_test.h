@@ -15,8 +15,10 @@
 
 #pragma once
 
+#include <algorithm>
 #include <catch2/catch_template_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
+#include <utility>
 
 #include "algorithm/hnswlib/hnswalg.h"
 #include "algorithm/hnswlib/space_l2.h"
@@ -31,6 +33,57 @@
 #include "utils/visited_list.h"
 
 namespace vsag {
+
+class MockGraphDataCell : public GraphInterface {
+public:
+    explicit MockGraphDataCell(std::vector<std::vector<InnerIdType>> neighbors)
+        : neighbors_(std::move(neighbors)) {
+        total_count_ = static_cast<InnerIdType>(neighbors_.size());
+        max_capacity_ = static_cast<InnerIdType>(neighbors_.size());
+        maximum_degree_ = 0;
+        for (const auto& ids : neighbors_) {
+            maximum_degree_ = std::max<uint32_t>(maximum_degree_, ids.size());
+        }
+    }
+
+    void
+    InsertNeighborsById(InnerIdType id, const Vector<InnerIdType>& neighbor_ids) override {
+        neighbors_[id].assign(neighbor_ids.begin(), neighbor_ids.end());
+        maximum_degree_ = std::max<uint32_t>(maximum_degree_, neighbor_ids.size());
+    }
+
+    void
+    Resize(InnerIdType new_size) override {
+        neighbors_.resize(new_size);
+        total_count_ = new_size;
+        max_capacity_ = new_size;
+    }
+
+    void
+    GetNeighbors(InnerIdType id, Vector<InnerIdType>& neighbor_ids) const override {
+        neighbor_ids.assign(neighbors_[id].begin(), neighbors_[id].end());
+    }
+
+    uint32_t
+    GetNeighborSize(InnerIdType id) const override {
+        return static_cast<uint32_t>(neighbors_[id].size());
+    }
+
+    [[nodiscard]] bool
+    CheckIdExists(InnerIdType id) const override {
+        return id >= 0 and id < static_cast<InnerIdType>(neighbors_.size());
+    }
+
+    void
+    Prefetch(InnerIdType id, uint32_t neighbor_i) override {
+        if (neighbor_i < neighbors_[id].size()) {
+            vsag::Prefetch(neighbors_[id].data() + neighbor_i);
+        }
+    }
+
+private:
+    std::vector<std::vector<InnerIdType>> neighbors_;
+};
 
 class AdaptGraphDataCell : public GraphInterface {
 public:
