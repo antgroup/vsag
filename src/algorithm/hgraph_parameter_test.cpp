@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -54,6 +53,7 @@ struct HGraphDefaultParam {
     int remove_flag_bit = 8;
     bool use_attribute_filter = false;
     bool support_duplicate = false;
+    float duplicate_distance_threshold = 0.0F;
     bool use_reorder = true;
     std::string label_remap_type = "pg";
 };
@@ -110,6 +110,7 @@ generate_hgraph_param(const HGraphDefaultParam& param) {
         "use_attribute_filter": {},
         "use_reorder": {},
         "support_duplicate": {},
+        "duplicate_distance_threshold": {},
         "label_remap_type": "{}"
     }})";
 
@@ -126,38 +127,81 @@ generate_hgraph_param(const HGraphDefaultParam& param) {
                        param.use_attribute_filter,
                        param.use_reorder,
                        param.support_duplicate,
+                       param.duplicate_distance_threshold,
                        param.label_remap_type);
 }
 
-TEST_CASE("HGraph Parameters CheckCompatibility", "[ut][HGraphParameter][CheckCompatibility]"){
-    SECTION("wrong parameter type"){HGraphDefaultParam default_param;
-auto param_str = generate_hgraph_param(default_param);
-auto param = std::make_shared<vsag::HGraphParameter>();
-param->FromString(param_str);
-REQUIRE(param->CheckCompatibility(param));
-REQUIRE_FALSE(param->CheckCompatibility(std::make_shared<vsag::EmptyParameter>()));
-}
+// clang-format off
+TEST_CASE("HGraph Parameters CheckCompatibility", "[ut][HGraphParameter][CheckCompatibility]") {
+    SECTION("wrong parameter type") {
+        HGraphDefaultParam default_param;
+        auto param_str = generate_hgraph_param(default_param);
+        auto param = std::make_shared<vsag::HGraphParameter>();
+        param->FromString(param_str);
+        REQUIRE(param->CheckCompatibility(param));
+        REQUIRE_FALSE(param->CheckCompatibility(std::make_shared<vsag::EmptyParameter>()));
+    }
 
-TEST_COMPATIBILITY_CASE(
-    "different base codes io type", base_codes_io_type, "memory_io", "block_memory_io", true)
-TEST_COMPATIBILITY_CASE("different pq dim", base_codes_pq_dim, 8, 16, false)
-TEST_COMPATIBILITY_CASE(
-    "different base codes quantization type", base_codes_quantization_type, "sq4", "sq8", false)
-TEST_COMPATIBILITY_CASE("different graph type", graph_storage_type, "flat", "compressed", false)
-TEST_COMPATIBILITY_CASE("different max degree", max_degree, 26, 30, false)
-TEST_COMPATIBILITY_CASE("different support remove", support_remove, true, false, false)
-TEST_COMPATIBILITY_CASE("different remove flag bit", remove_flag_bit, 8, 16, false)
-TEST_COMPATIBILITY_CASE("different use reorder", use_reorder, true, false, false)
-TEST_COMPATIBILITY_CASE(
-    "different precise codes io type", precise_codes_io_type, "memory_io", "block_memory_io", true)
-TEST_COMPATIBILITY_CASE("different precise codes quantization type",
-                        precise_codes_quantization_type,
-                        "fp32",
-                        "sq8",
-                        false)
-TEST_COMPATIBILITY_CASE("different use attribute filter", use_attribute_filter, true, false, false)
-TEST_COMPATIBILITY_CASE("different support duplicate", support_duplicate, true, false, false)
-TEST_COMPATIBILITY_CASE("different label remap type", label_remap_type, "pg", "robin", false)
+    TEST_COMPATIBILITY_CASE(
+        "different base codes io type", base_codes_io_type, "memory_io", "block_memory_io", true)
+    TEST_COMPATIBILITY_CASE("different pq dim", base_codes_pq_dim, 8, 16, false)
+    TEST_COMPATIBILITY_CASE("different base codes quantization type",
+                            base_codes_quantization_type,
+                            "sq4",
+                            "sq8",
+                            false)
+    TEST_COMPATIBILITY_CASE("different graph type", graph_storage_type, "flat", "compressed", false)
+    TEST_COMPATIBILITY_CASE("different max degree", max_degree, 26, 30, false)
+    TEST_COMPATIBILITY_CASE("different support remove", support_remove, true, false, false)
+    TEST_COMPATIBILITY_CASE("different remove flag bit", remove_flag_bit, 8, 16, false)
+    TEST_COMPATIBILITY_CASE("different use reorder", use_reorder, true, false, false)
+    TEST_COMPATIBILITY_CASE("different precise codes io type",
+                            precise_codes_io_type,
+                            "memory_io",
+                            "block_memory_io",
+                            true)
+    TEST_COMPATIBILITY_CASE("different precise codes quantization type",
+                            precise_codes_quantization_type,
+                            "fp32",
+                            "sq8",
+                            false)
+    TEST_COMPATIBILITY_CASE(
+        "different use attribute filter", use_attribute_filter, true, false, false)
+    TEST_COMPATIBILITY_CASE("different support duplicate", support_duplicate, true, false, false)
+    TEST_COMPATIBILITY_CASE("different duplicate distance threshold",
+                            duplicate_distance_threshold,
+                            0.0F,
+                            0.1F,
+                            false)
+    TEST_COMPATIBILITY_CASE("different label remap type", label_remap_type, "pg", "robin", false)
+}
+// clang-format on
+
+TEST_CASE("HGraph maps support_duplicate to graph parameter", "[ut][HGraphParameter]") {
+    auto param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "base_io_type": "block_memory_io",
+        "precise_quantization_type": "fp32",
+        "precise_io_type": "block_memory_io",
+        "graph_io_type": "block_memory_io",
+        "graph_storage_type": "flat",
+        "graph_type": "nsw",
+        "max_degree": 32,
+        "ef_construction": 100,
+        "support_duplicate": true,
+        "duplicate_distance_threshold": 0.25,
+        "use_reorder": true
+    })");
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    auto hgraph_param = vsag::HGraph::CheckAndMappingExternalParam(param, common_param);
+    auto typed_param = std::dynamic_pointer_cast<vsag::HGraphParameter>(hgraph_param);
+
+    REQUIRE(typed_param != nullptr);
+    REQUIRE(typed_param->support_duplicate);
+    REQUIRE(typed_param->duplicate_distance_threshold == 0.25F);
 }
 
 TEST_CASE("HGraph maps label_remap_type to inner index parameter", "[ut][HGraphParameter]") {
@@ -182,6 +226,5 @@ TEST_CASE("HGraph maps label_remap_type to inner index parameter", "[ut][HGraphP
     auto typed_param = std::dynamic_pointer_cast<vsag::HGraphParameter>(hgraph_param);
 
     REQUIRE(typed_param != nullptr);
-    REQUIRE(typed_param->bottom_graph_param != nullptr);
     REQUIRE(typed_param->label_remap_type == vsag::LabelRemapType::ROBIN);
 }

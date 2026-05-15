@@ -121,6 +121,9 @@ HGraphParameter::FromJson(const JsonType& json) {
     if (json.Contains(SUPPORT_DUPLICATE)) {
         this->support_duplicate = json[SUPPORT_DUPLICATE].GetBool();
     }
+    if (json.Contains(DUPLICATE_DISTANCE_THRESHOLD)) {
+        this->duplicate_distance_threshold = json[DUPLICATE_DISTANCE_THRESHOLD].GetFloat();
+    }
     if (json.Contains(SUPPORT_TOMBSTONE)) {
         this->support_tombstone = json[SUPPORT_TOMBSTONE].GetBool();
     }
@@ -137,6 +140,7 @@ HGraphParameter::ToJson() const {
     json[EF_CONSTRUCTION_KEY].SetInt(this->ef_construction);
     json[ALPHA_KEY].SetFloat(this->alpha);
     json[SUPPORT_DUPLICATE].SetBool(this->support_duplicate);
+    json[DUPLICATE_DISTANCE_THRESHOLD].SetFloat(this->duplicate_distance_threshold);
     json[TRAIN_SAMPLE_COUNT_KEY].SetInt(this->train_sample_count);
     return json;
 }
@@ -177,6 +181,11 @@ HGraphParameter::CheckCompatibility(const ParamPtr& other) const {
     }
     if (support_duplicate != hgraph_param->support_duplicate) {
         logger::error("HGraphParameter::CheckCompatibility: support_duplicate must be the same");
+        return false;
+    }
+    if (duplicate_distance_threshold != hgraph_param->duplicate_distance_threshold) {
+        logger::error(
+            "HGraphParameter::CheckCompatibility: duplicate_distance_threshold must be the same");
         return false;
     }
     if (label_remap_type != hgraph_param->label_remap_type) {

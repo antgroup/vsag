@@ -376,5 +376,7 @@ private:
     ReorderInterfacePtr reorder_{nullptr};
 
     bool use_old_serial_format_{false};
+
+    float duplicate_distance_threshold_{0.0F};
 };
 }  // namespace vsag

@@ -765,6 +765,7 @@ Pyramid::add_one_point(const std::shared_ptr<IndexNode>& node,
         search_param.search_mode = KNN_SEARCH;
         if (label_table_->CompressDuplicateData()) {
             search_param.find_duplicate = true;
+            search_param.duplicate_query_id = inner_id;
         }
         auto codes = use_reorder_ ? precise_codes_ : base_codes_;
         bool update_entry_point;
