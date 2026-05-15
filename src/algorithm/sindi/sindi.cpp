@@ -625,8 +625,8 @@ SINDI::Deserialize(StreamReader& reader) {
     std::scoped_lock wlock(this->global_mutex_);
 
     bool has_datacell_rerank_format = false;
-    if (not deserialize_without_footer_) {
-        auto footer = Footer::Parse(reader);
+    auto footer = Footer::Parse(reader);
+    if (footer != nullptr) {
         auto metadata = footer->GetMetadata();
         JsonType jsonify_basic_info = metadata->Get("basic_info");
         // Check if the index parameter is compatible
@@ -647,6 +647,8 @@ SINDI::Deserialize(StreamReader& reader) {
                 jsonify_basic_info[SINDI_RERANK_FLAT_FORMAT_KEY].GetInt() ==
                 SINDI_RERANK_FLAT_FORMAT_DATACELL;
         }
+    } else if (not deserialize_without_footer_) {
+        logger::debug("SINDI footer not found, fallback to legacy deserialize path");
     }
     auto* reader_ptr = &reader;
 
