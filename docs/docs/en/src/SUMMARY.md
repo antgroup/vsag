@@ -30,6 +30,7 @@
 
 - [Build and Train](advanced/build_and_train.md)
 - [Range Search](advanced/range_search.md)
+- [Calculate Distance by ID](advanced/calc_distance_by_id.md)
 - [Filtered Search](advanced/filtered_search.md)
 - [Attribute Filter (Hybrid Search)](advanced/attribute_filter.md)
 - [Serialization](advanced/serialization.md)
