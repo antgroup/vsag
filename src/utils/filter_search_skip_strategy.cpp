@@ -15,7 +15,6 @@
 #include "filter_search_skip_strategy.h"
 
 #include <algorithm>
-#include <cmath>
 
 #include "linear_congruential_generator.h"
 #include "vsag_exception.h"
@@ -38,8 +37,8 @@ get_skip_check_probability(float valid_ratio, float skip_ratio) {
 
 class RandomFilterSearchSkipStrategy : public FilterSearchSkipStrategy {
 public:
-    explicit RandomFilterSearchSkipStrategy(double retain_ratio)
-        : skip_threshold_(1.0 - retain_ratio) {
+    explicit RandomFilterSearchSkipStrategy(double skip_probability)
+        : skip_threshold_(1.0 - skip_probability) {
     }
 
     bool
@@ -60,22 +59,22 @@ private:
 
 class AccumulativeFilterSearchSkipStrategy : public FilterSearchSkipStrategy {
 public:
-    explicit AccumulativeFilterSearchSkipStrategy(double retain_ratio)
-        : retain_ratio_(retain_ratio) {
+    explicit AccumulativeFilterSearchSkipStrategy(double skip_probability)
+        : skip_probability_(skip_probability) {
     }
 
     bool
     ShouldSkipFilterCheck() override {
-        accumulative_alpha_ += retain_ratio_;
+        accumulative_alpha_ += skip_probability_;
         if (accumulative_alpha_ >= 1.0) {
-            accumulative_alpha_ = std::fmod(accumulative_alpha_, 1.0);
+            accumulative_alpha_ -= 1.0;
             return true;
         }
         return false;
     }
 
 private:
-    double retain_ratio_{1.0};
+    double skip_probability_{1.0};
     double accumulative_alpha_{0.0};
 };
 
@@ -85,12 +84,12 @@ FilterSearchSkipStrategyPtr
 create_filter_search_skip_strategy(FilterSearchSkipStrategyType type,
                                    float valid_ratio,
                                    float skip_ratio) {
-    auto retain_ratio = get_skip_check_probability(valid_ratio, skip_ratio);
+    auto skip_probability = get_skip_check_probability(valid_ratio, skip_ratio);
     switch (type) {
         case FilterSearchSkipStrategyType::RANDOM:
-            return std::make_unique<RandomFilterSearchSkipStrategy>(retain_ratio);
+            return std::make_unique<RandomFilterSearchSkipStrategy>(skip_probability);
         case FilterSearchSkipStrategyType::DETERMINISTIC_ACCUMULATIVE:
-            return std::make_unique<AccumulativeFilterSearchSkipStrategy>(retain_ratio);
+            return std::make_unique<AccumulativeFilterSearchSkipStrategy>(skip_probability);
     }
     throw VsagException(ErrorType::INVALID_ARGUMENT, "Unknown FilterSearchSkipStrategyType");
 }
