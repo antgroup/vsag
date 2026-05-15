@@ -101,6 +101,7 @@ const char* const HNSW_PARAMETER_CONSTRUCTION = "ef_construction";
 const char* const HNSW_PARAMETER_USE_STATIC = "use_static";
 const char* const HNSW_PARAMETER_REVERSED_EDGES = "use_reversed_edges";
 const char* const HNSW_PARAMETER_SKIP_RATIO = "skip_ratio";
+const char* const HNSW_PARAMETER_SKIP_STRATEGY = "skip_strategy";
 
 const char* const PYRAMID_PARAMETER_BASE_CODES = "base_codes";
 

@@ -96,6 +96,7 @@ extern const char* const HNSW_PARAMETER_CONSTRUCTION;
 extern const char* const HNSW_PARAMETER_USE_STATIC;
 extern const char* const HNSW_PARAMETER_REVERSED_EDGES;
 extern const char* const HNSW_PARAMETER_SKIP_RATIO;
+extern const char* const HNSW_PARAMETER_SKIP_STRATEGY;
 
 extern const char* const PYRAMID_PARAMETER_BASE_CODES;
 

@@ -20,7 +20,7 @@
 #include "data_cell/graph_interface.h"
 #include "impl/basic_searcher.h"
 #include "prefetch.h"
-#include "utils/linear_congruential_generator.h"
+#include "utils/filter_search_skip_strategy.h"
 
 namespace hnswlib {
 
@@ -487,9 +487,9 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
                                    size_t ef,
                                    const vsag::FilterPtr is_id_allowed,
                                    const float skip_ratio,
+                                   vsag::FilterSearchSkipStrategyType skip_strategy_type,
                                    vsag::Allocator* allocator,
                                    vsag::IteratorFilterContext* iter_ctx) const {
-    vsag::LinearCongruentialGenerator generator;
     VisitedListPtr vl = visited_list_pool_->getFreeVisitedList();
     vl_type* visited_array = vl->mass;
     vl_type visited_array_tag = vl->curV;
@@ -499,7 +499,8 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
     MaxHeap candidate_set(search_allocator);
 
     float valid_ratio = is_id_allowed ? is_id_allowed->ValidRatio() : 1.0F;
-    float skip_threshold = valid_ratio == 1.0F ? 0 : (1 - ((1 - valid_ratio) * skip_ratio));
+    auto skip_strategy =
+        vsag::create_filter_search_skip_strategy(skip_strategy_type, valid_ratio, skip_ratio);
 
     float lower_bound;
     if (iter_ctx != nullptr && !iter_ctx->IsFirstUsed()) {
@@ -571,10 +572,13 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
             }
             if (visited_array[candidate_id] != visited_array_tag) {
                 visited_array[candidate_id] = visited_array_tag;
+                bool candidate_valid_checked = false;
                 if (is_id_allowed && not candidate_set.empty() &&
-                    generator.NextFloat() < skip_threshold &&
-                    not is_id_allowed->CheckValid(getExternalLabel(candidate_id))) {
-                    continue;
+                    not skip_strategy->ShouldSkipFilterCheck()) {
+                    candidate_valid_checked = true;
+                    if (not is_id_allowed->CheckValid(getExternalLabel(candidate_id))) {
+                        continue;
+                    }
                 }
                 float dist = 0;
                 char* currObj1 = getDataByInternalId(candidate_id);
@@ -588,7 +592,7 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
 #endif
 
                     if ((!has_deletions || !isMarkedDeleted(candidate_id)) &&
-                        ((!is_id_allowed) ||
+                        ((!is_id_allowed) || candidate_valid_checked ||
                          is_id_allowed->CheckValid(getExternalLabel(candidate_id)))) {
                         if (iter_ctx != nullptr && !iter_ctx->CheckPoint(candidate_id)) {
                             continue;
@@ -1600,6 +1604,7 @@ HierarchicalNSW::searchKnn(const void* query_data,
                            uint64_t ef,
                            const vsag::FilterPtr is_id_allowed,
                            const float skip_ratio,
+                           vsag::FilterSearchSkipStrategyType skip_strategy_type,
                            vsag::Allocator* allocator,
                            vsag::IteratorFilterContext* iter_ctx,
                            bool is_last_filter) const {
@@ -1629,6 +1634,7 @@ HierarchicalNSW::searchKnn(const void* query_data,
                                                         std::max(ef, k),
                                                         is_id_allowed,
                                                         skip_ratio,
+                                                        skip_strategy_type,
                                                         allocator,
                                                         iter_ctx);
     } else {
@@ -1677,6 +1683,7 @@ HierarchicalNSW::searchKnn(const void* query_data,
                                                             std::max(ef, k),
                                                             is_id_allowed,
                                                             skip_ratio,
+                                                            skip_strategy_type,
                                                             allocator,
                                                             iter_ctx);
         } else {
@@ -1685,6 +1692,7 @@ HierarchicalNSW::searchKnn(const void* query_data,
                                                            std::max(ef, k),
                                                            is_id_allowed,
                                                            skip_ratio,
+                                                           skip_strategy_type,
                                                            allocator,
                                                            iter_ctx);
         }
@@ -1809,8 +1817,9 @@ HierarchicalNSW::searchBaseLayerST<false, false>(
     size_t ef,
     const vsag::FilterPtr is_id_allowed,
     const float skip_ratio,
+    vsag::FilterSearchSkipStrategyType skip_strategy_type,
     vsag::Allocator* allocator,
-    vsag::IteratorFilterContext* iter_ctx = nullptr) const;
+    vsag::IteratorFilterContext* iter_ctx) const;
 
 template MaxHeap
 HierarchicalNSW::searchBaseLayerST<false, false>(InnerIdType ep_id,
