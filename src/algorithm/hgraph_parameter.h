@@ -63,6 +63,7 @@ public:
     float alpha{1.0F};
 
     bool support_duplicate{false};
+    float duplicate_distance_threshold{0.0F};
     bool support_tombstone{false};
 
     DataTypes data_type{DataTypes::DATA_TYPE_FLOAT};

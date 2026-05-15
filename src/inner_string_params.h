@@ -167,6 +167,7 @@ const char* const GRAPH_SUPPORT_REMOVE = "support_remove";
 const char* const REMOVE_FLAG_BIT = "remove_flag_bit";
 const char* const HOLD_MOLDS = "hold_molds";
 const char* const SUPPORT_DUPLICATE = "support_duplicate";
+const char* const DUPLICATE_DISTANCE_THRESHOLD = "duplicate_distance_threshold";
 const char* const SUPPORT_TOMBSTONE = "support_tombstone";
 const char* const SUPPORT_AUTOTUNE = "support_autotune";
 
@@ -200,6 +201,7 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"BASE_CODES_KEY", BASE_CODES_KEY},
     {"PRECISE_CODES_KEY", PRECISE_CODES_KEY},
     {"HGRAPH_SUPPORT_DUPLICATE", HGRAPH_SUPPORT_DUPLICATE},
+    {"HGRAPH_DUPLICATE_DISTANCE_THRESHOLD", HGRAPH_DUPLICATE_DISTANCE_THRESHOLD},
     {"IO_TYPE_VALUE_MEMORY_IO", IO_TYPE_VALUE_MEMORY_IO},
     {"IO_TYPE_VALUE_BLOCK_MEMORY_IO", IO_TYPE_VALUE_BLOCK_MEMORY_IO},
     {"IO_TYPE_VALUE_BUFFER_IO", IO_TYPE_VALUE_BUFFER_IO},

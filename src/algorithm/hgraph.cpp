@@ -97,6 +97,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
       reorder_by_base_(hgraph_param->reorder_source == HGRAPH_REORDER_SOURCE_BASE),
       ef_construct_(hgraph_param->ef_construction),
       alpha_(hgraph_param->alpha),
+      duplicate_distance_threshold_(hgraph_param->duplicate_distance_threshold),
       odescent_param_(hgraph_param->odescent_param),
       graph_type_(hgraph_param->graph_type),
       hierarchical_datacell_param_(hgraph_param->hierarchical_graph_param),
@@ -492,6 +493,12 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             },
         },
         {
+            HGRAPH_DUPLICATE_DISTANCE_THRESHOLD,
+            {
+                DUPLICATE_DISTANCE_THRESHOLD,
+            },
+        },
+        {
             HGRAPH_SUPPORT_DUPLICATE,
             {
                 GRAPH_KEY,
@@ -596,6 +603,7 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             "{ATTR_HAS_BUCKETS_KEY}": false
         },
         "{HGRAPH_SUPPORT_DUPLICATE}": false,
+        "{HGRAPH_DUPLICATE_DISTANCE_THRESHOLD}": 0.0,
         "{HGRAPH_SUPPORT_TOMBSTONE}": false,
         "{EF_CONSTRUCTION_KEY}": 400
     })";
@@ -1876,6 +1884,8 @@ HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
     param.topk = static_cast<int64_t>(ef_construct_);
     if (this->support_duplicate_) {
         param.find_duplicate = true;
+        param.duplicate_query_id = inner_id;
+        param.duplicate_distance_threshold = this->duplicate_distance_threshold_;
     }
 
     if (bottom_graph_->TotalCount() != 0) {

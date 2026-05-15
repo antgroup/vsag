@@ -17,6 +17,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstring>
 #include <limits>
 
 #include "algorithm/inner_index_interface.h"
@@ -514,7 +515,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     }
 
     // set duplicate id for query vector
-    if (inner_search_param.find_duplicate) {
+    if (inner_search_param.find_duplicate and not top_candidates->Empty()) {
         const auto* data = top_candidates->GetData();
         auto min_distance = data[0].first;
         auto min_index = data[0].second;
@@ -524,15 +525,13 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                 min_index = data[i].second;
             }
         }
-        bool need_release;
-        const auto* codes = flatten->GetCodesById(min_index, need_release);
-        Vector<uint8_t> encoded_query(flatten->code_size_, allocator_);
-        flatten->Encode(static_cast<const float*>(query), encoded_query.data());
-        if (std::memcmp(codes, encoded_query.data(), flatten->code_size_) == 0) {
+        if (inner_search_param.duplicate_distance_threshold > 0.0F) {
+            if (min_distance <= inner_search_param.duplicate_distance_threshold) {
+                inner_search_param.duplicate_id = min_index;
+            }
+        } else if (inner_search_param.duplicate_query_id < flatten->TotalCount() &&
+                   flatten->CompareVectors(inner_search_param.duplicate_query_id, min_index)) {
             inner_search_param.duplicate_id = min_index;
-        }
-        if (need_release) {
-            flatten->Release(codes);
         }
     }
 

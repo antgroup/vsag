@@ -15,6 +15,8 @@
 
 #include "basic_searcher.h"
 
+#include <vector>
+
 #include "algorithm/inner_index_interface.h"
 #include "datacell/flatten_interface.h"
 #include "searcher_test.h"
@@ -321,4 +323,66 @@ TEST_CASE("Optimize SQ4", "[ut][BasicOptimizer]") {
     optimizer_searcher->RegisterParameter(RuntimeParameter(PREFETCH_STRIDE_VISIT, 1, 3, 1));
     float end2end_improvement = optimizer_searcher->Optimize(searcher);
     auto loss_after = searcher->MockRun(stats);
+}
+
+TEST_CASE("BasicSearcher duplicate threshold keeps nearest owner",
+          "[ut][BasicSearcher][duplicate]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common;
+    common.dim_ = 2;
+    common.allocator_ = allocator;
+    common.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+
+    constexpr const char* param_temp = R"({{"type": "{}"}})";
+    auto quantizer_param = QuantizerParameter::GetQuantizerParameterByJson(
+        JsonType::Parse(fmt::format(param_temp, "fp32")));
+    auto io_param =
+        IOParameter::GetIOParameterByJson(JsonType::Parse(fmt::format(param_temp, "memory_io")));
+
+    auto vector_data_cell = std::make_shared<
+        FlattenDataCell<FP32Quantizer<vsag::MetricType::METRIC_TYPE_L2SQR>, MemoryIO>>(
+        quantizer_param, io_param, common);
+    vector_data_cell->SetQuantizer(
+        std::make_shared<FP32Quantizer<vsag::MetricType::METRIC_TYPE_L2SQR>>(2, allocator.get()));
+    vector_data_cell->SetIO(std::make_unique<MemoryIO>(allocator.get()));
+
+    std::vector<float> base_vectors = {0.0F, 0.0F, 0.3F, 0.0F};
+    std::vector<InnerIdType> ids = {0, 1};
+    vector_data_cell->Train(base_vectors.data(), ids.size());
+    vector_data_cell->BatchInsertVector(base_vectors.data(), ids.size(), ids.data());
+
+    auto graph_data_cell =
+        std::make_shared<MockGraphDataCell>(std::vector<std::vector<InnerIdType>>{{1}, {0}});
+    auto pool = std::make_shared<VisitedListPool>(
+        1, allocator.get(), vector_data_cell->TotalCount(), allocator.get());
+    auto searcher = std::make_shared<BasicSearcher>(common);
+
+    auto run_search = [&](const std::vector<float>& query,
+                          float threshold,
+                          InnerIdType duplicate_query_id =
+                              std::numeric_limits<InnerIdType>::max()) {
+        InnerSearchParam search_param;
+        search_param.ep = 0;
+        search_param.ef = 2;
+        search_param.topk = 2;
+        search_param.find_duplicate = true;
+        search_param.duplicate_query_id = duplicate_query_id;
+        search_param.duplicate_distance_threshold = threshold;
+        auto vl = pool->TakeOne();
+        QueryContext* ctx = nullptr;
+        auto result = searcher->Search(graph_data_cell,
+                                       vector_data_cell,
+                                       vl,
+                                       query.data(),
+                                       search_param,
+                                       LabelTablePtr{},
+                                       ctx);
+        REQUIRE(result->Size() == 2);
+        pool->ReturnOne(vl);
+        return search_param.duplicate_id;
+    };
+
+    REQUIRE(run_search({0.12F, 0.0F}, 0.01F) == -1);
+    REQUIRE(run_search({0.12F, 0.0F}, 0.02F) == 0);
+    REQUIRE(run_search({0.3F, 0.0F}, 0.0F, 1) == 1);
 }

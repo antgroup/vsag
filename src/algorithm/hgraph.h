@@ -431,5 +431,6 @@ private:
     bool use_old_serial_format_{false};
 
     bool support_duplicate_{false};
+    float duplicate_distance_threshold_{0.0F};
 };
 }  // namespace vsag

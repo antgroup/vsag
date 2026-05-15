@@ -179,6 +179,7 @@ const char* const HGRAPH_PARAMETER_HOPS_LIMIT = "hops_limit";
 const char* const HGRAPH_PARAMETER_RABITQ_ONE_BIT_SEARCH = "rabitq_one_bit_search";
 const char* const HGRAPH_EXTRA_INFO_SIZE = "extra_info_size";
 const char* const HGRAPH_SUPPORT_DUPLICATE = "support_duplicate";
+const char* const HGRAPH_DUPLICATE_DISTANCE_THRESHOLD = "duplicate_distance_threshold";
 const char* const HGRAPH_SUPPORT_TOMBSTONE = "support_tomb_stone";
 const char* const HGRAPH_LABEL_REMAP_TYPE = "label_remap_type";
 const char* const HGRAPH_USE_EXTRA_INFO_FILTER = "use_extra_info_filter";

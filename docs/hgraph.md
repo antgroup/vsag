@@ -52,6 +52,7 @@ For RabitQ split 1bit + 7bit storage/search, see [rabitq_split_1bit_7bit.md](rab
 | **Advanced** | ignore_reorder | bool | false | No | Skip precise quantization serialization |
 | **Advanced** | build_by_base | bool | false | No | Build index using base quantization |
 | **Features** | support_duplicate | bool | false | No | Enable duplicate data detection |
+| **Features** | duplicate_distance_threshold | float | 0.0 | No | Deduplicate by nearest-candidate distance when greater than 0; otherwise fall back to code memcmp |
 | **Features** | support_remove | bool | false | No | Enable deletion support |
 | **Features** | store_raw_vector | bool | false | No | Store raw vectors (cosine metric) |
 | **Features** | use_elp_optimizer | bool | false | No | Auto parameter optimization |
@@ -196,6 +197,12 @@ For RabitQ split 1bit + 7bit storage/search, see [rabitq_split_1bit_7bit.md](rab
 - **Optional Values**: true, false
 - **Default Value**: false
 
+### duplicate_distance_threshold
+- **Parameter Type**: float
+- **Parameter Description**: Duplicate-detection distance threshold. When greater than 0, the nearest candidate is treated as the duplicate owner if its distance is within the threshold; when 0, duplicate detection falls back to code memcmp with the nearest candidate
+- **Optional Values**: Any non-negative float
+- **Default Value**: 0.0
+
 ### store_raw_vector
 - **Parameter Type**: bool
 - **Parameter Description**: Whether to store raw vectors in the index, useful for cosine metric
@@ -234,10 +241,11 @@ means that the index is built using SQ8 quantization, with a maximum degree of 3
     "ef_construction": 400,
     "build_thread_count": 50,
     "support_duplicate": true,
+    "duplicate_distance_threshold": 0.02,
     "support_remove": true
 }
 ```
-means that the index uses PQ quantization with 64 subspaces, enables reordering with FP16 precision, supports duplicate detection and deletion, with maximum degree 64 and ef_construction 400.
+means that the index uses PQ quantization with 64 subspaces, enables reordering with FP16 precision, deduplicates inserts within distance threshold 0.02, supports deletion, with maximum degree 64 and ef_construction 400.
 
 ## Detailed Explanation of Search Parameters
 
