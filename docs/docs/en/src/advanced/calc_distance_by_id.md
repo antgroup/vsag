@@ -8,7 +8,7 @@ pipelines on top of VSAG.
 Two flavors are provided:
 
 - `CalcDistanceById`  — single ID, returns one distance.
-- `CalDistanceById`   — batch of IDs, returns a `Dataset` of distances.
+- `CalDistanceById`   — batch of IDs, returns a `DatasetPtr` containing distances.
 
 Each flavor has two overloads: one taking a raw `const float*` (dense vectors) and one taking
 a `DatasetPtr` (works for both dense and sparse vectors).
@@ -94,7 +94,11 @@ auto result = index->CalDistanceById(query_vector.data(), ids.data(), ids.size()
 if (result.has_value()) {
     const float* dists = result.value()->GetDistances();
     for (size_t i = 0; i < ids.size(); ++i) {
-        std::cout << ids[i] << " -> " << dists[i] << std::endl;
+        if (dists[i] == -1.0f) {
+            std::cout << ids[i] << " -> invalid ID" << std::endl;
+        } else {
+            std::cout << ids[i] << " -> " << dists[i] << std::endl;
+        }
     }
 }
 ```

@@ -6,7 +6,7 @@
 接口分为两种形式：
 
 - `CalcDistanceById`  — 单个 ID，返回单个距离值。
-- `CalDistanceById`   — 一批 ID，返回一个包含距离数组的 `Dataset`。
+- `CalDistanceById`   — 一批 ID，返回一个包含距离数组的 `DatasetPtr`。
 
 每种形式都有两个重载：一个接收 `const float*`（稠密向量），另一个接收 `DatasetPtr`
 （稠密或稀疏均可）。
@@ -86,7 +86,11 @@ auto result = index->CalDistanceById(query_vector.data(), ids.data(), ids.size()
 if (result.has_value()) {
     const float* dists = result.value()->GetDistances();
     for (size_t i = 0; i < ids.size(); ++i) {
-        std::cout << ids[i] << " -> " << dists[i] << std::endl;
+        if (dists[i] == -1.0f) {
+            std::cout << ids[i] << " -> 无效 ID" << std::endl;
+        } else {
+            std::cout << ids[i] << " -> " << dists[i] << std::endl;
+        }
     }
 }
 ```
