@@ -13,6 +13,16 @@ Two flavors are provided:
 Each flavor has two overloads: one taking a raw `const float*` (dense vectors) and one taking
 a `DatasetPtr` (works for both dense and sparse vectors).
 
+> **Note on naming.** The batch method is currently spelled `CalDistanceById`
+> (missing the `c` in `Calc`). This is a historical typo introduced when the
+> batch overload was first added; the two names do **not** indicate any
+> semantic difference beyond *single vs. batch*. The current spelling is
+> kept for backward compatibility and is expected to be **deprecated** in a
+> future release in favor of a correctly spelled name (proposed:
+> `CalcDistancesById`). New code is encouraged to centralize calls behind a
+> thin wrapper to ease the eventual migration. See
+> [issue #2068](https://github.com/antgroup/vsag/issues/2068) for tracking.
+
 ## API Overview
 
 ```cpp
