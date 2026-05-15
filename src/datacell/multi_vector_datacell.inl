@@ -15,7 +15,12 @@
 
 #pragma once
 
+#include <algorithm>
+#include <cstring>
+
+#include "common.h"
 #include "multi_vector_datacell.h"
+#include "utils/byte_buffer.h"
 #include "vsag/options.h"
 
 namespace vsag {
@@ -45,8 +50,39 @@ MultiVectorDataCell<QuantTmpl, IOTmpl>::Train(const void* data, uint64_t count) 
 template <typename QuantTmpl, typename IOTmpl>
 void
 MultiVectorDataCell<QuantTmpl, IOTmpl>::InsertVector(const void* vector, InnerIdType idx) {
-    throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                        "InsertVector is not yet implemented for MultiVectorDataCell");
+    CHECK_ARGUMENT(vector != nullptr, "multi-vector data is nullptr");
+    const MultiVector* multi_vector = static_cast<const MultiVector*>(vector);
+    CHECK_ARGUMENT(multi_vector->len_ > 0, "multi-vector token count must be greater than 0");
+    CHECK_ARGUMENT(multi_vector->vectors_ != nullptr, "multi-vector tokens are nullptr");
+    CHECK_ARGUMENT(multi_vector_dim_ > 0, "multi-vector dim must be greater than 0");
+
+    {
+        std::lock_guard lock(mutex_);
+        if (idx == std::numeric_limits<InnerIdType>::max()) {
+            idx = total_count_;
+            ++total_count_;
+        } else {
+            total_count_ = std::max(total_count_, idx + 1);
+        }
+    }
+
+    const uint64_t vector_bytes = static_cast<uint64_t>(multi_vector->len_) *
+                                  static_cast<uint64_t>(multi_vector_dim_) * sizeof(float);
+    const uint64_t code_size = sizeof(uint32_t) + vector_bytes;
+    ByteBuffer codes(code_size, allocator_);
+    std::memcpy(codes.data, &multi_vector->len_, sizeof(uint32_t));
+    std::memcpy(codes.data + sizeof(uint32_t), multi_vector->vectors_, vector_bytes);
+
+    uint64_t old_offset = 0;
+    {
+        std::lock_guard lock(current_offset_mutex_);
+        old_offset = current_offset_;
+        current_offset_ += code_size;
+    }
+    offset_io_->Write(reinterpret_cast<const uint8_t*>(&old_offset),
+                      sizeof(old_offset),
+                      static_cast<uint64_t>(idx) * sizeof(old_offset));
+    io_->Write(codes.data, code_size, old_offset);
 }
 
 template <typename QuantTmpl, typename IOTmpl>
@@ -54,8 +90,22 @@ void
 MultiVectorDataCell<QuantTmpl, IOTmpl>::BatchInsertVector(const void* vectors,
                                                           InnerIdType count,
                                                           InnerIdType* idx_vec) {
-    throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                        "BatchInsertVector is not yet implemented for MultiVectorDataCell");
+    CHECK_ARGUMENT(vectors != nullptr, "multi-vector array is nullptr");
+    const MultiVector* multi_vectors = static_cast<const MultiVector*>(vectors);
+    Vector<InnerIdType> reserved_idx(count, allocator_);
+    if (idx_vec == nullptr) {
+        idx_vec = reserved_idx.data();
+        {
+            std::lock_guard lock(mutex_);
+            for (InnerIdType i = 0; i < count; ++i) {
+                idx_vec[i] = total_count_ + i;
+            }
+            total_count_ += count;
+        }
+    }
+    for (InnerIdType i = 0; i < count; ++i) {
+        this->InsertVector(multi_vectors + i, idx_vec[i]);
+    }
 }
 
 template <typename QuantTmpl, typename IOTmpl>

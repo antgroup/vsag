@@ -18,6 +18,7 @@
 #include <fmt/format.h>
 
 #include "flatten_interface_parameter.h"
+#include "impl/logger/logger.h"
 #include "inner_string_params.h"
 #include "quantization/fp32_quantizer_parameter.h"
 #include "utils/pointer_define.h"
@@ -27,14 +28,14 @@ DEFINE_POINTER2(MultiVectorDataCellParam, MultiVectorDataCellParameter);
 
 class MultiVectorDataCellParameter : public FlattenInterfaceParameter {
 public:
-    explicit MultiVectorDataCellParameter()
-        : FlattenInterfaceParameter(MULTI_VECTOR_DATA_CELL) {
+    explicit MultiVectorDataCellParameter() : FlattenInterfaceParameter(MULTI_VECTOR_DATA_CELL) {
     }
 
     void
     FromJson(const JsonType& json) override {
-        CHECK_ARGUMENT(json.Contains(IO_PARAMS_KEY),
-                       fmt::format("multi-vector datacell parameters must contain {}", IO_PARAMS_KEY));
+        CHECK_ARGUMENT(
+            json.Contains(IO_PARAMS_KEY),
+            fmt::format("multi-vector datacell parameters must contain {}", IO_PARAMS_KEY));
         this->io_parameter = IOParameter::GetIOParameterByJson(json[IO_PARAMS_KEY]);
         this->quantizer_parameter = std::make_shared<FP32QuantizerParameter>();
     }
