@@ -8,7 +8,8 @@
 > [PR #2070](https://github.com/antgroup/vsag/pull/2070)。如有勘误或
 > "升级途中踩到的坑"反馈，欢迎提 issue。
 
-> 1.0 之后版本之间的兼容性规则在 [API 稳定性](api_stability.md) 中说明；
+> 1.0 之后版本之间的兼容性规则将由独立的 *API 稳定性* 页面说明，作为后续
+> PR 跟踪于 [#2069](https://github.com/antgroup/vsag/issues/2069)；
 > 本页只覆盖 0.18 → 1.0 的一次性迁移。
 
 ## 一图速览
@@ -94,7 +95,8 @@
 
 网站文档中 [创建索引](../guide/create_index.md)、
 [索引参数](index_parameters.md)、[序列化](../advanced/serialization.md)
-等页面在 1.0 中默认以 `hgraph` 作为示例。原有的示例代码
+等页面将在后续 PR 中改为默认使用 `hgraph` 示例，整体进度跟踪于
+[#2069](https://github.com/antgroup/vsag/issues/2069)。原有的示例代码
 `examples/cpp/101_index_hnsw.cpp`、`examples/cpp/102_index_diskann.cpp`
 仍保留以供参考。
 
@@ -225,7 +227,8 @@ VSAG 1.0 通过三种序列化接口（`BinarySet` / `ReaderSet`、文件流、
 - DiskANN 的磁盘文件仍独立管理；如果你正在从 `diskann` 迁出，把这些
   磁盘文件当作可丢弃数据，在新的索引类型上重建即可。
 
-之后版本之间的兼容性合约由 [API 稳定性](api_stability.md) 规范。
+之后版本之间的兼容性合约将由独立的 *API 稳定性* 页面规范，作为后续 PR
+跟踪于 [#2069](https://github.com/antgroup/vsag/issues/2069)。
 
 ## 默认值与行为变化
 
@@ -284,7 +287,7 @@ VSAG 1.0 通过三种序列化接口（`BinarySet` / `ReaderSet`、文件流、
 ## 参考
 
 - [版本日志](release_notes.md)
-- [API 稳定性](api_stability.md)
+- *API 稳定性*（规划中，见 [#2069](https://github.com/antgroup/vsag/issues/2069)）
 - [HGraph](../indexes/hgraph.md)
 - [IVF](../indexes/ivf.md)
 - [搜索路径 Allocator](../advanced/search_allocator.md)

@@ -11,9 +11,10 @@ you recompile or redeploy.
 > open an issue.
 
 > 1.0 follows [Semantic Versioning](https://semver.org/). The compatibility
-> rules going forward are spelled out in
-> [API Stability](api_stability.md); this page focuses on the one-time
-> 0.18 → 1.0 migration.
+> rules going forward will be spelled out in a dedicated *API Stability*
+> page, planned as a follow-up PR tracked in
+> [#2069](https://github.com/antgroup/vsag/issues/2069); this page focuses
+> on the one-time 0.18 → 1.0 migration.
 
 ## At a glance
 
@@ -100,10 +101,11 @@ if you have measured that memory is the binding constraint.
 
 The on-website pages [Creating an Index](../guide/create_index.md),
 [Index Parameters](index_parameters.md), and
-[Serialization](../advanced/serialization.md) use `hgraph` as the
-default example in 1.0. The legacy examples remain in
-`examples/cpp/101_index_hnsw.cpp` and `examples/cpp/102_index_diskann.cpp`
-for reference.
+[Serialization](../advanced/serialization.md) will be updated to use
+`hgraph` as the default example in follow-up PRs tracked in
+[#2069](https://github.com/antgroup/vsag/issues/2069). The legacy
+examples remain in `examples/cpp/101_index_hnsw.cpp` and
+`examples/cpp/102_index_diskann.cpp` for reference.
 
 ## Deprecated search API: `SearchParam` → `SearchRequest`
 
@@ -244,8 +246,9 @@ Recommendations:
   migrating away from `diskann`, treat the disk files as throwaway data
   and rebuild on the new index type.
 
-Going forward, the compatibility contract between minor versions is
-codified in [API Stability](api_stability.md).
+Going forward, the compatibility contract between minor versions will be
+codified in a dedicated *API Stability* page, planned as a follow-up PR
+tracked in [#2069](https://github.com/antgroup/vsag/issues/2069).
 
 ## Default-value and behavioral changes
 
@@ -314,7 +317,7 @@ contributing a short "what we hit" note so this page can keep improving.
 ## See also
 
 - [Release Notes](release_notes.md)
-- [API Stability](api_stability.md)
+- *API Stability* (planned, see [#2069](https://github.com/antgroup/vsag/issues/2069))
 - [HGraph](../indexes/hgraph.md)
 - [IVF](../indexes/ivf.md)
 - [Per-Search Allocator](../advanced/search_allocator.md)
