@@ -104,9 +104,89 @@ default example in 1.0. The legacy examples remain in
 `examples/cpp/101_index_hnsw.cpp` and `examples/cpp/102_index_diskann.cpp`
 for reference.
 
+## Deprecated search API: `SearchParam` → `SearchRequest`
+
+VSAG accumulated several `Index::KnnSearch` overloads over time. The 1.0
+public API converges on a single entry point that carries **all** search
+options through one struct:
+
+```cpp
+[[nodiscard]] tl::expected<DatasetPtr, Error>
+SearchWithRequest(const SearchRequest& request) const;
+```
+
+`SearchRequest` (declared in [`include/vsag/search_request.h`](https://github.com/antgroup/vsag/blob/main/include/vsag/search_request.h))
+supports KNN and range search, attribute filtering, callback filtering,
+bitset filtering, iterator search, per-search allocators, and "expected
+labels" reasoning — all from one struct. The older
+`Index::KnnSearch(query, k, SearchParam&)` overload is **deprecated** and
+will be removed in a future major release.
+
+### Field mapping
+
+| `SearchParam` (old) | `SearchRequest` (new) | Notes |
+|---------------------|-----------------------|-------|
+| `parameters` (`const std::string&`) | `params_str_` (`std::string`) | The JSON parameter string (e.g. `{"hgraph": {"ef_search": 200}}`). |
+| `filter` | `filter_` + `enable_filter_ = true` | The callback `Filter` object. Must explicitly enable. |
+| `allocator` | `search_allocator_` | Per-search arena allocator. See [Per-Search Allocator](../advanced/search_allocator.md). |
+| `iter_ctx` | `p_iter_ctx_` + `enable_iterator_search_ = true` | Note the `**` shape — `SearchRequest` takes `IteratorContext**`. |
+| `is_iter_filter` | folded into `enable_iterator_search_` | Iterator search is now opt-in via a single boolean. |
+| `is_last_search` | `is_last_search_` | Same semantics. |
+
+`SearchRequest` additionally exposes capabilities that `SearchParam` never
+had:
+
+- `mode_` (`SearchMode::KNN_SEARCH` / `SearchMode::RANGE_SEARCH`),
+  `topk_`, `radius_`, `limited_size_` — one struct for both KNN and
+  range search.
+- `enable_attribute_filter_` + `attribute_filter_str_` — SQL-like
+  attribute filtering; see [Attribute Filter](../advanced/attribute_filter.md).
+- `enable_bitset_filter_` + `bitset_filter_` — bitset-based filtering.
+- `expected_labels_` — for recall-debugging / reasoning analysis.
+
+### Code migration
+
+Before:
+
+```cpp
+vsag::SearchParam param(
+    /*iter_filter_flag=*/false,
+    R"({"hgraph": {"ef_search": 200}})",
+    /*filter=*/my_filter,
+    /*allocator=*/my_arena);
+auto result = index->KnnSearch(query, /*k=*/10, param).value();
+```
+
+After:
+
+```cpp
+vsag::SearchRequest req;
+req.query_              = query;
+req.mode_               = vsag::SearchMode::KNN_SEARCH;
+req.topk_               = 10;
+req.params_str_         = R"({"hgraph": {"ef_search": 200}})";
+req.enable_filter_      = static_cast<bool>(my_filter);
+req.filter_             = my_filter;
+req.search_allocator_   = my_arena;
+auto result = index->SearchWithRequest(req).value();
+```
+
+Range search collapses into the same call by switching `mode_`:
+
+```cpp
+req.mode_         = vsag::SearchMode::RANGE_SEARCH;
+req.radius_       = 0.42F;
+req.limited_size_ = 1000;   // -1 means no cap
+auto result = index->SearchWithRequest(req).value();
+```
+
+> **Tip.** `SearchRequest` is a plain struct with default values, so
+> wrapping it in a small helper / builder is straightforward and tends
+> to read more clearly than the multi-argument `SearchParam`
+> constructor.
+
 ## Outline of the remaining sections (to be expanded)
 
-- Deprecated search API and the `SearchRequest` transition.
 - `CalDistanceById` typo and `CalcDistancesById` migration path.
 - Serialization-format compatibility statement.
 - Default-value and behavioral changes.

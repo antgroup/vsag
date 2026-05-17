@@ -97,9 +97,83 @@
 `examples/cpp/101_index_hnsw.cpp`、`examples/cpp/102_index_diskann.cpp`
 仍保留以供参考。
 
+## 已弃用的检索 API：`SearchParam` → `SearchRequest`
+
+历史上 VSAG 累积了多个 `Index::KnnSearch` 重载。1.0 的公开 API 收敛到
+单一入口，把**所有**检索选项都通过一个 struct 传递：
+
+```cpp
+[[nodiscard]] tl::expected<DatasetPtr, Error>
+SearchWithRequest(const SearchRequest& request) const;
+```
+
+`SearchRequest`（声明在 [`include/vsag/search_request.h`](https://github.com/antgroup/vsag/blob/main/include/vsag/search_request.h)）
+同时支持 KNN 与范围检索、属性过滤、回调过滤、bitset 过滤、迭代器检索、
+每次检索独立的 allocator，以及 expected-labels 召回归因 —— 全部由一个
+struct 承载。旧的 `Index::KnnSearch(query, k, SearchParam&)` 重载
+**已弃用**，将在未来某个 major 版本中移除。
+
+### 字段映射
+
+| `SearchParam`（旧） | `SearchRequest`（新） | 说明 |
+|---------------------|-----------------------|------|
+| `parameters` (`const std::string&`) | `params_str_` (`std::string`) | JSON 参数字符串（如 `{"hgraph": {"ef_search": 200}}`）。 |
+| `filter` | `filter_` + `enable_filter_ = true` | 回调式 `Filter` 对象，需要显式开启。 |
+| `allocator` | `search_allocator_` | 每次检索使用的 arena allocator，见 [搜索路径 Allocator](../advanced/search_allocator.md)。 |
+| `iter_ctx` | `p_iter_ctx_` + `enable_iterator_search_ = true` | 注意指针层级 —— `SearchRequest` 接收 `IteratorContext**`。 |
+| `is_iter_filter` | 由 `enable_iterator_search_` 承担 | 迭代器检索改为一个布尔开关。 |
+| `is_last_search` | `is_last_search_` | 语义不变。 |
+
+`SearchRequest` 还额外暴露了 `SearchParam` 不具备的能力：
+
+- `mode_`（`SearchMode::KNN_SEARCH` / `SearchMode::RANGE_SEARCH`）、
+  `topk_`、`radius_`、`limited_size_` —— KNN 与范围检索共用同一 struct。
+- `enable_attribute_filter_` + `attribute_filter_str_` —— SQL 风格的
+  属性过滤，见 [属性过滤](../advanced/attribute_filter.md)。
+- `enable_bitset_filter_` + `bitset_filter_` —— bitset 过滤。
+- `expected_labels_` —— 用于召回调试 / 归因分析。
+
+### 代码迁移
+
+迁移前：
+
+```cpp
+vsag::SearchParam param(
+    /*iter_filter_flag=*/false,
+    R"({"hgraph": {"ef_search": 200}})",
+    /*filter=*/my_filter,
+    /*allocator=*/my_arena);
+auto result = index->KnnSearch(query, /*k=*/10, param).value();
+```
+
+迁移后：
+
+```cpp
+vsag::SearchRequest req;
+req.query_              = query;
+req.mode_               = vsag::SearchMode::KNN_SEARCH;
+req.topk_               = 10;
+req.params_str_         = R"({"hgraph": {"ef_search": 200}})";
+req.enable_filter_      = static_cast<bool>(my_filter);
+req.filter_             = my_filter;
+req.search_allocator_   = my_arena;
+auto result = index->SearchWithRequest(req).value();
+```
+
+范围检索只需切换 `mode_`：
+
+```cpp
+req.mode_         = vsag::SearchMode::RANGE_SEARCH;
+req.radius_       = 0.42F;
+req.limited_size_ = 1000;   // -1 表示不限制
+auto result = index->SearchWithRequest(req).value();
+```
+
+> **提示**：`SearchRequest` 是带默认值的 POD struct，包一层小型
+> builder/helper 通常比旧的多参数 `SearchParam` 构造函数更清晰。
+
 ## 后续章节大纲（待补充）
 
-- 已弃用的搜索 API 与 `SearchRequest` 迁移。
 - `CalDistanceById` 拼写问题与 `CalcDistancesById` 迁移路径。
 - 序列化格式兼容性声明。
 - 默认值与行为变化。
