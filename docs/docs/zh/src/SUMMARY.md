@@ -56,6 +56,7 @@
 
 # 资源
 
+- [升级到 VSAG 1.0](resources/migration_to_1_0.md)
 - [版本日志](resources/release_notes.md)
 - [路线图](resources/roadmap_2025.md)
 - [开源社区](resources/community.md)
