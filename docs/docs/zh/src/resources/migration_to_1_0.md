@@ -1,11 +1,12 @@
 # 升级到 VSAG 1.0
 
-> **状态：** 活文档 —— 章节会在 PR
-> [#2070](https://github.com/antgroup/vsag/pull/2070) 中逐步补全，
-> 整体进度跟踪在 [issue #2069](https://github.com/antgroup/vsag/issues/2069)。
-
 本页汇总了从 **VSAG 0.18.x**（及更早版本）平滑升级到 **VSAG 1.0** 所需了解的
 全部内容。请在重新编译或重新部署前先阅读本页。
+
+> 进度跟踪在
+> [issue #2069](https://github.com/antgroup/vsag/issues/2069) /
+> [PR #2070](https://github.com/antgroup/vsag/pull/2070)。如有勘误或
+> "升级途中踩到的坑"反馈，欢迎提 issue。
 
 > 1.0 之后版本之间的兼容性规则在 [API 稳定性](api_stability.md) 中说明；
 > 本页只覆盖 0.18 → 1.0 的一次性迁移。
@@ -172,9 +173,122 @@ auto result = index->SearchWithRequest(req).value();
 > **提示**：`SearchRequest` 是带默认值的 POD struct，包一层小型
 > builder/helper 通常比旧的多参数 `SearchParam` 构造函数更清晰。
 
-## 后续章节大纲（待补充）
+## `CalDistanceById` 拼写问题与 `CalcDistancesById` 迁移路径
 
-- `CalDistanceById` 拼写问题与 `CalcDistancesById` 迁移路径。
+`Index` 上有两种按 ID 计算距离的 API：
+
+- **单条** ID，拼写正确：`CalcDistanceById(...)`。
+- **批量** IDs，历史上**拼写有误**：`CalDistanceById(...)`（少了
+  `Calc` 中的 `c`）。
+
+该命名不一致在 [按 ID 计算距离](../advanced/calc_distance_by_id.md)
+里有说明，并由 [#2068](https://github.com/antgroup/vsag/issues/2068)
+跟踪。
+
+**1.0 的处理：**
+
+- 两个名字都继续可用；批量方法**不会**在 1.0 中改名。
+- 未来某个版本会把批量方法重命名为 `CalcDistancesById`，旧名字会以
+  弃用别名的形式至少保留一个 minor 版本。
+
+**现在应该怎么做：**
+
+- 批量调用继续使用 `CalDistanceById`。
+- 在自己的代码中包一层 thin wrapper，未来重命名时只改 wrapper：
+
+  ```cpp
+  // wrappers/vsag_calc_distance.h
+  inline auto CalcDistances(const vsag::IndexPtr& index,
+                            const float* query,
+                            const int64_t* ids,
+                            int64_t count,
+                            bool precise = true) {
+      // 当前：转发到拼写错误的旧名字。
+      return index->CalDistanceById(query, ids, count, precise);
+  }
+  ```
+
+## 序列化兼容性
+
+VSAG 1.0 通过三种序列化接口（`BinarySet` / `ReaderSet`、文件流、
+自定义 `WriteFuncType`）均可**读取** 0.18.x 序列化产物；磁盘布局与
+元数据格式在前向方向上兼容。
+
+建议：
+
+- 升级完成后**重新序列化一次**，让新产物使用 1.0 的布局改进。
+- 反向兼容（1.0 → 0.18.x）**不支持**。升级窗口期内，每个生产集群应固定
+  在单一 reader 版本上。
+- `Deserialize` 仍要求目标索引为空，且构建配置（`dim`、`dtype`、
+  `metric_type` 等）与原索引一致；详见
+  [序列化](../advanced/serialization.md)。
+- DiskANN 的磁盘文件仍独立管理；如果你正在从 `diskann` 迁出，把这些
+  磁盘文件当作可丢弃数据，在新的索引类型上重建即可。
+
+之后版本之间的兼容性合约由 [API 稳定性](api_stability.md) 规范。
+
+## 默认值与行为变化
+
+升级 1.0 后建议确认：
+
+- **MKL 默认关闭。** `VSAG_ENABLE_INTEL_MKL`（CMake：
+  `ENABLE_INTEL_MKL`）默认 `OFF`。在原本期望开启 MKL 的 Intel CPU
+  环境，请在构建时显式 `VSAG_ENABLE_INTEL_MKL=ON`。
+  [标准环境性能参考](performance.md) 的数据是在 MKL 关闭下采集的。
+- **HGraph 默认值。** `max_degree` 默认 `64`，`ef_construction` 默认
+  `400`，`graph_type` 默认 `"nsw"`。构建子对象的 key 为
+  `index_param`；`base_quantization_type` 是必填字段。
+- **`support_remove` / `support_duplicate` 默认关闭。** 如果你依赖
+  `Remove()` 或之前实验分支上的去重能力，请在 `index_param` 中显式
+  开启。
+- **`store_raw_vector`** 默认关闭，只在确实需要在构建后访问原始向量
+  时再开启（例如基础表征已被量化、需要 `cosine` 重排）。
+
+本页未覆盖到的行为变化欢迎提 issue 反馈。
+
+## 构建系统与打包说明
+
+- **工具链版本约束不变。** `clang-format` / `clang-tidy` 必须**严格
+  等于 15**；GCC ≥ 9.4，Clang ≥ 13.0，CMake ≥ 3.18。
+- **ABI 变体不变。** 根据下游工具链选择对应的发行包：
+  - `make dist-pre-cxx11-abi` —— GCC `_GLIBCXX_USE_CXX11_ABI=0`。
+  - `make dist-cxx11-abi` —— GCC `_GLIBCXX_USE_CXX11_ABI=1`。
+  - `make dist-libcxx` —— Clang libc++。
+- **Python wheel。** 继续支持 `pip install pyvsag`；源码构建用
+  `make pyvsag PY_VERSION=3.10` 或 `make pyvsag-all`。
+- **Node.js / TypeScript。** `npm install vsag`。
+
+## 升级操作清单
+
+驱动从 0.18.x 升级到 1.0 的一个简短有序清单：
+
+1. **通读本页**，并速览 [版本日志](release_notes.md)。
+2. **盘点代码中的弃用用法**：
+   - `vsag::Factory::CreateIndex("hnsw", ...)` / `("diskann", ...)`。
+   - `Index::KnnSearch(query, k, SearchParam&)` 以及直接构造
+     `vsag::SearchParam` 的代码。
+   - 直接调用 `CalDistanceById`（批量重载）的位置；现在包一层
+     wrapper，未来改名只需改 wrapper。
+3. **规划替换**，优先选 HGraph 与 `SearchRequest`。
+4. **预发环境验证。** 用同样的 `dim` / `metric_type` 构建 HGraph
+   （或 IVF），通过 [`eval_performance`](eval.md) 对比召回与延迟。
+5. **序列化往返验证。** 用 1.0 二进制加载 0.18.x 产物，重新序列化后
+   再次加载。
+6. **灰度滚动。** 旧版本集群作为回滚池保留，直到新集群在某个 1.0.x
+   小版本上稳定一段时间。
+7. **更新 CI/CD 版本约束。** `pip install pyvsag==1.0.*`、
+   `npm install vsag@^1.0.0`、C++ 发行包固定到匹配的 ABI 变体。
+
+升级完成后，欢迎提 issue 或贡献一段"实战记录"，帮助本页持续完善。
+
+## 参考
+
+- [版本日志](release_notes.md)
+- [API 稳定性](api_stability.md)
+- [HGraph](../indexes/hgraph.md)
+- [IVF](../indexes/ivf.md)
+- [搜索路径 Allocator](../advanced/search_allocator.md)
+- [序列化](../advanced/serialization.md)
 - 序列化格式兼容性声明。
 - 默认值与行为变化。
 - 构建系统 / 打包相关说明。

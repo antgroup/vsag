@@ -1,13 +1,14 @@
 # Migrating to VSAG 1.0
 
-> **Status:** living document — sections are being added on PR
-> [#2070](https://github.com/antgroup/vsag/pull/2070) as part of the 1.0
-> documentation readiness effort tracked in
-> [issue #2069](https://github.com/antgroup/vsag/issues/2069).
-
 This page collects everything users coming from **VSAG 0.18.x** (and
 earlier) need to know to upgrade smoothly to **VSAG 1.0**. Read it before
 you recompile or redeploy.
+
+> Tracked in
+> [issue #2069](https://github.com/antgroup/vsag/issues/2069) /
+> [PR #2070](https://github.com/antgroup/vsag/pull/2070). Corrections
+> and "what we hit during the upgrade" feedback are welcome — please
+> open an issue.
 
 > 1.0 follows [Semantic Versioning](https://semver.org/). The compatibility
 > rules going forward are spelled out in
@@ -185,9 +186,139 @@ auto result = index->SearchWithRequest(req).value();
 > to read more clearly than the multi-argument `SearchParam`
 > constructor.
 
-## Outline of the remaining sections (to be expanded)
+## `CalDistanceById` typo and the `CalcDistancesById` path
 
-- `CalDistanceById` typo and `CalcDistancesById` migration path.
+VSAG exposes two flavors of distance-by-ID APIs on `Index`:
+
+- **Single** ID, correctly spelled: `CalcDistanceById(...)`.
+- **Batch** IDs, *misspelled* historically: `CalDistanceById(...)`
+  (missing the `c` in `Calc`).
+
+The naming inconsistency is documented in
+[Calculate Distance by ID](../advanced/calc_distance_by_id.md) and tracked
+in [#2068](https://github.com/antgroup/vsag/issues/2068).
+
+**What 1.0 does:**
+
+- Both names continue to work; the batch method is **not** renamed in
+  1.0.
+- The batch method will be renamed to `CalcDistancesById` in a future
+  release, with the old name kept as a deprecated alias for at least
+  one minor cycle.
+
+**What you should do today:**
+
+- Keep using `CalDistanceById` for batch calls.
+- Centralize the call behind a thin wrapper in your codebase. When the
+  rename ships, you only need to update the wrapper:
+
+  ```cpp
+  // wrappers/vsag_calc_distance.h
+  inline auto CalcDistances(const vsag::IndexPtr& index,
+                            const float* query,
+                            const int64_t* ids,
+                            int64_t count,
+                            bool precise = true) {
+      // Today: forwards to the typo'd name.
+      return index->CalDistanceById(query, ids, count, precise);
+  }
+  ```
+
+## Serialization compatibility
+
+VSAG 1.0 can **read** indexes serialized by 0.18.x via any of the three
+serialization interfaces (`BinarySet` / `ReaderSet`, file streams, custom
+`WriteFuncType`); the on-disk layout and metadata format are compatible
+on the forward path.
+
+Recommendations:
+
+- After upgrading, **re-serialize once** so newly-produced artefacts use
+  any layout improvements that ship with 1.0.
+- The reverse direction (1.0 → 0.18.x) is **not** supported. Pin a single
+  reader version per production cluster during the upgrade window.
+- `Deserialize` still requires an empty target index whose build
+  configuration (`dim`, `dtype`, `metric_type`, …) matches the original;
+  see [Serialization](../advanced/serialization.md).
+- DiskANN's on-disk shards remain managed independently; if you are
+  migrating away from `diskann`, treat the disk files as throwaway data
+  and rebuild on the new index type.
+
+Going forward, the compatibility contract between minor versions is
+codified in [API Stability](api_stability.md).
+
+## Default-value and behavioral changes
+
+Things to double-check after pulling 1.0:
+
+- **MKL is off by default.** `VSAG_ENABLE_INTEL_MKL` (CMake:
+  `ENABLE_INTEL_MKL`) defaults to `OFF`. On Intel CPUs where MKL was
+  expected, set `VSAG_ENABLE_INTEL_MKL=ON` at build time. The
+  [reference performance](performance.md) numbers are gathered with MKL
+  off.
+- **HGraph defaults.** `max_degree` defaults to `64`, `ef_construction`
+  to `400`, `graph_type` to `"nsw"`. The build sub-object key is
+  `index_param`; `base_quantization_type` is required.
+- **`support_remove` / `support_duplicate` are opt-in.** If you relied
+  on `Remove()` or on duplicate detection from an experimental branch,
+  enable them explicitly under `index_param`.
+- **`store_raw_vector`** is opt-in and only needed when you require the
+  raw vector after build (e.g. for `cosine` re-ranking when the base
+  representation is quantized).
+
+If a behavioral change surfaces that is not covered here, please file an
+issue and link this page.
+
+## Build-system and packaging notes
+
+- **Toolchain pins remain unchanged.** `clang-format` / `clang-tidy`
+  must be **version 15 exactly**; GCC ≥ 9.4, Clang ≥ 13.0, CMake ≥ 3.18.
+- **ABI variants are unchanged.** Choose the redistributable tarball
+  matching your downstream toolchain:
+  - `make dist-pre-cxx11-abi` — GCC `_GLIBCXX_USE_CXX11_ABI=0`.
+  - `make dist-cxx11-abi` — GCC `_GLIBCXX_USE_CXX11_ABI=1`.
+  - `make dist-libcxx` — Clang's libc++.
+- **Python wheels.** `pip install pyvsag` continues to work; build from
+  source via `make pyvsag PY_VERSION=3.10` or `make pyvsag-all`.
+- **Node.js / TypeScript.** `npm install vsag`.
+
+## Upgrade checklist
+
+A short, ordered list to drive an upgrade from 0.18.x to 1.0:
+
+1. **Read this page** end-to-end and skim the
+   [release notes](release_notes.md).
+2. **Inventory deprecated usage** in your codebase:
+   - `vsag::Factory::CreateIndex("hnsw", ...)` and `("diskann", ...)`.
+   - `Index::KnnSearch(query, k, SearchParam&)` and any code that
+     constructs `vsag::SearchParam` directly.
+   - Direct calls to `CalDistanceById` (the batch overload); add a
+     wrapper now to soften the future rename.
+3. **Plan replacements** using the tables in this page; aim for HGraph
+   and `SearchRequest` first.
+4. **Test in staging.** Build an HGraph (and/or IVF) index with the same
+   `dim` / `metric_type` as your existing one; compare recall and
+   latency via [`eval_performance`](eval.md).
+5. **Validate serialization round-trip.** Load 0.18.x artefacts with the
+   1.0 binary, then re-serialize and reload.
+6. **Roll out gradually.** Keep one cluster on 0.18.x as a fall-back
+   until the new cluster has been stable for at least one release of
+   1.0.x.
+7. **Update CI/CD pinning.** `pip install pyvsag==1.0.*`,
+   `npm install vsag@^1.0.0`, and pin the C++ tarball to the matching
+   ABI variant.
+
+When the upgrade is complete, please consider filing an issue or
+contributing a short "what we hit" note so this page can keep improving.
+
+## See also
+
+- [Release Notes](release_notes.md)
+- [API Stability](api_stability.md)
+- [HGraph](../indexes/hgraph.md)
+- [IVF](../indexes/ivf.md)
+- [Per-Search Allocator](../advanced/search_allocator.md)
+- [Serialization](../advanced/serialization.md)
 - Serialization-format compatibility statement.
 - Default-value and behavioral changes.
 - Build-system / packaging notes.
