@@ -13,15 +13,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Example: 8-bit RaBitQ (1+7bit split) on top of an HGraph index.
+// Example: 8-bit multi-bit RaBitQ on top of an HGraph index.
 //
-// This uses the v4 RabitQ "split_1bit_7bit" layout:
-//   - rabitq_bits_per_dim_base  = 8   (1 sign bit + 7 supplement bits per dim)
-//   - rabitq_bits_per_dim_query = 32  (float query, required by v4 split)
-//   - base_codes_type           = "rabitq_split"
-//   - rabitq_version            = "split_1bit_7bit"
-//
-// See docs/rabitq_split_1bit_7bit.md for the full parameter reference.
+// This uses the standard RabitQ path with multi-bit base encoding:
+//   - base_quantization_type    = "rabitq"
+//   - rabitq_bits_per_dim_base  = 8
+//   - rabitq_bits_per_dim_query = 32
+//   - rabitq_version            = "standard" (default)
+//   - base_codes_type           = "flatten" (default)
 
 #include <vsag/vsag.h>
 
@@ -58,11 +57,11 @@ main(int /*argc*/, char** /*argv*/) {
 
     /******************* Create HGraph Index w/ 8-bit RaBitQ ***************/
     // Notes:
-    //   - rabitq_bits_per_dim_base = 8 selects the 1+7bit configuration.
-    //   - rabitq_version must be "split_1bit_7bit" to enable the v4 path.
-    //   - rabitq_bits_per_dim_query must be 32 in v4 split.
+    //   - This keeps the older multi-bit RabitQ path, without split storage.
+    //   - rabitq_bits_per_dim_base = 8 enables the 8-bit base code.
+    //   - rabitq_bits_per_dim_query = 32 keeps query quantization at fp32.
     //   - use_reorder + precise_quantization_type = "fp32" gives full-precision
-    //     reorder on top of the compressed RaBitQ base codes.
+    //     reorder on top of the compressed RabitQ base codes.
     std::string hgraph_build_parameters = R"(
     {
         "dtype": "float32",
@@ -70,8 +69,6 @@ main(int /*argc*/, char** /*argv*/) {
         "dim": 128,
         "index_param": {
             "base_quantization_type": "rabitq",
-            "base_codes_type": "rabitq_split",
-            "rabitq_version": "split_1bit_7bit",
             "rabitq_bits_per_dim_base": 8,
             "rabitq_bits_per_dim_query": 32,
             "rabitq_error_rate": 1.9,
@@ -106,15 +103,11 @@ main(int /*argc*/, char** /*argv*/) {
     query->NumElements(1)->Dim(dim)->Float32Vectors(query_vector.data())->Owner(false);
 
     /******************* KnnSearch *****************/
-    // rabitq_one_bit_search:
-    //   true  -> graph traversal uses only the 1-bit sign code (fastest).
-    //   false -> graph traversal uses the full 1+7bit code (more accurate).
-    // Reorder with the fp32 precise codes is applied on top either way.
+    // Standard RabitQ search uses the existing HGraph path.
     auto hgraph_search_parameters = R"(
     {
         "hgraph": {
-            "ef_search": 100,
-            "rabitq_one_bit_search": true
+            "ef_search": 100
         }
     }
     )";
