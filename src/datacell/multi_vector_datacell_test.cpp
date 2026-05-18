@@ -14,7 +14,9 @@
 
 #include <fmt/format.h>
 
+#include <cmath>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 #include "datacell/flatten_interface.h"
@@ -69,6 +71,30 @@ FillMultiVectors(const std::vector<uint32_t>& token_counts,
         multi_vectors[doc_id].len_ = token_counts[doc_id];
         multi_vectors[doc_id].vectors_ = token_storage[doc_id].data();
     }
+}
+
+float
+CalMaxSimIP(const float* query,
+            uint32_t query_token_count,
+            const float* doc,
+            uint32_t doc_token_count,
+            uint32_t dim) {
+    float total = 0.0F;
+    for (uint32_t q = 0; q < query_token_count; ++q) {
+        float min_dist = std::numeric_limits<float>::max();
+        for (uint32_t d = 0; d < doc_token_count; ++d) {
+            float ip = 0.0F;
+            for (uint32_t k = 0; k < dim; ++k) {
+                ip += query[q * dim + k] * doc[d * dim + k];
+            }
+            float dist = 1.0F - ip;
+            if (dist < min_dist) {
+                min_dist = dist;
+            }
+        }
+        total += min_dist;
+    }
+    return total;
 }
 
 }  // namespace
@@ -143,6 +169,51 @@ TEST_CASE("MultiVectorDataCell GetCodesById reads back inserted data",
         }
 
         data_cell->Release(codes);
+    }
+}
+
+TEST_CASE("MultiVectorDataCell Query computes MaxSim distances", "[ut][MultiVectorDataCell]") {
+    const std::string io_type = GENERATE("memory_io", "block_memory_io");
+    constexpr uint32_t dim = 4;
+
+    // doc0: 2 tokens
+    std::vector<float> doc0_data = {0.1F, 0.3F, 0.5F, 0.7F, 0.2F, 0.4F, 0.6F, 0.8F};
+    // doc1: 3 tokens
+    std::vector<float> doc1_data = {
+        0.9F, 0.1F, 0.2F, 0.3F, 0.4F, 0.8F, 0.1F, 0.5F, 0.3F, 0.6F, 0.7F, 0.2F};
+    // doc2: 1 token
+    std::vector<float> doc2_data = {0.5F, 0.3F, 0.4F, 0.6F};
+
+    MultiVector doc0{2, doc0_data.data()};
+    MultiVector doc1{3, doc1_data.data()};
+    MultiVector doc2{1, doc2_data.data()};
+    std::vector<MultiVector> docs = {doc0, doc1, doc2};
+
+    std::shared_ptr<Allocator> allocator = SafeAllocator::FactoryDefaultAllocator();
+    FlattenInterfacePtr data_cell = MakeMultiVectorDataCell(io_type, dim, allocator);
+    data_cell->Resize(static_cast<InnerIdType>(docs.size()));
+    for (uint64_t i = 0; i < docs.size(); ++i) {
+        data_cell->InsertVector(docs.data() + i, static_cast<InnerIdType>(i));
+    }
+
+    // query: 2 tokens
+    std::vector<float> query_data = {0.7F, 0.2F, 0.3F, 0.1F, 0.1F, 0.5F, 0.8F, 0.4F};
+    MultiVector query_mv{2, query_data.data()};
+    ComputerInterfacePtr computer = data_cell->FactoryComputer(&query_mv);
+    REQUIRE(computer != nullptr);
+
+    std::vector<InnerIdType> idx = {0, 1, 2};
+    std::vector<float> dists(3, 0.0F);
+    data_cell->Query(
+        dists.data(), computer, idx.data(), static_cast<InnerIdType>(idx.size()), nullptr);
+
+    constexpr float kEpsilon = 1e-5F;
+    const std::vector<std::pair<const float*, uint32_t>> doc_list = {
+        {doc0_data.data(), 2}, {doc1_data.data(), 3}, {doc2_data.data(), 1}};
+    for (uint64_t i = 0; i < doc_list.size(); ++i) {
+        float expected =
+            CalMaxSimIP(query_data.data(), 2, doc_list[i].first, doc_list[i].second, dim);
+        REQUIRE(std::abs(dists[i] - expected) < kEpsilon);
     }
 }
 

@@ -174,8 +174,14 @@ MultiVectorDataCell<QuantTmpl, IOTmpl>::Deserialize(lvalue_or_rvalue<StreamReade
 template <typename QuantTmpl, typename IOTmpl>
 ComputerInterfacePtr
 MultiVectorDataCell<QuantTmpl, IOTmpl>::FactoryComputer(const void* query) {
-    throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                        "FactoryComputer is not yet implemented for MultiVectorDataCell");
+    CHECK_ARGUMENT(query != nullptr, "query is nullptr");
+    const MultiVector* multi_vector = static_cast<const MultiVector*>(query);
+    CHECK_ARGUMENT(multi_vector->len_ > 0, "query token count must be greater than 0");
+    CHECK_ARGUMENT(multi_vector->vectors_ != nullptr, "query vectors are nullptr");
+
+    auto computer = std::make_shared<MultiVectorComputer>(multi_vector_dim_, metric_, allocator_);
+    computer->SetQuery(multi_vector->vectors_, multi_vector->len_);
+    return computer;
 }
 
 template <typename QuantTmpl, typename IOTmpl>
@@ -185,8 +191,22 @@ MultiVectorDataCell<QuantTmpl, IOTmpl>::Query(float* result_dists,
                                               const InnerIdType* idx,
                                               InnerIdType id_count,
                                               QueryContext* ctx) {
-    throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                        "Query is not yet implemented for MultiVectorDataCell");
+    auto* mv_computer = dynamic_cast<MultiVectorComputer*>(computer.get());
+    CHECK_ARGUMENT(mv_computer != nullptr, "computer is not a MultiVectorComputer");
+
+    for (InnerIdType i = 0; i < id_count; ++i) {
+        bool need_release = false;
+        const uint8_t* codes = this->GetCodesById(idx[i], need_release);
+
+        uint32_t token_count = 0;
+        std::memcpy(&token_count, codes, sizeof(uint32_t));
+
+        mv_computer->ComputeDist(codes + sizeof(uint32_t), token_count, result_dists + i);
+
+        if (need_release) {
+            this->Release(codes);
+        }
+    }
 }
 
 template <typename QuantTmpl, typename IOTmpl>
