@@ -160,15 +160,23 @@ MultiVectorDataCell<QuantTmpl, IOTmpl>::InMemory() const {
 template <typename QuantTmpl, typename IOTmpl>
 void
 MultiVectorDataCell<QuantTmpl, IOTmpl>::Serialize(StreamWriter& writer) {
-    throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                        "Serialize is not yet implemented for MultiVectorDataCell");
+    FlattenInterface::Serialize(writer);
+    StreamWriter::WriteObj(writer, multi_vector_dim_);
+    StreamWriter::WriteObj(writer, current_offset_);
+    this->offset_io_->Serialize(writer);
+    this->io_->Serialize(writer);
+    this->quantizer_->Serialize(writer);
 }
 
 template <typename QuantTmpl, typename IOTmpl>
 void
 MultiVectorDataCell<QuantTmpl, IOTmpl>::Deserialize(lvalue_or_rvalue<StreamReader> reader) {
-    throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                        "Deserialize is not yet implemented for MultiVectorDataCell");
+    FlattenInterface::Deserialize(reader);
+    StreamReader::ReadObj(reader, multi_vector_dim_);
+    StreamReader::ReadObj(reader, current_offset_);
+    this->offset_io_->Deserialize(reader);
+    this->io_->Deserialize(reader);
+    this->quantizer_->Deserialize(reader);
 }
 
 template <typename QuantTmpl, typename IOTmpl>

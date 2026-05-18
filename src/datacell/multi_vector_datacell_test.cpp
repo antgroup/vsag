@@ -17,12 +17,14 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <sstream>
 #include <vector>
 
 #include "datacell/flatten_interface.h"
 #include "datacell/multi_vector_datacell_parameter.h"
 #include "impl/allocator/safe_allocator.h"
 #include "index_common_param.h"
+#include "storage/serialization.h"
 #include "unittest.h"
 #include "vsag/dataset.h"
 
@@ -214,6 +216,60 @@ TEST_CASE("MultiVectorDataCell Query computes MaxSim distances", "[ut][MultiVect
         float expected =
             CalMaxSimIP(query_data.data(), 2, doc_list[i].first, doc_list[i].second, dim);
         REQUIRE(std::abs(dists[i] - expected) < kEpsilon);
+    }
+}
+
+TEST_CASE("MultiVectorDataCell Serialize/Deserialize round-trip", "[ut][MultiVectorDataCell]") {
+    const std::string io_type = GENERATE("memory_io", "block_memory_io");
+    constexpr uint32_t dim = 4;
+
+    std::vector<float> doc0_data = {0.1F, 0.3F, 0.5F, 0.7F, 0.2F, 0.4F, 0.6F, 0.8F};
+    std::vector<float> doc1_data = {
+        0.9F, 0.1F, 0.2F, 0.3F, 0.4F, 0.8F, 0.1F, 0.5F, 0.3F, 0.6F, 0.7F, 0.2F};
+    std::vector<float> doc2_data = {0.5F, 0.3F, 0.4F, 0.6F};
+
+    MultiVector doc0{2, doc0_data.data()};
+    MultiVector doc1{3, doc1_data.data()};
+    MultiVector doc2{1, doc2_data.data()};
+    std::vector<MultiVector> docs = {doc0, doc1, doc2};
+
+    std::shared_ptr<Allocator> allocator = SafeAllocator::FactoryDefaultAllocator();
+    FlattenInterfacePtr original = MakeMultiVectorDataCell(io_type, dim, allocator);
+    original->Resize(static_cast<InnerIdType>(docs.size()));
+    for (uint64_t i = 0; i < docs.size(); ++i) {
+        original->InsertVector(docs.data() + i, static_cast<InnerIdType>(i));
+    }
+
+    std::vector<float> query_data = {0.7F, 0.2F, 0.3F, 0.1F, 0.1F, 0.5F, 0.8F, 0.4F};
+    MultiVector query_mv{2, query_data.data()};
+
+    std::vector<InnerIdType> idx = {0, 1, 2};
+    std::vector<float> dists_before(3, 0.0F);
+    {
+        ComputerInterfacePtr computer = original->FactoryComputer(&query_mv);
+        original->Query(
+            dists_before.data(), computer, idx.data(), static_cast<InnerIdType>(idx.size()), nullptr);
+    }
+
+    std::stringstream ss;
+    IOStreamWriter writer(ss);
+    original->Serialize(writer);
+
+    FlattenInterfacePtr restored = MakeMultiVectorDataCell(io_type, dim, allocator);
+    IOStreamReader reader(ss);
+    restored->Deserialize(reader);
+
+    REQUIRE(restored->TotalCount() == original->TotalCount());
+
+    std::vector<float> dists_after(3, 0.0F);
+    {
+        ComputerInterfacePtr computer = restored->FactoryComputer(&query_mv);
+        restored->Query(
+            dists_after.data(), computer, idx.data(), static_cast<InnerIdType>(idx.size()), nullptr);
+    }
+
+    for (uint64_t i = 0; i < 3; ++i) {
+        REQUIRE(dists_before[i] == dists_after[i]);
     }
 }
 
