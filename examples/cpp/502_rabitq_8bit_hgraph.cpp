@@ -71,7 +71,6 @@ main(int /*argc*/, char** /*argv*/) {
             "base_quantization_type": "rabitq",
             "rabitq_bits_per_dim_base": 8,
             "rabitq_bits_per_dim_query": 32,
-            "rabitq_error_rate": 1.9,
             "max_degree": 32,
             "ef_construction": 300,
             "alpha": 1.2,
