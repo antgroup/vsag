@@ -273,4 +273,60 @@ TEST_CASE("MultiVectorDataCell Serialize/Deserialize round-trip", "[ut][MultiVec
     }
 }
 
+TEST_CASE("MultiVectorDataCell rejects invalid InsertVector inputs",
+          "[ut][MultiVectorDataCell]") {
+    constexpr uint32_t dim = 4;
+    std::shared_ptr<Allocator> allocator = SafeAllocator::FactoryDefaultAllocator();
+    FlattenInterfacePtr data_cell = MakeMultiVectorDataCell("memory_io", dim, allocator);
+    data_cell->Resize(4);
+
+    SECTION("nullptr vector") {
+        REQUIRE_THROWS(data_cell->InsertVector(nullptr, 0));
+    }
+
+    SECTION("zero token count") {
+        std::vector<float> dummy(dim, 1.0F);
+        MultiVector mv{0, dummy.data()};
+        REQUIRE_THROWS(data_cell->InsertVector(&mv, 0));
+    }
+
+    SECTION("nullptr tokens") {
+        MultiVector mv{2, nullptr};
+        REQUIRE_THROWS(data_cell->InsertVector(&mv, 0));
+    }
+}
+
+TEST_CASE("MultiVectorDataCell rejects invalid BatchInsertVector inputs",
+          "[ut][MultiVectorDataCell]") {
+    constexpr uint32_t dim = 4;
+    std::shared_ptr<Allocator> allocator = SafeAllocator::FactoryDefaultAllocator();
+    FlattenInterfacePtr data_cell = MakeMultiVectorDataCell("memory_io", dim, allocator);
+
+    SECTION("nullptr vectors array") {
+        REQUIRE_THROWS(data_cell->BatchInsertVector(nullptr, 3, nullptr));
+    }
+}
+
+TEST_CASE("MultiVectorDataCell rejects invalid FactoryComputer inputs",
+          "[ut][MultiVectorDataCell]") {
+    constexpr uint32_t dim = 4;
+    std::shared_ptr<Allocator> allocator = SafeAllocator::FactoryDefaultAllocator();
+    FlattenInterfacePtr data_cell = MakeMultiVectorDataCell("memory_io", dim, allocator);
+
+    SECTION("nullptr query") {
+        REQUIRE_THROWS(data_cell->FactoryComputer(nullptr));
+    }
+
+    SECTION("zero query token count") {
+        std::vector<float> dummy(dim, 1.0F);
+        MultiVector mv{0, dummy.data()};
+        REQUIRE_THROWS(data_cell->FactoryComputer(&mv));
+    }
+
+    SECTION("nullptr query vectors") {
+        MultiVector mv{2, nullptr};
+        REQUIRE_THROWS(data_cell->FactoryComputer(&mv));
+    }
+}
+
 }  // namespace vsag
