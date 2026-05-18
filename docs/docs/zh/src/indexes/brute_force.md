@@ -57,7 +57,7 @@ auto result = index->KnnSearch(query, /*topk=*/10, "{}").value();
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `base_quantization_type` | string | `"fp32"` | `fp32`、`fp16`、`bf16`、`sq8`、`sq8_uniform`、`sq4_uniform`、`pq`、`pqfs`、`rabitq` |
+| `base_quantization_type` | string | `"fp32"` | `fp32`、`fp16`、`bf16`、`sq8`、`sq4`、`sq8_uniform`、`sq4_uniform`、`pq`、`pqfs`、`rabitq` —— 各量化器细节见[量化章节](../quantization/README.md) |
 | `use_attribute_filter` | bool | `false` | 启用属性过滤（参见 [属性过滤](../advanced/attribute_filter.md)） |
 
 > **关于 `store_raw_vector` 的说明。** `store_raw_vector` 字段会被共用的
@@ -81,7 +81,7 @@ auto result = index->KnnSearch(query, /*topk=*/10, "{}").value();
 }
 ```
 
-当 `base_quantization_type` 选择了需要训练的量化器（`sq8`、`sq8_uniform`、`sq4_uniform`、
+当 `base_quantization_type` 选择了需要训练的量化器（`sq8`、`sq4`、`sq8_uniform`、`sq4_uniform`、
 `pq`、`pqfs`、`rabitq`）时，`Build` 会先用传入的数据集训练量化器，此时召回率不再保证
 100%。只有 `fp32`、`fp16`、`bf16` 不需要训练，能保持精确距离（仅受浮点数值精度影响）。
 
@@ -124,7 +124,7 @@ BruteForce 声明的能力标志如下（参见 `BruteForce::InitFeatures`，
 | `SUPPORT_CHECK_ID_EXIST` / `SUPPORT_CLONE` / `SUPPORT_ESTIMATE_MEMORY` / `SUPPORT_GET_MEMORY_USAGE` | 标准的内省与生命周期接口。 |
 | `SUPPORT_SERIALIZE_BINARY_SET` / `SUPPORT_SERIALIZE_FILE` / `SUPPORT_SERIALIZE_WRITE_FUNC` | 完整的保存能力。 |
 | `SUPPORT_DESERIALIZE_BINARY_SET` / `SUPPORT_DESERIALIZE_FILE` / `SUPPORT_DESERIALIZE_READER_SET` | 完整的加载能力。（没有对应的 `DESERIALIZE_WRITE_FUNC`，读路径使用 `READER_SET` 形式。） |
-| `NEED_TRAIN` | 当 `base_quantization_type` 是 `sq8`、`sq8_uniform`、`sq4_uniform`、`pq`、`pqfs`、`rabitq` 之一时声明。 |
+| `NEED_TRAIN` | 当 `base_quantization_type` 是 `sq8`、`sq4`、`sq8_uniform`、`sq4_uniform`、`pq`、`pqfs`、`rabitq` 之一时声明。 |
 
 BruteForce **不支持** 的能力包括：`SUPPORT_UPDATE_VECTOR_CONCURRENT`、
 `SUPPORT_UPDATE_ID_CONCURRENT`、`SUPPORT_EXPORT_MODEL`。

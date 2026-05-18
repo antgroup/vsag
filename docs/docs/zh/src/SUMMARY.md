@@ -19,6 +19,18 @@
 - [Pyramid](indexes/pyramid.md)
 - [BruteForce](indexes/brute_force.md)
 
+# 量化
+
+- [总览](quantization/README.md)
+- [FP32（基线）](quantization/fp32.md)
+- [半精度浮点（FP16 / BF16）](quantization/fp16_bf16.md)
+- [标量量化（SQ4 / SQ8）](quantization/sq.md)
+- [Uniform 标量量化（SQ4 / SQ8 Uniform）](quantization/sq_uniform.md)
+- [乘积量化（PQ）](quantization/pq.md)
+- [PQ FastScan](quantization/pqfs.md)
+- [RaBitQ](quantization/rabitq.md)
+- [量化变换（TQ）](advanced/quantization_transform.md)
+
 # 开发者指南
 
 - [代码目录结构](development/code_structure.md)
@@ -42,7 +54,6 @@
 - [内存-磁盘混合索引](advanced/hybrid_index.md)
 - [Extra Info（附加信息）](advanced/extra_info.md)
 - [索引生命周期管理](advanced/index_lifecycle.md)
-- [量化变换](advanced/quantization_transform.md)
 
 # 性能与调优
 

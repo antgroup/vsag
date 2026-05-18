@@ -1,0 +1,126 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 380" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13">
+  <title>PQ FastScan block layout and SIMD lookup</title>
+  <desc>FastScan stores 4-bit PQ codes for 16 vectors interleaved per sub-space so a single 128-bit SIMD register holds one column of 16 codes and a pshufb-style lookup decodes 16 partial distances in one instruction.</desc>
+  <style>
+    .blk { fill: #ffffff; stroke: #cfcbc7; stroke-width: 1; }
+    .cell { fill: #fce897; stroke: #b88a16; stroke-width: 0.8; }
+    .cell-col { fill: #f4bd37; stroke: #b88a16; stroke-width: 1.2; }
+    .lut { fill: #ffffff; stroke: #3e3a39; stroke-width: 1; }
+    .lut-cell { fill: #ffffff; stroke: #cfcbc7; }
+    .lbl { fill: #1a1614; }
+    .lbl-muted { fill: #6e6a66; }
+    .arr { stroke: #3e3a39; stroke-width: 1.2; fill: none; }
+  </style>
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#3e3a39"/>
+    </marker>
+  </defs>
+
+  <text class="lbl" x="20" y="24">FastScan block &#x2014; 16 个向量 &#xD7; M 个子空间，4-bit code 交错排布</text>
+
+  <!-- block of 16x8 cells (M=8 shown) -->
+  <g transform="translate(40,50)">
+    <rect class="blk" x="-4" y="-4" width="408" height="248"/>
+    <text class="lbl-muted" x="-30" y="14">v&#x2080;</text>
+    <text class="lbl-muted" x="-30" y="29">v&#x2081;</text>
+    <text class="lbl-muted" x="-30" y="44">v&#x2082;</text>
+    <text class="lbl-muted" x="-30" y="59">...</text>
+    <text class="lbl-muted" x="-30" y="224">v&#x2081;&#x2085;</text>
+
+    <text class="lbl-muted" x="0" y="-12">m=0</text>
+    <text class="lbl-muted" x="50" y="-12">m=1</text>
+    <text class="lbl-muted" x="100" y="-12">m=2</text>
+    <text class="lbl-muted" x="150" y="-12">m=3</text>
+    <text class="lbl-muted" x="350" y="-12">m=M&#x2212;1</text>
+
+    <!-- grid: 8 cols x 16 rows -->
+    <g>
+      <!-- column m=2 highlighted -->
+      <g>
+        <rect class="cell-col" x="100" y="0" width="50" height="240"/>
+      </g>
+      <!-- cells filling -->
+      <g fill="#fce897" stroke="#b88a16" stroke-width="0.6">
+        <!-- 16 rows x 8 cols -->
+        <g transform="translate(0,0)">
+          <rect class="cell" x="0"   y="0" width="50" height="15"/>
+          <rect class="cell" x="50"  y="0" width="50" height="15"/>
+          <rect class="cell-col" x="100" y="0" width="50" height="15"/>
+          <rect class="cell" x="150" y="0" width="50" height="15"/>
+          <rect class="cell" x="200" y="0" width="50" height="15"/>
+          <rect class="cell" x="250" y="0" width="50" height="15"/>
+          <rect class="cell" x="300" y="0" width="50" height="15"/>
+          <rect class="cell" x="350" y="0" width="50" height="15"/>
+        </g>
+        <g transform="translate(0,15)">
+          <rect class="cell" x="0"   y="0" width="50" height="15"/>
+          <rect class="cell" x="50"  y="0" width="50" height="15"/>
+          <rect class="cell-col" x="100" y="0" width="50" height="15"/>
+          <rect class="cell" x="150" y="0" width="50" height="15"/>
+          <rect class="cell" x="200" y="0" width="50" height="15"/>
+          <rect class="cell" x="250" y="0" width="50" height="15"/>
+          <rect class="cell" x="300" y="0" width="50" height="15"/>
+          <rect class="cell" x="350" y="0" width="50" height="15"/>
+        </g>
+        <g transform="translate(0,30)">
+          <rect class="cell" x="0"   y="0" width="50" height="15"/>
+          <rect class="cell" x="50"  y="0" width="50" height="15"/>
+          <rect class="cell-col" x="100" y="0" width="50" height="15"/>
+          <rect class="cell" x="150" y="0" width="50" height="15"/>
+          <rect class="cell" x="200" y="0" width="50" height="15"/>
+          <rect class="cell" x="250" y="0" width="50" height="15"/>
+          <rect class="cell" x="300" y="0" width="50" height="15"/>
+          <rect class="cell" x="350" y="0" width="50" height="15"/>
+        </g>
+        <g transform="translate(0,45)" opacity="0.55">
+          <rect class="cell" x="0"   y="0" width="50" height="15"/>
+          <rect class="cell" x="50"  y="0" width="50" height="15"/>
+          <rect class="cell-col" x="100" y="0" width="50" height="15"/>
+          <rect class="cell" x="150" y="0" width="50" height="15"/>
+          <rect class="cell" x="200" y="0" width="50" height="15"/>
+          <rect class="cell" x="250" y="0" width="50" height="15"/>
+          <rect class="cell" x="300" y="0" width="50" height="15"/>
+          <rect class="cell" x="350" y="0" width="50" height="15"/>
+        </g>
+        <!-- skip middle rows visually -->
+        <g transform="translate(0,225)">
+          <rect class="cell" x="0"   y="0" width="50" height="15"/>
+          <rect class="cell" x="50"  y="0" width="50" height="15"/>
+          <rect class="cell-col" x="100" y="0" width="50" height="15"/>
+          <rect class="cell" x="150" y="0" width="50" height="15"/>
+          <rect class="cell" x="200" y="0" width="50" height="15"/>
+          <rect class="cell" x="250" y="0" width="50" height="15"/>
+          <rect class="cell" x="300" y="0" width="50" height="15"/>
+          <rect class="cell" x="350" y="0" width="50" height="15"/>
+        </g>
+      </g>
+      <text class="lbl-muted" x="180" y="130">&#x22EE; &#x22EE; &#x22EE; &#x22EE;</text>
+    </g>
+
+    <!-- one column annotated as a SIMD register -->
+    <text class="lbl" x="160" y="270">列 m=2：16 个 code &#xD7; 4 bits = 64 bits</text>
+    <text class="lbl-muted" x="160" y="288">（128-bit SIMD 寄存器的一半）</text>
+  </g>
+
+  <!-- arrow to LUT -->
+  <path class="arr" d="M455 170 L515 170" marker-end="url(#arr)"/>
+  <text class="lbl" x="465" y="158">pshufb</text>
+
+  <!-- LUT 16 entries -->
+  <g transform="translate(525,50)">
+    <text class="lbl" x="0" y="14">LUT（每 query / 每 m）</text>
+    <rect class="lut" x="0" y="22" width="80" height="240"/>
+    <g font-size="11" fill="#3e3a39">
+      <rect class="lut-cell" x="0" y="22" width="80" height="15"/><text x="6" y="33">d&#x2080;</text>
+      <rect class="lut-cell" x="0" y="37" width="80" height="15"/><text x="6" y="48">d&#x2081;</text>
+      <rect class="lut-cell" x="0" y="52" width="80" height="15"/><text x="6" y="63">d&#x2082;</text>
+      <rect class="lut-cell" x="0" y="67" width="80" height="15"/><text x="6" y="78">d&#x2083;</text>
+      <rect class="lut-cell" x="0" y="82" width="80" height="15"/><text x="6" y="93">...</text>
+      <rect class="lut-cell" x="0" y="247" width="80" height="15"/><text x="6" y="258">d&#x2081;&#x2085;</text>
+    </g>
+    <text class="lbl-muted" x="0" y="282">2&#x2074; = 16 项</text>
+    <text class="lbl-muted" x="0" y="298">一次 shuffle &#x2192;</text>
+    <text class="lbl-muted" x="0" y="314">16 个部分距离</text>
+  </g>
+</svg>

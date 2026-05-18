@@ -75,7 +75,7 @@ repository for the exhaustive list.
 | `first_order_buckets_count` | int | `10` | First-level count (effective for `gno_imi`) |
 | `second_order_buckets_count` | int | `10` | Second-level count (effective for `gno_imi`) |
 | `ivf_train_type` | string | `"kmeans"` | Centroid training: `kmeans` or `random` |
-| `base_quantization_type` | string | `"fp32"` | `fp32`, `fp16`, `bf16`, `sq8`, `sq8_uniform`, `sq4_uniform`, `pq`, `pqfs`, `rabitq` |
+| `base_quantization_type` | string | `"fp32"` | `fp32`, `fp16`, `bf16`, `sq8`, `sq4`, `sq8_uniform`, `sq4_uniform`, `pq`, `pqfs`, `rabitq` — see the [Quantization chapter](../quantization/README.md) for per-quantizer details |
 | `base_pq_dim` | int | `1` | PQ subspaces (required with `pq` / `pqfs`) |
 | `use_reorder` | bool | `false` | Keep a high-precision copy and re-rank after the coarse scan |
 | `precise_quantization_type` | string | `"fp32"` | Quantizer used for reordering (with `use_reorder: true`) |

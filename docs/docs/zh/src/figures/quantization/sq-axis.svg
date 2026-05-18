@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 220" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13">
+  <title>Scalar Quantization: float range mapped to integer bins</title>
+  <desc>The float range [v_min, v_max] is split into 2^bits equal-width bins. Each float value lands in one bin and is stored as the bin index. The decoded value is the bin centre.</desc>
+  <style>
+    .axis { stroke: #3e3a39; stroke-width: 1.4; fill: none; }
+    .tick { stroke: #3e3a39; stroke-width: 1; }
+    .bin  { fill: #fce897; stroke: #b88a16; stroke-width: 1; }
+    .bin-hit { fill: #f4bd37; stroke: #b88a16; stroke-width: 1.4; }
+    .lbl { fill: #1a1614; }
+    .lbl-muted { fill: #6e6a66; }
+    .pt { fill: #3e3a39; }
+    .arr { stroke: #3e3a39; stroke-width: 1.2; fill: none; }
+  </style>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#3e3a39"/>
+    </marker>
+  </defs>
+
+  <!-- title -->
+  <text class="lbl" x="20" y="26">float 范围 &#x2192; 2&#x1D4F; 个 bin（此处 b = 3，共 8 个 bin）</text>
+
+  <!-- bins -->
+  <g transform="translate(60,60)">
+    <rect class="bin"     x="0"   y="0" width="70" height="32"/>
+    <rect class="bin"     x="70"  y="0" width="70" height="32"/>
+    <rect class="bin-hit" x="140" y="0" width="70" height="32"/>
+    <rect class="bin"     x="210" y="0" width="70" height="32"/>
+    <rect class="bin"     x="280" y="0" width="70" height="32"/>
+    <rect class="bin"     x="350" y="0" width="70" height="32"/>
+    <rect class="bin"     x="420" y="0" width="70" height="32"/>
+    <rect class="bin"     x="490" y="0" width="70" height="32"/>
+
+    <text class="lbl" x="28" y="20">000</text>
+    <text class="lbl" x="98" y="20">001</text>
+    <text class="lbl" x="168" y="20">010</text>
+    <text class="lbl" x="238" y="20">011</text>
+    <text class="lbl" x="308" y="20">100</text>
+    <text class="lbl" x="378" y="20">101</text>
+    <text class="lbl" x="448" y="20">110</text>
+    <text class="lbl" x="518" y="20">111</text>
+  </g>
+
+  <!-- axis below -->
+  <g transform="translate(60,110)">
+    <line class="axis" x1="0" y1="0" x2="560" y2="0" marker-end="url(#arrow)"/>
+    <line class="tick" x1="0" y1="-5" x2="0" y2="5"/>
+    <line class="tick" x1="70" y1="-4" x2="70" y2="4"/>
+    <line class="tick" x1="140" y1="-4" x2="140" y2="4"/>
+    <line class="tick" x1="210" y1="-4" x2="210" y2="4"/>
+    <line class="tick" x1="280" y1="-4" x2="280" y2="4"/>
+    <line class="tick" x1="350" y1="-4" x2="350" y2="4"/>
+    <line class="tick" x1="420" y1="-4" x2="420" y2="4"/>
+    <line class="tick" x1="490" y1="-4" x2="490" y2="4"/>
+    <line class="tick" x1="560" y1="-5" x2="560" y2="5"/>
+
+    <text class="lbl-muted" x="-18" y="22">v_min</text>
+    <text class="lbl-muted" x="540" y="22">v_max</text>
+
+    <!-- sample data point lands in bin "010" -->
+    <circle class="pt" cx="170" cy="0" r="4"/>
+    <text class="lbl" x="155" y="-12">x</text>
+  </g>
+
+  <!-- arrow from bin to code -->
+  <path class="arr" d="M230 96 L230 140" marker-end="url(#arrow)"/>
+  <text class="lbl" x="240" y="125">存储 bin 索引</text>
+
+  <!-- output -->
+  <g transform="translate(120,160)">
+    <rect class="bin-hit" x="0" y="0" width="70" height="28"/>
+    <text class="lbl" x="22" y="20">010</text>
+    <text class="lbl-muted" x="80" y="20">每维 b bits &#x2192;  每向量 d &#xB7; b bits</text>
+  </g>
+
+  <text class="lbl-muted" x="20" y="208">解码：x&#x0302; = v_min + (idx + &#xBD;) &#xB7; (v_max &#x2212; v_min) / 2&#x1D4F;</text>
+</svg>

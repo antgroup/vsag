@@ -20,8 +20,8 @@ default.
    either NSW-style insertion (`graph_type: "nsw"`, the default) or ODescent
    (`graph_type: "odescent"`).
 2. **Quantization.** The base storage is compressed with a configurable quantizer
-   (`base_quantization_type` — `fp32`, `fp16`, `bf16`, `sq8`, `sq8_uniform`, `sq4_uniform`,
-   `pq`, `pqfs`, `rabitq`). Optionally, a second high-precision copy is kept
+   (`base_quantization_type` — `fp32`, `fp16`, `bf16`, `sq8`, `sq4`, `sq8_uniform`, `sq4_uniform`,
+   `pq`, `pqfs`, `rabitq`, `tq`). Optionally, a second high-precision copy is kept
    (`use_reorder: true` with `precise_quantization_type`) and used to re-rank the
    candidates returned by the coarse search.
 3. **Search.** Greedy beam search traverses the graph top-down, expanding the current
@@ -65,7 +65,7 @@ and `docs/hgraph.md` in the repository.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `base_quantization_type` | string | — (required) | `fp32`, `fp16`, `bf16`, `sq8`, `sq8_uniform`, `sq4_uniform`, `pq`, `pqfs`, `rabitq` |
+| `base_quantization_type` | string | — (required) | `fp32`, `fp16`, `bf16`, `sq8`, `sq4`, `sq8_uniform`, `sq4_uniform`, `pq`, `pqfs`, `rabitq`, `tq` — see the [Quantization chapter](../quantization/README.md) for per-quantizer details |
 | `max_degree` | int | `64` | Maximum out-degree per graph node |
 | `ef_construction` | int | `400` | Candidate list size during build (higher = better recall, slower build) |
 | `graph_type` | string | `"nsw"` | Graph algorithm: `nsw` or `odescent` |

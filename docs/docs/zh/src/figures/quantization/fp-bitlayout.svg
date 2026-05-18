@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 300" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13">
+  <title>fp32 vs fp16 vs bf16: IEEE 754 field widths</title>
+  <desc>Bit-level layout comparison of the three floating-point quantizers VSAG uses for storage: fp32 has 1 sign + 8 exponent + 23 mantissa bits, fp16 has 1 + 5 + 10, bf16 has 1 + 8 + 7.</desc>
+  <style>
+    .sign { fill: #3e3a39; stroke: #1a1614; stroke-width: 0.8; }
+    .exp  { fill: #f4bd37; stroke: #b88a16; stroke-width: 0.8; }
+    .mant { fill: #fce897; stroke: #b88a16; stroke-width: 0.8; }
+    .lbl { fill: #1a1614; }
+    .lbl-muted { fill: #6e6a66; }
+    .lbl-light { fill: #ffffff; }
+  </style>
+
+  <text class="lbl" x="20" y="24">IEEE 754 / bf16 位宽布局</text>
+
+  <!-- legend -->
+  <g transform="translate(440,12)">
+    <rect class="sign" x="0" y="0" width="14" height="14"/><text class="lbl-muted" x="20" y="12">符号位</text>
+    <rect class="exp"  x="70" y="0" width="14" height="14"/><text class="lbl-muted" x="90" y="12">指数位</text>
+    <rect class="mant" x="170" y="0" width="14" height="14"/><text class="lbl-muted" x="190" y="12">尾数位</text>
+  </g>
+
+  <!-- scale: 1 bit = 18 px for exp+mant; sign block widened to 28 px for legibility -->
+  <!-- fp32 row -->
+  <g transform="translate(60,60)">
+    <text class="lbl" x="-50" y="22" font-weight="700">fp32</text>
+    <rect class="sign" x="0"   y="0" width="28" height="34"/>
+    <rect class="exp"  x="28"  y="0" width="144" height="34"/>
+    <rect class="mant" x="172" y="0" width="414" height="34"/>
+    <text class="lbl-light" x="10" y="22">s</text>
+    <text class="lbl" x="74" y="22">8 bits</text>
+    <text class="lbl" x="324" y="22">23 bits</text>
+    <text class="lbl-muted" x="-20" y="52">范围 &#x00B1;3.4&#xD7;10&#x00B3;&#x2078;  &#xB7;  精度 &#x2248; 7 位十进制  &#xB7;  4 字节</text>
+  </g>
+
+  <!-- fp16 row -->
+  <g transform="translate(60,140)">
+    <text class="lbl" x="-50" y="22" font-weight="700">fp16</text>
+    <rect class="sign" x="0"   y="0" width="28" height="34"/>
+    <rect class="exp"  x="28"  y="0" width="90" height="34"/>
+    <rect class="mant" x="118" y="0" width="180" height="34"/>
+    <text class="lbl-light" x="10" y="22">s</text>
+    <text class="lbl" x="40" y="22">5 bits</text>
+    <text class="lbl" x="170" y="22">10 bits</text>
+    <text class="lbl-muted" x="-20" y="52">范围 &#x00B1;6.5&#xD7;10&#x2074;  &#xB7;  精度 &#x2248; 3 位十进制  &#xB7;  2 字节</text>
+  </g>
+
+  <!-- bf16 row -->
+  <g transform="translate(60,220)">
+    <text class="lbl" x="-50" y="22" font-weight="700">bf16</text>
+    <rect class="sign" x="0"   y="0" width="28" height="34"/>
+    <rect class="exp"  x="28"  y="0" width="144" height="34"/>
+    <rect class="mant" x="172" y="0" width="126" height="34"/>
+    <text class="lbl-light" x="10" y="22">s</text>
+    <text class="lbl" x="74" y="22">8 bits</text>
+    <text class="lbl" x="200" y="22">7 bits</text>
+    <text class="lbl-muted" x="-20" y="52">范围 &#x00B1;3.4&#xD7;10&#x00B3;&#x2078;  &#xB7;  精度 &#x2248; 2-3 位十进制  &#xB7;  2 字节</text>
+  </g>
+</svg>
