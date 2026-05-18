@@ -60,8 +60,6 @@ main(int /*argc*/, char** /*argv*/) {
     //   - This keeps the older multi-bit RabitQ path, without split storage.
     //   - rabitq_bits_per_dim_base = 8 enables the 8-bit base code.
     //   - rabitq_bits_per_dim_query = 32 keeps query quantization at fp32.
-    //   - use_reorder + precise_quantization_type = "fp32" gives full-precision
-    //     reorder on top of the compressed RabitQ base codes.
     std::string hgraph_build_parameters = R"(
     {
         "dtype": "float32",
@@ -72,10 +70,7 @@ main(int /*argc*/, char** /*argv*/) {
             "rabitq_bits_per_dim_base": 8,
             "rabitq_bits_per_dim_query": 32,
             "max_degree": 32,
-            "ef_construction": 300,
-            "alpha": 1.2,
-            "use_reorder": true,
-            "precise_quantization_type": "fp32"
+            "ef_construction": 300
         }
     }
     )";
