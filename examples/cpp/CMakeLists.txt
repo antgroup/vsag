@@ -122,5 +122,8 @@ target_link_libraries (402_persistent_streaming vsag)
 add_executable (501_quantization_transform 501_quantization_transform.cpp)
 target_link_libraries (501_quantization_transform vsag)
 
+add_executable (502_rabitq_8bit_hgraph 502_rabitq_8bit_hgraph.cpp)
+target_link_libraries (502_rabitq_8bit_hgraph vsag)
+
 add_executable (321_index_fp16_hgraph 321_index_fp16_hgraph.cpp)
 target_link_libraries (321_index_fp16_hgraph vsag)
