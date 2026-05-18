@@ -32,7 +32,7 @@ public:
 
     DistHeapPtr
     Reorder(const DistHeapPtr& input,
-            const float* query,
+            const void* query,
             int64_t topk,
             QueryContext& ctx,
             IteratorFilterContext* iter_ctx = nullptr,
