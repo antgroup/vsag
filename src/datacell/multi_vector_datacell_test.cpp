@@ -111,4 +111,39 @@ TEST_CASE("MultiVectorDataCell batch insert reserves ids when idx is null",
     REQUIRE(data_cell->TotalCount() == token_counts.size());
 }
 
+TEST_CASE("MultiVectorDataCell GetCodesById reads back inserted data",
+          "[ut][MultiVectorDataCell]") {
+    const std::string io_type = GENERATE("memory_io", "block_memory_io");
+    constexpr uint32_t dim = 4;
+    const std::vector<uint32_t> token_counts = {1, 3, 2, 5, 4};
+    std::vector<std::vector<float>> token_storage;
+    std::vector<MultiVector> multi_vectors;
+    FillMultiVectors(token_counts, dim, token_storage, multi_vectors);
+
+    std::shared_ptr<Allocator> allocator = SafeAllocator::FactoryDefaultAllocator();
+    FlattenInterfacePtr data_cell = MakeMultiVectorDataCell(io_type, dim, allocator);
+    data_cell->Resize(static_cast<InnerIdType>(multi_vectors.size()));
+
+    for (uint64_t i = 0; i < multi_vectors.size(); ++i) {
+        data_cell->InsertVector(multi_vectors.data() + i, static_cast<InnerIdType>(i));
+    }
+
+    for (uint64_t i = 0; i < multi_vectors.size(); ++i) {
+        bool need_release = false;
+        const uint8_t* codes = data_cell->GetCodesById(static_cast<InnerIdType>(i), need_release);
+        REQUIRE(need_release == true);
+
+        uint32_t len = 0;
+        std::memcpy(&len, codes, sizeof(uint32_t));
+        REQUIRE(len == token_counts[i]);
+
+        const auto* floats = reinterpret_cast<const float*>(codes + sizeof(uint32_t));
+        for (uint64_t j = 0; j < static_cast<uint64_t>(len) * dim; ++j) {
+            REQUIRE(floats[j] == token_storage[i][j]);
+        }
+
+        data_cell->Release(codes);
+    }
+}
+
 }  // namespace vsag

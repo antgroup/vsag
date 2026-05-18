@@ -133,8 +133,16 @@ MultiVectorDataCell<QuantTmpl, IOTmpl>::GetMetricType() {
 template <typename QuantTmpl, typename IOTmpl>
 const uint8_t*
 MultiVectorDataCell<QuantTmpl, IOTmpl>::GetCodesById(InnerIdType id, bool& need_release) const {
-    throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                        "GetCodesById is not yet implemented for MultiVectorDataCell");
+    uint64_t offset = 0;
+    offset_io_->Read(sizeof(offset), static_cast<uint64_t>(id) * sizeof(offset), (uint8_t*)&offset);
+    uint32_t len = 0;
+    io_->Read(sizeof(len), offset, (uint8_t*)&len);
+    uint64_t read_size =
+        sizeof(uint32_t) + static_cast<uint64_t>(len) * multi_vector_dim_ * sizeof(float);
+    auto* codes = static_cast<uint8_t*>(allocator_->Allocate(read_size));
+    io_->Read(read_size, offset, codes);
+    need_release = true;
+    return codes;
 }
 
 template <typename QuantTmpl, typename IOTmpl>
