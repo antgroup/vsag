@@ -79,14 +79,29 @@ TEST_CASE("MultiVectorComputer hand-computed oracle (dim=4, q=2, d=3)",
 
     // query: q0=(1,0,0,0), q1=(0,1,1,0)
     std::vector<float> query = {
-        1.0F, 0.0F, 0.0F, 0.0F,
-        0.0F, 1.0F, 1.0F, 0.0F,
+        1.0F,
+        0.0F,
+        0.0F,
+        0.0F,
+        0.0F,
+        1.0F,
+        1.0F,
+        0.0F,
     };
     // doc:   d0=(1,0,0,0), d1=(0,2,0,0), d2=(0,0,1,0)
     std::vector<float> doc = {
-        1.0F, 0.0F, 0.0F, 0.0F,
-        0.0F, 2.0F, 0.0F, 0.0F,
-        0.0F, 0.0F, 1.0F, 0.0F,
+        1.0F,
+        0.0F,
+        0.0F,
+        0.0F,
+        0.0F,
+        2.0F,
+        0.0F,
+        0.0F,
+        0.0F,
+        0.0F,
+        1.0F,
+        0.0F,
     };
 
     SECTION("IP metric: hand-computed expected = -1") {
@@ -213,8 +228,7 @@ TEST_CASE("MultiVectorComputer randomized vs naive oracle (dim=8, q=4, d=6)",
         computer.SetQuery(query.data(), query_tok_count);
 
         float actual = 0.0F;
-        computer.ComputeDist(
-            reinterpret_cast<const uint8_t*>(doc.data()), doc_tok_count, &actual);
+        computer.ComputeDist(reinterpret_cast<const uint8_t*>(doc.data()), doc_tok_count, &actual);
 
         float expected = NaiveMaxSim(query, query_tok_count, doc, doc_tok_count, dim, metric);
         REQUIRE(std::abs(actual - expected) < 1e-4F);

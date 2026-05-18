@@ -46,9 +46,7 @@ MultiVectorComputer::SetQuery(const float* query_tokens, uint32_t query_token_co
 }
 
 void
-MultiVectorComputer::ComputeDist(const uint8_t* codes,
-                                 uint32_t token_count,
-                                 float* dist) const {
+MultiVectorComputer::ComputeDist(const uint8_t* codes, uint32_t token_count, float* dist) const {
     const float* doc_tokens = reinterpret_cast<const float*>(codes);
     float total = 0.0F;
 

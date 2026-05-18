@@ -247,8 +247,11 @@ TEST_CASE("MultiVectorDataCell Serialize/Deserialize round-trip", "[ut][MultiVec
     std::vector<float> dists_before(3, 0.0F);
     {
         ComputerInterfacePtr computer = original->FactoryComputer(&query_mv);
-        original->Query(
-            dists_before.data(), computer, idx.data(), static_cast<InnerIdType>(idx.size()), nullptr);
+        original->Query(dists_before.data(),
+                        computer,
+                        idx.data(),
+                        static_cast<InnerIdType>(idx.size()),
+                        nullptr);
     }
 
     std::stringstream ss;
@@ -264,8 +267,11 @@ TEST_CASE("MultiVectorDataCell Serialize/Deserialize round-trip", "[ut][MultiVec
     std::vector<float> dists_after(3, 0.0F);
     {
         ComputerInterfacePtr computer = restored->FactoryComputer(&query_mv);
-        restored->Query(
-            dists_after.data(), computer, idx.data(), static_cast<InnerIdType>(idx.size()), nullptr);
+        restored->Query(dists_after.data(),
+                        computer,
+                        idx.data(),
+                        static_cast<InnerIdType>(idx.size()),
+                        nullptr);
     }
 
     for (uint64_t i = 0; i < 3; ++i) {
@@ -273,8 +279,7 @@ TEST_CASE("MultiVectorDataCell Serialize/Deserialize round-trip", "[ut][MultiVec
     }
 }
 
-TEST_CASE("MultiVectorDataCell rejects invalid InsertVector inputs",
-          "[ut][MultiVectorDataCell]") {
+TEST_CASE("MultiVectorDataCell rejects invalid InsertVector inputs", "[ut][MultiVectorDataCell]") {
     constexpr uint32_t dim = 4;
     std::shared_ptr<Allocator> allocator = SafeAllocator::FactoryDefaultAllocator();
     FlattenInterfacePtr data_cell = MakeMultiVectorDataCell("memory_io", dim, allocator);
