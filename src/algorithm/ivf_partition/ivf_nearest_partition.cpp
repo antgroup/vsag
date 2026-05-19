@@ -20,7 +20,7 @@
 #include <atomic>
 #include <cstdlib>
 
-#include "algorithm/hgraph.h"
+#include "algorithm/hgraph/hgraph.h"
 #include "algorithm/inner_index_interface.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/cluster/kmeans_cluster.h"

@@ -15,7 +15,7 @@
 
 #pragma once
 
-#include "algorithm/hgraph.h"
+#include "algorithm/hgraph/hgraph.h"
 #include "analyzer.h"
 
 namespace vsag {
