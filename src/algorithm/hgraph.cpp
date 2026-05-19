@@ -2307,7 +2307,11 @@ HGraph::force_remove_one(int64_t label) {
     InnerIdType inner_id;
     {
         std::shared_lock lock(this->label_lookup_mutex_);
-        inner_id = this->label_table_->GetIdByLabel(label);
+        bool found = false;
+        std::tie(found, inner_id) = this->label_table_->TryGetIdByLabel(label, false);
+        if (not found) {
+            return 0;
+        }
     }
     if (inner_id == this->entry_point_id_) {
         this->find_new_entry_point();
@@ -2323,7 +2327,8 @@ HGraph::force_remove_one(int64_t label) {
     if (swap_id != inner_id) {
         this->move_id(swap_id, inner_id);
     }
-    this->total_count_--;
+    this->label_table_->ForceRemove(label);
+    this->total_count_.fetch_sub(1);
     return 1;
 }
 

@@ -464,6 +464,18 @@ public:
         }
     }
 
+    void
+    ForceRemove(LabelType label) {
+        auto [found, inner_id] = TryGetIdByLabel(label, true);
+        if (found) {
+            if (use_reverse_map_) {
+                label_remap_.Erase(label);
+            }
+            std::scoped_lock wlock(delete_ids_mutex_);
+            deleted_ids_.erase(inner_id);
+        }
+    }
+
 private:
     UnorderedSet<InnerIdType> deleted_ids_;       // Record deleted ids.
     FilterPtr deleted_ids_filter_{nullptr};       // Filter to filter out deleted ids.
