@@ -29,8 +29,9 @@ namespace {
 
 constexpr float kEpsilon = 1e-5F;
 
-// 朴素 oracle:对 query 每个 token,在 doc 所有 token 里找 min distance,累加。
-// metric: METRIC_TYPE_IP 用 1 - <q,d>, METRIC_TYPE_L2SQR 用 ||q-d||^2。
+// Naive oracle: for each query token, find the minimum distance among all doc tokens and
+// accumulate the results. For METRIC_TYPE_IP, use 1 - <q,d>; for METRIC_TYPE_L2SQR,
+// use ||q-d||^2.
 float
 NaiveMaxSim(const std::vector<float>& query,
             uint32_t query_token_count,
