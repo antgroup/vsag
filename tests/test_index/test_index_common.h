@@ -39,28 +39,4 @@ Intersection(const int64_t* x, int64_t x_count, const int64_t* y, int64_t y_coun
     return result;
 }
 
-inline vsag::DatasetPtr
-get_one_query(const vsag::DatasetPtr& queries, int i) {
-    vsag::DatasetPtr query = vsag::Dataset::Make();
-    query->NumElements(1)->Dim(queries->GetDim())->Owner(false);
-
-    if (queries->GetSparseVectors() != nullptr) {
-        query->SparseVectors(queries->GetSparseVectors() + i);
-    }
-
-    if (queries->GetMultiVectors() != nullptr) {
-        query->MultiVectors(queries->GetMultiVectors() + i);
-        query->MultiVectorDim(queries->GetMultiVectorDim());
-    }
-
-    if (queries->GetFloat32Vectors() != nullptr) {
-        query->Float32Vectors(queries->GetFloat32Vectors() + i * queries->GetDim());
-    }
-
-    if (queries->GetPaths() != nullptr) {
-        query->Paths(queries->GetPaths() + i);
-    }
-    return query;
-}
-
 }  // namespace fixtures
