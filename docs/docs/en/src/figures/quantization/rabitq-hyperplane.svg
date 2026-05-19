@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 340" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13">
+  <title>RaBitQ: 1-bit signed code via random hyperplane</title>
+  <desc>RaBitQ normalises each vector, then encodes each dimension by the sign of its inner product against a random orthonormal basis. The stored code is one bit per dim plus a small per-vector residual norm; reorder against a precise copy recovers full recall.</desc>
+  <style>
+    .sphere { fill: #fff7d6; stroke: #b88a16; stroke-width: 1.2; }
+    .axis { stroke: #cfcbc7; stroke-width: 1; }
+    .hp { stroke: #3e3a39; stroke-width: 1.5; stroke-dasharray: 6 4; }
+    .pt-plus { fill: #f4bd37; stroke: #b88a16; stroke-width: 1; }
+    .pt-minus { fill: #3e3a39; stroke: #1a1614; stroke-width: 1; }
+    .lbl { fill: #1a1614; }
+    .lbl-muted { fill: #6e6a66; }
+    .arr { stroke: #3e3a39; stroke-width: 1.2; fill: none; }
+    .codebox { fill: #fce897; stroke: #b88a16; stroke-width: 1; }
+  </style>
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#3e3a39"/>
+    </marker>
+  </defs>
+
+  <text class="lbl" x="20" y="24">RaBitQ &#x2014; sign(&#x27E8;x, p&#x1D62;&#x27E9;) gives one bit per dim</text>
+
+  <!-- sphere with hyperplane -->
+  <g transform="translate(160,180)">
+    <circle class="sphere" cx="0" cy="0" r="110"/>
+    <line class="axis" x1="-110" y1="0" x2="110" y2="0"/>
+    <line class="axis" x1="0" y1="-110" x2="0" y2="110"/>
+    <!-- hyperplane perpendicular to p_i (direction ~ (cos30, sin30)) -->
+    <line class="hp" x1="-100" y1="-58" x2="100" y2="58"/>
+    <text class="lbl-muted" x="78" y="62">p&#x1D62;</text>
+    <!-- arrow showing p_i direction -->
+    <line class="arr" x1="0" y1="0" x2="60" y2="-35" marker-end="url(#arr)"/>
+
+    <!-- + side points -->
+    <circle class="pt-plus" cx="55" cy="-65" r="5"/>
+    <circle class="pt-plus" cx="85" cy="-15" r="5"/>
+    <circle class="pt-plus" cx="35" cy="-40" r="5"/>
+    <circle class="pt-plus" cx="70" cy="-90" r="5"/>
+    <circle class="pt-plus" cx="20" cy="-95" r="5"/>
+
+    <!-- - side points -->
+    <circle class="pt-minus" cx="-50" cy="40" r="5"/>
+    <circle class="pt-minus" cx="-85" cy="10" r="5"/>
+    <circle class="pt-minus" cx="-30" cy="65" r="5"/>
+    <circle class="pt-minus" cx="-70" cy="-15" r="5"/>
+    <circle class="pt-minus" cx="-15" cy="85" r="5"/>
+
+    <text class="lbl" x="75" y="-95">b&#x1D62; = 1</text>
+    <text class="lbl" x="-100" y="100">b&#x1D62; = 0</text>
+  </g>
+
+  <!-- arrow to bit string -->
+  <path class="arr" d="M310 180 L370 180" marker-end="url(#arr)"/>
+
+  <!-- right side: bit string + reorder -->
+  <g transform="translate(385,80)">
+    <text class="lbl" x="0" y="0">stored code per vector</text>
+    <g>
+      <rect class="codebox" x="0" y="12" width="22" height="22"/>
+      <rect class="codebox" x="22" y="12" width="22" height="22"/>
+      <rect class="codebox" x="44" y="12" width="22" height="22"/>
+      <rect class="codebox" x="66" y="12" width="22" height="22"/>
+      <rect class="codebox" x="88" y="12" width="22" height="22"/>
+      <rect class="codebox" x="110" y="12" width="22" height="22"/>
+      <rect class="codebox" x="132" y="12" width="22" height="22"/>
+      <rect class="codebox" x="154" y="12" width="22" height="22"/>
+      <rect class="codebox" x="176" y="12" width="22" height="22"/>
+      <rect class="codebox" x="198" y="12" width="22" height="22"/>
+      <text class="lbl" x="6" y="28">1</text>
+      <text class="lbl" x="28" y="28">0</text>
+      <text class="lbl" x="50" y="28">1</text>
+      <text class="lbl" x="72" y="28">1</text>
+      <text class="lbl" x="94" y="28">0</text>
+      <text class="lbl" x="116" y="28">0</text>
+      <text class="lbl" x="138" y="28">1</text>
+      <text class="lbl" x="160" y="28">0</text>
+      <text class="lbl" x="182" y="28">1</text>
+      <text class="lbl" x="204" y="28">1</text>
+    </g>
+    <text class="lbl-muted" x="0" y="56">d bits + 1 fp16 residual norm</text>
+    <text class="lbl-muted" x="0" y="74">&#x2192; ~ d/8 + 2 bytes per vector</text>
+
+    <text class="lbl" x="0" y="120">distance:</text>
+    <text class="lbl-muted" x="0" y="140">popcount(q_code XOR x_code)</text>
+    <text class="lbl-muted" x="0" y="158">scaled by residual norms</text>
+
+    <text class="lbl" x="0" y="200">accuracy boost:</text>
+    <text class="lbl-muted" x="0" y="220">use_reorder=true + fp16</text>
+    <text class="lbl-muted" x="0" y="238">re-rank top-k against precise copy</text>
+  </g>
+</svg>

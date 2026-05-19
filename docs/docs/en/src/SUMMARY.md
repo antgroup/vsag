@@ -19,6 +19,18 @@
 - [Pyramid](indexes/pyramid.md)
 - [BruteForce](indexes/brute_force.md)
 
+# Quantization
+
+- [Overview](quantization/README.md)
+- [FP32 (Baseline)](quantization/fp32.md)
+- [Half-Precision (FP16 / BF16)](quantization/fp16_bf16.md)
+- [Scalar Quantization (SQ4 / SQ8)](quantization/sq.md)
+- [Scalar Uniform (SQ4 / SQ8 Uniform)](quantization/sq_uniform.md)
+- [Product Quantization (PQ)](quantization/pq.md)
+- [PQ FastScan](quantization/pqfs.md)
+- [RaBitQ](quantization/rabitq.md)
+- [Transform Quantizer (TQ)](advanced/quantization_transform.md)
+
 # Developer Guide
 
 - [Code Structure](development/code_structure.md)
@@ -42,7 +54,6 @@
 - [Hybrid Memory-Disk Index](advanced/hybrid_index.md)
 - [Extra Info](advanced/extra_info.md)
 - [Index Lifecycle Management](advanced/index_lifecycle.md)
-- [Quantization Transform](advanced/quantization_transform.md)
 
 # Performance and Tuning
 
