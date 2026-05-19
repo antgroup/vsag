@@ -70,6 +70,7 @@
 - [Release Notes](resources/release_notes.md)
 - [Roadmap](resources/roadmap_2025.md)
 - [Community](resources/community.md)
+- [Filing Issues with an AI Agent](resources/filing_issues_with_agent.md)
 - [Related Projects](resources/related_projects.md)
 - [Research Papers](resources/research_papers.md)
 - [Contributors](misc/contributors.md)
