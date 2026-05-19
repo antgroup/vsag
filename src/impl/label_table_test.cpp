@@ -457,4 +457,33 @@ TEST_CASE("LabelTable Move", "[ut][LabelTable]") {
         REQUIRE(label_table.GetLabelById(0) == 100);
         REQUIRE(label_table.GetIdByLabel(100) == 0);
     }
+
+    SECTION("Move preserves removed state") {
+        LabelTable label_table(allocator.get(), true);
+        label_table.Resize(5);
+        label_table.Insert(0, 100);
+        label_table.Insert(4, 500);
+        label_table.MarkRemove(500);
+
+        label_table.Move(4, 0);
+
+        REQUIRE(label_table.GetLabelById(0) == 500);
+        REQUIRE(label_table.GetIdByLabel(500, true) == 0);
+        REQUIRE(label_table.IsRemoved(0) == true);
+        REQUIRE(label_table.IsRemoved(4) == false);
+    }
+
+    SECTION("ForceRemove clears deleted state and total count") {
+        LabelTable label_table(allocator.get(), true);
+        label_table.Resize(2);
+        label_table.Insert(0, 100);
+        label_table.Insert(1, 200);
+        label_table.MarkRemove(100);
+
+        label_table.ForceRemove(100, 0);
+
+        REQUIRE(label_table.TryGetIdByLabel(100, true).first == false);
+        REQUIRE(label_table.IsRemoved(0) == false);
+        REQUIRE(label_table.GetTotalCount() == 1);
+    }
 }
