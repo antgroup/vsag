@@ -63,15 +63,4 @@ get_one_query(const vsag::DatasetPtr& queries, int i) {
     return query;
 }
 
-inline int64_t
-get_missing_id(const vsag::DatasetPtr& base) {
-    std::unordered_set<int64_t> existing_ids(base->GetIds(),
-                                             base->GetIds() + base->GetNumElements());
-    int64_t missing_id = 0;
-    while (existing_ids.count(missing_id) != 0) {
-        ++missing_id;
-    }
-    return missing_id;
-}
-
 }  // namespace fixtures
