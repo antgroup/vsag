@@ -238,21 +238,30 @@ public:
         return static_cast<int>(r);
     }
 
+    /**
+     * @brief Allocate a contiguous block of fresh internal IDs.
+     *
+     * IDs are derived from "total_count_" but "total_count_" is intentionally
+     * NOT advanced inside this helper. The caller is responsible for:
+     *   1. Ensuring storage capacity covers the returned range (via resize()).
+     *   2. Publishing the new range by incrementing total_count_ once insertion
+     *      and capacity expansion have both succeeded.
+     *
+     * Thread-safety: the caller must hold add_mutex_ for the entire span of
+     * "call get_unique_inner_ids -> resize -> increment total_count_". Concurrent
+     * search threads read total_count_ under global_mutex_ and assume the
+     * underlying storage is sized to at least total_count_; never publish IDs
+     * before the resize completes.
+     */
     Vector<InnerIdType>
     get_unique_inner_ids(InnerIdType count) {
-        // Callers commit total_count_ only after resize succeeds.
         Vector<InnerIdType> ret(count, this->allocator_);
         if (ret.size() != count) {
             throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "allocate memory failed");
         }
         auto next_id = static_cast<InnerIdType>(this->total_count_.load());
         for (InnerIdType i = 0; i < count; ++i) {
-            auto [success, id] = this->label_table_->PopHole();
-            if (success) {
-                ret[i] = id;
-            } else {
-                ret[i] = next_id++;
-            }
+            ret[i] = next_id++;
         }
         return ret;
     }

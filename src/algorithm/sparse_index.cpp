@@ -18,7 +18,7 @@
 #include <numeric>
 
 #include "impl/heap/standard_heap.h"
-#include "impl/label_table.h"
+#include "impl/label_table/label_table.h"
 #include "index_feature_list.h"
 #include "utils/util_functions.h"
 #include "vsag/allocator.h"

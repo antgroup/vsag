@@ -26,6 +26,7 @@
 
 #include "common.h"
 #include "datacell/duplicate_interface.h"
+#include "label_remap.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "typing.h"
@@ -40,60 +41,6 @@ using IdMapFunction = std::function<std::tuple<bool, int64_t>(int64_t)>;
 
 class LabelTable {
 public:
-    class LabelRemap {
-    public:
-        explicit LabelRemap(Allocator* allocator, LabelRemapType remap_type = LabelRemapType::PG);
-
-        void
-        Clear();
-
-        void
-        Reset();
-
-        void
-        Reserve(uint64_t size);
-
-        uint64_t
-        Size() const;
-
-        void
-        InsertOrAssign(LabelType label, InnerIdType inner_id);
-
-        void
-        Emplace(LabelType label, InnerIdType inner_id);
-
-        bool
-        Erase(LabelType label);
-
-        bool
-        Find(LabelType label, InnerIdType& inner_id) const;
-
-        template <typename Func>
-        void
-        ForEach(Func&& func) const {
-            if (pg_map_ != nullptr) {
-                for (const auto& [label, inner_id] : *pg_map_) {
-                    func(label, inner_id);
-                }
-                return;
-            }
-            for (const auto& [label, inner_id] : *robin_map_) {
-                func(label, inner_id);
-            }
-        }
-
-        [[nodiscard]] LabelRemapType
-        GetType() const {
-            return remap_type_;
-        }
-
-    private:
-        Allocator* allocator_{nullptr};
-        LabelRemapType remap_type_{LabelRemapType::PG};
-        std::unique_ptr<UnorderedMap<LabelType, InnerIdType>> robin_map_{};
-        std::unique_ptr<PGUnorderedMap<LabelType, InnerIdType>> pg_map_{};
-    };
-
     explicit LabelTable(Allocator* allocator,
                         bool use_reverse_map = true,
                         bool compress_redundant_data = false,
@@ -318,8 +265,7 @@ public:
     int64_t
     GetMemoryUsage() {
         return sizeof(LabelTable) + label_table_.size() * sizeof(LabelType) +
-               label_remap_.Size() * (sizeof(LabelType) + sizeof(InnerIdType)) +
-               deleted_ids_.size() * sizeof(InnerIdType) + hole_list_.size() * sizeof(InnerIdType);
+               label_remap_.GetMemoryUsage() + deleted_ids_.size() * sizeof(InnerIdType) * 2;
     }
 
     uint64_t
@@ -401,46 +347,6 @@ public:
     Allocator* allocator_{nullptr};
     std::atomic<int64_t> total_count_{0L};
 
-    void
-    PushHole(InnerIdType id) {
-        std::scoped_lock wlock(hole_mutex_);
-        hole_list_.push_back(id);
-    }
-
-    std::pair<bool, InnerIdType>
-    PopHole() {
-        std::scoped_lock wlock(hole_mutex_);
-        if (hole_list_.empty()) {
-            return {false, 0};
-        }
-        InnerIdType id = hole_list_.back();
-        hole_list_.pop_back();
-        return {true, id};
-    }
-
-    bool
-    HasHole() const {
-        std::shared_lock rlock(hole_mutex_);
-        return not hole_list_.empty();
-    }
-
-    size_t
-    GetHoleCount() const {
-        std::shared_lock rlock(hole_mutex_);
-        return hole_list_.size();
-    }
-
-    bool
-    RemoveHole(InnerIdType id) {
-        std::scoped_lock wlock(hole_mutex_);
-        auto it = std::find(hole_list_.begin(), hole_list_.end(), id);
-        if (it != hole_list_.end()) {
-            hole_list_.erase(it);
-            return true;
-        }
-        return false;
-    }
-
     bool
     InsertSourceId(InnerIdType inner_id, const std::string& source_id) {
         if (inner_id >= source_id_table_.size()) {
@@ -509,9 +415,6 @@ private:
     mutable std::shared_mutex delete_ids_mutex_;  // Mutex to protect deleted_ids_.
 
     Vector<std::string> source_id_table_;  // Map from id to source id, used for cache.
-
-    Vector<InnerIdType> hole_list_;         // Reusable id list (stack structure).
-    mutable std::shared_mutex hole_mutex_;  // Mutex to protect hole_list_.
 };
 
 }  // namespace vsag
