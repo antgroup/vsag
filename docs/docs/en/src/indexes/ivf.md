@@ -94,6 +94,7 @@ Search-time parameters live under the `ivf` sub-object:
 |-----------|------|---------|-------------|
 | `scan_buckets_count` | int | — (required) | Number of buckets probed per query. Must be ≤ `buckets_count`. |
 | `factor` | float | `2.0` | With reordering enabled, pulls `factor * topk` coarse candidates before the precise rescore. |
+| `enable_reorder` | bool | `true` | Set to `false` to skip the final reorder stage for this request even when the index was built with reorder enabled. |
 | `parallelism` | int | `1` | Threads used to scan buckets in parallel for a single query. |
 | `timeout_ms` | double | `+∞` | Hard cap in milliseconds; partial results are returned once exceeded. |
 
@@ -101,6 +102,12 @@ Search-time parameters live under the `ivf` sub-object:
 auto result = index->KnnSearch(
     query, topk,
     R"({"ivf": {"scan_buckets_count": 32, "factor": 2.0, "parallelism": 4}})").value();
+```
+
+```cpp
+auto fast_result = index->KnnSearch(
+    query, topk,
+    R"({"ivf": {"scan_buckets_count": 32, "factor": 2.0, "enable_reorder": false}})").value();
 ```
 
 ## When to use IVF

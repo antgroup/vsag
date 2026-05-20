@@ -188,10 +188,17 @@ base->NumElements(num_vectors)->Dim(dim)->Ids(ids)
 | 参数 | 类型 | 说明 |
 |------|------|------|
 | `ef_search` | int | 搜索前沿候选集的大小，越大召回越高、查询越慢 |
+| `enable_reorder` | bool | 默认值为 `true`。当索引构建时启用了 reorder，也可以在单次请求里设为 `false` 跳过最终精排；这也会一并关闭 RaBitQ 的 one-bit reorder 路径。 |
 
 ```cpp
 auto result = index->KnnSearch(
     query, topk, R"({"hgraph": {"ef_search": 200}})").value();
+```
+
+```cpp
+auto fast_result = index->KnnSearch(
+    query, topk,
+    R"({"hgraph": {"ef_search": 200, "enable_reorder": false}})").value();
 ```
 
 ## 何时选择 HGraph

@@ -87,6 +87,7 @@ auto result = index->KnnSearch(
 |------|------|--------|------|
 | `scan_buckets_count` | int | —（必填） | 每次查询扫描的桶数，须 ≤ `buckets_count` |
 | `factor` | float | `2.0` | 启用精排时，粗排阶段会预取 `factor * topk` 个候选再重打分 |
+| `enable_reorder` | bool | `true` | 即使索引构建时启用了 reorder，也可以在单次请求里设为 `false` 跳过最终精排 |
 | `parallelism` | int | `1` | 单次查询内扫描桶时使用的线程数 |
 | `timeout_ms` | double | `+∞` | 单次查询最长耗时（毫秒），超时会返回当前的部分结果 |
 
@@ -94,6 +95,12 @@ auto result = index->KnnSearch(
 auto result = index->KnnSearch(
     query, topk,
     R"({"ivf": {"scan_buckets_count": 32, "factor": 2.0, "parallelism": 4}})").value();
+```
+
+```cpp
+auto fast_result = index->KnnSearch(
+    query, topk,
+    R"({"ivf": {"scan_buckets_count": 32, "factor": 2.0, "enable_reorder": false}})").value();
 ```
 
 ## 何时选择 IVF

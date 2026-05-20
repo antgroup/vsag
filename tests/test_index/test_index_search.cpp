@@ -56,14 +56,14 @@ TestIndex::TestKnnSearchCompare(const IndexPtr& index_weak,
     }
 }
 
-void
+float
 TestIndex::TestKnnSearch(const IndexPtr& index,
                          const TestDatasetPtr& dataset,
                          const std::string& search_param,
                          float expected_recall,
                          bool expected_success) {
     if (not index->CheckFeature(vsag::SUPPORT_KNN_SEARCH)) {
-        return;
+        return 0.0F;
     }
     auto queries = dataset->query_;
     auto query_count = queries->GetNumElements();
@@ -79,7 +79,7 @@ TestIndex::TestKnnSearch(const IndexPtr& index,
             if (res.has_value()) {
                 REQUIRE(res.value()->GetDim() == 0);
             }
-            return;
+            return 0.0F;
         } else {
             REQUIRE(res.has_value() == true);
         }
@@ -95,9 +95,10 @@ TestIndex::TestKnnSearch(const IndexPtr& index,
                          expected_recall * query_count));
     }
     REQUIRE(cur_recall > expected_recall * query_count * RECALL_THRESHOLD);
+    return cur_recall / static_cast<float>(query_count);
 }
 
-void
+float
 TestIndex::TestRangeSearch(const IndexPtr& index,
                            const TestDatasetPtr& dataset,
                            const std::string& search_param,
@@ -105,7 +106,7 @@ TestIndex::TestRangeSearch(const IndexPtr& index,
                            int64_t limited_size,
                            bool expected_success) {
     if (not index->CheckFeature(vsag::SUPPORT_RANGE_SEARCH)) {
-        return;
+        return 0.0F;
     }
     auto queries = dataset->range_query_;
     auto query_count = queries->GetNumElements();
@@ -125,7 +126,7 @@ TestIndex::TestRangeSearch(const IndexPtr& index,
             REQUIRE(res.has_value() == expected_success);
         }
         if (!expected_success) {
-            return;
+            return 0.0F;
         }
         if (limited_size > 0) {
             REQUIRE(res.value()->GetDim() <= limited_size);
@@ -148,6 +149,7 @@ TestIndex::TestRangeSearch(const IndexPtr& index,
                          expected_recall * query_count));
     }
     REQUIRE(cur_recall > expected_recall * query_count * RECALL_THRESHOLD);
+    return cur_recall / static_cast<float>(query_count);
 }
 
 class FilterObj : public vsag::Filter {
@@ -184,7 +186,7 @@ private:
     float valid_ratio_{1.0F};
 };
 
-void
+float
 TestIndex::TestKnnSearchIter(const IndexPtr& index,
                              const TestDatasetPtr& dataset,
                              const std::string& search_param,
@@ -192,10 +194,10 @@ TestIndex::TestKnnSearchIter(const IndexPtr& index,
                              bool expected_success,
                              bool use_ex_filter) {
     if (not index->CheckFeature(vsag::SUPPORT_KNN_ITERATOR_FILTER_SEARCH)) {
-        return;
+        return 0.0F;
     }
     if (use_ex_filter && not index->CheckFeature(vsag::SUPPORT_KNN_SEARCH_WITH_EX_FILTER)) {
-        return;
+        return 0.0F;
     }
     auto queries = dataset->query_;
     auto query_count = queries->GetNumElements();
@@ -222,7 +224,7 @@ TestIndex::TestKnnSearchIter(const IndexPtr& index,
             REQUIRE(res.has_value() == expected_success);
         }
         if (!expected_success) {
-            return;
+            return 0.0F;
         }
         int64_t get_cnt = res.value()->GetDim();
         REQUIRE(res.value()->GetDim() == first_top);
@@ -230,14 +232,14 @@ TestIndex::TestKnnSearchIter(const IndexPtr& index,
         auto res2 = index->KnnSearch(query, second_top, search_param, filter, filter_ctx, false);
         REQUIRE(res2.has_value() == expected_success);
         if (!expected_success) {
-            return;
+            return 0.0F;
         }
         REQUIRE(res2.value()->GetDim() == second_top);
         memcpy(ids.data() + first_top, res2.value()->GetIds(), sizeof(int64_t) * second_top);
         auto res3 = index->KnnSearch(query, third_top, search_param, filter, filter_ctx, false);
         REQUIRE(res3.has_value() == expected_success);
         if (!expected_success) {
-            return;
+            return 0.0F;
         }
         REQUIRE(res3.value()->GetDim() == third_top);
         memcpy(ids.data() + first_top + second_top,
@@ -254,6 +256,7 @@ TestIndex::TestKnnSearchIter(const IndexPtr& index,
                          expected_recall * query_count));
     }
     REQUIRE(cur_recall > expected_recall * query_count * RECALL_THRESHOLD);
+    return cur_recall / static_cast<float>(query_count);
 }
 
 void

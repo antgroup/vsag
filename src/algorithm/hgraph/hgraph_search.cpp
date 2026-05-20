@@ -161,11 +161,13 @@ HGraph::KnnSearch(const DatasetPtr& query,
         search_param.is_inner_id_allowed = ft;
         search_param.topk = static_cast<int64_t>(search_param.ef);
         search_param.parallel_search_thread_count = params.parallel_search_thread_count;
+        search_param.enable_reorder = params.enable_reorder;
         search_param.enable_rabitq_one_bit_search = params.rabitq_one_bit_search;
 
         DistanceRecordVector rabitq_lower_bound_candidates(ctx.alloc);
         auto* rabitq_lower_bound_candidates_ptr =
-            search_param.enable_rabitq_one_bit_search and use_reorder_ and reorder_by_base_
+            search_param.enable_rabitq_one_bit_search and use_reorder_ and
+                    search_param.enable_reorder and reorder_by_base_
                 ? &rabitq_lower_bound_candidates
                 : nullptr;
 
@@ -177,7 +179,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
                                                &ctx,
                                                rabitq_lower_bound_candidates_ptr);
 
-        if (use_reorder_) {
+        if (use_reorder_ and search_param.enable_reorder) {
             this->reorder(query_data,
                           this->get_reorder_codes(),
                           search_result,
@@ -185,7 +187,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
                           iter_filter_ctx,
                           ctx,
                           rabitq_lower_bound_candidates_ptr);
-        } else if (params.rabitq_one_bit_search) {
+        } else if (search_param.enable_reorder and params.rabitq_one_bit_search) {
             this->reorder(
                 query_data, this->basic_flatten_codes_, search_result, k, iter_filter_ctx, ctx);
         }
@@ -360,6 +362,7 @@ HGraph::RangeSearch(const DatasetPtr& query,
     search_param.consider_duplicate = true;
     search_param.range_search_limit_size = static_cast<int>(limited_size);
     search_param.parallel_search_thread_count = params.parallel_search_thread_count;
+    search_param.enable_reorder = params.enable_reorder;
     search_param.enable_rabitq_one_bit_search = params.rabitq_one_bit_search;
 
     auto search_result = this->search_one_graph(raw_query,
@@ -369,10 +372,10 @@ HGraph::RangeSearch(const DatasetPtr& query,
                                                 (VisitedListPtr) nullptr,
                                                 &ctx);
 
-    if (use_reorder_) {
+    if (use_reorder_ and search_param.enable_reorder) {
         this->reorder(
             raw_query, this->get_reorder_codes(), search_result, limited_size, nullptr, ctx);
-    } else if (params.rabitq_one_bit_search) {
+    } else if (search_param.enable_reorder and params.rabitq_one_bit_search) {
         this->reorder(
             raw_query, this->basic_flatten_codes_, search_result, limited_size, nullptr, ctx);
     }
@@ -525,6 +528,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         search_param.topk = std::min(
             search_param.topk, static_cast<int64_t>(static_cast<float>(k) * params.topk_factor));
     }
+    search_param.enable_reorder = params.enable_reorder;
     search_param.consider_duplicate = true;
     search_param.enable_rabitq_one_bit_search = params.rabitq_one_bit_search;
     if (params.enable_time_record) {
@@ -549,7 +553,8 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
 
     DistanceRecordVector rabitq_lower_bound_candidates(ctx.alloc);
     auto* rabitq_lower_bound_candidates_ptr =
-        search_param.enable_rabitq_one_bit_search and use_reorder_ and reorder_by_base_
+        search_param.enable_rabitq_one_bit_search and use_reorder_ and
+                search_param.enable_reorder and reorder_by_base_
             ? &rabitq_lower_bound_candidates
             : nullptr;
 
@@ -563,7 +568,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
 
     this->pool_->ReturnOne(vt);
 
-    if (use_reorder_) {
+    if (use_reorder_ and search_param.enable_reorder) {
         this->reorder(raw_query,
                       this->get_reorder_codes(),
                       search_result,
@@ -571,7 +576,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
                       nullptr,
                       ctx,
                       rabitq_lower_bound_candidates_ptr);
-    } else if (params.rabitq_one_bit_search) {
+    } else if (search_param.enable_reorder and params.rabitq_one_bit_search) {
         this->reorder(raw_query, this->basic_flatten_codes_, search_result, k, nullptr, ctx);
     }
 

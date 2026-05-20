@@ -41,6 +41,10 @@ public:
         if (json.Contains(SEARCH_PARAM_FACTOR)) {
             topk_factor = json[SEARCH_PARAM_FACTOR].GetFloat();
         }
+
+        if (json.Contains(SEARCH_PARAM_ENABLE_REORDER)) {
+            enable_reorder = json[SEARCH_PARAM_ENABLE_REORDER].GetBool();
+        }
     }
 
 public:
@@ -52,5 +56,6 @@ public:
 
     // for reorder, controls the number of candidates to reorder
     float topk_factor{0.0F};
+    bool enable_reorder{true};
 };
 }  // namespace vsag

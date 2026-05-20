@@ -152,7 +152,7 @@ public:
                                  const TestDatasetPtr& dataset,
                                  float build_ratio = 0.5);
 
-    static void
+    static float
     TestKnnSearch(const IndexPtr& index,
                   const TestDatasetPtr& dataset,
                   const std::string& search_param,
@@ -166,7 +166,7 @@ public:
                          const std::string& search_param,
                          bool expected_success = true);
 
-    static void
+    static float
     TestKnnSearchIter(const IndexPtr& index,
                       const TestDatasetPtr& dataset,
                       const std::string& search_param,
@@ -187,7 +187,7 @@ public:
                               const std::string& search_param,
                               bool expected_success = true);
 
-    static void
+    static float
     TestRangeSearch(const IndexPtr& index,
                     const TestDatasetPtr& dataset,
                     const std::string& search_param,

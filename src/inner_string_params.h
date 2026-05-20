@@ -185,6 +185,7 @@ const char* const SPARSE_CODES = "sparse";
 
 const char* const IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT = "scan_buckets_count";
 const char* const SEARCH_PARAM_FACTOR = "factor";
+const char* const SEARCH_PARAM_ENABLE_REORDER = "enable_reorder";
 const char* const SEARCH_PARALLELISM = "parallelism";
 const char* const SEARCH_MAX_TIME_COST_MS = "timeout_ms";
 const char* const SPARSE_N_CANDIDATE = "n_candidate";
@@ -254,6 +255,7 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"EXTRA_INFO_KEY", EXTRA_INFO_KEY},
     {"CODES_TYPE_KEY", CODES_TYPE_KEY},
     {"SEARCH_PARAM_FACTOR", SEARCH_PARAM_FACTOR},
+    {"SEARCH_PARAM_ENABLE_REORDER", SEARCH_PARAM_ENABLE_REORDER},
     {"BUCKET_PER_DATA_KEY", BUCKET_PER_DATA_KEY},
     {"IVF_PARTITION_STRATEGY_PARAMS_KEY", IVF_PARTITION_STRATEGY_PARAMS_KEY},
     {"IVF_PARTITION_STRATEGY_TYPE_KEY", IVF_PARTITION_STRATEGY_TYPE_KEY},
