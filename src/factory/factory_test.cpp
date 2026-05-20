@@ -62,6 +62,24 @@ TEST_CASE("Create Index with Full Parameters", "[ut][factory]") {
         auto index = vsag::Factory::CreateIndex("diskann", parameters.Dump());
         REQUIRE(index.has_value());
     }
+
+    SECTION("mci") {
+        auto parameters = vsag::JsonType::Parse(R"(
+        {
+            "dtype": "float32",
+            "metric_type": "l2",
+            "dim": 32,
+            "index_param": {
+                "max_degree": 32,
+                "mcs": 64,
+                "clique_max": 16
+            }
+        }
+        )");
+
+        auto index = vsag::Factory::CreateIndex("mci", parameters.Dump());
+        REQUIRE(index.has_value());
+    }
 }
 
 TEST_CASE("Create Local File Reader", "[ut][factory]") {

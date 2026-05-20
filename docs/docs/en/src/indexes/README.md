@@ -10,6 +10,7 @@ The pages in this section cover the actively developed indexes:
 | Index | Page | Best for |
 |-------|------|----------|
 | `hgraph` | [HGraph](hgraph.md) | General-purpose, high-recall graph with rich quantization options |
+| `mci` | [MCI](mci.md) | Dense vectors with clique-based candidate routing and optional HGraph hybrid filtering |
 | `ivf` | [IVF](ivf.md) | Partition-based search, high-throughput batch queries, large corpora |
 | `sindi` | [SINDI](sindi.md) | Sparse vectors (BM25 / learned sparse) on inner-product |
 | `pyramid` | [Pyramid](pyramid.md) | Multi-tenant or tag-partitioned corpora with hierarchical paths |

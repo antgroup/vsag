@@ -80,6 +80,48 @@ HGraph 的构建参数使用通用的 `index_param` 键（参见 `examples/cpp/1
 阈值时，HGraph 会跳过图遍历，直接在通过过滤的 id 上做精确暴扫。详见
 [HGraph 索引文档](../indexes/hgraph.md#高选择性过滤下的暴搜回退brute_force_threshold)。
 
+## MCI
+
+MCI 的构建参数同样放在通用的 `index_param` 下，而查询参数放在 `mci` 子对象里。
+
+```json
+{
+    "dim": 128,
+    "dtype": "float32",
+    "metric_type": "l2",
+    "index_param": {
+        "base_quantization_type": "sq8",
+        "base_codes_type": "flatten",
+        "max_degree": 32,
+        "mcs": 200,
+        "clique_max": 50,
+        "knng_path": "",
+        "use_hgraph_hybrid": false,
+        "hgraph_valid_ratio_threshold": 1.0,
+        "hgraph_index_path": ""
+    }
+}
+```
+
+| 字段 | 典型值 | 说明 |
+|------|-------|------|
+| `max_degree` | 16-48 | 候选图的最大出度 |
+| `mcs` | 64-256 | 构建或导入 KNN 图时使用的候选预算 |
+| `clique_max` | 16-64 | 单个 clique 候选组大小上限 |
+| `alpha` | 1.2 | 内部自建图时 ODescent 的扩张系数 |
+| `knng_path` | 路径或空 | 可选的固定宽度二进制 KNN 图文件 |
+| `clique_path` | 路径或空 | 可选的预计算 clique 索引 |
+| `use_hgraph_hybrid` | bool | 开启到外部 HGraph 的过滤检索路由 |
+| `hgraph_valid_ratio_threshold` | 0.0-1.0 | 只有 valid ratio 达阈值时才会切到 HGraph |
+| `hgraph_index_path` | 路径 | HGraph 配套索引的序列化文件 |
+| `hgraph_ef_search` | 32-200 | Hybrid 路由到 HGraph 时使用的默认 `ef_search` |
+
+搜索时：
+
+```json
+{"mci": {"ef_search": 80, "seed_count": 32}}
+```
+
 ## DiskANN
 
 ```json

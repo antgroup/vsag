@@ -33,8 +33,14 @@ namespace vsag::eval {
 
 class FilterObj : public vsag::Filter {
 public:
-    FilterObj(const std::shared_ptr<int64_t[]>& train_labels, int64_t test_label, float valid_ratio)
-        : train_labels_(train_labels), test_label_(test_label), valid_ratio_(valid_ratio) {
+    FilterObj(const std::shared_ptr<int64_t[]>& train_labels,
+              int64_t test_label,
+              float valid_ratio,
+              const std::vector<int64_t>* valid_ids)
+        : train_labels_(train_labels),
+          test_label_(test_label),
+          valid_ratio_(valid_ratio),
+          valid_ids_(valid_ids) {
     }
 
     bool
@@ -47,10 +53,22 @@ public:
         return valid_ratio_;
     }
 
+    void
+    GetValidIds(const int64_t** valid_ids, int64_t& count) const override {
+        if (valid_ids_ == nullptr or valid_ids_->empty()) {
+            *valid_ids = nullptr;
+            count = 0;
+            return;
+        }
+        *valid_ids = valid_ids_->data();
+        count = static_cast<int64_t>(valid_ids_->size());
+    }
+
 private:
     const std::shared_ptr<int64_t[]>& train_labels_;
     int64_t test_label_;
     float valid_ratio_;
+    const std::vector<int64_t>* valid_ids_{nullptr};
 };
 
 SearchEvalCase::SearchEvalCase(const std::string& dataset_path,
@@ -182,10 +200,11 @@ SearchEvalCase::do_knn_search() {
             const int64_t* neighbors = result.value()->GetIds();
             int64_t* ground_truth_neighbors = dataset_ptr_->GetNeighbors(i);
             auto record = std::make_tuple(neighbors,
+                                          static_cast<uint64_t>(result.value()->GetDim()),
                                           ground_truth_neighbors,
                                           dataset_ptr_.get(),
                                           query_vector,
-                                          result.value()->GetDim());
+                                          topk);
             monitor->Record(&record);
         }
         monitor->Stop();
@@ -194,6 +213,21 @@ SearchEvalCase::do_knn_search() {
 
 void
 SearchEvalCase::do_range_search() {
+}
+
+void
+SearchEvalCase::init_filter_valid_ids() {
+    if (not this->filter_valid_ids_.empty()) {
+        return;
+    }
+    auto train_labels = this->dataset_ptr_->GetTrainLabels();
+    if (train_labels == nullptr) {
+        return;
+    }
+    const auto total_base = this->dataset_ptr_->GetNumberOfBase();
+    for (int64_t id = 0; id < total_base; ++id) {
+        this->filter_valid_ids_[train_labels[id]].push_back(id);
+    }
 }
 
 void
@@ -208,10 +242,14 @@ SearchEvalCase::do_knn_filter_search() {
     if (test_labels == nullptr) {
         this->logger_->Error("dataset does not contain test_labels");
     }
+    this->init_filter_valid_ids();
     this->logger_->Debug("query count is " + std::to_string(query_count));
-    auto min_query = std::max<int64_t>(query_count, 10000);
+    auto min_query = std::max<int64_t>(query_count, config_.search_query_count);
     for (auto& monitor : this->monitors_) {
         monitor->Start();
+
+        omp_set_num_threads(config_.num_threads_searching);
+#pragma omp parallel for schedule(dynamic)
         for (int64_t id = 0; id < min_query; ++id) {
             auto i = id % query_count;
             auto query = vsag::Dataset::Make();
@@ -223,8 +261,13 @@ SearchEvalCase::do_knn_filter_search() {
                 query->Int8Vectors((const int8_t*)query_vector);
             }
             auto test_label = test_labels[i];
+            const std::vector<int64_t>* valid_ids = nullptr;
+            auto valid_ids_iter = this->filter_valid_ids_.find(test_label);
+            if (valid_ids_iter != this->filter_valid_ids_.end()) {
+                valid_ids = &valid_ids_iter->second;
+            }
             auto filter = std::make_shared<FilterObj>(
-                train_labels, test_label, this->dataset_ptr_->GetValidRatio(test_label));
+                train_labels, test_label, this->dataset_ptr_->GetValidRatio(test_label), valid_ids);
             auto result = this->index_->KnnSearch(query, topk, config_.search_param, filter);
             if (not result.has_value()) {
                 std::cerr << "query error: " << result.error().message << std::endl;
@@ -232,8 +275,12 @@ SearchEvalCase::do_knn_filter_search() {
             }
             const int64_t* neighbors = result.value()->GetIds();
             int64_t* ground_truth_neighbors = dataset_ptr_->GetNeighbors(i);
-            auto record = std::make_tuple(
-                neighbors, ground_truth_neighbors, dataset_ptr_.get(), query_vector, topk);
+            auto record = std::make_tuple(neighbors,
+                                          static_cast<uint64_t>(result.value()->GetDim()),
+                                          ground_truth_neighbors,
+                                          dataset_ptr_.get(),
+                                          query_vector,
+                                          topk);
             monitor->Record(&record);
         }
         monitor->Stop();
