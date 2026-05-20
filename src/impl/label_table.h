@@ -447,6 +447,16 @@ public:
             return;
         }
 
+        bool from_removed = false;
+        {
+            std::scoped_lock wlock(delete_ids_mutex_);
+            from_removed = deleted_ids_.erase(from) > 0;
+            deleted_ids_.erase(to);
+            if (from_removed) {
+                deleted_ids_.insert(to);
+            }
+        }
+
         if (use_reverse_map_) {
             label_remap_.Erase(label_table_[to]);
         }
@@ -462,6 +472,18 @@ public:
         if (duplicate_tracker_ != nullptr) {
             duplicate_tracker_->Resize(capacity);
         }
+    }
+
+    void
+    ForceRemove(LabelType label, InnerIdType inner_id) {
+        if (use_reverse_map_) {
+            label_remap_.Erase(label);
+        }
+        {
+            std::scoped_lock wlock(delete_ids_mutex_);
+            deleted_ids_.erase(inner_id);
+        }
+        total_count_.fetch_sub(1);
     }
 
 private:
