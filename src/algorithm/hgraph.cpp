@@ -2108,12 +2108,8 @@ HGraph::reorder(const void* query,
     if (reorder_impl == nullptr) {
         reorder_impl = std::make_shared<FlattenReorder>(flatten, allocator_);
     }
-    auto reorder_heap = reorder_impl->Reorder(candidate_heap,
-                                              static_cast<const float*>(query),
-                                              k,
-                                              ctx,
-                                              iter_ctx,
-                                              rabitq_lower_bound_candidates);
+    auto reorder_heap = reorder_impl->Reorder(
+        candidate_heap, query, k, ctx, iter_ctx, rabitq_lower_bound_candidates);
     candidate_heap = reorder_heap;
 }
 

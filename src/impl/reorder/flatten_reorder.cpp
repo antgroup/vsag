@@ -29,7 +29,7 @@ namespace vsag {
 
 DistHeapPtr
 FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
-                        const float* query,
+                        const void* query,
                         int64_t topk,
                         QueryContext& ctx,
                         IteratorFilterContext* iter_ctx,
