@@ -56,6 +56,18 @@ public:
     Query(float* global_dists, const SparseTermComputerPtr& computer) const;
 
     /**
+     * @brief Query with optional offset recording for proximity scoring
+     *
+     * @param global_dists Distance array to accumulate IP scores
+     * @param computer SparseTermComputer for query processing
+     * @param doc_term_offsets Optional output: doc_term_offsets[doc_id][term_id] = offset in posting list
+     */
+    void
+    Query(float* global_dists,
+          const SparseTermComputerPtr& computer,
+          std::vector<std::unordered_map<uint32_t, uint32_t>>* doc_term_offsets) const;
+
+    /**
      * @brief Insert candidates into heap by iterating through term lists
      * 
      * @param dists Pre-allocated distance array (will be modified during processing)

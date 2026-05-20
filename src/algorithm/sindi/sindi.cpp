@@ -346,8 +346,15 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
         auto window_start_id = cur * window_size_;
         auto term_list = this->window_term_list_[cur];
 
-        // compute
-        term_list->Query(dists.data(), computer);
+        // compute IP scores, optionally record term offsets for proximity
+        std::vector<std::unordered_map<uint32_t, uint32_t>> doc_term_offsets;
+        if (store_positions_ && (proximity_weight > 0.0f ||
+                                 (phrase_terms != nullptr && !phrase_terms->empty()))) {
+            doc_term_offsets.resize(window_size_);
+            term_list->Query(dists.data(), computer, &doc_term_offsets);
+        } else {
+            term_list->Query(dists.data(), computer);
+        }
 
         // phrase filter: discard candidates that don't satisfy phrase constraint
         if (store_positions_ && phrase_terms != nullptr && !phrase_terms->empty()) {
@@ -356,27 +363,19 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
                     continue;
                 }
                 // Collect positions for phrase terms in this doc
-                auto doc_id = static_cast<uint16_t>(doc_idx);
                 std::vector<std::vector<uint16_t>> phrase_positions;
                 phrase_positions.reserve(phrase_terms->size());
                 bool all_present = true;
                 for (uint32_t pt : *phrase_terms) {
-                    if (pt >= term_list->term_capacity_ || term_list->term_sizes_[pt] == 0 ||
+                    auto it = doc_term_offsets[doc_idx].find(pt);
+                    if (it == doc_term_offsets[doc_idx].end() ||
+                        pt >= term_list->term_capacity_ || term_list->term_sizes_[pt] == 0 ||
                         !term_list->term_pos_offsets_[pt]) {
                         phrase_positions.emplace_back();
                         all_present = false;
                         break;
                     }
-                    auto& term_doc_ids = *term_list->term_ids_[pt];
-                    auto it = std::lower_bound(term_doc_ids.begin(), term_doc_ids.end(), doc_id);
-                    if (it != term_doc_ids.end() && *it == doc_id) {
-                        uint32_t posting_idx = static_cast<uint32_t>(it - term_doc_ids.begin());
-                        phrase_positions.push_back(term_list->GetPositions(pt, posting_idx));
-                    } else {
-                        phrase_positions.emplace_back();
-                        all_present = false;
-                        break;
-                    }
+                    phrase_positions.push_back(term_list->GetPositions(pt, it->second));
                 }
                 if (!all_present ||
                     !check_phrase_constraint(phrase_positions, phrase_slop, phrase_ordered)) {
@@ -411,27 +410,21 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
                 candidates.push_back(p.second);
             }
 
-            // For each candidate, binary search posting lists to get positions
+            // For each candidate, use recorded offsets to get positions (no binary search)
             for (uint32_t doc_idx : candidates) {
                 std::vector<std::vector<uint16_t>> position_lists;
                 position_lists.reserve(raw_query.len_);
-                auto doc_id = static_cast<uint16_t>(doc_idx);
 
                 for (uint32_t qi = 0; qi < raw_query.len_; ++qi) {
                     uint32_t term = raw_query.ids_[qi];
-                    if (term >= term_list->term_capacity_ || term_list->term_sizes_[term] == 0 ||
+                    auto it = doc_term_offsets[doc_idx].find(term);
+                    if (it == doc_term_offsets[doc_idx].end() ||
+                        term >= term_list->term_capacity_ || term_list->term_sizes_[term] == 0 ||
                         !term_list->term_pos_offsets_[term]) {
                         position_lists.emplace_back();
                         continue;
                     }
-                    auto& term_doc_ids = *term_list->term_ids_[term];
-                    auto it = std::lower_bound(term_doc_ids.begin(), term_doc_ids.end(), doc_id);
-                    if (it != term_doc_ids.end() && *it == doc_id) {
-                        uint32_t posting_idx = static_cast<uint32_t>(it - term_doc_ids.begin());
-                        position_lists.push_back(term_list->GetPositions(term, posting_idx));
-                    } else {
-                        position_lists.emplace_back();
-                    }
+                    position_lists.push_back(term_list->GetPositions(term, it->second));
                 }
 
                 float raw_boost = compute_pairwise_proximity(position_lists, proximity_ordered);

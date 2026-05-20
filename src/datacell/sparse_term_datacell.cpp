@@ -57,6 +57,52 @@ SparseTermDataCell::Query(float* global_dists, const SparseTermComputerPtr& comp
     computer->ResetTerm();
 }
 
+void
+SparseTermDataCell::Query(float* global_dists,
+                           const SparseTermComputerPtr& computer,
+                           std::vector<std::unordered_map<uint32_t, uint32_t>>* doc_term_offsets) const {
+    while (computer->HasNextTerm()) {
+        auto it = computer->NextTermIter();
+        auto term = computer->GetTerm(it);
+        if (computer->HasNextTerm()) {
+            auto next_it = it + 1;
+            auto next_term = computer->GetTerm(next_it);
+            if (next_term < term_ids_.size() && term_ids_[next_term]) {
+                __builtin_prefetch(term_ids_[next_term]->data(), 0, 3);
+                __builtin_prefetch(term_datas_[next_term]->data(), 0, 3);
+            }
+        }
+        if (term >= term_sizes_.size() || term_sizes_[term] == 0) {
+            continue;
+        }
+
+        auto term_size = static_cast<uint32_t>(static_cast<float>(term_sizes_[term]) *
+                                               computer->term_retain_ratio_);
+
+        if (use_quantization_) {
+            // Quantization path: use ScanForAccumulate, then record offsets separately
+            computer->ScanForAccumulate(
+                it, term_ids_[term]->data(), term_datas_[term]->data(), term_size, global_dists);
+            // Record offsets for all docs in this term's posting list
+            auto& term_ids = *term_ids_[term];
+            for (uint32_t i = 0; i < term_size; ++i) {
+                (*doc_term_offsets)[term_ids[i]][term] = i;
+            }
+        } else {
+            // Non-quantization path: expand loop to record offsets inline
+            float query_val = computer->sorted_query_[it].second;
+            auto& term_ids = *term_ids_[term];
+            auto* term_vals = reinterpret_cast<const float*>(term_datas_[term]->data());
+            for (uint32_t i = 0; i < term_size; ++i) {
+                uint16_t doc_id = term_ids[i];
+                global_dists[doc_id] += query_val * term_vals[i];
+                (*doc_term_offsets)[doc_id][term] = i;
+            }
+        }
+    }
+    computer->ResetTerm();
+}
+
 template <InnerSearchMode mode, InnerSearchType type>
 void
 SparseTermDataCell::insert_candidate_into_heap(uint32_t id,
