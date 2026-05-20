@@ -17,7 +17,7 @@
 
 #include <memory>
 
-#include "algorithm/hgraph.h"
+#include "algorithm/hgraph/hgraph.h"
 #include "algorithm/inner_index_interface.h"
 #include "utils/pointer_define.h"
 #include "vsag/allocator.h"

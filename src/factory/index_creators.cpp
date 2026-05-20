@@ -19,7 +19,7 @@
 #include <mutex>
 
 #include "algorithm/brute_force.h"
-#include "algorithm/hgraph.h"
+#include "algorithm/hgraph/hgraph.h"
 #include "algorithm/ivf.h"
 #include "algorithm/pyramid.h"
 #include "algorithm/pyramid_zparameters.h"

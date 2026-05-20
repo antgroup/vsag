@@ -1,4 +1,3 @@
-
 # Copyright 2024-present the vsag project
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -17,6 +16,7 @@
 add_subdirectory (ivf_partition)
 add_subdirectory (hnswlib)
 add_subdirectory (sindi)
+add_subdirectory (hgraph)
 
 file (GLOB ALGORITHM_SRCS "*.cpp")
 list (FILTER ALGORITHM_SRCS EXCLUDE REGEX "_test.cpp")
@@ -31,6 +31,7 @@ set (ALGORITHM_LIBS
         hnswlib
         ivf_partition
         sindi
+        hgraph
         PARENT_SCOPE)
 
 if (ENABLE_TESTS)
