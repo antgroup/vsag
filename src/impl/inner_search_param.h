@@ -54,6 +54,7 @@ public:
     // for ivf
     int scan_bucket_size{1};
     float factor{2.0F};
+    bool enable_reorder{true};
     float first_order_scan_ratio{1.0F};
     std::vector<ExecutorPtr> executors;
 

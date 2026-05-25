@@ -202,10 +202,17 @@ Search-time parameters live under the `hgraph` sub-object:
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `ef_search` | int | Size of the search frontier. Larger = higher recall, slower query. |
+| `enable_reorder` | bool | `true` by default. Set to `false` to skip the final reorder stage for this request even when the index was built with reorder enabled. This also disables the RaBitQ one-bit reorder path. |
 
 ```cpp
 auto result = index->KnnSearch(
     query, topk, R"({"hgraph": {"ef_search": 200}})").value();
+```
+
+```cpp
+auto fast_result = index->KnnSearch(
+    query, topk,
+    R"({"hgraph": {"ef_search": 200, "enable_reorder": false}})").value();
 ```
 
 ## When to use HGraph
