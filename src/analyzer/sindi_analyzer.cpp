@@ -27,6 +27,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "impl/heap/standard_heap.h"
 #include "utils/sparse_vector_transform.h"
 
 namespace vsag {
@@ -41,7 +42,11 @@ struct analyze_options {
     std::string base_path;
     std::string groundtruth_path;
     std::string save_groundtruth_path;
+    bool profile_search_pipeline{false};
+    int64_t profile_query_count{0};
 };
+
+using ProfileClock = std::chrono::steady_clock;
 
 JsonType
 make_skip_json(const std::string& reason) {
@@ -89,6 +94,17 @@ make_distribution_stats(const std::vector<float>& values) {
     auto sorted_values = values;
     std::sort(sorted_values.begin(), sorted_values.end());
     return make_distribution_stats_from_sorted(sorted_values);
+}
+
+double
+elapsed_profile_ms(const ProfileClock::time_point& start_time,
+                   const ProfileClock::time_point& end_time) {
+    return std::chrono::duration<double, std::milli>(end_time - start_time).count();
+}
+
+void
+set_profile_ms(JsonType& json, const std::string& key, double value) {
+    json[key].SetFloat(static_cast<float>(value));
 }
 
 std::streamsize
@@ -497,6 +513,12 @@ parse_analyze_options(const JsonType& json) {
     if (analyze.Contains("save_groundtruth_path")) {
         options.save_groundtruth_path = analyze["save_groundtruth_path"].GetString();
     }
+    if (analyze.Contains("profile_search_pipeline")) {
+        options.profile_search_pipeline = analyze["profile_search_pipeline"].GetBool();
+    }
+    if (analyze.Contains("profile_query_count")) {
+        options.profile_query_count = analyze["profile_query_count"].GetInt();
+    }
     return options;
 }
 
@@ -877,6 +899,306 @@ SINDIAnalyzer::calculate_postings_scanned_stats(const DatasetPtr& query_dataset,
 }
 
 JsonType
+SINDIAnalyzer::profile_search_pipeline(const DatasetPtr& query_dataset,
+                                       const SINDISearchParameter& search_param,
+                                       int64_t topk,
+                                       int64_t query_limit) const {
+    if (query_dataset == nullptr || query_dataset->GetSparseVectors() == nullptr || topk <= 0) {
+        return make_skip_json("query dataset unavailable");
+    }
+
+    int64_t query_count = query_dataset->GetNumElements();
+    if (query_limit > 0) {
+        query_count = std::min<int64_t>(query_count, query_limit);
+    }
+    if (query_count <= 0) {
+        return make_skip_json("empty query dataset");
+    }
+
+    InnerSearchParam inner_param;
+    inner_param.ef = std::max(static_cast<int64_t>(search_param.n_candidate), topk);
+    inner_param.topk = topk;
+
+    double query_prepare_ms = 0.0;
+    double inverted_accumulate_ms = 0.0;
+    double coarse_heap_ms = 0.0;
+    double dmq_prepare_ms = 0.0;
+    double dmq_score_ms = 0.0;
+    double reorder_heap_ms = 0.0;
+    double result_materialize_ms = 0.0;
+
+    uint64_t active_terms_sum = 0;
+    uint64_t posting_entries_sum = 0;
+    uint64_t posting_term_hits_sum = 0;
+    uint64_t coarse_candidates_sum = 0;
+    uint64_t dmq_scored_candidates_sum = 0;
+    uint64_t max_query_lookup_bytes = 0;
+    uint64_t query_lookup_bytes_sum = 0;
+    uint64_t max_coarse_candidates = 0;
+    uint64_t max_windows = 0;
+
+    std::vector<float> query_latency_ms;
+    std::vector<float> inverted_search_ms;
+    std::vector<float> dmq_rerank_ms;
+    std::vector<float> candidate_counts;
+    query_latency_ms.reserve(static_cast<size_t>(query_count));
+    inverted_search_ms.reserve(static_cast<size_t>(query_count));
+    dmq_rerank_ms.reserve(static_cast<size_t>(query_count));
+    candidate_counts.reserve(static_cast<size_t>(query_count));
+
+    for (int64_t query_idx = 0; query_idx < query_count; ++query_idx) {
+        const auto& query = query_dataset->GetSparseVectors()[query_idx];
+        auto query_start_time = ProfileClock::now();
+        SparseVector effective_query = query;
+        Vector<uint32_t> tmp_ids(sindi_->allocator_);
+        Vector<float> tmp_vals(sindi_->allocator_);
+
+        auto prepare_start_time = ProfileClock::now();
+        if (sindi_->remap_term_ids_) {
+            effective_query = sindi_->remap_sparse_vector_for_query(query, tmp_ids, tmp_vals);
+        }
+        if (effective_query.len_ == 0) {
+            auto prepare_end_time = ProfileClock::now();
+            query_prepare_ms += elapsed_profile_ms(prepare_start_time, prepare_end_time);
+            query_latency_ms.emplace_back(
+                static_cast<float>(elapsed_profile_ms(query_start_time, prepare_end_time)));
+            continue;
+        }
+        auto computer =
+            std::make_shared<SparseTermComputer>(effective_query, search_param, sindi_->allocator_);
+        Vector<float> dists(sindi_->window_size_, 0.0F, sindi_->allocator_);
+        MaxHeap heap(sindi_->allocator_);
+        auto prepare_end_time = ProfileClock::now();
+        query_prepare_ms += elapsed_profile_ms(prepare_start_time, prepare_end_time);
+
+        double query_inverted_accumulate_ms = 0.0;
+        double query_coarse_heap_ms = 0.0;
+        double query_dmq_prepare_ms = 0.0;
+        double query_dmq_score_ms = 0.0;
+        double query_reorder_heap_ms = 0.0;
+        double query_result_materialize_ms = 0.0;
+
+        const auto [min_window_id, max_window_id] = sindi_->get_min_max_window_id(nullptr);
+        max_windows = std::max<uint64_t>(max_windows,
+                                         static_cast<uint64_t>(max_window_id - min_window_id + 1));
+        for (auto cur = min_window_id; cur <= max_window_id; ++cur) {
+            auto window_start_id = static_cast<uint32_t>(cur * sindi_->window_size_);
+            auto term_list = sindi_->window_term_list_[cur];
+
+            while (computer->HasNextTerm()) {
+                auto term_iterator = computer->NextTermIter();
+                auto term = computer->GetTerm(term_iterator);
+                if (term < term_list->term_sizes_.size() && term_list->term_sizes_[term] != 0) {
+                    auto term_size =
+                        static_cast<uint32_t>(static_cast<float>(term_list->term_sizes_[term]) *
+                                              computer->term_retain_ratio_);
+                    if (term_size > 0) {
+                        posting_entries_sum += term_size;
+                        ++posting_term_hits_sum;
+                    }
+                }
+            }
+            computer->ResetTerm();
+
+            auto accumulate_start_time = ProfileClock::now();
+            term_list->Query(dists.data(), computer);
+            auto accumulate_end_time = ProfileClock::now();
+            auto accumulate_ms = elapsed_profile_ms(accumulate_start_time, accumulate_end_time);
+            inverted_accumulate_ms += accumulate_ms;
+            query_inverted_accumulate_ms += accumulate_ms;
+
+            auto heap_start_time = ProfileClock::now();
+            if (search_param.use_term_lists_heap_insert) {
+                term_list->InsertHeapByTermLists<KNN_SEARCH, PURE>(
+                    dists.data(), computer, heap, inner_param, window_start_id);
+            } else {
+                term_list->InsertHeapByDists<KNN_SEARCH, PURE>(
+                    dists.data(), dists.size(), heap, inner_param, window_start_id);
+            }
+            auto heap_end_time = ProfileClock::now();
+            auto heap_ms = elapsed_profile_ms(heap_start_time, heap_end_time);
+            coarse_heap_ms += heap_ms;
+            query_coarse_heap_ms += heap_ms;
+        }
+
+        active_terms_sum += computer->pruned_len_;
+        auto candidate_size = static_cast<uint64_t>(heap.size());
+        coarse_candidates_sum += candidate_size;
+        max_coarse_candidates = std::max<uint64_t>(max_coarse_candidates, candidate_size);
+        candidate_counts.emplace_back(static_cast<float>(candidate_size));
+
+        if (sindi_->use_reorder_) {
+            const SparseVector* rerank_query =
+                (sindi_->remap_term_ids_ && sindi_->use_reorder_) ? &query : nullptr;
+            const auto& context_query =
+                rerank_query != nullptr ? *rerank_query : computer->raw_query_;
+            uint64_t query_lookup_bytes = 0;
+            if (sindi_->rerank_type_ == SPARSE_RERANK_TYPE_DMQ && context_query.len_ > 0) {
+                uint32_t max_term_id = 0;
+                for (uint32_t term_index = 0; term_index < context_query.len_; ++term_index) {
+                    max_term_id = std::max<uint32_t>(max_term_id, context_query.ids_[term_index]);
+                }
+                uint64_t lookup_size = static_cast<uint64_t>(max_term_id) + 1;
+                if (lookup_size <= 1'000'000) {
+                    query_lookup_bytes = lookup_size * sizeof(float);
+                }
+            }
+            query_lookup_bytes_sum += query_lookup_bytes;
+            max_query_lookup_bytes = std::max<uint64_t>(max_query_lookup_bytes, query_lookup_bytes);
+
+            auto dmq_prepare_start_time = ProfileClock::now();
+            auto rerank_query_context = sindi_->rerank_backend_->PrepareQuery(context_query);
+            auto dmq_prepare_end_time = ProfileClock::now();
+            query_dmq_prepare_ms = elapsed_profile_ms(dmq_prepare_start_time, dmq_prepare_end_time);
+            dmq_prepare_ms += query_dmq_prepare_ms;
+
+            float cur_heap_top = std::numeric_limits<float>::max();
+            auto high_precise_heap =
+                std::make_shared<StandardHeap<true, false>>(sindi_->allocator_, -1);
+            auto candidates_to_score = heap.size();
+            dmq_scored_candidates_sum += static_cast<uint64_t>(candidates_to_score);
+            for (uint64_t candidate_index = 0; candidate_index < candidates_to_score;
+                 ++candidate_index) {
+                auto inner_id = heap.top().second;
+                auto score_start_time = ProfileClock::now();
+                auto high_precise_distance =
+                    sindi_->rerank_backend_->CalDistanceByInnerId(*rerank_query_context, inner_id);
+                auto score_end_time = ProfileClock::now();
+                auto score_ms = elapsed_profile_ms(score_start_time, score_end_time);
+                query_dmq_score_ms += score_ms;
+                dmq_score_ms += score_ms;
+
+                auto reorder_start_time = ProfileClock::now();
+                auto label = sindi_->label_table_->GetLabelById(inner_id);
+                if (high_precise_distance < cur_heap_top || high_precise_heap->Size() < topk) {
+                    high_precise_heap->Push(high_precise_distance, label);
+                }
+                if (high_precise_heap->Size() > topk) {
+                    high_precise_heap->Pop();
+                }
+                cur_heap_top = high_precise_heap->Top().first;
+                heap.pop();
+                auto reorder_end_time = ProfileClock::now();
+                auto reorder_ms = elapsed_profile_ms(reorder_start_time, reorder_end_time);
+                query_reorder_heap_ms += reorder_ms;
+                reorder_heap_ms += reorder_ms;
+            }
+
+            auto materialize_start_time = ProfileClock::now();
+            while (not high_precise_heap->Empty()) {
+                high_precise_heap->Pop();
+            }
+            auto materialize_end_time = ProfileClock::now();
+            query_result_materialize_ms =
+                elapsed_profile_ms(materialize_start_time, materialize_end_time);
+            result_materialize_ms += query_result_materialize_ms;
+        } else {
+            auto materialize_start_time = ProfileClock::now();
+            while (heap.size() > static_cast<uint64_t>(topk)) {
+                heap.pop();
+            }
+            while (not heap.empty()) {
+                (void)sindi_->label_table_->GetLabelById(heap.top().second);
+                heap.pop();
+            }
+            auto materialize_end_time = ProfileClock::now();
+            query_result_materialize_ms =
+                elapsed_profile_ms(materialize_start_time, materialize_end_time);
+            result_materialize_ms += query_result_materialize_ms;
+        }
+
+        auto query_end_time = ProfileClock::now();
+        query_latency_ms.emplace_back(
+            static_cast<float>(elapsed_profile_ms(query_start_time, query_end_time)));
+        inverted_search_ms.emplace_back(
+            static_cast<float>(query_inverted_accumulate_ms + query_coarse_heap_ms));
+        dmq_rerank_ms.emplace_back(static_cast<float>(query_dmq_prepare_ms + query_dmq_score_ms +
+                                                      query_reorder_heap_ms +
+                                                      query_result_materialize_ms));
+    }
+
+    double profiled_stage_total_ms = query_prepare_ms + inverted_accumulate_ms + coarse_heap_ms +
+                                     dmq_prepare_ms + dmq_score_ms + reorder_heap_ms +
+                                     result_materialize_ms;
+    auto denominator = static_cast<double>(query_count);
+
+    JsonType totals;
+    set_profile_ms(totals, "query_prepare", query_prepare_ms);
+    set_profile_ms(totals, "inverted_accumulate", inverted_accumulate_ms);
+    set_profile_ms(totals, "coarse_heap", coarse_heap_ms);
+    set_profile_ms(totals, "dmq_prepare", dmq_prepare_ms);
+    set_profile_ms(totals, "dmq_score", dmq_score_ms);
+    set_profile_ms(totals, "reorder_heap", reorder_heap_ms);
+    set_profile_ms(totals, "result_materialize", result_materialize_ms);
+    set_profile_ms(totals, "profiled_stage_total", profiled_stage_total_ms);
+
+    JsonType means;
+    set_profile_ms(means, "query_prepare", query_prepare_ms / denominator);
+    set_profile_ms(means, "inverted_accumulate", inverted_accumulate_ms / denominator);
+    set_profile_ms(means, "coarse_heap", coarse_heap_ms / denominator);
+    set_profile_ms(
+        means, "inverted_search", (inverted_accumulate_ms + coarse_heap_ms) / denominator);
+    set_profile_ms(means, "dmq_prepare", dmq_prepare_ms / denominator);
+    set_profile_ms(means, "dmq_score", dmq_score_ms / denominator);
+    set_profile_ms(means, "reorder_heap", reorder_heap_ms / denominator);
+    set_profile_ms(means, "result_materialize", result_materialize_ms / denominator);
+    set_profile_ms(means, "profiled_stage_total", profiled_stage_total_ms / denominator);
+
+    JsonType ratios;
+    auto set_ratio = [&ratios, profiled_stage_total_ms](const std::string& key, double value) {
+        float ratio = profiled_stage_total_ms <= 0.0
+                          ? 0.0F
+                          : static_cast<float>(value / profiled_stage_total_ms);
+        ratios[key].SetFloat(ratio);
+    };
+    set_ratio("query_prepare", query_prepare_ms);
+    set_ratio("inverted_accumulate", inverted_accumulate_ms);
+    set_ratio("coarse_heap", coarse_heap_ms);
+    set_ratio("inverted_search", inverted_accumulate_ms + coarse_heap_ms);
+    set_ratio("dmq_prepare", dmq_prepare_ms);
+    set_ratio("dmq_score", dmq_score_ms);
+    set_ratio("reorder_heap", reorder_heap_ms);
+    set_ratio("result_materialize", result_materialize_ms);
+
+    JsonType counters;
+    counters["query_count"].SetInt(query_count);
+    counters["topk"].SetInt(topk);
+    counters["n_candidate"].SetInt(inner_param.ef);
+    counters["windows_max"].SetInt(max_windows);
+    counters["active_terms_mean"].SetFloat(static_cast<float>(active_terms_sum / denominator));
+    counters["posting_term_hits_mean"].SetFloat(
+        static_cast<float>(posting_term_hits_sum / denominator));
+    counters["posting_entries_scanned_mean"].SetFloat(
+        static_cast<float>(posting_entries_sum / denominator));
+    counters["coarse_candidates_mean"].SetFloat(
+        static_cast<float>(coarse_candidates_sum / denominator));
+    counters["dmq_scored_candidates_mean"].SetFloat(
+        static_cast<float>(dmq_scored_candidates_sum / denominator));
+
+    JsonType transient_memory;
+    transient_memory["dists_buffer_bytes"].SetInt(sindi_->window_size_ * sizeof(float));
+    transient_memory["coarse_heap_pair_bytes_estimate"].SetInt(max_coarse_candidates *
+                                                               sizeof(std::pair<float, int64_t>));
+    transient_memory["reorder_heap_pair_bytes_estimate"].SetInt(static_cast<uint64_t>(topk) *
+                                                                sizeof(std::pair<float, int64_t>));
+    transient_memory["dmq_query_lookup_bytes_mean"].SetInt(
+        static_cast<uint64_t>(query_lookup_bytes_sum / denominator));
+    transient_memory["dmq_query_lookup_bytes_max"].SetInt(max_query_lookup_bytes);
+
+    JsonType stats;
+    stats["stage_total_ms"].SetJson(totals);
+    stats["stage_avg_ms"].SetJson(means);
+    stats["stage_ratio"].SetJson(ratios);
+    stats["query_latency_ms"].SetJson(make_distribution_stats(query_latency_ms));
+    stats["inverted_search_ms"].SetJson(make_distribution_stats(inverted_search_ms));
+    stats["dmq_rerank_ms"].SetJson(make_distribution_stats(dmq_rerank_ms));
+    stats["coarse_candidates"].SetJson(make_distribution_stats(candidate_counts));
+    stats["counters"].SetJson(counters);
+    stats["transient_memory_estimate"].SetJson(transient_memory);
+    return stats;
+}
+
+JsonType
 SINDIAnalyzer::get_base_search_stats(const std::string& search_param,
                                      const DatasetPtr& base_dataset) const {
     JsonType stats;
@@ -1219,6 +1541,13 @@ SINDIAnalyzer::AnalyzeIndexBySearch(const SearchRequest& request) {
 
     auto effective_topk = std::min<int64_t>(request.topk_, sindi_->cur_element_count_);
     if (effective_topk <= 0) {
+        return stats;
+    }
+
+    if (analyze_options.profile_search_pipeline) {
+        stats["search_pipeline_profile"].SetJson(profile_search_pipeline(
+            query_dataset, search_param, effective_topk, analyze_options.profile_query_count));
+        stats["memory_detail"].SetJson(JsonType::Parse(sindi_->GetMemoryUsageDetail()));
         return stats;
     }
 

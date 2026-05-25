@@ -106,6 +106,12 @@ private:
                                      const SINDISearchParameter& search_param) const;
 
     JsonType
+    profile_search_pipeline(const DatasetPtr& query_dataset,
+                            const SINDISearchParameter& search_param,
+                            int64_t topk,
+                            int64_t query_limit) const;
+
+    JsonType
     get_base_search_stats(const std::string& search_param,
                           const DatasetPtr& base_dataset = nullptr) const;
 

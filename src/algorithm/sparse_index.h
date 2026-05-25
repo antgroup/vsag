@@ -97,8 +97,8 @@ public:
     InitFeatures() override;
 
     float
-    CalDistanceByIdUnsafe(Vector<uint32_t>& sorted_ids,
-                          Vector<float>& sorted_vals,
+    CalDistanceByIdUnsafe(const Vector<uint32_t>& sorted_ids,
+                          const Vector<float>& sorted_vals,
                           uint32_t inner_id) const;
 
     int64_t

@@ -58,3 +58,14 @@ target_link_libraries (eval_performance PRIVATE
     ${HDF5_C_STATIC_LIBRARY}
     z dl)
 add_dependencies (eval_performance hdf5)
+
+add_executable (sindi_direct_benchmark sindi_direct_benchmark.cpp)
+target_link_libraries (sindi_direct_benchmark PRIVATE
+    eval_obj
+    simd
+    vsag
+    vsag_eval_common
+    ${HDF5_CPP_STATIC_LIBRARY}
+    ${HDF5_C_STATIC_LIBRARY}
+    z dl)
+add_dependencies (sindi_direct_benchmark hdf5)

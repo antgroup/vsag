@@ -221,8 +221,8 @@ SparseIndex::collect_results(const DistHeapPtr& results) const {
 }
 
 float
-SparseIndex::CalDistanceByIdUnsafe(Vector<uint32_t>& sorted_ids,
-                                   Vector<float>& sorted_vals,
+SparseIndex::CalDistanceByIdUnsafe(const Vector<uint32_t>& sorted_ids,
+                                   const Vector<float>& sorted_vals,
                                    uint32_t inner_id) const {
     return get_distance(sorted_ids.size(),
                         sorted_ids.data(),
