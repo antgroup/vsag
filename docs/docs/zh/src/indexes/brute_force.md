@@ -1,5 +1,7 @@
 # BruteForce
 
+![BruteForce：向量存放在扁平数组中；查询会与每个存储向量逐一比对，可通过 parallelism 把扫描切到多个线程，最小的距离保留在 top-k 堆中](../figures/indexes/brute_force-overview.svg)
+
 BruteForce 是 VSAG 提供的**精确扁平索引**。查询时直接对语料中的每条向量计算距离并返回真实的
 top-k —— 没有图遍历、没有倒排表、不做近似。它的主要用途是为 HGraph、IVF 等近似索引提供
 **ground truth 基准**，也适合用于小规模语料或对召回率有严格要求的生产场景。

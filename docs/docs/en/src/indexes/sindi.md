@@ -1,5 +1,7 @@
 # SINDI
 
+![SINDI: per-term inverted lists grouped by window; only the lists matching the query's non-zero terms are walked and accumulated into an n_candidate-sized heap](../figures/indexes/sindi-overview.svg)
+
 SINDI (**S**parse **IN**verted **D**ense **I**ndex) is VSAG's index for **sparse
 vectors** — the kind produced by BM25, SPLADE, and other learned-sparse encoders.
 Unlike the dense indexes (HGraph, IVF), SINDI operates directly on term/value

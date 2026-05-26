@@ -1,0 +1,503 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 560" font-family="-apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12">
+  <title>BruteForce 索引概览</title>
+  <desc>BruteForce 将向量存放在一个扁平数组中；对每个查询，它会与所有存储向量逐一计算距离，并用 top-k 堆保留最近的几个。扫描可以通过 parallelism 参数切到多线程执行；当 base_quantization_type 为 fp32 时结果是精确的。</desc>
+
+  <style>
+    .title       { font-size: 16px; font-weight: 600; fill: #0f172a; }
+    .subtitle    { font-size: 12px; fill: #6b7280; }
+    .lbl         { fill: #334155; }
+    .lbl-mute    { fill: #6b7280; font-size: 11px; }
+    .layer-lbl   { font-size: 11px; font-weight: 700; fill: #475569; letter-spacing: 0.6px; text-transform: uppercase; }
+    .layer-sub   { font-size: 11px; fill: #94a3b8; }
+
+    .band        { fill: #f8fafc; stroke: #e2e8f0; stroke-width: 1; }
+    .panel       { fill: #f1f5f9; stroke: #cbd5e1; stroke-width: 1; }
+    .note-box    { fill: #fff4e6; stroke: #ffd8a8; stroke-width: 1; }
+
+    /* Vector cells */
+    .vcell       { fill: #ffffff; stroke: #94a3b8; stroke-width: 1; }
+    .vcell-hi    { fill: #ffd8a8; stroke: #e8590c; stroke-width: 1.5; }
+    .vbar        { fill: #cbd5e1; }
+    .vbar-hi     { fill: #e8590c; }
+
+    /* Thread stripe overlays */
+    .stripe      { fill: #5c7cfa; opacity: 0.07; stroke: #5c7cfa; stroke-dasharray: 4 3; stroke-opacity: 0.5; }
+    .stripe-lbl  { font-size: 10px; fill: #364fc7; font-weight: 600; letter-spacing: 0.4px; }
+
+    /* Query */
+    .q-star      { fill: #e03131; stroke: #a61e1e; stroke-width: 1; stroke-linejoin: round; }
+    .q-box       { fill: #fff5f5; stroke: #ffa8a8; }
+
+    /* Distance arrows fan-out */
+    .darr        { stroke: #94a3b8; stroke-width: 0.9; fill: none; opacity: 0.6; }
+    .darr-hi     { stroke: #e8590c; stroke-width: 1.6; fill: none; }
+
+    /* Heap */
+    .heap-box    { fill: #fff4e6; stroke: #ffd8a8; }
+    .heap-slot   { fill: #ffffff; stroke: #e8590c; stroke-width: 1.3; }
+    .heap-num    { font-size: 11px; font-weight: 600; fill: #a14503; }
+
+    .step-badge  { fill: #e8590c; stroke: #ffffff; stroke-width: 2; }
+    .step-num    { fill: #ffffff; font-weight: 700; font-size: 11px; }
+  </style>
+
+  <text class="title"    x="40" y="34">BruteForce</text>
+  <text class="subtitle" x="40" y="52">精确线性扫描 · 与每个存储向量逐一比对 · 可选的查询内并行</text>
+
+  <!-- =========================================================
+       Query column (left)
+       ========================================================= -->
+  <g transform="translate(40, 110)">
+    <rect class="q-box" x="0" y="0" width="120" height="410" rx="10"/>
+    <text class="layer-lbl" x="12" y="20">查询</text>
+
+    <!-- Query star -->
+    <g transform="translate(60, 90)">
+      <polygon class="q-star"
+               points="0,-22 6.5,-7 22,-7 9.5,3 14,18 0,9 -14,18 -9.5,3 -22,-7 -6.5,-7"/>
+    </g>
+    <text class="lbl" x="60" y="125" text-anchor="middle" font-size="13" font-weight="700" fill="#a61e1e">q</text>
+
+    <!-- Note about exactness / parallelism -->
+    <rect class="note-box" x="10" y="160" width="100" height="78" rx="6"/>
+    <text class="lbl" x="60" y="178" text-anchor="middle" font-size="10" font-weight="700" fill="#a14503">精确</text>
+    <text class="lbl-mute" x="60" y="194" text-anchor="middle" font-size="10">当 base_</text>
+    <text class="lbl-mute" x="60" y="207" text-anchor="middle" font-size="10">quantization_type</text>
+    <text class="lbl-mute" x="60" y="220" text-anchor="middle" font-size="10">= fp32</text>
+
+    <!-- parallelism note -->
+    <rect class="band" x="10" y="260" width="100" height="62" rx="6"/>
+    <text class="layer-lbl" x="60" y="278" text-anchor="middle" font-size="10">PARALLELISM</text>
+    <text class="lbl-mute" x="60" y="297" text-anchor="middle" font-size="10">扫描切分</text>
+    <text class="lbl-mute" x="60" y="310" text-anchor="middle" font-size="10">到 N 个线程</text>
+
+    <!-- metric note -->
+    <rect class="band" x="10" y="340" width="100" height="56" rx="6"/>
+    <text class="layer-lbl" x="60" y="358" text-anchor="middle" font-size="10">距离度量</text>
+    <text class="lbl-mute" x="60" y="376" text-anchor="middle" font-size="10">l2 · ip · cosine</text>
+  </g>
+
+  <!-- =========================================================
+       Center panel: flat vector store
+       Panel origin (180, 110), size 420 x 410.
+       ========================================================= -->
+  <g transform="translate(180, 110)">
+    <rect class="band" x="0" y="0" width="420" height="410" rx="10"/>
+    <text class="layer-lbl" x="14" y="20">扁平向量存储</text>
+    <text class="layer-sub" x="120" y="20">一排稠密单元 · 无图 · 无倒排表</text>
+
+    <!-- Thread stripe backgrounds (parallelism = 3 illustration).
+         Each stripe fully encloses its 4 columns (12 cells) with 3px padding.
+         Inside a thread, cells use step=30 (w=28, 2px gap); between threads
+         there is a 14px gap so the stripe boxes do not touch. -->
+    <!-- Stripe 1 (thread 0): columns 0..3, panel-x 21..147 -->
+    <rect class="stripe" x="15" y="56" width="126" height="320" rx="6"/>
+    <text class="stripe-lbl" x="78" y="50" text-anchor="middle">线程 0</text>
+    <!-- Stripe 2 (thread 1): columns 4..7, panel-x 153..279 -->
+    <rect class="stripe" x="147" y="56" width="126" height="320" rx="6"/>
+    <text class="stripe-lbl" x="210" y="50" text-anchor="middle">线程 1</text>
+    <!-- Stripe 3 (thread 2): columns 8..11, panel-x 285..411 -->
+    <rect class="stripe" x="279" y="56" width="126" height="320" rx="6"/>
+    <text class="stripe-lbl" x="342" y="50" text-anchor="middle">线程 2</text>
+
+    <!-- Flat vectors: 4 rows x 10 cols. Each cell shows a tiny bar chart "vector".
+         We highlight a small set as the top-k winners (orange). -->
+    <!-- Helper: cell w=28, h=70, gap=3 horizontally and vertically. Origin (24, 64). -->
+
+    <!-- ROW 0 -->
+    <g transform="translate(18, 64)">
+      <!-- 10 cells per row -->
+      <!-- generate cells inline -->
+      <g transform="translate(0,0)">
+        <rect class="vcell" x="0" y="0" width="28" height="70" rx="3"/>
+        <rect class="vbar" x="4"  y="44" width="3" height="22"/>
+        <rect class="vbar" x="9"  y="22" width="3" height="44"/>
+        <rect class="vbar" x="14" y="34" width="3" height="32"/>
+        <rect class="vbar" x="19" y="16" width="3" height="50"/>
+      </g>
+      <g transform="translate(30,0)">
+        <rect class="vcell" x="0" y="0" width="28" height="70" rx="3"/>
+        <rect class="vbar" x="4"  y="30" width="3" height="36"/>
+        <rect class="vbar" x="9"  y="40" width="3" height="26"/>
+        <rect class="vbar" x="14" y="14" width="3" height="52"/>
+        <rect class="vbar" x="19" y="36" width="3" height="30"/>
+      </g>
+      <g transform="translate(60,0)">
+        <rect class="vcell" x="0" y="0" width="28" height="70" rx="3"/>
+        <rect class="vbar" x="4"  y="20" width="3" height="46"/>
+        <rect class="vbar" x="9"  y="46" width="3" height="20"/>
+        <rect class="vbar" x="14" y="26" width="3" height="40"/>
+        <rect class="vbar" x="19" y="34" width="3" height="32"/>
+      </g>
+      <g transform="translate(90,0)">
+        <rect class="vcell" x="0" y="0" width="28" height="70" rx="3"/>
+        <rect class="vbar" x="4"  y="38" width="3" height="28"/>
+        <rect class="vbar" x="9"  y="18" width="3" height="48"/>
+        <rect class="vbar" x="14" y="42" width="3" height="24"/>
+        <rect class="vbar" x="19" y="24" width="3" height="42"/>
+      </g>
+      <g transform="translate(132,0)">
+        <rect class="vcell" x="0" y="0" width="28" height="70" rx="3"/>
+        <rect class="vbar" x="4"  y="28" width="3" height="38"/>
+        <rect class="vbar" x="9"  y="38" width="3" height="28"/>
+        <rect class="vbar" x="14" y="20" width="3" height="46"/>
+        <rect class="vbar" x="19" y="40" width="3" height="26"/>
+      </g>
+      <!-- Highlighted winner -->
+      <g transform="translate(162,0)">
+        <rect class="vcell-hi" x="0" y="0" width="28" height="70" rx="3"/>
+        <rect class="vbar-hi" x="4"  y="18" width="3" height="48"/>
+        <rect class="vbar-hi" x="9"  y="22" width="3" height="44"/>
+        <rect class="vbar-hi" x="14" y="26" width="3" height="40"/>
+        <rect class="vbar-hi" x="19" y="20" width="3" height="46"/>
+      </g>
+      <g transform="translate(192,0)">
+        <rect class="vcell" x="0" y="0" width="28" height="70" rx="3"/>
+        <rect class="vbar" x="4"  y="34" width="3" height="32"/>
+        <rect class="vbar" x="9"  y="20" width="3" height="46"/>
+        <rect class="vbar" x="14" y="42" width="3" height="24"/>
+        <rect class="vbar" x="19" y="28" width="3" height="38"/>
+      </g>
+      <g transform="translate(222,0)">
+        <rect class="vcell" x="0" y="0" width="28" height="70" rx="3"/>
+        <rect class="vbar" x="4"  y="22" width="3" height="44"/>
+        <rect class="vbar" x="9"  y="36" width="3" height="30"/>
+        <rect class="vbar" x="14" y="18" width="3" height="48"/>
+        <rect class="vbar" x="19" y="40" width="3" height="26"/>
+      </g>
+      <g transform="translate(264,0)">
+        <rect class="vcell" x="0" y="0" width="28" height="70" rx="3"/>
+        <rect class="vbar" x="4"  y="40" width="3" height="26"/>
+        <rect class="vbar" x="9"  y="24" width="3" height="42"/>
+        <rect class="vbar" x="14" y="36" width="3" height="30"/>
+        <rect class="vbar" x="19" y="20" width="3" height="46"/>
+      </g>
+      <g transform="translate(294,0)">
+        <rect class="vcell" x="0" y="0" width="28" height="70" rx="3"/>
+        <rect class="vbar" x="4"  y="20" width="3" height="46"/>
+        <rect class="vbar" x="9"  y="42" width="3" height="24"/>
+        <rect class="vbar" x="14" y="30" width="3" height="36"/>
+        <rect class="vbar" x="19" y="38" width="3" height="28"/>
+      </g>
+      <g transform="translate(324,0)">
+        <rect class="vcell" x="0" y="0" width="28" height="70" rx="3"/>
+        <rect class="vbar" x="4"  y="32" width="3" height="34"/>
+        <rect class="vbar" x="9"  y="46" width="3" height="20"/>
+        <rect class="vbar" x="14" y="24" width="3" height="42"/>
+        <rect class="vbar" x="19" y="36" width="3" height="30"/>
+      </g>
+      <g transform="translate(354,0)">
+        <rect class="vcell" x="0" y="0" width="28" height="70" rx="3"/>
+        <rect class="vbar" x="4"  y="26" width="3" height="40"/>
+        <rect class="vbar" x="9"  y="14" width="3" height="52"/>
+        <rect class="vbar" x="14" y="40" width="3" height="26"/>
+        <rect class="vbar" x="19" y="32" width="3" height="34"/>
+      </g>
+    </g>
+
+    <!-- ROW 1 -->
+    <g transform="translate(18, 142)">
+      <g transform="translate(0,0)">
+        <rect class="vcell" x="0" y="0" width="28" height="70" rx="3"/>
+        <rect class="vbar" x="4"  y="22" width="3" height="44"/>
+        <rect class="vbar" x="9"  y="44" width="3" height="22"/>
+        <rect class="vbar" x="14" y="18" width="3" height="48"/>
+        <rect class="vbar" x="19" y="40" width="3" height="26"/>
+      </g>
+      <g transform="translate(30,0)">
+        <rect class="vcell" x="0" y="0" width="28" height="70" rx="3"/>
+        <rect class="vbar" x="4"  y="32" width="3" height="34"/>
+        <rect class="vbar" x="9"  y="18" width="3" height="48"/>
+        <rect class="vbar" x="14" y="42" width="3" height="24"/>
+        <rect class="vbar" x="19" y="22" width="3" height="44"/>
+      </g>
+      <!-- another winner -->
+      <g transform="translate(60,0)">
+        <rect class="vcell-hi" x="0" y="0" width="28" height="70" rx="3"/>
+        <rect class="vbar-hi" x="4"  y="22" width="3" height="44"/>
+        <rect class="vbar-hi" x="9"  y="26" width="3" height="40"/>
+        <rect class="vbar-hi" x="14" y="20" width="3" height="46"/>
+        <rect class="vbar-hi" x="19" y="18" width="3" height="48"/>
+      </g>
+      <g transform="translate(90,0)">
+        <rect class="vcell" x="0" y="0" width="28" height="70" rx="3"/>
+        <rect class="vbar" x="4"  y="36" width="3" height="30"/>
+        <rect class="vbar" x="9"  y="28" width="3" height="38"/>
+        <rect class="vbar" x="14" y="44" width="3" height="22"/>
+        <rect class="vbar" x="19" y="20" width="3" height="46"/>
+      </g>
+      <g transform="translate(132,0)">
+        <rect class="vcell" x="0" y="0" width="28" height="70" rx="3"/>
+        <rect class="vbar" x="4"  y="14" width="3" height="52"/>
+        <rect class="vbar" x="9"  y="42" width="3" height="24"/>
+        <rect class="vbar" x="14" y="32" width="3" height="34"/>
+        <rect class="vbar" x="19" y="38" width="3" height="28"/>
+      </g>
+      <g transform="translate(162,0)">
+        <rect class="vcell" x="0" y="0" width="28" height="70" rx="3"/>
+        <rect class="vbar" x="4"  y="44" width="3" height="22"/>
+        <rect class="vbar" x="9"  y="22" width="3" height="44"/>
+        <rect class="vbar" x="14" y="36" width="3" height="30"/>
+        <rect class="vbar" x="19" y="28" width="3" height="38"/>
+      </g>
+      <g transform="translate(192,0)">
+        <rect class="vcell" x="0" y="0" width="28" height="70" rx="3"/>
+        <rect class="vbar" x="4"  y="20" width="3" height="46"/>
+        <rect class="vbar" x="9"  y="38" width="3" height="28"/>
+        <rect class="vbar" x="14" y="46" width="3" height="20"/>
+        <rect class="vbar" x="19" y="26" width="3" height="40"/>
+      </g>
+      <g transform="translate(222,0)">
+        <rect class="vcell" x="0" y="0" width="28" height="70" rx="3"/>
+        <rect class="vbar" x="4"  y="40" width="3" height="26"/>
+        <rect class="vbar" x="9"  y="18" width="3" height="48"/>
+        <rect class="vbar" x="14" y="30" width="3" height="36"/>
+        <rect class="vbar" x="19" y="42" width="3" height="24"/>
+      </g>
+      <g transform="translate(264,0)">
+        <rect class="vcell" x="0" y="0" width="28" height="70" rx="3"/>
+        <rect class="vbar" x="4"  y="24" width="3" height="42"/>
+        <rect class="vbar" x="9"  y="36" width="3" height="30"/>
+        <rect class="vbar" x="14" y="20" width="3" height="46"/>
+        <rect class="vbar" x="19" y="40" width="3" height="26"/>
+      </g>
+      <g transform="translate(294,0)">
+        <rect class="vcell" x="0" y="0" width="28" height="70" rx="3"/>
+        <rect class="vbar" x="4"  y="34" width="3" height="32"/>
+        <rect class="vbar" x="9"  y="20" width="3" height="46"/>
+        <rect class="vbar" x="14" y="38" width="3" height="28"/>
+        <rect class="vbar" x="19" y="22" width="3" height="44"/>
+      </g>
+      <!-- another winner -->
+      <g transform="translate(324,0)">
+        <rect class="vcell-hi" x="0" y="0" width="28" height="70" rx="3"/>
+        <rect class="vbar-hi" x="4"  y="20" width="3" height="46"/>
+        <rect class="vbar-hi" x="9"  y="24" width="3" height="42"/>
+        <rect class="vbar-hi" x="14" y="22" width="3" height="44"/>
+        <rect class="vbar-hi" x="19" y="26" width="3" height="40"/>
+      </g>
+      <g transform="translate(354,0)">
+        <rect class="vcell" x="0" y="0" width="28" height="70" rx="3"/>
+        <rect class="vbar" x="4"  y="36" width="3" height="30"/>
+        <rect class="vbar" x="9"  y="46" width="3" height="20"/>
+        <rect class="vbar" x="14" y="22" width="3" height="44"/>
+        <rect class="vbar" x="19" y="34" width="3" height="32"/>
+      </g>
+    </g>
+
+    <!-- ROW 2 -->
+    <g transform="translate(18, 220)">
+      <g transform="translate(0,0)">
+        <rect class="vcell" x="0" y="0" width="28" height="70" rx="3"/>
+        <rect class="vbar" x="4"  y="20" width="3" height="46"/>
+        <rect class="vbar" x="9"  y="36" width="3" height="30"/>
+        <rect class="vbar" x="14" y="44" width="3" height="22"/>
+        <rect class="vbar" x="19" y="28" width="3" height="38"/>
+      </g>
+      <g transform="translate(30,0)">
+        <rect class="vcell" x="0" y="0" width="28" height="70" rx="3"/>
+        <rect class="vbar" x="4"  y="42" width="3" height="24"/>
+        <rect class="vbar" x="9"  y="26" width="3" height="40"/>
+        <rect class="vbar" x="14" y="14" width="3" height="52"/>
+        <rect class="vbar" x="19" y="38" width="3" height="28"/>
+      </g>
+      <g transform="translate(60,0)">
+        <rect class="vcell" x="0" y="0" width="28" height="70" rx="3"/>
+        <rect class="vbar" x="4"  y="34" width="3" height="32"/>
+        <rect class="vbar" x="9"  y="20" width="3" height="46"/>
+        <rect class="vbar" x="14" y="46" width="3" height="20"/>
+        <rect class="vbar" x="19" y="24" width="3" height="42"/>
+      </g>
+      <g transform="translate(90,0)">
+        <rect class="vcell" x="0" y="0" width="28" height="70" rx="3"/>
+        <rect class="vbar" x="4"  y="18" width="3" height="48"/>
+        <rect class="vbar" x="9"  y="40" width="3" height="26"/>
+        <rect class="vbar" x="14" y="32" width="3" height="34"/>
+        <rect class="vbar" x="19" y="22" width="3" height="44"/>
+      </g>
+      <g transform="translate(132,0)">
+        <rect class="vcell" x="0" y="0" width="28" height="70" rx="3"/>
+        <rect class="vbar" x="4"  y="38" width="3" height="28"/>
+        <rect class="vbar" x="9"  y="22" width="3" height="44"/>
+        <rect class="vbar" x="14" y="44" width="3" height="22"/>
+        <rect class="vbar" x="19" y="36" width="3" height="30"/>
+      </g>
+      <g transform="translate(162,0)">
+        <rect class="vcell" x="0" y="0" width="28" height="70" rx="3"/>
+        <rect class="vbar" x="4"  y="22" width="3" height="44"/>
+        <rect class="vbar" x="9"  y="44" width="3" height="22"/>
+        <rect class="vbar" x="14" y="28" width="3" height="38"/>
+        <rect class="vbar" x="19" y="40" width="3" height="26"/>
+      </g>
+      <!-- another winner -->
+      <g transform="translate(192,0)">
+        <rect class="vcell-hi" x="0" y="0" width="28" height="70" rx="3"/>
+        <rect class="vbar-hi" x="4"  y="24" width="3" height="42"/>
+        <rect class="vbar-hi" x="9"  y="20" width="3" height="46"/>
+        <rect class="vbar-hi" x="14" y="22" width="3" height="44"/>
+        <rect class="vbar-hi" x="19" y="18" width="3" height="48"/>
+      </g>
+      <g transform="translate(222,0)">
+        <rect class="vcell" x="0" y="0" width="28" height="70" rx="3"/>
+        <rect class="vbar" x="4"  y="16" width="3" height="50"/>
+        <rect class="vbar" x="9"  y="38" width="3" height="28"/>
+        <rect class="vbar" x="14" y="46" width="3" height="20"/>
+        <rect class="vbar" x="19" y="24" width="3" height="42"/>
+      </g>
+      <g transform="translate(264,0)">
+        <rect class="vcell" x="0" y="0" width="28" height="70" rx="3"/>
+        <rect class="vbar" x="4"  y="34" width="3" height="32"/>
+        <rect class="vbar" x="9"  y="46" width="3" height="20"/>
+        <rect class="vbar" x="14" y="20" width="3" height="46"/>
+        <rect class="vbar" x="19" y="36" width="3" height="30"/>
+      </g>
+      <g transform="translate(294,0)">
+        <rect class="vcell" x="0" y="0" width="28" height="70" rx="3"/>
+        <rect class="vbar" x="4"  y="44" width="3" height="22"/>
+        <rect class="vbar" x="9"  y="22" width="3" height="44"/>
+        <rect class="vbar" x="14" y="38" width="3" height="28"/>
+        <rect class="vbar" x="19" y="28" width="3" height="38"/>
+      </g>
+      <g transform="translate(324,0)">
+        <rect class="vcell" x="0" y="0" width="28" height="70" rx="3"/>
+        <rect class="vbar" x="4"  y="20" width="3" height="46"/>
+        <rect class="vbar" x="9"  y="40" width="3" height="26"/>
+        <rect class="vbar" x="14" y="28" width="3" height="38"/>
+        <rect class="vbar" x="19" y="42" width="3" height="24"/>
+      </g>
+      <g transform="translate(354,0)">
+        <rect class="vcell" x="0" y="0" width="28" height="70" rx="3"/>
+        <rect class="vbar" x="4"  y="32" width="3" height="34"/>
+        <rect class="vbar" x="9"  y="18" width="3" height="48"/>
+        <rect class="vbar" x="14" y="40" width="3" height="26"/>
+        <rect class="vbar" x="19" y="26" width="3" height="40"/>
+      </g>
+    </g>
+
+    <!-- Vector id axis -->
+    <text class="lbl-mute" x="5" y="318" font-size="10">id 0</text>
+    <text class="lbl-mute" x="405" y="318" text-anchor="end" font-size="10">N-1</text>
+    <line x1="15" y1="306" x2="405" y2="306" stroke="#cbd5e1" stroke-width="1"/>
+
+    <!-- "compute distance" sweep arrow -->
+    <text class="lbl-mute" x="210" y="346" text-anchor="middle" font-size="11">扫描每个向量 · 计算 d(q, v_i)</text>
+    <path d="M 15 358 L 405 358" stroke="#5c7cfa" stroke-width="1.4" fill="none" marker-end="url(#scan-arrow)"/>
+
+    <!-- Step badge 1: at the start of the scan -->
+    <circle class="step-badge" cx="13" cy="358" r="11"/>
+    <text class="step-num"    x="13" y="362" text-anchor="middle">1</text>
+  </g>
+
+  <!-- Distance fan-out arrows from q to a sample of cells (to convey "every cell scored").
+       q world position is (40+60, 110+90) = (100, 200). Sample a few cell centers across the grid. -->
+  <g>
+    <!-- highlighted distance lines (to the 3 winners) -->
+    <path class="darr-hi" d="M 102 200 Q 240 178 374 199"/>   <!-- row 0 col 5 (winner) center approx (180+24+155+14, 110+64+35)=(373,209) -->
+    <path class="darr-hi" d="M 102 200 Q 200 256 272 287"/>   <!-- row 1 col 2 winner (180+24+62+14, 110+142+35)=(280,287) -->
+    <path class="darr-hi" d="M 102 200 Q 260 280 404 365"/>   <!-- row 2 col 6 winner (180+24+186+14, 110+220+35)=(404,365) -->
+
+    <!-- faint distance lines to other cells (sample 14) -->
+    <path class="darr" d="M 102 200 L 212 209"/>
+    <path class="darr" d="M 102 200 L 242 209"/>
+    <path class="darr" d="M 102 200 L 302 209"/>
+    <path class="darr" d="M 102 200 L 476 209"/>
+    <path class="darr" d="M 102 200 L 566 209"/>
+    <path class="darr" d="M 102 200 L 212 287"/>
+    <path class="darr" d="M 102 200 L 344 287"/>
+    <path class="darr" d="M 102 200 L 476 287"/>
+    <path class="darr" d="M 102 200 L 566 287"/>
+    <path class="darr" d="M 102 200 L 212 365"/>
+    <path class="darr" d="M 102 200 L 302 365"/>
+    <path class="darr" d="M 102 200 L 476 365"/>
+    <path class="darr" d="M 102 200 L 536 365"/>
+    <path class="darr" d="M 102 200 L 566 365"/>
+  </g>
+
+  <!-- arrow marker for the scan sweep -->
+  <defs>
+    <marker id="scan-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#5c7cfa"/>
+    </marker>
+  </defs>
+
+  <!-- =========================================================
+       Right panel: top-k heap
+       Panel origin (620, 110), size 130 x 410.
+       ========================================================= -->
+  <g transform="translate(610, 110)">
+    <rect class="band" x="0" y="0" width="130" height="410" rx="10"/>
+    <text class="layer-lbl" x="14" y="20">TOP-K 堆</text>
+    <text class="layer-sub" x="14" y="36">最小的 d(q, v_i)</text>
+
+    <!-- Heap slots (k = 5) -->
+    <g transform="translate(15, 56)">
+      <!-- slot 1 (winner) -->
+      <rect class="heap-slot" x="0" y="0" width="100" height="44" rx="6"/>
+      <text class="heap-num" x="14" y="28">#1</text>
+      <text class="lbl-mute" x="44" y="22" font-size="10">id 5</text>
+      <text class="lbl-mute" x="44" y="35" font-size="10">d = 0.12</text>
+
+      <!-- slot 2 -->
+      <rect class="heap-slot" x="0" y="56" width="100" height="44" rx="6"/>
+      <text class="heap-num" x="14" y="84">#2</text>
+      <text class="lbl-mute" x="44" y="78" font-size="10">id 12</text>
+      <text class="lbl-mute" x="44" y="91" font-size="10">d = 0.18</text>
+
+      <!-- slot 3 -->
+      <rect class="heap-slot" x="0" y="112" width="100" height="44" rx="6"/>
+      <text class="heap-num" x="14" y="140">#3</text>
+      <text class="lbl-mute" x="44" y="134" font-size="10">id 28</text>
+      <text class="lbl-mute" x="44" y="147" font-size="10">d = 0.21</text>
+
+      <!-- slot 4 (placeholder, lighter) -->
+      <rect class="heap-slot" x="0" y="168" width="100" height="44" rx="6" opacity="0.55"/>
+      <text class="heap-num" x="14" y="196" opacity="0.55">#4</text>
+      <text class="lbl-mute" x="44" y="190" font-size="10" opacity="0.6">…</text>
+
+      <!-- slot 5 -->
+      <rect class="heap-slot" x="0" y="224" width="100" height="44" rx="6" opacity="0.45"/>
+      <text class="heap-num" x="14" y="252" opacity="0.45">#k</text>
+      <text class="lbl-mute" x="44" y="246" font-size="10" opacity="0.55">…</text>
+    </g>
+
+    <!-- step badge 2: at top of heap -->
+    <circle class="step-badge" cx="105" cy="56" r="11"/>
+    <text class="step-num"    x="105" y="60" text-anchor="middle">2</text>
+
+    <!-- Output label -->
+    <text class="lbl" x="65" y="360" text-anchor="middle" font-size="11" font-weight="600" fill="#a14503">结果</text>
+    <text class="lbl-mute" x="65" y="376" text-anchor="middle" font-size="10">返回 k 个 id</text>
+  </g>
+
+  <!-- =========================================================
+       Bottom legend
+       ========================================================= -->
+  <g transform="translate(40, 553)">
+    <rect class="vcell" x="0" y="-7" width="14" height="14" rx="2"/>
+    <text class="lbl-mute" x="20" y="4">存储向量</text>
+
+    <rect class="vcell-hi" x="100" y="-7" width="14" height="14" rx="2"/>
+    <text class="lbl-mute" x="120" y="4">top-k 命中</text>
+
+    <line x1="208" y1="0" x2="236" y2="0" class="darr-hi"/>
+    <text class="lbl-mute" x="244" y="4">命中向量的距离</text>
+
+    <line x1="368" y1="0" x2="396" y2="0" class="darr"/>
+    <text class="lbl-mute" x="404" y="4">其余向量的距离</text>
+
+    <rect class="stripe" x="528" y="-7" width="14" height="14"/>
+    <text class="lbl-mute" x="548" y="4">并行扫描线程条带</text>
+  </g>
+
+  <!-- Step legend bar at top right -->
+  <g transform="translate(420, 70)">
+    <rect class="note-box" x="0" y="-12" width="320" height="32" rx="6"/>
+    <circle class="step-badge" cx="14" cy="4" r="8"/>
+    <text x="14" y="8" text-anchor="middle" fill="#fff" font-size="9" font-weight="700">1</text>
+    <text class="lbl" x="28" y="8" font-size="11" font-weight="600">为每个向量打分</text>
+
+    <circle class="step-badge" cx="160" cy="4" r="8"/>
+    <text x="160" y="8" text-anchor="middle" fill="#fff" font-size="9" font-weight="700">2</text>
+    <text class="lbl" x="174" y="8" font-size="11" font-weight="600">在 top-k 堆中保留最小</text>
+  </g>
+</svg>

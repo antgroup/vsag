@@ -1,0 +1,345 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 560" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12">
+  <title>HGraph index overview</title>
+  <desc>HGraph stores vectors as a multi-layer proximity graph. A vector may appear on several layers; upper layers are sparse and act as a navigation skip-list, the bottom layer holds every vector with dense max_degree neighbours. A search enters at the fixed top-layer entry, greedily hops to the locally-closest neighbour, drops to the next layer at the local minimum, and on the bottom layer expands an ef_search-sized beam around the query until it converges on the topk nearest neighbours. An optional reorder pass re-ranks candidates against a high-precision storage copy.</desc>
+
+  <defs>
+    <marker id="arrow-search" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#e8590c"/>
+    </marker>
+  </defs>
+
+  <style>
+    .title    { fill: #1a1a1a; font-size: 16px; font-weight: 600; }
+    .subtitle { fill: #6b7280; font-size: 12px; }
+    .lbl      { fill: #1f2937; }
+    .lbl-mute { fill: #6b7280; }
+    .layer-lbl { fill: #475569; font-size: 11px; font-weight: 600; letter-spacing: 0.6px; }
+    .layer-sub { fill: #94a3b8; font-size: 11px; }
+
+    .band       { fill: #f8fafc; stroke: #e2e8f0; stroke-width: 1; }
+    .band-top   { fill: #f1f5f9; stroke: #e2e8f0; stroke-width: 1; }
+
+    .node       { fill: #ffffff; stroke: #94a3b8; stroke-width: 1; }
+    .node-hi    { fill: #ffffff; stroke: #5c7cfa; stroke-width: 1.3; }
+    .node-entry { fill: #5c7cfa; stroke: #364fc7; stroke-width: 1.4; }
+    .node-visit { fill: #ffd8a8; stroke: #e8590c; stroke-width: 1.5; }
+    .node-result{ fill: #e03131; stroke: #a61e1e; stroke-width: 1.4; }
+
+    .edge        { stroke: #cbd5e1; stroke-width: 0.8; fill: none; }
+    .edge-hi     { stroke: #5c7cfa; stroke-width: 1.1; fill: none; opacity: 0.75; }
+    .crosslink   { stroke: #94a3b8; stroke-width: 0.9; fill: none; stroke-dasharray: 2 3; opacity: 0.8; }
+    .frontier    { fill: #fff4e6; stroke: #e8590c; stroke-width: 1; stroke-dasharray: 4 3; opacity: 0.85; }
+    .search      { stroke: #e8590c; stroke-width: 2; fill: none; stroke-linecap: round; }
+    .descent     { stroke: #e8590c; stroke-width: 2; fill: none; stroke-dasharray: 4 3; stroke-linecap: round; }
+
+    .step-badge  { fill: #e8590c; stroke: #ffffff; stroke-width: 2; }
+    .step-num    { fill: #ffffff; font-size: 11px; font-weight: 700; }
+
+    .note-box    { fill: #ffffff; stroke: #e2e8f0; stroke-width: 1; }
+  </style>
+
+  <!-- Header -->
+  <text class="title"    x="40" y="34">HGraph</text>
+  <text class="subtitle" x="40" y="52">Multi-layer proximity graph · greedy descent · ef_search beam on the bottom layer</text>
+
+  <!--
+    Layer-2 node x positions (panel origin 40,80):
+      60 (entry), 190, 330, 460
+    L2 panel y=80..190 (height 110), nodes at panel-y 48 or 70.
+    L1 panel y=210..320 (height 110), nodes at panel-y 50 or 78.
+    L0 panel y=340..540 (height 200), nodes at panel-y 55..185.
+
+    Query q is at panel x=395, panel y=115 in L0 → svg (435, 455).
+    The ghost-q indicator on upper layers sits at panel x=395.
+  -->
+
+  <!-- =========================================================
+       Layer 2 (top, sparse)
+       ========================================================= -->
+  <g transform="translate(40, 80)">
+    <rect class="band-top" x="0" y="0" width="540" height="110" rx="10"/>
+    <text class="layer-lbl" x="14" y="20">LAYER 2</text>
+    <text class="layer-sub" x="68" y="20">sparse · long-range hops · entry layer</text>
+
+    <line class="edge-hi" x1="60"  y1="70" x2="190" y2="48"/>
+    <line class="edge-hi" x1="190" y1="48" x2="330" y2="72"/>
+    <line class="edge-hi" x1="330" y1="72" x2="460" y2="50"/>
+    <line class="edge-hi" x1="190" y1="48" x2="460" y2="50"/>
+
+    <!-- ghost-q hint (small open star) -->
+    <polygon points="395,68 396.6,72 401,72 397.5,74.5 398.7,79 395,76.3 391.3,79 392.5,74.5 389,72 393.4,72"
+             fill="none" stroke="#e03131" stroke-width="1" stroke-dasharray="2 2" opacity="0.6"/>
+
+    <!-- nodes -->
+    <circle class="node-entry" cx="60"  cy="70" r="7"/>
+    <circle class="node-visit" cx="190" cy="48" r="6"/>   <!-- L2 local-min -->
+    <circle class="node-hi"    cx="330" cy="72" r="5.5"/>
+    <circle class="node-hi"    cx="460" cy="50" r="5.5"/>
+
+    <text class="lbl" x="60" y="92" text-anchor="middle" font-size="11" fill="#364fc7" font-weight="600">entry</text>
+
+    <!-- search through layer 2: enter → hop to nearest-to-q (190,48) -->
+    <path class="search" d="M 60 70 Q 130 30 190 48"/>
+  </g>
+
+  <!-- Descent L2 → L1 at x=190 (panel local-min) -->
+  <path class="descent" d="M 230 158 L 230 258"/>
+
+  <!-- =========================================================
+       Layer 1 (middle)
+       ========================================================= -->
+  <g transform="translate(40, 210)">
+    <rect class="band" x="0" y="0" width="540" height="110" rx="10"/>
+    <text class="layer-lbl" x="14" y="20">LAYER 1</text>
+    <text class="layer-sub" x="68" y="20">intermediate · medium-range hops</text>
+
+    <line class="edge-hi" x1="60"  y1="70" x2="135" y2="50"/>
+    <line class="edge-hi" x1="135" y1="50" x2="190" y2="78"/>
+    <line class="edge-hi" x1="190" y1="78" x2="265" y2="50"/>
+    <line class="edge-hi" x1="265" y1="50" x2="330" y2="72"/>
+    <line class="edge-hi" x1="330" y1="72" x2="395" y2="50"/>
+    <line class="edge-hi" x1="395" y1="50" x2="460" y2="76"/>
+    <line class="edge-hi" x1="135" y1="50" x2="265" y2="50"/>
+    <line class="edge-hi" x1="265" y1="50" x2="395" y2="50"/>
+
+    <!-- ghost-q hint -->
+    <polygon points="395,68 396.6,72 401,72 397.5,74.5 398.7,79 395,76.3 391.3,79 392.5,74.5 389,72 393.4,72"
+             fill="none" stroke="#e03131" stroke-width="1" stroke-dasharray="2 2" opacity="0.6"/>
+
+    <!-- nodes -->
+    <circle class="node-hi"    cx="60"  cy="70" r="5"/>
+    <circle class="node-hi"    cx="135" cy="50" r="5"/>
+    <circle class="node-hi"    cx="190" cy="78" r="5"/>
+    <circle class="node-hi"    cx="265" cy="50" r="5"/>
+    <circle class="node-hi"    cx="330" cy="72" r="5"/>
+    <circle class="node-visit" cx="395" cy="50" r="6"/>  <!-- L1 local-min closest to q -->
+    <circle class="node-hi"    cx="460" cy="76" r="5"/>
+
+    <!-- search through layer 1: from descent landing at (190,78) → (265,50) → (395,50) -->
+    <path class="search" d="M 190 78 Q 230 40 265 50 T 395 50"/>
+  </g>
+
+  <!-- Cross-layer dashed links (same vector at the same xy across multiple layers) -->
+  <!-- L2 (x,y): (60,150),(190,128),(330,152),(460,130) ; L1 same x at y +130 -->
+  <line class="crosslink" x1="100" y1="150" x2="100" y2="280"/>  <!-- 60 entry -->
+  <line class="crosslink" x1="230" y1="128" x2="230" y2="288"/>  <!-- 190 -->
+  <line class="crosslink" x1="370" y1="152" x2="370" y2="282"/>  <!-- 330 -->
+  <line class="crosslink" x1="500" y1="130" x2="500" y2="286"/>  <!-- 460 -->
+  <!-- L1 → L0 same-xy dashes for the four L2 anchors + the 395 anchor where q lives -->
+  <line class="crosslink" x1="100" y1="280" x2="100" y2="450"/>
+  <line class="crosslink" x1="230" y1="288" x2="230" y2="448"/>
+  <line class="crosslink" x1="370" y1="282" x2="370" y2="450"/>
+  <line class="crosslink" x1="500" y1="286" x2="500" y2="450"/>
+  <line class="crosslink" x1="435" y1="260" x2="435" y2="410"/>  <!-- L1 (395,50) → L0 (395,70) -->
+
+  <!-- Descent L1 → L0 at x=395 (L1 local-min). Starts just below L1 node, ends just above the L0 landing node. -->
+  <path class="descent" d="M 435 266 L 435 408"/>
+
+  <!-- =========================================================
+       Layer 0 (bottom, dense)
+       ========================================================= -->
+  <g transform="translate(40, 340)">
+    <rect class="band" x="0" y="0" width="540" height="200" rx="10"/>
+    <text class="layer-lbl" x="14" y="20">LAYER 0</text>
+    <text class="layer-sub" x="68" y="20">dense · every vector · up to max_degree neighbours · ef_search beam</text>
+
+    <!-- ef_search frontier (drawn first, behind nodes) -->
+    <ellipse class="frontier" cx="395" cy="100" rx="58" ry="42"/>
+
+    <!-- proximity edges -->
+    <line class="edge" x1="60"  y1="110" x2="95"  y2="85"/>
+    <line class="edge" x1="60"  y1="110" x2="80"  y2="148"/>
+    <line class="edge" x1="95"  y1="85"  x2="135" y2="68"/>
+    <line class="edge" x1="95"  y1="85"  x2="130" y2="110"/>
+    <line class="edge" x1="80"  y1="148" x2="130" y2="160"/>
+    <line class="edge" x1="130" y1="110" x2="135" y2="68"/>
+    <line class="edge" x1="130" y1="110" x2="170" y2="135"/>
+    <line class="edge" x1="130" y1="160" x2="170" y2="135"/>
+    <line class="edge" x1="135" y1="68"  x2="195" y2="55"/>
+    <line class="edge" x1="170" y1="135" x2="210" y2="105"/>
+    <line class="edge" x1="170" y1="135" x2="200" y2="170"/>
+    <line class="edge" x1="195" y1="55"  x2="250" y2="70"/>
+    <line class="edge" x1="195" y1="55"  x2="210" y2="105"/>
+    <line class="edge" x1="210" y1="105" x2="250" y2="70"/>
+    <line class="edge" x1="210" y1="105" x2="255" y2="135"/>
+    <line class="edge" x1="200" y1="170" x2="255" y2="135"/>
+    <line class="edge" x1="200" y1="170" x2="245" y2="175"/>
+    <line class="edge" x1="250" y1="70"  x2="305" y2="60"/>
+    <line class="edge" x1="250" y1="70"  x2="295" y2="105"/>
+    <line class="edge" x1="255" y1="135" x2="295" y2="105"/>
+    <line class="edge" x1="255" y1="135" x2="300" y2="150"/>
+    <line class="edge" x1="245" y1="175" x2="300" y2="150"/>
+    <line class="edge" x1="245" y1="175" x2="295" y2="178"/>
+    <line class="edge" x1="305" y1="60"  x2="345" y2="78"/>
+    <line class="edge" x1="305" y1="60"  x2="360" y2="55"/>
+    <line class="edge" x1="295" y1="105" x2="345" y2="78"/>
+    <line class="edge" x1="295" y1="105" x2="345" y2="120"/>
+    <line class="edge" x1="300" y1="150" x2="345" y2="120"/>
+    <line class="edge" x1="300" y1="150" x2="355" y2="155"/>
+    <line class="edge" x1="295" y1="178" x2="355" y2="155"/>
+    <line class="edge" x1="295" y1="178" x2="345" y2="185"/>
+    <line class="edge" x1="345" y1="78"  x2="395" y2="70"/>
+    <line class="edge" x1="345" y1="78"  x2="395" y2="105"/>
+    <line class="edge" x1="345" y1="120" x2="395" y2="105"/>
+    <line class="edge" x1="345" y1="120" x2="395" y2="135"/>
+    <line class="edge" x1="355" y1="155" x2="395" y2="135"/>
+    <line class="edge" x1="355" y1="155" x2="405" y2="160"/>
+    <line class="edge" x1="345" y1="185" x2="405" y2="160"/>
+    <line class="edge" x1="360" y1="55"  x2="395" y2="70"/>
+    <line class="edge" x1="360" y1="55"  x2="425" y2="55"/>
+    <line class="edge" x1="395" y1="70"  x2="425" y2="55"/>
+    <line class="edge" x1="395" y1="70"  x2="445" y2="80"/>
+    <line class="edge" x1="395" y1="105" x2="445" y2="80"/>
+    <line class="edge" x1="395" y1="105" x2="445" y2="115"/>
+    <line class="edge" x1="395" y1="135" x2="445" y2="115"/>
+    <line class="edge" x1="395" y1="135" x2="445" y2="148"/>
+    <line class="edge" x1="405" y1="160" x2="445" y2="148"/>
+    <line class="edge" x1="405" y1="160" x2="450" y2="178"/>
+    <line class="edge" x1="425" y1="55"  x2="475" y2="65"/>
+    <line class="edge" x1="445" y1="80"  x2="475" y2="65"/>
+    <line class="edge" x1="445" y1="80"  x2="495" y2="100"/>
+    <line class="edge" x1="445" y1="115" x2="495" y2="100"/>
+    <line class="edge" x1="445" y1="115" x2="495" y2="130"/>
+    <line class="edge" x1="445" y1="148" x2="495" y2="130"/>
+    <line class="edge" x1="445" y1="148" x2="490" y2="170"/>
+    <line class="edge" x1="450" y1="178" x2="490" y2="170"/>
+    <line class="edge" x1="475" y1="65"  x2="510" y2="85"/>
+    <line class="edge" x1="495" y1="100" x2="510" y2="85"/>
+    <line class="edge" x1="495" y1="100" x2="515" y2="135"/>
+    <line class="edge" x1="495" y1="130" x2="515" y2="135"/>
+    <line class="edge" x1="495" y1="130" x2="510" y2="165"/>
+    <line class="edge" x1="490" y1="170" x2="510" y2="165"/>
+
+    <!-- plain nodes -->
+    <circle class="node" cx="60"  cy="110" r="4"/>
+    <circle class="node" cx="95"  cy="85"  r="4"/>
+    <circle class="node" cx="80"  cy="148" r="4"/>
+    <circle class="node" cx="135" cy="68"  r="4"/>
+    <circle class="node" cx="130" cy="110" r="4"/>
+    <circle class="node" cx="130" cy="160" r="4"/>
+    <circle class="node" cx="170" cy="135" r="4"/>
+    <circle class="node" cx="195" cy="55"  r="4"/>
+    <circle class="node" cx="210" cy="105" r="4"/>
+    <circle class="node" cx="200" cy="170" r="4"/>
+    <circle class="node" cx="250" cy="70"  r="4"/>
+    <circle class="node" cx="255" cy="135" r="4"/>
+    <circle class="node" cx="245" cy="175" r="4"/>
+    <circle class="node" cx="305" cy="60"  r="4"/>
+    <circle class="node" cx="295" cy="105" r="4"/>
+    <circle class="node" cx="300" cy="150" r="4"/>
+    <circle class="node" cx="295" cy="178" r="4"/>
+    <circle class="node" cx="345" cy="78"  r="4"/>
+    <circle class="node" cx="345" cy="185" r="4"/>
+    <circle class="node" cx="355" cy="155" r="4"/>
+    <circle class="node" cx="360" cy="55"  r="4"/>
+    <circle class="node" cx="425" cy="55"  r="4"/>
+    <circle class="node" cx="445" cy="80"  r="4"/>
+    <circle class="node" cx="445" cy="148" r="4"/>
+    <circle class="node" cx="450" cy="178" r="4"/>
+    <circle class="node" cx="475" cy="65"  r="4"/>
+    <circle class="node" cx="510" cy="85"  r="4"/>
+    <circle class="node" cx="495" cy="130" r="4"/>
+    <circle class="node" cx="490" cy="170" r="4"/>
+    <circle class="node" cx="510" cy="165" r="4"/>
+    <circle class="node" cx="515" cy="135" r="4"/>
+
+    <!-- visited along the last-mile search -->
+    <circle class="node-visit" cx="395" cy="70"  r="5.4"/>  <!-- landing from L1 -->
+    <circle class="node-visit" cx="345" cy="120" r="5.4"/>
+    <circle class="node-visit" cx="395" cy="135" r="5.4"/>
+    <circle class="node-visit" cx="445" cy="115" r="5.4"/>
+
+    <!-- nearest neighbour (the topk-1 result, closest node to q) -->
+    <circle class="node-result" cx="395" cy="105" r="5.6"/>
+
+    <!-- query star: q is a point in the embedding space, placed inside the frontier -->
+    <polygon points="420,110 422.6,116.4 429.5,116.4 424,120.4 426.2,127 420,122.7 413.8,127 416,120.4 410.5,116.4 417.4,116.4"
+             fill="#e03131" stroke="#a61e1e" stroke-width="1.1" stroke-linejoin="round"/>
+    <text class="lbl" x="420" y="142" text-anchor="middle" font-size="11" font-weight="700" fill="#a61e1e">q</text>
+
+    <!-- last-mile search path on layer 0: lands at (395,70) → ... → nearest neighbour (395,105) -->
+    <path class="search" d="M 395 70 Q 360 95 345 120 T 395 135 T 395 105" marker-end="url(#arrow-search)"/>
+
+    <!-- ef_search caption -->
+    <text class="lbl-mute" x="395" y="178" text-anchor="middle" font-size="11">ef_search frontier</text>
+  </g>
+
+  <!-- Step badges placed along the search trajectory (svg coords) -->
+  <g>
+    <!-- 1: enter top  (just right of entry vertex, svg (60+10, 150-12) ) -->
+    <circle class="step-badge" cx="78" cy="138" r="11"/>
+    <text class="step-num"    x="78" y="142" text-anchor="middle">1</text>
+
+    <!-- 2: descent — placed beside the descent dash at x≈230, y≈208 -->
+    <circle class="step-badge" cx="246" cy="208" r="11"/>
+    <text class="step-num"    x="246" y="212" text-anchor="middle">2</text>
+
+    <!-- 3: beam — placed in upper-right of L0 panel, outside the frontier ellipse -->
+    <circle class="step-badge" cx="525" cy="370" r="11"/>
+    <text class="step-num"    x="525" y="374" text-anchor="middle">3</text>
+  </g>
+
+  <!-- =========================================================
+       Right-side legend / annotations
+       ========================================================= -->
+  <g transform="translate(600, 92)">
+    <g>
+      <circle class="step-badge" cx="10" cy="10" r="9"/>
+      <text x="10" y="14" text-anchor="middle" fill="#fff" font-size="10" font-weight="700">1</text>
+      <text class="lbl" x="28" y="8" font-weight="600">Enter at top</text>
+      <text class="lbl-mute" x="28" y="22" font-size="11">fixed entry vertex</text>
+    </g>
+
+    <g transform="translate(0, 44)">
+      <circle class="step-badge" cx="10" cy="10" r="9"/>
+      <text x="10" y="14" text-anchor="middle" fill="#fff" font-size="10" font-weight="700">2</text>
+      <text class="lbl" x="28" y="8" font-weight="600">Greedy descend</text>
+      <text class="lbl-mute" x="28" y="22" font-size="11">hop to closest neighbour;</text>
+      <text class="lbl-mute" x="28" y="36" font-size="11">drop layer at local minimum</text>
+    </g>
+
+    <g transform="translate(0, 102)">
+      <circle class="step-badge" cx="10" cy="10" r="9"/>
+      <text x="10" y="14" text-anchor="middle" fill="#fff" font-size="10" font-weight="700">3</text>
+      <text class="lbl" x="28" y="8" font-weight="600">Beam search on layer 0</text>
+      <text class="lbl-mute" x="28" y="22" font-size="11">expand ef_search candidates</text>
+      <text class="lbl-mute" x="28" y="36" font-size="11">→ topk nearest to q</text>
+    </g>
+
+    <g transform="translate(0, 168)">
+      <rect class="note-box" x="0" y="0" width="160" height="92" rx="6"/>
+      <text class="layer-lbl" x="10" y="18" font-size="10">STORAGE</text>
+      <text class="lbl-mute"  x="10" y="36" font-size="11">base_quantization_type:</text>
+      <text class="lbl"       x="10" y="50" font-size="11">sq8 · pq · rabitq · fp16 · ...</text>
+
+      <line x1="10" y1="58" x2="150" y2="58" stroke="#e2e8f0"/>
+
+      <text class="layer-lbl" x="10" y="74" font-size="10">RERANK (OPTIONAL)</text>
+      <text class="lbl-mute"  x="10" y="88" font-size="11">use_reorder + precise codes</text>
+    </g>
+  </g>
+
+  <!-- =========================================================
+       Bottom legend
+       ========================================================= -->
+  <g transform="translate(40, 553)">
+    <circle class="node-entry" cx="6" cy="0" r="6"/>
+    <text class="lbl-mute" x="18" y="4">entry</text>
+
+    <circle class="node-visit" cx="78" cy="0" r="6"/>
+    <text class="lbl-mute" x="90" y="4">visited</text>
+
+    <polygon points="164,-6.2 166.2,-1.4 171.5,-1.4 167.2,1.6 168.8,6.2 164,3.2 159.2,6.2 160.8,1.6 156.5,-1.4 161.8,-1.4"
+             fill="#e03131" stroke="#a61e1e" stroke-width="1" stroke-linejoin="round"/>
+    <text class="lbl-mute" x="178" y="4">query q</text>
+
+    <circle class="node-result" cx="254" cy="0" r="6"/>
+    <text class="lbl-mute" x="266" y="4">nearest neighbour</text>
+
+    <line class="search" x1="386" y1="0" x2="416" y2="0" marker-end="url(#arrow-search)"/>
+    <text class="lbl-mute" x="422" y="4">search path</text>
+
+    <line class="crosslink" x1="508" y1="0" x2="538" y2="0"/>
+    <text class="lbl-mute" x="544" y="4">same vector across layers</text>
+  </g>
+</svg>
