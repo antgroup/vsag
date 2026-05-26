@@ -182,6 +182,37 @@ public:
                             "Index doesn't support ContinueBuild");
     }
 
+    [[nodiscard]] virtual bool
+    SupportsBuildCache() const {
+        return false;
+    }
+
+    virtual void
+    ExportBuildCache(std::ostream& out_stream) const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index doesn't support ExportBuildCache");
+    }
+
+    virtual std::vector<int64_t>
+    BuildWithCache(const DatasetPtr& base,
+                   std::istream& in_stream,
+                   const BuildCacheOptions& options) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index doesn't support BuildWithCache");
+    }
+
+    virtual void
+    PrepareFeatureIdsForBuildCache(const DatasetPtr& base) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index doesn't support PrepareFeatureIdsForBuildCache");
+    }
+
+    [[nodiscard]] virtual BuildCacheStats
+    GetBuildCacheStats() const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index doesn't support GetBuildCacheStats");
+    }
+
     virtual bool
     Tune(const std::string& parameters, bool disable_future_tuning) {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION, "Index doesn't support Tune");

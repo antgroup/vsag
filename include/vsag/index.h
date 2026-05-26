@@ -51,6 +51,44 @@ struct MergeUnit {
     IdMapFunction id_map_func = nullptr;
 };
 
+struct BuildCacheOptions {
+  bool enable_warm_start = true;
+  uint32_t hit_refine_rounds = 2;
+  uint32_t missed_refine_rounds = 4;
+  uint32_t hit_refine_ef = 0;
+  uint32_t missed_refine_ef = 0;
+  bool enable_parallel_refine = false;
+  uint32_t refine_parallelism = 0;
+  bool drop_invalid_neighbors = true;
+  bool build_route_graph = true;
+};
+
+struct BuildCacheStats {
+  uint64_t total_nodes = 0;
+  uint64_t cached_nodes = 0;
+  uint64_t hit_nodes = 0;
+  uint64_t missed_nodes = 0;
+  uint64_t hit_seed_neighbor_total = 0;
+  uint64_t missed_seed_neighbor_total = 0;
+  uint64_t hit_empty_seed_nodes = 0;
+  uint64_t missed_empty_seed_nodes = 0;
+  uint64_t dropped_neighbors = 0;
+  uint64_t invalid_neighbors = 0;
+  uint64_t hit_refine_rounds = 0;
+  uint64_t missed_refine_rounds = 0;
+  uint32_t hit_refine_ef = 0;
+  uint32_t missed_refine_ef = 0;
+  uint32_t hit_refine_parallelism = 0;
+  uint32_t missed_refine_parallelism = 0;
+  uint64_t cache_load_us = 0;
+  uint64_t warm_start_apply_us = 0;
+  uint64_t hit_refine_us = 0;
+  uint64_t missed_refine_us = 0;
+  uint64_t route_graph_build_us = 0;
+  uint64_t route_graph_levels = 0;
+  float cache_hit_rate = 0;
+};
+
 enum class IndexType { HNSW, DISKANN, HGRAPH, IVF, PYRAMID, BRUTEFORCE, SPARSE, SINDI, WARP };
 
 #define DATA_FLAG_FLOAT32_VECTOR 0x01
@@ -145,6 +183,33 @@ public:
     virtual tl::expected<Checkpoint, Error>
     ContinueBuild(const DatasetPtr& base, const BinarySet& binary_set) {
         throw std::runtime_error("Index not support partial build");
+    }
+
+    [[nodiscard]] virtual bool
+    SupportsBuildCache() const {
+      return false;
+    }
+
+    virtual tl::expected<void, Error>
+    ExportBuildCache(std::ostream& out_stream) const {
+      throw std::runtime_error("Index doesn't support ExportBuildCache");
+    }
+
+    virtual tl::expected<std::vector<int64_t>, Error>
+    BuildWithCache(const DatasetPtr& base,
+             std::istream& in_stream,
+             const BuildCacheOptions& options = BuildCacheOptions{}) {
+      throw std::runtime_error("Index doesn't support BuildWithCache");
+    }
+
+    virtual tl::expected<void, Error>
+    PrepareFeatureIdsForBuildCache(const DatasetPtr& base) {
+      throw std::runtime_error("Index doesn't support PrepareFeatureIdsForBuildCache");
+    }
+
+    [[nodiscard]] virtual tl::expected<BuildCacheStats, Error>
+    GetBuildCacheStats() const {
+      throw std::runtime_error("Index doesn't support GetBuildCacheStats");
     }
 
     /**

@@ -219,6 +219,20 @@ public:
     }
 
     DatasetPtr
+    FeatureIds(const std::string* feature_ids) override {
+        this->data_[FEATURE_IDS] = feature_ids;
+        return shared_from_this();
+    }
+
+    const std::string*
+    GetFeatureIds() const override {
+        if (auto iter = this->data_.find(FEATURE_IDS); iter != this->data_.end()) {
+            return std::get<const std::string*>(iter->second);
+        }
+        return nullptr;
+    }
+
+    DatasetPtr
     ExtraInfos(const char* extra_info) override {
         this->data_[EXTRA_INFOS] = extra_info;
         return shared_from_this();

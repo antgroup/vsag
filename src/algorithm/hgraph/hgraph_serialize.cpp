@@ -27,6 +27,12 @@
 
 namespace vsag {
 
+namespace {
+constexpr int64_t kFeatureIdsFormatVersion = 1;
+constexpr std::string_view kFeatureIdsFormatVersionKey = "feature_ids_format_version";
+}  // namespace
+
+
 void
 HGraph::serialize_basic_info_v0_14(StreamWriter& writer) const {
     StreamWriter::WriteObj(writer, this->use_reorder_);
@@ -241,7 +247,15 @@ HGraph::Serialize(StreamWriter& writer) const {
     if (this->support_duplicate_) {
         metadata->Set("duplicate_format_version", 1);
     }
+    const bool has_feature_ids = this->feature_ids_.size() >= this->total_count_.load();
+    if (has_feature_ids) {
+        metadata->Set(std::string(kFeatureIdsFormatVersionKey), kFeatureIdsFormatVersion);
+    }
     logger::debug(jsonify_basic_info.Dump());
+
+    if (has_feature_ids) {
+        this->serialize_feature_ids(writer);
+    }
 
     auto footer = std::make_shared<Footer>(metadata);
     footer->Write(writer);
@@ -325,6 +339,17 @@ HGraph::Deserialize(StreamReader& reader) {
         }
         if (this->raw_vector_ != nullptr) {
             this->has_raw_vector_ = true;
+        }
+
+        int64_t feature_ids_version = 0;
+        if (metadata->Get(std::string(kFeatureIdsFormatVersionKey)).IsNumberInteger()) {
+            feature_ids_version = metadata->Get(std::string(kFeatureIdsFormatVersionKey)).GetInt();
+        }
+        if (feature_ids_version >= kFeatureIdsFormatVersion) {
+            this->deserialize_feature_ids(buffer_reader,
+                                          static_cast<uint64_t>(this->total_count_.load()));
+        } else {
+            this->feature_ids_.clear();
         }
     }
     this->cal_memory_usage();

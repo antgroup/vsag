@@ -41,6 +41,7 @@ const char* const INT8_VECTORS = "i8_vectors";
 const char* const ATTRIBUTE_SETS = "attribute_sets";
 const char* const DATASET_PATHS = "paths";
 const char* const EXTRA_INFOS = "extra_infos";
+const char* const FEATURE_IDS = "feature_ids";
 const char* const EXTRA_INFO_SIZE = "extra_info_size";
 const char* const VECTOR_COUNTS = "vector_counts";
 const char* const MULTI_VECTORS = "multi_vectors";

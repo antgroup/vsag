@@ -36,6 +36,7 @@ extern const char* const SPARSE_VECTORS;
 extern const char* const INT8_VECTORS;
 extern const char* const ATTRIBUTE_SETS;
 extern const char* const DATASET_PATHS;
+extern const char* const FEATURE_IDS;
 extern const char* const EXTRA_INFOS;
 extern const char* const EXTRA_INFO_SIZE;
 extern const char* const VECTOR_COUNTS;

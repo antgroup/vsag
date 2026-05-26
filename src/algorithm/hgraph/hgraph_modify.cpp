@@ -146,6 +146,14 @@ HGraph::move_id(InnerIdType from, InnerIdType to) {
 
     label_table_->Move(from, to);
 
+    if (from < this->feature_ids_.size()) {
+        if (to >= this->feature_ids_.size()) {
+            this->feature_ids_.resize(to + 1);
+        }
+        this->feature_ids_[to] = std::move(this->feature_ids_[from]);
+        this->feature_ids_[from].clear();
+    }
+
     if (entry_point_id_ == from) {
         entry_point_id_ = to;
     }
@@ -202,6 +210,7 @@ HGraph::shrink_to_fit() {
         route_graph->ShrinkToFit(total_count);
     }
     label_table_->ShrinkToFit(total_count);
+    this->feature_ids_.resize(total_count);
 }
 
 void

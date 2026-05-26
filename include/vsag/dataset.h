@@ -330,6 +330,23 @@ public:
     GetPaths() const = 0;
 
     /**
+     * @brief Sets the FeatureID array for the dataset.
+     *
+     * @param feature_ids Pointer to the array of FeatureID strings.
+     * @return DatasetPtr A shared pointer to the dataset with updated FeatureIDs.
+     */
+    virtual DatasetPtr
+    FeatureIds(const std::string* feature_ids) = 0;
+
+    /**
+     * @brief Retrieves the FeatureID array of the dataset.
+     *
+     * @return const std::string* Pointer to the array of FeatureIDs.
+     */
+    virtual const std::string*
+    GetFeatureIds() const = 0;
+
+    /**
      * @brief Sets the extra info for the dataset.
      *
      * @param paths Pointer to extra info.

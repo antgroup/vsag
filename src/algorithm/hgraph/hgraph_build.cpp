@@ -95,6 +95,7 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
 
     auto total = data->GetNumElements();
     const auto* labels = data->GetIds();
+    const auto* feature_ids = data->GetFeatureIds();
     const auto* vectors = data->GetFloat32Vectors();
     const auto* extra_infos = data->GetExtraInfos();
     Vector<int64_t> valid_indices(allocator_);
@@ -118,6 +119,8 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
     }
     this->resize(current_count + new_ids_count);
     this->total_count_ += new_ids_count;
+    this->feature_ids_.clear();
+    this->feature_ids_.resize(this->total_count_.load());
     Vector<Vector<InnerIdType>> route_graph_ids(allocator_);
     auto need_sq8_build_data =
         need_temporary_sq8_build_data(this->basic_flatten_codes_, this->has_precise_reorder());
@@ -142,6 +145,9 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
         auto label = labels[i];
         InnerIdType inner_id = inner_ids.at(cur_size);
         this->label_table_->Insert(inner_id, label);
+        if (feature_ids != nullptr && inner_id < this->feature_ids_.size()) {
+            this->feature_ids_[inner_id] = feature_ids[i];
+        }
         if (not defer_persistent_codes) {
             this->insert_persistent_codes(vectors + dim_ * i, inner_id);
         } else {
@@ -261,6 +267,7 @@ HGraph::Add(const DatasetPtr& data, AddMode mode) {
     auto total = data->GetNumElements();
     const auto* labels = data->GetIds();
     const auto* extra_infos = data->GetExtraInfos();
+    const auto* feature_ids = data->GetFeatureIds();
     const auto* attr_sets = data->GetAttributeSets();
     bool use_parallel_add = this->thread_pool_ != nullptr;
     Vector<std::pair<InnerIdType, LabelType>> inner_ids(allocator_);
@@ -289,6 +296,12 @@ HGraph::Add(const DatasetPtr& data, AddMode mode) {
             std::scoped_lock label_lock(this->label_lookup_mutex_);
             this->label_table_->Insert(inner_id, labels[j]);
             inner_ids.emplace_back(inner_id, j);
+        }
+        if (feature_ids != nullptr) {
+            if (inner_id >= this->feature_ids_.size()) {
+                this->feature_ids_.resize(this->total_count_.load());
+            }
+            this->feature_ids_[inner_id] = feature_ids[j];
         }
     }
     if (temporary_build_flatten_codes_ != nullptr) {

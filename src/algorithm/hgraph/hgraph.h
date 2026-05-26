@@ -18,6 +18,7 @@
 #include <random>
 #include <shared_mutex>
 #include <string>
+#include <unordered_map>
 
 #include "../inner_index_interface.h"
 #include "common.h"
@@ -206,6 +207,23 @@ public:
                     const AttributeSet& new_attrs,
                     const AttributeSet& origin_attrs) override;
 
+    [[nodiscard]] bool
+    SupportsBuildCache() const override;
+
+    void
+    ExportBuildCache(std::ostream& out_stream) const override;
+
+    std::vector<int64_t>
+    BuildWithCache(const DatasetPtr& data,
+                   std::istream& in_stream,
+                   const BuildCacheOptions& options) override;
+
+    void
+    PrepareFeatureIdsForBuildCache(const DatasetPtr& data) override;
+
+    [[nodiscard]] BuildCacheStats
+    GetBuildCacheStats() const override;
+
     static JsonType
     map_hgraph_param(const JsonType& hgraph_json);
 
@@ -294,6 +312,88 @@ public:
                      DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
 
 private:
+    void
+    serialize_feature_ids(StreamWriter& writer) const;
+
+    void
+    deserialize_feature_ids(StreamReader& reader, uint64_t expected_count);
+
+    void
+    validate_feature_ids_dataset(const DatasetPtr& data) const;
+
+    uint64_t
+    calculate_build_cache_param_hash() const;
+
+    struct RefineRoundStats {
+        uint64_t elapsed_us = 0;
+        uint64_t processed_nodes = 0;
+    };
+
+    struct RefineExecutionStats {
+        uint64_t elapsed_us = 0;
+        uint64_t executed_rounds = 0;
+        uint32_t effective_parallelism = 0;
+        std::vector<RefineRoundStats> round_stats;
+    };
+
+    DistHeapPtr
+    collect_refine_candidates(const DatasetPtr& data,
+                              InnerIdType inner_id,
+                              uint32_t input_idx,
+                              const FlattenInterfacePtr& flatten_codes,
+                              uint32_t refine_ef,
+                              bool use_self_as_entry) const;
+
+    void
+    refine_single_node(const DatasetPtr& data,
+                       InnerIdType inner_id,
+                       uint32_t input_idx,
+                       const FlattenInterfacePtr& flatten_codes,
+                       uint32_t refine_ef,
+                       bool use_self_as_entry);
+
+    RefineExecutionStats
+    refine_nodes_for_build_cache(const DatasetPtr& data,
+                                 const std::vector<InnerIdType>& ids_to_refine,
+                                 std::string_view phase_name,
+                                 uint32_t rounds,
+                                 uint32_t refine_ef,
+                                 bool use_self_as_entry,
+                                 bool enable_parallel_refine,
+                                 uint32_t requested_parallelism,
+                                 const FlattenInterfacePtr& flatten_codes,
+                                 const std::unordered_map<InnerIdType, uint32_t>& inner_id_to_input_idx);
+
+    RefineExecutionStats
+    refine_nodes_two_phase(const DatasetPtr& data,
+                           const std::vector<InnerIdType>& ids_to_refine,
+                           std::string_view phase_name,
+                           uint32_t rounds,
+                           uint32_t refine_ef,
+                           bool use_self_as_entry,
+                           bool enable_parallel_refine,
+                           uint32_t requested_parallelism,
+                           const FlattenInterfacePtr& flatten_codes,
+                           const std::unordered_map<InnerIdType, uint32_t>& inner_id_to_input_idx);
+
+    Vector<InnerIdType>
+    select_refine_neighbors_for_node(const DatasetPtr& data,
+                                     InnerIdType inner_id,
+                                     uint32_t input_idx,
+                                     const FlattenInterfacePtr& flatten_codes,
+                                     uint32_t refine_ef,
+                                     bool use_self_as_entry) const;
+
+    void
+    select_refine_neighbors_with_distances(const DatasetPtr& data,
+                                           InnerIdType inner_id,
+                                           uint32_t input_idx,
+                                           const FlattenInterfacePtr& flatten_codes,
+                                           uint32_t refine_ef,
+                                           bool use_self_as_entry,
+                                           Vector<InnerIdType>& out_neighbors,
+                                           Vector<float>& out_distances) const;
+
     // since v0.15
     JsonType
     serialize_basic_info() const;
@@ -432,5 +532,8 @@ private:
 
     bool support_duplicate_{false};
     float duplicate_distance_threshold_{0.0F};
+
+    std::vector<std::string> feature_ids_;
+    BuildCacheStats build_cache_stats_;
 };
 }  // namespace vsag

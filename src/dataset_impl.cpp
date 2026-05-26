@@ -244,6 +244,7 @@ DatasetImpl::~DatasetImpl() {  // NOLINT
         }
     }
     delete[] DatasetImpl::GetPaths();
+    delete[] DatasetImpl::GetFeatureIds();
     if (DatasetImpl::GetAttributeSets() != nullptr) {
         const auto* attrsets = DatasetImpl::GetAttributeSets();
         for (int i = 0; i < DatasetImpl::GetNumElements(); ++i) {
@@ -311,6 +312,13 @@ DatasetImpl::DeepCopy(Allocator* allocator) const {
         copy_dataset->Paths(paths);
         for (int i = 0; i < num_elements; ++i) {
             paths[i] += this->GetPaths()[i];
+        }
+    }
+    if (this->GetFeatureIds() != nullptr) {
+        auto* feature_ids = new std::string[num_elements];
+        copy_dataset->FeatureIds(feature_ids);
+        for (int i = 0; i < num_elements; ++i) {
+            feature_ids[i] += this->GetFeatureIds()[i];
         }
     }
 
@@ -425,6 +433,25 @@ DatasetImpl::Append(const DatasetPtr& other) {
             paths_copy[old_num_elements + i] += other->GetPaths()[i];
         }
         this->Paths(paths_copy);
+    }
+
+    // append feature_ids
+    if (auto iter = this->data_.find(FEATURE_IDS); iter != this->data_.end()) {
+        if (other->GetFeatureIds() == nullptr) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "Cannot append dataset without feature_ids to dataset with feature_ids");
+        }
+        auto* ptr = const_cast<std::string*>(std::get<const std::string*>(iter->second));
+        auto* feature_ids_copy = new std::string[old_num_elements + new_num_elements];
+        for (int i = 0; i < old_num_elements; ++i) {
+            feature_ids_copy[i] += ptr[i];
+        }
+        delete[] ptr;
+        ptr = nullptr;
+        for (int i = 0; i < new_num_elements; ++i) {
+            feature_ids_copy[old_num_elements + i] += other->GetFeatureIds()[i];
+        }
+        this->FeatureIds(feature_ids_copy);
     }
 
     // append sparse-vectors
