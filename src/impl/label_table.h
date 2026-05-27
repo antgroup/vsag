@@ -441,6 +441,23 @@ public:
         return false;
     }
 
+    bool
+    InsertSourceId(InnerIdType inner_id, const std::string& source_id) {
+        if (inner_id >= source_id_table_.size()) {
+            source_id_table_.resize(inner_id + 1);
+        }
+        source_id_table_[inner_id] = source_id;
+        return true;
+    }
+
+    std::string
+    GetSourceId(InnerIdType inner_id) const {
+        if (inner_id >= source_id_table_.size()) {
+            return {};
+        }
+        return source_id_table_[inner_id];
+    }
+
     void
     Move(InnerIdType from, InnerIdType to) {
         if (from == to) {
@@ -490,6 +507,8 @@ private:
     UnorderedSet<InnerIdType> deleted_ids_;       // Record deleted ids.
     FilterPtr deleted_ids_filter_{nullptr};       // Filter to filter out deleted ids.
     mutable std::shared_mutex delete_ids_mutex_;  // Mutex to protect deleted_ids_.
+
+    Vector<std::string> source_id_table_;  // Map from id to source id, used for cache.
 
     Vector<InnerIdType> hole_list_;         // Reusable id list (stack structure).
     mutable std::shared_mutex hole_mutex_;  // Mutex to protect hole_list_.

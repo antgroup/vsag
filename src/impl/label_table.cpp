@@ -138,6 +138,7 @@ LabelTable::LabelTable(Allocator* allocator,
       label_remap_(allocator, label_remap_type),
       allocator_(allocator),
       deleted_ids_(allocator),
+      source_id_table_(0, allocator),
       hole_list_(0, allocator) {
     (void)compress_redundant_data;
     deleted_ids_filter_ = std::make_shared<RemoveListFilter>(deleted_ids_, delete_ids_mutex_);

@@ -51,6 +51,7 @@ class HGraphAnalyzer;
 HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonParam& common_param)
     : InnerIndexInterface(hgraph_param, common_param),
       route_graphs_(common_param.allocator_.get()),
+      cache_(std::make_unique<HGraphCache>(common_param.allocator_.get())),
       use_elp_optimizer_(hgraph_param->use_elp_optimizer),
       ignore_reorder_(hgraph_param->ignore_reorder),
       build_by_base_(hgraph_param->build_by_base),
