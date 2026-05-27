@@ -53,7 +53,8 @@ For RabitQ split 1bit + 7bit storage/search, see [rabitq_split_1bit_7bit.md](rab
 | **Advanced** | build_by_base | bool | false | No | Build index using base quantization |
 | **Features** | support_duplicate | bool | false | No | Enable duplicate data detection |
 | **Features** | duplicate_distance_threshold | float | 0.0 | No | Deduplicate by nearest-candidate distance when greater than 0; otherwise fall back to code memcmp |
-| **Features** | support_remove | bool | false | No | Enable deletion support |
+| **Features** | support_remove | bool | false | No | Enable graph delete-tracking metadata |
+| **Features** | support_force_remove | bool | false | No | Enable force-remove support and its extra synchronization |
 | **Features** | store_raw_vector | bool | false | No | Store raw vectors (cosine metric) |
 | **Features** | use_elp_optimizer | bool | false | No | Auto parameter optimization |
 
@@ -217,7 +218,13 @@ For RabitQ split 1bit + 7bit storage/search, see [rabitq_split_1bit_7bit.md](rab
 
 ### support_remove
 - **Parameter Type**: bool
-- **Parameter Description**: Whether to support deletion operations
+- **Parameter Description**: Whether to enable graph delete-tracking metadata
+- **Optional Values**: true, false
+- **Default Value**: false
+
+### support_force_remove
+- **Parameter Type**: bool
+- **Parameter Description**: Whether to enable the force-remove path and its extra synchronization
 - **Optional Values**: true, false
 - **Default Value**: false
 
@@ -242,10 +249,10 @@ means that the index is built using SQ8 quantization, with a maximum degree of 3
     "build_thread_count": 50,
     "support_duplicate": true,
     "duplicate_distance_threshold": 0.02,
-    "support_remove": true
+    "support_force_remove": true
 }
 ```
-means that the index uses PQ quantization with 64 subspaces, enables reordering with FP16 precision, deduplicates inserts within distance threshold 0.02, supports deletion, with maximum degree 64 and ef_construction 400.
+means that the index uses PQ quantization with 64 subspaces, enables reordering with FP16 precision, deduplicates inserts within distance threshold 0.02, and enables force-remove support with maximum degree 64 and ef_construction 400.
 
 ## Detailed Explanation of Search Parameters
 

@@ -28,11 +28,11 @@
 
 `Remove` 按 id 删除向量。HGraph 支持两种删除模式，要求不同：
 
-- `RemoveMode::MARK_REMOVE`（默认）：仅通过 label table 写入墓碑标记，**不依赖** `support_remove`
+- `RemoveMode::MARK_REMOVE`（默认）：仅通过 label table 写入墓碑标记，**不依赖** `support_force_remove`
   即可调用。该 id 会在后续搜索中被过滤掉，但底层图节点与向量存储仍然保留。
 - `RemoveMode::FORCE_REMOVE`：物理重写图并回收存储槽。该模式仅在索引以
-  `index_param` 中 `support_remove: true` 构建时可用（这会让图 datacell 分配删除追踪元数据）。
-  若索引未带 `support_remove: true` 构建，调用 `FORCE_REMOVE` 会失败。
+  `index_param` 中 `support_force_remove: true` 构建时可用。该开关会启用 force remove 路径及其额外同步；
+  若索引未带 `support_force_remove: true` 构建，调用 `FORCE_REMOVE` 会失败。
 
 ```json
 {
@@ -43,13 +43,13 @@
         "base_quantization_type": "sq8",
         "max_degree": 16,
         "ef_construction": 100,
-        "support_remove": true
+        "support_force_remove": true
     }
 }
 ```
 
 上述 JSON 仅在打算使用 `FORCE_REMOVE` 时是必需的。若只用 `MARK_REMOVE`，可以省略
-`support_remove` 字段。
+`support_force_remove` 字段。
 
 ```json
 {
@@ -59,8 +59,7 @@
     "index_param": {
         "base_quantization_type": "sq8",
         "max_degree": 16,
-        "ef_construction": 100,
-        "support_remove": true
+        "ef_construction": 100
     }
 }
 ```
@@ -77,8 +76,8 @@ index->Remove(std::vector<int64_t>{id1, id2, id3});
 
 | 模式                                | 行为                                                                |
 |-------------------------------------|---------------------------------------------------------------------|
-| `RemoveMode::MARK_REMOVE`（默认）   | 对 id 打墓碑标记；速度快，不收缩、不修图。后续搜索会跳过该 id。不要求 `support_remove: true`。 |
-| `RemoveMode::FORCE_REMOVE`          | 物理删除向量并修复图结构。开销较大。要求索引以 `support_remove: true` 构建。 |
+| `RemoveMode::MARK_REMOVE`（默认）   | 对 id 打墓碑标记；速度快，不收缩、不修图。后续搜索会跳过该 id。不要求 `support_force_remove: true`。 |
+| `RemoveMode::FORCE_REMOVE`          | 物理删除向量并修复图结构。开销较大。要求索引以 `support_force_remove: true` 构建。 |
 
 `Remove` 返回成功删除的 id 数量。原本不存在的 id 会被静默跳过，不计入返回值。
 

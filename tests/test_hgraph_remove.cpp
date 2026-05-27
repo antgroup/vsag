@@ -35,7 +35,7 @@ constexpr int64_t EF_SEARCH = 20;
 constexpr int64_t THREAD_COUNT = 4;
 
 vsag::IndexPtr
-CreateHGraphIndex() {
+CreateHGraphIndex(bool support_force_remove = true) {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     vsag::Options::Instance().set_block_size_limit(1024 * 1024 * 2);
 
@@ -45,6 +45,7 @@ CreateHGraphIndex() {
     index_param["ef_construction"] = EF_CONSTRUCTION;
     index_param["build_thread_count"] = 0;
     index_param["use_reverse_edges"] = true;
+    index_param["support_force_remove"] = support_force_remove;
 
     nlohmann::json param;
     param["dtype"] = "float32";
@@ -414,4 +415,26 @@ TEST_CASE("HGraph Batch ForceRemove", "[ft][hgraph]") {
     REQUIRE(remove_result.has_value());
     REQUIRE(remove_result.value() == remove_ids.size());
     REQUIRE(index->GetNumElements() == NUM_ELEMENTS - remove_ids.size());
+}
+
+TEST_CASE("HGraph ForceRemove Requires support_force_remove", "[ft][hgraph]") {
+    fixtures::logger::LoggerReplacer _;
+
+    auto index = CreateHGraphIndex(false);
+
+    int64_t id = 1;
+    std::vector<float> vector(DIM, 0.5F);
+    auto dataset = vsag::Dataset::Make();
+    dataset->Dim(DIM)->NumElements(1)->Ids(&id)->Float32Vectors(vector.data())->Owner(false);
+
+    auto add_result = index->Add(dataset);
+    REQUIRE(add_result.has_value());
+
+    auto force_remove_result = index->Remove(id, vsag::RemoveMode::FORCE_REMOVE);
+    REQUIRE_FALSE(force_remove_result.has_value());
+    REQUIRE(force_remove_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+
+    auto mark_remove_result = index->Remove(id, vsag::RemoveMode::MARK_REMOVE);
+    REQUIRE(mark_remove_result.has_value());
+    REQUIRE(mark_remove_result.value() == 1);
 }

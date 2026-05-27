@@ -55,6 +55,7 @@ struct HGraphDefaultParam {
     bool use_attribute_filter = false;
     bool support_duplicate = false;
     float duplicate_distance_threshold = 0.0F;
+    bool support_force_remove = false;
     bool use_reorder = true;
 };
 
@@ -110,7 +111,8 @@ generate_hgraph_param(const HGraphDefaultParam& param) {
         "use_attribute_filter": {},
         "use_reorder": {},
         "support_duplicate": {},
-        "duplicate_distance_threshold": {}
+        "duplicate_distance_threshold": {},
+        "support_force_remove": {}
     }})";
 
     return fmt::format(param_str,
@@ -126,7 +128,8 @@ generate_hgraph_param(const HGraphDefaultParam& param) {
                        param.use_attribute_filter,
                        param.use_reorder,
                        param.support_duplicate,
-                       param.duplicate_distance_threshold);
+                       param.duplicate_distance_threshold,
+                       param.support_force_remove);
 }
 
 // clang-format off
@@ -171,6 +174,8 @@ TEST_CASE("HGraph Parameters CheckCompatibility", "[ut][HGraphParameter][CheckCo
                             0.0F,
                             0.1F,
                             false)
+    TEST_COMPATIBILITY_CASE(
+        "different support force remove", support_force_remove, true, false, false)
 }
 // clang-format on
 
@@ -255,4 +260,29 @@ TEST_CASE("HGraphSearchParameters parses brute_force_threshold",
         REQUIRE_THROWS(vsag::HGraphSearchParameters::FromJson(
             R"({"hgraph": {"ef_search": 32, "brute_force_threshold": 1.5}})"));
     }
+}
+
+TEST_CASE("HGraph maps support_force_remove to inner parameter", "[ut][HGraphParameter]") {
+    auto param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "base_io_type": "block_memory_io",
+        "precise_quantization_type": "fp32",
+        "precise_io_type": "block_memory_io",
+        "graph_io_type": "block_memory_io",
+        "graph_storage_type": "flat",
+        "graph_type": "nsw",
+        "max_degree": 32,
+        "ef_construction": 100,
+        "support_force_remove": true,
+        "use_reorder": true
+    })");
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    auto hgraph_param = vsag::HGraph::CheckAndMappingExternalParam(param, common_param);
+    auto typed_param = std::dynamic_pointer_cast<vsag::HGraphParameter>(hgraph_param);
+
+    REQUIRE(typed_param != nullptr);
+    REQUIRE(typed_param->support_force_remove);
 }

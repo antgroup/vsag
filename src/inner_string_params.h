@@ -172,6 +172,7 @@ const char* const HOLD_MOLDS = "hold_molds";
 const char* const SUPPORT_DUPLICATE = "support_duplicate";
 const char* const DUPLICATE_DISTANCE_THRESHOLD = "duplicate_distance_threshold";
 const char* const SUPPORT_TOMBSTONE = "support_tombstone";
+const char* const SUPPORT_FORCE_REMOVE = "support_force_remove";
 const char* const SUPPORT_AUTOTUNE = "support_autotune";
 
 const char* const DATACELL_OFFSETS = "datacell_offsets";
@@ -281,6 +282,7 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"RABITQ_QUANTIZATION_ERROR_RATE_KEY", RABITQ_QUANTIZATION_ERROR_RATE_KEY},
     {"TQ_CHAIN_KEY", TQ_CHAIN_KEY},
     {"NO_BUILD_LEVELS", NO_BUILD_LEVELS},
-    {"GRAPH_TYPE_KEY", GRAPH_TYPE_KEY}};
+    {"GRAPH_TYPE_KEY", GRAPH_TYPE_KEY},
+    {"SUPPORT_FORCE_REMOVE", SUPPORT_FORCE_REMOVE}};
 
 }  // namespace vsag

@@ -29,6 +29,8 @@ HGraph::Remove(const std::vector<int64_t>& ids, RemoveMode mode) {
     }
 
     if (mode == RemoveMode::FORCE_REMOVE) {
+        CHECK_ARGUMENT(this->support_force_remove(),
+                       "force remove requires index_param.support_force_remove to be true");
         std::unique_lock<std::shared_mutex> wlock(this->force_remove_mutex_);
         for (const auto& id : ids) {
             delete_count += this->force_remove_one(id);

@@ -1,7 +1,5 @@
 # HGraph
 
-![HGraph: hierarchical proximity graph with top-down greedy search and optional reorder](../figures/indexes/hgraph-overview.svg)
-
 HGraph is VSAG's flagship **graph-based** index. It builds a hierarchical proximity graph
 similar in spirit to HNSW, but with a richer set of quantization options, a unified
 build-parameter schema (`index_param`), and first-class support for reordering,
@@ -77,7 +75,8 @@ and `docs/hgraph.md` in the repository.
 | `build_thread_count` | int | `100` | Threads used to parallelise build |
 | `support_duplicate` | bool | `false` | Enable duplicate-ID detection on insert |
 | `duplicate_distance_threshold` | float | `0.0` | Duplicate-detection distance threshold. When greater than `0`, deduplicate by the nearest candidate distance; when `0`, fall back to the current code `memcmp` check |
-| `support_remove` | bool | `false` | Enable `Remove()` on the built index |
+| `support_remove` | bool | `false` | Enable graph delete-tracking metadata used by mark-remove recovery paths |
+| `support_force_remove` | bool | `false` | Enable `RemoveMode::FORCE_REMOVE` and its extra synchronization on the built index |
 | `store_raw_vector` | bool | `false` | Keep the raw vector in addition to the quantized copy (useful for `cosine`) |
 | `use_elp_optimizer` | bool | `false` | Auto-tune search parameters after build |
 | `base_io_type` / `precise_io_type` | string | `"block_memory_io"` | Storage backend (`memory_io`, `block_memory_io`, `buffer_io`, `async_io`, `mmap_io`) |
@@ -204,24 +203,17 @@ Search-time parameters live under the `hgraph` sub-object:
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `ef_search` | int | Size of the search frontier. Larger = higher recall, slower query. |
-| `enable_reorder` | bool | `true` by default. Set to `false` to skip the final reorder stage for this request even when the index was built with reorder enabled. This also disables the RaBitQ one-bit reorder path. |
 
 ```cpp
 auto result = index->KnnSearch(
     query, topk, R"({"hgraph": {"ef_search": 200}})").value();
 ```
 
-```cpp
-auto fast_result = index->KnnSearch(
-    query, topk,
-    R"({"hgraph": {"ef_search": 200, "enable_reorder": false}})").value();
-```
-
 ## When to use HGraph
 
 - Dense float vectors with dimensions roughly between 64 and 4096.
 - Latency-sensitive queries where high recall matters.
-- Mixed workloads with incremental insertion (optionally deletion via `support_remove`).
+- Mixed workloads with incremental insertion (optionally force removal via `support_force_remove`).
 - Memory-constrained deployments that benefit from `sq8` / `sq4_uniform` / `pq` — often
   in combination with `use_reorder` to recover recall.
 
