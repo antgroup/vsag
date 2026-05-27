@@ -1,0 +1,301 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 560" font-family="-apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12">
+  <title>SINDI 索引示意图</title>
+  <desc>SINDI 是 VSAG 面向稀疏向量的索引。文档按固定窗口划分；每个窗口内为每个词项维护一份倒排列表，记录 (doc_id, value) 投递项。检索时只遍历查询非零词项对应的倒排表，把内积分量累加进大小为 n_candidate 的候选堆，可选地在高精度扁平副本上重打分。</desc>
+
+  <defs>
+    <marker id="arrow-search" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#e8590c"/>
+    </marker>
+  </defs>
+
+  <style>
+    .title    { fill: #1a1a1a; font-size: 16px; font-weight: 600; }
+    .subtitle { fill: #6b7280; font-size: 12px; }
+    .lbl      { fill: #1f2937; }
+    .lbl-mute { fill: #6b7280; }
+    .layer-lbl { fill: #475569; font-size: 11px; font-weight: 600; letter-spacing: 0.6px; }
+    .layer-sub { fill: #94a3b8; font-size: 11px; }
+
+    .band       { fill: #f8fafc; stroke: #e2e8f0; stroke-width: 1; }
+    .band-top   { fill: #f1f5f9; stroke: #e2e8f0; stroke-width: 1; }
+
+    /* query term chip */
+    .qchip      { fill: #fff4e6; stroke: #e8590c; stroke-width: 1.2; }
+    .qchip-mute { fill: #ffffff; stroke: #cbd5e1; stroke-width: 1; stroke-dasharray: 3 2; }
+    .qtext      { fill: #a14503; font-size: 10px; font-weight: 700; }
+    .qtext-mute { fill: #94a3b8; font-size: 10px; font-weight: 600; }
+
+    /* posting cell (doc_id, value) */
+    .post       { fill: #ffffff; stroke: #94a3b8; stroke-width: 0.8; }
+    .post-hi    { fill: #ffd8a8; stroke: #e8590c; stroke-width: 1.1; }
+    .post-result{ fill: #e03131; stroke: #a61e1e; stroke-width: 1.2; }
+    .post-text  { fill: #1f2937; font-size: 9px; }
+    .post-text-hi { fill: #a14503; font-size: 9px; font-weight: 700; }
+    .post-text-result { fill: #ffffff; font-size: 9px; font-weight: 700; }
+
+    /* term row label */
+    .term-lbl   { fill: #364fc7; font-size: 10px; font-weight: 700; }
+
+    /* window separators */
+    .win-rect   { fill: none; stroke: #cbd5e1; stroke-width: 1; stroke-dasharray: 3 3; }
+    .win-lbl    { fill: #94a3b8; font-size: 9px; letter-spacing: 0.4px; }
+
+    /* search arrows */
+    .search     { stroke: #e8590c; stroke-width: 1.6; fill: none; stroke-linecap: round; }
+    .feed       { stroke: #e8590c; stroke-width: 1.4; fill: none; stroke-dasharray: 4 3; stroke-linecap: round; opacity: 0.85; }
+
+    .step-badge  { fill: #e8590c; stroke: #ffffff; stroke-width: 2; }
+    .step-num    { fill: #ffffff; font-size: 11px; font-weight: 700; }
+
+    .note-box    { fill: #ffffff; stroke: #e2e8f0; stroke-width: 1; }
+
+    /* heap shape */
+    .heap-box   { fill: #fff4e6; stroke: #e8590c; stroke-width: 1.2; }
+    .heap-lbl   { fill: #a14503; font-size: 10px; font-weight: 700; letter-spacing: 0.4px; }
+  </style>
+
+  <!-- Header -->
+  <text class="title"    x="40" y="34">SINDI</text>
+  <text class="subtitle" x="40" y="52">稀疏倒排索引 · 按窗口维护每个词项的投递列表 · 仅对查询中出现的词项打分</text>
+
+  <!-- =========================================================
+       Query band (top): sparse vector as a list of (term, value) chips
+       Panel origin (40, 80), size 540 x 70.
+       ========================================================= -->
+  <g transform="translate(40, 80)">
+    <rect class="band-top" x="0" y="0" width="540" height="86" rx="10"/>
+    <text class="layer-lbl" x="14" y="20">查询 q</text>
+    <text class="layer-sub" x="70" y="20">非零词项 · 仅遍历这些倒排表</text>
+
+    <!-- 4 query chips: t5, t12, t27, t41 ; one (t41) is dashed = pruned by query_prune_ratio -->
+    <g transform="translate(16, 32)">
+      <rect class="qchip" x="0"   y="0" width="90" height="26" rx="6"/>
+      <text class="qtext" x="45"  y="17" text-anchor="middle">t5 : 0.92</text>
+
+      <rect class="qchip" x="100" y="0" width="90" height="26" rx="6"/>
+      <text class="qtext" x="145" y="17" text-anchor="middle">t12 : 0.71</text>
+
+      <rect class="qchip" x="200" y="0" width="90" height="26" rx="6"/>
+      <text class="qtext" x="245" y="17" text-anchor="middle">t27 : 0.55</text>
+
+      <rect class="qchip-mute" x="300" y="0" width="90" height="26" rx="6"/>
+      <text class="qtext-mute" x="345" y="17" text-anchor="middle">t41 : 0.08</text>
+      <text class="lbl-mute" x="345" y="44" text-anchor="middle" font-size="9">已被 query_prune_ratio 剪枝</text>
+    </g>
+  </g>
+
+  <!-- =========================================================
+       Inverted lists (middle): one row per query term, two windows wide
+       Panel origin (40, 168), size 540 x 256.
+       Rows at y = 50, 110, 170 inside panel.
+       Two windows: W0 (x=80..295) and W1 (x=310..525).
+       ========================================================= -->
+  <g transform="translate(40, 168)">
+    <rect class="band" x="0" y="0" width="540" height="232" rx="10"/>
+    <text class="layer-lbl" x="14" y="20">倒排列表</text>
+    <text class="layer-sub" x="90" y="20">词项 → (doc_id, value) 投递项，按 window_size 分组</text>
+
+    <!-- Window dividers / labels -->
+    <text class="win-lbl" x="187" y="40" text-anchor="middle">窗口 W0</text>
+    <text class="win-lbl" x="417" y="40" text-anchor="middle">窗口 W1</text>
+    <rect class="win-rect" x="74"  y="44" width="226" height="172" rx="6"/>
+    <rect class="win-rect" x="304" y="44" width="226" height="172" rx="6"/>
+
+    <!-- Row 1: term t5 -->
+    <text class="term-lbl" x="14" y="74" font-size="11">词项 t5</text>
+    <!-- W0 postings -->
+    <g transform="translate(80, 60)">
+      <rect class="post-hi" x="0"   y="0" width="62" height="22" rx="3"/>
+      <text class="post-text-hi" x="31"  y="14" text-anchor="middle">d12 : .80</text>
+
+      <rect class="post"    x="68"  y="0" width="62" height="22" rx="3"/>
+      <text class="post-text" x="99"  y="14" text-anchor="middle">d31 : .45</text>
+
+      <rect class="post-hi" x="136" y="0" width="62" height="22" rx="3"/>
+      <text class="post-text-hi" x="167" y="14" text-anchor="middle">d47 : .65</text>
+    </g>
+    <!-- W1 postings -->
+    <g transform="translate(310, 60)">
+      <rect class="post"    x="0"   y="0" width="62" height="22" rx="3"/>
+      <text class="post-text" x="31"  y="14" text-anchor="middle">d83 : .31</text>
+
+      <rect class="post-hi" x="68"  y="0" width="62" height="22" rx="3"/>
+      <text class="post-text-hi" x="99"  y="14" text-anchor="middle">d97 : .72</text>
+
+      <rect class="post"    x="136" y="0" width="62" height="22" rx="3"/>
+      <text class="post-text" x="167" y="14" text-anchor="middle">d115: .28</text>
+    </g>
+
+    <!-- Row 2: term t12 -->
+    <text class="term-lbl" x="14" y="124" font-size="11">词项 t12</text>
+    <g transform="translate(80, 110)">
+      <rect class="post-hi" x="0"   y="0" width="62" height="22" rx="3"/>
+      <text class="post-text-hi" x="31"  y="14" text-anchor="middle">d12 : .55</text>
+
+      <rect class="post"    x="68"  y="0" width="62" height="22" rx="3"/>
+      <text class="post-text" x="99"  y="14" text-anchor="middle">d20 : .42</text>
+
+      <rect class="post"    x="136" y="0" width="62" height="22" rx="3"/>
+      <text class="post-text" x="167" y="14" text-anchor="middle">d58 : .19</text>
+    </g>
+    <g transform="translate(310, 110)">
+      <rect class="post-hi" x="0"   y="0" width="62" height="22" rx="3"/>
+      <text class="post-text-hi" x="31"  y="14" text-anchor="middle">d97 : .60</text>
+
+      <rect class="post"    x="68"  y="0" width="62" height="22" rx="3"/>
+      <text class="post-text" x="99"  y="14" text-anchor="middle">d104: .33</text>
+    </g>
+
+    <!-- Row 3: term t27 -->
+    <text class="term-lbl" x="14" y="174" font-size="11">词项 t27</text>
+    <g transform="translate(80, 160)">
+      <rect class="post"    x="0"   y="0" width="62" height="22" rx="3"/>
+      <text class="post-text" x="31"  y="14" text-anchor="middle">d09 : .22</text>
+
+      <rect class="post-hi" x="68"  y="0" width="62" height="22" rx="3"/>
+      <text class="post-text-hi" x="99"  y="14" text-anchor="middle">d12 : .48</text>
+
+      <rect class="post"    x="136" y="0" width="62" height="22" rx="3"/>
+      <text class="post-text" x="167" y="14" text-anchor="middle">d47 : .25</text>
+    </g>
+    <g transform="translate(310, 160)">
+      <rect class="post"    x="0"   y="0" width="62" height="22" rx="3"/>
+      <text class="post-text" x="31"  y="14" text-anchor="middle">d83 : .29</text>
+
+      <rect class="post"    x="68"  y="0" width="62" height="22" rx="3"/>
+      <text class="post-text" x="99"  y="14" text-anchor="middle">d97 : .15</text>
+
+      <rect class="post"    x="136" y="0" width="62" height="22" rx="3"/>
+      <text class="post-text" x="167" y="14" text-anchor="middle">d128: .19</text>
+    </g>
+
+    <!-- Term-walk highlight arrows (one per row, left → right) -->
+    <path class="search" d="M 70 71 L 308 71" marker-end="url(#arrow-search)" opacity="0.55"/>
+    <path class="search" d="M 70 121 L 308 121" marker-end="url(#arrow-search)" opacity="0.55"/>
+    <path class="search" d="M 70 171 L 308 171" marker-end="url(#arrow-search)" opacity="0.55"/>
+  </g>
+
+  <!-- =========================================================
+       Bottom band: n_candidate heap → topk
+       Panel origin (40, 420), size 540 x 80.
+       ========================================================= -->
+  <g transform="translate(40, 420)">
+    <rect class="band" x="0" y="0" width="540" height="80" rx="10"/>
+    <text class="layer-lbl" x="14" y="20">候选堆</text>
+    <text class="layer-sub" x="80" y="20">大小为 n_candidate · 累加 q·d 分量 · 保留 top-k</text>
+
+    <!-- candidate items -->
+    <g transform="translate(80, 36)">
+      <rect class="post-result" x="0"   y="0" width="74" height="30" rx="4"/>
+      <text class="post-text-result" x="37"  y="13" text-anchor="middle">d12</text>
+      <text class="post-text-result" x="37"  y="25" text-anchor="middle">1.83</text>
+
+      <rect class="post-result" x="84"  y="0" width="74" height="30" rx="4"/>
+      <text class="post-text-result" x="121" y="13" text-anchor="middle">d97</text>
+      <text class="post-text-result" x="121" y="25" text-anchor="middle">1.32</text>
+
+      <rect class="post-hi" x="168" y="0" width="74" height="30" rx="4"/>
+      <text class="post-text-hi"  x="205" y="13" text-anchor="middle">d47</text>
+      <text class="post-text-hi"  x="205" y="25" text-anchor="middle">0.90</text>
+
+      <rect class="post-hi" x="252" y="0" width="74" height="30" rx="4"/>
+      <text class="post-text-hi"  x="289" y="13" text-anchor="middle">d83</text>
+      <text class="post-text-hi"  x="289" y="25" text-anchor="middle">0.60</text>
+
+      <rect class="post"    x="336" y="0" width="74" height="30" rx="4"/>
+      <text class="post-text" x="373" y="13" text-anchor="middle">d31</text>
+      <text class="post-text" x="373" y="25" text-anchor="middle">0.45</text>
+
+      <text class="lbl-mute" x="426" y="20" font-size="11">...</text>
+    </g>
+
+    <!-- topk callout: small bracket underlining the two red chips (svg x=120..238) -->
+    <path d="M 120 70 L 120 73 L 238 73 L 238 70" stroke="#a61e1e" stroke-width="1.2" fill="none"/>
+    <text class="heap-lbl" x="179" y="75" text-anchor="middle" fill="#a61e1e" dominant-baseline="hanging">TOP-K</text>
+  </g>
+
+  <!-- feed arrows from inverted lists → candidate heap -->
+  <path class="feed" d="M 130 410 Q 130 418 130 430"/>
+  <path class="feed" d="M 195 410 Q 195 418 195 430"/>
+  <path class="feed" d="M 265 410 Q 265 418 265 430"/>
+  <path class="feed" d="M 350 410 Q 350 418 350 430"/>
+  <path class="feed" d="M 430 410 Q 430 418 430 430"/>
+
+  <!-- =========================================================
+       Step badges
+       ========================================================= -->
+  <g>
+    <!-- 1: query non-zero terms (top band) -->
+    <circle class="step-badge" cx="545" cy="114" r="11"/>
+    <text class="step-num"    x="545" y="118" text-anchor="middle">1</text>
+
+    <!-- 2: walk inverted lists -->
+    <circle class="step-badge" cx="545" cy="200" r="11"/>
+    <text class="step-num"    x="545" y="204" text-anchor="middle">2</text>
+
+    <!-- 3: aggregate into heap (bottom band) -->
+    <circle class="step-badge" cx="545" cy="436" r="11"/>
+    <text class="step-num"    x="545" y="440" text-anchor="middle">3</text>
+  </g>
+
+  <!-- =========================================================
+       Right-side legend / annotations
+       ========================================================= -->
+  <g transform="translate(600, 92)">
+    <g>
+      <circle class="step-badge" cx="10" cy="10" r="9"/>
+      <text x="10" y="14" text-anchor="middle" fill="#fff" font-size="10" font-weight="700">1</text>
+      <text class="lbl" x="28" y="8" font-weight="600">取出非零项</text>
+      <text class="lbl-mute" x="28" y="22" font-size="11">q 的所有非零</text>
+      <text class="lbl-mute" x="28" y="36" font-size="11">(词项, 权重) 对</text>
+    </g>
+
+    <g transform="translate(0, 58)">
+      <circle class="step-badge" cx="10" cy="10" r="9"/>
+      <text x="10" y="14" text-anchor="middle" fill="#fff" font-size="10" font-weight="700">2</text>
+      <text class="lbl" x="28" y="8" font-weight="600">遍历倒排表</text>
+      <text class="lbl-mute" x="28" y="22" font-size="11">每个查询词项对应一张表，</text>
+      <text class="lbl-mute" x="28" y="36" font-size="11">逐窗口访问</text>
+    </g>
+
+    <g transform="translate(0, 116)">
+      <circle class="step-badge" cx="10" cy="10" r="9"/>
+      <text x="10" y="14" text-anchor="middle" fill="#fff" font-size="10" font-weight="700">3</text>
+      <text class="lbl" x="28" y="8" font-weight="600">聚合 &amp; 取 top-k</text>
+      <text class="lbl-mute" x="28" y="22" font-size="11">累加 q·d 分量到堆中</text>
+      <text class="lbl-mute" x="28" y="36" font-size="11">→ 输出 top-k</text>
+    </g>
+
+    <g transform="translate(0, 174)">
+      <rect class="note-box" x="0" y="0" width="160" height="92" rx="6"/>
+      <text class="layer-lbl" x="10" y="18" font-size="10">剪枝</text>
+      <text class="lbl-mute"  x="10" y="34" font-size="11">doc_prune_ratio（建索引）</text>
+      <text class="lbl-mute"  x="10" y="48" font-size="11">query_prune_ratio（检索）</text>
+
+      <line x1="10" y1="58" x2="150" y2="58" stroke="#e2e8f0"/>
+
+      <text class="layer-lbl" x="10" y="74" font-size="10">精排（可选）</text>
+      <text class="lbl-mute"  x="10" y="88" font-size="11">use_reorder + 扁平副本</text>
+    </g>
+  </g>
+
+  <!-- =========================================================
+       Bottom legend
+       ========================================================= -->
+  <g transform="translate(40, 525)">
+    <rect class="qchip" x="0" y="-6" width="14" height="12" rx="3"/>
+    <text class="lbl-mute" x="20" y="4">查询词项</text>
+
+    <rect class="post-hi" x="96" y="-6" width="14" height="12" rx="3"/>
+    <text class="lbl-mute" x="116" y="4">命中的投递项</text>
+
+    <rect class="post-result" x="234" y="-6" width="14" height="12" rx="3"/>
+    <text class="lbl-mute" x="254" y="4">top-k 结果</text>
+
+    <rect class="post" x="352" y="-6" width="14" height="12" rx="3"/>
+    <text class="lbl-mute" x="372" y="4">未命中的投递项</text>
+
+    <line class="search" x1="490" y1="0" x2="520" y2="0" marker-end="url(#arrow-search)"/>
+    <text class="lbl-mute" x="528" y="4">词项遍历</text>
+  </g>
+</svg>

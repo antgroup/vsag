@@ -1,5 +1,7 @@
 # HGraph
 
+![HGraph：自顶向下贪心搜索的层级近邻图，支持可选精排](../figures/indexes/hgraph-overview.svg)
+
 HGraph 是 VSAG 的旗舰 **图索引**。它构建的是与 HNSW 思路类似的多层近邻图，但在此基础上
 提供了更丰富的量化方案、统一的构建参数 schema（`index_param`），并原生支持精排（reorder）、
 增量更新、删除、以及基于 ELP 的运行时自动调优。

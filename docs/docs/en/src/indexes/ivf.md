@@ -1,5 +1,7 @@
 # IVF
 
+![IVF: Voronoi partition over k-means centroids; only the scan_buckets_count buckets closest to the query are scanned, with an optional precise rerank](../figures/indexes/ivf-overview.svg)
+
 IVF (Inverted File) is VSAG's **partition-based** index. It clusters the corpus into
 buckets at build time, and at query time only scans the buckets whose centroids are
 closest to the query. This turns an O(N) linear scan into O(N · `scan_buckets_count`
