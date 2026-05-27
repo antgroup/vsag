@@ -168,16 +168,38 @@ for (let i = 0; i < 10; i++) {
 </details>
 
 ### Integrate with CMake
+
+If you have already installed vsag (e.g. `cmake --install build-release` or via a
+distribution package), the recommended path is to use the shipped CMake package
+config and the imported `vsag::vsag` target:
+
 ```cmake
 # CMakeLists.txt
-cmake_minimum_required(VERSION 3.18)
-
-project (myproject)
+cmake_minimum_required (VERSION 3.18)
+project (myproject CXX)
 
 set (CMAKE_CXX_STANDARD 11)
 set (CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# download and compile vsag
+find_package (vsag CONFIG REQUIRED)
+
+add_executable (vsag-cmake-example src/main.cpp)
+target_link_libraries (vsag-cmake-example PRIVATE vsag::vsag)
+```
+
+Point CMake at the install prefix via `-DCMAKE_PREFIX_PATH=/path/to/install` if
+vsag is not in a system location.
+
+Alternatively, to fetch and build vsag from source as part of your project:
+
+```cmake
+# CMakeLists.txt
+cmake_minimum_required (VERSION 3.18)
+project (myproject CXX)
+
+set (CMAKE_CXX_STANDARD 11)
+set (CMAKE_CXX_STANDARD_REQUIRED ON)
+
 include (FetchContent)
 FetchContent_Declare (
   vsag
@@ -186,12 +208,9 @@ FetchContent_Declare (
 )
 FetchContent_MakeAvailable (vsag)
 
-# compile executable and link to vsag
 add_executable (vsag-cmake-example src/main.cpp)
 target_include_directories (vsag-cmake-example SYSTEM PRIVATE ${vsag_SOURCE_DIR}/include)
 target_link_libraries (vsag-cmake-example PRIVATE vsag)
-
-# add dependency
 add_dependencies (vsag-cmake-example vsag)
 ```
 
