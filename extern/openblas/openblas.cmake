@@ -71,19 +71,19 @@ if (NOT _openblas_policy STREQUAL "OFF")
     endif ()
 
     # 3) Fall back to a manual search for libopenblas + cblas.h + lapacke.h.
+    #    Search VSAG's known list first, then fall through to CMake's default
+    #    paths (including CMAKE_PREFIX_PATH, multiarch dirs, etc.) so users on
+    #    less common architectures can point us at a system install.
     if (NOT OPENBLAS_FOUND)
         find_library (OPENBLAS_LIB
             NAMES openblas
-            PATHS ${_openblas_system_paths}
-            NO_DEFAULT_PATH)
+            PATHS ${_openblas_system_paths})
         find_path (OPENBLAS_INCLUDE
             NAMES cblas.h
-            PATHS ${_openblas_system_includes}
-            NO_DEFAULT_PATH)
+            PATHS ${_openblas_system_includes})
         find_path (LAPACKE_INCLUDE
             NAMES lapacke.h
-            PATHS ${_openblas_system_includes}
-            NO_DEFAULT_PATH)
+            PATHS ${_openblas_system_includes})
 
         if (OPENBLAS_LIB AND OPENBLAS_INCLUDE AND LAPACKE_INCLUDE)
             set (OPENBLAS_FOUND TRUE)
@@ -93,8 +93,7 @@ if (NOT _openblas_policy STREQUAL "OFF")
 
             find_library (LAPACKE_LIB
                 NAMES lapacke
-                PATHS ${_openblas_system_paths}
-                NO_DEFAULT_PATH)
+                PATHS ${_openblas_system_paths})
             if (LAPACKE_LIB)
                 message (STATUS "Found LAPACKE library: ${LAPACKE_LIB}")
             else ()
@@ -167,6 +166,11 @@ endif ()
 if (_openblas_uses_imported_target)
     target_link_libraries (vsag_openblas_headers INTERFACE OpenBLAS::OpenBLAS)
 endif ()
+
+# Publish BLAS_LIBRARIES in the cache so downstream / superbuild consumers see
+# the same variable shape on both BLAS backends (the MKL path does the same).
+set (BLAS_LIBRARIES "${BLAS_LIBRARIES}" CACHE STRING
+     "Final list of BLAS libraries to link against." FORCE)
 
 if (NOT OPENBLAS_FOUND)
     # Build OpenBLAS from source

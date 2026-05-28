@@ -138,7 +138,7 @@ cmake -DVSAG_USE_SYSTEM_OPENBLAS=ON -DENABLE_INTEL_MKL=OFF -B build
 cmake --build build
 ```
 
-The legacy switch **`USE_SYSTEM_OPENBLAS`** (default: `OFF`) is kept as a deprecated alias and is treated as `VSAG_USE_SYSTEM_OPENBLAS=ON` when the new override is empty. Prefer the new option in new scripts.
+The legacy switch **`USE_SYSTEM_OPENBLAS`** (default: `OFF`) is kept as a deprecated alias. When `VSAG_USE_SYSTEM_OPENBLAS` is empty, setting `USE_SYSTEM_OPENBLAS=ON` preserves its previous "try system, fall back to bundled" behaviour (equivalent to `VSAG_USE_SYSTEM_OPENBLAS=AUTO` — it does **not** hard-require a system copy). Prefer the new option in new scripts.
 
 ### Third-Party Source Overrides
 
