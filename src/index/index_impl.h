@@ -191,6 +191,16 @@ public:
         return std::make_shared<IndexImpl<T>>(model_value.value(), this->common_param_);
     }
 
+    tl::expected<void, Error>
+    ExportCache(std::ostream& out_stream) const override {
+        SAFE_CALL(this->inner_index_->ExportCache(out_stream));
+    }
+
+    tl::expected<void, Error>
+    ImportCache(std::istream& in_stream) override {
+        SAFE_CALL(this->inner_index_->ImportCache(in_stream));
+    }
+
     tl::expected<DatasetPtr, Error>
     GetDataByIds(const int64_t* ids, int64_t count) const override {
         SAFE_CALL(return this->inner_index_->GetDataByIds(ids, count));
