@@ -23,6 +23,8 @@
 #include "impl/searcher/basic_searcher.h"
 #include "io/memory_io_parameter.h"
 #include "quantization/scalar_quantization/scalar_quantizer_parameter.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
 #include "utils/util_functions.h"
 
 namespace vsag {
@@ -260,6 +262,7 @@ HGraph::Add(const DatasetPtr& data, AddMode mode) {
     std::vector<std::future<void>> futures;
     auto total = data->GetNumElements();
     const auto* labels = data->GetIds();
+    const auto* source_id = data->GetSourceID();
     const auto* extra_infos = data->GetExtraInfos();
     const auto* attr_sets = data->GetAttributeSets();
     bool use_parallel_add = this->thread_pool_ != nullptr;
@@ -288,6 +291,9 @@ HGraph::Add(const DatasetPtr& data, AddMode mode) {
         {
             std::scoped_lock label_lock(this->label_lookup_mutex_);
             this->label_table_->Insert(inner_id, labels[j]);
+            if (source_id != nullptr) {
+                this->label_table_->InsertSourceId(inner_id, *source_id);
+            }
             inner_ids.emplace_back(inner_id, j);
         }
     }
@@ -653,6 +659,42 @@ HGraph::reorder(const void* query,
                                               iter_ctx,
                                               rabitq_lower_bound_candidates);
     candidate_heap = reorder_heap;
+}
+
+void
+HGraph::ExportCache(std::ostream& out_stream) {
+    IOStreamWriter writer(out_stream);
+    this->fullfill_cache();
+    this->cache_->Serialize(writer);
+}
+
+void
+HGraph::ImportCache(std::istream& in_stream) {
+    IOStreamReader reader(in_stream);
+    this->cache_->Deserialize(reader);
+}
+
+void
+HGraph::fullfill_cache() {
+    auto& source_ids = this->cache_->source_ids_;
+    auto& source_cache_map = this->cache_->neighbors_;
+    source_ids.clear();
+    source_cache_map.clear();
+    source_ids.reserve(this->total_count_);
+    Vector<InnerIdType> inner_id_list(allocator_);
+    for (InnerIdType inner_id = 0; inner_id < this->total_count_; ++inner_id) {
+        auto source_id = this->label_table_->GetSourceId(inner_id);
+        source_ids.push_back(source_id);
+        if (source_id.empty()) {
+            continue;
+        }
+        auto [it, _] = source_cache_map.try_emplace(source_id, Vector<InnerIdType>(allocator_));
+        auto& cached = it.value();
+        cached.push_back(inner_id);
+        inner_id_list.clear();
+        this->bottom_graph_->GetNeighbors(inner_id, inner_id_list);
+        cached.insert(cached.end(), inner_id_list.begin(), inner_id_list.end());
+    }
 }
 
 }  // namespace vsag

@@ -467,6 +467,23 @@ public:
      */
     virtual int64_t
     GetMultiVectorDim() const = 0;
+
+    /**
+     * @brief Sets the source ID for the dataset.
+     *
+     * @param source_id Pointer to the source ID string.
+     * @return DatasetPtr A shared pointer to the dataset with updated source ID.
+     */
+    virtual DatasetPtr
+    SourceID(const std::string* source_id) = 0;
+
+    /**
+     * @brief Retrieves the source ID of the dataset.
+     *
+     * @return const std::string* Pointer to the source ID string.
+     */
+    virtual const std::string*
+    GetSourceID() const = 0;
 };
 
 };  // namespace vsag

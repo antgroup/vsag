@@ -25,6 +25,7 @@
 #include "datacell/flatten_interface.h"
 #include "datacell/graph_interface.h"
 #include "datacell/sparse_graph_datacell_parameter.h"
+#include "hgraph_cache.h"
 #include "hgraph_parameter.h"
 #include "impl/basic_optimizer.h"
 #include "impl/heap/distance_heap.h"
@@ -190,6 +191,12 @@ public:
     SetImmutable() override;
 
     void
+    ExportCache(std::ostream& out_stream) override;
+
+    void
+    ImportCache(std::istream& in_stream) override;
+
+    void
     SetIO(const std::shared_ptr<Reader> reader) override;
 
     void
@@ -353,7 +360,6 @@ private:
     DatasetPtr
     get_single_dataset(const DatasetPtr& data, uint32_t j);
 
-private:
     void
     check_and_init_raw_vector(const FlattenInterfaceParamPtr& raw_vector_param,
                               const IndexCommonParam& common_param,
@@ -374,6 +380,9 @@ private:
     get_reorder_codes() const {
         return reorder_by_base_ ? basic_flatten_codes_ : high_precise_codes_;
     }
+
+    void
+    fullfill_cache();
 
 private:
     FlattenInterfacePtr basic_flatten_codes_{nullptr};
@@ -432,5 +441,7 @@ private:
 
     bool support_duplicate_{false};
     float duplicate_distance_threshold_{0.0F};
+
+    std::unique_ptr<HGraphCache> cache_{nullptr};
 };
 }  // namespace vsag

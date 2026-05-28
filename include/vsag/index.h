@@ -932,6 +932,16 @@ public:
         throw std::runtime_error("Index not support check id exist");
     }
 
+    void
+    ExportCache(std::ostream& out_stream) {
+        throw std::runtime_error("Index not support export cache");
+    }
+
+    void
+    ImportCache(std::istream& in_stream) {
+        throw std::runtime_error("Index not support import cache");
+    }
+
 public:
     virtual ~Index() = default;
 };

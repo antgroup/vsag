@@ -313,6 +313,20 @@ public:
         return 0;
     }
 
+    DatasetPtr
+    SourceID(const std::string* source_id) override {
+        this->data_[SOURCE_ID] = source_id;
+        return shared_from_this();
+    }
+
+    const std::string*
+    GetSourceID() const override {
+        if (auto iter = this->data_.find(SOURCE_ID); iter != this->data_.end()) {
+            return std::get<const std::string*>(iter->second);
+        }
+        return nullptr;
+    }
+
     static DatasetPtr
     MakeEmptyDataset();
 

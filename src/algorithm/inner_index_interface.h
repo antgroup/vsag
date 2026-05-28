@@ -454,6 +454,18 @@ public:
     }
 
     virtual void
+    ExportCache(std::ostream& out_stream) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index doesn't support ExportCache");
+    }
+
+    virtual void
+    ImportCache(std::istream& in_stream) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index doesn't support ImportCache");
+    }
+
+    virtual void
     Train(const DatasetPtr& base){};
 
     virtual void
