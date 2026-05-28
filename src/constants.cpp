@@ -173,6 +173,7 @@ const char* const HGRAPH_GRAPH_FILE_PATH = "graph_file_path";
 const char* const HGRAPH_BUILD_THREAD_COUNT = "build_thread_count";
 const char* const HGRAPH_PRECISE_QUANTIZATION_TYPE = "precise_quantization_type";
 const char* const HGRAPH_BASE_IO_TYPE = "base_io_type";
+const char* const HGRAPH_BASE_SUPPLEMENT_IO_TYPE = "base_supplement_io_type";
 const char* const HGRAPH_BASE_PQ_DIM = "base_pq_dim";
 const char* const HGRAPH_BASE_FILE_PATH = "base_file_path";
 const char* const HGRAPH_PRECISE_IO_TYPE = "precise_io_type";

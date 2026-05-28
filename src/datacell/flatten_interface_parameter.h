@@ -32,6 +32,11 @@ public:
 
     IOParamPtr io_parameter{nullptr};
 
+    // Optional supplement IO parameter for RaBitQSplitDataCell. When nullptr,
+    // the supplement storage falls back to `io_parameter`. Allows e.g. keeping
+    // the one-bit codes in memory while spilling supplement codes to disk.
+    IOParamPtr supplement_io_parameter{nullptr};
+
     std::string name;
 };
 

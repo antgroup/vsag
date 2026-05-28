@@ -56,6 +56,7 @@ const char* const ALPHA_KEY = "alpha";
 
 // IO param key
 const char* const IO_PARAMS_KEY = "io_params";
+const char* const SUPPLEMENT_IO_PARAMS_KEY = "supplement_io_params";
 const char* const IO_TYPE_VALUE_MEMORY_IO = "memory_io";
 const char* const IO_TYPE_VALUE_BUFFER_IO = "buffer_io";
 const char* const IO_TYPE_VALUE_MMAP_IO = "mmap_io";

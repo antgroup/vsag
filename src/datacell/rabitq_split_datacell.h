@@ -24,21 +24,35 @@
 
 #include "common.h"
 #include "flatten_interface.h"
+#include "inner_string_params.h"
+#include "io/async_io_parameter.h"
 #include "io/basic_io.h"
+#include "io/buffer_io_parameter.h"
+#include "io/io_parameter.h"
+#include "io/mmap_io_parameter.h"
 #include "quantization/rabitq_quantization/rabitq_quantizer.h"
 #include "query_context.h"
+#include "rabitq_one_bit_storage.h"
+#include "rabitq_supplement_storage.h"
 #include "utils/byte_buffer.h"
 #include "utils/timer.h"
 
 namespace vsag {
 
-template <MetricType metric, typename IOTmpl>
+template <MetricType metric, typename OneBitIOTmpl, typename SupplementIOTmpl = OneBitIOTmpl>
 class RaBitQSplitDataCell : public FlattenInterface {
 public:
     RaBitQSplitDataCell() = default;
 
     explicit RaBitQSplitDataCell(const QuantizerParamPtr& quantization_param,
                                  const IOParamPtr& io_param,
+                                 const IndexCommonParam& common_param)
+        : RaBitQSplitDataCell(quantization_param, io_param, nullptr, common_param) {
+    }
+
+    explicit RaBitQSplitDataCell(const QuantizerParamPtr& quantization_param,
+                                 const IOParamPtr& io_param,
+                                 const IOParamPtr& supplement_io_param,
                                  const IndexCommonParam& common_param)
         : common_param_(common_param), allocator_(common_param.allocator_.get()) {
         this->quantizer_ =
@@ -49,8 +63,19 @@ public:
                                 "rabitq_bits_per_dim_query=32, and "
                                 "rabitq_bits_per_dim_base in [1, 8]");
         }
-        this->one_bit_io_ = std::make_shared<IOTmpl>(io_param, common_param);
-        this->supplement_io_ = std::make_shared<IOTmpl>(io_param, common_param);
+        // When a supplement-specific IO param is supplied, use it directly so
+        // the caller can pick an entirely different IO type (e.g. one-bit in
+        // memory + supplement on disk). Otherwise fall back to the shared
+        // io_param with the legacy file-path suffix to keep the two backing
+        // files separate for file-backed IO.
+        const IOParamPtr one_bit_io_param = SuffixIOParam(io_param, "_onebit");
+        const IOParamPtr supp_io_param = (supplement_io_param != nullptr)
+                                             ? supplement_io_param
+                                             : SuffixIOParam(io_param, "_supplement");
+        this->one_bit_cell_ =
+            std::make_shared<RaBitQOneBitStorage<OneBitIOTmpl>>(one_bit_io_param, common_param);
+        this->supplement_cell_ = std::make_shared<RaBitQSupplementStorage<SupplementIOTmpl>>(
+            supp_io_param, common_param);
         this->refresh_code_sizes();
     }
 
@@ -61,6 +86,13 @@ public:
           InnerIdType id_count,
           QueryContext* ctx = nullptr) override {
         auto* comp = static_cast<Computer<RaBitQuantizer<metric>>*>(computer.get());
+        if constexpr (not OneBitIOTmpl::InMemory or not SupplementIOTmpl::InMemory) {
+            if (id_count > 1) {
+                this->query_full_dist_by_multiread(result_dists, comp, idx, id_count, ctx);
+                return;
+            }
+        }
+
         for (uint32_t i = 0; i < this->prefetch_stride_code_ and i < id_count; ++i) {
             this->prefetch_full_code(idx[i]);
         }
@@ -132,7 +164,7 @@ public:
                                 InnerIdType id_count,
                                 QueryContext* ctx = nullptr) override {
         auto* comp = static_cast<Computer<RaBitQuantizer<metric>>*>(computer.get());
-        if constexpr (not IOTmpl::InMemory) {
+        if constexpr (not OneBitIOTmpl::InMemory) {
             if (id_count > 1) {
                 this->query_one_bit_lower_bound_by_multiread(
                     result_dists, lower_bounds, comp, idx, id_count, ctx);
@@ -301,8 +333,8 @@ public:
         if (new_capacity <= this->max_capacity_) {
             return;
         }
-        this->one_bit_io_->Resize(static_cast<uint64_t>(new_capacity) * one_bit_code_size_);
-        this->supplement_io_->Resize(static_cast<uint64_t>(new_capacity) * supplement_code_size_);
+        this->one_bit_cell_->Resize(new_capacity);
+        this->supplement_cell_->Resize(new_capacity);
         this->max_capacity_ = new_capacity;
     }
 
@@ -318,7 +350,9 @@ public:
         this->quantizer_->Serialize(writer);
         ss.seekg(0, std::ios::beg);
         IOStreamReader reader(ss);
-        auto ptr = std::dynamic_pointer_cast<RaBitQSplitDataCell<metric, IOTmpl>>(other);
+        auto ptr =
+            std::dynamic_pointer_cast<RaBitQSplitDataCell<metric, OneBitIOTmpl, SupplementIOTmpl>>(
+                other);
         if (ptr == nullptr) {
             throw VsagException(ErrorType::INTERNAL_ERROR,
                                 "Export model's rabitq split datacell failed");
@@ -329,8 +363,19 @@ public:
 
     void
     InitIO(const IOParamPtr& io_param) override {
-        this->one_bit_io_->InitIO(io_param);
-        this->supplement_io_->InitIO(io_param);
+        this->one_bit_cell_->InitIO(SuffixIOParam(io_param, "_onebit"));
+        this->supplement_cell_->InitIO(SuffixIOParam(io_param, "_supplement"));
+    }
+
+    void
+    InitIO(const IOParamPtr& one_bit_io_param, const IOParamPtr& supplement_io_param) {
+        this->one_bit_cell_->InitIO(SuffixIOParam(one_bit_io_param, "_onebit"));
+        // When a dedicated supplement IO param is supplied, do not append a
+        // suffix because the caller (typically the factory) has already picked
+        // an independent file path / IO type.
+        this->supplement_cell_->InitIO(supplement_io_param != nullptr
+                                           ? supplement_io_param
+                                           : SuffixIOParam(one_bit_io_param, "_supplement"));
     }
 
     IndexCommonParam
@@ -375,12 +420,8 @@ public:
     GetCodesById(InnerIdType id, uint8_t* codes) const override {
         ByteBuffer one_bit(one_bit_code_size_, allocator_);
         ByteBuffer supplement(supplement_code_size_, allocator_);
-        bool one_bit_ok = this->one_bit_io_->Read(
-            one_bit_code_size_, static_cast<uint64_t>(id) * one_bit_code_size_, one_bit.data);
-        bool supplement_ok =
-            this->supplement_io_->Read(supplement_code_size_,
-                                       static_cast<uint64_t>(id) * supplement_code_size_,
-                                       supplement.data);
+        bool one_bit_ok = this->one_bit_cell_->Read(id, one_bit.data);
+        bool supplement_ok = this->supplement_cell_->Read(id, supplement.data);
         if (not one_bit_ok or not supplement_ok) {
             return false;
         }
@@ -390,7 +431,7 @@ public:
 
     [[nodiscard]] bool
     InMemory() const override {
-        return IOTmpl::InMemory;
+        return OneBitIOTmpl::InMemory and SupplementIOTmpl::InMemory;
     }
 
     bool
@@ -401,23 +442,25 @@ public:
     void
     Serialize(StreamWriter& writer) override {
         FlattenInterface::Serialize(writer);
-        this->one_bit_io_->Serialize(writer);
-        this->supplement_io_->Serialize(writer);
+        this->one_bit_cell_->Serialize(writer);
+        this->supplement_cell_->Serialize(writer);
         this->quantizer_->Serialize(writer);
     }
 
     void
     Deserialize(lvalue_or_rvalue<StreamReader> reader) override {
         FlattenInterface::Deserialize(reader);
-        this->one_bit_io_->Deserialize(reader);
-        this->supplement_io_->Deserialize(reader);
+        this->one_bit_cell_->Deserialize(reader);
+        this->supplement_cell_->Deserialize(reader);
         this->quantizer_->Deserialize(reader);
         this->refresh_code_sizes();
     }
 
     void
     MergeOther(const FlattenInterfacePtr& other, InnerIdType bias) override {
-        auto ptr = std::dynamic_pointer_cast<RaBitQSplitDataCell<metric, IOTmpl>>(other);
+        auto ptr =
+            std::dynamic_pointer_cast<RaBitQSplitDataCell<metric, OneBitIOTmpl, SupplementIOTmpl>>(
+                other);
         if (ptr == nullptr) {
             throw VsagException(ErrorType::INTERNAL_ERROR,
                                 "Merge rabitq split datacell failed: not match type");
@@ -426,15 +469,11 @@ public:
         for (InnerIdType i = 0; i < ptr->total_count_; ++i) {
             ByteBuffer one_bit(one_bit_code_size_, allocator_);
             ByteBuffer supplement(supplement_code_size_, allocator_);
-            ptr->one_bit_io_->Read(
-                one_bit_code_size_, static_cast<uint64_t>(i) * one_bit_code_size_, one_bit.data);
-            ptr->supplement_io_->Read(supplement_code_size_,
-                                      static_cast<uint64_t>(i) * supplement_code_size_,
-                                      supplement.data);
-            auto target = static_cast<uint64_t>(bias + i);
-            this->one_bit_io_->Write(one_bit.data, one_bit_code_size_, target * one_bit_code_size_);
-            this->supplement_io_->Write(
-                supplement.data, supplement_code_size_, target * supplement_code_size_);
+            ptr->one_bit_cell_->Read(i, one_bit.data);
+            ptr->supplement_cell_->Read(i, supplement.data);
+            auto target_id = static_cast<InnerIdType>(bias + i);
+            this->one_bit_cell_->Write(one_bit.data, target_id);
+            this->supplement_cell_->Write(supplement.data, target_id);
         }
         this->total_count_ = std::max(this->total_count_, bias + ptr->total_count_);
     }
@@ -443,32 +482,24 @@ public:
     Move(InnerIdType from, InnerIdType to) override {
         ByteBuffer one_bit(one_bit_code_size_, allocator_);
         ByteBuffer supplement(supplement_code_size_, allocator_);
-        this->one_bit_io_->Read(
-            one_bit_code_size_, static_cast<uint64_t>(from) * one_bit_code_size_, one_bit.data);
-        this->supplement_io_->Read(supplement_code_size_,
-                                   static_cast<uint64_t>(from) * supplement_code_size_,
-                                   supplement.data);
-        this->one_bit_io_->Write(
-            one_bit.data, one_bit_code_size_, static_cast<uint64_t>(to) * one_bit_code_size_);
-        this->supplement_io_->Write(supplement.data,
-                                    supplement_code_size_,
-                                    static_cast<uint64_t>(to) * supplement_code_size_);
+        this->one_bit_cell_->Read(from, one_bit.data);
+        this->supplement_cell_->Read(from, supplement.data);
+        this->one_bit_cell_->Write(one_bit.data, to);
+        this->supplement_cell_->Write(supplement.data, to);
     }
 
     void
     ShrinkToFit(InnerIdType capacity) override {
-        this->one_bit_io_->Shrink(static_cast<uint64_t>(capacity) * one_bit_code_size_);
-        this->supplement_io_->Shrink(static_cast<uint64_t>(capacity) * supplement_code_size_);
+        this->one_bit_cell_->Shrink(capacity);
+        this->supplement_cell_->Shrink(capacity);
         this->max_capacity_ = capacity;
     }
 
     int64_t
     GetMemoryUsage() const override {
-        int64_t memory = sizeof(RaBitQSplitDataCell<metric, IOTmpl>);
-        if (IOTmpl::InMemory) {
-            memory += this->one_bit_io_->GetMemoryUsage();
-            memory += this->supplement_io_->GetMemoryUsage();
-        }
+        int64_t memory = sizeof(RaBitQSplitDataCell<metric, OneBitIOTmpl, SupplementIOTmpl>);
+        memory += this->one_bit_cell_->GetMemoryUsage();
+        memory += this->supplement_cell_->GetMemoryUsage();
         memory += sizeof(RaBitQuantizer<metric>);
         return memory;
     }
@@ -476,19 +507,34 @@ public:
 public:
     IndexCommonParam common_param_;
     std::shared_ptr<RaBitQuantizer<metric>> quantizer_{nullptr};
-    std::shared_ptr<BasicIO<IOTmpl>> one_bit_io_{nullptr};
-    std::shared_ptr<BasicIO<IOTmpl>> supplement_io_{nullptr};
+    std::shared_ptr<RaBitQOneBitStorage<OneBitIOTmpl>> one_bit_cell_{nullptr};
+    std::shared_ptr<RaBitQSupplementStorage<SupplementIOTmpl>> supplement_cell_{nullptr};
 
     Allocator* allocator_{nullptr};
     uint64_t one_bit_code_size_{0};
     uint64_t supplement_code_size_{0};
 
 private:
+    static IOParamPtr
+    SuffixIOParam(const IOParamPtr& io_param, const std::string& suffix) {
+        if (io_param == nullptr) {
+            return nullptr;
+        }
+        auto json = io_param->ToJson();
+        if (json.Contains(IO_FILE_PATH_KEY)) {
+            std::string path = json[IO_FILE_PATH_KEY].GetString();
+            json[IO_FILE_PATH_KEY].SetString(path + suffix);
+        }
+        return IOParameter::GetIOParameterByJson(json);
+    }
+
     void
     refresh_code_sizes() {
         this->code_size_ = static_cast<uint32_t>(quantizer_->GetCodeSize());
         this->one_bit_code_size_ = quantizer_->GetOneBitCodeSize();
         this->supplement_code_size_ = quantizer_->GetSupplementCodeSize();
+        this->one_bit_cell_->SetCodeSize(one_bit_code_size_);
+        this->supplement_cell_->SetCodeSize(supplement_code_size_);
     }
 
     void
@@ -498,25 +544,18 @@ private:
         ByteBuffer supplement_code(supplement_code_size_, allocator_);
         this->quantizer_->EncodeOne(vector, full_code.data);
         this->quantizer_->SplitCode(full_code.data, one_bit_code.data, supplement_code.data);
-        this->one_bit_io_->Write(
-            one_bit_code.data, one_bit_code_size_, static_cast<uint64_t>(idx) * one_bit_code_size_);
-        this->supplement_io_->Write(supplement_code.data,
-                                    supplement_code_size_,
-                                    static_cast<uint64_t>(idx) * supplement_code_size_);
+        this->one_bit_cell_->Write(one_bit_code.data, idx);
+        this->supplement_cell_->Write(supplement_code.data, idx);
     }
 
     void
     prefetch_one_bit(InnerIdType id) {
-        this->one_bit_io_->Prefetch(
-            static_cast<uint64_t>(id) * one_bit_code_size_,
-            std::min<uint64_t>(this->prefetch_depth_code_ * 64, one_bit_code_size_));
+        this->one_bit_cell_->Prefetch(id, this->prefetch_depth_code_ * 64);
     }
 
     void
     prefetch_supplement(InnerIdType id) {
-        this->supplement_io_->Prefetch(
-            static_cast<uint64_t>(id) * supplement_code_size_,
-            std::min<uint64_t>(this->prefetch_depth_code_ * 64, supplement_code_size_));
+        this->supplement_cell_->Prefetch(id, this->prefetch_depth_code_ * 64);
     }
 
     void
@@ -527,27 +566,25 @@ private:
 
     const uint8_t*
     get_one_bit_code(InnerIdType id, bool& need_release) const {
-        return this->one_bit_io_->Read(
-            one_bit_code_size_, static_cast<uint64_t>(id) * one_bit_code_size_, need_release);
+        return this->one_bit_cell_->Read(id, need_release);
     }
 
     void
     release_one_bit_code(const uint8_t* code, bool need_release) const {
-        if (need_release and code != nullptr) {
-            this->one_bit_io_->Release(code);
+        if (need_release) {
+            this->one_bit_cell_->Release(code);
         }
     }
 
     const uint8_t*
     get_supplement_code(InnerIdType id, bool& need_release) const {
-        return this->supplement_io_->Read(
-            supplement_code_size_, static_cast<uint64_t>(id) * supplement_code_size_, need_release);
+        return this->supplement_cell_->Read(id, need_release);
     }
 
     void
     release_supplement_code(const uint8_t* code, bool need_release) const {
-        if (need_release and code != nullptr) {
-            this->supplement_io_->Release(code);
+        if (need_release) {
+            this->supplement_cell_->Release(code);
         }
     }
 
@@ -569,7 +606,7 @@ private:
         double io_cost_ms = 0.0F;
         {
             Timer timer(io_cost_ms);
-            this->one_bit_io_->MultiRead(
+            this->one_bit_cell_->MultiRead(
                 one_bit_codes.data, sizes.data(), offsets.data(), id_count);
         }
         if (ctx != nullptr and ctx->stats != nullptr) {
@@ -633,6 +670,45 @@ private:
                 this->compute_full_dist_after_one_bit_failure(
                     idx[i], one_bit_code, computer, result_dists + i, lower_bound);
             }
+        }
+    }
+
+    void
+    query_full_dist_by_multiread(float* result_dists,
+                                 Computer<RaBitQuantizer<metric>>* computer,
+                                 const InnerIdType* idx,
+                                 InnerIdType id_count,
+                                 QueryContext* ctx) const {
+        Allocator* search_alloc = select_query_allocator(ctx, allocator_);
+        ByteBuffer one_bit_codes(id_count * one_bit_code_size_, search_alloc);
+        ByteBuffer supplement_codes(id_count * supplement_code_size_, search_alloc);
+        Vector<uint64_t> one_bit_sizes(id_count, one_bit_code_size_, search_alloc);
+        Vector<uint64_t> one_bit_offsets(id_count, 0, search_alloc);
+        Vector<uint64_t> supp_sizes(id_count, supplement_code_size_, search_alloc);
+        Vector<uint64_t> supp_offsets(id_count, 0, search_alloc);
+        for (InnerIdType i = 0; i < id_count; ++i) {
+            one_bit_offsets[i] = static_cast<uint64_t>(idx[i]) * one_bit_code_size_;
+            supp_offsets[i] = static_cast<uint64_t>(idx[i]) * supplement_code_size_;
+        }
+
+        double io_cost_ms = 0.0F;
+        {
+            Timer timer(io_cost_ms);
+            this->one_bit_cell_->MultiRead(
+                one_bit_codes.data, one_bit_sizes.data(), one_bit_offsets.data(), id_count);
+            this->supplement_cell_->MultiRead(
+                supplement_codes.data, supp_sizes.data(), supp_offsets.data(), id_count);
+        }
+        if (ctx != nullptr and ctx->stats != nullptr) {
+            ctx->stats->io_cnt.fetch_add(id_count * 2, std::memory_order_relaxed);
+            ctx->stats->io_time_ms.fetch_add(static_cast<uint32_t>(io_cost_ms),
+                                             std::memory_order_relaxed);
+        }
+
+        for (InnerIdType i = 0; i < id_count; ++i) {
+            const auto* one_bit_code = one_bit_codes.data + i * one_bit_code_size_;
+            const auto* supplement_code = supplement_codes.data + i * supplement_code_size_;
+            this->compute_full_dist(one_bit_code, supplement_code, computer, result_dists + i);
         }
     }
 
