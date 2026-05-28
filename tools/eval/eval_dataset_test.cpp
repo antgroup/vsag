@@ -342,8 +342,7 @@ TEST_CASE("EvalDataset sparse round-trip writes record-offset indexes", "[ut][ev
     auto loaded = EvalDataset::Load(path);
     REQUIRE(loaded->GetSparseTrainOffsets() == std::vector<uint64_t>{0, 20, 32, 36});
     REQUIRE(loaded->GetSparseTestOffsets() == std::vector<uint64_t>{0, 20, 32});
-    REQUIRE(loaded->GetTrainTokenSequenceOffsets() ==
-            std::vector<uint64_t>{0, 20, 32, 36});
+    REQUIRE(loaded->GetTrainTokenSequenceOffsets() == std::vector<uint64_t>{0, 20, 32, 36});
     REQUIRE(loaded->GetTestTokenSequenceOffsets() == std::vector<uint64_t>{0, 8, 24});
     std::remove(path.c_str());
 }

@@ -168,9 +168,9 @@ validate_offsets(const std::vector<uint64_t>& offsets,
                  uint64_t expected_total,
                  const std::string& tag) {
     if (offsets.size() != expected_count + 1) {
-        throw std::runtime_error(
-            tag + ": offsets length mismatch (expected " + std::to_string(expected_count + 1) +
-            ", got " + std::to_string(offsets.size()) + ")");
+        throw std::runtime_error(tag + ": offsets length mismatch (expected " +
+                                 std::to_string(expected_count + 1) + ", got " +
+                                 std::to_string(offsets.size()) + ")");
     }
     if (offsets.front() != 0) {
         throw std::runtime_error(tag + ": offsets[0] must be 0");
@@ -494,8 +494,7 @@ EvalDataset::Load(const std::string& filename) {
         // index (/train_offsets, /test_offsets), load it and cross-check
         // against the one we just rebuilt from the byte stream. Mismatches
         // indicate a corrupted file and abort the load.
-        auto load_offsets =
-            [&file, &datasets](const std::string& key) -> std::vector<uint64_t> {
+        auto load_offsets = [&file, &datasets](const std::string& key) -> std::vector<uint64_t> {
             std::vector<uint64_t> out;
             if (datasets.count(key) == 0) {
                 return out;
@@ -508,18 +507,17 @@ EvalDataset::Load(const std::string& filename) {
             ds.read(out.data(), H5::PredType::NATIVE_UINT64);
             return out;
         };
-        auto cross_check =
-            [](const std::vector<uint64_t>& on_disk,
-               const std::vector<uint64_t>& rebuilt,
-               const std::string& tag) {
-                if (on_disk.empty()) {
-                    return;
-                }
-                if (on_disk.size() != rebuilt.size() ||
-                    !std::equal(on_disk.begin(), on_disk.end(), rebuilt.begin())) {
-                    throw std::runtime_error(tag + ": stored offsets disagree with byte stream");
-                }
-            };
+        auto cross_check = [](const std::vector<uint64_t>& on_disk,
+                              const std::vector<uint64_t>& rebuilt,
+                              const std::string& tag) {
+            if (on_disk.empty()) {
+                return;
+            }
+            if (on_disk.size() != rebuilt.size() ||
+                !std::equal(on_disk.begin(), on_disk.end(), rebuilt.begin())) {
+                throw std::runtime_error(tag + ": stored offsets disagree with byte stream");
+            }
+        };
         {
             auto disk_off = load_offsets("train_offsets");
             if (!disk_off.empty()) {
@@ -561,17 +559,14 @@ EvalDataset::Load(const std::string& filename) {
             uint64_t buffer_size = dims_out[0];
             std::shared_ptr<char[]> buffer(new char[buffer_size]);
             dataset.read(buffer.get(), type, dataspace);
-            parse_token_sequences(buffer.get(),
-                                  buffer_size,
-                                  obj->sparse_train_,
-                                  &obj->train_token_seq_offsets_);
+            parse_token_sequences(
+                buffer.get(), buffer_size, obj->sparse_train_, &obj->train_token_seq_offsets_);
             auto disk_off = load_offsets("train_token_sequences_offsets");
             validate_offsets(disk_off,
                              static_cast<uint64_t>(obj->sparse_train_.size()),
                              buffer_size,
                              "train_token_sequences_offsets");
-            cross_check(
-                disk_off, obj->train_token_seq_offsets_, "train_token_sequences_offsets");
+            cross_check(disk_off, obj->train_token_seq_offsets_, "train_token_sequences_offsets");
         } else if (datasets.count("train_token_sequences_offsets")) {
             throw std::runtime_error(
                 "train_token_sequences_offsets present but train_token_sequences is missing");
@@ -589,17 +584,14 @@ EvalDataset::Load(const std::string& filename) {
             uint64_t buffer_size = dims_out[0];
             std::shared_ptr<char[]> buffer(new char[buffer_size]);
             dataset.read(buffer.get(), type, dataspace);
-            parse_token_sequences(buffer.get(),
-                                  buffer_size,
-                                  obj->sparse_test_,
-                                  &obj->test_token_seq_offsets_);
+            parse_token_sequences(
+                buffer.get(), buffer_size, obj->sparse_test_, &obj->test_token_seq_offsets_);
             auto disk_off = load_offsets("test_token_sequences_offsets");
             validate_offsets(disk_off,
                              static_cast<uint64_t>(obj->sparse_test_.size()),
                              buffer_size,
                              "test_token_sequences_offsets");
-            cross_check(
-                disk_off, obj->test_token_seq_offsets_, "test_token_sequences_offsets");
+            cross_check(disk_off, obj->test_token_seq_offsets_, "test_token_sequences_offsets");
         } else if (datasets.count("test_token_sequences_offsets")) {
             throw std::runtime_error(
                 "test_token_sequences_offsets present but test_token_sequences is missing");
@@ -845,8 +837,7 @@ EvalDataset::Save(const EvalDatasetPtr& dataset, const std::string& filename) {
         // readers can do O(1) random access to the i-th sparse vector.
         hsize_t off_dims[1] = {static_cast<hsize_t>(offsets.size())};
         DataSpace off_space(1, off_dims);
-        DataSet off_ds =
-            file.createDataSet("/train_offsets", PredType::NATIVE_UINT64, off_space);
+        DataSet off_ds = file.createDataSet("/train_offsets", PredType::NATIVE_UINT64, off_space);
         off_ds.write(offsets.data(), PredType::NATIVE_UINT64);
     }
 
@@ -875,8 +866,7 @@ EvalDataset::Save(const EvalDatasetPtr& dataset, const std::string& filename) {
         dataset_h5.write(buffer.data(), PredType::NATIVE_CHAR);
         hsize_t off_dims[1] = {static_cast<hsize_t>(offsets.size())};
         DataSpace off_space(1, off_dims);
-        DataSet off_ds =
-            file.createDataSet("/test_offsets", PredType::NATIVE_UINT64, off_space);
+        DataSet off_ds = file.createDataSet("/test_offsets", PredType::NATIVE_UINT64, off_space);
         off_ds.write(offsets.data(), PredType::NATIVE_UINT64);
     }
 
