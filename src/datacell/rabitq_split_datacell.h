@@ -72,6 +72,9 @@ public:
         const IOParamPtr supp_io_param = (supplement_io_param != nullptr)
                                              ? supplement_io_param
                                              : SuffixIOParam(io_param, "_supplement");
+        if (supplement_io_param != nullptr) {
+            this->supplement_io_type_ = supplement_io_param->GetTypeName();
+        }
         this->one_bit_cell_ =
             std::make_shared<RaBitQOneBitStorage<OneBitIOTmpl>>(one_bit_io_param, common_param);
         this->supplement_cell_ = std::make_shared<RaBitQSupplementStorage<SupplementIOTmpl>>(
@@ -364,18 +367,26 @@ public:
     void
     InitIO(const IOParamPtr& io_param) override {
         this->one_bit_cell_->InitIO(SuffixIOParam(io_param, "_onebit"));
-        this->supplement_cell_->InitIO(SuffixIOParam(io_param, "_supplement"));
+        // In hybrid mode (one-bit and supplement use different IO backends)
+        // the caller-facing `io_param` is the one-bit IO parameter type and
+        // cannot be passed directly to `supplement_cell_`. Rebuild a fresh
+        // IOParameter of the recorded supplement type so the underlying IO
+        // implementation receives the correct parameter subclass.
+        this->supplement_cell_->InitIO(RebuildSupplementIOParam(io_param));
     }
 
     void
     InitIO(const IOParamPtr& one_bit_io_param, const IOParamPtr& supplement_io_param) {
         this->one_bit_cell_->InitIO(SuffixIOParam(one_bit_io_param, "_onebit"));
-        // When a dedicated supplement IO param is supplied, do not append a
-        // suffix because the caller (typically the factory) has already picked
-        // an independent file path / IO type.
-        this->supplement_cell_->InitIO(supplement_io_param != nullptr
-                                           ? supplement_io_param
-                                           : SuffixIOParam(one_bit_io_param, "_supplement"));
+        if (supplement_io_param != nullptr) {
+            // Refresh the recorded supplement type so subsequent
+            // single-parameter InitIO calls (e.g. from Deserialize) can
+            // reconstruct the same IO subtype.
+            this->supplement_io_type_ = supplement_io_param->GetTypeName();
+            this->supplement_cell_->InitIO(supplement_io_param);
+        } else {
+            this->supplement_cell_->InitIO(RebuildSupplementIOParam(one_bit_io_param));
+        }
     }
 
     IndexCommonParam
@@ -513,6 +524,15 @@ public:
     Allocator* allocator_{nullptr};
     uint64_t one_bit_code_size_{0};
     uint64_t supplement_code_size_{0};
+    // Type name (e.g. "async_io") of the dedicated supplement IO when the
+    // caller supplies a separate `supplement_io_param` at construction time.
+    // Empty string means "supplement shares the same IO type as the one-bit
+    // storage" (the legacy single-IO behaviour). Recorded so that the
+    // single-parameter `InitIO(const IOParamPtr&)` overload (e.g. invoked
+    // from Deserialize) can rebuild a parameter of the correct concrete
+    // IOParameter subclass for `supplement_cell_` instead of feeding it the
+    // mismatched one-bit IO parameter type.
+    std::string supplement_io_type_{};
 
 private:
     static IOParamPtr
@@ -524,6 +544,31 @@ private:
         if (json.Contains(IO_FILE_PATH_KEY)) {
             std::string path = json[IO_FILE_PATH_KEY].GetString();
             json[IO_FILE_PATH_KEY].SetString(path + suffix);
+        }
+        return IOParameter::GetIOParameterByJson(json);
+    }
+
+    // Builds the IO parameter that should be handed to `supplement_cell_`
+    // given the caller-supplied `io_param` (which is always typed for the
+    // one-bit storage). If `supplement_io_type_` is empty the two storages
+    // share the same IO type and we fall back to the legacy file-path-suffix
+    // behaviour. Otherwise the JSON is cloned, its `type` field rewritten to
+    // the recorded supplement type, the optional file path suffixed, and a
+    // new IOParameter is constructed via the factory so `supplement_cell_`
+    // receives the IOParameter subclass it actually expects.
+    IOParamPtr
+    RebuildSupplementIOParam(const IOParamPtr& io_param) const {
+        if (io_param == nullptr) {
+            return nullptr;
+        }
+        if (this->supplement_io_type_.empty()) {
+            return SuffixIOParam(io_param, "_supplement");
+        }
+        auto json = io_param->ToJson();
+        json[TYPE_KEY].SetString(this->supplement_io_type_);
+        if (json.Contains(IO_FILE_PATH_KEY)) {
+            std::string path = json[IO_FILE_PATH_KEY].GetString();
+            json[IO_FILE_PATH_KEY].SetString(path + "_supplement");
         }
         return IOParameter::GetIOParameterByJson(json);
     }
