@@ -294,6 +294,17 @@ public:
                      DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
 
 private:
+    template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH>
+    DistHeapPtr
+    brute_force_search(const void* query,
+                       const FilterPtr& filter,
+                       int64_t topk,
+                       float radius,
+                       QueryContext* ctx) const;
+
+public:
+
+private:
     // since v0.15
     JsonType
     serialize_basic_info() const;
