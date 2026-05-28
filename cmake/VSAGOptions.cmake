@@ -48,6 +48,22 @@ set (BUILD_INFO_DIR "${CMAKE_BINARY_DIR}/.vsag-build-info" CACHE PATH "Metadata 
 set (DOWNLOAD_DIR "${CMAKE_BINARY_DIR}/.vsag-downloads" CACHE PATH "Download cache directory for ExternalProject archives.")
 set (BUILDING_PATH "" CACHE STRING "Optional PATH prefix for third-party build tools.")
 
+# Policy for resolving third-party dependencies from the host system instead of
+# building bundled copies.
+#   AUTO (default) - use a system / pre-existing copy when one is found, fall back
+#                    to the bundled build otherwise.
+#   ON             - require a system copy; fail configuration if none is found.
+#   OFF            - always build the bundled copy, ignoring system packages.
+# Per-dependency overrides (e.g. VSAG_USE_SYSTEM_OPENBLAS) take precedence when
+# set to a non-empty value; otherwise they inherit VSAG_USE_SYSTEM_DEPS.
+set (VSAG_USE_SYSTEM_DEPS "AUTO" CACHE STRING
+     "Policy for system third-party dependencies: AUTO, ON, or OFF.")
+set_property (CACHE VSAG_USE_SYSTEM_DEPS PROPERTY STRINGS AUTO ON OFF)
+
+set (VSAG_USE_SYSTEM_OPENBLAS "" CACHE STRING
+     "Override VSAG_USE_SYSTEM_DEPS for OpenBLAS: AUTO, ON, OFF, or empty to inherit.")
+set_property (CACHE VSAG_USE_SYSTEM_OPENBLAS PROPERTY STRINGS "" AUTO ON OFF)
+
 set (_default_aclocal_path "")
 if (DEFINED ENV{ACLOCAL_PATH} AND NOT "$ENV{ACLOCAL_PATH}" STREQUAL "")
     set (_default_aclocal_path "$ENV{ACLOCAL_PATH}")
