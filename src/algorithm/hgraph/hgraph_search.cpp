@@ -129,16 +129,12 @@ HGraph::KnnSearch(const DatasetPtr& query,
     auto* iter_filter_ctx = static_cast<IteratorFilterContext*>(iter_ctx);
     auto search_result = DistanceHeap::MakeInstanceBySize<true, false>(ctx.alloc, k);
     const auto* query_data = get_data(query);
-    bool brute_force_used = false;
-    if (not is_last_filter and iter_filter_ctx->IsFirstUsed() and
-        params.brute_force_threshold > 0.0F) {
-        float valid_ratio = ft != nullptr ? ft->ValidRatio() : 1.0F;
-        if (valid_ratio <= params.brute_force_threshold) {
-            search_result = this->brute_force_search<InnerSearchMode::KNN_SEARCH>(
-                query_data, ft, k, 0.0F, &ctx);
-            brute_force_used = true;
-        }
-    }
+    // Note: brute_force_threshold is intentionally not applied here. The
+    // iterator KnnSearch API pages results across multiple calls via
+    // iter_filter_ctx; a single brute-force sweep would either need to drive
+    // that pagination state itself or be wasted on subsequent calls. The
+    // non-iterator KnnSearch overload (which delegates to SearchWithRequest)
+    // still benefits from the brute-force fallback.
     if (is_last_filter) {
         while (!iter_filter_ctx->Empty()) {
             uint32_t cur_inner_id = iter_filter_ctx->GetTopID();
@@ -146,7 +142,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
             search_result->Push(cur_dist, cur_inner_id);
             iter_filter_ctx->PopDiscard();
         }
-    } else if (not brute_force_used) {
+    } else {
         InnerSearchParam search_param;
         search_param.ep = this->entry_point_id_;
         search_param.topk = 1;
@@ -319,7 +315,12 @@ HGraph::brute_force_search(const void* query,
         flatten = this->raw_vector_;
     }
 
-    auto result = DistanceHeap::MakeInstanceBySize<true, false>(alloc, -1);
+    DistHeapPtr result;
+    if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
+        result = DistanceHeap::MakeInstanceBySize<true, false>(alloc, -1);
+    } else {
+        result = DistanceHeap::MakeInstanceBySize<true, true>(alloc, topk);
+    }
     if (flatten == nullptr) {
         return result;
     }
@@ -356,12 +357,7 @@ HGraph::brute_force_search(const void* query,
                     result->Push(dist, inner_id);
                 }
             } else {
-                if (static_cast<int64_t>(result->Size()) < topk) {
-                    result->Push(dist, inner_id);
-                } else if (dist < result->Top().first) {
-                    result->Pop();
-                    result->Push(dist, inner_id);
-                }
+                result->Push(dist, inner_id);
             }
         }
     }
