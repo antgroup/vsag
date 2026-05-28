@@ -722,8 +722,8 @@ build_cache_now_us() {
                                      .count());
 }
 
-constexpr uint32_t kHitRefineRounds = 2;
-constexpr uint32_t kMissedRefineRounds = 4;
+constexpr uint32_t HIT_REFINE_ROUNDS = 2;
+constexpr uint32_t MISSED_REFINE_ROUNDS = 4;
 
 }  // namespace
 
@@ -844,7 +844,7 @@ HGraph::refine_nodes_two_phase(
                  rounds,
                  parallelism);
 
-    constexpr int64_t kBlockSize = 128;
+    constexpr int64_t block_size = 128;
     const auto begin = build_cache_now_us();
 
     for (uint32_t round = 0; round < rounds; ++round) {
@@ -873,10 +873,10 @@ HGraph::refine_nodes_two_phase(
             }
         } else {
             std::vector<std::future<void>> futures;
-            futures.reserve((ids_to_refine.size() + kBlockSize - 1) / kBlockSize);
-            for (int64_t i = 0; i < static_cast<int64_t>(ids_to_refine.size()); i += kBlockSize) {
+            futures.reserve((ids_to_refine.size() + block_size - 1) / block_size);
+            for (int64_t i = 0; i < static_cast<int64_t>(ids_to_refine.size()); i += block_size) {
                 const auto end =
-                    std::min(i + kBlockSize, static_cast<int64_t>(ids_to_refine.size()));
+                    std::min(i + block_size, static_cast<int64_t>(ids_to_refine.size()));
                 futures.emplace_back(this->thread_pool_->GeneralEnqueue([this,
                                                                          &data,
                                                                          &ids_to_refine,
@@ -935,19 +935,19 @@ HGraph::refine_nodes_two_phase(
                 ? std::max<uint32_t>(parallelism, static_cast<uint32_t>(this->build_thread_count_))
                 : 1U;
 
-        struct ReverseEdgeEntry {
+        struct reverse_edge_entry {
             InnerIdType src_id;
             float dist;
         };
-        struct ScatterRecord {
+        struct scatter_record {
             InnerIdType target_id;
             InnerIdType src_id;
             float dist;
         };
-        struct ReverseShard {
-            std::unordered_map<InnerIdType, std::vector<ReverseEdgeEntry>> pending;
+        struct reverse_shard {
+            std::unordered_map<InnerIdType, std::vector<reverse_edge_entry>> pending;
         };
-        std::vector<ReverseShard> shards(reverse_shard_count);
+        std::vector<reverse_shard> shards(reverse_shard_count);
 
         // ----- (3a) scatter (target,src,dist) into per-(worker,shard) buffers -----
         const uint32_t scatter_worker_count =
@@ -955,8 +955,8 @@ HGraph::refine_nodes_two_phase(
                 ? std::min<uint32_t>(parallelism, static_cast<uint32_t>(ids_to_refine.size()))
                 : 1U;
 
-        std::vector<std::vector<std::vector<ScatterRecord>>> worker_buckets(
-            scatter_worker_count, std::vector<std::vector<ScatterRecord>>(reverse_shard_count));
+        std::vector<std::vector<std::vector<scatter_record>>> worker_buckets(
+            scatter_worker_count, std::vector<std::vector<scatter_record>>(reverse_shard_count));
 
         const uint64_t max_degree = this->bottom_graph_->MaximumDegree();
         const uint64_t avg_per_bucket =
@@ -1033,7 +1033,7 @@ HGraph::refine_nodes_two_phase(
                 for (const auto& rec : buf) {
                     pending[rec.target_id].push_back({rec.src_id, rec.dist});
                 }
-                std::vector<ScatterRecord>().swap(buf);
+                std::vector<scatter_record>().swap(buf);
             }
         };
 
@@ -1062,10 +1062,10 @@ HGraph::refine_nodes_two_phase(
                 std::rethrow_exception(mat_ex);
             }
         }
-        std::vector<std::vector<std::vector<ScatterRecord>>>().swap(worker_buckets);
+        std::vector<std::vector<std::vector<scatter_record>>>().swap(worker_buckets);
 
         // ----- (3c) per-shard merge + heuristic prune (parallel across shards) -----
-        auto process_shard = [this, &flatten_codes, max_degree](ReverseShard& shard) {
+        auto process_shard = [this, &flatten_codes, max_degree](reverse_shard& shard) {
             Vector<InnerIdType> current_neighbors(allocator_);
             current_neighbors.reserve(max_degree + 16);
             std::unordered_set<InnerIdType> existing_set;
@@ -1335,7 +1335,8 @@ HGraph::build_with_cache(const DatasetPtr& data) {
         }
     }
     const auto warm_start_elapsed = build_cache_now_us() - warm_start_begin;
-    const float hit_rate = total > 0 ? static_cast<float>(hit_ids.size()) / total : 0.0F;
+    const float hit_rate =
+        total > 0 ? static_cast<float>(hit_ids.size()) / static_cast<float>(total) : 0.0F;
     logger::info(
         "[hgraph_build_cache] warm_start finished in {:.3f}s hit_nodes={} missed_nodes={} "
         "hit_empty_seed_nodes={} hit_seed_neighbor_total={} hit_rate={:.4f}",
@@ -1354,7 +1355,7 @@ HGraph::build_with_cache(const DatasetPtr& data) {
     this->refine_nodes_two_phase(data,
                                  hit_ids,
                                  "hit_refine",
-                                 kHitRefineRounds,
+                                 HIT_REFINE_ROUNDS,
                                  this->ef_construct_,
                                  /*use_self_as_entry=*/true,
                                  flatten_codes,
@@ -1362,7 +1363,7 @@ HGraph::build_with_cache(const DatasetPtr& data) {
     this->refine_nodes_two_phase(data,
                                  missed_ids,
                                  "missed_refine",
-                                 kMissedRefineRounds,
+                                 MISSED_REFINE_ROUNDS,
                                  this->ef_construct_,
                                  /*use_self_as_entry=*/false,
                                  flatten_codes,
