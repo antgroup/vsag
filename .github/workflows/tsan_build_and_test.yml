@@ -39,7 +39,7 @@ jobs:
       group: test_tsan_x86-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     container:
-      image: vsaglib/vsag:ci-x86
+      image: vsaglib/vsag:ci-x86-mkl
       volumes:
         - /opt:/useless
     steps:
@@ -76,7 +76,7 @@ jobs:
       group: test_tsan_x86-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     container:
-      image: vsaglib/vsag:ci-x86
+      image: vsaglib/vsag:ci-x86-mkl
     steps:
       - uses: actions/checkout@v4
       - name: Clean Env

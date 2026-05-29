@@ -70,7 +70,7 @@ jobs:
     if: needs.changes.outputs.cpp == 'true'
     runs-on: ubuntu-22.04
     container:
-      image: vsaglib/vsag:ci-x86
+      image: vsaglib/vsag:ci-x86-openblas
       volumes:
         - /opt:/useless
     steps:
@@ -84,7 +84,11 @@ jobs:
           save: ${{ github.event_name != 'pull_request' }}
           key: build-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
       - name: Make Asan
-        run: export VSAG_ENABLE_INTEL_MKL=ON CMAKE_GENERATOR="Ninja" CMAKE_EXPORT_COMPILE_COMMANDS=ON; make asan VSAG_ENABLE_EXAMPLES=ON
+        # PR CI runs against the pre-installed system OpenBLAS shipped in the
+        # ci-x86-openblas image to keep iteration latency low. The
+        # build-from-source OpenBLAS path is exercised by the daily x86 ASan
+        # job in daily_test.yml.
+        run: export CMAKE_GENERATOR="Ninja" CMAKE_EXPORT_COMPILE_COMMANDS=ON EXTRA_DEFINED="-DUSE_SYSTEM_OPENBLAS=ON"; make asan VSAG_ENABLE_EXAMPLES=ON
       - name: Install clang-tidy 15
         run: sudo apt install clang-tidy-15 -y
       - name: Run Lint
@@ -144,7 +148,7 @@ jobs:
     if: needs.changes.outputs.cpp == 'true'
     runs-on: ubuntu-22.04
     container:
-      image: vsaglib/vsag:ci-x86
+      image: vsaglib/vsag:ci-x86-openblas
       volumes:
         - /opt:/useless
     steps:
@@ -180,7 +184,7 @@ jobs:
     if: needs.changes.outputs.cpp == 'true'
     runs-on: ubuntu-22.04
     container:
-      image: vsaglib/vsag:ci-x86
+      image: vsaglib/vsag:ci-x86-openblas
       volumes:
         - /opt:/useless
     steps:
@@ -216,7 +220,7 @@ jobs:
     if: needs.changes.outputs.cpp == 'true'
     runs-on: ubuntu-22.04
     container:
-      image: vsaglib/vsag:ci-x86
+      image: vsaglib/vsag:ci-x86-openblas
       volumes:
         - /opt:/useless
     steps:
@@ -248,7 +252,7 @@ jobs:
     if: needs.changes.outputs.cpp == 'true'
     runs-on: ubuntu-latest
     container:
-      image: vsaglib/vsag:ci-x86
+      image: vsaglib/vsag:ci-x86-openblas
     steps:
       - name: Install GitHub CLI
         run: |
@@ -271,7 +275,7 @@ jobs:
             || echo "Warning: Failed to download compatibility indexes"
       - uses: actions/checkout@v4
       - name: Compile Check Compatibility Tools
-        run: export CMAKE_GENERATOR="Ninja"; make release VSAG_ENABLE_TOOLS=ON
+        run: export CMAKE_GENERATOR="Ninja" EXTRA_DEFINED="-DUSE_SYSTEM_OPENBLAS=ON"; make release VSAG_ENABLE_TOOLS=ON
       - name: Run Check Compatibility
         run: bash ./scripts/check_compatibility.sh
 
