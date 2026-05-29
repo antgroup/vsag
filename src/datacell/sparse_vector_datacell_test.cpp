@@ -386,4 +386,85 @@ TEST_CASE("SparseDataCell New Format Sentinel", "[ut][SparseDataCell]") {
     }
 }
 
+TEST_CASE("SparseDataCell Batch Codes Matches Single", "[ut][SparseDataCell]") {
+    // Verify GetCodesByIdsBatch returns the same per-id codes as the single-id
+    // GetCodesById path, regardless of input ordering. This is the Phase A
+    // correctness guarantee: only the IO submission shape changes.
+    std::string io_type = GENERATE("memory_io", "block_memory_io");
+    constexpr const char* param_temp =
+        R"(
+        {{
+            "io_params": {{
+                "type": "{}"
+            }},
+            "quantization_params": {{
+                "type": "sparse"
+            }}
+        }}
+        )";
+    int64_t max_dim = 100;
+    auto param_str = fmt::format(param_temp, io_type);
+    JsonType parsed_json = JsonType::Parse(param_str);
+    auto param = std::make_shared<SparseVectorDataCellParameter>();
+    param->FromJson(parsed_json);
+    IndexCommonParam index_common_param;
+    index_common_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
+    index_common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    index_common_param.dim_ = max_dim;
+
+    auto data_cell = FlattenInterface::MakeInstance(param, index_common_param);
+    constexpr uint32_t base_count = 64;
+    auto sparse_vectors = fixtures::GenerateSparseVectors(base_count, max_dim);
+    data_cell->Train(sparse_vectors.data(), base_count);
+    for (uint32_t i = 0; i < base_count; ++i) {
+        data_cell->InsertVector(sparse_vectors.data() + i, i);
+    }
+
+    auto compare_batch_against_single = [&](const std::vector<InnerIdType>& ids) {
+        auto batch = data_cell->GetCodesByIdsBatch(
+            ids.data(), static_cast<InnerIdType>(ids.size()), index_common_param.allocator_.get());
+        REQUIRE(batch.sizes.size() == ids.size());
+        REQUIRE(batch.in_buffer_offsets.size() == ids.size());
+        for (size_t i = 0; i < ids.size(); ++i) {
+            bool need_release = false;
+            const auto* expected = data_cell->GetCodesById(ids[i], need_release);
+            uint32_t len = *reinterpret_cast<const uint32_t*>(expected);
+            uint32_t blob_size = (len * 2 + 1) * sizeof(uint32_t);
+            REQUIRE(batch.sizes[i] == blob_size);
+            const uint8_t* actual = batch.buffer.data() + batch.in_buffer_offsets[i];
+            REQUIRE(std::memcmp(actual, expected, blob_size) == 0);
+            if (need_release) {
+                data_cell->Release(expected);
+            }
+        }
+    };
+
+    SECTION("ascending ids") {
+        std::vector<InnerIdType> ids(base_count);
+        std::iota(ids.begin(), ids.end(), 0);
+        compare_batch_against_single(ids);
+    }
+    SECTION("shuffled ids") {
+        std::vector<InnerIdType> ids(base_count);
+        std::iota(ids.begin(), ids.end(), 0);
+        std::shuffle(ids.begin(), ids.end(), std::mt19937(123));
+        compare_batch_against_single(ids);
+    }
+    SECTION("subset with duplicates") {
+        std::vector<InnerIdType> ids = {7, 7, 0, 63, 12, 12, 1, 1};
+        compare_batch_against_single(ids);
+    }
+    SECTION("empty input") {
+        auto batch = data_cell->GetCodesByIdsBatch(nullptr, 0, index_common_param.allocator_.get());
+        REQUIRE(batch.sizes.empty());
+        REQUIRE(batch.in_buffer_offsets.empty());
+        REQUIRE(batch.buffer.empty());
+    }
+
+    for (auto& item : sparse_vectors) {
+        delete[] item.vals_;
+        delete[] item.ids_;
+    }
+}
+
 }  // namespace vsag

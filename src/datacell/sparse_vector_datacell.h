@@ -115,6 +115,11 @@ public:
     [[nodiscard]] const uint8_t*
     GetCodesById(InnerIdType id, bool& need_release) const override;
 
+    BatchCodesResult
+    GetCodesByIdsBatch(const InnerIdType* ids,
+                       InnerIdType count,
+                       Allocator* allocator) const override;
+
     void
     GetSparseVectorByInnerId(InnerIdType inner_id,
                              SparseVector* data,

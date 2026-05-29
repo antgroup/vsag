@@ -104,12 +104,9 @@ private:
 };
 
 float
-cal_distance_by_id_unsafe(const FlattenInterfacePtr& flat,
-                          const Vector<uint32_t>& sorted_ids,
-                          const Vector<float>& sorted_vals,
-                          uint32_t inner_id) {
-    bool need_release{false};
-    const auto* codes = flat->GetCodesById(inner_id, need_release);
+compute_distance_from_codes(const uint8_t* codes,
+                            const Vector<uint32_t>& sorted_ids,
+                            const Vector<float>& sorted_vals) {
     auto len = *reinterpret_cast<const uint32_t*>(codes);
     const auto* entries = reinterpret_cast<const BufferEntry*>(codes + sizeof(uint32_t));
     float sum = 0.0F;
@@ -126,10 +123,21 @@ cal_distance_by_id_unsafe(const FlattenInterfacePtr& flat,
             j++;
         }
     }
+    return 1 - sum;
+}
+
+float
+cal_distance_by_id_unsafe(const FlattenInterfacePtr& flat,
+                          const Vector<uint32_t>& sorted_ids,
+                          const Vector<float>& sorted_vals,
+                          uint32_t inner_id) {
+    bool need_release{false};
+    const auto* codes = flat->GetCodesById(inner_id, need_release);
+    float distance = compute_distance_from_codes(codes, sorted_ids, sorted_vals);
     if (need_release) {
         flat->Release(codes);
     }
-    return 1 - sum;
+    return distance;
 }
 
 DatasetPtr
@@ -492,11 +500,24 @@ DiskSINDI::search_impl(const SparseTermComputerPtr& computer,
         auto [sorted_ids, sorted_vals] =
             sort_sparse_vector(original_query ? *original_query : computer->raw_query_, allocator_);
 
-        for (uint64_t i = 0; i < candidate_size; i++) {
-            auto inner_id = heap.top().second;
+        // Phase A: collect all candidate inner ids first (in heap pop order,
+        // no sorting), then issue a single batched IO for all their codes.
+        // This lets the rerank IO backend (notably async_io) submit one batch
+        // instead of N serialized DirectIO requests.
+        Vector<InnerIdType> cand_ids(allocator_);
+        cand_ids.resize(candidate_size);
+        for (int64_t i = static_cast<int64_t>(candidate_size) - 1; i >= 0; --i) {
+            cand_ids[i] = heap.top().second;
             heap.pop();
+        }
+        auto batch = rerank_flat_->GetCodesByIdsBatch(
+            cand_ids.data(), static_cast<InnerIdType>(candidate_size), allocator_);
+
+        for (uint64_t i = 0; i < candidate_size; i++) {
+            auto inner_id = cand_ids[i];
+            const uint8_t* codes = batch.buffer.data() + batch.in_buffer_offsets[i];
             auto high_precise_distance =
-                cal_distance_by_id_unsafe(rerank_flat_, sorted_ids, sorted_vals, inner_id);
+                compute_distance_from_codes(codes, sorted_ids, sorted_vals);
             auto label = label_table_->GetLabelById(inner_id);
             if constexpr (mode == KNN_SEARCH) {
                 if (high_precise_distance < cur_heap_top or

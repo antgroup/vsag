@@ -181,6 +181,55 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::GetCodesById(InnerIdType id, bool& need
     return io_->Read(location.size, location.offset, need_release);
 }
 
+// Phase A: batched codes fetch.
+// Issues a single MultiRead for all candidates' payloads after gathering their
+// (offset, size) tuples from the in-memory offset_io_. No sorting, no IO
+// merging — those are deferred to Phase B. The returned buffer concatenates
+// each candidate's codes in input order.
+template <typename QuantTmpl, typename IOTmpl>
+BatchCodesResult
+SparseVectorDataCell<QuantTmpl, IOTmpl>::GetCodesByIdsBatch(const InnerIdType* ids,
+                                                            InnerIdType count,
+                                                            Allocator* allocator) const {
+    BatchCodesResult result(allocator);
+    result.sizes.resize(count);
+    result.in_buffer_offsets.resize(count);
+
+    if (count == 0) {
+        return result;
+    }
+
+    std::shared_lock lock(mutex_);
+
+    // 1) Gather (offset, size) for every candidate from the in-memory offset_io_.
+    Vector<DocLocation> locs(count, allocator);
+    for (InnerIdType i = 0; i < count; ++i) {
+        offset_io_->Read(sizeof(DocLocation),
+                         static_cast<uint64_t>(ids[i]) * sizeof(DocLocation),
+                         reinterpret_cast<uint8_t*>(&locs[i]));
+    }
+
+    // 2) Compute the in-buffer layout and the per-candidate IO descriptors.
+    Vector<uint64_t> io_offsets(count, allocator);
+    Vector<uint64_t> io_sizes(count, allocator);
+    uint64_t total = 0;
+    for (InnerIdType i = 0; i < count; ++i) {
+        result.in_buffer_offsets[i] = total;
+        result.sizes[i] = locs[i].size;
+        io_offsets[i] = locs[i].offset;
+        io_sizes[i] = locs[i].size;
+        total += locs[i].size;
+    }
+    result.buffer.resize(total);
+
+    // 3) Single MultiRead pulls all payloads at once. For async_io this lets
+    //    the kernel batch io_submit / io_getevents; for memory/mmap/buffer/
+    //    reader it degenerates to sequential reads which is at least as
+    //    fast as N separate Read calls.
+    io_->MultiRead(result.buffer.data(), io_sizes.data(), io_offsets.data(), count);
+    return result;
+}
+
 template <typename QuantTmpl, typename IOTmpl>
 void
 SparseVectorDataCell<QuantTmpl, IOTmpl>::GetSparseVectorByInnerId(
