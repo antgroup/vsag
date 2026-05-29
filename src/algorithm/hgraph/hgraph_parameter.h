@@ -82,6 +82,11 @@ public:
     bool use_reorder{false};
     bool use_extra_info_filter{false};
     bool rabitq_one_bit_search{false};
+    // If > 0 and the active filter's ValidRatio() <= brute_force_threshold,
+    // the search bypasses the graph traversal and runs an exact scan over the
+    // valid inner ids using the best available flatten codes. Default 0
+    // preserves existing behaviour.
+    float brute_force_threshold{0.0F};
 
 private:
     HGraphSearchParameters() = default;

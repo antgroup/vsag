@@ -347,6 +347,14 @@ private:
     void
     shrink_to_fit();
 
+    template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH>
+    DistHeapPtr
+    brute_force_search(const void* query,
+                       const FilterPtr& filter,
+                       int64_t topk,
+                       float radius,
+                       QueryContext* ctx) const;
+
 private:
     void
     reorder(const void* query,

@@ -229,6 +229,14 @@ HGraphSearchParameters::FromJson(const std::string& json_string) {
         obj.rabitq_one_bit_search =
             params[INDEX_TYPE_HGRAPH][HGRAPH_PARAMETER_RABITQ_ONE_BIT_SEARCH].GetBool();
     }
+    if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_PARAMETER_BRUTE_FORCE_THRESHOLD)) {
+        obj.brute_force_threshold =
+            params[INDEX_TYPE_HGRAPH][HGRAPH_PARAMETER_BRUTE_FORCE_THRESHOLD].GetFloat();
+        CHECK_ARGUMENT(  // NOLINT
+            (0.0F <= obj.brute_force_threshold) and (obj.brute_force_threshold <= 1.0F),
+            fmt::format("brute_force_threshold({}) must in range[0.0, 1.0]",
+                        obj.brute_force_threshold));
+    }
 
     return obj;
 }

@@ -129,6 +129,12 @@ HGraph::KnnSearch(const DatasetPtr& query,
     auto* iter_filter_ctx = static_cast<IteratorFilterContext*>(iter_ctx);
     auto search_result = DistanceHeap::MakeInstanceBySize<true, false>(ctx.alloc, k);
     const auto* query_data = get_data(query);
+    // Note: brute_force_threshold is intentionally not applied here. The
+    // iterator KnnSearch API pages results across multiple calls via
+    // iter_filter_ctx; a single brute-force sweep would either need to drive
+    // that pagination state itself or be wasted on subsequent calls. The
+    // non-iterator KnnSearch overload (which delegates to SearchWithRequest)
+    // still benefits from the brute-force fallback.
     if (is_last_filter) {
         while (!iter_filter_ctx->Empty()) {
             uint32_t cur_inner_id = iter_filter_ctx->GetTopID();
@@ -292,6 +298,72 @@ HGraph::search_one_graph(const void* query,
     return result;
 }
 
+template <InnerSearchMode mode>
+DistHeapPtr
+HGraph::brute_force_search(const void* query,
+                           const FilterPtr& filter,
+                           int64_t topk,
+                           float radius,
+                           QueryContext* ctx) const {
+    Allocator* alloc = (ctx != nullptr && ctx->alloc != nullptr) ? ctx->alloc : this->allocator_;
+
+    auto flatten = this->basic_flatten_codes_;
+    if (this->has_precise_reorder()) {
+        flatten = this->high_precise_codes_;
+    }
+    if (this->create_new_raw_vector_ && this->raw_vector_ != nullptr) {
+        flatten = this->raw_vector_;
+    }
+
+    DistHeapPtr result;
+    if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
+        result = DistanceHeap::MakeInstanceBySize<true, false>(alloc, -1);
+    } else {
+        result = DistanceHeap::MakeInstanceBySize<true, true>(alloc, topk);
+    }
+    if (flatten == nullptr) {
+        return result;
+    }
+
+    auto total = static_cast<InnerIdType>(this->total_count_.load());
+    if (total == 0) {
+        return result;
+    }
+
+    auto computer = flatten->FactoryComputer(query);
+
+    constexpr InnerIdType brute_force_batch_size = 64;
+    Vector<InnerIdType> batch_ids(brute_force_batch_size, alloc);
+    Vector<float> batch_dists(brute_force_batch_size, alloc);
+
+    InnerIdType cursor = 0;
+    while (cursor < total) {
+        InnerIdType batch_count = 0;
+        while (cursor < total && batch_count < brute_force_batch_size) {
+            if (filter == nullptr || filter->CheckValid(cursor)) {
+                batch_ids[batch_count++] = cursor;
+            }
+            ++cursor;
+        }
+        if (batch_count == 0) {
+            continue;
+        }
+        flatten->Query(batch_dists.data(), computer, batch_ids.data(), batch_count, ctx);
+        for (InnerIdType i = 0; i < batch_count; ++i) {
+            float dist = batch_dists[i];
+            InnerIdType inner_id = batch_ids[i];
+            if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
+                if (dist <= radius) {
+                    result->Push(dist, inner_id);
+                }
+            } else {
+                result->Push(dist, inner_id);
+            }
+        }
+    }
+    return result;
+}
+
 DatasetPtr
 HGraph::RangeSearch(const DatasetPtr& query,
                     float radius,
@@ -365,17 +437,30 @@ HGraph::RangeSearch(const DatasetPtr& query,
     search_param.enable_reorder = params.enable_reorder;
     search_param.enable_rabitq_one_bit_search = params.rabitq_one_bit_search;
 
-    auto search_result = this->search_one_graph(raw_query,
-                                                this->bottom_graph_,
-                                                this->basic_flatten_codes_,
-                                                search_param,
-                                                (VisitedListPtr) nullptr,
-                                                &ctx);
+    DistHeapPtr search_result;
+    bool brute_force_used = false;
+    if (params.brute_force_threshold > 0.0F) {
+        float valid_ratio = ft != nullptr ? ft->ValidRatio() : 1.0F;
+        if (valid_ratio <= params.brute_force_threshold) {
+            search_result = this->brute_force_search<InnerSearchMode::RANGE_SEARCH>(
+                raw_query, ft, limited_size, radius, &ctx);
+            brute_force_used = true;
+        }
+    }
+    if (not brute_force_used) {
+        search_result = this->search_one_graph(raw_query,
+                                               this->bottom_graph_,
+                                               this->basic_flatten_codes_,
+                                               search_param,
+                                               (VisitedListPtr) nullptr,
+                                               &ctx);
+    }
 
-    if (use_reorder_ and search_param.enable_reorder) {
+    if (not brute_force_used and use_reorder_ and search_param.enable_reorder) {
         this->reorder(
             raw_query, this->get_reorder_codes(), search_result, limited_size, nullptr, ctx);
-    } else if (search_param.enable_reorder and params.rabitq_one_bit_search) {
+    } else if (not brute_force_used and search_param.enable_reorder and
+               params.rabitq_one_bit_search) {
         this->reorder(
             raw_query, this->basic_flatten_codes_, search_result, limited_size, nullptr, ctx);
     }
@@ -558,17 +643,29 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
             ? &rabitq_lower_bound_candidates
             : nullptr;
 
-    auto search_result = this->search_one_graph(raw_query,
-                                                this->bottom_graph_,
-                                                this->basic_flatten_codes_,
-                                                search_param,
-                                                vt,
-                                                &ctx,
-                                                rabitq_lower_bound_candidates_ptr);
+    DistHeapPtr search_result;
+    bool brute_force_used = false;
+    if (params.brute_force_threshold > 0.0F) {
+        float valid_ratio = ft != nullptr ? ft->ValidRatio() : 1.0F;
+        if (valid_ratio <= params.brute_force_threshold) {
+            search_result =
+                this->brute_force_search<InnerSearchMode::KNN_SEARCH>(raw_query, ft, k, 0.0F, &ctx);
+            brute_force_used = true;
+        }
+    }
+    if (not brute_force_used) {
+        search_result = this->search_one_graph(raw_query,
+                                               this->bottom_graph_,
+                                               this->basic_flatten_codes_,
+                                               search_param,
+                                               vt,
+                                               &ctx,
+                                               rabitq_lower_bound_candidates_ptr);
+    }
 
     this->pool_->ReturnOne(vt);
 
-    if (use_reorder_ and search_param.enable_reorder) {
+    if (not brute_force_used and use_reorder_ and search_param.enable_reorder) {
         this->reorder(raw_query,
                       this->get_reorder_codes(),
                       search_result,
@@ -576,7 +673,8 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
                       nullptr,
                       ctx,
                       rabitq_lower_bound_candidates_ptr);
-    } else if (search_param.enable_reorder and params.rabitq_one_bit_search) {
+    } else if (not brute_force_used and search_param.enable_reorder and
+               params.rabitq_one_bit_search) {
         this->reorder(raw_query, this->basic_flatten_codes_, search_result, k, nullptr, ctx);
     }
 

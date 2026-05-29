@@ -2447,3 +2447,171 @@ TestHGraphReverseEdges(const fixtures::HGraphTestIndexPtr& test_index,
 }
 
 HGRAPH_PR_DAILY_CASE("HGraph Reverse Edges", "[ft][build][hgraph]", TestHGraphReverseEdges)
+
+namespace {
+
+class ModuloFilter : public vsag::Filter {
+public:
+    ModuloFilter(int64_t modulus, int64_t residue, float valid_ratio)
+        : modulus_(modulus), residue_(residue), valid_ratio_(valid_ratio) {
+    }
+
+    bool
+    CheckValid(int64_t id) const override {
+        return (id % modulus_) == residue_;
+    }
+
+    float
+    ValidRatio() const override {
+        return valid_ratio_;
+    }
+
+private:
+    int64_t modulus_;
+    int64_t residue_;
+    float valid_ratio_;
+};
+
+}  // namespace
+
+TEST_CASE("(PR) HGraph brute_force_threshold", "[ft][hgraph][pr][brute_force_threshold]") {
+    constexpr int64_t dim = 16;
+    constexpr int64_t base_count = 1000;
+    constexpr int64_t modulus = 50;
+    constexpr int64_t residue = 7;
+    constexpr int64_t topk = 5;
+
+    std::string hgraph_params = R"({
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": 16,
+        "index_param": {
+            "base_quantization_type": "fp32",
+            "max_degree": 32,
+            "ef_construction": 100,
+            "use_reorder": false
+        }
+    })";
+    auto factory_res = vsag::Factory::CreateIndex("hgraph", hgraph_params);
+    REQUIRE(factory_res.has_value());
+    auto index = std::move(factory_res.value());
+
+    std::mt19937 rng(20260528);
+    std::uniform_real_distribution<float> dist(-1.0F, 1.0F);
+    std::vector<float> base_vectors(base_count * dim);
+    std::vector<int64_t> ids(base_count);
+    for (int64_t i = 0; i < base_count; ++i) {
+        ids[i] = i;
+        for (int64_t j = 0; j < dim; ++j) {
+            base_vectors[i * dim + j] = dist(rng);
+        }
+    }
+    auto base = vsag::Dataset::Make();
+    base->NumElements(base_count)
+        ->Dim(dim)
+        ->Ids(ids.data())
+        ->Float32Vectors(base_vectors.data())
+        ->Owner(false);
+    auto build_res = index->Build(base);
+    REQUIRE(build_res.has_value());
+
+    std::vector<float> query_vec(dim);
+    for (int64_t j = 0; j < dim; ++j) {
+        query_vec[j] = dist(rng);
+    }
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(dim)->Float32Vectors(query_vec.data())->Owner(false);
+
+    auto filter =
+        std::make_shared<ModuloFilter>(modulus, residue, 1.0F / static_cast<float>(modulus));
+
+    auto search_param_graph = R"({"hgraph": {"ef_search": 200}})";
+    auto search_param_brute = R"({"hgraph": {"ef_search": 200, "brute_force_threshold": 0.5}})";
+
+    auto res_graph = index->KnnSearch(query, topk, search_param_graph, filter);
+    auto res_brute = index->KnnSearch(query, topk, search_param_brute, filter);
+
+    REQUIRE(res_graph.has_value());
+    REQUIRE(res_brute.has_value());
+    REQUIRE(res_brute.value()->GetDim() == topk);
+
+    // Independent reference: scan all base ids that pass the filter, compute L2.
+    std::vector<std::pair<float, int64_t>> reference;
+    for (int64_t i = 0; i < base_count; ++i) {
+        if ((i % modulus) != residue) {
+            continue;
+        }
+        float d = 0.0F;
+        for (int64_t j = 0; j < dim; ++j) {
+            float diff = base_vectors[i * dim + j] - query_vec[j];
+            d += diff * diff;
+        }
+        reference.emplace_back(d, ids[i]);
+    }
+    std::sort(reference.begin(), reference.end());
+    REQUIRE(static_cast<int64_t>(reference.size()) >= topk);
+
+    const auto* brute_ids = res_brute.value()->GetIds();
+    const auto* brute_dists = res_brute.value()->GetDistances();
+    for (int64_t k = 0; k < topk; ++k) {
+        REQUIRE(brute_ids[k] == reference[k].second);
+        REQUIRE(std::abs(brute_dists[k] - reference[k].first) < 1e-5F);
+    }
+}
+
+TEST_CASE("(PR) HGraph brute_force_threshold default is no-op",
+          "[ft][hgraph][pr][brute_force_threshold]") {
+    constexpr int64_t dim = 8;
+    constexpr int64_t base_count = 200;
+    constexpr int64_t topk = 3;
+
+    std::string hgraph_params = R"({
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": 8,
+        "index_param": {
+            "base_quantization_type": "fp32",
+            "max_degree": 16,
+            "ef_construction": 64,
+            "use_reorder": false
+        }
+    })";
+    auto index = vsag::Factory::CreateIndex("hgraph", hgraph_params).value();
+
+    std::mt19937 rng(42);
+    std::uniform_real_distribution<float> dist(-1.0F, 1.0F);
+    std::vector<float> base_vectors(base_count * dim);
+    std::vector<int64_t> ids(base_count);
+    for (int64_t i = 0; i < base_count; ++i) {
+        ids[i] = i;
+        for (int64_t j = 0; j < dim; ++j) {
+            base_vectors[i * dim + j] = dist(rng);
+        }
+    }
+    auto base = vsag::Dataset::Make();
+    base->NumElements(base_count)
+        ->Dim(dim)
+        ->Ids(ids.data())
+        ->Float32Vectors(base_vectors.data())
+        ->Owner(false);
+    REQUIRE(index->Build(base).has_value());
+
+    std::vector<float> query_vec(dim);
+    for (int64_t j = 0; j < dim; ++j) {
+        query_vec[j] = dist(rng);
+    }
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(dim)->Float32Vectors(query_vec.data())->Owner(false);
+
+    auto baseline = index->KnnSearch(query, topk, R"({"hgraph": {"ef_search": 64}})");
+    auto with_zero = index->KnnSearch(
+        query, topk, R"({"hgraph": {"ef_search": 64, "brute_force_threshold": 0.0}})");
+    REQUIRE(baseline.has_value());
+    REQUIRE(with_zero.has_value());
+    REQUIRE(baseline.value()->GetDim() == with_zero.value()->GetDim());
+    for (int64_t k = 0; k < baseline.value()->GetDim(); ++k) {
+        REQUIRE(baseline.value()->GetIds()[k] == with_zero.value()->GetIds()[k]);
+        REQUIRE(std::abs(baseline.value()->GetDistances()[k] -
+                         with_zero.value()->GetDistances()[k]) < 1e-6F);
+    }
+}

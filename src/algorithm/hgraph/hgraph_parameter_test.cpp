@@ -227,3 +227,32 @@ TEST_CASE("HGraph maps label_remap_type to inner index parameter", "[ut][HGraphP
     REQUIRE(typed_param->bottom_graph_param != nullptr);
     REQUIRE(typed_param->label_remap_type == vsag::LabelRemapType::ROBIN);
 }
+
+TEST_CASE("HGraphSearchParameters parses brute_force_threshold",
+          "[ut][HGraphSearchParameters][brute_force_threshold]") {
+    SECTION("default is 0") {
+        auto params = vsag::HGraphSearchParameters::FromJson(R"({"hgraph": {"ef_search": 32}})");
+        REQUIRE(params.brute_force_threshold == 0.0F);
+    }
+
+    SECTION("accepts values in [0, 1]") {
+        auto params = vsag::HGraphSearchParameters::FromJson(
+            R"({"hgraph": {"ef_search": 32, "brute_force_threshold": 0.25}})");
+        REQUIRE(params.brute_force_threshold == 0.25F);
+
+        params = vsag::HGraphSearchParameters::FromJson(
+            R"({"hgraph": {"ef_search": 32, "brute_force_threshold": 1.0}})");
+        REQUIRE(params.brute_force_threshold == 1.0F);
+
+        params = vsag::HGraphSearchParameters::FromJson(
+            R"({"hgraph": {"ef_search": 32, "brute_force_threshold": 0.0}})");
+        REQUIRE(params.brute_force_threshold == 0.0F);
+    }
+
+    SECTION("rejects out-of-range values") {
+        REQUIRE_THROWS(vsag::HGraphSearchParameters::FromJson(
+            R"({"hgraph": {"ef_search": 32, "brute_force_threshold": -0.1}})"));
+        REQUIRE_THROWS(vsag::HGraphSearchParameters::FromJson(
+            R"({"hgraph": {"ef_search": 32, "brute_force_threshold": 1.5}})"));
+    }
+}
