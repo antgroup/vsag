@@ -13,18 +13,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "sindi.h"
+#include "disksindi.h"
 
+#include <cstring>
+#include <istream>
+#include <mutex>
+#include <sstream>
 #include <vector>
 
 #include "algorithm/sparse_distance.h"
-#include "analyzer/analyzer.h"
 #include "datacell/sparse_vector_datacell_parameter.h"
+#include "impl/filter/inner_id_wrapper_filter.h"
+#include "impl/filter/white_list_filter.h"
 #include "impl/heap/standard_heap.h"
 #include "index_feature_list.h"
-#include "io/memory_block_io_parameter.h"
+#include "inner_string_params.h"
+#include "io/reader_io_parameter.h"
 #include "quantization/sparse_quantization/sparse_quantizer.h"
 #include "quantization/sparse_quantization/sparse_quantizer_parameter.h"
+#include "storage/empty_index_binary_set.h"
 #include "storage/serialization.h"
 #include "utils/util_functions.h"
 #include "vsag/allocator.h"
@@ -35,8 +42,66 @@ namespace vsag {
 
 namespace {
 
-constexpr const char* SINDI_RERANK_FLAT_FORMAT_KEY = "sindi_rerank_flat_format";
-constexpr int64_t SINDI_RERANK_FLAT_FORMAT_DATACELL = 2;
+constexpr const char* DISKSINDI_RERANK_FLAT_FORMAT_KEY = "disksindi_rerank_flat_format";
+constexpr int64_t DISKSINDI_RERANK_FLAT_FORMAT_DATACELL = 2;
+
+class BinaryReader : public Reader {
+public:
+    explicit BinaryReader(Binary binary) : binary_(std::move(binary)) {
+    }
+
+    void
+    Read(uint64_t offset, uint64_t len, void* dest) override {
+        std::memcpy(dest, binary_.data.get() + offset, len);
+    }
+
+    void
+    AsyncRead(uint64_t offset, uint64_t len, void* dest, CallBack callback) override {
+        Read(offset, len, dest);
+        callback(IOErrorCode::IO_SUCCESS, "success");
+    }
+
+    uint64_t
+    Size() const override {
+        return binary_.size;
+    }
+
+private:
+    Binary binary_;
+};
+
+class StreamBackedReader : public Reader {
+public:
+    explicit StreamBackedReader(std::istream& stream) : stream_(stream) {
+        auto cursor = stream_.tellg();
+        stream_.seekg(0, std::ios::end);
+        size_ = static_cast<uint64_t>(stream_.tellg());
+        stream_.seekg(cursor, std::ios::beg);
+    }
+
+    void
+    Read(uint64_t offset, uint64_t len, void* dest) override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        stream_.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
+        stream_.read(static_cast<char*>(dest), static_cast<std::streamsize>(len));
+    }
+
+    void
+    AsyncRead(uint64_t offset, uint64_t len, void* dest, CallBack callback) override {
+        Read(offset, len, dest);
+        callback(IOErrorCode::IO_SUCCESS, "success");
+    }
+
+    uint64_t
+    Size() const override {
+        return size_;
+    }
+
+private:
+    std::istream& stream_;
+    uint64_t size_{0};
+    std::mutex mutex_;
+};
 
 float
 cal_distance_by_id_unsafe(const FlattenInterfacePtr& flat,
@@ -61,11 +126,10 @@ cal_distance_by_id_unsafe(const FlattenInterfacePtr& flat,
             j++;
         }
     }
-    auto distance = 1 - sum;
     if (need_release) {
         flat->Release(codes);
     }
-    return distance;
+    return 1 - sum;
 }
 
 DatasetPtr
@@ -85,10 +149,27 @@ collect_results(const DistHeapPtr& results, Allocator* allocator) {
     return result;
 }
 
+Vector<uint32_t>
+collect_query_term_ids(const SparseTermComputerPtr& computer, Allocator* allocator) {
+    Vector<uint32_t> query_term_ids(allocator);
+    while (computer->HasNextTerm()) {
+        auto it = computer->NextTermIter();
+        query_term_ids.push_back(computer->GetTerm(it));
+    }
+    computer->ResetTerm();
+    return query_term_ids;
+}
+
+uint64_t
+block_memory_ceil(uint64_t memory) {
+    const auto block_size = Options::Instance().block_size_limit();
+    return ((memory + block_size - 1) / block_size) * block_size;
+}
+
 FlattenInterfacePtr
-create_rerank_flat(const IndexCommonParam& common_param) {
+create_rerank_flat(const IndexCommonParam& common_param, const IOParamPtr& io_param) {
     auto rerank_param = std::make_shared<SparseVectorDataCellParameter>();
-    rerank_param->io_parameter = std::make_shared<MemoryBlockIOParameter>();
+    rerank_param->io_parameter = io_param;
     rerank_param->quantizer_parameter = std::make_shared<SparseQuantizerParameter>();
     return FlattenInterface::MakeInstance(rerank_param, common_param);
 }
@@ -136,67 +217,59 @@ deserialize_rerank_flat(StreamReader& reader,
 }  // namespace
 
 ParamPtr
-SINDI::CheckAndMappingExternalParam(const JsonType& external_param,
-                                    const IndexCommonParam& common_param) {
-    auto ptr = std::make_shared<SINDIParameter>();
+DiskSINDI::CheckAndMappingExternalParam(const JsonType& external_param,
+                                        const IndexCommonParam& common_param) {
+    auto ptr = std::make_shared<DiskSINDIParameter>();
     ptr->FromJson(external_param);
     return ptr;
 }
 
-SINDI::SINDI(const SINDIParameterPtr& param, const IndexCommonParam& common_param)
+DiskSINDI::DiskSINDI(const DiskSINDIParameterPtr& param, const IndexCommonParam& common_param)
     : InnerIndexInterface(param, common_param),
       use_reorder_(param->use_reorder),
       use_quantization_(param->use_quantization),
       term_id_limit_(param->term_id_limit),
       window_size_(param->window_size),
       doc_retain_ratio_(1.0F - param->doc_prune_ratio),
-      window_term_list_(common_param.allocator_.get()),
       deserialize_without_footer_(param->deserialize_without_footer),
       deserialize_without_buffer_(param->deserialize_without_buffer),
       quantization_params_(std::make_shared<QuantizationParams>()),
       avg_doc_term_length_(param->avg_doc_term_length),
-      remap_term_ids_(param->remap_term_ids) {
+      remap_term_ids_(param->remap_term_ids),
+      param_(param) {
+    CHECK_ARGUMENT(window_size_ > 0 && window_size_ <= 65536, "window_size must be in (0, 65536]");
+    CHECK_ARGUMENT(term_id_limit_ > 0, "term_id_limit must be > 0");
     if (remap_term_ids_) {
         term_id_mapper_ =
             std::make_shared<TermIdMapper>(term_id_limit_, common_param.allocator_.get());
     }
     if (use_reorder_) {
-        rerank_flat_ = create_rerank_flat(common_param);
+        rerank_flat_ = create_rerank_flat(common_param, param->rerank_io_parameter);
     }
-}
-
-constexpr int64_t K_ANALYZE_DEFAULT_TOPK = 10;
-constexpr uint64_t K_ANALYZE_BASE_SAMPLE_SIZE = 10;
-
-std::string
-SINDI::GetStats() const {
-    AnalyzerParam analyzer_param(allocator_);
-    analyzer_param.topk = K_ANALYZE_DEFAULT_TOPK;
-    analyzer_param.base_sample_size =
-        std::min<uint64_t>(K_ANALYZE_BASE_SAMPLE_SIZE, cur_element_count_);
-    analyzer_param.search_params =
-        R"({"sindi": {"query_prune_ratio": 0, "term_prune_ratio": 0, "n_candidate": 500, "use_term_lists_heap_insert": true}})";
-    auto analyzer = CreateAnalyzer(this, analyzer_param);
-    JsonType stats = analyzer->GetStats();
-    return stats.Dump(4);
+    term_datacell_ = DiskSparseTermListDataCellInterface::MakeInstance(doc_retain_ratio_,
+                                                                       term_id_limit_,
+                                                                       allocator_,
+                                                                       use_quantization_,
+                                                                       quantization_params_,
+                                                                       window_size_,
+                                                                       param->term_io_parameter,
+                                                                       common_param);
 }
 
 std::string
-SINDI::AnalyzeIndexBySearch(const SearchRequest& request) {
-    AnalyzerParam analyzer_param(allocator_);
-    analyzer_param.topk = request.topk_;
-    analyzer_param.base_sample_size =
-        std::min<uint64_t>(K_ANALYZE_BASE_SAMPLE_SIZE, cur_element_count_);
-    analyzer_param.search_params = request.params_str_;
-    auto analyzer = CreateAnalyzer(this, analyzer_param);
-    JsonType stats =
-        request.query_ == nullptr ? analyzer->GetStats() : analyzer->AnalyzeIndexBySearch(request);
-    return stats.Dump(4);
+DiskSINDI::GetStats() const {
+    return "";
 }
 
 std::vector<int64_t>
-SINDI::Add(const DatasetPtr& base, AddMode mode) {
+DiskSINDI::Add(const DatasetPtr& base, AddMode mode) {
     std::scoped_lock wlock(this->global_mutex_);
+
+    if (is_deserialized_) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "DiskSINDI does not support Add after Deserialize");
+    }
+
     std::vector<int64_t> failed_ids;
 
     auto data_num = base->GetNumElements();
@@ -230,23 +303,8 @@ SINDI::Add(const DatasetPtr& base, AddMode mode) {
         }
     }
 
-    // adjust window
-    int64_t final_add_window = align_up(cur_element_count_ + data_num, window_size_) / window_size_;
-    bool window_changed = false;
-    while (window_term_list_.size() < final_add_window) {
-        window_term_list_.emplace_back(std::make_shared<SparseTermDataCell>(doc_retain_ratio_,
-                                                                            term_id_limit_,
-                                                                            allocator_,
-                                                                            use_quantization_,
-                                                                            quantization_params_));
-        window_changed = true;
-    }
-
-    // add process
     Vector<uint32_t> tmp_ids(allocator_);
     for (uint32_t i = 0; i < data_num; ++i) {
-        auto cur_window = cur_element_count_ / window_size_;
-        auto window_start_id = cur_window * window_size_;
         const auto& sparse_vector = sparse_vectors[i];
         if (label_table_->CheckLabel(ids[i])) {
             failed_ids.push_back(ids[i]);
@@ -260,14 +318,13 @@ SINDI::Add(const DatasetPtr& base, AddMode mode) {
             continue;
         }
 
-        auto inner_id = static_cast<uint16_t>(cur_element_count_ - window_start_id);
-
         try {
             if (remap_term_ids_) {
                 auto remapped = remap_sparse_vector_for_build(sparse_vector, tmp_ids);
-                window_term_list_[cur_window]->InsertVector(remapped, inner_id);
+                term_datacell_->InsertVector(remapped, static_cast<uint32_t>(cur_element_count_));
             } else {
-                window_term_list_[cur_window]->InsertVector(sparse_vector, inner_id);
+                term_datacell_->InsertVector(sparse_vector,
+                                             static_cast<uint32_t>(cur_element_count_));
             }
         } catch (const std::runtime_error& e) {
             failed_ids.push_back(ids[i]);
@@ -283,85 +340,56 @@ SINDI::Add(const DatasetPtr& base, AddMode mode) {
             continue;
         }
 
-        label_table_->Insert(cur_element_count_, ids[i]);  // todo(zxy): check id exists
+        label_table_->Insert(cur_element_count_, ids[i]);
 
         if (extra_info_size > 0) {
             extra_infos_->InsertExtraInfo(extra_info + i * extra_info_size, cur_element_count_);
         }
 
-        cur_element_count_++;
-
-        // high precision part
         if (use_reorder_) {
-            rerank_flat_->InsertVector(sparse_vectors + i, cur_element_count_ - 1);
+            rerank_flat_->InsertVector(sparse_vectors + i, cur_element_count_);
         }
+
+        cur_element_count_++;
     }
-    if (window_changed) {
-        this->cal_memory_usage();
-    }
+
+    this->cal_memory_usage();
     return failed_ids;
 }
 
 std::vector<int64_t>
-SINDI::Build(const DatasetPtr& base) {
-    // note that there's a wlock in Add()
-    return this->Add(base);
+DiskSINDI::Build(const DatasetPtr& base) {
+    auto failed_ids = this->Add(base);
+
+    uint32_t window_count =
+        static_cast<uint32_t>(align_up(cur_element_count_, window_size_) / window_size_);
+    term_datacell_->FinalizeTermBuffers(window_count);
+    this->cal_memory_usage();
+    return failed_ids;
 }
 
 bool
-SINDI::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) {
-    // Note:
-    // 1. we only check whether the old vector is a subset of the new vector
-    // 2. we do not actually update the vector
-    uint32_t inner_id;
-    {
-        std::shared_lock rlock(this->global_mutex_);
-        inner_id = this->label_table_->GetIdByLabel(id);
-    }
-    const auto& new_sv = *new_base->GetSparseVectors();
-    auto check_and_cleanup = [this, inner_id, &new_sv](auto&& get_sparse_vector) -> bool {
-        SparseVector old_sv;
-        get_sparse_vector(inner_id, &old_sv, this->allocator_);
-        bool ret = is_subset_of_sparse_vector(old_sv, new_sv);
-
-        this->allocator_->Deallocate(old_sv.vals_);
-        this->allocator_->Deallocate(old_sv.ids_);
-        return ret;
-    };
-
-    if (use_reorder_) {
-        if (not check_and_cleanup(
-                [this](InnerIdType inner_id, SparseVector* data, Allocator* allocator) {
-                    rerank_flat_->GetSparseVectorByInnerId(inner_id, data, allocator);
-                })) {
-            return false;
-        }
-    }
-
-    return check_and_cleanup(
-        [this](InnerIdType inner_id, SparseVector* data, Allocator* allocator) {
-            this->GetSparseVectorByInnerId(inner_id, data, allocator);
-        });
+DiskSINDI::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) {
+    throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                        "DiskSINDI does not support UpdateVector");
 }
 
 DatasetPtr
-SINDI::KnnSearch(const DatasetPtr& query,
-                 int64_t k,
-                 const std::string& parameters,
-                 const FilterPtr& filter) const {
+DiskSINDI::KnnSearch(const DatasetPtr& query,
+                     int64_t k,
+                     const std::string& parameters,
+                     const FilterPtr& filter) const {
     return KnnSearch(query, k, parameters, filter, allocator_);
 }
 
 DatasetPtr
-SINDI::KnnSearch(const DatasetPtr& query,
-                 int64_t k,
-                 const std::string& parameters,
-                 const FilterPtr& filter,
-                 vsag::Allocator* allocator) const {
+DiskSINDI::KnnSearch(const DatasetPtr& query,
+                     int64_t k,
+                     const std::string& parameters,
+                     const FilterPtr& filter,
+                     vsag::Allocator* allocator) const {
     std::shared_lock rlock(this->global_mutex_);
 
-    // Due to concerns about the performance of this index
-    // We have not yet implemented search with filtering capabilities
     const auto* sparse_vectors = query->GetSparseVectors();
     CHECK_ARGUMENT(query->GetNumElements() == 1, "num of query should be 1");
     auto sparse_query = sparse_vectors[0];
@@ -369,8 +397,7 @@ SINDI::KnnSearch(const DatasetPtr& query,
         sparse_query.len_ > 0,
         fmt::format("query->GetSparseVectors()->len_ ({}) is invalid", sparse_query.len_));
 
-    // search parameter
-    SINDISearchParameter search_param;
+    DiskSINDISearchParameter search_param;
     search_param.FromJson(JsonType::Parse(parameters));
     CHECK_ARGUMENT(search_param.n_candidate <= SPARSE_AMPLIFICATION_FACTOR * k,
                    fmt::format("n_candidate ({}) should be less than {} * k ({})",
@@ -398,20 +425,29 @@ SINDI::KnnSearch(const DatasetPtr& query,
         }
     }
 
-    auto computer = std::make_shared<SparseTermComputer>(effective_query, search_param, allocator_);
+    auto computer = std::make_shared<SparseTermComputer>(effective_query, search_param, allocator);
     const SparseVector* rerank_query = (remap_term_ids_ && use_reorder_) ? &sparse_query : nullptr;
-    return search_impl<KNN_SEARCH>(
-        computer, inner_param, allocator, search_param.use_term_lists_heap_insert, rerank_query);
+
+    // Collect query term ids for lazy loading
+    auto query_term_ids = collect_query_term_ids(computer, allocator);
+    auto query_term_buffers = term_datacell_->LoadQueryTermBuffers(query_term_ids);
+
+    return search_impl<KNN_SEARCH>(computer,
+                                   inner_param,
+                                   allocator,
+                                   search_param.use_term_lists_heap_insert,
+                                   query_term_buffers,
+                                   rerank_query);
 }
 
 template <InnerSearchMode mode>
 DatasetPtr
-SINDI::search_impl(const SparseTermComputerPtr& computer,
-                   const InnerSearchParam& inner_param,
-                   Allocator* allocator,
-                   bool use_term_lists_heap_insert,
-                   const SparseVector* original_query) const {
-    // computer and heap
+DiskSINDI::search_impl(const SparseTermComputerPtr& computer,
+                       const InnerSearchParam& inner_param,
+                       Allocator* allocator,
+                       bool use_term_lists_heap_insert,
+                       const QueryTermBuffers& query_term_buffers,
+                       const SparseVector* original_query) const {
     MaxHeap heap(allocator);
     int64_t k = 0;
 
@@ -419,55 +455,55 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
         k = inner_param.topk;
     }
 
-    // window iteration
     Vector<float> dists(window_size_, 0.0, allocator);
     auto filter = inner_param.is_inner_id_allowed;
     const auto [min_window_id, max_window_id] = this->get_min_max_window_id(filter);
+
     for (auto cur = min_window_id; cur <= max_window_id; cur++) {
-        auto window_start_id = cur * window_size_;
-        auto term_list = this->window_term_list_[cur];
+        auto window_start_id = static_cast<uint32_t>(cur) * window_size_;
 
-        // compute
-        term_list->Query(dists.data(), computer);
+        term_datacell_->QueryWindow(
+            dists.data(), static_cast<uint32_t>(cur), computer, query_term_buffers);
 
-        // insert heap
         if (use_term_lists_heap_insert) {
-            if (inner_param.is_inner_id_allowed) {
-                term_list->InsertHeapByTermLists<mode, WITH_FILTER>(
-                    dists.data(), computer, heap, inner_param, window_start_id);
-            } else {
-                term_list->InsertHeapByTermLists<mode, PURE>(
-                    dists.data(), computer, heap, inner_param, window_start_id);
-            }
+            term_datacell_->InsertHeapByWindowKnn(dists.data(),
+                                                  static_cast<uint32_t>(cur),
+                                                  computer,
+                                                  heap,
+                                                  inner_param,
+                                                  window_start_id,
+                                                  inner_param.is_inner_id_allowed != nullptr,
+                                                  query_term_buffers);
         } else {
-            if (inner_param.is_inner_id_allowed) {
-                term_list->InsertHeapByDists<mode, WITH_FILTER>(
-                    dists.data(), dists.size(), heap, inner_param, window_start_id);
-            } else {
-                term_list->InsertHeapByDists<mode, PURE>(
-                    dists.data(), dists.size(), heap, inner_param, window_start_id);
-            }
+            term_datacell_->InsertHeapByDistsKnn(dists.data(),
+                                                 dists.size(),
+                                                 heap,
+                                                 inner_param,
+                                                 window_start_id,
+                                                 inner_param.is_inner_id_allowed != nullptr);
         }
     }
 
     // rerank
     if (use_reorder_) {
-        // high precision
         float cur_heap_top = std::numeric_limits<float>::max();
         auto candidate_size = heap.size();
         auto high_precise_heap = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
         auto [sorted_ids, sorted_vals] =
             sort_sparse_vector(original_query ? *original_query : computer->raw_query_, allocator_);
-        for (auto i = 0; i < candidate_size; i++) {
+
+        for (uint64_t i = 0; i < candidate_size; i++) {
             auto inner_id = heap.top().second;
+            heap.pop();
             auto high_precise_distance =
                 cal_distance_by_id_unsafe(rerank_flat_, sorted_ids, sorted_vals, inner_id);
             auto label = label_table_->GetLabelById(inner_id);
             if constexpr (mode == KNN_SEARCH) {
-                if (high_precise_distance < cur_heap_top or high_precise_heap->Size() < k) {
+                if (high_precise_distance < cur_heap_top or
+                    high_precise_heap->Size() < static_cast<uint64_t>(k)) {
                     high_precise_heap->Push(high_precise_distance, label);
                 }
-                if (high_precise_heap->Size() > k) {
+                if (high_precise_heap->Size() > static_cast<uint64_t>(k)) {
                     high_precise_heap->Pop();
                 }
                 cur_heap_top = high_precise_heap->Top().first;
@@ -477,11 +513,11 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
                     high_precise_heap->Push(high_precise_distance, label);
                 }
                 if (inner_param.range_search_limit_size != -1 and
-                    high_precise_heap->Size() > inner_param.range_search_limit_size) {
+                    high_precise_heap->Size() >
+                        static_cast<uint64_t>(inner_param.range_search_limit_size)) {
                     high_precise_heap->Pop();
                 }
             }
-            heap.pop();
         }
 
         return collect_results(high_precise_heap, allocator_);
@@ -507,7 +543,7 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
     }
 
     for (auto j = cur_size - 1; j >= 0; j--) {
-        ret_dists[j] = 1 + heap.top().first;  // dist = -ip -> 1 + dist = 1 - ip
+        ret_dists[j] = 1 + heap.top().first;
         ret_ids[j] = label_table_->GetLabelById(heap.top().second);
         heap.pop();
     }
@@ -516,59 +552,20 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
 }
 
 DatasetPtr
-SINDI::RangeSearch(const DatasetPtr& query,
-                   float radius,
-                   const std::string& parameters,
-                   const FilterPtr& filter,
-                   int64_t limited_size) const {
-    std::shared_lock rlock(this->global_mutex_);
-
-    // Due to concerns about the performance of this index
-    // We have not yet implemented search with filtering capabilities
-    const auto* sparse_vectors = query->GetSparseVectors();
-    CHECK_ARGUMENT(query->GetNumElements() == 1, "num of query should be 1");
-    auto sparse_query = sparse_vectors[0];
-    CHECK_ARGUMENT(
-        sparse_query.len_ > 0,
-        fmt::format("query->GetSparseVectors()->len_ ({}) is invalid", sparse_query.len_));
-
-    // search parameter
-    SINDISearchParameter search_param;
-    search_param.FromJson(JsonType::Parse(parameters));
-    InnerSearchParam inner_param;
-
-    inner_param.range_search_limit_size = static_cast<int>(limited_size);
-    inner_param.radius = radius;
-
-    FilterPtr ft = nullptr;
-    if (filter != nullptr) {
-        ft = std::make_shared<InnerIdWrapperFilter>(filter, *this->label_table_);
-    }
-    inner_param.is_inner_id_allowed = ft;
-
-    SparseVector effective_query = sparse_query;
-    Vector<uint32_t> tmp_ids(allocator_);
-    Vector<float> tmp_vals(allocator_);
-    if (remap_term_ids_) {
-        effective_query = remap_sparse_vector_for_query(sparse_query, tmp_ids, tmp_vals);
-        if (effective_query.len_ == 0) {
-            auto [results, ret_dists, ret_ids] = create_fast_dataset(0, allocator_);
-            return results;
-        }
-    }
-
-    auto computer = std::make_shared<SparseTermComputer>(effective_query, search_param, allocator_);
-    const SparseVector* rerank_query = (remap_term_ids_ && use_reorder_) ? &sparse_query : nullptr;
-    return search_impl<RANGE_SEARCH>(
-        computer, inner_param, allocator_, search_param.use_term_lists_heap_insert, rerank_query);
+DiskSINDI::RangeSearch(const DatasetPtr& query,
+                       float radius,
+                       const std::string& parameters,
+                       const FilterPtr& filter,
+                       int64_t limited_size) const {
+    throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                        "DiskSINDI does not support RangeSearch in stage 2");
 }
 
 void
-SINDI::cal_memory_usage() {
-    auto memory = sizeof(SINDI);
-    memory += window_term_list_.size() * sizeof(SparseTermDataCellPtr);
-    for (auto& window : window_term_list_) {
-        memory += window->GetMemoryUsage();
+DiskSINDI::cal_memory_usage() {
+    auto memory = sizeof(DiskSINDI);
+    if (term_datacell_ != nullptr) {
+        memory += term_datacell_->GetMemoryUsage();
     }
     if (this->rerank_flat_ != nullptr) {
         memory += this->rerank_flat_->GetMemoryUsage();
@@ -580,38 +577,68 @@ SINDI::cal_memory_usage() {
 }
 
 void
-SINDI::Serialize(StreamWriter& writer) const {
+DiskSINDI::Serialize(StreamWriter& writer) const {
     std::shared_lock rlock(this->global_mutex_);
 
-    StreamWriter::WriteObj(writer, cur_element_count_);
+    // Pre-compute sizes for two-pass serialization (StreamWriter lacks Seek/WriteAt)
+    uint64_t metadata_start = writer.GetCursor();
 
+    uint64_t quantization_size = use_quantization_ ? 3 * sizeof(float) : 0;
+    uint64_t term_dict_size = (term_id_limit_ + 1) * sizeof(DiskTermEntry);
+    uint64_t payload_size = term_datacell_->ComputePayloadSize();
+
+    // Compute segment offsets
+    DiskSINDIManifest manifest{};
+    manifest.term_dict_offset =
+        metadata_start + sizeof(manifest) + sizeof(cur_element_count_) + quantization_size;
+    manifest.term_dict_size = term_dict_size;
+    manifest.posting_payload_offset = manifest.term_dict_offset + term_dict_size;
+    manifest.posting_payload_size = payload_size;
+
+    uint64_t cursor_after_payload = manifest.posting_payload_offset + payload_size;
+
+    if (use_reorder_) {
+        manifest.rerank_flat_offset = cursor_after_payload;
+        manifest.rerank_flat_size = rerank_flat_->CalcSerializeSize();
+        cursor_after_payload += manifest.rerank_flat_size;
+    }
+
+    manifest.label_table_offset = cursor_after_payload;
+    std::stringstream label_ss;
+    {
+        IOStreamWriter label_writer(label_ss);
+        label_table_->Serialize(label_writer);
+    }
+    manifest.label_table_size = label_ss.tellp();
+
+    // Pass 2: write everything in order
+    writer.Write(reinterpret_cast<const char*>(&manifest), sizeof(manifest));
+    StreamWriter::WriteObj(writer, cur_element_count_);
     if (use_quantization_) {
         StreamWriter::WriteObj(writer, quantization_params_->min_val);
         StreamWriter::WriteObj(writer, quantization_params_->max_val);
         StreamWriter::WriteObj(writer, quantization_params_->diff);
     }
 
-    uint32_t window_term_list_size = window_term_list_.size();
-    StreamWriter::WriteObj(writer, window_term_list_size);
-    for (const auto& window : window_term_list_) {
-        window->Serialize(writer);
-    }
-
-    label_table_->Serialize(writer);
+    term_datacell_->WriteTermDictAndPayload(writer, manifest.posting_payload_offset);
 
     if (use_reorder_) {
         rerank_flat_->Serialize(writer);
     }
 
+    writer.Write(label_ss.str().c_str(), manifest.label_table_size);
+
     if (remap_term_ids_ && term_id_mapper_) {
         term_id_mapper_->Serialize(writer);
     }
 
+    // Footer
     JsonType jsonify_basic_info;
     auto metadata = std::make_shared<Metadata>();
     jsonify_basic_info[INDEX_PARAM].SetString(this->create_param_ptr_->ToString());
     if (use_reorder_) {
-        jsonify_basic_info[SINDI_RERANK_FLAT_FORMAT_KEY].SetInt(SINDI_RERANK_FLAT_FORMAT_DATACELL);
+        jsonify_basic_info[DISKSINDI_RERANK_FLAT_FORMAT_KEY].SetInt(
+            DISKSINDI_RERANK_FLAT_FORMAT_DATACELL);
     }
     metadata->Set("basic_info", jsonify_basic_info);
     auto footer = std::make_shared<Footer>(metadata);
@@ -619,7 +646,63 @@ SINDI::Serialize(StreamWriter& writer) const {
 }
 
 void
-SINDI::Deserialize(StreamReader& reader) {
+DiskSINDI::SetIO(const std::shared_ptr<Reader> reader) {
+    auto reader_param = std::make_shared<ReaderIOParameter>();
+    reader_param->reader = reader;
+    if (term_datacell_ != nullptr) {
+        term_datacell_->SetIO(
+            reader, manifest_.posting_payload_offset, manifest_.posting_payload_size);
+    }
+    if (rerank_flat_ != nullptr && param_->rerank_io_parameter != nullptr &&
+        param_->rerank_io_parameter->GetTypeName() == IO_TYPE_VALUE_READER_IO) {
+        rerank_flat_->InitIO(reader_param);
+    }
+}
+
+void
+DiskSINDI::Deserialize(const BinarySet& binary_set) {
+    if (binary_set.Contains(SERIAL_META_KEY)) {
+        auto metadata = std::make_shared<Metadata>(binary_set.Get(SERIAL_META_KEY));
+        if (metadata->EmptyIndex()) {
+            return;
+        }
+    } else if (binary_set.Contains(BLANK_INDEX)) {
+        return;
+    }
+
+    auto binary = binary_set.Get(this->GetName());
+    auto reader_holder = std::make_shared<BinaryReader>(binary);
+    auto func = [reader_holder](uint64_t offset, uint64_t len, void* dest) {
+        reader_holder->Read(offset, len, dest);
+    };
+    uint64_t cursor = 0;
+    auto reader = ReadFuncStreamReader(func, cursor, reader_holder->Size());
+    this->Deserialize(reader);
+    this->SetIO(reader_holder);
+}
+
+void
+DiskSINDI::Deserialize(std::istream& in_stream) {
+    auto reader_holder = std::make_shared<StreamBackedReader>(in_stream);
+    auto func = [reader_holder](uint64_t offset, uint64_t len, void* dest) {
+        reader_holder->Read(offset, len, dest);
+    };
+    uint64_t cursor = 0;
+    auto reader = ReadFuncStreamReader(func, cursor, reader_holder->Size());
+
+    auto footer = Footer::Parse(reader);
+    if (footer != nullptr) {
+        auto metadata = footer->GetMetadata();
+        if (metadata->EmptyIndex()) {
+            return;
+        }
+    }
+    this->Deserialize(reader);
+    this->SetIO(reader_holder);
+}
+
+void
+DiskSINDI::Deserialize(StreamReader& reader) {
     std::scoped_lock wlock(this->global_mutex_);
 
     bool has_datacell_rerank_format = false;
@@ -627,68 +710,69 @@ SINDI::Deserialize(StreamReader& reader) {
     if (footer != nullptr) {
         auto metadata = footer->GetMetadata();
         JsonType jsonify_basic_info = metadata->Get("basic_info");
-        // Check if the index parameter is compatible
         {
             auto param = jsonify_basic_info[INDEX_PARAM].GetString();
-            SINDIParameterPtr index_param = std::make_shared<SINDIParameter>();
+            DiskSINDIParameterPtr index_param = std::make_shared<DiskSINDIParameter>();
             index_param->FromString(param);
             if (not this->create_param_ptr_->CheckCompatibility(index_param)) {
-                auto message = fmt::format("SINDI index parameter not match, current: {}, new: {}",
-                                           this->create_param_ptr_->ToString(),
-                                           index_param->ToString());
+                auto message =
+                    fmt::format("DiskSINDI index parameter not match, current: {}, new: {}",
+                                this->create_param_ptr_->ToString(),
+                                index_param->ToString());
                 logger::error(message);
                 throw VsagException(ErrorType::INVALID_ARGUMENT, message);
             }
         }
-        if (jsonify_basic_info.Contains(SINDI_RERANK_FLAT_FORMAT_KEY)) {
+        if (jsonify_basic_info.Contains(DISKSINDI_RERANK_FLAT_FORMAT_KEY)) {
             has_datacell_rerank_format =
-                jsonify_basic_info[SINDI_RERANK_FLAT_FORMAT_KEY].GetInt() ==
-                SINDI_RERANK_FLAT_FORMAT_DATACELL;
+                jsonify_basic_info[DISKSINDI_RERANK_FLAT_FORMAT_KEY].GetInt() ==
+                DISKSINDI_RERANK_FLAT_FORMAT_DATACELL;
         }
     } else if (not deserialize_without_footer_) {
-        logger::debug("SINDI footer not found, fallback to legacy deserialize path");
+        logger::debug("DiskSINDI footer not found, fallback to legacy deserialize path");
     }
-    auto* reader_ptr = &reader;
 
-    BufferStreamReader buffer_reader(
-        &reader, std::numeric_limits<uint64_t>::max(), this->allocator_);
-    if (not deserialize_without_buffer_) {
-        reader_ptr = &buffer_reader;
-    }
-    auto& reader_ref = *reader_ptr;
-
-    StreamReader::ReadObj(reader_ref, cur_element_count_);
+    // Read manifest from the beginning
+    reader.Seek(0);
+    StreamReader::ReadObj(reader, manifest_);
+    StreamReader::ReadObj(reader, cur_element_count_);
 
     if (use_quantization_) {
-        StreamReader::ReadObj(reader_ref, quantization_params_->min_val);
-        StreamReader::ReadObj(reader_ref, quantization_params_->max_val);
-        StreamReader::ReadObj(reader_ref, quantization_params_->diff);
+        StreamReader::ReadObj(reader, quantization_params_->min_val);
+        StreamReader::ReadObj(reader, quantization_params_->max_val);
+        StreamReader::ReadObj(reader, quantization_params_->diff);
     }
 
-    uint32_t window_term_list_size = 0;
-    StreamReader::ReadObj(reader_ref, window_term_list_size);
-    window_term_list_.resize(window_term_list_size);
-    for (auto& window : window_term_list_) {
-        window = std::make_shared<SparseTermDataCell>(
-            doc_retain_ratio_, term_id_limit_, allocator_, use_quantization_, quantization_params_);
-        window->Deserialize(reader_ref);
+    uint32_t window_count =
+        static_cast<uint32_t>(align_up(cur_element_count_, window_size_) / window_size_);
+    term_datacell_->Deserialize(reader, manifest_.term_dict_size, window_count);
+    if (param_->term_io_parameter != nullptr &&
+        param_->term_io_parameter->GetTypeName() != IO_TYPE_VALUE_READER_IO) {
+        term_datacell_->InitIO(param_->term_io_parameter);
+        if (manifest_.posting_payload_offset != 0) {
+            term_datacell_->WritePayloadToIO(
+                reader, manifest_.posting_payload_offset, manifest_.posting_payload_size);
+        }
     }
-
-    label_table_->Deserialize(reader_ref);
 
     if (use_reorder_) {
-        deserialize_rerank_flat(reader_ref, rerank_flat_, allocator_, has_datacell_rerank_format);
+        reader.Seek(manifest_.rerank_flat_offset);
+        deserialize_rerank_flat(reader, rerank_flat_, allocator_, has_datacell_rerank_format);
     }
+
+    reader.Seek(manifest_.label_table_offset);
+    label_table_->Deserialize(reader);
 
     if (remap_term_ids_ && term_id_mapper_) {
-        term_id_mapper_->Deserialize(reader_ref);
+        term_id_mapper_->Deserialize(reader);
     }
 
+    is_deserialized_ = true;
     this->cal_memory_usage();
 }
 
 std::pair<int64_t, int64_t>
-SINDI::GetMinAndMaxId() const {
+DiskSINDI::GetMinAndMaxId() const {
     int64_t min_id = INT64_MAX;
     int64_t max_id = INT64_MIN;
     std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
@@ -707,55 +791,39 @@ SINDI::GetMinAndMaxId() const {
 }
 
 uint64_t
-SINDI::EstimateMemory(uint64_t num_elements) const {
+DiskSINDI::EstimateMemory(uint64_t num_elements) const {
     uint64_t mem = 0;
-    // size of label table
+    mem += sizeof(DiskSINDI);
+    mem += (term_id_limit_ + 1) * sizeof(DiskTermEntry);
     mem += 2 * sizeof(int64_t) * num_elements;
-
-    // size of term id + term data
-    if (use_quantization_) {
-        mem += avg_doc_term_length_ * num_elements * (sizeof(uint8_t) + sizeof(uint16_t));
-    } else {
-        mem += avg_doc_term_length_ * num_elements * (sizeof(float) + sizeof(uint16_t));
+    if (rerank_flat_ != nullptr) {
+        const auto rerank_payload_bytes =
+            num_elements *
+            (sizeof(uint32_t) + avg_doc_term_length_ * (sizeof(uint32_t) + sizeof(float)));
+        const auto rerank_offset_bytes = num_elements * (sizeof(uint64_t) + sizeof(uint32_t));
+        mem += block_memory_ceil(rerank_offset_bytes);
+        if (param_->rerank_io_parameter != nullptr &&
+            (param_->rerank_io_parameter->GetTypeName() == IO_TYPE_VALUE_MEMORY_IO ||
+             param_->rerank_io_parameter->GetTypeName() == IO_TYPE_VALUE_BLOCK_MEMORY_IO)) {
+            mem += block_memory_ceil(rerank_payload_bytes);
+        }
     }
-
-    if (use_reorder_) {
-        mem += num_elements *
-               (sizeof(uint32_t) + avg_doc_term_length_ * (sizeof(uint32_t) + sizeof(float)));
-
-        const auto block_size = Options::Instance().block_size_limit();
-        const auto offset_bytes = num_elements * (sizeof(uint64_t) + sizeof(uint32_t));
-        mem += ((offset_bytes + block_size - 1) / block_size) * block_size;
-    }
-
-    // size of term list
-    mem += sizeof(std::vector<float>) * 2 * term_id_limit_;
-
-    // size of term id mapper (unordered_map ~50B per entry + vector 4B per entry)
-    if (remap_term_ids_) {
-        mem += static_cast<uint64_t>(term_id_limit_) * 54;
-    }
-
+    mem += sizeof(QuantizationParams);
     return mem;
 }
 
 void
-SINDI::GetSparseVectorByInnerId(InnerIdType inner_id,
-                                SparseVector* data,
-                                Allocator* specified_allocator) const {
+DiskSINDI::GetSparseVectorByInnerId(InnerIdType inner_id,
+                                    SparseVector* data,
+                                    Allocator* specified_allocator) const {
     std::shared_lock rlock(this->global_mutex_);
 
     if (use_reorder_) {
         return this->rerank_flat_->GetSparseVectorByInnerId(inner_id, data, specified_allocator);
     }
 
-    auto cur_window = inner_id / window_size_;
-    auto window_start_id = cur_window * window_size_;
-    auto term_list = this->window_term_list_[cur_window];
+    term_datacell_->GetSparseVector(inner_id, data, specified_allocator);
 
-    term_list->GetSparseVector(inner_id - window_start_id, data, specified_allocator);
-
-    // Reverse map compact IDs back to original term IDs
     if (remap_term_ids_ && term_id_mapper_) {
         for (uint32_t i = 0; i < data->len_; ++i) {
             data->ids_[i] = term_id_mapper_->ReverseMap(data->ids_[i]);
@@ -764,9 +832,9 @@ SINDI::GetSparseVectorByInnerId(InnerIdType inner_id,
 }
 
 float
-SINDI::CalcDistanceById(const DatasetPtr& vector,
-                        int64_t id,
-                        bool calculate_precise_distance) const {
+DiskSINDI::CalcDistanceById(const DatasetPtr& vector,
+                            int64_t id,
+                            bool calculate_precise_distance) const {
     std::shared_lock rlock(this->global_mutex_);
 
     if (use_reorder_ && calculate_precise_distance) {
@@ -777,29 +845,27 @@ SINDI::CalcDistanceById(const DatasetPtr& vector,
     }
 
     auto inner_id = this->label_table_->GetIdByLabel(id);
-    auto cur_window = inner_id / window_size_;
-    auto window_start_id = cur_window * window_size_;
-    auto term_list = this->window_term_list_[cur_window];
-
     auto sparse_query = vector->GetSparseVectors()[0];
     Vector<uint32_t> tmp_ids(allocator_);
     Vector<float> tmp_vals(allocator_);
     if (remap_term_ids_) {
         sparse_query = remap_sparse_vector_for_query(sparse_query, tmp_ids, tmp_vals);
     }
-    SINDISearchParameter search_param;
+    DiskSINDISearchParameter search_param;
     search_param.query_prune_ratio = 0;
     search_param.term_prune_ratio = 0;
     auto computer = std::make_shared<SparseTermComputer>(sparse_query, search_param, allocator_);
-    return term_list->CalcDistanceByInnerId(computer,
-                                            static_cast<uint16_t>(inner_id - window_start_id));
+    auto query_term_ids = collect_query_term_ids(computer, allocator_);
+    auto query_term_buffers = term_datacell_->LoadQueryTermBuffers(query_term_ids);
+    return term_datacell_->CalcDistanceByInnerId(
+        computer, static_cast<uint32_t>(inner_id), query_term_buffers);
 }
 
 DatasetPtr
-SINDI::CalDistanceById(const DatasetPtr& query,
-                       const int64_t* ids,
-                       int64_t count,
-                       bool calculate_precise_distance) const {
+DiskSINDI::CalDistanceById(const DatasetPtr& query,
+                           const int64_t* ids,
+                           int64_t count,
+                           bool calculate_precise_distance) const {
     if (use_reorder_ && calculate_precise_distance) {
         std::shared_lock rlock(this->global_mutex_);
         auto result = Dataset::Make();
@@ -817,14 +883,12 @@ SINDI::CalDistanceById(const DatasetPtr& query,
         return result;
     }
 
-    // prepare result
     auto result = Dataset::Make();
     result->Owner(true, allocator_);
     auto* distances = static_cast<float*>(allocator_->Allocate(sizeof(float) * count));
     std::fill_n(distances, count, -1.0F);
     result->Distances(distances);
 
-    // assume count is small, otherwise we should use bitmap to construct filter function
     std::unordered_map<int64_t, uint32_t> valid_ids;
     for (auto i = 0; i < count; i++) {
         valid_ids[ids[i]] = i;
@@ -832,10 +896,9 @@ SINDI::CalDistanceById(const DatasetPtr& query,
     auto filter = [&valid_ids](int64_t id) -> bool { return valid_ids.count(id) != 0; };
     auto filter_ptr = std::make_shared<WhiteListFilter>(filter);
 
-    // search
     constexpr auto* search_param_fmt = R"(
     {{
-        "sindi": {{
+        "disksindi": {{
             "query_prune_ratio": 0,
             "n_candidate": {}
         }}
@@ -844,7 +907,6 @@ SINDI::CalDistanceById(const DatasetPtr& query,
     auto search_res =
         this->KnnSearch(query, count, fmt::format(search_param_fmt, count), filter_ptr);
 
-    // flush results
     for (auto i = 0; i < search_res->GetDim(); i++) {
         float dist = search_res->GetDistances()[i];
         int64_t id = search_res->GetIds()[i];
@@ -855,58 +917,38 @@ SINDI::CalDistanceById(const DatasetPtr& query,
 }
 
 void
-SINDI::SetImmutable() {
+DiskSINDI::SetImmutable() {
     std::scoped_lock wlock(this->global_mutex_);
     this->immutable_ = true;
 }
 
 void
-SINDI::InitFeatures() {
-    // build & add
+DiskSINDI::InitFeatures() {
     this->index_feature_list_->SetFeatures({
         IndexFeature::SUPPORT_BUILD,
         IndexFeature::SUPPORT_BUILD_WITH_MULTI_THREAD,
-        IndexFeature::SUPPORT_ADD_AFTER_BUILD,
-    });
-
-    // search
-    this->index_feature_list_->SetFeatures({
         IndexFeature::SUPPORT_KNN_SEARCH,
         IndexFeature::SUPPORT_KNN_SEARCH_WITH_ID_FILTER,
-        IndexFeature::SUPPORT_RANGE_SEARCH,
-        IndexFeature::SUPPORT_RANGE_SEARCH_WITH_ID_FILTER,
-    });
-
-    // serialize
-    this->index_feature_list_->SetFeatures({
-        IndexFeature::SUPPORT_DESERIALIZE_BINARY_SET,
-        IndexFeature::SUPPORT_DESERIALIZE_FILE,
-        IndexFeature::SUPPORT_DESERIALIZE_READER_SET,
-        IndexFeature::SUPPORT_SERIALIZE_BINARY_SET,
         IndexFeature::SUPPORT_SERIALIZE_FILE,
+        IndexFeature::SUPPORT_DESERIALIZE_FILE,
+        IndexFeature::SUPPORT_ESTIMATE_MEMORY,
+        IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID,
+        IndexFeature::SUPPORT_GET_RAW_VECTOR_BY_IDS,
+        IndexFeature::SUPPORT_SEARCH_CONCURRENT,
+        IndexFeature::SUPPORT_METRIC_TYPE_INNER_PRODUCT,
     });
-
-    // info
-    this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID);
-    this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ESTIMATE_MEMORY);
-    this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_RAW_VECTOR_BY_IDS);
-
-    // concurrency
-    this->index_feature_list_->SetFeatures({IndexFeature::SUPPORT_SEARCH_CONCURRENT,
-                                            IndexFeature::SUPPORT_ADD_CONCURRENT,
-                                            IndexFeature::SUPPORT_UPDATE_ID_CONCURRENT,
-                                            IndexFeature::SUPPORT_UPDATE_VECTOR_CONCURRENT});
-
-    // metric
-    this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_METRIC_TYPE_INNER_PRODUCT);
 }
 
 std::pair<int64_t, int64_t>
-SINDI::get_min_max_window_id(const FilterPtr& filter) const {
+DiskSINDI::get_min_max_window_id(const FilterPtr& filter) const {
     int64_t min_window_id = 0;
-    auto max_window_id = static_cast<int64_t>(window_term_list_.size() - 1);
+    auto window_count =
+        static_cast<uint32_t>(align_up(cur_element_count_, window_size_) / window_size_);
+    int64_t max_window_id = static_cast<int64_t>(window_count) - 1;
+    if (max_window_id < 0) {
+        max_window_id = 0;
+    }
 
-    // get min and max window id
     if (filter) {
         const int64_t* valid_ids = nullptr;
         int64_t valid_count = 0;
@@ -934,9 +976,9 @@ SINDI::get_min_max_window_id(const FilterPtr& filter) const {
 }
 
 SparseVector
-SINDI::remap_sparse_vector_for_query(const SparseVector& input,
-                                     Vector<uint32_t>& tmp_ids,
-                                     Vector<float>& tmp_vals) const {
+DiskSINDI::remap_sparse_vector_for_query(const SparseVector& input,
+                                         Vector<uint32_t>& tmp_ids,
+                                         Vector<float>& tmp_vals) const {
     tmp_ids.clear();
     tmp_vals.clear();
     tmp_ids.reserve(input.len_);
@@ -956,7 +998,7 @@ SINDI::remap_sparse_vector_for_query(const SparseVector& input,
 }
 
 SparseVector
-SINDI::remap_sparse_vector_for_build(const SparseVector& input, Vector<uint32_t>& tmp_ids) {
+DiskSINDI::remap_sparse_vector_for_build(const SparseVector& input, Vector<uint32_t>& tmp_ids) {
     tmp_ids.resize(input.len_);
     for (uint32_t i = 0; i < input.len_; ++i) {
         tmp_ids[i] = term_id_mapper_->Map(input.ids_[i]);
@@ -967,5 +1009,7 @@ SINDI::remap_sparse_vector_for_build(const SparseVector& input, Vector<uint32_t>
     remapped.vals_ = input.vals_;
     return remapped;
 }
+
+// Explicit template instantiations
 
 }  // namespace vsag

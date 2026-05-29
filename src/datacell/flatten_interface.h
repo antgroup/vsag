@@ -32,8 +32,8 @@
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "type_helpers.h"
-#include "vsag/allocator.h"
 #include "utils/pointer_define.h"
+#include "vsag/allocator.h"
 #include "vsag/constants.h"
 #include "vsag/dataset.h"
 

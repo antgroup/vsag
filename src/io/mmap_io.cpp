@@ -63,6 +63,10 @@ MMapIO::MMapIO(std::string filename, Allocator* allocator)
                         saved_errno,
                         std::error_code(saved_errno, std::system_category()).message()));
     }
+
+    if (this->exist_file_) {
+        this->size_ = std::filesystem::file_size(this->filepath_);
+    }
     auto mmap_size = this->size_;
     if (this->size_ == 0) {
         mmap_size = DEFAULT_INIT_MMAP_SIZE;
