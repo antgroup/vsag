@@ -35,100 +35,6 @@ private:
     std::shared_mutex& delete_ids_mutex_;
 };
 
-LabelTable::LabelRemap::LabelRemap(Allocator* allocator, LabelRemapType remap_type)
-    : allocator_(allocator), remap_type_(remap_type) {
-    if (remap_type_ == LabelRemapType::ROBIN) {
-        robin_map_ = std::make_unique<UnorderedMap<LabelType, InnerIdType>>(0, allocator);
-        robin_map_->max_load_factor(0.75F);
-    } else {
-        pg_map_ = std::make_unique<PGUnorderedMap<LabelType, InnerIdType>>(0, allocator);
-        pg_map_->max_load_factor(0.75F);
-    }
-}
-
-void
-LabelTable::LabelRemap::Reset() {
-    if (remap_type_ == LabelRemapType::ROBIN) {
-        robin_map_ = std::make_unique<UnorderedMap<LabelType, InnerIdType>>(0, allocator_);
-        robin_map_->max_load_factor(0.75F);
-        return;
-    }
-
-    pg_map_ = std::make_unique<PGUnorderedMap<LabelType, InnerIdType>>(0, allocator_);
-    pg_map_->max_load_factor(0.75F);
-}
-
-void
-LabelTable::LabelRemap::Clear() {
-    if (pg_map_ != nullptr) {
-        pg_map_->clear();
-        return;
-    }
-    robin_map_->clear();
-}
-
-void
-LabelTable::LabelRemap::Reserve(uint64_t size) {
-    if (pg_map_ != nullptr) {
-        pg_map_->reserve(size);
-        return;
-    }
-    robin_map_->reserve(size);
-}
-
-uint64_t
-LabelTable::LabelRemap::Size() const {
-    if (pg_map_ != nullptr) {
-        return pg_map_->size();
-    }
-    return robin_map_->size();
-}
-
-void
-LabelTable::LabelRemap::InsertOrAssign(LabelType label, InnerIdType inner_id) {
-    if (pg_map_ != nullptr) {
-        (*pg_map_)[label] = inner_id;
-        return;
-    }
-    (*robin_map_)[label] = inner_id;
-}
-
-void
-LabelTable::LabelRemap::Emplace(LabelType label, InnerIdType inner_id) {
-    if (pg_map_ != nullptr) {
-        pg_map_->emplace(label, inner_id);
-        return;
-    }
-    robin_map_->emplace(label, inner_id);
-}
-
-bool
-LabelTable::LabelRemap::Erase(LabelType label) {
-    if (pg_map_ != nullptr) {
-        return pg_map_->erase(label) > 0;
-    }
-    return robin_map_->erase(label) > 0;
-}
-
-bool
-LabelTable::LabelRemap::Find(LabelType label, InnerIdType& inner_id) const {
-    if (pg_map_ != nullptr) {
-        const auto iter = pg_map_->find(label);
-        if (iter == pg_map_->end()) {
-            return false;
-        }
-        inner_id = iter->second;
-        return true;
-    }
-
-    const auto iter = robin_map_->find(label);
-    if (iter == robin_map_->end()) {
-        return false;
-    }
-    inner_id = iter->second;
-    return true;
-}
-
 LabelTable::LabelTable(Allocator* allocator,
                        bool use_reverse_map,
                        bool compress_redundant_data,
@@ -138,8 +44,7 @@ LabelTable::LabelTable(Allocator* allocator,
       label_remap_(allocator, label_remap_type),
       allocator_(allocator),
       deleted_ids_(allocator),
-      source_id_table_(0, allocator),
-      hole_list_(0, allocator) {
+      source_id_table_(0, allocator) {
     (void)compress_redundant_data;
     deleted_ids_filter_ = std::make_shared<RemoveListFilter>(deleted_ids_, delete_ids_mutex_);
 }

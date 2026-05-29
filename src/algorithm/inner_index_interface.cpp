@@ -20,7 +20,7 @@
 #include "algorithm/hgraph/hgraph.h"
 #include "brute_force.h"
 #include "impl/filter/filter_headers.h"
-#include "impl/label_table.h"
+#include "impl/label_table/label_table.h"
 #include "impl/thread_pool/safe_thread_pool.h"
 #include "index_common_param.h"
 #include "index_detail_data.h"
