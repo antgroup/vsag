@@ -172,6 +172,13 @@ filtering, see [Extra Info](extra_info.md).
 - The more selective the filter (smaller `ValidRatio`), the more candidates the search has
   to expand. For graph indexes, increase `ef_search` proportionally when the filter is very
   selective; otherwise recall will drop sharply below ~1% selectivity.
+- **HGraph also offers a selectivity-aware brute-force fallback**: set
+  `brute_force_threshold` (e.g. `0.01–0.05`) in the search params so that, when
+  `Filter::ValidRatio()` is small enough, HGraph automatically skips graph
+  traversal and runs an exact scan over the surviving ids. This is often a
+  better choice than chasing recall by raising `ef_search` to very large values.
+  See the [HGraph index page](../indexes/hgraph.md#brute-force-fallback-under-highly-selective-filters-brute_force_threshold)
+  and example [`322_feature_hgraph_brute_force_threshold.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/322_feature_hgraph_brute_force_threshold.cpp).
 - Bitset filters are fastest because `Test()` is a single bit lookup. A `Filter` object that
   performs heavy work in `CheckValid` will be called many times per query.
 - For `RangeSearch`, set a finite `limited_size` when filters can let through millions of

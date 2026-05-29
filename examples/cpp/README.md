@@ -99,6 +99,7 @@ together when the directory is listed:
 | [`318_feature_tune.cpp`](318_feature_tune.cpp) | Online `Tune()` optimizer. |
 | [`319_feature_get_memory_usage.cpp`](319_feature_get_memory_usage.cpp) | Live memory-usage reporting. |
 | [`320_feature_extra_info.cpp`](320_feature_extra_info.cpp) | Attach per-vector extra info / payload. |
+| [`322_feature_hgraph_brute_force_threshold.cpp`](322_feature_hgraph_brute_force_threshold.cpp) | HGraph search-time `brute_force_threshold`: automatically switch to an exact scan under highly selective filters. |
 
 ### Persistence (`4xx`)
 

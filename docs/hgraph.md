@@ -269,6 +269,14 @@ means that the index uses PQ quantization with 64 subspaces, enables reordering 
 - **Default Value**: false
 - **Note**: This mode supports the `parallelism` search parameter for parallel search within a single query.
 
+### brute_force_threshold
+- **Parameter Type**: float
+- **Parameter Description**: Selectivity-aware brute-force fallback. When set to a value greater than `0.0` and the active filter's `ValidRatio()` is less than or equal to this threshold, the search bypasses graph traversal and runs an exact scan over the valid ids using the best available flatten codes (raw vectors > precise reorder codes > base quantized codes, in that order of preference). The post-search reorder pass is skipped on queries that take the brute-force branch.
+- **Optional Values**: any float in `[0.0, 1.0]`
+- **Default Value**: 0.0 (disabled — preserves legacy behavior)
+- **Applies to**: `KnnSearch` (non-iterator overload, also used by `SearchWithRequest`) and `RangeSearch`. The iterator-style `KnnSearch` does not use this parameter.
+- **Note**: The decision relies on `Filter::ValidRatio()` returning a meaningful selectivity estimate; see [filtered search](docs/docs/en/src/advanced/filtered_search.md). The brute-force scan visits every indexed id once to call `CheckValid`, so its cost is roughly `O(N × dim)` regardless of selectivity. A runnable example is [`322_feature_hgraph_brute_force_threshold.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/322_feature_hgraph_brute_force_threshold.cpp).
+
 ## Examples for Search Parameter String
 ```json
 "hgraph": {
@@ -278,3 +286,11 @@ means that the index uses PQ quantization with 64 subspaces, enables reordering 
 }
 ```
 means that the search will use an ef_search value of 200 to control the search quality and performance trade-off. When the index uses RabitQ split storage, rabitq_one_bit_search=true enables one-bit graph search and parallelism=4 enables parallel search within a single query.
+
+```json
+"hgraph": {
+    "ef_search": 200,
+    "brute_force_threshold": 0.02
+}
+```
+means that whenever the request supplies a filter whose `ValidRatio()` is ≤ 0.02 (i.e. only ~2% of the indexed ids survive the predicate), HGraph will skip the graph traversal and run an exact scan over the surviving ids; queries with weaker filters or no filter at all keep using the normal graph search.

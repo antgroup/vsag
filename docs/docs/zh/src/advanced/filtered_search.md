@@ -166,6 +166,12 @@ index->KnnSearch(query, topk, params, filter, ctx, /*is_last_search=*/false);
 
 - 谓词越严格（`ValidRatio` 越小），搜索需要扩展的候选越多。对图索引而言，谓词非常严格时
   应同步增大 `ef_search`，否则当通过率低于约 1% 时召回率会显著下降。
+- **HGraph 还提供选择率感知的暴搜回退**：在搜索参数里设置
+  `brute_force_threshold`（例如 `0.01–0.05`），当 `Filter::ValidRatio()` 足够
+  小时，HGraph 会自动跳过图遍历，对通过过滤的 id 做一次精确暴扫。当谓词非常
+  严格时，这通常比一味把 `ef_search` 调到很大更划算。详见
+  [HGraph 索引文档](../indexes/hgraph.md#高选择性过滤下的暴搜回退brute_force_threshold)
+  以及示例 [`322_feature_hgraph_brute_force_threshold.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/322_feature_hgraph_brute_force_threshold.cpp)。
 - 位图过滤最快，因为 `Test()` 只是一次位查询。`Filter` 对象内若有重逻辑，需注意它会被
   调用很多次。
 - `RangeSearch` 在过滤通过率较高、范围较宽时建议设定一个合理的 `limited_size`，避免结果
