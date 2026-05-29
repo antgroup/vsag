@@ -58,3 +58,20 @@ target_link_libraries (eval_performance PRIVATE
     ${HDF5_C_STATIC_LIBRARY}
     z dl)
 add_dependencies (eval_performance hdf5)
+
+if (ENABLE_TESTS)
+    add_executable (eval_dataset_test
+        eval_dataset_test.cpp)
+    target_include_directories (eval_dataset_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries (eval_dataset_test PRIVATE
+        Catch2::Catch2WithMain
+        eval_obj
+        simd
+        vsag
+        vsag_eval_common
+        ${HDF5_CPP_STATIC_LIBRARY}
+        ${HDF5_C_STATIC_LIBRARY}
+        z dl)
+    add_dependencies (eval_dataset_test hdf5 Catch2)
+endif ()

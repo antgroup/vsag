@@ -182,6 +182,27 @@ public:
         return vector_type_;
     }
 
+    // Per-record byte offsets into the on-disk sparse byte streams. For a
+    // sparse split with N records, GetSparseTrainOffsets() returns a vector
+    // of size N+1 where offsets[i] is the start of record i and offsets[N]
+    // equals the total byte stream length, enabling O(1) record-i lookup.
+    [[nodiscard]] const std::vector<uint64_t>&
+    GetSparseTrainOffsets() const {
+        return sparse_train_offsets_;
+    }
+    [[nodiscard]] const std::vector<uint64_t>&
+    GetSparseTestOffsets() const {
+        return sparse_test_offsets_;
+    }
+    [[nodiscard]] const std::vector<uint64_t>&
+    GetTrainTokenSequenceOffsets() const {
+        return train_token_seq_offsets_;
+    }
+    [[nodiscard]] const std::vector<uint64_t>&
+    GetTestTokenSequenceOffsets() const {
+        return test_token_seq_offsets_;
+    }
+
     std::string
     GetFilePath() {
         return this->file_path_;
@@ -209,10 +230,12 @@ public:
         for (auto& i : sparse_train_) {
             delete[] i.ids_;
             delete[] i.vals_;
+            delete[] i.token_sequence_;
         }
         for (auto& i : sparse_test_) {
             delete[] i.ids_;
             delete[] i.vals_;
+            delete[] i.token_sequence_;
         }
         for (auto& mv : multi_train_vectors_) {
             delete[] mv.vectors_;
@@ -263,7 +286,7 @@ private:
 private:
     vsag::DistanceFuncType distance_func_;
 
-private:
+protected:
     std::shared_ptr<char[]> train_;
     std::shared_ptr<char[]> test_;
     std::shared_ptr<int64_t[]> neighbors_;
@@ -287,6 +310,20 @@ private:
 
     std::vector<SparseVector> sparse_train_;
     std::vector<SparseVector> sparse_test_;
+
+    // Per-record byte offsets within /train and /test sparse byte streams.
+    // Always length N+1 (Q+1 for test), with offsets_.back() == byte stream
+    // total size. Built on load (from the optional /train_offsets &
+    // /test_offsets datasets, or recomputed if absent) and used for O(1)
+    // random access to the i-th sparse vector record on disk.
+    std::vector<uint64_t> sparse_train_offsets_;
+    std::vector<uint64_t> sparse_test_offsets_;
+
+    // Per-record byte offsets within /train_token_sequences &
+    // /test_token_sequences. Only populated when the corresponding token
+    // sequence dataset is present.
+    std::vector<uint64_t> train_token_seq_offsets_;
+    std::vector<uint64_t> test_token_seq_offsets_;
 
     std::vector<vsag::MultiVector> multi_train_vectors_;
     std::vector<vsag::MultiVector> multi_test_vectors_;
