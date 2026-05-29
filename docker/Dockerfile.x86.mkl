@@ -1,9 +1,12 @@
 
-# base image
-FROM ubuntu:22.04
+# Intel oneAPI MKL variant of the VSAG CI image for x86_64.
+#
+# Built on top of vsaglib/vsag:ci-x86-base (see docker/Dockerfile.x86.base).
+# Used by the CI jobs that exercise the MKL BLAS backend
+# (`VSAG_ENABLE_INTEL_MKL=ON`): asan / tsan / asan-simd push jobs and the
+# daily SIMD/TSAN matrices.
 
-# update and install basic deps
-RUN apt update && apt install -y wget gpg sudo
+FROM vsaglib/vsag:ci-x86-base
 
 # install intel-mkl and fix soft links
 RUN wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB \
@@ -13,11 +16,3 @@ RUN apt update && apt install -y intel-oneapi-mkl intel-oneapi-mkl-devel
 RUN [ ! -f /opt/intel/oneapi/mkl/latest/lib/intel64/libmkl_def.so ] && ln -s /opt/intel/oneapi/mkl/latest/lib/intel64/libmkl_def.so.2 /opt/intel/oneapi/mkl/latest/lib/intel64/libmkl_def.so
 RUN [ ! -f /opt/intel/oneapi/mkl/latest/lib/intel64/libmkl_avx2.so ] && ln -s /opt/intel/oneapi/mkl/latest/lib/intel64/libmkl_avx2.so.2 /opt/intel/oneapi/mkl/latest/lib/intel64/libmkl_avx2.so
 RUN [ ! -f /opt/intel/oneapi/mkl/latest/lib/intel64/libmkl_mc3.so ] && ln -s /opt/intel/oneapi/mkl/latest/lib/intel64/libmkl_mc3.so.2 /opt/intel/oneapi/mkl/latest/lib/intel64/libmkl_mc3.so
-
-# install build tools
-RUN apt install -y git g++ cmake ninja-build gdb ccache build-essential lcov gfortran
-RUN apt install -y clang-15 clangd-15 clang-format-15 python3-pip
-RUN ln -s /usr/bin/clang-format-15 /usr/bin/clang-format
-
-# install vsag deps
-RUN apt install -y python3-dev libomp-15-dev libaio-dev libcurl4-openssl-dev liburing-dev

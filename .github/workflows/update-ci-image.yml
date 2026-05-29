@@ -1,32 +1,68 @@
 name: Update Docker Image
 
 on:
-  push: # refresh ci container
+  push: # refresh ci containers
     paths: [ 'docker/**' ]
   pull_request: # to make sure dockerfile change correctly
     branches: [ 'main' ]
     paths: [ 'docker/**' ]
 
 jobs:
-  docker:
+  # The CI images form a small chain: ci-x86-base is the shared toolchain
+  # layer, and ci-x86-mkl / ci-x86-openblas are built FROM it. We build all
+  # three in a single job so PR runs (push: false) can validate end-to-end:
+  # the variant builds resolve `FROM vsaglib/vsag:ci-x86-base` against the
+  # base image we just loaded into the local Docker daemon, not whatever
+  # tag happens to be on Docker Hub.
+  build:
+    name: Build CI Images
     runs-on: ubuntu-latest
     steps:
-      -
-        name: Login to Docker Hub
+      # Docker Hub credentials only flow into runs triggered from the
+      # antgroup/vsag repo itself (push events, and same-repo PRs).
+      # `pull_request` runs from forks deliberately have no access to
+      # secrets, so we skip the login on PRs and rely on `push: false`
+      # for the variant builds. The `docker` buildx driver below still
+      # loads each image into the host daemon, so the `mkl`/`openblas`
+      # variants' `FROM vsaglib/vsag:ci-x86-base` resolves locally
+      # without ever talking to the registry.
+      - name: Login to Docker Hub
+        if: github.event_name == 'push'
         uses: docker/login-action@v3
         with:
           username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-      -
-        name: Set up QEMU
+      - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
-      -
-        name: Set up Docker Buildx
+      # The default `docker-container` driver keeps built images inside the
+      # buildkit container, so `FROM vsaglib/vsag:ci-x86-base` in the
+      # variant builds would not see the base we just built. The plain
+      # `docker` driver loads images straight into the host daemon, which
+      # is what `FROM` resolves against.
+      - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-      -
-        name: Build and push
+        with:
+          driver: docker
+      - name: Build ci-x86-base
         uses: docker/build-push-action@v6
         with:
-          file: ./docker/Dockerfile.x86
-          push: true
-          tags: vsaglib/vsag:ci-x86
+          file: ./docker/Dockerfile.x86.base
+          # PRs only build (push: false) so the registry isn't polluted by
+          # transient PR images. With the `docker` driver above, every
+          # build is loaded into the host daemon automatically, so the
+          # variant builds below can resolve `FROM vsaglib/vsag:ci-x86-base`
+          # locally instead of pulling from Docker Hub.
+          push: ${{ github.event_name == 'push' }}
+          tags: vsaglib/vsag:ci-x86-base
+      - name: Build ci-x86-mkl
+        uses: docker/build-push-action@v6
+        with:
+          file: ./docker/Dockerfile.x86.mkl
+          push: ${{ github.event_name == 'push' }}
+          tags: vsaglib/vsag:ci-x86-mkl
+      - name: Build ci-x86-openblas
+        uses: docker/build-push-action@v6
+        with:
+          file: ./docker/Dockerfile.x86.openblas
+          push: ${{ github.event_name == 'push' }}
+          tags: vsaglib/vsag:ci-x86-openblas
