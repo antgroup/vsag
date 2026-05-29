@@ -4,10 +4,35 @@ set (source_dir ${CMAKE_CURRENT_BINARY_DIR}/${name}/source)
 set (install_dir ${CMAKE_CURRENT_BINARY_DIR}/${name}/install)
 
 option (USE_SYSTEM_OPENBLAS "Use system-installed OpenBLAS instead of building from source" OFF)
+vsag_get_system_dep_policy (OPENBLAS _vsag_dep_policy)
+if (USE_SYSTEM_OPENBLAS AND _vsag_dep_policy STREQUAL "OFF")
+    set (_vsag_dep_policy "AUTO")
+endif ()
 
 set (OPENBLAS_FOUND FALSE)
 
-if (USE_SYSTEM_OPENBLAS)
+if (TARGET OpenBLAS::OpenBLAS AND NOT _vsag_dep_policy STREQUAL "OFF")
+    set (OPENBLAS_FOUND TRUE)
+    set (BLAS_LIBRARIES OpenBLAS::OpenBLAS)
+    set (OPENBLAS_INCLUDE_DIRS "")
+    if (NOT TARGET ${name})
+        add_custom_target (${name})
+    endif ()
+    message (STATUS "Using external OpenBLAS target: OpenBLAS::OpenBLAS")
+elseif (NOT _vsag_dep_policy STREQUAL "OFF")
+    find_package (OpenBLAS CONFIG QUIET)
+    if (TARGET OpenBLAS::OpenBLAS)
+        set (OPENBLAS_FOUND TRUE)
+        set (BLAS_LIBRARIES OpenBLAS::OpenBLAS)
+        set (OPENBLAS_INCLUDE_DIRS "")
+        if (NOT TARGET ${name})
+            add_custom_target (${name})
+        endif ()
+        message (STATUS "Using external OpenBLAS target: OpenBLAS::OpenBLAS")
+    endif ()
+endif ()
+
+if (NOT OPENBLAS_FOUND AND NOT _vsag_dep_policy STREQUAL "OFF")
     # Try to find system-installed OpenBLAS
     find_library (OPENBLAS_LIB
         NAMES openblas
@@ -86,17 +111,23 @@ if (USE_SYSTEM_OPENBLAS)
         endif ()
 
         # Create a dummy target for consistency with dependencies
-        add_custom_target (${name})
+        if (NOT TARGET ${name})
+            add_custom_target (${name})
+        endif ()
     else ()
-        message (WARNING
-                 "System OpenBLAS not found (USE_SYSTEM_OPENBLAS=ON). Falling back to building from source.")
+        if (_vsag_dep_policy STREQUAL "ON")
+            vsag_fail_missing_system_dep (OPENBLAS OpenBLAS "OpenBLAS::OpenBLAS")
+        elseif (USE_SYSTEM_OPENBLAS)
+            message (WARNING
+                     "System OpenBLAS not found (USE_SYSTEM_OPENBLAS=ON). Falling back to building from source.")
+        endif ()
         message (STATUS "  OPENBLAS_LIB: ${OPENBLAS_LIB}")
         message (STATUS "  OPENBLAS_INCLUDE: ${OPENBLAS_INCLUDE}")
         message (STATUS "  LAPACKE_INCLUDE: ${LAPACKE_INCLUDE}")
     endif ()
 endif ()
 
-if (USE_SYSTEM_OPENBLAS AND OPENBLAS_FOUND)
+if (OPENBLAS_FOUND AND DEFINED OPENBLAS_LIB AND OPENBLAS_LIB)
     set (BLAS_LIBRARIES ${OPENBLAS_LIB})
 
     if (DEFINED OPENBLAS_LAPACKE_LIB AND OPENBLAS_LAPACKE_LIB)
@@ -116,6 +147,8 @@ if (USE_SYSTEM_OPENBLAS AND OPENBLAS_FOUND)
     endif ()
 
     message (STATUS "Using system OpenBLAS as BLAS backend: ${OPENBLAS_LIB}")
+elseif (OPENBLAS_FOUND)
+    message (STATUS "Using system OpenBLAS as BLAS backend")
 else ()
     if (APPLE AND DEFINED GFORTRAN_LIB AND EXISTS "${GFORTRAN_LIB}")
         set (BLAS_LIBRARIES ${install_dir}/lib/libopenblas.a "${GFORTRAN_LIB}")
@@ -132,7 +165,12 @@ else ()
 endif ()
 
 add_library (vsag_openblas_headers INTERFACE)
-target_include_directories (vsag_openblas_headers INTERFACE ${OPENBLAS_INCLUDE_DIRS})
+if (OPENBLAS_INCLUDE_DIRS)
+    target_include_directories (vsag_openblas_headers INTERFACE ${OPENBLAS_INCLUDE_DIRS})
+endif ()
+if (TARGET OpenBLAS::OpenBLAS)
+    target_link_libraries (vsag_openblas_headers INTERFACE OpenBLAS::OpenBLAS)
+endif ()
 
 set (BLAS_LIBRARIES "${BLAS_LIBRARIES}" CACHE STRING "Final list of BLAS libraries to link against." FORCE)
 

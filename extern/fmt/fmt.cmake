@@ -1,6 +1,32 @@
 
 include (FetchContent)
 
+vsag_get_system_dep_policy (FMT _vsag_dep_policy)
+if (TARGET fmt::fmt OR TARGET fmt::fmt-header-only)
+    if (NOT TARGET fmt::fmt AND TARGET fmt::fmt-header-only)
+        add_library (fmt::fmt ALIAS fmt::fmt-header-only)
+    endif ()
+    if (NOT TARGET fmt::fmt-header-only AND TARGET fmt::fmt)
+        add_library (fmt::fmt-header-only ALIAS fmt::fmt)
+    endif ()
+    vsag_note_system_dep (fmt fmt::fmt)
+    return ()
+elseif (NOT _vsag_dep_policy STREQUAL "OFF")
+    find_path (FMT_INCLUDE_DIR NAMES fmt/format.h)
+    find_library (FMT_LIBRARY NAMES fmt)
+    if (FMT_INCLUDE_DIR AND FMT_LIBRARY)
+        add_library (fmt::fmt UNKNOWN IMPORTED GLOBAL)
+        set_target_properties (fmt::fmt PROPERTIES
+            IMPORTED_LOCATION ${FMT_LIBRARY}
+            INTERFACE_INCLUDE_DIRECTORIES ${FMT_INCLUDE_DIR})
+        add_library (fmt::fmt-header-only ALIAS fmt::fmt)
+        vsag_note_system_dep (fmt fmt::fmt)
+        return ()
+    elseif (_vsag_dep_policy STREQUAL "ON")
+        vsag_fail_missing_system_dep (FMT fmt "fmt::fmt, fmt::fmt-header-only")
+    endif ()
+endif ()
+
 # suppress "stringop-overflow" warning which caused by a compiler bug in gcc 10 or earlier
 # ref: https://github.com/fmtlib/fmt/issues/2708
 set (FMT_SYSTEM_HEADERS ON)

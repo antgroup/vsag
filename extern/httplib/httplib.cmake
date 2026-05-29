@@ -15,6 +15,38 @@
 
 include (FetchContent)
 
+vsag_get_system_dep_policy (HTTPLIB _vsag_dep_policy)
+if (TARGET httplib::httplib OR TARGET httplib)
+    if (NOT TARGET vsag_httplib)
+        add_library (vsag_httplib INTERFACE)
+    endif ()
+    if (TARGET httplib::httplib)
+        target_link_libraries (vsag_httplib INTERFACE httplib::httplib)
+    else ()
+        target_link_libraries (vsag_httplib INTERFACE httplib)
+    endif ()
+    target_compile_definitions (vsag_httplib INTERFACE CPP_HTTPLIB_OPENSSL_SUPPORT)
+    vsag_note_system_dep (httplib vsag_httplib)
+    return ()
+elseif (NOT _vsag_dep_policy STREQUAL "OFF")
+    find_package (httplib CONFIG QUIET)
+    if (TARGET httplib::httplib OR TARGET httplib)
+        if (NOT TARGET vsag_httplib)
+            add_library (vsag_httplib INTERFACE)
+        endif ()
+        if (TARGET httplib::httplib)
+            target_link_libraries (vsag_httplib INTERFACE httplib::httplib)
+        else ()
+            target_link_libraries (vsag_httplib INTERFACE httplib)
+        endif ()
+        target_compile_definitions (vsag_httplib INTERFACE CPP_HTTPLIB_OPENSSL_SUPPORT)
+        vsag_note_system_dep (httplib vsag_httplib)
+        return ()
+    elseif (_vsag_dep_policy STREQUAL "ON")
+        vsag_fail_missing_system_dep (HTTPLIB httplib "httplib::httplib, httplib")
+    endif ()
+endif ()
+
 # cpp-httplib is a header-only library, we only need the main header
 set (httplib_urls
     https://github.com/yhirose/cpp-httplib/archive/refs/tags/v0.35.0.tar.gz

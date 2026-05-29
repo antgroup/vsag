@@ -138,6 +138,40 @@ jobs:
           retention-days: 1
           overwrite: 'true'
 
+  system-deps-smoke:
+    name: System Deps Smoke
+    needs: [changes, format]
+    if: needs.changes.outputs.cmake == 'true'
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libfmt-dev \
+            nlohmann-json3-dev \
+            libroaring-dev \
+            libboost-dev \
+            libopenblas-dev \
+            liblapacke-dev
+      - name: Configure with selected system deps
+        run: |
+          cmake -S . -B build-system-deps \
+            -DVSAG_USE_SYSTEM_DEPS=AUTO \
+            -DVSAG_USE_SYSTEM_FMT=ON \
+            -DVSAG_USE_SYSTEM_NLOHMANN_JSON=ON \
+            -DVSAG_USE_SYSTEM_ROARING=ON \
+            -DVSAG_USE_SYSTEM_BOOST=ON \
+            -DVSAG_USE_SYSTEM_OPENBLAS=ON \
+            -DVSAG_USE_SYSTEM_ANTLR4=OFF \
+            -DVSAG_USE_SYSTEM_CPUINFO=OFF \
+            -DVSAG_USE_SYSTEM_THREAD_POOL=OFF \
+            -DVSAG_USE_SYSTEM_TSL=OFF \
+            -DCMAKE_BUILD_TYPE=Debug
+      - name: Build system deps smoke
+        run: cmake --build build-system-deps --parallel 2
+
   test-asan-x86-unittests:
     name: Test X86 Unittests
     needs: [changes, build-asan-x86]

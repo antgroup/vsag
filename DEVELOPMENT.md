@@ -123,6 +123,56 @@ VSAG provides several CMake options to customize the build:
   - Override the OpenBLAS source archive URL/path used by `ExternalProject_Add`
   - Useful for offline builds, local mirrors, or pre-downloaded archives
 
+### External Third-Party Dependencies
+
+VSAG can reuse third-party dependencies that are already provided by the system package manager,
+a CMake package manager, or an embedding superproject. Bundled dependencies remain the fallback
+unless external dependencies are explicitly required.
+
+- **`VSAG_USE_SYSTEM_DEPS`** (default: `AUTO`)
+  - `AUTO`: reuse an existing CMake target or `find_package` result when available, otherwise use
+    the bundled dependency.
+  - `ON`: require external dependencies. CMake fails fast with a clear error if a dependency is not
+    available.
+  - `OFF`: always use VSAG's bundled dependency flow.
+
+- **`VSAG_USE_SYSTEM_<DEP>`**
+  - Override the global policy for one dependency. Empty means inherit `VSAG_USE_SYSTEM_DEPS`.
+  - Supported dependency names are `ANTLR4`, `ARGPARSE`, `BOOST`, `CATCH2`, `CPUINFO`, `FMT`,
+    `HDF5`, `HTTPLIB`, `MKL`, `NLOHMANN_JSON`, `OPENBLAS`, `PYBIND11`, `ROARING`, `TABULATE`,
+    `THREAD_POOL`, `TSL`, and `YAML_CPP`.
+
+Example using available system packages while keeping bundled fallbacks:
+
+```bash
+cmake -S . -B build -DVSAG_USE_SYSTEM_DEPS=AUTO
+cmake --build build
+```
+
+Example for distro packaging, where external dependencies are mandatory:
+
+```bash
+cmake -S . -B build \
+  -DVSAG_USE_SYSTEM_DEPS=ON \
+  -DVSAG_USE_SYSTEM_ANTLR4=OFF \
+  -DVSAG_USE_SYSTEM_THREAD_POOL=OFF
+cmake --build build
+```
+
+An embedding CMake project may also provide canonical targets before adding VSAG:
+
+```cmake
+find_package(fmt CONFIG REQUIRED)
+find_package(nlohmann_json CONFIG REQUIRED)
+find_package(roaring CONFIG REQUIRED)
+
+set(VSAG_USE_SYSTEM_DEPS AUTO CACHE STRING "")
+add_subdirectory(vsag)
+```
+
+For the header-only thread pool snippet, provide either a `vsag_thread_pool_headers` interface target
+or set `VSAG_THREAD_POOL_INCLUDE_DIR` to a directory containing `ThreadPool.h`.
+
 ### Other Build Options
 
 - **`ENABLE_TESTS`** (default: `OFF`)

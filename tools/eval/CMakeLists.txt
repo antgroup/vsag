@@ -46,7 +46,7 @@ endif ()
 
 add_library (eval_obj OBJECT ${eval_srcs})
 target_link_libraries (eval_obj PRIVATE vsag_eval_common)
-add_dependencies (eval_obj hdf5 yaml-cpp tabulate)
+maybe_add_dependencies (eval_obj hdf5 yaml-cpp tabulate)
 
 add_executable (eval_performance main.cpp)
 target_link_libraries (eval_performance PRIVATE
@@ -57,4 +57,4 @@ target_link_libraries (eval_performance PRIVATE
     ${HDF5_CPP_STATIC_LIBRARY}
     ${HDF5_C_STATIC_LIBRARY}
     z dl)
-add_dependencies (eval_performance hdf5)
+maybe_add_dependencies (eval_performance hdf5)
