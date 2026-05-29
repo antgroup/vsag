@@ -454,7 +454,7 @@ public:
     }
 
     virtual void
-    ExportCache(std::ostream& out_stream) {
+    ExportCache(std::ostream& out_stream) const {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                             "Index doesn't support ExportCache");
     }

@@ -932,14 +932,31 @@ public:
         throw std::runtime_error("Index not support check id exist");
     }
 
-    void
-    ExportCache(std::ostream& out_stream) {
-        throw std::runtime_error("Index not support export cache");
+    /**
+     * @brief Export the index's build-time cache (e.g. graph neighbors keyed by
+     * source id) into the given stream so it can be reused to accelerate a
+     * later Build().
+     *
+     * @param out_stream Destination stream to write the cache blob into.
+     * @return tl::expected<void, Error>; an Error is returned if the index
+     * does not support exporting a build cache or the export fails.
+     */
+    virtual tl::expected<void, Error>
+    ExportCache(std::ostream& out_stream) const {
+        throw std::runtime_error("Index doesn't support ExportCache");
     }
 
-    void
+    /**
+     * @brief Import a previously exported build-time cache. Once imported, the
+     * next Build() call will use the cache to accelerate construction.
+     *
+     * @param in_stream Source stream containing a blob produced by ExportCache.
+     * @return tl::expected<void, Error>; an Error is returned if the index
+     * does not support importing a build cache or the import fails.
+     */
+    virtual tl::expected<void, Error>
     ImportCache(std::istream& in_stream) {
-        throw std::runtime_error("Index not support import cache");
+        throw std::runtime_error("Index doesn't support ImportCache");
     }
 
 public:
