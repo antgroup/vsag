@@ -145,11 +145,7 @@ if (OPENBLAS_FOUND)
     endif ()
     message (STATUS "Using system OpenBLAS as BLAS backend")
 else ()
-    if (APPLE AND DEFINED GFORTRAN_LIB AND EXISTS "${GFORTRAN_LIB}")
-        set (BLAS_LIBRARIES ${install_dir}/lib/libopenblas.a "${GFORTRAN_LIB}")
-    else ()
-        set (BLAS_LIBRARIES ${install_dir}/lib/libopenblas.a gfortran)
-    endif ()
+    set (BLAS_LIBRARIES ${install_dir}/lib/libopenblas.a)
     if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
         list (PREPEND BLAS_LIBRARIES omp)
     else ()
@@ -203,9 +199,9 @@ if (NOT OPENBLAS_FOUND)
             OMP_NUM_THREADS=1
             PATH=/usr/lib/ccache:$ENV{PATH}
             LD_LIBRARY_PATH=/opt/alibaba-cloud-compiler/lib64/:$ENV{LD_LIBRARY_PATH}
-            make USE_THREAD=0 USE_LOCKING=1 DYNAMIC_ARCH=1 -j${NUM_BUILDING_JOBS}
+            make USE_THREAD=0 USE_LOCKING=1 DYNAMIC_ARCH=1 NOFORTRAN=1 -j${NUM_BUILDING_JOBS}
         INSTALL_COMMAND
-            make DYNAMIC_ARCH=1 PREFIX=${install_dir} install
+            make DYNAMIC_ARCH=1 NOFORTRAN=1 PREFIX=${install_dir} install
         BUILD_IN_SOURCE 1
         LOG_CONFIGURE TRUE
         LOG_BUILD TRUE
