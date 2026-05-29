@@ -14,10 +14,16 @@
 
 #include <fmt/format.h>
 
+#include <chrono>
+#include <future>
+#include <unordered_map>
+#include <unordered_set>
+
 #include "datacell/flatten_datacell_parameter.h"
 #include "dataset_impl.h"
 #include "hgraph.h"  // IWYU pragma: keep
 #include "impl/heap/standard_heap.h"
+#include "impl/logger/logger.h"
 #include "impl/odescent/odescent_graph_builder.h"
 #include "impl/pruning_strategy.h"
 #include "impl/searcher/basic_searcher.h"
@@ -78,6 +84,16 @@ HGraph::Train(const DatasetPtr& base) {
 std::vector<int64_t>
 HGraph::Build(const DatasetPtr& data) {
     CHECK_ARGUMENT(GetNumElements() == 0, "index is not empty");
+    if (this->has_loaded_cache()) {
+        // A previously exported cache has been imported via ImportCache().
+        // Take the accelerated build path that warm-starts neighbours from
+        // the cache and refines them, instead of building from scratch.
+        auto ret = this->build_with_cache(data);
+        if (use_elp_optimizer_) {
+            elp_optimize();
+        }
+        return ret;
+    }
     this->Train(data);
     std::vector<int64_t> ret;
     if (graph_type_ == GRAPH_TYPE_VALUE_NSW) {
@@ -662,7 +678,7 @@ HGraph::reorder(const void* query,
 }
 
 void
-HGraph::ExportCache(std::ostream& out_stream) {
+HGraph::ExportCache(std::ostream& out_stream) const {
     IOStreamWriter writer(out_stream);
     this->fullfill_cache();
     this->cache_->Serialize(writer);
@@ -675,7 +691,7 @@ HGraph::ImportCache(std::istream& in_stream) {
 }
 
 void
-HGraph::fullfill_cache() {
+HGraph::fullfill_cache() const {
     auto& source_ids = this->cache_->source_ids_;
     auto& source_cache_map = this->cache_->neighbors_;
     source_ids.clear();
@@ -695,6 +711,692 @@ HGraph::fullfill_cache() {
         this->bottom_graph_->GetNeighbors(inner_id, inner_id_list);
         cached.insert(cached.end(), inner_id_list.begin(), inner_id_list.end());
     }
+}
+
+namespace {
+
+uint64_t
+build_cache_now_us() {
+    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+                                     std::chrono::steady_clock::now().time_since_epoch())
+                                     .count());
+}
+
+constexpr uint32_t HIT_REFINE_ROUNDS = 2;
+constexpr uint32_t MISSED_REFINE_ROUNDS = 4;
+
+}  // namespace
+
+DistHeapPtr
+HGraph::collect_refine_candidates(const DatasetPtr& data,
+                                  InnerIdType inner_id,
+                                  uint32_t input_idx,
+                                  const FlattenInterfacePtr& flatten_codes,
+                                  uint32_t refine_ef,
+                                  bool use_self_as_entry) const {
+    const uint32_t effective_refine_ef = refine_ef == 0 ? this->ef_construct_ : refine_ef;
+    CHECK_ARGUMENT(effective_refine_ef > 0, "refine ef must be greater than 0");
+
+    auto candidates = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
+    std::unordered_set<InnerIdType> seen;
+
+    Vector<InnerIdType> current_neighbors(allocator_);
+    this->bottom_graph_->GetNeighbors(inner_id, current_neighbors);
+    seen.reserve(current_neighbors.size() + effective_refine_ef);
+    for (const auto neighbor : current_neighbors) {
+        if (neighbor == inner_id || not seen.emplace(neighbor).second) {
+            continue;
+        }
+        candidates->Push(flatten_codes->ComputePairVectors(neighbor, inner_id), neighbor);
+    }
+
+    if (this->entry_point_id_ != INVALID_ENTRY_POINT && this->bottom_graph_->TotalCount() > 0) {
+        // For cache-hit nodes, start the search from inner_id itself so the
+        // warm-started stale neighbours act as the initial frontier and refine
+        // exploits the local neighbourhood efficiently. For cache-missed /
+        // cold-start nodes, use the global entry point for broad exploration.
+        // When the node has no cached neighbours, self-entry is meaningless,
+        // so fall back to the global entry point.
+        const auto search_entry_point =
+            (use_self_as_entry && not current_neighbors.empty()) ? inner_id : this->entry_point_id_;
+        InnerSearchParam param;
+        param.topk = static_cast<int64_t>(effective_refine_ef);
+        param.ef = effective_refine_ef;
+        param.ep = search_entry_point;
+        param.is_inner_id_allowed = nullptr;
+        auto result = this->search_one_graph(get_data(data, input_idx),
+                                             this->bottom_graph_,
+                                             flatten_codes,
+                                             param,
+                                             (VisitedListPtr) nullptr,
+                                             nullptr);
+        while (not result->Empty()) {
+            auto candidate = result->Top().second;
+            result->Pop();
+            if (candidate == inner_id || not seen.emplace(candidate).second) {
+                continue;
+            }
+            candidates->Push(flatten_codes->ComputePairVectors(candidate, inner_id), candidate);
+        }
+    }
+
+    return candidates;
+}
+
+void
+HGraph::select_refine_neighbors_with_distances(const DatasetPtr& data,
+                                               InnerIdType inner_id,
+                                               uint32_t input_idx,
+                                               const FlattenInterfacePtr& flatten_codes,
+                                               uint32_t refine_ef,
+                                               bool use_self_as_entry,
+                                               Vector<InnerIdType>& out_neighbors,
+                                               Vector<float>& out_distances) const {
+    out_neighbors.clear();
+    out_distances.clear();
+
+    auto candidates = this->collect_refine_candidates(
+        data, inner_id, input_idx, flatten_codes, refine_ef, use_self_as_entry);
+
+    if (candidates->Empty()) {
+        return;
+    }
+
+    const uint64_t max_size = this->bottom_graph_->MaximumDegree();
+    select_edges_by_heuristic(candidates, max_size, flatten_codes, allocator_, this->alpha_);
+
+    out_neighbors.reserve(candidates->Size());
+    out_distances.reserve(candidates->Size());
+    while (not candidates->Empty()) {
+        out_neighbors.emplace_back(candidates->Top().second);
+        out_distances.emplace_back(candidates->Top().first);
+        candidates->Pop();
+    }
+}
+
+void
+HGraph::refine_nodes_two_phase(
+    const DatasetPtr& data,
+    const std::vector<InnerIdType>& ids_to_refine,
+    std::string_view phase_name,
+    uint32_t rounds,
+    uint32_t refine_ef,
+    bool use_self_as_entry,
+    const FlattenInterfacePtr& flatten_codes,
+    const std::unordered_map<InnerIdType, uint32_t>& inner_id_to_input_idx) {
+    if (ids_to_refine.empty() || rounds == 0) {
+        return;
+    }
+
+    uint32_t parallelism = 1;
+    if (this->thread_pool_ != nullptr && this->build_thread_count_ > 1 &&
+        ids_to_refine.size() > 1) {
+        parallelism = std::min<uint32_t>(static_cast<uint32_t>(this->build_thread_count_),
+                                         static_cast<uint32_t>(ids_to_refine.size()));
+    }
+
+    const uint32_t effective_refine_ef = refine_ef == 0 ? this->ef_construct_ : refine_ef;
+    CHECK_ARGUMENT(effective_refine_ef > 0, "refine ef must be greater than 0");
+
+    logger::info("[hgraph_build_cache] starting {} nodes={} rounds={} parallelism={}",
+                 phase_name,
+                 ids_to_refine.size(),
+                 rounds,
+                 parallelism);
+
+    constexpr int64_t block_size = 128;
+    const auto begin = build_cache_now_us();
+
+    for (uint32_t round = 0; round < rounds; ++round) {
+        const auto round_begin = build_cache_now_us();
+
+        // ===== Phase 1: parallel search & local select (also keep distances) =====
+        Vector<Vector<InnerIdType>> selected_neighbors(
+            ids_to_refine.size(), Vector<InnerIdType>(allocator_), allocator_);
+        Vector<Vector<float>> selected_distances(
+            ids_to_refine.size(), Vector<float>(allocator_), allocator_);
+
+        if (parallelism <= 1) {
+            for (uint64_t i = 0; i < ids_to_refine.size(); ++i) {
+                const auto inner_id = ids_to_refine[i];
+                auto data_iter = inner_id_to_input_idx.find(inner_id);
+                CHECK_ARGUMENT(data_iter != inner_id_to_input_idx.end(),
+                               fmt::format("missing input row for inner_id {}", inner_id));
+                this->select_refine_neighbors_with_distances(data,
+                                                             inner_id,
+                                                             data_iter->second,
+                                                             flatten_codes,
+                                                             effective_refine_ef,
+                                                             use_self_as_entry,
+                                                             selected_neighbors[i],
+                                                             selected_distances[i]);
+            }
+        } else {
+            std::vector<std::future<void>> futures;
+            futures.reserve((ids_to_refine.size() + block_size - 1) / block_size);
+            for (int64_t i = 0; i < static_cast<int64_t>(ids_to_refine.size()); i += block_size) {
+                const auto end =
+                    std::min(i + block_size, static_cast<int64_t>(ids_to_refine.size()));
+                futures.emplace_back(this->thread_pool_->GeneralEnqueue([this,
+                                                                         &data,
+                                                                         &ids_to_refine,
+                                                                         &inner_id_to_input_idx,
+                                                                         &flatten_codes,
+                                                                         effective_refine_ef,
+                                                                         use_self_as_entry,
+                                                                         &selected_neighbors,
+                                                                         &selected_distances,
+                                                                         i,
+                                                                         end]() {
+                    for (int64_t idx = i; idx < end; ++idx) {
+                        const auto inner_id = ids_to_refine[idx];
+                        auto data_iter = inner_id_to_input_idx.find(inner_id);
+                        CHECK_ARGUMENT(data_iter != inner_id_to_input_idx.end(),
+                                       fmt::format("missing input row for inner_id {}", inner_id));
+                        this->select_refine_neighbors_with_distances(data,
+                                                                     inner_id,
+                                                                     data_iter->second,
+                                                                     flatten_codes,
+                                                                     effective_refine_ef,
+                                                                     use_self_as_entry,
+                                                                     selected_neighbors[idx],
+                                                                     selected_distances[idx]);
+                    }
+                }));
+            }
+            std::exception_ptr search_ex = nullptr;
+            for (auto& future : futures) {
+                try {
+                    future.get();
+                } catch (...) {
+                    if (not search_ex) {
+                        search_ex = std::current_exception();
+                    }
+                }
+            }
+            if (search_ex) {
+                std::rethrow_exception(search_ex);
+            }
+        }
+        const auto search_elapsed = build_cache_now_us() - round_begin;
+
+        // ===== Phase 2: serial writeback of selected neighbours =====
+        const auto writeback_begin = build_cache_now_us();
+        for (uint64_t i = 0; i < ids_to_refine.size(); ++i) {
+            LockGuard lock(neighbors_mutex_, ids_to_refine[i]);
+            this->bottom_graph_->InsertNeighborsById(ids_to_refine[i], selected_neighbors[i]);
+        }
+        const auto writeback_elapsed = build_cache_now_us() - writeback_begin;
+
+        // ===== Phase 3: reverse-edge install (scatter -> materialise -> shard prune) =====
+        const auto reverse_begin = build_cache_now_us();
+        const uint32_t reverse_shard_count =
+            (parallelism > 1)
+                ? std::max<uint32_t>(parallelism, static_cast<uint32_t>(this->build_thread_count_))
+                : 1U;
+
+        struct reverse_edge_entry {
+            InnerIdType src_id;
+            float dist;
+        };
+        struct scatter_record {
+            InnerIdType target_id;
+            InnerIdType src_id;
+            float dist;
+        };
+        struct reverse_shard {
+            std::unordered_map<InnerIdType, std::vector<reverse_edge_entry>> pending;
+        };
+        std::vector<reverse_shard> shards(reverse_shard_count);
+
+        // ----- (3a) scatter (target,src,dist) into per-(worker,shard) buffers -----
+        const uint32_t scatter_worker_count =
+            (parallelism > 1)
+                ? std::min<uint32_t>(parallelism, static_cast<uint32_t>(ids_to_refine.size()))
+                : 1U;
+
+        std::vector<std::vector<std::vector<scatter_record>>> worker_buckets(
+            scatter_worker_count, std::vector<std::vector<scatter_record>>(reverse_shard_count));
+
+        const uint64_t max_degree = this->bottom_graph_->MaximumDegree();
+        const uint64_t avg_per_bucket =
+            (ids_to_refine.size() * max_degree +
+             static_cast<uint64_t>(scatter_worker_count) * reverse_shard_count - 1) /
+            (static_cast<uint64_t>(scatter_worker_count) * reverse_shard_count);
+        for (auto& wb : worker_buckets) {
+            for (auto& shard_buf : wb) {
+                shard_buf.reserve(avg_per_bucket + 16);
+            }
+        }
+
+        auto scatter_slice = [&](uint32_t worker_idx, uint64_t lo, uint64_t hi) {
+            auto& my_buckets = worker_buckets[worker_idx];
+            for (uint64_t i = lo; i < hi; ++i) {
+                const auto src_id = ids_to_refine[i];
+                const auto& neighbors = selected_neighbors[i];
+                const auto& dists = selected_distances[i];
+                const uint64_t k = neighbors.size();
+                CHECK_ARGUMENT(dists.size() == k,
+                               "selected_neighbors and selected_distances size mismatch");
+                for (uint64_t j = 0; j < k; ++j) {
+                    const auto neighbor_id = neighbors[j];
+                    const uint32_t shard_idx =
+                        static_cast<uint32_t>(neighbor_id) % reverse_shard_count;
+                    my_buckets[shard_idx].push_back({neighbor_id, src_id, dists[j]});
+                }
+            }
+        };
+
+        if (scatter_worker_count <= 1) {
+            scatter_slice(0, 0, ids_to_refine.size());
+        } else {
+            const uint64_t per_worker =
+                (ids_to_refine.size() + scatter_worker_count - 1) / scatter_worker_count;
+            std::vector<std::future<void>> scatter_futures;
+            scatter_futures.reserve(scatter_worker_count);
+            for (uint32_t w = 0; w < scatter_worker_count; ++w) {
+                const uint64_t lo = static_cast<uint64_t>(w) * per_worker;
+                if (lo >= ids_to_refine.size()) {
+                    break;
+                }
+                const uint64_t hi =
+                    std::min(lo + per_worker, static_cast<uint64_t>(ids_to_refine.size()));
+                scatter_futures.emplace_back(this->thread_pool_->GeneralEnqueue(
+                    [&scatter_slice, w, lo, hi]() { scatter_slice(w, lo, hi); }));
+            }
+            std::exception_ptr scatter_ex = nullptr;
+            for (auto& f : scatter_futures) {
+                try {
+                    f.get();
+                } catch (...) {
+                    if (not scatter_ex) {
+                        scatter_ex = std::current_exception();
+                    }
+                }
+            }
+            if (scatter_ex) {
+                std::rethrow_exception(scatter_ex);
+            }
+        }
+
+        // ----- (3b) materialise per-shard (target -> [(src,dist), ...]) maps -----
+        auto materialise_shard = [&](uint32_t shard_idx) {
+            uint64_t total = 0;
+            for (uint32_t w = 0; w < scatter_worker_count; ++w) {
+                total += worker_buckets[w][shard_idx].size();
+            }
+            auto& pending = shards[shard_idx].pending;
+            const uint64_t hint = total / std::max<uint64_t>(max_degree / 2, 1) + 16;
+            pending.reserve(hint);
+            for (uint32_t w = 0; w < scatter_worker_count; ++w) {
+                auto& buf = worker_buckets[w][shard_idx];
+                for (const auto& rec : buf) {
+                    pending[rec.target_id].push_back({rec.src_id, rec.dist});
+                }
+                std::vector<scatter_record>().swap(buf);
+            }
+        };
+
+        if (parallelism <= 1 || reverse_shard_count <= 1) {
+            for (uint32_t s = 0; s < reverse_shard_count; ++s) {
+                materialise_shard(s);
+            }
+        } else {
+            std::vector<std::future<void>> mat_futures;
+            mat_futures.reserve(reverse_shard_count);
+            for (uint32_t s = 0; s < reverse_shard_count; ++s) {
+                mat_futures.emplace_back(this->thread_pool_->GeneralEnqueue(
+                    [&materialise_shard, s]() { materialise_shard(s); }));
+            }
+            std::exception_ptr mat_ex = nullptr;
+            for (auto& f : mat_futures) {
+                try {
+                    f.get();
+                } catch (...) {
+                    if (not mat_ex) {
+                        mat_ex = std::current_exception();
+                    }
+                }
+            }
+            if (mat_ex) {
+                std::rethrow_exception(mat_ex);
+            }
+        }
+        std::vector<std::vector<std::vector<scatter_record>>>().swap(worker_buckets);
+
+        // ----- (3c) per-shard merge + heuristic prune (parallel across shards) -----
+        auto process_shard = [this, &flatten_codes, max_degree](reverse_shard& shard) {
+            Vector<InnerIdType> current_neighbors(allocator_);
+            current_neighbors.reserve(max_degree + 16);
+            std::unordered_set<InnerIdType> existing_set;
+            existing_set.reserve(max_degree * 2 + 16);
+            std::unordered_map<InnerIdType, float> reuse_dist;
+
+            for (auto& entry : shard.pending) {
+                const auto target_id = entry.first;
+                auto& reverse_adds = entry.second;
+
+                LockGuard lock(neighbors_mutex_, target_id);
+
+                current_neighbors.clear();
+                this->bottom_graph_->GetNeighbors(target_id, current_neighbors);
+
+                existing_set.clear();
+                for (auto nid : current_neighbors) {
+                    existing_set.insert(nid);
+                }
+
+                bool changed = false;
+                for (const auto& add : reverse_adds) {
+                    if (add.src_id == target_id) {
+                        continue;
+                    }
+                    if (existing_set.insert(add.src_id).second) {
+                        current_neighbors.push_back(add.src_id);
+                        changed = true;
+                    }
+                }
+                if (not changed) {
+                    continue;
+                }
+
+                if (current_neighbors.size() > max_degree) {
+                    // Reuse src->target distances captured during the select phase.
+                    reuse_dist.clear();
+                    reuse_dist.reserve(reverse_adds.size());
+                    for (const auto& add : reverse_adds) {
+                        auto [it, inserted] = reuse_dist.emplace(add.src_id, add.dist);
+                        if (not inserted && add.dist < it->second) {
+                            it->second = add.dist;
+                        }
+                    }
+
+                    auto edges = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
+                    for (auto neighbor_id : current_neighbors) {
+                        auto rit = reuse_dist.find(neighbor_id);
+                        const float d =
+                            (rit != reuse_dist.end())
+                                ? rit->second
+                                : flatten_codes->ComputePairVectors(neighbor_id, target_id);
+                        edges->Push(d, neighbor_id);
+                    }
+                    select_edges_by_heuristic(
+                        edges, max_degree, flatten_codes, allocator_, this->alpha_);
+                    current_neighbors.clear();
+                    while (not edges->Empty()) {
+                        current_neighbors.emplace_back(edges->Top().second);
+                        edges->Pop();
+                    }
+                }
+                this->bottom_graph_->InsertNeighborsById(target_id, current_neighbors);
+            }
+        };
+
+        if (parallelism <= 1 || reverse_shard_count <= 1) {
+            for (auto& shard : shards) {
+                process_shard(shard);
+            }
+        } else {
+            std::vector<std::future<void>> shard_futures;
+            shard_futures.reserve(shards.size());
+            for (auto& shard : shards) {
+                shard_futures.emplace_back(this->thread_pool_->GeneralEnqueue(
+                    [&process_shard, &shard]() { process_shard(shard); }));
+            }
+            std::exception_ptr shard_ex = nullptr;
+            for (auto& f : shard_futures) {
+                try {
+                    f.get();
+                } catch (...) {
+                    if (not shard_ex) {
+                        shard_ex = std::current_exception();
+                    }
+                }
+            }
+            if (shard_ex) {
+                std::rethrow_exception(shard_ex);
+            }
+        }
+        const auto reverse_elapsed = build_cache_now_us() - reverse_begin;
+        const auto round_elapsed = build_cache_now_us() - round_begin;
+        logger::info(
+            "[hgraph_build_cache] {} round {}/{} finished in {:.3f}s "
+            "(search={:.3f}s writeback={:.3f}s reverse={:.3f}s) processed_nodes={}",
+            phase_name,
+            round + 1,
+            rounds,
+            static_cast<double>(round_elapsed) / 1000000.0,
+            static_cast<double>(search_elapsed) / 1000000.0,
+            static_cast<double>(writeback_elapsed) / 1000000.0,
+            static_cast<double>(reverse_elapsed) / 1000000.0,
+            ids_to_refine.size());
+    }
+    const auto total_elapsed = build_cache_now_us() - begin;
+    logger::info("[hgraph_build_cache] {} finished in {:.3f}s",
+                 phase_name,
+                 static_cast<double>(total_elapsed) / 1000000.0);
+}
+
+std::vector<int64_t>
+HGraph::build_with_cache(const DatasetPtr& data) {
+    CHECK_ARGUMENT(GetNumElements() == 0, "index is not empty");
+    CHECK_ARGUMENT(this->cache_ != nullptr, "build_with_cache requires an imported cache");
+    CHECK_ARGUMENT(data->GetSourceID() != nullptr,
+                   "build_with_cache requires Dataset::SourceID to be set");
+
+    const auto build_begin = build_cache_now_us();
+    this->Train(data);
+
+    const auto* labels = data->GetIds();
+    const auto* source_ids = data->GetSourceID();
+    const auto* extra_infos = data->GetExtraInfos();
+    const auto* attr_sets = data->GetAttributeSets();
+    const int64_t total = data->GetNumElements();
+
+    // ---- Step 1: scan dataset, allocate inner_ids, insert vectors/labels ----
+    Vector<int64_t> valid_indices(allocator_);
+    UnorderedSet<LabelType> seen_labels(allocator_);
+    std::vector<int64_t> failed_ids;
+    for (int64_t i = 0; i < total; ++i) {
+        auto label = labels[i];
+        if (this->label_table_->CheckLabel(label) || seen_labels.find(label) != seen_labels.end()) {
+            failed_ids.emplace_back(label);
+            continue;
+        }
+        seen_labels.insert(label);
+        valid_indices.emplace_back(i);
+    }
+    auto inner_ids = this->get_unique_inner_ids(static_cast<InnerIdType>(valid_indices.size()));
+    auto current_count = total_count_.load();
+    uint64_t new_ids_count = 0;
+    for (auto inner_id : inner_ids) {
+        if (inner_id >= current_count) {
+            ++new_ids_count;
+        }
+    }
+    this->resize(current_count + new_ids_count);
+    this->total_count_ += new_ids_count;
+
+    Vector<Vector<InnerIdType>> route_graph_ids(allocator_);
+    std::vector<InnerIdType> inserted_inner_ids;
+    inserted_inner_ids.reserve(static_cast<uint64_t>(valid_indices.size()));
+    std::unordered_map<InnerIdType, uint32_t> inner_id_to_input_idx;
+    inner_id_to_input_idx.reserve(static_cast<uint64_t>(valid_indices.size()));
+    std::unordered_map<std::string, InnerIdType> source_id_to_new_inner;
+    source_id_to_new_inner.reserve(static_cast<uint64_t>(valid_indices.size()));
+
+    for (uint64_t cur = 0; cur < valid_indices.size(); ++cur) {
+        const auto i = valid_indices[cur];
+        const auto inner_id = inner_ids.at(cur);
+        const auto label = labels[i];
+        this->label_table_->Insert(inner_id, label);
+        if (source_ids != nullptr && not source_ids[i].empty()) {
+            this->label_table_->InsertSourceId(inner_id, source_ids[i]);
+            source_id_to_new_inner.emplace(source_ids[i], inner_id);
+        }
+        this->insert_persistent_codes(get_data(data, static_cast<uint32_t>(i)), inner_id);
+        if (this->extra_infos_ != nullptr && extra_infos != nullptr) {
+            this->extra_infos_->InsertExtraInfo(extra_infos + i * extra_info_size_, inner_id);
+        }
+        if (attr_sets != nullptr && this->use_attribute_filter_) {
+            this->attr_filter_index_->Insert(attr_sets[i], inner_id);
+        }
+
+        inserted_inner_ids.push_back(inner_id);
+        inner_id_to_input_idx.emplace(inner_id, static_cast<uint32_t>(i));
+
+        const auto level = this->get_random_level() - 1;
+        if (level >= 0) {
+            if (level >= static_cast<int>(route_graph_ids.size()) || route_graph_ids.empty()) {
+                for (auto k = static_cast<int>(route_graph_ids.size()); k <= level; ++k) {
+                    route_graph_ids.emplace_back(allocator_);
+                }
+                entry_point_id_ = inner_id;
+            }
+            for (int j = 0; j <= level; ++j) {
+                route_graph_ids[j].emplace_back(inner_id);
+            }
+        }
+    }
+    if (entry_point_id_ == INVALID_ENTRY_POINT && not inserted_inner_ids.empty()) {
+        entry_point_id_ = inserted_inner_ids.front();
+    }
+
+    // ---- Step 2: warm_start - seed neighbours using the cache, classify nodes ----
+    // The cache encodes neighbours by source_id:
+    //   cache_->source_ids_[old_inner_id] -> source_id (string)
+    //   cache_->neighbors_[source_id]     -> [old_inner_id, neighbor_old_inner_id...]
+    // We translate the old neighbour list into the new inner_id space via
+    // (old neighbor inner_id) -> (old source_id) -> (new inner_id).
+    const auto warm_start_begin = build_cache_now_us();
+    const auto& cache_source_ids = this->cache_->source_ids_;
+    const auto& cache_map = this->cache_->neighbors_;
+    const uint64_t max_degree = this->bottom_graph_->MaximumDegree();
+
+    std::vector<InnerIdType> hit_ids;
+    std::vector<InnerIdType> missed_ids;
+    hit_ids.reserve(inserted_inner_ids.size());
+    missed_ids.reserve(inserted_inner_ids.size());
+
+    uint64_t hit_empty_seed_nodes = 0;
+    uint64_t hit_seed_neighbor_total = 0;
+    for (const auto inner_id : inserted_inner_ids) {
+        const auto& source_id = this->label_table_->GetSourceId(inner_id);
+        Vector<InnerIdType> mapped_neighbors(allocator_);
+        if (source_id.empty()) {
+            this->bottom_graph_->InsertNeighborsById(inner_id, mapped_neighbors);
+            missed_ids.push_back(inner_id);
+            continue;
+        }
+        auto it = cache_map.find(source_id);
+        if (it == cache_map.end()) {
+            this->bottom_graph_->InsertNeighborsById(inner_id, mapped_neighbors);
+            missed_ids.push_back(inner_id);
+            continue;
+        }
+        const auto& cached_list = it->second;  // [self_old_inner_id, neighbor_old_inner_id...]
+        std::unordered_set<InnerIdType> dedup;
+        dedup.reserve(cached_list.size());
+        for (uint64_t k = 1; k < cached_list.size(); ++k) {
+            const auto neighbor_old_inner = cached_list[k];
+            if (static_cast<uint64_t>(neighbor_old_inner) >= cache_source_ids.size()) {
+                continue;
+            }
+            const auto& neighbor_source_id = cache_source_ids[neighbor_old_inner];
+            if (neighbor_source_id.empty()) {
+                continue;
+            }
+            auto fit = source_id_to_new_inner.find(neighbor_source_id);
+            if (fit == source_id_to_new_inner.end()) {
+                continue;
+            }
+            if (fit->second == inner_id) {
+                continue;
+            }
+            if (dedup.emplace(fit->second).second) {
+                mapped_neighbors.emplace_back(fit->second);
+            }
+        }
+        if (mapped_neighbors.size() > max_degree) {
+            mapped_neighbors.resize(max_degree);
+        }
+        this->bottom_graph_->InsertNeighborsById(inner_id, mapped_neighbors);
+        if (mapped_neighbors.empty()) {
+            // Nodes whose cached neighbours could not be translated into the
+            // current index have no warm-start signal. Treat them as
+            // cold-start nodes so they receive the full missed-refine budget
+            // (global entry-point search + more rounds) instead of the cheap
+            // hit-refine path.
+            ++hit_empty_seed_nodes;
+            missed_ids.push_back(inner_id);
+        } else {
+            hit_seed_neighbor_total += mapped_neighbors.size();
+            hit_ids.push_back(inner_id);
+        }
+    }
+    const auto warm_start_elapsed = build_cache_now_us() - warm_start_begin;
+    const float hit_rate =
+        total > 0 ? static_cast<float>(hit_ids.size()) / static_cast<float>(total) : 0.0F;
+    logger::info(
+        "[hgraph_build_cache] warm_start finished in {:.3f}s hit_nodes={} missed_nodes={} "
+        "hit_empty_seed_nodes={} hit_seed_neighbor_total={} hit_rate={:.4f}",
+        static_cast<double>(warm_start_elapsed) / 1000000.0,
+        hit_ids.size(),
+        missed_ids.size(),
+        hit_empty_seed_nodes,
+        hit_seed_neighbor_total,
+        hit_rate);
+
+    // ---- Step 3: refine hit nodes (self-entry), then missed nodes (global entry) ----
+    auto flatten_codes = this->basic_flatten_codes_;
+    if (this->has_precise_reorder()) {
+        flatten_codes = this->high_precise_codes_;
+    }
+    this->refine_nodes_two_phase(data,
+                                 hit_ids,
+                                 "hit_refine",
+                                 HIT_REFINE_ROUNDS,
+                                 this->ef_construct_,
+                                 /*use_self_as_entry=*/true,
+                                 flatten_codes,
+                                 inner_id_to_input_idx);
+    this->refine_nodes_two_phase(data,
+                                 missed_ids,
+                                 "missed_refine",
+                                 MISSED_REFINE_ROUNDS,
+                                 this->ef_construct_,
+                                 /*use_self_as_entry=*/false,
+                                 flatten_codes,
+                                 inner_id_to_input_idx);
+
+    // ---- Step 4: rebuild route graphs via ODescent ----
+    this->route_graphs_.clear();
+    if (not route_graph_ids.empty()) {
+        const auto route_graph_begin = build_cache_now_us();
+        if (this->odescent_param_ == nullptr) {
+            this->odescent_param_ = std::make_shared<ODescentParameter>();
+        }
+        auto build_data =
+            this->has_precise_reorder() ? this->high_precise_codes_ : this->basic_flatten_codes_;
+        for (auto& route_graph_id : route_graph_ids) {
+            odescent_param_->max_degree = bottom_graph_->MaximumDegree() / 2;
+            ODescent sparse_odescent_builder(
+                odescent_param_, build_data, allocator_, this->thread_pool_.get());
+            auto graph = this->generate_one_route_graph();
+            sparse_odescent_builder.Build(route_graph_id);
+            sparse_odescent_builder.SaveGraph(graph);
+            this->route_graphs_.emplace_back(graph);
+        }
+        const auto route_graph_elapsed = build_cache_now_us() - route_graph_begin;
+        logger::info("[hgraph_build_cache] route_graph_build finished in {:.3f}s levels={}",
+                     static_cast<double>(route_graph_elapsed) / 1000000.0,
+                     this->route_graphs_.size());
+    }
+
+    const auto build_total_elapsed = build_cache_now_us() - build_begin;
+    logger::info("[hgraph_build_cache] build_with_cache total elapsed {:.3f}s",
+                 static_cast<double>(build_total_elapsed) / 1000000.0);
+    return failed_ids;
 }
 
 }  // namespace vsag

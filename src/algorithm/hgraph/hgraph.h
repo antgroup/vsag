@@ -18,6 +18,8 @@
 #include <random>
 #include <shared_mutex>
 #include <string>
+#include <string_view>
+#include <unordered_map>
 
 #include "../inner_index_interface.h"
 #include "common.h"
@@ -191,7 +193,7 @@ public:
     SetImmutable() override;
 
     void
-    ExportCache(std::ostream& out_stream) override;
+    ExportCache(std::ostream& out_stream) const override;
 
     void
     ImportCache(std::istream& in_stream) override;
@@ -399,7 +401,53 @@ private:
     }
 
     void
-    fullfill_cache();
+    fullfill_cache() const;
+
+    // ---- Build-with-cache acceleration path ----
+    // The build flow is automatically taken by Build() when ImportCache() has
+    // populated cache_ before. Steps:
+    //   (1) warm_start: seed each new node's neighbors from the cached
+    //       neighbors keyed by source_id, classify nodes into hit/missed.
+    //   (2) refine hit nodes (use_self_as_entry=true), then missed nodes
+    //       (use_self_as_entry=false). Each refine round is two-phase:
+    //       parallel search+select then serial writeback, plus a sharded
+    //       reverse-edge install with distance-reuse and O(M) dedup.
+    //   (3) build route graphs via ODescent over the sampled level ids.
+    bool
+    has_loaded_cache() const {
+        return this->cache_ != nullptr && not this->cache_->neighbors_.empty();
+    }
+
+    std::vector<int64_t>
+    build_with_cache(const DatasetPtr& data);
+
+    DistHeapPtr
+    collect_refine_candidates(const DatasetPtr& data,
+                              InnerIdType inner_id,
+                              uint32_t input_idx,
+                              const FlattenInterfacePtr& flatten_codes,
+                              uint32_t refine_ef,
+                              bool use_self_as_entry) const;
+
+    void
+    select_refine_neighbors_with_distances(const DatasetPtr& data,
+                                           InnerIdType inner_id,
+                                           uint32_t input_idx,
+                                           const FlattenInterfacePtr& flatten_codes,
+                                           uint32_t refine_ef,
+                                           bool use_self_as_entry,
+                                           Vector<InnerIdType>& out_neighbors,
+                                           Vector<float>& out_distances) const;
+
+    void
+    refine_nodes_two_phase(const DatasetPtr& data,
+                           const std::vector<InnerIdType>& ids_to_refine,
+                           std::string_view phase_name,
+                           uint32_t rounds,
+                           uint32_t refine_ef,
+                           bool use_self_as_entry,
+                           const FlattenInterfacePtr& flatten_codes,
+                           const std::unordered_map<InnerIdType, uint32_t>& inner_id_to_input_idx);
 
 private:
     FlattenInterfacePtr basic_flatten_codes_{nullptr};
