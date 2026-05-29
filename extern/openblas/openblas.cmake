@@ -1,121 +1,149 @@
+# Copyright 2024-present the vsag project
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 set (name openblas)
 set (source_dir ${CMAKE_CURRENT_BINARY_DIR}/${name}/source)
 set (install_dir ${CMAKE_CURRENT_BINARY_DIR}/${name}/install)
 
-option (USE_SYSTEM_OPENBLAS "Use system-installed OpenBLAS instead of building from source" OFF)
+# Legacy switch kept for backward compatibility: USE_SYSTEM_OPENBLAS=ON keeps
+# its previous "try system, fall back to bundled" semantics, i.e. it maps to
+# AUTO (not ON) when the new override is empty.
+option (USE_SYSTEM_OPENBLAS "(deprecated) Try system OpenBLAS, fall back to bundled" OFF)
+
+vsag_get_system_dep_policy (OPENBLAS _openblas_policy)
+if (USE_SYSTEM_OPENBLAS AND "${VSAG_USE_SYSTEM_OPENBLAS}" STREQUAL ""
+        AND _openblas_policy STREQUAL "OFF")
+    set (_openblas_policy "AUTO")
+endif ()
+
+set (_openblas_system_paths
+    /usr/lib
+    /usr/lib64
+    /usr/lib/x86_64-linux-gnu
+    /usr/lib/aarch64-linux-gnu
+    /usr/local/lib
+    /usr/local/lib64
+    /opt/homebrew/lib)
+set (_openblas_system_includes
+    /usr/include
+    /usr/include/openblas
+    /usr/include/x86_64-linux-gnu
+    /usr/include/aarch64-linux-gnu
+    /usr/local/include
+    /usr/local/include/openblas
+    /opt/homebrew/include)
 
 set (OPENBLAS_FOUND FALSE)
+set (_openblas_uses_imported_target FALSE)
+set (OPENBLAS_INCLUDE_DIRS "")
 
-if (USE_SYSTEM_OPENBLAS)
-    # Try to find system-installed OpenBLAS
-    find_library (OPENBLAS_LIB
-        NAMES openblas
-        PATHS
-            /usr/lib
-            /usr/lib64
-            /usr/lib/x86_64-linux-gnu
-            /usr/lib/aarch64-linux-gnu
-            /usr/local/lib
-            /usr/local/lib64
-            /opt/homebrew/lib
-        NO_DEFAULT_PATH
-    )
-
-    find_path (OPENBLAS_INCLUDE
-        NAMES cblas.h
-        PATHS
-            /usr/include
-            /usr/include/openblas
-            /usr/include/x86_64-linux-gnu
-            /usr/include/aarch64-linux-gnu
-            /usr/local/include
-            /usr/local/include/openblas
-            /opt/homebrew/include
-        NO_DEFAULT_PATH
-    )
-
-    find_path (LAPACKE_INCLUDE
-        NAMES lapacke.h
-        PATHS
-            /usr/include
-            /usr/include/openblas
-            /usr/include/x86_64-linux-gnu
-            /usr/include/aarch64-linux-gnu
-            /usr/local/include
-            /usr/local/include/openblas
-            /opt/homebrew/include
-        NO_DEFAULT_PATH
-    )
-
-    if (OPENBLAS_LIB AND OPENBLAS_INCLUDE AND LAPACKE_INCLUDE)
+if (NOT _openblas_policy STREQUAL "OFF")
+    # 1) Reuse an existing OpenBLAS::OpenBLAS target if a parent project already
+    #    provided one.
+    if (TARGET OpenBLAS::OpenBLAS)
         set (OPENBLAS_FOUND TRUE)
-        message (STATUS "Found system OpenBLAS library: ${OPENBLAS_LIB}")
-        message (STATUS "Found OpenBLAS include directory: ${OPENBLAS_INCLUDE}")
-        message (STATUS "Found LAPACKE include directory: ${LAPACKE_INCLUDE}")
+        set (_openblas_uses_imported_target TRUE)
+        set (BLAS_LIBRARIES OpenBLAS::OpenBLAS)
+        message (STATUS "Using pre-existing OpenBLAS::OpenBLAS target")
+    endif ()
 
-        # Try to find LAPACKE library (separate from OpenBLAS on some systems)
-        find_library (LAPACKE_LIB
-            NAMES lapacke
-            PATHS
-                /usr/lib
-                /usr/lib64
-                /usr/lib/x86_64-linux-gnu
-                /usr/lib/aarch64-linux-gnu
-                /usr/local/lib
-                /usr/local/lib64
-                /opt/homebrew/lib
-            NO_DEFAULT_PATH
-        )
-
-        if (LAPACKE_LIB)
-            message (STATUS "Found LAPACKE library: ${LAPACKE_LIB}")
-            set (OPENBLAS_LAPACKE_LIB ${LAPACKE_LIB})
-        else ()
-            message (STATUS
-                     "LAPACKE library not found as separate library, assuming it's included in OpenBLAS")
-            set (OPENBLAS_LAPACKE_LIB "")
+    # 2) Try find_package(OpenBLAS CONFIG ...) which is what modern OpenBLAS
+    #    installs ship.
+    if (NOT OPENBLAS_FOUND)
+        find_package (OpenBLAS CONFIG QUIET)
+        if (TARGET OpenBLAS::OpenBLAS)
+            set (OPENBLAS_FOUND TRUE)
+            set (_openblas_uses_imported_target TRUE)
+            set (BLAS_LIBRARIES OpenBLAS::OpenBLAS)
+            message (STATUS "Found OpenBLAS via find_package(OpenBLAS CONFIG)")
         endif ()
+    endif ()
 
-        # Set install_dir to a dummy value for compatibility
-        set (install_dir ${CMAKE_CURRENT_BINARY_DIR}/${name}/system)
+    # 3) Fall back to a manual search for libopenblas + cblas.h + lapacke.h.
+    #    Search VSAG's known list first, then fall through to CMake's default
+    #    paths (including CMAKE_PREFIX_PATH, multiarch dirs, etc.) so users on
+    #    less common architectures can point us at a system install.
+    if (NOT OPENBLAS_FOUND)
+        find_library (OPENBLAS_LIB
+            NAMES openblas
+            PATHS ${_openblas_system_paths})
+        find_path (OPENBLAS_INCLUDE
+            NAMES cblas.h
+            PATHS ${_openblas_system_includes})
+        find_path (LAPACKE_INCLUDE
+            NAMES lapacke.h
+            PATHS ${_openblas_system_includes})
 
-        set (OPENBLAS_INCLUDE_DIRS ${OPENBLAS_INCLUDE})
-        if (NOT "${OPENBLAS_INCLUDE}" STREQUAL "${LAPACKE_INCLUDE}")
-            list (APPEND OPENBLAS_INCLUDE_DIRS ${LAPACKE_INCLUDE})
+        if (OPENBLAS_LIB AND OPENBLAS_INCLUDE AND LAPACKE_INCLUDE)
+            set (OPENBLAS_FOUND TRUE)
+            message (STATUS "Found system OpenBLAS library: ${OPENBLAS_LIB}")
+            message (STATUS "Found OpenBLAS include directory: ${OPENBLAS_INCLUDE}")
+            message (STATUS "Found LAPACKE include directory: ${LAPACKE_INCLUDE}")
+
+            find_library (LAPACKE_LIB
+                NAMES lapacke
+                PATHS ${_openblas_system_paths})
+            if (LAPACKE_LIB)
+                message (STATUS "Found LAPACKE library: ${LAPACKE_LIB}")
+            else ()
+                message (STATUS
+                         "LAPACKE library not found as separate library; "
+                         "assuming it is bundled inside OpenBLAS")
+            endif ()
+
+            set (OPENBLAS_INCLUDE_DIRS ${OPENBLAS_INCLUDE})
+            if (NOT "${OPENBLAS_INCLUDE}" STREQUAL "${LAPACKE_INCLUDE}")
+                list (APPEND OPENBLAS_INCLUDE_DIRS ${LAPACKE_INCLUDE})
+            endif ()
+
+            set (BLAS_LIBRARIES ${OPENBLAS_LIB})
+            if (LAPACKE_LIB)
+                list (APPEND BLAS_LIBRARIES ${LAPACKE_LIB})
+            endif ()
         endif ()
+    endif ()
 
-        # Create a dummy target for consistency with dependencies
-        add_custom_target (${name})
-    else ()
-        message (WARNING
-                 "System OpenBLAS not found (USE_SYSTEM_OPENBLAS=ON). Falling back to building from source.")
+    # Discovery is done; honour the policy.
+    if (NOT OPENBLAS_FOUND AND _openblas_policy STREQUAL "ON")
         message (STATUS "  OPENBLAS_LIB: ${OPENBLAS_LIB}")
         message (STATUS "  OPENBLAS_INCLUDE: ${OPENBLAS_INCLUDE}")
         message (STATUS "  LAPACKE_INCLUDE: ${LAPACKE_INCLUDE}")
+        vsag_fail_missing_system_dep (OPENBLAS OpenBLAS OpenBLAS::OpenBLAS)
     endif ()
 endif ()
 
-if (USE_SYSTEM_OPENBLAS AND OPENBLAS_FOUND)
-    set (BLAS_LIBRARIES ${OPENBLAS_LIB})
-
-    if (DEFINED OPENBLAS_LAPACKE_LIB AND OPENBLAS_LAPACKE_LIB)
-        list (APPEND BLAS_LIBRARIES ${OPENBLAS_LAPACKE_LIB})
+if (OPENBLAS_FOUND)
+    # Append gfortran + OpenMP runtime when we are taking the system path that
+    # only resolves to a raw library (the imported CONFIG target already pulls
+    # transitive deps in).
+    if (NOT _openblas_uses_imported_target)
+        if (APPLE AND DEFINED GFORTRAN_LIB AND EXISTS "${GFORTRAN_LIB}")
+            list (APPEND BLAS_LIBRARIES "${GFORTRAN_LIB}")
+        else ()
+            list (APPEND BLAS_LIBRARIES gfortran)
+        endif ()
+        if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+            list (PREPEND BLAS_LIBRARIES omp)
+        else ()
+            list (PREPEND BLAS_LIBRARIES gomp)
+        endif ()
     endif ()
 
-    if (APPLE AND DEFINED GFORTRAN_LIB AND EXISTS "${GFORTRAN_LIB}")
-        list (APPEND BLAS_LIBRARIES "${GFORTRAN_LIB}")
-    else ()
-        list (APPEND BLAS_LIBRARIES gfortran)
-    endif()
-
-    if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-        list (PREPEND BLAS_LIBRARIES omp)
-    else ()
-        list (PREPEND BLAS_LIBRARIES gomp)
+    if (NOT TARGET ${name})
+        add_custom_target (${name})
     endif ()
-
-    message (STATUS "Using system OpenBLAS as BLAS backend: ${OPENBLAS_LIB}")
+    message (STATUS "Using system OpenBLAS as BLAS backend")
 else ()
     if (APPLE AND DEFINED GFORTRAN_LIB AND EXISTS "${GFORTRAN_LIB}")
         set (BLAS_LIBRARIES ${install_dir}/lib/libopenblas.a "${GFORTRAN_LIB}")
@@ -128,13 +156,21 @@ else ()
         list (PREPEND BLAS_LIBRARIES gomp)
     endif ()
     set (OPENBLAS_INCLUDE_DIRS ${install_dir}/include)
-    message (STATUS "Enable OpenBLAS as BLAS backend")
+    message (STATUS "Enable bundled OpenBLAS as BLAS backend")
 endif ()
 
 add_library (vsag_openblas_headers INTERFACE)
-target_include_directories (vsag_openblas_headers INTERFACE ${OPENBLAS_INCLUDE_DIRS})
+if (OPENBLAS_INCLUDE_DIRS)
+    target_include_directories (vsag_openblas_headers INTERFACE ${OPENBLAS_INCLUDE_DIRS})
+endif ()
+if (_openblas_uses_imported_target)
+    target_link_libraries (vsag_openblas_headers INTERFACE OpenBLAS::OpenBLAS)
+endif ()
 
-set (BLAS_LIBRARIES "${BLAS_LIBRARIES}" CACHE STRING "Final list of BLAS libraries to link against." FORCE)
+# Publish BLAS_LIBRARIES in the cache so downstream / superbuild consumers see
+# the same variable shape on both BLAS backends (the MKL path does the same).
+set (BLAS_LIBRARIES "${BLAS_LIBRARIES}" CACHE STRING
+     "Final list of BLAS libraries to link against." FORCE)
 
 if (NOT OPENBLAS_FOUND)
     # Build OpenBLAS from source

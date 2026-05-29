@@ -77,9 +77,51 @@ endfunction ()
 function (maybe_add_dependencies depender)
     if (TARGET ${depender})
         foreach (dependee ${ARGN})
-            if (TARGET ${dependee})
+            if (NOT TARGET ${dependee})
+                continue ()
+            endif ()
+            get_target_property (_dependee_aliased ${dependee} ALIASED_TARGET)
+            get_target_property (_dependee_imported ${dependee} IMPORTED)
+            if (NOT _dependee_aliased AND NOT _dependee_imported)
                 add_dependencies (${depender} ${dependee})
             endif ()
         endforeach ()
     endif ()
+endfunction ()
+
+# Validate that a VSAG_USE_SYSTEM_* value is one of AUTO / ON / OFF.
+function (vsag_validate_system_dep_policy policy variable)
+    string (TOUPPER "${policy}" _policy)
+    if (NOT _policy STREQUAL "AUTO"
+            AND NOT _policy STREQUAL "ON"
+            AND NOT _policy STREQUAL "OFF")
+        message (FATAL_ERROR
+                 "${variable} must be one of AUTO, ON, or OFF; got '${policy}'.")
+    endif ()
+endfunction ()
+
+# Resolve the effective system-dependency policy for ${dep}, returning AUTO / ON / OFF
+# in ${out_var}. The per-dependency override VSAG_USE_SYSTEM_<DEP> wins when set to a
+# non-empty value; otherwise the global VSAG_USE_SYSTEM_DEPS is used.
+function (vsag_get_system_dep_policy dep out_var)
+    string (TOUPPER "${dep}" _dep)
+    vsag_validate_system_dep_policy ("${VSAG_USE_SYSTEM_DEPS}" "VSAG_USE_SYSTEM_DEPS")
+    set (_policy "${VSAG_USE_SYSTEM_DEPS}")
+    if (DEFINED VSAG_USE_SYSTEM_${_dep}
+            AND NOT "${VSAG_USE_SYSTEM_${_dep}}" STREQUAL "")
+        vsag_validate_system_dep_policy ("${VSAG_USE_SYSTEM_${_dep}}"
+                                         "VSAG_USE_SYSTEM_${_dep}")
+        set (_policy "${VSAG_USE_SYSTEM_${_dep}}")
+    endif ()
+    string (TOUPPER "${_policy}" _policy)
+    set (${out_var} "${_policy}" PARENT_SCOPE)
+endfunction ()
+
+# Abort configuration when a system-only dependency cannot be found.
+function (vsag_fail_missing_system_dep dep package hint)
+    message (FATAL_ERROR
+             "VSAG was asked to use a system copy of ${dep} (VSAG_USE_SYSTEM_${dep}=ON "
+             "or VSAG_USE_SYSTEM_DEPS=ON), but it was not found. "
+             "Install package '${package}', expose target ${hint} before configuring VSAG, "
+             "or set VSAG_USE_SYSTEM_${dep}=OFF to use the bundled copy.")
 endfunction ()
