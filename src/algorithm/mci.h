@@ -173,6 +173,9 @@ private:
     [[nodiscard]] DatasetPtr
     search_hgraph_hybrid(const SearchRequest& request, float valid_ratio) const;
 
+    [[nodiscard]] DatasetPtr
+    build_dataset_from_heap(DistHeapPtr& heap) const;
+
 private:
     FlattenInterfacePtr base_codes_{nullptr};
     FlattenInterfacePtr reorder_codes_{nullptr};

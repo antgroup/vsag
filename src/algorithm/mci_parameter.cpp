@@ -90,6 +90,7 @@ MCIParameter::ToJson() const {
     json[MCI_PARAMETER_ALPHA].SetFloat(this->alpha);
     json[MCI_PARAMETER_KNNG_PATH].SetString(this->knng_path);
     json[MCI_PARAMETER_CLIQUE_PATH].SetString(this->clique_path);
+    json[MCI_PARAMETER_HGRAPH_INDEX_PATH].SetString(this->hgraph_index_path);
     json[MCI_PARAMETER_USE_HGRAPH_HYBRID].SetBool(this->use_hgraph_hybrid);
     json[MCI_PARAMETER_HGRAPH_VALID_RATIO_THRESHOLD].SetFloat(this->hgraph_valid_ratio_threshold);
     if (this->hgraph_param != nullptr) {

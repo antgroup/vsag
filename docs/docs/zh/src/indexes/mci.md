@@ -45,12 +45,22 @@ std::string params = R"({
 
 auto index = vsag::Factory::CreateIndex("mci", params).value();
 
+// 填充 base 集合（请替换为你自己的数据来源）。
+int64_t n = 10000;
+std::vector<int64_t> ids(n);
+std::vector<float> data(n * 128);
+// ... 填充 ids 和 data ...
+
 auto base = vsag::Dataset::Make();
-base->NumElements(n)->Dim(128)->Ids(ids)->Float32Vectors(data)->Owner(false);
+base->NumElements(n)->Dim(128)->Ids(ids.data())->Float32Vectors(data.data())->Owner(false);
 index->Build(base);
 
+// 构造一个查询向量。
+std::vector<float> q(128);
+// ... 填充查询向量 q ...
+
 auto query = vsag::Dataset::Make();
-query->NumElements(1)->Dim(128)->Float32Vectors(q)->Owner(false);
+query->NumElements(1)->Dim(128)->Float32Vectors(q.data())->Owner(false);
 auto result = index->KnnSearch(
     query, 10, R"({"mci": {"ef_search": 80, "seed_count": 32}})").value();
 ```

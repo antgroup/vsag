@@ -47,12 +47,22 @@ std::string params = R"({
 
 auto index = vsag::Factory::CreateIndex("mci", params).value();
 
+// Populate the base set (replace with your own data source).
+int64_t n = 10000;
+std::vector<int64_t> ids(n);
+std::vector<float> data(n * 128);
+// ... fill ids and data ...
+
 auto base = vsag::Dataset::Make();
-base->NumElements(n)->Dim(128)->Ids(ids)->Float32Vectors(data)->Owner(false);
+base->NumElements(n)->Dim(128)->Ids(ids.data())->Float32Vectors(data.data())->Owner(false);
 index->Build(base);
 
+// Build a single query vector.
+std::vector<float> q(128);
+// ... fill query vector q ...
+
 auto query = vsag::Dataset::Make();
-query->NumElements(1)->Dim(128)->Float32Vectors(q)->Owner(false);
+query->NumElements(1)->Dim(128)->Float32Vectors(q.data())->Owner(false);
 auto result = index->KnnSearch(
     query, 10, R"({"mci": {"ef_search": 80, "seed_count": 32}})").value();
 ```

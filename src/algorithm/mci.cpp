@@ -16,11 +16,9 @@
 
 #include <algorithm>
 #include <atomic>
-#include <cstdlib>
 #include <fstream>
 #include <functional>
 #include <future>
-#include <iostream>
 #include <limits>
 #include <mutex>
 #include <numeric>
@@ -37,6 +35,7 @@
 #include "impl/filter/combined_filter.h"
 #include "impl/filter/inner_id_wrapper_filter.h"
 #include "impl/heap/standard_heap.h"
+#include "impl/logger/logger.h"
 #include "impl/odescent/odescent_graph_builder.h"
 #include "impl/odescent/odescent_graph_parameter.h"
 #include "impl/reorder/flatten_reorder.h"
@@ -887,7 +886,6 @@ MCI::enumerate_maximal_cliques(const Vector<Vector<InnerIdType>>& graph,
     const auto node_clique_limit = std::max<uint32_t>(3, static_cast<uint32_t>(total / 100));
     const auto max_saved_per_seed =
         std::min<uint64_t>(candidate_limit, static_cast<uint64_t>(this->max_degree_ + 2));
-    const auto enable_build_stats = std::getenv("VSAG_MCI_BUILD_STATS") != nullptr;
 
     auto collect_candidates =
         [&](InnerIdType seed, Vector<InnerIdType>& local_nodes, Vector<float>& seed_distances) {
@@ -1316,12 +1314,13 @@ MCI::enumerate_maximal_cliques(const Vector<Vector<InnerIdType>>& graph,
                 ++uncovered;
             }
         }
-        if (enable_build_stats) {
-            std::cerr << "mci_build_round round=" << round + 1 << " alpha=" << now_alpha
-                      << " uncovered=" << uncovered
-                      << " round_cliques=" << cliques.size() - cliques_before_round
-                      << " total_cliques=" << cliques.size() << std::endl;
-        }
+        logger::debug(
+            "mci_build_round round={} alpha={} uncovered={} round_cliques={} total_cliques={}",
+            round + 1,
+            now_alpha,
+            uncovered,
+            cliques.size() - cliques_before_round,
+            cliques.size());
         if (uncovered == 0) {
             break;
         }
@@ -1349,7 +1348,7 @@ MCI::enumerate_maximal_cliques(const Vector<Vector<InnerIdType>>& graph,
             }
         }
     }
-    if (enable_build_stats) {
+    {
         uint64_t max_membership = 0;
         uint64_t total_memberships = 0;
         for (InnerIdType inner_id = 0; inner_id < total; ++inner_id) {
@@ -1357,10 +1356,13 @@ MCI::enumerate_maximal_cliques(const Vector<Vector<InnerIdType>>& graph,
             total_memberships += membership;
             max_membership = std::max(max_membership, membership);
         }
-        std::cerr << "mci_build_summary total_cliques=" << cliques.size()
-                  << " total_memberships=" << total_memberships << " avg_membership="
-                  << static_cast<double>(total_memberships) / static_cast<double>(total)
-                  << " max_membership=" << max_membership << std::endl;
+        logger::debug(
+            "mci_build_summary total_cliques={} total_memberships={} avg_membership={} "
+            "max_membership={}",
+            cliques.size(),
+            total_memberships,
+            static_cast<double>(total_memberships) / static_cast<double>(total),
+            max_membership);
     }
     return cliques;
 }
@@ -1609,6 +1611,18 @@ MCI::search_hgraph_hybrid(const SearchRequest& request, float valid_ratio) const
 }
 
 DatasetPtr
+MCI::build_dataset_from_heap(DistHeapPtr& heap) const {
+    auto [dataset_results, dists, ids] =
+        create_fast_dataset(static_cast<int64_t>(heap->Size()), allocator_);
+    for (auto i = static_cast<int64_t>(heap->Size() - 1); i >= 0; --i) {
+        dists[i] = heap->Top().first;
+        ids[i] = this->label_table_->GetLabelById(heap->Top().second);
+        heap->Pop();
+    }
+    return dataset_results;
+}
+
+DatasetPtr
 MCI::SearchWithRequest(const SearchRequest& request) const {
     std::shared_lock<std::shared_mutex> read_lock(this->global_mutex_);
     CHECK_ARGUMENT(request.query_ != nullptr, "query dataset is nullptr");
@@ -1618,7 +1632,6 @@ MCI::SearchWithRequest(const SearchRequest& request) const {
             "query.dim({}) must be equal to index.dim({})", request.query_->GetDim(), dim_));
     CHECK_ARGUMENT(request.query_->GetFloat32Vectors() != nullptr, "query.float_vector is nullptr");
     CHECK_ARGUMENT(request.topk_ > 0, "mci topk must be positive");
-    CHECK_ARGUMENT(request.limited_size_ != 0, "mci limited_size must not be equal to 0");
 
     auto search_params = MCISearchParameters::FromJson(request.params_str_);
     const auto* query_data = request.query_->GetFloat32Vectors();
@@ -1666,13 +1679,7 @@ MCI::SearchWithRequest(const SearchRequest& request) const {
                 heap->Push(dist, inner_id);
             }
         }
-        auto [dataset_results, dists, ids] =
-            create_fast_dataset(static_cast<int64_t>(heap->Size()), allocator_);
-        for (auto i = static_cast<int64_t>(heap->Size() - 1); i >= 0; --i) {
-            dists[i] = heap->Top().first;
-            ids[i] = this->label_table_->GetLabelById(heap->Top().second);
-            heap->Pop();
-        }
+        auto dataset_results = this->build_dataset_from_heap(heap);
         JsonType stats;
         stats["dist_cmp"].SetInt(static_cast<int64_t>(dist_cmp));
         stats["ef_search"].SetInt(search_params.ef_search);
@@ -1736,13 +1743,7 @@ MCI::SearchWithRequest(const SearchRequest& request) const {
         heap = trimmed_heap;
     }
 
-    auto [dataset_results, dists, ids] =
-        create_fast_dataset(static_cast<int64_t>(heap->Size()), allocator_);
-    for (auto i = static_cast<int64_t>(heap->Size() - 1); i >= 0; --i) {
-        dists[i] = heap->Top().first;
-        ids[i] = this->label_table_->GetLabelById(heap->Top().second);
-        heap->Pop();
-    }
+    auto dataset_results = this->build_dataset_from_heap(heap);
     JsonType stats;
     stats["dist_cmp"].SetInt(static_cast<int64_t>(dist_cmp));
     stats["ef_search"].SetInt(search_params.ef_search);
@@ -1769,15 +1770,12 @@ MCI::Serialize(StreamWriter& writer) const {
     StreamWriter::WriteVector(writer, this->p_node_to_cid_);
     StreamWriter::WriteVector(writer, this->node_to_cids_);
 
-    uint64_t hgraph_serialized_size = 0;
-
     auto metadata = std::make_shared<Metadata>();
     JsonType basic_info;
     basic_info["dim"].SetInt(dim_);
     basic_info["total_count"].SetInt(static_cast<int64_t>(this->total_count_.load()));
     basic_info["max_capacity"].SetInt(static_cast<int64_t>(this->max_capacity_.load()));
     basic_info["total_clique_count"].SetInt(static_cast<int64_t>(this->total_clique_count_));
-    basic_info["hgraph_serialized_size"].SetInt(static_cast<int64_t>(hgraph_serialized_size));
     basic_info[INDEX_PARAM].SetString(this->create_param_ptr_->ToString());
     metadata->Set(BASIC_INFO, basic_info);
     auto footer = std::make_shared<Footer>(metadata);
@@ -1822,17 +1820,7 @@ MCI::Deserialize(StreamReader& reader) {
     StreamReader::ReadVector(buffer_reader, this->maxcs_);
     StreamReader::ReadVector(buffer_reader, this->p_node_to_cid_);
     StreamReader::ReadVector(buffer_reader, this->node_to_cids_);
-    const auto hgraph_serialized_size = basic_info.Contains("hgraph_serialized_size")
-                                            ? basic_info["hgraph_serialized_size"].GetInt()
-                                            : 0;
-    if (hgraph_serialized_size > 0) {
-        CHECK_ARGUMENT(this->hgraph_index_ != nullptr,
-                       "mci index contains hgraph sub-index but hybrid is not enabled");
-        auto hgraph_reader = buffer_reader.Slice(static_cast<uint64_t>(hgraph_serialized_size));
-        this->hgraph_index_->Deserialize(hgraph_reader);
-        CHECK_ARGUMENT(this->hgraph_index_->GetNumElements() == this->GetNumElements(),
-                       "mci hgraph hybrid sub-index size mismatch after deserialize");
-    } else if (this->hgraph_index_ != nullptr and not this->hgraph_index_path_.empty()) {
+    if (this->hgraph_index_ != nullptr and not this->hgraph_index_path_.empty()) {
         this->load_hgraph_index(this->hgraph_index_path_);
     }
     this->cal_memory_usage();
