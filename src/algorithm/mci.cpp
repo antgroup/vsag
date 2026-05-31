@@ -25,12 +25,12 @@
 #include <queue>
 #include <vector>
 
+#include "algorithm/hgraph/hgraph.h"
 #include "common.h"
 #include "datacell/flatten_datacell_parameter.h"
 #include "datacell/graph_interface.h"
 #include "datacell/sparse_graph_datacell_parameter.h"
 #include "dataset_impl.h"
-#include "hgraph.h"
 #include "impl/filter/black_list_filter.h"
 #include "impl/filter/combined_filter.h"
 #include "impl/filter/inner_id_wrapper_filter.h"

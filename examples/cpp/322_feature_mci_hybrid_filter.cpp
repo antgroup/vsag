@@ -70,8 +70,7 @@ make_hgraph_params() {
     "dtype": "float32",
     "metric_type": "l2",
     "dim": )"
-            << kDim
-            << R"(,
+            << kDim << R"(,
     "index_param": {
         "base_quantization_type": "fp32",
         "graph_type": "odescent",
@@ -91,18 +90,15 @@ make_mci_params(const std::string& knng_path) {
     "dtype": "float32",
     "metric_type": "l2",
     "dim": )"
-            << kDim
-            << R"(,
+            << kDim << R"(,
     "index_param": {
         "max_degree": 8,
         "mcs": )"
-            << kKnngDegree
-            << R"(,
+            << kKnngDegree << R"(,
         "clique_max": 8,
         "build_thread_count": 2,
         "knng_path": ")"
-            << knng_path
-            << R"("
+            << knng_path << R"("
     }
 })";
     return builder.str();
@@ -115,23 +111,19 @@ make_mci_hybrid_params(const std::string& knng_path, const std::string& hgraph_i
     "dtype": "float32",
     "metric_type": "l2",
     "dim": )"
-            << kDim
-            << R"(,
+            << kDim << R"(,
     "index_param": {
         "max_degree": 8,
         "mcs": )"
-            << kKnngDegree
-            << R"(,
+            << kKnngDegree << R"(,
         "clique_max": 8,
         "build_thread_count": 2,
         "knng_path": ")"
-            << knng_path
-            << R"(",
+            << knng_path << R"(",
         "use_hgraph_hybrid": true,
         "hgraph_valid_ratio_threshold": 0.4,
         "hgraph_index_path": ")"
-            << hgraph_index_path
-            << R"(",
+            << hgraph_index_path << R"(",
         "hgraph_ef_search": 32,
         "hgraph_index_param": {
             "base_quantization_type": "fp32",
@@ -202,8 +194,7 @@ export_knng_from_hgraph(const vsag::IndexPtr& hgraph,
             ->Owner(false);
 
         auto search_result = hgraph->KnnSearch(query, query_k, kHGraphSearchParams);
-        check_expected(search_result,
-                       "failed to export KNNG row " + std::to_string(row) + ": ");
+        check_expected(search_result, "failed to export KNNG row " + std::to_string(row) + ": ");
 
         std::vector<uint32_t> neighbors;
         neighbors.reserve(kKnngDegree);
@@ -243,8 +234,7 @@ generate_vectors() {
         for (int64_t col = 0; col < kDim; ++col) {
             const auto block = static_cast<float>(row / 16);
             const auto lane = static_cast<float>(row % 16) * 0.05F;
-            vectors[row * kDim + col] = block + lane + static_cast<float>(col) * 0.01F +
-                                         noise(rng);
+            vectors[row * kDim + col] = block + lane + static_cast<float>(col) * 0.01F + noise(rng);
         }
     }
     return vectors;
@@ -288,8 +278,7 @@ main() {
     check_expected(mci_build, "failed to build MCI index: ");
     serialize_index(mci.value(), mci_path);
 
-    auto hybrid =
-        vsag::Factory::CreateIndex("mci", make_mci_hybrid_params(knng_path, hgraph_path));
+    auto hybrid = vsag::Factory::CreateIndex("mci", make_mci_hybrid_params(knng_path, hgraph_path));
     check_expected(hybrid, "failed to create Hybrid overlay: ");
     std::ifstream input(mci_path, std::ios::binary);
     check(input.good(), "failed to open MCI index for loading: " + mci_path);
@@ -297,10 +286,7 @@ main() {
     check_expected(deserialize_result, "failed to load MCI index into Hybrid overlay: ");
 
     auto query = vsag::Dataset::Make();
-    query->NumElements(1)
-        ->Dim(kDim)
-        ->Float32Vectors(vectors.data() + 96 * kDim)
-        ->Owner(false);
+    query->NumElements(1)->Dim(kDim)->Float32Vectors(vectors.data() + 96 * kDim)->Owner(false);
 
     auto filter = std::make_shared<MinIdFilter>(64);
     auto search_result = hybrid.value()->KnnSearch(query, kTopK, kMciSearchParams, filter);

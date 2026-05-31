@@ -12,24 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <fcntl.h>
+#include <fmt/format.h>
+#include <omp.h>
+#include <unistd.h>
 #include <vsag/vsag.h>
 
 #include <argparse/argparse.hpp>
-#include <fmt/format.h>
-#include <omp.h>
-
 #include <atomic>
 #include <cerrno>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
-#include <fcntl.h>
 #include <fstream>
 #include <iostream>
 #include <mutex>
 #include <stdexcept>
 #include <string>
-#include <unistd.h>
 #include <vector>
 
 #include "eval_dataset.h"
@@ -49,9 +48,7 @@ parse_args(argparse::ArgumentParser& parser, int argc, char** argv) {
     parser.add_argument("--datapath", "-d")
         .required()
         .help("The HDF5 dataset path. The tool reads the /train split as the query source.");
-    parser.add_argument("--index_path", "-i")
-        .required()
-        .help("The serialized HGraph index path.");
+    parser.add_argument("--index_path", "-i").required().help("The serialized HGraph index path.");
     parser.add_argument("--create_params", "-c")
         .required()
         .help("The JSON create_params string used to create the HGraph index.");
@@ -138,10 +135,8 @@ write_row(int fd,
         const auto offset = static_cast<off_t>(row_id * total_bytes + written);
         const auto result = ::pwrite(fd, bytes + written, total_bytes - written, offset);
         check(result >= 0,
-              fmt::format("failed to write row {} into {}: {}",
-                          row_id,
-                          output_path,
-                          std::strerror(errno)));
+              fmt::format(
+                  "failed to write row {} into {}: {}", row_id, output_path, std::strerror(errno)));
         written += static_cast<size_t>(result);
     }
 }
@@ -223,10 +218,9 @@ main(int argc, char** argv) {
         const auto result_size = static_cast<uint64_t>(result_dataset->GetDim());
         for (uint64_t rank = 0; rank < result_size and neighbor_count < topk; ++rank) {
             const auto label_id = ids[rank];
-            check(label_id >= 0,
-                  fmt::format("search returned negative label id {} at row {}",
-                              label_id,
-                              inner_id));
+            check(
+                label_id >= 0,
+                fmt::format("search returned negative label id {} at row {}", label_id, inner_id));
             const auto neighbor = static_cast<uint64_t>(label_id);
             if (neighbor >= total_base || neighbor == static_cast<uint64_t>(inner_id)) {
                 continue;
@@ -276,8 +270,8 @@ main(int argc, char** argv) {
         if (progress_interval > 0 && done % progress_interval == 0) {
 #pragma omp critical(export_knng_progress)
             {
-                std::cout << "[export_knng] exported " << done << "/" << row_count
-                          << " rows" << std::endl;
+                std::cout << "[export_knng] exported " << done << "/" << row_count << " rows"
+                          << std::endl;
             }
         }
     }

@@ -55,8 +55,8 @@ public:
                 valid_ids_.push_back(id);
             }
         }
-        valid_ratio_ = count > 0 ? static_cast<float>(valid_ids_.size()) / static_cast<float>(count)
-                                 : 1.0F;
+        valid_ratio_ =
+            count > 0 ? static_cast<float>(valid_ids_.size()) / static_cast<float>(count) : 1.0F;
     }
 
 private:
@@ -370,8 +370,7 @@ TEST_CASE("MCI hybrid search can reuse decoupled MCI and HGraph indexes", "[ut][
     for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
         REQUIRE(result.value()->GetIds()[i] >= 110);
     }
-    auto stats =
-        result.value()->GetStatistics({"mci_hybrid_route", "mci_hybrid_valid_ratio"});
+    auto stats = result.value()->GetStatistics({"mci_hybrid_route", "mci_hybrid_valid_ratio"});
     REQUIRE(stats[0].find("hgraph") != std::string::npos);
     REQUIRE(std::stof(stats[1]) > 0.5F);
 }
