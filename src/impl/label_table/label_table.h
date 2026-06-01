@@ -325,6 +325,16 @@ public:
         return source_id_table_[inner_id];
     }
 
+    const Vector<std::string>&
+    GetSourceIdTableRef() const {
+        return source_id_table_;
+    }
+
+    Vector<std::string>&
+    GetSourceIdTableMutable() {
+        return source_id_table_;
+    }
+
     void
     Move(InnerIdType from, InnerIdType to) {
         if (from == to) {

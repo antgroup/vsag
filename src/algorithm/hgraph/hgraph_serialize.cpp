@@ -152,41 +152,88 @@ HGraph::deserialize_basic_info(const JsonType& jsonify_basic_info) {
     }
 }
 
+// Magic header used to mark presence of an appended source_id_table block,
+// enabling backward-compatible Deserialize against legacy index files written
+// before source_id_table_ persistence was implemented.
+static constexpr uint64_t SOURCE_ID_TABLE_MAGIC = 0x534F555243454944ULL;  // "SOURCEID"
+
 void
 HGraph::serialize_label_info(StreamWriter& writer) const {
     if (this->support_duplicate_) {
         this->label_table_->Serialize(writer);
-        return;
+    } else {
+        StreamWriter::WriteVector(writer, this->label_table_->label_table_);
+        uint64_t size = this->label_table_->GetRemapSize();
+        StreamWriter::WriteObj(writer, size);
+        this->label_table_->ForEachRemap([&writer](LabelType key, InnerIdType value) {
+            StreamWriter::WriteObj(writer, key);
+            StreamWriter::WriteObj(writer, value);
+        });
     }
 
-    StreamWriter::WriteVector(writer, this->label_table_->label_table_);
-    uint64_t size = this->label_table_->GetRemapSize();
-    StreamWriter::WriteObj(writer, size);
-    this->label_table_->ForEachRemap([&writer](LabelType key, InnerIdType value) {
-        StreamWriter::WriteObj(writer, key);
-        StreamWriter::WriteObj(writer, value);
-    });
+    // Append source_id_table_ block: [magic][count][str0][str1]...
+    // Even an empty source_id_table_ still emits the magic + count==0 so the
+    // reader can unambiguously detect (and skip) the block.
+    const auto& sid_table = this->label_table_->GetSourceIdTableRef();
+    StreamWriter::WriteObj(writer, SOURCE_ID_TABLE_MAGIC);
+    uint64_t sid_count = sid_table.size();
+    StreamWriter::WriteObj(writer, sid_count);
+    for (uint64_t i = 0; i < sid_count; ++i) {
+        StreamWriter::WriteString(writer, sid_table[i]);
+    }
 }
 
 void
 HGraph::deserialize_label_info(StreamReader& reader) const {
     if (this->support_duplicate_) {
         this->label_table_->Deserialize(reader);
-        return;
+    } else {
+        StreamReader::ReadVector(reader, this->label_table_->label_table_);
+        uint64_t size;
+        StreamReader::ReadObj(reader, size);
+        this->label_table_->ResetRemap(size);
+        for (uint64_t i = 0; i < size; ++i) {
+            LabelType key;
+            StreamReader::ReadObj(reader, key);
+            InnerIdType value;
+            StreamReader::ReadObj(reader, value);
+            this->label_table_->InsertRemap(key, value);
+        }
+        this->label_table_->total_count_.store(static_cast<int64_t>(size));
     }
 
-    StreamReader::ReadVector(reader, this->label_table_->label_table_);
-    uint64_t size;
-    StreamReader::ReadObj(reader, size);
-    this->label_table_->ResetRemap(size);
-    for (uint64_t i = 0; i < size; ++i) {
-        LabelType key;
-        StreamReader::ReadObj(reader, key);
-        InnerIdType value;
-        StreamReader::ReadObj(reader, value);
-        this->label_table_->InsertRemap(key, value);
+    // Optional source_id_table_ block. If the next 8 bytes don't match
+    // SOURCE_ID_TABLE_MAGIC, the stream is from a legacy writer; rewind so
+    // the parent reader can continue with the next field.
+    const uint64_t cursor_before = reader.GetCursor();
+    if (reader.Length() >= cursor_before + sizeof(uint64_t)) {
+        uint64_t magic = 0;
+        StreamReader::ReadObj(reader, magic);
+        if (magic == SOURCE_ID_TABLE_MAGIC) {
+            uint64_t sid_count = 0;
+            StreamReader::ReadObj(reader, sid_count);
+            // Defensive validation against corrupted / maliciously crafted
+            // streams: an unchecked resize on a huge sid_count would cause
+            // OOM / DoS. sid_count must match the just-deserialized label
+            // table size (they are populated in lock-step by InsertSourceId).
+            const uint64_t label_table_size = this->label_table_->label_table_.size();
+            if (sid_count > label_table_size) {
+                throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                    fmt::format("corrupted index: source_id_table sid_count ({}) "
+                                                "exceeds label_table size ({})",
+                                                sid_count,
+                                                label_table_size));
+            }
+            auto& sid_table = this->label_table_->GetSourceIdTableMutable();
+            sid_table.clear();
+            sid_table.resize(sid_count);
+            for (uint64_t i = 0; i < sid_count; ++i) {
+                sid_table[i] = StreamReader::ReadString(reader);
+            }
+        } else {
+            reader.Seek(cursor_before);
+        }
     }
-    this->label_table_->total_count_.store(static_cast<int64_t>(size));
 }
 
 void
