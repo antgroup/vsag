@@ -71,11 +71,12 @@ MCIParameter::FromJson(const JsonType& json) {
     CHECK_ARGUMENT(this->mcs > 0, "mci mcs must be positive");
     CHECK_ARGUMENT(this->clique_max > 0, "mci clique_max must be positive");
     CHECK_ARGUMENT(this->alpha >= 1.0F, "mci alpha must be greater than or equal to 1.0");
-    CHECK_ARGUMENT(
-        this->hgraph_valid_ratio_threshold >= 0.0F and this->hgraph_valid_ratio_threshold <= 1.0F,
-        "mci hgraph_valid_ratio_threshold must be in range [0, 1]");
+    CHECK_ARGUMENT((this->hgraph_valid_ratio_threshold >= 0.0F) and  // NOLINT
+                       (this->hgraph_valid_ratio_threshold <= 1.0F),
+                   "mci hgraph_valid_ratio_threshold must be in range [0, 1]");
     CHECK_ARGUMENT(this->hgraph_ef_search > 0, "mci hgraph_ef_search must be positive");
-    CHECK_ARGUMENT(not this->use_hgraph_hybrid or this->hgraph_param != nullptr,
+    CHECK_ARGUMENT((not this->use_hgraph_hybrid) or  // NOLINT
+                       (this->hgraph_param != nullptr),
                    "mci use_hgraph_hybrid requires hgraph_index_param");
 }
 
