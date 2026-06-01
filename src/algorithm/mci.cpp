@@ -51,7 +51,7 @@
 namespace vsag {
 namespace {
 
-static const std::string MCI_PARAMS_TEMPLATE = R"(
+const std::string MCI_PARAMS_TEMPLATE = R"(
     {
         "type": "mci",
         "use_reorder": false,
@@ -214,7 +214,7 @@ run_local_ccr_mce(const Vector<InnerIdType>& local_nodes,
             const auto core_rhs = local_to_order[rhs];
             if (core_rhs < core_count) {
                 set_core_edge(core_lhs, core_rhs);
-                set_core_edge(core_rhs, core_lhs);
+                set_core_edge(core_rhs, core_lhs);  // NOLINT(readability-suspicious-call-argument)
             }
         }
     }
@@ -450,7 +450,7 @@ collect_valid_inner_ids(const FilterPtr& filter,
     return inner_ids;
 }
 
-struct MCISearchCandidate {
+struct mci_search_candidate {
     float distance{0.0F};
     InnerIdType inner_id{0};
     bool expanded{false};
@@ -621,12 +621,13 @@ MCI::build_clique_index(const float* vectors,
     auto build_codes = has_precise_reorder ? this->reorder_codes_ : this->base_codes_;
     FlattenInterfacePtr temporary_sq8_build_data = nullptr;
     if (need_temporary_sq8_build_data(this->base_codes_, has_precise_reorder)) {
-        temporary_sq8_build_data = make_temporary_sq8_flatten(this->metric_,
-                                                              this->data_type_,
-                                                              this->dim_,
-                                                              this->extra_info_size_,
-                                                              this->thread_pool_,
-                                                              this->allocator_);
+        temporary_sq8_build_data =
+            make_temporary_sq8_flatten(this->metric_,
+                                       this->data_type_,
+                                       this->dim_,
+                                       static_cast<int64_t>(this->extra_info_size_),
+                                       this->thread_pool_,
+                                       this->allocator_);
         temporary_sq8_build_data->Train(vectors, data_count);
         for (const auto& [inner_id, local_idx] : inserted_ids) {
             temporary_sq8_build_data->InsertVector(vectors + dim_ * local_idx, inner_id);
@@ -705,7 +706,8 @@ MCI::load_clique_index(const std::string& clique_path, uint64_t total) {
         new_p_node_to_cid.size() == total + 1,
         fmt::format(
             "mci pNodeToCid size {} must be total + 1 ({})", new_p_node_to_cid.size(), total + 1));
-    CHECK_ARGUMENT(new_p_maxc.front() == 0 and new_p_node_to_cid.front() == 0,
+    CHECK_ARGUMENT(new_p_maxc.front() == 0 and  // NOLINT
+                       new_p_node_to_cid.front() == 0,
                    "mci imported CSR offsets must start from 0");
     CHECK_ARGUMENT(
         new_p_maxc.back() == new_maxcs.size(),
@@ -1419,10 +1421,10 @@ MCI::search_clique_candidates(const ComputerInterfacePtr& computer,
     const auto total = static_cast<InnerIdType>(this->total_count_.load());
     Vector<uint8_t> visited_nodes(total, 0, this->allocator_);
     Vector<uint8_t> visited_cliques(this->total_clique_count_, 0, this->allocator_);
-    Vector<MCISearchCandidate> candidates(this->allocator_);
+    Vector<mci_search_candidate> candidates(this->allocator_);
     candidates.reserve(static_cast<uint64_t>(candidate_limit));
 
-    auto is_better = [](const MCISearchCandidate& lhs, const MCISearchCandidate& rhs) {
+    auto is_better = [](const mci_search_candidate& lhs, const mci_search_candidate& rhs) {
         if (lhs.distance != rhs.distance) {
             return lhs.distance < rhs.distance;
         }
@@ -1438,7 +1440,7 @@ MCI::search_clique_candidates(const ComputerInterfacePtr& computer,
         if (not can_update(distance)) {
             return;
         }
-        MCISearchCandidate candidate{distance, inner_id, false};
+        mci_search_candidate candidate{distance, inner_id, false};
         auto iter = std::lower_bound(candidates.begin(), candidates.end(), candidate, is_better);
         candidates.insert(iter, candidate);
         if (static_cast<int64_t>(candidates.size()) > candidate_limit) {
@@ -1446,7 +1448,7 @@ MCI::search_clique_candidates(const ComputerInterfacePtr& computer,
         }
     };
 
-    auto get_closest_unexpanded = [&]() -> MCISearchCandidate* {
+    auto get_closest_unexpanded = [&]() -> mci_search_candidate* {
         for (auto& candidate : candidates) {
             if (not candidate.expanded) {
                 candidate.expanded = true;
@@ -1888,7 +1890,7 @@ const float*
 MCI::get_float_vectors(const DatasetPtr& data) const {
     CHECK_ARGUMENT(data_type_ == DataTypes::DATA_TYPE_FLOAT,
                    fmt::format("MCI currently supports only {} datatype", DATATYPE_FLOAT32));
-    auto* vectors = data->GetFloat32Vectors();
+    const auto* vectors = data->GetFloat32Vectors();
     CHECK_ARGUMENT(vectors != nullptr, "float vectors are nullptr");
     return vectors;
 }
@@ -1936,7 +1938,7 @@ MCI::load_hgraph_index(const std::string& index_path) {
     CHECK_ARGUMENT(input.good(), fmt::format("failed to open hgraph index: {}", index_path));
     IOStreamReader reader(input);
     this->hgraph_index_->Deserialize(reader);
-    CHECK_ARGUMENT(this->hgraph_index_->GetNumElements() == this->GetNumElements() or
+    CHECK_ARGUMENT(this->hgraph_index_->GetNumElements() == this->GetNumElements() or  // NOLINT
                        this->GetNumElements() == 0,
                    fmt::format("hgraph index size {} does not match mci size {}",
                                this->hgraph_index_->GetNumElements(),
