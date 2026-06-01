@@ -200,14 +200,70 @@ still controlled by `base_quantization_type` (and optionally `precise_quantizati
 
 Search-time parameters live under the `hgraph` sub-object:
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `ef_search` | int | Size of the search frontier. Larger = higher recall, slower query. |
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `ef_search` | int | — (required) | Size of the search frontier. Larger = higher recall, slower query. |
+| `hops_limit` | int | unlimited | Hard cap on the number of hops the beam search performs before returning the current frontier. |
+| `brute_force_threshold` | float | `0.0` | Selectivity-aware brute-force fallback. When `> 0` and the supplied filter's `ValidRatio()` is `≤ brute_force_threshold`, the search **bypasses the graph traversal entirely** and runs an exact scan over the valid ids using the best available flatten codes (see the section below). Must lie in `[0.0, 1.0]`; the default `0.0` disables the feature and preserves legacy behavior. |
+| `rabitq_one_bit_search` | bool | `false` | RabitQ one-bit search path; see the [Quantization chapter](../quantization/README.md). |
 
 ```cpp
 auto result = index->KnnSearch(
     query, topk, R"({"hgraph": {"ef_search": 200}})").value();
 ```
+
+### Brute-force fallback under highly selective filters (`brute_force_threshold`)
+
+Graph traversal is the right strategy when most candidates pass the filter — the
+graph quickly reaches the neighborhood of the query. As filter selectivity
+increases (only a tiny fraction of vectors survive), the beam has to expand far
+more nodes just to fill `ef_search` with **valid** candidates, and recall drops.
+At some point an exhaustive scan over the surviving ids is both faster *and*
+exact.
+
+`brute_force_threshold` lets HGraph make that switch automatically on a
+per-query basis:
+
+```cpp
+// When the active filter keeps ≤ 1% of ids, run an exact scan instead.
+auto params = R"({"hgraph": {"ef_search": 200, "brute_force_threshold": 0.01}})";
+auto result = index->KnnSearch(query, topk, params, my_filter).value();
+```
+
+How it works (`src/algorithm/hgraph/hgraph_search.cpp`):
+
+- The fallback only fires when **all** of the following hold:
+    - `brute_force_threshold > 0.0`, **and**
+    - a filter is supplied, **and**
+    - `filter->ValidRatio() <= brute_force_threshold`.
+- The accuracy of `Filter::ValidRatio()` matters — it is the user-supplied hint
+  the dispatcher checks against the threshold. See
+  [Filtered Search](../advanced/filtered_search.md) for the API contract.
+- The scan iterates every valid inner id and computes distances in batches of
+  64 using the most precise flatten storage available (raw vectors if
+  `store_raw_vector` was set, otherwise the high-precision reorder codes when
+  `use_reorder=true`, otherwise the base quantized codes).
+- Because the scan already uses precise codes when present, the post-search
+  reorder pass is **skipped** for queries that took the brute-force branch.
+- Applies to `KnnSearch` (the non-iterator overload, which is what
+  `SearchWithRequest` and the standard `KnnSearch(query, k, params, filter)`
+  call) and to `RangeSearch`. It does **not** apply to the iterator-style
+  `KnnSearch(..., IteratorContext*&, ...)`, because a single sweep cannot be
+  paged across multiple iterator calls.
+
+Picking a value:
+
+- Leave at `0.0` (default) for unfiltered or weakly filtered workloads.
+- For highly selective filters, `0.01–0.05` is a reasonable starting point.
+  Setting it higher than that effectively turns the index into a brute-force
+  scanner whenever a filter is present.
+- The cost of the brute-force scan is roughly `O(N × dim)` where `N` is the
+  total number of indexed vectors (regardless of selectivity, because every id
+  is visited to check `CheckValid`). The benefit grows when graph search would
+  otherwise need a much larger `ef_search` to recover recall.
+
+A runnable example is
+[`322_feature_hgraph_brute_force_threshold.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/322_feature_hgraph_brute_force_threshold.cpp).
 
 ## When to use HGraph
 

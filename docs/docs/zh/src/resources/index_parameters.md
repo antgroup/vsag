@@ -75,6 +75,11 @@ HGraph 的构建参数使用通用的 `index_param` 键（参见 `examples/cpp/1
 {"hgraph": {"ef_search": 100}}
 ```
 
+`hgraph` 搜索参数还接受 `brute_force_threshold`（`[0.0, 1.0]` 区间的 float，
+默认 `0.0`）。当取值 `> 0` 且当前请求的 filter 的 `ValidRatio()` 不超过该
+阈值时，HGraph 会跳过图遍历，直接在通过过滤的 id 上做精确暴扫。详见
+[HGraph 索引文档](../indexes/hgraph.md#高选择性过滤下的暴搜回退brute_force_threshold)。
+
 ## DiskANN
 
 ```json
