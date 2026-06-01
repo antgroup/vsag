@@ -395,6 +395,11 @@ private:
         return use_reorder_ and not reorder_by_base_;
     }
 
+    [[nodiscard]] bool
+    support_force_remove() const {
+        return support_force_remove_;
+    }
+
     [[nodiscard]] FlattenInterfacePtr
     get_reorder_codes() const {
         return reorder_by_base_ ? basic_flatten_codes_ : high_precise_codes_;
@@ -505,6 +510,7 @@ private:
     bool use_old_serial_format_{false};
 
     bool support_duplicate_{false};
+    bool support_force_remove_{false};
     float duplicate_distance_threshold_{0.0F};
 
     std::unique_ptr<HGraphCache> cache_{nullptr};

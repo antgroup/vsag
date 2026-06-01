@@ -1,7 +1,5 @@
 # HGraph
 
-![HGraph：自顶向下贪心搜索的层级近邻图，支持可选精排](../figures/indexes/hgraph-overview.svg)
-
 HGraph 是 VSAG 的旗舰 **图索引**。它构建的是与 HNSW 思路类似的多层近邻图，但在此基础上
 提供了更丰富的量化方案、统一的构建参数 schema（`index_param`），并原生支持精排（reorder）、
 增量更新、删除、以及基于 ELP 的运行时自动调优。
@@ -70,7 +68,8 @@ auto result = index->KnnSearch(
 | `build_thread_count` | int | `100` | 构建阶段并发线程数 |
 | `support_duplicate` | bool | `false` | 是否在插入时做重复 ID 检测 |
 | `duplicate_distance_threshold` | float | `0.0` | 重复判定距离阈值。大于 `0` 时按最近候选的距离判重；等于 `0` 时退化为当前编码 `memcmp` 判重 |
-| `support_remove` | bool | `false` | 是否支持 `Remove()` |
+| `support_remove` | bool | `false` | 是否启用 mark-remove 恢复路径所需的图删除追踪元数据 |
+| `support_force_remove` | bool | `false` | 是否启用 `RemoveMode::FORCE_REMOVE` 及其额外同步 |
 | `store_raw_vector` | bool | `false` | 除量化副本外再保留原始向量（`cosine` 场景有用） |
 | `use_elp_optimizer` | bool | `false` | 构建完成后自动调优检索参数 |
 | `base_io_type` / `precise_io_type` | string | `"block_memory_io"` | 存储后端（`memory_io`、`block_memory_io`、`buffer_io`、`async_io`、`mmap_io`） |
@@ -190,24 +189,17 @@ base->NumElements(num_vectors)->Dim(dim)->Ids(ids)
 | 参数 | 类型 | 说明 |
 |------|------|------|
 | `ef_search` | int | 搜索前沿候选集的大小，越大召回越高、查询越慢 |
-| `enable_reorder` | bool | 默认值为 `true`。当索引构建时启用了 reorder，也可以在单次请求里设为 `false` 跳过最终精排；这也会一并关闭 RaBitQ 的 one-bit reorder 路径。 |
 
 ```cpp
 auto result = index->KnnSearch(
     query, topk, R"({"hgraph": {"ef_search": 200}})").value();
 ```
 
-```cpp
-auto fast_result = index->KnnSearch(
-    query, topk,
-    R"({"hgraph": {"ef_search": 200, "enable_reorder": false}})").value();
-```
-
 ## 何时选择 HGraph
 
 - 维度大约在 64–4096 的稠密 float 向量。
 - 对延迟敏感且要求高召回的场景。
-- 需要增量插入（可选通过 `support_remove` 打开删除）的混合负载。
+- 需要增量插入（可选通过 `support_force_remove` 打开物理删除）的混合负载。
 - 内存受限环境，可用 `sq8` / `sq4_uniform` / `pq` 压缩，再配合 `use_reorder` 弥补召回。
 
 如果你的业务偏向粗粒度分桶（每次查询只扫部分桶）或严重受 SSD I/O 制约，建议先对比

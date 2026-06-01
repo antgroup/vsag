@@ -131,6 +131,9 @@ HGraphParameter::FromJson(const JsonType& json) {
     if (json.Contains(SUPPORT_TOMBSTONE)) {
         this->support_tombstone = json[SUPPORT_TOMBSTONE].GetBool();
     }
+    if (json.Contains(SUPPORT_FORCE_REMOVE)) {
+        this->support_force_remove = json[SUPPORT_FORCE_REMOVE].GetBool();
+    }
 }
 
 JsonType
@@ -147,6 +150,7 @@ HGraphParameter::ToJson() const {
     json[ALPHA_KEY].SetFloat(this->alpha);
     json[SUPPORT_DUPLICATE].SetBool(this->support_duplicate);
     json[DUPLICATE_DISTANCE_THRESHOLD].SetFloat(this->duplicate_distance_threshold);
+    json[SUPPORT_FORCE_REMOVE].SetBool(this->support_force_remove);
     json[TRAIN_SAMPLE_COUNT_KEY].SetInt(this->train_sample_count);
     return json;
 }
@@ -196,6 +200,10 @@ HGraphParameter::CheckCompatibility(const ParamPtr& other) const {
     if (duplicate_distance_threshold != hgraph_param->duplicate_distance_threshold) {
         logger::error(
             "HGraphParameter::CheckCompatibility: duplicate_distance_threshold must be the same");
+        return false;
+    }
+    if (support_force_remove != hgraph_param->support_force_remove) {
+        logger::error("HGraphParameter::CheckCompatibility: support_force_remove must be the same");
         return false;
     }
     return true;

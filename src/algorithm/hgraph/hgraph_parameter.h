@@ -65,6 +65,7 @@ public:
     bool support_duplicate{false};
     float duplicate_distance_threshold{0.0F};
     bool support_tombstone{false};
+    bool support_force_remove{false};
 
     DataTypes data_type{DataTypes::DATA_TYPE_FLOAT};
 

@@ -215,7 +215,10 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
 
 std::vector<int64_t>
 HGraph::Add(const DatasetPtr& data, AddMode mode) {
-    std::shared_lock force_remove_rlock(this->force_remove_mutex_);
+    std::shared_lock<std::shared_mutex> force_remove_rlock;
+    if (this->support_force_remove()) {
+        force_remove_rlock = std::shared_lock<std::shared_mutex>(this->force_remove_mutex_);
+    }
     std::vector<int64_t> failed_ids;
     auto base_dim = data->GetDim();
     if (data_type_ != DataTypes::DATA_TYPE_SPARSE) {
@@ -378,7 +381,10 @@ HGraph::add_one_point(const void* data, int level, InnerIdType inner_id) {
 
 void
 HGraph::insert_persistent_codes(const void* data, InnerIdType inner_id) {
-    std::shared_lock add_lock(add_mutex_);
+    std::shared_lock<std::shared_mutex> add_lock;
+    if (not this->support_force_remove()) {
+        add_lock = std::shared_lock<std::shared_mutex>(this->add_mutex_);
+    }
     this->basic_flatten_codes_->InsertVector(data, inner_id);
     if (has_precise_reorder()) {
         this->high_precise_codes_->InsertVector(data, inner_id);
@@ -390,10 +396,16 @@ HGraph::insert_persistent_codes(const void* data, InnerIdType inner_id) {
 
 void
 HGraph::add_one_point(const void* data, int level, InnerIdType inner_id, bool insert_codes) {
+    std::unique_lock<std::shared_mutex> add_lock(this->add_mutex_, std::defer_lock);
+    if (this->support_force_remove()) {
+        add_lock.lock();
+    }
     if (insert_codes) {
         this->insert_persistent_codes(data, inner_id);
     }
-    std::unique_lock add_lock(add_mutex_);
+    if (not this->support_force_remove()) {
+        add_lock.lock();
+    }
     if (level >= static_cast<int>(this->route_graphs_.size()) || bottom_graph_->TotalCount() == 0) {
         std::scoped_lock<std::shared_mutex> wlock(this->global_mutex_);
         // level maybe a negative number(-1)

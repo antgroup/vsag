@@ -86,7 +86,10 @@ HGraph::KnnSearch(const DatasetPtr& query,
         (1 <= params.ef_search) and (params.ef_search <= ef_search_threshold),
         fmt::format("ef_search({}) must in range[1, {}]", params.ef_search, ef_search_threshold));
 
-    std::shared_lock force_remove_rlock(this->force_remove_mutex_);
+    std::shared_lock<std::shared_mutex> force_remove_rlock;
+    if (this->support_force_remove()) {
+        force_remove_rlock = std::shared_lock<std::shared_mutex>(this->force_remove_mutex_);
+    }
     std::shared_lock shared_lock(this->global_mutex_);
     // check k
     CHECK_ARGUMENT(k > 0, fmt::format("k({}) must be greater than 0", k));
@@ -400,7 +403,10 @@ HGraph::RangeSearch(const DatasetPtr& query,
     CHECK_ARGUMENT(limited_size != 0,
                    fmt::format("limited_size({}) must not be equal to 0", limited_size));
 
-    std::shared_lock force_remove_rlock(this->force_remove_mutex_);
+    std::shared_lock<std::shared_mutex> force_remove_rlock;
+    if (this->support_force_remove()) {
+        force_remove_rlock = std::shared_lock<std::shared_mutex>(this->force_remove_mutex_);
+    }
     std::shared_lock shared_lock(this->global_mutex_);
 
     InnerSearchParam search_param;
@@ -517,7 +523,10 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         (1 <= params.ef_search) and (params.ef_search <= ef_search_threshold),
         fmt::format("ef_search({}) must in range[1, {}]", params.ef_search, ef_search_threshold));
 
-    std::shared_lock force_remove_rlock(this->force_remove_mutex_);
+    std::shared_lock<std::shared_mutex> force_remove_rlock;
+    if (this->support_force_remove()) {
+        force_remove_rlock = std::shared_lock<std::shared_mutex>(this->force_remove_mutex_);
+    }
     std::shared_lock shared_lock(this->global_mutex_);
 
     // check k

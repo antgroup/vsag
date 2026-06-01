@@ -333,6 +333,12 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             {GRAPH_KEY, GRAPH_SUPPORT_REMOVE},
         },
         {
+            HGRAPH_SUPPORT_FORCE_REMOVE,
+            {
+                SUPPORT_FORCE_REMOVE,
+            },
+        },
+        {
             HGRAPH_REMOVE_FLAG_BIT,
             {GRAPH_KEY, REMOVE_FLAG_BIT},
         },
@@ -454,6 +460,7 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
         },
         "{HGRAPH_SUPPORT_DUPLICATE}": false,
         "{HGRAPH_SUPPORT_TOMBSTONE}": false,
+        "{SUPPORT_FORCE_REMOVE}": false,
         "{EF_CONSTRUCTION_KEY}": 400
     })";
 
