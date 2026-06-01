@@ -25,6 +25,30 @@ from conftest import (
 )
 
 
+def _create_dense_dispatch_index(dtype: str, dim: int) -> pyvsag.Index:
+    quantization = "fp16" if dtype == "float16" else "bf16"
+    return create_index(
+        "hgraph",
+        f"""
+        {{
+            "dtype": "{dtype}",
+            "metric_type": "l2",
+            "dim": {dim},
+            "index_param": {{
+                "base_quantization_type": "{quantization}",
+                "max_degree": 16,
+                "ef_construction": 50,
+                "alpha": 1.2
+            }}
+        }}
+        """,
+    )
+
+
+def _float32_to_bfloat16_bits(array: np.ndarray) -> np.ndarray:
+    return (array.astype(np.float32).view(np.uint32) >> 16).astype(np.uint16)
+
+
 class TestGetNumElements:
     """Tests for get_num_elements method"""
 
@@ -243,6 +267,168 @@ class TestAddVectors:
         ids_2 = dataset.ids[half:]
         index.add(vectors_2, ids_2, dataset.num_elements - half, dataset.dim)
         assert index.get_num_elements() == dataset.num_elements
+
+
+class TestDenseDtypeDispatch:
+    """Tests for dense dtype-aware build/search/add bindings"""
+
+    def test_build_accepts_2d_float16_matrix(self, dataset_factory):
+        dataset = dataset_factory(num_vectors=64, dim=32)
+        index = _create_dense_dispatch_index("float16", dataset.dim)
+
+        vectors = dataset.base_vectors.reshape(dataset.num_elements, dataset.dim).astype(np.float16)
+        index.build(vectors, dataset.ids, dataset.num_elements, dataset.dim)
+
+        assert index.get_num_elements() == dataset.num_elements
+
+    def test_add_accepts_2d_bfloat16_matrix(self, dataset_factory):
+        dataset = dataset_factory(num_vectors=32, dim=16)
+        index = _create_dense_dispatch_index("bfloat16", dataset.dim)
+
+        vectors = _float32_to_bfloat16_bits(dataset.base_vectors).reshape(
+            dataset.num_elements, dataset.dim
+        )
+        index.add(vectors, dataset.ids, dataset.num_elements, dataset.dim)
+
+        assert index.get_num_elements() == dataset.num_elements
+
+    def test_knn_search_accepts_float16_query(self, dataset_factory):
+        dataset = dataset_factory(num_vectors=64, dim=32)
+        index = _create_dense_dispatch_index("float16", dataset.dim)
+        index.build(dataset.base_vectors.astype(np.float16), dataset.ids, dataset.num_elements, dataset.dim)
+
+        query = dataset.query_vectors[: dataset.dim].astype(np.float16)
+        ids, distances = index.knn_search(query, 5, '{"hgraph": {"ef_search": 20}}')
+
+        assert ids.shape == (5,)
+        assert distances.shape == (5,)
+
+    def test_knn_search_accepts_bfloat16_query(self, dataset_factory):
+        dataset = dataset_factory(num_vectors=64, dim=32)
+        index = _create_dense_dispatch_index("bfloat16", dataset.dim)
+        index.build(
+            _float32_to_bfloat16_bits(dataset.base_vectors),
+            dataset.ids,
+            dataset.num_elements,
+            dataset.dim,
+        )
+
+        query = _float32_to_bfloat16_bits(dataset.query_vectors[: dataset.dim])
+        ids, distances = index.knn_search(query, 5, '{"hgraph": {"ef_search": 20}}')
+
+        assert ids.shape == (5,)
+        assert distances.shape == (5,)
+
+    def test_range_search_accepts_float16_query(self, dataset_factory):
+        dataset = dataset_factory(num_vectors=64, dim=32)
+        index = _create_dense_dispatch_index("float16", dataset.dim)
+        index.build(dataset.base_vectors.astype(np.float16), dataset.ids, dataset.num_elements, dataset.dim)
+
+        query = dataset.query_vectors[: dataset.dim].astype(np.float16)
+        ids, distances = index.range_search(query, 1e9, '{"hgraph": {"ef_search": 20}}')
+
+        assert ids.ndim == 1
+        assert distances.ndim == 1
+        assert ids.shape == distances.shape
+
+    def test_range_search_accepts_bfloat16_query(self, dataset_factory):
+        dataset = dataset_factory(num_vectors=64, dim=32)
+        index = _create_dense_dispatch_index("bfloat16", dataset.dim)
+        index.build(
+            _float32_to_bfloat16_bits(dataset.base_vectors),
+            dataset.ids,
+            dataset.num_elements,
+            dataset.dim,
+        )
+
+        query = _float32_to_bfloat16_bits(dataset.query_vectors[: dataset.dim])
+        ids, distances = index.range_search(query, 1e9, '{"hgraph": {"ef_search": 20}}')
+
+        assert ids.ndim == 1
+        assert distances.ndim == 1
+        assert ids.shape == distances.shape
+
+    @pytest.mark.parametrize(
+        ("dtype", "vectors", "expected_error"),
+        [
+            ("float16", lambda dataset: dataset.base_vectors.astype(np.float32), "vectors must be numpy.float16 array"),
+            (
+                "bfloat16",
+                lambda dataset: dataset.base_vectors.astype(np.float16),
+                r"vectors must be numpy.uint16 \(raw bfloat16 bits\) array",
+            ),
+        ],
+    )
+    def test_add_rejects_wrong_dense_dtype(self, dataset_factory, dtype, vectors, expected_error):
+        dataset = dataset_factory(num_vectors=16, dim=8)
+        index = _create_dense_dispatch_index(dtype, dataset.dim)
+
+        with pytest.raises(ValueError, match=expected_error):
+            index.add(vectors(dataset), dataset.ids, dataset.num_elements, dataset.dim)
+
+    @pytest.mark.parametrize(
+        ("dtype", "vectors", "expected_error"),
+        [
+            ("float16", lambda dataset: dataset.base_vectors.astype(np.float32), "vectors must be numpy.float16 array"),
+            (
+                "bfloat16",
+                lambda dataset: dataset.base_vectors.astype(np.float16),
+                r"vectors must be numpy.uint16 \(raw bfloat16 bits\) array",
+            ),
+        ],
+    )
+    def test_build_rejects_wrong_dense_dtype(self, dataset_factory, dtype, vectors, expected_error):
+        dataset = dataset_factory(num_vectors=16, dim=8)
+        index = _create_dense_dispatch_index(dtype, dataset.dim)
+
+        with pytest.raises(ValueError, match=expected_error):
+            index.build(vectors(dataset), dataset.ids, dataset.num_elements, dataset.dim)
+
+    @pytest.mark.parametrize(
+        ("dtype", "query", "expected_error"),
+        [
+            ("float16", lambda dim: np.ones(dim, dtype=np.float32), "vector must be numpy.float16 array"),
+            (
+                "bfloat16",
+                lambda dim: np.ones(dim, dtype=np.float16),
+                r"vector must be numpy.uint16 \(raw bfloat16 bits\) array",
+            ),
+        ],
+    )
+    def test_knn_search_rejects_wrong_dense_dtype(self, dataset_factory, dtype, query, expected_error):
+        dataset = dataset_factory(num_vectors=16, dim=8)
+        index = _create_dense_dispatch_index(dtype, dataset.dim)
+
+        build_vectors = dataset.base_vectors.astype(np.float16)
+        if dtype == "bfloat16":
+            build_vectors = _float32_to_bfloat16_bits(dataset.base_vectors)
+        index.build(build_vectors, dataset.ids, dataset.num_elements, dataset.dim)
+
+        with pytest.raises(ValueError, match=expected_error):
+            index.knn_search(query(dataset.dim), 3, '{"hgraph": {"ef_search": 20}}')
+
+    @pytest.mark.parametrize(
+        ("dtype", "query", "expected_error"),
+        [
+            ("float16", lambda dim: np.ones(dim, dtype=np.float32), "point must be numpy.float16 array"),
+            (
+                "bfloat16",
+                lambda dim: np.ones(dim, dtype=np.float16),
+                r"point must be numpy.uint16 \(raw bfloat16 bits\) array",
+            ),
+        ],
+    )
+    def test_range_search_rejects_wrong_dense_dtype(self, dataset_factory, dtype, query, expected_error):
+        dataset = dataset_factory(num_vectors=16, dim=8)
+        index = _create_dense_dispatch_index(dtype, dataset.dim)
+
+        build_vectors = dataset.base_vectors.astype(np.float16)
+        if dtype == "bfloat16":
+            build_vectors = _float32_to_bfloat16_bits(dataset.base_vectors)
+        index.build(build_vectors, dataset.ids, dataset.num_elements, dataset.dim)
+
+        with pytest.raises(ValueError, match=expected_error):
+            index.range_search(query(dataset.dim), 1.0, '{"hgraph": {"ef_search": 20}}')
 
 
 class TestRemoveVectors:
