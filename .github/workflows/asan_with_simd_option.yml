@@ -12,7 +12,7 @@ jobs:
     name: Asan Build Simd
     runs-on: ubuntu-22.04
     container:
-      image: vsaglib/vsag:ci-x86
+      image: vsaglib/vsag:ci-x86-mkl
       volumes:
         - /opt:/useless
     strategy:
@@ -72,7 +72,7 @@ jobs:
       group: test-${{ matrix.simd_key }}-${{ matrix.test_type }}-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     container:
-      image: vsaglib/vsag:ci-x86
+      image: vsaglib/vsag:ci-x86-mkl
       volumes:
         - /opt:/useless
     steps:
