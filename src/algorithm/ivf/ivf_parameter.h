@@ -16,13 +16,13 @@
 #pragma once
 #include <fmt/format.h>
 
-#include "algorithm/ivf_partition/ivf_nearest_partition.h"
-#include "algorithm/ivf_partition/ivf_partition_strategy_parameter.h"
+#include "algorithm/index_search_parameter.h"
+#include "algorithm/inner_index_parameter.h"
 #include "datacell/bucket_datacell_parameter.h"
 #include "datacell/flatten_datacell_parameter.h"
-#include "index_search_parameter.h"
-#include "inner_index_parameter.h"
 #include "inner_string_params.h"
+#include "ivf_nearest_partition.h"
+#include "ivf_partition_strategy_parameter.h"
 #include "typing.h"
 #include "utils/pointer_define.h"
 

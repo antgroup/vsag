@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "brute_force.h"
+#include "bruteforce.h"
 
 #include <atomic>
 #include <mutex>

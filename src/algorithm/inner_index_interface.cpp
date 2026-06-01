@@ -17,8 +17,8 @@
 
 #include <fmt/format.h>
 
+#include "algorithm/bruteforce/bruteforce.h"
 #include "algorithm/hgraph/hgraph.h"
-#include "brute_force.h"
 #include "impl/filter/filter_headers.h"
 #include "impl/label_table/label_table.h"
 #include "impl/thread_pool/safe_thread_pool.h"

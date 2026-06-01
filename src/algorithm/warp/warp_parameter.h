@@ -15,9 +15,9 @@
 
 #pragma once
 
+#include "algorithm/index_search_parameter.h"
+#include "algorithm/inner_index_parameter.h"
 #include "datacell/flatten_interface_parameter.h"
-#include "index_search_parameter.h"
-#include "inner_index_parameter.h"
 #include "typing.h"
 #include "utils/pointer_define.h"
 

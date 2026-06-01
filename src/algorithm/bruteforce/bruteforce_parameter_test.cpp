@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "brute_force_parameter.h"
+#include "bruteforce_parameter.h"
 
 #include "parameter_test.h"
 #include "unittest.h"

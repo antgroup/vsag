@@ -13,11 +13,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "algorithm/pyramid_zparameters.h"
+#include "pyramid_zparameters.h"
 
-#include "algorithm/pyramid.h"
 #include "index_common_param.h"
 #include "parameter_test.h"
+#include "pyramid.h"
 #include "unittest.h"
 
 struct PyramidDefaultParam {

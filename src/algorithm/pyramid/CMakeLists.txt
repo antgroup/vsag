@@ -14,13 +14,10 @@
 # limitations under the License.
 
 
-set (IVF_PARTITION_SRCS
-        gno_imi_parameter.cpp
-        ivf_nearest_partition.cpp
-        gno_imi_partition.cpp
-        ivf_partition_strategy_parameter.cpp
-        ivf_partition_strategy.cpp
+set (PYRAMID_SRCS
+        pyramid.cpp
+        pyramid_zparameters.cpp
 )
 
-add_library (ivf_partition OBJECT ${IVF_PARTITION_SRCS})
-target_link_libraries (ivf_partition PRIVATE coverage_config vsag_src_common)
+add_library (pyramid OBJECT ${PYRAMID_SRCS})
+target_link_libraries (pyramid PRIVATE coverage_config vsag_src_common)
