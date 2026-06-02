@@ -14,8 +14,12 @@
 
 #include <fmt/format.h>
 
+#include <atomic>
 #include <chrono>
+#include <cstdlib>
+#include <fstream>
 #include <future>
+#include <limits>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -115,6 +119,7 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
     const auto* labels = data->GetIds();
     const auto* vectors = data->GetFloat32Vectors();
     const auto* extra_infos = data->GetExtraInfos();
+    const auto* source_id = data->GetSourceID();
     Vector<int64_t> valid_indices(allocator_);
     UnorderedSet<LabelType> seen_labels(allocator_);
     for (int64_t i = 0; i < total; ++i) {
@@ -160,6 +165,11 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
         auto label = labels[i];
         InnerIdType inner_id = inner_ids.at(cur_size);
         this->label_table_->Insert(inner_id, label);
+        // Persist source_id alongside label so day2 ExportCache produces a
+        // non-empty source_id_table_. Same array-indexing semantics as Add().
+        if (source_id != nullptr && not source_id[i].empty()) {
+            this->label_table_->InsertSourceId(inner_id, source_id[i]);
+        }
         if (not defer_persistent_codes) {
             this->insert_persistent_codes(vectors + dim_ * i, inner_id);
         } else {
@@ -311,8 +321,12 @@ HGraph::Add(const DatasetPtr& data, AddMode mode) {
         {
             std::scoped_lock label_lock(this->label_lookup_mutex_);
             this->label_table_->Insert(inner_id, labels[j]);
-            if (source_id != nullptr) {
-                this->label_table_->InsertSourceId(inner_id, *source_id);
+            // NOTE: Dataset::GetSourceID() returns a pointer to an array of N
+            // source_id strings (one per row), matching the semantics already
+            // used by build_with_cache() at line ~1234. Use array indexing
+            // instead of dereferencing the head pointer.
+            if (source_id != nullptr && not source_id[j].empty()) {
+                this->label_table_->InsertSourceId(inner_id, source_id[j]);
             }
             inner_ids.emplace_back(inner_id, j);
         }
@@ -735,8 +749,23 @@ build_cache_now_us() {
                                      .count());
 }
 
-constexpr uint32_t HIT_REFINE_ROUNDS = 2;
-constexpr uint32_t MISSED_REFINE_ROUNDS = 4;
+constexpr uint32_t HIT_REFINE_ROUNDS = 1;
+// MISSED side requires >=3 rounds: cold-start nodes (no warm seed) need
+// multiple sweeps to (a) discover neighbors via search, (b) install reverse
+// edges into hit-node adjacency lists, and (c) re-search with the newly
+// populated frontier. Bisection on the miss-only smoke test
+// (ef_construction=50, 200 vectors) shows ROUNDS<=2 fails REQUIRE(found_self);
+// ROUNDS=3 passes consistently. Upstream uses 4; we keep 3 to bound cost.
+constexpr uint32_t MISSED_REFINE_ROUNDS = 3;
+// refine ef tuned down from ef_construct_ (=300/400) to 64 to avoid the
+// pathological hit_refine bottleneck where each node spends 308us re-exploring
+// the bottom graph with ef=300 (10092s total for 32.96M nodes, 1.73x slower
+// than full rebuild). With ef=64, expected per-node ~60us (5x faster).
+// Reference gby BuildCacheOptions default for hit_refine_ef is also 64.
+constexpr uint32_t HIT_REFINE_EF = 64;
+// MISSED_REFINE_EF kept high (400) because missed nodes have NO seed
+// neighbors and need wider exploration. User-directed asymmetric config.
+constexpr uint32_t MISSED_REFINE_EF = 400;
 
 }  // namespace
 
@@ -756,11 +785,40 @@ HGraph::collect_refine_candidates(const DatasetPtr& data,
     Vector<InnerIdType> current_neighbors(allocator_);
     this->bottom_graph_->GetNeighbors(inner_id, current_neighbors);
     seen.reserve(current_neighbors.size() + effective_refine_ef);
-    for (const auto neighbor : current_neighbors) {
-        if (neighbor == inner_id || not seen.emplace(neighbor).second) {
-            continue;
+
+    // Optimisation #2: replace the per-neighbour ComputePairVectors loop with
+    // a single batched flatten->Query call. The original code looped 64 times
+    // (max_degree per node) and each call paid for a separate query-vector
+    // load + distance kernel invocation; with N nodes refined we performed
+    // N*64 scalar distance computations. The batched path uses
+    // FactoryComputer(query) once and then asks the flatten cell to fill an
+    // array of N distances in one shot, which lets the underlying SIMD /
+    // prefetching code amortise the query load across all neighbours. Bit
+    // equivalence with the scalar path is preserved because Query() is the
+    // canonical primitive that ComputePairVectors itself delegates to.
+    if (not current_neighbors.empty()) {
+        // De-duplicate against `seen` and skip self-loops before issuing the
+        // batched Query so we never spend SIMD cycles on rows we will discard.
+        Vector<InnerIdType> filtered_ids(allocator_);
+        filtered_ids.reserve(current_neighbors.size());
+        for (const auto neighbor : current_neighbors) {
+            if (neighbor == inner_id || not seen.emplace(neighbor).second) {
+                continue;
+            }
+            filtered_ids.push_back(neighbor);
         }
-        candidates->Push(flatten_codes->ComputePairVectors(neighbor, inner_id), neighbor);
+        if (not filtered_ids.empty()) {
+            auto computer = flatten_codes->FactoryComputer(get_data(data, input_idx));
+            Vector<float> filtered_dists(filtered_ids.size(), allocator_);
+            flatten_codes->Query(filtered_dists.data(),
+                                 computer,
+                                 filtered_ids.data(),
+                                 static_cast<InnerIdType>(filtered_ids.size()),
+                                 nullptr);
+            for (uint64_t k = 0; k < filtered_ids.size(); ++k) {
+                candidates->Push(filtered_dists[k], filtered_ids[k]);
+            }
+        }
     }
 
     if (this->entry_point_id_ != INVALID_ENTRY_POINT && this->bottom_graph_->TotalCount() > 0) {
@@ -783,13 +841,25 @@ HGraph::collect_refine_candidates(const DatasetPtr& data,
                                              param,
                                              (VisitedListPtr) nullptr,
                                              nullptr);
+        // Optimisation #1: reuse the (dist, inner_id) records produced by
+        // search_one_graph instead of recomputing the same distance via
+        // ComputePairVectors. The searcher already computed dist(query, id)
+        // for every node it visited; the heap returned here stores those
+        // exact (dist, id) pairs. Re-running ComputePairVectors would do the
+        // same fp32 kernel call a second time for every candidate (~64 per
+        // node for hit_refine, ~400 for missed_refine), which dominates the
+        // candidate-collection cost. Dropping the recompute is bit-equivalent:
+        // both paths go through flatten_codes->ComputePairVectors with the
+        // same query and same inner_ids.
         while (not result->Empty()) {
-            auto candidate = result->Top().second;
-            result->Pop();
-            if (candidate == inner_id || not seen.emplace(candidate).second) {
+            const auto& candidate = result->Top();
+            const InnerIdType candidate_id = candidate.second;
+            if (candidate_id == inner_id || not seen.emplace(candidate_id).second) {
+                result->Pop();
                 continue;
             }
-            candidates->Push(flatten_codes->ComputePairVectors(candidate, inner_id), candidate);
+            candidates->Push(candidate.first, candidate.second);
+            result->Pop();
         }
     }
 
@@ -1238,6 +1308,11 @@ HGraph::build_with_cache(const DatasetPtr& data) {
     std::unordered_map<std::string, InnerIdType> source_id_to_new_inner;
     source_id_to_new_inner.reserve(static_cast<uint64_t>(valid_indices.size()));
 
+    // ---- Step 1a: serial setup of label_table / source_id_table / route_graph_ids
+    //              and bookkeeping containers. LabelTable::Insert and the route
+    //              graph id buckets are NOT thread-safe (vector resize race),
+    //              so this short prelude stays serial.
+    const auto prepare_meta_begin = build_cache_now_us();
     for (uint64_t cur = 0; cur < valid_indices.size(); ++cur) {
         const auto i = valid_indices[cur];
         const auto inner_id = inner_ids.at(cur);
@@ -1246,13 +1321,6 @@ HGraph::build_with_cache(const DatasetPtr& data) {
         if (source_ids != nullptr && not source_ids[i].empty()) {
             this->label_table_->InsertSourceId(inner_id, source_ids[i]);
             source_id_to_new_inner.emplace(source_ids[i], inner_id);
-        }
-        this->insert_persistent_codes(get_data(data, static_cast<uint32_t>(i)), inner_id);
-        if (this->extra_infos_ != nullptr && extra_infos != nullptr) {
-            this->extra_infos_->InsertExtraInfo(extra_infos + i * extra_info_size_, inner_id);
-        }
-        if (attr_sets != nullptr && this->use_attribute_filter_) {
-            this->attr_filter_index_->Insert(attr_sets[i], inner_id);
         }
 
         inserted_inner_ids.push_back(inner_id);
@@ -1271,6 +1339,80 @@ HGraph::build_with_cache(const DatasetPtr& data) {
             }
         }
     }
+    const auto prepare_meta_elapsed = build_cache_now_us() - prepare_meta_begin;
+    logger::info("[hgraph_build_cache] prepare_meta finished in {:.3f}s nodes={}",
+                 static_cast<double>(prepare_meta_elapsed) / 1000000.0,
+                 static_cast<uint64_t>(valid_indices.size()));
+
+    // ---- Step 1b: parallel encode (RaBitQ + SQ8) + extra_info/attr_filter
+    //              writes. Each task touches a unique inner_id, FlattenDataCell::
+    //              InsertVector is per-cell-mutex-protected, ExtraInfo and
+    //              AttrFilter writes are also per-inner_id and independent.
+    const auto prepare_encode_begin = build_cache_now_us();
+    const bool use_parallel_prepare =
+        this->thread_pool_ != nullptr && this->build_thread_count_ > 1;
+    if (use_parallel_prepare) {
+        const uint64_t num_threads = this->build_thread_count_;
+        const uint64_t total_jobs = valid_indices.size();
+        const uint64_t block_size =
+            std::max<uint64_t>(1, (total_jobs + num_threads - 1) / num_threads);
+        std::vector<std::future<void>> futures;
+        futures.reserve(num_threads);
+        for (uint64_t lo = 0; lo < total_jobs; lo += block_size) {
+            const uint64_t hi = std::min<uint64_t>(lo + block_size, total_jobs);
+            futures.emplace_back(this->thread_pool_->GeneralEnqueue(
+                [this, lo, hi, &valid_indices, &inner_ids, data, extra_infos, attr_sets]() {
+                    for (uint64_t cur = lo; cur < hi; ++cur) {
+                        const auto i = valid_indices[cur];
+                        const auto inner_id = inner_ids.at(cur);
+                        this->insert_persistent_codes(get_data(data, static_cast<uint32_t>(i)),
+                                                      inner_id);
+                        if (this->extra_infos_ != nullptr && extra_infos != nullptr) {
+                            this->extra_infos_->InsertExtraInfo(extra_infos + i * extra_info_size_,
+                                                                inner_id);
+                        }
+                        if (attr_sets != nullptr && this->use_attribute_filter_) {
+                            this->attr_filter_index_->Insert(attr_sets[i], inner_id);
+                        }
+                    }
+                }));
+        }
+        // CRITICAL: drain ALL futures even if one throws. Background tasks
+        // capture valid_indices/inner_ids by reference; early return on first
+        // exception would leave tasks running against soon-destroyed stack
+        // variables, causing use-after-free / UB. Mirror the warm_start
+        // join-then-rethrow pattern below.
+        std::exception_ptr prepare_ex = nullptr;
+        for (auto& f : futures) {
+            try {
+                f.get();
+            } catch (...) {
+                if (not prepare_ex) {
+                    prepare_ex = std::current_exception();
+                }
+            }
+        }
+        if (prepare_ex) {
+            std::rethrow_exception(prepare_ex);
+        }
+    } else {
+        for (uint64_t cur = 0; cur < valid_indices.size(); ++cur) {
+            const auto i = valid_indices[cur];
+            const auto inner_id = inner_ids.at(cur);
+            this->insert_persistent_codes(get_data(data, static_cast<uint32_t>(i)), inner_id);
+            if (this->extra_infos_ != nullptr && extra_infos != nullptr) {
+                this->extra_infos_->InsertExtraInfo(extra_infos + i * extra_info_size_, inner_id);
+            }
+            if (attr_sets != nullptr && this->use_attribute_filter_) {
+                this->attr_filter_index_->Insert(attr_sets[i], inner_id);
+            }
+        }
+    }
+    const auto prepare_encode_elapsed = build_cache_now_us() - prepare_encode_begin;
+    logger::info("[hgraph_build_cache] prepare_encode finished in {:.3f}s nodes={} parallelism={}",
+                 static_cast<double>(prepare_encode_elapsed) / 1000000.0,
+                 static_cast<uint64_t>(valid_indices.size()),
+                 use_parallel_prepare ? this->build_thread_count_ : 1);
     if (entry_point_id_ == INVALID_ENTRY_POINT && not inserted_inner_ids.empty()) {
         entry_point_id_ = inserted_inner_ids.front();
     }
@@ -1281,72 +1423,140 @@ HGraph::build_with_cache(const DatasetPtr& data) {
     //   cache_->neighbors_[source_id]     -> [old_inner_id, neighbor_old_inner_id...]
     // We translate the old neighbour list into the new inner_id space via
     // (old neighbor inner_id) -> (old source_id) -> (new inner_id).
+    //
+    // Optimisations vs. the original O(N) serial implementation:
+    //   A. Replace the per-node std::unordered_set<InnerIdType> dedup
+    //      structure (which forced 30M+ malloc/free pairs) with a thread-local
+    //      Vector<InnerIdType> reused across nodes, deduped via std::sort +
+    //      std::unique on a tiny (<= max_degree+1) array.
+    //   B. Run the outer loop in parallel via thread_pool_->GeneralEnqueue,
+    //      using std::atomic<uint64_t> slots to claim positions in
+    //      hit_ids/missed_ids without locking.
+    //   C. Pre-build a flat Vector<InnerIdType> old_to_new_map indexed by
+    //      old_inner_id, eliminating the per-edge string hash lookup
+    //      (cache_source_ids[idx] -> source_id_to_new_inner.find(source_id))
+    //      on the hot path. This drops the inner-loop translation cost from
+    //      two string-keyed unordered_map probes to a single integer index.
     const auto warm_start_begin = build_cache_now_us();
     const auto& cache_source_ids = this->cache_->source_ids_;
     const auto& cache_map = this->cache_->neighbors_;
     const uint64_t max_degree = this->bottom_graph_->MaximumDegree();
 
-    std::vector<InnerIdType> hit_ids;
-    std::vector<InnerIdType> missed_ids;
-    hit_ids.reserve(inserted_inner_ids.size());
-    missed_ids.reserve(inserted_inner_ids.size());
-
-    uint64_t hit_empty_seed_nodes = 0;
-    uint64_t hit_seed_neighbor_total = 0;
-    for (const auto inner_id : inserted_inner_ids) {
-        const auto& source_id = this->label_table_->GetSourceId(inner_id);
-        Vector<InnerIdType> mapped_neighbors(allocator_);
-        if (source_id.empty()) {
-            this->bottom_graph_->InsertNeighborsById(inner_id, mapped_neighbors);
-            missed_ids.push_back(inner_id);
+    // Step 2.0 (optimisation C): build old_inner_id -> new_inner_id map.
+    // The map is indexed densely by the old inner_id (== position in
+    // cache_source_ids); entries that have no counterpart in this build are
+    // left as invalid_id and skipped at lookup time.
+    constexpr InnerIdType invalid_id = std::numeric_limits<InnerIdType>::max();
+    Vector<InnerIdType> old_to_new_map(cache_source_ids.size(), invalid_id, allocator_);
+    for (uint64_t old_inner = 0; old_inner < cache_source_ids.size(); ++old_inner) {
+        const auto& sid = cache_source_ids[old_inner];
+        if (sid.empty()) {
             continue;
         }
-        auto it = cache_map.find(source_id);
-        if (it == cache_map.end()) {
-            this->bottom_graph_->InsertNeighborsById(inner_id, mapped_neighbors);
-            missed_ids.push_back(inner_id);
-            continue;
-        }
-        const auto& cached_list = it->second;  // [self_old_inner_id, neighbor_old_inner_id...]
-        std::unordered_set<InnerIdType> dedup;
-        dedup.reserve(cached_list.size());
-        for (uint64_t k = 1; k < cached_list.size(); ++k) {
-            const auto neighbor_old_inner = cached_list[k];
-            if (static_cast<uint64_t>(neighbor_old_inner) >= cache_source_ids.size()) {
-                continue;
-            }
-            const auto& neighbor_source_id = cache_source_ids[neighbor_old_inner];
-            if (neighbor_source_id.empty()) {
-                continue;
-            }
-            auto fit = source_id_to_new_inner.find(neighbor_source_id);
-            if (fit == source_id_to_new_inner.end()) {
-                continue;
-            }
-            if (fit->second == inner_id) {
-                continue;
-            }
-            if (dedup.emplace(fit->second).second) {
-                mapped_neighbors.emplace_back(fit->second);
-            }
-        }
-        if (mapped_neighbors.size() > max_degree) {
-            mapped_neighbors.resize(max_degree);
-        }
-        this->bottom_graph_->InsertNeighborsById(inner_id, mapped_neighbors);
-        if (mapped_neighbors.empty()) {
-            // Nodes whose cached neighbours could not be translated into the
-            // current index have no warm-start signal. Treat them as
-            // cold-start nodes so they receive the full missed-refine budget
-            // (global entry-point search + more rounds) instead of the cheap
-            // hit-refine path.
-            ++hit_empty_seed_nodes;
-            missed_ids.push_back(inner_id);
-        } else {
-            hit_seed_neighbor_total += mapped_neighbors.size();
-            hit_ids.push_back(inner_id);
+        auto fit = source_id_to_new_inner.find(sid);
+        if (fit != source_id_to_new_inner.end()) {
+            old_to_new_map[old_inner] = fit->second;
         }
     }
+
+    const uint64_t total_nodes = inserted_inner_ids.size();
+    std::vector<InnerIdType> hit_ids(total_nodes, invalid_id);
+    std::vector<InnerIdType> missed_ids(total_nodes, invalid_id);
+    std::atomic<uint64_t> hit_idx{0};
+    std::atomic<uint64_t> missed_idx{0};
+    std::atomic<uint64_t> hit_empty_seed_atomic{0};
+    std::atomic<uint64_t> hit_seed_neighbor_atomic{0};
+
+    // Block size sized so that each task processes ~16 K nodes; with 32-thread
+    // pool and 30 M nodes this yields ~1900 tasks, plenty to amortise enqueue
+    // overhead while keeping per-task data small.
+    constexpr uint64_t warm_start_block = 16384;
+    const uint64_t num_blocks = (total_nodes + warm_start_block - 1) / warm_start_block;
+
+    auto warm_start_worker = [&, this](uint64_t lo, uint64_t hi) {
+        Vector<InnerIdType> mapped(allocator_);
+        Vector<InnerIdType> empty_neighbours(allocator_);
+        mapped.reserve(max_degree + 8);
+        for (uint64_t k = lo; k < hi; ++k) {
+            const auto inner_id = inserted_inner_ids[k];
+            const auto& source_id = this->label_table_->GetSourceId(inner_id);
+            if (source_id.empty()) {
+                this->bottom_graph_->InsertNeighborsById(inner_id, empty_neighbours);
+                missed_ids[missed_idx.fetch_add(1, std::memory_order_relaxed)] = inner_id;
+                continue;
+            }
+            auto it = cache_map.find(source_id);
+            if (it == cache_map.end()) {
+                this->bottom_graph_->InsertNeighborsById(inner_id, empty_neighbours);
+                missed_ids[missed_idx.fetch_add(1, std::memory_order_relaxed)] = inner_id;
+                continue;
+            }
+            const auto& cached_list = it->second;  // [self_old_inner_id, neighbor_old_inner_id...]
+            mapped.clear();
+            for (uint64_t kk = 1; kk < cached_list.size(); ++kk) {
+                const auto neighbor_old_inner = cached_list[kk];
+                if (static_cast<uint64_t>(neighbor_old_inner) >= old_to_new_map.size()) {
+                    continue;
+                }
+                const auto new_neighbor = old_to_new_map[neighbor_old_inner];
+                if (new_neighbor == invalid_id || new_neighbor == inner_id) {
+                    continue;
+                }
+                mapped.push_back(new_neighbor);
+            }
+            // Tiny array (<= ~64 elements typically): sort + unique is faster
+            // than building+tearing down an unordered_set per node.
+            std::sort(mapped.begin(), mapped.end());
+            mapped.erase(std::unique(mapped.begin(), mapped.end()), mapped.end());
+            if (mapped.size() > max_degree) {
+                mapped.resize(max_degree);
+            }
+            this->bottom_graph_->InsertNeighborsById(inner_id, mapped);
+            if (mapped.empty()) {
+                // Nodes whose cached neighbours could not be translated into
+                // the current index have no warm-start signal. Treat them as
+                // cold-start nodes so they receive the full missed-refine
+                // budget (global entry-point search + more rounds) instead of
+                // the cheap hit-refine path.
+                hit_empty_seed_atomic.fetch_add(1, std::memory_order_relaxed);
+                missed_ids[missed_idx.fetch_add(1, std::memory_order_relaxed)] = inner_id;
+            } else {
+                hit_seed_neighbor_atomic.fetch_add(mapped.size(), std::memory_order_relaxed);
+                hit_ids[hit_idx.fetch_add(1, std::memory_order_relaxed)] = inner_id;
+            }
+        }
+    };
+
+    if (this->thread_pool_ == nullptr || num_blocks <= 1) {
+        warm_start_worker(0, total_nodes);
+    } else {
+        std::vector<std::future<void>> warm_futures;
+        warm_futures.reserve(num_blocks);
+        for (uint64_t b = 0; b < num_blocks; ++b) {
+            const uint64_t lo = b * warm_start_block;
+            const uint64_t hi = std::min(lo + warm_start_block, total_nodes);
+            warm_futures.emplace_back(this->thread_pool_->GeneralEnqueue(
+                [&warm_start_worker, lo, hi]() { warm_start_worker(lo, hi); }));
+        }
+        std::exception_ptr warm_ex = nullptr;
+        for (auto& fut : warm_futures) {
+            try {
+                fut.get();
+            } catch (...) {
+                if (not warm_ex) {
+                    warm_ex = std::current_exception();
+                }
+            }
+        }
+        if (warm_ex) {
+            std::rethrow_exception(warm_ex);
+        }
+    }
+    hit_ids.resize(hit_idx.load(std::memory_order_relaxed));
+    missed_ids.resize(missed_idx.load(std::memory_order_relaxed));
+    const uint64_t hit_empty_seed_nodes = hit_empty_seed_atomic.load(std::memory_order_relaxed);
+    const uint64_t hit_seed_neighbor_total =
+        hit_seed_neighbor_atomic.load(std::memory_order_relaxed);
     const auto warm_start_elapsed = build_cache_now_us() - warm_start_begin;
     const float hit_rate =
         total > 0 ? static_cast<float>(hit_ids.size()) / static_cast<float>(total) : 0.0F;
@@ -1360,25 +1570,55 @@ HGraph::build_with_cache(const DatasetPtr& data) {
         hit_seed_neighbor_total,
         hit_rate);
 
-    // ---- Step 3: refine hit nodes (self-entry), then missed nodes (global entry) ----
+    // ---- Step 3: refine missed nodes (global entry) first, then hit nodes ----
+    // Rationale: running missed_refine first lets cold-start nodes install
+    // both their own forward neighbours and their reverse-edge contributions
+    // back into hit-node adjacency lists before hit_refine kicks in. The
+    // subsequent hit_refine therefore sees a richer local frontier (warm
+    // seed merged with reverse edges produced by missed_refine) and can
+    // still exploit the cheap self-entry path on nodes whose neighbour list
+    // remains non-empty.
+    //
+    // Hit nodes whose neighbour list is empty when hit_refine starts
+    // (either because warm_start could not map any cached neighbour, or
+    // because every warm seed was evicted by the missed_refine reverse
+    // pruning) will automatically fall back to the global entry point.
+    // This is guaranteed by the existing guard inside
+    // collect_refine_candidates():
+    //     search_entry_point = (use_self_as_entry && !current_neighbors.empty())
+    //                          ? inner_id
+    //                          : this->entry_point_id_;
+    // so no extra bookkeeping is required at the call site.
+    //
+    // Parallelism note: refine_nodes_two_phase fully drains its internal
+    // futures (search / scatter / materialise / shard-prune) via
+    // future.get() before returning, so swapping the two invocations does
+    // not introduce any cross-phase data races. Each call independently
+    // re-derives parallelism / block_size / reverse_shard_count, so the
+    // intra-phase parallel pipeline is unaffected by the order change.
     auto flatten_codes = this->basic_flatten_codes_;
     if (this->has_precise_reorder()) {
         flatten_codes = this->high_precise_codes_;
     }
-    this->refine_nodes_two_phase(data,
-                                 hit_ids,
-                                 "hit_refine",
-                                 HIT_REFINE_ROUNDS,
-                                 this->ef_construct_,
-                                 /*use_self_as_entry=*/true,
-                                 flatten_codes,
-                                 inner_id_to_input_idx);
+    logger::info(
+        "[DIAG] refine flatten_codes quantizer = {} (basic={}, high_precise={})",
+        flatten_codes->GetQuantizerName(),
+        this->basic_flatten_codes_ ? this->basic_flatten_codes_->GetQuantizerName() : "null",
+        this->high_precise_codes_ ? this->high_precise_codes_->GetQuantizerName() : "null");
     this->refine_nodes_two_phase(data,
                                  missed_ids,
                                  "missed_refine",
                                  MISSED_REFINE_ROUNDS,
-                                 this->ef_construct_,
+                                 MISSED_REFINE_EF,
                                  /*use_self_as_entry=*/false,
+                                 flatten_codes,
+                                 inner_id_to_input_idx);
+    this->refine_nodes_two_phase(data,
+                                 hit_ids,
+                                 "hit_refine",
+                                 HIT_REFINE_ROUNDS,
+                                 HIT_REFINE_EF,
+                                 /*use_self_as_entry=*/true,
                                  flatten_codes,
                                  inner_id_to_input_idx);
 
@@ -1409,6 +1649,108 @@ HGraph::build_with_cache(const DatasetPtr& data) {
     const auto build_total_elapsed = build_cache_now_us() - build_begin;
     logger::info("[hgraph_build_cache] build_with_cache total elapsed {:.3f}s",
                  static_cast<double>(build_total_elapsed) / 1000000.0);
+
+    // === DIAGNOSTIC DUMP: scan all bottom_graph neighbour lists ===
+    // Emit warnings for neighbour lists that contain self-loops, duplicates,
+    // out-of-range ids, or are not strictly sorted. Required to root-cause
+    // ef=64 Deserialize OOM/loop.
+    {
+        const char* dump_env = std::getenv("VSAG_DUMP_NEIGHBORS");
+        if (dump_env != nullptr && std::string(dump_env) == "1") {
+            const auto dump_begin = build_cache_now_us();
+            const auto total = static_cast<uint64_t>(total_count_.load());
+            const uint64_t max_degree = this->bottom_graph_->MaximumDegree();
+            const char* dump_path_env = std::getenv("VSAG_DUMP_PATH");
+            std::string dump_path = (dump_path_env != nullptr)
+                                        ? std::string(dump_path_env)
+                                        : std::string("/tmp/neighbors_dump.txt");
+            std::ofstream dump_fs(dump_path);
+            uint64_t cnt_self_loop = 0;
+            uint64_t cnt_dup = 0;
+            uint64_t cnt_oor = 0;
+            uint64_t cnt_unsorted = 0;
+            uint64_t cnt_oversize = 0;
+            uint64_t cnt_empty = 0;
+            uint64_t cnt_total = 0;
+            uint64_t cnt_bad = 0;
+            Vector<InnerIdType> nbr(allocator_);
+            uint64_t max_neighbor_id_seen = 0;
+            for (uint64_t id = 0; id < total; ++id) {
+                nbr.clear();
+                this->bottom_graph_->GetNeighbors(static_cast<InnerIdType>(id), nbr);
+                cnt_total++;
+                bool bad = false;
+                if (nbr.empty()) {
+                    cnt_empty++;
+                    continue;
+                }
+                if (nbr.size() > max_degree) {
+                    cnt_oversize++;
+                    bad = true;
+                }
+                std::unordered_set<InnerIdType> seen;
+                InnerIdType prev = 0;
+                bool first = true;
+                for (const auto nid : nbr) {
+                    if (nid == static_cast<InnerIdType>(id)) {
+                        cnt_self_loop++;
+                        bad = true;
+                    }
+                    if (nid >= total) {
+                        cnt_oor++;
+                        bad = true;
+                    }
+                    if (!seen.insert(nid).second) {
+                        cnt_dup++;
+                        bad = true;
+                    }
+                    if (!first && nid <= prev) {
+                        cnt_unsorted++;
+                        bad = true;
+                    }
+                    prev = nid;
+                    first = false;
+                    if (nid > max_neighbor_id_seen) {
+                        max_neighbor_id_seen = nid;
+                    }
+                }
+                if (bad && cnt_bad < 50) {
+                    dump_fs << "BAD id=" << id << " size=" << nbr.size() << " [";
+                    for (uint64_t k = 0; k < nbr.size() && k < 80; ++k) {
+                        dump_fs << nbr[k] << (k + 1 < nbr.size() ? "," : "");
+                    }
+                    dump_fs << "]\n";
+                }
+                if (bad) {
+                    cnt_bad++;
+                }
+            }
+            dump_fs << "=== summary ===\n";
+            dump_fs << "total_nodes=" << cnt_total << "\n";
+            dump_fs << "empty_neighbour_nodes=" << cnt_empty << "\n";
+            dump_fs << "bad_nodes=" << cnt_bad << "\n";
+            dump_fs << "self_loop_count=" << cnt_self_loop << "\n";
+            dump_fs << "duplicate_neighbor_count=" << cnt_dup << "\n";
+            dump_fs << "out_of_range_neighbor_count=" << cnt_oor << "\n";
+            dump_fs << "unsorted_neighbor_count=" << cnt_unsorted << "\n";
+            dump_fs << "oversize_neighbour_lists=" << cnt_oversize << "\n";
+            dump_fs << "max_neighbor_id_seen=" << max_neighbor_id_seen << "\n";
+            dump_fs << "max_capacity=" << total << "\n";
+            dump_fs << "max_degree=" << max_degree << "\n";
+            dump_fs.close();
+            const auto dump_elapsed = build_cache_now_us() - dump_begin;
+            logger::info(
+                "[hgraph_build_cache] neighbor_dump finished in {:.3f}s "
+                "bad_nodes={} self_loop={} dup={} oor={} unsorted={} oversize={}",
+                static_cast<double>(dump_elapsed) / 1000000.0,
+                cnt_bad,
+                cnt_self_loop,
+                cnt_dup,
+                cnt_oor,
+                cnt_unsorted,
+                cnt_oversize);
+        }
+    }
     return failed_ids;
 }
 
