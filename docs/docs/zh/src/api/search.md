@@ -13,7 +13,7 @@
 
 ```cpp
 vsag::SearchRequest request;
-request.query_ = query;      // 含单个查询向量的 DatasetPtr
+request.query_ = query;      // 单个查询，或 HGraph/IVF 的连续 KNN 查询批次
 request.mode_ = vsag::SearchMode::KNN_SEARCH;
 request.topk_ = 10;
 request.params_str_ = R"({"hgraph": {"ef_search": 100}})";
@@ -34,7 +34,7 @@ enum class SearchMode {
 
 | 字段 | 类型 | 默认值 | 含义 |
 |------|------|--------|------|
-| `query_` | `DatasetPtr` | `nullptr` | 查询。只允许恰好一个查询向量。 |
+| `query_` | `DatasetPtr` | `nullptr` | 查询。HGraph 和 IVF 的 KNN 支持连续的多查询批次；范围搜索只支持单个查询。 |
 | `mode_` | `SearchMode` | `KNN_SEARCH` | KNN 还是范围搜索。 |
 | `topk_` | `int64_t` | `10` | 要返回的邻居数（KNN 模式）。必须为正。 |
 | `radius_` | `float` | `0.5` | 距离阈值（范围模式）。非负。 |

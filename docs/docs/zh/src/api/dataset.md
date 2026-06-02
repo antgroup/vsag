@@ -111,8 +111,10 @@ if (result.has_value()) {
 }
 ```
 
-对 KNN，`GetNumElements()` 为 `1`，ids/distances 数组长度为 `k`。对范围搜索，命中数通过结果的维度报告。
-见 [k-近邻搜索](../guide/knn_search.md)。
+对单查询 KNN，`GetNumElements()` 为 `1`，ids/distances 数组长度为 `k`。HGraph 和 IVF 的批量 KNN 返回
+按行主序排列的 `GetNumElements() x GetDim()` 矩阵，行 `q` 的第 `i` 个槽位位于
+`q * GetDim() + i`。不足一行的结果以 `id == -1` 和无穷距离填充；因此 `-1` 是保留的外部 label，不能用于
+已索引向量。范围搜索仅支持单个查询。见 [k-近邻搜索](../guide/knn_search.md)。
 
 ## `SparseVector`
 

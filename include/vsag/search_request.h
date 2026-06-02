@@ -34,10 +34,20 @@ enum class SearchMode {
 class SearchRequest {
 public:
     // basic params
-    /** 
-     * @brief Query dataset containing the vector to search for
-     * @details This DatasetPtr holds the query vector used for similarity search. 
-     *          Only one query vector is allowed.
+    /**
+     * @brief Query dataset containing the vector or vectors to search for
+     * @details This DatasetPtr holds the query data used for similarity search.
+     *          - Single query: Set NumElements to 1 with one vector. Supported by all
+     *            search modes (KNN_SEARCH, RANGE_SEARCH).
+     *          - Batched KNN: Set NumElements to the number of queries, with vectors
+     *            stored contiguously. Supported by HGraph::SearchWithRequest and
+      *            IVF::SearchWithRequest; results are returned with NumElements =
+      *            query_count and a row-major Dim determined by the implementation
+      *            (which can be less than topk when the index is smaller). Queries that yield
+     *            fewer than topk neighbors are padded with sentinel entries
+     *            (id = -1, distance = +infinity).
+     *          - Batched RANGE_SEARCH is not supported; implementations MUST reject
+     *            NumElements > 1 for range mode.
      */
     DatasetPtr query_{nullptr};
 

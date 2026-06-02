@@ -1286,10 +1286,23 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
     QueryContext ctx{.alloc = request.search_allocator_, .stats = &stats};
 
     bool is_range = (request.mode_ == SearchMode::RANGE_SEARCH);
+    auto query = request.query_;
+    CHECK_ARGUMENT(query != nullptr, "query dataset cannot be null");
+    CHECK_ARGUMENT(query->GetFloat32Vectors() != nullptr, "query float32 vectors cannot be null");
+    CHECK_ARGUMENT(query->GetDim() == this->dim_, "query dimension must match index dimension");
+    int64_t query_count = query->GetNumElements();
+    CHECK_ARGUMENT(query_count >= 1,
+                   fmt::format("query count({}) must be at least 1", query_count));
+    if (is_range) {
+        CHECK_ARGUMENT(query_count == 1, "range search only supports single query (NumElements=1)");
+    }
+    if (query_count > 1) {
+        CHECK_ARGUMENT(request.expected_labels_.empty(),
+                       "reasoning (expected_labels_) is only supported for single-query search");
+    }
 
     auto param = this->create_search_param(request.params_str_, request.filter_);
 
-    auto query = request.query_;
     if (param.disable_bucket_scan) {
         CHECK_ARGUMENT(query != nullptr, "query dataset cannot be null");
         CHECK_ARGUMENT(query->GetNumElements() >= 1,
@@ -1384,6 +1397,60 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
             fmt::format("factor must be positive when use_reorder is true, got {}", param.factor));
         param.topk = static_cast<int64_t>(param.factor * static_cast<float>(request.topk_));
     }
+
+    if (query_count > 1) {
+        const int64_t k = request.topk_;
+        CHECK_ARGUMENT(k > 0, fmt::format("k({}) must be greater than 0", k));
+        CHECK_ARGUMENT(query_count <= std::numeric_limits<int64_t>::max() / k,
+                       fmt::format("query_count({}) * k({}) would overflow", query_count, k));
+        const int64_t total_result_count = query_count * k;
+        CHECK_ARGUMENT(total_result_count <= std::numeric_limits<size_t>::max() / sizeof(int64_t),
+                       fmt::format("total_result_count({}) * sizeof(int64_t) would overflow size_t",
+                                   total_result_count));
+        CHECK_ARGUMENT(total_result_count <= std::numeric_limits<size_t>::max() / sizeof(float),
+                       fmt::format("total_result_count({}) * sizeof(float) would overflow size_t",
+                                   total_result_count));
+
+        auto* result_allocator = select_query_allocator(ctx.alloc, this->allocator_);
+        auto [dataset_results, dists, ids] =
+            create_fast_dataset(total_result_count, result_allocator);
+        std::fill_n(dists, total_result_count, std::numeric_limits<float>::infinity());
+        std::fill_n(ids, total_result_count, -1);
+
+        const int64_t dim = query->GetDim();
+        const float* query_data = query->GetFloat32Vectors();
+        for (int64_t q_idx = 0; q_idx < query_count; ++q_idx) {
+            auto single_query = Dataset::Make();
+            single_query->NumElements(1)
+                ->Dim(dim)
+                ->Float32Vectors(query_data + q_idx * dim)
+                ->Owner(false);
+
+            auto search_result = this->search<KNN_SEARCH>(single_query, param, ctx, nullptr);
+            if (use_reorder_ and param.enable_reorder) {
+                search_result = reorder_->Reorder(search_result, query_data + q_idx * dim, k, ctx);
+            }
+            if (search_result == nullptr) {
+                continue;
+            }
+
+            const auto result_count = static_cast<int64_t>(search_result->Size());
+            CHECK_ARGUMENT(result_count <= k,
+                           fmt::format("result count({}) exceeds k({})", result_count, k));
+            const int64_t offset = q_idx * k;
+            for (int64_t i = result_count - 1; i >= 0; --i) {
+                dists[offset + i] = search_result->Top().first;
+                ids[offset + i] = this->label_table_->GetLabelById(search_result->Top().second);
+                search_result->Pop();
+            }
+        }
+
+        dataset_results->NumElements(query_count);
+        dataset_results->Dim(k);
+        dataset_results->Statistics(stats.Dump());
+        return dataset_results;
+    }
+
     auto search_result = this->search<KNN_SEARCH>(query, param, ctx, reasoning_ctx.get());
     if (use_reorder_ and param.enable_reorder) {
         auto result = reorder(request.topk_,
