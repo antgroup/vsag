@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include "algorithm/inner_index_interface.h"
 #include "datacell/attribute_bucket_inverted_datacell.h"
 #include "datacell/bucket_datacell.h"
 #include "datacell/flatten_interface.h"
@@ -22,9 +23,8 @@
 #include "impl/reorder/reorder.h"
 #include "impl/searcher/basic_searcher.h"
 #include "index_common_param.h"
-#include "inner_index_interface.h"
 #include "ivf_parameter.h"
-#include "ivf_partition/ivf_partition_strategy.h"
+#include "ivf_partition_strategy.h"
 #include "query_context.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"

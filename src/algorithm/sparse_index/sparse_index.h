@@ -15,8 +15,8 @@
 
 #pragma once
 
+#include "algorithm/inner_index_interface.h"
 #include "impl/heap/distance_heap.h"
-#include "inner_index_interface.h"
 #include "sparse_index_parameters.h"
 
 namespace vsag {

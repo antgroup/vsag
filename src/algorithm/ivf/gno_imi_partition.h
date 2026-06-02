@@ -14,8 +14,8 @@
 // limitations under the License.
 
 #pragma once
-#include "algorithm/brute_force.h"
-#include "algorithm/brute_force_parameter.h"
+#include "algorithm/bruteforce/bruteforce.h"
+#include "algorithm/bruteforce/bruteforce_parameter.h"
 #include "algorithm/inner_index_interface.h"
 #include "index_common_param.h"
 #include "ivf_nearest_partition.h"

@@ -16,10 +16,10 @@
 #include "gno_imi_partition.h"
 
 #include "algorithm/inner_index_interface.h"
-#include "algorithm/ivf_parameter.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/inner_search_param.h"
 #include "impl/searcher/basic_searcher.h"
+#include "ivf_parameter.h"
 #include "storage/serialization_template_test.h"
 #include "unittest.h"
 using namespace vsag;

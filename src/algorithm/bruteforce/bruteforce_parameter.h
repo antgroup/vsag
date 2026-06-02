@@ -14,8 +14,8 @@
 // limitations under the License.
 
 #pragma once
-#include "index_search_parameter.h"
-#include "inner_index_parameter.h"
+#include "algorithm/index_search_parameter.h"
+#include "algorithm/inner_index_parameter.h"
 #include "typing.h"
 #include "utils/pointer_define.h"
 namespace vsag {

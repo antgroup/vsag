@@ -19,12 +19,12 @@
 
 #include "algorithm/hgraph/hgraph_parameter.h"
 #include "algorithm/index_search_parameter.h"
+#include "algorithm/inner_index_parameter.h"
 #include "datacell/flatten_interface.h"
 #include "datacell/graph_datacell_parameter.h"
 #include "datacell/graph_interface.h"
 #include "impl/odescent/odescent_graph_parameter.h"
 #include "index_common_param.h"
-#include "inner_index_parameter.h"
 #include "typing.h"
 #include "utils/pointer_define.h"
 #include "vsag/index.h"

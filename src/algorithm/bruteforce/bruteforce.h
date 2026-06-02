@@ -16,7 +16,7 @@
 #pragma once
 
 #include "algorithm/inner_index_interface.h"
-#include "brute_force_parameter.h"
+#include "bruteforce_parameter.h"
 #include "impl/label_table/label_table.h"
 #include "typing.h"
 #include "utils/pointer_define.h"

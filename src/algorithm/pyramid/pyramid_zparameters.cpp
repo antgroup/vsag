@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "algorithm/pyramid_zparameters.h"
+#include "pyramid_zparameters.h"
 
 #include "common.h"
 #include "impl/logger/logger.h"

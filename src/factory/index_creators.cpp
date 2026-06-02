@@ -18,14 +18,14 @@
 
 #include <mutex>
 
-#include "algorithm/brute_force.h"
+#include "algorithm/bruteforce/bruteforce.h"
 #include "algorithm/hgraph/hgraph.h"
-#include "algorithm/ivf.h"
-#include "algorithm/pyramid.h"
-#include "algorithm/pyramid_zparameters.h"
+#include "algorithm/ivf/ivf.h"
+#include "algorithm/pyramid/pyramid.h"
+#include "algorithm/pyramid/pyramid_zparameters.h"
 #include "algorithm/sindi/sindi.h"
-#include "algorithm/sparse_index.h"
-#include "algorithm/warp.h"
+#include "algorithm/sparse_index/sparse_index.h"
+#include "algorithm/warp/warp.h"
 #include "common.h"
 #include "index/diskann.h"
 #include "index/diskann_zparameters.h"

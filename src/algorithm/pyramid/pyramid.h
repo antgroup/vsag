@@ -18,6 +18,7 @@
 #include <memory>
 #include <utility>
 
+#include "algorithm/inner_index_interface.h"
 #include "datacell/graph_interface.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/filter/filter_headers.h"
@@ -26,7 +27,6 @@
 #include "impl/reorder/flatten_reorder.h"
 #include "impl/searcher/basic_searcher.h"
 #include "index_feature_list.h"
-#include "inner_index_interface.h"
 #include "io/memory_io_parameter.h"
 #include "pyramid_zparameters.h"
 #include "quantization/fp32_quantizer_parameter.h"
