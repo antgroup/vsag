@@ -1270,87 +1270,107 @@ HGraph::build_with_cache(const DatasetPtr& data) {
     const auto build_begin = build_cache_now_us();
     this->Train(data);
 
-    const auto* labels = data->GetIds();
-    const auto* source_ids = data->GetSourceID();
-    const auto* extra_infos = data->GetExtraInfos();
-    const auto* attr_sets = data->GetAttributeSets();
-    const int64_t total = data->GetNumElements();
+    BuildCachePlan plan(allocator_);
+    this->cache_collect_valid_indices(data, plan);
+    this->cache_setup_metadata_serial(data, plan);
+    this->cache_encode_codes_parallel(data, plan);
+    this->cache_warm_start_and_classify(plan);
+    this->cache_run_refine_two_phase(data, plan);
+    this->cache_rebuild_route_graphs(plan);
 
-    // ---- Step 1: scan dataset, allocate inner_ids, insert vectors/labels ----
-    Vector<int64_t> valid_indices(allocator_);
+    const auto build_total_elapsed = build_cache_now_us() - build_begin;
+    logger::info("[hgraph_build_cache] build_with_cache total elapsed {:.3f}s",
+                 static_cast<double>(build_total_elapsed) / 1000000.0);
+    return std::move(plan.failed_ids);
+}
+
+// Step 1: scan dataset, dedup labels against existing index + intra-batch
+// duplicates, allocate inner_ids for the surviving rows, grow capacity.
+// Outputs (in plan): valid_indices, inner_ids, failed_ids.
+void
+HGraph::cache_collect_valid_indices(const DatasetPtr& data, BuildCachePlan& plan) {
+    const auto* labels = data->GetIds();
+    const int64_t total = data->GetNumElements();
     UnorderedSet<LabelType> seen_labels(allocator_);
-    std::vector<int64_t> failed_ids;
     for (int64_t i = 0; i < total; ++i) {
         auto label = labels[i];
         if (this->label_table_->CheckLabel(label) || seen_labels.find(label) != seen_labels.end()) {
-            failed_ids.emplace_back(label);
+            plan.failed_ids.emplace_back(label);
             continue;
         }
         seen_labels.insert(label);
-        valid_indices.emplace_back(i);
+        plan.valid_indices.emplace_back(i);
     }
-    auto inner_ids = this->get_unique_inner_ids(static_cast<InnerIdType>(valid_indices.size()));
+    plan.inner_ids =
+        this->get_unique_inner_ids(static_cast<InnerIdType>(plan.valid_indices.size()));
     auto current_count = total_count_.load();
     uint64_t new_ids_count = 0;
-    for (auto inner_id : inner_ids) {
+    for (auto inner_id : plan.inner_ids) {
         if (inner_id >= current_count) {
             ++new_ids_count;
         }
     }
     this->resize(current_count + new_ids_count);
     this->total_count_ += new_ids_count;
+    plan.inserted_inner_ids.reserve(static_cast<uint64_t>(plan.valid_indices.size()));
+    plan.inner_id_to_input_idx.reserve(static_cast<uint64_t>(plan.valid_indices.size()));
+    plan.source_id_to_new_inner.reserve(static_cast<uint64_t>(plan.valid_indices.size()));
+}
 
-    Vector<Vector<InnerIdType>> route_graph_ids(allocator_);
-    std::vector<InnerIdType> inserted_inner_ids;
-    inserted_inner_ids.reserve(static_cast<uint64_t>(valid_indices.size()));
-    std::unordered_map<InnerIdType, uint32_t> inner_id_to_input_idx;
-    inner_id_to_input_idx.reserve(static_cast<uint64_t>(valid_indices.size()));
-    std::unordered_map<std::string, InnerIdType> source_id_to_new_inner;
-    source_id_to_new_inner.reserve(static_cast<uint64_t>(valid_indices.size()));
-
-    // ---- Step 1a: serial setup of label_table / source_id_table / route_graph_ids
-    //              and bookkeeping containers. LabelTable::Insert and the route
-    //              graph id buckets are NOT thread-safe (vector resize race),
-    //              so this short prelude stays serial.
+// Step 1a: serial setup of label_table / source_id_table / route_graph_ids
+// and bookkeeping containers. LabelTable::Insert and the route graph id
+// buckets are NOT thread-safe (vector resize race), so this short prelude
+// stays serial.
+void
+HGraph::cache_setup_metadata_serial(const DatasetPtr& data, BuildCachePlan& plan) {
+    const auto* labels = data->GetIds();
+    const auto* source_ids = data->GetSourceID();
     const auto prepare_meta_begin = build_cache_now_us();
-    for (uint64_t cur = 0; cur < valid_indices.size(); ++cur) {
-        const auto i = valid_indices[cur];
-        const auto inner_id = inner_ids.at(cur);
+    for (uint64_t cur = 0; cur < plan.valid_indices.size(); ++cur) {
+        const auto i = plan.valid_indices[cur];
+        const auto inner_id = plan.inner_ids.at(cur);
         const auto label = labels[i];
         this->label_table_->Insert(inner_id, label);
         if (source_ids != nullptr && not source_ids[i].empty()) {
             this->label_table_->InsertSourceId(inner_id, source_ids[i]);
-            source_id_to_new_inner.emplace(source_ids[i], inner_id);
+            plan.source_id_to_new_inner.emplace(source_ids[i], inner_id);
         }
-
-        inserted_inner_ids.push_back(inner_id);
-        inner_id_to_input_idx.emplace(inner_id, static_cast<uint32_t>(i));
+        plan.inserted_inner_ids.push_back(inner_id);
+        plan.inner_id_to_input_idx.emplace(inner_id, static_cast<uint32_t>(i));
 
         const auto level = this->get_random_level() - 1;
         if (level >= 0) {
-            if (level >= static_cast<int>(route_graph_ids.size()) || route_graph_ids.empty()) {
-                for (auto k = static_cast<int>(route_graph_ids.size()); k <= level; ++k) {
-                    route_graph_ids.emplace_back(allocator_);
+            if (level >= static_cast<int>(plan.route_graph_ids.size()) ||
+                plan.route_graph_ids.empty()) {
+                for (auto k = static_cast<int>(plan.route_graph_ids.size()); k <= level; ++k) {
+                    plan.route_graph_ids.emplace_back(allocator_);
                 }
                 entry_point_id_ = inner_id;
             }
             for (int j = 0; j <= level; ++j) {
-                route_graph_ids[j].emplace_back(inner_id);
+                plan.route_graph_ids[j].emplace_back(inner_id);
             }
         }
     }
     const auto prepare_meta_elapsed = build_cache_now_us() - prepare_meta_begin;
     logger::info("[hgraph_build_cache] prepare_meta finished in {:.3f}s nodes={}",
                  static_cast<double>(prepare_meta_elapsed) / 1000000.0,
-                 static_cast<uint64_t>(valid_indices.size()));
+                 static_cast<uint64_t>(plan.valid_indices.size()));
+}
 
-    // ---- Step 1b: parallel encode (RaBitQ + SQ8) + extra_info/attr_filter
-    //              writes. Each task touches a unique inner_id, FlattenDataCell::
-    //              InsertVector is per-cell-mutex-protected, ExtraInfo and
-    //              AttrFilter writes are also per-inner_id and independent.
+// Step 1b: parallel encode (RaBitQ + SQ8) + extra_info/attr_filter writes.
+// Each task touches a unique inner_id, FlattenDataCell::InsertVector is
+// per-cell-mutex-protected, ExtraInfo and AttrFilter writes are also
+// per-inner_id and independent.
+void
+HGraph::cache_encode_codes_parallel(const DatasetPtr& data, BuildCachePlan& plan) {
+    const auto* extra_infos = data->GetExtraInfos();
+    const auto* attr_sets = data->GetAttributeSets();
     const auto prepare_encode_begin = build_cache_now_us();
     const bool use_parallel_prepare =
         this->thread_pool_ != nullptr && this->build_thread_count_ > 1;
+    auto& valid_indices = plan.valid_indices;
+    auto& inner_ids = plan.inner_ids;
     if (use_parallel_prepare) {
         const uint64_t num_threads = this->build_thread_count_;
         const uint64_t total_jobs = valid_indices.size();
@@ -1413,39 +1433,41 @@ HGraph::build_with_cache(const DatasetPtr& data) {
                  static_cast<double>(prepare_encode_elapsed) / 1000000.0,
                  static_cast<uint64_t>(valid_indices.size()),
                  use_parallel_prepare ? this->build_thread_count_ : 1);
-    if (entry_point_id_ == INVALID_ENTRY_POINT && not inserted_inner_ids.empty()) {
-        entry_point_id_ = inserted_inner_ids.front();
+    if (entry_point_id_ == INVALID_ENTRY_POINT && not plan.inserted_inner_ids.empty()) {
+        entry_point_id_ = plan.inserted_inner_ids.front();
     }
+}
 
-    // ---- Step 2: warm_start - seed neighbours using the cache, classify nodes ----
-    // The cache encodes neighbours by source_id:
-    //   cache_->source_ids_[old_inner_id] -> source_id (string)
-    //   cache_->neighbors_[source_id]     -> [old_inner_id, neighbor_old_inner_id...]
-    // We translate the old neighbour list into the new inner_id space via
-    // (old neighbor inner_id) -> (old source_id) -> (new inner_id).
-    //
-    // Optimisations vs. the original O(N) serial implementation:
-    //   A. Replace the per-node std::unordered_set<InnerIdType> dedup
-    //      structure (which forced 30M+ malloc/free pairs) with a thread-local
-    //      Vector<InnerIdType> reused across nodes, deduped via std::sort +
-    //      std::unique on a tiny (<= max_degree+1) array.
-    //   B. Run the outer loop in parallel via thread_pool_->GeneralEnqueue,
-    //      using std::atomic<uint64_t> slots to claim positions in
-    //      hit_ids/missed_ids without locking.
-    //   C. Pre-build a flat Vector<InnerIdType> old_to_new_map indexed by
-    //      old_inner_id, eliminating the per-edge string hash lookup
-    //      (cache_source_ids[idx] -> source_id_to_new_inner.find(source_id))
-    //      on the hot path. This drops the inner-loop translation cost from
-    //      two string-keyed unordered_map probes to a single integer index.
+// Step 2: warm_start - seed neighbours using the cache, classify nodes into
+// hit_ids (have warm seed) / missed_ids (no warm seed, need full search).
+//
+// The cache encodes neighbours by source_id:
+//   cache_->source_ids_[old_inner_id] -> source_id (string)
+//   cache_->neighbors_[source_id]     -> [old_inner_id, neighbor_old_inner_id...]
+// We translate the old neighbour list into the new inner_id space via
+// (old neighbor inner_id) -> (old source_id) -> (new inner_id).
+//
+// Optimisations vs. the original O(N) serial implementation:
+//   A. Replace the per-node std::unordered_set<InnerIdType> dedup
+//      structure (which forced 30M+ malloc/free pairs) with a thread-local
+//      Vector<InnerIdType> reused across nodes, deduped via std::sort +
+//      std::unique on a tiny (<= max_degree+1) array.
+//   B. Run the outer loop in parallel via thread_pool_->GeneralEnqueue,
+//      using std::atomic<uint64_t> slots to claim positions in
+//      hit_ids/missed_ids without locking.
+//   C. Pre-build a flat Vector<InnerIdType> old_to_new_map indexed by
+//      old_inner_id, eliminating the per-edge string hash lookup
+//      (cache_source_ids[idx] -> source_id_to_new_inner.find(source_id))
+//      on the hot path. This drops the inner-loop translation cost from
+//      two string-keyed unordered_map probes to a single integer index.
+void
+HGraph::cache_warm_start_and_classify(BuildCachePlan& plan) {
     const auto warm_start_begin = build_cache_now_us();
     const auto& cache_source_ids = this->cache_->source_ids_;
     const auto& cache_map = this->cache_->neighbors_;
     const uint64_t max_degree = this->bottom_graph_->MaximumDegree();
 
     // Step 2.0 (optimisation C): build old_inner_id -> new_inner_id map.
-    // The map is indexed densely by the old inner_id (== position in
-    // cache_source_ids); entries that have no counterpart in this build are
-    // left as invalid_id and skipped at lookup time.
     constexpr InnerIdType invalid_id = std::numeric_limits<InnerIdType>::max();
     Vector<InnerIdType> old_to_new_map(cache_source_ids.size(), invalid_id, allocator_);
     for (uint64_t old_inner = 0; old_inner < cache_source_ids.size(); ++old_inner) {
@@ -1453,15 +1475,17 @@ HGraph::build_with_cache(const DatasetPtr& data) {
         if (sid.empty()) {
             continue;
         }
-        auto fit = source_id_to_new_inner.find(sid);
-        if (fit != source_id_to_new_inner.end()) {
+        auto fit = plan.source_id_to_new_inner.find(sid);
+        if (fit != plan.source_id_to_new_inner.end()) {
             old_to_new_map[old_inner] = fit->second;
         }
     }
 
-    const uint64_t total_nodes = inserted_inner_ids.size();
-    std::vector<InnerIdType> hit_ids(total_nodes, invalid_id);
-    std::vector<InnerIdType> missed_ids(total_nodes, invalid_id);
+    const uint64_t total_nodes = plan.inserted_inner_ids.size();
+    auto& hit_ids = plan.hit_ids;
+    auto& missed_ids = plan.missed_ids;
+    hit_ids.assign(total_nodes, invalid_id);
+    missed_ids.assign(total_nodes, invalid_id);
     std::atomic<uint64_t> hit_idx{0};
     std::atomic<uint64_t> missed_idx{0};
     std::atomic<uint64_t> hit_empty_seed_atomic{0};
@@ -1478,7 +1502,7 @@ HGraph::build_with_cache(const DatasetPtr& data) {
         Vector<InnerIdType> empty_neighbours(allocator_);
         mapped.reserve(max_degree + 8);
         for (uint64_t k = lo; k < hi; ++k) {
-            const auto inner_id = inserted_inner_ids[k];
+            const auto inner_id = plan.inserted_inner_ids[k];
             const auto& source_id = this->label_table_->GetSourceId(inner_id);
             if (source_id.empty()) {
                 this->bottom_graph_->InsertNeighborsById(inner_id, empty_neighbours);
@@ -1491,7 +1515,7 @@ HGraph::build_with_cache(const DatasetPtr& data) {
                 missed_ids[missed_idx.fetch_add(1, std::memory_order_relaxed)] = inner_id;
                 continue;
             }
-            const auto& cached_list = it->second;  // [self_old_inner_id, neighbor_old_inner_id...]
+            const auto& cached_list = it->second;
             mapped.clear();
             for (uint64_t kk = 1; kk < cached_list.size(); ++kk) {
                 const auto neighbor_old_inner = cached_list[kk];
@@ -1558,8 +1582,10 @@ HGraph::build_with_cache(const DatasetPtr& data) {
     const uint64_t hit_seed_neighbor_total =
         hit_seed_neighbor_atomic.load(std::memory_order_relaxed);
     const auto warm_start_elapsed = build_cache_now_us() - warm_start_begin;
-    const float hit_rate =
-        total > 0 ? static_cast<float>(hit_ids.size()) / static_cast<float>(total) : 0.0F;
+    const uint64_t total_classified = hit_ids.size() + missed_ids.size();
+    const float hit_rate = total_classified > 0 ? static_cast<float>(hit_ids.size()) /
+                                                      static_cast<float>(total_classified)
+                                                : 0.0F;
     logger::info(
         "[hgraph_build_cache] warm_start finished in {:.3f}s hit_nodes={} missed_nodes={} "
         "hit_empty_seed_nodes={} hit_seed_neighbor_total={} hit_rate={:.4f}",
@@ -1569,33 +1595,28 @@ HGraph::build_with_cache(const DatasetPtr& data) {
         hit_empty_seed_nodes,
         hit_seed_neighbor_total,
         hit_rate);
+}
 
-    // ---- Step 3: refine missed nodes (global entry) first, then hit nodes ----
-    // Rationale: running missed_refine first lets cold-start nodes install
-    // both their own forward neighbours and their reverse-edge contributions
-    // back into hit-node adjacency lists before hit_refine kicks in. The
-    // subsequent hit_refine therefore sees a richer local frontier (warm
-    // seed merged with reverse edges produced by missed_refine) and can
-    // still exploit the cheap self-entry path on nodes whose neighbour list
-    // remains non-empty.
-    //
-    // Hit nodes whose neighbour list is empty when hit_refine starts
-    // (either because warm_start could not map any cached neighbour, or
-    // because every warm seed was evicted by the missed_refine reverse
-    // pruning) will automatically fall back to the global entry point.
-    // This is guaranteed by the existing guard inside
-    // collect_refine_candidates():
-    //     search_entry_point = (use_self_as_entry && !current_neighbors.empty())
-    //                          ? inner_id
-    //                          : this->entry_point_id_;
-    // so no extra bookkeeping is required at the call site.
-    //
-    // Parallelism note: refine_nodes_two_phase fully drains its internal
-    // futures (search / scatter / materialise / shard-prune) via
-    // future.get() before returning, so swapping the two invocations does
-    // not introduce any cross-phase data races. Each call independently
-    // re-derives parallelism / block_size / reverse_shard_count, so the
-    // intra-phase parallel pipeline is unaffected by the order change.
+// Step 3: refine missed nodes (global entry) first, then hit nodes.
+// Rationale: running missed_refine first lets cold-start nodes install
+// both their own forward neighbours and their reverse-edge contributions
+// back into hit-node adjacency lists before hit_refine kicks in. The
+// subsequent hit_refine therefore sees a richer local frontier (warm
+// seed merged with reverse edges produced by missed_refine) and can
+// still exploit the cheap self-entry path on nodes whose neighbour list
+// remains non-empty.
+//
+// Hit nodes whose neighbour list is empty when hit_refine starts
+// (either because warm_start could not map any cached neighbour, or
+// because every warm seed was evicted by the missed_refine reverse
+// pruning) will automatically fall back to the global entry point via
+// the existing guard inside collect_refine_candidates().
+//
+// Parallelism note: refine_nodes_two_phase fully drains its internal
+// futures before returning, so swapping the two invocations does not
+// introduce any cross-phase data races.
+void
+HGraph::cache_run_refine_two_phase(const DatasetPtr& data, BuildCachePlan& plan) {
     auto flatten_codes = this->basic_flatten_codes_;
     if (this->has_precise_reorder()) {
         flatten_codes = this->high_precise_codes_;
@@ -1606,152 +1627,49 @@ HGraph::build_with_cache(const DatasetPtr& data) {
         this->basic_flatten_codes_ ? this->basic_flatten_codes_->GetQuantizerName() : "null",
         this->high_precise_codes_ ? this->high_precise_codes_->GetQuantizerName() : "null");
     this->refine_nodes_two_phase(data,
-                                 missed_ids,
+                                 plan.missed_ids,
                                  "missed_refine",
                                  MISSED_REFINE_ROUNDS,
                                  MISSED_REFINE_EF,
                                  /*use_self_as_entry=*/false,
                                  flatten_codes,
-                                 inner_id_to_input_idx);
+                                 plan.inner_id_to_input_idx);
     this->refine_nodes_two_phase(data,
-                                 hit_ids,
+                                 plan.hit_ids,
                                  "hit_refine",
                                  HIT_REFINE_ROUNDS,
                                  HIT_REFINE_EF,
                                  /*use_self_as_entry=*/true,
                                  flatten_codes,
-                                 inner_id_to_input_idx);
+                                 plan.inner_id_to_input_idx);
+}
 
-    // ---- Step 4: rebuild route graphs via ODescent ----
+// Step 4: rebuild route graphs via ODescent.
+void
+HGraph::cache_rebuild_route_graphs(BuildCachePlan& plan) {
     this->route_graphs_.clear();
-    if (not route_graph_ids.empty()) {
-        const auto route_graph_begin = build_cache_now_us();
-        if (this->odescent_param_ == nullptr) {
-            this->odescent_param_ = std::make_shared<ODescentParameter>();
-        }
-        auto build_data =
-            this->has_precise_reorder() ? this->high_precise_codes_ : this->basic_flatten_codes_;
-        for (auto& route_graph_id : route_graph_ids) {
-            odescent_param_->max_degree = bottom_graph_->MaximumDegree() / 2;
-            ODescent sparse_odescent_builder(
-                odescent_param_, build_data, allocator_, this->thread_pool_.get());
-            auto graph = this->generate_one_route_graph();
-            sparse_odescent_builder.Build(route_graph_id);
-            sparse_odescent_builder.SaveGraph(graph);
-            this->route_graphs_.emplace_back(graph);
-        }
-        const auto route_graph_elapsed = build_cache_now_us() - route_graph_begin;
-        logger::info("[hgraph_build_cache] route_graph_build finished in {:.3f}s levels={}",
-                     static_cast<double>(route_graph_elapsed) / 1000000.0,
-                     this->route_graphs_.size());
+    if (plan.route_graph_ids.empty()) {
+        return;
     }
-
-    const auto build_total_elapsed = build_cache_now_us() - build_begin;
-    logger::info("[hgraph_build_cache] build_with_cache total elapsed {:.3f}s",
-                 static_cast<double>(build_total_elapsed) / 1000000.0);
-
-    // === DIAGNOSTIC DUMP: scan all bottom_graph neighbour lists ===
-    // Emit warnings for neighbour lists that contain self-loops, duplicates,
-    // out-of-range ids, or are not strictly sorted. Required to root-cause
-    // ef=64 Deserialize OOM/loop.
-    {
-        const char* dump_env = std::getenv("VSAG_DUMP_NEIGHBORS");
-        if (dump_env != nullptr && std::string(dump_env) == "1") {
-            const auto dump_begin = build_cache_now_us();
-            const auto total = static_cast<uint64_t>(total_count_.load());
-            const uint64_t max_degree = this->bottom_graph_->MaximumDegree();
-            const char* dump_path_env = std::getenv("VSAG_DUMP_PATH");
-            std::string dump_path = (dump_path_env != nullptr)
-                                        ? std::string(dump_path_env)
-                                        : std::string("/tmp/neighbors_dump.txt");
-            std::ofstream dump_fs(dump_path);
-            uint64_t cnt_self_loop = 0;
-            uint64_t cnt_dup = 0;
-            uint64_t cnt_oor = 0;
-            uint64_t cnt_unsorted = 0;
-            uint64_t cnt_oversize = 0;
-            uint64_t cnt_empty = 0;
-            uint64_t cnt_total = 0;
-            uint64_t cnt_bad = 0;
-            Vector<InnerIdType> nbr(allocator_);
-            uint64_t max_neighbor_id_seen = 0;
-            for (uint64_t id = 0; id < total; ++id) {
-                nbr.clear();
-                this->bottom_graph_->GetNeighbors(static_cast<InnerIdType>(id), nbr);
-                cnt_total++;
-                bool bad = false;
-                if (nbr.empty()) {
-                    cnt_empty++;
-                    continue;
-                }
-                if (nbr.size() > max_degree) {
-                    cnt_oversize++;
-                    bad = true;
-                }
-                std::unordered_set<InnerIdType> seen;
-                InnerIdType prev = 0;
-                bool first = true;
-                for (const auto nid : nbr) {
-                    if (nid == static_cast<InnerIdType>(id)) {
-                        cnt_self_loop++;
-                        bad = true;
-                    }
-                    if (nid >= total) {
-                        cnt_oor++;
-                        bad = true;
-                    }
-                    if (!seen.insert(nid).second) {
-                        cnt_dup++;
-                        bad = true;
-                    }
-                    if (!first && nid <= prev) {
-                        cnt_unsorted++;
-                        bad = true;
-                    }
-                    prev = nid;
-                    first = false;
-                    if (nid > max_neighbor_id_seen) {
-                        max_neighbor_id_seen = nid;
-                    }
-                }
-                if (bad && cnt_bad < 50) {
-                    dump_fs << "BAD id=" << id << " size=" << nbr.size() << " [";
-                    for (uint64_t k = 0; k < nbr.size() && k < 80; ++k) {
-                        dump_fs << nbr[k] << (k + 1 < nbr.size() ? "," : "");
-                    }
-                    dump_fs << "]\n";
-                }
-                if (bad) {
-                    cnt_bad++;
-                }
-            }
-            dump_fs << "=== summary ===\n";
-            dump_fs << "total_nodes=" << cnt_total << "\n";
-            dump_fs << "empty_neighbour_nodes=" << cnt_empty << "\n";
-            dump_fs << "bad_nodes=" << cnt_bad << "\n";
-            dump_fs << "self_loop_count=" << cnt_self_loop << "\n";
-            dump_fs << "duplicate_neighbor_count=" << cnt_dup << "\n";
-            dump_fs << "out_of_range_neighbor_count=" << cnt_oor << "\n";
-            dump_fs << "unsorted_neighbor_count=" << cnt_unsorted << "\n";
-            dump_fs << "oversize_neighbour_lists=" << cnt_oversize << "\n";
-            dump_fs << "max_neighbor_id_seen=" << max_neighbor_id_seen << "\n";
-            dump_fs << "max_capacity=" << total << "\n";
-            dump_fs << "max_degree=" << max_degree << "\n";
-            dump_fs.close();
-            const auto dump_elapsed = build_cache_now_us() - dump_begin;
-            logger::info(
-                "[hgraph_build_cache] neighbor_dump finished in {:.3f}s "
-                "bad_nodes={} self_loop={} dup={} oor={} unsorted={} oversize={}",
-                static_cast<double>(dump_elapsed) / 1000000.0,
-                cnt_bad,
-                cnt_self_loop,
-                cnt_dup,
-                cnt_oor,
-                cnt_unsorted,
-                cnt_oversize);
-        }
+    const auto route_graph_begin = build_cache_now_us();
+    if (this->odescent_param_ == nullptr) {
+        this->odescent_param_ = std::make_shared<ODescentParameter>();
     }
-    return failed_ids;
+    auto build_data =
+        this->has_precise_reorder() ? this->high_precise_codes_ : this->basic_flatten_codes_;
+    for (auto& route_graph_id : plan.route_graph_ids) {
+        odescent_param_->max_degree = bottom_graph_->MaximumDegree() / 2;
+        ODescent sparse_odescent_builder(
+            odescent_param_, build_data, allocator_, this->thread_pool_.get());
+        auto graph = this->generate_one_route_graph();
+        sparse_odescent_builder.Build(route_graph_id);
+        sparse_odescent_builder.SaveGraph(graph);
+        this->route_graphs_.emplace_back(graph);
+    }
+    const auto route_graph_elapsed = build_cache_now_us() - route_graph_begin;
+    logger::info("[hgraph_build_cache] route_graph_build finished in {:.3f}s levels={}",
+                 static_cast<double>(route_graph_elapsed) / 1000000.0,
+                 this->route_graphs_.size());
 }
 
 }  // namespace vsag
