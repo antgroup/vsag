@@ -33,6 +33,9 @@ public:
     void
     SetThreshold(double threshold);
 
+    void
+    Reset();
+
     bool
     CheckOvertime();
 

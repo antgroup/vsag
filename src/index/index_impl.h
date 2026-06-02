@@ -58,6 +58,11 @@ public:
     if ((query)->GetNumElements() == 0) {       \
         return DatasetImpl::MakeEmptyDataset(); \
     }
+#define CHECK_EMPTY_INDEX_RETURN_EMPTY_DATASET(query, parameters)           \
+    if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(parameters) && \
+        ((query) == nullptr || (query)->GetNumElements() <= 1)) {           \
+        return DatasetImpl::MakeEmptyDataset();                             \
+    }
 #define CHECK_IMMUTABLE_INDEX(operation_str)                                       \
     if (this->inner_index_->immutable_.load(std::memory_order_acquire)) {          \
         return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,        \
@@ -303,9 +308,7 @@ public:
               const std::string& parameters,
               BitsetPtr invalid = nullptr) const override {
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
-        if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(parameters)) {
-            return DatasetImpl::MakeEmptyDataset();
-        }
+        CHECK_EMPTY_INDEX_RETURN_EMPTY_DATASET(query, parameters);
         SAFE_CALL(return this->inner_index_->KnnSearch(query, k, parameters, invalid));
     }
 
@@ -315,9 +318,7 @@ public:
               const std::string& parameters,
               const std::function<bool(int64_t)>& filter) const override {
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
-        if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(parameters)) {
-            return DatasetImpl::MakeEmptyDataset();
-        }
+        CHECK_EMPTY_INDEX_RETURN_EMPTY_DATASET(query, parameters);
         SAFE_CALL(return this->inner_index_->KnnSearch(query, k, parameters, filter));
     }
 
@@ -327,18 +328,14 @@ public:
               const std::string& parameters,
               const FilterPtr& filter) const override {
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
-        if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(parameters)) {
-            return DatasetImpl::MakeEmptyDataset();
-        }
+        CHECK_EMPTY_INDEX_RETURN_EMPTY_DATASET(query, parameters);
         SAFE_CALL(return this->inner_index_->KnnSearch(query, k, parameters, filter));
     }
 
     tl::expected<DatasetPtr, Error>
     KnnSearch(const DatasetPtr& query, int64_t k, SearchParam& search_param) const override {
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
-        if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(search_param.parameters)) {
-            return DatasetImpl::MakeEmptyDataset();
-        }
+        CHECK_EMPTY_INDEX_RETURN_EMPTY_DATASET(query, search_param.parameters);
         if (search_param.is_iter_filter) {
             SAFE_CALL(return this->inner_index_->KnnSearch(query,
                                                            k,
@@ -361,9 +358,7 @@ public:
               IteratorContext*& iter_ctx,
               bool is_last_filter) const override {
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
-        if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(parameters)) {
-            return DatasetImpl::MakeEmptyDataset();
-        }
+        CHECK_EMPTY_INDEX_RETURN_EMPTY_DATASET(query, parameters);
         SAFE_CALL(return this->inner_index_->KnnSearch(
             query, k, parameters, filter, nullptr, iter_ctx, is_last_filter));
     }
@@ -400,7 +395,8 @@ public:
                 const std::string& parameters,
                 int64_t limited_size = -1) const override {
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
-        if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(parameters)) {
+        if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(parameters) &&
+            (query == nullptr || query->GetNumElements() <= 1)) {
             return DatasetImpl::MakeEmptyDataset();
         }
         SAFE_CALL(return this->inner_index_->RangeSearch(query, radius, parameters, limited_size));
@@ -413,7 +409,8 @@ public:
                 BitsetPtr invalid,
                 int64_t limited_size = -1) const override {
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
-        if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(parameters)) {
+        if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(parameters) &&
+            (query == nullptr || query->GetNumElements() <= 1)) {
             return DatasetImpl::MakeEmptyDataset();
         }
         SAFE_CALL(return this->inner_index_->RangeSearch(
@@ -427,7 +424,8 @@ public:
                 const std::function<bool(int64_t)>& filter,
                 int64_t limited_size = -1) const override {
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
-        if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(parameters)) {
+        if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(parameters) &&
+            (query == nullptr || query->GetNumElements() <= 1)) {
             return DatasetImpl::MakeEmptyDataset();
         }
         SAFE_CALL(return this->inner_index_->RangeSearch(
@@ -441,7 +439,8 @@ public:
                 const FilterPtr& filter,
                 int64_t limited_size = -1) const override {
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
-        if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(parameters)) {
+        if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(parameters) &&
+            (query == nullptr || query->GetNumElements() <= 1)) {
             return DatasetImpl::MakeEmptyDataset();
         }
         SAFE_CALL(return this->inner_index_->RangeSearch(
@@ -476,7 +475,8 @@ public:
 
     [[nodiscard]] tl::expected<DatasetPtr, Error>
     SearchWithRequest(const SearchRequest& request) const override {
-        if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(request.params_str_)) {
+        if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(request.params_str_) &&
+            (request.query_ == nullptr || request.query_->GetNumElements() <= 1)) {
             return DatasetImpl::MakeEmptyDataset();
         }
         SAFE_CALL(return this->inner_index_->SearchWithRequest(request));
