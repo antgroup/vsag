@@ -315,9 +315,13 @@ public:
       * @brief Performing search with request on index
       * 
       * @param request @see SearchRequest
-      * @return result contains 
-      *                - num_elements: 1
-      *                - ids, distances: length is (num_elements * k)               
+      * @return result contains
+      *                - single-query requests: num_elements = 1, dim = actual result count for
+      *                  range search or returned topk for knn search
+      *                - batched KNN requests, when supported by the implementation:
+      *                  num_elements = query->GetNumElements(), dim = request.topk_, and
+      *                  ids/distances are stored in row-major order with length
+      *                  (num_elements * dim)
       */
     [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     SearchWithRequest(const SearchRequest& request) const {
