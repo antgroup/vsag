@@ -15,6 +15,7 @@
 
 #include "disksindi.h"
 
+#include <algorithm>
 #include <cstring>
 #include <istream>
 #include <mutex>
@@ -500,16 +501,18 @@ DiskSINDI::search_impl(const SparseTermComputerPtr& computer,
         auto [sorted_ids, sorted_vals] =
             sort_sparse_vector(original_query ? *original_query : computer->raw_query_, allocator_);
 
-        // Phase A: collect all candidate inner ids first (in heap pop order,
-        // no sorting), then issue a single batched IO for all their codes.
-        // This lets the rerank IO backend (notably async_io) submit one batch
-        // instead of N serialized DirectIO requests.
+        // Phase B: collect all candidate inner ids, sort them by inner_id
+        // (ascending), then issue a single batched IO. Sorting makes disk
+        // offsets monotonically increasing, which enables
+        // GetCodesByIdsBatch to merge adjacent IO requests and reduces
+        // syscall count for DirectIO.
         Vector<InnerIdType> cand_ids(allocator_);
         cand_ids.resize(candidate_size);
         for (int64_t i = static_cast<int64_t>(candidate_size) - 1; i >= 0; --i) {
             cand_ids[i] = heap.top().second;
             heap.pop();
         }
+        std::sort(cand_ids.begin(), cand_ids.end());
         auto batch = rerank_flat_->GetCodesByIdsBatch(
             cand_ids.data(), static_cast<InnerIdType>(candidate_size), allocator_);
 

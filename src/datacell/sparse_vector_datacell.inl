@@ -18,6 +18,7 @@
 #include <fmt/format.h>
 
 #include "sparse_vector_datacell.h"
+#include "vsag/options.h"
 
 namespace vsag {
 template <typename QuantTmpl, typename IOTmpl>
@@ -181,11 +182,17 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::GetCodesById(InnerIdType id, bool& need
     return io_->Read(location.size, location.offset, need_release);
 }
 
-// Phase A: batched codes fetch.
-// Issues a single MultiRead for all candidates' payloads after gathering their
-// (offset, size) tuples from the in-memory offset_io_. No sorting, no IO
-// merging — those are deferred to Phase B. The returned buffer concatenates
-// each candidate's codes in input order.
+// Phase B: batched codes fetch with adjacent IO merging.
+// Gathers (offset, size) tuples from the in-memory offset_io_, then merges
+// adjacent or nearly-adjacent IO requests into larger segments before issuing
+// a single MultiRead. When the input ids are sorted by inner_id (which
+// implies ascending disk offset because InsertVector appends sequentially),
+// nearby payloads are coalesced: two requests are merged when their gap is
+// within MERGE_GAP_LIMIT (= DirectIO alignment size, typically 4 KiB) and
+// the merged segment does not exceed MAX_MERGED_IO_LEN (1 MiB).
+//
+// Correctness does NOT depend on input ordering: unsorted ids simply produce
+// fewer merges, degenerating to one IO per candidate (equivalent to Phase A).
 template <typename QuantTmpl, typename IOTmpl>
 BatchCodesResult
 SparseVectorDataCell<QuantTmpl, IOTmpl>::GetCodesByIdsBatch(const InnerIdType* ids,
@@ -209,24 +216,74 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::GetCodesByIdsBatch(const InnerIdType* i
                          reinterpret_cast<uint8_t*>(&locs[i]));
     }
 
-    // 2) Compute the in-buffer layout and the per-candidate IO descriptors.
-    Vector<uint64_t> io_offsets(count, allocator);
-    Vector<uint64_t> io_sizes(count, allocator);
+    // 2) Compute the in-buffer layout (per-candidate offsets inside the output).
     uint64_t total = 0;
     for (InnerIdType i = 0; i < count; ++i) {
         result.in_buffer_offsets[i] = total;
         result.sizes[i] = locs[i].size;
-        io_offsets[i] = locs[i].offset;
-        io_sizes[i] = locs[i].size;
         total += locs[i].size;
     }
     result.buffer.resize(total);
 
-    // 3) Single MultiRead pulls all payloads at once. For async_io this lets
-    //    the kernel batch io_submit / io_getevents; for memory/mmap/buffer/
-    //    reader it degenerates to sequential reads which is at least as
-    //    fast as N separate Read calls.
-    io_->MultiRead(result.buffer.data(), io_sizes.data(), io_offsets.data(), count);
+    // 3) Build merged IO ranges. Adjacent candidates whose disk regions are
+    //    contiguous or separated by a small gap are coalesced into one IO.
+    const uint64_t MERGE_GAP_LIMIT = 1ULL << Options::Instance().direct_IO_object_align_bit();
+    static constexpr uint64_t MAX_MERGED_IO_LEN = 1ULL << 20;  // 1 MiB
+
+    struct MergedRange {
+        uint64_t io_offset;  // merged segment start on disk
+        uint64_t io_size;    // merged segment total length
+        uint32_t first;      // first candidate index covered
+        uint32_t last;       // last candidate index covered (inclusive)
+    };
+    Vector<MergedRange> ranges(allocator);
+    ranges.reserve(count);
+
+    for (uint32_t i = 0; i < static_cast<uint32_t>(count); ++i) {
+        const auto off = locs[i].offset;
+        const auto sz = static_cast<uint64_t>(locs[i].size);
+        if (!ranges.empty()) {
+            auto& back = ranges.back();
+            const auto end = back.io_offset + back.io_size;
+            if (off >= end) {
+                const auto gap = off - end;
+                const auto new_size = (off + sz) - back.io_offset;
+                if (gap <= MERGE_GAP_LIMIT && new_size <= MAX_MERGED_IO_LEN) {
+                    back.io_size = new_size;
+                    back.last = i;
+                    continue;
+                }
+            }
+        }
+        ranges.push_back({off, sz, i, i});
+    }
+
+    // 4) Allocate a scratch buffer for all merged segments and issue MultiRead.
+    const auto num_ranges = static_cast<uint64_t>(ranges.size());
+    Vector<uint64_t> io_offsets(num_ranges, allocator);
+    Vector<uint64_t> io_sizes(num_ranges, allocator);
+    Vector<uint64_t> io_in_buf(num_ranges, allocator);
+    uint64_t scratch_total = 0;
+    for (uint64_t r = 0; r < num_ranges; ++r) {
+        io_offsets[r] = ranges[r].io_offset;
+        io_sizes[r] = ranges[r].io_size;
+        io_in_buf[r] = scratch_total;
+        scratch_total += ranges[r].io_size;
+    }
+    Vector<uint8_t> scratch(scratch_total, allocator);
+    io_->MultiRead(scratch.data(), io_sizes.data(), io_offsets.data(), num_ranges);
+
+    // 5) Scatter merged data back into each candidate's slot in result.buffer.
+    for (uint64_t r = 0; r < num_ranges; ++r) {
+        const auto& rg = ranges[r];
+        const uint8_t* base = scratch.data() + io_in_buf[r];
+        for (uint32_t i = rg.first; i <= rg.last; ++i) {
+            const auto local = locs[i].offset - rg.io_offset;
+            std::memcpy(result.buffer.data() + result.in_buffer_offsets[i],
+                        base + local,
+                        result.sizes[i]);
+        }
+    }
     return result;
 }
 
