@@ -141,6 +141,17 @@ Range search and id-based filtering are supported; see the example for usage.
      with large gaps, enable `remap_term_ids: true`. This avoids managing many
      empty posting lists and helps stay below the `term_id_limit` ceiling.
 
+## Mark remove
+
+SINDI supports `RemoveMode::MARK_REMOVE`. Calling `Remove(ids)` (the default mode)
+tombstones the given ids so they no longer appear in search results;
+`GetNumElements()` drops accordingly and `GetNumberRemoved()` reports the running
+total. Removing an id that is absent or already removed is a no-op.
+`RemoveMode::FORCE_REMOVE` is not supported and returns an error.
+
+Mark-removed documents still occupy memory until the index is rebuilt; the space
+is not physically reclaimed.
+
 ## See also
 
 - [Creating an Index](../guide/create_index.md)

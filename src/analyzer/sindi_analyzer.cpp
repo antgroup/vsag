@@ -413,8 +413,8 @@ SINDIAnalyzer::calculate_ground_truth(const DatasetPtr& query_dataset,
     }
 
     auto query_count = query_dataset->GetNumElements();
-    auto base_count =
-        base_dataset == nullptr ? sindi_->cur_element_count_ : base_dataset->GetNumElements();
+    auto base_count = base_dataset == nullptr ? sindi_->cur_element_count_.load()
+                                              : base_dataset->GetNumElements();
     auto effective_topk = std::min<int64_t>(topk, base_count);
     if (effective_topk <= 0) {
         return nullptr;

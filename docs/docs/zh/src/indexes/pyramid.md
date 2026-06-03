@@ -116,6 +116,15 @@ auto result = index->KnnSearch(
 
 如果不需要按路径限定查询范围，[HGraph](hgraph.md) 更简洁，性能通常也更高。
 
+## 标记删除
+
+Pyramid 支持 `RemoveMode::MARK_REMOVE`。调用 `Remove(ids)`（默认模式）会为给定的 id
+打上删除标记：它们会从后续检索结果中排除，`GetNumElements()` 相应减少，
+`GetNumberRemoved()` 返回累计删除数量。删除不存在或已删除的 id 不会有任何效果。
+`RemoveMode::FORCE_REMOVE` 不支持，调用会返回错误。
+
+被标记删除的向量在索引重建前仍占用内存，空间不会被物理回收。
+
 ## 相关文档
 
 - [创建索引](../guide/create_index.md)
