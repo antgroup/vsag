@@ -405,7 +405,25 @@ Pyramid::search_impl(const DatasetPtr& query,
 
 int64_t
 Pyramid::GetNumElements() const {
-    return base_codes_->TotalCount();
+    auto total = static_cast<int64_t>(base_codes_->TotalCount());
+    auto deleted = delete_count_.load();
+    return total > deleted ? total - deleted : 0;
+}
+
+int64_t
+Pyramid::GetNumberRemoved() const {
+    return delete_count_.load();
+}
+
+uint32_t
+Pyramid::Remove(const std::vector<int64_t>& ids, RemoveMode mode) {
+    if (mode != RemoveMode::MARK_REMOVE) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "Pyramid only supports MARK_REMOVE");
+    }
+    std::scoped_lock lock(this->label_lookup_mutex_, this->cur_element_count_mutex_);
+    uint32_t delete_count = this->label_table_->MarkRemove(ids);
+    delete_count_.fetch_add(delete_count, std::memory_order_relaxed);
+    return delete_count;
 }
 
 void
@@ -448,6 +466,8 @@ Pyramid::Deserialize(StreamReader& reader) {
         &reader, std::numeric_limits<uint64_t>::max(), this->allocator_);
 
     label_table_->Deserialize(buffer_reader);
+    delete_count_.store(static_cast<int64_t>(label_table_->GetAllDeletedIds().size()),
+                        std::memory_order_relaxed);
     base_codes_->Deserialize(buffer_reader);
     if (use_reorder_) {
         precise_codes_->Deserialize(buffer_reader);
@@ -609,6 +629,8 @@ Pyramid::InitFeatures() {
         IndexFeature::SUPPORT_EXPORT_MODEL,
         IndexFeature::SUPPORT_GET_MEMORY_USAGE,
     });
+
+    this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_DELETE_BY_ID);
 }
 
 static const std::string HGRAPH_PARAMS_TEMPLATE =

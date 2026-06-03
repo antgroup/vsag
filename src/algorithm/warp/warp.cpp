@@ -529,6 +529,7 @@ WARP::Deserialize(StreamReader& reader) {
 
     this->inner_codes_->Deserialize(buffer_reader);
     this->label_table_->Deserialize(buffer_reader);
+    delete_count_.store(label_table_->GetAllDeletedIds().size(), std::memory_order_relaxed);
     this->cal_memory_usage();
 }
 
@@ -647,6 +648,17 @@ WARP::InitFeatures() {
         IndexFeature::SUPPORT_CHECK_ID_EXIST,
         IndexFeature::SUPPORT_CLONE,
     });
+}
+
+uint32_t
+WARP::Remove(const std::vector<int64_t>& ids, RemoveMode mode) {
+    if (mode != RemoveMode::MARK_REMOVE) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "WARP only supports MARK_REMOVE");
+    }
+    std::scoped_lock label_lock(this->label_lookup_mutex_);
+    uint32_t delete_count = this->label_table_->MarkRemove(ids);
+    delete_count_.fetch_add(delete_count, std::memory_order_relaxed);
+    return delete_count;
 }
 
 static const std::string WARP_PARAMS_TEMPLATE =

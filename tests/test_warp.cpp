@@ -173,3 +173,61 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::WarpTestIndex, "Warp IP Multiple Dims", "
         TestKnnSearch(index, dataset, search_param, 0.99, true);
     }
 }
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::WarpTestIndex, "Warp Mark Remove", "[ft][remove][warp]") {
+    auto metric_type = GENERATE("ip");
+    std::string base_quantization_str = GENERATE("fp32");
+    WarpParam warp_param;
+    warp_param.base_quantization_type = base_quantization_str;
+    const std::string name = "warp";
+    auto search_param = GenerateWarpSearchParametersString();
+    for (auto& dim : dims) {
+        INFO(fmt::format("metric_type={}, dim={}", metric_type, dim));
+        auto param = GenerateWarpBuildParametersString(metric_type, dim, warp_param);
+        auto index = TestFactory(name, param, true);
+        auto dataset =
+            pool.GetDatasetAndCreate(dim, base_count, metric_type, false, 0.8, 0, 16, "multi");
+        TestBuildIndex(index, dataset, true);
+
+        auto base_num = dataset->base_->GetNumElements();
+        const auto* ids = dataset->base_->GetIds();
+        REQUIRE(index->GetNumElements() == base_num);
+        REQUIRE(index->GetNumberRemoved() == 0);
+
+        // FORCE_REMOVE is not supported by WARP
+        auto force_result = index->Remove(ids[0], vsag::RemoveMode::FORCE_REMOVE);
+        REQUIRE_FALSE(force_result.has_value());
+
+        // mark remove half of the base data
+        int64_t remove_count = base_num / 2;
+        std::vector<int64_t> remove_ids(ids, ids + remove_count);
+        auto remove_result = index->Remove(remove_ids, vsag::RemoveMode::MARK_REMOVE);
+        REQUIRE(remove_result.has_value());
+        REQUIRE(remove_result.value() == remove_count);
+        REQUIRE(index->GetNumElements() == base_num - remove_count);
+        REQUIRE(index->GetNumberRemoved() == remove_count);
+
+        // removing the same ids again should remove nothing
+        auto duplicate_remove = index->Remove(remove_ids, vsag::RemoveMode::MARK_REMOVE);
+        REQUIRE(duplicate_remove.has_value());
+        REQUIRE(duplicate_remove.value() == 0);
+
+        // removing an id that is not present is a no-op
+        std::vector<int64_t> absent_ids = {base_num + 10000};
+        auto absent_remove = index->Remove(absent_ids, vsag::RemoveMode::MARK_REMOVE);
+        REQUIRE(absent_remove.has_value());
+        REQUIRE(absent_remove.value() == 0);
+        REQUIRE(index->GetNumElements() == base_num - remove_count);
+        REQUIRE(index->GetNumberRemoved() == remove_count);
+
+        // removed ids must not appear in search results
+        for (int64_t i = 0; i < remove_count; ++i) {
+            auto query = fixtures::get_one_query(dataset->base_, static_cast<int>(i));
+            auto search_result = index->KnnSearch(query, 10, search_param);
+            REQUIRE(search_result.has_value());
+            for (int64_t j = 0; j < search_result.value()->GetDim(); ++j) {
+                REQUIRE(search_result.value()->GetIds()[j] != ids[i]);
+            }
+        }
+    }
+}

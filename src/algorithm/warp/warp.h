@@ -73,14 +73,18 @@ public:
 
     [[nodiscard]] int64_t
     GetNumElements() const override {
-        return static_cast<int64_t>(this->total_count_.load()) -
-               static_cast<int64_t>(this->delete_count_);
+        auto deleted = static_cast<int64_t>(this->delete_count_.load());
+        auto total = static_cast<int64_t>(this->total_count_.load());
+        return total > deleted ? total - deleted : 0;
     }
 
     [[nodiscard]] int64_t
     GetNumberRemoved() const override {
-        return this->delete_count_;
+        return this->delete_count_.load();
     }
+
+    uint32_t
+    Remove(const std::vector<int64_t>& ids, RemoveMode mode) override;
 
     void
     GetVectorByInnerId(InnerIdType inner_id, float* data) const override;
@@ -133,7 +137,7 @@ private:
 private:
     FlattenInterfacePtr inner_codes_{nullptr};
 
-    uint64_t delete_count_{0};
+    std::atomic<uint64_t> delete_count_{0};
 
     uint64_t total_vector_count_{0};  // Total number of vectors across all docs
 

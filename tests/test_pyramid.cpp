@@ -1426,3 +1426,53 @@ TEST_CASE("Multi-Hierarchy: Single hierarchy in hierarchies config",
     std::set<int64_t> found(rids, rids + result.value()->GetDim());
     REQUIRE(found.count(10) == 1);
 }
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
+                             "Pyramid Mark Remove",
+                             "[ft][remove][pyramid]") {
+    auto metric_type = GENERATE("l2");
+    PyramidParam pyramid_param;
+    pyramid_param.no_build_levels = {0, 1, 2};
+    const std::string name = "pyramid";
+    auto search_param = GeneratePyramidSearchParametersString(200);
+    for (auto& dim : dims) {
+        INFO(fmt::format("metric_type={}, dim={}", metric_type, dim));
+        auto param = GeneratePyramidBuildParametersString(metric_type, dim, pyramid_param);
+        auto index = TestFactory(name, param, true);
+        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type, /*with_path=*/true);
+        TestBuildIndex(index, dataset, true);
+
+        auto base_num = dataset->base_->GetNumElements();
+        const auto* ids = dataset->base_->GetIds();
+        REQUIRE(index->GetNumElements() == base_num);
+        REQUIRE(index->GetNumberRemoved() == 0);
+
+        // FORCE_REMOVE is not supported by Pyramid
+        auto force_result = index->Remove(ids[0], vsag::RemoveMode::FORCE_REMOVE);
+        REQUIRE_FALSE(force_result.has_value());
+
+        // mark remove half of the base data
+        int64_t remove_count = base_num / 2;
+        std::vector<int64_t> remove_ids(ids, ids + remove_count);
+        auto remove_result = index->Remove(remove_ids, vsag::RemoveMode::MARK_REMOVE);
+        REQUIRE(remove_result.has_value());
+        REQUIRE(remove_result.value() == remove_count);
+        REQUIRE(index->GetNumElements() == base_num - remove_count);
+        REQUIRE(index->GetNumberRemoved() == remove_count);
+
+        // removing the same ids again should remove nothing
+        auto duplicate_remove = index->Remove(remove_ids, vsag::RemoveMode::MARK_REMOVE);
+        REQUIRE(duplicate_remove.has_value());
+        REQUIRE(duplicate_remove.value() == 0);
+
+        // removed ids must not appear in search results
+        for (int64_t i = 0; i < remove_count; ++i) {
+            auto query = fixtures::get_one_query(dataset->base_, static_cast<int>(i));
+            auto search_result = index->KnnSearch(query, 10, search_param);
+            REQUIRE(search_result.has_value());
+            for (int64_t j = 0; j < search_result.value()->GetDim(); ++j) {
+                REQUIRE(search_result.value()->GetIds()[j] != ids[i]);
+            }
+        }
+    }
+}
