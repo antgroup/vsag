@@ -18,6 +18,13 @@
 #include "simd/int8_simd.h"
 #if defined(ENABLE_SSE)
 #include <x86intrin.h>
+
+#include "simd/kernels/binary_op.h"
+#include "simd/kernels/compute_batch4.h"
+#include "simd/kernels/compute_ip.h"
+#include "simd/kernels/compute_l2.h"
+#include "simd/kernels/reduce_add.h"
+#include "simd/traits/simd_traits_sse.h"
 #endif
 
 #include <cmath>
@@ -102,21 +109,8 @@ __inline __m128i __attribute__((__always_inline__)) load_4_short(const uint16_t*
 float
 FP32ComputeIP(const float* RESTRICT query, const float* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_SSE)
-    const int n = dim / 4;
-    if (n == 0) {
-        return generic::FP32ComputeIP(query, codes, dim);
-    }
-    __m128 sum = _mm_setzero_ps();
-    for (int i = 0; i < n; ++i) {
-        __m128 a = _mm_loadu_ps(query + i * 4);
-        __m128 b = _mm_loadu_ps(codes + i * 4);
-        sum = _mm_add_ps(sum, _mm_mul_ps(a, b));
-    }
-    alignas(16) float result[4];
-    _mm_store_ps(result, sum);
-    float ip = result[0] + result[1] + result[2] + result[3];
-    ip += generic::FP32ComputeIP(query + n * 4, codes + n * 4, dim - n * 4);
-    return ip;
+    return simd::ComputeIPImpl<simd::SimdTraits<simd::SSE_Tag>>(
+        query, codes, dim, &generic::FP32ComputeIP);
 #else
     return vsag::generic::FP32ComputeIP(query, codes, dim);
 #endif
@@ -125,22 +119,8 @@ FP32ComputeIP(const float* RESTRICT query, const float* RESTRICT codes, uint64_t
 float
 FP32ComputeL2Sqr(const float* RESTRICT query, const float* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_SSE)
-    const uint64_t n = dim / 4;
-    if (n == 0) {
-        return generic::FP32ComputeL2Sqr(query, codes, dim);
-    }
-    __m128 sum = _mm_setzero_ps();
-    for (int i = 0; i < n; ++i) {
-        __m128 a = _mm_loadu_ps(query + i * 4);
-        __m128 b = _mm_loadu_ps(codes + i * 4);
-        __m128 diff = _mm_sub_ps(a, b);
-        sum = _mm_add_ps(sum, _mm_mul_ps(diff, diff));
-    }
-    alignas(16) float result[4];
-    _mm_store_ps(result, sum);
-    float l2 = result[0] + result[1] + result[2] + result[3];
-    l2 += generic::FP32ComputeL2Sqr(query + n * 4, codes + n * 4, dim - n * 4);
-    return l2;
+    return simd::ComputeL2SqrImpl<simd::SimdTraits<simd::SSE_Tag>>(
+        query, codes, dim, &generic::FP32ComputeL2Sqr);
 #else
     return vsag::generic::FP32ComputeL2Sqr(query, codes, dim);
 #endif
@@ -158,47 +138,18 @@ FP32ComputeIPBatch4(const float* RESTRICT query,
                     float& result3,
                     float& result4) {
 #if defined(ENABLE_SSE)
-    if (dim < 4) {
-        return generic::FP32ComputeIPBatch4(
-            query, dim, codes1, codes2, codes3, codes4, result1, result2, result3, result4);
-    }
-    __m128 sum1 = _mm_setzero_ps();
-    __m128 sum2 = _mm_setzero_ps();
-    __m128 sum3 = _mm_setzero_ps();
-    __m128 sum4 = _mm_setzero_ps();
-    int i = 0;
-    for (; i + 3 < dim; i += 4) {
-        __m128 q = _mm_loadu_ps(query + i);
-        __m128 c1 = _mm_loadu_ps(codes1 + i);
-        __m128 c2 = _mm_loadu_ps(codes2 + i);
-        __m128 c3 = _mm_loadu_ps(codes3 + i);
-        __m128 c4 = _mm_loadu_ps(codes4 + i);
-        sum1 = _mm_add_ps(sum1, _mm_mul_ps(q, c1));
-        sum2 = _mm_add_ps(sum2, _mm_mul_ps(q, c2));
-        sum3 = _mm_add_ps(sum3, _mm_mul_ps(q, c3));
-        sum4 = _mm_add_ps(sum4, _mm_mul_ps(q, c4));
-    }
-    alignas(16) float result[4];
-    _mm_store_ps(result, sum1);
-    result1 += result[0] + result[1] + result[2] + result[3];
-    _mm_store_ps(result, sum2);
-    result2 += result[0] + result[1] + result[2] + result[3];
-    _mm_store_ps(result, sum3);
-    result3 += result[0] + result[1] + result[2] + result[3];
-    _mm_store_ps(result, sum4);
-    result4 += result[0] + result[1] + result[2] + result[3];
-    if (i < dim) {
-        generic::FP32ComputeIPBatch4(query + i,
-                                     dim - i,
-                                     codes1 + i,
-                                     codes2 + i,
-                                     codes3 + i,
-                                     codes4 + i,
-                                     result1,
-                                     result2,
-                                     result3,
-                                     result4);
-    }
+    simd::ComputeBatch4Impl<simd::SimdTraits<simd::SSE_Tag>, simd::Batch4Kind::IP>(
+        query,
+        dim,
+        codes1,
+        codes2,
+        codes3,
+        codes4,
+        result1,
+        result2,
+        result3,
+        result4,
+        &generic::FP32ComputeIPBatch4);
 #else
     return generic::FP32ComputeIPBatch4(
         query, dim, codes1, codes2, codes3, codes4, result1, result2, result3, result4);
@@ -217,51 +168,18 @@ FP32ComputeL2SqrBatch4(const float* RESTRICT query,
                        float& result3,
                        float& result4) {
 #if defined(ENABLE_SSE)
-    if (dim < 4) {
-        return generic::FP32ComputeL2SqrBatch4(
-            query, dim, codes1, codes2, codes3, codes4, result1, result2, result3, result4);
-    }
-    __m128 sum1 = _mm_setzero_ps();
-    __m128 sum2 = _mm_setzero_ps();
-    __m128 sum3 = _mm_setzero_ps();
-    __m128 sum4 = _mm_setzero_ps();
-    int i = 0;
-    for (; i + 3 < dim; i += 4) {
-        __m128 q = _mm_loadu_ps(query + i);
-        __m128 c1 = _mm_loadu_ps(codes1 + i);
-        __m128 c2 = _mm_loadu_ps(codes2 + i);
-        __m128 c3 = _mm_loadu_ps(codes3 + i);
-        __m128 c4 = _mm_loadu_ps(codes4 + i);
-        __m128 diff1 = _mm_sub_ps(q, c1);
-        __m128 diff2 = _mm_sub_ps(q, c2);
-        __m128 diff3 = _mm_sub_ps(q, c3);
-        __m128 diff4 = _mm_sub_ps(q, c4);
-        sum1 = _mm_add_ps(sum1, _mm_mul_ps(diff1, diff1));
-        sum2 = _mm_add_ps(sum2, _mm_mul_ps(diff2, diff2));
-        sum3 = _mm_add_ps(sum3, _mm_mul_ps(diff3, diff3));
-        sum4 = _mm_add_ps(sum4, _mm_mul_ps(diff4, diff4));
-    }
-    alignas(16) float result[4];
-    _mm_store_ps(result, sum1);
-    result1 += result[0] + result[1] + result[2] + result[3];
-    _mm_store_ps(result, sum2);
-    result2 += result[0] + result[1] + result[2] + result[3];
-    _mm_store_ps(result, sum3);
-    result3 += result[0] + result[1] + result[2] + result[3];
-    _mm_store_ps(result, sum4);
-    result4 += result[0] + result[1] + result[2] + result[3];
-    if (i < dim) {
-        generic::FP32ComputeL2SqrBatch4(query + i,
-                                        dim - i,
-                                        codes1 + i,
-                                        codes2 + i,
-                                        codes3 + i,
-                                        codes4 + i,
-                                        result1,
-                                        result2,
-                                        result3,
-                                        result4);
-    }
+    simd::ComputeBatch4Impl<simd::SimdTraits<simd::SSE_Tag>, simd::Batch4Kind::L2>(
+        query,
+        dim,
+        codes1,
+        codes2,
+        codes3,
+        codes4,
+        result1,
+        result2,
+        result3,
+        result4,
+        &generic::FP32ComputeL2SqrBatch4);
 #else
     return generic::FP32ComputeL2SqrBatch4(
         query, dim, codes1, codes2, codes3, codes4, result1, result2, result3, result4);
@@ -271,19 +189,8 @@ FP32ComputeL2SqrBatch4(const float* RESTRICT query,
 void
 FP32Sub(const float* x, const float* y, float* z, uint64_t dim) {
 #if defined(ENABLE_SSE)
-    if (dim < 4) {
-        return generic::FP32Sub(x, y, z, dim);
-    }
-    int64_t i = 0;
-    for (; i + 3 < dim; i += 4) {
-        __m128 a = _mm_loadu_ps(x + i);
-        __m128 b = _mm_loadu_ps(y + i);
-        __m128 c = _mm_sub_ps(a, b);
-        _mm_storeu_ps(z + i, c);
-    }
-    if (i < dim) {
-        generic::FP32Sub(x + i, y + i, z + i, dim - i);
-    }
+    simd::BinaryOpImpl<simd::SimdTraits<simd::SSE_Tag>, simd::BinaryOp::Sub>(
+        x, y, z, dim, &generic::FP32Sub);
 #else
     return generic::FP32Sub(x, y, z, dim);
 #endif
@@ -292,19 +199,8 @@ FP32Sub(const float* x, const float* y, float* z, uint64_t dim) {
 void
 FP32Add(const float* x, const float* y, float* z, uint64_t dim) {
 #if defined(ENABLE_SSE)
-    if (dim < 4) {
-        return generic::FP32Add(x, y, z, dim);
-    }
-    int64_t i = 0;
-    for (; i + 3 < dim; i += 4) {
-        __m128 a = _mm_loadu_ps(x + i);
-        __m128 b = _mm_loadu_ps(y + i);
-        __m128 c = _mm_add_ps(a, b);
-        _mm_storeu_ps(z + i, c);
-    }
-    if (i < dim) {
-        generic::FP32Add(x + i, y + i, z + i, dim - i);
-    }
+    simd::BinaryOpImpl<simd::SimdTraits<simd::SSE_Tag>, simd::BinaryOp::Add>(
+        x, y, z, dim, &generic::FP32Add);
 #else
     return generic::FP32Add(x, y, z, dim);
 #endif
@@ -313,19 +209,8 @@ FP32Add(const float* x, const float* y, float* z, uint64_t dim) {
 void
 FP32Mul(const float* x, const float* y, float* z, uint64_t dim) {
 #if defined(ENABLE_SSE)
-    if (dim < 4) {
-        return generic::FP32Mul(x, y, z, dim);
-    }
-    int64_t i = 0;
-    for (; i + 3 < dim; i += 4) {
-        __m128 a = _mm_loadu_ps(x + i);
-        __m128 b = _mm_loadu_ps(y + i);
-        __m128 c = _mm_mul_ps(a, b);
-        _mm_storeu_ps(z + i, c);
-    }
-    if (i < dim) {
-        generic::FP32Mul(x + i, y + i, z + i, dim - i);
-    }
+    simd::BinaryOpImpl<simd::SimdTraits<simd::SSE_Tag>, simd::BinaryOp::Mul>(
+        x, y, z, dim, &generic::FP32Mul);
 #else
     return generic::FP32Mul(x, y, z, dim);
 #endif
@@ -334,19 +219,8 @@ FP32Mul(const float* x, const float* y, float* z, uint64_t dim) {
 void
 FP32Div(const float* x, const float* y, float* z, uint64_t dim) {
 #if defined(ENABLE_SSE)
-    if (dim < 4) {
-        return generic::FP32Div(x, y, z, dim);
-    }
-    int64_t i = 0;
-    for (; i + 3 < dim; i += 4) {
-        __m128 a = _mm_loadu_ps(x + i);
-        __m128 b = _mm_loadu_ps(y + i);
-        __m128 c = _mm_div_ps(a, b);
-        _mm_storeu_ps(z + i, c);
-    }
-    if (i < dim) {
-        generic::FP32Div(x + i, y + i, z + i, dim - i);
-    }
+    simd::BinaryOpImpl<simd::SimdTraits<simd::SSE_Tag>, simd::BinaryOp::Div>(
+        x, y, z, dim, &generic::FP32Div);
 #else
     return generic::FP32Div(x, y, z, dim);
 #endif
@@ -355,22 +229,7 @@ FP32Div(const float* x, const float* y, float* z, uint64_t dim) {
 float
 FP32ReduceAdd(const float* x, uint64_t dim) {
 #if defined(ENABLE_SSE)
-    if (dim < 4) {
-        return generic::FP32ReduceAdd(x, dim);
-    }
-    __m128 sum = _mm_setzero_ps();
-    int i = 0;
-    for (; i + 3 < dim; i += 4) {
-        __m128 a = _mm_loadu_ps(x + i);
-        sum = _mm_add_ps(sum, a);
-    }
-    sum = _mm_hadd_ps(sum, sum);
-    sum = _mm_hadd_ps(sum, sum);
-    float result = _mm_cvtss_f32(sum);
-    if (i < dim) {
-        result += generic::FP32ReduceAdd(x + i, dim - i);
-    }
-    return result;
+    return simd::ReduceAddImpl<simd::SimdTraits<simd::SSE_Tag>>(x, dim, &generic::FP32ReduceAdd);
 #else
     return generic::FP32ReduceAdd(x, dim);
 #endif

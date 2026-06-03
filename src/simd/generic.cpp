@@ -15,6 +15,12 @@
 
 #include "simd.h"
 #include "simd/int8_simd.h"
+#include "simd/kernels/binary_op.h"
+#include "simd/kernels/compute_batch4.h"
+#include "simd/kernels/compute_ip.h"
+#include "simd/kernels/compute_l2.h"
+#include "simd/kernels/reduce_add.h"
+#include "simd/traits/simd_traits_generic.h"
 
 namespace vsag::generic {
 
@@ -95,22 +101,12 @@ PQDistanceFloat256(const void* single_dim_centers, float single_dim_val, void* r
 
 float
 FP32ComputeIP(const float* RESTRICT query, const float* RESTRICT codes, uint64_t dim) {
-    float result = 0.0f;
-
-    for (uint64_t i = 0; i < dim; ++i) {
-        result += query[i] * codes[i];
-    }
-    return result;
+    return simd::ComputeIPImpl<simd::SimdTraits<simd::Generic_Tag>>(query, codes, dim);
 }
 
 float
 FP32ComputeL2Sqr(const float* RESTRICT query, const float* RESTRICT codes, uint64_t dim) {
-    float result = 0.0f;
-    for (uint64_t i = 0; i < dim; ++i) {
-        auto val = query[i] - codes[i];
-        result += val * val;
-    }
-    return result;
+    return simd::ComputeL2SqrImpl<simd::SimdTraits<simd::Generic_Tag>>(query, codes, dim);
 }
 
 void
@@ -124,12 +120,8 @@ FP32ComputeIPBatch4(const float* RESTRICT query,
                     float& result2,
                     float& result3,
                     float& result4) {
-    for (uint64_t i = 0; i < dim; ++i) {
-        result1 += query[i] * codes1[i];
-        result2 += query[i] * codes2[i];
-        result3 += query[i] * codes3[i];
-        result4 += query[i] * codes4[i];
-    }
+    simd::ComputeBatch4Impl<simd::SimdTraits<simd::Generic_Tag>, simd::Batch4Kind::IP>(
+        query, dim, codes1, codes2, codes3, codes4, result1, result2, result3, result4);
 }
 
 void
@@ -143,49 +135,33 @@ FP32ComputeL2SqrBatch4(const float* RESTRICT query,
                        float& result2,
                        float& result3,
                        float& result4) {
-    for (uint64_t i = 0; i < dim; ++i) {
-        result1 += (query[i] - codes1[i]) * (query[i] - codes1[i]);
-        result2 += (query[i] - codes2[i]) * (query[i] - codes2[i]);
-        result3 += (query[i] - codes3[i]) * (query[i] - codes3[i]);
-        result4 += (query[i] - codes4[i]) * (query[i] - codes4[i]);
-    }
+    simd::ComputeBatch4Impl<simd::SimdTraits<simd::Generic_Tag>, simd::Batch4Kind::L2>(
+        query, dim, codes1, codes2, codes3, codes4, result1, result2, result3, result4);
 }
 
 void
 FP32Sub(const float* x, const float* y, float* z, uint64_t dim) {
-    for (uint64_t i = 0; i < dim; ++i) {
-        z[i] = x[i] - y[i];
-    }
+    simd::BinaryOpImpl<simd::SimdTraits<simd::Generic_Tag>, simd::BinaryOp::Sub>(x, y, z, dim);
 }
 
 void
 FP32Add(const float* x, const float* y, float* z, uint64_t dim) {
-    for (uint64_t i = 0; i < dim; ++i) {
-        z[i] = x[i] + y[i];
-    }
+    simd::BinaryOpImpl<simd::SimdTraits<simd::Generic_Tag>, simd::BinaryOp::Add>(x, y, z, dim);
 }
 
 void
 FP32Mul(const float* x, const float* y, float* z, uint64_t dim) {
-    for (uint64_t i = 0; i < dim; ++i) {
-        z[i] = x[i] * y[i];
-    }
+    simd::BinaryOpImpl<simd::SimdTraits<simd::Generic_Tag>, simd::BinaryOp::Mul>(x, y, z, dim);
 }
 
 void
 FP32Div(const float* x, const float* y, float* z, uint64_t dim) {
-    for (uint64_t i = 0; i < dim; ++i) {
-        z[i] = x[i] / y[i];
-    }
+    simd::BinaryOpImpl<simd::SimdTraits<simd::Generic_Tag>, simd::BinaryOp::Div>(x, y, z, dim);
 }
 
 float
 FP32ReduceAdd(const float* x, uint64_t dim) {
-    float result = 0.0F;
-    for (uint64_t i = 0; i < dim; ++i) {
-        result += x[i];
-    }
-    return result;
+    return simd::ReduceAddImpl<simd::SimdTraits<simd::Generic_Tag>>(x, dim);
 }
 
 union FP32Struct {

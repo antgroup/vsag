@@ -15,6 +15,13 @@
 #include "simd/int8_simd.h"
 #if defined(ENABLE_NEON)
 #include <arm_neon.h>
+
+#include "simd/kernels/binary_op.h"
+#include "simd/kernels/compute_batch4.h"
+#include "simd/kernels/compute_ip.h"
+#include "simd/kernels/compute_l2.h"
+#include "simd/kernels/reduce_add.h"
+#include "simd/traits/simd_traits_neon.h"
 #endif
 
 #include <cmath>
@@ -134,64 +141,8 @@ PQDistanceFloat256(const void* single_dim_centers, float single_dim_val, void* r
 float
 FP32ComputeIP(const float* query, const float* codes, uint64_t dim) {
 #if defined(ENABLE_NEON)
-    float32x4_t sum_ = vdupq_n_f32(0.0f);
-    auto d = dim;
-    while (d >= 12) {
-        float32x4x3_t a = vld1q_f32_x3(query + dim - d);
-        float32x4x3_t b = vld1q_f32_x3(codes + dim - d);
-        float32x4x3_t c;
-        c.val[0] = vmulq_f32(a.val[0], b.val[0]);
-        c.val[1] = vmulq_f32(a.val[1], b.val[1]);
-        c.val[2] = vmulq_f32(a.val[2], b.val[2]);
-
-        c.val[0] = vaddq_f32(c.val[0], c.val[1]);
-        c.val[0] = vaddq_f32(c.val[0], c.val[2]);
-
-        sum_ = vaddq_f32(sum_, c.val[0]);
-        d -= 12;
-    }
-
-    if (d >= 8) {
-        float32x4x2_t a = vld1q_f32_x2(query + dim - d);
-        float32x4x2_t b = vld1q_f32_x2(codes + dim - d);
-        float32x4x2_t c;
-        c.val[0] = vmulq_f32(a.val[0], b.val[0]);
-        c.val[1] = vmulq_f32(a.val[1], b.val[1]);
-        c.val[0] = vaddq_f32(c.val[0], c.val[1]);
-        sum_ = vaddq_f32(sum_, c.val[0]);
-        d -= 8;
-    }
-    if (d >= 4) {
-        float32x4_t a = vld1q_f32(query + dim - d);
-        float32x4_t b = vld1q_f32(codes + dim - d);
-        float32x4_t c;
-        c = vmulq_f32(a, b);
-        sum_ = vaddq_f32(sum_, c);
-        d -= 4;
-    }
-
-    float32x4_t res_x = vdupq_n_f32(0.0f);
-    float32x4_t res_y = vdupq_n_f32(0.0f);
-    if (d >= 3) {
-        res_x = vld1q_lane_f32(query + dim - d, res_x, 2);
-        res_y = vld1q_lane_f32(codes + dim - d, res_y, 2);
-        d -= 1;
-    }
-
-    if (d >= 2) {
-        res_x = vld1q_lane_f32(query + dim - d, res_x, 1);
-        res_y = vld1q_lane_f32(codes + dim - d, res_y, 1);
-        d -= 1;
-    }
-
-    if (d >= 1) {
-        res_x = vld1q_lane_f32(query + dim - d, res_x, 0);
-        res_y = vld1q_lane_f32(codes + dim - d, res_y, 0);
-        d -= 1;
-    }
-
-    sum_ = vaddq_f32(sum_, vmulq_f32(res_x, res_y));
-    return vaddvq_f32(sum_);
+    return simd::ComputeIPImpl<simd::SimdTraits<simd::NEON_Tag>>(
+        query, codes, dim, &generic::FP32ComputeIP);
 #else
     return generic::FP32ComputeIP(query, codes, dim);
 #endif
@@ -200,75 +151,8 @@ FP32ComputeIP(const float* query, const float* codes, uint64_t dim) {
 float
 FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim) {
 #if defined(ENABLE_NEON)
-    float32x4_t sum_ = vdupq_n_f32(0.0f);
-    auto d = dim;
-    while (d >= 12) {
-        float32x4x3_t a = vld1q_f32_x3(query + dim - d);
-        float32x4x3_t b = vld1q_f32_x3(codes + dim - d);
-        float32x4x3_t c;
-
-        c.val[0] = vsubq_f32(a.val[0], b.val[0]);
-        c.val[1] = vsubq_f32(a.val[1], b.val[1]);
-        c.val[2] = vsubq_f32(a.val[2], b.val[2]);
-
-        c.val[0] = vmulq_f32(c.val[0], c.val[0]);
-        c.val[1] = vmulq_f32(c.val[1], c.val[1]);
-        c.val[2] = vmulq_f32(c.val[2], c.val[2]);
-
-        c.val[0] = vaddq_f32(c.val[0], c.val[1]);
-        c.val[0] = vaddq_f32(c.val[0], c.val[2]);
-
-        sum_ = vaddq_f32(sum_, c.val[0]);
-        d -= 12;
-    }
-
-    if (d >= 8) {
-        float32x4x2_t a = vld1q_f32_x2(query + dim - d);
-        float32x4x2_t b = vld1q_f32_x2(codes + dim - d);
-        float32x4x2_t c;
-        c.val[0] = vsubq_f32(a.val[0], b.val[0]);
-        c.val[1] = vsubq_f32(a.val[1], b.val[1]);
-
-        c.val[0] = vmulq_f32(c.val[0], c.val[0]);
-        c.val[1] = vmulq_f32(c.val[1], c.val[1]);
-
-        c.val[0] = vaddq_f32(c.val[0], c.val[1]);
-        sum_ = vaddq_f32(sum_, c.val[0]);
-        d -= 8;
-    }
-    if (d >= 4) {
-        float32x4_t a = vld1q_f32(query + dim - d);
-        float32x4_t b = vld1q_f32(codes + dim - d);
-        float32x4_t c;
-        c = vsubq_f32(a, b);
-        c = vmulq_f32(c, c);
-
-        sum_ = vaddq_f32(sum_, c);
-        d -= 4;
-    }
-
-    float32x4_t res_x = vdupq_n_f32(0.0f);
-    float32x4_t res_y = vdupq_n_f32(0.0f);
-    if (d >= 3) {
-        res_x = vld1q_lane_f32(query + dim - d, res_x, 2);
-        res_y = vld1q_lane_f32(codes + dim - d, res_y, 2);
-        d -= 1;
-    }
-
-    if (d >= 2) {
-        res_x = vld1q_lane_f32(query + dim - d, res_x, 1);
-        res_y = vld1q_lane_f32(codes + dim - d, res_y, 1);
-        d -= 1;
-    }
-
-    if (d >= 1) {
-        res_x = vld1q_lane_f32(query + dim - d, res_x, 0);
-        res_y = vld1q_lane_f32(codes + dim - d, res_y, 0);
-        d -= 1;
-    }
-
-    sum_ = vaddq_f32(sum_, vmulq_f32(vsubq_f32(res_x, res_y), vsubq_f32(res_x, res_y)));
-    return vaddvq_f32(sum_);
+    return simd::ComputeL2SqrImpl<simd::SimdTraits<simd::NEON_Tag>>(
+        query, codes, dim, &generic::FP32ComputeL2Sqr);
 #else
     return vsag::generic::FP32ComputeL2Sqr(query, codes, dim);
 #endif
@@ -286,44 +170,18 @@ FP32ComputeIPBatch4(const float* RESTRICT query,
                     float& result3,
                     float& result4) {
 #if defined(ENABLE_NEON)
-    if (dim < 4) {
-        return generic::FP32ComputeIPBatch4(
-            query, dim, codes1, codes2, codes3, codes4, result1, result2, result3, result4);
-    }
-    float32x4_t sum1 = vdupq_n_f32(0);
-    float32x4_t sum2 = vdupq_n_f32(0);
-    float32x4_t sum3 = vdupq_n_f32(0);
-    float32x4_t sum4 = vdupq_n_f32(0);
-    int i = 0;
-    for (; i + 3 < dim; i += 4) {
-        float32x4_t q = vld1q_f32(query + i);
-        float32x4_t c1 = vld1q_f32(codes1 + i);
-        float32x4_t c2 = vld1q_f32(codes2 + i);
-        float32x4_t c3 = vld1q_f32(codes3 + i);
-        float32x4_t c4 = vld1q_f32(codes4 + i);
-        sum1 = vaddq_f32(sum1, vmulq_f32(q, c1));
-        sum2 = vaddq_f32(sum2, vmulq_f32(q, c2));
-        sum3 = vaddq_f32(sum3, vmulq_f32(q, c3));
-        sum4 = vaddq_f32(sum4, vmulq_f32(q, c4));
-    }
-
-    result1 += vaddvq_f32(sum1);
-    result2 += vaddvq_f32(sum2);
-    result3 += vaddvq_f32(sum3);
-    result4 += vaddvq_f32(sum4);
-
-    if (i < dim) {
-        generic::FP32ComputeIPBatch4(query + i,
-                                     dim - i,
-                                     codes1 + i,
-                                     codes2 + i,
-                                     codes3 + i,
-                                     codes4 + i,
-                                     result1,
-                                     result2,
-                                     result3,
-                                     result4);
-    }
+    simd::ComputeBatch4Impl<simd::SimdTraits<simd::NEON_Tag>, simd::Batch4Kind::IP>(
+        query,
+        dim,
+        codes1,
+        codes2,
+        codes3,
+        codes4,
+        result1,
+        result2,
+        result3,
+        result4,
+        &generic::FP32ComputeIPBatch4);
 #else
     return generic::FP32ComputeIPBatch4(
         query, dim, codes1, codes2, codes3, codes4, result1, result2, result3, result4);
@@ -342,48 +200,18 @@ FP32ComputeL2SqrBatch4(const float* RESTRICT query,
                        float& result3,
                        float& result4) {
 #if defined(ENABLE_NEON)
-    if (dim < 4) {
-        return generic::FP32ComputeL2SqrBatch4(
-            query, dim, codes1, codes2, codes3, codes4, result1, result2, result3, result4);
-    }
-    float32x4_t sum1 = vdupq_n_f32(0);
-    float32x4_t sum2 = vdupq_n_f32(0);
-    float32x4_t sum3 = vdupq_n_f32(0);
-    float32x4_t sum4 = vdupq_n_f32(0);
-    int i = 0;
-    for (; i + 3 < dim; i += 4) {
-        float32x4_t q = vld1q_f32(query + i);
-        float32x4_t c1 = vld1q_f32(codes1 + i);
-        float32x4_t c2 = vld1q_f32(codes2 + i);
-        float32x4_t c3 = vld1q_f32(codes3 + i);
-        float32x4_t c4 = vld1q_f32(codes4 + i);
-        float32x4_t diff1 = vsubq_f32(q, c1);
-        float32x4_t diff2 = vsubq_f32(q, c2);
-        float32x4_t diff3 = vsubq_f32(q, c3);
-        float32x4_t diff4 = vsubq_f32(q, c4);
-        sum1 = vaddq_f32(sum1, vmulq_f32(diff1, diff1));
-        sum2 = vaddq_f32(sum2, vmulq_f32(diff2, diff2));
-        sum3 = vaddq_f32(sum3, vmulq_f32(diff3, diff3));
-        sum4 = vaddq_f32(sum4, vmulq_f32(diff4, diff4));
-    }
-
-    result1 += vaddvq_f32(sum1);
-    result2 += vaddvq_f32(sum2);
-    result3 += vaddvq_f32(sum3);
-    result4 += vaddvq_f32(sum4);
-
-    if (i < dim) {
-        generic::FP32ComputeL2SqrBatch4(query + i,
-                                        dim - i,
-                                        codes1 + i,
-                                        codes2 + i,
-                                        codes3 + i,
-                                        codes4 + i,
-                                        result1,
-                                        result2,
-                                        result3,
-                                        result4);
-    }
+    simd::ComputeBatch4Impl<simd::SimdTraits<simd::NEON_Tag>, simd::Batch4Kind::L2>(
+        query,
+        dim,
+        codes1,
+        codes2,
+        codes3,
+        codes4,
+        result1,
+        result2,
+        result3,
+        result4,
+        &generic::FP32ComputeL2SqrBatch4);
 #else
     return generic::FP32ComputeL2SqrBatch4(
         query, dim, codes1, codes2, codes3, codes4, result1, result2, result3, result4);
@@ -393,19 +221,8 @@ FP32ComputeL2SqrBatch4(const float* RESTRICT query,
 void
 FP32Sub(const float* x, const float* y, float* z, uint64_t dim) {
 #if defined(ENABLE_NEON)
-    if (dim < 4) {
-        return generic::FP32Sub(x, y, z, dim);
-    }
-    int64_t i = 0;
-    for (; i + 3 < dim; i += 4) {
-        float32x4_t a = vld1q_f32(x + i);
-        float32x4_t b = vld1q_f32(y + i);
-        float32x4_t c = vsubq_f32(a, b);
-        vst1q_f32(z + i, c);
-    }
-    if (i < dim) {
-        generic::FP32Sub(x + i, y + i, z + i, dim - i);
-    }
+    simd::BinaryOpImpl<simd::SimdTraits<simd::NEON_Tag>, simd::BinaryOp::Sub>(
+        x, y, z, dim, &generic::FP32Sub);
 #else
     return generic::FP32Sub(x, y, z, dim);
 #endif
@@ -414,19 +231,8 @@ FP32Sub(const float* x, const float* y, float* z, uint64_t dim) {
 void
 FP32Add(const float* x, const float* y, float* z, uint64_t dim) {
 #if defined(ENABLE_NEON)
-    if (dim < 4) {
-        return generic::FP32Add(x, y, z, dim);
-    }
-    int64_t i = 0;
-    for (; i + 3 < dim; i += 4) {
-        float32x4_t a = vld1q_f32(x + i);
-        float32x4_t b = vld1q_f32(y + i);
-        float32x4_t c = vaddq_f32(a, b);
-        vst1q_f32(z + i, c);
-    }
-    if (i < dim) {
-        generic::FP32Add(x + i, y + i, z + i, dim - i);
-    }
+    simd::BinaryOpImpl<simd::SimdTraits<simd::NEON_Tag>, simd::BinaryOp::Add>(
+        x, y, z, dim, &generic::FP32Add);
 #else
     return generic::FP32Add(x, y, z, dim);
 #endif
@@ -435,19 +241,8 @@ FP32Add(const float* x, const float* y, float* z, uint64_t dim) {
 void
 FP32Mul(const float* x, const float* y, float* z, uint64_t dim) {
 #if defined(ENABLE_NEON)
-    if (dim < 4) {
-        return generic::FP32Mul(x, y, z, dim);
-    }
-    int64_t i = 0;
-    for (; i + 3 < dim; i += 4) {
-        float32x4_t a = vld1q_f32(x + i);
-        float32x4_t b = vld1q_f32(y + i);
-        float32x4_t c = vmulq_f32(a, b);
-        vst1q_f32(z + i, c);
-    }
-    if (i < dim) {
-        generic::FP32Mul(x + i, y + i, z + i, dim - i);
-    }
+    simd::BinaryOpImpl<simd::SimdTraits<simd::NEON_Tag>, simd::BinaryOp::Mul>(
+        x, y, z, dim, &generic::FP32Mul);
 #else
     return generic::FP32Mul(x, y, z, dim);
 #endif
@@ -456,19 +251,8 @@ FP32Mul(const float* x, const float* y, float* z, uint64_t dim) {
 void
 FP32Div(const float* x, const float* y, float* z, uint64_t dim) {
 #if defined(ENABLE_NEON)
-    if (dim < 4) {
-        return generic::FP32Div(x, y, z, dim);
-    }
-    int64_t i = 0;
-    for (; i + 3 < dim; i += 4) {
-        float32x4_t a = vld1q_f32(x + i);
-        float32x4_t b = vld1q_f32(y + i);
-        float32x4_t c = vdivq_f32(a, b);
-        vst1q_f32(z + i, c);
-    }
-    if (i < dim) {
-        generic::FP32Div(x + i, y + i, z + i, dim - i);
-    }
+    simd::BinaryOpImpl<simd::SimdTraits<simd::NEON_Tag>, simd::BinaryOp::Div>(
+        x, y, z, dim, &generic::FP32Div);
 #else
     return generic::FP32Div(x, y, z, dim);
 #endif
@@ -477,20 +261,7 @@ FP32Div(const float* x, const float* y, float* z, uint64_t dim) {
 float
 FP32ReduceAdd(const float* x, uint64_t dim) {
 #if defined(ENABLE_NEON)
-    if (dim < 4) {
-        return generic::FP32ReduceAdd(x, dim);
-    }
-    int i = 0;
-    float32x4_t sum = vdupq_n_f32(0.0f);
-    for (; i + 3 < dim; i += 4) {
-        float32x4_t a = vld1q_f32(x + i);
-        sum = vaddq_f32(sum, a);
-    }
-    float result = vaddvq_f32(sum);
-    if (i < dim) {
-        result += generic::FP32ReduceAdd(x + i, dim - i);
-    }
-    return result;
+    return simd::ReduceAddImpl<simd::SimdTraits<simd::NEON_Tag>>(x, dim, &generic::FP32ReduceAdd);
 #else
     return generic::FP32ReduceAdd(x, dim);
 #endif
