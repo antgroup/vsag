@@ -171,7 +171,6 @@ const char* const REMOVE_FLAG_BIT = "remove_flag_bit";
 const char* const HOLD_MOLDS = "hold_molds";
 const char* const SUPPORT_DUPLICATE = "support_duplicate";
 const char* const DUPLICATE_DISTANCE_THRESHOLD = "duplicate_distance_threshold";
-const char* const SUPPORT_TOMBSTONE = "support_tombstone";
 const char* const SUPPORT_FORCE_REMOVE = "support_force_remove";
 const char* const SUPPORT_AUTOTUNE = "support_autotune";
 

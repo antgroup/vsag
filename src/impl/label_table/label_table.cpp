@@ -163,10 +163,6 @@ LabelTable::Deserialize(StreamReader& reader) {
     }
     is_legacy_duplicate_format_ = false;
 
-    if (support_tombstone_) {
-        StreamReader::ReadObj(reader, deleted_ids_);
-    }
-
     this->total_count_.store(static_cast<int64_t>(label_table_.size()));
 }
 

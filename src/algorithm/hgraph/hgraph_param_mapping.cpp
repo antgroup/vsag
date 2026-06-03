@@ -362,12 +362,6 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             },
         },
         {
-            HGRAPH_SUPPORT_TOMBSTONE,
-            {
-                SUPPORT_TOMBSTONE,
-            },
-        },
-        {
             HGRAPH_LABEL_REMAP_TYPE,
             {
                 LABEL_REMAP_TYPE_KEY,
@@ -459,7 +453,6 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             "{ATTR_HAS_BUCKETS_KEY}": false
         },
         "{HGRAPH_SUPPORT_DUPLICATE}": false,
-        "{HGRAPH_SUPPORT_TOMBSTONE}": false,
         "{SUPPORT_FORCE_REMOVE}": false,
         "{EF_CONSTRUCTION_KEY}": 400
     })";

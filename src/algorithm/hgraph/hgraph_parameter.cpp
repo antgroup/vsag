@@ -128,9 +128,6 @@ HGraphParameter::FromJson(const JsonType& json) {
     if (json.Contains(DUPLICATE_DISTANCE_THRESHOLD)) {
         this->duplicate_distance_threshold = json[DUPLICATE_DISTANCE_THRESHOLD].GetFloat();
     }
-    if (json.Contains(SUPPORT_TOMBSTONE)) {
-        this->support_tombstone = json[SUPPORT_TOMBSTONE].GetBool();
-    }
     if (json.Contains(SUPPORT_FORCE_REMOVE)) {
         this->support_force_remove = json[SUPPORT_FORCE_REMOVE].GetBool();
     }
