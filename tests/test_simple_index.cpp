@@ -112,13 +112,13 @@ TEST_CASE("Test Simple Index", "[ft][simple_index]") {
 
     REQUIRE_THROWS(index->Add(dataset->base_));
     REQUIRE_THROWS(index->Remove(0));
-    REQUIRE_THROWS(index->CheckFeature(IndexFeature::SUPPORT_ESTIMATE_MEMORY));
+    REQUIRE_FALSE(index->CheckFeature(IndexFeature::SUPPORT_ESTIMATE_MEMORY));
     REQUIRE_THROWS(index->EstimateMemory(1000));
     REQUIRE_THROWS(index->GetEstimateBuildMemory(1000));
     REQUIRE_THROWS(index->Feedback(dataset->query_, 10, ""));
     REQUIRE_THROWS_MATCHES(index->GetStats(),
                            std::runtime_error,
-                           Catch::Matchers::Message("Index not support GetStats"));
+                           Catch::Matchers::Message("Index does not support GetStats"));
     REQUIRE_THROWS(index->UpdateId(0, 1));
     REQUIRE_THROWS(index->UpdateVector(0, dataset->query_));
     REQUIRE_THROWS(index->ContinueBuild(dataset->base_, binary));
