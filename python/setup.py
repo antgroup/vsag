@@ -17,12 +17,14 @@ class CMakeBuild(build_ext):
         extdir = os.path.abspath(os.path.dirname(self.get_ext_fullpath(ext.name)))
         cfg = "Debug" if self.debug else "Release"
         mkl_static_link = os.environ.get("MKL_STATIC_LINK", "ON")
+        use_system_deps = os.environ.get("VSAG_USE_SYSTEM_DEPS", "OFF").strip().upper() or "OFF"
 
         cmake_args = [
             f"-DCMAKE_LIBRARY_OUTPUT_DIRECTORY={extdir}",
             f"-DPYTHON_EXECUTABLE={sys.executable}",
             f"-DPython3_EXECUTABLE={sys.executable}",
             f"-DCMAKE_BUILD_TYPE={cfg}",
+            f"-DVSAG_USE_SYSTEM_DEPS:STRING={use_system_deps}",
             "-DENABLE_PYBINDS=ON",
             "-DENABLE_TESTS=OFF",
             f"-DMKL_STATIC_LINK={mkl_static_link}",
