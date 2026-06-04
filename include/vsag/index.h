@@ -455,7 +455,7 @@ public:
     Pretrain(const std::vector<int64_t>& base_tag_ids, uint32_t k, const std::string& parameters) {
         return tl::unexpected(
             Error(ErrorType::UNSUPPORTED_INDEX_OPERATION, "Index does not support pretrain"));
-    };
+    }
 
     /**
      * @brief Performing feedback on conjugate graph
@@ -472,7 +472,7 @@ public:
              int64_t global_optimum_tag_id = std::numeric_limits<int64_t>::max()) {
         return tl::unexpected(
             Error(ErrorType::UNSUPPORTED_INDEX_OPERATION, "Index does not support feedback"));
-    };
+    }
 
     /**
      * @brief Calculate the distance between the query and the vector of the given ID.
@@ -496,7 +496,7 @@ public:
                      bool calculate_precise_distance = true) const {
         return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                                     "Index does not support get distance by id"));
-    };
+    }
 
     /**
      * @brief Calculate the distance between the query and the vector of the given ID.
@@ -521,7 +521,7 @@ public:
                      bool calculate_precise_distance = true) const {
         return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                                     "Index does not support get distance by id"));
-    };
+    }
 
     /**
      * @brief Calculate the distance between the query and the vector of the given ID for batch.
@@ -547,7 +547,7 @@ public:
                     bool calculate_precise_distance = true) const {
         return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                                     "Index does not support get distance by id"));
-    };
+    }
 
     /**
      * @brief Calculate the distance between the query and the vector of the given ID for batch.
@@ -574,7 +574,7 @@ public:
                     bool calculate_precise_distance = true) const {
         return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                                     "Index does not support get distance by id"));
-    };
+    }
 
     /**
      * @brief Calculate the maximum and minimum labels.
@@ -600,14 +600,14 @@ public:
      * @param extra_infos A char* pointer to the retrieved extra data if successful
      * (format is implementation-specific). Returns an error object
      * if any retrieval failure occurs (e.g., invalid ID, out of memory).
-     * @throws std::runtime_error If the index implementation does not support this operation
+     * @return tl::unexpected(ErrorType::UNSUPPORTED_INDEX_OPERATION) If the index implementation does not support this operation
      * (default behavior for base class).
      */
     virtual tl::expected<void, Error>
     GetExtraInfoByIds(const int64_t* ids, int64_t count, char* extra_infos) const {
         return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                                     "Index does not support GetExtraInfoByIds"));
-    };
+    }
 
     /**
      * @brief Retrieve raw vector data associated with given IDs.
@@ -625,7 +625,7 @@ public:
      *         - On success: A DatasetPtr containing the raw vector data
      *           (format depends on implementation, but typically includes vector arrays).
      *         - On failure: An error object (e.g., invalid ID, out of memory).
-     * @throws std::runtime_error If the index implementation does not support this operation
+     * @return tl::unexpected(ErrorType::UNSUPPORTED_INDEX_OPERATION) If the index implementation does not support this operation
      *            (default behavior for base class).
      *
      * @note The returned vectors are guaranteed to have a distance **close to 0** (e.g., Euclidean
@@ -644,7 +644,7 @@ public:
                       Allocator* specified_allocator = nullptr) const {
         return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                                     "Index does not support GetRawVectorByIds"));
-    };
+    }
 
     /**
      * @brief Retrieve all data associated with vectors identified by given IDs.
@@ -658,14 +658,14 @@ public:
      * @return tl::expected<DatasetPtr, Error>
      *         - On success: A DatasetPtr containing the extra data, attribute and vector
      *         - On failure: An error object (e.g., invalid ID, out of memory).
-     * @throws std::runtime_error If the index implementation does not support this operation
+     * @return tl::unexpected(ErrorType::UNSUPPORTED_INDEX_OPERATION) If the index implementation does not support this operation
      *            (default behavior for base class).
      */
     [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     GetDataByIdsWithFlag(const int64_t* ids, int64_t count, uint64_t selected_data_flag) const {
         return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                                     "Index does not support GetDataByIdsWithFlag"));
-    };
+    }
 
     /*
      * @brief Retrieve all detail information associated with the index.
@@ -676,14 +676,14 @@ public:
      * @return tl::expected<std::vector<IndexDetailInfo>, Error>
      *         - On success: A vector of IndexDetailInfo structs containing the detail information.
      *         - On failure: An error object (e.g., out of memory).
-     * @throws std::runtime_error If the index implementation does not support this operation
+     * @return tl::unexpected(ErrorType::UNSUPPORTED_INDEX_OPERATION) If the index implementation does not support this operation
      *            (default behavior for base class).
      */
     [[nodiscard]] virtual tl::expected<std::vector<IndexDetailInfo>, Error>
     GetIndexDetailInfos() const {
         return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                                     "Index does not support GetIndexDetailInfos"));
-    };
+    }
 
     /*
      * @brief Retrieve one detail data associated with the index.
@@ -693,14 +693,14 @@ public:
      * @return tl::expected<DetailDataPtr, Error>
      *         - On success: A DetailDataPtr containing the detail data.
      *         - On failure: An error object (e.g., no such detail information name).
-     * @throws std::runtime_error If the index implementation does not support this operation
+     * @return tl::unexpected(ErrorType::UNSUPPORTED_INDEX_OPERATION) If the index implementation does not support this operation
      *            (default behavior for base class).
      */
     virtual tl::expected<DetailDataPtr, Error>
     GetDetailDataByName(const std::string& name, IndexDetailInfo& info) const {
         return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                                     "Index does not support GetDetailDataByName"));
-    };
+    }
 
     /**
      * @brief Retrieve all data associated with vectors identified by given IDs.
@@ -713,7 +713,7 @@ public:
      * @return tl::expected<DatasetPtr, Error>
      *         - On success: A DatasetPtr containing the extra data, attribute and vector
      *         - On failure: An error object (e.g., invalid ID, out of memory).
-     * @throws std::runtime_error If the index implementation does not support this operation
+     * @return tl::unexpected(ErrorType::UNSUPPORTED_INDEX_OPERATION) If the index implementation does not support this operation
      *            (default behavior for base class).
      * @note The default implementation returns all data which in current index
      */
@@ -721,7 +721,7 @@ public:
     GetDataByIds(const int64_t* ids, int64_t count) const {
         return tl::unexpected(
             Error(ErrorType::UNSUPPORTED_INDEX_OPERATION, "Index does not support GetDataByIds"));
-    };
+    }
 
     /**
      * @brief Checks if the specified feature is supported by the index.
@@ -773,7 +773,7 @@ public:
      * @brief Export the index's model as an empty index.
      * 
      * @return IndexPtr A pointer to the exported model index.
-     * @throws std::runtime_error If the index does not support exporting the model.
+     * @return tl::unexpected(ErrorType::UNSUPPORTED_INDEX_OPERATION) If the index does not support exporting the model.
      */
     [[nodiscard]] virtual tl::expected<IndexPtr, Error>
     ExportModel() const {
@@ -785,7 +785,7 @@ public:
      * @brief Export the index's IDs as a dataset.
      * 
      * @return DatasetPtr A pointer to the exported IDs dataset.
-     * @throws std::runtime_error If the index does not support exporting the IDs.
+     * @return tl::unexpected(ErrorType::UNSUPPORTED_INDEX_OPERATION) If the index does not support exporting the IDs.
      */
     [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     ExportIDs() const {
@@ -797,7 +797,7 @@ public:
      * @brief set the index to immutable state.
      * After setting this state, no further modifications are supported, such as no additions or deletions 
      *
-     * @throws std::runtime_error If the index does not support to set immutable
+     * @return tl::unexpected(ErrorType::UNSUPPORTED_INDEX_OPERATION) If the index does not support to set immutable
      */
     virtual tl::expected<void, Error>
     SetImmutable() {
