@@ -272,11 +272,7 @@ SINDI::KnnSearch(const DatasetPtr& query,
     inner_param.ef = std::max(static_cast<int64_t>(search_param.n_candidate), k);
     inner_param.topk = k;
 
-    FilterPtr ft = nullptr;
-    if (filter != nullptr) {
-        ft = std::make_shared<InnerIdWrapperFilter>(filter, *this->label_table_);
-    }
-    inner_param.is_inner_id_allowed = ft;
+    inner_param.is_inner_id_allowed = this->create_search_filter(filter);
 
     SparseVector effective_query = sparse_query;
     Vector<uint32_t> tmp_ids(allocator_);
@@ -284,8 +280,7 @@ SINDI::KnnSearch(const DatasetPtr& query,
     if (remap_term_ids_) {
         effective_query = remap_sparse_vector_for_query(sparse_query, tmp_ids, tmp_vals);
         if (effective_query.len_ == 0) {
-            auto [results, ret_dists, ret_ids] = create_fast_dataset(0, allocator);
-            return results;
+            return make_empty_result();
         }
     }
 
@@ -433,11 +428,7 @@ SINDI::RangeSearch(const DatasetPtr& query,
     inner_param.range_search_limit_size = static_cast<int>(limited_size);
     inner_param.radius = radius;
 
-    FilterPtr ft = nullptr;
-    if (filter != nullptr) {
-        ft = std::make_shared<InnerIdWrapperFilter>(filter, *this->label_table_);
-    }
-    inner_param.is_inner_id_allowed = ft;
+    inner_param.is_inner_id_allowed = this->create_search_filter(filter);
 
     SparseVector effective_query = sparse_query;
     Vector<uint32_t> tmp_ids(allocator_);
@@ -445,8 +436,7 @@ SINDI::RangeSearch(const DatasetPtr& query,
     if (remap_term_ids_) {
         effective_query = remap_sparse_vector_for_query(sparse_query, tmp_ids, tmp_vals);
         if (effective_query.len_ == 0) {
-            auto [results, ret_dists, ret_ids] = create_fast_dataset(0, allocator_);
-            return results;
+            return make_empty_result();
         }
     }
 
@@ -501,11 +491,8 @@ SINDI::Serialize(StreamWriter& writer) const {
     }
 
     JsonType jsonify_basic_info;
-    auto metadata = std::make_shared<Metadata>();
     jsonify_basic_info[INDEX_PARAM].SetString(this->create_param_ptr_->ToString());
-    metadata->Set("basic_info", jsonify_basic_info);
-    auto footer = std::make_shared<Footer>(metadata);
-    footer->Write(writer);
+    write_index_footer(writer, jsonify_basic_info);
 }
 
 void
@@ -513,9 +500,10 @@ SINDI::Deserialize(StreamReader& reader) {
     std::scoped_lock wlock(this->global_mutex_);
 
     if (not deserialize_without_footer_) {
-        auto footer = Footer::Parse(reader);
-        auto metadata = footer->GetMetadata();
-        JsonType jsonify_basic_info = metadata->Get("basic_info");
+        JsonType jsonify_basic_info;
+        if (not read_index_footer(reader, jsonify_basic_info)) {
+            throw VsagException(ErrorType::READ_ERROR, "failed to read index footer");
+        }
         // Check if the index parameter is compatible
         {
             auto param = jsonify_basic_info[INDEX_PARAM].GetString();

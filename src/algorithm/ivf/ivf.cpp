@@ -479,15 +479,9 @@ IVF::KnnSearch(const DatasetPtr& query,
         dataset_results->Statistics(stats.Dump());
         return std::move(dataset_results);
     }
-    auto count = static_cast<const int64_t>(search_result->Size());
-    auto [dataset_results, dists, labels] = create_fast_dataset(count, allocator_);
-    for (int64_t j = count - 1; j >= 0; --j) {
-        dists[j] = search_result->Top().first;
-        labels[j] = label_table_->GetLabelById(search_result->Top().second);
-        search_result->Pop();
-    }
+    auto dataset_results = this->pack_knn_result(search_result);
     dataset_results->Statistics(stats.Dump());
-    return std::move(dataset_results);
+    return dataset_results;
 }
 
 DatasetPtr
@@ -515,16 +509,9 @@ IVF::RangeSearch(const DatasetPtr& query,
         int64_t k = (limited_size > 0) ? limited_size : static_cast<int64_t>(search_result->Size());
         return reorder(k, search_result, query->GetFloat32Vectors(), param, ctx);
     }
-    auto count = static_cast<const int64_t>(search_result->Size());
-    auto [dataset_results, dists, labels] = create_fast_dataset(count, allocator_);
-    for (int64_t j = count - 1; j >= 0; --j) {
-        dists[j] = search_result->Top().first;
-        labels[j] = label_table_->GetLabelById(search_result->Top().second);
-        search_result->Pop();
-    }
-
+    auto dataset_results = this->pack_knn_result(search_result);
     dataset_results->Statistics(stats.Dump());
-    return std::move(dataset_results);
+    return dataset_results;
 }
 
 int64_t
@@ -704,17 +691,7 @@ IVF::Deserialize(StreamReader& reader) {
 InnerSearchParam
 IVF::create_search_param(const std::string& parameters, const FilterPtr& filter) const {
     InnerSearchParam param;
-    auto combined_filter = std::make_shared<CombinedFilter>();
-    combined_filter->AppendFilter(this->label_table_->GetDeletedIdsFilter());
-    if (filter != nullptr) {
-        combined_filter->AppendFilter(
-            std::make_shared<InnerIdWrapperFilter>(filter, *this->label_table_));
-    }
-    FilterPtr ft = nullptr;
-    if (not combined_filter->IsEmpty()) {
-        ft = combined_filter;
-    }
-    param.is_inner_id_allowed = ft;
+    param.is_inner_id_allowed = this->create_search_filter(filter);
     auto search_param = IVFSearchParameters::FromJson(parameters);
     param.scan_bucket_size = std::min(static_cast<BucketIdType>(search_param.scan_buckets_count),
                                       bucket_->bucket_count_);
@@ -735,15 +712,8 @@ IVF::reorder(int64_t topk,
              const float* query,
              const InnerSearchParam& param,
              QueryContext& ctx) const {
-    auto [dataset_results, dists, labels] = create_fast_dataset(topk, allocator_);
     auto reorder_heap = reorder_->Reorder(input, query, topk, ctx);
-    auto size = static_cast<int64_t>(reorder_heap->Size());
-    for (int64_t j = size - 1; j >= 0; --j) {
-        dists[j] = reorder_heap->Top().first;
-        labels[j] = label_table_->GetLabelById(reorder_heap->Top().second);
-        reorder_heap->Pop();
-    }
-    return std::move(dataset_results);
+    return this->pack_knn_result(reorder_heap);
 }
 
 InnerIndexPtr
@@ -988,16 +958,9 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
     if (use_reorder_ and param.enable_reorder) {
         return reorder(request.topk_, search_result, query->GetFloat32Vectors(), param, ctx);
     }
-    auto count = static_cast<const int64_t>(search_result->Size());
-    auto [dataset_results, dists, labels] = create_fast_dataset(count, allocator_);
-    for (int64_t j = count - 1; j >= 0; --j) {
-        dists[j] = search_result->Top().first;
-        labels[j] = label_table_->GetLabelById(search_result->Top().second);
-        search_result->Pop();
-    }
-
+    auto dataset_results = this->pack_knn_result(search_result);
     dataset_results->Statistics(stats.Dump());
-    return std::move(dataset_results);
+    return dataset_results;
 }
 
 void

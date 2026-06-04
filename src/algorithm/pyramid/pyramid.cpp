@@ -261,10 +261,7 @@ Pyramid::KnnSearch(const DatasetPtr& query,
         search_param.time_cost->SetThreshold(parsed_param.timeout_ms);
     }
 
-    if (filter != nullptr) {
-        search_param.is_inner_id_allowed =
-            std::make_shared<InnerIdWrapperFilter>(filter, *label_table_);
-    }
+    search_param.is_inner_id_allowed = this->create_search_filter(filter);
     SearchFunc search_func = [&](const IndexNode* node, const VisitedListPtr& vl) {
         return this->search_node(
             node, vl, search_param, query, base_codes_, ctx, parsed_param.subindex_ef_search);
@@ -303,10 +300,7 @@ Pyramid::RangeSearch(const DatasetPtr& query,
         search_param.consider_duplicate = true;
     }
 
-    if (filter != nullptr) {
-        search_param.is_inner_id_allowed =
-            std::make_shared<InnerIdWrapperFilter>(filter, *label_table_);
-    }
+    search_param.is_inner_id_allowed = this->create_search_filter(filter);
     SearchFunc search_func = [&](const IndexNode* node, const VisitedListPtr& vl) {
         return this->search_node(
             node, vl, search_param, query, base_codes_, ctx, parsed_param.subindex_ef_search);
@@ -432,18 +426,16 @@ Pyramid::Serialize(StreamWriter& writer) const {
     JsonType basic_info;
     basic_info["max_capacity"].SetInt(max_capacity_);
     basic_info[INDEX_PARAM].SetString(this->create_param_ptr_->ToString());
-    auto metadata = std::make_shared<Metadata>();
-    metadata->Set(BASIC_INFO, basic_info);
-    auto footer = std::make_shared<Footer>(metadata);
-    footer->Write(writer);
+    write_index_footer(writer, basic_info);
 }
 
 void
 Pyramid::Deserialize(StreamReader& reader) {
     // try to deserialize footer (only in new version)
-    auto footer = Footer::Parse(reader);
-    auto metadata = footer->GetMetadata();
-    auto basic_info = metadata->Get(BASIC_INFO);
+    JsonType basic_info;
+    if (not read_index_footer(reader, basic_info)) {
+        throw VsagException(ErrorType::READ_ERROR, "failed to read index footer");
+    }
     auto max_capacity = basic_info["max_capacity"].GetInt();
 
     BufferStreamReader buffer_reader(

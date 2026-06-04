@@ -210,16 +210,7 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
     ExecutorPtr executor = nullptr;
     Filter* attr_filter = nullptr;
 
-    auto combined_filter = std::make_shared<CombinedFilter>();
-    combined_filter->AppendFilter(this->label_table_->GetDeletedIdsFilter());
-    if (request.filter_ != nullptr) {
-        combined_filter->AppendFilter(
-            std::make_shared<InnerIdWrapperFilter>(request.filter_, *this->label_table_));
-    }
-    FilterPtr ft = nullptr;
-    if (not combined_filter->IsEmpty()) {
-        ft = combined_filter;
-    }
+    FilterPtr ft = this->create_search_filter(request.filter_);
 
     if (request.enable_attribute_filter_) {
         auto& schema = this->attr_filter_index_->field_type_map_;
@@ -277,19 +268,13 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
         }
     }
 
-    auto [dataset_results, dists, ids] =
-        create_fast_dataset(static_cast<int64_t>(heap->Size()), allocator_);
-    for (auto j = static_cast<int64_t>(heap->Size() - 1); j >= 0; --j) {
-        dists[j] = heap->Top().first;
-        ids[j] = this->label_table_->GetLabelById(heap->Top().second);
-        heap->Pop();
-    }
+    auto result = this->pack_knn_result(heap);
 
     JsonType stats;
     stats["dist_cmp"].SetInt(dist_cmp.load(std::memory_order_relaxed));
-    dataset_results->Statistics(stats.Dump());
+    result->Statistics(stats.Dump());
 
-    return std::move(dataset_results);
+    return result;
 }
 
 DatasetPtr
@@ -300,14 +285,12 @@ BruteForce::RangeSearch(const vsag::DatasetPtr& query,
                         int64_t limited_size) const {
     std::shared_lock read_lock(this->global_mutex_);
     auto computer = this->inner_codes_->FactoryComputer(query->GetFloat32Vectors());
-    CHECK_ARGUMENT(limited_size != 0,
-                   fmt::format("limited_size({}) must not be equal to 0", limited_size));
+    this->validate_range_args(query, radius, limited_size);
     if (limited_size < 0) {
         limited_size = std::numeric_limits<int64_t>::max();
     }
     if (total_count_ == 0) {
-        auto [dataset_results, dists, ids] = create_fast_dataset(0, allocator_);
-        return std::move(dataset_results);
+        return make_empty_result();
     }
 
     auto brute_force_params = BruteForceSearchParameters::FromJson(parameters);
@@ -352,14 +335,7 @@ BruteForce::RangeSearch(const vsag::DatasetPtr& query,
         }
     }
 
-    auto [dataset_results, dists, ids] =
-        create_fast_dataset(static_cast<int64_t>(heap->Size()), allocator_);
-    for (auto j = static_cast<int64_t>(heap->Size() - 1); j >= 0; --j) {
-        dists[j] = heap->Top().first;
-        ids[j] = this->label_table_->GetLabelById(heap->Top().second);
-        heap->Pop();
-    }
-    return std::move(dataset_results);
+    return this->pack_knn_result(heap);
 }
 
 float
@@ -390,25 +366,23 @@ BruteForce::Serialize(StreamWriter& writer) const {
     this->label_table_->Serialize(writer);
 
     // serialize footer (introduced since v0.15)
-    auto metadata = std::make_shared<Metadata>();
     JsonType basic_info;
     basic_info["dim"].SetInt(dim_);
     basic_info["total_count"].SetInt(total_count_);
     basic_info[INDEX_PARAM].SetString(this->create_param_ptr_->ToString());
-    metadata->Set("basic_info", basic_info);
-    auto footer = std::make_shared<Footer>(metadata);
-    footer->Write(writer);
+    write_index_footer(writer, basic_info);
 }
 
 void
 BruteForce::Deserialize(StreamReader& reader) {
     // try to deserialize footer (only in new version)
-    auto footer = Footer::Parse(reader);
+    JsonType basic_info;
+    bool has_footer = read_index_footer(reader, basic_info);
 
     BufferStreamReader buffer_reader(
         &reader, std::numeric_limits<uint64_t>::max(), this->allocator_);
 
-    if (footer == nullptr) {  // old format, DON'T EDIT, remove in the future
+    if (not has_footer) {  // old format, DON'T EDIT, remove in the future
         logger::debug("parse with v0.13 version format");
 
         StreamReader::ReadObj(buffer_reader, dim_);
@@ -416,8 +390,6 @@ BruteForce::Deserialize(StreamReader& reader) {
     } else {  // create like `else if ( ver in [v0.15, v0.17] )` here if need in the future
         logger::debug("parse with new version format");
 
-        auto metadata = footer->GetMetadata();
-        auto basic_info = metadata->Get("basic_info");
         if (basic_info.Contains(INDEX_PARAM)) {
             std::string index_param_string = basic_info[INDEX_PARAM].GetString();
             auto index_param = std::make_shared<BruteForceParameter>();

@@ -755,4 +755,145 @@ InnerIndexInterface::cal_distance_by_id(const float* query,
     return result;
 }
 
+// ========== Search Helper Methods ==========
+
+FilterPtr
+InnerIndexInterface::create_search_filter(const FilterPtr& user_filter,
+                                          bool use_extra_info_filter) const {
+    auto deleted_filter = this->label_table_->GetDeletedIdsFilter();
+    FilterPtr wrapped_user_filter = nullptr;
+    if (user_filter != nullptr) {
+        if (use_extra_info_filter && this->extra_infos_ != nullptr) {
+            wrapped_user_filter =
+                std::make_shared<ExtraInfoWrapperFilter>(user_filter, this->extra_infos_);
+        } else {
+            wrapped_user_filter =
+                std::make_shared<InnerIdWrapperFilter>(user_filter, *this->label_table_);
+        }
+    }
+
+    // Avoid CombinedFilter when only one filter is present to preserve
+    // GetValidIds() / FilterDistribution() capabilities of the inner filter.
+    if (deleted_filter == nullptr && wrapped_user_filter == nullptr) {
+        return nullptr;
+    }
+    if (deleted_filter == nullptr) {
+        return wrapped_user_filter;
+    }
+    if (wrapped_user_filter == nullptr) {
+        return deleted_filter;
+    }
+    auto combined_filter = std::make_shared<CombinedFilter>();
+    combined_filter->AppendFilter(deleted_filter);
+    combined_filter->AppendFilter(wrapped_user_filter);
+    return combined_filter;
+}
+
+DatasetPtr
+InnerIndexInterface::pack_knn_result(DistHeapPtr& heap, Allocator* allocator) const {
+    if (heap == nullptr || heap->Empty()) {
+        return make_empty_result();
+    }
+    auto* alloc = allocator != nullptr ? allocator : allocator_;
+    auto count = static_cast<int64_t>(heap->Size());
+    auto [dataset_results, dists, ids] = create_fast_dataset(count, alloc);
+    for (auto j = count - 1; j >= 0; --j) {
+        dists[j] = heap->Top().first;
+        ids[j] = this->label_table_->GetLabelById(heap->Top().second);
+        heap->Pop();
+    }
+    return std::move(dataset_results);
+}
+
+DatasetPtr
+InnerIndexInterface::pack_knn_result_with_extra_info(DistHeapPtr& heap,
+                                                     Allocator* allocator) const {
+    if (heap == nullptr || heap->Empty()) {
+        return make_empty_result();
+    }
+    auto* alloc = allocator != nullptr ? allocator : allocator_;
+    auto count = static_cast<int64_t>(heap->Size());
+    auto [dataset_results, dists, ids] = create_fast_dataset(count, alloc);
+
+    if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
+        auto* extra_infos = static_cast<char*>(alloc->Allocate(this->extra_info_size_ * count));
+        for (auto j = count - 1; j >= 0; --j) {
+            dists[j] = heap->Top().first;
+            auto inner_id = heap->Top().second;
+            ids[j] = this->label_table_->GetLabelById(inner_id);
+            this->extra_infos_->GetExtraInfoById(inner_id,
+                                                 extra_infos + j * this->extra_info_size_);
+            heap->Pop();
+        }
+        dataset_results->ExtraInfos(extra_infos);
+        dataset_results->ExtraInfoSize(static_cast<int64_t>(this->extra_info_size_));
+    } else {
+        for (auto j = count - 1; j >= 0; --j) {
+            dists[j] = heap->Top().first;
+            ids[j] = this->label_table_->GetLabelById(heap->Top().second);
+            heap->Pop();
+        }
+    }
+    return std::move(dataset_results);
+}
+
+DatasetPtr
+InnerIndexInterface::make_empty_result(const std::string& stats_json) {
+    auto dataset_result = DatasetImpl::MakeEmptyDataset();
+    if (!stats_json.empty()) {
+        dataset_result->Statistics(stats_json);
+    }
+    return dataset_result;
+}
+
+void
+InnerIndexInterface::write_index_footer(StreamWriter& writer, const JsonType& basic_info) {
+    auto metadata = std::make_shared<Metadata>();
+    metadata->Set("basic_info", basic_info);
+    auto footer = std::make_shared<Footer>(metadata);
+    footer->Write(writer);
+}
+
+bool
+InnerIndexInterface::read_index_footer(StreamReader& reader, JsonType& basic_info) {
+    auto footer = Footer::Parse(reader);
+    if (footer == nullptr) {
+        // Old format - no footer found
+        return false;
+    }
+    auto metadata = footer->GetMetadata();
+    if (metadata == nullptr || metadata->EmptyIndex()) {
+        throw VsagException(ErrorType::INDEX_EMPTY, "index is empty");
+    }
+    basic_info = metadata->Get("basic_info");
+    return true;
+}
+
+void
+InnerIndexInterface::validate_search_query(const DatasetPtr& query) const {
+    if (data_type_ != DataTypes::DATA_TYPE_SPARSE) {
+        int64_t query_dim = query->GetDim();
+        CHECK_ARGUMENT(
+            query_dim == dim_,
+            fmt::format("query.dim({}) must be equal to index.dim({})", query_dim, dim_));
+    }
+    CHECK_ARGUMENT(query->GetNumElements() == 1, "query dataset should contain 1 vector only");
+}
+
+void
+InnerIndexInterface::validate_knn_args(const DatasetPtr& query, int64_t k) const {
+    validate_search_query(query);
+    CHECK_ARGUMENT(k > 0, fmt::format("k({}) must be greater than 0", k));
+}
+
+void
+InnerIndexInterface::validate_range_args(const DatasetPtr& query,
+                                         float radius,
+                                         int64_t limited_size) const {
+    validate_search_query(query);
+    CHECK_ARGUMENT(radius >= 0.0F, fmt::format("radius({}) must be greater equal than 0", radius));
+    CHECK_ARGUMENT(limited_size != 0,
+                   fmt::format("limited_size({}) must not be equal to 0", limited_size));
+}
+
 }  // namespace vsag
