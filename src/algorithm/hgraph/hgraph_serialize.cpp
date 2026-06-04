@@ -224,12 +224,11 @@ HGraph::deserialize_label_info(StreamReader& reader) const {
                                                 sid_count,
                                                 label_table_size));
             }
-            auto& sid_table = this->label_table_->GetSourceIdTableMutable();
-            sid_table.clear();
-            sid_table.resize(sid_count);
+            Vector<std::string> sid_table(sid_count, std::string{}, allocator_);
             for (uint64_t i = 0; i < sid_count; ++i) {
                 sid_table[i] = StreamReader::ReadString(reader);
             }
+            this->label_table_->ReplaceSourceIdTable(std::move(sid_table));
         } else {
             reader.Seek(cursor_before);
         }

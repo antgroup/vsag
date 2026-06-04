@@ -330,9 +330,12 @@ public:
         return source_id_table_;
     }
 
-    Vector<std::string>&
-    GetSourceIdTableMutable() {
-        return source_id_table_;
+    // Replace the entire source_id_table_ with a pre-built table.
+    // Used by deserialization to atomically swap in the persisted data
+    // without exposing a mutable reference to callers.
+    void
+    ReplaceSourceIdTable(Vector<std::string>&& table) {
+        source_id_table_ = std::move(table);
     }
 
     void

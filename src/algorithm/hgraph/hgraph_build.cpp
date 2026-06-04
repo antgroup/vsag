@@ -765,7 +765,7 @@ constexpr uint32_t MISSED_REFINE_ROUNDS = 3;
 constexpr uint32_t HIT_REFINE_EF = 64;
 // MISSED_REFINE_EF kept high (400) because missed nodes have NO seed
 // neighbors and need wider exploration. User-directed asymmetric config.
-constexpr uint32_t MISSED_REFINE_EF = 400;
+constexpr uint32_t MISSED_REFINE_EF = 200;
 
 }  // namespace
 
@@ -1621,7 +1621,7 @@ HGraph::cache_run_refine_two_phase(const DatasetPtr& data, BuildCachePlan& plan)
     if (this->has_precise_reorder()) {
         flatten_codes = this->high_precise_codes_;
     }
-    logger::info(
+    logger::debug(
         "[DIAG] refine flatten_codes quantizer = {} (basic={}, high_precise={})",
         flatten_codes->GetQuantizerName(),
         this->basic_flatten_codes_ ? this->basic_flatten_codes_->GetQuantizerName() : "null",
