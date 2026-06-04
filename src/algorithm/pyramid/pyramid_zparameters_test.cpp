@@ -15,6 +15,8 @@
 
 #include "pyramid_zparameters.h"
 
+#include <fmt/ranges.h>
+
 #include "index_common_param.h"
 #include "parameter_test.h"
 #include "pyramid.h"

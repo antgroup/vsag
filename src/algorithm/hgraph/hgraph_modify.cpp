@@ -12,11 +12,35 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <atomic>
+#include <cstdint>
+#include <memory>
+#include <mutex>
+#include <ostream>
+#include <shared_mutex>
+#include <tuple>
+#include <vector>
+
+#include "algorithm/inner_index_interface.h"
+#include "basic_types.h"
+#include "common.h"
+#include "container_types.h"
+#include "datacell/attribute_inverted_interface.h"
+#include "datacell/extra_info_interface.h"
+#include "datacell/flatten_interface.h"
+#include "datacell/graph_interface.h"
+#include "hash_types.h"
 #include "hgraph.h"  // IWYU pragma: keep
+#include "impl/label_table/label_table.h"
 #include "impl/pruning_strategy.h"
-#include "utils/util_functions.h"
+#include "tsl/robin_hash.h"
+#include "utils/lock_strategy.h"
+#include "vsag/errors.h"
+#include "vsag/index.h"
+#include "vsag_exception.h"
 
 namespace vsag {
+struct AttributeSet;
 
 uint32_t
 HGraph::Remove(const std::vector<int64_t>& ids, RemoveMode mode) {

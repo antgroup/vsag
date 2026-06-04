@@ -15,8 +15,13 @@
 
 #include "iterator_filter.h"
 
-#include "impl/logger/logger.h"
+#include <cstring>
+#include <new>
+#include <queue>
+
 #include "utils/util_functions.h"
+#include "vsag/allocator.h"
+#include "vsag/errors.h"
 
 namespace vsag {
 

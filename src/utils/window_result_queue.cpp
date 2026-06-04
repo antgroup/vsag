@@ -14,6 +14,8 @@
 
 #include "window_result_queue.h"
 
+#include <algorithm>
+
 namespace vsag {
 
 static constexpr int64_t DEFAULT_WATCH_WINDOW_SIZE = 20;

@@ -15,28 +15,62 @@
 
 #include "ivf.h"
 
+#include <cxxabi.h>
+#include <fmt/core.h>
+
+#include <algorithm>
 #include <atomic>
-#include <random>
-#include <set>
+#include <cmath>
+#include <future>
+#include <limits>
+#include <mutex>
+#include <ostream>
+#include <shared_mutex>
+#include <tuple>
+#include <unordered_map>
 
 #include "algorithm/inner_index_interface.h"
+#include "algorithm/inner_index_parameter.h"
+#include "algorithm/ivf/ivf_parameter.h"
+#include "algorithm/ivf/ivf_partition_strategy.h"
+#include "algorithm/ivf/ivf_partition_strategy_parameter.h"
 #include "attr/argparse.h"
 #include "attr/executor/executor.h"
+#include "common.h"
+#include "data_type.h"
+#include "datacell/attribute_inverted_interface.h"
+#include "datacell/bucket_datacell_parameter.h"
+#include "datacell/extra_info_interface.h"
 #include "datacell/flatten_interface.h"
 #include "gno_imi_partition.h"
-#include "impl/heap/standard_heap.h"
+#include "impl/filter/combined_filter.h"
+#include "impl/filter/inner_id_wrapper_filter.h"
 #include "impl/inner_search_param.h"
+#include "impl/label_table/label_table.h"
+#include "impl/logger/logger.h"
 #include "impl/reorder/flatten_reorder.h"
 #include "impl/searcher/basic_searcher.h"
+#include "impl/thread_pool/safe_thread_pool.h"
 #include "index/index_impl.h"
+#include "index_common_param.h"
 #include "index_feature_list.h"
 #include "inner_string_params.h"
 #include "ivf_nearest_partition.h"
+#include "json_wrapper.h"
+#include "metric_type.h"
 #include "query_context.h"
 #include "storage/serialization.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
+#include "type_helpers.h"
+#include "utils/timer.h"
 #include "utils/util_functions.h"
+#include "vsag/allocator.h"
+#include "vsag/attribute.h"
+#include "vsag/errors.h"
+#include "vsag/filter.h"
+#include "vsag/index_features.h"
+#include "vsag/search_request.h"
 #include "vsag_exception.h"
 
 namespace vsag {

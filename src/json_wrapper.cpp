@@ -15,6 +15,7 @@
 
 #include "json_wrapper.h"
 
+#include <cstdint>
 #include <nlohmann/json.hpp>
 
 namespace vsag {

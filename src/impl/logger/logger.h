@@ -15,7 +15,7 @@
 
 #pragma once
 
-#include <fmt/format.h>
+#include <fmt/core.h>
 
 #include "vsag/logger.h"
 #include "vsag/options.h"

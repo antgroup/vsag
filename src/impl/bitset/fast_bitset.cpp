@@ -15,14 +15,22 @@
 
 #include "fast_bitset.h"
 
+#include <algorithm>
+#include <cstdint>
+#include <cstring>
 #include <limits>
 #include <memory>
+#include <ostream>
 #include <string>
 
 #include "simd/bit_simd.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
+#include "vsag/errors.h"
 #include "vsag_exception.h"
 
 namespace vsag {
+class ComputableBitset;
 
 static constexpr uint64_t FILL_ONE = 0xFFFFFFFFFFFFFFFF;
 // The high bit of capacity_ stores fill_bit, so serialized word count must fit in 31 bits.

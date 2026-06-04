@@ -15,21 +15,42 @@
 
 #include "inner_index_interface.h"
 
-#include <fmt/format.h>
+#include <cxxabi.h>
+#include <fmt/core.h>
+
+#include <algorithm>
+#include <cmath>
+#include <cstring>
+#include <future>
+#include <istream>
+#include <mutex>
+#include <new>
 
 #include "algorithm/bruteforce/bruteforce.h"
 #include "algorithm/hgraph/hgraph.h"
-#include "impl/filter/filter_headers.h"
+#include "algorithm/inner_index_parameter.h"
+#include "common.h"
+#include "container_types.h"
+#include "impl/filter/black_list_filter.h"
+#include "impl/inner_search_param.h"
 #include "impl/label_table/label_table.h"
+#include "impl/logger/logger.h"
 #include "impl/thread_pool/safe_thread_pool.h"
 #include "index_common_param.h"
 #include "index_detail_data.h"
 #include "index_feature_list.h"
-#include "storage/empty_index_binary_set.h"
+#include "inner_string_params.h"
+#include "json_wrapper.h"
 #include "storage/serialization.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
+#include "tsl/robin_map.h"
 #include "utils/slow_task_timer.h"
 #include "utils/util_functions.h"
 #include "vsag/allocator.h"
+#include "vsag/attribute.h"
+#include "vsag/constants.h"
+#include "vsag/readerset.h"
 
 namespace vsag {
 

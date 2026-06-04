@@ -15,15 +15,28 @@
 
 #include "sq8_uniform_quantizer.h"
 
-#include <cstddef>
+#include <algorithm>
 #include <cstring>
+#include <limits>
+#include <memory>
+#include <new>
+#include <ostream>
 
+#include "container_types.h"
+#include "impl/logger/logger.h"
+#include "index_common_param.h"
+#include "quantization/computer.h"
+#include "quantization/scalar_quantization/sq8_uniform_quantizer_parameter.h"
 #include "scalar_quantization_trainer.h"
 #include "scalar_quantization_utils.h"
 #include "simd/normalize.h"
 #include "simd/sq8_uniform_simd.h"
-#include "typing.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
 #include "utils/util_functions.h"
+#include "vsag/allocator.h"
+#include "vsag/errors.h"
+#include "vsag_exception.h"
 
 namespace vsag {
 

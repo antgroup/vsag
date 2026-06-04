@@ -13,17 +13,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <fmt/core.h>
+
 #include <algorithm>
+#include <cctype>
 #include <cmath>
-#include <sstream>
+#include <cstdint>
+#include <exception>
+#include <string>
 
 #include "impl/logger/logger.h"
 #include "index/hnsw_zparameters.h"
 #include "utils/number.h"
 #include "utils/util_functions.h"
+#include "vsag/constants.h"
 #include "vsag/errors.h"
 #include "vsag/expected.hpp"
 #include "vsag/index.h"
+#include "vsag_exception.h"
 
 namespace vsag {
 

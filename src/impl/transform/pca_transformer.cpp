@@ -15,14 +15,23 @@
 
 #include "pca_transformer.h"
 
-#include <fmt/format.h>
+#include <fmt/core.h>
 
-#include <random>
+#include <memory>
+#include <ostream>
+#include <vector>
 
 #include "impl/blas/blas_function.h"
+#include "impl/logger/logger.h"
+#include "impl/transform/vector_transformer.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
+#include "vsag/errors.h"
 #include "vsag_exception.h"
 
 namespace vsag {
+class Allocator;
+
 PCATransformer::PCATransformer(Allocator* allocator, int64_t input_dim, int64_t output_dim)
     : VectorTransformer(allocator, input_dim, output_dim),
       pca_matrix_(allocator),

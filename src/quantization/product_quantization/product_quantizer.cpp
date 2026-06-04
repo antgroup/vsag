@@ -15,11 +15,27 @@
 
 #include "product_quantizer.h"
 
+#include <fmt/core.h>
+
+#include <algorithm>
+#include <cstring>
+#include <limits>
+#include <memory>
+#include <new>
+#include <ostream>
+
 #include "impl/blas/blas_function.h"
 #include "impl/cluster/kmeans_cluster.h"
+#include "index_common_param.h"
+#include "quantization/computer.h"
+#include "quantization/product_quantization/product_quantizer_parameter.h"
 #include "simd/fp32_simd.h"
 #include "simd/normalize.h"
-#include "utils/prefetch.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
+#include "vsag/allocator.h"
+#include "vsag/errors.h"
+#include "vsag_exception.h"
 
 namespace vsag {
 

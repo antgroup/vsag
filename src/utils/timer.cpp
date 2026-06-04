@@ -15,7 +15,7 @@
 
 #include "timer.h"
 
-#include <numeric>
+#include <limits>
 
 namespace vsag {
 Timer::Timer(double* ref) : ref_(ref) {

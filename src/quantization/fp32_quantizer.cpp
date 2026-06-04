@@ -15,9 +15,21 @@
 
 #include "fp32_quantizer.h"
 
+#include <cmath>
+#include <cstring>
+#include <memory>
+#include <new>
+#include <ostream>
+
+#include "index_common_param.h"
+#include "quantization/computer.h"
+#include "quantization/fp32_quantizer_parameter.h"
+#include "quantization/quantizer.h"
 #include "simd/fp32_simd.h"
 #include "simd/normalize.h"
-#include "simd/simd.h"
+#include "vsag/allocator.h"
+#include "vsag/errors.h"
+#include "vsag_exception.h"
 
 namespace vsag {
 

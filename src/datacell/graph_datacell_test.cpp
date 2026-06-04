@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <fmt/format.h>
+#include <fmt/core.h>
 
 #include "graph_datacell_parameter.h"
 #include "graph_interface_parameter.h"

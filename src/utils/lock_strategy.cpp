@@ -15,7 +15,10 @@
 
 #include "lock_strategy.h"
 
+#include "type_helpers.h"
+
 namespace vsag {
+class Allocator;
 
 PointsMutex::PointsMutex(uint32_t element_num, Allocator* allocator)
     : allocator_(allocator),

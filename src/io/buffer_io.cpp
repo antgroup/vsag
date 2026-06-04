@@ -15,12 +15,23 @@
 #include "buffer_io.h"
 
 #include <fcntl.h>
+#include <fmt/core.h>
 #include <unistd.h>
 
+#include <cerrno>
+#include <cstring>
 #include <filesystem>
+#include <memory>
+#include <ostream>
+#include <utility>
 
 #include "index_common_param.h"
+#include "io/basic_io.h"
+#include "io/buffer_io_parameter.h"
 #include "io_syscall.h"
+#include "vsag/allocator.h"
+#include "vsag/errors.h"
+#include "vsag_exception.h"
 
 namespace vsag {
 

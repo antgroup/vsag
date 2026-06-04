@@ -16,6 +16,13 @@
 
 #include "sparse_vector_transform.h"
 
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <unordered_map>
+
+#include "vsag/dataset.h"
+
 namespace vsag {
 
 void

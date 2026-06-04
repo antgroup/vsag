@@ -15,7 +15,15 @@
 
 #include "multi_bitset_manager.h"
 
+#include <iosfwd>
+#include <vector>
+
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
+#include "type_helpers.h"
+
 namespace vsag {
+class Allocator;
 
 MultiBitsetManager::MultiBitsetManager(Allocator* allocator,
                                        uint64_t count,

@@ -14,13 +14,19 @@
 
 #include "index_common_param.h"
 
-#include <fmt/format.h>
+#include <fmt/core.h>
+
+#include <string>
 
 #include "common.h"
+#include "json_wrapper.h"
 #include "vsag/constants.h"
+#include "vsag/errors.h"
 #include "vsag/resource.h"
+#include "vsag_exception.h"
 
 namespace vsag {
+class SafeThreadPool;
 
 static constexpr const int64_t MAX_DIM_SPARSE = 4096;
 

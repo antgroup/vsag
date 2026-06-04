@@ -15,6 +15,8 @@
 
 #include "graph_interface_parameter.h"
 
+#include <memory>
+
 #include "compressed_graph_datacell_parameter.h"
 #include "graph_datacell_parameter.h"
 #include "sparse_graph_datacell_parameter.h"

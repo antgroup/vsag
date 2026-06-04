@@ -15,8 +15,13 @@
 
 #include "attribute_inverted_interface.h"
 
+#include <memory>
+
 #include "attribute_bucket_inverted_datacell.h"
+#include "datacell/attribute_inverted_interface_parameter.h"
+
 namespace vsag {
+class Allocator;
 
 AttrInvertedInterfacePtr
 AttributeInvertedInterface::MakeInstance(Allocator* allocator, bool have_bucket) {

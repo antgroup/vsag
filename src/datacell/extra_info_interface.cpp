@@ -15,7 +15,7 @@
 
 #include "extra_info_interface.h"
 
-#include <fmt/format.h>
+#include <fmt/core.h>
 
 #include "extra_info_datacell.h"
 #include "inner_string_params.h"

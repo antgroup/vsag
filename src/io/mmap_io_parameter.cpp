@@ -15,7 +15,10 @@
 
 #include "mmap_io_parameter.h"
 
+#include "common.h"
 #include "inner_string_params.h"
+#include "io/io_parameter.h"
+#include "json_wrapper.h"
 
 namespace vsag {
 

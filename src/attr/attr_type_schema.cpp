@@ -15,9 +15,20 @@
 
 #include "attr_type_schema.h"
 
+#include <fmt/core.h>
+
+#include <cstdint>
+
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
+#include "tsl/robin_hash.h"
+#include "type_helpers.h"
+#include "vsag/errors.h"
 #include "vsag_exception.h"
 
 namespace vsag {
+class Allocator;
+
 AttrTypeSchema::AttrTypeSchema(Allocator* allocator) : allocator_(allocator), schema_(allocator) {
 }
 

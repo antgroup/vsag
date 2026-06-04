@@ -16,16 +16,25 @@
 #include "mmap_io.h"
 
 #include <fcntl.h>
+#include <fmt/core.h>
 #include <sys/mman.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cerrno>
+#include <cstring>
 #include <filesystem>
+#include <memory>
+#include <ostream>
 #include <system_error>
 #include <utility>
 
 #include "index_common_param.h"
+#include "io/basic_io.h"
+#include "io/mmap_io_parameter.h"
 #include "io_syscall.h"
+#include "vsag/errors.h"
+#include "vsag_exception.h"
 
 namespace vsag {
 

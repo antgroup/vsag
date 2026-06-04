@@ -14,7 +14,17 @@
 
 #include "search_reasoning.h"
 
+#include <utility>
+#include <vector>
+
+#include "impl/allocator/allocator_wrapper.h"
+#include "json_types.h"
+#include "json_wrapper.h"
+#include "tsl/robin_hash.h"
+#include "tsl/robin_map.h"
+
 namespace vsag {
+class Allocator;
 
 ReasoningContext::ReasoningContext(Allocator* allocator)
     : allocator_(allocator),

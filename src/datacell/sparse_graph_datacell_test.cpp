@@ -15,7 +15,7 @@
 
 #include "sparse_graph_datacell.h"
 
-#include <fmt/format.h>
+#include <fmt/core.h>
 
 #include "graph_interface_test.h"
 #include "impl/allocator/safe_allocator.h"

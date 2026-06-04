@@ -15,7 +15,7 @@
 
 #include "buffer_io_parameter.h"
 
-#include <fmt/format.h>
+#include <fmt/core.h>
 
 #include "parameter_test.h"
 #include "unittest.h"

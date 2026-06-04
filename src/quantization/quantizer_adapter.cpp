@@ -19,13 +19,18 @@
 #include <memory>
 #include <type_traits>
 
+#include "container_types.h"
+#include "index_common_param.h"
 #include "quantization/computer.h"
 #include "quantization/quantizer.h"
 #include "quantization/scalar_quantization/half_precision_quantizer.h"
 #include "simd/bf16_simd.h"
 #include "simd/fp16_simd.h"
+#include "vsag/allocator.h"
 
 namespace vsag {
+class StreamReader;
+class StreamWriter;
 
 using generic::BF16ToFloat;
 using generic::FloatToBF16;

@@ -15,12 +15,34 @@
 
 #include "hnswalg.h"
 
-#include <memory>
+#include <fmt/core.h>
 
+#include <algorithm>
+#include <cassert>
+#include <cmath>
+#include <exception>
+#include <fstream>
+#include <functional>
+#include <iostream>
+#include <limits>
+#include <memory>
+#include <stdexcept>
+#include <vector>
+
+#include "algorithm/hnswlib/algorithm_interface.h"
+#include "algorithm/hnswlib/block_manager.h"
+#include "algorithm/hnswlib/visited_list_pool.h"
 #include "datacell/graph_interface.h"
+#include "impl/inner_search_param.h"
 #include "impl/searcher/basic_searcher.h"
+#include "index/iterator_filter.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
+#include "tsl/robin_set.h"
 #include "utils/filter_search_skip_strategy.h"
 #include "utils/prefetch.h"
+#include "vsag/allocator.h"
+#include "vsag/errors.h"
 #include "vsag_exception.h"
 
 using vsag::ErrorType;

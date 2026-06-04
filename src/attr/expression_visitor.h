@@ -17,7 +17,7 @@
 
 #include <antlr4-autogen/FCBaseVisitor.h>
 #include <antlr4-runtime/antlr4-runtime.h>
-#include <fmt/format.h>
+#include <fmt/core.h>
 
 #include <any>
 #include <cstdio>

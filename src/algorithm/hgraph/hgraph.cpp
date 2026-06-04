@@ -14,39 +14,50 @@
 
 #include "hgraph.h"
 
-#include <datacell/compressed_graph_datacell_parameter.h>
-#include <fmt/format.h>
+#include <fmt/core.h>
 
+#include <algorithm>
 #include <atomic>
+#include <cmath>
+#include <cstdint>
+#include <cstdlib>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
 
+#include "algorithm/hgraph/hgraph_cache.h"
+#include "algorithm/hgraph/hgraph_parameter.h"
 #include "algorithm/inner_index_interface.h"
+#include "algorithm/inner_index_parameter.h"
 #include "analyzer/analyzer.h"
-#include "attr/argparse.h"
-#include "common.h"
+#include "datacell/attribute_inverted_interface.h"
+#include "datacell/extra_info_interface.h"
 #include "datacell/flatten_interface.h"
+#include "datacell/flatten_interface_parameter.h"
 #include "datacell/sparse_graph_datacell.h"
-#include "dataset_impl.h"
-#include "impl/filter/filter_headers.h"
-#include "impl/heap/standard_heap.h"
+#include "impl/basic_optimizer.h"
+#include "impl/label_table/label_table.h"
 #include "impl/odescent/odescent_graph_builder.h"
+#include "impl/odescent/odescent_graph_parameter.h"
 #include "impl/pruning_strategy.h"
-#include "impl/reasoning/search_reasoning.h"
 #include "impl/reorder/flatten_reorder.h"
 #include "index/index_impl.h"
-#include "index/iterator_filter.h"
+#include "index_common_param.h"
+#include "index_feature_list.h"
+#include "io/io_parameter.h"
 #include "io/reader_io_parameter.h"
-#include "storage/serialization.h"
-#include "storage/stream_reader.h"
-#include "typing.h"
+#include "json_wrapper.h"
+#include "tsl/robin_hash.h"
+#include "utils/resource_object_pool.h"
 #include "utils/util_functions.h"
-#include "utils/visited_list.h"
+#include "vsag/constants.h"
+#include "vsag/index_features.h"
 #include "vsag/options.h"
+#include "vsag/search_request.h"
 
 namespace vsag {
-
-class HGraphAnalyzer;
+class Reader;
+struct AttributeSet;
 
 HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonParam& common_param)
     : InnerIndexInterface(hgraph_param, common_param),

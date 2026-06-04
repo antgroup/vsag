@@ -19,6 +19,8 @@
 #include "impl/thread_pool/safe_thread_pool.h"
 
 namespace vsag {
+class Allocator;
+class ThreadPool;
 
 Resource::Resource() {
     this->allocator_ = SafeAllocator::FactoryDefaultAllocator();

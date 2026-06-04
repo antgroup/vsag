@@ -15,33 +15,58 @@
 
 #include "diskann.h"
 
+#include <cxxabi.h>
+#include <fmt/core.h>
 #include <local_file_reader.h>
 
-#include <exception>
+#include <algorithm>
+#include <atomic>
+#include <cstdint>
+#include <cstring>
 #include <functional>
 #include <future>
 #include <iterator>
 #include <memory>
 #include <new>
-#include <nlohmann/json.hpp>
+#include <sstream>
 #include <stdexcept>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
-#include "datacell/flatten_datacell.h"
+#include "datacell/flatten_datacell_parameter.h"
+#include "datacell/flatten_interface.h"
 #include "dataset_impl.h"
+#include "disk_utils.h"
+#include "impl/logger/logger.h"
 #include "impl/odescent/odescent_graph_builder.h"
+#include "impl/odescent/odescent_graph_parameter.h"
+#include "impl/thread_pool/safe_thread_pool.h"
+#include "index.h"
+#include "index/diskann_zparameters.h"
+#include "io/io_parameter.h"
 #include "io/memory_io_parameter.h"
+#include "json_types.h"
+#include "json_wrapper.h"
+#include "parameters.h"
+#include "percentile_stats.h"
+#include "pq.h"
+#include "pq_flash_index.h"
 #include "quantization/fp32_quantizer_parameter.h"
+#include "quantization/quantizer_parameter.h"
 #include "storage/empty_index_binary_set.h"
 #include "storage/serialization.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
 #include "utils/slow_task_timer.h"
 #include "utils/timer.h"
 #include "vsag/constants.h"
 #include "vsag/errors.h"
 #include "vsag/expected.hpp"
 #include "vsag/index.h"
+#include "vsag/options.h"
 #include "vsag/readerset.h"
+#include "vsag_exception.h"
 
 namespace vsag {
 

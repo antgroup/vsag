@@ -15,8 +15,15 @@
 
 #include "sindi_parameter.h"
 
+#include <fmt/core.h>
+
+#include <memory>
+
+#include "common.h"
 #include "inner_string_params.h"
+#include "json_wrapper.h"
 #include "utils/param_compat_macros.h"
+#include "vsag/constants.h"
 
 namespace vsag {
 

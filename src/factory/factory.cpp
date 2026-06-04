@@ -15,20 +15,24 @@
 
 #include "vsag/factory.h"
 
-#include <algorithm>
+#include <cxxabi.h>
+
 #include <cstdint>
-#include <exception>
 #include <fstream>
 #include <ios>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <utility>
 
 #include "impl/thread_pool/safe_thread_pool.h"
 #include "vsag/engine.h"
-#include "vsag/options.h"
+#include "vsag/errors.h"
+#include "vsag/readerset.h"
+#include "vsag/resource.h"
 
 namespace vsag {
+class Allocator;
 
 tl::expected<std::shared_ptr<Index>, Error>
 Factory::CreateIndex(const std::string& origin_name,

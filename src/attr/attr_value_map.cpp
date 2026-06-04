@@ -15,7 +15,15 @@
 
 #include "attr_value_map.h"
 
+#include <cstdint>
+
+#include "attr/multi_bitset_manager.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
+#include "tsl/robin_hash.h"
+
 namespace vsag {
+class Allocator;
 
 template <class T>
 void

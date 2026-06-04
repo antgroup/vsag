@@ -15,7 +15,11 @@
 
 #include "memory_io_parameter.h"
 
+#include <string>
+
 #include "inner_string_params.h"
+#include "io/io_parameter.h"
+#include "json_wrapper.h"
 
 namespace vsag {
 

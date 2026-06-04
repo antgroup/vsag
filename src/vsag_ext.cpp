@@ -15,7 +15,14 @@
 
 #include "vsag/vsag_ext.h"
 
+#include <memory>
+
+#include "vsag/binaryset.h"
+
 namespace vsag {
+class Allocator;
+class ReaderSet;
+
 namespace ext {
 
 DatasetHandler*

@@ -15,11 +15,17 @@
 
 #include "executor.h"
 
+#include <ostream>
+
 #include "comparison_executor.h"
 #include "integer_list_executor.h"
 #include "logical_executor.h"
 #include "string_list_executor.h"
+#include "vsag/errors.h"
+#include "vsag_exception.h"
+
 namespace vsag {
+class Allocator;
 
 ExecutorPtr
 Executor::MakeInstance(Allocator* allocator,

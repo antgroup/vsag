@@ -15,7 +15,7 @@
 
 #include "rabitq_quantizer_parameter.h"
 
-#include <fmt/format.h>
+#include <fmt/core.h>
 
 #include <cmath>
 

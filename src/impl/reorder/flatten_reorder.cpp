@@ -18,14 +18,23 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <memory>
 #include <numeric>
+#include <utility>
+#include <vector>
 
+#include "basic_types.h"
+#include "container_types.h"
 #include "datacell/flatten_interface.h"
+#include "hash_types.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/reasoning/search_reasoning.h"
+#include "index/iterator_filter.h"
 #include "query_context.h"
+#include "tsl/robin_hash.h"
 
 namespace vsag {
+class Allocator;
 
 DistHeapPtr
 FlattenReorder::Reorder(const vsag::DistHeapPtr& input,

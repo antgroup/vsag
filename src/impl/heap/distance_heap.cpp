@@ -15,10 +15,14 @@
 
 #include "distance_heap.h"
 
+#include <memory>
+
 #include "memmove_heap.h"
 #include "standard_heap.h"
 
 namespace vsag {
+class Allocator;
+
 template <bool max_heap, bool fixed_size>
 DistHeapPtr
 DistanceHeap::MakeInstanceBySize(Allocator* allocator, int64_t max_size) {

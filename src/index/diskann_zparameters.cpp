@@ -15,12 +15,17 @@
 
 #include "diskann_zparameters.h"
 
-#include <fmt/format.h>
+#include <fmt/core.h>
 
 #include "common.h"
+#include "data_type.h"
+#include "distance.h"
 #include "index_common_param.h"
 #include "inner_string_params.h"
+#include "json_wrapper.h"
+#include "metric_type.h"
 #include "vsag/constants.h"
+#include "vsag/errors.h"
 #include "vsag_exception.h"
 // NOLINTBEGIN(readability-simplify-boolean-expr)
 

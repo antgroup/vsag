@@ -15,7 +15,26 @@
 
 #include "hgraph_analyzer.h"
 
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <cstring>
+#include <numeric>
+#include <queue>
+#include <random>
+#include <unordered_set>
+
+#include "algorithm/inner_index_interface.h"
+#include "datacell/flatten_interface.h"
+#include "datacell/graph_interface.h"
 #include "impl/heap/standard_heap.h"
+#include "impl/label_table/label_table.h"
+#include "impl/logger/logger.h"
+#include "impl/reorder/reorder.h"
+#include "json_wrapper.h"
+#include "tsl/robin_hash.h"
+#include "utils/timer.h"
+#include "vsag/search_request.h"
 
 namespace vsag {
 

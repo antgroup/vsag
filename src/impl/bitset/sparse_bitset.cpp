@@ -17,8 +17,15 @@
 
 #include <cstdint>
 #include <mutex>
+#include <utility>
+#include <vector>
+
+#include "roaring.hh"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
 
 namespace vsag {
+class ComputableBitset;
 
 void
 SparseBitset::Set(int64_t pos, bool value) {

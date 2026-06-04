@@ -15,7 +15,7 @@
 
 #include "vector_transformer_parameter.h"
 
-#include <fmt/format.h>
+#include <fmt/core.h>
 
 #include "inner_string_params.h"
 #include "parameter_test.h"

@@ -15,7 +15,12 @@
 
 #include "sq4_uniform_quantizer_parameter.h"
 
+#include <memory>
+#include <string>
+
+#include "impl/logger/logger.h"
 #include "inner_string_params.h"
+#include "json_wrapper.h"
 #include "utils/param_compat_macros.h"
 
 namespace vsag {

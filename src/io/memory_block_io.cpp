@@ -17,11 +17,16 @@
 
 #include <algorithm>
 #include <cstring>
+#include <memory>
+#include <ostream>
+#include <vector>
 
-#include "common.h"
 #include "index_common_param.h"
-#include "inner_string_params.h"
+#include "io/basic_io.h"
+#include "io/memory_block_io_parameter.h"
 #include "utils/prefetch.h"
+#include "vsag/errors.h"
+#include "vsag_exception.h"
 
 namespace vsag {
 

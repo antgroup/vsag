@@ -15,13 +15,13 @@
 
 #include "vsag/vsag.h"
 
-#include <../extern/diskann/DiskANN/include/diskann_logger.h>
 #include <cpuinfo.h>
 
 #include <sstream>
 
 #include "impl/logger/logger.h"
 #include "simd/simd.h"
+#include "simd/simd_status.h"
 #include "version.h"
 
 namespace vsag {

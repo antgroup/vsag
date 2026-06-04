@@ -14,7 +14,10 @@
 
 #include "filter_search_skip_strategy.h"
 
+#include <ostream>
+
 #include "linear_congruential_generator.h"
+#include "vsag/errors.h"
 #include "vsag_exception.h"
 
 namespace vsag {

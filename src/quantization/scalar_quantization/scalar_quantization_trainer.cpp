@@ -15,9 +15,12 @@
 
 #include "scalar_quantization_trainer.h"
 
+#include <algorithm>
 #include <cstring>
+#include <functional>
+#include <limits>
 #include <queue>
-#include <random>
+#include <utility>
 
 #include "simd/normalize.h"
 

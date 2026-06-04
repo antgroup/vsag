@@ -15,38 +15,57 @@
 
 #include "hnsw.h"
 
-#include <fmt/format.h>
+#include <fmt/core.h>
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
-#include <exception>
+#include <cstdlib>
+#include <cstring>
 #include <memory>
 #include <new>
-#include <nlohmann/json.hpp>
+#include <queue>
 #include <stdexcept>
+#include <tuple>
+#include <type_traits>
 
-#include "algorithm/hnswlib/hnswlib.h"
+#include "algorithm/hnswlib/algorithm_interface.h"
+#include "algorithm/hnswlib/hnswalg.h"
 #include "common.h"
-#include "datacell/flatten_datacell.h"
+#include "datacell/flatten_datacell_parameter.h"
 #include "datacell/graph_datacell_parameter.h"
-#include "impl/allocator/safe_allocator.h"
+#include "impl/conjugate_graph.h"
+#include "impl/logger/logger.h"
 #include "impl/odescent/odescent_graph_builder.h"
+#include "impl/odescent/odescent_graph_parameter.h"
 #include "index/hnsw_zparameters.h"
+#include "index/iterator_filter.h"
 #include "index_detail_data.h"
+#include "io/io_parameter.h"
 #include "io/memory_block_io_parameter.h"
+#include "json_types.h"
+#include "json_wrapper.h"
 #include "quantization/fp32_quantizer_parameter.h"
+#include "quantization/quantizer_parameter.h"
 #include "storage/empty_index_binary_set.h"
 #include "storage/serialization.h"
+#include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "utils/slow_task_timer.h"
 #include "utils/timer.h"
 #include "utils/util_functions.h"
+#include "vsag/allocator.h"
 #include "vsag/binaryset.h"
 #include "vsag/constants.h"
 #include "vsag/errors.h"
 #include "vsag/expected.hpp"
 #include "vsag/options.h"
+#include "vsag/readerset.h"
+#include "vsag_exception.h"
 
 namespace vsag {
+class BlackListFilter;
+class IteratorContext;
 
 static const std::string EMPTY_HNSW = "EMPTY_HNSW";
 

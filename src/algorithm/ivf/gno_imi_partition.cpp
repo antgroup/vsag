@@ -15,20 +15,45 @@
 
 #include "gno_imi_partition.h"
 
-#include <fmt/format.h>
+#include <fmt/core.h>
 
+#include <algorithm>
 #include <atomic>
+#include <cmath>
+#include <cstring>
 #include <fstream>
+#include <functional>
+#include <limits>
 #include <numeric>
+#include <utility>
 #include <vector>
 
-#include "algorithm/inner_index_interface.h"
-#include "impl/allocator/safe_allocator.h"
+#include "algorithm/bruteforce/bruteforce.h"
+#include "algorithm/bruteforce/bruteforce_parameter.h"
+#include "algorithm/inner_index_parameter.h"
+#include "algorithm/ivf/gno_imi_parameter.h"
+#include "algorithm/ivf/ivf_partition_strategy.h"
+#include "algorithm/ivf/ivf_partition_strategy_parameter.h"
+#include "common.h"
+#include "datacell/flatten_datacell_parameter.h"
+#include "datacell/flatten_interface_parameter.h"
 #include "impl/blas/blas_function.h"
 #include "impl/cluster/kmeans_cluster.h"
+#include "impl/inner_search_param.h"
+#include "impl/logger/logger.h"
 #include "inner_string_params.h"
+#include "io/io_parameter.h"
+#include "json_types.h"
+#include "json_wrapper.h"
+#include "metric_type.h"
+#include "quantization/quantizer_parameter.h"
 #include "query_context.h"
-#include "utils/util_functions.h"
+#include "simd/fp32_simd.h"
+#include "simd/normalize.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
+#include "type_helpers.h"
+#include "vsag/errors.h"
 #include "vsag_exception.h"
 
 namespace vsag {

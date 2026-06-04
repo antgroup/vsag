@@ -19,10 +19,12 @@
 #include <map>
 #include <mutex>
 #include <string>
-
-#include "common.h"
+#include <utility>
 
 namespace vsag {
+class Index;
+class IndexCommonParam;
+
 namespace {
 
 auto&

@@ -14,27 +14,40 @@
 
 #include "index_creators.h"
 
-#include <fmt/format.h>
+#include <fmt/core.h>
 
+#include <exception>
+#include <memory>
 #include <mutex>
+#include <new>
+#include <string>
 
 #include "algorithm/bruteforce/bruteforce.h"
 #include "algorithm/hgraph/hgraph.h"
 #include "algorithm/ivf/ivf.h"
 #include "algorithm/pyramid/pyramid.h"
-#include "algorithm/pyramid/pyramid_zparameters.h"
 #include "algorithm/sindi/sindi.h"
 #include "algorithm/sparse_index/sparse_index.h"
 #include "algorithm/warp/warp.h"
 #include "common.h"
+#include "impl/logger/logger.h"
 #include "index/diskann.h"
 #include "index/diskann_zparameters.h"
 #include "index/hnsw.h"
 #include "index/hnsw_zparameters.h"
 #include "index/index_impl.h"
 #include "index_registry.h"
+#include "json_types.h"
+#include "json_wrapper.h"
+#include "vsag/constants.h"
+#include "vsag/errors.h"
+#include "vsag/expected.hpp"
+#include "vsag_exception.h"
 
 namespace vsag {
+class Index;
+class IndexCommonParam;
+
 namespace {
 
 JsonType

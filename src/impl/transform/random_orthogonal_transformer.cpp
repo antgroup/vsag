@@ -14,14 +14,23 @@
 
 #include "random_orthogonal_transformer.h"
 
-#include <fmt/format.h>
+#include <fmt/core.h>
 
+#include <algorithm>
+#include <cmath>
+#include <memory>
 #include <random>
+#include <vector>
 
 #include "impl/blas/blas_function.h"
 #include "impl/logger/logger.h"
+#include "impl/transform/vector_transformer.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
 
 namespace vsag {
+class Allocator;
+
 RandomOrthogonalMatrix::RandomOrthogonalMatrix(Allocator* allocator, int64_t dim, uint64_t retries)
     : VectorTransformer(allocator, dim), orthogonal_matrix_(allocator), generate_retries_(retries) {
     orthogonal_matrix_.resize(dim * dim);

@@ -15,6 +15,16 @@
 
 #include "footer.h"
 
+#include <fmt/core.h>
+
+#include <cstdint>
+#include <ostream>
+#include <vector>
+
+#include "json_wrapper.h"
+#include "storage/stream_reader.h"
+#include "vsag/constants.h"
+#include "vsag/errors.h"
 #include "vsag_exception.h"
 
 namespace vsag {

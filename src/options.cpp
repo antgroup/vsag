@@ -15,11 +15,16 @@
 
 #include "vsag/options.h"
 
-#include <fmt/format.h>
+#include <fmt/core.h>
+
+#include <memory>
 
 #include "impl/logger/default_logger.h"
+#include "vsag/errors.h"
 #include "vsag_exception.h"
+
 namespace vsag {
+class Logger;
 
 Options&
 Options::Instance() {

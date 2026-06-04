@@ -18,15 +18,33 @@
 #include "async_io.h"
 
 #include <fcntl.h>
+#include <fmt/core.h>
+#include <libaio.h>
 #include <unistd.h>
 
+#include <algorithm>
+#include <cerrno>
+#include <cstdlib>
+#include <cstring>
+#include <ctime>
 #include <filesystem>
+#include <ostream>
+#include <utility>
+#include <vector>
 
 #include "direct_io_object.h"
+#include "index_common_param.h"
+#include "io/async_io_parameter.h"
+#include "io/basic_io.h"
 #include "io_context.h"
 #include "io_syscall.h"
+#include "utils/resource_object_pool.h"
+#include "vsag/errors.h"
+#include "vsag/options.h"
+#include "vsag_exception.h"
 
 namespace vsag {
+class Allocator;
 
 std::unique_ptr<IOContextPool> AsyncIO::io_context_pool =
     std::make_unique<IOContextPool>(10, nullptr);

@@ -21,6 +21,7 @@
 // elements that don't fill an AMX tile.
 
 #include "amx_bf16_matmul.h"
+#include "simd/simd_marco.h"
 #include "simd_status.h"
 #include "sq8_uniform_simd.h"
 
@@ -29,7 +30,6 @@
 
 #include <algorithm>
 #include <cassert>
-#include <climits>
 #include <cstdint>
 #include <cstring>
 #include <vector>

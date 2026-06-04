@@ -15,19 +15,29 @@
 
 #include "basic_searcher.h"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
-#include <cstring>
+#include <cstdint>
 #include <limits>
+#include <vector>
 
-#include "algorithm/inner_index_interface.h"
+#include "attr/executor/executor.h"
 #include "datacell/flatten_interface.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/reasoning/search_reasoning.h"
+#include "index/iterator_filter.h"
+#include "index_common_param.h"
+#include "query_context.h"
+#include "tsl/robin_hash.h"
 #include "utils/filter_search_skip_strategy.h"
-#include "vsag/allocator.h"
+#include "utils/resource_object_pool.h"
+#include "utils/timer.h"
+#include "vsag/constants.h"
+#include "vsag/filter.h"
 
 namespace vsag {
+class Allocator;
 
 BasicSearcher::BasicSearcher(const IndexCommonParam& common_param, MutexArrayPtr mutex_array)
     : allocator_(common_param.allocator_.get()), mutex_array_(std::move(mutex_array)) {

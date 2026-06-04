@@ -15,21 +15,44 @@
 
 #include "ivf_nearest_partition.h"
 
-#include <fmt/format.h>
+#include <cxxabi.h>
+#include <fmt/core.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cstdlib>
+#include <cstring>
+#include <future>
+#include <memory>
+#include <mutex>
+#include <numeric>
+#include <ostream>
+#include <string>
+#include <utility>
+#include <vector>
 
 #include "algorithm/hgraph/hgraph.h"
 #include "algorithm/inner_index_interface.h"
-#include "impl/allocator/safe_allocator.h"
+#include "algorithm/ivf/ivf_partition_strategy.h"
+#include "algorithm/ivf/ivf_partition_strategy_parameter.h"
 #include "impl/cluster/kmeans_cluster.h"
-#include "inner_string_params.h"
+#include "impl/inner_search_param.h"
+#include "impl/thread_pool/safe_thread_pool.h"
+#include "json_types.h"
+#include "json_wrapper.h"
+#include "metric_type.h"
+#include "parameter.h"
 #include "query_context.h"
+#include "simd/normalize.h"
+#include "storage/stream_reader.h"
+#include "type_helpers.h"
 #include "utils/util_functions.h"
+#include "vsag/errors.h"
 #include "vsag_exception.h"
 
 namespace vsag {
+class IndexCommonParam;
+class StreamWriter;
 
 static constexpr const char* SEARCH_PARAM_TEMPLATE_STR = R"(
 {{

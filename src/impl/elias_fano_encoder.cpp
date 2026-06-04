@@ -15,9 +15,11 @@
 
 #include "elias_fano_encoder.h"
 
+#include <algorithm>
 #include <cmath>
 #include <iostream>
 
+#include "vsag/errors.h"
 #include "vsag_exception.h"
 
 namespace vsag {

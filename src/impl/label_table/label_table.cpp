@@ -15,7 +15,13 @@
 
 #include "label_table.h"
 
+#include <cstdint>
+
+#include "impl/label_table/label_remap.h"
+#include "vsag/filter.h"
+
 namespace vsag {
+class Allocator;
 
 class RemoveListFilter : public Filter {
 public:

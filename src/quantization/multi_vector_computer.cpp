@@ -15,14 +15,17 @@
 
 #include "multi_vector_computer.h"
 
-#include <algorithm>
 #include <cstring>
 #include <limits>
+#include <new>
+#include <ostream>
 
 #include "simd/fp32_simd.h"
+#include "vsag/errors.h"
 #include "vsag_exception.h"
 
 namespace vsag {
+class Allocator;
 
 MultiVectorComputer::MultiVectorComputer(uint32_t dim, MetricType metric, Allocator* allocator)
     : dim_(dim), metric_(metric), allocator_(allocator), query_tokens_(allocator) {
