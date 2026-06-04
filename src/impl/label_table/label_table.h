@@ -84,38 +84,6 @@ public:
         return MarkRemove(std::vector<LabelType>({label}));
     }
 
-    inline bool
-    RecoverRemove(LabelType label) {
-        // 1. check is removed
-        if (not use_reverse_map_) {
-            return false;
-        }
-        InnerIdType inner_id = INVALID_ID;
-        if (not label_remap_.Find(label, inner_id) or inner_id != INVALID_ID) {
-            return false;
-        }
-
-        // 2. find inner_id
-        inner_id = GetIdByLabel(label, true);
-
-        // 3. recover
-        deleted_ids_.erase(inner_id);
-        label_remap_.InsertOrAssign(label, inner_id);
-        return true;
-    }
-
-    inline bool
-    IsTombstoneLabel(LabelType label) {
-        if (not use_reverse_map_) {
-            return false;
-        }
-        InnerIdType inner_id = INVALID_ID;
-        if (not label_remap_.Find(label, inner_id)) {
-            return false;
-        }
-        return inner_id == INVALID_ID;
-    }
-
     /**
      * Check whether an id is removed.
      * @param id The id to check.
@@ -212,9 +180,6 @@ public:
     void
     Serialize(StreamWriter& writer) const {
         StreamWriter::WriteVector(writer, label_table_);
-        if (support_tombstone_) {
-            StreamWriter::WriteObj(writer, deleted_ids_);
-        }
     }
 
     void
@@ -226,9 +191,6 @@ public:
             for (InnerIdType id = 0; id < label_table_.size(); ++id) {
                 this->label_remap_.InsertOrAssign(label_table_[id], id);
             }
-        }
-        if (support_tombstone_) {
-            StreamReader::ReadObj(reader, deleted_ids_);
         }
 
         this->total_count_.store(label_table_.size());
@@ -341,7 +303,6 @@ public:
     // Reverse map from label to id.
     LabelRemap label_remap_;
 
-    bool support_tombstone_{false};
     DuplicateTrackerPtr duplicate_tracker_{nullptr};
 
     Allocator* allocator_{nullptr};

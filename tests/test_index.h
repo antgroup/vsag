@@ -119,7 +119,6 @@ public:
     TestRecoverRemoveIndex(const IndexPtr& index,
                            const TestDatasetPtr& dataset,
                            const std::string& search_parameters);
-
     static void
     TestUpdateId(const IndexPtr& index,
                  const TestDatasetPtr& dataset,

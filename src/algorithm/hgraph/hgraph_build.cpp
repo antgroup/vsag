@@ -287,16 +287,17 @@ HGraph::Add(const DatasetPtr& data, AddMode mode) {
     bool use_parallel_add = this->thread_pool_ != nullptr;
     Vector<std::pair<InnerIdType, LabelType>> inner_ids(allocator_);
     for (int64_t j = 0; j < total; ++j) {
-        InnerIdType inner_id;
-
-        // try recover tombstone
-        if (this->data_type_ != DataTypes::DATA_TYPE_SPARSE) {
-            auto one_base = get_single_dataset(data, j);
-            bool is_process_finished = try_recover_tombstone(one_base, failed_ids);
-            if (is_process_finished) {
+        // Check if label already exists (skip removed IDs)
+        {
+            std::shared_lock label_lock(this->label_lookup_mutex_);
+            auto [found, _] = this->label_table_->TryGetIdByLabel(labels[j]);
+            if (found) {
+                failed_ids.emplace_back(labels[j]);
                 continue;
             }
         }
+
+        InnerIdType inner_id;
 
         {
             std::scoped_lock lock(this->add_mutex_);
