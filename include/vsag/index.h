@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -90,7 +89,7 @@ public:
      */
     [[nodiscard]] virtual IndexType
     GetIndexType() const {
-        throw std::runtime_error("Index not support GetIndexType");
+        throw std::runtime_error("Index does not support GetIndexType");
     }
 
 public:
@@ -116,7 +115,8 @@ public:
      */
     virtual tl::expected<bool, Error>
     Tune(const std::string& parameters, bool disable_future_tuning = false) {
-        throw std::runtime_error("Tune is not supported by this index");
+        return tl::unexpected(
+            Error(ErrorType::UNSUPPORTED_INDEX_OPERATION, "Index does not support Tune"));
     }
 
     /**
@@ -127,7 +127,8 @@ public:
       */
     virtual tl::expected<void, Error>
     Train(const DatasetPtr& data) {
-        throw std::runtime_error("Index not support Train");
+        return tl::unexpected(
+            Error(ErrorType::UNSUPPORTED_INDEX_OPERATION, "Index does not support Train"));
     }
 
     struct Checkpoint {
@@ -144,7 +145,8 @@ public:
       */
     virtual tl::expected<Checkpoint, Error>
     ContinueBuild(const DatasetPtr& base, const BinarySet& binary_set) {
-        throw std::runtime_error("Index not support partial build");
+        return tl::unexpected(
+            Error(ErrorType::UNSUPPORTED_INDEX_OPERATION, "Index does not support partial build"));
     }
 
     /**
@@ -155,7 +157,8 @@ public:
       */
     [[nodiscard]] virtual tl::expected<std::vector<int64_t>, Error>
     Add(const DatasetPtr& base, AddMode mode = AddMode::DEFAULT) {
-        throw std::runtime_error("Index not support adding vectors");
+        return tl::unexpected(
+            Error(ErrorType::UNSUPPORTED_INDEX_OPERATION, "Index does not support adding vectors"));
     }
 
     /**
@@ -166,7 +169,8 @@ public:
      */
     virtual tl::expected<uint32_t, Error>
     Remove(const std::vector<int64_t>& ids, RemoveMode mode = RemoveMode::MARK_REMOVE) {
-        throw std::runtime_error("Index not support Remove");
+        return tl::unexpected(
+            Error(ErrorType::UNSUPPORTED_INDEX_OPERATION, "Index does not support Remove"));
     }
 
     /**
@@ -189,7 +193,8 @@ public:
      */
     virtual tl::expected<bool, Error>
     UpdateId(int64_t old_id, int64_t new_id) {
-        throw std::runtime_error("Index not support update id");
+        return tl::unexpected(
+            Error(ErrorType::UNSUPPORTED_INDEX_OPERATION, "Index does not support update id"));
     }
 
     /**
@@ -202,12 +207,14 @@ public:
      */
     virtual tl::expected<bool, Error>
     UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update = false) {
-        throw std::runtime_error("Index not support update vector");
+        return tl::unexpected(
+            Error(ErrorType::UNSUPPORTED_INDEX_OPERATION, "Index does not support update vector"));
     }
 
     virtual tl::expected<bool, Error>
     UpdateExtraInfo(const DatasetPtr& new_base) {
-        throw std::runtime_error("Index not support update extra info");
+        return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                    "Index does not support update extra info"));
     }
 
     /**
@@ -220,7 +227,8 @@ public:
      */
     virtual tl::expected<void, Error>
     UpdateAttribute(int64_t id, const AttributeSet& new_attrs) {
-        throw std::runtime_error("Index not support update attribute");
+        return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                    "Index does not support update attribute"));
     }
 
     /**
@@ -233,7 +241,9 @@ public:
      */
     virtual tl::expected<void, Error>
     UpdateAttribute(int64_t id, const AttributeSet& new_attrs, const AttributeSet& origin_attrs) {
-        throw std::runtime_error("Index not support update attribute with origin attributes");
+        return tl::unexpected(
+            Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                  "Index does not support update attribute with origin attributes"));
     }
 
 public:
@@ -286,7 +296,8 @@ public:
               int64_t k,
               const std::string& parameters,
               const FilterPtr& filter) const {
-        throw std::runtime_error("Index doesn't support new filter");
+        return tl::unexpected(
+            Error(ErrorType::UNSUPPORTED_INDEX_OPERATION, "Index does not support new filter"));
     }
 
     /**
@@ -299,7 +310,8 @@ public:
       */
     [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     SearchWithRequest(const SearchRequest& request) const {
-        throw std::runtime_error("Index doesn't support Search With Request");
+        return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                    "Index does not support Search With Request"));
     }
 
     /**
@@ -321,7 +333,8 @@ public:
               const FilterPtr& filter,
               IteratorContext*& iter_ctx,
               bool is_last_search) const {
-        throw std::runtime_error("Index doesn't support new filter");
+        return tl::unexpected(
+            Error(ErrorType::UNSUPPORTED_INDEX_OPERATION, "Index does not support new filter"));
     }
 
     /**
@@ -338,7 +351,8 @@ public:
       */
     [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     KnnSearch(const DatasetPtr& query, int64_t k, SearchParam& search_param) const {
-        throw std::runtime_error("Index doesn't support new filter");
+        return tl::unexpected(
+            Error(ErrorType::UNSUPPORTED_INDEX_OPERATION, "Index does not support new filter"));
     }
 
     /**
@@ -426,7 +440,8 @@ public:
                 const std::string& parameters,
                 const FilterPtr& filter,
                 int64_t limited_size = -1) const {
-        throw std::runtime_error("Index doesn't support new filter");
+        return tl::unexpected(
+            Error(ErrorType::UNSUPPORTED_INDEX_OPERATION, "Index does not support new filter"));
     }
 
     /**
@@ -438,7 +453,8 @@ public:
      */
     virtual tl::expected<uint32_t, Error>
     Pretrain(const std::vector<int64_t>& base_tag_ids, uint32_t k, const std::string& parameters) {
-        throw std::runtime_error("Index doesn't support pretrain");
+        return tl::unexpected(
+            Error(ErrorType::UNSUPPORTED_INDEX_OPERATION, "Index does not support pretrain"));
     };
 
     /**
@@ -454,7 +470,8 @@ public:
              int64_t k,
              const std::string& parameters,
              int64_t global_optimum_tag_id = std::numeric_limits<int64_t>::max()) {
-        throw std::runtime_error("Index doesn't support feedback");
+        return tl::unexpected(
+            Error(ErrorType::UNSUPPORTED_INDEX_OPERATION, "Index does not support feedback"));
     };
 
     /**
@@ -477,7 +494,8 @@ public:
     CalcDistanceById(const float* vector,
                      int64_t id,
                      bool calculate_precise_distance = true) const {
-        throw std::runtime_error("Index doesn't support get distance by id");
+        return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                    "Index does not support get distance by id"));
     };
 
     /**
@@ -501,7 +519,8 @@ public:
     CalcDistanceById(const DatasetPtr& vector,
                      int64_t id,
                      bool calculate_precise_distance = true) const {
-        throw std::runtime_error("Index doesn't support get distance by id");
+        return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                    "Index does not support get distance by id"));
     };
 
     /**
@@ -526,7 +545,8 @@ public:
                     const int64_t* ids,
                     int64_t count,
                     bool calculate_precise_distance = true) const {
-        throw std::runtime_error("Index doesn't support get distance by id");
+        return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                    "Index does not support get distance by id"));
     };
 
     /**
@@ -552,7 +572,8 @@ public:
                     const int64_t* ids,
                     int64_t count,
                     bool calculate_precise_distance = true) const {
-        throw std::runtime_error("Index doesn't support get distance by id");
+        return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                    "Index does not support get distance by id"));
     };
 
     /**
@@ -563,7 +584,8 @@ public:
      */
     [[nodiscard]] virtual tl::expected<std::pair<int64_t, int64_t>, Error>
     GetMinAndMaxId() const {
-        throw std::runtime_error("Index doesn't support get Min and Max id");
+        return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                    "Index does not support get Min and Max id"));
     }
 
     /**
@@ -583,7 +605,8 @@ public:
      */
     virtual tl::expected<void, Error>
     GetExtraInfoByIds(const int64_t* ids, int64_t count, char* extra_infos) const {
-        throw std::runtime_error("Index doesn't support GetExtraInfoByIds");
+        return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                    "Index does not support GetExtraInfoByIds"));
     };
 
     /**
@@ -619,7 +642,8 @@ public:
     GetRawVectorByIds(const int64_t* ids,
                       int64_t count,
                       Allocator* specified_allocator = nullptr) const {
-        throw std::runtime_error("Index doesn't support GetRawVectorByIds");
+        return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                    "Index does not support GetRawVectorByIds"));
     };
 
     /**
@@ -639,7 +663,8 @@ public:
      */
     [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     GetDataByIdsWithFlag(const int64_t* ids, int64_t count, uint64_t selected_data_flag) const {
-        throw std::runtime_error("Index doesn't support GetDataByIdsWithFlag");
+        return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                    "Index does not support GetDataByIdsWithFlag"));
     };
 
     /*
@@ -656,7 +681,8 @@ public:
      */
     [[nodiscard]] virtual tl::expected<std::vector<IndexDetailInfo>, Error>
     GetIndexDetailInfos() const {
-        throw std::runtime_error("Index doesn't support GetIndexDetailInfos");
+        return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                    "Index does not support GetIndexDetailInfos"));
     };
 
     /*
@@ -672,7 +698,8 @@ public:
      */
     virtual tl::expected<DetailDataPtr, Error>
     GetDetailDataByName(const std::string& name, IndexDetailInfo& info) const {
-        throw std::runtime_error("Index doesn't support GetDetailDataByName");
+        return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                    "Index does not support GetDetailDataByName"));
     };
 
     /**
@@ -692,7 +719,8 @@ public:
      */
     [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     GetDataByIds(const int64_t* ids, int64_t count) const {
-        throw std::runtime_error("Index doesn't support GetDataByIds");
+        return tl::unexpected(
+            Error(ErrorType::UNSUPPORTED_INDEX_OPERATION, "Index does not support GetDataByIds"));
     };
 
     /**
@@ -706,7 +734,7 @@ public:
      */
     [[nodiscard]] virtual bool
     CheckFeature(IndexFeature feature) const {
-        throw std::runtime_error("Index doesn't support check feature");
+        return false;
     }
 
     /**
@@ -724,7 +752,8 @@ public:
      */
     virtual tl::expected<void, Error>
     Merge(const std::vector<MergeUnit>& merge_units) {
-        throw std::runtime_error("Index doesn't support merge");
+        return tl::unexpected(
+            Error(ErrorType::UNSUPPORTED_INDEX_OPERATION, "Index does not support merge"));
     }
 
     /**
@@ -736,7 +765,8 @@ public:
      */
     [[nodiscard]] virtual tl::expected<IndexPtr, Error>
     Clone(const std::shared_ptr<Allocator>& allocator = nullptr) const {
-        throw std::runtime_error("Index doesn't support Clone");
+        return tl::unexpected(
+            Error(ErrorType::UNSUPPORTED_INDEX_OPERATION, "Index does not support Clone"));
     }
 
     /**
@@ -747,7 +777,8 @@ public:
      */
     [[nodiscard]] virtual tl::expected<IndexPtr, Error>
     ExportModel() const {
-        throw std::runtime_error("Index doesn't support ExportModel");
+        return tl::unexpected(
+            Error(ErrorType::UNSUPPORTED_INDEX_OPERATION, "Index does not support ExportModel"));
     }
 
     /**
@@ -758,7 +789,8 @@ public:
      */
     [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     ExportIDs() const {
-        throw std::runtime_error("Index doesn't support ExportIDs");
+        return tl::unexpected(
+            Error(ErrorType::UNSUPPORTED_INDEX_OPERATION, "Index does not support ExportIDs"));
     }
 
     /**
@@ -769,7 +801,8 @@ public:
      */
     virtual tl::expected<void, Error>
     SetImmutable() {
-        throw std::runtime_error("Index doesn't support SetImmutable");
+        return tl::unexpected(
+            Error(ErrorType::UNSUPPORTED_INDEX_OPERATION, "Index does not support SetImmutable"));
     }
 
 public:
@@ -790,7 +823,8 @@ public:
       */
     [[nodiscard]] virtual tl::expected<void, Error>
     Serialize(WriteFuncType write_func) const {
-        throw std::runtime_error("Index doesn't support Serialize with write function");
+        return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                    "Index does not support Serialize with write function"));
     }
 
     /**
@@ -819,7 +853,8 @@ public:
       */
     virtual tl::expected<void, Error>
     Serialize(std::ostream& out_stream) {
-        throw std::runtime_error("Index not support serialize to a file stream");
+        return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                    "Index does not support serialize to a file stream"));
     }
 
     /**
@@ -831,7 +866,8 @@ public:
       */
     virtual tl::expected<void, Error>
     Deserialize(std::istream& in_stream) {
-        throw std::runtime_error("Index not support deserialize from a file stream");
+        return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                    "Index does not support deserialize from a file stream"));
     }
 
 public:
@@ -852,7 +888,7 @@ public:
       */
     [[nodiscard]] virtual int64_t
     GetNumberRemoved() const {
-        throw std::runtime_error("Index not support GetNumberRemoved");
+        throw std::runtime_error("Index does not support GetNumberRemoved");
     }
 
     /**
@@ -873,7 +909,7 @@ public:
     // GetMemoryUsageDetail() const = 0;
     [[nodiscard]] virtual std::string
     GetMemoryUsageDetail() const {
-        throw std::runtime_error("Index not support GetMemoryUsageDetail");
+        throw std::runtime_error("Index does not support GetMemoryUsageDetail");
     }
 
     /**
@@ -884,7 +920,7 @@ public:
       */
     [[nodiscard]] virtual uint64_t
     EstimateMemory(uint64_t num_elements) const {
-        throw std::runtime_error("Index not support estimate the memory by element counts");
+        throw std::runtime_error("Index does not support estimate the memory by element counts");
     }
 
     /**
@@ -895,7 +931,7 @@ public:
       */
     [[nodiscard]] virtual int64_t
     GetEstimateBuildMemory(const int64_t num_elements) const {
-        throw std::runtime_error("Index not support estimate the memory while building");
+        throw std::runtime_error("Index does not support estimate the memory while building");
     }
 
     /**
@@ -905,7 +941,7 @@ public:
       */
     [[nodiscard]] virtual std::string
     GetStats() const {
-        throw std::runtime_error("Index not support GetStats");
+        throw std::runtime_error("Index does not support GetStats");
     }
 
     /**
@@ -917,7 +953,7 @@ public:
       */
     virtual std::string
     AnalyzeIndexBySearch(const SearchRequest& request) {
-        throw std::runtime_error("Index not support analyze index by search");
+        throw std::runtime_error("Index does not support analyze index by search");
     }
 
     /**
@@ -929,7 +965,7 @@ public:
       */
     [[nodiscard]] virtual bool
     CheckIdExist(int64_t id) const {
-        throw std::runtime_error("Index not support check id exist");
+        throw std::runtime_error("Index does not support check id exist");
     }
 
     /**
@@ -943,7 +979,8 @@ public:
      */
     virtual tl::expected<void, Error>
     ExportCache(std::ostream& out_stream) const {
-        throw std::runtime_error("Index doesn't support ExportCache");
+        return tl::unexpected(
+            Error(ErrorType::UNSUPPORTED_INDEX_OPERATION, "Index does not support ExportCache"));
     }
 
     /**
@@ -956,7 +993,8 @@ public:
      */
     virtual tl::expected<void, Error>
     ImportCache(std::istream& in_stream) {
-        throw std::runtime_error("Index doesn't support ImportCache");
+        return tl::unexpected(
+            Error(ErrorType::UNSUPPORTED_INDEX_OPERATION, "Index does not support ImportCache"));
     }
 
 public:
