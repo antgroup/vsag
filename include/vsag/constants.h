@@ -208,6 +208,7 @@ extern const char* const HGRAPH_USE_EXTRA_INFO_FILTER;
 extern const char* const STORE_RAW_VECTOR;
 extern const char* const RAW_VECTOR_IO_TYPE;
 extern const char* const RAW_VECTOR_FILE_PATH;
+extern const char* const HGRAPH_PERSIST_SOURCE_ID;
 
 extern const char* const BRUTE_FORCE_BASE_QUANTIZATION_TYPE;
 extern const char* const BRUTE_FORCE_BASE_IO_TYPE;

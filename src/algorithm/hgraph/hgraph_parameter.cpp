@@ -131,6 +131,9 @@ HGraphParameter::FromJson(const JsonType& json) {
     if (json.Contains(SUPPORT_FORCE_REMOVE)) {
         this->support_force_remove = json[SUPPORT_FORCE_REMOVE].GetBool();
     }
+    if (json.Contains(HGRAPH_PERSIST_SOURCE_ID_KEY)) {
+        this->persist_source_id = json[HGRAPH_PERSIST_SOURCE_ID_KEY].GetBool();
+    }
 }
 
 JsonType
@@ -148,6 +151,7 @@ HGraphParameter::ToJson() const {
     json[SUPPORT_DUPLICATE].SetBool(this->support_duplicate);
     json[DUPLICATE_DISTANCE_THRESHOLD].SetFloat(this->duplicate_distance_threshold);
     json[SUPPORT_FORCE_REMOVE].SetBool(this->support_force_remove);
+    json[HGRAPH_PERSIST_SOURCE_ID_KEY].SetBool(this->persist_source_id);
     json[TRAIN_SAMPLE_COUNT_KEY].SetInt(this->train_sample_count);
     return json;
 }

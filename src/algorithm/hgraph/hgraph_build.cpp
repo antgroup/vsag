@@ -763,7 +763,7 @@ constexpr uint32_t MISSED_REFINE_ROUNDS = 3;
 // than full rebuild). With ef=64, expected per-node ~60us (5x faster).
 // Reference gby BuildCacheOptions default for hit_refine_ef is also 64.
 constexpr uint32_t HIT_REFINE_EF = 64;
-// MISSED_REFINE_EF kept high (400) because missed nodes have NO seed
+// MISSED_REFINE_EF kept higher than HIT because missed nodes have NO seed
 // neighbors and need wider exploration. User-directed asymmetric config.
 constexpr uint32_t MISSED_REFINE_EF = 200;
 
@@ -852,7 +852,7 @@ HGraph::collect_refine_candidates(const DatasetPtr& data,
         // both paths go through flatten_codes->ComputePairVectors with the
         // same query and same inner_ids.
         while (not result->Empty()) {
-            const auto& candidate = result->Top();
+            auto candidate = result->Top();
             const InnerIdType candidate_id = candidate.second;
             if (candidate_id == inner_id || not seen.emplace(candidate_id).second) {
                 result->Pop();

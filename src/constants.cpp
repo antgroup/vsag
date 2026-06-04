@@ -188,6 +188,7 @@ const char* const HGRAPH_USE_EXTRA_INFO_FILTER = "use_extra_info_filter";
 const char* const STORE_RAW_VECTOR = "store_raw_vector";
 const char* const RAW_VECTOR_IO_TYPE = "raw_vector_io_type";
 const char* const RAW_VECTOR_FILE_PATH = "raw_vector_file_path";
+const char* const HGRAPH_PERSIST_SOURCE_ID = "persist_source_id";
 
 const char* const BRUTE_FORCE_BASE_QUANTIZATION_TYPE = "base_quantization_type";
 const char* const BRUTE_FORCE_BASE_IO_TYPE = "base_io_type";

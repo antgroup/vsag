@@ -94,6 +94,7 @@ HGraph::serialize_basic_info() const {
     jsonify_basic_info["ef_construct"].SetInt(this->ef_construct_);
     jsonify_basic_info["extra_info_size"].SetInt(this->extra_info_size_);
     jsonify_basic_info["data_type"].SetInt(static_cast<int64_t>(this->data_type_));
+    jsonify_basic_info["persist_source_id"].SetBool(this->persist_source_id_);
     // logger::debug("mult: {}", this->mult_);
     TO_JSON_BASE64(jsonify_basic_info, mult);
     jsonify_basic_info["max_capacity"].SetInt(this->max_capacity_.load());
@@ -128,6 +129,9 @@ HGraph::deserialize_basic_info(const JsonType& jsonify_basic_info) {
     FROM_JSON(jsonify_basic_info, extra_info_size, Int);
     if (jsonify_basic_info.Contains("data_type")) {
         this->data_type_ = static_cast<DataTypes>(jsonify_basic_info["data_type"].GetInt());
+    }
+    if (jsonify_basic_info.Contains("persist_source_id")) {
+        this->persist_source_id_ = jsonify_basic_info["persist_source_id"].GetBool();
     }
     FROM_JSON_BASE64(jsonify_basic_info, mult);
     // logger::debug("mult: {}", this->mult_);
@@ -172,14 +176,17 @@ HGraph::serialize_label_info(StreamWriter& writer) const {
     }
 
     // Append source_id_table_ block: [magic][count][str0][str1]...
-    // Even an empty source_id_table_ still emits the magic + count==0 so the
-    // reader can unambiguously detect (and skip) the block.
-    const auto& sid_table = this->label_table_->GetSourceIdTableRef();
-    StreamWriter::WriteObj(writer, SOURCE_ID_TABLE_MAGIC);
-    uint64_t sid_count = sid_table.size();
-    StreamWriter::WriteObj(writer, sid_count);
-    for (uint64_t i = 0; i < sid_count; ++i) {
-        StreamWriter::WriteString(writer, sid_table[i]);
+    // Only persist when persist_source_id_ is enabled. Even an empty
+    // source_id_table_ still emits the magic + count==0 so the reader can
+    // unambiguously detect (and skip) the block.
+    if (this->persist_source_id_) {
+        const auto& sid_table = this->label_table_->GetSourceIdTableRef();
+        StreamWriter::WriteObj(writer, SOURCE_ID_TABLE_MAGIC);
+        uint64_t sid_count = sid_table.size();
+        StreamWriter::WriteObj(writer, sid_count);
+        for (uint64_t i = 0; i < sid_count; ++i) {
+            StreamWriter::WriteString(writer, sid_table[i]);
+        }
     }
 }
 
@@ -214,8 +221,8 @@ HGraph::deserialize_label_info(StreamReader& reader) const {
             StreamReader::ReadObj(reader, sid_count);
             // Defensive validation against corrupted / maliciously crafted
             // streams: an unchecked resize on a huge sid_count would cause
-            // OOM / DoS. sid_count must match the just-deserialized label
-            // table size (they are populated in lock-step by InsertSourceId).
+            // OOM / DoS. sid_count must not exceed the just-deserialized label
+            // table size. It may be smaller (e.g. partial source_id assignment).
             const uint64_t label_table_size = this->label_table_->label_table_.size();
             if (sid_count > label_table_size) {
                 throw VsagException(ErrorType::INVALID_ARGUMENT,

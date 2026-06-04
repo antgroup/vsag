@@ -542,6 +542,8 @@ private:
     bool support_force_remove_{false};
     float duplicate_distance_threshold_{0.0F};
 
+    bool persist_source_id_{false};
+
     std::unique_ptr<HGraphCache> cache_{nullptr};
 };
 }  // namespace vsag

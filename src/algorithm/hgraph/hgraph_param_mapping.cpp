@@ -362,6 +362,12 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             },
         },
         {
+            HGRAPH_PERSIST_SOURCE_ID,
+            {
+                HGRAPH_PERSIST_SOURCE_ID_KEY,
+            },
+        },
+        {
             HGRAPH_LABEL_REMAP_TYPE,
             {
                 LABEL_REMAP_TYPE_KEY,
@@ -454,6 +460,7 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
         },
         "{HGRAPH_SUPPORT_DUPLICATE}": false,
         "{SUPPORT_FORCE_REMOVE}": false,
+        "{HGRAPH_PERSIST_SOURCE_ID_KEY}": false,
         "{EF_CONSTRUCTION_KEY}": 400
     })";
 
