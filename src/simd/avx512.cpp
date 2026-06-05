@@ -15,6 +15,9 @@
 #include "simd/int8_simd.h"
 #if defined(ENABLE_AVX512)
 #include <immintrin.h>
+
+#include "simd/kernels/kernels.h"
+#include "simd/traits/simd_traits_avx512.h"
 #endif
 
 #include <cmath>
@@ -66,7 +69,12 @@ INT8InnerProductDistance(const void* pVect1v, const void* pVect2v, const void* q
 
 void
 PQDistanceFloat256(const void* single_dim_centers, float single_dim_val, void* result) {
+#if defined(ENABLE_AVX512)
+    simd::PQDistanceFloat256Impl<simd::SimdTraits<simd::AVX512_Tag>>(
+        single_dim_centers, single_dim_val, result, &avx2::PQDistanceFloat256);
+#else
     return avx2::PQDistanceFloat256(single_dim_centers, single_dim_val, result);
+#endif
 }
 
 void
@@ -77,47 +85,8 @@ Prefetch(const void* data) {
 float
 FP32ComputeIP(const float* RESTRICT query, const float* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    if (dim < 16) {
-        return avx2::FP32ComputeIP(query, codes, dim);
-    }
-    __m512 sum0 = _mm512_setzero_ps();
-    __m512 sum1 = _mm512_setzero_ps();
-    __m512 sum2 = _mm512_setzero_ps();
-    __m512 sum3 = _mm512_setzero_ps();
-
-    uint64_t i = 0;
-    for (; i + 63 < dim; i += 64) {
-        __m512 a0 = _mm512_loadu_ps(query + i);
-        __m512 b0 = _mm512_loadu_ps(codes + i);
-
-        __m512 a1 = _mm512_loadu_ps(query + i + 16);
-        __m512 b1 = _mm512_loadu_ps(codes + i + 16);
-
-        __m512 a2 = _mm512_loadu_ps(query + i + 32);
-        __m512 b2 = _mm512_loadu_ps(codes + i + 32);
-
-        __m512 a3 = _mm512_loadu_ps(query + i + 48);
-        __m512 b3 = _mm512_loadu_ps(codes + i + 48);
-
-        sum0 = _mm512_fmadd_ps(a0, b0, sum0);
-        sum1 = _mm512_fmadd_ps(a1, b1, sum1);
-        sum2 = _mm512_fmadd_ps(a2, b2, sum2);
-        sum3 = _mm512_fmadd_ps(a3, b3, sum3);
-    }
-    __m512 sum = _mm512_add_ps(sum0, sum1);
-    sum = _mm512_add_ps(sum, sum2);
-    sum = _mm512_add_ps(sum, sum3);
-
-    for (; i + 15 < dim; i += 16) {
-        __m512 a = _mm512_loadu_ps(query + i);  // load 16 floats from memory
-        __m512 b = _mm512_loadu_ps(codes + i);  // load 16 floats from memory
-        sum = _mm512_fmadd_ps(a, b, sum);
-    }
-    float ip = _mm512_reduce_add_ps(sum);
-    if (dim - i > 0) {
-        ip += avx2::FP32ComputeIP(query + i, codes + i, dim - i);
-    }
-    return ip;
+    return simd::ComputeIPImpl<simd::SimdTraits<simd::AVX512_Tag>, /*Unroll=*/4>(
+        query, codes, dim, &avx2::FP32ComputeIP);
 #else
     return avx2::FP32ComputeIP(query, codes, dim);
 #endif
@@ -126,56 +95,8 @@ FP32ComputeIP(const float* RESTRICT query, const float* RESTRICT codes, uint64_t
 float
 FP32ComputeL2Sqr(const float* RESTRICT query, const float* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    if (dim < 16) {
-        return avx2::FP32ComputeL2Sqr(query, codes, dim);
-    }
-
-    __m512 sum0 = _mm512_setzero_ps();
-    __m512 sum1 = _mm512_setzero_ps();
-    __m512 sum2 = _mm512_setzero_ps();
-    __m512 sum3 = _mm512_setzero_ps();
-
-    uint64_t i = 0;
-    for (; i + 63 < dim; i += 64) {
-        __m512 a0 = _mm512_loadu_ps(query + i);
-        __m512 b0 = _mm512_loadu_ps(codes + i);
-
-        __m512 a1 = _mm512_loadu_ps(query + i + 16);
-        __m512 b1 = _mm512_loadu_ps(codes + i + 16);
-
-        __m512 a2 = _mm512_loadu_ps(query + i + 32);
-        __m512 b2 = _mm512_loadu_ps(codes + i + 32);
-
-        __m512 a3 = _mm512_loadu_ps(query + i + 48);
-        __m512 b3 = _mm512_loadu_ps(codes + i + 48);
-
-        __m512 diff0 = _mm512_sub_ps(a0, b0);
-        __m512 diff1 = _mm512_sub_ps(a1, b1);
-        __m512 diff2 = _mm512_sub_ps(a2, b2);
-        __m512 diff3 = _mm512_sub_ps(a3, b3);
-
-        sum0 = _mm512_fmadd_ps(diff0, diff0, sum0);
-        sum1 = _mm512_fmadd_ps(diff1, diff1, sum1);
-        sum2 = _mm512_fmadd_ps(diff2, diff2, sum2);
-        sum3 = _mm512_fmadd_ps(diff3, diff3, sum3);
-    }
-
-    __m512 sum = _mm512_add_ps(sum0, sum1);
-    sum = _mm512_add_ps(sum, sum2);
-    sum = _mm512_add_ps(sum, sum3);
-
-    for (; i + 15 < dim; i += 16) {
-        __m512 a = _mm512_loadu_ps(query + i);
-        __m512 b = _mm512_loadu_ps(codes + i);
-        __m512 diff = _mm512_sub_ps(a, b);
-        sum = _mm512_fmadd_ps(diff, diff, sum);
-    }
-
-    float l2 = _mm512_reduce_add_ps(sum);
-    if (dim > i) {
-        l2 += avx2::FP32ComputeL2Sqr(query + i, codes + i, dim - i);
-    }
-    return l2;
+    return simd::ComputeL2SqrImpl<simd::SimdTraits<simd::AVX512_Tag>, /*Unroll=*/4>(
+        query, codes, dim, &avx2::FP32ComputeL2Sqr);
 #else
     return avx2::FP32ComputeL2Sqr(query, codes, dim);
 #endif
@@ -193,45 +114,18 @@ FP32ComputeIPBatch4(const float* RESTRICT query,
                     float& result3,
                     float& result4) {
 #if defined(ENABLE_AVX512)
-    if (dim < 16) {
-        return avx2::FP32ComputeIPBatch4(
-            query, dim, codes1, codes2, codes3, codes4, result1, result2, result3, result4);
-    }
-
-    __m512 sum1 = _mm512_setzero_ps();
-    __m512 sum2 = _mm512_setzero_ps();
-    __m512 sum3 = _mm512_setzero_ps();
-    __m512 sum4 = _mm512_setzero_ps();
-    uint64_t i = 0;
-    for (; i + 15 < dim; i += 16) {
-        __m512 q = _mm512_loadu_ps(query + i);
-        __m512 c1 = _mm512_loadu_ps(codes1 + i);
-        __m512 c2 = _mm512_loadu_ps(codes2 + i);
-        __m512 c3 = _mm512_loadu_ps(codes3 + i);
-        __m512 c4 = _mm512_loadu_ps(codes4 + i);
-
-        sum1 = _mm512_fmadd_ps(q, c1, sum1);
-        sum2 = _mm512_fmadd_ps(q, c2, sum2);
-        sum3 = _mm512_fmadd_ps(q, c3, sum3);
-        sum4 = _mm512_fmadd_ps(q, c4, sum4);
-    }
-    result1 += _mm512_reduce_add_ps(sum1);
-    result2 += _mm512_reduce_add_ps(sum2);
-    result3 += _mm512_reduce_add_ps(sum3);
-    result4 += _mm512_reduce_add_ps(sum4);
-    if (dim - i > 0) {
-        avx2::FP32ComputeIPBatch4(query + i,
-                                  dim - i,
-                                  codes1 + i,
-                                  codes2 + i,
-                                  codes3 + i,
-                                  codes4 + i,
-                                  result1,
-                                  result2,
-                                  result3,
-                                  result4);
-    }
-
+    simd::ComputeBatch4Impl<simd::SimdTraits<simd::AVX512_Tag>, simd::Batch4Kind::IP>(
+        query,
+        dim,
+        codes1,
+        codes2,
+        codes3,
+        codes4,
+        result1,
+        result2,
+        result3,
+        result4,
+        &avx2::FP32ComputeIPBatch4);
 #else
     return avx2::FP32ComputeIPBatch4(
         query, dim, codes1, codes2, codes3, codes4, result1, result2, result3, result4);
@@ -250,46 +144,18 @@ FP32ComputeL2SqrBatch4(const float* RESTRICT query,
                        float& result3,
                        float& result4) {
 #if defined(ENABLE_AVX512)
-    if (dim < 16) {
-        return avx2::FP32ComputeL2SqrBatch4(
-            query, dim, codes1, codes2, codes3, codes4, result1, result2, result3, result4);
-    }
-    __m512 sum1 = _mm512_setzero_ps();
-    __m512 sum2 = _mm512_setzero_ps();
-    __m512 sum3 = _mm512_setzero_ps();
-    __m512 sum4 = _mm512_setzero_ps();
-    uint64_t i = 0;
-    for (; i + 15 < dim; i += 16) {
-        __m512 q = _mm512_loadu_ps(query + i);
-        __m512 c1 = _mm512_loadu_ps(codes1 + i);
-        __m512 c2 = _mm512_loadu_ps(codes2 + i);
-        __m512 c3 = _mm512_loadu_ps(codes3 + i);
-        __m512 c4 = _mm512_loadu_ps(codes4 + i);
-        __m512 diff1 = _mm512_sub_ps(q, c1);
-        __m512 diff2 = _mm512_sub_ps(q, c2);
-        __m512 diff3 = _mm512_sub_ps(q, c3);
-        __m512 diff4 = _mm512_sub_ps(q, c4);
-        sum1 = _mm512_fmadd_ps(diff1, diff1, sum1);
-        sum2 = _mm512_fmadd_ps(diff2, diff2, sum2);
-        sum3 = _mm512_fmadd_ps(diff3, diff3, sum3);
-        sum4 = _mm512_fmadd_ps(diff4, diff4, sum4);
-    }
-    result1 += _mm512_reduce_add_ps(sum1);
-    result2 += _mm512_reduce_add_ps(sum2);
-    result3 += _mm512_reduce_add_ps(sum3);
-    result4 += _mm512_reduce_add_ps(sum4);
-    if (dim - i > 0) {
-        avx2::FP32ComputeL2SqrBatch4(query + i,
-                                     dim - i,
-                                     codes1 + i,
-                                     codes2 + i,
-                                     codes3 + i,
-                                     codes4 + i,
-                                     result1,
-                                     result2,
-                                     result3,
-                                     result4);
-    }
+    simd::ComputeBatch4Impl<simd::SimdTraits<simd::AVX512_Tag>, simd::Batch4Kind::L2>(
+        query,
+        dim,
+        codes1,
+        codes2,
+        codes3,
+        codes4,
+        result1,
+        result2,
+        result3,
+        result4,
+        &avx2::FP32ComputeL2SqrBatch4);
 #else
     return avx::FP32ComputeL2SqrBatch4(
         query, dim, codes1, codes2, codes3, codes4, result1, result2, result3, result4);
@@ -299,19 +165,8 @@ FP32ComputeL2SqrBatch4(const float* RESTRICT query,
 void
 FP32Sub(const float* x, const float* y, float* z, uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    if (dim < 16) {
-        return avx2::FP32Sub(x, y, z, dim);
-    }
-    uint64_t i = 0;
-    for (; i + 15 < dim; i += 16) {
-        __m512 x_vec = _mm512_loadu_ps(x + i);
-        __m512 y_vec = _mm512_loadu_ps(y + i);
-        __m512 diff_vec = _mm512_sub_ps(x_vec, y_vec);
-        _mm512_storeu_ps(z + i, diff_vec);
-    }
-    if (dim > i) {
-        avx2::FP32Sub(x + i, y + i, z + i, dim - i);
-    }
+    simd::BinaryOpImpl<simd::SimdTraits<simd::AVX512_Tag>, simd::BinaryOp::Sub>(
+        x, y, z, dim, &avx2::FP32Sub);
 #else
     return avx2::FP32Sub(x, y, z, dim);
 #endif
@@ -320,19 +175,8 @@ FP32Sub(const float* x, const float* y, float* z, uint64_t dim) {
 void
 FP32Add(const float* x, const float* y, float* z, uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    if (dim < 16) {
-        return avx2::FP32Add(x, y, z, dim);
-    }
-    uint64_t i = 0;
-    for (; i + 15 < dim; i += 16) {
-        __m512 x_vec = _mm512_loadu_ps(x + i);
-        __m512 y_vec = _mm512_loadu_ps(y + i);
-        __m512 sum_vec = _mm512_add_ps(x_vec, y_vec);
-        _mm512_storeu_ps(z + i, sum_vec);
-    }
-    if (dim > i) {
-        avx2::FP32Add(x + i, y + i, z + i, dim - i);
-    }
+    simd::BinaryOpImpl<simd::SimdTraits<simd::AVX512_Tag>, simd::BinaryOp::Add>(
+        x, y, z, dim, &avx2::FP32Add);
 #else
     return avx2::FP32Add(x, y, z, dim);
 #endif
@@ -341,19 +185,8 @@ FP32Add(const float* x, const float* y, float* z, uint64_t dim) {
 void
 FP32Mul(const float* x, const float* y, float* z, uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    if (dim < 16) {
-        return avx2::FP32Mul(x, y, z, dim);
-    }
-    uint64_t i = 0;
-    for (; i + 15 < dim; i += 16) {
-        __m512 x_vec = _mm512_loadu_ps(x + i);
-        __m512 y_vec = _mm512_loadu_ps(y + i);
-        __m512 mul_vec = _mm512_mul_ps(x_vec, y_vec);
-        _mm512_storeu_ps(z + i, mul_vec);
-    }
-    if (dim > i) {
-        avx2::FP32Mul(x + i, y + i, z + i, dim - i);
-    }
+    simd::BinaryOpImpl<simd::SimdTraits<simd::AVX512_Tag>, simd::BinaryOp::Mul>(
+        x, y, z, dim, &avx2::FP32Mul);
 #else
     return avx2::FP32Mul(x, y, z, dim);
 #endif
@@ -362,19 +195,8 @@ FP32Mul(const float* x, const float* y, float* z, uint64_t dim) {
 void
 FP32Div(const float* x, const float* y, float* z, uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    if (dim < 16) {
-        return avx2::FP32Div(x, y, z, dim);
-    }
-    uint64_t i = 0;
-    for (; i + 15 < dim; i += 16) {
-        __m512 x_vec = _mm512_loadu_ps(x + i);
-        __m512 y_vec = _mm512_loadu_ps(y + i);
-        __m512 div_vec = _mm512_div_ps(x_vec, y_vec);
-        _mm512_storeu_ps(z + i, div_vec);
-    }
-    if (dim > i) {
-        avx2::FP32Div(x + i, y + i, z + i, dim - i);
-    }
+    simd::BinaryOpImpl<simd::SimdTraits<simd::AVX512_Tag>, simd::BinaryOp::Div>(
+        x, y, z, dim, &avx2::FP32Div);
 #else
     return avx2::FP32Div(x, y, z, dim);
 #endif
@@ -383,20 +205,7 @@ FP32Div(const float* x, const float* y, float* z, uint64_t dim) {
 float
 FP32ReduceAdd(const float* x, uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    if (dim < 16) {
-        return avx2::FP32ReduceAdd(x, dim);
-    }
-    __m512 sum = _mm512_setzero_ps();
-    uint64_t i = 0;
-    for (; i + 15 < dim; i += 16) {
-        __m512 a = _mm512_loadu_ps(x + i);
-        sum = _mm512_add_ps(sum, a);
-    }
-    float result = _mm512_reduce_add_ps(sum);
-    if (i < dim) {
-        result += avx2::FP32ReduceAdd(x + i, dim - i);
-    }
-    return result;
+    return simd::ReduceAddImpl<simd::SimdTraits<simd::AVX512_Tag>>(x, dim, &avx2::FP32ReduceAdd);
 #else
     return sse::FP32ReduceAdd(x, dim);
 #endif
@@ -413,26 +222,8 @@ __inline __m512i __attribute__((__always_inline__)) load_16_short(const uint16_t
 float
 INT8ComputeIP(const int8_t* __restrict query, const int8_t* __restrict codes, uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    __mmask32 mask = 0xFFFFFFFF;
-
-    auto qty = dim;
-    const uint32_t n = (qty >> 5);
-    if (n == 0) {
-        return avx2::INT8ComputeIP(query, codes, dim);
-    }
-
-    __m512i sum512 = _mm512_set1_epi32(0);
-    for (uint32_t i = 0; i < n; ++i) {
-        __m256i v1 = _mm256_maskz_loadu_epi8(mask, query + (i << 5));
-        __m512i v1_512 = _mm512_cvtepi8_epi16(v1);
-        __m256i v2 = _mm256_maskz_loadu_epi8(mask, codes + (i << 5));
-        __m512i v2_512 = _mm512_cvtepi8_epi16(v2);
-        sum512 = _mm512_add_epi32(sum512, _mm512_madd_epi16(v1_512, v2_512));
-    }
-    auto res = static_cast<float>(_mm512_reduce_add_epi32(sum512));
-    uint64_t new_dim = qty & (0x1F);
-    res += avx2::INT8ComputeIP(query + (n << 5), codes + (n << 5), new_dim);
-    return res;
+    return simd::Int8ComputeIPImpl<simd::Int8Traits<simd::AVX512_Int8_Tag>>(
+        query, codes, dim, &avx2::INT8ComputeIP);
 #else
     return avx2::INT8ComputeIP(query, codes, dim);
 #endif
@@ -441,35 +232,8 @@ INT8ComputeIP(const int8_t* __restrict query, const int8_t* __restrict codes, ui
 float
 INT8ComputeL2Sqr(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    constexpr int64_t BATCH_SIZE{32};
-
-    const uint64_t n = dim / BATCH_SIZE;
-
-    if (n == 0) {
-        return avx2::INT8ComputeL2Sqr(query, codes, dim);
-    }
-
-    __m512i sum_sq = _mm512_setzero_si512();
-
-    for (uint64_t i = 0; i < n; ++i) {
-        __m256i q = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(query + BATCH_SIZE * i));
-        __m256i c = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(codes + BATCH_SIZE * i));
-
-        __m512i q_int16 = _mm512_cvtepi8_epi16(q);
-        __m512i c_int16 = _mm512_cvtepi8_epi16(c);
-
-        __m512i diff = _mm512_sub_epi16(q_int16, c_int16);
-
-        __m512i sq = _mm512_madd_epi16(diff, diff);
-
-        sum_sq = _mm512_add_epi32(sq, sum_sq);
-    }
-
-    int32_t l2 = _mm512_reduce_add_epi32(sum_sq);
-
-    l2 += avx2::INT8ComputeL2Sqr(
-        query + BATCH_SIZE * n, codes + BATCH_SIZE * n, dim - BATCH_SIZE * n);
-    return static_cast<float>(l2);
+    return simd::Int8ComputeL2SqrImpl<simd::Int8Traits<simd::AVX512_Int8_Tag>>(
+        query, codes, dim, &avx2::INT8ComputeL2Sqr);
 #else
     return avx2::INT8ComputeL2Sqr(query, codes, dim);
 #endif
@@ -478,29 +242,8 @@ INT8ComputeL2Sqr(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uin
 float
 BF16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    // Initialize the sum to 0
-    __m512 sum = _mm512_setzero_ps();
-    const auto* query_bf16 = (const uint16_t*)(query);
-    const auto* codes_bf16 = (const uint16_t*)(codes);
-
-    // Process the data in 128-bit chunks
-    uint64_t i = 0;
-    for (; i + 15 < dim; i += 16) {
-        // Load data into registers
-        __m512i query_shift = load_16_short(query_bf16 + i);
-        __m512 query_float = _mm512_castsi512_ps(query_shift);
-
-        // Load data into registers
-        __m512i code_shift = load_16_short(codes_bf16 + i);
-        __m512 code_float = _mm512_castsi512_ps(code_shift);
-
-        sum = _mm512_fmadd_ps(code_float, query_float, sum);
-    }
-    float ip = _mm512_reduce_add_ps(sum);
-    if (dim > i) {
-        ip += avx2::BF16ComputeIP(query + i * 2, codes + i * 2, dim - i);
-    }
-    return ip;
+    return simd::HalfComputeIPImpl<simd::BF16Traits<simd::AVX512_BF16_Tag>>(
+        query, codes, dim, &avx2::BF16ComputeIP);
 #else
     return avx2::BF16ComputeIP(query, codes, dim);
 #endif
@@ -509,30 +252,8 @@ BF16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint
 float
 BF16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    // Initialize the sum to 0
-    __m512 sum = _mm512_setzero_ps();
-    const auto* query_bf16 = (const uint16_t*)(query);
-    const auto* codes_bf16 = (const uint16_t*)(codes);
-
-    // Process the data in 128-bit chunks
-    uint64_t i = 0;
-    for (; i + 15 < dim; i += 16) {
-        // Load data into registers
-        __m512i query_shift = load_16_short(query_bf16 + i);
-        __m512 query_float = _mm512_castsi512_ps(query_shift);
-
-        // Load data into registers
-        __m512i code_shift = load_16_short(codes_bf16 + i);
-        __m512 code_float = _mm512_castsi512_ps(code_shift);
-
-        __m512 diff = _mm512_sub_ps(code_float, query_float);
-        sum = _mm512_fmadd_ps(diff, diff, sum);
-    }
-    float l2 = _mm512_reduce_add_ps(sum);
-    if (dim > i) {
-        l2 += avx2::BF16ComputeL2Sqr(query + i * 2, codes + i * 2, dim - i);
-    }
-    return l2;
+    return simd::HalfComputeL2SqrImpl<simd::BF16Traits<simd::AVX512_BF16_Tag>>(
+        query, codes, dim, &avx2::BF16ComputeL2Sqr);
 #else
     return avx2::BF16ComputeL2Sqr(query, codes, dim);
 #endif
@@ -541,29 +262,8 @@ BF16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, u
 float
 FP16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    // Initialize the sum to 0
-    __m512 sum = _mm512_setzero_ps();
-    const auto* query_fp16 = (const uint16_t*)(query);
-    const auto* codes_fp16 = (const uint16_t*)(codes);
-
-    // Process the data in 128-bit chunks
-    uint64_t i = 0;
-    for (; i + 15 < dim; i += 16) {
-        // Load data into registers
-        __m256i query_load = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(query_fp16 + i));
-        __m512 query_float = _mm512_cvtph_ps(query_load);
-
-        // Load data into registers
-        __m256i code_load = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(codes_fp16 + i));
-        __m512 code_float = _mm512_cvtph_ps(code_load);
-
-        sum = _mm512_fmadd_ps(code_float, query_float, sum);
-    }
-    float ip = _mm512_reduce_add_ps(sum);
-    if (dim > i) {
-        ip += avx2::FP16ComputeIP(query + i * 2, codes + i * 2, dim - i);
-    }
-    return ip;
+    return simd::HalfComputeIPImpl<simd::FP16Traits<simd::AVX512_FP16_Tag>>(
+        query, codes, dim, &avx2::FP16ComputeIP);
 #else
     return avx2::FP16ComputeIP(query, codes, dim);
 #endif
@@ -572,30 +272,8 @@ FP16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint
 float
 FP16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    // Initialize the sum to 0
-    __m512 sum = _mm512_setzero_ps();
-    const auto* query_fp16 = (const uint16_t*)(query);
-    const auto* codes_fp16 = (const uint16_t*)(codes);
-
-    // Process the data in 128-bit chunks
-    uint64_t i = 0;
-    for (; i + 15 < dim; i += 16) {
-        // Load data into registers
-        __m256i query_load = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(query_fp16 + i));
-        __m512 query_float = _mm512_cvtph_ps(query_load);
-
-        // Load data into registers
-        __m256i code_load = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(codes_fp16 + i));
-        __m512 code_float = _mm512_cvtph_ps(code_load);
-
-        __m512 diff = _mm512_sub_ps(code_float, query_float);
-        sum = _mm512_fmadd_ps(diff, diff, sum);
-    }
-    float l2 = _mm512_reduce_add_ps(sum);
-    if (dim > i) {
-        l2 += avx2::FP16ComputeL2Sqr(query + i * 2, codes + i * 2, dim - i);
-    }
-    return l2;
+    return simd::HalfComputeL2SqrImpl<simd::FP16Traits<simd::AVX512_FP16_Tag>>(
+        query, codes, dim, &avx2::FP16ComputeL2Sqr);
 #else
     return avx2::FP16ComputeL2Sqr(query, codes, dim);
 #endif
@@ -608,29 +286,8 @@ SQ8ComputeIP(const float* RESTRICT query,
              const float* RESTRICT diff,
              uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    // Initialize the sum to 0
-    __m512 sum = _mm512_setzero_ps();
-    uint64_t i = 0;
-
-    for (; i + 15 < dim; i += 16) {
-        __m128i code_values = _mm_loadu_si128(reinterpret_cast<const __m128i*>(codes + i));
-        __m512i codes_512 = _mm512_cvtepu8_epi32(code_values);
-        __m512 query_values = _mm512_loadu_ps(query + i);
-        __m512 diff_values = _mm512_loadu_ps(diff + i);
-        __m512 lower_bound_values = _mm512_loadu_ps(lower_bound + i);
-
-        __m512 normalized =
-            _mm512_mul_ps(_mm512_cvtepi32_ps(codes_512), _mm512_set1_ps(1.0F / 255.0F));
-        __m512 adjusted = _mm512_fmadd_ps(normalized, diff_values, lower_bound_values);
-        sum = _mm512_fmadd_ps(query_values, adjusted, sum);
-    }
-
-    float ip = _mm512_reduce_add_ps(sum);
-
-    if (dim > i) {
-        ip += avx2::SQ8ComputeIP(query + i, codes + i, lower_bound + i, diff + i, dim - i);
-    }
-    return ip;
+    return simd::SQ8ComputeIPImpl<simd::SQ8Traits<simd::AVX512_SQ8_Tag>>(
+        query, codes, lower_bound, diff, dim, &avx2::SQ8ComputeIP);
 #else
     return avx2::SQ8ComputeIP(query, codes, lower_bound, diff, dim);
 #endif
@@ -643,28 +300,8 @@ SQ8ComputeL2Sqr(const float* RESTRICT query,
                 const float* RESTRICT diff,
                 uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    __m512 sum = _mm512_setzero_ps();
-    uint64_t i = 0;
-
-    for (; i + 15 < dim; i += 16) {
-        __m128i code_values = _mm_loadu_si128(reinterpret_cast<const __m128i*>(codes + i));
-        __m512i codes_512 = _mm512_cvtepu8_epi32(code_values);
-        __m512 query_values = _mm512_loadu_ps(query + i);
-        __m512 diff_values = _mm512_loadu_ps(diff + i);
-        __m512 lower_bound_values = _mm512_loadu_ps(lower_bound + i);
-
-        __m512 normalized =
-            _mm512_mul_ps(_mm512_cvtepi32_ps(codes_512), _mm512_set1_ps(1.0f / 255.0f));
-        __m512 adjusted = _mm512_fmadd_ps(normalized, diff_values, lower_bound_values);
-        __m512 dist = _mm512_sub_ps(query_values, adjusted);
-        sum = _mm512_fmadd_ps(dist, dist, sum);
-    }
-
-    float l2 = _mm512_reduce_add_ps(sum);
-    if (dim > i) {
-        l2 += avx2::SQ8ComputeL2Sqr(query + i, codes + i, lower_bound + i, diff + i, dim - i);
-    }
-    return l2;
+    return simd::SQ8ComputeL2SqrImpl<simd::SQ8Traits<simd::AVX512_SQ8_Tag>>(
+        query, codes, lower_bound, diff, dim, &avx2::SQ8ComputeL2Sqr);
 #else
     return avx2::SQ8ComputeL2Sqr(query, codes, lower_bound, diff, dim);
 #endif
@@ -677,31 +314,8 @@ SQ8ComputeCodesIP(const uint8_t* RESTRICT codes1,
                   const float* RESTRICT diff,
                   uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    __m512 sum = _mm512_setzero_ps();
-    uint64_t i = 0;
-
-    for (; i + 15 < dim; i += 16) {
-        __m128i code1_values = _mm_loadu_si128(reinterpret_cast<const __m128i*>(codes1 + i));
-        __m128i code2_values = _mm_loadu_si128(reinterpret_cast<const __m128i*>(codes2 + i));
-        __m512 diff_values = _mm512_loadu_ps(diff + i);
-        __m512 lower_bound_values = _mm512_loadu_ps(lower_bound + i);
-
-        __m512 code1_floats = _mm512_mul_ps(_mm512_cvtepi32_ps(_mm512_cvtepu8_epi32(code1_values)),
-                                            _mm512_set1_ps(1.0f / 255.0f));
-        __m512 code2_floats = _mm512_mul_ps(_mm512_cvtepi32_ps(_mm512_cvtepu8_epi32(code2_values)),
-                                            _mm512_set1_ps(1.0f / 255.0f));
-
-        __m512 scaled_codes1 = _mm512_fmadd_ps(code1_floats, diff_values, lower_bound_values);
-        __m512 scaled_codes2 = _mm512_fmadd_ps(code2_floats, diff_values, lower_bound_values);
-        sum = _mm512_fmadd_ps(scaled_codes1, scaled_codes2, sum);
-    }
-    float result = _mm512_reduce_add_ps(sum);
-
-    if (dim > i) {
-        result +=
-            avx2::SQ8ComputeCodesIP(codes1 + i, codes2 + i, lower_bound + i, diff + i, dim - i);
-    }
-    return result;
+    return simd::SQ8ComputeCodesIPImpl<simd::SQ8Traits<simd::AVX512_SQ8_Tag>>(
+        codes1, codes2, lower_bound, diff, dim, &avx2::SQ8ComputeCodesIP);
 #else
     return avx2::SQ8ComputeCodesIP(codes1, codes2, lower_bound, diff, dim);
 #endif
@@ -714,29 +328,8 @@ SQ8ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
                      const float* RESTRICT diff,
                      uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    __m512 sum = _mm512_setzero_ps();
-    uint64_t i = 0;
-
-    for (; i + 15 < dim; i += 16) {
-        __m128i code1_values = _mm_loadu_si128(reinterpret_cast<const __m128i*>(codes1 + i));
-        __m128i code2_values = _mm_loadu_si128(reinterpret_cast<const __m128i*>(codes2 + i));
-        __m512 diff_values = _mm512_loadu_ps(diff + i);
-
-        __m512i codes1_512 = _mm512_cvtepu8_epi32(code1_values);
-        __m512i codes2_512 = _mm512_cvtepu8_epi32(code2_values);
-        __m512 sub = _mm512_cvtepi32_ps(_mm512_sub_epi32(codes1_512, codes2_512));
-        __m512 scaled = _mm512_mul_ps(sub, _mm512_set1_ps(1.0 / 255.0f));
-        __m512 val = _mm512_mul_ps(scaled, diff_values);
-        sum = _mm512_fmadd_ps(val, val, sum);
-    }
-
-    float result = _mm512_reduce_add_ps(sum);
-
-    if (dim > i) {
-        result +=
-            avx2::SQ8ComputeCodesL2Sqr(codes1 + i, codes2 + i, lower_bound + i, diff + i, dim - i);
-    }
-    return result;
+    return simd::SQ8ComputeCodesL2SqrImpl<simd::SQ8Traits<simd::AVX512_SQ8_Tag>>(
+        codes1, codes2, lower_bound, diff, dim, &avx2::SQ8ComputeCodesL2Sqr);
 #else
     return avx2::SQ8ComputeCodesL2Sqr(codes1, codes2, lower_bound, diff, dim);
 #endif
@@ -776,39 +369,8 @@ SQ4ComputeIP(const float* RESTRICT query,
              const float* RESTRICT diff,
              uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    if (dim == 0) {
-        return 0;
-    }
-
-    float result = 0;
-    uint64_t d = 0;
-    __m512 sum0 = _mm512_setzero_ps();
-    __m512 sum1 = _mm512_setzero_ps();
-
-    // Process 32 elements at a time (16 bytes of codes)
-    for (; d + 31 < dim; d += 32) {
-        __m512 decoded0, decoded1;
-        unpack_4bit_to_m512(codes + (d >> 1), &decoded0, &decoded1);
-
-        // Apply affine transform: value = lower_bound + decoded * diff
-        __m512 lb0 = _mm512_loadu_ps(lower_bound + d);
-        __m512 lb1 = _mm512_loadu_ps(lower_bound + d + 16);
-        __m512 diff0 = _mm512_loadu_ps(diff + d);
-        __m512 diff1 = _mm512_loadu_ps(diff + d + 16);
-
-        __m512 val0 = _mm512_fmadd_ps(decoded0, diff0, lb0);
-        __m512 val1 = _mm512_fmadd_ps(decoded1, diff1, lb1);
-
-        // Load query
-        __m512 q0 = _mm512_loadu_ps(query + d);
-        __m512 q1 = _mm512_loadu_ps(query + d + 16);
-
-        sum0 = _mm512_fmadd_ps(q0, val0, sum0);
-        sum1 = _mm512_fmadd_ps(q1, val1, sum1);
-    }
-    result += _mm512_reduce_add_ps(_mm512_add_ps(sum0, sum1));
-    result += avx2::SQ4ComputeIP(query + d, codes + (d >> 1), lower_bound + d, diff + d, dim - d);
-    return result;
+    return simd::SQ4ComputeIPImpl<simd::SQ4Traits<simd::AVX512_SQ4_Tag>>(
+        query, codes, lower_bound, diff, dim, &avx2::SQ4ComputeIP);
 #else
     return avx2::SQ4ComputeIP(query, codes, lower_bound, diff, dim);
 #endif
@@ -821,42 +383,8 @@ SQ4ComputeL2Sqr(const float* RESTRICT query,
                 const float* RESTRICT diff,
                 uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    if (dim == 0) {
-        return 0;
-    }
-
-    float result = 0;
-    uint64_t d = 0;
-    __m512 sum0 = _mm512_setzero_ps();
-    __m512 sum1 = _mm512_setzero_ps();
-    // Process 32 elements at a time (16 bytes of codes)
-    for (; d + 31 < dim; d += 32) {
-        __m512 decoded0, decoded1;
-        unpack_4bit_to_m512(codes + (d >> 1), &decoded0, &decoded1);
-
-        // Apply affine transform: value = lower_bound + decoded * diff
-        __m512 lb0 = _mm512_loadu_ps(lower_bound + d);
-        __m512 lb1 = _mm512_loadu_ps(lower_bound + d + 16);
-        __m512 diff0 = _mm512_loadu_ps(diff + d);
-        __m512 diff1 = _mm512_loadu_ps(diff + d + 16);
-
-        __m512 val0 = _mm512_fmadd_ps(decoded0, diff0, lb0);
-        __m512 val1 = _mm512_fmadd_ps(decoded1, diff1, lb1);
-
-        // Load query
-        __m512 q0 = _mm512_loadu_ps(query + d);
-        __m512 q1 = _mm512_loadu_ps(query + d + 16);
-
-        __m512 q0_sub = _mm512_sub_ps(q0, val0);
-        __m512 q1_sub = _mm512_sub_ps(q1, val1);
-
-        sum0 = _mm512_fmadd_ps(q0_sub, q0_sub, sum0);
-        sum1 = _mm512_fmadd_ps(q1_sub, q1_sub, sum1);
-    }
-    result += _mm512_reduce_add_ps(sum0) + _mm512_reduce_add_ps(sum1);
-    result +=
-        avx2::SQ4ComputeL2Sqr(query + d, codes + (d >> 1), lower_bound + d, diff + d, dim - d);
-    return result;
+    return simd::SQ4ComputeL2SqrImpl<simd::SQ4Traits<simd::AVX512_SQ4_Tag>>(
+        query, codes, lower_bound, diff, dim, &avx2::SQ4ComputeL2Sqr);
 #else
     return avx2::SQ4ComputeL2Sqr(query, codes, lower_bound, diff, dim);
 #endif
@@ -869,39 +397,8 @@ SQ4ComputeCodesIP(const uint8_t* RESTRICT codes1,
                   const float* RESTRICT diff,
                   uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    if (dim == 0) {
-        return 0;
-    }
-    float result = 0;
-    uint64_t d = 0;
-    __m512 sum0 = _mm512_setzero_ps();
-    __m512 sum1 = _mm512_setzero_ps();
-
-    // Process 32 elements at a time (16 bytes of codes)
-    for (; d + 31 < dim; d += 32) {
-        __m512 decoded0, decoded1, decoded2, decoded3;
-        unpack_4bit_to_m512(codes1 + (d >> 1), &decoded0, &decoded1);
-        unpack_4bit_to_m512(codes2 + (d >> 1), &decoded2, &decoded3);
-
-        // Apply affine transform: value = lower_bound + decoded * diff
-        __m512 lb0 = _mm512_loadu_ps(lower_bound + d);
-        __m512 lb1 = _mm512_loadu_ps(lower_bound + d + 16);
-        __m512 diff0 = _mm512_loadu_ps(diff + d);
-        __m512 diff1 = _mm512_loadu_ps(diff + d + 16);
-        __m512 val0 = _mm512_fmadd_ps(decoded0, diff0, lb0);
-        __m512 val1 = _mm512_fmadd_ps(decoded1, diff1, lb1);
-
-        __m512 val2 = _mm512_fmadd_ps(decoded2, diff0, lb0);
-        __m512 val3 = _mm512_fmadd_ps(decoded3, diff1, lb1);
-
-        sum0 = _mm512_fmadd_ps(val2, val0, sum0);
-        sum1 = _mm512_fmadd_ps(val3, val1, sum1);
-    }
-    result += _mm512_reduce_add_ps(_mm512_add_ps(sum0, sum1));
-    result += avx2::SQ4ComputeCodesIP(
-        codes1 + (d >> 1), codes2 + (d >> 1), lower_bound + d, diff + d, dim - d);
-    return result;
-
+    return simd::SQ4ComputeCodesIPImpl<simd::SQ4Traits<simd::AVX512_SQ4_Tag>>(
+        codes1, codes2, lower_bound, diff, dim, &avx2::SQ4ComputeCodesIP);
 #else
     return avx2::SQ4ComputeCodesIP(codes1, codes2, lower_bound, diff, dim);
 #endif
@@ -914,44 +411,8 @@ SQ4ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
                      const float* RESTRICT diff,
                      uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    if (dim == 0) {
-        return 0;
-    }
-    float result = 0;
-    uint64_t d = 0;
-
-    __m512 sum0 = _mm512_setzero_ps();
-    __m512 sum1 = _mm512_setzero_ps();
-
-    // Process 32 elements at a time (16 bytes of codes)
-    for (; d + 31 < dim; d += 32) {
-        __m512 decoded0, decoded1, decoded2, decoded3;
-        unpack_4bit_to_m512(codes1 + (d >> 1), &decoded0, &decoded1);
-        unpack_4bit_to_m512(codes2 + (d >> 1), &decoded2, &decoded3);
-
-        // Apply affine transform: value = lower_bound + decoded * diff
-        __m512 lb0 = _mm512_loadu_ps(lower_bound + d);
-        __m512 lb1 = _mm512_loadu_ps(lower_bound + d + 16);
-        __m512 diff0 = _mm512_loadu_ps(diff + d);
-        __m512 diff1 = _mm512_loadu_ps(diff + d + 16);
-        __m512 val0 = _mm512_fmadd_ps(decoded0, diff0, lb0);
-        __m512 val1 = _mm512_fmadd_ps(decoded1, diff1, lb1);
-
-        __m512 val2 = _mm512_fmadd_ps(decoded2, diff0, lb0);
-        __m512 val3 = _mm512_fmadd_ps(decoded3, diff1, lb1);
-
-        __m512 sub0 = _mm512_sub_ps(val2, val0);
-        __m512 sub1 = _mm512_sub_ps(val3, val1);
-
-        // Dot product
-        sum0 = _mm512_fmadd_ps(sub0, sub0, sum0);
-        sum1 = _mm512_fmadd_ps(sub1, sub1, sum1);
-    }
-    result += _mm512_reduce_add_ps(sum0) + _mm512_reduce_add_ps(sum1);
-    result += avx2::SQ4ComputeCodesL2Sqr(
-        codes1 + (d >> 1), codes2 + (d >> 1), lower_bound + d, diff + d, dim - d);
-    return result;
-
+    return simd::SQ4ComputeCodesL2SqrImpl<simd::SQ4Traits<simd::AVX512_SQ4_Tag>>(
+        codes1, codes2, lower_bound, diff, dim, &avx2::SQ4ComputeCodesL2Sqr);
 #else
     return avx2::SQ4ComputeCodesL2Sqr(codes1, codes2, lower_bound, diff, dim);
 #endif
@@ -962,32 +423,8 @@ SQ4UniformComputeCodesIP(const uint8_t* RESTRICT codes1,
                          const uint8_t* RESTRICT codes2,
                          uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    if (dim == 0) {
-        return 0;
-    }
-    int32_t result = 0;
-    uint64_t d = 0;
-    __m512i sum = _mm512_setzero_si512();
-    __m512i mask = _mm512_set1_epi8(0xf);
-    for (; d + 127 < dim; d += 128) {
-        auto xx = _mm512_loadu_si512((__m512i*)(codes1 + (d >> 1)));
-        auto yy = _mm512_loadu_si512((__m512i*)(codes2 + (d >> 1)));
-        auto xx1 = _mm512_and_si512(xx, mask);                        // 64 * 8bits
-        auto xx2 = _mm512_and_si512(_mm512_srli_epi16(xx, 4), mask);  // 64 * 8bits
-        auto yy1 = _mm512_and_si512(yy, mask);
-        auto yy2 = _mm512_and_si512(_mm512_srli_epi16(yy, 4), mask);
-
-        sum = _mm512_add_epi16(sum, _mm512_maddubs_epi16(xx1, yy1));
-        sum = _mm512_add_epi16(sum, _mm512_maddubs_epi16(xx2, yy2));
-    }
-    auto sum1 = _mm512_cvtepi16_epi32(_mm512_castsi512_si256(sum));
-    auto sum2 = _mm512_cvtepi16_epi32(_mm512_extracti32x8_epi32(sum, 1));
-    result += _mm512_reduce_add_epi32(sum1);
-    result += _mm512_reduce_add_epi32(sum2);
-    if (d < dim) {
-        result += avx2::SQ4UniformComputeCodesIP(codes1 + (d >> 1), codes2 + (d >> 1), dim - d);
-    }
-    return result;
+    return simd::SQ4UniformComputeCodesIPImpl<simd::UniformCodeTraits<simd::AVX512_Uniform_Tag>>(
+        codes1, codes2, dim, &avx2::SQ4UniformComputeCodesIP);
 #else
     return avx2::SQ4UniformComputeCodesIP(codes1, codes2, dim);
 #endif
@@ -998,30 +435,8 @@ SQ8UniformComputeCodesIP(const uint8_t* RESTRICT codes1,
                          const uint8_t* RESTRICT codes2,
                          uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    if (dim == 0) {
-        return 0.0f;
-    }
-
-    uint64_t d = 0;
-    __m512i sum = _mm512_setzero_si512();
-    const __m512i mask = _mm512_set1_epi16(0xff);
-    for (; d + 63 < dim; d += 64) {
-        auto xx = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(codes1 + d));
-        auto yy = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(codes2 + d));
-
-        auto xx1 = _mm512_and_si512(xx, mask);
-        auto yy1 = _mm512_and_si512(yy, mask);
-        auto xx2 = _mm512_srli_epi16(xx, 8);
-        auto yy2 = _mm512_srli_epi16(yy, 8);
-
-        sum = _mm512_add_epi32(sum, _mm512_madd_epi16(xx1, yy1));
-        sum = _mm512_add_epi32(sum, _mm512_madd_epi16(xx2, yy2));
-    }
-    int32_t result = _mm512_reduce_add_epi32(sum);
-    if (d < dim) {
-        result += avx2::SQ8UniformComputeCodesIP(codes1 + d, codes2 + d, dim - d);
-    }
-    return static_cast<float>(result);
+    return simd::SQ8UniformComputeCodesIPImpl<simd::UniformCodeTraits<simd::AVX512_Uniform_Tag>>(
+        codes1, codes2, dim, &avx2::SQ8UniformComputeCodesIP);
 #else
     return avx2::SQ8UniformComputeCodesIP(codes1, codes2, dim);
 #endif
@@ -1042,42 +457,8 @@ SQ8UniformComputeCodesIPBatch(const uint8_t* RESTRICT query,
 float
 RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, float inv_sqrt_d) {
 #if defined(ENABLE_AVX512)
-    if (dim == 0) {
-        return 0.0f;
-    }
-
-    if (dim < 16) {
-        return avx2::RaBitQFloatBinaryIP(vector, bits, dim, inv_sqrt_d);
-    }
-
-    uint64_t d = 0;
-    __m512 sum = _mm512_setzero_ps();
-    __m512 pos, neg;
-    if (inv_sqrt_d > 1e-3) {
-        pos = _mm512_set1_ps(inv_sqrt_d);
-        neg = _mm512_set1_ps(-inv_sqrt_d);
-    } else {
-        pos = _mm512_set1_ps(1.0f);
-        neg = _mm512_setzero_ps();
-    }
-
-    for (; d + 16 <= dim; d += 16) {
-        __m512 vec = _mm512_loadu_ps(vector + d);
-
-        __mmask16 mask = static_cast<__mmask16>(bits[d / 8 + 1] << 8 | bits[d / 8]);
-
-        __m512 b_vec = _mm512_mask_blend_ps(mask, neg, pos);
-
-        sum = _mm512_fmadd_ps(b_vec, vec, sum);
-    }
-
-    float result = _mm512_reduce_add_ps(sum);
-
-    if (d < dim) {
-        result += avx2::RaBitQFloatBinaryIP(vector + d, bits + (d / 8), dim - d, inv_sqrt_d);
-    }
-
-    return result;
+    return simd::RaBitQFloatBinaryIPImpl<simd::RaBitQTraits<simd::AVX512_RaBitQ_Tag>>(
+        vector, bits, dim, inv_sqrt_d, &avx2::RaBitQFloatBinaryIP);
 #else
     return avx2::RaBitQFloatBinaryIP(vector, bits, dim, inv_sqrt_d);
 #endif
@@ -1093,55 +474,16 @@ RaBitQFloatBinaryIPBatch4(const float* vector,
                           float inv_sqrt_d,
                           float* results) {
 #if defined(ENABLE_AVX512)
-    if (dim == 0) {
-        results[0] = 0.0F;
-        results[1] = 0.0F;
-        results[2] = 0.0F;
-        results[3] = 0.0F;
-        return;
-    }
-    if (dim < 16) {
-        avx2::RaBitQFloatBinaryIPBatch4(
-            vector, bits1, bits2, bits3, bits4, dim, inv_sqrt_d, results);
-        return;
-    }
-
-    const __m512 pos = inv_sqrt_d > 1e-3F ? _mm512_set1_ps(inv_sqrt_d) : _mm512_set1_ps(1.0F);
-    const __m512 neg = inv_sqrt_d > 1e-3F ? _mm512_set1_ps(-inv_sqrt_d) : _mm512_setzero_ps();
-    __m512 sums[4] = {
-        _mm512_setzero_ps(), _mm512_setzero_ps(), _mm512_setzero_ps(), _mm512_setzero_ps()};
-    const uint8_t* bits[4] = {bits1, bits2, bits3, bits4};
-
-    uint64_t d = 0;
-    for (; d + 16 <= dim; d += 16) {
-        const __m512 vec = _mm512_loadu_ps(vector + d);
-        const uint64_t byte_id = d >> 3;
-        for (uint32_t i = 0; i < 4; ++i) {
-            const auto mask =
-                static_cast<__mmask16>(static_cast<uint16_t>(bits[i][byte_id]) |
-                                       (static_cast<uint16_t>(bits[i][byte_id + 1]) << 8));
-            const __m512 binary = _mm512_mask_blend_ps(mask, neg, pos);
-            sums[i] = _mm512_fmadd_ps(binary, vec, sums[i]);
-        }
-    }
-
-    for (uint32_t i = 0; i < 4; ++i) {
-        results[i] = _mm512_reduce_add_ps(sums[i]);
-    }
-    if (d < dim) {
-        float tail[4];
-        avx2::RaBitQFloatBinaryIPBatch4(vector + d,
-                                        bits1 + (d >> 3),
-                                        bits2 + (d >> 3),
-                                        bits3 + (d >> 3),
-                                        bits4 + (d >> 3),
-                                        dim - d,
-                                        inv_sqrt_d,
-                                        tail);
-        for (uint32_t i = 0; i < 4; ++i) {
-            results[i] += tail[i];
-        }
-    }
+    simd::RaBitQFloatBinaryIPBatch4Impl<simd::RaBitQTraits<simd::AVX512_RaBitQ_Tag>>(
+        vector,
+        bits1,
+        bits2,
+        bits3,
+        bits4,
+        dim,
+        inv_sqrt_d,
+        results,
+        &avx2::RaBitQFloatBinaryIPBatch4);
 #else
     avx2::RaBitQFloatBinaryIPBatch4(vector, bits1, bits2, bits3, bits4, dim, inv_sqrt_d, results);
 #endif
@@ -1154,54 +496,8 @@ RaBitQFloatSplitCodeIP(const float* vector,
                        uint64_t dim,
                        uint32_t supplement_bits) {
 #if defined(ENABLE_AVX512)
-    if (dim == 0) {
-        return 0.0F;
-    }
-
-    const uint64_t plane_bytes = (dim + 7) / 8;
-    __m512 sum = _mm512_setzero_ps();
-
-    uint64_t d = 0;
-    for (; d + 16 <= dim; d += 16) {
-        const uint64_t byte_idx = d >> 3;
-        __m512 code = _mm512_setzero_ps();
-
-        for (uint32_t bit = 0; bit < supplement_bits; ++bit) {
-            const auto* plane = supplement_code + static_cast<uint64_t>(bit) * plane_bytes;
-            const auto mask =
-                static_cast<__mmask16>(static_cast<uint16_t>(plane[byte_idx]) |
-                                       (static_cast<uint16_t>(plane[byte_idx + 1]) << 8));
-            const __m512 weight = _mm512_set1_ps(static_cast<float>(1U << bit));
-            code = _mm512_mask_add_ps(code, mask, code, weight);
-        }
-
-        const auto one_bit_mask =
-            static_cast<__mmask16>(static_cast<uint16_t>(one_bit_code[byte_idx]) |
-                                   (static_cast<uint16_t>(one_bit_code[byte_idx + 1]) << 8));
-        const __m512 one_bit_weight = _mm512_set1_ps(static_cast<float>(1U << supplement_bits));
-        code = _mm512_mask_add_ps(code, one_bit_mask, code, one_bit_weight);
-
-        const __m512 vec = _mm512_loadu_ps(vector + d);
-        sum = _mm512_fmadd_ps(code, vec, sum);
-    }
-
-    float result = _mm512_reduce_add_ps(sum);
-
-    const uint32_t one_bit_scalar_weight = 1U << supplement_bits;
-    for (; d < dim; ++d) {
-        const uint64_t byte_idx = d >> 3;
-        const uint8_t bit_mask = static_cast<uint8_t>(1U << (d & 7));
-        uint32_t code = (one_bit_code[byte_idx] & bit_mask) != 0 ? one_bit_scalar_weight : 0U;
-        for (uint32_t bit = 0; bit < supplement_bits; ++bit) {
-            const auto* plane = supplement_code + static_cast<uint64_t>(bit) * plane_bytes;
-            if ((plane[byte_idx] & bit_mask) != 0) {
-                code += 1U << bit;
-            }
-        }
-        result += vector[d] * static_cast<float>(code);
-    }
-
-    return result;
+    return simd::RaBitQFloatSplitCodeIPImpl<simd::RaBitQTraits<simd::AVX512_RaBitQ_Tag>>(
+        vector, one_bit_code, supplement_code, dim, supplement_bits);
 #else
     return avx2::RaBitQFloatSplitCodeIP(
         vector, one_bit_code, supplement_code, dim, supplement_bits);
@@ -1285,22 +581,8 @@ RaBitQSQ4UBinaryIP(const uint8_t* codes, const uint8_t* bits, uint64_t dim) {
 void
 DivScalar(const float* from, float* to, uint64_t dim, float scalar) {
 #if defined(ENABLE_AVX512)
-    if (dim == 0) {
-        return;
-    }
-    if (scalar == 0) {
-        scalar = 1.0f;  // TODO(LHT): logger?
-    }
-    int i = 0;
-    __m512 scalarVec = _mm512_set1_ps(scalar);
-    for (; i + 15 < dim; i += 16) {
-        __m512 vec = _mm512_loadu_ps(from + i);
-        vec = _mm512_div_ps(vec, scalarVec);
-        _mm512_storeu_ps(to + i, vec);
-    }
-    if (dim > i) {
-        avx2::DivScalar(from + i, to + i, dim - i, scalar);
-    }
+    simd::DivScalarImpl<simd::SimdTraits<simd::AVX512_Tag>>(
+        from, to, dim, scalar, &avx2::DivScalar);
 #else
     avx2::DivScalar(from, to, dim, scalar);
 #endif
@@ -1361,22 +643,7 @@ PQFastScanLookUp32(const uint8_t* RESTRICT lookup_table,
 void
 BitAnd(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result) {
 #if defined(ENABLE_AVX512)
-    if (num_byte == 0) {
-        return;
-    }
-    if (num_byte < 64) {
-        return avx2::BitAnd(x, y, num_byte, result);
-    }
-    int64_t i = 0;
-    for (; i + 63 < num_byte; i += 64) {
-        __m512i x_vec = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(x + i));
-        __m512i y_vec = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(y + i));
-        __m512i z_vec = _mm512_and_si512(x_vec, y_vec);
-        _mm512_storeu_si512(reinterpret_cast<__m512i*>(result + i), z_vec);
-    }
-    if (i < num_byte) {
-        avx2::BitAnd(x + i, y + i, num_byte - i, result + i);
-    }
+    simd::BitAndImpl<simd::BitTraits<simd::AVX512_Bit_Tag>>(x, y, num_byte, result, &avx2::BitAnd);
 #else
     return avx2::BitAnd(x, y, num_byte, result);
 #endif
@@ -1385,22 +652,7 @@ BitAnd(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* res
 void
 BitOr(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result) {
 #if defined(ENABLE_AVX512)
-    if (num_byte == 0) {
-        return;
-    }
-    if (num_byte < 64) {
-        return avx2::BitOr(x, y, num_byte, result);
-    }
-    int64_t i = 0;
-    for (; i + 63 < num_byte; i += 64) {
-        __m512i x_vec = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(x + i));
-        __m512i y_vec = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(y + i));
-        __m512i z_vec = _mm512_or_si512(x_vec, y_vec);
-        _mm512_storeu_si512(reinterpret_cast<__m512i*>(result + i), z_vec);
-    }
-    if (i < num_byte) {
-        avx2::BitOr(x + i, y + i, num_byte - i, result + i);
-    }
+    simd::BitOrImpl<simd::BitTraits<simd::AVX512_Bit_Tag>>(x, y, num_byte, result, &avx2::BitOr);
 #else
     return avx2::BitOr(x, y, num_byte, result);
 #endif
@@ -1409,22 +661,7 @@ BitOr(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* resu
 void
 BitXor(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result) {
 #if defined(ENABLE_AVX512)
-    if (num_byte == 0) {
-        return;
-    }
-    if (num_byte < 64) {
-        return avx2::BitXor(x, y, num_byte, result);
-    }
-    int64_t i = 0;
-    for (; i + 63 < num_byte; i += 64) {
-        __m512i x_vec = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(x + i));
-        __m512i y_vec = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(y + i));
-        __m512i z_vec = _mm512_xor_si512(x_vec, y_vec);
-        _mm512_storeu_si512(reinterpret_cast<__m512i*>(result + i), z_vec);
-    }
-    if (i < num_byte) {
-        avx2::BitXor(x + i, y + i, num_byte - i, result + i);
-    }
+    simd::BitXorImpl<simd::BitTraits<simd::AVX512_Bit_Tag>>(x, y, num_byte, result, &avx2::BitXor);
 #else
     return avx2::BitXor(x, y, num_byte, result);
 #endif
@@ -1433,21 +670,7 @@ BitXor(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* res
 void
 BitNot(const uint8_t* x, const uint64_t num_byte, uint8_t* result) {
 #if defined(ENABLE_AVX512)
-    if (num_byte == 0) {
-        return;
-    }
-    if (num_byte < 64) {
-        return avx2::BitNot(x, num_byte, result);
-    }
-    int64_t i = 0;
-    for (; i + 63 < num_byte; i += 64) {
-        __m512i x_vec = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(x + i));
-        __m512i z_vec = _mm512_xor_si512(x_vec, _mm512_set1_epi8(0xFF));
-        _mm512_storeu_si512(reinterpret_cast<__m512i*>(result + i), z_vec);
-    }
-    if (i < num_byte) {
-        avx2::BitNot(x + i, num_byte - i, result + i);
-    }
+    simd::BitNotImpl<simd::BitTraits<simd::AVX512_Bit_Tag>>(x, num_byte, result, &avx2::BitNot);
 #else
     return avx2::BitNot(x, num_byte, result);
 #endif
@@ -1456,30 +679,9 @@ BitNot(const uint8_t* x, const uint64_t num_byte, uint8_t* result) {
 void
 KacsWalk(float* data, uint64_t len) {
 #if defined(ENABLE_AVX512)
-    int base = len % 2;
-    int offset = base + (len / 2);
-    int i = 0;
-    for (; i + 16 < len / 2; i += 16) {
-        __m512 x = _mm512_loadu_ps(&data[i]);
-        __m512 y = _mm512_loadu_ps(&data[i + offset]);
-
-        __m512 new_x = _mm512_add_ps(x, y);
-        __m512 new_y = _mm512_sub_ps(x, y);
-
-        _mm512_storeu_ps(&data[i], new_x);
-        _mm512_storeu_ps(&data[i + offset], new_y);
-    }
-    for (; i < len / 2; i++) {
-        float x = data[i];
-        float y = data[i + offset];
-        data[i] = x + y;
-        data[i + offset] = x - y;
-    }
-    if (base != 0) {
-        data[len / 2] *= std::sqrt(2);
-    }
+    simd::KacsWalkImpl<simd::SimdTraits<simd::AVX512_Tag>>(data, len, &avx2::KacsWalk);
 #else
-    return avx2::KacsWalk(data, len);
+    avx2::KacsWalk(data, len);
 #endif
 }
 
@@ -1533,32 +735,18 @@ FlipSign(const uint8_t* flip, float* data, uint64_t dim) {
 void
 VecRescale(float* data, uint64_t dim, float val) {
 #if defined(ENABLE_AVX512)
-    __m512 scalar = _mm512_set1_ps(val);
-    uint64_t i = 0;
-    for (; i + 16 <= dim; i += 16) {
-        __m512 vec = _mm512_loadu_ps(&data[i]);
-        vec = _mm512_mul_ps(vec, scalar);
-        _mm512_storeu_ps(&data[i], vec);
-    }
-    avx2::VecRescale(data + i, dim - i, val);
+    simd::VecRescaleImpl<simd::SimdTraits<simd::AVX512_Tag>>(data, dim, val, &avx2::VecRescale);
 #else
-    return avx2::VecRescale(data, dim, val);
+    avx2::VecRescale(data, dim, val);
 #endif
 }
 
 void
 RotateOp(float* data, int idx, int dim_, int step) {
 #if defined(ENABLE_AVX512)
-    for (int i = 0; i < dim_; i += step * 2) {
-        for (int j = 0; j < step; j += 16) {
-            __m512 g1 = _mm512_loadu_ps(&data[i + j]);
-            __m512 g2 = _mm512_loadu_ps(&data[i + j + step]);
-            _mm512_storeu_ps(&data[i + j], _mm512_add_ps(g1, g2));
-            _mm512_storeu_ps(&data[i + j + step], _mm512_sub_ps(g1, g2));
-        }
-    }
+    simd::RotateOpImpl<simd::SimdTraits<simd::AVX512_Tag>>(data, idx, dim_, step);
 #else
-    return avx2::RotateOp(data, idx, dim_, step);
+    avx2::RotateOp(data, idx, dim_, step);
 #endif
 }
 
@@ -1587,46 +775,8 @@ FHTRotate(float* data, uint64_t dim_) {
 float
 NormalizeWithCentroid(const float* from, const float* centroid, float* to, uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    float norm_sq = 0;
-    uint64_t i = 0;
-    if (dim >= 16) {
-        __m512 sum = _mm512_setzero_ps();
-        for (; i + 15 < dim; i += 16) {
-            __m512 f = _mm512_loadu_ps(from + i);
-            __m512 c = _mm512_loadu_ps(centroid + i);
-            __m512 diff = _mm512_sub_ps(f, c);
-            sum = _mm512_fmadd_ps(diff, diff, sum);
-        }
-        norm_sq = _mm512_reduce_add_ps(sum);
-        for (; i < dim; ++i) {
-            auto diff = from[i] - centroid[i];
-            norm_sq += diff * diff;
-        }
-    } else {
-        norm_sq = generic::FP32ComputeL2Sqr(from, centroid, dim);
-    }
-
-    float norm = 0;
-    if (norm_sq < 1e-5f) {
-        norm = 1.0f;
-    } else {
-        norm = std::sqrt(norm_sq);
-    }
-
-    __m512 normVec = _mm512_set1_ps(norm);
-    for (i = 0; i + 15 < dim; i += 16) {
-        __m512 f = _mm512_loadu_ps(from + i);
-        __m512 c = _mm512_loadu_ps(centroid + i);
-        __m512 diff = _mm512_sub_ps(f, c);
-        __m512 result = _mm512_div_ps(diff, normVec);
-        _mm512_storeu_ps(to + i, result);
-    }
-    if (i < dim) {
-        for (; i < dim; ++i) {
-            to[i] = (from[i] - centroid[i]) / norm;
-        }
-    }
-    return norm;
+    return simd::NormalizeWithCentroidImpl<simd::SimdTraits<simd::AVX512_Tag>>(
+        from, centroid, to, dim, &avx2::NormalizeWithCentroid);
 #else
     return avx2::NormalizeWithCentroid(from, centroid, to, dim);
 #endif
@@ -1636,19 +786,8 @@ void
 InverseNormalizeWithCentroid(
     const float* from, const float* centroid, float* to, uint64_t dim, float norm) {
 #if defined(ENABLE_AVX512)
-    uint64_t i = 0;
-    __m512 normVec = _mm512_set1_ps(norm);
-    for (; i + 15 < dim; i += 16) {
-        __m512 f = _mm512_loadu_ps(from + i);
-        __m512 c = _mm512_loadu_ps(centroid + i);
-        __m512 result = _mm512_fmadd_ps(f, normVec, c);
-        _mm512_storeu_ps(to + i, result);
-    }
-    if (i < dim) {
-        for (; i < dim; ++i) {
-            to[i] = from[i] * norm + centroid[i];
-        }
-    }
+    simd::InverseNormalizeWithCentroidImpl<simd::SimdTraits<simd::AVX512_Tag>>(
+        from, centroid, to, dim, norm, &avx2::InverseNormalizeWithCentroid);
 #else
     avx2::InverseNormalizeWithCentroid(from, centroid, to, dim, norm);
 #endif

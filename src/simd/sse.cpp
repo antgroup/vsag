@@ -18,6 +18,9 @@
 #include "simd/int8_simd.h"
 #if defined(ENABLE_SSE)
 #include <x86intrin.h>
+
+#include "simd/kernels/kernels.h"
+#include "simd/traits/simd_traits_sse.h"
 #endif
 
 #include <cmath>
@@ -71,17 +74,8 @@ INT8InnerProductDistance(const void* pVect1v, const void* pVect2v, const void* q
 void
 PQDistanceFloat256(const void* single_dim_centers, float single_dim_val, void* result) {
 #if defined(ENABLE_SSE)
-    const auto* float_centers = (const float*)single_dim_centers;
-    auto* float_result = (float*)result;
-    for (uint64_t idx = 0; idx < 256; idx += 4) {
-        __m128 v_centers_dim = _mm_loadu_ps(float_centers + idx);
-        __m128 v_query_vec = _mm_set1_ps(single_dim_val);
-        __m128 v_diff = _mm_sub_ps(v_centers_dim, v_query_vec);
-        __m128 v_diff_sq = _mm_mul_ps(v_diff, v_diff);
-        __m128 v_chunk_dists = _mm_loadu_ps(&float_result[idx]);
-        v_chunk_dists = _mm_add_ps(v_chunk_dists, v_diff_sq);
-        _mm_storeu_ps(&float_result[idx], v_chunk_dists);
-    }
+    simd::PQDistanceFloat256Impl<simd::SimdTraits<simd::SSE_Tag>>(
+        single_dim_centers, single_dim_val, result, &generic::PQDistanceFloat256);
 #else
     return generic::PQDistanceFloat256(single_dim_centers, single_dim_val, result);
 #endif
@@ -102,21 +96,8 @@ __inline __m128i __attribute__((__always_inline__)) load_4_short(const uint16_t*
 float
 FP32ComputeIP(const float* RESTRICT query, const float* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_SSE)
-    const int n = dim / 4;
-    if (n == 0) {
-        return generic::FP32ComputeIP(query, codes, dim);
-    }
-    __m128 sum = _mm_setzero_ps();
-    for (int i = 0; i < n; ++i) {
-        __m128 a = _mm_loadu_ps(query + i * 4);
-        __m128 b = _mm_loadu_ps(codes + i * 4);
-        sum = _mm_add_ps(sum, _mm_mul_ps(a, b));
-    }
-    alignas(16) float result[4];
-    _mm_store_ps(result, sum);
-    float ip = result[0] + result[1] + result[2] + result[3];
-    ip += generic::FP32ComputeIP(query + n * 4, codes + n * 4, dim - n * 4);
-    return ip;
+    return simd::ComputeIPImpl<simd::SimdTraits<simd::SSE_Tag>>(
+        query, codes, dim, &generic::FP32ComputeIP);
 #else
     return vsag::generic::FP32ComputeIP(query, codes, dim);
 #endif
@@ -125,22 +106,8 @@ FP32ComputeIP(const float* RESTRICT query, const float* RESTRICT codes, uint64_t
 float
 FP32ComputeL2Sqr(const float* RESTRICT query, const float* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_SSE)
-    const uint64_t n = dim / 4;
-    if (n == 0) {
-        return generic::FP32ComputeL2Sqr(query, codes, dim);
-    }
-    __m128 sum = _mm_setzero_ps();
-    for (int i = 0; i < n; ++i) {
-        __m128 a = _mm_loadu_ps(query + i * 4);
-        __m128 b = _mm_loadu_ps(codes + i * 4);
-        __m128 diff = _mm_sub_ps(a, b);
-        sum = _mm_add_ps(sum, _mm_mul_ps(diff, diff));
-    }
-    alignas(16) float result[4];
-    _mm_store_ps(result, sum);
-    float l2 = result[0] + result[1] + result[2] + result[3];
-    l2 += generic::FP32ComputeL2Sqr(query + n * 4, codes + n * 4, dim - n * 4);
-    return l2;
+    return simd::ComputeL2SqrImpl<simd::SimdTraits<simd::SSE_Tag>>(
+        query, codes, dim, &generic::FP32ComputeL2Sqr);
 #else
     return vsag::generic::FP32ComputeL2Sqr(query, codes, dim);
 #endif
@@ -158,47 +125,18 @@ FP32ComputeIPBatch4(const float* RESTRICT query,
                     float& result3,
                     float& result4) {
 #if defined(ENABLE_SSE)
-    if (dim < 4) {
-        return generic::FP32ComputeIPBatch4(
-            query, dim, codes1, codes2, codes3, codes4, result1, result2, result3, result4);
-    }
-    __m128 sum1 = _mm_setzero_ps();
-    __m128 sum2 = _mm_setzero_ps();
-    __m128 sum3 = _mm_setzero_ps();
-    __m128 sum4 = _mm_setzero_ps();
-    int i = 0;
-    for (; i + 3 < dim; i += 4) {
-        __m128 q = _mm_loadu_ps(query + i);
-        __m128 c1 = _mm_loadu_ps(codes1 + i);
-        __m128 c2 = _mm_loadu_ps(codes2 + i);
-        __m128 c3 = _mm_loadu_ps(codes3 + i);
-        __m128 c4 = _mm_loadu_ps(codes4 + i);
-        sum1 = _mm_add_ps(sum1, _mm_mul_ps(q, c1));
-        sum2 = _mm_add_ps(sum2, _mm_mul_ps(q, c2));
-        sum3 = _mm_add_ps(sum3, _mm_mul_ps(q, c3));
-        sum4 = _mm_add_ps(sum4, _mm_mul_ps(q, c4));
-    }
-    alignas(16) float result[4];
-    _mm_store_ps(result, sum1);
-    result1 += result[0] + result[1] + result[2] + result[3];
-    _mm_store_ps(result, sum2);
-    result2 += result[0] + result[1] + result[2] + result[3];
-    _mm_store_ps(result, sum3);
-    result3 += result[0] + result[1] + result[2] + result[3];
-    _mm_store_ps(result, sum4);
-    result4 += result[0] + result[1] + result[2] + result[3];
-    if (i < dim) {
-        generic::FP32ComputeIPBatch4(query + i,
-                                     dim - i,
-                                     codes1 + i,
-                                     codes2 + i,
-                                     codes3 + i,
-                                     codes4 + i,
-                                     result1,
-                                     result2,
-                                     result3,
-                                     result4);
-    }
+    simd::ComputeBatch4Impl<simd::SimdTraits<simd::SSE_Tag>, simd::Batch4Kind::IP>(
+        query,
+        dim,
+        codes1,
+        codes2,
+        codes3,
+        codes4,
+        result1,
+        result2,
+        result3,
+        result4,
+        &generic::FP32ComputeIPBatch4);
 #else
     return generic::FP32ComputeIPBatch4(
         query, dim, codes1, codes2, codes3, codes4, result1, result2, result3, result4);
@@ -217,51 +155,18 @@ FP32ComputeL2SqrBatch4(const float* RESTRICT query,
                        float& result3,
                        float& result4) {
 #if defined(ENABLE_SSE)
-    if (dim < 4) {
-        return generic::FP32ComputeL2SqrBatch4(
-            query, dim, codes1, codes2, codes3, codes4, result1, result2, result3, result4);
-    }
-    __m128 sum1 = _mm_setzero_ps();
-    __m128 sum2 = _mm_setzero_ps();
-    __m128 sum3 = _mm_setzero_ps();
-    __m128 sum4 = _mm_setzero_ps();
-    int i = 0;
-    for (; i + 3 < dim; i += 4) {
-        __m128 q = _mm_loadu_ps(query + i);
-        __m128 c1 = _mm_loadu_ps(codes1 + i);
-        __m128 c2 = _mm_loadu_ps(codes2 + i);
-        __m128 c3 = _mm_loadu_ps(codes3 + i);
-        __m128 c4 = _mm_loadu_ps(codes4 + i);
-        __m128 diff1 = _mm_sub_ps(q, c1);
-        __m128 diff2 = _mm_sub_ps(q, c2);
-        __m128 diff3 = _mm_sub_ps(q, c3);
-        __m128 diff4 = _mm_sub_ps(q, c4);
-        sum1 = _mm_add_ps(sum1, _mm_mul_ps(diff1, diff1));
-        sum2 = _mm_add_ps(sum2, _mm_mul_ps(diff2, diff2));
-        sum3 = _mm_add_ps(sum3, _mm_mul_ps(diff3, diff3));
-        sum4 = _mm_add_ps(sum4, _mm_mul_ps(diff4, diff4));
-    }
-    alignas(16) float result[4];
-    _mm_store_ps(result, sum1);
-    result1 += result[0] + result[1] + result[2] + result[3];
-    _mm_store_ps(result, sum2);
-    result2 += result[0] + result[1] + result[2] + result[3];
-    _mm_store_ps(result, sum3);
-    result3 += result[0] + result[1] + result[2] + result[3];
-    _mm_store_ps(result, sum4);
-    result4 += result[0] + result[1] + result[2] + result[3];
-    if (i < dim) {
-        generic::FP32ComputeL2SqrBatch4(query + i,
-                                        dim - i,
-                                        codes1 + i,
-                                        codes2 + i,
-                                        codes3 + i,
-                                        codes4 + i,
-                                        result1,
-                                        result2,
-                                        result3,
-                                        result4);
-    }
+    simd::ComputeBatch4Impl<simd::SimdTraits<simd::SSE_Tag>, simd::Batch4Kind::L2>(
+        query,
+        dim,
+        codes1,
+        codes2,
+        codes3,
+        codes4,
+        result1,
+        result2,
+        result3,
+        result4,
+        &generic::FP32ComputeL2SqrBatch4);
 #else
     return generic::FP32ComputeL2SqrBatch4(
         query, dim, codes1, codes2, codes3, codes4, result1, result2, result3, result4);
@@ -271,19 +176,8 @@ FP32ComputeL2SqrBatch4(const float* RESTRICT query,
 void
 FP32Sub(const float* x, const float* y, float* z, uint64_t dim) {
 #if defined(ENABLE_SSE)
-    if (dim < 4) {
-        return generic::FP32Sub(x, y, z, dim);
-    }
-    int64_t i = 0;
-    for (; i + 3 < dim; i += 4) {
-        __m128 a = _mm_loadu_ps(x + i);
-        __m128 b = _mm_loadu_ps(y + i);
-        __m128 c = _mm_sub_ps(a, b);
-        _mm_storeu_ps(z + i, c);
-    }
-    if (i < dim) {
-        generic::FP32Sub(x + i, y + i, z + i, dim - i);
-    }
+    simd::BinaryOpImpl<simd::SimdTraits<simd::SSE_Tag>, simd::BinaryOp::Sub>(
+        x, y, z, dim, &generic::FP32Sub);
 #else
     return generic::FP32Sub(x, y, z, dim);
 #endif
@@ -292,19 +186,8 @@ FP32Sub(const float* x, const float* y, float* z, uint64_t dim) {
 void
 FP32Add(const float* x, const float* y, float* z, uint64_t dim) {
 #if defined(ENABLE_SSE)
-    if (dim < 4) {
-        return generic::FP32Add(x, y, z, dim);
-    }
-    int64_t i = 0;
-    for (; i + 3 < dim; i += 4) {
-        __m128 a = _mm_loadu_ps(x + i);
-        __m128 b = _mm_loadu_ps(y + i);
-        __m128 c = _mm_add_ps(a, b);
-        _mm_storeu_ps(z + i, c);
-    }
-    if (i < dim) {
-        generic::FP32Add(x + i, y + i, z + i, dim - i);
-    }
+    simd::BinaryOpImpl<simd::SimdTraits<simd::SSE_Tag>, simd::BinaryOp::Add>(
+        x, y, z, dim, &generic::FP32Add);
 #else
     return generic::FP32Add(x, y, z, dim);
 #endif
@@ -313,19 +196,8 @@ FP32Add(const float* x, const float* y, float* z, uint64_t dim) {
 void
 FP32Mul(const float* x, const float* y, float* z, uint64_t dim) {
 #if defined(ENABLE_SSE)
-    if (dim < 4) {
-        return generic::FP32Mul(x, y, z, dim);
-    }
-    int64_t i = 0;
-    for (; i + 3 < dim; i += 4) {
-        __m128 a = _mm_loadu_ps(x + i);
-        __m128 b = _mm_loadu_ps(y + i);
-        __m128 c = _mm_mul_ps(a, b);
-        _mm_storeu_ps(z + i, c);
-    }
-    if (i < dim) {
-        generic::FP32Mul(x + i, y + i, z + i, dim - i);
-    }
+    simd::BinaryOpImpl<simd::SimdTraits<simd::SSE_Tag>, simd::BinaryOp::Mul>(
+        x, y, z, dim, &generic::FP32Mul);
 #else
     return generic::FP32Mul(x, y, z, dim);
 #endif
@@ -334,19 +206,8 @@ FP32Mul(const float* x, const float* y, float* z, uint64_t dim) {
 void
 FP32Div(const float* x, const float* y, float* z, uint64_t dim) {
 #if defined(ENABLE_SSE)
-    if (dim < 4) {
-        return generic::FP32Div(x, y, z, dim);
-    }
-    int64_t i = 0;
-    for (; i + 3 < dim; i += 4) {
-        __m128 a = _mm_loadu_ps(x + i);
-        __m128 b = _mm_loadu_ps(y + i);
-        __m128 c = _mm_div_ps(a, b);
-        _mm_storeu_ps(z + i, c);
-    }
-    if (i < dim) {
-        generic::FP32Div(x + i, y + i, z + i, dim - i);
-    }
+    simd::BinaryOpImpl<simd::SimdTraits<simd::SSE_Tag>, simd::BinaryOp::Div>(
+        x, y, z, dim, &generic::FP32Div);
 #else
     return generic::FP32Div(x, y, z, dim);
 #endif
@@ -355,22 +216,7 @@ FP32Div(const float* x, const float* y, float* z, uint64_t dim) {
 float
 FP32ReduceAdd(const float* x, uint64_t dim) {
 #if defined(ENABLE_SSE)
-    if (dim < 4) {
-        return generic::FP32ReduceAdd(x, dim);
-    }
-    __m128 sum = _mm_setzero_ps();
-    int i = 0;
-    for (; i + 3 < dim; i += 4) {
-        __m128 a = _mm_loadu_ps(x + i);
-        sum = _mm_add_ps(sum, a);
-    }
-    sum = _mm_hadd_ps(sum, sum);
-    sum = _mm_hadd_ps(sum, sum);
-    float result = _mm_cvtss_f32(sum);
-    if (i < dim) {
-        result += generic::FP32ReduceAdd(x + i, dim - i);
-    }
-    return result;
+    return simd::ReduceAddImpl<simd::SimdTraits<simd::SSE_Tag>>(x, dim, &generic::FP32ReduceAdd);
 #else
     return generic::FP32ReduceAdd(x, dim);
 #endif
@@ -379,34 +225,8 @@ FP32ReduceAdd(const float* x, uint64_t dim) {
 float
 BF16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_SSE)
-    // Initialize the sum to 0
-    __m128 sum = _mm_setzero_ps();
-    const auto* query_bf16 = (const uint16_t*)(query);
-    const auto* codes_bf16 = (const uint16_t*)(codes);
-    // Process the data in 128-bit chunks
-    uint64_t i = 0;
-    for (; i + 3 < dim; i += 4) {
-        // Load data into registers
-        __m128i query_vec = load_4_short(query_bf16 + i);
-        __m128 query_float = _mm_castsi128_ps(query_vec);
-
-        // Load data into registers
-        __m128i code_vec = load_4_short(codes_bf16 + i);
-        __m128 code_float = _mm_castsi128_ps(code_vec);
-
-        __m128 mul = _mm_mul_ps(query_float, code_float);
-        sum = _mm_add_ps(sum, mul);
-    }
-
-    // Horizontal addition
-    sum = _mm_hadd_ps(sum, sum);
-    sum = _mm_hadd_ps(sum, sum);
-
-    // Extract the result from the register
-    alignas(16) float result[4];
-    _mm_store_ps(result, sum);
-
-    return result[0] + generic::BF16ComputeIP(query + i * 2, codes + i * 2, dim - i);
+    return simd::HalfComputeIPImpl<simd::BF16Traits<simd::SSE_BF16_Tag>>(
+        query, codes, dim, &generic::BF16ComputeIP);
 #else
     return generic::BF16ComputeIP(query, codes, dim);
 #endif
@@ -415,35 +235,8 @@ BF16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint
 float
 BF16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_SSE)
-    // Initialize the sum to 0
-    __m128 sum = _mm_setzero_ps();
-    const auto* query_bf16 = (const uint16_t*)(query);
-    const auto* codes_bf16 = (const uint16_t*)(codes);
-
-    // Process the data in 128-bit chunks
-    uint64_t i = 0;
-    for (; i + 3 < dim; i += 4) {
-        // Load data into registers
-        __m128i query_vec = load_4_short(query_bf16 + i);
-        __m128 query_float = _mm_castsi128_ps(query_vec);
-
-        // Load data into registers
-        __m128i code_vec = load_4_short(codes_bf16 + i);
-        __m128 code_float = _mm_castsi128_ps(code_vec);
-
-        __m128 diff = _mm_sub_ps(code_float, query_float);
-        sum = _mm_add_ps(sum, _mm_mul_ps(diff, diff));
-    }
-
-    // Horizontal addition
-    sum = _mm_hadd_ps(sum, sum);
-    sum = _mm_hadd_ps(sum, sum);
-
-    // Extract the result from the register
-    alignas(16) float result[4];
-    _mm_store_ps(result, sum);
-
-    return result[0] + generic::BF16ComputeL2Sqr(query + i * 2, codes + i * 2, dim - i);
+    return simd::HalfComputeL2SqrImpl<simd::BF16Traits<simd::SSE_BF16_Tag>>(
+        query, codes, dim, &generic::BF16ComputeL2Sqr);
 #else
     return generic::BF16ComputeL2Sqr(query, codes, dim);
 #endif
@@ -462,38 +255,8 @@ FP16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, u
 float
 INT8ComputeL2Sqr(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_SSE)
-    constexpr int64_t BATCH_SIZE{8};
-
-    const uint64_t n = dim / BATCH_SIZE;
-
-    if (n == 0) {
-        return generic::INT8ComputeL2Sqr(query, codes, dim);
-    }
-
-    __m128i sum_sq = _mm_setzero_si128();
-
-    for (uint64_t i = 0; i < n; ++i) {
-        __m128i q = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(query + BATCH_SIZE * i));
-        __m128i c = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(codes + BATCH_SIZE * i));
-
-        __m128i q_low = _mm_cvtepi8_epi16(q);
-        __m128i c_low = _mm_cvtepi8_epi16(c);
-
-        __m128i diff = _mm_sub_epi16(q_low, c_low);
-
-        __m128i sq = _mm_madd_epi16(diff, diff);
-
-        sum_sq = _mm_add_epi32(sum_sq, sq);
-    }
-
-    alignas(32) int32_t result[BATCH_SIZE / 2];
-    _mm_store_si128(reinterpret_cast<__m128i*>(result), sum_sq);
-    int64_t l2 = static_cast<int64_t>(result[0]) + result[1] + result[2] + result[3];
-
-    l2 += generic::INT8ComputeL2Sqr(
-        query + BATCH_SIZE * n, codes + BATCH_SIZE * n, dim - BATCH_SIZE * n);
-
-    return static_cast<float>(l2);
+    return simd::Int8ComputeL2SqrImpl<simd::Int8Traits<simd::SSE_Int8_Tag>>(
+        query, codes, dim, &generic::INT8ComputeL2Sqr);
 #else
     return generic::INT8ComputeL2Sqr(query, codes, dim);
 #endif
@@ -502,34 +265,8 @@ INT8ComputeL2Sqr(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uin
 float
 INT8ComputeIP(const int8_t* __restrict query, const int8_t* __restrict codes, uint64_t dim) {
 #if defined(ENABLE_SSE)
-    constexpr int BATCH_SIZE = 8;
-    const uint64_t n = dim / BATCH_SIZE;
-
-    if (n == 0) {
-        return generic::INT8ComputeIP(query, codes, dim);
-    }
-    __m128i sum_sq = _mm_setzero_si128();
-
-    for (uint64_t i = 0; i < n; ++i) {
-        __m128i q = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(query + BATCH_SIZE * i));
-        __m128i c = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(codes + BATCH_SIZE * i));
-
-        __m128i q_low = _mm_cvtepi8_epi16(q);
-        __m128i c_low = _mm_cvtepi8_epi16(c);
-
-        __m128i sq = _mm_madd_epi16(q_low, c_low);
-
-        sum_sq = _mm_add_epi32(sum_sq, sq);
-    }
-
-    alignas(32) int32_t result[BATCH_SIZE / 2];
-    _mm_store_si128(reinterpret_cast<__m128i*>(result), sum_sq);
-    int64_t ip = static_cast<int64_t>(result[0]) + result[1] + result[2] + result[3];
-
-    ip += generic::INT8ComputeIP(
-        query + BATCH_SIZE * n, codes + BATCH_SIZE * n, dim - BATCH_SIZE * n);
-
-    return static_cast<float>(ip);
+    return simd::Int8ComputeIPImpl<simd::Int8Traits<simd::SSE_Int8_Tag>>(
+        query, codes, dim, &generic::INT8ComputeIP);
 #else
     return generic::INT8ComputeIP(query, codes, dim);
 #endif
@@ -542,36 +279,8 @@ SQ8ComputeIP(const float* RESTRICT query,
              const float* RESTRICT diff,
              uint64_t dim) {
 #if defined(ENABLE_SSE)
-    // Initialize the sum to 0
-    __m128 sum = _mm_setzero_ps();
-
-    // Process the data in 128-bit chunks
-    uint64_t i = 0;
-    for (; i + 3 < dim; i += 4) {
-        // Load data into registers
-        __m128i code_values = load_4_char(codes + i);
-        __m128 code_floats = _mm_cvtepi32_ps(_mm_cvtepu8_epi32(code_values));
-        __m128 query_values = _mm_loadu_ps(query + i);
-        __m128 diff_values = _mm_loadu_ps(diff + i);
-        __m128 lower_bound_values = _mm_loadu_ps(lower_bound + i);
-
-        // Perform calculations
-        __m128 scaled_codes = _mm_mul_ps(_mm_div_ps(code_floats, _mm_set1_ps(255.0f)), diff_values);
-        __m128 adjusted_codes = _mm_add_ps(scaled_codes, lower_bound_values);
-        __m128 val = _mm_mul_ps(query_values, adjusted_codes);
-        sum = _mm_add_ps(sum, val);
-    }
-
-    // Horizontal addition
-    sum = _mm_hadd_ps(sum, sum);
-    sum = _mm_hadd_ps(sum, sum);
-
-    // Extract the result from the register
-    alignas(16) float result[4];
-    _mm_store_ps(result, sum);
-
-    return result[0] +
-           generic::SQ8ComputeIP(query + i, codes + i, lower_bound + i, diff + i, dim - i);
+    return simd::SQ8ComputeIPImpl<simd::SQ8Traits<simd::SSE_SQ8_Tag>>(
+        query, codes, lower_bound, diff, dim, &generic::SQ8ComputeIP);
 #else
     return generic::SQ8ComputeIP(query, codes, lower_bound, diff, dim);
 #endif
@@ -584,36 +293,8 @@ SQ8ComputeL2Sqr(const float* RESTRICT query,
                 const float* RESTRICT diff,
                 uint64_t dim) {
 #if defined(ENABLE_SSE)
-    __m128 sum = _mm_setzero_ps();
-
-    // Process the data in 128-bit chunks
-    uint64_t i = 0;
-    for (; i + 3 < dim; i += 4) {
-        // Load data into registers
-        __m128i code_values = _mm_cvtepu8_epi32(load_4_char(codes + i));
-        __m128 code_floats = _mm_div_ps(_mm_cvtepi32_ps(code_values), _mm_set1_ps(255.0f));
-        __m128 diff_values = _mm_loadu_ps(diff + i);
-        __m128 lower_bound_values = _mm_loadu_ps(lower_bound + i);
-        __m128 query_values = _mm_loadu_ps(query + i);
-
-        // Perform calculations
-        __m128 scaled_codes = _mm_mul_ps(code_floats, diff_values);
-        scaled_codes = _mm_add_ps(scaled_codes, lower_bound_values);
-        __m128 val = _mm_sub_ps(query_values, scaled_codes);
-        val = _mm_mul_ps(val, val);
-        sum = _mm_add_ps(sum, val);
-    }
-    // Perform horizontal addition
-    sum = _mm_hadd_ps(sum, sum);
-    sum = _mm_hadd_ps(sum, sum);
-
-    // Extract the result from the register
-    float result;
-    _mm_store_ss(&result, sum);
-
-    result += generic::SQ8ComputeL2Sqr(query + i, codes + i, lower_bound + i, diff + i, dim - i);
-
-    return result;
+    return simd::SQ8ComputeL2SqrImpl<simd::SQ8Traits<simd::SSE_SQ8_Tag>>(
+        query, codes, lower_bound, diff, dim, &generic::SQ8ComputeL2Sqr);
 #else
     return generic::SQ8ComputeL2Sqr(query, codes, lower_bound, diff, dim);
 #endif
@@ -626,35 +307,8 @@ SQ8ComputeCodesIP(const uint8_t* RESTRICT codes1,
                   const float* RESTRICT diff,
                   uint64_t dim) {
 #if defined(ENABLE_SSE)
-    __m128 sum = _mm_setzero_ps();
-    uint64_t i = 0;
-    for (; i + 3 < dim; i += 4) {
-        // Load data into registers
-        __m128i code1_values = load_4_char(codes1 + i);
-        __m128i code2_values = load_4_char(codes2 + i);
-        __m128i codes1_128 = _mm_cvtepu8_epi32(code1_values);
-        __m128i codes2_128 = _mm_cvtepu8_epi32(code2_values);
-        __m128 codes1_floats = _mm_div_ps(_mm_cvtepi32_ps(codes1_128), _mm_set1_ps(255.0f));
-        __m128 codes2_floats = _mm_div_ps(_mm_cvtepi32_ps(codes2_128), _mm_set1_ps(255.0f));
-        __m128 diff_values = _mm_loadu_ps(diff + i);
-        __m128 lower_bound_values = _mm_loadu_ps(lower_bound + i);
-        // Perform calculations
-        __m128 scaled_codes1 =
-            _mm_add_ps(_mm_mul_ps(codes1_floats, diff_values), lower_bound_values);
-        __m128 scaled_codes2 =
-            _mm_add_ps(_mm_mul_ps(codes2_floats, diff_values), lower_bound_values);
-        __m128 val = _mm_mul_ps(scaled_codes1, scaled_codes2);
-        sum = _mm_add_ps(sum, val);
-    }
-    // Horizontal addition
-    sum = _mm_hadd_ps(sum, sum);
-    sum = _mm_hadd_ps(sum, sum);
-    // Extract the result from the register
-    float result;
-    _mm_store_ss(&result, sum);
-    result +=
-        generic::SQ8ComputeCodesIP(codes1 + i, codes2 + i, lower_bound + i, diff + i, dim - i);
-    return result;
+    return simd::SQ8ComputeCodesIPImpl<simd::SQ8Traits<simd::SSE_SQ8_Tag>>(
+        codes1, codes2, lower_bound, diff, dim, &generic::SQ8ComputeCodesIP);
 #else
     return generic::SQ8ComputeCodesIP(codes1, codes2, lower_bound, diff, dim);
 #endif
@@ -667,38 +321,10 @@ SQ8ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
                      const float* RESTRICT diff,
                      uint64_t dim) {
 #if defined(ENABLE_SSE)
-    __m128 sum = _mm_setzero_ps();
-    uint64_t i = 0;
-    for (; i + 3 < dim; i += 4) {
-        // Load data into registers
-        __m128i code1_values = load_4_char(codes1 + i);
-        __m128i code2_values = load_4_char(codes2 + i);
-        __m128i codes1_128 = _mm_cvtepu8_epi32(code1_values);
-        __m128i codes2_128 = _mm_cvtepu8_epi32(code2_values);
-        __m128 codes1_floats = _mm_div_ps(_mm_cvtepi32_ps(codes1_128), _mm_set1_ps(255.0f));
-        __m128 codes2_floats = _mm_div_ps(_mm_cvtepi32_ps(codes2_128), _mm_set1_ps(255.0f));
-        __m128 diff_values = _mm_loadu_ps(diff + i);
-        __m128 lower_bound_values = _mm_loadu_ps(lower_bound + i);
-        // Perform calculations
-        __m128 scaled_codes1 =
-            _mm_add_ps(_mm_mul_ps(codes1_floats, diff_values), lower_bound_values);
-        __m128 scaled_codes2 =
-            _mm_add_ps(_mm_mul_ps(codes2_floats, diff_values), lower_bound_values);
-        __m128 val = _mm_sub_ps(scaled_codes1, scaled_codes2);
-        val = _mm_mul_ps(val, val);
-        sum = _mm_add_ps(sum, val);
-    }
-    // Horizontal addition
-    sum = _mm_hadd_ps(sum, sum);
-    sum = _mm_hadd_ps(sum, sum);
-    // Extract the result from the register
-    float result;
-    _mm_store_ss(&result, sum);
-    result +=
-        generic::SQ8ComputeCodesL2Sqr(codes1 + i, codes2 + i, lower_bound + i, diff + i, dim - i);
-    return result;
+    return simd::SQ8ComputeCodesL2SqrImpl<simd::SQ8Traits<simd::SSE_SQ8_Tag>>(
+        codes1, codes2, lower_bound, diff, dim, &generic::SQ8ComputeCodesL2Sqr);
 #else
-    return generic::SQ8ComputeCodesIP(codes1, codes2, lower_bound, diff, dim);
+    return generic::SQ8ComputeCodesL2Sqr(codes1, codes2, lower_bound, diff, dim);
 #endif
 }
 
@@ -709,68 +335,8 @@ SQ4ComputeIP(const float* RESTRICT query,
              const float* RESTRICT diff,
              uint64_t dim) {
 #if defined(ENABLE_SSE)
-    if (dim == 0) {
-        return 0;
-    }
-
-    float result = 0;
-    uint64_t d = 0;
-
-    // Process 8 values at a time (4 bytes containing 8 4-bit values)
-    for (; d + 7 < dim; d += 8) {
-        // Load 4 bytes (8 4-bit values)
-        __m128i code_vec = load_4_char(codes + (d >> 1));
-
-        // Extract low nibbles (values 0,2,4,6) - even indices
-        __m128i low_nibbles = _mm_and_si128(code_vec, _mm_set1_epi8(0x0F));
-        // Extract high nibbles (values 1,3,5,7) - odd indices
-        __m128i high_nibbles = _mm_and_si128(_mm_srli_epi16(code_vec, 4), _mm_set1_epi8(0x0F));
-
-        // Interleave low and high nibbles to get correct order: [d0, d1, d2, d3, d4, d5, d6, d7]
-        __m128i interleaved = _mm_unpacklo_epi8(low_nibbles, high_nibbles);
-
-        // Convert to float and scale
-        __m128i low_part = _mm_cvtepu8_epi32(interleaved);
-        __m128i high_part = _mm_cvtepu8_epi32(_mm_srli_si128(interleaved, 4));
-        __m128 values0 = _mm_cvtepi32_ps(low_part);
-        __m128 values1 = _mm_cvtepi32_ps(high_part);
-
-        // Scale by 1/15.0
-        __m128 scale = _mm_set1_ps(1.0f / 15.0f);
-        values0 = _mm_mul_ps(values0, scale);
-        values1 = _mm_mul_ps(values1, scale);
-
-        // Apply diff and lower_bound
-        __m128 diff_vec0 = _mm_loadu_ps(diff + d);
-        __m128 diff_vec1 = _mm_loadu_ps(diff + d + 4);
-        __m128 lb_vec0 = _mm_loadu_ps(lower_bound + d);
-        __m128 lb_vec1 = _mm_loadu_ps(lower_bound + d + 4);
-
-        values0 = _mm_add_ps(_mm_mul_ps(values0, diff_vec0), lb_vec0);
-        values1 = _mm_add_ps(_mm_mul_ps(values1, diff_vec1), lb_vec1);
-
-        // Load query vectors
-        __m128 query_vec0 = _mm_loadu_ps(query + d);
-        __m128 query_vec1 = _mm_loadu_ps(query + d + 4);
-
-        // Compute dot products
-        __m128 prod0 = _mm_mul_ps(query_vec0, values0);
-        __m128 prod1 = _mm_mul_ps(query_vec1, values1);
-
-        // Horizontal sum
-        __m128 sum01 = _mm_add_ps(prod0, prod1);
-        __m128 sum23 = _mm_shuffle_ps(sum01, sum01, _MM_SHUFFLE(2, 3, 0, 1));
-        __m128 sum0123 = _mm_add_ps(sum01, sum23);
-        __m128 sum4567 = _mm_movehl_ps(sum0123, sum0123);
-        __m128 sum = _mm_add_ss(sum0123, sum4567);
-
-        result += _mm_cvtss_f32(sum);
-    }
-
-    // Process remaining elements with generic implementation
-    result +=
-        generic::SQ4ComputeIP(query + d, codes + (d >> 1), lower_bound + d, diff + d, dim - d);
-    return result;
+    return simd::SQ4ComputeIPImpl<simd::SQ4Traits<simd::SSE_SQ4_Tag>>(
+        query, codes, lower_bound, diff, dim, &generic::SQ4ComputeIP);
 #else
     return generic::SQ4ComputeIP(query, codes, lower_bound, diff, dim);
 #endif
@@ -783,72 +349,8 @@ SQ4ComputeL2Sqr(const float* RESTRICT query,
                 const float* RESTRICT diff,
                 uint64_t dim) {
 #if defined(ENABLE_SSE)
-    if (dim == 0) {
-        return 0;
-    }
-
-    float result = 0;
-    uint64_t d = 0;
-
-    // Process 8 values at a time (4 bytes containing 8 4-bit values)
-    for (; d + 7 < dim; d += 8) {
-        // Load 4 bytes (8 4-bit values)
-        __m128i code_vec = load_4_char(codes + (d >> 1));
-
-        // Extract low nibbles (values 0,2,4,6) - even indices
-        __m128i low_nibbles = _mm_and_si128(code_vec, _mm_set1_epi8(0x0F));
-        // Extract high nibbles (values 1,3,5,7) - odd indices
-        __m128i high_nibbles = _mm_and_si128(_mm_srli_epi16(code_vec, 4), _mm_set1_epi8(0x0F));
-
-        // Interleave low and high nibbles to get correct order: [d0, d1, d2, d3, d4, d5, d6, d7]
-        __m128i interleaved = _mm_unpacklo_epi8(low_nibbles, high_nibbles);
-
-        // Convert to float and scale
-        __m128i low_part = _mm_cvtepu8_epi32(interleaved);
-        __m128i high_part = _mm_cvtepu8_epi32(_mm_srli_si128(interleaved, 4));
-        __m128 values0 = _mm_cvtepi32_ps(low_part);
-        __m128 values1 = _mm_cvtepi32_ps(high_part);
-
-        // Scale by 1/15.0
-        __m128 scale = _mm_set1_ps(1.0f / 15.0f);
-        values0 = _mm_mul_ps(values0, scale);
-        values1 = _mm_mul_ps(values1, scale);
-
-        // Apply diff and lower_bound
-        __m128 diff_vec0 = _mm_loadu_ps(diff + d);
-        __m128 diff_vec1 = _mm_loadu_ps(diff + d + 4);
-        __m128 lb_vec0 = _mm_loadu_ps(lower_bound + d);
-        __m128 lb_vec1 = _mm_loadu_ps(lower_bound + d + 4);
-
-        values0 = _mm_add_ps(_mm_mul_ps(values0, diff_vec0), lb_vec0);
-        values1 = _mm_add_ps(_mm_mul_ps(values1, diff_vec1), lb_vec1);
-
-        // Load query vectors
-        __m128 query_vec0 = _mm_loadu_ps(query + d);
-        __m128 query_vec1 = _mm_loadu_ps(query + d + 4);
-
-        // Compute differences
-        __m128 diff0 = _mm_sub_ps(query_vec0, values0);
-        __m128 diff1 = _mm_sub_ps(query_vec1, values1);
-
-        // Square differences
-        __m128 sq_diff0 = _mm_mul_ps(diff0, diff0);
-        __m128 sq_diff1 = _mm_mul_ps(diff1, diff1);
-
-        // Horizontal sum
-        __m128 sum01 = _mm_add_ps(sq_diff0, sq_diff1);
-        __m128 sum23 = _mm_shuffle_ps(sum01, sum01, _MM_SHUFFLE(2, 3, 0, 1));
-        __m128 sum0123 = _mm_add_ps(sum01, sum23);
-        __m128 sum4567 = _mm_movehl_ps(sum0123, sum0123);
-        __m128 sum = _mm_add_ss(sum0123, sum4567);
-
-        result += _mm_cvtss_f32(sum);
-    }
-
-    // Process remaining elements with generic implementation
-    result +=
-        generic::SQ4ComputeL2Sqr(query + d, codes + (d >> 1), lower_bound + d, diff + d, dim - d);
-    return result;
+    return simd::SQ4ComputeL2SqrImpl<simd::SQ4Traits<simd::SSE_SQ4_Tag>>(
+        query, codes, lower_bound, diff, dim, &generic::SQ4ComputeL2Sqr);
 #else
     return generic::SQ4ComputeL2Sqr(query, codes, lower_bound, diff, dim);
 #endif
@@ -861,77 +363,8 @@ SQ4ComputeCodesIP(const uint8_t* RESTRICT codes1,
                   const float* RESTRICT diff,
                   uint64_t dim) {
 #if defined(ENABLE_SSE)
-    if (dim == 0) {
-        return 0;
-    }
-
-    float result = 0;
-    uint64_t d = 0;
-
-    // Process 8 values at a time (4 bytes containing 8 4-bit values)
-    for (; d + 7 < dim; d += 8) {
-        // Load 4 bytes from each code vector (8 4-bit values)
-        __m128i code1_vec = load_4_char(codes1 + (d >> 1));
-        __m128i code2_vec = load_4_char(codes2 + (d >> 1));
-
-        // Extract and interleave nibbles for code1
-        __m128i code1_low = _mm_and_si128(code1_vec, _mm_set1_epi8(0x0F));
-        __m128i code1_high = _mm_and_si128(_mm_srli_epi16(code1_vec, 4), _mm_set1_epi8(0x0F));
-        __m128i code1_interleaved = _mm_unpacklo_epi8(code1_low, code1_high);
-
-        // Extract and interleave nibbles for code2
-        __m128i code2_low = _mm_and_si128(code2_vec, _mm_set1_epi8(0x0F));
-        __m128i code2_high = _mm_and_si128(_mm_srli_epi16(code2_vec, 4), _mm_set1_epi8(0x0F));
-        __m128i code2_interleaved = _mm_unpacklo_epi8(code2_low, code2_high);
-
-        // Convert to float and scale for code1
-        __m128i code1_low_part = _mm_cvtepu8_epi32(code1_interleaved);
-        __m128i code1_high_part = _mm_cvtepu8_epi32(_mm_srli_si128(code1_interleaved, 4));
-        __m128 code1_values0 = _mm_cvtepi32_ps(code1_low_part);
-        __m128 code1_values1 = _mm_cvtepi32_ps(code1_high_part);
-
-        // Convert to float and scale for code2
-        __m128i code2_low_part = _mm_cvtepu8_epi32(code2_interleaved);
-        __m128i code2_high_part = _mm_cvtepu8_epi32(_mm_srli_si128(code2_interleaved, 4));
-        __m128 code2_values0 = _mm_cvtepi32_ps(code2_low_part);
-        __m128 code2_values1 = _mm_cvtepi32_ps(code2_high_part);
-
-        // Scale by 1/15.0
-        __m128 scale = _mm_set1_ps(1.0f / 15.0f);
-        code1_values0 = _mm_mul_ps(code1_values0, scale);
-        code1_values1 = _mm_mul_ps(code1_values1, scale);
-        code2_values0 = _mm_mul_ps(code2_values0, scale);
-        code2_values1 = _mm_mul_ps(code2_values1, scale);
-
-        // Apply diff and lower_bound
-        __m128 diff_vec0 = _mm_loadu_ps(diff + d);
-        __m128 diff_vec1 = _mm_loadu_ps(diff + d + 4);
-        __m128 lb_vec0 = _mm_loadu_ps(lower_bound + d);
-        __m128 lb_vec1 = _mm_loadu_ps(lower_bound + d + 4);
-
-        code1_values0 = _mm_add_ps(_mm_mul_ps(code1_values0, diff_vec0), lb_vec0);
-        code1_values1 = _mm_add_ps(_mm_mul_ps(code1_values1, diff_vec1), lb_vec1);
-        code2_values0 = _mm_add_ps(_mm_mul_ps(code2_values0, diff_vec0), lb_vec0);
-        code2_values1 = _mm_add_ps(_mm_mul_ps(code2_values1, diff_vec1), lb_vec1);
-
-        // Compute dot products
-        __m128 prod0 = _mm_mul_ps(code1_values0, code2_values0);
-        __m128 prod1 = _mm_mul_ps(code1_values1, code2_values1);
-
-        // Horizontal sum
-        __m128 sum01 = _mm_add_ps(prod0, prod1);
-        __m128 sum23 = _mm_shuffle_ps(sum01, sum01, _MM_SHUFFLE(2, 3, 0, 1));
-        __m128 sum0123 = _mm_add_ps(sum01, sum23);
-        __m128 sum4567 = _mm_movehl_ps(sum0123, sum0123);
-        __m128 sum = _mm_add_ss(sum0123, sum4567);
-
-        result += _mm_cvtss_f32(sum);
-    }
-
-    // Process remaining elements with generic implementation
-    result += generic::SQ4ComputeCodesIP(
-        codes1 + (d >> 1), codes2 + (d >> 1), lower_bound + d, diff + d, dim - d);
-    return result;
+    return simd::SQ4ComputeCodesIPImpl<simd::SQ4Traits<simd::SSE_SQ4_Tag>>(
+        codes1, codes2, lower_bound, diff, dim, &generic::SQ4ComputeCodesIP);
 #else
     return generic::SQ4ComputeCodesIP(codes1, codes2, lower_bound, diff, dim);
 #endif
@@ -944,81 +377,8 @@ SQ4ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
                      const float* RESTRICT diff,
                      uint64_t dim) {
 #if defined(ENABLE_SSE)
-    if (dim == 0) {
-        return 0;
-    }
-
-    float result = 0;
-    uint64_t d = 0;
-
-    // Process 8 values at a time (4 bytes containing 8 4-bit values)
-    for (; d + 7 < dim; d += 8) {
-        // Load 4 bytes from each code vector (8 4-bit values)
-        __m128i code1_vec = load_4_char(codes1 + (d >> 1));
-        __m128i code2_vec = load_4_char(codes2 + (d >> 1));
-
-        // Extract and interleave nibbles for code1
-        __m128i code1_low = _mm_and_si128(code1_vec, _mm_set1_epi8(0x0F));
-        __m128i code1_high = _mm_and_si128(_mm_srli_epi16(code1_vec, 4), _mm_set1_epi8(0x0F));
-        __m128i code1_interleaved = _mm_unpacklo_epi8(code1_low, code1_high);
-
-        // Extract and interleave nibbles for code2
-        __m128i code2_low = _mm_and_si128(code2_vec, _mm_set1_epi8(0x0F));
-        __m128i code2_high = _mm_and_si128(_mm_srli_epi16(code2_vec, 4), _mm_set1_epi8(0x0F));
-        __m128i code2_interleaved = _mm_unpacklo_epi8(code2_low, code2_high);
-
-        // Convert to float and scale for code1
-        __m128i code1_low_part = _mm_cvtepu8_epi32(code1_interleaved);
-        __m128i code1_high_part = _mm_cvtepu8_epi32(_mm_srli_si128(code1_interleaved, 4));
-        __m128 code1_values0 = _mm_cvtepi32_ps(code1_low_part);
-        __m128 code1_values1 = _mm_cvtepi32_ps(code1_high_part);
-
-        // Convert to float and scale for code2
-        __m128i code2_low_part = _mm_cvtepu8_epi32(code2_interleaved);
-        __m128i code2_high_part = _mm_cvtepu8_epi32(_mm_srli_si128(code2_interleaved, 4));
-        __m128 code2_values0 = _mm_cvtepi32_ps(code2_low_part);
-        __m128 code2_values1 = _mm_cvtepi32_ps(code2_high_part);
-
-        // Scale by 1/15.0
-        __m128 scale = _mm_set1_ps(1.0f / 15.0f);
-        code1_values0 = _mm_mul_ps(code1_values0, scale);
-        code1_values1 = _mm_mul_ps(code1_values1, scale);
-        code2_values0 = _mm_mul_ps(code2_values0, scale);
-        code2_values1 = _mm_mul_ps(code2_values1, scale);
-
-        // Apply diff and lower_bound
-        __m128 diff_vec0 = _mm_loadu_ps(diff + d);
-        __m128 diff_vec1 = _mm_loadu_ps(diff + d + 4);
-        __m128 lb_vec0 = _mm_loadu_ps(lower_bound + d);
-        __m128 lb_vec1 = _mm_loadu_ps(lower_bound + d + 4);
-
-        code1_values0 = _mm_add_ps(_mm_mul_ps(code1_values0, diff_vec0), lb_vec0);
-        code1_values1 = _mm_add_ps(_mm_mul_ps(code1_values1, diff_vec1), lb_vec1);
-        code2_values0 = _mm_add_ps(_mm_mul_ps(code2_values0, diff_vec0), lb_vec0);
-        code2_values1 = _mm_add_ps(_mm_mul_ps(code2_values1, diff_vec1), lb_vec1);
-
-        // Compute differences
-        __m128 diff0 = _mm_sub_ps(code1_values0, code2_values0);
-        __m128 diff1 = _mm_sub_ps(code1_values1, code2_values1);
-
-        // Square differences
-        __m128 sq_diff0 = _mm_mul_ps(diff0, diff0);
-        __m128 sq_diff1 = _mm_mul_ps(diff1, diff1);
-
-        // Horizontal sum
-        __m128 sum01 = _mm_add_ps(sq_diff0, sq_diff1);
-        __m128 sum23 = _mm_shuffle_ps(sum01, sum01, _MM_SHUFFLE(2, 3, 0, 1));
-        __m128 sum0123 = _mm_add_ps(sum01, sum23);
-        __m128 sum4567 = _mm_movehl_ps(sum0123, sum0123);
-        __m128 sum = _mm_add_ss(sum0123, sum4567);
-
-        result += _mm_cvtss_f32(sum);
-    }
-
-    // Process remaining elements with generic implementation
-    result += generic::SQ4ComputeCodesL2Sqr(
-        codes1 + (d >> 1), codes2 + (d >> 1), lower_bound + d, diff + d, dim - d);
-    return result;
+    return simd::SQ4ComputeCodesL2SqrImpl<simd::SQ4Traits<simd::SSE_SQ4_Tag>>(
+        codes1, codes2, lower_bound, diff, dim, &generic::SQ4ComputeCodesL2Sqr);
 #else
     return generic::SQ4ComputeCodesL2Sqr(codes1, codes2, lower_bound, diff, dim);
 #endif
@@ -1029,31 +389,8 @@ SQ4UniformComputeCodesIP(const uint8_t* RESTRICT codes1,
                          const uint8_t* RESTRICT codes2,
                          uint64_t dim) {
 #if defined(ENABLE_SSE)
-    if (dim == 0) {
-        return 0;
-    }
-    alignas(128) int16_t temp[8];
-    int32_t result = 0;
-    uint64_t d = 0;
-    __m128i sum = _mm_setzero_si128();
-    __m128i mask = _mm_set1_epi8(0xf);
-    for (; d + 31 < dim; d += 32) {
-        auto xx = _mm_loadu_si128((__m128i*)(codes1 + (d >> 1)));
-        auto yy = _mm_loadu_si128((__m128i*)(codes2 + (d >> 1)));
-        auto xx1 = _mm_and_si128(xx, mask);                     // 16 * 8bits
-        auto xx2 = _mm_and_si128(_mm_srli_epi16(xx, 4), mask);  // 16 * 8bits
-        auto yy1 = _mm_and_si128(yy, mask);
-        auto yy2 = _mm_and_si128(_mm_srli_epi16(yy, 4), mask);
-
-        sum = _mm_add_epi16(sum, _mm_maddubs_epi16(xx1, yy1));
-        sum = _mm_add_epi16(sum, _mm_maddubs_epi16(xx2, yy2));
-    }
-    _mm_store_si128((__m128i*)temp, sum);
-    for (int i = 0; i < 8; ++i) {
-        result += temp[i];
-    }
-    result += generic::SQ4UniformComputeCodesIP(codes1 + (d >> 1), codes2 + (d >> 1), dim - d);
-    return result;
+    return simd::SQ4UniformComputeCodesIPImpl<simd::UniformCodeTraits<simd::SSE_Uniform_Tag>>(
+        codes1, codes2, dim, &generic::SQ4UniformComputeCodesIP);
 #else
     return generic::SQ4UniformComputeCodesIP(codes1, codes2, dim);
 #endif
@@ -1064,33 +401,8 @@ SQ8UniformComputeCodesIP(const uint8_t* RESTRICT codes1,
                          const uint8_t* RESTRICT codes2,
                          uint64_t dim) {
 #if defined(ENABLE_SSE)
-    if (dim == 0) {
-        return 0;
-    }
-    alignas(128) int32_t temp[4];
-    int32_t result = 0;
-    uint64_t d = 0;
-    __m128i sum = _mm_setzero_si128();
-    __m128i mask = _mm_set1_epi16(0xff);
-    for (; d + 15 < dim; d += 16) {
-        auto xx = _mm_loadu_si128((__m128i*)(codes1 + d));
-        auto yy = _mm_loadu_si128((__m128i*)(codes2 + d));
-
-        auto xx1 = _mm_and_si128(xx, mask);  // 16 * 8bits
-        auto xx2 = _mm_srli_epi16(xx, 8);    // 16 * 8bits
-        auto yy1 = _mm_and_si128(yy, mask);
-        auto yy2 = _mm_srli_epi16(yy, 8);
-
-        sum = _mm_add_epi32(sum, _mm_madd_epi16(xx1, yy1));
-        sum = _mm_add_epi32(sum, _mm_madd_epi16(xx2, yy2));
-    }
-    _mm_store_si128((__m128i*)temp, sum);
-    for (int i = 0; i < 4; ++i) {
-        result += temp[i];
-    }
-    result +=
-        static_cast<int32_t>(generic::SQ8UniformComputeCodesIP(codes1 + d, codes2 + d, dim - d));
-    return static_cast<float>(result);
+    return simd::SQ8UniformComputeCodesIPImpl<simd::UniformCodeTraits<simd::SSE_Uniform_Tag>>(
+        codes1, codes2, dim, &generic::SQ8UniformComputeCodesIP);
 #else
     return generic::SQ8UniformComputeCodesIP(codes1, codes2, dim);
 #endif
@@ -1143,20 +455,8 @@ RaBitQFloatSplitCodeIP(const float* vector,
 void
 DivScalar(const float* from, float* to, uint64_t dim, float scalar) {
 #if defined(ENABLE_SSE)
-    if (dim == 0) {
-        return;
-    }
-    if (scalar == 0) {
-        scalar = 1.0f;  // TODO(LHT): logger?
-    }
-    int i = 0;
-    __m128 scalarVec = _mm_set1_ps(scalar);
-    for (; i + 3 < dim; i += 4) {
-        __m128 vec = _mm_loadu_ps(from + i);
-        vec = _mm_div_ps(vec, scalarVec);
-        _mm_storeu_ps(to + i, vec);
-    }
-    generic::DivScalar(from + i, to + i, dim - i, scalar);
+    simd::DivScalarImpl<simd::SimdTraits<simd::SSE_Tag>>(
+        from, to, dim, scalar, &generic::DivScalar);
 #else
     generic::DivScalar(from, to, dim, scalar);
 #endif
@@ -1217,22 +517,7 @@ PQFastScanLookUp32(const uint8_t* RESTRICT lookup_table,
 void
 BitAnd(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result) {
 #if defined(ENABLE_SSE)
-    if (num_byte == 0) {
-        return;
-    }
-    if (num_byte < 16) {
-        return generic::BitAnd(x, y, num_byte, result);
-    }
-    int64_t i = 0;
-    for (; i + 15 < num_byte; i += 16) {
-        __m128i x_vec = _mm_loadu_si128(reinterpret_cast<const __m128i*>(x + i));
-        __m128i y_vec = _mm_loadu_si128(reinterpret_cast<const __m128i*>(y + i));
-        __m128i result_vec = _mm_and_si128(x_vec, y_vec);
-        _mm_storeu_si128(reinterpret_cast<__m128i*>(result + i), result_vec);
-    }
-    if (i < num_byte) {
-        generic::BitAnd(x + i, y + i, num_byte - i, result + i);
-    }
+    simd::BitAndImpl<simd::BitTraits<simd::SSE_Bit_Tag>>(x, y, num_byte, result, &generic::BitAnd);
 #else
     return generic::BitAnd(x, y, num_byte, result);
 #endif
@@ -1241,22 +526,7 @@ BitAnd(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* res
 void
 BitOr(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result) {
 #if defined(ENABLE_SSE)
-    if (num_byte == 0) {
-        return;
-    }
-    if (num_byte < 16) {
-        return generic::BitOr(x, y, num_byte, result);
-    }
-    int64_t i = 0;
-    for (; i + 15 < num_byte; i += 16) {
-        __m128i x_vec = _mm_loadu_si128(reinterpret_cast<const __m128i*>(x + i));
-        __m128i y_vec = _mm_loadu_si128(reinterpret_cast<const __m128i*>(y + i));
-        __m128i result_vec = _mm_or_si128(x_vec, y_vec);
-        _mm_storeu_si128(reinterpret_cast<__m128i*>(result + i), result_vec);
-    }
-    if (i < num_byte) {
-        generic::BitOr(x + i, y + i, num_byte - i, result + i);
-    }
+    simd::BitOrImpl<simd::BitTraits<simd::SSE_Bit_Tag>>(x, y, num_byte, result, &generic::BitOr);
 #else
     return generic::BitOr(x, y, num_byte, result);
 #endif
@@ -1265,22 +535,7 @@ BitOr(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* resu
 void
 BitXor(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result) {
 #if defined(ENABLE_SSE)
-    if (num_byte == 0) {
-        return;
-    }
-    if (num_byte < 16) {
-        return generic::BitXor(x, y, num_byte, result);
-    }
-    int64_t i = 0;
-    for (; i + 15 < num_byte; i += 16) {
-        __m128i x_vec = _mm_loadu_si128(reinterpret_cast<const __m128i*>(x + i));
-        __m128i y_vec = _mm_loadu_si128(reinterpret_cast<const __m128i*>(y + i));
-        __m128i result_vec = _mm_xor_si128(x_vec, y_vec);
-        _mm_storeu_si128(reinterpret_cast<__m128i*>(result + i), result_vec);
-    }
-    if (i < num_byte) {
-        generic::BitXor(x + i, y + i, num_byte - i, result + i);
-    }
+    simd::BitXorImpl<simd::BitTraits<simd::SSE_Bit_Tag>>(x, y, num_byte, result, &generic::BitXor);
 #else
     return generic::BitXor(x, y, num_byte, result);
 #endif
@@ -1289,21 +544,7 @@ BitXor(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* res
 void
 BitNot(const uint8_t* x, const uint64_t num_byte, uint8_t* result) {
 #if defined(ENABLE_SSE)
-    if (num_byte == 0) {
-        return;
-    }
-    if (num_byte < 16) {
-        return generic::BitNot(x, num_byte, result);
-    }
-    int64_t i = 0;
-    for (; i + 15 < num_byte; i += 16) {
-        __m128i x_vec = _mm_loadu_si128(reinterpret_cast<const __m128i*>(x + i));
-        __m128i result_vec = _mm_xor_si128(x_vec, _mm_set1_epi8(0xFF));
-        _mm_storeu_si128(reinterpret_cast<__m128i*>(result + i), result_vec);
-    }
-    if (i < num_byte) {
-        generic::BitNot(x + i, num_byte - i, result + i);
-    }
+    simd::BitNotImpl<simd::BitTraits<simd::SSE_Bit_Tag>>(x, num_byte, result, &generic::BitNot);
 #else
     return generic::BitNot(x, num_byte, result);
 #endif
@@ -1312,16 +553,9 @@ BitNot(const uint8_t* x, const uint64_t num_byte, uint8_t* result) {
 void
 RotateOp(float* data, int idx, int dim_, int step) {
 #if defined(ENABLE_SSE)
-    for (int i = idx; i < dim_; i += step * 2) {
-        for (int j = 0; j < step; j += 4) {
-            __m128 g1 = _mm_loadu_ps(&data[i + j]);
-            __m128 g2 = _mm_loadu_ps(&data[i + j + step]);
-            _mm_storeu_ps(&data[i + j], _mm_add_ps(g1, g2));
-            _mm_storeu_ps(&data[i + j + step], _mm_sub_ps(g1, g2));
-        }
-    }
+    simd::RotateOpImpl<simd::SimdTraits<simd::SSE_Tag>>(data, idx, dim_, step);
 #else
-    return generic::RotateOp(data, idx, dim_, step);
+    generic::RotateOp(data, idx, dim_, step);
 #endif
 }
 
@@ -1346,91 +580,26 @@ FHTRotate(float* data, uint64_t dim_) {
 void
 VecRescale(float* data, uint64_t dim, float val) {
 #if defined(ENABLE_SSE)
-    int i = 0;
-    __m128 val_vec = _mm_set1_ps(val);
-    for (; i + 4 < dim; i += 4) {
-        __m128 data_vec = _mm_loadu_ps(&data[i]);
-        __m128 result_vec = _mm_mul_ps(data_vec, val_vec);
-        _mm_storeu_ps(&data[i], result_vec);
-    }
-    for (; i < dim; i++) {
-        data[i] *= val;
-    }
+    simd::VecRescaleImpl<simd::SimdTraits<simd::SSE_Tag>>(data, dim, val, &generic::VecRescale);
 #else
-    return generic::VecRescale(data, dim, val);
+    generic::VecRescale(data, dim, val);
 #endif
 }
 
 void
 KacsWalk(float* data, uint64_t len) {
 #if defined(ENABLE_SSE)
-    uint64_t base = len % 2;
-    uint64_t offset = base + (len / 2);  // for odd dim
-    uint64_t i = 0;
-    for (; i + 4 < len / 2; i += 4) {
-        __m128 x = _mm_loadu_ps(&data[i]);
-        __m128 y = _mm_loadu_ps(&data[i + offset]);
-        _mm_storeu_ps(&data[i], _mm_add_ps(x, y));
-        _mm_storeu_ps(&data[i + offset], _mm_sub_ps(x, y));
-    }
-    for (; i < len / 2; i++) {
-        float add = data[i] + data[i + offset];
-        float sub = data[i] - data[i + offset];
-        data[i] = add;
-        data[i + offset] = sub;
-    }
-    if (base != 0) {
-        data[len / 2] *= std::sqrt(2.0F);
-        //In odd condition, we operate the prev len/2 items and the post len/2 items, the No.len/2 item stay still,
-        //As we need to resize the while sequence in the next step, so we increase the val of No.len/2 item to eliminate the impact of the following resize.
-    }
+    simd::KacsWalkImpl<simd::SimdTraits<simd::SSE_Tag>>(data, len, &generic::KacsWalk);
 #else
-    return generic::KacsWalk(data, len);
+    generic::KacsWalk(data, len);
 #endif
 }
 
 float
 NormalizeWithCentroid(const float* from, const float* centroid, float* to, uint64_t dim) {
 #if defined(ENABLE_SSE)
-    float norm_sq = 0;
-    uint64_t i = 0;
-    if (dim >= 4) {
-        __m128 sum = _mm_setzero_ps();
-        for (; i + 3 < dim; i += 4) {
-            __m128 f = _mm_loadu_ps(from + i);
-            __m128 c = _mm_loadu_ps(centroid + i);
-            __m128 diff = _mm_sub_ps(f, c);
-            sum = _mm_add_ps(sum, _mm_mul_ps(diff, diff));
-        }
-        alignas(16) float result[4];
-        _mm_store_ps(result, sum);
-        norm_sq = result[0] + result[1] + result[2] + result[3];
-        norm_sq += generic::FP32ComputeL2Sqr(from + i, centroid + i, dim - i);
-    } else {
-        norm_sq = generic::FP32ComputeL2Sqr(from, centroid, dim);
-    }
-
-    float norm = 0;
-    if (norm_sq < 1e-5f) {
-        norm = 1.0f;
-    } else {
-        norm = std::sqrt(norm_sq);
-    }
-
-    __m128 normVec = _mm_set1_ps(norm);
-    for (i = 0; i + 3 < dim; i += 4) {
-        __m128 f = _mm_loadu_ps(from + i);
-        __m128 c = _mm_loadu_ps(centroid + i);
-        __m128 diff = _mm_sub_ps(f, c);
-        __m128 result = _mm_div_ps(diff, normVec);
-        _mm_storeu_ps(to + i, result);
-    }
-    if (i < dim) {
-        for (; i < dim; ++i) {
-            to[i] = (from[i] - centroid[i]) / norm;
-        }
-    }
-    return norm;
+    return simd::NormalizeWithCentroidImpl<simd::SimdTraits<simd::SSE_Tag>>(
+        from, centroid, to, dim, &generic::NormalizeWithCentroid);
 #else
     return generic::NormalizeWithCentroid(from, centroid, to, dim);
 #endif
@@ -1440,17 +609,8 @@ void
 InverseNormalizeWithCentroid(
     const float* from, const float* centroid, float* to, uint64_t dim, float norm) {
 #if defined(ENABLE_SSE)
-    uint64_t i = 0;
-    __m128 normVec = _mm_set1_ps(norm);
-    for (; i + 3 < dim; i += 4) {
-        __m128 f = _mm_loadu_ps(from + i);
-        __m128 c = _mm_loadu_ps(centroid + i);
-        __m128 result = _mm_add_ps(_mm_mul_ps(f, normVec), c);
-        _mm_storeu_ps(to + i, result);
-    }
-    for (; i < dim; i++) {
-        to[i] = from[i] * norm + centroid[i];
-    }
+    simd::InverseNormalizeWithCentroidImpl<simd::SimdTraits<simd::SSE_Tag>>(
+        from, centroid, to, dim, norm, &generic::InverseNormalizeWithCentroid);
 #else
     generic::InverseNormalizeWithCentroid(from, centroid, to, dim, norm);
 #endif
