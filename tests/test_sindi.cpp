@@ -76,18 +76,17 @@ public:
     }
 
     static std::string
-    GenerateSearchParameter(bool use_term_lists_heap_insert) {
+    GenerateSearchParameter(float query_prune_ratio) {
         constexpr static const char* search_param_template = R"(
         {{
             "sindi":
             {{
                 "n_candidate": 20,
-                "query_prune_ratio": 0.0,
-                "term_prune_ratio": 0.0,
-                "use_term_lists_heap_insert": {}
+                "query_prune_ratio": {},
+                "term_prune_ratio": 0.0
             }}
         }})";
-        return fmt::format(search_param_template, use_term_lists_heap_insert);
+        return fmt::format(search_param_template, query_prune_ratio);
     }
 };
 TestDatasetPool SINDITestIndex::pool{};
@@ -227,7 +226,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Analyze", "[ft][an
 
     vsag::SearchRequest request;
     request.topk_ = 10;
-    request.params_str_ = fixtures::SINDITestIndex::GenerateSearchParameter(true);
+    request.params_str_ = fixtures::SINDITestIndex::GenerateSearchParameter(0.2F);
     request.query_ = dataset->query_;
     auto raw_query_count = dataset->query_->GetNumElements();
     dataset->query_->NumElements(5);
@@ -266,8 +265,8 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
     param.use_quantization = GENERATE(true, false);
     param.remap_term_ids = GENERATE(true, false);
     auto build_param = fixtures::SINDITestIndex::GenerateBuildParameter(param);
-    auto search_param_with_heap_insert =
-        fixtures::SINDITestIndex::GenerateSearchParameter(GENERATE(true, false));
+    auto search_param_with_prune_ratio =
+        fixtures::SINDITestIndex::GenerateSearchParameter(GENERATE(0.0F, 0.2F));
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("ip");
@@ -285,15 +284,15 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
     TestBuildIndex(index, dataset, true);
     SECTION("serialize/deserialize by binary") {
         auto index2 = TestFactory(name, build_param, true);
-        TestSerializeBinarySet(index, index2, dataset, search_param_with_heap_insert, true);
+        TestSerializeBinarySet(index, index2, dataset, search_param_with_prune_ratio, true);
     }
     SECTION("serialize/deserialize by readerset") {
         auto index2 = TestFactory(name, build_param, true);
-        TestSerializeReaderSet(index, index2, dataset, search_param_with_heap_insert, name, true);
+        TestSerializeReaderSet(index, index2, dataset, search_param_with_prune_ratio, name, true);
     }
     SECTION("serialize/deserialize by file") {
         auto index2 = TestFactory(name, build_param, true);
-        TestSerializeFile(index, index2, dataset, search_param_with_heap_insert, true);
+        TestSerializeFile(index, index2, dataset, search_param_with_prune_ratio, true);
     }
     vsag::Options::Instance().set_block_size_limit(origin_size);
 }
