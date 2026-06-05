@@ -17,8 +17,8 @@
 
 #include <fmt/format.h>
 
-#include "impl/logger/logger.h"
 #include "inner_string_params.h"
+#include "utils/param_compat_macros.h"
 #include "vsag/constants.h"
 namespace vsag {
 
@@ -61,47 +61,12 @@ GraphDataCellParameter::ToJson() const {
 }
 bool
 GraphDataCellParameter::CheckCompatibility(const ParamPtr& other) const {
-    auto graph_param = std::dynamic_pointer_cast<GraphDataCellParameter>(other);
-    if (not graph_param) {
-        logger::error(
-            "GraphDataCellParameter::CheckCompatibility: other parameter is not a "
-            "GraphDataCellParameter");
-        return false;
-    }
-    if (max_degree_ != graph_param->max_degree_) {
-        logger::error("GraphDataCellParameter::CheckCompatibility: max_degree_ mismatch: {} vs {}",
-                      max_degree_,
-                      graph_param->max_degree_);
-        return false;
-    }
-    if (support_remove_ != graph_param->support_remove_) {
-        logger::error(
-            "GraphDataCellParameter::CheckCompatibility: support_remove_ mismatch: {} vs {}",
-            support_remove_,
-            graph_param->support_remove_);
-        return false;
-    }
-    if (remove_flag_bit_ != graph_param->remove_flag_bit_) {
-        logger::error(
-            "GraphDataCellParameter::CheckCompatibility: remove_flag_bit_ mismatch: {} vs {}",
-            remove_flag_bit_,
-            graph_param->remove_flag_bit_);
-        return false;
-    }
-    if (use_reverse_edges_ != graph_param->use_reverse_edges_) {
-        logger::error(
-            "GraphDataCellParameter::CheckCompatibility: use_reverse_edges_ mismatch: {} vs {}",
-            use_reverse_edges_,
-            graph_param->use_reverse_edges_);
-        return false;
-    }
-    if (support_duplicate_ != graph_param->support_duplicate_) {
-        logger::error(
-            "GraphDataCellParameter::CheckCompatibility: support_duplicate_ mismatch: {} vs {}",
-            support_duplicate_,
-            graph_param->support_duplicate_);
-        return false;
-    }
+    PARAM_CAST_OR_RETURN(GraphDataCellParameter, p, other);
+    CHECK_FIELD_EQ(*this, *p, max_degree_);
+    CHECK_FIELD_EQ(*this, *p, support_remove_);
+    CHECK_FIELD_EQ(*this, *p, remove_flag_bit_);
+    CHECK_FIELD_EQ(*this, *p, use_reverse_edges_);
+    CHECK_FIELD_EQ(*this, *p, support_duplicate_);
     return true;
 }
 

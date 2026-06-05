@@ -18,6 +18,7 @@
 #include <fmt/format.h>
 
 #include "inner_string_params.h"
+#include "utils/param_compat_macros.h"
 #include "vsag/constants.h"
 namespace vsag {
 
@@ -64,29 +65,10 @@ IVFParameter::CheckCompatibility(const ParamPtr& other) const {
     if (not InnerIndexParameter::CheckCompatibility(other)) {
         return false;
     }
-    auto ivf_param = std::dynamic_pointer_cast<IVFParameter>(other);
-    if (not ivf_param) {
-        logger::error("IVFParameter::CheckCompatibility: other parameter is not IVFParameter");
-        return false;
-    }
-
-    if (this->buckets_per_data != ivf_param->buckets_per_data) {
-        logger::error("IVFParameter::CheckCompatibility: buckets_per_data mismatch");
-        return false;
-    }
-
-    if (not this->bucket_param->CheckCompatibility(ivf_param->bucket_param)) {
-        logger::error("IVFParameter::CheckCompatibility: bucket_param mismatch");
-        return false;
-    }
-
-    if (not this->ivf_partition_strategy_parameter->CheckCompatibility(
-            ivf_param->ivf_partition_strategy_parameter)) {
-        logger::error(
-            "IVFParameter::CheckCompatibility: ivf_partition_strategy_parameter "
-            "mismatch");
-        return false;
-    }
+    PARAM_CAST_OR_RETURN(IVFParameter, p, other);
+    CHECK_FIELD_EQ(*this, *p, buckets_per_data);
+    CHECK_SUB_PARAM(*this, *p, bucket_param);
+    CHECK_SUB_PARAM(*this, *p, ivf_partition_strategy_parameter);
     return true;
 }
 

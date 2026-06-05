@@ -19,6 +19,7 @@
 
 #include "flatten_interface.h"
 #include "inner_string_params.h"
+#include "utils/param_compat_macros.h"
 #include "utils/pointer_define.h"
 
 namespace vsag {
@@ -55,14 +56,9 @@ public:
 
     bool
     CheckCompatibility(const vsag::ParamPtr& other) const override {
-        auto sparse_param = std::dynamic_pointer_cast<SparseVectorDataCellParameter>(other);
-        if (not sparse_param) {
-            logger::error(
-                "SparseVectorDataCellParameter::CheckCompatibility: "
-                "other parameter is not SparseVectorDataCellParameter");
-            return false;
-        }
-        return this->quantizer_parameter->CheckCompatibility(sparse_param->quantizer_parameter);
+        PARAM_CAST_OR_RETURN(SparseVectorDataCellParameter, p, other);
+        CHECK_SUB_PARAM(*this, *p, quantizer_parameter);
+        return true;
     }
 };
 }  // namespace vsag

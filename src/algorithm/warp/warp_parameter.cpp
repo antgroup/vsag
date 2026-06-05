@@ -17,6 +17,8 @@
 
 #include <fmt/format.h>
 
+#include "utils/param_compat_macros.h"
+
 namespace vsag {
 
 void
@@ -41,11 +43,9 @@ WarpParameter::CheckCompatibility(const vsag::ParamPtr& other) const {
     if (not InnerIndexParameter::CheckCompatibility(other)) {
         return false;
     }
-    auto other_param = std::dynamic_pointer_cast<WarpParameter>(other);
-    if (other_param == nullptr) {
-        return false;
-    }
-    return this->base_codes_param->CheckCompatibility(other_param->base_codes_param);
+    PARAM_CAST_OR_RETURN(WarpParameter, p, other);
+    CHECK_SUB_PARAM(*this, *p, base_codes_param);
+    return true;
 }
 
 }  // namespace vsag

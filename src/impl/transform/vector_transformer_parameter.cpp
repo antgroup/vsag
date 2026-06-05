@@ -16,6 +16,7 @@
 #include "vector_transformer_parameter.h"
 
 #include "inner_string_params.h"
+#include "utils/param_compat_macros.h"
 
 namespace vsag {
 
@@ -45,22 +46,10 @@ VectorTransformerParameter::ToJson() const {
 
 bool
 VectorTransformerParameter::CheckCompatibility(const ParamPtr& other) const {
-    auto param = std::dynamic_pointer_cast<VectorTransformerParameter>(other);
-    if (not param) {
-        logger::error(
-            "VectorTransformerParameter::CheckCompatibility: other parameter is not a "
-            "VectorTransformerParameter");
-        return false;
-    }
-    if (pca_dim_ != param->pca_dim_) {
-        return false;
-    }
-    if (input_dim_ != param->input_dim_) {
-        return false;
-    }
-    if (mrle_dim_ != param->mrle_dim_) {
-        return false;
-    }
+    PARAM_CAST_OR_RETURN(VectorTransformerParameter, p, other);
+    CHECK_FIELD_EQ(*this, *p, pca_dim_);
+    CHECK_FIELD_EQ(*this, *p, input_dim_);
+    CHECK_FIELD_EQ(*this, *p, mrle_dim_);
     return true;
 }
 

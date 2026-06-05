@@ -15,8 +15,8 @@
 
 #include "product_quantizer_parameter.h"
 
-#include "impl/logger/logger.h"
 #include "inner_string_params.h"
+#include "utils/param_compat_macros.h"
 
 namespace vsag {
 
@@ -48,29 +48,9 @@ ProductQuantizerParameter::ToJson() const {
 
 bool
 ProductQuantizerParameter::CheckCompatibility(const ParamPtr& other) const {
-    auto pq_other = std::dynamic_pointer_cast<ProductQuantizerParameter>(other);
-    if (not pq_other) {
-        logger::error(
-            "ProductQuantizerParameter::CheckCompatibility: "
-            "other parameter is not a ProductQuantizerParameter");
-        return false;
-    }
-    if (this->pq_dim_ != pq_other->pq_dim_) {
-        logger::error(
-            "ProductQuantizerParameter::CheckCompatibility: "
-            "pq_dim mismatch: {} vs {}",
-            this->pq_dim_,
-            pq_other->pq_dim_);
-        return false;
-    }
-    if (this->pq_bits_ != pq_other->pq_bits_) {
-        logger::error(
-            "ProductQuantizerParameter::CheckCompatibility: "
-            "pq_bits mismatch: {} vs {}",
-            this->pq_bits_,
-            pq_other->pq_bits_);
-        return false;
-    }
+    PARAM_CAST_OR_RETURN(ProductQuantizerParameter, p, other);
+    CHECK_FIELD_EQ(*this, *p, pq_dim_);
+    CHECK_FIELD_EQ(*this, *p, pq_bits_);
     return true;
 }
 }  // namespace vsag

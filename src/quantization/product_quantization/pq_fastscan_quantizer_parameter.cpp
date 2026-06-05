@@ -15,8 +15,8 @@
 
 #include "pq_fastscan_quantizer_parameter.h"
 
-#include "impl/logger/logger.h"
 #include "inner_string_params.h"
+#include "utils/param_compat_macros.h"
 
 namespace vsag {
 
@@ -42,21 +42,8 @@ PQFastScanQuantizerParameter::ToJson() const {
 
 bool
 PQFastScanQuantizerParameter::CheckCompatibility(const ParamPtr& other) const {
-    auto pq_fast_param = std::dynamic_pointer_cast<const PQFastScanQuantizerParameter>(other);
-    if (not pq_fast_param) {
-        logger::error(
-            "PQFastScanQuantizerParameter::CheckCompatibility: "
-            "other is not PQFastScanQuantizerParameter");
-        return false;
-    }
-    if (this->pq_dim_ != pq_fast_param->pq_dim_) {
-        logger::error(
-            "PQFastScanQuantizerParameter::CheckCompatibility: "
-            "pq_dim mismatch, this: {}, other: {}",
-            this->pq_dim_,
-            pq_fast_param->pq_dim_);
-        return false;
-    }
+    PARAM_CAST_OR_RETURN(PQFastScanQuantizerParameter, p, other);
+    CHECK_FIELD_EQ(*this, *p, pq_dim_);
     return true;
 }
 }  // namespace vsag
