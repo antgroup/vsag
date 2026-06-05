@@ -65,6 +65,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
       hierarchical_datacell_param_(hgraph_param->hierarchical_graph_param),
       use_old_serial_format_(common_param.use_old_serial_format_) {
     this->support_duplicate_ = hgraph_param->support_duplicate;
+    this->persist_source_id_ = hgraph_param->persist_source_id;
     neighbors_mutex_ = std::make_shared<PointsMutex>(0, common_param.allocator_.get());
     this->basic_flatten_codes_ =
         FlattenInterface::MakeInstance(hgraph_param->base_codes_param, common_param);

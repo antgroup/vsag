@@ -66,6 +66,8 @@ public:
     float duplicate_distance_threshold{0.0F};
     bool support_force_remove{false};
 
+    bool persist_source_id{false};
+
     DataTypes data_type{DataTypes::DATA_TYPE_FLOAT};
 
     std::string name;

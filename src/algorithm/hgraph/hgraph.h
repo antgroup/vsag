@@ -417,6 +417,44 @@ private:
     std::vector<int64_t>
     build_with_cache(const DatasetPtr& data);
 
+    // Internal scratch state shared across the 6 phases of build_with_cache.
+    // Each phase reads/writes a well-defined subset; threading this through
+    // a single struct keeps phase signatures small (1 ref instead of 8 outs)
+    // and makes the data flow explicit at a glance.
+    struct BuildCachePlan {
+        Vector<int64_t> valid_indices;
+        Vector<InnerIdType> inner_ids;
+        Vector<Vector<InnerIdType>> route_graph_ids;
+        std::vector<InnerIdType> inserted_inner_ids;
+        std::unordered_map<InnerIdType, uint32_t> inner_id_to_input_idx;
+        std::unordered_map<std::string, InnerIdType> source_id_to_new_inner;
+        std::vector<int64_t> failed_ids;
+        std::vector<InnerIdType> hit_ids;
+        std::vector<InnerIdType> missed_ids;
+
+        BuildCachePlan(Allocator* allocator)
+            : valid_indices(allocator), inner_ids(allocator), route_graph_ids(allocator) {
+        }
+    };
+
+    void
+    cache_collect_valid_indices(const DatasetPtr& data, BuildCachePlan& plan);
+
+    void
+    cache_setup_metadata_serial(const DatasetPtr& data, BuildCachePlan& plan);
+
+    void
+    cache_encode_codes_parallel(const DatasetPtr& data, BuildCachePlan& plan);
+
+    void
+    cache_warm_start_and_classify(BuildCachePlan& plan);
+
+    void
+    cache_run_refine_two_phase(const DatasetPtr& data, BuildCachePlan& plan);
+
+    void
+    cache_rebuild_route_graphs(BuildCachePlan& plan);
+
     DistHeapPtr
     collect_refine_candidates(const DatasetPtr& data,
                               InnerIdType inner_id,
@@ -503,6 +541,8 @@ private:
     bool support_duplicate_{false};
     bool support_force_remove_{false};
     float duplicate_distance_threshold_{0.0F};
+
+    bool persist_source_id_{false};
 
     std::unique_ptr<HGraphCache> cache_{nullptr};
 };

@@ -325,6 +325,19 @@ public:
         return source_id_table_[inner_id];
     }
 
+    const Vector<std::string>&
+    GetSourceIdTableRef() const {
+        return source_id_table_;
+    }
+
+    // Replace the entire source_id_table_ with a pre-built table.
+    // Used during single-threaded deserialization to move in the persisted
+    // data without exposing a mutable reference to callers.
+    void
+    ReplaceSourceIdTable(Vector<std::string>&& table) {
+        source_id_table_ = std::move(table);
+    }
+
     void
     Move(InnerIdType from, InnerIdType to) {
         if (from == to) {
