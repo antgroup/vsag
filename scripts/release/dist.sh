@@ -22,6 +22,7 @@ build() {
            bash -c "\
            export COMPILE_JOBS=\"$compile_jobs\" && \
            export CMAKE_INSTALL_PREFIX=/tmp/vsag && \
+           export EXTRA_DEFINED=\"\${EXTRA_DEFINED:+\$EXTRA_DEFINED }-DVSAG_USE_SYSTEM_DEPS:STRING=OFF\" && \
            make clean-release && make $makefile_target && make run-dist-tests && make install && \
            mkdir -p ./dist && \
            cp -r /tmp/vsag ./dist/ && \
