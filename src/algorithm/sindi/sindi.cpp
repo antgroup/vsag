@@ -78,6 +78,7 @@ SINDI::SINDI(const SINDIParameterPtr& param, const IndexCommonParam& common_para
       sparse_value_quant_type_(param->sparse_value_quant_type),
       term_id_limit_(param->term_id_limit),
       window_size_(param->window_size),
+      doc_prune_ratio_(param->doc_prune_ratio),
       doc_retain_ratio_(1.0F - param->doc_prune_ratio),
       window_term_list_(common_param.allocator_.get()),
       deserialize_without_footer_(param->deserialize_without_footer),
@@ -107,7 +108,7 @@ SINDI::GetStats() const {
     analyzer_param.base_sample_size =
         std::min<uint64_t>(K_ANALYZE_BASE_SAMPLE_SIZE, cur_element_count_);
     analyzer_param.search_params =
-        R"({"sindi": {"query_prune_ratio": 0, "term_prune_ratio": 0, "n_candidate": 500, "use_term_lists_heap_insert": true}})";
+        R"({"sindi": {"query_prune_ratio": 0, "term_prune_ratio": 0, "n_candidate": 500}})";
     auto analyzer = CreateAnalyzer(this, analyzer_param);
     JsonType stats = analyzer->GetStats();
     return stats.Dump(4);
@@ -331,14 +332,11 @@ SINDI::KnnSearch(const DatasetPtr& query,
     auto computer = std::make_shared<SparseTermComputer>(effective_query, search_param, allocator_);
     const SparseVector* rerank_query = (remap_term_ids_ && use_reorder_) ? &sparse_query : nullptr;
     if (immutable_data_ != nullptr) {
-        return immutable_search_impl<KNN_SEARCH>(computer,
-                                                 inner_param,
-                                                 allocator,
-                                                 search_param.use_term_lists_heap_insert,
-                                                 rerank_query);
+        return immutable_search_impl<KNN_SEARCH>(
+            computer, inner_param, allocator, UseTermListsHeapInsert(search_param), rerank_query);
     }
     return search_impl<KNN_SEARCH>(
-        computer, inner_param, allocator, search_param.use_term_lists_heap_insert, rerank_query);
+        computer, inner_param, allocator, UseTermListsHeapInsert(search_param), rerank_query);
 }
 
 std::optional<uint32_t>
@@ -857,14 +855,20 @@ SINDI::RangeSearch(const DatasetPtr& query,
     auto computer = std::make_shared<SparseTermComputer>(effective_query, search_param, allocator_);
     const SparseVector* rerank_query = (remap_term_ids_ && use_reorder_) ? &sparse_query : nullptr;
     if (immutable_data_ != nullptr) {
-        return immutable_search_impl<RANGE_SEARCH>(computer,
-                                                   inner_param,
-                                                   allocator_,
-                                                   search_param.use_term_lists_heap_insert,
-                                                   rerank_query);
+        return immutable_search_impl<RANGE_SEARCH>(
+            computer, inner_param, allocator_, UseTermListsHeapInsert(search_param), rerank_query);
     }
     return search_impl<RANGE_SEARCH>(
-        computer, inner_param, allocator_, search_param.use_term_lists_heap_insert, rerank_query);
+        computer, inner_param, allocator_, UseTermListsHeapInsert(search_param), rerank_query);
+}
+
+bool
+SINDI::UseTermListsHeapInsert(const SINDISearchParameter& search_param) const {
+    // Low build-time doc pruning and low search-time query pruning keep the old
+    // distance-array heap insertion path for accuracy. Once either side exceeds the
+    // threshold, term-list heap insertion avoids scanning the whole window for heap updates.
+    return doc_prune_ratio_ > SINDI::K_TERM_LISTS_HEAP_INSERT_PRUNE_THRESHOLD ||
+           search_param.query_prune_ratio > SINDI::K_TERM_LISTS_HEAP_INSERT_PRUNE_THRESHOLD;
 }
 
 void
@@ -956,6 +960,8 @@ SINDI::Deserialize(StreamReader& reader) {
                 logger::error(message);
                 throw VsagException(ErrorType::INVALID_ARGUMENT, message);
             }
+            doc_prune_ratio_ = index_param->doc_prune_ratio;
+            doc_retain_ratio_ = 1.0F - doc_prune_ratio_;
         }
     }
     auto* reader_ptr = &reader;

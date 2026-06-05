@@ -222,13 +222,14 @@ SINDIAnalyzer::collect_coarse_candidates(const SparseVector& query,
     MaxHeap heap(sindi_->allocator_);
     auto computer =
         std::make_shared<SparseTermComputer>(effective_query, search_param, sindi_->allocator_);
+    const bool use_term_lists_heap_insert = sindi_->UseTermListsHeapInsert(search_param);
 
     Vector<float> dists(sindi_->window_size_, 0.0F, sindi_->allocator_);
     for (int64_t cur = 0; cur < static_cast<int64_t>(sindi_->window_term_list_.size()); ++cur) {
         auto window_start_id = static_cast<uint32_t>(cur * sindi_->window_size_);
         auto term_list = sindi_->window_term_list_[cur];
         term_list->Query(dists.data(), computer);
-        if (search_param.use_term_lists_heap_insert) {
+        if (use_term_lists_heap_insert) {
             term_list->InsertHeapByTermLists<KNN_SEARCH, PURE>(
                 dists.data(), computer, heap, inner_param, window_start_id);
         } else {
@@ -272,6 +273,7 @@ SINDIAnalyzer::collect_doc_prune_candidates(const SparseVector& query,
     MaxHeap heap(sindi_->allocator_);
     auto computer =
         std::make_shared<SparseTermComputer>(effective_query, search_param, sindi_->allocator_);
+    const bool use_term_lists_heap_insert = sindi_->UseTermListsHeapInsert(search_param);
 
     Vector<float> dists(sindi_->window_size_, 0.0F, sindi_->allocator_);
     Vector<float> decoded_values(sindi_->allocator_);
@@ -321,7 +323,7 @@ SINDIAnalyzer::collect_doc_prune_candidates(const SparseVector& query,
         }
         computer->ResetTerm();
 
-        if (search_param.use_term_lists_heap_insert) {
+        if (use_term_lists_heap_insert) {
             term_list->InsertHeapByTermLists<KNN_SEARCH, PURE>(
                 dists.data(), computer, heap, inner_param, window_start_id);
         } else {
@@ -1199,7 +1201,6 @@ SINDIAnalyzer::GetStats() {
     default_search_json[INDEX_SINDI][SPARSE_QUERY_PRUNE_RATIO].SetFloat(0.0F);
     default_search_json[INDEX_SINDI][SPARSE_TERM_PRUNE_RATIO].SetFloat(0.0F);
     default_search_json[INDEX_SINDI][SPARSE_N_CANDIDATE].SetInt(500);
-    default_search_json[INDEX_SINDI][SPARSE_USE_TERM_LISTS_HEAP_INSERT].SetBool(true);
     auto default_search_param = default_search_json.Dump();
 
     auto base_search_stats = get_base_search_stats(default_search_param, base_dataset);

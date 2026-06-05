@@ -92,7 +92,14 @@ Search-time parameters live under the `sindi` sub-object:
 | `n_candidate` | int | `0` | Candidate heap size. When `0`, defaults to `SPARSE_AMPLIFICATION_FACTOR · topk` (500×). If set, must satisfy `1 ≤ n_candidate ≤ SPARSE_AMPLIFICATION_FACTOR · topk`. |
 | `query_prune_ratio` | float | `0.0` | Fraction of lowest-weight query terms skipped (0.0 – 0.9). |
 | `term_prune_ratio` | float | `0.0` | Fraction of term-list entries skipped (0.0 – 0.9). |
-| `use_term_lists_heap_insert` | bool | `true` | Term-list-ordered heap insertion; usually faster. |
+
+SINDI chooses the heap-insertion strategy automatically from the build-time
+`doc_prune_ratio` and search-time `query_prune_ratio`. With the current `0.1`
+threshold, SINDI uses the distance-array insertion path when both ratios are
+`<= 0.1`; if either ratio is greater than `0.1`, it uses term-list heap
+insertion. The legacy
+`use_term_lists_heap_insert` search parameter is ignored; configure pruning
+ratios instead.
 
 ```cpp
 auto result = index->KnnSearch(

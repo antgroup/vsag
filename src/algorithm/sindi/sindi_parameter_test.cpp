@@ -92,14 +92,27 @@ TEST_CASE("SINDI Index Parameters Test", "[ut][SINDIParameter]") {
         "sindi": {
             "query_prune_ratio": 0.2,
             "n_candidate": 20,
-            "term_prune_ratio": 0.1,
-            "use_term_lists_heap_insert": false
+            "term_prune_ratio": 0.1
         }
     })";
     auto search_param = std::make_shared<vsag::SINDISearchParameter>();
     vsag::JsonType search_param_json = vsag::JsonType::Parse(search_param_str);
     search_param->FromJson(search_param_json);
     vsag::ParameterTest::TestToJson(search_param);
+    REQUIRE_FALSE(search_param->ToJson()[INDEX_SINDI].Contains("use_term_lists_heap_insert"));
+
+    auto legacy_search_param_str = R"({
+        "sindi": {
+            "query_prune_ratio": 0.2,
+            "n_candidate": 20,
+            "term_prune_ratio": 0.1,
+            "use_term_lists_heap_insert": false
+        }
+    })";
+    auto legacy_search_param = std::make_shared<vsag::SINDISearchParameter>();
+    legacy_search_param->FromJson(vsag::JsonType::Parse(legacy_search_param_str));
+    REQUIRE_FALSE(
+        legacy_search_param->ToJson()[INDEX_SINDI].Contains("use_term_lists_heap_insert"));
 }
 
 TEST_CASE("SINDI Index Parameters Compatibility Test", "[ut][SINDIParameter]") {

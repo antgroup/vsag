@@ -188,6 +188,8 @@ public:
     SetImmutable() override;
 
 private:
+    static constexpr float K_TERM_LISTS_HEAP_INSERT_PRUNE_THRESHOLD = 0.1F;
+
     /**
      * @brief Core search implementation shared by KnnSearch / RangeSearch.
      *
@@ -215,6 +217,13 @@ private:
                           Allocator* allocator,
                           bool use_term_lists_heap_insert,
                           const SparseVector* original_query = nullptr) const;
+
+    bool
+    UseTermListsHeapInsert(const SINDISearchParameter& search_param) const;
+
+#ifdef VSAG_SINDI_TEST_ACCESS
+    friend class SINDITestAccess;
+#endif
 
     /**
      * @brief Derive the [min_window_id, max_window_id] range that could
@@ -315,6 +324,7 @@ private:
     bool use_reorder_{false};       // enable reranking stage
     bool use_quantization_{false};  // enable term-value quantization
 
+    float doc_prune_ratio_{0};   // ratio of docs pruned during build
     float doc_retain_ratio_{0};  // ratio of docs kept after pruning
 
     std::shared_ptr<SparseIndex> rerank_flat_index_{nullptr};  // re-rank back-end

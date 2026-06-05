@@ -87,7 +87,11 @@ auto result = index->KnnSearch(
 | `n_candidate` | int | `0` | 候选堆大小。为 `0` 时自动取 `SPARSE_AMPLIFICATION_FACTOR · topk`（500 倍）；若显式设置，须满足 `1 ≤ n_candidate ≤ SPARSE_AMPLIFICATION_FACTOR · topk` |
 | `query_prune_ratio` | float | `0.0` | 查询时丢弃权重最低查询项的比例（0.0 – 0.9） |
 | `term_prune_ratio` | float | `0.0` | 查询时丢弃倒排表中低权项的比例（0.0 – 0.9） |
-| `use_term_lists_heap_insert` | bool | `true` | 按倒排表顺序做堆插入，通常更快 |
+
+SINDI 会根据构建阶段的 `doc_prune_ratio` 与检索阶段的 `query_prune_ratio`
+自动选择堆插入策略。按当前 `0.1` 阈值，当两个比例都 `<= 0.1` 时，SINDI 使用
+基于距离数组的入堆路径；只要任一比例大于 `0.1`，就使用基于 term-list 的入堆路径。
+旧版 `use_term_lists_heap_insert` 检索参数会被忽略；请改用剪枝比例控制该行为。
 
 ```cpp
 auto result = index->KnnSearch(
