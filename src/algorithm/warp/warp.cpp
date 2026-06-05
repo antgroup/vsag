@@ -269,16 +269,7 @@ WARP::SearchWithRequest(const SearchRequest& request) const {
     const float* query_vectors = query_multi_vectors[0].vectors_;
     uint32_t query_vec_count = query_multi_vectors[0].len_;
 
-    FilterPtr ft = nullptr;
-    auto combined_filter = std::make_shared<CombinedFilter>();
-    combined_filter->AppendFilter(this->label_table_->GetDeletedIdsFilter());
-    if (request.filter_ != nullptr) {
-        combined_filter->AppendFilter(
-            std::make_shared<InnerIdWrapperFilter>(request.filter_, *this->label_table_));
-    }
-    if (not combined_filter->IsEmpty()) {
-        ft = combined_filter;
-    }
+    FilterPtr ft = this->create_search_filter(request.filter_);
 
     // Parse search parameters
     auto warp_params = WarpSearchParameters::FromJson(request.params_str_);
@@ -351,20 +342,13 @@ WARP::SearchWithRequest(const SearchRequest& request) const {
         heap = heaps.empty() ? nullptr : heaps[0];
     }
 
-    auto [dataset_results, dists, ids] =
-        create_fast_dataset(static_cast<int64_t>(heap->Size()), allocator_);
-    for (auto j = static_cast<int64_t>(heap->Size() - 1); j >= 0; --j) {
-        float dist = heap->Top().first;
-        dists[j] = dist;
-        ids[j] = this->label_table_->GetLabelById(heap->Top().second);
-        heap->Pop();
-    }
+    auto dataset_results = this->pack_knn_result(heap);
 
     JsonType stats;
     stats["dist_cmp"].SetInt(dist_cmp.load(std::memory_order_relaxed));
     dataset_results->Statistics(stats.Dump());
 
-    return std::move(dataset_results);
+    return dataset_results;
 }
 
 DatasetPtr
@@ -393,7 +377,8 @@ WARP::RangeSearch(const vsag::DatasetPtr& query,
     // Use serial version if no thread pool or small dataset
     if (parallel_count == 1 || this->thread_pool_ == nullptr ||
         total_count_ < MIN_PARALLEL_SEARCH_DOC_COUNT) {
-        auto heap = std::make_shared<StandardHeap<true, true>>(this->allocator_, limited_size);
+        DistHeapPtr heap =
+            std::make_shared<StandardHeap<true, true>>(this->allocator_, limited_size);
 
         for (InnerIdType doc_id = 0; doc_id < total_count_; ++doc_id) {
             if (filter != nullptr and
@@ -414,15 +399,7 @@ WARP::RangeSearch(const vsag::DatasetPtr& query,
             heap->Push(heap_dist, doc_id);
         }
 
-        auto [dataset_results, dists, ids] =
-            create_fast_dataset(static_cast<int64_t>(heap->Size()), allocator_);
-        for (auto j = static_cast<int64_t>(heap->Size() - 1); j >= 0; --j) {
-            float dist = heap->Top().first;
-            dists[j] = dist;
-            ids[j] = this->label_table_->GetLabelById(heap->Top().second);
-            heap->Pop();
-        }
-        return std::move(dataset_results);
+        return this->pack_knn_result(heap);
     }
 
     // Parallel version using atomic index distribution
@@ -507,27 +484,24 @@ WARP::Serialize(StreamWriter& writer) const {
     this->label_table_->Serialize(writer);
 
     // Serialize footer
-    auto metadata = std::make_shared<Metadata>();
     JsonType basic_info;
     basic_info["dim"].SetInt(dim_);
     basic_info["total_count"].SetInt(total_count_);
     basic_info["total_vector_count"].SetInt(total_vector_count_);
     basic_info[INDEX_PARAM].SetString(this->create_param_ptr_->ToString());
-    metadata->Set("basic_info", basic_info);
-    auto footer = std::make_shared<Footer>(metadata);
-    footer->Write(writer);
+    write_index_footer(writer, basic_info);
 }
 
 void
 WARP::Deserialize(StreamReader& reader) {
     // Try to deserialize footer
-    auto footer = Footer::Parse(reader);
+    JsonType basic_info;
+    if (not read_index_footer(reader, basic_info)) {
+        throw VsagException(ErrorType::READ_ERROR, "failed to read index footer");
+    }
 
     BufferStreamReader buffer_reader(
         &reader, std::numeric_limits<uint64_t>::max(), this->allocator_);
-
-    auto metadata = footer->GetMetadata();
-    auto basic_info = metadata->Get("basic_info");
     if (basic_info.Contains(INDEX_PARAM)) {
         std::string index_param_string = basic_info[INDEX_PARAM].GetString();
         auto index_param = std::make_shared<WarpParameter>();

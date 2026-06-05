@@ -73,12 +73,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
     if (GetNumElements() == 0) {
         return DatasetImpl::MakeEmptyDataset();
     }
-    int64_t query_dim = query->GetDim();
-    if (data_type_ != DataTypes::DATA_TYPE_SPARSE) {
-        CHECK_ARGUMENT(
-            query_dim == dim_,
-            fmt::format("query.dim({}) must be equal to index.dim({})", query_dim, dim_));
-    }
+    this->validate_knn_args(query, k);
 
     auto params = HGraphSearchParameters::FromJson(parameters);
     auto ef_search_threshold = std::max<int64_t>(AMPLIFICATION_FACTOR * k, 1000);
@@ -91,28 +86,9 @@ HGraph::KnnSearch(const DatasetPtr& query,
         force_remove_rlock = std::shared_lock<std::shared_mutex>(this->force_remove_mutex_);
     }
     std::shared_lock shared_lock(this->global_mutex_);
-    // check k
-    CHECK_ARGUMENT(k > 0, fmt::format("k({}) must be greater than 0", k));
     k = std::min(k, GetNumElements());
 
-    // check query vector
-    CHECK_ARGUMENT(query->GetNumElements() == 1, "query dataset should contain 1 vector only");
-
-    auto combined_filter = std::make_shared<CombinedFilter>();
-    combined_filter->AppendFilter(this->label_table_->GetDeletedIdsFilter());
-    if (filter != nullptr) {
-        if (params.use_extra_info_filter) {
-            combined_filter->AppendFilter(
-                std::make_shared<ExtraInfoWrapperFilter>(filter, this->extra_infos_));
-        } else {
-            combined_filter->AppendFilter(
-                std::make_shared<InnerIdWrapperFilter>(filter, *this->label_table_));
-        }
-    }
-    FilterPtr ft = nullptr;
-    if (not combined_filter->IsEmpty()) {
-        ft = combined_filter;
-    }
+    FilterPtr ft = this->create_search_filter(filter, params.use_extra_info_filter);
 
     if (iter_ctx == nullptr) {
         auto cur_count = this->total_count_.load();
@@ -376,32 +352,9 @@ HGraph::RangeSearch(const DatasetPtr& query,
     SearchStatistics stats;
     QueryContext ctx{.stats = &stats};
 
-    auto combined_filter = std::make_shared<CombinedFilter>();
-    combined_filter->AppendFilter(this->label_table_->GetDeletedIdsFilter());
-    if (filter != nullptr) {
-        combined_filter->AppendFilter(
-            std::make_shared<InnerIdWrapperFilter>(filter, *this->label_table_));
-    }
-    FilterPtr ft = nullptr;
-    if (not combined_filter->IsEmpty()) {
-        ft = combined_filter;
-    }
+    FilterPtr ft = this->create_search_filter(filter);
 
-    int64_t query_dim = query->GetDim();
-    if (data_type_ != DataTypes::DATA_TYPE_SPARSE) {
-        CHECK_ARGUMENT(
-            query_dim == dim_,
-            fmt::format("query.dim({}) must be equal to index.dim({})", query_dim, dim_));
-    }
-    // check radius
-    CHECK_ARGUMENT(radius >= 0, fmt::format("radius({}) must be greater equal than 0", radius))
-
-    // check query vector
-    CHECK_ARGUMENT(query->GetNumElements() == 1, "query dataset should contain 1 vector only");
-
-    // check limited_size
-    CHECK_ARGUMENT(limited_size != 0,
-                   fmt::format("limited_size({}) must not be equal to 0", limited_size));
+    this->validate_range_args(query, radius, limited_size);
 
     std::shared_lock<std::shared_mutex> force_remove_rlock;
     if (this->support_force_remove()) {
@@ -477,26 +430,9 @@ HGraph::RangeSearch(const DatasetPtr& query,
         }
     }
 
-    auto count = static_cast<const int64_t>(search_result->Size());
-    auto [dataset_results, dists, ids] = create_fast_dataset(count, allocator_);
-    char* extra_infos = nullptr;
-    if (extra_info_size_ > 0) {
-        extra_infos =
-            static_cast<char*>(allocator_->Allocate(extra_info_size_ * search_result->Size()));
-        dataset_results->ExtraInfos(extra_infos);
-    }
-    for (int64_t j = count - 1; j >= 0; --j) {
-        dists[j] = search_result->Top().first;
-        ids[j] = this->label_table_->GetLabelById(search_result->Top().second);
-        if (extra_infos != nullptr) {
-            this->extra_infos_->GetExtraInfoById(search_result->Top().second,
-                                                 extra_infos + extra_info_size_ * j);
-        }
-        search_result->Pop();
-    }
-
-    dataset_results->Statistics(stats.Dump());
-    return std::move(dataset_results);
+    auto result = this->pack_knn_result_with_extra_info(search_result, allocator_);
+    result->Statistics(stats.Dump());
+    return result;
 }
 
 [[nodiscard]] DatasetPtr
@@ -508,13 +444,8 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     }
 
     const auto& query = request.query_;
-    int64_t query_dim = query->GetDim();
     auto k = request.topk_;
-    if (data_type_ != DataTypes::DATA_TYPE_SPARSE) {
-        CHECK_ARGUMENT(
-            query_dim == dim_,
-            fmt::format("query.dim({}) must be equal to index.dim({})", query_dim, dim_));
-    }
+    this->validate_knn_args(query, k);
 
     auto params = HGraphSearchParameters::FromJson(request.params_str_);
 
@@ -528,13 +459,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         force_remove_rlock = std::shared_lock<std::shared_mutex>(this->force_remove_mutex_);
     }
     std::shared_lock shared_lock(this->global_mutex_);
-
-    // check k
-    CHECK_ARGUMENT(k > 0, fmt::format("k({}) must be greater than 0", k));
     k = std::min(k, GetNumElements());
-
-    // check query vector
-    CHECK_ARGUMENT(query->GetNumElements() == 1, "query dataset should contain 1 vector only");
 
     // Setup reasoning context if expected labels are provided.
     std::shared_ptr<ReasoningContext> reasoning_ctx;
@@ -591,21 +516,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         search_param.ep = result->Top().second;
     }
 
-    auto combined_filter = std::make_shared<CombinedFilter>();
-    combined_filter->AppendFilter(this->label_table_->GetDeletedIdsFilter());
-    if (request.filter_ != nullptr) {
-        if (params.use_extra_info_filter) {
-            combined_filter->AppendFilter(
-                std::make_shared<ExtraInfoWrapperFilter>(request.filter_, this->extra_infos_));
-        } else {
-            combined_filter->AppendFilter(
-                std::make_shared<InnerIdWrapperFilter>(request.filter_, *this->label_table_));
-        }
-    }
-    FilterPtr ft = nullptr;
-    if (not combined_filter->IsEmpty()) {
-        ft = combined_filter;
-    }
+    FilterPtr ft = this->create_search_filter(request.filter_, params.use_extra_info_filter);
 
     if (request.enable_attribute_filter_ and this->attr_filter_index_ != nullptr) {
         auto& schema = this->attr_filter_index_->field_type_map_;

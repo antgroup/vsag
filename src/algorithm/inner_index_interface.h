@@ -25,6 +25,7 @@
 #include "datacell/extra_info_interface.h"
 #include "datacell/flatten_interface.h"
 #include "dataset_impl.h"
+#include "impl/heap/distance_heap.h"
 #include "inner_index_parameter.h"
 #include "json_types.h"
 #include "metric_type.h"
@@ -511,6 +512,45 @@ protected:
                        const int64_t* ids,
                        int64_t count,
                        const FlattenInterfacePtr& data) const;
+
+    // ========== Search Helper Methods ==========
+    // Common filter composition: combines DeletedIdsFilter with user filter
+    // If use_extra_info_filter is true and extra_infos_ is available,
+    // uses ExtraInfoWrapperFilter; otherwise uses InnerIdWrapperFilter.
+    FilterPtr
+    create_search_filter(const FilterPtr& user_filter, bool use_extra_info_filter = false) const;
+
+    // Pack search results from a distance heap into a Dataset
+    DatasetPtr
+    pack_knn_result(DistHeapPtr& heap, Allocator* allocator = nullptr) const;
+
+    // Pack search results from a distance heap with extra info
+    DatasetPtr
+    pack_knn_result_with_extra_info(DistHeapPtr& heap, Allocator* allocator = nullptr) const;
+
+    // Create an empty search result with optional statistics
+    static DatasetPtr
+    make_empty_result(const std::string& stats_json = "");
+
+    // Write index footer with basic_info metadata
+    static void
+    write_index_footer(StreamWriter& writer, const JsonType& basic_info);
+
+    // Read index footer and return basic_info metadata; returns false if old format
+    static bool
+    read_index_footer(StreamReader& reader, JsonType& basic_info);
+
+    // Validate search query: checks dim and num_elements
+    void
+    validate_search_query(const DatasetPtr& query) const;
+
+    // Validate KNN search arguments: query, k
+    void
+    validate_knn_args(const DatasetPtr& query, int64_t k) const;
+
+    // Validate range search arguments: query, radius, limited_size
+    void
+    validate_range_args(const DatasetPtr& query, float radius, int64_t limited_size) const;
 
 public:
     LabelTablePtr label_table_{nullptr};
