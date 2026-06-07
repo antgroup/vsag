@@ -263,6 +263,7 @@ Thrive together in VSAG community with users and developers from all around the 
 
 - **Optimized Index Types**
   - **HGraph (Graph Index)**: For scenarios demanding high recall and low latency.
+  - **LazyHGraph (Adaptive Graph Index)**: Uses exact BruteForce for small FP32 datasets and automatically converts to HGraph after a configurable threshold.
   - **IVF (Inverted File Index)**: Optimized for large-scale search (high `k`) and batch queries.
   - **SINDI (Sparse Inverted Non-redundant Distance Index)**: Optimized sparse vector index.
 

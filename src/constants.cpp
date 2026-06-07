@@ -19,6 +19,7 @@
 namespace vsag {
 
 const char* const INDEX_HGRAPH = "hgraph";
+const char* const INDEX_LAZY_HGRAPH = "lazy_hgraph";
 const char* const INDEX_DISKANN = "diskann";
 const char* const INDEX_HNSW = "hnsw";
 const char* const INDEX_FRESH_HNSW = "fresh_hnsw";
