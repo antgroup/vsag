@@ -763,6 +763,11 @@ DiskSparseTermListDataCell<IOTmpl>::GetSparseVector(uint32_t inner_id,
     }
 
     data->len_ = ids.size();
+    if (data->len_ == 0) {
+        data->ids_ = nullptr;
+        data->vals_ = nullptr;
+        return;
+    }
     data->ids_ = static_cast<uint32_t*>(allocator->Allocate(sizeof(uint32_t) * data->len_));
     data->vals_ = static_cast<float*>(allocator->Allocate(sizeof(float) * data->len_));
     memcpy(data->ids_, ids.data(), data->len_ * sizeof(uint32_t));

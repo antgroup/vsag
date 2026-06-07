@@ -75,7 +75,7 @@ public:
     /**
      * @brief Calculate distance by ID using DatasetPtr.
      *
-        * Suitable for sparse vector indexes (SINDI) where vectors
+     * Suitable for sparse vector indexes (SINDI) where vectors
      * cannot be represented as a simple float pointer. The Dataset should
      * contain sparse vectors via GetSparseVectors().
      * For dense vector indexes, this overload is also available via default
