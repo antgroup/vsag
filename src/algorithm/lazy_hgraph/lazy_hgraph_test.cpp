@@ -14,9 +14,13 @@
 
 #include "lazy_hgraph.h"
 
+#include <atomic>
+#include <cmath>
 #include <memory>
+#include <thread>
 #include <vector>
 
+#include "algorithm/hgraph/hgraph.h"
 #include "impl/allocator/safe_allocator.h"
 #include "index_common_param.h"
 #include "unittest.h"
@@ -37,7 +41,7 @@ MakeCommonParam() {
 }
 
 vsag::JsonType
-MakeLazyParam(uint64_t threshold) {
+MakeLazyParam(uint64_t threshold, const std::string& base_quantization_type = "fp32") {
     auto param = vsag::JsonType::Parse(R"({
         "transition_threshold": 4,
         "hgraph": {
@@ -48,6 +52,7 @@ MakeLazyParam(uint64_t threshold) {
         }
     })");
     param["transition_threshold"].SetInt(threshold);
+    param["hgraph"]["base_quantization_type"].SetString(base_quantization_type);
     return param;
 }
 
@@ -82,10 +87,10 @@ MakeQuery(const std::vector<float>& vectors, int64_t row) {
 }
 
 std::shared_ptr<vsag::LazyHGraph>
-MakeLazyIndex(uint64_t threshold) {
+MakeLazyIndex(uint64_t threshold, const std::string& base_quantization_type = "fp32") {
     auto common_param = MakeCommonParam();
-    auto param =
-        vsag::LazyHGraph::CheckAndMappingExternalParam(MakeLazyParam(threshold), common_param);
+    auto param = vsag::LazyHGraph::CheckAndMappingExternalParam(
+        MakeLazyParam(threshold, base_quantization_type), common_param);
     auto index = std::make_shared<vsag::LazyHGraph>(param, common_param);
     index->InitFeatures();
     return index;
@@ -109,6 +114,16 @@ MakeFactoryParam(uint64_t threshold) {
     })");
     root["lazy_hgraph"]["transition_threshold"].SetInt(threshold);
     return root.Dump();
+}
+
+float
+L2(const float* lhs, const float* rhs) {
+    float distance = 0.0F;
+    for (int64_t i = 0; i < DIM; ++i) {
+        auto diff = lhs[i] - rhs[i];
+        distance += diff * diff;
+    }
+    return distance;
 }
 
 }  // namespace
@@ -210,4 +225,192 @@ TEST_CASE("LazyHGraph rejects flat quantization parameters", "[ut][lazy_hgraph]"
     param["flat_quantization_type"].SetString("sq8");
 
     REQUIRE_THROWS(vsag::LazyHGraph::CheckAndMappingExternalParam(param, common_param));
+}
+
+TEST_CASE("LazyHGraph build chooses flat or graph by threshold", "[ut][lazy_hgraph]") {
+    auto small_index = MakeLazyIndex(4);
+    std::vector<float> small_vectors;
+    std::vector<int64_t> small_ids;
+    auto small = MakeDataset(3, 800, small_vectors, small_ids);
+
+    REQUIRE(small_index->Build(small).empty());
+    REQUIRE(small_index->GetPhase() == vsag::LazyHGraph::Phase::FLAT);
+    REQUIRE(small_index->KnnSearch(MakeQuery(small_vectors, 0), 1, "{}", nullptr)->GetIds()[0] ==
+            800);
+
+    auto large_index = MakeLazyIndex(4);
+    std::vector<float> large_vectors;
+    std::vector<int64_t> large_ids;
+    auto large = MakeDataset(4, 900, large_vectors, large_ids);
+
+    REQUIRE(large_index->Build(large).empty());
+    REQUIRE(large_index->GetPhase() == vsag::LazyHGraph::Phase::GRAPH);
+    REQUIRE(
+        large_index
+            ->KnnSearch(MakeQuery(large_vectors, 0), 1, R"({"hgraph":{"ef_search":40}})", nullptr)
+            ->GetIds()[0] == 900);
+}
+
+TEST_CASE("LazyHGraph serializes empty flat and graph phases", "[ut][lazy_hgraph]") {
+    auto empty = MakeLazyIndex(4);
+    auto empty_binary = static_cast<vsag::InnerIndexInterface*>(empty.get())->Serialize();
+
+    auto restored_empty = MakeLazyIndex(4);
+    static_cast<vsag::InnerIndexInterface*>(restored_empty.get())->Deserialize(empty_binary);
+    REQUIRE(restored_empty->GetPhase() == vsag::LazyHGraph::Phase::FLAT);
+    REQUIRE(restored_empty->GetNumElements() == 0);
+
+    auto graph = MakeLazyIndex(2);
+    std::vector<float> vectors;
+    std::vector<int64_t> ids;
+    auto data = MakeDataset(2, 1000, vectors, ids);
+    REQUIRE(graph->Add(data).empty());
+    REQUIRE(graph->GetPhase() == vsag::LazyHGraph::Phase::GRAPH);
+
+    auto graph_binary = static_cast<vsag::InnerIndexInterface*>(graph.get())->Serialize();
+    auto restored_graph = MakeLazyIndex(2);
+    static_cast<vsag::InnerIndexInterface*>(restored_graph.get())->Deserialize(graph_binary);
+    REQUIRE(restored_graph->GetPhase() == vsag::LazyHGraph::Phase::GRAPH);
+    REQUIRE(restored_graph
+                ->KnnSearch(MakeQuery(vectors, 1), 1, R"({"hgraph":{"ef_search":40}})", nullptr)
+                ->GetIds()[0] == 1001);
+}
+
+TEST_CASE("LazyHGraph removes ids in both phases", "[ut][lazy_hgraph]") {
+    auto index = MakeLazyIndex(4);
+    std::vector<float> vectors;
+    std::vector<int64_t> ids;
+    auto data = MakeDataset(3, 1100, vectors, ids);
+
+    REQUIRE(index->Add(data).empty());
+    REQUIRE(index->GetPhase() == vsag::LazyHGraph::Phase::FLAT);
+    REQUIRE(index->Remove({1101}) == 1);
+    REQUIRE_FALSE(index->CheckIdExist(1101));
+    REQUIRE(index->GetNumberRemoved() == 1);
+
+    std::vector<float> more_vectors;
+    std::vector<int64_t> more_ids;
+    auto more = MakeDataset(2, 1200, more_vectors, more_ids);
+    REQUIRE(index->Add(more).empty());
+    REQUIRE(index->GetPhase() == vsag::LazyHGraph::Phase::GRAPH);
+    REQUIRE(index->Remove({1200}) == 1);
+    REQUIRE_FALSE(index->CheckIdExist(1200));
+    REQUIRE(index->GetNumberRemoved() == 1);
+}
+
+TEST_CASE("LazyHGraph preserves fp32 vectors during transition", "[ut][lazy_hgraph]") {
+    auto index = MakeLazyIndex(4);
+    std::vector<float> vectors;
+    std::vector<int64_t> ids;
+    auto data = MakeDataset(4, 1300, vectors, ids);
+
+    REQUIRE(index->Add(data).empty());
+    REQUIRE(index->GetPhase() == vsag::LazyHGraph::Phase::GRAPH);
+
+    auto fetched = index->GetVectorByIds(ids.data(), ids.size(), nullptr);
+    REQUIRE(fetched->GetNumElements() == ids.size());
+    const auto* fetched_vectors = fetched->GetFloat32Vectors();
+    for (int64_t i = 0; i < data->GetNumElements() * DIM; ++i) {
+        REQUIRE(fetched_vectors[i] == vectors[i]);
+    }
+}
+
+TEST_CASE("LazyHGraph graph search matches direct HGraph baseline", "[ut][lazy_hgraph]") {
+    std::vector<float> vectors;
+    std::vector<int64_t> ids;
+    auto data = MakeDataset(4, 1400, vectors, ids);
+    auto query = MakeQuery(vectors, 2);
+    auto search_param = R"({"hgraph":{"ef_search":40}})";
+
+    auto lazy = MakeLazyIndex(4);
+    REQUIRE(lazy->Add(data).empty());
+    auto lazy_result = lazy->KnnSearch(query, 2, search_param, nullptr);
+
+    auto common_param = MakeCommonParam();
+    auto graph_param =
+        vsag::HGraph::CheckAndMappingExternalParam(MakeLazyParam(4)["hgraph"], common_param);
+    auto hgraph = std::make_shared<vsag::HGraph>(graph_param, common_param);
+    hgraph->InitFeatures();
+    REQUIRE(hgraph->Build(data).empty());
+    auto hgraph_result = hgraph->KnnSearch(query, 2, search_param, nullptr);
+
+    REQUIRE(lazy_result->GetDim() == hgraph_result->GetDim());
+    for (int64_t i = 0; i < lazy_result->GetDim(); ++i) {
+        REQUIRE(lazy_result->GetIds()[i] == hgraph_result->GetIds()[i]);
+        REQUIRE(lazy_result->GetDistances()[i] == hgraph_result->GetDistances()[i]);
+    }
+}
+
+TEST_CASE("LazyHGraph keeps flat fp32 while graph quantization is configurable",
+          "[ut][lazy_hgraph]") {
+    auto index = MakeLazyIndex(4, "sq8");
+    std::vector<float> vectors;
+    std::vector<int64_t> ids;
+    auto data = MakeDataset(3, 1500, vectors, ids);
+
+    REQUIRE(index->Add(data).empty());
+    REQUIRE(index->GetPhase() == vsag::LazyHGraph::Phase::FLAT);
+    REQUIRE(index->CalcDistanceById(vectors.data(), 1500) == 0.0F);
+
+    std::vector<float> more_vectors;
+    std::vector<int64_t> more_ids;
+    auto more = MakeDataset(1, 1600, more_vectors, more_ids);
+    REQUIRE(index->Add(more).empty());
+    REQUIRE(index->GetPhase() == vsag::LazyHGraph::Phase::GRAPH);
+    REQUIRE(index->CheckIdExist(1600));
+}
+
+TEST_CASE("LazyHGraph calculates distance by id in flat and graph phases", "[ut][lazy_hgraph]") {
+    auto index = MakeLazyIndex(4);
+    std::vector<float> vectors;
+    std::vector<int64_t> ids;
+    auto data = MakeDataset(3, 1700, vectors, ids);
+
+    REQUIRE(index->Add(data).empty());
+    auto expected = L2(vectors.data(), vectors.data() + DIM);
+    REQUIRE(index->CalcDistanceById(vectors.data(), 1701) == expected);
+
+    std::vector<float> more_vectors;
+    std::vector<int64_t> more_ids;
+    auto more = MakeDataset(1, 1800, more_vectors, more_ids);
+    REQUIRE(index->Add(more).empty());
+    REQUIRE(index->GetPhase() == vsag::LazyHGraph::Phase::GRAPH);
+    REQUIRE(index->CalcDistanceById(more_vectors.data(), 1800) == 0.0F);
+}
+
+TEST_CASE("LazyHGraph supports concurrent search during transition", "[ut][lazy_hgraph]") {
+    auto index = MakeLazyIndex(8);
+    std::vector<float> vectors;
+    std::vector<int64_t> ids;
+    auto data = MakeDataset(4, 1900, vectors, ids);
+    REQUIRE(index->Add(data).empty());
+
+    std::atomic<bool> stop{false};
+    std::atomic<bool> failed{false};
+    std::thread search_thread([&]() {
+        while (not stop.load(std::memory_order_acquire)) {
+            try {
+                auto result = index->KnnSearch(
+                    MakeQuery(vectors, 0), 1, R"({"hgraph":{"ef_search":40}})", nullptr);
+                if (result == nullptr or result->GetIds()[0] != 1900) {
+                    failed.store(true, std::memory_order_release);
+                    return;
+                }
+            } catch (...) {
+                failed.store(true, std::memory_order_release);
+                return;
+            }
+        }
+    });
+
+    std::vector<float> more_vectors;
+    std::vector<int64_t> more_ids;
+    auto more = MakeDataset(4, 2000, more_vectors, more_ids);
+    REQUIRE(index->Add(more).empty());
+    stop.store(true, std::memory_order_release);
+    search_thread.join();
+
+    REQUIRE_FALSE(failed.load(std::memory_order_acquire));
+    REQUIRE(index->GetPhase() == vsag::LazyHGraph::Phase::GRAPH);
+    REQUIRE(index->CheckIdExist(2000));
 }
