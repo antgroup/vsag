@@ -401,6 +401,7 @@ DiskSINDI::KnnSearch(const DatasetPtr& query,
 
     const auto* sparse_vectors = query->GetSparseVectors();
     CHECK_ARGUMENT(query->GetNumElements() == 1, "num of query should be 1");
+    CHECK_ARGUMENT(k > 0, "k must be greater than 0");
     auto sparse_query = sparse_vectors[0];
     CHECK_ARGUMENT(
         sparse_query.len_ > 0,

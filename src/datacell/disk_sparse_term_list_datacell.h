@@ -15,16 +15,18 @@
 
 #pragma once
 
+#include <map>
 #include <mutex>
 #include <shared_mutex>
 #include <unordered_map>
+#include <vector>
 
 #include "container_types.h"
 #include "impl/inner_search_param.h"
 #include "index_common_param.h"
 #include "io/basic_io.h"
 #include "io/io_parameter.h"
-#include "quantization/sparse_quantization//sparse_term_computer.h"
+#include "quantization/sparse_quantization/sparse_term_computer.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "utils/pointer_define.h"

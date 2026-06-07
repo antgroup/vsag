@@ -314,8 +314,8 @@ DiskSparseTermListDataCell<IOTmpl>::WritePayload(StreamWriter& writer) const {
         // Pad ids to 4-byte boundary
         size_t ids_padding = (4 - (tb.ids.size() * sizeof(uint16_t)) % 4) % 4;
         if (ids_padding > 0) {
-            Vector<char> pad(ids_padding, 0, allocator_);
-            writer.Write(pad.data(), ids_padding);
+            char pad[2] = {0, 0};
+            writer.Write(pad, ids_padding);
         }
 
         // Write values
@@ -365,6 +365,8 @@ DiskSparseTermListDataCell<IOTmpl>::Deserialize(StreamReader& reader,
                                                 uint32_t window_count) {
     std::unique_lock lock(term_buffers_mutex_);
     window_count_ = window_count;
+    CHECK_ARGUMENT(term_dict_size % sizeof(DiskTermEntry) == 0,
+                   fmt::format("invalid DiskSINDI term_dict_size {}", term_dict_size));
     uint32_t term_dict_count = static_cast<uint32_t>(term_dict_size / sizeof(DiskTermEntry));
     std::vector<DiskTermEntry> term_dict(term_dict_count);
     reader.Read(reinterpret_cast<char*>(term_dict.data()), term_dict_size);
@@ -421,8 +423,8 @@ DiskSparseTermListDataCell<IOTmpl>::WritePayloadToIO(uint64_t payload_base_offse
 
         size_t ids_padding = (4 - ids_size % 4) % 4;
         if (ids_padding > 0) {
-            Vector<uint8_t> pad(ids_padding, 0, allocator_);
-            io_->Write(pad.data(), ids_padding, offset);
+            uint8_t pad[2] = {0, 0};
+            io_->Write(pad, ids_padding, offset);
             offset += ids_padding;
         }
 

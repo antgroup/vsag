@@ -299,6 +299,14 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::GetSparseVectorByInnerId(
     const auto* codes = this->GetCodesById(inner_id, need_release);
     data->len_ = *reinterpret_cast<const uint32_t*>(codes);
     const auto* entries = reinterpret_cast<const BufferEntry*>(codes + sizeof(uint32_t));
+    if (data->len_ == 0) {
+        data->ids_ = nullptr;
+        data->vals_ = nullptr;
+        if (need_release) {
+            this->Release(codes);
+        }
+        return;
+    }
     data->ids_ = static_cast<uint32_t*>(allocator->Allocate(sizeof(uint32_t) * data->len_));
     try {
         data->vals_ = static_cast<float*>(allocator->Allocate(sizeof(float) * data->len_));
