@@ -2,13 +2,14 @@
 canonical: docs/agents/docs-map.md
 purpose: Map of VSAG markdown docs and where to look for what
 key-facts:
-  - Website source mirrors are docs/docs/{en,zh}/src/
-  - Top-level docs/*.md may overlap with website docs (being reconciled separately)
-  - Tool-level READMEs live alongside the tool under tools/<name>/
+  - Canonical user-facing docs live in docs/docs/{en,zh}/src/
+  - docs/README.md links local docs/docs sources to published vsag.io pages
+  - Tool-level READMEs are lightweight pointers to docs/docs and vsag.io
 related:
   - https://vsag.io/docs
   - ../../README.md
-last-reviewed: 2026-05-12
+  - ../README.md
+last-reviewed: 2026-06-07
 -->
 
 # Documentation Map
@@ -44,35 +45,25 @@ locate the right document below first.
 - [`CONTRIBUTING.md`](../../CONTRIBUTING.md) — contribution policy.
 - [`CODE_OF_CONDUCT.md`](../../CODE_OF_CONDUCT.md).
 
-### Website source (English & Chinese)
+### Documentation source of truth
 
-The official documentation site at <https://vsag.io/docs> is rendered from:
+The canonical user-facing documentation is `docs/docs/{en,zh}/src/`; the public website at
+<https://vsag.io/docs> is generated from that tree. Keep user-facing guide, index, advanced,
+resource, and tool documentation there first.
 
-- `docs/docs/en/src/` — English source.
-- `docs/docs/zh/src/` — Chinese source (kept in a parallel directory so
-  Chinese pages share the website URL path structure).
+Top-level `docs/*.md` files should not be used for new user-facing documentation. A small number of
+remaining files are historical design notes that have not yet been merged into the website source;
+when they are promoted, move the canonical content into `docs/docs/{en,zh}/src/` and leave only a
+short local pointer if a compatibility link is still useful.
 
-Common sub-areas (mirrored in both languages):
-
-- `guide/` — getting started (installation, knn search, pyvsag, create index).
-- `indexes/` — per-index user docs (`hgraph`, `ivf`, `sindi`, `pyramid`).
-- `advanced/` — advanced features (filtered search, range search, memory,
-  optimizer, serialization, attribute filter, extra info, etc.).
-- `development/` — building, testing, code structure, contributing.
-- `resources/` — index parameters, best practices, performance numbers,
-  dataset format, `eval_performance` guide, release notes, papers.
-
-### Top-level `docs/*.md`
-
-These files (`docs/hgraph.md`, `docs/ivf.md`, `docs/sindi.md`,
-`docs/brute_force.md`, `docs/dataset_format.md`, `docs/eval_performance.md`,
-`docs/get_memory_usage_en.md`) historically contained design notes that
-partially overlap with the website docs above. They are being reconciled in
-a separate track; treat the website docs (`docs/docs/{en,zh}/src/`) as the
-preferred source when content differs, and consult both if the topic
-requires deeper background.
+`docs/README.md` is the local documentation index for developers and AI coding agents. It links to
+both local `docs/docs/...` sources and the published website pages.
 
 ### Tool READMEs
+
+Tool-level READMEs stay next to the executable source as lightweight entry points. For tools that
+have user-facing docs, the README should link to both the local `docs/docs/{en,zh}/src/...` source
+and the published `https://vsag.io/docs/...` page rather than duplicating the full content.
 
 - [`tools/README.md`](../../tools/README.md)
 - [`tools/eval/README.md`](../../tools/eval/README.md) /
@@ -100,11 +91,9 @@ preserve published URLs and user expectations).
 | New build flag or dependency | `DEVELOPMENT.md`, `docs/agents/build-and-test.md`. |
 | Workflow / policy change | `CONTRIBUTING.md`, the matching file under `docs/agents/`. |
 | New index parameter | `docs/docs/{en,zh}/src/resources/index_parameters.md` and the per-index page. |
-| Behavior change in `eval_performance` | `tools/eval/README{,_zh}.md` and `docs/docs/{en,zh}/src/resources/eval.md`. |
+| Behavior change in `eval_performance` | `docs/docs/{en,zh}/src/resources/eval.md`; keep `tools/eval/README{,_zh}.md` as link-only entry points. |
 
 ## Pending follow-ups
 
-- Long top-level design notes (`docs/hgraph.md`, `docs/sindi.md`, etc.,
-  >200 lines) should gain `<!-- agent-hints -->` blocks once the reconciliation
-  track decides whether to keep them; do not edit those files preemptively
-  here.
+- Historical design notes that still live at top level under `docs/` should be merged into
+  `docs/docs/{en,zh}/src/` or replaced with short pointers once their website destination is clear.

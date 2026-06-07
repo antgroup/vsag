@@ -212,4 +212,4 @@ When a serialized index only embeds `index_param`, `analyze_index` can still rel
 - API: `Index::AnalyzeIndexBySearch` in `include/vsag/index.h`
 - Implementations: `src/analyzer/{analyzer,hgraph_analyzer,pyramid_analyzer}.h`
 - Tool source: `tools/analyze_index/`
-- Tool README: `tools/analyze_index/README.md`
+- Local tool entry point: `tools/analyze_index/README.md`

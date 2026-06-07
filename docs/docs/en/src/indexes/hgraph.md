@@ -60,8 +60,7 @@ auto result = index->KnnSearch(
 ## Build parameters
 
 Build-time parameters live under `index_param`. The table below highlights the keys
-most users need; the exhaustive list is in [Index Parameters](../resources/index_parameters.md)
-and `docs/hgraph.md` in the repository.
+most users need; the exhaustive list is in [Index Parameters](../resources/index_parameters.md).
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|

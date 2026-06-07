@@ -67,8 +67,7 @@ auto result = index->KnnSearch(
 ## Build parameters
 
 Build-time parameters live under `index_param`. See
-[Index Parameters](../resources/index_parameters.md) and `docs/ivf.md` in the
-repository for the exhaustive list.
+[Index Parameters](../resources/index_parameters.md) for the exhaustive list.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|

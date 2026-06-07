@@ -54,7 +54,7 @@ auto result = index->KnnSearch(
 ## 构建参数
 
 构建参数放在 `index_param` 下。下表列出最常用的配置项；完整列表请见
-[索引参数](../resources/index_parameters.md) 以及仓库中的 `docs/hgraph.md`。
+[索引参数](../resources/index_parameters.md)。
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
