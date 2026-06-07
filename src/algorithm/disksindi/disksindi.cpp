@@ -846,6 +846,11 @@ DiskSINDI::GetSparseVectorByInnerId(InnerIdType inner_id,
     if (use_reorder_) {
         return this->rerank_flat_->GetSparseVectorByInnerId(inner_id, data, specified_allocator);
     }
+    if (is_deserialized_) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "DiskSINDI without reorder does not support GetSparseVector after "
+                            "Deserialize");
+    }
 
     term_datacell_->GetSparseVector(inner_id, data, specified_allocator);
 
@@ -958,10 +963,12 @@ DiskSINDI::InitFeatures() {
         IndexFeature::SUPPORT_DESERIALIZE_FILE,
         IndexFeature::SUPPORT_ESTIMATE_MEMORY,
         IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID,
-        IndexFeature::SUPPORT_GET_RAW_VECTOR_BY_IDS,
         IndexFeature::SUPPORT_SEARCH_CONCURRENT,
         IndexFeature::SUPPORT_METRIC_TYPE_INNER_PRODUCT,
     });
+    if (use_reorder_) {
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_RAW_VECTOR_BY_IDS);
+    }
 }
 
 std::pair<int64_t, int64_t>

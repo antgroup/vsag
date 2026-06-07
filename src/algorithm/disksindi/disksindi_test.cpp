@@ -15,10 +15,6 @@
 
 #include "disksindi.h"
 
-#include <unistd.h>
-
-#include <cstdio>
-
 #include "impl/allocator/safe_allocator.h"
 #include "index_common_param.h"
 #include "unittest.h"
@@ -74,8 +70,8 @@ TEST_CASE("DiskSINDI Batch Rerank End-To-End", "[ut][DiskSINDI]") {
     auto base = Dataset::Make();
     base->NumElements(num_base)->SparseVectors(sv_base.data())->Ids(ids.data())->Owner(false);
 
-    const std::string term_path =
-        fmt::format("/tmp/disksindi_test_{}.term.index", static_cast<long long>(::getpid()));
+    fixtures::TempDir dir("disksindi_batch_rerank");
+    const std::string term_path = dir.GenerateRandomFile(false);
     auto param = create_disksindi_param(term_id_limit, term_path);
     auto index = std::make_unique<DiskSINDI>(param, common_param);
     REQUIRE(index->Build(base).empty());
@@ -119,7 +115,6 @@ TEST_CASE("DiskSINDI Batch Rerank End-To-End", "[ut][DiskSINDI]") {
         delete[] item.ids_;
     }
     index.reset();
-    std::remove(term_path.c_str());
 }
 
 TEST_CASE("DiskSINDI Sorted Merge Rerank End-To-End", "[ut][DiskSINDI]") {
@@ -148,8 +143,8 @@ TEST_CASE("DiskSINDI Sorted Merge Rerank End-To-End", "[ut][DiskSINDI]") {
     auto base = Dataset::Make();
     base->NumElements(num_base)->SparseVectors(sv_base.data())->Ids(ids.data())->Owner(false);
 
-    const std::string term_path =
-        fmt::format("/tmp/disksindi_merge_test_{}.term.index", static_cast<long long>(::getpid()));
+    fixtures::TempDir dir("disksindi_merge_rerank");
+    const std::string term_path = dir.GenerateRandomFile(false);
     auto param = create_disksindi_param(term_id_limit, term_path);
     auto index = std::make_unique<DiskSINDI>(param, common_param);
     REQUIRE(index->Build(base).empty());

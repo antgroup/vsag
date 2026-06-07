@@ -58,6 +58,8 @@ enum class IndexType {
     IVF = 3,
     PYRAMID = 4,
     BRUTEFORCE = 5,
+    // Kept for source compatibility with old SparseIndex callers. SparseIndex is no longer
+    // registered in the factory; use SINDI or DISKSINDI for sparse-vector indexes.
     SPARSE = 6,
     SINDI = 7,
     WARP = 8,
@@ -473,7 +475,7 @@ public:
      *
      * Suitable for dense vector indexes (HGraph, BruteForce, IVF, DiskANN, HNSW).
      * The query must be a contiguous float32 array with dimension matching the index.
-     * For sparse vector indexes (SINDI), this overload is not applicable;
+     * For sparse vector indexes (SINDI, DiskSINDI), this overload is not applicable;
      * use CalcDistanceById(DatasetPtr, int64_t, bool) instead.
      *
      * @param vector The embedding of the query (float32 array for dense vectors).
@@ -494,7 +496,7 @@ public:
     /**
      * @brief Calculate the distance between the query and the vector of the given ID.
      *
-     * Suitable for sparse vector indexes (SINDI) where vectors
+     * Suitable for sparse vector indexes (SINDI, DiskSINDI) where vectors
      * cannot be represented as a simple float pointer. The Dataset should
      * contain sparse vectors via GetSparseVectors().
      * For dense vector indexes (HGraph, BruteForce, IVF, DiskANN, HNSW),
@@ -520,7 +522,7 @@ public:
      *
      * Suitable for dense vector indexes (HGraph, BruteForce, IVF, DiskANN, HNSW).
      * The query must be a contiguous float32 array. For sparse vector indexes
-     * (SINDI), this overload is not applicable; use
+     * (SINDI, DiskSINDI), this overload is not applicable; use
      * CalDistanceById(DatasetPtr, const int64_t*, int64_t, bool) instead.
      *
      * @param query is the embedding of query (float32 array for dense vectors).
@@ -543,7 +545,7 @@ public:
     /**
      * @brief Calculate the distance between the query and the vector of the given ID for batch.
      *
-     * Suitable for sparse vector indexes (SINDI) where vectors
+     * Suitable for sparse vector indexes (SINDI, DiskSINDI) where vectors
      * cannot be represented as a simple float pointer. The Dataset should
      * contain sparse vectors via GetSparseVectors().
      * For dense vector indexes (HGraph, BruteForce, IVF, DiskANN, HNSW),
