@@ -110,60 +110,62 @@ TEST_CASE("Test Simple Index", "[ft][simple_index]") {
     std::string search_param = "{}";
     SearchParam param(true, search_param, filter, nullptr);
 
-    REQUIRE_THROWS(index->Add(dataset->base_));
-    REQUIRE_THROWS(index->Remove(0));
-    REQUIRE_THROWS(index->CheckFeature(IndexFeature::SUPPORT_ESTIMATE_MEMORY));
+    REQUIRE_FALSE(index->Add(dataset->base_).has_value());
+    REQUIRE_FALSE(index->Remove(0).has_value());
+    REQUIRE_FALSE(index->CheckFeature(IndexFeature::SUPPORT_ESTIMATE_MEMORY));
     REQUIRE_THROWS(index->EstimateMemory(1000));
     REQUIRE_THROWS(index->GetEstimateBuildMemory(1000));
-    REQUIRE_THROWS(index->Feedback(dataset->query_, 10, ""));
+    REQUIRE_FALSE(index->Feedback(dataset->query_, 10, "").has_value());
     REQUIRE_THROWS_MATCHES(index->GetStats(),
                            std::runtime_error,
-                           Catch::Matchers::Message("Index not support GetStats"));
-    REQUIRE_THROWS(index->UpdateId(0, 1));
-    REQUIRE_THROWS(index->UpdateVector(0, dataset->query_));
-    REQUIRE_THROWS(index->ContinueBuild(dataset->base_, binary));
-    REQUIRE_THROWS(index->Pretrain(pretrain_ids, 10, ""));
+                           Catch::Matchers::Message("Index does not support GetStats"));
+    REQUIRE_FALSE(index->UpdateId(0, 1).has_value());
+    REQUIRE_FALSE(index->UpdateVector(0, dataset->query_).has_value());
+    REQUIRE_FALSE(index->ContinueBuild(dataset->base_, binary).has_value());
+    REQUIRE_FALSE(index->Pretrain(pretrain_ids, 10, "").has_value());
     REQUIRE_THROWS(index->CheckIdExist(0));
-    REQUIRE_THROWS(index->CalcDistanceById(dataset->base_->GetFloat32Vectors(), 1));
-    REQUIRE_THROWS(index->CalcDistanceById(dataset->query_, 1));
-    REQUIRE_THROWS(index->CalDistanceById(dataset->base_->GetFloat32Vectors(), nullptr, 1));
-    REQUIRE_THROWS(index->GetMinAndMaxId());
-    REQUIRE_THROWS(index->GetExtraInfoByIds(nullptr, 1, nullptr));
-    REQUIRE_THROWS(index->UpdateExtraInfo(dataset->query_));
-    REQUIRE_THROWS(index->GetRawVectorByIds(nullptr, 1));
-    REQUIRE_THROWS(index->Clone());
-    REQUIRE_THROWS(index->ExportModel());
-    REQUIRE_THROWS(index->Train(dataset->base_));
-    REQUIRE_THROWS(index->KnnSearch(dataset->query_, 10, search_param, filter, itex, true));
-    REQUIRE_THROWS(index->KnnSearch(dataset->query_, 10, search_param, filter));
-    REQUIRE_THROWS(index->KnnSearch(dataset->query_, 10, param));
-    REQUIRE_THROWS(index->SearchWithRequest(req));
-    REQUIRE_THROWS(index->RangeSearch(dataset->query_, 1.0F, search_param, filter));
+    REQUIRE_FALSE(index->CalcDistanceById(dataset->base_->GetFloat32Vectors(), 1).has_value());
+    REQUIRE_FALSE(index->CalcDistanceById(dataset->query_, 1).has_value());
+    REQUIRE_FALSE(
+        index->CalDistanceById(dataset->base_->GetFloat32Vectors(), nullptr, 1).has_value());
+    REQUIRE_FALSE(index->GetMinAndMaxId().has_value());
+    REQUIRE_FALSE(index->GetExtraInfoByIds(nullptr, 1, nullptr).has_value());
+    REQUIRE_FALSE(index->UpdateExtraInfo(dataset->query_).has_value());
+    REQUIRE_FALSE(index->GetRawVectorByIds(nullptr, 1).has_value());
+    REQUIRE_FALSE(index->Clone().has_value());
+    REQUIRE_FALSE(index->ExportModel().has_value());
+    REQUIRE_FALSE(index->Train(dataset->base_).has_value());
+    REQUIRE_FALSE(
+        index->KnnSearch(dataset->query_, 10, search_param, filter, itex, true).has_value());
+    REQUIRE_FALSE(index->KnnSearch(dataset->query_, 10, search_param, filter).has_value());
+    REQUIRE_FALSE(index->KnnSearch(dataset->query_, 10, param).has_value());
+    REQUIRE_FALSE(index->SearchWithRequest(req).has_value());
+    REQUIRE_FALSE(index->RangeSearch(dataset->query_, 1.0F, search_param, filter).has_value());
     REQUIRE_THROWS(index->GetMemoryUsageDetail());
-    REQUIRE_THROWS(index->SetImmutable());
+    REQUIRE_FALSE(index->SetImmutable().has_value());
     AttributeSet old_attrs;
     AttributeSet new_attrs;
-    REQUIRE_THROWS(index->UpdateAttribute(0, new_attrs));
-    REQUIRE_THROWS(index->UpdateAttribute(1, new_attrs, old_attrs));
+    REQUIRE_FALSE(index->UpdateAttribute(0, new_attrs).has_value());
+    REQUIRE_FALSE(index->UpdateAttribute(1, new_attrs, old_attrs).has_value());
 
     std::vector<MergeUnit> units;
-    REQUIRE_THROWS(index->Merge(units));
+    REQUIRE_FALSE(index->Merge(units).has_value());
 
     fixtures::TempDir dir("test_simple_index");
     std::ofstream o_file(dir.path + "1234", std::ios::binary);
-    REQUIRE_THROWS(index->Serialize(o_file));
+    REQUIRE_FALSE(index->Serialize(o_file).has_value());
 
     std::ifstream i_file(dir.path + "1234", std::ios::binary);
-    REQUIRE_THROWS(index->Deserialize(i_file));
+    REQUIRE_FALSE(index->Deserialize(i_file).has_value());
 
-    REQUIRE_THROWS(index->GetDataByIds(nullptr, 1));
-    REQUIRE_THROWS(index->ExportIDs());
+    REQUIRE_FALSE(index->GetDataByIds(nullptr, 1).has_value());
+    REQUIRE_FALSE(index->ExportIDs().has_value());
     REQUIRE_THROWS(index->AnalyzeIndexBySearch(req));
     REQUIRE_THROWS(index->GetIndexType());
-    REQUIRE_THROWS(index->GetIndexDetailInfos());
-    REQUIRE_THROWS(index->Serialize(WriteFuncType(nullptr)));
+    REQUIRE_FALSE(index->GetIndexDetailInfos().has_value());
+    REQUIRE_FALSE(index->Serialize(WriteFuncType(nullptr)).has_value());
 
     IndexDetailInfo info;
     std::string name = INDEX_DETAIL_NAME_NUM_ELEMENTS;
-    REQUIRE_THROWS(index->GetDetailDataByName(name, info));
+    REQUIRE_FALSE(index->GetDetailDataByName(name, info).has_value());
 }

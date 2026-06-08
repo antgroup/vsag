@@ -90,7 +90,7 @@ HNSWTestIndex::TestGeneral(const TestIndex::IndexPtr& index,
     TestRangeSearch(index, dataset, search_param, recall / 2.0, 5, true);
     TestFilterSearch(index, dataset, search_param, recall, true, true);
     TestCheckIdExist(index, dataset);
-    TestBatchCalcDistanceById(index, dataset, 1e-5, true, false, true);
+    TestBatchCalcDistanceById(index, dataset, 1e-5, true, false);
     TestSearchAllocator(index, dataset, search_param, recall, true);
     TestUpdateVector(index, dataset, search_param, false);
     TestUpdateId(index, dataset, search_param, true);
@@ -533,7 +533,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
         auto index = TestFactory(name, param, true);
         auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
         TestBuildIndex(index, dataset, true);
-        TestBatchCalcDistanceById(index, dataset, 1e-5, true, false, true);
+        TestBatchCalcDistanceById(index, dataset, 1e-5, true, false);
         vsag::Options::Instance().set_block_size_limit(origin_size);
     }
 }

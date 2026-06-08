@@ -564,7 +564,7 @@ TEST_CASE("remove vectors from the index", "[ft][remove][hnsw][diskann]") {
         float recall_after = ((float)correct) / num_vectors;
         REQUIRE(std::abs(recall_before - recall_after) < 0.001);
     } else {  // index that does not supports remove
-        REQUIRE_THROWS(index->Remove(-1));
+        REQUIRE_FALSE(index->Remove(-1).has_value());
         REQUIRE_THROWS(index->GetNumberRemoved());
     }
 }
@@ -1272,10 +1272,10 @@ TEST_CASE("using indexes that do not support conjugate graph", "[ft][diskann]") 
     int64_t k = 10;
     std::vector<int64_t> base_tag_ids;
 
-    REQUIRE_THROWS(index->Feedback(query, k, search_parameters, -1));
-    REQUIRE_THROWS(index->Feedback(query, k, search_parameters));
+    REQUIRE_FALSE(index->Feedback(query, k, search_parameters, -1).has_value());
+    REQUIRE_FALSE(index->Feedback(query, k, search_parameters).has_value());
 
-    REQUIRE_THROWS(index->Pretrain(base_tag_ids, k, search_parameters));
+    REQUIRE_FALSE(index->Pretrain(base_tag_ids, k, search_parameters).has_value());
 }
 
 TEST_CASE("hnsw with pretrained by conjugate graph", "[ft][feedback][hnsw]") {
