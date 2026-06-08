@@ -433,14 +433,15 @@ HGraph::GetVectorByInnerId(InnerIdType inner_id, float* data) const {
 
 void
 HGraph::SetImmutable() {
-    if (this->immutable_) {
+    if (this->immutable_.load(std::memory_order_acquire)) {
         return;
     }
+    std::scoped_lock<std::shared_mutex> add_lock(this->add_mutex_);
     std::scoped_lock<std::shared_mutex> wlock(this->global_mutex_);
     this->neighbors_mutex_.reset();
     this->neighbors_mutex_ = std::make_shared<EmptyMutex>();
     this->searcher_->SetMutexArray(this->neighbors_mutex_);
-    this->immutable_ = true;
+    this->immutable_.store(true, std::memory_order_release);
 }
 
 void

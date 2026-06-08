@@ -567,7 +567,7 @@ public:
     IndexFeatureListUPtr index_feature_list_{nullptr};
 
     const InnerIndexParameterPtr create_param_ptr_{nullptr};
-    bool immutable_{false};
+    std::atomic<bool> immutable_{false};
 
 protected:
     std::atomic<int64_t> current_memory_usage_{0};

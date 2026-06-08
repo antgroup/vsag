@@ -82,10 +82,13 @@ HGraph::KnnSearch(const DatasetPtr& query,
         fmt::format("ef_search({}) must in range[1, {}]", params.ef_search, ef_search_threshold));
 
     std::shared_lock<std::shared_mutex> force_remove_rlock;
-    if (this->support_force_remove()) {
-        force_remove_rlock = std::shared_lock<std::shared_mutex>(this->force_remove_mutex_);
+    std::shared_lock<std::shared_mutex> shared_lock;
+    if (!this->immutable_.load(std::memory_order_acquire)) {
+        if (this->support_force_remove()) {
+            force_remove_rlock = std::shared_lock<std::shared_mutex>(this->force_remove_mutex_);
+        }
+        shared_lock = std::shared_lock<std::shared_mutex>(this->global_mutex_);
     }
-    std::shared_lock shared_lock(this->global_mutex_);
     k = std::min(k, GetNumElements());
 
     FilterPtr ft = this->create_search_filter(filter, params.use_extra_info_filter);
@@ -357,10 +360,13 @@ HGraph::RangeSearch(const DatasetPtr& query,
     this->validate_range_args(query, radius, limited_size);
 
     std::shared_lock<std::shared_mutex> force_remove_rlock;
-    if (this->support_force_remove()) {
-        force_remove_rlock = std::shared_lock<std::shared_mutex>(this->force_remove_mutex_);
+    std::shared_lock<std::shared_mutex> shared_lock;
+    if (!this->immutable_.load(std::memory_order_acquire)) {
+        if (this->support_force_remove()) {
+            force_remove_rlock = std::shared_lock<std::shared_mutex>(this->force_remove_mutex_);
+        }
+        shared_lock = std::shared_lock<std::shared_mutex>(this->global_mutex_);
     }
-    std::shared_lock shared_lock(this->global_mutex_);
 
     InnerSearchParam search_param;
     search_param.ep = this->entry_point_id_;
@@ -455,10 +461,13 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         fmt::format("ef_search({}) must in range[1, {}]", params.ef_search, ef_search_threshold));
 
     std::shared_lock<std::shared_mutex> force_remove_rlock;
-    if (this->support_force_remove()) {
-        force_remove_rlock = std::shared_lock<std::shared_mutex>(this->force_remove_mutex_);
+    std::shared_lock<std::shared_mutex> shared_lock;
+    if (!this->immutable_.load(std::memory_order_acquire)) {
+        if (this->support_force_remove()) {
+            force_remove_rlock = std::shared_lock<std::shared_mutex>(this->force_remove_mutex_);
+        }
+        shared_lock = std::shared_lock<std::shared_mutex>(this->global_mutex_);
     }
-    std::shared_lock shared_lock(this->global_mutex_);
     k = std::min(k, GetNumElements());
 
     // Setup reasoning context if expected labels are provided.
