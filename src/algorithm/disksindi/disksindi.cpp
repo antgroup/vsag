@@ -62,7 +62,7 @@ public:
         callback(IOErrorCode::IO_SUCCESS, "success");
     }
 
-    uint64_t
+    [[nodiscard]] uint64_t
     Size() const override {
         return binary_.size;
     }
@@ -93,7 +93,7 @@ public:
         callback(IOErrorCode::IO_SUCCESS, "success");
     }
 
-    uint64_t
+    [[nodiscard]] uint64_t
     Size() const override {
         return size_;
     }
@@ -246,7 +246,8 @@ DiskSINDI::DiskSINDI(const DiskSINDIParameterPtr& param, const IndexCommonParam&
       avg_doc_term_length_(param->avg_doc_term_length),
       remap_term_ids_(param->remap_term_ids),
       param_(param) {
-    CHECK_ARGUMENT(window_size_ > 0 && window_size_ <= 65536, "window_size must be in (0, 65536]");
+    CHECK_ARGUMENT(window_size_ > 0, "window_size must be in (0, 65536]");
+    CHECK_ARGUMENT(window_size_ <= 65536, "window_size must be in (0, 65536]");
     CHECK_ARGUMENT(term_id_limit_ > 0, "term_id_limit must be > 0");
     if (remap_term_ids_) {
         term_id_mapper_ =
@@ -370,7 +371,7 @@ std::vector<int64_t>
 DiskSINDI::Build(const DatasetPtr& base) {
     auto failed_ids = this->Add(base);
 
-    uint32_t window_count =
+    auto window_count =
         static_cast<uint32_t>(align_up(cur_element_count_, window_size_) / window_size_);
     term_datacell_->FinalizeTermBuffers(window_count);
     this->cal_memory_usage();
@@ -768,7 +769,7 @@ DiskSINDI::Deserialize(StreamReader& reader) {
         StreamReader::ReadObj(reader, quantization_params_->diff);
     }
 
-    uint32_t window_count =
+    auto window_count =
         static_cast<uint32_t>(align_up(cur_element_count_, window_size_) / window_size_);
     term_datacell_->Deserialize(reader, manifest_.term_dict_size, window_count);
     if (param_->term_io_parameter != nullptr &&

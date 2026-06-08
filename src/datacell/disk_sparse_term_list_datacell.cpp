@@ -347,11 +347,11 @@ DiskSparseTermListDataCell<IOTmpl>::WriteTermDictAndPayload(StreamWriter& writer
         return;
     }
 
-    constexpr uint64_t kSerializeBufferSize = 2 * 1024 * 1024;
-    ByteBuffer buffer(kSerializeBufferSize, allocator_);
+    constexpr uint64_t serialize_buffer_size = uint64_t{2} * 1024 * 1024;
+    ByteBuffer buffer(serialize_buffer_size, allocator_);
     uint64_t offset = 0;
     while (offset < payload_size) {
-        auto current_size = std::min(kSerializeBufferSize, payload_size - offset);
+        auto current_size = std::min(serialize_buffer_size, payload_size - offset);
         io_->Read(current_size, offset, buffer.data);
         writer.Write(reinterpret_cast<const char*>(buffer.data), current_size);
         offset += current_size;
@@ -367,7 +367,7 @@ DiskSparseTermListDataCell<IOTmpl>::Deserialize(StreamReader& reader,
     window_count_ = window_count;
     CHECK_ARGUMENT(term_dict_size % sizeof(DiskTermEntry) == 0,
                    fmt::format("invalid DiskSINDI term_dict_size {}", term_dict_size));
-    uint32_t term_dict_count = static_cast<uint32_t>(term_dict_size / sizeof(DiskTermEntry));
+    auto term_dict_count = static_cast<uint32_t>(term_dict_size / sizeof(DiskTermEntry));
     std::vector<DiskTermEntry> term_dict(term_dict_count);
     reader.Read(reinterpret_cast<char*>(term_dict.data()), term_dict_size);
     term_dict_ = term_dict;
@@ -448,12 +448,12 @@ DiskSparseTermListDataCell<IOTmpl>::WritePayloadToIO(StreamReader& reader,
     }
 
     io_->Resize(payload_size);
-    constexpr uint64_t kSerializeBufferSize = 2 * 1024 * 1024;
-    ByteBuffer buffer(kSerializeBufferSize, allocator_);
+    constexpr uint64_t serialize_buffer_size = uint64_t{2} * 1024 * 1024;
+    ByteBuffer buffer(serialize_buffer_size, allocator_);
     uint64_t copied_size = 0;
     reader.PushSeek(payload_offset);
     while (copied_size < payload_size) {
-        auto current_size = std::min(kSerializeBufferSize, payload_size - copied_size);
+        auto current_size = std::min(serialize_buffer_size, payload_size - copied_size);
         reader.Read(reinterpret_cast<char*>(buffer.data), current_size);
         io_->Write(buffer.data, current_size, copied_size);
         copied_size += current_size;
