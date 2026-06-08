@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <limits>
 #include <mutex>
 #include <stdexcept>
 #include <vector>
@@ -58,6 +59,19 @@ make_lazy_inner_json(uint64_t transition_threshold,
     return inner_json;
 }
 
+LazyHGraphParameterPtr
+checked_lazy_hgraph_param(const ParamPtr& param) {
+    auto lazy_param = std::dynamic_pointer_cast<LazyHGraphParameter>(param);
+    CHECK_ARGUMENT(lazy_param != nullptr, "lazy_hgraph parameter must be LazyHGraphParameter");
+    return lazy_param;
+}
+
+const LazyHGraphParameterPtr&
+checked_lazy_hgraph_param(const LazyHGraphParameterPtr& param) {
+    CHECK_ARGUMENT(param != nullptr, "lazy_hgraph parameter must be LazyHGraphParameter");
+    return param;
+}
+
 }  // namespace
 
 ParamPtr
@@ -72,7 +86,12 @@ LazyHGraph::CheckAndMappingExternalParam(const JsonType& external_param,
 
     uint64_t transition_threshold = 1000;
     if (external_param.Contains(LAZY_HGRAPH_TRANSITION_THRESHOLD)) {
-        transition_threshold = external_param[LAZY_HGRAPH_TRANSITION_THRESHOLD].GetInt();
+        const auto threshold_json = external_param[LAZY_HGRAPH_TRANSITION_THRESHOLD];
+        CHECK_ARGUMENT(threshold_json.IsNumberInteger(),
+                       "lazy_hgraph transition_threshold must be an integer");
+        const auto threshold_value = threshold_json.GetInt();
+        CHECK_ARGUMENT(threshold_value > 0, "lazy_hgraph transition_threshold must be positive");
+        transition_threshold = static_cast<uint64_t>(threshold_value);
     }
     CHECK_ARGUMENT(transition_threshold > 0, "lazy_hgraph transition_threshold must be positive");
 
@@ -90,11 +109,15 @@ LazyHGraph::CheckAndMappingExternalParam(const JsonType& external_param,
     return lazy_param;
 }
 
+LazyHGraph::LazyHGraph(const ParamPtr& param, const IndexCommonParam& common_param)
+    : LazyHGraph(checked_lazy_hgraph_param(param), common_param) {
+}
+
 LazyHGraph::LazyHGraph(const LazyHGraphParameterPtr& param, const IndexCommonParam& common_param)
-    : InnerIndexInterface(param, common_param),
-      transition_threshold_(param->transition_threshold),
-      flat_param_(param->flat_param),
-      graph_param_(param->graph_param),
+    : InnerIndexInterface(checked_lazy_hgraph_param(param), common_param),
+      transition_threshold_(checked_lazy_hgraph_param(param)->transition_threshold),
+      flat_param_(checked_lazy_hgraph_param(param)->flat_param),
+      graph_param_(checked_lazy_hgraph_param(param)->graph_param),
       common_param_(common_param) {
     this->flat_index_ = std::make_shared<BruteForce>(flat_param_, common_param);
     this->flat_index_->InitFeatures();
@@ -153,10 +176,16 @@ LazyHGraph::TransitionToGraph() {
         return;
     }
     auto id_dataset = flat_index_->ExportIDs();
+    if (id_dataset == nullptr) {
+        return;
+    }
     const auto total = id_dataset->GetNumElements();
     const auto* ids = id_dataset->GetIds();
+    if (ids == nullptr) {
+        return;
+    }
     std::vector<int64_t> valid_ids;
-    valid_ids.reserve(total);
+    valid_ids.reserve(static_cast<uint64_t>(total));
     for (int64_t i = 0; i < total; ++i) {
         if (flat_index_->CheckIdExist(ids[i])) {
             valid_ids.emplace_back(ids[i]);
@@ -166,18 +195,29 @@ LazyHGraph::TransitionToGraph() {
         return;
     }
 
-    auto build_data = flat_index_->GetVectorByIds(valid_ids.data(), valid_ids.size(), nullptr);
+    CHECK_ARGUMENT(valid_ids.size() <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max()),
+                   "lazy_hgraph transition id count is too large");
+    const auto valid_count = static_cast<int64_t>(valid_ids.size());
+
+    auto build_data = flat_index_->GetVectorByIds(valid_ids.data(), valid_count, this->allocator_);
+    if (build_data == nullptr) {
+        throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "failed to get lazy_hgraph vectors");
+    }
     auto* build_ids =
         static_cast<int64_t*>(this->allocator_->Allocate(sizeof(int64_t) * valid_ids.size()));
     if (build_ids == nullptr) {
         throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "failed to allocate lazy_hgraph ids");
     }
     std::memcpy(build_ids, valid_ids.data(), sizeof(int64_t) * valid_ids.size());
-    build_data->Ids(build_ids)->NumElements(valid_ids.size())->Dim(this->dim_);
+    build_data->Ids(build_ids)
+        ->NumElements(valid_count)
+        ->Dim(this->dim_)
+        ->Owner(true, this->allocator_);
 
     auto new_graph = std::make_shared<HGraph>(graph_param_, this->common_param_);
     new_graph->InitFeatures();
-    new_graph->Build(build_data);
+    auto failed_ids = new_graph->Build(build_data);
+    CHECK_ARGUMENT(failed_ids.empty(), "lazy_hgraph transition failed to build all ids");
     graph_index_ = new_graph;
     flat_index_.reset();
     phase_.store(Phase::GRAPH, std::memory_order_release);

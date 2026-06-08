@@ -37,8 +37,7 @@ public:
 public:
     LazyHGraph(const LazyHGraphParameterPtr& param, const IndexCommonParam& common_param);
 
-    LazyHGraph(const ParamPtr& param, const IndexCommonParam& common_param)
-        : LazyHGraph(std::dynamic_pointer_cast<LazyHGraphParameter>(param), common_param){};
+    LazyHGraph(const ParamPtr& param, const IndexCommonParam& common_param);
 
     std::vector<int64_t>
     Add(const DatasetPtr& data, AddMode mode = AddMode::DEFAULT) override;

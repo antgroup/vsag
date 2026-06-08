@@ -227,6 +227,19 @@ TEST_CASE("LazyHGraph rejects flat quantization parameters", "[ut][lazy_hgraph]"
     REQUIRE_THROWS(vsag::LazyHGraph::CheckAndMappingExternalParam(param, common_param));
 }
 
+TEST_CASE("LazyHGraph rejects invalid parameter types", "[ut][lazy_hgraph]") {
+    auto common_param = MakeCommonParam();
+
+    auto negative_threshold = MakeLazyParam(4);
+    negative_threshold["transition_threshold"].SetJson(vsag::JsonType::Parse("-1"));
+    REQUIRE_THROWS(
+        vsag::LazyHGraph::CheckAndMappingExternalParam(negative_threshold, common_param));
+
+    auto graph_param =
+        vsag::HGraph::CheckAndMappingExternalParam(MakeLazyParam(4)["hgraph"], common_param);
+    REQUIRE_THROWS(vsag::LazyHGraph(graph_param, common_param));
+}
+
 TEST_CASE("LazyHGraph build chooses flat or graph by threshold", "[ut][lazy_hgraph]") {
     auto small_index = MakeLazyIndex(4);
     std::vector<float> small_vectors;
@@ -400,6 +413,7 @@ TEST_CASE("LazyHGraph supports concurrent search during transition", "[ut][lazy_
                 failed.store(true, std::memory_order_release);
                 return;
             }
+            std::this_thread::yield();
         }
     });
 
