@@ -23,6 +23,7 @@
 #include "datacell/sparse_vector_datacell_parameter.h"
 #include "impl/odescent/odescent_graph_parameter.h"
 #include "inner_string_params.h"
+#include "utils/param_compat_macros.h"
 #include "vsag/constants.h"
 
 namespace vsag {
@@ -158,55 +159,31 @@ HGraphParameter::ToJson() const {
 
 bool
 HGraphParameter::CheckCompatibility(const ParamPtr& other) const {
-    auto hgraph_param = std::dynamic_pointer_cast<HGraphParameter>(other);
-    if (hgraph_param == nullptr) {
-        logger::error("HGraphParameter::CheckCompatibility: other is not HGraphParameter");
-        return false;
-    }
+    PARAM_CAST_OR_RETURN(HGraphParameter, p, other);
     auto have_reorder = this->use_reorder && not this->ignore_reorder;
-    auto have_reorder_other = hgraph_param->use_reorder && not hgraph_param->ignore_reorder;
+    auto have_reorder_other = p->use_reorder && not p->ignore_reorder;
     if (have_reorder != have_reorder_other) {
         logger::error(
             "HGraphParameter::CheckCompatibility: use_reorder and ignore_reorder must be the same");
         return false;
     }
-    if (not this->base_codes_param->CheckCompatibility(hgraph_param->base_codes_param)) {
-        logger::error("HGraphParameter::CheckCompatibility: base_codes_param is not compatible");
-        return false;
-    }
-    if (have_reorder && this->reorder_source != hgraph_param->reorder_source) {
-        logger::error("HGraphParameter::CheckCompatibility: reorder_source is not compatible");
-        return false;
-    }
-    if (have_reorder && this->reorder_source != HGRAPH_REORDER_SOURCE_BASE) {
-        if (not this->precise_codes_param ||
-            not this->precise_codes_param->CheckCompatibility(hgraph_param->precise_codes_param)) {
-            logger::error(
-                "HGraphParameter::CheckCompatibility: precise_codes_param is not compatible");
-            return false;
+    CHECK_SUB_PARAM(*this, *p, base_codes_param);
+    if (have_reorder) {
+        CHECK_FIELD_EQ(*this, *p, reorder_source);
+        if (this->reorder_source != HGRAPH_REORDER_SOURCE_BASE) {
+            if (not this->precise_codes_param ||
+                not this->precise_codes_param->CheckCompatibility(p->precise_codes_param)) {
+                logger::error(
+                    "HGraphParameter::CheckCompatibility: precise_codes_param is not compatible");
+                return false;
+            }
         }
     }
-    if (not this->bottom_graph_param->CheckCompatibility(hgraph_param->bottom_graph_param)) {
-        logger::error("HGraphParameter::CheckCompatibility: bottom_graph_param is not compatible");
-        return false;
-    }
-    if (use_attribute_filter != hgraph_param->use_attribute_filter) {
-        logger::error("HGraphParameter::CheckCompatibility: use_attribute_filter must be the same");
-        return false;
-    }
-    if (support_duplicate != hgraph_param->support_duplicate) {
-        logger::error("HGraphParameter::CheckCompatibility: support_duplicate must be the same");
-        return false;
-    }
-    if (duplicate_distance_threshold != hgraph_param->duplicate_distance_threshold) {
-        logger::error(
-            "HGraphParameter::CheckCompatibility: duplicate_distance_threshold must be the same");
-        return false;
-    }
-    if (support_force_remove != hgraph_param->support_force_remove) {
-        logger::error("HGraphParameter::CheckCompatibility: support_force_remove must be the same");
-        return false;
-    }
+    CHECK_SUB_PARAM(*this, *p, bottom_graph_param);
+    CHECK_FIELD_EQ(*this, *p, use_attribute_filter);
+    CHECK_FIELD_EQ(*this, *p, support_duplicate);
+    CHECK_FIELD_EQ(*this, *p, duplicate_distance_threshold);
+    CHECK_FIELD_EQ(*this, *p, support_force_remove);
     return true;
 }
 

@@ -18,9 +18,9 @@
 #include <fmt/format.h>
 
 #include "flatten_interface_parameter.h"
-#include "impl/logger/logger.h"
 #include "inner_string_params.h"
 #include "quantization/fp32_quantizer_parameter.h"
+#include "utils/param_compat_macros.h"
 #include "utils/pointer_define.h"
 
 namespace vsag {
@@ -50,13 +50,7 @@ public:
 
     bool
     CheckCompatibility(const vsag::ParamPtr& other) const override {
-        auto mv_param = std::dynamic_pointer_cast<MultiVectorDataCellParameter>(other);
-        if (not mv_param) {
-            logger::error(
-                "MultiVectorDataCellParameter::CheckCompatibility: "
-                "other parameter is not MultiVectorDataCellParameter");
-            return false;
-        }
+        PARAM_CAST_OR_RETURN(MultiVectorDataCellParameter, p, other);
         return true;
     }
 };

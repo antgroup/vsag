@@ -17,8 +17,8 @@
 
 #include <fmt/format.h>
 
-#include "impl/logger/logger.h"
 #include "inner_string_params.h"
+#include "utils/param_compat_macros.h"
 
 namespace vsag {
 FlattenDataCellParameter::FlattenDataCellParameter()
@@ -53,17 +53,9 @@ FlattenDataCellParameter::ToJson() const {
 }
 bool
 FlattenDataCellParameter::CheckCompatibility(const ParamPtr& other) const {
-    auto flatten_other = std::dynamic_pointer_cast<FlattenDataCellParameter>(other);
-    if (not flatten_other) {
-        logger::error(
-            "FlattenDataCellParameter::CheckCompatibility: "
-            "other parameter is not FlattenDataCellParameter");
-        return false;
-    }
-    if (this->name != flatten_other->name) {
-        logger::error("FlattenDataCellParameter::CheckCompatibility: codes_type mismatch");
-        return false;
-    }
-    return this->quantizer_parameter->CheckCompatibility(flatten_other->quantizer_parameter);
+    PARAM_CAST_OR_RETURN(FlattenDataCellParameter, p, other);
+    CHECK_FIELD_EQ(*this, *p, name);
+    CHECK_SUB_PARAM(*this, *p, quantizer_parameter);
+    return true;
 }
 }  // namespace vsag

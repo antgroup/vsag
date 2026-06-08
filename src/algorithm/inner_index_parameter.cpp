@@ -21,6 +21,7 @@
 #include "datacell/flatten_datacell_parameter.h"
 #include "impl/logger/logger.h"
 #include "inner_string_params.h"
+#include "utils/param_compat_macros.h"
 #include "vsag/constants.h"
 
 namespace vsag {
@@ -145,38 +146,14 @@ InnerIndexParameter::ToJson() const {
 }
 bool
 InnerIndexParameter::CheckCompatibility(const ParamPtr& other) const {
-    auto inner_index_param = std::dynamic_pointer_cast<InnerIndexParameter>(other);
-    if (not inner_index_param) {
-        logger::error(
-            "InnerIndexParameter::CheckCompatibility: other parameter is not InnerIndexParameter");
-        return false;
-    }
-    if (this->use_reorder != inner_index_param->use_reorder) {
-        logger::error("InnerIndexParameter::CheckCompatibility: use_reorder mismatch");
-        return false;
-    }
-    if (this->reorder_source != inner_index_param->reorder_source) {
-        logger::error("InnerIndexParameter::CheckCompatibility: reorder_source mismatch");
-        return false;
-    }
+    PARAM_CAST_OR_RETURN(InnerIndexParameter, p, other);
+    CHECK_FIELD_EQ(*this, *p, use_reorder);
+    CHECK_FIELD_EQ(*this, *p, reorder_source);
     if (this->use_reorder && this->reorder_source != HGRAPH_REORDER_SOURCE_BASE) {
-        if (not this->precise_codes_param->CheckCompatibility(
-                inner_index_param->precise_codes_param)) {
-            logger::error("InnerIndexParameter::CheckCompatibility: precise_codes_param mismatch");
-            return false;
-        }
+        CHECK_SUB_PARAM(*this, *p, precise_codes_param);
     }
-
-    if (this->use_attribute_filter != inner_index_param->use_attribute_filter) {
-        logger::error("InnerIndexParameter::CheckCompatibility: use_attribute_filter mismatch");
-        return false;
-    }
-
-    if (this->label_remap_type != inner_index_param->label_remap_type) {
-        logger::error("InnerIndexParameter::CheckCompatibility: label_remap_type mismatch");
-        return false;
-    }
-
+    CHECK_FIELD_EQ(*this, *p, use_attribute_filter);
+    CHECK_FIELD_EQ(*this, *p, label_remap_type);
     return true;
 }
 }  // namespace vsag

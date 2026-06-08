@@ -18,8 +18,8 @@
 #include <fmt/format.h>
 
 #include "datacell/flatten_datacell_parameter.h"
-#include "impl/logger/logger.h"
 #include "inner_string_params.h"
+#include "utils/param_compat_macros.h"
 #include "vsag/constants.h"
 
 namespace vsag {
@@ -49,13 +49,8 @@ BruteForceParameter::CheckCompatibility(const ParamPtr& other) const {
     if (not InnerIndexParameter::CheckCompatibility(other)) {
         return false;
     }
-    auto brute_force_param = std::dynamic_pointer_cast<BruteForceParameter>(other);
-    if (not brute_force_param) {
-        logger::error(
-            "BruteForceParameter::CheckCompatibility: "
-            "other parameter is not a BruteForceParameter");
-        return false;
-    }
-    return this->base_codes_param->CheckCompatibility(brute_force_param->base_codes_param);
+    PARAM_CAST_OR_RETURN(BruteForceParameter, p, other);
+    CHECK_SUB_PARAM(*this, *p, base_codes_param);
+    return true;
 }
 }  // namespace vsag

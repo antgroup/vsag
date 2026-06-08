@@ -17,8 +17,8 @@
 
 #include <fmt/format.h>
 
-#include "impl/logger/logger.h"
 #include "inner_string_params.h"
+#include "utils/param_compat_macros.h"
 
 namespace vsag {
 
@@ -49,29 +49,9 @@ GNOIMIParameter::ToJson() const {
 }
 bool
 GNOIMIParameter::CheckCompatibility(const ParamPtr& other) const {
-    auto gno_imi_param = std::dynamic_pointer_cast<GNOIMIParameter>(other);
-    if (!gno_imi_param) {
-        logger::error(
-            "GNOIMIParameter::CheckCompatibility: "
-            "other parameter is not GNOIMIParameter");
-        return false;
-    }
-    if (this->first_order_buckets_count != gno_imi_param->first_order_buckets_count) {
-        logger::error(
-            "GNOIMIParameter::CheckCompatibility: "
-            "first_order_buckets_count mismatch: {} != {}",
-            this->first_order_buckets_count,
-            gno_imi_param->first_order_buckets_count);
-        return false;
-    }
-    if (this->second_order_buckets_count != gno_imi_param->second_order_buckets_count) {
-        logger::error(
-            "GNOIMIParameter::CheckCompatibility: "
-            "second_order_buckets_count mismatch: {} != {}",
-            this->second_order_buckets_count,
-            gno_imi_param->second_order_buckets_count);
-        return false;
-    }
+    PARAM_CAST_OR_RETURN(GNOIMIParameter, p, other);
+    CHECK_FIELD_EQ(*this, *p, first_order_buckets_count);
+    CHECK_FIELD_EQ(*this, *p, second_order_buckets_count);
     return true;
 }
 }  // namespace vsag
