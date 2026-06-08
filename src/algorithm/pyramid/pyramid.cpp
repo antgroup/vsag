@@ -240,6 +240,7 @@ Pyramid::KnnSearch(const DatasetPtr& query,
     QueryContext ctx{.stats = &stats};
 
     auto parsed_param = PyramidSearchParameters::FromJson(parameters);
+    CHECK_ARGUMENT(k > 0, fmt::format("k({}) must be greater than 0", k));
     auto ef_search_threshold = std::max<uint64_t>(AMPLIFICATION_FACTOR * k, 1000L);
     CHECK_ARGUMENT(  // NOLINT
         (1 <= parsed_param.ef_search) and (parsed_param.ef_search <= ef_search_threshold),
@@ -247,7 +248,7 @@ Pyramid::KnnSearch(const DatasetPtr& query,
             "ef_search({}) must in range[1, {}]", parsed_param.ef_search, ef_search_threshold));
 
     InnerSearchParam search_param;
-    search_param.ef = parsed_param.ef_search;
+    search_param.ef = std::max<uint64_t>(parsed_param.ef_search, static_cast<uint64_t>(k));
     search_param.radius = std::numeric_limits<float>::max();
     search_param.topk = k;
     search_param.search_mode = KNN_SEARCH;
