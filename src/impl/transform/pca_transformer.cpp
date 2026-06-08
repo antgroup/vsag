@@ -34,6 +34,29 @@ PCATransformer::PCATransformer(Allocator* allocator, int64_t input_dim, int64_t 
 
 void
 PCATransformer::Train(const float* data, uint64_t count) {
+    if (data == nullptr) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "PCA training data pointer is null");
+    }
+    if (count < 2) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            fmt::format("PCA training requires at least 2 samples, got {}", count));
+    }
+    if (input_dim_ <= 0) {
+        throw VsagException(
+            ErrorType::INVALID_ARGUMENT,
+            fmt::format("PCA training requires positive input dimension, got {}", input_dim_));
+    }
+    if (static_cast<uint64_t>(input_dim_) > SIZE_MAX / static_cast<uint64_t>(input_dim_)) {
+        throw VsagException(
+            ErrorType::INVALID_ARGUMENT,
+            fmt::format("PCA training input dimension is too large, got {}", input_dim_));
+    }
+    if (count > SIZE_MAX / static_cast<uint64_t>(input_dim_)) {
+        throw VsagException(
+            ErrorType::INVALID_ARGUMENT,
+            fmt::format(
+                "PCA training data size overflow: count {} * input_dim {}", count, input_dim_));
+    }
     vsag::Vector<float> centralized_data(allocator_);
     centralized_data.resize(count * input_dim_, 0.0F);
 
