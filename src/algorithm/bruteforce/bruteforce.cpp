@@ -118,18 +118,17 @@ BruteForce::Add(const DatasetPtr& data, AddMode mode) {
                 continue;
             }
         }
+        const auto* ei_ptr = extra_info == nullptr ? nullptr : extra_info + j * extra_info_size;
         if (this->thread_pool_ != nullptr) {
             auto future = this->thread_pool_->GeneralEnqueue(add_func,
                                                              vectors + j * dim_,
                                                              label,
                                                              attrs == nullptr ? nullptr : attrs + j,
-                                                             extra_info + j * extra_info_size);
+                                                             ei_ptr);
             futures.emplace_back(std::move(future));
         } else {
-            if (auto add_res = add_func(vectors + j * dim_,
-                                        label,
-                                        attrs == nullptr ? nullptr : attrs + j,
-                                        extra_info + j * extra_info_size);
+            if (auto add_res = add_func(
+                    vectors + j * dim_, label, attrs == nullptr ? nullptr : attrs + j, ei_ptr);
                 add_res.has_value()) {
                 failed_ids.emplace_back(add_res.value());
             }
