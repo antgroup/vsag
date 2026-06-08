@@ -124,3 +124,43 @@ TEST_CASE("TQ Serialize and Deserialize", "[ut][TransformQuantizer]") {
         }
     }
 }
+
+TEST_CASE("TQ Repeated SetQuery No Leak", "[ut][TransformQuantizer]") {
+    constexpr MetricType metric = MetricType::METRIC_TYPE_L2SQR;
+    uint64_t dim = 128;
+    uint64_t count = 200;
+
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto param = std::make_shared<TransformQuantizerParameter>();
+    static constexpr const char* param_template = R"(
+        {{
+            "tq_chain": "rom, fp32",
+            "pca_dim": {},
+            "mrle_dim": {}
+        }}
+    )";
+    auto param_str = fmt::format(param_template, dim, dim - 1);
+    auto param_json = vsag::JsonType::Parse(param_str);
+    param->FromJson(param_json);
+
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.dim_ = dim;
+    TransformQuantizer<FP32Quantizer<metric>, metric> quantizer(param, common_param);
+
+    auto vecs = fixtures::generate_vectors(count, dim);
+    quantizer.Train(vecs.data(), count);
+
+    auto computer = quantizer.FactoryComputer();
+    auto queries = fixtures::generate_vectors(10, dim, false, 42);
+
+    for (int i = 0; i < 10; ++i) {
+        computer->SetQuery(queries.data() + i * dim);
+    }
+
+    std::vector<uint8_t> codes(quantizer.GetCodeSize());
+    quantizer.EncodeOne(vecs.data(), codes.data());
+    float dist = 0;
+    quantizer.ComputeDist(*computer, codes.data(), &dist);
+    REQUIRE(dist >= 0);
+}
