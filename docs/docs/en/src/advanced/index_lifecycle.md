@@ -31,12 +31,12 @@ supports it and which mode it supports.
 `Remove` deletes vectors by id. HGraph supports two deletion modes with different requirements:
 
 - `RemoveMode::MARK_REMOVE` (the default) only writes a tombstone via the label table and works
-  regardless of `support_remove`. The id is filtered out of subsequent searches, but the underlying
-  graph node and vector storage are kept.
+  regardless of `support_force_remove`. The id is filtered out of subsequent searches, but the
+  underlying graph node and vector storage are kept.
 - `RemoveMode::FORCE_REMOVE` physically rewrites the graph and reclaims the slot. This mode is
-  only available when the index was built with `support_remove: true` in `index_param` (which
-  causes the graph data cell to allocate the delete-tracking metadata). Calling `FORCE_REMOVE` on
-  an index built without `support_remove: true` will fail.
+  only available when the index was built with `support_force_remove: true` in `index_param`. That
+  flag enables the force-remove path and its extra synchronization; calling `FORCE_REMOVE` on an
+  index built without `support_force_remove: true` will fail.
 
 ```json
 {
@@ -47,13 +47,13 @@ supports it and which mode it supports.
         "base_quantization_type": "sq8",
         "max_degree": 16,
         "ef_construction": 100,
-        "support_remove": true
+        "support_force_remove": true
     }
 }
 ```
 
 The JSON snippet above is only required if you intend to use `FORCE_REMOVE`. For `MARK_REMOVE`
-alone you can omit the `support_remove` flag.
+alone you can omit the `support_force_remove` flag.
 
 ```json
 {
@@ -63,8 +63,7 @@ alone you can omit the `support_remove` flag.
     "index_param": {
         "base_quantization_type": "sq8",
         "max_degree": 16,
-        "ef_construction": 100,
-        "support_remove": true
+        "ef_construction": 100
     }
 }
 ```
@@ -81,8 +80,8 @@ The optional `RemoveMode` argument selects the deletion strategy:
 
 | Mode                          | Behavior                                                          |
 |-------------------------------|-------------------------------------------------------------------|
-| `RemoveMode::MARK_REMOVE` (default) | Tombstones the id; fast, no shrink or graph repair. Subsequent searches skip the id. Does not require `support_remove: true`. |
-| `RemoveMode::FORCE_REMOVE`    | Physically removes the vector and repairs the graph. Heavier. Requires the index to be built with `support_remove: true`. |
+| `RemoveMode::MARK_REMOVE` (default) | Tombstones the id; fast, no shrink or graph repair. Subsequent searches skip the id. Does not require `support_force_remove: true`. |
+| `RemoveMode::FORCE_REMOVE`    | Physically removes the vector and repairs the graph. Heavier. Requires the index to be built with `support_force_remove: true`. |
 
 `Remove` returns the number of ids that were successfully removed. Ids that did not exist are
 silently skipped and not counted.

@@ -21,10 +21,10 @@
 #include <iostream>
 #include <memory>
 
-#include "algorithm/hgraph.h"
-#include "algorithm/ivf.h"
-#include "algorithm/pyramid.h"
-#include "algorithm/pyramid_zparameters.h"
+#include "algorithm/hgraph/hgraph.h"
+#include "algorithm/ivf/ivf.h"
+#include "algorithm/pyramid/pyramid.h"
+#include "algorithm/pyramid/pyramid_zparameters.h"
 #include "algorithm/sindi/sindi.h"
 #include "algorithm/sindi/sindi_parameter.h"
 #include "index/index_impl.h"

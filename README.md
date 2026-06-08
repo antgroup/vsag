@@ -168,16 +168,38 @@ for (let i = 0; i < 10; i++) {
 </details>
 
 ### Integrate with CMake
+
+If you have already installed vsag (e.g. `cmake --install build-release` or via a
+distribution package), the recommended path is to use the shipped CMake package
+config and the imported `vsag::vsag` target:
+
 ```cmake
 # CMakeLists.txt
-cmake_minimum_required(VERSION 3.18)
-
-project (myproject)
+cmake_minimum_required (VERSION 3.18)
+project (myproject CXX)
 
 set (CMAKE_CXX_STANDARD 11)
 set (CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# download and compile vsag
+find_package (vsag CONFIG REQUIRED)
+
+add_executable (vsag-cmake-example src/main.cpp)
+target_link_libraries (vsag-cmake-example PRIVATE vsag::vsag)
+```
+
+Point CMake at the install prefix via `-DCMAKE_PREFIX_PATH=/path/to/install` if
+vsag is not in a system location.
+
+Alternatively, to fetch and build vsag from source as part of your project:
+
+```cmake
+# CMakeLists.txt
+cmake_minimum_required (VERSION 3.18)
+project (myproject CXX)
+
+set (CMAKE_CXX_STANDARD 11)
+set (CMAKE_CXX_STANDARD_REQUIRED ON)
+
 include (FetchContent)
 FetchContent_Declare (
   vsag
@@ -186,12 +208,9 @@ FetchContent_Declare (
 )
 FetchContent_MakeAvailable (vsag)
 
-# compile executable and link to vsag
 add_executable (vsag-cmake-example src/main.cpp)
 target_include_directories (vsag-cmake-example SYSTEM PRIVATE ${vsag_SOURCE_DIR}/include)
 target_link_libraries (vsag-cmake-example PRIVATE vsag)
-
-# add dependency
 add_dependencies (vsag-cmake-example vsag)
 ```
 
@@ -355,6 +374,13 @@ VSAG referenced the following works during its implementation:
         </tr>
         <tr>
             <td align="center">
+                <a href="https://github.com/Roxanne0321">
+                    <img src="https://avatars.githubusercontent.com/u/188438858?v=4" width="100" alt="Roxanne0321"/>
+                    <br />
+                    <sub><b>Roxanne</b></sub>
+                </a>
+            </td>
+            <td align="center">
                 <a href="https://github.com/Carrot-77">
                     <img src="https://avatars.githubusercontent.com/u/61344086?v=4" width="100" alt="Carrot-77"/>
                     <br />
@@ -366,13 +392,6 @@ VSAG referenced the following works during its implementation:
                     <img src="https://avatars.githubusercontent.com/u/11944144?v=4" width="100" alt="nedchu"/>
                     <br />
                     <sub><b>Deming Chu</b></sub>
-                </a>
-            </td>
-            <td align="center">
-                <a href="https://github.com/Roxanne0321">
-                    <img src="https://avatars.githubusercontent.com/u/188438858?v=4" width="100" alt="Roxanne0321"/>
-                    <br />
-                    <sub><b>Roxanne</b></sub>
                 </a>
             </td>
             <td align="center">
@@ -399,6 +418,13 @@ VSAG referenced the following works during its implementation:
         </tr>
         <tr>
             <td align="center">
+                <a href="https://github.com/xfmeng17">
+                    <img src="https://avatars.githubusercontent.com/u/32661584?v=4" width="100" alt="xfmeng17"/>
+                    <br />
+                    <sub><b>XFMENG17</b></sub>
+                </a>
+            </td>
+            <td align="center">
                 <a href="https://github.com/antfin-oss">
                     <img src="https://avatars.githubusercontent.com/u/48939886?v=4" width="100" alt="antfin-oss"/>
                     <br />
@@ -417,13 +443,6 @@ VSAG referenced the following works during its implementation:
                     <img src="https://avatars.githubusercontent.com/u/11880269?v=4" width="100" alt="pkusunjy"/>
                     <br />
                     <sub><b>Sun Jiayu</b></sub>
-                </a>
-            </td>
-            <td align="center">
-                <a href="https://github.com/xfmeng17">
-                    <img src="https://avatars.githubusercontent.com/u/32661584?v=4" width="100" alt="xfmeng17"/>
-                    <br />
-                    <sub><b>XFMENG17</b></sub>
                 </a>
             </td>
             <td align="center">

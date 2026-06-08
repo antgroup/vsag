@@ -53,7 +53,8 @@ For RabitQ split 1bit + 7bit storage/search, see [rabitq_split_1bit_7bit.md](rab
 | **Advanced** | build_by_base | bool | false | No | Build index using base quantization |
 | **Features** | support_duplicate | bool | false | No | Enable duplicate data detection |
 | **Features** | duplicate_distance_threshold | float | 0.0 | No | Deduplicate by nearest-candidate distance when greater than 0; otherwise fall back to code memcmp |
-| **Features** | support_remove | bool | false | No | Enable deletion support |
+| **Features** | support_remove | bool | false | No | Enable graph delete-tracking metadata |
+| **Features** | support_force_remove | bool | false | No | Enable force-remove support and its extra synchronization |
 | **Features** | store_raw_vector | bool | false | No | Store raw vectors (cosine metric) |
 | **Features** | use_elp_optimizer | bool | false | No | Auto parameter optimization |
 
@@ -217,7 +218,13 @@ For RabitQ split 1bit + 7bit storage/search, see [rabitq_split_1bit_7bit.md](rab
 
 ### support_remove
 - **Parameter Type**: bool
-- **Parameter Description**: Whether to support deletion operations
+- **Parameter Description**: Whether to enable graph delete-tracking metadata
+- **Optional Values**: true, false
+- **Default Value**: false
+
+### support_force_remove
+- **Parameter Type**: bool
+- **Parameter Description**: Whether to enable the force-remove path and its extra synchronization
 - **Optional Values**: true, false
 - **Default Value**: false
 
@@ -242,10 +249,10 @@ means that the index is built using SQ8 quantization, with a maximum degree of 3
     "build_thread_count": 50,
     "support_duplicate": true,
     "duplicate_distance_threshold": 0.02,
-    "support_remove": true
+    "support_force_remove": true
 }
 ```
-means that the index uses PQ quantization with 64 subspaces, enables reordering with FP16 precision, deduplicates inserts within distance threshold 0.02, supports deletion, with maximum degree 64 and ef_construction 400.
+means that the index uses PQ quantization with 64 subspaces, enables reordering with FP16 precision, deduplicates inserts within distance threshold 0.02, and enables force-remove support with maximum degree 64 and ef_construction 400.
 
 ## Detailed Explanation of Search Parameters
 
@@ -262,6 +269,14 @@ means that the index uses PQ quantization with 64 subspaces, enables reordering 
 - **Default Value**: false
 - **Note**: This mode supports the `parallelism` search parameter for parallel search within a single query.
 
+### brute_force_threshold
+- **Parameter Type**: float
+- **Parameter Description**: Selectivity-aware brute-force fallback. When set to a value greater than `0.0` and the active filter's `ValidRatio()` is less than or equal to this threshold, the search bypasses graph traversal and runs an exact scan over the valid ids using the best available flatten codes (raw vectors > precise reorder codes > base quantized codes, in that order of preference). The post-search reorder pass is skipped on queries that take the brute-force branch.
+- **Optional Values**: any float in `[0.0, 1.0]`
+- **Default Value**: 0.0 (disabled — preserves legacy behavior)
+- **Applies to**: `KnnSearch` (non-iterator overload, also used by `SearchWithRequest`) and `RangeSearch`. The iterator-style `KnnSearch` does not use this parameter.
+- **Note**: The decision relies on `Filter::ValidRatio()` returning a meaningful selectivity estimate; see [filtered search](docs/docs/en/src/advanced/filtered_search.md). The brute-force scan visits every indexed id once to call `CheckValid`, so its cost is roughly `O(N × dim)` regardless of selectivity. A runnable example is [`322_feature_hgraph_brute_force_threshold.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/322_feature_hgraph_brute_force_threshold.cpp).
+
 ## Examples for Search Parameter String
 ```json
 "hgraph": {
@@ -271,3 +286,11 @@ means that the index uses PQ quantization with 64 subspaces, enables reordering 
 }
 ```
 means that the search will use an ef_search value of 200 to control the search quality and performance trade-off. When the index uses RabitQ split storage, rabitq_one_bit_search=true enables one-bit graph search and parallelism=4 enables parallel search within a single query.
+
+```json
+"hgraph": {
+    "ef_search": 200,
+    "brute_force_threshold": 0.02
+}
+```
+means that whenever the request supplies a filter whose `ValidRatio()` is ≤ 0.02 (i.e. only ~2% of the indexed ids survive the predicate), HGraph will skip the graph traversal and run an exact scan over the surviving ids; queries with weaker filters or no filter at all keep using the normal graph search.

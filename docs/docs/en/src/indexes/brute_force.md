@@ -1,5 +1,7 @@
 # BruteForce
 
+![BruteForce: vectors live in a flat store; the query is compared against every stored vector, with optional intra-query parallelism splitting the scan across threads, and the smallest distances are kept in a top-k heap](../figures/indexes/brute_force-overview.svg)
+
 BruteForce is VSAG's **exact, flat** index. At query time it scores the query against every
 vector in the corpus and returns the true top-k — no graph traversal, no inverted lists, no
 approximation. Its main role is to be the **ground-truth baseline** that approximate indexes
@@ -61,7 +63,7 @@ Advanced users can pass an `index_param` object to enable quantization or storag
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `base_quantization_type` | string | `"fp32"` | `fp32`, `fp16`, `bf16`, `sq8`, `sq8_uniform`, `sq4_uniform`, `pq`, `pqfs`, `rabitq` |
+| `base_quantization_type` | string | `"fp32"` | `fp32`, `fp16`, `bf16`, `sq8`, `sq4`, `sq8_uniform`, `sq4_uniform`, `pq`, `pqfs`, `rabitq` — see the [Quantization chapter](../quantization/README.md) for per-quantizer details |
 | `use_attribute_filter` | bool | `false` | Enable attribute-based filtering (see [Attribute Filter](../advanced/attribute_filter.md)) |
 
 > **Note on `store_raw_vector`.** The `store_raw_vector` flag is parsed by the shared
@@ -131,7 +133,7 @@ BruteForce advertises the following capability flags (see `BruteForce::InitFeatu
 | `SUPPORT_CHECK_ID_EXIST` / `SUPPORT_CLONE` / `SUPPORT_ESTIMATE_MEMORY` / `SUPPORT_GET_MEMORY_USAGE` | Standard introspection and lifecycle. |
 | `SUPPORT_SERIALIZE_BINARY_SET` / `SUPPORT_SERIALIZE_FILE` / `SUPPORT_SERIALIZE_WRITE_FUNC` | Full save surface. |
 | `SUPPORT_DESERIALIZE_BINARY_SET` / `SUPPORT_DESERIALIZE_FILE` / `SUPPORT_DESERIALIZE_READER_SET` | Full load surface. (There is no `DESERIALIZE_WRITE_FUNC` counterpart — read paths use `READER_SET` instead.) |
-| `NEED_TRAIN` | Set when `base_quantization_type` is one of `sq8`, `sq8_uniform`, `sq4_uniform`, `pq`, `pqfs`, `rabitq`. |
+| `NEED_TRAIN` | Set when `base_quantization_type` is one of `sq8`, `sq4`, `sq8_uniform`, `sq4_uniform`, `pq`, `pqfs`, `rabitq`. |
 
 Notably **not** supported by BruteForce: `SUPPORT_UPDATE_VECTOR_CONCURRENT`,
 `SUPPORT_UPDATE_ID_CONCURRENT`, and `SUPPORT_EXPORT_MODEL`.

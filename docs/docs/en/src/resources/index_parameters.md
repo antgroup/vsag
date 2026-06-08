@@ -69,13 +69,20 @@ HGraph places its build parameters under the generic `index_param` key (see
 |-------|---------|-------------|
 | `max_degree` | 16–48 | Maximum out-degree per node |
 | `ef_construction` | 200–500 | Candidate set size during build; larger = higher recall, slower build |
-| `base_quantization_type` | `fp32` / `fp16` / `bf16` / `sq8` / `sq4` / `pq` | Quantization of the base storage |
+| `base_quantization_type` | `fp32` / `fp16` / `bf16` / `sq8` / `sq4` / `pq` | Quantization of the base storage — see the [Quantization chapter](../quantization/README.md) for all supported values |
 
 At search time:
 
 ```json
 {"hgraph": {"ef_search": 100}}
 ```
+
+The `hgraph` search-param object also accepts `brute_force_threshold` (a float
+in `[0.0, 1.0]`, default `0.0`). When set above zero and the request carries a
+filter whose `ValidRatio()` is at most this threshold, HGraph skips the graph
+traversal and runs an exact scan over the surviving ids. See the
+[HGraph index page](../indexes/hgraph.md#brute-force-fallback-under-highly-selective-filters-brute_force_threshold)
+for details.
 
 ## DiskANN
 

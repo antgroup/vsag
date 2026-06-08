@@ -48,6 +48,7 @@ const char* const HGRAPH_USE_ELP_OPTIMIZER_KEY = "use_elp_optimizer";
 const char* const HGRAPH_IGNORE_REORDER_KEY = "ignore_reorder";
 const char* const HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY = "build_by_base";
 const char* const HGRAPH_USE_REVERSE_EDGES_KEY = "use_reverse_edges";
+const char* const HGRAPH_PERSIST_SOURCE_ID_KEY = "persist_source_id";
 const char* const LABEL_REMAP_TYPE_VALUE_ROBIN = "robin";
 const char* const LABEL_REMAP_TYPE_VALUE_PG = "pg";
 const char* const GRAPH_KEY = "graph";
@@ -158,6 +159,9 @@ const char* const GNO_IMI_SEARCH_PARAM_FIRST_ORDER_SCAN_RATIO = "first_order_sca
 const char* const FLATTEN_DATA_CELL = "flatten_data_cell";
 const char* const RABITQ_SPLIT_DATA_CELL = "rabitq_split_data_cell";
 const char* const SPARSE_VECTOR_DATA_CELL = "sparse_vector_data_cell";
+const char* const MULTI_VECTOR_DATA_CELL = "multi_vector_data_cell";
+
+const char* const MULTI_VECTOR_CODES = "multi_vector";
 
 // for pyramid index
 const char* const NO_BUILD_LEVELS = "no_build_levels";
@@ -168,7 +172,7 @@ const char* const REMOVE_FLAG_BIT = "remove_flag_bit";
 const char* const HOLD_MOLDS = "hold_molds";
 const char* const SUPPORT_DUPLICATE = "support_duplicate";
 const char* const DUPLICATE_DISTANCE_THRESHOLD = "duplicate_distance_threshold";
-const char* const SUPPORT_TOMBSTONE = "support_tombstone";
+const char* const SUPPORT_FORCE_REMOVE = "support_force_remove";
 const char* const SUPPORT_AUTOTUNE = "support_autotune";
 
 const char* const DATACELL_OFFSETS = "datacell_offsets";
@@ -182,6 +186,7 @@ const char* const SPARSE_CODES = "sparse";
 
 const char* const IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT = "scan_buckets_count";
 const char* const SEARCH_PARAM_FACTOR = "factor";
+const char* const SEARCH_PARAM_ENABLE_REORDER = "enable_reorder";
 const char* const SEARCH_PARALLELISM = "parallelism";
 const char* const SEARCH_MAX_TIME_COST_MS = "timeout_ms";
 const char* const SPARSE_N_CANDIDATE = "n_candidate";
@@ -251,6 +256,7 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"EXTRA_INFO_KEY", EXTRA_INFO_KEY},
     {"CODES_TYPE_KEY", CODES_TYPE_KEY},
     {"SEARCH_PARAM_FACTOR", SEARCH_PARAM_FACTOR},
+    {"SEARCH_PARAM_ENABLE_REORDER", SEARCH_PARAM_ENABLE_REORDER},
     {"BUCKET_PER_DATA_KEY", BUCKET_PER_DATA_KEY},
     {"IVF_PARTITION_STRATEGY_PARAMS_KEY", IVF_PARTITION_STRATEGY_PARAMS_KEY},
     {"IVF_PARTITION_STRATEGY_TYPE_KEY", IVF_PARTITION_STRATEGY_TYPE_KEY},
@@ -265,6 +271,7 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"REMOVE_FLAG_BIT", REMOVE_FLAG_BIT},
     {"SUPPORT_DUPLICATE", SUPPORT_DUPLICATE},
     {"HOLD_MOLDS", HOLD_MOLDS},
+    {"HGRAPH_PERSIST_SOURCE_ID_KEY", HGRAPH_PERSIST_SOURCE_ID_KEY},
     {"IVF_PARTITION_STRATEGY_TYPE_GNO_IMI", IVF_PARTITION_STRATEGY_TYPE_GNO_IMI},
     {"STORE_RAW_VECTOR_KEY", STORE_RAW_VECTOR_KEY},
     {"RAW_VECTOR_KEY", RAW_VECTOR_KEY},
@@ -276,6 +283,7 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"RABITQ_QUANTIZATION_ERROR_RATE_KEY", RABITQ_QUANTIZATION_ERROR_RATE_KEY},
     {"TQ_CHAIN_KEY", TQ_CHAIN_KEY},
     {"NO_BUILD_LEVELS", NO_BUILD_LEVELS},
-    {"GRAPH_TYPE_KEY", GRAPH_TYPE_KEY}};
+    {"GRAPH_TYPE_KEY", GRAPH_TYPE_KEY},
+    {"SUPPORT_FORCE_REMOVE", SUPPORT_FORCE_REMOVE}};
 
 }  // namespace vsag

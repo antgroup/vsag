@@ -14,10 +14,15 @@
 # limitations under the License.
 
 
-add_subdirectory (ivf_partition)
 add_subdirectory (hnswlib)
 add_subdirectory (sindi)
 add_subdirectory (disksindi)
+add_subdirectory (hgraph)
+add_subdirectory (bruteforce)
+add_subdirectory (ivf)
+add_subdirectory (pyramid)
+add_subdirectory (sparse_index)
+add_subdirectory (warp)
 
 file (GLOB ALGORITHM_SRCS "*.cpp")
 list (FILTER ALGORITHM_SRCS EXCLUDE REGEX "_test.cpp")
@@ -30,9 +35,14 @@ maybe_add_dependencies (algorithm antlr4)
 set (ALGORITHM_LIBS
         algorithm
         hnswlib
-        ivf_partition
         sindi
         disksindi
+        hgraph
+        bruteforce
+        ivf
+        pyramid
+        sparse_index
+        warp
         PARENT_SCOPE)
 
 if (ENABLE_TESTS)

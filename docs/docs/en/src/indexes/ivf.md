@@ -1,5 +1,7 @@
 # IVF
 
+![IVF: Voronoi partition over k-means centroids; only the scan_buckets_count buckets closest to the query are scanned, with an optional precise rerank](../figures/indexes/ivf-overview.svg)
+
 IVF (Inverted File) is VSAG's **partition-based** index. It clusters the corpus into
 buckets at build time, and at query time only scans the buckets whose centroids are
 closest to the query. This turns an O(N) linear scan into O(N · `scan_buckets_count`
@@ -75,7 +77,7 @@ repository for the exhaustive list.
 | `first_order_buckets_count` | int | `10` | First-level count (effective for `gno_imi`) |
 | `second_order_buckets_count` | int | `10` | Second-level count (effective for `gno_imi`) |
 | `ivf_train_type` | string | `"kmeans"` | Centroid training: `kmeans` or `random` |
-| `base_quantization_type` | string | `"fp32"` | `fp32`, `fp16`, `bf16`, `sq8`, `sq8_uniform`, `sq4_uniform`, `pq`, `pqfs`, `rabitq` |
+| `base_quantization_type` | string | `"fp32"` | `fp32`, `fp16`, `bf16`, `sq8`, `sq4`, `sq8_uniform`, `sq4_uniform`, `pq`, `pqfs`, `rabitq` — see the [Quantization chapter](../quantization/README.md) for per-quantizer details |
 | `base_pq_dim` | int | `1` | PQ subspaces (required with `pq` / `pqfs`) |
 | `use_reorder` | bool | `false` | Keep a high-precision copy and re-rank after the coarse scan |
 | `precise_quantization_type` | string | `"fp32"` | Quantizer used for reordering (with `use_reorder: true`) |
@@ -94,6 +96,7 @@ Search-time parameters live under the `ivf` sub-object:
 |-----------|------|---------|-------------|
 | `scan_buckets_count` | int | — (required) | Number of buckets probed per query. Must be ≤ `buckets_count`. |
 | `factor` | float | `2.0` | With reordering enabled, pulls `factor * topk` coarse candidates before the precise rescore. |
+| `enable_reorder` | bool | `true` | Set to `false` to skip the final reorder stage for this request even when the index was built with reorder enabled. |
 | `parallelism` | int | `1` | Threads used to scan buckets in parallel for a single query. |
 | `timeout_ms` | double | `+∞` | Hard cap in milliseconds; partial results are returned once exceeded. |
 
@@ -101,6 +104,12 @@ Search-time parameters live under the `ivf` sub-object:
 auto result = index->KnnSearch(
     query, topk,
     R"({"ivf": {"scan_buckets_count": 32, "factor": 2.0, "parallelism": 4}})").value();
+```
+
+```cpp
+auto fast_result = index->KnnSearch(
+    query, topk,
+    R"({"ivf": {"scan_buckets_count": 32, "factor": 2.0, "enable_reorder": false}})").value();
 ```
 
 ## When to use IVF

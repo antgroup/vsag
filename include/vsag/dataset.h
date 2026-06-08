@@ -18,7 +18,6 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
-#include <variant>
 #include <vector>
 
 #include "vsag/allocator.h"
@@ -33,6 +32,13 @@ struct SparseVector {
                                // (The ids_ will be sorted in ascending order inside the index.
                                // it is recommended to sort them before putting them into VSAG.)
     float* vals_ = nullptr;    // contains vals with size of len_
+
+    // Optional original tokenized document content for the sparse vector.
+    // When present, token_sequence_ owns a buffer of token_seq_len_ uint32_t
+    // term ids, preserving the original tokenization order (duplicates and
+    // ordering are kept as-is, unlike the deduplicated/sorted ids_).
+    uint32_t token_seq_len_ = 0;          // length of the original token sequence
+    uint32_t* token_sequence_ = nullptr;  // original tokenized term ids, length = token_seq_len_
 };
 
 /**
@@ -468,6 +474,23 @@ public:
      */
     virtual int64_t
     GetMultiVectorDim() const = 0;
+
+    /**
+     * @brief Sets the source ID for the dataset.
+     *
+     * @param source_id Pointer to the source ID string.
+     * @return DatasetPtr A shared pointer to the dataset with updated source ID.
+     */
+    virtual DatasetPtr
+    SourceID(const std::string* source_id) = 0;
+
+    /**
+     * @brief Retrieves the source ID of the dataset.
+     *
+     * @return const std::string* Pointer to the source ID string.
+     */
+    virtual const std::string*
+    GetSourceID() const = 0;
 };
 
 };  // namespace vsag

@@ -24,12 +24,21 @@ void
 parse_sparse_vectors(const char* src_data,
                      size_t data_size,
                      std::vector<SparseVector>& parsed_vectors,
-                     int64_t& max_len) {
+                     int64_t& max_len,
+                     std::vector<uint64_t>* offsets_out) {
     // parse the sparse vectors with ordered keys
     const char* ptr = src_data;
     const char* end = src_data + data_size;
+    if (offsets_out != nullptr) {
+        offsets_out->clear();
+        offsets_out->reserve(64);
+    }
     while (ptr < end) {
         SparseVector vec;
+
+        if (offsets_out != nullptr) {
+            offsets_out->push_back(static_cast<uint64_t>(ptr - src_data));
+        }
 
         if (ptr + sizeof(uint32_t) > end)
             break;
@@ -82,7 +91,101 @@ parse_sparse_vectors(const char* src_data,
     if (ptr != end) {
         throw std::runtime_error("parse_sparse_vectors: fail to parse sparse vectors");
     }
+    if (offsets_out != nullptr) {
+        // append the sentinel offset (== total data_size) so that the
+        // length of record i is offsets_out[i+1] - offsets_out[i].
+        offsets_out->push_back(static_cast<uint64_t>(data_size));
+    }
 }
+
+void
+parse_token_sequences(const char* src_data,
+                      size_t data_size,
+                      std::vector<SparseVector>& target_vectors,
+                      std::vector<uint64_t>* offsets_out) {
+    // Parse token sequences and attach them to the matching sparse vectors
+    // by ordinal position. Each record layout in the byte stream is:
+    //   [seq_len(uint32), term_id_0(uint32), term_id_1(uint32), ...]
+    // Records are concatenated back-to-back with no padding. A seq_len of 0
+    // is allowed and occupies only the 4-byte length field.
+    const char* ptr = src_data;
+    const char* end = src_data + data_size;
+    uint64_t idx = 0;
+    if (offsets_out != nullptr) {
+        offsets_out->clear();
+        offsets_out->reserve(target_vectors.size() + 1);
+    }
+    while (ptr < end) {
+        if (idx >= target_vectors.size()) {
+            throw std::runtime_error(
+                "parse_token_sequences: more token sequence records than sparse vectors");
+        }
+        if (offsets_out != nullptr) {
+            offsets_out->push_back(static_cast<uint64_t>(ptr - src_data));
+        }
+        if (ptr + sizeof(uint32_t) > end) {
+            throw std::runtime_error("parse_token_sequences: truncated stream at length header");
+        }
+        uint32_t seq_len = 0;
+        memcpy(&seq_len, ptr, sizeof(uint32_t));
+        ptr += sizeof(uint32_t);
+
+        target_vectors[idx].token_seq_len_ = seq_len;
+        target_vectors[idx].token_sequence_ = nullptr;
+
+        if (seq_len > 0) {
+            const size_t payload_size = static_cast<size_t>(seq_len) * sizeof(uint32_t);
+            if (ptr + payload_size > end) {
+                throw std::runtime_error("parse_token_sequences: truncated stream at payload");
+            }
+            target_vectors[idx].token_sequence_ = new uint32_t[seq_len];
+            memcpy(target_vectors[idx].token_sequence_, ptr, payload_size);
+            ptr += payload_size;
+        }
+        ++idx;
+    }
+    if (ptr != end) {
+        throw std::runtime_error("parse_token_sequences: trailing bytes in stream");
+    }
+    if (idx != target_vectors.size()) {
+        throw std::runtime_error(
+            "parse_token_sequences: fewer token sequence records than sparse vectors");
+    }
+    if (offsets_out != nullptr) {
+        offsets_out->push_back(static_cast<uint64_t>(data_size));
+    }
+}
+
+namespace {
+
+// Validate that a record-offsets array follows the [0, ..., total] contract:
+// length N+1, strictly non-decreasing, first entry 0, last entry == total
+// byte stream length. Throws on violation so we never silently use a broken
+// index for random access.
+void
+validate_offsets(const std::vector<uint64_t>& offsets,
+                 uint64_t expected_count,
+                 uint64_t expected_total,
+                 const std::string& tag) {
+    if (offsets.size() != expected_count + 1) {
+        throw std::runtime_error(tag + ": offsets length mismatch (expected " +
+                                 std::to_string(expected_count + 1) + ", got " +
+                                 std::to_string(offsets.size()) + ")");
+    }
+    if (offsets.front() != 0) {
+        throw std::runtime_error(tag + ": offsets[0] must be 0");
+    }
+    if (offsets.back() != expected_total) {
+        throw std::runtime_error(tag + ": offsets sentinel must equal byte stream size");
+    }
+    for (uint64_t i = 1; i < offsets.size(); ++i) {
+        if (offsets[i] < offsets[i - 1]) {
+            throw std::runtime_error(tag + ": offsets must be non-decreasing");
+        }
+    }
+}
+
+}  // namespace
 
 float
 get_distance(const SparseVector* vector1, const SparseVector* vector2, const void* qty_ptr) {
@@ -361,8 +464,11 @@ EvalDataset::Load(const std::string& filename) {
             obj->train_data_size_ = dims_out[0];
             obj->train_.reset(new char[obj->train_data_size_]);
             dataset.read(obj->train_.get(), type, dataspace);
-            parse_sparse_vectors(
-                obj->train_.get(), obj->train_data_size_, obj->sparse_train_, obj->dim_);
+            parse_sparse_vectors(obj->train_.get(),
+                                 obj->train_data_size_,
+                                 obj->sparse_train_,
+                                 obj->dim_,
+                                 &obj->sparse_train_offsets_);
             obj->train_.reset();
             obj->number_of_base_ = obj->sparse_train_.size();
         }
@@ -375,10 +481,120 @@ EvalDataset::Load(const std::string& filename) {
             obj->test_data_size_ = dims_out[0];
             obj->test_.reset(new char[obj->test_data_size_]);
             dataset.read(obj->test_.get(), type, dataspace);
-            parse_sparse_vectors(
-                obj->test_.get(), obj->test_data_size_, obj->sparse_test_, obj->dim_);
+            parse_sparse_vectors(obj->test_.get(),
+                                 obj->test_data_size_,
+                                 obj->sparse_test_,
+                                 obj->dim_,
+                                 &obj->sparse_test_offsets_);
             obj->test_.reset();
             obj->number_of_query_ = obj->sparse_test_.size();
+        }
+
+        // Optional: if the writer also stored the precomputed record-offset
+        // index (/train_offsets, /test_offsets), load it and cross-check
+        // against the one we just rebuilt from the byte stream. Mismatches
+        // indicate a corrupted file and abort the load.
+        auto load_offsets = [&file, &datasets](const std::string& key) -> std::vector<uint64_t> {
+            std::vector<uint64_t> out;
+            if (datasets.count(key) == 0) {
+                return out;
+            }
+            H5::DataSet ds = file.openDataSet("/" + key);
+            H5::DataSpace sp = ds.getSpace();
+            hsize_t dims_out[1];
+            sp.getSimpleExtentDims(dims_out, NULL);
+            out.resize(dims_out[0]);
+            ds.read(out.data(), H5::PredType::NATIVE_UINT64);
+            return out;
+        };
+        auto cross_check = [](const std::vector<uint64_t>& on_disk,
+                              const std::vector<uint64_t>& rebuilt,
+                              const std::string& tag) {
+            if (on_disk.empty()) {
+                return;
+            }
+            if (on_disk.size() != rebuilt.size() ||
+                !std::equal(on_disk.begin(), on_disk.end(), rebuilt.begin())) {
+                throw std::runtime_error(tag + ": stored offsets disagree with byte stream");
+            }
+        };
+        {
+            auto disk_off = load_offsets("train_offsets");
+            if (!disk_off.empty()) {
+                validate_offsets(disk_off,
+                                 static_cast<uint64_t>(obj->sparse_train_.size()),
+                                 obj->train_data_size_,
+                                 "train_offsets");
+            }
+            cross_check(disk_off, obj->sparse_train_offsets_, "train_offsets");
+        }
+        {
+            auto disk_off = load_offsets("test_offsets");
+            if (!disk_off.empty()) {
+                validate_offsets(disk_off,
+                                 static_cast<uint64_t>(obj->sparse_test_.size()),
+                                 obj->test_data_size_,
+                                 "test_offsets");
+            }
+            cross_check(disk_off, obj->sparse_test_offsets_, "test_offsets");
+        }
+
+        // Optional: parse the original tokenized term_id sequences. Sparse
+        // datasets that were created before this feature do not contain
+        // these datasets, so missing keys are silently ignored.
+        // Contract: whenever a *_token_sequences byte stream is present, its
+        // companion *_token_sequences_offsets dataset MUST also be present.
+        // A token_sequences-without-offsets file is considered malformed and
+        // we abort the load to surface the problem early.
+        if (datasets.count("train_token_sequences")) {
+            if (datasets.count("train_token_sequences_offsets") == 0) {
+                throw std::runtime_error(
+                    "train_token_sequences present but train_token_sequences_offsets is missing");
+            }
+            H5::PredType type = H5::PredType::ALPHA_I8;
+            H5::DataSet dataset = file.openDataSet("/train_token_sequences");
+            H5::DataSpace dataspace = dataset.getSpace();
+            hsize_t dims_out[2];
+            dataspace.getSimpleExtentDims(dims_out, NULL);
+            uint64_t buffer_size = dims_out[0];
+            std::shared_ptr<char[]> buffer(new char[buffer_size]);
+            dataset.read(buffer.get(), type, dataspace);
+            parse_token_sequences(
+                buffer.get(), buffer_size, obj->sparse_train_, &obj->train_token_seq_offsets_);
+            auto disk_off = load_offsets("train_token_sequences_offsets");
+            validate_offsets(disk_off,
+                             static_cast<uint64_t>(obj->sparse_train_.size()),
+                             buffer_size,
+                             "train_token_sequences_offsets");
+            cross_check(disk_off, obj->train_token_seq_offsets_, "train_token_sequences_offsets");
+        } else if (datasets.count("train_token_sequences_offsets")) {
+            throw std::runtime_error(
+                "train_token_sequences_offsets present but train_token_sequences is missing");
+        }
+        if (datasets.count("test_token_sequences")) {
+            if (datasets.count("test_token_sequences_offsets") == 0) {
+                throw std::runtime_error(
+                    "test_token_sequences present but test_token_sequences_offsets is missing");
+            }
+            H5::PredType type = H5::PredType::ALPHA_I8;
+            H5::DataSet dataset = file.openDataSet("/test_token_sequences");
+            H5::DataSpace dataspace = dataset.getSpace();
+            hsize_t dims_out[2];
+            dataspace.getSimpleExtentDims(dims_out, NULL);
+            uint64_t buffer_size = dims_out[0];
+            std::shared_ptr<char[]> buffer(new char[buffer_size]);
+            dataset.read(buffer.get(), type, dataspace);
+            parse_token_sequences(
+                buffer.get(), buffer_size, obj->sparse_test_, &obj->test_token_seq_offsets_);
+            auto disk_off = load_offsets("test_token_sequences_offsets");
+            validate_offsets(disk_off,
+                             static_cast<uint64_t>(obj->sparse_test_.size()),
+                             buffer_size,
+                             "test_token_sequences_offsets");
+            cross_check(disk_off, obj->test_token_seq_offsets_, "test_token_sequences_offsets");
+        } else if (datasets.count("test_token_sequences_offsets")) {
+            throw std::runtime_error(
+                "test_token_sequences_offsets present but test_token_sequences is missing");
         }
     }
 
@@ -475,7 +691,9 @@ EvalDataset::Load(const std::string& filename) {
 }
 
 std::vector<char>
-serialize_sparse_vectors(const std::vector<SparseVector>& vectors, size_t& total_size_out) {
+serialize_sparse_vectors(const std::vector<SparseVector>& vectors,
+                         size_t& total_size_out,
+                         std::vector<uint64_t>* offsets_out) {
     size_t total_size = 0;
     for (const auto& vec : vectors) {
         total_size += sizeof(uint32_t);  // len_
@@ -486,8 +704,15 @@ serialize_sparse_vectors(const std::vector<SparseVector>& vectors, size_t& total
     }
     total_size_out = total_size;
     std::vector<char> buffer(total_size);
+    if (offsets_out != nullptr) {
+        offsets_out->clear();
+        offsets_out->reserve(vectors.size() + 1);
+    }
     char* ptr = buffer.data();
     for (const auto& vec : vectors) {
+        if (offsets_out != nullptr) {
+            offsets_out->push_back(static_cast<uint64_t>(ptr - buffer.data()));
+        }
         memcpy(ptr, &vec.len_, sizeof(uint32_t));
         ptr += sizeof(uint32_t);
         if (vec.len_ > 0) {
@@ -496,6 +721,53 @@ serialize_sparse_vectors(const std::vector<SparseVector>& vectors, size_t& total
             memcpy(ptr, vec.vals_, vec.len_ * sizeof(float));
             ptr += vec.len_ * sizeof(float);
         }
+    }
+    if (offsets_out != nullptr) {
+        offsets_out->push_back(static_cast<uint64_t>(total_size));
+    }
+    return buffer;
+}
+
+bool
+has_any_token_sequence(const std::vector<SparseVector>& vectors) {
+    for (const auto& vec : vectors) {
+        if (vec.token_seq_len_ > 0 && vec.token_sequence_ != nullptr) {
+            return true;
+        }
+    }
+    return false;
+}
+
+std::vector<char>
+serialize_token_sequences(const std::vector<SparseVector>& vectors,
+                          size_t& total_size_out,
+                          std::vector<uint64_t>* offsets_out) {
+    size_t total_size = 0;
+    for (const auto& vec : vectors) {
+        total_size += sizeof(uint32_t);  // token_seq_len_
+        total_size += static_cast<size_t>(vec.token_seq_len_) * sizeof(uint32_t);
+    }
+    total_size_out = total_size;
+    std::vector<char> buffer(total_size);
+    if (offsets_out != nullptr) {
+        offsets_out->clear();
+        offsets_out->reserve(vectors.size() + 1);
+    }
+    char* ptr = buffer.data();
+    for (const auto& vec : vectors) {
+        if (offsets_out != nullptr) {
+            offsets_out->push_back(static_cast<uint64_t>(ptr - buffer.data()));
+        }
+        memcpy(ptr, &vec.token_seq_len_, sizeof(uint32_t));
+        ptr += sizeof(uint32_t);
+        if (vec.token_seq_len_ > 0 && vec.token_sequence_ != nullptr) {
+            const size_t payload_size = static_cast<size_t>(vec.token_seq_len_) * sizeof(uint32_t);
+            memcpy(ptr, vec.token_sequence_, payload_size);
+            ptr += payload_size;
+        }
+    }
+    if (offsets_out != nullptr) {
+        offsets_out->push_back(static_cast<uint64_t>(total_size));
     }
     return buffer;
 }
@@ -554,11 +826,19 @@ EvalDataset::Save(const EvalDatasetPtr& dataset, const std::string& filename) {
 
     } else if (dataset->vector_type_ == SPARSE_VECTORS) {
         size_t total_size;
-        std::vector<char> buffer = serialize_sparse_vectors(dataset->sparse_train_, total_size);
+        std::vector<uint64_t> offsets;
+        std::vector<char> buffer =
+            serialize_sparse_vectors(dataset->sparse_train_, total_size, &offsets);
         hsize_t dims[1] = {static_cast<hsize_t>(total_size)};
         DataSpace dataspace(1, dims);
         DataSet dataset_h5 = file.createDataSet("/train", PredType::ALPHA_I8, dataspace);
         dataset_h5.write(buffer.data(), PredType::NATIVE_CHAR);
+        // Write the per-record offset index alongside the byte stream so
+        // readers can do O(1) random access to the i-th sparse vector.
+        hsize_t off_dims[1] = {static_cast<hsize_t>(offsets.size())};
+        DataSpace off_space(1, off_dims);
+        DataSet off_ds = file.createDataSet("/train_offsets", PredType::NATIVE_UINT64, off_space);
+        off_ds.write(offsets.data(), PredType::NATIVE_UINT64);
     }
 
     // write test dataset
@@ -577,11 +857,57 @@ EvalDataset::Save(const EvalDatasetPtr& dataset, const std::string& filename) {
         }
     } else if (dataset->vector_type_ == SPARSE_VECTORS) {
         size_t total_size;
-        std::vector<char> buffer = serialize_sparse_vectors(dataset->sparse_test_, total_size);
+        std::vector<uint64_t> offsets;
+        std::vector<char> buffer =
+            serialize_sparse_vectors(dataset->sparse_test_, total_size, &offsets);
         hsize_t dims[1] = {static_cast<hsize_t>(total_size)};
         DataSpace dataspace(1, dims);
         DataSet dataset_h5 = file.createDataSet("/test", PredType::ALPHA_I8, dataspace);
         dataset_h5.write(buffer.data(), PredType::NATIVE_CHAR);
+        hsize_t off_dims[1] = {static_cast<hsize_t>(offsets.size())};
+        DataSpace off_space(1, off_dims);
+        DataSet off_ds = file.createDataSet("/test_offsets", PredType::NATIVE_UINT64, off_space);
+        off_ds.write(offsets.data(), PredType::NATIVE_UINT64);
+    }
+
+    // write optional token_sequences datasets for sparse vectors (only if at
+    // least one entry has a non-empty token sequence, to keep backwards
+    // compatibility with datasets that have no original-document field).
+    // Each token sequence stream is paired with its own per-record offsets
+    // dataset so readers can do O(1) random access without re-scanning the
+    // byte stream.
+    if (dataset->vector_type_ == SPARSE_VECTORS) {
+        if (has_any_token_sequence(dataset->sparse_train_)) {
+            size_t total_size;
+            std::vector<uint64_t> offsets;
+            std::vector<char> buffer =
+                serialize_token_sequences(dataset->sparse_train_, total_size, &offsets);
+            hsize_t dims[1] = {static_cast<hsize_t>(total_size)};
+            DataSpace dataspace(1, dims);
+            DataSet ds =
+                file.createDataSet("/train_token_sequences", PredType::ALPHA_I8, dataspace);
+            ds.write(buffer.data(), PredType::NATIVE_CHAR);
+            hsize_t off_dims[1] = {static_cast<hsize_t>(offsets.size())};
+            DataSpace off_space(1, off_dims);
+            DataSet off_ds = file.createDataSet(
+                "/train_token_sequences_offsets", PredType::NATIVE_UINT64, off_space);
+            off_ds.write(offsets.data(), PredType::NATIVE_UINT64);
+        }
+        if (has_any_token_sequence(dataset->sparse_test_)) {
+            size_t total_size;
+            std::vector<uint64_t> offsets;
+            std::vector<char> buffer =
+                serialize_token_sequences(dataset->sparse_test_, total_size, &offsets);
+            hsize_t dims[1] = {static_cast<hsize_t>(total_size)};
+            DataSpace dataspace(1, dims);
+            DataSet ds = file.createDataSet("/test_token_sequences", PredType::ALPHA_I8, dataspace);
+            ds.write(buffer.data(), PredType::NATIVE_CHAR);
+            hsize_t off_dims[1] = {static_cast<hsize_t>(offsets.size())};
+            DataSpace off_space(1, off_dims);
+            DataSet off_ds = file.createDataSet(
+                "/test_token_sequences_offsets", PredType::NATIVE_UINT64, off_space);
+            off_ds.write(offsets.data(), PredType::NATIVE_UINT64);
+        }
     }
 
     // write neighbors dataset

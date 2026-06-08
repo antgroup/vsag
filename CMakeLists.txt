@@ -42,6 +42,7 @@ include (cmake/DarwinDep.cmake)                 # macOS-specific dependency hand
 include (cmake/VSAGExternalProjectConfig.cmake) # Shared ExternalProject flags and env.
 include (cmake/VSAGThirdParty.cmake)            # Third-party dependency declarations.
 include (cmake/VSAGDependencyTargets.cmake)     # Shared interface/header dependency targets.
+include (cmake/VSAGVersion.cmake)               # Resolve VSAG_VERSION_{MAJOR,MINOR,PATCH}.
 
 include_directories (${PROJECT_SOURCE_DIR}/include)
 include_directories (${PROJECT_SOURCE_DIR}/src)
@@ -69,5 +70,4 @@ endif ()
 
 include (cmake/VSAGPythonBindings.cmake)  # Optional Python bindings.
 include (cmake/VSAGNodeBindings.cmake)    # Optional Node.js bindings.
-include (cmake/VSAGInstall.cmake)         # Install rules.
-include (cmake/VSAGVersion.cmake)         # Generated version header target.
+include (cmake/VSAGInstall.cmake)         # Install rules and CMake package config.

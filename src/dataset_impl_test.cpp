@@ -108,6 +108,61 @@ TEST_CASE("Dataset Implement Test", "[ut][dataset]") {
             }
         }
     }
+
+    SECTION("sparse vector with token sequence ownership") {
+        // Build sparse vectors that each carry an original tokenized
+        // document, then transfer ownership to the Dataset and verify the
+        // destructor releases token_sequence_ buffers without leaks/crashes.
+        constexpr uint32_t kNumElements = 4;
+        auto* sparse_vectors = new vsag::SparseVector[kNumElements];
+        for (uint32_t i = 0; i < kNumElements; ++i) {
+            sparse_vectors[i].len_ = 2;
+            sparse_vectors[i].ids_ = new uint32_t[2]{1u + i, 5u + i};
+            sparse_vectors[i].vals_ = new float[2]{0.5f, 0.25f};
+            sparse_vectors[i].token_seq_len_ = 3;
+            sparse_vectors[i].token_sequence_ = new uint32_t[3]{i, i + 1, i};
+        }
+        // Element 2 represents the "no original document" case.
+        delete[] sparse_vectors[2].token_sequence_;
+        sparse_vectors[2].token_seq_len_ = 0;
+        sparse_vectors[2].token_sequence_ = nullptr;
+
+        auto dataset = vsag::Dataset::Make();
+        dataset->NumElements(kNumElements)->SparseVectors(sparse_vectors)->Owner(true, nullptr);
+
+        const auto* readback = dataset->GetSparseVectors();
+        REQUIRE(readback[0].token_seq_len_ == 3);
+        REQUIRE(readback[0].token_sequence_[2] == 0);
+        REQUIRE(readback[1].token_sequence_[1] == 2);
+        REQUIRE(readback[2].token_seq_len_ == 0);
+        REQUIRE(readback[2].token_sequence_ == nullptr);
+    }
+
+    SECTION("sparse vector token sequence deep copy") {
+        constexpr uint32_t kNumElements = 3;
+        auto* sparse_vectors = new vsag::SparseVector[kNumElements];
+        for (uint32_t i = 0; i < kNumElements; ++i) {
+            sparse_vectors[i].len_ = 1;
+            sparse_vectors[i].ids_ = new uint32_t[1]{i + 10};
+            sparse_vectors[i].vals_ = new float[1]{static_cast<float>(i)};
+            sparse_vectors[i].token_seq_len_ = 4;
+            sparse_vectors[i].token_sequence_ =
+                new uint32_t[4]{i, i + 1, i + 2, i};  // duplicate term ids preserved
+        }
+        auto original = vsag::Dataset::Make();
+        original->NumElements(kNumElements)->SparseVectors(sparse_vectors)->Owner(true, nullptr);
+
+        auto copy = original->DeepCopy();
+        const auto* src = original->GetSparseVectors();
+        const auto* dst = copy->GetSparseVectors();
+        for (uint32_t i = 0; i < kNumElements; ++i) {
+            REQUIRE(dst[i].token_seq_len_ == src[i].token_seq_len_);
+            REQUIRE(dst[i].token_sequence_ != src[i].token_sequence_);
+            REQUIRE(std::memcmp(dst[i].token_sequence_,
+                                src[i].token_sequence_,
+                                src[i].token_seq_len_ * sizeof(uint32_t)) == 0);
+        }
+    }
 }
 
 vsag::DatasetPtr

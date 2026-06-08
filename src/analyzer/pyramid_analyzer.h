@@ -14,7 +14,7 @@
 
 #pragma once
 
-#include "algorithm/pyramid.h"
+#include "algorithm/pyramid/pyramid.h"
 #include "analyzer.h"
 
 namespace vsag {

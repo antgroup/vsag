@@ -1,5 +1,7 @@
 # Pyramid
 
+![Pyramid: a tree of per-node proximity sub-graphs keyed by a path string; the search walks down the tree along the query's path prefix and runs ef_search inside the leaf sub-graph](../figures/indexes/pyramid-overview.svg)
+
 Pyramid is VSAG's **hierarchical, path-partitioned** graph index. Every vector is
 tagged with a path string such as `"a/d/f"`, and Pyramid builds a graph per node
 in that path tree. At query time you supply a path prefix, and Pyramid restricts
@@ -81,7 +83,7 @@ Build-time parameters live under `index_param`.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `base_quantization_type` | string | — | Coarse storage quantizer (`fp32`, `fp16`, `bf16`, `sq8`, `sq8_uniform`, `sq4_uniform`, `pq`, `pqfs`, `rabitq`). |
+| `base_quantization_type` | string | — | Coarse storage quantizer (`fp32`, `fp16`, `bf16`, `sq8`, `sq4`, `sq8_uniform`, `sq4_uniform`, `pq`, `pqfs`, `rabitq`). See the [Quantization chapter](../quantization/README.md) for per-quantizer details. |
 | `max_degree` | int | `64` | Maximum out-degree per node within a sub-graph. |
 | `graph_type` | string | `"nsw"` | `nsw` or `odescent`. |
 | `ef_construction` | int | `400` | Candidate list size for `nsw` builds. |

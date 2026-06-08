@@ -35,7 +35,7 @@ constexpr int64_t EF_SEARCH = 20;
 constexpr int64_t THREAD_COUNT = 4;
 
 vsag::IndexPtr
-CreateHGraphIndex() {
+CreateHGraphIndex(bool support_force_remove = true) {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     vsag::Options::Instance().set_block_size_limit(1024 * 1024 * 2);
 
@@ -45,6 +45,7 @@ CreateHGraphIndex() {
     index_param["ef_construction"] = EF_CONSTRUCTION;
     index_param["build_thread_count"] = 0;
     index_param["use_reverse_edges"] = true;
+    index_param["support_force_remove"] = support_force_remove;
 
     nlohmann::json param;
     param["dtype"] = "float32";
@@ -288,6 +289,102 @@ TEST_CASE("HGraph ForceRemove All Elements", "[ft][hgraph]") {
     REQUIRE(empty_result.value()->GetDim() == 0);
 }
 
+TEST_CASE("HGraph ForceRemove All Elements Twice", "[ft][hgraph]") {
+    fixtures::logger::LoggerReplacer _;
+
+    auto index = CreateHGraphIndex();
+
+    constexpr int64_t FULL_REMOVE_NUM_ELEMENTS = 100;
+    std::vector<int64_t> ids(FULL_REMOVE_NUM_ELEMENTS);
+    std::vector<float> vectors(DIM * FULL_REMOVE_NUM_ELEMENTS);
+    std::mt19937 rng(47);
+    std::uniform_real_distribution<float> distrib(0.1, 0.9);
+    for (int64_t i = 0; i < FULL_REMOVE_NUM_ELEMENTS; ++i) {
+        ids[i] = i;
+    }
+    for (int64_t i = 0; i < DIM * FULL_REMOVE_NUM_ELEMENTS; ++i) {
+        vectors[i] = distrib(rng);
+    }
+
+    auto base_dataset = vsag::Dataset::Make();
+    base_dataset->Dim(DIM)
+        ->NumElements(FULL_REMOVE_NUM_ELEMENTS)
+        ->Ids(ids.data())
+        ->Float32Vectors(vectors.data())
+        ->Owner(false);
+    auto build_result = index->Build(base_dataset);
+    REQUIRE(build_result.has_value());
+    REQUIRE(index->GetNumElements() == FULL_REMOVE_NUM_ELEMENTS);
+
+    for (int64_t i = 0; i < FULL_REMOVE_NUM_ELEMENTS; ++i) {
+        auto first_remove_result = index->Remove(ids[i], vsag::RemoveMode::FORCE_REMOVE);
+        REQUIRE(first_remove_result.has_value());
+        REQUIRE(first_remove_result.value() > 0);
+    }
+
+    REQUIRE(index->GetNumElements() == 0);
+
+    for (int64_t i = 0; i < FULL_REMOVE_NUM_ELEMENTS; ++i) {
+        auto second_remove_result = index->Remove(ids[i], vsag::RemoveMode::FORCE_REMOVE);
+        REQUIRE(second_remove_result.has_value());
+        REQUIRE(second_remove_result.value() == 0);
+    }
+
+    REQUIRE(index->GetNumElements() == 0);
+}
+
+TEST_CASE("HGraph ForceRemove MarkRemoved Elements", "[ft][hgraph]") {
+    fixtures::logger::LoggerReplacer _;
+
+    auto index = CreateHGraphIndex();
+
+    constexpr int64_t MARK_REMOVE_NUM_ELEMENTS = 6;
+    std::vector<int64_t> ids(MARK_REMOVE_NUM_ELEMENTS);
+    std::vector<float> vectors(DIM * MARK_REMOVE_NUM_ELEMENTS);
+    std::mt19937 rng(47);
+    std::uniform_real_distribution<float> distrib(0.1, 0.9);
+    for (int64_t i = 0; i < MARK_REMOVE_NUM_ELEMENTS; ++i) {
+        ids[i] = i;
+    }
+    for (int64_t i = 0; i < DIM * MARK_REMOVE_NUM_ELEMENTS; ++i) {
+        vectors[i] = distrib(rng);
+    }
+
+    auto base_dataset = vsag::Dataset::Make();
+    base_dataset->Dim(DIM)
+        ->NumElements(MARK_REMOVE_NUM_ELEMENTS)
+        ->Ids(ids.data())
+        ->Float32Vectors(vectors.data())
+        ->Owner(false);
+    auto build_result = index->Build(base_dataset);
+    REQUIRE(build_result.has_value());
+    REQUIRE(index->GetNumElements() == MARK_REMOVE_NUM_ELEMENTS);
+    REQUIRE(index->GetNumberRemoved() == 0);
+
+    std::vector<int64_t> remove_ids{ids.front(), ids.back()};
+    auto mark_remove_result = index->Remove(remove_ids, vsag::RemoveMode::MARK_REMOVE);
+    REQUIRE(mark_remove_result.has_value());
+    REQUIRE(mark_remove_result.value() == remove_ids.size());
+    REQUIRE(index->GetNumElements() == MARK_REMOVE_NUM_ELEMENTS - remove_ids.size());
+    REQUIRE(index->GetNumberRemoved() == remove_ids.size());
+
+    auto first_force_remove = index->Remove(ids.front(), vsag::RemoveMode::FORCE_REMOVE);
+    REQUIRE(first_force_remove.has_value());
+    REQUIRE(first_force_remove.value() > 0);
+    REQUIRE(index->GetNumElements() == MARK_REMOVE_NUM_ELEMENTS - remove_ids.size());
+    REQUIRE(index->GetNumberRemoved() == 1);
+
+    auto second_force_remove = index->Remove(ids.back(), vsag::RemoveMode::FORCE_REMOVE);
+    REQUIRE(second_force_remove.has_value());
+    REQUIRE(second_force_remove.value() > 0);
+    REQUIRE(index->GetNumElements() == MARK_REMOVE_NUM_ELEMENTS - remove_ids.size());
+    REQUIRE(index->GetNumberRemoved() == 0);
+
+    auto duplicate_force_remove = index->Remove(ids.back(), vsag::RemoveMode::FORCE_REMOVE);
+    REQUIRE(duplicate_force_remove.has_value());
+    REQUIRE(duplicate_force_remove.value() == 0);
+}
+
 TEST_CASE("HGraph Batch ForceRemove", "[ft][hgraph]") {
     fixtures::logger::LoggerReplacer _;
 
@@ -318,4 +415,26 @@ TEST_CASE("HGraph Batch ForceRemove", "[ft][hgraph]") {
     REQUIRE(remove_result.has_value());
     REQUIRE(remove_result.value() == remove_ids.size());
     REQUIRE(index->GetNumElements() == NUM_ELEMENTS - remove_ids.size());
+}
+
+TEST_CASE("HGraph ForceRemove Requires support_force_remove", "[ft][hgraph]") {
+    fixtures::logger::LoggerReplacer _;
+
+    auto index = CreateHGraphIndex(false);
+
+    int64_t id = 1;
+    std::vector<float> vector(DIM, 0.5F);
+    auto dataset = vsag::Dataset::Make();
+    dataset->Dim(DIM)->NumElements(1)->Ids(&id)->Float32Vectors(vector.data())->Owner(false);
+
+    auto add_result = index->Add(dataset);
+    REQUIRE(add_result.has_value());
+
+    auto force_remove_result = index->Remove(id, vsag::RemoveMode::FORCE_REMOVE);
+    REQUIRE_FALSE(force_remove_result.has_value());
+    REQUIRE(force_remove_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+
+    auto mark_remove_result = index->Remove(id, vsag::RemoveMode::MARK_REMOVE);
+    REQUIRE(mark_remove_result.has_value());
+    REQUIRE(mark_remove_result.value() == 1);
 }

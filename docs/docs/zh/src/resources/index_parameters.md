@@ -67,13 +67,18 @@ HGraph 的构建参数使用通用的 `index_param` 键（参见 `examples/cpp/1
 |------|-------|------|
 | `max_degree` | 16~48 | 每节点最大出边数 |
 | `ef_construction` | 200~500 | 构建阶段候选集大小，越大召回越高、构建越慢 |
-| `base_quantization_type` | `fp32` / `fp16` / `bf16` / `sq8` / `sq4` / `pq` | 主存储的量化策略 |
+| `base_quantization_type` | `fp32` / `fp16` / `bf16` / `sq8` / `sq4` / `pq` | 主存储的量化策略 —— 支持的全部取值见[量化章节](../quantization/README.md) |
 
 搜索时：
 
 ```json
 {"hgraph": {"ef_search": 100}}
 ```
+
+`hgraph` 搜索参数还接受 `brute_force_threshold`（`[0.0, 1.0]` 区间的 float，
+默认 `0.0`）。当取值 `> 0` 且当前请求的 filter 的 `ValidRatio()` 不超过该
+阈值时，HGraph 会跳过图遍历，直接在通过过滤的 id 上做精确暴扫。详见
+[HGraph 索引文档](../indexes/hgraph.md#高选择性过滤下的暴搜回退brute_force_threshold)。
 
 ## DiskANN
 

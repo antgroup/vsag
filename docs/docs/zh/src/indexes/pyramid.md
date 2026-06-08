@@ -1,5 +1,7 @@
 # Pyramid
 
+![Pyramid：以路径字符串为键的"每节点一个邻近子图"的树形结构；搜索沿查询路径前缀下行到叶子子图后再执行 ef_search](../figures/indexes/pyramid-overview.svg)
+
 Pyramid 是 VSAG 的 **层级路径分区** 图索引。每条向量都附带一个路径字符串（例如
 `"a/d/f"`），Pyramid 会按路径树为每个节点构建一个子图；查询时提供一个路径前缀，
 检索即被限定在相应的子树内。
@@ -76,7 +78,7 @@ auto result = index->KnnSearch(
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `base_quantization_type` | string | — | 底层量化类型（`fp32`、`fp16`、`bf16`、`sq8`、`sq8_uniform`、`sq4_uniform`、`pq`、`pqfs`、`rabitq`） |
+| `base_quantization_type` | string | — | 底层量化类型（`fp32`、`fp16`、`bf16`、`sq8`、`sq4`、`sq8_uniform`、`sq4_uniform`、`pq`、`pqfs`、`rabitq`）。各量化器细节见[量化章节](../quantization/README.md)。 |
 | `max_degree` | int | `64` | 子图内节点的最大出度 |
 | `graph_type` | string | `"nsw"` | `nsw` 或 `odescent` |
 | `ef_construction` | int | `400` | `nsw` 构图时的候选集大小 |

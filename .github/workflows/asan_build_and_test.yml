@@ -11,7 +11,7 @@ jobs:
     name: Asan Build X86
     runs-on: ubuntu-22.04
     container:
-      image: vsaglib/vsag:ci-x86
+      image: vsaglib/vsag:ci-x86-mkl
       volumes:
         - /opt:/useless
     concurrency:
@@ -88,7 +88,7 @@ jobs:
       matrix:
         test_type: [ unittests, functests ]
     container:
-      image: vsaglib/vsag:ci-x86
+      image: vsaglib/vsag:ci-x86-mkl
       volumes:
         - /opt:/useless
     steps:
@@ -162,7 +162,7 @@ jobs:
     needs: build_asan_x86
     runs-on: ubuntu-22.04
     container:
-      image: vsaglib/vsag:ci-x86
+      image: vsaglib/vsag:ci-x86-mkl
       volumes:
         - /opt:/useless
     concurrency:

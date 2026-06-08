@@ -21,6 +21,7 @@ extern const char* const INDEX_DISKANN;
 extern const char* const INDEX_HNSW;
 extern const char* const INDEX_FRESH_HNSW;
 extern const char* const INDEX_PYRAMID;
+extern const char* const INDEX_SPARSE;
 extern const char* const INDEX_SINDI;
 extern const char* const INDEX_DISKSINDI;
 extern const char* const INDEX_BRUTE_FORCE;
@@ -41,6 +42,7 @@ extern const char* const EXTRA_INFO_SIZE;
 extern const char* const VECTOR_COUNTS;
 extern const char* const MULTI_VECTORS;
 extern const char* const MULTI_VECTOR_DIM;
+extern const char* const SOURCE_ID;
 
 extern const char* const HNSW_DATA;
 extern const char* const CONJUGATE_GRAPH_DATA;
@@ -166,6 +168,7 @@ extern const char* const RABITQ_USE_FHT;
 extern const char* const INDEX_TQ_CHAIN;
 
 extern const char* const HGRAPH_SUPPORT_REMOVE;
+extern const char* const HGRAPH_SUPPORT_FORCE_REMOVE;
 extern const char* const HGRAPH_REMOVE_FLAG_BIT;
 
 // hgraph params
@@ -197,15 +200,16 @@ extern const char* const HGRAPH_PRECISE_FILE_PATH;
 extern const char* const HGRAPH_PARAMETER_EF_RUNTIME;
 extern const char* const HGRAPH_PARAMETER_HOPS_LIMIT;
 extern const char* const HGRAPH_PARAMETER_RABITQ_ONE_BIT_SEARCH;
+extern const char* const HGRAPH_PARAMETER_BRUTE_FORCE_THRESHOLD;
 extern const char* const HGRAPH_EXTRA_INFO_SIZE;
 extern const char* const HGRAPH_SUPPORT_DUPLICATE;
 extern const char* const HGRAPH_DUPLICATE_DISTANCE_THRESHOLD;
-extern const char* const HGRAPH_SUPPORT_TOMBSTONE;
 extern const char* const HGRAPH_LABEL_REMAP_TYPE;
 extern const char* const HGRAPH_USE_EXTRA_INFO_FILTER;
 extern const char* const STORE_RAW_VECTOR;
 extern const char* const RAW_VECTOR_IO_TYPE;
 extern const char* const RAW_VECTOR_FILE_PATH;
+extern const char* const HGRAPH_PERSIST_SOURCE_ID;
 
 extern const char* const BRUTE_FORCE_BASE_QUANTIZATION_TYPE;
 extern const char* const BRUTE_FORCE_BASE_IO_TYPE;

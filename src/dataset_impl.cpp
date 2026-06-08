@@ -97,6 +97,20 @@ copy_sparse_vector(const SparseVector& src, SparseVector* dest, Allocator* alloc
     dest->len_ = len;
     std::memcpy(dest->ids_, src.ids_, len * sizeof(uint32_t));
     std::memcpy(dest->vals_, src.vals_, len * sizeof(float));
+
+    // Copy optional original token sequence (preserves order & duplicates).
+    dest->token_seq_len_ = src.token_seq_len_;
+    dest->token_sequence_ = nullptr;
+    if (src.token_seq_len_ > 0 && src.token_sequence_ != nullptr) {
+        uint64_t token_len = src.token_seq_len_;
+        if (allocator != nullptr) {
+            dest->token_sequence_ =
+                static_cast<uint32_t*>(allocator->Allocate(token_len * sizeof(uint32_t)));
+        } else {
+            dest->token_sequence_ = new uint32_t[token_len];
+        }
+        std::memcpy(dest->token_sequence_, src.token_sequence_, token_len * sizeof(uint32_t));
+    }
 }
 
 static void
@@ -206,6 +220,9 @@ DatasetImpl::~DatasetImpl() {  // NOLINT
                 if (sparse_vectors[i].vals_ != nullptr) {
                     allocator_->Deallocate(void_ptr(sparse_vectors[i].vals_));
                 }
+                if (sparse_vectors[i].token_sequence_ != nullptr) {
+                    allocator_->Deallocate(void_ptr(sparse_vectors[i].token_sequence_));
+                }
             }
             allocator_->Deallocate(void_ptr(DatasetImpl::GetSparseVectors()));
         }
@@ -232,6 +249,7 @@ DatasetImpl::~DatasetImpl() {  // NOLINT
             for (int i = 0; i < DatasetImpl::GetNumElements(); i++) {
                 delete[] DatasetImpl::GetSparseVectors()[i].ids_;
                 delete[] DatasetImpl::GetSparseVectors()[i].vals_;
+                delete[] DatasetImpl::GetSparseVectors()[i].token_sequence_;
             }
             delete[] DatasetImpl::GetSparseVectors();
         }

@@ -17,7 +17,7 @@
 
 #include <string>
 
-#include "algorithm/ivf_partition/ivf_partition_strategy.h"
+#include "algorithm/ivf/ivf_partition_strategy.h"
 #include "bucket_datacell_parameter.h"
 #include "index_common_param.h"
 #include "quantization/computer.h"

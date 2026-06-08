@@ -58,8 +58,8 @@ enum class IndexType {
     IVF = 3,
     PYRAMID = 4,
     BRUTEFORCE = 5,
-    // Kept for source compatibility with old SparseIndex callers. SparseIndex is no longer
-    // registered in the factory; use SINDI or DISKSINDI for sparse-vector indexes.
+    // Kept for source compatibility with SparseIndex callers; new sparse workloads should
+    // prefer SINDI or DISKSINDI.
     SPARSE = 6,
     SINDI = 7,
     WARP = 8,
@@ -943,6 +943,33 @@ public:
     [[nodiscard]] virtual bool
     CheckIdExist(int64_t id) const {
         throw std::runtime_error("Index not support check id exist");
+    }
+
+    /**
+     * @brief Export the index's build-time cache (e.g. graph neighbors keyed by
+     * source id) into the given stream so it can be reused to accelerate a
+     * later Build().
+     *
+     * @param out_stream Destination stream to write the cache blob into.
+     * @return tl::expected<void, Error>; an Error is returned if the index
+     * does not support exporting a build cache or the export fails.
+     */
+    virtual tl::expected<void, Error>
+    ExportCache(std::ostream& out_stream) const {
+        throw std::runtime_error("Index doesn't support ExportCache");
+    }
+
+    /**
+     * @brief Import a previously exported build-time cache. Once imported, the
+     * next Build() call will use the cache to accelerate construction.
+     *
+     * @param in_stream Source stream containing a blob produced by ExportCache.
+     * @return tl::expected<void, Error>; an Error is returned if the index
+     * does not support importing a build cache or the import fails.
+     */
+    virtual tl::expected<void, Error>
+    ImportCache(std::istream& in_stream) {
+        throw std::runtime_error("Index doesn't support ImportCache");
     }
 
 public:

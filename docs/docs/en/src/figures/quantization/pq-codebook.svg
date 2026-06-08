@@ -1,0 +1,134 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 280" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13">
+  <title>Product Quantization: sub-vector split and codebook lookup</title>
+  <desc>A vector of dim D is split into M sub-vectors. Each sub-vector is mapped to the nearest centroid in a per-sub-space codebook of 2^nbits entries, producing M code IDs.</desc>
+  <style>
+    .vec { fill: #fff7d6; stroke: #f4bd37; stroke-width: 1.2; }
+    .sub { fill: #fce897; stroke: #b88a16; stroke-width: 1; }
+    .cb { fill: #fafafa; stroke: #3e3a39; stroke-width: 1; }
+    .row { fill: #ffffff; stroke: #cfcbc7; stroke-width: 0.8; }
+    .row-hit { fill: #fce897; stroke: #b88a16; stroke-width: 1.2; }
+    .lbl { fill: #1a1614; }
+    .lbl-muted { fill: #6e6a66; }
+    .arr { stroke: #3e3a39; stroke-width: 1.2; fill: none; }
+    .code { fill: #3e3a39; stroke: none; }
+  </style>
+
+  <!-- Top: original vector x of dim D -->
+  <text class="lbl" x="20" y="28">x &#x2208; &#8477;&#x1D49;  (D = M &#xB7; d&#x209B;)</text>
+  <g>
+    <rect class="vec" x="20" y="38" width="320" height="28" rx="3"/>
+    <!-- M=4 split markers -->
+    <line class="arr" x1="100" y1="38" x2="100" y2="66"/>
+    <line class="arr" x1="180" y1="38" x2="180" y2="66"/>
+    <line class="arr" x1="260" y1="38" x2="260" y2="66"/>
+    <text class="lbl-muted" x="50" y="57">x&#x2081;</text>
+    <text class="lbl-muted" x="130" y="57">x&#x2082;</text>
+    <text class="lbl-muted" x="210" y="57">x&#x2083;</text>
+    <text class="lbl-muted" x="290" y="57">x&#x2098;</text>
+  </g>
+  <text class="lbl-muted" x="20" y="84">split into M sub-vectors of dim d&#x209B; = D/M</text>
+
+  <!-- Arrow down to codebooks -->
+  <path class="arr" d="M170 96 L170 120" marker-end="url(#arrow)"/>
+
+  <!-- Codebooks row -->
+  <g transform="translate(20,128)">
+    <!-- codebook 1 -->
+    <text class="lbl" x="0" y="0">codebook C&#x2081;</text>
+    <g>
+      <rect class="cb" x="0" y="8" width="70" height="120"/>
+      <rect class="row" x="0" y="8" width="70" height="20"/>
+      <rect class="row" x="0" y="28" width="70" height="20"/>
+      <rect class="row-hit" x="0" y="48" width="70" height="20"/>
+      <rect class="row" x="0" y="68" width="70" height="20"/>
+      <rect class="row" x="0" y="88" width="70" height="20"/>
+      <rect class="row" x="0" y="108" width="70" height="20"/>
+      <text class="lbl-muted" x="6" y="22">000</text>
+      <text class="lbl-muted" x="6" y="42">001</text>
+      <text class="code" x="6" y="62">010 &#x2190;</text>
+      <text class="lbl-muted" x="6" y="82">011</text>
+      <text class="lbl-muted" x="6" y="102">...</text>
+      <text class="lbl-muted" x="6" y="122">2&#x1D4F;&#x2212;1</text>
+    </g>
+
+    <!-- codebook 2 -->
+    <g transform="translate(110,0)">
+      <text class="lbl" x="0" y="0">codebook C&#x2082;</text>
+      <rect class="cb" x="0" y="8" width="70" height="120"/>
+      <rect class="row-hit" x="0" y="8" width="70" height="20"/>
+      <rect class="row" x="0" y="28" width="70" height="20"/>
+      <rect class="row" x="0" y="48" width="70" height="20"/>
+      <rect class="row" x="0" y="68" width="70" height="20"/>
+      <rect class="row" x="0" y="88" width="70" height="20"/>
+      <rect class="row" x="0" y="108" width="70" height="20"/>
+      <text class="code" x="6" y="22">000 &#x2190;</text>
+      <text class="lbl-muted" x="6" y="42">001</text>
+      <text class="lbl-muted" x="6" y="62">010</text>
+      <text class="lbl-muted" x="6" y="82">011</text>
+      <text class="lbl-muted" x="6" y="102">...</text>
+      <text class="lbl-muted" x="6" y="122">2&#x1D4F;&#x2212;1</text>
+    </g>
+
+    <!-- codebook 3 -->
+    <g transform="translate(220,0)">
+      <text class="lbl" x="0" y="0">codebook C&#x2083;</text>
+      <rect class="cb" x="0" y="8" width="70" height="120"/>
+      <rect class="row" x="0" y="8" width="70" height="20"/>
+      <rect class="row" x="0" y="28" width="70" height="20"/>
+      <rect class="row" x="0" y="48" width="70" height="20"/>
+      <rect class="row-hit" x="0" y="68" width="70" height="20"/>
+      <rect class="row" x="0" y="88" width="70" height="20"/>
+      <rect class="row" x="0" y="108" width="70" height="20"/>
+      <text class="lbl-muted" x="6" y="22">000</text>
+      <text class="lbl-muted" x="6" y="42">001</text>
+      <text class="lbl-muted" x="6" y="62">010</text>
+      <text class="code" x="6" y="82">011 &#x2190;</text>
+      <text class="lbl-muted" x="6" y="102">...</text>
+      <text class="lbl-muted" x="6" y="122">2&#x1D4F;&#x2212;1</text>
+    </g>
+
+    <!-- codebook M -->
+    <g transform="translate(330,0)">
+      <text class="lbl" x="0" y="0">codebook C&#x2098;</text>
+      <rect class="cb" x="0" y="8" width="70" height="120"/>
+      <rect class="row" x="0" y="8" width="70" height="20"/>
+      <rect class="row-hit" x="0" y="28" width="70" height="20"/>
+      <rect class="row" x="0" y="48" width="70" height="20"/>
+      <rect class="row" x="0" y="68" width="70" height="20"/>
+      <rect class="row" x="0" y="88" width="70" height="20"/>
+      <rect class="row" x="0" y="108" width="70" height="20"/>
+      <text class="lbl-muted" x="6" y="22">000</text>
+      <text class="code" x="6" y="42">001 &#x2190;</text>
+      <text class="lbl-muted" x="6" y="62">010</text>
+      <text class="lbl-muted" x="6" y="82">011</text>
+      <text class="lbl-muted" x="6" y="102">...</text>
+      <text class="lbl-muted" x="6" y="122">2&#x1D4F;&#x2212;1</text>
+    </g>
+
+    <!-- arrow right to output -->
+    <path class="arr" d="M410 70 L440 70" marker-end="url(#arrow)"/>
+
+    <!-- output codes -->
+    <g transform="translate(450,40)">
+      <text class="lbl" x="0" y="0">PQ code  (M &#xB7; nbits)</text>
+      <g>
+        <rect class="sub" x="0" y="8" width="50" height="28"/>
+        <rect class="sub" x="50" y="8" width="50" height="28"/>
+        <rect class="sub" x="100" y="8" width="50" height="28"/>
+        <rect class="sub" x="150" y="8" width="50" height="28"/>
+      </g>
+      <text class="code" x="14" y="27">010</text>
+      <text class="code" x="64" y="27">000</text>
+      <text class="code" x="114" y="27">011</text>
+      <text class="code" x="164" y="27">001</text>
+      <text class="lbl-muted" x="0" y="56">M &#xB7; nbits bits / vec</text>
+      <text class="lbl-muted" x="0" y="74">e.g. M=64, b=8 &#x2192; 64 B</text>
+    </g>
+  </g>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#3e3a39"/>
+    </marker>
+  </defs>
+</svg>
