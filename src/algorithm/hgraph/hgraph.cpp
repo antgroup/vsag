@@ -134,6 +134,9 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
     }
 
     std::scoped_lock lock(this->add_mutex_);
+    if (this->immutable_.load(std::memory_order_acquire)) {
+        return false;
+    }
 
     // check which code need to tune and update create_param_ptr_
     bool is_tune_base_code = false;
