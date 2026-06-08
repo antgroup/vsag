@@ -34,6 +34,11 @@ PCATransformer::PCATransformer(Allocator* allocator, int64_t input_dim, int64_t 
 
 void
 PCATransformer::Train(const float* data, uint64_t count) {
+    if (count < 2) {
+        throw VsagException(
+            ErrorType::INVALID_ARGUMENT,
+            fmt::format("PCA training requires at least 2 samples, got {}", count));
+    }
     vsag::Vector<float> centralized_data(allocator_);
     centralized_data.resize(count * input_dim_, 0.0F);
 

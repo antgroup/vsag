@@ -167,6 +167,19 @@ TestTrain() {
     }
 }
 
+void
+TestTrainMinSampleCount() {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    const uint64_t original_dim = 2;
+    const uint64_t target_dim = 2;
+
+    PCATransformer pca(allocator.get(), original_dim, target_dim);
+
+    std::vector<float> single_sample = {1.0f, 2.0f};
+    REQUIRE_THROWS(pca.Train(single_sample.data(), 1));
+    REQUIRE_THROWS(pca.Train(single_sample.data(), 0));
+}
+
 TEST_CASE("PCA Basic Test", "[ut][PCA]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     const auto dims = fixtures::get_common_used_dims();
@@ -175,6 +188,7 @@ TEST_CASE("PCA Basic Test", "[ut][PCA]") {
     TestComputeCovarianceMatrix();
     TestTransform();
     TestTrain();
+    TestTrainMinSampleCount();
 
     for (auto dim : dims) {
         PCATransformer pca(allocator.get(), dim, dim);
