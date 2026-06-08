@@ -61,8 +61,7 @@ auto result = index->KnnSearch(
 
 ## 构建参数
 
-构建参数放在 `index_param` 下。完整列表请见 [索引参数](../resources/index_parameters.md)
-及仓库中的 `docs/ivf.md`。
+构建参数放在 `index_param` 下。完整列表请见 [索引参数](../resources/index_parameters.md)。
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|

@@ -82,16 +82,15 @@ Before making non-trivial changes, consult the project documentation:
 - Official documentation site: <https://vsag.io/docs> (English and Chinese;
   index parameters, best practices, performance references, and the
   `eval_performance` tool guide all live there).
-- In-repo sources mirror the site under `docs/docs/{en,zh}/src/`. Top-level
-  `docs/*.md` (e.g. `docs/hgraph.md`, `docs/ivf.md`, `docs/sindi.md`,
-  `docs/eval_performance.md`, `docs/dataset_format.md`) historically contain
-  design-leaning notes and may overlap with the website; treat the website
-  source as preferred and consult [`docs/agents/docs-map.md`](docs/agents/docs-map.md)
-  for the full layout.
+- In-repo sources mirror the site under `docs/docs/{en,zh}/src/`; this is
+  the canonical location for user-facing documentation. Top-level `docs/*.md`
+  files, when present, are historical design notes rather than preferred user
+  docs. Consult [`docs/agents/docs-map.md`](docs/agents/docs-map.md) for the
+  full layout.
 
-When updating user-facing behavior, keep both the website docs and any
-related in-repo READMEs (`tools/eval/README.md`, `tools/eval/README_zh.md`,
-etc.) in sync. See
+When updating user-facing behavior, update the website docs under
+`docs/docs/{en,zh}/src/`. Tool-level READMEs should stay as local pointers to
+those canonical pages. See
 [`docs/agents/contribution-workflow.md`](docs/agents/contribution-workflow.md#documentation-expectations).
 
 ## References
