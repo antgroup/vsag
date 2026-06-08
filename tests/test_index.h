@@ -119,6 +119,7 @@ public:
     TestRecoverRemoveIndex(const IndexPtr& index,
                            const TestDatasetPtr& dataset,
                            const std::string& search_parameters);
+
     static void
     TestUpdateId(const IndexPtr& index,
                  const TestDatasetPtr& dataset,
@@ -214,8 +215,7 @@ public:
                               const TestDatasetPtr& dataset,
                               float error = 1e-5,
                               bool expected_success = true,
-                              bool is_sparse = false,
-                              bool is_old_index = false);
+                              bool is_sparse = false);
 
     static void
     TestGetMinAndMaxId(const IndexPtr& index,

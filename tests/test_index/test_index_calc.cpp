@@ -56,8 +56,7 @@ TestIndex::TestBatchCalcDistanceById(const IndexPtr& index,
                                      const TestDatasetPtr& dataset,
                                      float error,
                                      bool expected_success,
-                                     bool is_sparse,
-                                     bool is_old_index) {
+                                     bool is_sparse) {
     if (not index->CheckFeature(vsag::SUPPORT_CAL_DISTANCE_BY_ID)) {
         return;
     }
@@ -74,15 +73,8 @@ TestIndex::TestBatchCalcDistanceById(const IndexPtr& index,
         } else {
             result = index->CalDistanceById(
                 query->GetFloat32Vectors(), gts->GetIds() + (i * gt_topK), gt_topK);
-            if (is_old_index) {
-                // for old index (hnsw and diskann)
-                REQUIRE_THROWS(index->CalDistanceById(query, gts->GetIds() + (i * gt_topK), gt_topK)
-                                   .has_value());
-            } else {
-                // for new index (from inner_index_interface)
-                REQUIRE_FALSE(index->CalDistanceById(query, gts->GetIds() + (i * gt_topK), gt_topK)
-                                  .has_value());
-            }
+            REQUIRE_FALSE(
+                index->CalDistanceById(query, gts->GetIds() + (i * gt_topK), gt_topK).has_value());
         }
         if (not expected_success) {
             return;
