@@ -418,6 +418,13 @@ VSAG referenced the following works during its implementation:
         </tr>
         <tr>
             <td align="center">
+                <a href="https://github.com/misaka0714">
+                    <img src="https://avatars.githubusercontent.com/u/129934985?v=4" width="100" alt="misaka0714"/>
+                    <br />
+                    <sub><b>baoyuan</b></sub>
+                </a>
+            </td>
+            <td align="center">
                 <a href="https://github.com/xfmeng17">
                     <img src="https://avatars.githubusercontent.com/u/32661584?v=4" width="100" alt="xfmeng17"/>
                     <br />
@@ -429,13 +436,6 @@ VSAG referenced the following works during its implementation:
                     <img src="https://avatars.githubusercontent.com/u/48939886?v=4" width="100" alt="antfin-oss"/>
                     <br />
                     <sub><b>Ant OSS</b></sub>
-                </a>
-            </td>
-            <td align="center">
-                <a href="https://github.com/misaka0714">
-                    <img src="https://avatars.githubusercontent.com/u/129934985?v=4" width="100" alt="misaka0714"/>
-                    <br />
-                    <sub><b>baoyuan</b></sub>
                 </a>
             </td>
             <td align="center">
