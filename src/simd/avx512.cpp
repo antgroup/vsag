@@ -465,14 +465,7 @@ INT8ComputeL2Sqr(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uin
         sum_sq = _mm512_add_epi32(sq, sum_sq);
     }
 
-    alignas(32) int32_t results[BATCH_SIZE / 2];
-
-    _mm512_store_si512(reinterpret_cast<__m512i*>(results), sum_sq);
-
-    int32_t l2 = 0;
-    for (int i = 0; i < BATCH_SIZE / 2; ++i) {
-        l2 += results[i];
-    }
+    int32_t l2 = _mm512_reduce_add_epi32(sum_sq);
 
     l2 += avx2::INT8ComputeL2Sqr(
         query + BATCH_SIZE * n, codes + BATCH_SIZE * n, dim - BATCH_SIZE * n);
@@ -789,6 +782,8 @@ SQ4ComputeIP(const float* RESTRICT query,
 
     float result = 0;
     uint64_t d = 0;
+    __m512 sum0 = _mm512_setzero_ps();
+    __m512 sum1 = _mm512_setzero_ps();
 
     // Process 32 elements at a time (16 bytes of codes)
     for (; d + 31 < dim; d += 32) {
@@ -808,12 +803,10 @@ SQ4ComputeIP(const float* RESTRICT query,
         __m512 q0 = _mm512_loadu_ps(query + d);
         __m512 q1 = _mm512_loadu_ps(query + d + 16);
 
-        // Dot product
-        __m512 prod0 = _mm512_mul_ps(q0, val0);
-        __m512 prod1 = _mm512_mul_ps(q1, val1);
-
-        result += _mm512_reduce_add_ps(prod0) + _mm512_reduce_add_ps(prod1);
+        sum0 = _mm512_fmadd_ps(q0, val0, sum0);
+        sum1 = _mm512_fmadd_ps(q1, val1, sum1);
     }
+    result += _mm512_reduce_add_ps(_mm512_add_ps(sum0, sum1));
     result += avx2::SQ4ComputeIP(query + d, codes + (d >> 1), lower_bound + d, diff + d, dim - d);
     return result;
 #else
@@ -881,6 +874,8 @@ SQ4ComputeCodesIP(const uint8_t* RESTRICT codes1,
     }
     float result = 0;
     uint64_t d = 0;
+    __m512 sum0 = _mm512_setzero_ps();
+    __m512 sum1 = _mm512_setzero_ps();
 
     // Process 32 elements at a time (16 bytes of codes)
     for (; d + 31 < dim; d += 32) {
@@ -899,12 +894,10 @@ SQ4ComputeCodesIP(const uint8_t* RESTRICT codes1,
         __m512 val2 = _mm512_fmadd_ps(decoded2, diff0, lb0);
         __m512 val3 = _mm512_fmadd_ps(decoded3, diff1, lb1);
 
-        // Dot product
-        __m512 prod0 = _mm512_mul_ps(val2, val0);
-        __m512 prod1 = _mm512_mul_ps(val3, val1);
-
-        result += _mm512_reduce_add_ps(prod0) + _mm512_reduce_add_ps(prod1);
+        sum0 = _mm512_fmadd_ps(val2, val0, sum0);
+        sum1 = _mm512_fmadd_ps(val3, val1, sum1);
     }
+    result += _mm512_reduce_add_ps(_mm512_add_ps(sum0, sum1));
     result += avx2::SQ4ComputeCodesIP(
         codes1 + (d >> 1), codes2 + (d >> 1), lower_bound + d, diff + d, dim - d);
     return result;
