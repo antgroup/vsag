@@ -155,11 +155,11 @@ tl::expected<void, Error>
 ConjugateGraph::Serialize(std::ostream& out_stream) const {
     out_stream.write((char*)&memory_usage_, sizeof(memory_usage_));
 
-    for (auto item : conjugate_graph_) {
-        auto neighbor_set = *item.second;
+    for (const auto& [tag_id, neighbor_ptr] : conjugate_graph_) {
+        const auto& neighbor_set = *neighbor_ptr;
         uint64_t neighbor_set_size = neighbor_set.size();
 
-        out_stream.write((char*)&item.first, sizeof(item.first));
+        out_stream.write((char*)&tag_id, sizeof(tag_id));
         out_stream.write((char*)&neighbor_set_size, sizeof(neighbor_set_size));
 
         for (auto neighbor_tag_id : neighbor_set) {
