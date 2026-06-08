@@ -41,9 +41,15 @@ LazyHGraphParameter::FromJson(const JsonType& json) {
     const auto threshold_json = json[LAZY_HGRAPH_TRANSITION_THRESHOLD];
     CHECK_ARGUMENT(threshold_json.IsNumberInteger(),
                    "lazy_hgraph transition_threshold must be an integer");
-    const auto threshold = threshold_json.GetInt();
-    CHECK_ARGUMENT(threshold > 0, "lazy_hgraph transition_threshold must be positive");
-    this->transition_threshold = static_cast<uint64_t>(threshold);
+    if (threshold_json.IsNumberUnsigned()) {
+        this->transition_threshold = threshold_json.GetUint64();
+        CHECK_ARGUMENT(this->transition_threshold > 0,
+                       "lazy_hgraph transition_threshold must be positive");
+    } else {
+        const auto threshold = threshold_json.GetInt();
+        CHECK_ARGUMENT(threshold > 0, "lazy_hgraph transition_threshold must be positive");
+        this->transition_threshold = static_cast<uint64_t>(threshold);
+    }
     this->graph_param = std::make_shared<HGraphParameter>();
     this->graph_param->FromJson(json[LAZY_HGRAPH_GRAPH]);
     this->flat_param = std::make_shared<BruteForceParameter>();
@@ -54,7 +60,7 @@ JsonType
 LazyHGraphParameter::ToJson() const {
     JsonType json = InnerIndexParameter::ToJson();
     json["type"].SetString(INDEX_LAZY_HGRAPH);
-    json[LAZY_HGRAPH_TRANSITION_THRESHOLD].SetInt(this->transition_threshold);
+    json[LAZY_HGRAPH_TRANSITION_THRESHOLD].SetUint64(this->transition_threshold);
     json[LAZY_HGRAPH_GRAPH].SetJson(this->graph_param->ToJson());
     json[LAZY_HGRAPH_FLAT].SetJson(this->flat_param->ToJson());
     return json;

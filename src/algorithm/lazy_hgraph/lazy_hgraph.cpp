@@ -47,13 +47,27 @@ reject_flat_param(const JsonType& external_param, const char* key) {
         fmt::format("lazy_hgraph flat phase is fixed to fp32 and does not accept {}", key));
 }
 
+uint64_t
+parse_transition_threshold(const JsonType& threshold_json) {
+    CHECK_ARGUMENT(threshold_json.IsNumberInteger(),
+                   "lazy_hgraph transition_threshold must be an integer");
+    if (threshold_json.IsNumberUnsigned()) {
+        const auto threshold_value = threshold_json.GetUint64();
+        CHECK_ARGUMENT(threshold_value > 0, "lazy_hgraph transition_threshold must be positive");
+        return threshold_value;
+    }
+    const auto threshold_value = threshold_json.GetInt();
+    CHECK_ARGUMENT(threshold_value > 0, "lazy_hgraph transition_threshold must be positive");
+    return static_cast<uint64_t>(threshold_value);
+}
+
 JsonType
 make_lazy_inner_json(uint64_t transition_threshold,
                      const ParamPtr& flat_param,
                      const ParamPtr& graph_param) {
     JsonType inner_json;
     inner_json["type"].SetString(INDEX_LAZY_HGRAPH);
-    inner_json[LAZY_HGRAPH_TRANSITION_THRESHOLD].SetInt(transition_threshold);
+    inner_json[LAZY_HGRAPH_TRANSITION_THRESHOLD].SetUint64(transition_threshold);
     inner_json["flat"].SetJson(flat_param->ToJson());
     inner_json[LAZY_HGRAPH_HGRAPH].SetJson(graph_param->ToJson());
     return inner_json;
@@ -81,17 +95,14 @@ LazyHGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                    "lazy_hgraph only supports float32 vectors");
     reject_flat_param(external_param, INDEX_BRUTE_FORCE);
     reject_flat_param(external_param, "bruteforce");
+    reject_flat_param(external_param, "flat");
     reject_flat_param(external_param, "flat_quantization_type");
     reject_flat_param(external_param, "flat_base_quantization_type");
 
     uint64_t transition_threshold = 1000;
     if (external_param.Contains(LAZY_HGRAPH_TRANSITION_THRESHOLD)) {
-        const auto threshold_json = external_param[LAZY_HGRAPH_TRANSITION_THRESHOLD];
-        CHECK_ARGUMENT(threshold_json.IsNumberInteger(),
-                       "lazy_hgraph transition_threshold must be an integer");
-        const auto threshold_value = threshold_json.GetInt();
-        CHECK_ARGUMENT(threshold_value > 0, "lazy_hgraph transition_threshold must be positive");
-        transition_threshold = static_cast<uint64_t>(threshold_value);
+        transition_threshold =
+            parse_transition_threshold(external_param[LAZY_HGRAPH_TRANSITION_THRESHOLD]);
     }
     CHECK_ARGUMENT(transition_threshold > 0, "lazy_hgraph transition_threshold must be positive");
 
@@ -318,10 +329,6 @@ LazyHGraph::GetVectorByIds(const int64_t* ids,
 
 void
 LazyHGraph::Serialize(StreamWriter& writer) const {
-    if (phase_.load(std::memory_order_acquire) == Phase::FLAT and GetNumElements() > 0) {
-        const_cast<LazyHGraph*>(this)->TransitionToGraph();
-    }
-
     std::shared_lock lock(this->phase_mutex_);
     StreamWriter::WriteObj(writer, LAZY_HGRAPH_MAGIC);
     StreamWriter::WriteObj(writer, LAZY_HGRAPH_VERSION);
@@ -330,6 +337,8 @@ LazyHGraph::Serialize(StreamWriter& writer) const {
     StreamWriter::WriteObj(writer, phase_value);
     if (phase == Phase::GRAPH) {
         graph_index_->Serialize(writer);
+    } else {
+        flat_index_->Serialize(writer);
     }
 }
 
@@ -344,11 +353,13 @@ LazyHGraph::Deserialize(StreamReader& reader) {
 
     uint8_t phase_value = 0;
     StreamReader::ReadObj(reader, phase_value);
+    CHECK_ARGUMENT(phase_value <= static_cast<uint8_t>(Phase::GRAPH), "invalid lazy_hgraph phase");
     auto phase = static_cast<Phase>(phase_value);
     std::unique_lock lock(this->phase_mutex_);
     if (phase == Phase::FLAT) {
         flat_index_ = std::make_shared<BruteForce>(flat_param_, this->common_param_);
         flat_index_->InitFeatures();
+        flat_index_->Deserialize(reader);
         graph_index_.reset();
         phase_.store(Phase::FLAT, std::memory_order_release);
         return;

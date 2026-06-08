@@ -118,11 +118,11 @@ create_hgraph_index(JsonType& parsed_params, const IndexCommonParam& index_commo
 
 tl::expected<std::shared_ptr<Index>, Error>
 create_lazy_hgraph_index(JsonType& parsed_params, const IndexCommonParam& index_common_params) {
-    CHECK_ARGUMENT(parsed_params.Contains(INDEX_LAZY_HGRAPH),
-                   fmt::format("parameters must contain {}", INDEX_LAZY_HGRAPH));
+    auto lazy_hgraph_param = parsed_params.Contains(INDEX_LAZY_HGRAPH)
+                                 ? parsed_params[INDEX_LAZY_HGRAPH]
+                                 : get_index_param_or_empty(parsed_params);
     logger::debug("created a lazy_hgraph index");
-    return {std::make_shared<IndexImpl<LazyHGraph>>(parsed_params[INDEX_LAZY_HGRAPH],
-                                                    index_common_params)};
+    return {std::make_shared<IndexImpl<LazyHGraph>>(lazy_hgraph_param, index_common_params)};
 }
 
 tl::expected<std::shared_ptr<Index>, Error>

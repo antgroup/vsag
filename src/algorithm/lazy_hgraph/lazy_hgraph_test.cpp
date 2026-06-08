@@ -51,7 +51,7 @@ MakeLazyParam(uint64_t threshold, const std::string& base_quantization_type = "f
             "build_thread_count": 1
         }
     })");
-    param["transition_threshold"].SetInt(threshold);
+    param["transition_threshold"].SetUint64(threshold);
     param["hgraph"]["base_quantization_type"].SetString(base_quantization_type);
     return param;
 }
@@ -112,7 +112,7 @@ MakeFactoryParam(uint64_t threshold) {
             }
         }
     })");
-    root["lazy_hgraph"]["transition_threshold"].SetInt(threshold);
+    root["lazy_hgraph"]["transition_threshold"].SetUint64(threshold);
     return root.Dump();
 }
 
@@ -225,6 +225,10 @@ TEST_CASE("LazyHGraph rejects flat quantization parameters", "[ut][lazy_hgraph]"
     param["flat_quantization_type"].SetString("sq8");
 
     REQUIRE_THROWS(vsag::LazyHGraph::CheckAndMappingExternalParam(param, common_param));
+
+    auto flat_param = MakeLazyParam(4);
+    flat_param["flat"].SetJson(vsag::JsonType::Parse(R"({"base_quantization_type":"sq8"})"));
+    REQUIRE_THROWS(vsag::LazyHGraph::CheckAndMappingExternalParam(flat_param, common_param));
 }
 
 TEST_CASE("LazyHGraph rejects invalid parameter types", "[ut][lazy_hgraph]") {
@@ -238,6 +242,10 @@ TEST_CASE("LazyHGraph rejects invalid parameter types", "[ut][lazy_hgraph]") {
     auto graph_param =
         vsag::HGraph::CheckAndMappingExternalParam(MakeLazyParam(4)["hgraph"], common_param);
     REQUIRE_THROWS(vsag::LazyHGraph(graph_param, common_param));
+
+    auto large_threshold = MakeLazyParam(1ULL << 40U);
+    auto lazy_param = vsag::LazyHGraph::CheckAndMappingExternalParam(large_threshold, common_param);
+    REQUIRE(lazy_param->ToJson()["transition_threshold"].GetUint64() == (1ULL << 40U));
 }
 
 TEST_CASE("LazyHGraph build chooses flat or graph by threshold", "[ut][lazy_hgraph]") {
@@ -273,6 +281,22 @@ TEST_CASE("LazyHGraph serializes empty flat and graph phases", "[ut][lazy_hgraph
     REQUIRE(restored_empty->GetPhase() == vsag::LazyHGraph::Phase::FLAT);
     REQUIRE(restored_empty->GetNumElements() == 0);
 
+    auto flat = MakeLazyIndex(4);
+    std::vector<float> flat_vectors;
+    std::vector<int64_t> flat_ids;
+    auto flat_data = MakeDataset(3, 950, flat_vectors, flat_ids);
+    REQUIRE(flat->Add(flat_data).empty());
+    REQUIRE(flat->GetPhase() == vsag::LazyHGraph::Phase::FLAT);
+
+    auto flat_binary = static_cast<vsag::InnerIndexInterface*>(flat.get())->Serialize();
+    auto restored_flat = MakeLazyIndex(4);
+    static_cast<vsag::InnerIndexInterface*>(restored_flat.get())->Deserialize(flat_binary);
+    REQUIRE(restored_flat->GetPhase() == vsag::LazyHGraph::Phase::FLAT);
+    REQUIRE(
+        restored_flat
+            ->KnnSearch(MakeQuery(flat_vectors, 2), 1, R"({"hgraph":{"ef_search":40}})", nullptr)
+            ->GetIds()[0] == 952);
+
     auto graph = MakeLazyIndex(2);
     std::vector<float> vectors;
     std::vector<int64_t> ids;
@@ -287,6 +311,17 @@ TEST_CASE("LazyHGraph serializes empty flat and graph phases", "[ut][lazy_hgraph
     REQUIRE(restored_graph
                 ->KnnSearch(MakeQuery(vectors, 1), 1, R"({"hgraph":{"ef_search":40}})", nullptr)
                 ->GetIds()[0] == 1001);
+}
+
+TEST_CASE("LazyHGraph rejects invalid serialized phase", "[ut][lazy_hgraph]") {
+    auto index = MakeLazyIndex(4);
+    auto binary = static_cast<vsag::InnerIndexInterface*>(index.get())->Serialize();
+    auto payload = binary.Get(vsag::INDEX_LAZY_HGRAPH);
+    REQUIRE(payload.size > 16);
+    payload.data.get()[16] = 2;
+
+    auto restored = MakeLazyIndex(4);
+    REQUIRE_THROWS(static_cast<vsag::InnerIndexInterface*>(restored.get())->Deserialize(binary));
 }
 
 TEST_CASE("LazyHGraph removes ids in both phases", "[ut][lazy_hgraph]") {
