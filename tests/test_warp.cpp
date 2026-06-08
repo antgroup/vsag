@@ -159,3 +159,17 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::WarpTestIndex,
     }
     vsag::Options::Instance().set_block_size_limit(origin_size);
 }
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::WarpTestIndex, "Warp IP Multiple Dims", "[ft][warp]") {
+    WarpParam warp_param;
+    warp_param.base_quantization_type = "fp32";
+    const std::string name = "warp";
+    auto search_param = GenerateWarpSearchParametersString();
+    for (auto dim : {16, 128, 256}) {
+        auto param = GenerateWarpBuildParametersString("ip", dim, warp_param);
+        auto index = TestFactory(name, param, true);
+        auto dataset = pool.GetDatasetAndCreate(dim, base_count, "ip", false, 0.8, 0, 16, "multi");
+        TestBuildIndex(index, dataset, true);
+        TestKnnSearch(index, dataset, search_param, 0.99, true);
+    }
+}

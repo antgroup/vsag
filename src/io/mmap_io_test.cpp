@@ -60,3 +60,75 @@ TEST_CASE("MMapIO Serialize & Deserialize", "[ut][MMapIO]") {
     auto rio = std::make_unique<MMapIO>(path2, allocator.get());
     TestSerializeAndDeserialize(*wio, *rio);
 }
+
+TEST_CASE("MMapIO directory path error", "[ut][MMapIO]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    fixtures::TempDir dir("mmap_io_dir_test");
+    auto dir_path = dir.path;
+    REQUIRE_THROWS(std::make_unique<MMapIO>(dir_path, allocator.get()));
+}
+
+TEST_CASE("MMapIO resize shrink", "[ut][MMapIO]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    fixtures::TempDir dir("mmap_io_resize");
+    auto path = dir.GenerateRandomFile(false);
+    auto io = std::make_unique<MMapIO>(path, allocator.get());
+
+    std::vector<uint8_t> data(4096, 0xAB);
+    io->Write(data.data(), data.size(), 0);
+
+    io->Resize(8192);
+    REQUIRE(io->size_ >= 8192);
+
+    io->Resize(2048);
+    REQUIRE(io->size_ == 2048);
+
+    std::vector<uint8_t> read_buf(2048);
+    REQUIRE(io->Read(2048, 0, read_buf.data()) == true);
+    for (uint64_t i = 0; i < 2048; ++i) {
+        REQUIRE(read_buf[i] == 0xAB);
+    }
+}
+
+TEST_CASE("MMapIO MultiRead", "[ut][MMapIO]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    fixtures::TempDir dir("mmap_io_multi");
+    auto path = dir.GenerateRandomFile(false);
+    auto io = std::make_unique<MMapIO>(path, allocator.get());
+
+    std::vector<uint8_t> data(256);
+    for (uint64_t i = 0; i < 256; ++i) {
+        data[i] = static_cast<uint8_t>(i);
+    }
+    io->Write(data.data(), data.size(), 0);
+
+    std::vector<uint64_t> sizes = {64, 64, 64};
+    std::vector<uint64_t> offsets = {0, 64, 128};
+    std::vector<uint8_t> result(192);
+    io->MultiRead(result.data(), sizes.data(), offsets.data(), 3);
+
+    for (uint64_t i = 0; i < 192; ++i) {
+        REQUIRE(result[i] == static_cast<uint8_t>(i));
+    }
+}
+
+TEST_CASE("MMapIO existing file", "[ut][MMapIO]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    fixtures::TempDir dir("mmap_io_exist");
+    auto path = dir.GenerateRandomFile(true);
+
+    {
+        auto io = std::make_unique<MMapIO>(path, allocator.get());
+        std::vector<uint8_t> data(128, 0xCD);
+        io->Write(data.data(), data.size(), 0);
+    }
+
+    auto io2 = std::make_unique<MMapIO>(path, allocator.get());
+    std::vector<uint8_t> data2(64, 0xEF);
+    io2->Write(data2.data(), data2.size(), 0);
+    std::vector<uint8_t> read_buf(64);
+    io2->Read(64, 0, read_buf.data());
+    for (uint64_t i = 0; i < 64; ++i) {
+        REQUIRE(read_buf[i] == 0xEF);
+    }
+}
