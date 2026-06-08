@@ -37,6 +37,7 @@ namespace {
 
 constexpr const char* SINDI_RERANK_FLAT_FORMAT_KEY = "sindi_rerank_flat_format";
 constexpr int64_t SINDI_RERANK_FLAT_FORMAT_DATACELL = 2;
+constexpr uint32_t SPARSE_VECTOR_DATACELL_FORMAT_SENTINEL = std::numeric_limits<uint32_t>::max();
 
 float
 cal_distance_by_id_unsafe(const FlattenInterfacePtr& flat,
@@ -131,6 +132,28 @@ deserialize_rerank_flat(StreamReader& reader,
         return;
     }
     deserialize_legacy_rerank_flat(reader, flat, allocator);
+}
+
+bool
+detect_datacell_rerank_flat(StreamReader& reader) {
+    const auto cursor = reader.GetCursor();
+    constexpr uint64_t header_size =
+        sizeof(InnerIdType) + sizeof(InnerIdType) + sizeof(uint32_t) + sizeof(uint32_t);
+    if (reader.Length() < cursor + header_size) {
+        return false;
+    }
+
+    InnerIdType total_count = 0;
+    InnerIdType max_capacity = 0;
+    uint32_t code_size = 0;
+    uint32_t maybe_sentinel = 0;
+    reader.PushSeek(cursor);
+    StreamReader::ReadObj(reader, total_count);
+    StreamReader::ReadObj(reader, max_capacity);
+    StreamReader::ReadObj(reader, code_size);
+    StreamReader::ReadObj(reader, maybe_sentinel);
+    reader.PopSeek();
+    return maybe_sentinel == SPARSE_VECTOR_DATACELL_FORMAT_SENTINEL;
 }
 
 }  // namespace
@@ -610,11 +633,13 @@ SINDI::Deserialize(StreamReader& reader) {
     std::scoped_lock wlock(this->global_mutex_);
 
     bool has_datacell_rerank_format = false;
+    bool has_footer = false;
     if (not deserialize_without_footer_) {
         JsonType jsonify_basic_info;
         if (not read_index_footer(reader, jsonify_basic_info)) {
             logger::debug("SINDI footer not found, fallback to legacy deserialize path");
         } else {
+            has_footer = true;
             // Check if the index parameter is compatible
             {
                 auto param = jsonify_basic_info[INDEX_PARAM].GetString();
@@ -665,6 +690,9 @@ SINDI::Deserialize(StreamReader& reader) {
     label_table_->Deserialize(reader_ref);
 
     if (use_reorder_) {
+        if (not has_datacell_rerank_format and (deserialize_without_footer_ or not has_footer)) {
+            has_datacell_rerank_format = detect_datacell_rerank_flat(reader_ref);
+        }
         deserialize_rerank_flat(reader_ref, rerank_flat_, allocator_, has_datacell_rerank_format);
     }
 
