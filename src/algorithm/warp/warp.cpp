@@ -110,7 +110,7 @@ WARP::Add(const DatasetPtr& data, AddMode mode) {
 
     {
         std::lock_guard lock(this->add_mutex_);
-        if (this->total_count_ == 0) {
+        if (this->total_count_.load() == 0) {
             this->Train(data);
         }
     }
@@ -150,9 +150,9 @@ WARP::Add(const DatasetPtr& data, AddMode mode) {
             if (this->label_table_->CheckLabel(label)) {
                 return label;
             }
-            inner_id = this->total_count_;
-            this->total_count_++;
-            this->resize(total_count_);
+            inner_id = this->total_count_.load();
+            ++this->total_count_;
+            this->resize(total_count_.load());
             this->label_table_->Insert(inner_id, label);
         }
         std::shared_lock global_lock(this->global_mutex_);
@@ -304,16 +304,17 @@ WARP::SearchWithRequest(const SearchRequest& request) const {
     };
 
     DistHeapPtr heap = nullptr;
+    auto count = total_count_.load();
 
     if (parallel_count == 1 || this->thread_pool_ == nullptr ||
-        total_count_ < MIN_PARALLEL_SEARCH_DOC_COUNT) {
-        heap = search_func(0, total_count_);
+        count < MIN_PARALLEL_SEARCH_DOC_COUNT) {
+        heap = search_func(0, count);
     } else {
         std::vector<std::future<DistHeapPtr>> futures;
-        auto chunk_size = (total_count_ + parallel_count - 1) / parallel_count;
+        auto chunk_size = (count + parallel_count - 1) / parallel_count;
         for (auto i = 0; i < static_cast<int>(parallel_count); ++i) {
             auto start = i * chunk_size;
-            auto end = std::min(start + chunk_size, static_cast<uint64_t>(total_count_));
+            auto end = std::min(start + chunk_size, count);
             if (start < end) {
                 auto future = this->thread_pool_->GeneralEnqueue(search_func, start, end);
                 futures.emplace_back(std::move(future));
@@ -375,12 +376,13 @@ WARP::RangeSearch(const vsag::DatasetPtr& query,
     auto parallel_count = warp_params.parallel_search_thread_count;
 
     // Use serial version if no thread pool or small dataset
+    auto count = total_count_.load();
     if (parallel_count == 1 || this->thread_pool_ == nullptr ||
-        total_count_ < MIN_PARALLEL_SEARCH_DOC_COUNT) {
+        count < MIN_PARALLEL_SEARCH_DOC_COUNT) {
         DistHeapPtr heap =
             std::make_shared<StandardHeap<true, true>>(this->allocator_, limited_size);
 
-        for (InnerIdType doc_id = 0; doc_id < total_count_; ++doc_id) {
+        for (InnerIdType doc_id = 0; doc_id < count; ++doc_id) {
             if (filter != nullptr and
                 not filter->CheckValid(this->label_table_->GetLabelById(doc_id))) {
                 continue;
@@ -410,12 +412,12 @@ WARP::RangeSearch(const vsag::DatasetPtr& query,
         auto future = this->thread_pool_->GeneralEnqueue([&]() {
             std::vector<std::pair<float, InnerIdType>> local_results;
             // Pre-allocate to avoid frequent reallocations
-            local_results.reserve(std::min(static_cast<size_t>(1024),
-                                           static_cast<size_t>(total_count_) / parallel_count));
+            local_results.reserve(
+                std::min(static_cast<size_t>(1024), static_cast<size_t>(count) / parallel_count));
 
             while (true) {
                 auto doc_id = next_doc.fetch_add(1);
-                if (doc_id >= total_count_) {
+                if (doc_id >= count) {
                     break;
                 }
 
@@ -474,7 +476,8 @@ WARP::RangeSearch(const vsag::DatasetPtr& query,
 void
 WARP::Serialize(StreamWriter& writer) const {
     // Serialize document offsets (size = total_count_ + 1)
-    StreamWriter::WriteObj(writer, total_count_);
+    uint64_t count = total_count_.load();
+    StreamWriter::WriteObj(writer, count);
     StreamWriter::WriteObj(writer, total_vector_count_);
 
     // Batch write the doc_offsets array using WriteVector
@@ -486,7 +489,7 @@ WARP::Serialize(StreamWriter& writer) const {
     // Serialize footer
     JsonType basic_info;
     basic_info["dim"].SetInt(dim_);
-    basic_info["total_count"].SetInt(total_count_);
+    basic_info["total_count"].SetInt(total_count_.load());
     basic_info["total_vector_count"].SetInt(total_vector_count_);
     basic_info[INDEX_PARAM].SetString(this->create_param_ptr_->ToString());
     write_index_footer(writer, basic_info);
@@ -516,7 +519,9 @@ WARP::Deserialize(StreamReader& reader) {
     }
     dim_ = basic_info["dim"].GetInt();
 
-    StreamReader::ReadObj(buffer_reader, total_count_);
+    uint64_t count = 0;
+    StreamReader::ReadObj(buffer_reader, count);
+    total_count_.store(count);
     StreamReader::ReadObj(buffer_reader, total_vector_count_);
 
     // Batch read the doc_offsets array using ReadVector

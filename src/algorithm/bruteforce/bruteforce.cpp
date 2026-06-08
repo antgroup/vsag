@@ -73,7 +73,7 @@ BruteForce::Add(const DatasetPtr& data, AddMode mode) {
 
     {
         std::lock_guard lock(this->add_mutex_);
-        if (this->total_count_ == 0) {
+        if (this->total_count_.load() == 0) {
             this->Train(data);
         }
     }
@@ -88,9 +88,9 @@ BruteForce::Add(const DatasetPtr& data, AddMode mode) {
             if (this->label_table_->CheckLabel(label)) {
                 return label;
             }
-            inner_id = this->total_count_;
-            this->total_count_++;
-            this->resize(total_count_);
+            inner_id = this->total_count_.load();
+            ++this->total_count_;
+            this->resize(total_count_.load());
             this->label_table_->Insert(inner_id, label);
         }
         std::shared_lock global_lock(this->global_mutex_);
@@ -160,7 +160,7 @@ BruteForce::Remove(const std::vector<int64_t>& ids, RemoveMode mode) {
 
     std::scoped_lock lock(this->add_mutex_, this->label_lookup_mutex_);
     for (auto label : ids) {
-        const auto last_inner_id = static_cast<InnerIdType>(this->total_count_ - 1);
+        const auto last_inner_id = static_cast<InnerIdType>(this->total_count_.load() - 1);
         const auto inner_id = this->label_table_->GetIdByLabel(label);
 
         CHECK_ARGUMENT(inner_id <= last_inner_id, "the element to be remove is invalid");
@@ -180,7 +180,7 @@ BruteForce::Remove(const std::vector<int64_t>& ids, RemoveMode mode) {
             this->label_table_->Insert(inner_id, last_label);
         }
 
-        this->total_count_--;
+        --this->total_count_;
     }
     return 1;
 }
@@ -246,15 +246,16 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
         dist_cmp.fetch_add(dist_cmp_local, std::memory_order_relaxed);
     };
 
+    auto count = total_count_.load();
     if (parallel_count == 1 || this->thread_pool_ == nullptr) {
-        search_func(0, total_count_, heaps[0]);
+        search_func(0, count, heaps[0]);
         heap = heaps[0];
     } else {
         std::vector<std::future<void>> futures;
-        auto chunk_size = (total_count_ + parallel_count - 1) / parallel_count;
+        auto chunk_size = (count + parallel_count - 1) / parallel_count;
         for (auto i = 0; i < parallel_count; ++i) {
             auto start = i * chunk_size;
-            auto end = std::min(start + chunk_size, total_count_);
+            auto end = std::min(start + chunk_size, count);
             auto future = this->thread_pool_->GeneralEnqueue(search_func, start, end, heaps[i]);
             futures.emplace_back(std::move(future));
         }
@@ -288,7 +289,7 @@ BruteForce::RangeSearch(const vsag::DatasetPtr& query,
     if (limited_size < 0) {
         limited_size = std::numeric_limits<int64_t>::max();
     }
-    if (total_count_ == 0) {
+    if (total_count_.load() == 0) {
         return make_empty_result();
     }
 
@@ -311,16 +312,17 @@ BruteForce::RangeSearch(const vsag::DatasetPtr& query,
     };
 
     DistHeapPtr heap = nullptr;
-    parallel_count = std::min(parallel_count, total_count_);
+    auto count = total_count_.load();
+    parallel_count = std::min(parallel_count, count);
     if (parallel_count <= 1 or this->thread_pool_ == nullptr) {
-        heap = search_func(0, total_count_);
+        heap = search_func(0, count);
     } else {
         std::vector<std::future<DistHeapPtr>> futures;
         futures.reserve(parallel_count);
-        auto chunk_size = (total_count_ + parallel_count - 1) / parallel_count;
+        auto chunk_size = (count + parallel_count - 1) / parallel_count;
         for (uint64_t i = 0; i < parallel_count; ++i) {
             auto start = static_cast<InnerIdType>(i * chunk_size);
-            auto end = static_cast<InnerIdType>(std::min(start + chunk_size, total_count_));
+            auto end = static_cast<InnerIdType>(std::min(start + chunk_size, count));
             futures.emplace_back(this->thread_pool_->GeneralEnqueue(search_func, start, end));
         }
 
@@ -367,7 +369,7 @@ BruteForce::Serialize(StreamWriter& writer) const {
     // serialize footer (introduced since v0.15)
     JsonType basic_info;
     basic_info["dim"].SetInt(dim_);
-    basic_info["total_count"].SetInt(total_count_);
+    basic_info["total_count"].SetInt(total_count_.load());
     basic_info[INDEX_PARAM].SetString(this->create_param_ptr_->ToString());
     write_index_footer(writer, basic_info);
 }
@@ -385,7 +387,9 @@ BruteForce::Deserialize(StreamReader& reader) {
         logger::debug("parse with v0.13 version format");
 
         StreamReader::ReadObj(buffer_reader, dim_);
-        StreamReader::ReadObj(buffer_reader, total_count_);
+        uint64_t count = 0;
+        StreamReader::ReadObj(buffer_reader, count);
+        total_count_.store(count);
     } else {  // create like `else if ( ver in [v0.15, v0.17] )` here if need in the future
         logger::debug("parse with new version format");
 
@@ -403,7 +407,7 @@ BruteForce::Deserialize(StreamReader& reader) {
             }
         }
         dim_ = basic_info["dim"].GetInt();
-        total_count_ = basic_info["total_count"].GetInt();
+        total_count_.store(basic_info["total_count"].GetInt());
 
         if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
             this->attr_filter_index_->Deserialize(buffer_reader);
