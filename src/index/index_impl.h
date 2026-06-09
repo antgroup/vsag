@@ -58,7 +58,7 @@ public:
         return DatasetImpl::MakeEmptyDataset(); \
     }
 #define CHECK_IMMUTABLE_INDEX(operation_str)                                       \
-    if (this->inner_index_->immutable_) {                                          \
+    if (this->inner_index_->immutable_.load(std::memory_order_acquire)) {          \
         return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,        \
                                     "immutable index no support " operation_str)); \
     }

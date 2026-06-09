@@ -709,7 +709,7 @@ SINDI::CalDistanceById(const DatasetPtr& query,
 void
 SINDI::SetImmutable() {
     std::scoped_lock wlock(this->global_mutex_);
-    this->immutable_ = true;
+    this->immutable_.store(true, std::memory_order_release);
 }
 
 void
