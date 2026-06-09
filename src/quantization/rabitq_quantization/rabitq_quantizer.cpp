@@ -382,7 +382,7 @@ RaBitQuantizer<metric>::EncodeExtendRaBitQ(const float* o_prime,
 
     auto compute_next_t_for_dim = [&](size_t i) -> double {
         auto oi = double(o_prime[i]);
-        if (oi < 1e-3) {
+        if (std::fabs(oi) < 1e-3) {
             return std::numeric_limits<double>::infinity();
         }
 
