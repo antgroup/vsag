@@ -103,6 +103,18 @@ TEST_CASE("SINDI Index Parameters Compatibility Test", "[ut][SINDIParameter]") {
     TEST_COMPATIBILITY_CASE("remap_term_ids compatibility", remap_term_ids, false, true, false);
 }
 
+TEST_CASE("SINDI term_id_limit upper bound", "[ut][SINDIParameter]") {
+    SINDIDefaultParam param;
+    param.term_id_limit = 50'000'000;
+    auto valid_param = std::make_shared<vsag::SINDIParameter>();
+    valid_param->FromString(generate_sindi_param(param));
+    REQUIRE(valid_param->term_id_limit == 50'000'000);
+
+    param.term_id_limit = 50'000'001;
+    auto invalid_param = std::make_shared<vsag::SINDIParameter>();
+    REQUIRE_THROWS(invalid_param->FromString(generate_sindi_param(param)));
+}
+
 TEST_CASE("SINDI remap_term_ids Parameter", "[ut][SINDIParameter]") {
     SECTION("default is false when not specified") {
         auto param_str = R"({"term_id_limit": 1000, "window_size": 50000})";

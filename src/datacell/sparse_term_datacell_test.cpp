@@ -37,8 +37,10 @@ TEST_CASE("SparseTermDatacell Basic Test", "[ut][SparseTermDatacell]") {
         // base[5] = [5:5, 6:6, 7:7, ..., 14:14] = after_prune = [11:11, 12:12, 13:13, 14:14]
         // base[6] = [6:6, 7:7, 8:8, ..., 15:15] = after_prune = [12:12, 13:13, 14:14, 15:15]
         // base[7] = [7:7, 8:8, 9:9, ..., 16:16] = after_prune = [13:13, 14:14, 15:15, 16:16]
-        // base[8] = [8:8, 9:9, 10:10, ..., 17:17] = after_prune = [13:13, 14:14, 15:15, 16:16, 17:17]
-        // base[9] = [9:9, 10:10, 11:11, ..., 18:18] = after_prune = [14:14, 15:15, 16:16, 17:17, 18:18]
+        // base[8] = [8:8, 9:9, 10:10, ..., 17:17]
+        // after_prune = [13:13, 14:14, 15:15, 16:16, 17:17]
+        // base[9] = [9:9, 10:10, 11:11, ..., 18:18]
+        // after_prune = [14:14, 15:15, 16:16, 17:17, 18:18]
         for (int d = 0; d < sparse_vectors[i].len_; d++) {
             sparse_vectors[i].ids_[d] = i + d;
             sparse_vectors[i].vals_[d] = i + d;
@@ -84,10 +86,10 @@ TEST_CASE("SparseTermDatacell Basic Test", "[ut][SparseTermDatacell]") {
     for (auto i = 0; i < count_base; i++) {
         data_cell->InsertVector(sparse_vectors[i], i);
     }
-    REQUIRE(data_cell->term_capacity_ == exp_id_size);
-    REQUIRE(data_cell->term_ids_.size() == exp_id_size);
-    REQUIRE(data_cell->term_datas_.size() == exp_id_size);
-    for (auto i = 0; i < data_cell->term_capacity_; i++) {
+    REQUIRE(data_cell->term_capacity_ >= exp_id_size);
+    REQUIRE(data_cell->term_ids_.size() == data_cell->term_capacity_);
+    REQUIRE(data_cell->term_datas_.size() == data_cell->term_capacity_);
+    for (auto i = 0; i < exp_id_size; i++) {
         if (exp_size[i] == 0) {
             REQUIRE(data_cell->term_ids_[i] == nullptr);
             REQUIRE(data_cell->term_datas_[i] == nullptr);
@@ -96,6 +98,10 @@ TEST_CASE("SparseTermDatacell Basic Test", "[ut][SparseTermDatacell]") {
             REQUIRE(data_cell->term_ids_[i]->size() == exp_size[i]);
             REQUIRE(data_cell->term_datas_[i]->size() == exp_size[i] * sizeof(float));
         }
+    }
+    for (auto i = exp_id_size; i < data_cell->term_capacity_; i++) {
+        REQUIRE(data_cell->term_ids_[i] == nullptr);
+        REQUIRE(data_cell->term_datas_[i] == nullptr);
     }
 
     // Calculate expected distances programmatically to match the test logic
