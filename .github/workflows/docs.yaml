@@ -23,6 +23,7 @@ jobs:
         with:
           repository: vsag-io/vsag-io.github.io
           token: ${{ secrets.GH_PAT }}
+          ref: main
           path: repo-vsagio
 
       - name: Sync docs books (zh, en)
@@ -47,11 +48,12 @@ jobs:
           cd repo-vsagio
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -B sync origin/main
+          git add -A docs blogs landing
           if [[ -z $(git status --porcelain) ]]; then
             echo "No changes to commit."
+            git push --force origin sync
             exit 0
           fi
-          git checkout -B sync
-          git add docs blogs landing
           git commit -m "docs: sync from vsag@${{ github.sha }}"
           git push --force origin sync
