@@ -51,17 +51,19 @@ jobs:
   daily_build_asan_aarch64:
     name: Asan Build Aarch64
     runs-on: ubuntu-22.04-arm
+    container:
+      image: vsaglib/vsag:ci-aarch64-openblas
+      volumes:
+        - /opt:/useless
     concurrency:
       group: daily_build_aarch
       cancel-in-progress: true
     steps:
       - name: Free Disk Space
-        run: rm -rf /opt/hostedtoolcache
+        run: rm -rf /useless/hostedtoolcache
       - uses: actions/checkout@v4
         with:
           ref: main
-      - name: Prepare Env
-        run: sudo bash ./scripts/deps/install_deps_ubuntu.sh
       - name: Load Cache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
@@ -133,17 +135,19 @@ jobs:
     strategy:
       matrix:
         test_type: [ unittests, functests ]
+    container:
+      image: vsaglib/vsag:ci-aarch64-openblas
+      volumes:
+        - /opt:/useless
     concurrency:
       group: daily_test_aarch64-${{ matrix.test_type }}
       cancel-in-progress: true
     steps:
       - name: Free Disk Space
-        run: rm -rf /opt/hostedtoolcache
+        run: rm -rf /useless/hostedtoolcache
       - uses: actions/checkout@v4
         with:
           ref: main
-      - name: Prepare Env
-        run: sudo bash ./scripts/deps/install_deps_ubuntu.sh
       - name: Clean Build
         run: rm -rf ./build
       - name: Download Test

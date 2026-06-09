@@ -8,14 +8,16 @@ on:
     paths: [ 'docker/**' ]
 
 jobs:
-  # The CI images form a small chain: ci-x86-base is the shared toolchain
+  # The x86 CI images form a small chain: ci-x86-base is the shared toolchain
   # layer, and ci-x86-mkl / ci-x86-openblas are built FROM it. We build all
   # three in a single job so PR runs (push: false) can validate end-to-end:
   # the variant builds resolve `FROM vsaglib/vsag:ci-x86-base` against the
   # base image we just loaded into the local Docker daemon, not whatever
-  # tag happens to be on Docker Hub.
-  build:
-    name: Build CI Images
+  # tag happens to be on Docker Hub. The aarch64 images are built by a separate
+  # job below; they live on their own ci-aarch64-* tags and must be built on a
+  # native arm64 runner so the resulting layers are genuinely arm64.
+  build-x86:
+    name: Build CI Images (x86)
     runs-on: ubuntu-latest
     steps:
       # Docker Hub credentials only flow into runs triggered from the
@@ -66,3 +68,41 @@ jobs:
           file: ./docker/Dockerfile.x86.openblas
           push: ${{ github.event_name == 'push' }}
           tags: vsaglib/vsag:ci-x86-openblas
+
+  # aarch64 counterpart of the job above. There is no MKL variant on aarch64
+  # (Intel oneAPI MKL is x86-only), so the chain is just ci-aarch64-base ->
+  # ci-aarch64-openblas. We run on a native arm64 runner instead of emulating
+  # via QEMU so the published layers are real arm64 and image builds stay fast.
+  build-aarch64:
+    name: Build CI Images (aarch64)
+    runs-on: ubuntu-22.04-arm
+    steps:
+      # Same fork-safety reasoning as the x86 job: secrets (and therefore the
+      # Docker Hub login) only flow into push events / same-repo PRs. Fork PRs
+      # build with push: false and resolve the openblas variant's
+      # `FROM vsaglib/vsag:ci-aarch64-base` against the locally loaded base.
+      - name: Login to Docker Hub
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      # The plain `docker` driver loads each build straight into the host
+      # daemon, so the openblas build can resolve `FROM vsaglib/vsag:ci-aarch64-base`
+      # against the base we just built rather than pulling from Docker Hub.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker
+      - name: Build ci-aarch64-base
+        uses: docker/build-push-action@v6
+        with:
+          file: ./docker/Dockerfile.aarch64.base
+          push: ${{ github.event_name == 'push' }}
+          tags: vsaglib/vsag:ci-aarch64-base
+      - name: Build ci-aarch64-openblas
+        uses: docker/build-push-action@v6
+        with:
+          file: ./docker/Dockerfile.aarch64.openblas
+          push: ${{ github.event_name == 'push' }}
+          tags: vsaglib/vsag:ci-aarch64-openblas
