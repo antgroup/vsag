@@ -1,6 +1,6 @@
 # Contributors
 
-The following is the list of VSAG contributors (updated 2026-04-21), ordered by the date of their
+The following is the list of VSAG contributors (updated 2026-06-09), ordered by the date of their
 first contribution:
 
 - 2024-07-26 Xiangyu Wang ([wxyucs](https://github.com/wxyucs/)) from AntGroup
@@ -26,8 +26,12 @@ first contribution:
 - 2025-10-29 [Roxanne0321](https://github.com/Roxanne0321) from AntGroup
 - 2025-11-12 baoyuan ([misaka0714](https://github.com/misaka0714))
 - 2025-11-20 Zihao Wang ([hhy3](https://github.com/hhy3))
-- 2025-12-19 Xinger ([Ningsir](https://github.com/Ningsir))
-- 2026-02-05 [stuBirdFly](https://github.com/stuBirdFly)
-- 2026-04-08 Sun Jiayu ([pkusunjy](https://github.com/pkusunjy))
-- 2026-04-20 wei ([jiaweizone](https://github.com/jiaweizone))
-- 2026-04-20 [XFMENG17](https://github.com/XFMENG17)
+- 2025-12-19 Xinger ([Ningsir](https://github.com/Ningsir)) from OceanBase
+- 2026-02-05 [stuBirdFly](https://github.com/stuBirdFly) from OceanBase
+- 2026-04-08 Sun Jiayu ([pkusunjy](https://github.com/pkusunjy)) from AntGroup
+- 2026-04-20 wei ([jiaweizone](https://github.com/jiaweizone)) from AntGroup
+- 2026-04-20 [XFMENG17](https://github.com/XFMENG17) from AntGroup
+- 2026-05-07 [liric24](https://github.com/liric24) from AntGroup
+- 2026-05-14 [LightWant](https://github.com/LightWant) from AntGroup
+- 2026-06-09 [mukejane](https://github.com/mukejane)
+- 2026-06-09 Jiangtian Feng ([jfeng18](https://github.com/jfeng18)) from Alibaba
