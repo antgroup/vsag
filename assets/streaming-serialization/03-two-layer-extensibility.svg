@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="230" viewBox="0 0 880 230" font-family="-apple-system, Segoe UI, Roboto, sans-serif">
+  <text x="20" y="26" font-size="16" font-weight="700" fill="#222">两层可扩展性：分段级（TLV）+ 字段级（JSON）</text>
+
+  <rect x="20" y="46" width="840" height="74" rx="8" fill="#e6f4ea" stroke="#34a853"/>
+  <text x="34" y="68" font-size="13" font-weight="700" fill="#1e6b34">① 分段级 · TLV：增删/跳过整块数据</text>
+  <rect x="40" y="78" width="150" height="30" rx="4" fill="#fff" stroke="#34a853"/>
+  <text x="115" y="98" font-size="12" text-anchor="middle" fill="#1e6b34">base_codes</text>
+  <rect x="200" y="78" width="150" height="30" rx="4" fill="#fff" stroke="#34a853"/>
+  <text x="275" y="98" font-size="12" text-anchor="middle" fill="#1e6b34">high_precise_codes</text>
+  <rect x="360" y="78" width="120" height="30" rx="4" fill="#fff" stroke="#34a853"/>
+  <text x="420" y="98" font-size="12" text-anchor="middle" fill="#1e6b34">graph</text>
+  <rect x="490" y="78" width="150" height="30" rx="4" fill="#fff" stroke="#34a853" stroke-dasharray="4 3"/>
+  <text x="565" y="98" font-size="12" text-anchor="middle" fill="#3a7a52">新能力块(可忽略)</text>
+  <text x="700" y="98" font-size="12" fill="#3a7a52">→ 未知/不要则跳过</text>
+
+  <rect x="20" y="132" width="840" height="78" rx="8" fill="#e8f0fe" stroke="#4a78d6"/>
+  <text x="34" y="154" font-size="13" font-weight="700" fill="#1c3d7a">② 字段级 · JSON：增删标量参数（unknown 键忽略、缺键取默认）</text>
+  <text x="40" y="180" font-size="12" fill="#1c3d7a" font-family="monospace">basic_info = { "dim":128, "metric":2, "use_reorder":true, "index_param":"…",</text>
+  <text x="52" y="198" font-size="12" fill="#39527f" font-family="monospace">"new_field_in_v0.17": 42  ← 旧版本读者直接忽略此键 }</text>
+</svg>

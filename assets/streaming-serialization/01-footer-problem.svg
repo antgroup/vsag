@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="270" viewBox="0 0 880 270" font-family="-apple-system, Segoe UI, Roboto, sans-serif">
+  <defs>
+    <marker id="ah-bad" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#d33"/>
+    </marker>
+  </defs>
+  <text x="20" y="28" font-size="17" font-weight="700" fill="#222">现有格式：元信息在尾部 → 反序列化必须 Seek 到流尾</text>
+
+  <rect x="20"  y="120" width="150" height="62" rx="6" fill="#e8f0fe" stroke="#4a78d6"/>
+  <text x="95"  y="156" font-size="13" text-anchor="middle" fill="#1c3d7a">数据块 1</text>
+  <rect x="170" y="120" width="150" height="62" rx="6" fill="#e8f0fe" stroke="#4a78d6"/>
+  <text x="245" y="156" font-size="13" text-anchor="middle" fill="#1c3d7a">数据块 2 …</text>
+  <rect x="320" y="120" width="160" height="62" rx="6" fill="#e8f0fe" stroke="#4a78d6"/>
+  <text x="400" y="156" font-size="13" text-anchor="middle" fill="#1c3d7a">数据块 N</text>
+  <rect x="480" y="120" width="380" height="62" rx="6" fill="#fde8e8" stroke="#d33"/>
+  <text x="670" y="146" font-size="12" text-anchor="middle" fill="#a11">Footer（尾部元信息）</text>
+  <text x="670" y="167" font-size="11" text-anchor="middle" fill="#a11" font-family="monospace">magic | metadata | crc | len | cigam</text>
+
+  <path d="M 770 118 C 770 66, 520 66, 500 116" fill="none" stroke="#d33" stroke-width="2" marker-end="url(#ah-bad)"/>
+  <text x="610" y="58" font-size="12" fill="#d33" text-anchor="middle">① Seek(Length−16) 先读尾部拿到 footer 长度</text>
+
+  <path d="M 700 184 C 700 236, 360 236, 340 184" fill="none" stroke="#d33" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#ah-bad)"/>
+  <text x="500" y="256" font-size="12" fill="#d33" text-anchor="middle">② Seek(Length−len) 再读整个 Footer　✗ 纯前向流（管道/分块下载）做不到</text>
+</svg>

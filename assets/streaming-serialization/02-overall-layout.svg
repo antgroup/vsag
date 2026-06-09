@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="360" viewBox="0 0 900 360" font-family="-apple-system, Segoe UI, Roboto, sans-serif">
+  <defs>
+    <marker id="ah-fwd" markerWidth="12" markerHeight="12" refX="9" refY="4" orient="auto">
+      <path d="M0,0 L9,4 L0,8 Z" fill="#34a853"/>
+    </marker>
+  </defs>
+  <text x="20" y="28" font-size="17" font-weight="700" fill="#222">新格式总体布局：Head（头部元信息）+ TLV Body + END</text>
+
+  <!-- Head -->
+  <rect x="20" y="60" width="250" height="210" rx="8" fill="#e8f0fe" stroke="#4a78d6" stroke-width="1.5"/>
+  <text x="145" y="84" font-size="14" font-weight="700" text-anchor="middle" fill="#1c3d7a">Head（固定结构，顺序解析）</text>
+  <rect x="36" y="98" width="218" height="24" rx="4" fill="#fff" stroke="#9bb6e6"/>
+  <text x="46" y="115" font-size="12" fill="#1c3d7a" font-family="monospace">magic[8] = "vsagstm0"</text>
+  <rect x="36" y="126" width="218" height="24" rx="4" fill="#fff" stroke="#9bb6e6"/>
+  <text x="46" y="143" font-size="12" fill="#1c3d7a" font-family="monospace">format_version : u32</text>
+  <rect x="36" y="154" width="218" height="24" rx="4" fill="#fff" stroke="#9bb6e6"/>
+  <text x="46" y="171" font-size="12" fill="#1c3d7a" font-family="monospace">meta_len : u64</text>
+  <rect x="36" y="182" width="218" height="52" rx="4" fill="#fff" stroke="#9bb6e6"/>
+  <text x="46" y="200" font-size="12" fill="#1c3d7a" font-family="monospace">metadata (JSON):</text>
+  <text x="52" y="216" font-size="11" fill="#39527f" font-family="monospace">_version / _empty /</text>
+  <text x="52" y="229" font-size="11" fill="#39527f" font-family="monospace">basic_info / _manifest</text>
+  <rect x="36" y="238" width="218" height="24" rx="4" fill="#fff" stroke="#9bb6e6"/>
+  <text x="46" y="255" font-size="12" fill="#1c3d7a" font-family="monospace">crc32 : u32</text>
+
+  <!-- TLV records -->
+  <rect x="290" y="90" width="150" height="150" rx="8" fill="#e6f4ea" stroke="#34a853" stroke-width="1.5"/>
+  <text x="365" y="112" font-size="13" font-weight="700" text-anchor="middle" fill="#1e6b34">TLV 记录 1</text>
+  <text x="365" y="135" font-size="11" text-anchor="middle" fill="#1e6b34" font-family="monospace">tag|flags|len</text>
+  <text x="365" y="152" font-size="11" text-anchor="middle" fill="#1e6b34" font-family="monospace">+ value</text>
+  <text x="365" y="186" font-size="11" text-anchor="middle" fill="#3a7a52">(如 base_codes)</text>
+
+  <rect x="450" y="90" width="150" height="150" rx="8" fill="#e6f4ea" stroke="#34a853" stroke-width="1.5"/>
+  <text x="525" y="112" font-size="13" font-weight="700" text-anchor="middle" fill="#1e6b34">TLV 记录 2</text>
+  <text x="525" y="135" font-size="11" text-anchor="middle" fill="#1e6b34" font-family="monospace">tag|flags|len</text>
+  <text x="525" y="152" font-size="11" text-anchor="middle" fill="#1e6b34" font-family="monospace">+ value</text>
+  <text x="525" y="186" font-size="11" text-anchor="middle" fill="#3a7a52">(如 graph)</text>
+
+  <text x="630" y="170" font-size="22" fill="#34a853">…</text>
+
+  <rect x="660" y="90" width="150" height="150" rx="8" fill="#e6f4ea" stroke="#34a853" stroke-width="1.5"/>
+  <text x="735" y="112" font-size="13" font-weight="700" text-anchor="middle" fill="#1e6b34">TLV 记录 N</text>
+  <text x="735" y="135" font-size="11" text-anchor="middle" fill="#1e6b34" font-family="monospace">tag|flags|len</text>
+  <text x="735" y="152" font-size="11" text-anchor="middle" fill="#1e6b34" font-family="monospace">+ value</text>
+
+  <!-- END -->
+  <rect x="822" y="90" width="58" height="150" rx="8" fill="#ede7f6" stroke="#7e57c2" stroke-width="1.5"/>
+  <text x="851" y="160" font-size="12" font-weight="700" text-anchor="middle" fill="#4a328a" transform="rotate(90 851 160)">SECTION_END</text>
+
+  <!-- forward arrow -->
+  <line x1="20" y1="300" x2="858" y2="300" stroke="#34a853" stroke-width="2.5" marker-end="url(#ah-fwd)"/>
+  <text x="440" y="290" font-size="13" font-weight="700" text-anchor="middle" fill="#1e6b34">写 / 读：只向前，绝不回看（no seek）</text>
+  <text x="440" y="330" font-size="12" text-anchor="middle" fill="#555">空索引：metadata._empty = true，读完 Head 即返回，不读 body</text>
+</svg>

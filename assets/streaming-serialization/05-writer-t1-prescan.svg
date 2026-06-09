@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="300" viewBox="0 0 880 300" font-family="-apple-system, Segoe UI, Roboto, sans-serif">
+  <defs>
+    <marker id="ah-g2" markerWidth="11" markerHeight="11" refX="8" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 Z" fill="#5b6b7a"/>
+    </marker>
+  </defs>
+  <text x="20" y="26" font-size="16" font-weight="700" fill="#222">T1（推荐）：整体测量预扫描 → 真正写出（零额外内存）</text>
+
+  <!-- pass 1 -->
+  <text x="20" y="62" font-size="13" font-weight="700" fill="#5b6b7a">① 测量预扫描（空写计数器，复用 CalSerializeSize 的 no-op writer）</text>
+  <rect x="40" y="74" width="130" height="44" rx="5" fill="#f1f3f4" stroke="#9aa0a6"/>
+  <text x="105" y="101" font-size="12" text-anchor="middle" fill="#5b6b7a">块1 → size₁</text>
+  <rect x="180" y="74" width="130" height="44" rx="5" fill="#f1f3f4" stroke="#9aa0a6"/>
+  <text x="245" y="101" font-size="12" text-anchor="middle" fill="#5b6b7a">块2 → size₂</text>
+  <rect x="320" y="74" width="130" height="44" rx="5" fill="#f1f3f4" stroke="#9aa0a6"/>
+  <text x="385" y="101" font-size="12" text-anchor="middle" fill="#5b6b7a">块N → sizeₙ</text>
+  <text x="470" y="101" font-size="12" fill="#9aa0a6">（输出全部丢弃，仅累加字节数）</text>
+
+  <line x1="245" y1="128" x2="245" y2="158" stroke="#5b6b7a" stroke-width="2" marker-end="url(#ah-g2)"/>
+  <text x="300" y="148" font-size="12" fill="#5b6b7a">得到每块 size</text>
+
+  <!-- pass 2 -->
+  <text x="20" y="186" font-size="13" font-weight="700" fill="#1e6b34">② 真正写出（一趟流式）</text>
+  <rect x="40" y="198" width="120" height="50" rx="5" fill="#e8f0fe" stroke="#4a78d6"/>
+  <text x="100" y="228" font-size="12" text-anchor="middle" fill="#1c3d7a">Head</text>
+  <rect x="170" y="198" width="200" height="50" rx="5" fill="#e6f4ea" stroke="#34a853"/>
+  <text x="270" y="220" font-size="11" text-anchor="middle" fill="#1e6b34" font-family="monospace">tag|flags|len=size₁</text>
+  <text x="270" y="238" font-size="11" text-anchor="middle" fill="#1e6b34" font-family="monospace">| value₁</text>
+  <rect x="380" y="198" width="200" height="50" rx="5" fill="#e6f4ea" stroke="#34a853"/>
+  <text x="480" y="220" font-size="11" text-anchor="middle" fill="#1e6b34" font-family="monospace">tag|flags|len=size₂</text>
+  <text x="480" y="238" font-size="11" text-anchor="middle" fill="#1e6b34" font-family="monospace">| value₂</text>
+  <text x="600" y="228" font-size="18" fill="#34a853">… END</text>
+
+  <text x="20" y="284" font-size="12" fill="#444">T2 逐段缓冲（单块峰值内存，单趟）；T3 分块编码（超大/不可测块，单趟、无需预知总长）。三者读端跳过语义统一。</text>
+</svg>

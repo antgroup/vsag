@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="470" viewBox="0 0 900 470" font-family="-apple-system, Segoe UI, Roboto, sans-serif">
+  <defs>
+    <marker id="ah-f" markerWidth="11" markerHeight="11" refX="8" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 Z" fill="#555"/>
+    </marker>
+  </defs>
+  <text x="20" y="26" font-size="16" font-weight="700" fill="#222">反序列化读循环（全程前向）</text>
+
+  <!-- nodes -->
+  <rect x="250" y="44" width="280" height="40" rx="6" fill="#e8f0fe" stroke="#4a78d6"/>
+  <text x="390" y="69" font-size="13" text-anchor="middle" fill="#1c3d7a">解析 Head（magic/版本/JSON/crc 校验）</text>
+
+  <rect x="300" y="108" width="180" height="44" rx="6" fill="#e6f4ea" stroke="#34a853"/>
+  <text x="390" y="135" font-size="13" text-anchor="middle" fill="#1e6b34">读一条 TLV 头</text>
+
+  <polygon points="390,176 510,210 390,244 270,210" fill="#fff8e1" stroke="#f2b705"/>
+  <text x="390" y="206" font-size="12" text-anchor="middle" fill="#8a6d00">tag == END ?</text>
+  <text x="390" y="223" font-size="11" text-anchor="middle" fill="#8a6d00">是 → 完成</text>
+
+  <polygon points="390,266 540,304 390,342 240,304" fill="#fff8e1" stroke="#f2b705"/>
+  <text x="390" y="298" font-size="12" text-anchor="middle" fill="#8a6d00">需要跳过此块？</text>
+  <text x="390" y="315" font-size="11" text-anchor="middle" fill="#8a6d00">(未知 tag 或 调用方不需要)</text>
+
+  <rect x="300" y="372" width="180" height="44" rx="6" fill="#e6f4ea" stroke="#34a853"/>
+  <text x="390" y="392" font-size="12" text-anchor="middle" fill="#1e6b34">有界派发子反序列化</text>
+  <text x="390" y="408" font-size="11" text-anchor="middle" fill="#1e6b34">(BoundedForwardReader)</text>
+
+  <!-- right branch: skip / critical -->
+  <polygon points="690,266 800,300 690,334 580,300" fill="#fde8e8" stroke="#d33"/>
+  <text x="690" y="296" font-size="12" text-anchor="middle" fill="#a11">未知 且 CRITICAL?</text>
+  <text x="690" y="313" font-size="11" text-anchor="middle" fill="#a11">是 → 报错</text>
+
+  <rect x="600" y="372" width="200" height="44" rx="6" fill="#f1f3f4" stroke="#9aa0a6"/>
+  <text x="700" y="392" font-size="12" text-anchor="middle" fill="#5b6b7a">SkipForward(value_len)</text>
+  <text x="700" y="408" font-size="11" text-anchor="middle" fill="#5b6b7a">前向丢弃 / 分块读到 0</text>
+
+  <rect x="640" y="44" width="180" height="40" rx="6" fill="#fde8e8" stroke="#d33"/>
+  <text x="730" y="69" font-size="12" text-anchor="middle" fill="#a11">报错：需更高版本 vsag</text>
+
+  <rect x="600" y="108" width="220" height="40" rx="6" fill="#ede7f6" stroke="#7e57c2"/>
+  <text x="710" y="133" font-size="12" text-anchor="middle" fill="#4a328a">完成（缺块按 _version 取默认）</text>
+
+  <!-- edges -->
+  <line x1="390" y1="84" x2="390" y2="108" stroke="#555" stroke-width="1.5" marker-end="url(#ah-f)"/>
+  <line x1="390" y1="152" x2="390" y2="176" stroke="#555" stroke-width="1.5" marker-end="url(#ah-f)"/>
+  <line x1="510" y1="210" x2="600" y2="148" stroke="#7e57c2" stroke-width="1.5" marker-end="url(#ah-f)"/>
+  <line x1="390" y1="244" x2="390" y2="266" stroke="#555" stroke-width="1.5" marker-end="url(#ah-f)"/>
+  <text x="404" y="262" font-size="11" fill="#555">否</text>
+  <line x1="390" y1="342" x2="390" y2="372" stroke="#555" stroke-width="1.5" marker-end="url(#ah-f)"/>
+  <text x="404" y="362" font-size="11" fill="#555">否</text>
+  <line x1="540" y1="304" x2="580" y2="301" stroke="#555" stroke-width="1.5" marker-end="url(#ah-f)"/>
+  <text x="548" y="294" font-size="11" fill="#555">是</text>
+  <line x1="690" y1="334" x2="700" y2="372" stroke="#555" stroke-width="1.5" marker-end="url(#ah-f)"/>
+  <text x="710" y="356" font-size="11" fill="#a11">否(可忽略)</text>
+  <line x1="690" y1="266" x2="730" y2="84" stroke="#d33" stroke-width="1.5" marker-end="url(#ah-f)"/>
+  <text x="744" y="200" font-size="11" fill="#d33">是</text>
+
+  <!-- loopback -->
+  <path d="M 300 394 C 120 394, 120 130, 300 130" fill="none" stroke="#555" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#ah-f)"/>
+  <path d="M 700 372 C 700 360, 180 360, 150 360 C 120 360, 120 130, 298 130" fill="none" stroke="#9aa0a6" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#ah-f)"/>
+  <text x="92" y="262" font-size="11" fill="#555" transform="rotate(-90 92 262)">循环读下一条</text>
+</svg>
