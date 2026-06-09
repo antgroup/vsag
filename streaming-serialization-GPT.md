@@ -74,60 +74,7 @@ repeat until EOF:
 
 ## 格式示意图
 
-<svg xmlns="http://www.w3.org/2000/svg" width="920" height="300" viewBox="0 0 920 300">
-  <style>
-    .title { font: 700 18px sans-serif; fill: #172033; }
-    .label { font: 13px sans-serif; fill: #172033; }
-    .small { font: 12px sans-serif; fill: #46556b; }
-    .box { stroke: #172033; stroke-width: 1.5; rx: 8; ry: 8; }
-    .header { fill: #d9ecff; }
-    .block1 { fill: #dcfce7; }
-    .block2 { fill: #fef3c7; }
-    .block3 { fill: #fde2e2; }
-    .skip { fill: #eceff3; stroke-dasharray: 5 4; }
-    .arrow { stroke: #172033; stroke-width: 1.5; marker-end: url(#arrow); }
-  </style>
-  <defs>
-    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
-      <path d="M0,0 L0,6 L9,3 z" fill="#172033" />
-    </marker>
-  </defs>
-
-  <text x="24" y="32" class="title">Streaming Serialization Layout</text>
-
-  <rect x="24" y="70" width="190" height="80" class="box header" />
-  <text x="45" y="104" class="label">File Header</text>
-  <text x="45" y="128" class="small">magic / version / header_json</text>
-
-  <rect x="238" y="70" width="145" height="80" class="box block1" />
-  <text x="264" y="104" class="label">Block Header</text>
-  <text x="264" y="128" class="small">type / len / flags</text>
-
-  <rect x="383" y="70" width="145" height="80" class="box block1" />
-  <text x="410" y="104" class="label">Payload</text>
-  <text x="410" y="128" class="small">label_table</text>
-
-  <rect x="552" y="70" width="145" height="80" class="box block2" />
-  <text x="578" y="104" class="label">Block Header</text>
-  <text x="578" y="128" class="small">type / len / flags</text>
-
-  <rect x="697" y="70" width="145" height="80" class="box block2" />
-  <text x="730" y="104" class="label">Payload</text>
-  <text x="730" y="128" class="small">graph</text>
-
-  <rect x="238" y="190" width="145" height="70" class="box block3" />
-  <text x="264" y="219" class="label">Block Header</text>
-  <text x="264" y="241" class="small">high precision</text>
-
-  <rect x="383" y="190" width="145" height="70" class="box skip" />
-  <text x="408" y="219" class="label">Payload</text>
-  <text x="408" y="241" class="small">read and discard</text>
-
-  <line x1="214" y1="110" x2="238" y2="110" class="arrow" />
-  <line x1="528" y1="110" x2="552" y2="110" class="arrow" />
-  <line x1="624" y1="150" x2="310" y2="190" class="arrow" />
-  <text x="570" y="185" class="small">strictly forward only</text>
-</svg>
+![流式序列化整体布局：File Header 之后是顺序排列的 Block（Block Header + Payload），严格只向前读写，不支持的块读取并丢弃](assets/streaming-serialization/gpt-01-layout.svg)
 
 ## Header 设计
 
@@ -286,62 +233,7 @@ reader options:
 
 ## 能力选择流程图
 
-<svg xmlns="http://www.w3.org/2000/svg" width="920" height="520" viewBox="0 0 920 520">
-  <style>
-    .node { fill: #ffffff; stroke: #172033; stroke-width: 1.5; rx: 10; ry: 10; }
-    .decision { fill: #fef3c7; stroke: #172033; stroke-width: 1.5; }
-    .ok { fill: #dcfce7; stroke: #172033; stroke-width: 1.5; rx: 10; ry: 10; }
-    .skip { fill: #eceff3; stroke: #172033; stroke-width: 1.5; rx: 10; ry: 10; }
-    .err { fill: #fde2e2; stroke: #172033; stroke-width: 1.5; rx: 10; ry: 10; }
-    .text { font: 13px sans-serif; fill: #172033; }
-    .title { font: 700 18px sans-serif; fill: #172033; }
-    .arrow { stroke: #172033; stroke-width: 1.5; marker-end: url(#arrow2); }
-  </style>
-  <defs>
-    <marker id="arrow2" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
-      <path d="M0,0 L0,6 L9,3 z" fill="#172033" />
-    </marker>
-  </defs>
-
-  <text x="24" y="32" class="title">LoadPlan Decision</text>
-
-  <rect x="350" y="60" width="220" height="54" class="node" />
-  <text x="391" y="92" class="text">Read file header</text>
-
-  <polygon points="460,150 570,205 460,260 350,205" class="decision" />
-  <text x="404" y="201" class="text">block supported</text>
-  <text x="425" y="220" class="text">by reader?</text>
-
-  <polygon points="210,310 320,365 210,420 100,365" class="decision" />
-  <text x="155" y="361" class="text">block required?</text>
-
-  <polygon points="710,310 820,365 710,420 600,365" class="decision" />
-  <text x="648" y="361" class="text">requested by load</text>
-  <text x="680" y="380" class="text">options?</text>
-
-  <rect x="70" y="455" width="280" height="44" class="err" />
-  <text x="128" y="482" class="text">Fail: unsupported required block</text>
-
-  <rect x="390" y="455" width="170" height="44" class="skip" />
-  <text x="421" y="482" class="text">Discard payload</text>
-
-  <rect x="640" y="455" width="150" height="44" class="ok" />
-  <text x="677" y="482" class="text">Deserialize</text>
-
-  <line x1="460" y1="114" x2="460" y2="150" class="arrow" />
-  <line x1="350" y1="205" x2="210" y2="310" class="arrow" />
-  <text x="270" y="245" class="text">no</text>
-  <line x1="570" y1="205" x2="710" y2="310" class="arrow" />
-  <text x="630" y="245" class="text">yes</text>
-  <line x1="210" y1="420" x2="210" y2="455" class="arrow" />
-  <text x="222" y="443" class="text">yes</text>
-  <line x1="320" y1="365" x2="475" y2="455" class="arrow" />
-  <text x="385" y="405" class="text">no</text>
-  <line x1="710" y1="420" x2="715" y2="455" class="arrow" />
-  <text x="724" y="443" class="text">yes</text>
-  <line x1="600" y1="365" x2="505" y2="455" class="arrow" />
-  <text x="545" y="405" class="text">no</text>
-</svg>
+![LoadPlan 决策流程图：读取 File Header 后，按 block 是否被 reader 支持、是否必需、是否被加载选项请求，决定反序列化、丢弃 payload 或报错](assets/streaming-serialization/gpt-02-loadplan-decision.svg)
 
 ## 读写选项
 
