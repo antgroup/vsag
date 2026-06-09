@@ -17,6 +17,7 @@
 add_subdirectory (hnswlib)
 add_subdirectory (sindi)
 add_subdirectory (hgraph)
+add_subdirectory (lazy_hgraph)
 add_subdirectory (bruteforce)
 add_subdirectory (ivf)
 add_subdirectory (pyramid)
@@ -36,6 +37,7 @@ set (ALGORITHM_LIBS
         hnswlib
         sindi
         hgraph
+        lazy_hgraph
         bruteforce
         ivf
         pyramid

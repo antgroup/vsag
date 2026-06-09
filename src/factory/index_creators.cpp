@@ -21,6 +21,7 @@
 #include "algorithm/bruteforce/bruteforce.h"
 #include "algorithm/hgraph/hgraph.h"
 #include "algorithm/ivf/ivf.h"
+#include "algorithm/lazy_hgraph/lazy_hgraph.h"
 #include "algorithm/pyramid/pyramid.h"
 #include "algorithm/pyramid/pyramid_zparameters.h"
 #include "algorithm/sindi/sindi.h"
@@ -116,6 +117,15 @@ create_hgraph_index(JsonType& parsed_params, const IndexCommonParam& index_commo
 }
 
 tl::expected<std::shared_ptr<Index>, Error>
+create_lazy_hgraph_index(JsonType& parsed_params, const IndexCommonParam& index_common_params) {
+    auto lazy_hgraph_param = parsed_params.Contains(INDEX_LAZY_HGRAPH)
+                                 ? parsed_params[INDEX_LAZY_HGRAPH]
+                                 : get_index_param_or_empty(parsed_params);
+    logger::debug("created a lazy_hgraph index");
+    return {std::make_shared<IndexImpl<LazyHGraph>>(lazy_hgraph_param, index_common_params)};
+}
+
+tl::expected<std::shared_ptr<Index>, Error>
 create_ivf_index(JsonType& parsed_params, const IndexCommonParam& index_common_params) {
     return create_index_impl_with_param_log<IVF>(
         "created an ivf index", parsed_params, index_common_params);
@@ -150,6 +160,7 @@ register_all_index_creators() {
         register_index_creator(INDEX_BRUTE_FORCE, &create_brute_force_index);
         register_index_creator(INDEX_DISKANN, &create_diskann_index);
         register_index_creator(INDEX_HGRAPH, &create_hgraph_index);
+        register_index_creator(INDEX_LAZY_HGRAPH, &create_lazy_hgraph_index);
         register_index_creator(INDEX_IVF, &create_ivf_index);
         register_index_creator(INDEX_PYRAMID, &create_pyramid_index);
         register_index_creator(INDEX_SPARSE, &create_sparse_index);
