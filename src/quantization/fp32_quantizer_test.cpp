@@ -17,8 +17,10 @@
 
 #include <memory>
 
+#include "fp32_quantizer_parameter.h"
 #include "impl/allocator/default_allocator.h"
 #include "impl/allocator/safe_allocator.h"
+#include "index_common_param.h"
 #include "quantizer_test.h"
 #include "unittest.h"
 
@@ -43,6 +45,33 @@ TEST_CASE("FP32 Encode and Decode", "[ut][FP32Quantizer]") {
         for (auto count : counts) {
             TestQuantizerEncodeDecodeMetricFP32<metrics[0]>(dim, count, error);
             TestQuantizerEncodeDecodeMetricFP32<metrics[1]>(dim, count, error);
+        }
+    }
+}
+
+TEST_CASE("FP32 DecodeBatch with hold_molds", "[ut][FP32Quantizer]") {
+    float error = 2e-5f;
+    for (auto dim : dims) {
+        for (auto count : counts) {
+            auto param = std::make_shared<FP32QuantizerParameter>();
+            param->hold_molds = true;
+            IndexCommonParam common_param;
+            common_param.dim_ = dim;
+            common_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
+            FP32Quantizer<MetricType::METRIC_TYPE_COSINE> quantizer(param, common_param);
+
+            auto vecs = fixtures::generate_vectors(count, dim, true);
+            std::vector<uint8_t> codes(quantizer.GetCodeSize() * count);
+            quantizer.EncodeBatch(vecs.data(), codes.data(), count);
+
+            std::vector<float> decoded(dim * count, -1.0f);
+            quantizer.DecodeBatch(codes.data(), decoded.data(), count);
+
+            for (int64_t i = 0; i < count; ++i) {
+                for (int64_t j = 0; j < dim; ++j) {
+                    REQUIRE(std::abs(vecs[i * dim + j] - decoded[i * dim + j]) < error);
+                }
+            }
         }
     }
 }
