@@ -15,14 +15,21 @@
 
 #include "inner_index_parameter.h"
 
+#include <fmt/core.h>
+
+#include <memory>
+
 #include "common.h"
 #include "datacell/attribute_inverted_interface_parameter.h"
 #include "datacell/extra_info_datacell_parameter.h"
-#include "datacell/flatten_datacell_parameter.h"
+#include "datacell/flatten_interface_parameter.h"
 #include "impl/logger/logger.h"
 #include "inner_string_params.h"
+#include "json_wrapper.h"
 #include "utils/param_compat_macros.h"
 #include "vsag/constants.h"
+#include "vsag/errors.h"
+#include "vsag_exception.h"
 
 namespace vsag {
 

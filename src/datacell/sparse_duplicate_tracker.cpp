@@ -15,8 +15,15 @@
 #include "sparse_duplicate_tracker.h"
 
 #include <algorithm>
+#include <mutex>
+
+#include "container_types.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
+#include "tsl/robin_hash.h"
 
 namespace vsag {
+class Allocator;
 
 namespace {
 

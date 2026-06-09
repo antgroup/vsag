@@ -15,6 +15,17 @@
 
 #include "block_manager.h"
 
+#include <algorithm>
+#include <cstdint>
+#include <ios>
+#include <new>
+#include <stdexcept>
+#include <string>
+
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
+#include "vsag/allocator.h"
+
 namespace hnswlib {
 
 BlockManager::BlockManager(uint64_t size_data_per_element,

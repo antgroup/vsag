@@ -14,9 +14,15 @@
 
 #include "hgraph_cache.h"
 
-#include "impl/allocator/default_allocator.h"
+#include <cstdint>
+#include <utility>
+
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
+#include "tsl/robin_hash.h"
 
 namespace vsag {
+class Allocator;
 
 HGraphCache::HGraphCache(Allocator* allocator)
     : allocator_(allocator), source_ids_(allocator_), neighbors_(allocator_) {

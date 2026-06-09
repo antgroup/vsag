@@ -15,6 +15,8 @@
 
 #include "logger.h"
 
+#include "vsag/options.h"
+
 namespace vsag ::logger {
 void
 set_level(level log_level) {

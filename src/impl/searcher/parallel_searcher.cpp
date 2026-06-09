@@ -15,6 +15,8 @@
 
 #include "parallel_searcher.h"
 
+#include <cxxabi.h>
+
 #include <atomic>
 #include <future>
 #include <limits>
@@ -22,12 +24,19 @@
 #include <utility>
 #include <vector>
 
+#include "attr/executor/executor.h"
 #include "datacell/flatten_interface.h"
 #include "impl/heap/standard_heap.h"
+#include "impl/searcher/basic_searcher.h"
+#include "index_common_param.h"
+#include "query_context.h"
 #include "utils/filter_search_skip_strategy.h"
 #include "utils/spsc_queue.h"
+#include "vsag/filter.h"
 
 namespace vsag {
+class Allocator;
+class SafeThreadPool;
 
 ParallelSearcher::ParallelSearcher(const IndexCommonParam& common_param,
                                    std::shared_ptr<SafeThreadPool> search_pool,

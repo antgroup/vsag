@@ -17,6 +17,8 @@
 
 #include <cpuinfo.h>
 
+#include "simd/simd_status.h"
+
 namespace vsag {
 
 SimdStatus

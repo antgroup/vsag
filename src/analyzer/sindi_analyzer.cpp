@@ -18,16 +18,38 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <fstream>
+#include <initializer_list>
 #include <limits>
+#include <memory>
+#include <new>
 #include <numeric>
+#include <optional>
 #include <queue>
 #include <random>
+#include <ratio>
+#include <shared_mutex>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
+#include "algorithm/inner_index_interface.h"
+#include "algorithm/sindi/sindi_parameter.h"
+#include "algorithm/sindi/term_id_mapper.h"
+#include "common.h"
+#include "container_types.h"
+#include "datacell/sparse_term_datacell.h"
+#include "impl/inner_search_param.h"
+#include "impl/label_table/label_table.h"
+#include "impl/logger/logger.h"
+#include "inner_string_params.h"
+#include "json_wrapper.h"
+#include "quantization/sparse_quantization/sparse_term_computer.h"
 #include "utils/sparse_vector_transform.h"
+#include "vsag/allocator.h"
+#include "vsag/constants.h"
+#include "vsag/search_request.h"
 
 namespace vsag {
 namespace {

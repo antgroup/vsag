@@ -15,7 +15,10 @@
 
 #include "io_parameter.h"
 
+#include <memory>
 #include <mutex>
+#include <stdexcept>
+#include <utility>
 
 #include "async_io_parameter.h"
 #include "buffer_io_parameter.h"

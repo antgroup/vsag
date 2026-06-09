@@ -15,13 +15,23 @@
 
 #include "sparse_index.h"
 
+#include <algorithm>
+#include <cstring>
 #include <numeric>
 
+#include "algorithm/inner_index_parameter.h"
+#include "algorithm/sparse_index/sparse_index_parameters.h"
+#include "common.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/label_table/label_table.h"
+#include "index_common_param.h"
 #include "index_feature_list.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
 #include "utils/util_functions.h"
 #include "vsag/allocator.h"
+#include "vsag/index_features.h"
+
 namespace vsag {
 
 static float

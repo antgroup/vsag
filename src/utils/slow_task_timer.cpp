@@ -15,6 +15,9 @@
 
 #include "slow_task_timer.h"
 
+#include <ratio>
+#include <utility>
+
 #include "impl/logger/logger.h"
 
 namespace vsag {

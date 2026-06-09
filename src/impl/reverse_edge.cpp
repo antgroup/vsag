@@ -14,6 +14,13 @@
 
 #include "reverse_edge.h"
 
+#include <mutex>
+#include <type_traits>
+#include <utility>
+#include <vector>
+
+#include "tsl/robin_hash.h"
+
 namespace vsag {
 
 void

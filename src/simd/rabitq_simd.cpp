@@ -14,6 +14,7 @@
 
 #include "rabitq_simd.h"
 
+#include "simd/simd_status.h"
 #include "simd_dispatch.h"
 
 namespace vsag {

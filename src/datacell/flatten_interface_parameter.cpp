@@ -15,8 +15,11 @@
 
 #include "flatten_interface_parameter.h"
 
+#include <memory>
+
 #include "flatten_datacell_parameter.h"
 #include "inner_string_params.h"
+#include "json_wrapper.h"
 #include "multi_vector_datacell_parameter.h"
 #include "sparse_vector_datacell_parameter.h"
 

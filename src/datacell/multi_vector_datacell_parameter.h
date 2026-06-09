@@ -15,7 +15,7 @@
 
 #pragma once
 
-#include <fmt/format.h>
+#include <fmt/core.h>
 
 #include "flatten_interface_parameter.h"
 #include "inner_string_params.h"

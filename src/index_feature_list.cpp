@@ -15,10 +15,12 @@
 
 #include "index_feature_list.h"
 
-#include <fmt/format.h>
+#include <fmt/core.h>
 
-#include <stdexcept>
+#include <ostream>
+#include <utility>
 
+#include "vsag/errors.h"
 #include "vsag_exception.h"
 
 namespace vsag {

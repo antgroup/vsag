@@ -15,11 +15,16 @@
 
 #include "term_id_mapper.h"
 
-#include <fmt/format.h>
+#include <fmt/core.h>
 
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
+#include "tsl/robin_hash.h"
+#include "vsag/errors.h"
 #include "vsag_exception.h"
 
 namespace vsag {
+class Allocator;
 
 TermIdMapper::TermIdMapper(uint32_t term_id_limit, Allocator* allocator)
     : orig_to_compact_(allocator),

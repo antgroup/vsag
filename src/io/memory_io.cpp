@@ -15,6 +15,10 @@
 
 #include "memory_io.h"
 
+#include <cstring>
+
+#include "utils/prefetch.h"
+
 namespace vsag {
 
 void

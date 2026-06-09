@@ -14,11 +14,22 @@
 
 #include "half_precision_quantizer.h"
 
+#include <memory>
+#include <new>
+#include <ostream>
+
+#include "container_types.h"
+#include "index_common_param.h"
+#include "quantization/computer.h"
+#include "quantization/scalar_quantization/half_precision_traits.h"
 #include "simd/normalize.h"
-#include "typing.h"
+#include "vsag/allocator.h"
+#include "vsag/errors.h"
 #include "vsag_exception.h"
 
 namespace vsag {
+template <typename Format>
+class HalfPrecisionQuantizerParameter;
 
 template <typename Format, MetricType metric>
 HalfPrecisionQuantizer<Format, metric>::HalfPrecisionQuantizer(int dim, Allocator* allocator)

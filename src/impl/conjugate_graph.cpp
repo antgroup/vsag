@@ -15,9 +15,25 @@
 
 #include "conjugate_graph.h"
 
+#include <fmt/core.h>
+
+#include <algorithm>
+#include <cstdint>
+#include <cstring>
+#include <istream>
+#include <stdexcept>
+#include <string>
+
+#include "container_types.h"
+#include "storage/stream_reader.h"
+#include "tsl/robin_hash.h"
+#include "tsl/robin_set.h"
+#include "vsag/binaryset.h"
+#include "vsag/errors.h"
 #include "vsag_exception.h"
 
 namespace vsag {
+class Allocator;
 
 ConjugateGraph::ConjugateGraph(Allocator* allocator)
     : allocator_(allocator), conjugate_graph_(allocator) {

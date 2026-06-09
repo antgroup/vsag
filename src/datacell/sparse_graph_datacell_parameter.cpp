@@ -15,6 +15,12 @@
 
 #include "sparse_graph_datacell_parameter.h"
 
+#include <memory>
+
+#include "datacell/graph_interface_parameter.h"
+#include "impl/logger/logger.h"
+#include "inner_string_params.h"
+#include "json_wrapper.h"
 #include "utils/param_compat_macros.h"
 
 namespace vsag {

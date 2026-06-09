@@ -15,15 +15,37 @@
 #include "pyramid_analyzer.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <cstdint>
+#include <cstring>
+#include <exception>
+#include <functional>
+#include <map>
+#include <memory>
+#include <numeric>
+#include <queue>
 #include <random>
+#include <utility>
+#include <vector>
 
+#include "algorithm/inner_index_interface.h"
+#include "datacell/flatten_interface.h"
+#include "datacell/graph_interface.h"
 #include "impl/heap/standard_heap.h"
+#include "impl/inner_search_param.h"
+#include "impl/label_table/label_table.h"
 #include "impl/logger/logger.h"
-#include "impl/searcher/basic_searcher.h"
+#include "impl/reorder/reorder.h"
+#include "json_wrapper.h"
 #include "query_context.h"
-#include "typing.h"
+#include "tsl/robin_hash.h"
+#include "tsl/robin_map.h"
+#include "tsl/robin_set.h"
+#include "utils/resource_object_pool.h"
+#include "utils/timer.h"
 #include "vsag/dataset.h"
+#include "vsag/search_request.h"
 
 namespace vsag {
 

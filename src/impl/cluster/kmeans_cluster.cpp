@@ -15,19 +15,40 @@
 
 #include "kmeans_cluster.h"
 
+#include <cxxabi.h>
+#include <fmt/core.h>
 #include <omp.h>
 
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <future>
+#include <iterator>
+#include <limits>
+#include <memory>
+#include <mutex>
+#include <numeric>
+#include <ostream>
 #include <random>
+#include <utility>
+#include <vector>
 
 #include "algorithm/inner_index_interface.h"
-#include "diskann_logger.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/blas/blas_function.h"
+#include "impl/logger/logger.h"
+#include "index_common_param.h"
+#include "metric_type.h"
 #include "simd/amx_bf16_matmul.h"
 #include "simd/fp32_simd.h"
 #include "simd/simd_status.h"
 #include "utils/byte_buffer.h"
 #include "utils/util_functions.h"
+#include "vsag/allocator.h"
+#include "vsag/dataset.h"
+#include "vsag/errors.h"
+#include "vsag/filter.h"
+#include "vsag_exception.h"
 
 namespace vsag {
 KMeansCluster::KMeansCluster(int32_t dim, Allocator* allocator, SafeThreadPoolPtr thread_pool)

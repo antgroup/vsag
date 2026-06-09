@@ -17,10 +17,20 @@
 #include <vsag/index.h>
 #include <vsag/vsag_c_api.h>
 
+#include <cstdint>
+#include <cstdio>
 #include <cstring>
+#include <exception>
 #include <fstream>
-#include <streambuf>
-#include <type_traits>
+#include <functional>
+#include <memory>
+#include <string>
+#include <utility>
+
+#include "vsag/dataset.h"
+#include "vsag/errors.h"
+#include "vsag/expected.hpp"
+#include "vsag/filter.h"
 
 Error_t success = {VSAG_SUCCESS, "success"};
 

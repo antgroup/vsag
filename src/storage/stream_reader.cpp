@@ -15,14 +15,18 @@
 
 #include "stream_reader.h"
 
-#include <fmt/format.h>
+#include <fmt/core.h>
 
+#include <algorithm>
 #include <cstdint>
-#include <fstream>
-#include <iostream>
+#include <cstring>
+#include <limits>
+#include <string>
+#include <utility>
 
-#include "footer.h"
 #include "impl/logger/logger.h"
+#include "vsag/allocator.h"
+#include "vsag/errors.h"
 #include "vsag/options.h"
 #include "vsag_exception.h"
 

@@ -12,11 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <fmt/format.h>
+#include <fmt/core.h>
+
+#include <algorithm>
+#include <cstdint>
+#include <memory>
+#include <string>
 
 #include "common.h"
+#include "data_type.h"
+#include "datacell/graph_interface_parameter.h"
 #include "hgraph.h"  // IWYU pragma: keep
 #include "hgraph_parameter.h"
+#include "index_common_param.h"
+#include "inner_string_params.h"
+#include "json_types.h"
+#include "json_wrapper.h"
+#include "parameter.h"
+#include "type_helpers.h"
+#include "utils/util_functions.h"
+#include "vsag/constants.h"
 
 namespace vsag {
 

@@ -15,7 +15,7 @@
 
 #include "hgraph_parameter.h"
 
-#include <fmt/format.h>
+#include <fmt/core.h>
 
 #include "hgraph.h"
 #include "index_common_param.h"

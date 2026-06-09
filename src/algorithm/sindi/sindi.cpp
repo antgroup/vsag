@@ -15,12 +15,46 @@
 
 #include "sindi.h"
 
+#include <fmt/core.h>
+
+#include <algorithm>
+#include <atomic>
+#include <cstdint>
+#include <limits>
+#include <mutex>
+#include <new>
+#include <optional>
+#include <ostream>
+#include <stdexcept>
+#include <unordered_map>
+
+#include "algorithm/inner_index_parameter.h"
+#include "algorithm/sindi/term_id_mapper.h"
+#include "algorithm/sparse_index/sparse_index.h"
+#include "algorithm/sparse_index/sparse_index_parameters.h"
 #include "analyzer/analyzer.h"
+#include "common.h"
+#include "datacell/extra_info_interface.h"
+#include "impl/filter/inner_id_wrapper_filter.h"
+#include "impl/filter/white_list_filter.h"
+#include "impl/heap/distance_heap.h"
 #include "impl/heap/standard_heap.h"
+#include "impl/label_table/label_table.h"
+#include "impl/logger/logger.h"
+#include "index_common_param.h"
 #include "index_feature_list.h"
+#include "json_wrapper.h"
 #include "storage/serialization.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
+#include "utils/sparse_vector_transform.h"
 #include "utils/util_functions.h"
 #include "vsag/allocator.h"
+#include "vsag/constants.h"
+#include "vsag/errors.h"
+#include "vsag/filter.h"
+#include "vsag/index_features.h"
+#include "vsag/search_request.h"
 #include "vsag_exception.h"
 
 namespace vsag {

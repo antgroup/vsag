@@ -15,7 +15,10 @@
 
 #include "sq8_uniform_quantizer_parameter.h"
 
+#include <string>
+
 #include "inner_string_params.h"
+#include "json_wrapper.h"
 
 namespace vsag {
 SQ8UniformQuantizerParameter::SQ8UniformQuantizerParameter()

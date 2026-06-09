@@ -15,12 +15,20 @@
 
 #include "pyramid_zparameters.h"
 
+#include <fmt/core.h>
+
+#include <algorithm>
+#include <cstdint>
+#include <memory>
+
 #include "common.h"
 #include "impl/logger/logger.h"
 #include "index/diskann_zparameters.h"
 #include "io/memory_io_parameter.h"
+#include "json_wrapper.h"
 #include "quantization/fp32_quantizer_parameter.h"
 #include "utils/param_compat_macros.h"
+#include "vsag/constants.h"
 
 // NOLINTBEGIN(readability-simplify-boolean-expr)
 

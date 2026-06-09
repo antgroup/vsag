@@ -15,8 +15,12 @@
 
 #include "odescent_graph_parameter.h"
 
-#include <fmt/format.h>
+#include <fmt/core.h>
 
+#include <memory>
+
+#include "common.h"
+#include "json_wrapper.h"
 #include "vsag/constants.h"
 
 namespace vsag {

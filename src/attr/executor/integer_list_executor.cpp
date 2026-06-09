@@ -15,13 +15,24 @@
 
 #include "integer_list_executor.h"
 
+#include <cstdint>
+#include <memory>
+#include <ostream>
 #include <variant>
 
-#include "impl/bitset/fast_bitset.h"
+#include "attr/executor/executor.h"
+#include "attr/multi_bitset_manager.h"
+#include "impl/bitset/computable_bitset.h"
+#include "impl/filter/black_list_filter.h"
+#include "impl/filter/white_list_filter.h"
 #include "utils/util_functions.h"
+#include "vsag/errors.h"
 #include "vsag_exception.h"
 
 namespace vsag {
+class Allocator;
+class Filter;
+
 using ListVariant = std::variant<std::shared_ptr<const IntListConstant<int64_t>>,
                                  std::shared_ptr<const IntListConstant<uint64_t>>>;
 

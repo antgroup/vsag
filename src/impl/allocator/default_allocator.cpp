@@ -15,7 +15,9 @@
 
 #include "default_allocator.h"
 
-#include <fmt/format.h>
+#include <fmt/core.h>
+
+#include <cstdlib>
 
 #include "impl/logger/logger.h"
 #include "vsag_exception.h"

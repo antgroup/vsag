@@ -15,10 +15,17 @@
 
 #include "rabitq_quantizer_parameter.h"
 
+#include <fmt/core.h>
+
 #include <cmath>
+#include <memory>
+#include <ostream>
 
 #include "inner_string_params.h"
+#include "json_wrapper.h"
 #include "utils/param_compat_macros.h"
+#include "vsag/errors.h"
+#include "vsag_exception.h"
 
 namespace vsag {
 

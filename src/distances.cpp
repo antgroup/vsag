@@ -14,7 +14,10 @@
 // limitations under the License.
 
 #include <cstdint>
+#include <limits>
+#include <memory>
 
+#include "vsag/bitset.h"
 #include "vsag/utils.h"
 
 namespace vsag {

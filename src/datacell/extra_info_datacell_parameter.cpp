@@ -15,9 +15,13 @@
 
 #include "extra_info_datacell_parameter.h"
 
-#include <fmt/format.h>
+#include <fmt/core.h>
 
+#include <memory>
+
+#include "common.h"
 #include "inner_string_params.h"
+#include "json_wrapper.h"
 
 namespace vsag {
 ExtraInfoDataCellParameter::ExtraInfoDataCellParameter() = default;

@@ -14,7 +14,7 @@
 // limitations under the License.
 
 #pragma once
-#include <fmt/format.h>
+#include <fmt/core.h>
 
 #include "algorithm/index_search_parameter.h"
 #include "algorithm/inner_index_parameter.h"

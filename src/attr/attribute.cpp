@@ -15,8 +15,9 @@
 
 #include "vsag/attribute.h"
 
+#include <cstdint>
 #include <cstring>
-#include <memory>
+#include <type_traits>
 
 namespace vsag {
 

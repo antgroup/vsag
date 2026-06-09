@@ -15,11 +15,17 @@
 
 #include "computable_bitset.h"
 
+#include <memory>
+#include <ostream>
+
 #include "fast_bitset.h"
 #include "sparse_bitset.h"
+#include "vsag/errors.h"
 #include "vsag_exception.h"
 
 namespace vsag {
+class Allocator;
+
 ComputableBitsetPtr
 ComputableBitset::MakeInstance(ComputableBitsetType type, Allocator* allocator) {
     if (type == ComputableBitsetType::SparseBitset) {

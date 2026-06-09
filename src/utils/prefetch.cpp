@@ -14,6 +14,9 @@
 // limitations under the License.
 
 #include "prefetch.h"
+
+#include <algorithm>
+
 namespace vsag {
 
 #define PREFETCH_LINE(X)       \

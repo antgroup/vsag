@@ -15,7 +15,11 @@
 
 #include "fp32_quantizer_parameter.h"
 
+#include <string>
+
 #include "inner_string_params.h"
+#include "json_wrapper.h"
+#include "quantization/quantizer_parameter.h"
 
 namespace vsag {
 FP32QuantizerParameter::FP32QuantizerParameter()

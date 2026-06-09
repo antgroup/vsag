@@ -15,11 +15,19 @@
 
 #include "fht_kac_rotate_transformer.h"
 
+#include <algorithm>
+#include <cmath>
+#include <cstring>
+#include <memory>
 #include <random>
 
+#include "impl/transform/vector_transformer.h"
 #include "simd/rabitq_simd.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
 
 namespace vsag {
+class Allocator;
 
 inline uint64_t
 floor_log2(uint64_t x) {  //smaller or equal

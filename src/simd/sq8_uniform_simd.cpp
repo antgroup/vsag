@@ -14,6 +14,7 @@
 // limitations under the License.
 #include "sq8_uniform_simd.h"
 
+#include "simd/simd_status.h"
 #include "simd_dispatch.h"
 
 namespace vsag {

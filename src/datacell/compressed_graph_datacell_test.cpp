@@ -15,7 +15,7 @@
 
 #include "compressed_graph_datacell.h"
 
-#include <fmt/format.h>
+#include <fmt/core.h>
 
 #include "graph_datacell_parameter.h"
 #include "graph_interface_test.h"

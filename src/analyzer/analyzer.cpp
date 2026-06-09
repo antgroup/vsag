@@ -15,9 +15,20 @@
 
 #include "analyzer.h"
 
+#include <fmt/core.h>
+
+#include <memory>
+#include <ostream>
+
+#include "algorithm/hgraph/hgraph.h"
+#include "algorithm/inner_index_interface.h"
+#include "algorithm/pyramid/pyramid.h"
+#include "algorithm/sindi/sindi.h"
 #include "hgraph_analyzer.h"
 #include "pyramid_analyzer.h"
 #include "sindi_analyzer.h"
+#include "vsag/errors.h"
+#include "vsag_exception.h"
 
 namespace vsag {
 

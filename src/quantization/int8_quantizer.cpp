@@ -15,17 +15,22 @@
 
 #include "quantization/int8_quantizer.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <memory>
 #include <new>
+#include <ostream>
 
+#include "index_common_param.h"
 #include "metric_type.h"
 #include "quantization/computer.h"
 #include "quantization/int8_quantizer_parameter.h"
 #include "quantization/quantizer.h"
 #include "simd/int8_simd.h"
+#include "vsag/allocator.h"
+#include "vsag/errors.h"
 #include "vsag_exception.h"
 
 namespace vsag {

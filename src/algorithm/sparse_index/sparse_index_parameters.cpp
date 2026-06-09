@@ -15,7 +15,10 @@
 
 #include "sparse_index_parameters.h"
 
+#include <memory>
+
 #include "inner_string_params.h"
+#include "json_wrapper.h"
 
 namespace vsag {
 

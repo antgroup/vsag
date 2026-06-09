@@ -15,7 +15,10 @@
 
 #include "visited_list.h"
 
+#include <cstring>
 #include <limits>
+
+#include "vsag/allocator.h"
 
 namespace vsag {
 VisitedList::VisitedList(InnerIdType max_size, Allocator* allocator)

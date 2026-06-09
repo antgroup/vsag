@@ -15,7 +15,18 @@
 
 #include "transform_quantizer_parameter.h"
 
+#include <fmt/core.h>
+
+#include <algorithm>
+#include <cctype>
+#include <cstdint>
+#include <istream>
+#include <memory>
+
+#include "impl/logger/logger.h"
 #include "utils/param_compat_macros.h"
+#include "vsag/errors.h"
+#include "vsag_exception.h"
 
 namespace vsag {
 

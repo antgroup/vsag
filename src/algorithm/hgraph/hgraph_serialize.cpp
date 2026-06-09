@@ -12,18 +12,42 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <fmt/format.h>
+#include <fmt/core.h>
 
-#include "datacell/sparse_graph_datacell.h"
+#include <atomic>
+#include <cstdint>
+#include <limits>
+#include <memory>
+#include <string>
+#include <vector>
+
+#include "algorithm/hgraph/hgraph_parameter.h"
+#include "algorithm/inner_index_interface.h"
+#include "algorithm/inner_index_parameter.h"
+#include "basic_types.h"
+#include "container_types.h"
+#include "data_type.h"
+#include "datacell/attribute_inverted_interface.h"
+#include "datacell/extra_info_interface.h"
+#include "datacell/flatten_interface.h"
+#include "datacell/graph_interface.h"
 #include "hgraph.h"  // IWYU pragma: keep
-#include "impl/heap/standard_heap.h"
-#include "impl/odescent/odescent_graph_builder.h"
-#include "impl/pruning_strategy.h"
+#include "impl/label_table/label_table.h"
+#include "impl/logger/logger.h"
+#include "inner_string_params.h"
+#include "json_types.h"
+#include "json_wrapper.h"
+#include "metric_type.h"
 #include "storage/serialization.h"
 #include "storage/stream_reader.h"
-#include "typing.h"
+#include "storage/stream_writer.h"
+#include "tsl/robin_map.h"
+#include "utils/lock_strategy.h"
 #include "utils/util_functions.h"
-#include "vsag/options.h"
+#include "utils/visited_list.h"
+#include "vsag/constants.h"
+#include "vsag/errors.h"
+#include "vsag_exception.h"
 
 namespace vsag {
 

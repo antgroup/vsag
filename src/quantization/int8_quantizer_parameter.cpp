@@ -15,7 +15,11 @@
 
 #include "int8_quantizer_parameter.h"
 
+#include <string>
+
 #include "inner_string_params.h"
+#include "json_wrapper.h"
+#include "quantization/quantizer_parameter.h"
 
 namespace vsag {
 INT8QuantizerParameter::INT8QuantizerParameter()

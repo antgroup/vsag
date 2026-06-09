@@ -15,11 +15,19 @@
 
 #include "ivf_parameter.h"
 
-#include <fmt/format.h>
+#include <fmt/core.h>
 
+#include <memory>
+
+#include "algorithm/ivf/gno_imi_parameter.h"
+#include "algorithm/ivf/ivf_partition_strategy_parameter.h"
+#include "common.h"
+#include "impl/logger/logger.h"
 #include "inner_string_params.h"
+#include "json_wrapper.h"
 #include "utils/param_compat_macros.h"
 #include "vsag/constants.h"
+
 namespace vsag {
 
 void

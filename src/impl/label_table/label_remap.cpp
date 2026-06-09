@@ -16,6 +16,7 @@
 #include "label_remap.h"
 
 namespace vsag {
+class Allocator;
 
 /**
  * @brief LabelRemap constructor implementation

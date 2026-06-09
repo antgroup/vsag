@@ -14,7 +14,7 @@
 // limitations under the License.
 
 #pragma once
-#include <fmt/format.h>
+#include <fmt/core.h>
 
 #include "stream_reader.h"
 #include "typing.h"

@@ -15,9 +15,18 @@
 
 #include "hnsw_zparameters.h"
 
-#include <fmt/format.h>
+#include <fmt/core.h>
 
+#include <algorithm>
+
+#include "algorithm/hnswlib/space_ip.h"
+#include "algorithm/hnswlib/space_l2.h"
+#include "common.h"
+#include "index_common_param.h"
+#include "json_wrapper.h"
+#include "metric_type.h"
 #include "vsag/constants.h"
+#include "vsag/errors.h"
 #include "vsag_exception.h"
 
 namespace vsag {

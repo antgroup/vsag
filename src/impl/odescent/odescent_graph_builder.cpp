@@ -15,11 +15,19 @@
 
 #include "odescent_graph_builder.h"
 
-#include <chrono>
-#include <ios>
+#include <cxxabi.h>
 
-#include "simd/simd.h"
+#include <algorithm>
+#include <cstdint>
+#include <future>
+
+#include "impl/odescent/odescent_graph_parameter.h"
+#include "impl/thread_pool/safe_thread_pool.h"
+#include "tsl/robin_hash.h"
+#include "tsl/robin_set.h"
 #include "utils/linear_congruential_generator.h"
+#include "vsag/errors.h"
+#include "vsag_exception.h"
 
 namespace vsag {
 

@@ -15,8 +15,16 @@
 
 #include "basic_optimizer.h"
 
-#include "algorithm/inner_index_interface.h"
+#include <fmt/core.h>
+
+#include <utility>
+#include <vector>
+
+#include "impl/logger/logger.h"
+#include "impl/runtime_parameter.h"
+#include "query_context.h"
 #include "searcher/basic_searcher.h"
+#include "tsl/robin_hash.h"
 
 namespace vsag {
 

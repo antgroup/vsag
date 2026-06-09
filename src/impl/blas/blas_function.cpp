@@ -17,6 +17,7 @@
 #include <omp.h>
 
 #include "blas_compat.h"
+
 namespace vsag {
 
 void

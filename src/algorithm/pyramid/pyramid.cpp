@@ -15,20 +15,51 @@
 
 #include "pyramid.h"
 
-#include <chrono>
+#include <cxxabi.h>
+#include <fmt/core.h>
+
+#include <algorithm>
+#include <atomic>
+#include <cstdint>
+#include <cstring>
+#include <future>
+#include <limits>
+#include <ostream>
+#include <utility>
 
 #include "algorithm/inner_index_interface.h"
+#include "algorithm/pyramid/pyramid_zparameters.h"
 #include "analyzer/analyzer.h"
+#include "common.h"
 #include "datacell/flatten_interface.h"
+#include "datacell/graph_interface_parameter.h"
+#include "datacell/sparse_graph_datacell.h"
+#include "datacell/sparse_graph_datacell_parameter.h"
+#include "dataset_impl.h"
+#include "impl/filter/inner_id_wrapper_filter.h"
 #include "impl/heap/standard_heap.h"
+#include "impl/label_table/label_table.h"
+#include "impl/logger/logger.h"
 #include "impl/odescent/odescent_graph_builder.h"
 #include "impl/pruning_strategy.h"
-#include "io/memory_io_parameter.h"
+#include "impl/thread_pool/safe_thread_pool.h"
+#include "index_feature_list.h"
+#include "json_wrapper.h"
 #include "query_context.h"
-#include "storage/empty_index_binary_set.h"
 #include "storage/serialization.h"
-#include "utils/slow_task_timer.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
+#include "tsl/robin_hash.h"
+#include "type_helpers.h"
+#include "utils/resource_object_pool.h"
+#include "utils/timer.h"
 #include "utils/util_functions.h"
+#include "vsag/allocator.h"
+#include "vsag/errors.h"
+#include "vsag/filter.h"
+#include "vsag/index_features.h"
+#include "vsag_exception.h"
+
 namespace vsag {
 
 const static float RADIUS_EPSILON = 1.1F;

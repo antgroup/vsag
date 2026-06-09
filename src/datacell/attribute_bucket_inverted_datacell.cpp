@@ -14,7 +14,27 @@
 // limitations under the License.
 
 #include "attribute_bucket_inverted_datacell.h"
+
+#include <cstdint>
+#include <memory>
+#include <mutex>
+#include <ostream>
+#include <type_traits>
+#include <utility>
+
+#include "attr/attr_type_schema.h"
+#include "datacell/attribute_inverted_interface.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
+#include "tsl/robin_hash.h"
+#include "tsl/robin_map.h"
+#include "type_helpers.h"
+#include "vsag/attribute.h"
+#include "vsag/errors.h"
+#include "vsag_exception.h"
+
 namespace vsag {
+class MultiBitsetManager;
 
 template <class T>
 static void

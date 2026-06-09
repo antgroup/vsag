@@ -15,7 +15,7 @@
 
 #include "bruteforce_parameter.h"
 
-#include <fmt/format.h>
+#include <fmt/core.h>
 
 #include "datacell/flatten_datacell_parameter.h"
 #include "inner_string_params.h"

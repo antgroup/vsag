@@ -15,9 +15,12 @@
 
 #include "bucket_datacell_parameter.h"
 
-#include <fmt/format.h>
+#include <fmt/core.h>
 
+#include "common.h"
+#include "impl/logger/logger.h"
 #include "inner_string_params.h"
+#include "json_wrapper.h"
 #include "utils/param_compat_macros.h"
 
 namespace vsag {

@@ -15,16 +15,30 @@
 
 #include "pq_fastscan_quantizer.h"
 
+#include <fmt/core.h>
+
+#include <algorithm>
+#include <cstring>
+#include <limits>
+#include <memory>
+#include <new>
+#include <ostream>
+
 #include "impl/blas/blas_function.h"
 #include "impl/cluster/kmeans_cluster.h"
 #include "index_common_param.h"
 #include "pq_fastscan_quantizer_parameter.h"
+#include "quantization/computer.h"
 #include "quantization/quantizer.h"
 #include "quantization/scalar_quantization/scalar_quantization_trainer.h"
 #include "simd/fp32_simd.h"
 #include "simd/normalize.h"
 #include "simd/pqfs_simd.h"
-#include "utils/prefetch.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
+#include "vsag/allocator.h"
+#include "vsag/errors.h"
+#include "vsag_exception.h"
 
 namespace vsag {
 

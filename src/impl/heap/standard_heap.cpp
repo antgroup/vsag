@@ -15,7 +15,14 @@
 
 #include "standard_heap.h"
 
+#include <memory>
+#include <utility>
+
+#include "impl/heap/distance_heap.h"
+
 namespace vsag {
+class Allocator;
+
 template <bool max_heap, bool fixed_size>
 StandardHeap<max_heap, fixed_size>::StandardHeap(Allocator* allocator, int64_t max_size)
     : DistanceHeap(allocator, max_size), queue_(allocator) {

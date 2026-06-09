@@ -14,11 +14,17 @@
 
 #include "reader_io.h"
 
-#include <fmt/format.h>
-
-#include <future>
+#include <cstdint>
+#include <ostream>
+#include <vector>
 
 #include "index_common_param.h"
+#include "io/basic_io.h"
+#include "io/reader_io_parameter.h"
+#include "vsag/allocator.h"
+#include "vsag/errors.h"
+#include "vsag/readerset.h"
+#include "vsag_exception.h"
 
 namespace vsag {
 

@@ -16,6 +16,7 @@
 #include "attribute_inverted_interface_parameter.h"
 
 #include "inner_string_params.h"
+#include "json_wrapper.h"
 #include "utils/param_compat_macros.h"
 
 namespace vsag {

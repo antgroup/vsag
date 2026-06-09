@@ -15,8 +15,22 @@
 
 #include "compressed_graph_datacell.h"
 
-#include "graph_datacell_parameter.h"
+#include <fmt/core.h>
+
+#include <algorithm>
+#include <atomic>
+#include <ostream>
+#include <utility>
+#include <vector>
+
+#include "datacell/compressed_graph_datacell_parameter.h"
+#include "datacell/graph_interface.h"
+#include "impl/elias_fano_encoder.h"
 #include "index_common_param.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
+#include "vsag/allocator.h"
+#include "vsag/errors.h"
 #include "vsag_exception.h"
 
 namespace vsag {

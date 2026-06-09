@@ -15,8 +15,19 @@
 
 #include "logical_executor.h"
 
+#include <cstdint>
+#include <memory>
+#include <ostream>
+
+#include "attr/executor/executor.h"
+#include "impl/bitset/computable_bitset.h"
+#include "impl/filter/white_list_filter.h"
+#include "vsag/errors.h"
+#include "vsag/filter.h"
 #include "vsag_exception.h"
+
 namespace vsag {
+class Allocator;
 
 LogicalExecutor::LogicalExecutor(Allocator* allocator,
                                  const ExprPtr& expr,

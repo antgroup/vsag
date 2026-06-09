@@ -12,32 +12,83 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <fmt/format.h>
+#include <cxxabi.h>
+#include <fmt/core.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <cstdlib>
+#include <exception>
 #include <fstream>
 #include <future>
+#include <iosfwd>
 #include <limits>
+#include <memory>
+#include <mutex>
+#include <shared_mutex>
+#include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
+#include <vector>
 
+#include "algorithm/hgraph/hgraph_cache.h"
+#include "algorithm/hgraph/hgraph_parameter.h"
+#include "algorithm/inner_index_interface.h"
+#include "basic_types.h"
+#include "common.h"
+#include "container_types.h"
+#include "data_type.h"
+#include "datacell/attribute_inverted_interface.h"
+#include "datacell/extra_info_interface.h"
 #include "datacell/flatten_datacell_parameter.h"
-#include "dataset_impl.h"
+#include "datacell/flatten_interface.h"
+#include "datacell/graph_interface.h"
+#include "hash_types.h"
 #include "hgraph.h"  // IWYU pragma: keep
+#include "impl/basic_optimizer.h"
+#include "impl/heap/distance_heap.h"
 #include "impl/heap/standard_heap.h"
+#include "impl/inner_search_param.h"
+#include "impl/label_table/label_table.h"
 #include "impl/logger/logger.h"
 #include "impl/odescent/odescent_graph_builder.h"
+#include "impl/odescent/odescent_graph_parameter.h"
 #include "impl/pruning_strategy.h"
+#include "impl/reorder/flatten_reorder.h"
+#include "impl/reorder/reorder.h"
+#include "impl/runtime_parameter.h"
 #include "impl/searcher/basic_searcher.h"
+#include "impl/thread_pool/safe_thread_pool.h"
+#include "index_common_param.h"
+#include "index_feature_list.h"
+#include "inner_string_params.h"
+#include "io/io_parameter.h"
 #include "io/memory_io_parameter.h"
+#include "metric_type.h"
+#include "quantization/quantizer_parameter.h"
 #include "quantization/scalar_quantization/scalar_quantizer_parameter.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
+#include "tsl/robin_hash.h"
+#include "tsl/robin_map.h"
+#include "tsl/robin_set.h"
+#include "utils/lock_strategy.h"
 #include "utils/util_functions.h"
+#include "utils/visited_list.h"
+#include "vsag/attribute.h"
+#include "vsag/constants.h"
+#include "vsag/dataset.h"
+#include "vsag/index.h"
+#include "vsag/index_features.h"
 
 namespace vsag {
+class Allocator;
+class IteratorFilterContext;
+struct QueryContext;
 
 static FlattenInterfacePtr
 make_temporary_sq8_flatten(MetricType metric,

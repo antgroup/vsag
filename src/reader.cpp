@@ -12,10 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <fmt/format.h>
+#include <fmt/core.h>
 
+#include <atomic>
+#include <cstdint>
 #include <future>
+#include <string>
 
+#include "vsag/errors.h"
 #include "vsag/readerset.h"
 #include "vsag_exception.h"
 

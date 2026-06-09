@@ -15,6 +15,9 @@
 
 #include "vector_transformer.h"
 
+#include <ostream>
+
+#include "vsag/errors.h"
 #include "vsag_exception.h"
 
 namespace vsag {

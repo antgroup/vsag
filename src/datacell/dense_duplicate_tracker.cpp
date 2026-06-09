@@ -15,8 +15,13 @@
 #include "dense_duplicate_tracker.h"
 
 #include <algorithm>
+#include <mutex>
+
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
 
 namespace vsag {
+class Allocator;
 
 DenseDuplicateTracker::DenseDuplicateTracker(Allocator* allocator)
     : allocator_(allocator), duplicate_ids_(0, allocator_) {

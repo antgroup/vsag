@@ -15,8 +15,17 @@
 
 #include "memmove_heap.h"
 
+#include <algorithm>
 #include <cstring>
+#include <type_traits>
+#include <utility>
+#include <vector>
+
+#include "impl/heap/distance_heap.h"
+
 namespace vsag {
+class Allocator;
+
 template <bool max_heap, bool fixed_size>
 MemmoveHeap<max_heap, fixed_size>::MemmoveHeap(Allocator* allocator, int64_t max_size)
     : DistanceHeap(allocator, max_size), ordered_buffer_(allocator) {

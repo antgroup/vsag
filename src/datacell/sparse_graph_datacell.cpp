@@ -15,11 +15,28 @@
 
 #include "sparse_graph_datacell.h"
 
+#include <fmt/core.h>
+
+#include <algorithm>
+#include <atomic>
+#include <mutex>
+#include <ostream>
+#include <utility>
+#include <vector>
+
+#include "datacell/graph_interface.h"
+#include "impl/reverse_edge.h"
 #include "index_common_param.h"
 #include "sparse_graph_datacell_parameter.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
+#include "tsl/robin_hash.h"
+#include "tsl/robin_map.h"
+#include "vsag/errors.h"
 #include "vsag_exception.h"
 
 namespace vsag {
+class Allocator;
 
 SparseGraphDataCell::SparseGraphDataCell(const SparseGraphDatacellParamPtr& graph_param,
                                          Allocator* allocator)
