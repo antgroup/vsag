@@ -16,6 +16,7 @@
 
 add_subdirectory (hnswlib)
 add_subdirectory (sindi)
+add_subdirectory (disksindi)
 add_subdirectory (hgraph)
 add_subdirectory (bruteforce)
 add_subdirectory (ivf)
@@ -35,6 +36,7 @@ set (ALGORITHM_LIBS
         algorithm
         hnswlib
         sindi
+        disksindi
         hgraph
         bruteforce
         ivf
