@@ -64,6 +64,10 @@ set (VSAG_USE_SYSTEM_OPENBLAS "" CACHE STRING
      "Override VSAG_USE_SYSTEM_DEPS for OpenBLAS: AUTO, ON, OFF, or empty to inherit.")
 set_property (CACHE VSAG_USE_SYSTEM_OPENBLAS PROPERTY STRINGS "" AUTO ON OFF)
 
+set (VSAG_USE_SYSTEM_FMT "" CACHE STRING
+     "Override VSAG_USE_SYSTEM_DEPS for fmt: AUTO, ON, OFF, or empty to inherit.")
+set_property (CACHE VSAG_USE_SYSTEM_FMT PROPERTY STRINGS "" AUTO ON OFF)
+
 set (_default_aclocal_path "")
 if (DEFINED ENV{ACLOCAL_PATH} AND NOT "$ENV{ACLOCAL_PATH}" STREQUAL "")
     set (_default_aclocal_path "$ENV{ACLOCAL_PATH}")
