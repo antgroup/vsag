@@ -462,6 +462,13 @@ VSAG referenced the following works during its implementation:
         </tr>
         <tr>
             <td align="center">
+                <a href="https://github.com/jfeng18">
+                    <img src="https://avatars.githubusercontent.com/u/288662032?v=4" width="100" alt="jfeng18"/>
+                    <br />
+                    <sub><b>Jiangtian Feng</b></sub>
+                </a>
+            </td>
+            <td align="center">
                 <a href="https://github.com/jiacai2050">
                     <img src="https://avatars.githubusercontent.com/u/3848910?v=4" width="100" alt="jiacai2050"/>
                     <br />
@@ -496,6 +503,8 @@ VSAG referenced the following works during its implementation:
                     <sub><b>cubicc</b></sub>
                 </a>
             </td>
+        </tr>
+        <tr>
             <td align="center">
                 <a href="https://github.com/dasurax">
                     <img src="https://avatars.githubusercontent.com/u/9841872?v=4" width="100" alt="dasurax"/>
@@ -503,8 +512,6 @@ VSAG referenced the following works during its implementation:
                     <sub><b>dasurax</b></sub>
                 </a>
             </td>
-        </tr>
-        <tr>
             <td align="center">
                 <a href="https://github.com/hhy3">
                     <img src="https://avatars.githubusercontent.com/u/44047980?v=4" width="100" alt="hhy3"/>
@@ -540,6 +547,15 @@ VSAG referenced the following works during its implementation:
                     <sub><b>Mingyu Yang</b></sub>
                 </a>
             </td>
+        </tr>
+        <tr>
+            <td align="center">
+                <a href="https://github.com/mukejane">
+                    <img src="https://avatars.githubusercontent.com/u/272978297?v=4" width="100" alt="mukejane"/>
+                    <br />
+                    <sub><b>mukejane</b></sub>
+                </a>
+            </td>
             <td align="center">
                 <a href="https://github.com/skylhd">
                     <img src="https://avatars.githubusercontent.com/u/13144296?v=4" width="100" alt="skylhd"/>
@@ -547,8 +563,6 @@ VSAG referenced the following works during its implementation:
                     <sub><b>lhd</b></sub>
                 </a>
             </td>
-        </tr>
-        <tr>
             <td align="center">
                 <a href="https://github.com/stuBirdFly">
                     <img src="https://avatars.githubusercontent.com/u/84010733?v=4" width="100" alt="stuBirdFly"/>
