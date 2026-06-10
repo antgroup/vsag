@@ -231,7 +231,13 @@ const char* const PYRAMID_PRECISE_IO_TYPE = "precise_io_type";
 const char* const PYRAMID_PRECISE_FILE_PATH = "precise_file_path";
 const char* const PYRAMID_PARAMETER_EF_SEARCH = "ef_search";
 const char* const PYRAMID_PARAMETER_SUBINDEX_EF_SEARCH = "subindex_ef_search";
+// search-time param key (in search JSON under "pyramid")
+const char* const PYRAMID_PARAMETER_HIERARCHIES = "hierarchies";
+const char* const PYRAMID_PARAMETER_HIERARCHY_OP = "hierarchy_op";
 const char* const PYRAMID_NO_BUILD_LEVELS = "no_build_levels";
+// build-time param key (in index_param JSON); same literal as search-time but kept separate
+// so either can evolve independently without coupling the other context
+const char* const PYRAMID_HIERARCHIES = "hierarchies";
 const char* const PYRAMID_INDEX_MIN_SIZE = "index_min_size";
 
 const char* const GNO_IMI_FIRST_ORDER_BUCKETS_COUNT = "first_order_buckets_count";

@@ -328,12 +328,31 @@ public:
     Paths(const std::string* paths) = 0;
 
     /**
+     * @brief Sets the paths array for a named hierarchy.
+     *
+     * @param hierarchy_name The hierarchy name. An empty string targets the default hierarchy.
+     * @param paths Pointer to the array of paths.
+     * @return DatasetPtr A shared pointer to the dataset with updated paths.
+     */
+    virtual DatasetPtr
+    Paths(const std::string& hierarchy_name, const std::string* paths) = 0;
+
+    /**
      * @brief Retrieves the paths array of the dataset.
      *
      * @return const std::string* Pointer to the array of paths.
      */
     virtual const std::string*
     GetPaths() const = 0;
+
+    /**
+     * @brief Retrieves the paths array of a named hierarchy.
+     *
+     * @param hierarchy_name The hierarchy name. An empty string targets the default hierarchy.
+     * @return const std::string* Pointer to the array of paths.
+     */
+    virtual const std::string*
+    GetPaths(const std::string& hierarchy_name) const = 0;
 
     /**
      * @brief Sets the extra info for the dataset.

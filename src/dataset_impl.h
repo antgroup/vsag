@@ -210,9 +210,30 @@ public:
         return shared_from_this();
     }
 
+    DatasetPtr
+    Paths(const std::string& hierarchy_name, const std::string* paths) override {
+        if (hierarchy_name.empty()) {
+            return Paths(paths);
+        }
+        this->data_[HierarchyPathsKey(hierarchy_name)] = paths;
+        return shared_from_this();
+    }
+
     const std::string*
     GetPaths() const override {
         if (auto iter = this->data_.find(DATASET_PATHS); iter != this->data_.end()) {
+            return std::get<const std::string*>(iter->second);
+        }
+        return nullptr;
+    }
+
+    const std::string*
+    GetPaths(const std::string& hierarchy_name) const override {
+        if (hierarchy_name.empty()) {
+            return GetPaths();
+        }
+        if (auto iter = this->data_.find(HierarchyPathsKey(hierarchy_name));
+            iter != this->data_.end()) {
             return std::get<const std::string*>(iter->second);
         }
         return nullptr;
@@ -329,6 +350,28 @@ public:
 
     static DatasetPtr
     MakeEmptyDataset();
+
+private:
+    static const std::string&
+    HierarchyPathsPrefix() {
+        static const std::string prefix = std::string(DATASET_PATHS) + ":";
+        return prefix;
+    }
+
+    static std::string
+    HierarchyPathsKey(const std::string& hierarchy_name) {
+        return HierarchyPathsPrefix() + hierarchy_name;
+    }
+
+    static bool
+    IsHierarchyPathsKey(const std::string& key) {
+        return key.rfind(HierarchyPathsPrefix(), 0) == 0;
+    }
+
+    static std::string
+    HierarchyNameFromPathsKey(const std::string& key) {
+        return key.substr(HierarchyPathsPrefix().size());
+    }
 
 private:
     bool owner_{true};

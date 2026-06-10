@@ -241,6 +241,8 @@ Pyramid::KnnSearch(const DatasetPtr& query,
 
     auto parsed_param = PyramidSearchParameters::FromJson(parameters);
     CHECK_ARGUMENT(k > 0, fmt::format("k({}) must be greater than 0", k));
+    CHECK_ARGUMENT(not parsed_param.HasHierarchySelector(),
+                   "pyramid named hierarchy search is reserved but not implemented");
     auto ef_search_threshold = std::max<uint64_t>(AMPLIFICATION_FACTOR * k, 1000L);
     CHECK_ARGUMENT(  // NOLINT
         (1 <= parsed_param.ef_search) and (parsed_param.ef_search <= ef_search_threshold),
@@ -285,6 +287,8 @@ Pyramid::RangeSearch(const DatasetPtr& query,
     QueryContext ctx{.stats = &stats};
 
     auto parsed_param = PyramidSearchParameters::FromJson(parameters);
+    CHECK_ARGUMENT(not parsed_param.HasHierarchySelector(),
+                   "pyramid named hierarchy search is reserved but not implemented");
     InnerSearchParam search_param;
     search_param.ef = parsed_param.ef_search;
     search_param.radius = radius * RADIUS_EPSILON;
@@ -474,6 +478,10 @@ Pyramid::ExportModel(const IndexCommonParam& param) const {
 
 std::vector<int64_t>
 Pyramid::Add(const DatasetPtr& base, AddMode mode) {
+    const auto pyramid_param = std::dynamic_pointer_cast<PyramidParameters>(create_param_ptr_);
+    CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+        pyramid_param == nullptr || not pyramid_param->has_hierarchies,
+        "pyramid named hierarchy add is reserved but not implemented");
     const auto* path = base->GetPaths();
     CHECK_ARGUMENT(path != nullptr, "path is required");
     int64_t data_num = base->GetNumElements();
@@ -699,6 +707,7 @@ Pyramid::CheckAndMappingExternalParam(const JsonType& external_param,
         {PYRAMID_PRECISE_IO_TYPE, {PRECISE_CODES_KEY, IO_PARAMS_KEY, TYPE_KEY}},
         {PYRAMID_BUILD_THREAD_COUNT, {BUILD_THREAD_COUNT_KEY}},
         {PYRAMID_NO_BUILD_LEVELS, {NO_BUILD_LEVELS}},
+        {PYRAMID_HIERARCHIES, {PYRAMID_HIERARCHIES}},
         {PYRAMID_BASE_PQ_DIM,
          {BASE_CODES_KEY, QUANTIZATION_PARAMS_KEY, PRODUCT_QUANTIZATION_DIM_KEY}},
         {PYRAMID_BASE_FILE_PATH, {BASE_CODES_KEY, IO_PARAMS_KEY, IO_FILE_PATH_KEY}},
@@ -729,6 +738,10 @@ Pyramid::Train(const DatasetPtr& base) {
 }
 std::vector<int64_t>
 Pyramid::Build(const DatasetPtr& base) {
+    const auto pyramid_param = std::dynamic_pointer_cast<PyramidParameters>(create_param_ptr_);
+    CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+        pyramid_param == nullptr || not pyramid_param->has_hierarchies,
+        "pyramid named hierarchy build is reserved but not implemented");
     CHECK_ARGUMENT(GetNumElements() == 0, "index is not empty");
     this->Train(base);
     std::vector<int64_t> ret;

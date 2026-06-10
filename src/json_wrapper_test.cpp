@@ -60,6 +60,15 @@ TEST_CASE("JsonWrapper Copy Nested Json", "[ut][json_wrapper]") {
     CHECK(w2["outer"]["inner"].GetString() == "data");
 }
 
+TEST_CASE("JsonWrapper Object Type Check", "[ut][json_wrapper]") {
+    auto object = vsag::JsonWrapper::Parse(R"({"key": "value"})");
+    auto array = vsag::JsonWrapper::Parse(R"(["value"])");
+    auto string = vsag::JsonWrapper::Parse(R"("value")");
+    CHECK(object.IsObject());
+    CHECK_FALSE(array.IsObject());
+    CHECK_FALSE(string.IsObject());
+}
+
 TEST_CASE("JsonWrapper Copy Non-owning Wrapper", "[ut][json_wrapper]") {
     vsag::JsonWrapper sub;
     {

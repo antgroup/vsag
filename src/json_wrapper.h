@@ -52,6 +52,9 @@ public:
     bool
     IsArray() const;
 
+    bool
+    IsObject() const;
+
     JsonWrapper&
     operator=(const JsonWrapper& other);
 

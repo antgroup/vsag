@@ -15,7 +15,10 @@
 
 #pragma once
 
+#include <cstdint>
 #include <functional>
+#include <string>
+#include <vector>
 
 #include "algorithm/hgraph/hgraph_parameter.h"
 #include "algorithm/index_search_parameter.h"
@@ -32,6 +35,26 @@
 namespace vsag {
 
 DEFINE_POINTER2(PyramidParam, PyramidParameters);
+struct PyramidHierarchyParameters {
+public:
+    void
+    FromJson(const JsonType& json);
+
+    JsonType
+    ToJson() const;
+
+    bool
+    CheckCompatibility(const PyramidHierarchyParameters& other) const;
+
+public:
+    std::string name;
+    std::vector<int32_t> no_build_levels;
+    int64_t max_degree{64};
+    uint64_t ef_construction{400};
+    float alpha{1.2F};
+    uint32_t index_min_size{0};
+};
+
 struct PyramidParameters : public InnerIndexParameter {
 public:
     void
@@ -49,6 +72,7 @@ public:
     ODescentParameterPtr odescent_param{nullptr};
 
     std::vector<int32_t> no_build_levels;
+    std::vector<PyramidHierarchyParameters> hierarchies;
     uint64_t ef_construction{400};
     int64_t max_degree{64};
     std::string graph_type{GRAPH_TYPE_VALUE_NSW};
@@ -56,16 +80,28 @@ public:
     uint32_t index_min_size{0};
 
     bool support_duplicate{false};
+    bool has_hierarchies{false};
 };
 
 class PyramidSearchParameters : public IndexSearchParameter {
 public:
+    enum class HierarchyOp {
+        SINGLE,
+        UNION,
+        INTERSECTION,
+    };
+
     static PyramidSearchParameters
     FromJson(const std::string& json_string);
+
+    bool
+    HasHierarchySelector() const;
 
 public:
     uint64_t ef_search{100};
     uint64_t subindex_ef_search{50};
+    std::vector<std::string> hierarchies;
+    HierarchyOp hierarchy_op{HierarchyOp::SINGLE};
 
 private:
     PyramidSearchParameters() = default;

@@ -342,6 +342,30 @@ ArePathArraysDeepCopied(const std::string* original,
     return true;
 }
 
+std::string*
+CopyPathArray(const std::vector<std::string>& paths) {
+    auto* path_array = new std::string[paths.size()];
+    for (uint64_t i = 0; i < paths.size(); ++i) {
+        path_array[i] = paths[i];
+    }
+    return path_array;
+}
+
+vsag::DatasetPtr
+MakeDatasetWithNamedPaths(
+    const std::vector<std::string>& default_paths,
+    const std::vector<std::pair<std::string, std::vector<std::string>>>& hierarchy_paths) {
+    auto dataset = vsag::Dataset::Make();
+    dataset->NumElements(static_cast<int64_t>(default_paths.size()))
+        ->Dim(1)
+        ->Paths(CopyPathArray(default_paths))
+        ->Owner(true);
+    for (const auto& [hierarchy_name, paths] : hierarchy_paths) {
+        dataset->Paths(hierarchy_name, CopyPathArray(paths));
+    }
+    return dataset;
+}
+
 TEST_CASE("Dataset Copy and Append Test", "[ut][Dataset]") {
     std::random_device rd;
     std::mt19937 gen(rd());
@@ -394,6 +418,95 @@ TEST_CASE("Dataset Copy and Append Test", "[ut][Dataset]") {
             ->ExtraInfos(original->GetExtraInfos() + num_elements * extra_info_size)
             ->Owner(false);
         REQUIRE(EqualDataset(sub_original, append_dataset));
+    }
+}
+
+TEST_CASE("Dataset Named Paths Test", "[ut][dataset]") {
+    SECTION("named path setter and getter") {
+        std::string default_paths[2] = {"root/a", "root/b"};
+        std::string site_paths[2] = {"site/a", "site/b"};
+        std::string taxonomy_paths[2] = {"taxonomy/a", "taxonomy/b"};
+        std::string replacement_default_paths[2] = {"root/c", "root/d"};
+
+        auto dataset = vsag::Dataset::Make();
+        dataset->NumElements(2)->Dim(1)->Owner(false);
+        dataset->Paths(default_paths)->Paths("site", site_paths)->Paths("taxonomy", taxonomy_paths);
+
+        REQUIRE(dataset->GetPaths() == default_paths);
+        REQUIRE(dataset->GetPaths("") == default_paths);
+        REQUIRE(dataset->GetPaths("site") == site_paths);
+        REQUIRE(dataset->GetPaths("taxonomy") == taxonomy_paths);
+        REQUIRE(dataset->GetPaths("missing") == nullptr);
+
+        dataset->Paths("", replacement_default_paths);
+        REQUIRE(dataset->GetPaths() == replacement_default_paths);
+        REQUIRE(dataset->GetPaths("") == replacement_default_paths);
+        REQUIRE(dataset->GetPaths("site") == site_paths);
+    }
+
+    SECTION("deep copy preserves named paths") {
+        auto original = MakeDatasetWithNamedPaths(
+            {"root/a", "root/b"},
+            {{"site", {"site/a", "site/b"}}, {"taxonomy", {"taxonomy/a", "taxonomy/b"}}});
+
+        auto copy = original->DeepCopy();
+
+        REQUIRE(ArePathArraysDeepCopied(original->GetPaths(), copy->GetPaths(), 2));
+        REQUIRE(ArePathArraysDeepCopied(original->GetPaths("site"), copy->GetPaths("site"), 2));
+        REQUIRE(
+            ArePathArraysDeepCopied(original->GetPaths("taxonomy"), copy->GetPaths("taxonomy"), 2));
+    }
+
+    SECTION("append preserves named paths") {
+        auto dataset = MakeDatasetWithNamedPaths(
+            {"root/a", "root/b"},
+            {{"site", {"site/a", "site/b"}}, {"taxonomy", {"taxonomy/a", "taxonomy/b"}}});
+        auto append_dataset = MakeDatasetWithNamedPaths(
+            {"root/c"}, {{"site", {"site/c"}}, {"taxonomy", {"taxonomy/c"}}});
+
+        dataset->Append(append_dataset);
+
+        REQUIRE(dataset->GetNumElements() == 3);
+        REQUIRE(dataset->GetPaths()[2] == "root/c");
+        REQUIRE(dataset->GetPaths("site")[2] == "site/c");
+        REQUIRE(dataset->GetPaths("taxonomy")[2] == "taxonomy/c");
+    }
+
+    SECTION("append requires matching named paths") {
+        auto dataset = MakeDatasetWithNamedPaths({"root/a"}, {{"site", {"site/a"}}});
+        auto append_dataset = MakeDatasetWithNamedPaths({"root/b"}, {});
+
+        REQUIRE_THROWS(dataset->Append(append_dataset));
+    }
+
+    SECTION("append rejects extra named paths on appended dataset") {
+        auto dataset = MakeDatasetWithNamedPaths({"root/a"}, {});
+        auto append_dataset = MakeDatasetWithNamedPaths({"root/b"}, {{"site", {"site/b"}}});
+
+        REQUIRE_THROWS(dataset->Append(append_dataset));
+    }
+
+    SECTION("append handles aliased named path arrays") {
+        auto* shared_paths = CopyPathArray({"shared/a", "shared/b"});
+        auto dataset = vsag::Dataset::Make();
+        dataset->NumElements(2)
+            ->Dim(1)
+            ->Paths(shared_paths)
+            ->Paths("site", shared_paths)
+            ->Paths("taxonomy", shared_paths)
+            ->Owner(true);
+        auto append_dataset = MakeDatasetWithNamedPaths(
+            {"root/c"}, {{"site", {"site/c"}}, {"taxonomy", {"taxonomy/c"}}});
+
+        dataset->Append(append_dataset);
+
+        REQUIRE(dataset->GetNumElements() == 3);
+        REQUIRE(dataset->GetPaths()[0] == "shared/a");
+        REQUIRE(dataset->GetPaths("site")[0] == "shared/a");
+        REQUIRE(dataset->GetPaths("taxonomy")[0] == "shared/a");
+        REQUIRE(dataset->GetPaths()[2] == "root/c");
+        REQUIRE(dataset->GetPaths("site")[2] == "site/c");
+        REQUIRE(dataset->GetPaths("taxonomy")[2] == "taxonomy/c");
     }
 }
 

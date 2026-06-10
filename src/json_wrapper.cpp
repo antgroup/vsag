@@ -106,6 +106,11 @@ JsonWrapper::IsArray() const {
     return json_->is_array();
 }
 
+bool
+JsonWrapper::IsObject() const {
+    return json_->is_object();
+}
+
 void
 JsonWrapper::SetString(const std::string& str_value) {
     (*json_) = str_value;
