@@ -57,6 +57,7 @@ AsyncIO::AsyncIO(const IOParamPtr& param, const IndexCommonParam& common_param)
     : AsyncIO(std::dynamic_pointer_cast<AsyncIOParameter>(param), common_param){};
 
 AsyncIO::~AsyncIO() {
+    flush_if_dirty();
     close(this->wfd_);
     close(this->rfd_);
     // remove file
