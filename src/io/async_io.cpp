@@ -108,6 +108,7 @@ AsyncIO::DirectReadImpl(uint64_t size, uint64_t offset, bool& need_release) cons
     DirectIOObject obj(size, offset);
     auto ret = IOSyscall::PRead(this->rfd_, obj.align_data, obj.size, obj.offset);
     if (ret < 0) {
+        obj.Release();
         throw VsagException(ErrorType::INTERNAL_ERROR, fmt::format("pread error {}", ret));
     }
     return obj.data;

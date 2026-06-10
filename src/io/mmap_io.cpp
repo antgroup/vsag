@@ -93,7 +93,11 @@ MMapIO::MMapIO(const IOParamPtr& param, const IndexCommonParam& common_param)
     : MMapIO(std::dynamic_pointer_cast<MMapIOParameter>(param), common_param){};
 
 MMapIO::~MMapIO() {
-    munmap(this->start_, this->size_);
+    auto munmap_size = this->size_;
+    if (munmap_size == 0) {
+        munmap_size = DEFAULT_INIT_MMAP_SIZE;
+    }
+    munmap(this->start_, munmap_size);
     close(this->fd_);
     // remove file
     if (not this->exist_file_) {
