@@ -75,7 +75,7 @@ AsyncIO::WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset) {
     if (size + offset > this->size_) {
         this->size_ = size + offset;
     }
-    fsync(wfd_);
+    dirty_.store(true, std::memory_order_release);
 }
 
 void
@@ -87,8 +87,19 @@ AsyncIO::ResizeImpl(uint64_t size) {
     this->size_ = size;
 }
 
+void
+AsyncIO::flush_if_dirty() const {
+    if (dirty_.load(std::memory_order_acquire)) {
+        std::lock_guard<std::mutex> lock(flush_mutex_);
+        if (dirty_.exchange(false, std::memory_order_acq_rel)) {
+            fdatasync(wfd_);
+        }
+    }
+}
+
 bool
 AsyncIO::ReadImpl(uint64_t size, uint64_t offset, uint8_t* data) const {
+    flush_if_dirty();
     bool need_release = true;
     const auto* ptr = DirectReadImpl(size, offset, need_release);
     if (ptr == nullptr) {
@@ -101,6 +112,7 @@ AsyncIO::ReadImpl(uint64_t size, uint64_t offset, uint8_t* data) const {
 
 const uint8_t*
 AsyncIO::DirectReadImpl(uint64_t size, uint64_t offset, bool& need_release) const {
+    flush_if_dirty();
     if (not check_valid_offset(size + offset)) {
         return nullptr;
     }
@@ -129,6 +141,7 @@ AsyncIO::ReleaseImpl(const uint8_t* data) {
 
 bool
 AsyncIO::MultiReadImpl(uint8_t* datas, uint64_t* sizes, uint64_t* offsets, uint64_t count) const {
+    flush_if_dirty();
     auto context = io_context_pool->TakeOne();
     uint8_t* cur_data = datas;
     auto all_count = static_cast<int64_t>(count);
