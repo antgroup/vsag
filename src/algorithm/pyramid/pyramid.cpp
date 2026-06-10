@@ -353,8 +353,7 @@ Pyramid::search_impl(const DatasetPtr& query,
                 if (thread_pool_ != nullptr && search_param.parallel_search_thread_count > 1) {
                     futures.push_back(thread_pool_->GeneralEnqueue([&, node, i]() -> void {
                         auto task_vl = pool_->TakeOne();
-                        node->Search(
-                            search_func, task_vl, search_result_lists[i], search_param.ef);
+                        node->Search(search_func, task_vl, search_result_lists[i], search_param.ef);
                         pool_->ReturnOne(task_vl);
                     }));
                 } else {
