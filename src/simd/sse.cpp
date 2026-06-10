@@ -713,8 +713,8 @@ SQ4ComputeIP(const float* RESTRICT query,
         return 0;
     }
 
-    float result = 0;
     uint64_t d = 0;
+    __m128 acc = _mm_setzero_ps();
 
     // Process 8 values at a time (4 bytes containing 8 4-bit values)
     for (; d + 7 < dim; d += 8) {
@@ -753,19 +753,17 @@ SQ4ComputeIP(const float* RESTRICT query,
         __m128 query_vec0 = _mm_loadu_ps(query + d);
         __m128 query_vec1 = _mm_loadu_ps(query + d + 4);
 
-        // Compute dot products
+        // Compute dot products and accumulate
         __m128 prod0 = _mm_mul_ps(query_vec0, values0);
         __m128 prod1 = _mm_mul_ps(query_vec1, values1);
-
-        // Horizontal sum
-        __m128 sum01 = _mm_add_ps(prod0, prod1);
-        __m128 sum23 = _mm_shuffle_ps(sum01, sum01, _MM_SHUFFLE(2, 3, 0, 1));
-        __m128 sum0123 = _mm_add_ps(sum01, sum23);
-        __m128 sum4567 = _mm_movehl_ps(sum0123, sum0123);
-        __m128 sum = _mm_add_ss(sum0123, sum4567);
-
-        result += _mm_cvtss_f32(sum);
+        acc = _mm_add_ps(acc, _mm_add_ps(prod0, prod1));
     }
+
+    // Single horizontal reduction after the loop
+    __m128 shuf = _mm_shuffle_ps(acc, acc, _MM_SHUFFLE(2, 3, 0, 1));
+    __m128 sums = _mm_add_ps(acc, shuf);
+    __m128 hi = _mm_movehl_ps(sums, sums);
+    float result = _mm_cvtss_f32(_mm_add_ss(sums, hi));
 
     // Process remaining elements with generic implementation
     result +=
@@ -787,8 +785,8 @@ SQ4ComputeL2Sqr(const float* RESTRICT query,
         return 0;
     }
 
-    float result = 0;
     uint64_t d = 0;
+    __m128 acc = _mm_setzero_ps();
 
     // Process 8 values at a time (4 bytes containing 8 4-bit values)
     for (; d + 7 < dim; d += 8) {
@@ -827,23 +825,18 @@ SQ4ComputeL2Sqr(const float* RESTRICT query,
         __m128 query_vec0 = _mm_loadu_ps(query + d);
         __m128 query_vec1 = _mm_loadu_ps(query + d + 4);
 
-        // Compute differences
+        // Compute differences and accumulate squared distances
         __m128 diff0 = _mm_sub_ps(query_vec0, values0);
         __m128 diff1 = _mm_sub_ps(query_vec1, values1);
-
-        // Square differences
-        __m128 sq_diff0 = _mm_mul_ps(diff0, diff0);
-        __m128 sq_diff1 = _mm_mul_ps(diff1, diff1);
-
-        // Horizontal sum
-        __m128 sum01 = _mm_add_ps(sq_diff0, sq_diff1);
-        __m128 sum23 = _mm_shuffle_ps(sum01, sum01, _MM_SHUFFLE(2, 3, 0, 1));
-        __m128 sum0123 = _mm_add_ps(sum01, sum23);
-        __m128 sum4567 = _mm_movehl_ps(sum0123, sum0123);
-        __m128 sum = _mm_add_ss(sum0123, sum4567);
-
-        result += _mm_cvtss_f32(sum);
+        acc = _mm_add_ps(acc, _mm_mul_ps(diff0, diff0));
+        acc = _mm_add_ps(acc, _mm_mul_ps(diff1, diff1));
     }
+
+    // Single horizontal reduction after the loop
+    __m128 shuf = _mm_shuffle_ps(acc, acc, _MM_SHUFFLE(2, 3, 0, 1));
+    __m128 sums = _mm_add_ps(acc, shuf);
+    __m128 hi = _mm_movehl_ps(sums, sums);
+    float result = _mm_cvtss_f32(_mm_add_ss(sums, hi));
 
     // Process remaining elements with generic implementation
     result +=
@@ -865,8 +858,8 @@ SQ4ComputeCodesIP(const uint8_t* RESTRICT codes1,
         return 0;
     }
 
-    float result = 0;
     uint64_t d = 0;
+    __m128 acc = _mm_setzero_ps();
 
     // Process 8 values at a time (4 bytes containing 8 4-bit values)
     for (; d + 7 < dim; d += 8) {
@@ -914,19 +907,17 @@ SQ4ComputeCodesIP(const uint8_t* RESTRICT codes1,
         code2_values0 = _mm_add_ps(_mm_mul_ps(code2_values0, diff_vec0), lb_vec0);
         code2_values1 = _mm_add_ps(_mm_mul_ps(code2_values1, diff_vec1), lb_vec1);
 
-        // Compute dot products
+        // Compute dot products and accumulate
         __m128 prod0 = _mm_mul_ps(code1_values0, code2_values0);
         __m128 prod1 = _mm_mul_ps(code1_values1, code2_values1);
-
-        // Horizontal sum
-        __m128 sum01 = _mm_add_ps(prod0, prod1);
-        __m128 sum23 = _mm_shuffle_ps(sum01, sum01, _MM_SHUFFLE(2, 3, 0, 1));
-        __m128 sum0123 = _mm_add_ps(sum01, sum23);
-        __m128 sum4567 = _mm_movehl_ps(sum0123, sum0123);
-        __m128 sum = _mm_add_ss(sum0123, sum4567);
-
-        result += _mm_cvtss_f32(sum);
+        acc = _mm_add_ps(acc, _mm_add_ps(prod0, prod1));
     }
+
+    // Single horizontal reduction after the loop
+    __m128 shuf = _mm_shuffle_ps(acc, acc, _MM_SHUFFLE(2, 3, 0, 1));
+    __m128 sums = _mm_add_ps(acc, shuf);
+    __m128 hi = _mm_movehl_ps(sums, sums);
+    float result = _mm_cvtss_f32(_mm_add_ss(sums, hi));
 
     // Process remaining elements with generic implementation
     result += generic::SQ4ComputeCodesIP(
@@ -948,8 +939,8 @@ SQ4ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
         return 0;
     }
 
-    float result = 0;
     uint64_t d = 0;
+    __m128 acc = _mm_setzero_ps();
 
     // Process 8 values at a time (4 bytes containing 8 4-bit values)
     for (; d + 7 < dim; d += 8) {
@@ -997,23 +988,18 @@ SQ4ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
         code2_values0 = _mm_add_ps(_mm_mul_ps(code2_values0, diff_vec0), lb_vec0);
         code2_values1 = _mm_add_ps(_mm_mul_ps(code2_values1, diff_vec1), lb_vec1);
 
-        // Compute differences
+        // Compute differences and accumulate squared distances
         __m128 diff0 = _mm_sub_ps(code1_values0, code2_values0);
         __m128 diff1 = _mm_sub_ps(code1_values1, code2_values1);
-
-        // Square differences
-        __m128 sq_diff0 = _mm_mul_ps(diff0, diff0);
-        __m128 sq_diff1 = _mm_mul_ps(diff1, diff1);
-
-        // Horizontal sum
-        __m128 sum01 = _mm_add_ps(sq_diff0, sq_diff1);
-        __m128 sum23 = _mm_shuffle_ps(sum01, sum01, _MM_SHUFFLE(2, 3, 0, 1));
-        __m128 sum0123 = _mm_add_ps(sum01, sum23);
-        __m128 sum4567 = _mm_movehl_ps(sum0123, sum0123);
-        __m128 sum = _mm_add_ss(sum0123, sum4567);
-
-        result += _mm_cvtss_f32(sum);
+        acc = _mm_add_ps(acc, _mm_mul_ps(diff0, diff0));
+        acc = _mm_add_ps(acc, _mm_mul_ps(diff1, diff1));
     }
+
+    // Single horizontal reduction after the loop
+    __m128 shuf = _mm_shuffle_ps(acc, acc, _MM_SHUFFLE(2, 3, 0, 1));
+    __m128 sums = _mm_add_ps(acc, shuf);
+    __m128 hi = _mm_movehl_ps(sums, sums);
+    float result = _mm_cvtss_f32(_mm_add_ss(sums, hi));
 
     // Process remaining elements with generic implementation
     result += generic::SQ4ComputeCodesL2Sqr(
