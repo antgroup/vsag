@@ -19,7 +19,7 @@ for (const auto& key : bs.GetKeys()) {
 // 加载
 vsag::BinarySet bs_loaded;
 // 从介质中读取每个 key 对应的 Binary 放入 bs_loaded
-auto empty = vsag::Factory::CreateIndex("hnsw", build_params).value();
+auto empty = vsag::Factory::CreateIndex("hgraph", build_params).value();
 empty->Deserialize(bs_loaded);
 ```
 

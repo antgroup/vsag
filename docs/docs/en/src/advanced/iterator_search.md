@@ -35,8 +35,8 @@ pass a sufficiently large `k` on the finalize call.
 ```cpp
 #include <vsag/vsag.h>
 
-// 1. Build an index (HNSW in this example)
-auto index = vsag::Factory::CreateIndex("hnsw", hnsw_build_params).value();
+// 1. Build an index (HGraph in this example)
+auto index = vsag::Factory::CreateIndex("hgraph", hgraph_build_params).value();
 index->Build(dataset);
 
 // 2. Prepare query
@@ -45,7 +45,7 @@ query->NumElements(1)->Dim(dim)->Float32Vectors(query_vec)->Owner(false);
 
 // 3. Configure SearchParam in iterator mode
 nlohmann::json search_parameters = {
-    {"hnsw", {{"ef_search", 100}, {"skip_ratio", 0.7f}}},
+    {"hgraph", {{"ef_search", 100}}},
 };
 std::string param_str = search_parameters.dump();
 

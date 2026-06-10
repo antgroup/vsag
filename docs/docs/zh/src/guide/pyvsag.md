@@ -39,14 +39,18 @@ index_params = json.dumps({
     "dtype": "float32",
     "metric_type": "l2",
     "dim": dim,
-    "hnsw": {"max_degree": 16, "ef_construction": 100},
+    "index_param": {
+        "base_quantization_type": "fp32",
+        "max_degree": 16,
+        "ef_construction": 100,
+    },
 })
 
-index = pyvsag.Index("hnsw", index_params)
+index = pyvsag.Index("hgraph", index_params)
 index.build(vectors=data, ids=ids, num_elements=num_elements, dim=dim)
 
 query = np.float32(np.random.random(dim))
-search_params = json.dumps({"hnsw": {"ef_search": 100}})
+search_params = json.dumps({"hgraph": {"ef_search": 100}})
 result_ids, result_dists = index.knn_search(
     vector=query, k=10, parameters=search_params,
 )
@@ -54,7 +58,7 @@ for rid, rdist in zip(result_ids, result_dists):
     print(f"{rid}: {rdist}")
 ```
 
-完整示例请查阅仓库中的 [`examples/python/`](https://github.com/antgroup/vsag/tree/main/examples/python) 目录，建议从 `example_hnsw.py` 开始。
+完整示例请查阅仓库中的 [`examples/python/`](https://github.com/antgroup/vsag/tree/main/examples/python) 目录，建议从 `103_index_hgraph.py` 开始。
 
 ## 与 C++ 库的关系
 

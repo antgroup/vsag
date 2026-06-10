@@ -26,7 +26,10 @@ index-specific options.
 
 ## Examples
 
-### HNSW
+### HGraph
+
+HGraph uses `index_param` as the build-time sub-object (`hgraph` is reserved for search-time
+parameters like `ef_search`). See `examples/cpp/103_index_hgraph.cpp`.
 
 ```cpp
 std::string params = R"(
@@ -34,19 +37,20 @@ std::string params = R"(
     "dim": 128,
     "dtype": "float32",
     "metric_type": "l2",
-    "hnsw": {
+    "index_param": {
+        "base_quantization_type": "fp32",
         "max_degree": 32,
         "ef_construction": 400
     }
 }
 )";
-auto index = vsag::Factory::CreateIndex("hnsw", params).value();
+auto index = vsag::Factory::CreateIndex("hgraph", params).value();
 ```
 
 ### HGraph with FP16 quantization
 
-HGraph uses `index_param` as the build-time sub-object (`hgraph` is reserved for search-time
-parameters like `ef_search`). See `examples/cpp/103_index_hgraph.cpp`.
+Switch `base_quantization_type` to `fp16` to halve the storage of base vectors with minimal
+recall impact; other quantization types (`bf16`, `sq8`, `pq`, …) are selected the same way.
 
 ```cpp
 std::string params = R"(
