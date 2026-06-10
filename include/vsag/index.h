@@ -51,19 +51,19 @@ struct MergeUnit {
 };
 
 enum class IndexType {
-    HNSW,
-    DISKANN,
-    HGRAPH,
-    IVF,
-    PYRAMID,
-    BRUTEFORCE,
-    SPARSE,
-    SINDI,
-    WARP,
-    LAZY_HGRAPH,
-    SIMQ
+    HNSW = 0,
+    DISKANN = 1,
+    HGRAPH = 2,
+    IVF = 3,
+    PYRAMID = 4,
+    BRUTEFORCE = 5,
+    SPARSE = 6,
+    SINDI = 7,
+    WARP = 8,
+    LAZY_HGRAPH = 9,
+    SIMQ = 10,
+    DISKSINDI = 11,
 };
-
 #define DATA_FLAG_FLOAT32_VECTOR 0x01
 #define DATA_FLAG_INT8_VECTOR 0x02
 #define DATA_FLAG_SPARSE_VECTOR 0x04
@@ -483,7 +483,7 @@ public:
      *
      * Suitable for dense vector indexes (HGraph, BruteForce, IVF, DiskANN, HNSW).
      * The query must be a contiguous float32 array with dimension matching the index.
-      * For sparse vector indexes (SINDI), this overload is not applicable;
+     * For sparse vector indexes (SINDI, DiskSINDI), this overload is not applicable;
      * use CalcDistanceById(DatasetPtr, int64_t, bool) instead.
      *
      * @param vector The embedding of the query (float32 array for dense vectors).
@@ -505,7 +505,7 @@ public:
     /**
      * @brief Calculate the distance between the query and the vector of the given ID.
      *
-      * Suitable for sparse vector indexes (SINDI) where vectors
+     * Suitable for sparse vector indexes (SINDI, DiskSINDI) where vectors
      * cannot be represented as a simple float pointer. The Dataset should
      * contain sparse vectors via GetSparseVectors().
      * For dense vector indexes (HGraph, BruteForce, IVF, DiskANN, HNSW),
@@ -532,7 +532,7 @@ public:
      *
      * Suitable for dense vector indexes (HGraph, BruteForce, IVF, DiskANN, HNSW).
      * The query must be a contiguous float32 array. For sparse vector indexes
-      * (SINDI), this overload is not applicable; use
+     * (SINDI, DiskSINDI), this overload is not applicable; use
      * CalDistanceById(DatasetPtr, const int64_t*, int64_t, bool) instead.
      *
      * @param query is the embedding of query (float32 array for dense vectors).
@@ -556,7 +556,7 @@ public:
     /**
      * @brief Calculate the distance between the query and the vector of the given ID for batch.
      *
-      * Suitable for sparse vector indexes (SINDI) where vectors
+     * Suitable for sparse vector indexes (SINDI, DiskSINDI) where vectors
      * cannot be represented as a simple float pointer. The Dataset should
      * contain sparse vectors via GetSparseVectors().
      * For dense vector indexes (HGraph, BruteForce, IVF, DiskANN, HNSW),

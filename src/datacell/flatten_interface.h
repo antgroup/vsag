@@ -16,11 +16,13 @@
 #pragma once
 
 #include <algorithm>
+#include <cstring>
 #include <limits>
 #include <shared_mutex>
 #include <string>
 
 #include "basic_types.h"
+#include "container_types.h"
 #include "flatten_datacell_parameter.h"
 #include "flatten_interface_parameter.h"
 #include "hash_types.h"
@@ -40,6 +42,20 @@
 namespace vsag {
 
 DEFINE_POINTER(FlattenInterface);
+
+// Result holder for FlattenInterface::GetCodesByIdsBatch.
+// `buffer` is the concatenated codes for all requested ids; `sizes[i]` is the
+// length of the i-th id's codes; `in_buffer_offsets[i]` is the start offset of
+// the i-th id's codes inside `buffer`.
+struct BatchCodesResult {
+    Vector<uint8_t> buffer;
+    Vector<uint64_t> sizes;
+    Vector<uint64_t> in_buffer_offsets;
+
+    explicit BatchCodesResult(Allocator* allocator)
+        : buffer(allocator), sizes(allocator), in_buffer_offsets(allocator) {
+    }
+};
 
 class FlattenInterface {
 public:
@@ -180,6 +196,39 @@ public:
 
     [[nodiscard]] virtual const uint8_t*
     GetCodesById(InnerIdType id, bool& need_release) const = 0;
+
+    // Batched variant of GetCodesById. Default implementation falls back to a
+    // loop over single-id reads; subclasses with variable-length codes (e.g.
+    // SparseVectorDataCell) should override to issue a single batched IO.
+    //
+    // The returned BatchCodesResult owns memory allocated through `allocator`.
+    // The default implementation does *not* require the input ids to be sorted;
+    // overrides may exploit ordering for IO merging but must remain correct
+    // when ids are unordered.
+    virtual BatchCodesResult
+    GetCodesByIdsBatch(const InnerIdType* ids, InnerIdType count, Allocator* allocator) const {
+        BatchCodesResult result(allocator);
+        result.sizes.resize(count);
+        result.in_buffer_offsets.resize(count);
+
+        // Default fallback: loop over single-id GetCodesById and copy each blob
+        // into the output buffer. Code length is fixed (`code_size_`) for most
+        // backends, so we know the total buffer size up front.
+        const uint64_t per_size = static_cast<uint64_t>(this->code_size_);
+        const uint64_t total = per_size * static_cast<uint64_t>(count);
+        result.buffer.resize(total);
+        for (InnerIdType i = 0; i < count; ++i) {
+            bool need_release = false;
+            const auto* codes = this->GetCodesById(ids[i], need_release);
+            result.in_buffer_offsets[i] = static_cast<uint64_t>(i) * per_size;
+            result.sizes[i] = per_size;
+            std::memcpy(result.buffer.data() + result.in_buffer_offsets[i], codes, per_size);
+            if (need_release) {
+                this->Release(codes);
+            }
+        }
+        return result;
+    }
 
     virtual void
     GetSparseVectorByInnerId(InnerIdType inner_id,

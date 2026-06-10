@@ -189,6 +189,41 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::GetCodesById(InnerIdType id, bool& need
 }
 
 template <typename QuantTmpl, typename IOTmpl>
+BatchCodesResult
+SparseVectorDataCell<QuantTmpl, IOTmpl>::GetCodesByIdsBatch(const InnerIdType* ids,
+                                                            InnerIdType count,
+                                                            Allocator* allocator) const {
+    BatchCodesResult result(allocator);
+    result.sizes.resize(count);
+    result.in_buffer_offsets.resize(count);
+
+    if (count == 0) {
+        return result;
+    }
+
+    Vector<uint64_t> read_sizes(count, allocator);
+    Vector<uint64_t> read_offsets(count, allocator);
+
+    std::shared_lock lock(mutex_);
+    uint64_t total_size = 0;
+    for (InnerIdType i = 0; i < count; ++i) {
+        DocLocation location;
+        offset_io_->Read(sizeof(location),
+                         static_cast<uint64_t>(ids[i]) * sizeof(location),
+                         reinterpret_cast<uint8_t*>(&location));
+        result.in_buffer_offsets[i] = total_size;
+        result.sizes[i] = location.size;
+        read_sizes[i] = location.size;
+        read_offsets[i] = location.offset;
+        total_size += location.size;
+    }
+
+    result.buffer.resize(total_size);
+    io_->MultiRead(result.buffer.data(), read_sizes.data(), read_offsets.data(), count);
+    return result;
+}
+
+template <typename QuantTmpl, typename IOTmpl>
 void
 SparseVectorDataCell<QuantTmpl, IOTmpl>::GetSparseVectorByInnerId(
     InnerIdType inner_id, SparseVector* data, Allocator* specified_allocator) const {
