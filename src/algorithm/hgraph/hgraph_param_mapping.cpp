@@ -195,6 +195,18 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             },
         },
         {
+            HGRAPH_MERGE_LAMBDA,
+            {
+                MERGE_LAMBDA_KEY,
+            },
+        },
+        {
+            HGRAPH_MERGE_STRATEGY,
+            {
+                MERGE_STRATEGY_KEY,
+            },
+        },
+        {
             HGRAPH_INIT_CAPACITY,
             {
                 GRAPH_KEY,
@@ -461,7 +473,9 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
         "{HGRAPH_SUPPORT_DUPLICATE}": false,
         "{SUPPORT_FORCE_REMOVE}": false,
         "{HGRAPH_PERSIST_SOURCE_ID_KEY}": false,
-        "{EF_CONSTRUCTION_KEY}": 400
+        "{EF_CONSTRUCTION_KEY}": 400,
+        "{MERGE_LAMBDA_KEY}": 0,
+        "{MERGE_STRATEGY_KEY}": "{MERGE_STRATEGY_VALUE_ODESCENT}"
     })";
 
     std::string str = format_map(hgraph_params_template, DEFAULT_MAP);

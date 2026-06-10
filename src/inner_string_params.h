@@ -53,6 +53,10 @@ const char* const LABEL_REMAP_TYPE_VALUE_ROBIN = "robin";
 const char* const LABEL_REMAP_TYPE_VALUE_PG = "pg";
 const char* const GRAPH_KEY = "graph";
 const char* const ALPHA_KEY = "alpha";
+const char* const MERGE_LAMBDA_KEY = "merge_lambda";
+const char* const MERGE_STRATEGY_KEY = "merge_strategy";
+const char* const MERGE_STRATEGY_VALUE_TWO_STAGE = "two_stage";
+const char* const MERGE_STRATEGY_VALUE_ODESCENT = "odescent";
 
 // IO param key
 const char* const IO_PARAMS_KEY = "io_params";
@@ -234,6 +238,10 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"GRAPH_PARAM_INIT_MAX_CAPACITY_KEY", GRAPH_PARAM_INIT_MAX_CAPACITY_KEY},
     {"EF_CONSTRUCTION_KEY", EF_CONSTRUCTION_KEY},
     {"ALPHA_KEY", ALPHA_KEY},
+    {"MERGE_LAMBDA_KEY", MERGE_LAMBDA_KEY},
+    {"MERGE_STRATEGY_KEY", MERGE_STRATEGY_KEY},
+    {"MERGE_STRATEGY_VALUE_TWO_STAGE", MERGE_STRATEGY_VALUE_TWO_STAGE},
+    {"MERGE_STRATEGY_VALUE_ODESCENT", MERGE_STRATEGY_VALUE_ODESCENT},
     {"BUCKETS_COUNT_KEY", BUCKETS_COUNT_KEY},
     {"BUCKET_PARAMS_KEY", BUCKET_PARAMS_KEY},
     {"IO_FILE_PATH_KEY", IO_FILE_PATH_KEY},

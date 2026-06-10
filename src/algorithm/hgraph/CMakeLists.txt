@@ -7,6 +7,7 @@ set(HGRAPH_SRCS
     hgraph_search.cpp
     hgraph_serialize.cpp
     hgraph_cache.cpp
+    hgraph_merge.cpp
 )
 
 add_library(hgraph OBJECT ${HGRAPH_SRCS})
