@@ -47,10 +47,11 @@ std::string params = R"(
 auto index = vsag::Factory::CreateIndex("hgraph", params).value();
 ```
 
-### HGraph with FP16 quantization
+### HGraph with SQ8 quantization
 
-Switch `base_quantization_type` to `fp16` to halve the storage of base vectors with minimal
-recall impact; other quantization types (`bf16`, `sq8`, `pq`, …) are selected the same way.
+Switch `base_quantization_type` to `sq8` to store base vectors as 8-bit scalar-quantized codes
+(roughly a 4× reduction versus `fp32`) with minimal recall impact; other quantization types
+(`fp16`, `bf16`, `pq`, …) are selected the same way.
 
 ```cpp
 std::string params = R"(
@@ -59,7 +60,7 @@ std::string params = R"(
     "dtype": "float32",
     "metric_type": "ip",
     "index_param": {
-        "base_quantization_type": "fp16",
+        "base_quantization_type": "sq8",
         "max_degree": 32,
         "ef_construction": 400
     }
