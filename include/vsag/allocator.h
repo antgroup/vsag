@@ -101,7 +101,7 @@ public:
             return (T*)::new (p) T(std::forward<Args>(args)...);
         } catch (std::exception& e) {
             Deallocate(p);
-            throw e;
+            throw;
         }
     }
 
