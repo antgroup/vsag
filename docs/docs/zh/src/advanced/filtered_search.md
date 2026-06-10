@@ -46,7 +46,7 @@ for (int64_t i = 0; i < num_vectors; ++i) {
     }
 }
 
-auto search_params = R"({ "hnsw": { "ef_search": 100 } })";
+auto search_params = R"({ "hgraph": { "ef_search": 100 } })";
 auto result = index->KnnSearch(query, /*topk=*/10, search_params, invalid).value();
 ```
 

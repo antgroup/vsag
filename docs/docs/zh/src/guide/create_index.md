@@ -30,26 +30,27 @@ VSAG 中所有检索能力都围绕 `Index` 接口展开。要使用某种索引
 
 索引特有参数以嵌套对象形式提供，例如 HNSW 的 `hnsw`、HGraph 的 `index_param`。
 
-## 示例：创建 HNSW 索引
+## 示例：创建 HGraph 索引
 
 ```cpp
 #include <vsag/vsag.h>
 
-auto hnsw_build_parameters = R"(
+auto hgraph_build_parameters = R"(
 {
     "dtype": "float32",
     "metric_type": "l2",
     "dim": 128,
-    "hnsw": {
+    "index_param": {
+        "base_quantization_type": "fp32",
         "max_degree": 16,
         "ef_construction": 100
     }
 }
 )";
-auto index = vsag::Factory::CreateIndex("hnsw", hnsw_build_parameters).value();
+auto index = vsag::Factory::CreateIndex("hgraph", hgraph_build_parameters).value();
 ```
 
-## 示例：创建 HGraph 索引
+## 示例：创建 HGraph 索引（SQ8 量化）
 
 ```cpp
 auto hgraph_build_parameters = R"(

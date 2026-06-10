@@ -8,8 +8,8 @@
 ```cpp
 #include <vsag/vsag.h>
 
-// 1. 构造索引（以 HNSW 为例）
-auto index = vsag::Factory::CreateIndex("hnsw", hnsw_build_params).value();
+// 1. 构造索引（以 HGraph 为例）
+auto index = vsag::Factory::CreateIndex("hgraph", hgraph_build_params).value();
 index->Build(dataset);
 
 // 2. 准备查询

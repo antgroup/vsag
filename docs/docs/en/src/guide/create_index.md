@@ -26,7 +26,10 @@ index-specific options.
 
 ## Examples
 
-### HNSW
+### HGraph
+
+HGraph uses `index_param` as the build-time sub-object (`hgraph` is reserved for search-time
+parameters like `ef_search`). See `examples/cpp/103_index_hgraph.cpp`.
 
 ```cpp
 std::string params = R"(
@@ -34,19 +37,21 @@ std::string params = R"(
     "dim": 128,
     "dtype": "float32",
     "metric_type": "l2",
-    "hnsw": {
+    "index_param": {
+        "base_quantization_type": "fp32",
         "max_degree": 32,
         "ef_construction": 400
     }
 }
 )";
-auto index = vsag::Factory::CreateIndex("hnsw", params).value();
+auto index = vsag::Factory::CreateIndex("hgraph", params).value();
 ```
 
-### HGraph with FP16 quantization
+### HGraph with SQ8 quantization
 
-HGraph uses `index_param` as the build-time sub-object (`hgraph` is reserved for search-time
-parameters like `ef_search`). See `examples/cpp/103_index_hgraph.cpp`.
+Switch `base_quantization_type` to `sq8` to store base vectors as 8-bit scalar-quantized codes
+(roughly a 4× reduction versus `fp32`) with minimal recall impact; other quantization types
+(`fp16`, `bf16`, `pq`, …) are selected the same way.
 
 ```cpp
 std::string params = R"(
@@ -55,7 +60,7 @@ std::string params = R"(
     "dtype": "float32",
     "metric_type": "ip",
     "index_param": {
-        "base_quantization_type": "fp16",
+        "base_quantization_type": "sq8",
         "max_degree": 32,
         "ef_construction": 400
     }
