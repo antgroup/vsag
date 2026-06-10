@@ -201,7 +201,10 @@ generate_graph(int count, int max_degree, Allocator* allocator) {
         }
 
         int k = std::min(max_degree, count - 1);
-        std::shuffle(candidates.begin(), candidates.begin() + k, rng);
+        for (int step = 0; step < k; ++step) {
+            std::uniform_int_distribution<int> dist(step, candidates.size() - 1);
+            std::swap(candidates[step], candidates[dist(rng)]);
+        }
 
         maps[i]->insert(maps[i]->end(), candidates.begin(), candidates.begin() + k);
     }
