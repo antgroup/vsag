@@ -202,6 +202,8 @@ jobs:
       - name: Free Disk Space
         run: rm -rf /opt/hostedtoolcache
       - uses: actions/checkout@v4
+      - name: Prepare Env
+        run: sudo bash ./scripts/deps/install_deps_ubuntu.sh
       - name: Clean Env
         run: rm -rf ./build
       - name: Download Test
