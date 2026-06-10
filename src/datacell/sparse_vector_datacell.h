@@ -80,7 +80,7 @@ public:
         }
         uint64_t io_size = (new_capacity - total_count_) * max_code_size_ + current_offset_;
         this->io_->Resize(io_size);
-        this->offset_io_->Resize(static_cast<uint64_t>(new_capacity) * sizeof(uint32_t));
+        this->offset_io_->Resize(static_cast<uint64_t>(new_capacity) * sizeof(uint64_t));
         this->max_capacity_ = new_capacity;
     }
 
@@ -159,7 +159,7 @@ private:
 
     Allocator* const allocator_{nullptr};
     std::shared_ptr<MemoryBlockIO> offset_io_{nullptr};
-    uint32_t current_offset_{0};
+    uint64_t current_offset_{0};
     uint64_t max_code_size_{0};
     std::mutex current_offset_mutex_;
 };

@@ -93,7 +93,7 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::InsertVector(const void* vector, InnerI
     }
     auto* codes = reinterpret_cast<uint8_t*>(allocator_->Allocate(code_size));
     quantizer_->EncodeOne((const float*)vector, codes);
-    uint32_t old_offset = 0;
+    uint64_t old_offset = 0;
     {
         std::lock_guard lock(current_offset_mutex_);
         old_offset = current_offset_;
@@ -114,7 +114,7 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::InMemory() const {
 template <typename QuantTmpl, typename IOTmpl>
 const uint8_t*
 SparseVectorDataCell<QuantTmpl, IOTmpl>::GetCodesById(InnerIdType id, bool& need_release) const {
-    uint32_t offset;
+    uint64_t offset = 0;
     offset_io_->Read(sizeof(offset), id * sizeof(offset), (uint8_t*)&offset);
     uint32_t length;
     io_->Read(sizeof(length), offset, (uint8_t*)&length);
