@@ -15,32 +15,31 @@
 
 #pragma once
 
+#include "algorithm/disksindi/disksindi_parameter.h"
 #include "algorithm/inner_index_interface.h"
 #include "algorithm/sindi/term_id_mapper.h"
+#include "datacell/disk_sparse_term_list_datacell.h"
 #include "datacell/flatten_interface.h"
-#include "datacell/sparse_term_datacell.h"
 #include "vsag/allocator.h"
 
 namespace vsag {
 
-class SINDI : public InnerIndexInterface {
+class DiskSINDI : public InnerIndexInterface {
 public:
     static ParamPtr
     CheckAndMappingExternalParam(const JsonType& external_param,
                                  const IndexCommonParam& common_param);
 
-    friend class SINDIAnalyzer;
+    explicit DiskSINDI(const DiskSINDIParameterPtr& param, const IndexCommonParam& common_param);
 
-    explicit SINDI(const SINDIParameterPtr& param, const IndexCommonParam& common_param);
+    DiskSINDI(const ParamPtr& param, const IndexCommonParam& common_param)
+        : DiskSINDI(std::dynamic_pointer_cast<DiskSINDIParameter>(param), common_param){};
 
-    SINDI(const ParamPtr& param, const IndexCommonParam& common_param)
-        : SINDI(std::dynamic_pointer_cast<SINDIParameter>(param), common_param){};
-
-    ~SINDI() override = default;
+    ~DiskSINDI() override = default;
 
     std::string
     GetName() const override {
-        return "sindi";
+        return "disksindi";
     }
 
     void
@@ -53,9 +52,6 @@ public:
 
     std::string
     GetStats() const override;
-
-    std::string
-    AnalyzeIndexBySearch(const SearchRequest& request) override;
 
     std::vector<int64_t>
     Add(const DatasetPtr& base, AddMode mode = AddMode::DEFAULT) override;
@@ -73,11 +69,11 @@ public:
               const FilterPtr& filter) const override;
 
     DatasetPtr
-    KnnSearch(const vsag::DatasetPtr& query,
+    KnnSearch(const DatasetPtr& query,
               int64_t k,
               const std::string& parameters,
-              const vsag::FilterPtr& filter,
-              vsag::Allocator* allocator) const override;
+              const FilterPtr& filter,
+              Allocator* allocator) const override;
 
     DatasetPtr
     RangeSearch(const DatasetPtr& query,
@@ -86,13 +82,14 @@ public:
                 const FilterPtr& filter,
                 int64_t limited_size = -1) const override;
 
-    InnerIndexPtr
-    Fork(const IndexCommonParam& param) override {
-        return nullptr;
-    };
-
     void
     Serialize(StreamWriter& writer) const override;
+
+    void
+    Deserialize(const BinarySet& binary_set) override;
+
+    void
+    Deserialize(std::istream& in_stream) override;
 
     void
     Deserialize(StreamReader& reader) override;
@@ -104,7 +101,7 @@ public:
 
     IndexType
     GetIndexType() const override {
-        return IndexType::SINDI;
+        return IndexType::DISKSINDI;
     }
 
     int64_t
@@ -132,6 +129,9 @@ public:
     void
     SetImmutable() override;
 
+    void
+    SetIO(const std::shared_ptr<Reader> reader) override;
+
 private:
     template <InnerSearchMode mode>
     DatasetPtr
@@ -139,6 +139,7 @@ private:
                 const InnerSearchParam& inner_param,
                 Allocator* allocator,
                 bool use_term_lists_heap_insert,
+                const QueryTermBuffers& query_term_buffers,
                 const SparseVector* original_query = nullptr) const;
 
     std::pair<int64_t, int64_t>
@@ -159,17 +160,14 @@ private:
     mutable std::shared_mutex global_mutex_;
 
     uint32_t term_id_limit_{0};
-
     uint32_t window_size_{0};
 
-    Vector<SparseTermDataCellPtr> window_term_list_;
+    DiskSparseTermListDataCellInterfacePtr term_datacell_;
 
     int64_t cur_element_count_{0};
 
     bool use_reorder_{false};
-
     bool use_quantization_{false};
-
     float doc_retain_ratio_{0};
 
     FlattenInterfacePtr rerank_flat_{nullptr};
@@ -177,11 +175,16 @@ private:
     bool deserialize_without_footer_{false};
     bool deserialize_without_buffer_{false};
 
-    std::shared_ptr<QuantizationParams> quantization_params_;
+    QuantizationParamsPtr quantization_params_;
     uint32_t avg_doc_term_length_{100};
 
     bool remap_term_ids_{false};
     std::shared_ptr<TermIdMapper> term_id_mapper_{nullptr};
+
+    DiskSINDIManifest manifest_;
+    DiskSINDIParameterPtr param_;
+
+    bool is_deserialized_{false};
 };
 
 }  // namespace vsag

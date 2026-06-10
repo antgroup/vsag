@@ -100,7 +100,7 @@ if (result.has_value()) {
 
 ## 稀疏向量
 
-对于稀疏向量索引（SINDI、SparseIndex），`const float*` 重载不适用。需要通过
+对于稀疏向量索引（SINDI、DiskSINDI、SparseIndex），`const float*` 重载不适用。需要通过
 `SparseVectors(...)` 把查询封装为 `DatasetPtr`，并调用 `DatasetPtr` 重载：
 
 ```cpp
@@ -121,6 +121,7 @@ auto d = index->CalcDistanceById(query, /*id=*/42);
 | diskann      | 支持                       | 支持（默认循环） | `calculate_precise_distance=true` 可能触发磁盘 I/O。 |
 | pyramid      | 支持                       | 支持（默认循环） | |
 | sindi        | 不支持                     | 支持             | 仅稀疏向量。 |
+| disksindi    | 不支持                     | 支持             | 仅稀疏向量。 |
 | sparse_index | 不支持                     | 支持             | 仅稀疏向量。 |
 
 对于未实现某重载的索引，调用会返回 `UNSUPPORTED_INDEX_OPERATION` 错误。

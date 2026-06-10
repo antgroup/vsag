@@ -108,7 +108,7 @@ A runnable example is provided in
 
 ## Sparse Vectors
 
-For sparse-vector indexes (SINDI, SparseIndex), the `const float*` overloads are not
+For sparse-vector indexes (SINDI, DiskSINDI, SparseIndex), the `const float*` overloads are not
 applicable. Pass the query as a `DatasetPtr` carrying sparse vectors via
 `SparseVectors(...)`, and use the `DatasetPtr` overloads:
 
@@ -130,6 +130,7 @@ auto d = index->CalcDistanceById(query, /*id=*/42);
 | diskann      | yes                             | yes (default loop)  | `calculate_precise_distance=true` may incur disk I/O. |
 | pyramid      | yes                             | yes (default loop)  | |
 | sindi        | no                              | yes                 | Sparse vectors only. |
+| disksindi    | no                              | yes                 | Sparse vectors only. |
 | sparse_index | no                              | yes                 | Sparse vectors only. |
 
 Indexes that do not implement the API surface for a given overload return an
