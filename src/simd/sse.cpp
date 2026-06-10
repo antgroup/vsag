@@ -714,7 +714,8 @@ SQ4ComputeIP(const float* RESTRICT query,
     }
 
     uint64_t d = 0;
-    __m128 acc = _mm_setzero_ps();
+    __m128 acc0 = _mm_setzero_ps();
+    __m128 acc1 = _mm_setzero_ps();
 
     // Process 8 values at a time (4 bytes containing 8 4-bit values)
     for (; d + 7 < dim; d += 8) {
@@ -753,13 +754,13 @@ SQ4ComputeIP(const float* RESTRICT query,
         __m128 query_vec0 = _mm_loadu_ps(query + d);
         __m128 query_vec1 = _mm_loadu_ps(query + d + 4);
 
-        // Compute dot products and accumulate
-        __m128 prod0 = _mm_mul_ps(query_vec0, values0);
-        __m128 prod1 = _mm_mul_ps(query_vec1, values1);
-        acc = _mm_add_ps(acc, _mm_add_ps(prod0, prod1));
+        // Compute dot products and accumulate into separate accumulators for ILP
+        acc0 = _mm_add_ps(acc0, _mm_mul_ps(query_vec0, values0));
+        acc1 = _mm_add_ps(acc1, _mm_mul_ps(query_vec1, values1));
     }
 
     // Single horizontal reduction after the loop
+    __m128 acc = _mm_add_ps(acc0, acc1);
     __m128 shuf = _mm_shuffle_ps(acc, acc, _MM_SHUFFLE(2, 3, 0, 1));
     __m128 sums = _mm_add_ps(acc, shuf);
     __m128 hi = _mm_movehl_ps(sums, sums);
@@ -786,7 +787,8 @@ SQ4ComputeL2Sqr(const float* RESTRICT query,
     }
 
     uint64_t d = 0;
-    __m128 acc = _mm_setzero_ps();
+    __m128 acc0 = _mm_setzero_ps();
+    __m128 acc1 = _mm_setzero_ps();
 
     // Process 8 values at a time (4 bytes containing 8 4-bit values)
     for (; d + 7 < dim; d += 8) {
@@ -825,14 +827,15 @@ SQ4ComputeL2Sqr(const float* RESTRICT query,
         __m128 query_vec0 = _mm_loadu_ps(query + d);
         __m128 query_vec1 = _mm_loadu_ps(query + d + 4);
 
-        // Compute differences and accumulate squared distances
+        // Compute differences and accumulate squared distances into separate accumulators for ILP
         __m128 diff0 = _mm_sub_ps(query_vec0, values0);
         __m128 diff1 = _mm_sub_ps(query_vec1, values1);
-        acc = _mm_add_ps(acc, _mm_mul_ps(diff0, diff0));
-        acc = _mm_add_ps(acc, _mm_mul_ps(diff1, diff1));
+        acc0 = _mm_add_ps(acc0, _mm_mul_ps(diff0, diff0));
+        acc1 = _mm_add_ps(acc1, _mm_mul_ps(diff1, diff1));
     }
 
     // Single horizontal reduction after the loop
+    __m128 acc = _mm_add_ps(acc0, acc1);
     __m128 shuf = _mm_shuffle_ps(acc, acc, _MM_SHUFFLE(2, 3, 0, 1));
     __m128 sums = _mm_add_ps(acc, shuf);
     __m128 hi = _mm_movehl_ps(sums, sums);
@@ -859,7 +862,8 @@ SQ4ComputeCodesIP(const uint8_t* RESTRICT codes1,
     }
 
     uint64_t d = 0;
-    __m128 acc = _mm_setzero_ps();
+    __m128 acc0 = _mm_setzero_ps();
+    __m128 acc1 = _mm_setzero_ps();
 
     // Process 8 values at a time (4 bytes containing 8 4-bit values)
     for (; d + 7 < dim; d += 8) {
@@ -907,13 +911,13 @@ SQ4ComputeCodesIP(const uint8_t* RESTRICT codes1,
         code2_values0 = _mm_add_ps(_mm_mul_ps(code2_values0, diff_vec0), lb_vec0);
         code2_values1 = _mm_add_ps(_mm_mul_ps(code2_values1, diff_vec1), lb_vec1);
 
-        // Compute dot products and accumulate
-        __m128 prod0 = _mm_mul_ps(code1_values0, code2_values0);
-        __m128 prod1 = _mm_mul_ps(code1_values1, code2_values1);
-        acc = _mm_add_ps(acc, _mm_add_ps(prod0, prod1));
+        // Compute dot products and accumulate into separate accumulators for ILP
+        acc0 = _mm_add_ps(acc0, _mm_mul_ps(code1_values0, code2_values0));
+        acc1 = _mm_add_ps(acc1, _mm_mul_ps(code1_values1, code2_values1));
     }
 
     // Single horizontal reduction after the loop
+    __m128 acc = _mm_add_ps(acc0, acc1);
     __m128 shuf = _mm_shuffle_ps(acc, acc, _MM_SHUFFLE(2, 3, 0, 1));
     __m128 sums = _mm_add_ps(acc, shuf);
     __m128 hi = _mm_movehl_ps(sums, sums);
@@ -940,7 +944,8 @@ SQ4ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
     }
 
     uint64_t d = 0;
-    __m128 acc = _mm_setzero_ps();
+    __m128 acc0 = _mm_setzero_ps();
+    __m128 acc1 = _mm_setzero_ps();
 
     // Process 8 values at a time (4 bytes containing 8 4-bit values)
     for (; d + 7 < dim; d += 8) {
@@ -988,14 +993,15 @@ SQ4ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
         code2_values0 = _mm_add_ps(_mm_mul_ps(code2_values0, diff_vec0), lb_vec0);
         code2_values1 = _mm_add_ps(_mm_mul_ps(code2_values1, diff_vec1), lb_vec1);
 
-        // Compute differences and accumulate squared distances
+        // Compute differences and accumulate squared distances into separate accumulators for ILP
         __m128 diff0 = _mm_sub_ps(code1_values0, code2_values0);
         __m128 diff1 = _mm_sub_ps(code1_values1, code2_values1);
-        acc = _mm_add_ps(acc, _mm_mul_ps(diff0, diff0));
-        acc = _mm_add_ps(acc, _mm_mul_ps(diff1, diff1));
+        acc0 = _mm_add_ps(acc0, _mm_mul_ps(diff0, diff0));
+        acc1 = _mm_add_ps(acc1, _mm_mul_ps(diff1, diff1));
     }
 
     // Single horizontal reduction after the loop
+    __m128 acc = _mm_add_ps(acc0, acc1);
     __m128 shuf = _mm_shuffle_ps(acc, acc, _MM_SHUFFLE(2, 3, 0, 1));
     __m128 sums = _mm_add_ps(acc, shuf);
     __m128 hi = _mm_movehl_ps(sums, sums);

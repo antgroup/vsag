@@ -797,7 +797,8 @@ SQ4ComputeIP(const float* RESTRICT query,
     }
 
     uint64_t d = 0;
-    __m256 acc = _mm256_setzero_ps();
+    __m256 acc0 = _mm256_setzero_ps();
+    __m256 acc1 = _mm256_setzero_ps();
 
     // Process 16 values at a time (8 bytes containing 16 4-bit values)
     for (; d + 15 < dim; d += 16) {
@@ -808,14 +809,13 @@ SQ4ComputeIP(const float* RESTRICT query,
         __m256 query_vec0 = _mm256_loadu_ps(query + d);
         __m256 query_vec1 = _mm256_loadu_ps(query + d + 8);
 
-        // Compute dot products and accumulate
-        __m256 prod0 = _mm256_mul_ps(query_vec0, values01);
-        __m256 prod1 = _mm256_mul_ps(query_vec1, values23);
-        acc = _mm256_add_ps(acc, _mm256_add_ps(prod0, prod1));
+        // Compute dot products and accumulate into separate accumulators for ILP
+        acc0 = _mm256_add_ps(acc0, _mm256_mul_ps(query_vec0, values01));
+        acc1 = _mm256_add_ps(acc1, _mm256_mul_ps(query_vec1, values23));
     }
 
     // Single horizontal reduction after the loop
-    float result = avx_reduce_add_ps(acc);
+    float result = avx_reduce_add_ps(_mm256_add_ps(acc0, acc1));
 
     // Process remaining elements with SSE implementation
     result += sse::SQ4ComputeIP(query + d, codes + (d >> 1), lower_bound + d, diff + d, dim - d);
@@ -837,7 +837,8 @@ SQ4ComputeL2Sqr(const float* RESTRICT query,
     }
 
     uint64_t d = 0;
-    __m256 acc = _mm256_setzero_ps();
+    __m256 acc0 = _mm256_setzero_ps();
+    __m256 acc1 = _mm256_setzero_ps();
 
     // Process 16 values at a time (8 bytes containing 16 4-bit values)
     for (; d + 15 < dim; d += 16) {
@@ -848,18 +849,15 @@ SQ4ComputeL2Sqr(const float* RESTRICT query,
         __m256 query_vec0 = _mm256_loadu_ps(query + d);
         __m256 query_vec1 = _mm256_loadu_ps(query + d + 8);
 
-        // Compute differences
+        // Compute differences and accumulate into separate accumulators for ILP
         __m256 diff0 = _mm256_sub_ps(query_vec0, values01);
         __m256 diff1 = _mm256_sub_ps(query_vec1, values23);
-
-        // Square differences and accumulate
-        __m256 sq0 = _mm256_mul_ps(diff0, diff0);
-        __m256 sq1 = _mm256_mul_ps(diff1, diff1);
-        acc = _mm256_add_ps(acc, _mm256_add_ps(sq0, sq1));
+        acc0 = _mm256_add_ps(acc0, _mm256_mul_ps(diff0, diff0));
+        acc1 = _mm256_add_ps(acc1, _mm256_mul_ps(diff1, diff1));
     }
 
     // Single horizontal reduction after the loop
-    float result = avx_reduce_add_ps(acc);
+    float result = avx_reduce_add_ps(_mm256_add_ps(acc0, acc1));
 
     // Process remaining elements with SSE implementation
     result += sse::SQ4ComputeL2Sqr(query + d, codes + (d >> 1), lower_bound + d, diff + d, dim - d);
@@ -881,7 +879,8 @@ SQ4ComputeCodesIP(const uint8_t* RESTRICT codes1,
     }
 
     uint64_t d = 0;
-    __m256 acc = _mm256_setzero_ps();
+    __m256 acc0 = _mm256_setzero_ps();
+    __m256 acc1 = _mm256_setzero_ps();
 
     // Process 16 values at a time (8 bytes containing 16 4-bit values)
     for (; d + 15 < dim; d += 16) {
@@ -891,14 +890,13 @@ SQ4ComputeCodesIP(const uint8_t* RESTRICT codes1,
         SQ4Decode16Values(codes1, d, code1_values01, code1_values23, lower_bound, diff);
         SQ4Decode16Values(codes2, d, code2_values01, code2_values23, lower_bound, diff);
 
-        // Compute dot products and accumulate
-        __m256 prod0 = _mm256_mul_ps(code1_values01, code2_values01);
-        __m256 prod1 = _mm256_mul_ps(code1_values23, code2_values23);
-        acc = _mm256_add_ps(acc, _mm256_add_ps(prod0, prod1));
+        // Compute dot products and accumulate into separate accumulators for ILP
+        acc0 = _mm256_add_ps(acc0, _mm256_mul_ps(code1_values01, code2_values01));
+        acc1 = _mm256_add_ps(acc1, _mm256_mul_ps(code1_values23, code2_values23));
     }
 
     // Single horizontal reduction after the loop
-    float result = avx_reduce_add_ps(acc);
+    float result = avx_reduce_add_ps(_mm256_add_ps(acc0, acc1));
 
     // Process remaining elements with SSE implementation
     result += sse::SQ4ComputeCodesIP(
@@ -921,7 +919,8 @@ SQ4ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
     }
 
     uint64_t d = 0;
-    __m256 acc = _mm256_setzero_ps();
+    __m256 acc0 = _mm256_setzero_ps();
+    __m256 acc1 = _mm256_setzero_ps();
 
     // Process 16 values at a time (8 bytes containing 16 4-bit values)
     for (; d + 15 < dim; d += 16) {
@@ -931,18 +930,15 @@ SQ4ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
         SQ4Decode16Values(codes1, d, code1_values01, code1_values23, lower_bound, diff);
         SQ4Decode16Values(codes2, d, code2_values01, code2_values23, lower_bound, diff);
 
-        // Compute differences
+        // Compute differences and accumulate into separate accumulators for ILP
         __m256 diff0 = _mm256_sub_ps(code1_values01, code2_values01);
         __m256 diff1 = _mm256_sub_ps(code1_values23, code2_values23);
-
-        // Square differences and accumulate
-        __m256 sq0 = _mm256_mul_ps(diff0, diff0);
-        __m256 sq1 = _mm256_mul_ps(diff1, diff1);
-        acc = _mm256_add_ps(acc, _mm256_add_ps(sq0, sq1));
+        acc0 = _mm256_add_ps(acc0, _mm256_mul_ps(diff0, diff0));
+        acc1 = _mm256_add_ps(acc1, _mm256_mul_ps(diff1, diff1));
     }
 
     // Single horizontal reduction after the loop
-    float result = avx_reduce_add_ps(acc);
+    float result = avx_reduce_add_ps(_mm256_add_ps(acc0, acc1));
 
     // Process remaining elements with SSE implementation
     result += sse::SQ4ComputeCodesL2Sqr(
