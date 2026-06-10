@@ -25,6 +25,7 @@ const char* const INDEX_HNSW = "hnsw";
 const char* const INDEX_FRESH_HNSW = "fresh_hnsw";
 const char* const INDEX_PYRAMID = "pyramid";
 const char* const INDEX_SINDI = "sindi";
+const char* const INDEX_DISKSINDI = "disksindi";
 const char* const INDEX_BRUTE_FORCE = "brute_force";
 const char* const INDEX_IVF = "ivf";
 const char* const INDEX_GNO_IMI = "gno_imi";

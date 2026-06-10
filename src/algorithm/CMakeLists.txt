@@ -15,6 +15,7 @@
 
 add_subdirectory (hnswlib)
 add_subdirectory (sindi)
+add_subdirectory (disksindi)
 add_subdirectory (hgraph)
 add_subdirectory (lazy_hgraph)
 add_subdirectory (bruteforce)
@@ -35,6 +36,7 @@ set (ALGORITHM_LIBS
         algorithm
         hnswlib
         sindi
+        disksindi
         hgraph
         lazy_hgraph
         bruteforce

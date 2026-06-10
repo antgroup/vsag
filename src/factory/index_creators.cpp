@@ -19,6 +19,7 @@
 #include <mutex>
 
 #include "algorithm/bruteforce/bruteforce.h"
+#include "algorithm/disksindi/disksindi.h"
 #include "algorithm/hgraph/hgraph.h"
 #include "algorithm/ivf/ivf.h"
 #include "algorithm/lazy_hgraph/lazy_hgraph.h"
@@ -140,6 +141,12 @@ create_sindi_index(JsonType& parsed_params, const IndexCommonParam& index_common
 }
 
 tl::expected<std::shared_ptr<Index>, Error>
+create_disksindi_index(JsonType& parsed_params, const IndexCommonParam& index_common_params) {
+    return create_index_impl_with_param_log<DiskSINDI>(
+        "created a disksindi index", parsed_params, index_common_params);
+}
+
+tl::expected<std::shared_ptr<Index>, Error>
 create_warp_index(JsonType& parsed_params, const IndexCommonParam& index_common_params) {
     // WARP is now implemented as BruteForce with multi-vector data cell
     logger::debug("created a warp index (via BruteForce multi-vector mode)");
@@ -170,6 +177,7 @@ register_all_index_creators() {
         register_index_creator(INDEX_IVF, &create_ivf_index);
         register_index_creator(INDEX_PYRAMID, &create_pyramid_index);
         register_index_creator(INDEX_SINDI, &create_sindi_index);
+        register_index_creator(INDEX_DISKSINDI, &create_disksindi_index);
         register_index_creator(INDEX_WARP, &create_warp_index);
         register_index_creator(INDEX_SIMQ, &create_simq_index);
     });
