@@ -26,6 +26,7 @@ extern const char* const INDEX_HGRAPH;
 extern const char* const INDEX_LAZY_HGRAPH;
 extern const char* const INDEX_PYRAMID;
 extern const char* const INDEX_SINDI;
+extern const char* const INDEX_DISKSINDI;
 extern const char* const INDEX_BRUTE_FORCE;
 extern const char* const INDEX_IVF;
 extern const char* const INDEX_WARP;
