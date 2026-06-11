@@ -91,8 +91,13 @@ bool
 AsyncIO::ReadImpl(uint64_t size, uint64_t offset, uint8_t* data) const {
     bool need_release = true;
     const auto* ptr = DirectReadImpl(size, offset, need_release);
-    memcpy(data, ptr, size);
-    AsyncIO::ReleaseImpl(ptr);
+    if (ptr == nullptr && size > 0) {
+        return false;
+    }
+    if (size > 0) {
+        memcpy(data, ptr, size);
+        AsyncIO::ReleaseImpl(ptr);
+    }
     return true;
 }
 
