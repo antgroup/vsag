@@ -62,6 +62,7 @@ SIMQParameter::FromJson(const JsonType& json) {
 
 JsonType
 SIMQParameter::ToJson() const {
+    CHECK_ARGUMENT(base_codes_param != nullptr, "simq: base_codes_param is not initialized");
     JsonType json = InnerIndexParameter::ToJson();
     json[TYPE_KEY].SetString(INDEX_SIMQ);
     json[SIMQ_INIT_CLUSTER_RATIO].SetFloat(init_cluster_ratio);
