@@ -92,15 +92,18 @@ void
 AsyncIO::flush_if_dirty() const {
     if (dirty_.load(std::memory_order_acquire)) {
         std::lock_guard<std::mutex> lock(flush_mutex_);
-        if (dirty_.exchange(false, std::memory_order_acq_rel)) {
-            fdatasync(wfd_);
+        if (dirty_.load(std::memory_order_acquire)) {
+            if (fdatasync(wfd_) == -1) {
+                throw VsagException(ErrorType::INTERNAL_ERROR,
+                                    fmt::format("fdatasync failed: {}", strerror(errno)));
+            }
+            dirty_.store(false, std::memory_order_release);
         }
     }
 }
 
 bool
 AsyncIO::ReadImpl(uint64_t size, uint64_t offset, uint8_t* data) const {
-    flush_if_dirty();
     bool need_release = true;
     const auto* ptr = DirectReadImpl(size, offset, need_release);
     if (ptr == nullptr) {
