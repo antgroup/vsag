@@ -1090,6 +1090,19 @@ RaBitQFloatBinaryIPBatch4(const float* vector,
     neon::RaBitQFloatBinaryIPBatch4(vector, bits1, bits2, bits3, bits4, dim, inv_sqrt_d, results);
 }
 
+void
+RaBitQFloatThreeBitIPBatch4(const float* vector,
+                            const uint8_t* bits1,
+                            const uint8_t* bits2,
+                            const uint8_t* bits3,
+                            const uint8_t* bits4,
+                            uint64_t dim,
+                            uint32_t reorder_bits,
+                            float* results) {
+    neon::RaBitQFloatThreeBitIPBatch4(
+        vector, bits1, bits2, bits3, bits4, dim, reorder_bits, results);
+}
+
 float
 RaBitQFloatSplitCodeIP(const float* vector,
                        const uint8_t* one_bit_code,
@@ -1098,6 +1111,14 @@ RaBitQFloatSplitCodeIP(const float* vector,
                        uint32_t supplement_bits) {
     return neon::RaBitQFloatSplitCodeIP(
         vector, one_bit_code, supplement_code, dim, supplement_bits);
+}
+
+float
+RaBitQFloatSupplementCodeIP(const float* vector,
+                            const uint8_t* supplement_code,
+                            uint64_t dim,
+                            uint32_t supplement_bits) {
+    return neon::RaBitQFloatSupplementCodeIP(vector, supplement_code, dim, supplement_bits);
 }
 
 uint32_t

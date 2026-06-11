@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <numeric>
 #include <sstream>
 #include <utility>
@@ -94,7 +95,7 @@ TEST_CASE("RaBitQSplitDataCell direct split compute", "[ut][RaBitQSplitDataCell]
             }},
             "quantization_params": {{
                 "type": "rabitq",
-                "rabitq_version": "split_1bit_7bit",
+                "rabitq_version": "split",
                 "rabitq_bits_per_dim_query": 32,
                 "rabitq_bits_per_dim_base": {}
             }}
@@ -162,7 +163,7 @@ TEST_CASE("RaBitQSplitDataCell serialize and methods", "[ut][RaBitQSplitDataCell
             },
             "quantization_params": {
                 "type": "rabitq",
-                "rabitq_version": "split_1bit_7bit",
+                "rabitq_version": "split",
                 "rabitq_bits_per_dim_query": 32,
                 "rabitq_bits_per_dim_base": 4
             }
@@ -324,7 +325,7 @@ TEST_CASE("RaBitQSplitDataCell IP metric", "[ut][RaBitQSplitDataCell]") {
             },
             "quantization_params": {
                 "type": "rabitq",
-                "rabitq_version": "split_1bit_7bit",
+                "rabitq_version": "split",
                 "rabitq_bits_per_dim_query": 32,
                 "rabitq_bits_per_dim_base": 4
             }
@@ -381,19 +382,44 @@ TEST_CASE("RaBitQSplitDataCell hybrid IO (1bit in memory, supplement on disk)",
     auto queries = fixtures::generate_vectors(4, dim, 31);
 
     const std::string tmp_prefix = "/tmp/vsag_rabitq_split_hybrid_ut_" + std::to_string(::getpid());
+    struct TempFileCleanup {
+        explicit TempFileCleanup(std::string prefix) : prefix_(std::move(prefix)) {
+            cleanup();
+        }
 
-    for (uint64_t base_bits : {1, 4, 7}) {
+        ~TempFileCleanup() {
+            cleanup();
+        }
+
+        void
+        cleanup() const {
+            for (const auto& suffix : {"_base", "_base_onebit", "_base_supplement"}) {
+                std::remove((prefix_ + suffix).c_str());
+            }
+        }
+
+        std::string prefix_;
+    } cleanup(tmp_prefix);
+
+    struct SplitCase {
+        uint64_t base_bits;
+        uint64_t filter_bits;
+    };
+    const SplitCase split_cases[] = {{1, 1}, {4, 1}, {7, 1}, {8, 3}};
+    for (const auto split_case : split_cases) {
         auto memory_param_str = fmt::format(R"({{
             "codes_type": "rabitq_split",
             "io_params": {{ "type": "block_memory_io" }},
             "quantization_params": {{
                 "type": "rabitq",
-                "rabitq_version": "split_1bit_7bit",
+                "rabitq_version": "split",
                 "rabitq_bits_per_dim_query": 32,
-                "rabitq_bits_per_dim_base": {}
+                "rabitq_bits_per_dim_base": {},
+                "rabitq_bits_per_dim_filter": {}
             }}
         }})",
-                                            base_bits);
+                                            split_case.base_bits,
+                                            split_case.filter_bits);
         auto hybrid_param_str = fmt::format(R"({{
             "codes_type": "rabitq_split",
             "io_params": {{
@@ -405,13 +431,15 @@ TEST_CASE("RaBitQSplitDataCell hybrid IO (1bit in memory, supplement on disk)",
             }},
             "quantization_params": {{
                 "type": "rabitq",
-                "rabitq_version": "split_1bit_7bit",
+                "rabitq_version": "split",
                 "rabitq_bits_per_dim_query": 32,
-                "rabitq_bits_per_dim_base": {}
+                "rabitq_bits_per_dim_base": {},
+                "rabitq_bits_per_dim_filter": {}
             }}
         }})",
                                             tmp_prefix,
-                                            base_bits);
+                                            split_case.base_bits,
+                                            split_case.filter_bits);
 
         auto mem_param = std::make_shared<FlattenDataCellParameter>();
         mem_param->FromJson(JsonType::Parse(memory_param_str));
@@ -466,6 +494,16 @@ TEST_CASE("RaBitQSplitDataCell hybrid IO (1bit in memory, supplement on disk)",
             for (InnerIdType id = 0; id < count; ++id) {
                 REQUIRE(mem_dists[id] == hyb_dists[id]);
                 REQUIRE(mem_lb[id] == hyb_lb[id]);
+            }
+
+            std::vector<float> mem_hint_dists(count);
+            std::vector<float> hyb_hint_dists(count);
+            mem_cell->QueryWithDistanceHint(
+                mem_hint_dists.data(), mem_dists.data(), mem_computer, idx.data(), count);
+            hyb_cell->QueryWithDistanceHint(
+                hyb_hint_dists.data(), hyb_dists.data(), hyb_computer, idx.data(), count);
+            for (InnerIdType id = 0; id < count; ++id) {
+                REQUIRE(mem_hint_dists[id] == hyb_hint_dists[id]);
             }
         }
     }

@@ -17,6 +17,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <limits>
 
 #include "typing.h"
 #include "vsag/allocator.h"
@@ -30,6 +31,7 @@ struct QueryContext {
     Allocator* alloc = nullptr;
     SearchStatistics* stats = nullptr;
     ReasoningContext* reasoning_ctx = nullptr;
+    float rabitq_error_rate = std::numeric_limits<float>::quiet_NaN();
 };
 
 class SearchStatistics {
@@ -42,6 +44,17 @@ public:
         j["hops"].SetInt(hops.load(std::memory_order_relaxed));
         j["io_cnt"].SetInt(io_cnt.load(std::memory_order_relaxed));
         j["io_time_ms"].SetInt(io_time_ms.load(std::memory_order_relaxed));
+        j["reorder_distance_count"].SetInt(reorder_distance_count.load(std::memory_order_relaxed));
+        j["reorder_lower_bound_probe_count"].SetInt(
+            reorder_lower_bound_probe_count.load(std::memory_order_relaxed));
+        j["rabitq_filter_count"].SetInt(rabitq_filter_count.load(std::memory_order_relaxed));
+        j["rabitq_full_count"].SetInt(rabitq_full_count.load(std::memory_order_relaxed));
+        j["rabitq_filter_fallback_full_count"].SetInt(
+            rabitq_filter_fallback_full_count.load(std::memory_order_relaxed));
+        j["rabitq_reorder_hint_full_count"].SetInt(
+            rabitq_reorder_hint_full_count.load(std::memory_order_relaxed));
+        j["rabitq_reorder_fallback_full_count"].SetInt(
+            rabitq_reorder_fallback_full_count.load(std::memory_order_relaxed));
         return j.Dump();
     }
 
@@ -51,6 +64,13 @@ public:
     std::atomic<uint32_t> hops{0};
     std::atomic<uint32_t> io_cnt{0};
     std::atomic<uint32_t> io_time_ms{0};
+    std::atomic<uint32_t> reorder_distance_count{0};
+    std::atomic<uint32_t> reorder_lower_bound_probe_count{0};
+    std::atomic<uint32_t> rabitq_filter_count{0};
+    std::atomic<uint32_t> rabitq_full_count{0};
+    std::atomic<uint32_t> rabitq_filter_fallback_full_count{0};
+    std::atomic<uint32_t> rabitq_reorder_hint_full_count{0};
+    std::atomic<uint32_t> rabitq_reorder_fallback_full_count{0};
 };
 
 inline Allocator*

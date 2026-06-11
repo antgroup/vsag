@@ -18,6 +18,7 @@
 #include <omp.h>
 
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
@@ -155,7 +156,9 @@ SearchEvalCase::do_knn_search() {
     auto query_count = this->dataset_ptr_->GetNumberOfQuery();
     this->logger_->Debug("query count is " + std::to_string(query_count));
     auto min_query = std::max(static_cast<uint64_t>(query_count), config_.search_query_count);
-    for (auto& monitor : this->monitors_) {
+    for (uint64_t monitor_id = 0; monitor_id < this->monitors_.size(); ++monitor_id) {
+        auto& monitor = this->monitors_[monitor_id];
+        const bool collect_statistics = monitor_id == 0;
         monitor->Start();
 
         omp_set_num_threads(config_.num_threads_searching);
@@ -178,6 +181,9 @@ SearchEvalCase::do_knn_search() {
             if (not result.has_value()) {
                 std::cerr << "query error: " << result.error().message << std::endl;
                 exit(-1);
+            }
+            if (collect_statistics) {
+                this->record_statistics(result.value());
             }
             const int64_t* neighbors = result.value()->GetIds();
             int64_t* ground_truth_neighbors = dataset_ptr_->GetNeighbors(i);
@@ -266,7 +272,137 @@ SearchEvalCase::process_result() {
         logger_->Error(e.what());
     }
     EvalCase::MergeJsonType(this->basic_info_, result);
+    result["statistics_query_count"] = this->statistics_query_count_.load();
+    result["statistics_total"] = this->statistics_total_json();
+    result["statistics_avg_per_query"] = this->statistics_avg_json();
     return result;
+}
+
+namespace {
+
+uint64_t
+parse_stat_value(const std::string& value) {
+    if (value.empty()) {
+        return 0;
+    }
+    return static_cast<uint64_t>(std::strtoull(value.c_str(), nullptr, 10));
+}
+
+void
+set_stat_value(JsonType& json, const char* key, uint64_t value) {
+    json[key] = value;
+}
+
+void
+set_avg_stat_value(JsonType& json, const char* key, uint64_t value, uint64_t count) {
+    const float avg = count == 0 ? 0.0F : static_cast<float>(value) / static_cast<float>(count);
+    json[key] = avg;
+}
+
+}  // namespace
+
+void
+SearchEvalCase::record_statistics(const vsag::DatasetPtr& result) {
+    constexpr const char* kDistCmp = "dist_cmp";
+    constexpr const char* kHops = "hops";
+    constexpr const char* kIoCnt = "io_cnt";
+    constexpr const char* kIoTimeMs = "io_time_ms";
+    constexpr const char* kReorderDistanceCount = "reorder_distance_count";
+    constexpr const char* kReorderLowerBoundProbeCount = "reorder_lower_bound_probe_count";
+    constexpr const char* kRabitqFilterCount = "rabitq_filter_count";
+    constexpr const char* kRabitqFullCount = "rabitq_full_count";
+    constexpr const char* kRabitqFilterFallbackFullCount = "rabitq_filter_fallback_full_count";
+    constexpr const char* kRabitqReorderHintFullCount = "rabitq_reorder_hint_full_count";
+    constexpr const char* kRabitqReorderFallbackFullCount = "rabitq_reorder_fallback_full_count";
+
+    const auto values = result->GetStatistics({kDistCmp,
+                                               kHops,
+                                               kIoCnt,
+                                               kIoTimeMs,
+                                               kReorderDistanceCount,
+                                               kReorderLowerBoundProbeCount,
+                                               kRabitqFilterCount,
+                                               kRabitqFullCount,
+                                               kRabitqFilterFallbackFullCount,
+                                               kRabitqReorderHintFullCount,
+                                               kRabitqReorderFallbackFullCount});
+    this->statistics_dist_cmp_.fetch_add(parse_stat_value(values[0]), std::memory_order_relaxed);
+    this->statistics_hops_.fetch_add(parse_stat_value(values[1]), std::memory_order_relaxed);
+    this->statistics_io_cnt_.fetch_add(parse_stat_value(values[2]), std::memory_order_relaxed);
+    this->statistics_io_time_ms_.fetch_add(parse_stat_value(values[3]), std::memory_order_relaxed);
+    this->statistics_reorder_distance_count_.fetch_add(parse_stat_value(values[4]),
+                                                       std::memory_order_relaxed);
+    this->statistics_reorder_lower_bound_probe_count_.fetch_add(parse_stat_value(values[5]),
+                                                                std::memory_order_relaxed);
+    this->statistics_rabitq_filter_count_.fetch_add(parse_stat_value(values[6]),
+                                                    std::memory_order_relaxed);
+    this->statistics_rabitq_full_count_.fetch_add(parse_stat_value(values[7]),
+                                                  std::memory_order_relaxed);
+    this->statistics_rabitq_filter_fallback_full_count_.fetch_add(parse_stat_value(values[8]),
+                                                                  std::memory_order_relaxed);
+    this->statistics_rabitq_reorder_hint_full_count_.fetch_add(parse_stat_value(values[9]),
+                                                               std::memory_order_relaxed);
+    this->statistics_rabitq_reorder_fallback_full_count_.fetch_add(parse_stat_value(values[10]),
+                                                                   std::memory_order_relaxed);
+    this->statistics_query_count_.fetch_add(1, std::memory_order_relaxed);
+}
+
+JsonType
+SearchEvalCase::statistics_total_json() const {
+    JsonType json;
+    set_stat_value(json, "dist_cmp", this->statistics_dist_cmp_.load());
+    set_stat_value(json, "hops", this->statistics_hops_.load());
+    set_stat_value(json, "io_cnt", this->statistics_io_cnt_.load());
+    set_stat_value(json, "io_time_ms", this->statistics_io_time_ms_.load());
+    set_stat_value(json, "reorder_distance_count", this->statistics_reorder_distance_count_.load());
+    set_stat_value(json,
+                   "reorder_lower_bound_probe_count",
+                   this->statistics_reorder_lower_bound_probe_count_.load());
+    set_stat_value(json, "rabitq_filter_count", this->statistics_rabitq_filter_count_.load());
+    set_stat_value(json, "rabitq_full_count", this->statistics_rabitq_full_count_.load());
+    set_stat_value(json,
+                   "rabitq_filter_fallback_full_count",
+                   this->statistics_rabitq_filter_fallback_full_count_.load());
+    set_stat_value(json,
+                   "rabitq_reorder_hint_full_count",
+                   this->statistics_rabitq_reorder_hint_full_count_.load());
+    set_stat_value(json,
+                   "rabitq_reorder_fallback_full_count",
+                   this->statistics_rabitq_reorder_fallback_full_count_.load());
+    return json;
+}
+
+JsonType
+SearchEvalCase::statistics_avg_json() const {
+    JsonType json;
+    const auto count = this->statistics_query_count_.load();
+    set_avg_stat_value(json, "dist_cmp", this->statistics_dist_cmp_.load(), count);
+    set_avg_stat_value(json, "hops", this->statistics_hops_.load(), count);
+    set_avg_stat_value(json, "io_cnt", this->statistics_io_cnt_.load(), count);
+    set_avg_stat_value(json, "io_time_ms", this->statistics_io_time_ms_.load(), count);
+    set_avg_stat_value(
+        json, "reorder_distance_count", this->statistics_reorder_distance_count_.load(), count);
+    set_avg_stat_value(json,
+                       "reorder_lower_bound_probe_count",
+                       this->statistics_reorder_lower_bound_probe_count_.load(),
+                       count);
+    set_avg_stat_value(
+        json, "rabitq_filter_count", this->statistics_rabitq_filter_count_.load(), count);
+    set_avg_stat_value(
+        json, "rabitq_full_count", this->statistics_rabitq_full_count_.load(), count);
+    set_avg_stat_value(json,
+                       "rabitq_filter_fallback_full_count",
+                       this->statistics_rabitq_filter_fallback_full_count_.load(),
+                       count);
+    set_avg_stat_value(json,
+                       "rabitq_reorder_hint_full_count",
+                       this->statistics_rabitq_reorder_hint_full_count_.load(),
+                       count);
+    set_avg_stat_value(json,
+                       "rabitq_reorder_fallback_full_count",
+                       this->statistics_rabitq_reorder_fallback_full_count_.load(),
+                       count);
+    return json;
 }
 
 }  // namespace vsag::eval

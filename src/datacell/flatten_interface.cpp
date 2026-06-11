@@ -33,6 +33,17 @@ IndexCommonParam
 FlattenInterface::ExportCommonParam() {
     throw VsagException(ErrorType::INTERNAL_ERROR, "ExportCommonParam is not implemented");
 }
+
+static IOParamPtr
+convert_io_param_type(const IOParamPtr& io_param, const std::string& type_name) {
+    if (io_param == nullptr) {
+        return nullptr;
+    }
+    auto json = io_param->ToJson();
+    json[TYPE_KEY].SetString(type_name);
+    return IOParameter::GetIOParameterByJson(json);
+}
+
 template <typename QuantTemp, typename IOTemp>
 static FlattenInterfacePtr
 make_instance_flatten(const FlattenInterfaceParamPtr& param, const IndexCommonParam& common_param) {
@@ -201,13 +212,25 @@ make_instance(const FlattenInterfaceParamPtr& param, const IndexCommonParam& com
                         param->supplement_io_parameter,
                         common_param);
 #else
+                    auto buffer_supplement_io_param = convert_io_param_type(
+                        param->supplement_io_parameter, IO_TYPE_VALUE_BUFFER_IO);
+                    return std::make_shared<RaBitQSplitDataCell<metric, MemoryBlockIO, BufferIO>>(
+                        param->quantizer_parameter,
+                        param->io_parameter,
+                        buffer_supplement_io_param,
+                        common_param);
+#endif
+                }
+#if !HAVE_LIBAIO
+                if (base_type == IO_TYPE_VALUE_BLOCK_MEMORY_IO and
+                    supp_type == IO_TYPE_VALUE_BUFFER_IO) {
                     return std::make_shared<RaBitQSplitDataCell<metric, MemoryBlockIO, BufferIO>>(
                         param->quantizer_parameter,
                         param->io_parameter,
                         param->supplement_io_parameter,
                         common_param);
-#endif
                 }
+#endif
                 if (base_type != supp_type) {
                     throw VsagException(
                         ErrorType::INVALID_ARGUMENT,

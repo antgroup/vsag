@@ -16,6 +16,7 @@
 #include "flatten_reorder.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <limits>
 #include <numeric>
@@ -26,6 +27,26 @@
 #include "query_context.h"
 
 namespace vsag {
+
+namespace {
+
+void
+add_reorder_distance_count(QueryContext& ctx, uint64_t count) {
+    if (ctx.stats != nullptr) {
+        ctx.stats->reorder_distance_count.fetch_add(static_cast<uint32_t>(count),
+                                                    std::memory_order_relaxed);
+    }
+}
+
+void
+add_reorder_lower_bound_probe_count(QueryContext& ctx, uint64_t count) {
+    if (ctx.stats != nullptr) {
+        ctx.stats->reorder_lower_bound_probe_count.fetch_add(static_cast<uint32_t>(count),
+                                                             std::memory_order_relaxed);
+    }
+}
+
+}  // namespace
 
 DistHeapPtr
 FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
@@ -47,6 +68,7 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
         for (uint64_t i = 0; i < heap_candidate_size; ++i) {
             ids[i] = candidate_result[i].second;
         }
+        add_reorder_distance_count(ctx, heap_candidate_size);
         flatten_->Query(dists.data(), computer, ids.data(), heap_candidate_size, &ctx);
         for (uint64_t i = 0; i < heap_candidate_size; ++i) {
             if (ctx.reasoning_ctx != nullptr) {
@@ -97,6 +119,7 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
     }
     const uint64_t heap_unique_size = candidate_size;
     if (heap_unique_size > 0) {
+        add_reorder_lower_bound_probe_count(ctx, heap_unique_size);
         flatten_->QueryWithDistanceLowerBound(lower_bound_probe_dists.data(),
                                               lower_bounds.data(),
                                               computer,
@@ -134,6 +157,7 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
     }
 
     if (not lower_bounds_available) {
+        add_reorder_distance_count(ctx, candidate_size);
         flatten_->Query(
             lower_bound_probe_dists.data(), computer, all_ids.data(), candidate_size, &ctx);
         for (uint64_t i = 0; i < candidate_size; ++i) {
@@ -170,12 +194,18 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
     const auto buffer_size = std::max<uint64_t>(bootstrap_size, batch_size);
     Vector<InnerIdType> ids(buffer_size, query_allocator);
     Vector<float> dists(buffer_size, query_allocator);
+    Vector<float> hint_dists(buffer_size, query_allocator);
     Vector<uint64_t> batch_indices(buffer_size, query_allocator);
 
     for (uint64_t i = 0; i < bootstrap_size; ++i) {
-        ids[i] = all_ids[order[i]];
+        const auto idx = order[i];
+        ids[i] = all_ids[idx];
+        hint_dists[i] = idx < heap_unique_size ? lower_bound_probe_dists[idx]
+                                               : std::numeric_limits<float>::max();
     }
-    flatten_->Query(dists.data(), computer, ids.data(), bootstrap_size, &ctx);
+    add_reorder_distance_count(ctx, bootstrap_size);
+    flatten_->QueryWithDistanceHint(
+        dists.data(), hint_dists.data(), computer, ids.data(), bootstrap_size, &ctx);
     for (uint64_t i = 0; i < bootstrap_size; ++i) {
         if (ctx.reasoning_ctx != nullptr) {
             const auto idx = order[i];
@@ -199,6 +229,8 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
                 break;
             }
             ids[batch_count] = all_ids[idx];
+            hint_dists[batch_count] = idx < heap_unique_size ? lower_bound_probe_dists[idx]
+                                                             : std::numeric_limits<float>::max();
             batch_indices[batch_count] = idx;
             ++batch_count;
             ++cursor;
@@ -208,7 +240,9 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
             break;
         }
 
-        flatten_->Query(dists.data(), computer, ids.data(), batch_count, &ctx);
+        add_reorder_distance_count(ctx, batch_count);
+        flatten_->QueryWithDistanceHint(
+            dists.data(), hint_dists.data(), computer, ids.data(), batch_count, &ctx);
         for (uint64_t i = 0; i < batch_count; ++i) {
             if (ctx.reasoning_ctx != nullptr) {
                 ctx.reasoning_ctx->RecordReorder(

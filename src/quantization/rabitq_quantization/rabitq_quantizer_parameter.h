@@ -24,8 +24,11 @@ DEFINE_POINTER2(RaBitQuantizerParam, RaBitQuantizerParameter);
 class RaBitQuantizerParameter : public QuantizerParameter {
 public:
     static constexpr const char* DEFAULT_RABITQ_VERSION = "standard";
+    static constexpr const char* RABITQ_VERSION_SPLIT = "split";
+    // Legacy alias kept for compatibility with existing configs.
     static constexpr const char* RABITQ_VERSION_SPLIT_1BIT_7BIT = "split_1bit_7bit";
     static constexpr float DEFAULT_RABITQ_ERROR_RATE = 1.9F;
+    static constexpr uint64_t DEFAULT_RABITQ_BITS_PER_DIM_FILTER = 1;
 
     RaBitQuantizerParameter();
 
@@ -40,10 +43,16 @@ public:
     bool
     CheckCompatibility(const vsag::ParamPtr& other) const override;
 
+    static bool
+    IsSplitVersion(const std::string& version) {
+        return version == RABITQ_VERSION_SPLIT or version == RABITQ_VERSION_SPLIT_1BIT_7BIT;
+    }
+
 public:
     uint64_t pca_dim_{0};
     uint64_t num_bits_per_dim_query_{32};
     uint64_t num_bits_per_dim_base_{1};
+    uint64_t num_bits_per_dim_filter_{DEFAULT_RABITQ_BITS_PER_DIM_FILTER};
     std::string rabitq_version_{DEFAULT_RABITQ_VERSION};
     float rabitq_error_rate_{DEFAULT_RABITQ_ERROR_RATE};
     bool use_fht_{false};

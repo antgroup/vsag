@@ -59,7 +59,7 @@ public:
             std::make_shared<RaBitQuantizer<metric>>(quantization_param, common_param);
         if (not this->quantizer_->SupportSplitCodeStorage()) {
             throw VsagException(ErrorType::INVALID_ARGUMENT,
-                                "rabitq split data cell requires rabitq_version=split_1bit_7bit, "
+                                "rabitq split data cell requires rabitq_version=split, "
                                 "rabitq_bits_per_dim_query=32, and "
                                 "rabitq_bits_per_dim_base in [1, 8]");
         }
@@ -91,6 +91,11 @@ public:
         auto* comp = static_cast<Computer<RaBitQuantizer<metric>>*>(computer.get());
         if constexpr (not OneBitIOTmpl::InMemory or not SupplementIOTmpl::InMemory) {
             if (id_count > 1) {
+                if constexpr (OneBitIOTmpl::InMemory and not SupplementIOTmpl::InMemory) {
+                    this->query_full_dist_by_supplement_multiread(
+                        result_dists, comp, idx, id_count, ctx);
+                    return;
+                }
                 this->query_full_dist_by_multiread(result_dists, comp, idx, id_count, ctx);
                 return;
             }
@@ -104,7 +109,42 @@ public:
             if (i + this->prefetch_stride_code_ < id_count) {
                 this->prefetch_full_code(idx[i + this->prefetch_stride_code_]);
             }
-            this->compute_full_dist(idx[i], comp, result_dists + i);
+            this->compute_full_dist(idx[i], comp, result_dists + i, ctx);
+        }
+    }
+
+    void
+    QueryWithDistanceHint(float* result_dists,
+                          const float* hint_dists,
+                          const ComputerInterfacePtr& computer,
+                          const InnerIdType* idx,
+                          InnerIdType id_count,
+                          QueryContext* ctx = nullptr) override {
+        auto* comp = static_cast<Computer<RaBitQuantizer<metric>>*>(computer.get());
+        if constexpr (not OneBitIOTmpl::InMemory or not SupplementIOTmpl::InMemory) {
+            if (id_count > 1) {
+                if constexpr (OneBitIOTmpl::InMemory and not SupplementIOTmpl::InMemory) {
+                    this->query_full_dist_by_supplement_multiread(
+                        result_dists, comp, idx, id_count, ctx, hint_dists);
+                    return;
+                }
+                this->query_full_dist_by_multiread(
+                    result_dists, comp, idx, id_count, ctx, hint_dists);
+                return;
+            }
+        }
+
+        for (uint32_t i = 0; i < this->prefetch_stride_code_ and i < id_count; ++i) {
+            this->prefetch_full_code(idx[i]);
+        }
+
+        for (InnerIdType i = 0; i < id_count; ++i) {
+            if (i + this->prefetch_stride_code_ < id_count) {
+                this->prefetch_full_code(idx[i + this->prefetch_stride_code_]);
+            }
+            const float hint =
+                hint_dists == nullptr ? std::numeric_limits<float>::max() : hint_dists[i];
+            this->compute_full_dist(idx[i], comp, result_dists + i, ctx, hint);
         }
     }
 
@@ -132,7 +172,11 @@ public:
             bool computed = false;
             try {
                 computed = this->quantizer_->ComputeDistWithOneBitLowerBound(
-                    *comp, one_bit_code, &one_bit_dist, &lower_bound);
+                    *comp,
+                    one_bit_code,
+                    &one_bit_dist,
+                    &lower_bound,
+                    this->query_rabitq_error_rate(ctx));
             } catch (...) {
                 this->release_one_bit_code(one_bit_code, one_bit_need_release);
                 throw;
@@ -148,7 +192,7 @@ public:
             const uint8_t* supplement_code = nullptr;
             try {
                 supplement_code = this->get_supplement_code(idx[i], supplement_need_release);
-                this->compute_full_dist(one_bit_code, supplement_code, comp, result_dists + i);
+                this->compute_full_dist(one_bit_code, supplement_code, comp, result_dists + i, ctx);
             } catch (...) {
                 this->release_one_bit_code(one_bit_code, one_bit_need_release);
                 this->release_supplement_code(supplement_code, supplement_need_release);
@@ -167,6 +211,7 @@ public:
                                 InnerIdType id_count,
                                 QueryContext* ctx = nullptr) override {
         auto* comp = static_cast<Computer<RaBitQuantizer<metric>>*>(computer.get());
+        this->add_filter_count(ctx, id_count);
         if constexpr (not OneBitIOTmpl::InMemory) {
             if (id_count > 1) {
                 this->query_one_bit_lower_bound_by_multiread(
@@ -209,38 +254,44 @@ public:
                 auto* lower_bound2 = lower_bounds == nullptr ? nullptr : lower_bounds + i + 1;
                 auto* lower_bound3 = lower_bounds == nullptr ? nullptr : lower_bounds + i + 2;
                 auto* lower_bound4 = lower_bounds == nullptr ? nullptr : lower_bounds + i + 3;
-                this->quantizer_->ComputeDistsWithOneBitLowerBoundBatch4(*comp,
-                                                                         code1,
-                                                                         code2,
-                                                                         code3,
-                                                                         code4,
-                                                                         result_dists[i],
-                                                                         result_dists[i + 1],
-                                                                         result_dists[i + 2],
-                                                                         result_dists[i + 3],
-                                                                         lower_bound1,
-                                                                         lower_bound2,
-                                                                         lower_bound3,
-                                                                         lower_bound4,
-                                                                         computed1,
-                                                                         computed2,
-                                                                         computed3,
-                                                                         computed4);
+                this->quantizer_->ComputeDistsWithOneBitLowerBoundBatch4(
+                    *comp,
+                    code1,
+                    code2,
+                    code3,
+                    code4,
+                    result_dists[i],
+                    result_dists[i + 1],
+                    result_dists[i + 2],
+                    result_dists[i + 3],
+                    lower_bound1,
+                    lower_bound2,
+                    lower_bound3,
+                    lower_bound4,
+                    computed1,
+                    computed2,
+                    computed3,
+                    computed4,
+                    this->query_rabitq_error_rate(ctx));
                 if (not computed1) {
+                    this->add_filter_fallback_full_count(ctx, 1);
                     this->compute_full_dist_after_one_bit_failure(
-                        idx[i], code1, comp, result_dists + i, lower_bound1);
+                        idx[i], code1, comp, result_dists + i, lower_bound1, ctx);
                 }
                 if (not computed2) {
+                    this->add_filter_fallback_full_count(ctx, 1);
                     this->compute_full_dist_after_one_bit_failure(
-                        idx[i + 1], code2, comp, result_dists + i + 1, lower_bound2);
+                        idx[i + 1], code2, comp, result_dists + i + 1, lower_bound2, ctx);
                 }
                 if (not computed3) {
+                    this->add_filter_fallback_full_count(ctx, 1);
                     this->compute_full_dist_after_one_bit_failure(
-                        idx[i + 2], code3, comp, result_dists + i + 2, lower_bound3);
+                        idx[i + 2], code3, comp, result_dists + i + 2, lower_bound3, ctx);
                 }
                 if (not computed4) {
+                    this->add_filter_fallback_full_count(ctx, 1);
                     this->compute_full_dist_after_one_bit_failure(
-                        idx[i + 3], code4, comp, result_dists + i + 3, lower_bound4);
+                        idx[i + 3], code4, comp, result_dists + i + 3, lower_bound4, ctx);
                 }
             } catch (...) {
                 release_batch();
@@ -260,10 +311,15 @@ public:
             bool computed = false;
             try {
                 computed = this->quantizer_->ComputeDistWithOneBitLowerBound(
-                    *comp, one_bit_code, result_dists + i, lower_bound);
+                    *comp,
+                    one_bit_code,
+                    result_dists + i,
+                    lower_bound,
+                    this->query_rabitq_error_rate(ctx));
                 if (not computed) {
+                    this->add_filter_fallback_full_count(ctx, 1);
                     this->compute_full_dist_after_one_bit_failure(
-                        idx[i], one_bit_code, comp, result_dists + i, lower_bound);
+                        idx[i], one_bit_code, comp, result_dists + i, lower_bound, ctx);
                 }
             } catch (...) {
                 this->release_one_bit_code(one_bit_code, one_bit_need_release);
@@ -453,6 +509,7 @@ public:
     void
     Serialize(StreamWriter& writer) override {
         FlattenInterface::Serialize(writer);
+        StreamWriter::WriteString(writer, this->supplement_io_type_);
         this->one_bit_cell_->Serialize(writer);
         this->supplement_cell_->Serialize(writer);
         this->quantizer_->Serialize(writer);
@@ -461,6 +518,7 @@ public:
     void
     Deserialize(lvalue_or_rvalue<StreamReader> reader) override {
         FlattenInterface::Deserialize(reader);
+        this->supplement_io_type_ = StreamReader::ReadString(reader);
         this->one_bit_cell_->Deserialize(reader);
         this->supplement_cell_->Deserialize(reader);
         this->quantizer_->Deserialize(reader);
@@ -633,6 +691,51 @@ private:
         }
     }
 
+    [[nodiscard]] static float
+    query_rabitq_error_rate(QueryContext* ctx) {
+        return ctx == nullptr ? std::numeric_limits<float>::quiet_NaN() : ctx->rabitq_error_rate;
+    }
+
+    void
+    add_filter_count(QueryContext* ctx, uint64_t count) const {
+        if (ctx != nullptr and ctx->stats != nullptr) {
+            ctx->stats->rabitq_filter_count.fetch_add(static_cast<uint32_t>(count),
+                                                      std::memory_order_relaxed);
+        }
+    }
+
+    void
+    add_full_count(QueryContext* ctx, uint64_t count) const {
+        if (ctx != nullptr and ctx->stats != nullptr) {
+            ctx->stats->rabitq_full_count.fetch_add(static_cast<uint32_t>(count),
+                                                    std::memory_order_relaxed);
+        }
+    }
+
+    void
+    add_filter_fallback_full_count(QueryContext* ctx, uint64_t count) const {
+        if (ctx != nullptr and ctx->stats != nullptr) {
+            ctx->stats->rabitq_filter_fallback_full_count.fetch_add(static_cast<uint32_t>(count),
+                                                                    std::memory_order_relaxed);
+        }
+    }
+
+    void
+    add_reorder_hint_full_count(QueryContext* ctx, uint64_t count) const {
+        if (ctx != nullptr and ctx->stats != nullptr) {
+            ctx->stats->rabitq_reorder_hint_full_count.fetch_add(static_cast<uint32_t>(count),
+                                                                 std::memory_order_relaxed);
+        }
+    }
+
+    void
+    add_reorder_fallback_full_count(QueryContext* ctx, uint64_t count) const {
+        if (ctx != nullptr and ctx->stats != nullptr) {
+            ctx->stats->rabitq_reorder_fallback_full_count.fetch_add(static_cast<uint32_t>(count),
+                                                                     std::memory_order_relaxed);
+        }
+    }
+
     void
     query_one_bit_lower_bound_by_multiread(float* result_dists,
                                            float* lower_bounds,
@@ -671,38 +774,44 @@ private:
             auto* lower_bound2 = lower_bounds == nullptr ? nullptr : lower_bounds + i + 1;
             auto* lower_bound3 = lower_bounds == nullptr ? nullptr : lower_bounds + i + 2;
             auto* lower_bound4 = lower_bounds == nullptr ? nullptr : lower_bounds + i + 3;
-            this->quantizer_->ComputeDistsWithOneBitLowerBoundBatch4(*computer,
-                                                                     code1,
-                                                                     code2,
-                                                                     code3,
-                                                                     code4,
-                                                                     result_dists[i],
-                                                                     result_dists[i + 1],
-                                                                     result_dists[i + 2],
-                                                                     result_dists[i + 3],
-                                                                     lower_bound1,
-                                                                     lower_bound2,
-                                                                     lower_bound3,
-                                                                     lower_bound4,
-                                                                     computed1,
-                                                                     computed2,
-                                                                     computed3,
-                                                                     computed4);
+            this->quantizer_->ComputeDistsWithOneBitLowerBoundBatch4(
+                *computer,
+                code1,
+                code2,
+                code3,
+                code4,
+                result_dists[i],
+                result_dists[i + 1],
+                result_dists[i + 2],
+                result_dists[i + 3],
+                lower_bound1,
+                lower_bound2,
+                lower_bound3,
+                lower_bound4,
+                computed1,
+                computed2,
+                computed3,
+                computed4,
+                this->query_rabitq_error_rate(ctx));
             if (not computed1) {
+                this->add_filter_fallback_full_count(ctx, 1);
                 this->compute_full_dist_after_one_bit_failure(
-                    idx[i], code1, computer, result_dists + i, lower_bound1);
+                    idx[i], code1, computer, result_dists + i, lower_bound1, ctx);
             }
             if (not computed2) {
+                this->add_filter_fallback_full_count(ctx, 1);
                 this->compute_full_dist_after_one_bit_failure(
-                    idx[i + 1], code2, computer, result_dists + i + 1, lower_bound2);
+                    idx[i + 1], code2, computer, result_dists + i + 1, lower_bound2, ctx);
             }
             if (not computed3) {
+                this->add_filter_fallback_full_count(ctx, 1);
                 this->compute_full_dist_after_one_bit_failure(
-                    idx[i + 2], code3, computer, result_dists + i + 2, lower_bound3);
+                    idx[i + 2], code3, computer, result_dists + i + 2, lower_bound3, ctx);
             }
             if (not computed4) {
+                this->add_filter_fallback_full_count(ctx, 1);
                 this->compute_full_dist_after_one_bit_failure(
-                    idx[i + 3], code4, computer, result_dists + i + 3, lower_bound4);
+                    idx[i + 3], code4, computer, result_dists + i + 3, lower_bound4, ctx);
             }
         }
 
@@ -710,10 +819,15 @@ private:
             auto* lower_bound = lower_bounds == nullptr ? nullptr : lower_bounds + i;
             const auto* one_bit_code = one_bit_codes.data + i * one_bit_code_size_;
             bool computed = this->quantizer_->ComputeDistWithOneBitLowerBound(
-                *computer, one_bit_code, result_dists + i, lower_bound);
+                *computer,
+                one_bit_code,
+                result_dists + i,
+                lower_bound,
+                this->query_rabitq_error_rate(ctx));
             if (not computed) {
+                this->add_filter_fallback_full_count(ctx, 1);
                 this->compute_full_dist_after_one_bit_failure(
-                    idx[i], one_bit_code, computer, result_dists + i, lower_bound);
+                    idx[i], one_bit_code, computer, result_dists + i, lower_bound, ctx);
             }
         }
     }
@@ -723,7 +837,8 @@ private:
                                  Computer<RaBitQuantizer<metric>>* computer,
                                  const InnerIdType* idx,
                                  InnerIdType id_count,
-                                 QueryContext* ctx) const {
+                                 QueryContext* ctx,
+                                 const float* hint_dists = nullptr) const {
         Allocator* search_alloc = select_query_allocator(ctx, allocator_);
         ByteBuffer one_bit_codes(id_count * one_bit_code_size_, search_alloc);
         ByteBuffer supplement_codes(id_count * supplement_code_size_, search_alloc);
@@ -753,7 +868,54 @@ private:
         for (InnerIdType i = 0; i < id_count; ++i) {
             const auto* one_bit_code = one_bit_codes.data + i * one_bit_code_size_;
             const auto* supplement_code = supplement_codes.data + i * supplement_code_size_;
-            this->compute_full_dist(one_bit_code, supplement_code, computer, result_dists + i);
+            const float hint =
+                hint_dists == nullptr ? std::numeric_limits<float>::max() : hint_dists[i];
+            this->compute_full_dist(
+                one_bit_code, supplement_code, computer, result_dists + i, ctx, hint);
+        }
+    }
+
+    void
+    query_full_dist_by_supplement_multiread(float* result_dists,
+                                            Computer<RaBitQuantizer<metric>>* computer,
+                                            const InnerIdType* idx,
+                                            InnerIdType id_count,
+                                            QueryContext* ctx,
+                                            const float* hint_dists = nullptr) const {
+        Allocator* search_alloc = select_query_allocator(ctx, allocator_);
+        ByteBuffer supplement_codes(id_count * supplement_code_size_, search_alloc);
+        Vector<uint64_t> supp_sizes(id_count, supplement_code_size_, search_alloc);
+        Vector<uint64_t> supp_offsets(id_count, 0, search_alloc);
+        for (InnerIdType i = 0; i < id_count; ++i) {
+            supp_offsets[i] = static_cast<uint64_t>(idx[i]) * supplement_code_size_;
+        }
+
+        double io_cost_ms = 0.0F;
+        {
+            Timer timer(io_cost_ms);
+            this->supplement_cell_->MultiRead(
+                supplement_codes.data, supp_sizes.data(), supp_offsets.data(), id_count);
+        }
+        if (ctx != nullptr and ctx->stats != nullptr) {
+            ctx->stats->io_cnt.fetch_add(id_count, std::memory_order_relaxed);
+            ctx->stats->io_time_ms.fetch_add(static_cast<uint32_t>(io_cost_ms),
+                                             std::memory_order_relaxed);
+        }
+
+        for (InnerIdType i = 0; i < id_count; ++i) {
+            bool one_bit_need_release = false;
+            const auto* one_bit_code = this->get_one_bit_code(idx[i], one_bit_need_release);
+            const auto* supplement_code = supplement_codes.data + i * supplement_code_size_;
+            const float hint =
+                hint_dists == nullptr ? std::numeric_limits<float>::max() : hint_dists[i];
+            try {
+                this->compute_full_dist(
+                    one_bit_code, supplement_code, computer, result_dists + i, ctx, hint);
+            } catch (...) {
+                this->release_one_bit_code(one_bit_code, one_bit_need_release);
+                throw;
+            }
+            this->release_one_bit_code(one_bit_code, one_bit_need_release);
         }
     }
 
@@ -762,12 +924,13 @@ private:
                                             const uint8_t* one_bit_code,
                                             Computer<RaBitQuantizer<metric>>* computer,
                                             float* result_dist,
-                                            float* lower_bound) const {
+                                            float* lower_bound,
+                                            QueryContext* ctx) const {
         bool supplement_need_release = false;
         const uint8_t* supplement_code = nullptr;
         try {
             supplement_code = this->get_supplement_code(id, supplement_need_release);
-            this->compute_full_dist(one_bit_code, supplement_code, computer, result_dist);
+            this->compute_full_dist(one_bit_code, supplement_code, computer, result_dist, ctx);
             if (lower_bound != nullptr) {
                 *lower_bound = std::numeric_limits<float>::max();
             }
@@ -782,9 +945,24 @@ private:
     compute_full_dist(const uint8_t* one_bit_code,
                       const uint8_t* supplement_code,
                       Computer<RaBitQuantizer<metric>>* computer,
-                      float* result_dist) const {
-        if (not this->quantizer_->ComputeDistWithSplitCode(
-                *computer, one_bit_code, supplement_code, result_dist)) {
+                      float* result_dist,
+                      QueryContext* ctx = nullptr,
+                      float hint_dist = std::numeric_limits<float>::max()) const {
+        this->add_full_count(ctx, 1);
+        bool computed = false;
+        const bool has_hint =
+            std::isfinite(hint_dist) and hint_dist < std::numeric_limits<float>::max();
+        if (has_hint) {
+            computed = this->quantizer_->ComputeDistWithSplitCodeAndFilterDist(
+                *computer, one_bit_code, supplement_code, hint_dist, result_dist);
+        }
+        if (computed) {
+            this->add_reorder_hint_full_count(ctx, 1);
+        } else if (has_hint) {
+            this->add_reorder_fallback_full_count(ctx, 1);
+        }
+        if (not computed and not this->quantizer_->ComputeDistWithSplitCode(
+                                 *computer, one_bit_code, supplement_code, result_dist)) {
             ByteBuffer full_code(this->code_size_, allocator_);
             this->quantizer_->MergeSplitCode(one_bit_code, supplement_code, full_code.data);
             computer->ComputeDist(full_code.data, result_dist);
@@ -794,13 +972,16 @@ private:
     void
     compute_full_dist(InnerIdType id,
                       Computer<RaBitQuantizer<metric>>* computer,
-                      float* result_dist) const {
+                      float* result_dist,
+                      QueryContext* ctx = nullptr,
+                      float hint_dist = std::numeric_limits<float>::max()) const {
         bool one_bit_need_release = false;
         bool supplement_need_release = false;
         const auto* one_bit_code = this->get_one_bit_code(id, one_bit_need_release);
         const auto* supplement_code = this->get_supplement_code(id, supplement_need_release);
         try {
-            this->compute_full_dist(one_bit_code, supplement_code, computer, result_dist);
+            this->compute_full_dist(
+                one_bit_code, supplement_code, computer, result_dist, ctx, hint_dist);
         } catch (...) {
             this->release_one_bit_code(one_bit_code, one_bit_need_release);
             this->release_supplement_code(supplement_code, supplement_need_release);

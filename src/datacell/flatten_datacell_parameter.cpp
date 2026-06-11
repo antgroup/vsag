@@ -17,6 +17,7 @@
 
 #include <fmt/format.h>
 
+#include "impl/logger/logger.h"
 #include "inner_string_params.h"
 #include "quantization/rabitq_quantization/rabitq_quantizer_parameter.h"
 #include "utils/param_compat_macros.h"
@@ -53,8 +54,8 @@ FlattenDataCellParameter::FromJson(const JsonType& json) {
         fmt::format("flatten interface parameters must contains {}", QUANTIZATION_PARAMS_KEY));
 
     // When the caller asks for the split codes layout, force the quantizer
-    // to its "split" variant so that users do not have to write the
-    // historically-named "rabitq_version": "split_1bit_7bit" by hand.
+    // to its "split" variant so that users do not have to write
+    // "rabitq_version": "split" by hand.
     // codes_type=rabitq_split is the single source of truth: any
     // user-supplied rabitq_version is silently overridden here so that the
     // hgraph default template (which always seeds rabitq_version=standard)
@@ -63,8 +64,17 @@ FlattenDataCellParameter::FromJson(const JsonType& json) {
         json.Contains(CODES_TYPE_KEY) && json[CODES_TYPE_KEY].GetString() == RABITQ_SPLIT_CODES;
     auto quant_json = json[QUANTIZATION_PARAMS_KEY];
     if (is_split_codes) {
+        if (quant_json.Contains(RABITQ_QUANTIZATION_VERSION_KEY)) {
+            const auto user_version = quant_json[RABITQ_QUANTIZATION_VERSION_KEY].GetString();
+            if (not RaBitQuantizerParameter::IsSplitVersion(user_version)) {
+                logger::warn(
+                    "rabitq_version={} is overridden to {} because codes_type=rabitq_split",
+                    user_version,
+                    RaBitQuantizerParameter::RABITQ_VERSION_SPLIT);
+            }
+        }
         quant_json[RABITQ_QUANTIZATION_VERSION_KEY].SetString(
-            RaBitQuantizerParameter::RABITQ_VERSION_SPLIT_1BIT_7BIT);
+            RaBitQuantizerParameter::RABITQ_VERSION_SPLIT);
     }
     this->quantizer_parameter = QuantizerParameter::GetQuantizerParameterByJson(quant_json);
     this->name = FLATTEN_DATA_CELL;

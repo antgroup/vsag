@@ -466,6 +466,118 @@ RaBitQFloatBinaryIPBatch4(const float* vector,
     }
 }
 
+void
+RaBitQFloatThreeBitIPBatch4(const float* vector,
+                            const uint8_t* bits1,
+                            const uint8_t* bits2,
+                            const uint8_t* bits3,
+                            const uint8_t* bits4,
+                            uint64_t dim,
+                            uint32_t reorder_bits,
+                            float* results) {
+    results[0] = 0.0F;
+    results[1] = 0.0F;
+    results[2] = 0.0F;
+    results[3] = 0.0F;
+    if (dim == 0) {
+        return;
+    }
+
+    const uint64_t plane_bytes = (dim + 7) / 8;
+    const uint8_t* codes[4] = {bits1, bits2, bits3, bits4};
+    const uint32_t weights[3] = {
+        1U << (reorder_bits + 2), 1U << (reorder_bits + 1), 1U << reorder_bits};
+    for (uint64_t d = 0; d < dim; ++d) {
+        const uint64_t byte_idx = d >> 3;
+        const uint8_t bit_mask = static_cast<uint8_t>(1U << (d & 7));
+        const float value = vector[d];
+        for (uint32_t i = 0; i < 4; ++i) {
+            uint32_t code = 0;
+            for (uint32_t bit = 0; bit < 3; ++bit) {
+                const auto* plane = codes[i] + static_cast<uint64_t>(bit) * plane_bytes;
+                if ((plane[byte_idx] & bit_mask) != 0U) {
+                    code += weights[bit];
+                }
+            }
+            results[i] += value * static_cast<float>(code);
+        }
+    }
+}
+
+void
+RaBitQFloatBuildByteIPLookupTable(const float* vector, uint64_t dim, float* lookup) {
+    const uint64_t block_count = (dim + 7) / 8;
+    for (uint64_t block = 0; block < block_count; ++block) {
+        float lane_values[8] = {0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F};
+        for (uint64_t lane = 0; lane < 8; ++lane) {
+            const uint64_t dim_id = block * 8 + lane;
+            if (dim_id < dim) {
+                lane_values[lane] = vector[dim_id];
+            }
+        }
+
+        auto* block_lookup = lookup + block * 256;
+        block_lookup[0] = 0.0F;
+        for (uint32_t mask = 1; mask < 256; ++mask) {
+            const uint32_t low_bit = mask & (~mask + 1U);
+            const auto lane = static_cast<uint32_t>(__builtin_ctz(low_bit));
+            block_lookup[mask] = block_lookup[mask ^ low_bit] + lane_values[lane];
+        }
+    }
+}
+
+float
+RaBitQFloatThreeBitIPByLookup(const float* lookup,
+                              const uint8_t* bits,
+                              uint64_t dim,
+                              uint32_t reorder_bits) {
+    const uint64_t plane_bytes = (dim + 7) / 8;
+    const uint32_t weights[3] = {
+        1U << (reorder_bits + 2), 1U << (reorder_bits + 1), 1U << reorder_bits};
+    float result = 0.0F;
+    for (uint64_t block = 0; block < plane_bytes; ++block) {
+        const auto* block_lookup = lookup + block * 256;
+        result += block_lookup[bits[block]] * static_cast<float>(weights[0]);
+        result += block_lookup[bits[plane_bytes + block]] * static_cast<float>(weights[1]);
+        result += block_lookup[bits[2 * plane_bytes + block]] * static_cast<float>(weights[2]);
+    }
+    return result;
+}
+
+void
+RaBitQFloatThreeBitIPBatch4ByLookup(const float* lookup,
+                                    const uint8_t* bits1,
+                                    const uint8_t* bits2,
+                                    const uint8_t* bits3,
+                                    const uint8_t* bits4,
+                                    uint64_t dim,
+                                    uint32_t reorder_bits,
+                                    float* results) {
+    results[0] = 0.0F;
+    results[1] = 0.0F;
+    results[2] = 0.0F;
+    results[3] = 0.0F;
+
+    const uint64_t plane_bytes = (dim + 7) / 8;
+    const uint32_t weights[3] = {
+        1U << (reorder_bits + 2), 1U << (reorder_bits + 1), 1U << reorder_bits};
+    for (uint64_t block = 0; block < plane_bytes; ++block) {
+        const auto* block_lookup = lookup + block * 256;
+        results[0] += block_lookup[bits1[block]] * static_cast<float>(weights[0]);
+        results[0] += block_lookup[bits1[plane_bytes + block]] * static_cast<float>(weights[1]);
+        results[0] += block_lookup[bits1[2 * plane_bytes + block]] * static_cast<float>(weights[2]);
+        results[1] += block_lookup[bits2[block]] * static_cast<float>(weights[0]);
+        results[1] += block_lookup[bits2[plane_bytes + block]] * static_cast<float>(weights[1]);
+        results[1] += block_lookup[bits2[2 * plane_bytes + block]] * static_cast<float>(weights[2]);
+        results[2] += block_lookup[bits3[block]] * static_cast<float>(weights[0]);
+        results[2] += block_lookup[bits3[plane_bytes + block]] * static_cast<float>(weights[1]);
+        results[2] += block_lookup[bits3[2 * plane_bytes + block]] * static_cast<float>(weights[2]);
+        results[3] += block_lookup[bits4[block]] * static_cast<float>(weights[0]);
+        results[3] += block_lookup[bits4[plane_bytes + block]] * static_cast<float>(weights[1]);
+        results[3] += block_lookup[bits4[2 * plane_bytes + block]] * static_cast<float>(weights[2]);
+    }
+}
+
 float
 RaBitQFloatSplitCodeIP(const float* vector,
                        const uint8_t* one_bit_code,
@@ -493,6 +605,32 @@ RaBitQFloatSplitCodeIP(const float* vector,
         result += vector[d] * static_cast<float>(code);
     }
 
+    return result;
+}
+
+float
+RaBitQFloatSupplementCodeIP(const float* vector,
+                            const uint8_t* supplement_code,
+                            uint64_t dim,
+                            uint32_t supplement_bits) {
+    if (dim == 0 or supplement_bits == 0) {
+        return 0.0F;
+    }
+
+    const uint64_t plane_bytes = (dim + 7) / 8;
+    float result = 0.0F;
+    for (uint64_t d = 0; d < dim; ++d) {
+        const uint64_t byte_idx = d >> 3;
+        const uint8_t bit_mask = static_cast<uint8_t>(1U << (d & 7));
+        uint32_t code = 0;
+        for (uint32_t bit = 0; bit < supplement_bits; ++bit) {
+            const auto* plane = supplement_code + static_cast<uint64_t>(bit) * plane_bytes;
+            if ((plane[byte_idx] & bit_mask) != 0U) {
+                code += 1U << bit;
+            }
+        }
+        result += vector[d] * static_cast<float>(code);
+    }
     return result;
 }
 
