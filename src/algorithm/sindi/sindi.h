@@ -19,7 +19,7 @@
 
 #include "algorithm/inner_index_interface.h"
 #include "algorithm/sindi/term_id_mapper.h"
-#include "algorithm/sparse_index/sparse_index.h"
+#include "datacell/flatten_interface.h"
 #include "datacell/sparse_term_datacell.h"
 #include "vsag/allocator.h"
 
@@ -59,7 +59,7 @@ struct ImmutableSINDIData {
  *
  * Optional features:
  *  - Quantization: compress stored term values.
- *  - Reranking: use an embedded SparseIndex for precise re-scoring.
+ *  - Reranking: use an embedded sparse-vector data cell for precise re-scoring.
  *  - Term-id remapping: remap external dim-ids to a dense [0,N) range to
  *    save memory when the vocabulary is sparse.
  *
@@ -321,13 +321,12 @@ private:
     std::atomic<int64_t> cur_element_count_{0};  // total inserted vectors
     std::atomic<int64_t> delete_count_{0};       // soft-deleted vectors
 
-    bool use_reorder_{false};       // enable reranking stage
-    bool use_quantization_{false};  // enable term-value quantization
+    bool use_reorder_{false};  // enable reranking stage
 
     float doc_prune_ratio_{0};   // ratio of docs pruned during build
     float doc_retain_ratio_{0};  // ratio of docs kept after pruning
 
-    std::shared_ptr<SparseIndex> rerank_flat_index_{nullptr};  // re-rank back-end
+    FlattenInterfacePtr rerank_flat_{nullptr};  // re-rank back-end
 
     SparseValueQuantizationType sparse_value_quant_type_{SparseValueQuantizationType::FP32};
 

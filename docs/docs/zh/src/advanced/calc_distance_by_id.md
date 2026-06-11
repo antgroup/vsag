@@ -100,8 +100,8 @@ if (result.has_value()) {
 
 ## 稀疏向量
 
-对于稀疏向量索引（SINDI、SparseIndex），`const float*` 重载不适用。需要通过
-`SparseVectors(...)` 把查询封装为 `DatasetPtr`，并调用 `DatasetPtr` 重载：
+对于 SINDI 等稀疏向量索引，`const float*` 重载不适用。需要通过 `SparseVectors(...)` 把查询
+封装为 `DatasetPtr`，并调用 `DatasetPtr` 重载：
 
 ```cpp
 auto query = vsag::Dataset::Make();
@@ -119,7 +119,6 @@ auto d = index->CalcDistanceById(query, /*id=*/42);
 | brute_force  | 支持                       | 支持（默认循环） | 总是精确（无量化）。 |
 | pyramid      | 支持                       | 支持（默认循环） | |
 | sindi        | 不支持                     | 支持             | 仅稀疏向量。 |
-| sparse_index | 不支持                     | 支持             | 仅稀疏向量。 |
 
 对于未实现某重载的索引，调用会返回 `UNSUPPORTED_INDEX_OPERATION` 错误。
 

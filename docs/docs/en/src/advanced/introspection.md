@@ -45,7 +45,7 @@ Two overloads are provided:
 // Dense vector indexes (HGraph, BruteForce, IVF)
 auto r = index->CalDistanceById(query_ptr, ids, count, /*calculate_precise_distance=*/true);
 
-// Sparse vector indexes (SINDI, SparseIndex) — wrap the query in a Dataset
+// Sparse vector indexes (SINDI) — wrap the query in a Dataset
 auto query_ds = vsag::Dataset::Make();
 query_ds->NumElements(1)->SparseVectors(/* ... */);
 auto r = index->CalDistanceById(query_ds, ids, count, /*calculate_precise_distance=*/true);

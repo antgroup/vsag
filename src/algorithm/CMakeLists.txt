@@ -20,7 +20,6 @@ add_subdirectory (lazy_hgraph)
 add_subdirectory (bruteforce)
 add_subdirectory (ivf)
 add_subdirectory (pyramid)
-add_subdirectory (sparse_index)
 add_subdirectory (simq)
 
 file (GLOB ALGORITHM_SRCS "*.cpp")
@@ -40,7 +39,6 @@ set (ALGORITHM_LIBS
         bruteforce
         ivf
         pyramid
-        sparse_index
         simq
         PARENT_SCOPE)
 

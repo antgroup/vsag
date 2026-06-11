@@ -15,6 +15,8 @@
 
 #pragma once
 
+#include <limits>
+
 #include "flatten_interface.h"
 #include "io/basic_io.h"
 #include "io/memory_block_io.h"
@@ -77,9 +79,11 @@ public:
         if (new_capacity <= this->max_capacity_) {
             return;
         }
-        uint64_t io_size = (new_capacity - total_count_) * max_code_size_ + current_offset_;
+        std::scoped_lock lock(mutex_, current_offset_mutex_);
+        uint64_t io_size =
+            static_cast<uint64_t>(new_capacity - total_count_) * max_code_size_ + current_offset_;
         this->io_->Resize(io_size);
-        this->offset_io_->Resize(static_cast<uint64_t>(new_capacity) * sizeof(uint32_t));
+        this->offset_io_->Resize(static_cast<uint64_t>(new_capacity) * sizeof(DocLocation));
         this->max_capacity_ = new_capacity;
     }
 
@@ -109,6 +113,11 @@ public:
 
     [[nodiscard]] const uint8_t*
     GetCodesById(InnerIdType id, bool& need_release) const override;
+
+    void
+    GetSparseVectorByInnerId(InnerIdType inner_id,
+                             SparseVector* data,
+                             Allocator* specified_allocator) const override;
 
     void
     Release(const uint8_t* data) const override;
@@ -153,12 +162,41 @@ private:
     }
 
 private:
+    // Packed so each entry is exactly 12 bytes on disk and in the offset_io_
+    // buffer. The unpacked layout would round sizeof up to 16 due to the
+    // uint64 alignment requirement, wasting 33% of the offset table.
+    struct __attribute__((packed)) DocLocation {
+        uint64_t offset{0};
+        uint32_t size{0};
+    };
+    static_assert(sizeof(DocLocation) == 12, "DocLocation must be 12 bytes on disk");
+
+    // Legacy on-disk layout: kept for backward-compatible deserialization of indexes
+    // produced before the 64-bit offset upgrade. Offsets larger than 4 GiB used to
+    // silently overflow and corrupt the stored payload (see PR #2056).
+    struct LegacyDocLocation {
+        uint32_t offset{0};
+        uint32_t size{0};
+    };
+    static_assert(sizeof(LegacyDocLocation) == 8, "LegacyDocLocation must be 8 bytes");
+
+    // Sentinel written in place of the legacy uint32 current_offset_ to mark the
+    // new 64-bit format on disk. A legacy file can never produce this value at
+    // that byte offset: legacy current_offset_ is the sum of code_size values,
+    // each of which is `(len*2+1)*sizeof(uint32_t)` and therefore a multiple of
+    // 4 bytes (see sparse_vector_datacell.inl::InsertVector). 0xFFFFFFFF is not
+    // a multiple of 4, so the sentinel cannot collide with any well-formed
+    // legacy serialization — including legacy files whose offsets had silently
+    // overflowed, since the modulo-2^32 value remains 4-byte aligned.
+    static constexpr uint32_t SERIALIZE_FORMAT_SENTINEL = std::numeric_limits<uint32_t>::max();
+    static constexpr uint32_t SERIALIZE_FORMAT_VERSION_V2 = 2;
+
     std::shared_ptr<Quantizer<QuantTmpl>> quantizer_{nullptr};
     std::shared_ptr<BasicIO<IOTmpl>> io_{nullptr};
 
     Allocator* const allocator_{nullptr};
     std::shared_ptr<MemoryBlockIO> offset_io_{nullptr};
-    uint32_t current_offset_{0};
+    uint64_t current_offset_{0};
     uint64_t max_code_size_{0};
     std::mutex current_offset_mutex_;
 };

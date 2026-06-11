@@ -26,7 +26,6 @@
 #include "algorithm/pyramid/pyramid_zparameters.h"
 #include "algorithm/simq/simq.h"
 #include "algorithm/sindi/sindi.h"
-#include "algorithm/sparse_index/sparse_index.h"
 #include "common.h"
 #include "index/diskann.h"
 #include "index/diskann_zparameters.h"
@@ -135,12 +134,6 @@ create_ivf_index(JsonType& parsed_params, const IndexCommonParam& index_common_p
 }
 
 tl::expected<std::shared_ptr<Index>, Error>
-create_sparse_index(JsonType& parsed_params, const IndexCommonParam& index_common_params) {
-    return create_index_impl_with_param_log<SparseIndex>(
-        "created a sparse index", parsed_params, index_common_params);
-}
-
-tl::expected<std::shared_ptr<Index>, Error>
 create_sindi_index(JsonType& parsed_params, const IndexCommonParam& index_common_params) {
     return create_index_impl_with_param_log<SINDI>(
         "created a sindi index", parsed_params, index_common_params);
@@ -176,7 +169,6 @@ register_all_index_creators() {
         register_index_creator(INDEX_LAZY_HGRAPH, &create_lazy_hgraph_index);
         register_index_creator(INDEX_IVF, &create_ivf_index);
         register_index_creator(INDEX_PYRAMID, &create_pyramid_index);
-        register_index_creator(INDEX_SPARSE, &create_sparse_index);
         register_index_creator(INDEX_SINDI, &create_sindi_index);
         register_index_creator(INDEX_WARP, &create_warp_index);
         register_index_creator(INDEX_SIMQ, &create_simq_index);

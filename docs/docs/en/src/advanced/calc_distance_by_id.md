@@ -108,9 +108,9 @@ A runnable example is provided in
 
 ## Sparse Vectors
 
-For sparse-vector indexes (SINDI, SparseIndex), the `const float*` overloads are not
-applicable. Pass the query as a `DatasetPtr` carrying sparse vectors via
-`SparseVectors(...)`, and use the `DatasetPtr` overloads:
+For sparse-vector indexes such as SINDI, the `const float*` overloads are not applicable. Pass
+the query as a `DatasetPtr` carrying sparse vectors via `SparseVectors(...)`, and use the
+`DatasetPtr` overloads:
 
 ```cpp
 auto query = vsag::Dataset::Make();
@@ -128,7 +128,6 @@ auto d = index->CalcDistanceById(query, /*id=*/42);
 | brute_force  | yes                             | yes (default loop)  | Always precise (no quantization). |
 | pyramid      | yes                             | yes (default loop)  | |
 | sindi        | no                              | yes                 | Sparse vectors only. |
-| sparse_index | no                              | yes                 | Sparse vectors only. |
 
 Indexes that do not implement the API surface for a given overload return an
 `UNSUPPORTED_INDEX_OPERATION` error.

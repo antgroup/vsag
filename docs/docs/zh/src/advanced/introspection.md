@@ -41,7 +41,7 @@ if (not index->CheckFeature(vsag::SUPPORT_DELETE_BY_ID)) {
 // 稠密向量索引（HGraph、BruteForce、IVF）
 auto r = index->CalDistanceById(query_ptr, ids, count, /*calculate_precise_distance=*/true);
 
-// 稀疏向量索引（SINDI、SparseIndex）—— 用 Dataset 封装查询
+// 稀疏向量索引（SINDI）—— 用 Dataset 封装查询
 auto query_ds = vsag::Dataset::Make();
 query_ds->NumElements(1)->SparseVectors(/* ... */);
 auto r = index->CalDistanceById(query_ds, ids, count, /*calculate_precise_distance=*/true);

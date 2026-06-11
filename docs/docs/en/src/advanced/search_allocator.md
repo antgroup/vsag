@@ -43,7 +43,7 @@ index falls back to the allocator that was attached to its owning `Resource`.
 > **Availability.** `Index::SearchWithRequest` has a default implementation that returns an
 > *unsupported* error. Only HGraph, IVF, BruteForce and WARP implement it today
 > (`src/algorithm/{hgraph,ivf,brute_force,warp}.cpp`). For indexes that do not yet override
-> `SearchWithRequest` (SINDI, Pyramid, SparseIndex), use the legacy `SearchParam`
+> `SearchWithRequest` (HNSW, DiskANN, SINDI, Pyramid), use the legacy `SearchParam`
 > path described below.
 
 ## Legacy API — `SearchParam::allocator` *(deprecated)*
@@ -78,7 +78,8 @@ The result-`Dataset` ownership contract depends on which index implements `Searc
   `allocator->Deallocate(...)` on `ids` / `distances` automatically.
 - **IVF / BruteForce / WARP** currently construct the result `Dataset` via
   `create_fast_dataset(..., allocator_)` — i.e. the index's own allocator
-  (`src/algorithm/ivf.cpp`, `src/algorithm/brute_force.cpp`, `src/algorithm/warp.cpp`).
+  (`src/algorithm/ivf/ivf.cpp`, `src/algorithm/bruteforce/bruteforce.cpp`; WARP uses the
+  BruteForce implementation in WARP mode).
   `request.search_allocator_` is only consulted for scratch state on those paths today; the
   result buffers are owned by the index's allocator. Treat the result `Dataset`'s lifetime as
   tied to the index's allocator on these indexes.

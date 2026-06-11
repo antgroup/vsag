@@ -37,7 +37,7 @@ auto result = index->SearchWithRequest(req).value();
 
 > **可用性。** `Index::SearchWithRequest` 默认实现会返回 *不支持* 错误。目前只有 HGraph、
 > IVF、BruteForce、WARP 实现了它（`src/algorithm/{hgraph,ivf,brute_force,warp}.cpp`）。对于
-> 尚未 override 的索引（SINDI、Pyramid、SparseIndex），请使用下文的旧版
+> 尚未 override 的索引（HNSW、DiskANN、SINDI、Pyramid），请使用下文的旧版
 > `SearchParam` 路径。
 
 ## 旧版 API —— `SearchParam::allocator`（已弃用）
@@ -69,10 +69,10 @@ auto result = index->KnnSearch(query, /*k=*/10, search_param).value();
   （见 `src/algorithm/hgraph.cpp` 中 `ctx.alloc = request.search_allocator_`）。其结果 `Dataset`
   被标记为 `Owner(true, allocator)`，析构时会自动用该 allocator 释放 `ids` / `distances`。
 - **IVF / BruteForce / WARP** 当前用 `create_fast_dataset(..., allocator_)` 构造结果，即索引
-  自身的 allocator（`src/algorithm/ivf.cpp`、`src/algorithm/brute_force.cpp`、
-  `src/algorithm/warp.cpp`）。这些路径上 `request.search_allocator_` 只会被部分临时缓冲读取，
-  结果缓冲仍由索引 allocator 持有。在这些索引上请把结果 `Dataset` 的生命周期视为绑定到索引
-  allocator。
+  自身的 allocator（`src/algorithm/ivf/ivf.cpp`、`src/algorithm/bruteforce/bruteforce.cpp`；
+  WARP 使用 BruteForce 的 WARP 模式实现）。这些路径上 `request.search_allocator_` 只会被部分
+  临时缓冲读取，结果缓冲仍由索引 allocator 持有。在这些索引上请把结果 `Dataset` 的生命周期
+  视为绑定到索引 allocator。
 
 实际意义：
 
