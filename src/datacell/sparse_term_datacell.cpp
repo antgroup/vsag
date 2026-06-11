@@ -283,9 +283,17 @@ SparseTermDataCell::ResizeTermList(InnerIdType new_term_capacity) {
     if (new_term_capacity <= term_capacity_) {
         return;
     }
-    Vector<std::unique_ptr<Vector<uint16_t>>> new_ids(new_term_capacity, allocator_);
-    Vector<std::unique_ptr<Vector<uint8_t>>> new_datas(new_term_capacity, allocator_);
-    Vector<uint32_t> new_sizes(new_term_capacity, 0, allocator_);
+    InnerIdType new_capacity = term_capacity_ == 0 ? new_term_capacity : term_capacity_;
+    while (new_capacity < new_term_capacity) {
+        if (new_capacity > std::numeric_limits<InnerIdType>::max() / 2) {
+            new_capacity = new_term_capacity;
+            break;
+        }
+        new_capacity *= 2;
+    }
+    Vector<std::unique_ptr<Vector<uint16_t>>> new_ids(new_capacity, allocator_);
+    Vector<std::unique_ptr<Vector<uint8_t>>> new_datas(new_capacity, allocator_);
+    Vector<uint32_t> new_sizes(new_capacity, 0, allocator_);
 
     std::move(term_ids_.begin(), term_ids_.end(), new_ids.begin());
     std::move(term_datas_.begin(), term_datas_.end(), new_datas.begin());
@@ -294,7 +302,7 @@ SparseTermDataCell::ResizeTermList(InnerIdType new_term_capacity) {
     term_ids_.swap(new_ids);
     term_datas_.swap(new_datas);
     term_sizes_.swap(new_sizes);
-    term_capacity_ = new_term_capacity;
+    term_capacity_ = new_capacity;
 }
 
 float
