@@ -352,14 +352,12 @@ Pyramid::search_impl(const DatasetPtr& query,
             if (valid) {
                 if (thread_pool_ != nullptr && search_param.parallel_search_thread_count > 1) {
                     futures.push_back(thread_pool_->GeneralEnqueue([&, node, i]() -> void {
-                        auto task_vl = pool_->TakeOne();
-                        node->Search(search_func, task_vl, search_result_lists[i], search_param.ef);
-                        pool_->ReturnOne(task_vl);
+                        VisitedListGuard vl_guard(pool_.get());
+                        node->Search(search_func, vl_guard.get(), search_result_lists[i], search_param.ef);
                     }));
                 } else {
-                    auto vl = pool_->TakeOne();
-                    node->Search(search_func, vl, search_result_lists[i], search_param.ef);
-                    pool_->ReturnOne(vl);
+                    VisitedListGuard vl_guard(pool_.get());
+                    node->Search(search_func, vl_guard.get(), search_result_lists[i], search_param.ef);
                 }
             }
         }
@@ -377,9 +375,8 @@ Pyramid::search_impl(const DatasetPtr& query,
         }
 
     } else {
-        auto vl = pool_->TakeOne();
-        root_->Search(search_func, vl, search_result, search_param.ef);
-        pool_->ReturnOne(vl);
+        VisitedListGuard vl_guard(pool_.get());
+        root_->Search(search_func, vl_guard.get(), search_result, search_param.ef);
     }
 
     if (use_reorder_) {

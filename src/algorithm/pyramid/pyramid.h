@@ -202,6 +202,35 @@ public:
     friend class PyramidAnalyzer;
 
 private:
+    // RAII guard for VisitedList pool resources
+    class VisitedListGuard {
+    public:
+        VisitedListGuard(ResourceObjectPool<VisitedList>* pool) : pool_(pool), vl_(pool->TakeOne()) {
+        }
+
+        ~VisitedListGuard() {
+            if (vl_) {
+                pool_->ReturnOne(vl_);
+            }
+        }
+
+        VisitedListGuard(const VisitedListGuard&) = delete;
+        VisitedListGuard& operator=(const VisitedListGuard&) = delete;
+
+        VisitedListPtr
+        get() const {
+            return vl_;
+        }
+
+        operator VisitedListPtr() const {
+            return vl_;
+        }
+
+    private:
+        ResourceObjectPool<VisitedList>* pool_;
+        VisitedListPtr vl_;
+    };
+
     void
     resize(int64_t new_max_capacity);
 
