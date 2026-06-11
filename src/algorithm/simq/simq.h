@@ -86,7 +86,10 @@ public:
 
 private:
     void
-    run_clustering(const float* flat_vecs, int64_t num_vecs, int64_t dim);
+    run_clustering(const float* flat_vecs,
+                   const Vector<InnerIdType>& vec_to_doc,
+                   int64_t num_vecs,
+                   int64_t dim);
 
     void
     build_rep_hnsw(const float* flat_vecs, int64_t dim);
@@ -95,11 +98,6 @@ private:
     coarse_search(const float* query_tokens,
                   uint32_t query_token_count,
                   int64_t coarse_k) const;
-
-    float
-    maxsim_score(const float* query_tokens,
-                 uint32_t query_token_count,
-                 InnerIdType doc_inner_id) const;
 
     void
     serialize_rep_hnsw(StreamWriter& writer) const;
@@ -113,18 +111,13 @@ private:
     int64_t num_clusters_{0};
 
     // Flat inverted index: cluster i owns [cluster_offsets_[i], cluster_offsets_[i+1])
+    // Stores doc IDs (not vector IDs)
     Vector<InnerIdType> cluster_offsets_;
     Vector<InnerIdType> cluster_data_;
 
-    Vector<InnerIdType> vec_to_doc_;
-
-    FlattenInterfacePtr inner_codes_{nullptr};
-
-    // doc_offsets_[i] = start flat-vec index of doc i; doc_offsets_[i+1] = end (exclusive)
-    Vector<uint32_t> doc_offsets_;
+    FlattenInterfacePtr mv_codes_{nullptr};
 
     uint64_t total_count_{0};
-    uint64_t total_vector_count_{0};
 
     Vector<InnerIdType> vec_to_cluster_;
 

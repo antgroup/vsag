@@ -83,7 +83,6 @@ make_build_param(float init_cluster_ratio   = 0.01f,  // ~80 clusters for 8000 t
             "metric_type": "ip",
             "dim": {},
             "index_param": {{
-                "base_quantization_type": "fp32",
                 "base_io_type": "memory_io",
                 "init_cluster_ratio": {},
                 "max_cluster_size": {},

@@ -24,14 +24,12 @@
 #include <unordered_map>
 #include <unordered_set>
 
-#include "datacell/flatten_datacell.h"
-#include "datacell/flatten_datacell_parameter.h"
 #include "index_feature_list.h"
 #include "inner_string_params.h"
+#include "metric_type.h"
 #include "storage/serialization.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
-#include "metric_type.h"
 #include "typing.h"
 #include "utils/util_functions.h"
 
@@ -69,13 +67,9 @@ public:
     void
     fit(const float* vecs, int64_t num_vecs, int64_t dim);
 
-    void
-    find_representatives(const float* vecs, int64_t dim);
-
     std::vector<int>                                         cluster_centers_;
     std::unordered_map<int, std::vector<ClusterMemberEntry>> clusters_;
     std::vector<int>                                         vec_to_cluster_;
-    std::vector<int>                                         representative_vids_;
 
 private:
     void
@@ -238,35 +232,6 @@ HNSWDynamicClustering::fit(const float* vecs, int64_t num_vecs, int64_t dim) {
     }
 }
 
-void
-HNSWDynamicClustering::find_representatives(const float* vecs, int64_t dim) {
-    representative_vids_.clear();
-    representative_vids_.reserve(cluster_centers_.size());
-
-    for (int cid : cluster_centers_) {
-        auto& members = clusters_[cid];
-
-        std::vector<float> mean(dim, 0.0f);
-        for (auto& m : members) {
-            const float* v = vecs + m.vec_id * dim;
-            for (int d = 0; d < dim; ++d) mean[d] += v[d];
-        }
-
-        float best_dot = -1e30f;
-        int   best_vid = static_cast<int>(members[0].vec_id);
-        for (auto& m : members) {
-            const float* v = vecs + m.vec_id * dim;
-            float dot = 0.0f;
-            for (int d = 0; d < dim; ++d) dot += v[d] * mean[d];
-            if (dot > best_dot) {
-                best_dot = dot;
-                best_vid = static_cast<int>(m.vec_id);
-            }
-        }
-        representative_vids_.push_back(best_vid);
-    }
-}
-
 }  // anonymous namespace
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -300,10 +265,8 @@ SIMQ::SIMQ(const SIMQParameterPtr& param, const IndexCommonParam& common_param)
     : InnerIndexInterface(param, common_param),
       cluster_offsets_(allocator_),
       cluster_data_(allocator_),
-      vec_to_doc_(allocator_),
-      doc_offsets_(allocator_),
       vec_to_cluster_(allocator_) {
-    inner_codes_ = FlattenInterface::MakeInstance(param->base_codes_param, common_param);
+    mv_codes_ = FlattenInterface::MakeInstance(param->base_codes_param, common_param);
     init_cluster_ratio_ = param->init_cluster_ratio;
     max_cluster_size_   = param->max_cluster_size;
     split_start_idx_    = param->split_start_idx;
@@ -337,38 +300,37 @@ SIMQ::Build(const DatasetPtr& data) {
     const int64_t* labels = data->GetIds();
     CHECK_ARGUMENT(labels != nullptr, "simq build: labels (ids) is nullptr");
 
+    // Count total token vectors for clustering
     uint64_t total_vecs = 0;
     for (int64_t i = 0; i < num_docs; ++i) total_vecs += mvs[i].len_;
+    CHECK_ARGUMENT(total_vecs > 0, "simq build: total number of vectors must be > 0");
 
+    // Build flat token array for clustering (clustering needs contiguous float*)
     Vector<float> flat(total_vecs * static_cast<uint64_t>(mv_dim), allocator_);
-    doc_offsets_.resize(static_cast<uint64_t>(num_docs) + 1);
-    vec_to_doc_.resize(total_vecs);
+    Vector<InnerIdType> vec_to_doc(total_vecs, allocator_);
 
     uint64_t vec_off = 0;
     for (int64_t i = 0; i < num_docs; ++i) {
-        doc_offsets_[i] = static_cast<uint32_t>(vec_off);
         uint64_t n = static_cast<uint64_t>(mvs[i].len_) * static_cast<uint64_t>(mv_dim);
         std::memcpy(flat.data() + vec_off * static_cast<uint64_t>(mv_dim),
                     mvs[i].vectors_,
                     n * sizeof(float));
-        for (uint32_t t = 0; t < mvs[i].len_; ++t) {
-            vec_to_doc_[vec_off + t] = static_cast<InnerIdType>(i);
-        }
+        for (uint32_t t = 0; t < mvs[i].len_; ++t)
+            vec_to_doc[vec_off + t] = static_cast<InnerIdType>(i);
         vec_off += mvs[i].len_;
     }
-    doc_offsets_[num_docs] = static_cast<uint32_t>(total_vecs);
-    total_count_        = static_cast<uint64_t>(num_docs);
-    total_vector_count_ = total_vecs;
 
-    inner_codes_->Train(flat.data(), total_vecs);
-    inner_codes_->Resize(static_cast<InnerIdType>(total_vecs));
-    inner_codes_->BatchInsertVector(flat.data(), static_cast<InnerIdType>(total_vecs), nullptr);
+    total_count_ = static_cast<uint64_t>(num_docs);
 
-    for (int64_t i = 0; i < num_docs; ++i) {
+    // Store multi-vector documents via MultiVectorDataCell
+    mv_codes_->Train(flat.data(), total_vecs);
+    mv_codes_->Resize(static_cast<InnerIdType>(num_docs));
+    mv_codes_->BatchInsertVector(mvs, static_cast<InnerIdType>(num_docs), nullptr);
+
+    for (int64_t i = 0; i < num_docs; ++i)
         this->label_table_->Insert(static_cast<InnerIdType>(i), labels[i]);
-    }
 
-    run_clustering(flat.data(), static_cast<int64_t>(total_vecs), mv_dim);
+    run_clustering(flat.data(), vec_to_doc, static_cast<int64_t>(total_vecs), mv_dim);
     build_rep_hnsw(flat.data(), mv_dim);
 
     { Vector<InnerIdType> tmp(allocator_); tmp.swap(vec_to_cluster_); }
@@ -377,7 +339,10 @@ SIMQ::Build(const DatasetPtr& data) {
 }
 
 void
-SIMQ::run_clustering(const float* flat_vecs, int64_t num_vecs, int64_t dim) {
+SIMQ::run_clustering(const float* flat_vecs,
+                     const Vector<InnerIdType>& vec_to_doc,
+                     int64_t num_vecs,
+                     int64_t dim) {
     HNSWDynamicClustering clustering(
         init_cluster_ratio_, max_cluster_size_, split_start_idx_, random_seed_, allocator_);
     clustering.fit(flat_vecs, num_vecs, dim);
@@ -386,11 +351,10 @@ SIMQ::run_clustering(const float* flat_vecs, int64_t num_vecs, int64_t dim) {
     num_clusters_ = nc;
 
     std::vector<int> center_to_idx(num_vecs, -1);
-    for (int idx = 0; idx < nc; ++idx) {
+    for (int idx = 0; idx < nc; ++idx)
         center_to_idx[clustering.cluster_centers_[idx]] = idx;
-    }
 
-    // Build flat inverted index
+    // Build flat inverted index: cluster i owns [cluster_offsets_[i], cluster_offsets_[i+1])
     cluster_offsets_.resize(static_cast<uint64_t>(nc) + 1);
     uint64_t total_members = 0;
     for (int idx = 0; idx < nc; ++idx) {
@@ -400,15 +364,15 @@ SIMQ::run_clustering(const float* flat_vecs, int64_t num_vecs, int64_t dim) {
     }
     cluster_offsets_[nc] = static_cast<InnerIdType>(total_members);
 
+    // Store doc IDs (not token IDs) in cluster_data_ for direct rerank lookup
     cluster_data_.resize(total_members);
     for (int idx = 0; idx < nc; ++idx) {
         int cid = clustering.cluster_centers_[idx];
         auto it = clustering.clusters_.find(cid);
         if (it == clustering.clusters_.end()) continue;
         uint64_t off = cluster_offsets_[idx];
-        for (auto& m : it->second) {
-            cluster_data_[off++] = m.vec_id;
-        }
+        for (auto& m : it->second)
+            cluster_data_[off++] = vec_to_doc[m.vec_id];
     }
 
     vec_to_cluster_.resize(static_cast<uint64_t>(num_vecs));
@@ -429,23 +393,40 @@ SIMQ::build_rep_hnsw(const float* flat_vecs, int64_t dim) {
             continue;
         }
 
+        // Find the token vector closest to the cluster mean
+        // cluster_data_ now holds doc IDs; we need to look up any token from those docs.
+        // Use the first token of the first doc in the cluster as a simple representative.
+        // For a better representative we would need per-cluster token IDs, but since
+        // clustering was done on token vectors, we stored token IDs in vec_to_cluster_.
+        // Re-derive token IDs from cluster membership via cluster_offsets_.
+        // Actually cluster_data_ was changed to doc IDs above — we need token IDs for
+        // the HNSW rep. Keep a separate token-level flat index here.
+        representative_vids[idx] = static_cast<int>(beg);  // placeholder, overwritten below
+    }
+
+    // Rebuild representative selection using flat_vecs directly.
+    // We need token-level cluster membership. Rerun a lightweight pass.
+    // vec_to_cluster_ still holds token->cluster mapping at this point.
+    std::vector<std::vector<int>> cluster_token_members(num_clusters_);
+    for (int64_t v = 0; v < static_cast<int64_t>(vec_to_cluster_.size()); ++v)
+        cluster_token_members[vec_to_cluster_[v]].push_back(static_cast<int>(v));
+
+    for (int64_t idx = 0; idx < num_clusters_; ++idx) {
+        auto& members = cluster_token_members[idx];
+        if (members.empty()) { representative_vids[idx] = 0; continue; }
+
         std::vector<float> mean(dim, 0.0f);
-        for (uint64_t j = beg; j < end; ++j) {
-            const float* v = flat_vecs + cluster_data_[j] * dim;
+        for (int vid : members) {
+            const float* v = flat_vecs + vid * dim;
             for (int d = 0; d < dim; ++d) mean[d] += v[d];
         }
-
         float best_dot = -1e30f;
-        int   best_vid = static_cast<int>(cluster_data_[beg]);
-        for (uint64_t j = beg; j < end; ++j) {
-            InnerIdType vid = cluster_data_[j];
+        int   best_vid = members[0];
+        for (int vid : members) {
             const float* v = flat_vecs + vid * dim;
             float dot = 0.0f;
             for (int d = 0; d < dim; ++d) dot += v[d] * mean[d];
-            if (dot > best_dot) {
-                best_dot = dot;
-                best_vid = static_cast<int>(vid);
-            }
+            if (dot > best_dot) { best_dot = dot; best_vid = vid; }
         }
         representative_vids[idx] = best_vid;
     }
@@ -458,10 +439,9 @@ SIMQ::build_rep_hnsw(const float* flat_vecs, int64_t dim) {
         rep_space_, static_cast<uint64_t>(num_clusters_), allocator_, 16, 100);
     rep_hnsw_->init_memory_space();
 
-    for (int64_t idx = 0; idx < num_clusters_; ++idx) {
+    for (int64_t idx = 0; idx < num_clusters_; ++idx)
         rep_hnsw_->addPoint(flat_vecs + representative_vids[idx] * dim,
                             static_cast<hnswlib::LabelType>(idx));
-    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -508,7 +488,7 @@ SIMQ::coarse_search(const float* query_tokens,
             uint64_t beg = cluster_offsets_[cidx];
             uint64_t end = cluster_offsets_[cidx + 1];
             for (uint64_t j = beg; j < end; ++j) {
-                InnerIdType doc_id = vec_to_doc_[cluster_data_[j]];
+                InnerIdType doc_id = cluster_data_[j];
                 if (!seen_this_token.insert(doc_id).second) continue;
                 score_map[doc_id] += cscore;
             }
@@ -519,42 +499,6 @@ SIMQ::coarse_search(const float* query_tokens,
     std::sort(ranked.begin(), ranked.end(),
               [](const auto& a, const auto& b) { return a.second > b.second; });
     return ranked;
-}
-
-float
-SIMQ::maxsim_score(const float* query_tokens,
-                   uint32_t query_token_count,
-                   InnerIdType doc_inner_id) const {
-    uint32_t doc_start = doc_offsets_[doc_inner_id];
-    uint32_t doc_count = doc_offsets_[doc_inner_id + 1] - doc_start;
-    if (doc_count == 0 || query_token_count == 0) return 0.0f;
-
-    static constexpr uint32_t kStackCap = 128;
-    InnerIdType idx_static[kStackCap];
-    float       dists_static[kStackCap];
-    Vector<InnerIdType> idx_heap(allocator_);
-    Vector<float>       dists_heap(allocator_);
-
-    InnerIdType* idx_ptr;
-    float*       dists_ptr;
-    if (doc_count <= kStackCap) {
-        idx_ptr   = idx_static;
-        dists_ptr = dists_static;
-    } else {
-        idx_heap.resize(doc_count);
-        dists_heap.resize(doc_count);
-        idx_ptr   = idx_heap.data();
-        dists_ptr = dists_heap.data();
-    }
-    std::iota(idx_ptr, idx_ptr + doc_count, doc_start);
-
-    float total = 0.0f;
-    for (uint32_t q = 0; q < query_token_count; ++q) {
-        auto computer = inner_codes_->FactoryComputer(query_tokens + q * dim_);
-        inner_codes_->Query(dists_ptr, computer, idx_ptr, doc_count);
-        total += *std::min_element(dists_ptr, dists_ptr + doc_count);
-    }
-    return total;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -571,27 +515,28 @@ SIMQ::KnnSearch(const DatasetPtr& query,
     const MultiVector* query_mvs = query->GetMultiVectors();
     CHECK_ARGUMENT(query_mvs != nullptr, "simq search: query.multi_vectors is nullptr");
 
-    const float* query_tokens      = query_mvs[0].vectors_;
-    uint32_t     query_token_count = query_mvs[0].len_;
-
     auto sp = SIMQSearchParameters::FromJson(parameters);
     int64_t coarse_k = sp.coarse_k > 0 ? sp.coarse_k : default_coarse_k_;
     int64_t rerank_k = sp.rerank_k > 0 ? sp.rerank_k : default_rerank_k_;
     rerank_k = std::min(rerank_k, static_cast<int64_t>(total_count_));
     k        = std::min(k, static_cast<int64_t>(total_count_));
 
-    auto coarse_results = coarse_search(query_tokens, query_token_count, coarse_k);
+    auto coarse_results = coarse_search(
+        query_mvs[0].vectors_, query_mvs[0].len_, coarse_k);
     if (static_cast<int64_t>(coarse_results.size()) > rerank_k)
         coarse_results.resize(rerank_k);
 
+    // Exact MaxSim rerank via MultiVectorDataCell
+    auto computer = mv_codes_->FactoryComputer(&query_mvs[0]);
     std::vector<std::pair<float, InnerIdType>> reranked;
     reranked.reserve(coarse_results.size());
     for (auto& [doc_id, _] : coarse_results) {
         if (filter != nullptr &&
             !filter->CheckValid(this->label_table_->GetLabelById(doc_id)))
             continue;
-        float score = maxsim_score(query_tokens, query_token_count, doc_id);
-        reranked.push_back({score, doc_id});
+        float dist = 0.0f;
+        mv_codes_->Query(&dist, computer, &doc_id, 1);
+        reranked.push_back({dist, doc_id});
     }
     std::sort(reranked.begin(), reranked.end(),
               [](const auto& a, const auto& b) { return a.first < b.first; });
@@ -620,27 +565,26 @@ SIMQ::RangeSearch(const DatasetPtr& query,
     const MultiVector* query_mvs = query->GetMultiVectors();
     CHECK_ARGUMENT(query_mvs != nullptr, "simq range search: query.multi_vectors is nullptr");
 
-    const float* query_tokens      = query_mvs[0].vectors_;
-    uint32_t     query_token_count = query_mvs[0].len_;
-
     auto sp = SIMQSearchParameters::FromJson(parameters);
     int64_t coarse_k = sp.coarse_k > 0 ? sp.coarse_k : default_coarse_k_;
     int64_t rerank_k = sp.rerank_k > 0 ? sp.rerank_k : default_rerank_k_;
     rerank_k = std::min(rerank_k, static_cast<int64_t>(total_count_));
 
-    auto coarse_results = coarse_search(query_tokens, query_token_count, coarse_k);
+    auto coarse_results = coarse_search(
+        query_mvs[0].vectors_, query_mvs[0].len_, coarse_k);
     if (static_cast<int64_t>(coarse_results.size()) > rerank_k)
         coarse_results.resize(rerank_k);
 
+    auto computer = mv_codes_->FactoryComputer(&query_mvs[0]);
     std::vector<std::pair<float, InnerIdType>> in_range;
     for (auto& [doc_id, _] : coarse_results) {
         if (filter != nullptr &&
             !filter->CheckValid(this->label_table_->GetLabelById(doc_id)))
             continue;
-        float score = maxsim_score(query_tokens, query_token_count, doc_id);
-        if (score <= radius) {
-            in_range.push_back({score, doc_id});
-        }
+        float dist = 0.0f;
+        mv_codes_->Query(&dist, computer, &doc_id, 1);
+        if (dist <= radius)
+            in_range.push_back({dist, doc_id});
     }
 
     if (limited_size >= 0 && static_cast<int64_t>(in_range.size()) > limited_size) {
@@ -691,24 +635,19 @@ SIMQ::deserialize_rep_hnsw(StreamReader& reader) {
 void
 SIMQ::Serialize(StreamWriter& writer) const {
     StreamWriter::WriteObj(writer, total_count_);
-    StreamWriter::WriteObj(writer, total_vector_count_);
     StreamWriter::WriteObj(writer, num_clusters_);
 
     StreamWriter::WriteVector(writer, cluster_offsets_);
     StreamWriter::WriteVector(writer, cluster_data_);
 
-    StreamWriter::WriteVector(writer, vec_to_doc_);
-    StreamWriter::WriteVector(writer, doc_offsets_);
-
     serialize_rep_hnsw(writer);
 
-    inner_codes_->Serialize(writer);
+    mv_codes_->Serialize(writer);
     this->label_table_->Serialize(writer);
 
     JsonType info;
     info["dim"].SetInt(dim_);
     info["total_count"].SetInt(total_count_);
-    info["total_vector_count"].SetInt(total_vector_count_);
     info[INDEX_PARAM].SetString(this->create_param_ptr_->ToString());
     write_index_footer(writer, info);
 }
@@ -727,18 +666,14 @@ SIMQ::Deserialize(StreamReader& reader) {
     dim_ = info["dim"].GetInt();
 
     StreamReader::ReadObj(buf_reader, total_count_);
-    StreamReader::ReadObj(buf_reader, total_vector_count_);
     StreamReader::ReadObj(buf_reader, num_clusters_);
 
     StreamReader::ReadVector(buf_reader, cluster_offsets_);
     StreamReader::ReadVector(buf_reader, cluster_data_);
 
-    StreamReader::ReadVector(buf_reader, vec_to_doc_);
-    StreamReader::ReadVector(buf_reader, doc_offsets_);
-
     deserialize_rep_hnsw(buf_reader);
 
-    inner_codes_->Deserialize(buf_reader);
+    mv_codes_->Deserialize(buf_reader);
     this->label_table_->Deserialize(buf_reader);
 }
 
@@ -748,11 +683,6 @@ SIMQ::Deserialize(StreamReader& reader) {
 
 void
 SIMQ::InitFeatures() {
-    auto name = inner_codes_->GetQuantizerName();
-    if (name != QUANTIZATION_TYPE_VALUE_FP32 && name != QUANTIZATION_TYPE_VALUE_BF16) {
-        index_feature_list_->SetFeature(IndexFeature::NEED_TRAIN);
-    }
-
     index_feature_list_->SetFeatures({
         IndexFeature::SUPPORT_BUILD,
         IndexFeature::SUPPORT_KNN_SEARCH,
@@ -785,10 +715,7 @@ static const std::string SIMQ_PARAMS_TEMPLATE =
                 "{TYPE_KEY}": "{IO_TYPE_VALUE_MEMORY_IO}",
                 "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
             },
-            "{CODES_TYPE_KEY}": "flatten",
-            "{QUANTIZATION_PARAMS_KEY}": {
-                "{TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}"
-            }
+            "{CODES_TYPE_KEY}": "multi_vector"
         }
     })";
 
@@ -796,16 +723,14 @@ ParamPtr
 SIMQ::CheckAndMappingExternalParam(const JsonType& external_param,
                                    const IndexCommonParam& common_param) {
     const ConstParamMap external_mapping = {
-        {BRUTE_FORCE_BASE_QUANTIZATION_TYPE,
-         {BASE_CODES_KEY, QUANTIZATION_PARAMS_KEY, TYPE_KEY}},
-        {BRUTE_FORCE_BASE_IO_TYPE, {BASE_CODES_KEY, IO_PARAMS_KEY, TYPE_KEY}},
+        {BRUTE_FORCE_BASE_IO_TYPE,   {BASE_CODES_KEY, IO_PARAMS_KEY, TYPE_KEY}},
         {BRUTE_FORCE_BASE_FILE_PATH, {BASE_CODES_KEY, IO_PARAMS_KEY, IO_FILE_PATH_KEY}},
         {"init_cluster_ratio", {"init_cluster_ratio"}},
-        {"max_cluster_size", {"max_cluster_size"}},
-        {"split_start_idx", {"split_start_idx"}},
-        {"random_seed", {"random_seed"}},
-        {"coarse_k", {"coarse_k"}},
-        {"rerank_k", {"rerank_k"}},
+        {"max_cluster_size",   {"max_cluster_size"}},
+        {"split_start_idx",    {"split_start_idx"}},
+        {"random_seed",        {"random_seed"}},
+        {"coarse_k",           {"coarse_k"}},
+        {"rerank_k",           {"rerank_k"}},
     };
 
     if (common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {
