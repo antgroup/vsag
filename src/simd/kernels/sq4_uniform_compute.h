@@ -32,6 +32,8 @@ SQ4UniformComputeCodesIPImpl(const uint8_t* codes1,
     }
 
     constexpr uint64_t kElemsPerIter = T::ByteWidth * 2;
+    constexpr int kFlushInterval = 32;
+    constexpr uint64_t kFlushElems = kElemsPerIter * kFlushInterval;
     int32_t result = 0;
     uint64_t d = 0;
     auto sum = T::zero();
@@ -47,6 +49,11 @@ SQ4UniformComputeCodesIPImpl(const uint8_t* codes1,
 
         sum = T::add_epi16(sum, T::maddubs_epi16(xx1, yy1));
         sum = T::add_epi16(sum, T::maddubs_epi16(xx2, yy2));
+
+        if ((d + kElemsPerIter) % kFlushElems == 0) {
+            result += T::reduce_add_epi16(sum);
+            sum = T::zero();
+        }
     }
 
     result += T::reduce_add_epi16(sum);
