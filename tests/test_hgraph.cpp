@@ -2840,3 +2840,87 @@ TEST_CASE("HGraph ExportCache + ImportCache + Build miss-only path", "[ft][hgrap
     }
     REQUIRE(found_self);
 }
+
+TEST_CASE("HGraph GetStats reports build cache hit-rate", "[ft][hgraph][cache][pr]") {
+    // Verify that the build-time warm-start hit-rate computed during
+    // build_with_cache() is surfaced through GetStats():
+    //   (1) A normal Build() (no imported cache) reports a skipped_reason.
+    //   (2) A Build() after ImportCache() reports a numeric hit-rate plus the
+    //       hit / missed node counts, and the counts sum to the index size.
+    constexpr int64_t TEST_DIM = 32;
+    constexpr int64_t TEST_COUNT = 200;
+
+    const auto* param = R"(
+    {
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": 32,
+        "index_param": {
+            "base_quantization_type": "fp32",
+            "max_degree": 16,
+            "ef_construction": 50
+        }
+    }
+    )";
+
+    std::mt19937 rng(42);
+    std::uniform_real_distribution<float> dist(-1.0F, 1.0F);
+    std::vector<float> vectors(TEST_DIM * TEST_COUNT);
+    for (auto& v : vectors) {
+        v = dist(rng);
+    }
+    std::vector<int64_t> ids(TEST_COUNT);
+    std::vector<std::string> source_ids(TEST_COUNT);
+    for (int64_t i = 0; i < TEST_COUNT; ++i) {
+        ids[i] = i + 1;
+        source_ids[i] = fmt::format("sid_{}", i);
+    }
+
+    auto make_dataset = [&]() {
+        auto base = vsag::Dataset::Make();
+        base->NumElements(TEST_COUNT)
+            ->Dim(TEST_DIM)
+            ->Ids(ids.data())
+            ->Float32Vectors(vectors.data())
+            ->SourceID(source_ids.data())
+            ->Owner(false);
+        return base;
+    };
+
+    // ---- (1) normal build: hit-rate is skipped ----
+    auto baseline = vsag::Factory::CreateIndex("hgraph", param).value();
+    REQUIRE(baseline->Build(make_dataset()).has_value());
+    auto baseline_stats = baseline->GetStats();
+    INFO(baseline_stats);
+    auto baseline_parsed = vsag::JsonType::Parse(baseline_stats);
+    REQUIRE(baseline_parsed.Contains("build_cache_hit_rate"));
+    // Without an imported cache the rate is not a number but a skipped_reason
+    // object nested under the build_cache_hit_rate key.
+    REQUIRE(baseline_parsed["build_cache_hit_rate"].Contains("skipped_reason"));
+    REQUIRE(baseline_parsed["build_cache_hit_rate"]["skipped_reason"].GetString() ==
+            std::string("index was not built from an imported cache"));
+    REQUIRE_FALSE(baseline_parsed.Contains("build_cache_hit_nodes"));
+    REQUIRE_FALSE(baseline_parsed.Contains("build_cache_missed_nodes"));
+
+    // ---- (2) cache-accelerated build: hit-rate is reported ----
+    std::stringstream cache_buf;
+    REQUIRE(baseline->ExportCache(cache_buf).has_value());
+
+    auto warmed = vsag::Factory::CreateIndex("hgraph", param).value();
+    REQUIRE(warmed->ImportCache(cache_buf).has_value());
+    REQUIRE(warmed->Build(make_dataset()).has_value());
+    REQUIRE(warmed->GetNumElements() == TEST_COUNT);
+
+    auto warmed_stats = warmed->GetStats();
+    INFO(warmed_stats);
+    auto parsed = vsag::JsonType::Parse(warmed_stats);
+    REQUIRE(parsed.Contains("build_cache_hit_rate"));
+    REQUIRE(parsed.Contains("build_cache_hit_nodes"));
+    REQUIRE(parsed.Contains("build_cache_missed_nodes"));
+    const float hit_rate = parsed["build_cache_hit_rate"].GetFloat();
+    REQUIRE(hit_rate >= 0.0F);
+    REQUIRE(hit_rate <= 1.0F);
+    const auto hit_nodes = parsed["build_cache_hit_nodes"].GetInt();
+    const auto missed_nodes = parsed["build_cache_missed_nodes"].GetInt();
+    REQUIRE(hit_nodes + missed_nodes == TEST_COUNT);
+}

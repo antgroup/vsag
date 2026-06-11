@@ -46,6 +46,8 @@ exposed through `GetStats()` rather than through `AnalyzeIndexBySearch`.
 | `proximity_recall_neighbor` | Recall of graph neighbor lists against true nearest neighbors |
 | `quantization_bias_ratio` | Quantized-distance bias against exact distance |
 | `quantization_inversion_count_rate` | Rate of distance-order inversions caused by quantization |
+| `build_cache_hit_rate` | Fraction of nodes warm-started from an imported cache during the last `Build()`; emits a `skipped_reason` when the index was not built from a cache imported via `ImportCache()` |
+| `build_cache_hit_nodes` / `build_cache_missed_nodes` | Node counts behind `build_cache_hit_rate` (only present when the index was built from an imported cache) |
 
 #### SINDI metrics
 
