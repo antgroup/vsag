@@ -49,15 +49,17 @@ jobs:
   build_asan_aarch64:
     name: Asan Build Aarch64
     runs-on: ubuntu-22.04-arm
+    container:
+      image: vsaglib/vsag:ci-aarch64-openblas
+      volumes:
+        - /opt:/useless
     concurrency:
       group: asan_build_aarch-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
       - name: Free Disk Space
-        run: rm -rf /opt/hostedtoolcache
+        run: rm -rf /useless/hostedtoolcache
       - uses: actions/checkout@v4
-      - name: Prepare Env
-        run: sudo bash ./scripts/deps/install_deps_ubuntu.sh
       - name: Load Cache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
@@ -125,15 +127,17 @@ jobs:
     strategy:
       matrix:
         test_type: [ unittests, functests ]
+    container:
+      image: vsaglib/vsag:ci-aarch64-openblas
+      volumes:
+        - /opt:/useless
     concurrency:
       group: test_asan_aarch64-${{ matrix.test_type }}-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
       - name: Free Disk Space
-        run: rm -rf /opt/hostedtoolcache
+        run: rm -rf /useless/hostedtoolcache
       - uses: actions/checkout@v4
-      - name: Prepare Env
-        run: sudo bash ./scripts/deps/install_deps_ubuntu.sh
       - name: Clean Build
         run: rm -rf ./build
       - name: Download Test
@@ -195,12 +199,16 @@ jobs:
     name: Test Example Aarch64
     needs: build_asan_aarch64
     runs-on: ubuntu-22.04-arm
+    container:
+      image: vsaglib/vsag:ci-aarch64-openblas
+      volumes:
+        - /opt:/useless
     concurrency:
       group: test_example_aarch64-${{ matrix.test_type }}-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
       - name: Free Disk Space
-        run: rm -rf /opt/hostedtoolcache
+        run: rm -rf /useless/hostedtoolcache
       - uses: actions/checkout@v4
       - name: Prepare Env
         run: sudo bash ./scripts/deps/install_deps_ubuntu.sh
