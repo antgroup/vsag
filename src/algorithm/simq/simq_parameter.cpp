@@ -50,8 +50,10 @@ SIMQParameter::FromJson(const JsonType& json) {
     CHECK_ARGUMENT(init_cluster_ratio > 0.0f && init_cluster_ratio <= 1.0f,
                    "simq: init_cluster_ratio must be in (0, 1]");
     CHECK_ARGUMENT(max_cluster_size > 1, "simq: max_cluster_size must be > 1");
-    CHECK_ARGUMENT(split_start_idx > 0 && split_start_idx < max_cluster_size,
-                   "simq: split_start_idx must be in (0, max_cluster_size)");
+    CHECK_ARGUMENT(split_start_idx > 1 && split_start_idx < max_cluster_size,
+                   "simq: split_start_idx must be in (1, max_cluster_size)");
+    CHECK_ARGUMENT(coarse_k > 0, "simq: coarse_k must be > 0");
+    CHECK_ARGUMENT(rerank_k > 0, "simq: rerank_k must be > 0");
 
     CHECK_ARGUMENT(json.Contains(BASE_CODES_KEY),
                    fmt::format("simq parameters must contain {}", BASE_CODES_KEY));
