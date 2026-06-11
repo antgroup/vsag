@@ -133,7 +133,7 @@ vsag_index_add(vsag_index_t index,
             auto add_result = vsag_index->index_->Add(dataset);
             VSAG_CHECK_RESULT(add_result);
         }
-        return success;
+        return make_error("index is NULL");
     } catch (const std::exception& e) {
         return make_error(e);
     }
@@ -157,7 +157,7 @@ vsag_index_train(vsag_index_t index,
             auto train_result = vsag_index->index_->Train(dataset);
             VSAG_CHECK_RESULT(train_result);
         }
-        return success;
+        return make_error("index is NULL");
     } catch (const std::exception& e) {
         return make_error(e);
     }
