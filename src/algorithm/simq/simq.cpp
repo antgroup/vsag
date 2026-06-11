@@ -108,7 +108,9 @@ private:
 void
 HNSWDynamicClustering::build_hnsw(const std::vector<int>& center_ids, int64_t dim) {
     delete hnsw_;
+    hnsw_ = nullptr;
     delete space_;
+    space_ = nullptr;
 
     space_ = new hnswlib::InnerProductSpace(static_cast<uint64_t>(dim),
                                             vsag::DataTypes::DATA_TYPE_FLOAT);
@@ -147,13 +149,11 @@ void
 HNSWDynamicClustering::sorted_insert(std::vector<ClusterMemberEntry>& members,
                                      InnerIdType vec_id,
                                      float dist) {
-    int lo = 0, hi = static_cast<int>(members.size());
-    while (lo < hi) {
-        int mid = (lo + hi) / 2;
-        if (members[mid].distance < dist) lo = mid + 1;
-        else hi = mid;
-    }
-    members.insert(members.begin() + lo, {vec_id, dist});
+    auto it = std::lower_bound(members.begin(), members.end(), dist,
+                               [](const ClusterMemberEntry& e, float val) {
+                                   return e.distance < val;
+                               });
+    members.insert(it, {vec_id, dist});
 }
 
 void
@@ -209,7 +209,6 @@ HNSWDynamicClustering::fit(const float* vecs, int64_t num_vecs, int64_t dim) {
     std::shuffle(all_indices.begin(), all_indices.end(), rng);
 
     std::vector<int> init_centers(all_indices.begin(), all_indices.begin() + num_init);
-    std::vector<int> remaining(all_indices.begin() + num_init, all_indices.end());
 
     cluster_centers_ = init_centers;
     for (int cid : init_centers) {
@@ -219,7 +218,8 @@ HNSWDynamicClustering::fit(const float* vecs, int64_t num_vecs, int64_t dim) {
 
     build_hnsw(init_centers, dim);
 
-    for (int vid : remaining) {
+    for (auto it = all_indices.begin() + num_init; it != all_indices.end(); ++it) {
+        int vid = *it;
         int nearest = find_nearest_cluster(vid);
         float dist  = ip_distance(vid, nearest);
 
@@ -384,29 +384,8 @@ SIMQ::run_clustering(const float* flat_vecs,
 
 void
 SIMQ::build_rep_hnsw(const float* flat_vecs, int64_t dim) {
-    std::vector<int> representative_vids(num_clusters_);
-    for (int64_t idx = 0; idx < num_clusters_; ++idx) {
-        uint64_t beg = cluster_offsets_[idx];
-        uint64_t end = cluster_offsets_[idx + 1];
-        if (beg == end) {
-            representative_vids[idx] = 0;
-            continue;
-        }
+    std::vector<int> representative_vids(num_clusters_, 0);
 
-        // Find the token vector closest to the cluster mean
-        // cluster_data_ now holds doc IDs; we need to look up any token from those docs.
-        // Use the first token of the first doc in the cluster as a simple representative.
-        // For a better representative we would need per-cluster token IDs, but since
-        // clustering was done on token vectors, we stored token IDs in vec_to_cluster_.
-        // Re-derive token IDs from cluster membership via cluster_offsets_.
-        // Actually cluster_data_ was changed to doc IDs above — we need token IDs for
-        // the HNSW rep. Keep a separate token-level flat index here.
-        representative_vids[idx] = static_cast<int>(beg);  // placeholder, overwritten below
-    }
-
-    // Rebuild representative selection using flat_vecs directly.
-    // We need token-level cluster membership. Rerun a lightweight pass.
-    // vec_to_cluster_ still holds token->cluster mapping at this point.
     std::vector<std::vector<int>> cluster_token_members(num_clusters_);
     for (int64_t v = 0; v < static_cast<int64_t>(vec_to_cluster_.size()); ++v)
         cluster_token_members[vec_to_cluster_[v]].push_back(static_cast<int>(v));
@@ -432,7 +411,9 @@ SIMQ::build_rep_hnsw(const float* flat_vecs, int64_t dim) {
     }
 
     delete rep_hnsw_;
+    rep_hnsw_ = nullptr;
     delete rep_space_;
+    rep_space_ = nullptr;
     rep_space_ = new hnswlib::InnerProductSpace(static_cast<uint64_t>(dim),
                                                 vsag::DataTypes::DATA_TYPE_FLOAT);
     rep_hnsw_ = new hnswlib::HierarchicalNSW(
@@ -464,7 +445,9 @@ SIMQ::coarse_search(const float* query_tokens,
                     int64_t coarse_k) const {
     // All buffers are local — safe for concurrent searches under shared_lock.
     std::unordered_map<InnerIdType, float> score_map;
-    std::unordered_set<InnerIdType>        seen_this_token;
+    score_map.reserve(static_cast<uint64_t>(coarse_k) * static_cast<uint64_t>(max_cluster_size_));
+    std::unordered_set<InnerIdType> seen_this_token;
+    seen_this_token.reserve(static_cast<uint64_t>(coarse_k) * static_cast<uint64_t>(max_cluster_size_));
 
     for (uint32_t ti = 0; ti < query_token_count; ++ti) {
         const float* qt = query_tokens + ti * dim_;
@@ -512,6 +495,7 @@ SIMQ::KnnSearch(const DatasetPtr& query,
                 const FilterPtr& filter) const {
     std::shared_lock lock(global_mutex_);
 
+    CHECK_ARGUMENT(query->GetNumElements() > 0, "simq search: query.num_elements must be > 0");
     const MultiVector* query_mvs = query->GetMultiVectors();
     CHECK_ARGUMENT(query_mvs != nullptr, "simq search: query.multi_vectors is nullptr");
 
@@ -562,6 +546,7 @@ SIMQ::RangeSearch(const DatasetPtr& query,
                   int64_t limited_size) const {
     std::shared_lock lock(global_mutex_);
 
+    CHECK_ARGUMENT(query->GetNumElements() > 0, "simq range search: query.num_elements must be > 0");
     const MultiVector* query_mvs = query->GetMultiVectors();
     CHECK_ARGUMENT(query_mvs != nullptr, "simq range search: query.multi_vectors is nullptr");
 
@@ -626,7 +611,9 @@ SIMQ::deserialize_rep_hnsw(StreamReader& reader) {
     reader.Read(bytes.data(), sz);
 
     delete rep_hnsw_;
+    rep_hnsw_ = nullptr;
     delete rep_space_;
+    rep_space_ = nullptr;
     rep_space_ = new hnswlib::InnerProductSpace(static_cast<uint64_t>(dim_),
                                                 vsag::DataTypes::DATA_TYPE_FLOAT);
     rep_hnsw_ = load_hnsw_from_string(bytes, rep_space_, allocator_);
