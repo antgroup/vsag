@@ -140,9 +140,7 @@ float
 HNSWDynamicClustering::ip_distance(int v1, int v2) const {
     const float* a = vecs_ + v1 * dim_;
     const float* b = vecs_ + v2 * dim_;
-    float dot = 0.0f;
-    for (int i = 0; i < dim_; ++i) dot += a[i] * b[i];
-    return 1.0f - dot;
+    return space_->get_dist_func()(a, b, space_->get_dist_func_param());
 }
 
 void
@@ -312,9 +310,13 @@ SIMQ::Build(const DatasetPtr& data) {
     uint64_t vec_off = 0;
     for (int64_t i = 0; i < num_docs; ++i) {
         uint64_t n = static_cast<uint64_t>(mvs[i].len_) * static_cast<uint64_t>(mv_dim);
-        std::memcpy(flat.data() + vec_off * static_cast<uint64_t>(mv_dim),
-                    mvs[i].vectors_,
-                    n * sizeof(float));
+        if (n > 0) {
+            CHECK_ARGUMENT(mvs[i].vectors_ != nullptr,
+                           fmt::format("simq build: vectors for doc {} is nullptr", i));
+            std::memcpy(flat.data() + vec_off * static_cast<uint64_t>(mv_dim),
+                        mvs[i].vectors_,
+                        n * sizeof(float));
+        }
         for (uint32_t t = 0; t < mvs[i].len_; ++t)
             vec_to_doc[vec_off + t] = static_cast<InnerIdType>(i);
         vec_off += mvs[i].len_;
@@ -463,8 +465,7 @@ SIMQ::coarse_search(const float* query_tokens,
             cscores.push_back({cscore, cidx});
             result.pop();
         }
-        std::sort(cscores.begin(), cscores.end(),
-                  [](const auto& a, const auto& b) { return a.first > b.first; });
+        std::reverse(cscores.begin(), cscores.end());
 
         seen_this_token.clear();
         for (auto& [cscore, cidx] : cscores) {
@@ -630,6 +631,7 @@ SIMQ::deserialize_rep_hnsw(StreamReader& reader) {
 
 void
 SIMQ::Serialize(StreamWriter& writer) const {
+    std::shared_lock lock(global_mutex_);
     if (rep_hnsw_ == nullptr) {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                             "simq: cannot serialize an unbuilt index");
