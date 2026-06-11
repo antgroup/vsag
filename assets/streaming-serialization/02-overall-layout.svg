@@ -13,7 +13,7 @@
   <rect x="36" y="98" width="218" height="24" rx="4" fill="#fff" stroke="#9bb6e6"/>
   <text x="46" y="115" font-size="12" fill="#1c3d7a" font-family="monospace">magic[8] = "vsagstm0"</text>
   <rect x="36" y="126" width="218" height="24" rx="4" fill="#fff" stroke="#9bb6e6"/>
-  <text x="46" y="143" font-size="12" fill="#1c3d7a" font-family="monospace">format_version : u32</text>
+  <text x="46" y="143" font-size="12" fill="#1c3d7a" font-family="monospace">format_major:u16 + minor:u16</text>
   <rect x="36" y="154" width="218" height="24" rx="4" fill="#fff" stroke="#9bb6e6"/>
   <text x="46" y="171" font-size="12" fill="#1c3d7a" font-family="monospace">meta_len : u64</text>
   <rect x="36" y="182" width="218" height="52" rx="4" fill="#fff" stroke="#9bb6e6"/>

@@ -26,14 +26,14 @@
   <text x="425" y="220" class="text">by reader?</text>
 
   <polygon points="210,310 320,365 210,420 100,365" class="decision" />
-  <text x="155" y="361" class="text">block required?</text>
+  <text x="155" y="361" class="text">block critical?</text>
 
   <polygon points="710,310 820,365 710,420 600,365" class="decision" />
   <text x="648" y="361" class="text">requested by load</text>
   <text x="680" y="380" class="text">options?</text>
 
   <rect x="70" y="455" width="280" height="44" class="err" />
-  <text x="128" y="482" class="text">Fail: unsupported required block</text>
+  <text x="128" y="482" class="text">Fail: unsupported critical block</text>
 
   <rect x="390" y="455" width="170" height="44" class="skip" />
   <text x="421" y="482" class="text">Discard payload</text>

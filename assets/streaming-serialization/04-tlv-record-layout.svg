@@ -3,31 +3,41 @@
   <text x="20" y="26" font-size="16" font-weight="700" fill="#222">TLV 记录字节布局</text>
 
   <!-- fields -->
-  <rect x="20"  y="56" width="120" height="56" rx="5" fill="#fef0e3" stroke="#f29d49"/>
-  <text x="80"  y="80" font-size="13" text-anchor="middle" fill="#b5651d" font-weight="700">tag</text>
-  <text x="80"  y="99" font-size="11" text-anchor="middle" fill="#b5651d" font-family="monospace">u32 (4B)</text>
+  <rect x="20"  y="56" width="95" height="56" rx="5" fill="#fef0e3" stroke="#f29d49"/>
+  <text x="67"  y="80" font-size="13" text-anchor="middle" fill="#b5651d" font-weight="700">tag</text>
+  <text x="67"  y="99" font-size="11" text-anchor="middle" fill="#b5651d" font-family="monospace">u32 (4B)</text>
 
-  <rect x="140" y="56" width="100" height="56" rx="5" fill="#fef0e3" stroke="#f29d49"/>
-  <text x="190" y="80" font-size="13" text-anchor="middle" fill="#b5651d" font-weight="700">flags</text>
-  <text x="190" y="99" font-size="11" text-anchor="middle" fill="#b5651d" font-family="monospace">u16 (2B)</text>
+  <rect x="115" y="56" width="120" height="56" rx="5" fill="#fef0e3" stroke="#f29d49"/>
+  <text x="175" y="80" font-size="13" text-anchor="middle" fill="#b5651d" font-weight="700">block_version</text>
+  <text x="175" y="99" font-size="11" text-anchor="middle" fill="#b5651d" font-family="monospace">u32 (4B)</text>
 
-  <rect x="240" y="56" width="150" height="56" rx="5" fill="#fef0e3" stroke="#f29d49"/>
-  <text x="315" y="80" font-size="13" text-anchor="middle" fill="#b5651d" font-weight="700">value_len</text>
-  <text x="315" y="99" font-size="11" text-anchor="middle" fill="#b5651d" font-family="monospace">u64 (8B)</text>
+  <rect x="235" y="56" width="100" height="56" rx="5" fill="#fef0e3" stroke="#f29d49"/>
+  <text x="285" y="80" font-size="13" text-anchor="middle" fill="#b5651d" font-weight="700">flags</text>
+  <text x="285" y="99" font-size="11" text-anchor="middle" fill="#b5651d" font-family="monospace">u64 (8B)</text>
 
-  <rect x="390" y="56" width="470" height="56" rx="5" fill="#e6f4ea" stroke="#34a853"/>
-  <text x="625" y="80" font-size="13" text-anchor="middle" fill="#1e6b34" font-weight="700">value</text>
-  <text x="625" y="99" font-size="11" text-anchor="middle" fill="#1e6b34" font-family="monospace">value_len 字节（块内容；可递归嵌套 TLV）</text>
+  <rect x="335" y="56" width="120" height="56" rx="5" fill="#fef0e3" stroke="#f29d49"/>
+  <text x="395" y="80" font-size="13" text-anchor="middle" fill="#b5651d" font-weight="700">value_len</text>
+  <text x="395" y="99" font-size="11" text-anchor="middle" fill="#b5651d" font-family="monospace">u64 (8B)</text>
+
+  <rect x="455" y="56" width="115" height="56" rx="5" fill="#fef0e3" stroke="#f29d49"/>
+  <text x="512" y="80" font-size="13" text-anchor="middle" fill="#b5651d" font-weight="700">payload_crc</text>
+  <text x="512" y="99" font-size="11" text-anchor="middle" fill="#b5651d" font-family="monospace">u32 (4B)</text>
+
+  <rect x="570" y="56" width="290" height="56" rx="5" fill="#e6f4ea" stroke="#34a853"/>
+  <text x="715" y="80" font-size="13" text-anchor="middle" fill="#1e6b34" font-weight="700">payload</text>
+  <text x="715" y="99" font-size="11" text-anchor="middle" fill="#1e6b34" font-family="monospace">value_len 字节（块内容）</text>
 
   <!-- offsets -->
   <text x="20"  y="128" font-size="11" fill="#888" font-family="monospace">0</text>
-  <text x="140" y="128" font-size="11" fill="#888" font-family="monospace">4</text>
-  <text x="240" y="128" font-size="11" fill="#888" font-family="monospace">6</text>
-  <text x="390" y="128" font-size="11" fill="#888" font-family="monospace">14</text>
+  <text x="115" y="128" font-size="11" fill="#888" font-family="monospace">4</text>
+  <text x="235" y="128" font-size="11" fill="#888" font-family="monospace">8</text>
+  <text x="335" y="128" font-size="11" fill="#888" font-family="monospace">16</text>
+  <text x="455" y="128" font-size="11" fill="#888" font-family="monospace">24</text>
+  <text x="570" y="128" font-size="11" fill="#888" font-family="monospace">28</text>
 
   <!-- notes -->
   <text x="20" y="166" font-size="12" fill="#444">• flags.bit0 = <tspan font-weight="700">CRITICAL</tspan>：读者不认识此 tag 时<tspan font-weight="700"> 必须报错</tspan>（否则可安全跳过）。</text>
-  <text x="20" y="188" font-size="12" fill="#444">• <tspan font-family="monospace">SECTION_END</tspan> 哨兵：<tspan font-family="monospace">tag=0, flags=0, value_len=0</tspan>，标记 body 结束。</text>
-  <text x="20" y="210" font-size="12" fill="#444">• 超大/不可测块：<tspan font-family="monospace">value_len = U64_MAX</tspan> 表示<tspan font-weight="700">分块编码</tspan> → value = <tspan font-family="monospace">[chunk_len][chunk]…[chunk_len=0]</tspan>。</text>
-  <text x="20" y="232" font-size="12" fill="#444">• tag 取自<tspan font-weight="700">集中注册表</tspan>（数值稳定、只增不复用）；<tspan font-family="monospace">_manifest</tspan> 里可附人类可读名便于调试。</text>
+  <text x="20" y="188" font-size="12" fill="#444">• <tspan font-family="monospace">SECTION_END</tspan> 哨兵：<tspan font-family="monospace">tag=0</tspan> 且其余字段为 0，标记 body 结束。</text>
+  <text x="20" y="210" font-size="12" fill="#444">• 超大/不可测块：<tspan font-family="monospace">value_len = U64_MAX</tspan> 表示<tspan font-weight="700">分块编码</tspan> → payload = <tspan font-family="monospace">[chunk_len][chunk]…[chunk_len=0]</tspan>，此时 payload_crc=0。</text>
+  <text x="20" y="232" font-size="12" fill="#444">• tag 取自<tspan font-weight="700">集中注册表</tspan>（数值稳定、只增不复用）；header manifest 里附人类可读名便于调试。</text>
 </svg>
