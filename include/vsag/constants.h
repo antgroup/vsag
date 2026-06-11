@@ -27,6 +27,7 @@ extern const char* const INDEX_SINDI;
 extern const char* const INDEX_BRUTE_FORCE;
 extern const char* const INDEX_IVF;
 extern const char* const INDEX_WARP;
+extern const char* const INDEX_SIMQ;
 extern const char* const DIM;
 extern const char* const NUM_ELEMENTS;
 extern const char* const IDS;

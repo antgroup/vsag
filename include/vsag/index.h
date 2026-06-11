@@ -60,7 +60,8 @@ enum class IndexType {
     SPARSE,
     SINDI,
     WARP,
-    LAZY_HGRAPH
+    LAZY_HGRAPH,
+    SIMQ
 };
 
 #define DATA_FLAG_FLOAT32_VECTOR 0x01
