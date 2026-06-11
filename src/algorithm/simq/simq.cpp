@@ -455,6 +455,7 @@ SIMQ::coarse_search(const float* query_tokens,
         const float* qt = query_tokens + ti * dim_;
 
         int64_t actual_coarse_k = std::min(coarse_k, num_clusters_);
+        if (actual_coarse_k <= 0) continue;
         auto result = rep_hnsw_->searchKnn(qt, static_cast<uint64_t>(actual_coarse_k), 50);
 
         std::vector<std::pair<float, InnerIdType>> cscores;
@@ -504,6 +505,8 @@ SIMQ::KnnSearch(const DatasetPtr& query,
     CHECK_ARGUMENT(query->GetNumElements() > 0, "simq search: query.num_elements must be > 0");
     const MultiVector* query_mvs = query->GetMultiVectors();
     CHECK_ARGUMENT(query_mvs != nullptr, "simq search: query.multi_vectors is nullptr");
+    CHECK_ARGUMENT(query_mvs[0].len_ > 0, "simq search: query multi_vector length must be > 0");
+    CHECK_ARGUMENT(query_mvs[0].vectors_ != nullptr, "simq search: query multi_vector vectors is nullptr");
 
     auto sp = SIMQSearchParameters::FromJson(parameters);
     int64_t coarse_k = sp.coarse_k > 0 ? sp.coarse_k : default_coarse_k_;
@@ -559,6 +562,8 @@ SIMQ::RangeSearch(const DatasetPtr& query,
     CHECK_ARGUMENT(query->GetNumElements() > 0, "simq range search: query.num_elements must be > 0");
     const MultiVector* query_mvs = query->GetMultiVectors();
     CHECK_ARGUMENT(query_mvs != nullptr, "simq range search: query.multi_vectors is nullptr");
+    CHECK_ARGUMENT(query_mvs[0].len_ > 0, "simq range search: query multi_vector length must be > 0");
+    CHECK_ARGUMENT(query_mvs[0].vectors_ != nullptr, "simq range search: query multi_vector vectors is nullptr");
 
     auto sp = SIMQSearchParameters::FromJson(parameters);
     int64_t coarse_k = sp.coarse_k > 0 ? sp.coarse_k : default_coarse_k_;
@@ -735,9 +740,9 @@ SIMQ::CheckAndMappingExternalParam(const JsonType& external_param,
         {"rerank_k",           {"rerank_k"}},
     };
 
-    if (common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {
+    if (common_param.data_type_ != DataTypes::DATA_TYPE_FLOAT) {
         throw VsagException(ErrorType::INVALID_ARGUMENT,
-                            fmt::format("simq does not support {} datatype", DATATYPE_INT8));
+                            "simq only supports float32 datatype");
     }
     if (common_param.metric_ != MetricType::METRIC_TYPE_IP &&
         common_param.metric_ != MetricType::METRIC_TYPE_COSINE) {
