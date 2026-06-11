@@ -21,24 +21,30 @@ if (APPLE)
 
     # Prefer Homebrew's libomp when using AppleClang.
     find_program (BREW_EXECUTABLE brew)
+    set (LIBOMP_PREFIX "")
     if (BREW_EXECUTABLE)
         execute_process (
             COMMAND ${BREW_EXECUTABLE} --prefix libomp
             OUTPUT_VARIABLE LIBOMP_PREFIX
+            RESULT_VARIABLE LIBOMP_PREFIX_RESULT
             OUTPUT_STRIP_TRAILING_WHITESPACE
             ERROR_QUIET
         )
+        if (NOT LIBOMP_PREFIX_RESULT EQUAL 0)
+            set (LIBOMP_PREFIX "")
+        endif ()
     endif ()
 
     find_package (OpenMP QUIET COMPONENTS CXX)
     if (OpenMP_CXX_FOUND)
         message (STATUS "Found OpenMP via CMake: ${OpenMP_CXX_LIB_NAMES}")
         target_link_libraries (vsag_openmp INTERFACE OpenMP::OpenMP_CXX)
-    elseif (DEFINED LIBOMP_PREFIX AND EXISTS "${LIBOMP_PREFIX}/lib/libomp.dylib")
+    elseif (LIBOMP_PREFIX AND EXISTS "${LIBOMP_PREFIX}/lib/libomp.dylib")
         message (STATUS "Configuring OpenMP from Homebrew libomp: ${LIBOMP_PREFIX}")
         target_compile_options (vsag_openmp INTERFACE -Xclang -fopenmp)
         target_include_directories (vsag_openmp INTERFACE "${LIBOMP_PREFIX}/include")
         target_link_libraries (vsag_openmp INTERFACE "${LIBOMP_PREFIX}/lib/libomp.dylib")
+        target_link_options (vsag_openmp INTERFACE "-Wl,-rpath,${LIBOMP_PREFIX}/lib")
     else ()
         message (FATAL_ERROR "OpenMP not found on macOS. Install dependencies via scripts/deps/install_deps.sh.")
     endif ()

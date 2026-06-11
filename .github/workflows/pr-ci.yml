@@ -276,10 +276,10 @@ jobs:
           cd ./build/examples/cpp
           for example in ./*; do
             filename=$(basename "$example")
-            if [[ $filename =~ ^[0-9]{3} ]]; then
-              chmod +x $example
+            if [[ -f "$example" && $filename =~ ^[0-9]{3} ]]; then
+              chmod +x "$example"
               echo "Run $example"
-              $example
+              "$example"
             fi
           done
 
