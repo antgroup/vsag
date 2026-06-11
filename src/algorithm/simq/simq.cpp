@@ -157,7 +157,7 @@ HNSWDynamicClustering::sorted_insert(std::vector<ClusterMemberEntry>& members,
 }
 
 void
-HNSWDynamicClustering::split_cluster(int old_center_id, int64_t dim) {
+HNSWDynamicClustering::split_cluster(int old_center_id, int64_t /*dim*/) {
     auto& cluster = clusters_[old_center_id];
 
     int new_center_id = static_cast<int>(cluster.back().vec_id);
@@ -240,7 +240,7 @@ HNSWDynamicClustering::fit(const float* vecs, int64_t num_vecs, int64_t dim) {
 
 static std::string
 save_hnsw_to_string(hnswlib::HierarchicalNSW* hnsw) {
-    std::ostringstream oss(std::ios::binary);
+    std::ostringstream oss(std::ios::out | std::ios::binary);
     IOStreamWriter writer(oss);
     hnsw->saveIndex(writer);
     return oss.str();
@@ -250,7 +250,7 @@ static hnswlib::HierarchicalNSW*
 load_hnsw_from_string(const std::string& bytes,
                       hnswlib::SpaceInterface* space,
                       vsag::Allocator* allocator) {
-    std::istringstream iss(bytes, std::ios::binary);
+    std::istringstream iss(bytes, std::ios::in | std::ios::binary);
     IOStreamReader reader(iss);
     auto* hnsw = new hnswlib::HierarchicalNSW(space, 0, allocator);
     hnsw->loadIndex(reader, space);
@@ -452,7 +452,8 @@ SIMQ::coarse_search(const float* query_tokens,
     for (uint32_t ti = 0; ti < query_token_count; ++ti) {
         const float* qt = query_tokens + ti * dim_;
 
-        auto result = rep_hnsw_->searchKnn(qt, static_cast<uint64_t>(coarse_k), 50);
+        int64_t actual_coarse_k = std::min(coarse_k, num_clusters_);
+        auto result = rep_hnsw_->searchKnn(qt, static_cast<uint64_t>(actual_coarse_k), 50);
 
         std::vector<std::pair<float, InnerIdType>> cscores;
         cscores.reserve(result.size());
@@ -494,6 +495,10 @@ SIMQ::KnnSearch(const DatasetPtr& query,
                 const std::string& parameters,
                 const FilterPtr& filter) const {
     std::shared_lock lock(global_mutex_);
+
+    if (total_count_ == 0 || rep_hnsw_ == nullptr) {
+        return Dataset::Make();
+    }
 
     CHECK_ARGUMENT(query->GetNumElements() > 0, "simq search: query.num_elements must be > 0");
     const MultiVector* query_mvs = query->GetMultiVectors();
@@ -545,6 +550,10 @@ SIMQ::RangeSearch(const DatasetPtr& query,
                   const FilterPtr& filter,
                   int64_t limited_size) const {
     std::shared_lock lock(global_mutex_);
+
+    if (total_count_ == 0 || rep_hnsw_ == nullptr) {
+        return Dataset::Make();
+    }
 
     CHECK_ARGUMENT(query->GetNumElements() > 0, "simq range search: query.num_elements must be > 0");
     const MultiVector* query_mvs = query->GetMultiVectors();
@@ -621,6 +630,10 @@ SIMQ::deserialize_rep_hnsw(StreamReader& reader) {
 
 void
 SIMQ::Serialize(StreamWriter& writer) const {
+    if (rep_hnsw_ == nullptr) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "simq: cannot serialize an unbuilt index");
+    }
     StreamWriter::WriteObj(writer, total_count_);
     StreamWriter::WriteObj(writer, num_clusters_);
 

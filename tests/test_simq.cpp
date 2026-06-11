@@ -30,7 +30,7 @@
  *   - init_cluster_ratio = 0.01 → ~80 clusters for 8000 token vecs  (≈ sqrt(N))
  *   - max_cluster_size   = 200  → split threshold
  *   - split_start_idx    = 100  → new cluster starts at position 100 in sorted cluster
- *   - coarse_k           = 10   → each query token probes 10 cluster centers
+ *   - coarse_k           = 20   → each query token probes 20 cluster centers
  *   - rerank_k           = 1000 → exact MaxSim rerank over top-1000 candidates
  *
  * Tests:
