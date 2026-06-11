@@ -798,6 +798,7 @@ Pyramid::add_one_point(IndexNode* node, InnerIdType inner_id, const float* vecto
         search_param.hops_limit = 10000;  // Add hops limit to prevent infinite loop
         if (support_duplicate_) {
             search_param.find_duplicate = true;
+            search_param.duplicate_query_id = inner_id;
         }
         auto codes = use_reorder_ ? precise_codes_ : base_codes_;
         bool update_entry_point;
