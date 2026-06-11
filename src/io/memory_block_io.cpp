@@ -133,6 +133,7 @@ MemoryBlockIO::check_and_realloc(uint64_t size) {
         if (ptr == nullptr) {
             throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "MemoryBlockIO allocation failed");
         }
+        memset(ptr, 0, block_size_);
         this->blocks_.emplace_back(ptr);
         ++cur_block_size;
     }
