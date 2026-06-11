@@ -1586,6 +1586,11 @@ HGraph::cache_warm_start_and_classify(BuildCachePlan& plan) {
     const float hit_rate = total_classified > 0 ? static_cast<float>(hit_ids.size()) /
                                                       static_cast<float>(total_classified)
                                                 : 0.0F;
+    // Publish the classification result so GetStats() can report how well the
+    // imported cache covered this build without having to scrape the log.
+    this->build_cache_hit_nodes_ = hit_ids.size();
+    this->build_cache_missed_nodes_ = missed_ids.size();
+    this->build_cache_hit_rate_ = hit_rate;
     logger::info(
         "[hgraph_build_cache] warm_start finished in {:.3f}s hit_nodes={} missed_nodes={} "
         "hit_empty_seed_nodes={} hit_seed_neighbor_total={} hit_rate={:.4f}",

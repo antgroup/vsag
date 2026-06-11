@@ -470,6 +470,18 @@ HGraph::GetStats() const {
         fmt::format(R"({{"hgraph": {{"ef_search": {}}}}})", ef_construct_);
     auto analyzer = CreateAnalyzer(this, analyzer_param);
     JsonType stats = analyzer->GetStats();
+    // Build-time cache hit-rate is a transient property of the
+    // build_with_cache() path (taken only after ImportCache()), so it lives on
+    // HGraph rather than in the post-hoc analyzer. A negative rate means this
+    // index was not built from an imported cache.
+    if (this->build_cache_hit_rate_ >= 0.0F) {
+        stats["build_cache_hit_rate"].SetFloat(this->build_cache_hit_rate_);
+        stats["build_cache_hit_nodes"].SetInt(this->build_cache_hit_nodes_);
+        stats["build_cache_missed_nodes"].SetInt(this->build_cache_missed_nodes_);
+    } else {
+        stats["build_cache_hit_rate"]["skipped_reason"].SetString(
+            "index was not built from an imported cache");
+    }
     return stats.Dump(4);
 }
 
