@@ -17,12 +17,14 @@
 
 #include <memory>
 #include <sstream>
+#include <utility>
 
 #include "algorithm/bruteforce/bruteforce.h"
 #include "algorithm/hgraph/hgraph.h"
 #include "impl/allocator/safe_allocator.h"
 #include "index_common_param.h"
 #include "unittest.h"
+#include "vsag_exception.h"
 
 using namespace vsag;
 
@@ -124,6 +126,73 @@ public:
     }
 };
 
+class ReadingInnerIndex : public EmptyInnerIndex {
+public:
+    std::string
+    GetName() const override {
+        return "ReadingInnerIndex";
+    }
+
+    void
+    Deserialize(StreamReader& reader) override {
+        uint64_t value = 0;
+        StreamReader::ReadObj(reader, value);
+    }
+};
+
+class NullDestinationInnerIndex : public EmptyInnerIndex {
+public:
+    std::string
+    GetName() const override {
+        return "NullDestinationInnerIndex";
+    }
+
+    void
+    Deserialize(StreamReader& reader) override {
+        reader.Read(nullptr, 1);
+    }
+};
+
+class SeekOutOfRangeInnerIndex : public EmptyInnerIndex {
+public:
+    std::string
+    GetName() const override {
+        return "SeekOutOfRangeInnerIndex";
+    }
+
+    void
+    Deserialize(StreamReader& reader) override {
+        reader.Seek(2);
+        uint8_t value = 0;
+        reader.Read(reinterpret_cast<char*>(&value), 1);
+    }
+};
+
+Binary
+MakeBinary(const std::shared_ptr<int8_t[]>& data, uint64_t size) {
+    Binary binary;
+    binary.data = data;
+    binary.size = size;
+    return binary;
+}
+
+template <typename Func>
+void
+RequireReadError(Func&& func) {
+    bool got_read_error = false;
+    try {
+        std::forward<Func>(func)();
+    } catch (const VsagException& e) {
+        got_read_error = true;
+        REQUIRE(e.error_.type == ErrorType::READ_ERROR);
+    } catch (const std::exception& e) {
+        FAIL("Expected READ_ERROR VsagException, got std::exception: " << e.what());
+    } catch (...) {
+        FAIL("Expected READ_ERROR VsagException, got non-standard exception");
+    }
+    REQUIRE(got_read_error);
+}
+
 TEST_CASE("InnerIndexInterface NOT Implemented", "[ut][InnerIndexInterface]") {
     InnerIndexPtr empty_index = std::make_shared<EmptyInnerIndex>();
     IndexCommonParam common_param;
@@ -176,4 +245,47 @@ TEST_CASE("InnerIndexInterface NOT Implemented", "[ut][InnerIndexInterface]") {
     REQUIRE_THROWS(empty_index->KnnSearch(nullptr, 0, param));
 
     REQUIRE_NOTHROW(empty_index->GetIndexDetailInfos());
+}
+
+TEST_CASE("InnerIndexInterface rejects malformed binary set", "[ut][InnerIndexInterface]") {
+    InnerIndexPtr index = std::make_shared<ReadingInnerIndex>();
+
+    SECTION("missing index binary") {
+        BinarySet binary;
+
+        RequireReadError([&index, &binary]() { index->Deserialize(binary); });
+    }
+
+    SECTION("null non-empty index binary") {
+        BinarySet binary;
+        binary.Set(index->GetName(), MakeBinary(std::shared_ptr<int8_t[]>(), sizeof(uint64_t)));
+
+        RequireReadError([&index, &binary]() { index->Deserialize(binary); });
+    }
+
+    SECTION("truncated index binary") {
+        auto data = std::shared_ptr<int8_t[]>(new int8_t[1]{});
+        BinarySet binary;
+        binary.Set(index->GetName(), MakeBinary(data, 1));
+
+        RequireReadError([&index, &binary]() { index->Deserialize(binary); });
+    }
+
+    SECTION("null read destination") {
+        index = std::make_shared<NullDestinationInnerIndex>();
+        auto data = std::shared_ptr<int8_t[]>(new int8_t[1]{});
+        BinarySet binary;
+        binary.Set(index->GetName(), MakeBinary(data, 1));
+
+        RequireReadError([&index, &binary]() { index->Deserialize(binary); });
+    }
+
+    SECTION("seek out of range") {
+        index = std::make_shared<SeekOutOfRangeInnerIndex>();
+        auto data = std::shared_ptr<int8_t[]>(new int8_t[1]{});
+        BinarySet binary;
+        binary.Set(index->GetName(), MakeBinary(data, 1));
+
+        RequireReadError([&index, &binary]() { index->Deserialize(binary); });
+    }
 }
