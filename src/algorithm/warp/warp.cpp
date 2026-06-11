@@ -410,9 +410,9 @@ WARP::RangeSearch(const vsag::DatasetPtr& query,
         auto future = this->thread_pool_->GeneralEnqueue([&]() {
             std::vector<std::pair<float, InnerIdType>> local_results;
             // Pre-allocate to avoid frequent reallocations
-            local_results.reserve(
-                static_cast<std::vector<std::pair<float, InnerIdType>>::size_type>(
-                    std::min<uint64_t>(1024, total_count_ / parallel_count)));
+            const auto reserve_count = static_cast<decltype(local_results)::size_type>(
+                std::min<uint64_t>(1024, total_count_ / parallel_count));
+            local_results.reserve(reserve_count);
 
             while (true) {
                 auto doc_id = next_doc.fetch_add(1);
