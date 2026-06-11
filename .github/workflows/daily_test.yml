@@ -10,7 +10,7 @@ jobs:
     name: Asan Build X86
     runs-on: ubuntu-22.04
     container:
-      image: vsaglib/vsag:ci-x86
+      image: vsaglib/vsag:ci-x86-openblas
       volumes:
         - /opt:/useless
     concurrency:
@@ -29,7 +29,14 @@ jobs:
           save: false
           key: build-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
       - name: Make Asan
-        run: export VSAG_ENABLE_INTEL_MKL=ON CMAKE_GENERATOR="Ninja"; make asan COMPILE_JOBS=4 VSAG_ENABLE_EXAMPLES=ON
+        # Daily guard for the from-source OpenBLAS build path. We intentionally
+        # do NOT pass -DUSE_SYSTEM_OPENBLAS=ON here: even though the image
+        # ships libopenblas-dev, leaving the flag at its default (OFF) means
+        # CMake downloads and compiles OpenBLAS via ExternalProject_Add, which
+        # is what release artifacts depend on. PR CI / coverage / lint use the
+        # system OpenBLAS for speed; this job is the one that keeps the
+        # source-build path covered.
+        run: export CMAKE_GENERATOR="Ninja"; make asan COMPILE_JOBS=4 VSAG_ENABLE_EXAMPLES=ON
       - name: Clean
         run: find ./build -type f -name "*.o" -exec rm -f {} +
       - name: Save Test
@@ -44,17 +51,19 @@ jobs:
   daily_build_asan_aarch64:
     name: Asan Build Aarch64
     runs-on: ubuntu-22.04-arm
+    container:
+      image: vsaglib/vsag:ci-aarch64-openblas
+      volumes:
+        - /opt:/useless
     concurrency:
       group: daily_build_aarch
       cancel-in-progress: true
     steps:
       - name: Free Disk Space
-        run: rm -rf /opt/hostedtoolcache
+        run: rm -rf /useless/hostedtoolcache
       - uses: actions/checkout@v4
         with:
           ref: main
-      - name: Prepare Env
-        run: sudo bash ./scripts/deps/install_deps_ubuntu.sh
       - name: Load Cache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
@@ -85,7 +94,10 @@ jobs:
       matrix:
         test_type: [ unittests, functests ]
     container:
-      image: vsaglib/vsag:ci-x86
+      # Matches daily_build_asan_x86: the test binaries were built against the
+      # from-source OpenBLAS (statically linked), so any image with the rest
+      # of the runtime would do. We pick ci-x86-openblas for consistency.
+      image: vsaglib/vsag:ci-x86-openblas
       volumes:
         - /opt:/useless
     steps:
@@ -123,17 +135,19 @@ jobs:
     strategy:
       matrix:
         test_type: [ unittests, functests ]
+    container:
+      image: vsaglib/vsag:ci-aarch64-openblas
+      volumes:
+        - /opt:/useless
     concurrency:
       group: daily_test_aarch64-${{ matrix.test_type }}
       cancel-in-progress: true
     steps:
       - name: Free Disk Space
-        run: rm -rf /opt/hostedtoolcache
+        run: rm -rf /useless/hostedtoolcache
       - uses: actions/checkout@v4
         with:
           ref: main
-      - name: Prepare Env
-        run: sudo bash ./scripts/deps/install_deps_ubuntu.sh
       - name: Clean Build
         run: rm -rf ./build
       - name: Download Test
@@ -184,7 +198,7 @@ jobs:
     name: Asan Build Simd
     runs-on: ubuntu-22.04
     container:
-      image: vsaglib/vsag:ci-x86
+      image: vsaglib/vsag:ci-x86-mkl
       volumes:
         - /opt:/useless
     strategy:
@@ -240,7 +254,7 @@ jobs:
       group: daily_test_simd-${{ matrix.simd_key }}-${{ matrix.test_type }}
       cancel-in-progress: true
     container:
-      image: vsaglib/vsag:ci-x86
+      image: vsaglib/vsag:ci-x86-mkl
       volumes:
         - /opt:/useless
     steps:
@@ -294,7 +308,7 @@ jobs:
       group: daily_build_tsan_x86
       cancel-in-progress: true
     container:
-      image: vsaglib/vsag:ci-x86
+      image: vsaglib/vsag:ci-x86-mkl
     steps:
       - uses: actions/checkout@v4
         with:
@@ -327,7 +341,7 @@ jobs:
       group: daily_test_tsan_x86
       cancel-in-progress: true
     container:
-      image: vsaglib/vsag:ci-x86
+      image: vsaglib/vsag:ci-x86-mkl
     steps:
       - uses: actions/checkout@v4
       - name: Clean Env

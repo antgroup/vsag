@@ -1,5 +1,7 @@
 # Pyramid
 
+![Pyramid: a tree of per-node proximity sub-graphs keyed by a path string; the search walks down the tree along the query's path prefix and runs ef_search inside the leaf sub-graph](../figures/indexes/pyramid-overview.svg)
+
 Pyramid is VSAG's **hierarchical, path-partitioned** graph index. Every vector is
 tagged with a path string such as `"a/d/f"`, and Pyramid builds a graph per node
 in that path tree. At query time you supply a path prefix, and Pyramid restricts

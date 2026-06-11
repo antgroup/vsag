@@ -13,6 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <limits>
+
 #include "functest.h"
 #include "storage/serialization_template_test.h"
 #include "test_index.h"
@@ -290,6 +292,48 @@ IVFTestIndex::TestGeneral(const TestIndex::IndexPtr& index,
     TestCheckIdExist(index, dataset);
 }
 }  // namespace fixtures
+
+static void
+RequireRangeSearchDisableReorderChangesResult(const fixtures::TestIndex::IndexPtr& index,
+                                              const fixtures::TestDatasetPtr& dataset,
+                                              const std::string& search_param_with_reorder,
+                                              const std::string& search_param_without_reorder,
+                                              int64_t limited_size = 10) {
+    const auto queries = dataset->query_;
+    const auto query_count = queries->GetNumElements();
+    const auto dim = queries->GetDim();
+    bool found_difference = false;
+    for (int64_t i = 0; i < query_count; ++i) {
+        auto query = vsag::Dataset::Make();
+        query->NumElements(1)
+            ->Dim(dim)
+            ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
+            ->Owner(false);
+        auto with_reorder = index->RangeSearch(
+            query, std::numeric_limits<float>::max(), search_param_with_reorder, limited_size);
+        auto without_reorder = index->RangeSearch(
+            query, std::numeric_limits<float>::max(), search_param_without_reorder, limited_size);
+        REQUIRE(with_reorder.has_value());
+        REQUIRE(without_reorder.has_value());
+        if (with_reorder.value()->GetDim() != without_reorder.value()->GetDim()) {
+            found_difference = true;
+            break;
+        }
+        const auto result_dim = with_reorder.value()->GetDim();
+        for (int64_t j = 0; j < result_dim; ++j) {
+            if (with_reorder.value()->GetIds()[j] != without_reorder.value()->GetIds()[j] ||
+                std::abs(with_reorder.value()->GetDistances()[j] -
+                         without_reorder.value()->GetDistances()[j]) > 1e-6F) {
+                found_difference = true;
+                break;
+            }
+        }
+        if (found_difference) {
+            break;
+        }
+    }
+    REQUIRE(found_difference);
+}
 
 template <typename Fn>
 void
@@ -681,6 +725,73 @@ TestIVFSearchOvertime(const fixtures::IVFResourcePtr& resource) {
 }
 
 IVF_PR_DAILY_CASE("IVF Search Overtime", "[ft][search][ivf]", TestIVFSearchOvertime)
+
+static void
+TestIVFSearchDisableReorder(const fixtures::IVFResourcePtr& resource) {
+    using namespace fixtures;
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    constexpr static const char* search_param_tmp_disable_reorder = R"(
+        {{
+            "ivf": {{
+                "scan_buckets_count": {},
+                "factor": 4.0,
+                "enable_reorder": {}
+            }}
+        }})";
+    for (auto metric_type : resource->metric_types) {
+        for (auto dim : resource->dims) {
+            for (auto train_type : resource->train_types) {
+                auto base_quantization_str = "sq4_uniform,fp32";
+                float recall_with_reorder = 0.89F;
+                float recall_without_reorder = 0.55F;
+                auto count = std::min(300, static_cast<int32_t>(dim / 4));
+                if (train_type == "kmeans") {
+                    recall_with_reorder *= 0.8F;
+                    recall_without_reorder *= 0.8F;
+                }
+                INFO(fmt::format(
+                    "metric_type: {}, dim: {}, base_quantization_str: {}, "
+                    "train_type: {}, recall_with_reorder: {}, recall_without_reorder: {}",
+                    metric_type,
+                    dim,
+                    base_quantization_str,
+                    train_type,
+                    recall_with_reorder,
+                    recall_without_reorder));
+                vsag::Options::Instance().set_block_size_limit(size);
+                auto param = IVFTestIndex::GenerateIVFBuildParametersString(
+                    metric_type, dim, base_quantization_str, 300, train_type, false, 1, false, 3);
+                auto index = IVFTestIndex::TestFactory(IVFTestIndex::name, param, true);
+                auto dataset =
+                    IVFTestIndex::pool.GetDatasetAndCreate(dim, resource->base_count, metric_type);
+                IVFTestIndex::TestBuildIndex(index, dataset, true);
+                auto recall_result_with_reorder = TestIndex::TestKnnSearch(
+                    index,
+                    dataset,
+                    fmt::format(search_param_tmp_disable_reorder, std::max(200, count), true),
+                    recall_with_reorder,
+                    true);
+                auto recall_result_without_reorder = TestIndex::TestKnnSearch(
+                    index,
+                    dataset,
+                    fmt::format(search_param_tmp_disable_reorder, std::max(200, count), false),
+                    recall_without_reorder,
+                    true);
+                auto search_param_with_reorder =
+                    fmt::format(search_param_tmp_disable_reorder, std::max(200, count), true);
+                auto search_param_without_reorder =
+                    fmt::format(search_param_tmp_disable_reorder, std::max(200, count), false);
+                REQUIRE(recall_result_with_reorder > recall_result_without_reorder);
+                RequireRangeSearchDisableReorderChangesResult(
+                    index, dataset, search_param_with_reorder, search_param_without_reorder);
+                vsag::Options::Instance().set_block_size_limit(origin_size);
+            }
+        }
+    }
+}
+
+IVF_PR_DAILY_CASE("IVF Search Disable Reorder", "[ft][search][ivf]", TestIVFSearchDisableReorder)
 
 static void
 TestIVFBuildWithLargeK(const fixtures::IVFResourcePtr& resource) {

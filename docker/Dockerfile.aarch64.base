@@ -1,0 +1,39 @@
+
+# Base CI image for VSAG on aarch64.
+#
+# This image carries the common toolchain shared by every aarch64 CI variant
+# (compilers, build tools, runtime headers, etc.) but intentionally does NOT
+# install any BLAS implementation. BLAS backends are layered on top of this
+# image in the variant Dockerfiles:
+#
+#   * docker/Dockerfile.aarch64.openblas -> vsaglib/vsag:ci-aarch64-openblas
+#
+# Unlike x86_64 there is no Intel MKL variant here: Intel oneAPI MKL ships
+# x86-only, so on aarch64 OpenBLAS is the sole BLAS backend. Keeping the base
+# image free of any BLAS implementation still lets us:
+#   * share the build context across future aarch64 variants;
+#   * make it trivial to add another backend (e.g. Arm Performance Libraries)
+#     later.
+#
+# `FROM ubuntu:22.04` is a multi-arch manifest; building this Dockerfile on an
+# aarch64 host (the ubuntu-22.04-arm runner in docker/update-ci-image.yml)
+# selects the arm64 base automatically, so no QEMU emulation is required.
+
+FROM ubuntu:22.04
+
+# Install the whole toolchain in a single layer and drop the apt cache so the
+# published image stays small (it is pulled by every aarch64 CI job). Grouped
+# by purpose:
+#   * basic deps:  wget gpg sudo
+#   * build tools: git g++ cmake ninja-build gdb ccache build-essential lcov
+#                  gfortran clang-15 clangd-15 clang-format-15 python3-pip
+#   * vsag deps (everything except a BLAS backend): python3-dev libomp-15-dev
+#                  libaio-dev libcurl4-openssl-dev liburing-dev
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
+        wget gpg sudo \
+        git g++ cmake ninja-build gdb ccache build-essential lcov gfortran \
+        clang-15 clangd-15 clang-format-15 python3-pip \
+        python3-dev libomp-15-dev libaio-dev libcurl4-openssl-dev liburing-dev \
+    && ln -s /usr/bin/clang-format-15 /usr/bin/clang-format \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*

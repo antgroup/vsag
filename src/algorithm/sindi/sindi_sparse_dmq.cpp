@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <vector>
 
 namespace vsag::sindi_dmq {
 namespace {
@@ -108,6 +109,19 @@ EncodeDirectValues(const float* values,
                    uint32_t length,
                    uint8_t* codes,
                    DirectDmqVectorFactors* factors) {
+    std::vector<const DirectDmqCodebook*> codebook_refs(length, nullptr);
+    for (uint32_t value_index = 0; value_index < length; ++value_index) {
+        codebook_refs[value_index] = codebooks + value_index;
+    }
+    EncodeDirectValuesByCodebooks(values, codebook_refs.data(), length, codes, factors);
+}
+
+void
+EncodeDirectValuesByCodebooks(const float* values,
+                              const DirectDmqCodebook* const* codebooks,
+                              uint32_t length,
+                              uint8_t* codes,
+                              DirectDmqVectorFactors* factors) {
     *factors = DirectDmqVectorFactors{};
     if (length == 0) {
         return;
@@ -123,9 +137,10 @@ EncodeDirectValues(const float* values,
     double denominator = 0.0;
     for (uint32_t value_index = 0; value_index < length; ++value_index) {
         float residual = values[value_index] - factors->mean;
-        uint8_t code = EncodeDirectResidual(residual, codebooks[value_index]);
+        const auto& codebook = *codebooks[value_index];
+        uint8_t code = EncodeDirectResidual(residual, codebook);
         codes[value_index] = code;
-        float qualifier = codebooks[value_index].values[code];
+        float qualifier = codebook.values[code];
         numerator += static_cast<double>(residual) * residual;
         denominator += static_cast<double>(qualifier) * residual;
     }

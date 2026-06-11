@@ -1,5 +1,7 @@
 # SINDI
 
+![SINDI：按窗口维护的每词项倒排表，只对查询非零词项对应的列表做遍历并累加进 n_candidate 候选堆](../figures/indexes/sindi-overview.svg)
+
 SINDI（**S**parse **IN**verted **D**ense **I**ndex）是 VSAG 面向 **稀疏向量** 的索引——
 例如 BM25、SPLADE 以及其他学习稀疏（learned sparse）编码器产出的向量。与稠密索引
 （HGraph、IVF）不同，SINDI 直接在“词项-权重”对上工作，是 VSAG 中唯一接受
@@ -64,7 +66,7 @@ auto result = index->KnnSearch(
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `dim` | int | —（必填） | 单条稀疏向量允许的最大非零项数量，**不是** 词表大小 |
-| `term_id_limit` | int | `1000000` | 词项 ID 的上界（应 ≥ 最大词项 ID + 1） |
+| `term_id_limit` | int | `1000000` | 词项 ID 的上界（应 ≥ 最大词项 ID + 1，最高 50 000 000） |
 | `window_size` | int | `50000` | 每个窗口容纳的文档数（取值范围 10 000 – 60 000） |
 | `doc_prune_ratio` | float | `0.0` | 构建阶段按文档丢弃权重最低词项的比例（0.0 – 0.9） |
 | `use_quantization` | bool | `false` | 是否量化词项权重以降低内存；开启后使用 8-bit 标量量化（SQ8） |

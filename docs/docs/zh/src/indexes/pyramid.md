@@ -1,5 +1,7 @@
 # Pyramid
 
+![Pyramid：以路径字符串为键的"每节点一个邻近子图"的树形结构；搜索沿查询路径前缀下行到叶子子图后再执行 ef_search](../figures/indexes/pyramid-overview.svg)
+
 Pyramid 是 VSAG 的 **层级路径分区** 图索引。每条向量都附带一个路径字符串（例如
 `"a/d/f"`），Pyramid 会按路径树为每个节点构建一个子图；查询时提供一个路径前缀，
 检索即被限定在相应的子树内。

@@ -18,6 +18,7 @@
 #include "algorithm/inner_index_interface.h"
 #include "algorithm/sindi/sindi_rerank_backend.h"
 #include "algorithm/sindi/term_id_mapper.h"
+#include "algorithm/sparse_index/sparse_index.h"
 #include "datacell/sparse_term_datacell.h"
 #include "vsag/allocator.h"
 

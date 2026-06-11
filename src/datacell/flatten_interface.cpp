@@ -18,6 +18,7 @@
 #include "index_common_param.h"
 #include "inner_string_params.h"
 #include "io/io_headers.h"
+#include "multi_vector_datacell.h"
 #include "quantization/int8_quantizer.h"
 #include "quantization/quantizer_adapter.h"
 #include "quantization/quantizer_headers.h"
@@ -44,6 +45,21 @@ make_instance_flatten(const FlattenInterfaceParamPtr& param, const IndexCommonPa
     throw VsagException(ErrorType::INVALID_ARGUMENT,
                         fmt::format("Unknown flatten interface name: {}", param->name));
 }
+template <typename QuantTemp, typename IOTemp>
+static FlattenInterfacePtr
+make_instance_multi_vector(const FlattenInterfaceParamPtr& param,
+                           const IndexCommonParam& common_param) {
+    auto& io_param = param->io_parameter;
+    auto& quantizer_param = param->quantizer_parameter;
+
+    if (param->name == MULTI_VECTOR_DATA_CELL) {
+        return std::make_shared<MultiVectorDataCell<QuantTemp, IOTemp>>(
+            quantizer_param, io_param, common_param);
+    }
+    throw VsagException(ErrorType::INVALID_ARGUMENT,
+                        fmt::format("Unknown flatten interface name: {}", param->name));
+}
+
 template <typename QuantTemp, typename IOTemp>
 static FlattenInterfacePtr
 make_instance_sparse(const FlattenInterfaceParamPtr& param, const IndexCommonParam& common_param) {
@@ -73,6 +89,10 @@ make_instance_with_tq(const FlattenInterfaceParamPtr& param,
 template <MetricType metric, typename IOTemp>
 static FlattenInterfacePtr
 make_instance(const FlattenInterfaceParamPtr& param, const IndexCommonParam& common_param) {
+    if (param->name == MULTI_VECTOR_DATA_CELL) {
+        return make_instance_multi_vector<FP32Quantizer<metric>, IOTemp>(param, common_param);
+    }
+
     std::string quantization_string = param->quantizer_parameter->GetTypeName();
 
     // Handle INT8 data type specially

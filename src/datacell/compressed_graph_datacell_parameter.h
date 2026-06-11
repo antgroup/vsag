@@ -16,8 +16,8 @@
 #pragma once
 
 #include "graph_interface_parameter.h"
-#include "impl/logger/logger.h"
 #include "inner_string_params.h"
+#include "utils/param_compat_macros.h"
 #include "utils/pointer_define.h"
 
 namespace vsag {
@@ -53,37 +53,10 @@ public:
 
     bool
     CheckCompatibility(const vsag::ParamPtr& other) const override {
-        auto graph_param = std::dynamic_pointer_cast<CompressedGraphDatacellParameter>(other);
-        if (not graph_param) {
-            logger::error(
-                "CompressedGraphDatacellParameter::CheckCompatibility: other parameter "
-                "is not a CompressedGraphDatacellParameter");
-            return false;
-        }
-        if (max_degree_ != graph_param->max_degree_) {
-            logger::error(
-                "CompressedGraphDatacellParameter::CheckCompatibility: max_degree_ "
-                "mismatch: {} vs {}",
-                max_degree_,
-                graph_param->max_degree_);
-            return false;
-        }
-        if (support_duplicate_ != graph_param->support_duplicate_) {
-            logger::error(
-                "CompressedGraphDatacellParameter::CheckCompatibility: "
-                "support_duplicate_ mismatch: {} vs {}",
-                support_duplicate_,
-                graph_param->support_duplicate_);
-            return false;
-        }
-        if (use_reverse_edges_ != graph_param->use_reverse_edges_) {
-            logger::error(
-                "CompressedGraphDatacellParameter::CheckCompatibility: "
-                "use_reverse_edges_ mismatch: {} vs {}",
-                use_reverse_edges_,
-                graph_param->use_reverse_edges_);
-            return false;
-        }
+        PARAM_CAST_OR_RETURN(CompressedGraphDatacellParameter, p, other);
+        CHECK_FIELD_EQ(*this, *p, max_degree_);
+        CHECK_FIELD_EQ(*this, *p, support_duplicate_);
+        CHECK_FIELD_EQ(*this, *p, use_reverse_edges_);
         return true;
     }
 };

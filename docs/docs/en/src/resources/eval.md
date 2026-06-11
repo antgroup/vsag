@@ -39,7 +39,8 @@ HDF5 must be installed on the system (Ubuntu: `apt install libhdf5-dev`; CentOS:
 
 Useful flags include `--search_mode` (`knn` / `range` / `knn_filter` / `range_filter`),
 `--search-query-count`, `--delete-index-after-search`, and the various `--disable_*` switches that
-turn off individual metrics. See `tools/eval/README.md` for the full list.
+turn off individual metrics. The reference template at `tools/eval/eval_template.yaml` shows the
+complete YAML shape.
 
 ### 2. Config-file mode (batch comparisons)
 
@@ -125,5 +126,5 @@ Any HDF5 dataset from [ann-benchmarks](https://github.com/erikbern/ann-benchmark
 ## References
 
 - Source: `tools/eval/`
-- Detailed README: `tools/eval/README.md`
+- Local tool entry point: `tools/eval/README.md`
 - Reference numbers on standard hardware: [Reference Performance](performance.md).

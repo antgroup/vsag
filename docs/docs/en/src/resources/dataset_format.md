@@ -8,8 +8,8 @@ debug failing evaluations.
 
 The dataset layout described below is the **dense** layout (selected by the global
 attribute `type="dense"`, or by omitting the attribute). For **sparse** datasets
-(`type="sparse"`), `/train` and `/test` are 1-D `INT8` byte streams produced by VSAG's
-sparse-vector serialization (decoded by `parse_sparse_vectors` in
+(`type="sparse"`), `/train` and `/test` are flat `INT8` byte streams of shape `(X,)`
+produced by VSAG's sparse-vector serialization (decoded by `parse_sparse_vectors` in
 `tools/eval/eval_dataset.cpp`); all other datasets and attributes below still apply.
 
 ## Mandatory Datasets
@@ -150,15 +150,17 @@ flat array plus the counts, then passes the full array to
 ## Sparse layout
 
 When the global attribute `type` equals `"sparse"`, `/train` and `/test` do **not** follow
-the `(N, D)` dense matrix layout. They are instead stored as one-dimensional `INT8`
+the `(N, D)` dense matrix layout. They are instead stored as flat `INT8`
 (`H5T_INTEGER`, size 1) datasets whose payload is a raw byte stream of packed sparse
-vectors. The `int8` storage class is a transport detail only; the bytes are not int8
-vector elements.
+vectors. Calling `f["/train"].shape` from h5py returns `(X,)` where `X` is the total
+number of bytes; the `int8` storage class is a transport detail only — the bytes are
+not int8 vector elements.
 
 ### `/train`, `/test` (sparse byte stream)
 
 - **HDF5 type**: `H5T_INTEGER`, size 1 (`INT8`)
-- **HDF5 shape**: 1-D; total length equals the sum of per-vector record sizes
+- **HDF5 shape**: `(X,)`, where `X` is the total byte-stream length
+  (sum of all per-vector record sizes)
 - **Endianness**: little-endian
 - **Content**: a contiguous sequence of records, one per sparse vector, in order. Each
   record has the following fields, concatenated with no padding or separators:
@@ -174,6 +176,77 @@ vector elements.
 - **Key ordering**: on load, the eval tool sorts each vector's `ids` in ascending order
   (and reorders `vals` accordingly). Writers may emit unordered keys, but readers should
   not rely on that.
+
+### `/train_offsets`, `/test_offsets` (random-access index, optional)
+
+These two datasets store the per-record byte offsets into the matching
+`/train` and `/test` sparse byte streams so that the i-th sparse vector
+can be located in **O(1)** without scanning the stream.
+
+- **HDF5 type**: `H5T_INTEGER`, size 8 (`UINT64`)
+- **HDF5 shape**: `(N + 1,)` for `/train_offsets` and `(Q + 1,)` for
+  `/test_offsets`
+- **Content**: `offsets[i]` is the byte offset of record `i`;
+  `offsets[N]` is the sentinel and equals the total byte stream length.
+  The size of record `i` is `offsets[i + 1] - offsets[i]`. The array is
+  non-decreasing.
+
+Both datasets are **optional**. VSAG writers always emit them when
+writing sparse files, but legacy sparse files that only contain `/train`
+and `/test` keep loading: the offsets are recomputed on load by walking
+the byte stream once. When the on-disk offsets are present, they are
+cross-checked against the recomputed offsets and the file is rejected as
+corrupted on any mismatch.
+
+### `/train_token_sequences`, `/test_token_sequences` (optional)
+
+These two datasets carry the **original tokenized document** that
+produced each sparse vector. They are entirely optional: sparse HDF5
+files that omit both datasets still load correctly. When present, they
+must appear in lockstep with `/train` and `/test`: the i-th record in
+`/train_token_sequences` corresponds to the i-th sparse vector in
+`/train` (same for `/test`).
+
+- **HDF5 type**: `H5T_INTEGER`, size 1 (`INT8`)
+- **HDF5 shape**: `(X,)`, where `X` is the total byte-stream length
+  (sum of all per-record sizes)
+- **Endianness**: little-endian
+- **Content**: a contiguous sequence of records, one per sparse vector,
+  in the same order as `/train` / `/test`. Each record has the layout:
+
+  | Field               | Type        | Size                | Description                                  |
+  |---------------------|-------------|---------------------|----------------------------------------------|
+  | `seq_len`           | `uint32`    | 4 bytes             | Number of tokens in the original document    |
+  | `term_ids[seq_len]` | `uint32[]`  | `4 * seq_len` bytes | Term ids in tokenization order (duplicates and order are preserved) |
+
+  Records are concatenated with no padding or separators. A
+  `seq_len == 0` record is allowed and occupies only the 4-byte length
+  field; readers should treat it as "no original document available
+  for this vector".
+
+- **Number of records**: must equal the number of sparse vectors in the
+  matching split. Readers raise an error if counts disagree or if the
+  stream is truncated.
+- **Ordering vs. `ids`**: `term_ids` are stored in the original token
+  order (duplicates kept). This is intentionally **different** from
+  `ids`, which the loader sorts ascending.
+
+### `/train_token_sequences_offsets`, `/test_token_sequences_offsets` (required when sequences are present)
+
+Whenever `/train_token_sequences` (resp. `/test_token_sequences`) is
+present, the paired `UINT64` offset index **must** also be present.
+
+- **HDF5 type**: `H5T_INTEGER`, size 8 (`UINT64`)
+- **HDF5 shape**: `(N + 1,)` (resp. `(Q + 1,)`)
+- **Content**: same contract as `/train_offsets`, enabling O(1) random
+  access to the i-th token-sequence record.
+
+Contract: the byte-stream dataset and its offsets dataset **live or die
+together**. Readers reject the file if exactly one of the pair exists
+(either a `*_token_sequences` dataset without its `*_offsets`, or vice
+versa). When both are present, the on-disk offsets are cross-checked
+against the offsets rebuilt from the byte stream; a mismatch is treated
+as corruption and aborts the load.
 
 ### Ground truth and metric
 

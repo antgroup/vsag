@@ -23,7 +23,7 @@
 #include <utility>
 
 #include "common.h"
-#include "impl/label_table.h"
+#include "impl/label_table/label_table.h"
 
 namespace vsag {
 namespace {
@@ -391,6 +391,20 @@ SINDIDmqRerankBackend::Add(const DatasetPtr& base) {
 
     TrainCodebooks(base, !codebooks_.empty());
 
+    uint64_t add_term_count = 0;
+    for (int64_t i = 0; i < data_num; ++i) {
+        add_term_count += sparse_vectors[i].len_;
+    }
+    const auto next_total_term_count = total_term_count_ + add_term_count;
+    encoded_vectors_.reserve(encoded_vectors_.size() + data_num);
+    id_codes_.reserve(get_packed_code_size(next_total_term_count, id_bits_));
+    if (total_bits_ == sindi_dmq::kDirectDmqBits) {
+        value_codes_.reserve(next_total_term_count);
+    } else {
+        value_codes_.reserve(get_packed_code_size(next_total_term_count, total_bits_));
+    }
+
+    Vector<const sindi_dmq::DirectDmqCodebook*> codebook_refs(allocator_);
     for (int64_t i = 0; i < data_num; ++i) {
         const auto& vector = sparse_vectors[i];
         auto [sorted_ids, sorted_vals] = sort_sparse_vector(vector, allocator_);
@@ -399,27 +413,9 @@ SINDIDmqRerankBackend::Add(const DatasetPtr& base) {
         encoded.term_offset = total_term_count_;
         encoded.len = vector.len_;
 
-        double value_sum = 0.0;
+        codebook_refs.resize(encoded.len);
         for (uint32_t term_index = 0; term_index < encoded.len; ++term_index) {
-            value_sum += sorted_vals[term_index];
-        }
-        encoded.factors.mean = static_cast<float>(value_sum / encoded.len);
-
-        Vector<uint8_t> unpacked_codes(encoded.len, allocator_);
-        double numerator = 0.0;
-        double denominator = 0.0;
-        for (uint32_t term_index = 0; term_index < encoded.len; ++term_index) {
-            const auto& codebook = codebooks_[GetCodebookIndex(sorted_ids[term_index])];
-            float residual = sorted_vals[term_index] - encoded.factors.mean;
-            uint8_t code = sindi_dmq::EncodeDirectResidual(residual, codebook);
-            float qualifier = codebook.values[code];
-            unpacked_codes[term_index] = code;
-            numerator += static_cast<double>(residual) * residual;
-            denominator += static_cast<double>(qualifier) * residual;
-        }
-        encoded.factors.alpha = 0.0F;
-        if (std::abs(denominator) > 1e-12) {
-            encoded.factors.alpha = static_cast<float>(numerator / denominator);
+            codebook_refs[term_index] = &codebooks_[GetCodebookIndex(sorted_ids[term_index])];
         }
 
         uint64_t next_term_count = total_term_count_ + encoded.len;
@@ -429,10 +425,14 @@ SINDIDmqRerankBackend::Add(const DatasetPtr& base) {
         } else {
             value_codes_.resize(get_packed_code_size(next_term_count, total_bits_), 0);
         }
+        sindi_dmq::EncodeDirectValuesByCodebooks(sorted_vals.data(),
+                                                 codebook_refs.data(),
+                                                 encoded.len,
+                                                 value_codes_.data() + encoded.term_offset,
+                                                 &encoded.factors);
 
         for (uint32_t term_index = 0; term_index < encoded.len; ++term_index) {
             StoreId(encoded.term_offset, term_index, sorted_ids[term_index]);
-            StoreCode(encoded.term_offset, term_index, unpacked_codes[term_index]);
         }
 
         encoded_vectors_.push_back(encoded);

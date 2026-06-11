@@ -43,6 +43,13 @@ EncodeDirectValues(const float* values,
                    uint8_t* codes,
                    DirectDmqVectorFactors* factors);
 
+void
+EncodeDirectValuesByCodebooks(const float* values,
+                              const DirectDmqCodebook* const* codebooks,
+                              uint32_t length,
+                              uint8_t* codes,
+                              DirectDmqVectorFactors* factors);
+
 [[nodiscard]] uint8_t
 EncodeDirectResidual(float residual, const DirectDmqCodebook& codebook);
 

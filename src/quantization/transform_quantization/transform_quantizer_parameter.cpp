@@ -15,7 +15,7 @@
 
 #include "transform_quantizer_parameter.h"
 
-#include "impl/logger/logger.h"
+#include "utils/param_compat_macros.h"
 
 namespace vsag {
 
@@ -97,22 +97,9 @@ TransformQuantizerParameter::ToJson() const {
 
 bool
 TransformQuantizerParameter::CheckCompatibility(const ParamPtr& other) const {
-    auto tq_param = std::dynamic_pointer_cast<TransformQuantizerParameter>(other);
-    if (not tq_param) {
-        logger::error(
-            "TransformQuantizerParameter::CheckCompatibility: other parameter is not a "
-            "TransformQuantizerParameter");
-        return false;
-    }
-    if (tq_param->tq_chain_.size() != this->tq_chain_.size()) {
-        return false;
-    }
-    for (auto i = 0; i < tq_param->tq_chain_.size(); i++) {
-        if (this->tq_chain_[i] != tq_param->tq_chain_[i]) {
-            return false;
-        }
-    }
+    PARAM_CAST_OR_RETURN(TransformQuantizerParameter, p, other);
+    CHECK_FIELD_EQ(*this, *p, tq_chain_);
     return this->base_quantizer_json_[TYPE_KEY].GetString() ==
-           tq_param->base_quantizer_json_[TYPE_KEY].GetString();
+           p->base_quantizer_json_[TYPE_KEY].GetString();
 }
 }  // namespace vsag

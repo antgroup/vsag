@@ -21,7 +21,7 @@ for (const auto& key : bs.GetKeys()) {
 // Load
 vsag::BinarySet bs_loaded;
 // Populate bs_loaded by reading each key from storage.
-auto empty = vsag::Factory::CreateIndex("hnsw", build_params).value();
+auto empty = vsag::Factory::CreateIndex("hgraph", build_params).value();
 empty->Deserialize(bs_loaded);
 ```
 

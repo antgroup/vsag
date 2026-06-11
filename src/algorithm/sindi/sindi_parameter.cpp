@@ -16,6 +16,7 @@
 #include "sindi_parameter.h"
 
 #include "inner_string_params.h"
+#include "utils/param_compat_macros.h"
 
 namespace vsag {
 
@@ -25,8 +26,8 @@ SINDIParameter::FromJson(const JsonType& json) {
         term_id_limit = json[SPARSE_TERM_ID_LIMIT].GetInt();
 
         CHECK_ARGUMENT(
-            (0 < term_id_limit and term_id_limit <= 10'000'000),
-            fmt::format("term_id_limit must in (0, 10'000'000], but now is {}", term_id_limit));
+            (0 < term_id_limit and term_id_limit <= 50'000'000),
+            fmt::format("term_id_limit must be in (0, 50'000'000], but got {}", term_id_limit));
     } else {
         term_id_limit = DEFAULT_TERM_ID_LIMIT;
     }
@@ -117,36 +118,17 @@ SINDIParameter::ToJson() const {
 
 bool
 SINDIParameter::CheckCompatibility(const vsag::ParamPtr& other) const {
-    auto sindi_param = std::dynamic_pointer_cast<SINDIParameter>(other);
-    if (sindi_param == nullptr) {
-        return false;
-    }
-    if (this->term_id_limit != sindi_param->term_id_limit) {
-        return false;
-    }
-    if (this->window_size != sindi_param->window_size) {
-        return false;
-    }
-    if (this->doc_prune_ratio != sindi_param->doc_prune_ratio) {
-        return false;
-    }
-    if (this->use_reorder != sindi_param->use_reorder) {
-        return false;
-    }
-    if (this->use_quantization != sindi_param->use_quantization) {
-        return false;
-    }
-    if (this->avg_doc_term_length != sindi_param->avg_doc_term_length) {
-        return false;
-    }
-    if (this->remap_term_ids != sindi_param->remap_term_ids) {
-        return false;
-    }
-    if (this->rerank_type != sindi_param->rerank_type) {
-        return false;
-    }
-    if (this->rerank_type == SPARSE_RERANK_TYPE_DMQ && this->dmq_bits != sindi_param->dmq_bits) {
-        return false;
+    PARAM_CAST_OR_RETURN(SINDIParameter, p, other);
+    CHECK_FIELD_EQ(*this, *p, term_id_limit);
+    CHECK_FIELD_EQ(*this, *p, window_size);
+    CHECK_FIELD_EQ(*this, *p, doc_prune_ratio);
+    CHECK_FIELD_EQ(*this, *p, use_reorder);
+    CHECK_FIELD_EQ(*this, *p, use_quantization);
+    CHECK_FIELD_EQ(*this, *p, avg_doc_term_length);
+    CHECK_FIELD_EQ(*this, *p, remap_term_ids);
+    CHECK_FIELD_EQ(*this, *p, rerank_type);
+    if (this->rerank_type == SPARSE_RERANK_TYPE_DMQ) {
+        CHECK_FIELD_EQ(*this, *p, dmq_bits);
     }
     return true;
 }

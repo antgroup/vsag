@@ -16,6 +16,7 @@
 #include "attribute_inverted_interface_parameter.h"
 
 #include "inner_string_params.h"
+#include "utils/param_compat_macros.h"
 
 namespace vsag {
 
@@ -34,11 +35,9 @@ AttributeInvertedInterfaceParameter::ToJson() const {
 }
 bool
 AttributeInvertedInterfaceParameter::CheckCompatibility(const ParamPtr& other) const {
-    auto other_param = std::dynamic_pointer_cast<AttributeInvertedInterfaceParameter>(other);
-    if (other_param == nullptr) {
-        return false;
-    }
-    return has_buckets_ == other_param->has_buckets_;
+    PARAM_CAST_OR_RETURN(AttributeInvertedInterfaceParameter, p, other);
+    CHECK_FIELD_EQ(*this, *p, has_buckets_);
+    return true;
 }
 
 }  // namespace vsag

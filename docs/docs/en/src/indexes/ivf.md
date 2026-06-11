@@ -1,5 +1,7 @@
 # IVF
 
+![IVF: Voronoi partition over k-means centroids; only the scan_buckets_count buckets closest to the query are scanned, with an optional precise rerank](../figures/indexes/ivf-overview.svg)
+
 IVF (Inverted File) is VSAG's **partition-based** index. It clusters the corpus into
 buckets at build time, and at query time only scans the buckets whose centroids are
 closest to the query. This turns an O(N) linear scan into O(N · `scan_buckets_count`
@@ -65,8 +67,7 @@ auto result = index->KnnSearch(
 ## Build parameters
 
 Build-time parameters live under `index_param`. See
-[Index Parameters](../resources/index_parameters.md) and `docs/ivf.md` in the
-repository for the exhaustive list.
+[Index Parameters](../resources/index_parameters.md) for the exhaustive list.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -94,6 +95,7 @@ Search-time parameters live under the `ivf` sub-object:
 |-----------|------|---------|-------------|
 | `scan_buckets_count` | int | — (required) | Number of buckets probed per query. Must be ≤ `buckets_count`. |
 | `factor` | float | `2.0` | With reordering enabled, pulls `factor * topk` coarse candidates before the precise rescore. |
+| `enable_reorder` | bool | `true` | Set to `false` to skip the final reorder stage for this request even when the index was built with reorder enabled. |
 | `parallelism` | int | `1` | Threads used to scan buckets in parallel for a single query. |
 | `timeout_ms` | double | `+∞` | Hard cap in milliseconds; partial results are returned once exceeded. |
 
@@ -101,6 +103,12 @@ Search-time parameters live under the `ivf` sub-object:
 auto result = index->KnnSearch(
     query, topk,
     R"({"ivf": {"scan_buckets_count": 32, "factor": 2.0, "parallelism": 4}})").value();
+```
+
+```cpp
+auto fast_result = index->KnnSearch(
+    query, topk,
+    R"({"ivf": {"scan_buckets_count": 32, "factor": 2.0, "enable_reorder": false}})").value();
 ```
 
 ## When to use IVF

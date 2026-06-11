@@ -35,11 +35,40 @@
 #include "vsag/vsag.h"
 
 namespace fixtures {
-vsag::DatasetPtr
-get_one_query(const vsag::DatasetPtr& queries, int i);
+inline vsag::DatasetPtr
+get_one_query(const vsag::DatasetPtr& queries, int i) {
+    vsag::DatasetPtr query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(queries->GetDim())->Owner(false);
 
-int64_t
-get_missing_id(const vsag::DatasetPtr& base);
+    if (queries->GetSparseVectors() != nullptr) {
+        query->SparseVectors(queries->GetSparseVectors() + i);
+    }
+
+    if (queries->GetMultiVectors() != nullptr) {
+        query->MultiVectors(queries->GetMultiVectors() + i);
+        query->MultiVectorDim(queries->GetMultiVectorDim());
+    }
+
+    if (queries->GetFloat32Vectors() != nullptr) {
+        query->Float32Vectors(queries->GetFloat32Vectors() + i * queries->GetDim());
+    }
+
+    if (queries->GetPaths() != nullptr) {
+        query->Paths(queries->GetPaths() + i);
+    }
+    return query;
+}
+
+inline int64_t
+get_missing_id(const vsag::DatasetPtr& base) {
+    std::unordered_set<int64_t> existing_ids(base->GetIds(),
+                                             base->GetIds() + base->GetNumElements());
+    int64_t missing_id = 0;
+    while (existing_ids.count(missing_id) != 0) {
+        ++missing_id;
+    }
+    return missing_id;
+}
 
 class TestIndex {
 public:
@@ -123,7 +152,7 @@ public:
                                  const TestDatasetPtr& dataset,
                                  float build_ratio = 0.5);
 
-    static void
+    static float
     TestKnnSearch(const IndexPtr& index,
                   const TestDatasetPtr& dataset,
                   const std::string& search_param,
@@ -137,7 +166,7 @@ public:
                          const std::string& search_param,
                          bool expected_success = true);
 
-    static void
+    static float
     TestKnnSearchIter(const IndexPtr& index,
                       const TestDatasetPtr& dataset,
                       const std::string& search_param,
@@ -158,7 +187,7 @@ public:
                               const std::string& search_param,
                               bool expected_success = true);
 
-    static void
+    static float
     TestRangeSearch(const IndexPtr& index,
                     const TestDatasetPtr& dataset,
                     const std::string& search_param,
@@ -186,8 +215,7 @@ public:
                               const TestDatasetPtr& dataset,
                               float error = 1e-5,
                               bool expected_success = true,
-                              bool is_sparse = false,
-                              bool is_old_index = false);
+                              bool is_sparse = false);
 
     static void
     TestGetMinAndMaxId(const IndexPtr& index,

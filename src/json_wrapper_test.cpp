@@ -37,6 +37,13 @@ TEST_CASE("JsonWrapper Copy With Integer Data", "[ut][json_wrapper]") {
     CHECK(w2["num"].GetInt() == 42);
 }
 
+TEST_CASE("JsonWrapper Uint64 Round Trip", "[ut][json_wrapper]") {
+    constexpr uint64_t value = 1ULL << 40U;
+    vsag::JsonWrapper wrapper;
+    wrapper["num"].SetUint64(value);
+    CHECK(wrapper["num"].GetUint64() == value);
+}
+
 TEST_CASE("JsonWrapper Copy Independence", "[ut][json_wrapper]") {
     auto w1 = vsag::JsonWrapper::Parse(R"({"key": "value1"})");
     vsag::JsonWrapper w2 = w1;
@@ -51,6 +58,15 @@ TEST_CASE("JsonWrapper Copy Nested Json", "[ut][json_wrapper]") {
     CHECK(w2.Contains("outer"));
     CHECK(w2["outer"].Contains("inner"));
     CHECK(w2["outer"]["inner"].GetString() == "data");
+}
+
+TEST_CASE("JsonWrapper Object Type Check", "[ut][json_wrapper]") {
+    auto object = vsag::JsonWrapper::Parse(R"({"key": "value"})");
+    auto array = vsag::JsonWrapper::Parse(R"(["value"])");
+    auto string = vsag::JsonWrapper::Parse(R"("value")");
+    CHECK(object.IsObject());
+    CHECK_FALSE(array.IsObject());
+    CHECK_FALSE(string.IsObject());
 }
 
 TEST_CASE("JsonWrapper Copy Non-owning Wrapper", "[ut][json_wrapper]") {

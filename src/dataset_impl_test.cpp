@@ -108,6 +108,61 @@ TEST_CASE("Dataset Implement Test", "[ut][dataset]") {
             }
         }
     }
+
+    SECTION("sparse vector with token sequence ownership") {
+        // Build sparse vectors that each carry an original tokenized
+        // document, then transfer ownership to the Dataset and verify the
+        // destructor releases token_sequence_ buffers without leaks/crashes.
+        constexpr uint32_t kNumElements = 4;
+        auto* sparse_vectors = new vsag::SparseVector[kNumElements];
+        for (uint32_t i = 0; i < kNumElements; ++i) {
+            sparse_vectors[i].len_ = 2;
+            sparse_vectors[i].ids_ = new uint32_t[2]{1u + i, 5u + i};
+            sparse_vectors[i].vals_ = new float[2]{0.5f, 0.25f};
+            sparse_vectors[i].token_seq_len_ = 3;
+            sparse_vectors[i].token_sequence_ = new uint32_t[3]{i, i + 1, i};
+        }
+        // Element 2 represents the "no original document" case.
+        delete[] sparse_vectors[2].token_sequence_;
+        sparse_vectors[2].token_seq_len_ = 0;
+        sparse_vectors[2].token_sequence_ = nullptr;
+
+        auto dataset = vsag::Dataset::Make();
+        dataset->NumElements(kNumElements)->SparseVectors(sparse_vectors)->Owner(true, nullptr);
+
+        const auto* readback = dataset->GetSparseVectors();
+        REQUIRE(readback[0].token_seq_len_ == 3);
+        REQUIRE(readback[0].token_sequence_[2] == 0);
+        REQUIRE(readback[1].token_sequence_[1] == 2);
+        REQUIRE(readback[2].token_seq_len_ == 0);
+        REQUIRE(readback[2].token_sequence_ == nullptr);
+    }
+
+    SECTION("sparse vector token sequence deep copy") {
+        constexpr uint32_t kNumElements = 3;
+        auto* sparse_vectors = new vsag::SparseVector[kNumElements];
+        for (uint32_t i = 0; i < kNumElements; ++i) {
+            sparse_vectors[i].len_ = 1;
+            sparse_vectors[i].ids_ = new uint32_t[1]{i + 10};
+            sparse_vectors[i].vals_ = new float[1]{static_cast<float>(i)};
+            sparse_vectors[i].token_seq_len_ = 4;
+            sparse_vectors[i].token_sequence_ =
+                new uint32_t[4]{i, i + 1, i + 2, i};  // duplicate term ids preserved
+        }
+        auto original = vsag::Dataset::Make();
+        original->NumElements(kNumElements)->SparseVectors(sparse_vectors)->Owner(true, nullptr);
+
+        auto copy = original->DeepCopy();
+        const auto* src = original->GetSparseVectors();
+        const auto* dst = copy->GetSparseVectors();
+        for (uint32_t i = 0; i < kNumElements; ++i) {
+            REQUIRE(dst[i].token_seq_len_ == src[i].token_seq_len_);
+            REQUIRE(dst[i].token_sequence_ != src[i].token_sequence_);
+            REQUIRE(std::memcmp(dst[i].token_sequence_,
+                                src[i].token_sequence_,
+                                src[i].token_seq_len_ * sizeof(uint32_t)) == 0);
+        }
+    }
 }
 
 vsag::DatasetPtr
@@ -287,6 +342,30 @@ ArePathArraysDeepCopied(const std::string* original,
     return true;
 }
 
+std::string*
+CopyPathArray(const std::vector<std::string>& paths) {
+    auto* path_array = new std::string[paths.size()];
+    for (uint64_t i = 0; i < paths.size(); ++i) {
+        path_array[i] = paths[i];
+    }
+    return path_array;
+}
+
+vsag::DatasetPtr
+MakeDatasetWithNamedPaths(
+    const std::vector<std::string>& default_paths,
+    const std::vector<std::pair<std::string, std::vector<std::string>>>& hierarchy_paths) {
+    auto dataset = vsag::Dataset::Make();
+    dataset->NumElements(static_cast<int64_t>(default_paths.size()))
+        ->Dim(1)
+        ->Paths(CopyPathArray(default_paths))
+        ->Owner(true);
+    for (const auto& [hierarchy_name, paths] : hierarchy_paths) {
+        dataset->Paths(hierarchy_name, CopyPathArray(paths));
+    }
+    return dataset;
+}
+
 TEST_CASE("Dataset Copy and Append Test", "[ut][Dataset]") {
     std::random_device rd;
     std::mt19937 gen(rd());
@@ -339,6 +418,95 @@ TEST_CASE("Dataset Copy and Append Test", "[ut][Dataset]") {
             ->ExtraInfos(original->GetExtraInfos() + num_elements * extra_info_size)
             ->Owner(false);
         REQUIRE(EqualDataset(sub_original, append_dataset));
+    }
+}
+
+TEST_CASE("Dataset Named Paths Test", "[ut][dataset]") {
+    SECTION("named path setter and getter") {
+        std::string default_paths[2] = {"root/a", "root/b"};
+        std::string site_paths[2] = {"site/a", "site/b"};
+        std::string taxonomy_paths[2] = {"taxonomy/a", "taxonomy/b"};
+        std::string replacement_default_paths[2] = {"root/c", "root/d"};
+
+        auto dataset = vsag::Dataset::Make();
+        dataset->NumElements(2)->Dim(1)->Owner(false);
+        dataset->Paths(default_paths)->Paths("site", site_paths)->Paths("taxonomy", taxonomy_paths);
+
+        REQUIRE(dataset->GetPaths() == default_paths);
+        REQUIRE(dataset->GetPaths("") == default_paths);
+        REQUIRE(dataset->GetPaths("site") == site_paths);
+        REQUIRE(dataset->GetPaths("taxonomy") == taxonomy_paths);
+        REQUIRE(dataset->GetPaths("missing") == nullptr);
+
+        dataset->Paths("", replacement_default_paths);
+        REQUIRE(dataset->GetPaths() == replacement_default_paths);
+        REQUIRE(dataset->GetPaths("") == replacement_default_paths);
+        REQUIRE(dataset->GetPaths("site") == site_paths);
+    }
+
+    SECTION("deep copy preserves named paths") {
+        auto original = MakeDatasetWithNamedPaths(
+            {"root/a", "root/b"},
+            {{"site", {"site/a", "site/b"}}, {"taxonomy", {"taxonomy/a", "taxonomy/b"}}});
+
+        auto copy = original->DeepCopy();
+
+        REQUIRE(ArePathArraysDeepCopied(original->GetPaths(), copy->GetPaths(), 2));
+        REQUIRE(ArePathArraysDeepCopied(original->GetPaths("site"), copy->GetPaths("site"), 2));
+        REQUIRE(
+            ArePathArraysDeepCopied(original->GetPaths("taxonomy"), copy->GetPaths("taxonomy"), 2));
+    }
+
+    SECTION("append preserves named paths") {
+        auto dataset = MakeDatasetWithNamedPaths(
+            {"root/a", "root/b"},
+            {{"site", {"site/a", "site/b"}}, {"taxonomy", {"taxonomy/a", "taxonomy/b"}}});
+        auto append_dataset = MakeDatasetWithNamedPaths(
+            {"root/c"}, {{"site", {"site/c"}}, {"taxonomy", {"taxonomy/c"}}});
+
+        dataset->Append(append_dataset);
+
+        REQUIRE(dataset->GetNumElements() == 3);
+        REQUIRE(dataset->GetPaths()[2] == "root/c");
+        REQUIRE(dataset->GetPaths("site")[2] == "site/c");
+        REQUIRE(dataset->GetPaths("taxonomy")[2] == "taxonomy/c");
+    }
+
+    SECTION("append requires matching named paths") {
+        auto dataset = MakeDatasetWithNamedPaths({"root/a"}, {{"site", {"site/a"}}});
+        auto append_dataset = MakeDatasetWithNamedPaths({"root/b"}, {});
+
+        REQUIRE_THROWS(dataset->Append(append_dataset));
+    }
+
+    SECTION("append rejects extra named paths on appended dataset") {
+        auto dataset = MakeDatasetWithNamedPaths({"root/a"}, {});
+        auto append_dataset = MakeDatasetWithNamedPaths({"root/b"}, {{"site", {"site/b"}}});
+
+        REQUIRE_THROWS(dataset->Append(append_dataset));
+    }
+
+    SECTION("append handles aliased named path arrays") {
+        auto* shared_paths = CopyPathArray({"shared/a", "shared/b"});
+        auto dataset = vsag::Dataset::Make();
+        dataset->NumElements(2)
+            ->Dim(1)
+            ->Paths(shared_paths)
+            ->Paths("site", shared_paths)
+            ->Paths("taxonomy", shared_paths)
+            ->Owner(true);
+        auto append_dataset = MakeDatasetWithNamedPaths(
+            {"root/c"}, {{"site", {"site/c"}}, {"taxonomy", {"taxonomy/c"}}});
+
+        dataset->Append(append_dataset);
+
+        REQUIRE(dataset->GetNumElements() == 3);
+        REQUIRE(dataset->GetPaths()[0] == "shared/a");
+        REQUIRE(dataset->GetPaths("site")[0] == "shared/a");
+        REQUIRE(dataset->GetPaths("taxonomy")[0] == "shared/a");
+        REQUIRE(dataset->GetPaths()[2] == "root/c");
+        REQUIRE(dataset->GetPaths("site")[2] == "site/c");
+        REQUIRE(dataset->GetPaths("taxonomy")[2] == "taxonomy/c");
     }
 }
 

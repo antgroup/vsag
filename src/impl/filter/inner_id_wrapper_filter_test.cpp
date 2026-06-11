@@ -18,7 +18,7 @@
 
 #include "impl/allocator/safe_allocator.h"
 #include "impl/bitset/fast_bitset.h"
-#include "impl/label_table.h"
+#include "impl/label_table/label_table.h"
 #include "unittest.h"
 #include "white_list_filter.h"
 using namespace vsag;

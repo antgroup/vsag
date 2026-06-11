@@ -17,8 +17,8 @@
 
 #include <cmath>
 
-#include "impl/logger/logger.h"
 #include "inner_string_params.h"
+#include "utils/param_compat_macros.h"
 
 namespace vsag {
 
@@ -93,59 +93,13 @@ RaBitQuantizerParameter::ToJson() const {
 
 bool
 RaBitQuantizerParameter::CheckCompatibility(const ParamPtr& other) const {
-    auto rabitq_param = std::dynamic_pointer_cast<RaBitQuantizerParameter>(other);
-    if (not rabitq_param) {
-        logger::error(
-            "RaBitQuantizerParameter::CheckCompatibility: other parameter is not a "
-            "RaBitQuantizerParameter");
-        return false;
-    }
-    if (this->pca_dim_ != rabitq_param->pca_dim_) {
-        logger::error(
-            "RaBitQuantizerParameter::CheckCompatibility: PCA dimensions do not match: {} vs {}",
-            this->pca_dim_,
-            rabitq_param->pca_dim_);
-        return false;
-    }
-    if (this->num_bits_per_dim_query_ != rabitq_param->num_bits_per_dim_query_) {
-        logger::error(
-            "RaBitQuantizerParameter::CheckCompatibility: Number of bits per dimension query do "
-            "not match: {} vs {}",
-            this->num_bits_per_dim_query_,
-            rabitq_param->num_bits_per_dim_query_);
-        return false;
-    }
-    if (this->num_bits_per_dim_base_ != rabitq_param->num_bits_per_dim_base_) {
-        logger::error(
-            "RaBitQuantizerParameter::CheckCompatibility: Number of bits per dimension base do "
-            "not match: {} vs {}",
-            this->num_bits_per_dim_base_,
-            rabitq_param->num_bits_per_dim_base_);
-        return false;
-    }
-    if (this->rabitq_version_ != rabitq_param->rabitq_version_) {
-        logger::error(
-            "RaBitQuantizerParameter::CheckCompatibility: RabitQ version does not match: {} vs {}",
-            this->rabitq_version_,
-            rabitq_param->rabitq_version_);
-        return false;
-    }
-    if (this->rabitq_error_rate_ != rabitq_param->rabitq_error_rate_) {
-        logger::error(
-            "RaBitQuantizerParameter::CheckCompatibility: RabitQ error rate does not match: {} "
-            "vs {}",
-            this->rabitq_error_rate_,
-            rabitq_param->rabitq_error_rate_);
-        return false;
-    }
-    if (this->use_fht_ != rabitq_param->use_fht_) {
-        logger::error(
-            "RaBitQuantizerParameter::CheckCompatibility: Use FHT flag does not match: {} vs {}",
-            this->use_fht_,
-            rabitq_param->use_fht_);
-        return false;
-    }
-
+    PARAM_CAST_OR_RETURN(RaBitQuantizerParameter, p, other);
+    CHECK_FIELD_EQ(*this, *p, pca_dim_);
+    CHECK_FIELD_EQ(*this, *p, num_bits_per_dim_query_);
+    CHECK_FIELD_EQ(*this, *p, num_bits_per_dim_base_);
+    CHECK_FIELD_EQ(*this, *p, rabitq_version_);
+    CHECK_FIELD_EQ(*this, *p, rabitq_error_rate_);
+    CHECK_FIELD_EQ(*this, *p, use_fht_);
     return true;
 }
 }  // namespace vsag

@@ -1,0 +1,394 @@
+
+// Copyright 2024-present the vsag project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#pragma once
+
+#include <fmt/format.h>
+#include <vsag/filter.h>
+
+#include <atomic>
+#include <functional>
+#include <memory>
+#include <shared_mutex>
+#include <tuple>
+
+#include "common.h"
+#include "datacell/duplicate_interface.h"
+#include "label_remap.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
+#include "typing.h"
+#include "utils/pointer_define.h"
+#include "vsag_exception.h"
+
+namespace vsag {
+
+DEFINE_POINTER(LabelTable);
+
+using IdMapFunction = std::function<std::tuple<bool, int64_t>(int64_t)>;
+
+class LabelTable {
+public:
+    explicit LabelTable(Allocator* allocator,
+                        bool use_reverse_map = true,
+                        bool compress_redundant_data = false,
+                        LabelRemapType label_remap_type = LabelRemapType::PG);
+
+    static constexpr InnerIdType INVALID_ID = std::numeric_limits<InnerIdType>::max();
+
+    void
+    Insert(InnerIdType id, LabelType label) {
+        if (use_reverse_map_) {
+            label_remap_.InsertOrAssign(label, id);
+        }
+        if (id + 1 > label_table_.size()) {
+            label_table_.resize(id + 1);
+        }
+        label_table_[id] = label;
+        total_count_++;
+    }
+
+    void
+    SetImmutable() {
+        this->use_reverse_map_ = false;
+        this->label_remap_.Reset();
+    }
+
+    /**
+     * Mark labels as removed.
+     * @param labels The labels to mark as removed.
+     * @return The number of labels marked as removed.
+     */
+    uint32_t
+    MarkRemove(const std::vector<LabelType>& labels);
+
+    /**
+     * Mark a label as removed.
+     * @param label The label to mark as removed.
+     * @return The number of labels marked as removed.
+     */
+    uint32_t
+    MarkRemove(const LabelType& label) {
+        return MarkRemove(std::vector<LabelType>({label}));
+    }
+
+    /**
+     * Check whether an id is removed.
+     * @param id The id to check.
+     * @return True if the id is removed, false otherwise.
+     */
+    bool
+    IsRemoved(InnerIdType id) {
+        std::shared_lock rlock(delete_ids_mutex_);
+        return deleted_ids_.count(id) != 0;
+    }
+
+    void
+    EraseFromDeletedIds(InnerIdType id) {
+        std::scoped_lock wlock(delete_ids_mutex_);
+        deleted_ids_.erase(id);
+    }
+
+    /**
+     * Get id by label.
+     * @param label The label to query.
+     * @param return_even_removed Whether to return even if the id is removed.
+     * @return The id corresponding to the label.
+     * @throws VsagException if the label does not exist or is removed.
+     */
+    InnerIdType
+    GetIdByLabel(LabelType label, bool return_even_removed = false) const;
+
+    /**
+     * Try to get id by label without throwing exception.
+     * @param label The label to query.
+     * @param return_even_removed Whether to return even if the id is removed.
+     * @return A pair where first indicates success and second is the inner_id.
+     */
+    std::pair<bool, InnerIdType>
+    TryGetIdByLabel(LabelType label, bool return_even_removed = false) const noexcept;
+
+    /**
+     * Check whether a label exists and not been removed.
+     * @param label The label to check.
+     * @return True if the label exists and not been removed, false otherwise.
+     */
+    bool
+    CheckLabel(LabelType label) const;
+
+    void
+    UpdateLabel(LabelType old_label, LabelType new_label) {
+        // 1. check whether new_label is occupied
+        if (CheckLabel(new_label)) {
+            throw VsagException(ErrorType::INTERNAL_ERROR,
+                                fmt::format("new label {} has been in Index", new_label));
+        }
+
+        // 2. update label_table_
+        // Important: there may be multiple occurrences of old_label, so we need to update every one
+        bool found = false;
+        for (size_t i = 0; i < label_table_.size(); ++i) {
+            if (label_table_[i] == old_label) {
+                label_table_[i] = new_label;
+                found = true;
+            }
+        }
+        if (not found) {
+            throw VsagException(ErrorType::INTERNAL_ERROR,
+                                fmt::format("old label {} does not exist", old_label));
+        }
+
+        // 3. update label_remap_
+        if (use_reverse_map_) {
+            // note that currently, old_label must exist
+            InnerIdType internal_id = INVALID_ID;
+            bool remap_found = label_remap_.Find(old_label, internal_id);
+            CHECK_ARGUMENT(remap_found,
+                           fmt::format("old label {} does not exist in remap", old_label));
+            label_remap_.Erase(old_label);
+            label_remap_.InsertOrAssign(new_label, internal_id);
+        }
+    }
+
+    LabelType
+    GetLabelById(InnerIdType inner_id) const {
+        if (inner_id >= label_table_.size()) {
+            throw VsagException(
+                ErrorType::INTERNAL_ERROR,
+                fmt::format("id is too large {} >= {}", inner_id, label_table_.size()));
+        }
+        return this->label_table_[inner_id];
+    }
+
+    inline const LabelType*
+    GetAllLabels() const {
+        return label_table_.data();
+    }
+
+    void
+    Serialize(StreamWriter& writer) const {
+        StreamWriter::WriteVector(writer, label_table_);
+    }
+
+    void
+    Deserialize(lvalue_or_rvalue<StreamReader> reader) {
+        StreamReader::ReadVector(reader, label_table_);
+        if (use_reverse_map_) {
+            this->label_remap_.Clear();
+            this->label_remap_.Reserve(label_table_.size());
+            for (InnerIdType id = 0; id < label_table_.size(); ++id) {
+                this->label_remap_.InsertOrAssign(label_table_[id], id);
+            }
+        }
+
+        this->total_count_.store(label_table_.size());
+    }
+
+    void
+    Deserialize(StreamReader& reader);
+
+    void
+    Resize(uint64_t new_size) {
+        if (new_size < total_count_) {
+            return;
+        }
+        label_table_.resize(new_size);
+    }
+
+    int64_t
+    GetTotalCount() {
+        return total_count_;
+    }
+
+    void
+    SetDuplicateTracker(DuplicateTrackerPtr tracker) {
+        duplicate_tracker_ = std::move(tracker);
+    }
+
+    void
+    MergeOther(const LabelTablePtr& other, const IdMapFunction& id_map = nullptr);
+
+    /**
+     * Get memory usage of the label table.
+     * @return The memory usage in bytes.
+     */
+    int64_t
+    GetMemoryUsage() {
+        return sizeof(LabelTable) + label_table_.size() * sizeof(LabelType) +
+               label_remap_.GetMemoryUsage() + deleted_ids_.size() * sizeof(InnerIdType) * 2;
+    }
+
+    uint64_t
+    GetRemapSize() const {
+        return label_remap_.Size();
+    }
+
+    template <typename Visitor>
+    void
+    ForEachRemap(Visitor&& visitor) const {
+        label_remap_.ForEach(visitor);
+    }
+
+    void
+    ResetRemap(uint64_t size = 0) {
+        label_remap_.Clear();
+        if (size > 0) {
+            label_remap_.Reserve(size);
+        }
+    }
+
+    void
+    InsertRemap(LabelType label, InnerIdType inner_id) {
+        label_remap_.Emplace(label, inner_id);
+    }
+
+    /**
+     * Get filter to filter out deleted ids.
+     * @return The filter.
+     */
+    FilterPtr
+    GetDeletedIdsFilter() {
+        std::shared_lock rlock(delete_ids_mutex_);
+        if (deleted_ids_.empty()) {
+            return nullptr;
+        }
+        return deleted_ids_filter_;
+    }
+
+    std::vector<InnerIdType>
+    GetDeletedIds(InnerIdType max_count) {
+        std::shared_lock rlock(delete_ids_mutex_);
+        if (deleted_ids_.empty()) {
+            return {};
+        }
+        auto size = std::min<uint64_t>(static_cast<uint64_t>(max_count), deleted_ids_.size());
+        return std::vector<InnerIdType>(deleted_ids_.begin(),
+                                        std::next(deleted_ids_.begin(), size));
+    }
+
+    std::vector<InnerIdType>
+    GetAllDeletedIds() {
+        std::shared_lock rlock(delete_ids_mutex_);
+        return std::vector<InnerIdType>(deleted_ids_.begin(), deleted_ids_.end());
+    }
+
+private:
+    InnerIdType
+    get_id_by_label_with_reverse_map(LabelType label) const noexcept;
+
+    InnerIdType
+    get_id_by_label_with_label_table(LabelType label) const noexcept;
+
+public:
+    // Label table, map from id to label.
+    Vector<LabelType> label_table_;
+
+    // Temporary compatibility switch for legacy duplicate payload layout.
+    bool is_legacy_duplicate_format_{false};
+
+    // Whether to use reverse map to speed up GetIdByLabel.
+    bool use_reverse_map_{true};
+    // Reverse map from label to id.
+    LabelRemap label_remap_;
+
+    DuplicateTrackerPtr duplicate_tracker_{nullptr};
+
+    Allocator* allocator_{nullptr};
+    std::atomic<int64_t> total_count_{0L};
+
+    bool
+    InsertSourceId(InnerIdType inner_id, const std::string& source_id) {
+        if (inner_id >= source_id_table_.size()) {
+            source_id_table_.resize(inner_id + 1);
+        }
+        source_id_table_[inner_id] = source_id;
+        return true;
+    }
+
+    std::string
+    GetSourceId(InnerIdType inner_id) const {
+        if (inner_id >= source_id_table_.size()) {
+            return {};
+        }
+        return source_id_table_[inner_id];
+    }
+
+    const Vector<std::string>&
+    GetSourceIdTableRef() const {
+        return source_id_table_;
+    }
+
+    // Replace the entire source_id_table_ with a pre-built table.
+    // Used during single-threaded deserialization to move in the persisted
+    // data without exposing a mutable reference to callers.
+    void
+    ReplaceSourceIdTable(Vector<std::string>&& table) {
+        source_id_table_ = std::move(table);
+    }
+
+    void
+    Move(InnerIdType from, InnerIdType to) {
+        if (from == to) {
+            return;
+        }
+
+        bool from_removed = false;
+        {
+            std::scoped_lock wlock(delete_ids_mutex_);
+            from_removed = deleted_ids_.erase(from) > 0;
+            deleted_ids_.erase(to);
+            if (from_removed) {
+                deleted_ids_.insert(to);
+            }
+        }
+
+        if (use_reverse_map_) {
+            label_remap_.Erase(label_table_[to]);
+        }
+        label_table_[to] = label_table_[from];
+        if (use_reverse_map_) {
+            label_remap_.InsertOrAssign(label_table_[to], to);
+        }
+    }
+
+    void
+    ShrinkToFit(InnerIdType capacity) {
+        label_table_.resize(capacity);
+        if (duplicate_tracker_ != nullptr) {
+            duplicate_tracker_->Resize(capacity);
+        }
+    }
+
+    void
+    ForceRemove(LabelType label, InnerIdType inner_id) {
+        if (use_reverse_map_) {
+            label_remap_.Erase(label);
+        }
+        {
+            std::scoped_lock wlock(delete_ids_mutex_);
+            deleted_ids_.erase(inner_id);
+        }
+        total_count_.fetch_sub(1);
+    }
+
+private:
+    UnorderedSet<InnerIdType> deleted_ids_;       // Record deleted ids.
+    FilterPtr deleted_ids_filter_{nullptr};       // Filter to filter out deleted ids.
+    mutable std::shared_mutex delete_ids_mutex_;  // Mutex to protect deleted_ids_.
+
+    Vector<std::string> source_id_table_;  // Map from id to source id, used for cache.
+};
+
+}  // namespace vsag

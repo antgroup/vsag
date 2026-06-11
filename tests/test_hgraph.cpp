@@ -13,9 +13,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <algorithm>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 #include <limits>
+#include <random>
+#include <sstream>
 
 #include "functest.h"
 #include "inner_string_params.h"
@@ -327,6 +330,48 @@ HGraphTestIndex::TestMemoryUsageDetail(const IndexPtr& index) {
 }  // namespace fixtures
 
 namespace {
+
+static void
+RequireRangeSearchDisableReorderChangesResult(const fixtures::TestIndex::IndexPtr& index,
+                                              const fixtures::TestDatasetPtr& dataset,
+                                              const std::string& search_param_with_reorder,
+                                              const std::string& search_param_without_reorder,
+                                              int64_t limited_size = 10) {
+    const auto queries = dataset->query_;
+    const auto query_count = queries->GetNumElements();
+    const auto dim = queries->GetDim();
+    bool found_difference = false;
+    for (int64_t i = 0; i < query_count; ++i) {
+        auto query = vsag::Dataset::Make();
+        query->NumElements(1)
+            ->Dim(dim)
+            ->Float32Vectors(queries->GetFloat32Vectors() + i * dim)
+            ->Owner(false);
+        auto with_reorder = index->RangeSearch(
+            query, std::numeric_limits<float>::max(), search_param_with_reorder, limited_size);
+        auto without_reorder = index->RangeSearch(
+            query, std::numeric_limits<float>::max(), search_param_without_reorder, limited_size);
+        REQUIRE(with_reorder.has_value());
+        REQUIRE(without_reorder.has_value());
+        if (with_reorder.value()->GetDim() != without_reorder.value()->GetDim()) {
+            found_difference = true;
+            break;
+        }
+        const auto result_dim = with_reorder.value()->GetDim();
+        for (int64_t j = 0; j < result_dim; ++j) {
+            if (with_reorder.value()->GetIds()[j] != without_reorder.value()->GetIds()[j] ||
+                std::abs(with_reorder.value()->GetDistances()[j] -
+                         without_reorder.value()->GetDistances()[j]) > 1e-6F) {
+                found_difference = true;
+                break;
+            }
+        }
+        if (found_difference) {
+            break;
+        }
+    }
+    REQUIRE(found_difference);
+}
 
 template <typename Fn>
 void
@@ -1904,6 +1949,79 @@ TestHGraphIgnoreReorder(const fixtures::HGraphTestIndexPtr& test_index,
 HGRAPH_PR_DAILY_CASE("HGraph Ignore Reorder", "[ft][search][hgraph]", TestHGraphIgnoreReorder)
 
 static void
+TestHGraphSearchDisableReorder(const fixtures::HGraphTestIndexPtr& test_index,
+                               const fixtures::HGraphResourcePtr& resource) {
+    using namespace fixtures;
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = GENERATE(1024 * 1024 * 2);
+    constexpr const char* search_param_tmp_disable_reorder = R"({{
+            "hgraph": {{
+                "ef_search": 200,
+                "enable_reorder": {}
+            }}
+        }})";
+
+    for (auto metric_type : resource->metric_types) {
+        for (auto dim : resource->dims) {
+            auto base_quantization_str = "sq4_uniform,fp32";
+            float recall_with_reorder = 0.95F;
+            float recall_without_reorder = 0.75F;
+            INFO(
+                fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, "
+                            "recall_with_reorder: {}, recall_without_reorder: {}",
+                            metric_type,
+                            dim,
+                            base_quantization_str,
+                            recall_with_reorder,
+                            recall_without_reorder));
+            vsag::Options::Instance().set_block_size_limit(size);
+            HGraphTestIndex::HGraphBuildParam build_param(metric_type, dim, base_quantization_str);
+            auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+            auto index = TestIndex::TestFactory(test_index->name, param, true);
+            auto dataset =
+                HGraphTestIndex::pool.GetDatasetAndCreate(dim, resource->base_count, metric_type);
+            TestIndex::TestBuildIndex(index, dataset, true);
+            auto recall_result_with_reorder =
+                TestIndex::TestKnnSearch(index,
+                                         dataset,
+                                         fmt::format(search_param_tmp_disable_reorder, true),
+                                         recall_with_reorder,
+                                         true);
+            auto recall_result_without_reorder =
+                TestIndex::TestKnnSearch(index,
+                                         dataset,
+                                         fmt::format(search_param_tmp_disable_reorder, false),
+                                         recall_without_reorder,
+                                         true);
+            auto iter_recall_result_with_reorder =
+                TestIndex::TestKnnSearchIter(index,
+                                             dataset,
+                                             fmt::format(search_param_tmp_disable_reorder, true),
+                                             recall_with_reorder,
+                                             true);
+            auto iter_recall_result_without_reorder =
+                TestIndex::TestKnnSearchIter(index,
+                                             dataset,
+                                             fmt::format(search_param_tmp_disable_reorder, false),
+                                             recall_without_reorder,
+                                             true);
+            auto search_param_with_reorder = fmt::format(search_param_tmp_disable_reorder, true);
+            auto search_param_without_reorder =
+                fmt::format(search_param_tmp_disable_reorder, false);
+            REQUIRE(recall_result_with_reorder > recall_result_without_reorder);
+            REQUIRE(iter_recall_result_with_reorder > iter_recall_result_without_reorder);
+            RequireRangeSearchDisableReorderChangesResult(
+                index, dataset, search_param_with_reorder, search_param_without_reorder);
+            vsag::Options::Instance().set_block_size_limit(origin_size);
+        }
+    }
+}
+
+HGRAPH_PR_DAILY_CASE("HGraph Search Disable Reorder",
+                     "[ft][search][hgraph]",
+                     TestHGraphSearchDisableReorder)
+
+static void
 TestHGraphWithExtraInfo(const fixtures::HGraphTestIndexPtr& test_index,
                         const fixtures::HGraphResourcePtr& resource) {
     using namespace fixtures;
@@ -2332,3 +2450,393 @@ TestHGraphReverseEdges(const fixtures::HGraphTestIndexPtr& test_index,
 }
 
 HGRAPH_PR_DAILY_CASE("HGraph Reverse Edges", "[ft][build][hgraph]", TestHGraphReverseEdges)
+
+namespace {
+
+class ModuloFilter : public vsag::Filter {
+public:
+    ModuloFilter(int64_t modulus, int64_t residue, float valid_ratio)
+        : modulus_(modulus), residue_(residue), valid_ratio_(valid_ratio) {
+    }
+
+    bool
+    CheckValid(int64_t id) const override {
+        return (id % modulus_) == residue_;
+    }
+
+    float
+    ValidRatio() const override {
+        return valid_ratio_;
+    }
+
+private:
+    int64_t modulus_;
+    int64_t residue_;
+    float valid_ratio_;
+};
+
+}  // namespace
+
+TEST_CASE("(PR) HGraph brute_force_threshold", "[ft][hgraph][pr][brute_force_threshold]") {
+    constexpr int64_t dim = 16;
+    constexpr int64_t base_count = 1000;
+    constexpr int64_t modulus = 50;
+    constexpr int64_t residue = 7;
+    constexpr int64_t topk = 5;
+
+    std::string hgraph_params = R"({
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": 16,
+        "index_param": {
+            "base_quantization_type": "fp32",
+            "max_degree": 32,
+            "ef_construction": 100,
+            "use_reorder": false
+        }
+    })";
+    auto factory_res = vsag::Factory::CreateIndex("hgraph", hgraph_params);
+    REQUIRE(factory_res.has_value());
+    auto index = std::move(factory_res.value());
+
+    std::mt19937 rng(20260528);
+    std::uniform_real_distribution<float> dist(-1.0F, 1.0F);
+    std::vector<float> base_vectors(base_count * dim);
+    std::vector<int64_t> ids(base_count);
+    for (int64_t i = 0; i < base_count; ++i) {
+        ids[i] = i;
+        for (int64_t j = 0; j < dim; ++j) {
+            base_vectors[i * dim + j] = dist(rng);
+        }
+    }
+    auto base = vsag::Dataset::Make();
+    base->NumElements(base_count)
+        ->Dim(dim)
+        ->Ids(ids.data())
+        ->Float32Vectors(base_vectors.data())
+        ->Owner(false);
+    auto build_res = index->Build(base);
+    REQUIRE(build_res.has_value());
+
+    std::vector<float> query_vec(dim);
+    for (int64_t j = 0; j < dim; ++j) {
+        query_vec[j] = dist(rng);
+    }
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(dim)->Float32Vectors(query_vec.data())->Owner(false);
+
+    auto filter =
+        std::make_shared<ModuloFilter>(modulus, residue, 1.0F / static_cast<float>(modulus));
+
+    auto search_param_graph = R"({"hgraph": {"ef_search": 200}})";
+    auto search_param_brute = R"({"hgraph": {"ef_search": 200, "brute_force_threshold": 0.5}})";
+
+    auto res_graph = index->KnnSearch(query, topk, search_param_graph, filter);
+    auto res_brute = index->KnnSearch(query, topk, search_param_brute, filter);
+
+    REQUIRE(res_graph.has_value());
+    REQUIRE(res_brute.has_value());
+    REQUIRE(res_brute.value()->GetDim() == topk);
+
+    // Independent reference: scan all base ids that pass the filter, compute L2.
+    std::vector<std::pair<float, int64_t>> reference;
+    for (int64_t i = 0; i < base_count; ++i) {
+        if ((i % modulus) != residue) {
+            continue;
+        }
+        float d = 0.0F;
+        for (int64_t j = 0; j < dim; ++j) {
+            float diff = base_vectors[i * dim + j] - query_vec[j];
+            d += diff * diff;
+        }
+        reference.emplace_back(d, ids[i]);
+    }
+    std::sort(reference.begin(), reference.end());
+    REQUIRE(static_cast<int64_t>(reference.size()) >= topk);
+
+    const auto* brute_ids = res_brute.value()->GetIds();
+    const auto* brute_dists = res_brute.value()->GetDistances();
+    for (int64_t k = 0; k < topk; ++k) {
+        REQUIRE(brute_ids[k] == reference[k].second);
+        REQUIRE(std::abs(brute_dists[k] - reference[k].first) < 1e-5F);
+    }
+}
+
+TEST_CASE("(PR) HGraph brute_force_threshold default is no-op",
+          "[ft][hgraph][pr][brute_force_threshold]") {
+    constexpr int64_t dim = 8;
+    constexpr int64_t base_count = 200;
+    constexpr int64_t topk = 3;
+
+    std::string hgraph_params = R"({
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": 8,
+        "index_param": {
+            "base_quantization_type": "fp32",
+            "max_degree": 16,
+            "ef_construction": 64,
+            "use_reorder": false
+        }
+    })";
+    auto index = vsag::Factory::CreateIndex("hgraph", hgraph_params).value();
+
+    std::mt19937 rng(42);
+    std::uniform_real_distribution<float> dist(-1.0F, 1.0F);
+    std::vector<float> base_vectors(base_count * dim);
+    std::vector<int64_t> ids(base_count);
+    for (int64_t i = 0; i < base_count; ++i) {
+        ids[i] = i;
+        for (int64_t j = 0; j < dim; ++j) {
+            base_vectors[i * dim + j] = dist(rng);
+        }
+    }
+    auto base = vsag::Dataset::Make();
+    base->NumElements(base_count)
+        ->Dim(dim)
+        ->Ids(ids.data())
+        ->Float32Vectors(base_vectors.data())
+        ->Owner(false);
+    REQUIRE(index->Build(base).has_value());
+
+    std::vector<float> query_vec(dim);
+    for (int64_t j = 0; j < dim; ++j) {
+        query_vec[j] = dist(rng);
+    }
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(dim)->Float32Vectors(query_vec.data())->Owner(false);
+
+    auto baseline = index->KnnSearch(query, topk, R"({"hgraph": {"ef_search": 64}})");
+    auto with_zero = index->KnnSearch(
+        query, topk, R"({"hgraph": {"ef_search": 64, "brute_force_threshold": 0.0}})");
+    REQUIRE(baseline.has_value());
+    REQUIRE(with_zero.has_value());
+    REQUIRE(baseline.value()->GetDim() == with_zero.value()->GetDim());
+    for (int64_t k = 0; k < baseline.value()->GetDim(); ++k) {
+        REQUIRE(baseline.value()->GetIds()[k] == with_zero.value()->GetIds()[k]);
+        REQUIRE(std::abs(baseline.value()->GetDistances()[k] -
+                         with_zero.value()->GetDistances()[k]) < 1e-6F);
+    }
+}
+
+TEST_CASE("HGraph ExportCache + ImportCache + Build acceleration smoke test",
+          "[ft][hgraph][cache][pr]") {
+    // End-to-end smoke test for the cache-accelerated Build path:
+    //   (1) Build a baseline HGraph with N points carrying source_id.
+    //   (2) ExportCache to an in-memory stream.
+    //   (3) Create a fresh HGraph, ImportCache, then Build the same dataset.
+    //       Build() should automatically take the warm-start + two-phase
+    //       refine path because cache_ has been populated.
+    //   (4) Verify the warmed index returns reasonable knn results on a few
+    //       random queries (we don't compare absolute recall against the
+    //       baseline, only that the index is non-empty, searchable, and
+    //       returns the inserted ids).
+    constexpr int64_t TEST_DIM = 32;
+    constexpr int64_t TEST_COUNT = 200;
+    constexpr int64_t TOPK = 10;
+
+    const auto* param = R"(
+    {
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": 32,
+        "index_param": {
+            "base_quantization_type": "fp32",
+            "max_degree": 16,
+            "ef_construction": 50
+        }
+    }
+    )";
+
+    // Prepare deterministic data and source_ids.
+    std::mt19937 rng(42);
+    std::uniform_real_distribution<float> dist(-1.0F, 1.0F);
+    std::vector<float> vectors(TEST_DIM * TEST_COUNT);
+    for (auto& v : vectors) {
+        v = dist(rng);
+    }
+    std::vector<int64_t> ids(TEST_COUNT);
+    for (int64_t i = 0; i < TEST_COUNT; ++i) {
+        ids[i] = i + 1;
+    }
+    std::vector<std::string> source_ids(TEST_COUNT);
+    for (int64_t i = 0; i < TEST_COUNT; ++i) {
+        source_ids[i] = fmt::format("sid_{}", i);
+    }
+
+    auto make_dataset = [&]() {
+        auto base = vsag::Dataset::Make();
+        base->NumElements(TEST_COUNT)
+            ->Dim(TEST_DIM)
+            ->Ids(ids.data())
+            ->Float32Vectors(vectors.data())
+            ->SourceID(source_ids.data())
+            ->Owner(false);
+        return base;
+    };
+
+    // ---- (1) baseline build ----
+    auto baseline = vsag::Factory::CreateIndex("hgraph", param).value();
+    auto baseline_build = baseline->Build(make_dataset());
+    REQUIRE(baseline_build.has_value());
+    REQUIRE(baseline->GetNumElements() == TEST_COUNT);
+
+    // ---- (2) export cache ----
+    std::stringstream cache_buf;
+    auto export_result = baseline->ExportCache(cache_buf);
+    REQUIRE(export_result.has_value());
+    REQUIRE(cache_buf.tellp() > 0);
+
+    // ---- (3) fresh index, import cache, build again ----
+    auto warmed = vsag::Factory::CreateIndex("hgraph", param).value();
+    auto import_result = warmed->ImportCache(cache_buf);
+    REQUIRE(import_result.has_value());
+    auto* logger_ptr = vsag::Options::Instance().logger();
+    if (logger_ptr != nullptr) {
+        logger_ptr->SetLevel(vsag::Logger::Level::kINFO);
+    }
+    auto warmed_build = warmed->Build(make_dataset());
+    if (logger_ptr != nullptr) {
+        logger_ptr->SetLevel(vsag::Logger::Level::kWARN);
+    }
+    REQUIRE(warmed_build.has_value());
+    REQUIRE(warmed->GetNumElements() == TEST_COUNT);
+
+    // ---- (4) sanity-check knn search on the warmed index ----
+    std::vector<float> query_vec(TEST_DIM);
+    std::copy(vectors.begin(), vectors.begin() + TEST_DIM, query_vec.begin());
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(TEST_DIM)->Float32Vectors(query_vec.data())->Owner(false);
+
+    const auto* search_param = R"({"hgraph": {"ef_search": 50}})";
+    auto search_result = warmed->KnnSearch(query, TOPK, search_param);
+    REQUIRE(search_result.has_value());
+    auto knn = search_result.value();
+    REQUIRE(knn->GetNumElements() == 1);
+    REQUIRE(knn->GetDim() > 0);
+    REQUIRE(knn->GetDim() <= TOPK);
+    // The first inserted vector (id=1) is identical to the query: it must be
+    // returned and its distance must be (approximately) zero.
+    bool found_self = false;
+    for (int64_t i = 0; i < knn->GetDim(); ++i) {
+        if (knn->GetIds()[i] == ids[0]) {
+            found_self = true;
+            REQUIRE(knn->GetDistances()[i] < 1e-4F);
+            break;
+        }
+    }
+    REQUIRE(found_self);
+}
+
+TEST_CASE("HGraph ExportCache + ImportCache + Build miss-only path", "[ft][hgraph][cache][pr]") {
+    // Force every node to take the *missed* branch of build_with_cache:
+    //   (1) Build baseline with source_id="sid_A" and ExportCache.
+    //   (2) Fresh index, ImportCache (so cache_->neighbors_ has key "sid_A"),
+    //       then Build with a DIFFERENT source_id "sid_B". Every inserted
+    //       node will fail the warm_start lookup and go through the
+    //       missed-refine loop. Verifies the missed path does not crash and
+    //       still produces a searchable index.
+    constexpr int64_t TEST_DIM = 32;
+    constexpr int64_t TEST_COUNT = 200;
+    constexpr int64_t TOPK = 10;
+
+    const auto* param = R"(
+    {
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": 32,
+        "index_param": {
+            "base_quantization_type": "fp32",
+            "max_degree": 16,
+            "ef_construction": 50
+        }
+    }
+    )";
+
+    std::mt19937 rng(7);
+    std::uniform_real_distribution<float> dist(-1.0F, 1.0F);
+    std::vector<float> vectors(TEST_DIM * TEST_COUNT);
+    for (auto& v : vectors) {
+        v = dist(rng);
+    }
+    std::vector<int64_t> ids(TEST_COUNT);
+    for (int64_t i = 0; i < TEST_COUNT; ++i) {
+        ids[i] = i + 1;
+    }
+    const std::string source_id_a = "sid_A";
+    const std::string source_id_b = "sid_B";
+    // Each vector must carry a unique source_id (semantics of source_id are
+    // per-vector identifiers, not group tags). Use disjoint prefixes so the
+    // second Build cannot match any source_id in the imported cache.
+    std::vector<std::string> source_ids_a(TEST_COUNT);
+    std::vector<std::string> source_ids_b(TEST_COUNT);
+    for (int64_t i = 0; i < TEST_COUNT; ++i) {
+        source_ids_a[i] = fmt::format("A_{}", i);
+        source_ids_b[i] = fmt::format("B_{}", i);
+    }
+
+    auto make_dataset = [&](const std::vector<std::string>& sids) {
+        auto base = vsag::Dataset::Make();
+        base->NumElements(TEST_COUNT)
+            ->Dim(TEST_DIM)
+            ->Ids(ids.data())
+            ->Float32Vectors(vectors.data())
+            ->SourceID(sids.data())
+            ->Owner(false);
+        return base;
+    };
+
+    // ---- (1) baseline build with source_id "sid_A" ----
+    auto baseline = vsag::Factory::CreateIndex("hgraph", param).value();
+    auto baseline_build = baseline->Build(make_dataset(source_ids_a));
+    REQUIRE(baseline_build.has_value());
+    REQUIRE(baseline->GetNumElements() == TEST_COUNT);
+
+    // ---- (2) export cache (contains only "sid_A") ----
+    std::stringstream cache_buf;
+    auto export_result = baseline->ExportCache(cache_buf);
+    REQUIRE(export_result.has_value());
+    REQUIRE(cache_buf.tellp() > 0);
+
+    // ---- (3) fresh index, import cache, build with DIFFERENT source_id ----
+    auto warmed = vsag::Factory::CreateIndex("hgraph", param).value();
+    auto import_result = warmed->ImportCache(cache_buf);
+    REQUIRE(import_result.has_value());
+    auto* logger_ptr = vsag::Options::Instance().logger();
+    if (logger_ptr != nullptr) {
+        logger_ptr->SetLevel(vsag::Logger::Level::kINFO);
+    }
+    // sid_B is not present in cache_->neighbors_ => 100% missed nodes.
+    auto warmed_build = warmed->Build(make_dataset(source_ids_b));
+    if (logger_ptr != nullptr) {
+        logger_ptr->SetLevel(vsag::Logger::Level::kWARN);
+    }
+    REQUIRE(warmed_build.has_value());
+    REQUIRE(warmed->GetNumElements() == TEST_COUNT);
+
+    // ---- (4) sanity-check knn search on the warmed index ----
+    std::vector<float> query_vec(TEST_DIM);
+    std::copy(vectors.begin(), vectors.begin() + TEST_DIM, query_vec.begin());
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(TEST_DIM)->Float32Vectors(query_vec.data())->Owner(false);
+
+    const auto* search_param = R"({"hgraph": {"ef_search": 50}})";
+    auto search_result = warmed->KnnSearch(query, TOPK, search_param);
+    REQUIRE(search_result.has_value());
+    auto knn = search_result.value();
+    REQUIRE(knn->GetNumElements() == 1);
+    REQUIRE(knn->GetDim() > 0);
+    REQUIRE(knn->GetDim() <= TOPK);
+    // The first inserted vector (id=1) is identical to the query: it must be
+    // returned and its distance must be (approximately) zero. This exercises
+    // the all-missed code path end-to-end.
+    bool found_self = false;
+    for (int64_t i = 0; i < knn->GetDim(); ++i) {
+        if (knn->GetIds()[i] == ids[0]) {
+            found_self = true;
+            REQUIRE(knn->GetDistances()[i] < 1e-4F);
+            break;
+        }
+    }
+    REQUIRE(found_self);
+}

@@ -202,4 +202,4 @@ SINDI 的 query/base 数据使用 CSR sparse 二进制布局：`int64 nrow, int6
 - 接口：`include/vsag/index.h` 中的 `Index::AnalyzeIndexBySearch`
 - 实现：`src/analyzer/{analyzer,hgraph_analyzer,pyramid_analyzer}.h`
 - 工具源码：`tools/analyze_index/`
-- 工具说明：`tools/analyze_index/README_zh.md`
+- 本地工具入口：`tools/analyze_index/README_zh.md`

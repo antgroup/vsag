@@ -36,7 +36,7 @@ cmake --build build-release -j
 
 常用参数还包括 `--search_mode`（`knn` / `range` / `knn_filter` / `range_filter`）、
 `--search-query-count`、`--delete-index-after-search`，以及一系列用于关闭单项指标的
-`--disable_*` 开关。完整参数列表见 `tools/eval/README.md`。
+`--disable_*` 开关。参考模板 `tools/eval/eval_template.yaml` 展示了完整的 YAML 结构。
 
 ### 2. 配置文件模式（适合批量对比）
 
@@ -120,5 +120,5 @@ global:
 ## 参考
 
 - 源码：`tools/eval/`
-- 详细说明：`tools/eval/README.md`
+- 本地工具入口：`tools/eval/README.md`
 - 标准机型的基准结果见 [标准环境性能参考](performance.md)。

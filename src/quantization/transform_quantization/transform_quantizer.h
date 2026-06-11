@@ -284,8 +284,10 @@ TransformQuantizer<QuantTmpl, metric>::ProcessQueryImpl(
     const float* query, Computer<TransformQuantizer>& computer) const {
     // 0. allocate
     try {
-        computer.inner_computer_->buf_ =
-            reinterpret_cast<uint8_t*>(this->allocator_->Allocate(this->query_code_size_));
+        if (computer.inner_computer_->buf_ == nullptr) {
+            computer.inner_computer_->buf_ =
+                reinterpret_cast<uint8_t*>(this->allocator_->Allocate(this->query_code_size_));
+        }
     } catch (const std::bad_alloc& e) {
         computer.inner_computer_->buf_ = nullptr;
         throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "bad alloc when init computer buf");

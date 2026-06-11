@@ -62,12 +62,19 @@ add_dependencies (unittests Catch2 vsag)
 
 # function tests
 file (GLOB FUNCTION_TESTS "test_*.cpp")
+file (GLOB FUNCTION_TEST_INDEX_SOURCES "test_index/*.cpp")
 add_executable (functests
         ${FUNCTION_TESTS}
+        ${FUNCTION_TEST_INDEX_SOURCES}
         $<TARGET_OBJECTS:fixtures_allocator>
         $<TARGET_OBJECTS:fixtures_core>
         $<TARGET_OBJECTS:fixtures_data>
         $<TARGET_OBJECTS:fixtures_framework>
+)
+
+target_include_directories (functests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_index
 )
 
 target_link_libraries (functests PRIVATE

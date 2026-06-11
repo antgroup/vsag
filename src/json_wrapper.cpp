@@ -87,6 +87,11 @@ JsonWrapper::IsNumberInteger() const {
 }
 
 bool
+JsonWrapper::IsNumberUnsigned() const {
+    return json_->is_number_unsigned();
+}
+
+bool
 JsonWrapper::IsString() const {
     return json_->is_string();
 }
@@ -99,6 +104,11 @@ JsonWrapper::IsDiscarded() const {
 bool
 JsonWrapper::IsArray() const {
     return json_->is_array();
+}
+
+bool
+JsonWrapper::IsObject() const {
+    return json_->is_object();
 }
 
 void
@@ -118,6 +128,11 @@ JsonWrapper::AppendJson(const JsonWrapper& json) {
 
 void
 JsonWrapper::SetInt(uint64_t value) {
+    (*json_) = value;
+}
+
+void
+JsonWrapper::SetUint64(uint64_t value) {
     (*json_) = value;
 }
 
@@ -145,6 +160,11 @@ JsonWrapper::GetString() const {
 int64_t
 JsonWrapper::GetInt() const {
     return (*json_).get<int64_t>();
+}
+
+uint64_t
+JsonWrapper::GetUint64() const {
+    return (*json_).get<uint64_t>();
 }
 
 float

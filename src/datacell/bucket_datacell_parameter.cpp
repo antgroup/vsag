@@ -17,8 +17,8 @@
 
 #include <fmt/format.h>
 
-#include "impl/logger/logger.h"
 #include "inner_string_params.h"
+#include "utils/param_compat_macros.h"
 
 namespace vsag {
 BucketDataCellParameter::BucketDataCellParameter() = default;
@@ -55,37 +55,10 @@ BucketDataCellParameter::ToJson() const {
 }
 bool
 BucketDataCellParameter::CheckCompatibility(const ParamPtr& other) const {
-    auto bucket_param = std::dynamic_pointer_cast<BucketDataCellParameter>(other);
-    if (not bucket_param) {
-        logger::error(
-            "BucketDataCellParameter::CheckCompatibility: other parameter is not a "
-            "BucketDataCellParameter");
-        return false;
-    }
-
-    if (not this->quantizer_parameter->CheckCompatibility(bucket_param->quantizer_parameter)) {
-        logger::error(
-            "BucketDataCellParameter::CheckCompatibility: quantizer parameters are not compatible");
-        return false;
-    }
-
-    if (buckets_count != bucket_param->buckets_count) {
-        logger::error(
-            "BucketDataCellParameter::CheckCompatibility: buckets count is not compatible: {} != "
-            "{}",
-            buckets_count,
-            bucket_param->buckets_count);
-        return false;
-    }
-
-    if (use_residual_ != bucket_param->use_residual_) {
-        logger::error(
-            "BucketDataCellParameter::CheckCompatibility: use residual is not compatible: {} != {}",
-            use_residual_,
-            bucket_param->use_residual_);
-        return false;
-    }
-
+    PARAM_CAST_OR_RETURN(BucketDataCellParameter, p, other);
+    CHECK_SUB_PARAM(*this, *p, quantizer_parameter);
+    CHECK_FIELD_EQ(*this, *p, buckets_count);
+    CHECK_FIELD_EQ(*this, *p, use_residual_);
     return true;
 }
 }  // namespace vsag

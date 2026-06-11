@@ -54,7 +54,7 @@ auto result = index->KnnSearch(
 ## 构建参数
 
 构建参数放在 `index_param` 下。下表列出最常用的配置项；完整列表请见
-[索引参数](../resources/index_parameters.md) 以及仓库中的 `docs/hgraph.md`。
+[索引参数](../resources/index_parameters.md)。
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
@@ -68,7 +68,8 @@ auto result = index->KnnSearch(
 | `build_thread_count` | int | `100` | 构建阶段并发线程数 |
 | `support_duplicate` | bool | `false` | 是否在插入时做重复 ID 检测 |
 | `duplicate_distance_threshold` | float | `0.0` | 重复判定距离阈值。大于 `0` 时按最近候选的距离判重；等于 `0` 时退化为当前编码 `memcmp` 判重 |
-| `support_remove` | bool | `false` | 是否支持 `Remove()` |
+| `support_remove` | bool | `false` | 是否启用 mark-remove 恢复路径所需的图删除追踪元数据 |
+| `support_force_remove` | bool | `false` | 是否启用 `RemoveMode::FORCE_REMOVE` 及其额外同步 |
 | `store_raw_vector` | bool | `false` | 除量化副本外再保留原始向量（`cosine` 场景有用） |
 | `use_elp_optimizer` | bool | `false` | 构建完成后自动调优检索参数 |
 | `base_io_type` / `precise_io_type` | string | `"block_memory_io"` | 存储后端（`memory_io`、`block_memory_io`、`buffer_io`、`async_io`、`mmap_io`） |
@@ -185,20 +186,67 @@ base->NumElements(num_vectors)->Dim(dim)->Ids(ids)
 
 检索参数放在 `hgraph` 子对象下：
 
-| 参数 | 类型 | 说明 |
-|------|------|------|
-| `ef_search` | int | 搜索前沿候选集的大小，越大召回越高、查询越慢 |
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `ef_search` | int | —（必填） | 搜索前沿候选集的大小，越大召回越高、查询越慢。 |
+| `hops_limit` | int | 不限 | beam search 在返回当前前沿前允许的最大跳数。 |
+| `brute_force_threshold` | float | `0.0` | 选择率感知的暴搜回退开关。当取值 `> 0` 且当前 filter 的 `ValidRatio()` 小于等于 `brute_force_threshold` 时，搜索会**完全跳过图遍历**，直接在通过过滤的 id 上用最佳精度的 flatten 编码做一次暴力扫描（细节见下一节）。取值范围 `[0.0, 1.0]`；默认 `0.0` 表示关闭，保持原有行为。 |
+| `rabitq_one_bit_search` | bool | `false` | RabitQ 一比特搜索路径，详见[量化章节](../quantization/README.md)。 |
 
 ```cpp
 auto result = index->KnnSearch(
     query, topk, R"({"hgraph": {"ef_search": 200}})").value();
 ```
 
+### 高选择性过滤下的暴搜回退（`brute_force_threshold`）
+
+图搜索在大多数候选都能通过过滤时是最优策略——图遍历能很快进入查询邻域。但是当
+过滤越来越严格（只有极少数向量能通过）时，beam 需要扩展非常多的节点才能凑够
+`ef_search` 个**通过过滤的**候选，此时召回率会下降，延迟反而上升。在某个临界点，
+对通过过滤的 id 做一次完整暴扫既更快又精确。
+
+`brute_force_threshold` 允许 HGraph 在每次查询时自动按 filter 选择率做这个切换：
+
+```cpp
+// 当 filter 仅保留 ≤ 1% 的 id 时，自动改走暴力扫描。
+auto params = R"({"hgraph": {"ef_search": 200, "brute_force_threshold": 0.01}})";
+auto result = index->KnnSearch(query, topk, params, my_filter).value();
+```
+
+工作原理（实现位于 `src/algorithm/hgraph/hgraph_search.cpp`）：
+
+- 暴搜回退仅在**同时**满足以下条件时触发：
+    - `brute_force_threshold > 0.0`，**并且**
+    - 提供了 filter，**并且**
+    - `filter->ValidRatio() <= brute_force_threshold`。
+- `Filter::ValidRatio()` 的准确性会直接影响是否切换 —— 这是用户提供的提示值。
+  详见 [带过滤的搜索](../advanced/filtered_search.md) 中关于该方法的约定。
+- 暴搜会遍历所有通过过滤的内部 id，并按 64 一批用当前最精确的 flatten 存储
+  计算距离（顺序：若启用了 `store_raw_vector` 则用原始向量；否则若
+  `use_reorder=true` 则用精排副本；否则用基础量化编码）。
+- 由于暴搜在有精排副本时本身就用了精确编码，**走暴搜分支的查询不会再做精排**。
+- 该机制对 `KnnSearch`（非迭代器重载，也即 `SearchWithRequest` 与标准的
+  `KnnSearch(query, k, params, filter)` 走的入口）和 `RangeSearch` 生效；对
+  迭代器风格的 `KnnSearch(..., IteratorContext*&, ...)` **不生效**，因为一次
+  扫描无法分页跨越多次迭代调用。
+
+取值建议：
+
+- 不带过滤或过滤通过率较高的场景，保持默认 `0.0`。
+- 高选择性过滤（如 `ValidRatio` ≤ 0.05）下，`0.01–0.05` 是合理起点。再往上调
+  实际上等于「只要带 filter 就走暴搜」。
+- 暴搜的代价大致是 `O(N × dim)`，`N` 是索引内总向量数（与选择率无关，因为
+  每个 id 都要走一次 `CheckValid`）。当原本需要把 `ef_search` 调到很大才能
+  维持召回时，暴搜带来的收益最明显。
+
+可运行示例：
+[`322_feature_hgraph_brute_force_threshold.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/322_feature_hgraph_brute_force_threshold.cpp)。
+
 ## 何时选择 HGraph
 
 - 维度大约在 64–4096 的稠密 float 向量。
 - 对延迟敏感且要求高召回的场景。
-- 需要增量插入（可选通过 `support_remove` 打开删除）的混合负载。
+- 需要增量插入（可选通过 `support_force_remove` 打开物理删除）的混合负载。
 - 内存受限环境，可用 `sq8` / `sq4_uniform` / `pq` 压缩，再配合 `use_reorder` 弥补召回。
 
 如果你的业务偏向粗粒度分桶（每次查询只扫部分桶）或严重受 SSD I/O 制约，建议先对比

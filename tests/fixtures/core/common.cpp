@@ -22,7 +22,7 @@
 #include <string>
 #include <unordered_set>
 
-#include "algorithm/pyramid.h"
+#include "algorithm/pyramid/pyramid.h"
 #include "data/vector_generator.h"
 #include "fmt/format.h"
 

@@ -374,6 +374,42 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
+                             "Pyramid KnnSearch Expands Ef Search To Topk",
+                             "[ft][build][pyramid]") {
+    PyramidParam pyramid_param;
+    pyramid_param.no_build_levels = {};
+
+    const auto param = GeneratePyramidBuildParametersString("l2", 4, pyramid_param);
+    auto index = TestFactory("pyramid", param, true);
+
+    constexpr int64_t data_count = 24;
+    constexpr int64_t topk = 20;
+    constexpr int64_t ef_search = 5;
+    std::vector<std::array<float, 4>> vectors;
+    std::vector<int64_t> ids;
+    std::vector<std::string> paths;
+    vectors.reserve(data_count);
+    ids.reserve(data_count);
+    paths.reserve(data_count);
+    for (int64_t i = 0; i < data_count; ++i) {
+        auto value = static_cast<float>(i);
+        vectors.push_back({value, value + 1.0F, value + 2.0F, value + 3.0F});
+        ids.push_back(1000 + i);
+        paths.emplace_back("all");
+    }
+
+    auto base = MakeDenseDataset(vectors, ids, paths);
+    auto build_result = index->Build(base);
+    REQUIRE(build_result.has_value());
+
+    auto query = MakeSingleQuery(vectors.front(), "all");
+    auto search_result =
+        index->KnnSearch(query, topk, GeneratePyramidSearchParametersString(ef_search));
+    REQUIRE(search_result.has_value());
+    REQUIRE(search_result.value()->GetDim() == topk);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "Pyramid Add Test",
                              "[ft][build][pyramid]") {
     auto metric_type = GENERATE("l2");

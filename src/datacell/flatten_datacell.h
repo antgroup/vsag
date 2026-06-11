@@ -325,7 +325,9 @@ FlattenDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
     }
     if constexpr (not IOTmpl::InMemory) {
         if (id_count > 1) {
-            ByteBuffer codes(id_count * this->code_size_, search_alloc);
+            ByteBuffer codes(
+                static_cast<uint64_t>(id_count) * static_cast<uint64_t>(this->code_size_),
+                search_alloc);
             Vector<uint64_t> sizes(id_count, this->code_size_, search_alloc);
             Vector<uint64_t> offsets(id_count, this->code_size_, search_alloc);
             for (int64_t i = 0; i < id_count; ++i) {

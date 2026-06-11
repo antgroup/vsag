@@ -15,6 +15,8 @@
 
 #include "simd.h"
 #include "simd/int8_simd.h"
+#include "simd/kernels/kernels.h"
+#include "simd/traits/simd_traits_generic.h"
 
 namespace vsag::generic {
 
@@ -95,22 +97,12 @@ PQDistanceFloat256(const void* single_dim_centers, float single_dim_val, void* r
 
 float
 FP32ComputeIP(const float* RESTRICT query, const float* RESTRICT codes, uint64_t dim) {
-    float result = 0.0f;
-
-    for (uint64_t i = 0; i < dim; ++i) {
-        result += query[i] * codes[i];
-    }
-    return result;
+    return simd::ComputeIPImpl<simd::SimdTraits<simd::Generic_Tag>>(query, codes, dim);
 }
 
 float
 FP32ComputeL2Sqr(const float* RESTRICT query, const float* RESTRICT codes, uint64_t dim) {
-    float result = 0.0f;
-    for (uint64_t i = 0; i < dim; ++i) {
-        auto val = query[i] - codes[i];
-        result += val * val;
-    }
-    return result;
+    return simd::ComputeL2SqrImpl<simd::SimdTraits<simd::Generic_Tag>>(query, codes, dim);
 }
 
 void
@@ -124,12 +116,8 @@ FP32ComputeIPBatch4(const float* RESTRICT query,
                     float& result2,
                     float& result3,
                     float& result4) {
-    for (uint64_t i = 0; i < dim; ++i) {
-        result1 += query[i] * codes1[i];
-        result2 += query[i] * codes2[i];
-        result3 += query[i] * codes3[i];
-        result4 += query[i] * codes4[i];
-    }
+    simd::ComputeBatch4Impl<simd::SimdTraits<simd::Generic_Tag>, simd::Batch4Kind::IP>(
+        query, dim, codes1, codes2, codes3, codes4, result1, result2, result3, result4);
 }
 
 void
@@ -143,49 +131,33 @@ FP32ComputeL2SqrBatch4(const float* RESTRICT query,
                        float& result2,
                        float& result3,
                        float& result4) {
-    for (uint64_t i = 0; i < dim; ++i) {
-        result1 += (query[i] - codes1[i]) * (query[i] - codes1[i]);
-        result2 += (query[i] - codes2[i]) * (query[i] - codes2[i]);
-        result3 += (query[i] - codes3[i]) * (query[i] - codes3[i]);
-        result4 += (query[i] - codes4[i]) * (query[i] - codes4[i]);
-    }
+    simd::ComputeBatch4Impl<simd::SimdTraits<simd::Generic_Tag>, simd::Batch4Kind::L2>(
+        query, dim, codes1, codes2, codes3, codes4, result1, result2, result3, result4);
 }
 
 void
 FP32Sub(const float* x, const float* y, float* z, uint64_t dim) {
-    for (uint64_t i = 0; i < dim; ++i) {
-        z[i] = x[i] - y[i];
-    }
+    simd::BinaryOpImpl<simd::SimdTraits<simd::Generic_Tag>, simd::BinaryOp::Sub>(x, y, z, dim);
 }
 
 void
 FP32Add(const float* x, const float* y, float* z, uint64_t dim) {
-    for (uint64_t i = 0; i < dim; ++i) {
-        z[i] = x[i] + y[i];
-    }
+    simd::BinaryOpImpl<simd::SimdTraits<simd::Generic_Tag>, simd::BinaryOp::Add>(x, y, z, dim);
 }
 
 void
 FP32Mul(const float* x, const float* y, float* z, uint64_t dim) {
-    for (uint64_t i = 0; i < dim; ++i) {
-        z[i] = x[i] * y[i];
-    }
+    simd::BinaryOpImpl<simd::SimdTraits<simd::Generic_Tag>, simd::BinaryOp::Mul>(x, y, z, dim);
 }
 
 void
 FP32Div(const float* x, const float* y, float* z, uint64_t dim) {
-    for (uint64_t i = 0; i < dim; ++i) {
-        z[i] = x[i] / y[i];
-    }
+    simd::BinaryOpImpl<simd::SimdTraits<simd::Generic_Tag>, simd::BinaryOp::Div>(x, y, z, dim);
 }
 
 float
 FP32ReduceAdd(const float* x, uint64_t dim) {
-    float result = 0.0F;
-    for (uint64_t i = 0; i < dim; ++i) {
-        result += x[i];
-    }
-    return result;
+    return simd::ReduceAddImpl<simd::SimdTraits<simd::Generic_Tag>>(x, dim);
 }
 
 union FP32Struct {
@@ -194,22 +166,13 @@ union FP32Struct {
 };
 
 float
-INT8ComputeL2Sqr(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uint64_t dim) {
-    float result = 0.0f;
-    for (uint64_t i = 0; i < dim; ++i) {
-        auto val = static_cast<float>(query[i] - codes[i]);
-        result += val * val;
-    }
-    return result;
+INT8ComputeL2Sqr(const int8_t* query, const int8_t* codes, uint64_t dim) {
+    return simd::Int8ComputeL2SqrImpl<simd::Int8Traits<simd::Generic_Int8_Tag>>(query, codes, dim);
 }
 
 float
-INT8ComputeIP(const int8_t* __restrict query, const int8_t* __restrict codes, uint64_t dim) {
-    float result = 0.0f;
-    for (uint64_t i = 0; i < dim; ++i) {
-        result += static_cast<float>(query[i] * codes[i]);
-    }
-    return result;
+INT8ComputeIP(const int8_t* query, const int8_t* codes, uint64_t dim) {
+    return simd::Int8ComputeIPImpl<simd::Int8Traits<simd::Generic_Int8_Tag>>(query, codes, dim);
 }
 
 float
@@ -254,48 +217,26 @@ FloatToFP16(const float fp32_value) {
 
 float
 BF16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim) {
-    float result = 0.0f;
-    auto* query_bf16 = reinterpret_cast<const uint16_t*>(query);
-    auto* codes_bf16 = reinterpret_cast<const uint16_t*>(codes);
-    for (uint64_t i = 0; i < dim; ++i) {
-        result += BF16ToFloat(query_bf16[i]) * BF16ToFloat(codes_bf16[i]);
-    }
-    return result;
+    return simd::HalfComputeIPImpl<simd::BF16Traits<simd::Generic_BF16_Tag>>(
+        query, codes, dim, nullptr);
 }
 
 float
 BF16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim) {
-    float result = 0.0f;
-    auto* query_bf16 = reinterpret_cast<const uint16_t*>(query);
-    auto* codes_bf16 = reinterpret_cast<const uint16_t*>(codes);
-    for (uint64_t i = 0; i < dim; ++i) {
-        auto val = BF16ToFloat(query_bf16[i]) - BF16ToFloat(codes_bf16[i]);
-        result += val * val;
-    }
-    return result;
+    return simd::HalfComputeL2SqrImpl<simd::BF16Traits<simd::Generic_BF16_Tag>>(
+        query, codes, dim, nullptr);
 }
 
 float
 FP16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim) {
-    float result = 0.0f;
-    auto* query_bf16 = reinterpret_cast<const uint16_t*>(query);
-    auto* codes_bf16 = reinterpret_cast<const uint16_t*>(codes);
-    for (uint64_t i = 0; i < dim; ++i) {
-        result += FP16ToFloat(query_bf16[i]) * FP16ToFloat(codes_bf16[i]);
-    }
-    return result;
+    return simd::HalfComputeIPImpl<simd::FP16Traits<simd::Generic_FP16_Tag>>(
+        query, codes, dim, nullptr);
 }
 
 float
 FP16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim) {
-    float result = 0.0f;
-    auto* query_bf16 = reinterpret_cast<const uint16_t*>(query);
-    auto* codes_bf16 = reinterpret_cast<const uint16_t*>(codes);
-    for (uint64_t i = 0; i < dim; ++i) {
-        auto val = FP16ToFloat(query_bf16[i]) - FP16ToFloat(codes_bf16[i]);
-        result += val * val;
-    }
-    return result;
+    return simd::HalfComputeL2SqrImpl<simd::FP16Traits<simd::Generic_FP16_Tag>>(
+        query, codes, dim, nullptr);
 }
 
 float
@@ -304,12 +245,8 @@ SQ8ComputeIP(const float* RESTRICT query,
              const float* RESTRICT lower_bound,
              const float* RESTRICT diff,
              uint64_t dim) {
-    float result = 0.0f;
-    for (uint64_t i = 0; i < dim; ++i) {
-        result += query[i] * static_cast<float>(static_cast<float>(codes[i]) / 255.0 * diff[i] +
-                                                lower_bound[i]);
-    }
-    return result;
+    return simd::SQ8ComputeIPImpl<simd::SQ8Traits<simd::Generic_SQ8_Tag>>(
+        query, codes, lower_bound, diff, dim);
 }
 
 float
@@ -318,13 +255,8 @@ SQ8ComputeL2Sqr(const float* RESTRICT query,
                 const float* RESTRICT lower_bound,
                 const float* RESTRICT diff,
                 uint64_t dim) {
-    float result = 0.0f;
-    for (uint64_t i = 0; i < dim; ++i) {
-        auto val = (query[i] - static_cast<float>(static_cast<float>(codes[i]) / 255.0 * diff[i] +
-                                                  lower_bound[i]));
-        result += val * val;
-    }
-    return result;
+    return simd::SQ8ComputeL2SqrImpl<simd::SQ8Traits<simd::Generic_SQ8_Tag>>(
+        query, codes, lower_bound, diff, dim);
 }
 
 float
@@ -333,15 +265,8 @@ SQ8ComputeCodesIP(const uint8_t* RESTRICT codes1,
                   const float* RESTRICT lower_bound,
                   const float* RESTRICT diff,
                   uint64_t dim) {
-    float result = 0.0f;
-    for (uint64_t i = 0; i < dim; ++i) {
-        auto val1 =
-            static_cast<float>(static_cast<float>(codes1[i]) / 255.0 * diff[i] + lower_bound[i]);
-        auto val2 =
-            static_cast<float>(static_cast<float>(codes2[i]) / 255.0 * diff[i] + lower_bound[i]);
-        result += val1 * val2;
-    }
-    return result;
+    return simd::SQ8ComputeCodesIPImpl<simd::SQ8Traits<simd::Generic_SQ8_Tag>>(
+        codes1, codes2, lower_bound, diff, dim);
 }
 
 float
@@ -350,16 +275,59 @@ SQ8ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
                      const float* RESTRICT lower_bound,
                      const float* RESTRICT diff,
                      uint64_t dim) {
-    float result = 0.0f;
+    return simd::SQ8ComputeCodesL2SqrImpl<simd::SQ8Traits<simd::Generic_SQ8_Tag>>(
+        codes1, codes2, lower_bound, diff, dim);
+}
+
+namespace {
+float
+SQ4ScalarIP(const float* q, const uint8_t* c, const float* lb, const float* d, uint64_t dim) {
+    float result = 0;
     for (uint64_t i = 0; i < dim; ++i) {
-        auto val1 =
-            static_cast<float>(static_cast<float>(codes1[i]) / 255.0 * diff[i] + lower_bound[i]);
-        auto val2 =
-            static_cast<float>(static_cast<float>(codes2[i]) / 255.0 * diff[i] + lower_bound[i]);
-        result += (val1 - val2) * (val1 - val2);
+        uint8_t nibble = (i & 1) ? (c[i >> 1] >> 4) : (c[i >> 1] & 0x0f);
+        result += q[i] * (nibble * (1.0f / 15.0f) * d[i] + lb[i]);
     }
     return result;
 }
+float
+SQ4ScalarL2(const float* q, const uint8_t* c, const float* lb, const float* d, uint64_t dim) {
+    float result = 0;
+    for (uint64_t i = 0; i < dim; ++i) {
+        uint8_t nibble = (i & 1) ? (c[i >> 1] >> 4) : (c[i >> 1] & 0x0f);
+        float v = nibble * (1.0f / 15.0f) * d[i] + lb[i];
+        float diff = q[i] - v;
+        result += diff * diff;
+    }
+    return result;
+}
+float
+SQ4ScalarCodesIP(
+    const uint8_t* c1, const uint8_t* c2, const float* lb, const float* d, uint64_t dim) {
+    float result = 0;
+    for (uint64_t i = 0; i < dim; ++i) {
+        uint8_t n1 = (i & 1) ? (c1[i >> 1] >> 4) : (c1[i >> 1] & 0x0f);
+        uint8_t n2 = (i & 1) ? (c2[i >> 1] >> 4) : (c2[i >> 1] & 0x0f);
+        float v1 = n1 * (1.0f / 15.0f) * d[i] + lb[i];
+        float v2 = n2 * (1.0f / 15.0f) * d[i] + lb[i];
+        result += v1 * v2;
+    }
+    return result;
+}
+float
+SQ4ScalarCodesL2(
+    const uint8_t* c1, const uint8_t* c2, const float* lb, const float* d, uint64_t dim) {
+    float result = 0;
+    for (uint64_t i = 0; i < dim; ++i) {
+        uint8_t n1 = (i & 1) ? (c1[i >> 1] >> 4) : (c1[i >> 1] & 0x0f);
+        uint8_t n2 = (i & 1) ? (c2[i >> 1] >> 4) : (c2[i >> 1] & 0x0f);
+        float v1 = n1 * (1.0f / 15.0f) * d[i] + lb[i];
+        float v2 = n2 * (1.0f / 15.0f) * d[i] + lb[i];
+        float diff = v1 - v2;
+        result += diff * diff;
+    }
+    return result;
+}
+}  // namespace
 
 float
 SQ4ComputeIP(const float* RESTRICT query,
@@ -367,24 +335,8 @@ SQ4ComputeIP(const float* RESTRICT query,
              const float* RESTRICT lower_bound,
              const float* RESTRICT diff,
              uint64_t dim) {
-    float result = 0;
-    float x_lo = 0, x_hi = 0, y_lo = 0, y_hi = 0;
-
-    for (uint64_t d = 0; d < dim; d += 2) {
-        x_lo = query[d];
-        y_lo = (codes[d >> 1] & 0x0f) / 15.0 * diff[d] + lower_bound[d];
-        if (d + 1 < dim) {
-            x_hi = query[d + 1];
-            y_hi = (codes[d >> 1] >> 4) / 15.0 * diff[d + 1] + lower_bound[d + 1];
-        } else {
-            x_hi = 0;
-            y_hi = 0;
-        }
-
-        result += (x_lo * y_lo + x_hi * y_hi);
-    }
-
-    return result;
+    return simd::SQ4ComputeIPImpl<simd::SQ4Traits<simd::Generic_SQ4_Tag>>(
+        query, codes, lower_bound, diff, dim, &SQ4ScalarIP);
 }
 
 float
@@ -393,24 +345,8 @@ SQ4ComputeL2Sqr(const float* RESTRICT query,
                 const float* RESTRICT lower_bound,
                 const float* RESTRICT diff,
                 uint64_t dim) {
-    float result = 0;
-    float x_lo = 0, x_hi = 0, y_lo = 0, y_hi = 0;
-
-    for (uint64_t d = 0; d < dim; d += 2) {
-        x_lo = query[d];
-        y_lo = (codes[d >> 1] & 0x0f) / 15.0 * diff[d] + lower_bound[d];
-        if (d + 1 < dim) {
-            x_hi = query[d + 1];
-            y_hi = ((codes[d >> 1] & 0xf0) >> 4) / 15.0 * diff[d + 1] + lower_bound[d + 1];
-        } else {
-            x_hi = 0;
-            y_hi = 0;
-        }
-
-        result += (x_lo - y_lo) * (x_lo - y_lo) + (x_hi - y_hi) * (x_hi - y_hi);
-    }
-
-    return result;
+    return simd::SQ4ComputeL2SqrImpl<simd::SQ4Traits<simd::Generic_SQ4_Tag>>(
+        query, codes, lower_bound, diff, dim, &SQ4ScalarL2);
 }
 
 float
@@ -419,24 +355,8 @@ SQ4ComputeCodesIP(const uint8_t* RESTRICT codes1,
                   const float* RESTRICT lower_bound,
                   const float* RESTRICT diff,
                   uint64_t dim) {
-    float result = 0, delta = 0;
-    float x_lo = 0, x_hi = 0, y_lo = 0, y_hi = 0;
-
-    for (uint64_t d = 0; d < dim; d += 2) {
-        x_lo = (codes1[d >> 1] & 0x0f) / 15.0 * diff[d] + lower_bound[d];
-        y_lo = (codes2[d >> 1] & 0x0f) / 15.0 * diff[d] + lower_bound[d];
-        if (d + 1 < dim) {
-            x_hi = ((codes1[d >> 1] & 0xf0) >> 4) / 15.0 * diff[d + 1] + lower_bound[d + 1];
-            y_hi = ((codes2[d >> 1] & 0xf0) >> 4) / 15.0 * diff[d + 1] + lower_bound[d + 1];
-        } else {
-            x_hi = 0;
-            y_hi = 0;
-        }
-
-        result += (x_lo * y_lo + x_hi * y_hi);
-    }
-
-    return result;
+    return simd::SQ4ComputeCodesIPImpl<simd::SQ4Traits<simd::Generic_SQ4_Tag>>(
+        codes1, codes2, lower_bound, diff, dim, &SQ4ScalarCodesIP);
 }
 
 float
@@ -445,24 +365,8 @@ SQ4ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
                      const float* RESTRICT lower_bound,
                      const float* RESTRICT diff,
                      uint64_t dim) {
-    float result = 0, delta = 0;
-    float x_lo = 0, x_hi = 0, y_lo = 0, y_hi = 0;
-
-    for (uint64_t d = 0; d < dim; d += 2) {
-        x_lo = (codes1[d >> 1] & 0x0f) / 15.0 * diff[d] + lower_bound[d];
-        y_lo = (codes2[d >> 1] & 0x0f) / 15.0 * diff[d] + lower_bound[d];
-        if (d + 1 < dim) {
-            x_hi = ((codes1[d >> 1] & 0xf0) >> 4) / 15.0 * diff[d + 1] + lower_bound[d + 1];
-            y_hi = ((codes2[d >> 1] & 0xf0) >> 4) / 15.0 * diff[d + 1] + lower_bound[d + 1];
-        } else {
-            x_hi = 0;
-            y_hi = 0;
-        }
-
-        result += (x_lo - y_lo) * (x_lo - y_lo) + (x_hi - y_hi) * (x_hi - y_hi);
-    }
-
-    return result;
+    return simd::SQ4ComputeCodesL2SqrImpl<simd::SQ4Traits<simd::Generic_SQ4_Tag>>(
+        codes1, codes2, lower_bound, diff, dim, &SQ4ScalarCodesL2);
 }
 
 float
@@ -657,43 +561,20 @@ Normalize(const float* from, float* to, uint64_t dim) {
 
 float
 NormalizeWithCentroid(const float* from, const float* centroid, float* to, uint64_t dim) {
-    float norm = 0;
-    for (uint64_t d = 0; d < dim; ++d) {
-        norm += (from[d] - centroid[d]) * (from[d] - centroid[d]);
-    }
-
-    if (norm < 1e-5) {
-        norm = 1;
-    } else {
-        norm = std::sqrt(norm);
-    }
-
-    for (int d = 0; d < dim; d++) {
-        to[d] = (from[d] - centroid[d]) / norm;
-    }
-
-    return norm;
+    return simd::NormalizeWithCentroidImpl<simd::SimdTraits<simd::Generic_Tag>>(
+        from, centroid, to, dim);
 }
 
 void
 InverseNormalizeWithCentroid(
     const float* from, const float* centroid, float* to, uint64_t dim, float norm) {
-    for (int d = 0; d < dim; d++) {
-        to[d] = from[d] * norm + centroid[d];
-    }
+    simd::InverseNormalizeWithCentroidImpl<simd::SimdTraits<simd::Generic_Tag>>(
+        from, centroid, to, dim, norm);
 }
 
 void
 DivScalar(const float* from, float* to, uint64_t dim, float scalar) {
-    if (dim == 0) {
-        return;
-    }
-    if (scalar == 0) {
-        scalar = 1.0f;  // TODO(LHT): logger?
-    }
-    for (uint64_t i = 0; i < dim; ++i) {
-        to[i] = from[i] / scalar;
-    }
+    simd::DivScalarImpl<simd::SimdTraits<simd::Generic_Tag>>(from, to, dim, scalar);
 }
 
 void
@@ -751,19 +632,7 @@ BitNot(const uint8_t* x, const uint64_t num_byte, uint8_t* result) {
 
 void
 KacsWalk(float* data, uint64_t len) {
-    uint64_t base = len % 2;
-    uint64_t offset = base + (len / 2);  // for odd dim
-    for (uint64_t i = 0; i < len / 2; i++) {
-        float add = data[i] + data[i + offset];
-        float sub = data[i] - data[i + offset];
-        data[i] = add;
-        data[i + offset] = sub;
-    }
-    if (base != 0) {
-        data[len / 2] *= std::sqrt(2.0F);
-        //In odd condition, we operate the prev len/2 items and the post len/2 items, the No.len/2 item stay still,
-        //As we need to resize the while sequence in the next step, so we increase the val of No.len/2 item to eliminate the impact of the following resize.
-    }
+    simd::KacsWalkImpl<simd::SimdTraits<simd::Generic_Tag>>(data, len);
 }
 
 void
@@ -778,21 +647,12 @@ FlipSign(const uint8_t* flip, float* data, uint64_t dim) {
 
 void
 VecRescale(float* data, uint64_t dim, float val) {
-    for (int i = 0; i < dim; i++) {
-        data[i] *= val;
-    }
+    simd::VecRescaleImpl<simd::SimdTraits<simd::Generic_Tag>>(data, dim, val);
 }
 
 void
 RotateOp(float* data, int idx, int dim_, int step) {
-    for (int i = idx; i < dim_; i += 2 * step) {
-        for (int j = 0; j < step; j++) {
-            float x = data[i + j];
-            float y = data[i + j + step];
-            data[i + j] = x + y;
-            data[i + j + step] = x - y;
-        }
-    }
+    simd::RotateOpImpl<simd::SimdTraits<simd::Generic_Tag>>(data, idx, dim_, step);
 }
 
 void

@@ -1,5 +1,7 @@
 # IVF
 
+![IVF：基于 k-means 中心的 Voronoi 分桶，仅扫描距离 q 最近的 scan_buckets_count 个桶，并支持可选的精排](../figures/indexes/ivf-overview.svg)
+
 IVF（Inverted File，倒排索引）是 VSAG 的 **分桶式** 索引。它在构建时将语料聚类成若干桶，
 查询时只扫描与查询距离最近的若干个桶的中心对应的倒排列表，把 O(N) 的线性扫描降为
 O(N · `scan_buckets_count` / `buckets_count`)，并通过这两个参数在召回与延迟之间进行权衡。
@@ -59,8 +61,7 @@ auto result = index->KnnSearch(
 
 ## 构建参数
 
-构建参数放在 `index_param` 下。完整列表请见 [索引参数](../resources/index_parameters.md)
-及仓库中的 `docs/ivf.md`。
+构建参数放在 `index_param` 下。完整列表请见 [索引参数](../resources/index_parameters.md)。
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
@@ -87,6 +88,7 @@ auto result = index->KnnSearch(
 |------|------|--------|------|
 | `scan_buckets_count` | int | —（必填） | 每次查询扫描的桶数，须 ≤ `buckets_count` |
 | `factor` | float | `2.0` | 启用精排时，粗排阶段会预取 `factor * topk` 个候选再重打分 |
+| `enable_reorder` | bool | `true` | 即使索引构建时启用了 reorder，也可以在单次请求里设为 `false` 跳过最终精排 |
 | `parallelism` | int | `1` | 单次查询内扫描桶时使用的线程数 |
 | `timeout_ms` | double | `+∞` | 单次查询最长耗时（毫秒），超时会返回当前的部分结果 |
 
@@ -94,6 +96,12 @@ auto result = index->KnnSearch(
 auto result = index->KnnSearch(
     query, topk,
     R"({"ivf": {"scan_buckets_count": 32, "factor": 2.0, "parallelism": 4}})").value();
+```
+
+```cpp
+auto fast_result = index->KnnSearch(
+    query, topk,
+    R"({"ivf": {"scan_buckets_count": 32, "factor": 2.0, "enable_reorder": false}})").value();
 ```
 
 ## 何时选择 IVF

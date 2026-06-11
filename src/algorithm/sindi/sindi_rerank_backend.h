@@ -17,7 +17,7 @@
 #include <memory>
 
 #include "algorithm/sindi/sindi_sparse_dmq.h"
-#include "algorithm/sparse_index.h"
+#include "algorithm/sparse_index/sparse_index.h"
 #include "hash_types.h"
 #include "json_types.h"
 #include "storage/stream_reader.h"

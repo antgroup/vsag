@@ -16,10 +16,12 @@
 #include <pybind11/stl.h>
 
 #include <fstream>
+#include <nlohmann/json.hpp>
 #include <vector>
 
 #include "binding.h"
 #include "fmt/format.h"
+#include "vsag/constants.h"
 #include "vsag/dataset.h"
 #include "vsag/vsag.h"
 
@@ -28,6 +30,149 @@ namespace {
 int64_t
 to_int64(uint64_t value) {
     return static_cast<int64_t>(value);
+}
+
+enum class DenseVectorKind { FLOAT32, FLOAT16, BFLOAT16, UNSUPPORTED };
+
+DenseVectorKind
+parse_dense_vector_kind(const std::string& parameters) {
+    const auto json = nlohmann::json::parse(parameters);
+    const auto dtype = json.find(vsag::PARAMETER_DTYPE);
+    if (dtype == json.end() || !dtype->is_string()) {
+        return DenseVectorKind::FLOAT32;
+    }
+
+    const auto dtype_name = dtype->get<std::string>();
+    if (dtype_name == vsag::DATATYPE_FLOAT32) {
+        return DenseVectorKind::FLOAT32;
+    }
+    if (dtype_name == vsag::DATATYPE_FLOAT16) {
+        return DenseVectorKind::FLOAT16;
+    }
+    if (dtype_name == vsag::DATATYPE_BFLOAT16) {
+        return DenseVectorKind::BFLOAT16;
+    }
+    return DenseVectorKind::UNSUPPORTED;
+}
+
+const char*
+expected_numpy_dtype(DenseVectorKind kind) {
+    switch (kind) {
+        case DenseVectorKind::FLOAT32:
+            return "numpy.float32";
+        case DenseVectorKind::FLOAT16:
+            return "numpy.float16";
+        case DenseVectorKind::BFLOAT16:
+            return "numpy.uint16 (raw bfloat16 bits)";
+        case DenseVectorKind::UNSUPPORTED:
+            return "unsupported";
+    }
+    return "unsupported";
+}
+
+const char*
+expected_numpy_dtype_name(DenseVectorKind kind) {
+    switch (kind) {
+        case DenseVectorKind::FLOAT32:
+            return "float32";
+        case DenseVectorKind::FLOAT16:
+            return "float16";
+        case DenseVectorKind::BFLOAT16:
+            return "uint16";
+        case DenseVectorKind::UNSUPPORTED:
+            return "";
+    }
+    return "";
+}
+
+void
+validate_dense_index_kind(DenseVectorKind kind, const char* operation_name) {
+    if (kind == DenseVectorKind::UNSUPPORTED) {
+        throw std::invalid_argument(
+            fmt::format("{} only supports indexes with dtype in [{}, {}, {}]",
+                        operation_name,
+                        vsag::DATATYPE_FLOAT32,
+                        vsag::DATATYPE_FLOAT16,
+                        vsag::DATATYPE_BFLOAT16));
+    }
+}
+
+py::buffer_info
+validate_dense_array(const py::array& array,
+                     DenseVectorKind kind,
+                     const char* arg_name,
+                     uint64_t expected_size = 0,
+                     uint64_t expected_dim = 0) {
+    auto buf = array.request();
+    const auto dtype_name = py::str(array.attr("dtype")).cast<std::string>();
+    if (dtype_name != expected_numpy_dtype_name(kind)) {
+        throw std::invalid_argument(
+            fmt::format("{} must be {} array", arg_name, expected_numpy_dtype(kind)));
+    }
+    if (expected_size == 0) {
+        if (buf.ndim != 1) {
+            throw std::invalid_argument(fmt::format("{} must be 1-dimensional", arg_name));
+        }
+        if (buf.strides[0] != buf.itemsize) {
+            throw std::invalid_argument(fmt::format("{} must be contiguous", arg_name));
+        }
+        return buf;
+    }
+
+    uint64_t actual_size = 0;
+    if (buf.ndim == 1) {
+        if (buf.strides[0] != buf.itemsize) {
+            throw std::invalid_argument(fmt::format("{} must be contiguous", arg_name));
+        }
+        actual_size = static_cast<uint64_t>(buf.shape[0]);
+    } else if (buf.ndim == 2) {
+        if (buf.strides[1] != buf.itemsize || buf.strides[0] != buf.itemsize * buf.shape[1]) {
+            throw std::invalid_argument(
+                fmt::format("{} must be contiguous in row-major order", arg_name));
+        }
+        if (expected_dim != 0 && static_cast<uint64_t>(buf.shape[1]) != expected_dim) {
+            throw std::invalid_argument(fmt::format("{} second dimension ({}) must equal dim ({})",
+                                                    arg_name,
+                                                    buf.shape[1],
+                                                    expected_dim));
+        }
+        actual_size = static_cast<uint64_t>(buf.shape[0]) * static_cast<uint64_t>(buf.shape[1]);
+    } else {
+        throw std::invalid_argument(fmt::format(
+            "{} must be a 1-dimensional array or a 2-dimensional contiguous matrix", arg_name));
+    }
+
+    if (actual_size != expected_size) {
+        throw std::invalid_argument(
+            fmt::format("{} size ({}) must equal {}", arg_name, actual_size, expected_size));
+    }
+    return buf;
+}
+
+void
+validate_ids(const py::array_t<int64_t>& ids, uint64_t expected_size) {
+    auto buf = ids.request();
+    if (buf.ndim != 1) {
+        throw std::invalid_argument("ids must be 1-dimensional");
+    }
+    if (buf.strides[0] != buf.itemsize) {
+        throw std::invalid_argument("ids must be contiguous");
+    }
+    if (static_cast<uint64_t>(buf.shape[0]) != expected_size) {
+        throw std::invalid_argument(fmt::format(
+            "ids length ({}) must equal num_elements ({})", buf.shape[0], expected_size));
+    }
+}
+
+void
+set_dense_vectors(const vsag::DatasetPtr& dataset,
+                  const py::buffer_info& buf,
+                  DenseVectorKind kind) {
+    if (kind == DenseVectorKind::FLOAT32) {
+        dataset->Float32Vectors(static_cast<const float*>(buf.ptr));
+        return;
+    }
+    dataset->Float16Vectors(static_cast<const uint16_t*>(buf.ptr));
 }
 
 struct SparseVectors {  // NOLINT(readability-identifier-naming)
@@ -121,20 +266,27 @@ public:
                     throw std::runtime_error("error type: unexpectedError");
             }
         }
+        dense_vector_kind_ = parse_dense_vector_kind(parameters);
     }
 
     void
-    Build(py::array_t<float> vectors,
-          py::array_t<int64_t> ids,
-          uint64_t num_elements,
-          uint64_t dim) {
+    Build(py::array vectors, py::array_t<int64_t> ids, uint64_t num_elements, uint64_t dim) {
+        validate_dense_index_kind(dense_vector_kind_, "build");
+        auto buf =
+            validate_dense_array(vectors, dense_vector_kind_, "vectors", num_elements * dim, dim);
+        validate_ids(ids, num_elements);
+
         auto dataset = vsag::Dataset::Make();
         dataset->Owner(false)
             ->Dim(to_int64(dim))
             ->NumElements(to_int64(num_elements))
-            ->Ids(ids.mutable_data())
-            ->Float32Vectors(vectors.mutable_data());
-        index_->Build(dataset);
+            ->Ids(ids.data());
+        set_dense_vectors(dataset, buf, dense_vector_kind_);
+
+        auto build_result = index_->Build(dataset);
+        if (!build_result.has_value()) {
+            throw std::runtime_error(fmt::format("build failed: {}", build_result.error().message));
+        }
     }
 
     void
@@ -165,12 +317,13 @@ public:
     }
 
     py::object
-    KnnSearch(py::array_t<float> vector, uint64_t k, std::string& parameters) {
+    KnnSearch(py::array vector, uint64_t k, std::string& parameters) {
+        validate_dense_index_kind(dense_vector_kind_, "knn_search");
+        auto buf = validate_dense_array(vector, dense_vector_kind_, "vector");
+
         auto query = vsag::Dataset::Make();
-        query->NumElements(1)
-            ->Dim(to_int64(vector.size()))
-            ->Float32Vectors(vector.mutable_data())
-            ->Owner(false);
+        query->NumElements(1)->Dim(to_int64(static_cast<uint64_t>(buf.shape[0])))->Owner(false);
+        set_dense_vectors(query, buf, dense_vector_kind_);
 
         uint64_t ids_shape[1]{k};
         uint64_t ids_strides[1]{sizeof(int64_t)};
@@ -179,13 +332,18 @@ public:
 
         auto ids = py::array_t<int64_t>(ids_shape, ids_strides);
         auto dists = py::array_t<float>(dists_shape, dists_strides);
-        if (auto result = index_->KnnSearch(query, to_int64(k), parameters); result.has_value()) {
-            auto ids_view = ids.mutable_unchecked<1>();
-            auto dists_view = dists.mutable_unchecked<1>();
+        auto ids_view = ids.mutable_unchecked<1>();
+        auto dists_view = dists.mutable_unchecked<1>();
+        for (uint64_t i = 0; i < k; ++i) {
+            ids_view(i) = -1;
+            dists_view(i) = -1.0f;
+        }
 
+        if (auto result = index_->KnnSearch(query, to_int64(k), parameters); result.has_value()) {
             const auto* vsag_ids = result.value()->GetIds();
             const auto* vsag_distances = result.value()->GetDistances();
-            for (uint32_t i = 0; i < k; ++i) {
+            const auto count = static_cast<uint64_t>(result.value()->GetDim());
+            for (uint64_t i = 0; i < k && i < count; ++i) {
                 ids_view(i) = vsag_ids[i];
                 dists_view(i) = vsag_distances[i];
             }
@@ -228,12 +386,13 @@ public:
     }
 
     py::object
-    RangeSearch(py::array_t<float> point, float threshold, std::string& parameters) {
+    RangeSearch(py::array point, float threshold, std::string& parameters) {
+        validate_dense_index_kind(dense_vector_kind_, "range_search");
+        auto buf = validate_dense_array(point, dense_vector_kind_, "point");
+
         auto query = vsag::Dataset::Make();
-        query->NumElements(1)
-            ->Dim(to_int64(point.size()))
-            ->Float32Vectors(point.mutable_data())
-            ->Owner(false);
+        query->NumElements(1)->Dim(to_int64(static_cast<uint64_t>(buf.shape[0])))->Owner(false);
+        set_dense_vectors(query, buf, dense_vector_kind_);
 
         py::array_t<int64_t> labels;
         py::array_t<float> dists;
@@ -280,17 +439,22 @@ public:
     }
 
     void
-    Add(py::array_t<float> vectors, py::array_t<int64_t> ids, uint64_t num_elements, uint64_t dim) {
+    Add(py::array vectors, py::array_t<int64_t> ids, uint64_t num_elements, uint64_t dim) {
+        validate_dense_index_kind(dense_vector_kind_, "add");
+        auto buf =
+            validate_dense_array(vectors, dense_vector_kind_, "vectors", num_elements * dim, dim);
+        validate_ids(ids, num_elements);
+
         auto dataset = vsag::Dataset::Make();
         dataset->Owner(false)
             ->Dim(to_int64(dim))
             ->NumElements(to_int64(num_elements))
-            ->Ids(ids.mutable_data())
-            ->Float32Vectors(vectors.mutable_data());
+            ->Ids(ids.data());
+        set_dense_vectors(dataset, buf, dense_vector_kind_);
 
         auto result = index_->Add(dataset);
         if (!result.has_value()) {
-            throw std::runtime_error("Failed to add vectors to index");
+            throw std::runtime_error(fmt::format("add failed: {}", result.error().message));
         }
     }
 
@@ -353,6 +517,7 @@ public:
     }
 
 private:
+    DenseVectorKind dense_vector_kind_{DenseVectorKind::FLOAT32};
     std::shared_ptr<vsag::Index> index_;
 };
 
@@ -366,6 +531,11 @@ bind_index(py::module_& module) {
         This class supports both dense and sparse vector indexing and searching.
         It provides methods for building indexes, performing k-NN and range searches,
         and saving/loading indexes to/from disk.
+
+        Supported dense input types:
+        - float32 indexes accept numpy.float32 vectors
+        - float16 indexes accept numpy.float16 vectors
+        - bfloat16 indexes accept numpy.uint16 arrays containing raw bfloat16 bits
     )pbdoc")
         .def(py::init<const std::string&, const std::string&>(),
              py::arg("name"),
@@ -385,16 +555,20 @@ bind_index(py::module_& module) {
              py::arg("num_elements"),
              py::arg("dim"),
              R"pbdoc(
-         Build index from dense float32 vectors.
+         Build index from dense vectors.
 
          Args:
-             vectors (numpy.ndarray): 1D array of float32 values with total size num_elements * dim
+              vectors (numpy.ndarray): Dense vector buffer with shape (num_elements * dim,) or
+                  a row-major contiguous matrix with shape (num_elements, dim)
              ids (numpy.ndarray): 1D array of int64 values with shape (num_elements,)
              num_elements (int): Number of vectors in the dataset
              dim (int): Dimensionality of each vector
 
          Note:
-             - The vectors array should contain num_elements * dim consecutive float32 values
+              - The index parameters determine the VSAG dtype
+              - Accepted dense inputs are numpy.float32 for float32 indexes, numpy.float16 for float16 indexes,
+                and numpy.uint16 raw-bit buffers for bfloat16 indexes
+              - Dense build inputs may be passed as either a flat array or a contiguous 2D matrix
          )pbdoc")
         .def("build",
              &Index::SparseBuild,
@@ -426,18 +600,18 @@ bind_index(py::module_& module) {
          Perform k-nearest neighbors search on a single dense query vector.
 
          Args:
-             vector (numpy.ndarray): 1D array of float32 values representing the query vector
+             vector (numpy.ndarray): 1D dense query vector buffer
              k (int): Number of nearest neighbors to retrieve
              parameters (str): JSON-formatted string containing search-specific parameters
 
          Returns:
-             tuple: (distances, ids) where:
-                 - distances: numpy.ndarray of float32 with shape (k,) containing distances to neighbors
+             tuple: (ids, distances) where:
                  - ids: numpy.ndarray of int64 with shape (k,) containing neighbor IDs
+                 - distances: numpy.ndarray of float32 with shape (k,) containing distances to neighbors
 
          Note:
-             - Distance metric depends on the index configuration (typically L2 or inner product)
-             - Results are sorted by distance (closest first)
+             - The query dtype must match the index dtype declared in the index parameters
+             - Use numpy.uint16 raw-bit buffers for bfloat16 queries
          )pbdoc")
         .def("knn_search",
              &Index::SparseKnnSearch,
@@ -457,7 +631,7 @@ bind_index(py::module_& module) {
              parameters (str): JSON-formatted string containing search-specific parameters
 
          Returns:
-             tuple: (distances, ids) with the same format as dense knn_search
+             tuple: (ids, distances) with the same format as dense knn_search
 
          )pbdoc")
         .def("range_search",
@@ -469,18 +643,18 @@ bind_index(py::module_& module) {
          Perform range search to find all vectors within a specified distance threshold.
 
          Args:
-             point (numpy.ndarray): 1D array of float32 values representing the query vector
+             point (numpy.ndarray): 1D dense query vector buffer
              threshold (float): Maximum distance threshold for inclusion in results
              parameters (str): JSON-formatted string containing search-specific parameters
 
          Returns:
-             tuple: (distances, ids) where:
-                 - distances: numpy.ndarray of float32 containing distances to all qualifying vectors
+             tuple: (ids, distances) where:
                  - ids: numpy.ndarray of int64 containing corresponding IDs
+                 - distances: numpy.ndarray of float32 containing distances to all qualifying vectors
 
          Note:
-             - The number of returned results varies based on data distribution and threshold
-             - Results are not guaranteed to be sorted by distance
+             - The query dtype must match the index dtype declared in the index parameters
+             - Use numpy.uint16 raw-bit buffers for bfloat16 queries
          )pbdoc")
         .def("save",
              &Index::Save,
@@ -555,17 +729,23 @@ bind_index(py::module_& module) {
              py::arg("num_elements"),
              py::arg("dim"),
              R"pbdoc(
-         Add new vectors to the index dynamically.
+         Add new dense vectors to the index dynamically.
 
          Args:
-             vectors (numpy.ndarray): 1D array of float32 values with total size num_elements * dim
+              vectors (numpy.ndarray): Dense vector buffer with shape (num_elements * dim,) or
+                  a row-major contiguous matrix with shape (num_elements, dim)
              ids (numpy.ndarray): 1D array of int64 values with shape (num_elements,)
              num_elements (int): Number of vectors to add
              dim (int): Dimensionality of each vector
 
          Raises:
              RuntimeError: If the add operation fails.
-         )pbdoc")
+
+         Note:
+              - The vector dtype must match the index dtype declared in the index parameters
+              - Use numpy.uint16 raw-bit buffers for bfloat16 additions
+              - Dense add inputs may be passed as either a flat array or a contiguous 2D matrix
+          )pbdoc")
         .def("remove",
              &Index::Remove,
              py::arg("ids"),

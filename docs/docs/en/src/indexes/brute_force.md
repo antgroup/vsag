@@ -1,5 +1,7 @@
 # BruteForce
 
+![BruteForce: vectors live in a flat store; the query is compared against every stored vector, with optional intra-query parallelism splitting the scan across threads, and the smallest distances are kept in a top-k heap](../figures/indexes/brute_force-overview.svg)
+
 BruteForce is VSAG's **exact, flat** index. At query time it scores the query against every
 vector in the corpus and returns the true top-k — no graph traversal, no inverted lists, no
 approximation. Its main role is to be the **ground-truth baseline** that approximate indexes

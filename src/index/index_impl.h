@@ -58,7 +58,7 @@ public:
         return DatasetImpl::MakeEmptyDataset(); \
     }
 #define CHECK_IMMUTABLE_INDEX(operation_str)                                       \
-    if (this->inner_index_->immutable_) {                                          \
+    if (this->inner_index_->immutable_.load(std::memory_order_acquire)) {          \
         return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,        \
                                     "immutable index no support " operation_str)); \
     }
@@ -189,6 +189,16 @@ public:
             LOG_ERROR_AND_RETURNS(model_value.error().type, model_value.error().message);
         }
         return std::make_shared<IndexImpl<T>>(model_value.value(), this->common_param_);
+    }
+
+    tl::expected<void, Error>
+    ExportCache(std::ostream& out_stream) const override {
+        SAFE_CALL(this->inner_index_->ExportCache(out_stream));
+    }
+
+    tl::expected<void, Error>
+    ImportCache(std::istream& in_stream) override {
+        SAFE_CALL(this->inner_index_->ImportCache(in_stream));
     }
 
     tl::expected<DatasetPtr, Error>

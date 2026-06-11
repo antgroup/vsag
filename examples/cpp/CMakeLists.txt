@@ -44,6 +44,9 @@ target_link_libraries (109_index_sindi vsag)
 add_executable (110_index_warp 110_index_warp.cpp)
 target_link_libraries (110_index_warp vsag)
 
+add_executable (111_index_lazy_hgraph 111_index_lazy_hgraph.cpp)
+target_link_libraries (111_index_lazy_hgraph vsag)
+
 add_executable (201_custom_allocator 201_custom_allocator.cpp)
 target_link_libraries (201_custom_allocator vsag)
 
@@ -124,3 +127,6 @@ target_link_libraries (501_quantization_transform vsag)
 
 add_executable (321_index_fp16_hgraph 321_index_fp16_hgraph.cpp)
 target_link_libraries (321_index_fp16_hgraph vsag)
+
+add_executable (322_feature_hgraph_brute_force_threshold 322_feature_hgraph_brute_force_threshold.cpp)
+target_link_libraries (322_feature_hgraph_brute_force_threshold vsag)

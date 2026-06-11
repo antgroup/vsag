@@ -103,19 +103,42 @@ VSAG provides several CMake options to customize the build:
   - When disabled, OpenBLAS is used instead
   - MKL resolution uses `MKL_PATH`, `OMP_PATH`, and `MKL_INCLUDE_PATH` as CMake cache overrides when the libraries are not installed in standard locations
 
-- **`USE_SYSTEM_OPENBLAS`** (default: `OFF`)
-  - Use system-installed OpenBLAS instead of building from source
-  - Requires `libopenblas-dev` and `liblapacke-dev` to be installed
-  - Falls back to building from source if system OpenBLAS is not found
-  - Example:
-    ```bash
-    # Install OpenBLAS on Ubuntu/Debian
-    sudo apt-get install libopenblas-dev liblapacke-dev
-    
-    # Build with system OpenBLAS
-     cmake -DUSE_SYSTEM_OPENBLAS=ON -DENABLE_INTEL_MKL=OFF -B build
-     cmake --build build
-     ```
+### System Third-Party Dependencies
+
+VSAG can reuse third-party libraries already provided by the host system or by a parent CMake project instead of always building bundled copies.
+
+- **`VSAG_USE_SYSTEM_DEPS`** (default: `AUTO`)
+  - `AUTO` — use a system / pre-existing copy when one is found, fall back to the bundled build otherwise.
+  - `ON` — require a system copy of every supported dependency; fail configuration if any of them is missing.
+  - `OFF` — always build bundled copies, ignoring system packages.
+
+- **`VSAG_USE_SYSTEM_<DEP>`** (default: empty — inherit `VSAG_USE_SYSTEM_DEPS`)
+  - Per-dependency override. Set to `AUTO`, `ON`, or `OFF` to override the global policy for a single dependency.
+
+**Currently supported dependencies for system reuse:** `OPENBLAS`.
+
+Additional dependencies will be enabled in follow-up changes.
+
+#### OpenBLAS
+
+When `VSAG_USE_SYSTEM_OPENBLAS=ON` (or inherited via `VSAG_USE_SYSTEM_DEPS=ON`), VSAG looks for OpenBLAS in the following order and stops at the first hit:
+
+1. an `OpenBLAS::OpenBLAS` target already defined by a parent project,
+2. `find_package(OpenBLAS CONFIG)`,
+3. a manual search for `libopenblas` plus `cblas.h` / `lapacke.h` under common system prefixes.
+
+Example:
+
+```bash
+# Install OpenBLAS on Ubuntu/Debian
+sudo apt-get install libopenblas-dev liblapacke-dev
+
+# Build with system OpenBLAS
+cmake -DVSAG_USE_SYSTEM_OPENBLAS=ON -DENABLE_INTEL_MKL=OFF -B build
+cmake --build build
+```
+
+The legacy switch **`USE_SYSTEM_OPENBLAS`** (default: `OFF`) is kept as a deprecated alias. When `VSAG_USE_SYSTEM_OPENBLAS` is empty, setting `USE_SYSTEM_OPENBLAS=ON` preserves its previous "try system, fall back to bundled" behaviour (equivalent to `VSAG_USE_SYSTEM_OPENBLAS=AUTO` — it does **not** hard-require a system copy). Prefer the new option in new scripts.
 
 ### Third-Party Source Overrides
 

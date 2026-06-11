@@ -44,6 +44,7 @@
 - [Range Search](advanced/range_search.md)
 - [Calculate Distance by ID](advanced/calc_distance_by_id.md)
 - [Filtered Search](advanced/filtered_search.md)
+- [Iterator Search](advanced/iterator_search.md)
 - [Attribute Filter (Hybrid Search)](advanced/attribute_filter.md)
 - [Serialization](advanced/serialization.md)
 - [Memory Management](advanced/memory.md)
@@ -64,12 +65,14 @@
 - [Evaluation Tool](resources/eval.md)
 - [HDF5 Dataset Format](resources/dataset_format.md)
 - [Index Analysis Tool](resources/analyze_index.md)
+- [Compatibility Check Tool](resources/check_compatibility.md)
 
 # Resources
 
 - [Release Notes](resources/release_notes.md)
 - [Roadmap](resources/roadmap_2025.md)
 - [Community](resources/community.md)
+- [Filing Issues with an AI Agent](resources/filing_issues_with_agent.md)
 - [Related Projects](resources/related_projects.md)
 - [Research Papers](resources/research_papers.md)
 - [Contributors](misc/contributors.md)

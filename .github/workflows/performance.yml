@@ -13,7 +13,7 @@ jobs:
       group: performance-${{ github.event.pull_request.number }}
       cancel-in-progress: true
     container:
-      image: vsaglib/vsag:ci-x86
+      image: vsaglib/vsag:ci-x86-openblas
     env:
       PERF_DINGDING_ACCESS_TOKEN: ${{ secrets.PERF_DINGDING_ACCESS_TOKEN }}
       PERF_DINGDING_SERCRET: ${{ secrets.PERF_DINGDING_SERCRET }}
@@ -25,7 +25,10 @@ jobs:
       - name: Download Datasets
         run: bash ./scripts/download_annbench_datasets.sh
       - name: Build Release
-        run: make release
+        # Performance benchmarks already run against OpenBLAS (the default
+        # backend). Use the pre-installed system OpenBLAS so the BLAS build
+        # itself doesn't eat into the daily perf window.
+        run: EXTRA_DEFINED="-DUSE_SYSTEM_OPENBLAS=ON" make release
       - name: Run Perf - Recall 90%, 95%, 99%
         run:  |
           ./build-release/tools/eval/eval_performance .github/perf-mini.yml

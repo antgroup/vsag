@@ -41,6 +41,9 @@ public:
     IsNumberInteger() const;
 
     bool
+    IsNumberUnsigned() const;
+
+    bool
     IsString() const;
 
     bool
@@ -48,6 +51,9 @@ public:
 
     bool
     IsArray() const;
+
+    bool
+    IsObject() const;
 
     JsonWrapper&
     operator=(const JsonWrapper& other);
@@ -68,6 +74,9 @@ public:
     SetInt(uint64_t value);
 
     void
+    SetUint64(uint64_t value);
+
+    void
     SetFloat(float value);
 
     void
@@ -85,6 +94,9 @@ public:
 
     int64_t
     GetInt() const;
+
+    uint64_t
+    GetUint64() const;
 
     float
     GetFloat() const;

@@ -10,8 +10,8 @@ scenarios.
 ```cpp
 #include <vsag/vsag.h>
 
-// 1. Create an index (HNSW in this example)
-auto index = vsag::Factory::CreateIndex("hnsw", hnsw_build_params).value();
+// 1. Create an index (HGraph in this example)
+auto index = vsag::Factory::CreateIndex("hgraph", hgraph_build_params).value();
 index->Build(dataset);
 
 // 2. Prepare the query

@@ -1,5 +1,7 @@
 # SINDI
 
+![SINDI: per-term inverted lists grouped by window; only the lists matching the query's non-zero terms are walked and accumulated into an n_candidate-sized heap](../figures/indexes/sindi-overview.svg)
+
 SINDI (**S**parse **IN**verted **D**ense **I**ndex) is VSAG's index for **sparse
 vectors** — the kind produced by BM25, SPLADE, and other learned-sparse encoders.
 Unlike the dense indexes (HGraph, IVF), SINDI operates directly on term/value
@@ -68,7 +70,7 @@ and `metric_type` **must** be `"ip"`.
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `dim` | int | — (required) | Maximum number of non-zero elements per sparse vector. *Not* the vocabulary size. |
-| `term_id_limit` | int | `1000000` | Upper bound on term id values (≥ max term id + 1). |
+| `term_id_limit` | int | `1000000` | Upper bound on term id values (≥ max term id + 1, up to 50 000 000). |
 | `window_size` | int | `50000` | Documents per window (range: 10 000 – 60 000). |
 | `doc_prune_ratio` | float | `0.0` | Fraction of lowest-weight terms dropped per doc at build time (0.0 – 0.9). |
 | `use_quantization` | bool | `false` | Quantize stored term values to cut memory; when enabled, uses 8-bit scalar quantization (SQ8). |
