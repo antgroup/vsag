@@ -17,10 +17,13 @@
 
 #include <algorithm>
 #include <limits>
+#include <mutex>
 #include <shared_mutex>
 #include <string>
+#include <vector>
 
 #include "basic_types.h"
+#include "container_types.h"
 #include "flatten_datacell_parameter.h"
 #include "flatten_interface_parameter.h"
 #include "hash_types.h"
@@ -142,6 +145,91 @@ public:
     ExportCommonParam();
 
 public:
+    void
+    EnableSlotRedirect(Allocator* allocator) {
+        redirect_allocator_ = allocator;
+        use_slot_redirect_ = true;
+        slot_redirect_.clear();
+        next_physical_slot_ = 0;
+    }
+
+    void
+    SetDuplicateSlot(InnerIdType dup_id, InnerIdType rep_id) {
+        if (!use_slot_redirect_) {
+            return;
+        }
+        std::unique_lock lock(redirect_mutex_);
+        if (dup_id >= slot_redirect_.size()) {
+            slot_redirect_.resize(dup_id + 1, std::numeric_limits<InnerIdType>::max());
+        }
+        slot_redirect_[dup_id] = GetPhysicalSlotLocked(rep_id);
+    }
+
+    InnerIdType
+    AllocatePhysicalSlot(InnerIdType logical_id) {
+        if (!use_slot_redirect_) {
+            return logical_id;
+        }
+        std::unique_lock lock(redirect_mutex_);
+        if (logical_id >= slot_redirect_.size()) {
+            slot_redirect_.resize(logical_id + 1, std::numeric_limits<InnerIdType>::max());
+        }
+        auto slot = next_physical_slot_++;
+        slot_redirect_[logical_id] = slot;
+        return slot;
+    }
+
+    [[nodiscard]] InnerIdType
+    GetPhysicalSlotCount() const {
+        if (!use_slot_redirect_) {
+            return total_count_;
+        }
+        std::shared_lock<std::shared_mutex> lock(redirect_mutex_);
+        return next_physical_slot_;
+    }
+
+    void
+    SerializeSlotRedirect(StreamWriter& writer) const {
+        std::shared_lock<std::shared_mutex> lock(redirect_mutex_);
+        StreamWriter::WriteObj(writer, use_slot_redirect_);
+        if (use_slot_redirect_) {
+            StreamWriter::WriteObj(writer, next_physical_slot_);
+            uint64_t redirect_size = slot_redirect_.size();
+            StreamWriter::WriteObj(writer, redirect_size);
+            for (uint64_t i = 0; i < redirect_size; ++i) {
+                StreamWriter::WriteObj(writer, slot_redirect_[i]);
+            }
+        }
+    }
+
+    void
+    DeserializeSlotRedirect(StreamReader& reader) {
+        bool has_redirect = false;
+        StreamReader::ReadObj(reader, has_redirect);
+        if (has_redirect) {
+            use_slot_redirect_ = true;
+            StreamReader::ReadObj(reader, next_physical_slot_);
+            uint64_t redirect_size = 0;
+            StreamReader::ReadObj(reader, redirect_size);
+            slot_redirect_.resize(redirect_size);
+            for (uint64_t i = 0; i < redirect_size; ++i) {
+                StreamReader::ReadObj(reader, slot_redirect_[i]);
+            }
+        } else {
+            use_slot_redirect_ = false;
+            slot_redirect_.clear();
+            next_physical_slot_ = 0;
+        }
+    }
+
+    void
+    DisableSlotRedirect() {
+        use_slot_redirect_ = false;
+        slot_redirect_.clear();
+        next_physical_slot_ = 0;
+    }
+
+public:
     virtual bool
     SetRuntimeParameters(const UnorderedMap<std::string, float>& new_params) {
         bool ret = false;
@@ -235,6 +323,31 @@ public:
     uint32_t code_size_{0};
     uint32_t prefetch_stride_code_{1};
     uint32_t prefetch_depth_code_{1};
+
+protected:
+    std::vector<InnerIdType> slot_redirect_;
+    InnerIdType next_physical_slot_{0};
+    bool use_slot_redirect_{false};
+    Allocator* redirect_allocator_{nullptr};
+    mutable std::shared_mutex redirect_mutex_;
+
+    InnerIdType
+    GetPhysicalSlotLocked(InnerIdType id) const {
+        if (id >= slot_redirect_.size()) {
+            return id;
+        }
+        auto slot = slot_redirect_[id];
+        return (slot == std::numeric_limits<InnerIdType>::max()) ? id : slot;
+    }
+
+    InnerIdType
+    GetPhysicalSlot(InnerIdType id) const {
+        if (!use_slot_redirect_) {
+            return id;
+        }
+        std::shared_lock<std::shared_mutex> lock(redirect_mutex_);
+        return GetPhysicalSlotLocked(id);
+    }
 };
 
 }  // namespace vsag

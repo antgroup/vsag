@@ -39,6 +39,9 @@ public:
     [[nodiscard]] virtual auto
     GetGroupId(InnerIdType id) const -> InnerIdType = 0;
 
+    [[nodiscard]] virtual bool
+    IsDuplicate(InnerIdType id) const = 0;
+
     virtual void
     Serialize(StreamWriter& writer) const = 0;
 

@@ -475,9 +475,15 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                 }
                 if (inner_search_param.consider_duplicate) {
                     const auto duplicate_ids = graph->GetDuplicateIds(cur_id);
+                    int64_t dup_count = 0;
                     for (const auto& item : duplicate_ids) {
+                        if (inner_search_param.max_duplicates_per_group >= 0 &&
+                            dup_count >= inner_search_param.max_duplicates_per_group) {
+                            break;
+                        }
                         if (check_func(item)) {
                             top_candidates->Push(dist, item);
+                            ++dup_count;
                         }
                     }
                 }
@@ -527,6 +533,22 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
         }
         if (inner_search_param.duplicate_distance_threshold > 0.0F) {
             if (min_distance <= inner_search_param.duplicate_distance_threshold) {
+                inner_search_param.duplicate_id = min_index;
+            }
+        } else if (inner_search_param.duplicate_query_data != nullptr) {
+            std::vector<uint8_t> temp_codes(flatten->code_size_);
+            flatten->Encode(static_cast<const float*>(inner_search_param.duplicate_query_data),
+                            temp_codes.data());
+            bool need_release = false;
+            const auto* existing_codes = flatten->GetCodesById(min_index, need_release);
+            bool match = false;
+            if (existing_codes != nullptr) {
+                match = (std::memcmp(temp_codes.data(), existing_codes, flatten->code_size_) == 0);
+                if (need_release) {
+                    flatten->Release(existing_codes);
+                }
+            }
+            if (match) {
                 inner_search_param.duplicate_id = min_index;
             }
         } else if (inner_search_param.duplicate_query_id < flatten->TotalCount() &&

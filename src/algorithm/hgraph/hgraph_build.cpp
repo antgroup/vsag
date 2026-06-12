@@ -367,9 +367,15 @@ HGraph::Add(const DatasetPtr& data, AddMode mode) {
             this->Train(data);
         }
         futures.clear();
+        Vector<std::pair<InnerIdType, InnerIdType>> deferred_dup_slots(allocator_);
         for (const auto& id_pair : inner_ids) {
             auto inner_id = id_pair.first;
             auto local_idx = id_pair.second;
+            if (this->use_slot_redirect_for_flatten_ && bottom_graph_->IsDuplicate(inner_id)) {
+                auto rep_id = bottom_graph_->GetGroupId(inner_id);
+                deferred_dup_slots.emplace_back(inner_id, rep_id);
+                continue;
+            }
             if (use_parallel_add) {
                 auto future =
                     this->thread_pool_->GeneralEnqueue([this, data, inner_id, local_idx]() {
@@ -383,6 +389,17 @@ HGraph::Add(const DatasetPtr& data, AddMode mode) {
         if (use_parallel_add) {
             for (auto& future : futures) {
                 future.get();
+            }
+        }
+        if (use_slot_redirect_for_flatten_) {
+            for (const auto& [dup_id, rep_id] : deferred_dup_slots) {
+                this->basic_flatten_codes_->SetDuplicateSlot(dup_id, rep_id);
+                if (has_precise_reorder()) {
+                    this->high_precise_codes_->SetDuplicateSlot(dup_id, rep_id);
+                }
+                if (create_new_raw_vector_) {
+                    this->raw_vector_->SetDuplicateSlot(dup_id, rep_id);
+                }
             }
         }
     }
@@ -411,37 +428,54 @@ HGraph::insert_persistent_codes(const void* data, InnerIdType inner_id) {
 
 void
 HGraph::add_one_point(const void* data, int level, InnerIdType inner_id, bool insert_codes) {
-    std::unique_lock<std::shared_mutex> add_lock(this->add_mutex_, std::defer_lock);
-    if (this->support_force_remove()) {
-        add_lock.lock();
-    }
-    if (insert_codes) {
-        this->insert_persistent_codes(data, inner_id);
-    }
-    if (not this->support_force_remove()) {
-        add_lock.lock();
-    }
-    if (level >= static_cast<int>(this->route_graphs_.size()) || bottom_graph_->TotalCount() == 0) {
-        std::scoped_lock<std::shared_mutex> wlock(this->global_mutex_);
-        // level maybe a negative number(-1)
-        for (auto j = static_cast<int>(this->route_graphs_.size()); j <= level; ++j) {
-            this->route_graphs_.emplace_back(this->generate_one_route_graph());
+    int64_t dup_rep_id = -1;
+    {
+        std::unique_lock<std::shared_mutex> add_lock(this->add_mutex_, std::defer_lock);
+        if (this->support_force_remove()) {
+            add_lock.lock();
         }
-        auto insert_success = this->graph_add_one(data, level, inner_id);
-        if (insert_success) {
-            entry_point_id_ = inner_id;
+        if (not this->support_force_remove()) {
+            add_lock.lock();
+        }
+        if (level >= static_cast<int>(this->route_graphs_.size()) ||
+            bottom_graph_->TotalCount() == 0) {
+            std::scoped_lock<std::shared_mutex> wlock(this->global_mutex_);
+            auto orig_route_size = this->route_graphs_.size();
+            // level maybe a negative number(-1)
+            for (auto j = static_cast<int>(this->route_graphs_.size()); j <= level; ++j) {
+                this->route_graphs_.emplace_back(this->generate_one_route_graph());
+            }
+            dup_rep_id = this->graph_add_one(data, level, inner_id);
+            if (dup_rep_id < 0) {
+                entry_point_id_ = inner_id;
+            } else {
+                this->route_graphs_.resize(orig_route_size);
+            }
         } else {
-            this->route_graphs_.pop_back();
+            add_lock.unlock();
+            std::shared_lock rlock(this->global_mutex_);
+            dup_rep_id = this->graph_add_one(data, level, inner_id);
         }
-        add_lock.unlock();
-    } else {
-        add_lock.unlock();
-        std::shared_lock rlock(this->global_mutex_);
-        this->graph_add_one(data, level, inner_id);
+    }
+    if (dup_rep_id >= 0 && this->support_duplicate_ && use_slot_redirect_for_flatten_) {
+        if (insert_codes) {
+            auto rep_id = static_cast<InnerIdType>(dup_rep_id);
+            this->basic_flatten_codes_->SetDuplicateSlot(inner_id, rep_id);
+            if (has_precise_reorder()) {
+                this->high_precise_codes_->SetDuplicateSlot(inner_id, rep_id);
+            }
+            if (create_new_raw_vector_) {
+                this->raw_vector_->SetDuplicateSlot(inner_id, rep_id);
+            }
+        }
+        // When insert_codes=false (deferred path), SetDuplicateSlot is called
+        // after all unique vectors' codes are written (see deferred codes loop).
+    } else if (insert_codes) {
+        this->insert_persistent_codes(data, inner_id);
     }
 }
 
-bool
+int64_t
 HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
     DistHeapPtr result = nullptr;
     InnerSearchParam param;
@@ -472,6 +506,7 @@ HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
     if (this->support_duplicate_) {
         param.find_duplicate = true;
         param.duplicate_query_id = inner_id;
+        param.duplicate_query_data = data;
         param.duplicate_distance_threshold = this->duplicate_distance_threshold_;
     }
 
@@ -486,7 +521,7 @@ HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
         if (this->support_duplicate_ && param.duplicate_id >= 0) {
             std::unique_lock lock(this->label_lookup_mutex_);
             bottom_graph_->SetDuplicateId(static_cast<InnerIdType>(param.duplicate_id), inner_id);
-            return false;
+            return param.duplicate_id;
         }
         auto filtered_result = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
         while (not result->Empty()) {
@@ -539,7 +574,7 @@ HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
             route_graphs_[j]->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
         }
     }
-    return true;
+    return -1;
 }
 
 void

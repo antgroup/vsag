@@ -233,6 +233,14 @@ public:
         return id;
     }
 
+    [[nodiscard]] bool
+    IsDuplicate(InnerIdType id) const {
+        if (duplicate_tracker_) {
+            return duplicate_tracker_->IsDuplicate(id);
+        }
+        return false;
+    }
+
 public:
     InnerIdType max_capacity_{100};
     uint32_t maximum_degree_{0};

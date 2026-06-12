@@ -156,6 +156,24 @@ SparseDuplicateTracker::GetGroupId(InnerIdType id) const -> InnerIdType {
     return group_id;
 }
 
+bool
+SparseDuplicateTracker::IsDuplicate(InnerIdType id) const {
+    std::shared_lock lock(mutex_);
+
+    auto iter = next_ids_.find(id);
+    if (iter == next_ids_.end()) {
+        return false;
+    }
+    // It's in a group. Check if it's the representative (min id in group)
+    InnerIdType group_id = id;
+    auto current_id = iter->second;
+    while (current_id != id) {
+        group_id = std::min(group_id, current_id);
+        current_id = next_ids_.at(current_id);
+    }
+    return group_id != id;
+}
+
 void
 SparseDuplicateTracker::Serialize(StreamWriter& writer) const {
     std::shared_lock lock(mutex_);

@@ -286,6 +286,16 @@ HGraph::Serialize(StreamWriter& writer) const {
     if (create_new_raw_vector_) {
         this->raw_vector_->Serialize(writer);
     }
+    // Serialize slot redirect tables for dedup storage
+    if (use_slot_redirect_for_flatten_) {
+        this->basic_flatten_codes_->SerializeSlotRedirect(writer);
+        if (this->has_precise_reorder()) {
+            this->high_precise_codes_->SerializeSlotRedirect(writer);
+        }
+        if (create_new_raw_vector_) {
+            this->raw_vector_->SerializeSlotRedirect(writer);
+        }
+    }
 
     // serialize footer (introduced since v0.15)
     auto jsonify_basic_info = this->serialize_basic_info();
@@ -293,6 +303,9 @@ HGraph::Serialize(StreamWriter& writer) const {
     metadata->Set(BASIC_INFO, jsonify_basic_info);
     if (this->support_duplicate_) {
         metadata->Set("duplicate_format_version", 1);
+    }
+    if (use_slot_redirect_for_flatten_) {
+        metadata->Set("slot_redirect_version", 1);
     }
     logger::debug(jsonify_basic_info.Dump());
 
@@ -367,7 +380,11 @@ HGraph::Deserialize(StreamReader& reader) {
         if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
             this->extra_infos_->Deserialize(buffer_reader);
         }
-        this->total_count_ = this->basic_flatten_codes_->TotalCount();
+        if (this->support_duplicate_) {
+            this->total_count_ = this->label_table_->GetTotalCount();
+        } else {
+            this->total_count_ = this->basic_flatten_codes_->TotalCount();
+        }
 
         if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
             this->attr_filter_index_->Deserialize(buffer_reader);
@@ -378,6 +395,31 @@ HGraph::Deserialize(StreamReader& reader) {
         }
         if (this->raw_vector_ != nullptr) {
             this->has_raw_vector_ = true;
+        }
+
+        // Deserialize slot redirect tables if present
+        int64_t slot_redirect_version = 0;
+        if (metadata->Get("slot_redirect_version").IsNumberInteger()) {
+            slot_redirect_version = metadata->Get("slot_redirect_version").GetInt();
+        }
+        if (slot_redirect_version > 0) {
+            this->basic_flatten_codes_->DeserializeSlotRedirect(buffer_reader);
+            if (this->has_precise_reorder()) {
+                this->high_precise_codes_->DeserializeSlotRedirect(buffer_reader);
+            }
+            if (create_new_raw_vector_) {
+                this->raw_vector_->DeserializeSlotRedirect(buffer_reader);
+            }
+            this->use_slot_redirect_for_flatten_ = true;
+        } else {
+            this->use_slot_redirect_for_flatten_ = false;
+            this->basic_flatten_codes_->DisableSlotRedirect();
+            if (this->has_precise_reorder()) {
+                this->high_precise_codes_->DisableSlotRedirect();
+            }
+            if (create_new_raw_vector_ && this->raw_vector_ != nullptr) {
+                this->raw_vector_->DisableSlotRedirect();
+            }
         }
     }
     this->cal_memory_usage();

@@ -35,6 +35,9 @@ public:
     [[nodiscard]] auto
     GetGroupId(InnerIdType id) const -> InnerIdType override;
 
+    [[nodiscard]] bool
+    IsDuplicate(InnerIdType id) const override;
+
     void
     Serialize(StreamWriter& writer) const override;
 
