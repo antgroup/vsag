@@ -156,7 +156,8 @@ AddNearVector(vsag::IndexPtr& index,
     }
     auto ds = vsag::Dataset::Make();
     ds->NumElements(1)->Dim(DIM)->Float32Vectors(vec.data())->Ids(&id)->Owner(false);
-    index->Add(ds);
+    auto result = index->Add(ds);
+    REQUIRE(result.has_value());
 }
 
 vsag::IndexPtr
@@ -164,8 +165,9 @@ BuildIndexWithDuplicates(const TestVectors& tv, const std::string& build_param) 
     auto index = vsag::Factory::CreateIndex("hgraph", build_param);
     REQUIRE(index.has_value());
 
+    auto base_count = static_cast<int64_t>(tv.base_ids.size());
     auto base_ds = vsag::Dataset::Make();
-    base_ds->NumElements(BASE_COUNT)
+    base_ds->NumElements(base_count)
         ->Dim(DIM)
         ->Float32Vectors(tv.base.data())
         ->Ids(tv.base_ids.data())
@@ -173,14 +175,17 @@ BuildIndexWithDuplicates(const TestVectors& tv, const std::string& build_param) 
     auto result = index.value()->Build(base_ds);
     REQUIRE(result.has_value());
 
-    auto dup_ds = vsag::Dataset::Make();
-    dup_ds->NumElements(DUP_COUNT)
-        ->Dim(DIM)
-        ->Float32Vectors(tv.duplicates.data())
-        ->Ids(tv.dup_ids.data())
-        ->Owner(false);
-    auto add_result = index.value()->Add(dup_ds);
-    REQUIRE(add_result.has_value());
+    auto dup_count = static_cast<int64_t>(tv.dup_ids.size());
+    if (dup_count > 0) {
+        auto dup_ds = vsag::Dataset::Make();
+        dup_ds->NumElements(dup_count)
+            ->Dim(DIM)
+            ->Float32Vectors(tv.duplicates.data())
+            ->Ids(tv.dup_ids.data())
+            ->Owner(false);
+        auto add_result = index.value()->Add(dup_ds);
+        REQUIRE(add_result.has_value());
+    }
 
     return index.value();
 }
@@ -467,6 +472,7 @@ TEST_CASE("HGraph dedup: concurrent add with duplicates", "[ft][hgraph][duplicat
     constexpr int NUM_THREADS = 4;
     int64_t per_thread = DUP_COUNT / NUM_THREADS;
 
+    std::atomic<int> add_failures{0};
     std::vector<std::thread> threads;
     for (int t = 0; t < NUM_THREADS; ++t) {
         threads.emplace_back([&, t]() {
@@ -478,13 +484,16 @@ TEST_CASE("HGraph dedup: concurrent add with duplicates", "[ft][hgraph][duplicat
                     ->Ids(tv.dup_ids.data() + i)
                     ->Owner(false);
                 auto add_result = index.value()->Add(ds);
-                REQUIRE(add_result.has_value());
+                if (!add_result.has_value()) {
+                    add_failures++;
+                }
             }
         });
     }
     for (auto& t : threads) {
         t.join();
     }
+    REQUIRE(add_failures == 0);
 
     // Verify search still works
     auto query_ds = vsag::Dataset::Make();
@@ -903,7 +912,7 @@ TEST_CASE("HGraph dedup: near-threshold vectors", "[ft][hgraph][duplicate][thres
         ->Float32Vectors(near_dup_vec.data())
         ->Ids(&near_dup_id)
         ->Owner(false);
-    index.value()->Add(near_ds);
+    REQUIRE(index.value()->Add(near_ds).has_value());
 
     // Create a vector just above threshold distance (should NOT be a duplicate)
     std::vector<float> far_vec = base_vec;
@@ -911,7 +920,7 @@ TEST_CASE("HGraph dedup: near-threshold vectors", "[ft][hgraph][duplicate][thres
     int64_t far_id = 2;
     auto far_ds = vsag::Dataset::Make();
     far_ds->NumElements(1)->Dim(DIM)->Float32Vectors(far_vec.data())->Ids(&far_id)->Owner(false);
-    index.value()->Add(far_ds);
+    REQUIRE(index.value()->Add(far_ds).has_value());
 
     REQUIRE(index.value()->GetNumElements() == 3);
 
@@ -1013,7 +1022,7 @@ TEST_CASE("HGraph dedup: concurrent search while adding duplicates",
                 auto param = MakeSearchParam(100, true, -1);
                 try {
                     auto result = index.value()->KnnSearch(query_ds, 5, param);
-                    if (!result.has_value()) {
+                    if (!result.has_value() || result.value()->GetDim() == 0) {
                         search_errors++;
                     } else {
                         auto* dists = result.value()->GetDistances();
@@ -1040,9 +1049,9 @@ TEST_CASE("HGraph dedup: concurrent search while adding duplicates",
             ->Float32Vectors(tv.duplicates.data() + i * DIM)
             ->Ids(tv.dup_ids.data() + i)
             ->Owner(false);
-        index.value()->Add(ds);
+        auto add_res = index.value()->Add(ds);
+        REQUIRE(add_res.has_value());
     }
-
     done = true;
     for (auto& t : search_threads) {
         t.join();
@@ -1128,13 +1137,13 @@ TEST_CASE("HGraph dedup: triple duplicate chain A=B=C", "[ft][hgraph][duplicate]
     int64_t id_b = SMALL_BASE;
     auto ds_b = vsag::Dataset::Make();
     ds_b->NumElements(1)->Dim(DIM)->Float32Vectors(base_vecs.data())->Ids(&id_b)->Owner(false);
-    index.value()->Add(ds_b);
+    REQUIRE(index.value()->Add(ds_b).has_value());
 
     // Add C = exact copy of A (id=0)
     int64_t id_c = SMALL_BASE + 1;
     auto ds_c = vsag::Dataset::Make();
     ds_c->NumElements(1)->Dim(DIM)->Float32Vectors(base_vecs.data())->Ids(&id_c)->Owner(false);
-    index.value()->Add(ds_c);
+    REQUIRE(index.value()->Add(ds_c).has_value());
 
     REQUIRE(index.value()->GetNumElements() == SMALL_BASE + 2);
     REQUIRE(index.value()->CheckIdExist(0));
