@@ -885,6 +885,50 @@ MCI::load_clique_index(const std::string& clique_path, uint64_t total) {
     this->reset_delta_clique_index(total);
 }
 
+void
+MCI::validate_clique_csr(uint64_t total) const {
+    if (this->p_maxc_.empty() and this->p_node_to_cid_.empty()) {
+        return;
+    }
+    CHECK_ARGUMENT(not this->p_maxc_.empty(), "mci pMaxC must not be empty after deserialize");
+    CHECK_ARGUMENT(this->p_node_to_cid_.size() == total + 1,
+                   fmt::format("mci pNodeToCid size {} must be total + 1 ({})",
+                               this->p_node_to_cid_.size(),
+                               total + 1));
+    CHECK_ARGUMENT(this->p_maxc_.front() == 0 and this->p_node_to_cid_.front() == 0,
+                   "mci deserialized CSR offsets must start from 0");
+    CHECK_ARGUMENT(this->p_maxc_.back() == this->maxcs_.size(),
+                   fmt::format("mci pMaxC tail {} must equal maxCs size {}",
+                               this->p_maxc_.back(),
+                               this->maxcs_.size()));
+    CHECK_ARGUMENT(this->p_node_to_cid_.back() == this->node_to_cids_.size(),
+                   fmt::format("mci pNodeToCid tail {} must equal nodeToCids size {}",
+                               this->p_node_to_cid_.back(),
+                               this->node_to_cids_.size()));
+    CHECK_ARGUMENT(
+        this->p_maxc_.size() == this->total_clique_count_ + 1,
+        fmt::format("mci pMaxC size {} inconsistent with total_clique_count {} from metadata",
+                    this->p_maxc_.size(),
+                    this->total_clique_count_));
+    CHECK_ARGUMENT(std::is_sorted(this->p_maxc_.begin(), this->p_maxc_.end()),
+                   "mci pMaxC offsets must be sorted after deserialize");
+    CHECK_ARGUMENT(std::is_sorted(this->p_node_to_cid_.begin(), this->p_node_to_cid_.end()),
+                   "mci pNodeToCid offsets must be sorted after deserialize");
+    if (not this->maxcs_.empty()) {
+        const auto max_node = *std::max_element(this->maxcs_.begin(), this->maxcs_.end());
+        CHECK_ARGUMENT(max_node < total,
+                       fmt::format("mci maxCs node {} is out of range {}", max_node, total));
+    }
+    if (not this->node_to_cids_.empty()) {
+        const auto clique_count = static_cast<InnerIdType>(this->p_maxc_.size() - 1);
+        const auto max_cid =
+            *std::max_element(this->node_to_cids_.begin(), this->node_to_cids_.end());
+        CHECK_ARGUMENT(
+            max_cid < clique_count,
+            fmt::format("mci nodeToCids id {} is out of range {}", max_cid, clique_count));
+    }
+}
+
 Vector<Vector<InnerIdType>>
 MCI::build_knn_graph(const FlattenInterfacePtr& build_codes, uint64_t total) const {
     Vector<Vector<InnerIdType>> graph(
@@ -1812,16 +1856,24 @@ MCI::build_dataset_from_heap(DistHeapPtr& heap) const {
 
 void
 MCI::collect_node_clique_ids(InnerIdType node_id, Vector<InnerIdType>& clique_ids) const {
+    const auto logical_count = this->total_logical_clique_count();
     if (node_id + 1 < this->p_node_to_cid_.size()) {
         const auto begin = this->p_node_to_cid_[node_id];
         const auto end = this->p_node_to_cid_[node_id + 1];
         for (auto offset = begin; offset < end; ++offset) {
-            clique_ids.push_back(this->node_to_cids_[offset]);
+            const auto cid = this->node_to_cids_[offset];
+            if (cid < logical_count) {
+                clique_ids.push_back(cid);
+            }
         }
     }
     if (node_id < this->delta_node_to_cids_.size()) {
         const auto& delta_ids = this->delta_node_to_cids_[node_id];
-        clique_ids.insert(clique_ids.end(), delta_ids.begin(), delta_ids.end());
+        for (auto cid : delta_ids) {
+            if (cid < logical_count) {
+                clique_ids.push_back(cid);
+            }
+        }
     }
 }
 
@@ -2369,6 +2421,7 @@ MCI::Deserialize(StreamReader& reader) {
     StreamReader::ReadVector(buffer_reader, this->maxcs_);
     StreamReader::ReadVector(buffer_reader, this->p_node_to_cid_);
     StreamReader::ReadVector(buffer_reader, this->node_to_cids_);
+    this->validate_clique_csr(this->total_count_.load());
     if (basic_info.Contains("lazy_delta_version")) {
         read_nested_vector(buffer_reader, this->delta_cliques_, this->allocator_);
         read_nested_vector(buffer_reader, this->delta_clique_extra_, this->allocator_);

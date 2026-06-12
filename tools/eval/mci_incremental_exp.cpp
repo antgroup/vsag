@@ -186,9 +186,8 @@ save_index_to_file(const vsag::IndexPtr& index, const std::string& path) {
     auto result = index->Serialize(outfile);
     check(result.has_value(), fmt::format("failed to serialize index: {}", result.error().message));
     outfile.close();
-    std::cout << fmt::format("[save] index saved to {} ({} bytes)\n",
-                             path,
-                             std::filesystem::file_size(path));
+    std::cout << fmt::format(
+        "[save] index saved to {} ({} bytes)\n", path, std::filesystem::file_size(path));
 }
 
 vsag::IndexPtr
@@ -444,8 +443,14 @@ main(int argc, char** argv) {
     if (not load_index_path.empty()) {
         incr_index = load_index_from_file(create_params, load_index_path);
     } else {
-        incr_index = build_index(
-            dataset, ids, create_params, total_base, build_ratio, add_batch, add_limit, "incremental");
+        incr_index = build_index(dataset,
+                                 ids,
+                                 create_params,
+                                 total_base,
+                                 build_ratio,
+                                 add_batch,
+                                 add_limit,
+                                 "incremental");
         if (not save_index_path.empty()) {
             save_index_to_file(incr_index, save_index_path);
         }

@@ -117,6 +117,9 @@ private:
     void
     load_clique_index(const std::string& clique_path, uint64_t total);
 
+    void
+    validate_clique_csr(uint64_t total) const;
+
     Vector<Vector<InnerIdType>>
     build_knn_graph(const FlattenInterfacePtr& build_codes, uint64_t total) const;
 
