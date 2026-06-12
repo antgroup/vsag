@@ -280,7 +280,9 @@ public:
     void
     add_one_point(const void* data, int level, InnerIdType id, bool insert_codes);
 
-    bool
+    // Returns -1 if the point was successfully inserted (unique),
+    // or the representative InnerIdType if the point is a duplicate.
+    int64_t
     graph_add_one(const void* data, int level, InnerIdType inner_id);
 
     void
@@ -545,5 +547,6 @@ private:
     bool persist_source_id_{false};
 
     std::unique_ptr<HGraphCache> cache_{nullptr};
+    bool use_slot_redirect_for_flatten_{false};
 };
 }  // namespace vsag

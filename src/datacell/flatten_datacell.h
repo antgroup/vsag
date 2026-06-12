@@ -237,6 +237,7 @@ FlattenDataCell<QuantTmpl, IOTmpl>::Train(const void* data, uint64_t count) {
 template <typename QuantTmpl, typename IOTmpl>
 void
 FlattenDataCell<QuantTmpl, IOTmpl>::InsertVector(const void* vector, InnerIdType idx) {
+    InnerIdType physical_slot;
     {
         std::lock_guard lock(mutex_);
         if (idx == std::numeric_limits<InnerIdType>::max()) {
@@ -245,11 +246,13 @@ FlattenDataCell<QuantTmpl, IOTmpl>::InsertVector(const void* vector, InnerIdType
         } else {
             total_count_ = std::max(total_count_, idx + 1);
         }
+        physical_slot = use_slot_redirect_ ? this->AllocatePhysicalSlot(idx) : idx;
     }
     ByteBuffer codes(static_cast<uint64_t>(code_size_), allocator_);
     quantizer_->EncodeOne(static_cast<const float*>(vector), codes.data);
-    io_->Write(
-        codes.data, code_size_, static_cast<uint64_t>(idx) * static_cast<uint64_t>(code_size_));
+    io_->Write(codes.data,
+               code_size_,
+               static_cast<uint64_t>(physical_slot) * static_cast<uint64_t>(code_size_));
 }
 
 template <typename QuantTmpl, typename IOTmpl>
@@ -447,15 +450,17 @@ FlattenDataCell<QuantTmpl, IOTmpl>::ComputePairVectors(InnerIdType id1, InnerIdT
 template <typename QuantTmpl, typename IOTmpl>
 const uint8_t*
 FlattenDataCell<QuantTmpl, IOTmpl>::GetCodesById(InnerIdType id, bool& need_release) const {
+    auto slot = this->GetPhysicalSlot(id);
     return io_->Read(
-        code_size_, static_cast<uint64_t>(id) * static_cast<uint64_t>(code_size_), need_release);
+        code_size_, static_cast<uint64_t>(slot) * static_cast<uint64_t>(code_size_), need_release);
 }
 
 template <typename QuantTmpl, typename IOTmpl>
 bool
 FlattenDataCell<QuantTmpl, IOTmpl>::GetCodesById(InnerIdType id, uint8_t* codes) const {
+    auto slot = this->GetPhysicalSlot(id);
     return io_->Read(
-        code_size_, static_cast<uint64_t>(id) * static_cast<uint64_t>(code_size_), codes);
+        code_size_, static_cast<uint64_t>(slot) * static_cast<uint64_t>(code_size_), codes);
 }
 
 template <typename QuantTmpl, typename IOTmpl>

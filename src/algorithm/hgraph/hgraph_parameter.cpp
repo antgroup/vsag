@@ -223,6 +223,14 @@ HGraphSearchParameters::FromJson(const std::string& json_string) {
             fmt::format("brute_force_threshold({}) must in range[0.0, 1.0]",
                         obj.brute_force_threshold));
     }
+    if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_PARAMETER_CONSIDER_DUPLICATE)) {
+        obj.consider_duplicate =
+            params[INDEX_TYPE_HGRAPH][HGRAPH_PARAMETER_CONSIDER_DUPLICATE].GetBool();
+    }
+    if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_PARAMETER_MAX_DUPLICATES_PER_GROUP)) {
+        obj.max_duplicates_per_group =
+            params[INDEX_TYPE_HGRAPH][HGRAPH_PARAMETER_MAX_DUPLICATES_PER_GROUP].GetInt();
+    }
 
     return obj;
 }

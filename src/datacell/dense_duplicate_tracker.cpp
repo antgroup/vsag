@@ -76,6 +76,27 @@ DenseDuplicateTracker::GetGroupId(InnerIdType id) const -> InnerIdType {
     return group_id;
 }
 
+bool
+DenseDuplicateTracker::IsDuplicate(InnerIdType id) const {
+    std::shared_lock lock(mutex_);
+
+    if (id >= duplicate_ids_.size()) {
+        return false;
+    }
+    // If it points to itself, it's not part of any group
+    if (duplicate_ids_[id] == id) {
+        return false;
+    }
+    // It's in a group. Check if it's the representative (min id in group)
+    InnerIdType group_id = id;
+    auto current_id = duplicate_ids_[id];
+    while (current_id != id) {
+        group_id = std::min(group_id, current_id);
+        current_id = duplicate_ids_[current_id];
+    }
+    return group_id != id;
+}
+
 void
 DenseDuplicateTracker::Serialize(StreamWriter& writer) const {
     std::shared_lock lock(mutex_);

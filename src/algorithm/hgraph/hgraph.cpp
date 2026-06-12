@@ -66,12 +66,19 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
       use_old_serial_format_(common_param.use_old_serial_format_) {
     this->support_duplicate_ = hgraph_param->support_duplicate;
     this->persist_source_id_ = hgraph_param->persist_source_id;
+    this->use_slot_redirect_for_flatten_ = hgraph_param->support_duplicate;
     neighbors_mutex_ = std::make_shared<PointsMutex>(0, common_param.allocator_.get());
     this->basic_flatten_codes_ =
         FlattenInterface::MakeInstance(hgraph_param->base_codes_param, common_param);
     if (has_precise_reorder()) {
         this->high_precise_codes_ =
             FlattenInterface::MakeInstance(hgraph_param->precise_codes_param, common_param);
+    }
+    if (use_slot_redirect_for_flatten_) {
+        this->basic_flatten_codes_->EnableSlotRedirect(common_param.allocator_.get());
+        if (has_precise_reorder()) {
+            this->high_precise_codes_->EnableSlotRedirect(common_param.allocator_.get());
+        }
     }
     this->searcher_ = std::make_shared<BasicSearcher>(common_param, neighbors_mutex_);
 
@@ -504,6 +511,9 @@ HGraph::check_and_init_raw_vector(const FlattenInterfaceParamPtr& raw_vector_par
 
     if (is_create_new) {
         raw_vector_ = FlattenInterface::MakeInstance(raw_vector_param, common_param);
+        if (use_slot_redirect_for_flatten_) {
+            raw_vector_->EnableSlotRedirect(common_param.allocator_.get());
+        }
     }
 
     if (basic_flatten_codes_->GetQuantizerName() != QUANTIZATION_TYPE_VALUE_FP32 and
