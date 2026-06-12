@@ -82,7 +82,8 @@ BufferIO::ReadImpl(uint64_t size, uint64_t offset, uint8_t* data) const {
 
 [[nodiscard]] const uint8_t*
 BufferIO::DirectReadImpl(uint64_t size, uint64_t offset, bool& need_release) const {
-    if (not check_valid_offset(size + offset)) {
+    if (size == 0 or not check_valid_offset(size + offset)) {
+        need_release = false;
         return nullptr;
     }
     need_release = true;
