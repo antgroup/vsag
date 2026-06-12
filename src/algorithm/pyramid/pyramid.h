@@ -20,6 +20,7 @@
 
 #include "algorithm/inner_index_interface.h"
 #include "datacell/graph_interface.h"
+#include "datacell/sparse_graph_datacell_parameter.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/filter/filter_headers.h"
 #include "impl/heap/distance_heap.h"
@@ -100,21 +101,42 @@ public:
 public:
     Pyramid(const PyramidParamPtr& pyramid_param, const IndexCommonParam& common_param)
         : InnerIndexInterface(pyramid_param, common_param),
-          alpha_(pyramid_param->alpha),
-          no_build_levels_(common_param.allocator_.get()),
+          hierarchies_(common_param.allocator_.get()),
           odescent_param_(pyramid_param->odescent_param),
-          ef_construction_(pyramid_param->ef_construction),
-          max_degree_(pyramid_param->max_degree),
           index_min_size_(pyramid_param->index_min_size),
           graph_type_(pyramid_param->graph_type),
           support_duplicate_(pyramid_param->support_duplicate) {
         base_codes_ = FlattenInterface::MakeInstance(pyramid_param->base_codes_param, common_param);
-        root_ =
-            std::make_unique<IndexNode>(allocator_, pyramid_param->graph_param, index_min_size_);
+        if (pyramid_param->has_hierarchies) {
+            for (const auto& h_param : pyramid_param->hierarchies) {
+                auto graph_param = pyramid_param->graph_param;
+                if (h_param.max_degree != pyramid_param->max_degree) {
+                    auto new_gp = std::make_shared<SparseGraphDatacellParameter>();
+                    new_gp->FromJson(graph_param->ToJson());
+                    new_gp->max_degree_ = h_param.max_degree;
+                    graph_param = new_gp;
+                }
+                auto root =
+                    std::make_unique<IndexNode>(allocator_, graph_param, h_param.index_min_size);
+                auto h = std::make_unique<Hierarchy>(h_param.name, std::move(root), allocator_);
+                h->no_build_levels.assign(h_param.no_build_levels.begin(),
+                                          h_param.no_build_levels.end());
+                h->ef_construction = h_param.ef_construction;
+                h->alpha = h_param.alpha;
+                hierarchies_.insert({h_param.name, std::move(h)});
+            }
+        } else {
+            auto root = std::make_unique<IndexNode>(
+                allocator_, pyramid_param->graph_param, index_min_size_);
+            auto h = std::make_unique<Hierarchy>("", std::move(root), allocator_);
+            h->no_build_levels.assign(pyramid_param->no_build_levels.begin(),
+                                      pyramid_param->no_build_levels.end());
+            h->ef_construction = pyramid_param->ef_construction;
+            h->alpha = pyramid_param->alpha;
+            hierarchies_.insert({"", std::move(h)});
+        }
         points_mutex_ = std::make_shared<PointsMutex>(max_capacity_, allocator_);
         searcher_ = std::make_unique<BasicSearcher>(common_param, points_mutex_);
-        no_build_levels_.assign(pyramid_param->no_build_levels.begin(),
-                                pyramid_param->no_build_levels.end());
         if (use_reorder_) {
             precise_codes_ =
                 FlattenInterface::MakeInstance(pyramid_param->precise_codes_param, common_param);
@@ -202,13 +224,44 @@ public:
     friend class PyramidAnalyzer;
 
 private:
+    struct Hierarchy {
+        std::string name;
+        std::unique_ptr<IndexNode> root{nullptr};
+        Vector<int32_t> no_build_levels;
+        uint64_t ef_construction{400};
+        float alpha{1.2F};
+
+        Hierarchy(const std::string& n, std::unique_ptr<IndexNode> r, Allocator* alloc)
+            : name(n), root(std::move(r)), no_build_levels(alloc) {
+        }
+    };
+
+    static void
+    populate_path_tree(Hierarchy& h, const std::string* paths, int64_t count);
+
+    void
+    add_to_hierarchy(Hierarchy& h,
+                     const float* data_vectors,
+                     const std::string* paths,
+                     const Vector<int64_t>& data_biases,
+                     int64_t local_cur_element_count);
+
+    void
+    search_hierarchy(const Hierarchy& h,
+                     const SearchFunc& search_func,
+                     const VisitedListPtr& vl,
+                     DistHeapPtr& search_result,
+                     const std::string& path,
+                     const InnerSearchParam& search_param) const;
+
     void
     resize(int64_t new_max_capacity);
 
     DatasetPtr
     search_impl(const DatasetPtr& query,
                 const SearchFunc& search_func,
-                InnerSearchParam& search_param) const;
+                InnerSearchParam& search_param,
+                const std::string& hierarchy_name = "") const;
 
     bool
     is_update_entry_point(uint64_t total_count) {
@@ -221,7 +274,7 @@ private:
     build_by_odescent(const DatasetPtr& base);
 
     void
-    add_one_point(IndexNode* node, InnerIdType inner_id, const float* vector);
+    add_one_point(const Hierarchy& h, IndexNode* node, InnerIdType inner_id, const float* vector);
 
     static std::vector<std::vector<std::string>>
     parse_path(const std::string& path);
@@ -237,10 +290,7 @@ private:
 
 private:
     ODescentParameterPtr odescent_param_{nullptr};
-    Vector<int32_t> no_build_levels_;
-    uint64_t ef_construction_{400};
-    int64_t max_degree_{64};
-    std::unique_ptr<IndexNode> root_{nullptr};
+    UnorderedMap<std::string, std::unique_ptr<Hierarchy>> hierarchies_;
     FlattenInterfacePtr base_codes_{nullptr};
     FlattenInterfacePtr precise_codes_{nullptr};
     std::unique_ptr<VisitedListPool> pool_ = nullptr;
@@ -249,7 +299,6 @@ private:
     std::unique_ptr<BasicSearcher> searcher_ = nullptr;
     int64_t max_capacity_{0};
     int64_t cur_element_count_{0};
-    float alpha_{1.0F};
     bool support_duplicate_{false};
 
     mutable std::shared_mutex resize_mutex_;
