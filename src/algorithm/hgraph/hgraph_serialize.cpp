@@ -409,6 +409,13 @@ HGraph::Deserialize(StreamReader& reader) {
             this->use_slot_redirect_for_flatten_ = true;
         } else {
             this->use_slot_redirect_for_flatten_ = false;
+            this->basic_flatten_codes_->DisableSlotRedirect();
+            if (this->has_precise_reorder()) {
+                this->high_precise_codes_->DisableSlotRedirect();
+            }
+            if (create_new_raw_vector_ && this->raw_vector_ != nullptr) {
+                this->raw_vector_->DisableSlotRedirect();
+            }
         }
     }
     this->cal_memory_usage();

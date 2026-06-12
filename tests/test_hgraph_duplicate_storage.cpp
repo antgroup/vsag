@@ -448,7 +448,8 @@ TEST_CASE("HGraph dedup: concurrent add with duplicates", "[ft][hgraph][duplicat
                     ->Float32Vectors(tv.duplicates.data() + i * DIM)
                     ->Ids(tv.dup_ids.data() + i)
                     ->Owner(false);
-                index.value()->Add(ds);
+                auto add_result = index.value()->Add(ds);
+                REQUIRE(add_result.has_value());
             }
         });
     }

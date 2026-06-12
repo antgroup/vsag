@@ -210,7 +210,18 @@ public:
             for (uint64_t i = 0; i < redirect_size; ++i) {
                 StreamReader::ReadObj(reader, slot_redirect_[i]);
             }
+        } else {
+            use_slot_redirect_ = false;
+            slot_redirect_.clear();
+            next_physical_slot_ = 0;
         }
+    }
+
+    void
+    DisableSlotRedirect() {
+        use_slot_redirect_ = false;
+        slot_redirect_.clear();
+        next_physical_slot_ = 0;
     }
 
 public:
