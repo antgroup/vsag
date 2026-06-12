@@ -218,7 +218,7 @@ ValidateSearchResult(const vsag::DatasetPtr& result, int64_t k, const vsag::Inde
     }
 }
 
-TEST_CASE("HGraph dedup storage: physical slot count is less than total count",
+TEST_CASE("HGraph dedup storage: search returns both base and duplicate IDs",
           "[ft][hgraph][duplicate][storage]") {
     auto tv = GenerateTestData(DIM, BASE_COUNT, DUP_COUNT);
     auto index = BuildIndexWithDuplicates(tv, MakeDefaultBuildParam(true));

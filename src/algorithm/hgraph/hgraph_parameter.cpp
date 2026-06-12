@@ -230,6 +230,9 @@ HGraphSearchParameters::FromJson(const std::string& json_string) {
     if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_PARAMETER_MAX_DUPLICATES_PER_GROUP)) {
         obj.max_duplicates_per_group =
             params[INDEX_TYPE_HGRAPH][HGRAPH_PARAMETER_MAX_DUPLICATES_PER_GROUP].GetInt();
+        CHECK_ARGUMENT(obj.max_duplicates_per_group >= -1,
+                       fmt::format("max_duplicates_per_group({}) must be >= -1",
+                                   obj.max_duplicates_per_group));
     }
 
     return obj;

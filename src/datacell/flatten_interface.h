@@ -181,11 +181,16 @@ public:
 
     [[nodiscard]] InnerIdType
     GetPhysicalSlotCount() const {
-        return use_slot_redirect_ ? next_physical_slot_ : total_count_;
+        if (!use_slot_redirect_) {
+            return total_count_;
+        }
+        std::shared_lock<std::shared_mutex> lock(redirect_mutex_);
+        return next_physical_slot_;
     }
 
     void
     SerializeSlotRedirect(StreamWriter& writer) const {
+        std::shared_lock<std::shared_mutex> lock(redirect_mutex_);
         StreamWriter::WriteObj(writer, use_slot_redirect_);
         if (use_slot_redirect_) {
             StreamWriter::WriteObj(writer, next_physical_slot_);
