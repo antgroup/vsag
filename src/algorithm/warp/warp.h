@@ -73,13 +73,16 @@ public:
 
     [[nodiscard]] int64_t
     GetNumElements() const override {
-        return this->total_count_ - this->delete_count_;
+        return this->total_count_ - this->delete_count_.load();
     }
 
     [[nodiscard]] int64_t
     GetNumberRemoved() const override {
-        return this->delete_count_;
+        return this->delete_count_.load();
     }
+
+    uint32_t
+    Remove(const std::vector<int64_t>& ids, RemoveMode mode) override;
 
     void
     GetVectorByInnerId(InnerIdType inner_id, float* data) const override;
@@ -134,7 +137,7 @@ private:
 
     uint64_t total_count_{0};  // Number of documents (not vectors)
 
-    uint64_t delete_count_{0};
+    std::atomic<uint64_t> delete_count_{0};
 
     uint64_t total_vector_count_{0};  // Total number of vectors across all docs
 

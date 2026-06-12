@@ -124,6 +124,17 @@ auto result = index->KnnSearch(
 If you don't need path-based scoping, [HGraph](hgraph.md) is simpler and generally
 faster.
 
+## Mark remove
+
+Pyramid supports `RemoveMode::MARK_REMOVE`. Calling `Remove(ids)` (the default
+mode) tombstones the given ids: they are excluded from subsequent search results,
+`GetNumElements()` drops by the number removed, and `GetNumberRemoved()` reports
+the running total. Removing an id that is absent or already removed is a no-op.
+`RemoveMode::FORCE_REMOVE` is not supported and returns an error.
+
+Mark-removed vectors still occupy memory until the index is rebuilt; the space is
+not physically reclaimed.
+
 ## See also
 
 - [Creating an Index](../guide/create_index.md)
