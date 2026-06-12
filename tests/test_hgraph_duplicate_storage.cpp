@@ -37,7 +37,8 @@ constexpr int64_t DUP_COUNT = 100;
 std::string
 MakeBuildParam(bool support_duplicate,
                float dup_threshold = 0.0F,
-               const std::string& metric = "l2") {
+               const std::string& metric = "l2",
+               bool support_force_remove = false) {
     return fmt::format(R"({{
         "dtype": "float32",
         "metric_type": "{}",
@@ -48,13 +49,15 @@ MakeBuildParam(bool support_duplicate,
             "max_degree": 24,
             "ef_construction": 100,
             "support_duplicate": {},
-            "duplicate_distance_threshold": {}
+            "duplicate_distance_threshold": {},
+            "support_force_remove": {}
         }}
     }})",
                        metric,
                        DIM,
                        support_duplicate ? "true" : "false",
-                       dup_threshold);
+                       dup_threshold,
+                       support_force_remove ? "true" : "false");
 }
 
 std::string
@@ -943,7 +946,8 @@ TEST_CASE("HGraph dedup: near-threshold vectors", "[ft][hgraph][duplicate][thres
 TEST_CASE("HGraph dedup: force_remove representative then search",
           "[ft][hgraph][duplicate][remove_rep]") {
     auto tv = GenerateTestData(DIM, BASE_COUNT, DUP_COUNT);
-    auto index = BuildIndexWithDuplicates(tv, MakeDefaultBuildParam(true));
+    auto build_param = MakeBuildParam(true, 0.001F, "l2", true);
+    auto index = BuildIndexWithDuplicates(tv, build_param);
 
     // Force-remove base vector 0 (which has duplicates)
     auto removed = index->Remove({0}, vsag::RemoveMode::FORCE_REMOVE);
@@ -965,7 +969,8 @@ TEST_CASE("HGraph dedup: force_remove representative then search",
 TEST_CASE("HGraph dedup: force_remove duplicate then search",
           "[ft][hgraph][duplicate][remove_dup]") {
     auto tv = GenerateTestData(DIM, BASE_COUNT, DUP_COUNT);
-    auto index = BuildIndexWithDuplicates(tv, MakeDefaultBuildParam(true));
+    auto build_param = MakeBuildParam(true, 0.001F, "l2", true);
+    auto index = BuildIndexWithDuplicates(tv, build_param);
 
     // Remove a duplicate ID (BASE_COUNT is a dup of base 0)
     int64_t dup_label = BASE_COUNT;
