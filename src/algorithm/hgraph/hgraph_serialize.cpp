@@ -380,7 +380,11 @@ HGraph::Deserialize(StreamReader& reader) {
         if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
             this->extra_infos_->Deserialize(buffer_reader);
         }
-        this->total_count_ = this->basic_flatten_codes_->TotalCount();
+        if (this->support_duplicate_) {
+            this->total_count_ = this->label_table_->GetTotalCount();
+        } else {
+            this->total_count_ = this->basic_flatten_codes_->TotalCount();
+        }
 
         if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
             this->attr_filter_index_->Deserialize(buffer_reader);
