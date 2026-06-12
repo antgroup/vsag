@@ -484,9 +484,6 @@ DatasetImpl::Append(const DatasetPtr& other) {
             "Cannot append dataset without attribute sets to dataset with attribute sets");
     }
 
-    // all validation passed; safe to mutate state (destructor relies on NumElements for cleanup)
-    this->NumElements(old_num_elements + new_num_elements);
-
     // append contiguous arrays via realloc-and-copy
     APPEND_DATA(IDS, int64_t*, Ids, 1);
     APPEND_DATA(DISTS, float*, Distances, dim);
@@ -566,6 +563,9 @@ DatasetImpl::Append(const DatasetPtr& other) {
             }
         }
     }
+
+    // update element count only after all copies succeed (exception safety)
+    this->NumElements(old_num_elements + new_num_elements);
 
     return shared_from_this();
 }
