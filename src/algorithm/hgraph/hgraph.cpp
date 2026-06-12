@@ -58,6 +58,8 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
       reorder_by_base_(hgraph_param->reorder_source == HGRAPH_REORDER_SOURCE_BASE),
       ef_construct_(hgraph_param->ef_construction),
       alpha_(hgraph_param->alpha),
+      merge_lambda_(hgraph_param->merge_lambda),
+      merge_strategy_(hgraph_param->merge_strategy),
       duplicate_distance_threshold_(hgraph_param->duplicate_distance_threshold),
       support_force_remove_(hgraph_param->support_force_remove),
       odescent_param_(hgraph_param->odescent_param),
@@ -355,66 +357,6 @@ HGraph::GetCodeByInnerId(InnerIdType inner_id, uint8_t* data) const {
         high_precise_codes_->GetCodesById(inner_id, data);
     } else {
         basic_flatten_codes_->GetCodesById(inner_id, data);
-    }
-}
-
-void
-HGraph::Merge(const std::vector<MergeUnit>& merge_units) {
-    int64_t total_count = this->GetNumElements();
-    for (const auto& unit : merge_units) {
-        total_count += unit.index->GetNumElements();
-    }
-    if (max_capacity_ < total_count) {
-        this->resize(total_count);
-    }
-    for (const auto& merge_unit : merge_units) {
-        const auto other_index = std::dynamic_pointer_cast<HGraph>(
-            std::dynamic_pointer_cast<IndexImpl<HGraph>>(merge_unit.index)->GetInnerIndex());
-        if (total_count_ == 0) {
-            this->entry_point_id_ = other_index->entry_point_id_;
-        }
-        basic_flatten_codes_->MergeOther(other_index->basic_flatten_codes_, this->total_count_);
-        label_table_->MergeOther(other_index->label_table_, merge_unit.id_map_func);
-        if (has_precise_reorder()) {
-            high_precise_codes_->MergeOther(other_index->high_precise_codes_, this->total_count_);
-        }
-        bottom_graph_->MergeOther(other_index->bottom_graph_, this->total_count_);
-        if (route_graphs_.size() < other_index->route_graphs_.size()) {
-            route_graphs_.push_back(this->generate_one_route_graph());
-        }
-        for (int j = 0; j < std::min(other_index->route_graphs_.size(), route_graphs_.size());
-             ++j) {
-            route_graphs_[j]->MergeOther(other_index->route_graphs_[j], this->total_count_);
-        }
-        this->total_count_ += other_index->GetNumElements();
-    }
-    if (this->odescent_param_ == nullptr) {
-        odescent_param_ = std::make_shared<ODescentParameter>();
-    }
-
-    auto build_data = (has_precise_reorder() and not build_by_base_) ? this->high_precise_codes_
-                                                                     : this->basic_flatten_codes_;
-    for (InnerIdType inner_id = 0; inner_id < this->total_count_; ++inner_id) {
-        Vector<InnerIdType> neighbors(this->allocator_);
-        this->bottom_graph_->GetNeighbors(inner_id, neighbors);
-        neighbors.resize(neighbors.size() / 2);
-        this->bottom_graph_->InsertNeighborsById(inner_id, neighbors);
-    }
-    {
-        odescent_param_->max_degree = bottom_graph_->MaximumDegree();
-        ODescent odescent_builder(
-            odescent_param_, build_data, allocator_, this->thread_pool_.get());
-        odescent_builder.Build(bottom_graph_);
-        odescent_builder.SaveGraph(bottom_graph_);
-    }
-    for (auto& graph : route_graphs_) {
-        odescent_param_->max_degree = bottom_graph_->MaximumDegree() / 2;
-        ODescent sparse_odescent_builder(
-            odescent_param_, build_data, allocator_, this->thread_pool_.get());
-        auto ids = graph->GetIds();
-        sparse_odescent_builder.Build(ids, graph);
-        sparse_odescent_builder.SaveGraph(graph);
-        this->entry_point_id_ = ids.back();
     }
 }
 

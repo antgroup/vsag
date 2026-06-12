@@ -167,6 +167,15 @@ public:
     void
     Merge(const std::vector<MergeUnit>& merge_units) override;
 
+private:
+    // Merge strategy implementations (selected via merge_strategy_ config)
+    void
+    merge_with_two_stage(const std::vector<MergeUnit>& merge_units);
+
+    void
+    merge_with_odescent(const std::vector<MergeUnit>& merge_units);
+
+public:
     [[nodiscard]] DatasetPtr
     RangeSearch(const DatasetPtr& query,
                 float radius,
@@ -509,6 +518,9 @@ private:
 
     uint64_t ef_construct_{400};
     float alpha_{1.0};
+
+    uint64_t merge_lambda_{0};
+    std::string merge_strategy_{MERGE_STRATEGY_VALUE_ODESCENT};
 
     std::atomic<uint64_t> total_count_{0};
 

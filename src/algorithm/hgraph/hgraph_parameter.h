@@ -62,6 +62,10 @@ public:
     uint64_t ef_construction{400};
     float alpha{1.0F};
 
+    // 0 = auto (follow graph max_degree at merge time); see merge_with_two_stage
+    uint64_t merge_lambda{0};
+    std::string merge_strategy{MERGE_STRATEGY_VALUE_ODESCENT};
+
     bool support_duplicate{false};
     float duplicate_distance_threshold{0.0F};
     bool support_force_remove{false};

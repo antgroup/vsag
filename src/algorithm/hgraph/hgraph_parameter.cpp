@@ -108,6 +108,14 @@ HGraphParameter::FromJson(const JsonType& json) {
         this->alpha = json[ALPHA_KEY].GetFloat();
     }
 
+    if (json.Contains(MERGE_LAMBDA_KEY)) {
+        this->merge_lambda = json[MERGE_LAMBDA_KEY].GetInt();
+    }
+
+    if (json.Contains(MERGE_STRATEGY_KEY)) {
+        this->merge_strategy = json[MERGE_STRATEGY_KEY].GetString();
+    }
+
     if (json.Contains(BUILD_THREAD_COUNT_KEY)) {
         this->build_thread_count = json[BUILD_THREAD_COUNT_KEY].GetInt();
     }
@@ -149,6 +157,8 @@ HGraphParameter::ToJson() const {
     json[GRAPH_KEY].SetJson(this->bottom_graph_param->ToJson());
     json[EF_CONSTRUCTION_KEY].SetInt(this->ef_construction);
     json[ALPHA_KEY].SetFloat(this->alpha);
+    json[MERGE_LAMBDA_KEY].SetInt(this->merge_lambda);
+    json[MERGE_STRATEGY_KEY].SetString(this->merge_strategy);
     json[SUPPORT_DUPLICATE].SetBool(this->support_duplicate);
     json[DUPLICATE_DISTANCE_THRESHOLD].SetFloat(this->duplicate_distance_threshold);
     json[SUPPORT_FORCE_REMOVE].SetBool(this->support_force_remove);
