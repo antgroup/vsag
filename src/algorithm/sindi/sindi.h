@@ -133,6 +133,8 @@ public:
     SetImmutable() override;
 
 private:
+    static constexpr float K_TERM_LISTS_HEAP_INSERT_PRUNE_THRESHOLD = 0.1F;
+
     template <InnerSearchMode mode>
     DatasetPtr
     search_impl(const SparseTermComputerPtr& computer,
@@ -140,6 +142,13 @@ private:
                 Allocator* allocator,
                 bool use_term_lists_heap_insert,
                 const SparseVector* original_query = nullptr) const;
+
+    bool
+    UseTermListsHeapInsert(const SINDISearchParameter& search_param) const;
+
+#ifdef VSAG_SINDI_TEST_ACCESS
+    friend class SINDITestAccess;
+#endif
 
     std::pair<int64_t, int64_t>
     get_min_max_window_id(const FilterPtr& filter) const;
@@ -169,6 +178,8 @@ private:
     bool use_reorder_{false};
 
     bool use_quantization_{false};
+
+    float doc_prune_ratio_{0};
 
     float doc_retain_ratio_{0};
 
