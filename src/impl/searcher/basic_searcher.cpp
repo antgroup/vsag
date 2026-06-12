@@ -536,15 +536,17 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                 inner_search_param.duplicate_id = min_index;
             }
         } else if (inner_search_param.duplicate_query_data != nullptr) {
-            // Encode the raw query data and compare with the nearest neighbor's codes
             std::vector<uint8_t> temp_codes(flatten->code_size_);
             flatten->Encode(static_cast<const float*>(inner_search_param.duplicate_query_data),
                             temp_codes.data());
             bool need_release = false;
             const auto* existing_codes = flatten->GetCodesById(min_index, need_release);
-            bool match = (std::memcmp(temp_codes.data(), existing_codes, flatten->code_size_) == 0);
-            if (need_release) {
-                flatten->Release(existing_codes);
+            bool match = false;
+            if (existing_codes != nullptr) {
+                match = (std::memcmp(temp_codes.data(), existing_codes, flatten->code_size_) == 0);
+                if (need_release) {
+                    flatten->Release(existing_codes);
+                }
             }
             if (match) {
                 inner_search_param.duplicate_id = min_index;

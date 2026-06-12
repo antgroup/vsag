@@ -407,6 +407,8 @@ HGraph::Deserialize(StreamReader& reader) {
                 this->raw_vector_->DeserializeSlotRedirect(buffer_reader);
             }
             this->use_slot_redirect_for_flatten_ = true;
+        } else {
+            this->use_slot_redirect_for_flatten_ = false;
         }
     }
     this->cal_memory_usage();

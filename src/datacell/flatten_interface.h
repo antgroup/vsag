@@ -158,7 +158,7 @@ public:
         if (!use_slot_redirect_) {
             return;
         }
-        std::lock_guard lock(redirect_mutex_);
+        std::unique_lock lock(redirect_mutex_);
         if (dup_id >= slot_redirect_.size()) {
             slot_redirect_.resize(dup_id + 1, std::numeric_limits<InnerIdType>::max());
         }
@@ -170,7 +170,7 @@ public:
         if (!use_slot_redirect_) {
             return logical_id;
         }
-        std::lock_guard lock(redirect_mutex_);
+        std::unique_lock lock(redirect_mutex_);
         if (logical_id >= slot_redirect_.size()) {
             slot_redirect_.resize(logical_id + 1, std::numeric_limits<InnerIdType>::max());
         }
@@ -313,7 +313,7 @@ protected:
     InnerIdType next_physical_slot_{0};
     bool use_slot_redirect_{false};
     Allocator* redirect_allocator_{nullptr};
-    mutable std::mutex redirect_mutex_;
+    mutable std::shared_mutex redirect_mutex_;
 
     InnerIdType
     GetPhysicalSlotLocked(InnerIdType id) const {
@@ -329,7 +329,7 @@ protected:
         if (!use_slot_redirect_) {
             return id;
         }
-        std::lock_guard<std::mutex> lock(redirect_mutex_);
+        std::shared_lock<std::shared_mutex> lock(redirect_mutex_);
         return GetPhysicalSlotLocked(id);
     }
 };

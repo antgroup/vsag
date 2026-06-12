@@ -371,7 +371,7 @@ HGraph::Add(const DatasetPtr& data, AddMode mode) {
         for (const auto& id_pair : inner_ids) {
             auto inner_id = id_pair.first;
             auto local_idx = id_pair.second;
-            if (this->support_duplicate_ && bottom_graph_->IsDuplicate(inner_id)) {
+            if (this->use_slot_redirect_for_flatten_ && bottom_graph_->IsDuplicate(inner_id)) {
                 auto rep_id = bottom_graph_->GetGroupId(inner_id);
                 deferred_dup_slots.emplace_back(inner_id, rep_id);
                 continue;
@@ -440,6 +440,7 @@ HGraph::add_one_point(const void* data, int level, InnerIdType inner_id, bool in
         if (level >= static_cast<int>(this->route_graphs_.size()) ||
             bottom_graph_->TotalCount() == 0) {
             std::scoped_lock<std::shared_mutex> wlock(this->global_mutex_);
+            auto orig_route_size = this->route_graphs_.size();
             // level maybe a negative number(-1)
             for (auto j = static_cast<int>(this->route_graphs_.size()); j <= level; ++j) {
                 this->route_graphs_.emplace_back(this->generate_one_route_graph());
@@ -448,7 +449,7 @@ HGraph::add_one_point(const void* data, int level, InnerIdType inner_id, bool in
             if (dup_rep_id < 0) {
                 entry_point_id_ = inner_id;
             } else {
-                this->route_graphs_.pop_back();
+                this->route_graphs_.resize(orig_route_size);
             }
         } else {
             add_lock.unlock();
