@@ -34,7 +34,9 @@ set (_openblas_system_paths
     /usr/lib/aarch64-linux-gnu
     /usr/local/lib
     /usr/local/lib64
-    /opt/homebrew/lib)
+    /opt/homebrew/lib
+    /opt/homebrew/opt/openblas/lib
+    /usr/local/opt/openblas/lib)
 set (_openblas_system_includes
     /usr/include
     /usr/include/openblas
@@ -42,7 +44,9 @@ set (_openblas_system_includes
     /usr/include/aarch64-linux-gnu
     /usr/local/include
     /usr/local/include/openblas
-    /opt/homebrew/include)
+    /opt/homebrew/include
+    /opt/homebrew/opt/openblas/include
+    /usr/local/opt/openblas/include)
 
 set (OPENBLAS_FOUND FALSE)
 set (_openblas_uses_imported_target FALSE)
@@ -124,16 +128,11 @@ if (NOT _openblas_policy STREQUAL "OFF")
 endif ()
 
 if (OPENBLAS_FOUND)
-    # Append gfortran + OpenMP runtime when we are taking the system path that
-    # only resolves to a raw library (the imported CONFIG target already pulls
-    # transitive deps in).
-    if (NOT _openblas_uses_imported_target)
-        if (APPLE AND DEFINED GFORTRAN_LIB AND EXISTS "${GFORTRAN_LIB}")
-            list (APPEND BLAS_LIBRARIES "${GFORTRAN_LIB}")
-        else ()
-            list (APPEND BLAS_LIBRARIES gfortran)
-        endif ()
-        if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    # Append non-Apple runtime libraries when the system path resolves to raw
+    # libraries; the imported CONFIG target already pulls transitive deps in.
+    if (NOT _openblas_uses_imported_target AND NOT APPLE)
+        list (APPEND BLAS_LIBRARIES gfortran)
+        if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
             list (PREPEND BLAS_LIBRARIES omp)
         else ()
             list (PREPEND BLAS_LIBRARIES gomp)
@@ -146,9 +145,9 @@ if (OPENBLAS_FOUND)
     message (STATUS "Using system OpenBLAS as BLAS backend")
 else ()
     set (BLAS_LIBRARIES ${install_dir}/lib/libopenblas.a)
-    if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    if (NOT APPLE AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         list (PREPEND BLAS_LIBRARIES omp)
-    else ()
+    elseif (NOT APPLE)
         list (PREPEND BLAS_LIBRARIES gomp)
     endif ()
     set (OPENBLAS_INCLUDE_DIRS ${install_dir}/include)

@@ -44,7 +44,7 @@ if (NOT APPLE)
     vsag_add_linker_flag (-static-libstdc++)
 endif ()
 
-if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     vsag_add_c_compile_flag (-gdwarf-4)
     vsag_add_cxx_compile_flag (-gdwarf-4)
 
@@ -79,12 +79,13 @@ if (ENABLE_LIBCXX OR APPLE)
             message (FATAL_ERROR "libc++ or libc++abi not found")
         endif ()
     endif ()
-elseif (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+elseif (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     vsag_add_cxx_compile_flag (-stdlib=libstdc++)
 endif ()
 
 set (CMAKE_CXX_STANDARD 17)
-if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang"
+if (NOT APPLE
+    AND CMAKE_CXX_COMPILER_ID MATCHES "Clang"
     AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 17)
     set (CMAKE_CXX_STANDARD 20)
 endif ()
@@ -101,13 +102,17 @@ if (CMAKE_BUILD_TYPE STREQUAL "Debug")
     vsag_add_compile_flag (-O0)
 elseif (CMAKE_BUILD_TYPE STREQUAL "Release")
     vsag_add_compile_flag (-g)
-    vsag_add_compile_flag (-Ofast)
+    if (APPLE AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        vsag_add_compile_flag (-O3)
+    else ()
+        vsag_add_compile_flag (-Ofast)
+    endif ()
 elseif (CMAKE_BUILD_TYPE STREQUAL "Sanitize")
     vsag_add_compile_flag (-g)
     vsag_add_compile_flag (-O2)
 endif ()
 
-if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     vsag_add_c_compile_flag (-Wno-incompatible-pointer-types-discards-qualifiers)
 endif ()
 
@@ -138,7 +143,7 @@ if (ENABLE_ASAN AND ENABLE_TSAN)
 endif ()
 
 if (ENABLE_ASAN)
-    if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang"
+    if (CMAKE_CXX_COMPILER_ID MATCHES "Clang"
         OR (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND NOT CMAKE_CXX_COMPILER_VERSION VERSION_LESS 7.0))
         message (STATUS "Compiling with AddressSanitizer and UndefinedBehaviorSanitizer")
         set (VSAG_SANITIZER_FLAGS

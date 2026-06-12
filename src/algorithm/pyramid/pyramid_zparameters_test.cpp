@@ -15,6 +15,8 @@
 
 #include "pyramid_zparameters.h"
 
+#include <fmt/ranges.h>
+
 #include <nlohmann/json.hpp>
 
 #include "index_common_param.h"

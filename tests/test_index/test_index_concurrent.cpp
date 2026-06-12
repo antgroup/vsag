@@ -295,6 +295,10 @@ TestIndex::TestConcurrentDestruct(TestIndex::IndexPtr& index,
     for (uint64_t i = 0; i < dataset->base_->GetNumElements(); i++) {
         futures.emplace_back(pool.enqueue(func, i));
     }
+
+    for (auto& future : futures) {
+        static_cast<void>(future.get());
+    }
 }
 
 void
