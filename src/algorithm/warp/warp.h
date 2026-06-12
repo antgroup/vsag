@@ -73,7 +73,8 @@ public:
 
     [[nodiscard]] int64_t
     GetNumElements() const override {
-        return this->total_count_ - this->delete_count_;
+        return static_cast<int64_t>(this->total_count_.load()) -
+               static_cast<int64_t>(this->delete_count_);
     }
 
     [[nodiscard]] int64_t
@@ -131,8 +132,6 @@ private:
 
 private:
     FlattenInterfacePtr inner_codes_{nullptr};
-
-    uint64_t total_count_{0};  // Number of documents (not vectors)
 
     uint64_t delete_count_{0};
 
