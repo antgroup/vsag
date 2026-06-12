@@ -723,7 +723,10 @@ MCI::add_dataset(const DatasetPtr& data,
             inserted_ids->emplace_back(inner_id, local_id);
         }
         this->total_count_.fetch_add(1);
-        this->p_node_to_cid_.push_back(this->p_node_to_cid_.back());
+        {
+            std::unique_lock<std::shared_mutex> lock(this->global_mutex_);
+            this->p_node_to_cid_.push_back(this->p_node_to_cid_.back());
+        }
     }
     return failed_ids;
 }
@@ -1043,6 +1046,9 @@ MCI::enumerate_maximal_cliques(const Vector<Vector<InnerIdType>>& graph,
         cliques.back().assign(clique.begin(), clique.end());
     };
 
+    // Best-effort coverage: the uncovered check + fetch_add is not atomic, so parallel
+    // workers may both observe a node as uncovered and emit overlapping cliques. This is
+    // memory-safe (per-thread buffers, atomic counter) but may inflate clique count slightly.
     auto try_select_clique = [&](const Vector<InnerIdType>& clique,
                                  Vector<Vector<InnerIdType>>& output) {
         auto normalized = normalize_clique(clique);
@@ -1805,6 +1811,9 @@ MCI::should_use_hgraph_hybrid(const SearchRequest& request, float valid_ratio) c
         return false;
     }
     if (this->hgraph_index_->GetNumElements() != this->GetNumElements()) {
+        logger::debug("mci hybrid routing disabled: hgraph size {} != mci size {}",
+                      this->hgraph_index_->GetNumElements(),
+                      this->GetNumElements());
         return false;
     }
     if (request.enable_bitset_filter_ and request.bitset_filter_ != nullptr) {
@@ -1844,6 +1853,10 @@ MCI::search_hgraph_hybrid(const SearchRequest& request, float valid_ratio) const
 
 DatasetPtr
 MCI::build_dataset_from_heap(DistHeapPtr& heap) const {
+    if (heap->Empty()) {
+        auto [dataset_results, dists, ids] = create_fast_dataset(0, allocator_);
+        return dataset_results;
+    }
     auto [dataset_results, dists, ids] =
         create_fast_dataset(static_cast<int64_t>(heap->Size()), allocator_);
     for (auto i = static_cast<int64_t>(heap->Size() - 1); i >= 0; --i) {
