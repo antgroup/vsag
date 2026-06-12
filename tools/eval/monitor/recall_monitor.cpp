@@ -65,21 +65,39 @@ void
 RecallMonitor::Record(void* input) {
     std::lock_guard<std::mutex> lock(record_mutex_);
 
-    auto [neighbors, gt_neighbors, dataset, query_data, topk] =
-        *(reinterpret_cast<std::tuple<int64_t*, int64_t*, EvalDataset*, const void*, uint64_t>*>(
+    auto [neighbors, result_count, gt_neighbors, dataset, query_data, topk] =
+        *(reinterpret_cast<
+            std::tuple<const int64_t*, uint64_t, int64_t*, EvalDataset*, const void*, uint64_t>*>(
             input));
-    size_t dim = dataset->GetDim();
+    const auto dim = static_cast<size_t>(dataset->GetDim());
+    const auto base_count = dataset->GetNumberOfBase();
     auto distance_func = dataset->GetDistanceFunc();
-    auto gt_distances = std::shared_ptr<float[]>(new float[topk]);
-    auto distances = std::shared_ptr<float[]>(new float[topk]);
-    for (int i = 0; i < topk; ++i) {
-        distances[i] = distance_func(query_data, dataset->GetOneTrain(neighbors[i]), &dim);
-        gt_distances[i] = distance_func(query_data, dataset->GetOneTrain(gt_neighbors[i]), &dim);
+    std::vector<float> gt_distances;
+    gt_distances.reserve(topk);
+    for (uint64_t i = 0; i < topk; ++i) {
+        if (gt_neighbors[i] < 0 or gt_neighbors[i] >= base_count) {
+            break;
+        }
+        gt_distances.push_back(
+            distance_func(query_data, dataset->GetOneTrain(gt_neighbors[i]), &dim));
+    }
+
+    std::vector<float> distances;
+    distances.reserve(std::min(result_count, topk));
+    if (neighbors != nullptr) {
+        for (uint64_t i = 0; i < result_count; ++i) {
+            if (neighbors[i] < 0 or neighbors[i] >= base_count) {
+                continue;
+            }
+            distances.push_back(
+                distance_func(query_data, dataset->GetOneTrain(neighbors[i]), &dim));
+        }
     }
 
     float val = 0;
-    if (topk != 0) {
-        val = get_recall(distances.get(), gt_distances.get(), topk, topk);
+    if (not gt_distances.empty()) {
+        val = get_recall(
+            distances.data(), gt_distances.data(), distances.size(), gt_distances.size());
     }
     this->recall_records_.emplace_back(val);
 }

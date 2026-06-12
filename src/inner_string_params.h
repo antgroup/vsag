@@ -27,6 +27,7 @@ const char* const INDEX_TYPE_IVF = "ivf";
 const char* const INDEX_TYPE_BRUTE_FORCE = "brute_force";
 const char* const INDEX_TYPE_GNO_IMI = "gno_imi";
 const char* const INDEX_TYPE_PYRAMID = "pyramid";
+const char* const INDEX_TYPE_MCI = "mci";
 
 const char* const TYPE_KEY = "type";
 const char* const USE_REORDER_KEY = "use_reorder";
@@ -198,6 +199,7 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"INDEX_TYPE_IVF", INDEX_TYPE_IVF},
     {"INDEX_TYPE_GNO_IMI", INDEX_TYPE_GNO_IMI},
     {"INDEX_TYPE_PYRAMID", INDEX_TYPE_PYRAMID},
+    {"INDEX_TYPE_MCI", INDEX_TYPE_MCI},
     {"TYPE_KEY", TYPE_KEY},
     {"HGRAPH_USE_ELP_OPTIMIZER_KEY", HGRAPH_USE_ELP_OPTIMIZER_KEY},
     {"HGRAPH_IGNORE_REORDER_KEY", HGRAPH_IGNORE_REORDER_KEY},

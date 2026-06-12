@@ -101,6 +101,8 @@ together when the directory is listed:
 | [`319_feature_get_memory_usage.cpp`](319_feature_get_memory_usage.cpp) | Live memory-usage reporting. |
 | [`320_feature_extra_info.cpp`](320_feature_extra_info.cpp) | Attach per-vector extra info / payload. |
 | [`322_feature_hgraph_brute_force_threshold.cpp`](322_feature_hgraph_brute_force_threshold.cpp) | HGraph search-time `brute_force_threshold`: automatically switch to an exact scan under highly selective filters. |
+| [`322_feature_mci_hybrid_filter.cpp`](322_feature_mci_hybrid_filter.cpp) | MCI filtered search with an HGraph hybrid overlay. |
+| [`323_feature_mci_incremental_add.cpp`](323_feature_mci_incremental_add.cpp) | Build MCI on a prefix, incrementally `Add()` the tail, then serialize and reload. |
 
 ### Persistence (`4xx`)
 

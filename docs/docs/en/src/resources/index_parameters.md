@@ -84,6 +84,49 @@ traversal and runs an exact scan over the surviving ids. See the
 [HGraph index page](../indexes/hgraph.md#brute-force-fallback-under-highly-selective-filters-brute_force_threshold)
 for details.
 
+## MCI
+
+MCI also uses the generic `index_param` key for build-time parameters, and the `mci` key for
+search-time parameters.
+
+```json
+{
+    "dim": 128,
+    "dtype": "float32",
+    "metric_type": "l2",
+    "index_param": {
+        "base_quantization_type": "sq8",
+        "base_codes_type": "flatten",
+        "max_degree": 32,
+        "mcs": 200,
+        "clique_max": 50,
+        "knng_path": "",
+        "use_hgraph_hybrid": false,
+        "hgraph_valid_ratio_threshold": 1.0,
+        "hgraph_index_path": ""
+    }
+}
+```
+
+| Field | Typical | Description |
+|-------|---------|-------------|
+| `max_degree` | 16-48 | Maximum out-degree of the candidate graph |
+| `mcs` | 64-256 | Candidate budget used when building or importing the KNN graph |
+| `clique_max` | 16-64 | Maximum clique candidate size |
+| `alpha` | 1.2 | ODescent expansion factor when building the graph internally |
+| `knng_path` | path or empty | Optional fixed-width binary KNN graph file |
+| `clique_path` | path or empty | Optional precomputed clique index |
+| `use_hgraph_hybrid` | bool | Enable filtered-search routing to an external HGraph index |
+| `hgraph_valid_ratio_threshold` | 0.0-1.0 | Minimum valid ratio required before routing to HGraph |
+| `hgraph_index_path` | path | Serialized HGraph companion index |
+| `hgraph_ef_search` | 32-200 | Default HGraph `ef_search` for hybrid-routed queries |
+
+At search time:
+
+```json
+{"mci": {"ef_search": 80, "seed_count": 32}}
+```
+
 ## DiskANN
 
 ```json

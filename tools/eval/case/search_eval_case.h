@@ -15,6 +15,8 @@
 
 #pragma once
 
+#include <unordered_map>
+
 #include "../monitor/monitor.h"
 #include "./eval_case.h"
 
@@ -65,6 +67,9 @@ private:
     do_knn_filter_search();
 
     void
+    init_filter_valid_ids();
+
+    void
     do_range_filter_search();
 
     JsonType
@@ -76,5 +81,7 @@ private:
     SearchType search_type_{SearchType::KNN};
 
     EvalConfig config_;
+
+    std::unordered_map<int64_t, std::vector<int64_t>> filter_valid_ids_{};
 };
 }  // namespace vsag::eval
