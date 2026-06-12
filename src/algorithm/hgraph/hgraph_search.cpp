@@ -76,6 +76,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
     this->validate_knn_args(query, k);
 
     auto params = HGraphSearchParameters::FromJson(parameters);
+    ctx.rabitq_error_rate = params.rabitq_error_rate;
     auto ef_search_threshold = std::max<int64_t>(AMPLIFICATION_FACTOR * k, 1000);
     CHECK_ARGUMENT(  // NOLINT
         (1 <= params.ef_search) and (params.ef_search <= ef_search_threshold),
@@ -389,6 +390,7 @@ HGraph::RangeSearch(const DatasetPtr& query,
     }
 
     auto params = HGraphSearchParameters::FromJson(parameters);
+    ctx.rabitq_error_rate = params.rabitq_error_rate;
 
     CHECK_ARGUMENT((1 <= params.ef_search) and (params.ef_search <= 1000),  // NOLINT
                    fmt::format("ef_search({}) must in range[1, 1000]", params.ef_search));
@@ -454,6 +456,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     this->validate_knn_args(query, k);
 
     auto params = HGraphSearchParameters::FromJson(request.params_str_);
+    ctx.rabitq_error_rate = params.rabitq_error_rate;
 
     auto ef_search_threshold = std::max<int64_t>(AMPLIFICATION_FACTOR * k, 1000);
     CHECK_ARGUMENT(  // NOLINT

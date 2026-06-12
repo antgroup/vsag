@@ -18,7 +18,7 @@ x = B - 1
 
 | 参数 | 当前约束 | 说明 |
 | --- | --- | --- |
-| `rabitq_version` | `"split_1bit_7bit"` | 启用 split storage。名字保留 1+7bit，但底层按 `B` 参数化。 |
+| `rabitq_version` | `"split"` | 启用 split storage；旧别名 `"split_1bit_7bit"` 仍兼容。 |
 | `rabitq_bits_per_dim_query` | `32` | split path 只支持 fp32 query code。 |
 | `rabitq_bits_per_dim_base` | `1..8` | 因此 `x=0..7`。`x=8` 需要 `B=9`，当前参数校验不允许。 |
 | `base_codes_type` | `"rabitq_split"` | 选择 split datacell，而不是普通 flatten datacell。 |
@@ -449,7 +449,7 @@ datacell、bottom graph、route graph 等内容。对于 split RabitQ，base spl
   "index_param": {
     "base_quantization_type": "rabitq",
     "base_codes_type": "rabitq_split",
-    "rabitq_version": "split_1bit_7bit",
+    "rabitq_version": "split",
     "rabitq_bits_per_dim_query": 32,
     "rabitq_bits_per_dim_base": 5,
     "rabitq_error_rate": 1.9,
@@ -477,7 +477,7 @@ datacell、bottom graph、route graph 等内容。对于 split RabitQ，base spl
 
 参数要点：
 
-- `base_codes_type = "rabitq_split"` 和 `rabitq_version = "split_1bit_7bit"` 必须同时出现。
+- `base_codes_type = "rabitq_split"` 和 `rabitq_version = "split"` 必须同时出现。
 - `rabitq_bits_per_dim_base = x + 1`，当前支持 `x=0..7`。
 - `reorder_source = "base"` 是本次迁移的关键参数，表示 final reorder 使用 base split full code。
 - YAML 中保留 `precise_quantization_type = "sq8"` 不会改变 base final reorder 语义；
@@ -531,7 +531,7 @@ in.close();
 加载时必须使用兼容的 `index_params`，尤其是：
 
 - `base_codes_type = "rabitq_split"`
-- `rabitq_version = "split_1bit_7bit"`
+- `rabitq_version = "split"`
 - `rabitq_bits_per_dim_query = 32`
 - `rabitq_bits_per_dim_base` 与构建时一致
 - `rabitq_error_rate` 与构建时一致
@@ -539,7 +539,7 @@ in.close();
 
 ## 8. 注意事项
 
-- 当前 `split_1bit_7bit` 版本名没有随 `x` 改名，实际由 `rabitq_bits_per_dim_base` 控制总 bit 数。
+- 当前推荐使用 `rabitq_version = "split"`；实际 filter/reorder 位数由 `rabitq_bits_per_dim_base` 和 `rabitq_bits_per_dim_filter` 控制。
 - `x=8` 当前不支持，因为 `rabitq_bits_per_dim_base` 上限是 `8`。
 - `rabitq_one_bit_search` 是搜索参数，不改变索引存储格式。
 - 若修改 `rabitq_error_rate`、`rabitq_bits_per_dim_base`、`reorder_source` 等参数，应重建索引。

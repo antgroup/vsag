@@ -2,7 +2,7 @@
 
 `rabitq` 是 VSAG 的二值 / 低比特量化器。默认模式下每个坐标用 **1 比特**
 编码，给出所有内建量化器中最高的压缩率。另一种模式
-（`rabitq_version = "split_1bit_7bit"`）把表示拆分为 1 比特基础 + 7 比特
+（`rabitq_version = "split"`）把表示拆分为 1 比特基础 + 7 比特
 精化，在保留 1 比特快速距离内核的同时，以约 8 比特/维换回大部分精度。
 
 ![RaBitQ：按坐标相对随机超平面的符号进行编码](../figures/quantization/rabitq-hyperplane.svg)
@@ -37,13 +37,15 @@
 | `pca_dim` | int | `0`（= 输入维度） | RaBitQ 内部可选的 PCA 预处理维度。`0` 表示不做 PCA 降维（`rabitq_quantizer_parameter.cpp:30-32`）。 |
 | `rabitq_bits_per_dim_query` | int | `32` | 搜索时**查询**的每维位数。允许值：`4` 或 `32`（`rabitq_quantizer_parameter.cpp:38-43`）。 |
 | `rabitq_bits_per_dim_base` | int | `1` | **底库**（存储）码的每维位数。范围 `[1, 8]`（`rabitq_quantizer_parameter.cpp:45-54`）。纯 1 比特 RaBitQ 取 `1`。 |
-| `rabitq_version` | string | `"standard"` | 取值：`"standard"`（1 比特）或 `"split_1bit_7bit"`。split 模式要求 `rabitq_bits_per_dim_query = 32`（`rabitq_quantizer_parameter.cpp:55-67`）。 |
+| `rabitq_bits_per_dim_filter` | int | `1` | split 模式过滤阶段使用的位数，必须在 `[1, rabitq_bits_per_dim_base]`。重排使用全部底库位数，但只额外读取 `rabitq_bits_per_dim_base - rabitq_bits_per_dim_filter` 位 supplement。 |
+| `rabitq_version` | string | `"standard"` | 取值：`"standard"`（1 比特）或 `"split"`。兼容旧别名 `"split_1bit_7bit"`。split 模式要求 `rabitq_bits_per_dim_query = 32`（`rabitq_quantizer_parameter.cpp:55-67`）。 |
 | `rabitq_error_rate` | float | `1.9` | 控制编码器误差预算；必须为有限正数（`rabitq_quantizer_parameter.cpp:68-75`）。 |
 | `use_fht` | bool | `false` | `true` 时在二值化前应用快速 Hadamard 变换旋转。以 O(dim log dim) 的廉价代价提升各向异性数据上的精度（`rabitq_quantizer_parameter.cpp:76-78`）。 |
 
 在 HGraph 上，这些以顶层 key 暴露：`rabitq_pca_dim`、
-`rabitq_bits_per_dim_query`、`rabitq_bits_per_dim_base`、`rabitq_version`、
-`rabitq_error_rate`、`rabitq_use_fht`。其中 `rabitq_use_fht` 是 HGraph
+`rabitq_bits_per_dim_query`、`rabitq_bits_per_dim_base`、
+`rabitq_bits_per_dim_filter`、`rabitq_version`、`rabitq_error_rate`、
+`rabitq_use_fht`。其中 `rabitq_use_fht` 是 HGraph
 对量化器内部 `use_fht` key 的别名，由索引层重写（`src/algorithm/hgraph.cpp:473-480`，
 名称定义见 `src/constants.cpp:142-148`）。Pyramid 同样暴露相应的 `rabitq_*` key
 （`src/algorithm/pyramid.cpp:698-699`）。
@@ -68,17 +70,19 @@
 ```
 
 切换到高精度的 split 模式。split 布局由两个 key 共同决定：
-`rabitq_version: "split_1bit_7bit"` 选择 1+7 RaBitQ 编码，
+`rabitq_version: "split"` 选择 split RaBitQ 编码，
 `base_codes_type: "rabitq_split"` 切换存储 datacell。仅设置
 `rabitq_version` **不会**走 split datacell 路径，二者必须同时设置（详见
-`docs/rabitq_split_1bit_7bit.md`）：
+`docs/rabitq_split_1bit_7bit.md`）。默认是 `1+y`；设置
+`rabitq_bits_per_dim_filter` 可使用 `x+y`：
 
 ```json
 {
     "base_quantization_type": "rabitq",
     "base_codes_type": "rabitq_split",
-    "rabitq_version": "split_1bit_7bit",
+    "rabitq_version": "split",
     "rabitq_bits_per_dim_base": 8,
+    "rabitq_bits_per_dim_filter": 3,
     "rabitq_bits_per_dim_query": 32,
     "rabitq_use_fht": true
 }
@@ -101,9 +105,9 @@ FHT 旋转是固定的（无需学习），因此不增加训练代价；PCA 预
   `use_reorder: true` + `precise_quantization_type: "fp32"` 是稳妥默认。
 - **先旋转。** 对未归一化数据，设 `rabitq_use_fht: true`，或在 `tq` 链路
   中包含 `rom` / `fht`。
-- **精度优先时用 split 模式。** `rabitq_version: "split_1bit_7bit"` 保留
-  图遍历的 1 比特快速路径，再添加 7 比特精化用于重排；相对纯 1 比特，
-  代价约为 8× 码大小，召回明显更高。
+- **精度优先时用 split 模式。** `rabitq_version: "split"` 保留低比特快速
+  过滤路径，再添加 supplement bits 用于重排；相对纯 1 比特，使用更多
+  base bits 时召回明显更高。
 
 ## 相关页面
 

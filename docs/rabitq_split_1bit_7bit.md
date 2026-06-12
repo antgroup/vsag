@@ -9,11 +9,11 @@ code 计算最终距离。
 - 索引类型：`hgraph`
 - base quantization：`rabitq`
 - base code 存储：`base_codes_type = "rabitq_split"`
-- RabitQ 版本：`rabitq_version = "split_1bit_7bit"`
+- RabitQ 版本：`rabitq_version = "split"`
 - query bits：必须是 `rabitq_bits_per_dim_query = 32`
 - base bits：支持 `rabitq_bits_per_dim_base` 在 `[1, 8]`，其中 `1` 表示 `1+0bit`，推荐 `8`（即 `1+7bit`）
 
-默认路径不变。如果不显式设置 `rabitq_version = "split_1bit_7bit"` 和
+默认路径不变。如果不显式设置 `rabitq_version = "split"` 和
 `base_codes_type = "rabitq_split"`，HGraph 仍使用已有 RabitQ/flatten datacell 路径。
 
 ## 构建参数
@@ -28,7 +28,7 @@ code 计算最终距离。
   "index_param": {
     "base_quantization_type": "rabitq",
     "base_codes_type": "rabitq_split",
-    "rabitq_version": "split_1bit_7bit",
+    "rabitq_version": "split",
     "rabitq_bits_per_dim_query": 32,
     "rabitq_bits_per_dim_base": 8,
     "rabitq_error_rate": 1.9,
@@ -44,13 +44,15 @@ code 计算最终距离。
 | 参数 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
 | `base_codes_type` | string | `"flatten"` | 设为 `"rabitq_split"` 时使用 split datacell 存储 RabitQ code。 |
-| `rabitq_version` | string | `"standard"` | 设为 `"split_1bit_7bit"` 时启用 v4 RabitQ split 布局。 |
+| `rabitq_version` | string | `"standard"` | 设为 `"split"` 时启用 v4 RabitQ split 布局；旧别名 `"split_1bit_7bit"` 仍兼容。 |
+| `rabitq_bits_per_dim_filter` | int | `1` | split 过滤阶段使用的高位 bit 数；设为 `x` 时形成 `x+y`，其中 `y = rabitq_bits_per_dim_base - x`。 |
 | `rabitq_error_rate` | float | `1.9` | one-bit lower bound 的误差倍率，使用官方 RabitQ 风格误差项。 |
 
 参数约束：
 
-- `rabitq_version = "split_1bit_7bit"` 只支持 `rabitq_bits_per_dim_query = 32`。
-- `rabitq_version = "split_1bit_7bit"` 支持 `rabitq_bits_per_dim_base` 在 `[1, 8]`；`1` 是合法的 `1+0bit` 配置，`8` 是推荐的 `1+7bit` 配置。
+- `rabitq_version = "split"` 只支持 `rabitq_bits_per_dim_query = 32`。
+- `rabitq_version = "split"` 支持 `rabitq_bits_per_dim_base` 在 `[1, 8]`；`1` 是合法的 `1+0bit` 配置，`8` 是推荐的 `1+7bit` 配置。
+- `rabitq_bits_per_dim_filter` 必须在 `[1, rabitq_bits_per_dim_base]`；默认 `1` 保持旧的 `1+y` 行为，设为大于 `1` 时用 x bit lower-bound 过滤，重排只额外读取 y bit supplement。
 - `rabitq_error_rate` 必须是有限正数。
 - `rabitq_error_rate` 会进入索引参数兼容性检查；修改该值后应重建索引。
 
@@ -105,7 +107,7 @@ int main() {
       "index_param": {
         "base_quantization_type": "rabitq",
         "base_codes_type": "rabitq_split",
-        "rabitq_version": "split_1bit_7bit",
+        "rabitq_version": "split",
         "rabitq_bits_per_dim_query": 32,
         "rabitq_bits_per_dim_base": 8,
         "rabitq_error_rate": 1.9,
@@ -223,7 +225,7 @@ auto ret = loaded->Deserialize(binary_set);
 
 - 创建空索引时必须使用与构建时兼容的参数。
 - v4 split 索引必须保留 `base_codes_type = "rabitq_split"`。
-- v4 split 索引必须保留 `rabitq_version = "split_1bit_7bit"`。
+- v4 split 索引必须保留 `rabitq_version = "split"`。
 - `dim`、`metric_type`、`rabitq_bits_per_dim_query`、`rabitq_bits_per_dim_base`、
   `rabitq_error_rate` 等参数需要匹配。
 - 旧版本 VSAG 不识别 `rabitq_split` datacell，不能加载 v4 split 索引。
@@ -239,7 +241,7 @@ auto ret = loaded->Deserialize(binary_set);
   "index_param": {
     "base_quantization_type": "rabitq",
     "base_codes_type": "rabitq_split",
-    "rabitq_version": "split_1bit_7bit",
+    "rabitq_version": "split",
     "rabitq_bits_per_dim_query": 32,
     "rabitq_bits_per_dim_base": 8,
     "use_reorder": false
@@ -256,7 +258,7 @@ auto ret = loaded->Deserialize(binary_set);
   "index_param": {
     "base_quantization_type": "rabitq",
     "base_codes_type": "rabitq_split",
-    "rabitq_version": "split_1bit_7bit",
+    "rabitq_version": "split",
     "rabitq_bits_per_dim_query": 32,
     "rabitq_bits_per_dim_base": 8,
     "use_reorder": true,
@@ -274,7 +276,7 @@ auto ret = loaded->Deserialize(binary_set);
   "index_param": {
     "base_quantization_type": "rabitq",
     "base_codes_type": "rabitq_split",
-    "rabitq_version": "split_1bit_7bit",
+    "rabitq_version": "split",
     "rabitq_bits_per_dim_query": 32,
     "rabitq_bits_per_dim_base": 8,
     "use_reorder": true,
@@ -288,7 +290,7 @@ auto ret = loaded->Deserialize(binary_set);
 ## 注意事项
 
 - 不要只设置 `rabitq_bits_per_dim_base = 8`。v4 split 路径必须显式设置
-  `rabitq_version = "split_1bit_7bit"` 和 `base_codes_type = "rabitq_split"`。
+  `rabitq_version = "split"` 和 `base_codes_type = "rabitq_split"`。
 - `rabitq_one_bit_search` 是搜索参数，不会改变已有索引的存储格式。
 - `rabitq_error_rate` 会影响构建时写入的 lower-bound error 元数据，修改后需要重建索引。
 - 如果需要跨进程或跨机器持久化，优先使用 `Serialize(std::ostream&)` 或 `Serialize()` 返回的

@@ -91,6 +91,22 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             },
         },
         {
+            HGRAPH_BASE_SUPPLEMENT_IO_TYPE,
+            {
+                BASE_CODES_KEY,
+                SUPPLEMENT_IO_PARAMS_KEY,
+                TYPE_KEY,
+            },
+        },
+        {
+            HGRAPH_BASE_SUPPLEMENT_FILE_PATH,
+            {
+                BASE_CODES_KEY,
+                SUPPLEMENT_IO_PARAMS_KEY,
+                IO_FILE_PATH_KEY,
+            },
+        },
+        {
             HGRAPH_BASE_CODES_TYPE,
             {
                 BASE_CODES_KEY,
@@ -294,6 +310,14 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
                 BASE_CODES_KEY,
                 QUANTIZATION_PARAMS_KEY,
                 RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY,
+            },
+        },
+        {
+            RABITQ_BITS_PER_DIM_FILTER,
+            {
+                BASE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                RABITQ_QUANTIZATION_BITS_PER_DIM_FILTER_KEY,
             },
         },
         {

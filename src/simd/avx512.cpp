@@ -489,6 +489,19 @@ RaBitQFloatBinaryIPBatch4(const float* vector,
 #endif
 }
 
+void
+RaBitQFloatThreeBitIPBatch4(const float* vector,
+                            const uint8_t* bits1,
+                            const uint8_t* bits2,
+                            const uint8_t* bits3,
+                            const uint8_t* bits4,
+                            uint64_t dim,
+                            uint32_t reorder_bits,
+                            float* results) {
+    avx2::RaBitQFloatThreeBitIPBatch4(
+        vector, bits1, bits2, bits3, bits4, dim, reorder_bits, results);
+}
+
 float
 RaBitQFloatSplitCodeIP(const float* vector,
                        const uint8_t* one_bit_code,
@@ -576,6 +589,14 @@ RaBitQSQ4UBinaryIP(const uint8_t* codes, const uint8_t* bits, uint64_t dim) {
 #else
     return generic::RaBitQSQ4UBinaryIP(codes, bits, dim);
 #endif
+}
+
+float
+RaBitQFloatSupplementCodeIP(const float* vector,
+                            const uint8_t* supplement_code,
+                            uint64_t dim,
+                            uint32_t supplement_bits) {
+    return avx2::RaBitQFloatSupplementCodeIP(vector, supplement_code, dim, supplement_bits);
 }
 
 void

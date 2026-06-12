@@ -15,6 +15,9 @@
 
 #include "rabitq_quantizer.h"
 
+#include <cmath>
+#include <cstring>
+#include <utility>
 #include <vector>
 
 #include "impl/allocator/safe_allocator.h"
@@ -101,7 +104,14 @@ TEST_CASE("RaBitQ Split Code Storage", "[ut][RaBitQuantizer]") {
     constexpr auto count = 32;
     auto vecs = fixtures::generate_vectors(count, dim);
 
+    std::vector<std::pair<uint64_t, uint64_t>> split_cases;
     for (uint64_t base_bits = 1; base_bits <= 8; ++base_bits) {
+        split_cases.emplace_back(base_bits, 1);
+    }
+    split_cases.emplace_back(8, 3);
+    split_cases.emplace_back(8, 8);
+
+    for (const auto& [base_bits, filter_bits] : split_cases) {
         RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR> quantizer(
             dim,
             dim,
@@ -110,9 +120,14 @@ TEST_CASE("RaBitQ Split Code Storage", "[ut][RaBitQuantizer]") {
             false,
             false,
             allocator.get(),
-            RaBitQuantizerParameter::RABITQ_VERSION_SPLIT_1BIT_7BIT,
-            RaBitQuantizerParameter::DEFAULT_RABITQ_ERROR_RATE);
+            RaBitQuantizerParameter::RABITQ_VERSION_SPLIT,
+            RaBitQuantizerParameter::DEFAULT_RABITQ_ERROR_RATE,
+            filter_bits);
         REQUIRE(quantizer.SupportSplitCodeStorage());
+        REQUIRE(quantizer.FilterBits() == filter_bits);
+        REQUIRE(quantizer.ReorderBits() == base_bits - filter_bits);
+        REQUIRE(quantizer.SupplementPlanesSize() ==
+                quantizer.PlaneBytes() * (base_bits - filter_bits));
         quantizer.TrainImpl(vecs.data(), count);
 
         std::vector<uint8_t> full_code(quantizer.GetCodeSize());
@@ -141,6 +156,38 @@ TEST_CASE("RaBitQ Split Code Storage", "[ut][RaBitQuantizer]") {
         REQUIRE(std::isfinite(one_bit_dist));
         REQUIRE(std::isfinite(lower_bound));
         REQUIRE(lower_bound <= one_bit_dist + 1e-5F);
+
+        if (filter_bits == 3) {
+            float stored_filter_norm_code = 0.0F;
+            std::memcpy(&stored_filter_norm_code,
+                        one_bit_code.data() + quantizer.OneBitRecordNormCodeOffset(),
+                        sizeof(stored_filter_norm_code));
+            const float filter_center = 0.5F * static_cast<float>((1U << filter_bits) - 1U);
+            double filter_norm_sqr = 0.0;
+            for (uint64_t d = 0; d < dim; ++d) {
+                const uint64_t byte_idx = d >> 3;
+                const auto bit_mask = static_cast<uint8_t>(1U << (d & 7));
+                uint32_t filter_code = 0;
+                for (uint32_t bit = 0; bit < filter_bits; ++bit) {
+                    const auto* plane = one_bit_code.data() + bit * quantizer.PlaneBytes();
+                    if ((plane[byte_idx] & bit_mask) != 0U) {
+                        filter_code += 1U << (filter_bits - bit - 1);
+                    }
+                }
+                const float centered = static_cast<float>(filter_code) - filter_center;
+                filter_norm_sqr += static_cast<double>(centered) * centered;
+            }
+            const auto expected_filter_norm_code = static_cast<float>(std::sqrt(filter_norm_sqr));
+            REQUIRE(std::abs(stored_filter_norm_code - expected_filter_norm_code) <= 1e-5F);
+
+            float hinted_split_dist = 0.0F;
+            REQUIRE(quantizer.ComputeDistWithSplitCodeAndFilterDist(*computer,
+                                                                    one_bit_code.data(),
+                                                                    supplement_code.data(),
+                                                                    one_bit_dist,
+                                                                    &hinted_split_dist));
+            REQUIRE(std::abs(split_dist - hinted_split_dist) <= 1e-5F);
+        }
     }
 }
 

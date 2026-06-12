@@ -15,9 +15,13 @@
 
 #include "flatten_datacell.h"
 
+#include <unistd.h>
+
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <numeric>
+#include <sstream>
 #include <utility>
 
 #include "flatten_interface_test.h"
@@ -91,7 +95,7 @@ TEST_CASE("RaBitQSplitDataCell direct split compute", "[ut][RaBitQSplitDataCell]
             }},
             "quantization_params": {{
                 "type": "rabitq",
-                "rabitq_version": "split_1bit_7bit",
+                "rabitq_version": "split",
                 "rabitq_bits_per_dim_query": 32,
                 "rabitq_bits_per_dim_base": {}
             }}
@@ -159,7 +163,7 @@ TEST_CASE("RaBitQSplitDataCell serialize and methods", "[ut][RaBitQSplitDataCell
             },
             "quantization_params": {
                 "type": "rabitq",
-                "rabitq_version": "split_1bit_7bit",
+                "rabitq_version": "split",
                 "rabitq_bits_per_dim_query": 32,
                 "rabitq_bits_per_dim_base": 4
             }
@@ -321,7 +325,7 @@ TEST_CASE("RaBitQSplitDataCell IP metric", "[ut][RaBitQSplitDataCell]") {
             },
             "quantization_params": {
                 "type": "rabitq",
-                "rabitq_version": "split_1bit_7bit",
+                "rabitq_version": "split",
                 "rabitq_bits_per_dim_query": 32,
                 "rabitq_bits_per_dim_base": 4
             }
@@ -356,5 +360,151 @@ TEST_CASE("RaBitQSplitDataCell IP metric", "[ut][RaBitQSplitDataCell]") {
         dists.data(), lower_bounds.data(), computer, idx.data(), count);
     for (InnerIdType i = 0; i < count; ++i) {
         REQUIRE(std::isfinite(dists[i]));
+    }
+}
+
+TEST_CASE("RaBitQSplitDataCell hybrid IO (1bit in memory, supplement on disk)",
+          "[ut][RaBitQSplitDataCell]") {
+    // Verifies the mixed IO mode: one-bit traversal codes stay in memory
+    // (block_memory_io) while xbit supplement codes are backed by file IO
+    // (async_io, which transparently falls back to buffer_io when libaio
+    // is unavailable). Behaviour must be numerically identical to the
+    // memory-only baseline. Because RaBitQ training uses a random
+    // orthogonal projection (std::random_device-seeded), the two cells
+    // cannot be trained independently and still produce identical codes.
+    // Instead we train + populate the memory-only cell first and then
+    // Serialize -> Deserialize into the hybrid cell so both share the
+    // same projection matrix and bytes.
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr uint64_t dim = 64;
+    constexpr InnerIdType count = 50;
+    auto vectors = fixtures::generate_vectors(count, dim);
+    auto queries = fixtures::generate_vectors(4, dim, 31);
+
+    const std::string tmp_prefix = "/tmp/vsag_rabitq_split_hybrid_ut_" + std::to_string(::getpid());
+    struct TempFileCleanup {
+        explicit TempFileCleanup(std::string prefix) : prefix_(std::move(prefix)) {
+            cleanup();
+        }
+
+        ~TempFileCleanup() {
+            cleanup();
+        }
+
+        void
+        cleanup() const {
+            for (const auto& suffix : {"_base", "_base_onebit", "_base_supplement"}) {
+                std::remove((prefix_ + suffix).c_str());
+            }
+        }
+
+        std::string prefix_;
+    } cleanup(tmp_prefix);
+
+    struct SplitCase {
+        uint64_t base_bits;
+        uint64_t filter_bits;
+    };
+    const SplitCase split_cases[] = {{1, 1}, {4, 1}, {7, 1}, {8, 3}};
+    for (const auto split_case : split_cases) {
+        auto memory_param_str = fmt::format(R"({{
+            "codes_type": "rabitq_split",
+            "io_params": {{ "type": "block_memory_io" }},
+            "quantization_params": {{
+                "type": "rabitq",
+                "rabitq_version": "split",
+                "rabitq_bits_per_dim_query": 32,
+                "rabitq_bits_per_dim_base": {},
+                "rabitq_bits_per_dim_filter": {}
+            }}
+        }})",
+                                            split_case.base_bits,
+                                            split_case.filter_bits);
+        auto hybrid_param_str = fmt::format(R"({{
+            "codes_type": "rabitq_split",
+            "io_params": {{
+                "type": "block_memory_io",
+                "file_path": "{}_base"
+            }},
+            "supplement_io_params": {{
+                "type": "async_io"
+            }},
+            "quantization_params": {{
+                "type": "rabitq",
+                "rabitq_version": "split",
+                "rabitq_bits_per_dim_query": 32,
+                "rabitq_bits_per_dim_base": {},
+                "rabitq_bits_per_dim_filter": {}
+            }}
+        }})",
+                                            tmp_prefix,
+                                            split_case.base_bits,
+                                            split_case.filter_bits);
+
+        auto mem_param = std::make_shared<FlattenDataCellParameter>();
+        mem_param->FromJson(JsonType::Parse(memory_param_str));
+        auto hyb_param = std::make_shared<FlattenDataCellParameter>();
+        hyb_param->FromJson(JsonType::Parse(hybrid_param_str));
+        REQUIRE(hyb_param->supplement_io_parameter != nullptr);
+
+        IndexCommonParam common_param;
+        common_param.allocator_ = allocator;
+        common_param.dim_ = dim;
+        common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+
+        auto mem_cell = FlattenInterface::MakeInstance(mem_param, common_param);
+        auto hyb_cell = FlattenInterface::MakeInstance(hyb_param, common_param);
+
+        REQUIRE(mem_cell->InMemory());
+        REQUIRE_FALSE(hyb_cell->InMemory());
+
+        mem_cell->Train(vectors.data(), count);
+        mem_cell->BatchInsertVector(vectors.data(), count);
+
+        // Sync trained model + codes from mem_cell into hyb_cell so both
+        // share the same RaBitQ projection / codes.
+        std::stringstream ss;
+        IOStreamWriter writer(ss);
+        mem_cell->Serialize(writer);
+        IOStreamReader reader(ss);
+        hyb_cell->Deserialize(reader);
+        REQUIRE(hyb_cell->TotalCount() == mem_cell->TotalCount());
+
+        std::vector<InnerIdType> idx(count);
+        std::iota(idx.begin(), idx.end(), 0);
+
+        for (uint64_t query_id = 0; query_id < 4; ++query_id) {
+            auto* query = queries.data() + query_id * dim;
+            auto mem_computer = mem_cell->FactoryComputer(query);
+            auto hyb_computer = hyb_cell->FactoryComputer(query);
+
+            std::vector<float> mem_dists(count);
+            std::vector<float> hyb_dists(count);
+            mem_cell->Query(mem_dists.data(), mem_computer, idx.data(), count);
+            hyb_cell->Query(hyb_dists.data(), hyb_computer, idx.data(), count);
+            for (InnerIdType id = 0; id < count; ++id) {
+                REQUIRE(mem_dists[id] == hyb_dists[id]);
+            }
+
+            std::vector<float> mem_lb(count), hyb_lb(count);
+            mem_cell->QueryWithDistanceLowerBound(
+                mem_dists.data(), mem_lb.data(), mem_computer, idx.data(), count);
+            hyb_cell->QueryWithDistanceLowerBound(
+                hyb_dists.data(), hyb_lb.data(), hyb_computer, idx.data(), count);
+            for (InnerIdType id = 0; id < count; ++id) {
+                REQUIRE(mem_dists[id] == hyb_dists[id]);
+                REQUIRE(mem_lb[id] == hyb_lb[id]);
+            }
+
+            std::vector<float> mem_hint_dists(count);
+            std::vector<float> hyb_hint_dists(count);
+            mem_cell->QueryWithDistanceHint(
+                mem_hint_dists.data(), mem_dists.data(), mem_computer, idx.data(), count);
+            hyb_cell->QueryWithDistanceHint(
+                hyb_hint_dists.data(), hyb_dists.data(), hyb_computer, idx.data(), count);
+            for (InnerIdType id = 0; id < count; ++id) {
+                REQUIRE(mem_hint_dists[id] == hyb_hint_dists[id]);
+            }
+        }
     }
 }
