@@ -91,6 +91,11 @@ HGraph::KnnSearch(const DatasetPtr& query,
     }
     k = std::min(k, GetNumElements());
 
+    // iterator-based KnnSearch tracks state across calls via IteratorContext,
+    // so it cannot be batched into a single multi-query invocation.
+    CHECK_ARGUMENT(query->GetNumElements() == 1,
+                   "iterator-based KnnSearch only supports single query (NumElements=1)");
+
     FilterPtr ft = this->create_search_filter(filter, params.use_extra_info_filter);
 
     if (iter_ctx == nullptr) {
@@ -191,13 +196,14 @@ HGraph::KnnSearch(const DatasetPtr& query,
     if (search_result->Empty()) {
         return DatasetImpl::MakeEmptyDataset();
     }
-    auto count = static_cast<const int64_t>(search_result->Size());
+    const auto count = static_cast<int64_t>(search_result->Size());
     auto [dataset_results, dists, ids] = create_fast_dataset(count, ctx.alloc);
     char* extra_infos = nullptr;
     if (extra_info_size_ > 0) {
-        extra_infos =
-            static_cast<char*>(ctx.alloc->Allocate(extra_info_size_ * search_result->Size()));
+        extra_infos = static_cast<char*>(ctx.alloc->Allocate(
+            static_cast<size_t>(extra_info_size_) * static_cast<size_t>(search_result->Size())));
         dataset_results->ExtraInfos(extra_infos);
+        dataset_results->ExtraInfoSize(static_cast<int64_t>(extra_info_size_));
     }
     for (int64_t j = count - 1; j >= 0; --j) {
         dists[j] = search_result->Top().first;
@@ -470,6 +476,17 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     }
     k = std::min(k, GetNumElements());
 
+    // check query vector(s)
+    int64_t query_count = query->GetNumElements();
+    CHECK_ARGUMENT(query_count >= 1,
+                   fmt::format("query count({}) must be at least 1", query_count));
+
+    // Reasoning context only supports single-query (per-call expected_labels_).
+    if (query_count > 1) {
+        CHECK_ARGUMENT(request.expected_labels_.empty(),
+                       "reasoning (expected_labels_) is only supported for single-query search");
+    }
+
     // Setup reasoning context if expected labels are provided.
     std::shared_ptr<ReasoningContext> reasoning_ctx;
     if (not request.expected_labels_.empty()) {
@@ -506,55 +523,34 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         ctx.reasoning_ctx = reasoning_ctx.get();
     }
 
-    InnerSearchParam search_param;
-    search_param.ep = this->entry_point_id_;
-    search_param.topk = 1;
-    search_param.ef = 1;
-    search_param.is_inner_id_allowed = nullptr;
-
-    if (search_param.ep == INVALID_ENTRY_POINT) {
+    if (this->entry_point_id_ == INVALID_ENTRY_POINT) {
         return make_empty_dataset_with_stats();
-    }
-
-    auto vt = this->pool_->TakeOne();
-
-    const auto* raw_query = get_data(query);
-    for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
-        auto result = this->search_one_graph(
-            raw_query, this->route_graphs_[i], this->basic_flatten_codes_, search_param, vt, &ctx);
-        search_param.ep = result->Top().second;
     }
 
     FilterPtr ft = this->create_search_filter(request.filter_, params.use_extra_info_filter);
 
-    if (request.enable_attribute_filter_ and this->attr_filter_index_ != nullptr) {
-        auto& schema = this->attr_filter_index_->field_type_map_;
-        auto expr = AstParse(request.attribute_filter_str_, &schema);
-        auto executor = Executor::MakeInstance(this->allocator_, expr, this->attr_filter_index_);
-        executor->Init();
-        search_param.executors.emplace_back(executor);
-    }
-
-    search_param.ef = std::max(params.ef_search, k);
-    search_param.is_inner_id_allowed = ft;
-    search_param.topk = static_cast<int64_t>(search_param.ef);
+    // Build a shared base search_param; per-query fields (ep) are set in the loop.
+    InnerSearchParam base_search_param;
+    base_search_param.is_inner_id_allowed = ft;
+    base_search_param.ef = std::max(params.ef_search, k);
+    base_search_param.topk = static_cast<int64_t>(base_search_param.ef);
     if (params.topk_factor > 1.0F) {
-        search_param.topk = std::min(
-            search_param.topk, static_cast<int64_t>(static_cast<float>(k) * params.topk_factor));
+        base_search_param.topk =
+            std::min(base_search_param.topk,
+                     static_cast<int64_t>(static_cast<float>(k) * params.topk_factor));
     }
-    search_param.enable_reorder = params.enable_reorder;
-    search_param.consider_duplicate = true;
-    search_param.enable_rabitq_one_bit_search = params.rabitq_one_bit_search;
+    base_search_param.enable_reorder = params.enable_reorder;
+    base_search_param.consider_duplicate = true;
+    base_search_param.enable_rabitq_one_bit_search = params.rabitq_one_bit_search;
     if (params.enable_time_record) {
-        search_param.time_cost = std::make_shared<Timer>();
-        search_param.time_cost->SetThreshold(params.timeout_ms);
+        base_search_param.time_cost = std::make_shared<Timer>();
+        base_search_param.time_cost->SetThreshold(params.timeout_ms);
         stats.is_timeout.store(false, std::memory_order_relaxed);
     }
-    search_param.parallel_search_thread_count = params.parallel_search_thread_count;
+    base_search_param.parallel_search_thread_count = params.parallel_search_thread_count;
 
-    // hops_limit only takes effect when it's greater than ef_search
     if (params.hops_limit <= static_cast<uint32_t>(params.ef_search)) {
-        search_param.hops_limit = std::numeric_limits<uint32_t>::max();
+        base_search_param.hops_limit = std::numeric_limits<uint32_t>::max();
         if (params.hops_limit != std::numeric_limits<uint32_t>::max()) {
             logger::warn(
                 fmt::format("hops_limit({}) is not greater than ef_search({}), ignoring hops_limit",
@@ -562,91 +558,178 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
                             params.ef_search));
         }
     } else {
-        search_param.hops_limit = params.hops_limit;
+        base_search_param.hops_limit = params.hops_limit;
     }
 
-    DistanceRecordVector rabitq_lower_bound_candidates(ctx.alloc);
-    auto* rabitq_lower_bound_candidates_ptr =
-        search_param.enable_rabitq_one_bit_search and use_reorder_ and
-                search_param.enable_reorder and reorder_by_base_
-            ? &rabitq_lower_bound_candidates
-            : nullptr;
-
-    DistHeapPtr search_result;
-    bool brute_force_used = false;
-    if (params.brute_force_threshold > 0.0F) {
-        float valid_ratio = ft != nullptr ? ft->ValidRatio() : 1.0F;
-        if (valid_ratio <= params.brute_force_threshold) {
-            search_result =
-                this->brute_force_search<InnerSearchMode::KNN_SEARCH>(raw_query, ft, k, 0.0F, &ctx);
-            brute_force_used = true;
-        }
-    }
-    if (not brute_force_used) {
-        search_result = this->search_one_graph(raw_query,
-                                               this->bottom_graph_,
-                                               this->basic_flatten_codes_,
-                                               search_param,
-                                               vt,
-                                               &ctx,
-                                               rabitq_lower_bound_candidates_ptr);
+    if (request.enable_attribute_filter_ and this->attr_filter_index_ != nullptr) {
+        auto& schema = this->attr_filter_index_->field_type_map_;
+        auto expr = AstParse(request.attribute_filter_str_, &schema);
+        auto executor = Executor::MakeInstance(this->allocator_, expr, this->attr_filter_index_);
+        executor->Init();
+        base_search_param.executors.emplace_back(executor);
     }
 
-    this->pool_->ReturnOne(vt);
-
-    if (not brute_force_used and use_reorder_ and search_param.enable_reorder) {
-        this->reorder(raw_query,
-                      this->get_reorder_codes(),
-                      search_result,
-                      k,
-                      nullptr,
-                      ctx,
-                      rabitq_lower_bound_candidates_ptr);
-    } else if (not brute_force_used and search_param.enable_reorder and
-               params.rabitq_one_bit_search) {
-        this->reorder(raw_query, this->basic_flatten_codes_, search_result, k, nullptr, ctx);
-    }
-
-    while (search_result->Size() > k) {
-        search_result->Pop();
-    }
-
-    // return an empty dataset directly if searcher returns nothing
-    if (search_result->Empty()) {
-        auto dataset_result = DatasetImpl::MakeEmptyDataset();
-        dataset_result->Statistics(stats.Dump());
-        if (reasoning_ctx) {
-            reasoning_ctx->DiagnoseExpectedTargets();
-            dataset_result->Reasoning(reasoning_ctx->GenerateReport());
-        }
-        return dataset_result;
-    }
-    auto count = static_cast<const int64_t>(search_result->Size());
-
-    Vector<InnerIdType> result_inner_ids(static_cast<size_t>(count), this->allocator_);
-
-    auto [dataset_results, dists, ids] = create_fast_dataset(count, ctx.alloc);
+    // Preserve single-query result semantics while batching uses a fixed query_count x k layout.
+    int64_t total_result_count = query_count > 1 ? query_count * k : 0;
+    auto [dataset_results, dists, ids] = create_fast_dataset(total_result_count, ctx.alloc);
     char* extra_infos = nullptr;
-    if (extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
-        extra_infos =
-            static_cast<char*>(ctx.alloc->Allocate(extra_info_size_ * search_result->Size()));
+    if (query_count > 1 && extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
+        extra_infos = static_cast<char*>(ctx.alloc->Allocate(
+            static_cast<size_t>(extra_info_size_) * static_cast<size_t>(total_result_count)));
+        std::memset(extra_infos,
+                    0,
+                    static_cast<size_t>(static_cast<size_t>(extra_info_size_) *
+                                        static_cast<size_t>(total_result_count)));
         dataset_results->ExtraInfos(extra_infos);
+        dataset_results->ExtraInfoSize(static_cast<int64_t>(extra_info_size_));
     }
-    for (int64_t j = count - 1; j >= 0; --j) {
-        const auto& top = search_result->Top();
-        dists[j] = top.first;
-        ids[j] = this->label_table_->GetLabelById(top.second);
-        result_inner_ids[j] = top.second;
-        if (extra_infos != nullptr) {
-            this->extra_infos_->GetExtraInfoById(top.second, extra_infos + extra_info_size_ * j);
+    for (int64_t j = 0; j < total_result_count; ++j) {
+        dists[j] = -1.0F;
+        ids[j] = -1;
+    }
+
+    Vector<InnerIdType> last_result_inner_ids(this->allocator_);
+
+    for (int64_t q_idx = 0; q_idx < query_count; ++q_idx) {
+        const auto* raw_query = get_data(query, q_idx);
+
+        InnerSearchParam search_param = base_search_param;
+
+        // Per-query entry point search through hierarchical graphs.
+        search_param.ep = this->entry_point_id_;
+        InnerSearchParam ep_search_param;
+        ep_search_param.ep = this->entry_point_id_;
+        ep_search_param.topk = 1;
+        ep_search_param.ef = 1;
+        ep_search_param.is_inner_id_allowed = nullptr;
+
+        auto vt = this->pool_->TakeOne();
+        for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
+            auto result = this->search_one_graph(raw_query,
+                                                 this->route_graphs_[i],
+                                                 this->basic_flatten_codes_,
+                                                 ep_search_param,
+                                                 vt,
+                                                 &ctx);
+            ep_search_param.ep = result->Top().second;
         }
-        search_result->Pop();
+        search_param.ep = ep_search_param.ep;
+
+        DistanceRecordVector rabitq_lower_bound_candidates(ctx.alloc);
+        auto* rabitq_lower_bound_candidates_ptr =
+            search_param.enable_rabitq_one_bit_search and use_reorder_ and
+                    search_param.enable_reorder and reorder_by_base_
+                ? &rabitq_lower_bound_candidates
+                : nullptr;
+
+        DistHeapPtr search_result;
+        bool brute_force_used = false;
+        if (params.brute_force_threshold > 0.0F) {
+            float valid_ratio = ft != nullptr ? ft->ValidRatio() : 1.0F;
+            if (valid_ratio <= params.brute_force_threshold) {
+                search_result = this->brute_force_search<InnerSearchMode::KNN_SEARCH>(
+                    raw_query, ft, k, 0.0F, &ctx);
+                brute_force_used = true;
+            }
+        }
+        if (not brute_force_used) {
+            search_result = this->search_one_graph(raw_query,
+                                                   this->bottom_graph_,
+                                                   this->basic_flatten_codes_,
+                                                   search_param,
+                                                   vt,
+                                                   &ctx,
+                                                   rabitq_lower_bound_candidates_ptr);
+        }
+
+        this->pool_->ReturnOne(vt);
+
+        if (not brute_force_used and use_reorder_ and search_param.enable_reorder) {
+            this->reorder(raw_query,
+                          this->get_reorder_codes(),
+                          search_result,
+                          k,
+                          nullptr,
+                          ctx,
+                          rabitq_lower_bound_candidates_ptr);
+        } else if (not brute_force_used and search_param.enable_reorder and
+                   params.rabitq_one_bit_search) {
+            this->reorder(raw_query, this->basic_flatten_codes_, search_result, k, nullptr, ctx);
+        }
+
+        while (search_result->Size() > k) {
+            search_result->Pop();
+        }
+
+        if (query_count == 1 && search_result->Empty()) {
+            auto dataset_result = DatasetImpl::MakeEmptyDataset();
+            dataset_result->Statistics(stats.Dump());
+            if (reasoning_ctx) {
+                reasoning_ctx->DiagnoseExpectedTargets();
+                dataset_result->Reasoning(reasoning_ctx->GenerateReport());
+            }
+            return dataset_result;
+        }
+
+        auto count = static_cast<int64_t>(search_result->Size());
+        if (reasoning_ctx) {
+            last_result_inner_ids.resize(static_cast<size_t>(count));
+        }
+
+        if (query_count == 1) {
+            if (dataset_results->GetDim() != count) {
+                auto [single_results, single_dists, single_ids] =
+                    create_fast_dataset(count, ctx.alloc);
+                dataset_results = single_results;
+                dists = single_dists;
+                ids = single_ids;
+            }
+            if (extra_info_size_ > 0 && this->extra_infos_ != nullptr && count > 0) {
+                extra_infos = static_cast<char*>(ctx.alloc->Allocate(
+                    static_cast<size_t>(extra_info_size_) * static_cast<size_t>(count)));
+                dataset_results->ExtraInfos(extra_infos);
+                dataset_results->ExtraInfoSize(static_cast<int64_t>(extra_info_size_));
+            }
+            for (int64_t j = count - 1; j >= 0; --j) {
+                const auto& top = search_result->Top();
+                dists[j] = top.first;
+                ids[j] = this->label_table_->GetLabelById(top.second);
+                if (reasoning_ctx) {
+                    last_result_inner_ids[static_cast<size_t>(j)] = top.second;
+                }
+                if (extra_infos != nullptr) {
+                    this->extra_infos_->GetExtraInfoById(top.second,
+                                                         extra_infos + extra_info_size_ * j);
+                }
+                search_result->Pop();
+            }
+        } else {
+            int64_t offset = q_idx * k;
+            for (int64_t j = count - 1; j >= 0; --j) {
+                const auto& top = search_result->Top();
+                dists[offset + j] = top.first;
+                ids[offset + j] = this->label_table_->GetLabelById(top.second);
+                if (reasoning_ctx) {
+                    last_result_inner_ids[static_cast<size_t>(j)] = top.second;
+                }
+                if (extra_infos != nullptr) {
+                    this->extra_infos_->GetExtraInfoById(
+                        top.second, extra_infos + extra_info_size_ * (offset + j));
+                }
+                search_result->Pop();
+            }
+        }
+    }
+
+    dataset_results->NumElements(query_count);
+    if (query_count > 1) {
+        dataset_results->Dim(k);
     }
     dataset_results->Statistics(stats.Dump());
 
-    // Generate reasoning report if reasoning context was created
+    // Generate reasoning report if reasoning context was created.
     if (reasoning_ctx) {
-        reasoning_ctx->MarkResult(result_inner_ids);
+        reasoning_ctx->MarkResult(last_result_inner_ids);
         reasoning_ctx->DiagnoseExpectedTargets();
         dataset_results->Reasoning(reasoning_ctx->GenerateReport());
     }
