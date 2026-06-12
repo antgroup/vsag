@@ -191,6 +191,8 @@ base->NumElements(num_vectors)->Dim(dim)->Ids(ids)
 | `ef_search` | int | —（必填） | 搜索前沿候选集的大小，越大召回越高、查询越慢。 |
 | `hops_limit` | int | 不限 | beam search 在返回当前前沿前允许的最大跳数。 |
 | `brute_force_threshold` | float | `0.0` | 选择率感知的暴搜回退开关。当取值 `> 0` 且当前 filter 的 `ValidRatio()` 小于等于 `brute_force_threshold` 时，搜索会**完全跳过图遍历**，直接在通过过滤的 id 上用最佳精度的 flatten 编码做一次暴力扫描（细节见下一节）。取值范围 `[0.0, 1.0]`；默认 `0.0` 表示关闭，保持原有行为。 |
+| `consider_duplicate` | bool | `true` | 当构建时启用了 `support_duplicate` 时，控制搜索结果是否包含与代表向量共享物理存储槽的重复 ID。设为 `false` 可抑制所有重复组成员，只返回代表向量。当 `support_duplicate` 为 `false` 时无效。 |
+| `max_duplicates_per_group` | int | `-1` | 每个重复组最多返回的重复 ID 数量。`-1` 表示不限制；`0` 表示抑制所有重复（在重复扩展方面等效于 `consider_duplicate: false`）。仅在 `consider_duplicate` 为 `true` 时生效。取值必须 `≥ -1`。 |
 | `rabitq_one_bit_search` | bool | `false` | RabitQ 一比特搜索路径，详见[量化章节](../quantization/README.md)。 |
 
 ```cpp

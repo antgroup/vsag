@@ -204,6 +204,8 @@ Search-time parameters live under the `hgraph` sub-object:
 | `ef_search` | int | — (required) | Size of the search frontier. Larger = higher recall, slower query. |
 | `hops_limit` | int | unlimited | Hard cap on the number of hops the beam search performs before returning the current frontier. |
 | `brute_force_threshold` | float | `0.0` | Selectivity-aware brute-force fallback. When `> 0` and the supplied filter's `ValidRatio()` is `≤ brute_force_threshold`, the search **bypasses the graph traversal entirely** and runs an exact scan over the valid ids using the best available flatten codes (see the section below). Must lie in `[0.0, 1.0]`; the default `0.0` disables the feature and preserves legacy behavior. |
+| `consider_duplicate` | bool | `true` | When `support_duplicate` is enabled at build time, controls whether search results include duplicate IDs that share a physical slot with their representative. Set to `false` to suppress all duplicate-group members and return only representatives. Has no effect when `support_duplicate` is `false`. |
+| `max_duplicates_per_group` | int | `-1` | Maximum number of duplicate IDs to return per duplicate group. `-1` means unlimited; `0` suppresses all duplicates (equivalent to `consider_duplicate: false` for duplicate expansion). Only takes effect when `consider_duplicate` is `true`. Must be `≥ -1`. |
 | `rabitq_one_bit_search` | bool | `false` | RabitQ one-bit search path; see the [Quantization chapter](../quantization/README.md). |
 
 ```cpp
