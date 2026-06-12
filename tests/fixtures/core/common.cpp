@@ -14,9 +14,10 @@
 
 #include "common.h"
 
+#include <fmt/ranges.h>
+
 #include <algorithm>
 #include <cstdint>
-#include <fmt/ranges.h>
 #include <fstream>
 #include <random>
 #include <sstream>
