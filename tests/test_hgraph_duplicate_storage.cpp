@@ -187,6 +187,32 @@ BuildIndexWithDuplicates(const TestVectors& tv, const std::string& build_param) 
 
 }  // namespace
 
+void
+ValidateSearchResult(const vsag::DatasetPtr& result, int64_t k, const vsag::IndexPtr& index) {
+    REQUIRE(result->GetDim() > 0);
+    auto count = result->GetDim();
+    REQUIRE(count <= k);
+
+    auto* ids = result->GetIds();
+    auto* dists = result->GetDistances();
+
+    // No duplicate IDs
+    std::set<int64_t> seen;
+    for (int64_t i = 0; i < count; ++i) {
+        REQUIRE(seen.insert(ids[i]).second);
+    }
+
+    // Distances monotonically non-decreasing
+    for (int64_t i = 1; i < count; ++i) {
+        REQUIRE(dists[i] >= dists[i - 1] - 1e-6F);
+    }
+
+    // All IDs exist in the index
+    for (int64_t i = 0; i < count; ++i) {
+        REQUIRE(index->CheckIdExist(ids[i]));
+    }
+}
+
 TEST_CASE("HGraph dedup storage: physical slot count is less than total count",
           "[ft][hgraph][duplicate][storage]") {
     auto tv = GenerateTestData(DIM, BASE_COUNT, DUP_COUNT);
@@ -229,11 +255,9 @@ TEST_CASE("HGraph dedup storage: search correctness", "[ft][hgraph][duplicate][s
 
         auto result = index->KnnSearch(query_ds, 10, search_param);
         REQUIRE(result.has_value());
-        auto count = result.value()->GetDim();
-        REQUIRE(count > 0);
+        ValidateSearchResult(result.value(), 10, index);
 
         auto* dists = result.value()->GetDistances();
-        // Query is identical to a base vector, so nearest should be ~0 distance
         REQUIRE(dists[0] < 0.01F);
     }
 }
@@ -272,6 +296,9 @@ TEST_CASE("HGraph dedup: max_duplicates_per_group = 0", "[ft][hgraph][duplicate]
         }
     }
 
+    // max_duplicates_per_group=0 must produce zero dup IDs
+    REQUIRE(dup_count_no == 0);
+
     auto param_expand = MakeSearchParam(200, true, -1);
     auto result_yes = index->KnnSearch(query_ds, 20, param_expand);
     REQUIRE(result_yes.has_value());
@@ -299,6 +326,7 @@ TEST_CASE("HGraph dedup: consider_duplicate = false reduces dup ids",
     auto param_off = MakeSearchParam(200, false, -1);
     auto result_off = index->KnnSearch(query_ds, 20, param_off);
     REQUIRE(result_off.has_value());
+    ValidateSearchResult(result_off.value(), 20, index);
     auto* ids_off = result_off.value()->GetIds();
     auto count_off = result_off.value()->GetDim();
     int64_t dup_count_off = 0;
@@ -307,6 +335,9 @@ TEST_CASE("HGraph dedup: consider_duplicate = false reduces dup ids",
             ++dup_count_off;
         }
     }
+
+    // consider_duplicate=false must produce zero dup IDs in results
+    REQUIRE(dup_count_off == 0);
 
     auto param_on = MakeSearchParam(200, true, -1);
     auto result_on = index->KnnSearch(query_ds, 20, param_on);
@@ -319,9 +350,7 @@ TEST_CASE("HGraph dedup: consider_duplicate = false reduces dup ids",
             ++dup_count_on;
         }
     }
-
-    // consider_duplicate=false should produce fewer dup ids
-    REQUIRE(dup_count_off < dup_count_on);
+    REQUIRE(dup_count_on > 0);
 }
 
 TEST_CASE("HGraph dedup: max_duplicates_per_group = 1", "[ft][hgraph][duplicate][search_limit]") {
@@ -491,7 +520,8 @@ TEST_CASE("HGraph dedup: high duplication ratio stress test", "[ft][hgraph][dupl
             ->Float32Vectors(tv.duplicates.data() + i * DIM)
             ->Ids(tv.dup_ids.data() + i)
             ->Owner(false);
-        index.value()->Add(ds);
+        auto add_result = index.value()->Add(ds);
+        REQUIRE(add_result.has_value());
     }
 
     auto query_ds = vsag::Dataset::Make();
@@ -985,6 +1015,14 @@ TEST_CASE("HGraph dedup: concurrent search while adding duplicates",
                     auto result = index.value()->KnnSearch(query_ds, 5, param);
                     if (!result.has_value()) {
                         search_errors++;
+                    } else {
+                        auto* dists = result.value()->GetDistances();
+                        auto cnt = result.value()->GetDim();
+                        for (int64_t j = 0; j < cnt; ++j) {
+                            if (dists[j] < 0.0F) {
+                                search_errors++;
+                            }
+                        }
                     }
                     search_count++;
                 } catch (...) {
@@ -1131,4 +1169,126 @@ TEST_CASE("HGraph dedup: triple duplicate chain A=B=C", "[ft][hgraph][duplicate]
         }
     }
     REQUIRE(dup_count_for_group0 <= 1);
+}
+
+TEST_CASE("HGraph dedup: per-ID self-distance consistency", "[ft][hgraph][duplicate][self_dist]") {
+    auto tv = GenerateTestData(DIM, BASE_COUNT, DUP_COUNT);
+    auto index = BuildIndexWithDuplicates(tv, MakeDefaultBuildParam(true));
+
+    auto search_param = MakeSearchParam(200, true, -1);
+
+    // Every base vector queried against itself must have distance ≈ 0.
+    // If slot redirect is corrupted, the stored codes belong to a different
+    // vector and the self-distance will be large.
+    for (int64_t i = 0; i < BASE_COUNT; ++i) {
+        auto query_ds = vsag::Dataset::Make();
+        query_ds->NumElements(1)->Dim(DIM)->Float32Vectors(tv.base.data() + i * DIM)->Owner(false);
+
+        auto result = index->KnnSearch(query_ds, 1, search_param);
+        REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetDim() == 1);
+        REQUIRE(result.value()->GetDistances()[0] < 0.1F);
+    }
+}
+
+TEST_CASE("HGraph dedup: serialize/deserialize result equivalence",
+          "[ft][hgraph][duplicate][serde_equiv]") {
+    auto tv = GenerateTestData(DIM, BASE_COUNT, DUP_COUNT);
+    auto build_param_str = MakeDefaultBuildParam(true);
+    auto index = BuildIndexWithDuplicates(tv, build_param_str);
+
+    auto search_param = MakeSearchParam(200, true, -1);
+
+    // Collect pre-serialization results for all queries
+    std::vector<std::vector<int64_t>> pre_ids(10);
+    std::vector<std::vector<float>> pre_dists(10);
+    for (int64_t q = 0; q < 10; ++q) {
+        auto query_ds = vsag::Dataset::Make();
+        query_ds->NumElements(1)
+            ->Dim(DIM)
+            ->Float32Vectors(tv.queries.data() + q * DIM)
+            ->Owner(false);
+        auto result = index->KnnSearch(query_ds, 10, search_param);
+        REQUIRE(result.has_value());
+        ValidateSearchResult(result.value(), 10, index);
+        auto count = result.value()->GetDim();
+        pre_ids[q].assign(result.value()->GetIds(), result.value()->GetIds() + count);
+        pre_dists[q].assign(result.value()->GetDistances(), result.value()->GetDistances() + count);
+    }
+
+    // Serialize and deserialize
+    auto binary = index->Serialize();
+    REQUIRE(binary.has_value());
+    auto index2 = vsag::Factory::CreateIndex("hgraph", build_param_str);
+    REQUIRE(index2.has_value());
+    index2.value()->Deserialize(binary.value());
+
+    // Post-serialization results must match exactly
+    for (int64_t q = 0; q < 10; ++q) {
+        auto query_ds = vsag::Dataset::Make();
+        query_ds->NumElements(1)
+            ->Dim(DIM)
+            ->Float32Vectors(tv.queries.data() + q * DIM)
+            ->Owner(false);
+        auto result = index2.value()->KnnSearch(query_ds, 10, search_param);
+        REQUIRE(result.has_value());
+        auto count = result.value()->GetDim();
+        REQUIRE(count == static_cast<int64_t>(pre_ids[q].size()));
+        auto* ids = result.value()->GetIds();
+        auto* dists = result.value()->GetDistances();
+        for (int64_t i = 0; i < count; ++i) {
+            REQUIRE(ids[i] == pre_ids[q][i]);
+            REQUIRE(std::abs(dists[i] - pre_dists[q][i]) < 1e-4F);
+        }
+    }
+}
+
+TEST_CASE("HGraph dedup: deserialize then add unique vectors stay intact",
+          "[ft][hgraph][duplicate][deser_add_unique]") {
+    auto tv = GenerateTestData(DIM, BASE_COUNT, DUP_COUNT);
+    auto build_param_str = MakeDefaultBuildParam(true);
+    auto index = BuildIndexWithDuplicates(tv, build_param_str);
+
+    auto binary = index->Serialize();
+    REQUIRE(binary.has_value());
+    auto index2 = vsag::Factory::CreateIndex("hgraph", build_param_str);
+    REQUIRE(index2.has_value());
+    index2.value()->Deserialize(binary.value());
+
+    // Add unique (non-duplicate) vectors after deserialization
+    constexpr int64_t NEW_COUNT = 20;
+    std::mt19937 rng(999);
+    std::uniform_real_distribution<float> dist(-1.0F, 1.0F);
+    std::vector<float> new_vecs(NEW_COUNT * DIM);
+    std::vector<int64_t> new_ids(NEW_COUNT);
+    for (int64_t i = 0; i < NEW_COUNT; ++i) {
+        for (int64_t d = 0; d < DIM; ++d) {
+            new_vecs[i * DIM + d] = dist(rng) * 100.0F;
+        }
+        new_ids[i] = BASE_COUNT + DUP_COUNT + 1000 + i;
+    }
+    for (int64_t i = 0; i < NEW_COUNT; ++i) {
+        auto ds = vsag::Dataset::Make();
+        ds->NumElements(1)
+            ->Dim(DIM)
+            ->Float32Vectors(new_vecs.data() + i * DIM)
+            ->Ids(new_ids.data() + i)
+            ->Owner(false);
+        auto add_result = index2.value()->Add(ds);
+        REQUIRE(add_result.has_value());
+    }
+
+    // Each new vector's self-query must return distance ≈ 0.
+    // If slot redirect is broken (e.g. next_physical_slot_=0 after deser),
+    // the codes would be written to wrong slots and distances would be large.
+    auto search_param = MakeSearchParam(200, true, -1);
+    for (int64_t i = 0; i < NEW_COUNT; ++i) {
+        auto query_ds = vsag::Dataset::Make();
+        query_ds->NumElements(1)->Dim(DIM)->Float32Vectors(new_vecs.data() + i * DIM)->Owner(false);
+        auto result = index2.value()->KnnSearch(query_ds, 1, search_param);
+        REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetDim() == 1);
+        REQUIRE(result.value()->GetDistances()[0] < 0.5F);
+        REQUIRE(result.value()->GetIds()[0] == new_ids[i]);
+    }
 }
