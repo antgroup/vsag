@@ -14,7 +14,7 @@
 
 #pragma once
 
-#include "hgraph_parameter.h"
+#include "hgraph/hgraph_parameter.h"
 #include "index_search_parameter.h"
 #include "inner_index_parameter.h"
 #include "typing.h"
