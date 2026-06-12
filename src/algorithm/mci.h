@@ -128,6 +128,15 @@ private:
     [[nodiscard]] bool
     has_clique_index(uint64_t total) const;
 
+    [[nodiscard]] uint64_t
+    total_logical_clique_count() const;
+
+    void
+    reset_delta_clique_index(uint64_t total);
+
+    void
+    ensure_delta_node_rows(uint64_t total);
+
     DistHeapPtr
     scan_knn_candidates(const FlattenInterfacePtr& codes,
                         const ComputerInterfacePtr& computer,
@@ -176,6 +185,27 @@ private:
     [[nodiscard]] DatasetPtr
     build_dataset_from_heap(DistHeapPtr& heap) const;
 
+    void
+    collect_node_clique_ids(InnerIdType node_id, Vector<InnerIdType>& clique_ids) const;
+
+    void
+    incremental_update_clique(InnerIdType new_inner_id, const float* vector);
+
+    [[nodiscard]] Vector<InnerIdType>
+    find_knn_for_new_node(InnerIdType new_inner_id, const float* vector) const;
+
+    bool
+    try_join_existing_clique(InnerIdType new_inner_id, const Vector<InnerIdType>& knn_ids);
+
+    void
+    build_incremental_clique(InnerIdType new_inner_id, const Vector<InnerIdType>& knn_ids);
+
+    void
+    append_node_to_clique(InnerIdType node_id, InnerIdType clique_id);
+
+    void
+    append_new_clique(const Vector<InnerIdType>& members);
+
 private:
     FlattenInterfacePtr base_codes_{nullptr};
     FlattenInterfacePtr reorder_codes_{nullptr};
@@ -187,11 +217,16 @@ private:
     Vector<InnerIdType> p_node_to_cid_;
     Vector<InnerIdType> node_to_cids_;
     uint64_t total_clique_count_{0};
+    Vector<Vector<InnerIdType>> delta_cliques_;
+    Vector<Vector<InnerIdType>> delta_clique_extra_;
+    Vector<Vector<InnerIdType>> delta_node_to_cids_;
 
     uint64_t max_degree_{32};
     uint64_t mcs_{200};
     uint64_t clique_max_{50};
     float alpha_{1.2F};
+    float join_ratio_threshold_{0.6F};
+    uint64_t added_mct_{3};
     std::string knng_path_{};
     std::string clique_path_{};
     bool reorder_by_base_{false};

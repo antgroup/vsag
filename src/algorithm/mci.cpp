@@ -60,6 +60,8 @@ const std::string MCI_PARAMS_TEMPLATE = R"(
         "mcs": 200,
         "clique_max": 50,
         "alpha": 1.2,
+        "join_ratio_threshold": 0.6,
+        "added_mct": 3,
         "knng_path": "",
         "clique_path": "",
         "use_hgraph_hybrid": false,
@@ -456,6 +458,36 @@ struct mci_search_candidate {
     bool expanded{false};
 };
 
+void
+write_nested_vector(StreamWriter& writer, const Vector<Vector<InnerIdType>>& rows) {
+    const auto row_count = static_cast<uint64_t>(rows.size());
+    StreamWriter::WriteObj(writer, row_count);
+    for (const auto& row : rows) {
+        StreamWriter::WriteVector(writer, row);
+    }
+}
+
+void
+read_nested_vector(StreamReader& reader, Vector<Vector<InnerIdType>>& rows, Allocator* allocator) {
+    uint64_t row_count = 0;
+    StreamReader::ReadObj(reader, row_count);
+    rows.clear();
+    rows.reserve(row_count);
+    for (uint64_t i = 0; i < row_count; ++i) {
+        rows.emplace_back(allocator);
+        StreamReader::ReadVector(reader, rows.back());
+    }
+}
+
+uint64_t
+nested_vector_memory(const Vector<Vector<InnerIdType>>& rows) {
+    uint64_t memory = rows.capacity() * sizeof(Vector<InnerIdType>);
+    for (const auto& row : rows) {
+        memory += row.capacity() * sizeof(InnerIdType);
+    }
+    return memory;
+}
+
 }  // namespace
 
 MCI::MCI(const MCIParameterPtr& param, const IndexCommonParam& common_param)
@@ -464,10 +496,15 @@ MCI::MCI(const MCIParameterPtr& param, const IndexCommonParam& common_param)
       maxcs_(common_param.allocator_.get()),
       p_node_to_cid_(common_param.allocator_.get()),
       node_to_cids_(common_param.allocator_.get()),
+      delta_cliques_(common_param.allocator_.get()),
+      delta_clique_extra_(common_param.allocator_.get()),
+      delta_node_to_cids_(common_param.allocator_.get()),
       max_degree_(param->max_degree),
       mcs_(param->mcs),
       clique_max_(param->clique_max),
       alpha_(param->alpha),
+      join_ratio_threshold_(param->join_ratio_threshold),
+      added_mct_(param->added_mct),
       knng_path_(param->knng_path),
       clique_path_(param->clique_path),
       reorder_by_base_(param->reorder_source == HGRAPH_REORDER_SOURCE_BASE),
@@ -531,14 +568,114 @@ MCI::Train(const DatasetPtr& data) {
 
 std::vector<int64_t>
 MCI::Add(const DatasetPtr& data, AddMode mode) {
-    (void)mode;
-    if (this->hgraph_index_ != nullptr) {
-        auto hgraph_failed_ids = this->hgraph_index_->Add(data, mode);
+    CHECK_ARGUMENT(data_type_ == DataTypes::DATA_TYPE_FLOAT,
+                   fmt::format("MCI currently supports only {} datatype", DATATYPE_FLOAT32));
+    const auto* vectors = data->GetFloat32Vectors();
+    CHECK_ARGUMENT(vectors != nullptr, "float vectors are nullptr");
+    const auto* labels = data->GetIds();
+    CHECK_ARGUMENT(labels != nullptr, "base.ids is nullptr");
+    auto base_dim = data->GetDim();
+    CHECK_ARGUMENT(base_dim == dim_,
+                   fmt::format("base.dim({}) must be equal to index.dim({})", base_dim, dim_));
+
+    const auto total_new = data->GetNumElements();
+    bool hgraph_added_batch = false;
+    auto add_hgraph_vector = [&](int64_t local_id, const float* vector) {
+        if (this->hgraph_index_ == nullptr or hgraph_added_batch) {
+            return;
+        }
+        auto hgraph_data = Dataset::Make();
+        hgraph_data->NumElements(1)
+            ->Dim(this->dim_)
+            ->Ids(labels + local_id)
+            ->Float32Vectors(vector)
+            ->Owner(false);
+        auto hgraph_failed_ids = this->hgraph_index_->Add(hgraph_data, mode);
         CHECK_ARGUMENT(hgraph_failed_ids.empty(),
-                       "mci hgraph hybrid sub-index failed to add all vectors");
+                       "mci hgraph hybrid sub-index failed to add vector");
+        CHECK_ARGUMENT(this->hgraph_index_->GetNumElements() == this->GetNumElements(),
+                       "mci hgraph hybrid sub-index size mismatch after add");
+    };
+
+    std::unique_lock<std::shared_mutex> add_lock(this->add_mutex_);
+    if (this->total_count_.load() == 0) {
+        this->Train(data);
     }
-    auto failed_ids = this->add_dataset(data, true, nullptr);
-    this->clear_clique_index();
+    const auto start_total = this->total_count_.load();
+    const auto had_clique = this->has_clique_index(start_total);
+
+    if (this->hgraph_index_ != nullptr) {
+        bool can_add_hgraph_batch = true;
+        Vector<int64_t> batch_labels(this->allocator_);
+        batch_labels.reserve(static_cast<uint64_t>(total_new));
+        {
+            std::lock_guard<std::shared_mutex> label_lock(this->label_lookup_mutex_);
+            for (int64_t local_id = 0; local_id < total_new; ++local_id) {
+                const auto label = labels[local_id];
+                if (this->label_table_->CheckLabel(label)) {
+                    can_add_hgraph_batch = false;
+                    break;
+                }
+                batch_labels.push_back(label);
+            }
+        }
+        if (can_add_hgraph_batch) {
+            std::sort(batch_labels.begin(), batch_labels.end());
+            can_add_hgraph_batch =
+                std::adjacent_find(batch_labels.begin(), batch_labels.end()) == batch_labels.end();
+        }
+        if (can_add_hgraph_batch) {
+            auto hgraph_failed_ids = this->hgraph_index_->Add(data, mode);
+            CHECK_ARGUMENT(hgraph_failed_ids.empty(),
+                           "mci hgraph hybrid sub-index failed to add all vectors");
+            hgraph_added_batch = true;
+        }
+    }
+
+    std::vector<int64_t> failed_ids;
+    for (int64_t local_id = 0; local_id < total_new; ++local_id) {
+        const auto label = labels[local_id];
+        {
+            std::lock_guard<std::shared_mutex> label_lock(this->label_lookup_mutex_);
+            if (this->label_table_->CheckLabel(label)) {
+                failed_ids.emplace_back(label);
+                continue;
+            }
+        }
+
+        const auto inner_id = static_cast<InnerIdType>(this->total_count_.load());
+        this->resize(inner_id + 1);
+        {
+            std::lock_guard<std::shared_mutex> label_lock(this->label_lookup_mutex_);
+            this->label_table_->Insert(inner_id, label);
+        }
+        const auto* vector = vectors + local_id * dim_;
+        this->base_codes_->InsertVector(vector, inner_id);
+        if (this->reorder_codes_ != nullptr) {
+            this->reorder_codes_->InsertVector(vector, inner_id);
+        }
+        this->total_count_.fetch_add(1);
+
+        // Extend p_node_to_cid_ for the new node (initially no clique membership).
+        {
+            std::unique_lock<std::shared_mutex> lock(this->global_mutex_);
+            this->p_node_to_cid_.push_back(this->p_node_to_cid_.back());
+            this->delta_node_to_cids_.emplace_back(this->allocator_);
+        }
+        add_hgraph_vector(local_id, vector);
+
+        // Incrementally update the clique index if one existed before Add.
+        if (had_clique) {
+            this->incremental_update_clique(inner_id, vector);
+        }
+    }
+    if (hgraph_added_batch) {
+        CHECK_ARGUMENT(this->hgraph_index_->GetNumElements() == this->GetNumElements(),
+                       "mci hgraph hybrid sub-index size mismatch after batch add");
+    }
+
+    // If there was no clique index before, we still don't have one —
+    // the caller should use Build() on the first batch.
     this->cal_memory_usage();
     return failed_ids;
 }
@@ -601,6 +738,7 @@ MCI::clear_clique_index() {
     this->p_maxc_.push_back(0);
     this->p_node_to_cid_.assign(this->total_count_.load() + 1, 0);
     this->total_clique_count_ = 0;
+    this->reset_delta_clique_index(this->total_count_.load());
 }
 
 void
@@ -668,6 +806,7 @@ MCI::build_clique_index(const float* vectors,
     this->p_node_to_cid_.swap(new_p_node_to_cid);
     this->node_to_cids_.swap(new_node_to_cids);
     this->total_clique_count_ = cliques.size();
+    this->reset_delta_clique_index(total);
 }
 
 void
@@ -743,6 +882,7 @@ MCI::load_clique_index(const std::string& clique_path, uint64_t total) {
     this->p_node_to_cid_.swap(new_p_node_to_cid);
     this->node_to_cids_.swap(new_node_to_cids);
     this->total_clique_count_ = this->p_maxc_.size() - 1;
+    this->reset_delta_clique_index(total);
 }
 
 Vector<Vector<InnerIdType>>
@@ -1371,9 +1511,38 @@ MCI::enumerate_maximal_cliques(const Vector<Vector<InnerIdType>>& graph,
 
 bool
 MCI::has_clique_index(uint64_t total) const {
-    return this->total_clique_count_ > 0 and
+    return this->total_logical_clique_count() > 0 and
            this->p_maxc_.size() == this->total_clique_count_ + 1 and
-           this->p_node_to_cid_.size() == total + 1;
+           this->p_node_to_cid_.size() == total + 1 and this->delta_node_to_cids_.size() == total;
+}
+
+uint64_t
+MCI::total_logical_clique_count() const {
+    return this->total_clique_count_ + this->delta_cliques_.size();
+}
+
+void
+MCI::reset_delta_clique_index(uint64_t total) {
+    this->delta_cliques_.clear();
+    this->delta_clique_extra_.clear();
+    this->delta_clique_extra_.resize(this->total_clique_count_,
+                                     Vector<InnerIdType>(this->allocator_));
+    this->delta_node_to_cids_.clear();
+    this->delta_node_to_cids_.reserve(total);
+    for (uint64_t i = 0; i < total; ++i) {
+        this->delta_node_to_cids_.emplace_back(this->allocator_);
+    }
+}
+
+void
+MCI::ensure_delta_node_rows(uint64_t total) {
+    while (this->delta_node_to_cids_.size() < total) {
+        this->delta_node_to_cids_.emplace_back(this->allocator_);
+    }
+    if (this->delta_clique_extra_.size() < this->total_clique_count_) {
+        this->delta_clique_extra_.resize(this->total_clique_count_,
+                                         Vector<InnerIdType>(this->allocator_));
+    }
 }
 
 DistHeapPtr
@@ -1420,7 +1589,7 @@ MCI::search_clique_candidates(const ComputerInterfacePtr& computer,
     auto heap = DistanceHeap::MakeInstanceBySize<true, true>(this->allocator_, candidate_limit);
     const auto total = static_cast<InnerIdType>(this->total_count_.load());
     Vector<uint8_t> visited_nodes(total, 0, this->allocator_);
-    Vector<uint8_t> visited_cliques(this->total_clique_count_, 0, this->allocator_);
+    Vector<uint8_t> visited_cliques(this->total_logical_clique_count(), 0, this->allocator_);
     Vector<mci_search_candidate> candidates(this->allocator_);
     candidates.reserve(static_cast<uint64_t>(candidate_limit));
 
@@ -1502,26 +1671,43 @@ MCI::search_clique_candidates(const ComputerInterfacePtr& computer,
 
     const auto hop_limit = std::min<uint32_t>(
         search_params.hops_limit, static_cast<uint32_t>(std::numeric_limits<int32_t>::max()));
+    auto visit_clique = [&](InnerIdType clique_id) {
+        if (clique_id >= visited_cliques.size() or visited_cliques[clique_id] != 0) {
+            return;
+        }
+        visited_cliques[clique_id] = 1;
+        ++hops;
+        if (clique_id < this->total_clique_count_) {
+            const auto node_begin = this->p_maxc_[clique_id];
+            const auto node_end = this->p_maxc_[clique_id + 1];
+            for (auto node_offset = node_begin; node_offset < node_end; ++node_offset) {
+                try_visit(this->maxcs_[node_offset]);
+            }
+            if (clique_id < this->delta_clique_extra_.size()) {
+                for (auto inner_id : this->delta_clique_extra_[clique_id]) {
+                    try_visit(inner_id);
+                }
+            }
+        } else {
+            const auto delta_id = clique_id - this->total_clique_count_;
+            if (delta_id < this->delta_cliques_.size()) {
+                for (auto inner_id : this->delta_cliques_[delta_id]) {
+                    try_visit(inner_id);
+                }
+            }
+        }
+    };
+
     while (hops < hop_limit) {
         auto* current = get_closest_unexpanded();
         if (current == nullptr) {
             break;
         }
         const auto inner_id = current->inner_id;
-        const auto clique_begin = this->p_node_to_cid_[inner_id];
-        const auto clique_end = this->p_node_to_cid_[inner_id + 1];
-        for (auto offset = clique_begin; offset < clique_end; ++offset) {
-            const auto clique_id = this->node_to_cids_[offset];
-            if (visited_cliques[clique_id] != 0) {
-                continue;
-            }
-            visited_cliques[clique_id] = 1;
-            ++hops;
-            const auto node_begin = this->p_maxc_[clique_id];
-            const auto node_end = this->p_maxc_[clique_id + 1];
-            for (auto node_offset = node_begin; node_offset < node_end; ++node_offset) {
-                try_visit(this->maxcs_[node_offset]);
-            }
+        Vector<InnerIdType> clique_ids(this->allocator_);
+        this->collect_node_clique_ids(inner_id, clique_ids);
+        for (auto clique_id : clique_ids) {
+            visit_clique(clique_id);
             if (hops >= hop_limit) {
                 break;
             }
@@ -1622,6 +1808,346 @@ MCI::build_dataset_from_heap(DistHeapPtr& heap) const {
         heap->Pop();
     }
     return dataset_results;
+}
+
+void
+MCI::collect_node_clique_ids(InnerIdType node_id, Vector<InnerIdType>& clique_ids) const {
+    if (node_id + 1 < this->p_node_to_cid_.size()) {
+        const auto begin = this->p_node_to_cid_[node_id];
+        const auto end = this->p_node_to_cid_[node_id + 1];
+        for (auto offset = begin; offset < end; ++offset) {
+            clique_ids.push_back(this->node_to_cids_[offset]);
+        }
+    }
+    if (node_id < this->delta_node_to_cids_.size()) {
+        const auto& delta_ids = this->delta_node_to_cids_[node_id];
+        clique_ids.insert(clique_ids.end(), delta_ids.begin(), delta_ids.end());
+    }
+}
+
+Vector<InnerIdType>
+MCI::find_knn_for_new_node(InnerIdType new_inner_id, const float* vector) const {
+    Vector<InnerIdType> knn_ids(this->allocator_);
+    const auto total = this->total_count_.load();
+    // The new node has already been inserted, so exclude it from its own neighborhood.
+    if (total <= 1) {
+        return knn_ids;
+    }
+    const auto k = std::min<uint64_t>(this->mcs_, total - 1);
+    if (k == 0) {
+        return knn_ids;
+    }
+
+    // Prefer the embedded HGraph sub-index when available; it returns labels,
+    // which we round-trip back into MCI inner ids via the shared label table.
+    const auto hgraph_count =
+        this->hgraph_index_ == nullptr ? 0 : this->hgraph_index_->GetNumElements();
+    if (hgraph_count >= static_cast<int64_t>(total)) {
+        auto query = Dataset::Make();
+        query->NumElements(1)->Dim(this->dim_)->Float32Vectors(vector)->Owner(false);
+        const auto hgraph_total = static_cast<uint64_t>(hgraph_count);
+        auto query_k = std::min<uint64_t>(k + 1, hgraph_total);
+        while (true) {
+            auto result = this->hgraph_index_->KnnSearch(
+                query, static_cast<int64_t>(query_k), this->get_hgraph_search_params(""), nullptr);
+            if (result == nullptr) {
+                break;
+            }
+            knn_ids.clear();
+            const auto* ids = result->GetIds();
+            const auto count = result->GetDim();
+            knn_ids.reserve(static_cast<uint64_t>(count));
+            for (int64_t i = 0; i < count; ++i) {
+                auto [found, inner_id] = this->label_table_->TryGetIdByLabel(ids[i]);
+                if (found and inner_id < total and inner_id != new_inner_id) {
+                    knn_ids.push_back(inner_id);
+                }
+            }
+            if (knn_ids.size() >= k or query_k == hgraph_total) {
+                break;
+            }
+            const auto next_query_k = std::min<uint64_t>(query_k * 2, hgraph_total);
+            if (next_query_k == query_k) {
+                break;
+            }
+            query_k = next_query_k;
+        }
+    } else {
+        // Fall back to MCI's own search over base codes; the heap holds inner ids.
+        QueryContext ctx;
+        ctx.alloc = this->allocator_;
+        uint32_t dist_cmp = 0;
+        auto computer = this->base_codes_->FactoryComputer(vector);
+        const auto candidate_limit = static_cast<int64_t>(k + 1);
+        DistHeapPtr heap = nullptr;
+        if (this->has_clique_index(total) and static_cast<int64_t>(total) > candidate_limit) {
+            uint32_t hops = 0;
+            auto search_params = MCISearchParameters::FromJson("");
+            std::shared_lock<std::shared_mutex> lock(this->global_mutex_);
+            heap = this->search_clique_candidates(computer,
+                                                  nullptr,
+                                                  nullptr,
+                                                  search_params,
+                                                  candidate_limit,
+                                                  ctx,
+                                                  nullptr,
+                                                  dist_cmp,
+                                                  hops);
+        } else {
+            heap = this->scan_knn_candidates(this->base_codes_,
+                                             computer,
+                                             nullptr,
+                                             candidate_limit,
+                                             false,
+                                             ctx,
+                                             nullptr,
+                                             dist_cmp);
+        }
+        knn_ids.reserve(heap->Size());
+        while (not heap->Empty()) {
+            const auto inner_id = heap->Top().second;
+            if (inner_id != new_inner_id) {
+                knn_ids.push_back(inner_id);
+            }
+            heap->Pop();
+        }
+    }
+
+    std::sort(knn_ids.begin(), knn_ids.end());
+    knn_ids.erase(std::unique(knn_ids.begin(), knn_ids.end()), knn_ids.end());
+    return knn_ids;
+}
+
+void
+MCI::append_node_to_clique(InnerIdType node_id, InnerIdType clique_id) {
+    std::unique_lock<std::shared_mutex> lock(this->global_mutex_);
+    this->ensure_delta_node_rows(this->total_count_.load());
+    if (clique_id >= this->total_logical_clique_count() or
+        node_id >= this->delta_node_to_cids_.size()) {
+        return;
+    }
+
+    auto& node_cliques = this->delta_node_to_cids_[node_id];
+    if (std::find(node_cliques.begin(), node_cliques.end(), clique_id) != node_cliques.end()) {
+        return;  // already a member of this clique
+    }
+
+    if (clique_id < this->total_clique_count_) {
+        auto& members = this->delta_clique_extra_[clique_id];
+        if (std::find(members.begin(), members.end(), node_id) == members.end()) {
+            members.push_back(node_id);
+        }
+    } else {
+        const auto delta_id = clique_id - this->total_clique_count_;
+        auto& members = this->delta_cliques_[delta_id];
+        if (std::find(members.begin(), members.end(), node_id) == members.end()) {
+            members.push_back(node_id);
+        }
+    }
+    node_cliques.push_back(clique_id);
+}
+
+void
+MCI::append_new_clique(const Vector<InnerIdType>& members) {
+    if (members.empty()) {
+        return;
+    }
+    std::unique_lock<std::shared_mutex> lock(this->global_mutex_);
+    this->ensure_delta_node_rows(this->total_count_.load());
+    const auto new_clique_id = static_cast<InnerIdType>(this->total_logical_clique_count());
+
+    Vector<InnerIdType> normalized(this->allocator_);
+    normalized.assign(members.begin(), members.end());
+    std::sort(normalized.begin(), normalized.end());
+    normalized.erase(std::unique(normalized.begin(), normalized.end()), normalized.end());
+    this->delta_cliques_.push_back(std::move(normalized));
+
+    for (auto node_id : this->delta_cliques_.back()) {
+        if (node_id >= this->delta_node_to_cids_.size()) {
+            continue;
+        }
+        auto& node_cliques = this->delta_node_to_cids_[node_id];
+        if (std::find(node_cliques.begin(), node_cliques.end(), new_clique_id) ==
+            node_cliques.end()) {
+            node_cliques.push_back(new_clique_id);
+        }
+    }
+}
+
+bool
+MCI::try_join_existing_clique(InnerIdType new_inner_id, const Vector<InnerIdType>& knn_ids) {
+    if (knn_ids.empty()) {
+        return false;
+    }
+
+    // Gather one vote per (KNN neighbor, clique) membership. After sorting, each duplicate
+    // run is exactly |members(C) intersect KNN(A)| for that clique.
+    Vector<InnerIdType> candidate_cliques(this->allocator_);
+    {
+        std::shared_lock<std::shared_mutex> lock(this->global_mutex_);
+        for (auto neighbor : knn_ids) {
+            if (neighbor >= this->total_count_.load()) {
+                continue;
+            }
+            this->collect_node_clique_ids(neighbor, candidate_cliques);
+        }
+    }
+    if (candidate_cliques.empty()) {
+        return false;
+    }
+    std::sort(candidate_cliques.begin(), candidate_cliques.end());
+
+    // Evaluate overlap = votes(C) / |members(C)| for each candidate clique.
+    // Keep only the top added_mct_ cliques by intersection size.
+    Vector<std::pair<uint64_t, InnerIdType>> targets(this->allocator_);
+    {
+        std::shared_lock<std::shared_mutex> lock(this->global_mutex_);
+        const auto logical_clique_count = this->total_logical_clique_count();
+        auto iter = candidate_cliques.begin();
+        while (iter != candidate_cliques.end()) {
+            const auto clique_id = *iter;
+            auto next = iter;
+            while (next != candidate_cliques.end() and *next == clique_id) {
+                ++next;
+            }
+            const auto inter = static_cast<uint64_t>(std::distance(iter, next));
+            iter = next;
+            if (clique_id >= logical_clique_count) {
+                continue;
+            }
+            uint64_t member_count = 0;
+            if (clique_id < this->total_clique_count_) {
+                const auto begin = this->p_maxc_[clique_id];
+                const auto end = this->p_maxc_[clique_id + 1];
+                member_count = end - begin;
+                if (clique_id < this->delta_clique_extra_.size()) {
+                    member_count += this->delta_clique_extra_[clique_id].size();
+                }
+            } else {
+                const auto delta_id = clique_id - this->total_clique_count_;
+                if (delta_id >= this->delta_cliques_.size()) {
+                    continue;
+                }
+                member_count = this->delta_cliques_[delta_id].size();
+            }
+            if (member_count == 0) {
+                continue;
+            }
+            const auto ratio = static_cast<float>(inter) / static_cast<float>(member_count);
+            if (ratio >= this->join_ratio_threshold_) {
+                targets.emplace_back(inter, clique_id);
+            }
+        }
+    }
+    if (targets.empty()) {
+        return false;
+    }
+
+    std::sort(targets.begin(),
+              targets.end(),
+              [](const std::pair<uint64_t, InnerIdType>& lhs,
+                 const std::pair<uint64_t, InnerIdType>& rhs) {
+                  if (lhs.first != rhs.first) {
+                      return lhs.first > rhs.first;
+                  }
+                  return lhs.second < rhs.second;
+              });
+    const auto target_count = std::min<uint64_t>(this->added_mct_, targets.size());
+    for (uint64_t i = 0; i < target_count; ++i) {
+        this->append_node_to_clique(new_inner_id, targets[i].second);
+    }
+    return true;
+}
+
+void
+MCI::build_incremental_clique(InnerIdType new_inner_id, const Vector<InnerIdType>& knn_ids) {
+    Vector<InnerIdType> members(this->allocator_);
+    if (knn_ids.empty()) {
+        members.push_back(new_inner_id);
+        this->append_new_clique(members);
+        return;
+    }
+
+    // Order neighbors by ascending distance to the new node.
+    Vector<std::pair<float, InnerIdType>> sorted_neighbors(this->allocator_);
+    sorted_neighbors.reserve(knn_ids.size());
+    for (auto neighbor : knn_ids) {
+        sorted_neighbors.emplace_back(this->base_codes_->ComputePairVectors(new_inner_id, neighbor),
+                                      neighbor);
+    }
+    std::sort(
+        sorted_neighbors.begin(),
+        sorted_neighbors.end(),
+        [](const std::pair<float, InnerIdType>& lhs, const std::pair<float, InnerIdType>& rhs) {
+            if (lhs.first != rhs.first) {
+                return lhs.first < rhs.first;
+            }
+            return lhs.second < rhs.second;
+        });
+
+    const auto total = this->total_count_.load();
+    const auto candidate_limit = std::min<uint64_t>(this->mcs_, total > 0 ? total - 1 : 0);
+    const auto clique_min =
+        std::max<uint64_t>(2, std::min<uint64_t>({this->clique_max_, candidate_limit + 1, total}));
+    const auto nearest_distance = sorted_neighbors.front().first;
+
+    // Greedily grow a clique around the new node, escalating alpha (mirroring the
+    // build-time enumerator) until it reaches clique_min, capped at 100.
+    Vector<InnerIdType> best(this->allocator_);
+    float now_alpha = std::max(1.2F, this->alpha_);
+    while (true) {
+        const auto distance_limit = nearest_distance * now_alpha;
+        Vector<InnerIdType> clique(this->allocator_);
+        clique.push_back(new_inner_id);
+        for (const auto& [distance, neighbor] : sorted_neighbors) {
+            if (distance > distance_limit) {
+                break;
+            }
+            bool connected = true;
+            for (auto member : clique) {
+                if (member == new_inner_id) {
+                    continue;
+                }
+                if (this->base_codes_->ComputePairVectors(member, neighbor) > distance_limit) {
+                    connected = false;
+                    break;
+                }
+            }
+            if (connected) {
+                clique.push_back(neighbor);
+            }
+        }
+        if (clique.size() > best.size()) {
+            best.swap(clique);
+        }
+        if (best.size() >= clique_min or now_alpha > 100.0F) {
+            break;
+        }
+        now_alpha *= 2.0F;
+    }
+
+    // High-alpha fallback: guarantee the new node is covered by pairing it with
+    // its single nearest neighbor.
+    if (best.size() < 2) {
+        best.clear();
+        best.push_back(new_inner_id);
+        best.push_back(sorted_neighbors.front().second);
+    }
+    this->append_new_clique(best);
+}
+
+void
+MCI::incremental_update_clique(InnerIdType new_inner_id, const float* vector) {
+    auto knn_ids = this->find_knn_for_new_node(new_inner_id, vector);
+    if (knn_ids.empty()) {
+        Vector<InnerIdType> singleton(this->allocator_);
+        singleton.push_back(new_inner_id);
+        this->append_new_clique(singleton);
+        return;
+    }
+    if (not this->try_join_existing_clique(new_inner_id, knn_ids)) {
+        this->build_incremental_clique(new_inner_id, knn_ids);
+    }
 }
 
 DatasetPtr
@@ -1752,7 +2278,9 @@ MCI::SearchWithRequest(const SearchRequest& request) const {
     stats["seed_count"].SetInt(static_cast<int64_t>(search_params.seed_count));
     stats["rabitq_one_bit_search"].SetBool(search_params.rabitq_one_bit_search);
     stats["hops"].SetInt(static_cast<int64_t>(hops));
-    stats["total_clique_count"].SetInt(static_cast<int64_t>(this->total_clique_count_));
+    stats["total_clique_count"].SetInt(static_cast<int64_t>(this->total_logical_clique_count()));
+    stats["base_clique_count"].SetInt(static_cast<int64_t>(this->total_clique_count_));
+    stats["delta_clique_count"].SetInt(static_cast<int64_t>(this->delta_cliques_.size()));
     stats["mci_hybrid_route"].SetString("mci");
     stats["mci_hybrid_valid_ratio"].SetFloat(hybrid_valid_ratio);
     stats["mci_hybrid_threshold"].SetFloat(this->hgraph_valid_ratio_threshold_);
@@ -1771,6 +2299,15 @@ MCI::Serialize(StreamWriter& writer) const {
     StreamWriter::WriteVector(writer, this->maxcs_);
     StreamWriter::WriteVector(writer, this->p_node_to_cid_);
     StreamWriter::WriteVector(writer, this->node_to_cids_);
+    write_nested_vector(writer, this->delta_cliques_);
+    write_nested_vector(writer, this->delta_clique_extra_);
+    write_nested_vector(writer, this->delta_node_to_cids_);
+    uint64_t hgraph_serialized_size = 0;
+    if (this->hgraph_index_ != nullptr) {
+        const auto hgraph_begin = writer.GetCursor();
+        this->hgraph_index_->Serialize(writer);
+        hgraph_serialized_size = writer.GetCursor() - hgraph_begin;
+    }
 
     auto metadata = std::make_shared<Metadata>();
     JsonType basic_info;
@@ -1778,6 +2315,11 @@ MCI::Serialize(StreamWriter& writer) const {
     basic_info["total_count"].SetInt(static_cast<int64_t>(this->total_count_.load()));
     basic_info["max_capacity"].SetInt(static_cast<int64_t>(this->max_capacity_.load()));
     basic_info["total_clique_count"].SetInt(static_cast<int64_t>(this->total_clique_count_));
+    basic_info["lazy_delta_version"].SetInt(1);
+    basic_info["delta_clique_count"].SetInt(static_cast<int64_t>(this->delta_cliques_.size()));
+    if (hgraph_serialized_size > 0) {
+        basic_info["hgraph_serialized_size"].SetInt(static_cast<int64_t>(hgraph_serialized_size));
+    }
     basic_info[INDEX_PARAM].SetString(this->create_param_ptr_->ToString());
     metadata->Set(BASIC_INFO, basic_info);
     auto footer = std::make_shared<Footer>(metadata);
@@ -1812,6 +2354,11 @@ MCI::Deserialize(StreamReader& reader) {
     this->total_count_.store(static_cast<uint64_t>(basic_info["total_count"].GetInt()));
     this->max_capacity_.store(static_cast<uint64_t>(basic_info["max_capacity"].GetInt()));
     this->total_clique_count_ = static_cast<uint64_t>(basic_info["total_clique_count"].GetInt());
+    uint64_t hgraph_serialized_size = 0;
+    if (basic_info.Contains("hgraph_serialized_size")) {
+        hgraph_serialized_size =
+            static_cast<uint64_t>(basic_info["hgraph_serialized_size"].GetInt());
+    }
 
     this->base_codes_->Deserialize(buffer_reader);
     if (this->reorder_codes_ != nullptr) {
@@ -1822,7 +2369,25 @@ MCI::Deserialize(StreamReader& reader) {
     StreamReader::ReadVector(buffer_reader, this->maxcs_);
     StreamReader::ReadVector(buffer_reader, this->p_node_to_cid_);
     StreamReader::ReadVector(buffer_reader, this->node_to_cids_);
-    if (this->hgraph_index_ != nullptr and not this->hgraph_index_path_.empty()) {
+    if (basic_info.Contains("lazy_delta_version")) {
+        read_nested_vector(buffer_reader, this->delta_cliques_, this->allocator_);
+        read_nested_vector(buffer_reader, this->delta_clique_extra_, this->allocator_);
+        read_nested_vector(buffer_reader, this->delta_node_to_cids_, this->allocator_);
+        this->ensure_delta_node_rows(this->total_count_.load());
+    } else {
+        this->reset_delta_clique_index(this->total_count_.load());
+    }
+    if (hgraph_serialized_size > 0) {
+        const auto hgraph_begin = buffer_reader.GetCursor();
+        if (this->hgraph_index_ != nullptr) {
+            auto hgraph_reader = buffer_reader.Slice(hgraph_serialized_size);
+            this->hgraph_index_->Deserialize(hgraph_reader);
+        }
+        buffer_reader.Seek(hgraph_begin + hgraph_serialized_size);
+    }
+    if (this->hgraph_index_ != nullptr and
+        this->hgraph_index_->GetNumElements() != this->GetNumElements() and
+        not this->hgraph_index_path_.empty()) {
         this->load_hgraph_index(this->hgraph_index_path_);
     }
     this->cal_memory_usage();
@@ -1925,6 +2490,9 @@ MCI::cal_memory_usage() {
     memory += this->maxcs_.capacity() * sizeof(InnerIdType);
     memory += this->p_node_to_cid_.capacity() * sizeof(InnerIdType);
     memory += this->node_to_cids_.capacity() * sizeof(InnerIdType);
+    memory += nested_vector_memory(this->delta_cliques_);
+    memory += nested_vector_memory(this->delta_clique_extra_);
+    memory += nested_vector_memory(this->delta_node_to_cids_);
     if (this->hgraph_index_ != nullptr) {
         memory += static_cast<uint64_t>(this->hgraph_index_->GetMemoryUsage());
     }
@@ -1963,6 +2531,8 @@ MCI::CheckAndMappingExternalParam(const JsonType& external_param,
         {MCI_PARAMETER_MCS, {MCI_PARAMETER_MCS}},
         {MCI_PARAMETER_CLIQUE_MAX, {MCI_PARAMETER_CLIQUE_MAX}},
         {MCI_PARAMETER_ALPHA, {MCI_PARAMETER_ALPHA}},
+        {MCI_PARAMETER_JOIN_RATIO_THRESHOLD, {MCI_PARAMETER_JOIN_RATIO_THRESHOLD}},
+        {MCI_PARAMETER_ADDED_MCT, {MCI_PARAMETER_ADDED_MCT}},
         {MCI_PARAMETER_KNNG_PATH, {MCI_PARAMETER_KNNG_PATH}},
         {MCI_PARAMETER_CLIQUE_PATH, {MCI_PARAMETER_CLIQUE_PATH}},
         {MCI_PARAMETER_USE_HGRAPH_HYBRID, {MCI_PARAMETER_USE_HGRAPH_HYBRID}},

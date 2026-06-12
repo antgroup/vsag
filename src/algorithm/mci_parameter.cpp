@@ -43,6 +43,12 @@ MCIParameter::FromJson(const JsonType& json) {
     if (json.Contains(MCI_PARAMETER_ALPHA)) {
         this->alpha = json[MCI_PARAMETER_ALPHA].GetFloat();
     }
+    if (json.Contains(MCI_PARAMETER_JOIN_RATIO_THRESHOLD)) {
+        this->join_ratio_threshold = json[MCI_PARAMETER_JOIN_RATIO_THRESHOLD].GetFloat();
+    }
+    if (json.Contains(MCI_PARAMETER_ADDED_MCT)) {
+        this->added_mct = static_cast<uint64_t>(json[MCI_PARAMETER_ADDED_MCT].GetInt());
+    }
     if (json.Contains(MCI_PARAMETER_KNNG_PATH)) {
         this->knng_path = json[MCI_PARAMETER_KNNG_PATH].GetString();
     }
@@ -71,6 +77,10 @@ MCIParameter::FromJson(const JsonType& json) {
     CHECK_ARGUMENT(this->mcs > 0, "mci mcs must be positive");
     CHECK_ARGUMENT(this->clique_max > 0, "mci clique_max must be positive");
     CHECK_ARGUMENT(this->alpha >= 1.0F, "mci alpha must be greater than or equal to 1.0");
+    CHECK_ARGUMENT((this->join_ratio_threshold >= 0.0F) and  // NOLINT
+                       (this->join_ratio_threshold <= 1.0F),
+                   "mci join_ratio_threshold must be in range [0, 1]");
+    CHECK_ARGUMENT(this->added_mct > 0, "mci added_mct must be positive");
     CHECK_ARGUMENT((this->hgraph_valid_ratio_threshold >= 0.0F) and  // NOLINT
                        (this->hgraph_valid_ratio_threshold <= 1.0F),
                    "mci hgraph_valid_ratio_threshold must be in range [0, 1]");
@@ -89,6 +99,8 @@ MCIParameter::ToJson() const {
     json[MCI_PARAMETER_MCS].SetInt(static_cast<int64_t>(this->mcs));
     json[MCI_PARAMETER_CLIQUE_MAX].SetInt(static_cast<int64_t>(this->clique_max));
     json[MCI_PARAMETER_ALPHA].SetFloat(this->alpha);
+    json[MCI_PARAMETER_JOIN_RATIO_THRESHOLD].SetFloat(this->join_ratio_threshold);
+    json[MCI_PARAMETER_ADDED_MCT].SetInt(static_cast<int64_t>(this->added_mct));
     json[MCI_PARAMETER_KNNG_PATH].SetString(this->knng_path);
     json[MCI_PARAMETER_CLIQUE_PATH].SetString(this->clique_path);
     json[MCI_PARAMETER_HGRAPH_INDEX_PATH].SetString(this->hgraph_index_path);

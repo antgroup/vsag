@@ -11,6 +11,7 @@ remains the serialized primary index, while a separate HGraph index can be loade
 
 - Source: `src/algorithm/mci.{h,cpp}`
 - Example: [`examples/cpp/322_feature_mci_hybrid_filter.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/322_feature_mci_hybrid_filter.cpp)
+- Incremental add guide: [Incremental Add for MCI](../advanced/mci_incremental_add.md)
 
 ## How it works
 
@@ -116,6 +117,8 @@ MCI uses the generic `index_param` object for build-time parameters.
 | `mcs` | int | `64`-`256` | Candidate budget used when building or importing the KNN graph |
 | `clique_max` | int | `16`-`64` | Upper bound on the size of a clique candidate group |
 | `alpha` | float | `1.2` | ODescent expansion factor when MCI builds its own KNN graph |
+| `join_ratio_threshold` | float | `0.6` | Minimum overlap required before an incrementally added vector joins an existing clique |
+| `added_mct` | int | `3` | Maximum number of eligible existing cliques an incrementally added vector joins |
 | `knng_path` | string | empty | Optional fixed-width binary KNNG file; if unset, MCI builds the graph internally |
 | `clique_path` | string | empty | Optional precomputed clique index file |
 | `use_reorder` | bool | `false` | Keep a higher-precision copy and rerank final candidates |

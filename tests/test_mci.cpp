@@ -34,6 +34,8 @@ struct MCIParam {
     uint64_t mcs = 32;
     uint64_t clique_max = 12;
     float alpha = 1.2F;
+    float join_ratio_threshold = 0.6F;
+    uint64_t added_mct = 3;
     bool use_reorder = false;
     bool use_hgraph_hybrid = false;
     float hgraph_valid_ratio_threshold = 0.5F;
@@ -72,6 +74,8 @@ public:
                 "mcs": {},
                 "clique_max": {},
                 "alpha": {},
+                "join_ratio_threshold": {},
+                "added_mct": {},
                 "use_reorder": {},
                 "use_hgraph_hybrid": {},
                 "hgraph_valid_ratio_threshold": {},
@@ -100,6 +104,8 @@ public:
                            param.mcs,
                            param.clique_max,
                            param.alpha,
+                           param.join_ratio_threshold,
+                           param.added_mct,
                            param.use_reorder,
                            param.use_hgraph_hybrid,
                            param.hgraph_valid_ratio_threshold,
@@ -162,6 +168,89 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::MCITestIndex,
         auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
         TestBuildIndex(index, dataset, true);
         TestFilterSearch(index, dataset, search_param, 0.85, true);
+    }
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::MCITestIndex,
+                             "MCI Incremental Add Test",
+                             "[ft][add][search][mci]") {
+    auto metric_type = GENERATE("l2", "ip", "cosine");
+    fixtures::MCIParam mci_param;
+    const std::string name = "mci";
+    auto search_param = GenerateSearchParametersString(120, 48);
+    for (auto& dim : dims) {
+        INFO(fmt::format("metric_type={}, dim={}", metric_type, dim));
+        auto param = GenerateBuildParametersString(metric_type, dim, mci_param);
+        auto index = TestFactory(name, param, true);
+        REQUIRE(index->GetIndexType() == vsag::IndexType::MCI);
+        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+        // Build on the first half, then incrementally Add the rest one-by-one so
+        // the clique index is maintained via incremental_update_clique.
+        TestContinueAddIgnoreRequire(index, dataset, 0.5);
+        REQUIRE(index->GetNumElements() == static_cast<int64_t>(base_count));
+        TestKnnSearch(index, dataset, search_param, 0.85, true);
+        TestFilterSearch(index, dataset, search_param, 0.85, true);
+        auto reloaded = TestFactory(name, param, true);
+        TestSerializeBinarySet(index, reloaded, dataset, search_param, true);
+    }
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::MCITestIndex,
+                             "MCI HGraph Hybrid Batch Add Test",
+                             "[ft][add][search][mci]") {
+    auto metric_type = GENERATE("l2");
+    fixtures::MCIParam mci_param;
+    mci_param.use_hgraph_hybrid = true;
+    const std::string name = "mci";
+    auto search_param = GenerateSearchParametersString(120, 48);
+    for (auto& dim : dims) {
+        INFO(fmt::format("metric_type={}, dim={}", metric_type, dim));
+        auto param = GenerateBuildParametersString(metric_type, dim, mci_param);
+        auto index = TestFactory(name, param, true);
+        REQUIRE(index->GetIndexType() == vsag::IndexType::MCI);
+        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+
+        const auto prefix_count = static_cast<int64_t>(base_count / 2);
+        const auto* paths = dataset->base_->GetPaths();
+        auto prefix = vsag::Dataset::Make();
+        prefix->Dim(dim)
+            ->Ids(dataset->base_->GetIds())
+            ->NumElements(prefix_count)
+            ->Paths(paths)
+            ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+            ->Owner(false);
+        auto build_result = index->Build(prefix);
+        REQUIRE(build_result.has_value());
+
+        auto tail = vsag::Dataset::Make();
+        tail->Dim(dim)
+            ->Ids(dataset->base_->GetIds() + prefix_count)
+            ->NumElements(static_cast<int64_t>(base_count) - prefix_count)
+            ->Paths(paths == nullptr ? nullptr : paths + prefix_count)
+            ->Float32Vectors(dataset->base_->GetFloat32Vectors() + prefix_count * dim)
+            ->Owner(false);
+        auto add_result = index->Add(tail);
+        REQUIRE(add_result.has_value());
+        REQUIRE(add_result.value().empty());
+        REQUIRE(index->GetNumElements() == static_cast<int64_t>(base_count));
+
+        TestKnnSearch(index, dataset, search_param, 0.85, true);
+        TestFilterSearch(index, dataset, search_param, 0.85, true);
+
+        auto serialize_binary = index->Serialize();
+        REQUIRE(serialize_binary.has_value());
+        auto reloaded = TestFactory(name, param, true);
+        auto deserialize_result = reloaded->Deserialize(serialize_binary.value());
+        REQUIRE(deserialize_result.has_value());
+        REQUIRE(reloaded->GetNumElements() == static_cast<int64_t>(base_count));
+
+        auto query = fixtures::get_one_query(dataset->query_, 0);
+        auto result = reloaded->KnnSearch(query, 10, search_param);
+        REQUIRE(result.has_value());
+        auto stats = result.value()->GetStatistics({"mci_hybrid_route"});
+        REQUIRE(stats.size() == 1);
+        REQUIRE(stats[0].find("hgraph") != std::string::npos);
+        TestKnnSearch(reloaded, dataset, search_param, 0.85, true);
     }
 }
 

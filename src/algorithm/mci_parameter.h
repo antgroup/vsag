@@ -26,6 +26,8 @@ static constexpr const char* MCI_PARAMETER_MAX_DEGREE = "max_degree";
 static constexpr const char* MCI_PARAMETER_MCS = "mcs";
 static constexpr const char* MCI_PARAMETER_CLIQUE_MAX = "clique_max";
 static constexpr const char* MCI_PARAMETER_ALPHA = "alpha";
+static constexpr const char* MCI_PARAMETER_JOIN_RATIO_THRESHOLD = "join_ratio_threshold";
+static constexpr const char* MCI_PARAMETER_ADDED_MCT = "added_mct";
 static constexpr const char* MCI_PARAMETER_KNNG_PATH = "knng_path";
 static constexpr const char* MCI_PARAMETER_CLIQUE_PATH = "clique_path";
 static constexpr const char* MCI_PARAMETER_USE_HGRAPH_HYBRID = "use_hgraph_hybrid";
@@ -59,6 +61,8 @@ public:
     uint64_t mcs{200};
     uint64_t clique_max{50};
     float alpha{1.2F};
+    float join_ratio_threshold{0.6F};
+    uint64_t added_mct{3};
     std::string knng_path{};
     std::string clique_path{};
     bool use_hgraph_hybrid{false};

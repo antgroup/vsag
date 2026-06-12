@@ -52,11 +52,21 @@ TEST_CASE("MCI Parameters Test", "[ut][MCIParameter]") {
     REQUIRE(param->mcs == 200);
     REQUIRE(param->clique_max == 50);
     REQUIRE(param->alpha == 1.2F);
+    REQUIRE(param->join_ratio_threshold == 0.6F);
+    REQUIRE(param->added_mct == 3);
     REQUIRE(param->knng_path == "/tmp/knng.bin");
     REQUIRE(param->base_codes_param != nullptr);
     REQUIRE(param->base_codes_param->quantizer_parameter->GetTypeName() == "fp32");
 
     vsag::ParameterTest::TestToJson(param);
+
+    auto custom_json = vsag::JsonType::Parse(generate_mci_param());
+    custom_json[vsag::MCI_PARAMETER_JOIN_RATIO_THRESHOLD].SetFloat(0.75F);
+    custom_json[vsag::MCI_PARAMETER_ADDED_MCT].SetInt(5);
+    auto custom_param = std::make_shared<vsag::MCIParameter>();
+    custom_param->FromJson(custom_json);
+    REQUIRE(custom_param->join_ratio_threshold == 0.75F);
+    REQUIRE(custom_param->added_mct == 5);
 
     auto search_param = vsag::MCISearchParameters::FromJson(R"({
         "mci": {

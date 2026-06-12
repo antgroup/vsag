@@ -48,6 +48,7 @@
 - [Iterator Search](advanced/iterator_search.md)
 - [Attribute Filter (Hybrid Search)](advanced/attribute_filter.md)
 - [Serialization](advanced/serialization.md)
+- [Incremental Add for MCI](advanced/mci_incremental_add.md)
 - [Memory Management](advanced/memory.md)
 - [Per-Search Allocator](advanced/search_allocator.md)
 - [Index Introspection](advanced/introspection.md)

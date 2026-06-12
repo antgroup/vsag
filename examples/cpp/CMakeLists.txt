@@ -133,3 +133,6 @@ target_link_libraries (322_feature_hgraph_brute_force_threshold vsag)
 
 add_executable(322_feature_mci_hybrid_filter 322_feature_mci_hybrid_filter.cpp)
 target_link_libraries(322_feature_mci_hybrid_filter vsag)
+
+add_executable(323_feature_mci_incremental_add 323_feature_mci_incremental_add.cpp)
+target_link_libraries(323_feature_mci_incremental_add vsag)
