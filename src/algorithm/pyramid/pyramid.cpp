@@ -332,7 +332,6 @@ Pyramid::search_impl(const DatasetPtr& query,
     DistHeapPtr search_result = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
 
     std::shared_lock<std::shared_mutex> lock(resize_mutex_);
-    auto vl = pool_->TakeOne();
     if (query_path != nullptr) {
         std::vector<std::future<void>> futures;
         const std::string& current_path = query_path[0];
@@ -353,10 +352,14 @@ Pyramid::search_impl(const DatasetPtr& query,
             if (valid) {
                 if (thread_pool_ != nullptr && search_param.parallel_search_thread_count > 1) {
                     futures.push_back(thread_pool_->GeneralEnqueue([&, node, i]() -> void {
-                        node->Search(search_func, vl, search_result_lists[i], search_param.ef);
+                        VisitedListGuard vl_guard(pool_.get());
+                        node->Search(
+                            search_func, vl_guard.get(), search_result_lists[i], search_param.ef);
                     }));
                 } else {
-                    node->Search(search_func, vl, search_result_lists[i], search_param.ef);
+                    VisitedListGuard vl_guard(pool_.get());
+                    node->Search(
+                        search_func, vl_guard.get(), search_result_lists[i], search_param.ef);
                 }
             }
         }
@@ -374,9 +377,9 @@ Pyramid::search_impl(const DatasetPtr& query,
         }
 
     } else {
-        root_->Search(search_func, vl, search_result, search_param.ef);
+        VisitedListGuard vl_guard(pool_.get());
+        root_->Search(search_func, vl_guard.get(), search_result, search_param.ef);
     }
-    pool_->ReturnOne(vl);
 
     if (use_reorder_) {
         search_result = this->reorder_->Reorder(
