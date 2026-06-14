@@ -80,8 +80,16 @@ Footer::Parse(StreamReader& reader) {
     }
     // no popseek, continue to parse
 
+    if (length < 20) {
+        reader.PopSeek();
+        return nullptr;
+    }
     uint64_t metadata_string_length = 0;
     memcpy(&metadata_string_length, meta_buffer.data() + 8, 8);
+    if (metadata_string_length > length - 20) {
+        reader.PopSeek();
+        return nullptr;
+    }
     std::string metadata_string(meta_buffer.data() + 16, metadata_string_length);
     uint32_t checksum;
     memcpy(&checksum, meta_buffer.data() + 16 + metadata_string_length, 4);
