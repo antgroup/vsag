@@ -205,7 +205,8 @@ private:
     // RAII guard for VisitedList pool resources
     class VisitedListGuard {
     public:
-        VisitedListGuard(ResourceObjectPool<VisitedList>* pool) : pool_(pool), vl_(pool->TakeOne()) {
+        VisitedListGuard(ResourceObjectPool<VisitedList>* pool)
+            : pool_(pool), vl_(pool->TakeOne()) {
         }
 
         ~VisitedListGuard() {

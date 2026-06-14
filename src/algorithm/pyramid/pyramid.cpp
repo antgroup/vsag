@@ -353,11 +353,13 @@ Pyramid::search_impl(const DatasetPtr& query,
                 if (thread_pool_ != nullptr && search_param.parallel_search_thread_count > 1) {
                     futures.push_back(thread_pool_->GeneralEnqueue([&, node, i]() -> void {
                         VisitedListGuard vl_guard(pool_.get());
-                        node->Search(search_func, vl_guard.get(), search_result_lists[i], search_param.ef);
+                        node->Search(
+                            search_func, vl_guard.get(), search_result_lists[i], search_param.ef);
                     }));
                 } else {
                     VisitedListGuard vl_guard(pool_.get());
-                    node->Search(search_func, vl_guard.get(), search_result_lists[i], search_param.ef);
+                    node->Search(
+                        search_func, vl_guard.get(), search_result_lists[i], search_param.ef);
                 }
             }
         }
