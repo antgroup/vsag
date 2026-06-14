@@ -749,24 +749,6 @@ build_cache_now_us() {
                                      .count());
 }
 
-constexpr uint32_t HIT_REFINE_ROUNDS = 1;
-// MISSED side requires >=3 rounds: cold-start nodes (no warm seed) need
-// multiple sweeps to (a) discover neighbors via search, (b) install reverse
-// edges into hit-node adjacency lists, and (c) re-search with the newly
-// populated frontier. Bisection on the miss-only smoke test
-// (ef_construction=50, 200 vectors) shows ROUNDS<=2 fails REQUIRE(found_self);
-// ROUNDS=3 passes consistently. Upstream uses 4; we keep 3 to bound cost.
-constexpr uint32_t MISSED_REFINE_ROUNDS = 3;
-// refine ef tuned down from ef_construct_ (=300/400) to 64 to avoid the
-// pathological hit_refine bottleneck where each node spends 308us re-exploring
-// the bottom graph with ef=300 (10092s total for 32.96M nodes, 1.73x slower
-// than full rebuild). With ef=64, expected per-node ~60us (5x faster).
-// Reference gby BuildCacheOptions default for hit_refine_ef is also 64.
-constexpr uint32_t HIT_REFINE_EF = 64;
-// MISSED_REFINE_EF kept higher than HIT because missed nodes have NO seed
-// neighbors and need wider exploration. User-directed asymmetric config.
-constexpr uint32_t MISSED_REFINE_EF = 200;
-
 }  // namespace
 
 DistHeapPtr
@@ -911,348 +893,212 @@ HGraph::refine_nodes_two_phase(
         return;
     }
 
-    uint32_t parallelism = 1;
-    if (this->thread_pool_ != nullptr && this->build_thread_count_ > 1 &&
-        ids_to_refine.size() > 1) {
-        parallelism = std::min<uint32_t>(static_cast<uint32_t>(this->build_thread_count_),
-                                         static_cast<uint32_t>(ids_to_refine.size()));
-    }
-
     const uint32_t effective_refine_ef = refine_ef == 0 ? this->ef_construct_ : refine_ef;
     CHECK_ARGUMENT(effective_refine_ef > 0, "refine ef must be greater than 0");
 
-    logger::info("[hgraph_build_cache] starting {} nodes={} rounds={} parallelism={}",
-                 phase_name,
-                 ids_to_refine.size(),
-                 rounds,
-                 parallelism);
+    const bool use_parallel =
+        this->thread_pool_ != nullptr && this->build_thread_count_ > 1 && ids_to_refine.size() > 1;
 
-    constexpr int64_t block_size = 128;
+    constexpr size_t block_size = 128;
+    const size_t num_blocks =
+        use_parallel ? (ids_to_refine.size() + block_size - 1) / block_size : 1;
+    const size_t effective_parallelism =
+        use_parallel ? std::min(num_blocks, static_cast<size_t>(this->build_thread_count_)) : 1;
+
+    logger::info(
+        "[hgraph_build_cache] starting {} nodes={} rounds={} parallelism={} mode=incremental",
+        phase_name,
+        ids_to_refine.size(),
+        rounds,
+        effective_parallelism);
+
+    const uint64_t max_degree = this->bottom_graph_->MaximumDegree();
     const auto begin = build_cache_now_us();
+
+    // Incremental refine: each node searches, then immediately writes back
+    // forward edges + reverse edges (like standard graph_add_one / mutually_connect_new_element).
+    // Later nodes see edges written by earlier nodes within the same round.
+    // Parallelism is achieved via thread pool with per-node mutex protection.
+    auto refine_one_node = [this,
+                            &data,
+                            &flatten_codes,
+                            &inner_id_to_input_idx,
+                            effective_refine_ef,
+                            use_self_as_entry,
+                            max_degree](InnerIdType inner_id) {
+        auto data_iter = inner_id_to_input_idx.find(inner_id);
+        CHECK_ARGUMENT(data_iter != inner_id_to_input_idx.end(),
+                       fmt::format("missing input row for inner_id {}", inner_id));
+        const uint32_t input_idx = data_iter->second;
+
+        // Step 1: search for candidates and select neighbors via heuristic
+        auto candidates = this->collect_refine_candidates(
+            data, inner_id, input_idx, flatten_codes, effective_refine_ef, use_self_as_entry);
+
+        if (candidates->Empty()) {
+            return;
+        }
+
+        // Step 2: heuristic edge selection (same as mutually_connect_new_element)
+        select_edges_by_heuristic(candidates, max_degree, flatten_codes, allocator_, this->alpha_);
+
+        // Step 3: immediately write forward edges + install reverse edges.
+        // IMPORTANT: to avoid deadlock when two parallel nodes are mutual
+        // neighbors (A locks self then B, B locks self then A), we NEVER
+        // nest locks. Write forward edges under inner_id's lock, release it,
+        // then lock each neighbor independently for reverse-edge install.
+        // This matches the lock discipline in mutually_connect_new_element.
+        Vector<InnerIdType> selected_neighbors(allocator_);
+        selected_neighbors.reserve(candidates->Size());
+        while (not candidates->Empty()) {
+            selected_neighbors.emplace_back(candidates->Top().second);
+            candidates->Pop();
+        }
+
+        // Write forward edges (lock inner_id only).
+        // Use read-modify-write to preserve reverse edges installed by
+        // concurrent workers. Minimize lock scope: snapshot under lock,
+        // compute distances + prune outside lock, then re-acquire to write.
+        {
+            // Snapshot existing neighbors under lock
+            Vector<InnerIdType> existing_neighbors(allocator_);
+            {
+                LockGuard cur_lock(neighbors_mutex_, inner_id);
+                this->bottom_graph_->GetNeighbors(inner_id, existing_neighbors);
+            }
+
+            // Merge + prune outside lock (no contention during distance computation)
+            auto merged = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
+            std::unordered_set<InnerIdType> seen_ids;
+            seen_ids.reserve(existing_neighbors.size() + selected_neighbors.size());
+            for (auto nid : existing_neighbors) {
+                if (nid != inner_id && seen_ids.emplace(nid).second) {
+                    merged->Push(flatten_codes->ComputePairVectors(nid, inner_id), nid);
+                }
+            }
+            for (auto nid : selected_neighbors) {
+                if (nid != inner_id && seen_ids.emplace(nid).second) {
+                    merged->Push(flatten_codes->ComputePairVectors(nid, inner_id), nid);
+                }
+            }
+            select_edges_by_heuristic(merged, max_degree, flatten_codes, allocator_, this->alpha_);
+            Vector<InnerIdType> final_neighbors(allocator_);
+            final_neighbors.reserve(merged->Size());
+            while (not merged->Empty()) {
+                final_neighbors.emplace_back(merged->Top().second);
+                merged->Pop();
+            }
+
+            // Write back under lock
+            LockGuard cur_lock(neighbors_mutex_, inner_id);
+            this->bottom_graph_->InsertNeighborsById(inner_id, final_neighbors);
+        }
+
+        // Install reverse edges for each selected neighbor (lock each independently)
+        Vector<InnerIdType> neighbors(allocator_);
+        for (auto selected_neighbor : selected_neighbors) {
+            if (selected_neighbor == inner_id) {
+                continue;
+            }
+
+            LockGuard neighbor_lock(neighbors_mutex_, selected_neighbor);
+
+            neighbors.clear();
+            this->bottom_graph_->GetNeighbors(selected_neighbor, neighbors);
+
+            uint64_t sz_link_list_other = neighbors.size();
+
+            if (sz_link_list_other < max_degree) {
+                // Simple case: neighbor has room, just append
+                bool already_present = false;
+                for (auto nid : neighbors) {
+                    if (nid == inner_id) {
+                        already_present = true;
+                        break;
+                    }
+                }
+                if (not already_present) {
+                    neighbors.emplace_back(inner_id);
+                    this->bottom_graph_->InsertNeighborsById(selected_neighbor, neighbors);
+                }
+            } else {
+                // Neighbor is full: run heuristic pruning to decide whether
+                // to include inner_id as a reverse edge
+                bool already_present = false;
+                for (auto nid : neighbors) {
+                    if (nid == inner_id) {
+                        already_present = true;
+                        break;
+                    }
+                }
+                if (not already_present) {
+                    float d_new_edge =
+                        flatten_codes->ComputePairVectors(inner_id, selected_neighbor);
+                    auto edge_candidates =
+                        std::make_shared<StandardHeap<true, false>>(allocator_, -1);
+                    edge_candidates->Push(d_new_edge, inner_id);
+                    for (uint64_t j = 0; j < sz_link_list_other; ++j) {
+                        edge_candidates->Push(
+                            flatten_codes->ComputePairVectors(neighbors[j], selected_neighbor),
+                            neighbors[j]);
+                    }
+                    select_edges_by_heuristic(
+                        edge_candidates, max_degree, flatten_codes, allocator_, this->alpha_);
+                    Vector<InnerIdType> pruned_neighbors(allocator_);
+                    while (not edge_candidates->Empty()) {
+                        pruned_neighbors.emplace_back(edge_candidates->Top().second);
+                        edge_candidates->Pop();
+                    }
+                    this->bottom_graph_->InsertNeighborsById(selected_neighbor, pruned_neighbors);
+                }
+            }
+        }
+    };
 
     for (uint32_t round = 0; round < rounds; ++round) {
         const auto round_begin = build_cache_now_us();
 
-        // ===== Phase 1: parallel search & local select (also keep distances) =====
-        Vector<Vector<InnerIdType>> selected_neighbors(
-            ids_to_refine.size(), Vector<InnerIdType>(allocator_), allocator_);
-        Vector<Vector<float>> selected_distances(
-            ids_to_refine.size(), Vector<float>(allocator_), allocator_);
-
-        if (parallelism <= 1) {
-            for (uint64_t i = 0; i < ids_to_refine.size(); ++i) {
-                const auto inner_id = ids_to_refine[i];
-                auto data_iter = inner_id_to_input_idx.find(inner_id);
-                CHECK_ARGUMENT(data_iter != inner_id_to_input_idx.end(),
-                               fmt::format("missing input row for inner_id {}", inner_id));
-                this->select_refine_neighbors_with_distances(data,
-                                                             inner_id,
-                                                             data_iter->second,
-                                                             flatten_codes,
-                                                             effective_refine_ef,
-                                                             use_self_as_entry,
-                                                             selected_neighbors[i],
-                                                             selected_distances[i]);
+        if (not use_parallel) {
+            for (const auto inner_id : ids_to_refine) {
+                refine_one_node(inner_id);
             }
         } else {
+            // Parallel execution: submit nodes to thread pool.
+            // Each node independently searches and writes back edges.
+            // neighbors_mutex_ ensures correctness of concurrent writes.
             std::vector<std::future<void>> futures;
             futures.reserve((ids_to_refine.size() + block_size - 1) / block_size);
-            for (int64_t i = 0; i < static_cast<int64_t>(ids_to_refine.size()); i += block_size) {
-                const auto end =
-                    std::min(i + block_size, static_cast<int64_t>(ids_to_refine.size()));
-                futures.emplace_back(this->thread_pool_->GeneralEnqueue([this,
-                                                                         &data,
-                                                                         &ids_to_refine,
-                                                                         &inner_id_to_input_idx,
-                                                                         &flatten_codes,
-                                                                         effective_refine_ef,
-                                                                         use_self_as_entry,
-                                                                         &selected_neighbors,
-                                                                         &selected_distances,
-                                                                         i,
-                                                                         end]() {
-                    for (int64_t idx = i; idx < end; ++idx) {
-                        const auto inner_id = ids_to_refine[idx];
-                        auto data_iter = inner_id_to_input_idx.find(inner_id);
-                        CHECK_ARGUMENT(data_iter != inner_id_to_input_idx.end(),
-                                       fmt::format("missing input row for inner_id {}", inner_id));
-                        this->select_refine_neighbors_with_distances(data,
-                                                                     inner_id,
-                                                                     data_iter->second,
-                                                                     flatten_codes,
-                                                                     effective_refine_ef,
-                                                                     use_self_as_entry,
-                                                                     selected_neighbors[idx],
-                                                                     selected_distances[idx]);
-                    }
-                }));
+            for (size_t i = 0; i < ids_to_refine.size(); i += block_size) {
+                const auto end = std::min(i + block_size, ids_to_refine.size());
+                futures.emplace_back(this->thread_pool_->GeneralEnqueue(
+                    [&refine_one_node, &ids_to_refine, i, end]() {
+                        for (size_t idx = i; idx < end; ++idx) {
+                            refine_one_node(ids_to_refine[idx]);
+                        }
+                    }));
             }
-            std::exception_ptr search_ex = nullptr;
+            std::exception_ptr ex = nullptr;
             for (auto& future : futures) {
                 try {
                     future.get();
                 } catch (...) {
-                    if (not search_ex) {
-                        search_ex = std::current_exception();
+                    if (not ex) {
+                        ex = std::current_exception();
                     }
                 }
             }
-            if (search_ex) {
-                std::rethrow_exception(search_ex);
-            }
-        }
-        const auto search_elapsed = build_cache_now_us() - round_begin;
-
-        // ===== Phase 2: serial writeback of selected neighbours =====
-        const auto writeback_begin = build_cache_now_us();
-        for (uint64_t i = 0; i < ids_to_refine.size(); ++i) {
-            LockGuard lock(neighbors_mutex_, ids_to_refine[i]);
-            this->bottom_graph_->InsertNeighborsById(ids_to_refine[i], selected_neighbors[i]);
-        }
-        const auto writeback_elapsed = build_cache_now_us() - writeback_begin;
-
-        // ===== Phase 3: reverse-edge install (scatter -> materialise -> shard prune) =====
-        const auto reverse_begin = build_cache_now_us();
-        const uint32_t reverse_shard_count =
-            (parallelism > 1)
-                ? std::max<uint32_t>(parallelism, static_cast<uint32_t>(this->build_thread_count_))
-                : 1U;
-
-        struct reverse_edge_entry {
-            InnerIdType src_id;
-            float dist;
-        };
-        struct scatter_record {
-            InnerIdType target_id;
-            InnerIdType src_id;
-            float dist;
-        };
-        struct reverse_shard {
-            std::unordered_map<InnerIdType, std::vector<reverse_edge_entry>> pending;
-        };
-        std::vector<reverse_shard> shards(reverse_shard_count);
-
-        // ----- (3a) scatter (target,src,dist) into per-(worker,shard) buffers -----
-        const uint32_t scatter_worker_count =
-            (parallelism > 1)
-                ? std::min<uint32_t>(parallelism, static_cast<uint32_t>(ids_to_refine.size()))
-                : 1U;
-
-        std::vector<std::vector<std::vector<scatter_record>>> worker_buckets(
-            scatter_worker_count, std::vector<std::vector<scatter_record>>(reverse_shard_count));
-
-        const uint64_t max_degree = this->bottom_graph_->MaximumDegree();
-        const uint64_t avg_per_bucket =
-            (ids_to_refine.size() * max_degree +
-             static_cast<uint64_t>(scatter_worker_count) * reverse_shard_count - 1) /
-            (static_cast<uint64_t>(scatter_worker_count) * reverse_shard_count);
-        for (auto& wb : worker_buckets) {
-            for (auto& shard_buf : wb) {
-                shard_buf.reserve(avg_per_bucket + 16);
+            if (ex) {
+                std::rethrow_exception(ex);
             }
         }
 
-        auto scatter_slice = [&](uint32_t worker_idx, uint64_t lo, uint64_t hi) {
-            auto& my_buckets = worker_buckets[worker_idx];
-            for (uint64_t i = lo; i < hi; ++i) {
-                const auto src_id = ids_to_refine[i];
-                const auto& neighbors = selected_neighbors[i];
-                const auto& dists = selected_distances[i];
-                const uint64_t k = neighbors.size();
-                CHECK_ARGUMENT(dists.size() == k,
-                               "selected_neighbors and selected_distances size mismatch");
-                for (uint64_t j = 0; j < k; ++j) {
-                    const auto neighbor_id = neighbors[j];
-                    const uint32_t shard_idx =
-                        static_cast<uint32_t>(neighbor_id) % reverse_shard_count;
-                    my_buckets[shard_idx].push_back({neighbor_id, src_id, dists[j]});
-                }
-            }
-        };
-
-        if (scatter_worker_count <= 1) {
-            scatter_slice(0, 0, ids_to_refine.size());
-        } else {
-            const uint64_t per_worker =
-                (ids_to_refine.size() + scatter_worker_count - 1) / scatter_worker_count;
-            std::vector<std::future<void>> scatter_futures;
-            scatter_futures.reserve(scatter_worker_count);
-            for (uint32_t w = 0; w < scatter_worker_count; ++w) {
-                const uint64_t lo = static_cast<uint64_t>(w) * per_worker;
-                if (lo >= ids_to_refine.size()) {
-                    break;
-                }
-                const uint64_t hi =
-                    std::min(lo + per_worker, static_cast<uint64_t>(ids_to_refine.size()));
-                scatter_futures.emplace_back(this->thread_pool_->GeneralEnqueue(
-                    [&scatter_slice, w, lo, hi]() { scatter_slice(w, lo, hi); }));
-            }
-            std::exception_ptr scatter_ex = nullptr;
-            for (auto& f : scatter_futures) {
-                try {
-                    f.get();
-                } catch (...) {
-                    if (not scatter_ex) {
-                        scatter_ex = std::current_exception();
-                    }
-                }
-            }
-            if (scatter_ex) {
-                std::rethrow_exception(scatter_ex);
-            }
-        }
-
-        // ----- (3b) materialise per-shard (target -> [(src,dist), ...]) maps -----
-        auto materialise_shard = [&](uint32_t shard_idx) {
-            uint64_t total = 0;
-            for (uint32_t w = 0; w < scatter_worker_count; ++w) {
-                total += worker_buckets[w][shard_idx].size();
-            }
-            auto& pending = shards[shard_idx].pending;
-            const uint64_t hint = total / std::max<uint64_t>(max_degree / 2, 1) + 16;
-            pending.reserve(hint);
-            for (uint32_t w = 0; w < scatter_worker_count; ++w) {
-                auto& buf = worker_buckets[w][shard_idx];
-                for (const auto& rec : buf) {
-                    pending[rec.target_id].push_back({rec.src_id, rec.dist});
-                }
-                std::vector<scatter_record>().swap(buf);
-            }
-        };
-
-        if (parallelism <= 1 || reverse_shard_count <= 1) {
-            for (uint32_t s = 0; s < reverse_shard_count; ++s) {
-                materialise_shard(s);
-            }
-        } else {
-            std::vector<std::future<void>> mat_futures;
-            mat_futures.reserve(reverse_shard_count);
-            for (uint32_t s = 0; s < reverse_shard_count; ++s) {
-                mat_futures.emplace_back(this->thread_pool_->GeneralEnqueue(
-                    [&materialise_shard, s]() { materialise_shard(s); }));
-            }
-            std::exception_ptr mat_ex = nullptr;
-            for (auto& f : mat_futures) {
-                try {
-                    f.get();
-                } catch (...) {
-                    if (not mat_ex) {
-                        mat_ex = std::current_exception();
-                    }
-                }
-            }
-            if (mat_ex) {
-                std::rethrow_exception(mat_ex);
-            }
-        }
-        std::vector<std::vector<std::vector<scatter_record>>>().swap(worker_buckets);
-
-        // ----- (3c) per-shard merge + heuristic prune (parallel across shards) -----
-        auto process_shard = [this, &flatten_codes, max_degree](reverse_shard& shard) {
-            Vector<InnerIdType> current_neighbors(allocator_);
-            current_neighbors.reserve(max_degree + 16);
-            std::unordered_set<InnerIdType> existing_set;
-            existing_set.reserve(max_degree * 2 + 16);
-            std::unordered_map<InnerIdType, float> reuse_dist;
-
-            for (auto& entry : shard.pending) {
-                const auto target_id = entry.first;
-                auto& reverse_adds = entry.second;
-
-                LockGuard lock(neighbors_mutex_, target_id);
-
-                current_neighbors.clear();
-                this->bottom_graph_->GetNeighbors(target_id, current_neighbors);
-
-                existing_set.clear();
-                for (auto nid : current_neighbors) {
-                    existing_set.insert(nid);
-                }
-
-                bool changed = false;
-                for (const auto& add : reverse_adds) {
-                    if (add.src_id == target_id) {
-                        continue;
-                    }
-                    if (existing_set.insert(add.src_id).second) {
-                        current_neighbors.push_back(add.src_id);
-                        changed = true;
-                    }
-                }
-                if (not changed) {
-                    continue;
-                }
-
-                if (current_neighbors.size() > max_degree) {
-                    // Reuse src->target distances captured during the select phase.
-                    reuse_dist.clear();
-                    reuse_dist.reserve(reverse_adds.size());
-                    for (const auto& add : reverse_adds) {
-                        auto [it, inserted] = reuse_dist.emplace(add.src_id, add.dist);
-                        if (not inserted && add.dist < it->second) {
-                            it->second = add.dist;
-                        }
-                    }
-
-                    auto edges = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
-                    for (auto neighbor_id : current_neighbors) {
-                        auto rit = reuse_dist.find(neighbor_id);
-                        const float d =
-                            (rit != reuse_dist.end())
-                                ? rit->second
-                                : flatten_codes->ComputePairVectors(neighbor_id, target_id);
-                        edges->Push(d, neighbor_id);
-                    }
-                    select_edges_by_heuristic(
-                        edges, max_degree, flatten_codes, allocator_, this->alpha_);
-                    current_neighbors.clear();
-                    while (not edges->Empty()) {
-                        current_neighbors.emplace_back(edges->Top().second);
-                        edges->Pop();
-                    }
-                }
-                this->bottom_graph_->InsertNeighborsById(target_id, current_neighbors);
-            }
-        };
-
-        if (parallelism <= 1 || reverse_shard_count <= 1) {
-            for (auto& shard : shards) {
-                process_shard(shard);
-            }
-        } else {
-            std::vector<std::future<void>> shard_futures;
-            shard_futures.reserve(shards.size());
-            for (auto& shard : shards) {
-                shard_futures.emplace_back(this->thread_pool_->GeneralEnqueue(
-                    [&process_shard, &shard]() { process_shard(shard); }));
-            }
-            std::exception_ptr shard_ex = nullptr;
-            for (auto& f : shard_futures) {
-                try {
-                    f.get();
-                } catch (...) {
-                    if (not shard_ex) {
-                        shard_ex = std::current_exception();
-                    }
-                }
-            }
-            if (shard_ex) {
-                std::rethrow_exception(shard_ex);
-            }
-        }
-        const auto reverse_elapsed = build_cache_now_us() - reverse_begin;
         const auto round_elapsed = build_cache_now_us() - round_begin;
-        logger::info(
-            "[hgraph_build_cache] {} round {}/{} finished in {:.3f}s "
-            "(search={:.3f}s writeback={:.3f}s reverse={:.3f}s) processed_nodes={}",
-            phase_name,
-            round + 1,
-            rounds,
-            static_cast<double>(round_elapsed) / 1000000.0,
-            static_cast<double>(search_elapsed) / 1000000.0,
-            static_cast<double>(writeback_elapsed) / 1000000.0,
-            static_cast<double>(reverse_elapsed) / 1000000.0,
-            ids_to_refine.size());
+        logger::info("[hgraph_build_cache] {} round {}/{} finished in {:.3f}s processed_nodes={}",
+                     phase_name,
+                     round + 1,
+                     rounds,
+                     static_cast<double>(round_elapsed) / 1000000.0,
+                     ids_to_refine.size());
     }
     const auto total_elapsed = build_cache_now_us() - begin;
     logger::info("[hgraph_build_cache] {} finished in {:.3f}s",
@@ -1629,16 +1475,16 @@ HGraph::cache_run_refine_two_phase(const DatasetPtr& data, BuildCachePlan& plan)
     this->refine_nodes_two_phase(data,
                                  plan.missed_ids,
                                  "missed_refine",
-                                 MISSED_REFINE_ROUNDS,
-                                 MISSED_REFINE_EF,
+                                 1,
+                                 0,  // 0 means use ef_construct_
                                  /*use_self_as_entry=*/false,
                                  flatten_codes,
                                  plan.inner_id_to_input_idx);
     this->refine_nodes_two_phase(data,
                                  plan.hit_ids,
                                  "hit_refine",
-                                 HIT_REFINE_ROUNDS,
-                                 HIT_REFINE_EF,
+                                 1,
+                                 this->ef_construct_ / 3,
                                  /*use_self_as_entry=*/true,
                                  flatten_codes,
                                  plan.inner_id_to_input_idx);
