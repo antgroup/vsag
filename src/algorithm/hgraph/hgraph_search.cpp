@@ -398,7 +398,8 @@ HGraph::RangeSearch(const DatasetPtr& query,
     search_param.is_inner_id_allowed = ft;
     search_param.radius = radius;
     search_param.search_mode = RANGE_SEARCH;
-    search_param.consider_duplicate = true;
+    search_param.consider_duplicate = this->support_duplicate_ && params.consider_duplicate;
+    search_param.max_duplicates_per_group = params.max_duplicates_per_group;
     search_param.range_search_limit_size = static_cast<int>(limited_size);
     search_param.parallel_search_thread_count = params.parallel_search_thread_count;
     search_param.enable_reorder = params.enable_reorder;
@@ -551,7 +552,8 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
             search_param.topk, static_cast<int64_t>(static_cast<float>(k) * params.topk_factor));
     }
     search_param.enable_reorder = params.enable_reorder;
-    search_param.consider_duplicate = true;
+    search_param.consider_duplicate = this->support_duplicate_ && params.consider_duplicate;
+    search_param.max_duplicates_per_group = params.max_duplicates_per_group;
     search_param.enable_rabitq_one_bit_search = params.rabitq_one_bit_search;
     if (params.enable_time_record) {
         search_param.time_cost = std::make_shared<Timer>();
