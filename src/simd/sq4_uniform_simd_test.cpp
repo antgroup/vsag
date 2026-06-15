@@ -71,6 +71,19 @@ TEST_CASE("SQ4 Uniform SIMD Compute Codes", "[ut][simd]") {
     }
 }
 
+TEST_CASE("SQ4 Uniform SIMD Compute Codes High Dim", "[ut][simd]") {
+    std::vector<int> high_dims = {2048, 4096, 8192};
+    int64_t count = 10;
+    for (const auto& dim : high_dims) {
+        uint32_t code_size = (dim + 1) / 2;
+        auto codes1 = fixtures::generate_int4_codes(count, dim, 114);
+        auto codes2 = fixtures::generate_int4_codes(count, dim, 514);
+        for (uint64_t i = 0; i < count; ++i) {
+            TEST_ACCURACY(SQ4UniformComputeCodesIP);
+        }
+    }
+}
+
 #define BENCHMARK_SIMD_COMPUTE(Simd, Comp)                                                 \
     BENCHMARK_ADVANCED(#Simd #Comp) {                                                      \
         for (int i = 0; i < count; ++i) {                                                  \
