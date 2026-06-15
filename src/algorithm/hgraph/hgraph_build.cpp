@@ -88,6 +88,9 @@ HGraph::Train(const DatasetPtr& base) {
 std::vector<int64_t>
 HGraph::Build(const DatasetPtr& data) {
     CHECK_ARGUMENT(GetNumElements() == 0, "index is not empty");
+    this->build_cache_hit_rate_ = -1.0F;
+    this->build_cache_hit_nodes_ = 0;
+    this->build_cache_missed_nodes_ = 0;
     if (this->has_loaded_cache()) {
         // A previously exported cache has been imported via ImportCache().
         // Take the accelerated build path that warm-starts neighbours from
@@ -1432,6 +1435,11 @@ HGraph::cache_warm_start_and_classify(BuildCachePlan& plan) {
     const float hit_rate = total_classified > 0 ? static_cast<float>(hit_ids.size()) /
                                                       static_cast<float>(total_classified)
                                                 : 0.0F;
+    // Publish the classification result so GetStats() can report how well the
+    // imported cache covered this build without having to scrape the log.
+    this->build_cache_hit_nodes_ = hit_ids.size();
+    this->build_cache_missed_nodes_ = missed_ids.size();
+    this->build_cache_hit_rate_ = hit_rate;
     logger::info(
         "[hgraph_build_cache] warm_start finished in {:.3f}s hit_nodes={} missed_nodes={} "
         "hit_empty_seed_nodes={} hit_seed_neighbor_total={} hit_rate={:.4f}",

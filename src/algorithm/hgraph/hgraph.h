@@ -543,5 +543,14 @@ private:
     bool persist_source_id_{false};
 
     std::unique_ptr<HGraphCache> cache_{nullptr};
+
+    // Build-time warm-start cache hit statistics, populated by
+    // cache_warm_start_and_classify() when Build() takes the
+    // build_with_cache() path (i.e. after ImportCache()). A negative
+    // hit-rate marks "this index was not built from an imported cache",
+    // in which case GetStats() emits a skipped_reason instead of values.
+    float build_cache_hit_rate_{-1.0F};
+    uint64_t build_cache_hit_nodes_{0};
+    uint64_t build_cache_missed_nodes_{0};
 };
 }  // namespace vsag
