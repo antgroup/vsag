@@ -39,7 +39,6 @@ BasicSearcher::visit(const GraphInterfacePtr& graph,
                      const std::pair<float, uint64_t>& current_node_pair,
                      const FilterPtr& filter,
                      FilterSearchSkipStrategy* skip_strategy,
-                     Vector<InnerIdType>& to_be_visited_rid,
                      Vector<InnerIdType>& to_be_visited_id,
                      Vector<InnerIdType>& neighbors) const {
     uint32_t count_no_visited = 0;
@@ -58,7 +57,6 @@ BasicSearcher::visit(const GraphInterfacePtr& graph,
         if (not vl->Get(neighbors[i])) {
             if (not filter || count_no_visited == 0 || skip_strategy->ShouldSkipFilterCheck() ||
                 filter->CheckValid(neighbors[i])) {
-                to_be_visited_rid[count_no_visited] = i;
                 to_be_visited_id[count_no_visited] = neighbors[i];
                 count_no_visited++;
             }
@@ -150,7 +148,6 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     uint32_t hops = 0;
     uint32_t dist_cmp = 0;
     uint32_t count_no_visited = 0;
-    Vector<InnerIdType> to_be_visited_rid(graph->MaximumDegree(), alloc);
     Vector<InnerIdType> to_be_visited_id(graph->MaximumDegree(), alloc);
     Vector<InnerIdType> neighbors(graph->MaximumDegree(), alloc);
     Vector<float> line_dists(graph->MaximumDegree(), alloc);
@@ -226,7 +223,6 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                                  current_node_pair,
                                  inner_search_param.is_inner_id_allowed,
                                  skip_strategy.get(),
-                                 to_be_visited_rid,
                                  to_be_visited_id,
                                  neighbors);
 
@@ -337,7 +333,6 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     uint32_t hops = 0;
     uint32_t dist_cmp = 0;
     uint32_t count_no_visited = 0;
-    Vector<InnerIdType> to_be_visited_rid(graph->MaximumDegree(), alloc);
     Vector<InnerIdType> to_be_visited_id(graph->MaximumDegree(), alloc);
     Vector<InnerIdType> neighbors(graph->MaximumDegree(), alloc);
     Vector<float> line_dists(graph->MaximumDegree(), alloc);
@@ -425,7 +420,6 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                                  current_node_pair,
                                  inner_search_param.is_inner_id_allowed,
                                  skip_strategy.get(),
-                                 to_be_visited_rid,
                                  to_be_visited_id,
                                  neighbors);
 
