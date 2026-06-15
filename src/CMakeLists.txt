@@ -44,9 +44,13 @@ add_dependencies (vsag_static version)
 set_target_properties (vsag PROPERTIES
     C_VISIBILITY_PRESET default
     CXX_VISIBILITY_PRESET default
-    VISIBILITY_INLINES_HIDDEN OFF
-    VERSION "${VSAG_VERSION_TRIPLE}"
-    SOVERSION "${VSAG_VERSION_MAJOR}")
+    VISIBILITY_INLINES_HIDDEN OFF)
+
+if (ENABLE_SOVERSION)
+    set_target_properties (vsag PROPERTIES
+        VERSION "${VSAG_VERSION_TRIPLE}"
+        SOVERSION "${VSAG_VERSION_MAJOR}")
+endif ()
 
 # Public include directory: usable both during the build (BUILD_INTERFACE)
 # and after `make install` from a downstream find_package() consumer
