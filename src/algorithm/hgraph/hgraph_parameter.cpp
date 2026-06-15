@@ -226,6 +226,17 @@ HGraphSearchParameters::FromJson(const std::string& json_string) {
             fmt::format("brute_force_threshold({}) must in range[0.0, 1.0]",
                         obj.brute_force_threshold));
     }
+    if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_PARAMETER_CONSIDER_DUPLICATE)) {
+        obj.consider_duplicate =
+            params[INDEX_TYPE_HGRAPH][HGRAPH_PARAMETER_CONSIDER_DUPLICATE].GetBool();
+    }
+    if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_PARAMETER_MAX_DUPLICATES_PER_GROUP)) {
+        obj.max_duplicates_per_group =
+            params[INDEX_TYPE_HGRAPH][HGRAPH_PARAMETER_MAX_DUPLICATES_PER_GROUP].GetInt();
+        CHECK_ARGUMENT(obj.max_duplicates_per_group >= -1,
+                       fmt::format("max_duplicates_per_group({}) must be >= -1",
+                                   obj.max_duplicates_per_group));
+    }
     if (params[INDEX_TYPE_HGRAPH].Contains(RABITQ_QUANTIZATION_ERROR_RATE_KEY)) {
         obj.rabitq_error_rate =
             params[INDEX_TYPE_HGRAPH][RABITQ_QUANTIZATION_ERROR_RATE_KEY].GetFloat();

@@ -90,6 +90,8 @@ public:
     // valid inner ids using the best available flatten codes. Default 0
     // preserves existing behaviour.
     float brute_force_threshold{0.0F};
+    bool consider_duplicate{true};
+    int64_t max_duplicates_per_group{-1};
     float rabitq_error_rate{std::numeric_limits<float>::quiet_NaN()};
     float skip_ratio{0.2F};
     FilterSearchSkipStrategyType skip_strategy_type{

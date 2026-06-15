@@ -66,6 +66,7 @@ public:
 
     // use in search process with duplicate ids
     bool consider_duplicate{false};
+    int64_t max_duplicates_per_group{-1};
 
     // time record
     std::shared_ptr<Timer> time_cost{nullptr};

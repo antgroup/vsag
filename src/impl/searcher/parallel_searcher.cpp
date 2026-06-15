@@ -328,9 +328,15 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
                 }
                 if (inner_search_param.consider_duplicate) {
                     const auto duplicate_ids = graph->GetDuplicateIds(cur_id);
+                    int64_t dup_count = 0;
                     for (const auto& item : duplicate_ids) {
+                        if (inner_search_param.max_duplicates_per_group >= 0 &&
+                            dup_count >= inner_search_param.max_duplicates_per_group) {
+                            break;
+                        }
                         if (check_func(item)) {
                             top_candidates->Push(dist, item);
+                            ++dup_count;
                         }
                     }
                 }
