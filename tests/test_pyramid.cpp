@@ -758,3 +758,671 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
         REQUIRE(stats.contains("subindex_quality"));
     }
 }
+
+// ============================================================================
+// Multi-Hierarchy Tests
+// ============================================================================
+
+namespace {
+
+struct MultiHierarchyFixture {
+    static constexpr int64_t NUM = 4;
+    static constexpr int64_t DIM = 4;
+
+    std::vector<float> vectors = {
+        1.0f,
+        0.0f,
+        0.0f,
+        0.0f,
+        0.0f,
+        1.0f,
+        0.0f,
+        0.0f,
+        0.0f,
+        0.0f,
+        1.0f,
+        0.0f,
+        0.0f,
+        0.0f,
+        0.0f,
+        1.0f,
+    };
+    std::vector<int64_t> ids = {100, 101, 102, 103};
+    std::vector<std::string> site_paths = {"www/news", "www/sports", "www/news", "www/sports"};
+    std::vector<std::string> cat_paths = {"tech/ai", "tech/web", "science/bio", "science/phys"};
+
+    vsag::DatasetPtr
+    make_base() {
+        auto* rv = new float[NUM * DIM];
+        auto* ri = new int64_t[NUM];
+        auto* rs = new std::string[NUM];
+        auto* rc = new std::string[NUM];
+        std::copy(vectors.begin(), vectors.end(), rv);
+        std::copy(ids.begin(), ids.end(), ri);
+        for (int i = 0; i < NUM; ++i) {
+            rs[i] = site_paths[i];
+            rc[i] = cat_paths[i];
+        }
+        auto ds = vsag::Dataset::Make();
+        ds->NumElements(NUM)
+            ->Dim(DIM)
+            ->Float32Vectors(rv)
+            ->Ids(ri)
+            ->Paths("site", rs)
+            ->Paths("cat", rc)
+            ->Owner(true);
+        return ds;
+    }
+
+    vsag::DatasetPtr
+    make_query(const std::string& hierarchy, const std::string& path) {
+        auto* qv = new float[DIM]{1.0f, 0.0f, 0.0f, 0.0f};
+        auto* qp = new std::string[1]{path};
+        auto ds = vsag::Dataset::Make();
+        ds->NumElements(1)->Dim(DIM)->Float32Vectors(qv)->Paths(hierarchy, qp)->Owner(true);
+        return ds;
+    }
+
+    std::set<int64_t>
+    search_ids(const std::shared_ptr<vsag::Index>& index,
+               const std::string& hierarchy,
+               const std::string& path,
+               int64_t k = 4) {
+        auto query = make_query(hierarchy, path);
+        std::string sp =
+            R"({"pyramid": {"ef_search": 100, "hierarchies": [")" + hierarchy + R"("]}})";
+        auto result = index->KnnSearch(query, k, sp);
+        REQUIRE(result.has_value());
+        auto* rids = result.value()->GetIds();
+        auto cnt = result.value()->GetDim();
+        return std::set<int64_t>(rids, rids + cnt);
+    }
+
+    static std::string
+    build_param(const std::string& graph_type = "nsw", bool use_reorder = false) {
+        std::string reorder_str = use_reorder ? "true" : "false";
+        std::string precise = use_reorder ? R"(, "precise_quantization_type": "fp32")" : "";
+        std::string base_q = use_reorder ? "rabitq" : "fp32";
+        return R"({
+            "dtype": "float32", "metric_type": "l2", "dim": 4,
+            "index_param": {
+                "max_degree": 32, "alpha": 1.2,
+                "graph_type": ")" +
+               graph_type + R"(",
+                "graph_iter_turn": 15, "neighbor_sample_rate": 0.2,
+                "base_quantization_type": ")" +
+               base_q + R"(",
+                "use_reorder": )" +
+               reorder_str + precise + R"(,
+                "index_min_size": 0, "support_duplicate": false,
+                "hierarchies": [
+                    {"name": "site", "no_build_levels": [0]},
+                    {"name": "cat", "no_build_levels": [0, 1]}
+                ]
+            }
+        })";
+    }
+};
+
+}  // namespace
+
+TEST_CASE("Multi-Hierarchy: NSW Build and Search", "[ft][pyramid][multi_hierarchy]") {
+    MultiHierarchyFixture f;
+    auto index = vsag::Factory::CreateIndex("pyramid", f.build_param("nsw"));
+    REQUIRE(index.has_value());
+
+    auto build_result = index.value()->Build(f.make_base());
+    REQUIRE(build_result.has_value());
+
+    // site hierarchy: "www/news" -> ids 100, 102
+    auto site_news = f.search_ids(index.value(), "site", "www/news");
+    REQUIRE(site_news.count(100) == 1);
+    REQUIRE(site_news.count(102) == 1);
+    REQUIRE(site_news.count(101) == 0);
+    REQUIRE(site_news.count(103) == 0);
+
+    // site hierarchy: "www/sports" -> ids 101, 103
+    auto site_sports = f.search_ids(index.value(), "site", "www/sports");
+    REQUIRE(site_sports.count(101) == 1);
+    REQUIRE(site_sports.count(103) == 1);
+    REQUIRE(site_sports.count(100) == 0);
+
+    // cat hierarchy: "tech" -> ids 100, 101
+    auto cat_tech = f.search_ids(index.value(), "cat", "tech");
+    REQUIRE(cat_tech.count(100) == 1);
+    REQUIRE(cat_tech.count(101) == 1);
+    REQUIRE(cat_tech.count(102) == 0);
+
+    // cat hierarchy: "science" -> ids 102, 103
+    auto cat_science = f.search_ids(index.value(), "cat", "science");
+    REQUIRE(cat_science.count(102) == 1);
+    REQUIRE(cat_science.count(103) == 1);
+    REQUIRE(cat_science.count(100) == 0);
+}
+
+TEST_CASE("Multi-Hierarchy: ODescent Build and Search", "[ft][pyramid][multi_hierarchy]") {
+    MultiHierarchyFixture f;
+    auto index = vsag::Factory::CreateIndex("pyramid", f.build_param("odescent"));
+    REQUIRE(index.has_value());
+
+    auto build_result = index.value()->Build(f.make_base());
+    REQUIRE(build_result.has_value());
+
+    auto site_news = f.search_ids(index.value(), "site", "www/news");
+    REQUIRE(site_news.count(100) == 1);
+    REQUIRE(site_news.count(102) == 1);
+
+    auto cat_tech = f.search_ids(index.value(), "cat", "tech");
+    REQUIRE(cat_tech.count(100) == 1);
+    REQUIRE(cat_tech.count(101) == 1);
+}
+
+TEST_CASE("Multi-Hierarchy: Add after Build", "[ft][pyramid][multi_hierarchy]") {
+    MultiHierarchyFixture f;
+    auto index = vsag::Factory::CreateIndex("pyramid", f.build_param("nsw"));
+    REQUIRE(index.has_value());
+
+    // Build with first 2 vectors
+    auto* rv = new float[8];
+    auto* ri = new int64_t[2]{100, 101};
+    auto* rs = new std::string[2]{"www/news", "www/sports"};
+    auto* rc = new std::string[2]{"tech/ai", "tech/web"};
+    std::copy(f.vectors.begin(), f.vectors.begin() + 8, rv);
+    auto base1 = vsag::Dataset::Make();
+    base1->NumElements(2)
+        ->Dim(4)
+        ->Float32Vectors(rv)
+        ->Ids(ri)
+        ->Paths("site", rs)
+        ->Paths("cat", rc)
+        ->Owner(true);
+    REQUIRE(index.value()->Build(base1).has_value());
+
+    // Add 2 more vectors
+    auto* rv2 = new float[8];
+    auto* ri2 = new int64_t[2]{102, 103};
+    auto* rs2 = new std::string[2]{"www/news", "www/sports"};
+    auto* rc2 = new std::string[2]{"science/bio", "science/phys"};
+    std::copy(f.vectors.begin() + 8, f.vectors.end(), rv2);
+    auto base2 = vsag::Dataset::Make();
+    base2->NumElements(2)
+        ->Dim(4)
+        ->Float32Vectors(rv2)
+        ->Ids(ri2)
+        ->Paths("site", rs2)
+        ->Paths("cat", rc2)
+        ->Owner(true);
+    REQUIRE(index.value()->Add(base2).has_value());
+
+    // Verify all 4 vectors are searchable
+    auto site_news = f.search_ids(index.value(), "site", "www/news");
+    REQUIRE(site_news.count(100) == 1);
+    REQUIRE(site_news.count(102) == 1);
+
+    auto cat_science = f.search_ids(index.value(), "cat", "science");
+    REQUIRE(cat_science.count(102) == 1);
+    REQUIRE(cat_science.count(103) == 1);
+}
+
+TEST_CASE("Multi-Hierarchy: Serialize and Deserialize", "[ft][pyramid][multi_hierarchy]") {
+    MultiHierarchyFixture f;
+    auto param_str = f.build_param("nsw");
+    auto index = vsag::Factory::CreateIndex("pyramid", param_str);
+    REQUIRE(index.has_value());
+    REQUIRE(index.value()->Build(f.make_base()).has_value());
+
+    // Serialize
+    auto bs = index.value()->Serialize();
+    REQUIRE(bs.has_value());
+
+    // Deserialize into new index
+    auto index2 = vsag::Factory::CreateIndex("pyramid", param_str);
+    REQUIRE(index2.has_value());
+    index2.value()->Deserialize(bs.value());
+
+    // Search deserialized index
+    auto site_news = f.search_ids(index2.value(), "site", "www/news");
+    REQUIRE(site_news.count(100) == 1);
+    REQUIRE(site_news.count(102) == 1);
+    REQUIRE(site_news.count(101) == 0);
+
+    auto cat_tech = f.search_ids(index2.value(), "cat", "tech");
+    REQUIRE(cat_tech.count(100) == 1);
+    REQUIRE(cat_tech.count(101) == 1);
+    REQUIRE(cat_tech.count(102) == 0);
+}
+
+TEST_CASE("Multi-Hierarchy: Different no_build_levels per hierarchy",
+          "[ft][pyramid][multi_hierarchy]") {
+    MultiHierarchyFixture f;
+    auto index = vsag::Factory::CreateIndex("pyramid", f.build_param("nsw"));
+    REQUIRE(index.has_value());
+    REQUIRE(index.value()->Build(f.make_base()).has_value());
+
+    // Both hierarchies should still return correct results
+    auto site_news = f.search_ids(index.value(), "site", "www/news");
+    REQUIRE(site_news.count(100) == 1);
+    REQUIRE(site_news.count(102) == 1);
+
+    // cat/tech/ai should find id 100
+    auto cat_ai = f.search_ids(index.value(), "cat", "tech/ai");
+    REQUIRE(cat_ai.count(100) == 1);
+}
+
+TEST_CASE("Multi-Hierarchy: Shared vector base distances", "[ft][pyramid][multi_hierarchy]") {
+    MultiHierarchyFixture f;
+    auto index = vsag::Factory::CreateIndex("pyramid", f.build_param("nsw"));
+    REQUIRE(index.has_value());
+    REQUIRE(index.value()->Build(f.make_base()).has_value());
+
+    // id=100 has vector [1,0,0,0]. Query with same vector -> distance = 0.
+    auto* qv1 = new float[4]{1.0f, 0.0f, 0.0f, 0.0f};
+    auto* qp1 = new std::string[1]{"www/news"};
+    auto q_site = vsag::Dataset::Make();
+    q_site->NumElements(1)->Dim(4)->Float32Vectors(qv1)->Paths("site", qp1)->Owner(true);
+    std::string sp_site = R"({"pyramid": {"ef_search": 100, "hierarchies": ["site"]}})";
+    auto r_site = index.value()->KnnSearch(q_site, 4, sp_site);
+    REQUIRE(r_site.has_value());
+
+    auto* qv2 = new float[4]{1.0f, 0.0f, 0.0f, 0.0f};
+    auto* qp2 = new std::string[1]{"tech"};
+    auto q_cat = vsag::Dataset::Make();
+    q_cat->NumElements(1)->Dim(4)->Float32Vectors(qv2)->Paths("cat", qp2)->Owner(true);
+    std::string sp_cat = R"({"pyramid": {"ef_search": 100, "hierarchies": ["cat"]}})";
+    auto r_cat = index.value()->KnnSearch(q_cat, 4, sp_cat);
+    REQUIRE(r_cat.has_value());
+
+    // Find distance for id=100 in both results — should be ~0 and identical
+    float dist_site = -1, dist_cat = -1;
+    for (int64_t i = 0; i < r_site.value()->GetDim(); ++i) {
+        if (r_site.value()->GetIds()[i] == 100) {
+            dist_site = r_site.value()->GetDistances()[i];
+        }
+    }
+    for (int64_t i = 0; i < r_cat.value()->GetDim(); ++i) {
+        if (r_cat.value()->GetIds()[i] == 100) {
+            dist_cat = r_cat.value()->GetDistances()[i];
+        }
+    }
+    REQUIRE(dist_site >= 0);
+    REQUIRE(dist_cat >= 0);
+    REQUIRE(std::abs(dist_site - dist_cat) < 1e-6f);
+    REQUIRE(std::abs(dist_site) < 1e-6f);
+}
+
+TEST_CASE("Multi-Hierarchy: Partial paths - only some hierarchies provided",
+          "[ft][pyramid][multi_hierarchy]") {
+    MultiHierarchyFixture f;
+    auto index = vsag::Factory::CreateIndex("pyramid", f.build_param("nsw"));
+    REQUIRE(index.has_value());
+
+    // Build with only "site" paths, no "cat" paths
+    auto* rv = new float[4]{1.0f, 0.0f, 0.0f, 0.0f};
+    auto* ri = new int64_t[1]{100};
+    auto* rs = new std::string[1]{"www/news"};
+    auto base = vsag::Dataset::Make();
+    base->NumElements(1)->Dim(4)->Float32Vectors(rv)->Ids(ri)->Paths("site", rs)->Owner(true);
+
+    auto result = index.value()->Build(base);
+    REQUIRE(result.has_value());
+
+    // Search in "site" hierarchy -> should find id=100
+    auto site_result = f.search_ids(index.value(), "site", "www/news");
+    REQUIRE(site_result.count(100) == 1);
+
+    // Search in "cat" hierarchy -> should NOT find id=100
+    auto* qv = new float[4]{1.0f, 0.0f, 0.0f, 0.0f};
+    auto* qp = new std::string[1]{"tech"};
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(4)->Float32Vectors(qv)->Paths("cat", qp)->Owner(true);
+    std::string sp = R"({"pyramid": {"ef_search": 100, "hierarchies": ["cat"]}})";
+    auto cat_result = index.value()->KnnSearch(query, 4, sp);
+    REQUIRE(cat_result.has_value());
+    REQUIRE(cat_result.value()->GetDim() == 0);
+}
+
+TEST_CASE("Multi-Hierarchy: Partial paths - Add to subset of hierarchies",
+          "[ft][pyramid][multi_hierarchy]") {
+    MultiHierarchyFixture f;
+    auto index = vsag::Factory::CreateIndex("pyramid", f.build_param("nsw"));
+    REQUIRE(index.has_value());
+    REQUIRE(index.value()->Build(f.make_base()).has_value());
+
+    // Add with only "site" paths, no "cat" paths
+    auto* rv = new float[4]{0.5f, 0.5f, 0.0f, 0.0f};
+    auto* ri = new int64_t[1]{200};
+    auto* rs = new std::string[1]{"www/news"};
+    auto add_ds = vsag::Dataset::Make();
+    add_ds->NumElements(1)->Dim(4)->Float32Vectors(rv)->Ids(ri)->Paths("site", rs)->Owner(true);
+
+    auto result = index.value()->Add(add_ds);
+    REQUIRE(result.has_value());
+
+    // id=200 should be findable in "site"
+    auto site_result = f.search_ids(index.value(), "site", "www/news");
+    REQUIRE(site_result.count(200) == 1);
+
+    // id=200 should NOT be findable in "cat"
+    auto cat_tech = f.search_ids(index.value(), "cat", "tech");
+    REQUIRE(cat_tech.count(200) == 0);
+}
+
+TEST_CASE("Multi-Hierarchy: Error - unknown hierarchy in search",
+          "[ft][pyramid][multi_hierarchy]") {
+    MultiHierarchyFixture f;
+    auto index = vsag::Factory::CreateIndex("pyramid", f.build_param("nsw"));
+    REQUIRE(index.has_value());
+    REQUIRE(index.value()->Build(f.make_base()).has_value());
+
+    auto* qv = new float[4]{1.0f, 0.0f, 0.0f, 0.0f};
+    auto* qp = new std::string[1]{"anything"};
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(4)->Float32Vectors(qv)->Paths("unknown", qp)->Owner(true);
+
+    std::string sp = R"({"pyramid": {"ef_search": 100, "hierarchies": ["unknown"]}})";
+    auto result = index.value()->KnnSearch(query, 4, sp);
+    REQUIRE_FALSE(result.has_value());
+}
+
+TEST_CASE("Multi-Hierarchy: Duplicate label rejected on Add", "[ft][pyramid][multi_hierarchy]") {
+    MultiHierarchyFixture f;
+    auto index = vsag::Factory::CreateIndex("pyramid", f.build_param("nsw"));
+    REQUIRE(index.has_value());
+    REQUIRE(index.value()->Build(f.make_base()).has_value());
+
+    // Try to add id=100 again (already exists)
+    auto* rv = new float[4]{0.9f, 0.1f, 0.0f, 0.0f};
+    auto* ri = new int64_t[1]{100};
+    auto* rs = new std::string[1]{"www/news"};
+    auto* rc = new std::string[1]{"tech/ai"};
+    auto add_ds = vsag::Dataset::Make();
+    add_ds->NumElements(1)
+        ->Dim(4)
+        ->Float32Vectors(rv)
+        ->Ids(ri)
+        ->Paths("site", rs)
+        ->Paths("cat", rc)
+        ->Owner(true);
+
+    auto result = index.value()->Add(add_ds);
+    REQUIRE(result.has_value());
+    // id=100 should be in the failed list
+    auto failed = result.value();
+    bool found_in_failed = false;
+    for (auto id : failed) {
+        if (id == 100) {
+            found_in_failed = true;
+        }
+    }
+    REQUIRE(found_in_failed);
+}
+
+TEST_CASE("Multi-Hierarchy: Legacy single-hierarchy serialize compat",
+          "[ft][pyramid][multi_hierarchy][serialization]") {
+    // Build with single-hierarchy (no "hierarchies" param) -> serialize -> deserialize -> search
+    std::string single_param = R"({
+        "dtype": "float32", "metric_type": "l2", "dim": 4,
+        "index_param": {
+            "max_degree": 32, "alpha": 1.2, "graph_type": "nsw",
+            "base_quantization_type": "fp32", "use_reorder": false,
+            "index_min_size": 0, "support_duplicate": false,
+            "no_build_levels": [0]
+        }
+    })";
+
+    auto index1 = vsag::Factory::CreateIndex("pyramid", single_param);
+    REQUIRE(index1.has_value());
+
+    auto* rv = new float[8]{1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f};
+    auto* ri = new int64_t[2]{10, 20};
+    auto* rp = new std::string[2]{"a/b", "a/c"};
+    auto base = vsag::Dataset::Make();
+    base->NumElements(2)->Dim(4)->Float32Vectors(rv)->Ids(ri)->Paths(rp)->Owner(true);
+    REQUIRE(index1.value()->Build(base).has_value());
+
+    auto bs = index1.value()->Serialize();
+    REQUIRE(bs.has_value());
+
+    auto index2 = vsag::Factory::CreateIndex("pyramid", single_param);
+    REQUIRE(index2.has_value());
+    index2.value()->Deserialize(bs.value());
+
+    auto* qv = new float[4]{1.0f, 0.0f, 0.0f, 0.0f};
+    auto* qp = new std::string[1]{"a/b"};
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(4)->Float32Vectors(qv)->Paths(qp)->Owner(true);
+    std::string sp = R"({"pyramid": {"ef_search": 100}})";
+    auto result = index2.value()->KnnSearch(query, 2, sp);
+    REQUIRE(result.has_value());
+
+    auto* result_ids = result.value()->GetIds();
+    auto cnt = result.value()->GetDim();
+    std::set<int64_t> found(result_ids, result_ids + cnt);
+    REQUIRE(found.count(10) == 1);
+}
+
+TEST_CASE("Multi-Hierarchy: Serialize roundtrip preserves isolation",
+          "[ft][pyramid][multi_hierarchy][serialization]") {
+    MultiHierarchyFixture f;
+    auto param_str = f.build_param("nsw");
+
+    auto index1 = vsag::Factory::CreateIndex("pyramid", param_str);
+    REQUIRE(index1.has_value());
+    REQUIRE(index1.value()->Build(f.make_base()).has_value());
+
+    auto bs = index1.value()->Serialize();
+    REQUIRE(bs.has_value());
+
+    auto index2 = vsag::Factory::CreateIndex("pyramid", param_str);
+    REQUIRE(index2.has_value());
+    index2.value()->Deserialize(bs.value());
+
+    // Verify isolation: site/www/sports should NOT contain id=100
+    auto site_sports = f.search_ids(index2.value(), "site", "www/sports");
+    REQUIRE(site_sports.count(100) == 0);
+    REQUIRE(site_sports.count(101) == 1);
+    REQUIRE(site_sports.count(103) == 1);
+
+    // Verify isolation: cat/science should NOT contain id=100 or id=101
+    auto cat_science = f.search_ids(index2.value(), "cat", "science");
+    REQUIRE(cat_science.count(100) == 0);
+    REQUIRE(cat_science.count(101) == 0);
+    REQUIRE(cat_science.count(102) == 1);
+    REQUIRE(cat_science.count(103) == 1);
+}
+
+TEST_CASE("Multi-Hierarchy: Per-hierarchy build params take effect",
+          "[ft][pyramid][multi_hierarchy]") {
+    // Create with different max_degree per hierarchy
+    std::string param = R"({
+        "dtype": "float32", "metric_type": "l2", "dim": 4,
+        "index_param": {
+            "max_degree": 16, "alpha": 1.0,
+            "graph_type": "nsw",
+            "base_quantization_type": "fp32",
+            "use_reorder": false,
+            "index_min_size": 0, "support_duplicate": false,
+            "hierarchies": [
+                {"name": "site", "no_build_levels": [0], "max_degree": 64, "alpha": 1.5},
+                {"name": "cat", "no_build_levels": [0]}
+            ]
+        }
+    })";
+
+    MultiHierarchyFixture f;
+    auto index = vsag::Factory::CreateIndex("pyramid", param);
+    REQUIRE(index.has_value());
+    REQUIRE(index.value()->Build(f.make_base()).has_value());
+
+    // Both hierarchies should work correctly regardless of different params
+    auto site_news = f.search_ids(index.value(), "site", "www/news");
+    REQUIRE(site_news.count(100) == 1);
+    REQUIRE(site_news.count(102) == 1);
+
+    auto cat_tech = f.search_ids(index.value(), "cat", "tech");
+    REQUIRE(cat_tech.count(100) == 1);
+    REQUIRE(cat_tech.count(101) == 1);
+}
+
+TEST_CASE("Multi-Hierarchy: Analyzer output format - multi hierarchy",
+          "[ft][pyramid][multi_hierarchy][analyzer]") {
+    MultiHierarchyFixture f;
+    auto index = vsag::Factory::CreateIndex("pyramid", f.build_param("nsw"));
+    REQUIRE(index.has_value());
+    REQUIRE(index.value()->Build(f.make_base()).has_value());
+
+    auto stats_str = index.value()->GetStats();
+    REQUIRE(!stats_str.empty());
+    auto stats = nlohmann::json::parse(stats_str);
+
+    REQUIRE(stats.contains("total_count"));
+    REQUIRE(stats["total_count"].get<int64_t>() == 4);
+    REQUIRE(stats.contains("hierarchy_count"));
+    REQUIRE(stats["hierarchy_count"].get<int64_t>() == 2);
+    REQUIRE(stats.contains("hierarchies"));
+    REQUIRE(stats["hierarchies"].contains("site"));
+    REQUIRE(stats["hierarchies"].contains("cat"));
+    REQUIRE(stats["hierarchies"]["site"].contains("index_node_structure"));
+    REQUIRE(stats["hierarchies"]["site"].contains("leaf_node_size_distribution"));
+    REQUIRE(stats["hierarchies"]["site"].contains("subindex_quality"));
+    REQUIRE(stats["hierarchies"]["cat"].contains("index_node_structure"));
+}
+
+TEST_CASE("Multi-Hierarchy: Analyzer output format - single hierarchy compat",
+          "[ft][pyramid][multi_hierarchy][analyzer]") {
+    std::string param = R"({
+        "dtype": "float32", "metric_type": "l2", "dim": 4,
+        "index_param": {
+            "max_degree": 32, "alpha": 1.2, "graph_type": "nsw",
+            "base_quantization_type": "fp32", "use_reorder": false,
+            "index_min_size": 0, "support_duplicate": false,
+            "no_build_levels": [0, 1, 2]
+        }
+    })";
+    auto index = vsag::Factory::CreateIndex("pyramid", param);
+    REQUIRE(index.has_value());
+
+    auto* rv = new float[8]{1, 0, 0, 0, 0, 1, 0, 0};
+    auto* ri = new int64_t[2]{1, 2};
+    auto* rp = new std::string[2]{"a/b/c", "a/b/d"};
+    auto ds = vsag::Dataset::Make();
+    ds->NumElements(2)->Dim(4)->Float32Vectors(rv)->Ids(ri)->Paths(rp)->Owner(true);
+    REQUIRE(index.value()->Build(ds).has_value());
+
+    auto stats_str = index.value()->GetStats();
+    auto stats = nlohmann::json::parse(stats_str);
+
+    REQUIRE(stats.contains("total_count"));
+    REQUIRE(stats.contains("index_node_structure"));
+    REQUIRE(stats.contains("leaf_node_size_distribution"));
+    REQUIRE(stats.contains("subindex_quality"));
+    REQUIRE_FALSE(stats.contains("hierarchies"));
+    REQUIRE_FALSE(stats.contains("hierarchy_count"));
+}
+
+TEST_CASE("Multi-Hierarchy: Search without hierarchies param in multi-mode errors",
+          "[ft][pyramid][multi_hierarchy]") {
+    MultiHierarchyFixture f;
+    auto index = vsag::Factory::CreateIndex("pyramid", f.build_param("nsw"));
+    REQUIRE(index.has_value());
+    REQUIRE(index.value()->Build(f.make_base()).has_value());
+
+    auto* qv = new float[4]{1.0f, 0.0f, 0.0f, 0.0f};
+    auto* qp = new std::string[1]{"www/news"};
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(4)->Float32Vectors(qv)->Paths(qp)->Owner(true);
+
+    std::string sp = R"({"pyramid": {"ef_search": 100}})";
+    auto result = index.value()->KnnSearch(query, 4, sp);
+    REQUIRE_FALSE(result.has_value());
+}
+
+TEST_CASE("Multi-Hierarchy: Multi-hierarchy union/intersection rejected",
+          "[ft][pyramid][multi_hierarchy]") {
+    MultiHierarchyFixture f;
+    auto index = vsag::Factory::CreateIndex("pyramid", f.build_param("nsw"));
+    REQUIRE(index.has_value());
+    REQUIRE(index.value()->Build(f.make_base()).has_value());
+
+    auto* qv = new float[4]{1.0f, 0.0f, 0.0f, 0.0f};
+    auto* qp_s = new std::string[1]{"www/news"};
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(4)->Float32Vectors(qv)->Paths("site", qp_s)->Owner(true);
+
+    std::string sp =
+        R"({"pyramid": {"ef_search": 100, "hierarchies": ["site", "cat"], "hierarchy_op": "intersection"}})";
+    auto result = index.value()->KnnSearch(query, 4, sp);
+    REQUIRE_FALSE(result.has_value());
+}
+
+TEST_CASE("Multi-Hierarchy: RangeSearch works", "[ft][pyramid][multi_hierarchy]") {
+    MultiHierarchyFixture f;
+    auto index = vsag::Factory::CreateIndex("pyramid", f.build_param("nsw"));
+    REQUIRE(index.has_value());
+    REQUIRE(index.value()->Build(f.make_base()).has_value());
+
+    auto* qv = new float[4]{1.0f, 0.0f, 0.0f, 0.0f};
+    auto* qp = new std::string[1]{"www/news"};
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(4)->Float32Vectors(qv)->Paths("site", qp)->Owner(true);
+
+    std::string sp = R"({"pyramid": {"ef_search": 100, "hierarchies": ["site"]}})";
+    auto result = index.value()->RangeSearch(query, 2.0f, sp);
+    REQUIRE(result.has_value());
+    auto* rids = result.value()->GetIds();
+    auto cnt = result.value()->GetDim();
+    std::set<int64_t> found(rids, rids + cnt);
+    REQUIRE(found.count(100) == 1);
+    REQUIRE(found.count(101) == 0);
+    REQUIRE(found.count(103) == 0);
+}
+
+TEST_CASE("Multi-Hierarchy: Reorder with multi-hierarchy", "[ft][pyramid][multi_hierarchy]") {
+    MultiHierarchyFixture f;
+    auto index = vsag::Factory::CreateIndex("pyramid", f.build_param("nsw", true));
+    REQUIRE(index.has_value());
+    REQUIRE(index.value()->Build(f.make_base()).has_value());
+
+    auto site_news = f.search_ids(index.value(), "site", "www/news");
+    REQUIRE(site_news.count(100) == 1);
+    REQUIRE(site_news.count(102) == 1);
+    REQUIRE(site_news.count(101) == 0);
+
+    auto cat_tech = f.search_ids(index.value(), "cat", "tech");
+    REQUIRE(cat_tech.count(100) == 1);
+    REQUIRE(cat_tech.count(101) == 1);
+}
+
+TEST_CASE("Multi-Hierarchy: Single hierarchy in hierarchies config",
+          "[ft][pyramid][multi_hierarchy]") {
+    std::string param = R"({
+        "dtype": "float32", "metric_type": "l2", "dim": 4,
+        "index_param": {
+            "max_degree": 32, "alpha": 1.2, "graph_type": "nsw",
+            "base_quantization_type": "fp32", "use_reorder": false,
+            "index_min_size": 0, "support_duplicate": false,
+            "hierarchies": [{"name": "only", "no_build_levels": [0]}]
+        }
+    })";
+
+    auto index = vsag::Factory::CreateIndex("pyramid", param);
+    REQUIRE(index.has_value());
+
+    auto* rv = new float[8]{1, 0, 0, 0, 0, 1, 0, 0};
+    auto* ri = new int64_t[2]{10, 20};
+    auto* rp = new std::string[2]{"a/b", "a/c"};
+    auto ds = vsag::Dataset::Make();
+    ds->NumElements(2)->Dim(4)->Float32Vectors(rv)->Ids(ri)->Paths("only", rp)->Owner(true);
+    REQUIRE(index.value()->Build(ds).has_value());
+
+    auto* qv = new float[4]{1, 0, 0, 0};
+    auto* qp = new std::string[1]{"a/b"};
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(4)->Float32Vectors(qv)->Paths("only", qp)->Owner(true);
+    std::string sp = R"({"pyramid": {"ef_search": 100, "hierarchies": ["only"]}})";
+    auto result = index.value()->KnnSearch(query, 2, sp);
+    REQUIRE(result.has_value());
+    auto* rids = result.value()->GetIds();
+    std::set<int64_t> found(rids, rids + result.value()->GetDim());
+    REQUIRE(found.count(10) == 1);
+}
