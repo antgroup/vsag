@@ -291,12 +291,19 @@ HGraph::generate_one_route_graph() {
 
 float
 HGraph::CalcDistanceById(const float* query, int64_t id, bool calculate_precise_distance) const {
-    auto flat = this->basic_flatten_codes_;
-    if (has_precise_reorder() && calculate_precise_distance) {
-        flat = this->high_precise_codes_;
-    }
-    if (create_new_raw_vector_ && calculate_precise_distance) {
-        flat = this->raw_vector_;
+    FlattenInterfacePtr flat;
+    {
+        std::shared_lock<std::shared_mutex> lock;
+        if (!this->immutable_.load(std::memory_order_acquire)) {
+            lock = std::shared_lock<std::shared_mutex>(this->global_mutex_);
+        }
+        flat = this->basic_flatten_codes_;
+        if (has_precise_reorder() && calculate_precise_distance) {
+            flat = this->high_precise_codes_;
+        }
+        if (create_new_raw_vector_ && calculate_precise_distance) {
+            flat = this->raw_vector_;
+        }
     }
     return InnerIndexInterface::calc_distance_by_id(query, id, flat);
 }
@@ -306,12 +313,19 @@ HGraph::CalDistanceById(const float* query,
                         const int64_t* ids,
                         int64_t count,
                         bool calculate_precise_distance) const {
-    auto flat = this->basic_flatten_codes_;
-    if (has_precise_reorder() && calculate_precise_distance) {
-        flat = this->high_precise_codes_;
-    }
-    if (create_new_raw_vector_ && calculate_precise_distance) {
-        flat = this->raw_vector_;
+    FlattenInterfacePtr flat;
+    {
+        std::shared_lock<std::shared_mutex> lock;
+        if (!this->immutable_.load(std::memory_order_acquire)) {
+            lock = std::shared_lock<std::shared_mutex>(this->global_mutex_);
+        }
+        flat = this->basic_flatten_codes_;
+        if (has_precise_reorder() && calculate_precise_distance) {
+            flat = this->high_precise_codes_;
+        }
+        if (create_new_raw_vector_ && calculate_precise_distance) {
+            flat = this->raw_vector_;
+        }
     }
     return InnerIndexInterface::cal_distance_by_id(query, ids, count, flat);
 }

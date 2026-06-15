@@ -14,11 +14,14 @@
 // limitations under the License.
 
 #include <algorithm>
+#include <atomic>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
+#include <chrono>
 #include <limits>
 #include <random>
 #include <sstream>
+#include <thread>
 
 #include "functest.h"
 #include "inner_string_params.h"
@@ -2923,4 +2926,250 @@ TEST_CASE("HGraph GetStats reports build cache hit-rate", "[ft][hgraph][cache][p
     const auto hit_nodes = parsed["build_cache_hit_nodes"].GetInt();
     const auto missed_nodes = parsed["build_cache_missed_nodes"].GetInt();
     REQUIRE(hit_nodes + missed_nodes == TEST_COUNT);
+}
+TEST_CASE("HGraph Concurrent Tune and CalDistanceById", "[ft][concurrent][hgraph]") {
+    constexpr uint32_t dim = 64;
+    constexpr uint32_t num_vectors = 1000;
+
+    std::string build_params = R"({
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": 64,
+        "index_param": {
+            "base_quantization_type": "fp32",
+            "max_degree": 32,
+            "ef_construction": 200,
+            "build_thread_count": 0,
+            "store_raw_vector": true
+        }
+    })";
+
+    std::string tune_params = R"({
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": 64,
+        "index_param": {
+            "base_quantization_type": "sq8",
+            "max_degree": 32,
+            "ef_construction": 100,
+            "build_thread_count": 0
+        }
+    })";
+
+    auto seed = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+    std::mt19937 rng(seed);
+    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+
+    std::vector<float> vectors(num_vectors * dim);
+    std::vector<int64_t> ids(num_vectors);
+    for (uint32_t i = 0; i < num_vectors; ++i) {
+        ids[i] = static_cast<int64_t>(i);
+        for (uint32_t j = 0; j < dim; ++j) {
+            vectors[i * dim + j] = dist(rng);
+        }
+    }
+
+    auto base = vsag::Dataset::Make();
+    base->NumElements(num_vectors)
+        ->Dim(dim)
+        ->Ids(ids.data())
+        ->Float32Vectors(vectors.data())
+        ->Owner(false);
+
+    auto index = vsag::Factory::CreateIndex("hgraph", build_params);
+    REQUIRE(index.has_value());
+    REQUIRE(index.value()->Build(base).has_value());
+
+    std::vector<float> query(vectors.begin(), vectors.begin() + dim);
+    std::vector<int64_t> batch_ids = {0, 1, 2};
+
+    std::atomic<bool> stop{false};
+    std::atomic<uint64_t> cal_count{0};
+
+    std::vector<std::thread> readers;
+    for (int i = 0; i < 4; ++i) {
+        readers.emplace_back([&]() {
+            while (!stop.load(std::memory_order_relaxed)) {
+                index.value()->CalDistanceById(query.data(), batch_ids.data(), 3);
+                cal_count.fetch_add(1, std::memory_order_relaxed);
+            }
+        });
+    }
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    auto tune_result = index.value()->Tune(tune_params, true);
+    CHECK(tune_result.has_value());
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    stop.store(true, std::memory_order_relaxed);
+    for (auto& t : readers) {
+        t.join();
+    }
+
+    REQUIRE(cal_count.load() > 0);
+}
+
+TEST_CASE("HGraph Concurrent Tune and CalcDistanceById (single id)", "[ft][concurrent][hgraph]") {
+    constexpr uint32_t dim = 64;
+    constexpr uint32_t num_vectors = 1000;
+
+    std::string build_params = R"({
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": 64,
+        "index_param": {
+            "base_quantization_type": "fp32",
+            "max_degree": 32,
+            "ef_construction": 200,
+            "build_thread_count": 0,
+            "store_raw_vector": true
+        }
+    })";
+
+    std::string tune_params = R"({
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": 64,
+        "index_param": {
+            "base_quantization_type": "sq8",
+            "max_degree": 32,
+            "ef_construction": 100,
+            "build_thread_count": 0
+        }
+    })";
+
+    auto seed = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+    std::mt19937 rng(seed);
+    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+
+    std::vector<float> vectors(num_vectors * dim);
+    std::vector<int64_t> ids(num_vectors);
+    for (uint32_t i = 0; i < num_vectors; ++i) {
+        ids[i] = static_cast<int64_t>(i);
+        for (uint32_t j = 0; j < dim; ++j) {
+            vectors[i * dim + j] = dist(rng);
+        }
+    }
+
+    auto base = vsag::Dataset::Make();
+    base->NumElements(num_vectors)
+        ->Dim(dim)
+        ->Ids(ids.data())
+        ->Float32Vectors(vectors.data())
+        ->Owner(false);
+
+    auto index = vsag::Factory::CreateIndex("hgraph", build_params);
+    REQUIRE(index.has_value());
+    REQUIRE(index.value()->Build(base).has_value());
+
+    std::vector<float> query(vectors.begin(), vectors.begin() + dim);
+
+    std::atomic<bool> stop{false};
+    std::atomic<uint64_t> cal_count{0};
+
+    std::vector<std::thread> readers;
+    for (int i = 0; i < 4; ++i) {
+        readers.emplace_back([&]() {
+            while (!stop.load(std::memory_order_relaxed)) {
+                index.value()->CalcDistanceById(query.data(), 0);
+                cal_count.fetch_add(1, std::memory_order_relaxed);
+            }
+        });
+    }
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    auto tune_result = index.value()->Tune(tune_params, true);
+    CHECK(tune_result.has_value());
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    stop.store(true, std::memory_order_relaxed);
+    for (auto& t : readers) {
+        t.join();
+    }
+
+    REQUIRE(cal_count.load() > 0);
+}
+
+TEST_CASE("HGraph Concurrent Tune(disable_future_tuning=false) and CalDistanceById",
+          "[ft][concurrent][hgraph]") {
+    constexpr uint32_t dim = 64;
+    constexpr uint32_t num_vectors = 1000;
+
+    std::string build_params = R"({
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": 64,
+        "index_param": {
+            "base_quantization_type": "fp32",
+            "max_degree": 32,
+            "ef_construction": 200,
+            "build_thread_count": 0,
+            "store_raw_vector": true
+        }
+    })";
+
+    std::string tune_params = R"({
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": 64,
+        "index_param": {
+            "base_quantization_type": "sq8",
+            "max_degree": 32,
+            "ef_construction": 100,
+            "build_thread_count": 0,
+            "store_raw_vector": true
+        }
+    })";
+
+    auto seed = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+    std::mt19937 rng(seed);
+    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+
+    std::vector<float> vectors(num_vectors * dim);
+    std::vector<int64_t> ids(num_vectors);
+    for (uint32_t i = 0; i < num_vectors; ++i) {
+        ids[i] = static_cast<int64_t>(i);
+        for (uint32_t j = 0; j < dim; ++j) {
+            vectors[i * dim + j] = dist(rng);
+        }
+    }
+
+    auto base = vsag::Dataset::Make();
+    base->NumElements(num_vectors)
+        ->Dim(dim)
+        ->Ids(ids.data())
+        ->Float32Vectors(vectors.data())
+        ->Owner(false);
+
+    auto index = vsag::Factory::CreateIndex("hgraph", build_params);
+    REQUIRE(index.has_value());
+    REQUIRE(index.value()->Build(base).has_value());
+
+    std::vector<float> query(vectors.begin(), vectors.begin() + dim);
+    std::vector<int64_t> batch_ids = {0, 1, 2};
+
+    std::atomic<bool> stop{false};
+    std::atomic<uint64_t> cal_count{0};
+
+    std::vector<std::thread> readers;
+    for (int i = 0; i < 4; ++i) {
+        readers.emplace_back([&]() {
+            while (!stop.load(std::memory_order_relaxed)) {
+                index.value()->CalDistanceById(query.data(), batch_ids.data(), 3);
+                cal_count.fetch_add(1, std::memory_order_relaxed);
+            }
+        });
+    }
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    auto tune_result = index.value()->Tune(tune_params, false);
+    CHECK(tune_result.has_value());
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    stop.store(true, std::memory_order_relaxed);
+    for (auto& t : readers) {
+        t.join();
+    }
+
+    REQUIRE(cal_count.load() > 0);
 }
