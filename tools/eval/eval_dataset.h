@@ -341,15 +341,11 @@ protected:
 public:
     [[nodiscard]] bool
     HasPaths() const {
-        return !train_paths_.empty();
+        return !train_paths_.empty() || !test_paths_.empty();
     }
 
     [[nodiscard]] const std::vector<std::string>&
     GetHierarchyNames() const {
-        static const std::vector<std::string> empty;
-        if (hierarchy_names_.empty()) {
-            return empty;
-        }
         return hierarchy_names_;
     }
 

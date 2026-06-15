@@ -612,40 +612,53 @@ EvalDataset::Load(const std::string& filename) {
                 continue;
             }
             H5::Group h_group = paths_group.openGroup(hname);
-            obj->hierarchy_names_.push_back(hname);
 
             auto read_string_dataset = [](H5::Group& group,
                                           const std::string& dsname,
                                           int64_t expected_count) -> std::vector<std::string> {
-                H5::DataSet ds = group.openDataSet(dsname);
-                H5::DataSpace space = ds.getSpace();
-                hsize_t dims[1];
-                space.getSimpleExtentDims(dims, NULL);
-                if (static_cast<int64_t>(dims[0]) != expected_count) {
-                    throw std::runtime_error("paths dataset size mismatch: expected " +
-                                             std::to_string(expected_count) + ", got " +
-                                             std::to_string(dims[0]));
+                try {
+                    H5::DataSet ds = group.openDataSet(dsname);
+                    H5::DataSpace space = ds.getSpace();
+                    hsize_t dims[1];
+                    space.getSimpleExtentDims(dims, NULL);
+                    if (static_cast<int64_t>(dims[0]) != expected_count) {
+                        throw std::runtime_error("paths dataset size mismatch: expected " +
+                                                 std::to_string(expected_count) + ", got " +
+                                                 std::to_string(dims[0]));
+                    }
+                    std::vector<const char*> raw(dims[0]);
+                    H5::StrType str_type(H5::PredType::C_S1, H5T_VARIABLE);
+                    ds.read(raw.data(), str_type);
+                    std::vector<std::string> result(dims[0]);
+                    for (hsize_t j = 0; j < dims[0]; ++j) {
+                        result[j] = raw[j] ? raw[j] : "";
+                    }
+                    H5::DataSet::vlenReclaim(raw.data(), str_type, space);
+                    return result;
+                } catch (H5::Exception&) {
+                    return {};
                 }
-                std::vector<const char*> raw(dims[0]);
-                H5::StrType str_type(H5::PredType::C_S1, H5T_VARIABLE);
-                ds.read(raw.data(), str_type);
-                std::vector<std::string> result(dims[0]);
-                for (hsize_t j = 0; j < dims[0]; ++j) {
-                    result[j] = raw[j] ? raw[j] : "";
-                }
-                H5::DataSet::vlenReclaim(raw.data(), str_type, space);
-                return result;
             };
 
-            obj->train_paths_[hname] = read_string_dataset(h_group, "train", obj->number_of_base_);
-            obj->test_paths_[hname] = read_string_dataset(h_group, "test", obj->number_of_query_);
+            auto train_paths = read_string_dataset(h_group, "train", obj->number_of_base_);
+            auto test_paths = read_string_dataset(h_group, "test", obj->number_of_query_);
 
-            logger::debug("loaded paths hierarchy '{}': {} train, {} test",
-                          hname,
-                          obj->train_paths_[hname].size(),
-                          obj->test_paths_[hname].size());
+            if (!train_paths.empty() || !test_paths.empty()) {
+                obj->hierarchy_names_.push_back(hname);
+                if (!train_paths.empty()) {
+                    obj->train_paths_[hname] = std::move(train_paths);
+                }
+                if (!test_paths.empty()) {
+                    obj->test_paths_[hname] = std::move(test_paths);
+                }
+                logger::debug("loaded paths hierarchy '{}': {} train, {} test",
+                              hname,
+                              obj->train_paths_.count(hname) ? obj->train_paths_[hname].size() : 0,
+                              obj->test_paths_.count(hname) ? obj->test_paths_[hname].size() : 0);
+            }
         }
-    } catch (H5::Exception&) {
+    } catch (H5::Exception& e) {
+        logger::debug("no /paths/ group in HDF5 file (not a Pyramid dataset)");
     }
 
     try {
