@@ -898,8 +898,9 @@ MCI::validate_clique_csr(uint64_t total) const {
                    fmt::format("mci pNodeToCid size {} must be total + 1 ({})",
                                this->p_node_to_cid_.size(),
                                total + 1));
-    CHECK_ARGUMENT(this->p_maxc_.front() == 0 and this->p_node_to_cid_.front() == 0,
-                   "mci deserialized CSR offsets must start from 0");
+    const auto offsets_start_at_zero =
+        this->p_maxc_.front() == 0 and this->p_node_to_cid_.front() == 0;
+    CHECK_ARGUMENT(offsets_start_at_zero, "mci deserialized CSR offsets must start from 0");
     CHECK_ARGUMENT(this->p_maxc_.back() == this->maxcs_.size(),
                    fmt::format("mci pMaxC tail {} must equal maxCs size {}",
                                this->p_maxc_.back(),

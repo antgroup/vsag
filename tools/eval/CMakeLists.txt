@@ -59,17 +59,6 @@ target_link_libraries (eval_performance PRIVATE
     z dl)
 add_dependencies (eval_performance hdf5)
 
-add_executable (export_knng export_knng.cpp)
-target_link_libraries (export_knng PRIVATE
-    eval_obj
-    simd
-    vsag
-    vsag_eval_common
-    ${HDF5_CPP_STATIC_LIBRARY}
-    ${HDF5_C_STATIC_LIBRARY}
-    z dl)
-add_dependencies (export_knng hdf5)
-
 add_executable (mci_incremental_exp mci_incremental_exp.cpp)
 target_link_libraries (mci_incremental_exp PRIVATE
     eval_obj
