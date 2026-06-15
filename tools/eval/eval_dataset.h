@@ -332,5 +332,40 @@ protected:
     int64_t multi_vector_dim_{0};
 
     std::string vector_type_ = DENSE_VECTORS;
+
+    // Pyramid path hierarchies: hierarchy_name -> vector of paths
+    // Populated when HDF5 contains a /paths/ group with sub-groups per hierarchy.
+    std::unordered_map<std::string, std::vector<std::string>> train_paths_;
+    std::unordered_map<std::string, std::vector<std::string>> test_paths_;
+
+public:
+    [[nodiscard]] bool
+    HasPaths() const {
+        return !train_paths_.empty();
+    }
+
+    [[nodiscard]] const std::vector<std::string>&
+    GetHierarchyNames() const {
+        static const std::vector<std::string> empty;
+        if (hierarchy_names_.empty()) {
+            return empty;
+        }
+        return hierarchy_names_;
+    }
+
+    [[nodiscard]] const std::string*
+    GetTrainPaths(const std::string& hierarchy_name) const {
+        auto it = train_paths_.find(hierarchy_name);
+        return it != train_paths_.end() ? it->second.data() : nullptr;
+    }
+
+    [[nodiscard]] const std::string*
+    GetTestPaths(const std::string& hierarchy_name) const {
+        auto it = test_paths_.find(hierarchy_name);
+        return it != test_paths_.end() ? it->second.data() : nullptr;
+    }
+
+private:
+    std::vector<std::string> hierarchy_names_;
 };
 }  // namespace vsag::eval

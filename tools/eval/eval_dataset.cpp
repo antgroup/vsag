@@ -598,6 +598,56 @@ EvalDataset::Load(const std::string& filename) {
         }
     }
 
+    // Load Pyramid path hierarchies from /paths/ group (if present).
+    // Structure: /paths/<hierarchy_name>/train  (1D variable-length strings, size N)
+    //            /paths/<hierarchy_name>/test   (1D variable-length strings, size Q)
+    try {
+        H5::Group paths_group = file.openGroup("/paths");
+        hsize_t num_hierarchies = paths_group.getNumObjs();
+        for (hsize_t i = 0; i < num_hierarchies; ++i) {
+            std::string hname = paths_group.getObjnameByIdx(i);
+            H5O_info_t info;
+            paths_group.getObjinfo(hname, info);
+            if (info.type != H5O_type_t::H5O_TYPE_GROUP) {
+                continue;
+            }
+            H5::Group h_group = paths_group.openGroup(hname);
+            obj->hierarchy_names_.push_back(hname);
+
+            auto read_string_dataset = [](H5::Group& group,
+                                          const std::string& dsname,
+                                          int64_t expected_count) -> std::vector<std::string> {
+                H5::DataSet ds = group.openDataSet(dsname);
+                H5::DataSpace space = ds.getSpace();
+                hsize_t dims[1];
+                space.getSimpleExtentDims(dims, NULL);
+                if (static_cast<int64_t>(dims[0]) != expected_count) {
+                    throw std::runtime_error("paths dataset size mismatch: expected " +
+                                             std::to_string(expected_count) + ", got " +
+                                             std::to_string(dims[0]));
+                }
+                std::vector<const char*> raw(dims[0]);
+                H5::StrType str_type(H5::PredType::C_S1, H5T_VARIABLE);
+                ds.read(raw.data(), str_type);
+                std::vector<std::string> result(dims[0]);
+                for (hsize_t j = 0; j < dims[0]; ++j) {
+                    result[j] = raw[j] ? raw[j] : "";
+                }
+                H5::DataSet::vlenReclaim(raw.data(), str_type, space);
+                return result;
+            };
+
+            obj->train_paths_[hname] = read_string_dataset(h_group, "train", obj->number_of_base_);
+            obj->test_paths_[hname] = read_string_dataset(h_group, "test", obj->number_of_query_);
+
+            logger::debug("loaded paths hierarchy '{}': {} train, {} test",
+                          hname,
+                          obj->train_paths_[hname].size(),
+                          obj->test_paths_[hname].size());
+        }
+    } catch (H5::Exception&) {
+    }
+
     try {
         H5::Attribute attr = file.openAttribute("distance");
         H5::StrType str_type = attr.getStrType();
@@ -907,6 +957,37 @@ EvalDataset::Save(const EvalDatasetPtr& dataset, const std::string& filename) {
             DataSet off_ds = file.createDataSet(
                 "/test_token_sequences_offsets", PredType::NATIVE_UINT64, off_space);
             off_ds.write(offsets.data(), PredType::NATIVE_UINT64);
+        }
+    }
+
+    // write Pyramid path hierarchies (if present)
+    if (!dataset->train_paths_.empty()) {
+        H5::Group paths_group = file.createGroup("/paths");
+        H5::StrType str_type(H5::PredType::C_S1, H5T_VARIABLE);
+        for (const auto& [hname, train_vec] : dataset->train_paths_) {
+            H5::Group h_group = paths_group.createGroup(hname);
+            {
+                hsize_t dims[1] = {static_cast<hsize_t>(train_vec.size())};
+                H5::DataSpace dataspace(1, dims);
+                H5::DataSet ds = h_group.createDataSet("train", str_type, dataspace);
+                std::vector<const char*> ptrs(train_vec.size());
+                for (size_t i = 0; i < train_vec.size(); ++i) {
+                    ptrs[i] = train_vec[i].c_str();
+                }
+                ds.write(ptrs.data(), str_type);
+            }
+            auto test_it = dataset->test_paths_.find(hname);
+            if (test_it != dataset->test_paths_.end()) {
+                const auto& test_vec = test_it->second;
+                hsize_t dims[1] = {static_cast<hsize_t>(test_vec.size())};
+                H5::DataSpace dataspace(1, dims);
+                H5::DataSet ds = h_group.createDataSet("test", str_type, dataspace);
+                std::vector<const char*> ptrs(test_vec.size());
+                for (size_t i = 0; i < test_vec.size(); ++i) {
+                    ptrs[i] = test_vec[i].c_str();
+                }
+                ds.write(ptrs.data(), str_type);
+            }
         }
     }
 
