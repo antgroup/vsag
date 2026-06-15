@@ -288,6 +288,7 @@ DatasetImpl::~DatasetImpl() {  // NOLINT
             release_paths(std::get<const std::string*>(value));
         }
     }
+    delete[] DatasetImpl::GetSourceID();
     if (DatasetImpl::GetAttributeSets() != nullptr) {
         const auto* attrsets = DatasetImpl::GetAttributeSets();
         for (int i = 0; i < DatasetImpl::GetNumElements(); ++i) {
@@ -362,6 +363,13 @@ DatasetImpl::DeepCopy(Allocator* allocator) const {
         }
     }
 
+    if (this->GetSourceID() != nullptr) {
+        auto* source_ids = new std::string[num_elements];
+        copy_dataset->SourceID(source_ids);
+        for (int i = 0; i < num_elements; ++i) {
+            source_ids[i] = this->GetSourceID()[i];
+        }
+    }
     if (this->GetAttributeSets() != nullptr) {
         const auto* attrsets = this->GetAttributeSets();
         auto* attrsets_copy = new AttributeSet[num_elements];
@@ -484,6 +492,12 @@ DatasetImpl::Append(const DatasetPtr& other) {
             "Cannot append dataset without attribute sets to dataset with attribute sets");
     }
 
+    // check source-id
+    if (this->data_.find(SOURCE_ID) != this->data_.end() && other->GetSourceID() == nullptr) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "Cannot append dataset without source id to dataset with source id");
+    }
+
     // all validation passed; safe to mutate state (destructor relies on NumElements for cleanup)
     this->NumElements(old_num_elements + new_num_elements);
 
@@ -526,6 +540,20 @@ DatasetImpl::Append(const DatasetPtr& other) {
     }
     for (const auto* paths : replaced_paths) {
         delete[] paths;
+    }
+
+    // append source-id
+    if (auto iter = this->data_.find(SOURCE_ID); iter != this->data_.end()) {
+        auto* ptr = const_cast<std::string*>(std::get<const std::string*>(iter->second));
+        auto* source_id_copy = new std::string[old_num_elements + new_num_elements];
+        for (int i = 0; i < old_num_elements; ++i) {
+            source_id_copy[i] = ptr[i];
+        }
+        for (int i = 0; i < new_num_elements; ++i) {
+            source_id_copy[old_num_elements + i] = other->GetSourceID()[i];
+        }
+        this->SourceID(source_id_copy);
+        delete[] ptr;
     }
 
     // append sparse-vectors
