@@ -1517,24 +1517,32 @@ HGraph::GetMemoryUsageDetail() const {
 
 float
 HGraph::CalcDistanceById(const float* query, int64_t id) const {
-    auto flat = this->basic_flatten_codes_;
-    if (use_reorder_) {
-        flat = this->high_precise_codes_;
-    }
-    if (create_new_raw_vector_) {
-        flat = this->raw_vector_;
+    FlattenInterfacePtr flat;
+    {
+        std::shared_lock shared_lock(this->global_mutex_);
+        flat = this->basic_flatten_codes_;
+        if (use_reorder_) {
+            flat = this->high_precise_codes_;
+        }
+        if (create_new_raw_vector_) {
+            flat = this->raw_vector_;
+        }
     }
     return InnerIndexInterface::calc_distance_by_id(query, id, flat);
 }
 
 DatasetPtr
 HGraph::CalDistanceById(const float* query, const int64_t* ids, int64_t count) const {
-    auto flat = this->basic_flatten_codes_;
-    if (use_reorder_) {
-        flat = this->high_precise_codes_;
-    }
-    if (create_new_raw_vector_) {
-        flat = this->raw_vector_;
+    FlattenInterfacePtr flat;
+    {
+        std::shared_lock shared_lock(this->global_mutex_);
+        flat = this->basic_flatten_codes_;
+        if (use_reorder_) {
+            flat = this->high_precise_codes_;
+        }
+        if (create_new_raw_vector_) {
+            flat = this->raw_vector_;
+        }
     }
     return InnerIndexInterface::cal_distance_by_id(query, ids, count, flat);
 }
