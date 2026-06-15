@@ -14,7 +14,11 @@
 
 #include "dense_duplicate_tracker.h"
 
+#include <fmt/format.h>
+
 #include <algorithm>
+
+#include "vsag_exception.h"
 
 namespace vsag {
 
@@ -120,11 +124,30 @@ DenseDuplicateTracker::Deserialize(StreamReader& reader) {
     for (size_t i = 0; i < duplicate_count_; ++i) {
         InnerIdType head_id;
         StreamReader::ReadObj(reader, head_id);
+        if (head_id >= size) {
+            throw VsagException(
+                ErrorType::INVALID_BINARY,
+                fmt::format("head_id {} >= size {} in duplicate tracker", head_id, size));
+        }
+        if (duplicate_ids_[head_id] != head_id) {
+            throw VsagException(ErrorType::INVALID_BINARY,
+                                fmt::format("duplicate head_id {} in duplicate tracker", head_id));
+        }
         Vector<InnerIdType> id_list(allocator_);
         StreamReader::ReadVector(reader, id_list);
 
         auto current_id = head_id;
         for (const auto& dup_id : id_list) {
+            if (dup_id >= size) {
+                throw VsagException(
+                    ErrorType::INVALID_BINARY,
+                    fmt::format("dup_id {} >= size {} in duplicate tracker", dup_id, size));
+            }
+            if (duplicate_ids_[dup_id] != dup_id) {
+                throw VsagException(
+                    ErrorType::INVALID_BINARY,
+                    fmt::format("duplicate dup_id {} in duplicate tracker", dup_id));
+            }
             duplicate_ids_[current_id] = dup_id;
             current_id = dup_id;
         }
@@ -150,10 +173,32 @@ DenseDuplicateTracker::DeserializeFromLegacyFormat(StreamReader& reader, size_t 
     for (InnerIdType i = 0; i < duplicate_count_; ++i) {
         InnerIdType id;
         StreamReader::ReadObj<InnerIdType>(reader, id);
+        if (id >= total_size) {
+            throw VsagException(
+                ErrorType::INVALID_BINARY,
+                fmt::format("id {} >= total_size {} in duplicate tracker legacy", id, total_size));
+        }
+        if (duplicate_ids_[id] != id) {
+            throw VsagException(ErrorType::INVALID_BINARY,
+                                fmt::format("duplicate id {} in duplicate tracker legacy", id));
+        }
         Vector<InnerIdType> id_list(allocator_);
         StreamReader::ReadVector(reader, id_list);
         auto current_id = id;
         for (const auto& duplicate_id : id_list) {
+            if (duplicate_id >= total_size) {
+                throw VsagException(
+                    ErrorType::INVALID_BINARY,
+                    fmt::format("duplicate_id {} >= total_size {} in duplicate tracker legacy",
+                                duplicate_id,
+                                total_size));
+            }
+            if (duplicate_ids_[duplicate_id] != duplicate_id) {
+                throw VsagException(
+                    ErrorType::INVALID_BINARY,
+                    fmt::format("duplicate duplicate_id {} in duplicate tracker legacy",
+                                duplicate_id));
+            }
             duplicate_ids_[current_id] = duplicate_id;
             current_id = duplicate_id;
         }
