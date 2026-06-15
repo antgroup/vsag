@@ -89,7 +89,12 @@ public:
     // valid inner ids using the best available flatten codes. Default 0
     // preserves existing behaviour.
     float brute_force_threshold{0.0F};
+    // When support_duplicate is enabled at build time, controls whether search
+    // results include duplicate group members. Default true preserves existing behavior.
     bool consider_duplicate{true};
+    // Maximum number of duplicate IDs to return per duplicate group.
+    // -1 means unlimited; 0 suppresses all duplicate expansion.
+    // Only takes effect when consider_duplicate is true. Must be >= -1.
     int64_t max_duplicates_per_group{-1};
     float rabitq_error_rate{std::numeric_limits<float>::quiet_NaN()};
 

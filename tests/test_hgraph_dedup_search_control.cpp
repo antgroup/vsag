@@ -263,3 +263,24 @@ TEST_CASE("HGraph dedup search: no dup support ignores consider_duplicate",
     REQUIRE(result.value()->GetDim() > 0);
     REQUIRE(result.value()->GetDistances()[0] < 0.1F);
 }
+
+TEST_CASE("HGraph dedup search: range search respects consider_duplicate",
+          "[ft][hgraph][duplicate][search_control]") {
+    auto tv = GenerateTestData(DIM, BASE_COUNT, DUP_COUNT);
+    auto index = BuildIndexWithDuplicates(tv, MakeBuildParam(true, 0.001F));
+
+    auto query_ds = vsag::Dataset::Make();
+    query_ds->NumElements(1)->Dim(DIM)->Float32Vectors(tv.queries.data())->Owner(false);
+
+    float radius = 1.0F;
+
+    auto param_on = MakeSearchParam(200, true, -1);
+    auto result_on = index->RangeSearch(query_ds, radius, param_on, -1);
+    REQUIRE(result_on.has_value());
+
+    auto param_off = MakeSearchParam(200, false, -1);
+    auto result_off = index->RangeSearch(query_ds, radius, param_off, -1);
+    REQUIRE(result_off.has_value());
+
+    REQUIRE(result_off.value()->GetDim() <= result_on.value()->GetDim());
+}
