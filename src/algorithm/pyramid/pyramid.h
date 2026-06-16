@@ -216,7 +216,8 @@ private:
         }
 
         VisitedListGuard(const VisitedListGuard&) = delete;
-        VisitedListGuard& operator=(const VisitedListGuard&) = delete;
+        VisitedListGuard&
+        operator=(const VisitedListGuard&) = delete;
 
         VisitedListPtr
         get() const {
