@@ -43,7 +43,6 @@ ParallelSearcher::visit(const GraphInterfacePtr& graph,
                         const Vector<std::pair<float, uint64_t>>& node_pair,
                         const FilterPtr& filter,
                         FilterSearchSkipStrategy* skip_strategy,
-                        Vector<InnerIdType>& to_be_visited_rid,
                         Vector<InnerIdType>& to_be_visited_id,
                         std::vector<Vector<InnerIdType>>& neighbors,
                         uint64_t point_visited_num) const {
@@ -68,7 +67,6 @@ ParallelSearcher::visit(const GraphInterfacePtr& graph,
             if (not vl->Get(neighbors[i][j])) {
                 if (not filter || count_no_visited == 0 || skip_strategy->ShouldSkipFilterCheck() ||
                     filter->CheckValid(neighbors[i][j])) {
-                    to_be_visited_rid[count_no_visited] = j;
                     to_be_visited_id[count_no_visited] = neighbors[i][j];
                     count_no_visited++;
                 }
@@ -143,7 +141,6 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
     uint64_t beam = 1;
     uint32_t vector_size = graph->MaximumDegree() * beam;
     uint32_t current_start = 0;
-    Vector<InnerIdType> to_be_visited_rid(vector_size, alloc);
     Vector<InnerIdType> to_be_visited_id(vector_size, alloc);
     std::vector<Vector<InnerIdType>> neighbors(beam,
                                                Vector<InnerIdType>(graph->MaximumDegree(), alloc));
@@ -248,7 +245,6 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
                                  node_pair,
                                  inner_search_param.is_inner_id_allowed,
                                  skip_strategy.get(),
-                                 to_be_visited_rid,
                                  to_be_visited_id,
                                  neighbors,
                                  num_explore_nodes);
