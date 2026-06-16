@@ -15,6 +15,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
+#include <cmath>
 #include <cstdint>
 #include <iostream>
 #include <random>
@@ -229,5 +230,107 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::WarpTestIndex, "Warp Mark Remove", "[ft][
                 REQUIRE(search_result.value()->GetIds()[j] != ids[i]);
             }
         }
+    }
+}
+
+// Concurrent, discriminating regression test for the WARP add-document race.
+//
+// Bug (historical): add_one_doc read the running vector count and wrote
+// doc offsets as two non-atomic steps. With build_thread_count > 1 each
+// document's add_func runs on a thread-pool worker, so two concurrent docs
+// could read the same stale start index and record wrong offsets.
+//
+// This test verifies that concurrent multi-vector Build with build_thread_count > 1
+// preserves correct per-doc vector mapping via the BruteForce multi-vector
+// (WARP) implementation.
+//
+// Discrimination: every document with label L is filled with the constant
+// fingerprint fp(L) = float(L) in all dims (stored exactly by the fp32
+// quantizer, no normalization). After a concurrent Build, GetVectorByIds(L)
+// must return a vector whose value rounds back to L.
+TEST_CASE("Warp concurrent multi-doc add preserves per-doc vector mapping",
+          "[ut][warp][concurrent]") {
+    const int64_t dim = 32;
+    const uint64_t num_docs = 600;       // many docs -> more interleavings
+    const uint32_t build_threads = 8;    // > 1 enables the concurrent path
+    const int iterations = 8;            // repeat to exercise nondeterminism
+
+    // Create a WARP (BruteForce multi-vector) index via factory with
+    // build_thread_count > 1 to exercise concurrent add path.
+    auto build_param_str = fmt::format(R"({{
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": {},
+        "index_param": {{
+            "base_quantization_type": "fp32",
+            "base_io_type": "memory_io",
+            "build_thread_count": {}
+        }}
+    }})", dim, build_threads);
+
+    for (int iter = 0; iter < iterations; ++iter) {
+        auto index_result = vsag::Factory::CreateIndex("warp", build_param_str);
+        REQUIRE(index_result.has_value());
+        auto index = index_result.value();
+
+        // Doc with label L (= i + 1) has a variable number of sub-vectors, every
+        // sub-vector filled with float(L) in all dims. Distinct labels -> distinct
+        // fingerprints, so any mis-mapped offset entry is detectable.
+        std::vector<int64_t> labels(num_docs);
+        std::vector<std::vector<float>> storage(num_docs);
+        std::vector<vsag::MultiVector> mvs(num_docs);
+        std::mt19937 gen(20260617U + static_cast<uint32_t>(iter));
+        std::uniform_int_distribution<uint32_t> len_dist(1, 7);
+        for (uint64_t i = 0; i < num_docs; ++i) {
+            int64_t label = static_cast<int64_t>(i + 1);
+            uint32_t len = len_dist(gen);
+            labels[i] = label;
+            storage[i].assign(static_cast<size_t>(len) * static_cast<size_t>(dim),
+                              static_cast<float>(label));
+            mvs[i].len_ = len;
+            mvs[i].vectors_ = storage[i].data();
+        }
+
+        auto dataset = vsag::Dataset::Make();
+        dataset->NumElements(static_cast<int64_t>(num_docs))
+            ->Dim(dim)
+            ->MultiVectorDim(dim)
+            ->Ids(labels.data())
+            ->MultiVectors(mvs.data())
+            ->Owner(false);
+
+        auto build_result = index->Build(dataset);
+        REQUIRE(build_result.has_value());
+        REQUIRE(index->GetNumElements() == static_cast<int64_t>(num_docs));
+
+        // Discriminating check: each label must map back to its own fingerprint.
+        int mismatches = 0;
+        int64_t first_bad_label = -1;
+        int64_t first_bad_got = -1;
+        for (uint64_t i = 0; i < num_docs; ++i) {
+            int64_t label = labels[i];
+            auto got = index->GetVectorByIds(&label, 1, nullptr);
+            REQUIRE(got.has_value());
+            const float* v = got.value()->GetFloat32Vectors();
+            REQUIRE(v != nullptr);
+            bool ok = true;
+            for (int d = 0; d < dim; ++d) {
+                if (std::lround(v[d]) != label) {
+                    ok = false;
+                    break;
+                }
+            }
+            if (not ok) {
+                if (mismatches == 0) {
+                    first_bad_label = label;
+                    first_bad_got = std::lround(v[0]);
+                }
+                ++mismatches;
+            }
+        }
+        INFO("iteration=" << iter << " mismatches=" << mismatches
+                          << " first_bad_label=" << first_bad_label
+                          << " first_bad_got=" << first_bad_got);
+        REQUIRE(mismatches == 0);
     }
 }
