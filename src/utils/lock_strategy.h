@@ -121,7 +121,7 @@ private:
 
 class LockGuard {
 public:
-    LockGuard(MutexArrayPtr mutex_impl, uint32_t locked_index)
+    LockGuard(const MutexArrayPtr& mutex_impl, uint32_t locked_index)
         : mutex_impl_(mutex_impl), locked_index_(locked_index) {
         mutex_impl_->Lock(locked_index_);
     }
@@ -131,7 +131,7 @@ public:
 
 private:
     uint32_t locked_index_;
-    MutexArrayPtr mutex_impl_;
+    const MutexArrayPtr& mutex_impl_;
 };
 
 }  // namespace vsag
