@@ -109,8 +109,18 @@ public:
 
     int64_t
     GetNumElements() const override {
-        return cur_element_count_;
+        auto total = cur_element_count_.load();
+        auto deleted = delete_count_.load();
+        return total > deleted ? total - deleted : 0;
     }
+
+    int64_t
+    GetNumberRemoved() const override {
+        return delete_count_.load();
+    }
+
+    uint32_t
+    Remove(const std::vector<int64_t>& ids, RemoveMode mode) override;
 
     [[nodiscard]] uint64_t
     EstimateMemory(uint64_t num_elements) const override;
@@ -164,7 +174,9 @@ private:
 
     Vector<SparseTermDataCellPtr> window_term_list_;
 
-    int64_t cur_element_count_{0};
+    std::atomic<int64_t> cur_element_count_{0};
+
+    std::atomic<int64_t> delete_count_{0};
 
     bool use_reorder_{false};
 

@@ -190,6 +190,12 @@ public:
     int64_t
     GetNumElements() const override;
 
+    int64_t
+    GetNumberRemoved() const override;
+
+    uint32_t
+    Remove(const std::vector<int64_t>& ids, RemoveMode mode) override;
+
     std::string
     GetStats() const override;
 
@@ -299,6 +305,7 @@ private:
     std::unique_ptr<BasicSearcher> searcher_ = nullptr;
     int64_t max_capacity_{0};
     int64_t cur_element_count_{0};
+    std::atomic<int64_t> delete_count_{0};
     bool support_duplicate_{false};
 
     mutable std::shared_mutex resize_mutex_;

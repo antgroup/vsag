@@ -325,3 +325,46 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
     TestRangeSearch(index, dataset, search_param, 0.99, 10, true);
     TestFilterSearch(index, dataset, search_param, 0.99, true);
 }
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Mark Remove", "[ft][remove][sindi]") {
+    fixtures::SINDIParam param;
+    param.use_reorder = GENERATE(true, false);
+    auto build_param = fixtures::SINDITestIndex::GenerateBuildParameter(param);
+    auto index = TestFactory("sindi", build_param, true);
+    auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
+    REQUIRE(index->GetIndexType() == vsag::IndexType::SINDI);
+    TestBuildIndex(index, dataset, true);
+
+    auto base_num = dataset->base_->GetNumElements();
+    const auto* ids = dataset->base_->GetIds();
+    REQUIRE(index->GetNumElements() == base_num);
+    REQUIRE(index->GetNumberRemoved() == 0);
+
+    // FORCE_REMOVE is not supported by SINDI
+    auto force_result = index->Remove(ids[0], vsag::RemoveMode::FORCE_REMOVE);
+    REQUIRE_FALSE(force_result.has_value());
+
+    // mark remove half of the base data
+    int64_t remove_count = base_num / 2;
+    std::vector<int64_t> remove_ids(ids, ids + remove_count);
+    auto remove_result = index->Remove(remove_ids, vsag::RemoveMode::MARK_REMOVE);
+    REQUIRE(remove_result.has_value());
+    REQUIRE(remove_result.value() == remove_count);
+    REQUIRE(index->GetNumElements() == base_num - remove_count);
+    REQUIRE(index->GetNumberRemoved() == remove_count);
+
+    // removing the same ids again should remove nothing
+    auto duplicate_remove = index->Remove(remove_ids, vsag::RemoveMode::MARK_REMOVE);
+    REQUIRE(duplicate_remove.has_value());
+    REQUIRE(duplicate_remove.value() == 0);
+
+    // removed ids must not appear in search results
+    for (int64_t i = 0; i < remove_count; ++i) {
+        auto query = fixtures::get_one_query(dataset->base_, static_cast<int>(i));
+        auto search_result = index->KnnSearch(query, 10, search_param);
+        REQUIRE(search_result.has_value());
+        for (int64_t j = 0; j < search_result.value()->GetDim(); ++j) {
+            REQUIRE(search_result.value()->GetIds()[j] != ids[i]);
+        }
+    }
+}
