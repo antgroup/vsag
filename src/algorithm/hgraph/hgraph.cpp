@@ -569,6 +569,10 @@ HGraph::check_and_init_raw_vector(const FlattenInterfaceParamPtr& raw_vector_par
 
 bool
 HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) {
+    std::shared_lock<std::shared_mutex> force_remove_rlock;
+    if (this->support_force_remove()) {
+        force_remove_rlock = std::shared_lock<std::shared_mutex>(this->force_remove_mutex_);
+    }
     // check if id exists and get copied base data
     uint32_t inner_id = 0;
     {
