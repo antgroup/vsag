@@ -328,9 +328,8 @@ TEST_CASE("Warp concurrent multi-doc add preserves per-doc vector mapping",
                 ++mismatches;
             }
         }
-        INFO("iteration=" << iter << " mismatches=" << mismatches
-                          << " first_bad_label=" << first_bad_label
-                          << " first_bad_got=" << first_bad_got);
+        INFO("iteration=" << iter << " mismatches=" << mismatches << " first_bad_label="
+                          << first_bad_label << " first_bad_got=" << first_bad_got);
         REQUIRE(mismatches == 0);
     }
 }
