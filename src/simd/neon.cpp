@@ -900,6 +900,21 @@ PQFastScanLookUp32(const uint8_t* RESTRICT lookup_table,
     for (uint64_t i = 0; i < 4; ++i) {
         sum[i] = vdupq_n_u32(0);
     }
+    // Each 16-bit lane accumulates one lookup byte (<= 255) per iteration and
+    // would overflow after ~258 of them, so periodically drain the int16
+    // partials into the int32 result and reset the accumulators.
+    constexpr uint64_t kFlushInterval = 32;
+    uint64_t since_flush = 0;
+    auto flush = [&]() {
+        alignas(128) uint16_t temp[8];
+        for (int64_t k = 0; k < 4; ++k) {
+            vst1q_u16(temp, vreinterpretq_u16_u32(sum[k]));
+            for (int64_t j = 0; j < 8; j++) {
+                result[k * 8 + j] += temp[j];
+            }
+            sum[k] = vdupq_n_u32(0);
+        }
+    };
     const auto sign4 = vdupq_n_u8(0x0F);
     const auto sign8 = vdupq_n_u16(0xFF);
 
@@ -917,14 +932,12 @@ PQFastScanLookUp32(const uint8_t* RESTRICT lookup_table,
         sum[1] = vaddq_u32(sum[1], vreinterpretq_u32_u16(vshrq_n_u16(res1, 8)));
         sum[2] = vaddq_u32(sum[2], vreinterpretq_u32_u16(vandq_u16(res2, sign8)));
         sum[3] = vaddq_u32(sum[3], vreinterpretq_u32_u16(vshrq_n_u16(res2, 8)));
-    }
-    alignas(128) uint16_t temp[8];
-    for (int64_t i = 0; i < 4; ++i) {
-        vst1q_u16(temp, vreinterpretq_u16_u32(sum[i]));
-        for (int64_t j = 0; j < 8; j++) {
-            result[i * 8 + j] += temp[j];
+        if (++since_flush == kFlushInterval) {
+            flush();
+            since_flush = 0;
         }
     }
+    flush();
 #else
     generic::PQFastScanLookUp32(lookup_table, codes, pq_dim, result);
 #endif
