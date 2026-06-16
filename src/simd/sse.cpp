@@ -492,7 +492,7 @@ PQFastScanLookUp32(const uint8_t* RESTRICT lookup_table,
     constexpr uint64_t kFlushInterval = 32;
     uint64_t since_flush = 0;
     auto flush = [&]() {
-        alignas(128) uint16_t temp[8];
+        alignas(16) uint16_t temp[8];
         for (int64_t k = 0; k < 4; k++) {
             _mm_store_si128((__m128i*)(temp), sum[k]);
             for (int64_t j = 0; j < 8; j++) {
