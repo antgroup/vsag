@@ -230,6 +230,30 @@ public:
     friend class PyramidAnalyzer;
 
 private:
+    // RAII guard that returns the VisitedList to the pool on scope exit,
+    // ensuring no leak if the search throws.
+    class VisitedListGuard {
+    public:
+        explicit VisitedListGuard(VisitedListPool* pool) : pool_(pool), vl_(pool->TakeOne()) {
+        }
+        ~VisitedListGuard() {
+            if (vl_ != nullptr) {
+                pool_->ReturnOne(vl_);
+            }
+        }
+        VisitedListGuard(const VisitedListGuard&) = delete;
+        VisitedListGuard&
+        operator=(const VisitedListGuard&) = delete;
+        [[nodiscard]] const VisitedListPtr&
+        get() const {
+            return vl_;
+        }
+
+    private:
+        VisitedListPool* pool_;
+        VisitedListPtr vl_;
+    };
+
     struct Hierarchy {
         std::string name;
         std::unique_ptr<IndexNode> root{nullptr};
