@@ -221,14 +221,18 @@ public:
     const void*
     get_data(const DatasetPtr& dataset, uint32_t index = 0) const {
         if (data_type_ == DataTypes::DATA_TYPE_FLOAT) {
-            return dataset->GetFloat32Vectors() + index * dim_;
+            auto* ptr = dataset->GetFloat32Vectors();
+            return ptr ? ptr + static_cast<int64_t>(index) * dim_ : nullptr;
         } else if (data_type_ == DataTypes::DATA_TYPE_INT8) {
-            return dataset->GetInt8Vectors() + index * dim_;
+            auto* ptr = dataset->GetInt8Vectors();
+            return ptr ? ptr + static_cast<int64_t>(index) * dim_ : nullptr;
         } else if (data_type_ == DataTypes::DATA_TYPE_FP16 ||
                    data_type_ == DataTypes::DATA_TYPE_BF16) {
-            return dataset->GetFloat16Vectors() + index * dim_;
+            auto* ptr = dataset->GetFloat16Vectors();
+            return ptr ? ptr + static_cast<int64_t>(index) * dim_ : nullptr;
         } else if (data_type_ == DataTypes::DATA_TYPE_SPARSE) {
-            return dataset->GetSparseVectors() + index;
+            auto* ptr = dataset->GetSparseVectors();
+            return ptr ? ptr + index : nullptr;
         }
         throw VsagException(ErrorType::INVALID_ARGUMENT, "invalid data_type in HGraph");
     }
