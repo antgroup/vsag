@@ -22,7 +22,6 @@ add_subdirectory (bruteforce)
 add_subdirectory (ivf)
 add_subdirectory (pyramid)
 add_subdirectory (sparse_index)
-add_subdirectory (warp)
 
 file (GLOB ALGORITHM_SRCS "*.cpp")
 list (FILTER ALGORITHM_SRCS EXCLUDE REGEX "_test.cpp")
@@ -42,7 +41,6 @@ set (ALGORITHM_LIBS
         ivf
         pyramid
         sparse_index
-        warp
         PARENT_SCOPE)
 
 if (ENABLE_TESTS)
