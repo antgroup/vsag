@@ -125,11 +125,8 @@ LabelTable::GetIdByLabel(LabelType label, bool return_even_removed) const {
 
 uint32_t
 LabelTable::MarkRemove(const std::vector<LabelType>& labels) {
-    uint32_t init_delete_size;
-    {
-        std::shared_lock rlock(delete_ids_mutex_);
-        init_delete_size = this->deleted_ids_.size();
-    }
+    std::vector<InnerIdType> ids;
+    ids.reserve(labels.size());
     for (const auto& label : labels) {
         InnerIdType id;
         if (this->use_reverse_map_) {
@@ -137,14 +134,18 @@ LabelTable::MarkRemove(const std::vector<LabelType>& labels) {
         } else {
             id = this->get_id_by_label_with_label_table(label);
         }
-        if (id == INVALID_ID) {
-            continue;
+        if (id != INVALID_ID) {
+            ids.push_back(id);
         }
-        std::scoped_lock wlock(delete_ids_mutex_);
-        this->deleted_ids_.insert(id);
     }
-    std::shared_lock rlock(delete_ids_mutex_);
-    return this->deleted_ids_.size() - init_delete_size;
+    uint32_t removed_count = 0;
+    std::scoped_lock wlock(delete_ids_mutex_);
+    for (const auto& id : ids) {
+        if (this->deleted_ids_.insert(id).second) {
+            ++removed_count;
+        }
+    }
+    return removed_count;
 }
 
 void

@@ -15,9 +15,12 @@
 #include "label_table.h"
 
 #include <algorithm>
+#include <atomic>
 #include <iostream>
 #include <memory>
 #include <sstream>
+#include <thread>
+#include <vector>
 
 #include "datacell/dense_duplicate_tracker.h"
 #include "impl/allocator/default_allocator.h"
@@ -398,5 +401,107 @@ TEST_CASE("LabelTable Move", "[ut][LabelTable]") {
         REQUIRE(label_table.TryGetIdByLabel(100, true).first == false);
         REQUIRE(label_table.IsRemoved(0) == false);
         REQUIRE(label_table.GetTotalCount() == 1);
+    }
+}
+
+TEST_CASE("LabelTable Concurrent MarkRemove", "[ut][LabelTable]") {
+    auto allocator = std::make_shared<DefaultAllocator>();
+
+    SECTION("concurrent MarkRemove returns accurate count") {
+        constexpr int num_labels = 1000;
+        constexpr int num_threads = 8;
+
+        LabelTable label_table(allocator.get());
+        for (int i = 0; i < num_labels; ++i) {
+            label_table.Insert(i, static_cast<LabelType>(i));
+        }
+
+        std::atomic<uint32_t> total_removed{0};
+        std::vector<std::thread> threads;
+        threads.reserve(num_threads);
+
+        // Barrier: all threads prepare their batches, then start MarkRemove simultaneously
+        // to maximise concurrency and reduce the chance of sequential scheduling.
+        std::atomic<int> ready{0};
+        std::atomic<bool> go{false};
+
+        for (int t = 0; t < num_threads; ++t) {
+            threads.emplace_back([&label_table, &total_removed, t, &ready, &go]() {
+                std::vector<LabelType> batch;
+                for (int i = t; i < static_cast<int>(num_labels);
+                     i += static_cast<int>(num_threads)) {
+                    batch.push_back(static_cast<LabelType>(i));
+                }
+                ready.fetch_add(1, std::memory_order_release);
+                while (not go.load(std::memory_order_acquire)) {
+                    std::this_thread::yield();
+                }
+                total_removed.fetch_add(label_table.MarkRemove(batch));
+            });
+        }
+
+        while (ready.load(std::memory_order_acquire) < num_threads) {
+            std::this_thread::yield();
+        }
+        go.store(true, std::memory_order_release);
+
+        for (auto& th : threads) {
+            th.join();
+        }
+
+        REQUIRE(total_removed.load() == num_labels);
+
+        for (int i = 0; i < num_labels; ++i) {
+            REQUIRE(label_table.IsRemoved(i));
+        }
+    }
+
+    SECTION("concurrent MarkRemove with overlapping labels") {
+        constexpr int num_labels = 100;
+        constexpr int num_threads = 4;
+
+        LabelTable label_table(allocator.get());
+        for (int i = 0; i < num_labels; ++i) {
+            label_table.Insert(i, static_cast<LabelType>(i));
+        }
+
+        std::atomic<uint32_t> total_removed{0};
+        std::vector<std::thread> threads;
+        threads.reserve(num_threads);
+
+        std::vector<LabelType> all_labels;
+        for (int i = 0; i < num_labels; ++i) {
+            all_labels.push_back(static_cast<LabelType>(i));
+        }
+
+        // Barrier: all threads signal ready, then call MarkRemove simultaneously
+        // to maximise contention on the same label set.
+        std::atomic<int> ready2{0};
+        std::atomic<bool> go2{false};
+
+        for (int t = 0; t < num_threads; ++t) {
+            threads.emplace_back([&label_table, &total_removed, &all_labels, &ready2, &go2]() {
+                ready2.fetch_add(1, std::memory_order_release);
+                while (not go2.load(std::memory_order_acquire)) {
+                    std::this_thread::yield();
+                }
+                total_removed.fetch_add(label_table.MarkRemove(all_labels));
+            });
+        }
+
+        while (ready2.load(std::memory_order_acquire) < num_threads) {
+            std::this_thread::yield();
+        }
+        go2.store(true, std::memory_order_release);
+
+        for (auto& th : threads) {
+            th.join();
+        }
+
+        REQUIRE(total_removed.load() == num_labels);
+
+        for (int i = 0; i < num_labels; ++i) {
+            REQUIRE(label_table.IsRemoved(i));
+        }
     }
 }
