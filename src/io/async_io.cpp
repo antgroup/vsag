@@ -149,18 +149,34 @@ AsyncIO::MultiReadImpl(uint8_t* datas, uint64_t* sizes, uint64_t* offsets, uint6
             throw VsagException(ErrorType::INTERNAL_ERROR, "io submit failed");
         }
 
-        struct timespec timeout = {1, 0};
-        auto num_events = io_getevents(context->ctx_,
-                                       static_cast<int64_t>(count),
-                                       static_cast<int64_t>(count),
-                                       context->events_,
-                                       &timeout);
-        if (num_events != count) {
+        // Wait for all submitted requests to complete, handling EINTR
+        int64_t num_events = 0;
+        while (num_events < submitted) {
+            auto ret = io_getevents(context->ctx_,
+                                    static_cast<int64_t>(submitted - num_events),
+                                    static_cast<int64_t>(submitted - num_events),
+                                    context->events_ + num_events,
+                                    nullptr);
+            if (ret < 0) {
+                if (ret == -EINTR) {
+                    continue;  // Interrupted by signal, retry
+                }
+                // Fatal error - but all requests are already submitted to kernel
+                // We must still wait for them to complete to avoid UAF
+                throw VsagException(ErrorType::INTERNAL_ERROR,
+                                    "io_getevents failed with errno " + std::to_string(-ret));
+            }
+            num_events += ret;
+        }
+
+        if (submitted != static_cast<int>(count)) {
             io_context_pool->ReturnOne(context);
             for (auto& obj : objs) {
                 obj.Release();
             }
-            throw VsagException(ErrorType::INTERNAL_ERROR, "io async read failed");
+            throw VsagException(ErrorType::INTERNAL_ERROR,
+                                "io_submit partial: requested " + std::to_string(count) +
+                                    " but submitted " + std::to_string(submitted));
         }
 
         for (int64_t i = 0; i < count; ++i) {
