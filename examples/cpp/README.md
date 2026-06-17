@@ -101,6 +101,7 @@ together when the directory is listed:
 | [`319_feature_get_memory_usage.cpp`](319_feature_get_memory_usage.cpp) | Live memory-usage reporting. |
 | [`320_feature_extra_info.cpp`](320_feature_extra_info.cpp) | Attach per-vector extra info / payload. |
 | [`322_feature_hgraph_brute_force_threshold.cpp`](322_feature_hgraph_brute_force_threshold.cpp) | HGraph search-time `brute_force_threshold`: automatically switch to an exact scan under highly selective filters. |
+| [`323_feature_lazy_hgraph_extra_info.cpp`](323_feature_lazy_hgraph_extra_info.cpp) | LazyHGraph `extra_info` filtering across flat and graph phases. |
 
 ### Persistence (`4xx`)
 

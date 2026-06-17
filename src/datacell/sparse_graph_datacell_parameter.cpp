@@ -44,7 +44,7 @@ SparseGraphDatacellParameter::FromJson(const JsonType& json) {
 JsonType
 SparseGraphDatacellParameter::ToJson() const {
     JsonType json;
-    json[GRAPH_PARAM_MAX_DEGREE_KEY].SetInt(this->max_degree_);
+    json[GRAPH_PARAM_MAX_DEGREE_KEY].SetUint64(this->max_degree_);
     json[GRAPH_SUPPORT_REMOVE].SetBool(this->support_delete_);
     json[REMOVE_FLAG_BIT].SetInt(this->remove_flag_bit_);
     json[SUPPORT_DUPLICATE].SetBool(this->support_duplicate_);

@@ -132,8 +132,13 @@ JsonWrapper::AppendJson(const JsonWrapper& json) {
 }
 
 void
-JsonWrapper::SetInt(uint64_t value) {
+JsonWrapper::SetInt64(int64_t value) {
     (*json_) = value;
+}
+
+void
+JsonWrapper::SetInt(uint64_t value) {
+    this->SetUint64(value);
 }
 
 void

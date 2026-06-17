@@ -18,6 +18,7 @@
 #include "algorithm/inner_index_parameter.h"
 #include "typing.h"
 #include "utils/pointer_define.h"
+#include "vsag/constants.h"
 namespace vsag {
 DEFINE_POINTER2(FlattenDataCellParam, FlattenDataCellParameter);
 class BruteForceParameter : public InnerIndexParameter {
@@ -48,9 +49,31 @@ public:
         }
         auto params = JsonType::Parse(json_string);
         BruteForceSearchParameters obj;
+        if (params.Contains(INDEX_TYPE_HGRAPH)) {
+            obj.IndexSearchParameter::FromJson(params[INDEX_TYPE_HGRAPH]);
+            if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_USE_EXTRA_INFO_FILTER)) {
+                obj.use_extra_info_filter =
+                    params[INDEX_TYPE_HGRAPH][HGRAPH_USE_EXTRA_INFO_FILTER].GetBool();
+            }
+            return obj;
+        }
+        if (params.Contains(INDEX_TYPE_BRUTE_FORCE)) {
+            obj.IndexSearchParameter::FromJson(params[INDEX_TYPE_BRUTE_FORCE]);
+            if (params[INDEX_TYPE_BRUTE_FORCE].Contains(HGRAPH_USE_EXTRA_INFO_FILTER)) {
+                obj.use_extra_info_filter =
+                    params[INDEX_TYPE_BRUTE_FORCE][HGRAPH_USE_EXTRA_INFO_FILTER].GetBool();
+            }
+            return obj;
+        }
         obj.IndexSearchParameter::FromJson(params);
+        if (params.Contains(HGRAPH_USE_EXTRA_INFO_FILTER)) {
+            obj.use_extra_info_filter = params[HGRAPH_USE_EXTRA_INFO_FILTER].GetBool();
+        }
         return obj;
     }
+
+public:
+    bool use_extra_info_filter{false};
 };
 
 }  // namespace vsag

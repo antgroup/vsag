@@ -335,10 +335,10 @@ PyramidAnalyzer::get_subindex_quality(IndexNode* root) {
         subindexes_json[stats.path].SetJson(subindex_json);
     }
 
-    quality["total_subindexes"].SetInt(subindex_stats_.size());
+    quality["total_subindexes"].SetUint64(subindex_stats_.size());
     quality["graph_subindexes"].SetInt(graph_count);
     quality["flat_subindexes"].SetInt(flat_count);
-    quality["total_vectors_in_graph"].SetInt(total_size_in_graph);
+    quality["total_vectors_in_graph"].SetUint64(total_size_in_graph);
 
     JsonType summary;
     summary["avg_subindex_size"].SetFloat(subindex_stats_.empty()
@@ -1383,7 +1383,7 @@ PyramidAnalyzer::get_graph_node_recall_stats(IndexNode* root, const std::string&
 
     stats["weighted_recall"].SetFloat(weighted_recall);
     stats["node_count"].SetInt(node_count);
-    stats["total_size"].SetInt(total_size);
+    stats["total_size"].SetUint64(total_size);
     stats["skipped_node_count"].SetInt(skipped_count);
 
     if (!low_recall_nodes_.empty()) {

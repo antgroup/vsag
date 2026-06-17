@@ -97,11 +97,11 @@ JsonType
 RaBitQuantizerParameter::ToJson() const {
     JsonType json;
     json[TYPE_KEY].SetString(QUANTIZATION_TYPE_VALUE_RABITQ);
-    json[PCA_DIM_KEY].SetInt(this->pca_dim_);
+    json[PCA_DIM_KEY].SetUint64(this->pca_dim_);
     json[RABITQ_QUANTIZATION_VERSION_KEY].SetString(this->rabitq_version_);
-    json[RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY].SetInt(this->num_bits_per_dim_query_);
-    json[RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY].SetInt(this->num_bits_per_dim_base_);
-    json[RABITQ_QUANTIZATION_BITS_PER_DIM_FILTER_KEY].SetInt(this->num_bits_per_dim_filter_);
+json[RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY].SetUint64(this->num_bits_per_dim_query_);
+    json[RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY].SetUint64(this->num_bits_per_dim_base_);
+    json[RABITQ_QUANTIZATION_BITS_PER_DIM_FILTER_KEY].SetUint64(this->num_bits_per_dim_filter_);
     json[RABITQ_QUANTIZATION_ERROR_RATE_KEY].SetFloat(this->rabitq_error_rate_);
     json[USE_FHT_KEY].SetBool(this->use_fht_);
     return json;

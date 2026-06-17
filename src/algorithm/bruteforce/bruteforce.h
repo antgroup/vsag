@@ -165,6 +165,9 @@ private:
      * The caller must have already called claim_slot() and resize().
      */
     void
+    shrink_to_fit();
+
+    void
     add_one(const float* data, InnerIdType inner_id);
 
     /**

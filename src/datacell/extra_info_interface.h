@@ -120,6 +120,12 @@ public:
                             "Move not implemented in ExtraInfoInterface");
     }
 
+    virtual void
+    ShrinkToFit(InnerIdType capacity) {
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            "ShrinkToFit not implemented in ExtraInfoInterface");
+    }
+
 public:
     InnerIdType total_count_{0};
     InnerIdType max_capacity_{0};

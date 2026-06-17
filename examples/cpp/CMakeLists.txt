@@ -136,3 +136,6 @@ target_link_libraries (322_feature_hgraph_brute_force_threshold vsag)
 
 add_executable(323_index_hgraph_rabitq_split 323_index_hgraph_rabitq_split.cpp)
 target_link_libraries(323_index_hgraph_rabitq_split vsag)
+
+add_executable (323_feature_lazy_hgraph_extra_info 323_feature_lazy_hgraph_extra_info.cpp)
+target_link_libraries (323_feature_lazy_hgraph_extra_info vsag)

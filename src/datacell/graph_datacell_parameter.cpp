@@ -51,8 +51,8 @@ JsonType
 GraphDataCellParameter::ToJson() const {
     JsonType json;
     json[IO_PARAMS_KEY].SetJson(this->io_parameter_->ToJson());
-    json[GRAPH_PARAM_MAX_DEGREE_KEY].SetInt(this->max_degree_);
-    json[GRAPH_PARAM_INIT_MAX_CAPACITY_KEY].SetInt(this->init_max_capacity_);
+    json[GRAPH_PARAM_MAX_DEGREE_KEY].SetUint64(this->max_degree_);
+    json[GRAPH_PARAM_INIT_MAX_CAPACITY_KEY].SetUint64(this->init_max_capacity_);
     json[GRAPH_SUPPORT_REMOVE].SetBool(this->support_remove_);
     json[REMOVE_FLAG_BIT].SetInt(this->remove_flag_bit_);
     json[HGRAPH_USE_REVERSE_EDGES_KEY].SetBool(this->use_reverse_edges_);

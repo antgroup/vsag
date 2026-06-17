@@ -198,7 +198,8 @@ HGraph::KnnSearch(const DatasetPtr& query,
     if (extra_info_size_ > 0) {
         extra_infos =
             static_cast<char*>(ctx.alloc->Allocate(extra_info_size_ * search_result->Size()));
-        dataset_results->ExtraInfos(extra_infos);
+        dataset_results->ExtraInfos(extra_infos)
+            ->ExtraInfoSize(static_cast<int64_t>(extra_info_size_));
     }
     for (int64_t j = count - 1; j >= 0; --j) {
         dists[j] = search_result->Top().first;
@@ -598,7 +599,8 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     if (extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
         extra_infos =
             static_cast<char*>(ctx.alloc->Allocate(extra_info_size_ * search_result->Size()));
-        dataset_results->ExtraInfos(extra_infos);
+        dataset_results->ExtraInfos(extra_infos)
+            ->ExtraInfoSize(static_cast<int64_t>(extra_info_size_));
     }
     for (int64_t j = count - 1; j >= 0; --j) {
         const auto& top = search_result->Top();

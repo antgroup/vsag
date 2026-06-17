@@ -1183,11 +1183,11 @@ SINDIAnalyzer::GetStats() {
     }
 
     JsonType stats;
-    stats["total_count"].SetInt(static_cast<uint64_t>(sindi_->cur_element_count_));
+stats["total_count"].SetUint64(static_cast<uint64_t>(sindi_->cur_element_count_));
     const auto window_count = sindi_->immutable_data_ == nullptr
                                   ? sindi_->window_term_list_.size()
                                   : sindi_->immutable_data_->windows.size();
-    stats["window_count"].SetInt(static_cast<uint64_t>(window_count));
+    stats["window_count"].SetUint64(static_cast<uint64_t>(window_count));
     stats["active_term_count"].SetJson(get_active_term_count_stats());
     stats["posting_length_distribution"].SetJson(get_posting_length_distribution_stats());
     if (is_sq8_value_quantization(sindi_->sparse_value_quant_type_)) {

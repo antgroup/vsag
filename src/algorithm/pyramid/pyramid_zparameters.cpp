@@ -115,7 +115,7 @@ PyramidHierarchyParameters::ToJson() const {
     json["name"].SetString(name);
     json[NO_BUILD_LEVELS].SetVector(no_build_levels);
     json[GRAPH_PARAM_MAX_DEGREE_KEY].SetInt(max_degree);
-    json[EF_CONSTRUCTION_KEY].SetInt(ef_construction);
+    json[EF_CONSTRUCTION_KEY].SetUint64(ef_construction);
     json[ALPHA_KEY].SetFloat(alpha);
     json[INDEX_MIN_SIZE].SetInt(index_min_size);
     return json;
@@ -226,7 +226,7 @@ PyramidParameters::ToJson() const {
     if (this->graph_type == GRAPH_TYPE_ODESCENT) {
         graph_json.UpdateJson(odescent_param->ToJson());
     } else {
-        json[EF_CONSTRUCTION_KEY].SetInt(this->ef_construction);
+        json[EF_CONSTRUCTION_KEY].SetUint64(this->ef_construction);
     }
     json[GRAPH_KEY].SetJson(graph_json);
     json[USE_REORDER_KEY].SetBool(this->use_reorder);
