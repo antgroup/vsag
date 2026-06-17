@@ -20,10 +20,10 @@
 #include <limits>
 #include <numeric>
 #include <random>
-#include <sstream>
 #include <unordered_map>
 #include <unordered_set>
 
+#include "dataset_impl.h"
 #include "index_feature_list.h"
 #include "inner_string_params.h"
 #include "metric_type.h"
@@ -52,17 +52,14 @@ public:
                           int64_t max_cluster_size,
                           int64_t split_start_idx,
                           int64_t random_seed,
-                          vsag::Allocator* allocator)
+                          const IndexCommonParam& common_param)
         : init_cluster_ratio_(init_cluster_ratio),
           max_cluster_size_(static_cast<int>(max_cluster_size)),
           split_start_idx_(static_cast<int>(split_start_idx)),
           random_seed_(static_cast<int>(random_seed)),
-          allocator_(allocator) {}
+          common_param_(common_param) {}
 
-    ~HNSWDynamicClustering() {
-        delete hnsw_;
-        delete space_;
-    }
+    ~HNSWDynamicClustering() = default;
 
     void
     fit(const float* vecs, int64_t num_vecs, int64_t dim);
@@ -73,7 +70,7 @@ public:
 
 private:
     void
-    build_hnsw(const std::vector<int>& center_ids, int64_t dim);
+    build_hgraph(const std::vector<int>& center_ids, int64_t dim);
 
     int
     find_nearest_cluster(int vec_id) const;
@@ -87,60 +84,57 @@ private:
     void
     split_cluster(int old_center_id, int64_t dim);
 
-    float            init_cluster_ratio_;
-    int              max_cluster_size_;
-    int              split_start_idx_;
-    int              random_seed_;
-    vsag::Allocator* allocator_{nullptr};
+    float          init_cluster_ratio_;
+    int            max_cluster_size_;
+    int            split_start_idx_;
+    int            random_seed_;
+    IndexCommonParam common_param_;
 
     const float* vecs_{nullptr};
     int64_t      num_vecs_{0};
     int64_t      dim_{0};
 
-    hnswlib::InnerProductSpace* space_{nullptr};
-    hnswlib::HierarchicalNSW*   hnsw_{nullptr};
-
-    std::vector<int> hnsw_id_to_vec_;
-    std::vector<int> vec_to_hnsw_id_;
-    int              next_hnsw_id_{0};
+    std::shared_ptr<HGraph> hgraph_{nullptr};
 };
 
 void
-HNSWDynamicClustering::build_hnsw(const std::vector<int>& center_ids, int64_t dim) {
-    delete hnsw_;
-    hnsw_ = nullptr;
-    delete space_;
-    space_ = nullptr;
+HNSWDynamicClustering::build_hgraph(const std::vector<int>& center_ids, int64_t dim) {
+    IndexCommonParam cp = common_param_;
+    cp.metric_ = MetricType::METRIC_TYPE_IP;
+    cp.data_type_ = DataTypes::DATA_TYPE_FLOAT;
+    cp.dim_ = dim;
 
-    space_ = new hnswlib::InnerProductSpace(static_cast<uint64_t>(dim),
-                                            vsag::DataTypes::DATA_TYPE_FLOAT);
-    hnsw_ = new hnswlib::HierarchicalNSW(
-        space_, static_cast<uint64_t>(center_ids.size()), allocator_, 16, 100);
-    hnsw_->init_memory_space();
+    auto param = HGraph::CheckAndMappingExternalParam(JsonType::Parse("{}"), cp);
+    hgraph_ = std::make_shared<HGraph>(param, cp);
 
-    hnsw_id_to_vec_.clear();
-    vec_to_hnsw_id_.assign(static_cast<uint64_t>(num_vecs_), -1);
-    next_hnsw_id_ = 0;
-
-    for (int cid : center_ids) {
-        hnsw_->addPoint(vecs_ + cid * dim_, static_cast<hnswlib::LabelType>(next_hnsw_id_));
-        hnsw_id_to_vec_.push_back(cid);
-        vec_to_hnsw_id_[cid] = next_hnsw_id_;
-        ++next_hnsw_id_;
+    auto n = static_cast<int64_t>(center_ids.size());
+    std::vector<float> vecs(static_cast<uint64_t>(n) * static_cast<uint64_t>(dim));
+    std::vector<int64_t> labels(static_cast<uint64_t>(n));
+    for (int64_t i = 0; i < n; ++i) {
+        std::memcpy(vecs.data() + i * dim, vecs_ + center_ids[i] * dim, dim * sizeof(float));
+        labels[i] = static_cast<int64_t>(center_ids[i]);
     }
+
+    auto ds = Dataset::Make();
+    ds->NumElements(n)->Dim(dim)->Float32Vectors(vecs.data())->Ids(labels.data());
+    hgraph_->Build(ds);
 }
 
 int
 HNSWDynamicClustering::find_nearest_cluster(int vec_id) const {
-    auto result = hnsw_->searchKnn(vecs_ + vec_id * dim_, 1, 50);
-    return hnsw_id_to_vec_[static_cast<int>(result.top().second)];
+    auto query_ds = Dataset::Make();
+    query_ds->NumElements(1)->Dim(dim_)->Float32Vectors(vecs_ + vec_id * dim_);
+    auto result = hgraph_->KnnSearch(query_ds, 1, "{}", nullptr);
+    return static_cast<int>(result->GetIds()[0]);
 }
 
 float
 HNSWDynamicClustering::ip_distance(int v1, int v2) const {
     const float* a = vecs_ + v1 * dim_;
     const float* b = vecs_ + v2 * dim_;
-    return space_->get_dist_func()(a, b, space_->get_dist_func_param());
+    float dot = 0.0f;
+    for (int64_t d = 0; d < dim_; ++d) dot += a[d] * b[d];
+    return 1.0f - dot;
 }
 
 void
@@ -178,17 +172,12 @@ HNSWDynamicClustering::split_cluster(int old_center_id, int64_t /*dim*/) {
     clusters_[new_center_id] = std::move(new_cluster);
     cluster_centers_.push_back(new_center_id);
 
-    if (hnsw_ != nullptr) {
-        if (static_cast<uint64_t>(next_hnsw_id_) >= hnsw_->getMaxElements()) {
-            hnsw_->resizeIndex(hnsw_->getMaxElements() * 2);
-        }
-        hnsw_->addPoint(vecs_ + new_center_id * dim_,
-                        static_cast<hnswlib::LabelType>(next_hnsw_id_));
-        if (new_center_id >= static_cast<int>(vec_to_hnsw_id_.size()))
-            vec_to_hnsw_id_.resize(new_center_id + 1, -1);
-        hnsw_id_to_vec_.push_back(new_center_id);
-        vec_to_hnsw_id_[new_center_id] = next_hnsw_id_;
-        ++next_hnsw_id_;
+    if (hgraph_ != nullptr) {
+        int64_t label = static_cast<int64_t>(new_center_id);
+        auto new_ds = Dataset::Make();
+        new_ds->NumElements(1)->Dim(dim_)->Float32Vectors(vecs_ + new_center_id * dim_)->Ids(
+            &label);
+        hgraph_->Add(new_ds);
     }
 }
 
@@ -214,7 +203,7 @@ HNSWDynamicClustering::fit(const float* vecs, int64_t num_vecs, int64_t dim) {
         vec_to_cluster_[cid] = cid;
     }
 
-    build_hnsw(init_centers, dim);
+    build_hgraph(init_centers, dim);
 
     for (auto it = all_indices.begin() + num_init; it != all_indices.end(); ++it) {
         int vid = *it;
@@ -233,34 +222,12 @@ HNSWDynamicClustering::fit(const float* vecs, int64_t num_vecs, int64_t dim) {
 }  // anonymous namespace
 
 // ─────────────────────────────────────────────────────────────────────────────
-// HNSW serialization helpers
-// ─────────────────────────────────────────────────────────────────────────────
-
-static std::string
-save_hnsw_to_string(hnswlib::HierarchicalNSW* hnsw) {
-    std::ostringstream oss(std::ios::out | std::ios::binary);
-    IOStreamWriter writer(oss);
-    hnsw->saveIndex(writer);
-    return oss.str();
-}
-
-static hnswlib::HierarchicalNSW*
-load_hnsw_from_string(const std::string& bytes,
-                      hnswlib::SpaceInterface* space,
-                      vsag::Allocator* allocator) {
-    std::istringstream iss(bytes, std::ios::in | std::ios::binary);
-    IOStreamReader reader(iss);
-    auto* hnsw = new hnswlib::HierarchicalNSW(space, 0, allocator);
-    hnsw->loadIndex(reader, space);
-    return hnsw;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Constructor / destructor
 // ─────────────────────────────────────────────────────────────────────────────
 
 SIMQ::SIMQ(const SIMQParameterPtr& param, const IndexCommonParam& common_param)
     : InnerIndexInterface(param, common_param),
+      common_param_(common_param),
       cluster_offsets_(allocator_),
       cluster_data_(allocator_),
       vec_to_cluster_(allocator_) {
@@ -274,10 +241,7 @@ SIMQ::SIMQ(const SIMQParameterPtr& param, const IndexCommonParam& common_param)
     this->has_raw_vector_ = true;
 }
 
-SIMQ::~SIMQ() {
-    delete rep_hnsw_;
-    delete rep_space_;
-}
+SIMQ::~SIMQ() = default;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Build
@@ -333,7 +297,7 @@ SIMQ::Build(const DatasetPtr& data) {
         this->label_table_->Insert(static_cast<InnerIdType>(i), labels[i]);
 
     run_clustering(flat.data(), vec_to_doc, static_cast<int64_t>(total_vecs), mv_dim);
-    build_rep_hnsw(flat.data(), mv_dim);
+    build_rep_hgraph(flat.data(), mv_dim);
 
     { Vector<InnerIdType> tmp(allocator_); tmp.swap(vec_to_cluster_); }
 
@@ -346,7 +310,7 @@ SIMQ::run_clustering(const float* flat_vecs,
                      int64_t num_vecs,
                      int64_t dim) {
     HNSWDynamicClustering clustering(
-        init_cluster_ratio_, max_cluster_size_, split_start_idx_, random_seed_, allocator_);
+        init_cluster_ratio_, max_cluster_size_, split_start_idx_, random_seed_, common_param_);
     clustering.fit(flat_vecs, num_vecs, dim);
 
     int64_t nc = static_cast<int64_t>(clustering.cluster_centers_.size());
@@ -385,46 +349,53 @@ SIMQ::run_clustering(const float* flat_vecs,
 }
 
 void
-SIMQ::build_rep_hnsw(const float* flat_vecs, int64_t dim) {
-    std::vector<int> representative_vids(num_clusters_, 0);
+SIMQ::build_rep_hgraph(const float* flat_vecs, int64_t dim) {
+    std::vector<int> representative_vids(static_cast<uint64_t>(num_clusters_), 0);
 
-    std::vector<std::vector<int>> cluster_token_members(num_clusters_);
+    std::vector<std::vector<int>> cluster_token_members(static_cast<uint64_t>(num_clusters_));
     for (int64_t v = 0; v < static_cast<int64_t>(vec_to_cluster_.size()); ++v)
         cluster_token_members[vec_to_cluster_[v]].push_back(static_cast<int>(v));
 
     for (int64_t idx = 0; idx < num_clusters_; ++idx) {
-        auto& members = cluster_token_members[idx];
-        if (members.empty()) { representative_vids[idx] = 0; continue; }
+        auto& members = cluster_token_members[static_cast<uint64_t>(idx)];
+        if (members.empty()) { representative_vids[static_cast<uint64_t>(idx)] = 0; continue; }
 
-        std::vector<float> mean(dim, 0.0f);
+        std::vector<float> mean(static_cast<uint64_t>(dim), 0.0f);
         for (int vid : members) {
             const float* v = flat_vecs + vid * dim;
-            for (int d = 0; d < dim; ++d) mean[d] += v[d];
+            for (int d = 0; d < dim; ++d) mean[static_cast<uint64_t>(d)] += v[d];
         }
         float best_dot = -1e30f;
         int   best_vid = members[0];
         for (int vid : members) {
             const float* v = flat_vecs + vid * dim;
             float dot = 0.0f;
-            for (int d = 0; d < dim; ++d) dot += v[d] * mean[d];
+            for (int d = 0; d < dim; ++d) dot += v[d] * mean[static_cast<uint64_t>(d)];
             if (dot > best_dot) { best_dot = dot; best_vid = vid; }
         }
-        representative_vids[idx] = best_vid;
+        representative_vids[static_cast<uint64_t>(idx)] = best_vid;
     }
 
-    delete rep_hnsw_;
-    rep_hnsw_ = nullptr;
-    delete rep_space_;
-    rep_space_ = nullptr;
-    rep_space_ = new hnswlib::InnerProductSpace(static_cast<uint64_t>(dim),
-                                                vsag::DataTypes::DATA_TYPE_FLOAT);
-    rep_hnsw_ = new hnswlib::HierarchicalNSW(
-        rep_space_, static_cast<uint64_t>(num_clusters_), allocator_, 16, 100);
-    rep_hnsw_->init_memory_space();
+    IndexCommonParam cp = common_param_;
+    cp.metric_ = MetricType::METRIC_TYPE_IP;
+    cp.data_type_ = DataTypes::DATA_TYPE_FLOAT;
+    cp.dim_ = dim;
 
-    for (int64_t idx = 0; idx < num_clusters_; ++idx)
-        rep_hnsw_->addPoint(flat_vecs + representative_vids[idx] * dim,
-                            static_cast<hnswlib::LabelType>(idx));
+    auto param = HGraph::CheckAndMappingExternalParam(JsonType::Parse("{}"), cp);
+    rep_hgraph_ = std::make_shared<HGraph>(param, cp);
+
+    std::vector<float> rep_vecs(static_cast<uint64_t>(num_clusters_) * static_cast<uint64_t>(dim));
+    std::vector<int64_t> labels(static_cast<uint64_t>(num_clusters_));
+    for (int64_t idx = 0; idx < num_clusters_; ++idx) {
+        std::memcpy(rep_vecs.data() + idx * dim,
+                    flat_vecs + representative_vids[static_cast<uint64_t>(idx)] * dim,
+                    static_cast<uint64_t>(dim) * sizeof(float));
+        labels[static_cast<uint64_t>(idx)] = idx;
+    }
+
+    auto ds = Dataset::Make();
+    ds->NumElements(num_clusters_)->Dim(dim)->Float32Vectors(rep_vecs.data())->Ids(labels.data());
+    rep_hgraph_->Build(ds);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -456,17 +427,25 @@ SIMQ::coarse_search(const float* query_tokens,
 
         int64_t actual_coarse_k = std::min(coarse_k, num_clusters_);
         if (actual_coarse_k <= 0) continue;
-        auto result = rep_hnsw_->searchKnn(qt, static_cast<uint64_t>(actual_coarse_k), 50);
+
+        auto query_ds = Dataset::Make();
+        query_ds->NumElements(1)->Dim(dim_)->Float32Vectors(qt);
+        auto result_ds = rep_hgraph_->KnnSearch(query_ds, actual_coarse_k, "{}", nullptr);
+
+        int64_t nres = result_ds->GetNumElements();
+        const float*   rdists = result_ds->GetDistances();
+        const int64_t* rids   = result_ds->GetIds();
 
         std::vector<std::pair<float, InnerIdType>> cscores;
-        cscores.reserve(result.size());
-        while (!result.empty()) {
-            float cscore = 1.0f - result.top().first;
-            auto  cidx   = static_cast<InnerIdType>(result.top().second);
+        cscores.reserve(static_cast<uint64_t>(nres));
+        for (int64_t ri = 0; ri < nres; ++ri) {
+            float cscore = 1.0f - rdists[ri];
+            auto  cidx   = static_cast<InnerIdType>(rids[ri]);
             cscores.push_back({cscore, cidx});
-            result.pop();
         }
-        std::reverse(cscores.begin(), cscores.end());
+        // sort ascending by cidx score (higher score = more similar)
+        std::sort(cscores.begin(), cscores.end(),
+                  [](const auto& a, const auto& b) { return a.first > b.first; });
 
         seen_this_token.clear();
         for (auto& [cscore, cidx] : cscores) {
@@ -498,7 +477,7 @@ SIMQ::KnnSearch(const DatasetPtr& query,
                 const FilterPtr& filter) const {
     std::shared_lock lock(global_mutex_);
 
-    if (total_count_ == 0 || rep_hnsw_ == nullptr) {
+    if (total_count_ == 0 || rep_hgraph_ == nullptr) {
         return Dataset::Make();
     }
 
@@ -555,7 +534,7 @@ SIMQ::RangeSearch(const DatasetPtr& query,
                   int64_t limited_size) const {
     std::shared_lock lock(global_mutex_);
 
-    if (total_count_ == 0 || rep_hnsw_ == nullptr) {
+    if (total_count_ == 0 || rep_hgraph_ == nullptr) {
         return Dataset::Make();
     }
 
@@ -611,33 +590,26 @@ SIMQ::RangeSearch(const DatasetPtr& query,
 // ─────────────────────────────────────────────────────────────────────────────
 
 void
-SIMQ::serialize_rep_hnsw(StreamWriter& writer) const {
-    std::string bytes = save_hnsw_to_string(rep_hnsw_);
-    auto sz = static_cast<uint64_t>(bytes.size());
-    StreamWriter::WriteObj(writer, sz);
-    writer.Write(bytes.data(), sz);
+SIMQ::serialize_rep_hgraph(StreamWriter& writer) const {
+    rep_hgraph_->Serialize(writer);
 }
 
 void
-SIMQ::deserialize_rep_hnsw(StreamReader& reader) {
-    uint64_t sz{0};
-    StreamReader::ReadObj(reader, sz);
-    std::string bytes(sz, '\0');
-    reader.Read(bytes.data(), sz);
+SIMQ::deserialize_rep_hgraph(StreamReader& reader) {
+    IndexCommonParam cp = common_param_;
+    cp.metric_ = MetricType::METRIC_TYPE_IP;
+    cp.data_type_ = DataTypes::DATA_TYPE_FLOAT;
+    cp.dim_ = dim_;
 
-    delete rep_hnsw_;
-    rep_hnsw_ = nullptr;
-    delete rep_space_;
-    rep_space_ = nullptr;
-    rep_space_ = new hnswlib::InnerProductSpace(static_cast<uint64_t>(dim_),
-                                                vsag::DataTypes::DATA_TYPE_FLOAT);
-    rep_hnsw_ = load_hnsw_from_string(bytes, rep_space_, allocator_);
+    auto param = HGraph::CheckAndMappingExternalParam(JsonType::Parse("{}"), cp);
+    rep_hgraph_ = std::make_shared<HGraph>(param, cp);
+    rep_hgraph_->Deserialize(reader);
 }
 
 void
 SIMQ::Serialize(StreamWriter& writer) const {
     std::shared_lock lock(global_mutex_);
-    if (rep_hnsw_ == nullptr) {
+    if (rep_hgraph_ == nullptr) {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                             "simq: cannot serialize an unbuilt index");
     }
@@ -647,7 +619,7 @@ SIMQ::Serialize(StreamWriter& writer) const {
     StreamWriter::WriteVector(writer, cluster_offsets_);
     StreamWriter::WriteVector(writer, cluster_data_);
 
-    serialize_rep_hnsw(writer);
+    serialize_rep_hgraph(writer);
 
     mv_codes_->Serialize(writer);
     this->label_table_->Serialize(writer);
@@ -678,7 +650,7 @@ SIMQ::Deserialize(StreamReader& reader) {
     StreamReader::ReadVector(buf_reader, cluster_offsets_);
     StreamReader::ReadVector(buf_reader, cluster_data_);
 
-    deserialize_rep_hnsw(buf_reader);
+    deserialize_rep_hgraph(buf_reader);
 
     mv_codes_->Deserialize(buf_reader);
     this->label_table_->Deserialize(buf_reader);
@@ -703,7 +675,6 @@ SIMQ::InitFeatures() {
         IndexFeature::SUPPORT_SERIALIZE_FILE,
         IndexFeature::SUPPORT_SERIALIZE_WRITE_FUNC,
         IndexFeature::SUPPORT_GET_MEMORY_USAGE,
-        IndexFeature::SUPPORT_ESTIMATE_MEMORY,
         IndexFeature::SUPPORT_CHECK_ID_EXIST,
         IndexFeature::SUPPORT_SEARCH_CONCURRENT,
     });
@@ -719,7 +690,7 @@ static const std::string SIMQ_PARAMS_TEMPLATE =
         "{TYPE_KEY}": "{INDEX_SIMQ}",
         "{BASE_CODES_KEY}": {
             "{IO_PARAMS_KEY}": {
-                "{TYPE_KEY}": "{IO_TYPE_VALUE_MEMORY_IO}",
+                "{TYPE_KEY}": "{IO_TYPE_VALUE_ASYNC_IO}",
                 "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
             },
             "{CODES_TYPE_KEY}": "multi_vector"

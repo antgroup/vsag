@@ -44,8 +44,10 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <iostream>
 #include <random>
+#include <string>
 #include <unordered_set>
 #include <vector>
 
@@ -71,8 +73,22 @@ static constexpr int      DOC_TOKENS  = 8;     // tokens per base document
 static constexpr int      QUERY_TOKENS = 4;    // tokens per query document
 static constexpr int      TOP_K       = 10;
 
+// Generate a unique temp file path; removes file on destruction.
+struct TempFile {
+    std::string path;
+    explicit TempFile(const char* prefix = "/tmp/simq_mv_XXXXXX") {
+        char buf[64];
+        std::snprintf(buf, sizeof(buf), "%s", prefix);
+        int fd = mkstemp(buf);
+        if (fd >= 0) ::close(fd);
+        path = buf;
+    }
+    ~TempFile() { std::remove(path.c_str()); }
+};
+
 static std::string
-make_build_param(float init_cluster_ratio   = 0.01f,  // ~80 clusters for 8000 token vecs
+make_build_param(const std::string& mv_file_path,
+                 float init_cluster_ratio   = 0.01f,  // ~80 clusters for 8000 token vecs
                  int64_t max_cluster_size   = 200,
                  int64_t split_start_idx    = 100,
                  int64_t coarse_k           = 20,
@@ -83,7 +99,8 @@ make_build_param(float init_cluster_ratio   = 0.01f,  // ~80 clusters for 8000 t
             "metric_type": "ip",
             "dim": {},
             "index_param": {{
-                "base_io_type": "memory_io",
+                "base_io_type": "async_io",
+                "base_file_path": "{}",
                 "init_cluster_ratio": {},
                 "max_cluster_size": {},
                 "split_start_idx": {},
@@ -91,7 +108,8 @@ make_build_param(float init_cluster_ratio   = 0.01f,  // ~80 clusters for 8000 t
                 "rerank_k": {}
             }}
         }})",
-        SIMQ_DIM, init_cluster_ratio, max_cluster_size, split_start_idx, coarse_k, rerank_k);
+        SIMQ_DIM, mv_file_path,
+        init_cluster_ratio, max_cluster_size, split_start_idx, coarse_k, rerank_k);
 }
 
 static std::string
@@ -262,9 +280,10 @@ TEST_CASE("SIMQ: dataset generation stats", "[simq][dataset]") {
 
 TEST_CASE("SIMQ: build and knn search recall", "[simq][build][search]") {
     auto ds = generate_dataset();
+    TempFile tmp;
 
     // ~80 clusters (sqrt(8000)); coarse_k=10 per token → 4×10=40 probes / 80 = 50% coverage
-    auto build_param  = make_build_param();
+    auto build_param  = make_build_param(tmp.path);
     auto search_param = make_search_param();
 
     // Create index
@@ -309,8 +328,9 @@ TEST_CASE("SIMQ: build and knn search recall", "[simq][build][search]") {
 
 TEST_CASE("SIMQ: serialize and deserialize preserves recall", "[simq][serialization]") {
     auto ds = generate_dataset();
+    TempFile tmp_build, tmp_deser;
 
-    auto build_param  = make_build_param();
+    auto build_param  = make_build_param(tmp_build.path);
     auto search_param = make_search_param();
 
     auto r1 = vsag::Factory::CreateIndex("simq", build_param);
@@ -323,8 +343,8 @@ TEST_CASE("SIMQ: serialize and deserialize preserves recall", "[simq][serializat
     auto serial = index->Serialize();
     REQUIRE(serial.has_value());
 
-    // Deserialize into fresh index
-    auto r2 = vsag::Factory::CreateIndex("simq", build_param);
+    // Deserialize into fresh index (needs its own file path for mv_codes)
+    auto r2 = vsag::Factory::CreateIndex("simq", make_build_param(tmp_deser.path));
     REQUIRE(r2.has_value());
     auto index2 = r2.value();
     auto deser = index2->Deserialize(serial.value());
@@ -365,9 +385,10 @@ TEST_CASE("SIMQ: serialize and deserialize preserves recall", "[simq][serializat
 
 TEST_CASE("SIMQ: parameter sweep on coarse_k and rerank_k", "[simq][sweep]") {
     auto ds = generate_dataset();
+    TempFile tmp;
 
     // ~80 clusters; each query token probes coarse_k centers; 4 tokens total
-    auto build_param = make_build_param();
+    auto build_param = make_build_param(tmp.path);
 
     auto r = vsag::Factory::CreateIndex("simq", build_param);
     REQUIRE(r.has_value());

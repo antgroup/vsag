@@ -17,10 +17,11 @@
 
 #include <shared_mutex>
 
-#include "algorithm/hnswlib/hnswlib.h"
-#include "algorithm/hnswlib/space_ip.h"
+#include "algorithm/hgraph/hgraph.h"
+#include "algorithm/hgraph/hgraph_parameter.h"
 #include "algorithm/inner_index_interface.h"
 #include "datacell/flatten_interface.h"
+#include "index_common_param.h"
 #include "simq_parameter.h"
 #include "typing.h"
 #include "utils/pointer_define.h"
@@ -92,7 +93,7 @@ private:
                    int64_t dim);
 
     void
-    build_rep_hnsw(const float* flat_vecs, int64_t dim);
+    build_rep_hgraph(const float* flat_vecs, int64_t dim);
 
     std::vector<std::pair<InnerIdType, float>>
     coarse_search(const float* query_tokens,
@@ -100,14 +101,14 @@ private:
                   int64_t coarse_k) const;
 
     void
-    serialize_rep_hnsw(StreamWriter& writer) const;
+    serialize_rep_hgraph(StreamWriter& writer) const;
 
     void
-    deserialize_rep_hnsw(StreamReader& reader);
+    deserialize_rep_hgraph(StreamReader& reader);
 
 private:
-    hnswlib::InnerProductSpace* rep_space_{nullptr};
-    hnswlib::HierarchicalNSW* rep_hnsw_{nullptr};
+    std::shared_ptr<HGraph> rep_hgraph_{nullptr};
+    IndexCommonParam common_param_;
     int64_t num_clusters_{0};
 
     // Flat inverted index: cluster i owns [cluster_offsets_[i], cluster_offsets_[i+1])
