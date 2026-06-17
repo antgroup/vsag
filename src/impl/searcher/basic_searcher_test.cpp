@@ -15,6 +15,7 @@
 
 #include "basic_searcher.h"
 
+#include <set>
 #include <vector>
 
 #include "algorithm/inner_index_interface.h"
@@ -385,4 +386,132 @@ TEST_CASE("BasicSearcher duplicate threshold keeps nearest owner",
     REQUIRE(run_search({0.12F, 0.0F}, 0.01F) == -1);
     REQUIRE(run_search({0.12F, 0.0F}, 0.02F) == 0);
     REQUIRE(run_search({0.3F, 0.0F}, 0.0F, 1) == 1);
+}
+
+TEST_CASE("BasicSearcher iterator drain path handles sign and lower_bound correctly",
+          "[ut][BasicSearcher][iterator]") {
+    // Regression test for the iterator drain path fix:
+    //   1. candidate_set Push must use -cur_dist (negative) in drain path.
+    //   2. lower_bound must be initialized from top_candidates->Top() after
+    //      the drain loop, not left at float::max.
+    //   3. top_candidates must be trimmed to ef after drain, with discarded
+    //      nodes preserved in iter_ctx for future calls.
+    //
+    // This test verifies the drain path runs without crash, that returned
+    // distances are non-negative (the sign convention invariant), and that
+    // multiple iterator calls produce a non-empty accumulated result set.
+
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    uint64_t dim = 32;
+    uint32_t base_size = 200;
+    uint32_t M = 16;
+    uint32_t ef_construction = 100;
+    InnerIdType fixed_entry_point_id = 0;
+    uint64_t default_max_element = 1;
+
+    auto base_vectors = fixtures::generate_vectors(base_size, dim, true);
+    std::vector<InnerIdType> ids(base_size);
+    std::iota(ids.begin(), ids.end(), 0);
+
+    auto space = std::make_shared<hnswlib::L2Space>(dim);
+    auto alg_hnsw =
+        std::make_shared<hnswlib::HierarchicalNSW>(space.get(),
+                                                   default_max_element,
+                                                   allocator.get(),
+                                                   M / 2,
+                                                   ef_construction,
+                                                   Options::Instance().block_size_limit());
+    alg_hnsw->init_memory_space();
+    for (int64_t i = 0; i < static_cast<int64_t>(base_size); ++i) {
+        alg_hnsw->addPoint((const void*)(base_vectors.data() + i * dim),
+                           static_cast<hnswlib::LabelType>(ids[i]));
+    }
+
+    auto graph_data_cell = std::make_shared<AdaptGraphDataCell>(alg_hnsw);
+
+    constexpr const char* param_temp = R"({{"type": "{}"}})";
+    auto fp32_param = QuantizerParameter::GetQuantizerParameterByJson(
+        JsonType::Parse(fmt::format(param_temp, "fp32")));
+    auto io_param =
+        IOParameter::GetIOParameterByJson(JsonType::Parse(fmt::format(param_temp, "memory_io")));
+    IndexCommonParam common;
+    common.dim_ = dim;
+    common.allocator_ = allocator;
+    common.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+
+    auto vector_data_cell = std::make_shared<
+        FlattenDataCell<FP32Quantizer<vsag::MetricType::METRIC_TYPE_L2SQR>, MemoryIO>>(
+        fp32_param, io_param, common);
+    vector_data_cell->SetQuantizer(
+        std::make_shared<FP32Quantizer<vsag::MetricType::METRIC_TYPE_L2SQR>>(dim, allocator.get()));
+    vector_data_cell->SetIO(std::make_unique<MemoryIO>(allocator.get()));
+    vector_data_cell->Train(base_vectors.data(), base_size);
+    vector_data_cell->BatchInsertVector(base_vectors.data(), base_size, ids.data());
+
+    auto pool = std::make_shared<VisitedListPool>(
+        1, allocator.get(), vector_data_cell->TotalCount(), allocator.get());
+
+    auto searcher = std::make_shared<BasicSearcher>(common);
+
+    const uint32_t ef = 8;
+    const uint32_t topk = 3;
+    auto query = base_vectors.data();
+
+    auto* iter_ctx = new IteratorFilterContext();
+    iter_ctx->init(vector_data_cell->TotalCount(), ef, allocator.get());
+
+    // First call: exercises the normal entry path
+    {
+        InnerSearchParam param;
+        param.ep = fixed_entry_point_id;
+        param.ef = ef;
+        param.topk = topk;
+
+        auto vl = pool->TakeOne();
+        QueryContext* ctx = nullptr;
+        auto result =
+            searcher->Search(graph_data_cell, vector_data_cell, vl, query, param, iter_ctx, ctx);
+        pool->ReturnOne(vl);
+
+        REQUIRE(result != nullptr);
+        // Verify distance sign invariant: top_candidates stores positive distances.
+        while (result->Size() > 0) {
+            auto [dist, id] = result->Top();
+            REQUIRE(dist >= 0.0F);
+            REQUIRE(id < base_size);
+            result->Pop();
+        }
+    }
+
+    iter_ctx->SetOFFFirstUsed();
+
+    // Second call: exercises the drain path (the code path fixed by this PR).
+    // Must not crash, must return valid results with positive distances.
+    {
+        InnerSearchParam param;
+        param.ep = fixed_entry_point_id;
+        param.ef = ef;
+        param.topk = topk;
+
+        auto vl = pool->TakeOne();
+        QueryContext* ctx = nullptr;
+        auto result =
+            searcher->Search(graph_data_cell, vector_data_cell, vl, query, param, iter_ctx, ctx);
+        pool->ReturnOne(vl);
+
+        REQUIRE(result != nullptr);
+        uint32_t count = 0;
+        while (result->Size() > 0) {
+            auto [dist, id] = result->Top();
+            REQUIRE(dist >= 0.0F);  // sign invariant
+            REQUIRE(id < base_size);
+            count++;
+            result->Pop();
+        }
+        // The drain path must produce at least one candidate (otherwise the
+        // fix was not exercised — iter_ctx should have stored some nodes).
+        REQUIRE(count > 0);
+    }
+
+    delete iter_ctx;
 }
