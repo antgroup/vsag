@@ -879,6 +879,213 @@ TEST_CASE("(PR) HGraph SearchWithRequest Reasoning", "[ft][hgraph][pr]") {
     REQUIRE(empty_result.value()->GetReasoning().find("diagnosis") != std::string::npos);
 }
 
+TEST_CASE("(PR) HGraph Reasoning Found Verification", "[ft][hgraph][reasoning][pr]") {
+    using namespace fixtures;
+
+    HGraphTestIndex::HGraphBuildParam build_param("l2", 16, "fp32");
+    auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+
+    auto index = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+    auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(16, 256, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)
+        ->Dim(dataset->base_->GetDim())
+        ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+        ->Owner(false);
+
+    vsag::SearchRequest req;
+    req.topk_ = 10;
+    req.params_str_ = fmt::format(fixtures::search_param_tmp, 200, false);
+    req.query_ = query;
+
+    auto baseline = index->SearchWithRequest(req);
+    REQUIRE(baseline.has_value());
+    REQUIRE(baseline.value()->GetDim() > 0);
+
+    auto* ids = baseline.value()->GetIds();
+    int64_t found_label = ids[0];
+
+    req.expected_labels_ = {found_label};
+    auto result = index->SearchWithRequest(req);
+    REQUIRE(result.has_value());
+    REQUIRE_FALSE(result.value()->GetReasoning().empty());
+
+    auto reasoning = result.value()->GetReasoning();
+    REQUIRE(reasoning.find("1/1") != std::string::npos);
+    REQUIRE(reasoning.find("0 missed") != std::string::npos);
+}
+
+TEST_CASE("(PR) HGraph Reasoning Multiple Labels Mixed", "[ft][hgraph][reasoning][pr]") {
+    using namespace fixtures;
+
+    HGraphTestIndex::HGraphBuildParam build_param("l2", 16, "fp32");
+    auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+
+    auto index = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+    auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(16, 256, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)
+        ->Dim(dataset->base_->GetDim())
+        ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+        ->Owner(false);
+
+    vsag::SearchRequest req;
+    req.topk_ = 5;
+    req.params_str_ = fmt::format(fixtures::search_param_tmp, 200, false);
+    req.query_ = query;
+
+    auto baseline = index->SearchWithRequest(req);
+    REQUIRE(baseline.has_value());
+    REQUIRE(baseline.value()->GetDim() > 0);
+
+    auto* ids = baseline.value()->GetIds();
+    int64_t found_label = ids[0];
+    int64_t unlikely_label = dataset->base_->GetNumElements() + 99999;
+
+    req.expected_labels_ = {found_label, unlikely_label};
+    auto result = index->SearchWithRequest(req);
+    REQUIRE(result.has_value());
+    REQUIRE_FALSE(result.value()->GetReasoning().empty());
+
+    auto reasoning = result.value()->GetReasoning();
+    REQUIRE(reasoning.find("expected_analysis") != std::string::npos);
+}
+
+TEST_CASE("(PR) HGraph Reasoning Does Not Affect Results", "[ft][hgraph][reasoning][pr]") {
+    using namespace fixtures;
+
+    HGraphTestIndex::HGraphBuildParam build_param("l2", 16, "fp32");
+    auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+
+    auto index = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+    auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(16, 256, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)
+        ->Dim(dataset->base_->GetDim())
+        ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+        ->Owner(false);
+
+    vsag::SearchRequest req_without;
+    req_without.topk_ = 10;
+    req_without.params_str_ = fmt::format(fixtures::search_param_tmp, 200, false);
+    req_without.query_ = query;
+
+    auto result_without = index->SearchWithRequest(req_without);
+    REQUIRE(result_without.has_value());
+    REQUIRE(result_without.value()->GetDim() > 0);
+
+    vsag::SearchRequest req_with;
+    req_with.topk_ = 10;
+    req_with.params_str_ = fmt::format(fixtures::search_param_tmp, 200, false);
+    req_with.query_ = query;
+    req_with.expected_labels_ = {result_without.value()->GetIds()[0]};
+
+    auto result_with = index->SearchWithRequest(req_with);
+    REQUIRE(result_with.has_value());
+    REQUIRE(result_with.value()->GetDim() == result_without.value()->GetDim());
+
+    auto dim_without = result_without.value()->GetDim();
+    for (int64_t i = 0; i < dim_without; ++i) {
+        REQUIRE(result_with.value()->GetIds()[i] == result_without.value()->GetIds()[i]);
+        REQUIRE(result_with.value()->GetDistances()[i] ==
+                result_without.value()->GetDistances()[i]);
+    }
+}
+
+TEST_CASE("(PR) HGraph Reasoning Empty Expected Labels", "[ft][hgraph][reasoning][pr]") {
+    using namespace fixtures;
+
+    HGraphTestIndex::HGraphBuildParam build_param("l2", 16, "fp32");
+    auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+
+    auto index = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+    auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(16, 256, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)
+        ->Dim(dataset->base_->GetDim())
+        ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+        ->Owner(false);
+
+    vsag::SearchRequest req;
+    req.topk_ = 5;
+    req.params_str_ = fmt::format(fixtures::search_param_tmp, 32, false);
+    req.query_ = query;
+    req.expected_labels_ = {};
+
+    auto result = index->SearchWithRequest(req);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() > 0);
+    REQUIRE(result.value()->GetReasoning().find("expected_analysis") == std::string::npos);
+}
+
+TEST_CASE("(PR) HGraph Reasoning Zero Overhead When Disabled", "[ft][hgraph][reasoning][pr]") {
+    using namespace fixtures;
+
+    HGraphTestIndex::HGraphBuildParam build_param("l2", 64, "fp32");
+    auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+
+    auto index = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+    auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(64, 1000, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)
+        ->Dim(dataset->base_->GetDim())
+        ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+        ->Owner(false);
+
+    constexpr int warmup_rounds = 20;
+    constexpr int measure_rounds = 100;
+
+    std::string search_params = fmt::format(fixtures::search_param_tmp, 100, false);
+
+    for (int i = 0; i < warmup_rounds; ++i) {
+        index->KnnSearch(query, 10, search_params, vsag::BitsetPtr(nullptr));
+    }
+
+    auto start_baseline = std::chrono::steady_clock::now();
+    for (int i = 0; i < measure_rounds; ++i) {
+        auto r = index->KnnSearch(query, 10, search_params, vsag::BitsetPtr(nullptr));
+        REQUIRE(r.has_value());
+    }
+    auto end_baseline = std::chrono::steady_clock::now();
+    auto baseline_us =
+        std::chrono::duration_cast<std::chrono::microseconds>(end_baseline - start_baseline)
+            .count();
+
+    vsag::SearchRequest req_no_reasoning;
+    req_no_reasoning.topk_ = 10;
+    req_no_reasoning.params_str_ = search_params;
+    req_no_reasoning.query_ = query;
+    req_no_reasoning.expected_labels_ = {};
+
+    for (int i = 0; i < warmup_rounds; ++i) {
+        index->SearchWithRequest(req_no_reasoning);
+    }
+
+    auto start_no_reasoning = std::chrono::steady_clock::now();
+    for (int i = 0; i < measure_rounds; ++i) {
+        auto r = index->SearchWithRequest(req_no_reasoning);
+        REQUIRE(r.has_value());
+    }
+    auto end_no_reasoning = std::chrono::steady_clock::now();
+    auto no_reasoning_us =
+        std::chrono::duration_cast<std::chrono::microseconds>(end_no_reasoning - start_no_reasoning)
+            .count();
+
+    double ratio =
+        static_cast<double>(no_reasoning_us) / static_cast<double>(std::max(baseline_us, 1L));
+    REQUIRE(ratio < 1.5);
+}
+
 static void
 TestHGraphGetRawVector(const fixtures::HGraphTestIndexPtr& test_index,
                        const fixtures::HGraphResourcePtr& resource) {
