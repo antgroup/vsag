@@ -1045,6 +1045,41 @@ TestIVFMerge(const fixtures::IVFResourcePtr& resource) {
 IVF_PR_DAILY_CASE("IVF Merge", "[ft][merge][ivf]", TestIVFMerge)
 
 static void
+TestIVFMergeMultiBucketsPerData(const fixtures::IVFResourcePtr& resource) {
+    using namespace fixtures;
+    ForEachIVFCase(
+        resource,
+        resource->test_cases,
+        [&](const auto& metric_type,
+            int64_t dim,
+            const auto& train_type,
+            const auto& base_quantization_str,
+            float recall) {
+            RunWithGeneratedBlockSizeLimit([&] {
+                const auto count = std::min(300, static_cast<int32_t>(dim / 4));
+                const auto search_param =
+                    fmt::format(fixtures::search_param_tmp, std::max(200, count));
+                auto param = IVFTestIndex::GenerateIVFBuildParametersString(
+                    metric_type, dim, base_quantization_str, 300, train_type, false, 2);
+                auto model = IVFTestIndex::TestFactory(IVFTestIndex::name, param, true);
+                auto dataset =
+                    IVFTestIndex::pool.GetDatasetAndCreate(dim, resource->base_count, metric_type);
+                auto ret = model->Train(dataset->base_);
+                REQUIRE(ret.has_value());
+                auto merge_index =
+                    IVFTestIndex::TestMergeIndexWithSameModel(model, dataset, 5, true);
+                if (model->CheckFeature(vsag::SUPPORT_MERGE_INDEX)) {
+                    IVFTestIndex::TestGeneral(merge_index, dataset, search_param, recall);
+                }
+            });
+        });
+}
+
+IVF_PR_DAILY_CASE("IVF Merge Multi Buckets Per Data",
+                  "[ft][merge][ivf]",
+                  TestIVFMergeMultiBucketsPerData)
+
+static void
 TestIVFConcurrentAdd(const fixtures::IVFResourcePtr& resource) {
     using namespace fixtures;
     ForEachIVFCase(resource,
