@@ -16,12 +16,16 @@
 //
 // 323_index_hgraph_rabitq_split.cpp
 //
-// End-to-end demo for the RaBitQ "split" code layout
-// (selected via base_codes_type = "rabitq_split") on HGraph. The split
+// End-to-end demo for the RaBitQ "x+y" split code layout on HGraph. The split
+// layout is selected by setting both base_quantization_type and
+// precise_quantization_type to "rabitq", then choosing:
+//   * rabitq_bits_per_dim_base    = x filter bits;
+//   * rabitq_bits_per_dim_precise = y supplement bits.
+//
 // layout stores each base vector as TWO independent storages:
-//   * one-bit storage    — the leading 1-bit traversal codes, accessed on
-//                          every graph hop;
-//   * supplement storage — the trailing x-bit (x = base_bits - 1) codes plus
+//   * filter storage     - the leading x-bit traversal codes, accessed on
+//                          graph hops;
+//   * supplement storage - the trailing y-bit reorder codes plus
 //                          metadata, accessed only during full-distance /
 //                          reorder evaluation.
 //
@@ -32,10 +36,10 @@
 //   Mode 1. Pure in-memory  : both storages on block_memory_io.
 //   Mode 2. Pure on-disk    : both storages on async_io (falls back to
 //                             buffer_io if libaio is unavailable).
-//   Mode 3. Hybrid          : one-bit in memory + supplement on disk.
-//                             This is the recommended large-index setup —
-//                             one-bit traversal stays hot in RAM while the
-//                             heavier xbit supplement bytes are paged in
+//   Mode 3. Hybrid          : filter codes in memory + supplement on disk.
+//                             This is the recommended large-index setup -
+//                             x-bit traversal stays hot in RAM while the
+//                             heavier y-bit supplement bytes are paged in
 //                             on demand during reorder.
 //
 // Build:
@@ -53,10 +57,12 @@
 #include <vsag/vsag.h>
 
 #include <cstdint>
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <random>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -117,10 +123,11 @@ build_and_save(vsag::Engine& engine, const vsag::DatasetPtr& base) {
         "dim": 128,
         "index_param": {
             "base_quantization_type": "rabitq",
-            "base_codes_type": "rabitq_split",
+            "precise_quantization_type": "rabitq",
             "base_io_type": "block_memory_io",
-            "rabitq_bits_per_dim_query": 32,
-            "rabitq_bits_per_dim_base": 8,
+            "use_reorder": true,
+            "rabitq_bits_per_dim_base": 3,
+            "rabitq_bits_per_dim_precise": 5,
             "rabitq_error_rate": 1.9,
             "max_degree": 32,
             "ef_construction": 200,
@@ -184,10 +191,11 @@ demo_memory(vsag::Engine& engine, const vsag::DatasetPtr& query) {
         "dim": 128,
         "index_param": {
             "base_quantization_type": "rabitq",
-            "base_codes_type": "rabitq_split",
+            "precise_quantization_type": "rabitq",
             "base_io_type": "block_memory_io",
-            "rabitq_bits_per_dim_query": 32,
-            "rabitq_bits_per_dim_base": 8,
+            "use_reorder": true,
+            "rabitq_bits_per_dim_base": 3,
+            "rabitq_bits_per_dim_precise": 5,
             "rabitq_error_rate": 1.9,
             "max_degree": 32,
             "ef_construction": 200,
@@ -212,11 +220,12 @@ demo_disk(vsag::Engine& engine, const vsag::DatasetPtr& query) {
         "dim": 128,
         "index_param": {
             "base_quantization_type": "rabitq",
-            "base_codes_type": "rabitq_split",
+            "precise_quantization_type": "rabitq",
             "base_io_type": "async_io",
             "base_file_path": "/tmp/vsag_rabitq_split_disk",
-            "rabitq_bits_per_dim_query": 32,
-            "rabitq_bits_per_dim_base": 8,
+            "use_reorder": true,
+            "rabitq_bits_per_dim_base": 3,
+            "rabitq_bits_per_dim_precise": 5,
             "rabitq_error_rate": 1.9,
             "max_degree": 32,
             "ef_construction": 200,
@@ -228,8 +237,8 @@ demo_disk(vsag::Engine& engine, const vsag::DatasetPtr& query) {
     run_search("mode2-disk", index, query);
 }
 
-// Mode 3: hybrid — one-bit traversal codes stay in block_memory_io while
-// the colder xbit supplement codes are pushed to async_io. The hgraph
+// Mode 3: hybrid - x-bit filter codes stay in block_memory_io while
+// the colder y-bit supplement codes are pushed to async_io. The hgraph
 // entry to flip the supplement-only backend is "base_supplement_io_type".
 // Only the (block_memory_io, async_io) combination is currently allowed.
 // The supplement file path is automatically derived by appending the
@@ -244,12 +253,13 @@ demo_hybrid(vsag::Engine& engine, const vsag::DatasetPtr& query) {
         "dim": 128,
         "index_param": {
             "base_quantization_type": "rabitq",
-            "base_codes_type": "rabitq_split",
+            "precise_quantization_type": "rabitq",
             "base_io_type": "block_memory_io",
             "base_supplement_io_type": "async_io",
             "base_file_path": "/tmp/vsag_rabitq_split_hybrid",
-            "rabitq_bits_per_dim_query": 32,
-            "rabitq_bits_per_dim_base": 8,
+            "use_reorder": true,
+            "rabitq_bits_per_dim_base": 3,
+            "rabitq_bits_per_dim_precise": 5,
             "rabitq_error_rate": 1.9,
             "max_degree": 32,
             "ef_construction": 200,

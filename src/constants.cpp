@@ -145,6 +145,7 @@ const char* const RABITQ_PCA_DIM = "rabitq_pca_dim";
 const char* const RABITQ_VERSION = "rabitq_version";
 const char* const RABITQ_BITS_PER_DIM_QUERY = "rabitq_bits_per_dim_query";
 const char* const RABITQ_BITS_PER_DIM_BASE = "rabitq_bits_per_dim_base";
+const char* const RABITQ_BITS_PER_DIM_PRECISE = "rabitq_bits_per_dim_precise";
 const char* const RABITQ_BITS_PER_DIM_FILTER = "rabitq_bits_per_dim_filter";
 const char* const RABITQ_ERROR_RATE = "rabitq_error_rate";
 const char* const RABITQ_USE_FHT = "rabitq_use_fht";

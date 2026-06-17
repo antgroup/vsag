@@ -5,32 +5,33 @@
 
 ## 1. 当前支持范围
 
-新仓库中的 split RabitQ 用一个 one-bit search record 加若干 supplement bit planes 存储
-base code。当前实现的实际语义是：
+新仓库中的 split RabitQ 用一个 filter search record 加若干 supplement bit planes 存储
+base code。本文记录的 `1+xbit` 是当前 `x+y` split 接口的特例：
 
 ```text
-B = rabitq_bits_per_dim_base
-x = B - 1
-1+xbit = 1 个 one-bit search plane + x 个 supplement planes
+filter bits = 1
+supplement bits = x
+total bits = 1 + x
 ```
 
 约束如下：
 
 | 参数 | 当前约束 | 说明 |
 | --- | --- | --- |
-| `rabitq_version` | `"split"` | 启用 split storage；旧别名 `"split_1bit_7bit"` 仍兼容。 |
+| `base_quantization_type` | `"rabitq"` | base 侧使用 RabitQ。 |
+| `precise_quantization_type` | `"rabitq"` | 和 `rabitq_bits_per_dim_precise` 一起启用 split storage。 |
 | `rabitq_bits_per_dim_query` | `32` | split path 只支持 fp32 query code。 |
-| `rabitq_bits_per_dim_base` | `1..8` | 因此 `x=0..7`。`x=8` 需要 `B=9`，当前参数校验不允许。 |
-| `base_codes_type` | `"rabitq_split"` | 选择 split datacell，而不是普通 flatten datacell。 |
+| `rabitq_bits_per_dim_base` | `1` | 对 `1+xbit` 实验表示 1 个 filter bit。 |
+| `rabitq_bits_per_dim_precise` | `1..7` | 对 `1+xbit` 实验表示 x 个 supplement bits。 |
 
 示例：
 
 | 配置 | 实际含义 |
 | --- | --- |
-| `rabitq_bits_per_dim_base = 1` | `1+0bit` |
-| `rabitq_bits_per_dim_base = 2` | `1+1bit` |
-| `rabitq_bits_per_dim_base = 4` | `1+3bit` |
-| `rabitq_bits_per_dim_base = 8` | `1+7bit` |
+| `base = 1, precise = 1` | `1+1bit` |
+| `base = 1, precise = 3` | `1+3bit` |
+| `base = 1, precise = 5` | `1+5bit` |
+| `base = 1, precise = 7` | `1+7bit` |
 
 ## 2. 公式说明
 
@@ -39,8 +40,12 @@ x = B - 1
 设随机旋转、中心化、归一化后的 base 向量为 `o'`，base 总 bit 数为：
 
 ```text
-B = rabitq_bits_per_dim_base
+B = filter_bits + supplement_bits
 ```
+
+在外部 HGraph 参数中，`filter_bits = rabitq_bits_per_dim_base`，
+`supplement_bits = rabitq_bits_per_dim_precise`。对本文的 `1+xbit` 实验，
+`filter_bits = 1`，`supplement_bits = x`。
 
 每一维编码成无符号整数：
 
@@ -143,9 +148,9 @@ full distance，避免在每个候选上先合并完整 full-code buffer。
 
 - 校验 `rabitq_bits_per_dim_query` 只能是 `4` 或 `32`。
 - 校验 `rabitq_bits_per_dim_base` 在 `[1, 8]`。
-- 校验 split version 只支持 `rabitq_bits_per_dim_query = 32`，base bits 沿用全局 `[1, 8]`
-  约束，因此 split path 覆盖 `x=0..7`。
-- 把 `rabitq_version` 和 `rabitq_error_rate` 写入兼容性检查。
+- HGraph 参数映射层校验 split path 只支持 `rabitq_bits_per_dim_query = 32`，且
+  `rabitq_bits_per_dim_base + rabitq_bits_per_dim_precise <= 8`。
+- 把映射后的 bit 数和 `rabitq_error_rate` 写入兼容性检查。
 
 ### 3.2 RabitQ quantizer
 
@@ -204,7 +209,7 @@ ip_est = ip_bq_estimate / base_error;
 
 关键语义：
 
-- `reorder_source = "base"` 时，final reorder 使用 `basic_flatten_codes_`。
+- split 参数映射后，final reorder 使用 `basic_flatten_codes_`。
 - `has_precise_reorder() = use_reorder_ && !reorder_by_base_`，因此 base reorder 不会走 SQ8
   precise codes。
 - one-bit search 且 base reorder 时，HGraph 会把 lower-bound candidates 从 searcher 传给
@@ -227,7 +232,7 @@ split datacell 会把每条向量的 RabitQ code 拆成两个连续存储区。
 
 ```text
 dim = 向量维度
-B = rabitq_bits_per_dim_base = x + 1
+B = filter_bits + supplement_bits
 plane_bytes = ceil(dim / 8)
 align(size) = 按 float/error/norm 字段大小对齐后的 size
 ```
@@ -438,8 +443,9 @@ datacell、bottom graph、route graph 等内容。对于 split RabitQ，base spl
 
 ### 5.2 split 1+xbit：one-bit search + base full-code reorder
 
-把 `x` 转成 `B=x+1`，例如 `1+4bit` 需要设置
-`rabitq_bits_per_dim_base = 5`。
+`1+xbit` 是 `x+y` split 的特例：`rabitq_bits_per_dim_base = 1`，
+`rabitq_bits_per_dim_precise = x`。例如 `1+4bit` 需要设置
+`rabitq_bits_per_dim_base = 1`、`rabitq_bits_per_dim_precise = 4`。
 
 ```json
 {
@@ -448,16 +454,14 @@ datacell、bottom graph、route graph 等内容。对于 split RabitQ，base spl
   "metric_type": "l2",
   "index_param": {
     "base_quantization_type": "rabitq",
-    "base_codes_type": "rabitq_split",
-    "rabitq_version": "split",
+    "precise_quantization_type": "rabitq",
+    "use_reorder": true,
     "rabitq_bits_per_dim_query": 32,
-    "rabitq_bits_per_dim_base": 5,
+    "rabitq_bits_per_dim_base": 1,
+    "rabitq_bits_per_dim_precise": 4,
     "rabitq_error_rate": 1.9,
     "max_degree": 64,
     "ef_construction": 300,
-    "precise_quantization_type": "sq8",
-    "use_reorder": true,
-    "reorder_source": "base",
     "build_thread_count": 32,
     "graph_storage_type": "compressed"
   }
@@ -477,24 +481,26 @@ datacell、bottom graph、route graph 等内容。对于 split RabitQ，base spl
 
 参数要点：
 
-- `base_codes_type = "rabitq_split"` 和 `rabitq_version = "split"` 必须同时出现。
-- `rabitq_bits_per_dim_base = x + 1`，当前支持 `x=0..7`。
-- `reorder_source = "base"` 是本次迁移的关键参数，表示 final reorder 使用 base split full code。
-- YAML 中保留 `precise_quantization_type = "sq8"` 不会改变 base final reorder 语义；
-  `reorder_source = "base"` 时 high precise reorder codes 不参与 final reorder。
+- `base_quantization_type` 和 `precise_quantization_type` 都设为 `"rabitq"`，并提供
+  `rabitq_bits_per_dim_precise`，HGraph 会自动选择 split datacell。
+- `rabitq_bits_per_dim_base = 1`，`rabitq_bits_per_dim_precise = x`，当前支持
+  `x=1..7`。
+- final reorder 使用 base split full code，不再依赖 SQ8/fp32 precise reorder codes。
 - `rabitq_error_rate` 影响构建时写入的 lower-bound metadata，修改后需要重建索引。
 
 ## 6. benchmark 建议
 
 本特性可以使用 `tools/eval/eval_performance` 做 baseline 与 split 配置对比，也可以 sweep
-`rabitq_bits_per_dim_base` 观察不同 supplement bit 数对 recall、QPS、build time 和内存的影响。
+`rabitq_bits_per_dim_precise` 观察不同 supplement bit 数对 recall、QPS、build time 和内存的影响。
 具体数据集路径、YAML 配置、运行日志、索引文件和图表属于本地实验记录，不随本说明提交。
 
 建议至少覆盖以下组合：
 
 - 传统 RabitQ one-bit search 加 precise/SQ8 reorder 的 baseline。
-- split `1+7bit`，并设置 `reorder_source = "base"`。
-- split `1+xbit` sweep，其中 `rabitq_bits_per_dim_base = x + 1`，`x=0..7`。
+- split `1+7bit`，即 `rabitq_bits_per_dim_base = 1`、
+  `rabitq_bits_per_dim_precise = 7`。
+- split `1+xbit` sweep，其中 `rabitq_bits_per_dim_base = 1`、
+  `rabitq_bits_per_dim_precise = x`，`x=1..7`。
 - `rabitq_one_bit_search = true` 时不同 `ef_search` 和 `parallelism` 的性能点。
 
 本地 GIST1M sweep 结果文件约定：
@@ -530,16 +536,18 @@ in.close();
 
 加载时必须使用兼容的 `index_params`，尤其是：
 
-- `base_codes_type = "rabitq_split"`
-- `rabitq_version = "split"`
+- `base_quantization_type = "rabitq"`
+- `precise_quantization_type = "rabitq"`
 - `rabitq_bits_per_dim_query = 32`
 - `rabitq_bits_per_dim_base` 与构建时一致
+- `rabitq_bits_per_dim_precise` 与构建时一致
 - `rabitq_error_rate` 与构建时一致
-- `reorder_source` 与构建时一致
 
 ## 8. 注意事项
 
-- 当前推荐使用 `rabitq_version = "split"`；实际 filter/reorder 位数由 `rabitq_bits_per_dim_base` 和 `rabitq_bits_per_dim_filter` 控制。
-- `x=8` 当前不支持，因为 `rabitq_bits_per_dim_base` 上限是 `8`。
+- 当前推荐使用 `x+y` 外部接口；实际 filter/reorder 位数由
+  `rabitq_bits_per_dim_base` 和 `rabitq_bits_per_dim_precise` 控制。
+- 对 `1+xbit` 实验，`x=8` 当前不支持，因为总 bit 数会超过 `8`。
 - `rabitq_one_bit_search` 是搜索参数，不改变索引存储格式。
-- 若修改 `rabitq_error_rate`、`rabitq_bits_per_dim_base`、`reorder_source` 等参数，应重建索引。
+- 若修改 `rabitq_error_rate`、`rabitq_bits_per_dim_base`、`rabitq_bits_per_dim_precise`
+  等参数，应重建索引。

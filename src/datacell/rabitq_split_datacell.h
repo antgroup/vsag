@@ -32,12 +32,103 @@
 #include "io/mmap_io_parameter.h"
 #include "quantization/rabitq_quantization/rabitq_quantizer.h"
 #include "query_context.h"
-#include "rabitq_one_bit_storage.h"
-#include "rabitq_supplement_storage.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
+#include "type_helpers.h"
 #include "utils/byte_buffer.h"
 #include "utils/timer.h"
 
 namespace vsag {
+
+template <typename IOTmpl>
+class RaBitQSplitCodeStorage {
+public:
+    static constexpr bool InMemory = IOTmpl::InMemory;
+
+    RaBitQSplitCodeStorage(const IOParamPtr& io_param, const IndexCommonParam& common_param)
+        : io_(std::make_shared<IOTmpl>(io_param, common_param)) {
+    }
+
+    void
+    SetCodeSize(uint64_t code_size) {
+        code_size_ = code_size;
+    }
+
+    [[nodiscard]] uint64_t
+    GetCodeSize() const {
+        return code_size_;
+    }
+
+    void
+    Resize(uint64_t new_capacity) {
+        io_->Resize(new_capacity * code_size_);
+    }
+
+    void
+    Shrink(uint64_t new_capacity) {
+        io_->Shrink(new_capacity * code_size_);
+    }
+
+    void
+    Write(const uint8_t* code, InnerIdType id) {
+        io_->Write(code, code_size_, static_cast<uint64_t>(id) * code_size_);
+    }
+
+    bool
+    Read(InnerIdType id, uint8_t* dst) const {
+        return io_->Read(code_size_, static_cast<uint64_t>(id) * code_size_, dst);
+    }
+
+    [[nodiscard]] const uint8_t*
+    Read(InnerIdType id, bool& need_release) const {
+        return io_->Read(code_size_, static_cast<uint64_t>(id) * code_size_, need_release);
+    }
+
+    void
+    Release(const uint8_t* code) const {
+        if (code != nullptr) {
+            io_->Release(code);
+        }
+    }
+
+    void
+    Prefetch(InnerIdType id, uint64_t bytes) const {
+        io_->Prefetch(static_cast<uint64_t>(id) * code_size_,
+                      std::min<uint64_t>(bytes, code_size_));
+    }
+
+    void
+    MultiRead(uint8_t* dst, uint64_t* sizes, uint64_t* offsets, uint64_t count) const {
+        io_->MultiRead(dst, sizes, offsets, count);
+    }
+
+    void
+    InitIO(const IOParamPtr& io_param) {
+        io_->InitIO(io_param);
+    }
+
+    void
+    Serialize(StreamWriter& writer) {
+        io_->Serialize(writer);
+    }
+
+    void
+    Deserialize(lvalue_or_rvalue<StreamReader> reader) {
+        io_->Deserialize(reader);
+    }
+
+    [[nodiscard]] int64_t
+    GetMemoryUsage() const {
+        if constexpr (IOTmpl::InMemory) {
+            return io_->GetMemoryUsage();
+        }
+        return 0;
+    }
+
+private:
+    std::shared_ptr<BasicIO<IOTmpl>> io_{nullptr};
+    uint64_t code_size_{0};
+};
 
 template <MetricType metric, typename OneBitIOTmpl, typename SupplementIOTmpl = OneBitIOTmpl>
 class RaBitQSplitDataCell : public FlattenInterface {
@@ -64,7 +155,7 @@ public:
                                 "rabitq_bits_per_dim_base in [1, 8]");
         }
         // When a supplement-specific IO param is supplied, use it directly so
-        // the caller can pick an entirely different IO type (e.g. one-bit in
+        // the caller can pick an entirely different IO type (e.g. x-bit in
         // memory + supplement on disk). Otherwise fall back to the shared
         // io_param with the legacy file-path suffix to keep the two backing
         // files separate for file-backed IO.
@@ -75,10 +166,10 @@ public:
         if (supplement_io_param != nullptr) {
             this->supplement_io_type_ = supplement_io_param->GetTypeName();
         }
-        this->one_bit_cell_ =
-            std::make_shared<RaBitQOneBitStorage<OneBitIOTmpl>>(one_bit_io_param, common_param);
-        this->supplement_cell_ = std::make_shared<RaBitQSupplementStorage<SupplementIOTmpl>>(
-            supp_io_param, common_param);
+        this->x_bit_cell_ =
+            std::make_shared<RaBitQSplitCodeStorage<OneBitIOTmpl>>(one_bit_io_param, common_param);
+        this->supplement_cell_ =
+            std::make_shared<RaBitQSplitCodeStorage<SupplementIOTmpl>>(supp_io_param, common_param);
         this->refresh_code_sizes();
     }
 
@@ -392,7 +483,7 @@ public:
         if (new_capacity <= this->max_capacity_) {
             return;
         }
-        this->one_bit_cell_->Resize(new_capacity);
+        this->x_bit_cell_->Resize(new_capacity);
         this->supplement_cell_->Resize(new_capacity);
         this->max_capacity_ = new_capacity;
     }
@@ -422,7 +513,7 @@ public:
 
     void
     InitIO(const IOParamPtr& io_param) override {
-        this->one_bit_cell_->InitIO(SuffixIOParam(io_param, "_onebit"));
+        this->x_bit_cell_->InitIO(SuffixIOParam(io_param, "_onebit"));
         // In hybrid mode (one-bit and supplement use different IO backends)
         // the caller-facing `io_param` is the one-bit IO parameter type and
         // cannot be passed directly to `supplement_cell_`. Rebuild a fresh
@@ -433,7 +524,7 @@ public:
 
     void
     InitIO(const IOParamPtr& one_bit_io_param, const IOParamPtr& supplement_io_param) {
-        this->one_bit_cell_->InitIO(SuffixIOParam(one_bit_io_param, "_onebit"));
+        this->x_bit_cell_->InitIO(SuffixIOParam(one_bit_io_param, "_onebit"));
         if (supplement_io_param != nullptr) {
             // Refresh the recorded supplement type so subsequent
             // single-parameter InitIO calls (e.g. from Deserialize) can
@@ -487,7 +578,7 @@ public:
     GetCodesById(InnerIdType id, uint8_t* codes) const override {
         ByteBuffer one_bit(one_bit_code_size_, allocator_);
         ByteBuffer supplement(supplement_code_size_, allocator_);
-        bool one_bit_ok = this->one_bit_cell_->Read(id, one_bit.data);
+        bool one_bit_ok = this->x_bit_cell_->Read(id, one_bit.data);
         bool supplement_ok = this->supplement_cell_->Read(id, supplement.data);
         if (not one_bit_ok or not supplement_ok) {
             return false;
@@ -510,7 +601,7 @@ public:
     Serialize(StreamWriter& writer) override {
         FlattenInterface::Serialize(writer);
         StreamWriter::WriteString(writer, this->supplement_io_type_);
-        this->one_bit_cell_->Serialize(writer);
+        this->x_bit_cell_->Serialize(writer);
         this->supplement_cell_->Serialize(writer);
         this->quantizer_->Serialize(writer);
     }
@@ -518,8 +609,8 @@ public:
     void
     Deserialize(lvalue_or_rvalue<StreamReader> reader) override {
         FlattenInterface::Deserialize(reader);
-        this->supplement_io_type_ = StreamReader::ReadString(reader);
-        this->one_bit_cell_->Deserialize(reader);
+        this->DeserializeSupplementIOType(reader);
+        this->x_bit_cell_->Deserialize(reader);
         this->supplement_cell_->Deserialize(reader);
         this->quantizer_->Deserialize(reader);
         this->refresh_code_sizes();
@@ -538,10 +629,10 @@ public:
         for (InnerIdType i = 0; i < ptr->total_count_; ++i) {
             ByteBuffer one_bit(one_bit_code_size_, allocator_);
             ByteBuffer supplement(supplement_code_size_, allocator_);
-            ptr->one_bit_cell_->Read(i, one_bit.data);
+            ptr->x_bit_cell_->Read(i, one_bit.data);
             ptr->supplement_cell_->Read(i, supplement.data);
             auto target_id = static_cast<InnerIdType>(bias + i);
-            this->one_bit_cell_->Write(one_bit.data, target_id);
+            this->x_bit_cell_->Write(one_bit.data, target_id);
             this->supplement_cell_->Write(supplement.data, target_id);
         }
         this->total_count_ = std::max(this->total_count_, bias + ptr->total_count_);
@@ -551,15 +642,15 @@ public:
     Move(InnerIdType from, InnerIdType to) override {
         ByteBuffer one_bit(one_bit_code_size_, allocator_);
         ByteBuffer supplement(supplement_code_size_, allocator_);
-        this->one_bit_cell_->Read(from, one_bit.data);
+        this->x_bit_cell_->Read(from, one_bit.data);
         this->supplement_cell_->Read(from, supplement.data);
-        this->one_bit_cell_->Write(one_bit.data, to);
+        this->x_bit_cell_->Write(one_bit.data, to);
         this->supplement_cell_->Write(supplement.data, to);
     }
 
     void
     ShrinkToFit(InnerIdType capacity) override {
-        this->one_bit_cell_->Shrink(capacity);
+        this->x_bit_cell_->Shrink(capacity);
         this->supplement_cell_->Shrink(capacity);
         this->max_capacity_ = capacity;
     }
@@ -567,7 +658,7 @@ public:
     int64_t
     GetMemoryUsage() const override {
         int64_t memory = sizeof(RaBitQSplitDataCell<metric, OneBitIOTmpl, SupplementIOTmpl>);
-        memory += this->one_bit_cell_->GetMemoryUsage();
+        memory += this->x_bit_cell_->GetMemoryUsage();
         memory += this->supplement_cell_->GetMemoryUsage();
         memory += sizeof(RaBitQuantizer<metric>);
         return memory;
@@ -576,15 +667,15 @@ public:
 public:
     IndexCommonParam common_param_;
     std::shared_ptr<RaBitQuantizer<metric>> quantizer_{nullptr};
-    std::shared_ptr<RaBitQOneBitStorage<OneBitIOTmpl>> one_bit_cell_{nullptr};
-    std::shared_ptr<RaBitQSupplementStorage<SupplementIOTmpl>> supplement_cell_{nullptr};
+    std::shared_ptr<RaBitQSplitCodeStorage<OneBitIOTmpl>> x_bit_cell_{nullptr};
+    std::shared_ptr<RaBitQSplitCodeStorage<SupplementIOTmpl>> supplement_cell_{nullptr};
 
     Allocator* allocator_{nullptr};
     uint64_t one_bit_code_size_{0};
     uint64_t supplement_code_size_{0};
     // Type name (e.g. "async_io") of the dedicated supplement IO when the
     // caller supplies a separate `supplement_io_param` at construction time.
-    // Empty string means "supplement shares the same IO type as the one-bit
+    // Empty string means "supplement shares the same IO type as the x-bit
     // storage" (the legacy single-IO behaviour). Recorded so that the
     // single-parameter `InitIO(const IOParamPtr&)` overload (e.g. invoked
     // from Deserialize) can rebuild a parameter of the correct concrete
@@ -631,12 +722,46 @@ private:
         return IOParameter::GetIOParameterByJson(json);
     }
 
+    static bool
+    IsKnownIOType(const std::string& io_type) {
+        return io_type == IO_TYPE_VALUE_MEMORY_IO or io_type == IO_TYPE_VALUE_BUFFER_IO or
+               io_type == IO_TYPE_VALUE_MMAP_IO or io_type == IO_TYPE_VALUE_READER_IO or
+               io_type == IO_TYPE_VALUE_ASYNC_IO or io_type == IO_TYPE_VALUE_BLOCK_MEMORY_IO;
+    }
+
+    void
+    DeserializeSupplementIOType(StreamReader& reader) {
+        this->supplement_io_type_.clear();
+        const uint64_t cursor = reader.GetCursor();
+        uint64_t length = 0;
+        StreamReader::ReadObj(reader, length);
+
+        if (length == 0) {
+            return;
+        }
+
+        constexpr uint64_t kMaxIOTypeLength = 64;
+        if (length > kMaxIOTypeLength or reader.GetCursor() + length > reader.Length()) {
+            reader.Seek(cursor);
+            return;
+        }
+
+        std::string io_type(length, '\0');
+        reader.Read(io_type.data(), length);
+        if (IsKnownIOType(io_type)) {
+            this->supplement_io_type_ = std::move(io_type);
+            return;
+        }
+
+        reader.Seek(cursor);
+    }
+
     void
     refresh_code_sizes() {
         this->code_size_ = static_cast<uint32_t>(quantizer_->GetCodeSize());
         this->one_bit_code_size_ = quantizer_->GetOneBitCodeSize();
         this->supplement_code_size_ = quantizer_->GetSupplementCodeSize();
-        this->one_bit_cell_->SetCodeSize(one_bit_code_size_);
+        this->x_bit_cell_->SetCodeSize(one_bit_code_size_);
         this->supplement_cell_->SetCodeSize(supplement_code_size_);
     }
 
@@ -647,13 +772,13 @@ private:
         ByteBuffer supplement_code(supplement_code_size_, allocator_);
         this->quantizer_->EncodeOne(vector, full_code.data);
         this->quantizer_->SplitCode(full_code.data, one_bit_code.data, supplement_code.data);
-        this->one_bit_cell_->Write(one_bit_code.data, idx);
+        this->x_bit_cell_->Write(one_bit_code.data, idx);
         this->supplement_cell_->Write(supplement_code.data, idx);
     }
 
     void
     prefetch_one_bit(InnerIdType id) {
-        this->one_bit_cell_->Prefetch(id, this->prefetch_depth_code_ * 64);
+        this->x_bit_cell_->Prefetch(id, this->prefetch_depth_code_ * 64);
     }
 
     void
@@ -669,13 +794,13 @@ private:
 
     const uint8_t*
     get_one_bit_code(InnerIdType id, bool& need_release) const {
-        return this->one_bit_cell_->Read(id, need_release);
+        return this->x_bit_cell_->Read(id, need_release);
     }
 
     void
     release_one_bit_code(const uint8_t* code, bool need_release) const {
         if (need_release) {
-            this->one_bit_cell_->Release(code);
+            this->x_bit_cell_->Release(code);
         }
     }
 
@@ -754,7 +879,7 @@ private:
         double io_cost_ms = 0.0F;
         {
             Timer timer(io_cost_ms);
-            this->one_bit_cell_->MultiRead(
+            this->x_bit_cell_->MultiRead(
                 one_bit_codes.data, sizes.data(), offsets.data(), id_count);
         }
         if (ctx != nullptr and ctx->stats != nullptr) {
@@ -854,7 +979,7 @@ private:
         double io_cost_ms = 0.0F;
         {
             Timer timer(io_cost_ms);
-            this->one_bit_cell_->MultiRead(
+            this->x_bit_cell_->MultiRead(
                 one_bit_codes.data, one_bit_sizes.data(), one_bit_offsets.data(), id_count);
             this->supplement_cell_->MultiRead(
                 supplement_codes.data, supp_sizes.data(), supp_offsets.data(), id_count);

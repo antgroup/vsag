@@ -31,7 +31,7 @@ public:
     // Build a hgraph parameter JSON exercising the RaBitQ split datacell.
     // - base_io_type: IO backend for the one-bit storage (and homogeneous
     //                 supplement when supplement_io_type is empty).
-    // - supplement_io_type: IO backend for the supplement (xbit) storage.
+    // - supplement_io_type: IO backend for the supplement (y-bit) storage.
     //                       When empty, the supplement falls back to
     //                       base_io_type.
     static std::string
@@ -39,8 +39,8 @@ public:
                        int64_t dim,
                        const std::string& base_io_type,
                        const std::string& supplement_io_type,
-                       uint32_t rabitq_bits_base = 8,
-                       uint32_t rabitq_bits_query = 32);
+                       uint32_t rabitq_filter_bits = 3,
+                       uint32_t rabitq_supplement_bits = 5);
 };
 
 const std::string HGraphRaBitQSplitTestIndex::name = "hgraph";
@@ -52,8 +52,8 @@ HGraphRaBitQSplitTestIndex::GenerateBuildParam(const std::string& metric_type,
                                                int64_t dim,
                                                const std::string& base_io_type,
                                                const std::string& supplement_io_type,
-                                               uint32_t rabitq_bits_base,
-                                               uint32_t rabitq_bits_query) {
+                                               uint32_t rabitq_filter_bits,
+                                               uint32_t rabitq_supplement_bits) {
     constexpr auto temp_with_supplement = R"(
     {{
         "dtype": "float32",
@@ -61,12 +61,13 @@ HGraphRaBitQSplitTestIndex::GenerateBuildParam(const std::string& metric_type,
         "dim": {},
         "index_param": {{
             "base_quantization_type": "rabitq",
-            "base_codes_type": "rabitq_split",
+            "precise_quantization_type": "rabitq",
             "base_io_type": "{}",
             "base_supplement_io_type": "{}",
             "base_file_path": "{}",
+            "use_reorder": true,
             "rabitq_bits_per_dim_base": {},
-            "rabitq_bits_per_dim_query": {},
+            "rabitq_bits_per_dim_precise": {},
             "rabitq_error_rate": 1.9,
             "max_degree": 32,
             "ef_construction": 200,
@@ -80,11 +81,12 @@ HGraphRaBitQSplitTestIndex::GenerateBuildParam(const std::string& metric_type,
         "dim": {},
         "index_param": {{
             "base_quantization_type": "rabitq",
-            "base_codes_type": "rabitq_split",
+            "precise_quantization_type": "rabitq",
             "base_io_type": "{}",
             "base_file_path": "{}",
+            "use_reorder": true,
             "rabitq_bits_per_dim_base": {},
-            "rabitq_bits_per_dim_query": {},
+            "rabitq_bits_per_dim_precise": {},
             "rabitq_error_rate": 1.9,
             "max_degree": 32,
             "ef_construction": 200,
@@ -97,8 +99,8 @@ HGraphRaBitQSplitTestIndex::GenerateBuildParam(const std::string& metric_type,
                            dim,
                            base_io_type,
                            dir.GenerateRandomFile(),
-                           rabitq_bits_base,
-                           rabitq_bits_query);
+                           rabitq_filter_bits,
+                           rabitq_supplement_bits);
     }
     return fmt::format(temp_with_supplement,
                        metric_type,
@@ -106,8 +108,8 @@ HGraphRaBitQSplitTestIndex::GenerateBuildParam(const std::string& metric_type,
                        base_io_type,
                        supplement_io_type,
                        dir.GenerateRandomFile(),
-                       rabitq_bits_base,
-                       rabitq_bits_query);
+                       rabitq_filter_bits,
+                       rabitq_supplement_bits);
 }
 
 }  // namespace fixtures

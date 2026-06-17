@@ -2,10 +2,9 @@
 
 `rabitq` is VSAG's binary / low-bit quantizer. In its default mode each
 coordinate is encoded with **1 bit**, giving the highest compression ratio
-of any built-in quantizer. A split mode (`rabitq_version = "split"`) stores
-low-bit base codes as filter bits plus supplement bits, so the graph traversal
-can use the filter code and re-ranking can fetch only the supplement bits it
-needs.
+of any built-in quantizer. On HGraph, an `x+y` split mode stores low-bit base
+codes as `x` filter bits plus `y` supplement bits, so graph traversal can use
+only the filter code and re-ranking can fetch only the supplement bits it needs.
 
 ![RaBitQ: encode each coordinate by its sign relative to a random hyperplane](../figures/quantization/rabitq-hyperplane.svg)
 
@@ -32,8 +31,10 @@ as `"pca, rom, rabitq"`.
 
 - `rabitq_bits_per_dim_base = 1`: `ceil(dim / 8)` bytes per vector. With
   `dim = 768` that is 96 bytes (vs 3072 for fp32 → 32× smaller).
-- `rabitq_bits_per_dim_base = 8` (split-1+7 mode stores additional bits):
-  ~`dim` bytes per vector.
+- `rabitq_bits_per_dim_base = x` plus `rabitq_bits_per_dim_precise = y`
+  on HGraph: split mode stores roughly `(x + y) * dim / 8` bytes per vector
+  for the RaBitQ code bytes. For example, `3+5` is about `dim` bytes per
+  vector.
 
 ## Parameters
 
@@ -41,16 +42,15 @@ as `"pca, rom, rabitq"`.
 | --- | --- | --- | --- |
 | `pca_dim` | int | `0` (= input dim) | Optional PCA preprocessing dimension applied inside RaBitQ. `0` means no PCA reduction (`rabitq_quantizer_parameter.cpp:30-32`). |
 | `rabitq_bits_per_dim_query` | int | `32` | Bits per dimension used to encode the **query** during search. Allowed values: `4` or `32` (`rabitq_quantizer_parameter.cpp:38-43`). |
-| `rabitq_bits_per_dim_base` | int | `1` | Bits per dimension for the **base** (stored) codes. Allowed range `[1, 8]` (`rabitq_quantizer_parameter.cpp:45-54`). Use `1` for pure 1-bit RaBitQ. |
-| `rabitq_bits_per_dim_filter` | int | `1` | Split-mode filter bits. Must be in `[1, rabitq_bits_per_dim_base]`. Reorder uses all base bits but fetches only `rabitq_bits_per_dim_base - rabitq_bits_per_dim_filter` supplement bits. |
-| `rabitq_version` | string | `"standard"` | One of `"standard"` (1-bit) or `"split"`. The legacy alias `"split_1bit_7bit"` is still accepted for compatibility. The split version requires `rabitq_bits_per_dim_query = 32` (`rabitq_quantizer_parameter.cpp:55-67`). |
+| `rabitq_bits_per_dim_base` | int | `1` | In standard RaBitQ, bits per dimension for the stored base code. In HGraph `x+y` split mode, this external key means `x`, the filter bits used during graph traversal. Allowed range `[1, 8]`. |
+| `rabitq_bits_per_dim_precise` | int | unset | HGraph-only split-mode key. When present with `base_quantization_type: "rabitq"` and `precise_quantization_type: "rabitq"`, this means `y`, the supplement bits used for reorder/full-distance refinement. The sum `x + y` must be `<= 8`. |
 | `rabitq_error_rate` | float | `1.9` | Controls the error budget of the encoder; must be finite and positive (`rabitq_quantizer_parameter.cpp:68-75`). |
 | `use_fht` | bool | `false` | If `true`, applies a Fast Hadamard Transform rotation before binarization. Improves accuracy on anisotropic data with cheap O(dim log dim) cost (`rabitq_quantizer_parameter.cpp:76-78`). |
 
 On HGraph these are exposed as the top-level keys `rabitq_pca_dim`,
 `rabitq_bits_per_dim_query`, `rabitq_bits_per_dim_base`,
-`rabitq_bits_per_dim_filter`, `rabitq_version`, `rabitq_error_rate`, and
-`rabitq_use_fht` — the last one is the HGraph
+`rabitq_bits_per_dim_precise`, `rabitq_error_rate`, and `rabitq_use_fht` —
+the last one is the HGraph
 alias for the quantizer's `use_fht` key and is rewritten by the index
 layer (`src/algorithm/hgraph.cpp:473-480`, names defined in
 `src/constants.cpp:142-148`). Pyramid exposes the same `rabitq_*` keys
@@ -75,22 +75,17 @@ layer (`src/algorithm/hgraph.cpp:473-480`, names defined in
 }
 ```
 
-Swap to the higher-accuracy split mode. The split layout is selected by a
-combination of two keys — `rabitq_version: "split"` selects the
-split RaBitQ encoding, and `base_codes_type: "rabitq_split"` switches the
-storage datacell. Setting `rabitq_version` alone does **not** activate the
-split datacell path; both keys must be set together (see
-`docs/rabitq_split_1bit_7bit.md`). By default this is a `1+y` split; set
-`rabitq_bits_per_dim_filter` to use an `x+y` split:
+Swap to the higher-accuracy `x+y` split mode by setting both base and precise
+quantization to RaBitQ and providing `rabitq_bits_per_dim_precise`. HGraph then
+automatically selects the split datacell. In the example below, traversal uses
+`x = 3` filter bits and reorder reads only `y = 5` supplement bits:
 
 ```json
 {
     "base_quantization_type": "rabitq",
-    "base_codes_type": "rabitq_split",
-    "rabitq_version": "split",
-    "rabitq_bits_per_dim_base": 8,
-    "rabitq_bits_per_dim_filter": 3,
-    "rabitq_bits_per_dim_query": 32,
+    "precise_quantization_type": "rabitq",
+    "rabitq_bits_per_dim_base": 3,
+    "rabitq_bits_per_dim_precise": 5,
     "rabitq_use_fht": true
 }
 ```
@@ -115,10 +110,9 @@ also tracks a residual norm so the inner-product estimate is unbiased.
   `precise_quantization_type: "fp32"` is the safe default.
 - **Rotate first.** For un-normalized data, set `rabitq_use_fht: true` or
   use a `tq` chain that includes `rom` / `fht`.
-- **Split mode for accuracy.** `rabitq_version: "split"` keeps a low-bit
-  fast path for graph traversal and adds supplement bits for re-ranking;
-  expect significantly higher recall than pure 1-bit when using more base
-  bits.
+- **Split mode for accuracy.** HGraph `x+y` split keeps an `x`-bit fast path
+  for graph traversal and adds `y` supplement bits for re-ranking; expect
+  significantly higher recall than pure 1-bit when using more total bits.
 
 ## Related pages
 

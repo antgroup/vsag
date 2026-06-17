@@ -220,6 +220,11 @@ public:
                              const uint8_t* supplement_code,
                              float* dists) const;
 
+    // Computes the full x+y split distance while reusing the filter-stage distance.
+    // `filter_dist` is the x-bit distance already produced by
+    // ComputeDistWithOneBitLowerBound(); it is not a lower bound and not the final
+    // x+y distance. Passing it here lets the reorder path scan only the y-bit
+    // supplement planes instead of rescanning the x-bit filter planes.
     bool
     ComputeDistWithSplitCodeAndFilterDist(Computer<RaBitQuantizer>& computer,
                                           const uint8_t* one_bit_code,
@@ -280,10 +285,10 @@ public:
 
 private:
     [[nodiscard]] bool
-    HasThreeBitQueryLookupTable() const;
+    HasFilterQueryLookupTable() const;
 
     [[nodiscard]] uint64_t
-    ThreeBitQueryLookupTableSize() const;
+    FilterQueryLookupTableSize() const;
 
     [[nodiscard]] norm_type
     ComputeScalarCodeNorm(const uint8_t* scalar_codes,
@@ -324,7 +329,7 @@ private:
     uint64_t query_offset_norm_{0};
     uint64_t query_offset_mrq_norm_{0};
     uint64_t query_offset_raw_norm_{0};
-    uint64_t query_offset_three_bit_lut_{0};
+    uint64_t query_offset_filter_lut_{0};
 
     /***
      * code layout: bq-code(required) + norm(required) + error(required) + offset_norm_code(extend_rabitq) + sum(sq4) + mrq_norm(required)

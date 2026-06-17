@@ -166,6 +166,7 @@ extern const char* const RABITQ_PCA_DIM;
 extern const char* const RABITQ_VERSION;
 extern const char* const RABITQ_BITS_PER_DIM_QUERY;
 extern const char* const RABITQ_BITS_PER_DIM_BASE;
+extern const char* const RABITQ_BITS_PER_DIM_PRECISE;
 extern const char* const RABITQ_BITS_PER_DIM_FILTER;
 extern const char* const RABITQ_ERROR_RATE;
 extern const char* const RABITQ_USE_FHT;

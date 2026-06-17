@@ -163,9 +163,9 @@ RaBitQuantizer<metric>::RaBitQuantizer(int dim,
         this->query_code_size_ += ((sizeof(norm_type) + align_size - 1) / align_size) * align_size;
     }
 
-    if (HasThreeBitQueryLookupTable()) {
-        query_offset_three_bit_lut_ = this->query_code_size_;
-        this->query_code_size_ += AlignCodeField(ThreeBitQueryLookupTableSize());
+    if (HasFilterQueryLookupTable()) {
+        query_offset_filter_lut_ = this->query_code_size_;
+        this->query_code_size_ += AlignCodeField(FilterQueryLookupTableSize());
     }
 
     if (SupportSplitCodeStorage()) {
@@ -800,13 +800,14 @@ RaBitQuantizer<metric>::AlignCodeField(uint64_t size) const {
 
 template <MetricType metric>
 bool
-RaBitQuantizer<metric>::HasThreeBitQueryLookupTable() const {
-    return SupportSplitCodeStorage() && FilterBits() == 3 && num_bits_per_dim_query_ == 32;
+RaBitQuantizer<metric>::HasFilterQueryLookupTable() const {
+    return SupportSplitCodeStorage() && (FilterBits() == 2 or FilterBits() == 3) &&
+           num_bits_per_dim_query_ == 32;
 }
 
 template <MetricType metric>
 uint64_t
-RaBitQuantizer<metric>::ThreeBitQueryLookupTableSize() const {
+RaBitQuantizer<metric>::FilterQueryLookupTableSize() const {
     return PlaneBytes() * 256 * sizeof(float);
 }
 
@@ -1051,12 +1052,13 @@ RaBitQuantizer<metric>::ComputeDistWithOneBitLowerBound(Computer<RaBitQuantizer>
             reinterpret_cast<const float*>(query), one_bit_code, this->dim_, inv_sqrt_d_);
     } else {
         sum_type query_raw_sum = *((sum_type*)(query + query_offset_sum_));
-        if (HasThreeBitQueryLookupTable()) {
-            filter_ip_yu_q = generic::RaBitQFloatThreeBitIPByLookup(
-                reinterpret_cast<const float*>(query + query_offset_three_bit_lut_),
+        if (HasFilterQueryLookupTable()) {
+            filter_ip_yu_q = RaBitQFloatMultiBitIPByLookup(
+                reinterpret_cast<const float*>(query + query_offset_filter_lut_),
                 one_bit_code,
                 this->dim_,
-                0);
+                0,
+                FilterBits());
         } else {
             filter_ip_yu_q = RaBitQFloatSQIPBySplitCode(
                 reinterpret_cast<const float*>(query), one_bit_code, nullptr, FilterBits(), 0);
@@ -1167,7 +1169,7 @@ RaBitQuantizer<metric>::ComputeDistsWithOneBitLowerBoundBatch4(
         return;
     }
 
-    if (FilterBits() != 1 and FilterBits() != 3) {
+    if (FilterBits() != 1 and not HasFilterQueryLookupTable()) {
         computed1 = this->ComputeDistWithOneBitLowerBound(
             computer, one_bit_code1, &dist1, lower_bound1, runtime_rabitq_error_rate);
         computed2 = this->ComputeDistWithOneBitLowerBound(
@@ -1205,26 +1207,16 @@ RaBitQuantizer<metric>::ComputeDistsWithOneBitLowerBoundBatch4(
                                   inv_sqrt_d_,
                                   filter_ip_values);
     } else {
-        if (HasThreeBitQueryLookupTable()) {
-            generic::RaBitQFloatThreeBitIPBatch4ByLookup(
-                reinterpret_cast<const float*>(query + query_offset_three_bit_lut_),
-                one_bit_code1,
-                one_bit_code2,
-                one_bit_code3,
-                one_bit_code4,
-                this->dim_,
-                0,
-                filter_ip_values);
-        } else {
-            RaBitQFloatThreeBitIPBatch4(query_data,
-                                        one_bit_code1,
-                                        one_bit_code2,
-                                        one_bit_code3,
-                                        one_bit_code4,
-                                        this->dim_,
-                                        0,
-                                        filter_ip_values);
-        }
+        RaBitQFloatMultiBitIPBatch4ByLookup(
+            reinterpret_cast<const float*>(query + query_offset_filter_lut_),
+            one_bit_code1,
+            one_bit_code2,
+            one_bit_code3,
+            one_bit_code4,
+            this->dim_,
+            0,
+            FilterBits(),
+            filter_ip_values);
     }
 
     auto compute_one = [&](const uint8_t* one_bit_code,
@@ -1244,7 +1236,7 @@ RaBitQuantizer<metric>::ComputeDistsWithOneBitLowerBoundBatch4(
         float filter_ip_yu_q = filter_ip;
         float filter_ip_estimate = filter_ip;
         norm_type base_norm_code = 0.0F;
-        if (FilterBits() == 3) {
+        if (FilterBits() > 1) {
             const sum_type query_raw_sum = *((sum_type*)(query + query_offset_sum_));
             memcpy(&base_norm_code,
                    one_bit_code + OneBitRecordNormCodeOffset(),
@@ -1328,12 +1320,13 @@ RaBitQuantizer<metric>::ComputeDistWithSplitCode(Computer<RaBitQuantizer>& compu
     } else {
         sum_type query_raw_sum = *((sum_type*)(query + query_offset_sum_));
         float ip_yu_q = 0.0F;
-        if (HasThreeBitQueryLookupTable()) {
-            ip_yu_q = generic::RaBitQFloatThreeBitIPByLookup(
-                reinterpret_cast<const float*>(query + query_offset_three_bit_lut_),
+        if (HasFilterQueryLookupTable()) {
+            ip_yu_q = RaBitQFloatMultiBitIPByLookup(
+                reinterpret_cast<const float*>(query + query_offset_filter_lut_),
                 one_bit_code,
                 this->dim_,
-                ReorderBits());
+                ReorderBits(),
+                FilterBits());
             ip_yu_q += RaBitQFloatSupplementCodeIP(
                 reinterpret_cast<const float*>(query), supplement_code, this->dim_, ReorderBits());
         } else {
@@ -1410,7 +1403,8 @@ RaBitQuantizer<metric>::ComputeDistWithSplitCodeAndFilterDist(Computer<RaBitQuan
         return false;
     }
 
-    if (not SupportSplitCodeStorage() or FilterBits() != 3 or not std::isfinite(filter_dist)) {
+    if (not SupportSplitCodeStorage() or FilterBits() <= 1 or not HasFilterQueryLookupTable() or
+        not std::isfinite(filter_dist)) {
         return false;
     }
 
@@ -1783,11 +1777,11 @@ RaBitQuantizer<metric>::ProcessQueryImpl(const float* query,
             *(sum_type*)(computer.buf_ + query_offset_sum_) = query_raw_sum;
         }
 
-        if (HasThreeBitQueryLookupTable()) {
+        if (HasFilterQueryLookupTable()) {
             generic::RaBitQFloatBuildByteIPLookupTable(
                 normed_data.data(),
                 this->dim_,
-                reinterpret_cast<float*>(computer.buf_ + query_offset_three_bit_lut_));
+                reinterpret_cast<float*>(computer.buf_ + query_offset_filter_lut_));
         }
 
         // 5. store norm

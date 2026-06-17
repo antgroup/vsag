@@ -531,15 +531,24 @@ RaBitQFloatThreeBitIPByLookup(const float* lookup,
                               const uint8_t* bits,
                               uint64_t dim,
                               uint32_t reorder_bits) {
+    return RaBitQFloatMultiBitIPByLookup(lookup, bits, dim, reorder_bits, 3);
+}
+
+float
+RaBitQFloatMultiBitIPByLookup(const float* lookup,
+                              const uint8_t* bits,
+                              uint64_t dim,
+                              uint32_t reorder_bits,
+                              uint32_t filter_bits) {
     const uint64_t plane_bytes = (dim + 7) / 8;
-    const uint32_t weights[3] = {
-        1U << (reorder_bits + 2), 1U << (reorder_bits + 1), 1U << reorder_bits};
     float result = 0.0F;
     for (uint64_t block = 0; block < plane_bytes; ++block) {
         const auto* block_lookup = lookup + block * 256;
-        result += block_lookup[bits[block]] * static_cast<float>(weights[0]);
-        result += block_lookup[bits[plane_bytes + block]] * static_cast<float>(weights[1]);
-        result += block_lookup[bits[2 * plane_bytes + block]] * static_cast<float>(weights[2]);
+        for (uint32_t bit = 0; bit < filter_bits; ++bit) {
+            const auto* plane = bits + static_cast<uint64_t>(bit) * plane_bytes;
+            const uint32_t weight = 1U << (reorder_bits + filter_bits - bit - 1);
+            result += block_lookup[plane[block]] * static_cast<float>(weight);
+        }
     }
     return result;
 }
@@ -553,28 +562,36 @@ RaBitQFloatThreeBitIPBatch4ByLookup(const float* lookup,
                                     uint64_t dim,
                                     uint32_t reorder_bits,
                                     float* results) {
+    RaBitQFloatMultiBitIPBatch4ByLookup(
+        lookup, bits1, bits2, bits3, bits4, dim, reorder_bits, 3, results);
+}
+
+void
+RaBitQFloatMultiBitIPBatch4ByLookup(const float* lookup,
+                                    const uint8_t* bits1,
+                                    const uint8_t* bits2,
+                                    const uint8_t* bits3,
+                                    const uint8_t* bits4,
+                                    uint64_t dim,
+                                    uint32_t reorder_bits,
+                                    uint32_t filter_bits,
+                                    float* results) {
     results[0] = 0.0F;
     results[1] = 0.0F;
     results[2] = 0.0F;
     results[3] = 0.0F;
 
     const uint64_t plane_bytes = (dim + 7) / 8;
-    const uint32_t weights[3] = {
-        1U << (reorder_bits + 2), 1U << (reorder_bits + 1), 1U << reorder_bits};
+    const uint8_t* codes[4] = {bits1, bits2, bits3, bits4};
     for (uint64_t block = 0; block < plane_bytes; ++block) {
         const auto* block_lookup = lookup + block * 256;
-        results[0] += block_lookup[bits1[block]] * static_cast<float>(weights[0]);
-        results[0] += block_lookup[bits1[plane_bytes + block]] * static_cast<float>(weights[1]);
-        results[0] += block_lookup[bits1[2 * plane_bytes + block]] * static_cast<float>(weights[2]);
-        results[1] += block_lookup[bits2[block]] * static_cast<float>(weights[0]);
-        results[1] += block_lookup[bits2[plane_bytes + block]] * static_cast<float>(weights[1]);
-        results[1] += block_lookup[bits2[2 * plane_bytes + block]] * static_cast<float>(weights[2]);
-        results[2] += block_lookup[bits3[block]] * static_cast<float>(weights[0]);
-        results[2] += block_lookup[bits3[plane_bytes + block]] * static_cast<float>(weights[1]);
-        results[2] += block_lookup[bits3[2 * plane_bytes + block]] * static_cast<float>(weights[2]);
-        results[3] += block_lookup[bits4[block]] * static_cast<float>(weights[0]);
-        results[3] += block_lookup[bits4[plane_bytes + block]] * static_cast<float>(weights[1]);
-        results[3] += block_lookup[bits4[2 * plane_bytes + block]] * static_cast<float>(weights[2]);
+        for (uint32_t i = 0; i < 4; ++i) {
+            for (uint32_t bit = 0; bit < filter_bits; ++bit) {
+                const auto* plane = codes[i] + static_cast<uint64_t>(bit) * plane_bytes;
+                const uint32_t weight = 1U << (reorder_bits + filter_bits - bit - 1);
+                results[i] += block_lookup[plane[block]] * static_cast<float>(weight);
+            }
+        }
     }
 }
 

@@ -503,6 +503,126 @@ RaBitQFloatThreeBitIPBatch4(const float* vector,
 }
 
 float
+RaBitQFloatThreeBitIPByLookup(const float* lookup,
+                              const uint8_t* bits,
+                              uint64_t dim,
+                              uint32_t reorder_bits) {
+    return RaBitQFloatMultiBitIPByLookup(lookup, bits, dim, reorder_bits, 3);
+}
+
+float
+RaBitQFloatMultiBitIPByLookup(const float* lookup,
+                              const uint8_t* bits,
+                              uint64_t dim,
+                              uint32_t reorder_bits,
+                              uint32_t filter_bits) {
+#if defined(ENABLE_AVX512)
+    const uint64_t plane_bytes = (dim + 7) / 8;
+    __m512 sum = _mm512_setzero_ps();
+    uint64_t block = 0;
+    for (; block + 16 <= plane_bytes; block += 16) {
+        for (uint32_t bit = 0; bit < filter_bits; ++bit) {
+            const auto* plane = bits + static_cast<uint64_t>(bit) * plane_bytes;
+            alignas(64) int indices[16];
+            for (uint32_t lane = 0; lane < 16; ++lane) {
+                indices[lane] = static_cast<int>((block + lane) * 256 + plane[block + lane]);
+            }
+            const __m512i index = _mm512_load_si512(reinterpret_cast<const void*>(indices));
+            const __m512 values = _mm512_i32gather_ps(index, lookup, 4);
+            const __m512 weight =
+                _mm512_set1_ps(static_cast<float>(1U << (reorder_bits + filter_bits - bit - 1)));
+            sum = _mm512_fmadd_ps(values, weight, sum);
+        }
+    }
+
+    float result = _mm512_reduce_add_ps(sum);
+    for (; block < plane_bytes; ++block) {
+        const auto* block_lookup = lookup + block * 256;
+        for (uint32_t bit = 0; bit < filter_bits; ++bit) {
+            const auto* plane = bits + static_cast<uint64_t>(bit) * plane_bytes;
+            const uint32_t weight = 1U << (reorder_bits + filter_bits - bit - 1);
+            result += block_lookup[plane[block]] * static_cast<float>(weight);
+        }
+    }
+    return result;
+#else
+    return avx2::RaBitQFloatMultiBitIPByLookup(lookup, bits, dim, reorder_bits, filter_bits);
+#endif
+}
+
+void
+RaBitQFloatThreeBitIPBatch4ByLookup(const float* lookup,
+                                    const uint8_t* bits1,
+                                    const uint8_t* bits2,
+                                    const uint8_t* bits3,
+                                    const uint8_t* bits4,
+                                    uint64_t dim,
+                                    uint32_t reorder_bits,
+                                    float* results) {
+    RaBitQFloatMultiBitIPBatch4ByLookup(
+        lookup, bits1, bits2, bits3, bits4, dim, reorder_bits, 3, results);
+}
+
+void
+RaBitQFloatMultiBitIPBatch4ByLookup(const float* lookup,
+                                    const uint8_t* bits1,
+                                    const uint8_t* bits2,
+                                    const uint8_t* bits3,
+                                    const uint8_t* bits4,
+                                    uint64_t dim,
+                                    uint32_t reorder_bits,
+                                    uint32_t filter_bits,
+                                    float* results) {
+#if defined(ENABLE_AVX512)
+    results[0] = 0.0F;
+    results[1] = 0.0F;
+    results[2] = 0.0F;
+    results[3] = 0.0F;
+
+    const uint64_t plane_bytes = (dim + 7) / 8;
+    const uint8_t* codes[4] = {bits1, bits2, bits3, bits4};
+    __m512 sums[4] = {
+        _mm512_setzero_ps(), _mm512_setzero_ps(), _mm512_setzero_ps(), _mm512_setzero_ps()};
+
+    uint64_t block = 0;
+    for (; block + 16 <= plane_bytes; block += 16) {
+        for (uint32_t i = 0; i < 4; ++i) {
+            for (uint32_t bit = 0; bit < filter_bits; ++bit) {
+                const auto* plane = codes[i] + static_cast<uint64_t>(bit) * plane_bytes;
+                alignas(64) int indices[16];
+                for (uint32_t lane = 0; lane < 16; ++lane) {
+                    indices[lane] = static_cast<int>((block + lane) * 256 + plane[block + lane]);
+                }
+                const __m512i index = _mm512_load_si512(reinterpret_cast<const void*>(indices));
+                const __m512 values = _mm512_i32gather_ps(index, lookup, 4);
+                const __m512 weight = _mm512_set1_ps(
+                    static_cast<float>(1U << (reorder_bits + filter_bits - bit - 1)));
+                sums[i] = _mm512_fmadd_ps(values, weight, sums[i]);
+            }
+        }
+    }
+
+    for (uint32_t i = 0; i < 4; ++i) {
+        results[i] = _mm512_reduce_add_ps(sums[i]);
+    }
+    for (; block < plane_bytes; ++block) {
+        const auto* block_lookup = lookup + block * 256;
+        for (uint32_t i = 0; i < 4; ++i) {
+            const auto* bits = codes[i];
+            for (uint32_t bit = 0; bit < filter_bits; ++bit) {
+                const auto* plane = bits + static_cast<uint64_t>(bit) * plane_bytes;
+                const uint32_t weight = 1U << (reorder_bits + filter_bits - bit - 1);
+                results[i] += block_lookup[plane[block]] * static_cast<float>(weight);
+            }
+        }
+    }
+#else
+    avx2::RaBitQFloatMultiBitIPBatch4ByLookup(
+        lookup, bits1, bits2, bits3, bits4, dim, reorder_bits, filter_bits, results);
+#endif
+}
+
+float
 RaBitQFloatSplitCodeIP(const float* vector,
                        const uint8_t* one_bit_code,
                        const uint8_t* supplement_code,

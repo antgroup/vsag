@@ -51,6 +51,40 @@ RaBitQFloatThreeBitIPBatch4(const float* vector,
                             float* results);
 
 float
+RaBitQFloatThreeBitIPByLookup(const float* lookup,
+                              const uint8_t* bits,
+                              uint64_t dim,
+                              uint32_t reorder_bits);
+
+float
+RaBitQFloatMultiBitIPByLookup(const float* lookup,
+                              const uint8_t* bits,
+                              uint64_t dim,
+                              uint32_t reorder_bits,
+                              uint32_t filter_bits);
+
+void
+RaBitQFloatThreeBitIPBatch4ByLookup(const float* lookup,
+                                    const uint8_t* bits1,
+                                    const uint8_t* bits2,
+                                    const uint8_t* bits3,
+                                    const uint8_t* bits4,
+                                    uint64_t dim,
+                                    uint32_t reorder_bits,
+                                    float* results);
+
+void
+RaBitQFloatMultiBitIPBatch4ByLookup(const float* lookup,
+                                    const uint8_t* bits1,
+                                    const uint8_t* bits2,
+                                    const uint8_t* bits3,
+                                    const uint8_t* bits4,
+                                    uint64_t dim,
+                                    uint32_t reorder_bits,
+                                    uint32_t filter_bits,
+                                    float* results);
+
+float
 RaBitQFloatSplitCodeIP(const float* vector,
                        const uint8_t* one_bit_code,
                        const uint8_t* supplement_code,
@@ -105,6 +139,40 @@ RaBitQFloatThreeBitIPBatch4(const float* vector,
                             uint64_t dim,
                             uint32_t reorder_bits,
                             float* results);
+
+float
+RaBitQFloatThreeBitIPByLookup(const float* lookup,
+                              const uint8_t* bits,
+                              uint64_t dim,
+                              uint32_t reorder_bits);
+
+float
+RaBitQFloatMultiBitIPByLookup(const float* lookup,
+                              const uint8_t* bits,
+                              uint64_t dim,
+                              uint32_t reorder_bits,
+                              uint32_t filter_bits);
+
+void
+RaBitQFloatThreeBitIPBatch4ByLookup(const float* lookup,
+                                    const uint8_t* bits1,
+                                    const uint8_t* bits2,
+                                    const uint8_t* bits3,
+                                    const uint8_t* bits4,
+                                    uint64_t dim,
+                                    uint32_t reorder_bits,
+                                    float* results);
+
+void
+RaBitQFloatMultiBitIPBatch4ByLookup(const float* lookup,
+                                    const uint8_t* bits1,
+                                    const uint8_t* bits2,
+                                    const uint8_t* bits3,
+                                    const uint8_t* bits4,
+                                    uint64_t dim,
+                                    uint32_t reorder_bits,
+                                    uint32_t filter_bits,
+                                    float* results);
 
 float
 RaBitQFloatSplitCodeIP(const float* vector,
@@ -268,6 +336,13 @@ RaBitQFloatThreeBitIPByLookup(const float* lookup,
                               uint64_t dim,
                               uint32_t reorder_bits);
 
+float
+RaBitQFloatMultiBitIPByLookup(const float* lookup,
+                              const uint8_t* bits,
+                              uint64_t dim,
+                              uint32_t reorder_bits,
+                              uint32_t filter_bits);
+
 void
 RaBitQFloatThreeBitIPBatch4ByLookup(const float* lookup,
                                     const uint8_t* bits1,
@@ -276,6 +351,17 @@ RaBitQFloatThreeBitIPBatch4ByLookup(const float* lookup,
                                     const uint8_t* bits4,
                                     uint64_t dim,
                                     uint32_t reorder_bits,
+                                    float* results);
+
+void
+RaBitQFloatMultiBitIPBatch4ByLookup(const float* lookup,
+                                    const uint8_t* bits1,
+                                    const uint8_t* bits2,
+                                    const uint8_t* bits3,
+                                    const uint8_t* bits4,
+                                    uint64_t dim,
+                                    uint32_t reorder_bits,
+                                    uint32_t filter_bits,
                                     float* results);
 
 float
@@ -448,6 +534,36 @@ using RaBitQFloatThreeBitBatch4Type = void (*)(const float* vector,
                                                uint32_t reorder_bits,
                                                float* results);
 
+using RaBitQFloatThreeBitByLookupType = float (*)(const float* lookup,
+                                                  const uint8_t* bits,
+                                                  uint64_t dim,
+                                                  uint32_t reorder_bits);
+
+using RaBitQFloatMultiBitByLookupType = float (*)(const float* lookup,
+                                                  const uint8_t* bits,
+                                                  uint64_t dim,
+                                                  uint32_t reorder_bits,
+                                                  uint32_t filter_bits);
+
+using RaBitQFloatThreeBitBatch4ByLookupType = void (*)(const float* lookup,
+                                                       const uint8_t* bits1,
+                                                       const uint8_t* bits2,
+                                                       const uint8_t* bits3,
+                                                       const uint8_t* bits4,
+                                                       uint64_t dim,
+                                                       uint32_t reorder_bits,
+                                                       float* results);
+
+using RaBitQFloatMultiBitBatch4ByLookupType = void (*)(const float* lookup,
+                                                       const uint8_t* bits1,
+                                                       const uint8_t* bits2,
+                                                       const uint8_t* bits3,
+                                                       const uint8_t* bits4,
+                                                       uint64_t dim,
+                                                       uint32_t reorder_bits,
+                                                       uint32_t filter_bits,
+                                                       float* results);
+
 using RaBitQFloatSplitCodeType = float (*)(const float* vector,
                                            const uint8_t* one_bit_code,
                                            const uint8_t* supplement_code,
@@ -475,6 +591,10 @@ using RotateOpType = void (*)(float* data, int idx, int dim_, int step);
 extern RaBitQFloatBinaryType RaBitQFloatBinaryIP;
 extern RaBitQFloatBinaryBatch4Type RaBitQFloatBinaryIPBatch4;
 extern RaBitQFloatThreeBitBatch4Type RaBitQFloatThreeBitIPBatch4;
+extern RaBitQFloatThreeBitByLookupType RaBitQFloatThreeBitIPByLookup;
+extern RaBitQFloatThreeBitBatch4ByLookupType RaBitQFloatThreeBitIPBatch4ByLookup;
+extern RaBitQFloatMultiBitByLookupType RaBitQFloatMultiBitIPByLookup;
+extern RaBitQFloatMultiBitBatch4ByLookupType RaBitQFloatMultiBitIPBatch4ByLookup;
 extern RaBitQFloatSplitCodeType RaBitQFloatSplitCodeIP;
 extern RaBitQFloatSupplementCodeType RaBitQFloatSupplementCodeIP;
 extern RaBitQFloatSQType RaBitQFloatSQIP;
