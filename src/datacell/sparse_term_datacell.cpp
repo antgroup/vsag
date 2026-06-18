@@ -15,6 +15,7 @@
 
 #include "sparse_term_datacell.h"
 
+#include "simd/fp16_simd.h"
 #include "utils/util_functions.h"
 #include "vsag/allocator.h"
 #include "vsag_exception.h"
@@ -40,9 +41,16 @@ SparseTermDataCell::Query(float* global_dists, const SparseTermComputerPtr& comp
         auto term_size = static_cast<uint32_t>(static_cast<float>(term_sizes_[term]) *
                                                computer->term_retain_ratio_);
 
-        if (use_quantization_) {
+        if (sparse_value_quant_type_ == SparseValueQuantizationType::SQ8) {
             computer->ScanForAccumulate(
                 it, term_ids_[term]->data(), term_datas_[term]->data(), term_size, global_dists);
+        } else if (sparse_value_quant_type_ == SparseValueQuantizationType::FP16) {
+            computer->ScanForAccumulateFP16(
+                it,
+                term_ids_[term]->data(),
+                reinterpret_cast<const uint16_t*>(term_datas_[term]->data()),
+                term_size,
+                global_dists);
         } else {
             computer->ScanForAccumulate(it,
                                         term_ids_[term]->data(),
@@ -263,10 +271,14 @@ SparseTermDataCell::InsertVector(const SparseVector& sparse_base, uint16_t base_
         term_ids_[term]->push_back(base_id);
 
         auto& data_vec = *term_datas_[term];
-        if (use_quantization_) {
+        if (sparse_value_quant_type_ == SparseValueQuantizationType::SQ8) {
             uint8_t buffer;
             Encode(val, &buffer);
             data_vec.push_back(buffer);
+        } else if (sparse_value_quant_type_ == SparseValueQuantizationType::FP16) {
+            auto old_size = data_vec.size();
+            data_vec.resize(old_size + sizeof(uint16_t));
+            *reinterpret_cast<uint16_t*>(data_vec.data() + old_size) = generic::FloatToFP16(val);
         } else {
             auto old_size = data_vec.size();
             data_vec.resize(old_size + sizeof(float));
@@ -328,9 +340,16 @@ SparseTermDataCell::CalcDistanceByInnerId(const SparseTermComputerPtr& computer,
         // Dequantize
         const float* vals = nullptr;
         auto size = term_sizes_[term];
-        if (use_quantization_) {
+        if (sparse_value_quant_type_ == SparseValueQuantizationType::SQ8) {
             temp_data.resize(size);
             Decode(term_datas_[term]->data(), size, temp_data.data());
+            vals = temp_data.data();
+        } else if (sparse_value_quant_type_ == SparseValueQuantizationType::FP16) {
+            temp_data.resize(size);
+            const auto* fp16_vals = reinterpret_cast<const uint16_t*>(term_datas_[term]->data());
+            for (uint64_t i = 0; i < size; ++i) {
+                temp_data[i] = generic::FP16ToFloat(fp16_vals[i]);
+            }
             vals = temp_data.data();
         } else {
             vals = reinterpret_cast<const float*>(term_datas_[term]->data());
@@ -381,8 +400,11 @@ SparseTermDataCell::GetSparseVector(uint32_t base_id,
             if (one_term_ids[i] == base_id) {
                 ids.push_back(term);
                 float v;
-                if (use_quantization_) {
+                if (sparse_value_quant_type_ == SparseValueQuantizationType::SQ8) {
                     Decode(term_datas_[term]->data() + i, 1, &v);
+                } else if (sparse_value_quant_type_ == SparseValueQuantizationType::FP16) {
+                    v = generic::FP16ToFloat(
+                        reinterpret_cast<const uint16_t*>(term_datas_[term]->data())[i]);
                 } else {
                     v = reinterpret_cast<float*>(term_datas_[term]->data())[i];
                 }
@@ -453,8 +475,10 @@ SparseTermDataCell::Deserialize(StreamReader& reader) {
             std::memcpy(
                 term_datas_[i]->data(), data_buffer.data(), sizeof(float) * data_buffer.size());
             convert(ids_buffer, *term_ids_[i]);
-            if (use_quantization_) {
+            if (sparse_value_quant_type_ == SparseValueQuantizationType::SQ8) {
                 term_datas_[i]->resize(term_ids_[i]->size());
+            } else if (sparse_value_quant_type_ == SparseValueQuantizationType::FP16) {
+                term_datas_[i]->resize(term_ids_[i]->size() * sizeof(uint16_t));
             }
         }
     }

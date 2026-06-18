@@ -31,7 +31,6 @@ const char* const INDEX_TYPE_PYRAMID = "pyramid";
 const char* const TYPE_KEY = "type";
 const char* const USE_REORDER_KEY = "use_reorder";
 const char* const REORDER_SOURCE_KEY = "reorder_source";
-const char* const USE_QUANTIZATION = "use_quantization";
 const char* const EXTRA_INFO_KEY = "extra_info";
 const char* const USE_ATTRIBUTE_FILTER_KEY = "use_attribute_filter";
 const char* const BUILD_THREAD_COUNT_KEY = "build_thread_count";
@@ -121,6 +120,7 @@ const char* const SPARSE_DESERIALIZE_WITHOUT_BUFFER = "deserialize_without_buffe
 const char* const SPARSE_USE_TERM_LISTS_HEAP_INSERT = "use_term_lists_heap_insert";
 const char* const SPARSE_AVG_DOC_TERM_LENGTH = "avg_doc_term_length";
 const char* const SPARSE_REMAP_TERM_IDS = "remap_term_ids";
+const char* const SPARSE_IMMUTABLE = "immutable";
 
 // graph param value
 const char* const GRAPH_PARAM_MAX_DEGREE_KEY = "max_degree";

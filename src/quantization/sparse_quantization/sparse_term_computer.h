@@ -20,6 +20,7 @@
 
 #include "algorithm/sindi/sindi_parameter.h"
 #include "metric_type.h"
+#include "simd/fp16_simd.h"
 #include "utils/pointer_define.h"
 #include "utils/sparse_vector_transform.h"
 namespace vsag {
@@ -78,6 +79,18 @@ public:
 
         for (auto i = 0; i < term_count; i++) {
             global_dists[term_ids[i]] += query_val * term_datas[i];
+        }
+    }
+
+    void
+    ScanForAccumulateFP16(uint32_t term_iterator,
+                          const uint16_t* term_ids,
+                          const uint16_t* term_datas,
+                          uint32_t term_count,
+                          float* global_dists) {
+        float query_val = sorted_query_[term_iterator].second;
+        for (uint32_t i = 0; i < term_count; i++) {
+            global_dists[term_ids[i]] += query_val * generic::FP16ToFloat(term_datas[i]);
         }
     }
 

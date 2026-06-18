@@ -41,24 +41,31 @@ using namespace vsag;
 
 struct SINDIDefaultParam {
     bool use_reorder = true;
-    bool use_quantization = false;
+    std::string sparse_value_quant_type = QUANTIZATION_TYPE_VALUE_FP32;
     float doc_prune_ratio = 0.1F;
     int window_size = 55555;
     int term_id_limit = 10000;
     int avg_doc_term_length = 100;
     bool remap_term_ids = false;
+    bool immutable = false;
 };
 
 std::string
 generate_sindi_param(const SINDIDefaultParam& param) {
     vsag::JsonType json;
     json[USE_REORDER_KEY].SetBool(param.use_reorder);
-    json[USE_QUANTIZATION].SetBool(param.use_quantization);
+    if (param.sparse_value_quant_type == QUANTIZATION_TYPE_VALUE_FP16) {
+        json["use_quantization"].SetString(QUANTIZATION_TYPE_VALUE_FP16);
+    } else {
+        json["use_quantization"].SetBool(param.sparse_value_quant_type ==
+                                         QUANTIZATION_TYPE_VALUE_SQ8);
+    }
     json[SPARSE_DOC_PRUNE_RATIO].SetFloat(param.doc_prune_ratio);
     json[SPARSE_WINDOW_SIZE].SetInt(param.window_size);
     json[SPARSE_TERM_ID_LIMIT].SetInt(param.term_id_limit);
     json[SPARSE_AVG_DOC_TERM_LENGTH].SetInt(param.avg_doc_term_length);
     json[SPARSE_REMAP_TERM_IDS].SetBool(param.remap_term_ids);
+    json[SPARSE_IMMUTABLE].SetBool(param.immutable);
     return json.Dump();
 }
 
@@ -69,14 +76,17 @@ TEST_CASE("SINDI Index Parameters Test", "[ut][SINDIParameter]") {
     auto param = std::make_shared<vsag::SINDIParameter>();
     param->FromJson(param_json);
     REQUIRE(param->use_reorder == default_param.use_reorder);
-    REQUIRE(param->use_quantization == default_param.use_quantization);
+    REQUIRE(SparseValueQuantizationTypeToString(param->sparse_value_quant_type) ==
+            default_param.sparse_value_quant_type);
     REQUIRE(std::abs(param->doc_prune_ratio - default_param.doc_prune_ratio) < 1e-3);
     REQUIRE(param->window_size == default_param.window_size);
     REQUIRE(param->term_id_limit == default_param.term_id_limit);
     REQUIRE(param->avg_doc_term_length == default_param.avg_doc_term_length);
     REQUIRE(param->remap_term_ids == default_param.remap_term_ids);
+    REQUIRE(param->immutable == default_param.immutable);
 
     vsag::ParameterTest::TestToJson(param);
+    REQUIRE_FALSE(param->ToJson().Contains(SPARSE_IMMUTABLE));
 
     auto search_param_str = R"({
         "sindi": {
@@ -94,13 +104,67 @@ TEST_CASE("SINDI Index Parameters Test", "[ut][SINDIParameter]") {
 
 TEST_CASE("SINDI Index Parameters Compatibility Test", "[ut][SINDIParameter]") {
     TEST_COMPATIBILITY_CASE("use_reorder compatibility", use_reorder, true, false, false);
-    TEST_COMPATIBILITY_CASE("use_quantization compatibility", use_quantization, true, false, false);
+    TEST_COMPATIBILITY_CASE("value quantization compatibility",
+                            sparse_value_quant_type,
+                            QUANTIZATION_TYPE_VALUE_FP32,
+                            QUANTIZATION_TYPE_VALUE_FP16,
+                            false);
     TEST_COMPATIBILITY_CASE("doc_prune_ratio compatibility", doc_prune_ratio, 0.2F, 0.3F, false);
     TEST_COMPATIBILITY_CASE("window_size compatibility", window_size, 33333, 55555, false);
     TEST_COMPATIBILITY_CASE("term_id_limit compatibility", term_id_limit, 10000, 10001, false);
     TEST_COMPATIBILITY_CASE(
         "avg_doc_term_length compatibility", avg_doc_term_length, 100, 200, false);
     TEST_COMPATIBILITY_CASE("remap_term_ids compatibility", remap_term_ids, false, true, false);
+    TEST_COMPATIBILITY_CASE("immutable compatibility", immutable, false, true, true);
+}
+
+TEST_CASE("SINDI immutable Parameter", "[ut][SINDIParameter]") {
+    SECTION("default is false when not specified") {
+        auto param_str = R"({"term_id_limit": 1000, "window_size": 50000})";
+        auto param = std::make_shared<vsag::SINDIParameter>();
+        param->FromJson(vsag::JsonType::Parse(param_str));
+        REQUIRE(param->immutable == false);
+    }
+
+    SECTION("deserialize-only") {
+        SINDIDefaultParam dp;
+        dp.immutable = true;
+        auto param = std::make_shared<vsag::SINDIParameter>();
+        param->FromString(generate_sindi_param(dp));
+        REQUIRE(param->immutable == true);
+
+        auto json = param->ToJson();
+        REQUIRE_FALSE(json.Contains(SPARSE_IMMUTABLE));
+    }
+}
+
+TEST_CASE("SINDI use_quantization Parameter", "[ut][SINDIParameter]") {
+    SECTION("legacy false means fp32") {
+        SINDIDefaultParam dp;
+        dp.sparse_value_quant_type = QUANTIZATION_TYPE_VALUE_FP32;
+        auto param = std::make_shared<vsag::SINDIParameter>();
+        param->FromString(generate_sindi_param(dp));
+        REQUIRE(param->sparse_value_quant_type == SparseValueQuantizationType::FP32);
+        REQUIRE_FALSE(param->ToJson()["use_quantization"].GetBool());
+    }
+
+    SECTION("legacy true means sq8") {
+        SINDIDefaultParam dp;
+        dp.sparse_value_quant_type = QUANTIZATION_TYPE_VALUE_SQ8;
+        auto param = std::make_shared<vsag::SINDIParameter>();
+        param->FromString(generate_sindi_param(dp));
+        REQUIRE(param->sparse_value_quant_type == SparseValueQuantizationType::SQ8);
+        REQUIRE(param->ToJson()["use_quantization"].GetBool());
+    }
+
+    SECTION("string fp16 means fp16") {
+        SINDIDefaultParam dp;
+        dp.sparse_value_quant_type = QUANTIZATION_TYPE_VALUE_FP16;
+        auto param = std::make_shared<vsag::SINDIParameter>();
+        param->FromString(generate_sindi_param(dp));
+        REQUIRE(param->sparse_value_quant_type == SparseValueQuantizationType::FP16);
+        REQUIRE(param->ToJson()["use_quantization"].GetString() == QUANTIZATION_TYPE_VALUE_FP16);
+    }
 }
 
 TEST_CASE("SINDI term_id_limit upper bound", "[ut][SINDIParameter]") {

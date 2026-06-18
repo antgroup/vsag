@@ -27,6 +27,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "simd/fp16_simd.h"
 #include "utils/sparse_vector_transform.h"
 
 namespace vsag {
@@ -36,6 +37,11 @@ constexpr int64_t K_ANALYZE_DEFAULT_TOPK = 10;
 constexpr uint64_t K_ANALYZE_BASE_SAMPLE_LIMIT = 10;
 constexpr uint64_t K_ANALYZE_DOC_SAMPLE_LIMIT = 100000;
 constexpr float K_ANALYZE_EPSILON = 1e-6F;
+
+bool
+is_sq8_value_quantization(SparseValueQuantizationType type) {
+    return type == SparseValueQuantizationType::SQ8;
+}
 
 struct analyze_options {
     std::string base_path;
@@ -290,7 +296,7 @@ SINDIAnalyzer::collect_doc_prune_candidates(const SparseVector& query,
                 continue;
             }
 
-            if (term_list->use_quantization_) {
+            if (is_sq8_value_quantization(term_list->sparse_value_quant_type_)) {
                 decoded_values.resize(term_size);
                 term_list->Decode(
                     term_list->term_datas_[term]->data(), term_size, decoded_values.data());
@@ -299,6 +305,13 @@ SINDIAnalyzer::collect_doc_prune_candidates(const SparseVector& query,
                                             decoded_values.data(),
                                             term_size,
                                             dists.data());
+            } else if (term_list->sparse_value_quant_type_ == SparseValueQuantizationType::FP16) {
+                computer->ScanForAccumulateFP16(
+                    term_idx,
+                    term_list->term_ids_[term]->data(),
+                    reinterpret_cast<const uint16_t*>(term_list->term_datas_[term]->data()),
+                    term_size,
+                    dists.data());
             } else {
                 computer->ScanForAccumulate(
                     term_idx,
@@ -795,7 +808,7 @@ SINDIAnalyzer::calculate_recall_stats(const DatasetPtr& query_dataset,
                                        topk,
                                        -1);
         doc_prune_recall_sum += doc_prune_recall;
-        if (sindi_->use_quantization_) {
+        if (is_sq8_value_quantization(sindi_->sparse_value_quant_type_)) {
             auto quantization_candidates =
                 collect_coarse_candidates(query, no_query_prune_param, candidate_count);
             quantization_recall_sum += calculate_candidate_recall(
@@ -809,7 +822,7 @@ SINDIAnalyzer::calculate_recall_stats(const DatasetPtr& query_dataset,
     auto denominator = static_cast<float>(std::max<int64_t>(1, query_count));
     stats["recall_query"].SetFloat(recall_sum / denominator);
     stats["doc_prune_recall"].SetFloat(doc_prune_recall_sum / denominator);
-    if (sindi_->use_quantization_) {
+    if (is_sq8_value_quantization(sindi_->sparse_value_quant_type_)) {
         stats["quantization_recall"].SetFloat(quantization_recall_sum / denominator);
     } else {
         stats["quantization_recall"].SetJson(make_skip_json("quantization disabled"));
@@ -974,7 +987,7 @@ SINDIAnalyzer::get_posting_length_distribution_stats() const {
 
 JsonType
 SINDIAnalyzer::get_quantization_range_stats() const {
-    if (not sindi_->use_quantization_) {
+    if (not is_sq8_value_quantization(sindi_->sparse_value_quant_type_)) {
         return make_skip_json("quantization disabled");
     }
     JsonType stats;
@@ -1033,7 +1046,7 @@ SINDIAnalyzer::calculate_distance_quality_stats(const DatasetPtr& query_dataset,
         auto skip = make_skip_json("query dataset unavailable");
         stats["doc_prune_bias_mean"].SetJson(skip);
         stats["doc_prune_inversion_count_rate"].SetJson(skip);
-        if (sindi_->use_quantization_) {
+        if (is_sq8_value_quantization(sindi_->sparse_value_quant_type_)) {
             stats["quantization_bias_ratio"].SetJson(skip);
             stats["quantization_inversion_count_rate"].SetJson(skip);
         }
@@ -1045,7 +1058,7 @@ SINDIAnalyzer::calculate_distance_quality_stats(const DatasetPtr& query_dataset,
             "requires original base vectors; provide --base_path or rebuild with use_reorder=true");
         stats["doc_prune_bias_mean"].SetJson(skip);
         stats["doc_prune_inversion_count_rate"].SetJson(skip);
-        if (sindi_->use_quantization_) {
+        if (is_sq8_value_quantization(sindi_->sparse_value_quant_type_)) {
             stats["quantization_bias_ratio"].SetJson(skip);
             stats["quantization_inversion_count_rate"].SetJson(skip);
         }
@@ -1106,7 +1119,7 @@ SINDIAnalyzer::calculate_distance_quality_stats(const DatasetPtr& query_dataset,
                     : static_cast<float>(doc_inversion_count) / static_cast<float>(doc_pair_count);
         }
 
-        if (not sindi_->use_quantization_) {
+        if (not is_sq8_value_quantization(sindi_->sparse_value_quant_type_)) {
             continue;
         }
         auto quant_candidates =
@@ -1152,7 +1165,7 @@ SINDIAnalyzer::calculate_distance_quality_stats(const DatasetPtr& query_dataset,
     auto doc_denominator = static_cast<float>(std::max<int64_t>(1, valid_doc_query_count));
     stats["doc_prune_bias_mean"].SetFloat(doc_bias_sum / doc_denominator);
     stats["doc_prune_inversion_count_rate"].SetFloat(doc_inversion_rate_sum / doc_denominator);
-    if (sindi_->use_quantization_) {
+    if (is_sq8_value_quantization(sindi_->sparse_value_quant_type_)) {
         auto quant_denominator = static_cast<float>(std::max<int64_t>(1, valid_quant_query_count));
         stats["quantization_bias_ratio"].SetFloat(quant_bias_sum / quant_denominator);
         stats["quantization_inversion_count_rate"].SetFloat(quant_inversion_rate_sum /
@@ -1176,7 +1189,7 @@ SINDIAnalyzer::GetStats() {
     stats["window_count"].SetInt(static_cast<uint64_t>(sindi_->window_term_list_.size()));
     stats["active_term_count"].SetJson(get_active_term_count_stats());
     stats["posting_length_distribution"].SetJson(get_posting_length_distribution_stats());
-    if (sindi_->use_quantization_) {
+    if (is_sq8_value_quantization(sindi_->sparse_value_quant_type_)) {
         stats["quantization_range"].SetJson(get_quantization_range_stats());
     }
     stats["mean_doc_retained"].SetJson(get_mean_doc_retained(base_dataset));
@@ -1322,7 +1335,7 @@ SINDIAnalyzer::AnalyzeIndexBySearch(const SearchRequest& request) {
         stats["quantization_recall"].SetJson(skip);
         stats["doc_prune_bias_mean"].SetJson(skip);
         stats["doc_prune_inversion_count_rate"].SetJson(skip);
-        if (sindi_->use_quantization_) {
+        if (is_sq8_value_quantization(sindi_->sparse_value_quant_type_)) {
             stats["quantization_bias_ratio"].SetJson(skip);
             stats["quantization_inversion_count_rate"].SetJson(skip);
         }

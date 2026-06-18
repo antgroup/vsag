@@ -19,6 +19,40 @@
 #include "utils/param_compat_macros.h"
 
 namespace vsag {
+namespace {
+
+constexpr const char* USE_QUANTIZATION = "use_quantization";
+
+}  // namespace
+
+std::string
+SparseValueQuantizationTypeToString(SparseValueQuantizationType type) {
+    switch (type) {
+        case SparseValueQuantizationType::FP32:
+            return QUANTIZATION_TYPE_VALUE_FP32;
+        case SparseValueQuantizationType::SQ8:
+            return QUANTIZATION_TYPE_VALUE_SQ8;
+        case SparseValueQuantizationType::FP16:
+            return QUANTIZATION_TYPE_VALUE_FP16;
+    }
+    return QUANTIZATION_TYPE_VALUE_FP32;
+}
+
+static SparseValueQuantizationType
+parse_sparse_value_quant_type(const std::string& type_name) {
+    if (type_name == QUANTIZATION_TYPE_VALUE_FP32) {
+        return SparseValueQuantizationType::FP32;
+    }
+    if (type_name == QUANTIZATION_TYPE_VALUE_SQ8) {
+        return SparseValueQuantizationType::SQ8;
+    }
+    if (type_name == QUANTIZATION_TYPE_VALUE_FP16) {
+        return SparseValueQuantizationType::FP16;
+    }
+    CHECK_ARGUMENT(
+        false, fmt::format("use_quantization must be false, true, or fp16, but got {}", type_name));
+    return SparseValueQuantizationType::FP32;
+}
 
 void
 SINDIParameter::FromJson(const JsonType& json) {
@@ -46,10 +80,14 @@ SINDIParameter::FromJson(const JsonType& json) {
         use_reorder = DEFAULT_USE_REORDER;
     }
 
+    sparse_value_quant_type = SparseValueQuantizationType::FP32;
     if (json.Contains(USE_QUANTIZATION)) {
-        use_quantization = json[USE_QUANTIZATION].GetBool();
-    } else {
-        use_quantization = false;
+        auto use_quantization = json[USE_QUANTIZATION];
+        if (use_quantization.IsString()) {
+            sparse_value_quant_type = parse_sparse_value_quant_type(use_quantization.GetString());
+        } else if (use_quantization.GetBool()) {
+            sparse_value_quant_type = SparseValueQuantizationType::SQ8;
+        }
     }
 
     if (json.Contains(SPARSE_WINDOW_SIZE)) {
@@ -81,6 +119,10 @@ SINDIParameter::FromJson(const JsonType& json) {
     if (json.Contains(SPARSE_REMAP_TERM_IDS)) {
         remap_term_ids = json[SPARSE_REMAP_TERM_IDS].GetBool();
     }
+
+    if (json.Contains(SPARSE_IMMUTABLE)) {
+        immutable = json[SPARSE_IMMUTABLE].GetBool();
+    }
 }
 
 JsonType
@@ -89,7 +131,11 @@ SINDIParameter::ToJson() const {
     json[SPARSE_TERM_ID_LIMIT].SetInt(term_id_limit);
     json[SPARSE_DOC_PRUNE_RATIO].SetFloat(doc_prune_ratio);
     json[USE_REORDER_KEY].SetBool(use_reorder);
-    json[USE_QUANTIZATION].SetBool(use_quantization);
+    if (sparse_value_quant_type == SparseValueQuantizationType::FP16) {
+        json[USE_QUANTIZATION].SetString(QUANTIZATION_TYPE_VALUE_FP16);
+    } else {
+        json[USE_QUANTIZATION].SetBool(sparse_value_quant_type == SparseValueQuantizationType::SQ8);
+    }
     json[SPARSE_WINDOW_SIZE].SetInt(window_size);
     json[SPARSE_AVG_DOC_TERM_LENGTH].SetInt(avg_doc_term_length);
     json[SPARSE_REMAP_TERM_IDS].SetBool(remap_term_ids);
@@ -103,7 +149,7 @@ SINDIParameter::CheckCompatibility(const vsag::ParamPtr& other) const {
     CHECK_FIELD_EQ(*this, *p, window_size);
     CHECK_FIELD_EQ(*this, *p, doc_prune_ratio);
     CHECK_FIELD_EQ(*this, *p, use_reorder);
-    CHECK_FIELD_EQ(*this, *p, use_quantization);
+    CHECK_FIELD_EQ(*this, *p, sparse_value_quant_type);
     CHECK_FIELD_EQ(*this, *p, avg_doc_term_length);
     CHECK_FIELD_EQ(*this, *p, remap_term_ids);
     return true;

@@ -69,8 +69,11 @@ TEST_CASE("SparseTermDatacell Basic Test", "[ut][SparseTermDatacell]") {
 
     // disable quantization for this basic test
     std::shared_ptr<QuantizationParams> q_params = nullptr;
-    auto data_cell = std::make_shared<SparseTermDataCell>(
-        doc_retain_ratio, DEFAULT_TERM_ID_LIMIT, allocator.get(), false, q_params);
+    auto data_cell = std::make_shared<SparseTermDataCell>(doc_retain_ratio,
+                                                          DEFAULT_TERM_ID_LIMIT,
+                                                          allocator.get(),
+                                                          SparseValueQuantizationType::FP32,
+                                                          q_params);
     REQUIRE(std::abs(data_cell->doc_retain_ratio_ - doc_retain_ratio) < 1e-3);
 
     // test factory computer
@@ -259,7 +262,7 @@ TEST_CASE("SparseTermDatacell Encode/Decode Test", "[ut][SparseTermDatacell]") {
     q_params->max_val = max_val;
     q_params->diff = max_val - min_val;
     auto data_cell = std::make_shared<SparseTermDataCell>(
-        1.0f, DEFAULT_TERM_ID_LIMIT, allocator.get(), true, q_params);
+        1.0f, DEFAULT_TERM_ID_LIMIT, allocator.get(), SparseValueQuantizationType::SQ8, q_params);
 
     // Insert vector (tests Encode)
     uint16_t base_id = 5;
@@ -315,7 +318,7 @@ TEST_CASE("SparseTermDatacell Last Term Test", "[ut][SparseTermDatacell]") {
         q_params->max_val = 0.1f;
         q_params->diff = q_params->max_val - q_params->min_val;
         auto data_cell = std::make_shared<SparseTermDataCell>(
-            1, DEFAULT_TERM_ID_LIMIT, allocator.get(), false, q_params);
+            1, DEFAULT_TERM_ID_LIMIT, allocator.get(), SparseValueQuantizationType::FP32, q_params);
         data_cell->InsertVector(sv0, ids[0]);
         data_cell->InsertVector(sv1, ids[1]);
 

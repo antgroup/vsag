@@ -28,7 +28,7 @@ struct SINDIParam {
     bool deserialize_without_footer = false;
     bool deserialize_without_buffer = false;
     int term_id_limit = 2000;
-    bool use_quantization = false;
+    std::string sparse_value_quant_type = "fp32";
     bool remap_term_ids = false;
 };
 
@@ -71,7 +71,9 @@ public:
                            param.term_id_limit,
                            param.deserialize_without_footer,
                            param.deserialize_without_buffer,
-                           param.use_quantization,
+                           param.sparse_value_quant_type == "fp16"
+                               ? R"("fp16")"
+                               : (param.sparse_value_quant_type == "sq8" ? "true" : "false"),
                            param.remap_term_ids);
     }
 
@@ -210,7 +212,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Analyze", "[ft][analyze][sindi]") {
     fixtures::SINDIParam param;
     param.use_reorder = GENERATE(true, false);
-    param.use_quantization = GENERATE(true, false);
+    param.sparse_value_quant_type = GENERATE("fp32", "sq8", "fp16");
     auto build_param = fixtures::SINDITestIndex::GenerateBuildParameter(param);
     auto index = TestFactory("sindi", build_param, true);
     auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
@@ -238,7 +240,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Analyze", "[ft][an
     REQUIRE(analyze.Contains("time_cost_query"));
     REQUIRE(analyze.Contains("postings_scanned"));
     REQUIRE(analyze.Contains("doc_prune_recall"));
-    if (param.use_quantization) {
+    if (param.sparse_value_quant_type == "sq8") {
         REQUIRE(analyze.Contains("quantization_recall"));
     }
 }
@@ -263,7 +265,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
     param.deserialize_without_footer = GENERATE(true, false);
     param.deserialize_without_buffer = true;
     param.use_reorder = GENERATE(true, false);
-    param.use_quantization = GENERATE(true, false);
+    param.sparse_value_quant_type = GENERATE("fp32", "sq8", "fp16");
     param.remap_term_ids = GENERATE(true, false);
     auto build_param = fixtures::SINDITestIndex::GenerateBuildParameter(param);
     auto search_param_with_heap_insert =

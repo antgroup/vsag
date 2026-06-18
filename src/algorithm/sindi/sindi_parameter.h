@@ -15,6 +15,8 @@
 
 #pragma once
 
+#include <string>
+
 #include "algorithm/inner_index_parameter.h"
 #include "index_common_param.h"
 #include "utils/pointer_define.h"
@@ -22,6 +24,15 @@
 namespace vsag {
 
 DEFINE_POINTER(SINDIParameter);
+
+enum class SparseValueQuantizationType {
+    FP32,
+    SQ8,
+    FP16,
+};
+
+std::string
+SparseValueQuantizationTypeToString(SparseValueQuantizationType type);
 
 class SINDIParameter : public InnerIndexParameter {
 public:
@@ -46,9 +57,11 @@ public:
 
     bool use_reorder{false};
 
-    bool use_quantization{false};
+    SparseValueQuantizationType sparse_value_quant_type{SparseValueQuantizationType::FP32};
 
     bool remap_term_ids{false};
+
+    bool immutable{false};
 
     // temporal parameter
     bool deserialize_without_footer{false};

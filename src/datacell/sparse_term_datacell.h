@@ -34,7 +34,7 @@ public:
     SparseTermDataCell(float doc_retain_ratio,
                        uint32_t term_id_limit,
                        Allocator* allocator,
-                       bool use_quantization,
+                       SparseValueQuantizationType sparse_value_quant_type,
                        std::shared_ptr<QuantizationParams> quantization_params)
         : doc_retain_ratio_(doc_retain_ratio),
           term_id_limit_(term_id_limit),
@@ -42,7 +42,7 @@ public:
           term_ids_(allocator),
           term_datas_(allocator),
           term_sizes_(allocator),
-          use_quantization_(use_quantization),
+          sparse_value_quant_type_(sparse_value_quant_type),
           quantization_params_(std::move(quantization_params)) {
     }
 
@@ -151,7 +151,7 @@ public:
 
     Allocator* const allocator_{nullptr};
 
-    bool use_quantization_{false};
+    SparseValueQuantizationType sparse_value_quant_type_{SparseValueQuantizationType::FP32};
 
     int64_t total_count_{0};
 
