@@ -410,6 +410,10 @@ HGraph::insert_persistent_codes(const void* data, InnerIdType inner_id) {
     if (create_new_raw_vector_) {
         raw_vector_->InsertVector(data, inner_id);
     }
+    // Publish the slot now that all of its codes are durably written. This
+    // release pairs with the acquire in brute_force_search()'s readiness check
+    // so a concurrent scan never observes a partially written slot (#2294).
+    this->codes_ready_.Mark(inner_id);
 }
 
 void
@@ -561,6 +565,7 @@ HGraph::resize(uint64_t new_size) {
         this->label_table_->Resize(new_size_power_2);
         bottom_graph_->Resize(new_size_power_2);
         this->basic_flatten_codes_->Resize(new_size_power_2);
+        this->codes_ready_.Resize(new_size_power_2);
         if (has_precise_reorder()) {
             this->high_precise_codes_->Resize(new_size_power_2);
         }

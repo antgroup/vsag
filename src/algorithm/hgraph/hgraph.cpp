@@ -430,6 +430,11 @@ HGraph::Merge(const std::vector<MergeUnit>& merge_units) {
         sparse_odescent_builder.SaveGraph(graph);
         this->entry_point_id_ = ids.back();
     }
+    // Merged slots received their codes via MergeOther(), bypassing the
+    // per-slot Mark() in insert_persistent_codes(). Publish the whole range so
+    // brute-force search can see them (#2294).
+    this->codes_ready_.Resize(this->max_capacity_.load());
+    this->codes_ready_.MarkRange(this->total_count_.load());
 }
 
 void

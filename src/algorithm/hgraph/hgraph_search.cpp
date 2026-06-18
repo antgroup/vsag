@@ -322,7 +322,14 @@ HGraph::brute_force_search(const void* query,
     while (cursor < total) {
         InnerIdType batch_count = 0;
         while (cursor < total && batch_count < brute_force_batch_size) {
-            if (filter == nullptr || filter->CheckValid(cursor)) {
+            // Skip slots whose codes are not yet published. A slot's inner_id
+            // enters total_count_ before its codes are written, so an unready
+            // slot here is one whose codes are still being written by a
+            // concurrent Add; reading it would be a data race (#2294). The
+            // acquire load pairs with the release Mark() in
+            // insert_persistent_codes().
+            if (this->codes_ready_.IsReady(cursor) &&
+                (filter == nullptr || filter->CheckValid(cursor))) {
                 batch_ids[batch_count++] = cursor;
             }
             ++cursor;
