@@ -106,21 +106,27 @@ private:
     void
     deserialize_rep_hgraph(StreamReader& reader);
 
+    void
+    split_cluster_incremental(InnerIdType cluster_idx);
+
 private:
-    std::shared_ptr<HGraph> rep_hgraph_{nullptr};
     IndexCommonParam common_param_;
     int64_t num_clusters_{0};
 
-    // Flat inverted index: cluster i owns [cluster_offsets_[i], cluster_offsets_[i+1])
-    // Stores doc IDs (not vector IDs)
-    Vector<InnerIdType> cluster_offsets_;
-    Vector<InnerIdType> cluster_data_;
+    // Per-cluster doc-ID lists; mutable for incremental Add.
+    Vector<Vector<InnerIdType>> cluster_lists_;
+
+    std::shared_ptr<HGraph> rep_hgraph_{nullptr};
 
     FlattenInterfacePtr mv_codes_{nullptr};
 
     uint64_t total_count_{0};
 
     Vector<InnerIdType> vec_to_cluster_;
+
+    // Token-level metadata for precise split: maps global token_id → doc inner_id / offset
+    Vector<InnerIdType> token_to_doc_;
+    Vector<uint32_t>    token_to_offset_;
 
     float   init_cluster_ratio_{0.2f};
     int64_t max_cluster_size_{64};

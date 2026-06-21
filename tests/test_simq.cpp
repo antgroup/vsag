@@ -50,6 +50,7 @@
 #include <string>
 #include <unordered_set>
 #include <vector>
+#include <unistd.h>
 
 #include <fmt/format.h>
 
@@ -381,6 +382,55 @@ TEST_CASE("SIMQ: serialize and deserialize preserves recall", "[simq][serializat
     // Deserialized index should produce identical results
     REQUIRE(std::abs(recall_orig - recall_deser) < 0.01f);
     SUCCEED("Serialize/deserialize recall matches.");
+}
+
+TEST_CASE("SIMQ: range search", "[simq][range_search]") {
+    auto ds = generate_dataset();
+    TempFile tmp;
+
+    auto build_param  = make_build_param(tmp.path);
+    auto search_param = make_search_param();
+
+    auto r = vsag::Factory::CreateIndex("simq", build_param);
+    REQUIRE(r.has_value());
+    auto index = r.value();
+    auto build_result = index->Build(ds.base_dataset);
+    REQUIRE(build_result.has_value());
+
+    vsag::DatasetPtr one_query = vsag::Dataset::Make();
+    one_query
+        ->NumElements(1)
+        ->Dim(SIMQ_DIM)
+        ->MultiVectors(&ds.query_mvs[0])
+        ->MultiVectorDim(SIMQ_DIM)
+        ->Owner(false);
+
+    // Use KNN distances to pick a sensible radius: the worst distance in top-k
+    auto knn_result = index->KnnSearch(one_query, TOP_K, search_param, vsag::FilterPtr(nullptr));
+    REQUIRE(knn_result.has_value());
+    const float* knn_dists = knn_result.value()->GetDistances();
+    int64_t knn_n = knn_result.value()->GetNumElements();
+    REQUIRE(knn_n > 0);
+    float radius = knn_dists[knn_n - 1];  // worst distance among top-k results
+
+    SECTION("all returned distances are within radius") {
+        auto rr = index->RangeSearch(one_query, radius, search_param, vsag::FilterPtr(nullptr));
+        REQUIRE(rr.has_value());
+        int64_t n = rr.value()->GetNumElements();
+        const float* rdists = rr.value()->GetDistances();
+        REQUIRE(n >= 1);
+        for (int64_t i = 0; i < n; ++i) {
+            REQUIRE(rdists[i] <= radius + 1e-5f);
+        }
+    }
+
+    SECTION("limited_size truncates results") {
+        int64_t limited = 3;
+        auto rr = index->RangeSearch(
+            one_query, radius, search_param, vsag::FilterPtr(nullptr), limited);
+        REQUIRE(rr.has_value());
+        REQUIRE(rr.value()->GetNumElements() <= limited);
+    }
 }
 
 TEST_CASE("SIMQ: parameter sweep on coarse_k and rerank_k", "[simq][sweep]") {
