@@ -15,7 +15,10 @@
 
 #pragma once
 
+#include <string>
+
 #include "algorithm/inner_index_interface.h"
+#include "algorithm/sindi/sindi_rerank_backend.h"
 #include "algorithm/sindi/term_id_mapper.h"
 #include "datacell/flatten_interface.h"
 #include "datacell/sparse_term_datacell.h"
@@ -47,9 +50,7 @@ public:
     InitFeatures() override;
 
     std::string
-    GetMemoryUsageDetail() const override {
-        return "";
-    }
+    GetMemoryUsageDetail() const override;
 
     std::string
     GetStats() const override;
@@ -170,9 +171,15 @@ private:
 
     bool use_quantization_{false};
 
+    std::string rerank_type_{"fp32"};
+
+    uint32_t dmq_bits_{8};
+
     float doc_retain_ratio_{0};
 
     FlattenInterfacePtr rerank_flat_{nullptr};
+
+    std::shared_ptr<SINDIRerankBackend> dmq_rerank_backend_{nullptr};
 
     bool deserialize_without_footer_{false};
     bool deserialize_without_buffer_{false};
