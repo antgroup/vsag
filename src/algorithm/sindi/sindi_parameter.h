@@ -15,6 +15,8 @@
 
 #pragma once
 
+#include <string>
+
 #include "algorithm/inner_index_parameter.h"
 #include "index_common_param.h"
 #include "utils/pointer_define.h"
@@ -49,6 +51,10 @@ public:
     bool use_quantization{false};
 
     bool remap_term_ids{false};
+
+    std::string rerank_type{"fp32"};
+
+    uint32_t dmq_bits{8};
 
     // temporal parameter
     bool deserialize_without_footer{false};

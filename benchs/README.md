@@ -1,5 +1,44 @@
 # VSAG Benchmarks
 
+## Benchmark Scripts
+
+### SINDI SQ8 + Reorder Comparison
+
+The `run_sindi_sq8_reorder_compare.sh` script compares two reorder variants for SINDI sparse vectors:
+- **SQ8 + FP32 Reorder:** High-precision reranking using full-precision (FP32) forward scores
+- **SQ8 + DMQ8 Reorder:** Fast approximate reranking using 8-bit quantized codes
+
+Both variants share the same SQ8 quantization for the inverted posting-list phase (`use_quantization: true`),
+but differ in the reorder backend (rerank phase). This allows fair comparison of memory vs. accuracy trade-offs.
+
+#### Usage
+
+```bash
+DATAPATH=/path/to/sparse.hdf5 DIM=512 TOPK=10 N_CANDIDATE=200 \
+	NUM_THREADS_SEARCHING=32 ./benchs/run_sindi_sq8_reorder_compare.sh
+```
+
+#### Configuration
+
+Key environment variables:
+- `DATAPATH` (required): Path to sparse HDF5 dataset
+- `DIM`: Vector dimension (default: 512)
+- `TOPK`: Number of nearest neighbors to retrieve (default: 10)
+- `N_CANDIDATE`: Candidates to rerank after inverted phase (default: 200)
+- `QUERY_PRUNE_RATIO`: Fraction of query terms to prune (default: 0.2)
+- `TERM_PRUNE_RATIO`: Fraction of posting-list terms to prune (default: 0.1)
+- `USE_QUANTIZATION`: Enable SQ8 quantization (always true in this script)
+- `NUM_THREADS_BUILDING`, `NUM_THREADS_SEARCHING`: Thread count for build/search phases
+
+#### Output
+
+For each variant, the script generates:
+- JSON results with metrics (latency, memory, recall)
+- Markdown table with searchable summaries
+- Index file for reuse
+
+## Recall 90%
+
 
 
 ## Recall 90%

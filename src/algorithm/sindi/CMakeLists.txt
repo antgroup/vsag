@@ -17,6 +17,8 @@
 set (SINDI_SRCS
         sindi.cpp
         sindi_parameter.cpp
+        sindi_rerank_backend.cpp
+        sindi_sparse_dmq.cpp
         term_id_mapper.cpp
 )
 
