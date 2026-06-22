@@ -352,6 +352,12 @@ LazyHGraph::UpdateExtraInfo(const DatasetPtr& new_base) {
     return ActiveIndex()->UpdateExtraInfo(new_base);
 }
 
+bool
+LazyHGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) {
+    std::shared_lock lock(this->phase_mutex_);
+    return ActiveIndex()->UpdateVector(id, new_base, force_update);
+}
+
 void
 LazyHGraph::Deserialize(StreamReader& reader) {
     uint64_t magic = 0;
@@ -407,6 +413,7 @@ LazyHGraph::InitFeatures() {
         IndexFeature::SUPPORT_GET_MEMORY_USAGE,
         IndexFeature::SUPPORT_CHECK_ID_EXIST,
         IndexFeature::SUPPORT_CLONE,
+        IndexFeature::SUPPORT_UPDATE_VECTOR_CONCURRENT,
     });
     if (this->common_param_.extra_info_size_ > 0) {
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_EXTRA_INFO_BY_ID);

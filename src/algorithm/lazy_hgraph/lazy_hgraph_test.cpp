@@ -165,6 +165,31 @@ L2(const float* lhs, const float* rhs) {
     return distance;
 }
 
+vsag::DatasetPtr
+MakeSingleVector(std::vector<float>& vector, float first_value) {
+    vector.resize(DIM);
+    for (int64_t i = 0; i < DIM; ++i) {
+        vector[i] = first_value + static_cast<float>(i);
+    }
+    return vsag::Dataset::Make()
+        ->NumElements(1)
+        ->Dim(DIM)
+        ->Float32Vectors(vector.data())
+        ->Owner(false);
+}
+
+void
+RequireStoredVector(const std::shared_ptr<vsag::LazyHGraph>& index,
+                    int64_t id,
+                    const std::vector<float>& expected) {
+    auto fetched = index->GetVectorByIds(&id, 1, nullptr);
+    REQUIRE(fetched->GetNumElements() == 1);
+    const auto* fetched_vectors = fetched->GetFloat32Vectors();
+    for (int64_t i = 0; i < DIM; ++i) {
+        REQUIRE(fetched_vectors[i] == expected[static_cast<uint64_t>(i)]);
+    }
+}
+
 }  // namespace
 
 TEST_CASE("LazyHGraph stays flat before threshold and searches exactly", "[ut][lazy_hgraph]") {
@@ -291,6 +316,66 @@ TEST_CASE("LazyHGraph transitions to graph and accepts more data", "[ut][lazy_hg
     auto result =
         index->KnnSearch(MakeQuery(more_vectors, 0), 1, R"({"hgraph":{"ef_search":40}})", nullptr);
     REQUIRE(result->GetIds()[0] == 300);
+}
+
+TEST_CASE("LazyHGraph updates vectors in flat phase", "[ut][lazy_hgraph]") {
+    auto index = MakeLazyIndex(10);
+    REQUIRE(index->CheckFeature(vsag::IndexFeature::SUPPORT_UPDATE_VECTOR_CONCURRENT));
+
+    std::vector<float> vectors;
+    std::vector<int64_t> ids;
+    auto data = MakeDataset(3, 320, vectors, ids);
+    REQUIRE(index->Add(data).empty());
+    REQUIRE(index->GetPhase() == vsag::LazyHGraph::Phase::FLAT);
+
+    std::vector<float> updated_vector;
+    auto update = MakeSingleVector(updated_vector, 100.0F);
+    REQUIRE(index->UpdateVector(321, update));
+
+    RequireStoredVector(index, 321, updated_vector);
+    REQUIRE(index->CalcDistanceById(updated_vector.data(), 321) == 0.0F);
+    auto result = index->KnnSearch(update, 1, "{}", nullptr);
+    REQUIRE(result->GetIds()[0] == 321);
+}
+
+TEST_CASE("LazyHGraph migrates flat vector updates to graph phase", "[ut][lazy_hgraph]") {
+    auto index = MakeLazyIndex(4);
+
+    std::vector<float> vectors;
+    std::vector<int64_t> ids;
+    auto data = MakeDataset(3, 330, vectors, ids);
+    REQUIRE(index->Add(data).empty());
+    REQUIRE(index->GetPhase() == vsag::LazyHGraph::Phase::FLAT);
+
+    std::vector<float> updated_vector;
+    auto update = MakeSingleVector(updated_vector, 200.0F);
+    REQUIRE(index->UpdateVector(331, update));
+
+    std::vector<float> more_vectors;
+    std::vector<int64_t> more_ids;
+    auto more = MakeDataset(1, 340, more_vectors, more_ids);
+    REQUIRE(index->Add(more).empty());
+    REQUIRE(index->GetPhase() == vsag::LazyHGraph::Phase::GRAPH);
+
+    RequireStoredVector(index, 331, updated_vector);
+    REQUIRE(index->CalcDistanceById(updated_vector.data(), 331) == 0.0F);
+}
+
+TEST_CASE("LazyHGraph updates vectors in graph phase", "[ut][lazy_hgraph]") {
+    auto index = MakeLazyIndex(4);
+
+    std::vector<float> vectors;
+    std::vector<int64_t> ids;
+    auto data = MakeDataset(4, 360, vectors, ids);
+    REQUIRE(index->Add(data).empty());
+    REQUIRE(index->GetPhase() == vsag::LazyHGraph::Phase::GRAPH);
+
+    std::vector<float> updated_vector;
+    auto update = MakeSingleVector(updated_vector, 300.0F);
+    REQUIRE(index->UpdateVector(362, update, true));
+
+    RequireStoredVector(index, 362, updated_vector);
+    REQUIRE(index->CalcDistanceById(updated_vector.data(), 362) == 0.0F);
 }
 
 TEST_CASE("LazyHGraph filters removed flat ids during transition", "[ut][lazy_hgraph]") {

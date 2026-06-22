@@ -632,6 +632,7 @@ BruteForce::InitFeatures() {
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_KNN_SEARCH_WITH_EX_FILTER);
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_UPDATE_EXTRA_INFO_CONCURRENT);
     }
+    this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_UPDATE_VECTOR_CONCURRENT);
 }
 
 static const std::string BRUTE_FORCE_PARAMS_TEMPLATE =
@@ -922,6 +923,23 @@ BruteForce::GetVectorByInnerId(InnerIdType inner_id, float* data) const {
         inner_codes_->GetCodesById(inner_id, codes.data());
         inner_codes_->Decode(codes.data(), data);
     }
+}
+
+bool
+BruteForce::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) {
+    (void)force_update;
+    auto base_dim = new_base->GetDim();
+    CHECK_ARGUMENT(base_dim == dim_,
+                   fmt::format("base.dim({}) must be equal to index.dim({})", base_dim, dim_));
+    CHECK_ARGUMENT(new_base->GetFloat32Vectors() != nullptr, "base.float_vector is nullptr");
+
+    InnerIdType inner_id = 0;
+    std::shared_lock add_lock(this->add_mutex_, std::defer_lock);
+    std::shared_lock label_lock(this->label_lookup_mutex_, std::defer_lock);
+    std::shared_lock global_lock(this->global_mutex_, std::defer_lock);
+    std::lock(add_lock, label_lock, global_lock);
+    inner_id = this->label_table_->GetIdByLabel(id);
+    return this->inner_codes_->UpdateVector(new_base->GetFloat32Vectors(), inner_id);
 }
 
 void
