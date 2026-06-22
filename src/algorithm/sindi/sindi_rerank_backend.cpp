@@ -40,7 +40,12 @@ get_packed_code_size(uint64_t len, uint32_t bits) {
 }
 
 uint32_t
-get_bits_for_max_value(uint32_t max_value) {
+get_bits_for_value_limit(uint32_t value_limit) {
+    if (value_limit <= 1) {
+        return 1;
+    }
+
+    uint32_t max_value = value_limit - 1;
     uint32_t bits = 0;
     do {
         ++bits;
@@ -141,7 +146,7 @@ SINDIDmqRerankBackend::SINDIDmqRerankBackend(uint32_t bits,
       codebook_index_by_term_id_(allocator_),
       codebook_index_lookup_(allocator_),
       total_bits_(bits),
-      id_bits_(get_bits_for_max_value(term_id_limit)) {
+      id_bits_(get_bits_for_value_limit(term_id_limit)) {
     CHECK_ARGUMENT(bits == sindi_dmq::kDirectDmqBits,
                    fmt::format("dmq_bits must be 8 for direct DMQ rerank, got {}", bits));
     CHECK_ARGUMENT(label_table_ != nullptr, "label table is null for dmq rerank backend");
@@ -321,6 +326,19 @@ SINDIDmqRerankBackend::Add(const DatasetPtr& base) {
 
     TrainCodebooks(base, !codebooks_.empty());
 
+    uint64_t total_new_len = 0;
+    for (int64_t i = 0; i < data_num; ++i) {
+        total_new_len += sparse_vectors[i].len_;
+    }
+    uint64_t final_term_count = total_term_count_ + total_new_len;
+    encoded_vectors_.reserve(encoded_vectors_.size() + data_num);
+    id_codes_.resize(get_packed_code_size(final_term_count, id_bits_), 0);
+    if (total_bits_ == sindi_dmq::kDirectDmqBits) {
+        value_codes_.resize(final_term_count, 0);
+    } else {
+        value_codes_.resize(get_packed_code_size(final_term_count, total_bits_), 0);
+    }
+
     for (int64_t i = 0; i < data_num; ++i) {
         const auto& vector = sparse_vectors[i];
         auto [sorted_ids, sorted_vals] = sort_sparse_vector(vector, allocator_);
@@ -353,13 +371,6 @@ SINDIDmqRerankBackend::Add(const DatasetPtr& base) {
         }
 
         uint64_t next_term_count = total_term_count_ + encoded.len;
-        id_codes_.resize(get_packed_code_size(next_term_count, id_bits_), 0);
-        if (total_bits_ == sindi_dmq::kDirectDmqBits) {
-            value_codes_.resize(next_term_count, 0);
-        } else {
-            value_codes_.resize(get_packed_code_size(next_term_count, total_bits_), 0);
-        }
-
         for (uint32_t term_index = 0; term_index < encoded.len; ++term_index) {
             StoreId(encoded.term_offset, term_index, sorted_ids[term_index]);
             StoreCode(encoded.term_offset, term_index, unpacked_codes[term_index]);
