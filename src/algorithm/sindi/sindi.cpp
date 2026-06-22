@@ -160,7 +160,11 @@ detect_datacell_rerank_flat(StreamReader& reader, int64_t cur_element_count) {
 
 uint32_t
 get_bits_for_term_id_limit(uint32_t term_id_limit) {
-    uint32_t max_value = term_id_limit;
+    if (term_id_limit <= 1) {
+        return 1;
+    }
+
+    uint32_t max_value = term_id_limit - 1;
     uint32_t bits = 0;
     do {
         ++bits;
