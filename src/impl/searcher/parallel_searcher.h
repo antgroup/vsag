@@ -54,7 +54,6 @@ private:
           const Vector<std::pair<float, uint64_t>>& node_pair,
           const FilterPtr& filter,
           FilterSearchSkipStrategy* skip_strategy,
-          Vector<InnerIdType>& to_be_visited_rid,
           Vector<InnerIdType>& to_be_visited_id,
           std::vector<Vector<InnerIdType>>& neighbors,
           uint64_t point_visited_num) const;

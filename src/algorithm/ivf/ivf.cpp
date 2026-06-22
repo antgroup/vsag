@@ -879,14 +879,14 @@ IVF::merge_one_unit(const MergeUnit& unit) {
     check_merge_illegal(unit);
     const auto other_index = std::dynamic_pointer_cast<IVF>(
         std::dynamic_pointer_cast<IndexImpl<IVF>>(unit.index)->GetInnerIndex());
-    auto bias = this->total_elements_;
+    auto bucket_bias = static_cast<InnerIdType>(this->total_elements_ * this->buckets_per_data_);
     this->label_table_->MergeOther(other_index->label_table_, unit.id_map_func);
     other_index->bucket_->Unpack();
-    this->bucket_->MergeOther(other_index->bucket_, bias);
+    this->bucket_->MergeOther(other_index->bucket_, bucket_bias);
     other_index->bucket_->Package();
 
     if (this->use_reorder_) {
-        this->reorder_codes_->MergeOther(other_index->reorder_codes_, bias);
+        this->reorder_codes_->MergeOther(other_index->reorder_codes_, this->total_elements_);
     }
     this->total_elements_ += other_index->total_elements_;
 }

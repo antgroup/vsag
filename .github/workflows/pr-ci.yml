@@ -235,6 +235,7 @@ jobs:
           name: build-x86-${{ github.run_id }}
           path: ./build
       - name: Run Examples
+        shell: bash
         run: |
           cd ./build/examples/cpp
           for example in ./*; do

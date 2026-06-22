@@ -43,7 +43,7 @@ public:
     AnalyzeIndexBySearch(const SearchRequest& request) override;
 
     float
-    GetDuplicateRatio();
+    GetDuplicateRatio(IndexNode* root);
 
 private:
     struct SubIndexStats {
@@ -83,17 +83,17 @@ private:
         float avg_distance_from_entry{0.0F};
     };
 
-    JsonType
-    get_index_node_structure();
+    static JsonType
+    get_index_node_structure(IndexNode* root);
 
     JsonType
-    get_leaf_node_size_distribution();
+    get_leaf_node_size_distribution(IndexNode* root);
 
     void
     collect_leaf_sizes(IndexNode* node, Vector<uint32_t>& sizes);
 
     JsonType
-    get_subindex_quality();
+    get_subindex_quality(IndexNode* root);
 
     void
     analyze_subindexes(IndexNode* node, const std::string& path);
@@ -145,7 +145,7 @@ private:
     analyze_entry_point(const IndexNode* node, const Vector<InnerIdType>& node_ids);
 
     JsonType
-    get_graph_node_recall_stats(const std::string& search_param_str);
+    get_graph_node_recall_stats(IndexNode* root, const std::string& search_param_str);
 
     void
     sample_global();

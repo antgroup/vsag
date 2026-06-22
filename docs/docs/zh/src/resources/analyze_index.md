@@ -43,6 +43,8 @@ AnalyzeIndexBySearch(const SearchRequest& request);
 | `proximity_recall_neighbor` | 邻居列表相对真实最近邻的召回率 |
 | `quantization_bias_ratio` | 量化距离相对精确距离的偏差比率 |
 | `quantization_inversion_count_rate` | 量化导致的距离顺序倒置比率 |
+| `build_cache_hit_rate` | 上一次 `Build()` 中从导入缓存完成 warm-start 的节点占比；当索引并非由 `ImportCache()` 导入的缓存构建时，输出 `skipped_reason` |
+| `build_cache_hit_nodes` / `build_cache_missed_nodes` | `build_cache_hit_rate` 背后的命中 / 未命中节点数（仅在索引由导入缓存构建时存在） |
 
 #### SINDI 指标
 

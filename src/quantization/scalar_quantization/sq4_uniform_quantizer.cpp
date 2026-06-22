@@ -202,7 +202,10 @@ void
 SQ4UniformQuantizer<metric>::ProcessQueryImpl(const float* query,
                                               Computer<SQ4UniformQuantizer>& computer) const {
     try {
-        computer.buf_ = reinterpret_cast<uint8_t*>(this->allocator_->Allocate(this->code_size_));
+        if (computer.buf_ == nullptr) {
+            computer.buf_ =
+                reinterpret_cast<uint8_t*>(this->allocator_->Allocate(this->code_size_));
+        }
         this->EncodeOneImpl(query, computer.buf_);
     } catch (const std::bad_alloc& e) {
         throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "bad alloc when init computer buf");

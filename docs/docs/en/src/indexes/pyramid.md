@@ -12,7 +12,8 @@ scenario where one logical index serves many groups that must not cross-contamin
 results.
 
 - Source: `src/algorithm/pyramid.{h,cpp}`, `src/algorithm/pyramid_zparameters.{h,cpp}`
-- Example: [`examples/cpp/107_index_pyramid.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/107_index_pyramid.cpp)
+- Example (single hierarchy): [`examples/cpp/107_index_pyramid.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/107_index_pyramid.cpp)
+- Example (multi-hierarchy): [`examples/cpp/112_index_pyramid_multi_hierarchy.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/112_index_pyramid_multi_hierarchy.cpp)
 
 ## How it works
 
@@ -96,6 +97,7 @@ Build-time parameters live under `index_param`.
 | `index_min_size` | int | `0` | Minimum sub-index size; smaller groups fall back to scan. |
 | `support_duplicate` | bool | `false` | Allow duplicate ids. |
 | `build_thread_count` | int | `1` | Threads used for parallel build. |
+| `hierarchies` | array | `[]` | Named hierarchy definitions. Each element is either a string (inherits all top-level params) or an object with `name` and optional overrides (`max_degree`, `ef_construction`, `alpha`, `no_build_levels`, `index_min_size`). When present, multi-hierarchy mode is activated and each hierarchy maintains its own independent path tree. |
 
 ## Search parameters
 
@@ -105,11 +107,135 @@ Search-time parameters live under the `pyramid` sub-object:
 |-----------|------|---------|-------------|
 | `ef_search` | int | `100` | Candidate list size for the leaf-level graph search. |
 | `subindex_ef_search` | int | `50` | Candidate list size used when traversing intermediate sub-graphs on the path. |
+| `hierarchies` | string[] | `[]` | Select which hierarchy to search. Empty means use the default (unnamed) hierarchy. |
+| `hierarchy_op` | string | `"single"` | How to combine results across hierarchies: `single` (search one hierarchy), `union`, or `intersection`. **Note:** `union` and `intersection` are not yet implemented — setting them will cause `KnnSearch`/`RangeSearch` to return an error. |
 
 ```cpp
 auto result = index->KnnSearch(
     query, topk,
     R"({"pyramid": {"ef_search": 200, "subindex_ef_search": 80}})").value();
+```
+
+## Multi-Hierarchy Support
+
+A single Pyramid index can maintain **multiple independent path trees**, each
+identified by a name (e.g. `"site"`, `"category"`). Vectors share IDs and data
+across all hierarchies — only the paths differ. Each hierarchy can optionally
+override graph construction parameters.
+
+This is useful when the same set of vectors needs to be partitioned along
+different dimensions simultaneously. For example, an e-commerce platform might
+partition products by **site** (`site-a/lang-en`) and by **category**
+(`electronics/phones`) at the same time, and search can target either hierarchy
+independently.
+
+### Build configuration
+
+Add a `hierarchies` array inside `index_param`. Each element is either:
+- A **string** (inherits all top-level params): `"site"`
+- An **object** with `name` and optional per-hierarchy overrides:
+  `{"name": "category", "max_degree": 64, "no_build_levels": [0]}`
+
+Overridable per-hierarchy parameters: `max_degree`, `ef_construction`, `alpha`,
+`no_build_levels`, `index_min_size`.
+
+```json
+{
+    "dtype": "float32",
+    "metric_type": "l2",
+    "dim": 128,
+    "index_param": {
+        "base_quantization_type": "sq8",
+        "max_degree": 32,
+        "alpha": 1.2,
+        "graph_type": "odescent",
+        "graph_iter_turn": 15,
+        "neighbor_sample_rate": 0.2,
+        "no_build_levels": [0, 1],
+        "use_reorder": true,
+        "build_thread_count": 16,
+        "hierarchies": [
+            "site",
+            {"name": "category", "max_degree": 64, "no_build_levels": [0]}
+        ]
+    }
+}
+```
+
+### Dataset API for named hierarchies
+
+Use the overloaded `Paths(hierarchy_name, paths)` method to assign paths per
+hierarchy. The same `Ids()` and `Float32Vectors()` are shared across all
+hierarchies:
+
+```cpp
+auto base = vsag::Dataset::Make();
+base->NumElements(n)
+    ->Dim(128)
+    ->Ids(ids)
+    ->Float32Vectors(data)
+    ->Paths("site", site_paths)         // std::string* of length n
+    ->Paths("category", category_paths) // independent paths for 2nd hierarchy
+    ->Owner(false);
+index->Build(base);
+```
+
+### Searching a specific hierarchy
+
+Specify which hierarchy to search via `"hierarchies"` in the search parameters.
+The query dataset must also set its path on the matching hierarchy name:
+
+```cpp
+auto query = vsag::Dataset::Make();
+query->NumElements(1)
+    ->Dim(128)
+    ->Float32Vectors(q)
+    ->Paths("site", &query_path)   // target the "site" hierarchy
+    ->Owner(false);
+
+auto result = index->KnnSearch(
+    query, /*topk=*/10,
+    R"({"pyramid": {"ef_search": 100, "hierarchies": ["site"]}})").value();
+```
+
+### Incremental insertion (Add)
+
+`Add()` works the same as `Build()` — provide named paths and the index inserts
+into all matching hierarchies:
+
+```cpp
+auto new_data = vsag::Dataset::Make();
+new_data->NumElements(count)
+    ->Dim(128)
+    ->Ids(new_ids)
+    ->Float32Vectors(new_vectors)
+    ->Paths("site", new_site_paths)
+    ->Paths("category", new_cat_paths);
+index->Add(new_data);
+```
+
+### RangeSearch
+
+RangeSearch also supports hierarchy selection via the same search parameters:
+
+```cpp
+auto result = index->RangeSearch(
+    query, /*radius=*/20.0f,
+    R"({"pyramid": {"ef_search": 100, "hierarchies": ["category"]}})").value();
+```
+
+### Serialize & Deserialize
+
+Multi-hierarchy indexes serialize and deserialize transparently. The serialized
+format includes all hierarchy names and their graph structures:
+
+```cpp
+// Serialize
+auto binary_set = index->Serialize().value();
+
+// Deserialize into a new index (must use the same build params)
+auto new_index = vsag::Factory::CreateIndex("pyramid", build_params).value();
+new_index->Deserialize(binary_set);
 ```
 
 ## When to use Pyramid
@@ -123,6 +249,17 @@ auto result = index->KnnSearch(
 
 If you don't need path-based scoping, [HGraph](hgraph.md) is simpler and generally
 faster.
+
+## Mark remove
+
+Pyramid supports `RemoveMode::MARK_REMOVE`. Calling `Remove(ids)` (the default
+mode) tombstones the given ids: they are excluded from subsequent search results,
+`GetNumElements()` drops by the number removed, and `GetNumberRemoved()` reports
+the running total. Removing an id that is absent or already removed is a no-op.
+`RemoveMode::FORCE_REMOVE` is not supported and returns an error.
+
+Mark-removed vectors still occupy memory until the index is rebuilt; the space is
+not physically reclaimed.
 
 ## See also
 

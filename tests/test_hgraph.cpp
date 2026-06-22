@@ -14,11 +14,14 @@
 // limitations under the License.
 
 #include <algorithm>
+#include <atomic>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
+#include <chrono>
 #include <limits>
 #include <random>
 #include <sstream>
+#include <thread>
 
 #include "functest.h"
 #include "inner_string_params.h"
@@ -874,6 +877,213 @@ TEST_CASE("(PR) HGraph SearchWithRequest Reasoning", "[ft][hgraph][pr]") {
     REQUIRE_FALSE(empty_result.value()->GetReasoning().empty());
     REQUIRE(empty_result.value()->GetReasoning().find("missed_targets") != std::string::npos);
     REQUIRE(empty_result.value()->GetReasoning().find("diagnosis") != std::string::npos);
+}
+
+TEST_CASE("(PR) HGraph Reasoning Found Verification", "[ft][hgraph][reasoning][pr]") {
+    using namespace fixtures;
+
+    HGraphTestIndex::HGraphBuildParam build_param("l2", 16, "fp32");
+    auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+
+    auto index = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+    auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(16, 256, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)
+        ->Dim(dataset->base_->GetDim())
+        ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+        ->Owner(false);
+
+    vsag::SearchRequest req;
+    req.topk_ = 10;
+    req.params_str_ = fmt::format(fixtures::search_param_tmp, 200, false);
+    req.query_ = query;
+
+    auto baseline = index->SearchWithRequest(req);
+    REQUIRE(baseline.has_value());
+    REQUIRE(baseline.value()->GetDim() > 0);
+
+    auto* ids = baseline.value()->GetIds();
+    int64_t found_label = ids[0];
+
+    req.expected_labels_ = {found_label};
+    auto result = index->SearchWithRequest(req);
+    REQUIRE(result.has_value());
+    REQUIRE_FALSE(result.value()->GetReasoning().empty());
+
+    auto reasoning = result.value()->GetReasoning();
+    REQUIRE(reasoning.find("1/1") != std::string::npos);
+    REQUIRE(reasoning.find("0 missed") != std::string::npos);
+}
+
+TEST_CASE("(PR) HGraph Reasoning Multiple Labels Mixed", "[ft][hgraph][reasoning][pr]") {
+    using namespace fixtures;
+
+    HGraphTestIndex::HGraphBuildParam build_param("l2", 16, "fp32");
+    auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+
+    auto index = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+    auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(16, 256, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)
+        ->Dim(dataset->base_->GetDim())
+        ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+        ->Owner(false);
+
+    vsag::SearchRequest req;
+    req.topk_ = 5;
+    req.params_str_ = fmt::format(fixtures::search_param_tmp, 200, false);
+    req.query_ = query;
+
+    auto baseline = index->SearchWithRequest(req);
+    REQUIRE(baseline.has_value());
+    REQUIRE(baseline.value()->GetDim() > 0);
+
+    auto* ids = baseline.value()->GetIds();
+    int64_t found_label = ids[0];
+    int64_t unlikely_label = dataset->base_->GetNumElements() + 99999;
+
+    req.expected_labels_ = {found_label, unlikely_label};
+    auto result = index->SearchWithRequest(req);
+    REQUIRE(result.has_value());
+    REQUIRE_FALSE(result.value()->GetReasoning().empty());
+
+    auto reasoning = result.value()->GetReasoning();
+    REQUIRE(reasoning.find("expected_analysis") != std::string::npos);
+}
+
+TEST_CASE("(PR) HGraph Reasoning Does Not Affect Results", "[ft][hgraph][reasoning][pr]") {
+    using namespace fixtures;
+
+    HGraphTestIndex::HGraphBuildParam build_param("l2", 16, "fp32");
+    auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+
+    auto index = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+    auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(16, 256, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)
+        ->Dim(dataset->base_->GetDim())
+        ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+        ->Owner(false);
+
+    vsag::SearchRequest req_without;
+    req_without.topk_ = 10;
+    req_without.params_str_ = fmt::format(fixtures::search_param_tmp, 200, false);
+    req_without.query_ = query;
+
+    auto result_without = index->SearchWithRequest(req_without);
+    REQUIRE(result_without.has_value());
+    REQUIRE(result_without.value()->GetDim() > 0);
+
+    vsag::SearchRequest req_with;
+    req_with.topk_ = 10;
+    req_with.params_str_ = fmt::format(fixtures::search_param_tmp, 200, false);
+    req_with.query_ = query;
+    req_with.expected_labels_ = {result_without.value()->GetIds()[0]};
+
+    auto result_with = index->SearchWithRequest(req_with);
+    REQUIRE(result_with.has_value());
+    REQUIRE(result_with.value()->GetDim() == result_without.value()->GetDim());
+
+    auto dim_without = result_without.value()->GetDim();
+    for (int64_t i = 0; i < dim_without; ++i) {
+        REQUIRE(result_with.value()->GetIds()[i] == result_without.value()->GetIds()[i]);
+        REQUIRE(result_with.value()->GetDistances()[i] ==
+                result_without.value()->GetDistances()[i]);
+    }
+}
+
+TEST_CASE("(PR) HGraph Reasoning Empty Expected Labels", "[ft][hgraph][reasoning][pr]") {
+    using namespace fixtures;
+
+    HGraphTestIndex::HGraphBuildParam build_param("l2", 16, "fp32");
+    auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+
+    auto index = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+    auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(16, 256, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)
+        ->Dim(dataset->base_->GetDim())
+        ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+        ->Owner(false);
+
+    vsag::SearchRequest req;
+    req.topk_ = 5;
+    req.params_str_ = fmt::format(fixtures::search_param_tmp, 32, false);
+    req.query_ = query;
+    req.expected_labels_ = {};
+
+    auto result = index->SearchWithRequest(req);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() > 0);
+    REQUIRE(result.value()->GetReasoning().find("expected_analysis") == std::string::npos);
+}
+
+TEST_CASE("(PR) HGraph Reasoning Zero Overhead When Disabled", "[ft][hgraph][reasoning][pr]") {
+    using namespace fixtures;
+
+    HGraphTestIndex::HGraphBuildParam build_param("l2", 64, "fp32");
+    auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+
+    auto index = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+    auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(64, 1000, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)
+        ->Dim(dataset->base_->GetDim())
+        ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+        ->Owner(false);
+
+    constexpr int warmup_rounds = 20;
+    constexpr int measure_rounds = 100;
+
+    std::string search_params = fmt::format(fixtures::search_param_tmp, 100, false);
+
+    for (int i = 0; i < warmup_rounds; ++i) {
+        index->KnnSearch(query, 10, search_params, vsag::BitsetPtr(nullptr));
+    }
+
+    auto start_baseline = std::chrono::steady_clock::now();
+    for (int i = 0; i < measure_rounds; ++i) {
+        auto r = index->KnnSearch(query, 10, search_params, vsag::BitsetPtr(nullptr));
+        REQUIRE(r.has_value());
+    }
+    auto end_baseline = std::chrono::steady_clock::now();
+    auto baseline_us =
+        std::chrono::duration_cast<std::chrono::microseconds>(end_baseline - start_baseline)
+            .count();
+
+    vsag::SearchRequest req_no_reasoning;
+    req_no_reasoning.topk_ = 10;
+    req_no_reasoning.params_str_ = search_params;
+    req_no_reasoning.query_ = query;
+    req_no_reasoning.expected_labels_ = {};
+
+    for (int i = 0; i < warmup_rounds; ++i) {
+        index->SearchWithRequest(req_no_reasoning);
+    }
+
+    auto start_no_reasoning = std::chrono::steady_clock::now();
+    for (int i = 0; i < measure_rounds; ++i) {
+        auto r = index->SearchWithRequest(req_no_reasoning);
+        REQUIRE(r.has_value());
+    }
+    auto end_no_reasoning = std::chrono::steady_clock::now();
+    auto no_reasoning_us =
+        std::chrono::duration_cast<std::chrono::microseconds>(end_no_reasoning - start_no_reasoning)
+            .count();
+
+    double ratio =
+        static_cast<double>(no_reasoning_us) / static_cast<double>(std::max(baseline_us, 1L));
+    REQUIRE(ratio < 1.5);
 }
 
 static void
@@ -2839,4 +3049,334 @@ TEST_CASE("HGraph ExportCache + ImportCache + Build miss-only path", "[ft][hgrap
         }
     }
     REQUIRE(found_self);
+}
+
+TEST_CASE("HGraph GetStats reports build cache hit-rate", "[ft][hgraph][cache][pr]") {
+    // Verify that the build-time warm-start hit-rate computed during
+    // build_with_cache() is surfaced through GetStats():
+    //   (1) A normal Build() (no imported cache) reports a skipped_reason.
+    //   (2) A Build() after ImportCache() reports a numeric hit-rate plus the
+    //       hit / missed node counts, and the counts sum to the index size.
+    constexpr int64_t TEST_DIM = 32;
+    constexpr int64_t TEST_COUNT = 200;
+
+    const auto* param = R"(
+    {
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": 32,
+        "index_param": {
+            "base_quantization_type": "fp32",
+            "max_degree": 16,
+            "ef_construction": 50
+        }
+    }
+    )";
+
+    std::mt19937 rng(42);
+    std::uniform_real_distribution<float> dist(-1.0F, 1.0F);
+    std::vector<float> vectors(TEST_DIM * TEST_COUNT);
+    for (auto& v : vectors) {
+        v = dist(rng);
+    }
+    std::vector<int64_t> ids(TEST_COUNT);
+    std::vector<std::string> source_ids(TEST_COUNT);
+    for (int64_t i = 0; i < TEST_COUNT; ++i) {
+        ids[i] = i + 1;
+        source_ids[i] = fmt::format("sid_{}", i);
+    }
+
+    auto make_dataset = [&]() {
+        auto base = vsag::Dataset::Make();
+        base->NumElements(TEST_COUNT)
+            ->Dim(TEST_DIM)
+            ->Ids(ids.data())
+            ->Float32Vectors(vectors.data())
+            ->SourceID(source_ids.data())
+            ->Owner(false);
+        return base;
+    };
+
+    // ---- (1) normal build: hit-rate is skipped ----
+    auto baseline = vsag::Factory::CreateIndex("hgraph", param).value();
+    REQUIRE(baseline->Build(make_dataset()).has_value());
+    auto baseline_stats = baseline->GetStats();
+    INFO(baseline_stats);
+    auto baseline_parsed = vsag::JsonType::Parse(baseline_stats);
+    REQUIRE(baseline_parsed.Contains("build_cache_hit_rate"));
+    // Without an imported cache the rate is not a number but a skipped_reason
+    // object nested under the build_cache_hit_rate key.
+    REQUIRE(baseline_parsed["build_cache_hit_rate"].Contains("skipped_reason"));
+    REQUIRE(baseline_parsed["build_cache_hit_rate"]["skipped_reason"].GetString() ==
+            std::string("index was not built from an imported cache"));
+    REQUIRE_FALSE(baseline_parsed.Contains("build_cache_hit_nodes"));
+    REQUIRE_FALSE(baseline_parsed.Contains("build_cache_missed_nodes"));
+
+    // ---- (2) cache-accelerated build: hit-rate is reported ----
+    std::stringstream cache_buf;
+    REQUIRE(baseline->ExportCache(cache_buf).has_value());
+
+    auto warmed = vsag::Factory::CreateIndex("hgraph", param).value();
+    REQUIRE(warmed->ImportCache(cache_buf).has_value());
+    REQUIRE(warmed->Build(make_dataset()).has_value());
+    REQUIRE(warmed->GetNumElements() == TEST_COUNT);
+
+    auto warmed_stats = warmed->GetStats();
+    INFO(warmed_stats);
+    auto parsed = vsag::JsonType::Parse(warmed_stats);
+    REQUIRE(parsed.Contains("build_cache_hit_rate"));
+    REQUIRE(parsed.Contains("build_cache_hit_nodes"));
+    REQUIRE(parsed.Contains("build_cache_missed_nodes"));
+    const float hit_rate = parsed["build_cache_hit_rate"].GetFloat();
+    REQUIRE(hit_rate >= 0.0F);
+    REQUIRE(hit_rate <= 1.0F);
+    const auto hit_nodes = parsed["build_cache_hit_nodes"].GetInt();
+    const auto missed_nodes = parsed["build_cache_missed_nodes"].GetInt();
+    REQUIRE(hit_nodes + missed_nodes == TEST_COUNT);
+}
+TEST_CASE("HGraph Concurrent Tune and CalDistanceById", "[ft][concurrent][hgraph]") {
+    constexpr uint32_t dim = 64;
+    constexpr uint32_t num_vectors = 1000;
+
+    std::string build_params = R"({
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": 64,
+        "index_param": {
+            "base_quantization_type": "fp32",
+            "max_degree": 32,
+            "ef_construction": 200,
+            "build_thread_count": 0,
+            "store_raw_vector": true
+        }
+    })";
+
+    std::string tune_params = R"({
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": 64,
+        "index_param": {
+            "base_quantization_type": "sq8",
+            "max_degree": 32,
+            "ef_construction": 100,
+            "build_thread_count": 0
+        }
+    })";
+
+    auto seed = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+    std::mt19937 rng(seed);
+    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+
+    std::vector<float> vectors(num_vectors * dim);
+    std::vector<int64_t> ids(num_vectors);
+    for (uint32_t i = 0; i < num_vectors; ++i) {
+        ids[i] = static_cast<int64_t>(i);
+        for (uint32_t j = 0; j < dim; ++j) {
+            vectors[i * dim + j] = dist(rng);
+        }
+    }
+
+    auto base = vsag::Dataset::Make();
+    base->NumElements(num_vectors)
+        ->Dim(dim)
+        ->Ids(ids.data())
+        ->Float32Vectors(vectors.data())
+        ->Owner(false);
+
+    auto index = vsag::Factory::CreateIndex("hgraph", build_params);
+    REQUIRE(index.has_value());
+    REQUIRE(index.value()->Build(base).has_value());
+
+    std::vector<float> query(vectors.begin(), vectors.begin() + dim);
+    std::vector<int64_t> batch_ids = {0, 1, 2};
+
+    std::atomic<bool> stop{false};
+    std::atomic<uint64_t> cal_count{0};
+
+    std::vector<std::thread> readers;
+    for (int i = 0; i < 4; ++i) {
+        readers.emplace_back([&]() {
+            while (!stop.load(std::memory_order_relaxed)) {
+                index.value()->CalDistanceById(query.data(), batch_ids.data(), 3);
+                cal_count.fetch_add(1, std::memory_order_relaxed);
+            }
+        });
+    }
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    auto tune_result = index.value()->Tune(tune_params, true);
+    CHECK(tune_result.has_value());
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    stop.store(true, std::memory_order_relaxed);
+    for (auto& t : readers) {
+        t.join();
+    }
+
+    REQUIRE(cal_count.load() > 0);
+}
+
+TEST_CASE("HGraph Concurrent Tune and CalcDistanceById (single id)", "[ft][concurrent][hgraph]") {
+    constexpr uint32_t dim = 64;
+    constexpr uint32_t num_vectors = 1000;
+
+    std::string build_params = R"({
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": 64,
+        "index_param": {
+            "base_quantization_type": "fp32",
+            "max_degree": 32,
+            "ef_construction": 200,
+            "build_thread_count": 0,
+            "store_raw_vector": true
+        }
+    })";
+
+    std::string tune_params = R"({
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": 64,
+        "index_param": {
+            "base_quantization_type": "sq8",
+            "max_degree": 32,
+            "ef_construction": 100,
+            "build_thread_count": 0
+        }
+    })";
+
+    auto seed = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+    std::mt19937 rng(seed);
+    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+
+    std::vector<float> vectors(num_vectors * dim);
+    std::vector<int64_t> ids(num_vectors);
+    for (uint32_t i = 0; i < num_vectors; ++i) {
+        ids[i] = static_cast<int64_t>(i);
+        for (uint32_t j = 0; j < dim; ++j) {
+            vectors[i * dim + j] = dist(rng);
+        }
+    }
+
+    auto base = vsag::Dataset::Make();
+    base->NumElements(num_vectors)
+        ->Dim(dim)
+        ->Ids(ids.data())
+        ->Float32Vectors(vectors.data())
+        ->Owner(false);
+
+    auto index = vsag::Factory::CreateIndex("hgraph", build_params);
+    REQUIRE(index.has_value());
+    REQUIRE(index.value()->Build(base).has_value());
+
+    std::vector<float> query(vectors.begin(), vectors.begin() + dim);
+
+    std::atomic<bool> stop{false};
+    std::atomic<uint64_t> cal_count{0};
+
+    std::vector<std::thread> readers;
+    for (int i = 0; i < 4; ++i) {
+        readers.emplace_back([&]() {
+            while (!stop.load(std::memory_order_relaxed)) {
+                index.value()->CalcDistanceById(query.data(), 0);
+                cal_count.fetch_add(1, std::memory_order_relaxed);
+            }
+        });
+    }
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    auto tune_result = index.value()->Tune(tune_params, true);
+    CHECK(tune_result.has_value());
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    stop.store(true, std::memory_order_relaxed);
+    for (auto& t : readers) {
+        t.join();
+    }
+
+    REQUIRE(cal_count.load() > 0);
+}
+
+TEST_CASE("HGraph Concurrent Tune(disable_future_tuning=false) and CalDistanceById",
+          "[ft][concurrent][hgraph]") {
+    constexpr uint32_t dim = 64;
+    constexpr uint32_t num_vectors = 1000;
+
+    std::string build_params = R"({
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": 64,
+        "index_param": {
+            "base_quantization_type": "fp32",
+            "max_degree": 32,
+            "ef_construction": 200,
+            "build_thread_count": 0,
+            "store_raw_vector": true
+        }
+    })";
+
+    std::string tune_params = R"({
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": 64,
+        "index_param": {
+            "base_quantization_type": "sq8",
+            "max_degree": 32,
+            "ef_construction": 100,
+            "build_thread_count": 0,
+            "store_raw_vector": true
+        }
+    })";
+
+    auto seed = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+    std::mt19937 rng(seed);
+    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+
+    std::vector<float> vectors(num_vectors * dim);
+    std::vector<int64_t> ids(num_vectors);
+    for (uint32_t i = 0; i < num_vectors; ++i) {
+        ids[i] = static_cast<int64_t>(i);
+        for (uint32_t j = 0; j < dim; ++j) {
+            vectors[i * dim + j] = dist(rng);
+        }
+    }
+
+    auto base = vsag::Dataset::Make();
+    base->NumElements(num_vectors)
+        ->Dim(dim)
+        ->Ids(ids.data())
+        ->Float32Vectors(vectors.data())
+        ->Owner(false);
+
+    auto index = vsag::Factory::CreateIndex("hgraph", build_params);
+    REQUIRE(index.has_value());
+    REQUIRE(index.value()->Build(base).has_value());
+
+    std::vector<float> query(vectors.begin(), vectors.begin() + dim);
+    std::vector<int64_t> batch_ids = {0, 1, 2};
+
+    std::atomic<bool> stop{false};
+    std::atomic<uint64_t> cal_count{0};
+
+    std::vector<std::thread> readers;
+    for (int i = 0; i < 4; ++i) {
+        readers.emplace_back([&]() {
+            while (!stop.load(std::memory_order_relaxed)) {
+                index.value()->CalDistanceById(query.data(), batch_ids.data(), 3);
+                cal_count.fetch_add(1, std::memory_order_relaxed);
+            }
+        });
+    }
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    auto tune_result = index.value()->Tune(tune_params, false);
+    CHECK(tune_result.has_value());
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    stop.store(true, std::memory_order_relaxed);
+    for (auto& t : readers) {
+        t.join();
+    }
+
+    REQUIRE(cal_count.load() > 0);
 }

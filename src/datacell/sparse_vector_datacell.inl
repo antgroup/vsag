@@ -30,7 +30,14 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
     for (int i = 0; i < id_count; ++i) {
         bool need_release{true};
         auto codes = this->GetCodesById(idx[i], need_release);
-        computer->ComputeDist(codes, result_dists + i);
+        try {
+            computer->ComputeDist(codes, result_dists + i);
+        } catch (...) {
+            if (need_release) {
+                this->Release(codes);
+            }
+            throw;
+        }
         if (need_release) {
             this->Release(codes);
         }
@@ -241,17 +248,31 @@ template <typename QuantTmpl, typename IOTmpl>
 float
 SparseVectorDataCell<QuantTmpl, IOTmpl>::ComputePairVectors(InnerIdType id1, InnerIdType id2) {
     std::shared_lock lock(mutex_);
-    bool release1, release2;
-    auto* codes1 = this->GetCodesById(id1, release1);
-    auto* codes2 = this->GetCodesById(id2, release2);
-    auto result = this->quantizer_->Compute(codes1, codes2);
-    if (release1) {
-        this->Release(codes1);
+    bool release1 = false;
+    bool release2 = false;
+    const uint8_t* codes1 = nullptr;
+    const uint8_t* codes2 = nullptr;
+
+    try {
+        codes1 = this->GetCodesById(id1, release1);
+        codes2 = this->GetCodesById(id2, release2);
+        auto result = this->quantizer_->Compute(codes1, codes2);
+        if (release1) {
+            this->Release(codes1);
+        }
+        if (release2) {
+            this->Release(codes2);
+        }
+        return result;
+    } catch (...) {
+        if (codes1 != nullptr && release1) {
+            this->Release(codes1);
+        }
+        if (codes2 != nullptr && release2) {
+            this->Release(codes2);
+        }
+        throw;
     }
-    if (release2) {
-        this->Release(codes2);
-    }
-    return result;
 }
 
 template <typename QuantTmpl, typename IOTmpl>

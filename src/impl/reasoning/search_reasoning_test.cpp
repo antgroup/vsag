@@ -271,4 +271,164 @@ TEST_CASE("ReasoningContext termination reasons are centralized", "[reasoning]")
     REQUIRE(std::string_view(ReasoningContext::kTerminationTimeout) == "timeout");
 }
 
+TEST_CASE("ReasoningContext SetTermination", "[reasoning]") {
+    DefaultAllocator allocator;
+    ReasoningContext ctx(&allocator);
+
+    SECTION("SetTermination stores reason") {
+        REQUIRE(ctx.termination_reason_.empty());
+        ctx.SetTermination(ReasoningContext::kTerminationLowerBoundReached);
+        REQUIRE(ctx.termination_reason_ == "lower_bound_reached");
+    }
+
+    SECTION("SetTermination can be overwritten") {
+        ctx.SetTermination(ReasoningContext::kTerminationHopsLimitReached);
+        REQUIRE(ctx.termination_reason_ == "hops_limit_reached");
+        ctx.SetTermination(ReasoningContext::kTerminationTimeout);
+        REQUIRE(ctx.termination_reason_ == "timeout");
+    }
+}
+
+TEST_CASE("ReasoningContext MarkResult", "[reasoning]") {
+    DefaultAllocator allocator;
+    ReasoningContext ctx(&allocator);
+
+    Vector<int64_t> labels(&allocator);
+    labels.push_back(100);
+    labels.push_back(200);
+    labels.push_back(300);
+
+    UnorderedMap<int64_t, InnerIdType> label_to_inner_id(&allocator);
+    label_to_inner_id[100] = 0;
+    label_to_inner_id[200] = 1;
+    label_to_inner_id[300] = 2;
+
+    ctx.InitializeExpectedTargets(labels, label_to_inner_id);
+
+    SECTION("MarkResult marks matching targets") {
+        Vector<InnerIdType> result_ids(&allocator);
+        result_ids.push_back(0);
+        result_ids.push_back(2);
+        ctx.MarkResult(result_ids);
+
+        REQUIRE(ctx.expected_traces_.find(0).value().was_in_result_set == true);
+        REQUIRE(ctx.expected_traces_.find(1).value().was_in_result_set == false);
+        REQUIRE(ctx.expected_traces_.find(2).value().was_in_result_set == true);
+    }
+
+    SECTION("MarkResult ignores non-expected IDs") {
+        Vector<InnerIdType> result_ids(&allocator);
+        result_ids.push_back(99);
+        result_ids.push_back(0);
+        ctx.MarkResult(result_ids);
+
+        REQUIRE(ctx.expected_traces_.find(0).value().was_in_result_set == true);
+        REQUIRE(ctx.expected_traces_.find(1).value().was_in_result_set == false);
+    }
+}
+
+TEST_CASE("ReasoningContext SetTrueDistance", "[reasoning]") {
+    DefaultAllocator allocator;
+    ReasoningContext ctx(&allocator);
+
+    Vector<int64_t> labels(&allocator);
+    labels.push_back(100);
+
+    UnorderedMap<int64_t, InnerIdType> label_to_inner_id(&allocator);
+    label_to_inner_id[100] = 0;
+
+    ctx.InitializeExpectedTargets(labels, label_to_inner_id);
+
+    SECTION("SetTrueDistance updates expected target") {
+        ctx.SetTrueDistance(0, 1.5F);
+        REQUIRE(ctx.expected_traces_.find(0).value().true_distance == 1.5F);
+    }
+
+    SECTION("SetTrueDistance ignores non-expected ID") {
+        ctx.SetTrueDistance(99, 2.0F);
+        REQUIRE(ctx.expected_traces_.find(0).value().true_distance == 0.0F);
+    }
+}
+
+TEST_CASE("ReasoningContext RecordVisit preserves first distance", "[reasoning]") {
+    DefaultAllocator allocator;
+    ReasoningContext ctx(&allocator);
+
+    Vector<int64_t> labels(&allocator);
+    labels.push_back(100);
+
+    UnorderedMap<int64_t, InnerIdType> label_to_inner_id(&allocator);
+    label_to_inner_id[100] = 0;
+
+    ctx.InitializeExpectedTargets(labels, label_to_inner_id);
+
+    SECTION("Preserves non-zero first distance") {
+        ctx.RecordVisit(0, 0.3F, 1);
+        ctx.RecordVisit(0, 0.5F, 2);
+
+        auto it = ctx.expected_traces_.find(0);
+        REQUIRE(it.value().quantized_distance == 0.3F);
+        REQUIRE(it.value().visited_at_hop == 2);
+    }
+
+    SECTION("Zero distance sentinel: second visit overwrites zero first distance") {
+        // Known limitation: RecordVisit uses 0.0F as sentinel for "not yet set",
+        // so a true zero distance gets overwritten by the next visit.
+        ctx.RecordVisit(0, 0.0F, 1);
+        ctx.RecordVisit(0, 0.5F, 2);
+
+        auto it = ctx.expected_traces_.find(0);
+        REQUIRE(it.value().quantized_distance == 0.5F);
+        REQUIRE(it.value().visited_at_hop == 2);
+    }
+}
+
+TEST_CASE("ReasoningContext RecordEviction preserves earlier visit", "[reasoning]") {
+    DefaultAllocator allocator;
+    ReasoningContext ctx(&allocator);
+
+    Vector<int64_t> labels(&allocator);
+    labels.push_back(100);
+
+    UnorderedMap<int64_t, InnerIdType> label_to_inner_id(&allocator);
+    label_to_inner_id[100] = 0;
+
+    ctx.InitializeExpectedTargets(labels, label_to_inner_id);
+
+    ctx.RecordVisit(0, 0.5F, 1);
+    ctx.RecordEviction(0, 3);
+
+    auto it = ctx.expected_traces_.find(0);
+    REQUIRE(it.value().was_evicted == true);
+    REQUIRE(it.value().visited_at_hop == 1);
+}
+
+TEST_CASE("ReasoningContext GenerateReport found count", "[reasoning]") {
+    DefaultAllocator allocator;
+    ReasoningContext ctx(&allocator);
+
+    Vector<int64_t> labels(&allocator);
+    labels.push_back(100);
+    labels.push_back(200);
+
+    UnorderedMap<int64_t, InnerIdType> label_to_inner_id(&allocator);
+    label_to_inner_id[100] = 0;
+    label_to_inner_id[200] = 1;
+
+    ctx.InitializeExpectedTargets(labels, label_to_inner_id);
+
+    ctx.RecordVisit(0, 0.0F, 1);
+    ctx.RecordVisit(1, 0.1F, 2);
+
+    Vector<InnerIdType> result_ids(&allocator);
+    result_ids.push_back(0);
+    result_ids.push_back(1);
+    ctx.MarkResult(result_ids);
+    ctx.DiagnoseExpectedTargets();
+
+    std::string report = ctx.GenerateReport();
+    REQUIRE(report.find("2/2") != std::string::npos);
+    REQUIRE(report.find("0 missed") != std::string::npos);
+}
+
 }  // namespace vsag

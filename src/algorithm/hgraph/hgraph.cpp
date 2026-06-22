@@ -291,12 +291,19 @@ HGraph::generate_one_route_graph() {
 
 float
 HGraph::CalcDistanceById(const float* query, int64_t id, bool calculate_precise_distance) const {
-    auto flat = this->basic_flatten_codes_;
-    if (has_precise_reorder() && calculate_precise_distance) {
-        flat = this->high_precise_codes_;
-    }
-    if (create_new_raw_vector_ && calculate_precise_distance) {
-        flat = this->raw_vector_;
+    FlattenInterfacePtr flat;
+    {
+        std::shared_lock<std::shared_mutex> lock;
+        if (!this->immutable_.load(std::memory_order_acquire)) {
+            lock = std::shared_lock<std::shared_mutex>(this->global_mutex_);
+        }
+        flat = this->basic_flatten_codes_;
+        if (has_precise_reorder() && calculate_precise_distance) {
+            flat = this->high_precise_codes_;
+        }
+        if (create_new_raw_vector_ && calculate_precise_distance) {
+            flat = this->raw_vector_;
+        }
     }
     return InnerIndexInterface::calc_distance_by_id(query, id, flat);
 }
@@ -306,12 +313,19 @@ HGraph::CalDistanceById(const float* query,
                         const int64_t* ids,
                         int64_t count,
                         bool calculate_precise_distance) const {
-    auto flat = this->basic_flatten_codes_;
-    if (has_precise_reorder() && calculate_precise_distance) {
-        flat = this->high_precise_codes_;
-    }
-    if (create_new_raw_vector_ && calculate_precise_distance) {
-        flat = this->raw_vector_;
+    FlattenInterfacePtr flat;
+    {
+        std::shared_lock<std::shared_mutex> lock;
+        if (!this->immutable_.load(std::memory_order_acquire)) {
+            lock = std::shared_lock<std::shared_mutex>(this->global_mutex_);
+        }
+        flat = this->basic_flatten_codes_;
+        if (has_precise_reorder() && calculate_precise_distance) {
+            flat = this->high_precise_codes_;
+        }
+        if (create_new_raw_vector_ && calculate_precise_distance) {
+            flat = this->raw_vector_;
+        }
     }
     return InnerIndexInterface::cal_distance_by_id(query, ids, count, flat);
 }
@@ -470,6 +484,18 @@ HGraph::GetStats() const {
         fmt::format(R"({{"hgraph": {{"ef_search": {}}}}})", ef_construct_);
     auto analyzer = CreateAnalyzer(this, analyzer_param);
     JsonType stats = analyzer->GetStats();
+    // Build-time cache hit-rate is a transient property of the
+    // build_with_cache() path (taken only after ImportCache()), so it lives on
+    // HGraph rather than in the post-hoc analyzer. A negative rate means this
+    // index was not built from an imported cache.
+    if (this->build_cache_hit_rate_ >= 0.0F) {
+        stats["build_cache_hit_rate"].SetFloat(this->build_cache_hit_rate_);
+        stats["build_cache_hit_nodes"].SetInt(this->build_cache_hit_nodes_);
+        stats["build_cache_missed_nodes"].SetInt(this->build_cache_missed_nodes_);
+    } else {
+        stats["build_cache_hit_rate"]["skipped_reason"].SetString(
+            "index was not built from an imported cache");
+    }
     return stats.Dump(4);
 }
 
@@ -543,6 +569,10 @@ HGraph::check_and_init_raw_vector(const FlattenInterfaceParamPtr& raw_vector_par
 
 bool
 HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) {
+    std::shared_lock<std::shared_mutex> force_remove_rlock;
+    if (this->support_force_remove()) {
+        force_remove_rlock = std::shared_lock<std::shared_mutex>(this->force_remove_mutex_);
+    }
     // check if id exists and get copied base data
     uint32_t inner_id = 0;
     {

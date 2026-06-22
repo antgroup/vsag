@@ -181,6 +181,10 @@ CreateTestDataset(int num_elements = 777,
     for (int i = 0; i < num_elements; ++i) {
         paths[i] = fixtures::create_random_string(false);
     }
+    std::string* source_ids = new std::string[num_elements];
+    for (int i = 0; i < num_elements; ++i) {
+        source_ids[i] = fixtures::create_random_string(false);
+    }
     std::vector<int64_t> ids(num_elements);
 
     std::random_device rd;
@@ -198,6 +202,7 @@ CreateTestDataset(int num_elements = 777,
     base->Dim(dim)
         ->Ids(fixtures::CopyVector(ids, allocator))
         ->Paths(paths)
+        ->SourceID(source_ids)
         ->AttributeSets(attr_sets)
         ->NumElements(num_elements)
         ->Distances(fixtures::CopyVector(distances, allocator))
@@ -260,6 +265,18 @@ EqualDataset(const vsag::DatasetPtr& data1, const vsag::DatasetPtr& data2) {
             }
         }
     } else if (path1 != nullptr || path2 != nullptr) {
+        return false;
+    }
+
+    auto sid1 = data1->GetSourceID();
+    auto sid2 = data2->GetSourceID();
+    if (sid1 != nullptr && sid2 != nullptr) {
+        for (int i = 0; i < num_element; ++i) {
+            if (sid1[i] != sid2[i]) {
+                return false;
+            }
+        }
+    } else if (sid1 != nullptr || sid2 != nullptr) {
         return false;
     }
 
@@ -394,6 +411,9 @@ TEST_CASE("Dataset Copy and Append Test", "[ut][Dataset]") {
             original->GetAttributeSets(), copy->GetAttributeSets(), num_elements));
 
         REQUIRE(ArePathArraysDeepCopied(original->GetPaths(), copy->GetPaths(), num_elements));
+
+        REQUIRE(
+            ArePathArraysDeepCopied(original->GetSourceID(), copy->GetSourceID(), num_elements));
     }
     SECTION("Append") {
         auto copy = original->DeepCopy();
@@ -411,6 +431,7 @@ TEST_CASE("Dataset Copy and Append Test", "[ut][Dataset]") {
             ->Int8Vectors(original->GetInt8Vectors() + num_elements * dim)
             ->Distances(original->GetDistances() + num_elements * dim)
             ->Paths(original->GetPaths() + num_elements)
+            ->SourceID(original->GetSourceID() + num_elements)
             ->AttributeSets(original->GetAttributeSets() + num_elements)
             ->VectorCounts(original->GetVectorCounts() + num_elements)
             ->NumElements(append_num_elements)

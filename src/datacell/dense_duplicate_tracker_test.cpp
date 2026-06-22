@@ -20,6 +20,7 @@
 
 #include "impl/allocator/default_allocator.h"
 #include "unittest.h"
+#include "vsag_exception.h"
 using namespace vsag;
 
 namespace {
@@ -130,4 +131,194 @@ TEST_CASE("DenseDuplicateTracker deserializes legacy format", "[ut][DenseDuplica
     REQUIRE(tracker.GetGroupId(0) == 0);
     REQUIRE(tracker.GetGroupId(2) == 0);
     REQUIRE(tracker.GetGroupId(5) == 4);
+}
+
+TEST_CASE("DenseDuplicateTracker deserialize rejects out-of-range ids",
+          "[ut][DenseDuplicateTracker]") {
+    auto allocator = std::make_shared<DefaultAllocator>();
+
+    SECTION("head_id out of range") {
+        std::stringstream ss;
+        IOStreamWriter writer(ss);
+        size_t duplicate_count = 1;
+        size_t size = 4;
+        StreamWriter::WriteObj(writer, duplicate_count);
+        StreamWriter::WriteObj(writer, size);
+
+        InnerIdType head_id = 10;  // >= size
+        StreamWriter::WriteObj(writer, head_id);
+        std::vector<InnerIdType> id_list{1};
+        StreamWriter::WriteVector(writer, id_list);
+
+        DenseDuplicateTracker tracker(allocator.get());
+        IOStreamReader reader(ss);
+        REQUIRE_THROWS_AS(tracker.Deserialize(reader), VsagException);
+    }
+
+    SECTION("dup_id out of range") {
+        std::stringstream ss;
+        IOStreamWriter writer(ss);
+        size_t duplicate_count = 1;
+        size_t size = 4;
+        StreamWriter::WriteObj(writer, duplicate_count);
+        StreamWriter::WriteObj(writer, size);
+
+        InnerIdType head_id = 0;
+        StreamWriter::WriteObj(writer, head_id);
+        std::vector<InnerIdType> id_list{99};  // >= size
+        StreamWriter::WriteVector(writer, id_list);
+
+        DenseDuplicateTracker tracker(allocator.get());
+        IOStreamReader reader(ss);
+        REQUIRE_THROWS_AS(tracker.Deserialize(reader), VsagException);
+    }
+}
+
+TEST_CASE("DenseDuplicateTracker legacy deserialize rejects out-of-range ids",
+          "[ut][DenseDuplicateTracker]") {
+    auto allocator = std::make_shared<DefaultAllocator>();
+
+    SECTION("id out of range") {
+        std::stringstream ss;
+        IOStreamWriter writer(ss);
+        size_t duplicate_count = 1;
+        StreamWriter::WriteObj(writer, duplicate_count);
+
+        InnerIdType id = 10;  // >= total_size (6)
+        StreamWriter::WriteObj(writer, id);
+        std::vector<InnerIdType> id_list{1};
+        StreamWriter::WriteVector(writer, id_list);
+
+        DenseDuplicateTracker tracker(allocator.get());
+        IOStreamReader reader(ss);
+        REQUIRE_THROWS_AS(tracker.DeserializeFromLegacyFormat(reader, 6), VsagException);
+    }
+
+    SECTION("duplicate_id out of range") {
+        std::stringstream ss;
+        IOStreamWriter writer(ss);
+        size_t duplicate_count = 1;
+        StreamWriter::WriteObj(writer, duplicate_count);
+
+        InnerIdType id = 0;
+        StreamWriter::WriteObj(writer, id);
+        std::vector<InnerIdType> id_list{99};  // >= total_size (6)
+        StreamWriter::WriteVector(writer, id_list);
+
+        DenseDuplicateTracker tracker(allocator.get());
+        IOStreamReader reader(ss);
+        REQUIRE_THROWS_AS(tracker.DeserializeFromLegacyFormat(reader, 6), VsagException);
+    }
+}
+
+TEST_CASE("DenseDuplicateTracker deserialize rejects overlapping groups",
+          "[ut][DenseDuplicateTracker]") {
+    auto allocator = std::make_shared<DefaultAllocator>();
+
+    SECTION("duplicate head_id across groups") {
+        std::stringstream ss;
+        IOStreamWriter writer(ss);
+        size_t duplicate_count = 2;
+        size_t size = 6;
+        StreamWriter::WriteObj(writer, duplicate_count);
+        StreamWriter::WriteObj(writer, size);
+
+        // group 1: head=0, members=[1]
+        InnerIdType head0 = 0;
+        StreamWriter::WriteObj(writer, head0);
+        std::vector<InnerIdType> group0{1};
+        StreamWriter::WriteVector(writer, group0);
+
+        // group 2: head=0 again — should be rejected
+        InnerIdType head1 = 0;
+        StreamWriter::WriteObj(writer, head1);
+        std::vector<InnerIdType> group1{2};
+        StreamWriter::WriteVector(writer, group1);
+
+        DenseDuplicateTracker tracker(allocator.get());
+        IOStreamReader reader(ss);
+        REQUIRE_THROWS_AS(tracker.Deserialize(reader), VsagException);
+    }
+}
+
+TEST_CASE("DenseDuplicateTracker legacy deserialize rejects overlapping groups",
+          "[ut][DenseDuplicateTracker]") {
+    auto allocator = std::make_shared<DefaultAllocator>();
+
+    SECTION("duplicate id across groups") {
+        std::stringstream ss;
+        IOStreamWriter writer(ss);
+        size_t duplicate_count = 2;
+        StreamWriter::WriteObj(writer, duplicate_count);
+
+        InnerIdType id0 = 0;
+        StreamWriter::WriteObj(writer, id0);
+        std::vector<InnerIdType> group0{1};
+        StreamWriter::WriteVector(writer, group0);
+
+        InnerIdType id1 = 0;  // already used
+        StreamWriter::WriteObj(writer, id1);
+        std::vector<InnerIdType> group1{2};
+        StreamWriter::WriteVector(writer, group1);
+
+        DenseDuplicateTracker tracker(allocator.get());
+        IOStreamReader reader(ss);
+        REQUIRE_THROWS_AS(tracker.DeserializeFromLegacyFormat(reader, 6), VsagException);
+    }
+}
+
+TEST_CASE("DenseDuplicateTracker deserialize rejects duplicate member ids",
+          "[ut][DenseDuplicateTracker]") {
+    auto allocator = std::make_shared<DefaultAllocator>();
+
+    SECTION("dup_id already used in another group") {
+        std::stringstream ss;
+        IOStreamWriter writer(ss);
+        size_t duplicate_count = 2;
+        size_t size = 6;
+        StreamWriter::WriteObj(writer, duplicate_count);
+        StreamWriter::WriteObj(writer, size);
+
+        // group 1: head=0, members=[1]
+        InnerIdType head0 = 0;
+        StreamWriter::WriteObj(writer, head0);
+        std::vector<InnerIdType> group0{1};
+        StreamWriter::WriteVector(writer, group0);
+
+        // group 2: head=2, members=[1] — id 1 already used
+        InnerIdType head1 = 2;
+        StreamWriter::WriteObj(writer, head1);
+        std::vector<InnerIdType> group1{1};
+        StreamWriter::WriteVector(writer, group1);
+
+        DenseDuplicateTracker tracker(allocator.get());
+        IOStreamReader reader(ss);
+        REQUIRE_THROWS_AS(tracker.Deserialize(reader), VsagException);
+    }
+}
+
+TEST_CASE("DenseDuplicateTracker legacy deserialize rejects duplicate member ids",
+          "[ut][DenseDuplicateTracker]") {
+    auto allocator = std::make_shared<DefaultAllocator>();
+
+    SECTION("duplicate_id already used in another group") {
+        std::stringstream ss;
+        IOStreamWriter writer(ss);
+        size_t duplicate_count = 2;
+        StreamWriter::WriteObj(writer, duplicate_count);
+
+        InnerIdType id0 = 0;
+        StreamWriter::WriteObj(writer, id0);
+        std::vector<InnerIdType> group0{1};
+        StreamWriter::WriteVector(writer, group0);
+
+        InnerIdType id1 = 2;
+        StreamWriter::WriteObj(writer, id1);
+        std::vector<InnerIdType> group1{1};  // already used
+        StreamWriter::WriteVector(writer, group1);
+
+        DenseDuplicateTracker tracker(allocator.get());
+        IOStreamReader reader(ss);
+        REQUIRE_THROWS_AS(tracker.DeserializeFromLegacyFormat(reader, 6), VsagException);
+    }
 }
