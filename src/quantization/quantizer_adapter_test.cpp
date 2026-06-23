@@ -22,10 +22,18 @@
 
 #include "index_common_param.h"
 #include "metric_type.h"
+#include "quantization/fp32_quantizer_parameter.h"
+#include "quantization/int8_quantizer_parameter.h"
+#include "quantization/product_quantization/pq_fastscan_quantizer_parameter.h"
 #include "quantization/product_quantization/product_quantizer.h"
 #include "quantization/quantizer_parameter.h"
+#include "quantization/rabitq_quantization/rabitq_quantizer_parameter.h"
 #include "quantization/scalar_quantization/half_precision_quantizer.h"
 #include "quantization/scalar_quantization/half_precision_quantizer_parameter.h"
+#include "quantization/scalar_quantization/sq4_uniform_quantizer_parameter.h"
+#include "quantization/scalar_quantization/sq8_uniform_quantizer_parameter.h"
+#include "quantization/sparse_quantization/sparse_quantizer_parameter.h"
+#include "quantization/transform_quantization/transform_quantizer_parameter.h"
 #include "quantizer_adapter_test.h"
 #include "typing.h"
 #include "unittest.h"
@@ -79,25 +87,68 @@ CreateQuantizerParam(const QuantizerType& quantization_type, uint64_t dim) {
             pq_param->FromJson(params);
             return pq_param;
         }
-        // TODO: Implement parameter creation for other quantizer types:
-        // SQ8, SQ4, FP32, FP16, BF16, INT8, PQFS, RABITQ, SPARSE, TQ
+        case QuantizerType::QUANTIZER_TYPE_PQFS: {
+            JsonType params;
+            params[PRODUCT_QUANTIZATION_DIM_KEY].SetInt(dim);
+            auto pqfs_param = std::make_shared<PQFastScanQuantizerParameter>();
+            pqfs_param->FromJson(params);
+            return pqfs_param;
+        }
         case QuantizerType::QUANTIZER_TYPE_SQ8:
-        case QuantizerType::QUANTIZER_TYPE_SQ8_UNIFORM:
+        case QuantizerType::QUANTIZER_TYPE_SQ8_UNIFORM: {
+            // dim is not required for test parameter construction
+            JsonType params;
+            auto sq8_param = std::make_shared<SQ8UniformQuantizerParameter>();
+            sq8_param->FromJson(params);
+            return sq8_param;
+        }
         case QuantizerType::QUANTIZER_TYPE_SQ4:
-        case QuantizerType::QUANTIZER_TYPE_SQ4_UNIFORM:
-        case QuantizerType::QUANTIZER_TYPE_FP32:
-        case QuantizerType::QUANTIZER_TYPE_FP16: {
+        case QuantizerType::QUANTIZER_TYPE_SQ4_UNIFORM: {
+            // dim is not required for test parameter construction
+            JsonType params;
+            auto sq4_param = std::make_shared<SQ4UniformQuantizerParameter>();
+            sq4_param->FromJson(params);
+            return sq4_param;
+        }
+        case QuantizerType::QUANTIZER_TYPE_FP32: {
+            // dim is not required for test parameter construction
+            JsonType params;
+            auto fp32_param = std::make_shared<FP32QuantizerParameter>();
+            fp32_param->FromJson(params);
+            return fp32_param;
+        }
+        case QuantizerType::QUANTIZER_TYPE_FP16:
             return std::make_shared<FP16QuantizerParameter>();
-        }
-        case QuantizerType::QUANTIZER_TYPE_BF16: {
+        case QuantizerType::QUANTIZER_TYPE_BF16:
             return std::make_shared<BF16QuantizerParameter>();
+        case QuantizerType::QUANTIZER_TYPE_INT8: {
+            // dim is not required for test parameter construction
+            JsonType params;
+            auto int8_param = std::make_shared<INT8QuantizerParameter>();
+            int8_param->FromJson(params);
+            return int8_param;
         }
-        case QuantizerType::QUANTIZER_TYPE_INT8:
-        case QuantizerType::QUANTIZER_TYPE_PQFS:
-        case QuantizerType::QUANTIZER_TYPE_RABITQ:
-        case QuantizerType::QUANTIZER_TYPE_SPARSE:
-        case QuantizerType::QUANTIZER_TYPE_TQ:
-            return nullptr;
+        case QuantizerType::QUANTIZER_TYPE_RABITQ: {
+            // dim is not required for test parameter construction
+            JsonType params;
+            auto rabitq_param = std::make_shared<RaBitQuantizerParameter>();
+            rabitq_param->FromJson(params);
+            return rabitq_param;
+        }
+        case QuantizerType::QUANTIZER_TYPE_SPARSE: {
+            // dim is not required for test parameter construction
+            JsonType params;
+            auto sparse_param = std::make_shared<SparseQuantizerParameter>();
+            sparse_param->FromJson(params);
+            return sparse_param;
+        }
+        case QuantizerType::QUANTIZER_TYPE_TQ: {
+            // dim is not required for test parameter construction
+            JsonType params;
+            auto tq_param = std::make_shared<TransformQuantizerParameter>();
+            tq_param->FromJson(params);
+            return tq_param;
+        }
         default:
             return nullptr;
     }
@@ -331,27 +382,20 @@ TestAdapterSerializeAndDeserializeUInt16(QuantizerType quantizer_type,
 }
 
 TEST_CASE("QuantizerAdapter FP16/BF16 Encode and Decode", "[ut][QuantizerAdapter][FP16][BF16]") {
-    for (const auto& config : quantizer_test_configs) {
-        if (config.quantizer_type != QuantizerType::QUANTIZER_TYPE_FP16 &&
-            config.quantizer_type != QuantizerType::QUANTIZER_TYPE_BF16) {
-            continue;
-        }
-        const std::string dtype = (config.quantizer_type == QuantizerType::QUANTIZER_TYPE_FP16)
-                                      ? DATATYPE_FLOAT16
-                                      : DATATYPE_BFLOAT16;
-        for (auto dim : config.dims) {
-            for (auto count : config.counts) {
-                float error = config.error_threshold * config.error_multiplier_encode_decode;
-                if (config.quantizer_type == QuantizerType::QUANTIZER_TYPE_FP16) {
+    for (const auto type :
+         {QuantizerType::QUANTIZER_TYPE_FP16, QuantizerType::QUANTIZER_TYPE_BF16}) {
+        const std::string dtype =
+            (type == QuantizerType::QUANTIZER_TYPE_FP16) ? DATATYPE_FLOAT16 : DATATYPE_BFLOAT16;
+        for (auto dim : dims) {
+            for (auto count : counts) {
+                if (type == QuantizerType::QUANTIZER_TYPE_FP16) {
                     TestQuantizerAdapterEncodeDecodeUInt16<
                         FP16Quantizer<MetricType::METRIC_TYPE_L2SQR>,
-                        MetricType::METRIC_TYPE_L2SQR>(
-                        config.quantizer_type, dim, count, dtype, error);
+                        MetricType::METRIC_TYPE_L2SQR>(type, dim, count, dtype);
                 } else {
                     TestQuantizerAdapterEncodeDecodeUInt16<
                         BF16Quantizer<MetricType::METRIC_TYPE_L2SQR>,
-                        MetricType::METRIC_TYPE_L2SQR>(
-                        config.quantizer_type, dim, count, dtype, error);
+                        MetricType::METRIC_TYPE_L2SQR>(type, dim, count, dtype);
                 }
             }
         }
@@ -359,25 +403,20 @@ TEST_CASE("QuantizerAdapter FP16/BF16 Encode and Decode", "[ut][QuantizerAdapter
 }
 
 TEST_CASE("QuantizerAdapter FP16/BF16 Compute", "[ut][QuantizerAdapter][FP16][BF16]") {
-    for (const auto& config : quantizer_test_configs) {
-        if (config.quantizer_type != QuantizerType::QUANTIZER_TYPE_FP16 &&
-            config.quantizer_type != QuantizerType::QUANTIZER_TYPE_BF16) {
-            continue;
-        }
-        const std::string dtype = (config.quantizer_type == QuantizerType::QUANTIZER_TYPE_FP16)
-                                      ? DATATYPE_FLOAT16
-                                      : DATATYPE_BFLOAT16;
-        for (auto dim : config.dims) {
-            for (auto count : config.counts) {
-                float error = config.error_threshold * config.error_multiplier_compute;
-                if (config.quantizer_type == QuantizerType::QUANTIZER_TYPE_FP16) {
+    for (const auto type :
+         {QuantizerType::QUANTIZER_TYPE_FP16, QuantizerType::QUANTIZER_TYPE_BF16}) {
+        const std::string dtype =
+            (type == QuantizerType::QUANTIZER_TYPE_FP16) ? DATATYPE_FLOAT16 : DATATYPE_BFLOAT16;
+        for (auto dim : dims) {
+            for (auto count : counts) {
+                if (type == QuantizerType::QUANTIZER_TYPE_FP16) {
                     TestQuantizerAdapterComputeUInt16<FP16Quantizer<MetricType::METRIC_TYPE_L2SQR>,
                                                       MetricType::METRIC_TYPE_L2SQR>(
-                        config.quantizer_type, dim, count, dtype, error);
+                        type, dim, count, dtype);
                 } else {
                     TestQuantizerAdapterComputeUInt16<BF16Quantizer<MetricType::METRIC_TYPE_L2SQR>,
                                                       MetricType::METRIC_TYPE_L2SQR>(
-                        config.quantizer_type, dim, count, dtype, error);
+                        type, dim, count, dtype);
                 }
             }
         }
@@ -386,27 +425,20 @@ TEST_CASE("QuantizerAdapter FP16/BF16 Compute", "[ut][QuantizerAdapter][FP16][BF
 
 TEST_CASE("QuantizerAdapter FP16/BF16 Serialize AND Deserialize",
           "[ut][QuantizerAdapter][FP16][BF16]") {
-    for (const auto& config : quantizer_test_configs) {
-        if (config.quantizer_type != QuantizerType::QUANTIZER_TYPE_FP16 &&
-            config.quantizer_type != QuantizerType::QUANTIZER_TYPE_BF16) {
-            continue;
-        }
-        const std::string dtype = (config.quantizer_type == QuantizerType::QUANTIZER_TYPE_FP16)
-                                      ? DATATYPE_FLOAT16
-                                      : DATATYPE_BFLOAT16;
-        for (auto dim : config.dims) {
-            for (auto count : config.counts) {
-                float error = config.error_threshold * config.error_multiplier_serialize;
-                if (config.quantizer_type == QuantizerType::QUANTIZER_TYPE_FP16) {
+    for (const auto type :
+         {QuantizerType::QUANTIZER_TYPE_FP16, QuantizerType::QUANTIZER_TYPE_BF16}) {
+        const std::string dtype =
+            (type == QuantizerType::QUANTIZER_TYPE_FP16) ? DATATYPE_FLOAT16 : DATATYPE_BFLOAT16;
+        for (auto dim : dims) {
+            for (auto count : counts) {
+                if (type == QuantizerType::QUANTIZER_TYPE_FP16) {
                     TestAdapterSerializeAndDeserializeUInt16<
                         FP16Quantizer<MetricType::METRIC_TYPE_L2SQR>,
-                        MetricType::METRIC_TYPE_L2SQR>(
-                        config.quantizer_type, dim, count, dtype, error);
+                        MetricType::METRIC_TYPE_L2SQR>(type, dim, count, dtype);
                 } else {
                     TestAdapterSerializeAndDeserializeUInt16<
                         BF16Quantizer<MetricType::METRIC_TYPE_L2SQR>,
-                        MetricType::METRIC_TYPE_L2SQR>(
-                        config.quantizer_type, dim, count, dtype, error);
+                        MetricType::METRIC_TYPE_L2SQR>(type, dim, count, dtype);
                 }
             }
         }

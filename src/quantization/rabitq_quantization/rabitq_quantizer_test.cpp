@@ -38,6 +38,7 @@ TEST_CASE("RaBitQ Basic Test", "[ut][RaBitQuantizer]") {
             pca_dim = dim / 2;
         }
         if (num_bits_per_dim_query == 4 and num_bits_per_dim_base != 1) {
+            WARN("num_bits_per_dim_query=4 only supports num_bits_per_dim_base=1");
             continue;
         }
         for (auto count : counts) {
@@ -156,6 +157,10 @@ TEST_CASE("RaBitQ Encode and Decode", "[ut][RaBitQuantizer]") {
                 continue;
             }
             if (dim < 900) {
+                WARN(
+                    "RaBitQ encode/decode tests only run on high-dimensional data (dim >= 900), "
+                    "skipping dim="
+                    << dim);
                 continue;
             }
             auto allocator = SafeAllocator::FactoryDefaultAllocator();
@@ -207,7 +212,8 @@ TEST_CASE("RaBitQ Compute", "[ut][RaBitQuantizer]") {
         if (num_bits_per_dim_query == 4) {
             unbounded_related_error_rate = 0.12F;
             if (num_bits_per_dim_base != 1) {
-                continue;  // not support
+                WARN("num_bits_per_dim_query=4 only supports num_bits_per_dim_base=1");
+                continue;
             }
         }
         if (use_fht) {
@@ -299,7 +305,8 @@ TEST_CASE("RaBitQ Serialize and Deserialize", "[ut][RaBitQuantizer]") {
     for (auto count : counts) {
         if (num_bits_per_dim_query == 4) {
             if (num_bits_per_dim_base != 1) {
-                continue;  // not support
+                WARN("num_bits_per_dim_query=4 only supports num_bits_per_dim_base=1");
+                continue;
             }
             unbounded_related_error_rate = 0.15F;
         }
