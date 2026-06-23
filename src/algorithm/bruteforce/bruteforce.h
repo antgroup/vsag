@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,6 +14,8 @@
 
 #pragma once
 
+#include <optional>
+
 #include "algorithm/inner_index_interface.h"
 #include "bruteforce_parameter.h"
 #include "impl/label_table/label_table.h"
@@ -28,7 +29,9 @@ class SafeThreadPool;
 
 DEFINE_POINTER2(AttrInvertedInterface, AttributeInvertedInterface);
 DEFINE_POINTER(FlattenInterface);
-// BruteForce index was introduced since v0.13
+
+// BruteForce index supports both single-vector and multi-vector (WARP-style) modes
+// via FlattenInterface polymorphism (introduced since v0.13)
 class BruteForce : public InnerIndexInterface {
 public:
     static ParamPtr
@@ -70,23 +73,24 @@ public:
 
     [[nodiscard]] IndexType
     GetIndexType() const override {
-        return IndexType::BRUTEFORCE;
+        return is_multi_vector_ ? IndexType::WARP : IndexType::BRUTEFORCE;
     }
 
     std::string
     GetName() const override {
-        return INDEX_BRUTE_FORCE;
+        return is_multi_vector_ ? INDEX_WARP : INDEX_BRUTE_FORCE;
     }
 
     [[nodiscard]] int64_t
     GetNumElements() const override {
-        return static_cast<int64_t>(this->total_count_.load()) -
-               static_cast<int64_t>(this->delete_count_);
+        auto deleted = static_cast<int64_t>(this->delete_count_.load());
+        auto total = static_cast<int64_t>(this->total_count_.load());
+        return total > deleted ? total - deleted : 0;
     }
 
     [[nodiscard]] int64_t
     GetNumberRemoved() const override {
-        return this->delete_count_;
+        return this->delete_count_.load();
     }
 
     void
@@ -135,16 +139,29 @@ private:
     void
     resize(uint64_t new_size);
 
+    std::optional<InnerIdType>
+    claim_slot(int64_t label, const AttributeSet* attr);
+
     void
     add_one(const float* data, InnerIdType inner_id);
 
     void
     cal_memory_usage();
 
+    // Multi-vector mode helpers
+    void
+    train_multi_vector(const DatasetPtr& data);
+
+    std::vector<int64_t>
+    add_multi_vector(const DatasetPtr& data);
+
+    ComputerInterfacePtr
+    make_search_computer(const DatasetPtr& query) const;
+
 private:
     FlattenInterfacePtr inner_codes_{nullptr};
 
-    uint64_t delete_count_{0};
+    std::atomic<uint64_t> delete_count_{0};
 
     uint64_t resize_increase_count_bit_{DEFAULT_RESIZE_BIT};
 
@@ -152,6 +169,8 @@ private:
     mutable std::shared_mutex add_mutex_;
 
     std::atomic<InnerIdType> max_capacity_{0};
+
+    bool is_multi_vector_{false};
 
     static constexpr uint64_t DEFAULT_RESIZE_BIT = 10;
 };

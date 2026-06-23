@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -16,6 +15,7 @@
 #include "bruteforce.h"
 
 #include <atomic>
+#include <cstring>
 #include <mutex>
 #include <optional>
 
@@ -35,19 +35,29 @@
 #include "utils/util_functions.h"
 namespace vsag {
 
+namespace {
+constexpr const char* WARP_MODE_MARKER = "_warp_mode";
+}  // namespace
+
 BruteForce::BruteForce(const BruteForceParameterPtr& param, const IndexCommonParam& common_param)
     : InnerIndexInterface(param, common_param) {
     inner_codes_ = FlattenInterface::MakeInstance(param->base_codes_param, common_param);
+    is_multi_vector_ = (param->base_codes_param->name == MULTI_VECTOR_DATA_CELL);
     auto code_size = this->inner_codes_->code_size_;
-    auto increase_count = Options::Instance().block_size_limit() / code_size;
+    auto increase_count = Options::Instance().block_size_limit() / std::max(code_size, 1U);
     this->resize_increase_count_bit_ = std::max(
         DEFAULT_RESIZE_BIT, static_cast<uint64_t>(log2(static_cast<double>(increase_count))));
     this->use_attribute_filter_ = param->use_attribute_filter;
-    this->has_raw_vector_ = true;
+    this->has_raw_vector_ = !is_multi_vector_;
 }
 
 uint64_t
 BruteForce::EstimateMemory(uint64_t num_elements) const {
+    if (is_multi_vector_) {
+        uint64_t avg_vectors_per_doc = 10;
+        return num_elements * (avg_vectors_per_doc * this->dim_ * sizeof(float) +
+                               sizeof(LabelType) * 2 + sizeof(InnerIdType) + sizeof(uint32_t) * 2);
+    }
     return num_elements *
            (this->dim_ * sizeof(float) + sizeof(LabelType) * 2 + sizeof(InnerIdType));
 }
@@ -59,12 +69,127 @@ BruteForce::Build(const vsag::DatasetPtr& data) {
 }
 
 void
+BruteForce::train_multi_vector(const DatasetPtr& data) {
+    const MultiVector* multi_vectors = data->GetMultiVectors();
+    CHECK_ARGUMENT(multi_vectors != nullptr, "data.multi_vectors is nullptr");
+    int64_t mv_dim = data->GetMultiVectorDim();
+    CHECK_ARGUMENT(
+        mv_dim == dim_,
+        fmt::format("data.multi_vector_dim({}) must be equal to index.dim({})", mv_dim, dim_));
+    int64_t num_elements = data->GetNumElements();
+    uint64_t total_vectors = 0;
+    for (int64_t i = 0; i < num_elements; ++i) {
+        total_vectors += multi_vectors[i].len_;
+    }
+    Vector<float> buffer(total_vectors * mv_dim, allocator_);
+    uint64_t offset = 0;
+    for (int64_t i = 0; i < num_elements; ++i) {
+        uint64_t num_floats = static_cast<uint64_t>(multi_vectors[i].len_) * mv_dim;
+        std::memcpy(buffer.data() + offset, multi_vectors[i].vectors_, num_floats * sizeof(float));
+        offset += num_floats;
+    }
+    this->inner_codes_->Train(buffer.data(), total_vectors);
+}
+
+void
 BruteForce::Train(const DatasetPtr& data) {
-    this->inner_codes_->Train(data->GetFloat32Vectors(), data->GetNumElements());
+    if (is_multi_vector_) {
+        this->train_multi_vector(data);
+    } else {
+        this->inner_codes_->Train(data->GetFloat32Vectors(), data->GetNumElements());
+    }
+}
+
+std::optional<InnerIdType>
+BruteForce::claim_slot(int64_t label, const AttributeSet* attr) {
+    InnerIdType inner_id;
+    {
+        std::scoped_lock add_lock(this->label_lookup_mutex_, this->add_mutex_);
+        if (this->label_table_->CheckLabel(label)) {
+            return std::nullopt;
+        }
+        inner_id = this->total_count_.load();
+        ++this->total_count_;
+        this->resize(total_count_.load());
+        this->label_table_->Insert(inner_id, label);
+    }
+    std::shared_lock global_lock(this->global_mutex_);
+    if (use_attribute_filter_ && attr != nullptr) {
+        this->attr_filter_index_->Insert(*attr, inner_id);
+    }
+    return inner_id;
+}
+
+std::vector<int64_t>
+BruteForce::add_multi_vector(const DatasetPtr& data) {
+    std::vector<int64_t> failed_ids;
+    const MultiVector* multi_vectors = data->GetMultiVectors();
+    CHECK_ARGUMENT(multi_vectors != nullptr, "data.multi_vectors is nullptr");
+    int64_t mv_dim = data->GetMultiVectorDim();
+    CHECK_ARGUMENT(
+        mv_dim == dim_,
+        fmt::format("data.multi_vector_dim({}) must be equal to index.dim({})", mv_dim, dim_));
+
+    {
+        std::lock_guard lock(this->add_mutex_);
+        if (this->total_count_.load() == 0) {
+            this->Train(data);
+        }
+    }
+
+    const int64_t num_elements = data->GetNumElements();
+    const int64_t* labels = data->GetIds();
+    const AttributeSet* attrs = data->GetAttributeSets();
+
+    auto add_func = [&](const MultiVector* mv,
+                        const int64_t label,
+                        const AttributeSet* attr) -> std::optional<int64_t> {
+        auto slot = this->claim_slot(label, attr);
+        if (not slot.has_value()) {
+            return label;
+        }
+        this->inner_codes_->InsertVector(mv, slot.value());
+        return std::nullopt;
+    };
+
+    std::vector<std::future<std::optional<int64_t>>> futures;
+    for (int64_t i = 0; i < num_elements; ++i) {
+        const int64_t label = labels[i];
+        {
+            std::lock_guard label_lock(this->label_lookup_mutex_);
+            if (this->label_table_->CheckLabel(label)) {
+                failed_ids.emplace_back(label);
+                continue;
+            }
+        }
+        if (this->thread_pool_ != nullptr) {
+            auto future = this->thread_pool_->GeneralEnqueue(
+                add_func, &multi_vectors[i], label, attrs == nullptr ? nullptr : attrs + i);
+            futures.emplace_back(std::move(future));
+        } else {
+            if (auto add_res =
+                    add_func(&multi_vectors[i], label, attrs == nullptr ? nullptr : attrs + i);
+                add_res.has_value()) {
+                failed_ids.emplace_back(add_res.value());
+            }
+        }
+    }
+    if (this->thread_pool_ != nullptr) {
+        for (auto& future : futures) {
+            if (auto reply = future.get(); reply.has_value()) {
+                failed_ids.emplace_back(reply.value());
+            }
+        }
+    }
+    return failed_ids;
 }
 
 std::vector<int64_t>
 BruteForce::Add(const DatasetPtr& data, AddMode mode) {
+    if (is_multi_vector_) {
+        return this->add_multi_vector(data);
+    }
+
     std::vector<int64_t> failed_ids;
     auto base_dim = data->GetDim();
     CHECK_ARGUMENT(base_dim == dim_,
@@ -82,23 +207,11 @@ BruteForce::Add(const DatasetPtr& data, AddMode mode) {
                         const int64_t label,
                         const AttributeSet* attr,
                         const char* extra_info) -> std::optional<int64_t> {
-        InnerIdType inner_id;
-        {
-            std::scoped_lock add_lock(this->label_lookup_mutex_, this->add_mutex_);
-            if (this->label_table_->CheckLabel(label)) {
-                return label;
-            }
-            inner_id = this->total_count_.load();
-            ++this->total_count_;
-            this->resize(total_count_.load());
-            this->label_table_->Insert(inner_id, label);
+        auto slot = this->claim_slot(label, attr);
+        if (not slot.has_value()) {
+            return label;
         }
-        std::shared_lock global_lock(this->global_mutex_);
-        if (use_attribute_filter_ && attr != nullptr) {
-            this->attr_filter_index_->Insert(*attr, inner_id);
-        }
-
-        this->add_one(data, inner_id);
+        this->add_one(data, slot.value());
         return std::nullopt;
     };
 
@@ -134,7 +247,6 @@ BruteForce::Add(const DatasetPtr& data, AddMode mode) {
             }
         }
     }
-
     if (this->thread_pool_ != nullptr) {
         for (auto& future : futures) {
             if (auto reply = future.get(); reply.has_value()) {
@@ -147,14 +259,19 @@ BruteForce::Add(const DatasetPtr& data, AddMode mode) {
 
 uint32_t
 BruteForce::Remove(const std::vector<int64_t>& ids, RemoveMode mode) {
-    CHECK_ARGUMENT(not use_attribute_filter_,
-                   "remove is not supported when use_attribute_filter is true");
+    if (is_multi_vector_ && mode != RemoveMode::MARK_REMOVE) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "multi-vector mode only supports MARK_REMOVE");
+    }
+    if (not is_multi_vector_) {
+        CHECK_ARGUMENT(not use_attribute_filter_,
+                       "remove is not supported when use_attribute_filter is true");
+    }
 
-    uint32_t delete_count = 0;
     if (mode == RemoveMode::MARK_REMOVE) {
         std::scoped_lock label_lock(this->label_lookup_mutex_);
-        delete_count = this->label_table_->MarkRemove(ids);
-        delete_count_ += delete_count;
+        uint32_t delete_count = this->label_table_->MarkRemove(ids);
+        delete_count_.fetch_add(delete_count, std::memory_order_relaxed);
         return delete_count;
     }
 
@@ -204,7 +321,8 @@ DatasetPtr
 BruteForce::SearchWithRequest(const SearchRequest& request) const {
     std::shared_lock read_lock(this->global_mutex_);
 
-    auto computer = this->inner_codes_->FactoryComputer(request.query_->GetFloat32Vectors());
+    auto computer = this->make_search_computer(request.query_);
+
     DistHeapPtr heap = nullptr;
     ExecutorPtr executor = nullptr;
     Filter* attr_filter = nullptr;
@@ -229,7 +347,6 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
         cur_heap = DistanceHeap::MakeInstanceBySize<true, true>(this->allocator_, request.topk_);
     }
     auto search_func = [&](InnerIdType start, InnerIdType end, const DistHeapPtr& cur_heap) {
-        float cur_min_dist = std::numeric_limits<float>::max();
         uint32_t dist_cmp_local = 0;
         for (InnerIdType i = start; i < end; ++i) {
             float dist = 0.0F;
@@ -242,7 +359,6 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
                 cur_heap->Push(dist, i);
             }
         }
-
         dist_cmp.fetch_add(dist_cmp_local, std::memory_order_relaxed);
     };
 
@@ -284,8 +400,12 @@ BruteForce::RangeSearch(const vsag::DatasetPtr& query,
                         const vsag::FilterPtr& filter,
                         int64_t limited_size) const {
     std::shared_lock read_lock(this->global_mutex_);
-    auto computer = this->inner_codes_->FactoryComputer(query->GetFloat32Vectors());
-    this->validate_range_args(query, radius, limited_size);
+
+    auto computer = this->make_search_computer(query);
+
+    if (not is_multi_vector_) {
+        this->validate_range_args(query, radius, limited_size);
+    }
     if (limited_size < 0) {
         limited_size = std::numeric_limits<int64_t>::max();
     }
@@ -339,6 +459,16 @@ BruteForce::RangeSearch(const vsag::DatasetPtr& query,
     return this->pack_knn_result(heap);
 }
 
+ComputerInterfacePtr
+BruteForce::make_search_computer(const DatasetPtr& query) const {
+    if (is_multi_vector_) {
+        const MultiVector* query_multi_vectors = query->GetMultiVectors();
+        CHECK_ARGUMENT(query_multi_vectors != nullptr, "query.multi_vectors is nullptr");
+        return this->inner_codes_->FactoryComputer(&query_multi_vectors[0]);
+    }
+    return this->inner_codes_->FactoryComputer(query->GetFloat32Vectors());
+}
+
 float
 BruteForce::CalcDistanceById(const float* vector,
                              int64_t id,
@@ -352,14 +482,6 @@ BruteForce::CalcDistanceById(const float* vector,
 
 void
 BruteForce::Serialize(StreamWriter& writer) const {
-    // FIXME(wxyu): only for testing, remove before merge into the main branch
-    // if (not Options::Instance().new_version()) {
-    //     StreamWriter::WriteObj(writer, dim_);
-    //     StreamWriter::WriteObj(writer, total_count_);
-    //     this->inner_codes_->Serialize(writer);
-    //     this->label_table_->Serialize(writer);
-    //     return;
-    // }
     if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
         this->attr_filter_index_->Serialize(writer);
     }
@@ -370,27 +492,29 @@ BruteForce::Serialize(StreamWriter& writer) const {
     JsonType basic_info;
     basic_info["dim"].SetInt(dim_);
     basic_info["total_count"].SetInt(total_count_.load());
+    basic_info["is_multi_vector"].SetBool(is_multi_vector_);
     basic_info[INDEX_PARAM].SetString(this->create_param_ptr_->ToString());
     write_index_footer(writer, basic_info);
 }
 
 void
 BruteForce::Deserialize(StreamReader& reader) {
-    // try to deserialize footer (only in new version)
     JsonType basic_info;
     bool has_footer = read_index_footer(reader, basic_info);
 
     BufferStreamReader buffer_reader(
         &reader, std::numeric_limits<uint64_t>::max(), this->allocator_);
 
-    if (not has_footer) {  // old format, DON'T EDIT, remove in the future
+    if (not has_footer) {
         logger::debug("parse with v0.13 version format");
 
         StreamReader::ReadObj(buffer_reader, dim_);
         uint64_t count = 0;
         StreamReader::ReadObj(buffer_reader, count);
         total_count_.store(count);
-    } else {  // create like `else if ( ver in [v0.15, v0.17] )` here if need in the future
+        this->inner_codes_->Deserialize(buffer_reader);
+        this->label_table_->Deserialize(buffer_reader);
+    } else {
         logger::debug("parse with new version format");
 
         if (basic_info.Contains(INDEX_PARAM)) {
@@ -409,6 +533,11 @@ BruteForce::Deserialize(StreamReader& reader) {
         dim_ = basic_info["dim"].GetInt();
         total_count_.store(basic_info["total_count"].GetInt());
 
+        if (basic_info.Contains("is_multi_vector")) {
+            is_multi_vector_ = basic_info["is_multi_vector"].GetBool();
+            this->has_raw_vector_ = !is_multi_vector_;
+        }
+
         if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
             this->attr_filter_index_->Deserialize(buffer_reader);
         }
@@ -416,48 +545,57 @@ BruteForce::Deserialize(StreamReader& reader) {
         this->inner_codes_->Deserialize(buffer_reader);
         this->label_table_->Deserialize(buffer_reader);
     }
+    delete_count_.store(label_table_->GetAllDeletedIds().size(), std::memory_order_relaxed);
     this->cal_memory_usage();
 }
 
 void
 BruteForce::InitFeatures() {
-    // About Train
     auto name = this->inner_codes_->GetQuantizerName();
-    if (name != QUANTIZATION_TYPE_VALUE_FP32 and name != QUANTIZATION_TYPE_VALUE_BF16 and
-        name != QUANTIZATION_TYPE_VALUE_FP16) {
-        this->index_feature_list_->SetFeature(IndexFeature::NEED_TRAIN);
+    if (is_multi_vector_) {
+        if (name != QUANTIZATION_TYPE_VALUE_FP32 and name != QUANTIZATION_TYPE_VALUE_BF16) {
+            this->index_feature_list_->SetFeature(IndexFeature::NEED_TRAIN);
+        } else {
+            this->index_feature_list_->SetFeatures(
+                {IndexFeature::SUPPORT_ADD_FROM_EMPTY,
+                 IndexFeature::SUPPORT_RANGE_SEARCH,
+                 IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID,
+                 IndexFeature::SUPPORT_RANGE_SEARCH_WITH_ID_FILTER});
+        }
     } else {
-        this->index_feature_list_->SetFeatures({IndexFeature::SUPPORT_ADD_FROM_EMPTY,
-                                                IndexFeature::SUPPORT_RANGE_SEARCH,
-                                                IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID,
-                                                IndexFeature::SUPPORT_RANGE_SEARCH_WITH_ID_FILTER});
-    }
-    if (name == QUANTIZATION_TYPE_VALUE_FP32 and
-        (metric_ != MetricType::METRIC_TYPE_COSINE || this->inner_codes_->HoldMolds())) {
-        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_RAW_VECTOR_BY_IDS);
+        if (name != QUANTIZATION_TYPE_VALUE_FP32 and name != QUANTIZATION_TYPE_VALUE_BF16 and
+            name != QUANTIZATION_TYPE_VALUE_FP16) {
+            this->index_feature_list_->SetFeature(IndexFeature::NEED_TRAIN);
+        } else {
+            this->index_feature_list_->SetFeatures(
+                {IndexFeature::SUPPORT_ADD_FROM_EMPTY,
+                 IndexFeature::SUPPORT_RANGE_SEARCH,
+                 IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID,
+                 IndexFeature::SUPPORT_RANGE_SEARCH_WITH_ID_FILTER});
+        }
+        if (name == QUANTIZATION_TYPE_VALUE_FP32 and
+            (metric_ != MetricType::METRIC_TYPE_COSINE || this->inner_codes_->HoldMolds())) {
+            this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_RAW_VECTOR_BY_IDS);
+        }
     }
 
-    // add & build & delete
     this->index_feature_list_->SetFeatures({
         IndexFeature::SUPPORT_BUILD,
         IndexFeature::SUPPORT_ADD_AFTER_BUILD,
         IndexFeature::SUPPORT_DELETE_BY_ID,
     });
 
-    // search
     this->index_feature_list_->SetFeatures({
         IndexFeature::SUPPORT_KNN_SEARCH,
         IndexFeature::SUPPORT_KNN_SEARCH_WITH_ID_FILTER,
     });
 
-    // concurrency
     this->index_feature_list_->SetFeatures({
         IndexFeature::SUPPORT_SEARCH_CONCURRENT,
         IndexFeature::SUPPORT_ADD_CONCURRENT,
         IndexFeature::SUPPORT_DELETE_CONCURRENT,
     });
 
-    // serialize
     this->index_feature_list_->SetFeatures({
         IndexFeature::SUPPORT_DESERIALIZE_BINARY_SET,
         IndexFeature::SUPPORT_DESERIALIZE_FILE,
@@ -467,7 +605,6 @@ BruteForce::InitFeatures() {
         IndexFeature::SUPPORT_SERIALIZE_WRITE_FUNC,
     });
 
-    // others
     this->index_feature_list_->SetFeatures({
         IndexFeature::SUPPORT_ESTIMATE_MEMORY,
         IndexFeature::SUPPORT_GET_MEMORY_USAGE,
@@ -519,9 +656,80 @@ static const std::string BRUTE_FORCE_PARAMS_TEMPLATE =
         }
     })";
 
+static const std::string WARP_PARAMS_TEMPLATE =
+    R"(
+    {
+        "{TYPE_KEY}": "{INDEX_BRUTE_FORCE}",
+        "{USE_REORDER_KEY}": false,
+        "{BASE_CODES_KEY}": {
+            "{IO_PARAMS_KEY}": {
+                "{TYPE_KEY}": "{IO_TYPE_VALUE_MEMORY_IO}",
+                "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
+            },
+            "{CODES_TYPE_KEY}": "multi_vector",
+            "{QUANTIZATION_PARAMS_KEY}": {
+                "{TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}"
+            }
+        },
+        "{BUILD_THREAD_COUNT_KEY}": 1,
+        "{USE_ATTRIBUTE_FILTER_KEY}": false,
+        "{ATTR_PARAMS_KEY}": {
+            "{ATTR_HAS_BUCKETS_KEY}": true
+        }
+    })";
+
 ParamPtr
 BruteForce::CheckAndMappingExternalParam(const JsonType& external_param,
                                          const IndexCommonParam& common_param) {
+    // Detect if this is a WARP (multi-vector) index request
+    bool is_warp = external_param.Contains(WARP_MODE_MARKER);
+
+    if (is_warp) {
+        // Remove the marker key before mapping (it would cause "invalid config param" error)
+        JsonType warp_external_param = external_param;
+        warp_external_param.Erase(WARP_MODE_MARKER);
+
+        const ConstParamMap external_mapping = {
+            {
+                BRUTE_FORCE_BASE_QUANTIZATION_TYPE,
+                {
+                    BASE_CODES_KEY,
+                    QUANTIZATION_PARAMS_KEY,
+                    TYPE_KEY,
+                },
+            },
+            {
+                BRUTE_FORCE_BASE_IO_TYPE,
+                {
+                    BASE_CODES_KEY,
+                    IO_PARAMS_KEY,
+                    TYPE_KEY,
+                },
+            },
+            {
+                BRUTE_FORCE_BASE_FILE_PATH,
+                {
+                    BASE_CODES_KEY,
+                    IO_PARAMS_KEY,
+                    IO_FILE_PATH_KEY,
+                },
+            },
+        };
+
+        if (common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                fmt::format("WARP not support {} datatype", DATATYPE_INT8));
+        }
+
+        std::string str = format_map(WARP_PARAMS_TEMPLATE, DEFAULT_MAP);
+        auto inner_json = JsonType::Parse(str);
+        mapping_external_param_to_inner(warp_external_param, external_mapping, inner_json);
+
+        auto brute_force_parameter = std::make_shared<BruteForceParameter>();
+        brute_force_parameter->FromJson(inner_json);
+        return brute_force_parameter;
+    }
+
     const ConstParamMap external_mapping = {
         {
             BRUTE_FORCE_BASE_QUANTIZATION_TYPE,
@@ -645,9 +853,28 @@ BruteForce::add_one(const float* data, InnerIdType inner_id) {
 
 void
 BruteForce::GetVectorByInnerId(InnerIdType inner_id, float* data) const {
-    Vector<uint8_t> codes(inner_codes_->code_size_, allocator_);
-    inner_codes_->GetCodesById(inner_id, codes.data());
-    inner_codes_->Decode(codes.data(), data);
+    if (is_multi_vector_) {
+        bool need_release = false;
+        const uint8_t* codes = inner_codes_->GetCodesById(inner_id, need_release);
+        if (codes == nullptr) {
+            std::memset(data, 0, dim_ * sizeof(float));
+            return;
+        }
+        uint32_t token_count = 0;
+        std::memcpy(&token_count, codes, sizeof(uint32_t));
+        if (token_count > 0) {
+            std::memcpy(data, codes + sizeof(uint32_t), dim_ * sizeof(float));
+        } else {
+            std::memset(data, 0, dim_ * sizeof(float));
+        }
+        if (need_release) {
+            inner_codes_->Release(codes);
+        }
+    } else {
+        Vector<uint8_t> codes(inner_codes_->code_size_, allocator_);
+        inner_codes_->GetCodesById(inner_id, codes.data());
+        inner_codes_->Decode(codes.data(), data);
+    }
 }
 
 void

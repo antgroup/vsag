@@ -20,8 +20,8 @@
 #include <random>
 #include <vector>
 
+#include "algorithm/bruteforce/bruteforce.h"
 #include "algorithm/inner_index_interface.h"
-#include "algorithm/warp/warp.h"
 #include "data_type.h"
 #include "datacell/flatten_datacell_parameter.h"
 #include "framework/test_dataset.h"
