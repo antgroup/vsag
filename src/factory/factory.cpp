@@ -54,7 +54,8 @@ public:
           file_(std::ifstream(filename, std::ios::binary)),
           base_offset_(base_offset),
           size_(size),
-          pool_(std::move(pool)) {
+          pool_(std::move(pool)),
+          valid_(file_.is_open()) {
     }
 
     ~LocalFileReader() override {
@@ -63,9 +64,15 @@ public:
 
     void
     Read(uint64_t offset, uint64_t len, void* dest) override {
+        if (!valid_) {
+            throw std::runtime_error("LocalFileReader: failed to open file: " + filename_);
+        }
         std::lock_guard<std::mutex> lock(mutex_);
         file_.seekg(static_cast<int64_t>(base_offset_ + offset), std::ios::beg);
         file_.read(static_cast<char*>(dest), static_cast<int64_t>(len));
+        if (file_.fail()) {
+            throw std::runtime_error("LocalFileReader: read failed on file: " + filename_);
+        }
     }
 
     void
@@ -81,8 +88,12 @@ public:
                                len,
                                dest,
                                callback]() {
-            this->Read(offset, len, dest);
-            callback(IOErrorCode::IO_SUCCESS, "success");
+            try {
+                this->Read(offset, len, dest);
+                callback(IOErrorCode::IO_SUCCESS, "success");
+            } catch (const std::exception& e) {
+                callback(IOErrorCode::IO_ERROR, e.what());
+            }
         });
     }
 
@@ -98,6 +109,7 @@ private:
     uint64_t size_;
     std::mutex mutex_;
     std::shared_ptr<SafeThreadPool> pool_;
+    bool valid_;
 };
 
 std::shared_ptr<Reader>
