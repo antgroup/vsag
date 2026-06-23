@@ -107,7 +107,8 @@ SINDI::AnalyzeIndexBySearch(const SearchRequest& request) {
 std::vector<int64_t>
 SINDI::Add(const DatasetPtr& base, AddMode mode) {
     std::scoped_lock wlock(this->global_mutex_);
-    CHECK_ARGUMENT(immutable_data_ == nullptr, "immutable SINDI runtime does not support Add");
+    const bool mutable_runtime = not immutable_enabled_ and immutable_data_ == nullptr;
+    CHECK_ARGUMENT(mutable_runtime, "immutable SINDI runtime does not support Add");
     std::vector<int64_t> failed_ids;
 
     auto data_num = base->GetNumElements();
@@ -391,11 +392,9 @@ SINDI::scan_immutable_window_by_mapped_terms(float* dists,
         if (sparse_value_quant_type_ == SparseValueQuantizationType::SQ8) {
             computer->ScanForAccumulate(it, ids, values, term_count, dists);
         } else if (sparse_value_quant_type_ == SparseValueQuantizationType::FP16) {
-            computer->ScanForAccumulateFP16(
-                it, ids, reinterpret_cast<const uint16_t*>(values), term_count, dists);
+            computer->ScanForAccumulateFP16Bytes(it, ids, values, term_count, dists);
         } else {
-            computer->ScanForAccumulate(
-                it, ids, reinterpret_cast<const float*>(values), term_count, dists);
+            computer->ScanForAccumulateFloatBytes(it, ids, values, term_count, dists);
         }
     }
     computer->ResetTerm();
@@ -409,7 +408,15 @@ SINDI::immutable_insert_candidate_into_heap(uint32_t id,
                                             MaxHeap& heap,
                                             uint32_t offset_id,
                                             float radius,
+                                            int range_search_limit_size,
                                             const FilterPtr& filter) const {
+    if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
+        if (range_search_limit_size == 0) {
+            dist = 0;
+            return;
+        }
+    }
+
     if constexpr (type == InnerSearchType::WITH_FILTER) {
 #if __cplusplus >= 202002L
         if (dist > cur_heap_top or not filter->CheckValid(id + offset_id)) [[likely]] {
@@ -435,7 +442,14 @@ SINDI::immutable_insert_candidate_into_heap(uint32_t id,
         cur_heap_top = heap.top().first;
     }
     if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
-        cur_heap_top = radius - 1;
+        if (range_search_limit_size > 0 and
+            heap.size() > static_cast<uint32_t>(range_search_limit_size)) {
+            heap.pop();
+        }
+        cur_heap_top = range_search_limit_size > 0 and
+                               heap.size() == static_cast<uint32_t>(range_search_limit_size)
+                           ? heap.top().first
+                           : radius - 1;
     }
     dist = 0;
 }
@@ -477,6 +491,7 @@ SINDI::immutable_insert_heap_by_mapped_terms(float* dists,
     float cur_heap_top = std::numeric_limits<float>::max();
     auto n_candidate = param.ef;
     auto radius = param.radius;
+    auto range_search_limit_size = param.range_search_limit_size;
     auto filter = param.is_inner_id_allowed;
 
     if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
@@ -507,8 +522,14 @@ SINDI::immutable_insert_heap_by_mapped_terms(float* dists,
 
         for (; i < term_count; ++i) {
             id = ids[i];
-            immutable_insert_candidate_into_heap<mode, type>(
-                id, dists[id], cur_heap_top, heap, offset_id, radius, filter);
+            immutable_insert_candidate_into_heap<mode, type>(id,
+                                                             dists[id],
+                                                             cur_heap_top,
+                                                             heap,
+                                                             offset_id,
+                                                             radius,
+                                                             range_search_limit_size,
+                                                             filter);
         }
     }
 }
@@ -523,6 +544,7 @@ SINDI::immutable_insert_heap_by_dists(float* dists,
     float cur_heap_top = std::numeric_limits<float>::max();
     auto n_candidate = param.ef;
     auto radius = param.radius;
+    auto range_search_limit_size = param.range_search_limit_size;
     auto filter = param.is_inner_id_allowed;
 
     if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
@@ -544,7 +566,7 @@ SINDI::immutable_insert_heap_by_dists(float* dists,
 
     for (; id < dists_size; ++id) {
         immutable_insert_candidate_into_heap<mode, type>(
-            id, dists[id], cur_heap_top, heap, offset_id, radius, filter);
+            id, dists[id], cur_heap_top, heap, offset_id, radius, range_search_limit_size, filter);
     }
 }
 
@@ -569,6 +591,7 @@ SINDI::immutable_search_impl(const SparseTermComputerPtr& computer,
         const auto& window = immutable_data_->windows[static_cast<uint32_t>(cur)];
         const auto window_start_id = static_cast<uint32_t>(cur) * window_size_;
         map_immutable_query_terms(window, computer, mapped_terms);
+        std::fill(dists.begin(), dists.end(), 0.0F);
         scan_immutable_window_by_mapped_terms(dists.data(), window, computer, mapped_terms);
 
         if (use_term_lists_heap_insert) {
@@ -605,7 +628,7 @@ SINDI::immutable_search_impl(const SparseTermComputerPtr& computer,
     if (use_reorder_) {
         float cur_heap_top = std::numeric_limits<float>::max();
         auto candidate_size = heap.size();
-        auto high_precise_heap = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
+        auto high_precise_heap = std::make_shared<StandardHeap<true, false>>(allocator, -1);
         auto [sorted_ids, sorted_vals] = rerank_flat_index_->sort_sparse_vector(
             original_query ? *original_query : computer->raw_query_);
         for (auto i = 0; i < candidate_size; i++) {
@@ -858,8 +881,8 @@ SINDI::cal_memory_usage() {
 void
 SINDI::Serialize(StreamWriter& writer) const {
     std::shared_lock rlock(this->global_mutex_);
-    CHECK_ARGUMENT(immutable_data_ == nullptr,
-                   "immutable SINDI runtime does not support Serialize");
+    const bool mutable_runtime = not immutable_enabled_ and immutable_data_ == nullptr;
+    CHECK_ARGUMENT(mutable_runtime, "immutable SINDI runtime does not support Serialize");
 
     StreamWriter::WriteObj(writer, cur_element_count_);
 
@@ -974,6 +997,8 @@ void
 SINDI::deserialize_immutable_window(StreamReader& reader_ref, ImmutableSINDIWindow& window) const {
     uint32_t term_capacity = 0;
     StreamReader::ReadObj(reader_ref, term_capacity);
+    CHECK_ARGUMENT(term_capacity <= static_cast<uint64_t>(term_id_limit_) * 2,
+                   "immutable SINDI term capacity exceeds capacity bound");
     const auto value_code_size = sparse_value_code_size(sparse_value_quant_type_);
 
     Vector<uint32_t> ids_buffer(allocator_);
@@ -989,6 +1014,8 @@ SINDI::deserialize_immutable_window(StreamReader& reader_ref, ImmutableSINDIWind
     for (uint32_t term = 0; term < term_capacity; ++term) {
         uint64_t posting_count = 0;
         StreamReader::ReadObj(reader_ref, posting_count);
+        CHECK_ARGUMENT(posting_count <= window_size_,
+                       "immutable SINDI posting count exceeds window size");
         CHECK_ARGUMENT(posting_count <= std::numeric_limits<uint32_t>::max(),
                        "immutable SINDI posting count overflows uint32_t");
         ids_buffer.resize(posting_count);
@@ -1034,6 +1061,10 @@ SINDI::deserialize_immutable_window(StreamReader& reader_ref, ImmutableSINDIWind
             if (ids_buffer[i] > std::numeric_limits<uint16_t>::max()) {
                 throw VsagException(ErrorType::INVALID_ARGUMENT,
                                     "immutable SINDI window-local doc id overflows uint16_t");
+            }
+            if (ids_buffer[i] >= window_size_) {
+                throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                    "immutable SINDI window-local doc id exceeds window size");
             }
             window.id_payloads[old_id_size + i] = static_cast<uint16_t>(ids_buffer[i]);
         }

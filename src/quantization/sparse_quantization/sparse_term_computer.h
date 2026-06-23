@@ -16,6 +16,7 @@
 #pragma once
 
 #include <cstdint>
+#include <cstring>
 #include <memory>
 
 #include "algorithm/sindi/sindi_parameter.h"
@@ -94,6 +95,36 @@ public:
         }
     }
 
+    void
+    ScanForAccumulateFP16Bytes(uint32_t term_iterator,
+                               const uint16_t* term_ids,
+                               const uint8_t* term_datas,
+                               uint32_t term_count,
+                               float* global_dists) {
+        float query_val = sorted_query_[term_iterator].second;
+        for (uint32_t i = 0; i < term_count; i++) {
+            uint16_t value = 0;
+            std::memcpy(
+                &value, term_datas + static_cast<uint64_t>(i) * sizeof(value), sizeof(value));
+            global_dists[term_ids[i]] += query_val * generic::FP16ToFloat(value);
+        }
+    }
+
+    void
+    ScanForAccumulateFloatBytes(uint32_t term_iterator,
+                                const uint16_t* term_ids,
+                                const uint8_t* term_datas,
+                                uint32_t term_count,
+                                float* global_dists) {
+        float query_val = sorted_query_[term_iterator].second;
+        for (uint32_t i = 0; i < term_count; i++) {
+            float value = 0.0F;
+            std::memcpy(
+                &value, term_datas + static_cast<uint64_t>(i) * sizeof(value), sizeof(value));
+            global_dists[term_ids[i]] += query_val * value;
+        }
+    }
+
     inline void
     ScanForCalculateDist(uint32_t term_iterator,
                          const uint16_t* term_ids,
@@ -106,6 +137,46 @@ public:
         for (auto i = 0; i < term_count; i++) {
             if (term_ids[i] == target_id) {
                 *dist += query_val * term_datas[i];
+                break;
+            }
+        }
+    }
+
+    inline void
+    ScanForCalculateDistFP16Bytes(uint32_t term_iterator,
+                                  const uint16_t* term_ids,
+                                  const uint8_t* term_datas,
+                                  uint32_t term_count,
+                                  uint16_t target_id,
+                                  float* dist) {
+        float query_val = sorted_query_[term_iterator].second;
+
+        for (uint32_t i = 0; i < term_count; i++) {
+            if (term_ids[i] == target_id) {
+                uint16_t value = 0;
+                std::memcpy(
+                    &value, term_datas + static_cast<uint64_t>(i) * sizeof(value), sizeof(value));
+                *dist += query_val * generic::FP16ToFloat(value);
+                break;
+            }
+        }
+    }
+
+    inline void
+    ScanForCalculateDistFloatBytes(uint32_t term_iterator,
+                                   const uint16_t* term_ids,
+                                   const uint8_t* term_datas,
+                                   uint32_t term_count,
+                                   uint16_t target_id,
+                                   float* dist) {
+        float query_val = sorted_query_[term_iterator].second;
+
+        for (uint32_t i = 0; i < term_count; i++) {
+            if (term_ids[i] == target_id) {
+                float value = 0.0F;
+                std::memcpy(
+                    &value, term_datas + static_cast<uint64_t>(i) * sizeof(value), sizeof(value));
+                *dist += query_val * value;
                 break;
             }
         }

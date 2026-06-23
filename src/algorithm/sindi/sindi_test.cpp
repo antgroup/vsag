@@ -460,6 +460,19 @@ TEST_CASE("SINDI Immutable Deserialize KNN Test", "[ut][SINDI]") {
             REQUIRE(std::abs(immutable_range_result->GetDistances()[j] -
                              source_range_result->GetDistances()[j]) < 1e-3);
         }
+
+        constexpr int64_t range_limit = 3;
+        auto limited_source_range_result =
+            source->RangeSearch(query, 0.0F, search_param_str, nullptr, range_limit);
+        auto limited_immutable_range_result =
+            immutable->RangeSearch(query, 0.0F, search_param_str, nullptr, range_limit);
+        REQUIRE(limited_immutable_range_result->GetDim() == limited_source_range_result->GetDim());
+        for (int64_t j = 0; j < limited_immutable_range_result->GetDim(); ++j) {
+            REQUIRE(limited_immutable_range_result->GetIds()[j] ==
+                    limited_source_range_result->GetIds()[j]);
+            REQUIRE(std::abs(limited_immutable_range_result->GetDistances()[j] -
+                             limited_source_range_result->GetDistances()[j]) < 1e-3);
+        }
     }
 
     REQUIRE_THROWS(immutable->GetSparseVectorByInnerId(0, nullptr, allocator.get()));
@@ -469,6 +482,31 @@ TEST_CASE("SINDI Immutable Deserialize KNN Test", "[ut][SINDI]") {
         delete[] item.vals_;
         delete[] item.ids_;
     }
+}
+
+TEST_CASE("SINDI Immutable Runtime Rejects Mutable Operations", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+
+    auto param = std::make_shared<vsag::SINDIParameter>();
+    param->FromJson(vsag::JsonType::Parse(R"({
+        "use_reorder": false,
+        "use_quantization": false,
+        "doc_prune_ratio": 0.0,
+        "window_size": 10000,
+        "term_id_limit": 100,
+        "avg_doc_term_length": 10,
+        "immutable": true
+    })"));
+
+    SINDI index(param, common_param);
+    auto empty_base = vsag::Dataset::Make();
+    REQUIRE_THROWS_AS(index.Add(empty_base), vsag::VsagException);
+
+    std::stringstream ss;
+    vsag::IOStreamWriter writer(ss);
+    REQUIRE_THROWS_AS(index.Serialize(writer), vsag::VsagException);
 }
 
 TEST_CASE("SINDI Remap Basic Test", "[ut][SINDI]") {

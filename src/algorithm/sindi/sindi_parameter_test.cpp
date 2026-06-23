@@ -165,6 +165,12 @@ TEST_CASE("SINDI use_quantization Parameter", "[ut][SINDIParameter]") {
         REQUIRE(param->sparse_value_quant_type == SparseValueQuantizationType::FP16);
         REQUIRE(param->ToJson()["use_quantization"].GetString() == QUANTIZATION_TYPE_VALUE_FP16);
     }
+
+    SECTION("unexpected type throws clear argument error") {
+        auto param = std::make_shared<vsag::SINDIParameter>();
+        REQUIRE_THROWS_AS(param->FromString(R"({"term_id_limit":1000,"use_quantization":1})"),
+                          vsag::VsagException);
+    }
 }
 
 TEST_CASE("SINDI term_id_limit upper bound", "[ut][SINDIParameter]") {

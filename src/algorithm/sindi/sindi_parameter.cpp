@@ -19,12 +19,6 @@
 #include "utils/param_compat_macros.h"
 
 namespace vsag {
-namespace {
-
-constexpr const char* USE_QUANTIZATION = "use_quantization";
-
-}  // namespace
-
 std::string
 SparseValueQuantizationTypeToString(SparseValueQuantizationType type) {
     switch (type) {
@@ -85,8 +79,12 @@ SINDIParameter::FromJson(const JsonType& json) {
         auto use_quantization = json[USE_QUANTIZATION];
         if (use_quantization.IsString()) {
             sparse_value_quant_type = parse_sparse_value_quant_type(use_quantization.GetString());
-        } else if (use_quantization.GetBool()) {
-            sparse_value_quant_type = SparseValueQuantizationType::SQ8;
+        } else {
+            CHECK_ARGUMENT(use_quantization.IsBool(),
+                           "use_quantization must be false, true, or fp16");
+            if (use_quantization.GetBool()) {
+                sparse_value_quant_type = SparseValueQuantizationType::SQ8;
+            }
         }
     }
 

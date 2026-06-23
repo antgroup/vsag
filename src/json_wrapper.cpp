@@ -97,6 +97,11 @@ JsonWrapper::IsString() const {
 }
 
 bool
+JsonWrapper::IsBool() const {
+    return json_->is_boolean();
+}
+
+bool
 JsonWrapper::IsDiscarded() const {
     return json_->is_discarded();
 }

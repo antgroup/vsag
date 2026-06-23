@@ -306,19 +306,17 @@ SINDIAnalyzer::collect_doc_prune_candidates(const SparseVector& query,
                                             term_size,
                                             dists.data());
             } else if (term_list->sparse_value_quant_type_ == SparseValueQuantizationType::FP16) {
-                computer->ScanForAccumulateFP16(
-                    term_idx,
-                    term_list->term_ids_[term]->data(),
-                    reinterpret_cast<const uint16_t*>(term_list->term_datas_[term]->data()),
-                    term_size,
-                    dists.data());
+                computer->ScanForAccumulateFP16Bytes(term_idx,
+                                                     term_list->term_ids_[term]->data(),
+                                                     term_list->term_datas_[term]->data(),
+                                                     term_size,
+                                                     dists.data());
             } else {
-                computer->ScanForAccumulate(
-                    term_idx,
-                    term_list->term_ids_[term]->data(),
-                    reinterpret_cast<const float*>(term_list->term_datas_[term]->data()),
-                    term_size,
-                    dists.data());
+                computer->ScanForAccumulateFloatBytes(term_idx,
+                                                      term_list->term_ids_[term]->data(),
+                                                      term_list->term_datas_[term]->data(),
+                                                      term_size,
+                                                      dists.data());
             }
         }
         computer->ResetTerm();
@@ -1186,7 +1184,10 @@ SINDIAnalyzer::GetStats() {
 
     JsonType stats;
     stats["total_count"].SetInt(static_cast<uint64_t>(sindi_->cur_element_count_));
-    stats["window_count"].SetInt(static_cast<uint64_t>(sindi_->window_term_list_.size()));
+    const auto window_count = sindi_->immutable_data_ == nullptr
+                                  ? sindi_->window_term_list_.size()
+                                  : sindi_->immutable_data_->windows.size();
+    stats["window_count"].SetInt(static_cast<uint64_t>(window_count));
     stats["active_term_count"].SetJson(get_active_term_count_stats());
     stats["posting_length_distribution"].SetJson(get_posting_length_distribution_stats());
     if (is_sq8_value_quantization(sindi_->sparse_value_quant_type_)) {

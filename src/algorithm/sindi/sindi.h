@@ -15,11 +15,12 @@
 
 #pragma once
 
+#include <optional>
+
 #include "algorithm/inner_index_interface.h"
 #include "algorithm/sindi/term_id_mapper.h"
 #include "algorithm/sparse_index/sparse_index.h"
 #include "datacell/sparse_term_datacell.h"
-#include "hash_types.h"
 #include "vsag/allocator.h"
 
 namespace vsag {
@@ -213,6 +214,7 @@ private:
                                          MaxHeap& heap,
                                          uint32_t offset_id,
                                          float radius,
+                                         int range_search_limit_size,
                                          const FilterPtr& filter) const;
 
     template <InnerSearchType type>

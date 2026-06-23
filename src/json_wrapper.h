@@ -47,6 +47,9 @@ public:
     IsString() const;
 
     bool
+    IsBool() const;
+
+    bool
     IsDiscarded() const;
 
     bool

@@ -15,6 +15,8 @@
 
 #include "sparse_term_datacell.h"
 
+#include <cstring>
+
 #include "simd/fp16_simd.h"
 #include "utils/util_functions.h"
 #include "vsag/allocator.h"
@@ -45,18 +47,11 @@ SparseTermDataCell::Query(float* global_dists, const SparseTermComputerPtr& comp
             computer->ScanForAccumulate(
                 it, term_ids_[term]->data(), term_datas_[term]->data(), term_size, global_dists);
         } else if (sparse_value_quant_type_ == SparseValueQuantizationType::FP16) {
-            computer->ScanForAccumulateFP16(
-                it,
-                term_ids_[term]->data(),
-                reinterpret_cast<const uint16_t*>(term_datas_[term]->data()),
-                term_size,
-                global_dists);
+            computer->ScanForAccumulateFP16Bytes(
+                it, term_ids_[term]->data(), term_datas_[term]->data(), term_size, global_dists);
         } else {
-            computer->ScanForAccumulate(it,
-                                        term_ids_[term]->data(),
-                                        reinterpret_cast<const float*>(term_datas_[term]->data()),
-                                        term_size,
-                                        global_dists);
+            computer->ScanForAccumulateFloatBytes(
+                it, term_ids_[term]->data(), term_datas_[term]->data(), term_size, global_dists);
         }
     }
     computer->ResetTerm();
@@ -278,11 +273,12 @@ SparseTermDataCell::InsertVector(const SparseVector& sparse_base, uint16_t base_
         } else if (sparse_value_quant_type_ == SparseValueQuantizationType::FP16) {
             auto old_size = data_vec.size();
             data_vec.resize(old_size + sizeof(uint16_t));
-            *reinterpret_cast<uint16_t*>(data_vec.data() + old_size) = generic::FloatToFP16(val);
+            auto fp16_value = generic::FloatToFP16(val);
+            std::memcpy(data_vec.data() + old_size, &fp16_value, sizeof(fp16_value));
         } else {
             auto old_size = data_vec.size();
             data_vec.resize(old_size + sizeof(float));
-            *reinterpret_cast<float*>(data_vec.data() + old_size) = val;
+            std::memcpy(data_vec.data() + old_size, &val, sizeof(val));
         }
 
         term_sizes_[term] += 1;
@@ -337,26 +333,27 @@ SparseTermDataCell::CalcDistanceByInnerId(const SparseTermComputerPtr& computer,
             continue;
         }
 
-        // Dequantize
-        const float* vals = nullptr;
         auto size = term_sizes_[term];
         if (sparse_value_quant_type_ == SparseValueQuantizationType::SQ8) {
             temp_data.resize(size);
             Decode(term_datas_[term]->data(), size, temp_data.data());
-            vals = temp_data.data();
+            computer->ScanForCalculateDist(
+                it, term_ids_[term]->data(), temp_data.data(), term_sizes_[term], base_id, &ip);
         } else if (sparse_value_quant_type_ == SparseValueQuantizationType::FP16) {
-            temp_data.resize(size);
-            const auto* fp16_vals = reinterpret_cast<const uint16_t*>(term_datas_[term]->data());
-            for (uint64_t i = 0; i < size; ++i) {
-                temp_data[i] = generic::FP16ToFloat(fp16_vals[i]);
-            }
-            vals = temp_data.data();
+            computer->ScanForCalculateDistFP16Bytes(it,
+                                                    term_ids_[term]->data(),
+                                                    term_datas_[term]->data(),
+                                                    term_sizes_[term],
+                                                    base_id,
+                                                    &ip);
         } else {
-            vals = reinterpret_cast<const float*>(term_datas_[term]->data());
+            computer->ScanForCalculateDistFloatBytes(it,
+                                                     term_ids_[term]->data(),
+                                                     term_datas_[term]->data(),
+                                                     term_sizes_[term],
+                                                     base_id,
+                                                     &ip);
         }
-
-        computer->ScanForCalculateDist(
-            it, term_ids_[term]->data(), vals, term_sizes_[term], base_id, &ip);
     }
     computer->ResetTerm();
     return 1 + ip;
@@ -403,10 +400,16 @@ SparseTermDataCell::GetSparseVector(uint32_t base_id,
                 if (sparse_value_quant_type_ == SparseValueQuantizationType::SQ8) {
                     Decode(term_datas_[term]->data() + i, 1, &v);
                 } else if (sparse_value_quant_type_ == SparseValueQuantizationType::FP16) {
-                    v = generic::FP16ToFloat(
-                        reinterpret_cast<const uint16_t*>(term_datas_[term]->data())[i]);
+                    uint16_t fp16_value = 0;
+                    std::memcpy(
+                        &fp16_value,
+                        term_datas_[term]->data() + static_cast<uint64_t>(i) * sizeof(fp16_value),
+                        sizeof(fp16_value));
+                    v = generic::FP16ToFloat(fp16_value);
                 } else {
-                    v = reinterpret_cast<float*>(term_datas_[term]->data())[i];
+                    std::memcpy(&v,
+                                term_datas_[term]->data() + static_cast<uint64_t>(i) * sizeof(v),
+                                sizeof(v));
                 }
                 vals.push_back(v);
             }
