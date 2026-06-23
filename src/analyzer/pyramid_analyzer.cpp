@@ -30,57 +30,55 @@ namespace vsag {
 JsonType
 PyramidAnalyzer::GetStats() {
     JsonType stats;
+    stats["total_count"].SetInt(this->total_count_);
 
-    auto start = std::chrono::steady_clock::now();
-    stats["index_node_structure"].SetJson(get_index_node_structure());
-    auto end = std::chrono::steady_clock::now();
-    logger::info("[PyramidAnalyzer] get_index_node_structure: {}ms",
-                 std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count());
-
-    start = std::chrono::steady_clock::now();
-    stats["leaf_node_size_distribution"].SetJson(get_leaf_node_size_distribution());
-    end = std::chrono::steady_clock::now();
-    logger::info("[PyramidAnalyzer] get_leaf_node_size_distribution: {}ms",
-                 std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count());
-
-    start = std::chrono::steady_clock::now();
-    stats["subindex_quality"].SetJson(get_subindex_quality());
-    end = std::chrono::steady_clock::now();
-    logger::info("[PyramidAnalyzer] get_subindex_quality: {}ms",
-                 std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count());
-
-    start = std::chrono::steady_clock::now();
     sample_global();
-    end = std::chrono::steady_clock::now();
-    logger::info("[PyramidAnalyzer] sample_global: {}ms",
-                 std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count());
 
-    if (not sample_ids_.empty()) {
-        if (not search_params_.empty()) {
-            start = std::chrono::steady_clock::now();
-            auto recall_stats = get_graph_node_recall_stats(search_params_);
-            end = std::chrono::steady_clock::now();
-            logger::info(
-                "[PyramidAnalyzer] get_graph_node_recall_stats: {}ms",
-                std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count());
+    auto analyze_one_hierarchy = [&](IndexNode* root) -> JsonType {
+        JsonType h_stats;
+        h_stats["index_node_structure"].SetJson(get_index_node_structure(root));
+        h_stats["leaf_node_size_distribution"].SetJson(get_leaf_node_size_distribution(root));
+        h_stats["subindex_quality"].SetJson(get_subindex_quality(root));
 
-            stats["recall_base"].SetFloat(recall_stats["weighted_recall"].GetFloat());
-            stats["graph_node_count"].SetInt(recall_stats["node_count"].GetInt());
-            stats["total_graph_size"].SetInt(recall_stats["total_size"].GetInt());
-            stats["skipped_node_count"].SetInt(recall_stats["skipped_node_count"].GetInt());
+        if (not sample_ids_.empty() && not search_params_.empty()) {
+            auto recall_stats = get_graph_node_recall_stats(root, search_params_);
+            h_stats["recall_base"].SetFloat(recall_stats["weighted_recall"].GetFloat());
+            h_stats["graph_node_count"].SetInt(recall_stats["node_count"].GetInt());
+            h_stats["total_graph_size"].SetInt(recall_stats["total_size"].GetInt());
+            h_stats["skipped_node_count"].SetInt(recall_stats["skipped_node_count"].GetInt());
             if (recall_stats.Contains("low_recall_nodes")) {
-                stats["low_recall_nodes"].SetJson(recall_stats["low_recall_nodes"]);
+                h_stats["low_recall_nodes"].SetJson(recall_stats["low_recall_nodes"]);
             }
         }
+
+        h_stats["duplicate_ratio"].SetFloat(GetDuplicateRatio(root));
+        return h_stats;
+    };
+
+    if (pyramid_->hierarchies_.size() == 1 && pyramid_->hierarchies_.begin()->first.empty()) {
+        auto* root = pyramid_->hierarchies_.begin()->second->root.get();
+        auto h_stats = analyze_one_hierarchy(root);
+        stats["index_node_structure"].SetJson(h_stats["index_node_structure"]);
+        stats["leaf_node_size_distribution"].SetJson(h_stats["leaf_node_size_distribution"]);
+        stats["subindex_quality"].SetJson(h_stats["subindex_quality"]);
+        if (h_stats.Contains("recall_base")) {
+            stats["recall_base"].SetFloat(h_stats["recall_base"].GetFloat());
+            stats["graph_node_count"].SetInt(h_stats["graph_node_count"].GetInt());
+            stats["total_graph_size"].SetInt(h_stats["total_graph_size"].GetInt());
+            stats["skipped_node_count"].SetInt(h_stats["skipped_node_count"].GetInt());
+            if (h_stats.Contains("low_recall_nodes")) {
+                stats["low_recall_nodes"].SetJson(h_stats["low_recall_nodes"]);
+            }
+        }
+        stats["duplicate_ratio"].SetFloat(h_stats["duplicate_ratio"].GetFloat());
+    } else {
+        stats["hierarchy_count"].SetInt(static_cast<int64_t>(pyramid_->hierarchies_.size()));
+        JsonType hierarchies_stats;
+        for (const auto& [hname, h_ptr] : pyramid_->hierarchies_) {
+            hierarchies_stats[hname].SetJson(analyze_one_hierarchy(h_ptr->root.get()));
+        }
+        stats["hierarchies"].SetJson(hierarchies_stats);
     }
-
-    start = std::chrono::steady_clock::now();
-    stats["duplicate_ratio"].SetFloat(GetDuplicateRatio());
-    end = std::chrono::steady_clock::now();
-    logger::info("[PyramidAnalyzer] GetDuplicateRatio: {}ms",
-                 std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count());
-
-    stats["total_count"].SetInt(this->total_count_);
 
     return stats;
 }
@@ -131,7 +129,7 @@ PyramidAnalyzer::AnalyzeIndexBySearch(const SearchRequest& request) {
 }
 
 JsonType
-PyramidAnalyzer::get_index_node_structure() {
+PyramidAnalyzer::get_index_node_structure(IndexNode* root) {
     JsonType structure;
 
     uint32_t total_nodes = 0;
@@ -167,7 +165,7 @@ PyramidAnalyzer::get_index_node_structure() {
         }
     };
 
-    traverse(pyramid_->root_.get(), 0);
+    traverse(root, 0);
 
     structure["total_nodes"].SetInt(total_nodes);
     structure["max_depth"].SetInt(max_depth);
@@ -188,11 +186,11 @@ PyramidAnalyzer::get_index_node_structure() {
 }
 
 JsonType
-PyramidAnalyzer::get_leaf_node_size_distribution() {
+PyramidAnalyzer::get_leaf_node_size_distribution(IndexNode* root) {
     JsonType distribution;
 
     Vector<uint32_t> leaf_sizes(allocator_);
-    collect_leaf_sizes(pyramid_->root_.get(), leaf_sizes);
+    collect_leaf_sizes(root, leaf_sizes);
 
     if (leaf_sizes.empty()) {
         distribution["total_leaf_nodes"].SetInt(0);
@@ -306,11 +304,11 @@ PyramidAnalyzer::collect_leaf_sizes(IndexNode* node, Vector<uint32_t>& sizes) {
 }
 
 JsonType
-PyramidAnalyzer::get_subindex_quality() {
+PyramidAnalyzer::get_subindex_quality(IndexNode* root) {
     JsonType quality;
 
     subindex_stats_.clear();
-    analyze_subindexes(pyramid_->root_.get(), "");
+    analyze_subindexes(root, "");
 
     uint32_t graph_count = 0;
     uint32_t flat_count = 0;
@@ -1305,7 +1303,7 @@ PyramidAnalyzer::analyze_node_graph_quality(const IndexNode* node,
 }
 
 JsonType
-PyramidAnalyzer::get_graph_node_recall_stats(const std::string& search_param_str) {
+PyramidAnalyzer::get_graph_node_recall_stats(IndexNode* root, const std::string& search_param_str) {
     JsonType stats;
 
     low_recall_nodes_.clear();
@@ -1378,7 +1376,7 @@ PyramidAnalyzer::get_graph_node_recall_stats(const std::string& search_param_str
         }
     };
 
-    traverse(pyramid_->root_.get(), "");
+    traverse(root, "");
 
     float weighted_recall =
         total_size > 0 ? total_weighted_recall / static_cast<float>(total_size) : 0.0F;
@@ -1414,7 +1412,7 @@ PyramidAnalyzer::get_graph_node_recall_stats(const std::string& search_param_str
 }
 
 float
-PyramidAnalyzer::GetDuplicateRatio() {
+PyramidAnalyzer::GetDuplicateRatio(IndexNode* root) {
     if (sample_datas_.empty()) {
         sample_global();
     }
@@ -1449,7 +1447,7 @@ PyramidAnalyzer::GetDuplicateRatio() {
         }
     };
 
-    traverse(pyramid_->root_.get());
+    traverse(root);
 
     return total_vector_count > 0
                ? static_cast<float>(total_duplicate_count) / static_cast<float>(total_vector_count)

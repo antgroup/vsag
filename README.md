@@ -410,19 +410,19 @@ VSAG referenced the following works during its implementation:
                 </a>
             </td>
             <td align="center">
-                <a href="https://github.com/jingyueob">
-                    <img src="https://avatars.githubusercontent.com/u/212298588?v=4" width="100" alt="jingyueob"/>
+                <a href="https://github.com/misaka0714">
+                    <img src="https://avatars.githubusercontent.com/u/129934985?v=4" width="100" alt="misaka0714"/>
                     <br />
-                    <sub><b>jingyueob</b></sub>
+                    <sub><b>baoyuan</b></sub>
                 </a>
             </td>
         </tr>
         <tr>
             <td align="center">
-                <a href="https://github.com/misaka0714">
-                    <img src="https://avatars.githubusercontent.com/u/129934985?v=4" width="100" alt="misaka0714"/>
+                <a href="https://github.com/jingyueob">
+                    <img src="https://avatars.githubusercontent.com/u/212298588?v=4" width="100" alt="jingyueob"/>
                     <br />
-                    <sub><b>baoyuan</b></sub>
+                    <sub><b>jingyueob</b></sub>
                 </a>
             </td>
             <td align="center">
@@ -440,6 +440,13 @@ VSAG referenced the following works during its implementation:
                 </a>
             </td>
             <td align="center">
+                <a href="https://github.com/jfeng18">
+                    <img src="https://avatars.githubusercontent.com/u/288662032?v=4" width="100" alt="jfeng18"/>
+                    <br />
+                    <sub><b>Jiangtian Feng</b></sub>
+                </a>
+            </td>
+            <td align="center">
                 <a href="https://github.com/pkusunjy">
                     <img src="https://avatars.githubusercontent.com/u/11880269?v=4" width="100" alt="pkusunjy"/>
                     <br />
@@ -453,20 +460,13 @@ VSAG referenced the following works during its implementation:
                     <sub><b>Danbaiwq</b></sub>
                 </a>
             </td>
+        </tr>
+        <tr>
             <td align="center">
                 <a href="https://github.com/HeHuMing">
                     <img src="https://avatars.githubusercontent.com/u/223064905?v=4" width="100" alt="HeHuMing"/>
                     <br />
                     <sub><b>HuMing He</b></sub>
-                </a>
-            </td>
-        </tr>
-        <tr>
-            <td align="center">
-                <a href="https://github.com/jfeng18">
-                    <img src="https://avatars.githubusercontent.com/u/288662032?v=4" width="100" alt="jfeng18"/>
-                    <br />
-                    <sub><b>Jiangtian Feng</b></sub>
                 </a>
             </td>
             <td align="center">

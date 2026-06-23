@@ -27,7 +27,6 @@
 #include "algorithm/sindi/sindi.h"
 #include "algorithm/sparse_index/sparse_index.h"
 #include "algorithm/simq/simq.h"
-#include "algorithm/warp/warp.h"
 #include "common.h"
 #include "index/diskann.h"
 #include "index/diskann_zparameters.h"
@@ -35,9 +34,12 @@
 #include "index/hnsw_zparameters.h"
 #include "index/index_impl.h"
 #include "index_registry.h"
+#include "inner_string_params.h"
 
 namespace vsag {
 namespace {
+
+constexpr const char* WARP_MODE_MARKER = "_warp_mode";
 
 JsonType
 get_index_param_or_empty(const JsonType& parsed_params) {
@@ -146,8 +148,12 @@ create_sindi_index(JsonType& parsed_params, const IndexCommonParam& index_common
 
 tl::expected<std::shared_ptr<Index>, Error>
 create_warp_index(JsonType& parsed_params, const IndexCommonParam& index_common_params) {
-    return create_index_impl_with_param_log<WARP>(
-        "created a warp index", parsed_params, index_common_params);
+    // WARP is now implemented as BruteForce with multi-vector data cell
+    logger::debug("created a warp index (via BruteForce multi-vector mode)");
+    auto index_param = get_index_param_or_empty(parsed_params);
+    // Inject a hidden marker so BruteForce::CheckAndMappingExternalParam knows this is WARP
+    index_param[WARP_MODE_MARKER].SetBool(true);
+    return {std::make_shared<IndexImpl<BruteForce>>(index_param, index_common_params)};
 }
 
 tl::expected<std::shared_ptr<Index>, Error>

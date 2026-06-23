@@ -276,13 +276,15 @@ KMeansCluster::find_nearest_one_with_blas(const float* query,
                                 static_cast<int32_t>(k));
         }
 
-        auto assign_labels_func = [&](uint64_t start, uint64_t end) -> void {
+        auto batch_offset = i;
+        auto assign_labels_func = [&, batch_offset](uint64_t start, uint64_t end) -> void {
             omp_set_num_threads(1);
             double thread_local_error = 0.0;
             for (uint64_t i = start; i < end; ++i) {
                 BlasFunction::Saxpy(static_cast<int32_t>(k), 1.0, y_sqr, 1, distances + i * k, 1);
                 auto* min_elem = std::min_element(distances + i * k, distances + i * k + k);
-                auto x_sqr = FP32ComputeIP(query + i * dim_, query + i * dim_, dim_);
+                auto x_sqr = FP32ComputeIP(
+                    query + (batch_offset + i) * dim_, query + (batch_offset + i) * dim_, dim_);
                 auto min_index = std::distance(distances + i * k, min_elem);
                 thread_local_error += static_cast<double>(*min_elem + x_sqr);
                 if (min_index != cur_label[i]) {

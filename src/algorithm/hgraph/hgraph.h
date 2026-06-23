@@ -221,14 +221,18 @@ public:
     const void*
     get_data(const DatasetPtr& dataset, uint32_t index = 0) const {
         if (data_type_ == DataTypes::DATA_TYPE_FLOAT) {
-            return dataset->GetFloat32Vectors() + index * dim_;
+            auto* ptr = dataset->GetFloat32Vectors();
+            return ptr ? ptr + static_cast<int64_t>(index) * dim_ : nullptr;
         } else if (data_type_ == DataTypes::DATA_TYPE_INT8) {
-            return dataset->GetInt8Vectors() + index * dim_;
+            auto* ptr = dataset->GetInt8Vectors();
+            return ptr ? ptr + static_cast<int64_t>(index) * dim_ : nullptr;
         } else if (data_type_ == DataTypes::DATA_TYPE_FP16 ||
                    data_type_ == DataTypes::DATA_TYPE_BF16) {
-            return dataset->GetFloat16Vectors() + index * dim_;
+            auto* ptr = dataset->GetFloat16Vectors();
+            return ptr ? ptr + static_cast<int64_t>(index) * dim_ : nullptr;
         } else if (data_type_ == DataTypes::DATA_TYPE_SPARSE) {
-            return dataset->GetSparseVectors() + index;
+            auto* ptr = dataset->GetSparseVectors();
+            return ptr ? ptr + index : nullptr;
         }
         throw VsagException(ErrorType::INVALID_ARGUMENT, "invalid data_type in HGraph");
     }
@@ -510,8 +514,6 @@ private:
     uint64_t ef_construct_{400};
     float alpha_{1.0};
 
-    std::atomic<uint64_t> total_count_{0};
-
     std::shared_ptr<VisitedListPool> pool_{nullptr};
 
     mutable std::shared_mutex global_mutex_;
@@ -545,5 +547,14 @@ private:
     bool persist_source_id_{false};
 
     std::unique_ptr<HGraphCache> cache_{nullptr};
+
+    // Build-time warm-start cache hit statistics, populated by
+    // cache_warm_start_and_classify() when Build() takes the
+    // build_with_cache() path (i.e. after ImportCache()). A negative
+    // hit-rate marks "this index was not built from an imported cache",
+    // in which case GetStats() emits a skipped_reason instead of values.
+    float build_cache_hit_rate_{-1.0F};
+    uint64_t build_cache_hit_nodes_{0};
+    uint64_t build_cache_missed_nodes_{0};
 };
 }  // namespace vsag

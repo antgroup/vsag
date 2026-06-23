@@ -91,8 +91,12 @@ FP32Quantizer<metric>::DecodeOneImpl(const uint8_t* codes, float* data) {
 template <MetricType metric>
 bool
 FP32Quantizer<metric>::DecodeBatchImpl(const uint8_t* codes, float* data, uint64_t count) {
-    for (uint64_t i = 0; i < count; ++i) {
-        memcpy(data + i * this->dim_, codes + i * this->code_size_, this->code_size_);
+    if (this->code_size_ == this->dim_ * sizeof(float)) {
+        memcpy(data, codes, count * this->code_size_);
+    } else {
+        for (uint64_t i = 0; i < count; ++i) {
+            memcpy(data + i * this->dim_, codes + i * this->code_size_, this->dim_ * sizeof(float));
+        }
     }
     return true;
 }

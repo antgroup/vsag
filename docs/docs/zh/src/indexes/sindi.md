@@ -129,6 +129,15 @@ SINDI **不支持** 稠密向量，只支持内积相似度。范围检索与基
      这样可以避免管理大量空倒排列表带来的内存浪费，也能降低触达 `term_id_limit`
      上限的风险。
 
+## 标记删除
+
+SINDI 支持 `RemoveMode::MARK_REMOVE`。调用 `Remove(ids)`（默认模式）会为给定的 id
+打上删除标记：它们不再出现在检索结果中，`GetNumElements()` 相应减少，
+`GetNumberRemoved()` 返回累计删除数量。删除不存在或已删除的 id 不会有任何效果。
+`RemoveMode::FORCE_REMOVE` 不支持，调用会返回错误。
+
+被标记删除的文档在索引重建前仍占用内存，空间不会被物理回收。
+
 ## 相关文档
 
 - [创建索引](../guide/create_index.md)

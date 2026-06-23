@@ -183,6 +183,15 @@ if (NOT OPENBLAS_FOUND)
         list (PREPEND openblas_urls "$ENV{VSAG_THIRDPARTY_OPENBLAS}")
     endif ()
 
+    # OpenBLAS build tools (getarch) require strict FP semantics; -Ofast
+    # (which implies -ffast-math) breaks CPU detection. Replace with -O2.
+    string (REPLACE "-Ofast" "-O2" _openblas_c_flags "${VSAG_THIRDPARTY_C_FLAGS}")
+    string (REPLACE "-ffast-math" "" _openblas_c_flags "${_openblas_c_flags}")
+    string (REPLACE "-Ofast" "-O2" _openblas_cxx_flags "${VSAG_THIRDPARTY_CXX_FLAGS}")
+    string (REPLACE "-ffast-math" "" _openblas_cxx_flags "${_openblas_cxx_flags}")
+    string (STRIP "${_openblas_c_flags}" _openblas_c_flags)
+    string (STRIP "${_openblas_cxx_flags}" _openblas_cxx_flags)
+
     ExternalProject_Add (
         ${name}
         URL ${openblas_urls}
@@ -196,6 +205,8 @@ if (NOT OPENBLAS_FOUND)
         CONFIGURE_COMMAND ""
         BUILD_COMMAND
             ${common_configure_envs}
+            "CFLAGS=${_openblas_c_flags} -D_DEFAULT_SOURCE -D_GNU_SOURCE"
+            "CXXFLAGS=${_openblas_cxx_flags} -D_DEFAULT_SOURCE -D_GNU_SOURCE"
             OMP_NUM_THREADS=1
             PATH=/usr/lib/ccache:$ENV{PATH}
             LD_LIBRARY_PATH=/opt/alibaba-cloud-compiler/lib64/:$ENV{LD_LIBRARY_PATH}

@@ -545,6 +545,8 @@ SINDI::Deserialize(StreamReader& reader) {
     }
 
     label_table_->Deserialize(reader_ref);
+    delete_count_.store(static_cast<int64_t>(label_table_->GetAllDeletedIds().size()),
+                        std::memory_order_relaxed);
 
     if (use_reorder_) {
         rerank_flat_index_->Deserialize(reader_ref);
@@ -750,6 +752,7 @@ SINDI::InitFeatures() {
                                             IndexFeature::SUPPORT_UPDATE_VECTOR_CONCURRENT});
 
     // metric
+    this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_DELETE_BY_ID);
     this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_METRIC_TYPE_INNER_PRODUCT);
 }
 
@@ -818,6 +821,16 @@ SINDI::remap_sparse_vector_for_build(const SparseVector& input, Vector<uint32_t>
     remapped.ids_ = tmp_ids.data();
     remapped.vals_ = input.vals_;
     return remapped;
+}
+uint32_t
+SINDI::Remove(const std::vector<int64_t>& ids, RemoveMode mode) {
+    if (mode != RemoveMode::MARK_REMOVE) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "SINDI only supports MARK_REMOVE");
+    }
+    std::scoped_lock lock(this->global_mutex_, this->label_lookup_mutex_);
+    uint32_t delete_count = this->label_table_->MarkRemove(ids);
+    delete_count_.fetch_add(delete_count, std::memory_order_relaxed);
+    return delete_count;
 }
 
 }  // namespace vsag

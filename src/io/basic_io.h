@@ -18,6 +18,7 @@
 #include <fmt/format.h>
 
 #include <cstdint>
+#include <cstring>
 
 #include "io_parameter.h"
 #include "storage/stream_reader.h"
@@ -227,6 +228,7 @@ public:
                 return;
             }
             ByteBuffer buffer(SERIALIZE_BUFFER_SIZE, this->allocator_);
+            memset(buffer.data, 0, SERIALIZE_BUFFER_SIZE);
             uint64_t offset = this->size_;
             while (offset < size) {
                 auto cur_size = std::min(SERIALIZE_BUFFER_SIZE, size - offset);

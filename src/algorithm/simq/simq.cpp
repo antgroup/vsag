@@ -757,7 +757,8 @@ SIMQ::Serialize(StreamWriter& writer) const {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                             "simq: cannot serialize an unbuilt index");
     }
-    StreamWriter::WriteObj(writer, total_count_);
+    uint64_t total_count_val = total_count_.load();
+    StreamWriter::WriteObj(writer, total_count_val);
     StreamWriter::WriteObj(writer, num_clusters_);
 
     uint64_t n_clusters = static_cast<uint64_t>(cluster_lists_.size());
@@ -776,7 +777,7 @@ SIMQ::Serialize(StreamWriter& writer) const {
 
     JsonType info;
     info["dim"].SetInt(dim_);
-    info["total_count"].SetInt(total_count_);
+    info["total_count"].SetInt(total_count_.load());
     info[INDEX_PARAM].SetString(this->create_param_ptr_->ToString());
     write_index_footer(writer, info);
 }
@@ -802,7 +803,9 @@ SIMQ::Deserialize(StreamReader& reader) {
         default_rerank_k_ = tmp_param.rerank_k;
     }
 
-    StreamReader::ReadObj(buf_reader, total_count_);
+    uint64_t total_count_val = 0;
+    StreamReader::ReadObj(buf_reader, total_count_val);
+    total_count_.store(total_count_val);
     StreamReader::ReadObj(buf_reader, num_clusters_);
 
     uint64_t n_clusters = 0;

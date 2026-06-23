@@ -95,6 +95,9 @@ main(int argc, char** argv) {
     }
 
     /******************* HGraph Remove Some result ids *****************/
+    // Remove() defaults to RemoveMode::MARK_REMOVE: the ids are tombstoned and
+    // skipped in subsequent searches. Besides HGraph, the Pyramid, SINDI, and
+    // WARP indexes also support MARK_REMOVE; BruteForce and IVF support it too.
     for (int64_t i = 0; i < 5; ++i) {
         index->Remove(result->GetIds()[i]);
     }

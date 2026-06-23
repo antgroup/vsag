@@ -47,6 +47,9 @@ target_link_libraries (110_index_warp vsag)
 add_executable (111_index_lazy_hgraph 111_index_lazy_hgraph.cpp)
 target_link_libraries (111_index_lazy_hgraph vsag)
 
+add_executable (112_index_pyramid_multi_hierarchy 112_index_pyramid_multi_hierarchy.cpp)
+target_link_libraries (112_index_pyramid_multi_hierarchy vsag)
+
 add_executable (201_custom_allocator 201_custom_allocator.cpp)
 target_link_libraries (201_custom_allocator vsag)
 

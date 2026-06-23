@@ -120,8 +120,6 @@ private:
 
     FlattenInterfacePtr mv_codes_{nullptr};
 
-    uint64_t total_count_{0};
-
     Vector<InnerIdType> vec_to_cluster_;
 
     // Token-level metadata for precise split: maps global token_id → doc inner_id / offset

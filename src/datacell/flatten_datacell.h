@@ -484,7 +484,7 @@ FlattenDataCell<QuantTmpl, IOTmpl>::MergeOther(const FlattenInterfacePtr& other,
     }
     constexpr uint64_t BUFFER_SIZE = 1024 * 1024 * 10;
     uint64_t total_count = ptr->total_count_;
-    uint64_t offset = bias * code_size_;
+    uint64_t offset = static_cast<uint64_t>(bias) * static_cast<uint64_t>(code_size_);
     uint64_t read_count = 0;
     while (read_count < total_count) {
         bool need_release = false;

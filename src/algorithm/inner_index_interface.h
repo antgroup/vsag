@@ -570,6 +570,8 @@ public:
     std::atomic<bool> immutable_{false};
 
 protected:
+    std::atomic<uint64_t> total_count_{0};
+
     std::atomic<int64_t> current_memory_usage_{0};
     mutable std::shared_mutex memory_usage_mutex_{};
 

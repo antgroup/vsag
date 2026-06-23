@@ -36,17 +36,18 @@ SQ4ComputeIPImpl(const float* query,
     if (dim < static_cast<uint64_t>(STEP)) {
         return fallback ? fallback(query, codes, lower_bound, diff, dim) : 0.0f;
     }
-    V sum = T::zero();
+    V sum0 = T::zero();
+    V sum1 = T::zero();
     uint64_t d = 0;
     for (; d + STEP <= dim; d += STEP) {
         V dec0, dec1;
         T::load_nibbles_2x_as_float(codes + (d >> 1), dec0, dec1);
         V val0 = T::fmadd(dec0, T::load(diff + d), T::load(lower_bound + d));
         V val1 = T::fmadd(dec1, T::load(diff + d + W), T::load(lower_bound + d + W));
-        sum = T::fmadd(T::load(query + d), val0, sum);
-        sum = T::fmadd(T::load(query + d + W), val1, sum);
+        sum0 = T::fmadd(T::load(query + d), val0, sum0);
+        sum1 = T::fmadd(T::load(query + d + W), val1, sum1);
     }
-    float result = T::reduce_add(sum);
+    float result = T::reduce_add(T::add(sum0, sum1));
     if (d < dim) {
         if (fallback)
             result += fallback(query + d, codes + (d >> 1), lower_bound + d, diff + d, dim - d);
@@ -72,7 +73,8 @@ SQ4ComputeL2SqrImpl(const float* query,
     if (dim < static_cast<uint64_t>(STEP)) {
         return fallback ? fallback(query, codes, lower_bound, diff, dim) : 0.0f;
     }
-    V sum = T::zero();
+    V sum0 = T::zero();
+    V sum1 = T::zero();
     uint64_t d = 0;
     for (; d + STEP <= dim; d += STEP) {
         V dec0, dec1;
@@ -81,10 +83,10 @@ SQ4ComputeL2SqrImpl(const float* query,
         V val1 = T::fmadd(dec1, T::load(diff + d + W), T::load(lower_bound + d + W));
         V d0 = T::sub(T::load(query + d), val0);
         V d1 = T::sub(T::load(query + d + W), val1);
-        sum = T::fmadd(d0, d0, sum);
-        sum = T::fmadd(d1, d1, sum);
+        sum0 = T::fmadd(d0, d0, sum0);
+        sum1 = T::fmadd(d1, d1, sum1);
     }
-    float result = T::reduce_add(sum);
+    float result = T::reduce_add(T::add(sum0, sum1));
     if (d < dim) {
         if (fallback)
             result += fallback(query + d, codes + (d >> 1), lower_bound + d, diff + d, dim - d);
@@ -110,7 +112,8 @@ SQ4ComputeCodesIPImpl(const uint8_t* codes1,
     if (dim < static_cast<uint64_t>(STEP)) {
         return fallback ? fallback(codes1, codes2, lower_bound, diff, dim) : 0.0f;
     }
-    V sum = T::zero();
+    V sum0 = T::zero();
+    V sum1 = T::zero();
     uint64_t d = 0;
     for (; d + STEP <= dim; d += STEP) {
         V dec1_0, dec1_1, dec2_0, dec2_1;
@@ -124,10 +127,10 @@ SQ4ComputeCodesIPImpl(const uint8_t* codes1,
         V a1 = T::fmadd(dec1_1, diff1, lb1);
         V b0 = T::fmadd(dec2_0, diff0, lb0);
         V b1 = T::fmadd(dec2_1, diff1, lb1);
-        sum = T::fmadd(a0, b0, sum);
-        sum = T::fmadd(a1, b1, sum);
+        sum0 = T::fmadd(a0, b0, sum0);
+        sum1 = T::fmadd(a1, b1, sum1);
     }
-    float result = T::reduce_add(sum);
+    float result = T::reduce_add(T::add(sum0, sum1));
     if (d < dim) {
         if (fallback)
             result +=
@@ -154,7 +157,8 @@ SQ4ComputeCodesL2SqrImpl(const uint8_t* codes1,
     if (dim < static_cast<uint64_t>(STEP)) {
         return fallback ? fallback(codes1, codes2, lower_bound, diff, dim) : 0.0f;
     }
-    V sum = T::zero();
+    V sum0 = T::zero();
+    V sum1 = T::zero();
     uint64_t d = 0;
     for (; d + STEP <= dim; d += STEP) {
         V dec1_0, dec1_1, dec2_0, dec2_1;
@@ -170,10 +174,10 @@ SQ4ComputeCodesL2SqrImpl(const uint8_t* codes1,
         V b1 = T::fmadd(dec2_1, diff1, lb1);
         V e0 = T::sub(a0, b0);
         V e1 = T::sub(a1, b1);
-        sum = T::fmadd(e0, e0, sum);
-        sum = T::fmadd(e1, e1, sum);
+        sum0 = T::fmadd(e0, e0, sum0);
+        sum1 = T::fmadd(e1, e1, sum1);
     }
-    float result = T::reduce_add(sum);
+    float result = T::reduce_add(T::add(sum0, sum1));
     if (d < dim) {
         if (fallback)
             result +=
