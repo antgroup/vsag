@@ -403,6 +403,8 @@ BruteForce::RangeSearch(const vsag::DatasetPtr& query,
 
     auto computer = this->make_search_computer(query);
 
+    FilterPtr ft = this->create_search_filter(filter);
+
     if (not is_multi_vector_) {
         this->validate_range_args(query, radius, limited_size);
     }
@@ -420,7 +422,7 @@ BruteForce::RangeSearch(const vsag::DatasetPtr& query,
             DistanceHeap::MakeInstanceBySize<true, true>(this->allocator_, limited_size);
         for (InnerIdType i = start; i < end; ++i) {
             float dist;
-            if (filter == nullptr or filter->CheckValid(this->label_table_->GetLabelById(i))) {
+            if (ft == nullptr or ft->CheckValid(i)) {
                 inner_codes_->Query(&dist, computer, &i, 1);
                 if (dist > radius) {
                     continue;
