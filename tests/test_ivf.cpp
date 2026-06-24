@@ -42,7 +42,8 @@ public:
                                      int buckets_per_data = 1,
                                      bool use_attr_filter = false,
                                      int thread_count = 1,
-                                     int64_t sample_count = 10000L);
+                                     int64_t sample_count = 10000L,
+                                     const std::string& precise_io_type = "block_memory_io");
 
     static IVFResourcePtr
     GetResource(bool sample = true);
@@ -130,7 +131,8 @@ IVFTestIndex::GenerateIVFBuildParametersString(const std::string& metric_type,
                                                int buckets_per_data,
                                                bool use_attr_filter,
                                                int thread_count,
-                                               int64_t sample_count) {
+                                               int64_t sample_count,
+                                               const std::string& precise_io_type) {
     std::string build_parameters_str;
     constexpr auto parameter_temp = R"(
     {{
@@ -144,6 +146,7 @@ IVFTestIndex::GenerateIVFBuildParametersString(const std::string& metric_type,
             "use_reorder": {},
             "base_pq_dim": {},
             "precise_quantization_type": "{}",
+            "precise_io_type": "{}",
             "use_residual": {},
             "buckets_per_data": {},
             "use_attribute_filter": {},
@@ -174,6 +177,7 @@ IVFTestIndex::GenerateIVFBuildParametersString(const std::string& metric_type,
                                        use_reorder,
                                        pq_dim,
                                        precise_quantizer_str,
+                                       precise_io_type,
                                        use_residual,
                                        buckets_per_data,
                                        use_attr_filter,
@@ -1171,6 +1175,56 @@ TestIVFSerialize(const fixtures::IVFResourcePtr& resource) {
 }
 
 IVF_PR_DAILY_CASE("IVF Serialize File", "[ft][serialize][ivf]", TestIVFSerialize)
+
+TEST_CASE("(PR) IVF Reader IO", "[ft][serialize][ivf][pr]") {
+    using namespace fixtures;
+    auto metric_type = "l2";
+    auto dim = 64;
+    auto base_count = 800;
+    auto bucket_count = 32;
+    auto train_sample_count = static_cast<int64_t>(base_count);
+    auto search_param = fmt::format(fixtures::search_param_tmp, bucket_count);
+
+    auto param = IVFTestIndex::GenerateIVFBuildParametersString(metric_type,
+                                                                dim,
+                                                                "sq8,fp32",
+                                                                bucket_count,
+                                                                "kmeans",
+                                                                false,
+                                                                1,
+                                                                false,
+                                                                1,
+                                                                train_sample_count);
+    auto reader_param = IVFTestIndex::GenerateIVFBuildParametersString(metric_type,
+                                                                       dim,
+                                                                       "sq8,fp32",
+                                                                       bucket_count,
+                                                                       "kmeans",
+                                                                       false,
+                                                                       1,
+                                                                       false,
+                                                                       1,
+                                                                       train_sample_count,
+                                                                       "reader_io");
+    auto index = IVFTestIndex::TestFactory(IVFTestIndex::name, param, true);
+    auto dataset = IVFTestIndex::pool.GetDatasetAndCreate(dim, base_count, metric_type);
+    IVFTestIndex::TestBuildIndex(index, dataset, true);
+
+    auto reader_index = IVFTestIndex::TestFactory(IVFTestIndex::name, reader_param, true);
+    IVFTestIndex::TestSerializeReaderSet(
+        index, reader_index, dataset, search_param, IVFTestIndex::name, true);
+
+    const auto* query = dataset->query_->GetFloat32Vectors();
+    const auto* ids = dataset->ground_truth_->GetIds();
+    auto expected_distances = index->CalDistanceById(query, ids, dataset->top_k);
+    auto reader_distances = reader_index->CalDistanceById(query, ids, dataset->top_k);
+    REQUIRE(expected_distances.has_value());
+    REQUIRE(reader_distances.has_value());
+    for (int64_t i = 0; i < dataset->top_k; ++i) {
+        REQUIRE(std::abs(expected_distances.value()->GetDistances()[i] -
+                         reader_distances.value()->GetDistances()[i]) < 1e-6F);
+    }
+}
 
 static void
 TestIVFClone(const fixtures::IVFResourcePtr& resource) {
