@@ -159,6 +159,9 @@ public:
     Serialize(StreamWriter& writer) const override;
 
     void
+    SetIO(const std::shared_ptr<Reader> reader) override;
+
+    void
     Train(const DatasetPtr& data) override;
 
     void
@@ -229,6 +232,12 @@ private:
     /// Recalculate and cache the memory-usage counter (throttled).
     void
     cal_memory_usage();
+
+    [[nodiscard]] bool
+    use_reader_io_for_reorder() const;
+
+    void
+    check_reorder_codes_ready() const;
 
 private:
     BucketInterfacePtr bucket_{nullptr};  // bucket storage (raw or attribute-aware)
