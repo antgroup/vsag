@@ -126,6 +126,9 @@ private:
     Vector<InnerIdType> token_to_doc_;
     Vector<uint32_t>    token_to_offset_;
 
+    // Per-cluster token count for O(1) split threshold check during Add
+    Vector<uint64_t> cluster_token_counts_;
+
     float   init_cluster_ratio_{0.2f};
     int64_t max_cluster_size_{64};
     int64_t split_start_idx_{32};
