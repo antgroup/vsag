@@ -492,36 +492,31 @@ SIMQ::split_cluster_incremental(InnerIdType cluster_idx) {
         for (uint64_t d = 0; d < dim; ++d)
             centroid[d] += token_vecs[i * dim + d];
 
-    // Find old representative (closest to centroid) and new seed (farthest from centroid)
-    float    best_dot = -1e30f, worst_dot = 1e30f;
-    uint64_t old_rep_local = 0, new_seed_local = 0;
+    // Score each token by IP with centroid, then sort descending
+    std::vector<std::pair<float, uint64_t>> scored(n);
     for (uint64_t i = 0; i < n; ++i) {
         float dot = 0.0f;
         for (uint64_t d = 0; d < dim; ++d) dot += token_vecs[i * dim + d] * centroid[d];
-        if (dot > best_dot)  { best_dot  = dot; old_rep_local  = i; }
-        if (dot < worst_dot) { worst_dot = dot; new_seed_local = i; }
+        scored[i] = {dot, i};
     }
+    std::sort(scored.begin(), scored.end(),
+              [](const auto& a, const auto& b) { return a.first > b.first; });
 
-    const float* old_rep_vec = token_vecs.data() + old_rep_local  * dim;
-    const float* new_rep_vec = token_vecs.data() + new_seed_local * dim;
-
-    // Voronoi: assign each token to whichever representative has higher inner product
+    // Median split: first half (closer to centroid) → old cluster,
+    //               second half (farther from centroid) → new cluster.
+    // Both halves are always non-empty because n >= 2.
+    uint64_t half = n / 2;
     InnerIdType new_cluster_idx = static_cast<InnerIdType>(num_clusters_);
-    std::unordered_set<InnerIdType> old_docs, new_docs;
 
-    for (uint64_t i = 0; i < n; ++i) {
-        const float* tv = token_vecs.data() + i * dim;
-        float dot_old = 0.0f, dot_new = 0.0f;
-        for (uint64_t d = 0; d < dim; ++d) {
-            dot_old += tv[d] * old_rep_vec[d];
-            dot_new += tv[d] * new_rep_vec[d];
-        }
-        InnerIdType tid = cluster_tokens[i];
-        if (dot_new > dot_old) {
+    std::unordered_set<InnerIdType> old_docs, new_docs;
+    for (uint64_t rank = 0; rank < n; ++rank) {
+        uint64_t    local_i = scored[rank].second;
+        InnerIdType tid     = cluster_tokens[local_i];
+        if (rank < half) {
+            old_docs.insert(token_to_doc_[tid]);
+        } else {
             vec_to_cluster_[tid] = new_cluster_idx;
             new_docs.insert(token_to_doc_[tid]);
-        } else {
-            old_docs.insert(token_to_doc_[tid]);
         }
     }
 
@@ -534,16 +529,25 @@ SIMQ::split_cluster_incremental(InnerIdType cluster_idx) {
     for (InnerIdType doc_id : new_docs)
         cluster_lists_.back().push_back(doc_id);
 
-    // Recount tokens for both clusters after reassignment
-    cluster_token_counts_[cluster_idx] = 0;
-    for (uint64_t ti = 0; ti < vec_to_cluster_.size(); ++ti)
-        if (vec_to_cluster_[ti] == cluster_idx)
-            ++cluster_token_counts_[cluster_idx];
-    uint64_t new_count = 0;
-    for (uint64_t ti = 0; ti < vec_to_cluster_.size(); ++ti)
-        if (vec_to_cluster_[ti] == new_cluster_idx)
-            ++new_count;
-    cluster_token_counts_.push_back(new_count);
+    // Recount tokens for both clusters
+    cluster_token_counts_[cluster_idx] = static_cast<uint64_t>(half);
+    cluster_token_counts_.push_back(n - half);
+
+    // New cluster representative: token in new half closest to new half's centroid
+    std::vector<float> new_centroid(dim, 0.0f);
+    for (uint64_t rank = half; rank < n; ++rank) {
+        const float* tv = token_vecs.data() + scored[rank].second * dim;
+        for (uint64_t d = 0; d < dim; ++d) new_centroid[d] += tv[d];
+    }
+    float best_dot = -1e30f;
+    uint64_t new_rep_local = scored[half].second;
+    for (uint64_t rank = half; rank < n; ++rank) {
+        const float* tv = token_vecs.data() + scored[rank].second * dim;
+        float dot = 0.0f;
+        for (uint64_t d = 0; d < dim; ++d) dot += tv[d] * new_centroid[d];
+        if (dot > best_dot) { best_dot = dot; new_rep_local = scored[rank].second; }
+    }
+    const float* new_rep_vec = token_vecs.data() + new_rep_local * dim;
 
     // Register the new cluster representative in rep_hgraph_
     int64_t new_label = static_cast<int64_t>(new_cluster_idx);
@@ -784,6 +788,7 @@ SIMQ::Serialize(StreamWriter& writer) const {
     StreamWriter::WriteVector(writer, vec_to_cluster_);
     StreamWriter::WriteVector(writer, token_to_doc_);
     StreamWriter::WriteVector(writer, token_to_offset_);
+    StreamWriter::WriteVector(writer, cluster_token_counts_);
 
     serialize_rep_hgraph(writer);
 
@@ -814,8 +819,12 @@ SIMQ::Deserialize(StreamReader& reader) {
         auto inner = JsonType::Parse(info[INDEX_PARAM].GetString());
         SIMQParameter tmp_param;
         tmp_param.FromJson(inner);
-        default_coarse_k_ = tmp_param.coarse_k;
-        default_rerank_k_ = tmp_param.rerank_k;
+        default_coarse_k_   = tmp_param.coarse_k;
+        default_rerank_k_   = tmp_param.rerank_k;
+        max_cluster_size_   = tmp_param.max_cluster_size;
+        split_start_idx_    = tmp_param.split_start_idx;
+        random_seed_        = tmp_param.random_seed;
+        init_cluster_ratio_ = tmp_param.init_cluster_ratio;
     }
 
     uint64_t total_count_val = 0;
@@ -832,6 +841,7 @@ SIMQ::Deserialize(StreamReader& reader) {
     StreamReader::ReadVector(buf_reader, vec_to_cluster_);
     StreamReader::ReadVector(buf_reader, token_to_doc_);
     StreamReader::ReadVector(buf_reader, token_to_offset_);
+    StreamReader::ReadVector(buf_reader, cluster_token_counts_);
 
     deserialize_rep_hgraph(buf_reader);
 
