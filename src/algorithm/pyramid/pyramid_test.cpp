@@ -508,6 +508,52 @@ TEST_CASE("Pyramid promotes flat node at index minimum size", "[ut][pyramid]") {
     }
 }
 
+TEST_CASE("Pyramid SearchWithRequest reports reasoning for expected labels",
+          "[ut][pyramid][reasoning]") {
+    auto test_index = MakePyramidIndex(100);
+    const auto& index = test_index.index;
+    std::array<float, PYRAMID_TEST_DIM* 2> vectors = {
+        0.0F, 0.0F, 0.0F, 0.0F, 10.0F, 0.0F, 0.0F, 0.0F};
+    std::array<int64_t, 2> ids = {100, 101};
+    std::array<std::string, 2> paths = {"tenant", "tenant"};
+    REQUIRE(index->Build(MakePyramidDataset(vectors.data(), ids.data(), paths.data(), 2)).empty());
+
+    auto query = MakePyramidDataset(vectors.data(), nullptr, paths.data(), 1);
+    vsag::SearchRequest request;
+    request.query_ = query;
+    request.topk_ = 1;
+    request.params_str_ = R"({"pyramid":{"ef_search":10}})";
+    request.expected_labels_ = {ids[0]};
+
+    auto result = index->SearchWithRequest(request);
+    REQUIRE(result != nullptr);
+    REQUIRE(result->GetIds()[0] == ids[0]);
+    REQUIRE(result->GetReasoning().find("1/1 expected labels found") != std::string::npos);
+    REQUIRE(result->GetReasoning().find("0 missed") != std::string::npos);
+
+    request.topk_ = 2;
+    request.expected_labels_ = {ids[0], ids[1]};
+    auto multi_result = index->SearchWithRequest(request);
+    REQUIRE(multi_result != nullptr);
+    REQUIRE(multi_result->GetDim() == 2);
+    REQUIRE(multi_result->GetReasoning().find("2/2 expected labels found") != std::string::npos);
+
+    request.threshold_ = 1.0F;
+    request.expected_labels_ = {ids[0]};
+    auto threshold_result = index->SearchWithRequest(request);
+    REQUIRE(threshold_result != nullptr);
+    REQUIRE(threshold_result->GetDim() == 1);
+    REQUIRE(threshold_result->GetIds()[0] == ids[0]);
+
+    request.expected_labels_.clear();
+    request.threshold_ = std::nullopt;
+    auto result_without_reasoning = index->SearchWithRequest(request);
+    REQUIRE(result_without_reasoning != nullptr);
+    REQUIRE(result_without_reasoning->GetIds()[0] == ids[0]);
+    REQUIRE(result_without_reasoning->GetReasoning().find("expected_analysis") ==
+            std::string::npos);
+}
+
 TEST_CASE("Pyramid MRLE split promotes flat nodes without raw vectors", "[ut][pyramid][MRLE]") {
     auto test_index = MakePyramidIndex(3, 4, false, false, true);
     const auto& index = test_index.index;

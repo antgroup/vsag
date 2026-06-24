@@ -17,6 +17,7 @@
 set (PYRAMID_SRCS
         pyramid.cpp
         pyramid_build_cache.cpp
+        pyramid_index_node.cpp
         pyramid_zparameters.cpp
 )
 
