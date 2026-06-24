@@ -10,6 +10,7 @@ VSAG 中所有检索能力都围绕 `Index` 接口展开。要使用某种索引
 | 名称           | `name` 字符串   | 文档                                  | 适用场景                                            |
 | -------------- | --------------- | ------------------------------------- | --------------------------------------------------- |
 | HGraph         | `hgraph`        | [HGraph](../indexes/hgraph.md)        | VSAG 自研图索引，支持多级量化和调优（详见 `examples/cpp/103_index_hgraph.cpp`） |
+| MCI            | `mci`           | [MCI](../indexes/mci.md)              | 基于 clique 候选组织的稠密向量索引，并支持可选 HGraph Hybrid 过滤 |
 | IVF            | `ivf`           | [IVF](../indexes/ivf.md)              | 倒排索引，适合大 `k` 和批量查询                     |
 | SINDI          | `sindi`         | [SINDI](../indexes/sindi.md)          | 稀疏向量上的倒排索引                                |
 | Pyramid        | `pyramid`       | [Pyramid](../indexes/pyramid.md)      | 多层级 / 按路径分区的索引结构                       |

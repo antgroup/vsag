@@ -22,6 +22,7 @@
 #include "algorithm/hgraph/hgraph.h"
 #include "algorithm/ivf/ivf.h"
 #include "algorithm/lazy_hgraph/lazy_hgraph.h"
+#include "algorithm/mci.h"
 #include "algorithm/pyramid/pyramid.h"
 #include "algorithm/pyramid/pyramid_zparameters.h"
 #include "algorithm/sindi/sindi.h"
@@ -155,6 +156,12 @@ create_warp_index(JsonType& parsed_params, const IndexCommonParam& index_common_
     return {std::make_shared<IndexImpl<BruteForce>>(index_param, index_common_params)};
 }
 
+tl::expected<std::shared_ptr<Index>, Error>
+create_mci_index(JsonType& parsed_params, const IndexCommonParam& index_common_params) {
+    return create_index_impl_with_param_log<MCI>(
+        "created a mci index", parsed_params, index_common_params);
+}
+
 }  // namespace
 
 void
@@ -172,6 +179,7 @@ register_all_index_creators() {
         register_index_creator(INDEX_SPARSE, &create_sparse_index);
         register_index_creator(INDEX_SINDI, &create_sindi_index);
         register_index_creator(INDEX_WARP, &create_warp_index);
+        register_index_creator(INDEX_MCI, &create_mci_index);
     });
 }
 

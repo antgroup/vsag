@@ -9,6 +9,7 @@ index-specific options.
 | Name | Description | Page | Example |
 |------|-------------|------|---------|
 | `hgraph` | Improved graph index with richer quantization options | [HGraph](../indexes/hgraph.md) | `examples/cpp/103_index_hgraph.cpp` |
+| `mci` | Clique-based dense index with optional HGraph hybrid filtering | [MCI](../indexes/mci.md) | `examples/cpp/322_feature_mci_hybrid_filter.cpp` |
 | `ivf` | Inverted file with quantization | [IVF](../indexes/ivf.md) | `examples/cpp/106_index_ivf.cpp` |
 | `sindi` | Sparse-vector index (e.g. BM25, SPLADE) | [SINDI](../indexes/sindi.md) | `examples/cpp/109_index_sindi.cpp` |
 | `pyramid` | Multi-tenant / tag-partitioned graph index | [Pyramid](../indexes/pyramid.md) | `examples/cpp/107_index_pyramid.cpp` |
