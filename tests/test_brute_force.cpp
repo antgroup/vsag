@@ -20,8 +20,17 @@
 #include "functest.h"
 #include "test_index.h"
 #include "vsag/options.h"
+#include "vsag/search_request.h"
 
 namespace fixtures {
+
+class RejectAllFilter : public vsag::Filter {
+public:
+    bool
+    CheckValid(int64_t id) const override {
+        return false;
+    }
+};
 
 class EvenIdFilter : public vsag::Filter {
 public:
@@ -800,4 +809,293 @@ TEST_CASE("(PR) BruteForce BruteForce Estimate Memory Test", "[ft][memory][brute
 TEST_CASE("(Daily) BruteForce BruteForce Estimate Memory Test", "[ft][memory][bruteforce][daily]") {
     auto resource = fixtures::BruteForceTestIndex::GetResource(false);
     TestBruteForceEstimateMemory(resource);
+}
+
+// BruteForce Reasoning Tests
+
+TEST_CASE("(PR) BruteForce SearchWithRequest Reasoning", "[ft][bruteforce][reasoning][pr]") {
+    using namespace fixtures;
+
+    auto param = BruteForceTestIndex::GenerateBruteForceBuildParametersString("l2", 16, "fp32");
+    auto index = TestIndex::TestFactory(BruteForceTestIndex::name, param, true);
+    auto dataset = BruteForceTestIndex::pool.GetDatasetAndCreate(16, 256, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)
+        ->Dim(dataset->base_->GetDim())
+        ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+        ->Owner(false);
+
+    vsag::SearchRequest req;
+    req.topk_ = 5;
+    req.params_str_ = "";
+    req.query_ = query;
+    req.expected_labels_ = {dataset->base_->GetIds()[0]};
+
+    auto result = index->SearchWithRequest(req);
+    REQUIRE(result.has_value());
+    REQUIRE_FALSE(result.value()->GetReasoning().empty());
+    REQUIRE(result.value()->GetReasoning().find("expected_analysis") != std::string::npos);
+    REQUIRE(result.value()->GetReasoning().find("missed_targets") != std::string::npos);
+
+    // With RejectAll filter, expected label should be diagnosed as filter_rejected
+    req.enable_filter_ = true;
+    req.filter_ = std::make_shared<RejectAllFilter>();
+
+    auto empty_result = index->SearchWithRequest(req);
+    REQUIRE(empty_result.has_value());
+    REQUIRE(empty_result.value()->GetDim() == 0);
+    REQUIRE_FALSE(empty_result.value()->GetReasoning().empty());
+    REQUIRE(empty_result.value()->GetReasoning().find("missed_targets") != std::string::npos);
+    REQUIRE(empty_result.value()->GetReasoning().find("filter_rejected") != std::string::npos);
+}
+
+TEST_CASE("(PR) BruteForce Reasoning Found Verification", "[ft][bruteforce][reasoning][pr]") {
+    using namespace fixtures;
+
+    auto param = BruteForceTestIndex::GenerateBruteForceBuildParametersString("l2", 16, "fp32");
+    auto index = TestIndex::TestFactory(BruteForceTestIndex::name, param, true);
+    auto dataset = BruteForceTestIndex::pool.GetDatasetAndCreate(16, 256, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)
+        ->Dim(dataset->base_->GetDim())
+        ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+        ->Owner(false);
+
+    vsag::SearchRequest req;
+    req.topk_ = 10;
+    req.params_str_ = "";
+    req.query_ = query;
+
+    auto baseline = index->SearchWithRequest(req);
+    REQUIRE(baseline.has_value());
+    REQUIRE(baseline.value()->GetDim() > 0);
+
+    auto* ids = baseline.value()->GetIds();
+    int64_t found_label = ids[0];
+
+    req.expected_labels_ = {found_label};
+    auto result = index->SearchWithRequest(req);
+    REQUIRE(result.has_value());
+    REQUIRE_FALSE(result.value()->GetReasoning().empty());
+
+    auto reasoning = result.value()->GetReasoning();
+    REQUIRE(reasoning.find("1/1") != std::string::npos);
+    REQUIRE(reasoning.find("0 missed") != std::string::npos);
+}
+
+TEST_CASE("(PR) BruteForce Reasoning Multiple Labels Mixed", "[ft][bruteforce][reasoning][pr]") {
+    using namespace fixtures;
+
+    auto param = BruteForceTestIndex::GenerateBruteForceBuildParametersString("l2", 16, "fp32");
+    auto index = TestIndex::TestFactory(BruteForceTestIndex::name, param, true);
+    auto dataset = BruteForceTestIndex::pool.GetDatasetAndCreate(16, 256, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)
+        ->Dim(dataset->base_->GetDim())
+        ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+        ->Owner(false);
+
+    vsag::SearchRequest req;
+    req.topk_ = 10;
+    req.params_str_ = "";
+    req.query_ = query;
+
+    auto baseline = index->SearchWithRequest(req);
+    REQUIRE(baseline.has_value());
+    REQUIRE(baseline.value()->GetDim() > 0);
+
+    auto* ids = baseline.value()->GetIds();
+    // Test with a label that is in the top-k result (should be found)
+    // and a label from the dataset that is outside the top-k (should be
+    // diagnosed as ef_too_small since BruteForce visits all vectors but
+    // the top-k heap may evict it).
+    int64_t found_label = ids[0];
+    int64_t missed_label = dataset->base_->GetIds()[0];
+    // Ensure missed_label is not in the top-10 result
+    bool missed_in_result = false;
+    for (int64_t i = 0; i < baseline.value()->GetDim(); ++i) {
+        if (ids[i] == missed_label) {
+            missed_in_result = true;
+            break;
+        }
+    }
+    if (missed_in_result) {
+        // Pick a different label that is not in the result
+        for (int64_t i = 0; i < dataset->base_->GetNumElements(); ++i) {
+            missed_label = dataset->base_->GetIds()[i];
+            missed_in_result = false;
+            for (int64_t j = 0; j < baseline.value()->GetDim(); ++j) {
+                if (ids[j] == missed_label) {
+                    missed_in_result = true;
+                    break;
+                }
+            }
+            if (!missed_in_result) {
+                break;
+            }
+        }
+    }
+
+    req.expected_labels_ = {found_label, missed_label};
+    auto result = index->SearchWithRequest(req);
+    REQUIRE(result.has_value());
+    REQUIRE_FALSE(result.value()->GetReasoning().empty());
+
+    auto reasoning = result.value()->GetReasoning();
+    REQUIRE(reasoning.find("expected_analysis") != std::string::npos);
+    // found_label should be found; missed_label may be found or missed
+    // depending on the dataset. At minimum the report should be valid.
+    if (!missed_in_result) {
+        REQUIRE(reasoning.find("missed_targets") != std::string::npos);
+    }
+}
+
+TEST_CASE("(PR) BruteForce Reasoning With Filter Rejection", "[ft][bruteforce][reasoning][pr]") {
+    using namespace fixtures;
+
+    auto param = BruteForceTestIndex::GenerateBruteForceBuildParametersString("l2", 16, "fp32");
+    auto index = TestIndex::TestFactory(BruteForceTestIndex::name, param, true);
+    auto dataset = BruteForceTestIndex::pool.GetDatasetAndCreate(16, 256, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)
+        ->Dim(dataset->base_->GetDim())
+        ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+        ->Owner(false);
+
+    // Use RejectAllFilter to guarantee that expected labels are rejected.
+    // This makes the test deterministic: all expected labels will be
+    // diagnosed as filter_rejected since RejectAllFilter rejects everything.
+    int64_t target_label = dataset->base_->GetIds()[0];
+
+    vsag::SearchRequest req;
+    req.topk_ = 5;
+    req.params_str_ = "";
+    req.query_ = query;
+    req.enable_filter_ = true;
+    req.filter_ = std::make_shared<RejectAllFilter>();
+    req.expected_labels_ = {target_label};
+
+    auto result = index->SearchWithRequest(req);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() == 0);
+    REQUIRE_FALSE(result.value()->GetReasoning().empty());
+
+    auto reasoning = result.value()->GetReasoning();
+    REQUIRE(reasoning.find("expected_analysis") != std::string::npos);
+    REQUIRE(reasoning.find("filter_rejected") != std::string::npos);
+}
+
+TEST_CASE("(PR) BruteForce Reasoning Does Not Affect Results", "[ft][bruteforce][reasoning][pr]") {
+    using namespace fixtures;
+
+    auto param = BruteForceTestIndex::GenerateBruteForceBuildParametersString("l2", 16, "fp32");
+    auto index = TestIndex::TestFactory(BruteForceTestIndex::name, param, true);
+    auto dataset = BruteForceTestIndex::pool.GetDatasetAndCreate(16, 256, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)
+        ->Dim(dataset->base_->GetDim())
+        ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+        ->Owner(false);
+
+    vsag::SearchRequest req_without;
+    req_without.topk_ = 10;
+    req_without.params_str_ = "";
+    req_without.query_ = query;
+
+    auto result_without = index->SearchWithRequest(req_without);
+    REQUIRE(result_without.has_value());
+    REQUIRE(result_without.value()->GetDim() > 0);
+
+    vsag::SearchRequest req_with;
+    req_with.topk_ = 10;
+    req_with.params_str_ = "";
+    req_with.query_ = query;
+    req_with.expected_labels_ = {result_without.value()->GetIds()[0]};
+
+    auto result_with = index->SearchWithRequest(req_with);
+    REQUIRE(result_with.has_value());
+    REQUIRE(result_with.value()->GetDim() == result_without.value()->GetDim());
+
+    auto dim_without = result_without.value()->GetDim();
+    for (int64_t i = 0; i < dim_without; ++i) {
+        REQUIRE(result_with.value()->GetIds()[i] == result_without.value()->GetIds()[i]);
+        REQUIRE(result_with.value()->GetDistances()[i] ==
+                result_without.value()->GetDistances()[i]);
+    }
+}
+
+TEST_CASE("(PR) BruteForce Reasoning Empty Expected Labels", "[ft][bruteforce][reasoning][pr]") {
+    using namespace fixtures;
+
+    auto param = BruteForceTestIndex::GenerateBruteForceBuildParametersString("l2", 16, "fp32");
+    auto index = TestIndex::TestFactory(BruteForceTestIndex::name, param, true);
+    auto dataset = BruteForceTestIndex::pool.GetDatasetAndCreate(16, 256, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)
+        ->Dim(dataset->base_->GetDim())
+        ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+        ->Owner(false);
+
+    vsag::SearchRequest req;
+    req.topk_ = 5;
+    req.params_str_ = "";
+    req.query_ = query;
+    req.expected_labels_ = {};
+
+    auto result = index->SearchWithRequest(req);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() > 0);
+    // No reasoning analysis when expected_labels is empty
+    REQUIRE(result.value()->GetReasoning().find("expected_analysis") == std::string::npos);
+}
+
+TEST_CASE("(PR) BruteForce Reasoning No Output When Disabled", "[ft][bruteforce][reasoning][pr]") {
+    using namespace fixtures;
+
+    auto param = BruteForceTestIndex::GenerateBruteForceBuildParametersString("l2", 16, "fp32");
+    auto index = TestIndex::TestFactory(BruteForceTestIndex::name, param, true);
+    auto dataset = BruteForceTestIndex::pool.GetDatasetAndCreate(16, 256, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)
+        ->Dim(dataset->base_->GetDim())
+        ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+        ->Owner(false);
+
+    // When expected_labels is empty, reasoning is completely disabled:
+    // no ReasoningContext is created, and the result should contain no
+    // reasoning analysis. This is a deterministic check (no timing).
+    vsag::SearchRequest req;
+    req.topk_ = 5;
+    req.params_str_ = "";
+    req.query_ = query;
+    req.expected_labels_ = {};
+
+    auto result = index->SearchWithRequest(req);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() > 0);
+    REQUIRE(result.value()->GetReasoning().find("expected_analysis") == std::string::npos);
+
+    // Also verify that KnnSearch (which delegates to SearchWithRequest with
+    // empty expected_labels) produces identical results with and without
+    // the reasoning code path active.
+    auto knn_result = index->KnnSearch(query, 5, "", vsag::BitsetPtr(nullptr));
+    REQUIRE(knn_result.has_value());
+    REQUIRE(knn_result.value()->GetDim() == result.value()->GetDim());
+    for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
+        REQUIRE(result.value()->GetIds()[i] == knn_result.value()->GetIds()[i]);
+    }
 }

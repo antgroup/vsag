@@ -26,6 +26,7 @@
 #include "datacell/flatten_interface.h"
 #include "fmt/chrono.h"
 #include "impl/heap/standard_heap.h"
+#include "impl/reasoning/search_reasoning.h"
 #include "index_common_param.h"
 #include "index_feature_list.h"
 #include "inner_string_params.h"
@@ -359,6 +360,36 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
         attr_filter = executor->Run();
     }
 
+    // Setup reasoning context if expected labels are provided.
+    std::shared_ptr<ReasoningContext> reasoning_ctx;
+    if (not request.expected_labels_.empty()) {
+        reasoning_ctx = std::make_shared<ReasoningContext>(this->allocator_);
+        reasoning_ctx->SetSearchParams(
+            request.topk_, is_multi_vector_ ? "WARP" : "BruteForce", false, ft != nullptr);
+
+        UnorderedMap<int64_t, InnerIdType> label_to_inner_id(this->allocator_);
+        for (const auto& label : request.expected_labels_) {
+            auto [success, inner_id] = label_table_->TryGetIdByLabel(label, true);
+            if (success) {
+                label_to_inner_id[label] = inner_id;
+            }
+        }
+
+        Vector<int64_t> expected_labels_vec(
+            request.expected_labels_.begin(), request.expected_labels_.end(), this->allocator_);
+        reasoning_ctx->InitializeExpectedTargets(expected_labels_vec, label_to_inner_id);
+
+        // Compute true distances for expected targets.
+        // BruteForce uses inner_codes_ directly; for multi-vector, this is the
+        // same tokenizer used during search, so the distance is already precise.
+        for (const auto& pair : label_to_inner_id) {
+            float dist = 0.0F;
+            const auto inner_id = pair.second;
+            this->inner_codes_->Query(&dist, computer, &inner_id, 1);
+            reasoning_ctx->SetTrueDistance(inner_id, dist);
+        }
+    }
+
     std::atomic<uint32_t> dist_cmp{0};
 
     auto brute_force_params = BruteForceSearchParameters::FromJson(request.params_str_);
@@ -367,27 +398,43 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
     for (auto& cur_heap : heaps) {
         cur_heap = DistanceHeap::MakeInstanceBySize<true, true>(this->allocator_, heap_size);
     }
+    auto* reasoning = reasoning_ctx ? reasoning_ctx.get() : nullptr;
+
     auto search_func = [&](InnerIdType start, InnerIdType end, const DistHeapPtr& cur_heap) {
         uint32_t dist_cmp_local = 0;
         for (InnerIdType i = start; i < end; ++i) {
             float dist = 0.0F;
             if (attr_filter != nullptr and not attr_filter->CheckValid(i)) {
+                if (reasoning != nullptr) {
+                    reasoning->RecordFilterReject(i);
+                }
                 continue;
             }
             if (ft == nullptr or ft->CheckValid(i)) {
                 inner_codes_->Query(&dist, computer, &i, 1);
                 ++dist_cmp_local;
+                if (reasoning != nullptr) {
+                    reasoning->RecordVisit(i, dist, 0);
+                }
                 if (is_range and dist > radius) {
                     continue;
                 }
                 cur_heap->Push(dist, i);
+            } else {
+                if (reasoning != nullptr) {
+                    reasoning->RecordFilterReject(i);
+                }
             }
         }
         dist_cmp.fetch_add(dist_cmp_local, std::memory_order_relaxed);
     };
 
     auto count = total_count_.load();
-    if (parallel_count == 1 || this->thread_pool_ == nullptr) {
+    // Reasoning context is not thread-safe; force single-threaded search when
+    // reasoning is enabled so that RecordVisit / RecordFilterReject calls are
+    // serialized.  Reasoning is a diagnostic tool and does not need maximum
+    // throughput.
+    if (parallel_count == 1 || this->thread_pool_ == nullptr || reasoning != nullptr) {
         search_func(0, count, heaps[0]);
         heap = heaps[0];
     } else {
@@ -408,7 +455,29 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
         }
     }
 
+    // Collect result inner IDs before pack_knn_result consumes the heap,
+    // so we can call MarkResult for reasoning analysis.
+    Vector<InnerIdType> result_inner_ids(this->allocator_);
+    if (reasoning_ctx && heap != nullptr && !heap->Empty()) {
+        auto heap_size = static_cast<uint64_t>(heap->Size());
+        result_inner_ids.reserve(heap_size);
+        const auto* data = heap->GetData();
+        for (uint64_t i = 0; i < heap_size; ++i) {
+            result_inner_ids.push_back(data[i].second);
+        }
+    }
+
     auto result = this->pack_knn_result(heap);
+
+    // Generate reasoning report if reasoning context was created.
+    if (reasoning_ctx) {
+        if (not result_inner_ids.empty()) {
+            reasoning_ctx->MarkResult(result_inner_ids);
+        }
+        reasoning_ctx->SetTermination(ReasoningContext::kTerminationLowerBoundReached);
+        reasoning_ctx->DiagnoseExpectedTargets();
+        result->Reasoning(reasoning_ctx->GenerateReport());
+    }
 
     JsonType stats;
     stats["dist_cmp"].SetInt(dist_cmp.load(std::memory_order_relaxed));
