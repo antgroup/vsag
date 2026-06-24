@@ -79,12 +79,11 @@ public:
 
     virtual void
     QueryWithDistanceHint(float* result_dists,
-                          const float* hint_dists,
+                          const float* /*hint_dists*/,
                           const ComputerInterfacePtr& computer,
                           const InnerIdType* idx,
                           InnerIdType id_count,
                           QueryContext* ctx = nullptr) {
-        (void)hint_dists;
         this->Query(result_dists, computer, idx, id_count, ctx);
     }
 
