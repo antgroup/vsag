@@ -28,6 +28,9 @@
 #include "impl/heap/standard_heap.h"
 #include "impl/odescent/odescent_graph_builder.h"
 #include "impl/pruning_strategy.h"
+#include "impl/reasoning/search_reasoning.h"
+#include "io/memory_io/memory_io_parameter.h"
+#include "quantization/rabitq_quantization/rabitq_quantizer_parameter.h"
 #include "query_context.h"
 #include "storage/empty_index_binary_set.h"
 #include "storage/serialization.h"
@@ -51,17 +54,6 @@ split(const std::string& str, char delimiter) {
 }
 
 static inline uint64_t
-get_suitable_max_degree(int64_t data_num) {
-    if (data_num < 100'000) {
-        return 24;
-    }
-    if (data_num < 1000'000) {
-        return 32;
-    }
-    return 64;
-}
-
-static inline uint64_t
 get_suitable_ef_search(int64_t topk, int64_t data_num, uint64_t subindex_ef_search = 50) {
     auto topk_float = static_cast<float>(topk);
     if (data_num < 1'000) {
@@ -76,149 +68,37 @@ get_suitable_ef_search(int64_t topk, int64_t data_num, uint64_t subindex_ef_sear
     return std::max(static_cast<uint64_t>(4.0F * topk_float), subindex_ef_search * 8);
 }
 
-IndexNode::IndexNode(Allocator* allocator,
-                     GraphInterfaceParamPtr graph_param,
-                     uint32_t index_min_size)
-    : ids_(allocator),
-      children_(allocator),
-      allocator_(allocator),
-      graph_param_(std::move(graph_param)),
-      index_min_size_(index_min_size) {
-}
+InnerSearchParam
+Pyramid::create_knn_search_param(const PyramidSearchParameters& parsed_param,
+                                 int64_t k,
+                                 const FilterPtr& filter) const {
+    CHECK_ARGUMENT(k > 0, fmt::format("k({}) must be greater than 0", k));
+    CHECK_ARGUMENT(parsed_param.hierarchy_op == PyramidSearchParameters::HierarchyOp::SINGLE,
+                   "multi-hierarchy search (union/intersection) is not yet implemented");
+    auto ef_search_threshold =
+        std::max<uint64_t>(AMPLIFICATION_FACTOR * k, static_cast<uint64_t>(1000));
+    CHECK_ARGUMENT(  // NOLINT
+        (1 <= parsed_param.ef_search) and (parsed_param.ef_search <= ef_search_threshold),
+        fmt::format(
+            "ef_search({}) must be in range [1, {}]", parsed_param.ef_search, ef_search_threshold));
 
-void
-IndexNode::Build(ODescent& odescent) {
-    std::unique_lock lock(mutex_);
-    // Build an index when the level corresponding to the current node requires indexing
-    if (not ids_.empty()) {
-        Init();
-    }
-    if (status_ == Status::GRAPH) {
-        entry_point_ = ids_[0];
-        odescent.SetMaxDegree(static_cast<int32_t>(graph_param_->max_degree_));
-        odescent.Build(ids_);
-        odescent.SaveGraph(graph_);
-        Vector<InnerIdType>(allocator_).swap(ids_);
-    }
-    for (const auto& item : children_) {
-        item.second->Build(odescent);
-    }
-}
-
-void
-IndexNode::AddChild(const std::string& key) {
-    // AddChild is not thread-safe; ensure thread safety in calls to it.
-    children_[key] = std::make_unique<IndexNode>(allocator_, graph_param_, index_min_size_);
-    children_[key]->level_ = level_ + 1;
-}
-
-IndexNode*
-IndexNode::GetChild(const std::string& key, bool need_init) {
-    std::unique_lock lock(mutex_);
-    auto result = children_.find(key);
-    if (result != children_.end()) {
-        return result->second.get();
-    }
-    if (not need_init) {
-        return nullptr;
-    }
-    AddChild(key);
-    return children_[key].get();
-}
-
-void
-IndexNode::Deserialize(StreamReader& reader) {
-    // deserialize `entry_point_`
-    StreamReader::ReadObj(reader, entry_point_);
-    // deserialize `level_`
-    StreamReader::ReadObj(reader, level_);
-    // deserialize `status_`
-    StreamReader::ReadObj(reader, status_);
-    if (status_ == Status::GRAPH) {
-        graph_ = std::make_shared<SparseGraphDataCell>(
-            std::dynamic_pointer_cast<SparseGraphDatacellParameter>(graph_param_), allocator_);
-        graph_->Deserialize(reader);
-    } else if (status_ == Status::FLAT) {
-        StreamReader::ReadVector(reader, ids_);
-    }
-    // deserialize `children`
-    uint64_t children_size = 0;
-    StreamReader::ReadObj(reader, children_size);
-    for (uint64_t i = 0; i < children_size; ++i) {
-        std::string key = StreamReader::ReadString(reader);
-        AddChild(key);
-        children_[key]->Deserialize(reader);
-    }
-}
-
-void
-IndexNode::Serialize(StreamWriter& writer) const {
-    // serialize `entry_point_`
-    StreamWriter::WriteObj(writer, entry_point_);
-    // serialize `level_`
-    StreamWriter::WriteObj(writer, level_);
-    // serialize `status_`
-    StreamWriter::WriteObj(writer, status_);
-    if (status_ == Status::GRAPH) {
-        graph_->Serialize(writer);
-    } else if (status_ == Status::FLAT) {
-        StreamWriter::WriteVector(writer, ids_);
-    }
-    // serialize `children`
-    uint64_t children_size = children_.size();
-    StreamWriter::WriteObj(writer, children_size);
-    for (const auto& item : children_) {
-        // calculate size of `key`
-        StreamWriter::WriteString(writer, item.first);
-        // calculate size of `content`
-        item.second->Serialize(writer);
-    }
-}
-void
-IndexNode::Init() {
-    if (status_ == Status::NO_INDEX) {
-        if (ids_.size() >= index_min_size_) {
-            if (not ids_.empty() and level_ != 0) {
-                auto new_max_degree = get_suitable_max_degree(static_cast<int64_t>(ids_.size()));
-                if (new_max_degree < graph_param_->max_degree_) {
-                    auto new_graph_param = std::make_shared<SparseGraphDatacellParameter>();
-                    new_graph_param->FromJson(graph_param_->ToJson());
-                    new_graph_param->max_degree_ =
-                        get_suitable_max_degree(static_cast<int64_t>(ids_.size()));
-                    graph_param_ = new_graph_param;
-                }
-            }
-            graph_ = std::make_shared<SparseGraphDataCell>(
-                std::dynamic_pointer_cast<SparseGraphDatacellParameter>(graph_param_), allocator_);
-            status_ = Status::GRAPH;
-        } else {
-            status_ = Status::FLAT;
-        }
-    }
-}
-
-void
-IndexNode::Search(const SearchFunc& search_func,
-                  const VisitedListPtr& vl,
-                  const DistHeapPtr& search_result,
-                  uint64_t ef_search) const {
-    bool has_index = false;
-    {
-        std::shared_lock lock(mutex_);
-        has_index = status_ != IndexNode::Status::NO_INDEX;
-    }
-    if (has_index) {
-        auto self_search_result = search_func(this, vl);
-        search_result->Merge(*self_search_result);
-        while (search_result->Size() > ef_search) {
-            search_result->Pop();
-        }
-        return;
+    InnerSearchParam search_param;
+    search_param.ef = std::max<uint64_t>(parsed_param.ef_search, static_cast<uint64_t>(k));
+    search_param.radius = std::numeric_limits<float>::max();
+    search_param.topk = k;
+    search_param.search_mode = KNN_SEARCH;
+    search_param.parallel_search_thread_count = parsed_param.parallel_search_thread_count;
+    if (this->support_duplicate_) {
+        search_param.consider_duplicate = true;
     }
 
-    for (const auto& [key, node] : children_) {
-        node->Search(search_func, vl, search_result, ef_search);
+    if (parsed_param.enable_time_record) {
+        search_param.time_cost = std::make_shared<Timer>();
+        search_param.time_cost->SetThreshold(parsed_param.timeout_ms);
     }
+
+    search_param.is_inner_id_allowed = this->create_search_filter(filter);
+    return search_param;
 }
 
 std::vector<int64_t>
@@ -441,6 +321,126 @@ Pyramid::RangeSearch(const DatasetPtr& query,
                           hierarchy_name,
                           collect_rabitq_lower_bounds ? &rabitq_lower_bound_candidates : nullptr);
     result->Statistics(stats.Dump());
+    return result;
+}
+
+DatasetPtr
+Pyramid::SearchWithRequest(const SearchRequest& request) const {
+    SearchStatistics stats;
+    QueryContext ctx{.alloc = this->allocator_, .stats = &stats};
+    if (request.search_allocator_ != nullptr) {
+        ctx.alloc = request.search_allocator_;
+    }
+
+    const auto& query = request.query_;
+    CHECK_ARGUMENT(query != nullptr, "query dataset is required");
+    CHECK_ARGUMENT(query->GetFloat32Vectors() != nullptr, "query vectors is required");
+
+    const bool is_knn = request.mode_ == SearchMode::KNN_SEARCH;
+    if (is_knn) {
+        this->validate_knn_args(query, request.topk_);
+    } else {
+        CHECK_ARGUMENT(request.mode_ == SearchMode::RANGE_SEARCH, "unsupported search mode");
+        this->validate_range_args(query, request.radius_, request.limited_size_);
+    }
+
+    auto parsed_param = PyramidSearchParameters::FromJson(request.params_str_);
+    InnerSearchParam search_param;
+    if (is_knn) {
+        search_param = this->create_knn_search_param(parsed_param, request.topk_, request.filter_);
+    } else {
+        CHECK_ARGUMENT(parsed_param.hierarchy_op == PyramidSearchParameters::HierarchyOp::SINGLE,
+                       "multi-hierarchy search (union/intersection) is not yet implemented");
+        search_param.ef = parsed_param.ef_search;
+        search_param.radius = request.radius_ * RADIUS_EPSILON;
+        search_param.search_mode = RANGE_SEARCH;
+        search_param.parallel_search_thread_count = parsed_param.parallel_search_thread_count;
+        search_param.topk = request.limited_size_ == -1 ? std::numeric_limits<int64_t>::max()
+                                                        : request.limited_size_;
+        if (this->support_duplicate_) {
+            search_param.consider_duplicate = true;
+        }
+        if (parsed_param.enable_time_record) {
+            search_param.time_cost = std::make_shared<Timer>();
+            search_param.time_cost->SetThreshold(parsed_param.timeout_ms);
+        }
+        search_param.is_inner_id_allowed = this->create_search_filter(request.filter_);
+    }
+    SearchFunc search_func = [&](const IndexNode* node, const VisitedListPtr& vl) {
+        return this->search_node(
+            node, vl, search_param, query, base_codes_, ctx, parsed_param.subindex_ef_search);
+    };
+
+    // Setup reasoning context if expected labels are provided.
+    std::shared_ptr<ReasoningContext> reasoning_ctx;
+    if (is_knn && not request.expected_labels_.empty()) {
+        reasoning_ctx = std::make_shared<ReasoningContext>(ctx.alloc);
+        reasoning_ctx->SetSearchParams(
+            request.topk_, "Pyramid", use_reorder_, request.filter_ != nullptr);
+
+        UnorderedMap<int64_t, InnerIdType> label_to_inner_id(ctx.alloc);
+        Vector<InnerIdType> expected_inner_ids(ctx.alloc);
+        {
+            // Add holds this lock while mutating labels and vector storage.
+            std::lock_guard lock(cur_element_count_mutex_);
+            for (const auto& label : request.expected_labels_) {
+                // `true` = return_even_removed: include removed labels so reasoning can diagnose them.
+                auto [success, inner_id] = label_table_->TryGetIdByLabel(label, true);
+                if (success) {
+                    label_to_inner_id[label] = inner_id;
+                }
+            }
+            expected_inner_ids.reserve(label_to_inner_id.size());
+            for (const auto& [label, inner_id] : label_to_inner_id) {
+                expected_inner_ids.push_back(inner_id);
+            }
+            if (not expected_inner_ids.empty()) {
+                auto precise_flatten =
+                    this->precise_codes_ != nullptr ? this->precise_codes_ : this->base_codes_;
+                auto computer = precise_flatten->FactoryComputer(query->GetFloat32Vectors());
+                Vector<float> true_dists(expected_inner_ids.size(), ctx.alloc);
+                precise_flatten->Query(true_dists.data(),
+                                       computer,
+                                       expected_inner_ids.data(),
+                                       static_cast<InnerIdType>(expected_inner_ids.size()),
+                                       &ctx);
+                for (size_t i = 0; i < expected_inner_ids.size(); ++i) {
+                    reasoning_ctx->SetTrueDistance(expected_inner_ids[i], true_dists[i]);
+                }
+            }
+        }
+
+        Vector<int64_t> expected_labels_vec(
+            request.expected_labels_.begin(), request.expected_labels_.end(), ctx.alloc);
+        reasoning_ctx->InitializeExpectedTargets(expected_labels_vec, label_to_inner_id);
+        ctx.reasoning_ctx = reasoning_ctx.get();
+    }
+
+    std::string hierarchy_name =
+        parsed_param.hierarchies.empty() ? "" : parsed_param.hierarchies[0];
+    auto result = this->search_impl(query, search_func, search_param, ctx, hierarchy_name, nullptr);
+    result->Statistics(stats.Dump());
+
+    if (reasoning_ctx) {
+        Vector<InnerIdType> result_inner_ids(ctx.alloc);
+        const auto* result_ids = result->GetIds();
+        const auto num_results = result->GetNumElements();
+        result_inner_ids.reserve(static_cast<size_t>(num_results));
+        {
+            std::lock_guard lock(cur_element_count_mutex_);
+            for (int64_t i = 0; i < num_results; ++i) {
+                // `true` = return_even_removed: match the same behavior used for expected_labels.
+                auto [success, inner_id] = label_table_->TryGetIdByLabel(result_ids[i], true);
+                if (success) {
+                    result_inner_ids.push_back(inner_id);
+                }
+            }
+        }
+        reasoning_ctx->MarkResult(result_inner_ids);
+        reasoning_ctx->DiagnoseExpectedTargets();
+        result->Reasoning(reasoning_ctx->GenerateReport());
+    }
+
     return result;
 }
 
@@ -1674,6 +1674,8 @@ Pyramid::search_node(const IndexNode* node,
             for (uint64_t i = 0; i < id_count; ++i) {
                 if (inner_filter->CheckValid(ids_ptr[i])) {
                     valid_ids.push_back(ids_ptr[i]);
+                } else if (ctx.reasoning_ctx != nullptr) {
+                    ctx.reasoning_ctx->RecordFilterReject(ids_ptr[i]);
                 }
             }
             ids_ptr = valid_ids.data();
@@ -1685,6 +1687,9 @@ Pyramid::search_node(const IndexNode* node,
         codes->Query(dists.data(), computer, ids_ptr, id_count, &ctx);
 
         for (int i = 0; i < id_count; ++i) {
+            if (ctx.reasoning_ctx != nullptr) {
+                ctx.reasoning_ctx->RecordVisit(ids_ptr[i], dists[i], 0);
+            }
             if (search_param.distance_threshold.has_value() and
                 (not std::isfinite(dists[i]) ||
                  (not search_param.enable_reorder and
@@ -1693,6 +1698,9 @@ Pyramid::search_node(const IndexNode* node,
             }
             results->Push(dists[i], ids_ptr[i]);
             if (results->Size() > search_param.ef) {
+                if (ctx.reasoning_ctx != nullptr) {
+                    ctx.reasoning_ctx->RecordEviction(results->Top().second, 0);
+                }
                 results->Pop();
             }
         }
