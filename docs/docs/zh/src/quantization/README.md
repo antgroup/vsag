@@ -142,4 +142,5 @@ true`）。本章介绍每一种受支持的量化器：它做什么、接受哪
 - [乘积量化（PQ）](pq.md)
 - [PQ FastScan](pqfs.md)
 - [RaBitQ](rabitq.md)
+- [RaBitQ x+y Split](rabitq_split.md)
 - [量化变换（TQ）](../advanced/quantization_transform.md)

@@ -29,6 +29,7 @@
 - [乘积量化（PQ）](quantization/pq.md)
 - [PQ FastScan](quantization/pqfs.md)
 - [RaBitQ](quantization/rabitq.md)
+- [RaBitQ x+y Split](quantization/rabitq_split.md)
 - [量化变换（TQ）](advanced/quantization_transform.md)
 
 # 开发者指南

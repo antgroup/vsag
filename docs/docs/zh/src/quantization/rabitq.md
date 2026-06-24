@@ -9,8 +9,8 @@
 
 > 实现：`src/quantization/rabitq_quantization/rabitq_quantizer.cpp`，
 > 参数文件 `rabitq_quantizer_parameter.cpp`。
-> 设计说明：`docs/rabitq_1xbit_new_repo_guide.md`、
-> `docs/rabitq_split_1bit_7bit.md`。
+> HGraph split 的完整存储布局、lower bound 公式和 IO 模式见
+> [RaBitQ x+y Split](rabitq_split.md)。
 
 ## 何时使用
 
@@ -40,7 +40,7 @@
 | `rabitq_bits_per_dim_query` | int | `32` | 搜索时**查询**的每维位数。允许值：`4` 或 `32`（`rabitq_quantizer_parameter.cpp:38-43`）。 |
 | `rabitq_bits_per_dim_base` | int | `1` | standard RaBitQ 下表示底库码每维位数；HGraph `x+y` split 下，这个外部 key 表示 `x`，即图遍历过滤阶段使用的 filter bits。范围 `[1, 8]`。 |
 | `rabitq_bits_per_dim_precise` | int | 未设置 | HGraph-only split 模式 key。和 `base_quantization_type: "rabitq"`、`precise_quantization_type: "rabitq"` 一起出现时表示 `y`，即重排 / full-distance 阶段读取的 supplement bits。要求 `x + y <= 8`。 |
-| `rabitq_error_rate` | float | `1.9` | 控制编码器误差预算；必须为有限正数（`rabitq_quantizer_parameter.cpp:68-75`）。 |
+| `rabitq_error_rate` | float | `1.9` | HGraph split 搜索的默认 lower-bound 误差倍率；必须为有限正数，也可以在 `hgraph` 搜索参数中按次覆盖。 |
 | `use_fht` | bool | `false` | `true` 时在二值化前应用快速 Hadamard 变换旋转。以 O(dim log dim) 的廉价代价提升各向异性数据上的精度（`rabitq_quantizer_parameter.cpp:76-78`）。 |
 
 在 HGraph 上，这些以顶层 key 暴露：`rabitq_pca_dim`、
@@ -110,6 +110,5 @@ FHT 旋转是固定的（无需学习），因此不增加训练代价；PCA 预
 
 - [量化变换](../advanced/quantization_transform.md)
 - [HGraph 索引](../indexes/hgraph.md)
-- 设计说明：`docs/rabitq_1xbit_new_repo_guide.md`、
-  `docs/rabitq_split_1bit_7bit.md`
+- [RaBitQ x+y Split](rabitq_split.md)
 - [量化总览](README.md)

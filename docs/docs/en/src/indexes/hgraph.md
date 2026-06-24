@@ -204,7 +204,8 @@ Search-time parameters live under the `hgraph` sub-object:
 | `ef_search` | int | — (required) | Size of the search frontier. Larger = higher recall, slower query. |
 | `hops_limit` | int | unlimited | Hard cap on the number of hops the beam search performs before returning the current frontier. |
 | `brute_force_threshold` | float | `0.0` | Selectivity-aware brute-force fallback. When `> 0` and the supplied filter's `ValidRatio()` is `≤ brute_force_threshold`, the search **bypasses the graph traversal entirely** and runs an exact scan over the valid ids using the best available flatten codes (see the section below). Must lie in `[0.0, 1.0]`; the default `0.0` disables the feature and preserves legacy behavior. |
-| `rabitq_one_bit_search` | bool | `false` | RabitQ one-bit search path; see the [Quantization chapter](../quantization/README.md). |
+| `rabitq_one_bit_search` | bool | `false` | Enables the RaBitQ filter/lower-bound path. On an x+y split index it uses all x filter bits; see [RaBitQ x+y Split](../quantization/rabitq_split.md). |
+| `rabitq_error_rate` | float | index default | Positive lower-bound error multiplier for this search. It can be tuned without rebuilding the split index. |
 
 ```cpp
 auto result = index->KnnSearch(

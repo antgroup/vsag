@@ -10,8 +10,8 @@ only the filter code and re-ranking can fetch only the supplement bits it needs.
 
 > Implementation: `src/quantization/rabitq_quantization/rabitq_quantizer.cpp`,
 > parameter file `rabitq_quantizer_parameter.cpp`.
-> Design notes: `docs/rabitq_1xbit_new_repo_guide.md`,
-> `docs/rabitq_split_1bit_7bit.md`.
+> For the complete HGraph split layout, lower-bound formula, and IO modes,
+> see [RaBitQ x+y Split](rabitq_split.md).
 
 ## When to use it
 
@@ -44,7 +44,7 @@ as `"pca, rom, rabitq"`.
 | `rabitq_bits_per_dim_query` | int | `32` | Bits per dimension used to encode the **query** during search. Allowed values: `4` or `32` (`rabitq_quantizer_parameter.cpp:38-43`). |
 | `rabitq_bits_per_dim_base` | int | `1` | In standard RaBitQ, bits per dimension for the stored base code. In HGraph `x+y` split mode, this external key means `x`, the filter bits used during graph traversal. Allowed range `[1, 8]`. |
 | `rabitq_bits_per_dim_precise` | int | unset | HGraph-only split-mode key. When present with `base_quantization_type: "rabitq"` and `precise_quantization_type: "rabitq"`, this means `y`, the supplement bits used for reorder/full-distance refinement. The sum `x + y` must be `<= 8`. |
-| `rabitq_error_rate` | float | `1.9` | Controls the error budget of the encoder; must be finite and positive (`rabitq_quantizer_parameter.cpp:68-75`). |
+| `rabitq_error_rate` | float | `1.9` | Default lower-bound error multiplier for HGraph split search; must be finite and positive. It can be overridden per search under the `hgraph` object. |
 | `use_fht` | bool | `false` | If `true`, applies a Fast Hadamard Transform rotation before binarization. Improves accuracy on anisotropic data with cheap O(dim log dim) cost (`rabitq_quantizer_parameter.cpp:76-78`). |
 
 On HGraph these are exposed as the top-level keys `rabitq_pca_dim`,
@@ -118,6 +118,5 @@ also tracks a residual norm so the inner-product estimate is unbiased.
 
 - [Transform Quantizer](../advanced/quantization_transform.md)
 - [HGraph index](../indexes/hgraph.md)
-- Design notes: `docs/rabitq_1xbit_new_repo_guide.md`,
-  `docs/rabitq_split_1bit_7bit.md`
+- [RaBitQ x+y Split](rabitq_split.md)
 - [Quantization overview](README.md)

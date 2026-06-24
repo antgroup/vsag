@@ -152,4 +152,5 @@ Refer to each index page for its full parameter list.
 - [Product Quantization (PQ)](pq.md)
 - [PQ FastScan](pqfs.md)
 - [RaBitQ](rabitq.md)
+- [RaBitQ x+y Split](rabitq_split.md)
 - [Transform Quantizer (TQ)](../advanced/quantization_transform.md)
