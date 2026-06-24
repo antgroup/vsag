@@ -232,7 +232,8 @@ SIMQ::SIMQ(const SIMQParameterPtr& param, const IndexCommonParam& common_param)
       cluster_lists_(allocator_),
       vec_to_cluster_(allocator_),
       token_to_doc_(allocator_),
-      token_to_offset_(allocator_) {
+      token_to_offset_(allocator_),
+      cluster_token_counts_(allocator_) {
     mv_codes_ = FlattenInterface::MakeInstance(param->base_codes_param, common_param);
     init_cluster_ratio_ = param->init_cluster_ratio;
     max_cluster_size_   = param->max_cluster_size;
@@ -342,9 +343,12 @@ SIMQ::run_clustering(const float* flat_vecs,
     }
 
     vec_to_cluster_.resize(static_cast<uint64_t>(num_vecs));
+    cluster_token_counts_.assign(static_cast<uint64_t>(nc), 0);
     for (int64_t v = 0; v < num_vecs; ++v) {
         int cid = clustering.vec_to_cluster_[v];
-        vec_to_cluster_[v] = static_cast<InnerIdType>(center_to_idx.at(cid));
+        InnerIdType idx = static_cast<InnerIdType>(center_to_idx.at(cid));
+        vec_to_cluster_[v] = idx;
+        ++cluster_token_counts_[idx];
     }
 }
 
@@ -440,14 +444,14 @@ SIMQ::Add(const DatasetPtr& data, AddMode /*mode*/) {
             vec_to_cluster_.push_back(cluster_idx);
             token_to_doc_.push_back(inner_id);
             token_to_offset_.push_back(t);
-            cluster_lists_[cluster_idx].push_back(inner_id);
 
-            // Count tokens in this cluster and split if over limit
-            int64_t token_count = 0;
-            for (uint64_t ti = 0; ti < vec_to_cluster_.size(); ++ti)
-                if (vec_to_cluster_[ti] == cluster_idx)
-                    ++token_count;
-            if (token_count > max_cluster_size_)
+            // Insert doc only once per cluster (deduplicate across tokens of the same doc)
+            if (cluster_lists_[cluster_idx].empty() ||
+                cluster_lists_[cluster_idx].back() != inner_id)
+                cluster_lists_[cluster_idx].push_back(inner_id);
+
+            ++cluster_token_counts_[cluster_idx];
+            if (static_cast<int64_t>(cluster_token_counts_[cluster_idx]) > max_cluster_size_)
                 split_cluster_incremental(cluster_idx);
         }
 
@@ -529,6 +533,17 @@ SIMQ::split_cluster_incremental(InnerIdType cluster_idx) {
     cluster_lists_.push_back(Vector<InnerIdType>(allocator_));
     for (InnerIdType doc_id : new_docs)
         cluster_lists_.back().push_back(doc_id);
+
+    // Recount tokens for both clusters after reassignment
+    cluster_token_counts_[cluster_idx] = 0;
+    for (uint64_t ti = 0; ti < vec_to_cluster_.size(); ++ti)
+        if (vec_to_cluster_[ti] == cluster_idx)
+            ++cluster_token_counts_[cluster_idx];
+    uint64_t new_count = 0;
+    for (uint64_t ti = 0; ti < vec_to_cluster_.size(); ++ti)
+        if (vec_to_cluster_[ti] == new_cluster_idx)
+            ++new_count;
+    cluster_token_counts_.push_back(new_count);
 
     // Register the new cluster representative in rep_hgraph_
     int64_t new_label = static_cast<int64_t>(new_cluster_idx);
@@ -884,10 +899,9 @@ SIMQ::CheckAndMappingExternalParam(const JsonType& external_param,
         throw VsagException(ErrorType::INVALID_ARGUMENT,
                             "simq only supports float32 datatype");
     }
-    if (common_param.metric_ != MetricType::METRIC_TYPE_IP &&
-        common_param.metric_ != MetricType::METRIC_TYPE_COSINE) {
+    if (common_param.metric_ != MetricType::METRIC_TYPE_IP) {
         throw VsagException(ErrorType::INVALID_ARGUMENT,
-                            "simq only supports ip or cosine metric types");
+                            "simq only supports ip metric type");
     }
 
     std::string str = format_map(SIMQ_PARAMS_TEMPLATE, DEFAULT_MAP);

@@ -81,7 +81,8 @@ struct TempFile {
         char buf[64];
         std::snprintf(buf, sizeof(buf), "%s", prefix);
         int fd = mkstemp(buf);
-        if (fd >= 0) ::close(fd);
+        REQUIRE(fd >= 0);
+        ::close(fd);
         path = buf;
     }
     ~TempFile() { std::remove(path.c_str()); }
