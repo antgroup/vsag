@@ -35,6 +35,7 @@
 
 - [代码目录结构](development/code_structure.md)
 - [编译构建](development/building.md)
+- [离线 / 内网环境构建](development/offline_build.md)
 - [运行测试](development/testing.md)
 - [贡献到 VSAG](development/contributing.md)
 

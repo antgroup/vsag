@@ -138,6 +138,12 @@ make pyvsag-all
 - `VSAG_ENABLE_INTEL_MKL`：是否启用 Intel MKL 作为 BLAS 后端，默认 `OFF`；关闭时使用 OpenBLAS；
 - `VSAG_ENABLE_LIBAIO`：是否启用 `libaio`，默认 `ON`。
 
+## 离线 / 内网环境构建
+
+VSAG 会在配置 / 构建阶段下载第三方库。在离线或网络受限的环境中，可以设置按依赖的
+`VSAG_THIRDPARTY_*` 环境变量，从本地路径或内网镜像（内网 HTTP 服务、OSS 存储桶等）获取每个
+压缩包。完整的变量列表与示例见[离线 / 内网环境构建](offline_build.md)。
+
 ## 发布流程
 
 如果要在 GitHub 上手动发布 Release，请到 GitHub Actions 页面运行 `Build and Publish Release` 工作流，并填写以下参数：

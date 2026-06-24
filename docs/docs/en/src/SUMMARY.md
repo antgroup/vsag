@@ -35,6 +35,7 @@
 
 - [Code Structure](development/code_structure.md)
 - [Building](development/building.md)
+- [Offline / Air-gapped Builds](development/offline_build.md)
 - [Running Tests](development/testing.md)
 - [Contributing](development/contributing.md)
 
