@@ -23,6 +23,7 @@
 #include "impl/heap/standard_heap.h"
 #include "impl/odescent/odescent_graph_builder.h"
 #include "impl/pruning_strategy.h"
+#include "impl/reasoning/search_reasoning.h"
 #include "io/memory_io/memory_io_parameter.h"
 #include "query_context.h"
 #include "storage/empty_index_binary_set.h"
@@ -66,6 +67,39 @@ get_suitable_ef_search(int64_t topk, int64_t data_num, uint64_t subindex_ef_sear
         return std::max(static_cast<uint64_t>(3.0F * topk_float), subindex_ef_search * 4);
     }
     return std::max(static_cast<uint64_t>(4.0F * topk_float), subindex_ef_search * 8);
+}
+
+InnerSearchParam
+Pyramid::create_knn_search_param(const PyramidSearchParameters& parsed_param,
+                                 int64_t k,
+                                 const FilterPtr& filter) const {
+    CHECK_ARGUMENT(k > 0, fmt::format("k({}) must be greater than 0", k));
+    CHECK_ARGUMENT(parsed_param.hierarchy_op == PyramidSearchParameters::HierarchyOp::SINGLE,
+                   "multi-hierarchy search (union/intersection) is not yet implemented");
+    auto ef_search_threshold =
+        std::max<uint64_t>(AMPLIFICATION_FACTOR * k, static_cast<uint64_t>(1000));
+    CHECK_ARGUMENT(  // NOLINT
+        (1 <= parsed_param.ef_search) and (parsed_param.ef_search <= ef_search_threshold),
+        fmt::format(
+            "ef_search({}) must be in range [1, {}]", parsed_param.ef_search, ef_search_threshold));
+
+    InnerSearchParam search_param;
+    search_param.ef = std::max<uint64_t>(parsed_param.ef_search, static_cast<uint64_t>(k));
+    search_param.radius = std::numeric_limits<float>::max();
+    search_param.topk = k;
+    search_param.search_mode = KNN_SEARCH;
+    search_param.parallel_search_thread_count = parsed_param.parallel_search_thread_count;
+    if (this->support_duplicate_) {
+        search_param.consider_duplicate = true;
+    }
+
+    if (parsed_param.enable_time_record) {
+        search_param.time_cost = std::make_shared<Timer>();
+        search_param.time_cost->SetThreshold(parsed_param.timeout_ms);
+    }
+
+    search_param.is_inner_id_allowed = this->create_search_filter(filter);
+    return search_param;
 }
 
 IndexNode::IndexNode(Allocator* allocator,
@@ -254,31 +288,7 @@ Pyramid::KnnSearch(const DatasetPtr& query,
     QueryContext ctx{.stats = &stats};
 
     auto parsed_param = PyramidSearchParameters::FromJson(parameters);
-    CHECK_ARGUMENT(k > 0, fmt::format("k({}) must be greater than 0", k));
-    CHECK_ARGUMENT(parsed_param.hierarchy_op == PyramidSearchParameters::HierarchyOp::SINGLE,
-                   "multi-hierarchy search (union/intersection) is not yet implemented");
-    auto ef_search_threshold = std::max<uint64_t>(AMPLIFICATION_FACTOR * k, 1000L);
-    CHECK_ARGUMENT(  // NOLINT
-        (1 <= parsed_param.ef_search) and (parsed_param.ef_search <= ef_search_threshold),
-        fmt::format(
-            "ef_search({}) must in range[1, {}]", parsed_param.ef_search, ef_search_threshold));
-
-    InnerSearchParam search_param;
-    search_param.ef = std::max<uint64_t>(parsed_param.ef_search, static_cast<uint64_t>(k));
-    search_param.radius = std::numeric_limits<float>::max();
-    search_param.topk = k;
-    search_param.search_mode = KNN_SEARCH;
-    search_param.parallel_search_thread_count = parsed_param.parallel_search_thread_count;
-    if (this->support_duplicate_) {
-        search_param.consider_duplicate = true;
-    }
-
-    if (parsed_param.enable_time_record) {
-        search_param.time_cost = std::make_shared<Timer>();
-        search_param.time_cost->SetThreshold(parsed_param.timeout_ms);
-    }
-
-    search_param.is_inner_id_allowed = this->create_search_filter(filter);
+    auto search_param = this->create_knn_search_param(parsed_param, k, filter);
     SearchFunc search_func = [&](const IndexNode* node, const VisitedListPtr& vl) {
         return this->search_node(
             node, vl, search_param, query, base_codes_, ctx, parsed_param.subindex_ef_search);
@@ -286,7 +296,7 @@ Pyramid::KnnSearch(const DatasetPtr& query,
 
     std::string hierarchy_name =
         parsed_param.hierarchies.empty() ? "" : parsed_param.hierarchies[0];
-    auto result = this->search_impl(query, search_func, search_param, hierarchy_name);
+    auto result = this->search_impl(query, search_func, search_param, hierarchy_name, ctx);
     result->Statistics(stats.Dump());
     return result;
 }
@@ -329,8 +339,91 @@ Pyramid::RangeSearch(const DatasetPtr& query,
 
     std::string hierarchy_name =
         parsed_param.hierarchies.empty() ? "" : parsed_param.hierarchies[0];
-    auto result = this->search_impl(query, search_func, search_param, hierarchy_name);
+    auto result = this->search_impl(query, search_func, search_param, hierarchy_name, ctx);
     result->Statistics(stats.Dump());
+    return result;
+}
+
+DatasetPtr
+Pyramid::SearchWithRequest(const SearchRequest& request) const {
+    SearchStatistics stats;
+    QueryContext ctx{.alloc = this->allocator_, .stats = &stats};
+    if (request.search_allocator_ != nullptr) {
+        ctx.alloc = request.search_allocator_;
+    }
+
+    const auto& query = request.query_;
+    auto k = request.topk_;
+    this->validate_knn_args(query, k);
+
+    auto parsed_param = PyramidSearchParameters::FromJson(request.params_str_);
+    auto search_param = this->create_knn_search_param(parsed_param, k, request.filter_);
+    SearchFunc search_func = [&](const IndexNode* node, const VisitedListPtr& vl) {
+        return this->search_node(
+            node, vl, search_param, query, base_codes_, ctx, parsed_param.subindex_ef_search);
+    };
+
+    // Setup reasoning context if expected labels are provided.
+    std::shared_ptr<ReasoningContext> reasoning_ctx;
+    if (not request.expected_labels_.empty()) {
+        reasoning_ctx = std::make_shared<ReasoningContext>(ctx.alloc);
+        reasoning_ctx->SetSearchParams(k, "Pyramid", use_reorder_, request.filter_ != nullptr);
+
+        UnorderedMap<int64_t, InnerIdType> label_to_inner_id(ctx.alloc);
+        for (const auto& label : request.expected_labels_) {
+            // `true` = return_even_removed: include removed labels so reasoning can diagnose them.
+            auto [success, inner_id] = label_table_->TryGetIdByLabel(label, true);
+            if (success) {
+                label_to_inner_id[label] = inner_id;
+            }
+        }
+
+        Vector<int64_t> expected_labels_vec(
+            request.expected_labels_.begin(), request.expected_labels_.end(), ctx.alloc);
+        reasoning_ctx->InitializeExpectedTargets(expected_labels_vec, label_to_inner_id);
+
+        auto precise_flatten =
+            this->precise_codes_ != nullptr ? this->precise_codes_ : this->base_codes_;
+        auto computer = precise_flatten->FactoryComputer(query->GetFloat32Vectors());
+        Vector<InnerIdType> expected_inner_ids(ctx.alloc);
+        expected_inner_ids.reserve(label_to_inner_id.size());
+        for (const auto& [label, inner_id] : label_to_inner_id) {
+            expected_inner_ids.push_back(inner_id);
+        }
+        Vector<float> true_dists(expected_inner_ids.size(), ctx.alloc);
+        precise_flatten->Query(true_dists.data(),
+                               computer,
+                               expected_inner_ids.data(),
+                               static_cast<InnerIdType>(expected_inner_ids.size()),
+                               &ctx);
+        for (size_t i = 0; i < expected_inner_ids.size(); ++i) {
+            reasoning_ctx->SetTrueDistance(expected_inner_ids[i], true_dists[i]);
+        }
+        ctx.reasoning_ctx = reasoning_ctx.get();
+    }
+
+    std::string hierarchy_name =
+        parsed_param.hierarchies.empty() ? "" : parsed_param.hierarchies[0];
+    auto result = this->search_impl(query, search_func, search_param, hierarchy_name, ctx);
+    result->Statistics(stats.Dump());
+
+    if (reasoning_ctx) {
+        Vector<InnerIdType> result_inner_ids(ctx.alloc);
+        const auto* result_ids = result->GetIds();
+        const auto num_results = result->GetNumElements();
+        result_inner_ids.reserve(static_cast<size_t>(num_results));
+        for (int64_t i = 0; i < num_results; ++i) {
+            // `true` = return_even_removed: match the same behavior used for expected_labels.
+            auto [success, inner_id] = label_table_->TryGetIdByLabel(result_ids[i], true);
+            if (success) {
+                result_inner_ids.push_back(inner_id);
+            }
+        }
+        reasoning_ctx->MarkResult(result_inner_ids);
+        reasoning_ctx->DiagnoseExpectedTargets();
+        result->Reasoning(reasoning_ctx->GenerateReport());
+    }
+
     return result;
 }
 
@@ -338,10 +431,8 @@ DatasetPtr
 Pyramid::search_impl(const DatasetPtr& query,
                      const SearchFunc& search_func,
                      InnerSearchParam& search_param,
-                     const std::string& hierarchy_name) const {
-    SearchStatistics stats;
-    QueryContext ctx{.stats = &stats};
-
+                     const std::string& hierarchy_name,
+                     QueryContext& ctx) const {
     auto h_iter = hierarchies_.find(hierarchy_name);
     CHECK_ARGUMENT(h_iter != hierarchies_.end(),
                    fmt::format("unknown hierarchy name: '{}'", hierarchy_name));

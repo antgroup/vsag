@@ -240,6 +240,9 @@ public:
                 const FilterPtr& filter,
                 int64_t limited_size = -1) const override;
 
+    DatasetPtr
+    SearchWithRequest(const SearchRequest& request) const override;
+
     void
     Serialize(StreamWriter& writer) const override;
 
@@ -298,7 +301,13 @@ private:
     search_impl(const DatasetPtr& query,
                 const SearchFunc& search_func,
                 InnerSearchParam& search_param,
-                const std::string& hierarchy_name = "") const;
+                const std::string& hierarchy_name,
+                QueryContext& ctx) const;
+
+    InnerSearchParam
+    create_knn_search_param(const PyramidSearchParameters& parsed_param,
+                            int64_t k,
+                            const FilterPtr& filter) const;
 
     /// Probabilistic check: should total_count trigger a new entry-point update?
     bool
