@@ -526,6 +526,49 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
     }
 }
 
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
+                             "IVF RabitQ base quantization",
+                             "[ft][ivf][rabitq]") {
+    constexpr const char* params_template = R"(
+    {{
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": 64,
+        "index_param": {{
+            "buckets_count": 32,
+            "base_quantization_type": "rabitq",
+            "use_reorder": {},
+            "precise_quantization_type": "fp32",
+            "partition_strategy_type": "ivf",
+            "ivf_train_type": "random",
+            "train_sample_count": 512
+        }}
+    }}
+    )";
+
+    auto use_reorder = GENERATE(false, true);
+    auto params = fmt::format(params_template, use_reorder);
+    CAPTURE(use_reorder);
+
+    SECTION(use_reorder ? "with fp32 reorder" : "without reorder") {
+        auto index = vsag::Factory::CreateIndex("ivf", params);
+        REQUIRE(index.has_value());
+        REQUIRE(index.value()->GetIndexType() == vsag::IndexType::IVF);
+
+        auto dataset = IVFTestIndex::pool.GetDatasetAndCreate(64, 512, "l2");
+        auto build_result = index.value()->Build(dataset->base_);
+        REQUIRE(build_result.has_value());
+
+        constexpr int64_t topk = 10;
+        auto query = fixtures::get_one_query(dataset->query_, 0);
+        auto search_result =
+            index.value()->KnnSearch(query, topk, R"({"ivf":{"scan_buckets_count":32}})");
+        REQUIRE(search_result.has_value());
+        REQUIRE(search_result.value()->GetDim() == topk);
+        REQUIRE(search_result.value()->GetNumElements() == query->GetNumElements());
+    }
+}
+
 static void
 TestIVFBuildAndContinueAdd(const fixtures::IVFResourcePtr& resource) {
     using namespace fixtures;

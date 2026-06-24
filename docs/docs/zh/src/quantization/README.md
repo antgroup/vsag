@@ -127,9 +127,14 @@ true`）。本章介绍每一种受支持的量化器：它做什么、接受哪
   `rabitq_bits_per_dim_base`、`rabitq_bits_per_dim_precise`、
   `rabitq_error_rate`、`rabitq_use_fht`、`sq4_uniform_trunc_rate`、`tq_chain`
   （见 `src/algorithm/hgraph.cpp`）。
-- **IVF**、**Pyramid**、**BruteForce** 暴露 `base_quantization_type`
-  与通用的重排相关 key；部分可调项（如 `tq_chain`）目前在内部接好但未作
-  为外部 key 暴露。
+- **IVF** 暴露 `base_quantization_type`、`base_pq_dim`、通用重排相关 key，
+  以及 `rabitq_pca_dim`、`rabitq_bits_per_dim_query`、
+  `rabitq_bits_per_dim_base`、`rabitq_version`、`rabitq_error_rate`、
+  `rabitq_use_fht` 这些 RabitQ 调参 key。
+- **Pyramid** 暴露 `base_quantization_type`、`base_pq_dim`、通用重排相关 key，
+  以及 RabitQ 的 PCA、底库/查询位数和 FHT 相关 key。
+- **BruteForce** 暴露 `base_quantization_type` 与通用重排相关 key；部分可调项
+  （如 `tq_chain`）目前在内部接好但未作为外部 key 暴露。
 
 每种索引的完整参数列表见对应索引页。
 

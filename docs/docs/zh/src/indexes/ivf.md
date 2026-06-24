@@ -72,6 +72,12 @@ auto result = index->KnnSearch(
 | `ivf_train_type` | string | `"kmeans"` | 中心训练方式：`kmeans` 或 `random` |
 | `base_quantization_type` | string | `"fp32"` | `fp32`、`fp16`、`bf16`、`sq8`、`sq4`、`sq8_uniform`、`sq4_uniform`、`pq`、`pqfs`、`rabitq` —— 各量化器细节见[量化章节](../quantization/README.md) |
 | `base_pq_dim` | int | `1` | PQ 子空间数（`pq` / `pqfs` 时必填） |
+| `rabitq_pca_dim` | int | `0` | `base_quantization_type: "rabitq"` 时可选的 PCA 预处理维度 |
+| `rabitq_bits_per_dim_query` | int | `32` | `rabitq` 查询每维位数；允许值为 `4` 或 `32` |
+| `rabitq_bits_per_dim_base` | int | `1` | `rabitq` 底库存储码每维位数；允许范围为 `[1, 8]` |
+| `rabitq_version` | string | `"standard"` | `rabitq` 布局：`"standard"` 或 `"split_1bit_7bit"` |
+| `rabitq_error_rate` | float | `1.9` | `rabitq` 编码的正数误差预算参数 |
+| `rabitq_use_fht` | bool | `false` | `rabitq` 二值化前是否启用 FHT 旋转 |
 | `use_reorder` | bool | `false` | 是否保留高精度副本用于精排 |
 | `precise_quantization_type` | string | `"fp32"` | 精排量化类型（`use_reorder: true` 时使用） |
 | `base_io_type` | string | `"memory_io"` | 粗排向量的存储后端 |
