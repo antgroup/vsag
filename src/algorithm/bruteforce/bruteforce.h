@@ -136,42 +136,74 @@ public:
     GetMemoryUsage() const override;
 
 private:
+    /**
+     * @brief Grow the capacity of inner_codes_ to at least new_size slots.
+     *
+     * Capacity grows arithmetically (by a fixed increment of 2^resize_increase_count_bit_) to
+     * amortise allocation cost.  Safe to call with a smaller value than the
+     * current capacity (no-op).
+     */
     void
     resize(uint64_t new_size);
 
+    /**
+     * @brief Reserve the next available internal slot for @p label.
+     *
+     * In single-vector mode the slot index equals total_count_.
+     * In multi-vector mode the slot is reserved only if @p label is new;
+     * attribute-based dedup is performed when @p attr is non-null.
+     *
+     * @return the allocated inner id, or std::nullopt if the label was
+     *         already present (multi-vector mode only).
+     */
     std::optional<InnerIdType>
     claim_slot(int64_t label, const AttributeSet* attr);
 
+    /**
+     * @brief Write one vector into inner_codes_ at position @p inner_id.
+     *
+     * The caller must have already called claim_slot() and resize().
+     */
     void
     add_one(const float* data, InnerIdType inner_id);
 
+    /**
+     * @brief Recalculate and cache the memory-usage counter.
+     *
+     * Called after Add/Build/Remove to keep GetMemoryUsage() cheap.
+     */
     void
     cal_memory_usage();
 
-    // Multi-vector mode helpers
+    /// Build the multi-vector label table and train the quantizer.
     void
     train_multi_vector(const DatasetPtr& data);
 
+    /// Insert multi-vector (WARP) data; returns failed external ids.
     std::vector<int64_t>
     add_multi_vector(const DatasetPtr& data);
 
+    /**
+     * @brief Create a Computer object sized for @p query, used by
+     *        KnnSearch / RangeSearch in multi-vector mode.
+     */
     ComputerInterfacePtr
     make_search_computer(const DatasetPtr& query) const;
 
 private:
-    FlattenInterfacePtr inner_codes_{nullptr};
+    FlattenInterfacePtr inner_codes_{nullptr};  // quantized or raw vector storage
 
-    std::atomic<uint64_t> delete_count_{0};
+    std::atomic<uint64_t> delete_count_{0};  // number of soft-deleted vectors
 
-    uint64_t resize_increase_count_bit_{DEFAULT_RESIZE_BIT};
+    uint64_t resize_increase_count_bit_{DEFAULT_RESIZE_BIT};  // log2 of capacity increment
 
-    mutable std::shared_mutex global_mutex_;
-    mutable std::shared_mutex add_mutex_;
+    mutable std::shared_mutex global_mutex_;  // protects reads during resize
+    mutable std::shared_mutex add_mutex_;     // serialises Add / Remove
 
-    std::atomic<InnerIdType> max_capacity_{0};
+    std::atomic<InnerIdType> max_capacity_{0};  // allocated slot count
 
-    bool is_multi_vector_{false};
+    bool is_multi_vector_{false};  // true ⇒ WARP / multi-vector mode
 
-    static constexpr uint64_t DEFAULT_RESIZE_BIT = 10;
+    static constexpr uint64_t DEFAULT_RESIZE_BIT = 10;  // default increment = 1024
 };
 }  // namespace vsag

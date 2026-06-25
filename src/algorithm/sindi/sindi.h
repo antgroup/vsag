@@ -23,6 +23,24 @@
 
 namespace vsag {
 
+/**
+ * @brief SINDI: Sparse INverted Index with windowed term lists.
+ *
+ * SINDI is designed for high-dimensional sparse vectors (e.g. learned sparse
+ * representations such as SPLADE).  The index partitions the internal-id
+ * space into fixed-size windows; each window maintains per-term inverted
+ * lists so that a query only touches the windows that overlap the query's
+ * non-zero dimensions.
+ *
+ * Optional features:
+ *  - Quantization: compress stored term values.
+ *  - Reranking: use an embedded SparseIndex for precise re-scoring.
+ *  - Term-id remapping: remap external dim-ids to a dense [0,N) range to
+ *    save memory when the vocabulary is sparse.
+ *
+ * Fork() is intentionally unsupported (returns nullptr) because the window
+ * layout depends on the insertion order and cannot be trivially cloned.
+ */
 class SINDI : public InnerIndexInterface {
 public:
     static ParamPtr
@@ -143,6 +161,18 @@ public:
     SetImmutable() override;
 
 private:
+    /**
+     * @brief Core search implementation shared by KnnSearch / RangeSearch.
+     *
+     * @tparam mode   KNN_SEARCH or RANGE_SEARCH.
+     * @param computer  evaluates partial IP contributions per window.
+     * @param inner_param  top-k / radius / ef parameters.
+     * @param allocator  scratch allocator for the result heap.
+     * @param use_term_lists_heap_insert  when true, accumulate candidates via
+     *                                    per-term heap insertion (faster for
+     *                                    very sparse queries).
+     * @param original_query  non-null only when reranking is needed.
+     */
     template <InnerSearchMode mode>
     DatasetPtr
     search_impl(const SparseTermComputerPtr& computer,
@@ -151,49 +181,61 @@ private:
                 bool use_term_lists_heap_insert,
                 const SparseVector* original_query = nullptr) const;
 
+    /**
+     * @brief Derive the [min_window_id, max_window_id] range that could
+     *        contain vectors passing @p filter.
+     */
     std::pair<int64_t, int64_t>
     get_min_max_window_id(const FilterPtr& filter) const;
 
+    /// Recalculate and cache the memory-usage counter.
     void
     cal_memory_usage();
 
+    /**
+     * @brief Compact a sparse vector's dim-ids into the remapped space
+     *        during Build.  Uses @p tmp_ids as scratch buffer.
+     */
     SparseVector
     remap_sparse_vector_for_build(const SparseVector& input, Vector<uint32_t>& tmp_ids);
 
+    /**
+     * @brief Map a query's dim-ids into the remapped space.
+     *
+     * Unlike the Build variant this does not mutate the index and uses
+     * @p tmp_ids / @p tmp_vals as scratch buffers.
+     */
     SparseVector
     remap_sparse_vector_for_query(const SparseVector& input,
                                   Vector<uint32_t>& tmp_ids,
                                   Vector<float>& tmp_vals) const;
 
 private:
-    mutable std::shared_mutex global_mutex_;
+    mutable std::shared_mutex global_mutex_;  // protects structural mutations
 
-    uint32_t term_id_limit_{0};
+    uint32_t term_id_limit_{0};  // max number of distinct terms per window
+    uint32_t window_size_{0};    // number of vectors per window
 
-    uint32_t window_size_{0};
+    Vector<SparseTermDataCellPtr> window_term_list_;  // one inverted list per window
 
-    Vector<SparseTermDataCellPtr> window_term_list_;
+    std::atomic<int64_t> cur_element_count_{0};  // total inserted vectors
+    std::atomic<int64_t> delete_count_{0};       // soft-deleted vectors
 
-    std::atomic<int64_t> cur_element_count_{0};
+    bool use_reorder_{false};       // enable reranking stage
+    bool use_quantization_{false};  // enable term-value quantization
 
-    std::atomic<int64_t> delete_count_{0};
+    float doc_retain_ratio_{0};  // ratio of docs kept after pruning
 
-    bool use_reorder_{false};
+    std::shared_ptr<SparseIndex> rerank_flat_index_{nullptr};  // re-rank back-end
 
-    bool use_quantization_{false};
-
-    float doc_retain_ratio_{0};
-
-    std::shared_ptr<SparseIndex> rerank_flat_index_{nullptr};
-
-    bool deserialize_without_footer_{false};
-    bool deserialize_without_buffer_{false};
+    bool deserialize_without_footer_{false};  // backward-compat: old format lacks footer
+    bool deserialize_without_buffer_{false};  // backward-compat: old format lacks buffer
 
     std::shared_ptr<QuantizationParams> quantization_params_;
-    uint32_t avg_doc_term_length_{100};
+    uint32_t avg_doc_term_length_{100};  // average non-zero terms per doc (estimation)
 
-    bool remap_term_ids_{false};
-    std::shared_ptr<TermIdMapper> term_id_mapper_{nullptr};
+    bool remap_term_ids_{false};                             // enable dense dim-id remapping
+    std::shared_ptr<TermIdMapper> term_id_mapper_{nullptr};  // maps external→internal ids
 };
 
 }  // namespace vsag

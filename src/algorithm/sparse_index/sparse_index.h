@@ -21,6 +21,15 @@
 
 namespace vsag {
 
+/**
+ * @brief SparseIndex: a flat brute-force index for sparse vectors.
+ *
+ * Stores raw sparse vectors (dimension ids as uint32_t, values as float
+ * bit-cast into uint32_t) and performs exhaustive linear scan for KNN / range queries.
+ * Suitable as a reranking back-end for SINDI or for small sparse datasets.
+ *
+ * Distance metric: inner product (IP).
+ */
 class SparseIndex : public InnerIndexInterface {
 public:
     static ParamPtr
@@ -96,6 +105,18 @@ public:
     void
     InitFeatures() override;
 
+    /**
+     * @brief Compute the IP distance between a pre-sorted query and a stored
+     *        vector without acquiring any lock.
+     *
+     * The caller must guarantee that the index is not mutated concurrently
+     * and that inner_id < cur_element_count_.
+     *
+     * @param sorted_ids  sorted dimension ids of the query (uint32).
+     * @param sorted_vals corresponding values, parallel to sorted_ids.
+     * @param inner_id    internal id of the target vector.
+     * @return inner-product distance.
+     */
     float
     CalDistanceByIdUnsafe(Vector<uint32_t>& sorted_ids,
                           Vector<float>& sorted_vals,
@@ -104,9 +125,15 @@ public:
     int64_t
     GetMemoryUsage() const override;
 
+    /**
+     * @brief Pack a distance heap into a Dataset with (id, distance) pairs.
+     */
     DatasetPtr
     collect_results(const DistHeapPtr& results) const;
 
+    /**
+     * @brief Return a sorted copy of the given sparse vector by dimension id.
+     */
     std::tuple<Vector<uint32_t>, Vector<float>>
     sort_sparse_vector(const SparseVector& vector) const;
 
@@ -121,10 +148,11 @@ private:
     }
 
 private:
-    Vector<uint32_t*> datas_;
-    bool need_sort_;
-    int64_t cur_element_count_{0};
-    int64_t max_capacity_{0};
+    Vector<uint32_t*> datas_;       // raw sparse vectors; each entry encodes
+                                    // [dim_count, id0, val0_as_uint32, id1, val1_as_uint32, ...]
+    bool need_sort_;                // true if stored vectors may be unsorted by dim id
+    int64_t cur_element_count_{0};  // number of valid entries in datas_
+    int64_t max_capacity_{0};       // allocated capacity of datas_
 };
 
 }  // namespace vsag
