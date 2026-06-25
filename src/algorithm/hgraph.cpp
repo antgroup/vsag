@@ -2097,9 +2097,10 @@ HGraph::SetImmutable() {
         return;
     }
     std::scoped_lock<std::shared_mutex> wlock(this->global_mutex_);
-    this->neighbors_mutex_.reset();
-    this->neighbors_mutex_ = std::make_shared<EmptyMutex>();
-    this->searcher_->SetMutexArray(this->neighbors_mutex_);
+    auto empty_mutex = std::make_shared<EmptyMutex>();
+    this->searcher_->SetMutexArray(empty_mutex);
+    this->parallel_searcher_->SetMutexArray(empty_mutex);
+    this->neighbors_mutex_ = empty_mutex;
     this->immutable_ = true;
 }
 
