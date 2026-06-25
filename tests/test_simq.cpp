@@ -480,3 +480,74 @@ TEST_CASE("SIMQ: parameter sweep on coarse_k and rerank_k", "[simq][sweep]") {
         REQUIRE(recall >= c.floor);
     }
 }
+
+TEST_CASE("SIMQ: incremental Add triggers split and preserves recall", "[simq][add]") {
+    // Build with a very small max_cluster_size so Add() triggers splits.
+    // Use only half the base docs for Build, then Add the rest.
+    static constexpr uint64_t BUILD_DOCS = BASE_DOCS / 2;
+    static constexpr uint64_t ADD_DOCS = BASE_DOCS - BUILD_DOCS;
+
+    auto ds = generate_dataset();
+    TempFile tmp;
+
+    // Small max_cluster_size (20) with ~5% init ratio → splits happen quickly during Add
+    auto build_param = make_build_param(tmp.path,
+                                        /*init_cluster_ratio=*/0.05f,
+                                        /*max_cluster_size=*/20,
+                                        /*split_start_idx=*/10,
+                                        /*coarse_k=*/20,
+                                        /*rerank_k=*/1000);
+    auto search_param = make_search_param(20, 1000);
+
+    auto r = vsag::Factory::CreateIndex("simq", build_param);
+    REQUIRE(r.has_value());
+    auto index = r.value();
+
+    // Build on first half
+    auto build_ds = vsag::Dataset::Make();
+    build_ds->NumElements(static_cast<int64_t>(BUILD_DOCS))
+        ->Dim(SIMQ_DIM)
+        ->Ids(ds.base_ids.data())
+        ->MultiVectors(ds.base_mvs.data())
+        ->MultiVectorDim(SIMQ_DIM)
+        ->Owner(false);
+    REQUIRE(index->Build(build_ds).has_value());
+    REQUIRE(index->GetNumElements() == static_cast<int64_t>(BUILD_DOCS));
+
+    // Add second half one doc at a time to maximize split triggers
+    for (uint64_t i = BUILD_DOCS; i < BASE_DOCS; ++i) {
+        auto add_ds = vsag::Dataset::Make();
+        add_ds->NumElements(1)
+            ->Dim(SIMQ_DIM)
+            ->Ids(&ds.base_ids[i])
+            ->MultiVectors(&ds.base_mvs[i])
+            ->MultiVectorDim(SIMQ_DIM)
+            ->Owner(false);
+        REQUIRE(index->Add(add_ds).has_value());
+    }
+    REQUIRE(index->GetNumElements() == static_cast<int64_t>(BASE_DOCS));
+
+    // Compute ground truth over full BASE_DOCS then check recall
+    float total_recall = 0.0f;
+    for (uint64_t q = 0; q < QUERY_DOCS; ++q) {
+        vsag::DatasetPtr one_query = vsag::Dataset::Make();
+        one_query->NumElements(1)
+            ->Dim(SIMQ_DIM)
+            ->MultiVectors(&ds.query_mvs[q])
+            ->MultiVectorDim(SIMQ_DIM)
+            ->Owner(false);
+
+        auto sr = index->KnnSearch(one_query, TOP_K, search_param, vsag::FilterPtr(nullptr));
+        REQUIRE(sr.has_value());
+        auto* ret_ids = sr.value()->GetIds();
+        // Returned ids must all be valid (in range [0, BASE_DOCS))
+        for (int64_t ki = 0; ki < TOP_K; ++ki) REQUIRE(ret_ids[ki] >= 0);
+        total_recall +=
+            recall_at_k(ret_ids, TOP_K, ds.gt_ids[q].data(), static_cast<int64_t>(TOP_K));
+    }
+
+    float mean_recall = total_recall / static_cast<float>(QUERY_DOCS);
+    std::cout << "\n[SIMQ Add] Mean Recall@" << TOP_K << " after incremental Add = " << mean_recall
+              << "\n";
+    REQUIRE(mean_recall >= 0.3f);
+}

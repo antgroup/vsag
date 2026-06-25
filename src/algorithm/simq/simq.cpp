@@ -546,6 +546,23 @@ SIMQ::split_cluster_incremental(InnerIdType cluster_idx) {
         ->Owner(false);
     rep_hgraph_->Add(new_ds);
 
+    // Update token_to_dist_ for tokens moved to new cluster so future splits
+    // sort by distance to the new representative, not the old one.
+    const uint64_t udim = static_cast<uint64_t>(dim_);
+    for (uint64_t rank = half; rank < n; ++rank) {
+        InnerIdType tid = cluster_tokens[rank];
+        InnerIdType doc_id = token_to_doc_[tid];
+        uint32_t offset = token_to_offset_[tid];
+        bool nr = false;
+        const uint8_t* c = mv_codes_->GetCodesById(doc_id, nr);
+        const float* tv = reinterpret_cast<const float*>(c + sizeof(uint32_t)) + offset * udim;
+        float dot = 0.0f;
+        for (uint64_t d = 0; d < udim; ++d) dot += tv[d] * new_rep_vec[d];
+        token_to_dist_[tid] = 1.0f - dot;
+        if (nr)
+            mv_codes_->Release(c);
+    }
+
     ++num_clusters_;
 }
 
