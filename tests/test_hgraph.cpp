@@ -1710,9 +1710,14 @@ static void
 TestHGraphConcurrentAddSearchRemove(const fixtures::HGraphTestIndexPtr& test_index,
                                     const fixtures::HGraphResourcePtr& resource) {
     using namespace fixtures;
+    // Only reduce for PR variant (GetResource(true) gives 2 test cases)
+    if (resource->test_cases.size() <= 2) {
+        resource->test_cases = fixtures::RandomSelect(resource->test_cases, 1);
+    }
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
+    vsag::Options::Instance().set_block_size_limit(size);
 
     for (auto metric_type : resource->metric_types) {
         for (auto dim : resource->dims) {
@@ -1727,9 +1732,6 @@ TestHGraphConcurrentAddSearchRemove(const fixtures::HGraphTestIndexPtr& test_ind
                     dim = fixtures::RABITQ_MIN_RACALL_DIM;
                 }
 
-                // Set block size limit for current test iteration
-                vsag::Options::Instance().set_block_size_limit(size);
-
                 // Generate index parameters with attribute support enabled
                 HGraphTestIndex::HGraphBuildParam build_param(
                     metric_type, dim, base_quantization_str);
@@ -1740,11 +1742,10 @@ TestHGraphConcurrentAddSearchRemove(const fixtures::HGraphTestIndexPtr& test_ind
                     dim, resource->base_count, metric_type);
                 // Execute build test
                 TestIndex::TestConcurrentAddSearchRemove(index, dataset, search_param, true);
-                // Restore original block size limit
-                vsag::Options::Instance().set_block_size_limit(origin_size);
             }
         }
     }
+    vsag::Options::Instance().set_block_size_limit(origin_size);
 }
 
 HGRAPH_PR_DAILY_CASE("HGraph Concurrent Add Search Remove",
