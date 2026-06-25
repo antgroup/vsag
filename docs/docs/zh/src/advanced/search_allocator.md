@@ -37,7 +37,7 @@ auto result = index->SearchWithRequest(req).value();
 
 > **可用性。** `Index::SearchWithRequest` 默认实现会返回 *不支持* 错误。目前只有 HGraph、
 > IVF、BruteForce、WARP 实现了它（`src/algorithm/{hgraph,ivf,brute_force,warp}.cpp`）。对于
-> 尚未 override 的索引（HNSW、DiskANN、SINDI、Pyramid、SparseIndex），请使用下文的旧版
+> 尚未 override 的索引（SINDI、Pyramid、SparseIndex），请使用下文的旧版
 > `SearchParam` 路径。
 
 ## 旧版 API —— `SearchParam::allocator`（已弃用）
@@ -59,7 +59,6 @@ auto result = index->KnnSearch(query, /*k=*/10, search_param).value();
 （"Use SearchRequest instead"），仅为源码兼容保留。注意当前只是注释层面的弃用 —— struct
 本身并没有 C++ `[[deprecated]]` 属性，编译器不会发出弃用告警；但新代码如果所用索引已支持
 `SearchRequest`/`SearchWithRequest`，仍应优先使用该路径。
-`examples/cpp/313_feature_search_allocator.cpp`（HNSW）与
 `examples/cpp/314_feature_hgraph_search_allocator.cpp`（HGraph）展示了旧版形式。
 
 ## 结果所有权
@@ -110,7 +109,7 @@ arena.reset();              // 一次性回收本批所有 per-query 缓冲
 | `HGraph::SearchWithRequest` 的临时缓冲与结果 `Dataset`                        | 已设置 `search_allocator_` 时使用它，否则使用 `Resource` 的 allocator。HGraph 是目前唯一把 `search_allocator_` 贯通到结果的索引。 |
 | `IVF` / `BruteForce` / `WARP` `SearchWithRequest` 的结果 `Dataset`            | 始终使用索引自身的 allocator（`allocator_`）。目前**不**消费 `search_allocator_`。                                       |
 | `IVF` / `BruteForce` / `WARP` `SearchWithRequest` 的部分临时状态              | 设置 `search_allocator_` 时会用它分配部分临时缓冲，否则使用索引 allocator。                                              |
-| `KnnSearch(query, k, SearchParam)`（旧版）                                   | 在认 `SearchParam::allocator` 的索引上（如 HNSW、HGraph 示例）使用该 allocator，否则使用 `Resource` allocator。           |
+| `KnnSearch(query, k, SearchParam)`（旧版）                                   | 在支持 `SearchParam::allocator` 的索引上（如 HGraph 示例）使用该 allocator，否则使用 `Resource` allocator。           |
 | `KnnSearch(query, k, parameters_str)`                                       | 无 per-search Allocator 入口，统一使用 `Resource` 的 allocator。                                                         |
 | `RangeSearch(...)`（所有形态）                                               | 使用 `Resource` 的 allocator；没有 per-search Allocator 入口。                                                           |
 
@@ -125,8 +124,6 @@ arena.reset();              // 一次性回收本批所有 per-query 缓冲
 
 ## 可运行示例
 
-- `examples/cpp/313_feature_search_allocator.cpp` —— HNSW + 自定义 allocator（旧版
-  `SearchParam`）。
 - `examples/cpp/314_feature_hgraph_search_allocator.cpp` —— HGraph（`sq8`）+ 自定义 allocator。
 
 参见 [内存管理](memory.md) 了解索引级 `Allocator` / `Resource` 的设置，以及

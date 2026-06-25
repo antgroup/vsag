@@ -43,7 +43,7 @@ index falls back to the allocator that was attached to its owning `Resource`.
 > **Availability.** `Index::SearchWithRequest` has a default implementation that returns an
 > *unsupported* error. Only HGraph, IVF, BruteForce and WARP implement it today
 > (`src/algorithm/{hgraph,ivf,brute_force,warp}.cpp`). For indexes that do not yet override
-> `SearchWithRequest` (HNSW, DiskANN, SINDI, Pyramid, SparseIndex), use the legacy `SearchParam`
+> `SearchWithRequest` (SINDI, Pyramid, SparseIndex), use the legacy `SearchParam`
 > path described below.
 
 ## Legacy API — `SearchParam::allocator` *(deprecated)*
@@ -66,8 +66,7 @@ instead") and remains only for source compatibility. The wording is currently a 
 the struct itself does not carry the C++ `[[deprecated]]` attribute, so the compiler will not
 emit deprecation warnings, but new code should still target `SearchRequest` /
 `SearchWithRequest` on indexes that support it. The example
-`examples/cpp/313_feature_search_allocator.cpp` (HNSW) and
-`examples/cpp/314_feature_hgraph_search_allocator.cpp` (HGraph) demonstrate the legacy form.
+`examples/cpp/314_feature_hgraph_search_allocator.cpp` (HGraph) demonstrates the legacy form.
 
 ## Result Ownership
 
@@ -122,7 +121,7 @@ arena.reset();              // drops every per-query buffer at once
 | `HGraph::SearchWithRequest` scratch + result `Dataset`                             | `search_allocator_` if set, otherwise the `Resource`'s allocator. HGraph is the only index that plumbs `search_allocator_` into the result.   |
 | `IVF` / `BruteForce` / `WARP` `SearchWithRequest` result `Dataset`                 | Always the index's own allocator (`allocator_`). `search_allocator_` is *not* consulted for result buffers today.                             |
 | `IVF` / `BruteForce` / `WARP` `SearchWithRequest` scratch state                    | Uses `search_allocator_` for some intermediate buffers when set; otherwise the index's allocator.                                             |
-| `KnnSearch(query, k, SearchParam)` (legacy)                                        | Uses `SearchParam::allocator` if set, on indexes whose `KnnSearch` honors it (e.g. HNSW, HGraph examples). Otherwise the `Resource` allocator. |
+| `KnnSearch(query, k, SearchParam)` (legacy)                                        | Uses `SearchParam::allocator` if set, on indexes whose `KnnSearch` honors it (e.g. HGraph examples). Otherwise the `Resource` allocator. |
 | `KnnSearch(query, k, parameters_str)`                                              | No per-search allocator hook — uses the `Resource` allocator.                                                                                 |
 | `RangeSearch(...)` (all forms)                                                     | Uses the `Resource` allocator; no per-search allocator hook.                                                                                  |
 
@@ -140,8 +139,6 @@ the index/entry point actually consumes it (see the per-row notes above).
 
 ## Runnable Examples
 
-- `examples/cpp/313_feature_search_allocator.cpp` — HNSW + custom allocator (legacy
-  `SearchParam`).
 - `examples/cpp/314_feature_hgraph_search_allocator.cpp` — HGraph (`sq8`) + custom allocator.
 
 See also [Memory Management](memory.md) for the index-level `Allocator` / `Resource` setup, and

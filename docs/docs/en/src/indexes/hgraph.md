@@ -1,7 +1,7 @@
 # HGraph
 
 HGraph is VSAG's flagship **graph-based** index. It builds a hierarchical proximity graph
-similar in spirit to HNSW, but with a richer set of quantization options, a unified
+and offers a rich set of quantization options, a unified
 build-parameter schema (`index_param`), and first-class support for reordering,
 incremental updates, deletion, and ELP-based runtime tuning.
 

@@ -59,8 +59,8 @@ Declarations live in
 ### `calculate_precise_distance`
 
 - `true` (default): the implementation tries to use the **high-precision** representation
-  of the stored vector (e.g. full-precision float32). For DiskANN this may require reading
-  the original vector from disk and therefore incurs I/O.
+  of the stored vector (e.g. full-precision float32). When the index only retains quantized
+  codes, obtaining the precise value can be more expensive.
 - `false`: the implementation may use the **quantized / approximate** representation that
   the index already keeps in memory. Faster, but the returned distance is approximate.
 
@@ -124,10 +124,8 @@ auto d = index->CalcDistanceById(query, /*id=*/42);
 | Index type   | Dense overload (`const float*`) | DatasetPtr overload | Notes |
 |--------------|---------------------------------|---------------------|-------|
 | hgraph       | yes                             | yes                 | Honors `calculate_precise_distance`. |
-| hnsw         | yes                             | yes (default loop)  | |
 | ivf          | yes                             | yes (default loop)  | |
 | brute_force  | yes                             | yes (default loop)  | Always precise (no quantization). |
-| diskann      | yes                             | yes (default loop)  | `calculate_precise_distance=true` may incur disk I/O. |
 | pyramid      | yes                             | yes (default loop)  | |
 | sindi        | no                              | yes                 | Sparse vectors only. |
 | sparse_index | no                              | yes                 | Sparse vectors only. |

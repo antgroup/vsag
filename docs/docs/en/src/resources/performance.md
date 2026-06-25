@@ -11,7 +11,6 @@ release):
 
 - **CPU**: mainstream x86_64 server CPUs (with AVX2 / AVX-512)
 - **Memory**: enough DDR4/DDR5 to cover the index plus OS page cache
-- **Disk**: NVMe SSD (for DiskANN scenarios)
 - **OS**: Ubuntu 20.04 / 22.04 or CentOS 7 / 8
 - **Build**: `make release` by default; MKL is **off** by default (`VSAG_ENABLE_INTEL_MKL=OFF`).
   To enable it explicitly, use `VSAG_ENABLE_INTEL_MKL=ON make release` (or

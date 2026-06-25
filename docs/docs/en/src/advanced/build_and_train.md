@@ -109,8 +109,7 @@ batches, because the refinement loop parallelizes cleanly over the data and avoi
 search.
 
 ODescent is implemented in `src/impl/odescent/odescent_graph_builder.{h,cpp}` and is currently
-used by **HGraph**, **Pyramid**, **DiskANN** (build path), and internally by HNSW's `Merge`
-implementation.
+used by **HGraph** and **Pyramid** (build path).
 
 ### Enabling ODescent on HGraph
 

@@ -27,7 +27,7 @@ empty->Deserialize(bs_loaded);
 
 `ReaderSet` is similar to `BinarySet` but uses a user-supplied `Reader` to read on demand, which
 avoids loading everything at once. This is useful for memory-constrained or partial-deserialization
-scenarios (for example, the on-disk portion of DiskANN).
+scenarios.
 
 ### 2. File Streams (`std::ostream` / `std::istream`)
 
@@ -57,7 +57,6 @@ index->Serialize([&](const void* buf, uint64_t offset, uint64_t size) {
   matches the one used at serialization time.
 - When upgrading across major versions, check the compatibility notes in the
   [release notes](../resources/release_notes.md).
-- DiskANN's disk files are managed independently; `Serialize` returns the in-memory metadata side.
 - References:
   `examples/cpp/318_feature_tune.cpp`, `examples/cpp/401_persistent_kv.cpp`,
   `examples/cpp/402_persistent_streaming.cpp`.

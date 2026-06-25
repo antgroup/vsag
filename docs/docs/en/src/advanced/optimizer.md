@@ -1,6 +1,6 @@
 # Optimizer (Tune)
 
-For graph-based indexes (HNSW, HGraph), VSAG exposes the `Tune` interface, which automatically
+For graph-based indexes (HGraph), VSAG exposes the `Tune` interface, which automatically
 adjusts runtime parameters based on a representative query set to get a better trade-off between
 **recall** and **latency**. Internally this is the historical "ELP Optimizer".
 
@@ -35,9 +35,7 @@ Optimizer". Its implementation key is `use_elp_optimizer`, which now lives behin
 
 | Index type | Supports Tune |
 |------------|---------------|
-| hnsw | yes |
 | hgraph | yes |
-| diskann | partial |
 | ivf / sindi / brute_force | no |
 
 ## Example

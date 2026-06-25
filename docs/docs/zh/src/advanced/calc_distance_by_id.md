@@ -53,8 +53,8 @@ CalDistanceById(const DatasetPtr& query,
 
 ### `calculate_precise_distance`
 
-- `true`（默认）：尽量使用**高精度**向量表示（如完整 float32）来计算距离。对 DiskANN 而言
-  可能需要从磁盘读取原始向量，会带来 I/O 开销。
+- `true`（默认）：尽量使用**高精度**向量表示（如完整 float32）来计算距离。当索引仅保留
+  量化编码时，获取精确值可能开销更大。
 - `false`：可以使用索引内存中已有的**量化 / 近似**表示，速度更快但距离是近似值。
 
 ### 返回值含义
@@ -115,10 +115,8 @@ auto d = index->CalcDistanceById(query, /*id=*/42);
 | 索引类型     | 稠密重载（`const float*`） | DatasetPtr 重载 | 说明 |
 |--------------|----------------------------|------------------|------|
 | hgraph       | 支持                       | 支持             | 遵循 `calculate_precise_distance`。 |
-| hnsw         | 支持                       | 支持（默认循环） | |
 | ivf          | 支持                       | 支持（默认循环） | |
 | brute_force  | 支持                       | 支持（默认循环） | 总是精确（无量化）。 |
-| diskann      | 支持                       | 支持（默认循环） | `calculate_precise_distance=true` 可能触发磁盘 I/O。 |
 | pyramid      | 支持                       | 支持（默认循环） | |
 | sindi        | 不支持                     | 支持             | 仅稀疏向量。 |
 | sparse_index | 不支持                     | 支持             | 仅稀疏向量。 |

@@ -55,9 +55,7 @@ which is more efficient than post-filtering.
 
 | Index type | Supports RangeSearch |
 |------------|----------------------|
-| hnsw | yes |
 | hgraph | yes |
-| diskann | yes |
 | ivf | yes |
 | brute_force | yes |
 | sindi | yes (sparse vectors) |
@@ -68,5 +66,5 @@ which is more efficient than post-filtering.
   the `metric_type` specified at index creation.
 - If `radius` is very large, the result set can be huge; combine with `limited_size` to avoid
   unbounded memory usage.
-- For graph-based indexes (HNSW / HGraph), runtime parameters like `ef` share the same meaning
+- For graph-based indexes (HGraph), runtime parameters like `ef` share the same meaning
   between `RangeSearch` and `KnnSearch`.

@@ -120,8 +120,8 @@ while (kept.size() < needed) {
 delete ctx;
 ```
 
-HNSW 图索引在迭代模式下还支持一个额外的运行期参数 `skip_ratio`，用于控制延续搜索时跳过已探索区域
-的力度，详见 `examples/cpp/313_feature_search_allocator.cpp` 中的 HNSW 部分。
+HGraph 图索引在迭代模式下还支持一个额外的运行期参数 `skip_ratio`，用于控制延续搜索时跳过已探索区域
+的力度，详见 `examples/cpp/314_feature_hgraph_search_allocator.cpp`。
 
 ## 支持情况
 
@@ -129,10 +129,8 @@ HNSW 图索引在迭代模式下还支持一个额外的运行期参数 `skip_ra
 
 | 索引类型 | 是否支持迭代搜索 |
 |---------|----------------|
-| hnsw       | 是 |
 | hgraph     | 是 |
 | ivf        | 否 |
-| diskann    | 否 |
 | brute_force| 否 |
 | sindi      | 否 |
 
