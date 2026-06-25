@@ -120,9 +120,10 @@ private:
 
     Vector<InnerIdType> vec_to_cluster_;
 
-    // Token-level metadata for precise split: maps global token_id → doc inner_id / offset
+    // Token-level metadata for precise split: maps global token_id → doc inner_id / offset / dist
     Vector<InnerIdType> token_to_doc_;
     Vector<uint32_t> token_to_offset_;
+    Vector<float> token_to_dist_;
 
     // Per-cluster token count for O(1) split threshold check during Add
     Vector<uint64_t> cluster_token_counts_;
