@@ -88,7 +88,7 @@ jobs:
         # ci-x86-openblas image to keep iteration latency low. The
         # build-from-source OpenBLAS path is exercised by the daily x86 ASan
         # job in daily_test.yml.
-        run: export CMAKE_GENERATOR="Ninja" CMAKE_EXPORT_COMPILE_COMMANDS=ON EXTRA_DEFINED="-DUSE_SYSTEM_OPENBLAS=ON"; make asan VSAG_ENABLE_EXAMPLES=ON
+        run: export CMAKE_GENERATOR="Ninja" CMAKE_EXPORT_COMPILE_COMMANDS=ON EXTRA_DEFINED="-DUSE_SYSTEM_OPENBLAS=ON"; make asan VSAG_ENABLE_EXAMPLES=ON VSAG_ENABLE_TOOLS=ON
       - name: Install clang-tidy 15
         run: sudo apt install clang-tidy-15 -y
       - name: Run Lint
@@ -101,7 +101,6 @@ jobs:
           find ./build -type f -name "*.a" -exec rm -f {} +
           rm -rf ./build/hdf5
           rm -rf ./build/boost
-          rm -rf ./build/tools
       - name: Save Build
         uses: actions/upload-artifact@v5
         with:
@@ -249,12 +248,16 @@ jobs:
 
   compatibility:
     name: Check Compatibility
-    needs: [changes, format]
+    needs: [changes, build-asan-x86]
     if: needs.changes.outputs.cpp == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     container:
       image: vsaglib/vsag:ci-x86-openblas
+      volumes:
+        - /opt:/useless
     steps:
+      - name: Free Disk Space
+        run: rm -rf /useless/hostedtoolcache
       - name: Install GitHub CLI
         env:
           GH_VERSION: 2.75.0
@@ -280,10 +283,17 @@ jobs:
             --pattern "*.json" \
             || echo "Warning: Failed to download compatibility indexes"
       - uses: actions/checkout@v4
-      - name: Compile Check Compatibility Tools
-        run: export CMAKE_GENERATOR="Ninja" EXTRA_DEFINED="-DUSE_SYSTEM_OPENBLAS=ON"; make release VSAG_ENABLE_TOOLS=ON
+      - name: Clean Env
+        run: rm -rf ./build
+      - name: Download Build
+        uses: actions/download-artifact@v5
+        with:
+          name: build-x86-${{ github.run_id }}
+          path: ./build
+      - name: Fix Permissions
+        run: chmod +x ./build/tools/check_compatibility/check_compatibility
       - name: Run Check Compatibility
-        run: bash ./scripts/check_compatibility.sh
+        run: BUILD_DIR=./build bash ./scripts/check_compatibility.sh
 
   test-python-x86:
     name: Test Python X86
