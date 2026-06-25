@@ -20,4 +20,5 @@ namespace vsag {
 
 VSAG_DEFINE_SIMD_DISPATCH(FP16ComputeIP, FP16ComputeType);
 VSAG_DEFINE_SIMD_DISPATCH(FP16ComputeL2Sqr, FP16ComputeType);
+VSAG_DEFINE_SIMD_DISPATCH(FP16SparseAccumulate, FP16SparseAccumulateType);
 }  // namespace vsag

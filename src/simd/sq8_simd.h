@@ -46,6 +46,12 @@ namespace vsag {
                          const float* RESTRICT lower_bound, \
                          const float* RESTRICT diff,        \
                          uint64_t dim);                     \
+    void                                                    \
+    SQ8SparseAccumulate(float* RESTRICT dists,              \
+                        const uint16_t* RESTRICT ids,       \
+                        const uint8_t* RESTRICT vals,       \
+                        float query_val,                    \
+                        uint32_t num);                      \
     }  // namespace ns
 
 DECLARE_SQ8_FUNCTIONS(generic)
@@ -74,4 +80,11 @@ using SQ8ComputeCodesType = float (*)(const uint8_t* RESTRICT codes1,
 
 extern SQ8ComputeCodesType SQ8ComputeCodesIP;
 extern SQ8ComputeCodesType SQ8ComputeCodesL2Sqr;
+
+using SQ8SparseAccumulateType = void (*)(float* RESTRICT dists,
+                                         const uint16_t* RESTRICT ids,
+                                         const uint8_t* RESTRICT vals,
+                                         float query_val,
+                                         uint32_t num);
+extern SQ8SparseAccumulateType SQ8SparseAccumulate;
 }  // namespace vsag

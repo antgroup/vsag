@@ -55,10 +55,10 @@ generate_sindi_param(const SINDIDefaultParam& param) {
     vsag::JsonType json;
     json[USE_REORDER_KEY].SetBool(param.use_reorder);
     if (param.sparse_value_quant_type == QUANTIZATION_TYPE_VALUE_FP16) {
-        json["use_quantization"].SetString(QUANTIZATION_TYPE_VALUE_FP16);
+        json[USE_QUANTIZATION].SetString(QUANTIZATION_TYPE_VALUE_FP16);
     } else {
-        json["use_quantization"].SetBool(param.sparse_value_quant_type ==
-                                         QUANTIZATION_TYPE_VALUE_SQ8);
+        json[USE_QUANTIZATION].SetBool(param.sparse_value_quant_type ==
+                                       QUANTIZATION_TYPE_VALUE_SQ8);
     }
     json[SPARSE_DOC_PRUNE_RATIO].SetFloat(param.doc_prune_ratio);
     json[SPARSE_WINDOW_SIZE].SetInt(param.window_size);

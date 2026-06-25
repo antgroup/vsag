@@ -15,9 +15,12 @@
 
 #include "sparse_term_computer.h"
 
+#include <cstring>
+
 #include "algorithm/sindi/sindi_parameter.h"
 #include "impl/allocator/safe_allocator.h"
 #include "unittest.h"
+
 using namespace vsag;
 
 TEST_CASE("SparseTermComputer Basic Test", "[ut][SparseTermComputer]") {
@@ -71,7 +74,7 @@ TEST_CASE("SparseTermComputer Basic Test", "[ut][SparseTermComputer]") {
         std::vector<float> term_vals = {0.1f, 2.2f, 4.3f, 6.4f, 8.5f};
         computer->ScanForAccumulate(
             test_term_it, term_ids.data(), term_vals.data(), term_ids.size(), dists.data());
-        for (size_t i = 0; i < term_ids.size(); i++) {
+        for (uint64_t i = 0; i < term_ids.size(); i++) {
             auto id = term_ids[i];
             REQUIRE(std::abs(dists[id] - (term_vals[i] * query_val)) < 1e-3);
         }
@@ -82,9 +85,61 @@ TEST_CASE("SparseTermComputer Basic Test", "[ut][SparseTermComputer]") {
         std::vector<uint8_t> term_vals{0, 2, 4, 6, 8};
         computer->ScanForAccumulate(
             test_term_it, term_ids.data(), term_vals.data(), term_ids.size(), dists.data());
-        for (size_t i = 0; i < term_ids.size(); i++) {
+        for (uint64_t i = 0; i < term_ids.size(); i++) {
             auto id = term_ids[i];
             REQUIRE(std::abs(dists[id] - (term_vals[i] * query_val)) < 1e-3);
+        }
+    }
+
+    SECTION("Scan with fp16 data") {
+        std::vector<float> dists(10, 0);
+        std::vector<float> raw_term_vals = {0.1F, 2.2F, 4.3F, 6.4F, 8.5F};
+        std::vector<uint16_t> term_vals(raw_term_vals.size());
+        for (uint64_t i = 0; i < raw_term_vals.size(); ++i) {
+            term_vals[i] = generic::FloatToFP16(raw_term_vals[i]);
+        }
+
+        computer->ScanForAccumulateFP16(
+            test_term_it, term_ids.data(), term_vals.data(), term_ids.size(), dists.data());
+        for (uint64_t i = 0; i < term_ids.size(); i++) {
+            auto id = term_ids[i];
+            auto expected = generic::FP16ToFloat(term_vals[i]) * query_val;
+            REQUIRE(std::abs(dists[id] - expected) < 1e-3);
+        }
+    }
+
+    SECTION("Scan with fp16 bytes") {
+        std::vector<float> dists(10, 0);
+        std::vector<float> raw_term_vals = {0.1F, 2.2F, 4.3F, 6.4F, 8.5F};
+        std::vector<uint16_t> fp16_vals(raw_term_vals.size());
+        std::vector<uint8_t> term_vals(raw_term_vals.size() * sizeof(uint16_t));
+        for (uint64_t i = 0; i < raw_term_vals.size(); ++i) {
+            fp16_vals[i] = generic::FloatToFP16(raw_term_vals[i]);
+            std::memcpy(term_vals.data() + i * sizeof(uint16_t), &fp16_vals[i], sizeof(uint16_t));
+        }
+
+        computer->ScanForAccumulateFP16Bytes(
+            test_term_it, term_ids.data(), term_vals.data(), term_ids.size(), dists.data());
+        for (uint64_t i = 0; i < term_ids.size(); i++) {
+            auto id = term_ids[i];
+            auto expected = generic::FP16ToFloat(fp16_vals[i]) * query_val;
+            REQUIRE(std::abs(dists[id] - expected) < 1e-3);
+        }
+    }
+
+    SECTION("Scan with float bytes") {
+        std::vector<float> dists(10, 0);
+        std::vector<float> raw_term_vals = {0.1F, 2.2F, 4.3F, 6.4F, 8.5F};
+        std::vector<uint8_t> term_vals(raw_term_vals.size() * sizeof(float));
+        for (uint64_t i = 0; i < raw_term_vals.size(); ++i) {
+            std::memcpy(term_vals.data() + i * sizeof(float), &raw_term_vals[i], sizeof(float));
+        }
+
+        computer->ScanForAccumulateFloatBytes(
+            test_term_it, term_ids.data(), term_vals.data(), term_ids.size(), dists.data());
+        for (uint64_t i = 0; i < term_ids.size(); i++) {
+            auto id = term_ids[i];
+            REQUIRE(std::abs(dists[id] - (raw_term_vals[i] * query_val)) < 1e-3);
         }
     }
 

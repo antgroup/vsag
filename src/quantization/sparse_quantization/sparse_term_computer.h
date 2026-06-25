@@ -18,10 +18,13 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <type_traits>
 
 #include "algorithm/sindi/sindi_parameter.h"
 #include "metric_type.h"
 #include "simd/fp16_simd.h"
+#include "simd/fp32_simd.h"
+#include "simd/sq8_simd.h"
 #include "utils/pointer_define.h"
 #include "utils/sparse_vector_transform.h"
 namespace vsag {
@@ -78,8 +81,14 @@ public:
         //  __builtin_prefetch(term_datas + term_count / 2, 0, 3);
         //  __builtin_prefetch(global_dists + term_ids[term_count / 2], 0, 3);
 
-        for (auto i = 0; i < term_count; i++) {
-            global_dists[term_ids[i]] += query_val * term_datas[i];
+        if constexpr (std::is_same_v<T, float>) {
+            FP32SparseAccumulate(global_dists, term_ids, term_datas, query_val, term_count);
+        } else if constexpr (std::is_same_v<T, uint8_t>) {
+            SQ8SparseAccumulate(global_dists, term_ids, term_datas, query_val, term_count);
+        } else {
+            for (auto i = 0; i < term_count; i++) {
+                global_dists[term_ids[i]] += query_val * term_datas[i];
+            }
         }
     }
 
@@ -90,9 +99,7 @@ public:
                           uint32_t term_count,
                           float* global_dists) {
         float query_val = sorted_query_[term_iterator].second;
-        for (uint32_t i = 0; i < term_count; i++) {
-            global_dists[term_ids[i]] += query_val * generic::FP16ToFloat(term_datas[i]);
-        }
+        FP16SparseAccumulate(global_dists, term_ids, term_datas, query_val, term_count);
     }
 
     void
@@ -102,7 +109,7 @@ public:
                                uint32_t term_count,
                                float* global_dists) {
         float query_val = sorted_query_[term_iterator].second;
-        for (uint32_t i = 0; i < term_count; i++) {
+        for (uint32_t i = 0; i < term_count; ++i) {
             uint16_t value = 0;
             std::memcpy(
                 &value, term_datas + static_cast<uint64_t>(i) * sizeof(value), sizeof(value));
@@ -117,7 +124,7 @@ public:
                                 uint32_t term_count,
                                 float* global_dists) {
         float query_val = sorted_query_[term_iterator].second;
-        for (uint32_t i = 0; i < term_count; i++) {
+        for (uint32_t i = 0; i < term_count; ++i) {
             float value = 0.0F;
             std::memcpy(
                 &value, term_datas + static_cast<uint64_t>(i) * sizeof(value), sizeof(value));

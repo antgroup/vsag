@@ -28,6 +28,8 @@ SparseValueQuantizationTypeToString(SparseValueQuantizationType type) {
             return QUANTIZATION_TYPE_VALUE_SQ8;
         case SparseValueQuantizationType::FP16:
             return QUANTIZATION_TYPE_VALUE_FP16;
+        default:
+            CHECK_ARGUMENT(false, "unknown sparse value quantization type");
     }
     return QUANTIZATION_TYPE_VALUE_FP32;
 }

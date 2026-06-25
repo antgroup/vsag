@@ -26,6 +26,12 @@ namespace vsag {
     FP16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim);    \
     float                                                                                         \
     FP16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim); \
+    void                                                                                          \
+    FP16SparseAccumulate(float* RESTRICT dists,                                                   \
+                         const uint16_t* RESTRICT ids,                                            \
+                         const uint16_t* RESTRICT vals,                                           \
+                         float query_val,                                                         \
+                         uint32_t num);                                                           \
     }  // namespace ns
 
 namespace generic {
@@ -50,5 +56,12 @@ using FP16ComputeType = float (*)(const uint8_t* RESTRICT query,
                                   uint64_t dim);
 extern FP16ComputeType FP16ComputeIP;
 extern FP16ComputeType FP16ComputeL2Sqr;
+
+using FP16SparseAccumulateType = void (*)(float* RESTRICT dists,
+                                          const uint16_t* RESTRICT ids,
+                                          const uint16_t* RESTRICT vals,
+                                          float query_val,
+                                          uint32_t num);
+extern FP16SparseAccumulateType FP16SparseAccumulate;
 
 }  // namespace vsag

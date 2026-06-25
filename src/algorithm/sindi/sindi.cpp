@@ -27,6 +27,9 @@
 namespace vsag {
 namespace {
 
+// Approximate per mapped term: one reverse-map uint32_t plus one uint32_t->uint32_t map node.
+constexpr uint64_t TERM_ID_MAPPER_ENTRY_MEMORY_BYTES = 54;
+
 uint32_t
 sparse_value_code_size(SparseValueQuantizationType type) {
     switch (type) {
@@ -36,6 +39,8 @@ sparse_value_code_size(SparseValueQuantizationType type) {
             return sizeof(uint8_t);
         case SparseValueQuantizationType::FP16:
             return sizeof(uint16_t);
+        default:
+            CHECK_ARGUMENT(false, "unknown sparse value quantization type");
     }
     return sizeof(float);
 }
@@ -867,11 +872,10 @@ SINDI::cal_memory_usage() {
     if (this->rerank_flat_index_ != nullptr) {
         memory += this->rerank_flat_index_->GetMemoryUsage();
     }
-    if (sparse_value_quant_type_ == SparseValueQuantizationType::SQ8) {
-        memory += sizeof(QuantizationParams);
-    }
+    memory += sizeof(QuantizationParams);
     if (remap_term_ids_ && term_id_mapper_) {
-        memory += static_cast<uint64_t>(term_id_mapper_->Size()) * 54;
+        memory +=
+            static_cast<uint64_t>(term_id_mapper_->Size()) * TERM_ID_MAPPER_ENTRY_MEMORY_BYTES;
     }
 
     std::unique_lock lock(this->memory_usage_mutex_);

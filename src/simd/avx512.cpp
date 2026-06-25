@@ -103,6 +103,64 @@ FP32ComputeL2Sqr(const float* RESTRICT query, const float* RESTRICT codes, uint6
 }
 
 void
+FP32SparseAccumulate(float* RESTRICT dists,
+                     const uint16_t* RESTRICT ids,
+                     const float* RESTRICT vals,
+                     float query_val,
+                     uint32_t num) {
+#if defined(ENABLE_AVX512)
+    constexpr uint32_t SIMD_WIDTH = 16;
+    uint32_t j = 0;
+
+    __m512 q_weight_vec = _mm512_set1_ps(query_val);
+
+    for (; j + 2 * SIMD_WIDTH <= num; j += 2 * SIMD_WIDTH) {
+        _mm_prefetch(reinterpret_cast<const char*>(&vals[j + 128]), _MM_HINT_T0);
+        _mm_prefetch(reinterpret_cast<const char*>(&ids[j + 128]), _MM_HINT_T0);
+        _mm_prefetch(reinterpret_cast<const char*>(&vals[j + 144]), _MM_HINT_T0);
+        _mm_prefetch(reinterpret_cast<const char*>(&ids[j + 144]), _MM_HINT_T0);
+
+        __m512 vals0 = _mm512_loadu_ps(&vals[j]);
+        __m512i ids0 =
+            _mm512_cvtepu16_epi32(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(&ids[j])));
+
+        __m512 vals1 = _mm512_loadu_ps(&vals[j + SIMD_WIDTH]);
+        __m512i ids1 = _mm512_cvtepu16_epi32(
+            _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&ids[j + SIMD_WIDTH])));
+
+        __m512 current_scores0 = _mm512_i32gather_ps(ids0, dists, sizeof(float));
+        __m512 new_scores0 = _mm512_fmadd_ps(vals0, q_weight_vec, current_scores0);
+        _mm512_i32scatter_ps(dists, ids0, new_scores0, sizeof(float));
+
+        __m512 current_scores1 = _mm512_i32gather_ps(ids1, dists, sizeof(float));
+        __m512 new_scores1 = _mm512_fmadd_ps(vals1, q_weight_vec, current_scores1);
+        _mm512_i32scatter_ps(dists, ids1, new_scores1, sizeof(float));
+    }
+
+    for (; j + SIMD_WIDTH <= num; j += SIMD_WIDTH) {
+        __m512 vals_vec = _mm512_loadu_ps(&vals[j]);
+        __m512i ids_vec =
+            _mm512_cvtepu16_epi32(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(&ids[j])));
+        __m512 current_scores = _mm512_i32gather_ps(ids_vec, dists, sizeof(float));
+        __m512 new_scores = _mm512_fmadd_ps(vals_vec, q_weight_vec, current_scores);
+        _mm512_i32scatter_ps(dists, ids_vec, new_scores, sizeof(float));
+    }
+
+    if (j < num) {
+        __mmask16 mask = (1u << (num - j)) - 1;
+        __m512 vals_vec = _mm512_maskz_loadu_ps(mask, &vals[j]);
+        __m512i ids_vec = _mm512_cvtepu16_epi32(_mm256_maskz_loadu_epi16(mask, &ids[j]));
+        __m512 current_scores =
+            _mm512_mask_i32gather_ps(_mm512_setzero_ps(), mask, ids_vec, dists, sizeof(float));
+        __m512 new_scores = _mm512_fmadd_ps(vals_vec, q_weight_vec, current_scores);
+        _mm512_mask_i32scatter_ps(dists, mask, ids_vec, new_scores, sizeof(float));
+    }
+#else
+    return avx2::FP32SparseAccumulate(dists, ids, vals, query_val, num);
+#endif
+}
+
+void
 FP32ComputeIPBatch4(const float* RESTRICT query,
                     uint64_t dim,
                     const float* RESTRICT codes1,
@@ -279,6 +337,67 @@ FP16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, u
 #endif
 }
 
+void
+FP16SparseAccumulate(float* RESTRICT dists,
+                     const uint16_t* RESTRICT ids,
+                     const uint16_t* RESTRICT vals,
+                     float query_val,
+                     uint32_t num) {
+#if defined(ENABLE_AVX512)
+    constexpr uint32_t SIMD_WIDTH = 16;
+    uint32_t j = 0;
+
+    __m512 q_weight_vec = _mm512_set1_ps(query_val);
+
+    for (; j + 2 * SIMD_WIDTH <= num; j += 2 * SIMD_WIDTH) {
+        _mm_prefetch(reinterpret_cast<const char*>(&vals[j + 128]), _MM_HINT_T0);
+        _mm_prefetch(reinterpret_cast<const char*>(&ids[j + 128]), _MM_HINT_T0);
+        _mm_prefetch(reinterpret_cast<const char*>(&vals[j + 144]), _MM_HINT_T0);
+        _mm_prefetch(reinterpret_cast<const char*>(&ids[j + 144]), _MM_HINT_T0);
+
+        __m512 vals0 =
+            _mm512_cvtph_ps(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(&vals[j])));
+        __m512i ids0 =
+            _mm512_cvtepu16_epi32(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(&ids[j])));
+
+        __m512 vals1 = _mm512_cvtph_ps(
+            _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&vals[j + SIMD_WIDTH])));
+        __m512i ids1 = _mm512_cvtepu16_epi32(
+            _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&ids[j + SIMD_WIDTH])));
+
+        __m512 current_scores0 = _mm512_i32gather_ps(ids0, dists, sizeof(float));
+        __m512 new_scores0 = _mm512_fmadd_ps(vals0, q_weight_vec, current_scores0);
+        _mm512_i32scatter_ps(dists, ids0, new_scores0, sizeof(float));
+
+        __m512 current_scores1 = _mm512_i32gather_ps(ids1, dists, sizeof(float));
+        __m512 new_scores1 = _mm512_fmadd_ps(vals1, q_weight_vec, current_scores1);
+        _mm512_i32scatter_ps(dists, ids1, new_scores1, sizeof(float));
+    }
+
+    for (; j + SIMD_WIDTH <= num; j += SIMD_WIDTH) {
+        __m512 vals_vec =
+            _mm512_cvtph_ps(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(&vals[j])));
+        __m512i ids_vec =
+            _mm512_cvtepu16_epi32(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(&ids[j])));
+        __m512 current_scores = _mm512_i32gather_ps(ids_vec, dists, sizeof(float));
+        __m512 new_scores = _mm512_fmadd_ps(vals_vec, q_weight_vec, current_scores);
+        _mm512_i32scatter_ps(dists, ids_vec, new_scores, sizeof(float));
+    }
+
+    if (j < num) {
+        __mmask16 mask = (1u << (num - j)) - 1;
+        __m512 vals_vec = _mm512_cvtph_ps(_mm256_maskz_loadu_epi16(mask, &vals[j]));
+        __m512i ids_vec = _mm512_cvtepu16_epi32(_mm256_maskz_loadu_epi16(mask, &ids[j]));
+        __m512 current_scores =
+            _mm512_mask_i32gather_ps(_mm512_setzero_ps(), mask, ids_vec, dists, sizeof(float));
+        __m512 new_scores = _mm512_fmadd_ps(vals_vec, q_weight_vec, current_scores);
+        _mm512_mask_i32scatter_ps(dists, mask, ids_vec, new_scores, sizeof(float));
+    }
+#else
+    return avx2::FP16SparseAccumulate(dists, ids, vals, query_val, num);
+#endif
+}
+
 float
 SQ8ComputeIP(const float* RESTRICT query,
              const uint8_t* RESTRICT codes,
@@ -332,6 +451,68 @@ SQ8ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
         codes1, codes2, lower_bound, diff, dim, &avx2::SQ8ComputeCodesL2Sqr);
 #else
     return avx2::SQ8ComputeCodesL2Sqr(codes1, codes2, lower_bound, diff, dim);
+#endif
+}
+
+void
+SQ8SparseAccumulate(float* RESTRICT dists,
+                    const uint16_t* RESTRICT ids,
+                    const uint8_t* RESTRICT vals,
+                    float query_val,
+                    uint32_t num) {
+#if defined(ENABLE_AVX512)
+    constexpr uint32_t SIMD_WIDTH = 16;
+    uint32_t j = 0;
+
+    __m512 q_weight_vec = _mm512_set1_ps(query_val);
+
+    for (; j + 2 * SIMD_WIDTH <= num; j += 2 * SIMD_WIDTH) {
+        _mm_prefetch(reinterpret_cast<const char*>(&vals[j + 128]), _MM_HINT_T0);
+        _mm_prefetch(reinterpret_cast<const char*>(&ids[j + 128]), _MM_HINT_T0);
+        _mm_prefetch(reinterpret_cast<const char*>(&vals[j + 144]), _MM_HINT_T0);
+        _mm_prefetch(reinterpret_cast<const char*>(&ids[j + 144]), _MM_HINT_T0);
+
+        __m512 vals0 = _mm512_cvtepi32_ps(
+            _mm512_cvtepu8_epi32(_mm_loadu_si128(reinterpret_cast<const __m128i*>(&vals[j]))));
+        __m512i ids0 =
+            _mm512_cvtepu16_epi32(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(&ids[j])));
+
+        __m512 vals1 = _mm512_cvtepi32_ps(_mm512_cvtepu8_epi32(
+            _mm_loadu_si128(reinterpret_cast<const __m128i*>(&vals[j + SIMD_WIDTH]))));
+        __m512i ids1 = _mm512_cvtepu16_epi32(
+            _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&ids[j + SIMD_WIDTH])));
+
+        __m512 current_scores0 = _mm512_i32gather_ps(ids0, dists, sizeof(float));
+        __m512 new_scores0 = _mm512_fmadd_ps(vals0, q_weight_vec, current_scores0);
+        _mm512_i32scatter_ps(dists, ids0, new_scores0, sizeof(float));
+
+        __m512 current_scores1 = _mm512_i32gather_ps(ids1, dists, sizeof(float));
+        __m512 new_scores1 = _mm512_fmadd_ps(vals1, q_weight_vec, current_scores1);
+        _mm512_i32scatter_ps(dists, ids1, new_scores1, sizeof(float));
+    }
+
+    for (; j + SIMD_WIDTH <= num; j += SIMD_WIDTH) {
+        __m512 vals_vec = _mm512_cvtepi32_ps(
+            _mm512_cvtepu8_epi32(_mm_loadu_si128(reinterpret_cast<const __m128i*>(&vals[j]))));
+        __m512i ids_vec =
+            _mm512_cvtepu16_epi32(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(&ids[j])));
+        __m512 current_scores = _mm512_i32gather_ps(ids_vec, dists, sizeof(float));
+        __m512 new_scores = _mm512_fmadd_ps(vals_vec, q_weight_vec, current_scores);
+        _mm512_i32scatter_ps(dists, ids_vec, new_scores, sizeof(float));
+    }
+
+    if (j < num) {
+        __mmask16 mask = (1u << (num - j)) - 1;
+        __m512 vals_vec =
+            _mm512_cvtepi32_ps(_mm512_cvtepu8_epi32(_mm_maskz_loadu_epi8(mask, &vals[j])));
+        __m512i ids_vec = _mm512_cvtepu16_epi32(_mm256_maskz_loadu_epi16(mask, &ids[j]));
+        __m512 current_scores =
+            _mm512_mask_i32gather_ps(_mm512_setzero_ps(), mask, ids_vec, dists, sizeof(float));
+        __m512 new_scores = _mm512_fmadd_ps(vals_vec, q_weight_vec, current_scores);
+        _mm512_mask_i32scatter_ps(dists, mask, ids_vec, new_scores, sizeof(float));
+    }
+#else
+    return avx2::SQ8SparseAccumulate(dists, ids, vals, query_val, num);
 #endif
 }
 

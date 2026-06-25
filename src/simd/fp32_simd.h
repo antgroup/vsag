@@ -27,6 +27,12 @@ namespace vsag {
     float                                                                                     \
     FP32ComputeL2Sqr(const float* RESTRICT query, const float* RESTRICT codes, uint64_t dim); \
     void                                                                                      \
+    FP32SparseAccumulate(float* RESTRICT dists,                                               \
+                         const uint16_t* RESTRICT ids,                                        \
+                         const float* RESTRICT vals,                                          \
+                         float query_val,                                                     \
+                         uint32_t num);                                                       \
+    void                                                                                      \
     FP32ComputeIPBatch4(const float* RESTRICT query,                                          \
                         uint64_t dim,                                                         \
                         const float* RESTRICT codes1,                                         \
@@ -74,6 +80,13 @@ using FP32ComputeType = float (*)(const float* RESTRICT query,
                                   uint64_t dim);
 extern FP32ComputeType FP32ComputeIP;
 extern FP32ComputeType FP32ComputeL2Sqr;
+
+using FP32SparseAccumulateType = void (*)(float* RESTRICT dists,
+                                          const uint16_t* RESTRICT ids,
+                                          const float* RESTRICT vals,
+                                          float query_val,
+                                          uint32_t num);
+extern FP32SparseAccumulateType FP32SparseAccumulate;
 
 using FP32ComputeBatch4Type = void (*)(const float* RESTRICT query,
                                        uint64_t dim,

@@ -106,6 +106,17 @@ FP32ComputeL2Sqr(const float* RESTRICT query, const float* RESTRICT codes, uint6
 }
 
 void
+FP32SparseAccumulate(float* RESTRICT dists,
+                     const uint16_t* RESTRICT ids,
+                     const float* RESTRICT vals,
+                     float query_val,
+                     uint32_t num) {
+    for (uint32_t i = 0; i < num; ++i) {
+        dists[ids[i]] += vals[i] * query_val;
+    }
+}
+
+void
 FP32ComputeIPBatch4(const float* RESTRICT query,
                     uint64_t dim,
                     const float* RESTRICT codes1,
@@ -239,6 +250,17 @@ FP16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, u
         query, codes, dim, nullptr);
 }
 
+void
+FP16SparseAccumulate(float* RESTRICT dists,
+                     const uint16_t* RESTRICT ids,
+                     const uint16_t* RESTRICT vals,
+                     float query_val,
+                     uint32_t num) {
+    for (uint32_t i = 0; i < num; ++i) {
+        dists[ids[i]] += generic::FP16ToFloat(vals[i]) * query_val;
+    }
+}
+
 float
 SQ8ComputeIP(const float* RESTRICT query,
              const uint8_t* RESTRICT codes,
@@ -277,6 +299,17 @@ SQ8ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
                      uint64_t dim) {
     return simd::SQ8ComputeCodesL2SqrImpl<simd::SQ8Traits<simd::Generic_SQ8_Tag>>(
         codes1, codes2, lower_bound, diff, dim);
+}
+
+void
+SQ8SparseAccumulate(float* RESTRICT dists,
+                    const uint16_t* RESTRICT ids,
+                    const uint8_t* RESTRICT vals,
+                    float query_val,
+                    uint32_t num) {
+    for (uint32_t i = 0; i < num; ++i) {
+        dists[ids[i]] += static_cast<float>(vals[i]) * query_val;
+    }
 }
 
 namespace {

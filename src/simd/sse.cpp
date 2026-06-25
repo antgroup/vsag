@@ -14,6 +14,7 @@
 // limitations under the License.
 
 #include <cstdint>
+#include <cstring>
 
 #include "simd/int8_simd.h"
 #if defined(ENABLE_SSE)
@@ -110,6 +111,39 @@ FP32ComputeL2Sqr(const float* RESTRICT query, const float* RESTRICT codes, uint6
         query, codes, dim, &generic::FP32ComputeL2Sqr);
 #else
     return vsag::generic::FP32ComputeL2Sqr(query, codes, dim);
+#endif
+}
+
+void
+FP32SparseAccumulate(float* RESTRICT dists,
+                     const uint16_t* RESTRICT ids,
+                     const float* RESTRICT vals,
+                     float query_val,
+                     uint32_t num) {
+#if defined(ENABLE_SSE)
+    __m128 q_vec = _mm_set1_ps(query_val);
+    uint32_t i = 0;
+    for (; i + 4 <= num; i += 4) {
+        __m128 val_vec = _mm_loadu_ps(vals + i);
+        __m128 delta_vec = _mm_mul_ps(val_vec, q_vec);
+
+        __m128i id_vec = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ids + i));
+        __m128i idx_vec = _mm_cvtepu16_epi32(id_vec);
+
+        alignas(16) float res[4];
+        alignas(16) int32_t indices[4];
+        _mm_store_ps(res, delta_vec);
+        _mm_store_si128(reinterpret_cast<__m128i*>(indices), idx_vec);
+
+        for (int k = 0; k < 4; ++k) {
+            dists[indices[k]] += res[k];
+        }
+    }
+    for (; i < num; ++i) {
+        dists[ids[i]] += vals[i] * query_val;
+    }
+#else
+    return generic::FP32SparseAccumulate(dists, ids, vals, query_val, num);
 #endif
 }
 
@@ -252,6 +286,15 @@ FP16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, u
     return generic::FP16ComputeL2Sqr(query, codes, dim);
 }
 
+void
+FP16SparseAccumulate(float* RESTRICT dists,
+                     const uint16_t* RESTRICT ids,
+                     const uint16_t* RESTRICT vals,
+                     float query_val,
+                     uint32_t num) {
+    return generic::FP16SparseAccumulate(dists, ids, vals, query_val, num);
+}
+
 float
 INT8ComputeL2Sqr(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_SSE)
@@ -325,6 +368,42 @@ SQ8ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
         codes1, codes2, lower_bound, diff, dim, &generic::SQ8ComputeCodesL2Sqr);
 #else
     return generic::SQ8ComputeCodesL2Sqr(codes1, codes2, lower_bound, diff, dim);
+#endif
+}
+
+void
+SQ8SparseAccumulate(float* RESTRICT dists,
+                    const uint16_t* RESTRICT ids,
+                    const uint8_t* RESTRICT vals,
+                    float query_val,
+                    uint32_t num) {
+#if defined(ENABLE_SSE)
+    __m128 q_vec = _mm_set1_ps(query_val);
+    uint32_t i = 0;
+    for (; i + 4 <= num; i += 4) {
+        uint32_t packed_vals = 0;
+        std::memcpy(&packed_vals, vals + i, sizeof(packed_vals));
+        __m128i val_i32 = _mm_cvtepu8_epi32(_mm_cvtsi32_si128(static_cast<int>(packed_vals)));
+        __m128 val_vec = _mm_cvtepi32_ps(val_i32);
+        __m128 delta_vec = _mm_mul_ps(val_vec, q_vec);
+
+        __m128i id_vec = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ids + i));
+        __m128i idx_vec = _mm_cvtepu16_epi32(id_vec);
+
+        alignas(16) float res[4];
+        alignas(16) int32_t indices[4];
+        _mm_store_ps(res, delta_vec);
+        _mm_store_si128(reinterpret_cast<__m128i*>(indices), idx_vec);
+
+        for (int k = 0; k < 4; ++k) {
+            dists[indices[k]] += res[k];
+        }
+    }
+    for (; i < num; ++i) {
+        dists[ids[i]] += static_cast<float>(vals[i]) * query_val;
+    }
+#else
+    return generic::SQ8SparseAccumulate(dists, ids, vals, query_val, num);
 #endif
 }
 

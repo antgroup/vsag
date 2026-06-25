@@ -22,4 +22,5 @@ VSAG_DEFINE_SIMD_DISPATCH(SQ8ComputeIP, SQ8ComputeType);
 VSAG_DEFINE_SIMD_DISPATCH(SQ8ComputeL2Sqr, SQ8ComputeType);
 VSAG_DEFINE_SIMD_DISPATCH(SQ8ComputeCodesIP, SQ8ComputeCodesType);
 VSAG_DEFINE_SIMD_DISPATCH(SQ8ComputeCodesL2Sqr, SQ8ComputeCodesType);
+VSAG_DEFINE_SIMD_DISPATCH(SQ8SparseAccumulate, SQ8SparseAccumulateType);
 }  // namespace vsag
