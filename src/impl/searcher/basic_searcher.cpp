@@ -483,7 +483,8 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                 } else if (reasoning != nullptr) {
                     reasoning->RecordFilterReject(cur_id);
                 }
-                if (inner_search_param.consider_duplicate) {
+                if (inner_search_param.consider_duplicate &&
+                    inner_search_param.max_duplicates_per_group != 0) {
                     const auto duplicate_ids = graph->GetDuplicateIds(cur_id);
                     int64_t dup_count = 0;
                     for (const auto& item : duplicate_ids) {
