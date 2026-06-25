@@ -245,7 +245,15 @@ SINDI::Add(const DatasetPtr& base) {
 std::vector<int64_t>
 SINDI::Build(const DatasetPtr& base) {
     // note that there's a wlock in Add()
-    return this->Add(base);
+    auto failed_ids = this->Add(base);
+    {
+        std::scoped_lock wlock(this->global_mutex_);
+        for (auto& window : window_term_list_) {
+            window->Compact();
+        }
+        this->cal_memory_usage();
+    }
+    return failed_ids;
 }
 
 bool

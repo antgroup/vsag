@@ -15,6 +15,7 @@
 
 #include "sparse_term_datacell.h"
 
+#include <algorithm>
 #include <cstring>
 
 #include "simd/fp16_simd.h"
@@ -313,6 +314,40 @@ SparseTermDataCell::ResizeTermList(InnerIdType new_term_capacity) {
     term_capacity_ = new_capacity;
 }
 
+void
+SparseTermDataCell::Compact() {
+    uint32_t compact_term_capacity = 0;
+    const uint64_t compactable_capacity = std::min(
+        std::min(static_cast<uint64_t>(term_capacity_), static_cast<uint64_t>(term_sizes_.size())),
+        std::min(static_cast<uint64_t>(term_ids_.size()),
+                 static_cast<uint64_t>(term_datas_.size())));
+    for (uint64_t i = 0; i < compactable_capacity; ++i) {
+        if (term_sizes_[i] != 0) {
+            compact_term_capacity = static_cast<uint32_t>(i + 1);
+        }
+    }
+
+    Vector<std::unique_ptr<Vector<uint16_t>>> compact_ids(compact_term_capacity, allocator_);
+    Vector<std::unique_ptr<Vector<uint8_t>>> compact_datas(compact_term_capacity, allocator_);
+    Vector<uint32_t> compact_sizes(compact_term_capacity, 0, allocator_);
+    for (uint32_t i = 0; i < compact_term_capacity; ++i) {
+        compact_sizes[i] = term_sizes_[i];
+        if (term_sizes_[i] != 0) {
+            CHECK_ARGUMENT(term_ids_[i] != nullptr && term_datas_[i] != nullptr,
+                           "non-empty sparse term has null posting data");
+            compact_ids[i] = std::make_unique<Vector<uint16_t>>(
+                term_ids_[i]->begin(), term_ids_[i]->end(), allocator_);
+            compact_datas[i] = std::make_unique<Vector<uint8_t>>(
+                term_datas_[i]->begin(), term_datas_[i]->end(), allocator_);
+        }
+    }
+
+    term_ids_.swap(compact_ids);
+    term_datas_.swap(compact_datas);
+    term_sizes_.swap(compact_sizes);
+    term_capacity_ = compact_term_capacity;
+}
+
 float
 SparseTermDataCell::CalcDistanceByInnerId(const SparseTermComputerPtr& computer, uint16_t base_id) {
     float ip = 0;
@@ -362,20 +397,22 @@ SparseTermDataCell::CalcDistanceByInnerId(const SparseTermComputerPtr& computer,
 int64_t
 SparseTermDataCell::GetMemoryUsage() const {
     auto memory = sizeof(SparseTermDataCell);
-    memory += term_ids_.size() * sizeof(std::unique_ptr<Vector<uint16_t>>);
-    memory += term_datas_.size() * sizeof(std::unique_ptr<Vector<uint8_t>>);
+    memory += term_ids_.capacity() * sizeof(std::unique_ptr<Vector<uint16_t>>);
+    memory += term_datas_.capacity() * sizeof(std::unique_ptr<Vector<uint8_t>>);
     for (const auto& ptr : term_ids_) {
         if (ptr != nullptr) {
-            memory += ptr->size() * sizeof(uint16_t);
+            memory += sizeof(Vector<uint16_t>);
+            memory += ptr->capacity() * sizeof(uint16_t);
         }
     }
     for (const auto& ptr : term_datas_) {
         if (ptr != nullptr) {
-            memory += ptr->size() * sizeof(uint8_t);
+            memory += sizeof(Vector<uint8_t>);
+            memory += ptr->capacity() * sizeof(uint8_t);
         }
     }
     memory += sizeof(QuantizationParams);
-    memory += term_sizes_.size() * sizeof(uint32_t);
+    memory += term_sizes_.capacity() * sizeof(uint32_t);
     return static_cast<int64_t>(memory);
 }
 
@@ -486,8 +523,16 @@ SparseTermDataCell::Deserialize(StreamReader& reader) {
         }
     }
     StreamReader::ReadVector(reader, term_sizes_);
+    for (uint64_t i = 0; i < term_ids_.size(); ++i) {
+        if (i >= term_sizes_.size() || term_sizes_[i] == 0) {
+            term_ids_[i].reset();
+            term_datas_[i].reset();
+        }
+    }
 
-    // Restore total_count_ from deserialized data (not serialized to maintain compatibility)
+    Compact();
+
+    // Restore total_count_ from compacted deserialized data (not serialized for compatibility).
     total_count_ = 0;
     for (const auto& term_id_vec : term_ids_) {
         if (term_id_vec != nullptr) {
