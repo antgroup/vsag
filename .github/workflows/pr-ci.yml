@@ -91,9 +91,24 @@ jobs:
         run: export CMAKE_GENERATOR="Ninja" CMAKE_EXPORT_COMPILE_COMMANDS=ON EXTRA_DEFINED="-DUSE_SYSTEM_OPENBLAS=ON"; make asan VSAG_ENABLE_EXAMPLES=ON
       - name: Install clang-tidy 15
         run: sudo apt install clang-tidy-15 -y
-      - name: Run Lint
+      - name: Get changed source files
+        id: changed-srcs
         run: |
-          ./scripts/linters/run-clang-tidy-15.sh -p build/ -use-color -source-filter '^.*vsag\/src.*(?<!_test)\.cpp$$' -j 4
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git fetch origin ${{ github.base_ref }} --depth=1
+          CHANGED=$(git diff --name-only origin/${{ github.base_ref }}..HEAD -- 'src/**/*.cpp' ':(exclude)src/**/*_test.cpp')
+          PATTERN=""
+          if [ -n "$CHANGED" ]; then
+            PATTERN=$(echo "$CHANGED" | while IFS= read -r f; do
+              escaped=$(printf '%s' "$f" | sed 's/[][.\*^$()+?{|}]/\\&/g')
+              printf '%s$|' "$escaped"
+            done | sed 's/|$//')
+          fi
+          echo "pattern=$PATTERN" >> "$GITHUB_OUTPUT"
+      - name: Run Lint
+        if: steps.changed-srcs.outputs.pattern != ''
+        run: |
+          ./scripts/linters/run-clang-tidy-15.sh -p build/ -use-color -source-filter '^.*vsag\/src.*(?<!_test)\.cpp$$' -j 4 '${{ steps.changed-srcs.outputs.pattern }}'
       - name: Clean
         run: |
           find ./build -type f -name "*.o" -exec rm -f {} +
