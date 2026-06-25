@@ -151,6 +151,12 @@ public:
     [[nodiscard]] int64_t
     GetMemoryUsage() const override;
 
+    [[nodiscard]] uint64_t
+    EstimateMemory(uint64_t num_elements) const override;
+
+    void
+    SetImmutable() override;
+
 private:
     InnerSearchParam
     create_search_param(const std::string& parameters, const FilterPtr& filter) const;

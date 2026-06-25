@@ -15,9 +15,12 @@
 
 #include "ivf.h"
 
+#include <algorithm>
 #include <atomic>
+#include <limits>
 #include <random>
 #include <set>
+#include <utility>
 
 #include "algorithm/inner_index_interface.h"
 #include "attr/argparse.h"
@@ -26,11 +29,13 @@
 #include "gno_imi_partition.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/inner_search_param.h"
+#include "impl/label_table/label_table.h"
 #include "impl/reorder/flatten_reorder.h"
 #include "impl/searcher/basic_searcher.h"
 #include "index/index_impl.h"
 #include "index_feature_list.h"
 #include "inner_string_params.h"
+#include "io/memory_block_io_parameter.h"
 #include "ivf_nearest_partition.h"
 #include "query_context.h"
 #include "storage/serialization.h"
@@ -40,6 +45,102 @@
 #include "vsag_exception.h"
 
 namespace vsag {
+namespace {
+
+uint64_t
+saturated_add(uint64_t lhs, uint64_t rhs) {
+    if (std::numeric_limits<uint64_t>::max() - lhs < rhs) {
+        return std::numeric_limits<uint64_t>::max();
+    }
+    return lhs + rhs;
+}
+
+uint64_t
+saturated_mul(uint64_t lhs, uint64_t rhs) {
+    if (lhs != 0 and rhs > std::numeric_limits<uint64_t>::max() / lhs) {
+        return std::numeric_limits<uint64_t>::max();
+    }
+    return lhs * rhs;
+}
+
+uint64_t
+ceil_div(uint64_t value, uint64_t divisor) {
+    if (divisor == 0) {
+        return value;
+    }
+    return value / divisor + static_cast<uint64_t>(value % divisor != 0);
+}
+
+uint64_t
+block_memory_ceil(uint64_t memory, uint64_t block_size) {
+    if (memory == 0 or block_size == 0) {
+        return memory;
+    }
+    return saturated_mul(ceil_div(memory, block_size), block_size);
+}
+
+uint64_t
+non_negative_memory(int64_t memory) {
+    if (memory <= 0) {
+        return 0;
+    }
+    return static_cast<uint64_t>(memory);
+}
+
+uint64_t
+get_block_size(const IOParamPtr& io_param) {
+    if (io_param == nullptr) {
+        return 0;
+    }
+    auto block_param = std::dynamic_pointer_cast<MemoryBlockIOParameter>(io_param);
+    if (block_param != nullptr) {
+        return block_param->block_size_;
+    }
+    return MemoryBlockIOParameter::NearestPowerOfTwo(Options::Instance().block_size_limit());
+}
+
+uint64_t
+estimate_flatten_io_memory(uint64_t memory, const IOParamPtr& io_param) {
+    if (io_param == nullptr) {
+        return memory;
+    }
+    const auto io_type_name = io_param->GetTypeName();
+    if (io_type_name == IO_TYPE_VALUE_MEMORY_IO) {
+        return memory;
+    }
+    if (io_type_name == IO_TYPE_VALUE_BLOCK_MEMORY_IO) {
+        return block_memory_ceil(memory, get_block_size(io_param));
+    }
+    return 0;
+}
+
+uint64_t
+estimate_bucket_io_memory(uint64_t memory,
+                          uint64_t vector_count,
+                          uint64_t bucket_count,
+                          const IOParamPtr& io_param) {
+    if (io_param == nullptr) {
+        return memory;
+    }
+    const auto io_type_name = io_param->GetTypeName();
+    if (io_type_name == IO_TYPE_VALUE_MEMORY_IO) {
+        return memory;
+    }
+    if (io_type_name != IO_TYPE_VALUE_BLOCK_MEMORY_IO) {
+        return 0;
+    }
+
+    auto non_empty_bucket_count = std::min(bucket_count, vector_count);
+    if (non_empty_bucket_count == 0) {
+        return 0;
+    }
+    auto memory_per_bucket = ceil_div(memory, non_empty_bucket_count);
+    return saturated_mul(non_empty_bucket_count,
+                         block_memory_ceil(memory_per_bucket, get_block_size(io_param)));
+}
+
+}  // namespace
+
 static constexpr const char* IVF_PARAMS_TEMPLATE =
     R"(
     {
@@ -337,6 +438,7 @@ IVF::InitFeatures() {
 
     this->index_feature_list_->SetFeatures({IndexFeature::SUPPORT_CLONE,
                                             IndexFeature::SUPPORT_EXPORT_MODEL,
+                                            IndexFeature::SUPPORT_ESTIMATE_MEMORY,
                                             IndexFeature::SUPPORT_GET_MEMORY_USAGE,
                                             IndexFeature::SUPPORT_MERGE_INDEX});
 
@@ -1163,6 +1265,75 @@ IVF::GetMemoryUsage() const {
         memory += this->attr_filter_index_->GetMemoryUsage();
     }
     return memory;
+}
+
+uint64_t
+IVF::EstimateMemory(uint64_t num_elements) const {
+    auto param = std::static_pointer_cast<IVFParameter>(this->create_param_ptr_);
+    uint64_t memory = sizeof(IVF);
+    if (this->bucket_ == nullptr) {
+        return memory;
+    }
+
+    const auto bucket_count = static_cast<uint64_t>(this->bucket_->bucket_count_);
+    const auto buckets_per_data = static_cast<uint64_t>(this->buckets_per_data_);
+    const auto bucket_vector_count = saturated_mul(num_elements, buckets_per_data);
+    const auto bucket_io_param = (param != nullptr and param->bucket_param != nullptr)
+                                     ? param->bucket_param->io_parameter
+                                     : nullptr;
+
+    memory = saturated_add(memory, non_negative_memory(this->bucket_->GetMemoryUsage()));
+    memory = saturated_add(
+        memory,
+        estimate_bucket_io_memory(
+            saturated_mul(bucket_vector_count, static_cast<uint64_t>(this->bucket_->code_size_)),
+            bucket_vector_count,
+            bucket_count,
+            bucket_io_param));
+    memory = saturated_add(memory, saturated_mul(bucket_vector_count, sizeof(InnerIdType)));
+    if (this->bucket_->UseResidual()) {
+        memory = saturated_add(memory, saturated_mul(bucket_vector_count, sizeof(float)));
+    }
+
+    if (use_reorder_ and this->reorder_codes_ != nullptr) {
+        const auto precise_io_param = (param != nullptr and param->precise_codes_param != nullptr)
+                                          ? param->precise_codes_param->io_parameter
+                                          : nullptr;
+        memory = saturated_add(memory, non_negative_memory(this->reorder_codes_->GetMemoryUsage()));
+        memory = saturated_add(
+            memory,
+            estimate_flatten_io_memory(
+                saturated_mul(num_elements,
+                              static_cast<uint64_t>(this->reorder_codes_->code_size_)),
+                precise_io_param));
+    }
+
+    if (this->extra_info_size_ > 0 and this->extra_infos_ != nullptr and
+        this->extra_infos_->InMemory()) {
+        memory = saturated_add(memory, saturated_mul(this->extra_info_size_, num_elements));
+    }
+
+    memory = saturated_add(memory, sizeof(LabelTable));
+    memory = saturated_add(memory, saturated_mul(num_elements, sizeof(LabelType)));
+    memory = saturated_add(
+        memory,
+        saturated_mul(num_elements, sizeof(std::pair<LabelType, InnerIdType>) + 2 * sizeof(void*)));
+    memory = saturated_add(memory, saturated_mul(num_elements, sizeof(uint64_t)));
+    if (this->partition_strategy_ != nullptr) {
+        memory = saturated_add(memory, this->partition_strategy_->EstimateMemory(num_elements));
+    }
+
+    if (this->attr_filter_index_ != nullptr) {
+        memory =
+            saturated_add(memory, saturated_mul(num_elements, sizeof(InnerIdType) + sizeof(void*)));
+    }
+
+    return memory;
+}
+
+void
+IVF::SetImmutable() {
+    this->immutable_.store(true, std::memory_order_release);
 }
 
 }  // namespace vsag

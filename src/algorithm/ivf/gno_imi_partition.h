@@ -54,6 +54,9 @@ public:
     void
     Deserialize(lvalue_or_rvalue<StreamReader> reader) override;
 
+    [[nodiscard]] uint64_t
+    EstimateMemory(uint64_t num_elements) const override;
+
 public:
     IVFNearestPartitionTrainerType trainer_type_{IVFNearestPartitionTrainerType::KMeansTrainer};
     IndexCommonParam common_param_;

@@ -42,7 +42,8 @@ public:
                                      int buckets_per_data = 1,
                                      bool use_attr_filter = false,
                                      int thread_count = 1,
-                                     int64_t sample_count = 10000L);
+                                     int64_t sample_count = 10000L,
+                                     const std::string& base_io_type = "memory_io");
 
     static IVFResourcePtr
     GetResource(bool sample = true);
@@ -130,7 +131,8 @@ IVFTestIndex::GenerateIVFBuildParametersString(const std::string& metric_type,
                                                int buckets_per_data,
                                                bool use_attr_filter,
                                                int thread_count,
-                                               int64_t sample_count) {
+                                               int64_t sample_count,
+                                               const std::string& base_io_type) {
     std::string build_parameters_str;
     constexpr auto parameter_temp = R"(
     {{
@@ -138,6 +140,7 @@ IVFTestIndex::GenerateIVFBuildParametersString(const std::string& metric_type,
         "metric_type": "{}",
         "dim": {},
         "index_param": {{
+            "base_io_type": "{}",
             "buckets_count": {},
             "base_quantization_type": "{}",
             "ivf_train_type": "{}",
@@ -168,6 +171,7 @@ IVFTestIndex::GenerateIVFBuildParametersString(const std::string& metric_type,
     build_parameters_str = fmt::format(parameter_temp,
                                        metric_type,
                                        dim,
+                                       base_io_type,
                                        buckets_count,
                                        basic_quantizer_str,
                                        train_type,
@@ -209,6 +213,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF GetStatus", "[ft][ivf]
                 dataset->query_->NumElements(10);
                 INFO(index->AnalyzeIndexBySearch(request));
                 dataset->query_->NumElements(raw_num);
+                TestIndex::TestIndexStatus(index);
             }
         }
     }
@@ -1302,6 +1307,27 @@ TEST_CASE("(PR) IVF Estimate Memory And Get Memory Usage", "[ft][memory][ivf][pr
     auto test_index = std::make_shared<fixtures::IVFTestIndex>();
     auto resource = test_index->GetResource(true);
     TestIVFEstimateMemoryAndGetMemoryUsage(resource);
+}
+
+TEST_CASE("(PR) IVF Estimate Memory IO Type Monotonic", "[ft][memory][ivf][pr]") {
+    const auto origin_size = vsag::Options::Instance().block_size_limit();
+    vsag::Options::Instance().set_block_size_limit(1024 * 1024 * 2);
+
+    const std::vector<std::string> base_io_types{"memory_io", "block_memory_io"};
+    for (const auto& base_io_type : base_io_types) {
+        INFO(fmt::format("base_io_type: {}", base_io_type));
+        auto param = fixtures::IVFTestIndex::GenerateIVFBuildParametersString(
+            "l2", 32, "sq8", 64, "random", false, 1, false, 1, 512, base_io_type);
+        auto index = fixtures::TestIndex::TestFactory(fixtures::IVFTestIndex::name, param, true);
+        REQUIRE(index->CheckFeature(vsag::IndexFeature::SUPPORT_ESTIMATE_MEMORY));
+
+        const auto small_memory = index->EstimateMemory(512);
+        const auto large_memory = index->EstimateMemory(1024);
+        REQUIRE(small_memory > 0);
+        REQUIRE(large_memory >= small_memory);
+    }
+
+    vsag::Options::Instance().set_block_size_limit(origin_size);
 }
 
 TEST_CASE("(Daily) IVF Estimate Memory", "[ft][memory][ivf][daily]") {
