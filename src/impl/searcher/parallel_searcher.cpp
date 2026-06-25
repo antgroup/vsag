@@ -342,7 +342,7 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
                 }
 
                 if constexpr (mode == KNN_SEARCH) {
-                    if (top_candidates->Size() > ef) {
+                    while (top_candidates->Size() > ef) {
                         top_candidates->Pop();
                     }
                 }
