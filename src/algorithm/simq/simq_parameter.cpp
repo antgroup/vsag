@@ -24,11 +24,11 @@
 namespace vsag {
 
 static constexpr const char* SIMQ_INIT_CLUSTER_RATIO = "init_cluster_ratio";
-static constexpr const char* SIMQ_MAX_CLUSTER_SIZE    = "max_cluster_size";
-static constexpr const char* SIMQ_SPLIT_START_IDX     = "split_start_idx";
-static constexpr const char* SIMQ_RANDOM_SEED         = "random_seed";
-static constexpr const char* SIMQ_COARSE_K            = "coarse_k";
-static constexpr const char* SIMQ_RERANK_K            = "rerank_k";
+static constexpr const char* SIMQ_MAX_CLUSTER_SIZE = "max_cluster_size";
+static constexpr const char* SIMQ_SPLIT_START_IDX = "split_start_idx";
+static constexpr const char* SIMQ_RANDOM_SEED = "random_seed";
+static constexpr const char* SIMQ_COARSE_K = "coarse_k";
+static constexpr const char* SIMQ_RERANK_K = "rerank_k";
 
 void
 SIMQParameter::FromJson(const JsonType& json) {

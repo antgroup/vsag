@@ -96,9 +96,7 @@ private:
     build_rep_hgraph(const float* flat_vecs, int64_t dim);
 
     std::vector<std::pair<InnerIdType, float>>
-    coarse_search(const float* query_tokens,
-                  uint32_t query_token_count,
-                  int64_t coarse_k) const;
+    coarse_search(const float* query_tokens, uint32_t query_token_count, int64_t coarse_k) const;
 
     void
     serialize_rep_hgraph(StreamWriter& writer) const;
@@ -124,12 +122,12 @@ private:
 
     // Token-level metadata for precise split: maps global token_id → doc inner_id / offset
     Vector<InnerIdType> token_to_doc_;
-    Vector<uint32_t>    token_to_offset_;
+    Vector<uint32_t> token_to_offset_;
 
     // Per-cluster token count for O(1) split threshold check during Add
     Vector<uint64_t> cluster_token_counts_;
 
-    float   init_cluster_ratio_{0.2f};
+    float init_cluster_ratio_{0.2f};
     int64_t max_cluster_size_{64};
     int64_t split_start_idx_{32};
     int64_t random_seed_{42};

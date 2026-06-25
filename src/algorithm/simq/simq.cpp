@@ -17,10 +17,10 @@
 
 #include <algorithm>
 #include <cstring>
-#include <sstream>
 #include <limits>
 #include <numeric>
 #include <random>
+#include <sstream>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -44,7 +44,7 @@ namespace {
 
 struct ClusterMemberEntry {
     InnerIdType vec_id;
-    float       distance;
+    float distance;
 };
 
 class HGraphDynamicClustering {
@@ -58,16 +58,17 @@ public:
           max_cluster_size_(static_cast<int>(max_cluster_size)),
           split_start_idx_(static_cast<int>(split_start_idx)),
           random_seed_(static_cast<int>(random_seed)),
-          common_param_(common_param) {}
+          common_param_(common_param) {
+    }
 
     ~HGraphDynamicClustering() = default;
 
     void
     fit(const float* vecs, int64_t num_vecs, int64_t dim);
 
-    std::vector<int>                                         cluster_centers_;
+    std::vector<int> cluster_centers_;
     std::unordered_map<int, std::vector<ClusterMemberEntry>> clusters_;
-    std::vector<int>                                         vec_to_cluster_;
+    std::vector<int> vec_to_cluster_;
 
 private:
     void
@@ -85,15 +86,15 @@ private:
     void
     split_cluster(int old_center_id, int64_t dim);
 
-    float          init_cluster_ratio_;
-    int            max_cluster_size_;
-    int            split_start_idx_;
-    int            random_seed_;
+    float init_cluster_ratio_;
+    int max_cluster_size_;
+    int split_start_idx_;
+    int random_seed_;
     IndexCommonParam common_param_;
 
     const float* vecs_{nullptr};
-    int64_t      num_vecs_{0};
-    int64_t      dim_{0};
+    int64_t num_vecs_{0};
+    int64_t dim_{0};
 
     std::shared_ptr<HGraph> hgraph_{nullptr};
 };
@@ -140,12 +141,12 @@ HGraphDynamicClustering::ip_distance(int v1, int v2) const {
 
 void
 HGraphDynamicClustering::sorted_insert(std::vector<ClusterMemberEntry>& members,
-                                     InnerIdType vec_id,
-                                     float dist) {
-    auto it = std::lower_bound(members.begin(), members.end(), dist,
-                               [](const ClusterMemberEntry& e, float val) {
-                                   return e.distance < val;
-                               });
+                                       InnerIdType vec_id,
+                                       float dist) {
+    auto it = std::lower_bound(
+        members.begin(), members.end(), dist, [](const ClusterMemberEntry& e, float val) {
+            return e.distance < val;
+        });
     members.insert(it, {vec_id, dist});
 }
 
@@ -164,7 +165,8 @@ HGraphDynamicClustering::split_cluster(int old_center_id, int64_t /*dim*/) {
     vec_to_cluster_[new_center_id] = new_center_id;
 
     for (auto& m : to_move) {
-        if (static_cast<int>(m.vec_id) == new_center_id) continue;
+        if (static_cast<int>(m.vec_id) == new_center_id)
+            continue;
         float d = ip_distance(static_cast<int>(m.vec_id), new_center_id);
         sorted_insert(new_cluster, m.vec_id, d);
         vec_to_cluster_[m.vec_id] = new_center_id;
@@ -176,17 +178,20 @@ HGraphDynamicClustering::split_cluster(int old_center_id, int64_t /*dim*/) {
     if (hgraph_ != nullptr) {
         int64_t label = static_cast<int64_t>(new_center_id);
         auto new_ds = Dataset::Make();
-        new_ds->NumElements(1)->Dim(dim_)->Float32Vectors(vecs_ + new_center_id * dim_)->Ids(
-            &label)->Owner(false);
+        new_ds->NumElements(1)
+            ->Dim(dim_)
+            ->Float32Vectors(vecs_ + new_center_id * dim_)
+            ->Ids(&label)
+            ->Owner(false);
         hgraph_->Add(new_ds);
     }
 }
 
 void
 HGraphDynamicClustering::fit(const float* vecs, int64_t num_vecs, int64_t dim) {
-    vecs_     = vecs;
+    vecs_ = vecs;
     num_vecs_ = num_vecs;
-    dim_      = dim;
+    dim_ = dim;
 
     vec_to_cluster_.assign(num_vecs, -1);
 
@@ -209,7 +214,7 @@ HGraphDynamicClustering::fit(const float* vecs, int64_t num_vecs, int64_t dim) {
     for (auto it = all_indices.begin() + num_init; it != all_indices.end(); ++it) {
         int vid = *it;
         int nearest = find_nearest_cluster(vid);
-        float dist  = ip_distance(vid, nearest);
+        float dist = ip_distance(vid, nearest);
 
         sorted_insert(clusters_[nearest], static_cast<InnerIdType>(vid), dist);
         vec_to_cluster_[vid] = nearest;
@@ -236,11 +241,11 @@ SIMQ::SIMQ(const SIMQParameterPtr& param, const IndexCommonParam& common_param)
       cluster_token_counts_(allocator_) {
     mv_codes_ = FlattenInterface::MakeInstance(param->base_codes_param, common_param);
     init_cluster_ratio_ = param->init_cluster_ratio;
-    max_cluster_size_   = param->max_cluster_size;
-    split_start_idx_    = param->split_start_idx;
-    random_seed_        = param->random_seed;
-    default_coarse_k_   = param->coarse_k;
-    default_rerank_k_   = param->rerank_k;
+    max_cluster_size_ = param->max_cluster_size;
+    split_start_idx_ = param->split_start_idx;
+    random_seed_ = param->random_seed;
+    default_coarse_k_ = param->coarse_k;
+    default_rerank_k_ = param->rerank_k;
     this->has_raw_vector_ = true;
 }
 
@@ -288,8 +293,8 @@ SIMQ::Build(const DatasetPtr& data) {
                         n * sizeof(float));
         }
         for (uint32_t t = 0; t < mvs[i].len_; ++t) {
-            vec_to_doc[vec_off + t]       = static_cast<InnerIdType>(i);
-            token_to_doc_[vec_off + t]    = static_cast<InnerIdType>(i);
+            vec_to_doc[vec_off + t] = static_cast<InnerIdType>(i);
+            token_to_doc_[vec_off + t] = static_cast<InnerIdType>(i);
             token_to_offset_[vec_off + t] = t;
         }
         vec_off += mvs[i].len_;
@@ -325,8 +330,7 @@ SIMQ::run_clustering(const float* flat_vecs,
 
     std::unordered_map<int, int> center_to_idx;
     center_to_idx.reserve(static_cast<uint64_t>(nc));
-    for (int idx = 0; idx < nc; ++idx)
-        center_to_idx[clustering.cluster_centers_[idx]] = idx;
+    for (int idx = 0; idx < nc; ++idx) center_to_idx[clustering.cluster_centers_[idx]] = idx;
 
     // Build per-cluster unique doc sets; a doc with multiple tokens maps to one entry per cluster
     std::vector<std::unordered_set<InnerIdType>> cluster_doc_sets(static_cast<uint64_t>(nc));
@@ -360,7 +364,7 @@ SIMQ::build_rep_hgraph(const float* flat_vecs, int64_t dim) {
         cluster_token_members[vec_to_cluster_[v]].push_back(static_cast<int>(v));
 
     // For each cluster pick the token vector closest to the cluster centroid
-    std::vector<float>   rep_vecs(static_cast<uint64_t>(num_clusters_) * static_cast<uint64_t>(dim));
+    std::vector<float> rep_vecs(static_cast<uint64_t>(num_clusters_) * static_cast<uint64_t>(dim));
     std::vector<int64_t> labels(static_cast<uint64_t>(num_clusters_));
 
     for (int64_t idx = 0; idx < num_clusters_; ++idx) {
@@ -380,12 +384,15 @@ SIMQ::build_rep_hgraph(const float* flat_vecs, int64_t dim) {
             for (int d = 0; d < dim; ++d) mean[static_cast<uint64_t>(d)] += v[d];
         }
         float best_dot = -1e30f;
-        int   best_vid = members[0];
+        int best_vid = members[0];
         for (int vid : members) {
             const float* v = flat_vecs + vid * dim;
             float dot = 0.0f;
             for (int d = 0; d < dim; ++d) dot += v[d] * mean[static_cast<uint64_t>(d)];
-            if (dot > best_dot) { best_dot = dot; best_vid = vid; }
+            if (dot > best_dot) {
+                best_dot = dot;
+                best_vid = vid;
+            }
         }
         std::memcpy(dst, flat_vecs + best_vid * dim, static_cast<uint64_t>(dim) * sizeof(float));
     }
@@ -399,8 +406,11 @@ SIMQ::build_rep_hgraph(const float* flat_vecs, int64_t dim) {
     rep_hgraph_ = std::make_shared<HGraph>(param, cp);
 
     auto ds = Dataset::Make();
-    ds->NumElements(num_clusters_)->Dim(dim)
-      ->Float32Vectors(rep_vecs.data())->Ids(labels.data())->Owner(false);
+    ds->NumElements(num_clusters_)
+        ->Dim(dim)
+        ->Float32Vectors(rep_vecs.data())
+        ->Ids(labels.data())
+        ->Owner(false);
     rep_hgraph_->Build(ds);
 }
 
@@ -420,7 +430,7 @@ SIMQ::Add(const DatasetPtr& data, AddMode /*mode*/) {
     const MultiVector* mvs = data->GetMultiVectors();
     CHECK_ARGUMENT(mvs != nullptr, "simq add: data.multi_vectors is nullptr");
 
-    int64_t num_docs      = data->GetNumElements();
+    int64_t num_docs = data->GetNumElements();
     const int64_t* labels = data->GetIds();
     CHECK_ARGUMENT(labels != nullptr, "simq add: labels (ids) is nullptr");
 
@@ -436,8 +446,8 @@ SIMQ::Add(const DatasetPtr& data, AddMode /*mode*/) {
 
             auto query_ds = Dataset::Make();
             query_ds->NumElements(1)->Dim(dim_)->Float32Vectors(token_vec)->Owner(false);
-            auto result_ds = rep_hgraph_->KnnSearch(
-                query_ds, 1, R"({"hgraph": {"ef_search": 100}})", nullptr);
+            auto result_ds =
+                rep_hgraph_->KnnSearch(query_ds, 1, R"({"hgraph": {"ef_search": 100}})", nullptr);
 
             InnerIdType cluster_idx = static_cast<InnerIdType>(result_ds->GetIds()[0]);
 
@@ -469,28 +479,29 @@ SIMQ::split_cluster_incremental(InnerIdType cluster_idx) {
         if (vec_to_cluster_[ti] == cluster_idx)
             cluster_tokens.push_back(static_cast<InnerIdType>(ti));
 
-    uint64_t n   = cluster_tokens.size();
+    uint64_t n = cluster_tokens.size();
     uint64_t dim = static_cast<uint64_t>(dim_);
-    if (n < 2) return;
+    if (n < 2)
+        return;
 
     // Fetch all token vectors for this cluster from mv_codes_
     std::vector<float> token_vecs(n * dim);
     for (uint64_t i = 0; i < n; ++i) {
-        InnerIdType tid    = cluster_tokens[i];
+        InnerIdType tid = cluster_tokens[i];
         InnerIdType doc_id = token_to_doc_[tid];
-        uint32_t    offset = token_to_offset_[tid];
-        bool need_release  = false;
-        const uint8_t* codes    = mv_codes_->GetCodesById(doc_id, need_release);
-        const float*   all_toks = reinterpret_cast<const float*>(codes + sizeof(uint32_t));
+        uint32_t offset = token_to_offset_[tid];
+        bool need_release = false;
+        const uint8_t* codes = mv_codes_->GetCodesById(doc_id, need_release);
+        const float* all_toks = reinterpret_cast<const float*>(codes + sizeof(uint32_t));
         std::memcpy(token_vecs.data() + i * dim, all_toks + offset * dim, dim * sizeof(float));
-        if (need_release) mv_codes_->Release(codes);
+        if (need_release)
+            mv_codes_->Release(codes);
     }
 
     // Compute centroid
     std::vector<float> centroid(dim, 0.0f);
     for (uint64_t i = 0; i < n; ++i)
-        for (uint64_t d = 0; d < dim; ++d)
-            centroid[d] += token_vecs[i * dim + d];
+        for (uint64_t d = 0; d < dim; ++d) centroid[d] += token_vecs[i * dim + d];
 
     // Score each token by IP with centroid, then sort descending
     std::vector<std::pair<float, uint64_t>> scored(n);
@@ -499,8 +510,9 @@ SIMQ::split_cluster_incremental(InnerIdType cluster_idx) {
         for (uint64_t d = 0; d < dim; ++d) dot += token_vecs[i * dim + d] * centroid[d];
         scored[i] = {dot, i};
     }
-    std::sort(scored.begin(), scored.end(),
-              [](const auto& a, const auto& b) { return a.first > b.first; });
+    std::sort(scored.begin(), scored.end(), [](const auto& a, const auto& b) {
+        return a.first > b.first;
+    });
 
     // Median split: first half (closer to centroid) → old cluster,
     //               second half (farther from centroid) → new cluster.
@@ -510,8 +522,8 @@ SIMQ::split_cluster_incremental(InnerIdType cluster_idx) {
 
     std::unordered_set<InnerIdType> old_docs, new_docs;
     for (uint64_t rank = 0; rank < n; ++rank) {
-        uint64_t    local_i = scored[rank].second;
-        InnerIdType tid     = cluster_tokens[local_i];
+        uint64_t local_i = scored[rank].second;
+        InnerIdType tid = cluster_tokens[local_i];
         if (rank < half) {
             old_docs.insert(token_to_doc_[tid]);
         } else {
@@ -522,12 +534,10 @@ SIMQ::split_cluster_incremental(InnerIdType cluster_idx) {
 
     // Rebuild cluster_lists_ for old cluster; add entry for new cluster
     cluster_lists_[cluster_idx].clear();
-    for (InnerIdType doc_id : old_docs)
-        cluster_lists_[cluster_idx].push_back(doc_id);
+    for (InnerIdType doc_id : old_docs) cluster_lists_[cluster_idx].push_back(doc_id);
 
     cluster_lists_.push_back(Vector<InnerIdType>(allocator_));
-    for (InnerIdType doc_id : new_docs)
-        cluster_lists_.back().push_back(doc_id);
+    for (InnerIdType doc_id : new_docs) cluster_lists_.back().push_back(doc_id);
 
     // Recount tokens for both clusters
     cluster_token_counts_[cluster_idx] = static_cast<uint64_t>(half);
@@ -545,7 +555,10 @@ SIMQ::split_cluster_incremental(InnerIdType cluster_idx) {
         const float* tv = token_vecs.data() + scored[rank].second * dim;
         float dot = 0.0f;
         for (uint64_t d = 0; d < dim; ++d) dot += tv[d] * new_centroid[d];
-        if (dot > best_dot) { best_dot = dot; new_rep_local = scored[rank].second; }
+        if (dot > best_dot) {
+            best_dot = dot;
+            new_rep_local = scored[rank].second;
+        }
     }
     const float* new_rep_vec = token_vecs.data() + new_rep_local * dim;
 
@@ -553,8 +566,11 @@ SIMQ::split_cluster_incremental(InnerIdType cluster_idx) {
     int64_t new_label = static_cast<int64_t>(new_cluster_idx);
     std::vector<float> new_rep_copy(new_rep_vec, new_rep_vec + dim);
     auto new_ds = Dataset::Make();
-    new_ds->NumElements(1)->Dim(dim_)
-          ->Float32Vectors(new_rep_copy.data())->Ids(&new_label)->Owner(false);
+    new_ds->NumElements(1)
+        ->Dim(dim_)
+        ->Float32Vectors(new_rep_copy.data())
+        ->Ids(&new_label)
+        ->Owner(false);
     rep_hgraph_->Add(new_ds);
 
     ++num_clusters_;
@@ -565,53 +581,57 @@ SIMQ::split_cluster_incremental(InnerIdType cluster_idx) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 std::vector<std::pair<InnerIdType, float>>
-SIMQ::coarse_search(const float* query_tokens,
-                    uint32_t query_token_count,
-                    int64_t coarse_k) const {
+SIMQ::coarse_search(const float* query_tokens, uint32_t query_token_count, int64_t coarse_k) const {
     // All buffers are local — safe for concurrent searches under shared_lock.
     std::unordered_map<InnerIdType, float> score_map;
     score_map.reserve(static_cast<uint64_t>(coarse_k) * static_cast<uint64_t>(max_cluster_size_));
     std::unordered_set<InnerIdType> seen_this_token;
-    seen_this_token.reserve(static_cast<uint64_t>(coarse_k) * static_cast<uint64_t>(max_cluster_size_));
+    seen_this_token.reserve(static_cast<uint64_t>(coarse_k) *
+                            static_cast<uint64_t>(max_cluster_size_));
 
     for (uint32_t ti = 0; ti < query_token_count; ++ti) {
         const float* qt = query_tokens + ti * dim_;
 
         int64_t actual_coarse_k = std::min(coarse_k, num_clusters_);
-        if (actual_coarse_k <= 0) continue;
+        if (actual_coarse_k <= 0)
+            continue;
 
         auto query_ds = Dataset::Make();
         query_ds->NumElements(1)->Dim(dim_)->Float32Vectors(qt)->Owner(false);
         auto result_ds = rep_hgraph_->KnnSearch(
             query_ds, actual_coarse_k, R"({"hgraph": {"ef_search": 100}})", nullptr);
 
-        int64_t        nres   = result_ds->GetDim();
-        const float*   rdists = result_ds->GetDistances();
-        const int64_t* rids   = result_ds->GetIds();
+        int64_t nres = result_ds->GetDim();
+        const float* rdists = result_ds->GetDistances();
+        const int64_t* rids = result_ds->GetIds();
 
         std::vector<std::pair<float, InnerIdType>> cscores;
         cscores.reserve(static_cast<uint64_t>(nres));
         for (int64_t ri = 0; ri < nres; ++ri) {
-            float       cscore = 1.0f - rdists[ri];
-            InnerIdType cidx   = static_cast<InnerIdType>(rids[ri]);
+            float cscore = 1.0f - rdists[ri];
+            InnerIdType cidx = static_cast<InnerIdType>(rids[ri]);
             cscores.push_back({cscore, cidx});
         }
-        std::sort(cscores.begin(), cscores.end(),
-                  [](const auto& a, const auto& b) { return a.first > b.first; });
+        std::sort(cscores.begin(), cscores.end(), [](const auto& a, const auto& b) {
+            return a.first > b.first;
+        });
 
         seen_this_token.clear();
         for (auto& [cscore, cidx] : cscores) {
-            if (cidx >= static_cast<InnerIdType>(num_clusters_)) continue;
+            if (cidx >= static_cast<InnerIdType>(num_clusters_))
+                continue;
             for (InnerIdType doc_id : cluster_lists_[cidx]) {
-                if (!seen_this_token.insert(doc_id).second) continue;
+                if (!seen_this_token.insert(doc_id).second)
+                    continue;
                 score_map[doc_id] += cscore;
             }
         }
     }
 
     std::vector<std::pair<InnerIdType, float>> ranked(score_map.begin(), score_map.end());
-    std::sort(ranked.begin(), ranked.end(),
-              [](const auto& a, const auto& b) { return a.second > b.second; });
+    std::sort(ranked.begin(), ranked.end(), [](const auto& a, const auto& b) {
+        return a.second > b.second;
+    });
     return ranked;
 }
 
@@ -634,16 +654,16 @@ SIMQ::KnnSearch(const DatasetPtr& query,
     const MultiVector* query_mvs = query->GetMultiVectors();
     CHECK_ARGUMENT(query_mvs != nullptr, "simq search: query.multi_vectors is nullptr");
     CHECK_ARGUMENT(query_mvs[0].len_ > 0, "simq search: query multi_vector length must be > 0");
-    CHECK_ARGUMENT(query_mvs[0].vectors_ != nullptr, "simq search: query multi_vector vectors is nullptr");
+    CHECK_ARGUMENT(query_mvs[0].vectors_ != nullptr,
+                   "simq search: query multi_vector vectors is nullptr");
 
     auto sp = SIMQSearchParameters::FromJson(parameters);
     int64_t coarse_k = sp.coarse_k > 0 ? sp.coarse_k : default_coarse_k_;
     int64_t rerank_k = sp.rerank_k > 0 ? sp.rerank_k : default_rerank_k_;
     rerank_k = std::min(rerank_k, static_cast<int64_t>(total_count_));
-    k        = std::min(k, static_cast<int64_t>(total_count_));
+    k = std::min(k, static_cast<int64_t>(total_count_));
 
-    auto coarse_results = coarse_search(
-        query_mvs[0].vectors_, query_mvs[0].len_, coarse_k);
+    auto coarse_results = coarse_search(query_mvs[0].vectors_, query_mvs[0].len_, coarse_k);
     if (static_cast<int64_t>(coarse_results.size()) > rerank_k)
         coarse_results.resize(rerank_k);
 
@@ -652,21 +672,21 @@ SIMQ::KnnSearch(const DatasetPtr& query,
     std::vector<std::pair<float, InnerIdType>> reranked;
     reranked.reserve(coarse_results.size());
     for (auto& [doc_id, _] : coarse_results) {
-        if (filter != nullptr &&
-            !filter->CheckValid(this->label_table_->GetLabelById(doc_id)))
+        if (filter != nullptr && !filter->CheckValid(this->label_table_->GetLabelById(doc_id)))
             continue;
         float dist = 0.0f;
         mv_codes_->Query(&dist, computer, &doc_id, 1);
         reranked.push_back({dist, doc_id});
     }
-    std::sort(reranked.begin(), reranked.end(),
-              [](const auto& a, const auto& b) { return a.first < b.first; });
+    std::sort(reranked.begin(), reranked.end(), [](const auto& a, const auto& b) {
+        return a.first < b.first;
+    });
 
     int64_t result_count = std::min(k, static_cast<int64_t>(reranked.size()));
     auto [result_ds, dists, ids] = create_fast_dataset(result_count, allocator_);
     for (int64_t i = 0; i < result_count; ++i) {
         dists[i] = reranked[i].first;
-        ids[i]   = this->label_table_->GetLabelById(reranked[i].second);
+        ids[i] = this->label_table_->GetLabelById(reranked[i].second);
     }
     return std::move(result_ds);
 }
@@ -687,27 +707,28 @@ SIMQ::RangeSearch(const DatasetPtr& query,
         return Dataset::Make();
     }
 
-    CHECK_ARGUMENT(query->GetNumElements() > 0, "simq range search: query.num_elements must be > 0");
+    CHECK_ARGUMENT(query->GetNumElements() > 0,
+                   "simq range search: query.num_elements must be > 0");
     const MultiVector* query_mvs = query->GetMultiVectors();
     CHECK_ARGUMENT(query_mvs != nullptr, "simq range search: query.multi_vectors is nullptr");
-    CHECK_ARGUMENT(query_mvs[0].len_ > 0, "simq range search: query multi_vector length must be > 0");
-    CHECK_ARGUMENT(query_mvs[0].vectors_ != nullptr, "simq range search: query multi_vector vectors is nullptr");
+    CHECK_ARGUMENT(query_mvs[0].len_ > 0,
+                   "simq range search: query multi_vector length must be > 0");
+    CHECK_ARGUMENT(query_mvs[0].vectors_ != nullptr,
+                   "simq range search: query multi_vector vectors is nullptr");
 
     auto sp = SIMQSearchParameters::FromJson(parameters);
     int64_t coarse_k = sp.coarse_k > 0 ? sp.coarse_k : default_coarse_k_;
     int64_t rerank_k = sp.rerank_k > 0 ? sp.rerank_k : default_rerank_k_;
     rerank_k = std::min(rerank_k, static_cast<int64_t>(total_count_));
 
-    auto coarse_results = coarse_search(
-        query_mvs[0].vectors_, query_mvs[0].len_, coarse_k);
+    auto coarse_results = coarse_search(query_mvs[0].vectors_, query_mvs[0].len_, coarse_k);
     if (static_cast<int64_t>(coarse_results.size()) > rerank_k)
         coarse_results.resize(rerank_k);
 
     auto computer = mv_codes_->FactoryComputer(&query_mvs[0]);
     std::vector<std::pair<float, InnerIdType>> in_range;
     for (auto& [doc_id, _] : coarse_results) {
-        if (filter != nullptr &&
-            !filter->CheckValid(this->label_table_->GetLabelById(doc_id)))
+        if (filter != nullptr && !filter->CheckValid(this->label_table_->GetLabelById(doc_id)))
             continue;
         float dist = 0.0f;
         mv_codes_->Query(&dist, computer, &doc_id, 1);
@@ -722,14 +743,15 @@ SIMQ::RangeSearch(const DatasetPtr& query,
                          [](const auto& a, const auto& b) { return a.first < b.first; });
         in_range.resize(limited_size);
     }
-    std::sort(in_range.begin(), in_range.end(),
-              [](const auto& a, const auto& b) { return a.first < b.first; });
+    std::sort(in_range.begin(), in_range.end(), [](const auto& a, const auto& b) {
+        return a.first < b.first;
+    });
 
     auto [result_ds, dists, ids] =
         create_fast_dataset(static_cast<int64_t>(in_range.size()), allocator_);
     for (uint64_t i = 0; i < in_range.size(); ++i) {
         dists[i] = in_range[i].first;
-        ids[i]   = this->label_table_->GetLabelById(in_range[i].second);
+        ids[i] = this->label_table_->GetLabelById(in_range[i].second);
     }
     return std::move(result_ds);
 }
@@ -782,8 +804,7 @@ SIMQ::Serialize(StreamWriter& writer) const {
 
     uint64_t n_clusters = static_cast<uint64_t>(cluster_lists_.size());
     StreamWriter::WriteObj(writer, n_clusters);
-    for (const auto& list : cluster_lists_)
-        StreamWriter::WriteVector(writer, list);
+    for (const auto& list : cluster_lists_) StreamWriter::WriteVector(writer, list);
 
     StreamWriter::WriteVector(writer, vec_to_cluster_);
     StreamWriter::WriteVector(writer, token_to_doc_);
@@ -819,11 +840,11 @@ SIMQ::Deserialize(StreamReader& reader) {
         auto inner = JsonType::Parse(info[INDEX_PARAM].GetString());
         SIMQParameter tmp_param;
         tmp_param.FromJson(inner);
-        default_coarse_k_   = tmp_param.coarse_k;
-        default_rerank_k_   = tmp_param.rerank_k;
-        max_cluster_size_   = tmp_param.max_cluster_size;
-        split_start_idx_    = tmp_param.split_start_idx;
-        random_seed_        = tmp_param.random_seed;
+        default_coarse_k_ = tmp_param.coarse_k;
+        default_rerank_k_ = tmp_param.rerank_k;
+        max_cluster_size_ = tmp_param.max_cluster_size;
+        split_start_idx_ = tmp_param.split_start_idx;
+        random_seed_ = tmp_param.random_seed;
         init_cluster_ratio_ = tmp_param.init_cluster_ratio;
     }
 
@@ -835,8 +856,7 @@ SIMQ::Deserialize(StreamReader& reader) {
     uint64_t n_clusters = 0;
     StreamReader::ReadObj(buf_reader, n_clusters);
     cluster_lists_.resize(n_clusters, Vector<InnerIdType>(allocator_));
-    for (auto& list : cluster_lists_)
-        StreamReader::ReadVector(buf_reader, list);
+    for (auto& list : cluster_lists_) StreamReader::ReadVector(buf_reader, list);
 
     StreamReader::ReadVector(buf_reader, vec_to_cluster_);
     StreamReader::ReadVector(buf_reader, token_to_doc_);
@@ -895,23 +915,21 @@ ParamPtr
 SIMQ::CheckAndMappingExternalParam(const JsonType& external_param,
                                    const IndexCommonParam& common_param) {
     const ConstParamMap external_mapping = {
-        {BRUTE_FORCE_BASE_IO_TYPE,   {BASE_CODES_KEY, IO_PARAMS_KEY, TYPE_KEY}},
+        {BRUTE_FORCE_BASE_IO_TYPE, {BASE_CODES_KEY, IO_PARAMS_KEY, TYPE_KEY}},
         {BRUTE_FORCE_BASE_FILE_PATH, {BASE_CODES_KEY, IO_PARAMS_KEY, IO_FILE_PATH_KEY}},
         {"init_cluster_ratio", {"init_cluster_ratio"}},
-        {"max_cluster_size",   {"max_cluster_size"}},
-        {"split_start_idx",    {"split_start_idx"}},
-        {"random_seed",        {"random_seed"}},
-        {"coarse_k",           {"coarse_k"}},
-        {"rerank_k",           {"rerank_k"}},
+        {"max_cluster_size", {"max_cluster_size"}},
+        {"split_start_idx", {"split_start_idx"}},
+        {"random_seed", {"random_seed"}},
+        {"coarse_k", {"coarse_k"}},
+        {"rerank_k", {"rerank_k"}},
     };
 
     if (common_param.data_type_ != DataTypes::DATA_TYPE_FLOAT) {
-        throw VsagException(ErrorType::INVALID_ARGUMENT,
-                            "simq only supports float32 datatype");
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "simq only supports float32 datatype");
     }
     if (common_param.metric_ != MetricType::METRIC_TYPE_IP) {
-        throw VsagException(ErrorType::INVALID_ARGUMENT,
-                            "simq only supports ip metric type");
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "simq only supports ip metric type");
     }
 
     std::string str = format_map(SIMQ_PARAMS_TEMPLATE, DEFAULT_MAP);

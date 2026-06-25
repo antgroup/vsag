@@ -36,9 +36,9 @@ public:
 
 public:
     // Clustering construction parameters
-    float   init_cluster_ratio{0.2f};  // fraction of vectors used as initial seeds
-    int64_t max_cluster_size{64};      // split threshold
-    int64_t split_start_idx{32};       // index within sorted cluster where new cluster begins
+    float init_cluster_ratio{0.2f};  // fraction of vectors used as initial seeds
+    int64_t max_cluster_size{64};    // split threshold
+    int64_t split_start_idx{32};     // index within sorted cluster where new cluster begins
     int64_t random_seed{42};
 
     // Search parameters (index-level defaults, overridable per-query)
@@ -53,8 +53,8 @@ DEFINE_POINTER(SIMQParameter);
 
 class SIMQSearchParameters : public IndexSearchParameter {
 public:
-    int64_t coarse_k{-1};   // -1 means use index default
-    int64_t rerank_k{-1};   // -1 means use index default
+    int64_t coarse_k{-1};  // -1 means use index default
+    int64_t rerank_k{-1};  // -1 means use index default
 
     static SIMQSearchParameters
     FromJson(const std::string& json_string);

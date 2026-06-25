@@ -39,9 +39,12 @@
  *   3. Parameter sweep: coarse_k in {5, 10, 20}
  */
 
+#include <fmt/format.h>
+#include <unistd.h>
+
+#include <algorithm>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
-#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -50,9 +53,6 @@
 #include <string>
 #include <unordered_set>
 #include <vector>
-#include <unistd.h>
-
-#include <fmt/format.h>
 
 #include "framework/test_dataset.h"
 #include "framework/test_dataset_pool.h"
@@ -67,12 +67,12 @@ using namespace vsag;
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-static constexpr int64_t  SIMQ_DIM         = 128;   // token vector dimension
-static constexpr uint64_t BASE_DOCS   = 1000;  // documents to index
-static constexpr uint64_t QUERY_DOCS  = 100;   // query documents
-static constexpr int      DOC_TOKENS  = 8;     // tokens per base document
-static constexpr int      QUERY_TOKENS = 4;    // tokens per query document
-static constexpr int      TOP_K       = 10;
+static constexpr int64_t SIMQ_DIM = 128;     // token vector dimension
+static constexpr uint64_t BASE_DOCS = 1000;  // documents to index
+static constexpr uint64_t QUERY_DOCS = 100;  // query documents
+static constexpr int DOC_TOKENS = 8;         // tokens per base document
+static constexpr int QUERY_TOKENS = 4;       // tokens per query document
+static constexpr int TOP_K = 10;
 
 // Generate a unique temp file path; removes file on destruction.
 struct TempFile {
@@ -85,16 +85,18 @@ struct TempFile {
         ::close(fd);
         path = buf;
     }
-    ~TempFile() { std::remove(path.c_str()); }
+    ~TempFile() {
+        std::remove(path.c_str());
+    }
 };
 
 static std::string
 make_build_param(const std::string& mv_file_path,
-                 float init_cluster_ratio   = 0.01f,  // ~80 clusters for 8000 token vecs
-                 int64_t max_cluster_size   = 200,
-                 int64_t split_start_idx    = 100,
-                 int64_t coarse_k           = 20,
-                 int64_t rerank_k           = 1000) {
+                 float init_cluster_ratio = 0.01f,  // ~80 clusters for 8000 token vecs
+                 int64_t max_cluster_size = 200,
+                 int64_t split_start_idx = 100,
+                 int64_t coarse_k = 20,
+                 int64_t rerank_k = 1000) {
     return fmt::format(
         R"({{
             "dtype": "float32",
@@ -110,15 +112,18 @@ make_build_param(const std::string& mv_file_path,
                 "rerank_k": {}
             }}
         }})",
-        SIMQ_DIM, mv_file_path,
-        init_cluster_ratio, max_cluster_size, split_start_idx, coarse_k, rerank_k);
+        SIMQ_DIM,
+        mv_file_path,
+        init_cluster_ratio,
+        max_cluster_size,
+        split_start_idx,
+        coarse_k,
+        rerank_k);
 }
 
 static std::string
 make_search_param(int64_t coarse_k = 10, int64_t rerank_k = 1000) {
-    return fmt::format(
-        R"({{"simq": {{"coarse_k": {}, "rerank_k": {}}}}})",
-        coarse_k, rerank_k);
+    return fmt::format(R"({{"simq": {{"coarse_k": {}, "rerank_k": {}}}}})", coarse_k, rerank_k);
 }
 
 // Generate normalized random vectors (unit sphere for IP metric)
@@ -127,7 +132,7 @@ fill_normalized(float* buf, int64_t n, int64_t dim, std::mt19937& rng) {
     std::normal_distribution<float> nd(0.0f, 1.0f);
     for (int64_t i = 0; i < n; ++i) {
         float* v = buf + i * dim;
-        float  norm = 0.0f;
+        float norm = 0.0f;
         for (int64_t d = 0; d < dim; ++d) {
             v[d] = nd(rng);
             norm += v[d] * v[d];
@@ -145,9 +150,9 @@ maxsim(const float* q_toks, int nq, const float* d_toks, int nd, int64_t dim) {
         float best = -1e30f;
         for (int di = 0; di < nd; ++di) {
             float dot = 0.0f;
-            for (int64_t d = 0; d < dim; ++d)
-                dot += q_toks[qi * dim + d] * d_toks[di * dim + d];
-            if (dot > best) best = dot;
+            for (int64_t d = 0; d < dim; ++d) dot += q_toks[qi * dim + d] * d_toks[di * dim + d];
+            if (dot > best)
+                best = dot;
         }
         score += best;
     }
@@ -185,9 +190,9 @@ generate_dataset(uint64_t seed = 42) {
     ds.base_mvs.resize(BASE_DOCS);
     ds.base_ids.resize(BASE_DOCS);
     for (uint64_t i = 0; i < BASE_DOCS; ++i) {
-        ds.base_mvs[i].len_     = DOC_TOKENS;
+        ds.base_mvs[i].len_ = DOC_TOKENS;
         ds.base_mvs[i].vectors_ = ds.base_storage.data() + i * DOC_TOKENS * SIMQ_DIM;
-        ds.base_ids[i]          = static_cast<int64_t>(i);
+        ds.base_ids[i] = static_cast<int64_t>(i);
     }
 
     // ── Query documents ───────────────────────────────────────────────────
@@ -196,7 +201,7 @@ generate_dataset(uint64_t seed = 42) {
 
     ds.query_mvs.resize(QUERY_DOCS);
     for (uint64_t q = 0; q < QUERY_DOCS; ++q) {
-        ds.query_mvs[q].len_     = QUERY_TOKENS;
+        ds.query_mvs[q].len_ = QUERY_TOKENS;
         ds.query_mvs[q].vectors_ = ds.query_storage.data() + q * QUERY_TOKENS * SIMQ_DIM;
     }
 
@@ -207,24 +212,23 @@ generate_dataset(uint64_t seed = 42) {
         const float* qtoks = ds.query_mvs[q].vectors_;
         std::vector<std::pair<float, int64_t>> scores(BASE_DOCS);
         for (uint64_t d = 0; d < BASE_DOCS; ++d) {
-            float s = maxsim(qtoks, QUERY_TOKENS,
-                             ds.base_mvs[d].vectors_, DOC_TOKENS, SIMQ_DIM);
+            float s = maxsim(qtoks, QUERY_TOKENS, ds.base_mvs[d].vectors_, DOC_TOKENS, SIMQ_DIM);
             scores[d] = {s, static_cast<int64_t>(d)};
         }
-        std::sort(scores.begin(), scores.end(),
-                  [](const auto& a, const auto& b) { return a.first > b.first; });
+        std::sort(scores.begin(), scores.end(), [](const auto& a, const auto& b) {
+            return a.first > b.first;
+        });
         ds.gt_ids[q].resize(TOP_K);
         ds.gt_scores[q].resize(TOP_K);
         for (int k = 0; k < TOP_K; ++k) {
-            ds.gt_ids[q][k]    = scores[k].second;
+            ds.gt_ids[q][k] = scores[k].second;
             ds.gt_scores[q][k] = scores[k].first;
         }
     }
 
     // ── VSAG Dataset wrappers ─────────────────────────────────────────────
     ds.base_dataset = vsag::Dataset::Make();
-    ds.base_dataset
-        ->NumElements(static_cast<int64_t>(BASE_DOCS))
+    ds.base_dataset->NumElements(static_cast<int64_t>(BASE_DOCS))
         ->Dim(SIMQ_DIM)
         ->Ids(ds.base_ids.data())
         ->MultiVectors(ds.base_mvs.data())
@@ -232,8 +236,7 @@ generate_dataset(uint64_t seed = 42) {
         ->Owner(false);
 
     ds.query_dataset = vsag::Dataset::Make();
-    ds.query_dataset
-        ->NumElements(static_cast<int64_t>(QUERY_DOCS))
+    ds.query_dataset->NumElements(static_cast<int64_t>(QUERY_DOCS))
         ->Dim(SIMQ_DIM)
         ->MultiVectors(ds.query_mvs.data())
         ->MultiVectorDim(SIMQ_DIM)
@@ -244,12 +247,12 @@ generate_dataset(uint64_t seed = 42) {
 
 // Compute recall@TOP_K between returned ids and ground-truth ids for one query
 static float
-recall_at_k(const int64_t* returned, int64_t n_returned,
-            const int64_t* gt, int64_t n_gt) {
+recall_at_k(const int64_t* returned, int64_t n_returned, const int64_t* gt, int64_t n_gt) {
     std::unordered_set<int64_t> gt_set(gt, gt + n_gt);
     int64_t hits = 0;
     for (int64_t i = 0; i < n_returned; ++i)
-        if (gt_set.count(returned[i])) ++hits;
+        if (gt_set.count(returned[i]))
+            ++hits;
     return static_cast<float>(hits) / static_cast<float>(n_gt);
 }
 
@@ -285,7 +288,7 @@ TEST_CASE("SIMQ: build and knn search recall", "[simq][build][search]") {
     TempFile tmp;
 
     // ~80 clusters (sqrt(8000)); coarse_k=10 per token → 4×10=40 probes / 80 = 50% coverage
-    auto build_param  = make_build_param(tmp.path);
+    auto build_param = make_build_param(tmp.path);
     auto search_param = make_search_param();
 
     // Create index
@@ -303,25 +306,24 @@ TEST_CASE("SIMQ: build and knn search recall", "[simq][build][search]") {
     float total_recall = 0.0f;
     for (uint64_t q = 0; q < QUERY_DOCS; ++q) {
         vsag::DatasetPtr one_query = vsag::Dataset::Make();
-        one_query
-            ->NumElements(1)
+        one_query->NumElements(1)
             ->Dim(SIMQ_DIM)
             ->MultiVectors(&ds.query_mvs[q])
             ->MultiVectorDim(SIMQ_DIM)
             ->Owner(false);
 
-        auto search_result = index->KnnSearch(one_query, TOP_K, search_param, vsag::FilterPtr(nullptr));
+        auto search_result =
+            index->KnnSearch(one_query, TOP_K, search_param, vsag::FilterPtr(nullptr));
         REQUIRE(search_result.has_value());
 
         auto* ret_ids = search_result.value()->GetIds();
-        float r = recall_at_k(ret_ids, TOP_K,
-                               ds.gt_ids[q].data(), static_cast<int64_t>(TOP_K));
+        float r = recall_at_k(ret_ids, TOP_K, ds.gt_ids[q].data(), static_cast<int64_t>(TOP_K));
         total_recall += r;
     }
 
     float mean_recall = total_recall / static_cast<float>(QUERY_DOCS);
-    std::cout << "\n[SIMQ] Mean Recall@" << TOP_K << " = " << mean_recall
-              << "  (over " << QUERY_DOCS << " queries)\n";
+    std::cout << "\n[SIMQ] Mean Recall@" << TOP_K << " = " << mean_recall << "  (over "
+              << QUERY_DOCS << " queries)\n";
 
     // SIMQ is an approximate method; 0.5 is a sanity floor for this small dataset
     REQUIRE(mean_recall >= 0.5f);
@@ -332,7 +334,7 @@ TEST_CASE("SIMQ: serialize and deserialize preserves recall", "[simq][serializat
     auto ds = generate_dataset();
     TempFile tmp_build, tmp_deser;
 
-    auto build_param  = make_build_param(tmp_build.path);
+    auto build_param = make_build_param(tmp_build.path);
     auto search_param = make_search_param();
 
     auto r1 = vsag::Factory::CreateIndex("simq", build_param);
@@ -357,8 +359,7 @@ TEST_CASE("SIMQ: serialize and deserialize preserves recall", "[simq][serializat
     float recall_orig = 0.0f, recall_deser = 0.0f;
     for (uint64_t q = 0; q < QUERY_DOCS; ++q) {
         vsag::DatasetPtr one_query = vsag::Dataset::Make();
-        one_query
-            ->NumElements(1)
+        one_query->NumElements(1)
             ->Dim(SIMQ_DIM)
             ->MultiVectors(&ds.query_mvs[q])
             ->MultiVectorDim(SIMQ_DIM)
@@ -369,12 +370,10 @@ TEST_CASE("SIMQ: serialize and deserialize preserves recall", "[simq][serializat
         REQUIRE(sr1.has_value());
         REQUIRE(sr2.has_value());
 
-        recall_orig  += recall_at_k(sr1.value()->GetIds(), TOP_K,
-                                    ds.gt_ids[q].data(), TOP_K);
-        recall_deser += recall_at_k(sr2.value()->GetIds(), TOP_K,
-                                    ds.gt_ids[q].data(), TOP_K);
+        recall_orig += recall_at_k(sr1.value()->GetIds(), TOP_K, ds.gt_ids[q].data(), TOP_K);
+        recall_deser += recall_at_k(sr2.value()->GetIds(), TOP_K, ds.gt_ids[q].data(), TOP_K);
     }
-    recall_orig  /= static_cast<float>(QUERY_DOCS);
+    recall_orig /= static_cast<float>(QUERY_DOCS);
     recall_deser /= static_cast<float>(QUERY_DOCS);
 
     std::cout << "\n[SIMQ Serialize] Original recall@" << TOP_K << " = " << recall_orig
@@ -389,7 +388,7 @@ TEST_CASE("SIMQ: range search", "[simq][range_search]") {
     auto ds = generate_dataset();
     TempFile tmp;
 
-    auto build_param  = make_build_param(tmp.path);
+    auto build_param = make_build_param(tmp.path);
     auto search_param = make_search_param();
 
     auto r = vsag::Factory::CreateIndex("simq", build_param);
@@ -399,8 +398,7 @@ TEST_CASE("SIMQ: range search", "[simq][range_search]") {
     REQUIRE(build_result.has_value());
 
     vsag::DatasetPtr one_query = vsag::Dataset::Make();
-    one_query
-        ->NumElements(1)
+    one_query->NumElements(1)
         ->Dim(SIMQ_DIM)
         ->MultiVectors(&ds.query_mvs[0])
         ->MultiVectorDim(SIMQ_DIM)
@@ -427,8 +425,8 @@ TEST_CASE("SIMQ: range search", "[simq][range_search]") {
 
     SECTION("limited_size truncates results") {
         int64_t limited = 3;
-        auto rr = index->RangeSearch(
-            one_query, radius, search_param, vsag::FilterPtr(nullptr), limited);
+        auto rr =
+            index->RangeSearch(one_query, radius, search_param, vsag::FilterPtr(nullptr), limited);
         REQUIRE(rr.has_value());
         REQUIRE(rr.value()->GetNumElements() <= limited);
     }
@@ -447,12 +445,16 @@ TEST_CASE("SIMQ: parameter sweep on coarse_k and rerank_k", "[simq][sweep]") {
     auto build_result = index->Build(ds.base_dataset);
     REQUIRE(build_result.has_value());
 
-    struct Combo { int64_t ck; int64_t rk; float floor; };
+    struct Combo {
+        int64_t ck;
+        int64_t rk;
+        float floor;
+    };
     // coarse_k=5  → 4×5=20/80 = 25% cluster coverage → modest recall
     // coarse_k=10 → 4×10=40/80 = 50% cluster coverage → good recall
     // coarse_k=20 → 4×20=80/80 = 100% cluster coverage → near-perfect
     std::vector<Combo> combos = {
-        {5,  1000, 0.3f},
+        {5, 1000, 0.3f},
         {10, 1000, 0.5f},
         {20, 1000, 0.7f},
     };
@@ -463,8 +465,7 @@ TEST_CASE("SIMQ: parameter sweep on coarse_k and rerank_k", "[simq][sweep]") {
         float total = 0.0f;
         for (uint64_t q = 0; q < QUERY_DOCS; ++q) {
             vsag::DatasetPtr one_query = vsag::Dataset::Make();
-            one_query
-                ->NumElements(1)
+            one_query->NumElements(1)
                 ->Dim(SIMQ_DIM)
                 ->MultiVectors(&ds.query_mvs[q])
                 ->MultiVectorDim(SIMQ_DIM)
@@ -472,12 +473,10 @@ TEST_CASE("SIMQ: parameter sweep on coarse_k and rerank_k", "[simq][sweep]") {
 
             auto sr = index->KnnSearch(one_query, TOP_K, sp, vsag::FilterPtr(nullptr));
             REQUIRE(sr.has_value());
-            total += recall_at_k(sr.value()->GetIds(), TOP_K,
-                                 ds.gt_ids[q].data(), TOP_K);
+            total += recall_at_k(sr.value()->GetIds(), TOP_K, ds.gt_ids[q].data(), TOP_K);
         }
         float recall = total / static_cast<float>(QUERY_DOCS);
-        std::cout << "  coarse_k=" << c.ck << " rerank_k=" << c.rk
-                  << "  recall=" << recall << "\n";
+        std::cout << "  coarse_k=" << c.ck << " rerank_k=" << c.rk << "  recall=" << recall << "\n";
         REQUIRE(recall >= c.floor);
     }
 }
