@@ -353,99 +353,16 @@ HGraph::RangeSearch(const DatasetPtr& query,
                     const std::string& parameters,
                     const FilterPtr& filter,
                     int64_t limited_size) const {
-    SearchStatistics stats;
-    QueryContext ctx{.stats = &stats};
-
-    FilterPtr ft = this->create_search_filter(filter);
-
-    this->validate_range_args(query, radius, limited_size);
-
-    std::shared_lock<std::shared_mutex> force_remove_rlock;
-    std::shared_lock<std::shared_mutex> shared_lock;
-    if (!this->immutable_.load(std::memory_order_acquire)) {
-        if (this->support_force_remove()) {
-            force_remove_rlock = std::shared_lock<std::shared_mutex>(this->force_remove_mutex_);
-        }
-        shared_lock = std::shared_lock<std::shared_mutex>(this->global_mutex_);
+    SearchRequest req;
+    req.mode_ = SearchMode::RANGE_SEARCH;
+    req.query_ = query;
+    req.radius_ = radius;
+    req.limited_size_ = limited_size;
+    req.params_str_ = parameters;
+    if (filter != nullptr) {
+        req.filter_ = filter;
     }
-
-    InnerSearchParam search_param;
-    search_param.ep = this->entry_point_id_;
-    search_param.topk = 1;
-    search_param.ef = 1;
-
-    if (search_param.ep == INVALID_ENTRY_POINT) {
-        return make_empty_dataset_with_stats();
-    }
-
-    const auto* raw_query = get_data(query);
-    for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
-        auto result = this->search_one_graph(raw_query,
-                                             this->route_graphs_[i],
-                                             this->basic_flatten_codes_,
-                                             search_param,
-                                             (VisitedListPtr) nullptr,
-                                             &ctx);
-        search_param.ep = result->Top().second;
-    }
-
-    auto params = HGraphSearchParameters::FromJson(parameters);
-    ctx.rabitq_error_rate = params.rabitq_error_rate;
-
-    CHECK_ARGUMENT((1 <= params.ef_search) and (params.ef_search <= 1000),  // NOLINT
-                   fmt::format("ef_search({}) must in range[1, 1000]", params.ef_search));
-    search_param.ef = std::max(params.ef_search, limited_size);
-    search_param.is_inner_id_allowed = ft;
-    search_param.radius = radius;
-    search_param.search_mode = RANGE_SEARCH;
-    search_param.consider_duplicate = true;
-    search_param.range_search_limit_size = static_cast<int>(limited_size);
-    search_param.parallel_search_thread_count = params.parallel_search_thread_count;
-    search_param.enable_reorder = params.enable_reorder;
-    search_param.enable_rabitq_one_bit_search = params.rabitq_one_bit_search;
-
-    DistHeapPtr search_result;
-    bool brute_force_used = false;
-    if (params.brute_force_threshold > 0.0F) {
-        float valid_ratio = ft != nullptr ? ft->ValidRatio() : 1.0F;
-        if (valid_ratio <= params.brute_force_threshold) {
-            search_result = this->brute_force_search<InnerSearchMode::RANGE_SEARCH>(
-                raw_query, ft, limited_size, radius, &ctx);
-            brute_force_used = true;
-        }
-    }
-    if (not brute_force_used) {
-        search_result = this->search_one_graph(raw_query,
-                                               this->bottom_graph_,
-                                               this->basic_flatten_codes_,
-                                               search_param,
-                                               (VisitedListPtr) nullptr,
-                                               &ctx);
-    }
-
-    if (not brute_force_used and use_reorder_ and search_param.enable_reorder) {
-        this->reorder(
-            raw_query, this->get_reorder_codes(), search_result, limited_size, nullptr, ctx);
-    } else if (not brute_force_used and search_param.enable_reorder and
-               params.rabitq_one_bit_search) {
-        this->reorder(
-            raw_query, this->basic_flatten_codes_, search_result, limited_size, nullptr, ctx);
-    }
-
-    // Filter by radius using final distances (high-precision if reordered)
-    while (not search_result->Empty() and search_result->Top().first > radius + THRESHOLD_ERROR) {
-        search_result->Pop();
-    }
-
-    if (limited_size > 0) {
-        while (search_result->Size() > limited_size) {
-            search_result->Pop();
-        }
-    }
-
-    auto result = this->pack_knn_result_with_extra_info(search_result, allocator_);
-    result->Statistics(stats.Dump());
-    return result;
+    return this->SearchWithRequest(req);
 }
 
 [[nodiscard]] DatasetPtr
@@ -457,8 +374,14 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     }
 
     const auto& query = request.query_;
+    bool is_range = (request.mode_ == SearchMode::RANGE_SEARCH);
     auto k = request.topk_;
-    this->validate_knn_args(query, k);
+
+    if (is_range) {
+        this->validate_range_args(query, request.radius_, request.limited_size_);
+    } else {
+        this->validate_knn_args(query, k);
+    }
 
     auto params = HGraphSearchParameters::FromJson(request.params_str_);
     ctx.rabitq_error_rate = params.rabitq_error_rate;
@@ -478,9 +401,9 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     }
     k = std::min(k, GetNumElements());
 
-    // Setup reasoning context if expected labels are provided.
+    // Setup reasoning context (KNN only)
     std::shared_ptr<ReasoningContext> reasoning_ctx;
-    if (not request.expected_labels_.empty()) {
+    if (not is_range and not request.expected_labels_.empty()) {
         reasoning_ctx = std::make_shared<ReasoningContext>(this->allocator_);
         reasoning_ctx->SetSearchParams(k, "HGraph", use_reorder_, request.filter_ != nullptr);
 
@@ -543,34 +466,46 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         search_param.executors.emplace_back(executor);
     }
 
-    search_param.ef = std::max(params.ef_search, k);
-    search_param.is_inner_id_allowed = ft;
-    search_param.topk = static_cast<int64_t>(search_param.ef);
-    if (params.topk_factor > 1.0F) {
-        search_param.topk = std::min(
-            search_param.topk, static_cast<int64_t>(static_cast<float>(k) * params.topk_factor));
-    }
-    search_param.enable_reorder = params.enable_reorder;
-    search_param.consider_duplicate = true;
-    search_param.enable_rabitq_one_bit_search = params.rabitq_one_bit_search;
-    if (params.enable_time_record) {
-        search_param.time_cost = std::make_shared<Timer>();
-        search_param.time_cost->SetThreshold(params.timeout_ms);
-        stats.is_timeout.store(false, std::memory_order_relaxed);
-    }
-    search_param.parallel_search_thread_count = params.parallel_search_thread_count;
-
-    // hops_limit only takes effect when it's greater than ef_search
-    if (params.hops_limit <= static_cast<uint32_t>(params.ef_search)) {
-        search_param.hops_limit = std::numeric_limits<uint32_t>::max();
-        if (params.hops_limit != std::numeric_limits<uint32_t>::max()) {
-            logger::warn(
-                fmt::format("hops_limit({}) is not greater than ef_search({}), ignoring hops_limit",
-                            params.hops_limit,
-                            params.ef_search));
-        }
+    if (is_range) {
+        search_param.ef = std::max(params.ef_search, request.limited_size_);
+        search_param.is_inner_id_allowed = ft;
+        search_param.radius = request.radius_;
+        search_param.search_mode = RANGE_SEARCH;
+        search_param.consider_duplicate = true;
+        search_param.range_search_limit_size = static_cast<int>(request.limited_size_);
+        search_param.parallel_search_thread_count = params.parallel_search_thread_count;
+        search_param.enable_reorder = params.enable_reorder;
+        search_param.enable_rabitq_one_bit_search = params.rabitq_one_bit_search;
     } else {
-        search_param.hops_limit = params.hops_limit;
+        search_param.ef = std::max(params.ef_search, k);
+        search_param.is_inner_id_allowed = ft;
+        search_param.topk = static_cast<int64_t>(search_param.ef);
+        if (params.topk_factor > 1.0F) {
+            search_param.topk =
+                std::min(search_param.topk,
+                         static_cast<int64_t>(static_cast<float>(k) * params.topk_factor));
+        }
+        search_param.enable_reorder = params.enable_reorder;
+        search_param.consider_duplicate = true;
+        search_param.enable_rabitq_one_bit_search = params.rabitq_one_bit_search;
+        if (params.enable_time_record) {
+            search_param.time_cost = std::make_shared<Timer>();
+            search_param.time_cost->SetThreshold(params.timeout_ms);
+            stats.is_timeout.store(false, std::memory_order_relaxed);
+        }
+        search_param.parallel_search_thread_count = params.parallel_search_thread_count;
+
+        if (params.hops_limit <= static_cast<uint32_t>(params.ef_search)) {
+            search_param.hops_limit = std::numeric_limits<uint32_t>::max();
+            if (params.hops_limit != std::numeric_limits<uint32_t>::max()) {
+                logger::warn(fmt::format(
+                    "hops_limit({}) is not greater than ef_search({}), ignoring hops_limit",
+                    params.hops_limit,
+                    params.ef_search));
+            }
+        } else {
+            search_param.hops_limit = params.hops_limit;
+        }
     }
 
     DistanceRecordVector rabitq_lower_bound_candidates(ctx.alloc);
@@ -585,8 +520,13 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     if (params.brute_force_threshold > 0.0F) {
         float valid_ratio = ft != nullptr ? ft->ValidRatio() : 1.0F;
         if (valid_ratio <= params.brute_force_threshold) {
-            search_result =
-                this->brute_force_search<InnerSearchMode::KNN_SEARCH>(raw_query, ft, k, 0.0F, &ctx);
+            if (is_range) {
+                search_result = this->brute_force_search<InnerSearchMode::RANGE_SEARCH>(
+                    raw_query, ft, request.limited_size_, request.radius_, &ctx);
+            } else {
+                search_result = this->brute_force_search<InnerSearchMode::KNN_SEARCH>(
+                    raw_query, ft, k, 0.0F, &ctx);
+            }
             brute_force_used = true;
         }
     }
@@ -602,20 +542,40 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
 
     this->pool_->ReturnOne(vt);
 
+    // Reorder
     if (not brute_force_used and use_reorder_ and search_param.enable_reorder) {
+        auto limit = is_range ? request.limited_size_ : k;
         this->reorder(raw_query,
                       this->get_reorder_codes(),
                       search_result,
-                      k,
+                      limit,
                       nullptr,
                       ctx,
                       rabitq_lower_bound_candidates_ptr);
     } else if (not brute_force_used and search_param.enable_reorder and
                params.rabitq_one_bit_search) {
-        this->reorder(raw_query, this->basic_flatten_codes_, search_result, k, nullptr, ctx);
+        auto limit = is_range ? request.limited_size_ : k;
+        this->reorder(raw_query, this->basic_flatten_codes_, search_result, limit, nullptr, ctx);
     }
 
-    while (search_result->Size() > k) {
+    // Trim and pack results
+    if (is_range) {
+        while (not search_result->Empty() and
+               search_result->Top().first > request.radius_ + THRESHOLD_ERROR) {
+            search_result->Pop();
+        }
+        if (request.limited_size_ > 0) {
+            while (search_result->Size() > static_cast<uint64_t>(request.limited_size_)) {
+                search_result->Pop();
+            }
+        }
+        auto result = this->pack_knn_result_with_extra_info(search_result, ctx.alloc);
+        result->Statistics(stats.Dump());
+        return result;
+    }
+
+    // KNN mode: trim by k
+    while (search_result->Size() > static_cast<uint64_t>(k)) {
         search_result->Pop();
     }
 

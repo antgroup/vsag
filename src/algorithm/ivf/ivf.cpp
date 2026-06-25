@@ -461,27 +461,15 @@ IVF::KnnSearch(const DatasetPtr& query,
                int64_t k,
                const std::string& parameters,
                const FilterPtr& filter) const {
-    SearchStatistics stats;
-    QueryContext ctx{.stats = &stats};
-
-    auto param = this->create_search_param(parameters, filter);
-    param.search_mode = KNN_SEARCH;
-    param.topk = k;
-    if (use_reorder_ and param.enable_reorder) {
-        CHECK_ARGUMENT(
-            param.factor > 0.0F,
-            fmt::format("factor must be positive when use_reorder is true, got {}", param.factor));
-        param.topk = static_cast<int64_t>(param.factor * static_cast<float>(k));
+    SearchRequest req;
+    req.mode_ = SearchMode::KNN_SEARCH;
+    req.query_ = query;
+    req.topk_ = k;
+    req.params_str_ = parameters;
+    if (filter != nullptr) {
+        req.filter_ = filter;
     }
-    auto search_result = this->search<KNN_SEARCH>(query, param, ctx);
-    if (use_reorder_ and param.enable_reorder) {
-        auto dataset_results = reorder(k, search_result, query->GetFloat32Vectors(), param, ctx);
-        dataset_results->Statistics(stats.Dump());
-        return std::move(dataset_results);
-    }
-    auto dataset_results = this->pack_knn_result(search_result);
-    dataset_results->Statistics(stats.Dump());
-    return dataset_results;
+    return this->SearchWithRequest(req);
 }
 
 DatasetPtr
@@ -490,28 +478,16 @@ IVF::RangeSearch(const DatasetPtr& query,
                  const std::string& parameters,
                  const FilterPtr& filter,
                  int64_t limited_size) const {
-    SearchStatistics stats;
-    QueryContext ctx{.stats = &stats};
-
-    auto param = this->create_search_param(parameters, filter);
-    param.search_mode = RANGE_SEARCH;
-    param.radius = radius;
-    param.range_search_limit_size = static_cast<int>(limited_size);
-    if (use_reorder_ and param.enable_reorder and limited_size > 0) {
-        CHECK_ARGUMENT(
-            param.factor > 0.0F,
-            fmt::format("factor must be positive when use_reorder is true, got {}", param.factor));
-        param.range_search_limit_size =
-            static_cast<int>(param.factor * static_cast<float>(limited_size));
+    SearchRequest req;
+    req.mode_ = SearchMode::RANGE_SEARCH;
+    req.query_ = query;
+    req.radius_ = radius;
+    req.limited_size_ = limited_size;
+    req.params_str_ = parameters;
+    if (filter != nullptr) {
+        req.filter_ = filter;
     }
-    auto search_result = this->search<RANGE_SEARCH>(query, param, ctx);
-    if (use_reorder_ and param.enable_reorder) {
-        int64_t k = (limited_size > 0) ? limited_size : static_cast<int64_t>(search_result->Size());
-        return reorder(k, search_result, query->GetFloat32Vectors(), param, ctx);
-    }
-    auto dataset_results = this->pack_knn_result(search_result);
-    dataset_results->Statistics(stats.Dump());
-    return dataset_results;
+    return this->SearchWithRequest(req);
 }
 
 int64_t
@@ -742,7 +718,7 @@ IVF::search(const DatasetPtr& query, const InnerSearchParam& param, QueryContext
     if constexpr (mode == RANGE_SEARCH) {
         topk = param.range_search_limit_size;
         if (topk < 0) {
-            topk = std::numeric_limits<int64_t>::max();
+            topk = this->GetNumElements();
         }
     }
     // Scale topk to ensure sufficient candidates after deduplication when buckets_per_data_ > 1
@@ -934,15 +910,10 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
     SearchStatistics stats;
     QueryContext ctx{.alloc = request.search_allocator_, .stats = &stats};
 
+    bool is_range = (request.mode_ == SearchMode::RANGE_SEARCH);
+
     auto param = this->create_search_param(request.params_str_, request.filter_);
-    param.search_mode = KNN_SEARCH;
-    param.topk = request.topk_;
-    if (use_reorder_ and param.enable_reorder) {
-        CHECK_ARGUMENT(
-            param.factor > 0.0F,
-            fmt::format("factor must be positive when use_reorder is true, got {}", param.factor));
-        param.topk = static_cast<int64_t>(param.factor * static_cast<float>(request.topk_));
-    }
+
     auto query = request.query_;
     if (request.enable_attribute_filter_ and this->attr_filter_index_ != nullptr) {
         auto& schema = this->attr_filter_index_->field_type_map_;
@@ -954,9 +925,45 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
             param.executors.emplace_back(executor);
         }
     }
+
+    if (is_range) {
+        param.search_mode = RANGE_SEARCH;
+        param.radius = request.radius_;
+        param.range_search_limit_size = static_cast<int>(request.limited_size_);
+        if (use_reorder_ and param.enable_reorder and request.limited_size_ > 0) {
+            CHECK_ARGUMENT(param.factor > 0.0F,
+                           fmt::format("factor must be positive when use_reorder is true, got {}",
+                                       param.factor));
+            param.range_search_limit_size =
+                static_cast<int>(param.factor * static_cast<float>(request.limited_size_));
+        }
+        auto search_result = this->search<RANGE_SEARCH>(query, param, ctx);
+        if (use_reorder_ and param.enable_reorder) {
+            int64_t k = (request.limited_size_ > 0) ? request.limited_size_
+                                                    : static_cast<int64_t>(search_result->Size());
+            auto result = reorder(k, search_result, query->GetFloat32Vectors(), param, ctx);
+            result->Statistics(stats.Dump());
+            return result;
+        }
+        auto dataset_results = this->pack_knn_result(search_result);
+        dataset_results->Statistics(stats.Dump());
+        return dataset_results;
+    }
+
+    // KNN mode
+    param.search_mode = KNN_SEARCH;
+    param.topk = request.topk_;
+    if (use_reorder_ and param.enable_reorder) {
+        CHECK_ARGUMENT(
+            param.factor > 0.0F,
+            fmt::format("factor must be positive when use_reorder is true, got {}", param.factor));
+        param.topk = static_cast<int64_t>(param.factor * static_cast<float>(request.topk_));
+    }
     auto search_result = this->search<KNN_SEARCH>(query, param, ctx);
     if (use_reorder_ and param.enable_reorder) {
-        return reorder(request.topk_, search_result, query->GetFloat32Vectors(), param, ctx);
+        auto result = reorder(request.topk_, search_result, query->GetFloat32Vectors(), param, ctx);
+        result->Statistics(stats.Dump());
+        return result;
     }
     auto dataset_results = this->pack_knn_result(search_result);
     dataset_results->Statistics(stats.Dump());

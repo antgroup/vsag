@@ -323,6 +323,27 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
 
     auto computer = this->make_search_computer(request.query_);
 
+    bool is_range = (request.mode_ == SearchMode::RANGE_SEARCH);
+    if (is_range) {
+        if (not is_multi_vector_) {
+            this->validate_range_args(request.query_, request.radius_, request.limited_size_);
+        }
+    } else {
+        if (not is_multi_vector_) {
+            this->validate_knn_args(request.query_, request.topk_);
+        }
+    }
+
+    auto heap_size = is_range ? request.limited_size_ : request.topk_;
+    if (heap_size < 0) {
+        heap_size = static_cast<int64_t>(this->total_count_.load());
+    }
+    auto radius = is_range ? request.radius_ : std::numeric_limits<float>::max();
+
+    if (total_count_.load() == 0) {
+        return make_empty_result();
+    }
+
     DistHeapPtr heap = nullptr;
     ExecutorPtr executor = nullptr;
     Filter* attr_filter = nullptr;
@@ -344,7 +365,7 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
     auto parallel_count = brute_force_params.parallel_search_thread_count;
     std::vector<DistHeapPtr> heaps(parallel_count);
     for (auto& cur_heap : heaps) {
-        cur_heap = DistanceHeap::MakeInstanceBySize<true, true>(this->allocator_, request.topk_);
+        cur_heap = DistanceHeap::MakeInstanceBySize<true, true>(this->allocator_, heap_size);
     }
     auto search_func = [&](InnerIdType start, InnerIdType end, const DistHeapPtr& cur_heap) {
         uint32_t dist_cmp_local = 0;
@@ -356,6 +377,9 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
             if (ft == nullptr or ft->CheckValid(i)) {
                 inner_codes_->Query(&dist, computer, &i, 1);
                 ++dist_cmp_local;
+                if (is_range and dist > radius) {
+                    continue;
+                }
                 cur_heap->Push(dist, i);
             }
         }
@@ -399,66 +423,16 @@ BruteForce::RangeSearch(const vsag::DatasetPtr& query,
                         const std::string& parameters,
                         const vsag::FilterPtr& filter,
                         int64_t limited_size) const {
-    std::shared_lock read_lock(this->global_mutex_);
-
-    auto computer = this->make_search_computer(query);
-
-    FilterPtr ft = this->create_search_filter(filter);
-
-    if (not is_multi_vector_) {
-        this->validate_range_args(query, radius, limited_size);
+    SearchRequest req;
+    req.mode_ = SearchMode::RANGE_SEARCH;
+    req.query_ = query;
+    req.radius_ = radius;
+    req.limited_size_ = limited_size;
+    req.params_str_ = parameters;
+    if (filter != nullptr) {
+        req.filter_ = filter;
     }
-    if (limited_size < 0) {
-        limited_size = std::numeric_limits<int64_t>::max();
-    }
-    if (total_count_.load() == 0) {
-        return make_empty_result();
-    }
-
-    auto brute_force_params = BruteForceSearchParameters::FromJson(parameters);
-    auto parallel_count = static_cast<uint64_t>(brute_force_params.parallel_search_thread_count);
-    auto search_func = [&](InnerIdType start, InnerIdType end) -> DistHeapPtr {
-        auto cur_heap =
-            DistanceHeap::MakeInstanceBySize<true, true>(this->allocator_, limited_size);
-        for (InnerIdType i = start; i < end; ++i) {
-            float dist;
-            if (ft == nullptr or ft->CheckValid(i)) {
-                inner_codes_->Query(&dist, computer, &i, 1);
-                if (dist > radius) {
-                    continue;
-                }
-                cur_heap->Push(dist, i);
-            }
-        }
-        return cur_heap;
-    };
-
-    DistHeapPtr heap = nullptr;
-    auto count = total_count_.load();
-    parallel_count = std::min(parallel_count, count);
-    if (parallel_count <= 1 or this->thread_pool_ == nullptr) {
-        heap = search_func(0, count);
-    } else {
-        std::vector<std::future<DistHeapPtr>> futures;
-        futures.reserve(parallel_count);
-        auto chunk_size = (count + parallel_count - 1) / parallel_count;
-        for (uint64_t i = 0; i < parallel_count; ++i) {
-            auto start = static_cast<InnerIdType>(i * chunk_size);
-            auto end = static_cast<InnerIdType>(std::min(start + chunk_size, count));
-            futures.emplace_back(this->thread_pool_->GeneralEnqueue(search_func, start, end));
-        }
-
-        for (uint64_t i = 0; i < futures.size(); ++i) {
-            auto cur_heap = futures[i].get();
-            if (i == 0) {
-                heap = cur_heap;
-            } else {
-                heap->Merge(*cur_heap);
-            }
-        }
-    }
-
-    return this->pack_knn_result(heap);
+    return this->SearchWithRequest(req);
 }
 
 ComputerInterfacePtr
