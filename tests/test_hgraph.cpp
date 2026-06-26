@@ -593,6 +593,37 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HGraphTestIndex,
     }
 }
 
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HGraphTestIndex,
+                             "HGraph parallel build drains worker exceptions",
+                             "[ft][hgraph][concurrent][pr]") {
+    auto param = R"(
+    {
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": 128,
+        "index_param": {
+            "base_quantization_type": "rabitq",
+            "rabitq_bits_per_dim_base": 3,
+            "use_reorder": true,
+            "precise_quantization_type": "fp32",
+            "build_by_base": true,
+            "max_degree": 26,
+            "ef_construction": 100,
+            "build_thread_count": 8
+        }
+    }
+    )";
+    auto index_result = vsag::Factory::CreateIndex(name, param);
+    REQUIRE(index_result.has_value());
+
+    auto dataset = pool.GetDatasetAndCreate(128, 1000, "l2");
+    auto build_result = index_result.value()->Build(dataset->base_);
+    REQUIRE_FALSE(build_result.has_value());
+    REQUIRE(build_result.error().type == vsag::ErrorType::INTERNAL_ERROR);
+    REQUIRE(build_result.error().message.find("building the index is not supported using RabbitQ "
+                                              "alone") != std::string::npos);
+}
+
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::HGraphTestIndex, "HGraph GetStatus", "[ft][hgraph]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(true);
