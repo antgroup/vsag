@@ -18,8 +18,8 @@
 #include <set>
 #include <vector>
 
-#include "algorithm/inner_index_interface.h"
 #include "datacell/flatten_interface.h"
+#include "impl/filter/iterator_filter.h"
 #include "searcher_test.h"
 #include "unittest.h"
 #include "utils/visited_list.h"

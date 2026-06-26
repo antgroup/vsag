@@ -22,6 +22,7 @@
 #include <numeric>
 
 #include "datacell/flatten_interface.h"
+#include "impl/filter/iterator_filter.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/reasoning/search_reasoning.h"
 #include "query_context.h"

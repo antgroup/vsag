@@ -29,6 +29,7 @@
 #include "datacell/flatten_datacell.h"
 #include "datacell/graph_datacell_parameter.h"
 #include "impl/allocator/safe_allocator.h"
+#include "impl/filter/iterator_filter.h"
 #include "impl/odescent/odescent_graph_builder.h"
 #include "index/hnsw_zparameters.h"
 #include "index_detail_data.h"

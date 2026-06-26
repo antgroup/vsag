@@ -17,7 +17,6 @@
 
 #include <shared_mutex>
 
-#include "algorithm/inner_index_interface.h"
 #include "bucket_interface.h"
 #include "impl/inner_search_param.h"
 #include "io/io_array.h"

@@ -37,13 +37,16 @@
 #include "datacell/flatten_interface.h"
 #include "datacell/graph_interface.h"
 #include "impl/allocator/default_allocator.h"
-#include "index/iterator_filter.h"
 #include "simd/simd.h"
 #include "utils/lock_strategy.h"
 #include "utils/prefetch.h"
 #include "visited_list_pool.h"
 #include "vsag/dataset.h"
 #include "vsag/iterator_context.h"
+
+namespace vsag {
+class IteratorFilterContext;
+}
 
 namespace hnswlib {
 using linklistsizeint = unsigned int;

@@ -15,12 +15,11 @@
 
 #pragma once
 
-#include "algorithm/inner_index_interface.h"
 #include "impl/heap/distance_heap.h"
-#include "index/iterator_filter.h"
 #include "utils/pointer_define.h"
 
 namespace vsag {
+class IteratorFilterContext;
 
 DEFINE_POINTER(ReorderInterface)
 

@@ -19,7 +19,7 @@
 #include <nlohmann/json.hpp>
 #include <random>
 
-#include "datacell/bucket_datacell.h"
+#include "container_types.h"
 #include "dataset_impl.h"
 #include "impl/allocator/safe_allocator.h"
 #include "vsag_exception.h"

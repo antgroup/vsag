@@ -20,8 +20,8 @@
 #include <cstring>
 #include <limits>
 
-#include "algorithm/inner_index_interface.h"
 #include "datacell/flatten_interface.h"
+#include "impl/filter/iterator_filter.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/reasoning/search_reasoning.h"
 #include "utils/filter_search_skip_strategy.h"

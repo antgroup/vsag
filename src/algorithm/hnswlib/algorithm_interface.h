@@ -21,7 +21,6 @@
 #include <string>
 
 #include "impl/filter/filter_headers.h"
-#include "index/iterator_filter.h"
 #include "space_interface.h"
 #include "storage/stream_reader.h"
 #include "typing.h"
@@ -30,6 +29,10 @@
 #include "vsag/errors.h"
 #include "vsag/expected.hpp"
 #include "vsag/iterator_context.h"
+
+namespace vsag {
+class IteratorFilterContext;
+}
 
 namespace hnswlib {
 

@@ -35,7 +35,6 @@
 #include "impl/searcher/basic_searcher.h"
 #include "impl/searcher/parallel_searcher.h"
 #include "impl/thread_pool/default_thread_pool.h"
-#include "index/iterator_filter.h"
 #include "index_common_param.h"
 #include "index_feature_list.h"
 #include "typing.h"
@@ -46,6 +45,7 @@
 #include "vsag/index_features.h"
 
 namespace vsag {
+class IteratorFilterContext;
 
 // HGraph index was introduced since v0.12
 class HGraph : public InnerIndexInterface {

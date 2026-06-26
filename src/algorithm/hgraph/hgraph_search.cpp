@@ -18,9 +18,9 @@
 #include "dataset_impl.h"
 #include "hgraph.h"  // IWYU pragma: keep
 #include "impl/filter/filter_headers.h"
+#include "impl/filter/iterator_filter.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/reasoning/search_reasoning.h"
-#include "index/iterator_filter.h"
 #include "utils/util_functions.h"
 
 namespace vsag {

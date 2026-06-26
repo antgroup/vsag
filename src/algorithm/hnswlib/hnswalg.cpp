@@ -18,6 +18,7 @@
 #include <memory>
 
 #include "datacell/graph_interface.h"
+#include "impl/filter/iterator_filter.h"
 #include "impl/searcher/basic_searcher.h"
 #include "utils/filter_search_skip_strategy.h"
 #include "utils/prefetch.h"

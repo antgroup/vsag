@@ -15,7 +15,6 @@
 
 #pragma once
 
-#include "algorithm/inner_index_interface.h"
 #include "flatten_interface.h"
 #include "io/basic_io.h"
 #include "io/memory_block_io.h"
