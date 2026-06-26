@@ -46,6 +46,31 @@ DenseDuplicateTracker::SetDuplicateId(InnerIdType group_id, InnerIdType duplicat
     duplicate_ids_[group_id] = duplicate_id;
 }
 
+bool
+DenseDuplicateTracker::RemoveDuplicateId(InnerIdType duplicate_id) {
+    std::scoped_lock lock(mutex_);
+
+    if (duplicate_id >= duplicate_ids_.size() || duplicate_ids_[duplicate_id] == duplicate_id) {
+        return false;
+    }
+
+    auto previous_id = duplicate_id;
+    while (duplicate_ids_[previous_id] != duplicate_id) {
+        previous_id = duplicate_ids_[previous_id];
+    }
+
+    const auto next_id = duplicate_ids_[duplicate_id];
+    duplicate_ids_[duplicate_id] = duplicate_id;
+    if (previous_id == next_id) {
+        duplicate_ids_[previous_id] = previous_id;
+        duplicate_count_--;
+        return true;
+    }
+
+    duplicate_ids_[previous_id] = next_id;
+    return true;
+}
+
 auto
 DenseDuplicateTracker::GetDuplicateIds(InnerIdType id) const -> std::vector<InnerIdType> {
     std::shared_lock lock(mutex_);
