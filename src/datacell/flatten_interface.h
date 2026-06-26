@@ -33,7 +33,9 @@
 #include "storage/stream_writer.h"
 #include "type_helpers.h"
 #include "utils/pointer_define.h"
+#include "vsag/allocator.h"
 #include "vsag/constants.h"
+#include "vsag/dataset.h"
 
 namespace vsag {
 
@@ -178,6 +180,14 @@ public:
 
     [[nodiscard]] virtual const uint8_t*
     GetCodesById(InnerIdType id, bool& need_release) const = 0;
+
+    virtual void
+    GetSparseVectorByInnerId(InnerIdType inner_id,
+                             SparseVector* data,
+                             Allocator* specified_allocator) const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "GetSparseVectorByInnerId is not implemented in FlattenInterface");
+    }
 
     virtual void
     Release(const uint8_t* data) const = 0;

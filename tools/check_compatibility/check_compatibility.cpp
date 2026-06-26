@@ -15,6 +15,7 @@
 
 #include <vsag/vsag.h>
 
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 
@@ -50,11 +51,21 @@ main(int argc, char** argv) {
 
     std::string input_str = argv[1];
     auto strs = split_string(input_str, '_');
+    if (strs.size() < 2) {
+        std::cerr << "input error: expected index name in <tag>_<algorithm> format, got "
+                  << input_str << std::endl;
+        return -1;
+    }
     auto tag_id = strs[0];
     auto algo_name = strs[1];
-    std::string index_path = "/tmp/" + input_str + ".index";
-    std::string search_json_path = "/tmp/" + input_str + "_search.json";
-    std::string build_json_path = "/tmp/" + input_str + "_build.json";
+    const char* compatibility_index_dir_env = std::getenv("COMPATIBILITY_INDEX_DIR");
+    std::string compatibility_index_dir =
+        compatibility_index_dir_env == nullptr || *compatibility_index_dir_env == '\0'
+            ? "/tmp"
+            : compatibility_index_dir_env;
+    std::string index_path = compatibility_index_dir + "/" + input_str + ".index";
+    std::string search_json_path = compatibility_index_dir + "/" + input_str + "_search.json";
+    std::string build_json_path = compatibility_index_dir + "/" + input_str + "_build.json";
 
     auto build_json = read_json(build_json_path);
     auto search_json = read_json(search_json_path);
@@ -75,10 +86,20 @@ main(int argc, char** argv) {
     }
     int64_t dim = 512;
     auto count = 500;
-    std::string origin_data_path = "/tmp/random_512d_10K.bin";
+    std::string origin_data_path = compatibility_index_dir + "/random_512d_10K.bin";
     std::ifstream ifs(origin_data_path, std::ios::binary);
+    if (not ifs.is_open()) {
+        std::cerr << "failed to open compatibility query data: " << origin_data_path << std::endl;
+        return -1;
+    }
     std::vector<float> data(count * dim);
-    ifs.read(reinterpret_cast<char*>(data.data()), data.size() * sizeof(float));
+    auto read_size = static_cast<std::streamsize>(data.size() * sizeof(float));
+    ifs.read(reinterpret_cast<char*>(data.data()), read_size);
+    if (ifs.gcount() != read_size) {
+        std::cerr << "failed to read compatibility query data: " << origin_data_path
+                  << ", expected " << read_size << " bytes, got " << ifs.gcount() << std::endl;
+        return -1;
+    }
 
     for (int i = 0; i < count; ++i) {
         auto query = vsag::Dataset::Make();

@@ -81,6 +81,24 @@ SINDIParameter::FromJson(const JsonType& json) {
     if (json.Contains(SPARSE_REMAP_TERM_IDS)) {
         remap_term_ids = json[SPARSE_REMAP_TERM_IDS].GetBool();
     }
+
+    if (json.Contains(SPARSE_RERANK_TYPE)) {
+        rerank_type = json[SPARSE_RERANK_TYPE].GetString();
+    } else {
+        rerank_type = SPARSE_RERANK_TYPE_FP32;
+    }
+    CHECK_ARGUMENT(rerank_type == SPARSE_RERANK_TYPE_FP32 || rerank_type == SPARSE_RERANK_TYPE_DMQ,
+                   fmt::format("rerank_type must be fp32 or dmq, got {}", rerank_type));
+
+    if (json.Contains(SPARSE_DMQ_BITS)) {
+        dmq_bits = json[SPARSE_DMQ_BITS].GetInt();
+    } else {
+        dmq_bits = DEFAULT_SINDI_DMQ_BITS;
+    }
+    CHECK_ARGUMENT((rerank_type != SPARSE_RERANK_TYPE_DMQ || dmq_bits == 8),
+                   fmt::format("rerank_type=dmq uses direct 8-bit DMQ; got dmq_bits {}", dmq_bits));
+    CHECK_ARGUMENT(use_reorder || rerank_type == SPARSE_RERANK_TYPE_FP32,
+                   "rerank_type=dmq requires use_reorder=true");
 }
 
 JsonType
@@ -93,6 +111,8 @@ SINDIParameter::ToJson() const {
     json[SPARSE_WINDOW_SIZE].SetInt(window_size);
     json[SPARSE_AVG_DOC_TERM_LENGTH].SetInt(avg_doc_term_length);
     json[SPARSE_REMAP_TERM_IDS].SetBool(remap_term_ids);
+    json[SPARSE_RERANK_TYPE].SetString(rerank_type);
+    json[SPARSE_DMQ_BITS].SetInt(dmq_bits);
     return json;
 }
 
@@ -106,6 +126,10 @@ SINDIParameter::CheckCompatibility(const vsag::ParamPtr& other) const {
     CHECK_FIELD_EQ(*this, *p, use_quantization);
     CHECK_FIELD_EQ(*this, *p, avg_doc_term_length);
     CHECK_FIELD_EQ(*this, *p, remap_term_ids);
+    CHECK_FIELD_EQ(*this, *p, rerank_type);
+    if (this->rerank_type == SPARSE_RERANK_TYPE_DMQ || p->rerank_type == SPARSE_RERANK_TYPE_DMQ) {
+        CHECK_FIELD_EQ(*this, *p, dmq_bits);
+    }
     return true;
 }
 
