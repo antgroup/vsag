@@ -14,6 +14,8 @@
 
 #include <fmt/format.h>
 
+#include <limits>
+
 #include "datacell/sparse_graph_datacell.h"
 #include "hgraph.h"  // IWYU pragma: keep
 #include "impl/heap/standard_heap.h"
@@ -125,8 +127,8 @@ HGraph::deserialize_basic_info(const JsonType& jsonify_basic_info) {
         this->metric_ = static_cast<MetricType>(jsonify_basic_info["metric"].GetInt());
     }
     FROM_JSON(jsonify_basic_info, entry_point_id, Int);
-    FROM_JSON(jsonify_basic_info, ef_construct, Int);
-    FROM_JSON(jsonify_basic_info, extra_info_size, Int);
+    FROM_JSON(jsonify_basic_info, ef_construct, Uint64);
+    FROM_JSON(jsonify_basic_info, extra_info_size, Uint64);
     if (jsonify_basic_info.Contains("data_type")) {
         this->data_type_ = static_cast<DataTypes>(jsonify_basic_info["data_type"].GetInt());
     }
@@ -135,10 +137,16 @@ HGraph::deserialize_basic_info(const JsonType& jsonify_basic_info) {
     }
     FROM_JSON_BASE64(jsonify_basic_info, mult);
     // logger::debug("mult: {}", this->mult_);
-    this->max_capacity_.store(jsonify_basic_info["max_capacity"].GetInt());
+    auto max_capacity = jsonify_basic_info["max_capacity"].GetUint64();
+    if (max_capacity > std::numeric_limits<InnerIdType>::max()) {
+        throw VsagException(
+            ErrorType::INVALID_ARGUMENT,
+            fmt::format("HGraph max_capacity {} exceeds InnerIdType limit", max_capacity));
+    }
+    this->max_capacity_.store(static_cast<InnerIdType>(max_capacity));
 
-    auto max_level = jsonify_basic_info["max_level"].GetInt();
-    for (int64_t i = 0; i < max_level; ++i) {
+    auto max_level = jsonify_basic_info["max_level"].GetUint64();
+    for (uint64_t i = 0; i < max_level; ++i) {
         this->route_graphs_.emplace_back(this->generate_one_route_graph());
     }
     if (jsonify_basic_info.Contains(INDEX_PARAM)) {

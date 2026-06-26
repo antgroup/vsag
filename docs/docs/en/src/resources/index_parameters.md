@@ -54,6 +54,37 @@ traversal and runs an exact scan over the surviving ids. See the
 [HGraph index page](../indexes/hgraph.md#brute-force-fallback-under-highly-selective-filters-brute_force_threshold)
 for details.
 
+## LazyHGraph
+
+LazyHGraph can take its build parameters in a top-level `lazy_hgraph` object
+(preferred for clarity) or in the generic `index_param` object. The `hgraph`
+sub-object is forwarded to the internal HGraph used after transition.
+
+```json
+{
+    "dim": 128,
+    "dtype": "float32",
+    "metric_type": "l2",
+    "lazy_hgraph": {
+        "transition_threshold": 1000,
+        "hgraph": {
+            "base_quantization_type": "sq8",
+            "max_degree": 26,
+            "ef_construction": 100
+        }
+    }
+}
+```
+
+| Field | Typical | Description |
+|-------|---------|-------------|
+| `transition_threshold` | `1000` or workload-specific | Positive vector count at which the index converts from exact flat search to HGraph |
+| `hgraph` | HGraph build object | Parameters for the graph phase; see [HGraph](../indexes/hgraph.md) |
+
+LazyHGraph only supports `dtype: "float32"`. Search parameters use the `hgraph`
+object, for example `{"hgraph": {"ef_search": 100}}`. See the
+[LazyHGraph index page](../indexes/lazy_hgraph.md) for details.
+
 ## IVF
 
 ```json

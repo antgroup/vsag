@@ -10,6 +10,7 @@ The pages in this section cover the actively developed indexes:
 | Index | Page | Best for |
 |-------|------|----------|
 | `hgraph` | [HGraph](hgraph.md) | General-purpose, high-recall graph with rich quantization options |
+| `lazy_hgraph` | [LazyHGraph](lazy_hgraph.md) | Small-to-growing FP32 collections that start exact and later convert to HGraph |
 | `ivf` | [IVF](ivf.md) | Partition-based search, high-throughput batch queries, large corpora |
 | `sindi` | [SINDI](sindi.md) | Sparse vectors (BM25 / learned sparse) on inner-product |
 | `pyramid` | [Pyramid](pyramid.md) | Multi-tenant or tag-partitioned corpora with hierarchical paths |
@@ -29,5 +30,6 @@ All indexes share the same top-level build fields:
 
 Index-specific build parameters live under the `index_param` sub-object; search-time
 parameters live under a sub-object named after the index (e.g. `hgraph`, `ivf`,
-`sindi`, `pyramid`). Concrete schemas are documented on each page and enumerated in
+`sindi`, `pyramid`). LazyHGraph also uses the `hgraph` search object after it
+converts to graph phase. Concrete schemas are documented on each page and enumerated in
 [Index Parameters](../resources/index_parameters.md).
