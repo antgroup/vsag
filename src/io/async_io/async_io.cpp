@@ -111,10 +111,13 @@ AsyncIO::DirectReadImpl(uint64_t size, uint64_t offset, bool& need_release) cons
     DirectIOObject obj(size, offset);
     auto ret = IOSyscall::PRead(this->rfd_, obj.align_data, obj.size, obj.offset);
     if (ret < 0) {
-        obj.Release();
+        // destructor automatically frees align_data
         throw VsagException(ErrorType::INTERNAL_ERROR, fmt::format("pread error {}", ret));
     }
-    return obj.data;
+    auto* result = obj.data;
+    obj.align_data = nullptr;  // transfer ownership to caller
+    obj.data = nullptr;
+    return result;
 }
 
 void
@@ -146,9 +149,7 @@ AsyncIO::MultiReadImpl(uint8_t* datas, uint64_t* sizes, uint64_t* offsets, uint6
         int submitted = io_submit(context->ctx_, static_cast<int64_t>(count), cb);
         if (submitted < 0) {
             io_context_pool->ReturnOne(context);
-            for (auto& obj : objs) {
-                obj.Release();
-            }
+            // objs destructor automatically frees all align_data
             throw VsagException(ErrorType::INTERNAL_ERROR, "io submit failed");
         }
 
@@ -174,9 +175,7 @@ AsyncIO::MultiReadImpl(uint8_t* datas, uint64_t* sizes, uint64_t* offsets, uint6
 
         if (submitted != static_cast<int>(count)) {
             io_context_pool->ReturnOne(context);
-            for (auto& obj : objs) {
-                obj.Release();
-            }
+            // objs destructor automatically frees all align_data
             throw VsagException(ErrorType::INTERNAL_ERROR,
                                 "io_submit partial: requested " + std::to_string(count) +
                                     " but submitted " + std::to_string(submitted));
@@ -185,7 +184,7 @@ AsyncIO::MultiReadImpl(uint8_t* datas, uint64_t* sizes, uint64_t* offsets, uint6
         for (int64_t i = 0; i < count; ++i) {
             memcpy(cur_data, objs[i].data, sizes[i]);
             cur_data += sizes[i];
-            this->ReleaseImpl(objs[i].data);
+            // no manual release — vector<DirectIOObject> destructor handles cleanup
         }
 
         sizes += count;
