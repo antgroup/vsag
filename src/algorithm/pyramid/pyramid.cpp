@@ -359,14 +359,14 @@ Pyramid::search_impl(const DatasetPtr& query,
     DistHeapPtr search_result = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
 
     std::shared_lock<std::shared_mutex> lock(resize_mutex_);
-    auto vl = pool_->TakeOne();
+    VisitedListGuard vl_guard(pool_.get());
+    const VisitedListPtr& vl = vl_guard.get();
     if (query_path != nullptr) {
         const std::string& current_path = query_path[0];
         search_hierarchy(h, search_func, vl, search_result, current_path, search_param);
     } else {
         h.root->Search(search_func, vl, search_result, search_param.ef);
     }
-    pool_->ReturnOne(vl);
 
     if (use_reorder_) {
         search_result = this->reorder_->Reorder(
@@ -825,10 +825,10 @@ Pyramid::add_one_point(const Hierarchy& h,
             graph_lock.unlock();
         }
 
-        auto vl = pool_->TakeOne();
+        VisitedListGuard vl_guard(pool_.get());
+        const VisitedListPtr& vl = vl_guard.get();
         auto results = searcher_->Search(
             node->graph_, codes, vl, vector, search_param, (LabelTablePtr) nullptr, nullptr);
-        pool_->ReturnOne(vl);
         if (this->support_duplicate_ && search_param.duplicate_id >= 0) {
             std::unique_lock lock(this->label_lookup_mutex_);
             node->graph_->SetDuplicateId(static_cast<InnerIdType>(search_param.duplicate_id),
@@ -933,9 +933,9 @@ Pyramid::search_hierarchy(const Hierarchy& h,
         if (valid) {
             if (thread_pool_ != nullptr && search_param.parallel_search_thread_count > 1) {
                 futures.push_back(thread_pool_->GeneralEnqueue([&, node, i]() -> void {
-                    auto local_vl = pool_->TakeOne();
+                    VisitedListGuard vl_guard(pool_.get());
+                    const VisitedListPtr& local_vl = vl_guard.get();
                     node->Search(search_func, local_vl, search_result_lists[i], search_param.ef);
-                    pool_->ReturnOne(local_vl);
                 }));
             } else {
                 node->Search(search_func, vl, search_result_lists[i], search_param.ef);
