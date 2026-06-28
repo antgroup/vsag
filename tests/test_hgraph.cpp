@@ -18,10 +18,12 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 #include <chrono>
+#include <cmath>
 #include <limits>
 #include <random>
 #include <sstream>
 #include <thread>
+#include <vector>
 
 #include "functest.h"
 #include "inner_string_params.h"
@@ -3380,4 +3382,160 @@ TEST_CASE("HGraph Concurrent Tune(disable_future_tuning=false) and CalDistanceBy
     }
 
     REQUIRE(cal_count.load() > 0);
+}
+
+// Regression test for the data race between a concurrent Add and a brute-force
+// KnnSearch (issue #2294). HGraph advertises SUPPORT_ADD_SEARCH_CONCURRENT, but
+// Add() publishes a new inner_id by incrementing total_count_ *before* the
+// vector's quantized codes are written, while brute_force_search() scans
+// [0, total_count_) and reads code slots directly. A search can therefore read
+// a slot whose codes are still being memcpy-ed into the flatten storage.
+//
+// Graph KNN is unaffected because a node only becomes reachable through edges
+// that are published *after* its codes are written; brute force bypasses that
+// ordering by scanning the raw count. The test deliberately forces the
+// brute-force path via "brute_force_threshold": 1.0 (no filter ->
+// valid_ratio == 1.0 <= threshold) and uses "base_io_type": "memory_io" so the
+// flatten codes live in a single contiguous buffer whose tail slot is being
+// written exactly while a searcher reads it.
+//
+// Under a normal build this test merely exercises the concurrent path and
+// passes (a torn read only yields a garbage distance, not a crash). Its value
+// is under ThreadSanitizer (`make tsan` / `make test_tsan`): TSan reports a
+// data race between MemoryIO::WriteImpl (via insert_persistent_codes) and
+// FlattenDataCell::query (via brute_force_search). Once the race is fixed, the
+// test must stay clean under TSan.
+TEST_CASE("HGraph Concurrent Add vs Brute-Force Search Race",
+          "[ft][concurrent][hgraph][brute_force_threshold]") {
+    constexpr int64_t dim = 16;
+    constexpr int64_t seed_count = 200;
+    constexpr int64_t add_count = 2000;
+    constexpr int64_t total_count = seed_count + add_count;
+    constexpr int64_t topk = 2;
+    constexpr uint32_t searcher_threads = 4;
+
+    // memory_io + fp32 keeps the codes in one contiguous buffer and avoids any
+    // quantizer training requirement; build_thread_count > 1 defers the code
+    // writes to pool workers, widening the window between the total_count_ bump
+    // and the code write so the race is hit reliably.
+    std::string hgraph_params = R"({
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": 16,
+        "index_param": {
+            "base_quantization_type": "fp32",
+            "base_io_type": "memory_io",
+            "max_degree": 16,
+            "ef_construction": 100,
+            "build_thread_count": 4,
+            "use_reorder": false
+        }
+    })";
+    auto factory_res = vsag::Factory::CreateIndex("hgraph", hgraph_params);
+    REQUIRE(factory_res.has_value());
+    auto index = std::move(factory_res.value());
+
+    REQUIRE(index->CheckFeature(vsag::SUPPORT_ADD_SEARCH_CONCURRENT));
+
+    std::mt19937 rng(20260618);
+    std::uniform_real_distribution<float> dist(-1.0F, 1.0F);
+    std::vector<float> vectors(total_count * dim);
+    std::vector<int64_t> ids(total_count);
+    for (int64_t i = 0; i < total_count; ++i) {
+        ids[i] = i;
+        for (int64_t j = 0; j < dim; ++j) {
+            vectors[i * dim + j] = dist(rng);
+        }
+    }
+
+    // Seed the index so entry_point_id_ is set; otherwise SearchWithRequest
+    // returns early before ever reaching the brute-force block.
+    auto seed = vsag::Dataset::Make();
+    seed->NumElements(seed_count)
+        ->Dim(dim)
+        ->Ids(ids.data())
+        ->Float32Vectors(vectors.data())
+        ->Owner(false);
+    REQUIRE(index->Build(seed).has_value());
+
+    const auto* search_param = R"({"hgraph": {"ef_search": 64, "brute_force_threshold": 1.0}})";
+
+    std::atomic<bool> adder_done{false};
+    std::atomic<uint64_t> add_failures{0};
+    std::atomic<uint64_t> search_failures{0};
+    // Counts brute-force results that are impossible unless a torn / unpublished
+    // slot leaked into the scan: a non-finite distance, or the query's own
+    // (always-ready, id == query id) vector failing to come back as an exact
+    // (~0 distance) match. Under a correct fix this stays 0.
+    std::atomic<uint64_t> correctness_violations{0};
+
+    // Single adder thread streaming new vectors one at a time, matching the
+    // issue reproducer.
+    std::thread adder([&]() {
+        for (int64_t i = seed_count; i < total_count; ++i) {
+            auto one = vsag::Dataset::Make();
+            one->NumElements(1)
+                ->Dim(dim)
+                ->Ids(ids.data() + i)
+                ->Float32Vectors(vectors.data() + i * dim)
+                ->Owner(false);
+            if (not index->Add(one).has_value()) {
+                add_failures.fetch_add(1, std::memory_order_relaxed);
+            }
+        }
+        adder_done.store(true, std::memory_order_relaxed);
+    });
+
+    // Searcher threads hammering the brute-force path while the adder runs.
+    // Each queries one of the seed vectors (present and ready from the start),
+    // so a correct brute-force scan must always return that vector at distance
+    // ~0. A torn read of a concurrently written slot would instead surface a
+    // garbage distance and could displace the true self-match.
+    auto searcher = [&](uint32_t tid) {
+        const int64_t self_id = ids[tid % seed_count];
+        std::vector<float> query(vectors.begin() + (tid % seed_count) * dim,
+                                 vectors.begin() + (tid % seed_count) * dim + dim);
+        while (not adder_done.load(std::memory_order_relaxed)) {
+            auto q = vsag::Dataset::Make();
+            q->NumElements(1)->Dim(dim)->Float32Vectors(query.data())->Owner(false);
+            // No filter -> valid_ratio == 1.0 <= brute_force_threshold, so the
+            // full [0, total_count_) scan is taken on every call.
+            auto res = index->KnnSearch(q, topk, search_param);
+            if (not res.has_value()) {
+                search_failures.fetch_add(1, std::memory_order_relaxed);
+                continue;
+            }
+            const auto* result_ids = res.value()->GetIds();
+            const auto* dists = res.value()->GetDistances();
+            const auto count = res.value()->GetDim();
+            bool found_self = false;
+            for (int64_t r = 0; r < count; ++r) {
+                if (not std::isfinite(dists[r])) {
+                    correctness_violations.fetch_add(1, std::memory_order_relaxed);
+                }
+                if (result_ids[r] == self_id && dists[r] < 1e-4F) {
+                    found_self = true;
+                }
+            }
+            if (not found_self) {
+                correctness_violations.fetch_add(1, std::memory_order_relaxed);
+            }
+        }
+    };
+
+    std::vector<std::thread> searchers;
+    searchers.reserve(searcher_threads);
+    for (uint32_t t = 0; t < searcher_threads; ++t) {
+        searchers.emplace_back(searcher, t);
+    }
+
+    adder.join();
+    for (auto& th : searchers) {
+        th.join();
+    }
+
+    REQUIRE(add_failures.load() == 0);
+    REQUIRE(search_failures.load() == 0);
+    REQUIRE(correctness_violations.load() == 0);
+    REQUIRE(index->GetNumElements() == total_count);
 }

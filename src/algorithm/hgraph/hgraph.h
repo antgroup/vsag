@@ -39,6 +39,7 @@
 #include "index_common_param.h"
 #include "index_feature_list.h"
 #include "typing.h"
+#include "utils/atomic_visibility_bitmap.h"
 #include "utils/lock_strategy.h"
 #include "utils/util_functions.h"
 #include "utils/visited_list.h"
@@ -513,6 +514,16 @@ private:
 
     uint64_t ef_construct_{400};
     float alpha_{1.0};
+
+    // Per-slot "codes are fully written" flags. A slot's inner_id is published
+    // into total_count_ before its quantized codes are written, so brute-force
+    // search (which scans [0, total_count_) directly, bypassing the graph
+    // edges) could otherwise read a slot whose codes are still being written.
+    // insert_persistent_codes() Marks a slot (release) once its codes are
+    // durable; brute_force_search() skips slots that are not yet ready
+    // (acquire). Grown alongside the code storage inside resize(), under the
+    // same global_mutex_/add_mutex_ exclusion. See issue #2294.
+    mutable AtomicVisibilityBitmap codes_ready_;
 
     std::shared_ptr<VisitedListPool> pool_{nullptr};
 
