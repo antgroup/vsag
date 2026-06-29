@@ -29,6 +29,7 @@
 #include "framework/test_dataset.h"
 #include "framework/test_dataset_pool.h"
 #include "framework/test_logger.h"
+#include "framework/test_matrix.h"
 #include "framework/test_reader.h"
 #include "framework/test_thread_pool.h"
 #include "unittest.h"
