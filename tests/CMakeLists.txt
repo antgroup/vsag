@@ -81,5 +81,6 @@ target_link_libraries (functests PRIVATE
         Catch2::Catch2 
         vsag 
         simd
+        fmt::fmt
 )
 add_dependencies (functests Catch2)

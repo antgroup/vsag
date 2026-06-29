@@ -54,6 +54,7 @@ if (ENABLE_TESTS)
     add_executable (tests_mockimpl
             ../tests/test_factory.cpp
     )
-    target_link_libraries (tests_mockimpl PRIVATE Catch2::Catch2WithMain vsag_mockimpl_static)
+    target_link_libraries (tests_mockimpl PRIVATE Catch2::Catch2WithMain vsag_mockimpl_static fmt::fmt-header-only)
+    target_compile_definitions (tests_mockimpl PRIVATE VSAG_MOCKIMPL_TEST)
     add_dependencies (tests_mockimpl Catch2)
 endif ()
