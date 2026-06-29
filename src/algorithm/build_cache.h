@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,11 +22,11 @@
 
 namespace vsag {
 
-class HGraphCache {
+class BuildCache {
 public:
-    explicit HGraphCache(Allocator* allocator);
+    explicit BuildCache(Allocator* allocator);
 
-    ~HGraphCache() = default;
+    ~BuildCache() = default;
 
     void
     Serialize(StreamWriter& writer) const;
