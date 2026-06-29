@@ -40,6 +40,8 @@ enum class StreamSerializationTag : uint32_t {
     PYRAMID_HIERARCHIES = 14,
     CODE_SLOT_MAP = 15,
     IVF_BUCKET_GRAPH = 16,
+    BUILD_CACHE = 17,
+    SOURCE_ID_TABLE = 18,
 };
 
 inline const char*
@@ -79,6 +81,10 @@ StreamSerializationTagName(uint32_t tag) {
             return "code_slot_map";
         case StreamSerializationTag::IVF_BUCKET_GRAPH:
             return "ivf_bucket_graph";
+        case StreamSerializationTag::BUILD_CACHE:
+            return "build_cache";
+        case StreamSerializationTag::SOURCE_ID_TABLE:
+            return "source_id_table";
     }
     return "unknown";
 }
@@ -100,11 +106,13 @@ StreamSerializationTagCritical(uint32_t tag) {
         case StreamSerializationTag::SINDI_TERM_ID_MAPPER:
         case StreamSerializationTag::PYRAMID_HIERARCHIES:
         case StreamSerializationTag::CODE_SLOT_MAP:
+        case StreamSerializationTag::BUILD_CACHE:
             return true;
         case StreamSerializationTag::ATTRIBUTE_FILTER:
         case StreamSerializationTag::EXTRA_INFO:
         case StreamSerializationTag::RAW_VECTOR:
         case StreamSerializationTag::IVF_BUCKET_GRAPH:
+        case StreamSerializationTag::SOURCE_ID_TABLE:
             return false;
     }
     return false;
@@ -133,6 +141,8 @@ StreamSerializationBlockCurrentVersion(uint32_t tag) {
         case StreamSerializationTag::CODE_SLOT_MAP:
             return kStreamSerializationBlockVersionV1;
         case StreamSerializationTag::IVF_BUCKET_GRAPH:
+        case StreamSerializationTag::BUILD_CACHE:
+        case StreamSerializationTag::SOURCE_ID_TABLE:
             return kStreamSerializationBlockVersionV1;
     }
     return kStreamSerializationBlockVersionV1;
