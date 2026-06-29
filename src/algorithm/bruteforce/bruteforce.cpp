@@ -928,6 +928,7 @@ BruteForce::GetVectorByInnerId(InnerIdType inner_id, float* data) const {
 bool
 BruteForce::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) {
     (void)force_update;
+    CHECK_ARGUMENT(new_base != nullptr, "new_base is nullptr");
     auto base_dim = new_base->GetDim();
     CHECK_ARGUMENT(base_dim == dim_,
                    fmt::format("base.dim({}) must be equal to index.dim({})", base_dim, dim_));

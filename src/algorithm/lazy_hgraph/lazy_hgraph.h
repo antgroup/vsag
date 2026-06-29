@@ -144,17 +144,14 @@ public:
 bool
     UpdateExtraInfo(const DatasetPtr& new_base) override;
 
-<<<<<<< HEAD
+    bool
+    UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update = false) override;
+
     /**
      * @brief Return the current operational phase.
      *
      * Thread-safe (acquire load on the atomic phase_).
      */
-=======
-    bool
-    UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update = false) override;
-
->>>>>>> feat(lazy_hgraph): support vector updates
     [[nodiscard]] Phase
     GetPhase() const {
         return phase_.load(std::memory_order_acquire);
