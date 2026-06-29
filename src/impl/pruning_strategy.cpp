@@ -129,7 +129,17 @@ mutually_connect_new_element(InnerIdType cur_c,
         if (sz_link_list_other > max_size) {
             throw VsagException(ErrorType::INTERNAL_ERROR, "Bad value of sz_link_list_other");
         }
-        // If cur_c is already present in the neighboring connections of `selected_neighbors[idx]` then no need to modify any connections or run the heuristics.
+        bool has_reverse_edge = false;
+        for (auto neighbor : neighbors) {
+            if (neighbor == cur_c) {
+                has_reverse_edge = true;
+                break;
+            }
+        }
+        if (has_reverse_edge) {
+            continue;
+        }
+
         if (sz_link_list_other < max_size) {
             neighbors.emplace_back(cur_c);
             graph->InsertNeighborsById(selected_neighbor, neighbors);

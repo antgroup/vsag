@@ -91,8 +91,13 @@ auto result = index->KnnSearch(
 | `precise_quantization_type` | string | `"fp32"` | 精排使用的量化类型 |
 | `index_min_size` | int | `0` | 子索引的最小规模；小于该值的分区会退化为线性扫描 |
 | `support_duplicate` | bool | `false` | 是否允许重复 ID |
+| `persist_source_id` | bool | `false` | 持久化 Dataset source ID，以便导出和导入构建缓存。 |
 | `build_thread_count` | int | `1` | 构建阶段并发线程数 |
 | `hierarchies` | array | `[]` | 命名层级定义。每个元素可以是字符串（继承全部顶层参数）或对象（含 `name` 及可选覆盖参数：`max_degree`、`ef_construction`、`alpha`、`no_build_levels`、`index_min_size`）。设置后激活多层级模式，每个层级维护独立的路径树。 |
+
+## 构建缓存
+
+`ExportCache` 会保存每个层级、每个节点的 NSW 图种子，`ImportCache` 可在后续 `Build` 中复用。需要复用缓存的索引序列化前应设置 `persist_source_id: true`，并且两次构建中的每个向量都必须提供唯一的 `Dataset::SourceID`。缓存预热仅适用于 `graph_type: "nsw"`；ODescent、重复 ID 模式、缺少 source ID 或 source ID 重复时会自动回退到普通冷构建。导入的边仅作为种子，构建过程中会结合当前向量进行 refinement。
 
 ## 检索参数
 

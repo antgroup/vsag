@@ -25,6 +25,7 @@
 #include <unordered_map>
 
 #include "../inner_index_interface.h"
+#include "algorithm/build_cache.h"
 #include "common.h"
 #include "datacell/attribute_inverted_interface.h"
 #include "datacell/code_slot_flatten_adapter.h"
@@ -32,7 +33,6 @@
 #include "datacell/flatten_interface.h"
 #include "datacell/graph_interface.h"
 #include "datacell/sparse_graph_datacell_parameter.h"
-#include "hgraph_cache.h"
 #include "hgraph_parameter.h"
 #include "impl/basic_optimizer.h"
 #include "impl/heap/distance_heap.h"
@@ -806,7 +806,7 @@ private:
 
     bool persist_source_id_{false};  // whether to persist source_id in serialization
 
-    std::unique_ptr<HGraphCache> cache_{nullptr};  // neighbor cache for warm-start build
+    std::unique_ptr<BuildCache> cache_{nullptr};  // neighbor cache for warm-start build
 
     float build_cache_hit_rate_{-1.0F};     // cache hit rate from last cache-based build
     uint64_t build_cache_hit_nodes_{0};     // number of nodes with cache hit
