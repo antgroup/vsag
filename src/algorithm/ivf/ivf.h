@@ -187,7 +187,10 @@ private:
      */
     template <InnerSearchMode mode = KNN_SEARCH>
     DistHeapPtr
-    search(const DatasetPtr& query, const InnerSearchParam& param, QueryContext& ctx) const;
+    search(const DatasetPtr& query,
+           const InnerSearchParam& param,
+           QueryContext& ctx,
+           ReasoningContext* reasoning_ctx = nullptr) const;
 
     /**
      * @brief Re-score the top candidates in @p input with high-precision
@@ -198,7 +201,11 @@ private:
             DistHeapPtr& input,
             const float* query,
             const InnerSearchParam& param,
-            QueryContext& ctx) const;
+            QueryContext& ctx,
+            ReasoningContext* reasoning_ctx = nullptr) const;
+
+    void
+    AttachReasoningReport(const DatasetPtr& dataset_results, ReasoningContext* reasoning_ctx) const;
 
     /// Merge a single source shard into this index.
     void

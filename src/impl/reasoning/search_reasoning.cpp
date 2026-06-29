@@ -21,7 +21,8 @@ ReasoningContext::ReasoningContext(Allocator* allocator)
       expected_inner_ids_(AllocatorWrapper<InnerIdType>(allocator)),
       expected_traces_(
           AllocatorWrapper<std::pair<const InnerIdType, ExpectedTargetTrace>>(allocator)),
-      reorder_changes_(AllocatorWrapper<ReorderRecord>(allocator)) {
+      reorder_changes_(AllocatorWrapper<ReorderRecord>(allocator)),
+      selected_buckets_(AllocatorWrapper<BucketIdType>(allocator)) {
 }
 
 ReasoningContext::~ReasoningContext() = default;
@@ -29,6 +30,7 @@ ReasoningContext::~ReasoningContext() = default;
 void
 ReasoningContext::InitializeExpectedTargets(
     const Vector<int64_t>& labels, const UnorderedMap<int64_t, InnerIdType>& label_to_inner_id) {
+    std::lock_guard<std::mutex> guard(mutex_);
     expected_inner_ids_.clear();
     expected_traces_.clear();
 
@@ -49,6 +51,7 @@ ReasoningContext::InitializeExpectedTargets(
 
 void
 ReasoningContext::SetTrueDistance(InnerIdType id, float dist) {
+    std::lock_guard<std::mutex> guard(mutex_);
     auto it = expected_traces_.find(id);
     if (it != expected_traces_.end()) {
         it.value().true_distance = dist;
@@ -57,6 +60,7 @@ ReasoningContext::SetTrueDistance(InnerIdType id, float dist) {
 
 void
 ReasoningContext::RecordVisit(InnerIdType id, float dist, uint32_t hop) {
+    std::lock_guard<std::mutex> guard(mutex_);
     auto it = expected_traces_.find(id);
     if (it != expected_traces_.end()) {
         it.value().was_visited = true;
@@ -69,6 +73,7 @@ ReasoningContext::RecordVisit(InnerIdType id, float dist, uint32_t hop) {
 
 void
 ReasoningContext::RecordEviction(InnerIdType id, uint32_t hop) {
+    std::lock_guard<std::mutex> guard(mutex_);
     auto it = expected_traces_.find(id);
     if (it != expected_traces_.end()) {
         it.value().was_evicted = true;
@@ -81,6 +86,7 @@ ReasoningContext::RecordEviction(InnerIdType id, uint32_t hop) {
 
 void
 ReasoningContext::RecordFilterReject(InnerIdType id) {
+    std::lock_guard<std::mutex> guard(mutex_);
     auto it = expected_traces_.find(id);
     if (it != expected_traces_.end()) {
         it.value().filter_rejected = true;
@@ -90,6 +96,7 @@ ReasoningContext::RecordFilterReject(InnerIdType id) {
 
 void
 ReasoningContext::RecordReorder(InnerIdType id, float dist_before, float dist_after) {
+    std::lock_guard<std::mutex> guard(mutex_);
     auto it = expected_traces_.find(id);
     if (it == expected_traces_.end()) {
         return;
@@ -107,6 +114,7 @@ ReasoningContext::RecordReorder(InnerIdType id, float dist_before, float dist_af
 
 void
 ReasoningContext::RecordReorderEviction(InnerIdType id, uint32_t hop) {
+    std::lock_guard<std::mutex> guard(mutex_);
     auto it = expected_traces_.find(id);
     if (it != expected_traces_.end()) {
         it.value().reorder_evicted = true;
@@ -119,11 +127,19 @@ ReasoningContext::RecordReorderEviction(InnerIdType id, uint32_t hop) {
 
 void
 ReasoningContext::SetTermination(const std::string& reason) {
+    std::lock_guard<std::mutex> guard(mutex_);
     termination_reason_ = reason;
 }
 
 void
+ReasoningContext::RecordBucketSelection(const Vector<BucketIdType>& buckets) {
+    std::lock_guard<std::mutex> guard(mutex_);
+    selected_buckets_ = buckets;
+}
+
+void
 ReasoningContext::MarkResult(const Vector<InnerIdType>& result_ids) {
+    std::lock_guard<std::mutex> guard(mutex_);
     for (const auto& id : result_ids) {
         auto it = expected_traces_.find(id);
         if (it != expected_traces_.end()) {
@@ -134,6 +150,7 @@ ReasoningContext::MarkResult(const Vector<InnerIdType>& result_ids) {
 
 void
 ReasoningContext::DiagnoseExpectedTargets() {
+    std::lock_guard<std::mutex> guard(mutex_);
     for (auto it = expected_traces_.begin(); it != expected_traces_.end(); ++it) {
         it.value().diagnosis = DiagnoseTarget(it.value());
     }
@@ -170,6 +187,7 @@ ReasoningContext::DiagnoseTarget(const ExpectedTargetTrace& trace) {
 
 std::string
 ReasoningContext::GenerateReport() const {
+    std::lock_guard<std::mutex> guard(mutex_);
     JsonType report;
     JsonType missed_targets = JsonType::Parse("[]");
 
@@ -205,6 +223,18 @@ ReasoningContext::GenerateReport() const {
     report["expected_analysis"]["summary"].SetString(summary);
     report["expected_analysis"]["missed_targets"].SetJson(missed_targets);
 
+    if (not selected_buckets_.empty()) {
+        JsonType bucket_array = JsonType::Parse("[]");
+        for (const auto bucket_id : selected_buckets_) {
+            JsonType bucket_json;
+            bucket_json.SetInt(static_cast<int64_t>(bucket_id));
+            bucket_array.AppendJson(bucket_json);
+        }
+        report["bucket_selection"]["selected_bucket_count"].SetInt(
+            static_cast<int64_t>(selected_buckets_.size()));
+        report["bucket_selection"]["selected_buckets"].SetJson(bucket_array);
+    }
+
     return report.Dump();
 }
 
@@ -213,6 +243,7 @@ ReasoningContext::SetSearchParams(int64_t topk,
                                   const std::string& index_type,
                                   bool use_reorder,
                                   bool filter_active) {
+    std::lock_guard<std::mutex> guard(mutex_);
     topk_ = topk;
     index_type_ = index_type;
     use_reorder_ = use_reorder;
@@ -221,11 +252,13 @@ ReasoningContext::SetSearchParams(int64_t topk,
 
 void
 ReasoningContext::AddSearchHop() {
+    std::lock_guard<std::mutex> guard(mutex_);
     total_hops_++;
 }
 
 void
 ReasoningContext::AddDistanceComputation(uint32_t count) {
+    std::lock_guard<std::mutex> guard(mutex_);
     total_dist_computations_ += count;
 }
 

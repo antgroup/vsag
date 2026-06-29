@@ -15,6 +15,7 @@
 #pragma once
 
 #include <cstdint>
+#include <mutex>
 #include <string>
 
 #include "impl/allocator/allocator_wrapper.h"
@@ -81,6 +82,8 @@ public:
 
     void
     DiagnoseExpectedTargets();
+    void
+    RecordBucketSelection(const Vector<BucketIdType>& buckets);
 
     std::string
     GenerateReport() const;
@@ -114,9 +117,11 @@ public:
     UnorderedSet<InnerIdType> expected_inner_ids_;
     UnorderedMap<InnerIdType, ExpectedTargetTrace> expected_traces_;
     Vector<ReorderRecord> reorder_changes_;
+    Vector<BucketIdType> selected_buckets_;
 
 private:
     Allocator* allocator_{nullptr};
+    mutable std::mutex mutex_;
 
     static std::string
     DiagnoseTarget(const ExpectedTargetTrace& trace);

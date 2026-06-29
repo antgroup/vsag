@@ -49,11 +49,16 @@ MemmoveHeap<max_heap, fixed_size>::Push(float dist, InnerIdType id) {
         }
     } else {
         DistanceRecord record = {dist, id};
-        auto pos =
-            std::upper_bound(
-                this->ordered_buffer_.begin(), this->ordered_buffer_.end(), record, CompareType()) -
-            this->ordered_buffer_.begin();
-        ordered_buffer_.emplace_back(record);
+        auto pos = std::upper_bound(this->ordered_buffer_.begin(),
+                                    this->ordered_buffer_.begin() + cur_size_,
+                                    record,
+                                    CompareType()) -
+                   this->ordered_buffer_.begin();
+        if (cur_size_ < static_cast<int64_t>(ordered_buffer_.size())) {
+            ordered_buffer_[cur_size_] = record;
+        } else {
+            ordered_buffer_.push_back(record);
+        }
         // NOLINTNEXTLINE(bugprone-undefined-memory-manipulation)
         memmove(ordered_buffer_.data() + pos + 1,
                 ordered_buffer_.data() + pos,
