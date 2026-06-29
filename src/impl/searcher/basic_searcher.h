@@ -15,21 +15,23 @@
 
 #pragma once
 
-#include "algorithm/inner_index_interface.h"
 #include "attr/executor/executor.h"
+#include "basic_types.h"
 #include "datacell/flatten_interface.h"
 #include "datacell/graph_interface.h"
 #include "hash_types.h"
 #include "impl/heap/distance_heap.h"
 #include "impl/inner_search_param.h"
-#include "index/iterator_filter.h"
+#include "impl/label_table/label_table.h"
 #include "index_common_param_fwd.h"
+#include "query_context.h"
 #include "utils/lock_strategy.h"
 #include "utils/pointer_define.h"
 #include "utils/timer.h"
 #include "utils/visited_list.h"
 
 namespace vsag {
+class IteratorFilterContext;
 
 static constexpr uint32_t OPTIMIZE_SEARCHER_SAMPLE_SIZE = 10000;
 

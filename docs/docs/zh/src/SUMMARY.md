@@ -29,12 +29,14 @@
 - [乘积量化（PQ）](quantization/pq.md)
 - [PQ FastScan](quantization/pqfs.md)
 - [RaBitQ](quantization/rabitq.md)
+- [RaBitQ x+y Split](quantization/rabitq_split.md)
 - [量化变换（TQ）](advanced/quantization_transform.md)
 
 # 开发者指南
 
 - [代码目录结构](development/code_structure.md)
 - [编译构建](development/building.md)
+- [离线 / 内网环境构建](development/offline_build.md)
 - [运行测试](development/testing.md)
 - [贡献到 VSAG](development/contributing.md)
 
@@ -52,7 +54,6 @@
 - [索引自省](advanced/introspection.md)
 - [可扩展性](advanced/extensibility.md)
 - [图索引增强](advanced/enhance_graph.md)
-- [内存-磁盘混合索引](advanced/hybrid_index.md)
 - [Extra Info（附加信息）](advanced/extra_info.md)
 - [索引生命周期管理](advanced/index_lifecycle.md)
 

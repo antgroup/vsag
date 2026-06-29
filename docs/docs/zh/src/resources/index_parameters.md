@@ -4,7 +4,7 @@
 
 - 构建参数键：`src/constants.cpp`
 - 公开常量：`include/vsag/constants.h`
-- 每个索引的示例：`examples/cpp/101_index_hnsw.cpp` 等
+- 每个索引的示例：`examples/cpp/*_index_*.cpp`（例如 `103_index_hgraph.cpp`）
 
 ## 通用参数
 
@@ -15,35 +15,6 @@
 | `dim` | 正整数 | 向量维度，构建后不可更改 |
 | `dtype` | `float32` / `fp16` / `bf16` / `int8` | 向量数据类型，决定索引内部表示 |
 | `metric_type` | `l2` / `ip` / `cosine` | 距离度量 |
-
-## HNSW
-
-HNSW 使用 `hnsw` 子对象承载构建参数，并不支持 HGraph 专有参数（如 `base_quantization_type`）。
-
-```json
-{
-    "dim": 128,
-    "dtype": "float32",
-    "metric_type": "l2",
-    "hnsw": {
-        "max_degree": 32,
-        "ef_construction": 400,
-        "use_conjugate_graph": false
-    }
-}
-```
-
-| 字段 | 典型值 | 说明 |
-|------|-------|------|
-| `max_degree` | 16~48 | 每节点最大出边数 |
-| `ef_construction` | 200~500 | 构建阶段候选集大小，越大召回越高、构建越慢 |
-| `use_conjugate_graph` | bool | 是否构建 [共轭图](../advanced/enhance_graph.md) |
-
-搜索时：
-
-```json
-{"hnsw": {"ef_search": 100, "use_conjugate_graph_search": false}}
-```
 
 ## HGraph
 
@@ -79,20 +50,6 @@ HGraph 的构建参数使用通用的 `index_param` 键（参见 `examples/cpp/1
 默认 `0.0`）。当取值 `> 0` 且当前请求的 filter 的 `ValidRatio()` 不超过该
 阈值时，HGraph 会跳过图遍历，直接在通过过滤的 id 上做精确暴扫。详见
 [HGraph 索引文档](../indexes/hgraph.md#高选择性过滤下的暴搜回退brute_force_threshold)。
-
-## DiskANN
-
-```json
-{
-    "diskann": {
-        "max_degree": 32,
-        "ef_construction": 400,
-        "pq_sample_rate": 0.1,
-        "pq_dims": 32,
-        "use_async_io": true
-    }
-}
-```
 
 ## IVF
 

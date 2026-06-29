@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 
 compatibility_index_dir="${COMPATIBILITY_INDEX_DIR:-/tmp}"
+build_dir="${BUILD_DIR:-./build-release}"
+compatibility_tool="${build_dir}/tools/check_compatibility/check_compatibility"
+
+if [[ ! -x "${compatibility_tool}" ]]; then
+    echo "Error: Compatibility tool not found or not executable at ${compatibility_tool}" >&2
+    exit 1
+fi
 
 old_version_indexes=()
 shopt -s nullglob
@@ -21,7 +28,7 @@ all_success=true
 
 for version in "${old_version_indexes[@]}"; do
     echo "Checking compatibility for: $version"
-    if ! ./build-release/tools/check_compatibility/check_compatibility "$version"; then
+    if ! "${compatibility_tool}" "$version"; then
         echo "Error: Compatibility check failed for $version"
         all_success=false
         break

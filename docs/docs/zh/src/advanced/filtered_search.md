@@ -15,9 +15,6 @@
 [属性过滤（混合搜索）](attribute_filter.md)；如果是基于每条向量的不透明字节负载在图内过滤，
 请阅读 [Extra Info](extra_info.md)。
 
-> 注意：本文与 [内存-磁盘混合索引](hybrid_index.md) 无关，后者描述的是 DiskANN 的存储布局，
-> 而非搜索阶段的过滤。
-
 ## 真值约定
 
 三种 API 关于「这个 id 是否被排除」的语义并不一致，混用前请仔细对照下表。
@@ -149,10 +146,8 @@ index->KnnSearch(query, topk, params, filter, ctx, /*is_last_search=*/false);
 | 索引         | `_KNN_SEARCH_WITH_ID_FILTER` | `_RANGE_SEARCH_WITH_ID_FILTER` | `_KNN_ITERATOR_FILTER_SEARCH` |
 |--------------|:----------------------------:|:------------------------------:|:-----------------------------:|
 | HGraph       |             支持             |              支持              |              支持             |
-| HNSW         |             支持             |              支持              |              支持             |
 | IVF          |             支持             |              支持              |               —               |
 | BruteForce   |             支持             |              支持              |               —               |
-| DiskANN      |             支持             |              支持              |               —               |
 | Pyramid      |             支持             |              支持              |               —               |
 | SINDI / WARP |             支持             |              支持              |               —               |
 
@@ -202,7 +197,7 @@ auto result = index->SearchWithRequest(req).value();
 ## 示例
 
 - C++：[`examples/cpp/301_feature_filter.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/301_feature_filter.cpp)
-  ——同时演示三种过滤方式（HNSW 上）。
+  ——同时演示三种过滤方式。
 - C++：[`examples/cpp/320_feature_extra_info.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/320_feature_extra_info.cpp)
   ——基于 `CheckValid(const char*)` 字节负载重载的图内过滤。
 

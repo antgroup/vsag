@@ -45,6 +45,23 @@ sparse_value_code_size(SparseValueQuantizationType type) {
     return sizeof(float);
 }
 
+DatasetPtr
+collect_heap_results(const DistHeapPtr& results, Allocator* allocator) {
+    auto [result, dists, ids] =
+        create_fast_dataset(static_cast<int64_t>(results->Size()), allocator);
+    if (results->Empty()) {
+        result->Dim(0)->NumElements(1);
+        return result;
+    }
+
+    for (auto j = static_cast<int64_t>(results->Size() - 1); j >= 0; --j) {
+        dists[j] = results->Top().first;
+        ids[j] = results->Top().second;
+        results->Pop();
+    }
+    return result;
+}
+
 }  // namespace
 
 ParamPtr
@@ -582,14 +599,15 @@ SINDI::immutable_search_impl(const SparseTermComputerPtr& computer,
                              Allocator* allocator,
                              bool use_term_lists_heap_insert,
                              const SparseVector* original_query) const {
-    MaxHeap heap(allocator);
+    Allocator* search_allocator = allocator != nullptr ? allocator : allocator_;
+    MaxHeap heap(search_allocator);
     int64_t k = 0;
     if constexpr (mode == KNN_SEARCH) {
         k = inner_param.topk;
     }
 
-    Vector<float> dists(window_size_, 0.0F, allocator);
-    ImmutableMappedQueryTerms mapped_terms(allocator);
+    Vector<float> dists(window_size_, 0.0F, search_allocator);
+    ImmutableMappedQueryTerms mapped_terms(search_allocator);
     auto filter = inner_param.is_inner_id_allowed;
     const auto [min_window_id, max_window_id] = this->get_min_max_window_id(filter);
     for (auto cur = min_window_id; cur <= max_window_id; cur++) {
@@ -633,7 +651,7 @@ SINDI::immutable_search_impl(const SparseTermComputerPtr& computer,
     if (use_reorder_) {
         float cur_heap_top = std::numeric_limits<float>::max();
         auto candidate_size = heap.size();
-        auto high_precise_heap = std::make_shared<StandardHeap<true, false>>(allocator, -1);
+        auto high_precise_heap = std::make_shared<StandardHeap<true, false>>(search_allocator, -1);
         auto [sorted_ids, sorted_vals] = rerank_flat_index_->sort_sparse_vector(
             original_query ? *original_query : computer->raw_query_);
         for (auto i = 0; i < candidate_size; i++) {
@@ -661,7 +679,7 @@ SINDI::immutable_search_impl(const SparseTermComputerPtr& computer,
             }
             heap.pop();
         }
-        return rerank_flat_index_->collect_results(high_precise_heap);
+        return collect_heap_results(high_precise_heap, search_allocator);
     }
 
     if constexpr (mode == RANGE_SEARCH) {
@@ -671,7 +689,7 @@ SINDI::immutable_search_impl(const SparseTermComputerPtr& computer,
         }
     }
     int64_t cur_size = std::min(static_cast<int64_t>(heap.size()), k);
-    auto [results, ret_dists, ret_ids] = create_fast_dataset(cur_size, allocator_);
+    auto [results, ret_dists, ret_ids] = create_fast_dataset(cur_size, search_allocator);
     if (cur_size == 0) {
         return results;
     }
@@ -768,7 +786,7 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
             heap.pop();
         }
 
-        return rerank_flat_index_->collect_results(high_precise_heap);
+        return collect_heap_results(high_precise_heap, allocator);
     }
 
     // low precision

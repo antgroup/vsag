@@ -13,8 +13,6 @@ index-specific options.
 | `sindi` | Sparse-vector index (e.g. BM25, SPLADE) | [SINDI](../indexes/sindi.md) | `examples/cpp/109_index_sindi.cpp` |
 | `pyramid` | Multi-tenant / tag-partitioned graph index | [Pyramid](../indexes/pyramid.md) | `examples/cpp/107_index_pyramid.cpp` |
 | `brute_force` | Exact exhaustive search; useful as baseline | — | `examples/cpp/105_index_brute_force.cpp` |
-| `hnsw` | Classic HNSW graph index (**deprecated** — prefer `hgraph`) | — | `examples/cpp/101_index_hnsw.cpp` |
-| `diskann` | Memory-disk hybrid (**deprecated** — prefer `ivf`) | — | `examples/cpp/102_index_diskann.cpp` |
 
 ## Common Top-Level Fields
 

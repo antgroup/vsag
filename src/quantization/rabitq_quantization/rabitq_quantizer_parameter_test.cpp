@@ -28,6 +28,7 @@ struct RaBitQDefaultParam {
     std::string rabitq_version = "standard";
     int rabitq_bits_per_dim_query = 4;
     int rabitq_bits_per_dim_base = 1;
+    int rabitq_bits_per_dim_filter = 1;
     float rabitq_error_rate = RaBitQuantizerParameter::DEFAULT_RABITQ_ERROR_RATE;
     bool use_fht = false;
 };
@@ -40,6 +41,7 @@ generate_rabitq_param(const RaBitQDefaultParam& param) {
             "rabitq_version": "{}",
             "rabitq_bits_per_dim_query": {},
             "rabitq_bits_per_dim_base": {},
+            "rabitq_bits_per_dim_filter": {},
             "rabitq_error_rate": {},
             "use_fht": {}
         }}
@@ -49,6 +51,7 @@ generate_rabitq_param(const RaBitQDefaultParam& param) {
                        param.rabitq_version,
                        param.rabitq_bits_per_dim_query,
                        param.rabitq_bits_per_dim_base,
+                       param.rabitq_bits_per_dim_filter,
                        param.rabitq_error_rate,
                        param.use_fht);
 }
@@ -84,10 +87,23 @@ TEST_COMPATIBILITY_CASE("different pac_dim", pca_dim, 256, 512, false)
 TEST_COMPATIBILITY_CASE(
     "different rabitq_bits_per_dim_query", rabitq_bits_per_dim_query, 4, 32, false)
 TEST_COMPATIBILITY_CASE("different rabitq_bits_per_dim_base", rabitq_bits_per_dim_base, 1, 4, false)
+SECTION("different rabitq_bits_per_dim_filter") {
+    RaBitQDefaultParam param1;
+    RaBitQDefaultParam param2;
+    param1.rabitq_bits_per_dim_base = 4;
+    param2.rabitq_bits_per_dim_base = 4;
+    param1.rabitq_bits_per_dim_filter = 1;
+    param2.rabitq_bits_per_dim_filter = 2;
+    auto rabitq_param1 = std::make_shared<vsag::RaBitQuantizerParameter>();
+    auto rabitq_param2 = std::make_shared<vsag::RaBitQuantizerParameter>();
+    rabitq_param1->FromString(generate_rabitq_param(param1));
+    rabitq_param2->FromString(generate_rabitq_param(param2));
+    REQUIRE_FALSE(rabitq_param1->CheckCompatibility(rabitq_param2));
+}
 SECTION("different rabitq_version") {
     RaBitQDefaultParam param1;
     RaBitQDefaultParam param2;
-    param2.rabitq_version = "split_1bit_7bit";
+    param2.rabitq_version = RaBitQuantizerParameter::RABITQ_VERSION_SPLIT;
     param2.rabitq_bits_per_dim_query = 32;
     param2.rabitq_bits_per_dim_base = 8;
     auto rabitq_param1 = std::make_shared<vsag::RaBitQuantizerParameter>();
@@ -96,7 +112,7 @@ SECTION("different rabitq_version") {
     rabitq_param2->FromString(generate_rabitq_param(param2));
     REQUIRE_FALSE(rabitq_param1->CheckCompatibility(rabitq_param2));
 }
-TEST_COMPATIBILITY_CASE("different rabitq_error_rate", rabitq_error_rate, 1.9F, 1.0F, false)
+TEST_COMPATIBILITY_CASE("different rabitq_error_rate", rabitq_error_rate, 1.9F, 1.0F, true)
 TEST_COMPATIBILITY_CASE("different use_fht", use_fht, true, false, false)
 }
 
@@ -111,15 +127,27 @@ TEST_CASE("RaBitQ Quantizer Parameter Defaults", "[ut][RaBitQuantizerParameter]"
 TEST_CASE("RaBitQ Split Version Parameter", "[ut][RaBitQuantizerParameter]") {
     auto rabitq_bits_per_dim_base = GENERATE(1, 8);
     RaBitQDefaultParam default_param;
-    default_param.rabitq_version = RaBitQuantizerParameter::RABITQ_VERSION_SPLIT_1BIT_7BIT;
+    default_param.rabitq_version = RaBitQuantizerParameter::RABITQ_VERSION_SPLIT;
     default_param.rabitq_bits_per_dim_query = 32;
     default_param.rabitq_bits_per_dim_base = rabitq_bits_per_dim_base;
+    default_param.rabitq_bits_per_dim_filter = rabitq_bits_per_dim_base == 1 ? 1 : 2;
     default_param.rabitq_error_rate = 1.25F;
     auto param = std::make_shared<vsag::RaBitQuantizerParameter>();
     param->FromString(generate_rabitq_param(default_param));
-    REQUIRE(param->rabitq_version_ == RaBitQuantizerParameter::RABITQ_VERSION_SPLIT_1BIT_7BIT);
+    REQUIRE(param->rabitq_version_ == RaBitQuantizerParameter::RABITQ_VERSION_SPLIT);
     REQUIRE(param->num_bits_per_dim_base_ == rabitq_bits_per_dim_base);
+    REQUIRE(param->num_bits_per_dim_filter_ == default_param.rabitq_bits_per_dim_filter);
     REQUIRE(std::abs(param->rabitq_error_rate_ - 1.25F) < 1e-5F);
+}
+
+TEST_CASE("RaBitQ Split Version Legacy Alias", "[ut][RaBitQuantizerParameter]") {
+    RaBitQDefaultParam default_param;
+    default_param.rabitq_version = RaBitQuantizerParameter::RABITQ_VERSION_SPLIT_1BIT_7BIT;
+    default_param.rabitq_bits_per_dim_query = 32;
+    default_param.rabitq_bits_per_dim_base = 8;
+    auto param = std::make_shared<vsag::RaBitQuantizerParameter>();
+    param->FromString(generate_rabitq_param(default_param));
+    REQUIRE(param->rabitq_version_ == RaBitQuantizerParameter::RABITQ_VERSION_SPLIT);
 }
 
 TEST_CASE("Wrong rabitq_bits_per_dim_base parameter", "[ut][RaBitQuantizerParameter]") {
@@ -140,6 +168,18 @@ TEST_CASE("Wrong rabitq_bits_per_dim_query parameter", "[ut][RaBitQuantizerParam
     REQUIRE_THROWS(param->FromString(param_str));
 }
 
+TEST_CASE("Wrong rabitq_bits_per_dim_filter parameter", "[ut][RaBitQuantizerParameter]") {
+    auto wrong_rabitq_bits_per_dim_filter = GENERATE(0, 9);
+    RaBitQDefaultParam default_param;
+    default_param.rabitq_version = RaBitQuantizerParameter::RABITQ_VERSION_SPLIT;
+    default_param.rabitq_bits_per_dim_query = 32;
+    default_param.rabitq_bits_per_dim_base = 8;
+    default_param.rabitq_bits_per_dim_filter = wrong_rabitq_bits_per_dim_filter;
+    auto param_str = generate_rabitq_param(default_param);
+    auto param = std::make_shared<vsag::RaBitQuantizerParameter>();
+    REQUIRE_THROWS(param->FromString(param_str));
+}
+
 TEST_CASE("Wrong rabitq_version parameter", "[ut][RaBitQuantizerParameter]") {
     RaBitQDefaultParam default_param;
     default_param.rabitq_version = "unknown";
@@ -149,7 +189,7 @@ TEST_CASE("Wrong rabitq_version parameter", "[ut][RaBitQuantizerParameter]") {
 
 TEST_CASE("Wrong rabitq split version shape", "[ut][RaBitQuantizerParameter]") {
     RaBitQDefaultParam default_param;
-    default_param.rabitq_version = RaBitQuantizerParameter::RABITQ_VERSION_SPLIT_1BIT_7BIT;
+    default_param.rabitq_version = RaBitQuantizerParameter::RABITQ_VERSION_SPLIT;
     default_param.rabitq_bits_per_dim_query = 4;
     default_param.rabitq_bits_per_dim_base = 8;
     auto param = std::make_shared<vsag::RaBitQuantizerParameter>();

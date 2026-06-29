@@ -86,7 +86,7 @@ public:
         } else if constexpr (std::is_same_v<T, uint8_t>) {
             SQ8SparseAccumulate(global_dists, term_ids, term_datas, query_val, term_count);
         } else {
-            for (auto i = 0; i < term_count; i++) {
+            for (uint32_t i = 0; i < term_count; i++) {
                 global_dists[term_ids[i]] += query_val * term_datas[i];
             }
         }

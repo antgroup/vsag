@@ -26,8 +26,26 @@
 
 namespace vsag {
 
+/**
+ * @brief LazyHGraph: a two-phase adaptive index that starts as BruteForce
+ *        and transitions to HGraph when the dataset grows.
+ *
+ * LazyHGraph delays graph construction until the number of elements exceeds
+ * a configurable threshold.  During the FLAT phase all operations are served
+ * by a BruteForce sub-index; once the threshold is reached the index rebuilds
+ * itself as an HGraph.  This amortises the high fixed cost of graph
+ * construction for workloads that begin with very few vectors.
+ *
+ * @since v0.15
+ */
 class LazyHGraph : public InnerIndexInterface {
 public:
+    /**
+     * @brief Operational phase of the index.
+     *
+     * FLAT  – backed by BruteForce; low overhead, linear search.
+     * GRAPH – backed by HGraph; higher build cost, sub-linear search.
+     */
     enum class Phase : uint8_t { FLAT = 0, GRAPH = 1 };
 
     static ParamPtr
@@ -119,27 +137,43 @@ public:
     void
     Serialize(StreamWriter& writer) const override;
 
+    /**
+     * @brief Return the current operational phase.
+     *
+     * Thread-safe (acquire load on the atomic phase_).
+     */
     [[nodiscard]] Phase
     GetPhase() const {
         return phase_.load(std::memory_order_acquire);
     }
 
 private:
+    /**
+     * @brief Migrate data from the flat index to a new HGraph and switch
+     *        phase_ to GRAPH.  Idempotent after the first successful call.
+     */
     void
     TransitionToGraph();
 
+    /**
+     * @brief Return the raw pointer to the currently active sub-index.
+     *
+     * The caller must hold phase_mutex_ (read or write) while using the
+     * returned pointer because a concurrent TransitionToGraph() may
+     * destroy the flat_index_.
+     */
     InnerIndexInterface*
     ActiveIndex() const;
 
 private:
-    std::atomic<Phase> phase_{Phase::FLAT};
-    uint64_t transition_threshold_{1000};
-    BruteForceParameterPtr flat_param_{nullptr};
-    HGraphParameterPtr graph_param_{nullptr};
-    IndexCommonParam common_param_;
-    std::shared_ptr<BruteForce> flat_index_{nullptr};
-    std::shared_ptr<HGraph> graph_index_{nullptr};
-    mutable std::shared_mutex phase_mutex_;
+    std::atomic<Phase> phase_{Phase::FLAT};            // current phase
+    uint64_t transition_threshold_{1000};              // element count that triggers FLAT→GRAPH
+    BruteForceParameterPtr flat_param_{nullptr};       // config for the BruteForce sub-index
+    HGraphParameterPtr graph_param_{nullptr};          // config for the HGraph sub-index
+    IndexCommonParam common_param_;                    // shared index-wide parameters
+    std::shared_ptr<BruteForce> flat_index_{nullptr};  // active only in FLAT phase
+    std::shared_ptr<HGraph> graph_index_{nullptr};     // active only in GRAPH phase
+    mutable std::shared_mutex phase_mutex_;            // guards phase transitions
 };
 
 }  // namespace vsag

@@ -9,10 +9,8 @@
 
 ## VSAG 的依赖与灵感来源
 
-- **[hnswlib](https://github.com/nmslib/hnswlib)**：HNSW 的经典实现，VSAG 中的 HNSW 索引在接口与算法上受其影响。
-- **[DiskANN](https://github.com/microsoft/DiskANN)**：微软研究院的大规模磁盘向量检索工作，VSAG 的 `diskann` 索引基于该思路实现。
 - **[Faiss](https://github.com/facebookresearch/faiss)**：Meta 的向量检索库；VSAG 在 IVF / 量化思路上有所借鉴。
-- **[SPANN / SPTAG](https://github.com/microsoft/SPTAG)**：微软的大规模向量检索工程，提供了混合索引的思路。
+- **[SPANN / SPTAG](https://github.com/microsoft/SPTAG)**：微软的大规模向量检索工程，为 VSAG 的大规模检索设计提供了灵感。
 
 ## 生态工具
 

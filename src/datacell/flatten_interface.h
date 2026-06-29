@@ -77,6 +77,16 @@ public:
         }
     }
 
+    virtual void
+    QueryWithDistanceHint(float* result_dists,
+                          const float* /*hint_dists*/,
+                          const ComputerInterfacePtr& computer,
+                          const InnerIdType* idx,
+                          InnerIdType id_count,
+                          QueryContext* ctx = nullptr) {
+        this->Query(result_dists, computer, idx, id_count, ctx);
+    }
+
     virtual ComputerInterfacePtr
     FactoryComputer(const void* query) = 0;
 

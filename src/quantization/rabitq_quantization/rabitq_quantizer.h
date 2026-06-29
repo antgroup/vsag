@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <limits>
 #include <string>
 
 #include "impl/transform/pca_transformer.h"
@@ -52,7 +53,9 @@ public:
         bool use_mrq,
         Allocator* allocator,
         std::string rabitq_version = RaBitQuantizerParameter::DEFAULT_RABITQ_VERSION,
-        float rabitq_error_rate = RaBitQuantizerParameter::DEFAULT_RABITQ_ERROR_RATE);
+        float rabitq_error_rate = RaBitQuantizerParameter::DEFAULT_RABITQ_ERROR_RATE,
+        uint64_t num_bits_per_dim_filter =
+            RaBitQuantizerParameter::DEFAULT_RABITQ_BITS_PER_DIM_FILTER);
 
     explicit RaBitQuantizer(const RaBitQuantizerParamPtr& param,
                             const IndexCommonParam& common_param);
@@ -149,6 +152,13 @@ public:
                                const uint8_t* one_bit_code,
                                const uint8_t* supplement_code) const;
 
+    float
+    RaBitQFloatSQIPBySplitCode(const float* query,
+                               const uint8_t* filter_code,
+                               const uint8_t* supplement_code,
+                               uint32_t filter_bits,
+                               uint32_t supplement_bits) const;
+
     [[nodiscard]] uint64_t
     StoredPlaneIndex(uint32_t logical_bit) const;
 
@@ -176,35 +186,51 @@ public:
                    uint8_t* full_code) const;
 
     bool
-    ComputeDistWithOneBitLowerBound(Computer<RaBitQuantizer>& computer,
-                                    const uint8_t* one_bit_code,
-                                    float* dists,
-                                    float* lower_bound) const;
+    ComputeDistWithOneBitLowerBound(
+        Computer<RaBitQuantizer>& computer,
+        const uint8_t* one_bit_code,
+        float* dists,
+        float* lower_bound,
+        float runtime_rabitq_error_rate = std::numeric_limits<float>::quiet_NaN()) const;
 
     void
-    ComputeDistsWithOneBitLowerBoundBatch4(Computer<RaBitQuantizer>& computer,
-                                           const uint8_t* one_bit_code1,
-                                           const uint8_t* one_bit_code2,
-                                           const uint8_t* one_bit_code3,
-                                           const uint8_t* one_bit_code4,
-                                           float& dist1,
-                                           float& dist2,
-                                           float& dist3,
-                                           float& dist4,
-                                           float* lower_bound1,
-                                           float* lower_bound2,
-                                           float* lower_bound3,
-                                           float* lower_bound4,
-                                           bool& computed1,
-                                           bool& computed2,
-                                           bool& computed3,
-                                           bool& computed4) const;
+    ComputeDistsWithOneBitLowerBoundBatch4(
+        Computer<RaBitQuantizer>& computer,
+        const uint8_t* one_bit_code1,
+        const uint8_t* one_bit_code2,
+        const uint8_t* one_bit_code3,
+        const uint8_t* one_bit_code4,
+        float& dist1,
+        float& dist2,
+        float& dist3,
+        float& dist4,
+        float* lower_bound1,
+        float* lower_bound2,
+        float* lower_bound3,
+        float* lower_bound4,
+        bool& computed1,
+        bool& computed2,
+        bool& computed3,
+        bool& computed4,
+        float runtime_rabitq_error_rate = std::numeric_limits<float>::quiet_NaN()) const;
 
     bool
     ComputeDistWithSplitCode(Computer<RaBitQuantizer>& computer,
                              const uint8_t* one_bit_code,
                              const uint8_t* supplement_code,
                              float* dists) const;
+
+    // Computes the full x+y split distance while reusing the filter-stage distance.
+    // `filter_dist` is the x-bit distance already produced by
+    // ComputeDistWithOneBitLowerBound(); it is not a lower bound and not the final
+    // x+y distance. Passing it here lets the reorder path scan only the y-bit
+    // supplement planes instead of rescanning the x-bit filter planes.
+    bool
+    ComputeDistWithSplitCodeAndFilterDist(Computer<RaBitQuantizer>& computer,
+                                          const uint8_t* one_bit_code,
+                                          const uint8_t* supplement_code,
+                                          float filter_dist,
+                                          float* dists) const;
 
     [[nodiscard]] uint64_t
     OneBitRecordNormOffset() const;
@@ -236,6 +262,21 @@ public:
     [[nodiscard]] uint64_t
     SupplementPlanesSize() const;
 
+    [[nodiscard]] uint32_t
+    FilterBits() const;
+
+    [[nodiscard]] uint32_t
+    ReorderBits() const;
+
+    [[nodiscard]] uint64_t
+    FilterPlanesSize() const;
+
+    [[nodiscard]] bool
+    HasMultiBitFilter() const;
+
+    [[nodiscard]] uint64_t
+    OneBitRecordNormCodeOffset() const;
+
     [[nodiscard]] uint64_t
     SupplementMetaOffset() const;
 
@@ -243,9 +284,24 @@ public:
     AlignCodeField(uint64_t size) const;
 
 private:
+    [[nodiscard]] bool
+    HasFilterQueryLookupTable() const;
+
+    [[nodiscard]] uint64_t
+    FilterQueryLookupTableSize() const;
+
+    [[nodiscard]] norm_type
+    ComputeScalarCodeNorm(const uint8_t* scalar_codes,
+                          uint32_t code_bits,
+                          uint32_t dropped_bits) const;
+
+    [[nodiscard]] norm_type
+    ComputeFilterCodeNorm(const uint8_t* filter_code, uint32_t filter_bits) const;
+
     // bit related
     uint64_t num_bits_per_dim_query_{32};
     uint32_t num_bits_per_dim_base_{1};
+    uint32_t num_bits_per_dim_filter_{RaBitQuantizerParameter::DEFAULT_RABITQ_BITS_PER_DIM_FILTER};
 
     // compute related
     float inv_sqrt_d_{0.0F};
@@ -273,6 +329,7 @@ private:
     uint64_t query_offset_norm_{0};
     uint64_t query_offset_mrq_norm_{0};
     uint64_t query_offset_raw_norm_{0};
+    uint64_t query_offset_filter_lut_{0};
 
     /***
      * code layout: bq-code(required) + norm(required) + error(required) + offset_norm_code(extend_rabitq) + sum(sq4) + mrq_norm(required)

@@ -20,8 +20,8 @@
 #include <cstring>
 #include <limits>
 
-#include "algorithm/inner_index_interface.h"
 #include "datacell/flatten_interface.h"
+#include "impl/filter/iterator_filter.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/reasoning/search_reasoning.h"
 #include "utils/filter_search_skip_strategy.h"
@@ -55,12 +55,15 @@ BasicSearcher::visit(const GraphInterfacePtr& graph,
             vl->Prefetch(neighbors[i + prefetch_stride_visit_]);
         }
         if (not vl->Get(neighbors[i])) {
-            if (not filter || count_no_visited == 0 || skip_strategy->ShouldSkipFilterCheck() ||
-                filter->CheckValid(neighbors[i])) {
+            vl->Set(neighbors[i]);
+            // Removed filter->CheckValid() to eliminate duplicate filter checking.
+            // Filter is applied at result-collection stage.
+            // ShouldVisit() probabilistically gates traversal to preserve graph connectivity.
+            if (not filter || count_no_visited == 0 || skip_strategy == nullptr ||
+                skip_strategy->ShouldVisit()) {
                 to_be_visited_id[count_no_visited] = neighbors[i];
                 count_no_visited++;
             }
-            vl->Set(neighbors[i]);
         }
     }
     return count_no_visited;
@@ -171,10 +174,11 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
             float cur_dist = iter_ctx->GetTopDist();
             vl->Set(cur_inner_id);
             if (iter_ctx->CheckPoint(cur_inner_id)) {
-                lower_bound = std::max(lower_bound, cur_dist);
                 flatten->Query(&cur_dist, computer, &cur_inner_id, 1, ctx);
+                // Sign convention: top_candidates stores positive distances (nearest = smallest);
+                // candidate_set is a max-heap, so distances are negated (nearest = largest, popped first).
                 top_candidates->Push(cur_dist, cur_inner_id);
-                candidate_set->Push(cur_dist, cur_inner_id);
+                candidate_set->Push(-cur_dist, cur_inner_id);
                 if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
                     if (cur_dist > inner_search_param.radius and not top_candidates->Empty()) {
                         top_candidates->Pop();
@@ -182,6 +186,18 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                 }
             }
             iter_ctx->PopDiscard();
+        }
+        if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
+            while (top_candidates->Size() > ef) {
+                auto cur_node_pair = top_candidates->Top();
+                if (iter_ctx->CheckPoint(cur_node_pair.second)) {
+                    iter_ctx->AddDiscardNode(cur_node_pair.first, cur_node_pair.second);
+                }
+                top_candidates->Pop();
+            }
+        }
+        if (not top_candidates->Empty()) {
+            lower_bound = top_candidates->Top().first;
         }
     } else {
         if (inner_search_param.enable_rabitq_one_bit_search) {

@@ -17,9 +17,6 @@ The pages in this section cover the actively developed indexes:
 `brute_force` is also available as an exact-search baseline (see
 [Creating an Index](../guide/create_index.md) and `examples/cpp/105_index_brute_force.cpp`).
 
-`hnsw` and `diskann` are retained for backward compatibility but are **deprecated**; new
-deployments should prefer `hgraph` (graph-based) or `ivf` (partition-based) instead.
-
 ## Parameter conventions
 
 All indexes share the same top-level build fields:

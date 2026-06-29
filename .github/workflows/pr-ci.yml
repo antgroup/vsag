@@ -88,12 +88,27 @@ jobs:
         # ci-x86-openblas image to keep iteration latency low. The
         # build-from-source OpenBLAS path is exercised by the daily x86 ASan
         # job in daily_test.yml.
-        run: export CMAKE_GENERATOR="Ninja" CMAKE_EXPORT_COMPILE_COMMANDS=ON EXTRA_DEFINED="-DUSE_SYSTEM_OPENBLAS=ON"; make asan VSAG_ENABLE_EXAMPLES=ON
+        run: export CMAKE_GENERATOR="Ninja" CMAKE_EXPORT_COMPILE_COMMANDS=ON EXTRA_DEFINED="-DUSE_SYSTEM_OPENBLAS=ON"; make asan VSAG_ENABLE_EXAMPLES=ON VSAG_ENABLE_TOOLS=ON
       - name: Install clang-tidy 15
         run: sudo apt install clang-tidy-15 -y
-      - name: Run Lint
+      - name: Get changed source files
+        id: changed-srcs
         run: |
-          ./scripts/linters/run-clang-tidy-15.sh -p build/ -use-color -source-filter '^.*vsag\/src.*(?<!_test)\.cpp$$' -j 4
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git fetch origin ${{ github.base_ref }} --depth=1
+          CHANGED=$(git diff --name-only origin/${{ github.base_ref }}..HEAD -- 'src/**/*.cpp' ':(exclude)src/**/*_test.cpp')
+          PATTERN=""
+          if [ -n "$CHANGED" ]; then
+            PATTERN=$(echo "$CHANGED" | while IFS= read -r f; do
+              escaped=$(printf '%s' "$f" | sed 's/[][.\*^$()+?{|}]/\\&/g')
+              printf '%s$|' "$escaped"
+            done | sed 's/|$//')
+          fi
+          echo "pattern=$PATTERN" >> "$GITHUB_OUTPUT"
+      - name: Run Lint
+        if: steps.changed-srcs.outputs.pattern != ''
+        run: |
+          ./scripts/linters/run-clang-tidy-15.sh -p build/ -use-color -source-filter '^.*vsag\/src.*(?<!_test)\.cpp$$' -j 4 '${{ steps.changed-srcs.outputs.pattern }}'
       - name: Clean
         run: |
           find ./build -type f -name "*.o" -exec rm -f {} +
@@ -101,7 +116,6 @@ jobs:
           find ./build -type f -name "*.a" -exec rm -f {} +
           rm -rf ./build/hdf5
           rm -rf ./build/boost
-          rm -rf ./build/tools
       - name: Save Build
         uses: actions/upload-artifact@v5
         with:
@@ -249,18 +263,27 @@ jobs:
 
   compatibility:
     name: Check Compatibility
-    needs: [changes, format]
+    needs: [changes, build-asan-x86]
     if: needs.changes.outputs.cpp == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     container:
       image: vsaglib/vsag:ci-x86-openblas
+      volumes:
+        - /opt:/useless
     steps:
+      - name: Free Disk Space
+        run: rm -rf /useless/hostedtoolcache
       - name: Install GitHub CLI
+        env:
+          GH_VERSION: 2.75.0
         run: |
-          GH_VERSION=$(wget -qO- https://api.github.com/repos/cli/cli/releases/latest | sed -n 's/.*"tag_name": "v\([^"]*\)".*/\1/p')
-          wget -q "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" -O /tmp/gh.tar.gz
+          if command -v gh >/dev/null 2>&1; then
+            gh --version
+            exit 0
+          fi
+          wget --tries=3 --timeout=30 -q "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" -O /tmp/gh.tar.gz
           tar xzf /tmp/gh.tar.gz -C /tmp
-          mv /tmp/gh_${GH_VERSION}_linux_amd64/bin/gh /usr/local/bin/gh
+          install -m 0755 /tmp/gh_${GH_VERSION}_linux_amd64/bin/gh /usr/local/bin/gh
           rm -rf /tmp/gh.tar.gz /tmp/gh_${GH_VERSION}_linux_amd64
           gh --version
       - name: Download Compatibility Indexes from Release
@@ -275,10 +298,17 @@ jobs:
             --pattern "*.json" \
             || echo "Warning: Failed to download compatibility indexes"
       - uses: actions/checkout@v4
-      - name: Compile Check Compatibility Tools
-        run: export CMAKE_GENERATOR="Ninja" EXTRA_DEFINED="-DUSE_SYSTEM_OPENBLAS=ON"; make release VSAG_ENABLE_TOOLS=ON
+      - name: Clean Env
+        run: rm -rf ./build
+      - name: Download Build
+        uses: actions/download-artifact@v5
+        with:
+          name: build-x86-${{ github.run_id }}
+          path: ./build
+      - name: Fix Permissions
+        run: chmod +x ./build/tools/check_compatibility/check_compatibility
       - name: Run Check Compatibility
-        run: bash ./scripts/check_compatibility.sh
+        run: BUILD_DIR=./build bash ./scripts/check_compatibility.sh
 
   test-python-x86:
     name: Test Python X86

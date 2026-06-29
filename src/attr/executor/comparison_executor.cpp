@@ -116,6 +116,7 @@ ComparisonExecutor::Run(BucketIdType bucket_id) {
             WhiteListFilter::TryToUpdate(this->filter_, this->bitset_);
         } else {
             this->only_bitset_ = false;
+            delete this->filter_;
             this->filter_ = new BlackListFilter(this->bitset_);
         }
     }

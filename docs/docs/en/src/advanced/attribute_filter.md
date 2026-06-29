@@ -13,8 +13,8 @@ without writing a callback. VSAG builds an attribute inverted index alongside th
 index; the predicate is parsed once and evaluated during graph traversal, so candidates that
 cannot satisfy the predicate are pruned early.
 
-> "Hybrid search" on this page means **vector + structured attributes**. For DiskANN's
-> memory + disk *index* hybrid, see [Memory + Disk Hybrid Index](hybrid_index.md).
+> "Hybrid search" on this page means **vector + structured attributes** (not a
+> storage-layout hybrid).
 
 ## When to Use Each Filter API
 
@@ -35,7 +35,7 @@ All three can be combined inside a single `SearchRequest`; they are ANDed togeth
 | IVF              |                Yes                |                   Yes                  |        Yes        |
 | BruteForce       |                Yes                |                   Yes                  |        Yes        |
 | WARP (sparse)    |                Yes                |                   Yes                  |        Yes        |
-| HNSW / DiskANN / SINDI / Pyramid | — | id-based filters only (see [Filtered Search](filtered_search.md)) | — |
+| SINDI / Pyramid | — | id-based filters only (see [Filtered Search](filtered_search.md)) | — |
 
 When `use_attribute_filter` is enabled, BruteForce currently rejects `Remove` calls
 (re-add the index to delete entries).

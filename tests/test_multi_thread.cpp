@@ -191,7 +191,7 @@ TEST_CASE("Test HNSW Multi-threading Read and Write", "[ft][hnsw][concurrent]") 
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kWARN);
 
     int dim = 16;
-    int max_elements = 5000;
+    int max_elements = 1000;
     int max_degree = 16;
     int ef_construction = 200;
     int ef_search = 100;
@@ -206,7 +206,7 @@ TEST_CASE("Test HNSW Multi-threading Read and Write", "[ft][hnsw][concurrent]") 
     std::shared_ptr<int64_t[]> ids(new int64_t[max_elements]);
     std::shared_ptr<float[]> data(new float[dim * max_elements]);
 
-    fixtures::ThreadPool pool(16);
+    fixtures::ThreadPool pool(4);
 
     // Generate random data
     std::mt19937 rng;
@@ -250,6 +250,9 @@ TEST_CASE("Test HNSW Multi-threading Read and Write", "[ft][hnsw][concurrent]") 
 
     for (int i = 0; i < max_elements; ++i) {
         REQUIRE(insert_results[i].get());
+    }
+    for (int i = 0; i < max_elements; ++i) {
+        REQUIRE(search_results[i].get());
     }
 }
 

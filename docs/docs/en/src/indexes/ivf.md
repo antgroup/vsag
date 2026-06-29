@@ -128,5 +128,4 @@ For latency-sensitive, high-recall workloads on dense embeddings, compare agains
 
 - [Creating an Index](../guide/create_index.md)
 - [Index Parameters](../resources/index_parameters.md)
-- [Hybrid Memory-Disk Index](../advanced/hybrid_index.md)
 - [Serialization](../advanced/serialization.md)

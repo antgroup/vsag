@@ -21,9 +21,9 @@ This page gives a quick tour of the VSAG repository layout.
 
 ## Core Subsystems (inside `src/`)
 
-- **index**: concrete index implementations (HNSW, HGraph, DiskANN, IVF, Pyramid, SINDI, ...).
+- **index**: concrete index implementations (HGraph, IVF, Pyramid, SINDI, ...; legacy: HNSW, DiskANN).
 - **quantization**: FP32 / FP16 / BF16 / SQ4 / SQ8 / PQ quantizers with SIMD dispatch.
-- **graph**: shared graph data structures used by HNSW/HGraph/DiskANN.
+- **graph**: shared graph data structures used by HGraph and other graph-based indexes.
 - **storage**: binary/reader sets, streaming serialization.
 - **allocator / thread pool**: user-pluggable resource management.
 - **simd**: cascaded SIMD dispatch for x86_64 and AArch64.

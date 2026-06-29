@@ -24,7 +24,7 @@ empty->Deserialize(bs_loaded);
 ```
 
 `ReaderSet` 与 `BinarySet` 类似，但通过用户自定义的 `Reader` 按需读取，避免一次性加载全部数据，
-常用于内存受限或部分反序列化场景（例如 DiskANN 的磁盘部分）。
+常用于内存受限或部分反序列化场景。
 
 ### 2. 文件流（`std::ostream` / `std::istream`）
 
@@ -52,6 +52,5 @@ index->Serialize([&](const void* buf, uint64_t offset, uint64_t size) {
 
 - `Deserialize` 要求目标索引为**空**索引，并且参数配置与序列化时一致（如 `dim`、`metric_type`）。
 - 跨大版本升级时请关注 [版本日志](../resources/release_notes.md) 中的兼容性说明。
-- DiskANN 的磁盘索引文件独立管理，`Serialize` 返回的是内存侧元信息。
 - 示例参考：`examples/cpp/318_feature_tune.cpp`、`examples/cpp/401_persistent_kv.cpp`、
   `examples/cpp/402_persistent_streaming.cpp`。

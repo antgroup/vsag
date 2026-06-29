@@ -17,6 +17,8 @@
 
 #include <fmt/format.h>
 
+#include <cmath>
+
 #include "hgraph.h"
 #include "index_common_param.h"
 #include "parameter_test.h"
@@ -207,6 +209,27 @@ TEST_CASE("HGraph maps support_duplicate to graph parameter", "[ut][HGraphParame
     REQUIRE(typed_param->bottom_graph_param->support_duplicate_);
 }
 
+TEST_CASE("HGraph Search Parameters parse RaBitQ error rate", "[ut][HGraphParameter]") {
+    auto params = vsag::HGraphSearchParameters::FromJson(R"({
+        "hgraph": {
+            "ef_search": 200,
+            "rabitq_one_bit_search": true,
+            "rabitq_error_rate": 2.5
+        }
+    })");
+
+    REQUIRE(params.ef_search == 200);
+    REQUIRE(params.rabitq_one_bit_search);
+    REQUIRE(std::abs(params.rabitq_error_rate - 2.5F) < 1e-5F);
+
+    REQUIRE_THROWS(vsag::HGraphSearchParameters::FromJson(R"({
+        "hgraph": {
+            "ef_search": 200,
+            "rabitq_error_rate": 0.0
+        }
+    })"));
+}
+
 TEST_CASE("HGraph maps label_remap_type to inner index parameter", "[ut][HGraphParameter]") {
     auto param = vsag::JsonType::Parse(R"({
         "base_quantization_type": "fp32",
@@ -285,4 +308,71 @@ TEST_CASE("HGraph maps support_force_remove to inner parameter", "[ut][HGraphPar
 
     REQUIRE(typed_param != nullptr);
     REQUIRE(typed_param->support_force_remove);
+}
+
+TEST_CASE("HGraph maps RaBitQ x+y split params", "[ut][HGraphParameter]") {
+    auto param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "rabitq",
+        "precise_quantization_type": "rabitq",
+        "base_io_type": "block_memory_io",
+        "base_file_path": "/tmp/vsag_rabitq_split_base",
+        "base_supplement_io_type": "async_io",
+        "base_supplement_file_path": "/tmp/vsag_rabitq_split_supplement",
+        "rabitq_bits_per_dim_base": 3,
+        "rabitq_bits_per_dim_precise": 5,
+        "graph_io_type": "block_memory_io",
+        "graph_storage_type": "flat",
+        "graph_type": "nsw",
+        "max_degree": 32,
+        "ef_construction": 100,
+        "use_reorder": true,
+        "reorder_source": "base"
+    })");
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    auto hgraph_param = vsag::HGraph::CheckAndMappingExternalParam(param, common_param);
+    auto typed_param = std::dynamic_pointer_cast<vsag::HGraphParameter>(hgraph_param);
+
+    REQUIRE(typed_param != nullptr);
+    auto base_json = typed_param->base_codes_param->ToJson();
+    REQUIRE(base_json["codes_type"].GetString() == std::string("rabitq_split"));
+    REQUIRE(base_json["io_params"]["type"].GetString() == std::string("block_memory_io"));
+    REQUIRE(base_json["supplement_io_params"]["type"].GetString() == std::string("async_io"));
+    REQUIRE(base_json["supplement_io_params"]["file_path"].GetString() ==
+            std::string("/tmp/vsag_rabitq_split_supplement"));
+    REQUIRE(base_json["quantization_params"]["rabitq_version"].GetString() == std::string("split"));
+    REQUIRE(base_json["quantization_params"]["rabitq_bits_per_dim_base"].GetInt() == 8);
+    REQUIRE(base_json["quantization_params"]["rabitq_bits_per_dim_filter"].GetInt() == 3);
+    REQUIRE(typed_param->reorder_source == std::string("base"));
+}
+
+TEST_CASE("HGraph maps RaBitQ without y bits to standard RaBitQ", "[ut][HGraphParameter]") {
+    auto param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "rabitq",
+        "precise_quantization_type": "sq8",
+        "base_io_type": "block_memory_io",
+        "precise_io_type": "block_memory_io",
+        "rabitq_bits_per_dim_base": 3,
+        "graph_io_type": "block_memory_io",
+        "graph_storage_type": "flat",
+        "graph_type": "nsw",
+        "max_degree": 32,
+        "ef_construction": 100,
+        "use_reorder": true
+    })");
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    auto hgraph_param = vsag::HGraph::CheckAndMappingExternalParam(param, common_param);
+    auto typed_param = std::dynamic_pointer_cast<vsag::HGraphParameter>(hgraph_param);
+
+    REQUIRE(typed_param != nullptr);
+    auto base_json = typed_param->base_codes_param->ToJson();
+    REQUIRE(base_json["codes_type"].GetString() == std::string("flatten"));
+    REQUIRE(base_json["quantization_params"]["rabitq_version"].GetString() ==
+            std::string("standard"));
+    REQUIRE(base_json["quantization_params"]["rabitq_bits_per_dim_base"].GetInt() == 3);
 }

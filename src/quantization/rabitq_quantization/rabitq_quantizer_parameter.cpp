@@ -52,18 +52,33 @@ RaBitQuantizerParameter::FromJson(const JsonType& json) {
             fmt::format("currently, only support rabitq_bits_per_dim_base in [1, 8], but got {}",
                         num_bits_per_dim_base_));
     }
+    if (json.Contains(RABITQ_QUANTIZATION_BITS_PER_DIM_FILTER_KEY)) {
+        this->num_bits_per_dim_filter_ = json[RABITQ_QUANTIZATION_BITS_PER_DIM_FILTER_KEY].GetInt();
+    }
+    if (num_bits_per_dim_filter_ < 1 or num_bits_per_dim_filter_ > num_bits_per_dim_base_) {
+        throw VsagException(
+            ErrorType::INVALID_ARGUMENT,
+            fmt::format("rabitq_bits_per_dim_filter must be in [1, rabitq_bits_per_dim_base], "
+                        "but got {} with rabitq_bits_per_dim_base={}",
+                        num_bits_per_dim_filter_,
+                        num_bits_per_dim_base_));
+    }
     if (json.Contains(RABITQ_QUANTIZATION_VERSION_KEY)) {
         this->rabitq_version_ = json[RABITQ_QUANTIZATION_VERSION_KEY].GetString();
     }
-    if (this->rabitq_version_ != DEFAULT_RABITQ_VERSION &&
-        this->rabitq_version_ != RABITQ_VERSION_SPLIT_1BIT_7BIT) {
-        throw VsagException(ErrorType::INVALID_ARGUMENT,
-                            fmt::format("unsupported rabitq_version: {}", rabitq_version_));
+    if (this->rabitq_version_ != DEFAULT_RABITQ_VERSION and
+        not IsSplitVersion(this->rabitq_version_)) {
+        throw VsagException(
+            ErrorType::INVALID_ARGUMENT,
+            fmt::format("unsupported rabitq_version: {}. Supported values are standard, split",
+                        rabitq_version_));
     }
-    if (this->rabitq_version_ == RABITQ_VERSION_SPLIT_1BIT_7BIT &&
-        this->num_bits_per_dim_query_ != 32) {
+    if (IsSplitVersion(this->rabitq_version_)) {
+        this->rabitq_version_ = RABITQ_VERSION_SPLIT;
+    }
+    if (this->rabitq_version_ == RABITQ_VERSION_SPLIT and this->num_bits_per_dim_query_ != 32) {
         throw VsagException(ErrorType::INVALID_ARGUMENT,
-                            "rabitq_version=split_1bit_7bit requires rabitq_bits_per_dim_query=32");
+                            "rabitq_version=split requires rabitq_bits_per_dim_query=32");
     }
     if (json.Contains(RABITQ_QUANTIZATION_ERROR_RATE_KEY)) {
         this->rabitq_error_rate_ = json[RABITQ_QUANTIZATION_ERROR_RATE_KEY].GetFloat();
@@ -86,6 +101,7 @@ RaBitQuantizerParameter::ToJson() const {
     json[RABITQ_QUANTIZATION_VERSION_KEY].SetString(this->rabitq_version_);
     json[RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY].SetInt(this->num_bits_per_dim_query_);
     json[RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY].SetInt(this->num_bits_per_dim_base_);
+    json[RABITQ_QUANTIZATION_BITS_PER_DIM_FILTER_KEY].SetInt(this->num_bits_per_dim_filter_);
     json[RABITQ_QUANTIZATION_ERROR_RATE_KEY].SetFloat(this->rabitq_error_rate_);
     json[USE_FHT_KEY].SetBool(this->use_fht_);
     return json;
@@ -97,8 +113,8 @@ RaBitQuantizerParameter::CheckCompatibility(const ParamPtr& other) const {
     CHECK_FIELD_EQ(*this, *p, pca_dim_);
     CHECK_FIELD_EQ(*this, *p, num_bits_per_dim_query_);
     CHECK_FIELD_EQ(*this, *p, num_bits_per_dim_base_);
+    CHECK_FIELD_EQ(*this, *p, num_bits_per_dim_filter_);
     CHECK_FIELD_EQ(*this, *p, rabitq_version_);
-    CHECK_FIELD_EQ(*this, *p, rabitq_error_rate_);
     CHECK_FIELD_EQ(*this, *p, use_fht_);
     return true;
 }

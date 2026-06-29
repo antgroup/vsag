@@ -162,6 +162,7 @@ vsag_index_knn_search_with_filter(vsag_index_t index,
  * @param query The query data.
  * @param dim The dimension of the query data.
  * @param radius The radius of the search.
+ * @param k The maximum number of results to return (must be >= 1).
  * @param parameters The parameters of the search.
  * @param result The result of the search.
  * @return Error_t The error code.
@@ -171,6 +172,7 @@ vsag_index_range_search(vsag_index_t index,
                         const float* query,
                         uint64_t dim,
                         float radius,
+                        int64_t k,
                         const char* parameters,
                         SearchResult_t* search_result);
 
@@ -181,6 +183,7 @@ vsag_index_range_search(vsag_index_t index,
  * @param query The query data.
  * @param dim The dimension of the query data.
  * @param radius The radius of the search.
+ * @param k The maximum number of results to return (must be >= 1).
  * @param parameters The parameters of the search.
  * @param filter The filter function.
  * @param result The result of the search.
@@ -191,6 +194,7 @@ vsag_index_range_search_with_filter(vsag_index_t index,
                                     const float* query,
                                     uint64_t dim,
                                     float radius,
+                                    int64_t k,
                                     const char* parameters,
                                     FilterFunc_t filter,
                                     SearchResult_t* search_result);

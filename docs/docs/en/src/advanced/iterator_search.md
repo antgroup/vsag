@@ -127,9 +127,9 @@ while (kept.size() < needed) {
 delete ctx;
 ```
 
-The HNSW graph supports an additional runtime parameter — `skip_ratio` — that controls how
-aggressively the iterator skips already-explored regions during continuation. See the
-HNSW section in `examples/cpp/313_feature_search_allocator.cpp`.
+The HGraph index supports an additional runtime parameter — `skip_ratio` — that controls how
+aggressively the iterator skips already-explored regions during continuation. See
+`examples/cpp/314_feature_hgraph_search_allocator.cpp`.
 
 ## Support Matrix
 
@@ -138,10 +138,8 @@ Indexes that advertise the `SUPPORT_KNN_ITERATOR_FILTER_SEARCH` feature (queryab
 
 | Index type | Supports iterator search |
 |------------|--------------------------|
-| hnsw       | yes |
 | hgraph     | yes |
 | ivf        | no  |
-| diskann    | no  |
 | brute_force| no  |
 | sindi      | no  |
 

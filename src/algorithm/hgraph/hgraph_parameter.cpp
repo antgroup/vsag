@@ -15,6 +15,8 @@
 
 #include "hgraph_parameter.h"
 
+#include <cmath>
+
 #include "datacell/extra_info_datacell_parameter.h"
 #include "datacell/flatten_datacell_parameter.h"
 #include "datacell/graph_datacell_parameter.h"
@@ -222,6 +224,16 @@ HGraphSearchParameters::FromJson(const std::string& json_string) {
             (0.0F <= obj.brute_force_threshold) and (obj.brute_force_threshold <= 1.0F),
             fmt::format("brute_force_threshold({}) must in range[0.0, 1.0]",
                         obj.brute_force_threshold));
+    }
+    if (params[INDEX_TYPE_HGRAPH].Contains(RABITQ_QUANTIZATION_ERROR_RATE_KEY)) {
+        obj.rabitq_error_rate =
+            params[INDEX_TYPE_HGRAPH][RABITQ_QUANTIZATION_ERROR_RATE_KEY].GetFloat();
+        CHECK_ARGUMENT(std::isfinite(obj.rabitq_error_rate),
+                       fmt::format("rabitq_error_rate must be finite and positive, got {}",
+                                   obj.rabitq_error_rate));
+        CHECK_ARGUMENT(obj.rabitq_error_rate > 0.0F,
+                       fmt::format("rabitq_error_rate must be finite and positive, got {}",
+                                   obj.rabitq_error_rate));
     }
 
     return obj;

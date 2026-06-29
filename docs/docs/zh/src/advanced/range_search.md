@@ -52,9 +52,7 @@ auto result = index->RangeSearch(query, radius, search_params, /*limited_size=*/
 
 | 索引类型 | 支持 RangeSearch |
 |---------|-----------------|
-| hnsw | 是 |
 | hgraph | 是 |
-| diskann | 是 |
 | ivf | 是 |
 | brute_force | 是 |
 | sindi | 稀疏向量场景支持 |
@@ -63,4 +61,4 @@ auto result = index->RangeSearch(query, radius, search_params, /*limited_size=*/
 
 - 距离度量（内积 / L2 / 余弦）会影响 `radius` 的语义。请与索引创建时的 `metric_type` 保持一致。
 - 当 `radius` 过大时结果集可能巨大，建议配合 `limited_size` 使用。
-- HNSW / HGraph 类图索引下，`RangeSearch` 的 `ef` 等运行期参数与 `KnnSearch` 共享含义。
+- 对于图类索引（HGraph），`RangeSearch` 的 `ef` 等运行期参数与 `KnnSearch` 共享含义。

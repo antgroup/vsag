@@ -21,9 +21,9 @@
 #include <limits>
 #include <memory>
 
-#include "algorithm/inner_index_interface.h"
 #include "common.h"
 #include "flatten_interface.h"
+#include "index_common_param.h"
 #include "io/basic_io.h"
 #include "io/memory_block_io.h"
 #include "quantization/quantizer.h"

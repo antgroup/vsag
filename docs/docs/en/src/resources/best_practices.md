@@ -8,8 +8,6 @@ parameter reference and performance tuning guide.
 | Scenario | Recommended index | Rationale |
 |----------|-------------------|-----------|
 | Medium scale (≤ 10M), in-memory, recall/latency critical | `hgraph` | Unified high-quality graph index with multiple quantizations and Tune support |
-| Compatibility with existing HNSW deployments | `hnsw` | Interface/parameters closest to hnswlib |
-| Billion-scale vectors under limited memory | `diskann` | PQ in memory, full vectors on disk |
 | Coarse recall / candidate layer | `ivf` | Trains once, parallelizes widely |
 | Small scale, 100% precision required | `brute_force` | Exhaustive search; useful as a recall baseline |
 | Multi-tenant or partitioned data | `pyramid` | Multiple subgraphs inside one index, supports tag-based retrieval |
@@ -51,7 +49,6 @@ Detailed parameters: [Index Parameters](index_parameters.md).
 - For production binaries, pick the distribution matching your ABI:
   `dist-pre-cxx11-abi`, `dist-cxx11-abi`, or `dist-libcxx` (see [Building](../development/building.md)).
 - Enable `VSAG_ENABLE_INTEL_MKL=ON` on Intel CPUs for additional acceleration.
-- For DiskANN, use NVMe SSDs and compile with `VSAG_ENABLE_LIBAIO=ON`.
 
 ## Observability
 

@@ -11,8 +11,7 @@ category = "electronics" AND price <= 1000 AND multi_in(tag, "promo|new", "|")
 而无需写回调代码。VSAG 在向量索引旁额外构建一份属性倒排索引；表达式只解析一次，并在图遍历
 过程中完成判定，从而尽早剪除不可能满足条件的候选。
 
-> 本文中的“混合搜索”指的是**向量 + 结构化属性**的混合检索；DiskANN 的“**内存 + 磁盘**”
-> 存储混合请参见 [内存-磁盘混合索引](hybrid_index.md)。
+> 本文中的“混合搜索”指的是**向量 + 结构化属性**的混合检索，而非存储布局上的混合。
 
 ## 何时选择哪种过滤 API
 
@@ -33,7 +32,7 @@ category = "electronics" AND price <= 1000 AND multi_in(tag, "promo|new", "|")
 | IVF              |                支持               |               支持               |        支持       |
 | BruteForce       |                支持               |               支持               |        支持       |
 | WARP（稀疏）     |                支持               |               支持               |        支持       |
-| HNSW / DiskANN / SINDI / Pyramid | — | 仅支持基于 id 的过滤，详见 [带过滤的搜索](filtered_search.md) | — |
+| SINDI / Pyramid | — | 仅支持基于 id 的过滤，详见 [带过滤的搜索](filtered_search.md) | — |
 
 启用 `use_attribute_filter` 后，BruteForce 暂不支持 `Remove`（如需删除请重建索引）。
 

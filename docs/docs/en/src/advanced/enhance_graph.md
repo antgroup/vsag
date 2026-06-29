@@ -1,6 +1,6 @@
 # Graph Index Enhancement
 
-Graph-based indexes (HNSW, HGraph) may see recall drops on "hard queries" — queries that are
+Graph-based indexes may see recall drops on "hard queries" — queries that are
 poorly connected to their true nearest neighbors. VSAG patches these queries online or offline
 using a **conjugate graph**, noticeably improving tail recall at almost zero index-size cost.
 

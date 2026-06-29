@@ -29,12 +29,14 @@
 - [Product Quantization (PQ)](quantization/pq.md)
 - [PQ FastScan](quantization/pqfs.md)
 - [RaBitQ](quantization/rabitq.md)
+- [RaBitQ x+y Split](quantization/rabitq_split.md)
 - [Transform Quantizer (TQ)](advanced/quantization_transform.md)
 
 # Developer Guide
 
 - [Code Structure](development/code_structure.md)
 - [Building](development/building.md)
+- [Offline / Air-gapped Builds](development/offline_build.md)
 - [Running Tests](development/testing.md)
 - [Contributing](development/contributing.md)
 
@@ -52,7 +54,6 @@
 - [Index Introspection](advanced/introspection.md)
 - [Extensibility](advanced/extensibility.md)
 - [Graph Enhancement](advanced/enhance_graph.md)
-- [Hybrid Memory-Disk Index](advanced/hybrid_index.md)
 - [Extra Info](advanced/extra_info.md)
 - [Index Lifecycle Management](advanced/index_lifecycle.md)
 

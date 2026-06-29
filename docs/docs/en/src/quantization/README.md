@@ -70,7 +70,7 @@ the concrete quantizer based on the JSON `type` field.
 | `sq4_uniform` | 4 | **yes** | no | SIMD-friendly SQ4; supports `sq4_uniform_trunc_rate` |
 | `pq` | ~`pq_bits` × `pq_dim` / `dim` | **yes** | no | Codebook-based, very compact |
 | `pqfs` | 4 × `pq_dim` / `dim` | **yes** | no | PQ FastScan — SIMD-accelerated PQ |
-| `rabitq` | 1 (+ optional 7) | **yes** | no | 1-bit / 1+7-bit binary quantization, strongest compression |
+| `rabitq` | 1 or HGraph x+y | **yes** | no | 1-bit / low-bit split binary quantization, strongest compression |
 | `tq` | depends on chain | depends on terminal quantizer | no | [Transform Quantizer](../advanced/quantization_transform.md): prepend rotations / PCA before another quantizer |
 
 `int8` and `sparse` are not exposed as general-purpose
@@ -134,8 +134,8 @@ Not every index exposes every parameter as an external key. As of today:
 - **HGraph** exposes the richest set: `base_quantization_type`,
   `precise_quantization_type`, `use_reorder`, `base_pq_dim`,
   `rabitq_pca_dim`, `rabitq_bits_per_dim_query`,
-  `rabitq_bits_per_dim_base`, `rabitq_version`, `rabitq_error_rate`,
-  `rabitq_use_fht`, `sq4_uniform_trunc_rate`, `tq_chain`
+  `rabitq_bits_per_dim_base`, `rabitq_bits_per_dim_precise`,
+  `rabitq_error_rate`, `rabitq_use_fht`, `sq4_uniform_trunc_rate`, `tq_chain`
   (see `src/algorithm/hgraph.cpp`).
 - **IVF**, **Pyramid**, **BruteForce** expose `base_quantization_type` and
   the common reorder keys; some tunables (e.g. `tq_chain`) are wired
@@ -152,4 +152,5 @@ Refer to each index page for its full parameter list.
 - [Product Quantization (PQ)](pq.md)
 - [PQ FastScan](pqfs.md)
 - [RaBitQ](rabitq.md)
+- [RaBitQ x+y Split](rabitq_split.md)
 - [Transform Quantizer (TQ)](../advanced/quantization_transform.md)

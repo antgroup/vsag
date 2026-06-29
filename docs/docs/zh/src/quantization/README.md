@@ -68,7 +68,7 @@ true`）。本章介绍每一种受支持的量化器：它做什么、接受哪
 | `sq4_uniform` | 4 | **是** | 否 | SIMD 友好的 SQ4；支持 `sq4_uniform_trunc_rate` |
 | `pq` | ~`pq_bits` × `pq_dim` / `dim` | **是** | 否 | 基于码本，非常紧凑 |
 | `pqfs` | 4 × `pq_dim` / `dim` | **是** | 否 | PQ FastScan——SIMD 加速版 PQ |
-| `rabitq` | 1（可选额外 7） | **是** | 否 | 1 比特 / 1+7 比特二值量化，最强压缩 |
+| `rabitq` | 1 或 HGraph x+y | **是** | 否 | 1 比特 / 低比特 split 二值量化，最强压缩 |
 | `tq` | 取决于链路 | 取决于末端量化器 | 否 | [量化变换](../advanced/quantization_transform.md)：在另一个量化器之前串接旋转 / PCA |
 
 `int8` 与 `sparse` 不作为通用的 `base_quantization_type` 暴露：
@@ -124,8 +124,8 @@ true`）。本章介绍每一种受支持的量化器：它做什么、接受哪
 - **HGraph** 暴露最完整的集合：`base_quantization_type`、
   `precise_quantization_type`、`use_reorder`、`base_pq_dim`、
   `rabitq_pca_dim`、`rabitq_bits_per_dim_query`、
-  `rabitq_bits_per_dim_base`、`rabitq_version`、`rabitq_error_rate`、
-  `rabitq_use_fht`、`sq4_uniform_trunc_rate`、`tq_chain`
+  `rabitq_bits_per_dim_base`、`rabitq_bits_per_dim_precise`、
+  `rabitq_error_rate`、`rabitq_use_fht`、`sq4_uniform_trunc_rate`、`tq_chain`
   （见 `src/algorithm/hgraph.cpp`）。
 - **IVF**、**Pyramid**、**BruteForce** 暴露 `base_quantization_type`
   与通用的重排相关 key；部分可调项（如 `tq_chain`）目前在内部接好但未作
@@ -142,4 +142,5 @@ true`）。本章介绍每一种受支持的量化器：它做什么、接受哪
 - [乘积量化（PQ）](pq.md)
 - [PQ FastScan](pqfs.md)
 - [RaBitQ](rabitq.md)
+- [RaBitQ x+y Split](rabitq_split.md)
 - [量化变换（TQ）](../advanced/quantization_transform.md)

@@ -17,7 +17,7 @@
 
 摘要（翻译）：随着深度学习技术的飞速发展，高维向量空间中的近似最近邻搜索近年来受到了广泛关注。我们观察到，在基于图的索引的整个生命周期中，会产生大量的搜索日志与构建日志。然而，由于现有索引具有静态特性，这两类有价值的日志并未得到充分利用。本文提出了EnhanceGraph框架，该框架将这两类日志整合到一种名为“共轭图”（conjugate graph）的新型结构中，并利用该共轭图来提升搜索质量。通过对基于图的索引的局限性进行理论分析与观察，我们提出了若干优化方法。针对搜索日志，共轭图存储从局部最优解到全局最优解的边，以增强路由至最近邻的能力；针对构建日志，共轭图存储从邻近图（proximity graph）中被剪除的边，以增强对k最近邻的检索能力。我们在多个公开及真实的工业数据集上的实验结果表明，EnhanceGraph在不牺牲搜索效率的前提下，显著提升了搜索精度，其中召回率（recall）的最大提升幅度达到了从41.74%至93.42%。此外，我们的EnhanceGraph算法已被集成到蚂蚁集团的开源向量库VSAG中。
 
-> 该功能集成在 VSAG 库的 HNSW 索引上，可通过 `use_conjugate_graph` 参数启用。
+> 该功能已集成到 VSAG 库中，可通过 `use_conjugate_graph` 参数启用。
 
 ## 4. SINDI: an Efficient Index for Approximate Maximum Inner Product Search on Sparse Vectors [[arxiv]](https://arxiv.org/abs/2509.08395)
 

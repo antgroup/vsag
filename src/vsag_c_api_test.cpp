@@ -266,9 +266,16 @@ TEST_CASE("vsag_c_api range search", "[vsag_c_api][ut]") {
     result.ids = results.data();
 
     auto idx = random() % num_vectors;
-    ret = vsag_index_range_search(
-        index, test_case.datas.data() + idx * dim, dim, radius, hgraph_search_parameters, &result);
+    int64_t range_k = 100;
+    ret = vsag_index_range_search(index,
+                                  test_case.datas.data() + idx * dim,
+                                  dim,
+                                  radius,
+                                  range_k,
+                                  hgraph_search_parameters,
+                                  &result);
     REQUIRE(ret.code == VSAG_SUCCESS);
+    REQUIRE(result.count <= range_k);
 
     // Test range search with filter
     auto filter_func = [](int64_t id) -> bool {
@@ -279,10 +286,12 @@ TEST_CASE("vsag_c_api range search", "[vsag_c_api][ut]") {
                                               test_case.datas.data() + idx * dim,
                                               dim,
                                               radius,
+                                              range_k,
                                               hgraph_search_parameters,
                                               filter_func,
                                               &result);
     REQUIRE(ret.code == VSAG_SUCCESS);
+    REQUIRE(result.count <= range_k);
 
     // Verify that all returned IDs are less than 50
     for (int64_t i = 0; i < result.count; ++i) {
@@ -441,9 +450,9 @@ TEST_CASE("vsag_c_api null handle paths", "[vsag_c_api][ut]") {
     vsag_index_knn_search_with_filter(
         nullptr, test_case.datas.data(), dim, 3, hgraph_search_parameters, nullptr, &result);
     vsag_index_range_search(
-        nullptr, test_case.datas.data(), dim, 1.0F, hgraph_search_parameters, &result);
+        nullptr, test_case.datas.data(), dim, 1.0F, 10, hgraph_search_parameters, &result);
     vsag_index_range_search_with_filter(
-        nullptr, test_case.datas.data(), dim, 1.0F, hgraph_search_parameters, nullptr, &result);
+        nullptr, test_case.datas.data(), dim, 1.0F, 10, hgraph_search_parameters, nullptr, &result);
 
     vsag_index_t clone_index = nullptr;
     REQUIRE(vsag_index_clone(nullptr, &clone_index).code == VSAG_INTERNAL_ERROR);
@@ -550,11 +559,17 @@ TEST_CASE("vsag_c_api search error paths", "[vsag_c_api][ut]") {
     REQUIRE(ret.code != VSAG_SUCCESS);
 
     ret = vsag_index_range_search(
-        index, test_case.datas.data(), dim, 10.0F, invalid_search_parameters, &result);
+        index, test_case.datas.data(), dim, 10.0F, 10, invalid_search_parameters, &result);
     REQUIRE(ret.code != VSAG_SUCCESS);
 
-    ret = vsag_index_range_search_with_filter(
-        index, test_case.datas.data(), dim, 10.0F, invalid_search_parameters, filter_func, &result);
+    ret = vsag_index_range_search_with_filter(index,
+                                              test_case.datas.data(),
+                                              dim,
+                                              10.0F,
+                                              10,
+                                              invalid_search_parameters,
+                                              filter_func,
+                                              &result);
     REQUIRE(ret.code != VSAG_SUCCESS);
 
     ret = vsag_index_knn_search(
@@ -562,7 +577,7 @@ TEST_CASE("vsag_c_api search error paths", "[vsag_c_api][ut]") {
     REQUIRE(ret.code != VSAG_SUCCESS);
 
     ret = vsag_index_range_search(
-        index, test_case.datas.data(), dim - 1, 10.0F, hgraph_search_parameters, &result);
+        index, test_case.datas.data(), dim - 1, 10.0F, 10, hgraph_search_parameters, &result);
     REQUIRE(ret.code != VSAG_SUCCESS);
 
     vsag_index_destroy(index);
@@ -625,5 +640,90 @@ TEST_CASE("vsag_c_api serialize and update edge paths", "[vsag_c_api][ut]") {
     REQUIRE(ret.code != VSAG_SUCCESS);
 
     vsag_index_destroy(non_empty_index);
+    vsag_index_destroy(index);
+}
+TEST_CASE("vsag_c_api range search k validation", "[vsag_c_api][ut]") {
+    auto index = vsag_index_factory(index_name, index_param);
+    REQUIRE(index != nullptr);
+
+    VsagTestCase test_case;
+    auto ret =
+        vsag_index_build(index, test_case.datas.data(), test_case.ids.data(), dim, num_vectors);
+    REQUIRE(ret.code == VSAG_SUCCESS);
+
+    std::vector<int64_t> results(100);
+    std::vector<float> scores(100);
+    SearchResult_t result{};
+    result.ids = results.data();
+    result.dists = scores.data();
+
+    // k = 0 must be rejected
+    ret = vsag_index_range_search(
+        index, test_case.datas.data(), dim, 10.0F, 0, hgraph_search_parameters, &result);
+    REQUIRE(ret.code != VSAG_SUCCESS);
+
+    // k = -1 must be rejected
+    ret = vsag_index_range_search(
+        index, test_case.datas.data(), dim, 10.0F, -1, hgraph_search_parameters, &result);
+    REQUIRE(ret.code != VSAG_SUCCESS);
+
+    // k = 0 with filter must also be rejected
+    auto filter_func = [](int64_t /*id*/) -> bool { return true; };
+    ret = vsag_index_range_search_with_filter(index,
+                                              test_case.datas.data(),
+                                              dim,
+                                              10.0F,
+                                              0,
+                                              hgraph_search_parameters,
+                                              filter_func,
+                                              &result);
+    REQUIRE(ret.code != VSAG_SUCCESS);
+
+    // k = -1 with filter must also be rejected
+    ret = vsag_index_range_search_with_filter(index,
+                                              test_case.datas.data(),
+                                              dim,
+                                              10.0F,
+                                              -1,
+                                              hgraph_search_parameters,
+                                              filter_func,
+                                              &result);
+    REQUIRE(ret.code != VSAG_SUCCESS);
+
+    // small k must cap the result count
+    int64_t small_k = 3;
+    ret = vsag_index_range_search(index,
+                                  test_case.datas.data(),
+                                  dim,
+                                  /*radius=*/100.0F,
+                                  small_k,
+                                  hgraph_search_parameters,
+                                  &result);
+    REQUIRE(ret.code == VSAG_SUCCESS);
+    REQUIRE(result.count <= small_k);
+
+    vsag_index_destroy(index);
+}
+
+TEST_CASE("vsag_c_api serialize/deserialize invalid path", "[vsag_c_api][ut]") {
+    auto index = vsag_index_factory(index_name, index_param);
+    REQUIRE(index != nullptr);
+
+    VsagTestCase test_case;
+    auto ret =
+        vsag_index_build(index, test_case.datas.data(), test_case.ids.data(), dim, num_vectors);
+    REQUIRE(ret.code == VSAG_SUCCESS);
+
+    // serialize to an unwritable path must fail
+    ret = vsag_serialize_file(index, "/nonexistent_dir/subdir/index.bin");
+    REQUIRE(ret.code != VSAG_SUCCESS);
+
+    // deserialize from a non-existent file must fail
+    auto index2 = vsag_index_factory(index_name, index_param);
+    REQUIRE(index2 != nullptr);
+    ret = vsag_deserialize_file(index2, "/nonexistent_dir/subdir/index.bin");
+    REQUIRE(ret.code != VSAG_SUCCESS);
+
+    vsag_index_destroy(index2);
     vsag_index_destroy(index);
 }

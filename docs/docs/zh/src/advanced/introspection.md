@@ -38,7 +38,7 @@ if (not index->CheckFeature(vsag::SUPPORT_DELETE_BY_ID)) {
 提供两个重载：
 
 ```cpp
-// 稠密向量索引（HGraph、BruteForce、IVF、DiskANN、HNSW）
+// 稠密向量索引（HGraph、BruteForce、IVF）
 auto r = index->CalDistanceById(query_ptr, ids, count, /*calculate_precise_distance=*/true);
 
 // 稀疏向量索引（SINDI、SparseIndex）—— 用 Dataset 封装查询
@@ -70,8 +70,7 @@ auto r = index->CalDistanceById(query_ds, ids, count, /*calculate_precise_distan
 是否支持取决于索引类型 —— 这两个 API 没有专门的 `SUPPORT_*` flag。`Index` 基类默认抛
 `std::runtime_error("Index doesn't support ...")`（`GetIndexDetailInfos` 与
 `GetDetailDataByName`，见 `include/vsag/index.h:658,674`）；HGraph / IVF / BruteForce /
-Pyramid / SINDI / WARP 通过 `InnerIndexInterface` 提供了实现，而 `HNSW` 仅 override 了
-`GetDetailDataByName`，DiskANN 两者都没有 override。调用时请始终处理 `tl::expected`
+Pyramid / SINDI / WARP 通过 `InnerIndexInterface` 提供了实现。调用时请始终处理 `tl::expected`
 的 error 分支。
 
 ```cpp

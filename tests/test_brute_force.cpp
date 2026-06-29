@@ -668,6 +668,68 @@ TEST_CASE("(Daily) BruteForce Mark Remove", "[ft][remove][bruteforce][daily]") {
     TestBruteForceMarkRemove(resource);
 }
 
+TEST_CASE("(PR) BruteForce RangeSearch After MarkRemove",
+          "[ft][remove][range_search][bruteforce][pr]") {
+    // Regression: RangeSearch must exclude documents removed via MARK_REMOVE,
+    // mirroring KnnSearch behavior (see create_search_filter usage).
+    using namespace fixtures;
+    auto resource = fixtures::BruteForceTestIndex::GetResource(true);
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    auto size = 1024 * 1024 * 2;
+    for (const auto& metric_type : resource->metric_types) {
+        for (auto& dim : resource->dims) {
+            for (auto& [base_quantization_str, recall] : resource->test_cases) {
+                vsag::Options::Instance().set_block_size_limit(size);
+                auto param = BruteForceTestIndex::GenerateBruteForceBuildParametersString(
+                    metric_type, dim, base_quantization_str);
+                auto index = TestIndex::TestFactory(BruteForceTestIndex::name, param, true);
+                auto dataset = BruteForceTestIndex::pool.GetDatasetAndCreate(
+                    dim, BruteForceTestIndex::base_count, metric_type);
+
+                // Build and add
+                auto train_result = index->Train(dataset->base_);
+                REQUIRE(train_result.has_value());
+                auto add_results = index->Add(dataset->base_);
+                REQUIRE(add_results.has_value());
+
+                auto base_num = dataset->base_->GetNumElements();
+                auto base_dim = dataset->base_->GetDim();
+                auto ids = dataset->base_->GetIds();
+
+                // Mark-remove half of the base data
+                int64_t remove_count = base_num / 2;
+                std::vector<int64_t> remove_ids(ids, ids + remove_count);
+                auto remove_result = index->Remove(remove_ids, vsag::RemoveMode::MARK_REMOVE);
+                REQUIRE(remove_result.has_value());
+                REQUIRE(index->GetNumberRemoved() == remove_count);
+
+                // RangeSearch from each query; verify no removed id appears.
+                // Build a hash set of removed ids for O(1) lookup.
+                std::unordered_set<int64_t> removed_set(remove_ids.begin(), remove_ids.end());
+                auto queries = dataset->range_query_;
+                auto query_count = queries->GetNumElements();
+                auto radius = dataset->range_radius_;
+                for (int64_t q = 0; q < query_count; ++q) {
+                    auto query = vsag::Dataset::Make();
+                    query->NumElements(1)
+                        ->Dim(base_dim)
+                        ->Float32Vectors(queries->GetFloat32Vectors() + q * base_dim)
+                        ->Owner(false);
+                    auto res = index->RangeSearch(query, radius[q], search_param_tmp);
+                    REQUIRE(res.has_value());
+                    auto result_ids = res.value()->GetIds();
+                    auto result_dim = res.value()->GetDim();
+                    for (int64_t j = 0; j < result_dim; ++j) {
+                        REQUIRE(removed_set.count(result_ids[j]) == 0);
+                    }
+                }
+
+                vsag::Options::Instance().set_block_size_limit(origin_size);
+            }
+        }
+    }
+}
+
 static void
 TestBruteForceRemoveById(const fixtures::BruteForceResourcePtr& resource) {
     using namespace fixtures;

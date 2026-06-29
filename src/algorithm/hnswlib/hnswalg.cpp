@@ -18,6 +18,7 @@
 #include <memory>
 
 #include "datacell/graph_interface.h"
+#include "impl/filter/iterator_filter.h"
 #include "impl/searcher/basic_searcher.h"
 #include "utils/filter_search_skip_strategy.h"
 #include "utils/prefetch.h"
@@ -616,7 +617,7 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
                 bool candidate_valid = true;
                 bool candidate_valid_checked = false;
                 if (is_id_allowed && not candidate_set.empty() &&
-                    not skip_strategy->ShouldSkipFilterCheck()) {
+                    not skip_strategy->ShouldVisit()) {
                     candidate_valid = is_id_allowed->CheckValid(getExternalLabel(candidate_id));
                     candidate_valid_checked = true;
                     if (not candidate_valid) {

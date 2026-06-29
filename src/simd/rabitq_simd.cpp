@@ -20,12 +20,80 @@ namespace vsag {
 
 VSAG_DEFINE_SIMD_DISPATCH(RaBitQFloatBinaryIP, RaBitQFloatBinaryType);
 VSAG_DEFINE_SIMD_DISPATCH(RaBitQFloatBinaryIPBatch4, RaBitQFloatBinaryBatch4Type);
+VSAG_DEFINE_SIMD_DISPATCH(RaBitQFloatThreeBitIPBatch4, RaBitQFloatThreeBitBatch4Type);
 VSAG_DEFINE_SIMD_DISPATCH(RaBitQFloatSplitCodeIP, RaBitQFloatSplitCodeType);
+VSAG_DEFINE_SIMD_DISPATCH(RaBitQFloatSupplementCodeIP, RaBitQFloatSupplementCodeType);
 VSAG_DEFINE_SIMD_DISPATCH_VPOPCNTDQ(RaBitQSQ4UBinaryIP, RaBitQSQ4UBinaryType);
 VSAG_DEFINE_SIMD_DISPATCH(FHTRotate, FHTRotateType);
 VSAG_DEFINE_SIMD_DISPATCH(KacsWalk, KacsWalkType);
 VSAG_DEFINE_SIMD_DISPATCH(VecRescale, VecRescaleType);
 VSAG_DEFINE_SIMD_DISPATCH(RotateOp, RotateOpType);
+
+static RaBitQFloatThreeBitByLookupType
+GetRaBitQFloatThreeBitIPByLookup() {
+    if (SimdStatus::SupportAVX512()) {
+#if defined(ENABLE_AVX512)
+        return avx512::RaBitQFloatThreeBitIPByLookup;
+#endif
+    }
+    if (SimdStatus::SupportAVX2()) {
+#if defined(ENABLE_AVX2)
+        return avx2::RaBitQFloatThreeBitIPByLookup;
+#endif
+    }
+    return generic::RaBitQFloatThreeBitIPByLookup;
+}
+RaBitQFloatThreeBitByLookupType RaBitQFloatThreeBitIPByLookup = GetRaBitQFloatThreeBitIPByLookup();
+
+static RaBitQFloatMultiBitByLookupType
+GetRaBitQFloatMultiBitIPByLookup() {
+    if (SimdStatus::SupportAVX512()) {
+#if defined(ENABLE_AVX512)
+        return avx512::RaBitQFloatMultiBitIPByLookup;
+#endif
+    }
+    if (SimdStatus::SupportAVX2()) {
+#if defined(ENABLE_AVX2)
+        return avx2::RaBitQFloatMultiBitIPByLookup;
+#endif
+    }
+    return generic::RaBitQFloatMultiBitIPByLookup;
+}
+RaBitQFloatMultiBitByLookupType RaBitQFloatMultiBitIPByLookup = GetRaBitQFloatMultiBitIPByLookup();
+
+static RaBitQFloatThreeBitBatch4ByLookupType
+GetRaBitQFloatThreeBitIPBatch4ByLookup() {
+    if (SimdStatus::SupportAVX512()) {
+#if defined(ENABLE_AVX512)
+        return avx512::RaBitQFloatThreeBitIPBatch4ByLookup;
+#endif
+    }
+    if (SimdStatus::SupportAVX2()) {
+#if defined(ENABLE_AVX2)
+        return avx2::RaBitQFloatThreeBitIPBatch4ByLookup;
+#endif
+    }
+    return generic::RaBitQFloatThreeBitIPBatch4ByLookup;
+}
+RaBitQFloatThreeBitBatch4ByLookupType RaBitQFloatThreeBitIPBatch4ByLookup =
+    GetRaBitQFloatThreeBitIPBatch4ByLookup();
+
+static RaBitQFloatMultiBitBatch4ByLookupType
+GetRaBitQFloatMultiBitIPBatch4ByLookup() {
+    if (SimdStatus::SupportAVX512()) {
+#if defined(ENABLE_AVX512)
+        return avx512::RaBitQFloatMultiBitIPBatch4ByLookup;
+#endif
+    }
+    if (SimdStatus::SupportAVX2()) {
+#if defined(ENABLE_AVX2)
+        return avx2::RaBitQFloatMultiBitIPBatch4ByLookup;
+#endif
+    }
+    return generic::RaBitQFloatMultiBitIPBatch4ByLookup;
+}
+RaBitQFloatMultiBitBatch4ByLookupType RaBitQFloatMultiBitIPBatch4ByLookup =
+    GetRaBitQFloatMultiBitIPBatch4ByLookup();
 
 // RaBitQFloatSQIP currently only has a generic implementation. Kept as
 // an explicit one-liner so the absence of SIMD variants is obvious.

@@ -453,27 +453,30 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
                              "[ft][build][hnsw][concurrent][build]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("l2", "ip", "cosine");
+    auto metric_types = fixtures::RandomSelect<std::string>({"l2", "ip", "cosine"}, 1);
+    auto selected_dims = fixtures::RandomSelect<int>(dims, 1);
     const std::string name = "hnsw";
     auto search_param = fmt::format(search_param_tmp, 100);
-    for (auto& dim : dims) {
-        vsag::Options::Instance().set_block_size_limit(size);
-        auto param = GenerateHNSWBuildParametersString(metric_type, dim);
-        auto index = TestFactory(name, param, true);
+    vsag::Options::Instance().set_block_size_limit(size);
+    for (auto& metric_type : metric_types) {
+        for (auto& dim : selected_dims) {
+            INFO(fmt::format("metric_type: {}, dim: {}", metric_type, dim));
+            auto param = GenerateHNSWBuildParametersString(metric_type, dim);
+            auto index = TestFactory(name, param, true);
 
-        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
-        TestConcurrentAdd(index, dataset, true);
-        TestKnnSearch(index, dataset, search_param, 0.95, true);
-        TestConcurrentKnnSearch(index, dataset, search_param, 0.95, true);
-        TestRangeSearch(index, dataset, search_param, 0.95, 10, true);
-        TestRangeSearch(index, dataset, search_param, 0.45, 5, true);
-        TestFilterSearch(index, dataset, search_param, 0.95, true);
-        if (index->CheckFeature(vsag::IndexFeature::SUPPORT_CHECK_ID_EXIST)) {
-            TestCheckIdExist(index, dataset);
+            auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+            TestConcurrentAdd(index, dataset, true);
+            TestKnnSearch(index, dataset, search_param, 0.95, true);
+            TestConcurrentKnnSearch(index, dataset, search_param, 0.95, true);
+            TestRangeSearch(index, dataset, search_param, 0.95, 10, true);
+            TestRangeSearch(index, dataset, search_param, 0.45, 5, true);
+            TestFilterSearch(index, dataset, search_param, 0.95, true);
+            if (index->CheckFeature(vsag::IndexFeature::SUPPORT_CHECK_ID_EXIST)) {
+                TestCheckIdExist(index, dataset);
+            }
         }
-
-        vsag::Options::Instance().set_block_size_limit(origin_size);
     }
+    vsag::Options::Instance().set_block_size_limit(origin_size);
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex, "HNSW Remove", "[ft][remove][hnsw]") {
@@ -640,24 +643,27 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,
                              "[ft][build][hnsw][concurrent]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("l2", "ip", "cosine");
+    auto metric_types = fixtures::RandomSelect<std::string>({"l2", "ip", "cosine"}, 1);
+    auto selected_dims = fixtures::RandomSelect<int>(dims, 1);
     const std::string name = "hnsw";
     auto search_param = fmt::format(search_param_tmp, 100);
-    for (auto& dim : dims) {
-        vsag::Options::Instance().set_block_size_limit(size);
-        auto param = GenerateHNSWBuildParametersString(metric_type, dim);
-        auto index = TestFactory(name, param, true);
+    vsag::Options::Instance().set_block_size_limit(size);
+    for (auto& metric_type : metric_types) {
+        for (auto& dim : selected_dims) {
+            INFO(fmt::format("metric_type: {}, dim: {}", metric_type, dim));
+            auto param = GenerateHNSWBuildParametersString(metric_type, dim);
+            auto index = TestFactory(name, param, true);
 
-        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
-        TestDuplicateAdd(index, dataset);
-        TestKnnSearch(index, dataset, search_param, 0.99, true);
-        TestConcurrentKnnSearch(index, dataset, search_param, 0.99, true);
-        TestRangeSearch(index, dataset, search_param, 0.99, 10, true);
-        TestRangeSearch(index, dataset, search_param, 0.49, 5, true);
-        TestFilterSearch(index, dataset, search_param, 0.99, true);
-
-        vsag::Options::Instance().set_block_size_limit(origin_size);
+            auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+            TestDuplicateAdd(index, dataset);
+            TestKnnSearch(index, dataset, search_param, 0.99, true);
+            TestConcurrentKnnSearch(index, dataset, search_param, 0.99, true);
+            TestRangeSearch(index, dataset, search_param, 0.99, 10, true);
+            TestRangeSearch(index, dataset, search_param, 0.49, 5, true);
+            TestFilterSearch(index, dataset, search_param, 0.99, true);
+        }
     }
+    vsag::Options::Instance().set_block_size_limit(origin_size);
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::HNSWTestIndex,

@@ -17,8 +17,77 @@
 #include "common.h"
 #include "hgraph.h"  // IWYU pragma: keep
 #include "hgraph_parameter.h"
+#include "quantization/rabitq_quantization/rabitq_quantizer_parameter.h"
 
 namespace vsag {
+
+namespace {
+
+void
+map_rabitq_split_param(const JsonType& external_json, JsonType& inner_json) {
+    if (not external_json.Contains(RABITQ_BITS_PER_DIM_PRECISE)) {
+        return;
+    }
+
+    CHECK_ARGUMENT(
+        external_json.Contains(RABITQ_BITS_PER_DIM_BASE),
+        fmt::format("{} requires {}", RABITQ_BITS_PER_DIM_PRECISE, RABITQ_BITS_PER_DIM_BASE));
+    CHECK_ARGUMENT(
+        external_json.Contains(HGRAPH_BASE_QUANTIZATION_TYPE),
+        fmt::format("{} requires {}", RABITQ_BITS_PER_DIM_PRECISE, HGRAPH_BASE_QUANTIZATION_TYPE));
+    CHECK_ARGUMENT(
+        external_json.Contains(HGRAPH_PRECISE_QUANTIZATION_TYPE),
+        fmt::format(
+            "{} requires {}", RABITQ_BITS_PER_DIM_PRECISE, HGRAPH_PRECISE_QUANTIZATION_TYPE));
+
+    const auto base_quantization_type = external_json[HGRAPH_BASE_QUANTIZATION_TYPE].GetString();
+    const auto precise_quantization_type =
+        external_json[HGRAPH_PRECISE_QUANTIZATION_TYPE].GetString();
+    CHECK_ARGUMENT(base_quantization_type == QUANTIZATION_TYPE_VALUE_RABITQ,
+                   fmt::format("{} requires {}={}",
+                               RABITQ_BITS_PER_DIM_PRECISE,
+                               HGRAPH_BASE_QUANTIZATION_TYPE,
+                               QUANTIZATION_TYPE_VALUE_RABITQ));
+    CHECK_ARGUMENT(precise_quantization_type == QUANTIZATION_TYPE_VALUE_RABITQ,
+                   fmt::format("{} requires {}={}",
+                               RABITQ_BITS_PER_DIM_PRECISE,
+                               HGRAPH_PRECISE_QUANTIZATION_TYPE,
+                               QUANTIZATION_TYPE_VALUE_RABITQ));
+
+    const int64_t filter_bits = external_json[RABITQ_BITS_PER_DIM_BASE].GetInt();
+    const int64_t supplement_bits = external_json[RABITQ_BITS_PER_DIM_PRECISE].GetInt();
+    CHECK_ARGUMENT(
+        filter_bits >= 1,
+        fmt::format("{} must be in [1, 8], got {}", RABITQ_BITS_PER_DIM_BASE, filter_bits));
+    CHECK_ARGUMENT(
+        filter_bits <= 8,
+        fmt::format("{} must be in [1, 8], got {}", RABITQ_BITS_PER_DIM_BASE, filter_bits));
+    CHECK_ARGUMENT(
+        supplement_bits >= 1,
+        fmt::format("{} must be in [1, 8], got {}", RABITQ_BITS_PER_DIM_PRECISE, supplement_bits));
+    CHECK_ARGUMENT(
+        supplement_bits <= 8,
+        fmt::format("{} must be in [1, 8], got {}", RABITQ_BITS_PER_DIM_PRECISE, supplement_bits));
+    const int64_t total_bits = filter_bits + supplement_bits;
+    CHECK_ARGUMENT(total_bits <= 8,
+                   fmt::format("{} + {} must be no greater than 8, got {}",
+                               RABITQ_BITS_PER_DIM_BASE,
+                               RABITQ_BITS_PER_DIM_PRECISE,
+                               total_bits));
+
+    inner_json[REORDER_SOURCE_KEY].SetString(HGRAPH_REORDER_SOURCE_BASE);
+    inner_json[BASE_CODES_KEY][CODES_TYPE_KEY].SetString(RABITQ_SPLIT_CODES);
+    inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][RABITQ_QUANTIZATION_VERSION_KEY].SetString(
+        RaBitQuantizerParameter::RABITQ_VERSION_SPLIT);
+    inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY]
+        .SetInt(32);
+    inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][RABITQ_QUANTIZATION_BITS_PER_DIM_FILTER_KEY]
+        .SetInt(filter_bits);
+    inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY]
+        .SetInt(total_bits);
+}
+
+}  // namespace
 
 JsonType
 HGraph::map_hgraph_param(const JsonType& hgraph_json) {
@@ -91,10 +160,19 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             },
         },
         {
-            HGRAPH_BASE_CODES_TYPE,
+            HGRAPH_BASE_SUPPLEMENT_IO_TYPE,
             {
                 BASE_CODES_KEY,
-                CODES_TYPE_KEY,
+                SUPPLEMENT_IO_PARAMS_KEY,
+                TYPE_KEY,
+            },
+        },
+        {
+            HGRAPH_BASE_SUPPLEMENT_FILE_PATH,
+            {
+                BASE_CODES_KEY,
+                SUPPLEMENT_IO_PARAMS_KEY,
+                IO_FILE_PATH_KEY,
             },
         },
         {
@@ -297,11 +375,11 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             },
         },
         {
-            RABITQ_VERSION,
+            RABITQ_BITS_PER_DIM_PRECISE,
             {
-                BASE_CODES_KEY,
+                PRECISE_CODES_KEY,
                 QUANTIZATION_PARAMS_KEY,
-                RABITQ_QUANTIZATION_VERSION_KEY,
+                RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY,
             },
         },
         {
@@ -467,6 +545,7 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
     std::string str = format_map(hgraph_params_template, DEFAULT_MAP);
     auto inner_json = JsonType::Parse(str);
     mapping_external_param_to_inner(hgraph_json, external_mapping, inner_json);
+    map_rabitq_split_param(hgraph_json, inner_json);
 
     return inner_json;
 }

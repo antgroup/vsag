@@ -17,6 +17,12 @@
 
 #include <cstring>
 #include <sstream>
+
+namespace {
+constexpr uint64_t FOOTER_TRAILER_SIZE = 16;
+constexpr uint64_t FOOTER_MIN_SIZE = 36;
+}  // namespace
+
 namespace vsag {
 
 void
@@ -46,10 +52,14 @@ Metadata::make_sure_metadata_not_null() {
 
 FooterPtr
 Footer::Parse(StreamReader& reader) {
+    const auto stream_length = reader.Length();
+    if (stream_length < FOOTER_MIN_SIZE) {
+        return nullptr;
+    }
     // check cigam
-    reader.PushSeek(reader.Length() - 16);
-    char buffer[16] = {};
-    reader.Read(buffer, 16);
+    reader.PushSeek(stream_length - FOOTER_TRAILER_SIZE);
+    char buffer[FOOTER_TRAILER_SIZE] = {};
+    reader.Read(buffer, FOOTER_TRAILER_SIZE);
     char cigam[9] = {};
     memcpy(cigam, buffer + 8, 8);
     logger::debug("deserial cigam: {}", cigam);
@@ -61,7 +71,7 @@ Footer::Parse(StreamReader& reader) {
     uint64_t length;
     memcpy(&length, buffer, 8);
     logger::debug("deserial length: {}", length);
-    if (length > reader.Length()) {
+    if (length < FOOTER_MIN_SIZE || length > stream_length) {
         reader.PopSeek();
         return nullptr;
     }
@@ -82,6 +92,10 @@ Footer::Parse(StreamReader& reader) {
 
     uint64_t metadata_string_length = 0;
     memcpy(&metadata_string_length, meta_buffer.data() + 8, 8);
+    if (metadata_string_length != length - FOOTER_MIN_SIZE) {
+        reader.PopSeek();
+        return nullptr;
+    }
     std::string metadata_string(meta_buffer.data() + 16, metadata_string_length);
     uint32_t checksum;
     memcpy(&checksum, meta_buffer.data() + 16 + metadata_string_length, 4);
@@ -94,7 +108,7 @@ Footer::Parse(StreamReader& reader) {
 
     auto metadata = std::make_shared<Metadata>(JsonType::Parse(metadata_string));
     auto footer = std::make_shared<Footer>(metadata);
-    footer->length_ = metadata_string.length() + /* wrapper.length= */ 36;
+    footer->length_ = metadata_string.length() + /* wrapper.length= */ FOOTER_MIN_SIZE;
     return footer;
 }
 

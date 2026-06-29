@@ -31,8 +31,7 @@ TEST_CASE("Filter search skip strategy parse", "[ut][filter_search_skip_strategy
     REQUIRE_THROWS(parse_filter_search_skip_strategy_type("unknown"));
 }
 
-TEST_CASE("Accumulative filter search skip strategy is deterministic",
-          "[ut][filter_search_skip_strategy]") {
+TEST_CASE("Accumulative ShouldVisit is deterministic", "[ut][filter_search_skip_strategy]") {
     constexpr float valid_ratio = 0.5F;
     constexpr float skip_ratio = 0.8F;
     std::vector<bool> first_sequence;
@@ -44,31 +43,39 @@ TEST_CASE("Accumulative filter search skip strategy is deterministic",
         FilterSearchSkipStrategyType::DETERMINISTIC_ACCUMULATIVE, valid_ratio, skip_ratio);
 
     for (uint64_t i = 0; i < 20; ++i) {
-        first_sequence.emplace_back(first_strategy->ShouldSkipFilterCheck());
-        second_sequence.emplace_back(second_strategy->ShouldSkipFilterCheck());
+        first_sequence.emplace_back(first_strategy->ShouldVisit());
+        second_sequence.emplace_back(second_strategy->ShouldVisit());
     }
 
     REQUIRE(first_sequence == second_sequence);
-    REQUIRE(first_sequence == std::vector<bool>{false, false, true,  false, true,  false, false,
-                                                true,  false, true,  false, false, true,  false,
-                                                true,  false, false, true,  false, true});
+    // visit_ratio = 0.5 + 0.5*0.8 = 0.9
+    // Accumulative pattern: F,T,T,T,T,T,T,T,T,T repeated = 18/20 true
+    std::vector<bool> expected = {false, true, true, true, true, true, true, true, true, true,
+                                  false, true, true, true, true, true, true, true, true, true};
+    REQUIRE(first_sequence == expected);
 }
 
-TEST_CASE("Accumulative filter search skip strategy edge cases",
-          "[ut][filter_search_skip_strategy]") {
-    SECTION("valid ratio one skips filter checks") {
+TEST_CASE("ShouldVisit edge cases", "[ut][filter_search_skip_strategy]") {
+    SECTION("valid ratio one always visits") {
         auto strategy = create_filter_search_skip_strategy(
             FilterSearchSkipStrategyType::DETERMINISTIC_ACCUMULATIVE, 1.0F, 0.8F);
         for (uint64_t i = 0; i < 10; ++i) {
-            REQUIRE(strategy->ShouldSkipFilterCheck());
+            REQUIRE(strategy->ShouldVisit());
         }
     }
 
-    SECTION("skip ratio zero skips invalid candidates") {
+    SECTION("skip ratio zero with low valid ratio visits less") {
         auto strategy = create_filter_search_skip_strategy(
             FilterSearchSkipStrategyType::DETERMINISTIC_ACCUMULATIVE, 0.5F, 0.0F);
-        for (uint64_t i = 0; i < 10; ++i) {
-            REQUIRE_FALSE(strategy->ShouldSkipFilterCheck());
+        // visit_ratio = 0.5 + 0.5*0 = 0.5
+        // Accumulative pattern: F,T,F,T,... alternating = exactly 50/100 true
+        std::vector<bool> sequence;
+        for (uint64_t i = 0; i < 20; ++i) {
+            sequence.emplace_back(strategy->ShouldVisit());
         }
+        std::vector<bool> expected = {false, true,  false, true,  false, true,  false,
+                                      true,  false, true,  false, true,  false, true,
+                                      false, true,  false, true,  false, true};
+        REQUIRE(sequence == expected);
     }
 }

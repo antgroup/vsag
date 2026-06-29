@@ -118,5 +118,4 @@ auto fast_result = index->KnnSearch(
 
 - [创建索引](../guide/create_index.md)
 - [索引参数](../resources/index_parameters.md)
-- [内存-磁盘混合索引](../advanced/hybrid_index.md)
 - [序列化格式](../advanced/serialization.md)

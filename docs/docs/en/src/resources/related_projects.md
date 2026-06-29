@@ -12,14 +12,10 @@ easier to assemble complete stacks.
 
 ## Dependencies and Inspirations
 
-- **[hnswlib](https://github.com/nmslib/hnswlib)** — the canonical HNSW implementation; VSAG's
-  HNSW interface and algorithms were influenced by it.
-- **[DiskANN](https://github.com/microsoft/DiskANN)** — Microsoft Research's large-scale on-disk
-  vector search work; VSAG's `diskann` index is based on this approach.
 - **[Faiss](https://github.com/facebookresearch/faiss)** — Meta's vector search library; VSAG
   borrows ideas in IVF and quantization.
 - **[SPANN / SPTAG](https://github.com/microsoft/SPTAG)** — Microsoft's large-scale retrieval
-  system; shaped our hybrid-index approach.
+  system; an inspiration for VSAG's large-scale search design.
 
 ## Ecosystem Tooling
 

@@ -33,7 +33,28 @@
 
 namespace vsag {
 
-// IVF index was introduced since v0.14
+/**
+ * @brief IVF: Inverted File index for dense vectors.
+ *
+ * IVF partitions the vector space into a configurable number of buckets
+ * (Voronoi cells) using a partition strategy (e.g. nearest-centroid or
+ * GNO-IMI).  Each vector is assigned to one or more buckets; at search
+ * time only the nprobe closest buckets are scanned, giving sub-linear
+ * complexity at the cost of some recall.
+ *
+ * Workflow:
+ *   1. Train() – build the partition centroids from a sample.
+ *   2. Add()   – assign incoming vectors to their bucket(s).
+ *   3. Search  – scan the nprobe nearest buckets, optionally reorder
+ *               with high-precision codes.
+ *
+ * Supports:
+ *   - Attribute-based filtering (via AttributeBucketInvertedDataCell).
+ *   - Merge of pre-built shards (Merge()).
+ *   - Reordering with a separate quantizer for better precision.
+ *
+ * @since v0.14
+ */
 class IVF : public InnerIndexInterface {
 public:
     static ParamPtr
@@ -152,13 +173,26 @@ public:
     GetMemoryUsage() const override;
 
 private:
+    /**
+     * @brief Parse the JSON search parameter string and populate an
+     *        InnerSearchParam (nprobe, ef_search, etc.).
+     */
     InnerSearchParam
     create_search_param(const std::string& parameters, const FilterPtr& filter) const;
 
+    /**
+     * @brief Scan the selected buckets and return a distance heap.
+     *
+     * @tparam mode  KNN_SEARCH or RANGE_SEARCH.
+     */
     template <InnerSearchMode mode = KNN_SEARCH>
     DistHeapPtr
     search(const DatasetPtr& query, const InnerSearchParam& param, QueryContext& ctx) const;
 
+    /**
+     * @brief Re-score the top candidates in @p input with high-precision
+     *        codes and return the final result Dataset.
+     */
     DatasetPtr
     reorder(int64_t topk,
             DistHeapPtr& input,
@@ -166,42 +200,54 @@ private:
             const InnerSearchParam& param,
             QueryContext& ctx) const;
 
+    /// Merge a single source shard into this index.
     void
     merge_one_unit(const MergeUnit& unit);
 
+    /// Validate that @p unit is compatible with this index's configuration.
     void
     check_merge_illegal(const MergeUnit& unit) const;
 
+    /// Populate location_map_ after deserialization or merge.
     void
     fill_location_map();
 
+    /**
+     * @brief Decode the packed (bucket_id, local_inner_id) pair from
+     *        location_map_[inner_id].
+     */
     std::pair<BucketIdType, InnerIdType>
     get_location(InnerIdType inner_id) const;
 
+    /// Recalculate and cache the memory-usage counter (throttled).
     void
     cal_memory_usage();
 
 private:
-    BucketInterfacePtr bucket_{nullptr};
+    BucketInterfacePtr bucket_{nullptr};  // bucket storage (raw or attribute-aware)
 
-    IVFPartitionStrategyPtr partition_strategy_{nullptr};
-    BucketIdType buckets_per_data_;
+    IVFPartitionStrategyPtr partition_strategy_{nullptr};  // centroid / partition logic
+    BucketIdType buckets_per_data_;                        // buckets each vector is assigned to
 
-    int64_t total_elements_{0};
-    bool is_trained_{false};
+    int64_t total_elements_{0};  // total inserted (incl. deleted)
+    bool is_trained_{false};     // true after Train() succeeds
 
-    FlattenInterfacePtr reorder_codes_{nullptr};
-    ReorderInterfacePtr reorder_{nullptr};
+    FlattenInterfacePtr reorder_codes_{nullptr};  // high-precision codes for reranking
+    ReorderInterfacePtr reorder_{nullptr};        // reordering engine
 
-    std::shared_ptr<SafeThreadPool> thread_pool_{nullptr};
+    std::shared_ptr<SafeThreadPool> thread_pool_{nullptr};  // for parallel bucket scans
 
+    /**
+     * Packed mapping: location_map_[inner_id] = (bucket_id << 32) | local_id.
+     * LOCATION_SPLIT_BIT controls the split position.
+     */
     Vector<uint64_t> location_map_;
 
-    static const uint64_t LOCATION_SPLIT_BIT = 32;
+    static const uint64_t LOCATION_SPLIT_BIT = 32;  // bit position of bucket/local split
 
     std::atomic<int64_t> delete_count_{0};
 
-    // last_cal_memory_element_ is used to avoid cal memory usage too frequently
+    // Throttle cal_memory_usage(): skip if element delta < interval
     int64_t last_cal_memory_element_{0};
     int64_t cal_memory_element_interval_{1024L};
 };

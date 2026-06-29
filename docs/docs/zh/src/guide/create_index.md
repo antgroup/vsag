@@ -14,8 +14,6 @@ VSAG 中所有检索能力都围绕 `Index` 接口展开。要使用某种索引
 | SINDI          | `sindi`         | [SINDI](../indexes/sindi.md)          | 稀疏向量上的倒排索引                                |
 | Pyramid        | `pyramid`       | [Pyramid](../indexes/pyramid.md)      | 多层级 / 按路径分区的索引结构                       |
 | BruteForce     | `brute_force`   | —                                     | 暴力搜索，用作基准或小数据集                        |
-| HNSW           | `hnsw`          | —                                     | 纯内存图索引（**已弃用**，新部署请改用 `hgraph`）   |
-| DiskANN        | `diskann`       | —                                     | 内存-磁盘混合索引（**已弃用**，新部署请改用 `ivf`） |
 | GNO-IMI        | `gno_imi`       | —                                     | 基于 GNO-IMI 的倒排索引变体（作为 `ivf` 的 `partition_strategy_type`）|
 
 > 完整示例可在 [`examples/cpp/`](https://github.com/antgroup/vsag/tree/main/examples/cpp) 目录中按照前缀编号依次查看（`101_` ~ `109_` 为索引类型，`2xx_` 为自定义资源，`3xx_` 为功能特性）。
@@ -28,7 +26,7 @@ VSAG 中所有检索能力都围绕 `Index` 接口展开。要使用某种索引
 - `metric_type`：距离度量方式，支持 `"l2"`、`"ip"`、`"cosine"`；
 - `dim`：向量维度，必须与后续写入的数据一致。
 
-索引特有参数以嵌套对象形式提供，例如 HNSW 的 `hnsw`、HGraph 的 `index_param`。
+索引特有参数以嵌套对象形式提供，例如 HGraph 在构建期使用 `index_param` 子对象（`hgraph` 保留给 `ef_search` 等查询期参数）。
 
 ## 示例：创建 HGraph 索引
 

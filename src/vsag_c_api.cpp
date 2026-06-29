@@ -17,6 +17,7 @@
 #include <vsag/index.h>
 #include <vsag/vsag_c_api.h>
 
+#include <algorithm>
 #include <cstring>
 #include <fstream>
 #include <streambuf>
@@ -173,6 +174,12 @@ vsag_index_knn_search(vsag_index_t index,
     try {
         auto* vsag_index = static_cast<VsagIndex*>(index);
         if (vsag_index != nullptr) {
+            if (k <= 0) {
+                Error_t err;
+                err.code = VSAG_INVALID_ARGUMENT;
+                snprintf(err.message, sizeof(err.message), "%s", "knn_search requires k >= 1");
+                return err;
+            }
             auto query_dataset = vsag::Dataset::Make();
             query_dataset->Owner(false)
                 ->Dim(static_cast<int64_t>(dim))
@@ -183,16 +190,18 @@ vsag_index_knn_search(vsag_index_t index,
                 const auto* ids_view = result.value()->GetIds();
                 const auto* dists_view = result.value()->GetDistances();
                 auto real_k = result.value()->GetDim();
-                for (int i = 0; i < real_k; ++i) {
+                int64_t to_write = std::min<int64_t>(real_k, k);
+                for (int64_t i = 0; i < to_write; ++i) {
                     search_result->ids[i] = ids_view[i];
                     search_result->dists[i] = dists_view[i];
                 }
-                search_result->count = real_k;
+                search_result->count = to_write;
             } else {
                 return make_error(result.error());
             }
+            return success;
         }
-        return success;
+        return make_error("index is NULL");
     } catch (const std::exception& e) {
         return make_error(e);
     }
@@ -223,6 +232,12 @@ vsag_index_knn_search_with_filter(vsag_index_t index,
     try {
         auto* vsag_index = static_cast<VsagIndex*>(index);
         if (vsag_index != nullptr) {
+            if (k <= 0) {
+                Error_t err;
+                err.code = VSAG_INVALID_ARGUMENT;
+                snprintf(err.message, sizeof(err.message), "%s", "knn_search requires k >= 1");
+                return err;
+            }
             auto query_dataset = vsag::Dataset::Make();
             query_dataset->Owner(false)
                 ->Dim(static_cast<int64_t>(dim))
@@ -234,16 +249,18 @@ vsag_index_knn_search_with_filter(vsag_index_t index,
                 const auto* ids_view = result.value()->GetIds();
                 const auto* dists_view = result.value()->GetDistances();
                 auto real_k = result.value()->GetDim();
-                for (int i = 0; i < real_k; ++i) {
+                int64_t to_write = std::min<int64_t>(real_k, k);
+                for (int64_t i = 0; i < to_write; ++i) {
                     search_result->ids[i] = ids_view[i];
                     search_result->dists[i] = dists_view[i];
                 }
-                search_result->count = real_k;
+                search_result->count = to_write;
             } else {
                 return make_error(result.error());
             }
+            return success;
         }
-        return success;
+        return make_error("index is NULL");
     } catch (const std::exception& e) {
         return make_error(e);
     }
@@ -254,26 +271,37 @@ vsag_index_range_search(vsag_index_t index,
                         const float* query,
                         uint64_t dim,
                         float radius,
+                        int64_t k,
                         const char* parameters,
                         SearchResult_t* search_result) {
     try {
         auto* vsag_index = static_cast<VsagIndex*>(index);
         if (vsag_index != nullptr) {
+            if (k <= 0) {
+                Error_t err;
+                err.code = VSAG_INVALID_ARGUMENT;
+                snprintf(err.message,
+                         sizeof(err.message),
+                         "%s",
+                         "range_search requires k >= 1 as result cap");
+                return err;
+            }
             auto query_dataset = vsag::Dataset::Make();
             query_dataset->Owner(false)
                 ->Dim(static_cast<int64_t>(dim))
                 ->NumElements(static_cast<int64_t>(1))
                 ->Float32Vectors(query);
-            auto result = vsag_index->index_->RangeSearch(query_dataset, radius, parameters);
+            auto result = vsag_index->index_->RangeSearch(query_dataset, radius, parameters, k);
             if (result.has_value()) {
                 const auto* ids_view = result.value()->GetIds();
                 const auto* dists_view = result.value()->GetDistances();
                 auto real_k = result.value()->GetDim();
-                for (int i = 0; i < real_k; ++i) {
+                int64_t to_write = std::min<int64_t>(real_k, k);
+                for (int64_t i = 0; i < to_write; ++i) {
                     search_result->ids[i] = ids_view[i];
                     search_result->dists[i] = dists_view[i];
                 }
-                search_result->count = real_k;
+                search_result->count = to_write;
             } else {
                 return make_error(result.error());
             }
@@ -289,12 +317,22 @@ vsag_index_range_search_with_filter(vsag_index_t index,
                                     const float* query,
                                     uint64_t dim,
                                     float radius,
+                                    int64_t k,
                                     const char* parameters,
                                     FilterFunc_t filter,
                                     SearchResult_t* search_result) {
     try {
         auto* vsag_index = static_cast<VsagIndex*>(index);
         if (vsag_index != nullptr) {
+            if (k <= 0) {
+                Error_t err;
+                err.code = VSAG_INVALID_ARGUMENT;
+                snprintf(err.message,
+                         sizeof(err.message),
+                         "%s",
+                         "range_search requires k >= 1 as result cap");
+                return err;
+            }
             auto query_dataset = vsag::Dataset::Make();
             query_dataset->Owner(false)
                 ->Dim(static_cast<int64_t>(dim))
@@ -302,16 +340,17 @@ vsag_index_range_search_with_filter(vsag_index_t index,
                 ->Float32Vectors(query);
             auto vsag_filter = std::make_shared<VsagFilterWrapper>(filter);
             auto result =
-                vsag_index->index_->RangeSearch(query_dataset, radius, parameters, vsag_filter);
+                vsag_index->index_->RangeSearch(query_dataset, radius, parameters, vsag_filter, k);
             if (result.has_value()) {
                 const auto* ids_view = result.value()->GetIds();
                 const auto* dists_view = result.value()->GetDistances();
                 auto real_k = result.value()->GetDim();
-                for (int i = 0; i < real_k; ++i) {
+                int64_t to_write = std::min<int64_t>(real_k, k);
+                for (int64_t i = 0; i < to_write; ++i) {
                     search_result->ids[i] = ids_view[i];
                     search_result->dists[i] = dists_view[i];
                 }
-                search_result->count = real_k;
+                search_result->count = to_write;
             } else {
                 return make_error(result.error());
             }
@@ -496,6 +535,9 @@ vsag_serialize_file(vsag_index_t index, const char* file_path) {
         auto* vsag_index = static_cast<VsagIndex*>(index);
         if (vsag_index != nullptr) {
             std::ofstream file(file_path, std::ios::binary);
+            if (!file.is_open()) {
+                return make_error("failed to open file for writing: " + std::string(file_path));
+            }
             auto serialize_result = vsag_index->index_->Serialize(file);
             file.close();
             VSAG_CHECK_RESULT(serialize_result);
@@ -512,6 +554,15 @@ vsag_deserialize_file(vsag_index_t index, const char* file_path) {
         auto* vsag_index = static_cast<VsagIndex*>(index);
         if (vsag_index != nullptr) {
             std::ifstream file(file_path, std::ios::binary);
+            if (!file.is_open()) {
+                Error_t err;
+                err.code = VSAG_MISSING_FILE;
+                snprintf(err.message,
+                         sizeof(err.message),
+                         "failed to open file for reading: %s",
+                         file_path);
+                return err;
+            }
             auto deserialize_result = vsag_index->index_->Deserialize(file);
             file.close();
             VSAG_CHECK_RESULT(deserialize_result);

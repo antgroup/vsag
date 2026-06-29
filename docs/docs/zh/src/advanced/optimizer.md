@@ -1,6 +1,6 @@
 # 优化器（Tune）
 
-对于图类索引（HNSW、HGraph），VSAG 提供 `Tune` 接口，根据给定查询集自动调整运行期参数以在**召回率**
+对于图类索引（HGraph），VSAG 提供 `Tune` 接口，根据给定查询集自动调整运行期参数以在**召回率**
 与**延迟**之间取得更好的权衡。其底层实现即历史版本中的 ELP Optimizer。
 
 ## 基本用法
@@ -32,9 +32,7 @@ auto ret = index->Tune(tune_params);
 
 | 索引类型 | 支持 Tune |
 |---------|----------|
-| hnsw | 是 |
 | hgraph | 是 |
-| diskann | 部分参数 |
 | ivf / sindi / brute_force | 否 |
 
 ## 示例

@@ -42,7 +42,7 @@ evaluation, ground-truth checks, or computing pairwise distances to a known shor
 Two overloads are provided:
 
 ```cpp
-// Dense vector indexes (HGraph, BruteForce, IVF, DiskANN, HNSW)
+// Dense vector indexes (HGraph, BruteForce, IVF)
 auto r = index->CalDistanceById(query_ptr, ids, count, /*calculate_precise_distance=*/true);
 
 // Sparse vector indexes (SINDI, SparseIndex) — wrap the query in a Dataset
@@ -75,8 +75,7 @@ Support is index-dependent — there is no dedicated `SUPPORT_*` flag for these 
 `Index` base class throws `std::runtime_error("Index doesn't support ...")` by default
 (`GetIndexDetailInfos` and `GetDetailDataByName` in `include/vsag/index.h:658,674`);
 HGraph / IVF / BruteForce / Pyramid / SINDI / WARP implement them through
-`InnerIndexInterface`, while `HNSW` only overrides `GetDetailDataByName` and DiskANN does not
-override either. Always handle the `tl::expected` error path when calling these APIs.
+`InnerIndexInterface`. Always handle the `tl::expected` error path when calling these APIs.
 
 ```cpp
 auto infos = index->GetIndexDetailInfos().value();

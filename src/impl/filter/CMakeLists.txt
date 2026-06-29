@@ -23,6 +23,8 @@ set (FILTER_SRC
         white_list_filter.h
         white_list_filter.cpp
         combined_filter.h
+        iterator_filter.h
+        iterator_filter.cpp
 )
 add_library (filter OBJECT ${FILTER_SRC})
 target_link_libraries (filter PRIVATE coverage_config vsag_src_common)

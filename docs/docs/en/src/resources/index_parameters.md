@@ -5,7 +5,7 @@ enumeration, consult the source:
 
 - Build parameter keys: `src/constants.cpp`
 - Public constants: `include/vsag/constants.h`
-- Per-index examples: `examples/cpp/101_index_hnsw.cpp` and friends.
+- Per-index examples: the `examples/cpp/*_index_*.cpp` files (e.g. `103_index_hgraph.cpp`).
 
 ## Common Fields
 
@@ -16,36 +16,6 @@ Every index requires these top-level fields at build time:
 | `dim` | positive integer | Vector dimensionality; cannot change after build |
 | `dtype` | `float32` / `fp16` / `bf16` / `int8` | Vector data type; determines internal representation |
 | `metric_type` | `l2` / `ip` / `cosine` | Distance metric |
-
-## HNSW
-
-HNSW uses the `hnsw` sub-object for build parameters. It does not accept HGraph-only keys
-such as `base_quantization_type`.
-
-```json
-{
-    "dim": 128,
-    "dtype": "float32",
-    "metric_type": "l2",
-    "hnsw": {
-        "max_degree": 32,
-        "ef_construction": 400,
-        "use_conjugate_graph": false
-    }
-}
-```
-
-| Field | Typical | Description |
-|-------|---------|-------------|
-| `max_degree` | 16–48 | Maximum out-degree per node |
-| `ef_construction` | 200–500 | Candidate set size during build; larger = higher recall, slower build |
-| `use_conjugate_graph` | bool | Build the [conjugate graph](../advanced/enhance_graph.md) |
-
-At search time:
-
-```json
-{"hnsw": {"ef_search": 100, "use_conjugate_graph_search": false}}
-```
 
 ## HGraph
 
@@ -83,20 +53,6 @@ filter whose `ValidRatio()` is at most this threshold, HGraph skips the graph
 traversal and runs an exact scan over the surviving ids. See the
 [HGraph index page](../indexes/hgraph.md#brute-force-fallback-under-highly-selective-filters-brute_force_threshold)
 for details.
-
-## DiskANN
-
-```json
-{
-    "diskann": {
-        "max_degree": 32,
-        "ef_construction": 400,
-        "pq_sample_rate": 0.1,
-        "pq_dims": 32,
-        "use_async_io": true
-    }
-}
-```
 
 ## IVF
 

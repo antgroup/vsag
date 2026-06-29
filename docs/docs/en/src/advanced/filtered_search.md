@@ -16,9 +16,6 @@ For attribute / "hybrid" search where the predicate is an SQL-like expression ov
 fields, see [Attribute Filter (Hybrid Search)](attribute_filter.md). For filtering against an
 opaque per-vector byte payload during graph traversal, see [Extra Info](extra_info.md).
 
-> Note: this page is unrelated to the [Memory + Disk Hybrid Index](hybrid_index.md), which
-> is about DiskANN's storage layout, not search-time filtering.
-
 ## Truth-value Conventions
 
 The three APIs disagree on how to spell "exclude this id". Read this table carefully before
@@ -154,10 +151,8 @@ which is what runtime feature checks return.
 | Index        | `_KNN_SEARCH_WITH_ID_FILTER` | `_RANGE_SEARCH_WITH_ID_FILTER` | `_KNN_ITERATOR_FILTER_SEARCH` |
 |--------------|:----------------------------:|:------------------------------:|:-----------------------------:|
 | HGraph       |              Yes             |               Yes              |              Yes              |
-| HNSW         |              Yes             |               Yes              |              Yes              |
 | IVF          |              Yes             |               Yes              |               —               |
 | BruteForce   |              Yes             |               Yes              |               —               |
-| DiskANN      |              Yes             |               Yes              |               —               |
 | Pyramid      |              Yes             |               Yes              |               —               |
 | SINDI / WARP |              Yes             |               Yes              |               —               |
 
@@ -210,7 +205,7 @@ See [Attribute Filter](attribute_filter.md) for the `attribute_filter_str_` fiel
 ## Examples
 
 - C++: [`examples/cpp/301_feature_filter.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/301_feature_filter.cpp)
-  — bitset, function, and `Filter`-object styles on HNSW.
+  — bitset, function, and `Filter`-object styles.
 - C++: [`examples/cpp/320_feature_extra_info.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/320_feature_extra_info.cpp)
   — in-graph filtering using the `CheckValid(const char*)` byte-buffer overload.
 

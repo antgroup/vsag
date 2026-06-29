@@ -142,9 +142,22 @@ The legacy switch **`USE_SYSTEM_OPENBLAS`** (default: `OFF`) is kept as a deprec
 
 ### Third-Party Source Overrides
 
-- **`VSAG_THIRDPARTY_OPENBLAS`**
+VSAG downloads its third-party libraries at configure/build time. Each
+downloaded dependency honors a `VSAG_THIRDPARTY_<LIB>` **environment variable**
+that, when set, is tried before the upstream URL and the project's Aliyun OSS
+mirror. The value may be a local filesystem path or any URL (internal HTTP
+server, OSS bucket, etc.), which makes it the primary mechanism for offline,
+air-gapped, or internal-mirror builds.
+
+- **`VSAG_THIRDPARTY_OPENBLAS`** (representative example)
   - Override the OpenBLAS source archive URL/path used by `ExternalProject_Add`
   - Useful for offline builds, local mirrors, or pre-downloaded archives
+
+The full list of variables (`VSAG_THIRDPARTY_ANTLR4`, `VSAG_THIRDPARTY_BOOST`,
+`VSAG_THIRDPARTY_FMT`, …), usage examples, and the exact archives to mirror are
+documented in the [Offline / Air-gapped Builds](docs/docs/en/src/development/offline_build.md)
+guide. The note next to each `URL_HASH` in `extern/<lib>/<lib>.cmake` is the
+source of truth for the exact upstream URL and expected checksum.
 
 ### Other Build Options
 

@@ -11,9 +11,9 @@ VSAG 使用 C++ 编写，并提供：
 
 ## 主要特性
 
-- **低内存占用**：通过量化（RaBitQ、PQ、SQ4/SQ8）与内存-磁盘混合索引降低使用成本；
+- **低内存占用**：通过量化（RaBitQ、PQ、SQ4/SQ8）降低使用成本；
 - **高性能检索**：针对 x86_64（SSE/AVX/AVX2/AVX512/AMX）和 ARM（Neon/SVE）做了指令集适配；
-- **丰富的索引类型**：HGraph、HNSW、DiskANN、IVF、Pyramid、BruteForce、SINDI（稀疏）等；
+- **丰富的索引类型**：HGraph、IVF、Pyramid、BruteForce、SINDI（稀疏）等；
 - **灵活的过滤与混合搜索**：支持 bitmap 与 callback 两种过滤方式，以及混合 `(data vector, attribute)` 查询；
 - **易于集成**：提供基于 CMake 的集成方式，详见 [README](https://github.com/antgroup/vsag/blob/main/README.md#integrate-with-cmake)。
 

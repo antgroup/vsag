@@ -1,7 +1,7 @@
 # HGraph
 
-HGraph 是 VSAG 的旗舰 **图索引**。它构建的是与 HNSW 思路类似的多层近邻图，但在此基础上
-提供了更丰富的量化方案、统一的构建参数 schema（`index_param`），并原生支持精排（reorder）、
+HGraph 是 VSAG 的旗舰 **图索引**。它构建的是多层近邻图，
+提供了丰富的量化方案、统一的构建参数 schema（`index_param`），并原生支持精排（reorder）、
 增量更新、删除、以及基于 ELP 的运行时自动调优。
 
 对于大多数稠密向量场景（文本 / 图像 / 多模态 embedding，维度 64–4096，规模从数千到数亿），
@@ -191,7 +191,8 @@ base->NumElements(num_vectors)->Dim(dim)->Ids(ids)
 | `ef_search` | int | —（必填） | 搜索前沿候选集的大小，越大召回越高、查询越慢。 |
 | `hops_limit` | int | 不限 | beam search 在返回当前前沿前允许的最大跳数。 |
 | `brute_force_threshold` | float | `0.0` | 选择率感知的暴搜回退开关。当取值 `> 0` 且当前 filter 的 `ValidRatio()` 小于等于 `brute_force_threshold` 时，搜索会**完全跳过图遍历**，直接在通过过滤的 id 上用最佳精度的 flatten 编码做一次暴力扫描（细节见下一节）。取值范围 `[0.0, 1.0]`；默认 `0.0` 表示关闭，保持原有行为。 |
-| `rabitq_one_bit_search` | bool | `false` | RabitQ 一比特搜索路径，详见[量化章节](../quantization/README.md)。 |
+| `rabitq_one_bit_search` | bool | `false` | 启用 RaBitQ filter/lower-bound 路径；对 x+y split 索引会使用全部 x 个 filter bits，详见 [RaBitQ x+y Split](../quantization/rabitq_split.md)。 |
+| `rabitq_error_rate` | float | 索引默认值 | 本次搜索使用的正数 lower-bound 误差倍率；调整它不需要重建 split 索引。 |
 
 ```cpp
 auto result = index->KnnSearch(
