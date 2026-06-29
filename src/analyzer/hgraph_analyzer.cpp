@@ -56,7 +56,7 @@ HGraphAnalyzer::select_precise_codes() const {
     if (hgraph_->create_new_raw_vector_ and hgraph_->raw_vector_ != nullptr) {
         codes = hgraph_->raw_vector_;
     }
-    return codes;
+    return codes == nullptr ? hgraph_->basic_flatten_codes_ : codes;
 }
 
 Vector<int64_t>
@@ -277,6 +277,7 @@ HGraphAnalyzer::calculate_quantization_result(
     float total_quantization_error = 0.0F;
     float total_quantization_inversion_count_rate = 0.0F;
     uint32_t valid_sample_count = 0;
+    uint32_t valid_inversion_sample_count = 0;
     for (int i = 0; i < sample_size; ++i) {
         auto id = sample_ids[i];
         const auto& result = search_result.at(id);
@@ -284,13 +285,18 @@ HGraphAnalyzer::calculate_quantization_result(
         if (actual_topk == 0) {
             continue;
         }
+        const auto* query = sample_datas.data() + static_cast<uint64_t>(i) * dim_;
         float sample_error = 0.0F;
-        auto base_result =
-            hgraph_->CalDistanceById(sample_datas.data() + i, result.data(), actual_topk, false);
+        auto base_result = hgraph_->CalDistanceById(query, result.data(), actual_topk, false);
+        auto precise_result = hgraph_->CalDistanceById(query, result.data(), actual_topk, true);
+        if (base_result == nullptr or precise_result == nullptr) {
+            continue;
+        }
         const auto* base_distance = base_result->GetDistances();
-        auto precise_result =
-            hgraph_->CalDistanceById(sample_datas.data() + i, result.data(), actual_topk, true);
         const auto* precise_distance = precise_result->GetDistances();
+        if (base_distance == nullptr or precise_distance == nullptr) {
+            continue;
+        }
         uint32_t inversion_count = 0;
         for (uint32_t j = 0; j < actual_topk; ++j) {
             sample_error += std::abs(base_distance[j] - precise_distance[j]);
@@ -307,14 +313,19 @@ HGraphAnalyzer::calculate_quantization_result(
             total_quantization_inversion_count_rate +=
                 static_cast<float>(inversion_count) /
                 (static_cast<float>(actual_topk) * static_cast<float>(actual_topk - 1) / 2.0F);
+            valid_inversion_sample_count++;
         }
         valid_sample_count++;
     }
     if (valid_sample_count == 0) {
         return {0.0F, 0.0F};
     }
+    const float avg_inversion_count_rate =
+        valid_inversion_sample_count == 0 ? 0.0F
+                                          : total_quantization_inversion_count_rate /
+                                                static_cast<float>(valid_inversion_sample_count);
     return {total_quantization_error / static_cast<float>(valid_sample_count),
-            total_quantization_inversion_count_rate / static_cast<float>(valid_sample_count)};
+            avg_inversion_count_rate};
 }
 
 float
