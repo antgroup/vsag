@@ -27,7 +27,7 @@ constexpr const char* RANDOM_SKIP_STRATEGY = "random";
 constexpr const char* DETERMINISTIC_ACCUMULATIVE_SKIP_STRATEGY = "deterministic_accumulative";
 
 double
-get_skip_check_probability(float valid_ratio, float skip_ratio) {
+get_retain_ratio(float valid_ratio, float skip_ratio) {
     if (valid_ratio == 1.0F) {
         return 1.0;
     }
@@ -38,35 +38,28 @@ get_skip_check_probability(float valid_ratio, float skip_ratio) {
 
 class RandomFilterSearchSkipStrategy : public FilterSearchSkipStrategy {
 public:
-    explicit RandomFilterSearchSkipStrategy(double retain_ratio)
-        : skip_threshold_(1.0 - retain_ratio) {
+    explicit RandomFilterSearchSkipStrategy(double visit_ratio)
+        : visit_threshold_(1.0 - visit_ratio) {
     }
 
     bool
-    ShouldSkipFilterCheck() override {
-        if (skip_threshold_ <= 0.0) {
-            return true;
-        }
-        if (skip_threshold_ >= 1.0) {
-            return false;
-        }
-        return generator_.NextFloat() > skip_threshold_;
+    ShouldVisit() override {
+        return generator_.NextFloat() > visit_threshold_;
     }
 
 private:
     LinearCongruentialGenerator generator_;
-    double skip_threshold_{0.0};
+    double visit_threshold_{0.0};
 };
 
 class AccumulativeFilterSearchSkipStrategy : public FilterSearchSkipStrategy {
 public:
-    explicit AccumulativeFilterSearchSkipStrategy(double retain_ratio)
-        : retain_ratio_(retain_ratio) {
+    explicit AccumulativeFilterSearchSkipStrategy(double visit_ratio) : visit_ratio_(visit_ratio) {
     }
 
     bool
-    ShouldSkipFilterCheck() override {
-        accumulative_alpha_ += retain_ratio_;
+    ShouldVisit() override {
+        accumulative_alpha_ += visit_ratio_;
         if (accumulative_alpha_ >= 1.0) {
             accumulative_alpha_ = std::fmod(accumulative_alpha_, 1.0);
             return true;
@@ -75,7 +68,7 @@ public:
     }
 
 private:
-    double retain_ratio_{1.0};
+    double visit_ratio_{1.0};
     double accumulative_alpha_{0.0};
 };
 
@@ -85,12 +78,15 @@ FilterSearchSkipStrategyPtr
 create_filter_search_skip_strategy(FilterSearchSkipStrategyType type,
                                    float valid_ratio,
                                    float skip_ratio) {
-    auto retain_ratio = get_skip_check_probability(valid_ratio, skip_ratio);
+    auto retain_ratio = get_retain_ratio(valid_ratio, skip_ratio);
+    // visit_ratio = valid_ratio + retain_ratio, capped at 1.0
+    // When valid_ratio is high, we visit most neighbors; when low, visit_ratio depends on skip_ratio
+    auto visit_ratio = std::min(1.0, static_cast<double>(valid_ratio) + retain_ratio);
     switch (type) {
         case FilterSearchSkipStrategyType::RANDOM:
-            return std::make_unique<RandomFilterSearchSkipStrategy>(retain_ratio);
+            return std::make_unique<RandomFilterSearchSkipStrategy>(visit_ratio);
         case FilterSearchSkipStrategyType::DETERMINISTIC_ACCUMULATIVE:
-            return std::make_unique<AccumulativeFilterSearchSkipStrategy>(retain_ratio);
+            return std::make_unique<AccumulativeFilterSearchSkipStrategy>(visit_ratio);
     }
     throw VsagException(ErrorType::INVALID_ARGUMENT, "Unknown FilterSearchSkipStrategyType");
 }
