@@ -55,12 +55,15 @@ BasicSearcher::visit(const GraphInterfacePtr& graph,
             vl->Prefetch(neighbors[i + prefetch_stride_visit_]);
         }
         if (not vl->Get(neighbors[i])) {
-            if (not filter || count_no_visited == 0 || skip_strategy->ShouldSkipFilterCheck() ||
-                filter->CheckValid(neighbors[i])) {
+            vl->Set(neighbors[i]);
+            // Removed filter->CheckValid() to eliminate duplicate filter checking.
+            // Filter is applied at result-collection stage.
+            // ShouldVisit() probabilistically gates traversal to preserve graph connectivity.
+            if (not filter || count_no_visited == 0 || skip_strategy == nullptr ||
+                skip_strategy->ShouldVisit()) {
                 to_be_visited_id[count_no_visited] = neighbors[i];
                 count_no_visited++;
             }
-            vl->Set(neighbors[i]);
         }
     }
     return count_no_visited;

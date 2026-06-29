@@ -28,8 +28,11 @@ class FilterSearchSkipStrategy {
 public:
     virtual ~FilterSearchSkipStrategy() = default;
 
+    // Probabilistic gate for visiting neighbors during graph traversal.
+    // visit_ratio = valid_ratio + (1 - valid_ratio) * skip_ratio
+    // This ensures we visit more neighbors when most pass the filter.
     virtual bool
-    ShouldSkipFilterCheck() = 0;
+    ShouldVisit() = 0;
 };
 
 using FilterSearchSkipStrategyPtr = std::unique_ptr<FilterSearchSkipStrategy>;
