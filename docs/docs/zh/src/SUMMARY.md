@@ -70,6 +70,7 @@
 
 # 资源
 
+- [FAQ 常见问题](resources/faq.md)
 - [版本日志](resources/release_notes.md)
 - [路线图](resources/roadmap_2025.md)
 - [开源社区](resources/community.md)

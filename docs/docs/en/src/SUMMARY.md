@@ -70,6 +70,7 @@
 
 # Resources
 
+- [FAQ](resources/faq.md)
 - [Release Notes](resources/release_notes.md)
 - [Roadmap](resources/roadmap_2025.md)
 - [Community](resources/community.md)
