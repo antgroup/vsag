@@ -58,7 +58,7 @@ public:
     LazyHGraph(const ParamPtr& param, const IndexCommonParam& common_param);
 
     std::vector<int64_t>
-    Add(const DatasetPtr& data, AddMode mode = AddMode::DEFAULT) override;
+    Add(const DatasetPtr& data) override;
 
     std::vector<int64_t>
     Build(const DatasetPtr& data) override;

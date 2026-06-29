@@ -227,7 +227,7 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
 }
 
 std::vector<int64_t>
-HGraph::Add(const DatasetPtr& data, AddMode mode) {
+HGraph::Add(const DatasetPtr& data) {
     std::shared_lock<std::shared_mutex> force_remove_rlock;
     if (this->support_force_remove()) {
         force_remove_rlock = std::shared_lock<std::shared_mutex>(this->force_remove_mutex_);

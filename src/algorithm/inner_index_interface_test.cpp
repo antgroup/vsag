@@ -89,7 +89,7 @@ public:
     }
 
     std::vector<int64_t>
-    Add(const DatasetPtr& base, AddMode mode) override {
+    Add(const DatasetPtr& base) override {
         return {};
     }
 

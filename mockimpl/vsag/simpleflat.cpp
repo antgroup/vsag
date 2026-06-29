@@ -69,7 +69,7 @@ SimpleFlat::Build(const DatasetPtr& base) {
 }
 
 tl::expected<std::vector<int64_t>, Error>
-SimpleFlat::Add(const DatasetPtr& base, AddMode mode) {
+SimpleFlat::Add(const DatasetPtr& base) {
     std::vector<int64_t> failed_ids;
     if (not this->data_.empty()) {
         if (this->dim_ != base->GetDim()) {

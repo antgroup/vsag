@@ -521,7 +521,7 @@ Pyramid::ExportModel(const IndexCommonParam& param) const {
 }
 
 std::vector<int64_t>
-Pyramid::Add(const DatasetPtr& base, AddMode mode) {
+Pyramid::Add(const DatasetPtr& base) {
     int64_t data_num = base->GetNumElements();
     const auto* data_vectors = base->GetFloat32Vectors();
     const auto* data_ids = base->GetIds();

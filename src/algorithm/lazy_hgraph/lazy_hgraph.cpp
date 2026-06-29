@@ -161,17 +161,17 @@ LazyHGraph::Build(const DatasetPtr& data) {
 }
 
 std::vector<int64_t>
-LazyHGraph::Add(const DatasetPtr& data, AddMode mode) {
+LazyHGraph::Add(const DatasetPtr& data) {
     std::vector<int64_t> failed_ids;
     bool need_transition = false;
     {
         std::shared_lock lock(this->phase_mutex_);
         if (phase_.load(std::memory_order_acquire) == Phase::FLAT) {
-            failed_ids = flat_index_->Add(data, mode);
+            failed_ids = flat_index_->Add(data);
             need_transition =
                 static_cast<uint64_t>(flat_index_->GetNumElements()) >= transition_threshold_;
         } else {
-            failed_ids = graph_index_->Add(data, mode);
+            failed_ids = graph_index_->Add(data);
         }
     }
     if (need_transition) {

@@ -1016,7 +1016,7 @@ TEST_CASE("extract/set data and graph", "[ut][hnsw]") {
         ->Ids(ids.data() + num_elements / 2)
         ->Float32Vectors(vectors.data() + num_elements / 2 * dim)
         ->Owner(false);
-    another_index->Add(dataset, AddMode::DEFAULT);
+    another_index->Add(dataset);
 
     JsonType search_parameters;
 

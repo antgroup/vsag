@@ -74,14 +74,6 @@ using OffsetType = uint64_t;
 using SizeType = uint64_t;
 using WriteFuncType = std::function<void(OffsetType, SizeType, const void*)>;
 
-enum class AddMode {
-    /** try to reuse the memory of the deleted vector, no recovery check */
-    DEFAULT = 0,
-
-    /** always allocate new memory for the vector, but also check whether recovery from the same id */
-    KEEP_TOMBSTONE = 1,
-};
-
 enum class RemoveMode {
     /** mark the vector as deleted, but not remove it from index, no shrink and repair,
         * this mode is fast */
@@ -167,7 +159,7 @@ public:
       * @return IDs that failed to insert into the index
       */
     [[nodiscard]] virtual tl::expected<std::vector<int64_t>, Error>
-    Add(const DatasetPtr& base, AddMode mode = AddMode::DEFAULT) {
+    Add(const DatasetPtr& base) {
         return tl::unexpected(
             Error(ErrorType::UNSUPPORTED_INDEX_OPERATION, "Index does not support adding vectors"));
     }

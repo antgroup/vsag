@@ -71,7 +71,7 @@ public:
     ~HGraph() override = default;
 
     std::vector<int64_t>
-    Add(const DatasetPtr& data, AddMode mode = AddMode::DEFAULT) override;
+    Add(const DatasetPtr& data) override;
 
     std::string
     AnalyzeIndexBySearch(const SearchRequest& request) override;

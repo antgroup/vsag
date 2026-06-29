@@ -185,7 +185,7 @@ BruteForce::add_multi_vector(const DatasetPtr& data) {
 }
 
 std::vector<int64_t>
-BruteForce::Add(const DatasetPtr& data, AddMode mode) {
+BruteForce::Add(const DatasetPtr& data) {
     if (is_multi_vector_) {
         return this->add_multi_vector(data);
     }

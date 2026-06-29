@@ -70,10 +70,10 @@ public:
 
 public:
     tl::expected<std::vector<int64_t>, Error>
-    Add(const DatasetPtr& base, AddMode mode = AddMode::DEFAULT) override {
+    Add(const DatasetPtr& base) override {
         CHECK_IMMUTABLE_INDEX("add");
         CHECK_NONEMPTY_DATASET(base);
-        SAFE_CALL(return this->inner_index_->Add(base, mode));
+        SAFE_CALL(return this->inner_index_->Add(base));
     }
 
     std::string

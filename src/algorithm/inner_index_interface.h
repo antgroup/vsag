@@ -62,7 +62,7 @@ public:
     FastCreateIndex(const std::string& index_fast_str, const IndexCommonParam& common_param);
 
     virtual std::vector<int64_t>
-    Add(const DatasetPtr& base, AddMode mode = AddMode::DEFAULT) = 0;
+    Add(const DatasetPtr& base) = 0;
 
     virtual std::string
     AnalyzeIndexBySearch(const SearchRequest& request) {

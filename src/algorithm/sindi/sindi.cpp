@@ -86,7 +86,7 @@ SINDI::AnalyzeIndexBySearch(const SearchRequest& request) {
 }
 
 std::vector<int64_t>
-SINDI::Add(const DatasetPtr& base, AddMode mode) {
+SINDI::Add(const DatasetPtr& base) {
     std::scoped_lock wlock(this->global_mutex_);
     std::vector<int64_t> failed_ids;
 

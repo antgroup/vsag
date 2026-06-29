@@ -376,7 +376,7 @@ IVF::Train(const DatasetPtr& data) {
 }
 
 std::vector<int64_t>
-IVF::Add(const DatasetPtr& base, AddMode mode) {
+IVF::Add(const DatasetPtr& base) {
     // TODO(LHT): duplicate
     if (not partition_strategy_->is_trained_) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "ivf index add without train error");

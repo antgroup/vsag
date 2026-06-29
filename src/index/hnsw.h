@@ -87,8 +87,7 @@ public:
     }
 
     tl::expected<std::vector<int64_t>, Error>
-    Add(const DatasetPtr& base, AddMode mode = AddMode::DEFAULT) override {
-        // TODO(LHT): HNSW only support KEEP_TOMBSTONE mode
+    Add(const DatasetPtr& base) override {
         SAFE_CALL(return this->add(base));
     }
 
