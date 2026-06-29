@@ -49,6 +49,16 @@ mark_duplicate_ids(const GraphInterfacePtr& graph,
 
 }  // namespace
 
+FlattenInterfacePtr
+HGraphAnalyzer::select_precise_codes() const {
+    auto codes = hgraph_->has_precise_reorder() ? hgraph_->high_precise_codes_
+                                                : hgraph_->basic_flatten_codes_;
+    if (hgraph_->create_new_raw_vector_ and hgraph_->raw_vector_ != nullptr) {
+        codes = hgraph_->raw_vector_;
+    }
+    return codes;
+}
+
 Vector<int64_t>
 HGraphAnalyzer::GetComponentCount() {
     // graph connection
@@ -173,7 +183,7 @@ HGraphAnalyzer::GetDuplicateRatio() {
 
     // Sieve method: progressively filter candidate duplicate groups
     calculate_base_groundtruth();
-    auto codes = hgraph_->reorder_ ? hgraph_->high_precise_codes_ : hgraph_->basic_flatten_codes_;
+    auto codes = select_precise_codes();
     constexpr float epsilon = 2e-6F;
 
     // Initialize with all vectors as a single group
@@ -266,20 +276,25 @@ HGraphAnalyzer::calculate_quantization_result(
     uint32_t sample_size) {
     float total_quantization_error = 0.0F;
     float total_quantization_inversion_count_rate = 0.0F;
+    uint32_t valid_sample_count = 0;
     for (int i = 0; i < sample_size; ++i) {
         auto id = sample_ids[i];
         const auto& result = search_result.at(id);
+        const auto actual_topk = std::min<uint32_t>(topk_, result.size());
+        if (actual_topk == 0) {
+            continue;
+        }
         float sample_error = 0.0F;
         auto base_result =
-            hgraph_->CalDistanceById(sample_datas.data() + i, result.data(), topk_, false);
+            hgraph_->CalDistanceById(sample_datas.data() + i, result.data(), actual_topk, false);
         const auto* base_distance = base_result->GetDistances();
         auto precise_result =
-            hgraph_->CalDistanceById(sample_datas.data() + i, result.data(), topk_, true);
+            hgraph_->CalDistanceById(sample_datas.data() + i, result.data(), actual_topk, true);
         const auto* precise_distance = precise_result->GetDistances();
         uint32_t inversion_count = 0;
-        for (uint32_t j = 0; j < topk_; ++j) {
+        for (uint32_t j = 0; j < actual_topk; ++j) {
             sample_error += std::abs(base_distance[j] - precise_distance[j]);
-            for (uint32_t k = j + 1; k < topk_; ++k) {
+            for (uint32_t k = j + 1; k < actual_topk; ++k) {
                 if ((base_distance[j] - base_distance[k]) *
                         (precise_distance[j] - precise_distance[k]) <
                     0) {
@@ -287,13 +302,19 @@ HGraphAnalyzer::calculate_quantization_result(
                 }
             }
         }
-        total_quantization_error += sample_error / static_cast<float>(topk_);
-        total_quantization_inversion_count_rate +=
-            static_cast<float>(inversion_count) /
-            (static_cast<float>(topk_) * static_cast<float>(topk_ - 1) / 2.0F);
+        total_quantization_error += sample_error / static_cast<float>(actual_topk);
+        if (actual_topk > 1) {
+            total_quantization_inversion_count_rate +=
+                static_cast<float>(inversion_count) /
+                (static_cast<float>(actual_topk) * static_cast<float>(actual_topk - 1) / 2.0F);
+        }
+        valid_sample_count++;
     }
-    return {total_quantization_error / static_cast<float>(sample_size),
-            total_quantization_inversion_count_rate / static_cast<float>(sample_size)};
+    if (valid_sample_count == 0) {
+        return {0.0F, 0.0F};
+    }
+    return {total_quantization_error / static_cast<float>(valid_sample_count),
+            total_quantization_inversion_count_rate / static_cast<float>(valid_sample_count)};
 }
 
 float
@@ -341,7 +362,7 @@ HGraphAnalyzer::calculate_groundtruth(const Vector<float>& sample_datas,
     Vector<float> distances_array(this->total_count_, allocator_);
     Vector<InnerIdType> ids_array(this->total_count_, allocator_);
     std::iota(ids_array.begin(), ids_array.end(), 0);
-    auto codes = hgraph_->reorder_ ? hgraph_->high_precise_codes_ : hgraph_->basic_flatten_codes_;
+    auto codes = select_precise_codes();
     for (uint64_t i = 0; i < sample_size; ++i) {
         if (i % 10 == 0) {
             logger::info("calculate groundtruth for sample {} of {}", i, i + 10);
