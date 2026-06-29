@@ -287,6 +287,8 @@ HGraph::brute_force_search(const void* query,
                            const FilterPtr& filter,
                            int64_t topk,
                            float radius,
+                           bool consider_duplicate,
+                           int64_t max_duplicates_per_group,
                            QueryContext* ctx) const {
     Allocator* alloc = (ctx != nullptr && ctx->alloc != nullptr) ? ctx->alloc : this->allocator_;
 
@@ -314,6 +316,29 @@ HGraph::brute_force_search(const void* query,
     }
 
     auto computer = flatten->FactoryComputer(query);
+    const bool need_limit_duplicate = this->support_duplicate_ && bottom_graph_ != nullptr &&
+                                      (not consider_duplicate || max_duplicates_per_group >= 0);
+    UnorderedMap<InnerIdType, int64_t> duplicate_counts(alloc);
+    auto should_push_result = [&](InnerIdType inner_id) {
+        if (not need_limit_duplicate) {
+            return true;
+        }
+
+        const auto group_id = bottom_graph_->GetGroupId(inner_id);
+        if (group_id == inner_id) {
+            return true;
+        }
+        if (not consider_duplicate || max_duplicates_per_group == 0) {
+            return false;
+        }
+
+        auto& duplicate_count = duplicate_counts[group_id];
+        if (duplicate_count >= max_duplicates_per_group) {
+            return false;
+        }
+        ++duplicate_count;
+        return true;
+    };
 
     constexpr InnerIdType brute_force_batch_size = 64;
     Vector<InnerIdType> batch_ids(brute_force_batch_size, alloc);
@@ -335,6 +360,9 @@ HGraph::brute_force_search(const void* query,
         for (InnerIdType i = 0; i < batch_count; ++i) {
             float dist = batch_dists[i];
             InnerIdType inner_id = batch_ids[i];
+            if (not should_push_result(inner_id)) {
+                continue;
+            }
             if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
                 if (dist <= radius) {
                     result->Push(dist, inner_id);
@@ -398,7 +426,8 @@ HGraph::RangeSearch(const DatasetPtr& query,
     search_param.is_inner_id_allowed = ft;
     search_param.radius = radius;
     search_param.search_mode = RANGE_SEARCH;
-    search_param.consider_duplicate = true;
+    search_param.consider_duplicate = this->support_duplicate_ && params.consider_duplicate;
+    search_param.max_duplicates_per_group = params.max_duplicates_per_group;
     search_param.range_search_limit_size = static_cast<int>(limited_size);
     search_param.parallel_search_thread_count = params.parallel_search_thread_count;
     search_param.enable_reorder = params.enable_reorder;
@@ -410,7 +439,13 @@ HGraph::RangeSearch(const DatasetPtr& query,
         float valid_ratio = ft != nullptr ? ft->ValidRatio() : 1.0F;
         if (valid_ratio <= params.brute_force_threshold) {
             search_result = this->brute_force_search<InnerSearchMode::RANGE_SEARCH>(
-                raw_query, ft, limited_size, radius, &ctx);
+                raw_query,
+                ft,
+                limited_size,
+                radius,
+                search_param.consider_duplicate,
+                search_param.max_duplicates_per_group,
+                &ctx);
             brute_force_used = true;
         }
     }
@@ -551,7 +586,8 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
             search_param.topk, static_cast<int64_t>(static_cast<float>(k) * params.topk_factor));
     }
     search_param.enable_reorder = params.enable_reorder;
-    search_param.consider_duplicate = true;
+    search_param.consider_duplicate = this->support_duplicate_ && params.consider_duplicate;
+    search_param.max_duplicates_per_group = params.max_duplicates_per_group;
     search_param.enable_rabitq_one_bit_search = params.rabitq_one_bit_search;
     if (params.enable_time_record) {
         search_param.time_cost = std::make_shared<Timer>();
@@ -585,8 +621,14 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     if (params.brute_force_threshold > 0.0F) {
         float valid_ratio = ft != nullptr ? ft->ValidRatio() : 1.0F;
         if (valid_ratio <= params.brute_force_threshold) {
-            search_result =
-                this->brute_force_search<InnerSearchMode::KNN_SEARCH>(raw_query, ft, k, 0.0F, &ctx);
+            search_result = this->brute_force_search<InnerSearchMode::KNN_SEARCH>(
+                raw_query,
+                ft,
+                k,
+                0.0F,
+                search_param.consider_duplicate,
+                search_param.max_duplicates_per_group,
+                &ctx);
             brute_force_used = true;
         }
     }

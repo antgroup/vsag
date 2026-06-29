@@ -395,6 +395,8 @@ private:
                        const FilterPtr& filter,
                        int64_t topk,
                        float radius,
+                       bool consider_duplicate,
+                       int64_t max_duplicates_per_group,
                        QueryContext* ctx) const;
 
 private:
