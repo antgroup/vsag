@@ -56,6 +56,7 @@ const char* const ALPHA_KEY = "alpha";
 
 // IO param key
 const char* const IO_PARAMS_KEY = "io_params";
+const char* const SUPPLEMENT_IO_PARAMS_KEY = "supplement_io_params";
 const char* const IO_TYPE_VALUE_MEMORY_IO = "memory_io";
 const char* const IO_TYPE_VALUE_BUFFER_IO = "buffer_io";
 const char* const IO_TYPE_VALUE_MMAP_IO = "mmap_io";
@@ -104,6 +105,7 @@ const char* const TQ_CHAIN_KEY = "tq_chain";
 const char* const RABITQ_QUANTIZATION_VERSION_KEY = "rabitq_version";
 const char* const RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY = "rabitq_bits_per_dim_query";
 const char* const RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY = "rabitq_bits_per_dim_base";
+const char* const RABITQ_QUANTIZATION_BITS_PER_DIM_FILTER_KEY = "rabitq_bits_per_dim_filter";
 const char* const RABITQ_QUANTIZATION_ERROR_RATE_KEY = "rabitq_error_rate";
 const char* const SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE_KEY = "sq4_uniform_trunc_rate";
 const char* const PRODUCT_QUANTIZATION_DIM_KEY = "pq_dim";
@@ -280,6 +282,7 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"RABITQ_QUANTIZATION_VERSION_KEY", RABITQ_QUANTIZATION_VERSION_KEY},
     {"RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY", RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY},
     {"RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY", RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY},
+    {"RABITQ_QUANTIZATION_BITS_PER_DIM_FILTER_KEY", RABITQ_QUANTIZATION_BITS_PER_DIM_FILTER_KEY},
     {"RABITQ_QUANTIZATION_ERROR_RATE_KEY", RABITQ_QUANTIZATION_ERROR_RATE_KEY},
     {"TQ_CHAIN_KEY", TQ_CHAIN_KEY},
     {"NO_BUILD_LEVELS", NO_BUILD_LEVELS},
