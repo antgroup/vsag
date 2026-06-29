@@ -1,4 +1,3 @@
-
 # Copyright 2024-present the vsag project
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -22,6 +21,7 @@ add_subdirectory (bruteforce)
 add_subdirectory (ivf)
 add_subdirectory (pyramid)
 add_subdirectory (sparse_index)
+add_subdirectory (simq)
 
 file (GLOB ALGORITHM_SRCS "*.cpp")
 list (FILTER ALGORITHM_SRCS EXCLUDE REGEX "_test.cpp")
@@ -41,6 +41,7 @@ set (ALGORITHM_LIBS
         ivf
         pyramid
         sparse_index
+        simq
         PARENT_SCOPE)
 
 if (ENABLE_TESTS)
