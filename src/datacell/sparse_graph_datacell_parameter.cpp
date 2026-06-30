@@ -25,7 +25,7 @@ SparseGraphDatacellParameter::SparseGraphDatacellParameter()
 void
 SparseGraphDatacellParameter::FromJson(const JsonType& json) {
     if (json.Contains(GRAPH_PARAM_MAX_DEGREE_KEY)) {
-        this->max_degree_ = json[GRAPH_PARAM_MAX_DEGREE_KEY].GetInt();
+        this->max_degree_ = json[GRAPH_PARAM_MAX_DEGREE_KEY].GetUint64();
     }
     if (json.Contains(GRAPH_SUPPORT_REMOVE)) {
         this->support_delete_ = json[GRAPH_SUPPORT_REMOVE].GetBool();

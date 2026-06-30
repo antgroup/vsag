@@ -104,6 +104,11 @@ public:
     [[nodiscard]] DatasetPtr
     GetDataByIds(const int64_t* ids, int64_t count) const override;
 
+    [[nodiscard]] DatasetPtr
+    GetDataByIdsWithFlag(const int64_t* ids,
+                         int64_t count,
+                         uint64_t selected_data_flag) const override;
+
     void
     GetExtraInfoByIds(const int64_t* ids, int64_t count, char* extra_infos) const override;
 
@@ -141,7 +146,7 @@ public:
     void
     Serialize(StreamWriter& writer) const override;
 
-bool
+    bool
     UpdateExtraInfo(const DatasetPtr& new_base) override;
 
     bool

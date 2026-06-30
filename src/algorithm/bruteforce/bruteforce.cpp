@@ -208,7 +208,7 @@ BruteForce::Add(const DatasetPtr& data) {
                         const int64_t label,
                         const AttributeSet* attr,
                         const char* extra_info) -> std::optional<int64_t> {
-auto slot = this->claim_slot(label, attr);
+        auto slot = this->claim_slot(label, attr);
         if (not slot.has_value()) {
             return label;
         }
@@ -278,14 +278,16 @@ BruteForce::Remove(const std::vector<int64_t>& ids, RemoveMode mode) {
                        "remove is not supported when use_attribute_filter is true");
     }
 
+    uint32_t delete_count = 0;
     if (mode == RemoveMode::MARK_REMOVE) {
         std::scoped_lock label_lock(this->label_lookup_mutex_);
-        uint32_t delete_count = this->label_table_->MarkRemove(ids);
+        delete_count = this->label_table_->MarkRemove(ids);
         delete_count_.fetch_add(delete_count, std::memory_order_relaxed);
         return delete_count;
     }
 
-    std::scoped_lock lock(this->add_mutex_, this->label_lookup_mutex_, this->global_mutex_);
+    std::scoped_lock add_label_lock(this->add_mutex_, this->label_lookup_mutex_);
+    std::unique_lock global_lock(this->global_mutex_);
     for (auto label : ids) {
         InnerIdType inner_id;
         bool found = false;
@@ -462,7 +464,7 @@ BruteForce::make_search_computer(const DatasetPtr& query) const {
         CHECK_ARGUMENT(query_multi_vectors != nullptr, "query.multi_vectors is nullptr");
         return this->inner_codes_->FactoryComputer(&query_multi_vectors[0]);
     }
-return this->inner_codes_->FactoryComputer(query->GetFloat32Vectors());
+    return this->inner_codes_->FactoryComputer(query->GetFloat32Vectors());
 }
 
 float
@@ -490,7 +492,7 @@ BruteForce::Serialize(StreamWriter& writer) const {
     // serialize footer (introduced since v0.15)
     JsonType basic_info;
     basic_info["dim"].SetInt(dim_);
-basic_info["total_count"].SetUint64(total_count_.load());
+    basic_info["total_count"].SetUint64(total_count_.load());
     basic_info["is_multi_vector"].SetBool(is_multi_vector_);
     basic_info["extra_info_size"].SetUint64(this->extra_info_size_);
     basic_info["has_extra_info"].SetBool(this->extra_info_size_ > 0 and
@@ -934,12 +936,11 @@ BruteForce::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_upda
                    fmt::format("base.dim({}) must be equal to index.dim({})", base_dim, dim_));
     CHECK_ARGUMENT(new_base->GetFloat32Vectors() != nullptr, "base.float_vector is nullptr");
 
-    InnerIdType inner_id = 0;
     std::shared_lock add_lock(this->add_mutex_, std::defer_lock);
     std::shared_lock label_lock(this->label_lookup_mutex_, std::defer_lock);
-    std::shared_lock global_lock(this->global_mutex_, std::defer_lock);
-    std::lock(add_lock, label_lock, global_lock);
-    inner_id = this->label_table_->GetIdByLabel(id);
+    std::lock(add_lock, label_lock);
+    std::unique_lock global_lock(this->global_mutex_);
+    InnerIdType inner_id = this->label_table_->GetIdByLabel(id);
     return this->inner_codes_->UpdateVector(new_base->GetFloat32Vectors(), inner_id);
 }
 

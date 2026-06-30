@@ -121,9 +121,7 @@ public:
     }
 
     virtual void
-    ShrinkToFit(InnerIdType capacity) {
-        throw VsagException(ErrorType::INTERNAL_ERROR,
-                            "ShrinkToFit not implemented in ExtraInfoInterface");
+    ShrinkToFit(InnerIdType /*capacity*/) {
     }
 
 public:

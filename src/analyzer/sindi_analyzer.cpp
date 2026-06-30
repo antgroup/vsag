@@ -1183,7 +1183,7 @@ SINDIAnalyzer::GetStats() {
     }
 
     JsonType stats;
-stats["total_count"].SetUint64(static_cast<uint64_t>(sindi_->cur_element_count_));
+    stats["total_count"].SetUint64(static_cast<uint64_t>(sindi_->cur_element_count_));
     const auto window_count = sindi_->immutable_data_ == nullptr
                                   ? sindi_->window_term_list_.size()
                                   : sindi_->immutable_data_->windows.size();

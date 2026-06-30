@@ -85,10 +85,10 @@ PyramidHierarchyParameters::FromJson(const JsonType& json) {
                        fmt::format("hierarchy {} max_degree must be positive", name));
     }
     if (json.Contains(EF_CONSTRUCTION_KEY)) {
-        const auto ef_construction_value = json[EF_CONSTRUCTION_KEY].GetInt();
+        const auto ef_construction_value = json[EF_CONSTRUCTION_KEY].GetUint64();
         CHECK_ARGUMENT(ef_construction_value > 0,
                        fmt::format("hierarchy {} ef_construction must be positive", name));
-        ef_construction = static_cast<uint64_t>(ef_construction_value);
+        ef_construction = ef_construction_value;
     }
     if (json.Contains(ALPHA_KEY)) {
         alpha = json[ALPHA_KEY].GetFloat();
@@ -160,7 +160,8 @@ PyramidParameters::FromJson(const JsonType& json) {
         this->odescent_param->FromJson(graph_json);
     } else {
         if (json.Contains(EF_CONSTRUCTION_KEY)) {
-            this->ef_construction = json[EF_CONSTRUCTION_KEY].GetInt();
+            this->ef_construction = json[EF_CONSTRUCTION_KEY].GetUint64();
+            CHECK_ARGUMENT(this->ef_construction > 0, "ef_construction must be positive");
         }
     }
 

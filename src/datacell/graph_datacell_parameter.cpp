@@ -28,10 +28,10 @@ GraphDataCellParameter::FromJson(const JsonType& json) {
                    fmt::format("graph interface parameters must contains {}", IO_PARAMS_KEY));
     this->io_parameter_ = IOParameter::GetIOParameterByJson(json[IO_PARAMS_KEY]);
     if (json.Contains(GRAPH_PARAM_MAX_DEGREE_KEY)) {
-        this->max_degree_ = json[GRAPH_PARAM_MAX_DEGREE_KEY].GetInt();
+        this->max_degree_ = json[GRAPH_PARAM_MAX_DEGREE_KEY].GetUint64();
     }
     if (json.Contains(GRAPH_PARAM_INIT_MAX_CAPACITY_KEY)) {
-        this->init_max_capacity_ = json[GRAPH_PARAM_INIT_MAX_CAPACITY_KEY].GetInt();
+        this->init_max_capacity_ = json[GRAPH_PARAM_INIT_MAX_CAPACITY_KEY].GetUint64();
     }
     if (json.Contains(GRAPH_SUPPORT_REMOVE)) {
         this->support_remove_ = json[GRAPH_SUPPORT_REMOVE].GetBool();

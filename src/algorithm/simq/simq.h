@@ -46,7 +46,7 @@ public:
     Build(const DatasetPtr& data) override;
 
     std::vector<int64_t>
-    Add(const DatasetPtr& data, AddMode mode = AddMode::DEFAULT) override;
+    Add(const DatasetPtr& data) override;
 
     DatasetPtr
     KnnSearch(const DatasetPtr& query,

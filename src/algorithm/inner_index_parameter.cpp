@@ -77,7 +77,8 @@ InnerIndexParameter::FromJson(const JsonType& json) {
     }
 
     if (json.Contains(BUILD_THREAD_COUNT_KEY)) {
-        this->build_thread_count = json[BUILD_THREAD_COUNT_KEY].GetInt();
+        this->build_thread_count = json[BUILD_THREAD_COUNT_KEY].GetUint64();
+        CHECK_ARGUMENT(this->build_thread_count > 0, "build_thread_count must be positive");
     }
 
     if (json.Contains(LABEL_REMAP_TYPE_KEY)) {

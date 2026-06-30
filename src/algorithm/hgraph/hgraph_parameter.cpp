@@ -103,7 +103,8 @@ HGraphParameter::FromJson(const JsonType& json) {
     }
 
     if (json.Contains(EF_CONSTRUCTION_KEY)) {
-        this->ef_construction = json[EF_CONSTRUCTION_KEY].GetInt();
+        this->ef_construction = json[EF_CONSTRUCTION_KEY].GetUint64();
+        CHECK_ARGUMENT(this->ef_construction > 0, "ef_construction must be positive");
     }
 
     if (json.Contains(ALPHA_KEY)) {
@@ -111,7 +112,8 @@ HGraphParameter::FromJson(const JsonType& json) {
     }
 
     if (json.Contains(BUILD_THREAD_COUNT_KEY)) {
-        this->build_thread_count = json[BUILD_THREAD_COUNT_KEY].GetInt();
+        this->build_thread_count = json[BUILD_THREAD_COUNT_KEY].GetUint64();
+        CHECK_ARGUMENT(this->build_thread_count > 0, "build_thread_count must be positive");
     }
 
     if (graph_json.Contains(GRAPH_TYPE_KEY)) {

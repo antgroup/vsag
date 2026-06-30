@@ -311,6 +311,14 @@ LazyHGraph::GetDataByIds(const int64_t* ids, int64_t count) const {
     return ActiveIndex()->GetDataByIds(ids, count);
 }
 
+DatasetPtr
+LazyHGraph::GetDataByIdsWithFlag(const int64_t* ids,
+                                 int64_t count,
+                                 uint64_t selected_data_flag) const {
+    std::shared_lock lock(this->phase_mutex_);
+    return ActiveIndex()->GetDataByIdsWithFlag(ids, count, selected_data_flag);
+}
+
 void
 LazyHGraph::GetExtraInfoByIds(const int64_t* ids, int64_t count, char* extra_infos) const {
     std::shared_lock lock(this->phase_mutex_);
