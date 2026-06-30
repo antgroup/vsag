@@ -172,6 +172,12 @@ public:
     [[nodiscard]] int64_t
     GetMemoryUsage() const override;
 
+    [[nodiscard]] uint64_t
+    EstimateMemory(uint64_t num_elements) const override;
+
+    void
+    SetImmutable() override;
+
 private:
     /**
      * @brief Parse the JSON search parameter string and populate an

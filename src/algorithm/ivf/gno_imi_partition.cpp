@@ -437,4 +437,16 @@ GNOIMIPartition::GetCentroid(BucketIdType bucket_id, Vector<float>& centroid) {
             dim_);
 }
 
+uint64_t
+GNOIMIPartition::EstimateMemory(uint64_t num_elements) const {
+    (void)num_elements;
+    uint64_t memory = sizeof(GNOIMIPartition);
+    memory += static_cast<uint64_t>(bucket_count_s_ + bucket_count_t_) *
+              static_cast<uint64_t>(dim_) * sizeof(float);
+    memory += static_cast<uint64_t>(bucket_count_s_ + bucket_count_t_) * sizeof(float);
+    memory += static_cast<uint64_t>(bucket_count_s_) * static_cast<uint64_t>(bucket_count_t_) *
+              sizeof(float);
+    return memory;
+}
+
 }  // namespace vsag
