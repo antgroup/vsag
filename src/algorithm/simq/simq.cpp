@@ -445,7 +445,7 @@ SIMQ::build_rep_hgraph(const float* flat_vecs, int64_t dim) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 std::vector<int64_t>
-SIMQ::Add(const DatasetPtr& data, AddMode /*mode*/) {
+SIMQ::Add(const DatasetPtr& data) {
     std::unique_lock lock(global_mutex_);
 
     if (rep_hgraph_ == nullptr) {
