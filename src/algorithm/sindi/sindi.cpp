@@ -1016,7 +1016,7 @@ SINDI::cal_memory_usage() {
     }
 
     std::unique_lock lock(this->memory_usage_mutex_);
-    this->current_memory_usage_.store(static_cast<int64_t>(memory));
+    this->current_memory_usage_.store(memory);
 }
 
 void

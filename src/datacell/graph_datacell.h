@@ -107,9 +107,9 @@ public:
     void
     MergeOther(GraphInterfacePtr other, uint64_t bias) override;
 
-    int64_t
+    uint64_t
     GetMemoryUsage() const override {
-        int64_t memory = sizeof(GraphDataCell) + node_versions_.size() * sizeof(uint8_t);
+        uint64_t memory = sizeof(GraphDataCell) + node_versions_.size() * sizeof(uint8_t);
         if (IOTmpl::InMemory) {
             memory += io_->GetMemoryUsage();
         }

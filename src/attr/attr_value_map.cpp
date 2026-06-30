@@ -117,18 +117,18 @@ AttrValueMap::Deserialize(StreamReader& reader) {
 }
 
 template <typename T>
-int64_t
+uint64_t
 get_memory_usage(const UnorderedMap<T, MultiBitsetManager*>& map) {
-    int64_t memory_usage = 0;
+    uint64_t memory_usage = 0;
     for (const auto& [key, value] : map) {
         memory_usage += sizeof(T) + value->GetMemoryUsage();
     }
     return memory_usage;
 }
 
-int64_t
+uint64_t
 AttrValueMap::GetMemoryUsage() const {
-    int64_t memory_usage = sizeof(AttrValueMap);
+    uint64_t memory_usage = sizeof(AttrValueMap);
     memory_usage += get_memory_usage(int64_to_bitset_);
     memory_usage += get_memory_usage(int32_to_bitset_);
     memory_usage += get_memory_usage(int16_to_bitset_);

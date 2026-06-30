@@ -108,7 +108,7 @@ public:
     void
     GetCodeByInnerId(InnerIdType inner_id, uint8_t* data) const override;
 
-    std::string
+    std::unordered_map<std::string, uint64_t>
     GetMemoryUsageDetail() const override;
 
     std::pair<int64_t, int64_t>

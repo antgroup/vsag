@@ -308,7 +308,7 @@ AttributeBucketInvertedDataCell::GetAttribute(BucketIdType bucket_id,
     }
 }
 
-int64_t
+uint64_t
 AttributeBucketInvertedDataCell::GetMemoryUsage() const {
     auto memory_usage = sizeof(AttributeBucketInvertedDataCell);
 
@@ -316,7 +316,7 @@ AttributeBucketInvertedDataCell::GetMemoryUsage() const {
         memory_usage += value_map->GetMemoryUsage();
         memory_usage += name.size() + sizeof(ValueMapPtr);
     }
-    return static_cast<int64_t>(memory_usage);
+    return static_cast<uint64_t>(memory_usage);
 }
 
 }  // namespace vsag

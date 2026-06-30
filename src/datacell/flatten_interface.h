@@ -145,7 +145,7 @@ public:
         throw VsagException(ErrorType::INTERNAL_ERROR,
                             "InitIO not implemented in FlattenInterface");
     }
-    virtual int64_t
+    virtual uint64_t
     GetMemoryUsage() const {
         return 0;
     }

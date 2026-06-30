@@ -144,7 +144,7 @@ public:
         this->io_ = io;
     }
 
-    int64_t
+    uint64_t
     GetMemoryUsage() const override;
 
 private:

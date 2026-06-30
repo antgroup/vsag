@@ -325,7 +325,7 @@ LazyHGraph::GetExtraInfoByIds(const int64_t* ids, int64_t count, char* extra_inf
     ActiveIndex()->GetExtraInfoByIds(ids, count, extra_infos);
 }
 
-int64_t
+uint64_t
 LazyHGraph::GetMemoryUsage() const {
     std::shared_lock lock(this->phase_mutex_);
     return ActiveIndex()->GetMemoryUsage();

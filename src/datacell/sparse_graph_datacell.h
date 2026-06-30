@@ -77,7 +77,7 @@ public:
     Vector<InnerIdType>
     GetIds() const override;
 
-    int64_t
+    uint64_t
     GetMemoryUsage() const override;
 
     DuplicateTrackerPtr

@@ -272,9 +272,9 @@ FastBitset::resize(uint32_t new_size, uint64_t fill) {
     size_ = new_size;
 }
 
-int64_t
+uint64_t
 FastBitset::GetMemoryUsage() const {
-    return static_cast<int64_t>(sizeof(FastBitset) + this->size_ * sizeof(uint64_t));
+    return static_cast<uint64_t>(sizeof(FastBitset) + this->size_ * sizeof(uint64_t));
 }
 
 }  // namespace vsag

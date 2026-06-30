@@ -88,7 +88,7 @@ public:
         return this->bitset_type_;
     }
 
-    virtual int64_t
+    virtual uint64_t
     GetMemoryUsage() const = 0;
 
 public:

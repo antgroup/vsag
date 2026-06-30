@@ -45,7 +45,7 @@ public:
     void
     Resize(InnerIdType new_size);
 
-    int64_t
+    uint64_t
     GetMemoryUsage() const;
 
 private:

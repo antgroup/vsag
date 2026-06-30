@@ -176,7 +176,7 @@ public:
         return common_param_;
     }
 
-    int64_t
+    uint64_t
     GetMemoryUsage() const override;
 
 public:
@@ -502,9 +502,9 @@ FlattenDataCell<QuantTmpl, IOTmpl>::MergeOther(const FlattenInterfacePtr& other,
 }
 
 template <typename QuantTmpl, typename IOTmpl>
-int64_t
+uint64_t
 FlattenDataCell<QuantTmpl, IOTmpl>::GetMemoryUsage() const {
-    int64_t memory = sizeof(FlattenDataCell<QuantTmpl, IOTmpl>);
+    uint64_t memory = sizeof(FlattenDataCell<QuantTmpl, IOTmpl>);
     if (IOTmpl::InMemory) {
         memory += this->io_->GetMemoryUsage();
     }

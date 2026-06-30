@@ -1307,12 +1307,12 @@ IVF::cal_memory_usage() {
     memory += location_map_.size() * sizeof(uint64_t);
     memory += partition_strategy_->GetMemoryUsage();
     std::unique_lock lock(this->memory_usage_mutex_);
-    this->current_memory_usage_.store(static_cast<int64_t>(memory));
+    this->current_memory_usage_.store(memory);
 }
 
-int64_t
+uint64_t
 IVF::GetMemoryUsage() const {
-    int64_t memory = 0;
+    uint64_t memory = 0;
     {
         std::shared_lock lock(this->memory_usage_mutex_);
         memory = this->current_memory_usage_.load();

@@ -158,7 +158,7 @@ CompressedGraphDataCell::CheckIdExists(InnerIdType id) const {
     return id < neighbor_sets_.size() && neighbor_sets_[id] != nullptr;
 }
 
-int64_t
+uint64_t
 CompressedGraphDataCell::GetMemoryUsage() const {
     auto memory = sizeof(CompressedGraphDataCell);
     memory += neighbor_sets_.size() * sizeof(std::nullptr_t);
@@ -167,7 +167,7 @@ CompressedGraphDataCell::GetMemoryUsage() const {
             memory += encoder->SizeInBytes();
         }
     }
-    return static_cast<int64_t>(memory);
+    return static_cast<uint64_t>(memory);
 }
 
 Vector<InnerIdType>

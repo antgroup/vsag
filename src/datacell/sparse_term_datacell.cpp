@@ -394,7 +394,7 @@ SparseTermDataCell::CalcDistanceByInnerId(const SparseTermComputerPtr& computer,
     return 1 + ip;
 }
 
-int64_t
+uint64_t
 SparseTermDataCell::GetMemoryUsage() const {
     auto memory = sizeof(SparseTermDataCell);
     memory += term_ids_.capacity() * sizeof(std::unique_ptr<Vector<uint16_t>>);
@@ -413,7 +413,7 @@ SparseTermDataCell::GetMemoryUsage() const {
     }
     memory += sizeof(QuantizationParams);
     memory += term_sizes_.capacity() * sizeof(uint32_t);
-    return static_cast<int64_t>(memory);
+    return static_cast<uint64_t>(memory);
 }
 
 void

@@ -56,12 +56,24 @@ if (index->CheckFeature(vsag::SUPPORT_ESTIMATE_MEMORY)) {
 
 完整示例：`examples/cpp/308_feature_estimate_memory.cpp`。
 
+### `EstimateBuildMemory(num_elements)`
+
+`Index::EstimateBuildMemory(num_elements)` 返回构建 `num_elements` 条向量的索引时**构建过程中**
+所需的预估内存（字节数）。与 `EstimateMemory`（估算最终索引的稳态大小）不同，该接口考虑了构建
+过程中仅临时存在的缓冲区与中间数据结构。构建期间的峰值内存通常高于构建完成后的内存占用：
+
+```cpp
+uint64_t peak = index->EstimateBuildMemory(1000000);  // 字节
+```
+
+目前仅 DiskANN 提供了有效实现，其他索引类型默认抛出异常。
+
 ### `GetMemoryUsage()`
 
 `Index::GetMemoryUsage()` 返回索引**当前**占用的字节数：
 
 ```cpp
-int64_t bytes = index->GetMemoryUsage();
+uint64_t bytes = index->GetMemoryUsage();
 ```
 
 特性：
@@ -79,6 +91,23 @@ int64_t bytes = index->GetMemoryUsage();
 
 可运行示例：`examples/cpp/319_feature_get_memory_usage.cpp`，其中包含一个辅助函数将接口值与进程
 驻留内存进行对照。
+
+### `GetMemoryUsageDetail()`
+
+`Index::GetMemoryUsageDetail()` 返回索引**当前**内存占用按组件的细分：
+
+```cpp
+std::unordered_map<std::string, uint64_t> detail = index->GetMemoryUsageDetail();
+for (const auto& [component, bytes] : detail) {
+    std::cout << component << ": " << bytes << " bytes\n";
+}
+```
+
+返回的 map 的 key 为组件名，value 为对应内存字节数。该接口有助于了解索引内部的内存分布。
+
+目前仅 HGraph 提供了有效实现，返回的组件包括 `basic_flatten_codes`、`bottom_graph`、
+`route_graph`、`neighbors_mutex`、`pool`、`label_table`、`high_precise_codes`、
+`extra_infos` 和 `raw_vector`。SINDI 返回空 map，其他索引类型默认抛出异常。
 
 ### 能力标志
 

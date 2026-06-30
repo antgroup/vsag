@@ -325,10 +325,10 @@ HGraphTestIndex::TestGeneral(const TestIndex::IndexPtr& index,
 
 void
 HGraphTestIndex::TestMemoryUsageDetail(const IndexPtr& index) {
-    auto memory_detail = vsag::JsonType::Parse(index->GetMemoryUsageDetail());
-    REQUIRE(memory_detail.Contains("basic_flatten_codes"));
-    REQUIRE(memory_detail.Contains("bottom_graph"));
-    REQUIRE(memory_detail.Contains("route_graph"));
+    auto memory_detail = index->GetMemoryUsageDetail();
+    REQUIRE(memory_detail.count("basic_flatten_codes") > 0);
+    REQUIRE(memory_detail.count("bottom_graph") > 0);
+    REQUIRE(memory_detail.count("route_graph") > 0);
 }
 }  // namespace fixtures
 

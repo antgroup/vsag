@@ -22,6 +22,7 @@
 #include <stdexcept>
 #include <string>
 #include <tuple>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -900,18 +901,15 @@ public:
       *
       * @return number of bytes occupied by the index.
       */
-    [[nodiscard]] virtual int64_t
+    [[nodiscard]] virtual uint64_t
     GetMemoryUsage() const = 0;
 
     /**
       * @brief Return the memory usage of every component in the index
       *
-      * @return a json object that contains the memory usage of every component in the index
+      * @return a map from component name to memory usage in bytes
       */
-    // TODO(deming): implement func for every types of index
-    // [[nodiscard]] virtual JsonType
-    // GetMemoryUsageDetail() const = 0;
-    [[nodiscard]] virtual std::string
+    [[nodiscard]] virtual std::unordered_map<std::string, uint64_t>
     GetMemoryUsageDetail() const {
         throw std::runtime_error("Index does not support GetMemoryUsageDetail");
     }
@@ -933,9 +931,9 @@ public:
       * @param num_elements denotes the amount of data used to build the index.
       * @return estimated memory required during building.
       */
-    [[nodiscard]] virtual int64_t
-    GetEstimateBuildMemory(const int64_t num_elements) const {
-        throw std::runtime_error("Index does not support estimate the memory while building");
+    [[nodiscard]] virtual uint64_t
+    EstimateBuildMemory(uint64_t num_elements) const {
+        throw std::runtime_error("Index does not support EstimateBuildMemory");
     }
 
     /**

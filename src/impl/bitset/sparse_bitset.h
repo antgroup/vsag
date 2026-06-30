@@ -76,7 +76,7 @@ public:
     void
     Clear() override;
 
-    int64_t
+    uint64_t
     GetMemoryUsage() const override;
 
 private:

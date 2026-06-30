@@ -396,28 +396,29 @@ HGraph::Deserialize(StreamReader& reader) {
     }
 }
 
-std::string
+std::unordered_map<std::string, uint64_t>
 HGraph::GetMemoryUsageDetail() const {
-    JsonType memory_usage;
-    if (this->ignore_reorder_) {
-        this->use_reorder_ = false;
-    }
-    memory_usage["basic_flatten_codes"].SetUint64(this->basic_flatten_codes_->CalcSerializeSize());
-    memory_usage["bottom_graph"].SetUint64(this->bottom_graph_->CalcSerializeSize());
-    if (this->has_precise_reorder()) {
-        memory_usage["high_precise_codes"].SetUint64(
-            this->high_precise_codes_->CalcSerializeSize());
-    }
-    uint64_t route_graph_size = 0;
+    std::unordered_map<std::string, uint64_t> memory_usage;
+    memory_usage["neighbors_mutex"] = this->neighbors_mutex_->GetMemoryUsage();
+    memory_usage["pool"] = this->pool_->GetMemoryUsage();
+    memory_usage["label_table"] = this->label_table_->GetMemoryUsage();
+    memory_usage["basic_flatten_codes"] = this->basic_flatten_codes_->GetMemoryUsage();
+    memory_usage["bottom_graph"] = this->bottom_graph_->GetMemoryUsage();
+    uint64_t route_graph_memory = 0;
     for (const auto& route_graph : this->route_graphs_) {
-        route_graph_size += route_graph->CalcSerializeSize();
+        route_graph_memory += route_graph->GetMemoryUsage();
     }
-    memory_usage["route_graph"].SetUint64(route_graph_size);
+    memory_usage["route_graph"] = route_graph_memory;
+    if (this->has_precise_reorder()) {
+        memory_usage["high_precise_codes"] = this->high_precise_codes_->GetMemoryUsage();
+    }
     if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
-        memory_usage["extra_infos"].SetUint64(this->extra_infos_->CalcSerializeSize());
+        memory_usage["extra_infos"] = this->extra_infos_->GetMemoryUsage();
     }
-    memory_usage["__total_size__"].SetUint64(this->CalSerializeSize());
-    return memory_usage.Dump();
+    if (this->create_new_raw_vector_ && this->raw_vector_ != nullptr) {
+        memory_usage["raw_vector"] = this->raw_vector_->GetMemoryUsage();
+    }
+    return memory_usage;
 }
 
 }  // namespace vsag

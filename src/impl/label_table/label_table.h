@@ -224,7 +224,7 @@ public:
      * Get memory usage of the label table.
      * @return The memory usage in bytes.
      */
-    int64_t
+    uint64_t
     GetMemoryUsage() {
         return sizeof(LabelTable) + label_table_.size() * sizeof(LabelType) +
                label_remap_.GetMemoryUsage() + deleted_ids_.size() * sizeof(InnerIdType) * 2;

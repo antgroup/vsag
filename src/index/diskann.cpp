@@ -1100,9 +1100,9 @@ DiskANN::GetStats() const {
     return j.Dump(4);
 }
 
-int64_t
-DiskANN::GetEstimateBuildMemory(const int64_t num_elements) const {
-    int64_t estimate_memory_usage = 0;
+uint64_t
+DiskANN::EstimateBuildMemory(uint64_t num_elements) const {
+    uint64_t estimate_memory_usage = 0;
     // Memory usage of graph (1.365 is the relaxation factor used by DiskANN during graph construction.)
     estimate_memory_usage += (num_elements * R_ * sizeof(uint32_t)  // NOLINT
                               + num_elements * (R_ + 1) * sizeof(uint32_t)) *
