@@ -288,6 +288,55 @@ TEST_CASE("SparseTermDatacell Encode/Decode Test", "[ut][SparseTermDatacell]") {
     allocator->Deallocate(retrieved_sv.vals_);
 }
 
+TEST_CASE("SparseTermDatacell handles missing term lists", "[ut][SparseTermDatacell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto data_cell = std::make_shared<SparseTermDataCell>(
+        1.0F, DEFAULT_TERM_ID_LIMIT, allocator.get(), false, nullptr);
+    data_cell->ResizeTermList(2);
+
+    std::vector<uint32_t> query_ids = {1};
+    std::vector<float> query_vals = {1.0F};
+    SparseVector query{};
+    query.len_ = static_cast<uint32_t>(query_ids.size());
+    query.ids_ = query_ids.data();
+    query.vals_ = query_vals.data();
+
+    SINDISearchParameter search_params{};
+    search_params.term_prune_ratio = 0;
+    search_params.query_prune_ratio = 0;
+
+    InnerSearchParam inner_param{};
+    inner_param.ef = 2;
+
+    SECTION("null term list is skipped") {
+        data_cell->term_ids_[1].reset();
+        data_cell->term_sizes_[1] = 1;
+        auto computer = std::make_shared<SparseTermComputer>(query, search_params, allocator.get());
+        std::vector<float> dists(1, -1.0F);
+        MaxHeap heap(allocator.get());
+
+        data_cell->InsertHeapByTermLists<KNN_SEARCH, PURE>(
+            dists.data(), computer, heap, inner_param, 0);
+
+        REQUIRE(heap.empty());
+    }
+
+    SECTION("oversized term size is clamped to the term list") {
+        data_cell->term_ids_[1] = std::make_unique<Vector<uint16_t>>(allocator.get());
+        data_cell->term_ids_[1]->push_back(0);
+        data_cell->term_sizes_[1] = 2;
+        auto computer = std::make_shared<SparseTermComputer>(query, search_params, allocator.get());
+        std::vector<float> dists(1, -1.0F);
+        MaxHeap heap(allocator.get());
+
+        data_cell->InsertHeapByTermLists<KNN_SEARCH, PURE>(
+            dists.data(), computer, heap, inner_param, 0);
+
+        REQUIRE(heap.size() == 1);
+        REQUIRE(heap.top().second == 0);
+    }
+}
+
 TEST_CASE("SparseTermDatacell Last Term Test", "[ut][SparseTermDatacell]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
 
