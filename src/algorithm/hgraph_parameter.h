@@ -17,6 +17,7 @@
 
 #include "data_type.h"
 #include "inner_index_parameter.h"
+#include "utils/filter_search_skip_strategy.h"
 #include "utils/pointer_define.h"
 #include "vsag/constants.h"
 
@@ -77,6 +78,9 @@ public:
     float topk_factor{0.0F};
     bool use_reorder{false};
     bool use_extra_info_filter{false};
+    float skip_ratio{0.2F};
+    FilterSearchSkipStrategyType skip_strategy_type{
+        FilterSearchSkipStrategyType::DETERMINISTIC_ACCUMULATIVE};
     bool enable_time_record{false};
     double timeout_ms{std::numeric_limits<double>::max()};
 

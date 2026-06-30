@@ -375,6 +375,8 @@ HGraph::KnnSearch(const DatasetPtr& query,
         search_param.ef = std::max(params.ef_search, k);
         search_param.is_inner_id_allowed = ft;
         search_param.topk = static_cast<int64_t>(search_param.ef);
+        search_param.skip_ratio = params.skip_ratio;
+        search_param.skip_strategy_type = params.skip_strategy_type;
         search_result = this->search_one_graph(query_data,
                                                this->bottom_graph_,
                                                this->basic_flatten_codes_,
@@ -552,6 +554,8 @@ HGraph::RangeSearch(const DatasetPtr& query,
     search_param.search_mode = RANGE_SEARCH;
     search_param.consider_duplicate = true;
     search_param.range_search_limit_size = static_cast<int>(limited_size);
+    search_param.skip_ratio = params.skip_ratio;
+    search_param.skip_strategy_type = params.skip_strategy_type;
     auto search_result = this->search_one_graph(
         raw_query, this->bottom_graph_, this->basic_flatten_codes_, search_param);
     if (use_reorder_) {
@@ -1909,6 +1913,8 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         search_param.time_cost->SetThreshold(params.timeout_ms);
         (*search_param.stats)["is_timeout"].SetBool(false);
     }
+    search_param.skip_ratio = params.skip_ratio;
+    search_param.skip_strategy_type = params.skip_strategy_type;
     auto search_result = this->search_one_graph(
         raw_query, this->bottom_graph_, this->basic_flatten_codes_, search_param);
 
