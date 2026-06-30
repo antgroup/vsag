@@ -151,6 +151,7 @@ const char* const RABITQ_BITS_PER_DIM_FILTER = "rabitq_bits_per_dim_filter";
 const char* const RABITQ_ERROR_RATE = "rabitq_error_rate";
 const char* const RABITQ_USE_FHT = "rabitq_use_fht";
 const char* const INDEX_TQ_CHAIN = "tq_chain";
+const char* const INDEX_MRLE_DIM = "mrle_dim";
 
 const char* const HGRAPH_SUPPORT_REMOVE = "support_remove";
 const char* const HGRAPH_SUPPORT_FORCE_REMOVE = "support_force_remove";

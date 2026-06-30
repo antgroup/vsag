@@ -21,6 +21,7 @@
 
 #include "hgraph.h"
 #include "index_common_param.h"
+#include "inner_string_params.h"
 #include "parameter_test.h"
 #include "unittest.h"
 
@@ -375,4 +376,97 @@ TEST_CASE("HGraph maps RaBitQ without y bits to standard RaBitQ", "[ut][HGraphPa
     REQUIRE(base_json["quantization_params"]["rabitq_version"].GetString() ==
             std::string("standard"));
     REQUIRE(base_json["quantization_params"]["rabitq_bits_per_dim_base"].GetInt() == 3);
+}
+
+TEST_CASE("HGraph maps mrle_dim external parameter", "[ut][HGraphParameter]") {
+    auto param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "tq",
+        "tq_chain": "mrle, fp32",
+        "base_io_type": "block_memory_io",
+        "precise_quantization_type": "fp32",
+        "precise_io_type": "block_memory_io",
+        "mrle_dim": 127,
+        "graph_io_type": "block_memory_io",
+        "graph_storage_type": "flat",
+        "graph_type": "nsw",
+        "max_degree": 32,
+        "ef_construction": 100,
+        "use_reorder": false
+    })");
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    auto hgraph_param = vsag::HGraph::CheckAndMappingExternalParam(param, common_param);
+    auto typed_param = std::dynamic_pointer_cast<vsag::HGraphParameter>(hgraph_param);
+
+    REQUIRE(typed_param != nullptr);
+    auto base_json = typed_param->base_codes_param->ToJson();
+    REQUIRE(base_json["quantization_params"][vsag::MRLE_DIM_KEY].GetInt() == 127);
+}
+
+TEST_CASE("HGraph mrle_dim validation rejects out-of-range values", "[ut][HGraphParameter]") {
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+
+    SECTION("mrle_dim exceeds dim") {
+        auto param = vsag::JsonType::Parse(R"({
+            "base_quantization_type": "tq",
+            "tq_chain": "mrle, fp32",
+            "base_io_type": "block_memory_io",
+            "precise_quantization_type": "fp32",
+            "precise_io_type": "block_memory_io",
+            "graph_io_type": "block_memory_io",
+            "graph_storage_type": "flat",
+            "graph_type": "nsw",
+            "max_degree": 32,
+            "ef_construction": 100,
+            "use_reorder": false,
+            "mrle_dim": 200
+        })");
+        REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
+    }
+
+    SECTION("mrle_dim is negative") {
+        auto param = vsag::JsonType::Parse(R"({
+            "base_quantization_type": "tq",
+            "tq_chain": "mrle, fp32",
+            "base_io_type": "block_memory_io",
+            "precise_quantization_type": "fp32",
+            "precise_io_type": "block_memory_io",
+            "graph_io_type": "block_memory_io",
+            "graph_storage_type": "flat",
+            "graph_type": "nsw",
+            "max_degree": 32,
+            "ef_construction": 100,
+            "use_reorder": false,
+            "mrle_dim": -1
+        })");
+        REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
+    }
+
+    SECTION("mrle_dim default is 0 when omitted") {
+        auto param = vsag::JsonType::Parse(R"({
+            "base_quantization_type": "tq",
+            "tq_chain": "mrle, fp32",
+            "base_io_type": "block_memory_io",
+            "precise_quantization_type": "fp32",
+            "precise_io_type": "block_memory_io",
+            "graph_io_type": "block_memory_io",
+            "graph_storage_type": "flat",
+            "graph_type": "nsw",
+            "max_degree": 32,
+            "ef_construction": 100,
+            "use_reorder": false
+        })");
+        auto hgraph_param = vsag::HGraph::CheckAndMappingExternalParam(param, common_param);
+        auto typed_param = std::dynamic_pointer_cast<vsag::HGraphParameter>(hgraph_param);
+        REQUIRE(typed_param != nullptr);
+        auto base_json = typed_param->base_codes_param->ToJson();
+        REQUIRE(base_json.Contains("quantization_params"));
+        auto qp = base_json["quantization_params"];
+        REQUIRE(qp.Contains(vsag::MRLE_DIM_KEY));
+        REQUIRE(qp[vsag::MRLE_DIM_KEY].GetInt() == 0);
+    }
 }

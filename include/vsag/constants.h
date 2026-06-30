@@ -172,6 +172,7 @@ extern const char* const RABITQ_BITS_PER_DIM_FILTER;
 extern const char* const RABITQ_ERROR_RATE;
 extern const char* const RABITQ_USE_FHT;
 extern const char* const INDEX_TQ_CHAIN;
+extern const char* const INDEX_MRLE_DIM;
 
 extern const char* const HGRAPH_SUPPORT_REMOVE;
 extern const char* const HGRAPH_SUPPORT_FORCE_REMOVE;

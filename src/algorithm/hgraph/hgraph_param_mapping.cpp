@@ -359,6 +359,14 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             },
         },
         {
+            INDEX_MRLE_DIM,
+            {
+                BASE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                MRLE_DIM_KEY,
+            },
+        },
+        {
             RABITQ_BITS_PER_DIM_QUERY,
             {
                 BASE_CODES_KEY,
@@ -494,6 +502,7 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
                 "{RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY}": 1,
                 "{RABITQ_QUANTIZATION_ERROR_RATE_KEY}": 1.9,
                 "{TQ_CHAIN_KEY}": "",
+                "mrle_dim": 0,
                 "nbits": 8,
                 "{PRODUCT_QUANTIZATION_DIM_KEY}": 1,
                 "{HOLD_MOLDS}": false
@@ -560,6 +569,16 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
         inner_json[RAW_VECTOR_KEY][CODES_TYPE_KEY].SetString(SPARSE_CODES);
     }
 
+    if (external_param.Contains(INDEX_MRLE_DIM)) {
+        CHECK_ARGUMENT(external_param[INDEX_MRLE_DIM].IsNumberInteger(),
+                       fmt::format("mrle_dim must be an integer, got {}",
+                                   external_param[INDEX_MRLE_DIM].Dump()));
+        int64_t mrle_dim = external_param[INDEX_MRLE_DIM].GetInt();
+        CHECK_ARGUMENT(
+            mrle_dim >= 0 and mrle_dim <= static_cast<int64_t>(common_param.dim_),
+            fmt::format("mrle_dim({}) must be in range [0, {}]", mrle_dim, common_param.dim_));
+    }
+
     auto hgraph_parameter = std::make_shared<HGraphParameter>();
     hgraph_parameter->data_type = common_param.data_type_;
     hgraph_parameter->FromJson(inner_json);
@@ -577,6 +596,7 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                hgraph_parameter->ef_construction,
                                max_degree,
                                construction_threshold));
+
     return hgraph_parameter;
 }
 
