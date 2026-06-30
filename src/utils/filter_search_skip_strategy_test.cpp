@@ -25,6 +25,8 @@ TEST_CASE("Filter search skip strategy parse", "[ut][filter_search_skip_strategy
     REQUIRE(parse_filter_search_skip_strategy_type("deterministic_accumulative") ==
             FilterSearchSkipStrategyType::DETERMINISTIC_ACCUMULATIVE);
     REQUIRE(std::string(filter_search_skip_strategy_type_to_string(
+                FilterSearchSkipStrategyType::RANDOM)) == "random");
+    REQUIRE(std::string(filter_search_skip_strategy_type_to_string(
                 FilterSearchSkipStrategyType::DETERMINISTIC_ACCUMULATIVE)) ==
             "deterministic_accumulative");
     REQUIRE_THROWS(parse_filter_search_skip_strategy_type("unknown"));
@@ -32,7 +34,7 @@ TEST_CASE("Filter search skip strategy parse", "[ut][filter_search_skip_strategy
 
 TEST_CASE("Accumulative ShouldVisit is deterministic", "[ut][filter_search_skip_strategy]") {
     constexpr float valid_ratio = 0.5F;
-    constexpr float skip_ratio = 0.8F;
+    constexpr float skip_ratio = 0.2F;
     std::vector<bool> first_sequence;
     std::vector<bool> second_sequence;
 
@@ -47,7 +49,7 @@ TEST_CASE("Accumulative ShouldVisit is deterministic", "[ut][filter_search_skip_
     }
 
     REQUIRE(first_sequence == second_sequence);
-    // visit_ratio = 0.5 + 0.5*0.8 = 0.9
+    // visit_ratio = 0.5 + (1-0.5)*(1-0.2) = 0.5 + 0.4 = 0.9
     // Accumulative pattern: F,T,T,T,T,T,T,T,T,T repeated = 18/20 true
     std::vector<bool> expected = {false, true, true, true, true, true, true, true, true, true,
                                   false, true, true, true, true, true, true, true, true, true};
@@ -63,18 +65,16 @@ TEST_CASE("ShouldVisit edge cases", "[ut][filter_search_skip_strategy]") {
         }
     }
 
-    SECTION("skip ratio zero with low valid ratio visits less") {
+    SECTION("skip ratio zero means no skipping") {
         auto strategy = create_filter_search_skip_strategy(
             FilterSearchSkipStrategyType::DETERMINISTIC_ACCUMULATIVE, 0.5F, 0.0F);
-        // visit_ratio = 0.5 + 0.5*0 = 0.5
-        // Accumulative pattern: F,T,F,T,... alternating = exactly 50/100 true
+        // visit_ratio = 0.5 + (1-0.5)*(1-0.0) = 0.5 + 0.5 = 1.0
+        // Accumulative pattern: all true since visit_ratio = 1.0
         std::vector<bool> sequence;
         for (uint64_t i = 0; i < 20; ++i) {
             sequence.emplace_back(strategy->ShouldVisit());
         }
-        std::vector<bool> expected = {false, true,  false, true,  false, true,  false,
-                                      true,  false, true,  false, true,  false, true,
-                                      false, true,  false, true,  false, true};
+        std::vector<bool> expected(20, true);  // All true since we visit everything
         REQUIRE(sequence == expected);
     }
 }
