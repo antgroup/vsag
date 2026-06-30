@@ -68,7 +68,7 @@ public:
      *
      * @return Memory usage in bytes (sizeof(IOContext) plus heap-allocated iocb pointers).
      */
-    int64_t
+    uint64_t
     GetMemoryUsage() const override {
         return sizeof(IOContext) + DEFAULT_REQUEST_COUNT * sizeof(struct iocb);
     }

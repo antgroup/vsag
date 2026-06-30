@@ -139,7 +139,7 @@ TEST_CASE("ReverseEdge Basic Operations", "[ut][ReverseEdge]") {
         reverse_edge.AddReverseEdge(1, 2);
         reverse_edge.AddReverseEdge(3, 2);
 
-        int64_t usage = reverse_edge.GetMemoryUsage();
+        uint64_t usage = reverse_edge.GetMemoryUsage();
         REQUIRE(usage > 0);
         REQUIRE(usage > sizeof(ReverseEdge));
     }

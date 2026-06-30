@@ -105,13 +105,12 @@ BuildEvalCase::process_result() {
     result["index_info"] = JsonType::parse(config_.build_param);
     result["action"] = "build";
     result["index"] = config_.index_name;
-    // TODO(deming): remove try-catch after implement GetMemoryUsageDetail
     try {
-        result["memory_detail(B)"] = this->index_->GetMemoryUsageDetail();
-    } catch (std::runtime_error& e) {
-        // if GetMemoryUsageDetail not implemented
-        logger_->Error(e.what());
-    } catch (vsag::VsagException& e) {
+        auto detail = this->index_->GetMemoryUsageDetail();
+        for (const auto& [name, size] : detail) {
+            result["memory_detail(B)"][name] = size;
+        }
+    } catch (const std::exception& e) {
         logger_->Error(e.what());
     }
     return result;

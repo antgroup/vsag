@@ -118,7 +118,7 @@ public:
     void
     Deserialize(StreamReader& reader);
 
-    int64_t
+    uint64_t
     GetMemoryUsage() const;
 
 private:

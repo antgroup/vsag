@@ -51,7 +51,7 @@ public:
     void
     Reset() override;
 
-    int64_t
+    uint64_t
     GetMemoryUsage() const override {
         return sizeof(VisitedList) + sizeof(VisitedListType) * this->max_size_;
     }

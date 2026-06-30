@@ -267,7 +267,7 @@ SparseGraphDataCell::GetIds() const {
     return ids;
 }
 
-int64_t
+uint64_t
 SparseGraphDataCell::GetMemoryUsage() const {
     auto memory = sizeof(SparseGraphDataCell);
     memory += neighbors_.size() * (sizeof(InnerIdType) + maximum_degree_ * sizeof(InnerIdType) +
@@ -276,7 +276,7 @@ SparseGraphDataCell::GetMemoryUsage() const {
     if (reverse_edges_) {
         memory += reverse_edges_->GetMemoryUsage();
     }
-    return static_cast<int64_t>(memory);
+    return static_cast<uint64_t>(memory);
 }
 
 void

@@ -184,7 +184,7 @@ IndexHandler::GetNumElements() const {
     return index_->GetNumElements();
 }
 
-int64_t
+uint64_t
 IndexHandler::GetMemoryUsage() const {
     return index_->GetMemoryUsage();
 }

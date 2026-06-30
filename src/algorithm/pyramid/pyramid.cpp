@@ -498,7 +498,7 @@ Pyramid::Deserialize(StreamReader& reader) {
     }
 
     resize(max_capacity);
-    this->current_memory_usage_ = static_cast<int64_t>(this->CalSerializeSize());
+    this->current_memory_usage_ = this->CalSerializeSize();
 }
 
 InnerIndexPtr
@@ -516,7 +516,7 @@ Pyramid::ExportModel(const IndexCommonParam& param) const {
         }
         this->precise_codes_->ExportModel(index->precise_codes_);
     }
-    index->current_memory_usage_ = static_cast<int64_t>(index->CalSerializeSize());
+    index->current_memory_usage_ = index->CalSerializeSize();
     return index;
 }
 

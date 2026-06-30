@@ -91,9 +91,9 @@ public:
     void
     InitFeatures() override;
 
-    std::string
+    std::unordered_map<std::string, uint64_t>
     GetMemoryUsageDetail() const override {
-        return "";
+        return {};
     }
 
     std::string

@@ -126,7 +126,7 @@ public:
      * @note This includes hash table overhead (buckets, pointers, load factor)
      *       The estimate uses a multiplier to account for container overhead
      */
-    int64_t
+    uint64_t
     GetMemoryUsage() const {
         return Size() * (sizeof(LabelType) + sizeof(InnerIdType)) * 2;
     }

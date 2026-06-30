@@ -60,7 +60,7 @@ public:
     void
     Deserialize(StreamReader& reader) override;
 
-    int64_t
+    uint64_t
     GetMemoryUsage() const override;
 
     Vector<InnerIdType>

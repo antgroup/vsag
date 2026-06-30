@@ -53,9 +53,9 @@ public:
      * The memory usage should include all dynamically allocated memory, whether
      * directly or indirectly, used by the resource.
      *
-     * @return int64_t The memory usage of the resource object in bytes.
+     * @return uint64_t The memory usage of the resource object in bytes.
      */
-    virtual int64_t
+    virtual uint64_t
     GetMemoryUsage() const = 0;
 };
 

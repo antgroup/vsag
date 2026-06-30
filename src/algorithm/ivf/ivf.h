@@ -169,7 +169,7 @@ public:
                     const AttributeSet& new_attrs,
                     const AttributeSet& origin_attrs) override;
 
-    [[nodiscard]] int64_t
+    [[nodiscard]] uint64_t
     GetMemoryUsage() const override;
 
 private:

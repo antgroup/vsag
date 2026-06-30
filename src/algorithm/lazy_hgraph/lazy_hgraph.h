@@ -112,7 +112,7 @@ public:
     void
     GetExtraInfoByIds(const int64_t* ids, int64_t count, char* extra_infos) const override;
 
-    [[nodiscard]] int64_t
+    [[nodiscard]] uint64_t
     GetMemoryUsage() const override;
 
     void
