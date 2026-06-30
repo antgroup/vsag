@@ -342,6 +342,9 @@ HGraph::Deserialize(StreamReader& reader) {
         if (this->has_precise_reorder()) {
             this->high_precise_codes_->Deserialize(reader);
         }
+        this->physical_code_capacity_.store(
+            static_cast<InnerIdType>(this->basic_flatten_codes_->max_capacity_),
+            std::memory_order_release);
 
         for (auto& route_graph : this->route_graphs_) {
             route_graph->Deserialize(reader);
@@ -397,6 +400,9 @@ HGraph::Deserialize(StreamReader& reader) {
         if (this->has_precise_reorder()) {
             this->high_precise_codes_->Deserialize(buffer_reader);
         }
+        this->physical_code_capacity_.store(
+            static_cast<InnerIdType>(this->basic_flatten_codes_->max_capacity_),
+            std::memory_order_release);
 
         for (auto& route_graph : this->route_graphs_) {
             route_graph->Deserialize(buffer_reader);

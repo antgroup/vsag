@@ -402,13 +402,17 @@ HGraph::add_one_point(const void* data,
                       int level,
                       InnerIdType inner_id,
                       const FlattenInterfacePtr& graph_read_codes) {
-    auto run_add_stages = [&]() -> bool {
+    auto make_search_param = [&]() {
         InnerSearchParam param;
         param.topk = 1;
         param.ep = this->entry_point_id_;
         param.ef = 1;
         param.is_inner_id_allowed = nullptr;
+        return param;
+    };
 
+    auto run_add_stages_with_unique_lock = [&]() -> bool {
+        auto param = make_search_param();
         // Stage 1: probe the current graph view and decide whether this point is a duplicate.
         auto probe = this->probe_graph_for_add(data, level, inner_id, param, graph_read_codes);
         if (probe.duplicate_id >= 0) {
@@ -425,7 +429,14 @@ HGraph::add_one_point(const void* data,
         }
 
         // Stage 2b: prepare unique storage before making the node visible in the graph.
-        this->insert_unique_storage_for_add(data, inner_id);
+        if (this->support_duplicate_ && this->deduplicate_storage_) {
+            auto code_slot_id = this->code_slot_map_->AllocateSlot();
+            this->ensure_physical_code_capacity_unlocked(code_slot_id + 1);
+            this->insert_persistent_codes_to_slot(data, code_slot_id);
+            this->code_slot_map_->PublishSlot(inner_id, code_slot_id);
+        } else {
+            this->insert_unique_storage_for_add(data, inner_id);
+        }
 
         // Stage 3b: publish the unique node to the graph after codes are readable.
         this->connect_bottom_for_add(inner_id, probe.neighbors, graph_read_codes);
@@ -433,22 +444,57 @@ HGraph::add_one_point(const void* data,
         return true;
     };
 
+    std::unique_lock<std::shared_mutex> add_lock(this->add_mutex_);
     if (level >= static_cast<int>(this->route_graphs_.size()) || bottom_graph_->TotalCount() == 0) {
         std::scoped_lock<std::shared_mutex> wlock(this->global_mutex_);
+        auto old_route_graph_count = this->route_graphs_.size();
         // level maybe a negative number(-1)
         for (auto j = static_cast<int>(this->route_graphs_.size()); j <= level; ++j) {
             this->route_graphs_.emplace_back(this->generate_one_route_graph());
         }
-        auto insert_success = run_add_stages();
+        auto insert_success = run_add_stages_with_unique_lock();
         if (insert_success) {
             entry_point_id_ = inner_id;
         } else {
-            this->route_graphs_.pop_back();
+            this->route_graphs_.resize(old_route_graph_count);
         }
         return insert_success;
     }
+    add_lock.unlock();
     std::shared_lock rlock(this->global_mutex_);
-    return run_add_stages();
+
+    auto param = make_search_param();
+    // Stage 1: probe the current graph view and decide whether this point is a duplicate.
+    auto probe = this->probe_graph_for_add(data, level, inner_id, param, graph_read_codes);
+    if (probe.duplicate_id >= 0) {
+        // Stage 2a: prepare duplicate storage before publishing the duplicate id.
+        if (this->support_duplicate_ && this->deduplicate_storage_) {
+            this->publish_duplicate_storage_for_add(static_cast<InnerIdType>(probe.duplicate_id),
+                                                    inner_id);
+        } else {
+            this->insert_persistent_codes_unlocked(data, inner_id);
+        }
+        // Stage 3a: publish the logical duplicate after its storage mapping is ready.
+        this->publish_duplicate_for_add(static_cast<InnerIdType>(probe.duplicate_id), inner_id);
+        return false;
+    }
+
+    // Stage 2b: prepare unique storage before making the node visible in the graph.
+    if (this->support_duplicate_ && this->deduplicate_storage_) {
+        auto code_slot_id = this->code_slot_map_->AllocateSlot();
+        rlock.unlock();
+        this->ensure_physical_code_capacity(code_slot_id + 1);
+        rlock.lock();
+        this->insert_persistent_codes_to_slot(data, code_slot_id);
+        this->code_slot_map_->PublishSlot(inner_id, code_slot_id);
+    } else {
+        this->insert_unique_storage_for_add(data, inner_id);
+    }
+
+    // Stage 3b: publish the unique node to the graph after codes are readable.
+    this->connect_bottom_for_add(inner_id, probe.neighbors, graph_read_codes);
+    this->connect_route_graphs_for_add(data, level, inner_id, param, graph_read_codes);
+    return true;
 }
 
 HGraph::GraphAddProbeResult
@@ -568,11 +614,46 @@ void
 HGraph::insert_unique_storage_for_add(const void* data, InnerIdType inner_id) {
     if (this->support_duplicate_ && this->deduplicate_storage_) {
         auto code_slot_id = this->code_slot_map_->AllocateSlot();
+        this->ensure_physical_code_capacity(code_slot_id + 1);
         this->insert_persistent_codes_to_slot(data, code_slot_id);
         this->code_slot_map_->PublishSlot(inner_id, code_slot_id);
         return;
     }
     this->insert_persistent_codes_unlocked(data, inner_id);
+}
+
+void
+HGraph::ensure_physical_code_capacity(InnerIdType required_capacity) {
+    if (not(this->support_duplicate_ && this->deduplicate_storage_)) {
+        return;
+    }
+    if (this->physical_code_capacity_.load(std::memory_order_acquire) >= required_capacity) {
+        return;
+    }
+    std::scoped_lock lock(this->global_mutex_);
+    this->ensure_physical_code_capacity_unlocked(required_capacity);
+}
+
+void
+HGraph::ensure_physical_code_capacity_unlocked(InnerIdType required_capacity) {
+    if (not(this->support_duplicate_ && this->deduplicate_storage_)) {
+        return;
+    }
+    if (this->physical_code_capacity_.load(std::memory_order_acquire) >= required_capacity) {
+        return;
+    }
+
+    auto new_capacity = static_cast<InnerIdType>(
+        next_multiple_of_power_of_two(required_capacity, DEFAULT_RESIZE_BIT));
+    this->basic_flatten_codes_->Resize(new_capacity);
+    if (has_precise_reorder()) {
+        this->high_precise_codes_->Resize(new_capacity);
+    }
+    if (create_new_raw_vector_) {
+        this->raw_vector_->Resize(new_capacity);
+    }
+    this->physical_code_capacity_.store(new_capacity, std::memory_order_release);
+    this->cal_memory_usage();
 }
 
 void
@@ -599,12 +680,16 @@ HGraph::resize(uint64_t new_size) {
         if (this->support_duplicate_ && this->deduplicate_storage_) {
             this->code_slot_map_->ReserveLogicalSize(static_cast<InnerIdType>(new_size_power_2));
         }
-        this->basic_flatten_codes_->Resize(new_size_power_2);
-        if (has_precise_reorder()) {
-            this->high_precise_codes_->Resize(new_size_power_2);
-        }
-        if (create_new_raw_vector_) {
-            this->raw_vector_->Resize(new_size_power_2);
+        if (not(this->support_duplicate_ && this->deduplicate_storage_)) {
+            this->basic_flatten_codes_->Resize(new_size_power_2);
+            if (has_precise_reorder()) {
+                this->high_precise_codes_->Resize(new_size_power_2);
+            }
+            if (create_new_raw_vector_) {
+                this->raw_vector_->Resize(new_size_power_2);
+            }
+            this->physical_code_capacity_.store(static_cast<InnerIdType>(new_size_power_2),
+                                                std::memory_order_release);
         }
         if (this->extra_infos_ != nullptr) {
             this->extra_infos_->Resize(new_size_power_2);

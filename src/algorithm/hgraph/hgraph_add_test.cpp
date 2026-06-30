@@ -294,6 +294,74 @@ TEST_CASE("HGraph fp32 Build exact duplicate with deduplicate_storage",
     RequireRangeContains(index, query, {20, 30}, 2);
 }
 
+TEST_CASE("HGraph deduplicate_storage uses representative vector for approximate duplicates",
+          "[ut][hgraph][duplicate][add]") {
+    constexpr int64_t dim = 2;
+    auto common_param = MakeCommonParam(dim);
+    auto hgraph_json = MakeFp32HGraphJson();
+    hgraph_json["duplicate_distance_threshold"].SetFloat(0.0001F);
+    auto index = MakeHGraphIndex(hgraph_json, common_param);
+
+    std::vector<float> vectors = {
+        0.0F,
+        0.0F,
+        1.0F,
+        0.0F,
+        1.005F,
+        0.0F,
+        3.0F,
+        0.0F,
+    };
+    std::vector<int64_t> ids = {10, 20, 30, 40};
+    auto base = MakeFloatDataset(vectors, ids, dim, 4);
+
+    auto build_result = index->Build(base);
+    REQUIRE(build_result.has_value());
+    REQUIRE(build_result.value().empty());
+    REQUIRE(index->GetNumElements() == 4);
+
+    std::vector<float> query_vector = {1.005F, 0.0F};
+    auto query = MakeFloatQuery(query_vector, dim);
+    RequireRangeContains(index, query, {20, 30}, 2);
+
+    auto representative_distance = index->CalcDistanceById(query_vector.data(), ids[1]);
+    auto approximate_duplicate_distance = index->CalcDistanceById(query_vector.data(), ids[2]);
+    REQUIRE(representative_distance.has_value());
+    REQUIRE(approximate_duplicate_distance.has_value());
+    REQUIRE(approximate_duplicate_distance.value() == representative_distance.value());
+}
+
+TEST_CASE("HGraph deduplicate_storage keeps physical flatten capacity slot-based",
+          "[ut][hgraph][duplicate][serialize][memory]") {
+    constexpr int64_t dim = 16;
+    constexpr int64_t count = 1100;
+    auto common_param = MakeCommonParam(dim);
+
+    std::vector<float> vectors(static_cast<uint64_t>(dim * count), 1.0F);
+    std::vector<int64_t> ids(static_cast<uint64_t>(count));
+    for (int64_t i = 0; i < count; ++i) {
+        ids[static_cast<uint64_t>(i)] = i;
+    }
+    auto base = MakeFloatDataset(vectors, ids, dim, count);
+
+    auto dedup_index = MakeHGraphIndex(MakeFp32HGraphJson(), common_param);
+    auto dedup_build = dedup_index->Build(base);
+    REQUIRE(dedup_build.has_value());
+    REQUIRE(dedup_build.value().empty());
+
+    auto old_storage_index = MakeHGraphIndex(MakeFp32HGraphJson(false), common_param);
+    auto old_storage_build = old_storage_index->Build(base);
+    REQUIRE(old_storage_build.has_value());
+    REQUIRE(old_storage_build.value().empty());
+
+    auto dedup_memory = vsag::JsonType::Parse(dedup_index->GetMemoryUsageDetail());
+    auto old_storage_memory = vsag::JsonType::Parse(old_storage_index->GetMemoryUsageDetail());
+    REQUIRE(dedup_memory["basic_flatten_codes"].GetInt() <
+            old_storage_memory["basic_flatten_codes"].GetInt());
+    REQUIRE(dedup_memory["__total_size__"].GetInt() <
+            old_storage_memory["__total_size__"].GetInt());
+}
+
 TEST_CASE("HGraph support_duplicate without deduplicate_storage keeps old storage semantics",
           "[ut][hgraph][duplicate][regression][add]") {
     constexpr int64_t dim = 2;

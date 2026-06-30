@@ -119,20 +119,16 @@ public:
     void
     InsertVector(const void* vector, InnerIdType idx) override {
         base_->InsertVector(vector, mapping_->Resolve(idx));
-        this->refresh_metadata();
     }
 
     void
     InsertVectorToSlot(const void* vector, InnerIdType code_slot_id) {
         base_->InsertVector(vector, code_slot_id);
-        this->refresh_metadata();
     }
 
     bool
     UpdateVector(const void* vector, InnerIdType idx) override {
-        auto updated = base_->UpdateVector(vector, mapping_->Resolve(idx));
-        this->refresh_metadata();
-        return updated;
+        return base_->UpdateVector(vector, mapping_->Resolve(idx));
     }
 
     void
@@ -146,7 +142,6 @@ public:
             code_slot_ids[i] = mapping_->Resolve(idx_vec[i]);
         }
         base_->BatchInsertVector(vectors, count, code_slot_ids.data());
-        this->refresh_metadata();
     }
 
     float

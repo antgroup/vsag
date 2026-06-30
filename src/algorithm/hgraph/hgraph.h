@@ -375,6 +375,14 @@ public:
     void
     insert_persistent_codes_to_slot(const void* data, InnerIdType code_slot_id);
 
+    /// Ensure physical code storage can hold required_capacity physical slots.
+    void
+    ensure_physical_code_capacity(InnerIdType required_capacity);
+
+    /// Ensure physical code storage while global_mutex_ unique lock is already held.
+    void
+    ensure_physical_code_capacity_unlocked(InnerIdType required_capacity);
+
     /// Insert a single point using graph_read_codes for probing and graph connectivity.
     bool
     add_one_point(const void* data,
@@ -685,7 +693,8 @@ private:
     mutable std::shared_mutex add_mutex_;           // serializes Add() operations
     mutable std::shared_mutex force_remove_mutex_;  // serializes force-remove operations
 
-    std::atomic<InnerIdType> max_capacity_{0};  // allocated storage capacity
+    std::atomic<InnerIdType> max_capacity_{0};            // allocated storage capacity
+    std::atomic<InnerIdType> physical_code_capacity_{0};  // physical flatten slot capacity
 
     uint64_t resize_increase_count_bit_{DEFAULT_RESIZE_BIT};  // log2(resize batch size)
 
