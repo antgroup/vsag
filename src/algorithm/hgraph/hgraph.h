@@ -54,14 +54,28 @@ class IteratorFilterContext;
 struct HGraphCodeSlotMap {
     explicit HGraphCodeSlotMap(Allocator* allocator);
 
+    ~HGraphCodeSlotMap();
+
     InnerIdType
-    BindNewSlot(InnerIdType inner_id);
+    AllocateSlot();
 
     void
-    BindExistingSlot(InnerIdType inner_id, InnerIdType code_slot_id);
+    PublishSlot(InnerIdType inner_id, InnerIdType code_slot_id);
 
     [[nodiscard]] InnerIdType
     Resolve(InnerIdType inner_id) const;
+
+    void
+    ResolvePair(InnerIdType inner_id1,
+                InnerIdType inner_id2,
+                InnerIdType& code_slot_id1,
+                InnerIdType& code_slot_id2) const;
+
+    void
+    ResolveBatch(const InnerIdType* inner_ids, InnerIdType count, InnerIdType* code_slot_ids) const;
+
+    void
+    ReserveLogicalSize(InnerIdType new_size);
 
     [[nodiscard]] InnerIdType
     PhysicalCount() const;
@@ -82,9 +96,14 @@ private:
     void
     EnsureLogicalSize(InnerIdType new_size);
 
+    void
+    ReleaseSlots();
+
     Allocator* allocator_{nullptr};
-    Vector<InnerIdType> inner_to_slot_;
-    InnerIdType physical_count_{0};
+    std::atomic<InnerIdType>* inner_to_slot_{nullptr};
+    InnerIdType logical_size_{0};
+    InnerIdType logical_capacity_{0};
+    std::atomic<InnerIdType> physical_count_{0};
     mutable std::shared_mutex mutex_;
 };
 
@@ -93,6 +112,11 @@ MakeHGraphCodeSlotAdapter(FlattenInterfacePtr base,
                           std::shared_ptr<const HGraphCodeSlotMap> mapping,
                           Allocator* allocator,
                           const std::atomic<uint64_t>* logical_total_count);
+
+void
+InsertVectorToHGraphCodeSlot(const FlattenInterfacePtr& flatten,
+                             const void* vector,
+                             InnerIdType code_slot_id);
 
 /**
  * @brief HGraph: hierarchical navigable graph index.
@@ -347,6 +371,10 @@ public:
     void
     insert_persistent_codes_unlocked(const void* data, InnerIdType inner_id);
 
+    /// Write codes to a physical code slot when deduplicated storage is enabled.
+    void
+    insert_persistent_codes_to_slot(const void* data, InnerIdType code_slot_id);
+
     /// Insert a single point using graph_read_codes for probing and graph connectivity.
     bool
     add_one_point(const void* data,
@@ -400,10 +428,10 @@ private:
                         const FlattenInterfacePtr& flatten_codes) const;
 
     void
-    bind_duplicate_storage_for_add(InnerIdType duplicate_id, InnerIdType inner_id);
+    publish_duplicate_storage_for_add(InnerIdType duplicate_id, InnerIdType inner_id);
 
     void
-    bind_unique_storage_for_add(InnerIdType inner_id);
+    insert_unique_storage_for_add(const void* data, InnerIdType inner_id);
 
     void
     publish_duplicate_for_add(InnerIdType group_id, InnerIdType duplicate_id);

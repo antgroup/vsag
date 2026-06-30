@@ -17,10 +17,12 @@
 #include <datacell/compressed_graph_datacell_parameter.h>
 #include <fmt/format.h>
 
+#include <array>
 #include <atomic>
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <new>
 #include <stdexcept>
 #include <utility>
 
@@ -120,6 +122,12 @@ public:
         this->refresh_metadata();
     }
 
+    void
+    InsertVectorToSlot(const void* vector, InnerIdType code_slot_id) {
+        base_->InsertVector(vector, code_slot_id);
+        this->refresh_metadata();
+    }
+
     bool
     UpdateVector(const void* vector, InnerIdType idx) override {
         auto updated = base_->UpdateVector(vector, mapping_->Resolve(idx));
@@ -143,7 +151,10 @@ public:
 
     float
     ComputePairVectors(InnerIdType id1, InnerIdType id2) override {
-        return base_->ComputePairVectors(mapping_->Resolve(id1), mapping_->Resolve(id2));
+        InnerIdType code_slot_id1 = 0;
+        InnerIdType code_slot_id2 = 0;
+        mapping_->ResolvePair(id1, id2, code_slot_id1, code_slot_id2);
+        return base_->ComputePairVectors(code_slot_id1, code_slot_id2);
     }
 
     void
@@ -208,21 +219,12 @@ public:
 
     const uint8_t*
     GetCodesById(InnerIdType id, bool& need_release) const override {
-        auto* codes = static_cast<uint8_t*>(allocator_->Allocate(this->code_size_));
-        if (codes == nullptr || not base_->GetCodesById(mapping_->Resolve(id), codes)) {
-            if (codes != nullptr) {
-                allocator_->Deallocate(codes);
-            }
-            need_release = false;
-            return nullptr;
-        }
-        need_release = true;
-        return codes;
+        return base_->GetCodesById(mapping_->Resolve(id), need_release);
     }
 
     void
     Release(const uint8_t* data) const override {
-        allocator_->Deallocate(const_cast<uint8_t*>(data));
+        base_->Release(data);
     }
 
     bool
@@ -295,15 +297,21 @@ private:
             return;
         }
         if (id_count == 1) {
-            InnerIdType mapped_id = mapping_->Resolve(idx[0]);
+            InnerIdType mapped_id = 0;
+            mapped_id = mapping_->Resolve(idx[0]);
             query_func(&mapped_id);
+            return;
+        }
+        constexpr InnerIdType stack_mapped_id_count = 128;
+        if (id_count <= stack_mapped_id_count) {
+            std::array<InnerIdType, stack_mapped_id_count> mapped_ids{};
+            mapping_->ResolveBatch(idx, id_count, mapped_ids.data());
+            query_func(mapped_ids.data());
             return;
         }
         Allocator* allocator = select_query_allocator(ctx, allocator_);
         Vector<InnerIdType> mapped_ids(static_cast<uint64_t>(id_count), allocator);
-        for (InnerIdType i = 0; i < id_count; ++i) {
-            mapped_ids[i] = mapping_->Resolve(idx[i]);
-        }
+        mapping_->ResolveBatch(idx, id_count, mapped_ids.data());
         query_func(mapped_ids.data());
     }
 
@@ -324,99 +332,219 @@ MakeHGraphCodeSlotAdapter(FlattenInterfacePtr base,
         std::move(base), std::move(mapping), allocator, logical_total_count);
 }
 
-HGraphCodeSlotMap::HGraphCodeSlotMap(Allocator* allocator)
-    : allocator_(allocator), inner_to_slot_(allocator) {
+void
+InsertVectorToHGraphCodeSlot(const FlattenInterfacePtr& flatten,
+                             const void* vector,
+                             InnerIdType code_slot_id) {
+    auto adapter = std::dynamic_pointer_cast<HGraphCodeSlotAdapter>(flatten);
+    if (adapter != nullptr) {
+        adapter->InsertVectorToSlot(vector, code_slot_id);
+        return;
+    }
+    flatten->InsertVector(vector, code_slot_id);
+}
+
+HGraphCodeSlotMap::HGraphCodeSlotMap(Allocator* allocator) : allocator_(allocator) {
+}
+
+HGraphCodeSlotMap::~HGraphCodeSlotMap() {
+    this->ReleaseSlots();
 }
 
 InnerIdType
-HGraphCodeSlotMap::BindNewSlot(InnerIdType inner_id) {
-    std::unique_lock lock(mutex_);
-    this->EnsureLogicalSize(inner_id + 1);
-    CHECK_ARGUMENT(inner_to_slot_[inner_id] == INVALID_CODE_SLOT,
-                   fmt::format("inner_id({}) is already bound", inner_id));
-    auto slot_id = physical_count_;
-    inner_to_slot_[inner_id] = slot_id;
-    ++physical_count_;
+HGraphCodeSlotMap::AllocateSlot() {
+    auto slot_id = physical_count_.fetch_add(1, std::memory_order_acq_rel);
+    if (slot_id >= logical_capacity_) {
+        physical_count_.fetch_sub(1, std::memory_order_acq_rel);
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            fmt::format("code slot capacity is not reserved for slot {}", slot_id));
+    }
     return slot_id;
 }
 
 void
-HGraphCodeSlotMap::BindExistingSlot(InnerIdType inner_id, InnerIdType code_slot_id) {
-    std::unique_lock lock(mutex_);
-    CHECK_ARGUMENT(code_slot_id < physical_count_,
-                   fmt::format("code_slot_id({}) must be less than physical_count({})",
-                               code_slot_id,
-                               physical_count_));
-    this->EnsureLogicalSize(inner_id + 1);
-    CHECK_ARGUMENT(inner_to_slot_[inner_id] == INVALID_CODE_SLOT,
-                   fmt::format("inner_id({}) is already bound", inner_id));
-    inner_to_slot_[inner_id] = code_slot_id;
+HGraphCodeSlotMap::PublishSlot(InnerIdType inner_id, InnerIdType code_slot_id) {
+    auto physical_count = physical_count_.load(std::memory_order_acquire);
+    CHECK_ARGUMENT(
+        code_slot_id < physical_count,
+        fmt::format(
+            "code_slot_id({}) must be less than physical_count({})", code_slot_id, physical_count));
+    if (inner_id >= logical_capacity_) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            fmt::format("inner_id({}) has no reserved code slot", inner_id));
+    }
+    auto expected = INVALID_CODE_SLOT;
+    CHECK_ARGUMENT(
+        inner_to_slot_[inner_id].compare_exchange_strong(
+            expected, code_slot_id, std::memory_order_release, std::memory_order_acquire),
+        fmt::format("inner_id({}) is already bound", inner_id));
 }
 
 InnerIdType
 HGraphCodeSlotMap::Resolve(InnerIdType inner_id) const {
-    std::shared_lock lock(mutex_);
-    if (inner_id >= inner_to_slot_.size() || inner_to_slot_[inner_id] == INVALID_CODE_SLOT) {
+    if (inner_id >= logical_capacity_) {
         throw VsagException(ErrorType::INVALID_ARGUMENT,
                             fmt::format("inner_id({}) has no bound code slot", inner_id));
     }
-    return inner_to_slot_[inner_id];
+    auto slot = inner_to_slot_[inner_id].load(std::memory_order_acquire);
+    if (slot == INVALID_CODE_SLOT) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            fmt::format("inner_id({}) has no bound code slot", inner_id));
+    }
+    return slot;
+}
+
+void
+HGraphCodeSlotMap::ResolvePair(InnerIdType inner_id1,
+                               InnerIdType inner_id2,
+                               InnerIdType& code_slot_id1,
+                               InnerIdType& code_slot_id2) const {
+    if (inner_id1 >= logical_capacity_) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            fmt::format("inner_id({}) has no bound code slot", inner_id1));
+    }
+    if (inner_id2 >= logical_capacity_) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            fmt::format("inner_id({}) has no bound code slot", inner_id2));
+    }
+    code_slot_id1 = inner_to_slot_[inner_id1].load(std::memory_order_acquire);
+    code_slot_id2 = inner_to_slot_[inner_id2].load(std::memory_order_acquire);
+    if (code_slot_id1 == INVALID_CODE_SLOT) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            fmt::format("inner_id({}) has no bound code slot", inner_id1));
+    }
+    if (code_slot_id2 == INVALID_CODE_SLOT) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            fmt::format("inner_id({}) has no bound code slot", inner_id2));
+    }
+}
+
+void
+HGraphCodeSlotMap::ResolveBatch(const InnerIdType* inner_ids,
+                                InnerIdType count,
+                                InnerIdType* code_slot_ids) const {
+    for (InnerIdType i = 0; i < count; ++i) {
+        auto inner_id = inner_ids[i];
+        if (inner_id >= logical_capacity_) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                fmt::format("inner_id({}) has no bound code slot", inner_id));
+        }
+        auto slot = inner_to_slot_[inner_id].load(std::memory_order_acquire);
+        if (slot == INVALID_CODE_SLOT) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                fmt::format("inner_id({}) has no bound code slot", inner_id));
+        }
+        code_slot_ids[i] = slot;
+    }
+}
+
+void
+HGraphCodeSlotMap::ReserveLogicalSize(InnerIdType new_size) {
+    std::unique_lock lock(mutex_);
+    this->EnsureLogicalSize(new_size);
 }
 
 InnerIdType
 HGraphCodeSlotMap::PhysicalCount() const {
-    std::shared_lock lock(mutex_);
-    return physical_count_;
+    return physical_count_.load(std::memory_order_acquire);
 }
 
 void
 HGraphCodeSlotMap::Clear() {
     std::unique_lock lock(mutex_);
-    inner_to_slot_.clear();
-    physical_count_ = 0;
+    this->ReleaseSlots();
+    logical_size_ = 0;
+    physical_count_.store(0, std::memory_order_release);
 }
 
 void
 HGraphCodeSlotMap::Serialize(StreamWriter& writer) const {
     std::shared_lock lock(mutex_);
-    StreamWriter::WriteObj(writer, physical_count_);
-    StreamWriter::WriteVector(writer, inner_to_slot_);
+    auto physical_count = physical_count_.load(std::memory_order_acquire);
+    StreamWriter::WriteObj(writer, physical_count);
+    Vector<InnerIdType> slots(allocator_);
+    slots.resize(logical_size_);
+    for (InnerIdType inner_id = 0; inner_id < logical_size_; ++inner_id) {
+        slots[inner_id] = inner_to_slot_[inner_id].load(std::memory_order_acquire);
+    }
+    StreamWriter::WriteVector(writer, slots);
 }
 
 void
 HGraphCodeSlotMap::Deserialize(StreamReader& reader) {
     std::unique_lock lock(mutex_);
-    StreamReader::ReadObj(reader, physical_count_);
-    StreamReader::ReadVector(reader, inner_to_slot_);
-    for (auto slot : inner_to_slot_) {
-        if (slot != INVALID_CODE_SLOT && slot >= physical_count_) {
+    InnerIdType physical_count = 0;
+    StreamReader::ReadObj(reader, physical_count);
+    Vector<InnerIdType> slots(allocator_);
+    StreamReader::ReadVector(reader, slots);
+    this->ReleaseSlots();
+    logical_size_ = 0;
+    this->EnsureLogicalSize(static_cast<InnerIdType>(slots.size()));
+    for (InnerIdType inner_id = 0; inner_id < slots.size(); ++inner_id) {
+        auto slot = slots[inner_id];
+        if (slot != INVALID_CODE_SLOT && slot >= physical_count) {
             throw VsagException(
                 ErrorType::INVALID_ARGUMENT,
                 fmt::format("invalid code slot mapping: slot {} >= physical count {}",
                             slot,
-                            physical_count_));
+                            physical_count));
         }
+        inner_to_slot_[inner_id].store(slot, std::memory_order_release);
     }
+    physical_count_.store(physical_count, std::memory_order_release);
 }
 
 int64_t
 HGraphCodeSlotMap::GetMemoryUsage() const {
     std::shared_lock lock(mutex_);
     auto memory = static_cast<uint64_t>(sizeof(*this));
-    memory += static_cast<uint64_t>(inner_to_slot_.size()) * sizeof(InnerIdType);
+    memory += static_cast<uint64_t>(logical_capacity_) * sizeof(std::atomic<InnerIdType>);
     return static_cast<int64_t>(memory);
 }
 
 void
 HGraphCodeSlotMap::EnsureLogicalSize(InnerIdType new_size) {
-    if (new_size <= inner_to_slot_.size()) {
+    if (new_size <= logical_size_) {
         return;
     }
-    auto old_size = static_cast<InnerIdType>(inner_to_slot_.size());
-    inner_to_slot_.resize(new_size);
-    for (InnerIdType inner_id = old_size; inner_id < new_size; ++inner_id) {
-        inner_to_slot_[inner_id] = INVALID_CODE_SLOT;
+    if (new_size > logical_capacity_) {
+        auto* new_slots = static_cast<std::atomic<InnerIdType>*>(
+            allocator_->Allocate(static_cast<uint64_t>(new_size) *
+                                 static_cast<uint64_t>(sizeof(std::atomic<InnerIdType>))));
+        if (new_slots == nullptr) {
+            throw VsagException(ErrorType::NO_ENOUGH_MEMORY,
+                                "failed to allocate HGraph code slot map");
+        }
+        for (InnerIdType inner_id = 0; inner_id < new_size; ++inner_id) {
+            new (new_slots + inner_id) std::atomic<InnerIdType>(INVALID_CODE_SLOT);
+        }
+        for (InnerIdType inner_id = 0; inner_id < logical_size_; ++inner_id) {
+            new_slots[inner_id].store(inner_to_slot_[inner_id].load(std::memory_order_acquire),
+                                      std::memory_order_release);
+        }
+        this->ReleaseSlots();
+        inner_to_slot_ = new_slots;
+        logical_capacity_ = new_size;
     }
+    for (InnerIdType inner_id = logical_size_; inner_id < new_size; ++inner_id) {
+        inner_to_slot_[inner_id].store(INVALID_CODE_SLOT, std::memory_order_release);
+    }
+    logical_size_ = new_size;
+}
+
+void
+HGraphCodeSlotMap::ReleaseSlots() {
+    if (inner_to_slot_ == nullptr) {
+        logical_capacity_ = 0;
+        return;
+    }
+    using AtomicSlot = std::atomic<InnerIdType>;
+    for (InnerIdType inner_id = 0; inner_id < logical_capacity_; ++inner_id) {
+        inner_to_slot_[inner_id].~AtomicSlot();
+    }
+    allocator_->Deallocate(inner_to_slot_);
+    inner_to_slot_ = nullptr;
+    logical_capacity_ = 0;
 }
 
 class HGraphAnalyzer;

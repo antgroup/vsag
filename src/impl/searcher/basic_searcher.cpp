@@ -540,10 +540,14 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                 inner_search_param.duplicate_id = min_index;
             }
         } else {
-            Vector<uint8_t> encoded_query(flatten->code_size_, alloc);
-            if (flatten->CompareVectorWithId(query, min_index, encoded_query.data()) ||
-                (inner_search_param.duplicate_query_id < flatten->TotalCount() &&
-                 flatten->CompareVectors(inner_search_param.duplicate_query_id, min_index))) {
+            bool is_duplicate =
+                inner_search_param.duplicate_query_id < flatten->TotalCount() &&
+                flatten->CompareVectors(inner_search_param.duplicate_query_id, min_index);
+            if (not is_duplicate) {
+                Vector<uint8_t> encoded_query(flatten->code_size_, alloc);
+                is_duplicate = flatten->CompareVectorWithId(query, min_index, encoded_query.data());
+            }
+            if (is_duplicate) {
                 inner_search_param.duplicate_id = min_index;
             }
         }

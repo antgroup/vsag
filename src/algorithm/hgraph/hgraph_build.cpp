@@ -386,6 +386,17 @@ HGraph::insert_persistent_codes_unlocked(const void* data, InnerIdType inner_id)
     }
 }
 
+void
+HGraph::insert_persistent_codes_to_slot(const void* data, InnerIdType code_slot_id) {
+    InsertVectorToHGraphCodeSlot(this->basic_flatten_codes_, data, code_slot_id);
+    if (has_precise_reorder()) {
+        InsertVectorToHGraphCodeSlot(this->high_precise_codes_, data, code_slot_id);
+    }
+    if (create_new_raw_vector_) {
+        InsertVectorToHGraphCodeSlot(this->raw_vector_, data, code_slot_id);
+    }
+}
+
 bool
 HGraph::add_one_point(const void* data,
                       int level,
@@ -403,8 +414,8 @@ HGraph::add_one_point(const void* data,
         if (probe.duplicate_id >= 0) {
             // Stage 2a: prepare duplicate storage before publishing the duplicate id.
             if (this->support_duplicate_ && this->deduplicate_storage_) {
-                this->bind_duplicate_storage_for_add(static_cast<InnerIdType>(probe.duplicate_id),
-                                                     inner_id);
+                this->publish_duplicate_storage_for_add(
+                    static_cast<InnerIdType>(probe.duplicate_id), inner_id);
             } else {
                 this->insert_persistent_codes_unlocked(data, inner_id);
             }
@@ -414,8 +425,7 @@ HGraph::add_one_point(const void* data,
         }
 
         // Stage 2b: prepare unique storage before making the node visible in the graph.
-        this->bind_unique_storage_for_add(inner_id);
-        this->insert_persistent_codes_unlocked(data, inner_id);
+        this->insert_unique_storage_for_add(data, inner_id);
 
         // Stage 3b: publish the unique node to the graph after codes are readable.
         this->connect_bottom_for_add(inner_id, probe.neighbors, graph_read_codes);
@@ -423,13 +433,6 @@ HGraph::add_one_point(const void* data,
         return true;
     };
 
-    std::unique_lock<std::shared_mutex> add_lock(this->add_mutex_, std::defer_lock);
-    if (this->support_force_remove()) {
-        add_lock.lock();
-    }
-    if (not this->support_force_remove()) {
-        add_lock.lock();
-    }
     if (level >= static_cast<int>(this->route_graphs_.size()) || bottom_graph_->TotalCount() == 0) {
         std::scoped_lock<std::shared_mutex> wlock(this->global_mutex_);
         // level maybe a negative number(-1)
@@ -442,10 +445,8 @@ HGraph::add_one_point(const void* data,
         } else {
             this->route_graphs_.pop_back();
         }
-        add_lock.unlock();
         return insert_success;
     }
-    add_lock.unlock();
     std::shared_lock rlock(this->global_mutex_);
     return run_add_stages();
 }
@@ -556,18 +557,22 @@ HGraph::connect_route_graphs_for_add(const void* data,
 }
 
 void
-HGraph::bind_duplicate_storage_for_add(InnerIdType duplicate_id, InnerIdType inner_id) {
+HGraph::publish_duplicate_storage_for_add(InnerIdType duplicate_id, InnerIdType inner_id) {
     if (this->support_duplicate_ && this->deduplicate_storage_) {
-        this->code_slot_map_->BindExistingSlot(inner_id,
-                                               this->code_slot_map_->Resolve(duplicate_id));
+        auto code_slot_id = this->code_slot_map_->Resolve(duplicate_id);
+        this->code_slot_map_->PublishSlot(inner_id, code_slot_id);
     }
 }
 
 void
-HGraph::bind_unique_storage_for_add(InnerIdType inner_id) {
+HGraph::insert_unique_storage_for_add(const void* data, InnerIdType inner_id) {
     if (this->support_duplicate_ && this->deduplicate_storage_) {
-        this->code_slot_map_->BindNewSlot(inner_id);
+        auto code_slot_id = this->code_slot_map_->AllocateSlot();
+        this->insert_persistent_codes_to_slot(data, code_slot_id);
+        this->code_slot_map_->PublishSlot(inner_id, code_slot_id);
+        return;
     }
+    this->insert_persistent_codes_unlocked(data, inner_id);
 }
 
 void
@@ -591,6 +596,9 @@ HGraph::resize(uint64_t new_size) {
         pool_ = std::make_shared<VisitedListPool>(1, allocator_, new_size_power_2, allocator_);
         this->label_table_->Resize(new_size_power_2);
         bottom_graph_->Resize(new_size_power_2);
+        if (this->support_duplicate_ && this->deduplicate_storage_) {
+            this->code_slot_map_->ReserveLogicalSize(static_cast<InnerIdType>(new_size_power_2));
+        }
         this->basic_flatten_codes_->Resize(new_size_power_2);
         if (has_precise_reorder()) {
             this->high_precise_codes_->Resize(new_size_power_2);

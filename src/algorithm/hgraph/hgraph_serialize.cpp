@@ -348,6 +348,9 @@ HGraph::Deserialize(StreamReader& reader) {
         }
         auto new_size = max_capacity_.load();
         this->neighbors_mutex_->Resize(new_size);
+        if (this->support_duplicate_ && this->deduplicate_storage_) {
+            this->code_slot_map_->ReserveLogicalSize(static_cast<InnerIdType>(new_size));
+        }
 
         pool_ = std::make_shared<VisitedListPool>(1, allocator_, new_size, allocator_);
 
@@ -400,6 +403,9 @@ HGraph::Deserialize(StreamReader& reader) {
         }
         auto new_size = max_capacity_.load();
         this->neighbors_mutex_->Resize(new_size);
+        if (this->support_duplicate_ && this->deduplicate_storage_) {
+            this->code_slot_map_->ReserveLogicalSize(static_cast<InnerIdType>(new_size));
+        }
 
         pool_ = std::make_shared<VisitedListPool>(1, allocator_, new_size, allocator_);
 
