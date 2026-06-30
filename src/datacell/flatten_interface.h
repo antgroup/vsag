@@ -16,6 +16,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cstring>
 #include <limits>
 #include <shared_mutex>
 #include <string>
@@ -121,6 +122,31 @@ public:
             this->Release(codes2);
         }
         return result;
+    }
+
+    bool
+    CompareVectorWithId(const void* vector, InnerIdType id, uint8_t* encoded_buffer) {
+        if (vector == nullptr || encoded_buffer == nullptr) {
+            return false;
+        }
+        try {
+            if (not this->Encode(static_cast<const float*>(vector), encoded_buffer)) {
+                return false;
+            }
+
+            bool need_release = false;
+            const auto* codes = this->GetCodesById(id, need_release);
+            if (codes == nullptr) {
+                return false;
+            }
+            bool result = (std::memcmp(encoded_buffer, codes, this->code_size_) == 0);
+            if (need_release) {
+                this->Release(codes);
+            }
+            return result;
+        } catch (const VsagException&) {
+            return false;
+        }
     }
 
     virtual void

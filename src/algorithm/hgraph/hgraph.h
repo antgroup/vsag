@@ -15,6 +15,8 @@
 
 #pragma once
 
+#include <atomic>
+#include <memory>
 #include <random>
 #include <shared_mutex>
 #include <string>
@@ -37,6 +39,8 @@
 #include "impl/thread_pool/default_thread_pool.h"
 #include "index_common_param.h"
 #include "index_feature_list.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
 #include "typing.h"
 #include "utils/lock_strategy.h"
 #include "utils/util_functions.h"
@@ -46,6 +50,49 @@
 
 namespace vsag {
 class IteratorFilterContext;
+
+struct HGraphCodeSlotMap {
+    explicit HGraphCodeSlotMap(Allocator* allocator);
+
+    InnerIdType
+    BindNewSlot(InnerIdType inner_id);
+
+    void
+    BindExistingSlot(InnerIdType inner_id, InnerIdType code_slot_id);
+
+    [[nodiscard]] InnerIdType
+    Resolve(InnerIdType inner_id) const;
+
+    [[nodiscard]] InnerIdType
+    PhysicalCount() const;
+
+    void
+    Clear();
+
+    void
+    Serialize(StreamWriter& writer) const;
+
+    void
+    Deserialize(StreamReader& reader);
+
+    [[nodiscard]] int64_t
+    GetMemoryUsage() const;
+
+private:
+    void
+    EnsureLogicalSize(InnerIdType new_size);
+
+    Allocator* allocator_{nullptr};
+    Vector<InnerIdType> inner_to_slot_;
+    InnerIdType physical_count_{0};
+    mutable std::shared_mutex mutex_;
+};
+
+FlattenInterfacePtr
+MakeHGraphCodeSlotAdapter(FlattenInterfacePtr base,
+                          std::shared_ptr<const HGraphCodeSlotMap> mapping,
+                          Allocator* allocator,
+                          const std::atomic<uint64_t>* logical_total_count);
 
 /**
  * @brief HGraph: hierarchical navigable graph index.
@@ -292,22 +339,20 @@ public:
     std::vector<int64_t>
     build_by_odescent(const DatasetPtr& data);
 
-    /// Insert a single point into the graph(s) at the given level.
-    void
-    add_one_point(const void* data, int level, InnerIdType id);
-
     /// Write codes for inner_id into the persistent flatten storage.
     void
     insert_persistent_codes(const void* data, InnerIdType inner_id);
 
-    /// Insert a single point, optionally also inserting codes.
+    /// Write codes when the caller already protects storage capacity.
     void
-    add_one_point(const void* data, int level, InnerIdType id, bool insert_codes);
+    insert_persistent_codes_unlocked(const void* data, InnerIdType inner_id);
 
-    /// Core graph insertion: connect the new node and update neighbors.
-    /// Returns true if the entry point was updated.
+    /// Insert a single point using graph_read_codes for probing and graph connectivity.
     bool
-    graph_add_one(const void* data, int level, InnerIdType inner_id);
+    add_one_point(const void* data,
+                  int level,
+                  InnerIdType id,
+                  const FlattenInterfacePtr& graph_read_codes);
 
     /// Grow internal storage to at least new_size capacity.
     void
@@ -342,6 +387,39 @@ public:
                      DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
 
 private:
+    struct GraphAddProbeResult {
+        DistHeapPtr neighbors{nullptr};
+        int64_t duplicate_id{-1};
+    };
+
+    GraphAddProbeResult
+    probe_graph_for_add(const void* data,
+                        int level,
+                        InnerIdType inner_id,
+                        InnerSearchParam& param,
+                        const FlattenInterfacePtr& flatten_codes) const;
+
+    void
+    bind_duplicate_storage_for_add(InnerIdType duplicate_id, InnerIdType inner_id);
+
+    void
+    bind_unique_storage_for_add(InnerIdType inner_id);
+
+    void
+    publish_duplicate_for_add(InnerIdType group_id, InnerIdType duplicate_id);
+
+    void
+    connect_bottom_for_add(InnerIdType inner_id,
+                           const DistHeapPtr& neighbors,
+                           const FlattenInterfacePtr& flatten_codes);
+
+    void
+    connect_route_graphs_for_add(const void* data,
+                                 int level,
+                                 InnerIdType inner_id,
+                                 InnerSearchParam& param,
+                                 const FlattenInterfacePtr& flatten_codes);
+
     // since v0.15: serialize basic index metadata to JSON.
     JsonType
     serialize_basic_info() const;
@@ -546,6 +624,7 @@ private:
 private:
     FlattenInterfacePtr basic_flatten_codes_{nullptr};  // coarse/quantized codes for graph search
     FlattenInterfacePtr high_precise_codes_{nullptr};   // precise codes for reorder (optional)
+    std::shared_ptr<HGraphCodeSlotMap> code_slot_map_{nullptr};
 
     Vector<GraphInterfacePtr> route_graphs_;   // upper-layer route graphs
     GraphInterfacePtr bottom_graph_{nullptr};  // base-level graph (all vectors)
@@ -588,8 +667,7 @@ private:
 
     std::shared_ptr<Optimizer<BasicSearcher>> optimizer_;  // search parameter optimizer
 
-    bool create_new_raw_vector_{false};  // whether a separate raw vector exists
-    FlattenInterfacePtr temporary_build_flatten_codes_{nullptr};  // temp flatten during build
+    bool create_new_raw_vector_{false};        // whether a separate raw vector exists
     FlattenInterfacePtr raw_vector_{nullptr};  // raw float vectors (for distance calc)
 
     ReorderInterfacePtr reorder_{nullptr};  // reorder helper
@@ -597,6 +675,7 @@ private:
     bool use_old_serial_format_{false};  // true when deserialized from legacy format
 
     bool support_duplicate_{false};             // allow duplicate external ids
+    bool deduplicate_storage_{false};           // share duplicate vector storage slots
     bool support_force_remove_{false};          // enable physical deletion
     float duplicate_distance_threshold_{0.0F};  // distance threshold for duplicate detection
 

@@ -56,6 +56,7 @@ struct HGraphDefaultParam {
     int remove_flag_bit = 8;
     bool use_attribute_filter = false;
     bool support_duplicate = false;
+    bool deduplicate_storage = false;
     float duplicate_distance_threshold = 0.0F;
     bool support_force_remove = false;
     bool use_reorder = true;
@@ -113,6 +114,7 @@ generate_hgraph_param(const HGraphDefaultParam& param) {
         "use_attribute_filter": {},
         "use_reorder": {},
         "support_duplicate": {},
+        "deduplicate_storage": {},
         "duplicate_distance_threshold": {},
         "support_force_remove": {}
     }})";
@@ -130,6 +132,7 @@ generate_hgraph_param(const HGraphDefaultParam& param) {
                        param.use_attribute_filter,
                        param.use_reorder,
                        param.support_duplicate,
+                       param.deduplicate_storage,
                        param.duplicate_distance_threshold,
                        param.support_force_remove);
 }
@@ -171,6 +174,19 @@ TEST_CASE("HGraph Parameters CheckCompatibility", "[ut][HGraphParameter][CheckCo
     TEST_COMPATIBILITY_CASE(
         "different use attribute filter", use_attribute_filter, true, false, false)
     TEST_COMPATIBILITY_CASE("different support duplicate", support_duplicate, true, false, false)
+    SECTION("different deduplicate storage") {
+        HGraphDefaultParam param1;
+        HGraphDefaultParam param2;
+        param1.support_duplicate = true;
+        param2.support_duplicate = true;
+        param1.deduplicate_storage = true;
+        param2.deduplicate_storage = false;
+        auto hgraph_param1 = std::make_shared<vsag::HGraphParameter>();
+        auto hgraph_param2 = std::make_shared<vsag::HGraphParameter>();
+        hgraph_param1->FromString(generate_hgraph_param(param1));
+        hgraph_param2->FromString(generate_hgraph_param(param2));
+        REQUIRE_FALSE(hgraph_param1->CheckCompatibility(hgraph_param2));
+    }
     TEST_COMPATIBILITY_CASE("different duplicate distance threshold",
                             duplicate_distance_threshold,
                             0.0F,
@@ -193,6 +209,7 @@ TEST_CASE("HGraph maps support_duplicate to graph parameter", "[ut][HGraphParame
         "max_degree": 32,
         "ef_construction": 100,
         "support_duplicate": true,
+        "deduplicate_storage": true,
         "duplicate_distance_threshold": 0.25,
         "use_reorder": true
     })");
@@ -205,8 +222,31 @@ TEST_CASE("HGraph maps support_duplicate to graph parameter", "[ut][HGraphParame
 
     REQUIRE(typed_param != nullptr);
     REQUIRE(typed_param->support_duplicate);
+    REQUIRE(typed_param->deduplicate_storage);
     REQUIRE(typed_param->duplicate_distance_threshold == 0.25F);
     REQUIRE(typed_param->bottom_graph_param->support_duplicate_);
+}
+
+TEST_CASE("HGraph rejects deduplicate_storage without support_duplicate", "[ut][HGraphParameter]") {
+    auto param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "base_io_type": "block_memory_io",
+        "precise_quantization_type": "fp32",
+        "precise_io_type": "block_memory_io",
+        "graph_io_type": "block_memory_io",
+        "graph_storage_type": "flat",
+        "graph_type": "nsw",
+        "max_degree": 32,
+        "ef_construction": 100,
+        "support_duplicate": false,
+        "deduplicate_storage": true,
+        "use_reorder": true
+    })");
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
 }
 
 TEST_CASE("HGraph Search Parameters parse RaBitQ error rate", "[ut][HGraphParameter]") {

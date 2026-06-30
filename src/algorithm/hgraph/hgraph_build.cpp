@@ -92,6 +92,10 @@ HGraph::Build(const DatasetPtr& data) {
     this->build_cache_hit_nodes_ = 0;
     this->build_cache_missed_nodes_ = 0;
     if (this->has_loaded_cache()) {
+        if (this->support_duplicate_ && this->deduplicate_storage_) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "HGraph deduplicate_storage does not support build_with_cache");
+        }
         // A previously exported cache has been imported via ImportCache().
         // Take the accelerated build path that warm-starts neighbours from
         // the cache and refines them, instead of building from scratch.
@@ -242,37 +246,33 @@ HGraph::Add(const DatasetPtr& data) {
 
     auto need_sq8_build_data =
         need_temporary_sq8_build_data(this->basic_flatten_codes_, this->has_precise_reorder());
-    CHECK_ARGUMENT(not(need_sq8_build_data and this->total_count_ != 0 and
-                       raw_vector_ == nullptr and temporary_build_flatten_codes_ == nullptr),
-                   "adding to a non-empty HGraph that needs temporary SQ8 build data requires "
-                   "raw vectors");
-    bool created_temporary_build_data = false;
-    if (need_sq8_build_data and this->total_count_ == 0 and raw_vector_ == nullptr and
-        temporary_build_flatten_codes_ == nullptr) {
-        temporary_build_flatten_codes_ =
+    if (need_sq8_build_data and this->total_count_ != 0 and raw_vector_ == nullptr) {
+        throw VsagException(
+            ErrorType::INVALID_ARGUMENT,
+            "adding to a non-empty HGraph that needs temporary SQ8 build data requires raw "
+            "vectors");
+    }
+    auto graph_read_codes = this->basic_flatten_codes_;
+    FlattenInterfacePtr temporary_graph_read_codes = nullptr;
+    if (need_sq8_build_data and this->total_count_ == 0 and raw_vector_ == nullptr) {
+        temporary_graph_read_codes =
             make_temporary_sq8_flatten(this->metric_,
                                        this->data_type_,
                                        this->dim_,
                                        static_cast<int64_t>(this->extra_info_size_),
                                        this->thread_pool_,
                                        this->allocator_);
-        temporary_build_flatten_codes_->Train(get_data(data), data->GetNumElements());
-        created_temporary_build_data = true;
+        temporary_graph_read_codes->Train(get_data(data), data->GetNumElements());
+        graph_read_codes = temporary_graph_read_codes;
+    } else if (need_sq8_build_data and raw_vector_ != nullptr) {
+        graph_read_codes = raw_vector_;
+    } else if (has_precise_reorder() and not build_by_base_) {
+        graph_read_codes = high_precise_codes_;
     }
-    struct temporary_build_flatten_guard {
-        HGraph* hgraph;
-        bool enabled;
-        ~temporary_build_flatten_guard() {
-            if (enabled) {
-                hgraph->temporary_build_flatten_codes_.reset();
-            }
-        }
-    } temporary_build_flatten_guard_instance{this, created_temporary_build_data};
-    bool defer_persistent_codes = created_temporary_build_data;
 
     {
         std::scoped_lock lock(this->add_mutex_);
-        if (this->total_count_ == 0 and not defer_persistent_codes) {
+        if (this->total_count_ == 0) {
             this->Train(data);
         }
     }
@@ -288,7 +288,7 @@ HGraph::Add(const DatasetPtr& data) {
         if (attrs != nullptr and this->use_attribute_filter_) {
             this->attr_filter_index_->Insert(*attrs, inner_id);
         }
-        this->add_one_point(data, level, inner_id, not defer_persistent_codes);
+        this->add_one_point(data, level, inner_id, graph_read_codes);
     };
 
     std::vector<std::future<void>> futures;
@@ -334,9 +334,9 @@ HGraph::Add(const DatasetPtr& data) {
             inner_ids.emplace_back(inner_id, j);
         }
     }
-    if (temporary_build_flatten_codes_ != nullptr) {
+    if (temporary_graph_read_codes != nullptr) {
         for (const auto& [inner_id, local_idx] : inner_ids) {
-            temporary_build_flatten_codes_->InsertVector(get_data(data, local_idx), inner_id);
+            temporary_graph_read_codes->InsertVector(get_data(data, local_idx), inner_id);
         }
     }
     for (auto& [inner_id, local_idx] : inner_ids) {
@@ -363,38 +363,7 @@ HGraph::Add(const DatasetPtr& data) {
             future.get();
         }
     }
-    if (defer_persistent_codes) {
-        temporary_build_flatten_codes_.reset();
-        {
-            std::scoped_lock lock(this->add_mutex_);
-            this->Train(data);
-        }
-        futures.clear();
-        for (const auto& id_pair : inner_ids) {
-            auto inner_id = id_pair.first;
-            auto local_idx = id_pair.second;
-            if (use_parallel_add) {
-                auto future =
-                    this->thread_pool_->GeneralEnqueue([this, data, inner_id, local_idx]() {
-                        this->insert_persistent_codes(get_data(data, local_idx), inner_id);
-                    });
-                futures.emplace_back(std::move(future));
-            } else {
-                this->insert_persistent_codes(get_data(data, local_idx), inner_id);
-            }
-        }
-        if (use_parallel_add) {
-            for (auto& future : futures) {
-                future.get();
-            }
-        }
-    }
     return failed_ids;
-}
-
-void
-HGraph::add_one_point(const void* data, int level, InnerIdType inner_id) {
-    this->add_one_point(data, level, inner_id, true);
 }
 
 void
@@ -403,6 +372,11 @@ HGraph::insert_persistent_codes(const void* data, InnerIdType inner_id) {
     if (not this->support_force_remove()) {
         add_lock = std::shared_lock<std::shared_mutex>(this->add_mutex_);
     }
+    this->insert_persistent_codes_unlocked(data, inner_id);
+}
+
+void
+HGraph::insert_persistent_codes_unlocked(const void* data, InnerIdType inner_id) {
     this->basic_flatten_codes_->InsertVector(data, inner_id);
     if (has_precise_reorder()) {
         this->high_precise_codes_->InsertVector(data, inner_id);
@@ -412,14 +386,46 @@ HGraph::insert_persistent_codes(const void* data, InnerIdType inner_id) {
     }
 }
 
-void
-HGraph::add_one_point(const void* data, int level, InnerIdType inner_id, bool insert_codes) {
+bool
+HGraph::add_one_point(const void* data,
+                      int level,
+                      InnerIdType inner_id,
+                      const FlattenInterfacePtr& graph_read_codes) {
+    auto run_add_stages = [&]() -> bool {
+        InnerSearchParam param;
+        param.topk = 1;
+        param.ep = this->entry_point_id_;
+        param.ef = 1;
+        param.is_inner_id_allowed = nullptr;
+
+        // Stage 1: probe the current graph view and decide whether this point is a duplicate.
+        auto probe = this->probe_graph_for_add(data, level, inner_id, param, graph_read_codes);
+        if (probe.duplicate_id >= 0) {
+            // Stage 2a: prepare duplicate storage before publishing the duplicate id.
+            if (this->support_duplicate_ && this->deduplicate_storage_) {
+                this->bind_duplicate_storage_for_add(static_cast<InnerIdType>(probe.duplicate_id),
+                                                     inner_id);
+            } else {
+                this->insert_persistent_codes_unlocked(data, inner_id);
+            }
+            // Stage 3a: publish the logical duplicate after its storage mapping is ready.
+            this->publish_duplicate_for_add(static_cast<InnerIdType>(probe.duplicate_id), inner_id);
+            return false;
+        }
+
+        // Stage 2b: prepare unique storage before making the node visible in the graph.
+        this->bind_unique_storage_for_add(inner_id);
+        this->insert_persistent_codes_unlocked(data, inner_id);
+
+        // Stage 3b: publish the unique node to the graph after codes are readable.
+        this->connect_bottom_for_add(inner_id, probe.neighbors, graph_read_codes);
+        this->connect_route_graphs_for_add(data, level, inner_id, param, graph_read_codes);
+        return true;
+    };
+
     std::unique_lock<std::shared_mutex> add_lock(this->add_mutex_, std::defer_lock);
     if (this->support_force_remove()) {
         add_lock.lock();
-    }
-    if (insert_codes) {
-        this->insert_persistent_codes(data, inner_id);
     }
     if (not this->support_force_remove()) {
         add_lock.lock();
@@ -430,39 +436,27 @@ HGraph::add_one_point(const void* data, int level, InnerIdType inner_id, bool in
         for (auto j = static_cast<int>(this->route_graphs_.size()); j <= level; ++j) {
             this->route_graphs_.emplace_back(this->generate_one_route_graph());
         }
-        auto insert_success = this->graph_add_one(data, level, inner_id);
+        auto insert_success = run_add_stages();
         if (insert_success) {
             entry_point_id_ = inner_id;
         } else {
             this->route_graphs_.pop_back();
         }
         add_lock.unlock();
-    } else {
-        add_lock.unlock();
-        std::shared_lock rlock(this->global_mutex_);
-        this->graph_add_one(data, level, inner_id);
+        return insert_success;
     }
+    add_lock.unlock();
+    std::shared_lock rlock(this->global_mutex_);
+    return run_add_stages();
 }
 
-bool
-HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
+HGraph::GraphAddProbeResult
+HGraph::probe_graph_for_add(const void* data,
+                            int level,
+                            InnerIdType inner_id,
+                            InnerSearchParam& param,
+                            const FlattenInterfacePtr& flatten_codes) const {
     DistHeapPtr result = nullptr;
-    InnerSearchParam param;
-    param.topk = 1;
-    param.ep = this->entry_point_id_;
-    param.ef = 1;
-    param.is_inner_id_allowed = nullptr;
-
-    auto flatten_codes = basic_flatten_codes_;
-    if (temporary_build_flatten_codes_ != nullptr) {
-        flatten_codes = temporary_build_flatten_codes_;
-    } else if (need_temporary_sq8_build_data(this->basic_flatten_codes_,
-                                             this->has_precise_reorder()) and
-               raw_vector_ != nullptr) {
-        flatten_codes = raw_vector_;
-    } else if (has_precise_reorder() and not build_by_base_) {
-        flatten_codes = high_precise_codes_;
-    }
 
     for (auto j = this->route_graphs_.size() - 1; j > level; --j) {
         result = search_one_graph(
@@ -474,7 +468,9 @@ HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
     param.topk = static_cast<int64_t>(ef_construct_);
     if (this->support_duplicate_) {
         param.find_duplicate = true;
-        param.duplicate_query_id = inner_id;
+        param.duplicate_query_id = this->support_duplicate_ && this->deduplicate_storage_
+                                       ? std::numeric_limits<InnerIdType>::max()
+                                       : inner_id;
         param.duplicate_distance_threshold = this->duplicate_distance_threshold_;
     }
 
@@ -487,9 +483,7 @@ HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
                                   (VisitedListPtr) nullptr,
                                   nullptr);
         if (this->support_duplicate_ && param.duplicate_id >= 0) {
-            std::unique_lock lock(this->label_lookup_mutex_);
-            bottom_graph_->SetDuplicateId(static_cast<InnerIdType>(param.duplicate_id), inner_id);
-            return false;
+            return GraphAddProbeResult{nullptr, param.duplicate_id};
         }
         auto filtered_result = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
         while (not result->Empty()) {
@@ -499,19 +493,36 @@ HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
                 filtered_result->Push(dist, id);
             }
         }
-        LockGuard cur_lock(neighbors_mutex_, inner_id);
+        return GraphAddProbeResult{filtered_result, -1};
+    }
+    return GraphAddProbeResult{};
+}
+
+void
+HGraph::connect_bottom_for_add(InnerIdType inner_id,
+                               const DistHeapPtr& neighbors,
+                               const FlattenInterfacePtr& flatten_codes) {
+    LockGuard cur_lock(neighbors_mutex_, inner_id);
+    if (neighbors != nullptr) {
         mutually_connect_new_element(inner_id,
-                                     filtered_result,
+                                     neighbors,
                                      this->bottom_graph_,
                                      flatten_codes,
                                      neighbors_mutex_,
                                      allocator_,
                                      alpha_);
-    } else {
-        LockGuard cur_lock(neighbors_mutex_, inner_id);
-        bottom_graph_->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
+        return;
     }
+    bottom_graph_->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
+}
 
+void
+HGraph::connect_route_graphs_for_add(const void* data,
+                                     int level,
+                                     InnerIdType inner_id,
+                                     InnerSearchParam& param,
+                                     const FlattenInterfacePtr& flatten_codes) {
+    DistHeapPtr result = nullptr;
     for (int64_t j = 0; j <= level; ++j) {
         if (route_graphs_[j]->TotalCount() != 0) {
             result = search_one_graph(data,
@@ -542,7 +553,27 @@ HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
             route_graphs_[j]->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
         }
     }
-    return true;
+}
+
+void
+HGraph::bind_duplicate_storage_for_add(InnerIdType duplicate_id, InnerIdType inner_id) {
+    if (this->support_duplicate_ && this->deduplicate_storage_) {
+        this->code_slot_map_->BindExistingSlot(inner_id,
+                                               this->code_slot_map_->Resolve(duplicate_id));
+    }
+}
+
+void
+HGraph::bind_unique_storage_for_add(InnerIdType inner_id) {
+    if (this->support_duplicate_ && this->deduplicate_storage_) {
+        this->code_slot_map_->BindNewSlot(inner_id);
+    }
+}
+
+void
+HGraph::publish_duplicate_for_add(InnerIdType group_id, InnerIdType duplicate_id) {
+    std::unique_lock lock(this->label_lookup_mutex_);
+    bottom_graph_->SetDuplicateId(group_id, duplicate_id);
 }
 
 void
@@ -919,7 +950,7 @@ HGraph::refine_nodes_two_phase(
     const auto begin = build_cache_now_us();
 
     // Incremental refine: each node searches, then immediately writes back
-    // forward edges + reverse edges (like standard graph_add_one / mutually_connect_new_element).
+    // forward edges + reverse edges (like the standard add path / mutually_connect_new_element).
     // Later nodes see edges written by earlier nodes within the same round.
     // Parallelism is achieved via thread pool with per-node mutex protection.
     auto refine_one_node = [this,

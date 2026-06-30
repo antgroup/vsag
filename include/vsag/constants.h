@@ -211,6 +211,7 @@ extern const char* const HGRAPH_PARAMETER_RABITQ_ONE_BIT_SEARCH;
 extern const char* const HGRAPH_PARAMETER_BRUTE_FORCE_THRESHOLD;
 extern const char* const HGRAPH_EXTRA_INFO_SIZE;
 extern const char* const HGRAPH_SUPPORT_DUPLICATE;
+extern const char* const HGRAPH_DEDUPLICATE_STORAGE;
 extern const char* const HGRAPH_DUPLICATE_DISTANCE_THRESHOLD;
 extern const char* const HGRAPH_LABEL_REMAP_TYPE;
 extern const char* const HGRAPH_USE_EXTRA_INFO_FILTER;

@@ -427,6 +427,12 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             },
         },
         {
+            HGRAPH_DEDUPLICATE_STORAGE,
+            {
+                DEDUPLICATE_STORAGE,
+            },
+        },
+        {
             HGRAPH_DUPLICATE_DISTANCE_THRESHOLD,
             {
                 DUPLICATE_DISTANCE_THRESHOLD,
@@ -477,7 +483,8 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             "{GRAPH_PARAM_INIT_MAX_CAPACITY_KEY}": 100,
             "{GRAPH_SUPPORT_REMOVE}": false,
             "{REMOVE_FLAG_BIT}": 8,
-            "{SUPPORT_DUPLICATE}": false
+            "{SUPPORT_DUPLICATE}": false,
+            "{DEDUPLICATE_STORAGE}": false
         },
         "{BASE_CODES_KEY}": {
             "{IO_PARAMS_KEY}": {
@@ -537,6 +544,7 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             "{ATTR_HAS_BUCKETS_KEY}": false
         },
         "{HGRAPH_SUPPORT_DUPLICATE}": false,
+        "{HGRAPH_DEDUPLICATE_STORAGE}": false,
         "{SUPPORT_FORCE_REMOVE}": false,
         "{HGRAPH_PERSIST_SOURCE_ID_KEY}": false,
         "{EF_CONSTRUCTION_KEY}": 400
