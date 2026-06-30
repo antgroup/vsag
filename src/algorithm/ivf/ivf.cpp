@@ -26,6 +26,7 @@
 #include "gno_imi_partition.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/inner_search_param.h"
+#include "impl/reasoning/search_reasoning.h"
 #include "impl/reorder/flatten_reorder.h"
 #include "impl/searcher/basic_searcher.h"
 #include "index/index_impl.h"
@@ -687,9 +688,14 @@ IVF::reorder(int64_t topk,
              DistHeapPtr& input,
              const float* query,
              const InnerSearchParam& param,
-             QueryContext& ctx) const {
+             QueryContext& ctx,
+             ReasoningContext* reasoning_ctx) const {
     auto reorder_heap = reorder_->Reorder(input, query, topk, ctx);
-    return this->pack_knn_result(reorder_heap);
+    auto dataset_results = this->pack_knn_result(reorder_heap, ctx.alloc);
+
+    this->AttachReasoningReport(dataset_results, reasoning_ctx);
+
+    return dataset_results;
 }
 
 InnerIndexPtr
@@ -706,11 +712,17 @@ IVF::ExportModel(const IndexCommonParam& param) const {
 
 template <InnerSearchMode mode>
 DistHeapPtr
-IVF::search(const DatasetPtr& query, const InnerSearchParam& param, QueryContext& ctx) const {
+IVF::search(const DatasetPtr& query,
+            const InnerSearchParam& param,
+            QueryContext& ctx,
+            ReasoningContext* reasoning_ctx) const {
     const auto* query_data = query->GetFloat32Vectors();
     Vector<float> normalize_data(dim_, allocator_);
     auto candidate_buckets =
         partition_strategy_->ClassifyDatasForSearch(query_data, 1, param, &ctx);
+    if (reasoning_ctx != nullptr) {
+        reasoning_ctx->RecordBucketSelection(candidate_buckets);
+    }
     auto computer = bucket_->FactoryComputer(query_data);
 
     auto cur_heap_top = std::numeric_limits<float>::max();
@@ -771,7 +783,13 @@ IVF::search(const DatasetPtr& query, const InnerSearchParam& param, QueryContext
             }
             for (int j = 0; j < bucket_size; ++j) {
                 auto origin_id = ids[j] / buckets_per_data_;
+                if (reasoning_ctx != nullptr) {
+                    reasoning_ctx->RecordVisit(origin_id, dist[j], 0);
+                }
                 if (attr_ft != nullptr and not attr_ft->CheckValid(j)) {
+                    if (reasoning_ctx != nullptr) {
+                        reasoning_ctx->RecordFilterReject(origin_id);
+                    }
                     continue;
                 }
                 if (ft == nullptr or ft->CheckValid(origin_id)) {
@@ -785,11 +803,17 @@ IVF::search(const DatasetPtr& query, const InnerSearchParam& param, QueryContext
                         }
                     }
                     if (heap->Size() > topk) {
+                        if (reasoning_ctx != nullptr) {
+                            reasoning_ctx->RecordEviction(heap->Top().second / buckets_per_data_,
+                                                          0);
+                        }
                         heap->Pop();
                     }
                     if (not heap->Empty() and heap->Size() == topk) {
                         cur_heap_top = heap->Top().first;
                     }
+                } else if (reasoning_ctx != nullptr) {
+                    reasoning_ctx->RecordFilterReject(origin_id);
                 }
             }
         }
@@ -925,6 +949,42 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
             param.executors.emplace_back(executor);
         }
     }
+    std::shared_ptr<ReasoningContext> reasoning_ctx;
+    if (not request.expected_labels_.empty()) {
+        reasoning_ctx = std::make_shared<ReasoningContext>(this->allocator_);
+        reasoning_ctx->SetSearchParams(
+            request.topk_, "IVF", use_reorder_, request.filter_ != nullptr);
+
+        UnorderedMap<int64_t, InnerIdType> label_to_inner_id(this->allocator_);
+        std::vector<std::tuple<InnerIdType, BucketIdType, InnerIdType>> locations;
+        {
+            std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
+            locations.reserve(request.expected_labels_.size());
+            for (const auto& label : request.expected_labels_) {
+                auto [success, inner_id] = this->label_table_->TryGetIdByLabel(label, true);
+                if (success) {
+                    label_to_inner_id[label] = inner_id;
+                    auto [bucket_id, offset_id] = this->get_location(inner_id);
+                    locations.emplace_back(inner_id, bucket_id, offset_id);
+                }
+            }
+        }
+
+        Vector<int64_t> expected_labels_vec(this->allocator_);
+        expected_labels_vec.reserve(request.expected_labels_.size());
+        for (const auto& label : request.expected_labels_) {
+            expected_labels_vec.push_back(label);
+        }
+        reasoning_ctx->InitializeExpectedTargets(expected_labels_vec, label_to_inner_id);
+
+        const auto* query_data = query->GetFloat32Vectors();
+        auto computer = this->bucket_->FactoryComputer(query_data);
+        for (const auto& [inner_id, bucket_id, offset_id] : locations) {
+            float dist = this->bucket_->QueryOneById(computer, bucket_id, offset_id);
+            reasoning_ctx->SetTrueDistance(inner_id, dist);
+        }
+        ctx.reasoning_ctx = reasoning_ctx.get();
+    }
 
     if (is_range) {
         param.search_mode = RANGE_SEARCH;
@@ -937,16 +997,18 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
             param.range_search_limit_size =
                 static_cast<int>(param.factor * static_cast<float>(request.limited_size_));
         }
-        auto search_result = this->search<RANGE_SEARCH>(query, param, ctx);
+        auto search_result = this->search<RANGE_SEARCH>(query, param, ctx, reasoning_ctx.get());
         if (use_reorder_ and param.enable_reorder) {
             int64_t k = (request.limited_size_ > 0) ? request.limited_size_
                                                     : static_cast<int64_t>(search_result->Size());
-            auto result = reorder(k, search_result, query->GetFloat32Vectors(), param, ctx);
+            auto result = reorder(
+                k, search_result, query->GetFloat32Vectors(), param, ctx, reasoning_ctx.get());
             result->Statistics(stats.Dump());
             return result;
         }
-        auto dataset_results = this->pack_knn_result(search_result);
+        auto dataset_results = this->pack_knn_result(search_result, ctx.alloc);
         dataset_results->Statistics(stats.Dump());
+        this->AttachReasoningReport(dataset_results, reasoning_ctx.get());
         return dataset_results;
     }
 
@@ -959,15 +1021,52 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
             fmt::format("factor must be positive when use_reorder is true, got {}", param.factor));
         param.topk = static_cast<int64_t>(param.factor * static_cast<float>(request.topk_));
     }
-    auto search_result = this->search<KNN_SEARCH>(query, param, ctx);
+    auto search_result = this->search<KNN_SEARCH>(query, param, ctx, reasoning_ctx.get());
     if (use_reorder_ and param.enable_reorder) {
-        auto result = reorder(request.topk_, search_result, query->GetFloat32Vectors(), param, ctx);
+        auto result = reorder(request.topk_,
+                              search_result,
+                              query->GetFloat32Vectors(),
+                              param,
+                              ctx,
+                              reasoning_ctx.get());
         result->Statistics(stats.Dump());
         return result;
     }
-    auto dataset_results = this->pack_knn_result(search_result);
+    if (search_result == nullptr || search_result->Empty()) {
+        auto dataset_results = DatasetImpl::MakeEmptyDataset();
+        this->AttachReasoningReport(dataset_results, reasoning_ctx.get());
+        dataset_results->Statistics(stats.Dump());
+        return dataset_results;
+    }
+
+    auto dataset_results = this->pack_knn_result(search_result, ctx.alloc);
     dataset_results->Statistics(stats.Dump());
+
+    this->AttachReasoningReport(dataset_results, reasoning_ctx.get());
+
     return dataset_results;
+}
+
+void
+IVF::AttachReasoningReport(const DatasetPtr& dataset_results,
+                           ReasoningContext* reasoning_ctx) const {
+    if (reasoning_ctx == nullptr) {
+        return;
+    }
+    auto count = dataset_results->GetNumElements();
+    if (count > 0 and dataset_results->GetIds() != nullptr) {
+        Vector<InnerIdType> result_inner_ids(static_cast<uint64_t>(count), this->allocator_);
+        {
+            std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
+            for (int64_t i = 0; i < count; ++i) {
+                result_inner_ids[i] =
+                    this->label_table_->GetIdByLabel(dataset_results->GetIds()[i]);
+            }
+        }
+        reasoning_ctx->MarkResult(result_inner_ids);
+    }
+    reasoning_ctx->DiagnoseExpectedTargets();
+    dataset_results->Reasoning(reasoning_ctx->GenerateReport());
 }
 
 void
@@ -1017,8 +1116,8 @@ IVF::CalDistanceById(const float* query,
             distances[i] = -1;
             continue;
         }
-        auto location = this->get_location(inner_id);
-        distances[i] = this->bucket_->QueryOneById(computer, location.first, location.second);
+        auto [bucket_id, offset_id] = this->get_location(inner_id);
+        distances[i] = this->bucket_->QueryOneById(computer, bucket_id, offset_id);
     }
     return result;
 }
@@ -1037,8 +1136,8 @@ IVF::CalcDistanceById(const float* query, int64_t id, bool calculate_precise_dis
         return dist;
     }
     auto computer = this->bucket_->FactoryComputer(query);
-    auto location = this->get_location(inner_id);
-    return this->bucket_->QueryOneById(computer, location.first, location.second);
+    auto [bucket_id, offset_id] = this->get_location(inner_id);
+    return this->bucket_->QueryOneById(computer, bucket_id, offset_id);
 }
 
 void

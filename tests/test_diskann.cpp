@@ -804,3 +804,92 @@ TEST_CASE("split building process", "[ft][build][diskann]") {
     std::cout << "Recall: " << recall_full << std::endl;
     REQUIRE(recall_full == recall_partial);
 }
+
+TEST_CASE("index with bsa", "[ft][diskann]") {
+    vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
+    int64_t num_vectors = 1000;
+    int64_t dim = 128;
+    auto index_name = GENERATE("diskann");
+    auto metric_type = "l2";
+
+    constexpr auto build_parameter_json = R"(
+    {{
+        "dtype": "float32",
+        "metric_type": "{}",
+        "dim": {},
+        "hnsw": {{
+            "max_degree": 16,
+            "ef_construction": 100
+        }},
+        "diskann": {{
+            "max_degree": 16,
+            "ef_construction": 100,
+            "pq_dims": 32,
+            "pq_sample_rate": 0.5,
+            "use_pq_search": true
+        }}
+    }}
+    )";
+    auto build_parameters = fmt::format(build_parameter_json, metric_type, dim);
+    auto index_opt = vsag::Factory::CreateIndex(index_name, build_parameters);
+    REQUIRE(index_opt.has_value());
+    auto index = index_opt.value();
+
+    auto [ids, vectors] = fixtures::generate_ids_and_vectors(num_vectors, dim);
+    auto base = vsag::Dataset::Make();
+    base->NumElements(num_vectors)
+        ->Dim(dim)
+        ->Ids(ids.data())
+        ->Float32Vectors(vectors.data())
+        ->Owner(false);
+    REQUIRE(index->Build(base).has_value());
+
+    auto search_parameters = R"(
+    {
+        "hnsw": {
+            "ef_search": 100
+        },
+        "diskann": {
+            "ef_search": 100,
+            "beam_search": 4,
+            "io_limit": 100,
+            "use_reorder": true,
+            "use_bsa": true
+        }
+    }
+    )";
+    float recall =
+        fixtures::test_knn_recall(index, search_parameters, num_vectors, dim, ids, vectors);
+    REQUIRE(recall > 0.99);
+}
+
+TEST_CASE("using indexes that do not support conjugate graph", "[ft][diskann]") {
+    vsag::Options::Instance().logger()->SetLevel(vsag::Logger::Level::kDEBUG);
+    int64_t num_vectors = 1000;
+    int64_t dim = 64;
+    auto index_name = GENERATE("diskann");
+    auto metric_type = GENERATE("l2");
+
+    auto [ids, vectors] = fixtures::generate_ids_and_vectors(num_vectors, dim);
+    auto index = fixtures::generate_index(index_name, metric_type, num_vectors, dim, ids, vectors);
+
+    auto search_parameters = R"(
+    {
+        "diskann": {
+            "ef_search": 100,
+            "beam_search": 4,
+            "io_limit": 100,
+            "use_reorder": false
+        }
+    }
+    )";
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(dim)->Float32Vectors(vectors.data())->Owner(false);
+    int64_t k = 10;
+    std::vector<int64_t> base_tag_ids;
+
+    REQUIRE_FALSE(index->Feedback(query, k, search_parameters, -1).has_value());
+    REQUIRE_FALSE(index->Feedback(query, k, search_parameters).has_value());
+
+    REQUIRE_FALSE(index->Pretrain(base_tag_ids, k, search_parameters).has_value());
+}

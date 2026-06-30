@@ -1449,3 +1449,145 @@ TestIVFGNOIMIBuildWithResidual(const fixtures::IVFResourcePtr& resource) {
 IVF_PR_DAILY_CASE("IVF GNO-IMI Build with Residual",
                   "[ft][build][ivf]",
                   TestIVFGNOIMIBuildWithResidual)
+
+// RejectAllFilter for testing empty results
+class RejectAllFilter : public vsag::Filter {
+public:
+    bool
+    CheckValid(int64_t) const override {
+        return false;
+    }
+    bool
+    CheckValid(const char*) const override {
+        return false;
+    }
+};
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
+                             "IVF Reasoning Basic",
+                             "[ft][ivf][reasoning][pr]") {
+    auto dim = 32;
+    auto metric = "l2";
+    auto param = IVFTestIndex::GenerateIVFBuildParametersString(metric, dim, "fp32", 10);
+    auto index = TestIndex::TestFactory(IVFTestIndex::name, param, true);
+    auto dataset = IVFTestIndex::pool.GetDatasetAndCreate(dim, 200, metric);
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)
+        ->Dim(dim)
+        ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+        ->Owner(false);
+
+    vsag::SearchRequest req;
+    req.topk_ = 5;
+    req.params_str_ = fmt::format(fixtures::search_param_tmp, 10);
+    req.query_ = query;
+    req.expected_labels_ = {dataset->base_->GetIds()[0]};
+
+    auto result = index->SearchWithRequest(req);
+    REQUIRE(result.has_value());
+    REQUIRE_FALSE(result.value()->GetReasoning().empty());
+    REQUIRE(result.value()->GetReasoning().find("missed_targets") != std::string::npos);
+    REQUIRE(result.value()->GetReasoning().find("bucket_selection") != std::string::npos);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
+                             "IVF Reasoning Found Target",
+                             "[ft][ivf][reasoning][pr]") {
+    auto dim = 32;
+    auto metric = "l2";
+    auto param = IVFTestIndex::GenerateIVFBuildParametersString(metric, dim, "fp32", 10);
+    auto index = TestIndex::TestFactory(IVFTestIndex::name, param, true);
+    auto dataset = IVFTestIndex::pool.GetDatasetAndCreate(dim, 200, metric);
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    // First search to find a result
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)
+        ->Dim(dim)
+        ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+        ->Owner(false);
+
+    vsag::SearchRequest req_no_reasoning;
+    req_no_reasoning.topk_ = 5;
+    req_no_reasoning.params_str_ = fmt::format(fixtures::search_param_tmp, 10);
+    req_no_reasoning.query_ = query;
+
+    auto result_no_reasoning = index->SearchWithRequest(req_no_reasoning);
+    REQUIRE(result_no_reasoning.has_value());
+    REQUIRE(result_no_reasoning.value()->GetDim() > 0);
+
+    auto found_label = result_no_reasoning.value()->GetIds()[0];
+
+    // Now search with reasoning for that label
+    vsag::SearchRequest req;
+    req.topk_ = 5;
+    req.params_str_ = fmt::format(fixtures::search_param_tmp, 10);
+    req.query_ = query;
+    req.expected_labels_ = {found_label};
+
+    auto result = index->SearchWithRequest(req);
+    REQUIRE(result.has_value());
+    REQUIRE_FALSE(result.value()->GetReasoning().empty());
+    REQUIRE(result.value()->GetReasoning().find("expected_analysis") != std::string::npos);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
+                             "IVF Reasoning Empty Labels No Overhead",
+                             "[ft][ivf][reasoning][pr]") {
+    auto dim = 32;
+    auto metric = "l2";
+    auto param = IVFTestIndex::GenerateIVFBuildParametersString(metric, dim, "fp32", 10);
+    auto index = TestIndex::TestFactory(IVFTestIndex::name, param, true);
+    auto dataset = IVFTestIndex::pool.GetDatasetAndCreate(dim, 200, metric);
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)
+        ->Dim(dim)
+        ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+        ->Owner(false);
+
+    vsag::SearchRequest req;
+    req.topk_ = 5;
+    req.params_str_ = fmt::format(fixtures::search_param_tmp, 10);
+    req.query_ = query;
+    req.expected_labels_ = {};  // empty
+
+    auto result = index->SearchWithRequest(req);
+    REQUIRE(result.has_value());
+    // Empty expected_labels means no reasoning report
+    REQUIRE(result.value()->GetReasoning().find("expected_analysis") == std::string::npos);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
+                             "IVF Reasoning With Filter All",
+                             "[ft][ivf][reasoning][pr]") {
+    auto dim = 32;
+    auto metric = "l2";
+    auto param = IVFTestIndex::GenerateIVFBuildParametersString(metric, dim, "fp32", 10);
+    auto index = TestIndex::TestFactory(IVFTestIndex::name, param, true);
+    auto dataset = IVFTestIndex::pool.GetDatasetAndCreate(dim, 200, metric);
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)
+        ->Dim(dim)
+        ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+        ->Owner(false);
+
+    vsag::SearchRequest req;
+    req.topk_ = 5;
+    req.params_str_ = fmt::format(fixtures::search_param_tmp, 10);
+    req.query_ = query;
+    req.expected_labels_ = {dataset->base_->GetIds()[0]};
+    req.enable_filter_ = true;
+    req.filter_ = std::make_shared<RejectAllFilter>();
+
+    auto result = index->SearchWithRequest(req);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() == 0);
+    REQUIRE_FALSE(result.value()->GetReasoning().empty());
+    REQUIRE(result.value()->GetReasoning().find("missed_targets") != std::string::npos);
+}
