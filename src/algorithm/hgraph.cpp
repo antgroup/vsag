@@ -943,6 +943,8 @@ HGraph::KnnSearch(const DatasetPtr& query,
         search_param.topk = static_cast<int64_t>(search_param.ef);
         search_param.consider_duplicate = this->label_table_->CompressDuplicateData();
         search_param.parallel_search_thread_count = params.parallel_search_thread_count;
+        search_param.skip_ratio = params.skip_ratio;
+        search_param.skip_strategy_type = params.skip_strategy_type;
 
         search_result = this->search_one_graph(query_data,
                                                this->bottom_graph_,
@@ -1153,6 +1155,8 @@ HGraph::RangeSearch(const DatasetPtr& query,
     search_param.consider_duplicate = true;
     search_param.range_search_limit_size = static_cast<int>(limited_size);
     search_param.parallel_search_thread_count = params.parallel_search_thread_count;
+    search_param.skip_ratio = params.skip_ratio;
+    search_param.skip_strategy_type = params.skip_strategy_type;
 
     auto search_result = this->search_one_graph(raw_query,
                                                 this->bottom_graph_,
@@ -2197,6 +2201,8 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         stats.is_timeout.store(false, std::memory_order_relaxed);
     }
     search_param.parallel_search_thread_count = params.parallel_search_thread_count;
+    search_param.skip_ratio = params.skip_ratio;
+    search_param.skip_strategy_type = params.skip_strategy_type;
 
     // hops_limit only takes effect when it's greater than ef_search
     if (params.hops_limit <= static_cast<uint32_t>(params.ef_search)) {

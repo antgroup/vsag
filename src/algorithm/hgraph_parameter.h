@@ -20,6 +20,7 @@
 #include "data_type.h"
 #include "index_search_parameter.h"
 #include "inner_index_parameter.h"
+#include "utils/filter_search_skip_strategy.h"
 #include "utils/pointer_define.h"
 #include "vsag/constants.h"
 
@@ -81,6 +82,9 @@ public:
     uint32_t hops_limit{std::numeric_limits<uint32_t>::max()};
     bool use_reorder{false};
     bool use_extra_info_filter{false};
+    float skip_ratio{0.2F};
+    FilterSearchSkipStrategyType skip_strategy_type{
+        FilterSearchSkipStrategyType::DETERMINISTIC_ACCUMULATIVE};
 
 private:
     HGraphSearchParameters() = default;
