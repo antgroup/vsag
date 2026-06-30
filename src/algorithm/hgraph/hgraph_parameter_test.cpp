@@ -286,6 +286,70 @@ TEST_CASE("HGraphSearchParameters parses brute_force_threshold",
     }
 }
 
+TEST_CASE("HGraphSearchParameters parses skip_ratio and skip_strategy",
+          "[ut][HGraphSearchParameters][skip_ratio]") {
+    SECTION("default values") {
+        auto params = vsag::HGraphSearchParameters::FromJson(R"({"hgraph": {"ef_search": 32}})");
+        REQUIRE(params.skip_ratio == 0.2F);
+        REQUIRE(params.skip_strategy_type ==
+                vsag::FilterSearchSkipStrategyType::DETERMINISTIC_ACCUMULATIVE);
+    }
+
+    SECTION("custom skip_ratio") {
+        auto params = vsag::HGraphSearchParameters::FromJson(
+            R"({"hgraph": {"ef_search": 32, "skip_ratio": 0.5}})");
+        REQUIRE(params.skip_ratio == 0.5F);
+    }
+
+    SECTION("custom skip_strategy") {
+        auto params = vsag::HGraphSearchParameters::FromJson(
+            R"({"hgraph": {"ef_search": 32, "skip_strategy": "deterministic_accumulative"}})");
+        REQUIRE(params.skip_strategy_type ==
+                vsag::FilterSearchSkipStrategyType::DETERMINISTIC_ACCUMULATIVE);
+    }
+
+    SECTION("both skip_ratio and skip_strategy") {
+        auto params = vsag::HGraphSearchParameters::FromJson(
+            R"(
+                {
+                    "hgraph": {
+                        "ef_search": 32,
+                        "skip_ratio": 0.3,
+                        "skip_strategy": "deterministic_accumulative"
+                    }
+                })");
+        REQUIRE(params.skip_ratio == 0.3F);
+        REQUIRE(params.skip_strategy_type ==
+                vsag::FilterSearchSkipStrategyType::DETERMINISTIC_ACCUMULATIVE);
+    }
+
+    SECTION("random skip_strategy") {
+        auto params = vsag::HGraphSearchParameters::FromJson(
+            R"({"hgraph": {"ef_search": 32, "skip_strategy": "random"}})");
+        REQUIRE(params.skip_strategy_type == vsag::FilterSearchSkipStrategyType::RANDOM);
+    }
+
+    SECTION("skip_ratio out of range - too high") {
+        REQUIRE_THROWS(vsag::HGraphSearchParameters::FromJson(
+            R"({"hgraph": {"ef_search": 32, "skip_ratio": 1.5}})"));
+    }
+
+    SECTION("skip_ratio out of range - negative") {
+        REQUIRE_THROWS(vsag::HGraphSearchParameters::FromJson(
+            R"({"hgraph": {"ef_search": 32, "skip_ratio": -0.1}})"));
+    }
+
+    SECTION("skip_strategy rejects unknown values") {
+        REQUIRE_THROWS(vsag::HGraphSearchParameters::FromJson(
+            R"({"hgraph": {"ef_search": 32, "skip_strategy": "unknown"}})"));
+    }
+
+    SECTION("skip_strategy rejects non-string values") {
+        REQUIRE_THROWS(vsag::HGraphSearchParameters::FromJson(
+            R"({"hgraph": {"ef_search": 32, "skip_strategy": 123}})"));
+    }
+}
+
 TEST_CASE("HGraph maps support_force_remove to inner parameter", "[ut][HGraphParameter]") {
     auto param = vsag::JsonType::Parse(R"({
         "base_quantization_type": "fp32",
