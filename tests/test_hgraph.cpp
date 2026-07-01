@@ -2591,7 +2591,9 @@ TestHGraphReverseEdges(const fixtures::HGraphTestIndexPtr& test_index,
 
     for (auto metric_type : resource->metric_types) {
         for (auto dim : resource->dims) {
-            for (auto& [base_quantization_str, recall] : resource->test_cases) {
+            for (const auto& test_case : resource->test_cases) {
+                const auto& base_quantization_str = test_case.first;
+                const auto& recall = test_case.second;
                 INFO(fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}",
                                  metric_type,
                                  dim,
@@ -3381,3 +3383,149 @@ TEST_CASE("HGraph Concurrent Tune(disable_future_tuning=false) and CalDistanceBy
 
     REQUIRE(cal_count.load() > 0);
 }
+
+static void
+TestHGraphMultiQueryKnnSearch(const fixtures::HGraphTestIndexPtr& test_index,
+                              const fixtures::HGraphResourcePtr& resource) {
+    using namespace fixtures;
+    auto search_param_str = fmt::format(search_param_tmp, 200, false);
+
+    for (auto metric_type : resource->metric_types) {
+        for (auto dim : resource->dims) {
+            for (const auto& test_case : resource->test_cases) {
+                const auto& base_quantization_str = test_case.first;
+                INFO(fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}",
+                                 metric_type,
+                                 dim,
+                                 base_quantization_str));
+
+                if (HGraphTestIndex::IsRaBitQ(base_quantization_str) &&
+                    dim < fixtures::RABITQ_MIN_RACALL_DIM) {
+                    dim = fixtures::RABITQ_MIN_RACALL_DIM;
+                }
+
+                HGraphTestIndex::HGraphBuildParam build_param(
+                    metric_type, dim, base_quantization_str);
+                auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+
+                auto index = TestIndex::TestFactory(test_index->name, param, true);
+                auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(
+                    dim, resource->base_count, metric_type);
+
+                TestIndex::TestBuildIndex(index, dataset, true);
+
+                const int64_t num_queries = 5;
+                const int64_t k = 10;
+                int64_t dim_val = dataset->query_->GetDim();
+                int64_t available_queries = dataset->query_->GetNumElements();
+
+                std::vector<float> multi_query_data(num_queries * dim_val);
+                const float* original_queries = dataset->query_->GetFloat32Vectors();
+                for (int64_t i = 0; i < num_queries; ++i) {
+                    int64_t src_idx = i % available_queries;
+                    std::copy(original_queries + src_idx * dim_val,
+                              original_queries + (src_idx + 1) * dim_val,
+                              multi_query_data.data() + i * dim_val);
+                }
+
+                auto multi_query = vsag::Dataset::Make();
+                multi_query->NumElements(num_queries)
+                    ->Dim(dim_val)
+                    ->Float32Vectors(multi_query_data.data())
+                    ->Owner(false);
+
+                auto multi_result = index->KnnSearch(multi_query, k, search_param_str);
+                REQUIRE(multi_result.has_value());
+                REQUIRE(multi_result.value()->GetNumElements() == num_queries);
+                REQUIRE(multi_result.value()->GetDim() == k);
+
+                const auto* multi_ids = multi_result.value()->GetIds();
+                for (int64_t q_idx = 0; q_idx < num_queries; ++q_idx) {
+                    auto single_query = vsag::Dataset::Make();
+                    single_query->NumElements(1)
+                        ->Dim(dim_val)
+                        ->Float32Vectors(multi_query_data.data() + q_idx * dim_val)
+                        ->Owner(false);
+                    auto single_result = index->KnnSearch(single_query, k, search_param_str);
+                    REQUIRE(single_result.has_value());
+
+                    int64_t single_count = single_result.value()->GetDim();
+                    const auto* single_ids = single_result.value()->GetIds();
+                    int64_t offset = q_idx * k;
+                    // Without filter, all queries should return exactly k results.
+                    REQUIRE(single_count == k);
+                    for (int64_t i = 0; i < k; ++i) {
+                        REQUIRE(multi_ids[offset + i] == single_ids[i]);
+                    }
+                }
+            }
+        }
+    }
+}
+
+HGRAPH_PR_DAILY_CASE("HGraph Multi-Query Knn Search",
+                     "[ft][search][hgraph]",
+                     TestHGraphMultiQueryKnnSearch)
+
+static void
+TestHGraphMultiQueryRangeSearch(const fixtures::HGraphTestIndexPtr& test_index,
+                                const fixtures::HGraphResourcePtr& resource) {
+    using namespace fixtures;
+    auto search_param_str = fmt::format(search_param_tmp, 200, false);
+
+    for (auto metric_type : resource->metric_types) {
+        for (auto dim : resource->dims) {
+            for (const auto& test_case : resource->test_cases) {
+                const auto& base_quantization_str = test_case.first;
+                INFO(fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}",
+                                 metric_type,
+                                 dim,
+                                 base_quantization_str));
+
+                if (HGraphTestIndex::IsRaBitQ(base_quantization_str) &&
+                    dim < fixtures::RABITQ_MIN_RACALL_DIM) {
+                    dim = fixtures::RABITQ_MIN_RACALL_DIM;
+                }
+
+                HGraphTestIndex::HGraphBuildParam build_param(
+                    metric_type, dim, base_quantization_str);
+                auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+
+                auto index = TestIndex::TestFactory(test_index->name, param, true);
+                auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(
+                    dim, resource->base_count, metric_type);
+
+                TestIndex::TestBuildIndex(index, dataset, true);
+
+                const int64_t num_queries = 3;
+                int64_t dim_val = dataset->query_->GetDim();
+                int64_t available_queries = dataset->query_->GetNumElements();
+                const float radius = 0.5F;
+                const int64_t limited_size = 10;
+
+                std::vector<float> multi_query_data(num_queries * dim_val);
+                const float* original_queries = dataset->query_->GetFloat32Vectors();
+                for (int64_t i = 0; i < num_queries; ++i) {
+                    int64_t src_idx = i % available_queries;
+                    std::copy(original_queries + src_idx * dim_val,
+                              original_queries + (src_idx + 1) * dim_val,
+                              multi_query_data.data() + i * dim_val);
+                }
+
+                auto multi_query = vsag::Dataset::Make();
+                multi_query->NumElements(num_queries)
+                    ->Dim(dim_val)
+                    ->Float32Vectors(multi_query_data.data())
+                    ->Owner(false);
+
+                auto multi_result =
+                    index->RangeSearch(multi_query, radius, search_param_str, limited_size);
+                REQUIRE_FALSE(multi_result.has_value());
+            }
+        }
+    }
+}
+
+HGRAPH_PR_DAILY_CASE("HGraph Multi-Query Range Search",
+                     "[ft][search][hgraph]",
+                     TestHGraphMultiQueryRangeSearch)

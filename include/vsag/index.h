@@ -306,11 +306,18 @@ public:
 
     /**
       * @brief Performing search with request on index
-      * 
+      *
       * @param request @see SearchRequest
-      * @return result contains 
-      *                - num_elements: 1
-      *                - ids, distances: length is (num_elements * k)               
+      * @return result contains
+      *                - single-query requests: num_elements = 1, dim = actual returned
+      *                  result count (<= request.topk_ for KNN, <= request.limited_size_
+      *                  for RANGE_SEARCH). May be < topk_ when filters reject candidates.
+      *                - batched KNN requests, when supported by the implementation:
+      *                  num_elements = query->GetNumElements(), dim = request.topk_.
+      *                  ids/distances are stored row-major with length (num_elements * dim).
+      *                  Queries that yielded fewer than dim neighbors are padded with
+      *                  sentinel entries (id = -1, distance value undefined); callers
+      *                  MUST check `ids[i] == -1` to detect padding.
       */
     [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     SearchWithRequest(const SearchRequest& request) const {

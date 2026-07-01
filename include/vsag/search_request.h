@@ -35,9 +35,10 @@ class SearchRequest {
 public:
     // basic params
     /** 
-     * @brief Query dataset containing the vector to search for
-     * @details This DatasetPtr holds the query vector used for similarity search. 
-     *          Only one query vector is allowed.
+     * @brief Query dataset containing the vector or vectors to search for
+     * @details This DatasetPtr holds the query data used for similarity search.
+     *          Most search modes accept a single query vector, while some implementations
+     *          support batched KNN queries with multiple query vectors in one request.
      */
     DatasetPtr query_{nullptr};
 
