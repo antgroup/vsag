@@ -574,8 +574,9 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                        fmt::format("mrle_dim must be an integer, got {}",
                                    external_param[INDEX_MRLE_DIM].Dump()));
         int64_t mrle_dim = external_param[INDEX_MRLE_DIM].GetInt();
+        bool valid_mrle_dim = mrle_dim >= 0 and mrle_dim <= static_cast<int64_t>(common_param.dim_);
         CHECK_ARGUMENT(
-            mrle_dim >= 0 and mrle_dim <= static_cast<int64_t>(common_param.dim_),
+            valid_mrle_dim,
             fmt::format("mrle_dim({}) must be in range [0, {}]", mrle_dim, common_param.dim_));
     }
 

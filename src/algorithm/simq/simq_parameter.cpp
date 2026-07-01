@@ -34,24 +34,30 @@ void
 SIMQParameter::FromJson(const JsonType& json) {
     InnerIndexParameter::FromJson(json);
 
-    if (json.Contains(SIMQ_INIT_CLUSTER_RATIO))
+    if (json.Contains(SIMQ_INIT_CLUSTER_RATIO)) {
         init_cluster_ratio = json[SIMQ_INIT_CLUSTER_RATIO].GetFloat();
-    if (json.Contains(SIMQ_MAX_CLUSTER_SIZE))
+    }
+    if (json.Contains(SIMQ_MAX_CLUSTER_SIZE)) {
         max_cluster_size = json[SIMQ_MAX_CLUSTER_SIZE].GetInt();
-    if (json.Contains(SIMQ_SPLIT_START_IDX))
+    }
+    if (json.Contains(SIMQ_SPLIT_START_IDX)) {
         split_start_idx = json[SIMQ_SPLIT_START_IDX].GetInt();
-    if (json.Contains(SIMQ_RANDOM_SEED))
+    }
+    if (json.Contains(SIMQ_RANDOM_SEED)) {
         random_seed = json[SIMQ_RANDOM_SEED].GetInt();
-    if (json.Contains(SIMQ_COARSE_K))
+    }
+    if (json.Contains(SIMQ_COARSE_K)) {
         coarse_k = json[SIMQ_COARSE_K].GetInt();
-    if (json.Contains(SIMQ_RERANK_K))
+    }
+    if (json.Contains(SIMQ_RERANK_K)) {
         rerank_k = json[SIMQ_RERANK_K].GetInt();
+    }
 
-    CHECK_ARGUMENT(init_cluster_ratio > 0.0f && init_cluster_ratio <= 1.0f,
-                   "simq: init_cluster_ratio must be in (0, 1]");
+    bool valid_init_cluster_ratio = init_cluster_ratio > 0.0F and init_cluster_ratio <= 1.0F;
+    CHECK_ARGUMENT(valid_init_cluster_ratio, "simq: init_cluster_ratio must be in (0, 1]");
     CHECK_ARGUMENT(max_cluster_size > 1, "simq: max_cluster_size must be > 1");
-    CHECK_ARGUMENT(split_start_idx > 1 && split_start_idx < max_cluster_size,
-                   "simq: split_start_idx must be in (1, max_cluster_size)");
+    bool valid_split_start_idx = split_start_idx > 1 and split_start_idx < max_cluster_size;
+    CHECK_ARGUMENT(valid_split_start_idx, "simq: split_start_idx must be in (1, max_cluster_size)");
     CHECK_ARGUMENT(coarse_k > 0, "simq: coarse_k must be > 0");
     CHECK_ARGUMENT(rerank_k > 0, "simq: rerank_k must be > 0");
 
@@ -97,10 +103,12 @@ SIMQSearchParameters::FromJson(const std::string& json_string) {
     }
     const auto& simq_params = params[INDEX_SIMQ];
     obj.IndexSearchParameter::FromJson(simq_params);
-    if (simq_params.Contains(SIMQ_COARSE_K))
+    if (simq_params.Contains(SIMQ_COARSE_K)) {
         obj.coarse_k = simq_params[SIMQ_COARSE_K].GetInt();
-    if (simq_params.Contains(SIMQ_RERANK_K))
+    }
+    if (simq_params.Contains(SIMQ_RERANK_K)) {
         obj.rerank_k = simq_params[SIMQ_RERANK_K].GetInt();
+    }
     return obj;
 }
 
