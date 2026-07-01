@@ -174,6 +174,11 @@ void
 HGraph::serialize_label_info(StreamWriter& writer) const {
     if (this->support_duplicate_) {
         auto label_count = this->total_count_.load(std::memory_order_acquire);
+        auto label_table_size = static_cast<uint64_t>(this->label_table_->label_table_.size());
+        CHECK_ARGUMENT(
+            label_count <= label_table_size,
+            fmt::format(
+                "label_count({}) exceeds label_table size({})", label_count, label_table_size));
         StreamWriter::WriteObj(writer, label_count);
         if (label_count > 0) {
             writer.Write(reinterpret_cast<const char*>(this->label_table_->label_table_.data()),

@@ -25,6 +25,7 @@
 #include "index/index_impl.h"
 #include "index_common_param.h"
 #include "unittest.h"
+#include "vsag/options.h"
 
 namespace {
 
@@ -59,6 +60,21 @@ MakeFloatQuery(std::vector<float>& vector, int64_t dim) {
     dataset->NumElements(1)->Dim(dim)->Float32Vectors(vector.data())->Owner(false);
     return dataset;
 }
+
+class BlockSizeLimitGuard {
+public:
+    explicit BlockSizeLimitGuard(uint64_t block_size_limit)
+        : old_block_size_limit_(vsag::Options::Instance().block_size_limit()) {
+        vsag::Options::Instance().set_block_size_limit(block_size_limit);
+    }
+
+    ~BlockSizeLimitGuard() {
+        vsag::Options::Instance().set_block_size_limit(old_block_size_limit_);
+    }
+
+private:
+    uint64_t old_block_size_limit_;
+};
 
 vsag::IndexCommonParam
 MakeCommonParam(int64_t dim, uint64_t thread_count = 0) {
@@ -334,7 +350,8 @@ TEST_CASE("HGraph deduplicate_storage uses representative vector for approximate
 TEST_CASE("HGraph deduplicate_storage keeps physical flatten capacity slot-based",
           "[ut][hgraph][duplicate][serialize][memory]") {
     constexpr int64_t dim = 16;
-    constexpr int64_t count = 1100;
+    constexpr int64_t count = 5000;
+    BlockSizeLimitGuard block_size_limit_guard(256UL * 1024);
     auto common_param = MakeCommonParam(dim);
 
     std::vector<float> vectors(static_cast<uint64_t>(dim * count), 1.0F);

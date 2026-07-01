@@ -36,6 +36,7 @@
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "utils/util_functions.h"
+#include "vsag/options.h"
 
 namespace vsag {
 
@@ -339,6 +340,11 @@ HGraph::Add(const DatasetPtr& data) {
             temporary_graph_read_codes->InsertVector(get_data(data, local_idx), inner_id);
         }
     }
+    if (this->support_duplicate_ && this->deduplicate_storage_ && not inner_ids.empty()) {
+        auto required_capacity =
+            this->code_slot_map_->PhysicalCount() + static_cast<InnerIdType>(inner_ids.size());
+        this->ensure_physical_code_capacity(required_capacity);
+    }
     for (auto& [inner_id, local_idx] : inner_ids) {
         int level;
         {
@@ -363,6 +369,7 @@ HGraph::Add(const DatasetPtr& data) {
             future.get();
         }
     }
+    this->compact_physical_code_capacity_if_needed();
     return failed_ids;
 }
 
@@ -482,9 +489,11 @@ HGraph::add_one_point(const void* data,
     // Stage 2b: prepare unique storage before making the node visible in the graph.
     if (this->support_duplicate_ && this->deduplicate_storage_) {
         auto code_slot_id = this->code_slot_map_->AllocateSlot();
-        rlock.unlock();
-        this->ensure_physical_code_capacity(code_slot_id + 1);
-        rlock.lock();
+        if (this->physical_code_capacity_.load(std::memory_order_acquire) < code_slot_id + 1) {
+            rlock.unlock();
+            this->ensure_physical_code_capacity(code_slot_id + 1);
+            rlock.lock();
+        }
         this->insert_persistent_codes_to_slot(data, code_slot_id);
         this->code_slot_map_->PublishSlot(inner_id, code_slot_id);
     } else {
@@ -643,8 +652,7 @@ HGraph::ensure_physical_code_capacity_unlocked(InnerIdType required_capacity) {
         return;
     }
 
-    auto new_capacity = static_cast<InnerIdType>(
-        next_multiple_of_power_of_two(required_capacity, this->resize_increase_count_bit_));
+    auto new_capacity = this->align_physical_code_capacity(required_capacity);
     this->basic_flatten_codes_->Resize(new_capacity);
     if (has_precise_reorder()) {
         this->high_precise_codes_->Resize(new_capacity);
@@ -653,6 +661,53 @@ HGraph::ensure_physical_code_capacity_unlocked(InnerIdType required_capacity) {
         this->raw_vector_->Resize(new_capacity);
     }
     this->physical_code_capacity_.store(new_capacity, std::memory_order_release);
+    this->cal_memory_usage();
+}
+
+InnerIdType
+HGraph::align_physical_code_capacity(InnerIdType required_capacity) const {
+    if (required_capacity == 0) {
+        return 0;
+    }
+    auto block_size = Options::Instance().block_size_limit();
+    auto code_size =
+        std::max<uint64_t>(1, static_cast<uint64_t>(this->basic_flatten_codes_->code_size_));
+    auto slots_per_block = std::max<uint64_t>(1, block_size / code_size);
+    auto required = static_cast<uint64_t>(required_capacity);
+    return static_cast<InnerIdType>(((required + slots_per_block - 1) / slots_per_block) *
+                                    slots_per_block);
+}
+
+void
+HGraph::compact_physical_code_capacity_if_needed() {
+    if (not(this->support_duplicate_ && this->deduplicate_storage_)) {
+        return;
+    }
+
+    auto block_slots = this->align_physical_code_capacity(1);
+    auto physical_count = this->code_slot_map_->PhysicalCount();
+    auto target_capacity = this->align_physical_code_capacity(physical_count);
+    auto current_capacity = this->physical_code_capacity_.load(std::memory_order_acquire);
+    if (current_capacity <= target_capacity || current_capacity - target_capacity < block_slots) {
+        return;
+    }
+
+    std::scoped_lock lock(this->global_mutex_);
+    physical_count = this->code_slot_map_->PhysicalCount();
+    target_capacity = this->align_physical_code_capacity(physical_count);
+    current_capacity = this->physical_code_capacity_.load(std::memory_order_acquire);
+    if (current_capacity <= target_capacity || current_capacity - target_capacity < block_slots) {
+        return;
+    }
+
+    this->basic_flatten_codes_->ShrinkToFit(target_capacity);
+    if (has_precise_reorder()) {
+        this->high_precise_codes_->ShrinkToFit(target_capacity);
+    }
+    if (create_new_raw_vector_) {
+        this->raw_vector_->ShrinkToFit(target_capacity);
+    }
+    this->physical_code_capacity_.store(target_capacity, std::memory_order_release);
     this->cal_memory_usage();
 }
 

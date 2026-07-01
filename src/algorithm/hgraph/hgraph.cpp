@@ -267,8 +267,8 @@ public:
 
     void
     ShrinkToFit(InnerIdType capacity) override {
-        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                            "HGraph code-slot adapter does not support ShrinkToFit");
+        base_->ShrinkToFit(capacity);
+        this->refresh_metadata();
     }
 
 private:

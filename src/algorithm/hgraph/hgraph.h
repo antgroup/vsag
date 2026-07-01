@@ -383,6 +383,13 @@ public:
     void
     ensure_physical_code_capacity_unlocked(InnerIdType required_capacity);
 
+    /// Compact physical code storage when the unused physical slots exceed one IO block.
+    void
+    compact_physical_code_capacity_if_needed();
+
+    [[nodiscard]] InnerIdType
+    align_physical_code_capacity(InnerIdType required_capacity) const;
+
     /// Insert a single point using graph_read_codes for probing and graph connectivity.
     bool
     add_one_point(const void* data,
