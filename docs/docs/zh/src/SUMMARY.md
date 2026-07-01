@@ -61,6 +61,7 @@
 # 性能与调优
 
 - [最佳实践](resources/best_practices.md)
+- [磁盘索引最佳实践](resources/disk_index.md)
 - [度量语义](resources/metric_semantics.md)
 - [优化器](advanced/optimizer.md)
 - [标准环境性能参考](resources/performance.md)

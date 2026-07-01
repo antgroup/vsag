@@ -61,6 +61,7 @@
 # Performance and Tuning
 
 - [Best Practices](resources/best_practices.md)
+- [Disk-Based Index Best Practices](resources/disk_index.md)
 - [Metric Semantics](resources/metric_semantics.md)
 - [Optimizer (Tune)](advanced/optimizer.md)
 - [Benchmarks](resources/performance.md)
