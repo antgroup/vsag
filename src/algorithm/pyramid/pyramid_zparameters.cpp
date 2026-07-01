@@ -85,10 +85,10 @@ PyramidHierarchyParameters::FromJson(const JsonType& json) {
                        fmt::format("hierarchy {} max_degree must be positive", name));
     }
     if (json.Contains(EF_CONSTRUCTION_KEY)) {
-        const auto ef_construction_value = json[EF_CONSTRUCTION_KEY].GetInt();
+        const auto ef_construction_value = json[EF_CONSTRUCTION_KEY].GetUint64();
         CHECK_ARGUMENT(ef_construction_value > 0,
                        fmt::format("hierarchy {} ef_construction must be positive", name));
-        ef_construction = static_cast<uint64_t>(ef_construction_value);
+        ef_construction = ef_construction_value;
     }
     if (json.Contains(ALPHA_KEY)) {
         alpha = json[ALPHA_KEY].GetFloat();
@@ -115,7 +115,7 @@ PyramidHierarchyParameters::ToJson() const {
     json["name"].SetString(name);
     json[NO_BUILD_LEVELS].SetVector(no_build_levels);
     json[GRAPH_PARAM_MAX_DEGREE_KEY].SetInt(max_degree);
-    json[EF_CONSTRUCTION_KEY].SetInt(ef_construction);
+    json[EF_CONSTRUCTION_KEY].SetUint64(ef_construction);
     json[ALPHA_KEY].SetFloat(alpha);
     json[INDEX_MIN_SIZE].SetInt(index_min_size);
     return json;
@@ -160,7 +160,8 @@ PyramidParameters::FromJson(const JsonType& json) {
         this->odescent_param->FromJson(graph_json);
     } else {
         if (json.Contains(EF_CONSTRUCTION_KEY)) {
-            this->ef_construction = json[EF_CONSTRUCTION_KEY].GetInt();
+            this->ef_construction = json[EF_CONSTRUCTION_KEY].GetUint64();
+            CHECK_ARGUMENT(this->ef_construction > 0, "ef_construction must be positive");
         }
     }
 
@@ -226,7 +227,7 @@ PyramidParameters::ToJson() const {
     if (this->graph_type == GRAPH_TYPE_ODESCENT) {
         graph_json.UpdateJson(odescent_param->ToJson());
     } else {
-        json[EF_CONSTRUCTION_KEY].SetInt(this->ef_construction);
+        json[EF_CONSTRUCTION_KEY].SetUint64(this->ef_construction);
     }
     json[GRAPH_KEY].SetJson(graph_json);
     json[USE_REORDER_KEY].SetBool(this->use_reorder);

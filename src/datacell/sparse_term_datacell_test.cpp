@@ -15,6 +15,8 @@
 
 #include "sparse_term_datacell.h"
 
+#include <sstream>
+
 #include "impl/allocator/safe_allocator.h"
 #include "unittest.h"
 
@@ -333,6 +335,100 @@ TEST_CASE("SparseTermDatacell FP16 Roundtrip Test", "[ut][SparseTermDatacell]") 
 
     allocator->Deallocate(retrieved_sv.ids_);
     allocator->Deallocate(retrieved_sv.vals_);
+}
+
+TEST_CASE("SparseTermDatacell Compact Memory Usage", "[ut][SparseTermDatacell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto data_cell = std::make_shared<SparseTermDataCell>(
+        1.0F, DEFAULT_TERM_ID_LIMIT, allocator.get(), SparseValueQuantizationType::FP32, nullptr);
+
+    std::vector<uint32_t> ids = {1, 3, 5};
+    std::vector<float> vals = {1.0F, 2.0F, 3.0F};
+    SparseVector sparse_vector;
+    sparse_vector.len_ = static_cast<uint32_t>(ids.size());
+    sparse_vector.ids_ = ids.data();
+    sparse_vector.vals_ = vals.data();
+    data_cell->InsertVector(sparse_vector, 0);
+
+    data_cell->term_ids_[1]->reserve(32);
+    data_cell->term_datas_[1]->reserve(128);
+    auto compact_capacity = data_cell->term_capacity_;
+    auto reserved_id_capacity = data_cell->term_ids_[1]->capacity();
+    auto reserved_data_capacity = data_cell->term_datas_[1]->capacity();
+    data_cell->ResizeTermList(128);
+
+    auto memory_with_reserved_capacity = data_cell->GetMemoryUsage();
+    REQUIRE(data_cell->term_capacity_ >= 128);
+
+    data_cell->Compact();
+
+    REQUIRE(data_cell->term_capacity_ == compact_capacity);
+    REQUIRE(data_cell->term_ids_[1]->capacity() <= reserved_id_capacity);
+    REQUIRE(data_cell->term_datas_[1]->capacity() <= reserved_data_capacity);
+    REQUIRE(data_cell->GetMemoryUsage() < memory_with_reserved_capacity);
+}
+
+TEST_CASE("SparseTermDatacell Deserialize Compacts Capacity", "[ut][SparseTermDatacell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto data_cell = std::make_shared<SparseTermDataCell>(
+        1.0F, DEFAULT_TERM_ID_LIMIT, allocator.get(), SparseValueQuantizationType::FP32, nullptr);
+
+    std::vector<uint32_t> ids = {1, 3, 5};
+    std::vector<float> vals = {1.0F, 2.0F, 3.0F};
+    SparseVector sparse_vector;
+    sparse_vector.len_ = static_cast<uint32_t>(ids.size());
+    sparse_vector.ids_ = ids.data();
+    sparse_vector.vals_ = vals.data();
+    data_cell->InsertVector(sparse_vector, 0);
+    data_cell->ResizeTermList(128);
+
+    std::stringstream ss;
+    IOStreamWriter writer(ss);
+    data_cell->Serialize(writer);
+
+    SparseTermDataCell restored(
+        1.0F, DEFAULT_TERM_ID_LIMIT, allocator.get(), SparseValueQuantizationType::FP32, nullptr);
+    IOStreamReader reader(ss);
+    restored.Deserialize(reader);
+
+    REQUIRE(restored.term_capacity_ == 6);
+    REQUIRE(restored.GetMemoryUsage() < data_cell->GetMemoryUsage());
+}
+
+TEST_CASE("SparseTermDatacell Deserialize Clears Stale Posting Lists", "[ut][SparseTermDatacell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto make_sparse_vector = [](std::vector<uint32_t>& ids, std::vector<float>& vals) {
+        SparseVector sparse_vector;
+        sparse_vector.len_ = static_cast<uint32_t>(ids.size());
+        sparse_vector.ids_ = ids.data();
+        sparse_vector.vals_ = vals.data();
+        return sparse_vector;
+    };
+
+    SparseTermDataCell stale(
+        1.0F, DEFAULT_TERM_ID_LIMIT, allocator.get(), SparseValueQuantizationType::FP32, nullptr);
+    std::vector<uint32_t> stale_ids = {9};
+    std::vector<float> stale_vals = {9.0F};
+    auto stale_vector = make_sparse_vector(stale_ids, stale_vals);
+    stale.InsertVector(stale_vector, 42);
+
+    SparseTermDataCell source(
+        1.0F, DEFAULT_TERM_ID_LIMIT, allocator.get(), SparseValueQuantizationType::FP32, nullptr);
+    std::vector<uint32_t> ids = {1};
+    std::vector<float> vals = {1.0F};
+    auto sparse_vector = make_sparse_vector(ids, vals);
+    source.InsertVector(sparse_vector, 0);
+
+    std::stringstream ss;
+    IOStreamWriter writer(ss);
+    source.Serialize(writer);
+
+    IOStreamReader reader(ss);
+    stale.Deserialize(reader);
+
+    REQUIRE(stale.total_count_ == 1);
+    REQUIRE(stale.term_capacity_ == 2);
+    REQUIRE(stale.term_ids_.size() == 2);
 }
 
 TEST_CASE("SparseTermDatacell Last Term Test", "[ut][SparseTermDatacell]") {

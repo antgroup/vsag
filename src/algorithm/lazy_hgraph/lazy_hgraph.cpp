@@ -17,10 +17,8 @@
 #include <fmt/format.h>
 
 #include <algorithm>
-#include <cstring>
 #include <limits>
 #include <mutex>
-#include <stdexcept>
 #include <vector>
 
 #include "dataset_impl.h"
@@ -86,6 +84,12 @@ checked_lazy_hgraph_param(const LazyHGraphParameterPtr& param) {
     return param;
 }
 
+IndexCommonParam
+make_wrapper_common_param(IndexCommonParam common_param) {
+    common_param.extra_info_size_ = 0;
+    return common_param;
+}
+
 }  // namespace
 
 ParamPtr
@@ -125,10 +129,11 @@ LazyHGraph::LazyHGraph(const ParamPtr& param, const IndexCommonParam& common_par
 }
 
 LazyHGraph::LazyHGraph(const LazyHGraphParameterPtr& param, const IndexCommonParam& common_param)
-    : InnerIndexInterface(checked_lazy_hgraph_param(param), common_param),
-      transition_threshold_(checked_lazy_hgraph_param(param)->transition_threshold),
-      flat_param_(checked_lazy_hgraph_param(param)->flat_param),
-      graph_param_(checked_lazy_hgraph_param(param)->graph_param),
+    : InnerIndexInterface(checked_lazy_hgraph_param(param),
+                          make_wrapper_common_param(common_param)),
+      transition_threshold_(param->transition_threshold),
+      flat_param_(param->flat_param),
+      graph_param_(param->graph_param),
       common_param_(common_param) {
     this->flat_index_ = std::make_shared<BruteForce>(flat_param_, common_param);
     this->flat_index_->InitFeatures();
@@ -210,20 +215,10 @@ LazyHGraph::TransitionToGraph() {
                    "lazy_hgraph transition id count is too large");
     const auto valid_count = static_cast<int64_t>(valid_ids.size());
 
-    auto build_data = flat_index_->GetVectorByIds(valid_ids.data(), valid_count, this->allocator_);
+    auto build_data = flat_index_->GetDataByIds(valid_ids.data(), valid_count);
     if (build_data == nullptr) {
         throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "failed to get lazy_hgraph vectors");
     }
-    auto* build_ids =
-        static_cast<int64_t*>(this->allocator_->Allocate(sizeof(int64_t) * valid_ids.size()));
-    if (build_ids == nullptr) {
-        throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "failed to allocate lazy_hgraph ids");
-    }
-    std::memcpy(build_ids, valid_ids.data(), sizeof(int64_t) * valid_ids.size());
-    build_data->Ids(build_ids)
-        ->NumElements(valid_count)
-        ->Dim(this->dim_)
-        ->Owner(true, this->allocator_);
 
     auto new_graph = std::make_shared<HGraph>(graph_param_, this->common_param_);
     new_graph->InitFeatures();
@@ -270,7 +265,10 @@ LazyHGraph::CheckIdExist(int64_t id) const {
 uint32_t
 LazyHGraph::Remove(const std::vector<int64_t>& ids, RemoveMode mode) {
     std::shared_lock lock(this->phase_mutex_);
-    return ActiveIndex()->Remove(ids, mode);
+    if (phase_.load(std::memory_order_acquire) == Phase::FLAT) {
+        return flat_index_->Remove(ids, RemoveMode::FORCE_REMOVE);
+    }
+    return graph_index_->Remove(ids, mode);
 }
 
 int64_t
@@ -313,6 +311,20 @@ LazyHGraph::GetDataByIds(const int64_t* ids, int64_t count) const {
     return ActiveIndex()->GetDataByIds(ids, count);
 }
 
+DatasetPtr
+LazyHGraph::GetDataByIdsWithFlag(const int64_t* ids,
+                                 int64_t count,
+                                 uint64_t selected_data_flag) const {
+    std::shared_lock lock(this->phase_mutex_);
+    return ActiveIndex()->GetDataByIdsWithFlag(ids, count, selected_data_flag);
+}
+
+void
+LazyHGraph::GetExtraInfoByIds(const int64_t* ids, int64_t count, char* extra_infos) const {
+    std::shared_lock lock(this->phase_mutex_);
+    ActiveIndex()->GetExtraInfoByIds(ids, count, extra_infos);
+}
+
 int64_t
 LazyHGraph::GetMemoryUsage() const {
     std::shared_lock lock(this->phase_mutex_);
@@ -340,6 +352,18 @@ LazyHGraph::Serialize(StreamWriter& writer) const {
     } else {
         flat_index_->Serialize(writer);
     }
+}
+
+bool
+LazyHGraph::UpdateExtraInfo(const DatasetPtr& new_base) {
+    std::shared_lock lock(this->phase_mutex_);
+    return ActiveIndex()->UpdateExtraInfo(new_base);
+}
+
+bool
+LazyHGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) {
+    std::shared_lock lock(this->phase_mutex_);
+    return ActiveIndex()->UpdateVector(id, new_base, force_update);
 }
 
 void
@@ -397,7 +421,13 @@ LazyHGraph::InitFeatures() {
         IndexFeature::SUPPORT_GET_MEMORY_USAGE,
         IndexFeature::SUPPORT_CHECK_ID_EXIST,
         IndexFeature::SUPPORT_CLONE,
+        IndexFeature::SUPPORT_UPDATE_VECTOR_CONCURRENT,
     });
+    if (this->common_param_.extra_info_size_ > 0) {
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_EXTRA_INFO_BY_ID);
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_KNN_SEARCH_WITH_EX_FILTER);
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_UPDATE_EXTRA_INFO_CONCURRENT);
+    }
 }
 
 }  // namespace vsag

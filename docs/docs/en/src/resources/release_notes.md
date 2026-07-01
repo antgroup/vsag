@@ -48,5 +48,8 @@ npm install vsag@X.Y.Z
   versions.
 - When the serialization format changes, validate deserialization compatibility in a staging
   environment first.
+- For SINDI, the legacy `use_term_lists_heap_insert` search parameter is ignored. SINDI
+  now derives the heap-insertion strategy from `doc_prune_ratio` and `query_prune_ratio`;
+  update configs that relied on forcing this path directly.
 - Roll out gradually in production and use the
   [performance evaluation tool](eval.md) to compare recall and latency.

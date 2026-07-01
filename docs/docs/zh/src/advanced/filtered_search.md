@@ -13,7 +13,7 @@
 
 如果谓词是结构化字段上的 SQL 风格表达式，请阅读
 [属性过滤（混合搜索）](attribute_filter.md)；如果是基于每条向量的不透明字节负载在图内过滤，
-请阅读 [Extra Info](extra_info.md)。
+请阅读 [Extra Info（附加信息）](extra_info.md)。
 
 ## 真值约定
 

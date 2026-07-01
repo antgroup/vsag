@@ -86,6 +86,15 @@ public:
     void
     Move(InnerIdType from, InnerIdType to) override;
 
+    void
+    ShrinkToFit(InnerIdType capacity) override {
+        uint64_t io_size =
+            static_cast<uint64_t>(capacity) * static_cast<uint64_t>(extra_info_size_);
+        this->io_->Shrink(io_size);
+        this->max_capacity_ = capacity;
+        this->total_count_ = std::min(this->total_count_, capacity);
+    }
+
     inline void
     SetIO(std::shared_ptr<BasicIO<IOTmpl>> io) {
         this->io_ = io;

@@ -1,4 +1,3 @@
-
 # Copyright 2024-present the vsag project
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -139,6 +138,9 @@ target_link_libraries(323_index_hgraph_rabitq_split vsag)
 
 add_executable(324_feature_hgraph_mci_companion 324_feature_hgraph_mci_companion.cpp)
 target_link_libraries(324_feature_hgraph_mci_companion vsag)
+
+add_executable(324_feature_lazy_hgraph_extra_info 324_feature_lazy_hgraph_extra_info.cpp)
+target_link_libraries(324_feature_lazy_hgraph_extra_info vsag)
 
 if (TARGET vsag_hdf5_headers)
     set(VSAG_HDF5_LIBS

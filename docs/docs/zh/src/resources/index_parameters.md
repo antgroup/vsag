@@ -51,6 +51,35 @@ HGraph 的构建参数使用通用的 `index_param` 键（参见 `examples/cpp/1
 阈值时，HGraph 会跳过图遍历，直接在通过过滤的 id 上做精确暴扫。详见
 [HGraph 索引文档](../indexes/hgraph.md#高选择性过滤下的暴搜回退brute_force_threshold)。
 
+## LazyHGraph
+
+LazyHGraph 的构建参数可以放在顶层 `lazy_hgraph` 对象中（推荐，语义更清晰），也可以放在
+通用的 `index_param` 对象中。`hgraph` 子对象会转交给转换后的内部 HGraph。
+
+```json
+{
+    "dim": 128,
+    "dtype": "float32",
+    "metric_type": "l2",
+    "lazy_hgraph": {
+        "transition_threshold": 1000,
+        "hgraph": {
+            "base_quantization_type": "sq8",
+            "max_degree": 26,
+            "ef_construction": 100
+        }
+    }
+}
+```
+
+| 字段 | 典型值 | 说明 |
+|------|-------|------|
+| `transition_threshold` | `1000` 或按业务规模设置 | 从精确 flat 搜索转换到 HGraph 的正整数向量数量阈值 |
+| `hgraph` | HGraph 构建对象 | graph 阶段的参数；见 [HGraph](../indexes/hgraph.md) |
+
+LazyHGraph 只支持 `dtype: "float32"`。搜索参数使用 `hgraph` 对象，例如
+`{"hgraph": {"ef_search": 100}}`。详见 [LazyHGraph 索引文档](../indexes/lazy_hgraph.md)。
+
 ## IVF
 
 ```json

@@ -550,7 +550,7 @@ InnerIndexInterface::GetDataByIdsWithFlag(const int64_t* ids,
         }
         auto* extra_info =
             reinterpret_cast<char*>(this->allocator_->Allocate(count * extra_info_size_));
-        dataset->ExtraInfos(extra_info);
+        dataset->ExtraInfos(extra_info)->ExtraInfoSize(static_cast<int64_t>(extra_info_size_));
         auto get_extra_info_func = [&](int64_t begin, int64_t end) {
             for (int64_t i = begin; i < end; ++i) {
                 auto inner_id = this->label_table_->GetIdByLabel(ids[i]);

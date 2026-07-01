@@ -1,0 +1,3 @@
+repository='external project URL'
+module='http://tbase.cn-hangzhou.alipay.aliyun-inc.com/vsagcache%2Fopenblas-0.3.23.tar.gz?OSSAccessKeyId=LTAILFuN8FJQZ4Eu&Expires=101772248134&Signature=UK59ecIPYlLFmVwWhIctCkODvmU%3D;https://github.com/OpenMathLib/OpenBLAS/releases/download/v0.3.23/OpenBLAS-0.3.23.tar.gz;https://vsagcache.oss-rg-china-mainland.aliyuncs.com/openblas/OpenBLAS-0.3.23.tar.gz'
+tag='MD5=115634b39007de71eb7e75cf7591dfb2'

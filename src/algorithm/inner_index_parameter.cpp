@@ -77,7 +77,7 @@ InnerIndexParameter::FromJson(const JsonType& json) {
     }
 
     if (json.Contains(BUILD_THREAD_COUNT_KEY)) {
-        this->build_thread_count = json[BUILD_THREAD_COUNT_KEY].GetInt();
+        this->build_thread_count = json[BUILD_THREAD_COUNT_KEY].GetUint64();
     }
 
     if (json.Contains(LABEL_REMAP_TYPE_KEY)) {
@@ -122,7 +122,7 @@ InnerIndexParameter::ToJson() const {
     JsonType json;
     json[USE_REORDER_KEY].SetBool(this->use_reorder);
     json[REORDER_SOURCE_KEY].SetString(this->reorder_source);
-    json[BUILD_THREAD_COUNT_KEY].SetInt(this->build_thread_count);
+    json[BUILD_THREAD_COUNT_KEY].SetUint64(this->build_thread_count);
     json[LABEL_REMAP_TYPE_KEY].SetString(dump_label_remap_type(this->label_remap_type));
     json[USE_ATTRIBUTE_FILTER_KEY].SetBool(this->use_attribute_filter);
     if (use_reorder && this->reorder_source != HGRAPH_REORDER_SOURCE_BASE) {

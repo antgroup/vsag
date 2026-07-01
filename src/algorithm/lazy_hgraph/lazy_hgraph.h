@@ -104,6 +104,14 @@ public:
     [[nodiscard]] DatasetPtr
     GetDataByIds(const int64_t* ids, int64_t count) const override;
 
+    [[nodiscard]] DatasetPtr
+    GetDataByIdsWithFlag(const int64_t* ids,
+                         int64_t count,
+                         uint64_t selected_data_flag) const override;
+
+    void
+    GetExtraInfoByIds(const int64_t* ids, int64_t count, char* extra_infos) const override;
+
     [[nodiscard]] int64_t
     GetMemoryUsage() const override;
 
@@ -131,11 +139,18 @@ public:
                 const FilterPtr& filter,
                 int64_t limited_size = -1) const override;
 
+    // Flat phase deletes are always physical removals so future graph transitions skip tombstones.
     uint32_t
     Remove(const std::vector<int64_t>& ids, RemoveMode mode = RemoveMode::MARK_REMOVE) override;
 
     void
     Serialize(StreamWriter& writer) const override;
+
+    bool
+    UpdateExtraInfo(const DatasetPtr& new_base) override;
+
+    bool
+    UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update = false) override;
 
     /**
      * @brief Return the current operational phase.

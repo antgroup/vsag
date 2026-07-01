@@ -27,6 +27,7 @@ COMPARE_FULL_BUILD="${COMPARE_FULL_BUILD:-1}"
 cmake -S "${ROOT_DIR}" -B "${BUILD_DIR}" \
     -DCMAKE_BUILD_TYPE=Release \
     -DENABLE_EXAMPLES=ON \
+    -DENABLE_TOOLS=ON \
     -DENABLE_TESTS=OFF
 
 cmake --build "${BUILD_DIR}" --target 328_hgraph_mci_add_compare_hdf5 -j "${THREADS}"

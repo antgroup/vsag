@@ -518,7 +518,7 @@ HGraphAnalyzer::GetStats() {
     JsonType stats;
     stats["avg_distance_base"].SetFloat(GetBaseAvgDistance());
     auto components = GetComponentCount();
-    stats["connect_components"].SetInt(components.size());
+    stats["connect_components"].SetUint64(components.size());
     stats["maximal_component_size"].SetInt(*std::max_element(components.begin(), components.end()));
     stats["deleted_count"].SetInt(hgraph_->delete_count_);
     const auto& [count_in_degree, count_out_degree, avg_degree] = GetDegreeDistribution();

@@ -95,6 +95,9 @@ public:
     ResizeTermList(InnerIdType new_term_capacity);
 
     void
+    Compact();
+
+    void
     Serialize(StreamWriter& writer) const;
 
     void

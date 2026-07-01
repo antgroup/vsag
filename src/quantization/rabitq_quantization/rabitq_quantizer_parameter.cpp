@@ -29,10 +29,11 @@ RaBitQuantizerParameter::RaBitQuantizerParameter()
 void
 RaBitQuantizerParameter::FromJson(const JsonType& json) {
     if (json.Contains(PCA_DIM_KEY)) {
-        this->pca_dim_ = json[PCA_DIM_KEY].GetInt();
+        this->pca_dim_ = json[PCA_DIM_KEY].GetUint64();
     }
     if (json.Contains(RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY)) {
-        this->num_bits_per_dim_query_ = json[RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY].GetInt();
+        this->num_bits_per_dim_query_ =
+            json[RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY].GetUint64();
     }
 
     if (num_bits_per_dim_query_ != 4 and num_bits_per_dim_query_ != 32) {
@@ -43,7 +44,7 @@ RaBitQuantizerParameter::FromJson(const JsonType& json) {
     }
 
     if (json.Contains(RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY)) {
-        this->num_bits_per_dim_base_ = json[RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY].GetInt();
+        this->num_bits_per_dim_base_ = json[RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY].GetUint64();
     }
 
     if (num_bits_per_dim_base_ > 8 or num_bits_per_dim_base_ < 1) {
@@ -53,7 +54,8 @@ RaBitQuantizerParameter::FromJson(const JsonType& json) {
                         num_bits_per_dim_base_));
     }
     if (json.Contains(RABITQ_QUANTIZATION_BITS_PER_DIM_FILTER_KEY)) {
-        this->num_bits_per_dim_filter_ = json[RABITQ_QUANTIZATION_BITS_PER_DIM_FILTER_KEY].GetInt();
+        this->num_bits_per_dim_filter_ =
+            json[RABITQ_QUANTIZATION_BITS_PER_DIM_FILTER_KEY].GetUint64();
     }
     if (num_bits_per_dim_filter_ < 1 or num_bits_per_dim_filter_ > num_bits_per_dim_base_) {
         throw VsagException(
@@ -97,11 +99,11 @@ JsonType
 RaBitQuantizerParameter::ToJson() const {
     JsonType json;
     json[TYPE_KEY].SetString(QUANTIZATION_TYPE_VALUE_RABITQ);
-    json[PCA_DIM_KEY].SetInt(this->pca_dim_);
+    json[PCA_DIM_KEY].SetUint64(this->pca_dim_);
     json[RABITQ_QUANTIZATION_VERSION_KEY].SetString(this->rabitq_version_);
-    json[RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY].SetInt(this->num_bits_per_dim_query_);
-    json[RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY].SetInt(this->num_bits_per_dim_base_);
-    json[RABITQ_QUANTIZATION_BITS_PER_DIM_FILTER_KEY].SetInt(this->num_bits_per_dim_filter_);
+    json[RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY].SetUint64(this->num_bits_per_dim_query_);
+    json[RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY].SetUint64(this->num_bits_per_dim_base_);
+    json[RABITQ_QUANTIZATION_BITS_PER_DIM_FILTER_KEY].SetUint64(this->num_bits_per_dim_filter_);
     json[RABITQ_QUANTIZATION_ERROR_RATE_KEY].SetFloat(this->rabitq_error_rate_);
     json[USE_FHT_KEY].SetBool(this->use_fht_);
     return json;

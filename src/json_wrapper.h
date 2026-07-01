@@ -17,6 +17,7 @@
 
 #include <nlohmann/json_fwd.hpp>
 #include <string>
+#include <type_traits>
 
 namespace vsag {
 
@@ -72,6 +73,17 @@ public:
 
     void
     AppendJson(const JsonWrapper& json);
+
+    void
+    SetInt64(int64_t value);
+
+    template <typename T,
+              typename std::enable_if<std::is_integral<T>::value && std::is_signed<T>::value,
+                                      int>::type = 0>
+    void
+    SetInt(T value) {
+        this->SetInt64(static_cast<int64_t>(value));
+    }
 
     void
     SetInt(uint64_t value);

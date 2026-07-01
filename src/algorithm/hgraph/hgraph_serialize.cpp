@@ -14,6 +14,8 @@
 
 #include <fmt/format.h>
 
+#include <limits>
+
 #include "datacell/sparse_graph_datacell.h"
 #include "hgraph.h"  // IWYU pragma: keep
 #include "impl/heap/standard_heap.h"
@@ -91,15 +93,15 @@ HGraph::serialize_basic_info() const {
     jsonify_basic_info["dim"].SetInt(this->dim_);
     jsonify_basic_info["metric"].SetInt(static_cast<int64_t>(this->metric_));
     jsonify_basic_info["entry_point_id"].SetInt(this->entry_point_id_);
-    jsonify_basic_info["ef_construct"].SetInt(this->ef_construct_);
-    jsonify_basic_info["extra_info_size"].SetInt(this->extra_info_size_);
+    jsonify_basic_info["ef_construct"].SetUint64(this->ef_construct_);
+    jsonify_basic_info["extra_info_size"].SetUint64(this->extra_info_size_);
     jsonify_basic_info["data_type"].SetInt(static_cast<int64_t>(this->data_type_));
     jsonify_basic_info["persist_source_id"].SetBool(this->persist_source_id_);
     jsonify_basic_info["use_mci"].SetBool(this->use_mci_);
     // logger::debug("mult: {}", this->mult_);
     TO_JSON_BASE64(jsonify_basic_info, mult);
-    jsonify_basic_info["max_capacity"].SetInt(this->max_capacity_.load());
-    jsonify_basic_info["max_level"].SetInt(this->route_graphs_.size());
+    jsonify_basic_info["max_capacity"].SetUint64(this->max_capacity_.load());
+    jsonify_basic_info["max_level"].SetUint64(this->route_graphs_.size());
     jsonify_basic_info[INDEX_PARAM].SetString(this->create_param_ptr_->ToString());
 
     return jsonify_basic_info;
@@ -126,8 +128,8 @@ HGraph::deserialize_basic_info(const JsonType& jsonify_basic_info) {
         this->metric_ = static_cast<MetricType>(jsonify_basic_info["metric"].GetInt());
     }
     FROM_JSON(jsonify_basic_info, entry_point_id, Int);
-    FROM_JSON(jsonify_basic_info, ef_construct, Int);
-    FROM_JSON(jsonify_basic_info, extra_info_size, Int);
+    FROM_JSON(jsonify_basic_info, ef_construct, Uint64);
+    FROM_JSON(jsonify_basic_info, extra_info_size, Uint64);
     if (jsonify_basic_info.Contains("data_type")) {
         this->data_type_ = static_cast<DataTypes>(jsonify_basic_info["data_type"].GetInt());
     }
@@ -136,10 +138,16 @@ HGraph::deserialize_basic_info(const JsonType& jsonify_basic_info) {
     }
     FROM_JSON_BASE64(jsonify_basic_info, mult);
     // logger::debug("mult: {}", this->mult_);
-    this->max_capacity_.store(jsonify_basic_info["max_capacity"].GetInt());
+    auto max_capacity = jsonify_basic_info["max_capacity"].GetUint64();
+    if (max_capacity > std::numeric_limits<InnerIdType>::max()) {
+        throw VsagException(
+            ErrorType::INVALID_ARGUMENT,
+            fmt::format("HGraph max_capacity {} exceeds InnerIdType limit", max_capacity));
+    }
+    this->max_capacity_.store(static_cast<InnerIdType>(max_capacity));
 
-    auto max_level = jsonify_basic_info["max_level"].GetInt();
-    for (int64_t i = 0; i < max_level; ++i) {
+    auto max_level = jsonify_basic_info["max_level"].GetUint64();
+    for (uint64_t i = 0; i < max_level; ++i) {
         this->route_graphs_.emplace_back(this->generate_one_route_graph());
     }
     if (jsonify_basic_info.Contains(INDEX_PARAM)) {
@@ -401,20 +409,21 @@ HGraph::GetMemoryUsageDetail() const {
     if (this->ignore_reorder_) {
         this->use_reorder_ = false;
     }
-    memory_usage["basic_flatten_codes"].SetInt(this->basic_flatten_codes_->CalcSerializeSize());
-    memory_usage["bottom_graph"].SetInt(this->bottom_graph_->CalcSerializeSize());
+    memory_usage["basic_flatten_codes"].SetUint64(this->basic_flatten_codes_->CalcSerializeSize());
+    memory_usage["bottom_graph"].SetUint64(this->bottom_graph_->CalcSerializeSize());
     if (this->has_precise_reorder()) {
-        memory_usage["high_precise_codes"].SetInt(this->high_precise_codes_->CalcSerializeSize());
+        memory_usage["high_precise_codes"].SetUint64(
+            this->high_precise_codes_->CalcSerializeSize());
     }
     uint64_t route_graph_size = 0;
     for (const auto& route_graph : this->route_graphs_) {
         route_graph_size += route_graph->CalcSerializeSize();
     }
-    memory_usage["route_graph"].SetInt(route_graph_size);
+    memory_usage["route_graph"].SetUint64(route_graph_size);
     if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
-        memory_usage["extra_infos"].SetInt(this->extra_infos_->CalcSerializeSize());
+        memory_usage["extra_infos"].SetUint64(this->extra_infos_->CalcSerializeSize());
     }
-    memory_usage["__total_size__"].SetInt(this->CalSerializeSize());
+    memory_usage["__total_size__"].SetUint64(this->CalSerializeSize());
     return memory_usage.Dump();
 }
 

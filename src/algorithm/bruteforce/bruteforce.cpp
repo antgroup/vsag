@@ -18,6 +18,7 @@
 #include <cstring>
 #include <mutex>
 #include <optional>
+#include <tuple>
 
 #include "attr/argparse.h"
 #include "attr/executor/executor.h"
@@ -212,6 +213,10 @@ BruteForce::Add(const DatasetPtr& data) {
         if (not slot.has_value()) {
             return label;
         }
+        if (this->extra_infos_ != nullptr) {
+            std::lock_guard lock(this->add_mutex_);
+            this->extra_infos_->InsertExtraInfo(extra_info, slot.value());
+        }
         this->add_one(data, slot.value());
         return std::nullopt;
     };
@@ -223,6 +228,11 @@ BruteForce::Add(const DatasetPtr& data) {
     const auto* attrs = data->GetAttributeSets();
     const auto* extra_info = data->GetExtraInfos();
     const auto extra_info_size = data->GetExtraInfoSize();
+    if (this->extra_infos_ != nullptr) {
+        CHECK_ARGUMENT(extra_info != nullptr, "extra_infos is nullptr");
+        CHECK_ARGUMENT(extra_info_size == static_cast<int64_t>(this->extra_info_size_),
+                       "extra_infos size mismatch");
+    }
     for (int64_t j = 0; j < total; ++j) {
         const auto label = labels[j];
         {
@@ -269,38 +279,49 @@ BruteForce::Remove(const std::vector<int64_t>& ids, RemoveMode mode) {
                        "remove is not supported when use_attribute_filter is true");
     }
 
+    uint32_t delete_count = 0;
     if (mode == RemoveMode::MARK_REMOVE) {
         std::scoped_lock label_lock(this->label_lookup_mutex_);
-        uint32_t delete_count = this->label_table_->MarkRemove(ids);
+        delete_count = this->label_table_->MarkRemove(ids);
         delete_count_.fetch_add(delete_count, std::memory_order_relaxed);
         return delete_count;
     }
 
-    std::scoped_lock lock(this->add_mutex_, this->label_lookup_mutex_);
+    std::scoped_lock add_label_lock(this->add_mutex_, this->label_lookup_mutex_);
+    std::unique_lock global_lock(this->global_mutex_);
     for (auto label : ids) {
-        const auto last_inner_id = static_cast<InnerIdType>(this->total_count_.load() - 1);
-        const auto inner_id = this->label_table_->GetIdByLabel(label);
+        InnerIdType inner_id;
+        bool found = false;
+        std::tie(found, inner_id) = this->label_table_->TryGetIdByLabel(label, true);
+        auto current_total = this->total_count_.load();
+        if (not found or inner_id >= current_total) {
+            continue;
+        }
 
-        CHECK_ARGUMENT(inner_id <= last_inner_id, "the element to be remove is invalid");
-
-        const auto last_label = this->label_table_->GetLabelById(last_inner_id);
-        this->label_table_->MarkRemove(label);
-        --this->label_table_->total_count_;
+        const auto last_inner_id = static_cast<InnerIdType>(current_total - 1);
+        bool was_mark_removed = this->label_table_->IsRemoved(inner_id);
+        this->label_table_->ForceRemove(label, inner_id);
 
         if (inner_id < last_inner_id) {
             Vector<float> data(dim_, allocator_);
             GetVectorByInnerId(last_inner_id, data.data());
-
-            this->label_table_->MarkRemove(last_label);
-            --this->label_table_->total_count_;
-
             this->inner_codes_->InsertVector(data.data(), inner_id);
-            this->label_table_->Insert(inner_id, last_label);
+            this->label_table_->Move(last_inner_id, inner_id);
+            if (this->extra_infos_ != nullptr) {
+                this->extra_infos_->Move(last_inner_id, inner_id);
+            }
         }
 
-        --this->total_count_;
+        if (was_mark_removed and this->delete_count_.load(std::memory_order_relaxed) > 0) {
+            this->delete_count_.fetch_sub(1, std::memory_order_relaxed);
+        }
+        this->total_count_.fetch_sub(1);
+        delete_count++;
     }
-    return 1;
+    if (delete_count != 0) {
+        this->shrink_to_fit();
+    }
+    return delete_count;
 }
 
 DatasetPtr
@@ -349,7 +370,9 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
     ExecutorPtr executor = nullptr;
     Filter* attr_filter = nullptr;
 
-    FilterPtr ft = this->create_search_filter(request.filter_);
+    auto brute_force_params = BruteForceSearchParameters::FromJson(request.params_str_);
+    FilterPtr ft =
+        this->create_search_filter(request.filter_, brute_force_params.use_extra_info_filter);
 
     if (request.enable_attribute_filter_) {
         auto& schema = this->attr_filter_index_->field_type_map_;
@@ -392,7 +415,6 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
 
     std::atomic<uint32_t> dist_cmp{0};
 
-    auto brute_force_params = BruteForceSearchParameters::FromJson(request.params_str_);
     auto parallel_count = brute_force_params.parallel_search_thread_count;
     std::vector<DistHeapPtr> heaps(parallel_count);
     for (auto& cur_heap : heaps) {
@@ -455,7 +477,7 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
         }
     }
 
-    // Collect result inner IDs before pack_knn_result consumes the heap,
+    // Collect result inner IDs before pack_knn_result_with_extra_info consumes the heap,
     // so we can call MarkResult for reasoning analysis.
     Vector<InnerIdType> result_inner_ids(this->allocator_);
     if (reasoning_ctx && heap != nullptr && !heap->Empty()) {
@@ -467,7 +489,7 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
         }
     }
 
-    auto result = this->pack_knn_result(heap);
+    auto result = this->pack_knn_result_with_extra_info(heap);
 
     // Generate reasoning report if reasoning context was created.
     if (reasoning_ctx) {
@@ -530,14 +552,20 @@ BruteForce::Serialize(StreamWriter& writer) const {
     if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
         this->attr_filter_index_->Serialize(writer);
     }
+    if (this->extra_info_size_ > 0 and this->extra_infos_ != nullptr) {
+        this->extra_infos_->Serialize(writer);
+    }
     this->inner_codes_->Serialize(writer);
     this->label_table_->Serialize(writer);
 
     // serialize footer (introduced since v0.15)
     JsonType basic_info;
     basic_info["dim"].SetInt(dim_);
-    basic_info["total_count"].SetInt(total_count_.load());
+    basic_info["total_count"].SetUint64(total_count_.load());
     basic_info["is_multi_vector"].SetBool(is_multi_vector_);
+    basic_info["extra_info_size"].SetUint64(this->extra_info_size_);
+    basic_info["has_extra_info"].SetBool(this->extra_info_size_ > 0 and
+                                         this->extra_infos_ != nullptr);
     basic_info[INDEX_PARAM].SetString(this->create_param_ptr_->ToString());
     write_index_footer(writer, basic_info);
 }
@@ -576,7 +604,11 @@ BruteForce::Deserialize(StreamReader& reader) {
             }
         }
         dim_ = basic_info["dim"].GetInt();
-        total_count_.store(basic_info["total_count"].GetInt());
+        total_count_.store(basic_info["total_count"].GetUint64());
+        if (basic_info.Contains("extra_info_size")) {
+            CHECK_ARGUMENT(basic_info["extra_info_size"].GetUint64() == this->extra_info_size_,
+                           "BruteForce index extra_info_size not match");
+        }
 
         if (basic_info.Contains("is_multi_vector")) {
             is_multi_vector_ = basic_info["is_multi_vector"].GetBool();
@@ -585,6 +617,15 @@ BruteForce::Deserialize(StreamReader& reader) {
 
         if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
             this->attr_filter_index_->Deserialize(buffer_reader);
+        }
+        const bool has_extra_info =
+            basic_info.Contains("has_extra_info") and basic_info["has_extra_info"].GetBool();
+        if (has_extra_info) {
+            CHECK_ARGUMENT(this->extra_info_size_ > 0,
+                           "BruteForce serialized extra_info is not supported by current index");
+            CHECK_ARGUMENT(this->extra_infos_ != nullptr,
+                           "BruteForce serialized extra_info is not supported by current index");
+            this->extra_infos_->Deserialize(buffer_reader);
         }
 
         this->inner_codes_->Deserialize(buffer_reader);
@@ -656,6 +697,13 @@ BruteForce::InitFeatures() {
         IndexFeature::SUPPORT_CHECK_ID_EXIST,
         IndexFeature::SUPPORT_CLONE,
     });
+
+    if (this->extra_infos_ != nullptr) {
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_EXTRA_INFO_BY_ID);
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_KNN_SEARCH_WITH_EX_FILTER);
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_UPDATE_EXTRA_INFO_CONCURRENT);
+    }
+    this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_UPDATE_VECTOR_CONCURRENT);
 }
 
 static const std::string BRUTE_FORCE_PARAMS_TEMPLATE =
@@ -695,6 +743,12 @@ static const std::string BRUTE_FORCE_PARAMS_TEMPLATE =
             }
         },
         "{BUILD_THREAD_COUNT_KEY}": 1,
+        "{EXTRA_INFO_KEY}": {
+            "{IO_PARAMS_KEY}": {
+                "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
+                "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
+            }
+        },
         "{USE_ATTRIBUTE_FILTER_KEY}": false,
         "{ATTR_PARAMS_KEY}": {
             "{ATTR_HAS_BUCKETS_KEY}": true
@@ -886,9 +940,29 @@ BruteForce::resize(uint64_t new_size) {
     cur_size = this->max_capacity_.load();
     if (cur_size < new_size_power_2) {
         this->inner_codes_->Resize(new_size_power_2);
+        if (this->extra_infos_ != nullptr) {
+            this->extra_infos_->Resize(new_size_power_2);
+        }
         this->max_capacity_.store(new_size_power_2);
         this->cal_memory_usage();
     }
+}
+
+void
+BruteForce::shrink_to_fit() {
+    auto total_count = this->total_count_.load();
+    auto current_capacity = this->max_capacity_.load();
+    if (total_count != 0 and total_count > current_capacity / 2) {
+        return;
+    }
+
+    this->inner_codes_->ShrinkToFit(total_count);
+    this->label_table_->ShrinkToFit(total_count);
+    if (this->extra_infos_ != nullptr) {
+        this->extra_infos_->ShrinkToFit(total_count);
+    }
+    this->max_capacity_.store(total_count);
+    this->cal_memory_usage();
 }
 
 void
@@ -922,6 +996,23 @@ BruteForce::GetVectorByInnerId(InnerIdType inner_id, float* data) const {
     }
 }
 
+bool
+BruteForce::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) {
+    (void)force_update;
+    CHECK_ARGUMENT(new_base != nullptr, "new_base is nullptr");
+    auto base_dim = new_base->GetDim();
+    CHECK_ARGUMENT(base_dim == dim_,
+                   fmt::format("base.dim({}) must be equal to index.dim({})", base_dim, dim_));
+    CHECK_ARGUMENT(new_base->GetFloat32Vectors() != nullptr, "base.float_vector is nullptr");
+
+    std::shared_lock add_lock(this->add_mutex_, std::defer_lock);
+    std::shared_lock label_lock(this->label_lookup_mutex_, std::defer_lock);
+    std::lock(add_lock, label_lock);
+    std::unique_lock global_lock(this->global_mutex_);
+    InnerIdType inner_id = this->label_table_->GetIdByLabel(id);
+    return this->inner_codes_->UpdateVector(new_base->GetFloat32Vectors(), inner_id);
+}
+
 void
 BruteForce::UpdateAttribute(int64_t id, const AttributeSet& new_attrs) {
     auto inner_id = this->label_table_->GetIdByLabel(id);
@@ -946,6 +1037,9 @@ BruteForce::cal_memory_usage() {
     auto memory_usage = this->inner_codes_->GetMemoryUsage();
     memory_usage += sizeof(BruteForce);
     memory_usage += this->label_table_->GetMemoryUsage();
+    if (this->extra_infos_ != nullptr) {
+        memory_usage += this->extra_infos_->GetMemoryUsage();
+    }
     std::unique_lock lock(this->memory_usage_mutex_);
     this->current_memory_usage_.store(memory_usage);
 }

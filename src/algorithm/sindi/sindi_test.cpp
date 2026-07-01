@@ -13,8 +13,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#define VSAG_SINDI_TEST_ACCESS
 #include "sindi.h"
 
+#include <array>
 #include <set>
 
 #include "impl/allocator/safe_allocator.h"
@@ -22,6 +24,23 @@
 #include "storage/serialization_template_test.h"
 #include "unittest.h"
 using namespace vsag;
+
+namespace vsag {
+
+class SINDITestAccess {
+public:
+    static bool
+    UseTermListsHeapInsert(const SINDI& index, const SINDISearchParameter& search_param) {
+        return index.UseTermListsHeapInsert(search_param);
+    }
+
+    static float
+    TermListsHeapInsertPruneThreshold() {
+        return SINDI::K_TERM_LISTS_HEAP_INSERT_PRUNE_THRESHOLD;
+    }
+};
+
+}  // namespace vsag
 
 class MockFilter : public Filter {
 public:
@@ -59,6 +78,49 @@ private:
     std::vector<int64_t> valid_ids_;
     std::unordered_set<int64_t> valid_ids_set_;
 };
+
+TEST_CASE("SINDI Heap Insert Strategy Test", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+
+    auto make_index = [&](float doc_prune_ratio) {
+        auto param = std::make_shared<vsag::SINDIParameter>();
+        param->term_id_limit = 30001;
+        param->window_size = 10000;
+        param->doc_prune_ratio = doc_prune_ratio;
+        param->avg_doc_term_length = 100;
+        return SINDI(param, common_param);
+    };
+
+    auto make_search_param = [](float query_prune_ratio) {
+        SINDISearchParameter search_param;
+        search_param.query_prune_ratio = query_prune_ratio;
+        return search_param;
+    };
+
+    SECTION("uses distance insertion when both prune ratios are no greater than threshold") {
+        std::array<float, 3> prune_ratios = {
+            0.0F, 0.05F, SINDITestAccess::TermListsHeapInsertPruneThreshold()};
+        for (auto doc_prune_ratio : prune_ratios) {
+            auto index = make_index(doc_prune_ratio);
+            for (auto query_prune_ratio : prune_ratios) {
+                auto search_param = make_search_param(query_prune_ratio);
+                REQUIRE_FALSE(SINDITestAccess::UseTermListsHeapInsert(index, search_param));
+            }
+        }
+    }
+
+    SECTION("matches threshold rule for distance and term-list insertion") {
+        auto doc_prune_ratio = GENERATE(0.0F, 0.2F);
+        auto query_prune_ratio = GENERATE(0.0F, 0.2F);
+        auto index = make_index(doc_prune_ratio);
+        auto search_param = make_search_param(query_prune_ratio);
+        REQUIRE(SINDITestAccess::UseTermListsHeapInsert(index, search_param) ==
+                (doc_prune_ratio > SINDITestAccess::TermListsHeapInsertPruneThreshold() ||
+                 query_prune_ratio > SINDITestAccess::TermListsHeapInsertPruneThreshold()));
+    }
+}
 
 TEST_CASE("SINDI Basic Test", "[ut][SINDI]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
@@ -135,8 +197,7 @@ TEST_CASE("SINDI Basic Test", "[ut][SINDI]") {
         "sindi": {
             "query_prune_ratio": 0.0,
             "term_prune_ratio": 0.0,
-            "n_candidate": 20,
-            "use_term_lists_heap_insert": false
+            "n_candidate": 20
         }
     }
     )";
@@ -300,8 +361,7 @@ TEST_CASE("SINDI Quantization Test", "[ut][SINDI]") {
         "sindi": {
             "query_prune_ratio": 0.0,
             "term_prune_ratio": 0.0,
-            "n_candidate": 20,
-            "use_term_lists_heap_insert": false
+            "n_candidate": 20
         }
     }
     )";
@@ -590,8 +650,7 @@ TEST_CASE("SINDI Remap Basic Test", "[ut][SINDI]") {
         "sindi": {
             "query_prune_ratio": 0.0,
             "term_prune_ratio": 0.0,
-            "n_candidate": 20,
-            "use_term_lists_heap_insert": false
+            "n_candidate": 20
         }
     }
     )";
@@ -734,8 +793,7 @@ TEST_CASE("SINDI Remap with Reorder Test", "[ut][SINDI]") {
         "sindi": {
             "query_prune_ratio": 0.0,
             "term_prune_ratio": 0.0,
-            "n_candidate": 20,
-            "use_term_lists_heap_insert": false
+            "n_candidate": 20
         }
     }
     )";
@@ -876,8 +934,7 @@ TEST_CASE("SINDI Remap with Quantization Test", "[ut][SINDI]") {
         "sindi": {
             "query_prune_ratio": 0.0,
             "term_prune_ratio": 0.0,
-            "n_candidate": 20,
-            "use_term_lists_heap_insert": false
+            "n_candidate": 20
         }
     }
     )";
@@ -974,8 +1031,7 @@ TEST_CASE("SINDI Remap with Filter Test", "[ut][SINDI]") {
         "sindi": {
             "query_prune_ratio": 0.0,
             "term_prune_ratio": 0.0,
-            "n_candidate": 20,
-            "use_term_lists_heap_insert": false
+            "n_candidate": 20
         }
     }
     )";
@@ -1390,8 +1446,7 @@ TEST_CASE("SINDI Remap Memory Comparison - MD5 Vocabulary", "[ut][SINDI]") {
         "sindi": {
             "query_prune_ratio": 0.0,
             "term_prune_ratio": 0.0,
-            "n_candidate": 20,
-            "use_term_lists_heap_insert": false
+            "n_candidate": 20
         }
     }
     )";

@@ -31,7 +31,7 @@ public:
     void
     FromJson(const JsonType& json) override {
         if (json.Contains(GRAPH_PARAM_MAX_DEGREE_KEY)) {
-            this->max_degree_ = json[GRAPH_PARAM_MAX_DEGREE_KEY].GetInt();
+            this->max_degree_ = json[GRAPH_PARAM_MAX_DEGREE_KEY].GetUint64();
         }
         if (json.Contains(SUPPORT_DUPLICATE)) {
             this->support_duplicate_ = json[SUPPORT_DUPLICATE].GetBool();
@@ -44,7 +44,7 @@ public:
     JsonType
     ToJson() const override {
         JsonType json;
-        json[GRAPH_PARAM_MAX_DEGREE_KEY].SetInt(this->max_degree_);
+        json[GRAPH_PARAM_MAX_DEGREE_KEY].SetUint64(this->max_degree_);
         json[GRAPH_STORAGE_TYPE_KEY].SetString(GRAPH_STORAGE_TYPE_VALUE_COMPRESSED);
         json[SUPPORT_DUPLICATE].SetBool(this->support_duplicate_);
         json[HGRAPH_USE_REVERSE_EDGES_KEY].SetBool(this->use_reverse_edges_);

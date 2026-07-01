@@ -124,6 +124,9 @@ public:
     void
     Train(const DatasetPtr& data) override;
 
+    bool
+    UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update = false) override;
+
     void
     UpdateAttribute(int64_t id, const AttributeSet& new_attrs) override;
 
@@ -164,6 +167,9 @@ private:
      *
      * The caller must have already called claim_slot() and resize().
      */
+    void
+    shrink_to_fit();
+
     void
     add_one(const float* data, InnerIdType inner_id);
 

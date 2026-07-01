@@ -5,20 +5,25 @@
 
 - 通过向量 id 直接获取元数据，无需额外的 KV 存储。
 - 在不重新插入向量的前提下，原地更新某条向量对应的元数据。
-- 在图遍历**过程中**就基于元数据过滤候选，而不是事后再过滤搜索结果。
+- 在搜索过程中基于元数据过滤候选，而不是事后再过滤搜索结果。
 
 VSAG 把该负载视为原始字节流，其内存布局、序列化与解释完全由用户自行决定。
 
 ## 索引支持情况
 
-| 索引       | Build/Add 时存入 | `GetExtraInfoByIds` | `UpdateExtraInfo` | 图内过滤（`use_extra_info_filter`） | 搜索结果中返回 |
-|------------|:----------------:|:-------------------:|:-----------------:|:-----------------------------------:|:--------------:|
-| **HGraph** |       支持       |         支持        |        支持       |                 支持                |      支持      |
-| IVF        |       支持       |          —          |         —         |                  —                  |        —       |
-| SINDI      |       支持       |          —          |         —         |                  —                  |        —       |
+各索引支持的操作如下：
 
-只有 HGraph 注册了相关的能力标志位；如需完整体验请使用 HGraph。运行时可通过
-`index->CheckFeature(...)` 进行检查。
+- **HGraph**：支持 Build/Add 时存入、`GetExtraInfoByIds`、`UpdateExtraInfo`、
+  `use_extra_info_filter`，以及在搜索结果中返回 extra info。
+- **LazyHGraph**：两个阶段都支持与 HGraph 相同的能力。flat 阶段由 BruteForce 提供能力，
+  转换后 graph 阶段由 HGraph 提供能力。
+- **BruteForce**：支持 Build/Add 时存入、`GetExtraInfoByIds`、`UpdateExtraInfo`、
+  `use_extra_info_filter`，以及在搜索结果中返回 extra info。
+- **IVF** 和 **SINDI**：支持 Build/Add 时存入 extra info，但不提供获取、更新、
+  extra-info 过滤或在搜索结果中返回 extra info。
+
+当 `extra_info_size > 0` 时，HGraph、LazyHGraph 和 BruteForce 会注册相关能力标志位。
+运行时可通过 `index->CheckFeature(...)` 进行检查。
 
 ## 启用 Extra Info
 
@@ -35,6 +40,25 @@ VSAG 把该负载视为原始字节流，其内存布局、序列化与解释完
         "base_quantization_type": "sq8",
         "max_degree": 26,
         "ef_construction": 100
+    }
+}
+```
+
+LazyHGraph 也使用顶层 `extra_info_size`；LazyHGraph 自身参数仍放在 `lazy_hgraph` 对象中：
+
+```json
+{
+    "dtype": "float32",
+    "metric_type": "l2",
+    "dim": 128,
+    "extra_info_size": 12,
+    "lazy_hgraph": {
+        "transition_threshold": 1000,
+        "hgraph": {
+            "base_quantization_type": "sq8",
+            "max_degree": 26,
+            "ef_construction": 100
+        }
     }
 }
 ```
@@ -63,18 +87,18 @@ index->Build(base);   // 或 index->Add(base)
 
 ## 获取 Extra Info
 
-### 在搜索结果中获取（HGraph）
+### 在搜索结果中获取
 
-当 `extra_info_size > 0` 时，HGraph 会自动在结果 `Dataset` 中填入每个返回 id 对应的字节负载：
+当 `extra_info_size > 0` 时，支持该能力的索引会在结果 `Dataset` 中填入每个返回 id 对应的
+字节负载：
 
 ```cpp
 auto result = index->KnnSearch(query, k, search_params).value();
-const char* infos = result->GetExtraInfos();          // 长度 = result->GetDim() * extra_info_size
+const char* infos = result->GetExtraInfos();
+auto info_size = result->GetExtraInfoSize();
 ```
 
-返回的结果 `Dataset` 中只设置了 `ExtraInfos` 缓冲区，**并没有**设置 `ExtraInfoSize`，
-因此 `result->GetExtraInfoSize()` 会返回 `0`。请使用建索引时配置的 `extra_info_size`
-来计算偏移和缓冲区长度。
+请使用 `info_size` 计算返回缓冲区中的偏移。
 
 ### 通过 ID 批量获取（`GetExtraInfoByIds`）
 
@@ -107,10 +131,11 @@ if (index->CheckFeature(vsag::SUPPORT_UPDATE_EXTRA_INFO_CONCURRENT)) {
 
 数据集必须只包含一条记录，且大小必须匹配。
 
-## 基于 Extra Info 的图内过滤（HGraph）
+## 基于 Extra Info 过滤
 
-在过滤命中率较低的场景下，事后过滤会浪费大量计算。HGraph 可以在图遍历过程中，对每个候选向量
-直接调用用户定义的过滤器并传入其 extra_info 字节，从而让被过滤掉的候选根本不进入结果集。
+在过滤命中率较低的场景下，事后过滤会浪费大量计算。HGraph 与 LazyHGraph 可以在图遍历过程中
+对每个候选向量直接调用用户定义的过滤器并传入其 extra_info 字节，从而让被过滤掉的候选不进入
+结果集。LazyHGraph 在转换前也支持同样的字节负载过滤，此时 flat 阶段会执行精确扫描。
 
 1. 重写 `vsag::Filter` 中接收字节缓冲区的版本：
 
@@ -118,7 +143,7 @@ if (index->CheckFeature(vsag::SUPPORT_UPDATE_EXTRA_INFO_CONCURRENT)) {
    class CategoryFilter : public vsag::Filter {
    public:
        CategoryFilter(uint32_t lo, uint32_t hi) : lo_(lo), hi_(hi) {}
-       bool CheckValid(int64_t /*id*/) const override { return true; }   // 该路径下不会被调用
+       bool CheckValid(int64_t /*id*/) const override { return true; }
        bool CheckValid(const char* data) const override {
            uint32_t category_id;
            std::memcpy(&category_id, data, sizeof(category_id));
@@ -143,27 +168,35 @@ if (index->CheckFeature(vsag::SUPPORT_UPDATE_EXTRA_INFO_CONCURRENT)) {
    auto result = index->KnnSearch(query, k, search_params, filter).value();
    ```
 
-`use_extra_info_filter` 为 `true` 时，HGraph 会调用 `CheckValid(const char*)` 而不是
+`use_extra_info_filter` 为 `true` 时，搜索路径会调用 `CheckValid(const char*)` 而不是
 `CheckValid(int64_t)`。可使用
 `index->CheckFeature(vsag::SUPPORT_KNN_SEARCH_WITH_EX_FILTER)` 进行能力检查。
 
+## LazyHGraph 说明
+
+- 创建 LazyHGraph 索引时必须配置 `extra_info_size`；该字段不放在 `lazy_hgraph` 或 `hgraph`
+  对象内部。
+- flat 阶段写入的 extra info 会在转换时迁移到内部 HGraph。
+- `GetExtraInfoByIds`、`UpdateExtraInfo`、搜索结果返回 extra info，以及
+  `use_extra_info_filter` 在转换前后都可用。
+- 序列化 LazyHGraph 时会保留当前阶段和已存储的 extra info。
+
 ## 能力标志
 
-| 标志                                          | 含义                                                   |
-|-----------------------------------------------|--------------------------------------------------------|
-| `vsag::SUPPORT_GET_EXTRA_INFO_BY_ID`          | 支持 `GetExtraInfoByIds`。                             |
-| `vsag::SUPPORT_UPDATE_EXTRA_INFO_CONCURRENT`  | 支持线程安全的 `UpdateExtraInfo`。                     |
-| `vsag::SUPPORT_KNN_SEARCH_WITH_EX_FILTER`     | 搜索时支持 `use_extra_info_filter`。                   |
+- `vsag::SUPPORT_GET_EXTRA_INFO_BY_ID`：支持 `GetExtraInfoByIds`。
+- `vsag::SUPPORT_UPDATE_EXTRA_INFO_CONCURRENT`：支持线程安全的 `UpdateExtraInfo`。
+- `vsag::SUPPORT_KNN_SEARCH_WITH_EX_FILTER`：搜索时支持 `use_extra_info_filter`。
 
 ## 注意事项与限制
 
-- 负载是不透明的字节流，序列化/反序列化由用户负责，库内部仅按偏移做 `memcpy`。
+- 负载是不透明的字节流，序列化/反序列化由用户负责，库内部仅按偏移复制。
 - `extra_info_size` 在 Build 时即被固定，并写入序列化后的索引。
-- 存储开销为 `extra_info_size * num_elements` 字节，会被计入 `EstimateMemory`。
-- 请尽量保持负载紧凑——它会驻留内存，并在图内过滤时被反复读取。
+- 存储开销为 `extra_info_size * num_elements` 字节；支持该存储统计的索引会将其计入
+  `EstimateMemory`。
+- 请尽量保持负载紧凑，因为 extra-info 过滤时会读取该负载。
 - 该特性目前仅提供 C++ 接口，未提供 Python 绑定。
 
 ## 示例
 
 完整的可运行示例位于 `examples/cpp/320_feature_extra_info.cpp`，演示了在 HGraph 上启用
-`extra_info`、按 id 获取、图内过滤搜索以及原地更新等用法。
+`extra_info`、按 id 获取、extra-info 过滤搜索以及原地更新等用法。

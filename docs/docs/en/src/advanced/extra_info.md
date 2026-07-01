@@ -1,27 +1,31 @@
 # Extra Info
 
 `extra_info` is a fixed-size, opaque per-vector byte payload stored alongside vectors inside
-the index. It lets you keep small pieces of non-vector metadata (e.g. timestamps, category ids,
-permission tags, application-specific fields) right next to the vectors, so you can:
+the index. It lets you keep small pieces of non-vector metadata, such as timestamps, category ids,
+permission tags, or application-specific fields, right next to the vectors, so you can:
 
 - Retrieve metadata by vector id without a separate KV store.
 - Update a vector's metadata in place without re-inserting the vector.
-- Filter candidates **during** graph traversal using your own metadata, instead of post-filtering
-  results.
+- Filter candidates during search using your own metadata instead of post-filtering results.
 
-The library treats the payload as raw bytes — you fully own its layout, serialization, and
+The library treats the payload as raw bytes. You fully own its layout, serialization, and
 interpretation.
 
 ## Index Support
 
-| Index      | Store on Build/Add | `GetExtraInfoByIds` | `UpdateExtraInfo` | In-graph filter (`use_extra_info_filter`) | Returned in search results |
-|------------|:------------------:|:-------------------:|:-----------------:|:-----------------------------------------:|:--------------------------:|
-| **HGraph** |         Yes        |         Yes         |         Yes       |                    Yes                    |             Yes            |
-| IVF        |         Yes        |          —          |         —         |                     —                     |              —             |
-| SINDI      |         Yes        |          —          |         —         |                     —                     |              —             |
+Supported operations by index:
 
-Only HGraph advertises the related capability flags; for the richest experience use HGraph.
-You can always check at runtime with `index->CheckFeature(...)`.
+- **HGraph**: store on Build/Add, `GetExtraInfoByIds`, `UpdateExtraInfo`,
+  `use_extra_info_filter`, and search-result extra info.
+- **LazyHGraph**: the same support as HGraph in both phases. The flat phase is served by
+  BruteForce, and after transition the graph phase is served by HGraph.
+- **BruteForce**: store on Build/Add, `GetExtraInfoByIds`, `UpdateExtraInfo`,
+  `use_extra_info_filter`, and search-result extra info.
+- **IVF** and **SINDI**: store extra info on Build/Add, but do not expose retrieval, update,
+  extra-info filtering, or search-result extra info.
+
+HGraph, LazyHGraph, and BruteForce advertise the related capability flags when
+`extra_info_size > 0`. You can always check at runtime with `index->CheckFeature(...)`.
 
 ## Enabling Extra Info
 
@@ -39,6 +43,26 @@ serialized together with the index.
         "base_quantization_type": "sq8",
         "max_degree": 26,
         "ef_construction": 100
+    }
+}
+```
+
+For LazyHGraph, `extra_info_size` is still a top-level field; the LazyHGraph-specific parameters
+stay in the `lazy_hgraph` object:
+
+```json
+{
+    "dtype": "float32",
+    "metric_type": "l2",
+    "dim": 128,
+    "extra_info_size": 12,
+    "lazy_hgraph": {
+        "transition_threshold": 1000,
+        "hgraph": {
+            "base_quantization_type": "sq8",
+            "max_degree": 26,
+            "ef_construction": 100
+        }
     }
 }
 ```
@@ -67,19 +91,18 @@ index->Build(base);   // or index->Add(base)
 
 ## Retrieving Extra Info
 
-### From Search Results (HGraph)
+### From Search Results
 
-When `extra_info_size > 0`, HGraph automatically populates the result `Dataset` with the matching
+When `extra_info_size > 0`, supported indexes populate the result `Dataset` with the matching
 extra_info bytes for every returned id:
 
 ```cpp
 auto result = index->KnnSearch(query, k, search_params).value();
-const char* infos = result->GetExtraInfos();          // length = result->GetDim() * extra_info_size
+const char* infos = result->GetExtraInfos();
+auto info_size = result->GetExtraInfoSize();
 ```
 
-The result `Dataset` carries the `ExtraInfos` buffer but **does not** set `ExtraInfoSize` on it,
-so `result->GetExtraInfoSize()` will return `0`. Use the `extra_info_size` you configured at
-build time to compute offsets and lengths.
+Use `info_size` to compute offsets in the returned buffer.
 
 ### By Ids (`GetExtraInfoByIds`)
 
@@ -112,11 +135,12 @@ if (index->CheckFeature(vsag::SUPPORT_UPDATE_EXTRA_INFO_CONCURRENT)) {
 
 The dataset must contain exactly one element and the size must match.
 
-## In-Graph Filtering with Extra Info (HGraph)
+## Filtering with Extra Info
 
-Post-filtering can be wasteful when the filter prunes many candidates. HGraph can call your
-filter on each candidate's extra_info bytes during graph traversal, so disqualified candidates
-never enter the result set.
+Post-filtering can be wasteful when the filter prunes many candidates. HGraph and LazyHGraph can
+call your filter on each candidate's extra_info bytes during graph traversal, so disqualified
+candidates never enter the result set. LazyHGraph also supports the same byte-payload filter before
+transition, where the flat phase runs an exact scan.
 
 1. Override the byte-buffer overload of `vsag::Filter`:
 
@@ -124,7 +148,7 @@ never enter the result set.
    class CategoryFilter : public vsag::Filter {
    public:
        CategoryFilter(uint32_t lo, uint32_t hi) : lo_(lo), hi_(hi) {}
-       bool CheckValid(int64_t /*id*/) const override { return true; }   // unused on this path
+       bool CheckValid(int64_t /*id*/) const override { return true; }
        bool CheckValid(const char* data) const override {
            uint32_t category_id;
            std::memcpy(&category_id, data, sizeof(category_id));
@@ -150,29 +174,38 @@ never enter the result set.
    auto result = index->KnnSearch(query, k, search_params, filter).value();
    ```
 
-When `use_extra_info_filter` is true, HGraph dispatches to `CheckValid(const char*)` instead of
+When `use_extra_info_filter` is true, the search path calls `CheckValid(const char*)` instead of
 `CheckValid(int64_t)`. You can guard with
 `index->CheckFeature(vsag::SUPPORT_KNN_SEARCH_WITH_EX_FILTER)`.
 
+## LazyHGraph Notes
+
+- `extra_info_size` must be configured when the LazyHGraph index is created; it is not nested under
+  `lazy_hgraph` or `hgraph`.
+- Extra info supplied while the index is still in the flat phase is migrated into the internal
+  HGraph during transition.
+- `GetExtraInfoByIds`, `UpdateExtraInfo`, search-result extra info, and
+  `use_extra_info_filter` work before and after transition.
+- Serialized LazyHGraph indexes preserve both the current phase and the stored extra info.
+
 ## Capability Flags
 
-| Flag                                          | Meaning                                              |
-|-----------------------------------------------|------------------------------------------------------|
-| `vsag::SUPPORT_GET_EXTRA_INFO_BY_ID`          | `GetExtraInfoByIds` is available.                    |
-| `vsag::SUPPORT_UPDATE_EXTRA_INFO_CONCURRENT`  | `UpdateExtraInfo` is available and thread-safe.      |
-| `vsag::SUPPORT_KNN_SEARCH_WITH_EX_FILTER`     | `use_extra_info_filter` is available in search.      |
+- `vsag::SUPPORT_GET_EXTRA_INFO_BY_ID`: `GetExtraInfoByIds` is available.
+- `vsag::SUPPORT_UPDATE_EXTRA_INFO_CONCURRENT`: `UpdateExtraInfo` is available and thread-safe.
+- `vsag::SUPPORT_KNN_SEARCH_WITH_EX_FILTER`: `use_extra_info_filter` is available in search.
 
 ## Notes and Limitations
 
 - The payload is opaque bytes; you are responsible for serialization/deserialization. The library
-  only `memcpy`s by offset.
+  only copies by offset.
 - `extra_info_size` is fixed at build time and persisted in the serialized index.
-- Storage cost is `extra_info_size * num_elements` bytes, accounted into `EstimateMemory`.
-- Keep the payload compact — it is loaded into memory and walked during in-graph filtering.
+- Storage cost is `extra_info_size * num_elements` bytes, accounted into `EstimateMemory` by
+  indexes that support memory estimation for this storage.
+- Keep the payload compact because it is read during extra-info filtering.
 - The feature is currently C++ only; there is no Python binding for `extra_info`.
 
 ## Example
 
 A complete, runnable example is available at
 `examples/cpp/320_feature_extra_info.cpp`. It demonstrates building an HGraph index with
-`extra_info`, retrieval by id, in-graph filtering, and in-place updates.
+`extra_info`, retrieval by id, extra-info filtering, and in-place updates.

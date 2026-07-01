@@ -120,6 +120,10 @@ public:
                             "Move not implemented in ExtraInfoInterface");
     }
 
+    virtual void
+    ShrinkToFit(InnerIdType /*capacity*/) {
+    }
+
 public:
     InnerIdType total_count_{0};
     InnerIdType max_capacity_{0};

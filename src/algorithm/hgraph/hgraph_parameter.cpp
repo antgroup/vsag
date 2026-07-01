@@ -118,7 +118,8 @@ HGraphParameter::FromJson(const JsonType& json) {
     }
 
     if (json.Contains(EF_CONSTRUCTION_KEY)) {
-        this->ef_construction = json[EF_CONSTRUCTION_KEY].GetInt();
+        this->ef_construction = json[EF_CONSTRUCTION_KEY].GetUint64();
+        CHECK_ARGUMENT(this->ef_construction > 0, "ef_construction must be positive");
     }
 
     if (json.Contains(ALPHA_KEY)) {
@@ -126,7 +127,7 @@ HGraphParameter::FromJson(const JsonType& json) {
     }
 
     if (json.Contains(BUILD_THREAD_COUNT_KEY)) {
-        this->build_thread_count = json[BUILD_THREAD_COUNT_KEY].GetInt();
+        this->build_thread_count = json[BUILD_THREAD_COUNT_KEY].GetUint64();
     }
 
     if (graph_json.Contains(GRAPH_TYPE_KEY)) {
@@ -218,7 +219,7 @@ HGraphParameter::ToJson() const {
     json[REORDER_SOURCE_KEY].SetString(this->reorder_source);
     json[BASE_CODES_KEY].SetJson(this->base_codes_param->ToJson());
     json[GRAPH_KEY].SetJson(this->bottom_graph_param->ToJson());
-    json[EF_CONSTRUCTION_KEY].SetInt(this->ef_construction);
+    json[EF_CONSTRUCTION_KEY].SetUint64(this->ef_construction);
     json[ALPHA_KEY].SetFloat(this->alpha);
     json[SUPPORT_DUPLICATE].SetBool(this->support_duplicate);
     json[DUPLICATE_DISTANCE_THRESHOLD].SetFloat(this->duplicate_distance_threshold);

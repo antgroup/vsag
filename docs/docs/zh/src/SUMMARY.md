@@ -14,6 +14,7 @@
 - [总览](indexes/README.md)
 - [索引参数](resources/index_parameters.md)
 - [HGraph](indexes/hgraph.md)
+- [LazyHGraph](indexes/lazy_hgraph.md)
 - [IVF](indexes/ivf.md)
 - [SINDI](indexes/sindi.md)
 - [Pyramid](indexes/pyramid.md)

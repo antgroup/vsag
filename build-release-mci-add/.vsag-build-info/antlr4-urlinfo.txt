@@ -1,0 +1,3 @@
+repository='external project URL'
+module='http://tbase.cn-hangzhou.alipay.aliyun-inc.com/vsagcache%2Fantlr4-4.13.2.tar.gz?OSSAccessKeyId=LTAILFuN8FJQZ4Eu&Expires=101772248135&Signature=ydGSUBXnA0F2WjMgb%2BrfqGVDgfs%3D;https://github.com/antlr/antlr4/archive/refs/tags/4.13.2.tar.gz;https://vsagcache.oss-rg-china-mainland.aliyuncs.com/antlr4/v4.13.2.tar.gz'
+tag='MD5=3b75610fc8a827119258cba09a068be5'

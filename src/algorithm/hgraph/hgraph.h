@@ -49,6 +49,8 @@
 
 namespace vsag {
 
+class IteratorFilterContext;
+
 // HGraph index was introduced since v0.12
 class HGraph : public InnerIndexInterface {
 public:
@@ -575,5 +577,9 @@ private:
     bool persist_source_id_{false};
 
     std::unique_ptr<HGraphCache> cache_{nullptr};
+
+    float build_cache_hit_rate_{-1.0F};     // cache hit rate from last cache-based build
+    uint64_t build_cache_hit_nodes_{0};     // number of nodes with cache hit
+    uint64_t build_cache_missed_nodes_{0};  // number of nodes without cache hit
 };
 }  // namespace vsag

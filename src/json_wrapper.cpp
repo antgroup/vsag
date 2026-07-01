@@ -16,6 +16,7 @@
 #include "json_wrapper.h"
 
 #include <nlohmann/json.hpp>
+#include <stdexcept>
 
 namespace vsag {
 
@@ -132,8 +133,13 @@ JsonWrapper::AppendJson(const JsonWrapper& json) {
 }
 
 void
-JsonWrapper::SetInt(uint64_t value) {
+JsonWrapper::SetInt64(int64_t value) {
     (*json_) = value;
+}
+
+void
+JsonWrapper::SetInt(uint64_t value) {
+    this->SetUint64(value);
 }
 
 void
@@ -169,6 +175,13 @@ JsonWrapper::GetInt() const {
 
 uint64_t
 JsonWrapper::GetUint64() const {
+    if (json_->is_number_integer() && not json_->is_number_unsigned()) {
+        const auto value = (*json_).get<int64_t>();
+        if (value < 0) {
+            throw std::out_of_range("negative integer cannot be converted to uint64_t");
+        }
+        return static_cast<uint64_t>(value);
+    }
     return (*json_).get<uint64_t>();
 }
 

@@ -1,0 +1,66 @@
+name: hdf5 1.14 release build
+
+# Controls when the action will run. Triggers the workflow on a manual run
+on:
+  workflow_dispatch:
+    inputs:
+      use_tag:
+        description: 'Release version tag'
+        type: string
+        required: false
+        default: snapshot-1.14
+
+permissions:
+  contents: read
+
+# A workflow run is made up of one or more jobs that can run sequentially or
+# in parallel.
+jobs:
+  log-the-inputs:
+    runs-on: ubuntu-latest
+    outputs:
+      rel_tag: ${{ steps.get-tag-name.outputs.RELEASE_TAG }}
+    steps:
+    - name: Get tag name
+      id: get-tag-name
+      env:
+        TAG: ${{ inputs.use_tag }}
+      run: echo "RELEASE_TAG=$TAG" >> $GITHUB_OUTPUT
+
+  call-workflow-tarball:
+    needs: log-the-inputs
+    uses: ./.github/workflows/tarball.yml
+    with:
+      use_tag: ${{ needs.log-the-inputs.outputs.rel_tag }}
+      use_environ: release
+
+  call-workflow-ctest:
+    needs: call-workflow-tarball
+    uses: ./.github/workflows/cmake-ctest.yml
+    with:
+      preset_name: ci-StdShar
+      file_base: ${{ needs.call-workflow-tarball.outputs.file_base }}
+      snap_name: hdf5-${{ needs.call-workflow-tarball.outputs.source_base }}
+      use_environ: release
+
+  call-workflow-abi:
+    needs: [log-the-inputs, call-workflow-tarball, call-workflow-ctest]
+    uses: ./.github/workflows/abi-report.yml
+    with:
+      file_ref: '1_14_3'
+      file_base: ${{ needs.call-workflow-tarball.outputs.file_base }}
+      use_tag: ${{ needs.log-the-inputs.outputs.rel_tag }}
+      use_environ: release
+
+  call-workflow-release:
+    needs: [log-the-inputs, call-workflow-tarball, call-workflow-ctest, call-workflow-abi]
+    permissions:
+      contents: write # In order to allow tag creation
+    uses: ./.github/workflows/release-files.yml
+    with:
+      file_base: ${{ needs.call-workflow-tarball.outputs.file_base }}
+      file_branch: ${{ needs.call-workflow-tarball.outputs.file_branch }}
+      file_sha: ${{ needs.call-workflow-tarball.outputs.file_sha }}
+      use_tag: ${{ needs.log-the-inputs.outputs.rel_tag }}
+      use_environ: release
+

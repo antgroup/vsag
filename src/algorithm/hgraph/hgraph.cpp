@@ -510,6 +510,18 @@ HGraph::GetStats() const {
         stats["mci_memory_usage"].SetInt(
             static_cast<int64_t>(this->mci_cliques_->GetMemoryUsage()));
     }
+    // Build-time cache hit-rate is a transient property of the
+    // build_with_cache() path (taken only after ImportCache()), so it lives on
+    // HGraph rather than in the post-hoc analyzer. A negative rate means this
+    // index was not built from an imported cache.
+    if (this->build_cache_hit_rate_ >= 0.0F) {
+        stats["build_cache_hit_rate"].SetFloat(this->build_cache_hit_rate_);
+        stats["build_cache_hit_nodes"].SetUint64(this->build_cache_hit_nodes_);
+        stats["build_cache_missed_nodes"].SetUint64(this->build_cache_missed_nodes_);
+    } else {
+        stats["build_cache_hit_rate"]["skipped_reason"].SetString(
+            "index was not built from an imported cache");
+    }
     return stats.Dump(4);
 }
 

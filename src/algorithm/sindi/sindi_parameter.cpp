@@ -15,6 +15,7 @@
 
 #include "sindi_parameter.h"
 
+#include "impl/logger/logger.h"
 #include "inner_string_params.h"
 #include "utils/param_compat_macros.h"
 
@@ -49,6 +50,12 @@ parse_sparse_value_quant_type(const std::string& type_name) {
         false, fmt::format("use_quantization must be false, true, or fp16, but got {}", type_name));
     return SparseValueQuantizationType::FP32;
 }
+
+namespace {
+
+constexpr auto LEGACY_USE_TERM_LISTS_HEAP_INSERT_KEY = "use_term_lists_heap_insert";
+
+}  // namespace
 
 void
 SINDIParameter::FromJson(const JsonType& json) {
@@ -181,10 +188,11 @@ SINDISearchParameter::FromJson(const JsonType& json) {
         n_candidate = DEFAULT_N_CANDIDATE;
     }
 
-    if (json[INDEX_SINDI].Contains(SPARSE_USE_TERM_LISTS_HEAP_INSERT)) {
-        use_term_lists_heap_insert = json[INDEX_SINDI][SPARSE_USE_TERM_LISTS_HEAP_INSERT].GetBool();
-    } else {
-        use_term_lists_heap_insert = true;
+    if (json[INDEX_SINDI].Contains(LEGACY_USE_TERM_LISTS_HEAP_INSERT_KEY)) {
+        logger::warn(
+            "SINDI search parameter use_term_lists_heap_insert is ignored. "
+            "Remove this key; heap insertion is derived from doc_prune_ratio "
+            "and query_prune_ratio with the current SINDI prune-ratio threshold");
     }
 }
 JsonType
@@ -194,7 +202,6 @@ SINDISearchParameter::ToJson() const {
     json[INDEX_SINDI][SPARSE_QUERY_PRUNE_RATIO].SetFloat(query_prune_ratio);
     json[INDEX_SINDI][SPARSE_N_CANDIDATE].SetInt(n_candidate);
     json[INDEX_SINDI][SPARSE_TERM_PRUNE_RATIO].SetFloat(term_prune_ratio);
-    json[INDEX_SINDI][SPARSE_USE_TERM_LISTS_HEAP_INSERT].SetBool(use_term_lists_heap_insert);
     return json;
 }
 
