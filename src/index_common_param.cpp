@@ -54,6 +54,28 @@ fill_datatype(IndexCommonParam& result, const JsonType& datatype_obj) {
 }
 
 inline void
+fill_repr(IndexCommonParam& result, const JsonType& repr_obj) {
+    CHECK_ARGUMENT(repr_obj.IsString(),
+                   fmt::format("parameters[{}] must string type", PARAMETER_REPR));
+    std::string repr = repr_obj.GetString();
+    if (repr == REPR_DENSE) {
+        result.repr_ = RecordRepr::DENSE;
+    } else if (repr == REPR_SPARSE) {
+        result.repr_ = RecordRepr::SPARSE;
+    } else if (repr == REPR_MULTI_VECTOR) {
+        result.repr_ = RecordRepr::MULTI_VECTOR;
+    } else {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            fmt::format("parameters[{}] must be one of [{}, {}, {}], now is {}",
+                                        PARAMETER_REPR,
+                                        REPR_DENSE,
+                                        REPR_SPARSE,
+                                        REPR_MULTI_VECTOR,
+                                        repr));
+    }
+}
+
+inline void
 fill_metrictype(IndexCommonParam& result, const JsonType& metric_obj) {
     CHECK_ARGUMENT(metric_obj.IsString(),
                    fmt::format("parameters[{}] must string type", PARAMETER_METRIC_TYPE));
@@ -102,6 +124,26 @@ IndexCommonParam::CheckAndCreate(JsonType& params, const std::shared_ptr<Resourc
     CHECK_ARGUMENT(params.Contains(PARAMETER_DTYPE),
                    fmt::format("parameters must contains {}", PARAMETER_DTYPE));
     fill_datatype(result, params[PARAMETER_DTYPE]);
+
+    // Check and Fill Repr (with backward compatibility)
+    if (params.Contains(PARAMETER_REPR)) {
+        fill_repr(result, params[PARAMETER_REPR]);
+        if (result.data_type_ == DataTypes::DATA_TYPE_SPARSE &&
+            result.repr_ != RecordRepr::SPARSE) {
+            throw VsagException(
+                ErrorType::INVALID_ARGUMENT,
+                fmt::format("parameters[{}]=sparse requires parameters[{}]=sparse, got {}",
+                            PARAMETER_DTYPE,
+                            PARAMETER_REPR,
+                            ToString(result.repr_)));
+        }
+    } else {
+        if (result.data_type_ == DataTypes::DATA_TYPE_SPARSE) {
+            result.repr_ = RecordRepr::SPARSE;
+        } else {
+            result.repr_ = RecordRepr::DENSE;
+        }
+    }
 
     // Check and Fill MetricType
     CHECK_ARGUMENT(params.Contains(PARAMETER_METRIC_TYPE),

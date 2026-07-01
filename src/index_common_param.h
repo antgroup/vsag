@@ -31,6 +31,7 @@ class IndexCommonParam {
 public:
     MetricType metric_{MetricType::METRIC_TYPE_L2SQR};
     DataTypes data_type_{DataTypes::DATA_TYPE_FLOAT};
+    RecordRepr repr_{RecordRepr::DENSE};
     int64_t dim_{0};
     int64_t extra_info_size_{0};
     std::shared_ptr<Allocator> allocator_{nullptr};
@@ -41,18 +42,5 @@ public:
 
     static IndexCommonParam
     CheckAndCreate(JsonType& params, const std::shared_ptr<Resource>& resource);
-
-    IndexCommonParam&
-    operator=(const IndexCommonParam& other) {
-        if (this != &other) {
-            metric_ = other.metric_;
-            data_type_ = other.data_type_;
-            dim_ = other.dim_;
-            extra_info_size_ = other.extra_info_size_;
-            allocator_ = other.allocator_;
-            thread_pool_ = other.thread_pool_;
-        }
-        return *this;
-    }
 };
 }  // namespace vsag
