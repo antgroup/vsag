@@ -1,3 +1,0 @@
-repository='external project URL'
-module='http://tbase.cn-hangzhou.alipay.aliyun-inc.com/vsagcache%2Fhdf5-hdf5_1.14.4.tar.gz?OSSAccessKeyId=LTAILFuN8FJQZ4Eu&Expires=101772248135&Signature=Ijog%2BRzfSuKvUfM8UngFIgq7jMg%3D;https://github.com/HDFGroup/hdf5/archive/refs/tags/hdf5_1.14.4.tar.gz;https://vsagcache.oss-rg-china-mainland.aliyuncs.com/hdf5/hdf5_1.14.4.tar.gz'
-tag='MD5=fdea52afcce07ed6c3e2a36e7fa11f21'

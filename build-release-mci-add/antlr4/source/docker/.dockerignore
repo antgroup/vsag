@@ -1,7 +1,0 @@
-tool-testsuite
-runtime-testsuite
-.git*
-README.adoc
-README.md
-cache
-tests
