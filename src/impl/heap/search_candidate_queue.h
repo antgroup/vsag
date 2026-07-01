@@ -15,6 +15,7 @@
 #pragma once
 
 #include <cstring>
+#include <vector>
 
 #include "typing.h"
 
@@ -36,13 +37,7 @@ SearchCandidateLess(const SearchCandidate& lhs, const SearchCandidate& rhs) {
 
 class SearchCandidateQueue {
 public:
-    explicit SearchCandidateQueue(Allocator* allocator) : data_(allocator), allocator_(allocator) {
-    }
-
-    [[nodiscard]] Allocator*
-    GetAllocator() const {
-        return allocator_;
-    }
+    SearchCandidateQueue() = default;
 
     void
     Reset(uint64_t new_capacity) {
@@ -113,8 +108,7 @@ public:
     }
 
 private:
-    Vector<SearchCandidate> data_;
-    Allocator* allocator_{nullptr};
+    std::vector<SearchCandidate> data_;
     uint64_t size_{0};
     uint64_t capacity_{0};
     uint64_t current_unexpanded_{0};

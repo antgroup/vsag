@@ -391,7 +391,10 @@ HGraph::Deserialize(StreamReader& reader) {
         if (this->raw_vector_ != nullptr) {
             this->has_raw_vector_ = true;
         }
-        if (this->use_mci_ and this->mci_cliques_ != nullptr) {
+        if (this->use_mci_) {
+            if (this->mci_cliques_ == nullptr) {
+                this->mci_cliques_ = std::make_shared<CliqueDataCell>(this->allocator_);
+            }
             this->mci_cliques_->Deserialize(buffer_reader);
         }
     }

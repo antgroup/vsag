@@ -166,9 +166,9 @@ MCE::run(std::vector<bool>& mustContainNodes) {
     maxCliqueCntSave = 0;
     // printf("a0\n");fflush(stdout);
     edAdj.resize(g.coreNumber + 1);
-    for (ui i = 0; i < g.coreNumber; i++) edAdj[i].resize(g.maxD);
+    for (ui i = 0; i <= g.coreNumber; i++) edAdj[i].resize(g.maxD);
     stAdj.resize(g.coreNumber + 1);
-    for (ui i = 0; i < g.coreNumber; i++) stAdj[i].resize(g.maxD);
+    for (ui i = 0; i <= g.coreNumber; i++) stAdj[i].resize(g.maxD);
     adj.resize(g.maxD);
     for (ui i = 0; i < g.maxD; i++) {
         adj[i].resize(g.coreNumber);
@@ -1411,9 +1411,9 @@ MCE::run() {
     cnt = 0;
     // printf("a0\n");fflush(stdout);
     edAdj.resize(g.coreNumber + 1);
-    for (ui i = 0; i < g.coreNumber; i++) edAdj[i].resize(g.maxD);
+    for (ui i = 0; i <= g.coreNumber; i++) edAdj[i].resize(g.maxD);
     stAdj.resize(g.coreNumber + 1);
-    for (ui i = 0; i < g.coreNumber; i++) stAdj[i].resize(g.maxD);
+    for (ui i = 0; i <= g.coreNumber; i++) stAdj[i].resize(g.maxD);
     adj.resize(g.maxD);
     for (ui i = 0; i < g.maxD; i++) {
         adj[i].resize(g.coreNumber);

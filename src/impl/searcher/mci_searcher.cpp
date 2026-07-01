@@ -45,8 +45,8 @@ search_raw_float_csr(const CliqueDataCellBaseView& view,
     thread_local MCIEpochMarks visited_nodes;
     thread_local MCIEpochMarks visited_cliques;
     thread_local std::unique_ptr<SearchCandidateQueue> candidates;
-    if (candidates == nullptr or candidates->GetAllocator() != allocator) {
-        candidates = std::make_unique<SearchCandidateQueue>(allocator);
+    if (candidates == nullptr) {
+        candidates = std::make_unique<SearchCandidateQueue>();
     }
     visited_nodes.Reset(total);
     visited_cliques.Reset(view.total_clique_count);

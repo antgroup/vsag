@@ -109,7 +109,7 @@ public:
                 delete[] keys;
                 keys = nullptr;
             }
-            // n = _n;
+            n = _n;
         }
         // n = _n;
         if (keys == nullptr)
