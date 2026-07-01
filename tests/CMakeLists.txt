@@ -29,7 +29,7 @@ target_link_libraries (unittests
         PRIVATE
         Catch2::Catch2 
         simd_test vsag_test algorithm_test factory_test attr_test
-        datacell_test quantizer_test storage_test io_test utils_test impl_test
+        datacell_test param_test quantizer_test storage_test io_test utils_test impl_test
         vsag_static
 )
 
@@ -39,9 +39,10 @@ if (APPLE)
         "-Wl,-force_load,$<TARGET_FILE:simd_test>"
         "-Wl,-force_load,$<TARGET_FILE:vsag_test>"
         "-Wl,-force_load,$<TARGET_FILE:algorithm_test>"
+        "-Wl,-force_load,$<TARGET_FILE:param_test>"
         "-Wl,-force_load,$<TARGET_FILE:factory_test>"
         "-Wl,-force_load,$<TARGET_FILE:attr_test>"
-        "-Wl,-force_load,$<TARGET_FILE:datacell_test>"
+        "-Wl,-force_load,$<TARGET_FILE: param_test> $<TARGET_FILE:datacell_test>"
         "-Wl,-force_load,$<TARGET_FILE:quantizer_test>"
         "-Wl,-force_load,$<TARGET_FILE:storage_test>"
         "-Wl,-force_load,$<TARGET_FILE:io_test>"
@@ -53,7 +54,7 @@ else()
                         PRIVATE
                         "-Wl,--whole-archive"
                         simd_test vsag_test algorithm_test factory_test attr_test
-                        datacell_test quantizer_test storage_test io_test utils_test impl_test
+                        datacell_test param_test quantizer_test storage_test io_test utils_test impl_test
                         "-Wl,--no-whole-archive"
         )
 endif()

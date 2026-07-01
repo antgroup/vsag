@@ -15,7 +15,7 @@
 
 #include "bruteforce_parameter.h"
 
-#include <fmt/format.h>
+#include <unordered_set>
 
 #include "datacell/flatten_datacell_parameter.h"
 #include "inner_string_params.h"
@@ -24,23 +24,27 @@
 
 namespace vsag {
 
+VSAG_PARAM_SCHEMA(BruteForceParameter)
+VSAG_PARAM_TYPE_TAG(TYPE_KEY, INDEX_TYPE_BRUTE_FORCE)
+VSAG_PARAM_SUBPARAM_REQUIRED(FlattenInterfaceParameter,
+                             base_codes_param,
+                             BASE_CODES_KEY,
+                             CreateFlattenParam)
+VSAG_PARAM_SCHEMA_END()
+
 BruteForceParameter::BruteForceParameter() : base_codes_param(nullptr) {
 }
 
 void
 BruteForceParameter::FromJson(const JsonType& json) {
     InnerIndexParameter::FromJson(json);
-    CHECK_ARGUMENT(json.Contains(BASE_CODES_KEY),
-                   fmt::format("bruteforce parameters must contains {}", BASE_CODES_KEY));
-    const auto& base_codes_json = json[BASE_CODES_KEY];
-    this->base_codes_param = CreateFlattenParam(base_codes_json);
+    schema().Parse(this, json);
 }
 
 JsonType
 BruteForceParameter::ToJson() const {
     JsonType json = InnerIndexParameter::ToJson();
-    json[TYPE_KEY].SetString(INDEX_TYPE_BRUTE_FORCE);
-    json[BASE_CODES_KEY].SetJson(this->base_codes_param->ToJson());
+    schema().Serialize(this, json);
     return json;
 }
 
@@ -50,7 +54,6 @@ BruteForceParameter::CheckCompatibility(const ParamPtr& other) const {
         return false;
     }
     PARAM_CAST_OR_RETURN(BruteForceParameter, p, other);
-    CHECK_SUB_PARAM(*this, *p, base_codes_param);
-    return true;
+    return schema().Equal(this, p.get());
 }
 }  // namespace vsag

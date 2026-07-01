@@ -21,6 +21,7 @@ add_subdirectory (impl)
 add_subdirectory (storage)
 add_subdirectory (attr)
 add_subdirectory (datacell)
+add_subdirectory (param)
 add_subdirectory (algorithm)
 add_subdirectory (utils)
 add_subdirectory (factory)
@@ -62,7 +63,7 @@ foreach (_lib vsag vsag_static)
             $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 endforeach ()
 
-set (VSAG_DEP_LIBS antlr4-autogen antlr4-runtime diskann simd io quantizer storage utils factory analyzer
+set (VSAG_DEP_LIBS antlr4-autogen param antlr4-runtime diskann simd io quantizer storage utils factory analyzer
       datacell ${IMPL_LIBS} ${ALGORITHM_LIBS} attr pthread m dl fmt::fmt nlohmann_json::nlohmann_json roaring ${BLAS_LIBRARIES})
 
 # `vsag_src_common` aggregates third-party include paths and link
