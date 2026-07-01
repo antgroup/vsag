@@ -146,6 +146,11 @@ public:
     void
     PrefetchImpl(uint64_t offset, uint64_t cache_line = 64);
 
+    [[nodiscard]] const uint8_t*
+    GetRawDataImpl() const {
+        return buffer_;
+    }
+
 private:
     /**
      * @brief Checks the required size and reallocates the buffer if needed.

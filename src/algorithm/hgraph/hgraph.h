@@ -24,15 +24,18 @@
 #include "../inner_index_interface.h"
 #include "common.h"
 #include "datacell/attribute_inverted_interface.h"
+#include "datacell/clique_datacell.h"
 #include "datacell/flatten_interface.h"
 #include "datacell/graph_interface.h"
 #include "datacell/sparse_graph_datacell_parameter.h"
 #include "hgraph_cache.h"
 #include "hgraph_parameter.h"
 #include "impl/basic_optimizer.h"
+#include "impl/filter/iterator_filter.h"
 #include "impl/heap/distance_heap.h"
 #include "impl/reorder/flatten_reorder.h"
 #include "impl/searcher/basic_searcher.h"
+#include "impl/searcher/mci_searcher.h"
 #include "impl/searcher/parallel_searcher.h"
 #include "impl/thread_pool/default_thread_pool.h"
 #include "index_common_param.h"
@@ -45,15 +48,8 @@
 #include "vsag/index_features.h"
 
 namespace vsag {
-class IteratorFilterContext;
 
-/**
- * @brief HGraph: hierarchical navigable graph index.
- *
- * Multi-layer NSW graph with bottom-level graph + optional upper route graphs.
- * Supports quantized codes, reorder, attribute filtering, cache warm-start,
- * force remove, and iterative search. Introduced since v0.12.
- */
+// HGraph index was introduced since v0.12
 class HGraph : public InnerIndexInterface {
 public:
     static ParamPtr
@@ -189,7 +185,6 @@ public:
     void
     Serialize(StreamWriter& writer) const override;
 
-    /// Set the number of threads used during Build().
     void
     SetBuildThreadsCount(uint64_t count) {
         this->build_thread_count_ = count;
@@ -222,37 +217,24 @@ public:
                     const AttributeSet& new_attrs,
                     const AttributeSet& origin_attrs) override;
 
-    /// Map hgraph JSON parameters (legacy helper for external param mapping).
     static JsonType
     map_hgraph_param(const JsonType& hgraph_json);
 
-    /**
-     * @brief Extract a pointer to the data vector at the given index.
-     *
-     * Dispatches on data_type_ to the correct typed getter on the dataset
-     * and offsets by `index * dim_`. Returns nullptr if the underlying
-     * pointer is absent.
-     */
     const void*
     get_data(const DatasetPtr& dataset, uint32_t index = 0) const {
         if (data_type_ == DataTypes::DATA_TYPE_FLOAT) {
-            auto* ptr = dataset->GetFloat32Vectors();
-            return ptr ? ptr + static_cast<int64_t>(index) * dim_ : nullptr;
+            return dataset->GetFloat32Vectors() + index * dim_;
         } else if (data_type_ == DataTypes::DATA_TYPE_INT8) {
-            auto* ptr = dataset->GetInt8Vectors();
-            return ptr ? ptr + static_cast<int64_t>(index) * dim_ : nullptr;
+            return dataset->GetInt8Vectors() + index * dim_;
         } else if (data_type_ == DataTypes::DATA_TYPE_FP16 ||
                    data_type_ == DataTypes::DATA_TYPE_BF16) {
-            auto* ptr = dataset->GetFloat16Vectors();
-            return ptr ? ptr + static_cast<int64_t>(index) * dim_ : nullptr;
+            return dataset->GetFloat16Vectors() + index * dim_;
         } else if (data_type_ == DataTypes::DATA_TYPE_SPARSE) {
-            auto* ptr = dataset->GetSparseVectors();
-            return ptr ? ptr + index : nullptr;
+            return dataset->GetSparseVectors() + index;
         }
         throw VsagException(ErrorType::INVALID_ARGUMENT, "invalid data_type in HGraph");
     }
 
-    /// Sample a random level from the exponential distribution for a new node.
     int
     get_random_level() {
         std::uniform_real_distribution<double> distribution(0.0, 1.0);
@@ -288,37 +270,27 @@ public:
         return ret;
     }
 
-    /// Build all graphs (bottom + route) via ODescent in batch mode.
     std::vector<int64_t>
     build_by_odescent(const DatasetPtr& data);
 
-    /// Insert a single point into the graph(s) at the given level.
     void
     add_one_point(const void* data, int level, InnerIdType id);
 
-    /// Write codes for inner_id into the persistent flatten storage.
     void
     insert_persistent_codes(const void* data, InnerIdType inner_id);
 
-    /// Insert a single point, optionally also inserting codes.
     void
     add_one_point(const void* data, int level, InnerIdType id, bool insert_codes);
 
-    /// Core graph insertion: connect the new node and update neighbors.
-    /// Returns true if the entry point was updated.
     bool
     graph_add_one(const void* data, int level, InnerIdType inner_id);
 
-    /// Grow internal storage to at least new_size capacity.
     void
     resize(uint64_t new_size);
 
-    /// Create a single route (upper-layer) graph from the hierarchical params.
     GraphInterfacePtr
     generate_one_route_graph();
 
-    /// Search a single graph layer, returning a candidate distance heap.
-    /// @param ctx  may be nullptr during add (non-query) scenarios.
     template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH>
     DistHeapPtr
     search_one_graph(const void* query,
@@ -326,10 +298,10 @@ public:
                      const FlattenInterfacePtr& flatten,
                      InnerSearchParam& inner_search_param,
                      const VisitedListPtr& vt,
+                     // ctx can be nullptr in adding scenario
                      QueryContext* ctx,
                      DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
 
-    /// Overload that accepts an IteratorFilterContext for iterative search.
     template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH>
     DistHeapPtr
     search_one_graph(const void* query,
@@ -342,53 +314,43 @@ public:
                      DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
 
 private:
-    // since v0.15: serialize basic index metadata to JSON.
+    // since v0.15
     JsonType
     serialize_basic_info() const;
 
-    /// Restore basic index metadata from JSON.
     void
     deserialize_basic_info(const JsonType& jsonify_basic_info);
 
-    /// Write label (external id) mappings to stream.
     void
     serialize_label_info(StreamWriter& writer) const;
 
-    /// Read label (external id) mappings from stream.
     void
     deserialize_label_info(StreamReader& reader) const;
 
-    /// Legacy serialize for version [0.12.*, 0.14.*].
+    // used in version [0.12.*, 0.14.*]
     void
     serialize_basic_info_v0_14(StreamWriter& writer) const;
 
-    /// Legacy deserialize for version [0.12.*, 0.14.*].
     void
     deserialize_basic_info_v0_14(StreamReader& reader);
 
-    /// Force-remove a single label: physically delete from all graphs.
     uint32_t
     force_remove_one(int64_t label);
 
-    /// Scan all graphs to find a new entry point after the current one is removed.
     void
     find_new_entry_point();
 
-    /// Force-remove a single inner_id from a specific graph layer.
     void
     graph_force_remove_one(const InnerIdType& inner_id,
                            const FlattenInterfacePtr& flatten,
                            const GraphInterfacePtr& graph);
 
-    /// Move data at inner_id `from` to `to`, updating all references.
     void
     move_id(InnerIdType from, InnerIdType to);
 
-    /// Compact internal storage after deletions.
     void
     shrink_to_fit();
 
-    /// Flat brute-force search used when the index is too small or graph is unavailable.
     template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH>
     DistHeapPtr
     brute_force_search(const void* query,
@@ -398,7 +360,6 @@ private:
                        QueryContext* ctx) const;
 
 private:
-    /// Reorder the candidate heap using precise codes, updating in-place.
     void
     reorder(const void* query,
             const FlattenInterfacePtr& flatten,
@@ -408,43 +369,35 @@ private:
             QueryContext& ctx,
             const DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
 
-    /// Run ELP (Edge-Link Pruning) optimizer on the bottom graph.
     void
     elp_optimize();
 
-    /// Initialize raw_vector_ from the given parameter if needed.
     void
     check_and_init_raw_vector(const FlattenInterfaceParamPtr& raw_vector_param,
                               const IndexCommonParam& common_param,
                               bool is_create_new = true);
 
-    /// Compute resize_increase_count_bit_ and initialize reorder if enabled.
     void
     init_resize_bit_and_reorder();
 
-    /// Compute memory usage breakdown and cache the result.
     void
     cal_memory_usage();
 
-    /// True when reorder uses a separate high-precision flatten (not base codes).
     [[nodiscard]] bool
     has_precise_reorder() const {
         return use_reorder_ and not reorder_by_base_;
     }
 
-    /// True when force-remove is enabled.
     [[nodiscard]] bool
     support_force_remove() const {
         return support_force_remove_;
     }
 
-    /// Return the flatten used for reorder (base or high-precision).
     [[nodiscard]] FlattenInterfacePtr
     get_reorder_codes() const {
         return reorder_by_base_ ? basic_flatten_codes_ : high_precise_codes_;
     }
 
-    /// Populate the neighbor cache from the index state.
     void
     fullfill_cache() const;
 
@@ -463,56 +416,47 @@ private:
         return this->cache_ != nullptr && not this->cache_->neighbors_.empty();
     }
 
-    /// Build from imported cache: warm-start, refine, and rebuild route graphs.
     std::vector<int64_t>
     build_with_cache(const DatasetPtr& data);
 
-    /// Internal scratch state shared across the 6 phases of build_with_cache.
-    /// Each phase reads/writes a well-defined subset; threading this through
-    /// a single struct keeps phase signatures small (1 ref instead of 8 outs)
-    /// and makes the data flow explicit at a glance.
+    // Internal scratch state shared across the 6 phases of build_with_cache.
+    // Each phase reads/writes a well-defined subset; threading this through
+    // a single struct keeps phase signatures small (1 ref instead of 8 outs)
+    // and makes the data flow explicit at a glance.
     struct BuildCachePlan {
-        Vector<int64_t> valid_indices;                // input indices that pass filter
-        Vector<InnerIdType> inner_ids;                // allocated inner ids per valid input
-        Vector<Vector<InnerIdType>> route_graph_ids;  // ids assigned to each route graph level
-        std::vector<InnerIdType> inserted_inner_ids;  // all successfully inserted ids
-        std::unordered_map<InnerIdType, uint32_t> inner_id_to_input_idx;  // inner_id -> input index
-        std::unordered_map<std::string, InnerIdType>
-            source_id_to_new_inner;           // source_id -> inner_id
-        std::vector<int64_t> failed_ids;      // ids that failed insertion
-        std::vector<InnerIdType> hit_ids;     // nodes with cache hit (warm-started)
-        std::vector<InnerIdType> missed_ids;  // nodes without cache hit
+        Vector<int64_t> valid_indices;
+        Vector<InnerIdType> inner_ids;
+        Vector<Vector<InnerIdType>> route_graph_ids;
+        std::vector<InnerIdType> inserted_inner_ids;
+        std::unordered_map<InnerIdType, uint32_t> inner_id_to_input_idx;
+        std::unordered_map<std::string, InnerIdType> source_id_to_new_inner;
+        std::vector<int64_t> failed_ids;
+        std::vector<InnerIdType> hit_ids;
+        std::vector<InnerIdType> missed_ids;
 
         BuildCachePlan(Allocator* allocator)
             : valid_indices(allocator), inner_ids(allocator), route_graph_ids(allocator) {
         }
     };
 
-    /// Phase 1: collect valid input indices (serial).
     void
     cache_collect_valid_indices(const DatasetPtr& data, BuildCachePlan& plan);
 
-    /// Phase 2: set up metadata (ids, route graph assignment) (serial).
     void
     cache_setup_metadata_serial(const DatasetPtr& data, BuildCachePlan& plan);
 
-    /// Phase 3: encode all codes in parallel.
     void
     cache_encode_codes_parallel(const DatasetPtr& data, BuildCachePlan& plan);
 
-    /// Phase 4: warm-start neighbors from cache, classify nodes as hit/missed.
     void
     cache_warm_start_and_classify(BuildCachePlan& plan);
 
-    /// Phase 5: refine hit and missed nodes via two-phase parallel refine.
     void
     cache_run_refine_two_phase(const DatasetPtr& data, BuildCachePlan& plan);
 
-    /// Phase 6: rebuild route (upper-layer) graphs via ODescent.
     void
     cache_rebuild_route_graphs(BuildCachePlan& plan);
 
-    /// Collect refine candidates for a single node via graph search.
     DistHeapPtr
     collect_refine_candidates(const DatasetPtr& data,
                               InnerIdType inner_id,
@@ -521,7 +465,6 @@ private:
                               uint32_t refine_ef,
                               bool use_self_as_entry) const;
 
-    /// Select refined neighbors and their distances for a single node.
     void
     select_refine_neighbors_with_distances(const DatasetPtr& data,
                                            InnerIdType inner_id,
@@ -532,7 +475,6 @@ private:
                                            Vector<InnerIdType>& out_neighbors,
                                            Vector<float>& out_distances) const;
 
-    /// Refine a batch of nodes in two phases: parallel search+select, then serial writeback.
     void
     refine_nodes_two_phase(const DatasetPtr& data,
                            const std::vector<InnerIdType>& ids_to_refine,
@@ -543,69 +485,95 @@ private:
                            const FlattenInterfacePtr& flatten_codes,
                            const std::unordered_map<InnerIdType, uint32_t>& inner_id_to_input_idx);
 
+    void
+    build_mci_clique_index(const float* vectors = nullptr);
+
+    void
+    incremental_update_mci_clique(InnerIdType new_inner_id, const void* vector);
+
+    [[nodiscard]] Vector<InnerIdType>
+    find_mci_knn_for_new_node(InnerIdType new_inner_id, const void* vector) const;
+
+    bool
+    try_join_mci_clique(InnerIdType new_inner_id, const Vector<InnerIdType>& knn_ids);
+
+    void
+    build_incremental_mci_clique(InnerIdType new_inner_id, const Vector<InnerIdType>& knn_ids);
+
 private:
-    FlattenInterfacePtr basic_flatten_codes_{nullptr};  // coarse/quantized codes for graph search
-    FlattenInterfacePtr high_precise_codes_{nullptr};   // precise codes for reorder (optional)
+    FlattenInterfacePtr basic_flatten_codes_{nullptr};
+    FlattenInterfacePtr high_precise_codes_{nullptr};
 
-    Vector<GraphInterfacePtr> route_graphs_;   // upper-layer route graphs
-    GraphInterfacePtr bottom_graph_{nullptr};  // base-level graph (all vectors)
-    SparseGraphDatacellParamPtr hierarchical_datacell_param_{nullptr};  // params for route graphs
+    Vector<GraphInterfacePtr> route_graphs_;
+    GraphInterfacePtr bottom_graph_{nullptr};
+    SparseGraphDatacellParamPtr hierarchical_datacell_param_{nullptr};
 
-    bool use_elp_optimizer_{false};  // enable ELP edge-link pruning
-    bool ignore_reorder_{false};     // skip reorder even if configured
-    bool build_by_base_{false};      // build graph using base (not quantized) codes
-    bool reorder_by_base_{false};    // use base codes for reorder (no separate precise)
+    bool use_elp_optimizer_{false};
+    bool ignore_reorder_{false};
+    bool build_by_base_{false};
+    bool reorder_by_base_{false};
 
-    BasicSearcherPtr searcher_;              // single-thread graph searcher
-    ParallelSearcherPtr parallel_searcher_;  // multi-thread graph searcher
+    BasicSearcherPtr searcher_;
+    MCISearcherPtr mci_searcher_;
+    ParallelSearcherPtr parallel_searcher_;
 
-    std::default_random_engine level_generator_{
-        2021};          // random number generator for level sampling
-    double mult_{1.0};  // level multiplier (1/ln(max_degree))
+    std::default_random_engine level_generator_{2021};
+    double mult_{1.0};
 
-    InnerIdType entry_point_id_{INVALID_ENTRY_POINT};  // top-level entry point
+    InnerIdType entry_point_id_{INVALID_ENTRY_POINT};
 
-    ODescentParameterPtr odescent_param_{nullptr};  // ODescent build parameters
-    std::string graph_type_{GRAPH_TYPE_VALUE_NSW};  // graph algorithm type
+    ODescentParameterPtr odescent_param_{nullptr};
+    std::string graph_type_{GRAPH_TYPE_VALUE_NSW};
 
-    uint64_t ef_construct_{400};  // expansion factor during graph construction
-    float alpha_{1.0};            // Relative Neighborhood Graph pruning coefficient
+    CliqueDataCellPtr mci_cliques_{nullptr};
+    bool use_mci_{false};
+    uint64_t mci_mcs_{200};
+    uint64_t mci_clique_max_{50};
+    float mci_alpha_{1.2F};
+    uint64_t mci_seed_count_{32};
+    float mci_hgraph_valid_ratio_threshold_{1.0F};
+    std::string mci_knng_path_{};
+    float mci_incremental_join_ratio_threshold_{0.6F};
+    uint64_t mci_incremental_added_mct_{3};
+    uint64_t mci_incremental_clique_max_{50};
 
-    std::shared_ptr<VisitedListPool> pool_{nullptr};  // pool of visited-lists for search
+    uint64_t ef_construct_{400};
+    float alpha_{1.0};
 
-    mutable std::shared_mutex global_mutex_;        // guards total_count_, entry_point_id_
-    mutable MutexArrayPtr neighbors_mutex_;         // per-node locks for neighbor lists
-    mutable std::shared_mutex add_mutex_;           // serializes Add() operations
-    mutable std::shared_mutex force_remove_mutex_;  // serializes force-remove operations
+    std::atomic<uint64_t> total_count_{0};
 
-    std::atomic<InnerIdType> max_capacity_{0};  // allocated storage capacity
+    std::shared_ptr<VisitedListPool> pool_{nullptr};
 
-    uint64_t resize_increase_count_bit_{DEFAULT_RESIZE_BIT};  // log2(resize batch size)
+    mutable std::shared_mutex global_mutex_;
+    mutable MutexArrayPtr neighbors_mutex_;
+    mutable std::shared_mutex add_mutex_;
+    mutable std::shared_mutex force_remove_mutex_;
 
-    static constexpr uint64_t DEFAULT_RESIZE_BIT = 10;  // default resize batch = 1024
+    std::atomic<InnerIdType> max_capacity_{0};
 
-    std::atomic<int64_t> delete_count_{0};  // number of force-removed vectors
+    uint64_t resize_increase_count_bit_{
+        DEFAULT_RESIZE_BIT};  // 2^resize_increase_count_bit_ for resize count
 
-    std::shared_ptr<Optimizer<BasicSearcher>> optimizer_;  // search parameter optimizer
+    static constexpr uint64_t DEFAULT_RESIZE_BIT = 10;
 
-    bool create_new_raw_vector_{false};  // whether a separate raw vector exists
-    FlattenInterfacePtr temporary_build_flatten_codes_{nullptr};  // temp flatten during build
-    FlattenInterfacePtr raw_vector_{nullptr};  // raw float vectors (for distance calc)
+    std::atomic<int64_t> delete_count_{0};
 
-    ReorderInterfacePtr reorder_{nullptr};  // reorder helper
+    std::shared_ptr<Optimizer<BasicSearcher>> optimizer_;
 
-    bool use_old_serial_format_{false};  // true when deserialized from legacy format
+    bool create_new_raw_vector_{false};
+    FlattenInterfacePtr temporary_build_flatten_codes_{nullptr};
+    FlattenInterfacePtr raw_vector_{nullptr};
 
-    bool support_duplicate_{false};             // allow duplicate external ids
-    bool support_force_remove_{false};          // enable physical deletion
-    float duplicate_distance_threshold_{0.0F};  // distance threshold for duplicate detection
+    ReorderInterfacePtr reorder_{nullptr};
 
-    bool persist_source_id_{false};  // whether to persist source_id in serialization
+    bool use_old_serial_format_{false};
 
-    std::unique_ptr<HGraphCache> cache_{nullptr};  // neighbor cache for warm-start build
+    bool support_duplicate_{false};
+    bool support_force_remove_{false};
+    float duplicate_distance_threshold_{0.0F};
 
-    float build_cache_hit_rate_{-1.0F};     // cache hit rate from last cache-based build
-    uint64_t build_cache_hit_nodes_{0};     // number of nodes with cache hit
-    uint64_t build_cache_missed_nodes_{0};  // number of nodes without cache hit
+    bool persist_source_id_{false};
+
+    std::unique_ptr<HGraphCache> cache_{nullptr};
 };
 }  // namespace vsag

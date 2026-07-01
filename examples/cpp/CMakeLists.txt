@@ -136,3 +136,43 @@ target_link_libraries (322_feature_hgraph_brute_force_threshold vsag)
 
 add_executable(323_index_hgraph_rabitq_split 323_index_hgraph_rabitq_split.cpp)
 target_link_libraries(323_index_hgraph_rabitq_split vsag)
+
+add_executable(324_feature_hgraph_mci_companion 324_feature_hgraph_mci_companion.cpp)
+target_link_libraries(324_feature_hgraph_mci_companion vsag)
+
+if (TARGET vsag_hdf5_headers)
+    set(VSAG_HDF5_LIBS
+        ${HDF5_CPP_STATIC_LIBRARY}
+        ${HDF5_C_STATIC_LIBRARY}
+        z
+        dl
+        m
+    )
+
+    add_executable(324_hgraph_mci_build_hdf5 324_hgraph_mci_build_hdf5.cpp)
+    target_link_libraries(324_hgraph_mci_build_hdf5
+        PRIVATE
+            vsag
+            vsag_hdf5_headers
+            ${VSAG_HDF5_LIBS}
+    )
+    add_dependencies(324_hgraph_mci_build_hdf5 hdf5)
+
+    add_executable(325_hgraph_mci_load_search_hdf5 325_hgraph_mci_load_search_hdf5.cpp)
+    target_link_libraries(325_hgraph_mci_load_search_hdf5
+        PRIVATE
+            vsag
+            vsag_hdf5_headers
+            ${VSAG_HDF5_LIBS}
+    )
+    add_dependencies(325_hgraph_mci_load_search_hdf5 hdf5)
+
+    add_executable(328_hgraph_mci_add_compare_hdf5 328_hgraph_mci_add_compare_hdf5.cpp)
+    target_link_libraries(328_hgraph_mci_add_compare_hdf5
+        PRIVATE
+            vsag
+            vsag_hdf5_headers
+            ${VSAG_HDF5_LIBS}
+    )
+    add_dependencies(328_hgraph_mci_add_compare_hdf5 hdf5)
+endif ()

@@ -254,6 +254,14 @@ public:
         return this->size_;
     }
 
+    [[nodiscard]] inline const uint8_t*
+    GetRawData() const {
+        if constexpr (has_GetRawDataImpl<IOTmpl>::value) {
+            return cast().GetRawDataImpl();
+        }
+        return nullptr;
+    }
+
 public:
     /**
      * @brief The size of the IO object.
@@ -347,5 +355,6 @@ private:
     GENERATE_HAS_MEMBER_FUNCTION(InitIOImpl, void, std::declval<const IOParamPtr&>())
     GENERATE_HAS_MEMBER_FUNCTION(ResizeImpl, void, std::declval<uint64_t>())
     GENERATE_HAS_MEMBER_FUNCTION(ShrinkImpl, void, std::declval<uint64_t>())
+    GENERATE_HAS_MEMBER_FUNCTION(GetRawDataImpl, const uint8_t*)
 };
 }  // namespace vsag

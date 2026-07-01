@@ -63,6 +63,16 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
       odescent_param_(hgraph_param->odescent_param),
       graph_type_(hgraph_param->graph_type),
       hierarchical_datacell_param_(hgraph_param->hierarchical_graph_param),
+      use_mci_(hgraph_param->use_mci),
+      mci_mcs_(hgraph_param->mci_mcs),
+      mci_clique_max_(hgraph_param->mci_clique_max),
+      mci_alpha_(hgraph_param->mci_alpha),
+      mci_seed_count_(hgraph_param->mci_seed_count),
+      mci_hgraph_valid_ratio_threshold_(hgraph_param->mci_hgraph_valid_ratio_threshold),
+      mci_knng_path_(hgraph_param->mci_knng_path),
+      mci_incremental_join_ratio_threshold_(hgraph_param->mci_incremental_join_ratio_threshold),
+      mci_incremental_added_mct_(hgraph_param->mci_incremental_added_mct),
+      mci_incremental_clique_max_(hgraph_param->mci_incremental_clique_max),
       use_old_serial_format_(common_param.use_old_serial_format_) {
     this->support_duplicate_ = hgraph_param->support_duplicate;
     this->persist_source_id_ = hgraph_param->persist_source_id;
@@ -74,6 +84,10 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
             FlattenInterface::MakeInstance(hgraph_param->precise_codes_param, common_param);
     }
     this->searcher_ = std::make_shared<BasicSearcher>(common_param, neighbors_mutex_);
+    this->mci_searcher_ = std::make_shared<MCISearcher>(common_param);
+    if (this->use_mci_) {
+        this->mci_cliques_ = std::make_shared<CliqueDataCell>(common_param.allocator_.get());
+    }
 
     this->bottom_graph_ =
         GraphInterface::MakeInstance(hgraph_param->bottom_graph_param, common_param);
@@ -291,19 +305,12 @@ HGraph::generate_one_route_graph() {
 
 float
 HGraph::CalcDistanceById(const float* query, int64_t id, bool calculate_precise_distance) const {
-    FlattenInterfacePtr flat;
-    {
-        std::shared_lock<std::shared_mutex> lock;
-        if (!this->immutable_.load(std::memory_order_acquire)) {
-            lock = std::shared_lock<std::shared_mutex>(this->global_mutex_);
-        }
-        flat = this->basic_flatten_codes_;
-        if (has_precise_reorder() && calculate_precise_distance) {
-            flat = this->high_precise_codes_;
-        }
-        if (create_new_raw_vector_ && calculate_precise_distance) {
-            flat = this->raw_vector_;
-        }
+    auto flat = this->basic_flatten_codes_;
+    if (has_precise_reorder() && calculate_precise_distance) {
+        flat = this->high_precise_codes_;
+    }
+    if (create_new_raw_vector_ && calculate_precise_distance) {
+        flat = this->raw_vector_;
     }
     return InnerIndexInterface::calc_distance_by_id(query, id, flat);
 }
@@ -313,19 +320,12 @@ HGraph::CalDistanceById(const float* query,
                         const int64_t* ids,
                         int64_t count,
                         bool calculate_precise_distance) const {
-    FlattenInterfacePtr flat;
-    {
-        std::shared_lock<std::shared_mutex> lock;
-        if (!this->immutable_.load(std::memory_order_acquire)) {
-            lock = std::shared_lock<std::shared_mutex>(this->global_mutex_);
-        }
-        flat = this->basic_flatten_codes_;
-        if (has_precise_reorder() && calculate_precise_distance) {
-            flat = this->high_precise_codes_;
-        }
-        if (create_new_raw_vector_ && calculate_precise_distance) {
-            flat = this->raw_vector_;
-        }
+    auto flat = this->basic_flatten_codes_;
+    if (has_precise_reorder() && calculate_precise_distance) {
+        flat = this->high_precise_codes_;
+    }
+    if (create_new_raw_vector_ && calculate_precise_distance) {
+        flat = this->raw_vector_;
     }
     return InnerIndexInterface::cal_distance_by_id(query, ids, count, flat);
 }
@@ -455,10 +455,9 @@ HGraph::SetImmutable() {
     }
     std::scoped_lock<std::shared_mutex> add_lock(this->add_mutex_);
     std::scoped_lock<std::shared_mutex> wlock(this->global_mutex_);
-    auto empty_mutex = std::make_shared<EmptyMutex>();
-    this->searcher_->SetMutexArray(empty_mutex);
-    this->parallel_searcher_->SetMutexArray(empty_mutex);
-    this->neighbors_mutex_ = empty_mutex;
+    this->neighbors_mutex_.reset();
+    this->neighbors_mutex_ = std::make_shared<EmptyMutex>();
+    this->searcher_->SetMutexArray(this->neighbors_mutex_);
     this->immutable_.store(true, std::memory_order_release);
 }
 
@@ -485,17 +484,31 @@ HGraph::GetStats() const {
         fmt::format(R"({{"hgraph": {{"ef_search": {}}}}})", ef_construct_);
     auto analyzer = CreateAnalyzer(this, analyzer_param);
     JsonType stats = analyzer->GetStats();
-    // Build-time cache hit-rate is a transient property of the
-    // build_with_cache() path (taken only after ImportCache()), so it lives on
-    // HGraph rather than in the post-hoc analyzer. A negative rate means this
-    // index was not built from an imported cache.
-    if (this->build_cache_hit_rate_ >= 0.0F) {
-        stats["build_cache_hit_rate"].SetFloat(this->build_cache_hit_rate_);
-        stats["build_cache_hit_nodes"].SetInt(this->build_cache_hit_nodes_);
-        stats["build_cache_missed_nodes"].SetInt(this->build_cache_missed_nodes_);
-    } else {
-        stats["build_cache_hit_rate"]["skipped_reason"].SetString(
-            "index was not built from an imported cache");
+    if (this->mci_cliques_ != nullptr) {
+        const auto mci_stats = this->mci_cliques_->CollectStats(this->total_count_.load());
+        stats["mci_has_index"].SetBool(mci_stats.has_index);
+        stats["mci_total_nodes"].SetInt(static_cast<int64_t>(mci_stats.total_nodes));
+        stats["mci_covered_nodes"].SetInt(static_cast<int64_t>(mci_stats.covered_nodes));
+        stats["mci_covered_node_ratio"].SetFloat(static_cast<float>(mci_stats.covered_node_ratio));
+        stats["mci_base_clique_count"].SetInt(static_cast<int64_t>(mci_stats.base_clique_count));
+        stats["mci_delta_clique_count"].SetInt(static_cast<int64_t>(mci_stats.delta_clique_count));
+        stats["mci_total_clique_count"].SetInt(static_cast<int64_t>(mci_stats.total_clique_count));
+        stats["mci_base_membership_count"].SetInt(
+            static_cast<int64_t>(mci_stats.base_membership_count));
+        stats["mci_delta_extra_membership_count"].SetInt(
+            static_cast<int64_t>(mci_stats.delta_extra_membership_count));
+        stats["mci_delta_clique_membership_count"].SetInt(
+            static_cast<int64_t>(mci_stats.delta_clique_membership_count));
+        stats["mci_total_membership_count"].SetInt(
+            static_cast<int64_t>(mci_stats.total_membership_count));
+        stats["mci_avg_membership_per_node"].SetFloat(
+            static_cast<float>(mci_stats.avg_membership_per_node));
+        stats["mci_avg_clique_size"].SetFloat(static_cast<float>(mci_stats.avg_clique_size));
+        stats["mci_max_membership_per_node"].SetInt(
+            static_cast<int64_t>(mci_stats.max_membership_per_node));
+        stats["mci_max_clique_size"].SetInt(static_cast<int64_t>(mci_stats.max_clique_size));
+        stats["mci_memory_usage"].SetInt(
+            static_cast<int64_t>(this->mci_cliques_->GetMemoryUsage()));
     }
     return stats.Dump(4);
 }
@@ -570,10 +583,6 @@ HGraph::check_and_init_raw_vector(const FlattenInterfaceParamPtr& raw_vector_par
 
 bool
 HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) {
-    std::shared_lock<std::shared_mutex> force_remove_rlock;
-    if (this->support_force_remove()) {
-        force_remove_rlock = std::shared_lock<std::shared_mutex>(this->force_remove_mutex_);
-    }
     // check if id exists and get copied base data
     uint32_t inner_id = 0;
     {
@@ -667,6 +676,9 @@ HGraph::cal_memory_usage() {
 
     if (this->create_new_raw_vector_ and this->raw_vector_ != nullptr) {
         memory += raw_vector_->GetMemoryUsage();
+    }
+    if (this->mci_cliques_ != nullptr) {
+        memory += this->mci_cliques_->GetMemoryUsage();
     }
 
     std::unique_lock lock(this->memory_usage_mutex_);

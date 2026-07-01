@@ -95,6 +95,7 @@ HGraph::serialize_basic_info() const {
     jsonify_basic_info["extra_info_size"].SetInt(this->extra_info_size_);
     jsonify_basic_info["data_type"].SetInt(static_cast<int64_t>(this->data_type_));
     jsonify_basic_info["persist_source_id"].SetBool(this->persist_source_id_);
+    jsonify_basic_info["use_mci"].SetBool(this->use_mci_);
     // logger::debug("mult: {}", this->mult_);
     TO_JSON_BASE64(jsonify_basic_info, mult);
     jsonify_basic_info["max_capacity"].SetInt(this->max_capacity_.load());
@@ -286,6 +287,9 @@ HGraph::Serialize(StreamWriter& writer) const {
     if (create_new_raw_vector_) {
         this->raw_vector_->Serialize(writer);
     }
+    if (this->use_mci_ and this->mci_cliques_ != nullptr) {
+        this->mci_cliques_->Serialize(writer);
+    }
 
     // serialize footer (introduced since v0.15)
     auto jsonify_basic_info = this->serialize_basic_info();
@@ -378,6 +382,9 @@ HGraph::Deserialize(StreamReader& reader) {
         }
         if (this->raw_vector_ != nullptr) {
             this->has_raw_vector_ = true;
+        }
+        if (this->use_mci_ and this->mci_cliques_ != nullptr) {
+            this->mci_cliques_->Deserialize(buffer_reader);
         }
     }
     this->cal_memory_usage();

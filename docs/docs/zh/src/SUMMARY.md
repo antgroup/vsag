@@ -46,6 +46,7 @@
 - [范围搜索](advanced/range_search.md)
 - [按 ID 计算距离](advanced/calc_distance_by_id.md)
 - [带过滤的搜索](advanced/filtered_search.md)
+- [HGraph MCI 挂件](advanced/hgraph_mci_companion.md)
 - [迭代式搜索](advanced/iterator_search.md)
 - [属性过滤（混合搜索）](advanced/attribute_filter.md)
 - [序列化格式](advanced/serialization.md)

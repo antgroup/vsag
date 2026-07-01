@@ -149,6 +149,16 @@ public:
     bool
     GetCodesById(InnerIdType id, uint8_t* codes) const override;
 
+    [[nodiscard]] const float*
+    GetRawFloatData() const override {
+        if constexpr (IOTmpl::InMemory) {
+            if (this->code_size_ % sizeof(float) == 0) {
+                return reinterpret_cast<const float*>(this->io_->GetRawData());
+            }
+        }
+        return nullptr;
+    }
+
     void
     Serialize(StreamWriter& writer) override;
 

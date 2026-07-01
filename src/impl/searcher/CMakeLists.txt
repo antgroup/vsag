@@ -17,6 +17,9 @@
 set (SEARCHER_SRC
     basic_searcher.cpp
     basic_searcher.h
+    mci_search_common.h
+    mci_searcher.cpp
+    mci_searcher.h
     parallel_searcher.cpp
     parallel_searcher.h
 )
