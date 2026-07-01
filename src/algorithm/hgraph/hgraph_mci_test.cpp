@@ -67,7 +67,6 @@ GenerateHGraphMCIParams(int64_t dim) {
                     "mcs": 8,
                     "clique_max": 4,
                     "alpha": 1.2,
-                    "seed_count": 8,
                     "hgraph_valid_ratio_threshold": 1.0
                 }
             }

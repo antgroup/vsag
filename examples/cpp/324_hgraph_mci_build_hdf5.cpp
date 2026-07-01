@@ -198,7 +198,6 @@ make_hgraph_mci_params(const Options& options, uint64_t dim, const std::string& 
             << options.mci_clique_max << R"(,
             "alpha": )"
             << options.mci_alpha << R"(,
-            "seed_count": 32,
             "hgraph_valid_ratio_threshold": )"
             << options.hgraph_valid_ratio_threshold << R"(
 )";

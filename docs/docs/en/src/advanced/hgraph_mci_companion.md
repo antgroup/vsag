@@ -27,7 +27,6 @@ Enable the companion under `index_param.mci`:
       "mcs": 200,
       "clique_max": 50,
       "alpha": 1.2,
-      "seed_count": 64,
       "hgraph_valid_ratio_threshold": 0.2,
       "knng_path": "/path/to/knng_200.bin"
     }
@@ -44,8 +43,7 @@ Otherwise it derives a KNN graph from the built HGraph graph and vector data.
 | `mcs` | Candidate neighbor count used when constructing cliques. |
 | `clique_max` | Maximum clique size during full build. |
 | `alpha` | Clique construction expansion factor. |
-| `seed_count` | Default number of filtered seed ids used by MCI search. |
-| `hgraph_valid_ratio_threshold` | Use MCI when `ValidRatio()` is below this value; otherwise use HGraph. |
+| `hgraph_valid_ratio_threshold` | Default search routing threshold: use MCI when `ValidRatio()` is below this value; otherwise use HGraph. |
 | `knng_path` | Optional binary KNNG file for clique construction. |
 | `incremental_join_ratio_threshold` | Add-time threshold for joining existing cliques. |
 | `incremental_added_mct` | Maximum existing cliques a newly added node may join. |
@@ -57,12 +55,13 @@ Search parameters live under the `hgraph` search object:
 
 ```json
 {
-  "hgraph": {
-    "ef_search": 120,
-    "use_mci": true,
-    "seed_ratio": 0.002,
-    "hgraph_valid_ratio_threshold": 0.2
-  }
+    "hgraph": {
+      "ef_search": 120,
+      "use_mci": true,
+      "seed_count": 64,
+      "seed_ratio": 0.002,
+      "hgraph_valid_ratio_threshold": 0.2
+    }
 }
 ```
 

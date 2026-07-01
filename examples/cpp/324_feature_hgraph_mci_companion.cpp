@@ -72,7 +72,6 @@ main(int argc, char** argv) {
                 "mcs": 64,
                 "clique_max": 32,
                 "alpha": 1.2,
-                "seed_count": 64,
                 "hgraph_valid_ratio_threshold": 0.2
             }
         }
