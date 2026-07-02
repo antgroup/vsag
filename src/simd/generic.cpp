@@ -538,6 +538,58 @@ RaBitQFloatThreeBitIPBatch4(const float* vector,
 }
 
 float
+RaBitQFloatTwoBitCenteredIP(const float* vector, const uint8_t* bits, uint64_t dim) {
+    if (dim == 0) {
+        return 0.0F;
+    }
+
+    const uint64_t plane_bytes = (dim + 7) / 8;
+    const uint8_t* plane0 = bits;
+    const uint8_t* plane1 = bits + plane_bytes;
+    float result = 0.0F;
+    for (uint64_t d = 0; d < dim; ++d) {
+        const uint64_t byte_idx = d >> 3;
+        const uint8_t bit_mask = static_cast<uint8_t>(1U << (d & 7));
+        float weight = (plane0[byte_idx] & bit_mask) != 0U ? 1.0F : -1.0F;
+        weight += (plane1[byte_idx] & bit_mask) != 0U ? 0.5F : -0.5F;
+        result += vector[d] * weight;
+    }
+    return result;
+}
+
+void
+RaBitQFloatTwoBitCenteredIPBatch4(const float* vector,
+                                  const uint8_t* bits1,
+                                  const uint8_t* bits2,
+                                  const uint8_t* bits3,
+                                  const uint8_t* bits4,
+                                  uint64_t dim,
+                                  float* results) {
+    results[0] = 0.0F;
+    results[1] = 0.0F;
+    results[2] = 0.0F;
+    results[3] = 0.0F;
+    if (dim == 0) {
+        return;
+    }
+
+    const uint64_t plane_bytes = (dim + 7) / 8;
+    const uint8_t* plane0[4] = {bits1, bits2, bits3, bits4};
+    const uint8_t* plane1[4] = {
+        bits1 + plane_bytes, bits2 + plane_bytes, bits3 + plane_bytes, bits4 + plane_bytes};
+    for (uint64_t d = 0; d < dim; ++d) {
+        const uint64_t byte_idx = d >> 3;
+        const uint8_t bit_mask = static_cast<uint8_t>(1U << (d & 7));
+        const float value = vector[d];
+        for (uint32_t i = 0; i < 4; ++i) {
+            float weight = (plane0[i][byte_idx] & bit_mask) != 0U ? 1.0F : -1.0F;
+            weight += (plane1[i][byte_idx] & bit_mask) != 0U ? 0.5F : -0.5F;
+            results[i] += value * weight;
+        }
+    }
+}
+
+float
 RaBitQFloatThreeBitCenteredIP(const float* vector, const uint8_t* bits, uint64_t dim) {
     if (dim == 0) {
         return 0.0F;

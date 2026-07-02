@@ -196,6 +196,65 @@ TEST_CASE("RaBitQ Split Code Storage", "[ut][RaBitQuantizer]") {
                 REQUIRE(std::abs(split_dist - hinted_split_dist) <= 1e-5F);
             }
         }
+
+        if (filter_bits == 2) {
+            std::vector<std::vector<uint8_t>> batch_one_bit_codes(4);
+            std::vector<uint8_t> batch_supplement_code(quantizer.GetSupplementCodeSize());
+            std::vector<float> single_dists(4, 0.0F);
+            std::vector<float> single_lower_bounds(4, std::numeric_limits<float>::max());
+            for (uint32_t i = 0; i < 4; ++i) {
+                batch_one_bit_codes[i].resize(quantizer.GetOneBitCodeSize());
+                quantizer.EncodeOne(vecs.data() + i * dim, full_code.data());
+                quantizer.SplitCode(
+                    full_code.data(), batch_one_bit_codes[i].data(), batch_supplement_code.data());
+                REQUIRE(quantizer.ComputeDistWithOneBitLowerBound(*computer,
+                                                                  batch_one_bit_codes[i].data(),
+                                                                  &single_dists[i],
+                                                                  &single_lower_bounds[i]));
+            }
+
+            float batch_dist1 = 0.0F;
+            float batch_dist2 = 0.0F;
+            float batch_dist3 = 0.0F;
+            float batch_dist4 = 0.0F;
+            float batch_lower_bound1 = std::numeric_limits<float>::max();
+            float batch_lower_bound2 = std::numeric_limits<float>::max();
+            float batch_lower_bound3 = std::numeric_limits<float>::max();
+            float batch_lower_bound4 = std::numeric_limits<float>::max();
+            bool computed1 = false;
+            bool computed2 = false;
+            bool computed3 = false;
+            bool computed4 = false;
+            quantizer.ComputeDistsWithOneBitLowerBoundBatch4(*computer,
+                                                             batch_one_bit_codes[0].data(),
+                                                             batch_one_bit_codes[1].data(),
+                                                             batch_one_bit_codes[2].data(),
+                                                             batch_one_bit_codes[3].data(),
+                                                             batch_dist1,
+                                                             batch_dist2,
+                                                             batch_dist3,
+                                                             batch_dist4,
+                                                             &batch_lower_bound1,
+                                                             &batch_lower_bound2,
+                                                             &batch_lower_bound3,
+                                                             &batch_lower_bound4,
+                                                             computed1,
+                                                             computed2,
+                                                             computed3,
+                                                             computed4);
+
+            REQUIRE(computed1);
+            REQUIRE(computed2);
+            REQUIRE(computed3);
+            REQUIRE(computed4);
+            const float batch_dists[4] = {batch_dist1, batch_dist2, batch_dist3, batch_dist4};
+            const float batch_lower_bounds[4] = {
+                batch_lower_bound1, batch_lower_bound2, batch_lower_bound3, batch_lower_bound4};
+            for (uint32_t i = 0; i < 4; ++i) {
+                REQUIRE(std::abs(batch_dists[i] - single_dists[i]) <= 1e-5F);
+                REQUIRE(std::abs(batch_lower_bounds[i] - single_lower_bounds[i]) <= 1e-5F);
+            }
+        }
     }
 }
 

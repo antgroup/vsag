@@ -29,6 +29,39 @@ VSAG_DEFINE_SIMD_DISPATCH(KacsWalk, KacsWalkType);
 VSAG_DEFINE_SIMD_DISPATCH(VecRescale, VecRescaleType);
 VSAG_DEFINE_SIMD_DISPATCH(RotateOp, RotateOpType);
 
+static RaBitQFloatTwoBitCenteredType
+GetRaBitQFloatTwoBitCenteredIP() {
+    if (SimdStatus::SupportAVX512()) {
+#if defined(ENABLE_AVX512)
+        return avx512::RaBitQFloatTwoBitCenteredIP;
+#endif
+    }
+    if (SimdStatus::SupportAVX2()) {
+#if defined(ENABLE_AVX2)
+        return avx2::RaBitQFloatTwoBitCenteredIP;
+#endif
+    }
+    return generic::RaBitQFloatTwoBitCenteredIP;
+}
+RaBitQFloatTwoBitCenteredType RaBitQFloatTwoBitCenteredIP = GetRaBitQFloatTwoBitCenteredIP();
+
+static RaBitQFloatTwoBitCenteredBatch4Type
+GetRaBitQFloatTwoBitCenteredIPBatch4() {
+    if (SimdStatus::SupportAVX512()) {
+#if defined(ENABLE_AVX512)
+        return avx512::RaBitQFloatTwoBitCenteredIPBatch4;
+#endif
+    }
+    if (SimdStatus::SupportAVX2()) {
+#if defined(ENABLE_AVX2)
+        return avx2::RaBitQFloatTwoBitCenteredIPBatch4;
+#endif
+    }
+    return generic::RaBitQFloatTwoBitCenteredIPBatch4;
+}
+RaBitQFloatTwoBitCenteredBatch4Type RaBitQFloatTwoBitCenteredIPBatch4 =
+    GetRaBitQFloatTwoBitCenteredIPBatch4();
+
 static RaBitQFloatThreeBitCenteredType
 GetRaBitQFloatThreeBitCenteredIP() {
     if (SimdStatus::SupportAVX512()) {

@@ -1054,7 +1054,11 @@ RaBitQuantizer<metric>::ComputeDistWithOneBitLowerBound(Computer<RaBitQuantizer>
         sum_type query_raw_sum = *((sum_type*)(query + query_offset_sum_));
         memcpy(
             &base_norm_code, one_bit_code + OneBitRecordNormCodeOffset(), sizeof(base_norm_code));
-        if (FilterBits() == 3) {
+        if (FilterBits() == 2) {
+            filter_ip_yu_q = RaBitQFloatTwoBitCenteredIP(
+                reinterpret_cast<const float*>(query), one_bit_code, this->dim_);
+            filter_ip_estimate = base_norm_code <= 0.0F ? 0.0F : filter_ip_yu_q / base_norm_code;
+        } else if (FilterBits() == 3) {
             filter_ip_yu_q = RaBitQFloatThreeBitCenteredIP(
                 reinterpret_cast<const float*>(query), one_bit_code, this->dim_);
             filter_ip_estimate = base_norm_code <= 0.0F ? 0.0F : filter_ip_yu_q / base_norm_code;
@@ -1176,7 +1180,8 @@ RaBitQuantizer<metric>::ComputeDistsWithOneBitLowerBoundBatch4(
         return;
     }
 
-    if (FilterBits() != 1 and not HasFilterQueryLookupTable()) {
+    if (FilterBits() != 1 and FilterBits() != 2 and FilterBits() != 3 and
+        not HasFilterQueryLookupTable()) {
         computed1 = this->ComputeDistWithOneBitLowerBound(
             computer, one_bit_code1, &dist1, lower_bound1, runtime_rabitq_error_rate);
         computed2 = this->ComputeDistWithOneBitLowerBound(
@@ -1214,6 +1219,15 @@ RaBitQuantizer<metric>::ComputeDistsWithOneBitLowerBoundBatch4(
                                   this->dim_,
                                   inv_sqrt_d_,
                                   filter_ip_values);
+    } else if (FilterBits() == 2) {
+        RaBitQFloatTwoBitCenteredIPBatch4(query_data,
+                                          one_bit_code1,
+                                          one_bit_code2,
+                                          one_bit_code3,
+                                          one_bit_code4,
+                                          this->dim_,
+                                          filter_ip_values);
+        filter_ip_values_are_centered = true;
     } else if (FilterBits() == 3) {
         RaBitQFloatThreeBitCenteredIPBatch4(query_data,
                                             one_bit_code1,
