@@ -32,6 +32,9 @@ BucketInterfacePtr
 MakeAsyncBucketDataCell(const BucketDataCellParamPtr& param, const IndexCommonParam& common_param);
 
 BucketInterfacePtr
+MakeUringBucketDataCell(const BucketDataCellParamPtr& param, const IndexCommonParam& common_param);
+
+BucketInterfacePtr
 MakeBufferBucketDataCell(const BucketDataCellParamPtr& param, const IndexCommonParam& common_param);
 
 }  // namespace vsag

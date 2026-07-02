@@ -192,11 +192,27 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             },
         },
         {
+            HGRAPH_BASE_DIRECT_READ,
+            {
+                BASE_CODES_KEY,
+                IO_PARAMS_KEY,
+                IO_DIRECT_READ_KEY,
+            },
+        },
+        {
             HGRAPH_PRECISE_FILE_PATH,
             {
                 PRECISE_CODES_KEY,
                 IO_PARAMS_KEY,
                 IO_FILE_PATH_KEY,
+            },
+        },
+        {
+            HGRAPH_PRECISE_DIRECT_READ,
+            {
+                PRECISE_CODES_KEY,
+                IO_PARAMS_KEY,
+                IO_DIRECT_READ_KEY,
             },
         },
         {

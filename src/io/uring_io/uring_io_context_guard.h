@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,12 +14,34 @@
 
 #pragma once
 
-#include "io/async_io/async_io.h"
-#include "io/buffer_io/buffer_io.h"
-#include "io/common/basic_io.h"
-#include "io/memory_block_io/memory_block_io.h"
-#include "io/memory_io/memory_io.h"
-#include "io/mmap_io/mmap_io.h"
-#include "io/noncontinuous_io/noncontinuous_io.h"
-#include "io/reader_io/reader_io.h"
-#include "io/uring_io/uring_io.h"
+#if HAVE_LIBURING
+
+#include <memory>
+
+#include "io/uring_io/uring_io_context.h"
+
+namespace vsag {
+
+class UringIOContextGuard {
+public:
+    explicit UringIOContextGuard(std::shared_ptr<UringIOContext> ctx);
+
+    ~UringIOContextGuard();
+
+    UringIOContextGuard(const UringIOContextGuard&) = delete;
+    UringIOContextGuard&
+    operator=(const UringIOContextGuard&) = delete;
+
+    void
+    Abandon();
+
+    void
+    Drop();
+
+private:
+    std::shared_ptr<UringIOContext> ctx_{nullptr};
+};
+
+}  // namespace vsag
+
+#endif  // HAVE_LIBURING

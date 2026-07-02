@@ -38,6 +38,9 @@ BucketInterface::MakeInstance(const BucketDataCellParamPtr& param,
     if (io_type_name == IO_TYPE_VALUE_ASYNC_IO) {
         return MakeAsyncBucketDataCell(param, common_param);
     }
+    if (io_type_name == IO_TYPE_VALUE_URING_IO) {
+        return MakeUringBucketDataCell(param, common_param);
+    }
     if (io_type_name == IO_TYPE_VALUE_BUFFER_IO) {
         return MakeBufferBucketDataCell(param, common_param);
     }

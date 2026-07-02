@@ -62,11 +62,13 @@ const char* const IO_TYPE_VALUE_BUFFER_IO = "buffer_io";
 const char* const IO_TYPE_VALUE_MMAP_IO = "mmap_io";
 const char* const IO_TYPE_VALUE_READER_IO = "reader_io";
 const char* const IO_TYPE_VALUE_ASYNC_IO = "async_io";
+const char* const IO_TYPE_VALUE_URING_IO = "uring_io";
 const char* const IO_TYPE_VALUE_BLOCK_MEMORY_IO = "block_memory_io";
 const char* const BLOCK_IO_BLOCK_SIZE_KEY = "block_size";
 
 // IO param for file
 const char* const IO_FILE_PATH_KEY = "file_path";
+const char* const IO_DIRECT_READ_KEY = "direct_read";
 const char* const DEFAULT_FILE_PATH_VALUE = "./default_file_path";
 
 // quantization params key
@@ -241,6 +243,7 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"BUCKETS_COUNT_KEY", BUCKETS_COUNT_KEY},
     {"BUCKET_PARAMS_KEY", BUCKET_PARAMS_KEY},
     {"IO_FILE_PATH_KEY", IO_FILE_PATH_KEY},
+    {"IO_DIRECT_READ_KEY", IO_DIRECT_READ_KEY},
     {"DEFAULT_FILE_PATH_VALUE", DEFAULT_FILE_PATH_VALUE},
     {"PRECISE_CODES_KEY", PRECISE_CODES_KEY},
     {"USE_REORDER_KEY", USE_REORDER_KEY},

@@ -726,7 +726,8 @@ private:
     IsKnownIOType(const std::string& io_type) {
         return io_type == IO_TYPE_VALUE_MEMORY_IO or io_type == IO_TYPE_VALUE_BUFFER_IO or
                io_type == IO_TYPE_VALUE_MMAP_IO or io_type == IO_TYPE_VALUE_READER_IO or
-               io_type == IO_TYPE_VALUE_ASYNC_IO or io_type == IO_TYPE_VALUE_BLOCK_MEMORY_IO;
+               io_type == IO_TYPE_VALUE_ASYNC_IO or io_type == IO_TYPE_VALUE_URING_IO or
+               io_type == IO_TYPE_VALUE_BLOCK_MEMORY_IO;
     }
 
     void

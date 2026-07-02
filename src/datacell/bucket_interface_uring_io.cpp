@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,14 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#pragma once
-
-#include "io/async_io/async_io.h"
-#include "io/buffer_io/buffer_io.h"
-#include "io/common/basic_io.h"
-#include "io/memory_block_io/memory_block_io.h"
-#include "io/memory_io/memory_io.h"
-#include "io/mmap_io/mmap_io.h"
+#include "bucket_interface_factory.h"
+#include "bucket_interface_factory_impl.h"
 #include "io/noncontinuous_io/noncontinuous_io.h"
-#include "io/reader_io/reader_io.h"
 #include "io/uring_io/uring_io.h"
+
+namespace vsag {
+
+BucketInterfacePtr
+MakeUringBucketDataCell(const BucketDataCellParamPtr& param, const IndexCommonParam& common_param) {
+    return MakeBucketDataCellInstance<NonContinuousIO<UringIO>>(param, common_param);
+}
+
+}  // namespace vsag
