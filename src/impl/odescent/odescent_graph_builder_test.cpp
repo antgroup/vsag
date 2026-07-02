@@ -21,7 +21,7 @@
 #include "datacell/flatten_interface.h"
 #include "datacell/graph_interface.h"
 #include "impl/allocator/safe_allocator.h"
-#include "io/memory_io_parameter.h"
+#include "io/memory_io/memory_io_parameter.h"
 #include "quantization/fp32_quantizer_parameter.h"
 #include "unittest.h"
 uint64_t

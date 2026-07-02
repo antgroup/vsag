@@ -31,7 +31,7 @@
 #include "impl/odescent/odescent_graph_builder.h"
 #include "impl/pruning_strategy.h"
 #include "impl/searcher/basic_searcher.h"
-#include "io/memory_io_parameter.h"
+#include "io/memory_io/memory_io_parameter.h"
 #include "quantization/scalar_quantization/scalar_quantizer_parameter.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"

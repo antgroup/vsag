@@ -20,7 +20,7 @@
 #include "compressed_graph_datacell_parameter.h"
 #include "graph_interface.h"
 #include "impl/elias_fano_encoder.h"
-#include "io/memory_block_io.h"
+#include "io/memory_block_io/memory_block_io.h"
 #include "sparse_duplicate_tracker.h"
 
 namespace vsag {

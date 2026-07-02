@@ -26,7 +26,7 @@
 #include "framework/test_logger.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/basic_optimizer.h"
-#include "io/memory_io.h"
+#include "io/memory_io/memory_io.h"
 #include "quantization/fp32_quantizer.h"
 #include "quantization/scalar_quantization/sq4_uniform_quantizer.h"
 #include "unittest.h"

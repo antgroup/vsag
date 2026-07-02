@@ -16,7 +16,7 @@
 #pragma once
 
 #include "flatten_interface_parameter.h"
-#include "io/io_parameter.h"
+#include "io/common/io_parameter.h"
 #include "parameter.h"
 #include "quantization/quantizer_parameter.h"
 #include "utils/pointer_define.h"

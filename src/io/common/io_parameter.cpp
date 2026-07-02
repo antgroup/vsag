@@ -1,0 +1,73 @@
+
+// Copyright 2024-present the vsag project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#include "io/common/io_parameter.h"
+
+#include <mutex>
+
+#include "impl/logger/logger.h"
+#include "inner_string_params.h"
+#include "io/async_io/async_io_parameter.h"
+#include "io/buffer_io/buffer_io_parameter.h"
+#include "io/memory_block_io/memory_block_io_parameter.h"
+#include "io/memory_io/memory_io_parameter.h"
+#include "io/mmap_io/mmap_io_parameter.h"
+#include "io/reader_io/reader_io_parameter.h"
+
+namespace vsag {
+
+namespace {
+std::once_flag async_io_fallback_warn_once;
+}  // namespace
+
+IOParamPtr
+IOParameter::GetIOParameterByJson(const JsonType& json) {
+    IOParamPtr io_ptr = nullptr;
+    try {
+        auto type_name = Parameter::TryToParseType(json);
+        if (type_name == IO_TYPE_VALUE_MEMORY_IO) {
+            io_ptr = std::make_shared<MemoryIOParameter>();
+            io_ptr->FromJson(json);
+        } else if (type_name == IO_TYPE_VALUE_BLOCK_MEMORY_IO) {
+            io_ptr = std::make_shared<MemoryBlockIOParameter>();
+            io_ptr->FromJson(json);
+        } else if (type_name == IO_TYPE_VALUE_BUFFER_IO) {
+            io_ptr = std::make_shared<BufferIOParameter>();
+            io_ptr->FromJson(json);
+        } else if (type_name == IO_TYPE_VALUE_ASYNC_IO) {
+#if HAVE_LIBAIO
+            io_ptr = std::make_shared<AsyncIOParameter>();
+#else
+            std::call_once(async_io_fallback_warn_once, []() {
+                logger::warn("libaio is unavailable, async_io is falling back to buffer_io");
+            });
+            io_ptr = std::make_shared<BufferIOParameter>();
+#endif
+            io_ptr->FromJson(json);
+        } else if (type_name == IO_TYPE_VALUE_MMAP_IO) {
+            io_ptr = std::make_shared<MMapIOParameter>();
+            io_ptr->FromJson(json);
+        } else if (type_name == IO_TYPE_VALUE_READER_IO) {
+            io_ptr = std::make_shared<ReaderIOParameter>();
+            io_ptr->FromJson(json);
+        }
+    } catch (std::invalid_argument& error) {
+        return nullptr;
+    }
+    return io_ptr;
+}
+IOParameter::IOParameter(std::string name) : name_(std::move(name)) {
+}
+}  // namespace vsag

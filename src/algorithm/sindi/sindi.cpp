@@ -22,7 +22,7 @@
 #include "datacell/sparse_vector_datacell_parameter.h"
 #include "impl/heap/standard_heap.h"
 #include "index_feature_list.h"
-#include "io/memory_block_io_parameter.h"
+#include "io/memory_block_io/memory_block_io_parameter.h"
 #include "quantization/sparse_quantization/sparse_quantizer.h"
 #include "quantization/sparse_quantization/sparse_quantizer_parameter.h"
 #include "simd/fp16_simd.h"

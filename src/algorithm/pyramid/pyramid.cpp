@@ -23,7 +23,7 @@
 #include "impl/heap/standard_heap.h"
 #include "impl/odescent/odescent_graph_builder.h"
 #include "impl/pruning_strategy.h"
-#include "io/memory_io_parameter.h"
+#include "io/memory_io/memory_io_parameter.h"
 #include "query_context.h"
 #include "storage/empty_index_binary_set.h"
 #include "storage/serialization.h"
