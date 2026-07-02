@@ -150,7 +150,9 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
             if (iter_ctx->CheckPoint(cur_inner_id)) {
                 lower_bound = std::max(lower_bound, cur_dist);
                 flatten->Query(&cur_dist, computer, &cur_inner_id, 1, ctx);
-                top_candidates->Push(cur_dist, cur_inner_id);
+                if (cur_dist > inner_search_param.min_distance) {
+                    top_candidates->Push(cur_dist, cur_inner_id);
+                }
                 candidate_set->Push(cur_dist, cur_inner_id);
                 if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
                     if (cur_dist > inner_search_param.radius and not top_candidates->Empty()) {
@@ -233,7 +235,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                 }
                 candidate_set->Push(-dist, to_be_visited_id[i]);
                 flatten->Prefetch(candidate_set->Top().second);
-                if (not is_id_allowed || is_id_allowed->CheckValid(to_be_visited_id[i])) {
+                if ((not is_id_allowed || is_id_allowed->CheckValid(to_be_visited_id[i])) && dist > inner_search_param.min_distance) {
                     top_candidates->Push(dist, to_be_visited_id[i]);
                 }
 
@@ -333,7 +335,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
 
     flatten->Query(&dist, computer, &ep, 1, ctx);
     ++dist_cmp;
-    if (check_func(ep)) {
+    if (check_func(ep) && dist > inner_search_param.min_distance) {
         top_candidates->Push(dist, ep);
         lower_bound = top_candidates->Top().first;
     }
@@ -349,7 +351,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
         label_table->CompressDuplicateData()) {
         const auto& duplicate_ids = label_table->GetDuplicateId(ep);
         for (const auto& item : duplicate_ids) {
-            if (check_func(item)) {
+            if (check_func(item) && dist > inner_search_param.min_distance) {
                 top_candidates->Push(dist, item);
             }
         }
@@ -407,14 +409,14 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                 (mode == RANGE_SEARCH && dist <= inner_search_param.radius)) {
                 candidate_set->Push(-dist, to_be_visited_id[i]);
                 //                flatten->Prefetch(candidate_set->Top().second);
-                if (check_func(to_be_visited_id[i])) {
+                if (check_func(to_be_visited_id[i]) && dist > inner_search_param.min_distance) {
                     top_candidates->Push(dist, to_be_visited_id[i]);
                 }
                 if (inner_search_param.consider_duplicate and label_table != nullptr and
                     label_table->CompressDuplicateData()) {
                     const auto& duplicate_ids = label_table->GetDuplicateId(to_be_visited_id[i]);
                     for (const auto& item : duplicate_ids) {
-                        if (check_func(item)) {
+                        if (check_func(item) && dist > inner_search_param.min_distance) {
                             top_candidates->Push(dist, item);
                         }
                     }

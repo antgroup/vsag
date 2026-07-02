@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <limits>
 #include <memory>
 #include <string>
 
@@ -66,6 +67,7 @@ public:
     FilterSearchSkipStrategyType skip_strategy_type{
         FilterSearchSkipStrategyType::DETERMINISTIC_ACCUMULATIVE};
     bool use_conjugate_graph_search;
+    float min_distance{std::numeric_limits<float>::lowest()};
 
 private:
     HnswSearchParameters() = default;
