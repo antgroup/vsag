@@ -105,7 +105,7 @@ MultiBitsetManager::Deserialize(lvalue_or_rvalue<StreamReader> reader) {
     }
 }
 
-int64_t
+uint64_t
 MultiBitsetManager::GetMemoryUsage() const {
     auto memory_usage = sizeof(MultiBitsetManager);
     memory_usage += bitsets_.size() * sizeof(std::nullptr_t);
@@ -113,7 +113,7 @@ MultiBitsetManager::GetMemoryUsage() const {
     for (auto* bitset : bitsets_) {
         memory_usage += bitset->GetMemoryUsage();
     }
-    return static_cast<int64_t>(memory_usage);
+    return static_cast<uint64_t>(memory_usage);
 }
 
 }  // namespace vsag

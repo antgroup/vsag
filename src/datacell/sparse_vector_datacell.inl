@@ -289,9 +289,9 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::SparseVectorDataCell(
 }
 
 template <typename QuantTmpl, typename IOTmpl>
-int64_t
+uint64_t
 SparseVectorDataCell<QuantTmpl, IOTmpl>::GetMemoryUsage() const {
-    int64_t memory = sizeof(SparseVectorDataCell<QuantTmpl, IOTmpl>);
+    uint64_t memory = sizeof(SparseVectorDataCell<QuantTmpl, IOTmpl>);
     memory += this->offset_io_->size_;
     if (IOTmpl::InMemory) {
         memory += this->io_->GetMemoryUsage();

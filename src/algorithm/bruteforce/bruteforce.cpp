@@ -1044,9 +1044,9 @@ BruteForce::cal_memory_usage() {
     this->current_memory_usage_.store(memory_usage);
 }
 
-int64_t
+uint64_t
 BruteForce::GetMemoryUsage() const {
-    int64_t memory = 0;
+    uint64_t memory = 0;
     {
         std::shared_lock lock(this->memory_usage_mutex_);
         memory = this->current_memory_usage_.load();

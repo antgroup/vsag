@@ -47,7 +47,7 @@ public:
     void
     Deserialize(lvalue_or_rvalue<StreamReader> reader) override;
 
-    [[nodiscard]] int64_t
+    [[nodiscard]] uint64_t
     GetMemoryUsage() const override;
 
 public:

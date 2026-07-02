@@ -77,7 +77,7 @@ public:
     std::string
     Dump() override;
 
-    int64_t
+    uint64_t
     GetMemoryUsage() const override;
 
 private:

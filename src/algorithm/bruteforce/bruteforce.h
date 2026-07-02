@@ -135,7 +135,7 @@ public:
                     const AttributeSet& new_attrs,
                     const AttributeSet& origin_attrs) override;
 
-    int64_t
+    uint64_t
     GetMemoryUsage() const override;
 
 private:

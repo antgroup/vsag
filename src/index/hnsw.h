@@ -308,7 +308,7 @@ public:
         return this->get_num_elements();
     }
 
-    int64_t
+    uint64_t
     GetMemoryUsage() const override {
         return this->get_memory_usage();
     }

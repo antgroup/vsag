@@ -117,7 +117,7 @@ public:
         io_->Deserialize(reader);
     }
 
-    [[nodiscard]] int64_t
+    [[nodiscard]] uint64_t
     GetMemoryUsage() const {
         if constexpr (IOTmpl::InMemory) {
             return io_->GetMemoryUsage();
@@ -655,9 +655,9 @@ public:
         this->max_capacity_ = capacity;
     }
 
-    int64_t
+    uint64_t
     GetMemoryUsage() const override {
-        int64_t memory = sizeof(RaBitQSplitDataCell<metric, OneBitIOTmpl, SupplementIOTmpl>);
+        uint64_t memory = sizeof(RaBitQSplitDataCell<metric, OneBitIOTmpl, SupplementIOTmpl>);
         memory += this->x_bit_cell_->GetMemoryUsage();
         memory += this->supplement_cell_->GetMemoryUsage();
         memory += sizeof(RaBitQuantizer<metric>);

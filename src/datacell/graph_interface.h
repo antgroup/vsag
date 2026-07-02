@@ -88,7 +88,7 @@ public:
                             "GetIds in GraphInterface is not implemented");
     }
 
-    virtual int64_t
+    virtual uint64_t
     GetMemoryUsage() const {
         return 0;
     }

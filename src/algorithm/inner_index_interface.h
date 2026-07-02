@@ -17,6 +17,7 @@
 
 #include <atomic>
 #include <shared_mutex>
+#include <unordered_map>
 #include <vector>
 
 #include "container_types.h"
@@ -253,10 +254,10 @@ public:
     virtual DetailDataPtr
     GetDetailDataByName(const std::string& name, IndexDetailInfo& info) const;
 
-    [[nodiscard]] virtual int64_t
-    GetEstimateBuildMemory(const int64_t num_elements) const {
+    [[nodiscard]] virtual uint64_t
+    EstimateBuildMemory(uint64_t num_elements) const {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                            "Index doesn't support GetEstimateBuildMemory");
+                            "Index doesn't support EstimateBuildMemory");
     }
 
     virtual void
@@ -265,15 +266,14 @@ public:
     [[nodiscard]] virtual IndexType
     GetIndexType() const = 0;
 
-    [[nodiscard]] virtual int64_t
+    [[nodiscard]] virtual uint64_t
     GetMemoryUsage() const {
         std::shared_lock lock(this->memory_usage_mutex_);
         return this->current_memory_usage_.load();
     }
 
-    [[nodiscard]] virtual std::string
+    [[nodiscard]] virtual std::unordered_map<std::string, uint64_t>
     GetMemoryUsageDetail() const {
-        // TODO(deming): implement func for every types of inner index
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                             "Index doesn't support GetMemoryUsageDetail");
     }
@@ -572,7 +572,7 @@ public:
 protected:
     std::atomic<uint64_t> total_count_{0};
 
-    std::atomic<int64_t> current_memory_usage_{0};
+    std::atomic<uint64_t> current_memory_usage_{0};
     mutable std::shared_mutex memory_usage_mutex_{};
 
     bool has_raw_vector_{false};

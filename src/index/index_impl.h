@@ -223,9 +223,9 @@ public:
         SAFE_CALL(return this->inner_index_->GetDetailDataByName(name, info));
     }
 
-    [[nodiscard]] int64_t
-    GetEstimateBuildMemory(const int64_t num_elements) const override {
-        return this->inner_index_->GetEstimateBuildMemory(num_elements);
+    [[nodiscard]] uint64_t
+    EstimateBuildMemory(uint64_t num_elements) const override {
+        return this->inner_index_->EstimateBuildMemory(num_elements);
     }
 
     virtual tl::expected<void, Error>
@@ -238,12 +238,12 @@ public:
         return this->inner_index_->GetIndexType();
     }
 
-    [[nodiscard]] int64_t
+    [[nodiscard]] uint64_t
     GetMemoryUsage() const override {
         return this->inner_index_->GetMemoryUsage();
     }
 
-    [[nodiscard]] std::string
+    [[nodiscard]] std::unordered_map<std::string, uint64_t>
     GetMemoryUsageDetail() const override {
         return this->inner_index_->GetMemoryUsageDetail();
     }

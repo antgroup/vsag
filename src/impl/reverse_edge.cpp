@@ -72,15 +72,15 @@ ReverseEdge::Clear() {
     reverse_edges_.clear();
 }
 
-int64_t
+uint64_t
 ReverseEdge::GetMemoryUsage() const {
     std::shared_lock<std::shared_mutex> rlock(mutex_);
-    int64_t usage = sizeof(ReverseEdge);
+    uint64_t usage = sizeof(ReverseEdge);
     for (const auto& [id, neighbors] : reverse_edges_) {
         usage += sizeof(id);
         usage += sizeof(std::unique_ptr<Vector<InnerIdType>>);
         if (neighbors) {
-            usage += static_cast<int64_t>(neighbors->capacity() * sizeof(InnerIdType));
+            usage += neighbors->capacity() * sizeof(InnerIdType);
         }
     }
     return usage;
