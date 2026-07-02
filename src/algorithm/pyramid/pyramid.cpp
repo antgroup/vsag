@@ -17,6 +17,7 @@
 
 #include <chrono>
 
+#include "algorithm/build_cache.h"
 #include "algorithm/inner_index_interface.h"
 #include "analyzer/analyzer.h"
 #include "datacell/flatten_interface.h"
@@ -27,11 +28,15 @@
 #include "query_context.h"
 #include "storage/empty_index_binary_set.h"
 #include "storage/serialization.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
 #include "utils/slow_task_timer.h"
 #include "utils/util_functions.h"
 namespace vsag {
 
 const static float RADIUS_EPSILON = 1.1F;
+
+static constexpr uint64_t SOURCE_ID_TABLE_MAGIC = 0x534F555243454944ULL;
 
 std::vector<std::string>
 split(const std::string& str, char delimiter) {
@@ -216,7 +221,14 @@ Pyramid::build_by_odescent(const DatasetPtr& base) {
 
     resize(data_num);
     std::memcpy(label_table_->label_table_.data(), data_ids, sizeof(LabelType) * data_num);
+    const auto* source_ids = base->GetSourceID();
+    if (source_ids != nullptr) {
+        for (int64_t i = 0; i < data_num; ++i) {
+            label_table_->InsertSourceId(static_cast<InnerIdType>(i), source_ids[i]);
+        }
+    }
 
+    label_table_->total_count_.store(data_num);
     base_codes_->BatchInsertVector(data_vectors, data_num);
     if (use_reorder_) {
         precise_codes_->BatchInsertVector(data_vectors, data_num);
@@ -429,6 +441,17 @@ Pyramid::Remove(const std::vector<int64_t>& ids, RemoveMode mode) {
 void
 Pyramid::Serialize(StreamWriter& writer) const {
     label_table_->Serialize(writer);
+
+    if (this->persist_source_id_) {
+        const auto& sid_table = this->label_table_->GetSourceIdTableRef();
+        StreamWriter::WriteObj(writer, SOURCE_ID_TABLE_MAGIC);
+        uint64_t sid_count = sid_table.size();
+        StreamWriter::WriteObj(writer, sid_count);
+        for (uint64_t i = 0; i < sid_count; ++i) {
+            StreamWriter::WriteString(writer, sid_table[i]);
+        }
+    }
+
     base_codes_->Serialize(writer);
     if (use_reorder_) {
         precise_codes_->Serialize(writer);
@@ -466,6 +489,35 @@ Pyramid::Deserialize(StreamReader& reader) {
         &reader, std::numeric_limits<uint64_t>::max(), this->allocator_);
 
     label_table_->Deserialize(buffer_reader);
+
+    {
+        const uint64_t cursor_before = buffer_reader.GetCursor();
+        if (buffer_reader.Length() >= cursor_before + sizeof(uint64_t)) {
+            uint64_t magic = 0;
+            StreamReader::ReadObj(buffer_reader, magic);
+            if (magic == SOURCE_ID_TABLE_MAGIC) {
+                uint64_t sid_count = 0;
+                StreamReader::ReadObj(buffer_reader, sid_count);
+                const uint64_t label_table_size = this->label_table_->label_table_.size();
+                if (sid_count > label_table_size) {
+                    throw VsagException(
+                        ErrorType::INVALID_ARGUMENT,
+                        fmt::format("corrupted index: source_id_table sid_count ({}) "
+                                    "exceeds label_table size ({})",
+                                    sid_count,
+                                    label_table_size));
+                }
+                Vector<std::string> sid_table(sid_count, std::string{}, allocator_);
+                for (uint64_t i = 0; i < sid_count; ++i) {
+                    sid_table[i] = StreamReader::ReadString(buffer_reader);
+                }
+                this->label_table_->ReplaceSourceIdTable(std::move(sid_table));
+            } else {
+                buffer_reader.Seek(cursor_before);
+            }
+        }
+    }
+
     delete_count_.store(static_cast<int64_t>(label_table_->GetAllDeletedIds().size()),
                         std::memory_order_relaxed);
     base_codes_->Deserialize(buffer_reader);
@@ -544,6 +596,13 @@ Pyramid::Add(const DatasetPtr& base) {
         for (int64_t i = 0; i < data_num; ++i) {
             if (not label_table_->CheckLabel(data_ids[i])) {
                 label_table_->Insert(valid_id_count + local_cur_element_count, data_ids[i]);
+                {
+                    const auto* src_ids = base->GetSourceID();
+                    if (src_ids != nullptr) {
+                        label_table_->InsertSourceId(valid_id_count + local_cur_element_count,
+                                                     src_ids[i]);
+                    }
+                }
                 base_codes_->InsertVector(data_vectors + dim_ * i,
                                           valid_id_count + local_cur_element_count);
                 if (use_reorder_) {
@@ -691,7 +750,8 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
         "{EF_CONSTRUCTION_KEY}": 400,
         "{NO_BUILD_LEVELS}":[],
         "{INDEX_MIN_SIZE}": 0,
-        "{SUPPORT_DUPLICATE}": false
+        "{SUPPORT_DUPLICATE}": false,
+        "{HGRAPH_PERSIST_SOURCE_ID_KEY}": false
     })";
 
 ParamPtr
@@ -716,6 +776,7 @@ Pyramid::CheckAndMappingExternalParam(const JsonType& external_param,
         {PYRAMID_PRECISE_IO_TYPE, {PRECISE_CODES_KEY, IO_PARAMS_KEY, TYPE_KEY}},
         {PYRAMID_BUILD_THREAD_COUNT, {BUILD_THREAD_COUNT_KEY}},
         {PYRAMID_NO_BUILD_LEVELS, {NO_BUILD_LEVELS}},
+        {PYRAMID_PERSIST_SOURCE_ID, {HGRAPH_PERSIST_SOURCE_ID_KEY}},
         {PYRAMID_HIERARCHIES, {PYRAMID_HIERARCHIES}},
         {PYRAMID_BASE_PQ_DIM,
          {BASE_CODES_KEY, QUANTIZATION_PARAMS_KEY, PRODUCT_QUANTIZATION_DIM_KEY}},
@@ -749,6 +810,15 @@ std::vector<int64_t>
 Pyramid::Build(const DatasetPtr& base) {
     CHECK_ARGUMENT(GetNumElements() == 0, "index is not empty");
     int64_t data_num = base->GetNumElements();
+
+    this->build_cache_hit_rate_ = -1.0F;
+    this->build_cache_hit_nodes_ = 0;
+    this->build_cache_missed_nodes_ = 0;
+
+    if (this->has_loaded_cache()) {
+        auto ret = this->build_with_cache(base);
+        return ret;
+    }
 
     this->Train(base);
     std::vector<int64_t> ret;
@@ -1087,7 +1157,299 @@ Pyramid::GetStats() const {
     analyzer_param.search_params = R"({"pyramid": {"ef_search": 500}})";
     auto analyzer = CreateAnalyzer(this, analyzer_param);
     JsonType stats = analyzer->GetStats();
+
+    if (this->build_cache_hit_rate_ >= 0.0F) {
+        stats["build_cache_hit_rate"].SetFloat(this->build_cache_hit_rate_);
+        stats["build_cache_hit_nodes"].SetInt(static_cast<int64_t>(this->build_cache_hit_nodes_));
+        stats["build_cache_missed_nodes"].SetInt(
+            static_cast<int64_t>(this->build_cache_missed_nodes_));
+    } else {
+        stats["build_cache_hit_rate"]["skipped_reason"].SetString(
+            "index was not built from an imported cache");
+    }
+
     return stats.Dump(4);
+}
+
+void
+Pyramid::collect_graph_nodes(IndexNode* node, std::vector<IndexNode*>& out) {
+    if (node == nullptr) {
+        return;
+    }
+    if (node->status_ == IndexNode::Status::GRAPH) {
+        out.push_back(node);
+    }
+    for (auto& [key, child] : node->children_) {
+        collect_graph_nodes(child.get(), out);
+    }
+}
+
+void
+Pyramid::fullfill_cache() {
+    auto total_count = static_cast<InnerIdType>(label_table_->total_count_.load());
+    // Track which inner_ids we've already captured so that the same vector
+    // appearing in multiple IndexNode graphs (e.g. ancestor levels) doesn't
+    // produce duplicate entries in cache_->neighbors_, which only stores the
+    // most recent snapshot via emplace().
+    UnorderedSet<InnerIdType> seen(allocator_);
+    for (auto& [hname, h_ptr] : hierarchies_) {
+        std::vector<IndexNode*> graph_nodes;
+        collect_graph_nodes(h_ptr->root.get(), graph_nodes);
+        for (auto* gnode : graph_nodes) {
+            std::shared_lock lock(gnode->mutex_);
+            // IndexNode::Build drains ids_ after persisting the graph, so we
+            // can't use gnode->ids_ here. Walk the graph's id space directly:
+            // every id in [0, TotalCount()) was inserted via
+            // InsertNeighborsById (even the seed entry, which carries an
+            // empty neighbor list). GetNeighbors() on ids that were routed
+            // into a sibling IndexNode simply returns empty -- we can't tell
+            // those apart from a freshly-seeded entry by neighbor count
+            // alone, so we rely on the `seen` set to keep a single canonical
+            // entry per global inner_id. Downstream, build_with_cache()
+            // translates each cached neighbor inner_id back to its source_id
+            // and re-discovers the right IndexNode via populate_path_tree;
+            // neighbors that physically live in a different IndexNode will
+            // miss the path filter and be dropped before insertion.
+            InnerIdType graph_total = static_cast<InnerIdType>(gnode->graph_->TotalCount());
+            InnerIdType scan_count = std::min<InnerIdType>(graph_total, total_count);
+            for (InnerIdType inner_id = 0; inner_id < scan_count; ++inner_id) {
+                if (seen.find(inner_id) != seen.end()) {
+                    continue;
+                }
+                auto source_id = label_table_->GetSourceId(inner_id);
+                if (source_id.empty()) {
+                    continue;
+                }
+                seen.insert(inner_id);
+                Vector<InnerIdType> neighbors(allocator_);
+                gnode->graph_->GetNeighbors(inner_id, neighbors);
+                if (static_cast<uint64_t>(inner_id) >= cache_->source_ids_.size()) {
+                    cache_->source_ids_.resize(static_cast<uint64_t>(inner_id) + 1);
+                }
+                cache_->source_ids_[inner_id] = source_id;
+                Vector<InnerIdType> entry(allocator_);
+                entry.push_back(inner_id);
+                for (auto n : neighbors) {
+                    entry.push_back(n);
+                }
+                cache_->neighbors_.emplace(source_id, std::move(entry));
+            }
+        }
+    }
+}
+
+void
+Pyramid::ExportCache(std::ostream& out_stream) const {
+    IOStreamWriter writer(out_stream);
+    const_cast<Pyramid*>(this)->fullfill_cache();
+    this->cache_->Serialize(writer);
+}
+
+void
+Pyramid::ImportCache(std::istream& in_stream) {
+    IOStreamReader reader(in_stream);
+    this->cache_->Deserialize(reader);
+}
+
+std::vector<int64_t>
+Pyramid::build_with_cache(const DatasetPtr& base) {
+    auto start = std::chrono::steady_clock::now();
+    int64_t data_num = base->GetNumElements();
+    const auto* data_vectors = base->GetFloat32Vectors();
+    const auto* data_ids = base->GetIds();
+    const auto* source_ids = base->GetSourceID();
+
+    CHECK_ARGUMENT(source_ids != nullptr, "build_with_cache requires dataset with source_ids");
+
+    this->Train(base);
+    resize(data_num);
+    std::memcpy(label_table_->label_table_.data(), data_ids, sizeof(LabelType) * data_num);
+    for (int64_t i = 0; i < data_num; ++i) {
+        label_table_->InsertSourceId(static_cast<InnerIdType>(i), source_ids[i]);
+    }
+    label_table_->total_count_.store(data_num);
+    base_codes_->BatchInsertVector(data_vectors, data_num);
+    if (use_reorder_) {
+        precise_codes_->BatchInsertVector(data_vectors, data_num);
+    }
+    cur_element_count_ = data_num;
+
+    for (const auto& [hname, h_ptr] : hierarchies_) {
+        const auto* hpath = base->GetPaths(hname);
+        if (hpath != nullptr) {
+            populate_path_tree(*h_ptr, hpath, data_num);
+        }
+    }
+
+    for (auto& [hname, h_ptr] : hierarchies_) {
+        std::function<void(IndexNode*)> init_all = [&](IndexNode* node) {
+            if (node == nullptr)
+                return;
+            node->Init();
+            for (auto& [k, child] : node->children_) {
+                init_all(child.get());
+            }
+        };
+        init_all(h_ptr->root.get());
+    }
+
+    Vector<InnerIdType> hit_ids(allocator_);
+    Vector<InnerIdType> missed_ids(allocator_);
+    hit_ids.reserve(data_num);
+    missed_ids.reserve(data_num);
+
+    auto codes = use_reorder_ ? precise_codes_ : base_codes_;
+
+    for (auto& [hname, h_ptr] : hierarchies_) {
+        std::vector<IndexNode*> graph_nodes;
+        collect_graph_nodes(h_ptr->root.get(), graph_nodes);
+        if (graph_nodes.empty()) {
+            for (InnerIdType id = 0; id < static_cast<InnerIdType>(data_num); ++id) {
+                missed_ids.push_back(id);
+            }
+            continue;
+        }
+
+        UnorderedMap<std::string, InnerIdType> source_id_to_inner(allocator_);
+        source_id_to_inner.reserve(data_num);
+        for (InnerIdType id = 0; id < static_cast<InnerIdType>(data_num); ++id) {
+            source_id_to_inner[source_ids[id]] = id;
+        }
+
+        for (auto* gnode : graph_nodes) {
+            std::unique_lock lock(gnode->mutex_);
+            for (auto inner_id : gnode->ids_) {
+                if (inner_id >= static_cast<InnerIdType>(data_num)) {
+                    continue;
+                }
+                auto source_id = source_ids[inner_id];
+                auto cached = cache_->GetNeighbors(source_id);
+                if (cached.empty()) {
+                    continue;
+                }
+
+                Vector<InnerIdType> new_neighbors(allocator_);
+                for (const auto& nb_src : cached) {
+                    auto it = source_id_to_inner.find(nb_src);
+                    if (it != source_id_to_inner.end() && it->second != inner_id) {
+                        new_neighbors.push_back(it->second);
+                    }
+                }
+                std::sort(new_neighbors.begin(), new_neighbors.end());
+                new_neighbors.erase(std::unique(new_neighbors.begin(), new_neighbors.end()),
+                                    new_neighbors.end());
+
+                if (new_neighbors.empty()) {
+                    continue;
+                }
+
+                if (gnode->graph_->TotalCount() == 0) {
+                    gnode->entry_point_ = inner_id;
+                }
+
+                // SparseGraphDataCell enforces a hard max_degree on every
+                // InsertNeighborsById call. When the warm seed already fits,
+                // keep the translated list as-is so the refined graph keeps
+                // the topology captured by the cache. Only when the cached
+                // neighbour set is wider than the cap do we need distance
+                // information to drop the farthest entries.
+                const auto max_deg = gnode->graph_->MaximumDegree();
+                if (new_neighbors.size() > max_deg) {
+                    DistHeapPtr candidates =
+                        std::make_shared<StandardHeap<true, false>>(allocator_, -1);
+                    for (auto nb : new_neighbors) {
+                        float dist = codes->ComputePairVectors(inner_id, nb);
+                        candidates->Push(dist, nb);
+                    }
+                    new_neighbors.clear();
+                    new_neighbors.reserve(max_deg);
+                    while (!candidates->Empty() && new_neighbors.size() < max_deg) {
+                        new_neighbors.push_back(candidates->Top().second);
+                        candidates->Pop();
+                    }
+                }
+                gnode->graph_->InsertNeighborsById(inner_id, new_neighbors);
+                for (auto nb : new_neighbors) {
+                    Vector<InnerIdType> existing(allocator_);
+                    gnode->graph_->GetNeighbors(nb, existing);
+                    bool has_reverse = false;
+                    for (auto e : existing) {
+                        if (e == inner_id) {
+                            has_reverse = true;
+                            break;
+                        }
+                    }
+                    if (has_reverse) {
+                        continue;
+                    }
+                    if (existing.size() < max_deg) {
+                        existing.push_back(inner_id);
+                        gnode->graph_->InsertNeighborsById(nb, existing);
+                    }
+                    // else: neighbor is already at the degree cap; let the
+                    // downstream Add/odescent refinement step decide whether
+                    // to expand this adjacency later.
+                }
+                hit_ids.push_back(inner_id);
+            }
+        }
+
+        std::vector<bool> is_hit(data_num, false);
+        for (auto hid : hit_ids) {
+            if (hid < static_cast<InnerIdType>(data_num)) {
+                is_hit[hid] = true;
+            }
+        }
+        for (InnerIdType id = 0; id < static_cast<InnerIdType>(data_num); ++id) {
+            if (!is_hit[id]) {
+                missed_ids.push_back(id);
+            }
+        }
+        build_cache_hit_nodes_ += hit_ids.size();
+        build_cache_missed_nodes_ += missed_ids.size();
+
+        hit_ids.clear();
+        const auto* hpath = base->GetPaths(hname);
+        for (auto mid : missed_ids) {
+            int64_t bias = static_cast<int64_t>(mid);
+            if (hpath == nullptr)
+                continue;
+            std::string current_path = hpath[bias];
+            auto path_slices = split(current_path, PART_SLASH);
+            IndexNode* node = h_ptr->root.get();
+            for (auto& slice : path_slices) {
+                auto* child = node->GetChild(slice, false);
+                if (child == nullptr)
+                    break;
+                node = child;
+            }
+            add_one_point(*h_ptr, node, mid, data_vectors + dim_ * bias);
+        }
+        missed_ids.clear();
+
+        if (graph_type_ != GRAPH_TYPE_VALUE_NSW) {
+            ODescent builder(odescent_param_, codes, allocator_, this->thread_pool_.get());
+            h_ptr->root->Build(builder);
+        }
+    }
+
+    uint64_t total = build_cache_hit_nodes_ + build_cache_missed_nodes_;
+    if (total > 0) {
+        build_cache_hit_rate_ =
+            static_cast<float>(build_cache_hit_nodes_) / static_cast<float>(total);
+    } else {
+        build_cache_hit_rate_ = 0.0F;
+    }
+
+    auto end = std::chrono::steady_clock::now();
+    auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+    logger::info("[pyramid_build_cache] completed in {} ms, hit_rate={:.4f}, hit={}, missed={}",
+                 elapsed_ms,
+                 build_cache_hit_rate_,
+                 build_cache_hit_nodes_,
+                 build_cache_missed_nodes_);
+
+    return {};
 }
 
 }  // namespace vsag

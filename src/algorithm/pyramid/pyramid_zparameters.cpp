@@ -184,6 +184,10 @@ PyramidParameters::FromJson(const JsonType& json) {
         this->index_min_size = json[INDEX_MIN_SIZE].GetInt();
     }
 
+    if (json.Contains(HGRAPH_PERSIST_SOURCE_ID_KEY)) {
+        this->persist_source_id = json[HGRAPH_PERSIST_SOURCE_ID_KEY].GetBool();
+    }
+
     if (json.Contains(SUPPORT_DUPLICATE)) {
         this->support_duplicate = json[SUPPORT_DUPLICATE].GetBool();
     }
@@ -233,6 +237,7 @@ PyramidParameters::ToJson() const {
     json[USE_REORDER_KEY].SetBool(this->use_reorder);
     json[INDEX_MIN_SIZE].SetInt(index_min_size);
     json[SUPPORT_DUPLICATE].SetBool(support_duplicate);
+    json[HGRAPH_PERSIST_SOURCE_ID_KEY].SetBool(persist_source_id);
     if (this->use_reorder) {
         json[PRECISE_CODES_KEY].SetJson(precise_codes_param->ToJson());
     }

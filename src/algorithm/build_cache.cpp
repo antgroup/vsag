@@ -12,25 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "hgraph_cache.h"
+#include "build_cache.h"
 
 #include "impl/allocator/default_allocator.h"
 
 namespace vsag {
 
-HGraphCache::HGraphCache(Allocator* allocator)
+BuildCache::BuildCache(Allocator* allocator)
     : allocator_(allocator), source_ids_(allocator_), neighbors_(allocator_) {
 }
 
 void
-HGraphCache::Serialize(StreamWriter& writer) const {
+BuildCache::Serialize(StreamWriter& writer) const {
     uint64_t source_ids_size = source_ids_.size();
     StreamWriter::WriteObj(writer, source_ids_size);
     Vector<InnerIdType> empty(allocator_);
     for (uint64_t i = 0; i < source_ids_size; ++i) {
         const auto& source_id = source_ids_[i];
         StreamWriter::WriteString(writer, source_id);
-        // Write neighbors for this source_id if exists, otherwise write empty vector
         auto it = neighbors_.find(source_id);
         if (it != neighbors_.end()) {
             StreamWriter::WriteVector(writer, it->second);
@@ -41,7 +40,7 @@ HGraphCache::Serialize(StreamWriter& writer) const {
 }
 
 void
-HGraphCache::Deserialize(StreamReader& reader) {
+BuildCache::Deserialize(StreamReader& reader) {
     uint64_t source_ids_size = 0;
     StreamReader::ReadObj(reader, source_ids_size);
     source_ids_.clear();
@@ -59,7 +58,7 @@ HGraphCache::Deserialize(StreamReader& reader) {
 }
 
 std::vector<std::string>
-HGraphCache::GetNeighbors(const std::string& source_id) const {
+BuildCache::GetNeighbors(const std::string& source_id) const {
     std::vector<std::string> result;
     auto it = neighbors_.find(source_id);
     if (it == neighbors_.end()) {
