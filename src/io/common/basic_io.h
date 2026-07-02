@@ -54,11 +54,6 @@ public:
     explicit BasicIO<IOTmpl>(Allocator* allocator) : allocator_(allocator){};
 
     /**
-     * @brief Virtual destructor to ensure proper cleanup in derived classes.
-     */
-    virtual ~BasicIO() = default;
-
-    /**
      * @brief Writes data to the IO object at a specified offset.
      *
      * If the IO object has a WriteImpl method, it is called.
@@ -262,6 +257,19 @@ public:
     uint64_t start_{0};
 
 protected:
+    /**
+     * @brief Protected non-virtual destructor.
+     *
+     * BasicIO uses CRTP for static polymorphism, so dynamic dispatch is never needed.
+     * The destructor is non-virtual to avoid introducing a vptr.
+     *
+     * The destructor is protected (not public) to prevent deletion through a raw
+     * BasicIO pointer at compile time. Note that std::shared_ptr<BasicIO<IOTmpl>>
+     * (used in some datacells) remains safe because the deleter is bound to the
+     * concrete IOTmpl type at construction time (e.g. via std::make_shared<IOTmpl>).
+     */
+    ~BasicIO() = default;
+
     /**
      * @brief Checks if the given offset is valid.
      *

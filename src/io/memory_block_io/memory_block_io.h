@@ -66,7 +66,7 @@ public:
     /**
      * @brief Destructor that deallocates all memory blocks.
      */
-    ~MemoryBlockIO() override;
+    ~MemoryBlockIO();
 
     /**
      * @brief Writes data to the blocks at a specified offset.

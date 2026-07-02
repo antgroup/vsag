@@ -66,7 +66,7 @@ public:
     /**
      * @brief Default destructor.
      */
-    ~NonContinuousIO() override = default;
+    ~NonContinuousIO() = default;
 
     /**
      * @brief Writes data to non-continuous regions at a specified logical offset.
