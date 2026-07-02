@@ -14,6 +14,8 @@
 
 #pragma once
 
+#include <cstdint>
+
 namespace vsag {
 
 extern const char* const INDEX_HGRAPH;
@@ -250,5 +252,9 @@ extern const char* const GNO_IMI_SECOND_ORDER_BUCKETS_COUNT;
 extern const char* const SERIAL_MAGIC_BEGIN;
 extern const char* const SERIAL_MAGIC_END;
 extern const char* const SERIAL_META_KEY;
+extern const char* const SERIAL_STREAM_MAGIC;
+extern const uint16_t SERIAL_STREAM_FORMAT_MAJOR;
+extern const uint16_t SERIAL_STREAM_FORMAT_MINOR;
+extern const uint32_t SERIAL_STREAM_SECTION_END;
 
 }  // namespace vsag

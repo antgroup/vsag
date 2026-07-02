@@ -17,10 +17,13 @@
 #include "sindi.h"
 
 #include <array>
+#include <cstring>
 #include <set>
+#include <sstream>
 
 #include "impl/allocator/safe_allocator.h"
 #include "index_common_param.h"
+#include "storage/serialization_tags.h"
 #include "storage/serialization_template_test.h"
 #include "unittest.h"
 using namespace vsag;
@@ -41,6 +44,102 @@ public:
 };
 
 }  // namespace vsag
+
+namespace {
+
+constexpr uint64_t SINDI_STREAM_MAGIC_SIZE = 8;
+constexpr uint64_t SINDI_STREAM_VERSION_OFFSET = SINDI_STREAM_MAGIC_SIZE;
+constexpr uint64_t SINDI_STREAM_METADATA_LENGTH_OFFSET =
+    SINDI_STREAM_VERSION_OFFSET + 2 * sizeof(uint16_t);
+constexpr uint64_t SINDI_STREAM_BLOCK_HEADER_SIZE = 4 + 4 + 8 + 8 + 4;
+constexpr uint64_t SINDI_STREAM_BLOCK_CRITICAL_FLAG = 1;
+
+struct SINDIStreamingBlockSlice {
+    uint32_t tag{0};
+    uint64_t header_offset{0};
+    uint64_t payload_size{0};
+};
+
+template <typename T>
+T
+ReadSINDIStreamingObj(const std::string& bytes, uint64_t offset) {
+    REQUIRE(offset + sizeof(T) <= bytes.size());
+    T value{};
+    std::memcpy(&value, bytes.data() + offset, sizeof(T));
+    return value;
+}
+
+template <typename T>
+void
+WriteSINDIStreamingObj(std::string& bytes, uint64_t offset, T value) {
+    REQUIRE(offset + sizeof(T) <= bytes.size());
+    std::memcpy(bytes.data() + offset, &value, sizeof(T));
+}
+
+uint64_t
+SINDIStreamingBodyOffset(const std::string& bytes) {
+    REQUIRE(bytes.size() >= SINDI_STREAM_METADATA_LENGTH_OFFSET + sizeof(uint64_t));
+    const auto metadata_len =
+        ReadSINDIStreamingObj<uint64_t>(bytes, SINDI_STREAM_METADATA_LENGTH_OFFSET);
+    return SINDI_STREAM_METADATA_LENGTH_OFFSET + sizeof(uint64_t) + metadata_len + sizeof(uint32_t);
+}
+
+std::vector<SINDIStreamingBlockSlice>
+ParseSINDIStreamingBlocks(const std::string& bytes) {
+    std::vector<SINDIStreamingBlockSlice> blocks;
+    uint64_t cursor = SINDIStreamingBodyOffset(bytes);
+    while (cursor < bytes.size()) {
+        REQUIRE(cursor + SINDI_STREAM_BLOCK_HEADER_SIZE <= bytes.size());
+        const auto tag = ReadSINDIStreamingObj<uint32_t>(bytes, cursor);
+        const auto value_len = ReadSINDIStreamingObj<uint64_t>(bytes, cursor + 4 + 4 + 8);
+        blocks.push_back(SINDIStreamingBlockSlice{tag, cursor, value_len});
+        cursor += SINDI_STREAM_BLOCK_HEADER_SIZE;
+        if (tag == static_cast<uint32_t>(StreamSerializationTag::SECTION_END)) {
+            break;
+        }
+        REQUIRE(cursor + value_len <= bytes.size());
+        cursor += value_len;
+    }
+    return blocks;
+}
+
+SINDIStreamingBlockSlice
+FindSINDIStreamingBlock(const std::string& bytes, StreamSerializationTag tag) {
+    const auto tag_value = static_cast<uint32_t>(tag);
+    for (const auto& block : ParseSINDIStreamingBlocks(bytes)) {
+        if (block.tag == tag_value) {
+            return block;
+        }
+    }
+    FAIL(fmt::format("SINDI streaming block tag {} not found", tag_value));
+    return SINDIStreamingBlockSlice{};
+}
+
+std::string
+InsertUnknownSINDIStreamingBlock(std::string bytes, bool critical) {
+    const auto section_end = FindSINDIStreamingBlock(bytes, StreamSerializationTag::SECTION_END);
+    std::string block(SINDI_STREAM_BLOCK_HEADER_SIZE, '\0');
+    constexpr uint32_t unknown_tag = 0x0051D111;
+    constexpr uint64_t payload_size = 5;
+    WriteSINDIStreamingObj<uint32_t>(block, 0, unknown_tag);
+    WriteSINDIStreamingObj<uint32_t>(block, 4, 1);
+    WriteSINDIStreamingObj<uint64_t>(block, 8, critical ? SINDI_STREAM_BLOCK_CRITICAL_FLAG : 0);
+    WriteSINDIStreamingObj<uint64_t>(block, 16, payload_size);
+    WriteSINDIStreamingObj<uint32_t>(block, 24, 0);
+    block.append("hello", payload_size);
+    bytes.insert(static_cast<size_t>(section_end.header_offset), block);
+    return bytes;
+}
+
+std::string
+EraseSINDIStreamingBlock(std::string bytes, StreamSerializationTag tag) {
+    const auto block = FindSINDIStreamingBlock(bytes, tag);
+    bytes.erase(static_cast<size_t>(block.header_offset),
+                static_cast<size_t>(SINDI_STREAM_BLOCK_HEADER_SIZE + block.payload_size));
+    return bytes;
+}
+
+}  // namespace
 
 class MockFilter : public Filter {
 public:
@@ -145,6 +244,85 @@ create_exact_sindi_param(uint32_t term_id_limit,
     return index_param;
 }
 
+TEST_CASE("SINDI streaming compatibility", "[ut][SINDI][streaming][compatibility]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    common_param.dim_ = 64;
+
+    constexpr uint32_t num_base = 128;
+    constexpr int64_t max_dim = 64;
+    constexpr int64_t max_id = 30000;
+    std::vector<int64_t> ids(num_base);
+    for (uint32_t i = 0; i < num_base; ++i) {
+        ids[i] = i;
+    }
+
+    auto sv_base = fixtures::GenerateSparseVectors(num_base, max_dim, max_id, 0, 10, 114);
+    auto base = Dataset::Make();
+    base->NumElements(num_base)->SparseVectors(sv_base.data())->Ids(ids.data())->Owner(false);
+
+    static constexpr auto param_str = R"({
+        "use_reorder": false,
+        "use_quantization": false,
+        "doc_prune_ratio": 0.0,
+        "term_prune_ratio": 0.0,
+        "window_size": 10000,
+        "term_id_limit": 30001,
+        "avg_doc_term_length": 100
+    })";
+    auto param_json = JsonType::Parse(param_str);
+    auto index_param = std::make_shared<SINDIParameter>();
+    index_param->FromJson(param_json);
+
+    auto index = std::make_unique<SINDI>(index_param, common_param);
+    auto build_res = index->Build(base);
+    REQUIRE(build_res.size() == 0);
+
+    std::stringstream stream;
+    REQUIRE_NOTHROW(index->SerializeStreaming(stream));
+    const auto bytes = stream.str();
+
+    SECTION("skips unknown non-critical block") {
+        auto mutated = InsertUnknownSINDIStreamingBlock(bytes, false);
+        auto restored = std::make_unique<SINDI>(index_param, common_param);
+        std::stringstream deserialize_stream(mutated);
+        REQUIRE_NOTHROW(restored->DeserializeStreaming(deserialize_stream));
+        REQUIRE(restored->GetNumElements() == num_base);
+
+        std::stringstream load_stream(mutated);
+        auto loaded = Index::Load(load_stream, "{}");
+        REQUIRE(loaded.has_value());
+        REQUIRE(loaded.value()->GetNumElements() == num_base);
+    }
+
+    SECTION("rejects unknown critical block") {
+        auto mutated = InsertUnknownSINDIStreamingBlock(bytes, true);
+        auto restored = std::make_unique<SINDI>(index_param, common_param);
+        std::stringstream deserialize_stream(mutated);
+        REQUIRE_THROWS(restored->DeserializeStreaming(deserialize_stream));
+
+        std::stringstream load_stream(mutated);
+        REQUIRE_FALSE(Index::Load(load_stream, "{}").has_value());
+    }
+
+    SECTION("rejects missing required block") {
+        auto mutated = EraseSINDIStreamingBlock(bytes, StreamSerializationTag::SINDI_WINDOWS);
+        auto restored = std::make_unique<SINDI>(index_param, common_param);
+        std::stringstream deserialize_stream(mutated);
+        REQUIRE_THROWS(restored->DeserializeStreaming(deserialize_stream));
+
+        std::stringstream load_stream(mutated);
+        REQUIRE_FALSE(Index::Load(load_stream, "{}").has_value());
+    }
+
+    for (auto& item : sv_base) {
+        delete[] item.vals_;
+        delete[] item.ids_;
+    }
+}
+
 TEST_CASE("SINDI Basic Test", "[ut][SINDI]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     IndexCommonParam common_param;
@@ -215,6 +393,19 @@ TEST_CASE("SINDI Basic Test", "[ut][SINDI]") {
     // test serialize
     test_serializion(*index, *another_index);
     REQUIRE(another_index->GetNumElements() == num_base);
+    auto streaming_index = std::make_unique<SINDI>(index_param, common_param);
+    std::stringstream streaming_buffer;
+    REQUIRE_NOTHROW(index->SerializeStreaming(streaming_buffer));
+    const auto streaming_bytes = streaming_buffer.str();
+
+    std::stringstream deserialize_stream(streaming_bytes);
+    REQUIRE_NOTHROW(streaming_index->DeserializeStreaming(deserialize_stream));
+    REQUIRE(streaming_index->GetNumElements() == num_base);
+
+    std::stringstream load_stream(streaming_bytes);
+    auto loaded_index = vsag::Index::Load(load_stream, "{}");
+    REQUIRE(loaded_index.has_value());
+    REQUIRE(loaded_index.value()->GetNumElements() == num_base);
 
     // test search process
     std::string search_param_str = R"(
@@ -248,10 +439,16 @@ TEST_CASE("SINDI Basic Test", "[ut][SINDI]") {
 
         // test basic performance
         auto result = index->KnnSearch(query, k, search_param_str, nullptr);
+        auto loaded_result =
+            loaded_index.value()->KnnSearch(query, k, search_param_str, vsag::BitsetPtr(nullptr));
+        REQUIRE(loaded_result.has_value());
         REQUIRE(result->GetNumElements() == bf_result->GetNumElements());
         REQUIRE(result->GetDim() == bf_result->GetDim());
+        REQUIRE(loaded_result.value()->GetNumElements() == result->GetNumElements());
+        REQUIRE(loaded_result.value()->GetDim() == result->GetDim());
         for (int j = 0; j < k; j++) {
             REQUIRE(result->GetIds()[j] == bf_result->GetIds()[j]);
+            REQUIRE(loaded_result.value()->GetIds()[j] == result->GetIds()[j]);
             REQUIRE(std::abs(result->GetDistances()[j] - bf_result->GetDistances()[j]) < 3e-3);
         }
 

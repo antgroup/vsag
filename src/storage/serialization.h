@@ -128,6 +128,18 @@ private:
     JsonType metadata_;
 };
 
+class StreamHeader {
+public:
+    static MetadataPtr
+    Read(StreamReader& reader);
+
+    static void
+    Write(StreamWriter& writer, const MetadataPtr& metadata);
+
+    static uint32_t
+    CalculateChecksum(std::string_view bytes);
+};
+
 // Footer is a wrapper of metadata, only used in all-in-one serialize format
 DEFINE_POINTER(Footer);
 class Footer {
@@ -156,7 +168,7 @@ public:
     virtual ~Footer() = default;
 
 private:
-    // TODO(wxyu): optimize performance
+    // Keep this byte-for-byte compatible with the legacy footer checksum.
     static uint32_t
     calculate_checksum(std::string_view bytes) {
         const uint32_t polynomial = 0xEDB88320;

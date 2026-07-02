@@ -18,6 +18,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 #include <chrono>
+#include <cstring>
 #include <limits>
 #include <random>
 #include <sstream>
@@ -25,6 +26,7 @@
 
 #include "functest.h"
 #include "inner_string_params.h"
+#include "storage/serialization_tags.h"
 #include "test_index.h"
 #include "typing.h"
 #include "vsag/filter.h"
@@ -405,6 +407,182 @@ ForEachHGraphCase(const fixtures::HGraphResourcePtr& resource, const Cases& test
                 fn(metric_type, dim, base_quantization_str, recall);
             }
         }
+    }
+}
+
+constexpr uint64_t STREAM_MAGIC_SIZE = 8;
+constexpr uint64_t STREAM_VERSION_OFFSET = STREAM_MAGIC_SIZE;
+constexpr uint64_t STREAM_MAJOR_OFFSET = STREAM_VERSION_OFFSET;
+constexpr uint64_t STREAM_MINOR_OFFSET = STREAM_VERSION_OFFSET + sizeof(uint16_t);
+constexpr uint64_t STREAM_METADATA_LENGTH_OFFSET = STREAM_VERSION_OFFSET + 2 * sizeof(uint16_t);
+constexpr uint64_t STREAM_BLOCK_HEADER_SIZE = 4 + 4 + 8 + 8 + 4;
+constexpr uint64_t STREAM_BLOCK_CRITICAL_FLAG = 1;
+
+struct StreamingBlockSlice {
+    uint32_t tag{0};
+    uint64_t header_offset{0};
+    uint64_t payload_offset{0};
+    uint64_t payload_size{0};
+
+    [[nodiscard]] uint64_t
+    end_offset() const {
+        return payload_offset + payload_size;
+    }
+};
+
+template <typename T>
+T
+ReadStreamingObj(const std::string& bytes, uint64_t offset) {
+    REQUIRE(offset + sizeof(T) <= bytes.size());
+    T value{};
+    std::memcpy(&value, bytes.data() + offset, sizeof(T));
+    return value;
+}
+
+template <typename T>
+void
+WriteStreamingObj(std::string& bytes, uint64_t offset, T value) {
+    REQUIRE(offset + sizeof(T) <= bytes.size());
+    std::memcpy(bytes.data() + offset, &value, sizeof(T));
+}
+
+uint64_t
+StreamingBodyOffset(const std::string& bytes) {
+    REQUIRE(bytes.size() >= STREAM_METADATA_LENGTH_OFFSET + sizeof(uint64_t));
+    const auto metadata_len = ReadStreamingObj<uint64_t>(bytes, STREAM_METADATA_LENGTH_OFFSET);
+    return STREAM_METADATA_LENGTH_OFFSET + sizeof(uint64_t) + metadata_len + sizeof(uint32_t);
+}
+
+std::vector<StreamingBlockSlice>
+ParseStreamingBlocks(const std::string& bytes) {
+    std::vector<StreamingBlockSlice> blocks;
+    uint64_t cursor = StreamingBodyOffset(bytes);
+    while (cursor < bytes.size()) {
+        REQUIRE(cursor + STREAM_BLOCK_HEADER_SIZE <= bytes.size());
+        const auto tag = ReadStreamingObj<uint32_t>(bytes, cursor);
+        const auto value_len = ReadStreamingObj<uint64_t>(bytes, cursor + 4 + 4 + 8);
+        StreamingBlockSlice block{tag, cursor, cursor + STREAM_BLOCK_HEADER_SIZE, value_len};
+        blocks.push_back(block);
+        cursor += STREAM_BLOCK_HEADER_SIZE;
+        if (tag == static_cast<uint32_t>(vsag::StreamSerializationTag::SECTION_END)) {
+            break;
+        }
+        REQUIRE(cursor + value_len <= bytes.size());
+        cursor += value_len;
+    }
+    return blocks;
+}
+
+StreamingBlockSlice
+FindStreamingBlock(const std::string& bytes, vsag::StreamSerializationTag tag) {
+    const auto tag_value = static_cast<uint32_t>(tag);
+    for (const auto& block : ParseStreamingBlocks(bytes)) {
+        if (block.tag == tag_value) {
+            return block;
+        }
+    }
+    FAIL(fmt::format("streaming block tag {} not found", tag_value));
+    return StreamingBlockSlice{};
+}
+
+std::string
+SetStreamingMinorVersion(std::string bytes, uint16_t minor) {
+    WriteStreamingObj<uint16_t>(bytes, STREAM_MINOR_OFFSET, minor);
+    return bytes;
+}
+
+std::string
+SetStreamingMajorVersion(std::string bytes, uint16_t major) {
+    WriteStreamingObj<uint16_t>(bytes, STREAM_MAJOR_OFFSET, major);
+    return bytes;
+}
+
+std::string
+SetStreamingBlockVersion(std::string bytes, vsag::StreamSerializationTag tag, uint32_t version) {
+    const auto block = FindStreamingBlock(bytes, tag);
+    WriteStreamingObj<uint32_t>(bytes, block.header_offset + sizeof(uint32_t), version);
+    return bytes;
+}
+
+std::string
+EraseStreamingBlock(std::string bytes, vsag::StreamSerializationTag tag) {
+    const auto block = FindStreamingBlock(bytes, tag);
+    bytes.erase(static_cast<size_t>(block.header_offset),
+                static_cast<size_t>(STREAM_BLOCK_HEADER_SIZE + block.payload_size));
+    return bytes;
+}
+
+std::string
+InsertUnknownStreamingBlock(std::string bytes, bool critical, uint32_t version = 1) {
+    const auto section_end = FindStreamingBlock(bytes, vsag::StreamSerializationTag::SECTION_END);
+    std::string block(STREAM_BLOCK_HEADER_SIZE, '\0');
+    constexpr uint32_t unknown_tag = 0x00ABCDEF;
+    constexpr uint64_t payload_size = 5;
+    WriteStreamingObj<uint32_t>(block, 0, unknown_tag);
+    WriteStreamingObj<uint32_t>(block, 4, version);
+    WriteStreamingObj<uint64_t>(block, 8, critical ? STREAM_BLOCK_CRITICAL_FLAG : 0);
+    WriteStreamingObj<uint64_t>(block, 16, payload_size);
+    WriteStreamingObj<uint32_t>(block, 24, 0);
+    block.append("hello", payload_size);
+    bytes.insert(static_cast<size_t>(section_end.header_offset), block);
+    return bytes;
+}
+
+struct HGraphStreamingFixture {
+    std::string param;
+    fixtures::TestDatasetPtr dataset;
+    fixtures::TestIndex::IndexPtr index;
+    std::string bytes;
+};
+
+HGraphStreamingFixture
+MakeHGraphStreamingFixture(const std::string& quantization = "fp32") {
+    using namespace fixtures;
+    HGraphTestIndex::HGraphBuildParam build_param("l2", 16, quantization);
+    auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+    auto index = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+    auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(16, 100, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    std::stringstream stream;
+    auto serialize_result = index->SerializeStreaming(stream);
+    REQUIRE(serialize_result.has_value());
+    auto bytes = stream.str();
+    REQUIRE(bytes.substr(0, 8) == vsag::SERIAL_STREAM_MAGIC);
+    return HGraphStreamingFixture{param, dataset, index, bytes};
+}
+
+fixtures::TestIndex::IndexPtr
+DeserializeHGraphStreamingBytes(const std::string& param, const std::string& bytes) {
+    auto index = fixtures::TestIndex::TestFactory(fixtures::HGraphTestIndex::name, param, true);
+    std::stringstream stream(bytes);
+    auto result = index->DeserializeStreaming(stream);
+    REQUIRE(result.has_value());
+    return index;
+}
+
+void
+RequireHGraphStreamingDeserializeFails(const std::string& param, const std::string& bytes) {
+    auto index = fixtures::TestIndex::TestFactory(fixtures::HGraphTestIndex::name, param, true);
+    std::stringstream stream(bytes);
+    REQUIRE_FALSE(index->DeserializeStreaming(stream).has_value());
+}
+
+void
+RequireHGraphStreamingSearchMatches(const fixtures::TestIndex::IndexPtr& expected,
+                                    const fixtures::TestIndex::IndexPtr& actual,
+                                    const fixtures::TestDatasetPtr& dataset) {
+    auto query = fixtures::get_one_query(dataset->query_, 0);
+    auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
+    auto expected_result = expected->KnnSearch(query, 10, search_param);
+    auto actual_result = actual->KnnSearch(query, 10, search_param);
+    REQUIRE(expected_result.has_value());
+    REQUIRE(actual_result.has_value());
+    REQUIRE(expected_result.value()->GetDim() == actual_result.value()->GetDim());
+    for (int64_t i = 0; i < expected_result.value()->GetDim(); ++i) {
+        REQUIRE(expected_result.value()->GetIds()[i] == actual_result.value()->GetIds()[i]);
+        REQUIRE(expected_result.value()->GetDistances()[i] ==
+                actual_result.value()->GetDistances()[i]);
     }
 }
 
@@ -1804,6 +1982,133 @@ TestHGraphSerialize(const fixtures::HGraphTestIndexPtr& test_index,
 HGRAPH_PR_DAILY_CASE("HGraph Serialize File",
                      "[ft][serialize][hgraph][serialization]",
                      TestHGraphSerialize)
+
+TEST_CASE("HGraph Serialize Streaming", "[ft][serialize][hgraph][streaming]") {
+    using namespace fixtures;
+    HGraphTestIndex::HGraphBuildParam build_param("l2", 16, "fp32");
+    auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+    auto index = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+    auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(16, 100, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    std::stringstream stream;
+    auto serialize_result = index->SerializeStreaming(stream);
+    REQUIRE(serialize_result.has_value());
+    auto bytes = stream.str();
+    REQUIRE(bytes.substr(0, 8) == vsag::SERIAL_STREAM_MAGIC);
+
+    auto index2 = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+    std::stringstream deserialize_stream(bytes);
+    auto deserialize_result = index2->DeserializeStreaming(deserialize_stream);
+    REQUIRE(deserialize_result.has_value());
+    REQUIRE(index2->GetNumElements() == index->GetNumElements());
+
+    std::stringstream load_stream(bytes);
+    auto load_result = vsag::Index::Load(load_stream, "{}");
+    REQUIRE(load_result.has_value());
+    auto index3 = load_result.value();
+    REQUIRE(index3->GetNumElements() == index->GetNumElements());
+
+    auto query = get_one_query(dataset->query_, 0);
+    auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
+    auto result = index->KnnSearch(query, 10, search_param);
+    auto result2 = index2->KnnSearch(query, 10, search_param);
+    auto result3 = index3->KnnSearch(query, 10, search_param);
+    REQUIRE(result.has_value());
+    REQUIRE(result2.has_value());
+    REQUIRE(result3.has_value());
+    REQUIRE(result.value()->GetDim() == result2.value()->GetDim());
+    REQUIRE(result.value()->GetDim() == result3.value()->GetDim());
+    for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
+        REQUIRE(result.value()->GetIds()[i] == result2.value()->GetIds()[i]);
+        REQUIRE(result.value()->GetDistances()[i] == result2.value()->GetDistances()[i]);
+        REQUIRE(result.value()->GetIds()[i] == result3.value()->GetIds()[i]);
+        REQUIRE(result.value()->GetDistances()[i] == result3.value()->GetDistances()[i]);
+    }
+}
+
+TEST_CASE("HGraph streaming Load applies IO parameters", "[ft][serialize][hgraph][streaming]") {
+    using namespace fixtures;
+    HGraphTestIndex::HGraphBuildParam build_param("l2", 128, "rabitq,sq8,block_memory_io,32,3");
+    build_param.graph_storage = "compressed";
+    build_param.thread_count = 1;
+    auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+    auto index = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+    auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(128, 200, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    std::stringstream stream;
+    REQUIRE(index->SerializeStreaming(stream).has_value());
+    auto bytes = stream.str();
+
+    auto precise_path = HGraphTestIndex::dir.GenerateRandomFile(false);
+    auto load_param =
+        fmt::format(R"({{"precise_io_type":"buffer_io","precise_file_path":"{}"}})", precise_path);
+    std::stringstream load_stream(bytes);
+    auto loaded = vsag::Index::Load(load_stream, load_param);
+    REQUIRE(loaded.has_value());
+    REQUIRE(loaded.value()->GetNumElements() == index->GetNumElements());
+
+    std::stringstream invalid_load_stream(bytes);
+    REQUIRE_FALSE(
+        vsag::Index::Load(invalid_load_stream, R"({"precise_io_type":"invalid_io"})").has_value());
+}
+
+TEST_CASE("HGraph streaming serialization compatibility",
+          "[ft][serialize][hgraph][streaming][compatibility]") {
+    SECTION("accepts newer minor version") {
+        auto fixture = MakeHGraphStreamingFixture();
+        auto bytes = SetStreamingMinorVersion(fixture.bytes, 7);
+        auto restored = DeserializeHGraphStreamingBytes(fixture.param, bytes);
+        RequireHGraphStreamingSearchMatches(fixture.index, restored, fixture.dataset);
+    }
+
+    SECTION("rejects unsupported major version") {
+        auto fixture = MakeHGraphStreamingFixture();
+        auto bytes = SetStreamingMajorVersion(fixture.bytes, 2);
+        RequireHGraphStreamingDeserializeFails(fixture.param, bytes);
+    }
+
+    SECTION("skips unknown non-critical block") {
+        auto fixture = MakeHGraphStreamingFixture();
+        auto bytes = InsertUnknownStreamingBlock(fixture.bytes, false);
+        auto restored = DeserializeHGraphStreamingBytes(fixture.param, bytes);
+        RequireHGraphStreamingSearchMatches(fixture.index, restored, fixture.dataset);
+    }
+
+    SECTION("skips unknown non-critical block with unsupported version") {
+        auto fixture = MakeHGraphStreamingFixture();
+        auto bytes = InsertUnknownStreamingBlock(fixture.bytes, false, 99);
+        auto restored = DeserializeHGraphStreamingBytes(fixture.param, bytes);
+        RequireHGraphStreamingSearchMatches(fixture.index, restored, fixture.dataset);
+    }
+
+    SECTION("rejects unknown critical block") {
+        auto fixture = MakeHGraphStreamingFixture();
+        auto bytes = InsertUnknownStreamingBlock(fixture.bytes, true);
+        RequireHGraphStreamingDeserializeFails(fixture.param, bytes);
+    }
+
+    SECTION("rejects unsupported critical block version") {
+        auto fixture = MakeHGraphStreamingFixture();
+        auto bytes =
+            SetStreamingBlockVersion(fixture.bytes, vsag::StreamSerializationTag::BASE_CODES, 99);
+        RequireHGraphStreamingDeserializeFails(fixture.param, bytes);
+    }
+
+    SECTION("rejects missing required block") {
+        auto fixture = MakeHGraphStreamingFixture();
+        auto bytes = EraseStreamingBlock(fixture.bytes, vsag::StreamSerializationTag::BOTTOM_GRAPH);
+        RequireHGraphStreamingDeserializeFails(fixture.param, bytes);
+    }
+
+    SECTION("rejects missing conditional high precision block") {
+        auto fixture = MakeHGraphStreamingFixture("sq8,fp32");
+        auto bytes =
+            EraseStreamingBlock(fixture.bytes, vsag::StreamSerializationTag::HIGH_PRECISION_CODES);
+        RequireHGraphStreamingDeserializeFails(fixture.param, bytes);
+    }
+}
 
 static void
 TestHGraphReaderIO(const fixtures::HGraphTestIndexPtr& test_index,

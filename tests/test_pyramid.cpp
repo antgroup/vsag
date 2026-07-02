@@ -18,10 +18,13 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 #include <cmath>
+#include <cstring>
 #include <nlohmann/json.hpp>
 #include <set>
+#include <sstream>
 
 #include "functest.h"
+#include "storage/serialization_tags.h"
 #include "test_index.h"
 #include "vsag/vsag.h"
 
@@ -168,6 +171,100 @@ RequireDistancesNearZero(const vsag::DatasetPtr& result, const std::set<int64_t>
             REQUIRE(std::abs(result->GetDistances()[i]) <= 1e-6F);
         }
     }
+}
+
+constexpr uint64_t PYRAMID_STREAM_MAGIC_SIZE = 8;
+constexpr uint64_t PYRAMID_STREAM_VERSION_OFFSET = PYRAMID_STREAM_MAGIC_SIZE;
+constexpr uint64_t PYRAMID_STREAM_METADATA_LENGTH_OFFSET =
+    PYRAMID_STREAM_VERSION_OFFSET + 2 * sizeof(uint16_t);
+constexpr uint64_t PYRAMID_STREAM_BLOCK_HEADER_SIZE = 4 + 4 + 8 + 8 + 4;
+constexpr uint64_t PYRAMID_STREAM_BLOCK_CRITICAL_FLAG = 1;
+
+struct PyramidStreamingBlockSlice {
+    uint32_t tag{0};
+    uint64_t header_offset{0};
+    uint64_t payload_size{0};
+};
+
+template <typename T>
+T
+ReadPyramidStreamingObj(const std::string& bytes, uint64_t offset) {
+    REQUIRE(offset + sizeof(T) <= bytes.size());
+    T value{};
+    std::memcpy(&value, bytes.data() + offset, sizeof(T));
+    return value;
+}
+
+template <typename T>
+void
+WritePyramidStreamingObj(std::string& bytes, uint64_t offset, T value) {
+    REQUIRE(offset + sizeof(T) <= bytes.size());
+    std::memcpy(bytes.data() + offset, &value, sizeof(T));
+}
+
+uint64_t
+PyramidStreamingBodyOffset(const std::string& bytes) {
+    REQUIRE(bytes.size() >= PYRAMID_STREAM_METADATA_LENGTH_OFFSET + sizeof(uint64_t));
+    const auto metadata_len =
+        ReadPyramidStreamingObj<uint64_t>(bytes, PYRAMID_STREAM_METADATA_LENGTH_OFFSET);
+    return PYRAMID_STREAM_METADATA_LENGTH_OFFSET + sizeof(uint64_t) + metadata_len +
+           sizeof(uint32_t);
+}
+
+std::vector<PyramidStreamingBlockSlice>
+ParsePyramidStreamingBlocks(const std::string& bytes) {
+    std::vector<PyramidStreamingBlockSlice> blocks;
+    uint64_t cursor = PyramidStreamingBodyOffset(bytes);
+    while (cursor < bytes.size()) {
+        REQUIRE(cursor + PYRAMID_STREAM_BLOCK_HEADER_SIZE <= bytes.size());
+        const auto tag = ReadPyramidStreamingObj<uint32_t>(bytes, cursor);
+        const auto value_len = ReadPyramidStreamingObj<uint64_t>(bytes, cursor + 4 + 4 + 8);
+        blocks.push_back(PyramidStreamingBlockSlice{tag, cursor, value_len});
+        cursor += PYRAMID_STREAM_BLOCK_HEADER_SIZE;
+        if (tag == static_cast<uint32_t>(vsag::StreamSerializationTag::SECTION_END)) {
+            break;
+        }
+        REQUIRE(cursor + value_len <= bytes.size());
+        cursor += value_len;
+    }
+    return blocks;
+}
+
+PyramidStreamingBlockSlice
+FindPyramidStreamingBlock(const std::string& bytes, vsag::StreamSerializationTag tag) {
+    const auto tag_value = static_cast<uint32_t>(tag);
+    for (const auto& block : ParsePyramidStreamingBlocks(bytes)) {
+        if (block.tag == tag_value) {
+            return block;
+        }
+    }
+    FAIL(fmt::format("Pyramid streaming block tag {} not found", tag_value));
+    return PyramidStreamingBlockSlice{};
+}
+
+std::string
+InsertUnknownPyramidStreamingBlock(std::string bytes, bool critical) {
+    const auto section_end =
+        FindPyramidStreamingBlock(bytes, vsag::StreamSerializationTag::SECTION_END);
+    std::string block(PYRAMID_STREAM_BLOCK_HEADER_SIZE, '\0');
+    constexpr uint32_t unknown_tag = 0x00C0FFEE;
+    constexpr uint64_t payload_size = 5;
+    WritePyramidStreamingObj<uint32_t>(block, 0, unknown_tag);
+    WritePyramidStreamingObj<uint32_t>(block, 4, 1);
+    WritePyramidStreamingObj<uint64_t>(block, 8, critical ? PYRAMID_STREAM_BLOCK_CRITICAL_FLAG : 0);
+    WritePyramidStreamingObj<uint64_t>(block, 16, payload_size);
+    WritePyramidStreamingObj<uint32_t>(block, 24, 0);
+    block.append("hello", payload_size);
+    bytes.insert(static_cast<size_t>(section_end.header_offset), block);
+    return bytes;
+}
+
+std::string
+ErasePyramidStreamingBlock(std::string bytes, vsag::StreamSerializationTag tag) {
+    const auto block = FindPyramidStreamingBlock(bytes, tag);
+    bytes.erase(static_cast<size_t>(block.header_offset),
+                static_cast<size_t>(PYRAMID_STREAM_BLOCK_HEADER_SIZE + block.payload_size));
+    return bytes;
 }
 
 class BlockSizeLimitGuard {
@@ -534,8 +631,73 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
             auto index2 = TestFactory(name, param, true);
             TestSerializeFile(index, index2, dataset, search_param, true);
         }
+        SECTION("streaming serialize/deserialize/load") {
+            auto index2 = TestFactory(name, param, true);
+            std::stringstream stream;
+            REQUIRE(index->SerializeStreaming(stream).has_value());
+            const auto bytes = stream.str();
+
+            std::stringstream deserialize_stream(bytes);
+            REQUIRE(index2->DeserializeStreaming(deserialize_stream).has_value());
+            TestKnnSearch(index2, dataset, search_param, 0.94, true);
+
+            std::stringstream load_stream(bytes);
+            auto loaded = vsag::Index::Load(load_stream, "{}");
+            REQUIRE(loaded.has_value());
+            TestKnnSearch(loaded.value(), dataset, search_param, 0.94, true);
+        }
     }
     vsag::Options::Instance().set_block_size_limit(origin_size);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
+                             "Pyramid streaming compatibility",
+                             "[ft][pyramid][serialization][streaming][compatibility]") {
+    BlockSizeLimitGuard block_size_limit_guard(1024 * 1024 * 2);
+    PyramidParam pyramid_param;
+    pyramid_param.no_build_levels = {0, 1, 2};
+    const auto param = GeneratePyramidBuildParametersString("l2", 16, pyramid_param);
+    auto index = TestFactory("pyramid", param, true);
+    auto dataset = pool.GetDatasetAndCreate(16, 200, "l2", /*with_path=*/true);
+    TestBuildIndex(index, dataset, true);
+
+    std::stringstream stream;
+    REQUIRE(index->SerializeStreaming(stream).has_value());
+    const auto bytes = stream.str();
+    const auto expected_count = dataset->base_->GetNumElements();
+
+    SECTION("skips unknown non-critical block") {
+        auto mutated = InsertUnknownPyramidStreamingBlock(bytes, false);
+        auto restored = TestFactory("pyramid", param, true);
+        std::stringstream deserialize_stream(mutated);
+        REQUIRE(restored->DeserializeStreaming(deserialize_stream).has_value());
+        REQUIRE(restored->GetNumElements() == expected_count);
+
+        std::stringstream load_stream(mutated);
+        auto loaded = vsag::Index::Load(load_stream, "{}");
+        REQUIRE(loaded.has_value());
+        REQUIRE(loaded.value()->GetNumElements() == expected_count);
+    }
+
+    SECTION("rejects unknown critical block") {
+        auto mutated = InsertUnknownPyramidStreamingBlock(bytes, true);
+        auto restored = TestFactory("pyramid", param, true);
+        std::stringstream deserialize_stream(mutated);
+        REQUIRE_FALSE(restored->DeserializeStreaming(deserialize_stream).has_value());
+
+        std::stringstream load_stream(mutated);
+        REQUIRE_FALSE(vsag::Index::Load(load_stream, "{}").has_value());
+    }
+
+    SECTION("rejects missing required block") {
+        auto mutated = ErasePyramidStreamingBlock(bytes, vsag::StreamSerializationTag::BASE_CODES);
+        auto restored = TestFactory("pyramid", param, true);
+        std::stringstream deserialize_stream(mutated);
+        REQUIRE_FALSE(restored->DeserializeStreaming(deserialize_stream).has_value());
+
+        std::stringstream load_stream(mutated);
+        REQUIRE_FALSE(vsag::Index::Load(load_stream, "{}").has_value());
+    }
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex, "Pyramid Clone", "[ft][clone][pyramid]") {

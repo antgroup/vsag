@@ -109,6 +109,8 @@ together when the directory is listed:
 | --- | --- |
 | [`401_persistent_kv.cpp`](401_persistent_kv.cpp) | Serialize / deserialize against a key-value backend. |
 | [`402_persistent_streaming.cpp`](402_persistent_streaming.cpp) | Streaming serialization for large indexes. |
+| [`403_persistent_streaming_load.cpp`](403_persistent_streaming_load.cpp) | Static `Index::Load` from streaming serialization across index types. |
+| [`404_persistent_streaming_load_hybrid.cpp`](404_persistent_streaming_load_hybrid.cpp) | Static `Index::Load` for a hybrid HGraph index with memory and disk-backed RaBitQ split codes. |
 
 ### Quantization (`5xx`)
 
