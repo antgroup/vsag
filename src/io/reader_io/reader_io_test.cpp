@@ -15,12 +15,47 @@
 
 #include "io/reader_io/reader_io.h"
 
+#include <algorithm>
 #include <memory>
+#include <sstream>
 
 #include "index_common_param.h"
 #include "io/common/basic_io_test.h"
 #include "io/reader_io/reader_io_parameter.h"
 #include "unittest.h"
+
+namespace {
+
+class TestSkipDeserializeIO : public vsag::BasicIO<TestSkipDeserializeIO> {
+public:
+    static constexpr bool InMemory = true;
+    static constexpr bool SkipDeserialize = true;
+
+    explicit TestSkipDeserializeIO(vsag::Allocator* allocator)
+        : vsag::BasicIO<TestSkipDeserializeIO>(allocator) {
+    }
+
+    void
+    WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset) {
+        ++write_count_;
+        REQUIRE(data != nullptr);
+        this->size_ = std::max(this->size_, offset + size);
+    }
+
+    uint64_t
+    Start() const {
+        return this->start_;
+    }
+
+    uint64_t
+    Size() const {
+        return this->size_;
+    }
+
+    uint64_t write_count_{0};
+};
+
+}  // namespace
 
 class TestReader : public vsag::Reader {
 public:
@@ -129,4 +164,29 @@ TEST_CASE("ReaderIO Read Test", "[ut][ReaderIO]") {
         std::vector<uint8_t> buffer(1);
         REQUIRE_THROWS(reader_io.MultiReadImpl(buffer.data(), sizes, offsets, count));
     }
+}
+
+TEST_CASE("SkipDeserialize updates size without writing null data", "[ut][ReaderIO]") {
+    const uint64_t kTestSize = 1024;
+    std::vector<uint8_t> all_data(kTestSize);
+    for (uint64_t i = 0; i < kTestSize; ++i) {
+        all_data[i] = static_cast<uint8_t>(i % 256);
+    }
+
+    std::stringstream ss;
+    vsag::IOStreamWriter writer(ss);
+    vsag::StreamWriter::WriteObj(writer, kTestSize);
+    writer.Write(reinterpret_cast<const char*>(all_data.data()), kTestSize);
+    ss.seekg(0, std::ios::beg);
+
+    vsag::IOStreamReader reader(ss);
+    auto allocator = vsag::Engine::CreateDefaultAllocator();
+    TestSkipDeserializeIO io(allocator.get());
+
+    io.Deserialize(reader);
+
+    REQUIRE(io.write_count_ == 0);
+    REQUIRE(io.Start() == sizeof(kTestSize));
+    REQUIRE(io.Size() == kTestSize);
+    REQUIRE(reader.GetCursor() == sizeof(kTestSize) + kTestSize);
 }
