@@ -16,11 +16,12 @@
 #pragma once
 #include "algorithm/index_search_parameter.h"
 #include "algorithm/inner_index_parameter.h"
+#include "datacell/flatten_interface_parameter.h"
+#include "param/schema.h"
 #include "typing.h"
 #include "utils/pointer_define.h"
 #include "vsag/constants.h"
 namespace vsag {
-DEFINE_POINTER2(FlattenDataCellParam, FlattenDataCellParameter);
 class BruteForceParameter : public InnerIndexParameter {
 public:
     explicit BruteForceParameter();
@@ -34,8 +35,8 @@ public:
     bool
     CheckCompatibility(const vsag::ParamPtr& other) const override;
 
-public:
     FlattenInterfaceParamPtr base_codes_param{nullptr};
+    VSAG_PARAM_SCHEMA_DECL();
 };
 
 DEFINE_POINTER(BruteForceParameter);
