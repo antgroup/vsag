@@ -224,7 +224,7 @@ SparseTermDataCell::DocPrune(Vector<std::pair<uint32_t, float>>& sorted_base) co
     float temp_mass = 0.0F;
     int pruned_doc_len = 0;
 
-    while (temp_mass < part_mass) {
+    while (temp_mass < part_mass && pruned_doc_len < static_cast<int>(sorted_base.size())) {
         temp_mass += sorted_base[pruned_doc_len++].second;
     }
 
