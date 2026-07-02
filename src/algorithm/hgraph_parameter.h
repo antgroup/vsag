@@ -81,6 +81,7 @@ public:
     uint32_t hops_limit{std::numeric_limits<uint32_t>::max()};
     bool use_reorder{false};
     bool use_extra_info_filter{false};
+    float min_distance{std::numeric_limits<float>::lowest()};
 
 private:
     HGraphSearchParameters() = default;

@@ -324,7 +324,8 @@ HNSW::knn_search(const DatasetPtr& query,
                                            params.skip_strategy_type,
                                            allocator,
                                            iter_filter_ctx,
-                                           is_last_filter);
+                                           is_last_filter,
+                                           params.min_distance);
         } catch (const std::runtime_error& e) {
             LOG_ERROR_AND_RETURNS(ErrorType::INTERNAL_ERROR,
                                   "failed to perofrm knn_search(internalError): ",

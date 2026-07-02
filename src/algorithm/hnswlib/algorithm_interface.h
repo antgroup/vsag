@@ -17,6 +17,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <queue>
 #include <string>
 
@@ -52,7 +53,8 @@ public:
                   vsag::FilterSearchSkipStrategyType::DETERMINISTIC_ACCUMULATIVE,
               vsag::Allocator* allocator = nullptr,
               vsag::IteratorFilterContext* iter_ctx = nullptr,
-              bool is_last_filter = false) const = 0;
+              bool is_last_filter = false,
+              float min_distance = std::numeric_limits<float>::lowest()) const = 0;
 
     virtual std::priority_queue<std::pair<dist_t, LabelType>>
     searchRange(const void* query_data,
