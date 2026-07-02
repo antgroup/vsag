@@ -356,6 +356,82 @@ TEST_CASE("RaBitQ FP32 three-bit SIMD Batch4 Compute Codes", "[ut][simd]") {
     }
 }
 
+TEST_CASE("RaBitQ FP32 three-bit centered SIMD Batch4 Compute Codes", "[ut][simd]") {
+    const std::vector<uint64_t> dims = {0, 1, 7, 8, 9, 15, 16, 17, 63, 64, 65, 960};
+
+    for (const auto dim : dims) {
+        const uint64_t plane_bytes = (dim + 7) / 8;
+        std::vector<float> query(dim);
+        float query_sum = 0.0F;
+        for (uint64_t d = 0; d < dim; ++d) {
+            query[d] = static_cast<float>(static_cast<int>(d % 29) - 14) * 0.03125F;
+            query_sum += query[d];
+        }
+
+        std::vector<uint8_t> codes(std::max<uint64_t>(1, plane_bytes * 3 * 4));
+        for (uint64_t i = 0; i < codes.size(); ++i) {
+            codes[i] = static_cast<uint8_t>(43U * i + 5U);
+        }
+
+        const auto* bits1 = codes.data();
+        const auto* bits2 = bits1 + plane_bytes * 3;
+        const auto* bits3 = bits2 + plane_bytes * 3;
+        const auto* bits4 = bits3 + plane_bytes * 3;
+
+        float unsigned_ip[4] = {0.0F, 0.0F, 0.0F, 0.0F};
+        generic::RaBitQFloatThreeBitIPBatch4(
+            query.data(), bits1, bits2, bits3, bits4, dim, 0, unsigned_ip);
+        float expected[4] = {unsigned_ip[0] - 3.5F * query_sum,
+                             unsigned_ip[1] - 3.5F * query_sum,
+                             unsigned_ip[2] - 3.5F * query_sum,
+                             unsigned_ip[3] - 3.5F * query_sum};
+
+        auto check_result = [&expected](const float* result) {
+            for (uint32_t i = 0; i < 4; ++i) {
+                REQUIRE(std::abs(expected[i] - result[i]) < 1e-4F);
+            }
+        };
+        auto check_one = [&](auto func, const uint8_t* bits, float expected_value) {
+            REQUIRE(std::abs(expected_value - func(query.data(), bits, dim)) < 1e-4F);
+        };
+
+        float result[4] = {0.0F, 0.0F, 0.0F, 0.0F};
+        generic::RaBitQFloatThreeBitCenteredIPBatch4(
+            query.data(), bits1, bits2, bits3, bits4, dim, result);
+        check_result(result);
+        check_one(generic::RaBitQFloatThreeBitCenteredIP, bits1, expected[0]);
+        check_one(generic::RaBitQFloatThreeBitCenteredIP, bits2, expected[1]);
+        check_one(generic::RaBitQFloatThreeBitCenteredIP, bits3, expected[2]);
+        check_one(generic::RaBitQFloatThreeBitCenteredIP, bits4, expected[3]);
+
+        RaBitQFloatThreeBitCenteredIPBatch4(query.data(), bits1, bits2, bits3, bits4, dim, result);
+        check_result(result);
+        check_one(RaBitQFloatThreeBitCenteredIP, bits1, expected[0]);
+        check_one(RaBitQFloatThreeBitCenteredIP, bits2, expected[1]);
+        check_one(RaBitQFloatThreeBitCenteredIP, bits3, expected[2]);
+        check_one(RaBitQFloatThreeBitCenteredIP, bits4, expected[3]);
+
+        if (SimdStatus::SupportAVX2()) {
+            avx2::RaBitQFloatThreeBitCenteredIPBatch4(
+                query.data(), bits1, bits2, bits3, bits4, dim, result);
+            check_result(result);
+            check_one(avx2::RaBitQFloatThreeBitCenteredIP, bits1, expected[0]);
+            check_one(avx2::RaBitQFloatThreeBitCenteredIP, bits2, expected[1]);
+            check_one(avx2::RaBitQFloatThreeBitCenteredIP, bits3, expected[2]);
+            check_one(avx2::RaBitQFloatThreeBitCenteredIP, bits4, expected[3]);
+        }
+        if (SimdStatus::SupportAVX512()) {
+            avx512::RaBitQFloatThreeBitCenteredIPBatch4(
+                query.data(), bits1, bits2, bits3, bits4, dim, result);
+            check_result(result);
+            check_one(avx512::RaBitQFloatThreeBitCenteredIP, bits1, expected[0]);
+            check_one(avx512::RaBitQFloatThreeBitCenteredIP, bits2, expected[1]);
+            check_one(avx512::RaBitQFloatThreeBitCenteredIP, bits3, expected[2]);
+            check_one(avx512::RaBitQFloatThreeBitCenteredIP, bits4, expected[3]);
+        }
+    }
+}
+
 TEST_CASE("RaBitQ FP32 multi-bit lookup SIMD Batch4 Compute Codes", "[ut][simd]") {
     constexpr float kLookupTolerance = 1e-3F;
     const std::vector<uint64_t> dims = {0, 1, 7, 8, 9, 15, 16, 17, 63, 64, 65, 960};

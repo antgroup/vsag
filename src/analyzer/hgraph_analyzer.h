@@ -106,6 +106,9 @@ private:
     void
     calculate_query_search_result(const std::string& search_param);
 
+    FlattenInterfacePtr
+    select_precise_codes() const;
+
     std::tuple<float, float>
     calculate_quantization_result(const Vector<float>& sample_datas,
                                   const Vector<InnerIdType>& sample_ids,

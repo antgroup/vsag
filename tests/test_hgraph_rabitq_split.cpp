@@ -139,6 +139,7 @@ TEST_CASE("HGraph RaBitQ Split Homogeneous IO", "[ft][rabitq_split][hgraph]") {
     auto index = TestIndex::TestFactory(HGraphRaBitQSplitTestIndex::name, param, true);
     auto dataset = HGraphRaBitQSplitTestIndex::pool.GetDatasetAndCreate(dim, base_count, metric);
     TestIndex::TestBuildIndex(index, dataset, true);
+    REQUIRE_NOTHROW(index->GetStats());
     // Recall is intentionally low: the split datacell at moderate dim is not
     // expected to recover ground-truth accuracy. The check primarily proves
     // that build / search complete without error on this code path.
@@ -157,6 +158,7 @@ TEST_CASE("HGraph RaBitQ Split Hybrid IO (memory + async supplement)",
     auto index = TestIndex::TestFactory(HGraphRaBitQSplitTestIndex::name, build_param, true);
     auto dataset = HGraphRaBitQSplitTestIndex::pool.GetDatasetAndCreate(dim, base_count, metric);
     TestIndex::TestBuildIndex(index, dataset, true);
+    REQUIRE_NOTHROW(index->GetStats());
     TestIndex::TestKnnSearch(index, dataset, kSplitSearchParam, 0.0F, true);
 
     // Round-trip serialize / deserialize so the supplement_io_params branch

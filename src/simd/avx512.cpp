@@ -503,6 +503,39 @@ RaBitQFloatThreeBitIPBatch4(const float* vector,
 }
 
 float
+RaBitQFloatThreeBitCenteredIP(const float* vector, const uint8_t* bits, uint64_t dim) {
+#if defined(ENABLE_AVX512)
+    return simd::RaBitQFloatThreeBitCenteredIPImpl<simd::RaBitQTraits<simd::AVX512_RaBitQ_Tag>>(
+        vector, bits, dim, &generic::RaBitQFloatThreeBitCenteredIP);
+#else
+    return avx2::RaBitQFloatThreeBitCenteredIP(vector, bits, dim);
+#endif
+}
+
+void
+RaBitQFloatThreeBitCenteredIPBatch4(const float* vector,
+                                    const uint8_t* bits1,
+                                    const uint8_t* bits2,
+                                    const uint8_t* bits3,
+                                    const uint8_t* bits4,
+                                    uint64_t dim,
+                                    float* results) {
+#if defined(ENABLE_AVX512)
+    simd::RaBitQFloatThreeBitCenteredIPBatch4Impl<simd::RaBitQTraits<simd::AVX512_RaBitQ_Tag>>(
+        vector,
+        bits1,
+        bits2,
+        bits3,
+        bits4,
+        dim,
+        results,
+        &generic::RaBitQFloatThreeBitCenteredIPBatch4);
+#else
+    avx2::RaBitQFloatThreeBitCenteredIPBatch4(vector, bits1, bits2, bits3, bits4, dim, results);
+#endif
+}
+
+float
 RaBitQFloatThreeBitIPByLookup(const float* lookup,
                               const uint8_t* bits,
                               uint64_t dim,

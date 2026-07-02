@@ -1052,20 +1052,27 @@ RaBitQuantizer<metric>::ComputeDistWithOneBitLowerBound(Computer<RaBitQuantizer>
             reinterpret_cast<const float*>(query), one_bit_code, this->dim_, inv_sqrt_d_);
     } else {
         sum_type query_raw_sum = *((sum_type*)(query + query_offset_sum_));
-        if (HasFilterQueryLookupTable()) {
+        memcpy(
+            &base_norm_code, one_bit_code + OneBitRecordNormCodeOffset(), sizeof(base_norm_code));
+        if (FilterBits() == 3) {
+            filter_ip_yu_q = RaBitQFloatThreeBitCenteredIP(
+                reinterpret_cast<const float*>(query), one_bit_code, this->dim_);
+            filter_ip_estimate = base_norm_code <= 0.0F ? 0.0F : filter_ip_yu_q / base_norm_code;
+        } else if (HasFilterQueryLookupTable()) {
             filter_ip_yu_q = RaBitQFloatMultiBitIPByLookup(
                 reinterpret_cast<const float*>(query + query_offset_filter_lut_),
                 one_bit_code,
                 this->dim_,
                 0,
                 FilterBits());
+            filter_ip_estimate =
+                ip_obar_q(filter_ip_yu_q, query_raw_sum, base_norm_code, FilterBits());
         } else {
             filter_ip_yu_q = RaBitQFloatSQIPBySplitCode(
                 reinterpret_cast<const float*>(query), one_bit_code, nullptr, FilterBits(), 0);
+            filter_ip_estimate =
+                ip_obar_q(filter_ip_yu_q, query_raw_sum, base_norm_code, FilterBits());
         }
-        memcpy(
-            &base_norm_code, one_bit_code + OneBitRecordNormCodeOffset(), sizeof(base_norm_code));
-        filter_ip_estimate = ip_obar_q(filter_ip_yu_q, query_raw_sum, base_norm_code, FilterBits());
     }
     float ip_est = filter_ip_estimate / one_bit_error;
 
@@ -1197,6 +1204,7 @@ RaBitQuantizer<metric>::ComputeDistsWithOneBitLowerBoundBatch4(
     }
 
     float filter_ip_values[4] = {0.0F, 0.0F, 0.0F, 0.0F};
+    bool filter_ip_values_are_centered = false;
     if (FilterBits() == 1) {
         RaBitQFloatBinaryIPBatch4(query_data,
                                   one_bit_code1,
@@ -1206,6 +1214,15 @@ RaBitQuantizer<metric>::ComputeDistsWithOneBitLowerBoundBatch4(
                                   this->dim_,
                                   inv_sqrt_d_,
                                   filter_ip_values);
+    } else if (FilterBits() == 3) {
+        RaBitQFloatThreeBitCenteredIPBatch4(query_data,
+                                            one_bit_code1,
+                                            one_bit_code2,
+                                            one_bit_code3,
+                                            one_bit_code4,
+                                            this->dim_,
+                                            filter_ip_values);
+        filter_ip_values_are_centered = true;
     } else {
         RaBitQFloatMultiBitIPBatch4ByLookup(
             reinterpret_cast<const float*>(query + query_offset_filter_lut_),
@@ -1219,65 +1236,67 @@ RaBitQuantizer<metric>::ComputeDistsWithOneBitLowerBoundBatch4(
             filter_ip_values);
     }
 
-    auto compute_one = [&](const uint8_t* one_bit_code,
-                           float filter_ip,
-                           float& dist,
-                           float* lower_bound) {
-        if (lower_bound != nullptr) {
-            *lower_bound = std::numeric_limits<float>::max();
-        }
+    auto compute_one =
+        [&](const uint8_t* one_bit_code, float filter_ip, float& dist, float* lower_bound) {
+            if (lower_bound != nullptr) {
+                *lower_bound = std::numeric_limits<float>::max();
+            }
 
-        const error_type one_bit_error =
-            std::fabs(*((error_type*)(one_bit_code + OneBitRecordOneBitErrorOffset())));
-        if (one_bit_error <= 1e-5F) {
-            return false;
-        }
+            const error_type one_bit_error =
+                std::fabs(*((error_type*)(one_bit_code + OneBitRecordOneBitErrorOffset())));
+            if (one_bit_error <= 1e-5F) {
+                return false;
+            }
 
-        float filter_ip_yu_q = filter_ip;
-        float filter_ip_estimate = filter_ip;
-        norm_type base_norm_code = 0.0F;
-        if (FilterBits() > 1) {
-            const sum_type query_raw_sum = *((sum_type*)(query + query_offset_sum_));
-            memcpy(&base_norm_code,
-                   one_bit_code + OneBitRecordNormCodeOffset(),
-                   sizeof(base_norm_code));
-            filter_ip_estimate = ip_obar_q(filter_ip, query_raw_sum, base_norm_code, FilterBits());
-        }
+            float filter_ip_yu_q = filter_ip;
+            float filter_ip_estimate = filter_ip;
+            norm_type base_norm_code = 0.0F;
+            if (FilterBits() > 1) {
+                const sum_type query_raw_sum = *((sum_type*)(query + query_offset_sum_));
+                memcpy(&base_norm_code,
+                       one_bit_code + OneBitRecordNormCodeOffset(),
+                       sizeof(base_norm_code));
+                filter_ip_estimate =
+                    filter_ip_values_are_centered
+                        ? (base_norm_code <= 0.0F ? 0.0F : filter_ip / base_norm_code)
+                        : ip_obar_q(filter_ip, query_raw_sum, base_norm_code, FilterBits());
+            }
 
-        const float ip_est = filter_ip_estimate / one_bit_error;
-        const norm_type base_norm = *((norm_type*)(one_bit_code + OneBitRecordNormOffset()));
-        float result = l2_ube(base_norm, query_norm, ip_est);
+            const float ip_est = filter_ip_estimate / one_bit_error;
+            const norm_type base_norm = *((norm_type*)(one_bit_code + OneBitRecordNormOffset()));
+            float result = l2_ube(base_norm, query_norm, ip_est);
 
-        if (pca_dim_ != this->original_dim_ and use_mrq_) {
-            const norm_type base_mrq_norm_sqr =
-                *(norm_type*)(one_bit_code + OneBitRecordMrqNormOffset());
-            result += (query_mrq_norm_sqr + base_mrq_norm_sqr);
-        }
+            if (pca_dim_ != this->original_dim_ and use_mrq_) {
+                const norm_type base_mrq_norm_sqr =
+                    *(norm_type*)(one_bit_code + OneBitRecordMrqNormOffset());
+                result += (query_mrq_norm_sqr + base_mrq_norm_sqr);
+            }
 
-        if (not std::isfinite(result)) {
-            return false;
-        }
+            if (not std::isfinite(result)) {
+                return false;
+            }
 
-        dist = result;
-        if (lower_bound == nullptr) {
+            dist = result;
+            if (lower_bound == nullptr) {
+                return true;
+            }
+
+            const error_type low_bound_error =
+                *((error_type*)(one_bit_code + OneBitRecordLowBoundErrorOffset()));
+            const float effective_error_rate =
+                std::isfinite(runtime_rabitq_error_rate) and runtime_rabitq_error_rate > 0.0F
+                    ? runtime_rabitq_error_rate
+                    : rabitq_error_rate_;
+            const float lower_bound_error_term = 2.0F * base_norm * query_norm *
+                                                 effective_error_rate * low_bound_error /
+                                                 one_bit_error;
+            const float lower_bound_result = result - lower_bound_error_term;
+            if (std::isfinite(lower_bound_result)) {
+                *lower_bound =
+                    lower_bound_result - 1e-5F * std::max(1.0F, std::fabs(lower_bound_result));
+            }
             return true;
-        }
-
-        const error_type low_bound_error =
-            *((error_type*)(one_bit_code + OneBitRecordLowBoundErrorOffset()));
-        const float effective_error_rate =
-            std::isfinite(runtime_rabitq_error_rate) and runtime_rabitq_error_rate > 0.0F
-                ? runtime_rabitq_error_rate
-                : rabitq_error_rate_;
-        const float lower_bound_error_term =
-            2.0F * base_norm * query_norm * effective_error_rate * low_bound_error / one_bit_error;
-        const float lower_bound_result = result - lower_bound_error_term;
-        if (std::isfinite(lower_bound_result)) {
-            *lower_bound =
-                lower_bound_result - 1e-5F * std::max(1.0F, std::fabs(lower_bound_result));
-        }
-        return true;
-    };
+        };
 
     computed1 = compute_one(one_bit_code1, filter_ip_values[0], dist1, lower_bound1);
     computed2 = compute_one(one_bit_code2, filter_ip_values[1], dist2, lower_bound2);
