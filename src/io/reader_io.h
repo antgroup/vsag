@@ -64,7 +64,7 @@ public:
     /**
      * @brief Default destructor.
      */
-    ~ReaderIO() override = default;
+    ~ReaderIO() = default;
 
     /**
      * @brief Writes data to the IO object (no-op for read-only IO).

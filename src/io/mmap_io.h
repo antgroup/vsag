@@ -66,7 +66,7 @@ public:
     /**
      * @brief Destructor that unmaps memory and closes file; optionally removes file.
      */
-    ~MMapIO() override;
+    ~MMapIO();
 
     /**
      * @brief Writes data to the mapped memory at a specified offset.
