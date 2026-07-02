@@ -74,6 +74,9 @@ GraphInterface::MakeInstance(const GraphInterfaceParamPtr& graph_param,
             if (io_string == IO_TYPE_VALUE_ASYNC_IO) {
                 return std::make_shared<GraphDataCell<AsyncIO>>(graph_param, common_param);
             }
+            if (io_string == IO_TYPE_VALUE_URING_IO) {
+                return std::make_shared<GraphDataCell<UringIO>>(graph_param, common_param);
+            }
             if (io_string == IO_TYPE_VALUE_READER_IO) {
                 return std::make_shared<GraphDataCell<ReaderIO>>(graph_param, common_param);
             }

@@ -106,6 +106,9 @@ BucketInterface::MakeInstance(const BucketDataCellParamPtr& param,
     if (io_type_name == IO_TYPE_VALUE_ASYNC_IO) {
         return make_instance<NonContinuousIO<AsyncIO>>(param, common_param);
     }
+    if (io_type_name == IO_TYPE_VALUE_URING_IO) {
+        return make_instance<NonContinuousIO<UringIO>>(param, common_param);
+    }
     if (io_type_name == IO_TYPE_VALUE_BUFFER_IO) {
         return make_instance<NonContinuousIO<BufferIO>>(param, common_param);
     }
