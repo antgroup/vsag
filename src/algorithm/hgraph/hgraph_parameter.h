@@ -68,6 +68,16 @@ public:
 
     bool persist_source_id{false};
 
+    bool use_mci{false};
+    uint64_t mci_mcs{200};
+    uint64_t mci_clique_max{50};
+    float mci_alpha{1.2F};
+    float mci_hgraph_valid_ratio_threshold{1.0F};
+    std::string mci_knng_path{};
+    float mci_incremental_join_ratio_threshold{0.6F};
+    uint64_t mci_incremental_added_mct{3};
+    uint64_t mci_incremental_clique_max{50};
+
     DataTypes data_type{DataTypes::DATA_TYPE_FLOAT};
 
     std::string name;
@@ -84,6 +94,10 @@ public:
     bool use_reorder{false};
     bool use_extra_info_filter{false};
     bool rabitq_one_bit_search{false};
+    bool use_mci{true};
+    uint64_t mci_seed_count{32};
+    float mci_seed_ratio{0.0F};
+    float mci_hgraph_valid_ratio_threshold{-1.0F};
     // If > 0 and the active filter's ValidRatio() <= brute_force_threshold,
     // the search bypasses the graph traversal and runs an exact scan over the
     // valid inner ids using the best available flatten codes. Default 0

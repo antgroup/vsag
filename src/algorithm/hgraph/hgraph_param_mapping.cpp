@@ -458,6 +458,12 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             {
                 LABEL_REMAP_TYPE_KEY,
             },
+        },
+        {
+            "mci",
+            {
+                "mci",
+            },
         }};
     const std::string hgraph_params_template =
         R"(
@@ -555,6 +561,9 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
     auto inner_json = JsonType::Parse(str);
     mapping_external_param_to_inner(hgraph_json, external_mapping, inner_json);
     map_rabitq_split_param(hgraph_json, inner_json);
+    if (hgraph_json.Contains("mci")) {
+        inner_json["mci"].SetJson(hgraph_json["mci"]);
+    }
 
     return inner_json;
 }

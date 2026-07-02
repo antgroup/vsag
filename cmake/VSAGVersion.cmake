@@ -36,7 +36,8 @@ find_package (Git)
 if (NOT DEFINED VSAG_VERSION OR VSAG_VERSION STREQUAL "")
     if (GIT_EXECUTABLE)
         execute_process (
-            COMMAND ${GIT_EXECUTABLE} describe --tags --always --dirty --match "v*"
+            COMMAND ${GIT_EXECUTABLE} -c safe.directory=${PROJECT_SOURCE_DIR}
+                    describe --tags --always --dirty --match "v*"
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
             OUTPUT_VARIABLE _vsag_git_describe
             RESULT_VARIABLE _vsag_git_describe_rc
@@ -83,5 +84,6 @@ add_custom_target (version
     -D SRC=${PROJECT_SOURCE_DIR}/src/version.h.in
     -D DST=${PROJECT_SOURCE_DIR}/src/version.h
     -D GIT_EXECUTABLE=${GIT_EXECUTABLE}
+    -D GIT_SAFE_DIRECTORY=${PROJECT_SOURCE_DIR}
     -D VSAG_VERSION=${VSAG_VERSION}
     -P ${PROJECT_SOURCE_DIR}/cmake/GenerateVersionHeader.cmake)

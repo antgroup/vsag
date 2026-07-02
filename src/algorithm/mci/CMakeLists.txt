@@ -1,4 +1,3 @@
-
 # Copyright 2024-present the vsag project
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,16 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-
-set (SEARCHER_SRC
-    basic_searcher.cpp
-    basic_searcher.h
-    mci_search_common.h
-    mci_searcher.cpp
-    mci_searcher.h
-    parallel_searcher.cpp
-    parallel_searcher.h
+set (MCI_SRCS
+    mci_v3_builder.cpp
+    mci_v3_graph_mce.cpp
+    mci_v3_mce.cpp
 )
 
-add_library (searcher OBJECT ${SEARCHER_SRC})
-target_link_libraries (searcher PRIVATE coverage_config vsag_src_common)
+add_library (mci OBJECT ${MCI_SRCS})
+target_link_libraries (mci PRIVATE coverage_config vsag_src_common)
