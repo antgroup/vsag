@@ -84,7 +84,7 @@ MMapIO::MMapIO(std::string filename, Allocator* allocator)
                         saved_errno,
                         std::error_code(saved_errno, std::system_category()).message()));
     }
-    this->start_ = static_cast<uint8_t*>(addr);
+    this->mapped_ptr_ = static_cast<uint8_t*>(addr);
 }
 
 MMapIO::MMapIO(const MMapIOParamPtr& io_param, const IndexCommonParam& common_param)
@@ -95,7 +95,9 @@ MMapIO::MMapIO(const IOParamPtr& param, const IndexCommonParam& common_param)
 
 MMapIO::~MMapIO() {
     auto munmap_size = std::max(this->size_, static_cast<uint64_t>(DEFAULT_INIT_MMAP_SIZE));
-    munmap(this->start_, munmap_size);
+    if (this->mapped_ptr_ != nullptr) {
+        (void)munmap(this->mapped_ptr_, munmap_size);
+    }
     close(this->fd_);
     // remove file
     if (not this->exist_file_) {
@@ -117,22 +119,23 @@ MMapIO::WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset) {
         }
 
 #ifdef __APPLE__
-        munmap(this->start_, old_size);
+        munmap(this->mapped_ptr_, old_size);
+        this->mapped_ptr_ = nullptr;
         void* addr = mmap(nullptr, new_size, PROT_READ | PROT_WRITE, MAP_SHARED, this->fd_, 0);
         if (addr == MAP_FAILED) {
             throw VsagException(ErrorType::INTERNAL_ERROR, "mmap remap failed");
         }
-        this->start_ = static_cast<uint8_t*>(addr);
+        this->mapped_ptr_ = static_cast<uint8_t*>(addr);
 #else
-        void* new_addr = mremap(this->start_, old_size, new_size, MREMAP_MAYMOVE);
+        void* new_addr = mremap(this->mapped_ptr_, old_size, new_size, MREMAP_MAYMOVE);
         if (new_addr == MAP_FAILED) {
             throw_mremap_error(old_size, new_size);
         }
-        this->start_ = static_cast<uint8_t*>(new_addr);
+        this->mapped_ptr_ = static_cast<uint8_t*>(new_addr);
 #endif
     }
     this->size_ = std::max(this->size_, new_size);
-    memcpy(this->start_ + offset, data, size);
+    memcpy(this->mapped_ptr_ + offset, data, size);
 }
 
 void
@@ -149,33 +152,35 @@ MMapIO::ResizeImpl(uint64_t size) {
         }
 
 #ifdef __APPLE__
-        munmap(this->start_, old_size);
+        munmap(this->mapped_ptr_, old_size);
+        this->mapped_ptr_ = nullptr;
         void* addr = mmap(nullptr, new_size, PROT_READ | PROT_WRITE, MAP_SHARED, this->fd_, 0);
         if (addr == MAP_FAILED) {
             throw VsagException(ErrorType::INTERNAL_ERROR, "mmap remap failed");
         }
-        this->start_ = static_cast<uint8_t*>(addr);
+        this->mapped_ptr_ = static_cast<uint8_t*>(addr);
 #else
-        void* new_addr = mremap(this->start_, old_size, new_size, MREMAP_MAYMOVE);
+        void* new_addr = mremap(this->mapped_ptr_, old_size, new_size, MREMAP_MAYMOVE);
         if (new_addr == MAP_FAILED) {
             throw_mremap_error(old_size, new_size);
         }
-        this->start_ = static_cast<uint8_t*>(new_addr);
+        this->mapped_ptr_ = static_cast<uint8_t*>(new_addr);
 #endif
     } else if (new_size < old_size) {
 #ifdef __APPLE__
-        munmap(this->start_, old_size);
+        munmap(this->mapped_ptr_, old_size);
+        this->mapped_ptr_ = nullptr;
         void* addr = mmap(nullptr, new_size, PROT_READ | PROT_WRITE, MAP_SHARED, this->fd_, 0);
         if (addr == MAP_FAILED) {
             throw VsagException(ErrorType::INTERNAL_ERROR, "mmap remap failed");
         }
-        this->start_ = static_cast<uint8_t*>(addr);
+        this->mapped_ptr_ = static_cast<uint8_t*>(addr);
 #else
-        void* new_addr = mremap(this->start_, old_size, new_size, MREMAP_MAYMOVE);
+        void* new_addr = mremap(this->mapped_ptr_, old_size, new_size, MREMAP_MAYMOVE);
         if (new_addr == MAP_FAILED) {
             throw_mremap_error(old_size, new_size);
         }
-        this->start_ = static_cast<uint8_t*>(new_addr);
+        this->mapped_ptr_ = static_cast<uint8_t*>(new_addr);
 #endif
         auto ret = IOSyscall::FTruncate(this->fd_, new_size);
         if (ret == -1) {
@@ -192,7 +197,7 @@ MMapIO::ReadImpl(uint64_t size, uint64_t offset, uint8_t* data) const {
             ErrorType::INTERNAL_ERROR,
             fmt::format("read offset {} + size {} > size {}", offset, size, this->size_));
     }
-    memcpy(data, this->start_ + offset, size);
+    memcpy(data, this->mapped_ptr_ + offset, size);
     return true;
 }
 
@@ -202,7 +207,7 @@ MMapIO::DirectReadImpl(uint64_t size, uint64_t offset, bool& need_release) const
         return nullptr;
     }
     need_release = false;
-    return reinterpret_cast<const uint8_t*>(this->start_ + offset);
+    return this->mapped_ptr_ + offset;
 }
 
 bool
