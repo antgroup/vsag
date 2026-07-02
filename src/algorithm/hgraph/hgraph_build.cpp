@@ -61,6 +61,27 @@ make_temporary_sq8_flatten(MetricType metric,
     return FlattenInterface::MakeInstance(sq8_param, common_param);
 }
 
+static FlattenInterfacePtr
+make_temporary_flatten_like(const FlattenInterfaceParamPtr& source_param,
+                            MetricType metric,
+                            DataTypes data_type,
+                            int64_t dim,
+                            int64_t extra_info_size,
+                            const std::shared_ptr<SafeThreadPool>& thread_pool,
+                            Allocator* allocator) {
+    auto temporary_param_json = source_param->ToJson();
+    auto temporary_param = CreateFlattenParam(temporary_param_json);
+
+    IndexCommonParam common_param;
+    common_param.metric_ = metric;
+    common_param.data_type_ = data_type;
+    common_param.dim_ = dim;
+    common_param.extra_info_size_ = extra_info_size;
+    common_param.thread_pool_ = thread_pool;
+    common_param.allocator_ = std::shared_ptr<Allocator>(allocator, [](Allocator*) {});
+    return FlattenInterface::MakeInstance(temporary_param, common_param);
+}
+
 static bool
 need_temporary_sq8_build_data(const FlattenInterfacePtr& basic_flatten_codes,
                               bool has_precise_reorder) {
@@ -70,11 +91,18 @@ need_temporary_sq8_build_data(const FlattenInterfacePtr& basic_flatten_codes,
 
 void
 HGraph::Train(const DatasetPtr& base) {
+    this->train_codes_with_dataset(this->sample_train_dataset(base));
+}
+
+DatasetPtr
+HGraph::sample_train_dataset(const DatasetPtr& base) const {
     int64_t total_elements = base->GetNumElements();
     int64_t dim = base->GetDim();
-    DatasetPtr train_data =
-        vsag::sample_train_data(base, total_elements, dim, train_sample_count_, allocator_);
+    return vsag::sample_train_data(base, total_elements, dim, train_sample_count_, allocator_);
+}
 
+void
+HGraph::train_codes_with_dataset(const DatasetPtr& train_data) {
     const auto* data_ptr = get_data(train_data);
     this->basic_flatten_codes_->Train(data_ptr, train_data->GetNumElements());
     if (has_precise_reorder()) {
@@ -106,7 +134,6 @@ HGraph::Build(const DatasetPtr& data) {
         }
         return ret;
     }
-    this->Train(data);
     std::vector<int64_t> ret;
     if (graph_type_ == GRAPH_TYPE_VALUE_NSW) {
         ret = this->Add(data);
@@ -253,9 +280,20 @@ HGraph::Add(const DatasetPtr& data) {
             "adding to a non-empty HGraph that needs temporary SQ8 build data requires raw "
             "vectors");
     }
+
+    DatasetPtr train_data = nullptr;
+    {
+        std::scoped_lock lock(this->add_mutex_);
+        if (this->total_count_ == 0) {
+            train_data = this->sample_train_dataset(data);
+            this->train_codes_with_dataset(train_data);
+        }
+    }
+    bool first_empty_add = train_data != nullptr;
+
     auto graph_read_codes = this->basic_flatten_codes_;
     FlattenInterfacePtr temporary_graph_read_codes = nullptr;
-    if (need_sq8_build_data and this->total_count_ == 0 and raw_vector_ == nullptr) {
+    if (need_sq8_build_data and first_empty_add and raw_vector_ == nullptr) {
         temporary_graph_read_codes =
             make_temporary_sq8_flatten(this->metric_,
                                        this->data_type_,
@@ -269,13 +307,21 @@ HGraph::Add(const DatasetPtr& data) {
         graph_read_codes = raw_vector_;
     } else if (has_precise_reorder() and not build_by_base_) {
         graph_read_codes = high_precise_codes_;
-    }
-
-    {
-        std::scoped_lock lock(this->add_mutex_);
-        if (this->total_count_ == 0) {
-            this->Train(data);
-        }
+    } else if (this->support_duplicate_ && this->deduplicate_storage_ && first_empty_add) {
+        auto hgraph_param = std::dynamic_pointer_cast<HGraphParameter>(this->create_param_ptr_);
+        CHECK_ARGUMENT(hgraph_param != nullptr, "HGraphParameter is required for temporary codes");
+        // Keep the first dedup build's graph reads logical-id indexed; persistent writes stay
+        // slot-indexed through the code-slot map.
+        temporary_graph_read_codes =
+            make_temporary_flatten_like(hgraph_param->base_codes_param,
+                                        this->metric_,
+                                        this->data_type_,
+                                        this->dim_,
+                                        static_cast<int64_t>(this->extra_info_size_),
+                                        this->thread_pool_,
+                                        this->allocator_);
+        temporary_graph_read_codes->Train(get_data(train_data), train_data->GetNumElements());
+        graph_read_codes = temporary_graph_read_codes;
     }
 
     auto add_func = [&](const void* data,
@@ -409,6 +455,11 @@ HGraph::add_one_point(const void* data,
                       int level,
                       InnerIdType inner_id,
                       const FlattenInterfacePtr& graph_read_codes) {
+    bool use_dedup_storage = this->support_duplicate_ && this->deduplicate_storage_;
+    if (not use_dedup_storage) {
+        this->insert_persistent_codes(data, inner_id);
+    }
+
     auto make_search_param = [&]() {
         InnerSearchParam param;
         param.topk = 1;
@@ -424,11 +475,9 @@ HGraph::add_one_point(const void* data,
         auto probe = this->probe_graph_for_add(data, level, inner_id, param, graph_read_codes);
         if (probe.duplicate_id >= 0) {
             // Stage 2a: prepare duplicate storage before publishing the duplicate id.
-            if (this->support_duplicate_ && this->deduplicate_storage_) {
+            if (use_dedup_storage) {
                 this->publish_duplicate_storage_for_add(
                     static_cast<InnerIdType>(probe.duplicate_id), inner_id);
-            } else {
-                this->insert_persistent_codes_unlocked(data, inner_id);
             }
             // Stage 3a: publish the logical duplicate after its storage mapping is ready.
             this->publish_duplicate_for_add(static_cast<InnerIdType>(probe.duplicate_id), inner_id);
@@ -436,13 +485,11 @@ HGraph::add_one_point(const void* data,
         }
 
         // Stage 2b: prepare unique storage before making the node visible in the graph.
-        if (this->support_duplicate_ && this->deduplicate_storage_) {
+        if (use_dedup_storage) {
             auto code_slot_id = this->code_slot_map_->AllocateSlot();
             this->ensure_physical_code_capacity_unlocked(code_slot_id + 1);
             this->insert_persistent_codes_to_slot(data, code_slot_id);
             this->code_slot_map_->PublishSlot(inner_id, code_slot_id);
-        } else {
-            this->insert_unique_storage_for_add(data, inner_id);
         }
 
         // Stage 3b: publish the unique node to the graph after codes are readable.
@@ -475,11 +522,9 @@ HGraph::add_one_point(const void* data,
     auto probe = this->probe_graph_for_add(data, level, inner_id, param, graph_read_codes);
     if (probe.duplicate_id >= 0) {
         // Stage 2a: prepare duplicate storage before publishing the duplicate id.
-        if (this->support_duplicate_ && this->deduplicate_storage_) {
+        if (use_dedup_storage) {
             this->publish_duplicate_storage_for_add(static_cast<InnerIdType>(probe.duplicate_id),
                                                     inner_id);
-        } else {
-            this->insert_persistent_codes_unlocked(data, inner_id);
         }
         // Stage 3a: publish the logical duplicate after its storage mapping is ready.
         this->publish_duplicate_for_add(static_cast<InnerIdType>(probe.duplicate_id), inner_id);
@@ -487,7 +532,7 @@ HGraph::add_one_point(const void* data,
     }
 
     // Stage 2b: prepare unique storage before making the node visible in the graph.
-    if (this->support_duplicate_ && this->deduplicate_storage_) {
+    if (use_dedup_storage) {
         auto code_slot_id = this->code_slot_map_->AllocateSlot();
         if (this->physical_code_capacity_.load(std::memory_order_acquire) < code_slot_id + 1) {
             rlock.unlock();
@@ -496,8 +541,6 @@ HGraph::add_one_point(const void* data,
         }
         this->insert_persistent_codes_to_slot(data, code_slot_id);
         this->code_slot_map_->PublishSlot(inner_id, code_slot_id);
-    } else {
-        this->insert_unique_storage_for_add(data, inner_id);
     }
 
     // Stage 3b: publish the unique node to the graph after codes are readable.
@@ -617,18 +660,6 @@ HGraph::publish_duplicate_storage_for_add(InnerIdType duplicate_id, InnerIdType 
         auto code_slot_id = this->code_slot_map_->Resolve(duplicate_id);
         this->code_slot_map_->PublishSlot(inner_id, code_slot_id);
     }
-}
-
-void
-HGraph::insert_unique_storage_for_add(const void* data, InnerIdType inner_id) {
-    if (this->support_duplicate_ && this->deduplicate_storage_) {
-        auto code_slot_id = this->code_slot_map_->AllocateSlot();
-        this->ensure_physical_code_capacity(code_slot_id + 1);
-        this->insert_persistent_codes_to_slot(data, code_slot_id);
-        this->code_slot_map_->PublishSlot(inner_id, code_slot_id);
-        return;
-    }
-    this->insert_persistent_codes_unlocked(data, inner_id);
 }
 
 void

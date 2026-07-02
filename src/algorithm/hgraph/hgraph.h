@@ -80,6 +80,9 @@ struct HGraphCodeSlotMap {
     [[nodiscard]] InnerIdType
     PhysicalCount() const;
 
+    [[nodiscard]] bool
+    HasRedirect() const;
+
     void
     Clear();
 
@@ -104,6 +107,7 @@ private:
     InnerIdType logical_size_{0};
     InnerIdType logical_capacity_{0};
     std::atomic<InnerIdType> physical_count_{0};
+    std::atomic<bool> has_redirect_{false};
     mutable std::shared_mutex mutex_;
 };
 
@@ -430,6 +434,12 @@ public:
                      DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
 
 private:
+    DatasetPtr
+    sample_train_dataset(const DatasetPtr& base) const;
+
+    void
+    train_codes_with_dataset(const DatasetPtr& train_data);
+
     struct GraphAddProbeResult {
         DistHeapPtr neighbors{nullptr};
         int64_t duplicate_id{-1};
@@ -444,9 +454,6 @@ private:
 
     void
     publish_duplicate_storage_for_add(InnerIdType duplicate_id, InnerIdType inner_id);
-
-    void
-    insert_unique_storage_for_add(const void* data, InnerIdType inner_id);
 
     void
     publish_duplicate_for_add(InnerIdType group_id, InnerIdType duplicate_id);

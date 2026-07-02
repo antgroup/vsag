@@ -74,6 +74,10 @@ public:
           const InnerIdType* idx,
           InnerIdType id_count,
           QueryContext* ctx = nullptr) override {
+        if (this->uses_identity_mapping(idx, id_count)) {
+            base_->Query(result_dists, computer, idx, id_count, ctx);
+            return;
+        }
         this->with_mapped_ids(idx, id_count, ctx, [&](const InnerIdType* mapped_ids) {
             base_->Query(result_dists, computer, mapped_ids, id_count, ctx);
         });
@@ -86,6 +90,10 @@ public:
                             InnerIdType id_count,
                             float threshold,
                             QueryContext* ctx = nullptr) override {
+        if (this->uses_identity_mapping(idx, id_count)) {
+            base_->QueryWithDistanceFilter(result_dists, computer, idx, id_count, threshold, ctx);
+            return;
+        }
         this->with_mapped_ids(idx, id_count, ctx, [&](const InnerIdType* mapped_ids) {
             base_->QueryWithDistanceFilter(
                 result_dists, computer, mapped_ids, id_count, threshold, ctx);
@@ -99,6 +107,11 @@ public:
                                 const InnerIdType* idx,
                                 InnerIdType id_count,
                                 QueryContext* ctx = nullptr) override {
+        if (this->uses_identity_mapping(idx, id_count)) {
+            base_->QueryWithDistanceLowerBound(
+                result_dists, lower_bounds, computer, idx, id_count, ctx);
+            return;
+        }
         this->with_mapped_ids(idx, id_count, ctx, [&](const InnerIdType* mapped_ids) {
             base_->QueryWithDistanceLowerBound(
                 result_dists, lower_bounds, computer, mapped_ids, id_count, ctx);
@@ -146,6 +159,9 @@ public:
 
     float
     ComputePairVectors(InnerIdType id1, InnerIdType id2) override {
+        if (this->uses_identity_mapping(id1) and this->uses_identity_mapping(id2)) {
+            return base_->ComputePairVectors(id1, id2);
+        }
         InnerIdType code_slot_id1 = 0;
         InnerIdType code_slot_id2 = 0;
         mapping_->ResolvePair(id1, id2, code_slot_id1, code_slot_id2);
@@ -154,6 +170,10 @@ public:
 
     void
     Prefetch(InnerIdType id) override {
+        if (this->uses_identity_mapping(id)) {
+            base_->Prefetch(id);
+            return;
+        }
         base_->Prefetch(mapping_->Resolve(id));
     }
 
@@ -214,6 +234,9 @@ public:
 
     const uint8_t*
     GetCodesById(InnerIdType id, bool& need_release) const override {
+        if (this->uses_identity_mapping(id)) {
+            return base_->GetCodesById(id, need_release);
+        }
         return base_->GetCodesById(mapping_->Resolve(id), need_release);
     }
 
@@ -224,6 +247,9 @@ public:
 
     bool
     GetCodesById(InnerIdType id, uint8_t* codes) const override {
+        if (this->uses_identity_mapping(id)) {
+            return base_->GetCodesById(id, codes);
+        }
         return base_->GetCodesById(mapping_->Resolve(id), codes);
     }
 
@@ -310,6 +336,25 @@ private:
         query_func(mapped_ids.data());
     }
 
+    bool
+    uses_identity_mapping(InnerIdType id) const {
+        return not mapping_->HasRedirect() && id < base_->TotalCount();
+    }
+
+    bool
+    uses_identity_mapping(const InnerIdType* idx, InnerIdType id_count) const {
+        if (mapping_->HasRedirect()) {
+            return false;
+        }
+        auto physical_count = base_->TotalCount();
+        for (InnerIdType i = 0; i < id_count; ++i) {
+            if (idx[i] >= physical_count) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     FlattenInterfacePtr base_{nullptr};
     std::shared_ptr<const HGraphCodeSlotMap> mapping_{nullptr};
     Allocator* allocator_{nullptr};
@@ -373,6 +418,9 @@ HGraphCodeSlotMap::PublishSlot(InnerIdType inner_id, InnerIdType code_slot_id) {
         inner_to_slot_[inner_id].compare_exchange_strong(
             expected, code_slot_id, std::memory_order_release, std::memory_order_acquire),
         fmt::format("inner_id({}) is already bound", inner_id));
+    if (inner_id != code_slot_id) {
+        has_redirect_.store(true, std::memory_order_release);
+    }
 }
 
 InnerIdType
@@ -444,12 +492,18 @@ HGraphCodeSlotMap::PhysicalCount() const {
     return physical_count_.load(std::memory_order_acquire);
 }
 
+bool
+HGraphCodeSlotMap::HasRedirect() const {
+    return has_redirect_.load(std::memory_order_acquire);
+}
+
 void
 HGraphCodeSlotMap::Clear() {
     std::unique_lock lock(mutex_);
     this->ReleaseSlots();
     logical_size_ = 0;
     physical_count_.store(0, std::memory_order_release);
+    has_redirect_.store(false, std::memory_order_release);
 }
 
 void
@@ -474,6 +528,7 @@ HGraphCodeSlotMap::Deserialize(StreamReader& reader) {
     StreamReader::ReadVector(reader, slots);
     this->ReleaseSlots();
     logical_size_ = 0;
+    bool has_redirect = false;
     this->EnsureLogicalSize(static_cast<InnerIdType>(slots.size()));
     for (InnerIdType inner_id = 0; inner_id < slots.size(); ++inner_id) {
         auto slot = slots[inner_id];
@@ -485,8 +540,10 @@ HGraphCodeSlotMap::Deserialize(StreamReader& reader) {
                             physical_count));
         }
         inner_to_slot_[inner_id].store(slot, std::memory_order_release);
+        has_redirect = has_redirect || (slot != INVALID_CODE_SLOT && slot != inner_id);
     }
     physical_count_.store(physical_count, std::memory_order_release);
+    has_redirect_.store(has_redirect, std::memory_order_release);
 }
 
 int64_t
