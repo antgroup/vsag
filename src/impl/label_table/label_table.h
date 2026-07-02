@@ -182,6 +182,11 @@ public:
         StreamWriter::WriteVector(writer, label_table_);
     }
 
+    uint64_t
+    CalcSerializeSize() const {
+        return sizeof(uint64_t) + label_table_.size() * sizeof(LabelType);
+    }
+
     void
     Deserialize(lvalue_or_rvalue<StreamReader> reader) {
         StreamReader::ReadVector(reader, label_table_);
