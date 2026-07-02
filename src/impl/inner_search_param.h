@@ -41,7 +41,7 @@ public:
     InnerIdType ep{0};
     uint64_t ef{10};
     FilterPtr is_inner_id_allowed{nullptr};
-    float skip_ratio{0.8F};
+    float skip_ratio{0.2F};
     FilterSearchSkipStrategyType skip_strategy_type{
         FilterSearchSkipStrategyType::DETERMINISTIC_ACCUMULATIVE};
     InnerSearchMode search_mode{KNN_SEARCH};

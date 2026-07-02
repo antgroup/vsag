@@ -27,13 +27,8 @@ constexpr const char* RANDOM_SKIP_STRATEGY = "random";
 constexpr const char* DETERMINISTIC_ACCUMULATIVE_SKIP_STRATEGY = "deterministic_accumulative";
 
 double
-get_skip_check_probability(float valid_ratio, float skip_ratio) {
-    if (valid_ratio == 1.0F) {
-        return 1.0;
-    }
-    auto skip_check_probability =
-        static_cast<double>(1.0F - valid_ratio) * static_cast<double>(skip_ratio);
-    return std::clamp(skip_check_probability, 0.0, 1.0);
+get_retain_ratio(float valid_ratio, float skip_ratio) {
+    return static_cast<double>(1.0F - valid_ratio) * static_cast<double>(1.0F - skip_ratio);
 }
 
 class RandomFilterSearchSkipStrategy : public FilterSearchSkipStrategy {
@@ -85,7 +80,7 @@ FilterSearchSkipStrategyPtr
 create_filter_search_skip_strategy(FilterSearchSkipStrategyType type,
                                    float valid_ratio,
                                    float skip_ratio) {
-    auto retain_ratio = get_skip_check_probability(valid_ratio, skip_ratio);
+    auto retain_ratio = get_retain_ratio(valid_ratio, skip_ratio);
     switch (type) {
         case FilterSearchSkipStrategyType::RANDOM:
             return std::make_unique<RandomFilterSearchSkipStrategy>(retain_ratio);
