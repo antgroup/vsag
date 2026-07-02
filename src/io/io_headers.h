@@ -23,3 +23,4 @@
 #include "mmap_io.h"
 #include "noncontinuous_io.h"
 #include "reader_io.h"
+#include "uring_io.h"
