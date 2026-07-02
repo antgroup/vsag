@@ -24,6 +24,7 @@
 #include "../inner_index_interface.h"
 #include "common.h"
 #include "datacell/attribute_inverted_interface.h"
+#include "datacell/clique_datacell.h"
 #include "datacell/flatten_interface.h"
 #include "datacell/graph_interface.h"
 #include "datacell/sparse_graph_datacell_parameter.h"
@@ -33,6 +34,7 @@
 #include "impl/heap/distance_heap.h"
 #include "impl/reorder/flatten_reorder.h"
 #include "impl/searcher/basic_searcher.h"
+#include "impl/searcher/mci_searcher.h"
 #include "impl/searcher/parallel_searcher.h"
 #include "impl/thread_pool/default_thread_pool.h"
 #include "index_common_param.h"
@@ -543,6 +545,21 @@ private:
                            const FlattenInterfacePtr& flatten_codes,
                            const std::unordered_map<InnerIdType, uint32_t>& inner_id_to_input_idx);
 
+    void
+    build_mci_clique_index(const float* vectors = nullptr);
+
+    void
+    incremental_update_mci_clique(InnerIdType new_inner_id, const void* vector);
+
+    [[nodiscard]] Vector<InnerIdType>
+    find_mci_knn_for_new_node(InnerIdType new_inner_id, const void* vector) const;
+
+    bool
+    try_join_mci_clique(InnerIdType new_inner_id, const Vector<InnerIdType>& knn_ids);
+
+    void
+    build_incremental_mci_clique(InnerIdType new_inner_id, const Vector<InnerIdType>& knn_ids);
+
 private:
     FlattenInterfacePtr basic_flatten_codes_{nullptr};  // coarse/quantized codes for graph search
     FlattenInterfacePtr high_precise_codes_{nullptr};   // precise codes for reorder (optional)
@@ -557,6 +574,7 @@ private:
     bool reorder_by_base_{false};    // use base codes for reorder (no separate precise)
 
     BasicSearcherPtr searcher_;              // single-thread graph searcher
+    MCISearcherPtr mci_searcher_;            // companion MCI clique searcher
     ParallelSearcherPtr parallel_searcher_;  // multi-thread graph searcher
 
     std::default_random_engine level_generator_{
@@ -567,6 +585,18 @@ private:
 
     ODescentParameterPtr odescent_param_{nullptr};  // ODescent build parameters
     std::string graph_type_{GRAPH_TYPE_VALUE_NSW};  // graph algorithm type
+
+    CliqueDataCellPtr mci_cliques_{nullptr};  // companion MCI clique datacell
+    bool use_mci_{false};
+    uint64_t mci_mcs_{200};
+    uint64_t mci_clique_max_{50};
+    float mci_alpha_{1.2F};
+    uint64_t mci_seed_count_{32};
+    float mci_hgraph_valid_ratio_threshold_{1.0F};
+    std::string mci_knng_path_{};
+    float mci_incremental_join_ratio_threshold_{0.6F};
+    uint64_t mci_incremental_added_mct_{3};
+    uint64_t mci_incremental_clique_max_{50};
 
     uint64_t ef_construct_{400};  // expansion factor during graph construction
     float alpha_{1.0};            // Relative Neighborhood Graph pruning coefficient

@@ -99,6 +99,9 @@ HGraph::Build(const DatasetPtr& data) {
         if (use_elp_optimizer_) {
             elp_optimize();
         }
+        if (this->use_mci_ and graph_type_ != GRAPH_TYPE_VALUE_NSW) {
+            this->build_mci_clique_index(data->GetFloat32Vectors());
+        }
         return ret;
     }
     this->Train(data);
@@ -110,6 +113,9 @@ HGraph::Build(const DatasetPtr& data) {
     }
     if (use_elp_optimizer_) {
         elp_optimize();
+    }
+    if (this->use_mci_ and graph_type_ != GRAPH_TYPE_VALUE_NSW) {
+        this->build_mci_clique_index(data->GetFloat32Vectors());
     }
     return ret;
 }
@@ -269,6 +275,9 @@ HGraph::Add(const DatasetPtr& data) {
         }
     } temporary_build_flatten_guard_instance{this, created_temporary_build_data};
     bool defer_persistent_codes = created_temporary_build_data;
+    const auto mci_start_total = this->total_count_.load();
+    const bool had_mci_clique_index = this->use_mci_ and this->mci_cliques_ != nullptr and
+                                      this->mci_cliques_->HasCliqueIndex(mci_start_total);
 
     {
         std::scoped_lock lock(this->add_mutex_);
@@ -387,6 +396,22 @@ HGraph::Add(const DatasetPtr& data) {
             for (auto& future : futures) {
                 future.get();
             }
+        }
+    }
+    if (this->use_mci_) {
+        if (had_mci_clique_index) {
+            logger::info("hgraph mci incremental add started, added={}", inner_ids.size());
+            for (const auto& [inner_id, local_idx] : inner_ids) {
+                this->incremental_update_mci_clique(inner_id, get_data(data, local_idx));
+            }
+            logger::info("hgraph mci incremental add finished, total={}",
+                         this->total_count_.load());
+        } else {
+            const float* vectors = nullptr;
+            if (mci_start_total == 0 and this->data_type_ == DataTypes::DATA_TYPE_FLOAT) {
+                vectors = data->GetFloat32Vectors();
+            }
+            this->build_mci_clique_index(vectors);
         }
     }
     return failed_ids;

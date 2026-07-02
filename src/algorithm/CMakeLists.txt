@@ -22,6 +22,7 @@ add_subdirectory (ivf)
 add_subdirectory (pyramid)
 add_subdirectory (sparse_index)
 add_subdirectory (simq)
+add_subdirectory (mci)
 
 file (GLOB ALGORITHM_SRCS "*.cpp")
 list (FILTER ALGORITHM_SRCS EXCLUDE REGEX "_test.cpp")
@@ -42,6 +43,7 @@ set (ALGORITHM_LIBS
         pyramid
         sparse_index
         simq
+        mci
         PARENT_SCOPE)
 
 if (ENABLE_TESTS)

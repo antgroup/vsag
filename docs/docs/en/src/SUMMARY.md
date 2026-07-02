@@ -57,6 +57,7 @@
 - [Graph Enhancement](advanced/enhance_graph.md)
 - [Extra Info](advanced/extra_info.md)
 - [Index Lifecycle Management](advanced/index_lifecycle.md)
+- [HGraph MCI Companion](advanced/hgraph_mci_companion.md)
 
 # Performance and Tuning
 

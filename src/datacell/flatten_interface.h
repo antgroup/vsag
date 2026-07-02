@@ -185,6 +185,11 @@ public:
     virtual bool
     GetCodesById(InnerIdType id, uint8_t* codes) const = 0;
 
+    [[nodiscard]] virtual const float*
+    GetRawFloatData() {
+        return nullptr;
+    }
+
     [[nodiscard]] virtual InnerIdType
     TotalCount() const {
         std::shared_lock lock(mutex_);
