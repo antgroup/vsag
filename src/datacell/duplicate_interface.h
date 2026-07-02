@@ -33,6 +33,9 @@ public:
     virtual void
     SetDuplicateId(InnerIdType group_id, InnerIdType duplicate_id) = 0;
 
+    virtual bool
+    RemoveDuplicateId(InnerIdType duplicate_id) = 0;
+
     [[nodiscard]] virtual auto
     GetDuplicateIds(InnerIdType id) const -> std::vector<InnerIdType> = 0;
 

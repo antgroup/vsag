@@ -29,6 +29,9 @@ public:
     void
     SetDuplicateId(InnerIdType group_id, InnerIdType duplicate_id) override;
 
+    bool
+    RemoveDuplicateId(InnerIdType duplicate_id) override;
+
     auto
     GetDuplicateIds(InnerIdType id) const -> std::vector<InnerIdType> override;
 

@@ -119,6 +119,31 @@ SparseDuplicateTracker::SetDuplicateId(InnerIdType group_id, InnerIdType duplica
     next_ids_[group_id] = duplicate_id;
 }
 
+bool
+SparseDuplicateTracker::RemoveDuplicateId(InnerIdType duplicate_id) {
+    std::scoped_lock lock(mutex_);
+
+    if (next_ids_.count(duplicate_id) == 0) {
+        return false;
+    }
+
+    auto previous_id = duplicate_id;
+    while (next_ids_[previous_id] != duplicate_id) {
+        previous_id = next_ids_[previous_id];
+    }
+
+    const auto next_id = next_ids_[duplicate_id];
+    next_ids_.erase(duplicate_id);
+    if (previous_id == next_id) {
+        next_ids_.erase(previous_id);
+        duplicate_count_--;
+        return true;
+    }
+
+    next_ids_[previous_id] = next_id;
+    return true;
+}
+
 auto
 SparseDuplicateTracker::GetDuplicateIds(InnerIdType id) const -> std::vector<InnerIdType> {
     std::shared_lock lock(mutex_);

@@ -386,6 +386,17 @@ RunWithGeneratedBlockSizeLimit(Fn&& fn) {
     vsag::Options::Instance().set_block_size_limit(origin_size);
 }
 
+bool
+FindDistanceById(const vsag::DatasetPtr& result, int64_t id, float& distance) {
+    for (int64_t i = 0; i < result->GetDim(); ++i) {
+        if (result->GetIds()[i] == id) {
+            distance = result->GetDistances()[i];
+            return true;
+        }
+    }
+    return false;
+}
+
 template <typename Cases, typename Fn>
 void
 ForEachHGraphCase(const fixtures::HGraphResourcePtr& resource, const Cases& test_cases, Fn&& fn) {
@@ -2031,6 +2042,93 @@ TestHGraphDuplicateBuild(const fixtures::HGraphTestIndexPtr& test_index,
 HGRAPH_PR_DAILY_CASE("HGraph Duplicate Build",
                      "[ft][build][duplicate][hgraph]",
                      TestHGraphDuplicateBuild)
+
+TEST_CASE("HGraph UpdateVector refreshes duplicate member state",
+          "[ft][hgraph][duplicate][update]") {
+    using namespace fixtures;
+
+    constexpr int64_t kEntryId = 10;
+    constexpr int64_t kRepresentativeId = 11;
+    constexpr int64_t kDuplicateId = 12;
+    constexpr int64_t kDim = 2;
+    constexpr float kNearRadius = 0.01F;
+    const std::string search_param = R"({"hgraph":{"ef_search":32}})";
+
+    auto make_updated_index = [&]() -> TestIndex::IndexPtr {
+        HGraphTestIndex::HGraphBuildParam build_param("l2", kDim, "fp32");
+        build_param.support_duplicate = true;
+        build_param.thread_count = 1;
+
+        auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+        auto index = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+
+        float entry_vector[kDim] = {-1.0F, 0.0F};
+        int64_t entry_id[1] = {kEntryId};
+        auto entry = vsag::Dataset::Make();
+        entry->NumElements(1)->Dim(kDim)->Ids(entry_id)->Float32Vectors(entry_vector)->Owner(false);
+        REQUIRE(index->Build(entry).has_value());
+
+        float representative_vector[kDim] = {1.0F, 0.0F};
+        int64_t representative_id[1] = {kRepresentativeId};
+        auto representative = vsag::Dataset::Make();
+        representative->NumElements(1)
+            ->Dim(kDim)
+            ->Ids(representative_id)
+            ->Float32Vectors(representative_vector)
+            ->Owner(false);
+        REQUIRE(index->Add(representative).has_value());
+
+        float duplicate_vector[kDim] = {1.0F, 0.0F};
+        int64_t duplicate_id[1] = {kDuplicateId};
+        auto duplicate = vsag::Dataset::Make();
+        duplicate->NumElements(1)->Dim(kDim)->Ids(duplicate_id)->Float32Vectors(duplicate_vector);
+        duplicate->Owner(false);
+        REQUIRE(index->Add(duplicate).has_value());
+        REQUIRE(index->CheckIdExist(kDuplicateId));
+
+        float moved_vector[kDim] = {0.0F, 1.0F};
+        auto moved = vsag::Dataset::Make();
+        moved->NumElements(1)->Dim(kDim)->Float32Vectors(moved_vector);
+        moved->Owner(false);
+        auto update = index->UpdateVector(kDuplicateId, moved, true);
+        REQUIRE(update.has_value());
+        REQUIRE(update.value());
+
+        return index;
+    };
+
+    SECTION("search expansion uses the updated duplicate member distance") {
+        auto index = make_updated_index();
+        float representative_query_vector[kDim] = {1.0F, 0.0F};
+        auto query = vsag::Dataset::Make();
+        query->NumElements(1)->Dim(kDim)->Float32Vectors(representative_query_vector);
+        query->Owner(false);
+
+        auto result = index->KnnSearch(query, 3, search_param);
+        REQUIRE(result.has_value());
+
+        float returned_distance = 0.0F;
+        REQUIRE(FindDistanceById(result.value(), kDuplicateId, returned_distance));
+
+        auto exact_distance = index->CalcDistanceById(representative_query_vector, kDuplicateId);
+        REQUIRE(exact_distance.has_value());
+        REQUIRE(std::abs(returned_distance - exact_distance.value()) < 1e-5F);
+    }
+
+    SECTION("updated duplicate-only member is searchable at its new position") {
+        auto index = make_updated_index();
+        float moved_query_vector[kDim] = {0.0F, 1.0F};
+        auto query = vsag::Dataset::Make();
+        query->NumElements(1)->Dim(kDim)->Float32Vectors(moved_query_vector);
+        query->Owner(false);
+
+        auto result = index->RangeSearch(query, kNearRadius, search_param, 1);
+        REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetDim() == 1);
+        REQUIRE(result.value()->GetIds()[0] == kDuplicateId);
+        REQUIRE(std::abs(result.value()->GetDistances()[0]) < 1e-5F);
+    }
+}
 
 static void
 TestHGraphEstimateMemoryAndGetMemoryUsage(const fixtures::HGraphTestIndexPtr& test_index,
