@@ -137,9 +137,15 @@ Not every index exposes every parameter as an external key. As of today:
   `rabitq_bits_per_dim_base`, `rabitq_bits_per_dim_precise`,
   `rabitq_error_rate`, `rabitq_use_fht`, `sq4_uniform_trunc_rate`, `tq_chain`
   (see `src/algorithm/hgraph.cpp`).
-- **IVF**, **Pyramid**, **BruteForce** expose `base_quantization_type` and
-  the common reorder keys; some tunables (e.g. `tq_chain`) are wired
-  internally but not exposed as external keys today.
+- **IVF** exposes `base_quantization_type`, `base_pq_dim`, the common reorder
+  keys, and the RabitQ tuning keys `rabitq_pca_dim`,
+  `rabitq_bits_per_dim_query`, `rabitq_bits_per_dim_base`, `rabitq_version`,
+  `rabitq_error_rate`, and `rabitq_use_fht`.
+- **Pyramid** exposes `base_quantization_type`, `base_pq_dim`, the common
+  reorder keys, and the RabitQ PCA, base/query bit, and FHT keys.
+- **BruteForce** exposes `base_quantization_type` and the common reorder keys;
+  some tunables (e.g. `tq_chain`) are wired internally but not exposed as
+  external keys today.
 
 Refer to each index page for its full parameter list.
 

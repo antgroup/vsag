@@ -78,6 +78,12 @@ Build-time parameters live under `index_param`. See
 | `ivf_train_type` | string | `"kmeans"` | Centroid training: `kmeans` or `random` |
 | `base_quantization_type` | string | `"fp32"` | `fp32`, `fp16`, `bf16`, `sq8`, `sq4`, `sq8_uniform`, `sq4_uniform`, `pq`, `pqfs`, `rabitq` — see the [Quantization chapter](../quantization/README.md) for per-quantizer details |
 | `base_pq_dim` | int | `1` | PQ subspaces (required with `pq` / `pqfs`) |
+| `rabitq_pca_dim` | int | `0` | Optional PCA preprocessing dimension for `base_quantization_type: "rabitq"` |
+| `rabitq_bits_per_dim_query` | int | `32` | Query bits for `rabitq`; allowed values are `4` or `32` |
+| `rabitq_bits_per_dim_base` | int | `1` | Stored-code bits for `rabitq`; allowed range is `[1, 8]` |
+| `rabitq_version` | string | `"standard"` | `rabitq` layout: `"standard"` or `"split_1bit_7bit"` |
+| `rabitq_error_rate` | float | `1.9` | Positive error-budget parameter for `rabitq` encoding |
+| `rabitq_use_fht` | bool | `false` | Enable FHT rotation before `rabitq` binarization |
 | `use_reorder` | bool | `false` | Keep a high-precision copy and re-rank after the coarse scan |
 | `precise_quantization_type` | string | `"fp32"` | Quantizer used for reordering (with `use_reorder: true`) |
 | `base_io_type` | string | `"memory_io"` | Storage backend for coarse codes |

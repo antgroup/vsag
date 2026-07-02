@@ -43,13 +43,14 @@
 | `rabitq_error_rate` | float | `1.9` | HGraph split 搜索的默认 lower-bound 误差倍率；必须为有限正数，也可以在 `hgraph` 搜索参数中按次覆盖。 |
 | `use_fht` | bool | `false` | `true` 时在二值化前应用快速 Hadamard 变换旋转。以 O(dim log dim) 的廉价代价提升各向异性数据上的精度（`rabitq_quantizer_parameter.cpp:76-78`）。 |
 
-在 HGraph 上，这些以顶层 key 暴露：`rabitq_pca_dim`、
-`rabitq_bits_per_dim_query`、`rabitq_bits_per_dim_base`、
-`rabitq_bits_per_dim_precise`、`rabitq_error_rate`、
-`rabitq_use_fht`。其中 `rabitq_use_fht` 是 HGraph
-对量化器内部 `use_fht` key 的别名，由索引层重写（`src/algorithm/hgraph.cpp:473-480`，
-名称定义见 `src/constants.cpp:142-148`）。Pyramid 同样暴露相应的 `rabitq_*` key
-（`src/algorithm/pyramid.cpp:698-699`）。
+各索引页会把 RaBitQ 设置暴露为 `index_param` 顶层 key：HGraph 暴露
+`rabitq_pca_dim`、`rabitq_bits_per_dim_query`、`rabitq_bits_per_dim_base`、
+`rabitq_bits_per_dim_precise`、`rabitq_error_rate`、`rabitq_use_fht`；IVF
+暴露 `rabitq_pca_dim`、`rabitq_bits_per_dim_query`、
+`rabitq_bits_per_dim_base`、`rabitq_version`、`rabitq_error_rate`、
+`rabitq_use_fht`；Pyramid 为底层量化器暴露 PCA、底库/查询位数和 FHT
+相关 key。其中 `rabitq_use_fht` 是索引层对量化器内部 `use_fht` key
+的别名，会由索引层重写。
 
 ```json
 {

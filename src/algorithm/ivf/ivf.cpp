@@ -58,7 +58,11 @@ static constexpr const char* IVF_PARAMS_TEMPLATE =
                 "{TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
                 "{SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE_KEY}": 0.05,
                 "{PCA_DIM_KEY}": 0,
+                "{RABITQ_QUANTIZATION_VERSION_KEY}": "standard",
                 "{RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY}": 32,
+                "{RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY}": 1,
+                "{RABITQ_QUANTIZATION_ERROR_RATE_KEY}": 1.9,
+                "{USE_FHT_KEY}": false,
                 "{PRODUCT_QUANTIZATION_DIM_KEY}": 1
             },
             "{BUCKETS_COUNT_KEY}": 10,
@@ -210,6 +214,54 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
                 BUCKET_PARAMS_KEY,
                 QUANTIZATION_PARAMS_KEY,
                 PRODUCT_QUANTIZATION_DIM_KEY,
+            },
+        },
+        {
+            RABITQ_PCA_DIM,
+            {
+                BUCKET_PARAMS_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                PCA_DIM_KEY,
+            },
+        },
+        {
+            RABITQ_BITS_PER_DIM_QUERY,
+            {
+                BUCKET_PARAMS_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY,
+            },
+        },
+        {
+            RABITQ_BITS_PER_DIM_BASE,
+            {
+                BUCKET_PARAMS_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY,
+            },
+        },
+        {
+            RABITQ_VERSION,
+            {
+                BUCKET_PARAMS_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                RABITQ_QUANTIZATION_VERSION_KEY,
+            },
+        },
+        {
+            RABITQ_ERROR_RATE,
+            {
+                BUCKET_PARAMS_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                RABITQ_QUANTIZATION_ERROR_RATE_KEY,
+            },
+        },
+        {
+            RABITQ_USE_FHT,
+            {
+                BUCKET_PARAMS_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                USE_FHT_KEY,
             },
         },
         {

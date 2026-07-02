@@ -47,14 +47,15 @@ as `"pca, rom, rabitq"`.
 | `rabitq_error_rate` | float | `1.9` | Default lower-bound error multiplier for HGraph split search; must be finite and positive. It can be overridden per search under the `hgraph` object. |
 | `use_fht` | bool | `false` | If `true`, applies a Fast Hadamard Transform rotation before binarization. Improves accuracy on anisotropic data with cheap O(dim log dim) cost (`rabitq_quantizer_parameter.cpp:76-78`). |
 
-On HGraph these are exposed as the top-level keys `rabitq_pca_dim`,
-`rabitq_bits_per_dim_query`, `rabitq_bits_per_dim_base`,
-`rabitq_bits_per_dim_precise`, `rabitq_error_rate`, and `rabitq_use_fht` —
-the last one is the HGraph
-alias for the quantizer's `use_fht` key and is rewritten by the index
-layer (`src/algorithm/hgraph.cpp:473-480`, names defined in
-`src/constants.cpp:142-148`). Pyramid exposes the same `rabitq_*` keys
-(`src/algorithm/pyramid.cpp:698-699`).
+Index pages expose RaBitQ settings as top-level `index_param` keys:
+HGraph exposes `rabitq_pca_dim`, `rabitq_bits_per_dim_query`,
+`rabitq_bits_per_dim_base`, `rabitq_bits_per_dim_precise`,
+`rabitq_error_rate`, and `rabitq_use_fht`; IVF exposes
+`rabitq_pca_dim`, `rabitq_bits_per_dim_query`, `rabitq_bits_per_dim_base`,
+`rabitq_version`, `rabitq_error_rate`, and `rabitq_use_fht`; Pyramid exposes
+the PCA, base/query bit, and FHT keys for its base quantizer. The
+`rabitq_use_fht` key is an index-level alias for the quantizer's internal
+`use_fht` key and is rewritten by the index layer.
 
 ```json
 {
