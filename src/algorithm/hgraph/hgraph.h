@@ -80,9 +80,6 @@ struct HGraphCodeSlotMap {
     [[nodiscard]] InnerIdType
     PhysicalCount() const;
 
-    [[nodiscard]] bool
-    HasRedirect() const;
-
     void
     Clear();
 
@@ -107,7 +104,6 @@ private:
     InnerIdType logical_size_{0};
     InnerIdType logical_capacity_{0};
     std::atomic<InnerIdType> physical_count_{0};
-    std::atomic<bool> has_redirect_{false};
     mutable std::shared_mutex mutex_;
 };
 
