@@ -16,9 +16,13 @@
 
 if (GIT_EXECUTABLE)
   get_filename_component (SRC_DIR ${SRC} DIRECTORY)
+  if (NOT DEFINED GIT_SAFE_DIRECTORY OR GIT_SAFE_DIRECTORY STREQUAL "")
+    set (GIT_SAFE_DIRECTORY ${SRC_DIR})
+  endif ()
   # Generate a git-describe version string from Git repository tags
   execute_process (
-    COMMAND ${GIT_EXECUTABLE} describe --tags --always --dirty --match "v*"
+    COMMAND ${GIT_EXECUTABLE} -c safe.directory=${GIT_SAFE_DIRECTORY}
+            describe --tags --always --dirty --match "v*"
     WORKING_DIRECTORY ${SRC_DIR}
     OUTPUT_VARIABLE GIT_DESCRIBE_VERSION
     RESULT_VARIABLE GIT_DESCRIBE_ERROR_CODE
