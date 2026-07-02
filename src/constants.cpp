@@ -188,6 +188,7 @@ const char* const HGRAPH_PARAMETER_RABITQ_ONE_BIT_SEARCH = "rabitq_one_bit_searc
 const char* const HGRAPH_PARAMETER_BRUTE_FORCE_THRESHOLD = "brute_force_threshold";
 const char* const HGRAPH_EXTRA_INFO_SIZE = "extra_info_size";
 const char* const HGRAPH_SUPPORT_DUPLICATE = "support_duplicate";
+const char* const HGRAPH_DEDUPLICATE_STORAGE = "deduplicate_storage";
 const char* const HGRAPH_DUPLICATE_DISTANCE_THRESHOLD = "duplicate_distance_threshold";
 const char* const HGRAPH_LABEL_REMAP_TYPE = "label_remap_type";
 const char* const HGRAPH_USE_EXTRA_INFO_FILTER = "use_extra_info_filter";

@@ -16,6 +16,7 @@
 
 #include <limits>
 
+#include "common.h"
 #include "datacell/sparse_graph_datacell.h"
 #include "hgraph.h"  // IWYU pragma: keep
 #include "impl/heap/standard_heap.h"
@@ -172,7 +173,17 @@ static constexpr uint64_t SOURCE_ID_TABLE_MAGIC = 0x534F555243454944ULL;  // "SO
 void
 HGraph::serialize_label_info(StreamWriter& writer) const {
     if (this->support_duplicate_) {
-        this->label_table_->Serialize(writer);
+        auto label_count = this->total_count_.load(std::memory_order_acquire);
+        auto label_table_size = static_cast<uint64_t>(this->label_table_->label_table_.size());
+        CHECK_ARGUMENT(
+            label_count <= label_table_size,
+            fmt::format(
+                "label_count({}) exceeds label_table size({})", label_count, label_table_size));
+        StreamWriter::WriteObj(writer, label_count);
+        if (label_count > 0) {
+            writer.Write(reinterpret_cast<const char*>(this->label_table_->label_table_.data()),
+                         label_count * sizeof(LabelType));
+        }
     } else {
         StreamWriter::WriteVector(writer, this->label_table_->label_table_);
         uint64_t size = this->label_table_->GetRemapSize();
@@ -258,6 +269,11 @@ HGraph::Serialize(StreamWriter& writer) const {
 
     // FIXME(wxyu): this option is used for special purposes, like compatibility testing
     if (this->use_old_serial_format_) {
+        if (this->support_duplicate_ && this->deduplicate_storage_) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "HGraph duplicate code slot mapping does not support v0.14 "
+                                "serialization");
+        }
         this->serialize_basic_info_v0_14(writer);
         this->basic_flatten_codes_->Serialize(writer);
         this->bottom_graph_->Serialize(writer);
@@ -277,6 +293,9 @@ HGraph::Serialize(StreamWriter& writer) const {
     }
 
     this->serialize_label_info(writer);
+    if (this->support_duplicate_ && this->deduplicate_storage_) {
+        this->code_slot_map_->Serialize(writer);
+    }
     this->basic_flatten_codes_->Serialize(writer);
     this->bottom_graph_->Serialize(writer);
     if (this->has_precise_reorder()) {
@@ -317,18 +336,29 @@ HGraph::Deserialize(StreamReader& reader) {
         logger::debug("parse with v0.14 version format");
 
         this->deserialize_basic_info_v0_14(reader);
+        if (this->support_duplicate_ && this->deduplicate_storage_) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "HGraph duplicate code slot mapping does not support v0.14 "
+                                "serialization");
+        }
 
         this->basic_flatten_codes_->Deserialize(reader);
         this->bottom_graph_->Deserialize(reader);
         if (this->has_precise_reorder()) {
             this->high_precise_codes_->Deserialize(reader);
         }
+        this->physical_code_capacity_.store(
+            static_cast<InnerIdType>(this->basic_flatten_codes_->max_capacity_),
+            std::memory_order_release);
 
         for (auto& route_graph : this->route_graphs_) {
             route_graph->Deserialize(reader);
         }
         auto new_size = max_capacity_.load();
         this->neighbors_mutex_->Resize(new_size);
+        if (this->support_duplicate_ && this->deduplicate_storage_) {
+            this->code_slot_map_->ReserveLogicalSize(static_cast<InnerIdType>(new_size));
+        }
 
         pool_ = std::make_shared<VisitedListPool>(1, allocator_, new_size, allocator_);
 
@@ -348,7 +378,14 @@ HGraph::Deserialize(StreamReader& reader) {
 
         auto metadata = footer->GetMetadata();
         // metadata should NOT be nullptr if footer is not nullptr
-        this->deserialize_basic_info(metadata->Get(BASIC_INFO));
+        auto basic_info = metadata->Get(BASIC_INFO);
+        auto has_serialized_index_param = basic_info.Contains(INDEX_PARAM);
+        this->deserialize_basic_info(basic_info);
+        if (not has_serialized_index_param && this->support_duplicate_ &&
+            this->deduplicate_storage_) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "HGraph deduplicate_storage requires serialized index parameter");
+        }
 
         int64_t dup_version = 0;
         if (metadata->Get("duplicate_format_version").IsNumberInteger()) {
@@ -357,25 +394,38 @@ HGraph::Deserialize(StreamReader& reader) {
         this->label_table_->is_legacy_duplicate_format_ = (dup_version == 0);
 
         this->deserialize_label_info(buffer_reader);
+        auto logical_count = static_cast<uint64_t>(this->label_table_->GetTotalCount());
+        this->total_count_.store(logical_count);
+        if (this->support_duplicate_ && this->deduplicate_storage_) {
+            this->code_slot_map_->Deserialize(buffer_reader);
+        }
 
         this->basic_flatten_codes_->Deserialize(buffer_reader);
         this->bottom_graph_->Deserialize(buffer_reader);
         if (this->has_precise_reorder()) {
             this->high_precise_codes_->Deserialize(buffer_reader);
         }
+        this->physical_code_capacity_.store(
+            static_cast<InnerIdType>(this->basic_flatten_codes_->max_capacity_),
+            std::memory_order_release);
 
         for (auto& route_graph : this->route_graphs_) {
             route_graph->Deserialize(buffer_reader);
         }
         auto new_size = max_capacity_.load();
         this->neighbors_mutex_->Resize(new_size);
+        if (this->support_duplicate_ && this->deduplicate_storage_) {
+            this->code_slot_map_->ReserveLogicalSize(static_cast<InnerIdType>(new_size));
+        }
 
         pool_ = std::make_shared<VisitedListPool>(1, allocator_, new_size, allocator_);
 
         if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
             this->extra_infos_->Deserialize(buffer_reader);
         }
-        this->total_count_ = this->basic_flatten_codes_->TotalCount();
+        if (not(this->support_duplicate_ && this->deduplicate_storage_)) {
+            this->total_count_ = this->basic_flatten_codes_->TotalCount();
+        }
 
         if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
             this->attr_filter_index_->Deserialize(buffer_reader);
