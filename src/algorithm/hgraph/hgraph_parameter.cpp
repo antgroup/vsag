@@ -249,6 +249,10 @@ HGraphSearchParameters::FromJson(const std::string& json_string) {
             params[INDEX_TYPE_HGRAPH][HNSW_PARAMETER_SKIP_STRATEGY].GetString());
     }
 
+    if (params[INDEX_TYPE_HGRAPH].Contains("min_distance")) {
+        obj.min_distance = params[INDEX_TYPE_HGRAPH]["min_distance"].GetFloat();
+    }
+
     return obj;
 }
 }  // namespace vsag

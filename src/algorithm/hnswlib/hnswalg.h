@@ -24,6 +24,7 @@
 #include <functional>
 #include <iostream>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <random>
@@ -291,7 +292,8 @@ public:
                       vsag::FilterSearchSkipStrategyType skip_strategy_type =
                           vsag::FilterSearchSkipStrategyType::DETERMINISTIC_ACCUMULATIVE,
                       vsag::Allocator* allocator = nullptr,
-                      vsag::IteratorFilterContext* iter_ctx = nullptr) const;
+                      vsag::IteratorFilterContext* iter_ctx = nullptr,
+                      float min_distance = std::numeric_limits<float>::lowest()) const;
 
     template <bool has_deletions, bool collect_metrics = false>
     MaxHeap
@@ -299,7 +301,8 @@ public:
                       const void* data_point,
                       float radius,
                       int64_t ef,
-                      const vsag::FilterPtr is_id_allowed = nullptr) const;
+                      const vsag::FilterPtr is_id_allowed = nullptr,
+                      float min_distance = std::numeric_limits<float>::lowest()) const;
 
     void
     getNeighborsByHeuristic2(MaxHeap& top_candidates, uint64_t M);
@@ -472,7 +475,8 @@ public:
                   vsag::FilterSearchSkipStrategyType::DETERMINISTIC_ACCUMULATIVE,
               vsag::Allocator* allocator = nullptr,
               vsag::IteratorFilterContext* iter_ctx = nullptr,
-              bool is_last_filter = false) const override;
+              bool is_last_filter = false,
+              float min_distance = std::numeric_limits<float>::lowest()) const override;
 
     std::priority_queue<std::pair<float, LabelType>>
     searchRange(const void* query_data,
