@@ -33,7 +33,7 @@
 #include "impl/odescent/odescent_graph_builder.h"
 #include "index/hnsw_zparameters.h"
 #include "index_detail_data.h"
-#include "io/memory_block_io_parameter.h"
+#include "io/memory_block_io/memory_block_io_parameter.h"
 #include "quantization/fp32_quantizer_parameter.h"
 #include "storage/empty_index_binary_set.h"
 #include "storage/serialization.h"

@@ -27,7 +27,7 @@
 #include "impl/reverse_edge.h"
 #include "index_common_param_fwd.h"
 #include "inner_string_params.h"
-#include "io/io_parameter.h"
+#include "io/common/io_parameter.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "utils/pointer_define.h"

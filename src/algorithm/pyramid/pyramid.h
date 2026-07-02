@@ -28,7 +28,7 @@
 #include "impl/reorder/flatten_reorder.h"
 #include "impl/searcher/basic_searcher.h"
 #include "index_feature_list.h"
-#include "io/memory_io_parameter.h"
+#include "io/memory_io/memory_io_parameter.h"
 #include "pyramid_zparameters.h"
 #include "quantization/fp32_quantizer_parameter.h"
 #include "query_context.h"

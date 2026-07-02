@@ -36,7 +36,7 @@
 #include "impl/reasoning/search_reasoning.h"
 #include "impl/reorder/flatten_reorder.h"
 #include "index/index_impl.h"
-#include "io/reader_io_parameter.h"
+#include "io/reader_io/reader_io_parameter.h"
 #include "storage/serialization.h"
 #include "storage/stream_reader.h"
 #include "typing.h"

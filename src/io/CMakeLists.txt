@@ -15,19 +15,19 @@
 
 
 set (IO_SRC
-        io_parameter.cpp
-        memory_io.cpp
-        memory_io_parameter.cpp
-        memory_block_io_parameter.cpp
-        buffer_io_parameter.cpp
-        buffer_io.cpp
-        async_io_parameter.cpp
-        async_io.cpp
-        mmap_io_parameter.cpp
-        mmap_io.cpp
-        memory_block_io.cpp
-        reader_io.cpp
-        reader_io_parameter.cpp
+        common/io_parameter.cpp
+        memory_io/memory_io.cpp
+        memory_io/memory_io_parameter.cpp
+        memory_block_io/memory_block_io_parameter.cpp
+        buffer_io/buffer_io_parameter.cpp
+        buffer_io/buffer_io.cpp
+        async_io/async_io_parameter.cpp
+        async_io/async_io.cpp
+        mmap_io/mmap_io_parameter.cpp
+        mmap_io/mmap_io.cpp
+        memory_block_io/memory_block_io.cpp
+        reader_io/reader_io.cpp
+        reader_io/reader_io_parameter.cpp
 )
 
 add_library (io OBJECT ${IO_SRC})
