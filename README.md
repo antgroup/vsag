@@ -422,10 +422,24 @@ VSAG referenced the following works during its implementation:
         </tr>
         <tr>
             <td align="center">
+                <a href="https://github.com/jfeng18">
+                    <img src="https://avatars.githubusercontent.com/u/288662032?v=4" width="100" alt="jfeng18"/>
+                    <br />
+                    <sub><b>Jiangtian Feng</b></sub>
+                </a>
+            </td>
+            <td align="center">
                 <a href="https://github.com/jingyueob">
                     <img src="https://avatars.githubusercontent.com/u/212298588?v=4" width="100" alt="jingyueob"/>
                     <br />
                     <sub><b>jingyueob</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/LightWant">
+                    <img src="https://avatars.githubusercontent.com/u/32861432?v=4" width="100" alt="LightWant"/>
+                    <br />
+                    <sub><b>LightWant</b></sub>
                 </a>
             </td>
             <td align="center">
@@ -443,19 +457,14 @@ VSAG referenced the following works during its implementation:
                 </a>
             </td>
             <td align="center">
-                <a href="https://github.com/jfeng18">
-                    <img src="https://avatars.githubusercontent.com/u/288662032?v=4" width="100" alt="jfeng18"/>
-                    <br />
-                    <sub><b>Jiangtian Feng</b></sub>
-                </a>
-            </td>
-            <td align="center">
                 <a href="https://github.com/pkusunjy">
                     <img src="https://avatars.githubusercontent.com/u/11880269?v=4" width="100" alt="pkusunjy"/>
                     <br />
                     <sub><b>Sun Jiayu</b></sub>
                 </a>
             </td>
+        </tr>
+        <tr>
             <td align="center">
                 <a href="https://github.com/Danbaiwq">
                     <img src="https://avatars.githubusercontent.com/u/212493818?v=4" width="100" alt="Danbaiwq"/>
@@ -463,8 +472,6 @@ VSAG referenced the following works during its implementation:
                     <sub><b>Danbaiwq</b></sub>
                 </a>
             </td>
-        </tr>
-        <tr>
             <td align="center">
                 <a href="https://github.com/HeHuMing">
                     <img src="https://avatars.githubusercontent.com/u/223064905?v=4" width="100" alt="HeHuMing"/>
@@ -500,6 +507,8 @@ VSAG referenced the following works during its implementation:
                     <sub><b>Xinger</b></sub>
                 </a>
             </td>
+        </tr>
+        <tr>
             <td align="center">
                 <a href="https://github.com/cubicc">
                     <img src="https://avatars.githubusercontent.com/u/51120671?v=4" width="100" alt="cubicc"/>
@@ -507,8 +516,6 @@ VSAG referenced the following works during its implementation:
                     <sub><b>cubicc</b></sub>
                 </a>
             </td>
-        </tr>
-        <tr>
             <td align="center">
                 <a href="https://github.com/dasurax">
                     <img src="https://avatars.githubusercontent.com/u/9841872?v=4" width="100" alt="dasurax"/>
@@ -528,13 +535,6 @@ VSAG referenced the following works during its implementation:
                     <img src="https://avatars.githubusercontent.com/u/251354?v=4" width="100" alt="jiaweizone"/>
                     <br />
                     <sub><b>wei</b></sub>
-                </a>
-            </td>
-            <td align="center">
-                <a href="https://github.com/LightWant">
-                    <img src="https://avatars.githubusercontent.com/u/32861432?v=4" width="100" alt="LightWant"/>
-                    <br />
-                    <sub><b>LightWant</b></sub>
                 </a>
             </td>
             <td align="center">
@@ -558,6 +558,13 @@ VSAG referenced the following works during its implementation:
                     <img src="https://avatars.githubusercontent.com/u/272978297?v=4" width="100" alt="mukejane"/>
                     <br />
                     <sub><b>mukejane</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/Sia-Sheerland">
+                    <img src="https://avatars.githubusercontent.com/u/204556736?v=4" width="100" alt="Sia-Sheerland"/>
+                    <br />
+                    <sub><b>Wen Huanzhi</b></sub>
                 </a>
             </td>
             <td align="center">
