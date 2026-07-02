@@ -171,14 +171,16 @@ private:
         return computer;
     }
 
+    const uint8_t*
+    get_codes_by_id_no_lock(InnerIdType id, bool& need_release) const;
+
 private:
-    // Packed so each entry is exactly 12 bytes on disk and in the offset_io_
-    // buffer. The unpacked layout would round sizeof up to 16 due to the
-    // uint64 alignment requirement, wasting 33% of the offset table.
-    struct __attribute__((packed)) DocLocation {
+#pragma pack(push, 1)
+    struct DocLocation {
         uint64_t offset{0};
         uint32_t size{0};
     };
+#pragma pack(pop)
     static_assert(sizeof(DocLocation) == 12, "DocLocation must be 12 bytes on disk");
 
     // Legacy on-disk layout: kept for backward-compatible deserialization of indexes

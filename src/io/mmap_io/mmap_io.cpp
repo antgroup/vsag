@@ -103,7 +103,14 @@ MMapIO::MMapIO(std::string filename, Allocator* allocator)
     }
 
     if (this->exist_file_) {
-        this->size_ = std::filesystem::file_size(this->filepath_);
+        std::error_code ec;
+        this->size_ = std::filesystem::file_size(this->filepath_, ec);
+        if (ec) {
+            close(this->fd_);
+            throw VsagException(
+                ErrorType::INTERNAL_ERROR,
+                fmt::format("get file size {} failed: {}", this->filepath_, ec.message()));
+        }
     }
     auto mmap_size = this->size_;
     if (this->size_ == 0) {

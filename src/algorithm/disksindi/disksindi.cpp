@@ -16,6 +16,7 @@
 #include "disksindi.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <cstring>
 #include <istream>
 #include <limits>
@@ -46,6 +47,8 @@ namespace {
 
 constexpr const char* DISKSINDI_RERANK_FLAT_FORMAT_KEY = "disksindi_rerank_flat_format";
 constexpr int64_t DISKSINDI_RERANK_FLAT_FORMAT_DATACELL = 2;
+constexpr const char* DISKSINDI_RERANK_LAYOUT_NONE = "none";
+constexpr const char* DISKSINDI_RERANK_LAYOUT_TOP_TERMS_SIGNATURE = "top_terms_signature";
 
 class BinaryReader : public Reader {
 public:
@@ -144,15 +147,12 @@ float
 cal_distance_by_id_unsafe(const FlattenInterfacePtr& flat,
                           const Vector<uint32_t>& sorted_ids,
                           const Vector<float>& sorted_vals,
-                          uint32_t inner_id) {
-    bool need_release{false};
-    const auto* codes = flat->GetCodesById(inner_id, need_release);
-    float distance = compute_distance_from_codes(
-        codes, std::numeric_limits<uint64_t>::max(), sorted_ids, sorted_vals);
-    if (need_release) {
-        flat->Release(codes);
-    }
-    return distance;
+                          uint32_t inner_id,
+                          Allocator* allocator) {
+    auto rerank_id = static_cast<InnerIdType>(inner_id);
+    auto batch = flat->GetCodesByIdsBatch(&rerank_id, 1, allocator);
+    const auto* codes = batch.buffer.data() + batch.in_buffer_offsets[0];
+    return compute_distance_from_codes(codes, batch.sizes[0], sorted_ids, sorted_vals);
 }
 
 DatasetPtr
@@ -197,6 +197,75 @@ create_rerank_flat(const IndexCommonParam& common_param, const IOParamPtr& io_pa
     return FlattenInterface::MakeInstance(rerank_param, common_param);
 }
 
+std::vector<uint32_t>
+make_top_terms_signature(const SparseVector& vector, uint32_t top_terms) {
+    std::vector<std::pair<float, uint32_t>> weighted_terms;
+    weighted_terms.reserve(vector.len_);
+    for (uint32_t i = 0; i < vector.len_; ++i) {
+        weighted_terms.emplace_back(vector.vals_[i], vector.ids_[i]);
+    }
+    auto compare_by_weight = [](const auto& lhs, const auto& rhs) {
+        if (lhs.first != rhs.first) {
+            return lhs.first > rhs.first;
+        }
+        return lhs.second < rhs.second;
+    };
+    if (weighted_terms.size() > top_terms) {
+        std::partial_sort(weighted_terms.begin(),
+                          weighted_terms.begin() + top_terms,
+                          weighted_terms.end(),
+                          compare_by_weight);
+        weighted_terms.resize(top_terms);
+    } else {
+        std::sort(weighted_terms.begin(), weighted_terms.end(), compare_by_weight);
+    }
+
+    std::vector<uint32_t> signature;
+    signature.reserve(weighted_terms.size());
+    for (const auto& [_, term_id] : weighted_terms) {
+        signature.push_back(term_id);
+    }
+    std::sort(signature.begin(), signature.end());
+    return signature;
+}
+
+std::vector<uint64_t>
+make_top_terms_signature_key(const SparseVector& vector, uint32_t top_terms) {
+    auto signature = make_top_terms_signature(vector, top_terms);
+    return {signature.begin(), signature.end()};
+}
+
+struct rerank_layout_record {
+    const SparseVector* vector{nullptr};
+    InnerIdType inner_id{0};
+    std::vector<uint64_t> signature;
+};
+
+void
+write_rerank_flat_with_layout(const FlattenInterfacePtr& rerank_flat,
+                              std::vector<rerank_layout_record>& records,
+                              const std::string& rerank_layout,
+                              uint32_t rerank_layout_top_terms) {
+    if (rerank_layout != DISKSINDI_RERANK_LAYOUT_NONE) {
+        for (auto& record : records) {
+            if (rerank_layout == DISKSINDI_RERANK_LAYOUT_TOP_TERMS_SIGNATURE) {
+                record.signature =
+                    make_top_terms_signature_key(*record.vector, rerank_layout_top_terms);
+            }
+        }
+        std::sort(records.begin(), records.end(), [](const auto& lhs, const auto& rhs) {
+            if (lhs.signature != rhs.signature) {
+                return lhs.signature < rhs.signature;
+            }
+            return lhs.inner_id < rhs.inner_id;
+        });
+    }
+
+    for (const auto& record : records) {
+        rerank_flat->InsertVector(record.vector, record.inner_id);
+    }
+}
+
 void
 deserialize_legacy_rerank_flat(StreamReader& reader,
                                const FlattenInterfacePtr& flat,
@@ -237,6 +306,29 @@ deserialize_rerank_flat(StreamReader& reader,
     deserialize_legacy_rerank_flat(reader, flat, allocator);
 }
 
+void
+validate_manifest_section(const char* section_name,
+                          uint64_t base_offset,
+                          uint64_t offset,
+                          uint64_t size,
+                          uint64_t reader_length) {
+    bool fits_absolute_length = base_offset <= reader_length &&
+                                offset <= reader_length - base_offset &&
+                                size <= reader_length - base_offset - offset;
+    bool fits_remaining_length = offset <= reader_length && size <= reader_length - offset;
+    if (not fits_absolute_length && not fits_remaining_length) {
+        throw VsagException(
+            ErrorType::INVALID_ARGUMENT,
+            fmt::format("invalid DiskSINDI manifest section {}: base {}, offset {}, size {}, file "
+                        "size {}",
+                        section_name,
+                        base_offset,
+                        offset,
+                        size,
+                        reader_length));
+    }
+}
+
 }  // namespace
 
 ParamPtr
@@ -259,6 +351,8 @@ DiskSINDI::DiskSINDI(const DiskSINDIParameterPtr& param, const IndexCommonParam&
       quantization_params_(std::make_shared<QuantizationParams>()),
       avg_doc_term_length_(param->avg_doc_term_length),
       remap_term_ids_(param->remap_term_ids),
+      rerank_layout_(param->rerank_layout),
+      rerank_layout_top_terms_(param->rerank_layout_top_terms),
       param_(param) {
     CHECK_ARGUMENT(window_size_ > 0, "window_size must be in (0, 65536]");
     CHECK_ARGUMENT(window_size_ <= 65536, "window_size must be in (0, 65536]");
@@ -286,7 +380,7 @@ DiskSINDI::GetStats() const {
 }
 
 std::vector<int64_t>
-DiskSINDI::Add(const DatasetPtr& base, AddMode mode) {
+DiskSINDI::Add(const DatasetPtr& base) {
     std::scoped_lock wlock(this->global_mutex_);
 
     if (is_deserialized_) {
@@ -328,6 +422,10 @@ DiskSINDI::Add(const DatasetPtr& base, AddMode mode) {
     }
 
     Vector<uint32_t> tmp_ids(allocator_);
+    std::vector<rerank_layout_record> rerank_layout_records;
+    if (use_reorder_ && rerank_layout_ != DISKSINDI_RERANK_LAYOUT_NONE) {
+        rerank_layout_records.reserve(data_num);
+    }
     for (uint32_t i = 0; i < data_num; ++i) {
         const auto& sparse_vector = sparse_vectors[i];
         if (label_table_->CheckLabel(ids[i])) {
@@ -370,11 +468,19 @@ DiskSINDI::Add(const DatasetPtr& base, AddMode mode) {
             extra_infos_->InsertExtraInfo(extra_info + i * extra_info_size, cur_element_count_);
         }
 
-        if (use_reorder_) {
+        if (use_reorder_ && rerank_layout_ == DISKSINDI_RERANK_LAYOUT_NONE) {
             rerank_flat_->InsertVector(sparse_vectors + i, cur_element_count_);
+        } else if (use_reorder_) {
+            rerank_layout_records.push_back(
+                {sparse_vectors + i, static_cast<InnerIdType>(cur_element_count_), {}});
         }
 
         cur_element_count_++;
+    }
+
+    if (use_reorder_ && rerank_layout_ != DISKSINDI_RERANK_LAYOUT_NONE) {
+        write_rerank_flat_with_layout(
+            rerank_flat_, rerank_layout_records, rerank_layout_, rerank_layout_top_terms_);
     }
 
     this->cal_memory_usage();
@@ -440,8 +546,8 @@ DiskSINDI::KnnSearch(const DatasetPtr& query,
     inner_param.is_inner_id_allowed = ft;
 
     SparseVector effective_query = sparse_query;
-    Vector<uint32_t> tmp_ids(allocator_);
-    Vector<float> tmp_vals(allocator_);
+    Vector<uint32_t> tmp_ids(allocator);
+    Vector<float> tmp_vals(allocator);
     if (remap_term_ids_) {
         effective_query = remap_sparse_vector_for_query(sparse_query, tmp_ids, tmp_vals);
         if (effective_query.len_ == 0) {
@@ -486,9 +592,13 @@ DiskSINDI::search_impl(const SparseTermComputerPtr& computer,
 
     for (auto cur = min_window_id; cur <= max_window_id; cur++) {
         auto window_start_id = static_cast<uint32_t>(cur) * window_size_;
+        std::fill(dists.begin(), dists.end(), 0.0F);
 
-        term_datacell_->QueryWindow(
-            dists.data(), static_cast<uint32_t>(cur), computer, query_term_buffers);
+        term_datacell_->QueryWindow(dists.data(),
+                                    static_cast<uint32_t>(cur),
+                                    computer,
+                                    use_term_lists_heap_insert,
+                                    query_term_buffers);
 
         if (use_term_lists_heap_insert) {
             term_datacell_->InsertHeapByWindowKnn(dists.data(),
@@ -513,16 +623,13 @@ DiskSINDI::search_impl(const SparseTermComputerPtr& computer,
     if (use_reorder_) {
         float cur_heap_top = std::numeric_limits<float>::max();
         auto candidate_size = heap.size();
-        auto high_precise_heap = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
+        auto high_precise_heap = std::make_shared<StandardHeap<true, false>>(allocator, -1);
         auto [sorted_ids, sorted_vals] =
-            sort_sparse_vector(original_query ? *original_query : computer->raw_query_, allocator_);
+            sort_sparse_vector(original_query ? *original_query : computer->raw_query_, allocator);
 
-        // Phase B: collect all candidate inner ids, sort them by inner_id
-        // (ascending), then issue a single batched IO. Sorting makes disk
-        // offsets monotonically increasing, which enables
-        // GetCodesByIdsBatch to merge adjacent IO requests and reduces
-        // syscall count for DirectIO.
-        Vector<InnerIdType> cand_ids(allocator_);
+        // Collect all candidate inner ids, sort for deterministic processing,
+        // then issue a single batched IO through the rerank flat.
+        Vector<InnerIdType> cand_ids(allocator);
         cand_ids.resize(candidate_size);
         for (int64_t i = static_cast<int64_t>(candidate_size) - 1; i >= 0; --i) {
             cand_ids[i] = heap.top().second;
@@ -530,7 +637,7 @@ DiskSINDI::search_impl(const SparseTermComputerPtr& computer,
         }
         std::sort(cand_ids.begin(), cand_ids.end());
         auto batch = rerank_flat_->GetCodesByIdsBatch(
-            cand_ids.data(), static_cast<InnerIdType>(candidate_size), allocator_);
+            cand_ids.data(), static_cast<InnerIdType>(candidate_size), allocator);
 
         for (uint64_t i = 0; i < candidate_size; i++) {
             auto inner_id = cand_ids[i];
@@ -560,7 +667,7 @@ DiskSINDI::search_impl(const SparseTermComputerPtr& computer,
             }
         }
 
-        return collect_results(high_precise_heap, allocator_);
+        return collect_results(high_precise_heap, allocator);
     }
 
     // low precision
@@ -573,7 +680,7 @@ DiskSINDI::search_impl(const SparseTermComputerPtr& computer,
 
     int64_t cur_size = std::min(static_cast<int64_t>(heap.size()), k);
 
-    auto [results, ret_dists, ret_ids] = create_fast_dataset(cur_size, allocator_);
+    auto [results, ret_dists, ret_ids] = create_fast_dataset(cur_size, allocator);
     if (cur_size == 0) {
         return results;
     }
@@ -620,17 +727,13 @@ void
 DiskSINDI::Serialize(StreamWriter& writer) const {
     std::shared_lock rlock(this->global_mutex_);
 
-    // Pre-compute sizes for two-pass serialization (StreamWriter lacks Seek/WriteAt)
-    uint64_t metadata_start = writer.GetCursor();
-
     uint64_t quantization_size = use_quantization_ ? 3 * sizeof(float) : 0;
     uint64_t term_dict_size = (term_id_limit_ + 1) * sizeof(DiskTermEntry);
     uint64_t payload_size = term_datacell_->ComputePayloadSize();
 
-    // Compute segment offsets
+    // Segment offsets are relative to the beginning of this index blob.
     DiskSINDIManifest manifest{};
-    manifest.term_dict_offset =
-        metadata_start + sizeof(manifest) + sizeof(cur_element_count_) + quantization_size;
+    manifest.term_dict_offset = sizeof(manifest) + sizeof(cur_element_count_) + quantization_size;
     manifest.term_dict_size = term_dict_size;
     manifest.posting_payload_offset = manifest.term_dict_offset + term_dict_size;
     manifest.posting_payload_size = payload_size;
@@ -644,12 +747,7 @@ DiskSINDI::Serialize(StreamWriter& writer) const {
     }
 
     manifest.label_table_offset = cursor_after_payload;
-    std::stringstream label_ss;
-    {
-        IOStreamWriter label_writer(label_ss);
-        label_table_->Serialize(label_writer);
-    }
-    manifest.label_table_size = label_ss.tellp();
+    manifest.label_table_size = label_table_->CalcSerializeSize();
 
     // Pass 2: write everything in order
     writer.Write(reinterpret_cast<const char*>(&manifest), sizeof(manifest));
@@ -660,13 +758,13 @@ DiskSINDI::Serialize(StreamWriter& writer) const {
         StreamWriter::WriteObj(writer, quantization_params_->diff);
     }
 
-    term_datacell_->WriteTermDictAndPayload(writer, manifest.posting_payload_offset);
+    term_datacell_->WriteTermDictAndPayload(writer);
 
     if (use_reorder_) {
         rerank_flat_->Serialize(writer);
     }
 
-    writer.Write(label_ss.str().c_str(), manifest.label_table_size);
+    label_table_->Serialize(writer);
 
     if (remap_term_ids_ && term_id_mapper_) {
         term_id_mapper_->Serialize(writer);
@@ -690,8 +788,9 @@ DiskSINDI::SetIO(const std::shared_ptr<Reader> reader) {
     auto reader_param = std::make_shared<ReaderIOParameter>();
     reader_param->reader = reader;
     if (term_datacell_ != nullptr) {
-        term_datacell_->SetIO(
-            reader, manifest_.posting_payload_offset, manifest_.posting_payload_size);
+        term_datacell_->SetIO(reader,
+                              serialized_base_offset_ + manifest_.posting_payload_offset,
+                              manifest_.posting_payload_size);
     }
     if (rerank_flat_ != nullptr && param_->rerank_io_parameter != nullptr &&
         param_->rerank_io_parameter->GetTypeName() == IO_TYPE_VALUE_READER_IO) {
@@ -727,7 +826,7 @@ DiskSINDI::Deserialize(std::istream& in_stream) {
     auto func = [reader_holder](uint64_t offset, uint64_t len, void* dest) {
         reader_holder->Read(offset, len, dest);
     };
-    uint64_t cursor = 0;
+    uint64_t cursor = static_cast<uint64_t>(in_stream.tellg());
     auto reader = ReadFuncStreamReader(func, cursor, reader_holder->Size());
 
     auto footer = Footer::Parse(reader);
@@ -745,6 +844,7 @@ void
 DiskSINDI::Deserialize(StreamReader& reader) {
     std::scoped_lock wlock(this->global_mutex_);
 
+    serialized_base_offset_ = reader.GetCursor();
     bool has_datacell_rerank_format = false;
     auto footer = Footer::Parse(reader);
     if (footer != nullptr) {
@@ -772,10 +872,32 @@ DiskSINDI::Deserialize(StreamReader& reader) {
         logger::debug("DiskSINDI footer not found, fallback to legacy deserialize path");
     }
 
-    // Read manifest from the beginning
-    reader.Seek(0);
+    reader.Seek(serialized_base_offset_);
     StreamReader::ReadObj(reader, manifest_);
     StreamReader::ReadObj(reader, cur_element_count_);
+    const auto reader_length = reader.Length();
+    validate_manifest_section("term_dict",
+                              serialized_base_offset_,
+                              manifest_.term_dict_offset,
+                              manifest_.term_dict_size,
+                              reader_length);
+    validate_manifest_section("posting_payload",
+                              serialized_base_offset_,
+                              manifest_.posting_payload_offset,
+                              manifest_.posting_payload_size,
+                              reader_length);
+    if (use_reorder_) {
+        validate_manifest_section("rerank_flat",
+                                  serialized_base_offset_,
+                                  manifest_.rerank_flat_offset,
+                                  manifest_.rerank_flat_size,
+                                  reader_length);
+    }
+    validate_manifest_section("label_table",
+                              serialized_base_offset_,
+                              manifest_.label_table_offset,
+                              manifest_.label_table_size,
+                              reader_length);
 
     if (use_quantization_) {
         StreamReader::ReadObj(reader, quantization_params_->min_val);
@@ -783,6 +905,7 @@ DiskSINDI::Deserialize(StreamReader& reader) {
         StreamReader::ReadObj(reader, quantization_params_->diff);
     }
 
+    reader.Seek(serialized_base_offset_ + manifest_.term_dict_offset);
     auto window_count =
         static_cast<uint32_t>(align_up(cur_element_count_, window_size_) / window_size_);
     term_datacell_->Deserialize(reader, manifest_.term_dict_size, window_count);
@@ -791,16 +914,18 @@ DiskSINDI::Deserialize(StreamReader& reader) {
         term_datacell_->InitIO(param_->term_io_parameter);
         if (manifest_.posting_payload_offset != 0) {
             term_datacell_->WritePayloadToIO(
-                reader, manifest_.posting_payload_offset, manifest_.posting_payload_size);
+                reader,
+                serialized_base_offset_ + manifest_.posting_payload_offset,
+                manifest_.posting_payload_size);
         }
     }
 
     if (use_reorder_) {
-        reader.Seek(manifest_.rerank_flat_offset);
+        reader.Seek(serialized_base_offset_ + manifest_.rerank_flat_offset);
         deserialize_rerank_flat(reader, rerank_flat_, allocator_, has_datacell_rerank_format);
     }
 
-    reader.Seek(manifest_.label_table_offset);
+    reader.Seek(serialized_base_offset_ + manifest_.label_table_offset);
     label_table_->Deserialize(reader);
 
     if (remap_term_ids_ && term_id_mapper_) {
@@ -882,14 +1007,18 @@ DiskSINDI::CalcDistanceById(const DatasetPtr& vector,
                             bool calculate_precise_distance) const {
     std::shared_lock rlock(this->global_mutex_);
 
-    if (use_reorder_ && calculate_precise_distance) {
-        auto inner_id = this->label_table_->GetIdByLabel(id);
-        auto [sorted_ids, sorted_vals] =
-            sort_sparse_vector(vector->GetSparseVectors()[0], allocator_);
-        return cal_distance_by_id_unsafe(rerank_flat_, sorted_ids, sorted_vals, inner_id);
+    auto [success, inner_id] = this->label_table_->TryGetIdByLabel(id);
+    if (not success) {
+        return -1.0F;
     }
 
-    auto inner_id = this->label_table_->GetIdByLabel(id);
+    if (use_reorder_ && calculate_precise_distance) {
+        auto [sorted_ids, sorted_vals] =
+            sort_sparse_vector(vector->GetSparseVectors()[0], allocator_);
+        return cal_distance_by_id_unsafe(
+            rerank_flat_, sorted_ids, sorted_vals, inner_id, allocator_);
+    }
+
     auto sparse_query = vector->GetSparseVectors()[0];
     Vector<uint32_t> tmp_ids(allocator_);
     Vector<float> tmp_vals(allocator_);
@@ -911,8 +1040,9 @@ DiskSINDI::CalDistanceById(const DatasetPtr& query,
                            const int64_t* ids,
                            int64_t count,
                            bool calculate_precise_distance) const {
+    std::shared_lock rlock(this->global_mutex_);
+
     if (use_reorder_ && calculate_precise_distance) {
-        std::shared_lock rlock(this->global_mutex_);
         auto result = Dataset::Make();
         result->Owner(true, allocator_);
         auto* distances = static_cast<float*>(allocator_->Allocate(sizeof(float) * count));
@@ -921,9 +1051,10 @@ DiskSINDI::CalDistanceById(const DatasetPtr& query,
             sort_sparse_vector(query->GetSparseVectors()[0], allocator_);
         for (int64_t i = 0; i < count; i++) {
             auto [success, inner_id] = this->label_table_->TryGetIdByLabel(ids[i]);
-            distances[i] =
-                success ? cal_distance_by_id_unsafe(rerank_flat_, sorted_ids, sorted_vals, inner_id)
-                        : -1;
+            distances[i] = success
+                               ? cal_distance_by_id_unsafe(
+                                     rerank_flat_, sorted_ids, sorted_vals, inner_id, allocator_)
+                               : -1;
         }
         return result;
     }
@@ -934,28 +1065,25 @@ DiskSINDI::CalDistanceById(const DatasetPtr& query,
     std::fill_n(distances, count, -1.0F);
     result->Distances(distances);
 
-    std::unordered_map<int64_t, uint32_t> valid_ids;
-    for (auto i = 0; i < count; i++) {
-        valid_ids[ids[i]] = i;
+    auto sparse_query = query->GetSparseVectors()[0];
+    Vector<uint32_t> tmp_ids(allocator_);
+    Vector<float> tmp_vals(allocator_);
+    if (remap_term_ids_) {
+        sparse_query = remap_sparse_vector_for_query(sparse_query, tmp_ids, tmp_vals);
     }
-    auto filter = [&valid_ids](int64_t id) -> bool { return valid_ids.count(id) != 0; };
-    auto filter_ptr = std::make_shared<WhiteListFilter>(filter);
+    DiskSINDISearchParameter search_param;
+    search_param.query_prune_ratio = 0;
+    search_param.term_prune_ratio = 0;
+    auto computer = std::make_shared<SparseTermComputer>(sparse_query, search_param, allocator_);
+    auto query_term_ids = collect_query_term_ids(computer, allocator_);
+    auto query_term_buffers = term_datacell_->LoadQueryTermBuffers(query_term_ids);
 
-    constexpr auto* search_param_fmt = R"(
-    {{
-        "disksindi": {{
-            "query_prune_ratio": 0,
-            "n_candidate": {}
-        }}
-    }}
-    )";
-    auto search_res =
-        this->KnnSearch(query, count, fmt::format(search_param_fmt, count), filter_ptr);
-
-    for (auto i = 0; i < search_res->GetDim(); i++) {
-        float dist = search_res->GetDistances()[i];
-        int64_t id = search_res->GetIds()[i];
-        distances[valid_ids[id]] = dist;
+    for (int64_t i = 0; i < count; i++) {
+        auto [success, inner_id] = this->label_table_->TryGetIdByLabel(ids[i]);
+        if (success) {
+            distances[i] = term_datacell_->CalcDistanceByInnerId(
+                computer, static_cast<uint32_t>(inner_id), query_term_buffers);
+        }
     }
 
     return result;

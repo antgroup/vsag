@@ -15,6 +15,8 @@
 
 #pragma once
 
+#include <string>
+
 #include "algorithm/inner_index_parameter.h"
 #include "index_common_param.h"
 #include "io/io_parameter.h"
@@ -50,6 +52,10 @@ public:
     bool use_quantization{false};
 
     bool remap_term_ids{false};
+
+    std::string rerank_layout{"none"};
+
+    uint32_t rerank_layout_top_terms{16};
 
     // temporal parameter
     bool deserialize_without_footer{false};

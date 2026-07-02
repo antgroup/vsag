@@ -41,6 +41,7 @@ sort_sparse_vector(const SparseVector& vector, Allocator* allocator) {
     return std::make_tuple(sorted_ids, sorted_vals);
 }
 
+// Returns the sparse inner-product distance used by SINDI: 1 - dot(vector1, vector2).
 inline float
 get_distance(uint32_t len1,
              const uint32_t* ids1,

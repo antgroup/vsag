@@ -150,3 +150,41 @@ TEST_CASE("DiskSINDI term io rejects memory io", "[ut][DiskSINDIParameter]") {
         param->FromJson(vsag::JsonType::Parse(param_str)),
         Catch::Matchers::ContainsSubstring("DiskSINDI term_io does not support memory_io"));
 }
+
+TEST_CASE("DiskSINDI rerank layout accepts only top terms signature", "[ut][DiskSINDIParameter]") {
+    auto param_str = R"({
+        "term_id_limit": 30109,
+        "window_size": 60000,
+        "doc_prune_ratio": 0.4,
+        "use_quantization": true,
+        "use_reorder": true,
+        "avg_doc_term_length": 126,
+        "rerank_layout": "top_terms_signature",
+        "rerank_layout_top_terms": 8,
+        "term_io": {
+            "type": "reader_io"
+        }
+    })";
+
+    auto param = std::make_shared<vsag::DiskSINDIParameter>();
+    param->FromJson(vsag::JsonType::Parse(param_str));
+
+    REQUIRE(param->rerank_layout == "top_terms_signature");
+    REQUIRE(param->rerank_layout_top_terms == 8);
+    REQUIRE(param->ToJson()["rerank_layout"].GetString() == "top_terms_signature");
+    REQUIRE(param->ToJson()["rerank_layout_top_terms"].GetInt() == 8);
+
+    auto no_reorder = vsag::JsonType::Parse(param_str);
+    no_reorder[USE_REORDER_KEY].SetBool(false);
+    REQUIRE_THROWS_WITH(
+        param->FromJson(no_reorder),
+        Catch::Matchers::ContainsSubstring("DiskSINDI rerank_layout requires use_reorder=true"));
+
+    for (const auto* layout : {"random", "minhash", "simhash"}) {
+        auto unsupported = vsag::JsonType::Parse(param_str);
+        unsupported["rerank_layout"].SetString(layout);
+        REQUIRE_THROWS_WITH(
+            param->FromJson(unsupported),
+            Catch::Matchers::ContainsSubstring("unsupported DiskSINDI rerank_layout"));
+    }
+}
