@@ -58,6 +58,17 @@
 - [Extra Info（附加信息）](advanced/extra_info.md)
 - [索引生命周期管理](advanced/index_lifecycle.md)
 
+# API 参考
+
+- [总览](api/README.md)
+- [Factory 与 Engine](api/factory_engine.md)
+- [Index](api/index_class.md)
+- [Dataset](api/dataset.md)
+- [搜索请求与过滤器](api/search.md)
+- [序列化类型](api/serialization.md)
+- [资源管理](api/resource.md)
+- [辅助类型](api/types.md)
+
 # 性能与调优
 
 - [最佳实践](resources/best_practices.md)

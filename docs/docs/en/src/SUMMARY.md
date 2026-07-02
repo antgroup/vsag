@@ -58,6 +58,17 @@
 - [Extra Info](advanced/extra_info.md)
 - [Index Lifecycle Management](advanced/index_lifecycle.md)
 
+# API Reference
+
+- [Overview](api/README.md)
+- [Factory & Engine](api/factory_engine.md)
+- [Index](api/index_class.md)
+- [Dataset](api/dataset.md)
+- [Search Request & Filters](api/search.md)
+- [Serialization Types](api/serialization.md)
+- [Resource Management](api/resource.md)
+- [Auxiliary Types](api/types.md)
+
 # Performance and Tuning
 
 - [Best Practices](resources/best_practices.md)
