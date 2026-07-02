@@ -35,10 +35,10 @@ auto result = index->SearchWithRequest(req).value();
 `SearchRequest`（`include/vsag/search_request.h`）是当前未废弃、推荐用来驱动单次搜索的入口。
 `search_allocator_` 字段是可选的，留空时索引会回退到它所属 `Resource` 上的 allocator。
 
-> **可用性。** `Index::SearchWithRequest` 默认实现会返回 *不支持* 错误。目前只有 HGraph、
-> IVF、BruteForce、WARP 实现了它（`src/algorithm/{hgraph,ivf,brute_force,warp}.cpp`）。对于
-> 尚未 override 的索引（HNSW、DiskANN、SINDI、Pyramid），请使用下文的旧版
-> `SearchParam` 路径。
+> **可用性。** `Index::SearchWithRequest` 默认实现会返回 *不支持* 错误。目前 HGraph、IVF、
+> BruteForce、WARP 支持它；WARP 会路由到 BruteForce multi-vector 模式
+> （`src/algorithm/{hgraph,ivf,bruteforce}.cpp`）。对于尚未 override 的索引
+> （SINDI、DiskSINDI、Pyramid），请使用下文的旧版 `SearchParam` 路径。
 
 ## 旧版 API —— `SearchParam::allocator`（已弃用）
 

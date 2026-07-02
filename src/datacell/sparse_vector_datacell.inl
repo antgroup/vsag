@@ -17,6 +17,8 @@
 
 #include <fmt/format.h>
 
+#include <limits>
+
 #include "sparse_vector_datacell.h"
 
 namespace vsag {
@@ -29,7 +31,7 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
     std::shared_lock lock(mutex_);
     for (int i = 0; i < id_count; ++i) {
         bool need_release{true};
-        auto codes = this->GetCodesById(idx[i], need_release);
+        auto codes = this->get_codes_by_id_no_lock(idx[i], need_release);
         try {
             computer->ComputeDist(codes, result_dists + i);
         } catch (...) {
@@ -73,8 +75,12 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::Deserialize(lvalue_or_rvalue<StreamRead
         uint64_t legacy_offset_io_size = 0;
         StreamReader::ReadObj(reader, legacy_offset_io_size);
         const uint64_t legacy_entry_size = sizeof(LegacyDocLocation);
-        const uint64_t doc_count =
-            legacy_entry_size == 0 ? 0 : legacy_offset_io_size / legacy_entry_size;
+        if (legacy_offset_io_size % legacy_entry_size != 0) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                fmt::format("invalid legacy SparseVectorDataCell offset size: {}",
+                                            legacy_offset_io_size));
+        }
+        const uint64_t doc_count = legacy_offset_io_size / legacy_entry_size;
         this->offset_io_->Resize(doc_count * sizeof(DocLocation));
         if (doc_count > 0) {
             constexpr uint64_t BATCH = 4096;
@@ -149,9 +155,14 @@ template <typename QuantTmpl, typename IOTmpl>
 void
 SparseVectorDataCell<QuantTmpl, IOTmpl>::InsertVector(const void* vector, InnerIdType idx) {
     auto sparse_vector = (const SparseVector*)vector;
-    uint64_t code_size = (sparse_vector->len_ * 2 + 1) * sizeof(uint32_t);
-    auto* codes = reinterpret_cast<uint8_t*>(allocator_->Allocate(code_size));
-    quantizer_->EncodeOne((const float*)vector, codes);
+    uint64_t code_size = (static_cast<uint64_t>(sparse_vector->len_) * 2 + 1) * sizeof(uint32_t);
+    if (code_size > std::numeric_limits<uint32_t>::max()) {
+        throw VsagException(
+            ErrorType::INVALID_ARGUMENT,
+            fmt::format("sparse vector code size {} exceeds uint32_t limit", code_size));
+    }
+    Vector<uint8_t> codes(code_size, allocator_);
+    quantizer_->EncodeOne((const float*)vector, codes.data());
     DocLocation location;
     {
         std::scoped_lock lock(mutex_, current_offset_mutex_);
@@ -167,9 +178,8 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::InsertVector(const void* vector, InnerI
         offset_io_->Write(reinterpret_cast<uint8_t*>(&location),
                           sizeof(location),
                           static_cast<uint64_t>(idx) * sizeof(location));
-        io_->Write(codes, code_size, location.offset);
+        io_->Write(codes.data(), code_size, location.offset);
     }
-    allocator_->Deallocate(codes);
 }
 
 template <typename QuantTmpl, typename IOTmpl>
@@ -181,11 +191,61 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::InMemory() const {
 template <typename QuantTmpl, typename IOTmpl>
 const uint8_t*
 SparseVectorDataCell<QuantTmpl, IOTmpl>::GetCodesById(InnerIdType id, bool& need_release) const {
+    std::shared_lock lock(mutex_);
+    return this->get_codes_by_id_no_lock(id, need_release);
+}
+
+template <typename QuantTmpl, typename IOTmpl>
+const uint8_t*
+SparseVectorDataCell<QuantTmpl, IOTmpl>::get_codes_by_id_no_lock(InnerIdType id,
+                                                                 bool& need_release) const {
     DocLocation location;
     offset_io_->Read(sizeof(location),
                      static_cast<uint64_t>(id) * sizeof(location),
                      reinterpret_cast<uint8_t*>(&location));
     return io_->Read(location.size, location.offset, need_release);
+}
+
+template <typename QuantTmpl, typename IOTmpl>
+BatchCodesResult
+SparseVectorDataCell<QuantTmpl, IOTmpl>::GetCodesByIdsBatch(const InnerIdType* ids,
+                                                            InnerIdType count,
+                                                            Allocator* allocator) const {
+    CHECK_ARGUMENT(allocator != nullptr, "allocator must not be null");
+    BatchCodesResult result(allocator);
+    result.sizes.resize(count);
+    result.in_buffer_offsets.resize(count);
+
+    if (count == 0) {
+        return result;
+    }
+
+    Vector<uint64_t> read_sizes(count, allocator);
+    Vector<uint64_t> read_offsets(count, allocator);
+
+    uint64_t total_size = 0;
+    {
+        std::shared_lock lock(mutex_);
+        for (InnerIdType i = 0; i < count; ++i) {
+            DocLocation location;
+            offset_io_->Read(sizeof(location),
+                             static_cast<uint64_t>(ids[i]) * sizeof(location),
+                             reinterpret_cast<uint8_t*>(&location));
+            CHECK_ARGUMENT(total_size <= std::numeric_limits<uint64_t>::max() - location.size,
+                           fmt::format("batch sparse codes size overflow: total {}, next {}",
+                                       total_size,
+                                       location.size));
+            result.in_buffer_offsets[i] = total_size;
+            result.sizes[i] = location.size;
+            read_sizes[i] = location.size;
+            read_offsets[i] = location.offset;
+            total_size += location.size;
+        }
+    }
+
+    result.buffer.resize(total_size);
+    io_->MultiRead(result.buffer.data(), read_sizes.data(), read_offsets.data(), count);
+    return result;
 }
 
 template <typename QuantTmpl, typename IOTmpl>
@@ -197,7 +257,7 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::GetSparseVectorByInnerId(
     std::shared_lock lock(mutex_);
 
     bool need_release{false};
-    const auto* codes = this->GetCodesById(inner_id, need_release);
+    const auto* codes = this->get_codes_by_id_no_lock(inner_id, need_release);
     data->len_ = *reinterpret_cast<const uint32_t*>(codes);
     const auto* entries = reinterpret_cast<const BufferEntry*>(codes + sizeof(uint32_t));
     data->ids_ = static_cast<uint32_t*>(allocator->Allocate(sizeof(uint32_t) * data->len_));
@@ -252,8 +312,8 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::ComputePairVectors(InnerIdType id1, Inn
     const uint8_t* codes1 = nullptr;
     const uint8_t* codes2 = nullptr;
     try {
-        codes1 = this->GetCodesById(id1, release1);
-        codes2 = this->GetCodesById(id2, release2);
+        codes1 = this->get_codes_by_id_no_lock(id1, release1);
+        codes2 = this->get_codes_by_id_no_lock(id2, release2);
         auto result = this->quantizer_->Compute(codes1, codes2);
         if (release1) {
             this->Release(codes1);
@@ -283,7 +343,8 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::SparseVectorDataCell(
     this->io_ = std::make_shared<IOTmpl>(io_param, common_param);
     this->offset_io_ =
         std::make_shared<MemoryBlockIO>(Options::Instance().block_size_limit(), allocator_);
-    this->max_code_size_ = sizeof(uint32_t);
+    this->max_code_size_ =
+        std::max<uint64_t>(sizeof(uint32_t), (common_param.dim_ * 2 + 1) * sizeof(uint32_t));
     this->max_capacity_ = 0;
     this->code_size_ = this->quantizer_->GetCodeSize();
 }

@@ -19,6 +19,7 @@
 #include <array>
 #include <set>
 
+#include "algorithm/sparse_distance.h"
 #include "impl/allocator/safe_allocator.h"
 #include "index_common_param.h"
 #include "storage/serialization_template_test.h"
@@ -145,6 +146,35 @@ create_exact_sindi_param(uint32_t term_id_limit,
     return index_param;
 }
 
+std::vector<std::pair<int64_t, float>>
+brute_force_sparse_knn(const SparseVector& query,
+                       const std::vector<SparseVector>& base,
+                       const std::vector<int64_t>& ids,
+                       int64_t k,
+                       Allocator* allocator) {
+    auto [query_ids, query_vals] = sort_sparse_vector(query, allocator);
+    std::vector<std::pair<int64_t, float>> result;
+    result.reserve(base.size());
+    for (uint64_t i = 0; i < base.size(); ++i) {
+        auto [base_ids, base_vals] = sort_sparse_vector(base[i], allocator);
+        auto distance = get_distance(query.len_,
+                                     query_ids.data(),
+                                     query_vals.data(),
+                                     base[i].len_,
+                                     base_ids.data(),
+                                     base_vals.data());
+        result.emplace_back(ids[i], distance);
+    }
+    std::sort(result.begin(), result.end(), [](const auto& lhs, const auto& rhs) {
+        if (lhs.second == rhs.second) {
+            return lhs.first < rhs.first;
+        }
+        return lhs.second < rhs.second;
+    });
+    result.resize(static_cast<uint64_t>(k));
+    return result;
+}
+
 TEST_CASE("SINDI Basic Test", "[ut][SINDI]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     IndexCommonParam common_param;
@@ -187,12 +217,8 @@ TEST_CASE("SINDI Basic Test", "[ut][SINDI]") {
     index_param->FromJson(param_json);
     auto index = std::make_unique<SINDI>(index_param, common_param);
     auto another_index = std::make_unique<SINDI>(index_param, common_param);
-    auto exact_param = create_exact_sindi_param(30001);
-    auto exact_index = std::make_unique<SINDI>(exact_param, common_param);
 
     // test build
-    auto exact_build_res = exact_index->Build(base);
-    REQUIRE(exact_build_res.size() == 0);
     auto build_res = index->Build(base);
     REQUIRE(build_res.size() == 0);
     REQUIRE(index->GetNumElements() == num_base);
@@ -244,15 +270,14 @@ TEST_CASE("SINDI Basic Test", "[ut][SINDI]") {
         query->NumElements(1)->SparseVectors(sv_base.data() + i)->Owner(false);
 
         // gt
-        auto bf_result = exact_index->KnnSearch(query, k, search_param_str, nullptr);
+        auto bf_result = brute_force_sparse_knn(sv_base[i], sv_base, ids, k, allocator.get());
 
         // test basic performance
         auto result = index->KnnSearch(query, k, search_param_str, nullptr);
-        REQUIRE(result->GetNumElements() == bf_result->GetNumElements());
-        REQUIRE(result->GetDim() == bf_result->GetDim());
+        REQUIRE(result->GetDim() == k);
         for (int j = 0; j < k; j++) {
-            REQUIRE(result->GetIds()[j] == bf_result->GetIds()[j]);
-            REQUIRE(std::abs(result->GetDistances()[j] - bf_result->GetDistances()[j]) < 3e-3);
+            REQUIRE(result->GetIds()[j] == bf_result[j].first);
+            REQUIRE(std::abs(result->GetDistances()[j] - bf_result[j].second) < 3e-3);
         }
 
         // test filter with knn

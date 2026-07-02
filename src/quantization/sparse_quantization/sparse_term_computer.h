@@ -20,6 +20,7 @@
 #include <memory>
 #include <type_traits>
 
+#include "algorithm/disksindi/disksindi_parameter.h"
 #include "algorithm/sindi/sindi_parameter.h"
 #include "metric_type.h"
 #include "simd/fp16_simd.h"
@@ -27,6 +28,7 @@
 #include "simd/sq8_simd.h"
 #include "utils/pointer_define.h"
 #include "utils/sparse_vector_transform.h"
+
 namespace vsag {
 
 struct QuantizationParams {
@@ -36,6 +38,7 @@ struct QuantizationParams {
 };
 
 static constexpr int INVALID_TERM = -1;
+DEFINE_POINTER(QuantizationParams)
 DEFINE_POINTER(SparseTermComputer)
 class SparseTermComputer {
 public:
@@ -43,6 +46,16 @@ public:
 
     explicit SparseTermComputer(const SparseVector& sparse_query,
                                 const SINDISearchParameter& search_param,
+                                Allocator* allocator = nullptr)
+        : sorted_query_(allocator),
+          query_retain_ratio_(1.0F - search_param.query_prune_ratio),
+          term_retain_ratio_(1.0F - search_param.term_prune_ratio),
+          raw_query_(sparse_query) {
+        SetQuery(sparse_query);
+    }
+
+    explicit SparseTermComputer(const SparseVector& sparse_query,
+                                const DiskSINDISearchParameter& search_param,
                                 Allocator* allocator = nullptr)
         : sorted_query_(allocator),
           query_retain_ratio_(1.0F - search_param.query_prune_ratio),
