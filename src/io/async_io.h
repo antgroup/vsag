@@ -65,7 +65,7 @@ public:
     /**
      * @brief Destructor that closes file descriptors and optionally removes the file.
      */
-    ~AsyncIO() override;
+    ~AsyncIO();
 
 public:
     /**

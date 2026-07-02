@@ -54,11 +54,6 @@ public:
     explicit BasicIO<IOTmpl>(Allocator* allocator) : allocator_(allocator){};
 
     /**
-     * @brief Virtual destructor to ensure proper cleanup in derived classes.
-     */
-    virtual ~BasicIO() = default;
-
-    /**
      * @brief Writes data to the IO object at a specified offset.
      *
      * If the IO object has a WriteImpl method, it is called.
@@ -262,6 +257,8 @@ public:
     uint64_t start_{0};
 
 protected:
+    ~BasicIO() = default;
+
     /**
      * @brief Checks if the given offset is valid.
      *

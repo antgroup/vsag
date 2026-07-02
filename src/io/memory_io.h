@@ -78,7 +78,7 @@ public:
     /**
      * @brief Destructor that deallocates the memory buffer.
      */
-    ~MemoryIO() override {
+    ~MemoryIO() {
         this->allocator_->Deallocate(buffer_);
     }
 
