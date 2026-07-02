@@ -32,6 +32,7 @@
 #include "index/index_impl.h"
 #include "index_feature_list.h"
 #include "inner_string_params.h"
+#include "io/reader_io_parameter.h"
 #include "ivf_nearest_partition.h"
 #include "query_context.h"
 #include "storage/serialization.h"
@@ -610,6 +611,7 @@ IVF::Deserialize(StreamReader& reader) {
         this->partition_strategy_->Deserialize(buffer_reader);
         this->label_table_->Deserialize(buffer_reader);
         if (use_reorder_) {
+            this->check_reorder_codes_ready();
             this->reorder_codes_->Deserialize(buffer_reader);
         }
 
@@ -651,7 +653,14 @@ IVF::Deserialize(StreamReader& reader) {
         READ_DATACELL_WITH_NAME(buffer_reader, "partition_strategy", this->partition_strategy_);
         READ_DATACELL_WITH_NAME(buffer_reader, "label_table", this->label_table_);
         if (use_reorder_) {
-            READ_DATACELL_WITH_NAME(buffer_reader, "reorder_codes", this->reorder_codes_);
+            this->check_reorder_codes_ready();
+            if (this->use_reader_io_for_reorder()) {
+                buffer_reader.PushSeek(datacell_offsets["reorder_codes"].GetInt());
+                this->reorder_codes_->Deserialize(buffer_reader);
+                buffer_reader.PopSeek();
+            } else {
+                READ_DATACELL_WITH_NAME(buffer_reader, "reorder_codes", this->reorder_codes_);
+            }
         }
         if (use_attribute_filter_) {
             READ_DATACELL_WITH_NAME(buffer_reader, "attr_filter_index", this->attr_filter_index_);
@@ -663,6 +672,16 @@ IVF::Deserialize(StreamReader& reader) {
     }
     this->fill_location_map();
     this->cal_memory_usage();
+}
+
+void
+IVF::SetIO(const std::shared_ptr<Reader> reader) {
+    auto reader_param = std::make_shared<ReaderIOParameter>();
+    reader_param->reader = reader;
+    if (this->use_reorder_) {
+        this->check_reorder_codes_ready();
+        this->reorder_codes_->InitIO(reader_param);
+    }
 }
 
 InnerSearchParam
@@ -1256,6 +1275,22 @@ IVF::cal_memory_usage() {
     memory += partition_strategy_->GetMemoryUsage();
     std::unique_lock lock(this->memory_usage_mutex_);
     this->current_memory_usage_.store(static_cast<int64_t>(memory));
+}
+
+bool
+IVF::use_reader_io_for_reorder() const {
+    auto ivf_param = std::dynamic_pointer_cast<IVFParameter>(this->create_param_ptr_);
+    return ivf_param != nullptr and ivf_param->precise_codes_param != nullptr and
+           ivf_param->precise_codes_param->io_parameter != nullptr and
+           ivf_param->precise_codes_param->io_parameter->GetTypeName() == IO_TYPE_VALUE_READER_IO;
+}
+
+void
+IVF::check_reorder_codes_ready() const {
+    if (this->reorder_codes_ == nullptr) {
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            "reorder_codes is null but use_reorder is true");
+    }
 }
 
 int64_t
