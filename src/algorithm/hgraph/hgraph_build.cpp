@@ -67,6 +67,23 @@ need_temporary_sq8_build_data(const FlattenInterfacePtr& basic_flatten_codes,
            basic_flatten_codes->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_RABITQ;
 }
 
+static void
+wait_all_futures(std::vector<std::future<void>>& futures) {
+    std::exception_ptr first_exception = nullptr;
+    for (auto& future : futures) {
+        try {
+            future.get();
+        } catch (...) {
+            if (not first_exception) {
+                first_exception = std::current_exception();
+            }
+        }
+    }
+    if (first_exception) {
+        std::rethrow_exception(first_exception);
+    }
+}
+
 void
 HGraph::Train(const DatasetPtr& base) {
     int64_t total_elements = base->GetNumElements();
@@ -359,9 +376,7 @@ HGraph::Add(const DatasetPtr& data) {
         }
     }
     if (use_parallel_add) {
-        for (auto& future : futures) {
-            future.get();
-        }
+        wait_all_futures(futures);
     }
     if (defer_persistent_codes) {
         temporary_build_flatten_codes_.reset();
@@ -384,9 +399,7 @@ HGraph::Add(const DatasetPtr& data) {
             }
         }
         if (use_parallel_add) {
-            for (auto& future : futures) {
-                future.get();
-            }
+            wait_all_futures(futures);
         }
     }
     return failed_ids;
@@ -1080,19 +1093,7 @@ HGraph::refine_nodes_two_phase(
                         }
                     }));
             }
-            std::exception_ptr ex = nullptr;
-            for (auto& future : futures) {
-                try {
-                    future.get();
-                } catch (...) {
-                    if (not ex) {
-                        ex = std::current_exception();
-                    }
-                }
-            }
-            if (ex) {
-                std::rethrow_exception(ex);
-            }
+            wait_all_futures(futures);
         }
 
         const auto round_elapsed = build_cache_now_us() - round_begin;
