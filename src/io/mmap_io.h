@@ -131,7 +131,7 @@ private:
     int fd_{-1};
 
     /// Pointer to the start of the memory-mapped region.
-    uint8_t* start_{nullptr};
+    uint8_t* mapped_ptr_{nullptr};
 
     /// Flag indicating if file existed before opening; false means file will be removed on destruction.
     bool exist_file_{false};
