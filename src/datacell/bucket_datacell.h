@@ -19,7 +19,7 @@
 
 #include "bucket_interface.h"
 #include "impl/inner_search_param.h"
-#include "io/io_array.h"
+#include "io/container/io_array.h"
 #include "quantization/product_quantization/pq_fastscan_quantizer.h"
 #include "simd/fp32_simd.h"
 #include "utils/byte_buffer.h"

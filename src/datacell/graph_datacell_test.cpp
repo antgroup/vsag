@@ -20,7 +20,7 @@
 #include "graph_interface_test.h"
 #include "impl/allocator/safe_allocator.h"
 #include "index_common_param.h"
-#include "io/memory_io_parameter.h"
+#include "io/memory_io/memory_io_parameter.h"
 #include "unittest.h"
 
 using namespace vsag;

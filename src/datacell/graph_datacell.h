@@ -27,7 +27,7 @@
 #include "graph_interface_parameter.h"
 #include "impl/reverse_edge.h"
 #include "index_common_param.h"
-#include "io/basic_io.h"
+#include "io/common/basic_io.h"
 #include "vsag/constants.h"
 
 namespace vsag {

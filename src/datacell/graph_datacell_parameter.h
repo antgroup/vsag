@@ -16,7 +16,7 @@
 #pragma once
 
 #include "graph_interface_parameter.h"
-#include "io/io_parameter.h"
+#include "io/common/io_parameter.h"
 #include "utils/pointer_define.h"
 
 namespace vsag {
