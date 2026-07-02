@@ -107,7 +107,7 @@ DiskSparseTermListDataCell<IOTmpl>::InsertHeapByWindow(
     while (computer->HasNextTerm()) {
         auto it = computer->NextTermIter();
         auto term = computer->GetTerm(it);
-        auto* tb = this->GetTermBuffer(term, query_term_buffers);
+        auto* tb = this->GetTermBufferNoLock(term, query_term_buffers);
         if (tb == nullptr) {
             continue;
         }

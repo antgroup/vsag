@@ -54,7 +54,7 @@ public:
     GetStats() const override;
 
     std::vector<int64_t>
-    Add(const DatasetPtr& base, AddMode mode = AddMode::DEFAULT) override;
+    Add(const DatasetPtr& base) override;
 
     std::vector<int64_t>
     Build(const DatasetPtr& base) override;
@@ -181,7 +181,11 @@ private:
     bool remap_term_ids_{false};
     std::shared_ptr<TermIdMapper> term_id_mapper_{nullptr};
 
+    std::string rerank_layout_{"none"};
+    uint32_t rerank_layout_top_terms_{16};
+
     DiskSINDIManifest manifest_;
+    uint64_t serialized_base_offset_{0};
     DiskSINDIParameterPtr param_;
 
     bool is_deserialized_{false};

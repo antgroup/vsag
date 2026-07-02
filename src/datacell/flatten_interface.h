@@ -15,6 +15,8 @@
 
 #pragma once
 
+#include <fmt/format.h>
+
 #include <algorithm>
 #include <cstring>
 #include <limits>
@@ -22,6 +24,7 @@
 #include <string>
 
 #include "basic_types.h"
+#include "common.h"
 #include "container_types.h"
 #include "flatten_datacell_parameter.h"
 #include "flatten_interface_parameter.h"
@@ -207,6 +210,7 @@ public:
     // when ids are unordered.
     virtual BatchCodesResult
     GetCodesByIdsBatch(const InnerIdType* ids, InnerIdType count, Allocator* allocator) const {
+        CHECK_ARGUMENT(allocator != nullptr, "allocator must not be null");
         BatchCodesResult result(allocator);
         result.sizes.resize(count);
         result.in_buffer_offsets.resize(count);
@@ -215,6 +219,11 @@ public:
         // into the output buffer. Code length is fixed (`code_size_`) for most
         // backends, so we know the total buffer size up front.
         const uint64_t per_size = static_cast<uint64_t>(this->code_size_);
+        CHECK_ARGUMENT(count == 0 || per_size <= std::numeric_limits<uint64_t>::max() /
+                                                     static_cast<uint64_t>(count),
+                       fmt::format("batch codes size overflow: per_size {}, count {}",
+                                   per_size,
+                                   static_cast<uint64_t>(count)));
         const uint64_t total = per_size * static_cast<uint64_t>(count);
         result.buffer.resize(total);
         for (InnerIdType i = 0; i < count; ++i) {

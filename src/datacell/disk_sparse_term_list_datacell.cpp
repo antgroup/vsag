@@ -15,6 +15,8 @@
 
 #include "disk_sparse_term_list_datacell.h"
 
+#include <fmt/format.h>
+
 #include <limits>
 #include <type_traits>
 
@@ -49,6 +51,16 @@ make_disk_sparse_term_list_datacell(float doc_retain_ratio,
                                                                 common_param);
 }
 
+IOParamPtr
+make_buffer_io_param_from_async(const IOParamPtr& io_param) {
+    auto async_param = std::dynamic_pointer_cast<AsyncIOParameter>(io_param);
+    CHECK_ARGUMENT(async_param != nullptr, "async_io parameter is invalid");
+
+    auto buffer_param = std::make_shared<BufferIOParameter>();
+    buffer_param->path_ = async_param->path_;
+    return buffer_param;
+}
+
 }  // namespace
 
 DiskSparseTermListDataCellInterfacePtr
@@ -60,6 +72,7 @@ DiskSparseTermListDataCellInterface::MakeInstance(float doc_retain_ratio,
                                                   uint32_t window_size,
                                                   const IOParamPtr& io_param,
                                                   const IndexCommonParam& common_param) {
+    CHECK_ARGUMENT(io_param != nullptr, "invalid term io parameter");
     auto io_type_name = io_param->GetTypeName();
     if (io_type_name == IO_TYPE_VALUE_MMAP_IO) {
         return make_disk_sparse_term_list_datacell<MMapIO>(doc_retain_ratio,
@@ -92,14 +105,15 @@ DiskSparseTermListDataCellInterface::MakeInstance(float doc_retain_ratio,
                                                             io_param,
                                                             common_param);
 #else
-        return make_disk_sparse_term_list_datacell<BufferIO>(doc_retain_ratio,
-                                                             term_id_limit,
-                                                             allocator,
-                                                             use_quantization,
-                                                             std::move(quantization_params),
-                                                             window_size,
-                                                             io_param,
-                                                             common_param);
+        return make_disk_sparse_term_list_datacell<BufferIO>(
+            doc_retain_ratio,
+            term_id_limit,
+            allocator,
+            use_quantization,
+            std::move(quantization_params),
+            window_size,
+            make_buffer_io_param_from_async(io_param),
+            common_param);
 #endif
     }
     if (io_type_name == IO_TYPE_VALUE_READER_IO) {
@@ -134,6 +148,16 @@ DiskSparseTermListDataCell<IOTmpl>::DiskSparseTermListDataCell(
       window_size_(window_size),
       io_param_(std::move(io_param)),
       common_param_(common_param) {
+    CHECK_ARGUMENT(
+        window_size_ > 0 &&
+            window_size_ <= static_cast<uint32_t>(std::numeric_limits<uint16_t>::max()) + 1,
+        "window_size must be in (0, 65536]");
+    if (use_quantization_) {
+        CHECK_ARGUMENT(quantization_params_ != nullptr,
+                       "quantization_params must not be null when quantization is enabled");
+        CHECK_ARGUMENT(quantization_params_->diff != 0.0F,
+                       "quantization diff must not be zero when quantization is enabled");
+    }
 }
 
 template <typename IOTmpl>
@@ -213,7 +237,7 @@ DiskSparseTermListDataCell<IOTmpl>::FinalizeTermBuffers(uint32_t window_count) {
 
         if (use_quantization_) {
             tb.values.resize(count);
-            size_t idx = 0;
+            uint64_t idx = 0;
             for (const auto& posting : postings) {
                 float x = (posting.second - quantization_params_->min_val) /
                           quantization_params_->diff * 255.0F;
@@ -221,7 +245,7 @@ DiskSparseTermListDataCell<IOTmpl>::FinalizeTermBuffers(uint32_t window_count) {
             }
         } else {
             tb.values.resize(count * sizeof(float));
-            size_t idx = 0;
+            uint64_t idx = 0;
             for (const auto& posting : postings) {
                 std::memcpy(tb.values.data() + idx * sizeof(float), &posting.second, sizeof(float));
                 idx++;
@@ -281,9 +305,10 @@ DiskSparseTermListDataCell<IOTmpl>::BuildTermDict(std::vector<DiskTermEntry>& te
         entry.posting_payload_offset = current_offset;
         entry.term_num = static_cast<uint32_t>(tb.ids.size());
 
-        current_offset += tb.window_offsets.size() * sizeof(uint32_t);
-        current_offset += tb.ids.size() * sizeof(uint16_t);
-        size_t ids_padding = (4 - (tb.ids.size() * sizeof(uint16_t)) % 4) % 4;
+        current_offset += static_cast<uint64_t>(tb.window_offsets.size()) * sizeof(uint32_t);
+        current_offset += static_cast<uint64_t>(tb.ids.size()) * sizeof(uint16_t);
+        uint64_t ids_padding =
+            (4 - (static_cast<uint64_t>(tb.ids.size()) * sizeof(uint16_t)) % 4) % 4;
         current_offset += ids_padding;
         current_offset += tb.values.size();
 
@@ -320,9 +345,10 @@ DiskSparseTermListDataCell<IOTmpl>::WritePayload(StreamWriter& writer) const {
                      tb.ids.size() * sizeof(uint16_t));
 
         // Pad ids to 4-byte boundary
-        size_t ids_padding = (4 - (tb.ids.size() * sizeof(uint16_t)) % 4) % 4;
+        uint64_t ids_padding =
+            (4 - (static_cast<uint64_t>(tb.ids.size()) * sizeof(uint16_t)) % 4) % 4;
         if (ids_padding > 0) {
-            char pad[2] = {0, 0};
+            char pad[4] = {0};
             writer.Write(pad, ids_padding);
         }
 
@@ -333,9 +359,7 @@ DiskSparseTermListDataCell<IOTmpl>::WritePayload(StreamWriter& writer) const {
 
 template <typename IOTmpl>
 void
-DiskSparseTermListDataCell<IOTmpl>::WriteTermDictAndPayload(StreamWriter& writer,
-                                                            uint64_t payload_base_offset) const {
-    (void)payload_base_offset;
+DiskSparseTermListDataCell<IOTmpl>::WriteTermDictAndPayload(StreamWriter& writer) const {
     std::vector<DiskTermEntry> term_dict;
     if (term_buffers_.empty() && !term_dict_.empty()) {
         term_dict = term_dict_;
@@ -375,7 +399,11 @@ DiskSparseTermListDataCell<IOTmpl>::Deserialize(StreamReader& reader,
     window_count_ = window_count;
     CHECK_ARGUMENT(term_dict_size % sizeof(DiskTermEntry) == 0,
                    fmt::format("invalid DiskSINDI term_dict_size {}", term_dict_size));
-    auto term_dict_count = static_cast<uint32_t>(term_dict_size / sizeof(DiskTermEntry));
+    const uint64_t term_dict_count = term_dict_size / sizeof(DiskTermEntry);
+    CHECK_ARGUMENT(term_dict_count == static_cast<uint64_t>(term_id_limit_) + 1,
+                   fmt::format("invalid DiskSINDI term_dict_count {}, expected {}",
+                               term_dict_count,
+                               static_cast<uint64_t>(term_id_limit_) + 1));
     std::vector<DiskTermEntry> term_dict(term_dict_count);
     reader.Read(reinterpret_cast<char*>(term_dict.data()), term_dict_size);
     term_dict_ = term_dict;
@@ -400,7 +428,6 @@ DiskSparseTermListDataCell<IOTmpl>::InitIO(const IOParamPtr& io_param) {
 template <typename IOTmpl>
 void
 DiskSparseTermListDataCell<IOTmpl>::WritePayloadToIO(uint64_t payload_base_offset) {
-    (void)payload_base_offset;
     if (io_ == nullptr) {
         this->InitIO(io_param_);
     }
@@ -408,9 +435,9 @@ DiskSparseTermListDataCell<IOTmpl>::WritePayloadToIO(uint64_t payload_base_offse
         return;
     }
 
-    io_->Resize(this->ComputePayloadSize());
+    io_->Resize(payload_base_offset + this->ComputePayloadSize());
     std::vector<DiskTermEntry> term_dict;
-    this->BuildTermDict(term_dict, 0);
+    this->BuildTermDict(term_dict, payload_base_offset);
     for (uint32_t term_id = 0; term_id <= term_id_limit_; ++term_id) {
         auto it = term_buffers_.find(term_id);
         if (it == term_buffers_.end() || it->second.ids.empty()) {
@@ -425,13 +452,13 @@ DiskSparseTermListDataCell<IOTmpl>::WritePayloadToIO(uint64_t payload_base_offse
                    offset);
         offset += window_offsets_size;
 
-        auto ids_size = tb.ids.size() * sizeof(uint16_t);
+        uint64_t ids_size = static_cast<uint64_t>(tb.ids.size()) * sizeof(uint16_t);
         io_->Write(reinterpret_cast<const uint8_t*>(tb.ids.data()), ids_size, offset);
         offset += ids_size;
 
-        size_t ids_padding = (4 - ids_size % 4) % 4;
+        uint64_t ids_padding = (4 - ids_size % 4) % 4;
         if (ids_padding > 0) {
-            uint8_t pad[2] = {0, 0};
+            uint8_t pad[4] = {0};
             io_->Write(pad, ids_padding, offset);
             offset += ids_padding;
         }
@@ -531,10 +558,12 @@ DiskSparseTermListDataCell<IOTmpl>::LoadQueryTerms(const Vector<uint32_t>& query
                   reinterpret_cast<uint8_t*>(tb.ids.data()));
 
         // Skip padding
-        size_t ids_padding = (4 - (tb.ids.size() * sizeof(uint16_t)) % 4) % 4;
-        uint64_t values_offset = entry.posting_payload_offset +
-                                 tb.window_offsets.size() * sizeof(uint32_t) +
-                                 tb.ids.size() * sizeof(uint16_t) + ids_padding;
+        uint64_t ids_padding =
+            (4 - (static_cast<uint64_t>(tb.ids.size()) * sizeof(uint16_t)) % 4) % 4;
+        uint64_t values_offset =
+            entry.posting_payload_offset +
+            static_cast<uint64_t>(tb.window_offsets.size()) * sizeof(uint32_t) +
+            static_cast<uint64_t>(tb.ids.size()) * sizeof(uint16_t) + ids_padding;
 
         // Read values
         io_->Read(tb.values.size(), values_offset, tb.values.data());
@@ -567,23 +596,44 @@ DiskSparseTermListDataCell<IOTmpl>::LoadQueryTermBuffers(
         return query_term_buffers;
     }
 
-    std::shared_lock lock(term_buffers_mutex_);
-    query_term_buffers.reserve(query_term_ids.size());
-    for (uint32_t term_id : query_term_ids) {
-        if (term_id >= term_dict_.size()) {
-            logger::warn("term_id {} out of range in LoadQueryTermBuffers", term_id);
-            continue;
-        }
+    struct QueryTermReadPlan {
+        uint32_t term_id{0};
+        DiskTermEntry entry{};
+    };
 
-        const auto& entry = term_dict_[term_id];
-        if (entry.term_num == 0) {
-            continue;
+    std::vector<QueryTermReadPlan> read_plans;
+    read_plans.reserve(query_term_ids.size());
+    uint32_t window_count = 0;
+    uint32_t window_size = 0;
+    bool use_quantization = false;
+    {
+        std::shared_lock lock(term_buffers_mutex_);
+        window_count = window_count_;
+        window_size = window_size_;
+        use_quantization = use_quantization_;
+        for (uint32_t term_id : query_term_ids) {
+            if (term_id >= term_dict_.size()) {
+                logger::warn("term_id {} out of range in LoadQueryTermBuffers", term_id);
+                continue;
+            }
+
+            const auto entry = term_dict_[term_id];
+            if (entry.term_num == 0) {
+                continue;
+            }
+            read_plans.push_back({term_id, entry});
         }
+    }
+
+    query_term_buffers.reserve(query_term_ids.size());
+    for (const auto& plan : read_plans) {
+        const auto term_id = plan.term_id;
+        const auto& entry = plan.entry;
 
         TermBuffer tb;
-        tb.window_offsets.resize(window_count_ + 1);
+        tb.window_offsets.resize(window_count + 1);
         tb.ids.resize(entry.term_num);
-        if (use_quantization_) {
+        if (use_quantization) {
             tb.values.resize(entry.term_num);
         } else {
             tb.values.resize(entry.term_num * sizeof(float));
@@ -599,8 +649,10 @@ DiskSparseTermListDataCell<IOTmpl>::LoadQueryTermBuffers(
                   ids_offset,
                   reinterpret_cast<uint8_t*>(tb.ids.data()));
 
-        size_t ids_padding = (4 - (tb.ids.size() * sizeof(uint16_t)) % 4) % 4;
-        uint64_t values_offset = ids_offset + tb.ids.size() * sizeof(uint16_t) + ids_padding;
+        uint64_t ids_padding =
+            (4 - (static_cast<uint64_t>(tb.ids.size()) * sizeof(uint16_t)) % 4) % 4;
+        uint64_t values_offset =
+            ids_offset + static_cast<uint64_t>(tb.ids.size()) * sizeof(uint16_t) + ids_padding;
         io_->Read(tb.values.size(), values_offset, tb.values.data());
 
         bool valid_payload =
@@ -610,7 +662,7 @@ DiskSparseTermListDataCell<IOTmpl>::LoadQueryTermBuffers(
                             tb.window_offsets[i] <= entry.term_num;
         }
         for (uint64_t i = 0; valid_payload && i < tb.ids.size(); ++i) {
-            valid_payload = tb.ids[i] < window_size_;
+            valid_payload = tb.ids[i] < window_size;
         }
         if (not valid_payload) {
             throw VsagException(
@@ -677,6 +729,14 @@ template <typename IOTmpl>
 const TermBuffer*
 DiskSparseTermListDataCell<IOTmpl>::GetTermBuffer(
     uint32_t term_id, const QueryTermBuffers& query_term_buffers) const {
+    std::shared_lock lock(term_buffers_mutex_);
+    return this->GetTermBufferNoLock(term_id, query_term_buffers);
+}
+
+template <typename IOTmpl>
+const TermBuffer*
+DiskSparseTermListDataCell<IOTmpl>::GetTermBufferNoLock(
+    uint32_t term_id, const QueryTermBuffers& query_term_buffers) const {
     auto query_it = query_term_buffers.find(term_id);
     if (query_it != query_term_buffers.end()) {
         return &query_it->second;
@@ -702,12 +762,13 @@ void
 DiskSparseTermListDataCell<IOTmpl>::QueryWindow(float* dists,
                                                 uint32_t window_id,
                                                 const SparseTermComputerPtr& computer,
+                                                bool use_term_lists_heap_insert,
                                                 const QueryTermBuffers& query_term_buffers) const {
     std::shared_lock lock(term_buffers_mutex_);
     while (computer->HasNextTerm()) {
         auto it = computer->NextTermIter();
         auto term = computer->GetTerm(it);
-        auto* tb = this->GetTermBuffer(term, query_term_buffers);
+        auto* tb = this->GetTermBufferNoLock(term, query_term_buffers);
         if (tb == nullptr) {
             continue;
         }
@@ -717,6 +778,9 @@ DiskSparseTermListDataCell<IOTmpl>::QueryWindow(float* dists,
         uint32_t start = tb->window_offsets[window_id];
         uint32_t end = tb->window_offsets[window_id + 1];
         uint32_t count = end - start;
+        if (use_term_lists_heap_insert) {
+            count = static_cast<uint32_t>(static_cast<float>(count) * computer->term_retain_ratio_);
+        }
         if (count == 0) {
             continue;
         }
@@ -795,7 +859,7 @@ DiskSparseTermListDataCell<IOTmpl>::CalcDistanceByInnerId(
     while (computer->HasNextTerm()) {
         auto it = computer->NextTermIter();
         auto term = computer->GetTerm(it);
-        auto* tb = this->GetTermBuffer(term, query_term_buffers);
+        auto* tb = this->GetTermBufferNoLock(term, query_term_buffers);
         if (tb == nullptr) {
             continue;
         }
@@ -837,7 +901,7 @@ DiskSparseTermListDataCell<IOTmpl>::Encode(float val, uint8_t* dst) const {
 
 template <typename IOTmpl>
 void
-DiskSparseTermListDataCell<IOTmpl>::Decode(const uint8_t* src, size_t size, float* dst) const {
+DiskSparseTermListDataCell<IOTmpl>::Decode(const uint8_t* src, uint64_t size, float* dst) const {
     if (use_quantization_) {
         float x = static_cast<float>(*src) / 255.0F * quantization_params_->diff +
                   quantization_params_->min_val;

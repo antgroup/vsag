@@ -15,6 +15,8 @@
 
 #include "disksindi_parameter.h"
 
+#include <fmt/format.h>
+
 #include "inner_string_params.h"
 #include "io/memory_block_io_parameter.h"
 #include "io/reader_io_parameter.h"
@@ -23,6 +25,11 @@ namespace {
 
 constexpr const char* DISKSINDI_TERM_IO_KEY = "term_io";
 constexpr const char* DISKSINDI_RERANK_IO_KEY = "rerank_io";
+constexpr const char* DISKSINDI_RERANK_LAYOUT_KEY = "rerank_layout";
+constexpr const char* DISKSINDI_RERANK_LAYOUT_TOP_TERMS_KEY = "rerank_layout_top_terms";
+constexpr const char* DISKSINDI_USE_TERM_LISTS_HEAP_INSERT_KEY = "use_term_lists_heap_insert";
+constexpr const char* DISKSINDI_RERANK_LAYOUT_NONE = "none";
+constexpr const char* DISKSINDI_RERANK_LAYOUT_TOP_TERMS_SIGNATURE = "top_terms_signature";
 
 }  // namespace
 
@@ -116,6 +123,27 @@ DiskSINDIParameter::FromJson(const JsonType& json) {
         remap_term_ids = json[SPARSE_REMAP_TERM_IDS].GetBool();
     }
 
+    if (json.Contains(DISKSINDI_RERANK_LAYOUT_KEY)) {
+        rerank_layout = json[DISKSINDI_RERANK_LAYOUT_KEY].GetString();
+        CHECK_ARGUMENT(rerank_layout == DISKSINDI_RERANK_LAYOUT_NONE ||
+                           rerank_layout == DISKSINDI_RERANK_LAYOUT_TOP_TERMS_SIGNATURE,
+                       fmt::format("unsupported DiskSINDI rerank_layout: {}", rerank_layout));
+    } else {
+        rerank_layout = DISKSINDI_RERANK_LAYOUT_NONE;
+    }
+
+    if (json.Contains(DISKSINDI_RERANK_LAYOUT_TOP_TERMS_KEY)) {
+        rerank_layout_top_terms = json[DISKSINDI_RERANK_LAYOUT_TOP_TERMS_KEY].GetInt();
+        CHECK_ARGUMENT(rerank_layout_top_terms > 0,
+                       fmt::format("rerank_layout_top_terms must be greater than 0, but now is {}",
+                                   rerank_layout_top_terms));
+    } else {
+        rerank_layout_top_terms = 16;
+    }
+
+    CHECK_ARGUMENT(use_reorder || rerank_layout == DISKSINDI_RERANK_LAYOUT_NONE,
+                   "DiskSINDI rerank_layout requires use_reorder=true");
+
     if (json.Contains(DISKSINDI_TERM_IO_KEY)) {
         term_io_parameter = IOParameter::GetIOParameterByJson(json[DISKSINDI_TERM_IO_KEY]);
         CHECK_ARGUMENT(term_io_parameter != nullptr, "invalid term_io parameter");
@@ -146,6 +174,8 @@ DiskSINDIParameter::ToJson() const {
     json[SPARSE_WINDOW_SIZE].SetInt(window_size);
     json[SPARSE_AVG_DOC_TERM_LENGTH].SetInt(avg_doc_term_length);
     json[SPARSE_REMAP_TERM_IDS].SetBool(remap_term_ids);
+    json[DISKSINDI_RERANK_LAYOUT_KEY].SetString(rerank_layout);
+    json[DISKSINDI_RERANK_LAYOUT_TOP_TERMS_KEY].SetInt(rerank_layout_top_terms);
     if (term_io_parameter != nullptr) {
         json[DISKSINDI_TERM_IO_KEY].SetJson(term_io_parameter->ToJson());
     }
@@ -182,6 +212,12 @@ DiskSINDIParameter::CheckCompatibility(const vsag::ParamPtr& other) const {
     if (this->remap_term_ids != disksindi_param->remap_term_ids) {
         return false;
     }
+    if (this->rerank_layout != disksindi_param->rerank_layout) {
+        return false;
+    }
+    if (this->rerank_layout_top_terms != disksindi_param->rerank_layout_top_terms) {
+        return false;
+    }
     return true;
 }
 
@@ -211,9 +247,9 @@ DiskSINDISearchParameter::FromJson(const JsonType& json) {
         n_candidate = DEFAULT_N_CANDIDATE;
     }
 
-    if (json[INDEX_DISKSINDI].Contains(SPARSE_USE_TERM_LISTS_HEAP_INSERT)) {
+    if (json[INDEX_DISKSINDI].Contains(DISKSINDI_USE_TERM_LISTS_HEAP_INSERT_KEY)) {
         use_term_lists_heap_insert =
-            json[INDEX_DISKSINDI][SPARSE_USE_TERM_LISTS_HEAP_INSERT].GetBool();
+            json[INDEX_DISKSINDI][DISKSINDI_USE_TERM_LISTS_HEAP_INSERT_KEY].GetBool();
     } else {
         use_term_lists_heap_insert = true;
     }
@@ -225,7 +261,8 @@ DiskSINDISearchParameter::ToJson() const {
     json[INDEX_DISKSINDI][SPARSE_QUERY_PRUNE_RATIO].SetFloat(query_prune_ratio);
     json[INDEX_DISKSINDI][SPARSE_N_CANDIDATE].SetInt(n_candidate);
     json[INDEX_DISKSINDI][SPARSE_TERM_PRUNE_RATIO].SetFloat(term_prune_ratio);
-    json[INDEX_DISKSINDI][SPARSE_USE_TERM_LISTS_HEAP_INSERT].SetBool(use_term_lists_heap_insert);
+    json[INDEX_DISKSINDI][DISKSINDI_USE_TERM_LISTS_HEAP_INSERT_KEY].SetBool(
+        use_term_lists_heap_insert);
     return json;
 }
 

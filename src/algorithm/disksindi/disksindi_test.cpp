@@ -15,6 +15,11 @@
 
 #include "disksindi.h"
 
+#include <fmt/format.h>
+
+#include <cstdio>
+#include <numeric>
+
 #include "impl/allocator/safe_allocator.h"
 #include "index_common_param.h"
 #include "unittest.h"
@@ -27,7 +32,9 @@ DiskSINDIParameterPtr
 create_disksindi_param(uint32_t term_id_limit,
                        const std::string& term_path,
                        const std::string& term_io_type = "buffer_io",
-                       const std::string& rerank_io_type = "memory_io") {
+                       const std::string& rerank_io_type = "memory_io",
+                       const std::string& rerank_layout = "none",
+                       uint32_t rerank_layout_top_terms = 16) {
     auto param_str = fmt::format(R"({{
         "term_id_limit": {},
         "window_size": 10000,
@@ -35,10 +42,14 @@ create_disksindi_param(uint32_t term_id_limit,
         "use_quantization": false,
         "use_reorder": true,
         "avg_doc_term_length": 100,
+        "rerank_layout": "{}",
+        "rerank_layout_top_terms": {},
         "term_io": {{ "type": "{}", "file_path": "{}" }},
         "rerank_io": {{ "type": "{}" }}
     }})",
                                  term_id_limit,
+                                 rerank_layout,
+                                 rerank_layout_top_terms,
                                  term_io_type,
                                  term_path,
                                  rerank_io_type);
@@ -122,13 +133,66 @@ TEST_CASE("DiskSINDI Batch Rerank End-To-End", "[ut][DiskSINDI]") {
     index.reset();
 }
 
-TEST_CASE("DiskSINDI Sorted Merge Rerank End-To-End", "[ut][DiskSINDI]") {
-    // Phase B regression: the rerank path now sorts candidate inner_ids before
-    // issuing the batched IO, enabling GetCodesByIdsBatch to merge adjacent
-    // requests. The returned (id, distance) pairs must remain identical to the
-    // brute-force truth (same as Phase A). Additionally, each returned distance
-    // is cross-checked against CalcDistanceById to ensure the sorted+merged
-    // code path produces the exact same distance computation.
+TEST_CASE("DiskSINDI Top Terms Rerank Layout End-To-End", "[ut][DiskSINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+
+    const uint32_t num_base = 128;
+    const int64_t max_dim = 64;
+    const uint32_t term_id_limit = 2048;
+    const int64_t k = 10;
+    common_param.dim_ = max_dim;
+
+    std::vector<int64_t> ids(num_base);
+    std::iota(ids.begin(), ids.end(), 0);
+
+    auto sv_base = fixtures::GenerateSparseVectors(num_base, max_dim, term_id_limit - 1);
+    auto base = Dataset::Make();
+    base->NumElements(num_base)->SparseVectors(sv_base.data())->Ids(ids.data())->Owner(false);
+
+    fixtures::TempDir dir("disksindi_top_terms_layout");
+    const std::string term_path = dir.GenerateRandomFile(false);
+    auto param = create_disksindi_param(term_id_limit,
+                                        term_path,
+                                        "buffer_io",
+                                        "memory_io",
+                                        "top_terms_signature",
+                                        /*rerank_layout_top_terms=*/8);
+    auto index = std::make_unique<DiskSINDI>(param, common_param);
+    REQUIRE(index->Build(base).empty());
+
+    auto query = Dataset::Make();
+    query->NumElements(1)->SparseVectors(sv_base.data())->Owner(false);
+    const std::string search_param = R"({
+        "disksindi": {
+            "query_prune_ratio": 0.0,
+            "term_prune_ratio": 0.0,
+            "n_candidate": 64,
+            "use_term_lists_heap_insert": false
+        }
+    })";
+    auto result = index->KnnSearch(query, k, search_param, nullptr);
+    REQUIRE(result->GetDim() == k);
+    REQUIRE(result->GetIds()[0] == 0);
+    for (int64_t i = 0; i < result->GetDim(); ++i) {
+        auto precise_dist = index->CalcDistanceById(query, result->GetIds()[i], true);
+        REQUIRE(std::abs(result->GetDistances()[i] - precise_dist) < 1e-5);
+    }
+
+    for (auto& item : sv_base) {
+        delete[] item.vals_;
+        delete[] item.ids_;
+    }
+    index.reset();
+}
+
+TEST_CASE("DiskSINDI Sorted Batch Rerank End-To-End", "[ut][DiskSINDI]") {
+    // The rerank path sorts candidate inner_ids before issuing batched IO.
+    // Returned (id, distance) pairs must remain identical to the brute-force
+    // truth. Each returned distance is cross-checked against CalcDistanceById to
+    // ensure the batched code path produces the same distance computation.
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     IndexCommonParam common_param;
     common_param.allocator_ = allocator;
@@ -148,7 +212,7 @@ TEST_CASE("DiskSINDI Sorted Merge Rerank End-To-End", "[ut][DiskSINDI]") {
     auto base = Dataset::Make();
     base->NumElements(num_base)->SparseVectors(sv_base.data())->Ids(ids.data())->Owner(false);
 
-    fixtures::TempDir dir("disksindi_merge_rerank");
+    fixtures::TempDir dir("disksindi_batch_rerank");
     const std::string term_path = dir.GenerateRandomFile(false);
     auto param = create_disksindi_param(term_id_limit, term_path);
     auto index = std::make_unique<DiskSINDI>(param, common_param);
@@ -176,7 +240,7 @@ TEST_CASE("DiskSINDI Sorted Merge Rerank End-To-End", "[ut][DiskSINDI]") {
         }
 
         // Cross-check each result distance against CalcDistanceById (which
-        // uses the single-id GetCodesById path, bypassing the merge logic).
+        // uses the single-id GetCodesById path, bypassing batched IO).
         for (int64_t i = 0; i < result->GetDim(); ++i) {
             auto precise_dist =
                 index->CalcDistanceById(query, result->GetIds()[i], /*precise=*/true);
@@ -228,13 +292,15 @@ TEST_CASE("DiskSINDI ReaderIO Rerank Uses Section Offset", "[ut][DiskSINDI]") {
     REQUIRE(built.Build(base).empty());
 
     std::stringstream stream;
+    const std::string prefix = "outer-container-prefix";
+    stream.write(prefix.data(), static_cast<std::streamsize>(prefix.size()));
     IOStreamWriter writer(stream);
     built.Serialize(writer);
 
     auto load_param =
         create_disksindi_param(term_id_limit, term_path, IO_TYPE_VALUE_READER_IO, "reader_io");
     DiskSINDI loaded(load_param, common_param);
-    stream.seekg(0, std::ios::beg);
+    stream.seekg(static_cast<std::streamoff>(prefix.size()), std::ios::beg);
     loaded.Deserialize(stream);
 
     auto query = Dataset::Make();

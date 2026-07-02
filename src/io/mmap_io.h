@@ -133,6 +133,9 @@ private:
     /// Pointer to the start of the memory-mapped region.
     uint8_t* start_{nullptr};
 
+    // Actual length of the current mmap region.
+    uint64_t mapped_size_{0};
+
     /// Flag indicating if file existed before opening; false means file will be removed on destruction.
     bool exist_file_{false};
 };

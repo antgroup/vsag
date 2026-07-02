@@ -86,7 +86,7 @@ public:
     ComputePayloadSize() const = 0;
 
     virtual void
-    WriteTermDictAndPayload(StreamWriter& writer, uint64_t payload_base_offset) const = 0;
+    WriteTermDictAndPayload(StreamWriter& writer) const = 0;
 
     virtual void
     Deserialize(StreamReader& reader, uint64_t term_dict_size, uint32_t window_count) = 0;
@@ -121,6 +121,7 @@ public:
     QueryWindow(float* dists,
                 uint32_t window_id,
                 const SparseTermComputerPtr& computer,
+                bool use_term_lists_heap_insert,
                 const QueryTermBuffers& query_term_buffers) const = 0;
 
     virtual void
@@ -180,7 +181,7 @@ public:
     WritePayload(StreamWriter& writer) const;
 
     void
-    WriteTermDictAndPayload(StreamWriter& writer, uint64_t payload_base_offset) const override;
+    WriteTermDictAndPayload(StreamWriter& writer) const override;
 
     void
     Deserialize(StreamReader& reader, uint64_t term_dict_size, uint32_t window_count) override;
@@ -211,6 +212,9 @@ public:
     const TermBuffer*
     GetTermBuffer(uint32_t term_id, const QueryTermBuffers& query_term_buffers) const;
 
+    const TermBuffer*
+    GetTermBufferNoLock(uint32_t term_id, const QueryTermBuffers& query_term_buffers) const;
+
     uint32_t
     GetWindowCount() const override {
         return window_count_;
@@ -223,6 +227,7 @@ public:
     QueryWindow(float* dists,
                 uint32_t window_id,
                 const SparseTermComputerPtr& computer,
+                bool use_term_lists_heap_insert,
                 const QueryTermBuffers& query_term_buffers) const override;
 
     void
@@ -297,7 +302,7 @@ private:
     Encode(float val, uint8_t* dst) const;
 
     void
-    Decode(const uint8_t* src, size_t size, float* dst) const;
+    Decode(const uint8_t* src, uint64_t size, float* dst) const;
 
 private:
     float doc_retain_ratio_{0};

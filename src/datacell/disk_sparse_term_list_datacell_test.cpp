@@ -67,7 +67,7 @@ TEST_CASE("DiskSparseTermListDataCell restores payload io", "[ut][DiskSparseTerm
     auto term_dict_size = static_cast<uint64_t>(term_id_limit + 1) * sizeof(DiskTermEntry);
     std::stringstream stream;
     IOStreamWriter writer(stream);
-    data_cell->WriteTermDictAndPayload(writer, term_dict_size);
+    data_cell->WriteTermDictAndPayload(writer);
     stream.seekg(0, std::ios::beg);
 
     auto restored = DiskSparseTermListDataCellInterface::MakeInstance(1.0F,
