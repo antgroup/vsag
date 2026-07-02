@@ -356,6 +356,86 @@ TEST_CASE("RaBitQ FP32 three-bit SIMD Batch4 Compute Codes", "[ut][simd]") {
     }
 }
 
+TEST_CASE("RaBitQ FP32 two-bit centered SIMD Batch4 Compute Codes", "[ut][simd]") {
+    const std::vector<uint64_t> dims = {0, 1, 7, 8, 9, 15, 16, 17, 63, 64, 65, 960};
+
+    for (const auto dim : dims) {
+        const uint64_t plane_bytes = (dim + 7) / 8;
+        std::vector<float> query(dim);
+        for (uint64_t d = 0; d < dim; ++d) {
+            query[d] = static_cast<float>(static_cast<int>(d % 29) - 14) * 0.03125F;
+        }
+
+        std::vector<uint8_t> codes(std::max<uint64_t>(1, plane_bytes * 2 * 4));
+        for (uint64_t i = 0; i < codes.size(); ++i) {
+            codes[i] = static_cast<uint8_t>(43U * i + 5U);
+        }
+
+        const auto* bits1 = codes.data();
+        const auto* bits2 = bits1 + plane_bytes * 2;
+        const auto* bits3 = bits2 + plane_bytes * 2;
+        const auto* bits4 = bits3 + plane_bytes * 2;
+        const uint8_t* all_bits[4] = {bits1, bits2, bits3, bits4};
+
+        float expected[4] = {0.0F, 0.0F, 0.0F, 0.0F};
+        for (uint64_t d = 0; d < dim; ++d) {
+            const uint64_t byte_idx = d >> 3;
+            const uint8_t bit_mask = static_cast<uint8_t>(1U << (d & 7));
+            for (uint32_t i = 0; i < 4; ++i) {
+                const uint8_t* plane0 = all_bits[i];
+                const uint8_t* plane1 = all_bits[i] + plane_bytes;
+                float weight = (plane0[byte_idx] & bit_mask) != 0U ? 1.0F : -1.0F;
+                weight += (plane1[byte_idx] & bit_mask) != 0U ? 0.5F : -0.5F;
+                expected[i] += query[d] * weight;
+            }
+        }
+
+        auto check_result = [&expected](const float* result) {
+            for (uint32_t i = 0; i < 4; ++i) {
+                REQUIRE(std::abs(expected[i] - result[i]) < 1e-4F);
+            }
+        };
+        auto check_one = [&](auto func, const uint8_t* bits, float expected_value) {
+            REQUIRE(std::abs(expected_value - func(query.data(), bits, dim)) < 1e-4F);
+        };
+
+        float result[4] = {0.0F, 0.0F, 0.0F, 0.0F};
+        generic::RaBitQFloatTwoBitCenteredIPBatch4(
+            query.data(), bits1, bits2, bits3, bits4, dim, result);
+        check_result(result);
+        check_one(generic::RaBitQFloatTwoBitCenteredIP, bits1, expected[0]);
+        check_one(generic::RaBitQFloatTwoBitCenteredIP, bits2, expected[1]);
+        check_one(generic::RaBitQFloatTwoBitCenteredIP, bits3, expected[2]);
+        check_one(generic::RaBitQFloatTwoBitCenteredIP, bits4, expected[3]);
+
+        RaBitQFloatTwoBitCenteredIPBatch4(query.data(), bits1, bits2, bits3, bits4, dim, result);
+        check_result(result);
+        check_one(RaBitQFloatTwoBitCenteredIP, bits1, expected[0]);
+        check_one(RaBitQFloatTwoBitCenteredIP, bits2, expected[1]);
+        check_one(RaBitQFloatTwoBitCenteredIP, bits3, expected[2]);
+        check_one(RaBitQFloatTwoBitCenteredIP, bits4, expected[3]);
+
+        if (SimdStatus::SupportAVX2()) {
+            avx2::RaBitQFloatTwoBitCenteredIPBatch4(
+                query.data(), bits1, bits2, bits3, bits4, dim, result);
+            check_result(result);
+            check_one(avx2::RaBitQFloatTwoBitCenteredIP, bits1, expected[0]);
+            check_one(avx2::RaBitQFloatTwoBitCenteredIP, bits2, expected[1]);
+            check_one(avx2::RaBitQFloatTwoBitCenteredIP, bits3, expected[2]);
+            check_one(avx2::RaBitQFloatTwoBitCenteredIP, bits4, expected[3]);
+        }
+        if (SimdStatus::SupportAVX512()) {
+            avx512::RaBitQFloatTwoBitCenteredIPBatch4(
+                query.data(), bits1, bits2, bits3, bits4, dim, result);
+            check_result(result);
+            check_one(avx512::RaBitQFloatTwoBitCenteredIP, bits1, expected[0]);
+            check_one(avx512::RaBitQFloatTwoBitCenteredIP, bits2, expected[1]);
+            check_one(avx512::RaBitQFloatTwoBitCenteredIP, bits3, expected[2]);
+            check_one(avx512::RaBitQFloatTwoBitCenteredIP, bits4, expected[3]);
+        }
+    }
+}
+
 TEST_CASE("RaBitQ FP32 three-bit centered SIMD Batch4 Compute Codes", "[ut][simd]") {
     const std::vector<uint64_t> dims = {0, 1, 7, 8, 9, 15, 16, 17, 63, 64, 65, 960};
 
