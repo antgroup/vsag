@@ -269,14 +269,17 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
             if (top_candidates->Size() < ef || lower_bound > dist ||
                 (mode == RANGE_SEARCH && dist <= inner_search_param.radius)) {
                 candidate_set->Push(-dist, to_be_visited_id[i]);
-                if (not is_id_allowed || is_id_allowed->CheckValid(to_be_visited_id[i])) {
+                if ((not is_id_allowed || is_id_allowed->CheckValid(to_be_visited_id[i])) &&
+                    dist > inner_search_param.min_distance) {
                     top_candidates->Push(dist, to_be_visited_id[i]);
                 }
                 if (inner_search_param.consider_duplicate && label_table &&
                     label_table->CompressDuplicateData()) {
                     const auto& duplicate_ids = label_table->GetDuplicateId(to_be_visited_id[i]);
                     for (const auto& item : duplicate_ids) {
-                        top_candidates->Push(dist, item);
+                        if (dist > inner_search_param.min_distance) {
+                            top_candidates->Push(dist, item);
+                        }
                     }
                 }
 

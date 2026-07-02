@@ -65,6 +65,9 @@ public:
     // use in search process with duplicate ids
     bool consider_duplicate{false};
 
+    // skip results with dist <= min_distance (for search iterator)
+    float min_distance{std::numeric_limits<float>::lowest()};
+
     // time record
     std::shared_ptr<Timer> time_cost{nullptr};
 

@@ -25,6 +25,7 @@
 #include <functional>
 #include <iostream>
 #include <iterator>
+#include <limits>
 #include <list>
 #include <random>
 #include <stdexcept>
@@ -1412,7 +1413,8 @@ public:
                   vsag::FilterSearchSkipStrategyType::DETERMINISTIC_ACCUMULATIVE,
               vsag::Allocator* allocator = nullptr,
               vsag::IteratorFilterContext* iter_ctx = nullptr,
-              bool is_last_filter = false) const override {
+              bool is_last_filter = false,
+              float min_distance = std::numeric_limits<float>::lowest()) const override {
         std::priority_queue<std::pair<float, LabelType>> result;
         if (cur_element_count_ == 0)
             return result;
