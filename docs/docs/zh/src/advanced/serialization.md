@@ -1,6 +1,9 @@
 # 序列化格式
 
-VSAG 索引可通过多种方式序列化与反序列化，便于持久化、跨进程共享及分布式部署。
+VSAG 索引可通过现有序列化接口进行序列化与反序列化，便于持久化、跨进程共享及分布式部署。
+
+本文介绍 `Serialize` 和 `Deserialize` 使用的现有序列化格式。后续引入的 header-first 流式格式见
+[新序列化格式](new_serialization.md)。两种格式互不兼容。
 
 ## 三种接口
 
@@ -51,6 +54,8 @@ index->Serialize([&](const void* buf, uint64_t offset, uint64_t size) {
 ## 注意事项
 
 - `Deserialize` 要求目标索引为**空**索引，并且参数配置与序列化时一致（如 `dim`、`metric_type`）。
+- `Serialize`/`Deserialize` 保留现有 footer-based 格式。新的 `SerializeStreaming` 格式是
+  header-first 格式，需要用 `DeserializeStreaming` 或 `Load` 读取。
 - 跨大版本升级时请关注 [版本日志](../resources/release_notes.md) 中的兼容性说明。
 - 示例参考：`examples/cpp/318_feature_tune.cpp`、`examples/cpp/401_persistent_kv.cpp`、
   `examples/cpp/402_persistent_streaming.cpp`。

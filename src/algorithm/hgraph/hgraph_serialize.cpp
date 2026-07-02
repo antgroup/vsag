@@ -22,12 +22,30 @@
 #include "impl/odescent/odescent_graph_builder.h"
 #include "impl/pruning_strategy.h"
 #include "storage/serialization.h"
+#include "storage/serialization_tags.h"
 #include "storage/stream_reader.h"
+#include "storage/tlv_section.h"
 #include "typing.h"
 #include "utils/util_functions.h"
 #include "vsag/options.h"
 
 namespace vsag {
+
+namespace {
+
+std::string
+dump_basic_info_for_log(const JsonType& basic_info) {
+    JsonType log_basic_info = basic_info;
+    if (log_basic_info.Contains(INDEX_PARAM) and log_basic_info[INDEX_PARAM].IsString()) {
+        auto index_param = JsonType::Parse(log_basic_info[INDEX_PARAM].GetString(), false);
+        if (not index_param.IsDiscarded() and index_param.IsObject()) {
+            log_basic_info[INDEX_PARAM].SetJson(index_param);
+        }
+    }
+    return log_basic_info.Dump(4);
+}
+
+}  // namespace
 
 void
 HGraph::serialize_basic_info_v0_14(StreamWriter& writer) const {
@@ -118,7 +136,7 @@ HGraph::serialize_basic_info() const {
 
 void
 HGraph::deserialize_basic_info(const JsonType& jsonify_basic_info) {
-    logger::debug("jsonify_basic_info: {}", jsonify_basic_info.Dump());
+    logger::debug("jsonify_basic_info:\n{}", dump_basic_info_for_log(jsonify_basic_info));
     FROM_JSON(jsonify_basic_info, use_reorder, Bool);
     this->reorder_by_base_ = false;
     FROM_JSON(jsonify_basic_info, reorder_by_base, Bool);
@@ -306,6 +324,314 @@ HGraph::Serialize(StreamWriter& writer) const {
 
     auto footer = std::make_shared<Footer>(metadata);
     footer->Write(writer);
+}
+
+MetadataPtr
+HGraph::collect_streaming_header() const {
+    auto metadata = std::make_shared<Metadata>();
+    metadata->Set("format", "vsag_stream_v1");
+    metadata->Set("index_name", this->GetName());
+    metadata->Set("build_param_snapshot", this->create_param_ptr_->ToString());
+
+    auto jsonify_basic_info = this->serialize_basic_info();
+    const bool include_precise_codes = this->has_precise_reorder() && !this->ignore_reorder_;
+    if (this->ignore_reorder_) {
+        jsonify_basic_info["use_reorder"].SetBool(false);
+    }
+    metadata->Set(BASIC_INFO, jsonify_basic_info);
+    if (this->support_duplicate_) {
+        metadata->Set("duplicate_format_version", 1);
+    }
+
+    JsonType manifest;
+    auto label_table_tag = static_cast<uint32_t>(StreamSerializationTag::LABEL_TABLE);
+    auto base_codes_tag = static_cast<uint32_t>(StreamSerializationTag::BASE_CODES);
+    auto bottom_graph_tag = static_cast<uint32_t>(StreamSerializationTag::BOTTOM_GRAPH);
+    auto route_graphs_tag = static_cast<uint32_t>(StreamSerializationTag::ROUTE_GRAPHS);
+    AppendStreamingManifestBlock(
+        manifest, label_table_tag, 1, StreamSerializationTagCritical(label_table_tag));
+    AppendStreamingManifestBlock(
+        manifest, base_codes_tag, 1, StreamSerializationTagCritical(base_codes_tag));
+    AppendStreamingManifestBlock(
+        manifest, bottom_graph_tag, 1, StreamSerializationTagCritical(bottom_graph_tag));
+    if (include_precise_codes) {
+        auto tag = static_cast<uint32_t>(StreamSerializationTag::HIGH_PRECISION_CODES);
+        AppendStreamingManifestBlock(manifest, tag, 1, StreamSerializationTagCritical(tag));
+    }
+    AppendStreamingManifestBlock(
+        manifest, route_graphs_tag, 1, StreamSerializationTagCritical(route_graphs_tag));
+    if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
+        auto tag = static_cast<uint32_t>(StreamSerializationTag::EXTRA_INFO);
+        AppendStreamingManifestBlock(manifest, tag, 1, StreamSerializationTagCritical(tag));
+    }
+    if (this->use_attribute_filter_ && this->attr_filter_index_ != nullptr) {
+        auto tag = static_cast<uint32_t>(StreamSerializationTag::ATTRIBUTE_FILTER);
+        AppendStreamingManifestBlock(manifest, tag, 1, StreamSerializationTagCritical(tag));
+    }
+    if (create_new_raw_vector_) {
+        auto tag = static_cast<uint32_t>(StreamSerializationTag::RAW_VECTOR);
+        AppendStreamingManifestBlock(manifest, tag, 1, StreamSerializationTagCritical(tag));
+    }
+    metadata->Set("block_manifest", manifest);
+    metadata->SetEmptyIndex(this->GetNumElements() == 0);
+    return metadata;
+}
+
+void
+HGraph::serialize_streaming_body(StreamWriter& writer) const {
+    const bool include_precise_codes = this->has_precise_reorder() && !this->ignore_reorder_;
+
+    auto label_table_tag = static_cast<uint32_t>(StreamSerializationTag::LABEL_TABLE);
+    auto base_codes_tag = static_cast<uint32_t>(StreamSerializationTag::BASE_CODES);
+    auto bottom_graph_tag = static_cast<uint32_t>(StreamSerializationTag::BOTTOM_GRAPH);
+    auto route_graphs_tag = static_cast<uint32_t>(StreamSerializationTag::ROUTE_GRAPHS);
+
+    WriteStreamingBlock(
+        writer,
+        label_table_tag,
+        StreamSerializationTagCritical(label_table_tag),
+        [this](StreamWriter& block_writer) { this->serialize_label_info(block_writer); });
+    WriteStreamingBlock(writer,
+                        base_codes_tag,
+                        StreamSerializationTagCritical(base_codes_tag),
+                        [this](StreamWriter& block_writer) {
+                            this->basic_flatten_codes_->Serialize(block_writer);
+                        });
+    WriteStreamingBlock(
+        writer,
+        bottom_graph_tag,
+        StreamSerializationTagCritical(bottom_graph_tag),
+        [this](StreamWriter& block_writer) { this->bottom_graph_->Serialize(block_writer); });
+    if (include_precise_codes) {
+        auto tag = static_cast<uint32_t>(StreamSerializationTag::HIGH_PRECISION_CODES);
+        WriteStreamingBlock(
+            writer, tag, StreamSerializationTagCritical(tag), [this](StreamWriter& block_writer) {
+                this->high_precise_codes_->Serialize(block_writer);
+            });
+    }
+    WriteStreamingBlock(writer,
+                        route_graphs_tag,
+                        StreamSerializationTagCritical(route_graphs_tag),
+                        [this](StreamWriter& block_writer) {
+                            for (const auto& route_graph : this->route_graphs_) {
+                                route_graph->Serialize(block_writer);
+                            }
+                        });
+    if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
+        auto tag = static_cast<uint32_t>(StreamSerializationTag::EXTRA_INFO);
+        WriteStreamingBlock(
+            writer, tag, StreamSerializationTagCritical(tag), [this](StreamWriter& block_writer) {
+                this->extra_infos_->Serialize(block_writer);
+            });
+    }
+    if (this->use_attribute_filter_ && this->attr_filter_index_ != nullptr) {
+        auto tag = static_cast<uint32_t>(StreamSerializationTag::ATTRIBUTE_FILTER);
+        WriteStreamingBlock(
+            writer, tag, StreamSerializationTagCritical(tag), [this](StreamWriter& block_writer) {
+                this->attr_filter_index_->Serialize(block_writer);
+            });
+    }
+    if (create_new_raw_vector_) {
+        auto tag = static_cast<uint32_t>(StreamSerializationTag::RAW_VECTOR);
+        WriteStreamingBlock(
+            writer, tag, StreamSerializationTagCritical(tag), [this](StreamWriter& block_writer) {
+                this->raw_vector_->Serialize(block_writer);
+            });
+    }
+}
+
+void
+HGraph::deserialize_label_info_streaming(StreamReader& reader) const {
+    if (this->support_duplicate_) {
+        this->label_table_->Deserialize(reader);
+    } else {
+        StreamReader::ReadVector(reader, this->label_table_->label_table_);
+        uint64_t size;
+        StreamReader::ReadObj(reader, size);
+        this->label_table_->ResetRemap(size);
+        for (uint64_t i = 0; i < size; ++i) {
+            LabelType key;
+            StreamReader::ReadObj(reader, key);
+            InnerIdType value;
+            StreamReader::ReadObj(reader, value);
+            this->label_table_->InsertRemap(key, value);
+        }
+        this->label_table_->total_count_.store(static_cast<int64_t>(size));
+    }
+
+    if (this->persist_source_id_) {
+        uint64_t magic = 0;
+        StreamReader::ReadObj(reader, magic);
+        if (magic != SOURCE_ID_TABLE_MAGIC) {
+            throw VsagException(ErrorType::READ_ERROR, "missing HGraph source_id_table marker");
+        }
+        uint64_t sid_count = 0;
+        StreamReader::ReadObj(reader, sid_count);
+        const uint64_t label_table_size = this->label_table_->label_table_.size();
+        if (sid_count > label_table_size) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                fmt::format("corrupted index: source_id_table sid_count ({}) "
+                                            "exceeds label_table size ({})",
+                                            sid_count,
+                                            label_table_size));
+        }
+        Vector<std::string> sid_table(sid_count, std::string{}, allocator_);
+        for (uint64_t i = 0; i < sid_count; ++i) {
+            sid_table[i] = StreamReader::ReadString(reader);
+        }
+        this->label_table_->ReplaceSourceIdTable(std::move(sid_table));
+    }
+}
+
+void
+HGraph::deserialize_streaming_body(StreamReader& reader, const MetadataPtr& metadata) {
+    this->read_streaming_body(reader, metadata);
+}
+
+void
+HGraph::load_streaming_body(StreamReader& reader,
+                            const MetadataPtr& metadata,
+                            const std::string& parameters) {
+    (void)parameters;
+    this->read_streaming_body(reader, metadata);
+}
+
+void
+HGraph::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) {
+    auto basic_info = metadata->Get(BASIC_INFO);
+    this->deserialize_basic_info(basic_info);
+
+    int64_t dup_version = 0;
+    if (metadata->Get("duplicate_format_version").IsNumberInteger()) {
+        dup_version = metadata->Get("duplicate_format_version").GetInt();
+    }
+    this->label_table_->is_legacy_duplicate_format_ = (dup_version == 0);
+
+    bool loaded_label_table = false;
+    bool loaded_base_codes = false;
+    bool loaded_bottom_graph = false;
+    bool loaded_high_precision_codes = false;
+    bool loaded_route_graphs = false;
+    bool loaded_extra_info = false;
+    bool loaded_attribute_filter = false;
+    bool loaded_raw_vector = false;
+
+    while (true) {
+        auto block_header = StreamBlockHeader::Read(reader);
+        if (block_header.IsSectionEnd()) {
+            break;
+        }
+        BoundedForwardReader block_reader(&reader, block_header.value_len);
+        if (block_header.block_version != 1) {
+            if (block_header.IsCritical()) {
+                throw VsagException(
+                    ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                    fmt::format("unsupported HGraph streaming block version: tag={}, name={}, "
+                                "version={}, flags={}, value_len={}",
+                                block_header.tag,
+                                StreamSerializationTagName(block_header.tag),
+                                block_header.block_version,
+                                block_header.flags,
+                                block_header.value_len));
+            }
+            block_reader.SkipRemaining();
+            continue;
+        }
+
+        switch (static_cast<StreamSerializationTag>(block_header.tag)) {
+            case StreamSerializationTag::LABEL_TABLE:
+                this->deserialize_label_info_streaming(block_reader);
+                loaded_label_table = true;
+                break;
+            case StreamSerializationTag::BASE_CODES:
+                this->basic_flatten_codes_->Deserialize(block_reader);
+                loaded_base_codes = true;
+                break;
+            case StreamSerializationTag::BOTTOM_GRAPH:
+                this->bottom_graph_->Deserialize(block_reader);
+                loaded_bottom_graph = true;
+                break;
+            case StreamSerializationTag::HIGH_PRECISION_CODES:
+                if (this->has_precise_reorder()) {
+                    this->high_precise_codes_->Deserialize(block_reader);
+                    loaded_high_precision_codes = true;
+                }
+                break;
+            case StreamSerializationTag::ROUTE_GRAPHS:
+                for (auto& route_graph : this->route_graphs_) {
+                    route_graph->Deserialize(block_reader);
+                }
+                loaded_route_graphs = true;
+                break;
+            case StreamSerializationTag::EXTRA_INFO:
+                if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
+                    this->extra_infos_->Deserialize(block_reader);
+                    loaded_extra_info = true;
+                }
+                break;
+            case StreamSerializationTag::ATTRIBUTE_FILTER:
+                if (this->use_attribute_filter_ && this->attr_filter_index_ != nullptr) {
+                    this->attr_filter_index_->Deserialize(block_reader);
+                    loaded_attribute_filter = true;
+                }
+                break;
+            case StreamSerializationTag::RAW_VECTOR:
+                if (create_new_raw_vector_) {
+                    this->raw_vector_->Deserialize(block_reader);
+                    loaded_raw_vector = true;
+                }
+                break;
+            default:
+                if (block_header.IsCritical()) {
+                    throw VsagException(
+                        ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                        fmt::format("unknown HGraph streaming serialization block: tag={}, "
+                                    "name={}, version={}, flags={}, value_len={}",
+                                    block_header.tag,
+                                    StreamSerializationTagName(block_header.tag),
+                                    block_header.block_version,
+                                    block_header.flags,
+                                    block_header.value_len));
+                }
+                break;
+        }
+        block_reader.SkipRemaining();
+    }
+
+    if (!loaded_label_table || !loaded_base_codes || !loaded_bottom_graph || !loaded_route_graphs) {
+        throw VsagException(ErrorType::READ_ERROR,
+                            "HGraph streaming serialization required block is missing");
+    }
+    if (this->has_precise_reorder() && !loaded_high_precision_codes) {
+        throw VsagException(ErrorType::READ_ERROR,
+                            "HGraph streaming serialization high precision block is missing");
+    }
+    if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr && !loaded_extra_info) {
+        throw VsagException(ErrorType::READ_ERROR,
+                            "HGraph streaming serialization extra info block is missing");
+    }
+    if (this->use_attribute_filter_ && this->attr_filter_index_ != nullptr &&
+        !loaded_attribute_filter) {
+        throw VsagException(ErrorType::READ_ERROR,
+                            "HGraph streaming serialization attribute filter block is missing");
+    }
+    if (create_new_raw_vector_ && !loaded_raw_vector) {
+        throw VsagException(ErrorType::READ_ERROR,
+                            "HGraph streaming serialization raw vector block is missing");
+    }
+
+    auto new_size = max_capacity_.load();
+    this->neighbors_mutex_->Resize(new_size);
+    pool_ = std::make_shared<VisitedListPool>(1, allocator_, new_size, allocator_);
+    this->total_count_ = this->basic_flatten_codes_->TotalCount();
+    if (this->raw_vector_ != nullptr) {
+        this->has_raw_vector_ = true;
+    }
+    this->cal_memory_usage();
+
+    if (use_elp_optimizer_) {
+        elp_optimize();
+    }
 }
 
 void

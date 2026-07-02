@@ -181,6 +181,11 @@ public:
         SAFE_CALL(this->inner_index_->Deserialize(in_stream));
     }
 
+    tl::expected<void, Error>
+    DeserializeStreaming(std::istream& in_stream) override {
+        SAFE_CALL(this->inner_index_->DeserializeStreaming(in_stream));
+    }
+
     [[nodiscard]] uint64_t
     EstimateMemory(uint64_t num_elements) const override {
         return this->inner_index_->EstimateMemory(num_elements);
@@ -440,6 +445,11 @@ public:
     tl::expected<void, Error>
     Serialize(std::ostream& out_stream) override {
         SAFE_CALL(this->inner_index_->Serialize(out_stream));
+    }
+
+    tl::expected<void, Error>
+    SerializeStreaming(std::ostream& out_stream) const override {
+        SAFE_CALL(this->inner_index_->SerializeStreaming(out_stream));
     }
 
     [[nodiscard]] tl::expected<DatasetPtr, Error>

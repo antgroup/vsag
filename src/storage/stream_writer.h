@@ -99,6 +99,12 @@ private:
     uint64_t written_bytes_{0};
 };
 
+class CountingStreamWriter : public StreamWriter {
+public:
+    void
+    Write(const char* data, uint64_t size) override;
+};
+
 class WriteFuncStreamWriter : public StreamWriter {
 public:
     explicit WriteFuncStreamWriter(std::function<void(uint64_t, uint64_t, void*)> writeFunc,

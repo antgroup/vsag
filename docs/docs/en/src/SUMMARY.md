@@ -50,6 +50,7 @@
 - [Iterator Search](advanced/iterator_search.md)
 - [Attribute Filter (Hybrid Search)](advanced/attribute_filter.md)
 - [Serialization](advanced/serialization.md)
+- [New Serialization](advanced/new_serialization.md)
 - [Memory Management](advanced/memory.md)
 - [Per-Search Allocator](advanced/search_allocator.md)
 - [Index Introspection](advanced/introspection.md)

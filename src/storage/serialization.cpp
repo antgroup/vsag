@@ -18,12 +18,17 @@
 #include <cstring>
 #include <sstream>
 
-namespace {
-constexpr uint64_t FOOTER_TRAILER_SIZE = 16;
-constexpr uint64_t FOOTER_MIN_SIZE = 36;
-}  // namespace
+#include "vsag_exception.h"
 
 namespace vsag {
+
+namespace {
+
+constexpr uint64_t FOOTER_TRAILER_SIZE = 16;
+constexpr uint64_t FOOTER_MIN_SIZE = 36;
+constexpr uint64_t STREAM_HEADER_MAX_METADATA_LEN = 16ULL * 1024ULL * 1024ULL;
+
+}  // namespace
 
 void
 Metadata::make_sure_metadata_not_null() {
@@ -48,6 +53,76 @@ Metadata::make_sure_metadata_not_null() {
     formatted_datetime = "1970-01-01 00:00:00";
 
     metadata_["_update_time"].SetString(formatted_datetime);
+}
+
+uint32_t
+StreamHeader::CalculateChecksum(std::string_view bytes) {
+    const uint32_t polynomial = 0xEDB88320;
+    uint32_t crc = 0xFFFFFFFF;
+
+    for (const char& byte : bytes) {
+        crc ^= static_cast<uint8_t>(byte);
+        for (uint64_t j = 0; j < 8; ++j) {
+            crc = (crc >> 1) ^ ((crc & 1) == 1 ? polynomial : 0);
+        }
+    }
+
+    return crc ^ 0xFFFFFFFF;
+}
+
+void
+StreamHeader::Write(StreamWriter& writer, const MetadataPtr& metadata) {
+    writer.Write(SERIAL_STREAM_MAGIC, 8);
+    StreamWriter::WriteObj(writer, SERIAL_STREAM_FORMAT_MAJOR);
+    StreamWriter::WriteObj(writer, SERIAL_STREAM_FORMAT_MINOR);
+
+    auto metadata_string = metadata->ToString();
+    const uint64_t metadata_len = metadata_string.size();
+    if (metadata_len > STREAM_HEADER_MAX_METADATA_LEN) {
+        throw VsagException(ErrorType::INVALID_BINARY,
+                            "streaming serialization metadata is too large");
+    }
+    StreamWriter::WriteObj(writer, metadata_len);
+    writer.Write(metadata_string.c_str(), metadata_len);
+    const uint32_t checksum = StreamHeader::CalculateChecksum(metadata_string);
+    StreamWriter::WriteObj(writer, checksum);
+}
+
+MetadataPtr
+StreamHeader::Read(StreamReader& reader) {
+    char magic[9] = {};
+    reader.Read(magic, 8);
+    if (strcmp(magic, SERIAL_STREAM_MAGIC) != 0) {
+        throw VsagException(ErrorType::INVALID_BINARY, "invalid streaming serialization magic");
+    }
+
+    uint16_t major = 0;
+    uint16_t minor = 0;
+    StreamReader::ReadObj(reader, major);
+    StreamReader::ReadObj(reader, minor);
+    if (major != SERIAL_STREAM_FORMAT_MAJOR) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "unsupported streaming serialization major version");
+    }
+
+    uint64_t metadata_len = 0;
+    StreamReader::ReadObj(reader, metadata_len);
+    if (metadata_len > STREAM_HEADER_MAX_METADATA_LEN) {
+        throw VsagException(ErrorType::INVALID_BINARY,
+                            "streaming serialization metadata is too large");
+    }
+    std::string metadata_string(metadata_len, '\0');
+    reader.Read(metadata_string.data(), metadata_len);
+
+    uint32_t checksum = 0;
+    StreamReader::ReadObj(reader, checksum);
+    if (StreamHeader::CalculateChecksum(metadata_string) != checksum) {
+        throw VsagException(ErrorType::INVALID_BINARY,
+                            "streaming serialization metadata checksum mismatch");
+    }
+
+    (void)minor;
+    return std::make_shared<Metadata>(JsonType::Parse(metadata_string));
 }
 
 FooterPtr

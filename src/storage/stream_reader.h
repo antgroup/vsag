@@ -112,6 +112,9 @@ private:
     std::stack<uint64_t> positions_;
 };
 
+void
+SkipForward(StreamReader& reader, uint64_t size);
+
 class ReadFuncStreamReader : public StreamReader {
 public:
     void
@@ -153,6 +156,28 @@ public:
 
 private:
     std::istream& istream_;
+};
+
+class ForwardStreamReader : public StreamReader {
+public:
+    void
+    Read(char* data, uint64_t size) override;
+
+    void
+    Seek(uint64_t cursor) override;
+
+    [[nodiscard]] uint64_t
+    GetCursor() const override;
+
+    [[nodiscard]] uint64_t
+    Length() override;
+
+public:
+    explicit ForwardStreamReader(std::istream& istream);
+
+private:
+    std::istream& istream_;
+    uint64_t cursor_{0};
 };
 
 class BufferStreamReader : public StreamReader {
@@ -208,6 +233,33 @@ public:
 private:
     StreamReader* const reader_impl_{nullptr};
     uint64_t begin_{0};
+    uint64_t cursor_{0};
+};
+
+class BoundedForwardReader : public StreamReader {
+public:
+    void
+    Read(char* data, uint64_t size) override;
+
+    void
+    Seek(uint64_t cursor) override;
+
+    [[nodiscard]] uint64_t
+    GetCursor() const override;
+
+    [[nodiscard]] uint64_t
+    Length() override;
+
+    void
+    SkipRemaining();
+
+public:
+    BoundedForwardReader(StreamReader* reader, uint64_t length);
+
+    ~BoundedForwardReader() = default;
+
+private:
+    StreamReader* const reader_impl_{nullptr};
     uint64_t cursor_{0};
 };
 
