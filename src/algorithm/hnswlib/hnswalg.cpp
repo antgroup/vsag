@@ -573,11 +573,13 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
             }
             if (visited_array[candidate_id] != visited_array_tag) {
                 visited_array[candidate_id] = visited_array_tag;
+                bool candidate_valid = true;
                 bool candidate_valid_checked = false;
                 if (is_id_allowed && not candidate_set.empty() &&
-                    not skip_strategy->ShouldSkipFilterCheck()) {
+                    not skip_strategy->ShouldVisit()) {
+                    candidate_valid = is_id_allowed->CheckValid(getExternalLabel(candidate_id));
                     candidate_valid_checked = true;
-                    if (not is_id_allowed->CheckValid(getExternalLabel(candidate_id))) {
+                    if (not candidate_valid) {
                         continue;
                     }
                 }
