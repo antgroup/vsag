@@ -20,6 +20,7 @@
 #include "../index_search_parameter.h"
 #include "../inner_index_parameter.h"
 #include "data_type.h"
+#include "utils/filter_search_skip_strategy.h"
 #include "utils/pointer_define.h"
 #include "vsag/constants.h"
 
@@ -90,6 +91,9 @@ public:
     // preserves existing behaviour.
     float brute_force_threshold{0.0F};
     float rabitq_error_rate{std::numeric_limits<float>::quiet_NaN()};
+    float skip_ratio{0.2F};
+    FilterSearchSkipStrategyType skip_strategy_type{
+        FilterSearchSkipStrategyType::DETERMINISTIC_ACCUMULATIVE};
 
 private:
     HGraphSearchParameters() = default;
