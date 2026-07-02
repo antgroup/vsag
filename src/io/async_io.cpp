@@ -57,6 +57,10 @@ AsyncIO::AsyncIO(const IOParamPtr& param, const IndexCommonParam& common_param)
     : AsyncIO(std::dynamic_pointer_cast<AsyncIOParameter>(param), common_param){};
 
 AsyncIO::~AsyncIO() {
+    try {
+        flush_if_dirty();
+    } catch (...) {
+    }
     close(this->wfd_);
     close(this->rfd_);
     // remove file
@@ -75,7 +79,7 @@ AsyncIO::WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset) {
     if (size + offset > this->size_) {
         this->size_ = size + offset;
     }
-    fsync(wfd_);
+    dirty_.store(true, std::memory_order_release);
 }
 
 void
@@ -85,6 +89,20 @@ AsyncIO::ResizeImpl(uint64_t size) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "ftruncate failed");
     }
     this->size_ = size;
+}
+
+void
+AsyncIO::flush_if_dirty() const {
+    if (dirty_.load(std::memory_order_acquire)) {
+        std::lock_guard<std::mutex> lock(flush_mutex_);
+        if (dirty_.load(std::memory_order_acquire)) {
+            if (fdatasync(wfd_) == -1) {
+                throw VsagException(ErrorType::INTERNAL_ERROR,
+                                    fmt::format("fdatasync failed: {}", strerror(errno)));
+            }
+            dirty_.store(false, std::memory_order_release);
+        }
+    }
 }
 
 bool
@@ -101,6 +119,7 @@ AsyncIO::ReadImpl(uint64_t size, uint64_t offset, uint8_t* data) const {
 
 const uint8_t*
 AsyncIO::DirectReadImpl(uint64_t size, uint64_t offset, bool& need_release) const {
+    flush_if_dirty();
     if (not check_valid_offset(size + offset)) {
         return nullptr;
     }
@@ -129,6 +148,7 @@ AsyncIO::ReleaseImpl(const uint8_t* data) {
 
 bool
 AsyncIO::MultiReadImpl(uint8_t* datas, uint64_t* sizes, uint64_t* offsets, uint64_t count) const {
+    flush_if_dirty();
     auto context = io_context_pool->TakeOne();
     uint8_t* cur_data = datas;
     auto all_count = static_cast<int64_t>(count);
