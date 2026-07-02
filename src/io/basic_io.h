@@ -17,6 +17,7 @@
 
 #include <fmt/format.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 
@@ -174,7 +175,7 @@ public:
         this->start_ = reader.GetCursor();
         if constexpr (SkipDeserialize) {
             reader.Seek(reader.GetCursor() + size);
-            this->Write(nullptr, size, offset);
+            this->size_ = std::max(this->size_, size);
         } else {
             while (offset < size) {
                 auto cur_size = std::min(SERIALIZE_BUFFER_SIZE, size - offset);
