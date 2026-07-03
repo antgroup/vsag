@@ -14,7 +14,6 @@
 
 #include "filter_search_skip_strategy.h"
 
-#include <algorithm>
 #include <cmath>
 
 #include "linear_congruential_generator.h"
@@ -28,12 +27,7 @@ constexpr const char* DETERMINISTIC_ACCUMULATIVE_SKIP_STRATEGY = "deterministic_
 
 double
 get_retain_ratio(float valid_ratio, float skip_ratio) {
-    if (valid_ratio == 1.0F) {
-        return 1.0;
-    }
-    auto skip_check_probability =
-        static_cast<double>(1.0F - valid_ratio) * static_cast<double>(skip_ratio);
-    return std::clamp(skip_check_probability, 0.0, 1.0);
+    return static_cast<double>(1.0F - valid_ratio) * static_cast<double>(1.0F - skip_ratio);
 }
 
 class RandomFilterSearchSkipStrategy : public FilterSearchSkipStrategy {
@@ -44,7 +38,7 @@ public:
 
     bool
     ShouldVisit() override {
-        return generator_.NextFloat() > visit_threshold_;
+        return generator_.NextFloat() >= visit_threshold_;
     }
 
 private:
@@ -61,7 +55,7 @@ public:
     ShouldVisit() override {
         accumulative_alpha_ += visit_ratio_;
         if (accumulative_alpha_ >= 1.0) {
-            accumulative_alpha_ = std::fmod(accumulative_alpha_, 1.0);
+            accumulative_alpha_ -= 1.0;
             return true;
         }
         return false;
@@ -79,8 +73,6 @@ create_filter_search_skip_strategy(FilterSearchSkipStrategyType type,
                                    float valid_ratio,
                                    float skip_ratio) {
     auto retain_ratio = get_retain_ratio(valid_ratio, skip_ratio);
-    // visit_ratio = valid_ratio + retain_ratio, capped at 1.0
-    // When valid_ratio is high, we visit most neighbors; when low, visit_ratio depends on skip_ratio
     auto visit_ratio = std::min(1.0, static_cast<double>(valid_ratio) + retain_ratio);
     switch (type) {
         case FilterSearchSkipStrategyType::RANDOM:
@@ -100,8 +92,7 @@ parse_filter_search_skip_strategy_type(const std::string& strategy_name) {
         return FilterSearchSkipStrategyType::DETERMINISTIC_ACCUMULATIVE;
     }
     throw VsagException(ErrorType::INVALID_ARGUMENT,
-                        "invalid filter search skip strategy '" + strategy_name +
-                            "', valid values are 'random' and 'deterministic_accumulative'");
+                        "invalid filter search skip strategy: " + strategy_name);
 }
 
 const char*

@@ -125,37 +125,64 @@ generate_hgraph_param(const HGraphDefaultParam& param) {
                        param.support_duplicate);
 }
 
-TEST_CASE("HGraph Parameters CheckCompatibility", "[ut][HGraphParameter][CheckCompatibility]") {
-    SECTION("wrong parameter type") {
-        HGraphDefaultParam default_param;
-        auto param_str = generate_hgraph_param(default_param);
-        auto param = std::make_shared<vsag::HGraphParameter>();
-        param->FromString(param_str);
-        REQUIRE(param->CheckCompatibility(param));
-        REQUIRE_FALSE(param->CheckCompatibility(std::make_shared<vsag::EmptyParameter>()));
+TEST_CASE("HGraph Parameters CheckCompatibility", "[ut][HGraphParameter][CheckCompatibility]"){
+    SECTION("wrong parameter type"){HGraphDefaultParam default_param;
+auto param_str = generate_hgraph_param(default_param);
+auto param = std::make_shared<vsag::HGraphParameter>();
+param->FromString(param_str);
+REQUIRE(param->CheckCompatibility(param));
+REQUIRE_FALSE(param->CheckCompatibility(std::make_shared<vsag::EmptyParameter>()));
+}
+
+TEST_COMPATIBILITY_CASE(
+    "different base codes io type", base_codes_io_type, "memory_io", "block_memory_io", true)
+TEST_COMPATIBILITY_CASE("different pq dim", base_codes_pq_dim, 8, 16, false)
+TEST_COMPATIBILITY_CASE(
+    "different base codes quantization type", base_codes_quantization_type, "sq4", "sq8", false)
+TEST_COMPATIBILITY_CASE("different graph type", graph_storage_type, "flat", "compressed", false)
+TEST_COMPATIBILITY_CASE("different max degree", max_degree, 26, 30, false)
+TEST_COMPATIBILITY_CASE("different support remove", support_remove, true, false, false)
+TEST_COMPATIBILITY_CASE("different remove flag bit", remove_flag_bit, 8, 16, false)
+TEST_COMPATIBILITY_CASE("different use reorder", use_reorder, true, false, false)
+TEST_COMPATIBILITY_CASE(
+    "different precise codes io type", precise_codes_io_type, "memory_io", "block_memory_io", true)
+TEST_COMPATIBILITY_CASE("different precise codes quantization type",
+                        precise_codes_quantization_type,
+                        "fp32",
+                        "sq8",
+                        false)
+TEST_COMPATIBILITY_CASE("different use attribute filter", use_attribute_filter, true, false, false)
+TEST_COMPATIBILITY_CASE("different support duplicate", support_duplicate, true, false, false)
+}
+
+TEST_CASE("HGraphSearchParameters parses skip_ratio and skip_strategy",
+          "[ut][HGraphSearchParameters][skip_ratio]") {
+    SECTION("default values") {
+        auto params = vsag::HGraphSearchParameters::FromJson(R"({"hgraph": {"ef_search": 32}})");
+        REQUIRE(params.skip_ratio == 0.2F);
+        REQUIRE(params.skip_strategy_type ==
+                vsag::FilterSearchSkipStrategyType::DETERMINISTIC_ACCUMULATIVE);
     }
 
-    TEST_COMPATIBILITY_CASE(
-        "different base codes io type", base_codes_io_type, "memory_io", "block_memory_io", true)
-    TEST_COMPATIBILITY_CASE("different pq dim", base_codes_pq_dim, 8, 16, false)
-    TEST_COMPATIBILITY_CASE(
-        "different base codes quantization type", base_codes_quantization_type, "sq4", "sq8", false)
-    TEST_COMPATIBILITY_CASE("different graph type", graph_storage_type, "flat", "compressed", false)
-    TEST_COMPATIBILITY_CASE("different max degree", max_degree, 26, 30, false)
-    TEST_COMPATIBILITY_CASE("different support remove", support_remove, true, false, false)
-    TEST_COMPATIBILITY_CASE("different remove flag bit", remove_flag_bit, 8, 16, false)
-    TEST_COMPATIBILITY_CASE("different use reorder", use_reorder, true, false, false)
-    TEST_COMPATIBILITY_CASE("different precise codes io type",
-                            precise_codes_io_type,
-                            "memory_io",
-                            "block_memory_io",
-                            true)
-    TEST_COMPATIBILITY_CASE("different precise codes quantization type",
-                            precise_codes_quantization_type,
-                            "fp32",
-                            "sq8",
-                            false)
-    TEST_COMPATIBILITY_CASE(
-        "different use attribute filter", use_attribute_filter, true, false, false)
-    TEST_COMPATIBILITY_CASE("different support duplicate", support_duplicate, true, false, false)
+    SECTION("custom skip_ratio") {
+        auto params = vsag::HGraphSearchParameters::FromJson(
+            R"({"hgraph": {"ef_search": 32, "skip_ratio": 0.5}})");
+        REQUIRE(params.skip_ratio == 0.5F);
+    }
+
+    SECTION("custom skip_strategy") {
+        auto params = vsag::HGraphSearchParameters::FromJson(
+            R"({"hgraph": {"ef_search": 32, "skip_strategy": "random"}})");
+        REQUIRE(params.skip_strategy_type == vsag::FilterSearchSkipStrategyType::RANDOM);
+    }
+
+    SECTION("skip_ratio out of range - too high") {
+        REQUIRE_THROWS(vsag::HGraphSearchParameters::FromJson(
+            R"({"hgraph": {"ef_search": 32, "skip_ratio": 1.5}})"));
+    }
+
+    SECTION("skip_ratio out of range - negative") {
+        REQUIRE_THROWS(vsag::HGraphSearchParameters::FromJson(
+            R"({"hgraph": {"ef_search": 32, "skip_ratio": -0.1}})"));
+    }
 }
