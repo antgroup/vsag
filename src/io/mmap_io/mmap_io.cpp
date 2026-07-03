@@ -32,6 +32,42 @@ namespace vsag {
 
 namespace {
 
+#ifdef __APPLE__
+uint8_t*
+remap_mmap_file(int fd, uint8_t* old_addr, uint64_t old_size, uint64_t new_size) {
+    auto old_mapped_size =
+        std::max(old_size, static_cast<uint64_t>(MMapIO::DEFAULT_INIT_MMAP_SIZE));
+    auto new_mapped_size =
+        std::max(new_size, static_cast<uint64_t>(MMapIO::DEFAULT_INIT_MMAP_SIZE));
+    if (old_mapped_size == new_mapped_size) {
+        return old_addr;
+    }
+
+    void* addr = mmap(nullptr, new_mapped_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (addr == MAP_FAILED) {
+        const int saved_errno = errno;
+        throw VsagException(
+            ErrorType::INTERNAL_ERROR,
+            fmt::format("mmap remap(size={}) failed (errno={}): {}",
+                        new_mapped_size,
+                        saved_errno,
+                        std::error_code(saved_errno, std::system_category()).message()));
+    }
+
+    if (munmap(old_addr, old_mapped_size) == -1) {
+        const int saved_errno = errno;
+        munmap(addr, new_mapped_size);
+        throw VsagException(
+            ErrorType::INTERNAL_ERROR,
+            fmt::format("munmap(old_size={}) failed (errno={}): {}",
+                        old_mapped_size,
+                        saved_errno,
+                        std::error_code(saved_errno, std::system_category()).message()));
+    }
+
+    return static_cast<uint8_t*>(addr);
+}
+#else
 void
 throw_mremap_error(uint64_t old_size, uint64_t new_size) {
     const int saved_errno = errno;
@@ -43,6 +79,7 @@ throw_mremap_error(uint64_t old_size, uint64_t new_size) {
                     saved_errno,
                     std::error_code(saved_errno, std::system_category()).message()));
 }
+#endif
 
 }  // namespace
 
@@ -69,8 +106,14 @@ MMapIO::MMapIO(std::string filename, Allocator* allocator)
         mmap_size = DEFAULT_INIT_MMAP_SIZE;
         auto ret = IOSyscall::FTruncate(this->fd_, mmap_size);
         if (ret == -1) {
+            const int saved_errno = errno;
             close(this->fd_);
-            throw VsagException(ErrorType::INTERNAL_ERROR, "ftruncate failed");
+            throw VsagException(
+                ErrorType::INTERNAL_ERROR,
+                fmt::format("ftruncate(size={}) failed (errno={}): {}",
+                            mmap_size,
+                            saved_errno,
+                            std::error_code(saved_errno, std::system_category()).message()));
         }
     }
     void* addr = mmap(nullptr, mmap_size, PROT_READ | PROT_WRITE, MAP_SHARED, this->fd_, 0);
@@ -115,17 +158,17 @@ MMapIO::WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset) {
     if (new_size > old_size) {
         auto ret = IOSyscall::FTruncate(this->fd_, new_size);
         if (ret == -1) {
-            throw VsagException(ErrorType::INTERNAL_ERROR, "ftruncate failed");
+            const int saved_errno = errno;
+            throw VsagException(
+                ErrorType::INTERNAL_ERROR,
+                fmt::format("ftruncate(size={}) failed (errno={}): {}",
+                            new_size,
+                            saved_errno,
+                            std::error_code(saved_errno, std::system_category()).message()));
         }
 
 #ifdef __APPLE__
-        munmap(this->mapped_ptr_, old_size);
-        this->mapped_ptr_ = nullptr;
-        void* addr = mmap(nullptr, new_size, PROT_READ | PROT_WRITE, MAP_SHARED, this->fd_, 0);
-        if (addr == MAP_FAILED) {
-            throw VsagException(ErrorType::INTERNAL_ERROR, "mmap remap failed");
-        }
-        this->mapped_ptr_ = static_cast<uint8_t*>(addr);
+        this->mapped_ptr_ = remap_mmap_file(this->fd_, this->mapped_ptr_, old_size, new_size);
 #else
         void* new_addr = mremap(this->mapped_ptr_, old_size, new_size, MREMAP_MAYMOVE);
         if (new_addr == MAP_FAILED) {
@@ -148,17 +191,17 @@ MMapIO::ResizeImpl(uint64_t size) {
     if (new_size > old_size) {
         auto ret = IOSyscall::FTruncate(this->fd_, new_size);
         if (ret == -1) {
-            throw VsagException(ErrorType::INTERNAL_ERROR, "ftruncate failed");
+            const int saved_errno = errno;
+            throw VsagException(
+                ErrorType::INTERNAL_ERROR,
+                fmt::format("ftruncate(size={}) failed (errno={}): {}",
+                            new_size,
+                            saved_errno,
+                            std::error_code(saved_errno, std::system_category()).message()));
         }
 
 #ifdef __APPLE__
-        munmap(this->mapped_ptr_, old_size);
-        this->mapped_ptr_ = nullptr;
-        void* addr = mmap(nullptr, new_size, PROT_READ | PROT_WRITE, MAP_SHARED, this->fd_, 0);
-        if (addr == MAP_FAILED) {
-            throw VsagException(ErrorType::INTERNAL_ERROR, "mmap remap failed");
-        }
-        this->mapped_ptr_ = static_cast<uint8_t*>(addr);
+        this->mapped_ptr_ = remap_mmap_file(this->fd_, this->mapped_ptr_, old_size, new_size);
 #else
         void* new_addr = mremap(this->mapped_ptr_, old_size, new_size, MREMAP_MAYMOVE);
         if (new_addr == MAP_FAILED) {
@@ -167,14 +210,18 @@ MMapIO::ResizeImpl(uint64_t size) {
         this->mapped_ptr_ = static_cast<uint8_t*>(new_addr);
 #endif
     } else if (new_size < old_size) {
-#ifdef __APPLE__
-        munmap(this->mapped_ptr_, old_size);
-        this->mapped_ptr_ = nullptr;
-        void* addr = mmap(nullptr, new_size, PROT_READ | PROT_WRITE, MAP_SHARED, this->fd_, 0);
-        if (addr == MAP_FAILED) {
-            throw VsagException(ErrorType::INTERNAL_ERROR, "mmap remap failed");
+        auto ret = IOSyscall::FTruncate(this->fd_, new_size);
+        if (ret == -1) {
+            const int saved_errno = errno;
+            throw VsagException(
+                ErrorType::INTERNAL_ERROR,
+                fmt::format("ftruncate(size={}) failed (errno={}): {}",
+                            new_size,
+                            saved_errno,
+                            std::error_code(saved_errno, std::system_category()).message()));
         }
-        this->mapped_ptr_ = static_cast<uint8_t*>(addr);
+#ifdef __APPLE__
+        this->mapped_ptr_ = remap_mmap_file(this->fd_, this->mapped_ptr_, old_size, new_size);
 #else
         void* new_addr = mremap(this->mapped_ptr_, old_size, new_size, MREMAP_MAYMOVE);
         if (new_addr == MAP_FAILED) {
@@ -182,10 +229,6 @@ MMapIO::ResizeImpl(uint64_t size) {
         }
         this->mapped_ptr_ = static_cast<uint8_t*>(new_addr);
 #endif
-        auto ret = IOSyscall::FTruncate(this->fd_, new_size);
-        if (ret == -1) {
-            throw VsagException(ErrorType::INTERNAL_ERROR, "ftruncate failed");
-        }
     }
     this->size_ = new_size;
 }
