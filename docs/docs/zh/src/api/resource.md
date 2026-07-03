@@ -122,6 +122,10 @@ vsag::Options::Instance().set_logger(&my_logger);
 声明于 `vsag/logger.h`。一个抽象的日志汇。实现它并通过 `Options::set_logger` 注册，即可把 VSAG 的日志
 输出路由到你应用的日志系统。
 
+内置 logger 默认使用 `info`。在内置 logger 创建前设置 `VSAG_LOG_LEVEL`，可选择 `trace`、
+`debug`、`info`、`warn`/`warning`、`error`、`critical` 或 `off`。无效值会被忽略，并保留默认等级。
+显式调用 `SetLevel` 仍会覆盖从环境变量得到的等级。
+
 ```cpp
 class Logger {
 public:

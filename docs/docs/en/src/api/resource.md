@@ -123,6 +123,11 @@ vsag::Options::Instance().set_logger(&my_logger);
 Declared in `vsag/logger.h`. An abstract logging sink. Implement it and register it via
 `Options::set_logger` to route VSAG's log output through your application's logging system.
 
+The built-in logger defaults to `info`. Set `VSAG_LOG_LEVEL` before the built-in logger is
+created to choose `trace`, `debug`, `info`, `warn`/`warning`, `error`, `critical`, or `off`. Invalid
+values are ignored and keep the default level. An explicit `SetLevel` call still overrides the
+environment-derived level.
+
 ```cpp
 class Logger {
 public:

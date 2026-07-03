@@ -26,6 +26,8 @@ namespace vsag {
 
 class DefaultLogger : public Logger {
 public:
+    DefaultLogger();
+
     void
     SetLevel(Logger::Level log_level) override;
 
