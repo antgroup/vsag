@@ -708,7 +708,8 @@ IVF::Deserialize(StreamReader& reader) {
             this->check_reorder_codes_ready();
             if (this->use_reader_io_for_reorder()) {
                 buffer_reader.PushSeek(datacell_offsets["reorder_codes"].GetInt());
-                this->reorder_codes_->Deserialize(buffer_reader);
+                this->reorder_codes_->Deserialize(
+                    buffer_reader.Slice(datacell_sizes["reorder_codes"].GetInt()));
                 buffer_reader.PopSeek();
             } else {
                 READ_DATACELL_WITH_NAME(buffer_reader, "reorder_codes", this->reorder_codes_);
