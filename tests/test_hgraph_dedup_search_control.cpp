@@ -15,6 +15,7 @@
 
 #include <fmt/format.h>
 
+#include <algorithm>
 #include <catch2/catch_test_macros.hpp>
 #include <cstring>
 #include <map>
@@ -160,6 +161,17 @@ CountDuplicateIds(const vsag::DatasetPtr& result, int64_t base_count) {
         }
     }
     return duplicate_count;
+}
+
+bool
+contains_id(const vsag::DatasetPtr& result, int64_t target_id) {
+    auto* ids = result->GetIds();
+    for (int64_t i = 0; i < result->GetDim(); ++i) {
+        if (ids[i] == target_id) {
+            return true;
+        }
+    }
+    return false;
 }
 
 }  // namespace
@@ -363,6 +375,44 @@ TEST_CASE("HGraph dedup search: brute force respects max_duplicates_per_group",
     REQUIRE(result_unlimited.has_value());
     REQUIRE(CountDuplicateIds(result_one.value(), multi_base_count) <
             CountDuplicateIds(result_unlimited.value(), multi_base_count));
+}
+
+TEST_CASE("HGraph dedup search: brute force counts only accepted duplicates",
+          "[ft][hgraph][duplicate][search_control]") {
+    constexpr int64_t multi_base_count = 20;
+    constexpr int64_t multi_dup_count = 21;
+    auto tv = GenerateTestData(DIM, multi_base_count, multi_dup_count);
+    std::fill(tv.base.begin(), tv.base.end(), 10.0F);
+    std::fill(tv.base.begin(), tv.base.begin() + DIM, 0.0F);
+    std::fill(tv.base.begin() + DIM, tv.base.begin() + 2 * DIM, 0.2F);
+    std::fill(tv.queries.begin(), tv.queries.begin() + DIM, 0.0F);
+    for (int64_t d = 0; d < DIM; ++d) {
+        tv.duplicates[d] = 0.3F;
+        tv.duplicates[multi_base_count * DIM + d] = tv.base[d];
+    }
+    auto index = BuildIndexWithDuplicates(tv, MakeBuildParam(true, 5.0F));
+
+    auto query_ds = vsag::Dataset::Make();
+    query_ds->NumElements(1)->Dim(DIM)->Float32Vectors(tv.queries.data())->Owner(false);
+
+    auto unlimited_param = MakeSearchParam(200, true, -1, 1.0F);
+    auto unlimited_result = index->KnnSearch(query_ds, 5, unlimited_param);
+    REQUIRE(unlimited_result.has_value());
+    std::vector<int64_t> unlimited_ids(
+        unlimited_result.value()->GetIds(),
+        unlimited_result.value()->GetIds() + unlimited_result.value()->GetDim());
+    INFO("unlimited ids: " << unlimited_ids[0] << ", " << unlimited_ids[1] << ", "
+                           << unlimited_ids[2] << ", " << unlimited_ids[3] << ", "
+                           << unlimited_ids[4]);
+    REQUIRE(contains_id(unlimited_result.value(), multi_base_count + multi_base_count));
+
+    auto limited_param = MakeSearchParam(200, true, 2, 1.0F);
+    auto result = index->KnnSearch(query_ds, 2, limited_param);
+    REQUIRE(result.has_value());
+    std::vector<int64_t> actual_ids(result.value()->GetIds(),
+                                    result.value()->GetIds() + result.value()->GetDim());
+    INFO("actual ids: " << actual_ids[0] << ", " << actual_ids[1]);
+    REQUIRE(contains_id(result.value(), multi_base_count + multi_base_count));
 }
 
 TEST_CASE("HGraph dedup search: brute force respects consider_duplicate in range search",

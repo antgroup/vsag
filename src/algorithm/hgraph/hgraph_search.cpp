@@ -322,25 +322,51 @@ HGraph::brute_force_search(const void* query,
     const bool need_limit_duplicate = this->support_duplicate_ && bottom_graph_ != nullptr &&
                                       (not consider_duplicate || max_duplicates_per_group >= 0);
     UnorderedMap<InnerIdType, int64_t> duplicate_counts(alloc);
-    auto should_push_result = [&](InnerIdType inner_id) {
-        if (not need_limit_duplicate) {
+    auto can_push_duplicate =
+        [&](InnerIdType inner_id, bool has_evicted_id, InnerIdType evicted_id) {
+            if (not need_limit_duplicate) {
+                return true;
+            }
+
+            const auto group_id = bottom_graph_->GetGroupId(inner_id);
+            if (group_id == inner_id) {
+                return true;
+            }
+            if (not consider_duplicate || max_duplicates_per_group == 0) {
+                return false;
+            }
+
+            auto duplicate_count = duplicate_counts[group_id];
+            if (has_evicted_id && bottom_graph_->GetGroupId(evicted_id) == group_id &&
+                evicted_id != group_id && duplicate_count > 0) {
+                --duplicate_count;
+            }
+            if (duplicate_count >= max_duplicates_per_group) {
+                return false;
+            }
             return true;
+        };
+    auto record_pushed_duplicate = [&](InnerIdType inner_id,
+                                       bool has_evicted_id,
+                                       InnerIdType evicted_id) {
+        if (not need_limit_duplicate || not consider_duplicate || max_duplicates_per_group <= 0) {
+            return;
+        }
+
+        if (has_evicted_id) {
+            const auto evicted_group_id = bottom_graph_->GetGroupId(evicted_id);
+            if (evicted_group_id != evicted_id) {
+                auto& evicted_duplicate_count = duplicate_counts[evicted_group_id];
+                if (evicted_duplicate_count > 0) {
+                    --evicted_duplicate_count;
+                }
+            }
         }
 
         const auto group_id = bottom_graph_->GetGroupId(inner_id);
-        if (group_id == inner_id) {
-            return true;
+        if (group_id != inner_id) {
+            ++duplicate_counts[group_id];
         }
-        if (not consider_duplicate || max_duplicates_per_group == 0) {
-            return false;
-        }
-
-        auto& duplicate_count = duplicate_counts[group_id];
-        if (duplicate_count >= max_duplicates_per_group) {
-            return false;
-        }
-        ++duplicate_count;
-        return true;
     };
 
     constexpr InnerIdType brute_force_batch_size = 64;
@@ -363,15 +389,26 @@ HGraph::brute_force_search(const void* query,
         for (InnerIdType i = 0; i < batch_count; ++i) {
             float dist = batch_dists[i];
             InnerIdType inner_id = batch_ids[i];
-            if (not should_push_result(inner_id)) {
-                continue;
-            }
             if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
+                if (not can_push_duplicate(inner_id, false, 0)) {
+                    continue;
+                }
                 if (dist <= radius) {
                     result->Push(dist, inner_id);
+                    record_pushed_duplicate(inner_id, false, 0);
                 }
             } else {
+                const auto topk_size = static_cast<uint64_t>(topk);
+                if (result->Size() >= topk_size && dist >= result->Top().first) {
+                    continue;
+                }
+                const bool has_evicted_id = result->Size() >= topk_size;
+                const auto evicted_id = has_evicted_id ? result->Top().second : InnerIdType(0);
+                if (not can_push_duplicate(inner_id, has_evicted_id, evicted_id)) {
+                    continue;
+                }
                 result->Push(dist, inner_id);
+                record_pushed_duplicate(inner_id, has_evicted_id, evicted_id);
             }
         }
     }
