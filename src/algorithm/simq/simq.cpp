@@ -16,6 +16,7 @@
 #include "simq.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <numeric>
@@ -28,6 +29,7 @@
 #include "index_feature_list.h"
 #include "inner_string_params.h"
 #include "metric_type.h"
+#include "query_context.h"
 #include "storage/serialization.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
@@ -46,6 +48,38 @@ struct cluster_member_entry {
     InnerIdType vec_id;
     float distance;
 };
+
+std::string
+dump_simq_statistics(const SearchStatistics& stats,
+                     uint64_t coarse_dist_cmp,
+                     uint64_t coarse_probe_count,
+                     uint64_t coarse_candidate_count,
+                     uint64_t rerank_candidate_count,
+                     uint64_t filtered_candidate_count,
+                     uint64_t result_count,
+                     bool limited_size_applied) {
+    auto json = JsonType::Parse(stats.Dump());
+    json["simq_coarse_dist_cmp"].SetUint64(coarse_dist_cmp);
+    json["simq_coarse_probe_count"].SetUint64(coarse_probe_count);
+    json["simq_coarse_candidate_count"].SetUint64(coarse_candidate_count);
+    json["simq_rerank_candidate_count"].SetUint64(rerank_candidate_count);
+    json["simq_filtered_candidate_count"].SetUint64(filtered_candidate_count);
+    json["simq_result_count"].SetUint64(result_count);
+    json["simq_limited_size_applied"].SetBool(limited_size_applied);
+    return json.Dump();
+}
+
+uint64_t
+read_dist_cmp(const DatasetPtr& result_ds) {
+    if (result_ds == nullptr) {
+        return 0;
+    }
+    auto values = result_ds->GetStatistics({"dist_cmp"});
+    if (values.empty() || values[0].empty()) {
+        return 0;
+    }
+    return std::strtoull(values[0].c_str(), nullptr, 10);
+}
 
 class HGraphDynamicClustering {
 public:
@@ -603,7 +637,11 @@ SIMQ::split_cluster_incremental(InnerIdType cluster_idx) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 std::vector<std::pair<InnerIdType, float>>
-SIMQ::coarse_search(const float* query_tokens, uint32_t query_token_count, int64_t coarse_k) const {
+SIMQ::coarse_search(const float* query_tokens,
+                    uint32_t query_token_count,
+                    int64_t coarse_k,
+                    uint64_t* coarse_dist_cmp,
+                    uint64_t* coarse_probe_count) const {
     // All buffers are local — safe for concurrent searches under shared_lock.
     std::unordered_map<InnerIdType, float> score_map;
     score_map.reserve(static_cast<uint64_t>(coarse_k) * static_cast<uint64_t>(max_cluster_size_));
@@ -618,11 +656,17 @@ SIMQ::coarse_search(const float* query_tokens, uint32_t query_token_count, int64
         if (actual_coarse_k <= 0) {
             continue;
         }
+        if (coarse_probe_count != nullptr) {
+            *coarse_probe_count += static_cast<uint64_t>(actual_coarse_k);
+        }
 
         auto query_ds = Dataset::Make();
         query_ds->NumElements(1)->Dim(dim_)->Float32Vectors(qt)->Owner(false);
         auto result_ds = rep_hgraph_->KnnSearch(
             query_ds, actual_coarse_k, R"({"hgraph": {"ef_search": 100}})", nullptr);
+        if (coarse_dist_cmp != nullptr) {
+            *coarse_dist_cmp += read_dist_cmp(result_ds);
+        }
 
         int64_t nres = result_ds->GetDim();
         const auto* rdists = result_ds->GetDistances();
@@ -670,9 +714,12 @@ SIMQ::KnnSearch(const DatasetPtr& query,
                 const std::string& parameters,
                 const FilterPtr& filter) const {
     std::shared_lock lock(global_mutex_);
+    SearchStatistics stats;
 
     if (total_count_ == 0 || rep_hgraph_ == nullptr) {
-        return Dataset::Make();
+        auto result = Dataset::Make();
+        result->Statistics(dump_simq_statistics(stats, 0, 0, 0, 0, 0, 0, false));
+        return result;
     }
 
     CHECK_ARGUMENT(query->GetNumElements() > 0, "simq search: query.num_elements must be > 0");
@@ -688,21 +735,29 @@ SIMQ::KnnSearch(const DatasetPtr& query,
     rerank_k = std::min(rerank_k, static_cast<int64_t>(total_count_));
     k = std::min(k, static_cast<int64_t>(total_count_));
 
-    auto coarse_results = coarse_search(query_mvs[0].vectors_, query_mvs[0].len_, coarse_k);
+    uint64_t coarse_dist_cmp = 0;
+    uint64_t coarse_probe_count = 0;
+    auto coarse_results = coarse_search(
+        query_mvs[0].vectors_, query_mvs[0].len_, coarse_k, &coarse_dist_cmp, &coarse_probe_count);
+    uint64_t coarse_candidate_count = coarse_results.size();
     if (static_cast<int64_t>(coarse_results.size()) > rerank_k) {
         coarse_results.resize(rerank_k);
     }
+    uint64_t rerank_candidate_count = coarse_results.size();
 
     // Exact MaxSim rerank via MultiVectorDataCell
     auto computer = mv_codes_->FactoryComputer(&query_mvs[0]);
     std::vector<std::pair<float, InnerIdType>> reranked;
     reranked.reserve(coarse_results.size());
+    uint64_t filtered_candidate_count = 0;
     for (auto& [doc_id, _] : coarse_results) {
         if (filter != nullptr && !filter->CheckValid(this->label_table_->GetLabelById(doc_id))) {
+            ++filtered_candidate_count;
             continue;
         }
         float dist = 0.0F;
         mv_codes_->Query(&dist, computer, &doc_id, 1);
+        ++stats.dist_cmp;
         reranked.emplace_back(dist, doc_id);
     }
     std::sort(reranked.begin(), reranked.end(), [](const auto& a, const auto& b) {
@@ -715,6 +770,14 @@ SIMQ::KnnSearch(const DatasetPtr& query,
         dists[i] = reranked[i].first;
         ids[i] = this->label_table_->GetLabelById(reranked[i].second);
     }
+    result_ds->Statistics(dump_simq_statistics(stats,
+                                               coarse_dist_cmp,
+                                               coarse_probe_count,
+                                               coarse_candidate_count,
+                                               rerank_candidate_count,
+                                               filtered_candidate_count,
+                                               static_cast<uint64_t>(result_count),
+                                               false));
     return std::move(result_ds);
 }
 
@@ -729,9 +792,12 @@ SIMQ::RangeSearch(const DatasetPtr& query,
                   const FilterPtr& filter,
                   int64_t limited_size) const {
     std::shared_lock lock(global_mutex_);
+    SearchStatistics stats;
 
     if (total_count_ == 0 || rep_hgraph_ == nullptr) {
-        return Dataset::Make();
+        auto result = Dataset::Make();
+        result->Statistics(dump_simq_statistics(stats, 0, 0, 0, 0, 0, 0, false));
+        return result;
     }
 
     CHECK_ARGUMENT(query->GetNumElements() > 0,
@@ -748,25 +814,35 @@ SIMQ::RangeSearch(const DatasetPtr& query,
     int64_t rerank_k = sp.rerank_k > 0 ? sp.rerank_k : default_rerank_k_;
     rerank_k = std::min(rerank_k, static_cast<int64_t>(total_count_));
 
-    auto coarse_results = coarse_search(query_mvs[0].vectors_, query_mvs[0].len_, coarse_k);
+    uint64_t coarse_dist_cmp = 0;
+    uint64_t coarse_probe_count = 0;
+    auto coarse_results = coarse_search(
+        query_mvs[0].vectors_, query_mvs[0].len_, coarse_k, &coarse_dist_cmp, &coarse_probe_count);
+    uint64_t coarse_candidate_count = coarse_results.size();
     if (static_cast<int64_t>(coarse_results.size()) > rerank_k) {
         coarse_results.resize(rerank_k);
     }
+    uint64_t rerank_candidate_count = coarse_results.size();
 
     auto computer = mv_codes_->FactoryComputer(&query_mvs[0]);
     std::vector<std::pair<float, InnerIdType>> in_range;
+    uint64_t filtered_candidate_count = 0;
     for (auto& [doc_id, _] : coarse_results) {
         if (filter != nullptr && !filter->CheckValid(this->label_table_->GetLabelById(doc_id))) {
+            ++filtered_candidate_count;
             continue;
         }
         float dist = 0.0F;
         mv_codes_->Query(&dist, computer, &doc_id, 1);
+        ++stats.dist_cmp;
         if (dist <= radius) {
             in_range.emplace_back(dist, doc_id);
         }
     }
 
+    bool limited_size_applied = false;
     if (limited_size >= 0 && static_cast<int64_t>(in_range.size()) > limited_size) {
+        limited_size_applied = true;
         std::nth_element(in_range.begin(),
                          in_range.begin() + limited_size,
                          in_range.end(),
@@ -783,6 +859,14 @@ SIMQ::RangeSearch(const DatasetPtr& query,
         dists[i] = in_range[i].first;
         ids[i] = this->label_table_->GetLabelById(in_range[i].second);
     }
+    result_ds->Statistics(dump_simq_statistics(stats,
+                                               coarse_dist_cmp,
+                                               coarse_probe_count,
+                                               coarse_candidate_count,
+                                               rerank_candidate_count,
+                                               filtered_candidate_count,
+                                               static_cast<uint64_t>(in_range.size()),
+                                               limited_size_applied));
     return std::move(result_ds);
 }
 

@@ -48,6 +48,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <iostream>
 #include <random>
 #include <string>
@@ -256,6 +257,59 @@ recall_at_k(const int64_t* returned, int64_t n_returned, const int64_t* gt, int6
     return static_cast<float>(hits) / static_cast<float>(n_gt);
 }
 
+struct SimqSearchStats {
+    uint64_t dist_cmp{0};
+    uint64_t coarse_dist_cmp{0};
+    uint64_t coarse_probe_count{0};
+    uint64_t coarse_candidate_count{0};
+    uint64_t rerank_candidate_count{0};
+    uint64_t filtered_candidate_count{0};
+    uint64_t result_count{0};
+    std::string limited_size_applied;
+};
+
+static uint64_t
+parse_u64(const std::string& value) {
+    REQUIRE(!value.empty());
+    return std::strtoull(value.c_str(), nullptr, 10);
+}
+
+static SimqSearchStats
+get_simq_search_stats(const vsag::DatasetPtr& result) {
+    REQUIRE(result->GetStatistics() != "{}");
+    auto values = result->GetStatistics({"dist_cmp",
+                                         "simq_coarse_dist_cmp",
+                                         "simq_coarse_probe_count",
+                                         "simq_coarse_candidate_count",
+                                         "simq_rerank_candidate_count",
+                                         "simq_filtered_candidate_count",
+                                         "simq_result_count",
+                                         "simq_limited_size_applied"});
+    REQUIRE(values.size() == 8);
+
+    SimqSearchStats stats;
+    stats.dist_cmp = parse_u64(values[0]);
+    stats.coarse_dist_cmp = parse_u64(values[1]);
+    stats.coarse_probe_count = parse_u64(values[2]);
+    stats.coarse_candidate_count = parse_u64(values[3]);
+    stats.rerank_candidate_count = parse_u64(values[4]);
+    stats.filtered_candidate_count = parse_u64(values[5]);
+    stats.result_count = parse_u64(values[6]);
+    stats.limited_size_applied = values[7];
+    return stats;
+}
+
+static void
+require_simq_search_stats(const vsag::DatasetPtr& result) {
+    auto stats = get_simq_search_stats(result);
+    REQUIRE(stats.dist_cmp > 0);
+    REQUIRE(stats.coarse_dist_cmp > 0);
+    REQUIRE(stats.coarse_probe_count > 0);
+    REQUIRE(stats.coarse_candidate_count >= stats.rerank_candidate_count);
+    REQUIRE(stats.rerank_candidate_count >= stats.dist_cmp);
+    REQUIRE(stats.result_count == static_cast<uint64_t>(result->GetDim()));
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Test cases
 // ─────────────────────────────────────────────────────────────────────────────
@@ -315,6 +369,7 @@ TEST_CASE("SIMQ: build and knn search recall", "[simq][build][search]") {
         auto search_result =
             index->KnnSearch(one_query, TOP_K, search_param, vsag::FilterPtr(nullptr));
         REQUIRE(search_result.has_value());
+        require_simq_search_stats(search_result.value());
 
         auto* ret_ids = search_result.value()->GetIds();
         float r = recall_at_k(ret_ids, TOP_K, ds.gt_ids[q].data(), static_cast<int64_t>(TOP_K));
@@ -407,15 +462,17 @@ TEST_CASE("SIMQ: range search", "[simq][range_search]") {
     // Use KNN distances to pick a sensible radius: the worst distance in top-k
     auto knn_result = index->KnnSearch(one_query, TOP_K, search_param, vsag::FilterPtr(nullptr));
     REQUIRE(knn_result.has_value());
+    require_simq_search_stats(knn_result.value());
     const float* knn_dists = knn_result.value()->GetDistances();
-    int64_t knn_n = knn_result.value()->GetNumElements();
+    int64_t knn_n = knn_result.value()->GetDim();
     REQUIRE(knn_n > 0);
     float radius = knn_dists[knn_n - 1];  // worst distance among top-k results
 
     SECTION("all returned distances are within radius") {
         auto rr = index->RangeSearch(one_query, radius, search_param, vsag::FilterPtr(nullptr));
         REQUIRE(rr.has_value());
-        int64_t n = rr.value()->GetNumElements();
+        require_simq_search_stats(rr.value());
+        int64_t n = rr.value()->GetDim();
         const float* rdists = rr.value()->GetDistances();
         REQUIRE(n >= 1);
         for (int64_t i = 0; i < n; ++i) {
@@ -428,7 +485,11 @@ TEST_CASE("SIMQ: range search", "[simq][range_search]") {
         auto rr =
             index->RangeSearch(one_query, radius, search_param, vsag::FilterPtr(nullptr), limited);
         REQUIRE(rr.has_value());
-        REQUIRE(rr.value()->GetNumElements() <= limited);
+        require_simq_search_stats(rr.value());
+        int64_t n = rr.value()->GetDim();
+        REQUIRE(n <= limited);
+        auto stats = get_simq_search_stats(rr.value());
+        REQUIRE(stats.limited_size_applied == "true");
     }
 }
 
