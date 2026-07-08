@@ -16,6 +16,7 @@
 #include "ivf.h"
 
 #include <atomic>
+#include <limits>
 #include <random>
 #include <set>
 
@@ -32,6 +33,7 @@
 #include "index/index_impl.h"
 #include "index_feature_list.h"
 #include "inner_string_params.h"
+#include "io/reader_io/reader_io_parameter.h"
 #include "ivf_nearest_partition.h"
 #include "query_context.h"
 #include "storage/serialization.h"
@@ -41,6 +43,59 @@
 #include "vsag_exception.h"
 
 namespace vsag {
+static uint64_t
+checked_datacell_end(uint64_t begin, uint64_t length) {
+    if (length > std::numeric_limits<uint64_t>::max() - begin) {
+        throw VsagException(ErrorType::READ_ERROR, "Serialized datacell boundary overflows");
+    }
+    return begin + length;
+}
+
+class AbsoluteBoundedStreamReader : public StreamReader {
+public:
+    AbsoluteBoundedStreamReader(StreamReader* reader, uint64_t begin, uint64_t length)
+        : StreamReader(checked_datacell_end(begin, length)),
+          reader_(reader),
+          begin_(begin),
+          end_(begin + length) {
+        reader_->Seek(begin_);
+    }
+
+    void
+    Read(char* data, uint64_t size) override {
+        auto cursor = this->GetCursor();
+        if (cursor > end_ or size > end_ - cursor) {
+            throw VsagException(ErrorType::READ_ERROR,
+                                "Read operation exceeds serialized datacell boundary");
+        }
+        reader_->Read(data, size);
+    }
+
+    void
+    Seek(uint64_t cursor) override {
+        if (cursor < begin_ or cursor > end_) {
+            throw VsagException(ErrorType::READ_ERROR,
+                                "Seek operation exceeds serialized datacell boundary");
+        }
+        reader_->Seek(cursor);
+    }
+
+    [[nodiscard]] uint64_t
+    GetCursor() const override {
+        return reader_->GetCursor();
+    }
+
+    [[nodiscard]] uint64_t
+    Length() override {
+        return end_;
+    }
+
+private:
+    StreamReader* const reader_{nullptr};
+    uint64_t begin_{0};
+    uint64_t end_{0};
+};
+
 static constexpr const char* IVF_PARAMS_TEMPLATE =
     R"(
     {
@@ -662,6 +717,7 @@ IVF::Deserialize(StreamReader& reader) {
         this->partition_strategy_->Deserialize(buffer_reader);
         this->label_table_->Deserialize(buffer_reader);
         if (use_reorder_) {
+            this->check_reorder_codes_ready();
             this->reorder_codes_->Deserialize(buffer_reader);
         }
 
@@ -703,7 +759,19 @@ IVF::Deserialize(StreamReader& reader) {
         READ_DATACELL_WITH_NAME(buffer_reader, "partition_strategy", this->partition_strategy_);
         READ_DATACELL_WITH_NAME(buffer_reader, "label_table", this->label_table_);
         if (use_reorder_) {
-            READ_DATACELL_WITH_NAME(buffer_reader, "reorder_codes", this->reorder_codes_);
+            this->check_reorder_codes_ready();
+            if (this->use_reader_io_for_reorder()) {
+                auto reorder_codes_offset = datacell_offsets["reorder_codes"].GetInt();
+                auto reorder_codes_size = datacell_sizes["reorder_codes"].GetInt();
+                buffer_reader.PushSeek(reorder_codes_offset);
+                AbsoluteBoundedStreamReader reorder_codes_reader(
+                    &buffer_reader, reorder_codes_offset, reorder_codes_size);
+                // ReaderIO records absolute offsets into the owning index reader.
+                this->reorder_codes_->Deserialize(reorder_codes_reader);
+                buffer_reader.PopSeek();
+            } else {
+                READ_DATACELL_WITH_NAME(buffer_reader, "reorder_codes", this->reorder_codes_);
+            }
         }
         if (use_attribute_filter_) {
             READ_DATACELL_WITH_NAME(buffer_reader, "attr_filter_index", this->attr_filter_index_);
@@ -715,6 +783,16 @@ IVF::Deserialize(StreamReader& reader) {
     }
     this->fill_location_map();
     this->cal_memory_usage();
+}
+
+void
+IVF::SetIO(const std::shared_ptr<Reader> reader) {
+    auto reader_param = std::make_shared<ReaderIOParameter>();
+    reader_param->reader = reader;
+    if (this->use_reorder_) {
+        this->check_reorder_codes_ready();
+        this->reorder_codes_->InitIO(reader_param);
+    }
 }
 
 InnerSearchParam
@@ -1308,6 +1386,22 @@ IVF::cal_memory_usage() {
     memory += partition_strategy_->GetMemoryUsage();
     std::unique_lock lock(this->memory_usage_mutex_);
     this->current_memory_usage_.store(memory);
+}
+
+bool
+IVF::use_reader_io_for_reorder() const {
+    auto ivf_param = std::dynamic_pointer_cast<IVFParameter>(this->create_param_ptr_);
+    return ivf_param != nullptr and ivf_param->precise_codes_param != nullptr and
+           ivf_param->precise_codes_param->io_parameter != nullptr and
+           ivf_param->precise_codes_param->io_parameter->GetTypeName() == IO_TYPE_VALUE_READER_IO;
+}
+
+void
+IVF::check_reorder_codes_ready() const {
+    if (this->reorder_codes_ == nullptr) {
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            "reorder_codes is null but use_reorder is true");
+    }
 }
 
 uint64_t
