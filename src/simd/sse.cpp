@@ -127,16 +127,11 @@ FP32SparseAccumulate(float* RESTRICT dists,
         __m128 val_vec = _mm_loadu_ps(vals + i);
         __m128 delta_vec = _mm_mul_ps(val_vec, q_vec);
 
-        __m128i id_vec = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ids + i));
-        __m128i idx_vec = _mm_cvtepu16_epi32(id_vec);
-
         alignas(16) float res[4];
-        alignas(16) int32_t indices[4];
         _mm_store_ps(res, delta_vec);
-        _mm_store_si128(reinterpret_cast<__m128i*>(indices), idx_vec);
 
         for (int k = 0; k < 4; ++k) {
-            dists[indices[k]] += res[k];
+            dists[ids[i + k]] += res[k];
         }
     }
     for (; i < num; ++i) {
@@ -381,22 +376,17 @@ SQ8SparseAccumulate(float* RESTRICT dists,
     __m128 q_vec = _mm_set1_ps(query_val);
     uint32_t i = 0;
     for (; i + 4 <= num; i += 4) {
-        uint32_t packed_vals = 0;
-        std::memcpy(&packed_vals, vals + i, sizeof(packed_vals));
-        __m128i val_i32 = _mm_cvtepu8_epi32(_mm_cvtsi32_si128(static_cast<int>(packed_vals)));
-        __m128 val_vec = _mm_cvtepi32_ps(val_i32);
+        __m128 val_vec = _mm_set_ps(static_cast<float>(vals[i + 3]),
+                                    static_cast<float>(vals[i + 2]),
+                                    static_cast<float>(vals[i + 1]),
+                                    static_cast<float>(vals[i]));
         __m128 delta_vec = _mm_mul_ps(val_vec, q_vec);
 
-        __m128i id_vec = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ids + i));
-        __m128i idx_vec = _mm_cvtepu16_epi32(id_vec);
-
         alignas(16) float res[4];
-        alignas(16) int32_t indices[4];
         _mm_store_ps(res, delta_vec);
-        _mm_store_si128(reinterpret_cast<__m128i*>(indices), idx_vec);
 
         for (int k = 0; k < 4; ++k) {
-            dists[indices[k]] += res[k];
+            dists[ids[i + k]] += res[k];
         }
     }
     for (; i < num; ++i) {

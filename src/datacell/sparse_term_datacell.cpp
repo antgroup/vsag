@@ -45,7 +45,7 @@ SparseTermDataCell::Query(float* global_dists, const SparseTermComputerPtr& comp
                                                computer->term_retain_ratio_);
 
         if (sparse_value_quant_type_ == SparseValueQuantizationType::SQ8) {
-            computer->ScanForAccumulate(
+            computer->ScanForAccumulateSQ8(
                 it, term_ids_[term]->data(), term_datas_[term]->data(), term_size, global_dists);
         } else if (sparse_value_quant_type_ == SparseValueQuantizationType::FP16) {
             computer->ScanForAccumulateFP16Bytes(

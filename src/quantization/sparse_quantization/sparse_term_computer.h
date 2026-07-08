@@ -67,13 +67,12 @@ public:
         }
     }
 
-    template <class T>
     void
-    ScanForAccumulate(uint32_t term_iterator,
-                      const uint16_t* term_ids,
-                      const T* term_datas,
-                      uint32_t term_count,
-                      float* global_dists) {
+    ScanForAccumulateSQ8(uint32_t term_iterator,
+                         const uint16_t* term_ids,
+                         const uint8_t* term_datas,
+                         uint32_t term_count,
+                         float* global_dists) {
         float query_val = sorted_query_[term_iterator].second;
 
         // TODO(ZXY): add prefetch to decrease cache miss like:
@@ -81,25 +80,7 @@ public:
         //  __builtin_prefetch(term_datas + term_count / 2, 0, 3);
         //  __builtin_prefetch(global_dists + term_ids[term_count / 2], 0, 3);
 
-        if constexpr (std::is_same_v<T, float>) {
-            FP32SparseAccumulate(global_dists, term_ids, term_datas, query_val, term_count);
-        } else if constexpr (std::is_same_v<T, uint8_t>) {
-            SQ8SparseAccumulate(global_dists, term_ids, term_datas, query_val, term_count);
-        } else {
-            for (uint32_t i = 0; i < term_count; i++) {
-                global_dists[term_ids[i]] += query_val * term_datas[i];
-            }
-        }
-    }
-
-    void
-    ScanForAccumulateFP16(uint32_t term_iterator,
-                          const uint16_t* term_ids,
-                          const uint16_t* term_datas,
-                          uint32_t term_count,
-                          float* global_dists) {
-        float query_val = sorted_query_[term_iterator].second;
-        FP16SparseAccumulate(global_dists, term_ids, term_datas, query_val, term_count);
+        SQ8SparseAccumulate(global_dists, term_ids, term_datas, query_val, term_count);
     }
 
     void
@@ -109,12 +90,7 @@ public:
                                uint32_t term_count,
                                float* global_dists) {
         float query_val = sorted_query_[term_iterator].second;
-        for (uint32_t i = 0; i < term_count; ++i) {
-            uint16_t value = 0;
-            std::memcpy(
-                &value, term_datas + static_cast<uint64_t>(i) * sizeof(value), sizeof(value));
-            global_dists[term_ids[i]] += query_val * generic::FP16ToFloat(value);
-        }
+        AccumulateFP16Bytes(global_dists, term_ids, term_datas, query_val, term_count);
     }
 
     void
@@ -124,12 +100,7 @@ public:
                                 uint32_t term_count,
                                 float* global_dists) {
         float query_val = sorted_query_[term_iterator].second;
-        for (uint32_t i = 0; i < term_count; ++i) {
-            float value = 0.0F;
-            std::memcpy(
-                &value, term_datas + static_cast<uint64_t>(i) * sizeof(value), sizeof(value));
-            global_dists[term_ids[i]] += query_val * value;
-        }
+        AccumulateFloatBytes(global_dists, term_ids, term_datas, query_val, term_count);
     }
 
     inline void
@@ -207,6 +178,49 @@ public:
     uint32_t
     GetTerm(uint32_t term_iterator) {
         return sorted_query_[term_iterator].first;
+    }
+
+private:
+    static constexpr uint32_t BYTE_ACCUMULATE_BATCH_SIZE = 32;
+
+    static void
+    AccumulateFP16Bytes(float* global_dists,
+                        const uint16_t* term_ids,
+                        const uint8_t* term_datas,
+                        float query_val,
+                        uint32_t term_count) {
+        uint32_t offset = 0;
+        while (offset < term_count) {
+            const uint32_t remaining = term_count - offset;
+            const uint32_t batch_size =
+                remaining < BYTE_ACCUMULATE_BATCH_SIZE ? remaining : BYTE_ACCUMULATE_BATCH_SIZE;
+            uint16_t values[BYTE_ACCUMULATE_BATCH_SIZE];
+            std::memcpy(values,
+                        term_datas + static_cast<uint64_t>(offset) * sizeof(uint16_t),
+                        static_cast<uint64_t>(batch_size) * sizeof(uint16_t));
+            FP16SparseAccumulate(global_dists, term_ids + offset, values, query_val, batch_size);
+            offset += batch_size;
+        }
+    }
+
+    static void
+    AccumulateFloatBytes(float* global_dists,
+                         const uint16_t* term_ids,
+                         const uint8_t* term_datas,
+                         float query_val,
+                         uint32_t term_count) {
+        uint32_t offset = 0;
+        while (offset < term_count) {
+            const uint32_t remaining = term_count - offset;
+            const uint32_t batch_size =
+                remaining < BYTE_ACCUMULATE_BATCH_SIZE ? remaining : BYTE_ACCUMULATE_BATCH_SIZE;
+            float values[BYTE_ACCUMULATE_BATCH_SIZE];
+            std::memcpy(values,
+                        term_datas + static_cast<uint64_t>(offset) * sizeof(float),
+                        static_cast<uint64_t>(batch_size) * sizeof(float));
+            FP32SparseAccumulate(global_dists, term_ids + offset, values, query_val, batch_size);
+            offset += batch_size;
+        }
     }
 
 public:

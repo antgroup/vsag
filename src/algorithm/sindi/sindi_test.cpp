@@ -18,6 +18,7 @@
 
 #include <array>
 #include <set>
+#include <tuple>
 
 #include "impl/allocator/safe_allocator.h"
 #include "index_common_param.h"
@@ -596,7 +597,149 @@ TEST_CASE("SINDI Immutable Runtime Rejects Mutable Operations", "[ut][SINDI]") {
 
     std::stringstream ss;
     vsag::IOStreamWriter writer(ss);
-    REQUIRE_THROWS_AS(index.Serialize(writer), vsag::VsagException);
+    REQUIRE_NOTHROW(index.Serialize(writer));
+}
+
+TEST_CASE("SINDI Immutable Build Search And Serialize Test", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+
+    auto param_tuple = GENERATE(std::make_tuple("fp32", false, false),
+                                std::make_tuple("sq8", false, true),
+                                std::make_tuple("fp16", true, false),
+                                std::make_tuple("fp32", true, true));
+    const auto* sparse_value_quant_type = std::get<0>(param_tuple);
+    const bool remap_term_ids = std::get<1>(param_tuple);
+    const bool use_reorder = std::get<2>(param_tuple);
+    const std::string use_quantization =
+        std::string(sparse_value_quant_type) == "fp16"
+            ? R"("fp16")"
+            : (std::string(sparse_value_quant_type) == "sq8" ? "true" : "false");
+
+    constexpr uint32_t num_base = 10050;
+    constexpr uint32_t num_query = 2;
+    constexpr uint32_t window_size = 10000;
+    constexpr int64_t max_dim = 48;
+    constexpr int64_t max_id = 1000;
+    constexpr uint32_t id_offset = 700000;
+
+    std::vector<int64_t> ids(num_base);
+    for (uint32_t i = 0; i < num_base; ++i) {
+        ids[i] = i;
+    }
+
+    auto sv_base = fixtures::GenerateSparseVectors(num_base, max_dim, max_id, 0, 10, 2243);
+    std::set<uint32_t> unique_terms;
+    for (uint32_t i = 0; i < num_base; ++i) {
+        for (uint32_t j = 0; j < sv_base[i].len_; ++j) {
+            if (remap_term_ids) {
+                sv_base[i].ids_[j] += id_offset;
+            }
+            unique_terms.insert(sv_base[i].ids_[j]);
+        }
+    }
+
+    auto base = vsag::Dataset::Make();
+    base->NumElements(num_base)->SparseVectors(sv_base.data())->Ids(ids.data())->Owner(false);
+
+    uint32_t term_id_limit = remap_term_ids ? static_cast<uint32_t>(unique_terms.size()) + 10
+                                            : static_cast<uint32_t>(max_id) + 1;
+    auto mutable_param_str = fmt::format(R"({{
+        "use_reorder": {},
+        "use_quantization": {},
+        "doc_prune_ratio": 0.0,
+        "window_size": {},
+        "term_id_limit": {},
+        "remap_term_ids": {},
+        "avg_doc_term_length": 48,
+        "immutable": false
+    }})",
+                                         use_reorder,
+                                         use_quantization,
+                                         window_size,
+                                         term_id_limit,
+                                         remap_term_ids);
+    auto immutable_param_str = fmt::format(R"({{
+        "use_reorder": {},
+        "use_quantization": {},
+        "doc_prune_ratio": 0.0,
+        "window_size": {},
+        "term_id_limit": {},
+        "remap_term_ids": {},
+        "avg_doc_term_length": 48,
+        "immutable": true
+    }})",
+                                           use_reorder,
+                                           use_quantization,
+                                           window_size,
+                                           term_id_limit,
+                                           remap_term_ids);
+
+    auto mutable_param = std::make_shared<vsag::SINDIParameter>();
+    mutable_param->FromJson(vsag::JsonType::Parse(mutable_param_str));
+    auto immutable_param = std::make_shared<vsag::SINDIParameter>();
+    immutable_param->FromJson(vsag::JsonType::Parse(immutable_param_str));
+    auto mutable_index = std::make_unique<SINDI>(mutable_param, common_param);
+    auto immutable_index = std::make_unique<SINDI>(immutable_param, common_param);
+
+    REQUIRE(mutable_index->Build(base).empty());
+    REQUIRE(immutable_index->Build(base).empty());
+    REQUIRE(immutable_index->GetNumElements() == num_base);
+
+    auto add_data = vsag::Dataset::Make();
+    add_data->NumElements(1)->SparseVectors(sv_base.data())->Ids(ids.data())->Owner(false);
+    REQUIRE_THROWS_AS(immutable_index->Add(add_data), vsag::VsagException);
+
+    auto mutable_from_immutable = std::make_unique<SINDI>(mutable_param, common_param);
+    auto immutable_from_immutable = std::make_unique<SINDI>(immutable_param, common_param);
+    test_serializion(*immutable_index, *mutable_from_immutable);
+    test_serializion(*immutable_index, *immutable_from_immutable);
+
+    static constexpr auto search_param_str = R"(
+    {
+        "sindi": {
+            "query_prune_ratio": 0.0,
+            "term_prune_ratio": 0.0,
+            "n_candidate": 40,
+            "use_term_lists_heap_insert": true
+        }
+    }
+    )";
+
+    auto query = vsag::Dataset::Make();
+    for (uint32_t i = 0; i < num_query; ++i) {
+        query->NumElements(1)->SparseVectors(sv_base.data() + i)->Owner(false);
+        auto expected = mutable_index->KnnSearch(query, 10, search_param_str, nullptr);
+        auto built = immutable_index->KnnSearch(query, 10, search_param_str, nullptr);
+        auto mutable_roundtrip =
+            mutable_from_immutable->KnnSearch(query, 10, search_param_str, nullptr);
+        auto immutable_roundtrip =
+            immutable_from_immutable->KnnSearch(query, 10, search_param_str, nullptr);
+        REQUIRE(built->GetDim() == expected->GetDim());
+        REQUIRE(mutable_roundtrip->GetDim() == expected->GetDim());
+        REQUIRE(immutable_roundtrip->GetDim() == expected->GetDim());
+        for (int64_t j = 0; j < expected->GetDim(); ++j) {
+            REQUIRE(built->GetIds()[j] == expected->GetIds()[j]);
+            REQUIRE(mutable_roundtrip->GetIds()[j] == expected->GetIds()[j]);
+            REQUIRE(immutable_roundtrip->GetIds()[j] == expected->GetIds()[j]);
+            REQUIRE(std::abs(built->GetDistances()[j] - expected->GetDistances()[j]) < 1e-3);
+            REQUIRE(std::abs(mutable_roundtrip->GetDistances()[j] - expected->GetDistances()[j]) <
+                    1e-3);
+            REQUIRE(std::abs(immutable_roundtrip->GetDistances()[j] - expected->GetDistances()[j]) <
+                    1e-3);
+        }
+
+        auto expected_range = mutable_index->RangeSearch(query, 0.0F, search_param_str, nullptr);
+        auto built_range = immutable_index->RangeSearch(query, 0.0F, search_param_str, nullptr);
+        REQUIRE(built_range->GetDim() == expected_range->GetDim());
+    }
+
+    for (auto& item : sv_base) {
+        delete[] item.vals_;
+        delete[] item.ids_;
+    }
 }
 
 TEST_CASE("SINDI Remap Basic Test", "[ut][SINDI]") {

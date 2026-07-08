@@ -15,6 +15,7 @@
 
 #include "sindi.h"
 
+#include <cstring>
 #include <vector>
 
 #include "algorithm/sparse_distance.h"
@@ -349,6 +350,10 @@ SINDI::Add(const DatasetPtr& base) {
 
 std::vector<int64_t>
 SINDI::Build(const DatasetPtr& base) {
+    if (immutable_enabled_) {
+        return this->build_immutable(base);
+    }
+
     // note that there's a wlock in Add()
     auto failed_ids = this->Add(base);
     {
@@ -358,6 +363,127 @@ SINDI::Build(const DatasetPtr& base) {
         }
         this->cal_memory_usage();
     }
+    return failed_ids;
+}
+
+std::vector<int64_t>
+SINDI::build_immutable(const DatasetPtr& base) {
+    std::scoped_lock wlock(this->global_mutex_);
+    CHECK_ARGUMENT(immutable_data_ == nullptr, "immutable SINDI has already been built");
+    std::vector<int64_t> failed_ids;
+
+    auto data_num = base->GetNumElements();
+    CHECK_ARGUMENT(data_num > 0, "data_num is zero when add vectors");
+
+    const auto* sparse_vectors = base->GetSparseVectors();
+    const auto* ids = base->GetIds();
+    const auto* extra_info = base->GetExtraInfos();
+    const auto extra_info_size = base->GetExtraInfoSize();
+
+    if (sparse_value_quant_type_ == SparseValueQuantizationType::SQ8 && cur_element_count_ == 0) {
+        float min_val = std::numeric_limits<float>::max();
+        float max_val = std::numeric_limits<float>::lowest();
+        for (int64_t i = 0; i < data_num; ++i) {
+            const auto& vec = sparse_vectors[i];
+            for (int j = 0; j < vec.len_; ++j) {
+                float val = vec.vals_[j];
+                min_val = std::min(min_val, val);
+                max_val = std::max(max_val, val);
+            }
+        }
+        quantization_params_->min_val = min_val;
+        quantization_params_->max_val = max_val;
+        quantization_params_->diff = max_val - min_val;
+        if (quantization_params_->diff < 1e-6) {
+            quantization_params_->diff = 1.0F;
+        }
+    }
+
+    immutable_data_ = std::make_unique<ImmutableSINDIData>(allocator_);
+    immutable_data_->sparse_value_quant_type = sparse_value_quant_type_;
+    immutable_data_->value_code_size = sparse_value_code_size(sparse_value_quant_type_);
+    immutable_data_->windows.reserve(align_up(data_num, window_size_) / window_size_);
+
+    SparseTermDataCellPtr current_window = nullptr;
+    Vector<uint32_t> tmp_ids(allocator_);
+    for (int64_t i = 0; i < data_num; ++i) {
+        if (current_window == nullptr) {
+            current_window = std::make_shared<SparseTermDataCell>(doc_retain_ratio_,
+                                                                  term_id_limit_,
+                                                                  allocator_,
+                                                                  sparse_value_quant_type_,
+                                                                  quantization_params_);
+        }
+
+        const auto& sparse_vector = sparse_vectors[i];
+        if (label_table_->CheckLabel(ids[i])) {
+            failed_ids.push_back(ids[i]);
+            logger::warn("id ({}) already exists", ids[i]);
+            continue;
+        }
+        if (sparse_vector.len_ <= 0) {
+            failed_ids.push_back(ids[i]);
+            logger::warn(
+                "sparse_vector.len_ ({}) is invalid for id ({})", sparse_vector.len_, ids[i]);
+            continue;
+        }
+
+        const auto window_start_id =
+            static_cast<int64_t>(immutable_data_->windows.size()) * window_size_;
+        const auto window_inner_id = cur_element_count_ - window_start_id;
+        CHECK_ARGUMENT(
+            window_inner_id >= 0 and window_inner_id <= std::numeric_limits<uint16_t>::max(),
+            "immutable SINDI window-local doc id overflows uint16_t");
+        auto inner_id = static_cast<uint16_t>(window_inner_id);
+
+        try {
+            if (remap_term_ids_) {
+                auto remapped = remap_sparse_vector_for_build(sparse_vector, tmp_ids);
+                current_window->InsertVector(remapped, inner_id);
+            } else {
+                current_window->InsertVector(sparse_vector, inner_id);
+            }
+        } catch (const std::runtime_error& e) {
+            failed_ids.push_back(ids[i]);
+            logger::warn("runtime error: {}", e.what());
+            continue;
+        } catch (const VsagException& e) {
+            failed_ids.push_back(ids[i]);
+            logger::warn("vsag exception: {}", e.what());
+            continue;
+        } catch (const std::bad_alloc& e) {
+            failed_ids.push_back(ids[i]);
+            logger::warn("memory allocation failed: {}", e.what());
+            continue;
+        }
+
+        label_table_->Insert(cur_element_count_, ids[i]);
+
+        if (extra_info_size > 0) {
+            extra_infos_->InsertExtraInfo(extra_info + i * extra_info_size, cur_element_count_);
+        }
+
+        cur_element_count_++;
+
+        if (use_reorder_) {
+            rerank_flat_->InsertVector(sparse_vectors + i, cur_element_count_ - 1);
+        }
+
+        if (cur_element_count_ % window_size_ == 0) {
+            immutable_data_->windows.emplace_back(allocator_);
+            compact_window_to_immutable(*current_window, immutable_data_->windows.back());
+            current_window.reset();
+        }
+    }
+
+    if (current_window != nullptr && current_window->total_count_ > 0) {
+        immutable_data_->windows.emplace_back(allocator_);
+        compact_window_to_immutable(*current_window, immutable_data_->windows.back());
+    }
+    current_window.reset();
+    window_term_list_.clear();
+    window_term_list_.shrink_to_fit();
+    this->cal_memory_usage();
     return failed_ids;
 }
 
@@ -460,14 +586,11 @@ std::optional<uint32_t>
 SINDI::get_immutable_local_term(const ImmutableSINDIWindow& window, uint32_t term) const {
     if (remap_term_ids_) {
         auto it = std::lower_bound(
-            window.sorted_global_to_local_terms.begin(),
-            window.sorted_global_to_local_terms.end(),
-            std::make_pair(term, uint32_t{0}),
-            [](const auto& lhs, const auto& rhs) { return lhs.first < rhs.first; });
-        if (it == window.sorted_global_to_local_terms.end() || it->first != term) {
+            window.sorted_global_terms.begin(), window.sorted_global_terms.end(), term);
+        if (it == window.sorted_global_terms.end() || *it != term) {
             return std::nullopt;
         }
-        return it->second;
+        return static_cast<uint32_t>(it - window.sorted_global_terms.begin());
     }
     if (term >= window.offsets.size()) {
         return std::nullopt;
@@ -527,7 +650,7 @@ SINDI::scan_immutable_window_by_mapped_terms(float* dists,
         const auto* values =
             window.value_payloads.data() + static_cast<uint64_t>(begin_doc) * value_code_size;
         if (sparse_value_quant_type_ == SparseValueQuantizationType::SQ8) {
-            computer->ScanForAccumulate(it, ids, values, term_count, dists);
+            computer->ScanForAccumulateSQ8(it, ids, values, term_count, dists);
         } else if (sparse_value_quant_type_ == SparseValueQuantizationType::FP16) {
             computer->ScanForAccumulateFP16Bytes(it, ids, values, term_count, dists);
         } else {
@@ -993,8 +1116,7 @@ SINDI::cal_memory_usage() {
         memory += sizeof(ImmutableSINDIData);
         memory += immutable_data_->windows.size() * sizeof(ImmutableSINDIWindow);
         for (const auto& window : immutable_data_->windows) {
-            memory +=
-                window.sorted_global_to_local_terms.size() * sizeof(std::pair<uint32_t, uint32_t>);
+            memory += window.sorted_global_terms.size() * sizeof(uint32_t);
             memory += window.offsets.size() * sizeof(uint32_t);
             memory += window.id_payloads.size() * sizeof(uint16_t);
             memory += window.value_payloads.size() * sizeof(uint8_t);
@@ -1022,8 +1144,6 @@ SINDI::cal_memory_usage() {
 void
 SINDI::Serialize(StreamWriter& writer) const {
     std::shared_lock rlock(this->global_mutex_);
-    const bool mutable_runtime = not immutable_enabled_ and immutable_data_ == nullptr;
-    CHECK_ARGUMENT(mutable_runtime, "immutable SINDI runtime does not support Serialize");
 
     if (cur_element_count_ == 0) {
         StreamWriter::WriteObj(writer, cur_element_count_);
@@ -1051,10 +1171,17 @@ SINDI::Serialize(StreamWriter& writer) const {
         StreamWriter::WriteObj(writer, quantization_params_->diff);
     }
 
-    uint32_t window_term_list_size = window_term_list_.size();
+    uint32_t window_term_list_size =
+        immutable_data_ != nullptr ? immutable_data_->windows.size() : window_term_list_.size();
     StreamWriter::WriteObj(writer, window_term_list_size);
-    for (const auto& window : window_term_list_) {
-        window->Serialize(writer);
+    if (immutable_data_ != nullptr) {
+        for (const auto& window : immutable_data_->windows) {
+            serialize_immutable_window(writer, window);
+        }
+    } else {
+        for (const auto& window : window_term_list_) {
+            window->Serialize(writer);
+        }
     }
 
     label_table_->Serialize(writer);
@@ -1180,6 +1307,124 @@ SINDI::Deserialize(StreamReader& reader) {
 }
 
 void
+SINDI::compact_window_to_immutable(const SparseTermDataCell& term_list,
+                                   ImmutableSINDIWindow& window) const {
+    const auto value_code_size = sparse_value_code_size(sparse_value_quant_type_);
+    uint64_t total_posting_count = 0;
+    window.offsets.clear();
+    window.id_payloads.clear();
+    window.value_payloads.clear();
+    window.sorted_global_terms.clear();
+
+    if (not remap_term_ids_) {
+        window.offsets.reserve(static_cast<uint64_t>(term_list.term_capacity_) + 1);
+    }
+    window.offsets.push_back(0);
+
+    for (uint32_t term = 0; term < term_list.term_capacity_; ++term) {
+        const auto posting_count = term_list.term_sizes_[term];
+        if (posting_count == 0) {
+            if (not remap_term_ids_) {
+                window.offsets.push_back(static_cast<uint32_t>(total_posting_count));
+            }
+            continue;
+        }
+
+        if (total_posting_count >
+            std::numeric_limits<uint32_t>::max() - static_cast<uint64_t>(posting_count)) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "immutable SINDI posting offset overflows uint32_t");
+        }
+        if (remap_term_ids_) {
+            window.sorted_global_terms.push_back(term);
+        }
+
+        const auto old_id_size = window.id_payloads.size();
+        window.id_payloads.resize(old_id_size + posting_count);
+        std::copy(term_list.term_ids_[term]->begin(),
+                  term_list.term_ids_[term]->end(),
+                  window.id_payloads.begin() + old_id_size);
+
+        const auto payload_bytes = static_cast<uint64_t>(posting_count) * value_code_size;
+        const auto old_value_size = window.value_payloads.size();
+        window.value_payloads.resize(old_value_size + payload_bytes);
+        std::memcpy(window.value_payloads.data() + old_value_size,
+                    term_list.term_datas_[term]->data(),
+                    payload_bytes);
+
+        total_posting_count += posting_count;
+        window.offsets.push_back(static_cast<uint32_t>(total_posting_count));
+    }
+}
+
+void
+SINDI::serialize_immutable_window(StreamWriter& writer, const ImmutableSINDIWindow& window) const {
+    uint32_t term_capacity = 0;
+    if (remap_term_ids_) {
+        if (not window.sorted_global_terms.empty()) {
+            term_capacity = window.sorted_global_terms.back() + 1;
+        }
+    } else if (not window.offsets.empty()) {
+        term_capacity = static_cast<uint32_t>(window.offsets.size() - 1);
+    }
+    StreamWriter::WriteObj(writer, term_capacity);
+
+    Vector<float> empty_data(allocator_);
+    Vector<uint32_t> empty_ids(allocator_);
+    Vector<float> buffer_data(allocator_);
+    Vector<uint32_t> buffer_ids(allocator_);
+    Vector<uint32_t> term_sizes(term_capacity, 0, allocator_);
+    uint32_t next_remap_pos = 0;
+    const auto value_code_size = sparse_value_code_size(sparse_value_quant_type_);
+
+    for (uint32_t term = 0; term < term_capacity; ++term) {
+        std::optional<uint32_t> local_term;
+        if (remap_term_ids_) {
+            if (next_remap_pos < window.sorted_global_terms.size() &&
+                window.sorted_global_terms[next_remap_pos] == term) {
+                local_term = next_remap_pos;
+                ++next_remap_pos;
+            }
+        } else {
+            local_term = term;
+        }
+
+        if (not local_term.has_value()) {
+            StreamWriter::WriteVector(writer, empty_ids);
+            StreamWriter::WriteVector(writer, empty_data);
+            continue;
+        }
+
+        const auto begin = window.offsets[local_term.value()];
+        const auto end = window.offsets[local_term.value() + 1];
+        const auto posting_count = end - begin;
+        term_sizes[term] = posting_count;
+        if (posting_count == 0) {
+            StreamWriter::WriteVector(writer, empty_ids);
+            StreamWriter::WriteVector(writer, empty_data);
+            continue;
+        }
+
+        buffer_ids.resize(posting_count);
+        std::copy(window.id_payloads.begin() + begin,
+                  window.id_payloads.begin() + end,
+                  buffer_ids.begin());
+        StreamWriter::WriteVector(writer, buffer_ids);
+
+        const auto payload_bytes = static_cast<uint64_t>(posting_count) * value_code_size;
+        const auto buffer_size =
+            align_up(static_cast<int64_t>(payload_bytes), sizeof(float)) / sizeof(float);
+        buffer_data.resize(buffer_size);
+        std::memset(buffer_data.data(), 0, buffer_size * sizeof(float));
+        std::memcpy(buffer_data.data(),
+                    window.value_payloads.data() + static_cast<uint64_t>(begin) * value_code_size,
+                    payload_bytes);
+        StreamWriter::WriteVector(writer, buffer_data);
+    }
+    StreamWriter::WriteVector(writer, term_sizes);
+}
+
+void
 SINDI::deserialize_immutable_window(StreamReader& reader_ref, ImmutableSINDIWindow& window) const {
     uint32_t term_capacity = 0;
     StreamReader::ReadObj(reader_ref, term_capacity);
@@ -1188,8 +1433,6 @@ SINDI::deserialize_immutable_window(StreamReader& reader_ref, ImmutableSINDIWind
     const auto value_code_size = sparse_value_code_size(sparse_value_quant_type_);
 
     Vector<uint32_t> ids_buffer(allocator_);
-    Vector<uint32_t> observed_term_sizes(allocator_);
-    observed_term_sizes.reserve(term_capacity);
 
     if (not remap_term_ids_) {
         window.offsets.reserve(static_cast<uint64_t>(term_capacity) + 1);
@@ -1214,7 +1457,6 @@ SINDI::deserialize_immutable_window(StreamReader& reader_ref, ImmutableSINDIWind
         CHECK_ARGUMENT(data_count <= std::numeric_limits<uint64_t>::max() / sizeof(float),
                        "immutable SINDI value payload size overflows uint64_t");
 
-        observed_term_sizes.push_back(static_cast<uint32_t>(posting_count));
         if (posting_count > std::numeric_limits<uint32_t>::max() - total_posting_count) {
             throw VsagException(ErrorType::INVALID_ARGUMENT,
                                 "immutable SINDI posting offset overflows uint32_t");
@@ -1237,8 +1479,8 @@ SINDI::deserialize_immutable_window(StreamReader& reader_ref, ImmutableSINDIWind
 
         uint32_t local_term = term;
         if (remap_term_ids_) {
-            local_term = static_cast<uint32_t>(window.sorted_global_to_local_terms.size());
-            window.sorted_global_to_local_terms.emplace_back(term, local_term);
+            local_term = static_cast<uint32_t>(window.sorted_global_terms.size());
+            window.sorted_global_terms.push_back(term);
         }
 
         const auto old_id_size = window.id_payloads.size();
@@ -1271,14 +1513,12 @@ SINDI::deserialize_immutable_window(StreamReader& reader_ref, ImmutableSINDIWind
         }
     }
 
-    Vector<uint32_t> term_sizes(allocator_);
-    StreamReader::ReadVector(reader_ref, term_sizes);
-    CHECK_ARGUMENT(term_sizes.size() == observed_term_sizes.size(),
-                   "immutable SINDI term_sizes length mismatch");
-    for (uint32_t term = 0; term < term_sizes.size(); ++term) {
-        CHECK_ARGUMENT(term_sizes[term] == observed_term_sizes[term],
-                       "immutable SINDI term_sizes value mismatch");
-    }
+    uint64_t term_sizes_count = 0;
+    StreamReader::ReadObj(reader_ref, term_sizes_count);
+    CHECK_ARGUMENT(term_sizes_count == term_capacity, "immutable SINDI term_sizes length mismatch");
+    CHECK_ARGUMENT(term_sizes_count <= (std::numeric_limits<uint64_t>::max() / sizeof(uint32_t)),
+                   "immutable SINDI term_sizes payload size overflows uint64_t");
+    reader_ref.Seek(reader_ref.GetCursor() + term_sizes_count * sizeof(uint32_t));
 
     const auto expected_payload_size = (window.offsets.empty() ? 0 : window.offsets.back()) *
                                        static_cast<uint64_t>(value_code_size);

@@ -27,13 +27,13 @@ namespace vsag {
 
 struct ImmutableSINDIWindow {
     explicit ImmutableSINDIWindow(Allocator* allocator)
-        : sorted_global_to_local_terms(allocator),
+        : sorted_global_terms(allocator),
           offsets(allocator),
           id_payloads(allocator),
           value_payloads(allocator) {
     }
 
-    Vector<std::pair<uint32_t, uint32_t>> sorted_global_to_local_terms;
+    Vector<uint32_t> sorted_global_terms;
     Vector<uint32_t> offsets;
     Vector<uint16_t> id_payloads;
     Vector<uint8_t> value_payloads;
@@ -234,6 +234,16 @@ private:
 
     void
     deserialize_immutable_window(StreamReader& reader_ref, ImmutableSINDIWindow& window) const;
+
+    void
+    serialize_immutable_window(StreamWriter& writer, const ImmutableSINDIWindow& window) const;
+
+    void
+    compact_window_to_immutable(const SparseTermDataCell& term_list,
+                                ImmutableSINDIWindow& window) const;
+
+    std::vector<int64_t>
+    build_immutable(const DatasetPtr& base);
 
     std::optional<uint32_t>
     get_immutable_local_term(const ImmutableSINDIWindow& window, uint32_t term) const;

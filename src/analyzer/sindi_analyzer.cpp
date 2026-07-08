@@ -276,7 +276,6 @@ SINDIAnalyzer::collect_doc_prune_candidates(const SparseVector& query,
     const bool use_term_lists_heap_insert = sindi_->UseTermListsHeapInsert(search_param);
 
     Vector<float> dists(sindi_->window_size_, 0.0F, sindi_->allocator_);
-    Vector<float> decoded_values(sindi_->allocator_);
 
     for (int64_t cur = 0; cur < static_cast<int64_t>(sindi_->window_term_list_.size()); ++cur) {
         auto window_start_id = static_cast<uint32_t>(cur * sindi_->window_size_);
@@ -299,14 +298,11 @@ SINDIAnalyzer::collect_doc_prune_candidates(const SparseVector& query,
             }
 
             if (is_sq8_value_quantization(term_list->sparse_value_quant_type_)) {
-                decoded_values.resize(term_size);
-                term_list->Decode(
-                    term_list->term_datas_[term]->data(), term_size, decoded_values.data());
-                computer->ScanForAccumulate(term_idx,
-                                            term_list->term_ids_[term]->data(),
-                                            decoded_values.data(),
-                                            term_size,
-                                            dists.data());
+                computer->ScanForAccumulateSQ8(term_idx,
+                                               term_list->term_ids_[term]->data(),
+                                               term_list->term_datas_[term]->data(),
+                                               term_size,
+                                               dists.data());
             } else if (term_list->sparse_value_quant_type_ == SparseValueQuantizationType::FP16) {
                 computer->ScanForAccumulateFP16Bytes(term_idx,
                                                      term_list->term_ids_[term]->data(),
