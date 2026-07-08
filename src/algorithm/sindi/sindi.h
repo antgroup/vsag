@@ -232,6 +232,29 @@ private:
     std::pair<int64_t, int64_t>
     get_min_max_window_id(const FilterPtr& filter) const;
 
+    MetadataPtr
+    collect_streaming_header() const override;
+
+    void
+    serialize_streaming_body(StreamWriter& writer) const override;
+
+    void
+    deserialize_streaming_body(StreamReader& reader, const MetadataPtr& metadata) override;
+
+    void
+    load_streaming_body(StreamReader& reader,
+                        const MetadataPtr& metadata,
+                        const LoadParameters& parameters) override;
+
+    void
+    read_streaming_body(StreamReader& reader, const MetadataPtr& metadata);
+
+    void
+    serialize_windows(StreamWriter& writer) const;
+
+    void
+    deserialize_windows(StreamReader& reader_ref);
+
     void
     deserialize_immutable_window(StreamReader& reader_ref, ImmutableSINDIWindow& window) const;
 

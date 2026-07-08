@@ -16,6 +16,8 @@ published documentation.
 | IVF | [docs/docs/en/src/indexes/ivf.md](docs/en/src/indexes/ivf.md) | <https://vsag.io/docs/indexes/ivf.html> |
 | SINDI | [docs/docs/en/src/indexes/sindi.md](docs/en/src/indexes/sindi.md) | <https://vsag.io/docs/indexes/sindi.html> |
 | BruteForce | [docs/docs/en/src/indexes/brute_force.md](docs/en/src/indexes/brute_force.md) | <https://vsag.io/docs/indexes/brute_force.html> |
+| Serialization | [docs/docs/en/src/advanced/serialization.md](docs/en/src/advanced/serialization.md) | <https://vsag.io/docs/advanced/serialization.html> |
+| New serialization | [docs/docs/en/src/advanced/new_serialization.md](docs/en/src/advanced/new_serialization.md) | <https://vsag.io/docs/advanced/new_serialization.html> |
 | Memory management | [docs/docs/en/src/advanced/memory.md](docs/en/src/advanced/memory.md) | <https://vsag.io/docs/advanced/memory.html> |
 | Evaluation tool | [docs/docs/en/src/resources/eval.md](docs/en/src/resources/eval.md) | <https://vsag.io/docs/resources/eval.html> |
 | HDF5 dataset format | [docs/docs/en/src/resources/dataset_format.md](docs/en/src/resources/dataset_format.md) | <https://vsag.io/docs/resources/dataset_format.html> |
@@ -32,6 +34,8 @@ published documentation.
 | IVF | [docs/docs/zh/src/indexes/ivf.md](docs/zh/src/indexes/ivf.md) | <https://vsag.io/docs/zh/indexes/ivf.html> |
 | SINDI | [docs/docs/zh/src/indexes/sindi.md](docs/zh/src/indexes/sindi.md) | <https://vsag.io/docs/zh/indexes/sindi.html> |
 | BruteForce | [docs/docs/zh/src/indexes/brute_force.md](docs/zh/src/indexes/brute_force.md) | <https://vsag.io/docs/zh/indexes/brute_force.html> |
+| 序列化格式 | [docs/docs/zh/src/advanced/serialization.md](docs/zh/src/advanced/serialization.md) | <https://vsag.io/docs/zh/advanced/serialization.html> |
+| 新序列化格式 | [docs/docs/zh/src/advanced/new_serialization.md](docs/zh/src/advanced/new_serialization.md) | <https://vsag.io/docs/zh/advanced/new_serialization.html> |
 | Memory management | [docs/docs/zh/src/advanced/memory.md](docs/zh/src/advanced/memory.md) | <https://vsag.io/docs/zh/advanced/memory.html> |
 | Evaluation tool | [docs/docs/zh/src/resources/eval.md](docs/zh/src/resources/eval.md) | <https://vsag.io/docs/zh/resources/eval.html> |
 | HDF5 dataset format | [docs/docs/zh/src/resources/dataset_format.md](docs/zh/src/resources/dataset_format.md) | <https://vsag.io/docs/zh/resources/dataset_format.html> |

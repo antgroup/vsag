@@ -96,7 +96,12 @@ public:
 
 private:
     std::ostream& ostream_;
-    uint64_t written_bytes_{0};
+};
+
+class CountingStreamWriter : public StreamWriter {
+public:
+    void
+    Write(const char* data, uint64_t size) override;
 };
 
 class WriteFuncStreamWriter : public StreamWriter {

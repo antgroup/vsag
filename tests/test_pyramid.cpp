@@ -20,10 +20,14 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 #include <cmath>
+#include <cstring>
 #include <nlohmann/json.hpp>
 #include <set>
+#include <sstream>
 
 #include "functest.h"
+#include "storage/serialization_tags.h"
+#include "storage/streaming_serialization_test_utils.h"
 #include "test_index.h"
 #include "vsag/vsag.h"
 
@@ -171,6 +175,9 @@ RequireDistancesNearZero(const vsag::DatasetPtr& result, const std::set<int64_t>
         }
     }
 }
+
+using vsag::test::EraseStreamingBlock;
+using vsag::test::InsertUnknownStreamingBlock;
 
 class BlockSizeLimitGuard {
 public:
@@ -536,8 +543,73 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
             auto index2 = TestFactory(name, param, true);
             TestSerializeFile(index, index2, dataset, search_param, true);
         }
+        SECTION("streaming serialize/deserialize/load") {
+            auto index2 = TestFactory(name, param, true);
+            std::stringstream stream;
+            REQUIRE(index->SerializeStreaming(stream).has_value());
+            const auto bytes = stream.str();
+
+            std::stringstream deserialize_stream(bytes);
+            REQUIRE(index2->DeserializeStreaming(deserialize_stream).has_value());
+            TestKnnSearch(index2, dataset, search_param, 0.94, true);
+
+            std::stringstream load_stream(bytes);
+            auto loaded = vsag::Index::Load(load_stream, "{}");
+            REQUIRE(loaded.has_value());
+            TestKnnSearch(loaded.value(), dataset, search_param, 0.94, true);
+        }
     }
     vsag::Options::Instance().set_block_size_limit(origin_size);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
+                             "Pyramid streaming compatibility",
+                             "[ft][pyramid][serialization][streaming][compatibility]") {
+    BlockSizeLimitGuard block_size_limit_guard(1024 * 1024 * 2);
+    PyramidParam pyramid_param;
+    pyramid_param.no_build_levels = {0, 1, 2};
+    const auto param = GeneratePyramidBuildParametersString("l2", 16, pyramid_param);
+    auto index = TestFactory("pyramid", param, true);
+    auto dataset = pool.GetDatasetAndCreate(16, 200, "l2", /*with_path=*/true);
+    TestBuildIndex(index, dataset, true);
+
+    std::stringstream stream;
+    REQUIRE(index->SerializeStreaming(stream).has_value());
+    const auto bytes = stream.str();
+    const auto expected_count = dataset->base_->GetNumElements();
+
+    SECTION("skips unknown non-critical block") {
+        auto mutated = InsertUnknownStreamingBlock(bytes, false);
+        auto restored = TestFactory("pyramid", param, true);
+        std::stringstream deserialize_stream(mutated);
+        REQUIRE(restored->DeserializeStreaming(deserialize_stream).has_value());
+        REQUIRE(restored->GetNumElements() == expected_count);
+
+        std::stringstream load_stream(mutated);
+        auto loaded = vsag::Index::Load(load_stream, "{}");
+        REQUIRE(loaded.has_value());
+        REQUIRE(loaded.value()->GetNumElements() == expected_count);
+    }
+
+    SECTION("rejects unknown critical block") {
+        auto mutated = InsertUnknownStreamingBlock(bytes, true);
+        auto restored = TestFactory("pyramid", param, true);
+        std::stringstream deserialize_stream(mutated);
+        REQUIRE_FALSE(restored->DeserializeStreaming(deserialize_stream).has_value());
+
+        std::stringstream load_stream(mutated);
+        REQUIRE_FALSE(vsag::Index::Load(load_stream, "{}").has_value());
+    }
+
+    SECTION("rejects missing required block") {
+        auto mutated = EraseStreamingBlock(bytes, vsag::StreamSerializationTag::BASE_CODES);
+        auto restored = TestFactory("pyramid", param, true);
+        std::stringstream deserialize_stream(mutated);
+        REQUIRE_FALSE(restored->DeserializeStreaming(deserialize_stream).has_value());
+
+        std::stringstream load_stream(mutated);
+        REQUIRE_FALSE(vsag::Index::Load(load_stream, "{}").has_value());
+    }
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex, "Pyramid Clone", "[ft][clone][pyramid]") {

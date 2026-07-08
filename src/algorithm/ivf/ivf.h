@@ -226,6 +226,23 @@ private:
     std::pair<BucketIdType, InnerIdType>
     get_location(InnerIdType inner_id) const;
 
+    MetadataPtr
+    collect_streaming_header() const override;
+
+    void
+    serialize_streaming_body(StreamWriter& writer) const override;
+
+    void
+    deserialize_streaming_body(StreamReader& reader, const MetadataPtr& metadata) override;
+
+    void
+    load_streaming_body(StreamReader& reader,
+                        const MetadataPtr& metadata,
+                        const LoadParameters& parameters) override;
+
+    void
+    read_streaming_body(StreamReader& reader, const MetadataPtr& metadata);
+
     /// Recalculate and cache the memory-usage counter (throttled).
     void
     cal_memory_usage();

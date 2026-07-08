@@ -261,5 +261,9 @@ const char* const IVF_THREAD_COUNT = "thread_count";
 const char* const SERIAL_MAGIC_BEGIN = "vsag0000";
 const char* const SERIAL_MAGIC_END = "0000gasv";
 const char* const SERIAL_META_KEY = "_meta";
+const char* const SERIAL_STREAM_MAGIC = "vsagstm0";
+const uint16_t SERIAL_STREAM_FORMAT_MAJOR = 1;
+const uint16_t SERIAL_STREAM_FORMAT_MINOR = 0;
+const uint32_t SERIAL_STREAM_SECTION_END = 0;
 
 };  // namespace vsag

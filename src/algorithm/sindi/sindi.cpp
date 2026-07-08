@@ -28,6 +28,8 @@
 #include "quantization/sparse_quantization/sparse_quantizer_parameter.h"
 #include "simd/fp16_simd.h"
 #include "storage/serialization.h"
+#include "storage/serialization_tags.h"
+#include "storage/tlv_section.h"
 #include "utils/util_functions.h"
 #include "vsag/allocator.h"
 #include "vsag/options.h"
@@ -1146,7 +1148,8 @@ SINDI::Serialize(StreamWriter& writer) const {
     std::shared_lock rlock(this->global_mutex_);
 
     if (cur_element_count_ == 0) {
-        StreamWriter::WriteObj(writer, cur_element_count_);
+        auto cur_element_count = cur_element_count_.load();
+        StreamWriter::WriteObj(writer, cur_element_count);
         if (sparse_value_quant_type_ == SparseValueQuantizationType::SQ8) {
             StreamWriter::WriteObj(writer, quantization_params_->min_val);
             StreamWriter::WriteObj(writer, quantization_params_->max_val);
@@ -1163,7 +1166,8 @@ SINDI::Serialize(StreamWriter& writer) const {
         return;
     }
 
-    StreamWriter::WriteObj(writer, cur_element_count_);
+    auto cur_element_count = cur_element_count_.load();
+    StreamWriter::WriteObj(writer, cur_element_count);
 
     if (sparse_value_quant_type_ == SparseValueQuantizationType::SQ8) {
         StreamWriter::WriteObj(writer, quantization_params_->min_val);
@@ -1200,6 +1204,269 @@ SINDI::Serialize(StreamWriter& writer) const {
         jsonify_basic_info[SINDI_RERANK_FLAT_FORMAT_KEY].SetInt(SINDI_RERANK_FLAT_FORMAT_DATACELL);
     }
     write_index_footer(writer, jsonify_basic_info);
+}
+
+MetadataPtr
+SINDI::collect_streaming_header() const {
+    auto metadata = std::make_shared<Metadata>();
+    metadata->Set("format", "vsag_stream_v1");
+    metadata->Set("index_name", this->GetName());
+
+    JsonType basic_info;
+    basic_info[INDEX_PARAM].SetString(this->create_param_ptr_->ToString());
+    basic_info["dim"].SetInt(dim_);
+    basic_info["metric"].SetInt(static_cast<int64_t>(metric_));
+    basic_info["data_type"].SetInt(static_cast<int64_t>(data_type_));
+    basic_info["extra_info_size"].SetInt(static_cast<int64_t>(extra_info_size_));
+    basic_info["cur_element_count"].SetInt(this->cur_element_count_.load());
+    basic_info["use_reorder"].SetBool(this->use_reorder_);
+    basic_info["remap_term_ids"].SetBool(this->remap_term_ids_);
+    if (use_reorder_) {
+        basic_info[SINDI_RERANK_FLAT_FORMAT_KEY].SetInt(SINDI_RERANK_FLAT_FORMAT_DATACELL);
+    }
+    metadata->Set(BASIC_INFO, basic_info);
+
+    JsonType manifest;
+    auto windows_tag = static_cast<uint32_t>(StreamSerializationTag::SINDI_WINDOWS);
+    auto label_tag = static_cast<uint32_t>(StreamSerializationTag::LABEL_TABLE);
+    AppendStreamingManifestBlock(manifest,
+                                 windows_tag,
+                                 StreamSerializationBlockCurrentVersion(windows_tag),
+                                 StreamSerializationTagCritical(windows_tag));
+    AppendStreamingManifestBlock(manifest,
+                                 label_tag,
+                                 StreamSerializationBlockCurrentVersion(label_tag),
+                                 StreamSerializationTagCritical(label_tag));
+    if (this->use_reorder_) {
+        auto tag = static_cast<uint32_t>(StreamSerializationTag::SINDI_RERANK_INDEX);
+        AppendStreamingManifestBlock(manifest,
+                                     tag,
+                                     StreamSerializationBlockCurrentVersion(tag),
+                                     StreamSerializationTagCritical(tag));
+    }
+    if (this->remap_term_ids_ && this->term_id_mapper_) {
+        auto tag = static_cast<uint32_t>(StreamSerializationTag::SINDI_TERM_ID_MAPPER);
+        AppendStreamingManifestBlock(manifest,
+                                     tag,
+                                     StreamSerializationBlockCurrentVersion(tag),
+                                     StreamSerializationTagCritical(tag));
+    }
+    metadata->Set("block_manifest", manifest);
+    metadata->SetEmptyIndex(this->GetNumElements() == 0);
+    return metadata;
+}
+
+void
+SINDI::serialize_windows(StreamWriter& writer) const {
+    auto cur_element_count = cur_element_count_.load();
+    StreamWriter::WriteObj(writer, cur_element_count);
+
+    if (sparse_value_quant_type_ == SparseValueQuantizationType::SQ8) {
+        StreamWriter::WriteObj(writer, quantization_params_->min_val);
+        StreamWriter::WriteObj(writer, quantization_params_->max_val);
+        StreamWriter::WriteObj(writer, quantization_params_->diff);
+    }
+
+    uint32_t window_term_list_size = window_term_list_.size();
+    StreamWriter::WriteObj(writer, window_term_list_size);
+    for (const auto& window : window_term_list_) {
+        window->Serialize(writer);
+    }
+}
+
+void
+SINDI::serialize_streaming_body(StreamWriter& writer) const {
+    std::shared_lock rlock(this->global_mutex_);
+    const bool mutable_runtime = not immutable_enabled_ and immutable_data_ == nullptr;
+    CHECK_ARGUMENT(mutable_runtime, "immutable SINDI runtime does not support SerializeStreaming");
+
+    auto windows_tag = static_cast<uint32_t>(StreamSerializationTag::SINDI_WINDOWS);
+    auto label_tag = static_cast<uint32_t>(StreamSerializationTag::LABEL_TABLE);
+    WriteStreamingBlock(
+        writer, windows_tag, StreamSerializationTagCritical(windows_tag), [this](StreamWriter& w) {
+            this->serialize_windows(w);
+        });
+    WriteStreamingBlock(
+        writer, label_tag, StreamSerializationTagCritical(label_tag), [this](StreamWriter& w) {
+            this->label_table_->Serialize(w);
+        });
+    if (this->use_reorder_) {
+        auto tag = static_cast<uint32_t>(StreamSerializationTag::SINDI_RERANK_INDEX);
+        WriteStreamingBlock(
+            writer, tag, StreamSerializationTagCritical(tag), [this](StreamWriter& w) {
+                this->rerank_flat_->Serialize(w);
+            });
+    }
+    if (this->remap_term_ids_ && this->term_id_mapper_) {
+        auto tag = static_cast<uint32_t>(StreamSerializationTag::SINDI_TERM_ID_MAPPER);
+        WriteStreamingBlock(
+            writer, tag, StreamSerializationTagCritical(tag), [this](StreamWriter& w) {
+                this->term_id_mapper_->Serialize(w);
+            });
+    }
+}
+
+void
+SINDI::deserialize_windows(StreamReader& reader_ref) {
+    uint64_t cur_element_count = 0;
+    StreamReader::ReadObj(reader_ref, cur_element_count);
+    cur_element_count_.store(cur_element_count);
+
+    if (sparse_value_quant_type_ == SparseValueQuantizationType::SQ8) {
+        StreamReader::ReadObj(reader_ref, quantization_params_->min_val);
+        StreamReader::ReadObj(reader_ref, quantization_params_->max_val);
+        StreamReader::ReadObj(reader_ref, quantization_params_->diff);
+    }
+
+    uint32_t window_term_list_size = 0;
+    StreamReader::ReadObj(reader_ref, window_term_list_size);
+    if (immutable_enabled_) {
+        immutable_data_ = std::make_unique<ImmutableSINDIData>(allocator_);
+        immutable_data_->sparse_value_quant_type = sparse_value_quant_type_;
+        immutable_data_->value_code_size = sparse_value_code_size(sparse_value_quant_type_);
+        immutable_data_->windows.reserve(window_term_list_size);
+        for (uint32_t i = 0; i < window_term_list_size; ++i) {
+            immutable_data_->windows.emplace_back(allocator_);
+            deserialize_immutable_window(reader_ref, immutable_data_->windows.back());
+        }
+        window_term_list_.clear();
+        window_term_list_.shrink_to_fit();
+    } else {
+        window_term_list_.resize(window_term_list_size);
+        for (auto& window : window_term_list_) {
+            window = std::make_shared<SparseTermDataCell>(doc_retain_ratio_,
+                                                          term_id_limit_,
+                                                          allocator_,
+                                                          sparse_value_quant_type_,
+                                                          quantization_params_);
+            window->Deserialize(reader_ref);
+        }
+    }
+}
+
+void
+SINDI::deserialize_streaming_body(StreamReader& reader, const MetadataPtr& metadata) {
+    this->read_streaming_body(reader, metadata);
+}
+
+void
+SINDI::load_streaming_body(StreamReader& reader,
+                           const MetadataPtr& metadata,
+                           const LoadParameters& parameters) {
+    (void)parameters;
+    this->read_streaming_body(reader, metadata);
+}
+
+void
+SINDI::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) {
+    std::scoped_lock wlock(this->global_mutex_);
+
+    auto basic_info = metadata->Get(BASIC_INFO);
+    if (basic_info.Contains(INDEX_PARAM)) {
+        auto index_param = std::make_shared<SINDIParameter>();
+        index_param->FromString(basic_info[INDEX_PARAM].GetString());
+        if (not this->create_param_ptr_->CheckCompatibility(index_param)) {
+            auto message = fmt::format("SINDI index parameter not match, current: {}, new: {}",
+                                       this->create_param_ptr_->ToString(),
+                                       index_param->ToString());
+            logger::error(message);
+            throw VsagException(ErrorType::INVALID_ARGUMENT, message);
+        }
+    }
+
+    bool loaded_windows = false;
+    bool loaded_label_table = false;
+    bool loaded_rerank = false;
+    bool loaded_term_mapper = false;
+
+    while (true) {
+        auto block_header = StreamBlockHeader::Read(reader);
+        if (block_header.IsSectionEnd()) {
+            break;
+        }
+        BoundedForwardReader block_reader(&reader, block_header.value_len);
+        if (!StreamSerializationBlockVersionSupported(block_header.tag,
+                                                      block_header.block_version)) {
+            if (block_header.IsCritical()) {
+                throw VsagException(
+                    ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                    fmt::format("unsupported SINDI streaming block version: tag={}, "
+                                "name={}, version={}, flags={}, value_len={}",
+                                block_header.tag,
+                                StreamSerializationTagName(block_header.tag),
+                                block_header.block_version,
+                                block_header.flags,
+                                block_header.value_len));
+            }
+            block_reader.SkipRemaining();
+            continue;
+        }
+
+        switch (static_cast<StreamSerializationTag>(block_header.tag)) {
+            case StreamSerializationTag::SINDI_WINDOWS:
+                ReadSeekableBlockPayload(block_reader, block_header, [this](StreamReader& block) {
+                    this->deserialize_windows(block);
+                });
+                loaded_windows = true;
+                break;
+            case StreamSerializationTag::LABEL_TABLE:
+                ReadSeekableBlockPayload(block_reader, block_header, [this](StreamReader& block) {
+                    this->label_table_->Deserialize(block);
+                });
+                this->delete_count_.store(
+                    static_cast<int64_t>(this->label_table_->GetAllDeletedIds().size()),
+                    std::memory_order_relaxed);
+                loaded_label_table = true;
+                break;
+            case StreamSerializationTag::SINDI_RERANK_INDEX:
+                if (this->use_reorder_) {
+                    ReadSeekableBlockPayload(
+                        block_reader, block_header, [this](StreamReader& block) {
+                            deserialize_rerank_flat(
+                                block, this->rerank_flat_, this->allocator_, true);
+                        });
+                    loaded_rerank = true;
+                }
+                break;
+            case StreamSerializationTag::SINDI_TERM_ID_MAPPER:
+                if (this->remap_term_ids_ && this->term_id_mapper_) {
+                    ReadSeekableBlockPayload(
+                        block_reader, block_header, [this](StreamReader& block) {
+                            this->term_id_mapper_->Deserialize(block);
+                        });
+                    loaded_term_mapper = true;
+                }
+                break;
+            default:
+                if (block_header.IsCritical()) {
+                    throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                        fmt::format("unknown SINDI streaming serialization block: "
+                                                    "tag={}, name={}, version={}, flags={}, "
+                                                    "value_len={}",
+                                                    block_header.tag,
+                                                    StreamSerializationTagName(block_header.tag),
+                                                    block_header.block_version,
+                                                    block_header.flags,
+                                                    block_header.value_len));
+                }
+                break;
+        }
+        block_reader.SkipRemaining();
+    }
+
+    if (!loaded_windows || !loaded_label_table) {
+        throw VsagException(ErrorType::READ_ERROR,
+                            "SINDI streaming serialization required block is missing");
+    }
+    if (this->use_reorder_ && !loaded_rerank) {
+        throw VsagException(ErrorType::READ_ERROR,
+                            "SINDI streaming serialization rerank block is missing");
+    }
+    if (this->remap_term_ids_ && this->term_id_mapper_ && !loaded_term_mapper) {
+        throw VsagException(ErrorType::READ_ERROR,
+                            "SINDI streaming serialization term mapper block is missing");
+    }
+    this->cal_memory_usage();
 }
 
 void
@@ -1251,7 +1518,9 @@ SINDI::Deserialize(StreamReader& reader) {
     }
     auto& reader_ref = *reader_ptr;
 
-    StreamReader::ReadObj(reader_ref, cur_element_count_);
+    uint64_t cur_element_count = 0;
+    StreamReader::ReadObj(reader_ref, cur_element_count);
+    cur_element_count_.store(cur_element_count);
 
     if (sparse_value_quant_type_ == SparseValueQuantizationType::SQ8) {
         StreamReader::ReadObj(reader_ref, quantization_params_->min_val);

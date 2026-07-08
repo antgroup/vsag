@@ -255,6 +255,29 @@ public:
     friend class PyramidAnalyzer;
 
 private:
+    MetadataPtr
+    collect_streaming_header() const override;
+
+    void
+    serialize_streaming_body(StreamWriter& writer) const override;
+
+    void
+    deserialize_streaming_body(StreamReader& reader, const MetadataPtr& metadata) override;
+
+    void
+    load_streaming_body(StreamReader& reader,
+                        const MetadataPtr& metadata,
+                        const LoadParameters& parameters) override;
+
+    void
+    read_streaming_body(StreamReader& reader, const MetadataPtr& metadata);
+
+    void
+    serialize_hierarchies(StreamWriter& writer) const;
+
+    void
+    deserialize_hierarchies(StreamReader& reader, const JsonType& basic_info);
+
     /// One named hierarchy with its own root IndexNode and build parameters.
     struct Hierarchy {
         std::string name;                          // hierarchy name (empty = default)

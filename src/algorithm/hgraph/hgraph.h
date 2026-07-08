@@ -209,6 +209,9 @@ public:
     SetIO(const std::shared_ptr<Reader> reader) override;
 
     void
+    SetPreciseCodesIO(const std::shared_ptr<Reader>& reader);
+
+    void
     Train(const DatasetPtr& base) override;
 
     bool
@@ -342,6 +345,28 @@ public:
                      DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
 
 private:
+    MetadataPtr
+    collect_streaming_header() const override;
+
+    void
+    serialize_streaming_body(StreamWriter& writer) const override;
+
+    void
+    deserialize_streaming_body(StreamReader& reader, const MetadataPtr& metadata) override;
+
+    void
+    load_streaming_body(StreamReader& reader,
+                        const MetadataPtr& metadata,
+                        const LoadParameters& parameters) override;
+
+    void
+    read_streaming_body(StreamReader& reader,
+                        const MetadataPtr& metadata,
+                        const LoadParameters* load_parameters = nullptr);
+
+    void
+    deserialize_label_info_streaming(StreamReader& reader) const;
+
     // since v0.15: serialize basic index metadata to JSON.
     JsonType
     serialize_basic_info() const;

@@ -13,10 +13,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <cstring>
 #include <limits>
+#include <sstream>
 
 #include "functest.h"
+#include "storage/serialization_tags.h"
 #include "storage/serialization_template_test.h"
+#include "storage/streaming_serialization_test_utils.h"
 #include "test_index.h"
 namespace fixtures {
 
@@ -183,6 +187,13 @@ IVFTestIndex::GenerateIVFBuildParametersString(const std::string& metric_type,
     return build_parameters_str;
 }
 
+namespace {
+
+using vsag::test::EraseStreamingBlock;
+using vsag::test::InsertUnknownStreamingBlock;
+
+}  // namespace
+
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF GetStatus", "[ft][ivf]") {
     auto test_index = std::make_shared<fixtures::IVFTestIndex>();
     auto resource = test_index->GetResource(true);
@@ -290,6 +301,58 @@ IVFTestIndex::TestGeneral(const TestIndex::IndexPtr& index,
     TestFilterSearch(index, dataset, search_param, recall, true);
     TestCalcDistanceById(index, dataset, 2e-6, true);
     TestCheckIdExist(index, dataset);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(IVFTestIndex,
+                             "IVF streaming compatibility",
+                             "[ft][serialize][streaming][ivf]") {
+    auto origin_size = vsag::Options::Instance().block_size_limit();
+    vsag::Options::Instance().set_block_size_limit(1024 * 1024 * 2);
+
+    auto param = IVFTestIndex::GenerateIVFBuildParametersString("l2", 16, "sq8", 32, "random");
+    auto index = TestIndex::TestFactory(IVFTestIndex::name, param, true);
+    auto dataset = IVFTestIndex::pool.GetDatasetAndCreate(16, 200, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    std::stringstream stream;
+    REQUIRE(index->SerializeStreaming(stream).has_value());
+    const auto bytes = stream.str();
+    const auto search_param = fmt::format(search_param_tmp, 32);
+
+    SECTION("skips unknown non-critical block") {
+        auto mutated = InsertUnknownStreamingBlock(bytes, false);
+        auto restored = TestIndex::TestFactory(IVFTestIndex::name, param, true);
+        std::stringstream deserialize_stream(mutated);
+        REQUIRE(restored->DeserializeStreaming(deserialize_stream).has_value());
+        IVFTestIndex::TestGeneral(restored, dataset, search_param, 0.70F);
+
+        std::stringstream load_stream(mutated);
+        auto loaded = vsag::Index::Load(load_stream, "{}");
+        REQUIRE(loaded.has_value());
+        IVFTestIndex::TestGeneral(loaded.value(), dataset, search_param, 0.70F);
+    }
+
+    SECTION("rejects unknown critical block") {
+        auto mutated = InsertUnknownStreamingBlock(bytes, true);
+        auto restored = TestIndex::TestFactory(IVFTestIndex::name, param, true);
+        std::stringstream deserialize_stream(mutated);
+        REQUIRE_FALSE(restored->DeserializeStreaming(deserialize_stream).has_value());
+
+        std::stringstream load_stream(mutated);
+        REQUIRE_FALSE(vsag::Index::Load(load_stream, "{}").has_value());
+    }
+
+    SECTION("rejects missing required block") {
+        auto mutated = EraseStreamingBlock(bytes, vsag::StreamSerializationTag::IVF_BUCKET);
+        auto restored = TestIndex::TestFactory(IVFTestIndex::name, param, true);
+        std::stringstream deserialize_stream(mutated);
+        REQUIRE_FALSE(restored->DeserializeStreaming(deserialize_stream).has_value());
+
+        std::stringstream load_stream(mutated);
+        REQUIRE_FALSE(vsag::Index::Load(load_stream, "{}").has_value());
+    }
+
+    vsag::Options::Instance().set_block_size_limit(origin_size);
 }
 }  // namespace fixtures
 
@@ -1207,6 +1270,21 @@ TestIVFSerialize(const fixtures::IVFResourcePtr& resource) {
                         auto index2 = IVFTestIndex::TestFactory(IVFTestIndex::name, param, true);
                         IVFTestIndex::TestSerializeWriteFunc(
                             index, index2, dataset, search_param, true);
+                    }
+                    {
+                        auto index2 = IVFTestIndex::TestFactory(IVFTestIndex::name, param, true);
+                        std::stringstream stream;
+                        REQUIRE(index->SerializeStreaming(stream).has_value());
+                        const auto bytes = stream.str();
+
+                        std::stringstream deserialize_stream(bytes);
+                        REQUIRE(index2->DeserializeStreaming(deserialize_stream).has_value());
+                        IVFTestIndex::TestGeneral(index2, dataset, search_param, recall);
+
+                        std::stringstream load_stream(bytes);
+                        auto loaded = vsag::Index::Load(load_stream, "{}");
+                        REQUIRE(loaded.has_value());
+                        IVFTestIndex::TestGeneral(loaded.value(), dataset, search_param, recall);
                     }
                 }
             });

@@ -611,7 +611,7 @@ SIMQ::split_cluster_incremental(InnerIdType cluster_idx) {
 
     // Update token_to_dist_ for tokens moved to new cluster so future splits
     // sort by distance to the new representative, not the old one.
-    const uint64_t udim = static_cast<uint64_t>(dim_);
+    const auto udim = static_cast<uint64_t>(dim_);
     for (uint64_t rank = half; rank < n; ++rank) {
         InnerIdType tid = cluster_tokens[rank];
         InnerIdType doc_id = token_to_doc_[tid];

@@ -16,38 +16,114 @@
 #include "serialization.h"
 
 #include <cstring>
-#include <sstream>
 
-namespace {
-constexpr uint64_t FOOTER_TRAILER_SIZE = 16;
-constexpr uint64_t FOOTER_MIN_SIZE = 36;
-}  // namespace
+#include "vsag_exception.h"
 
 namespace vsag {
 
+namespace {
+
+constexpr uint64_t FOOTER_TRAILER_SIZE = 16;
+constexpr uint64_t FOOTER_MIN_SIZE = 36;
+
+}  // namespace
+
 void
 Metadata::make_sure_metadata_not_null() {
-    time_t now = time(nullptr);
-    tm* ltm = localtime(&now);
+    metadata_["_update_time"].SetString("1970-01-01 00:00:00");
+}
 
-    int32_t year = 1900 + ltm->tm_year;
-    int32_t month = 1 + ltm->tm_mon;
-    int32_t day = ltm->tm_mday;
-    int32_t hour = ltm->tm_hour;
-    int32_t min = ltm->tm_min;
-    int32_t sec = ltm->tm_sec;
+uint32_t
+StreamHeader::InitialChecksum() {
+    return 0xFFFFFFFF;
+}
 
-    std::stringstream ss;
-    ss << year << "-" << (month < 10 ? "0" : "") << month << "-" << (day < 10 ? "0" : "") << day
-       << " " << (hour < 10 ? "0" : "") << hour << ":" << (min < 10 ? "0" : "") << min << ":"
-       << (sec < 10 ? "0" : "") << sec;
-    std::string formatted_datetime = ss.str();
+uint32_t
+StreamHeader::UpdateChecksum(uint32_t crc, std::string_view bytes) {
+    constexpr uint32_t polynomial = 0xEDB88320;
+    for (const char& byte : bytes) {
+        crc ^= static_cast<uint8_t>(byte);
+        for (uint64_t j = 0; j < 8; ++j) {
+            crc = (crc >> 1) ^ ((crc & 1) == 1 ? polynomial : 0);
+        }
+    }
+    return crc;
+}
 
-    // FIXME(wxyu): Index merge depends on model comparison, timestamp in footer may cause the
-    // two models not to be equal, remove this line after supporting comparing two indexes in memory
-    formatted_datetime = "1970-01-01 00:00:00";
+uint32_t
+StreamHeader::FinalizeChecksum(uint32_t crc) {
+    return crc ^ 0xFFFFFFFF;
+}
 
-    metadata_["_update_time"].SetString(formatted_datetime);
+uint32_t
+StreamHeader::CalculateChecksum(std::string_view bytes) {
+    return StreamHeader::FinalizeChecksum(
+        StreamHeader::UpdateChecksum(StreamHeader::InitialChecksum(), bytes));
+}
+
+void
+StreamHeader::Write(StreamWriter& writer, const MetadataPtr& metadata) {
+    writer.Write(SERIAL_STREAM_MAGIC, 8);
+    StreamWriter::WriteObj(writer, SERIAL_STREAM_FORMAT_MAJOR);
+    StreamWriter::WriteObj(writer, SERIAL_STREAM_FORMAT_MINOR);
+
+    auto metadata_string = metadata->ToString();
+    const uint64_t metadata_len = metadata_string.size();
+    if (metadata_len > STREAM_HEADER_MAX_METADATA_LEN) {
+        throw VsagException(ErrorType::INVALID_BINARY,
+                            "streaming serialization metadata is too large");
+    }
+    StreamWriter::WriteObj(writer, metadata_len);
+    writer.Write(metadata_string.c_str(), metadata_len);
+    const uint32_t checksum = StreamHeader::CalculateChecksum(metadata_string);
+    StreamWriter::WriteObj(writer, checksum);
+}
+
+MetadataPtr
+StreamHeader::Read(StreamReader& reader) {
+    return StreamHeader::ReadRaw(reader).metadata;
+}
+
+StreamHeaderData
+StreamHeader::ReadRaw(StreamReader& reader) {
+    char magic[8] = {};
+    reader.Read(magic, 8);
+    if (std::memcmp(magic, SERIAL_STREAM_MAGIC, 8) != 0) {
+        throw VsagException(ErrorType::INVALID_BINARY, "invalid streaming serialization magic");
+    }
+
+    uint16_t major = 0;
+    uint16_t minor = 0;
+    StreamReader::ReadObj(reader, major);
+    StreamReader::ReadObj(reader, minor);
+    if (major != SERIAL_STREAM_FORMAT_MAJOR) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "unsupported streaming serialization major version");
+    }
+
+    uint64_t metadata_len = 0;
+    StreamReader::ReadObj(reader, metadata_len);
+    if (metadata_len > STREAM_HEADER_MAX_METADATA_LEN) {
+        throw VsagException(ErrorType::INVALID_BINARY,
+                            "streaming serialization metadata is too large");
+    }
+    std::string metadata_string(metadata_len, '\0');
+    reader.Read(metadata_string.data(), metadata_len);
+
+    uint32_t checksum = 0;
+    StreamReader::ReadObj(reader, checksum);
+    if (StreamHeader::CalculateChecksum(metadata_string) != checksum) {
+        throw VsagException(ErrorType::INVALID_BINARY,
+                            "streaming serialization metadata checksum mismatch");
+    }
+
+    (void)minor;
+    auto metadata_json = JsonType::Parse(metadata_string, false);
+    if (metadata_json.IsDiscarded() || !metadata_json.IsObject()) {
+        throw VsagException(ErrorType::INVALID_BINARY,
+                            "streaming serialization metadata must be a JSON object");
+    }
+    return {std::make_shared<Metadata>(metadata_json), std::move(metadata_string)};
 }
 
 FooterPtr

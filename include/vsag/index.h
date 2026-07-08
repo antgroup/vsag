@@ -36,6 +36,7 @@
 #include "vsag/index_detail_info.h"
 #include "vsag/index_features.h"
 #include "vsag/iterator_context.h"
+#include "vsag/load_parameters.h"
 #include "vsag/readerset.h"
 #include "vsag/search_param.h"
 #include "vsag/search_request.h"
@@ -84,6 +85,21 @@ enum class RemoveMode {
     /** remove the vector from index and repair the index, this mode is heavy */
     FORCE_REMOVE = 1,
 
+};
+
+struct StreamingBlockLayout {
+    std::string name;
+    uint32_t tag{0};
+    uint32_t version{0};
+    bool critical{false};
+    uint64_t header_offset{0};
+    uint64_t payload_offset{0};
+    uint64_t payload_size{0};
+};
+
+struct StreamingIndexMetadata {
+    std::string metadata_json;
+    std::vector<StreamingBlockLayout> blocks;
 };
 
 class Index {
@@ -863,6 +879,19 @@ public:
     }
 
     /**
+      * @brief Serialize the full index to the header-first streaming format.
+      *
+      * The stream starts with the VSAG streaming magic/version header, followed by metadata and
+      * TLV body blocks, and ends with a SECTION_END block. Use DeserializeStreaming or Load to
+      * read this format.
+      */
+    virtual tl::expected<void, Error>
+    SerializeStreaming(std::ostream& out_stream) const {
+        return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                    "Index does not support streaming serialize"));
+    }
+
+    /**
       * @brief Deserialize index from a file stream
       * 
       * @param in_stream is a already opened file stream contains serialized index
@@ -874,6 +903,37 @@ public:
         return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                                     "Index does not support deserialize from a file stream"));
     }
+
+    /**
+      * @brief Restore the full in-memory index from the streaming format.
+      *
+      * The target index must be empty and compatible with the serialized build parameters. This
+      * API does not accept loading policy options; use Load for policy-based placement.
+      */
+    virtual tl::expected<void, Error>
+    DeserializeStreaming(std::istream& in_stream) {
+        return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                    "Index does not support streaming deserialize"));
+    }
+
+    /**
+      * @brief Load an index from the streaming format using a loading policy.
+      *
+      * This static API reads the serialized metadata, creates the matching index internally, and
+      * then loads the index body according to the loading policy. The parameters object can be
+      * constructed from a JSON string, and can also carry Reader objects for reader_io-backed
+      * blocks. Policy keys are index-specific; supported keys include IO-related keys from
+      * CreateIndex, such as base_io_type, precise_io_type, raw_vector_io_type and their file path
+      * counterparts. Invalid parameter JSON or values return INVALID_ARGUMENT; unsupported loading
+      * policies return UNSUPPORTED_INDEX_OPERATION.
+      */
+    static tl::expected<StreamingIndexMetadata, Error>
+    GetStreamingMetadata(std::istream& in_stream);
+
+    static tl::expected<IndexPtr, Error>
+    Load(std::istream& in_stream,
+         const LoadParameters& parameters = LoadParameters(),
+         Allocator* allocator = nullptr);
 
 public:
     // [statstics methods]

@@ -32,13 +32,36 @@
 #include "index_feature_list.h"
 #include "inner_string_params.h"
 #include "storage/serialization.h"
+#include "storage/serialization_tags.h"
+#include "storage/tlv_section.h"
 #include "typing.h"
 #include "utils/slow_task_timer.h"
 #include "utils/util_functions.h"
 namespace vsag {
 
 namespace {
+
 constexpr const char* WARP_MODE_MARKER = "_warp_mode";
+
+void
+require_string_member(const JsonType& json, const std::string& key) {
+    CHECK_ARGUMENT(json[key].IsString(),
+                   fmt::format("BruteForce streaming load parameter '{}' must be a string", key));
+}
+
+void
+require_object_member(const JsonType& json, const std::string& key) {
+    CHECK_ARGUMENT(json[key].IsObject(),
+                   fmt::format("BruteForce streaming load parameter '{}' must be an object", key));
+}
+
+void
+require_bool_or_string_member(const JsonType& json, const std::string& key) {
+    CHECK_ARGUMENT(
+        json[key].IsBool() or json[key].IsString(),
+        fmt::format("BruteForce streaming load parameter '{}' must be a bool or string", key));
+}
+
 }  // namespace
 
 BruteForce::BruteForce(const BruteForceParameterPtr& param, const IndexCommonParam& common_param)
@@ -375,6 +398,8 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
         this->create_search_filter(request.filter_, brute_force_params.use_extra_info_filter);
 
     if (request.enable_attribute_filter_) {
+        CHECK_ARGUMENT(this->use_attribute_filter_ && this->attr_filter_index_ != nullptr,
+                       "attribute filter is not available");
         auto& schema = this->attr_filter_index_->field_type_map_;
         auto expr = AstParse(request.attribute_filter_str_, &schema);
         executor = Executor::MakeInstance(this->allocator_, expr, this->attr_filter_index_);
@@ -568,6 +593,294 @@ BruteForce::Serialize(StreamWriter& writer) const {
                                          this->extra_infos_ != nullptr);
     basic_info[INDEX_PARAM].SetString(this->create_param_ptr_->ToString());
     write_index_footer(writer, basic_info);
+}
+
+MetadataPtr
+BruteForce::collect_streaming_header() const {
+    auto metadata = std::make_shared<Metadata>();
+    metadata->Set("format", "vsag_stream_v1");
+    metadata->Set("index_name", this->GetName());
+
+    JsonType basic_info;
+    basic_info["dim"].SetInt(dim_);
+    basic_info["metric"].SetInt(static_cast<int64_t>(metric_));
+    basic_info["data_type"].SetInt(static_cast<int64_t>(data_type_));
+    basic_info["total_count"].SetUint64(total_count_.load());
+    basic_info["is_multi_vector"].SetBool(is_multi_vector_);
+    basic_info[INDEX_PARAM].SetString(this->create_param_ptr_->ToString());
+    metadata->Set("basic_info", basic_info);
+
+    JsonType manifest;
+    auto attribute_filter_tag = static_cast<uint32_t>(StreamSerializationTag::ATTRIBUTE_FILTER);
+    auto base_codes_tag = static_cast<uint32_t>(StreamSerializationTag::BASE_CODES);
+    auto label_table_tag = static_cast<uint32_t>(StreamSerializationTag::LABEL_TABLE);
+    if (this->use_attribute_filter_ && this->attr_filter_index_ != nullptr) {
+        AppendStreamingManifestBlock(manifest,
+                                     attribute_filter_tag,
+                                     StreamSerializationBlockCurrentVersion(attribute_filter_tag),
+                                     StreamSerializationTagCritical(attribute_filter_tag));
+    }
+    AppendStreamingManifestBlock(manifest,
+                                 base_codes_tag,
+                                 StreamSerializationBlockCurrentVersion(base_codes_tag),
+                                 StreamSerializationTagCritical(base_codes_tag));
+    AppendStreamingManifestBlock(manifest,
+                                 label_table_tag,
+                                 StreamSerializationBlockCurrentVersion(label_table_tag),
+                                 StreamSerializationTagCritical(label_table_tag));
+    metadata->Set("block_manifest", manifest);
+    metadata->SetEmptyIndex(this->GetNumElements() == 0);
+    return metadata;
+}
+
+void
+BruteForce::serialize_streaming_body(StreamWriter& writer) const {
+    if (this->use_attribute_filter_ && this->attr_filter_index_ != nullptr) {
+        auto tag = static_cast<uint32_t>(StreamSerializationTag::ATTRIBUTE_FILTER);
+        WriteStreamingBlock(
+            writer, tag, StreamSerializationTagCritical(tag), [this](StreamWriter& block_writer) {
+                this->attr_filter_index_->Serialize(block_writer);
+            });
+    }
+
+    auto base_codes_tag = static_cast<uint32_t>(StreamSerializationTag::BASE_CODES);
+    auto label_table_tag = static_cast<uint32_t>(StreamSerializationTag::LABEL_TABLE);
+    WriteStreamingBlock(
+        writer,
+        base_codes_tag,
+        StreamSerializationTagCritical(base_codes_tag),
+        [this](StreamWriter& block_writer) { this->inner_codes_->Serialize(block_writer); });
+    WriteStreamingBlock(
+        writer,
+        label_table_tag,
+        StreamSerializationTagCritical(label_table_tag),
+        [this](StreamWriter& block_writer) { this->label_table_->Serialize(block_writer); });
+}
+
+void
+BruteForce::deserialize_streaming_body(StreamReader& reader, const MetadataPtr& metadata) {
+    StreamingLoadPlan plan;
+    plan.base_codes = StreamingLoadTarget::MEMORY;
+    plan.precise_codes = StreamingLoadTarget::MEMORY;
+    plan.raw_vector = StreamingLoadTarget::MEMORY;
+    plan.attribute_filter = StreamingLoadTarget::MEMORY;
+    this->read_streaming_body(reader, metadata, plan, true);
+}
+
+void
+BruteForce::load_streaming_body(StreamReader& reader,
+                                const MetadataPtr& metadata,
+                                const LoadParameters& parameters) {
+    auto plan = BruteForce::parse_streaming_load_parameters(parameters);
+    this->read_streaming_body(reader, metadata, plan, false);
+}
+
+BruteForce::StreamingLoadPlan
+BruteForce::parse_streaming_load_parameters(const LoadParameters& parameters) {
+    StreamingLoadPlan plan;
+    auto parameter_string = parameters.Dump();
+    auto json = JsonType::Parse(parameter_string.empty() ? "{}" : parameter_string, false);
+    CHECK_ARGUMENT(not json.IsDiscarded(),
+                   "BruteForce streaming load parameters must be valid JSON");
+    CHECK_ARGUMENT(json.IsObject(), "BruteForce streaming load parameters must be a JSON object");
+    if (json.Contains(BRUTE_FORCE_BASE_IO_TYPE)) {
+        require_string_member(json, BRUTE_FORCE_BASE_IO_TYPE);
+        plan.base_codes = BruteForce::streaming_load_target_from_io_type(
+            json[BRUTE_FORCE_BASE_IO_TYPE].GetString());
+    }
+    if (json.Contains(BRUTE_FORCE_PRECISE_IO_TYPE)) {
+        require_string_member(json, BRUTE_FORCE_PRECISE_IO_TYPE);
+        plan.precise_codes = BruteForce::streaming_load_target_from_io_type(
+            json[BRUTE_FORCE_PRECISE_IO_TYPE].GetString());
+    }
+    if (json.Contains(RAW_VECTOR_IO_TYPE)) {
+        require_string_member(json, RAW_VECTOR_IO_TYPE);
+        plan.raw_vector =
+            BruteForce::streaming_load_target_from_io_type(json[RAW_VECTOR_IO_TYPE].GetString());
+    }
+    if (json.Contains(USE_ATTRIBUTE_FILTER)) {
+        CHECK_ARGUMENT(json[USE_ATTRIBUTE_FILTER].IsBool(),
+                       fmt::format("BruteForce streaming load parameter '{}' must be a bool",
+                                   USE_ATTRIBUTE_FILTER));
+        if (not json[USE_ATTRIBUTE_FILTER].GetBool()) {
+            plan.attribute_filter = StreamingLoadTarget::SKIP;
+        }
+    }
+    if (json.Contains("load")) {
+        require_object_member(json, "load");
+        auto load_json = json["load"];
+        if (load_json.Contains(BASE_CODES_KEY)) {
+            require_string_member(load_json, BASE_CODES_KEY);
+            plan.base_codes = BruteForce::streaming_load_target_from_string(
+                load_json[BASE_CODES_KEY].GetString());
+        }
+        if (load_json.Contains(PRECISE_CODES_KEY)) {
+            require_string_member(load_json, PRECISE_CODES_KEY);
+            plan.precise_codes = BruteForce::streaming_load_target_from_string(
+                load_json[PRECISE_CODES_KEY].GetString());
+        }
+        if (load_json.Contains(RAW_VECTOR_KEY)) {
+            require_string_member(load_json, RAW_VECTOR_KEY);
+            plan.raw_vector = BruteForce::streaming_load_target_from_string(
+                load_json[RAW_VECTOR_KEY].GetString());
+        }
+        if (load_json.Contains(USE_ATTRIBUTE_FILTER_KEY)) {
+            require_bool_or_string_member(load_json, USE_ATTRIBUTE_FILTER_KEY);
+            auto attr_policy = load_json[USE_ATTRIBUTE_FILTER_KEY];
+            if (attr_policy.IsBool()) {
+                plan.attribute_filter =
+                    attr_policy.GetBool() ? StreamingLoadTarget::MEMORY : StreamingLoadTarget::SKIP;
+            } else {
+                plan.attribute_filter =
+                    BruteForce::streaming_load_target_from_string(attr_policy.GetString());
+            }
+        }
+    }
+    return plan;
+}
+
+BruteForce::StreamingLoadTarget
+BruteForce::streaming_load_target_from_io_type(const std::string& io_type) {
+    if (io_type == IO_TYPE_VALUE_READER_IO || io_type == IO_TYPE_VALUE_MMAP_IO ||
+        io_type == IO_TYPE_VALUE_ASYNC_IO) {
+        return StreamingLoadTarget::READER;
+    }
+    if (io_type == IO_TYPE_VALUE_MEMORY_IO || io_type == IO_TYPE_VALUE_BLOCK_MEMORY_IO ||
+        io_type == IO_TYPE_VALUE_BUFFER_IO) {
+        return StreamingLoadTarget::MEMORY;
+    }
+    throw VsagException(ErrorType::INVALID_ARGUMENT,
+                        fmt::format("unsupported BruteForce streaming load io_type: {}", io_type));
+}
+
+BruteForce::StreamingLoadTarget
+BruteForce::streaming_load_target_from_string(const std::string& value) {
+    if (value == "skip") {
+        return StreamingLoadTarget::SKIP;
+    }
+    if (value == "reader") {
+        return StreamingLoadTarget::READER;
+    }
+    if (value == "memory") {
+        return StreamingLoadTarget::MEMORY;
+    }
+    throw VsagException(
+        ErrorType::INVALID_ARGUMENT,
+        fmt::format("unsupported BruteForce streaming load placement policy: {}", value));
+}
+
+void
+BruteForce::read_streaming_body(StreamReader& reader,
+                                const MetadataPtr& metadata,
+                                const StreamingLoadPlan& plan,
+                                bool full_deserialize) {
+    auto basic_info = metadata->Get("basic_info");
+    if (basic_info.Contains(INDEX_PARAM)) {
+        std::string index_param_string = basic_info[INDEX_PARAM].GetString();
+        auto index_param = std::make_shared<BruteForceParameter>();
+        index_param->FromString(index_param_string);
+        if (not this->create_param_ptr_->CheckCompatibility(index_param)) {
+            auto message = fmt::format("BruteForce index parameter not match, current: {}, new: {}",
+                                       this->create_param_ptr_->ToString(),
+                                       index_param->ToString());
+            logger::error(message);
+            throw VsagException(ErrorType::INVALID_ARGUMENT, message);
+        }
+    }
+
+    dim_ = basic_info["dim"].GetInt();
+    total_count_.store(basic_info["total_count"].GetUint64());
+
+    bool loaded_base_codes = false;
+    bool loaded_label_table = false;
+    bool loaded_attribute_filter = false;
+    while (true) {
+        auto block_header = StreamBlockHeader::Read(reader);
+        if (block_header.IsSectionEnd()) {
+            break;
+        }
+        BoundedForwardReader block_reader(&reader, block_header.value_len);
+        if (!StreamSerializationBlockVersionSupported(block_header.tag,
+                                                      block_header.block_version)) {
+            if (block_header.IsCritical()) {
+                throw VsagException(
+                    ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                    fmt::format("unsupported BruteForce streaming block version: tag={}, name={}, "
+                                "version={}, flags={}, value_len={}",
+                                block_header.tag,
+                                StreamSerializationTagName(block_header.tag),
+                                block_header.block_version,
+                                block_header.flags,
+                                block_header.value_len));
+            }
+            block_reader.SkipRemaining();
+            continue;
+        }
+        switch (static_cast<StreamSerializationTag>(block_header.tag)) {
+            case StreamSerializationTag::ATTRIBUTE_FILTER:
+                if ((full_deserialize || plan.attribute_filter == StreamingLoadTarget::MEMORY) &&
+                    this->use_attribute_filter_ && this->attr_filter_index_ != nullptr) {
+                    ReadSeekableBlockPayload(
+                        block_reader, block_header, [this](StreamReader& block) {
+                            this->attr_filter_index_->Deserialize(block);
+                        });
+                    loaded_attribute_filter = true;
+                } else if (plan.attribute_filter == StreamingLoadTarget::READER &&
+                           this->use_attribute_filter_ && this->attr_filter_index_ != nullptr) {
+                    throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                        "BruteForce attribute filter does not support reader load");
+                }
+                break;
+            case StreamSerializationTag::BASE_CODES:
+                if (!full_deserialize && plan.base_codes != StreamingLoadTarget::MEMORY) {
+                    throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                        "BruteForce base codes must be loaded into memory");
+                }
+                ReadSeekableBlockPayload(block_reader, block_header, [this](StreamReader& block) {
+                    this->inner_codes_->Deserialize(block);
+                });
+                loaded_base_codes = true;
+                break;
+            case StreamSerializationTag::LABEL_TABLE:
+                ReadSeekableBlockPayload(block_reader, block_header, [this](StreamReader& block) {
+                    this->label_table_->Deserialize(block);
+                });
+                loaded_label_table = true;
+                break;
+            default:
+                if (block_header.IsCritical()) {
+                    throw VsagException(
+                        ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                        fmt::format("unknown streaming serialization block: tag={}, name={}, "
+                                    "version={}, flags={}, value_len={}",
+                                    block_header.tag,
+                                    StreamSerializationTagName(block_header.tag),
+                                    block_header.block_version,
+                                    block_header.flags,
+                                    block_header.value_len));
+                }
+                break;
+        }
+        block_reader.SkipRemaining();
+    }
+
+    if (not loaded_base_codes || not loaded_label_table) {
+        throw VsagException(ErrorType::READ_ERROR,
+                            "BruteForce streaming serialization required block is missing");
+    }
+    if (this->use_attribute_filter_ && this->attr_filter_index_ != nullptr &&
+        (full_deserialize || plan.attribute_filter == StreamingLoadTarget::MEMORY) &&
+        !loaded_attribute_filter) {
+        throw VsagException(ErrorType::READ_ERROR,
+                            "BruteForce streaming serialization attribute filter block is missing");
+    }
+    if (!full_deserialize && plan.attribute_filter == StreamingLoadTarget::SKIP) {
+        this->use_attribute_filter_ = false;
+        this->has_attribute_ = false;
+        this->attr_filter_index_.reset();
+    }
+    delete_count_.store(label_table_->GetAllDeletedIds().size(), std::memory_order_relaxed);
+    this->cal_memory_usage();
 }
 
 void

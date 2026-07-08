@@ -31,6 +31,7 @@
 #include "json_types.h"
 #include "metric_type.h"
 #include "parameter.h"
+#include "storage/serialization.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "type_helpers.h"
@@ -197,6 +198,14 @@ public:
 
     virtual void
     Deserialize(std::istream& in_stream);
+
+    virtual void
+    DeserializeStreaming(std::istream& in_stream);
+
+    virtual void
+    LoadStreamingBody(StreamReader& reader,
+                      const MetadataPtr& metadata,
+                      const LoadParameters& parameters);
 
     virtual void
     Deserialize(StreamReader& reader) = 0;
@@ -436,6 +445,9 @@ public:
     Serialize(std::ostream& out_stream) const;
 
     virtual void
+    SerializeStreaming(std::ostream& out_stream) const;
+
+    virtual void
     Serialize(const WriteFuncType& write_func) const;
 
     virtual void
@@ -494,6 +506,20 @@ public:
     }
 
 protected:
+    virtual MetadataPtr
+    collect_streaming_header() const;
+
+    virtual void
+    serialize_streaming_body(StreamWriter& writer) const;
+
+    virtual void
+    deserialize_streaming_body(StreamReader& reader, const MetadataPtr& metadata);
+
+    virtual void
+    load_streaming_body(StreamReader& reader,
+                        const MetadataPtr& metadata,
+                        const LoadParameters& parameters);
+
     void
     analyze_quantizer(JsonType& stats,
                       const float* data,

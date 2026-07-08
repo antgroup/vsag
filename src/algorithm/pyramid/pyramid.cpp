@@ -27,6 +27,8 @@
 #include "query_context.h"
 #include "storage/empty_index_binary_set.h"
 #include "storage/serialization.h"
+#include "storage/serialization_tags.h"
+#include "storage/tlv_section.h"
 #include "utils/slow_task_timer.h"
 #include "utils/util_functions.h"
 namespace vsag {
@@ -451,6 +453,238 @@ Pyramid::Serialize(StreamWriter& writer) const {
     basic_info["max_capacity"].SetInt(max_capacity_);
     basic_info[INDEX_PARAM].SetString(this->create_param_ptr_->ToString());
     write_index_footer(writer, basic_info);
+}
+
+MetadataPtr
+Pyramid::collect_streaming_header() const {
+    auto metadata = std::make_shared<Metadata>();
+    metadata->Set("format", "vsag_stream_v1");
+    metadata->Set("index_name", this->GetName());
+
+    JsonType basic_info;
+    basic_info["max_capacity"].SetInt(max_capacity_);
+    basic_info["dim"].SetInt(dim_);
+    basic_info["metric"].SetInt(static_cast<int64_t>(metric_));
+    basic_info["data_type"].SetInt(static_cast<int64_t>(data_type_));
+    basic_info["extra_info_size"].SetInt(static_cast<int64_t>(extra_info_size_));
+    basic_info[INDEX_PARAM].SetString(this->create_param_ptr_->ToString());
+    metadata->Set(BASIC_INFO, basic_info);
+
+    JsonType manifest;
+    auto label_tag = static_cast<uint32_t>(StreamSerializationTag::LABEL_TABLE);
+    auto base_tag = static_cast<uint32_t>(StreamSerializationTag::BASE_CODES);
+    auto hierarchy_tag = static_cast<uint32_t>(StreamSerializationTag::PYRAMID_HIERARCHIES);
+    AppendStreamingManifestBlock(manifest,
+                                 label_tag,
+                                 StreamSerializationBlockCurrentVersion(label_tag),
+                                 StreamSerializationTagCritical(label_tag));
+    AppendStreamingManifestBlock(manifest,
+                                 base_tag,
+                                 StreamSerializationBlockCurrentVersion(base_tag),
+                                 StreamSerializationTagCritical(base_tag));
+    if (this->use_reorder_) {
+        auto tag = static_cast<uint32_t>(StreamSerializationTag::HIGH_PRECISION_CODES);
+        AppendStreamingManifestBlock(manifest,
+                                     tag,
+                                     StreamSerializationBlockCurrentVersion(tag),
+                                     StreamSerializationTagCritical(tag));
+    }
+    AppendStreamingManifestBlock(manifest,
+                                 hierarchy_tag,
+                                 StreamSerializationBlockCurrentVersion(hierarchy_tag),
+                                 StreamSerializationTagCritical(hierarchy_tag));
+    metadata->Set("block_manifest", manifest);
+    metadata->SetEmptyIndex(this->GetNumElements() == 0);
+    return metadata;
+}
+
+void
+Pyramid::serialize_hierarchies(StreamWriter& writer) const {
+    auto pyramid_param = std::dynamic_pointer_cast<PyramidParameters>(create_param_ptr_);
+    if (pyramid_param && pyramid_param->has_hierarchies) {
+        uint64_t hierarchy_count = hierarchies_.size();
+        StreamWriter::WriteObj(writer, hierarchy_count);
+        for (const auto& [hname, h_ptr] : hierarchies_) {
+            StreamWriter::WriteString(writer, hname);
+            h_ptr->root->Serialize(writer);
+        }
+    } else {
+        hierarchies_.at("")->root->Serialize(writer);
+    }
+}
+
+void
+Pyramid::serialize_streaming_body(StreamWriter& writer) const {
+    auto label_tag = static_cast<uint32_t>(StreamSerializationTag::LABEL_TABLE);
+    auto base_tag = static_cast<uint32_t>(StreamSerializationTag::BASE_CODES);
+    auto hierarchy_tag = static_cast<uint32_t>(StreamSerializationTag::PYRAMID_HIERARCHIES);
+
+    WriteStreamingBlock(
+        writer, label_tag, StreamSerializationTagCritical(label_tag), [this](StreamWriter& w) {
+            this->label_table_->Serialize(w);
+        });
+    WriteStreamingBlock(
+        writer, base_tag, StreamSerializationTagCritical(base_tag), [this](StreamWriter& w) {
+            this->base_codes_->Serialize(w);
+        });
+    if (this->use_reorder_) {
+        auto tag = static_cast<uint32_t>(StreamSerializationTag::HIGH_PRECISION_CODES);
+        WriteStreamingBlock(
+            writer, tag, StreamSerializationTagCritical(tag), [this](StreamWriter& w) {
+                this->precise_codes_->Serialize(w);
+            });
+    }
+    WriteStreamingBlock(writer,
+                        hierarchy_tag,
+                        StreamSerializationTagCritical(hierarchy_tag),
+                        [this](StreamWriter& w) { this->serialize_hierarchies(w); });
+}
+
+void
+Pyramid::deserialize_hierarchies(StreamReader& reader, const JsonType& basic_info) {
+    auto param_json = JsonType::Parse(basic_info[INDEX_PARAM].GetString());
+    if (param_json.Contains(PYRAMID_HIERARCHIES)) {
+        uint64_t hierarchy_count = 0;
+        StreamReader::ReadObj(reader, hierarchy_count);
+        CHECK_ARGUMENT(hierarchy_count == hierarchies_.size(),
+                       fmt::format("serialized hierarchy count ({}) != config ({})",
+                                   hierarchy_count,
+                                   hierarchies_.size()));
+        for (uint64_t i = 0; i < hierarchy_count; ++i) {
+            std::string hname = StreamReader::ReadString(reader);
+            auto h_iter = hierarchies_.find(hname);
+            CHECK_ARGUMENT(h_iter != hierarchies_.end(),
+                           fmt::format("deserialized hierarchy '{}' not in config", hname));
+            h_iter->second->root->Deserialize(reader);
+        }
+    } else {
+        auto h_iter = hierarchies_.find("");
+        CHECK_ARGUMENT(
+            h_iter != hierarchies_.end(),
+            "deserialized single-hierarchy index but current config has named hierarchies");
+        h_iter->second->root->Deserialize(reader);
+    }
+}
+
+void
+Pyramid::deserialize_streaming_body(StreamReader& reader, const MetadataPtr& metadata) {
+    this->read_streaming_body(reader, metadata);
+}
+
+void
+Pyramid::load_streaming_body(StreamReader& reader,
+                             const MetadataPtr& metadata,
+                             const LoadParameters& parameters) {
+    (void)parameters;
+    this->read_streaming_body(reader, metadata);
+}
+
+void
+Pyramid::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) {
+    auto basic_info = metadata->Get(BASIC_INFO);
+    auto max_capacity = basic_info["max_capacity"].GetInt();
+    if (basic_info.Contains(INDEX_PARAM)) {
+        auto index_param = std::make_shared<PyramidParameters>();
+        index_param->FromString(basic_info[INDEX_PARAM].GetString());
+        if (not this->create_param_ptr_->CheckCompatibility(index_param)) {
+            auto message = fmt::format("Pyramid index parameter not match, current: {}, new: {}",
+                                       this->create_param_ptr_->ToString(),
+                                       index_param->ToString());
+            logger::error(message);
+            throw VsagException(ErrorType::INVALID_ARGUMENT, message);
+        }
+    }
+
+    bool loaded_label_table = false;
+    bool loaded_base_codes = false;
+    bool loaded_precise_codes = false;
+    bool loaded_hierarchies = false;
+
+    while (true) {
+        auto block_header = StreamBlockHeader::Read(reader);
+        if (block_header.IsSectionEnd()) {
+            break;
+        }
+        BoundedForwardReader block_reader(&reader, block_header.value_len);
+        if (!StreamSerializationBlockVersionSupported(block_header.tag,
+                                                      block_header.block_version)) {
+            if (block_header.IsCritical()) {
+                throw VsagException(
+                    ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                    fmt::format("unsupported Pyramid streaming block version: tag={}, "
+                                "name={}, version={}, flags={}, value_len={}",
+                                block_header.tag,
+                                StreamSerializationTagName(block_header.tag),
+                                block_header.block_version,
+                                block_header.flags,
+                                block_header.value_len));
+            }
+            block_reader.SkipRemaining();
+            continue;
+        }
+
+        switch (static_cast<StreamSerializationTag>(block_header.tag)) {
+            case StreamSerializationTag::LABEL_TABLE:
+                ReadSeekableBlockPayload(block_reader, block_header, [this](StreamReader& block) {
+                    this->label_table_->Deserialize(block);
+                });
+                this->delete_count_.store(
+                    static_cast<int64_t>(this->label_table_->GetAllDeletedIds().size()),
+                    std::memory_order_relaxed);
+                loaded_label_table = true;
+                break;
+            case StreamSerializationTag::BASE_CODES:
+                ReadSeekableBlockPayload(block_reader, block_header, [this](StreamReader& block) {
+                    this->base_codes_->Deserialize(block);
+                });
+                this->cur_element_count_ = this->base_codes_->TotalCount();
+                loaded_base_codes = true;
+                break;
+            case StreamSerializationTag::HIGH_PRECISION_CODES:
+                if (this->use_reorder_) {
+                    ReadSeekableBlockPayload(
+                        block_reader, block_header, [this](StreamReader& block) {
+                            this->precise_codes_->Deserialize(block);
+                        });
+                    loaded_precise_codes = true;
+                }
+                break;
+            case StreamSerializationTag::PYRAMID_HIERARCHIES:
+                ReadSeekableBlockPayload(
+                    block_reader, block_header, [this, &basic_info](StreamReader& block) {
+                        this->deserialize_hierarchies(block, basic_info);
+                    });
+                loaded_hierarchies = true;
+                break;
+            default:
+                if (block_header.IsCritical()) {
+                    throw VsagException(
+                        ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                        fmt::format("unknown Pyramid streaming serialization block: "
+                                    "tag={}, name={}, version={}, flags={}, "
+                                    "value_len={}",
+                                    block_header.tag,
+                                    StreamSerializationTagName(block_header.tag),
+                                    block_header.block_version,
+                                    block_header.flags,
+                                    block_header.value_len));
+                }
+                break;
+        }
+        block_reader.SkipRemaining();
+    }
+
+    if (!loaded_label_table || !loaded_base_codes || !loaded_hierarchies) {
+        throw VsagException(ErrorType::READ_ERROR,
+                            "Pyramid streaming serialization required block is missing");
+    }
+    if (this->use_reorder_ && !loaded_precise_codes) {
+        throw VsagException(ErrorType::READ_ERROR,
+                            "Pyramid streaming serialization precise codes block is missing");
+    }
+
+    resize(max_capacity);
+    this->current_memory_usage_ = static_cast<int64_t>(this->CalSerializeSize());
 }
 
 void

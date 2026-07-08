@@ -95,6 +95,9 @@ public:
     SetFloat(float value);
 
     void
+    SetDouble(double value);
+
+    void
     SetBool(bool value);
 
     template <class T>

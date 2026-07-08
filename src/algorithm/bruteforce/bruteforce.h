@@ -139,6 +139,48 @@ public:
     GetMemoryUsage() const override;
 
 private:
+    enum class StreamingLoadTarget {
+        SKIP,
+        MEMORY,
+        READER,
+    };
+
+    struct StreamingLoadPlan {
+        StreamingLoadTarget base_codes{StreamingLoadTarget::MEMORY};
+        StreamingLoadTarget precise_codes{StreamingLoadTarget::READER};
+        StreamingLoadTarget raw_vector{StreamingLoadTarget::SKIP};
+        StreamingLoadTarget attribute_filter{StreamingLoadTarget::MEMORY};
+    };
+
+    MetadataPtr
+    collect_streaming_header() const override;
+
+    void
+    serialize_streaming_body(StreamWriter& writer) const override;
+
+    void
+    deserialize_streaming_body(StreamReader& reader, const MetadataPtr& metadata) override;
+
+    void
+    load_streaming_body(StreamReader& reader,
+                        const MetadataPtr& metadata,
+                        const LoadParameters& parameters) override;
+
+    static StreamingLoadPlan
+    parse_streaming_load_parameters(const LoadParameters& parameters);
+
+    static StreamingLoadTarget
+    streaming_load_target_from_io_type(const std::string& io_type);
+
+    static StreamingLoadTarget
+    streaming_load_target_from_string(const std::string& value);
+
+    void
+    read_streaming_body(StreamReader& reader,
+                        const MetadataPtr& metadata,
+                        const StreamingLoadPlan& plan,
+                        bool full_deserialize);
+
     /**
      * @brief Grow the capacity of inner_codes_ to at least new_size slots.
      *

@@ -35,12 +35,15 @@
 #include "ivf_nearest_partition.h"
 #include "query_context.h"
 #include "storage/serialization.h"
+#include "storage/serialization_tags.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
+#include "storage/tlv_section.h"
 #include "utils/util_functions.h"
 #include "vsag_exception.h"
 
 namespace vsag {
+
 static constexpr const char* IVF_PARAMS_TEMPLATE =
     R"(
     {
@@ -636,6 +639,225 @@ IVF::Serialize(StreamWriter& writer) const {
 
     auto footer = std::make_shared<Footer>(metadata);
     footer->Write(writer);
+}
+
+MetadataPtr
+IVF::collect_streaming_header() const {
+    auto metadata = std::make_shared<Metadata>();
+    metadata->Set("format", "vsag_stream_v1");
+    metadata->Set("index_name", this->GetName());
+
+    JsonType basic_info;
+    basic_info["total_elements"].SetInt(this->total_elements_);
+    basic_info["use_reorder"].SetBool(this->use_reorder_);
+    basic_info["is_trained"].SetBool(this->is_trained_);
+    basic_info[DIM].SetInt(this->dim_);
+    basic_info[EXTRA_INFO_SIZE].SetInt(0);
+    basic_info[INDEX_PARAM].SetString(this->create_param_ptr_->ToString());
+    basic_info["data_type"].SetInt(static_cast<int64_t>(this->data_type_));
+    basic_info["metric"].SetInt(static_cast<int64_t>(this->metric_));
+    metadata->Set(BASIC_INFO, basic_info);
+
+    JsonType manifest;
+    auto bucket_tag = static_cast<uint32_t>(StreamSerializationTag::IVF_BUCKET);
+    auto partition_tag = static_cast<uint32_t>(StreamSerializationTag::IVF_PARTITION_STRATEGY);
+    auto label_tag = static_cast<uint32_t>(StreamSerializationTag::LABEL_TABLE);
+    AppendStreamingManifestBlock(manifest,
+                                 bucket_tag,
+                                 StreamSerializationBlockCurrentVersion(bucket_tag),
+                                 StreamSerializationTagCritical(bucket_tag));
+    AppendStreamingManifestBlock(manifest,
+                                 partition_tag,
+                                 StreamSerializationBlockCurrentVersion(partition_tag),
+                                 StreamSerializationTagCritical(partition_tag));
+    AppendStreamingManifestBlock(manifest,
+                                 label_tag,
+                                 StreamSerializationBlockCurrentVersion(label_tag),
+                                 StreamSerializationTagCritical(label_tag));
+    if (this->use_reorder_) {
+        auto tag = static_cast<uint32_t>(StreamSerializationTag::HIGH_PRECISION_CODES);
+        AppendStreamingManifestBlock(manifest,
+                                     tag,
+                                     StreamSerializationBlockCurrentVersion(tag),
+                                     StreamSerializationTagCritical(tag));
+    }
+    if (this->use_attribute_filter_) {
+        auto tag = static_cast<uint32_t>(StreamSerializationTag::ATTRIBUTE_FILTER);
+        AppendStreamingManifestBlock(manifest,
+                                     tag,
+                                     StreamSerializationBlockCurrentVersion(tag),
+                                     StreamSerializationTagCritical(tag));
+    }
+    metadata->Set("block_manifest", manifest);
+    metadata->SetEmptyIndex(this->GetNumElements() == 0);
+    return metadata;
+}
+
+void
+IVF::serialize_streaming_body(StreamWriter& writer) const {
+    auto bucket_tag = static_cast<uint32_t>(StreamSerializationTag::IVF_BUCKET);
+    auto partition_tag = static_cast<uint32_t>(StreamSerializationTag::IVF_PARTITION_STRATEGY);
+    auto label_tag = static_cast<uint32_t>(StreamSerializationTag::LABEL_TABLE);
+
+    WriteStreamingBlock(
+        writer, bucket_tag, StreamSerializationTagCritical(bucket_tag), [this](StreamWriter& w) {
+            this->bucket_->Serialize(w);
+        });
+    WriteStreamingBlock(writer,
+                        partition_tag,
+                        StreamSerializationTagCritical(partition_tag),
+                        [this](StreamWriter& w) { this->partition_strategy_->Serialize(w); });
+    WriteStreamingBlock(
+        writer, label_tag, StreamSerializationTagCritical(label_tag), [this](StreamWriter& w) {
+            this->label_table_->Serialize(w);
+        });
+    if (this->use_reorder_) {
+        auto tag = static_cast<uint32_t>(StreamSerializationTag::HIGH_PRECISION_CODES);
+        WriteStreamingBlock(
+            writer, tag, StreamSerializationTagCritical(tag), [this](StreamWriter& w) {
+                this->reorder_codes_->Serialize(w);
+            });
+    }
+    if (this->use_attribute_filter_) {
+        auto tag = static_cast<uint32_t>(StreamSerializationTag::ATTRIBUTE_FILTER);
+        WriteStreamingBlock(
+            writer, tag, StreamSerializationTagCritical(tag), [this](StreamWriter& w) {
+                this->attr_filter_index_->Serialize(w);
+            });
+    }
+}
+
+void
+IVF::deserialize_streaming_body(StreamReader& reader, const MetadataPtr& metadata) {
+    this->read_streaming_body(reader, metadata);
+}
+
+void
+IVF::load_streaming_body(StreamReader& reader,
+                         const MetadataPtr& metadata,
+                         const LoadParameters& parameters) {
+    (void)parameters;
+    this->read_streaming_body(reader, metadata);
+}
+
+void
+IVF::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) {
+    auto basic_info = metadata->Get(BASIC_INFO);
+    this->total_elements_ = basic_info["total_elements"].GetInt();
+    this->use_reorder_ = basic_info["use_reorder"].GetBool();
+    this->is_trained_ = basic_info["is_trained"].GetBool();
+    if (basic_info.Contains(INDEX_PARAM)) {
+        auto index_param = std::make_shared<IVFParameter>();
+        index_param->FromString(basic_info[INDEX_PARAM].GetString());
+        if (not this->create_param_ptr_->CheckCompatibility(index_param)) {
+            auto message = fmt::format("IVF index parameter not match, current: {}, new: {}",
+                                       this->create_param_ptr_->ToString(),
+                                       index_param->ToString());
+            logger::error(message);
+            throw VsagException(ErrorType::INVALID_ARGUMENT, message);
+        }
+    }
+
+    bool loaded_bucket = false;
+    bool loaded_partition = false;
+    bool loaded_label_table = false;
+    bool loaded_reorder_codes = false;
+    bool loaded_attribute_filter = false;
+
+    while (true) {
+        auto block_header = StreamBlockHeader::Read(reader);
+        if (block_header.IsSectionEnd()) {
+            break;
+        }
+        BoundedForwardReader block_reader(&reader, block_header.value_len);
+        if (!StreamSerializationBlockVersionSupported(block_header.tag,
+                                                      block_header.block_version)) {
+            if (block_header.IsCritical()) {
+                throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                    fmt::format("unsupported IVF streaming block version: tag={}, "
+                                                "name={}, version={}, flags={}, value_len={}",
+                                                block_header.tag,
+                                                StreamSerializationTagName(block_header.tag),
+                                                block_header.block_version,
+                                                block_header.flags,
+                                                block_header.value_len));
+            }
+            block_reader.SkipRemaining();
+            continue;
+        }
+
+        switch (static_cast<StreamSerializationTag>(block_header.tag)) {
+            case StreamSerializationTag::IVF_BUCKET:
+                ReadSeekableBlockPayload(block_reader, block_header, [this](StreamReader& block) {
+                    this->bucket_->Deserialize(block);
+                });
+                loaded_bucket = true;
+                break;
+            case StreamSerializationTag::IVF_PARTITION_STRATEGY:
+                ReadSeekableBlockPayload(block_reader, block_header, [this](StreamReader& block) {
+                    this->partition_strategy_->Deserialize(block);
+                });
+                loaded_partition = true;
+                break;
+            case StreamSerializationTag::LABEL_TABLE:
+                ReadSeekableBlockPayload(block_reader, block_header, [this](StreamReader& block) {
+                    this->label_table_->Deserialize(block);
+                });
+                loaded_label_table = true;
+                break;
+            case StreamSerializationTag::HIGH_PRECISION_CODES:
+                if (this->use_reorder_) {
+                    ReadSeekableBlockPayload(
+                        block_reader, block_header, [this](StreamReader& block) {
+                            this->reorder_codes_->Deserialize(block);
+                        });
+                    loaded_reorder_codes = true;
+                }
+                break;
+            case StreamSerializationTag::ATTRIBUTE_FILTER:
+                if (this->use_attribute_filter_) {
+                    ReadSeekableBlockPayload(
+                        block_reader, block_header, [this](StreamReader& block) {
+                            this->attr_filter_index_->Deserialize(block);
+                        });
+                    loaded_attribute_filter = true;
+                    this->has_attribute_ = true;
+                }
+                break;
+            default:
+                if (block_header.IsCritical()) {
+                    throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                        fmt::format("unknown IVF streaming serialization block: "
+                                                    "tag={}, name={}, version={}, flags={}, "
+                                                    "value_len={}",
+                                                    block_header.tag,
+                                                    StreamSerializationTagName(block_header.tag),
+                                                    block_header.block_version,
+                                                    block_header.flags,
+                                                    block_header.value_len));
+                }
+                break;
+        }
+        block_reader.SkipRemaining();
+    }
+
+    if (!loaded_bucket || !loaded_partition || !loaded_label_table) {
+        throw VsagException(ErrorType::READ_ERROR,
+                            "IVF streaming serialization required block is missing");
+    }
+    if (this->use_reorder_ && !loaded_reorder_codes) {
+        throw VsagException(ErrorType::READ_ERROR,
+                            "IVF streaming serialization reorder block is missing");
+    }
+    if (this->use_attribute_filter_ && !loaded_attribute_filter) {
+        throw VsagException(ErrorType::READ_ERROR,
+                            "IVF streaming serialization attribute filter block is missing");
+    }
+    if (this->bucket_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
+        this->has_raw_vector_ = true;
+    }
+    this->fill_location_map();
+    this->cal_memory_usage();
 }
 
 #define READ_DATACELL_WITH_NAME(reader, name, datacell)                       \

@@ -473,6 +473,13 @@ HGraph::SetIO(const std::shared_ptr<Reader> reader) {
     bottom_graph_->InitIO(reader_param);
 }
 
+void
+HGraph::SetPreciseCodesIO(const std::shared_ptr<Reader>& reader) {
+    auto reader_param = std::make_shared<ReaderIOParameter>();
+    reader_param->reader = reader;
+    high_precise_codes_->InitIO(reader_param);
+}
+
 const static uint64_t QUERY_SAMPLE_SIZE = 10;
 const static int64_t DEFAULT_TOPK = 100;
 
