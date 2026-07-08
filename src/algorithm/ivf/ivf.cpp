@@ -16,6 +16,7 @@
 #include "ivf.h"
 
 #include <atomic>
+#include <limits>
 #include <random>
 #include <set>
 
@@ -32,7 +33,7 @@
 #include "index/index_impl.h"
 #include "index_feature_list.h"
 #include "inner_string_params.h"
-#include "io/reader_io_parameter.h"
+#include "io/reader_io/reader_io_parameter.h"
 #include "ivf_nearest_partition.h"
 #include "query_context.h"
 #include "storage/serialization.h"
@@ -1387,7 +1388,6 @@ IVF::cal_memory_usage() {
     this->current_memory_usage_.store(memory);
 }
 
-uint64_t
 bool
 IVF::use_reader_io_for_reorder() const {
     auto ivf_param = std::dynamic_pointer_cast<IVFParameter>(this->create_param_ptr_);
