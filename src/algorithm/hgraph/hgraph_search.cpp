@@ -290,6 +290,8 @@ HGraph::brute_force_search(const void* query,
                            const FilterPtr& filter,
                            int64_t topk,
                            float radius,
+                           bool consider_duplicate,
+                           int64_t max_duplicates_per_group,
                            QueryContext* ctx) const {
     Allocator* alloc = (ctx != nullptr && ctx->alloc != nullptr) ? ctx->alloc : this->allocator_;
 
@@ -317,6 +319,55 @@ HGraph::brute_force_search(const void* query,
     }
 
     auto computer = flatten->FactoryComputer(query);
+    const bool need_limit_duplicate = this->support_duplicate_ && bottom_graph_ != nullptr &&
+                                      (not consider_duplicate || max_duplicates_per_group >= 0);
+    UnorderedMap<InnerIdType, int64_t> duplicate_counts(alloc);
+    auto can_push_duplicate =
+        [&](InnerIdType inner_id, bool has_evicted_id, InnerIdType evicted_id) {
+            if (not need_limit_duplicate) {
+                return true;
+            }
+
+            const auto group_id = bottom_graph_->GetGroupId(inner_id);
+            if (group_id == inner_id) {
+                return true;
+            }
+            if (not consider_duplicate || max_duplicates_per_group == 0) {
+                return false;
+            }
+
+            auto duplicate_count = duplicate_counts[group_id];
+            if (has_evicted_id && bottom_graph_->GetGroupId(evicted_id) == group_id &&
+                evicted_id != group_id && duplicate_count > 0) {
+                --duplicate_count;
+            }
+            if (duplicate_count >= max_duplicates_per_group) {
+                return false;
+            }
+            return true;
+        };
+    auto record_pushed_duplicate = [&](InnerIdType inner_id,
+                                       bool has_evicted_id,
+                                       InnerIdType evicted_id) {
+        if (not need_limit_duplicate || not consider_duplicate || max_duplicates_per_group <= 0) {
+            return;
+        }
+
+        if (has_evicted_id) {
+            const auto evicted_group_id = bottom_graph_->GetGroupId(evicted_id);
+            if (evicted_group_id != evicted_id) {
+                auto& evicted_duplicate_count = duplicate_counts[evicted_group_id];
+                if (evicted_duplicate_count > 0) {
+                    --evicted_duplicate_count;
+                }
+            }
+        }
+
+        const auto group_id = bottom_graph_->GetGroupId(inner_id);
+        if (group_id != inner_id) {
+            ++duplicate_counts[group_id];
+        }
+    };
 
     constexpr InnerIdType brute_force_batch_size = 64;
     Vector<InnerIdType> batch_ids(brute_force_batch_size, alloc);
@@ -339,11 +390,25 @@ HGraph::brute_force_search(const void* query,
             float dist = batch_dists[i];
             InnerIdType inner_id = batch_ids[i];
             if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
+                if (not can_push_duplicate(inner_id, false, 0)) {
+                    continue;
+                }
                 if (dist <= radius) {
                     result->Push(dist, inner_id);
+                    record_pushed_duplicate(inner_id, false, 0);
                 }
             } else {
+                const auto topk_size = static_cast<uint64_t>(topk);
+                if (result->Size() >= topk_size && dist >= result->Top().first) {
+                    continue;
+                }
+                const bool has_evicted_id = result->Size() >= topk_size;
+                const auto evicted_id = has_evicted_id ? result->Top().second : InnerIdType(0);
+                if (not can_push_duplicate(inner_id, has_evicted_id, evicted_id)) {
+                    continue;
+                }
                 result->Push(dist, inner_id);
+                record_pushed_duplicate(inner_id, has_evicted_id, evicted_id);
             }
         }
     }
@@ -474,7 +539,8 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         search_param.is_inner_id_allowed = ft;
         search_param.radius = request.radius_;
         search_param.search_mode = RANGE_SEARCH;
-        search_param.consider_duplicate = true;
+        search_param.consider_duplicate = this->support_duplicate_ && params.consider_duplicate;
+        search_param.max_duplicates_per_group = params.max_duplicates_per_group;
         search_param.range_search_limit_size = static_cast<int>(request.limited_size_);
         search_param.parallel_search_thread_count = params.parallel_search_thread_count;
         search_param.enable_reorder = params.enable_reorder;
@@ -489,7 +555,8 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
                          static_cast<int64_t>(static_cast<float>(k) * params.topk_factor));
         }
         search_param.enable_reorder = params.enable_reorder;
-        search_param.consider_duplicate = true;
+        search_param.consider_duplicate = this->support_duplicate_ && params.consider_duplicate;
+        search_param.max_duplicates_per_group = params.max_duplicates_per_group;
         search_param.enable_rabitq_one_bit_search = params.rabitq_one_bit_search;
         if (params.enable_time_record) {
             search_param.time_cost = std::make_shared<Timer>();
@@ -528,10 +595,22 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         if (valid_ratio <= params.brute_force_threshold) {
             if (is_range) {
                 search_result = this->brute_force_search<InnerSearchMode::RANGE_SEARCH>(
-                    raw_query, ft, request.limited_size_, request.radius_, &ctx);
+                    raw_query,
+                    ft,
+                    request.limited_size_,
+                    request.radius_,
+                    search_param.consider_duplicate,
+                    search_param.max_duplicates_per_group,
+                    &ctx);
             } else {
                 search_result = this->brute_force_search<InnerSearchMode::KNN_SEARCH>(
-                    raw_query, ft, k, 0.0F, &ctx);
+                    raw_query,
+                    ft,
+                    k,
+                    0.0F,
+                    search_param.consider_duplicate,
+                    search_param.max_duplicates_per_group,
+                    &ctx);
             }
             brute_force_used = true;
         }
