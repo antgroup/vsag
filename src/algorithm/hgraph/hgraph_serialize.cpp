@@ -388,6 +388,12 @@ HGraph::Deserialize(StreamReader& reader) {
             this->has_raw_vector_ = true;
         }
     }
+    // All deserialized slots carry fully written codes. Size the readiness
+    // bitmap to the restored capacity and publish [0, total_count_) so a later
+    // brute-force search can see them (this bulk path bypasses the per-slot
+    // Mark() in insert_persistent_codes()). See #2294.
+    this->codes_ready_.Resize(this->max_capacity_.load());
+    this->codes_ready_.MarkRange(this->total_count_.load());
     this->cal_memory_usage();
 
     // post serialize procedure
