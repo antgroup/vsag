@@ -36,6 +36,7 @@
 # Developer Guide
 
 - [Code Structure](development/code_structure.md)
+- [New Index Integration Checklist](development/new_index_checklist.md)
 - [Building](development/building.md)
 - [Offline / Air-gapped Builds](development/offline_build.md)
 - [Running Tests](development/testing.md)
