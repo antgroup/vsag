@@ -114,10 +114,7 @@ AsyncIO::DirectReadImpl(uint64_t size, uint64_t offset, bool& need_release) cons
         // destructor automatically frees align_data
         throw VsagException(ErrorType::INTERNAL_ERROR, fmt::format("pread error {}", ret));
     }
-    auto* result = obj.data;
-    obj.align_data = nullptr;  // transfer ownership to caller
-    obj.data = nullptr;
-    return result;
+    return obj.TakeData();
 }
 
 void

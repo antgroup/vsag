@@ -95,6 +95,24 @@ public:
     }
 
     /**
+     * @brief Transfers ownership of the aligned buffer to the caller.
+     *
+     * After this call, the object no longer owns the buffer and will not
+     * free it in the destructor. The caller is responsible for freeing
+     * the returned pointer (via the owning IO's ReleaseImpl).
+     *
+     * @return Pointer to the usable data region (may be offset from the
+     *         allocation base).
+     */
+    uint8_t*
+    TakeData() {
+        auto* ptr = data;
+        align_data = nullptr;
+        data = nullptr;
+        return ptr;
+    }
+
+    /**
      * @brief Sets up aligned buffer for a given size and offset.
      *
      * Calculates the aligned offset and size, allocates aligned memory,
