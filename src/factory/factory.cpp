@@ -65,14 +65,12 @@ namespace {
 
 IndexCommonParam
 make_streaming_common_param(const MetadataPtr& metadata, Allocator* allocator) {
-    auto resource = allocator == nullptr
-                        ? std::make_shared<Resource>(Engine::CreateDefaultAllocator(), nullptr)
-                        : std::make_shared<Resource>(allocator, nullptr);
+    auto resource = allocator == nullptr ? Resource(Engine::CreateDefaultAllocator(), nullptr)
+                                         : Resource(allocator, nullptr);
 
     IndexCommonParam common_param;
-    common_param.allocator_ = resource->GetAllocator();
-    common_param.thread_pool_ =
-        std::dynamic_pointer_cast<SafeThreadPool>(resource->GetThreadPool());
+    common_param.allocator_ = resource.GetAllocator();
+    common_param.thread_pool_ = std::dynamic_pointer_cast<SafeThreadPool>(resource.GetThreadPool());
 
     auto basic_info = metadata->Get("basic_info");
     if (basic_info.Contains("dim")) {

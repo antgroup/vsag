@@ -123,7 +123,10 @@ StreamHeader::ReadRaw(StreamReader& reader) {
         throw VsagException(ErrorType::INVALID_BINARY,
                             "streaming serialization metadata must be a JSON object");
     }
-    return {std::make_shared<Metadata>(metadata_json), std::move(metadata_string)};
+    StreamHeaderData result;
+    result.metadata = std::make_shared<Metadata>(std::move(metadata_json));
+    result.metadata_string = std::move(metadata_string);
+    return result;
 }
 
 FooterPtr
