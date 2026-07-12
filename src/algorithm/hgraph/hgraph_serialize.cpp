@@ -37,7 +37,7 @@ namespace {
 
 std::string
 dump_basic_info_for_log(const JsonType& basic_info) {
-    JsonType log_basic_info = basic_info;
+    JsonType log_basic_info = basic_info;  // NOLINT(performance-unnecessary-copy-initialization)
     if (log_basic_info.Contains(INDEX_PARAM) and log_basic_info[INDEX_PARAM].IsString()) {
         auto index_param = JsonType::Parse(log_basic_info[INDEX_PARAM].GetString(), false);
         if (not index_param.IsDiscarded() and index_param.IsObject()) {
@@ -104,13 +104,13 @@ public:
 private:
     void
     checksum_range(uint64_t offset, uint64_t size) {
-        constexpr uint64_t kBufferSize = 8192;
-        std::array<char, kBufferSize> buffer{};
+        constexpr uint64_t k_buffer_size = 8192;
+        std::array<char, k_buffer_size> buffer{};
         const auto original_cursor = reader_.GetCursor();
         reader_.Seek(offset);
         uint64_t remaining = size;
         while (remaining > 0) {
-            const auto read_size = std::min<uint64_t>(remaining, kBufferSize);
+            const auto read_size = std::min<uint64_t>(remaining, k_buffer_size);
             reader_.Read(buffer.data(), read_size);
             crc_ = StreamHeader::UpdateChecksum(crc_, std::string_view(buffer.data(), read_size));
             remaining -= read_size;
@@ -641,9 +641,10 @@ HGraph::read_streaming_body(StreamReader& reader,
                 break;
             case StreamSerializationTag::HIGH_PRECISION_CODES:
                 if (this->has_precise_reorder()) {
-                    constexpr const char* kPreciseReader = "precise_reader";
-                    if (load_parameters != nullptr && load_parameters->HasReader(kPreciseReader)) {
-                        auto reader_ptr = load_parameters->GetReader(kPreciseReader);
+                    constexpr const char* k_precise_reader = "precise_reader";
+                    if (load_parameters != nullptr &&
+                        load_parameters->HasReader(k_precise_reader)) {
+                        auto reader_ptr = load_parameters->GetReader(k_precise_reader);
                         if (reader_ptr == nullptr) {
                             throw VsagException(ErrorType::INVALID_ARGUMENT,
                                                 "precise_reader is null");

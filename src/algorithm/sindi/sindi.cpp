@@ -433,9 +433,10 @@ SINDI::build_immutable(const DatasetPtr& base) {
         const auto window_start_id =
             static_cast<int64_t>(immutable_data_->windows.size()) * window_size_;
         const auto window_inner_id = cur_element_count_ - window_start_id;
-        CHECK_ARGUMENT(
-            window_inner_id >= 0 and window_inner_id <= std::numeric_limits<uint16_t>::max(),
-            "immutable SINDI window-local doc id overflows uint16_t");
+        if (window_inner_id < 0 or window_inner_id > std::numeric_limits<uint16_t>::max()) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "immutable SINDI window-local doc id overflows uint16_t");
+        }
         auto inner_id = static_cast<uint16_t>(window_inner_id);
 
         try {
@@ -1310,7 +1311,9 @@ void
 SINDI::deserialize_windows(StreamReader& reader_ref) {
     uint64_t cur_element_count = 0;
     StreamReader::ReadObj(reader_ref, cur_element_count);
-    cur_element_count_.store(cur_element_count);
+    CHECK_ARGUMENT(cur_element_count <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max()),
+                   "SINDI element count overflows int64_t");
+    cur_element_count_.store(static_cast<int64_t>(cur_element_count));
 
     if (sparse_value_quant_type_ == SparseValueQuantizationType::SQ8) {
         StreamReader::ReadObj(reader_ref, quantization_params_->min_val);
@@ -1520,7 +1523,9 @@ SINDI::Deserialize(StreamReader& reader) {
 
     uint64_t cur_element_count = 0;
     StreamReader::ReadObj(reader_ref, cur_element_count);
-    cur_element_count_.store(cur_element_count);
+    CHECK_ARGUMENT(cur_element_count <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max()),
+                   "SINDI element count overflows int64_t");
+    cur_element_count_.store(static_cast<int64_t>(cur_element_count));
 
     if (sparse_value_quant_type_ == SparseValueQuantizationType::SQ8) {
         StreamReader::ReadObj(reader_ref, quantization_params_->min_val);
@@ -1610,9 +1615,11 @@ SINDI::compact_window_to_immutable(const SparseTermDataCell& term_list,
 
         const auto old_id_size = window.id_payloads.size();
         window.id_payloads.resize(old_id_size + posting_count);
+        const auto old_id_position =
+            static_cast<decltype(window.id_payloads)::difference_type>(old_id_size);
         std::copy(term_list.term_ids_[term]->begin(),
                   term_list.term_ids_[term]->end(),
-                  window.id_payloads.begin() + old_id_size);
+                  window.id_payloads.begin() + old_id_position);
 
         const auto payload_bytes = static_cast<uint64_t>(posting_count) * value_code_size;
         const auto old_value_size = window.value_payloads.size();

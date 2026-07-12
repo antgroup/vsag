@@ -24,6 +24,7 @@
 #include <sstream>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 
 #include "dataset_impl.h"
 #include "index_feature_list.h"
@@ -87,12 +88,12 @@ public:
                             int64_t max_cluster_size,
                             int64_t split_start_idx,
                             int64_t random_seed,
-                            const IndexCommonParam& common_param)
+                            IndexCommonParam common_param)
         : init_cluster_ratio_(init_cluster_ratio),
           max_cluster_size_(static_cast<int>(max_cluster_size)),
           split_start_idx_(static_cast<int>(split_start_idx)),
           random_seed_(static_cast<int>(random_seed)),
-          common_param_(common_param) {
+          common_param_(std::move(common_param)) {
     }
 
     ~HGraphDynamicClustering() = default;

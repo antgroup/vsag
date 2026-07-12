@@ -38,7 +38,7 @@ namespace vsag {
 namespace {
 
 void
-SeekTemporaryFile(std::FILE* file, uint64_t offset) {
+seek_temporary_file(std::FILE* file, uint64_t offset) {
 #if defined(_WIN32)
     if (offset > static_cast<uint64_t>(std::numeric_limits<__int64>::max())) {
         throw VsagException(ErrorType::READ_ERROR,
@@ -206,7 +206,7 @@ SkipBlockPayload(StreamReader& reader, const StreamBlockHeader& header) {
 }
 
 void
-ValidateSeekableBlockCursor(const StreamReader& reader, const StreamBlockHeader& header) {
+validate_seekable_block_cursor(const StreamReader& reader, const StreamBlockHeader& header) {
     if (reader.GetCursor() > header.value_len) {
         throw VsagException(ErrorType::INVALID_BINARY,
                             "seekable streaming block reader cursor exceeds payload boundary");
@@ -270,7 +270,7 @@ ReadSeekableBlockPayload(StreamReader& reader,
         };
         ReadFuncStreamReader block_reader(read_func, 0, header.value_len);
         deserialize(block_reader);
-        ValidateSeekableBlockCursor(block_reader, header);
+        validate_seekable_block_cursor(block_reader, header);
         return;
     }
 
@@ -309,7 +309,7 @@ ReadSeekableBlockPayload(StreamReader& reader,
             throw VsagException(ErrorType::READ_ERROR,
                                 "seekable streaming block reader exceeds payload boundary");
         }
-        SeekTemporaryFile(temp_file.get(), offset);
+        seek_temporary_file(temp_file.get(), offset);
         if (size > 0 && std::fread(dest, 1, static_cast<size_t>(size), temp_file.get()) != size) {
             throw VsagException(ErrorType::READ_ERROR,
                                 "failed to read streaming block temporary file");
@@ -317,7 +317,7 @@ ReadSeekableBlockPayload(StreamReader& reader,
     };
     ReadFuncStreamReader block_reader(read_func, 0, header.value_len);
     deserialize(block_reader);
-    ValidateSeekableBlockCursor(block_reader, header);
+    validate_seekable_block_cursor(block_reader, header);
 }
 
 }  // namespace vsag

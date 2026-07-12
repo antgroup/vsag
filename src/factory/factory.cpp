@@ -169,13 +169,13 @@ apply_hgraph_streaming_load_parameters(JsonType& index_param, const std::string&
     }
 }
 
-struct StreamingIndexLoadTarget {
+struct streaming_index_load_target {
     IndexPtr index;
     InnerIndexPtr inner_index;
 };
 
 template <typename IndexT, typename ParamT>
-StreamingIndexLoadTarget
+streaming_index_load_target
 create_streaming_index(const JsonType& index_param, const IndexCommonParam& common_param) {
     auto param = std::make_shared<ParamT>();
     param->FromJson(index_param);
@@ -183,7 +183,7 @@ create_streaming_index(const JsonType& index_param, const IndexCommonParam& comm
     return {std::make_shared<IndexImpl<IndexT>>(inner_index, common_param), inner_index};
 }
 
-tl::expected<StreamingIndexLoadTarget, Error>
+tl::expected<streaming_index_load_target, Error>
 create_streaming_index_from_metadata(const MetadataPtr& metadata,
                                      const std::string& parameters,
                                      Allocator* allocator) {
@@ -270,7 +270,7 @@ Index::GetStreamingMetadata(std::istream& in_stream) {
             StreamingIndexMetadata result;
             result.metadata_json = std::move(stream_header.metadata_string);
 
-            struct ManifestBlock {
+            struct manifest_block {
                 std::string name;
                 uint32_t tag{0};
                 uint32_t version{0};
@@ -278,13 +278,13 @@ Index::GetStreamingMetadata(std::istream& in_stream) {
                 uint64_t payload_size{0};
                 bool has_payload_size{false};
             };
-            std::vector<ManifestBlock> manifest_blocks;
+            std::vector<manifest_block> manifest_blocks;
             auto manifest = stream_header.metadata->Get("block_manifest");
             if (manifest.IsArray()) {
                 const auto* manifest_json = manifest.GetInnerJson();
                 manifest_blocks.reserve(manifest_json->size());
                 for (const auto& block_json : *manifest_json) {
-                    ManifestBlock block;
+                    manifest_block block;
                     block.name = block_json.value("name", std::string{});
                     block.tag = block_json.value("tag", 0U);
                     block.version = block_json.value("version", 0U);
@@ -462,7 +462,7 @@ public:
         });
     }
 
-    uint64_t
+    [[nodiscard]] uint64_t
     Size() const override {
         return size_;
     }
@@ -510,7 +510,7 @@ public:
         }
     }
 
-    uint64_t
+    [[nodiscard]] uint64_t
     Size() const override {
         return size_;
     }
