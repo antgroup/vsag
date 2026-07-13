@@ -17,6 +17,7 @@
 - [LazyHGraph](indexes/lazy_hgraph.md)
 - [IVF](indexes/ivf.md)
 - [SINDI](indexes/sindi.md)
+- [SIMQ](indexes/simq.md)
 - [Pyramid](indexes/pyramid.md)
 - [BruteForce](indexes/brute_force.md)
 
