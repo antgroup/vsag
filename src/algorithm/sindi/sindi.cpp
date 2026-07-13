@@ -1477,15 +1477,22 @@ SINDI::Deserialize(StreamReader& reader) {
     std::scoped_lock wlock(this->global_mutex_);
 
     bool has_datacell_rerank_format = false;
+    bool has_footer = false;
     if (not deserialize_without_footer_) {
         JsonType jsonify_basic_info;
         try {
             if (read_index_footer(reader, jsonify_basic_info)) {
+                has_footer = true;
                 // Check if the index parameter is compatible
                 {
                     auto param = jsonify_basic_info[INDEX_PARAM].GetString();
                     SINDIParameterPtr index_param = std::make_shared<SINDIParameter>();
                     index_param->FromString(param);
+                    CHECK_ARGUMENT(
+                        index_param->immutable == immutable_enabled_,
+                        fmt::format("SINDI immutable format mismatch: runtime={}, storage={}",
+                                    immutable_enabled_,
+                                    index_param->immutable));
                     if (not this->create_param_ptr_->CheckCompatibility(index_param)) {
                         auto message =
                             fmt::format("SINDI index parameter not match, current: {}, new: {}",
@@ -1512,6 +1519,9 @@ SINDI::Deserialize(StreamReader& reader) {
             throw;
         }
     }
+    CHECK_ARGUMENT(has_footer || not immutable_enabled_,
+                   "cannot deserialize SINDI storage without immutable format metadata into "
+                   "immutable runtime");
     auto* reader_ptr = &reader;
 
     BufferStreamReader buffer_reader(
@@ -1635,174 +1645,82 @@ SINDI::compact_window_to_immutable(const SparseTermDataCell& term_list,
 
 void
 SINDI::serialize_immutable_window(StreamWriter& writer, const ImmutableSINDIWindow& window) const {
-    uint32_t term_capacity = 0;
-    if (remap_term_ids_) {
-        if (not window.sorted_global_terms.empty()) {
-            term_capacity = window.sorted_global_terms.back() + 1;
-        }
-    } else if (not window.offsets.empty()) {
-        term_capacity = static_cast<uint32_t>(window.offsets.size() - 1);
-    }
-    StreamWriter::WriteObj(writer, term_capacity);
-
-    Vector<float> empty_data(allocator_);
-    Vector<uint32_t> empty_ids(allocator_);
-    Vector<float> buffer_data(allocator_);
-    Vector<uint32_t> buffer_ids(allocator_);
-    Vector<uint32_t> term_sizes(term_capacity, 0, allocator_);
-    uint32_t next_remap_pos = 0;
-    const auto value_code_size = sparse_value_code_size(sparse_value_quant_type_);
-
-    for (uint32_t term = 0; term < term_capacity; ++term) {
-        std::optional<uint32_t> local_term;
-        if (remap_term_ids_) {
-            if (next_remap_pos < window.sorted_global_terms.size() &&
-                window.sorted_global_terms[next_remap_pos] == term) {
-                local_term = next_remap_pos;
-                ++next_remap_pos;
-            }
-        } else {
-            local_term = term;
-        }
-
-        if (not local_term.has_value()) {
-            StreamWriter::WriteVector(writer, empty_ids);
-            StreamWriter::WriteVector(writer, empty_data);
-            continue;
-        }
-
-        const auto begin = window.offsets[local_term.value()];
-        const auto end = window.offsets[local_term.value() + 1];
-        const auto posting_count = end - begin;
-        term_sizes[term] = posting_count;
-        if (posting_count == 0) {
-            StreamWriter::WriteVector(writer, empty_ids);
-            StreamWriter::WriteVector(writer, empty_data);
-            continue;
-        }
-
-        buffer_ids.resize(posting_count);
-        std::copy(window.id_payloads.begin() + begin,
-                  window.id_payloads.begin() + end,
-                  buffer_ids.begin());
-        StreamWriter::WriteVector(writer, buffer_ids);
-
-        const auto payload_bytes = static_cast<uint64_t>(posting_count) * value_code_size;
-        const auto buffer_size =
-            align_up(static_cast<int64_t>(payload_bytes), sizeof(float)) / sizeof(float);
-        buffer_data.resize(buffer_size);
-        std::memset(buffer_data.data(), 0, buffer_size * sizeof(float));
-        std::memcpy(buffer_data.data(),
-                    window.value_payloads.data() + static_cast<uint64_t>(begin) * value_code_size,
-                    payload_bytes);
-        StreamWriter::WriteVector(writer, buffer_data);
-    }
-    StreamWriter::WriteVector(writer, term_sizes);
+    StreamWriter::WriteVector(writer, window.sorted_global_terms);
+    StreamWriter::WriteVector(writer, window.offsets);
+    StreamWriter::WriteVector(writer, window.id_payloads);
+    StreamWriter::WriteVector(writer, window.value_payloads);
 }
 
 void
 SINDI::deserialize_immutable_window(StreamReader& reader_ref, ImmutableSINDIWindow& window) const {
-    uint32_t term_capacity = 0;
-    StreamReader::ReadObj(reader_ref, term_capacity);
-    CHECK_ARGUMENT(term_capacity <= static_cast<uint64_t>(term_id_limit_) * 2,
-                   "immutable SINDI term capacity exceeds capacity bound");
     const auto value_code_size = sparse_value_code_size(sparse_value_quant_type_);
+    const auto read_vector = [&reader_ref](auto& values, uint64_t max_size, const char* message) {
+        uint64_t size = 0;
+        StreamReader::ReadObj(reader_ref, size);
+        CHECK_ARGUMENT(size <= max_size && size <= static_cast<uint64_t>(values.max_size()),
+                       message);
+        values.resize(size);
+        reader_ref.Read(reinterpret_cast<char*>(values.data()),
+                        size * sizeof(typename std::decay_t<decltype(values)>::value_type));
+    };
 
-    Vector<uint32_t> ids_buffer(allocator_);
-
-    if (not remap_term_ids_) {
-        window.offsets.reserve(static_cast<uint64_t>(term_capacity) + 1);
+    read_vector(window.sorted_global_terms,
+                remap_term_ids_ ? term_id_limit_ : 0,
+                remap_term_ids_ ? "immutable SINDI remapped term count exceeds term_id_limit"
+                                : "immutable SINDI terms require remap_term_ids");
+    uint64_t offset_count = 0;
+    StreamReader::ReadObj(reader_ref, offset_count);
+    const auto max_offset_count = remap_term_ids_ ? static_cast<uint64_t>(term_id_limit_) + 1
+                                                  : static_cast<uint64_t>(term_id_limit_) * 2 + 1;
+    CHECK_ARGUMENT(offset_count <= max_offset_count &&
+                       offset_count <= static_cast<uint64_t>(window.offsets.max_size()),
+                   "immutable SINDI offset count exceeds capacity bound");
+    if (remap_term_ids_) {
+        CHECK_ARGUMENT(offset_count == static_cast<uint64_t>(window.sorted_global_terms.size()) + 1,
+                       "immutable SINDI term and offset counts do not match");
     }
-    window.offsets.push_back(0);
+    window.offsets.resize(offset_count);
+    reader_ref.Read(reinterpret_cast<char*>(window.offsets.data()),
+                    offset_count * sizeof(uint32_t));
 
-    uint64_t total_posting_count = 0;
-    for (uint32_t term = 0; term < term_capacity; ++term) {
-        uint64_t posting_count = 0;
-        StreamReader::ReadObj(reader_ref, posting_count);
-        CHECK_ARGUMENT(posting_count <= window_size_,
+    CHECK_ARGUMENT(not window.offsets.empty(), "immutable SINDI offsets must not be empty");
+    CHECK_ARGUMENT(window.offsets.front() == 0, "immutable SINDI offsets must start at zero");
+    CHECK_ARGUMENT(std::is_sorted(window.offsets.begin(), window.offsets.end()),
+                   "immutable SINDI offsets must be sorted");
+    if (remap_term_ids_) {
+        CHECK_ARGUMENT(
+            std::adjacent_find(window.sorted_global_terms.begin(),
+                               window.sorted_global_terms.end(),
+                               std::greater_equal<uint32_t>()) == window.sorted_global_terms.end(),
+            "immutable SINDI remapped terms must be strictly increasing");
+    } else {
+        CHECK_ARGUMENT(window.sorted_global_terms.empty(),
+                       "immutable SINDI dense window must not contain remapped terms");
+        CHECK_ARGUMENT(window.offsets.size() <= static_cast<uint64_t>(term_id_limit_) * 2 + 1,
+                       "immutable SINDI term capacity exceeds capacity bound");
+    }
+    for (uint64_t i = 1; i < window.offsets.size(); ++i) {
+        CHECK_ARGUMENT(window.offsets[i] - window.offsets[i - 1] <= window_size_,
                        "immutable SINDI posting count exceeds window size");
-        CHECK_ARGUMENT(posting_count <= std::numeric_limits<uint32_t>::max(),
-                       "immutable SINDI posting count overflows uint32_t");
-        ids_buffer.resize(posting_count);
-        if (posting_count > 0) {
-            reader_ref.Read(reinterpret_cast<char*>(ids_buffer.data()),
-                            posting_count * sizeof(uint32_t));
-        }
-        uint64_t data_count = 0;
-        StreamReader::ReadObj(reader_ref, data_count);
-        CHECK_ARGUMENT(data_count <= std::numeric_limits<uint64_t>::max() / sizeof(float),
-                       "immutable SINDI value payload size overflows uint64_t");
-
-        if (posting_count > std::numeric_limits<uint32_t>::max() - total_posting_count) {
-            throw VsagException(ErrorType::INVALID_ARGUMENT,
-                                "immutable SINDI posting offset overflows uint32_t");
-        }
-
-        const auto data_bytes = data_count * sizeof(float);
-        const auto payload_bytes = posting_count * value_code_size;
-        CHECK_ARGUMENT(data_bytes >= payload_bytes,
-                       "immutable SINDI value payload is smaller than posting payload");
-
-        if (posting_count == 0) {
-            if (data_bytes > 0) {
-                reader_ref.Seek(reader_ref.GetCursor() + data_bytes);
-            }
-            if (not remap_term_ids_) {
-                window.offsets.push_back(static_cast<uint32_t>(total_posting_count));
-            }
-            continue;
-        }
-
-        uint32_t local_term = term;
-        if (remap_term_ids_) {
-            local_term = static_cast<uint32_t>(window.sorted_global_terms.size());
-            window.sorted_global_terms.push_back(term);
-        }
-
-        const auto old_id_size = window.id_payloads.size();
-        window.id_payloads.resize(old_id_size + posting_count);
-        for (uint64_t i = 0; i < posting_count; ++i) {
-            if (ids_buffer[i] > std::numeric_limits<uint16_t>::max()) {
-                throw VsagException(ErrorType::INVALID_ARGUMENT,
-                                    "immutable SINDI window-local doc id overflows uint16_t");
-            }
-            if (ids_buffer[i] >= window_size_) {
-                throw VsagException(ErrorType::INVALID_ARGUMENT,
-                                    "immutable SINDI window-local doc id exceeds window size");
-            }
-            window.id_payloads[old_id_size + i] = static_cast<uint16_t>(ids_buffer[i]);
-        }
-        const auto old_value_size = window.value_payloads.size();
-        window.value_payloads.resize(old_value_size + payload_bytes);
-        auto* segment_values = window.value_payloads.data() + old_value_size;
-        reader_ref.Read(reinterpret_cast<char*>(segment_values), payload_bytes);
-        if (data_bytes > payload_bytes) {
-            reader_ref.Seek(reader_ref.GetCursor() + data_bytes - payload_bytes);
-        }
-        total_posting_count += posting_count;
-        if (remap_term_ids_) {
-            window.offsets.push_back(static_cast<uint32_t>(total_posting_count));
-        } else {
-            CHECK_ARGUMENT(local_term + 1 == window.offsets.size(),
-                           "immutable SINDI dense term offsets are inconsistent");
-            window.offsets.push_back(static_cast<uint32_t>(total_posting_count));
-        }
     }
 
-    uint64_t term_sizes_count = 0;
-    StreamReader::ReadObj(reader_ref, term_sizes_count);
-    CHECK_ARGUMENT(term_sizes_count == term_capacity, "immutable SINDI term_sizes length mismatch");
-    CHECK_ARGUMENT(term_sizes_count <= (std::numeric_limits<uint64_t>::max() / sizeof(uint32_t)),
-                   "immutable SINDI term_sizes payload size overflows uint64_t");
-    reader_ref.Seek(reader_ref.GetCursor() + term_sizes_count * sizeof(uint32_t));
-
-    const auto expected_payload_size = (window.offsets.empty() ? 0 : window.offsets.back()) *
-                                       static_cast<uint64_t>(value_code_size);
-    const auto expected_id_payload_size = window.offsets.empty() ? 0 : window.offsets.back();
-    CHECK_ARGUMENT(window.id_payloads.size() == expected_id_payload_size,
+    const auto posting_count = static_cast<uint64_t>(window.offsets.back());
+    read_vector(
+        window.id_payloads, posting_count, "immutable SINDI id payload count exceeds offsets");
+    CHECK_ARGUMENT(window.id_payloads.size() == posting_count,
                    "immutable SINDI id payload size does not match offsets");
-    CHECK_ARGUMENT(window.value_payloads.size() == expected_payload_size,
+    CHECK_ARGUMENT(posting_count <= std::numeric_limits<uint64_t>::max() /
+                                        static_cast<uint64_t>(value_code_size),
+                   "immutable SINDI value payload size overflows uint64_t");
+    read_vector(window.value_payloads,
+                posting_count * value_code_size,
+                "immutable SINDI value payload count exceeds offsets");
+    CHECK_ARGUMENT(window.value_payloads.size() == posting_count * value_code_size,
                    "immutable SINDI value payload size does not match offsets");
+    for (const auto id : window.id_payloads) {
+        CHECK_ARGUMENT(id < window_size_,
+                       "immutable SINDI window-local doc id exceeds window size");
+    }
 }
 
 std::pair<int64_t, int64_t>

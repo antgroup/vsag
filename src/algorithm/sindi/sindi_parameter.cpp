@@ -146,6 +146,9 @@ SINDIParameter::ToJson() const {
     json[SPARSE_WINDOW_SIZE].SetInt(window_size);
     json[SPARSE_AVG_DOC_TERM_LENGTH].SetInt(avg_doc_term_length);
     json[SPARSE_REMAP_TERM_IDS].SetBool(remap_term_ids);
+    if (immutable) {
+        json[SPARSE_IMMUTABLE].SetBool(true);
+    }
     return json;
 }
 
@@ -159,6 +162,7 @@ SINDIParameter::CheckCompatibility(const vsag::ParamPtr& other) const {
     CHECK_FIELD_EQ(*this, *p, sparse_value_quant_type);
     CHECK_FIELD_EQ(*this, *p, avg_doc_term_length);
     CHECK_FIELD_EQ(*this, *p, remap_term_ids);
+    CHECK_FIELD_EQ(*this, *p, immutable);
     return true;
 }
 
