@@ -15,6 +15,7 @@
 
 #include "sindi.h"
 
+#include <algorithm>
 #include <cstring>
 #include <vector>
 
@@ -200,7 +201,9 @@ SINDI::SINDI(const SINDIParameterPtr& param, const IndexCommonParam& common_para
       quantization_params_(std::make_shared<QuantizationParams>()),
       avg_doc_term_length_(param->avg_doc_term_length),
       remap_term_ids_(param->remap_term_ids),
-      immutable_enabled_(param->immutable) {
+      immutable_enabled_(param->immutable),
+      store_positions_(param->store_positions),
+      max_positions_per_term_(param->max_positions_per_term) {
     if (remap_term_ids_) {
         term_id_mapper_ =
             std::make_shared<TermIdMapper>(term_id_limit_, common_param.allocator_.get());
@@ -286,7 +289,9 @@ SINDI::Add(const DatasetPtr& base) {
                                                  term_id_limit_,
                                                  allocator_,
                                                  sparse_value_quant_type_,
-                                                 quantization_params_));
+                                                 quantization_params_,
+                                                 store_positions_,
+                                                 max_positions_per_term_));
         window_changed = true;
     }
 
@@ -313,6 +318,18 @@ SINDI::Add(const DatasetPtr& base) {
         try {
             if (remap_term_ids_) {
                 auto remapped = remap_sparse_vector_for_build(sparse_vector, tmp_ids);
+                // Remap token_sequence if present: replace original term IDs with compact IDs
+                Vector<uint32_t> remapped_token_seq(allocator_);
+                if (sparse_vector.token_sequence_ != nullptr && sparse_vector.token_seq_len_ > 0) {
+                    remapped_token_seq.resize(sparse_vector.token_seq_len_);
+                    for (uint32_t ti = 0; ti < sparse_vector.token_seq_len_; ++ti) {
+                        auto mapped = term_id_mapper_->TryMap(sparse_vector.token_sequence_[ti]);
+                        remapped_token_seq[ti] =
+                            mapped.has_value() ? mapped.value() : sparse_vector.token_sequence_[ti];
+                    }
+                    remapped.token_seq_len_ = sparse_vector.token_seq_len_;
+                    remapped.token_sequence_ = remapped_token_seq.data();
+                }
                 window_term_list_[cur_window]->InsertVector(remapped, inner_id);
             } else {
                 window_term_list_[cur_window]->InsertVector(sparse_vector, inner_id);
@@ -414,7 +431,9 @@ SINDI::build_immutable(const DatasetPtr& base) {
                                                                   term_id_limit_,
                                                                   allocator_,
                                                                   sparse_value_quant_type_,
-                                                                  quantization_params_);
+                                                                  quantization_params_,
+                                                                  store_positions_,
+                                                                  max_positions_per_term_);
         }
 
         const auto& sparse_vector = sparse_vectors[i];
@@ -442,6 +461,17 @@ SINDI::build_immutable(const DatasetPtr& base) {
         try {
             if (remap_term_ids_) {
                 auto remapped = remap_sparse_vector_for_build(sparse_vector, tmp_ids);
+                Vector<uint32_t> remapped_token_seq(allocator_);
+                if (sparse_vector.token_sequence_ != nullptr && sparse_vector.token_seq_len_ > 0) {
+                    remapped_token_seq.resize(sparse_vector.token_seq_len_);
+                    for (uint32_t ti = 0; ti < sparse_vector.token_seq_len_; ++ti) {
+                        auto mapped = term_id_mapper_->TryMap(sparse_vector.token_sequence_[ti]);
+                        remapped_token_seq[ti] =
+                            mapped.has_value() ? mapped.value() : sparse_vector.token_sequence_[ti];
+                    }
+                    remapped.token_seq_len_ = sparse_vector.token_seq_len_;
+                    remapped.token_sequence_ = remapped_token_seq.data();
+                }
                 current_window->InsertVector(remapped, inner_id);
             } else {
                 current_window->InsertVector(sparse_vector, inner_id);
@@ -577,12 +607,18 @@ SINDI::KnnSearch(const DatasetPtr& query,
 
     auto computer = std::make_shared<SparseTermComputer>(effective_query, search_param, allocator_);
     const SparseVector* rerank_query = (remap_term_ids_ && use_reorder_) ? &sparse_query : nullptr;
+    ProximityPhraseContext ctx = make_proximity_phrase_context(search_param, effective_query.len_);
     if (immutable_data_ != nullptr) {
-        return immutable_search_impl<KNN_SEARCH>(
-            computer, inner_param, allocator, UseTermListsHeapInsert(search_param), rerank_query);
+        return immutable_search_impl<KNN_SEARCH>(computer,
+                                                 inner_param,
+                                                 allocator,
+                                                 UseTermListsHeapInsert(search_param),
+                                                 rerank_query,
+                                                 &ctx);
     }
+
     return search_impl<KNN_SEARCH>(
-        computer, inner_param, allocator, UseTermListsHeapInsert(search_param), rerank_query);
+        computer, inner_param, allocator, UseTermListsHeapInsert(search_param), rerank_query, &ctx);
 }
 
 std::optional<uint32_t>
@@ -839,7 +875,8 @@ SINDI::immutable_search_impl(const SparseTermComputerPtr& computer,
                              const InnerSearchParam& inner_param,
                              Allocator* allocator,
                              bool use_term_lists_heap_insert,
-                             const SparseVector* original_query) const {
+                             const SparseVector* original_query,
+                             const ProximityPhraseContext* ctx) const {
     Allocator* search_allocator = allocator != nullptr ? allocator : allocator_;
     MaxHeap heap(search_allocator);
     int64_t k = 0;
@@ -851,12 +888,38 @@ SINDI::immutable_search_impl(const SparseTermComputerPtr& computer,
     ImmutableMappedQueryTerms mapped_terms(search_allocator);
     auto filter = inner_param.is_inner_id_allowed;
     const auto [min_window_id, max_window_id] = this->get_min_max_window_id(filter);
+
+    const bool has_phrase = ctx != nullptr && !ctx->phrase_terms.empty();
+    const bool has_proximity = ctx != nullptr && ctx->proximity_weight > 0.0f;
+    // Reusable buffers hoisted out of the window loop, mirroring search_impl.
+    std::vector<std::pair<float, uint32_t>> scored_candidates;
+    std::vector<PosSpan> position_lists;
+    std::vector<PosSpan> phrase_spans;
+    std::vector<NormEntry> norm_buffer;
+    std::vector<uint32_t> count_buffer;
+
     for (auto cur = min_window_id; cur <= max_window_id; cur++) {
         const auto& window = immutable_data_->windows[static_cast<uint32_t>(cur)];
         const auto window_start_id = static_cast<uint32_t>(cur) * window_size_;
         map_immutable_query_terms(window, computer, mapped_terms);
         std::fill(dists.begin(), dists.end(), 0.0F);
         scan_immutable_window_by_mapped_terms(dists.data(), window, computer, mapped_terms);
+
+        ImmutableWindowPositionBackend pos_backend{this, window, computer->term_retain_ratio_};
+        if (store_positions_ && has_phrase) {
+            phrase_filter(dists.data(),
+                          pos_backend,
+                          ctx->phrase_terms,
+                          ctx->phrase_slop,
+                          phrase_spans,
+                          norm_buffer,
+                          count_buffer);
+        }
+
+        if (store_positions_ && has_proximity) {
+            proximity_boost(
+                dists.data(), computer, pos_backend, scored_candidates, position_lists, *ctx);
+        }
 
         if (use_term_lists_heap_insert) {
             if (inner_param.is_inner_id_allowed) {
@@ -945,13 +1008,45 @@ SINDI::immutable_search_impl(const SparseTermComputerPtr& computer,
     return results;
 }
 
+ProximityPhraseContext
+SINDI::make_proximity_phrase_context(const SINDISearchParameter& search_param,
+                                     uint32_t query_term_count) const {
+    ProximityPhraseContext ctx;
+    ctx.proximity_weight = search_param.proximity_boost.weight;
+    ctx.proximity_ordered = search_param.proximity_boost.ordered;
+    ctx.proximity_candidates = search_param.proximity_boost.candidates;
+    ctx.proximity_boost_multiplicative = search_param.proximity_boost.boost_multiplicative;
+    ctx.proximity_all_pairs = search_param.proximity_boost.all_pairs;
+    ctx.query_term_count = query_term_count;
+    ctx.phrase_slop = search_param.phrase_slop;
+
+    // Remap phrase terms into the dense internal id space when remapping is
+    // enabled; unknown terms are dropped. Without remapping the external ids are
+    // used directly.
+    if (!search_param.phrase_terms.empty()) {
+        if (remap_term_ids_ && term_id_mapper_) {
+            ctx.phrase_terms.reserve(search_param.phrase_terms.size());
+            for (auto t : search_param.phrase_terms) {
+                auto mapped = term_id_mapper_->TryMap(t);
+                if (mapped.has_value()) {
+                    ctx.phrase_terms.push_back(mapped.value());
+                }
+            }
+        } else {
+            ctx.phrase_terms = search_param.phrase_terms;
+        }
+    }
+    return ctx;
+}
+
 template <InnerSearchMode mode>
 DatasetPtr
 SINDI::search_impl(const SparseTermComputerPtr& computer,
                    const InnerSearchParam& inner_param,
                    Allocator* allocator,
                    bool use_term_lists_heap_insert,
-                   const SparseVector* original_query) const {
+                   const SparseVector* original_query,
+                   const ProximityPhraseContext* ctx) const {
     // computer and heap
     MaxHeap heap(allocator);
     int64_t k = 0;
@@ -964,12 +1059,39 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
     Vector<float> dists(window_size_, 0.0, allocator);
     auto filter = inner_param.is_inner_id_allowed;
     const auto [min_window_id, max_window_id] = this->get_min_max_window_id(filter);
+
+    const bool has_phrase = ctx != nullptr && !ctx->phrase_terms.empty();
+    const bool has_proximity = ctx != nullptr && ctx->proximity_weight > 0.0f;
+
+    // Reusable buffers for proximity/phrase position lookup.
+    std::vector<std::pair<float, uint32_t>> scored_candidates;
+    std::vector<PosSpan> position_lists;
+    std::vector<PosSpan> phrase_spans;
+    std::vector<NormEntry> norm_buffer;
+    std::vector<uint32_t> count_buffer;
+
     for (auto cur = min_window_id; cur <= max_window_id; cur++) {
         auto window_start_id = cur * window_size_;
         auto term_list = this->window_term_list_[cur];
 
-        // compute
+        // compute IP scores
         term_list->Query(dists.data(), computer);
+
+        DatacellPositionBackend pos_backend{term_list, computer->term_retain_ratio_};
+        if (store_positions_ && has_phrase) {
+            phrase_filter(dists.data(),
+                          pos_backend,
+                          ctx->phrase_terms,
+                          ctx->phrase_slop,
+                          phrase_spans,
+                          norm_buffer,
+                          count_buffer);
+        }
+
+        if (store_positions_ && has_proximity) {
+            proximity_boost(
+                dists.data(), computer, pos_backend, scored_candidates, position_lists, *ctx);
+        }
 
         // insert heap
         if (use_term_lists_heap_insert) {
@@ -991,7 +1113,6 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
         }
     }
 
-    // rerank
     if (use_reorder_) {
         // high precision
         float cur_heap_top = std::numeric_limits<float>::max();
@@ -1056,6 +1177,120 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
     return results;
 }
 
+template <class PosBackend>
+void
+SINDI::phrase_filter(float* dists,
+                     const PosBackend& pos,
+                     const std::vector<uint32_t>& phrase_terms,
+                     uint32_t phrase_slop,
+                     std::vector<PosSpan>& phrase_spans,
+                     std::vector<NormEntry>& norm_buffer,
+                     std::vector<uint32_t>& count_buffer) const {
+    // Resolve each phrase term once; the global->local translation is invariant
+    // across the window, so it runs phrase_terms.size() times instead of
+    // window_size_ times.
+    std::vector<typename PosBackend::TermPostingListView> phrase_views(phrase_terms.size());
+    for (size_t i = 0; i < phrase_terms.size(); ++i) {
+        phrase_views[i] = pos.ResolveTerm(phrase_terms[i]);
+    }
+    for (uint32_t doc_idx = 0; doc_idx < window_size_; ++doc_idx) {
+        if (dists[doc_idx] >= 0.0f) {
+            continue;
+        }
+        // Collect zero-copy position views for phrase terms in this doc. Each
+        // view is located by binary search over the term's retained posting
+        // prefix, so a doc missing any phrase term is discarded.
+        phrase_spans.clear();
+        bool all_present = true;
+        for (const auto& view : phrase_views) {
+            PosSpan span = pos.LookupPositions(view, static_cast<uint16_t>(doc_idx));
+            if (span.empty()) {
+                all_present = false;
+                break;
+            }
+            phrase_spans.push_back(span);
+        }
+        bool phrase_ok = all_present &&
+                         sloppy_phrase_match(phrase_spans, phrase_slop, norm_buffer, count_buffer);
+        if (!phrase_ok) {
+            dists[doc_idx] = 0.0f;  // discard
+        }
+    }
+}
+
+template <class PosBackend>
+void
+SINDI::proximity_boost(float* dists,
+                       const SparseTermComputerPtr& computer,
+                       const PosBackend& pos,
+                       std::vector<std::pair<float, uint32_t>>& scored_candidates,
+                       std::vector<PosSpan>& position_lists,
+                       const ProximityPhraseContext& ctx) const {
+    const auto& raw_query = computer->raw_query_;
+    const uint32_t proximity_candidates = ctx.proximity_candidates;
+    const bool proximity_ordered = ctx.proximity_ordered;
+    const bool proximity_all_pairs = ctx.proximity_all_pairs;
+    const bool proximity_boost_multiplicative = ctx.proximity_boost_multiplicative;
+    const float proximity_weight = ctx.proximity_weight;
+    const uint32_t query_term_count = ctx.query_term_count;
+
+    // Collect candidate doc_ids with non-zero scores, then keep top-N by IP score
+    // Keep top-proximity_candidates by smallest dist (most negative = highest IP)
+    scored_candidates.clear();
+    for (uint32_t doc_idx = 0; doc_idx < window_size_; ++doc_idx) {
+        if (dists[doc_idx] < 0.0f) {
+            scored_candidates.emplace_back(dists[doc_idx], doc_idx);
+        }
+    }
+    if (scored_candidates.size() > proximity_candidates) {
+        std::nth_element(scored_candidates.begin(),
+                         scored_candidates.begin() + proximity_candidates,
+                         scored_candidates.end(),
+                         [](const auto& a, const auto& b) { return a.first < b.first; });
+        scored_candidates.resize(proximity_candidates);
+    }
+
+    // Pre-resolve each query term to a reusable posting-list view once, outside
+    // the candidate loop, so the global->local translation is paid query_len
+    // times instead of candidates*query_len times.
+    std::vector<typename PosBackend::TermPostingListView> views(raw_query.len_);
+    for (uint32_t qi = 0; qi < raw_query.len_; ++qi) {
+        views[qi] = pos.ResolveTerm(raw_query.ids_[qi]);
+    }
+
+    // For each candidate, fetch positions by binary search over each query
+    // term's retained posting prefix. PosSpan elements point into the backend's
+    // position pool, which is read-only for the duration of this query, so the
+    // zero-copy views stay valid until consumed.
+    for (const auto& cand : scored_candidates) {
+        uint32_t doc_idx = cand.second;
+        position_lists.clear();
+
+        for (uint32_t qi = 0; qi < raw_query.len_; ++qi) {
+            position_lists.push_back(
+                pos.LookupPositions(views[qi], static_cast<uint16_t>(doc_idx)));
+        }
+
+        float raw_boost = proximity_all_pairs
+                              ? all_pairwise_proximity(position_lists, proximity_ordered)
+                              : adjacent_pairwise_proximity(position_lists, proximity_ordered);
+        if (raw_boost > 0.0f) {
+            // Normalize by the number of scored pairs: C(query_term_count, 2) for
+            // all-pairs, n-1 for adjacent-only.
+            float pair_count = proximity_all_pairs
+                                   ? static_cast<float>(query_term_count) *
+                                         static_cast<float>(query_term_count - 1) / 2.0f
+                                   : static_cast<float>(query_term_count - 1);
+            float normalized_boost = (pair_count > 0.0f) ? raw_boost / pair_count : 0.0f;
+            if (proximity_boost_multiplicative) {
+                dists[doc_idx] *= (1.0f + proximity_weight * normalized_boost);
+            } else {
+                dists[doc_idx] -= proximity_weight * normalized_boost;
+            }
+        }
+    }
+}
+
 DatasetPtr
 SINDI::RangeSearch(const DatasetPtr& query,
                    float radius,
@@ -1095,12 +1330,22 @@ SINDI::RangeSearch(const DatasetPtr& query,
 
     auto computer = std::make_shared<SparseTermComputer>(effective_query, search_param, allocator_);
     const SparseVector* rerank_query = (remap_term_ids_ && use_reorder_) ? &sparse_query : nullptr;
+    ProximityPhraseContext ctx = make_proximity_phrase_context(search_param, effective_query.len_);
     if (immutable_data_ != nullptr) {
-        return immutable_search_impl<RANGE_SEARCH>(
-            computer, inner_param, allocator_, UseTermListsHeapInsert(search_param), rerank_query);
+        return immutable_search_impl<RANGE_SEARCH>(computer,
+                                                   inner_param,
+                                                   allocator_,
+                                                   UseTermListsHeapInsert(search_param),
+                                                   rerank_query,
+                                                   &ctx);
     }
-    return search_impl<RANGE_SEARCH>(
-        computer, inner_param, allocator_, UseTermListsHeapInsert(search_param), rerank_query);
+
+    return search_impl<RANGE_SEARCH>(computer,
+                                     inner_param,
+                                     allocator_,
+                                     UseTermListsHeapInsert(search_param),
+                                     rerank_query,
+                                     &ctx);
 }
 
 bool
@@ -1123,6 +1368,8 @@ SINDI::cal_memory_usage() {
             memory += window.offsets.size() * sizeof(uint32_t);
             memory += window.id_payloads.size() * sizeof(uint16_t);
             memory += window.value_payloads.size() * sizeof(uint8_t);
+            memory += window.pos_offsets.size() * sizeof(uint32_t);
+            memory += window.pos_pool.size() * sizeof(uint16_t);
         }
     } else {
         memory += window_term_list_.size() * sizeof(SparseTermDataCellPtr);
@@ -1341,7 +1588,9 @@ SINDI::deserialize_windows(StreamReader& reader_ref) {
                                                           term_id_limit_,
                                                           allocator_,
                                                           sparse_value_quant_type_,
-                                                          quantization_params_);
+                                                          quantization_params_,
+                                                          store_positions_,
+                                                          max_positions_per_term_);
             window->Deserialize(reader_ref);
         }
     }
@@ -1563,7 +1812,9 @@ SINDI::Deserialize(StreamReader& reader) {
                                                           term_id_limit_,
                                                           allocator_,
                                                           sparse_value_quant_type_,
-                                                          quantization_params_);
+                                                          quantization_params_,
+                                                          store_positions_,
+                                                          max_positions_per_term_);
             window->Deserialize(reader_ref);
         }
     }
@@ -1599,6 +1850,8 @@ SINDI::compact_window_to_immutable(const SparseTermDataCell& term_list,
     window.id_payloads.clear();
     window.value_payloads.clear();
     window.sorted_global_terms.clear();
+    window.pos_offsets.clear();
+    window.pos_pool.clear();
 
     if (not remap_term_ids_) {
         window.offsets.reserve(static_cast<uint64_t>(term_list.term_capacity_) + 1);
@@ -1638,8 +1891,135 @@ SINDI::compact_window_to_immutable(const SparseTermDataCell& term_list,
                     term_list.term_datas_[term]->data(),
                     payload_bytes);
 
+        if (store_positions_) {
+            for (uint32_t within = 0; within < posting_count; ++within) {
+                auto [positions, positions_size] = term_list.GetPositionsView(term, within);
+                if (window.pos_pool.size() > std::numeric_limits<uint32_t>::max()) {
+                    throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                        "immutable SINDI position pool overflows uint32_t");
+                }
+                window.pos_offsets.push_back(static_cast<uint32_t>(window.pos_pool.size()));
+                if (positions_size == 0) {
+                    continue;
+                }
+                if (positions == nullptr) {
+                    throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                        "immutable SINDI position view is null");
+                }
+                const uint64_t pool_size = window.pos_pool.size();
+                if (positions_size > std::numeric_limits<uint32_t>::max() - pool_size) {
+                    throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                        "immutable SINDI position pool overflows uint32_t");
+                }
+                const auto old_pos_size = window.pos_pool.size();
+                window.pos_pool.resize(old_pos_size + positions_size);
+                std::memcpy(window.pos_pool.data() + old_pos_size,
+                            positions,
+                            positions_size * sizeof(uint16_t));
+            }
+        }
+
         total_posting_count += posting_count;
         window.offsets.push_back(static_cast<uint32_t>(total_posting_count));
+    }
+    if (store_positions_) {
+        CHECK_ARGUMENT(window.pos_pool.size() <= std::numeric_limits<uint32_t>::max(),
+                       "immutable SINDI position pool overflows uint32_t");
+        window.pos_offsets.push_back(static_cast<uint32_t>(window.pos_pool.size()));
+        CHECK_ARGUMENT(window.pos_offsets.size() == window.id_payloads.size() + 1,
+                       "immutable SINDI position offsets size does not match postings");
+    }
+}
+
+void
+SINDI::serialize_immutable_window_positions(StreamWriter& writer,
+                                            const ImmutableSINDIWindow& window) const {
+    uint32_t term_capacity = 0;
+    if (remap_term_ids_) {
+        if (not window.sorted_global_terms.empty()) {
+            CHECK_ARGUMENT(window.sorted_global_terms.back() < term_id_limit_,
+                           "immutable SINDI remapped term exceeds term_id_limit");
+            term_capacity = window.sorted_global_terms.back() + 1;
+        }
+    } else if (not window.offsets.empty()) {
+        term_capacity = static_cast<uint32_t>(window.offsets.size() - 1);
+    }
+
+    Vector<uint32_t> term_sizes(term_capacity, 0, allocator_);
+    if (remap_term_ids_) {
+        for (uint32_t local_term = 0; local_term < window.sorted_global_terms.size();
+             ++local_term) {
+            const auto term = window.sorted_global_terms[local_term];
+            CHECK_ARGUMENT(local_term + 1 < window.offsets.size(),
+                           "immutable SINDI term and offset counts do not match");
+            term_sizes[term] = window.offsets[local_term + 1] - window.offsets[local_term];
+        }
+    } else {
+        for (uint32_t term = 0; term < term_capacity; ++term) {
+            term_sizes[term] = window.offsets[term + 1] - window.offsets[term];
+        }
+    }
+
+    StreamWriter::WriteObj(writer, static_cast<uint8_t>(1));
+
+    Vector<uint32_t> empty_offsets(allocator_);
+    Vector<uint16_t> empty_pool(allocator_);
+    Vector<uint32_t> term_offsets(allocator_);
+    Vector<uint16_t> term_pool(allocator_);
+
+    uint32_t next_remap_pos = 0;
+    for (uint32_t term = 0; term < term_capacity; ++term) {
+        std::optional<uint32_t> local_term;
+        if (remap_term_ids_) {
+            if (next_remap_pos < window.sorted_global_terms.size() &&
+                window.sorted_global_terms[next_remap_pos] == term) {
+                local_term = next_remap_pos;
+                ++next_remap_pos;
+            }
+        } else {
+            local_term = term;
+        }
+
+        if (not local_term.has_value() || term_sizes[term] == 0 || window.pos_offsets.empty()) {
+            StreamWriter::WriteVector(writer, empty_offsets);
+            StreamWriter::WriteVector(writer, empty_pool);
+            continue;
+        }
+
+        const auto begin = window.offsets[local_term.value()];
+        const auto end = window.offsets[local_term.value() + 1];
+        CHECK_ARGUMENT(term_sizes[term] == end - begin,
+                       "immutable SINDI term_sizes are inconsistent");
+
+        term_offsets.clear();
+        term_pool.clear();
+        term_offsets.reserve(term_sizes[term]);
+        uint32_t pool_cursor = 0;
+        for (uint32_t p = begin; p < end; ++p) {
+            CHECK_ARGUMENT(p + 1 < window.pos_offsets.size(),
+                           "immutable SINDI position offsets length mismatch");
+            const uint32_t start = window.pos_offsets[p];
+            const uint32_t pos_end = window.pos_offsets[p + 1];
+            CHECK_ARGUMENT(start <= pos_end, "immutable SINDI position offsets are unordered");
+            CHECK_ARGUMENT(pos_end <= window.pos_pool.size(),
+                           "immutable SINDI position offsets exceed pool size");
+
+            term_offsets.push_back(pool_cursor);
+            const uint32_t span_size = pos_end - start;
+            CHECK_ARGUMENT(span_size <= std::numeric_limits<uint32_t>::max() - pool_cursor,
+                           "immutable SINDI term position pool overflows uint32_t");
+            const auto old_pool_size = term_pool.size();
+            term_pool.resize(old_pool_size + span_size);
+            if (span_size > 0) {
+                std::memcpy(term_pool.data() + old_pool_size,
+                            window.pos_pool.data() + start,
+                            span_size * sizeof(uint16_t));
+            }
+            pool_cursor += span_size;
+        }
+
+        StreamWriter::WriteVector(writer, term_offsets);
+        StreamWriter::WriteVector(writer, term_pool);
     }
 }
 
@@ -1649,6 +2029,92 @@ SINDI::serialize_immutable_window(StreamWriter& writer, const ImmutableSINDIWind
     StreamWriter::WriteVector(writer, window.offsets);
     StreamWriter::WriteVector(writer, window.id_payloads);
     StreamWriter::WriteVector(writer, window.value_payloads);
+
+    if (store_positions_) {
+        serialize_immutable_window_positions(writer, window);
+    }
+}
+
+void
+SINDI::deserialize_immutable_window_positions(StreamReader& reader_ref,
+                                              ImmutableSINDIWindow& window) const {
+    const auto posting_count = static_cast<uint64_t>(window.offsets.back());
+    uint32_t term_capacity = 0;
+    Vector<uint32_t> term_sizes(allocator_);
+    if (remap_term_ids_) {
+        if (not window.sorted_global_terms.empty()) {
+            CHECK_ARGUMENT(window.sorted_global_terms.back() < term_id_limit_,
+                           "immutable SINDI remapped term exceeds term_id_limit");
+            term_capacity = window.sorted_global_terms.back() + 1;
+        }
+        term_sizes.resize(term_capacity);
+        for (uint32_t local_term = 0; local_term < window.sorted_global_terms.size();
+             ++local_term) {
+            const auto term = window.sorted_global_terms[local_term];
+            term_sizes[term] = window.offsets[local_term + 1] - window.offsets[local_term];
+        }
+    } else {
+        term_capacity = static_cast<uint32_t>(window.offsets.size() - 1);
+        term_sizes.resize(term_capacity);
+        for (uint32_t term = 0; term < term_capacity; ++term) {
+            term_sizes[term] = window.offsets[term + 1] - window.offsets[term];
+        }
+    }
+
+    uint8_t marker = 0;
+    StreamReader::ReadObj(reader_ref, marker);
+    CHECK_ARGUMENT(marker == 1, "immutable SINDI position block marker mismatch");
+    window.pos_offsets.reserve(posting_count + 1);
+    Vector<uint32_t> offsets_buf(allocator_);
+    Vector<uint16_t> pool_buf(allocator_);
+    uint64_t pool_cursor = 0;
+    for (uint32_t term = 0; term < term_capacity; ++term) {
+        StreamReader::ReadVector(reader_ref, offsets_buf);
+        StreamReader::ReadVector(reader_ref, pool_buf);
+        const auto term_posting_count = term_sizes[term];
+        if (term_posting_count == 0) {
+            CHECK_ARGUMENT(offsets_buf.empty() && pool_buf.empty(),
+                           "immutable SINDI empty term has position payload");
+            continue;
+        }
+        if (offsets_buf.empty()) {
+            CHECK_ARGUMENT(pool_buf.empty(),
+                           "immutable SINDI position pool exists without offsets");
+            for (uint32_t within = 0; within < term_posting_count; ++within) {
+                window.pos_offsets.push_back(static_cast<uint32_t>(pool_cursor));
+            }
+            continue;
+        }
+        CHECK_ARGUMENT(offsets_buf.size() == term_posting_count,
+                       "immutable SINDI position offsets length mismatch");
+        CHECK_ARGUMENT(offsets_buf.front() == 0,
+                       "immutable SINDI position offsets must start at zero");
+        for (uint32_t within = 0; within < term_posting_count; ++within) {
+            CHECK_ARGUMENT(offsets_buf[within] <= pool_buf.size(),
+                           "immutable SINDI position offset exceeds pool size");
+            if (within > 0) {
+                CHECK_ARGUMENT(offsets_buf[within - 1] <= offsets_buf[within],
+                               "immutable SINDI position offsets are unordered");
+            }
+            CHECK_ARGUMENT(offsets_buf[within] <=
+                               std::numeric_limits<uint32_t>::max() - pool_cursor,
+                           "immutable SINDI position offset overflows uint32_t");
+            window.pos_offsets.push_back(static_cast<uint32_t>(pool_cursor + offsets_buf[within]));
+        }
+        CHECK_ARGUMENT(pool_buf.size() <= std::numeric_limits<uint32_t>::max() - pool_cursor,
+                       "immutable SINDI position pool overflows uint32_t");
+        const auto old_pool_size = window.pos_pool.size();
+        window.pos_pool.resize(old_pool_size + pool_buf.size());
+        std::memcpy(window.pos_pool.data() + old_pool_size,
+                    pool_buf.data(),
+                    pool_buf.size() * sizeof(uint16_t));
+        pool_cursor += pool_buf.size();
+    }
+    window.pos_offsets.push_back(static_cast<uint32_t>(pool_cursor));
+    CHECK_ARGUMENT(window.pos_offsets.size() == window.id_payloads.size() + 1,
+                   "immutable SINDI position offsets size does not match postings");
+    CHECK_ARGUMENT(window.pos_pool.size() == pool_cursor,
+                   "immutable SINDI position pool size mismatch");
 }
 
 void
@@ -1693,6 +2159,8 @@ SINDI::deserialize_immutable_window(StreamReader& reader_ref, ImmutableSINDIWind
                                window.sorted_global_terms.end(),
                                std::greater_equal<uint32_t>()) == window.sorted_global_terms.end(),
             "immutable SINDI remapped terms must be strictly increasing");
+        CHECK_ARGUMENT(window.offsets.size() == window.sorted_global_terms.size() + 1,
+                       "immutable SINDI term and offset counts do not match");
     } else {
         CHECK_ARGUMENT(window.sorted_global_terms.empty(),
                        "immutable SINDI dense window must not contain remapped terms");
@@ -1720,6 +2188,10 @@ SINDI::deserialize_immutable_window(StreamReader& reader_ref, ImmutableSINDIWind
     for (const auto id : window.id_payloads) {
         CHECK_ARGUMENT(id < window_size_,
                        "immutable SINDI window-local doc id exceeds window size");
+    }
+
+    if (store_positions_) {
+        deserialize_immutable_window_positions(reader_ref, window);
     }
 }
 

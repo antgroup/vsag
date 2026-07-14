@@ -125,6 +125,16 @@ const char* const SPARSE_DESERIALIZE_WITHOUT_BUFFER = "deserialize_without_buffe
 const char* const SPARSE_AVG_DOC_TERM_LENGTH = "avg_doc_term_length";
 const char* const SPARSE_REMAP_TERM_IDS = "remap_term_ids";
 const char* const SPARSE_IMMUTABLE = "immutable";
+const char* const SPARSE_STORE_POSITIONS = "store_positions";
+const char* const SPARSE_MAX_POSITIONS_PER_TERM = "max_positions_per_term";
+const char* const SPARSE_PROXIMITY_BOOST = "proximity_boost";
+const char* const SPARSE_PROXIMITY_BOOST_CANDIDATES = "candidates";
+const char* const SPARSE_PROXIMITY_BOOST_WEIGHT = "weight";
+const char* const SPARSE_PROXIMITY_BOOST_ORDERED = "ordered";
+const char* const SPARSE_PROXIMITY_BOOST_MULTIPLICATIVE = "boost_multiplicative";
+const char* const SPARSE_PROXIMITY_BOOST_ALL_PAIRS = "all_pairs";
+const char* const SPARSE_PHRASE_TERMS = "phrase_terms";
+const char* const SPARSE_PHRASE_SLOP = "phrase_slop";
 
 // graph param value
 const char* const GRAPH_PARAM_MAX_DEGREE_KEY = "max_degree";

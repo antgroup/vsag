@@ -72,6 +72,8 @@ auto result = index->KnnSearch(
 | `use_quantization` | bool | `false` | 是否量化词项权重以降低内存；开启后使用 8-bit 标量量化（SQ8） |
 | `use_reorder` | bool | `false` | 是否保留一份高精度扁平副本用于精排（内存约翻倍） |
 | `remap_term_ids` | bool | `false` | 是否在建索引前重映射词项 ID，适用于词项 ID 很稀疏或存在大量空洞的词表 |
+| `store_positions` | bool | `false` | 是否存储每个词项在文档原始 token 顺序中的位置。启用邻近度打分或短语过滤时必须开启；内存开销大致与文档长度成正比 |
+| `max_positions_per_term` | int | `64` | 每篇文档中每个词项最多存储的位置数量（取值范围 1 – 256），超出的出现将被丢弃。仅在 `store_positions` 为 `true` 时生效 |
 | `avg_doc_term_length` | int | `100` | 仅用于内存估算 |
 
 > **`dim` 与 `term_id_limit` 的区别。** 对于稀疏向量 `{0:0.1, 2:0.5, 177:0.8}`，
@@ -87,6 +89,14 @@ auto result = index->KnnSearch(
 | `n_candidate` | int | `0` | 候选堆大小。为 `0` 时自动取 `SPARSE_AMPLIFICATION_FACTOR · topk`（500 倍）；若显式设置，须满足 `1 ≤ n_candidate ≤ SPARSE_AMPLIFICATION_FACTOR · topk` |
 | `query_prune_ratio` | float | `0.0` | 查询时丢弃权重最低查询项的比例（0.0 – 0.9） |
 | `term_prune_ratio` | float | `0.0` | 查询时丢弃倒排表中低权项的比例（0.0 – 0.9） |
+| `proximity_boost` | object | — | 邻近度打分选项；省略时使用下列默认值。启用时要求索引构建阶段设置 `store_positions: true` |
+| `proximity_boost.weight` | float | `0.0` | 邻近度加权的权重。`0.0` 表示关闭邻近度打分，正值开启 |
+| `proximity_boost.candidates` | int | `10000` | 每个 window 内按余弦得分参与邻近度重排的候选数量，只有这些候选会承担邻近度计算开销 |
+| `proximity_boost.all_pairs` | bool | `false` | `true` 对所有 `C(n,2)` 查询词项对打分；`false` 仅对查询顺序中相邻的词项对 `(i, i+1)` 打分 |
+| `proximity_boost.ordered` | bool | `false` | 为 `true` 时对逆序（reversed）词项对施加惩罚（距离翻倍），类似 Lucene 的 slop 代价 |
+| `proximity_boost.boost_multiplicative` | bool | `true` | `true` 将邻近度加权与基础余弦得分相乘；`false` 表示相加 |
+| `phrase_terms` | int[] | `[]` | 构成短语约束的词项 ID 列表。非空时，只有这些词项在 `phrase_slop` 内共现的候选才会保留。要求 `store_positions: true` |
+| `phrase_slop` | int | `0` | 短语过滤允许的最大 slop（位置上的编辑距离）。`0` 表示要求精确、按序的短语 |
 
 SINDI 会根据构建阶段的 `doc_prune_ratio` 与检索阶段的 `query_prune_ratio`
 自动选择堆插入策略。按当前 `0.1` 阈值，当两个比例都 `<= 0.1` 时，SINDI 使用
@@ -98,6 +108,79 @@ auto result = index->KnnSearch(
     query, topk,
     R"({"sindi": {"n_candidate": 200, "query_prune_ratio": 0.1}})").value();
 ```
+
+## 邻近度打分与短语过滤
+
+默认情况下 SINDI 以词袋（bag of words）方式打分：只要词项权重相同，两篇文档得分
+相同，与词项出现的位置无关。当词项 *位置* 很重要时——例如短语类查询、“这些词应当
+挨在一起”——SINDI 可以选择性地对查询词项相互靠近的文档加权，或直接过滤掉不包含某个
+短语的文档。
+
+这两项能力都要求构建时存储位置，并且逐条向量提供原始的分词序列。
+
+1. **构建时设置 `store_positions: true`。**
+2. **在每条 `SparseVector` 上提供原始 token 顺序**，通过 `token_sequence_` /
+   `token_seq_len_` 传入。与 `ids_`（去重且排序）不同，`token_sequence_` 保留原始
+   分词顺序和重复项，位置正是从中提取的。
+
+```cpp
+// 构建侧：开启位置存储。
+std::string params = R"({
+    "dtype": "sparse",
+    "metric_type": "ip",
+    "dim": 1024,
+    "index_param": {
+        "term_id_limit": 30000,
+        "window_size": 50000,
+        "store_positions": true,
+        "max_positions_per_term": 64
+    }
+})";
+
+// 逐篇文档：保留原始分词后的词项 ID。
+vsag::SparseVector doc;
+doc.len_ = n_nonzero;           // 与平时一样的去重 ids_/vals_
+doc.ids_ = ids;
+doc.vals_ = vals;
+doc.token_seq_len_ = seq_len;   // 原始 token 顺序，含重复
+doc.token_sequence_ = token_ids;
+```
+
+**邻近度加权。** 设置 `proximity_boost.weight > 0`，即可对每个 window 内按余弦得分
+排序的前 `proximity_boost.candidates` 个候选，使用基于查询词项对的
+`1/(min_dist + 1)` 加权进行重排：
+
+```cpp
+auto result = index->KnnSearch(
+    query, topk,
+    R"({"sindi": {
+        "n_candidate": 200,
+        "proximity_boost": {
+            "weight": 0.3,
+            "candidates": 10000,
+            "all_pairs": false,
+            "ordered": false,
+            "boost_multiplicative": true
+        }
+    }})").value();
+```
+
+**短语过滤。** 设置 `phrase_terms`（可选 `phrase_slop`），只保留这些词项在给定
+slop 内共现的候选。slop 采用 Lucene 的归一化窗口语义，词项顺序被编码进偏移量中
+（逆序会消耗额外 slop）；`phrase_slop: 0` 要求精确、按序的短语：
+
+```cpp
+auto result = index->KnnSearch(
+    query, topk,
+    R"({"sindi": {
+        "n_candidate": 200,
+        "phrase_terms": [12, 34, 56],
+        "phrase_slop": 1
+    }})").value();
+```
+
+邻近度与短语过滤可在同一次查询中组合使用。每个候选的开销为 `O(T² × P)`（T 为命中的
+查询词项数，P 为每词项位置数），且只有参与重排的候选才会付出该开销。
 
 ## 何时选择 SINDI
 
