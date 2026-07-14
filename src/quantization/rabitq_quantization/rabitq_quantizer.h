@@ -284,12 +284,6 @@ public:
     AlignCodeField(uint64_t size) const;
 
 private:
-    [[nodiscard]] bool
-    HasFilterQueryLookupTable() const;
-
-    [[nodiscard]] uint64_t
-    FilterQueryLookupTableSize() const;
-
     [[nodiscard]] norm_type
     ComputeScalarCodeNorm(const uint8_t* scalar_codes,
                           uint32_t code_bits,
@@ -329,8 +323,6 @@ private:
     uint64_t query_offset_norm_{0};
     uint64_t query_offset_mrq_norm_{0};
     uint64_t query_offset_raw_norm_{0};
-    uint64_t query_offset_filter_lut_{0};
-
     /***
      * code layout: bq-code(required) + norm(required) + error(required) + offset_norm_code(extend_rabitq) + sum(sq4) + mrq_norm(required)
      */

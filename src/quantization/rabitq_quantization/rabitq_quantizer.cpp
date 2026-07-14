@@ -163,11 +163,6 @@ RaBitQuantizer<metric>::RaBitQuantizer(int dim,
         this->query_code_size_ += ((sizeof(norm_type) + align_size - 1) / align_size) * align_size;
     }
 
-    if (HasFilterQueryLookupTable()) {
-        query_offset_filter_lut_ = this->query_code_size_;
-        this->query_code_size_ += AlignCodeField(FilterQueryLookupTableSize());
-    }
-
     if (SupportSplitCodeStorage()) {
         offset_low_bound_error_ = this->code_size_;
         this->code_size_ += ((sizeof(error_type) + align_size - 1) / align_size) * align_size;
@@ -799,19 +794,6 @@ RaBitQuantizer<metric>::AlignCodeField(uint64_t size) const {
 }
 
 template <MetricType metric>
-bool
-RaBitQuantizer<metric>::HasFilterQueryLookupTable() const {
-    return SupportSplitCodeStorage() && (FilterBits() == 2 or FilterBits() == 3) &&
-           num_bits_per_dim_query_ == 32;
-}
-
-template <MetricType metric>
-uint64_t
-RaBitQuantizer<metric>::FilterQueryLookupTableSize() const {
-    return PlaneBytes() * 256 * sizeof(float);
-}
-
-template <MetricType metric>
 uint64_t
 RaBitQuantizer<metric>::PlaneBytes() const {
     return (this->dim_ + 7) / 8;
@@ -1062,15 +1044,6 @@ RaBitQuantizer<metric>::ComputeDistWithOneBitLowerBound(Computer<RaBitQuantizer>
             filter_ip_yu_q = RaBitQFloatThreeBitCenteredIP(
                 reinterpret_cast<const float*>(query), one_bit_code, this->dim_);
             filter_ip_estimate = base_norm_code <= 0.0F ? 0.0F : filter_ip_yu_q / base_norm_code;
-        } else if (HasFilterQueryLookupTable()) {
-            filter_ip_yu_q = RaBitQFloatMultiBitIPByLookup(
-                reinterpret_cast<const float*>(query + query_offset_filter_lut_),
-                one_bit_code,
-                this->dim_,
-                0,
-                FilterBits());
-            filter_ip_estimate =
-                ip_obar_q(filter_ip_yu_q, query_raw_sum, base_norm_code, FilterBits());
         } else {
             filter_ip_yu_q = RaBitQFloatSQIPBySplitCode(
                 reinterpret_cast<const float*>(query), one_bit_code, nullptr, FilterBits(), 0);
@@ -1168,7 +1141,8 @@ RaBitQuantizer<metric>::ComputeDistsWithOneBitLowerBoundBatch4(
     bool& computed3,
     bool& computed4,
     float runtime_rabitq_error_rate) const {
-    if constexpr (metric != MetricType::METRIC_TYPE_L2SQR) {
+    if constexpr (metric != MetricType::METRIC_TYPE_L2SQR and
+                  metric != MetricType::METRIC_TYPE_IP) {
         computed1 = this->ComputeDistWithOneBitLowerBound(
             computer, one_bit_code1, &dist1, lower_bound1, runtime_rabitq_error_rate);
         computed2 = this->ComputeDistWithOneBitLowerBound(
@@ -1180,8 +1154,7 @@ RaBitQuantizer<metric>::ComputeDistsWithOneBitLowerBoundBatch4(
         return;
     }
 
-    if (FilterBits() != 1 and FilterBits() != 2 and FilterBits() != 3 and
-        not HasFilterQueryLookupTable()) {
+    if (FilterBits() != 1 and FilterBits() != 2 and FilterBits() != 3) {
         computed1 = this->ComputeDistWithOneBitLowerBound(
             computer, one_bit_code1, &dist1, lower_bound1, runtime_rabitq_error_rate);
         computed2 = this->ComputeDistWithOneBitLowerBound(
@@ -1196,6 +1169,10 @@ RaBitQuantizer<metric>::ComputeDistsWithOneBitLowerBoundBatch4(
     const auto* query = computer.buf_;
     const auto* query_data = reinterpret_cast<const float*>(query);
     const norm_type query_norm = *((norm_type*)(query + query_offset_norm_));
+    norm_type query_raw_norm = 0.0F;
+    if constexpr (metric == MetricType::METRIC_TYPE_IP) {
+        std::memcpy(&query_raw_norm, query + query_offset_raw_norm_, sizeof(query_raw_norm));
+    }
     const norm_type query_mrq_norm_sqr = pca_dim_ != this->original_dim_ and use_mrq_
                                              ? *(norm_type*)(query + query_offset_mrq_norm_)
                                              : 0.0F;
@@ -1237,17 +1214,6 @@ RaBitQuantizer<metric>::ComputeDistsWithOneBitLowerBoundBatch4(
                                             this->dim_,
                                             filter_ip_values);
         filter_ip_values_are_centered = true;
-    } else {
-        RaBitQFloatMultiBitIPBatch4ByLookup(
-            reinterpret_cast<const float*>(query + query_offset_filter_lut_),
-            one_bit_code1,
-            one_bit_code2,
-            one_bit_code3,
-            one_bit_code4,
-            this->dim_,
-            0,
-            FilterBits(),
-            filter_ip_values);
     }
 
     auto compute_one =
@@ -1286,6 +1252,20 @@ RaBitQuantizer<metric>::ComputeDistsWithOneBitLowerBoundBatch4(
                 result += (query_mrq_norm_sqr + base_mrq_norm_sqr);
             }
 
+            if constexpr (metric == MetricType::METRIC_TYPE_IP) {
+                norm_type base_raw_norm = 0.0F;
+                std::memcpy(&base_raw_norm,
+                            one_bit_code + OneBitRecordRawNormOffset(),
+                            sizeof(base_raw_norm));
+                if (is_approx_zero(query_raw_norm) or is_approx_zero(base_raw_norm)) {
+                    result = 1.0F;
+                } else {
+                    result = 1.0F - (query_raw_norm * query_raw_norm +
+                                     base_raw_norm * base_raw_norm - result) *
+                                        0.5F;
+                }
+            }
+
             if (not std::isfinite(result)) {
                 return false;
             }
@@ -1301,9 +1281,11 @@ RaBitQuantizer<metric>::ComputeDistsWithOneBitLowerBoundBatch4(
                 std::isfinite(runtime_rabitq_error_rate) and runtime_rabitq_error_rate > 0.0F
                     ? runtime_rabitq_error_rate
                     : rabitq_error_rate_;
-            const float lower_bound_error_term = 2.0F * base_norm * query_norm *
-                                                 effective_error_rate * low_bound_error /
-                                                 one_bit_error;
+            float lower_bound_error_term = 2.0F * base_norm * query_norm * effective_error_rate *
+                                           low_bound_error / one_bit_error;
+            if constexpr (metric == MetricType::METRIC_TYPE_IP) {
+                lower_bound_error_term *= 0.5F;
+            }
             const float lower_bound_result = result - lower_bound_error_term;
             if (std::isfinite(lower_bound_result)) {
                 *lower_bound =
@@ -1353,15 +1335,17 @@ RaBitQuantizer<metric>::ComputeDistWithSplitCode(Computer<RaBitQuantizer>& compu
     } else {
         sum_type query_raw_sum = *((sum_type*)(query + query_offset_sum_));
         float ip_yu_q = 0.0F;
-        if (HasFilterQueryLookupTable()) {
-            ip_yu_q = RaBitQFloatMultiBitIPByLookup(
-                reinterpret_cast<const float*>(query + query_offset_filter_lut_),
-                one_bit_code,
-                this->dim_,
-                ReorderBits(),
-                FilterBits());
-            ip_yu_q += RaBitQFloatSupplementCodeIP(
-                reinterpret_cast<const float*>(query), supplement_code, this->dim_, ReorderBits());
+        if (FilterBits() == 2 or FilterBits() == 3) {
+            const auto* query_data = reinterpret_cast<const float*>(query);
+            const float filter_centered_ip =
+                FilterBits() == 2
+                    ? RaBitQFloatTwoBitCenteredIP(query_data, one_bit_code, this->dim_)
+                    : RaBitQFloatThreeBitCenteredIP(query_data, one_bit_code, this->dim_);
+            const float filter_center = 0.5F * static_cast<float>((1U << FilterBits()) - 1U);
+            const float filter_ip_yu_q = filter_centered_ip + filter_center * query_raw_sum;
+            ip_yu_q = filter_ip_yu_q * static_cast<float>(1U << ReorderBits());
+            ip_yu_q +=
+                RaBitQFloatSupplementCodeIP(query_data, supplement_code, this->dim_, ReorderBits());
         } else {
             ip_yu_q = RaBitQFloatSQIPBySplitCode(reinterpret_cast<const float*>(query),
                                                  one_bit_code,
@@ -1432,12 +1416,12 @@ RaBitQuantizer<metric>::ComputeDistWithSplitCodeAndFilterDist(Computer<RaBitQuan
                                                               const uint8_t* supplement_code,
                                                               float filter_dist,
                                                               float* dists) const {
-    if constexpr (metric != MetricType::METRIC_TYPE_L2SQR) {
+    if constexpr (metric != MetricType::METRIC_TYPE_L2SQR and
+                  metric != MetricType::METRIC_TYPE_IP) {
         return false;
     }
 
-    if (not SupportSplitCodeStorage() or FilterBits() <= 1 or not HasFilterQueryLookupTable() or
-        not std::isfinite(filter_dist)) {
+    if (not SupportSplitCodeStorage() or FilterBits() <= 1 or not std::isfinite(filter_dist)) {
         return false;
     }
 
@@ -1456,7 +1440,20 @@ RaBitQuantizer<metric>::ComputeDistWithSplitCodeAndFilterDist(Computer<RaBitQuan
         return false;
     }
 
+    norm_type query_raw_norm = 0.0F;
+    norm_type base_raw_norm = 0.0F;
     float filter_l2 = filter_dist;
+    if constexpr (metric == MetricType::METRIC_TYPE_IP) {
+        std::memcpy(&query_raw_norm, query + query_offset_raw_norm_, sizeof(query_raw_norm));
+        std::memcpy(
+            &base_raw_norm, one_bit_code + OneBitRecordRawNormOffset(), sizeof(base_raw_norm));
+        if (is_approx_zero(query_raw_norm) or is_approx_zero(base_raw_norm)) {
+            *dists = 1.0F;
+            return true;
+        }
+        filter_l2 = query_raw_norm * query_raw_norm + base_raw_norm * base_raw_norm -
+                    2.0F * (1.0F - filter_dist);
+    }
     if (pca_dim_ != this->original_dim_ and use_mrq_) {
         const norm_type query_mrq_norm_sqr = *(norm_type*)(query + query_offset_mrq_norm_);
         const norm_type base_mrq_norm_sqr =
@@ -1503,6 +1500,11 @@ RaBitQuantizer<metric>::ComputeDistWithSplitCodeAndFilterDist(Computer<RaBitQuan
         norm_type base_mrq_norm_sqr = 0;
         memcpy(&base_mrq_norm_sqr, meta_field(offset_mrq_norm_), sizeof(base_mrq_norm_sqr));
         result += query_mrq_norm_sqr + base_mrq_norm_sqr;
+    }
+
+    if constexpr (metric == MetricType::METRIC_TYPE_IP) {
+        result = 1.0F -
+                 (query_raw_norm * query_raw_norm + base_raw_norm * base_raw_norm - result) * 0.5F;
     }
 
     if (not std::isfinite(result)) {
@@ -1808,13 +1810,6 @@ RaBitQuantizer<metric>::ProcessQueryImpl(const float* query,
                 query_raw_sum += normed_data[d];
             }
             *(sum_type*)(computer.buf_ + query_offset_sum_) = query_raw_sum;
-        }
-
-        if (HasFilterQueryLookupTable()) {
-            generic::RaBitQFloatBuildByteIPLookupTable(
-                normed_data.data(),
-                this->dim_,
-                reinterpret_cast<float*>(computer.buf_ + query_offset_filter_lut_));
         }
 
         // 5. store norm

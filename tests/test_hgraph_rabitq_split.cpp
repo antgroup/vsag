@@ -151,7 +151,7 @@ TEST_CASE("HGraph RaBitQ Split Hybrid IO (memory + async supplement)",
     using namespace fixtures;
     constexpr int64_t dim = 128;
     constexpr uint64_t base_count = 600;
-    const std::string metric = "l2";
+    const std::string metric = GENERATE("l2", "ip");
 
     auto build_param =
         HGraphRaBitQSplitTestIndex::GenerateBuildParam(metric, dim, "block_memory_io", "async_io");

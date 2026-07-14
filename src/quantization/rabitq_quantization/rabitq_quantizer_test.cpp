@@ -258,6 +258,83 @@ TEST_CASE("RaBitQ Split Code Storage", "[ut][RaBitQuantizer]") {
     }
 }
 
+TEST_CASE("RaBitQ Split IP Batch4 and Reorder Hint", "[ut][RaBitQuantizer]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr uint64_t dim = 64;
+    constexpr uint64_t count = 32;
+    constexpr uint64_t base_bits = 8;
+    constexpr uint64_t filter_bits = 3;
+    auto vecs = fixtures::generate_vectors(count, dim);
+
+    RaBitQuantizer<MetricType::METRIC_TYPE_IP> quantizer(
+        dim,
+        dim,
+        32,
+        base_bits,
+        false,
+        false,
+        allocator.get(),
+        RaBitQuantizerParameter::RABITQ_VERSION_SPLIT,
+        RaBitQuantizerParameter::DEFAULT_RABITQ_ERROR_RATE,
+        filter_bits);
+    REQUIRE(quantizer.SupportSplitCodeStorage());
+    quantizer.TrainImpl(vecs.data(), count);
+
+    auto computer = quantizer.FactoryComputer();
+    computer->SetQuery(vecs.data() + 8 * dim);
+
+    std::vector<uint8_t> full_code(quantizer.GetCodeSize());
+    std::vector<uint8_t> supplement_code(quantizer.GetSupplementCodeSize());
+    std::vector<std::vector<uint8_t>> one_bit_codes(
+        4, std::vector<uint8_t>(quantizer.GetOneBitCodeSize()));
+    float single_dists[4] = {};
+    float single_lower_bounds[4] = {};
+
+    for (uint64_t i = 0; i < 4; ++i) {
+        REQUIRE(quantizer.EncodeOne(vecs.data() + i * dim, full_code.data()));
+        quantizer.SplitCode(full_code.data(), one_bit_codes[i].data(), supplement_code.data());
+
+        REQUIRE(quantizer.ComputeDistWithOneBitLowerBound(
+            *computer, one_bit_codes[i].data(), single_dists + i, single_lower_bounds + i));
+        float split_dist = 0.0F;
+        REQUIRE(quantizer.ComputeDistWithSplitCode(
+            *computer, one_bit_codes[i].data(), supplement_code.data(), &split_dist));
+        float hinted_split_dist = 0.0F;
+        REQUIRE(quantizer.ComputeDistWithSplitCodeAndFilterDist(*computer,
+                                                                one_bit_codes[i].data(),
+                                                                supplement_code.data(),
+                                                                single_dists[i],
+                                                                &hinted_split_dist));
+        REQUIRE(std::abs(split_dist - hinted_split_dist) <= 1e-5F);
+    }
+
+    float batch_dists[4] = {};
+    float batch_lower_bounds[4] = {};
+    bool computed[4] = {};
+    quantizer.ComputeDistsWithOneBitLowerBoundBatch4(*computer,
+                                                     one_bit_codes[0].data(),
+                                                     one_bit_codes[1].data(),
+                                                     one_bit_codes[2].data(),
+                                                     one_bit_codes[3].data(),
+                                                     batch_dists[0],
+                                                     batch_dists[1],
+                                                     batch_dists[2],
+                                                     batch_dists[3],
+                                                     batch_lower_bounds,
+                                                     batch_lower_bounds + 1,
+                                                     batch_lower_bounds + 2,
+                                                     batch_lower_bounds + 3,
+                                                     computed[0],
+                                                     computed[1],
+                                                     computed[2],
+                                                     computed[3]);
+    for (uint64_t i = 0; i < 4; ++i) {
+        REQUIRE(computed[i]);
+        REQUIRE(std::abs(single_dists[i] - batch_dists[i]) <= 1e-5F);
+        REQUIRE(std::abs(single_lower_bounds[i] - batch_lower_bounds[i]) <= 1e-5F);
+    }
+}
+
 TEST_CASE("RaBitQ Encode and Decode", "[ut][RaBitQuantizer]") {
     bool use_fht = GENERATE(true, false);
     auto num_bits_per_dim_query = GENERATE(4, 32);

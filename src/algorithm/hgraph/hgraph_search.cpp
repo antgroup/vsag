@@ -131,6 +131,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
         search_param.topk = 1;
         search_param.ef = 1;
         search_param.is_inner_id_allowed = nullptr;
+        search_param.enable_rabitq_one_bit_search = params.rabitq_one_bit_search;
         if (search_param.ep == INVALID_ENTRY_POINT) {
             return make_empty_dataset_with_stats();
         }
@@ -445,6 +446,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     search_param.topk = 1;
     search_param.ef = 1;
     search_param.is_inner_id_allowed = nullptr;
+    search_param.enable_rabitq_one_bit_search = params.rabitq_one_bit_search;
 
     if (search_param.ep == INVALID_ENTRY_POINT) {
         return make_empty_dataset_with_stats();
