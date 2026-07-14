@@ -66,6 +66,8 @@ static constexpr const char* IVF_PARAMS_TEMPLATE =
                 "{RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY}": 1,
                 "{RABITQ_QUANTIZATION_ERROR_RATE_KEY}": 1.9,
                 "{USE_FHT_KEY}": false,
+                "{FAST_ENCODE_RABITQ_KEY}": true,
+                "{FAST_ENCODE_RABITQ_ROUNDS_KEY}": 6,
                 "{PRODUCT_QUANTIZATION_DIM_KEY}": 1
             },
             "{BUCKETS_COUNT_KEY}": 10,
@@ -89,6 +91,8 @@ static constexpr const char* IVF_PARAMS_TEMPLATE =
             "codes_type": "flatten_codes",
             "{QUANTIZATION_PARAMS_KEY}": {
                 "{TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
+                "{FAST_ENCODE_RABITQ_KEY}": true,
+                "{FAST_ENCODE_RABITQ_ROUNDS_KEY}": 6,
                 "{PRODUCT_QUANTIZATION_DIM_KEY}": 0
             }
         },
@@ -265,6 +269,38 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
                 BUCKET_PARAMS_KEY,
                 QUANTIZATION_PARAMS_KEY,
                 USE_FHT_KEY,
+            },
+        },
+        {
+            FAST_ENCODE_RABITQ,
+            {
+                BUCKET_PARAMS_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                FAST_ENCODE_RABITQ_KEY,
+            },
+        },
+        {
+            FAST_ENCODE_RABITQ,
+            {
+                PRECISE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                FAST_ENCODE_RABITQ_KEY,
+            },
+        },
+        {
+            FAST_ENCODE_RABITQ_ROUNDS,
+            {
+                BUCKET_PARAMS_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                FAST_ENCODE_RABITQ_ROUNDS_KEY,
+            },
+        },
+        {
+            FAST_ENCODE_RABITQ_ROUNDS,
+            {
+                PRECISE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                FAST_ENCODE_RABITQ_ROUNDS_KEY,
             },
         },
         {

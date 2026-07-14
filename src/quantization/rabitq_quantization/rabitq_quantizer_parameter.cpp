@@ -93,6 +93,24 @@ RaBitQuantizerParameter::FromJson(const JsonType& json) {
     if (json.Contains(USE_FHT_KEY)) {
         this->use_fht_ = json[USE_FHT_KEY].GetBool();
     }
+    if (json.Contains(FAST_ENCODE_RABITQ_KEY)) {
+        this->fast_encode_rabitq_ = json[FAST_ENCODE_RABITQ_KEY].GetBool();
+    }
+    if (json.Contains(FAST_ENCODE_RABITQ_ROUNDS_KEY)) {
+        this->fast_encode_rabitq_rounds_ = json[FAST_ENCODE_RABITQ_ROUNDS_KEY].GetUint64();
+        if (not json[FAST_ENCODE_RABITQ_ROUNDS_KEY].IsNumberInteger()) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "fast_encode_rabitq_rounds must be an integer");
+        }
+    }
+    if (this->fast_encode_rabitq_rounds_ < MIN_FAST_ENCODE_RABITQ_ROUNDS or
+        this->fast_encode_rabitq_rounds_ > MAX_FAST_ENCODE_RABITQ_ROUNDS) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            fmt::format("fast_encode_rabitq_rounds must be in [{}, {}], but got {}",
+                                        MIN_FAST_ENCODE_RABITQ_ROUNDS,
+                                        MAX_FAST_ENCODE_RABITQ_ROUNDS,
+                                        fast_encode_rabitq_rounds_));
+    }
 }
 
 JsonType
@@ -106,6 +124,8 @@ RaBitQuantizerParameter::ToJson() const {
     json[RABITQ_QUANTIZATION_BITS_PER_DIM_FILTER_KEY].SetUint64(this->num_bits_per_dim_filter_);
     json[RABITQ_QUANTIZATION_ERROR_RATE_KEY].SetFloat(this->rabitq_error_rate_);
     json[USE_FHT_KEY].SetBool(this->use_fht_);
+    json[FAST_ENCODE_RABITQ_KEY].SetBool(this->fast_encode_rabitq_);
+    json[FAST_ENCODE_RABITQ_ROUNDS_KEY].SetUint64(this->fast_encode_rabitq_rounds_);
     return json;
 }
 

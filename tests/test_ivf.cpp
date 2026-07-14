@@ -600,6 +600,9 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
         "index_param": {{
             "buckets_count": 32,
             "base_quantization_type": "rabitq",
+            "rabitq_bits_per_dim_base": 8,
+            "fast_encode_rabitq": {},
+            "fast_encode_rabitq_rounds": 6,
             "use_reorder": {},
             "precise_quantization_type": "fp32",
             "partition_strategy_type": "ivf",
@@ -609,9 +612,10 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
     }}
     )";
 
+    auto fast_encode = GENERATE(false, true);
     auto use_reorder = GENERATE(false, true);
-    auto params = fmt::format(params_template, use_reorder);
-    CAPTURE(use_reorder);
+    auto params = fmt::format(params_template, fast_encode, use_reorder);
+    CAPTURE(fast_encode, use_reorder);
 
     SECTION(use_reorder ? "with fp32 reorder" : "without reorder") {
         auto index = vsag::Factory::CreateIndex("ivf", params);

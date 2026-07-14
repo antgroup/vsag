@@ -42,6 +42,17 @@
 | `rabitq_bits_per_dim_precise` | int | 未设置 | HGraph-only split 模式 key。和 `base_quantization_type: "rabitq"`、`precise_quantization_type: "rabitq"` 一起出现时表示 `y`，即重排 / full-distance 阶段读取的 supplement bits。要求 `x + y <= 8`。 |
 | `rabitq_error_rate` | float | `1.9` | HGraph split 搜索的默认 lower-bound 误差倍率；必须为有限正数，也可以在 `hgraph` 搜索参数中按次覆盖。 |
 | `use_fht` | bool | `false` | `true` 时在二值化前应用快速 Hadamard 变换旋转。以 O(dim log dim) 的廉价代价提升各向异性数据上的精度（`rabitq_quantizer_parameter.cpp:76-78`）。 |
+| `fast_encode_rabitq` | bool | `true` | 对大于 1 bit 的底库码启用基于 CAQ 的快速编码；设为 `false` 时使用原有精确编码。1 bit 编码会忽略此参数。 |
+| `fast_encode_rabitq_rounds` | int | `6` | CAQ 坐标微调轮数，范围 `[1, 32]`；每个坐标在每轮最多移动一级。 |
+
+启用 `fast_encode_rabitq` 后，多 bit RaBitQ 先进行 LVQ 初始化，再执行固定轮数的
+坐标微调，把码字选择复杂度从约 `O(2^B * dim * log(dim))` 降到
+`O(rounds * dim)`，且不改变编码布局和查询估计器。实现参考
+[SAQ](https://arxiv.org/abs/2509.12086) 中的 CAQ；在新数据集上评估质量与速度
+权衡时可关闭该参数使用精确编码。两个参数仅影响构建，不影响已保存索引的加载
+兼容性。VSAG 采用 clean-room 实现，不依赖采用 Apache-2.0 许可证的
+[SAQ 参考仓库](https://github.com/howarlii/saq/)。
+
 
 各索引页会把 RaBitQ 设置暴露为 `index_param` 顶层 key：HGraph 暴露
 `rabitq_pca_dim`、`rabitq_bits_per_dim_query`、`rabitq_bits_per_dim_base`、
@@ -51,6 +62,9 @@
 `rabitq_use_fht`；Pyramid 为底层量化器暴露 PCA、底库/查询位数和 FHT
 相关 key。其中 `rabitq_use_fht` 是索引层对量化器内部 `use_fht` key
 的别名，会由索引层重写。
+
+`fast_encode_rabitq` 和 `fast_encode_rabitq_rounds` 同时适用于 HGraph、IVF
+和 Pyramid，并会传播给 base 与 precise RaBitQ 量化器。
 
 ```json
 {

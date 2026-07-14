@@ -129,6 +129,8 @@ extern const char* const PYRAMID_RABITQ_BITS_PER_DIM_BASE;
 extern const char* const PYRAMID_RABITQ_BITS_PER_DIM_QUERY;
 extern const char* const PYRAMID_RABITQ_PCA_DIM;
 extern const char* const PYRAMID_RABITQ_USE_FHT;
+extern const char* const PYRAMID_FAST_ENCODE_RABITQ;
+extern const char* const PYRAMID_FAST_ENCODE_RABITQ_ROUNDS;
 extern const char* const PYRAMID_BASE_IO_TYPE;
 extern const char* const PYRAMID_BASE_PQ_DIM;
 extern const char* const PYRAMID_BASE_FILE_PATH;
@@ -176,6 +178,8 @@ extern const char* const RABITQ_BITS_PER_DIM_PRECISE;
 extern const char* const RABITQ_BITS_PER_DIM_FILTER;
 extern const char* const RABITQ_ERROR_RATE;
 extern const char* const RABITQ_USE_FHT;
+extern const char* const FAST_ENCODE_RABITQ;
+extern const char* const FAST_ENCODE_RABITQ_ROUNDS;
 extern const char* const INDEX_TQ_CHAIN;
 extern const char* const INDEX_MRLE_DIM;
 

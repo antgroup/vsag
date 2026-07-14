@@ -36,6 +36,9 @@ namespace vsag {
  *  [1] Jianyang Gao and Cheng Long. 2024. RaBitQ: Quantizing High-Dimensional Vectors with a Theoretical Error Bound for Approximate Nearest Neighbor Search. Proc. ACM Manag. Data 2, 3, Article 167 (June 2024), 27 pages. https://doi.org/10.1145/3654970
  *  [2] Mingyu Yang, Wentao Li, Wei Wang. Fast High-dimensional Approximate Nearest Neighbor Search with Efficient Index Time and Space
  *  [3] Jianyang Gao, Yutong Gou, Yuexuan Xu, Yongyi Yang, Cheng Long, and Raymond Chi-Wing Wong. 2025. Practical and Asymptotically Optimal Quantization of High-Dimensional Vectors in Euclidean Space for Approximate Nearest Neighbor Search. Proc. ACM Manag. Data 3, 3, Article 202 (June 2025), 26 pages. https://doi.org/10.1145/3725413
+ *  [4] Hui Li et al. 2026. SAQ: Pushing the Limits of Vector Quantization through Code
+ *      Adjustment and Dimension Segmentation. https://arxiv.org/abs/2509.12086
+ *
  */
 template <MetricType metric = MetricType::METRIC_TYPE_L2SQR>
 class RaBitQuantizer : public Quantizer<RaBitQuantizer<metric>> {
@@ -55,7 +58,10 @@ public:
         std::string rabitq_version = RaBitQuantizerParameter::DEFAULT_RABITQ_VERSION,
         float rabitq_error_rate = RaBitQuantizerParameter::DEFAULT_RABITQ_ERROR_RATE,
         uint64_t num_bits_per_dim_filter =
-            RaBitQuantizerParameter::DEFAULT_RABITQ_BITS_PER_DIM_FILTER);
+            RaBitQuantizerParameter::DEFAULT_RABITQ_BITS_PER_DIM_FILTER,
+        bool fast_encode_rabitq = RaBitQuantizerParameter::DEFAULT_FAST_ENCODE_RABITQ,
+        uint64_t fast_encode_rabitq_rounds =
+            RaBitQuantizerParameter::DEFAULT_FAST_ENCODE_RABITQ_ROUNDS);
 
     explicit RaBitQuantizer(const RaBitQuantizerParamPtr& param,
                             const IndexCommonParam& common_param);
@@ -140,6 +146,8 @@ public:
     // base multi-bit related
     void
     EncodeExtendRaBitQ(const float* o_prime, uint8_t* code, float& y_norm) const;
+    void
+    FastEncodeRaBitQ(const float* o_prime, uint8_t* code, float& y_norm) const;
 
     void
     PackIntoPlanes(const uint8_t* src, uint8_t* dst) const;
@@ -304,6 +312,8 @@ private:
     uint32_t num_bits_per_dim_filter_{RaBitQuantizerParameter::DEFAULT_RABITQ_BITS_PER_DIM_FILTER};
 
     // compute related
+    bool fast_encode_rabitq_{RaBitQuantizerParameter::DEFAULT_FAST_ENCODE_RABITQ};
+    uint64_t fast_encode_rabitq_rounds_{RaBitQuantizerParameter::DEFAULT_FAST_ENCODE_RABITQ_ROUNDS};
     float inv_sqrt_d_{0.0F};
     std::string rabitq_version_{RaBitQuantizerParameter::DEFAULT_RABITQ_VERSION};
     float rabitq_error_rate_{RaBitQuantizerParameter::DEFAULT_RABITQ_ERROR_RATE};

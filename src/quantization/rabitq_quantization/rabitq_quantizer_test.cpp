@@ -15,6 +15,8 @@
 
 #include "rabitq_quantizer.h"
 
+#include <algorithm>
+#include <catch2/benchmark/catch_benchmark.hpp>
 #include <cmath>
 #include <cstring>
 #include <utility>
@@ -97,6 +99,236 @@ TEST_CASE("Extend RaBitQ Basic Test", "[ut][RaBitQuantizer]") {
         auto dist = quantizer.ComputeDist(*computer, base_code.data());
         REQUIRE(std::abs(dist) <= 1e-3);
     }
+}
+
+TEST_CASE("Fast RaBitQ coordinate adjustment", "[ut][RaBitQuantizer]") {
+    constexpr uint64_t dim = 64;
+    const uint64_t base_bits = GENERATE(2, 4, 8);
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    std::vector<float> data(dim);
+    for (uint64_t d = 0; d < dim; ++d) {
+        data[d] = std::sin(static_cast<float>(d) * 0.37F) +
+                  0.2F * std::cos(static_cast<float>(d) * 0.11F);
+    }
+
+    auto make_quantizer = [&](uint64_t rounds) {
+        return RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR>(
+            dim,
+            dim,
+            32,
+            base_bits,
+            false,
+            false,
+            allocator.get(),
+            RaBitQuantizerParameter::DEFAULT_RABITQ_VERSION,
+            RaBitQuantizerParameter::DEFAULT_RABITQ_ERROR_RATE,
+            RaBitQuantizerParameter::DEFAULT_RABITQ_BITS_PER_DIM_FILTER,
+            true,
+            rounds);
+    };
+    auto quantizer = make_quantizer(6);
+    auto one_round_quantizer = make_quantizer(1);
+
+    std::vector<uint8_t> lvq_code(dim);
+    std::vector<uint8_t> one_round_code(dim);
+    std::vector<uint8_t> fast_code(dim);
+    float one_round_norm = 0.0F;
+    float fast_norm = 0.0F;
+
+    const uint32_t code_max = (1U << base_bits) - 1U;
+    const double center = 0.5 * static_cast<double>(code_max);
+    double max_abs = 0.0;
+    for (float value : data) {
+        max_abs = std::max(max_abs, std::fabs(static_cast<double>(value)));
+    }
+    const double delta = 2.0 * max_abs / static_cast<double>(code_max + 1U);
+    for (uint64_t d = 0; d < dim; ++d) {
+        const double scaled = (static_cast<double>(data[d]) + max_abs) / delta;
+        auto code = static_cast<int64_t>(std::floor(scaled));
+        code = std::clamp<int64_t>(code, 0, code_max);
+        lvq_code[d] = static_cast<uint8_t>(code);
+    }
+
+    auto alignment_score = [&](const std::vector<uint8_t>& code) {
+        double ip = 0.0;
+        double norm_sqr = 0.0;
+        for (uint64_t d = 0; d < dim; ++d) {
+            const double centered = static_cast<double>(code[d]) - center;
+            ip += static_cast<double>(data[d]) * centered;
+            norm_sqr += centered * centered;
+        }
+        return ip * ip / norm_sqr;
+    };
+
+    one_round_quantizer.FastEncodeRaBitQ(data.data(), one_round_code.data(), one_round_norm);
+    quantizer.FastEncodeRaBitQ(data.data(), fast_code.data(), fast_norm);
+
+    REQUIRE(alignment_score(one_round_code) + 1e-7 >= alignment_score(lvq_code));
+    REQUIRE(alignment_score(fast_code) + 1e-7 >= alignment_score(one_round_code));
+    REQUIRE(std::isfinite(fast_norm));
+    REQUIRE(fast_norm > 0.0F);
+    for (uint8_t code : fast_code) {
+        REQUIRE(code <= code_max);
+    }
+
+    double expected_norm_sqr = 0.0;
+    for (uint8_t code : fast_code) {
+        const double centered = static_cast<double>(code) - center;
+        expected_norm_sqr += centered * centered;
+    }
+    REQUIRE(std::abs(fast_norm - std::sqrt(expected_norm_sqr)) <= 1e-5F);
+}
+
+TEST_CASE("Fast RaBitQ does not exceed the exhaustive optimum", "[ut][RaBitQuantizer]") {
+    constexpr uint64_t dim = 3;
+    const uint64_t base_bits = GENERATE(2, 4);
+    const std::vector<float> data = {0.73F, -0.41F, 0.19F};
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR> quantizer(
+        dim, dim, 32, base_bits, false, false, allocator.get());
+
+    std::vector<uint8_t> fast_code(dim);
+    float fast_norm = 0.0F;
+    quantizer.FastEncodeRaBitQ(data.data(), fast_code.data(), fast_norm);
+
+    const uint32_t levels = 1U << base_bits;
+    const double center = 0.5 * static_cast<double>(levels - 1U);
+    auto alignment_score = [&](const std::vector<uint8_t>& code) {
+        double ip = 0.0;
+        double norm_sqr = 0.0;
+        for (uint64_t d = 0; d < dim; ++d) {
+            const double centered = static_cast<double>(code[d]) - center;
+            ip += static_cast<double>(data[d]) * centered;
+            norm_sqr += centered * centered;
+        }
+        return ip * ip / norm_sqr;
+    };
+
+    double best_score = 0.0;
+    std::vector<uint8_t> candidate(dim);
+    for (uint32_t first = 0; first < levels; ++first) {
+        candidate[0] = static_cast<uint8_t>(first);
+        for (uint32_t second = 0; second < levels; ++second) {
+            candidate[1] = static_cast<uint8_t>(second);
+            for (uint32_t third = 0; third < levels; ++third) {
+                candidate[2] = static_cast<uint8_t>(third);
+                best_score = std::max(best_score, alignment_score(candidate));
+            }
+        }
+    }
+
+    REQUIRE(alignment_score(fast_code) <= best_score + 1e-10);
+    REQUIRE(std::isfinite(fast_norm));
+}
+TEST_CASE("Fast RaBitQ handles zero vectors and invalid rounds", "[ut][RaBitQuantizer]") {
+    constexpr uint64_t dim = 16;
+    constexpr uint64_t base_bits = 8;
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR> quantizer(
+        dim, dim, 32, base_bits, false, false, allocator.get());
+
+    std::vector<float> data(dim, 0.0F);
+    std::vector<uint8_t> code(dim);
+    float norm = 0.0F;
+    quantizer.FastEncodeRaBitQ(data.data(), code.data(), norm);
+    REQUIRE(norm == 1.0F);
+    for (uint8_t value : code) {
+        REQUIRE(value == 127);
+    }
+
+    REQUIRE_THROWS(RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR>(
+        dim,
+        dim,
+        32,
+        base_bits,
+        false,
+        false,
+        allocator.get(),
+        RaBitQuantizerParameter::DEFAULT_RABITQ_VERSION,
+        RaBitQuantizerParameter::DEFAULT_RABITQ_ERROR_RATE,
+        RaBitQuantizerParameter::DEFAULT_RABITQ_BITS_PER_DIM_FILTER,
+        true,
+        0));
+}
+
+TEST_CASE("Fast RaBitQ switch preserves batch behavior", "[ut][RaBitQuantizer]") {
+    constexpr uint64_t dim = 64;
+    constexpr uint64_t count = 3;
+    const uint64_t base_bits = GENERATE(1, 4);
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto data = fixtures::generate_vectors(count, dim);
+
+    auto make_quantizer = [&](bool fast_encode) {
+        return RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR>(
+            dim,
+            dim,
+            32,
+            base_bits,
+            false,
+            false,
+            allocator.get(),
+            RaBitQuantizerParameter::DEFAULT_RABITQ_VERSION,
+            RaBitQuantizerParameter::DEFAULT_RABITQ_ERROR_RATE,
+            RaBitQuantizerParameter::DEFAULT_RABITQ_BITS_PER_DIM_FILTER,
+            fast_encode,
+            RaBitQuantizerParameter::DEFAULT_FAST_ENCODE_RABITQ_ROUNDS);
+    };
+
+    auto fast_quantizer = make_quantizer(true);
+    auto exact_quantizer = make_quantizer(false);
+    REQUIRE(fast_quantizer.TrainImpl(data.data(), count));
+    test_serializion(fast_quantizer, exact_quantizer);
+
+    std::vector<uint8_t> fast_batch(fast_quantizer.GetCodeSize() * count);
+    std::vector<uint8_t> exact_batch(exact_quantizer.GetCodeSize() * count);
+    REQUIRE(fast_quantizer.EncodeBatch(data.data(), fast_batch.data(), count));
+    REQUIRE(exact_quantizer.EncodeBatch(data.data(), exact_batch.data(), count));
+
+    for (uint64_t i = 0; i < count; ++i) {
+        std::vector<uint8_t> fast_one(fast_quantizer.GetCodeSize());
+        std::vector<uint8_t> exact_one(exact_quantizer.GetCodeSize());
+        REQUIRE(fast_quantizer.EncodeOne(data.data() + i * dim, fast_one.data()));
+        REQUIRE(exact_quantizer.EncodeOne(data.data() + i * dim, exact_one.data()));
+        REQUIRE(std::memcmp(fast_one.data(),
+                            fast_batch.data() + i * fast_quantizer.GetCodeSize(),
+                            fast_one.size()) == 0);
+        REQUIRE(std::memcmp(exact_one.data(),
+                            exact_batch.data() + i * exact_quantizer.GetCodeSize(),
+                            exact_one.size()) == 0);
+    }
+
+    if (base_bits == 1) {
+        REQUIRE(fast_batch == exact_batch);
+    }
+}
+
+TEST_CASE("Fast RaBitQ code selection benchmark", "[!benchmark][RaBitQuantizer]") {
+    const uint64_t dim = GENERATE(128, 768, 960, 1536);
+    const uint64_t base_bits = GENERATE(2, 4, 8);
+    CAPTURE(dim, base_bits);
+
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR> quantizer(
+        dim, dim, 32, base_bits, false, false, allocator.get());
+    std::vector<float> data(dim);
+    std::vector<uint8_t> code(dim);
+    for (uint64_t d = 0; d < dim; ++d) {
+        data[d] = std::sin(static_cast<float>(d) * 0.37F) +
+                  0.2F * std::cos(static_cast<float>(d) * 0.11F);
+    }
+
+    const auto case_name = " D=" + std::to_string(dim) + " B=" + std::to_string(base_bits);
+    BENCHMARK("Exact EncodeExtendRaBitQ" + case_name) {
+        float norm = 0.0F;
+        quantizer.EncodeExtendRaBitQ(data.data(), code.data(), norm);
+        return norm;
+    };
+
+    BENCHMARK("FastEncodeRaBitQ rounds=6" + case_name) {
+        float norm = 0.0F;
+        quantizer.FastEncodeRaBitQ(data.data(), code.data(), norm);
+        return norm;
+    };
 }
 
 TEST_CASE("RaBitQ Split Code Storage", "[ut][RaBitQuantizer]") {

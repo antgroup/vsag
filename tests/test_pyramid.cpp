@@ -38,6 +38,8 @@ struct PyramidParam {
     std::string graph_type = "nsw";
     bool use_reorder = false;
     bool support_duplicate = false;
+    uint64_t rabitq_bits_per_dim_base = 1;
+    bool fast_encode_rabitq = true;
 };
 
 namespace fixtures {
@@ -90,6 +92,9 @@ PyramidTestIndex::GeneratePyramidBuildParametersString(const std::string& metric
             "no_build_levels": [{}],
             "graph_type": "{}",
             "base_quantization_type": "{}",
+            "rabitq_bits_per_dim_base": {},
+            "fast_encode_rabitq": {},
+            "fast_encode_rabitq_rounds": 6,
             "precise_quantization_type": "{}",
             "use_reorder": {},
             "index_min_size": 28,
@@ -103,6 +108,8 @@ PyramidTestIndex::GeneratePyramidBuildParametersString(const std::string& metric
                                             fmt::join(param.no_build_levels, ","),
                                             param.graph_type,
                                             param.base_quantization_type,
+                                            param.rabitq_bits_per_dim_base,
+                                            param.fast_encode_rabitq,
                                             param.precise_quantization_type,
                                             param.use_reorder,
                                             param.support_duplicate);
@@ -238,6 +245,33 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
         TestRangeSearch(index, dataset, search_param, 0.94, 10, true);
         TestRangeSearch(index, dataset, search_param, 0.49, 5, true);
     }
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
+                             "Pyramid multi-bit RaBitQ fast encoding",
+                             "[ft][pyramid][rabitq]") {
+    constexpr int64_t dim = 64;
+    constexpr uint64_t count = 256;
+    const bool fast_encode = GENERATE(false, true);
+
+    PyramidParam pyramid_param;
+    pyramid_param.no_build_levels = {0, 1, 2};
+    pyramid_param.base_quantization_type = "rabitq";
+    pyramid_param.precise_quantization_type = "fp32";
+    pyramid_param.use_reorder = true;
+    pyramid_param.rabitq_bits_per_dim_base = 8;
+    pyramid_param.fast_encode_rabitq = fast_encode;
+
+    CAPTURE(fast_encode);
+    auto param = GeneratePyramidBuildParametersString("l2", dim, pyramid_param);
+    auto index = TestFactory("pyramid", param, true);
+    auto dataset = pool.GetDatasetAndCreate(dim, count, "l2", /*with_path=*/true);
+    TestBuildIndex(index, dataset, true);
+    auto query = fixtures::get_one_query(dataset->query_, 0);
+    auto result = index->KnnSearch(query, 5, GeneratePyramidSearchParametersString(100));
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() > 0);
+    REQUIRE(result.value()->GetDim() <= 5);
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,

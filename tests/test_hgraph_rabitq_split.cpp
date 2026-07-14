@@ -40,7 +40,8 @@ public:
                        const std::string& base_io_type,
                        const std::string& supplement_io_type,
                        uint32_t rabitq_filter_bits = 3,
-                       uint32_t rabitq_supplement_bits = 5);
+                       uint32_t rabitq_supplement_bits = 5,
+                       bool fast_encode_rabitq = true);
 };
 
 const std::string HGraphRaBitQSplitTestIndex::name = "hgraph";
@@ -53,7 +54,8 @@ HGraphRaBitQSplitTestIndex::GenerateBuildParam(const std::string& metric_type,
                                                const std::string& base_io_type,
                                                const std::string& supplement_io_type,
                                                uint32_t rabitq_filter_bits,
-                                               uint32_t rabitq_supplement_bits) {
+                                               uint32_t rabitq_supplement_bits,
+                                               bool fast_encode_rabitq) {
     constexpr auto temp_with_supplement = R"(
     {{
         "dtype": "float32",
@@ -69,6 +71,7 @@ HGraphRaBitQSplitTestIndex::GenerateBuildParam(const std::string& metric_type,
             "rabitq_bits_per_dim_base": {},
             "rabitq_bits_per_dim_precise": {},
             "rabitq_error_rate": 1.9,
+            "fast_encode_rabitq": {},
             "max_degree": 32,
             "ef_construction": 200,
             "graph_storage_type": "compressed"
@@ -88,6 +91,7 @@ HGraphRaBitQSplitTestIndex::GenerateBuildParam(const std::string& metric_type,
             "rabitq_bits_per_dim_base": {},
             "rabitq_bits_per_dim_precise": {},
             "rabitq_error_rate": 1.9,
+            "fast_encode_rabitq": {},
             "max_degree": 32,
             "ef_construction": 200,
             "graph_storage_type": "compressed"
@@ -100,7 +104,8 @@ HGraphRaBitQSplitTestIndex::GenerateBuildParam(const std::string& metric_type,
                            base_io_type,
                            dir.GenerateRandomFile(),
                            rabitq_filter_bits,
-                           rabitq_supplement_bits);
+                           rabitq_supplement_bits,
+                           fast_encode_rabitq);
     }
     return fmt::format(temp_with_supplement,
                        metric_type,
@@ -109,7 +114,8 @@ HGraphRaBitQSplitTestIndex::GenerateBuildParam(const std::string& metric_type,
                        supplement_io_type,
                        dir.GenerateRandomFile(),
                        rabitq_filter_bits,
-                       rabitq_supplement_bits);
+                       rabitq_supplement_bits,
+                       fast_encode_rabitq);
 }
 
 }  // namespace fixtures
@@ -134,8 +140,10 @@ TEST_CASE("HGraph RaBitQ Split Homogeneous IO", "[ft][rabitq_split][hgraph]") {
     auto metric = GENERATE("l2", "ip");
     auto base_io = GENERATE("block_memory_io", "memory_io");
 
-    INFO(fmt::format("metric={}, base_io={}", metric, base_io));
-    auto param = HGraphRaBitQSplitTestIndex::GenerateBuildParam(metric, dim, base_io, "");
+    auto fast_encode = GENERATE(false, true);
+    INFO(fmt::format("metric={}, base_io={}, fast_encode={}", metric, base_io, fast_encode));
+    auto param =
+        HGraphRaBitQSplitTestIndex::GenerateBuildParam(metric, dim, base_io, "", 3, 5, fast_encode);
     auto index = TestIndex::TestFactory(HGraphRaBitQSplitTestIndex::name, param, true);
     auto dataset = HGraphRaBitQSplitTestIndex::pool.GetDatasetAndCreate(dim, base_count, metric);
     TestIndex::TestBuildIndex(index, dataset, true);

@@ -84,6 +84,8 @@ Build-time parameters live under `index_param`. See
 | `rabitq_version` | string | `"standard"` | `rabitq` layout: `"standard"` or `"split_1bit_7bit"` |
 | `rabitq_error_rate` | float | `1.9` | Positive error-budget parameter for `rabitq` encoding |
 | `rabitq_use_fht` | bool | `false` | Enable FHT rotation before `rabitq` binarization |
+| `fast_encode_rabitq` | bool | `true` | Use CAQ fast construction for multi-bit `rabitq`; set to `false` for exact encoding |
+| `fast_encode_rabitq_rounds` | int | `6` | CAQ adjustment rounds; allowed range is `[1, 32]` |
 | `use_reorder` | bool | `false` | Keep a high-precision copy and re-rank after the coarse scan |
 | `precise_quantization_type` | string | `"fp32"` | Quantizer used for reordering (with `use_reorder: true`) |
 | `base_io_type` | string | `"memory_io"` | Storage backend for coarse codes |

@@ -46,6 +46,19 @@ as `"pca, rom, rabitq"`.
 | `rabitq_bits_per_dim_precise` | int | unset | HGraph-only split-mode key. When present with `base_quantization_type: "rabitq"` and `precise_quantization_type: "rabitq"`, this means `y`, the supplement bits used for reorder/full-distance refinement. The sum `x + y` must be `<= 8`. |
 | `rabitq_error_rate` | float | `1.9` | Default lower-bound error multiplier for HGraph split search; must be finite and positive. It can be overridden per search under the `hgraph` object. |
 | `use_fht` | bool | `false` | If `true`, applies a Fast Hadamard Transform rotation before binarization. Improves accuracy on anisotropic data with cheap O(dim log dim) cost (`rabitq_quantizer_parameter.cpp:76-78`). |
+| `fast_encode_rabitq` | bool | `true` | For stored codes wider than one bit, use CAQ-based fast encoding. Set to `false` to retain the exact RaBitQ encoder. The setting is ignored for one-bit codes. |
+| `fast_encode_rabitq_rounds` | int | `6` | Number of CAQ coordinate-adjustment rounds. Allowed range: `[1, 32]`. Each coordinate moves by at most one level per round. |
+
+Multi-bit RaBitQ uses an LVQ initialization followed by fixed-round coordinate
+adjustment when `fast_encode_rabitq` is enabled. This reduces code selection
+from approximately `O(2^B * dim * log(dim))` to `O(rounds * dim)` while keeping
+the existing code layout and query estimator. The implementation follows the
+CAQ component of [SAQ](https://arxiv.org/abs/2509.12086); use the exact fallback
+when measuring the quality/speed trade-off on a new dataset. These build-only
+settings do not affect index loading compatibility. VSAG uses a clean-room
+implementation and does not depend on the Apache-2.0 licensed
+[SAQ reference repository](https://github.com/howarlii/saq/).
+
 
 Index pages expose RaBitQ settings as top-level `index_param` keys:
 HGraph exposes `rabitq_pca_dim`, `rabitq_bits_per_dim_query`,
@@ -56,6 +69,9 @@ HGraph exposes `rabitq_pca_dim`, `rabitq_bits_per_dim_query`,
 the PCA, base/query bit, and FHT keys for its base quantizer. The
 `rabitq_use_fht` key is an index-level alias for the quantizer's internal
 `use_fht` key and is rewritten by the index layer.
+`fast_encode_rabitq` and `fast_encode_rabitq_rounds` are available on HGraph,
+IVF, and Pyramid and are propagated to both base and precise RaBitQ quantizers.
+
 
 ```json
 {

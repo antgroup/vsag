@@ -153,6 +153,8 @@ const char* const RABITQ_BITS_PER_DIM_PRECISE = "rabitq_bits_per_dim_precise";
 const char* const RABITQ_BITS_PER_DIM_FILTER = "rabitq_bits_per_dim_filter";
 const char* const RABITQ_ERROR_RATE = "rabitq_error_rate";
 const char* const RABITQ_USE_FHT = "rabitq_use_fht";
+const char* const FAST_ENCODE_RABITQ = "fast_encode_rabitq";
+const char* const FAST_ENCODE_RABITQ_ROUNDS = "fast_encode_rabitq_rounds";
 const char* const INDEX_TQ_CHAIN = "tq_chain";
 const char* const INDEX_MRLE_DIM = "mrle_dim";
 
@@ -233,6 +235,8 @@ const char* const PYRAMID_RABITQ_BITS_PER_DIM_BASE = RABITQ_BITS_PER_DIM_BASE;
 const char* const PYRAMID_RABITQ_BITS_PER_DIM_QUERY = RABITQ_BITS_PER_DIM_QUERY;
 const char* const PYRAMID_RABITQ_PCA_DIM = RABITQ_PCA_DIM;
 const char* const PYRAMID_RABITQ_USE_FHT = RABITQ_USE_FHT;
+const char* const PYRAMID_FAST_ENCODE_RABITQ = FAST_ENCODE_RABITQ;
+const char* const PYRAMID_FAST_ENCODE_RABITQ_ROUNDS = FAST_ENCODE_RABITQ_ROUNDS;
 const char* const PYRAMID_BASE_IO_TYPE = "base_io_type";
 const char* const PYRAMID_BASE_PQ_DIM = "base_pq_dim";
 const char* const PYRAMID_BASE_FILE_PATH = "base_file_path";
