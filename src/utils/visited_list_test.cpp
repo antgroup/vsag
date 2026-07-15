@@ -15,7 +15,9 @@
 
 #include "visited_list.h"
 
+#include <algorithm>
 #include <limits>
+#include <random>
 #include <thread>
 
 #include "impl/allocator/default_allocator.h"
@@ -95,6 +97,37 @@ TEST_CASE("VisitedList Basic Test", "[ut][VisitedList]") {
         REQUIRE_FALSE(vl_ptr->Get(0));
         vl_ptr->Set(0);
         REQUIRE(vl_ptr->Get(0));
+    }
+}
+
+TEST_CASE("VisitedList Randomized Differential Test", "[ut][VisitedList]") {
+    auto allocator = std::make_shared<DefaultAllocator>();
+    std::mt19937_64 random_generator(20260715);
+    const std::vector<InnerIdType> sizes = {1, 2, 5, 63, 64, 65, 127, 128, 129, 10000};
+
+    for (const auto size : sizes) {
+        VisitedList visited_list(size, allocator.get());
+        std::vector<bool> reference(static_cast<uint64_t>(size), false);
+        std::uniform_int_distribution<uint64_t> id_distribution(0, static_cast<uint64_t>(size) - 1);
+        std::uniform_int_distribution<uint64_t> operation_distribution(0, 15);
+
+        for (uint64_t operation = 0; operation < 20000; ++operation) {
+            const auto id = static_cast<InnerIdType>(id_distribution(random_generator));
+            const auto operation_type = operation_distribution(random_generator);
+            if (operation_type == 0) {
+                visited_list.Reset();
+                std::fill(reference.begin(), reference.end(), false);
+            } else if (operation_type <= 8) {
+                visited_list.Set(id);
+                reference[static_cast<uint64_t>(id)] = true;
+            } else {
+                REQUIRE(visited_list.Get(id) == reference[static_cast<uint64_t>(id)]);
+            }
+        }
+
+        for (InnerIdType id = 0; id < size; ++id) {
+            REQUIRE(visited_list.Get(id) == reference[static_cast<uint64_t>(id)]);
+        }
     }
 }
 
