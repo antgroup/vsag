@@ -22,6 +22,9 @@ namespace vsag {
 VisitedList::VisitedList(InnerIdType max_size, Allocator* allocator)
     : allocator_(allocator),
       word_count_((static_cast<uint64_t>(max_size) + kBitsPerWord - 1) / kBitsPerWord) {
+    if (word_count_ == 0) {
+        return;
+    }
     const auto words_bytes = word_count_ * sizeof(WordType);
     const auto tags_bytes = word_count_ * sizeof(TagType);
     auto* buffer = static_cast<uint8_t*>(allocator_->Allocate(words_bytes + tags_bytes));
@@ -31,13 +34,17 @@ VisitedList::VisitedList(InnerIdType max_size, Allocator* allocator)
 }
 
 VisitedList::~VisitedList() {
-    allocator_->Deallocate(words_);
+    if (words_ != nullptr) {
+        allocator_->Deallocate(words_);
+    }
 }
 
 void
 VisitedList::Reset() {
     if (tag_ == std::numeric_limits<TagType>::max()) {
-        memset(tags_, 0, word_count_ * sizeof(TagType));
+        if (word_count_ > 0) {
+            memset(tags_, 0, word_count_ * sizeof(TagType));
+        }
         tag_ = 1;
     } else {
         ++tag_;

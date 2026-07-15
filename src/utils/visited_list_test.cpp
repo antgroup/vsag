@@ -24,6 +24,26 @@
 #include "unittest.h"
 using namespace vsag;
 
+namespace {
+class CountingAllocator : public DefaultAllocator {
+public:
+    void*
+    Allocate(uint64_t size) override {
+        ++allocate_count_;
+        return DefaultAllocator::Allocate(size);
+    }
+
+    void
+    Deallocate(void* p) override {
+        ++deallocate_count_;
+        DefaultAllocator::Deallocate(p);
+    }
+
+    uint64_t allocate_count_{0};
+    uint64_t deallocate_count_{0};
+};
+}  // namespace
+
 TEST_CASE("VisitedList Basic Test", "[ut][VisitedList]") {
     auto allocator = std::make_shared<DefaultAllocator>();
     auto size = 10000;
@@ -98,6 +118,19 @@ TEST_CASE("VisitedList Basic Test", "[ut][VisitedList]") {
         vl_ptr->Set(0);
         REQUIRE(vl_ptr->Get(0));
     }
+}
+
+TEST_CASE("VisitedList Zero Size Test", "[ut][VisitedList]") {
+    CountingAllocator allocator;
+    {
+        VisitedList visited_list(0, &allocator);
+        REQUIRE(visited_list.GetMemoryUsage() == sizeof(VisitedList));
+        for (uint64_t i = 0; i < std::numeric_limits<VisitedList::TagType>::max(); ++i) {
+            visited_list.Reset();
+        }
+    }
+    REQUIRE(allocator.allocate_count_ == 0);
+    REQUIRE(allocator.deallocate_count_ == 0);
 }
 
 TEST_CASE("VisitedList Randomized Differential Test", "[ut][VisitedList]") {
