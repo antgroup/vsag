@@ -15,6 +15,7 @@
 
 #include "visited_list.h"
 
+#include <limits>
 #include <thread>
 
 #include "impl/allocator/default_allocator.h"
@@ -57,6 +58,43 @@ TEST_CASE("VisitedList Basic Test", "[ut][VisitedList]") {
         for (auto& id : ids) {
             REQUIRE(vl_ptr->Get(id) == false);
         }
+    }
+
+    SECTION("test word boundaries and repeated sets") {
+        const std::vector<InnerIdType> ids = {0, 1, 63, 64, 65, static_cast<InnerIdType>(size - 1)};
+        for (const auto id : ids) {
+            vl_ptr->Set(id);
+            vl_ptr->Set(id);
+            REQUIRE(vl_ptr->Get(id));
+        }
+
+        vl_ptr->Reset();
+        for (const auto id : ids) {
+            REQUIRE_FALSE(vl_ptr->Get(id));
+        }
+
+        vl_ptr->Set(64);
+        REQUIRE(vl_ptr->Get(64));
+        vl_ptr->Reset();
+        REQUIRE_FALSE(vl_ptr->Get(64));
+    }
+
+    SECTION("test memory usage") {
+        const auto word_count = (static_cast<uint64_t>(size) + VisitedList::kBitsPerWord - 1) /
+                                VisitedList::kBitsPerWord;
+        const auto expected = sizeof(VisitedList) + word_count * (sizeof(VisitedList::WordType) +
+                                                                  sizeof(VisitedList::TagType));
+        REQUIRE(vl_ptr->GetMemoryUsage() == expected);
+    }
+
+    SECTION("test tag overflow") {
+        vl_ptr->Set(0);
+        for (uint64_t i = 0; i < std::numeric_limits<VisitedList::TagType>::max(); ++i) {
+            vl_ptr->Reset();
+        }
+        REQUIRE_FALSE(vl_ptr->Get(0));
+        vl_ptr->Set(0);
+        REQUIRE(vl_ptr->Get(0));
     }
 }
 
