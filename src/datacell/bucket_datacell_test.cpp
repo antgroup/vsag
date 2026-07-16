@@ -190,6 +190,12 @@ TEST_CASE("BucketDataCell Basic Test", "[ut][BucketDataCell] ") {
     TestBucketDataCell(param1, param2, common_param, quantizer_error.second);
 }
 
+TEST_CASE("BucketDataCell rejects invalid parameters", "[ut][BucketDataCell]") {
+    IndexCommonParam common_param;
+
+    REQUIRE(BucketInterface::MakeInstance(nullptr, common_param) == nullptr);
+}
+
 TEST_CASE("BucketDataCell supports RabitQ", "[ut][BucketDataCell]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     constexpr uint64_t dim = 64;
