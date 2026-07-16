@@ -87,7 +87,8 @@
 
 - [FAQ 常见问题](resources/faq.md)
 - [版本日志](resources/release_notes.md)
-- [路线图](resources/roadmap_2025.md)
+  - [VSAG 1.0](resources/release_notes/v1.0.md)
+- [2025 路线图](resources/roadmap_2025.md)
 - [开源社区](resources/community.md)
 - [使用 AI Agent 创建 Issue](resources/filing_issues_with_agent.md)
 - [关联项目](resources/related_projects.md)
