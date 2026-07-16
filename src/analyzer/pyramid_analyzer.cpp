@@ -508,7 +508,7 @@ PyramidAnalyzer::calculate_groundtruth(const Vector<float>& sample_datas,
     Vector<InnerIdType> ids_array(this->total_count_, allocator_);
     std::iota(ids_array.begin(), ids_array.end(), 0);
 
-    auto codes = pyramid_->use_reorder_ ? pyramid_->precise_codes_ : pyramid_->base_codes_;
+    auto codes = pyramid_->has_precise_reorder() ? pyramid_->precise_codes_ : pyramid_->base_codes_;
 
     for (uint32_t i = 0; i < sample_size; ++i) {
         if (i % 10 == 0) {
@@ -793,7 +793,7 @@ PyramidAnalyzer::calculate_node_groundtruth(const IndexNode* node,
         return gt;
     }
 
-    auto codes = pyramid_->use_reorder_ ? pyramid_->precise_codes_ : pyramid_->base_codes_;
+    auto codes = pyramid_->has_precise_reorder() ? pyramid_->precise_codes_ : pyramid_->base_codes_;
     if (codes == nullptr) {
         return gt;
     }
@@ -830,7 +830,8 @@ PyramidAnalyzer::search_single_node(const IndexNode* node,
             return result;
         }
 
-        auto codes = pyramid_->use_reorder_ ? pyramid_->precise_codes_ : pyramid_->base_codes_;
+        auto codes =
+            pyramid_->has_precise_reorder() ? pyramid_->precise_codes_ : pyramid_->base_codes_;
         Vector<float> distances(node_ids.size(), allocator_);
         auto computer = codes->FactoryComputer(query);
         codes->Query(distances.data(), computer, node_ids.data(), node_ids.size());
@@ -1021,7 +1022,7 @@ PyramidAnalyzer::get_node_neighbor_recall(const IndexNode* node,
     }
 
     auto graph = node->graph_;
-    auto codes = pyramid_->use_reorder_ ? pyramid_->precise_codes_ : pyramid_->base_codes_;
+    auto codes = pyramid_->has_precise_reorder() ? pyramid_->precise_codes_ : pyramid_->base_codes_;
     if (codes == nullptr) {
         return 0.0F;
     }

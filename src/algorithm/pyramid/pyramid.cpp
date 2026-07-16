@@ -15,6 +15,8 @@
 
 #include "pyramid.h"
 
+#include <fmt/format.h>
+
 #include <chrono>
 
 #include "algorithm/inner_index_interface.h"
@@ -23,7 +25,7 @@
 #include "impl/heap/standard_heap.h"
 #include "impl/odescent/odescent_graph_builder.h"
 #include "impl/pruning_strategy.h"
-#include "io/memory_io/memory_io_parameter.h"
+#include "quantization/rabitq_quantization/rabitq_quantizer_parameter.h"
 #include "query_context.h"
 #include "storage/empty_index_binary_set.h"
 #include "storage/serialization.h"
@@ -32,6 +34,84 @@
 #include "utils/slow_task_timer.h"
 #include "utils/util_functions.h"
 namespace vsag {
+
+namespace {
+
+void
+map_rabitq_split_param(const JsonType& external_json, JsonType& inner_json) {
+    if (not external_json.Contains(PYRAMID_RABITQ_BITS_PER_DIM_PRECISE)) {
+        return;
+    }
+
+    CHECK_ARGUMENT(external_json.Contains(PYRAMID_RABITQ_BITS_PER_DIM_BASE),
+                   fmt::format("{} requires {}",
+                               PYRAMID_RABITQ_BITS_PER_DIM_PRECISE,
+                               PYRAMID_RABITQ_BITS_PER_DIM_BASE));
+    CHECK_ARGUMENT(
+        external_json.Contains(PYRAMID_BASE_QUANTIZATION_TYPE),
+        fmt::format(
+            "{} requires {}", PYRAMID_RABITQ_BITS_PER_DIM_PRECISE, PYRAMID_BASE_QUANTIZATION_TYPE));
+    CHECK_ARGUMENT(external_json.Contains(PYRAMID_PRECISE_QUANTIZATION_TYPE),
+                   fmt::format("{} requires {}",
+                               PYRAMID_RABITQ_BITS_PER_DIM_PRECISE,
+                               PYRAMID_PRECISE_QUANTIZATION_TYPE));
+
+    CHECK_ARGUMENT(external_json[PYRAMID_BASE_QUANTIZATION_TYPE].IsString(),
+                   fmt::format("{} must be a string", PYRAMID_BASE_QUANTIZATION_TYPE));
+    CHECK_ARGUMENT(external_json[PYRAMID_PRECISE_QUANTIZATION_TYPE].IsString(),
+                   fmt::format("{} must be a string", PYRAMID_PRECISE_QUANTIZATION_TYPE));
+
+    const auto base_quantization_type = external_json[PYRAMID_BASE_QUANTIZATION_TYPE].GetString();
+    const auto precise_quantization_type =
+        external_json[PYRAMID_PRECISE_QUANTIZATION_TYPE].GetString();
+    CHECK_ARGUMENT(base_quantization_type == QUANTIZATION_TYPE_VALUE_RABITQ,
+                   fmt::format("{} requires {}={}",
+                               PYRAMID_RABITQ_BITS_PER_DIM_PRECISE,
+                               PYRAMID_BASE_QUANTIZATION_TYPE,
+                               QUANTIZATION_TYPE_VALUE_RABITQ));
+    CHECK_ARGUMENT(precise_quantization_type == QUANTIZATION_TYPE_VALUE_RABITQ,
+                   fmt::format("{} requires {}={}",
+                               PYRAMID_RABITQ_BITS_PER_DIM_PRECISE,
+                               PYRAMID_PRECISE_QUANTIZATION_TYPE,
+                               QUANTIZATION_TYPE_VALUE_RABITQ));
+
+    const int64_t filter_bits = external_json[PYRAMID_RABITQ_BITS_PER_DIM_BASE].GetInt();
+    const int64_t supplement_bits = external_json[PYRAMID_RABITQ_BITS_PER_DIM_PRECISE].GetInt();
+    CHECK_ARGUMENT(
+        filter_bits >= 1 and filter_bits <= 8,
+        fmt::format("{} must be in [1, 8], got {}", PYRAMID_RABITQ_BITS_PER_DIM_BASE, filter_bits));
+    CHECK_ARGUMENT(
+        supplement_bits >= 1 and supplement_bits <= 8,
+        fmt::format(
+            "{} must be in [1, 8], got {}", PYRAMID_RABITQ_BITS_PER_DIM_PRECISE, supplement_bits));
+    const int64_t total_bits = filter_bits + supplement_bits;
+    CHECK_ARGUMENT(total_bits <= 8,
+                   fmt::format("{} + {} must be no greater than 8, got {}",
+                               PYRAMID_RABITQ_BITS_PER_DIM_BASE,
+                               PYRAMID_RABITQ_BITS_PER_DIM_PRECISE,
+                               total_bits));
+
+    if (external_json.Contains(PYRAMID_RABITQ_BITS_PER_DIM_QUERY)) {
+        const int64_t query_bits = external_json[PYRAMID_RABITQ_BITS_PER_DIM_QUERY].GetInt();
+        CHECK_ARGUMENT(query_bits == 32,
+                       fmt::format("split storage requires {} to be 32, got {}",
+                                   PYRAMID_RABITQ_BITS_PER_DIM_QUERY,
+                                   query_bits));
+    }
+
+    inner_json[REORDER_SOURCE_KEY].SetString(HGRAPH_REORDER_SOURCE_BASE);
+    inner_json[BASE_CODES_KEY][CODES_TYPE_KEY].SetString(RABITQ_SPLIT_CODES);
+    inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][RABITQ_QUANTIZATION_VERSION_KEY].SetString(
+        RaBitQuantizerParameter::RABITQ_VERSION_SPLIT);
+    inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY]
+        .SetInt(32);
+    inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][RABITQ_QUANTIZATION_BITS_PER_DIM_FILTER_KEY]
+        .SetInt(filter_bits);
+    inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY]
+        .SetInt(total_bits);
+}
+
+}  // namespace
 
 const static float RADIUS_EPSILON = 1.1F;
 
@@ -220,17 +300,18 @@ Pyramid::build_by_odescent(const DatasetPtr& base) {
     std::memcpy(label_table_->label_table_.data(), data_ids, sizeof(LabelType) * data_num);
 
     base_codes_->BatchInsertVector(data_vectors, data_num);
-    if (use_reorder_) {
+    if (has_precise_reorder()) {
         precise_codes_->BatchInsertVector(data_vectors, data_num);
     }
-    auto codes = use_reorder_ ? precise_codes_ : base_codes_;
+    auto codes = has_precise_reorder() ? precise_codes_ : base_codes_;
 
     if (thread_pool_ != nullptr && hierarchies_.size() > 1) {
         Vector<std::future<void>> futures(allocator_);
         for (const auto& [hname, h_ptr] : hierarchies_) {
             auto* root_ptr = h_ptr->root.get();
             futures.push_back(thread_pool_->GeneralEnqueue([&, codes, root_ptr]() {
-                ODescent builder(odescent_param_, codes, allocator_, nullptr);
+                ODescent builder(
+                    odescent_param_, codes, allocator_, nullptr, true, data_vectors, data_num);
                 root_ptr->Build(builder);
             }));
         }
@@ -238,7 +319,13 @@ Pyramid::build_by_odescent(const DatasetPtr& base) {
             f.get();
         }
     } else {
-        ODescent graph_builder(odescent_param_, codes, allocator_, this->thread_pool_.get());
+        ODescent graph_builder(odescent_param_,
+                               codes,
+                               allocator_,
+                               this->thread_pool_.get(),
+                               true,
+                               data_vectors,
+                               data_num);
         for (const auto& [hname, h_ptr] : hierarchies_) {
             h_ptr->root->Build(graph_builder);
         }
@@ -256,6 +343,7 @@ Pyramid::KnnSearch(const DatasetPtr& query,
     QueryContext ctx{.stats = &stats};
 
     auto parsed_param = PyramidSearchParameters::FromJson(parameters);
+    ctx.rabitq_error_rate = parsed_param.rabitq_error_rate;
     CHECK_ARGUMENT(k > 0, fmt::format("k({}) must be greater than 0", k));
     CHECK_ARGUMENT(parsed_param.hierarchy_op == PyramidSearchParameters::HierarchyOp::SINGLE,
                    "multi-hierarchy search (union/intersection) is not yet implemented");
@@ -271,6 +359,9 @@ Pyramid::KnnSearch(const DatasetPtr& query,
     search_param.topk = k;
     search_param.search_mode = KNN_SEARCH;
     search_param.parallel_search_thread_count = parsed_param.parallel_search_thread_count;
+    search_param.enable_rabitq_one_bit_search = parsed_param.has_rabitq_one_bit_search
+                                                    ? parsed_param.rabitq_one_bit_search
+                                                    : default_rabitq_one_bit_search_;
     if (this->support_duplicate_) {
         search_param.consider_duplicate = true;
     }
@@ -305,6 +396,7 @@ Pyramid::RangeSearch(const DatasetPtr& query,
     QueryContext ctx{.stats = &stats};
 
     auto parsed_param = PyramidSearchParameters::FromJson(parameters);
+    ctx.rabitq_error_rate = parsed_param.rabitq_error_rate;
     CHECK_ARGUMENT(parsed_param.hierarchy_op == PyramidSearchParameters::HierarchyOp::SINGLE,
                    "multi-hierarchy search (union/intersection) is not yet implemented");
     InnerSearchParam search_param;
@@ -312,6 +404,9 @@ Pyramid::RangeSearch(const DatasetPtr& query,
     search_param.radius = radius * RADIUS_EPSILON;
     search_param.search_mode = RANGE_SEARCH;
     search_param.parallel_search_thread_count = parsed_param.parallel_search_thread_count;
+    search_param.enable_rabitq_one_bit_search = parsed_param.has_rabitq_one_bit_search
+                                                    ? parsed_param.rabitq_one_bit_search
+                                                    : default_rabitq_one_bit_search_;
     search_param.topk = limited_size == -1 ? std::numeric_limits<int64_t>::max() : limited_size;
 
     if (parsed_param.enable_time_record) {
@@ -430,7 +525,7 @@ void
 Pyramid::Serialize(StreamWriter& writer) const {
     label_table_->Serialize(writer);
     base_codes_->Serialize(writer);
-    if (use_reorder_) {
+    if (has_precise_reorder()) {
         precise_codes_->Serialize(writer);
     }
 
@@ -480,7 +575,7 @@ Pyramid::collect_streaming_header() const {
                                  base_tag,
                                  StreamSerializationBlockCurrentVersion(base_tag),
                                  StreamSerializationTagCritical(base_tag));
-    if (this->use_reorder_) {
+    if (this->has_precise_reorder()) {
         auto tag = static_cast<uint32_t>(StreamSerializationTag::HIGH_PRECISION_CODES);
         AppendStreamingManifestBlock(manifest,
                                      tag,
@@ -525,7 +620,7 @@ Pyramid::serialize_streaming_body(StreamWriter& writer) const {
         writer, base_tag, StreamSerializationTagCritical(base_tag), [this](StreamWriter& w) {
             this->base_codes_->Serialize(w);
         });
-    if (this->use_reorder_) {
+    if (this->has_precise_reorder()) {
         auto tag = static_cast<uint32_t>(StreamSerializationTag::HIGH_PRECISION_CODES);
         WriteStreamingBlock(
             writer, tag, StreamSerializationTagCritical(tag), [this](StreamWriter& w) {
@@ -639,7 +734,7 @@ Pyramid::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) 
                 loaded_base_codes = true;
                 break;
             case StreamSerializationTag::HIGH_PRECISION_CODES:
-                if (this->use_reorder_) {
+                if (this->has_precise_reorder()) {
                     ReadSeekableBlockPayload(
                         block_reader, block_header, [this](StreamReader& block) {
                             this->precise_codes_->Deserialize(block);
@@ -676,7 +771,7 @@ Pyramid::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) 
         throw VsagException(ErrorType::READ_ERROR,
                             "Pyramid streaming serialization required block is missing");
     }
-    if (this->use_reorder_ && !loaded_precise_codes) {
+    if (this->has_precise_reorder() && !loaded_precise_codes) {
         throw VsagException(ErrorType::READ_ERROR,
                             "Pyramid streaming serialization precise codes block is missing");
     }
@@ -701,7 +796,7 @@ Pyramid::Deserialize(StreamReader& reader) {
     delete_count_.store(static_cast<int64_t>(label_table_->GetAllDeletedIds().size()),
                         std::memory_order_relaxed);
     base_codes_->Deserialize(buffer_reader);
-    if (use_reorder_) {
+    if (has_precise_reorder()) {
         precise_codes_->Deserialize(buffer_reader);
     }
     cur_element_count_ = base_codes_->TotalCount();
@@ -741,7 +836,7 @@ Pyramid::ExportModel(const IndexCommonParam& param) const {
                             "Export model's pyramid reorder config mismatched");
     }
     this->base_codes_->ExportModel(index->base_codes_);
-    if (use_reorder_) {
+    if (has_precise_reorder()) {
         if (index->precise_codes_ == nullptr) {
             throw VsagException(ErrorType::INTERNAL_ERROR,
                                 "Export model's pyramid precise codes is empty");
@@ -778,7 +873,7 @@ Pyramid::Add(const DatasetPtr& base) {
                 label_table_->Insert(valid_id_count + local_cur_element_count, data_ids[i]);
                 base_codes_->InsertVector(data_vectors + dim_ * i,
                                           valid_id_count + local_cur_element_count);
-                if (use_reorder_) {
+                if (has_precise_reorder()) {
                     precise_codes_->InsertVector(data_vectors + dim_ * i,
                                                  valid_id_count + local_cur_element_count);
                 }
@@ -811,7 +906,7 @@ Pyramid::resize(int64_t new_max_capacity) {
     pool_ = std::make_unique<VisitedListPool>(1, allocator_, new_max_capacity, allocator_);
     label_table_->Resize(new_max_capacity);
     base_codes_->Resize(new_max_capacity);
-    if (use_reorder_) {
+    if (has_precise_reorder()) {
         precise_codes_->Resize(new_max_capacity);
     }
     points_mutex_->Resize(new_max_capacity);
@@ -936,13 +1031,20 @@ Pyramid::CheckAndMappingExternalParam(const JsonType& external_param,
     const ConstParamMap external_mapping = {
         {PYRAMID_EF_CONSTRUCTION, {EF_CONSTRUCTION_KEY}},
         {PYRAMID_USE_REORDER, {USE_REORDER_KEY}},
+        {PYRAMID_REORDER_SOURCE, {REORDER_SOURCE_KEY}},
         {PYRAMID_BASE_QUANTIZATION_TYPE, {BASE_CODES_KEY, QUANTIZATION_PARAMS_KEY, TYPE_KEY}},
         {PYRAMID_RABITQ_BITS_PER_DIM_BASE,
          {BASE_CODES_KEY, QUANTIZATION_PARAMS_KEY, RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY}},
         {PYRAMID_RABITQ_BITS_PER_DIM_QUERY,
          {BASE_CODES_KEY, QUANTIZATION_PARAMS_KEY, RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY}},
+        {PYRAMID_RABITQ_BITS_PER_DIM_PRECISE,
+         {PRECISE_CODES_KEY, QUANTIZATION_PARAMS_KEY, RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY}},
         {PYRAMID_RABITQ_PCA_DIM, {BASE_CODES_KEY, QUANTIZATION_PARAMS_KEY, PCA_DIM_KEY}},
         {PYRAMID_RABITQ_USE_FHT, {BASE_CODES_KEY, QUANTIZATION_PARAMS_KEY, USE_FHT_KEY}},
+        {RABITQ_ERROR_RATE,
+         {BASE_CODES_KEY, QUANTIZATION_PARAMS_KEY, RABITQ_QUANTIZATION_ERROR_RATE_KEY}},
+        {RABITQ_ERROR_RATE,
+         {PRECISE_CODES_KEY, QUANTIZATION_PARAMS_KEY, RABITQ_QUANTIZATION_ERROR_RATE_KEY}},
         {PYRAMID_FAST_ENCODE_RABITQ,
          {BASE_CODES_KEY, QUANTIZATION_PARAMS_KEY, FAST_ENCODE_RABITQ_KEY}},
         {PYRAMID_FAST_ENCODE_RABITQ,
@@ -954,6 +1056,9 @@ Pyramid::CheckAndMappingExternalParam(const JsonType& external_param,
         {PYRAMID_PRECISE_QUANTIZATION_TYPE, {PRECISE_CODES_KEY, QUANTIZATION_PARAMS_KEY, TYPE_KEY}},
         {PYRAMID_GRAPH_MAX_DEGREE, {GRAPH_KEY, GRAPH_PARAM_MAX_DEGREE_KEY}},
         {PYRAMID_BASE_IO_TYPE, {BASE_CODES_KEY, IO_PARAMS_KEY, TYPE_KEY}},
+        {PYRAMID_BASE_SUPPLEMENT_IO_TYPE, {BASE_CODES_KEY, SUPPLEMENT_IO_PARAMS_KEY, TYPE_KEY}},
+        {PYRAMID_BASE_SUPPLEMENT_FILE_PATH,
+         {BASE_CODES_KEY, SUPPLEMENT_IO_PARAMS_KEY, IO_FILE_PATH_KEY}},
         {PYRAMID_BUILD_ALPHA, {GRAPH_KEY, ODESCENT_PARAMETER_ALPHA}},
         {PYRAMID_GRAPH_TYPE, {GRAPH_KEY, GRAPH_TYPE_KEY}},
         {PYRAMID_GRAPH_STORAGE_TYPE, {GRAPH_KEY, GRAPH_STORAGE_TYPE_KEY}},
@@ -977,6 +1082,7 @@ Pyramid::CheckAndMappingExternalParam(const JsonType& external_param,
     std::string str = format_map(HGRAPH_PARAMS_TEMPLATE, DEFAULT_MAP);
     auto inner_json = JsonType::Parse(str);
     mapping_external_param_to_inner(external_param, external_mapping, inner_json);
+    map_rabitq_split_param(external_param, inner_json);
     auto pyramid_params = std::make_shared<PyramidParameters>();
     pyramid_params->FromJson(inner_json);
     return pyramid_params;
@@ -985,7 +1091,7 @@ Pyramid::CheckAndMappingExternalParam(const JsonType& external_param,
 void
 Pyramid::Train(const DatasetPtr& base) {
     this->base_codes_->Train(base->GetFloat32Vectors(), base->GetNumElements());
-    if (use_reorder_) {
+    if (has_precise_reorder()) {
         this->precise_codes_->Train(base->GetFloat32Vectors(), base->GetNumElements());
     }
 }
@@ -1058,7 +1164,7 @@ Pyramid::add_one_point(const Hierarchy& h,
             search_param.find_duplicate = true;
             search_param.duplicate_query_id = inner_id;
         }
-        auto codes = use_reorder_ ? precise_codes_ : base_codes_;
+        auto codes = has_precise_reorder() ? precise_codes_ : base_codes_;
         bool update_entry_point;
         {
             std::scoped_lock<std::mutex> entry_point_lock(entry_point_mutex_);
@@ -1292,7 +1398,7 @@ float
 Pyramid::CalcDistanceById(const float* query, int64_t id, bool calculate_precise_distance) const {
     std::shared_lock<std::shared_mutex> lock(resize_mutex_);
     auto flat = this->base_codes_;
-    if (use_reorder_ && calculate_precise_distance) {
+    if (has_precise_reorder() && calculate_precise_distance) {
         flat = this->precise_codes_;
     }
     return InnerIndexInterface::calc_distance_by_id(query, id, flat);
@@ -1305,7 +1411,7 @@ Pyramid::CalDistanceById(const float* query,
                          bool calculate_precise_distance) const {
     std::shared_lock<std::shared_mutex> lock(resize_mutex_);
     auto flat = this->base_codes_;
-    if (use_reorder_ && calculate_precise_distance) {
+    if (has_precise_reorder() && calculate_precise_distance) {
         flat = this->precise_codes_;
     }
     return InnerIndexInterface::cal_distance_by_id(query, ids, count, flat);
@@ -1314,7 +1420,7 @@ Pyramid::CalDistanceById(const float* query,
 void
 Pyramid::GetVectorByInnerId(InnerIdType inner_id, float* data) const {
     std::shared_lock<std::shared_mutex> lock(resize_mutex_);
-    auto codes = (use_reorder_) ? precise_codes_ : base_codes_;
+    auto codes = has_precise_reorder() ? precise_codes_ : base_codes_;
     bool release = false;
     const auto* buffer = codes->GetCodesById(inner_id, release);
     codes->Decode(buffer, data);

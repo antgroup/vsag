@@ -93,7 +93,10 @@ Build-time parameters live under `index_param`.
 | `neighbor_sample_rate` | float | — | ODescent neighbor sampling rate. |
 | `no_build_levels` | int[] | `[]` | Tree levels that skip graph construction (0-indexed from the root). |
 | `use_reorder` | bool | `false` | Keep a high-precision copy for rescoring. |
-| `precise_quantization_type` | string | `"fp32"` | Quantizer for reordering. |
+| `precise_quantization_type` | string | `"fp32"` | Quantizer for reordering. Use `"rabitq"` with `rabitq_bits_per_dim_precise` to enable RaBitQ x+y split reorder from base storage. |
+| `reorder_source` | string | `"precise"` | Reorder from a separate precise store (`"precise"`) or from base storage (`"base"`). Split RaBitQ selects `"base"` automatically. |
+| `rabitq_bits_per_dim_precise` | int | unset | RaBitQ split `y` bits. When set with `base_quantization_type: "rabitq"` and `precise_quantization_type: "rabitq"`, Pyramid uses split storage; `rabitq_bits_per_dim_base` remains `x`, and `x + y <= 8`. |
+| `rabitq_error_rate` | float | quantizer default | Lower-bound error multiplier used by split RaBitQ search. |
 | `index_min_size` | int | `0` | Minimum sub-index size; smaller groups fall back to scan. |
 | `support_duplicate` | bool | `false` | Allow duplicate ids. |
 | `build_thread_count` | int | `1` | Threads used for parallel build. |
@@ -109,6 +112,8 @@ Search-time parameters live under the `pyramid` sub-object:
 | `subindex_ef_search` | int | `50` | Candidate list size used when traversing intermediate sub-graphs on the path. |
 | `hierarchies` | string[] | `[]` | Select which hierarchy to search. Empty means use the default (unnamed) hierarchy. |
 | `hierarchy_op` | string | `"single"` | How to combine results across hierarchies: `single` (search one hierarchy), `union`, or `intersection`. **Note:** `union` and `intersection` are not yet implemented — setting them will cause `KnnSearch`/`RangeSearch` to return an error. |
+| `rabitq_one_bit_search` | bool | split index default | Overrides the one-bit RaBitQ split search path. Pyramid enables it by default when the index was built with split RaBitQ; pass `false` to force the standard search path. |
+| `rabitq_error_rate` | float | index default | Positive lower-bound error multiplier for this search. |
 
 ```cpp
 auto result = index->KnnSearch(
