@@ -323,13 +323,15 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
             if (top_candidates->Size() < ef || lower_bound > dist ||
                 (mode == RANGE_SEARCH && dist <= inner_search_param.radius)) {
                 candidate_set->Push(-dist, cur_id);
-                if (check_func(cur_id) && dist > inner_search_param.min_distance) {
+                if (check_func(cur_id) &&
+                    dist > inner_search_param.min_distance + THRESHOLD_ERROR) {
                     top_candidates->Push(dist, cur_id);
                 }
                 if (inner_search_param.consider_duplicate) {
                     const auto duplicate_ids = graph->GetDuplicateIds(cur_id);
                     for (const auto& item : duplicate_ids) {
-                        if (check_func(item) && dist > inner_search_param.min_distance) {
+                        if (check_func(item) &&
+                            dist > inner_search_param.min_distance + THRESHOLD_ERROR) {
                             top_candidates->Push(dist, item);
                         }
                     }

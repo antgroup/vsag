@@ -568,7 +568,7 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
             ((!is_id_allowed) || is_id_allowed->CheckValid(getExternalLabel(ep_id)))) {
             float dist = fstdistfunc_(data_point, getDataByInternalId(ep_id), dist_func_param_);
             candidate_set.emplace(-dist, ep_id);
-            if (dist > min_distance) {
+            if (dist > min_distance + vsag::THRESHOLD_ERROR) {
                 top_candidates.emplace(dist, ep_id);
                 lower_bound = dist;
             }
@@ -642,7 +642,7 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
                         if (iter_ctx != nullptr && !iter_ctx->CheckPoint(candidate_id)) {
                             continue;
                         }
-                        if (dist <= min_distance) {
+                        if (dist <= min_distance + vsag::THRESHOLD_ERROR) {
                             continue;
                         }
                         top_candidates.emplace(dist, candidate_id);
@@ -687,7 +687,7 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
         ((!is_id_allowed) || is_id_allowed->CheckValid(getExternalLabel(ep_id)))) {
         float dist = fstdistfunc_(data_point, getDataByInternalId(ep_id), dist_func_param_);
         lower_bound = dist;
-        if (dist <= radius + vsag::THRESHOLD_ERROR && dist > min_distance)
+        if (dist <= radius + vsag::THRESHOLD_ERROR && dist > min_distance + vsag::THRESHOLD_ERROR)
             top_candidates.emplace(dist, ep_id);
         candidate_set.emplace(-dist, ep_id);
     } else {
@@ -748,7 +748,7 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
                     if ((!has_deletions || !isMarkedDeleted(candidate_id)) &&
                         ((!is_id_allowed) ||
                          is_id_allowed->CheckValid(getExternalLabel(candidate_id)))) {
-                        if (dist > min_distance)
+                        if (dist > min_distance + vsag::THRESHOLD_ERROR)
                             top_candidates.emplace(dist, candidate_id);
                     }
 
