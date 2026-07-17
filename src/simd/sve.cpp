@@ -1148,6 +1148,27 @@ RaBitQFloatSupplementCodeIP(const float* vector,
     return neon::RaBitQFloatSupplementCodeIP(vector, supplement_code, dim, supplement_bits);
 }
 
+float
+RaBitQFloatSQIP(const float* vector, const uint8_t* codes, uint64_t dim) {
+    return neon::RaBitQFloatSQIP(vector, codes, dim);
+}
+
+uint64_t
+RaBitQCodeCodeIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t dim) {
+    return neon::RaBitQCodeCodeIP(codes1, codes2, dim);
+}
+
+void
+RaBitQPackScalarToSplitPlanes(const uint8_t* scalar_codes,
+                              uint8_t* filter_planes,
+                              uint8_t* supplement_planes,
+                              uint64_t dim,
+                              uint32_t total_bits,
+                              uint32_t filter_bits) {
+    neon::RaBitQPackScalarToSplitPlanes(
+        scalar_codes, filter_planes, supplement_planes, dim, total_bits, filter_bits);
+}
+
 uint32_t
 RaBitQSQ4UBinaryIP(const uint8_t* codes, const uint8_t* bits, uint64_t dim) {
 #if defined(ENABLE_SVE)

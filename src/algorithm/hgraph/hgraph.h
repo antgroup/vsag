@@ -330,7 +330,8 @@ public:
                      InnerSearchParam& inner_search_param,
                      const VisitedListPtr& vt,
                      QueryContext* ctx,
-                     DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
+                     DistanceRecordVector* rabitq_lower_bound_candidates = nullptr,
+                     const ComputerInterfacePtr& preset_computer = nullptr) const;
 
     /// Overload that accepts an IteratorFilterContext for iterative search.
     template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH>

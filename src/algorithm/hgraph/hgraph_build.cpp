@@ -67,6 +67,41 @@ need_temporary_sq8_build_data(const FlattenInterfacePtr& basic_flatten_codes,
            basic_flatten_codes->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_RABITQ;
 }
 
+class OptimizedBuildGuard {
+public:
+    OptimizedBuildGuard(const FlattenInterfacePtr& codes,
+                        bool active,
+                        const std::shared_ptr<SafeThreadPool>& thread_pool,
+                        uint64_t thread_count)
+        : codes_(codes), thread_pool_(thread_pool), thread_count_(thread_count), active_(active) {
+    }
+
+    OptimizedBuildGuard(const OptimizedBuildGuard&) = delete;
+    OptimizedBuildGuard&
+    operator=(const OptimizedBuildGuard&) = delete;
+
+    ~OptimizedBuildGuard() {
+        if (active_) {
+            codes_->AbortOptimizedBuild();
+        }
+    }
+
+    void
+    Finalize() {
+        if (not active_) {
+            return;
+        }
+        codes_->FinalizeOptimizedBuild(thread_pool_, thread_count_);
+        active_ = false;
+    }
+
+private:
+    FlattenInterfacePtr codes_{nullptr};
+    std::shared_ptr<SafeThreadPool> thread_pool_{nullptr};
+    uint64_t thread_count_{1};
+    bool active_{false};
+};
+
 static void
 wait_all_futures(std::vector<std::future<void>>& futures) {
     std::exception_ptr first_exception = nullptr;
@@ -86,6 +121,34 @@ wait_all_futures(std::vector<std::future<void>>& futures) {
         std::rethrow_exception(first_exception);
     }
 }
+
+class FutureDrainGuard {
+public:
+    FutureDrainGuard(std::vector<std::future<void>>& futures, uint64_t capacity)
+        : futures_(futures) {
+        futures_.reserve(capacity);
+    }
+
+    FutureDrainGuard(const FutureDrainGuard&) = delete;
+    FutureDrainGuard&
+    operator=(const FutureDrainGuard&) = delete;
+
+    ~FutureDrainGuard() {
+        try {
+            wait_all_futures(futures_);
+        } catch (...) {
+        }
+    }
+
+    void
+    WaitAndClear() {
+        wait_all_futures(futures_);
+        futures_.clear();
+    }
+
+private:
+    std::vector<std::future<void>>& futures_;
+};
 
 void
 HGraph::Train(const DatasetPtr& base) {
@@ -121,13 +184,25 @@ HGraph::Build(const DatasetPtr& data) {
         }
         return ret;
     }
+
     this->Train(data);
+
+    const bool build_uses_base_codes =
+        this->has_precise_reorder() ? this->build_by_base_ : this->raw_vector_ == nullptr;
+    const bool optimized_build =
+        build_uses_base_codes and this->basic_flatten_codes_->BeginOptimizedBuild();
+    OptimizedBuildGuard optimized_build_guard(
+        this->basic_flatten_codes_, optimized_build, this->thread_pool_, this->build_thread_count_);
+
     std::vector<int64_t> ret;
     if (graph_type_ == GRAPH_TYPE_VALUE_NSW) {
         ret = this->Add(data);
     } else {
         ret = this->build_by_odescent(data);
     }
+
+    optimized_build_guard.Finalize();
+
     if (use_elp_optimizer_) {
         elp_optimize();
     }
@@ -165,7 +240,9 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
     this->resize(current_count + new_ids_count);
     this->total_count_ += new_ids_count;
     Vector<Vector<InnerIdType>> route_graph_ids(allocator_);
-    auto need_sq8_build_data =
+    const bool optimized_build_active = this->basic_flatten_codes_->IsOptimizedBuildActive();
+    const bool need_sq8_build_data =
+        not optimized_build_active and
         need_temporary_sq8_build_data(this->basic_flatten_codes_, this->has_precise_reorder());
     FlattenInterfacePtr temporary_sq8_build_data = nullptr;
     if (need_sq8_build_data and raw_vector_ == nullptr) {
@@ -179,7 +256,7 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
         temporary_sq8_build_data->Train(vectors, total);
     }
     bool defer_persistent_codes = temporary_sq8_build_data != nullptr;
-    if (not defer_persistent_codes) {
+    if (not defer_persistent_codes and not optimized_build_active) {
         this->Train(data);
     }
     Vector<std::pair<InnerIdType, int64_t>> deferred_code_ids(allocator_);
@@ -260,7 +337,9 @@ HGraph::Add(const DatasetPtr& data) {
     }
     CHECK_ARGUMENT(get_data(data) != nullptr, "base.float_vector is nullptr");
 
-    auto need_sq8_build_data =
+    const bool optimized_build_active = this->basic_flatten_codes_->IsOptimizedBuildActive();
+    const bool need_sq8_build_data =
+        not optimized_build_active and
         need_temporary_sq8_build_data(this->basic_flatten_codes_, this->has_precise_reorder());
     CHECK_ARGUMENT(not(need_sq8_build_data and this->total_count_ != 0 and
                        raw_vector_ == nullptr and temporary_build_flatten_codes_ == nullptr),
@@ -292,11 +371,10 @@ HGraph::Add(const DatasetPtr& data) {
 
     {
         std::scoped_lock lock(this->add_mutex_);
-        if (this->total_count_ == 0 and not defer_persistent_codes) {
+        if (this->total_count_ == 0 and not defer_persistent_codes and not optimized_build_active) {
             this->Train(data);
         }
     }
-
     auto add_func = [&](const void* data,
                         int level,
                         InnerIdType inner_id,
@@ -308,7 +386,8 @@ HGraph::Add(const DatasetPtr& data) {
         if (attrs != nullptr and this->use_attribute_filter_) {
             this->attr_filter_index_->Insert(*attrs, inner_id);
         }
-        this->add_one_point(data, level, inner_id, not defer_persistent_codes);
+        this->add_one_point(
+            data, level, inner_id, not defer_persistent_codes and not optimized_build_active);
     };
 
     std::vector<std::future<void>> futures;
@@ -359,6 +438,24 @@ HGraph::Add(const DatasetPtr& data) {
             temporary_build_flatten_codes_->InsertVector(get_data(data, local_idx), inner_id);
         }
     }
+    FutureDrainGuard future_guard(futures,
+                                  use_parallel_add ? static_cast<uint64_t>(inner_ids.size()) : 0);
+    if (optimized_build_active) {
+        for (const auto& [inner_id, local_idx] : inner_ids) {
+            if (use_parallel_add) {
+                auto future =
+                    this->thread_pool_->GeneralEnqueue([this, data, inner_id, local_idx]() {
+                        this->insert_persistent_codes(get_data(data, local_idx), inner_id);
+                    });
+                futures.emplace_back(std::move(future));
+            } else {
+                this->insert_persistent_codes(get_data(data, local_idx), inner_id);
+            }
+        }
+        if (use_parallel_add) {
+            future_guard.WaitAndClear();
+        }
+    }
     for (auto& [inner_id, local_idx] : inner_ids) {
         int level;
         {
@@ -379,7 +476,7 @@ HGraph::Add(const DatasetPtr& data) {
         }
     }
     if (use_parallel_add) {
-        wait_all_futures(futures);
+        future_guard.WaitAndClear();
     }
     if (defer_persistent_codes) {
         temporary_build_flatten_codes_.reset();
@@ -402,7 +499,7 @@ HGraph::Add(const DatasetPtr& data) {
             }
         }
         if (use_parallel_add) {
-            wait_all_futures(futures);
+            future_guard.WaitAndClear();
         }
     }
     return failed_ids;
@@ -480,9 +577,20 @@ HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
         flatten_codes = high_precise_codes_;
     }
 
+    ComputerInterfacePtr build_computer = nullptr;
+    if (flatten_codes->IsOptimizedBuildActive()) {
+        build_computer = flatten_codes->FactoryComputerForBuild(data, inner_id);
+    }
+
     for (auto j = this->route_graphs_.size() - 1; j > level; --j) {
-        result = search_one_graph(
-            data, route_graphs_[j], flatten_codes, param, (VisitedListPtr) nullptr, nullptr);
+        result = search_one_graph(data,
+                                  route_graphs_[j],
+                                  flatten_codes,
+                                  param,
+                                  (VisitedListPtr) nullptr,
+                                  nullptr,
+                                  nullptr,
+                                  build_computer);
         param.ep = result->Top().second;
     }
 
@@ -501,7 +609,9 @@ HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
                                   param,
                                   // to specify which overloaded function to call
                                   (VisitedListPtr) nullptr,
-                                  nullptr);
+                                  nullptr,
+                                  nullptr,
+                                  build_computer);
         if (this->support_duplicate_ && param.duplicate_id >= 0) {
             std::unique_lock lock(this->label_lookup_mutex_);
             bottom_graph_->SetDuplicateId(static_cast<InnerIdType>(param.duplicate_id), inner_id);
@@ -536,7 +646,9 @@ HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
                                       param,
                                       // to specify which overloaded function to call
                                       (VisitedListPtr) nullptr,
-                                      nullptr);
+                                      nullptr,
+                                      nullptr,
+                                      build_computer);
             auto filtered_result = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
             while (not result->Empty()) {
                 auto [dist, id] = result->Top();

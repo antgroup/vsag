@@ -16,6 +16,7 @@
 #include "simd.h"
 #include "simd/int8_simd.h"
 #include "simd/kernels/kernels.h"
+#include "simd/kernels/rabitq_pack.h"
 #include "simd/traits/simd_traits_generic.h"
 
 namespace vsag::generic {
@@ -807,6 +808,25 @@ RaBitQFloatSQIP(const float* vector, const uint8_t* codes, uint64_t dim) {
     }
 
     return result;
+}
+
+uint64_t
+RaBitQCodeCodeIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t dim) {
+    uint64_t result = 0;
+    for (uint64_t d = 0; d < dim; ++d) {
+        result += static_cast<uint64_t>(codes1[d]) * codes2[d];
+    }
+    return result;
+}
+void
+RaBitQPackScalarToSplitPlanes(const uint8_t* scalar_codes,
+                              uint8_t* filter_planes,
+                              uint8_t* supplement_planes,
+                              uint64_t dim,
+                              uint32_t total_bits,
+                              uint32_t filter_bits) {
+    simd::RaBitQPackScalarToSplitPlanesTail(
+        scalar_codes, filter_planes, supplement_planes, dim, total_bits, filter_bits, 0);
 }
 
 uint32_t

@@ -51,7 +51,8 @@ public:
            const InnerSearchParam& inner_search_param,
            const LabelTablePtr& label_table,
            QueryContext* ctx,
-           DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
+           DistanceRecordVector* rabitq_lower_bound_candidates = nullptr,
+           const ComputerInterfacePtr& preset_computer = nullptr) const;
 
     virtual DistHeapPtr
     Search(const GraphInterfacePtr& graph,
@@ -101,7 +102,8 @@ private:
                 const InnerSearchParam& inner_search_param,
                 const LabelTablePtr& label_table,
                 QueryContext* ctx,
-                DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
+                DistanceRecordVector* rabitq_lower_bound_candidates = nullptr,
+                const ComputerInterfacePtr& preset_computer = nullptr) const;
 
     template <InnerSearchMode mode = KNN_SEARCH>
     DistHeapPtr

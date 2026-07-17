@@ -13,6 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 #include "simd/int8_simd.h"
+#include "simd/kernels/rabitq_pack.h"
 #if defined(ENABLE_AVX512)
 #include <immintrin.h>
 
@@ -633,6 +634,57 @@ SQ8UniformComputeCodesIPBatch(const uint8_t* RESTRICT query,
     for (uint64_t i = 0; i < n_codes; ++i) {
         out[i] = avx512::SQ8UniformComputeCodesIP(query, codes + i * code_stride, dim);
     }
+}
+
+float
+RaBitQFloatSQIP(const float* vector, const uint8_t* codes, uint64_t dim) {
+#if defined(ENABLE_AVX512)
+    return simd::RaBitQFloatScalarIPImpl<simd::SQ8Traits<simd::AVX512_SQ8_Tag>>(
+        vector, codes, dim, &avx2::RaBitQFloatSQIP);
+#else
+    return avx2::RaBitQFloatSQIP(vector, codes, dim);
+#endif
+}
+
+uint64_t
+RaBitQCodeCodeIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t dim) {
+#if defined(ENABLE_AVX512)
+    return simd::RaBitQScalarCodesIPImpl<simd::UniformCodeTraits<simd::AVX512_Uniform_Tag>>(
+        codes1, codes2, dim, &avx2::RaBitQCodeCodeIP);
+#else
+    return avx2::RaBitQCodeCodeIP(codes1, codes2, dim);
+#endif
+}
+void
+RaBitQPackScalarToSplitPlanes(const uint8_t* scalar_codes,
+                              uint8_t* filter_planes,
+                              uint8_t* supplement_planes,
+                              uint64_t dim,
+                              uint32_t total_bits,
+                              uint32_t filter_bits) {
+#if defined(ENABLE_AVX512)
+    const uint64_t plane_bytes = (dim + 7) / 8;
+    uint64_t d = 0;
+    for (; d + 64 <= dim; d += 64) {
+        const __m512i values = _mm512_loadu_si512(reinterpret_cast<const void*>(scalar_codes + d));
+        const uint64_t byte_index = d / 8;
+        for (uint32_t bit = 0; bit < total_bits; ++bit) {
+            const __m512i bit_mask =
+                _mm512_set1_epi8(static_cast<char>(static_cast<uint8_t>(1U << bit)));
+            const uint64_t packed = static_cast<uint64_t>(_mm512_test_epi8_mask(values, bit_mask));
+            auto* plane = simd::RaBitQGetSplitPlane(
+                filter_planes, supplement_planes, plane_bytes, total_bits, filter_bits, bit);
+            for (uint32_t byte = 0; byte < 8; ++byte) {
+                plane[byte_index + byte] = static_cast<uint8_t>(packed >> (byte * 8));
+            }
+        }
+    }
+    simd::RaBitQPackScalarToSplitPlanesTail(
+        scalar_codes, filter_planes, supplement_planes, dim, total_bits, filter_bits, d);
+#else
+    avx2::RaBitQPackScalarToSplitPlanes(
+        scalar_codes, filter_planes, supplement_planes, dim, total_bits, filter_bits);
+#endif
 }
 
 float

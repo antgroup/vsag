@@ -143,6 +143,56 @@ TEST_CASE("RaBitQ SQ4U-BQ Compute Codes", "[ut][simd]") {
     }
 }
 
+TEST_CASE("RaBitQ scalar-code inner products", "[ut][simd]") {
+    const std::vector<uint64_t> dims = {0, 1, 7, 8, 9, 31, 32, 33, 63, 64, 65, 128, 960, 4097};
+
+    for (const auto dim : dims) {
+        for (uint32_t code_bits = 2; code_bits <= 8; ++code_bits) {
+            const uint32_t code_mask = (1U << code_bits) - 1U;
+            std::vector<uint8_t> codes1(dim);
+            std::vector<uint8_t> codes2(dim);
+            std::vector<float> query(dim);
+            uint64_t expected_code_ip = 0;
+            float expected_query_ip = 0.0F;
+            for (uint64_t d = 0; d < dim; ++d) {
+                codes1[d] = static_cast<uint8_t>((17U * d + 3U) & code_mask);
+                codes2[d] = static_cast<uint8_t>((29U * d + 5U) & code_mask);
+                query[d] = static_cast<float>(static_cast<int64_t>(d % 23U) - 11) * 0.03125F;
+                expected_code_ip += static_cast<uint64_t>(codes1[d]) * codes2[d];
+                expected_query_ip += query[d] * codes1[d];
+            }
+
+            REQUIRE(generic::RaBitQCodeCodeIP(codes1.data(), codes2.data(), dim) ==
+                    expected_code_ip);
+            REQUIRE(RaBitQCodeCodeIP(codes1.data(), codes2.data(), dim) == expected_code_ip);
+            REQUIRE(std::abs(generic::RaBitQFloatSQIP(query.data(), codes1.data(), dim) -
+                             expected_query_ip) < 1e-4F);
+            REQUIRE(std::abs(RaBitQFloatSQIP(query.data(), codes1.data(), dim) -
+                             expected_query_ip) < 1e-3F);
+            if (SimdStatus::SupportAVX2()) {
+                REQUIRE(avx2::RaBitQCodeCodeIP(codes1.data(), codes2.data(), dim) ==
+                        expected_code_ip);
+                REQUIRE(std::abs(avx2::RaBitQFloatSQIP(query.data(), codes1.data(), dim) -
+                                 expected_query_ip) < 1e-3F);
+            }
+            if (SimdStatus::SupportAVX512()) {
+                REQUIRE(avx512::RaBitQCodeCodeIP(codes1.data(), codes2.data(), dim) ==
+                        expected_code_ip);
+                REQUIRE(std::abs(avx512::RaBitQFloatSQIP(query.data(), codes1.data(), dim) -
+                                 expected_query_ip) < 1e-3F);
+            }
+            if (SimdStatus::SupportNEON()) {
+                REQUIRE(neon::RaBitQCodeCodeIP(codes1.data(), codes2.data(), dim) ==
+                        expected_code_ip);
+            }
+            if (SimdStatus::SupportSVE()) {
+                REQUIRE(sve::RaBitQCodeCodeIP(codes1.data(), codes2.data(), dim) ==
+                        expected_code_ip);
+            }
+        }
+    }
+}
+
 TEST_CASE("RaBitQ FP32-BQ SIMD Compute Codes", "[ut][simd]") {
     auto dims = fixtures::get_common_used_dims();
     int64_t count = 100;
@@ -1195,6 +1245,70 @@ TEST_CASE("SIMD FlipSign Correctness with Patterns", "[ut][simd]") {
             } else if (test.flip_pattern[0] == 0x00) {
                 for (int i = 0; i < dim; i++) {
                     REQUIRE(gt_data[i] == original_data[i]);
+                }
+            }
+        }
+    }
+}
+
+TEST_CASE("RaBitQ scalar code to split planes SIMD", "[ut][simd][rabitq]") {
+    const std::vector<uint64_t> test_dims = {1, 7, 8, 9, 31, 32, 33, 63, 64, 65, 128, 960};
+    for (const uint64_t dim : test_dims) {
+        const uint64_t plane_bytes = (dim + 7) / 8;
+        for (uint32_t total_bits = 2; total_bits <= 8; ++total_bits) {
+            const uint8_t code_mask = static_cast<uint8_t>((1U << total_bits) - 1U);
+            std::vector<uint8_t> scalar_codes(dim);
+            for (uint64_t d = 0; d < dim; ++d) {
+                scalar_codes[d] = static_cast<uint8_t>((d * 37 + total_bits * 13) & code_mask);
+            }
+            for (uint32_t filter_bits = 1; filter_bits <= total_bits; ++filter_bits) {
+                const uint32_t supplement_bits = total_bits - filter_bits;
+                std::vector<uint8_t> expected_filter(plane_bytes * filter_bits, 0);
+                std::vector<uint8_t> expected_supplement(plane_bytes * supplement_bits, 0);
+                for (uint64_t d = 0; d < dim; ++d) {
+                    const uint64_t byte_index = d / 8;
+                    const uint8_t lane_mask = static_cast<uint8_t>(1U << (d % 8));
+                    for (uint32_t bit = 0; bit < total_bits; ++bit) {
+                        if ((scalar_codes[d] & (1U << bit)) == 0U) {
+                            continue;
+                        }
+                        if (bit < supplement_bits) {
+                            expected_supplement[static_cast<uint64_t>(bit) * plane_bytes +
+                                                byte_index] |= lane_mask;
+                        } else {
+                            const uint32_t filter_plane = total_bits - 1 - bit;
+                            expected_filter[static_cast<uint64_t>(filter_plane) * plane_bytes +
+                                            byte_index] |= lane_mask;
+                        }
+                    }
+                }
+
+                auto check = [&](auto pack) {
+                    std::vector<uint8_t> filter(expected_filter.size(), 0xA5);
+                    std::vector<uint8_t> supplement(expected_supplement.size(), 0xA5);
+                    pack(scalar_codes.data(),
+                         filter.data(),
+                         supplement.data(),
+                         dim,
+                         total_bits,
+                         filter_bits);
+                    REQUIRE(filter == expected_filter);
+                    REQUIRE(supplement == expected_supplement);
+                };
+
+                check(generic::RaBitQPackScalarToSplitPlanes);
+                check(RaBitQPackScalarToSplitPlanes);
+                if (SimdStatus::SupportAVX2()) {
+                    check(avx2::RaBitQPackScalarToSplitPlanes);
+                }
+                if (SimdStatus::SupportAVX512()) {
+                    check(avx512::RaBitQPackScalarToSplitPlanes);
+                }
+                if (SimdStatus::SupportNEON()) {
+                    check(neon::RaBitQPackScalarToSplitPlanes);
+                }
+                if (SimdStatus::SupportSVE()) {
+                    check(sve::RaBitQPackScalarToSplitPlanes);
                 }
             }
         }
