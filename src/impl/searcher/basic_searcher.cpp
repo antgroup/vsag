@@ -167,7 +167,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     } else {
         flatten->Query(&dist, computer, &ep, 1, ctx);
         if ((not is_id_allowed || is_id_allowed->CheckValid(ep)) and
-            dist > inner_search_param.min_distance + THRESHOLD_ERROR) {
+            !(dist <= inner_search_param.min_distance + THRESHOLD_ERROR)) {
             top_candidates->Push(dist, ep);
             lower_bound = top_candidates->Top().first;
         }
@@ -340,7 +340,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
 
     flatten->Query(&dist, computer, &ep, 1, ctx);
     ++dist_cmp;
-    if (check_func(ep) && dist > inner_search_param.min_distance + THRESHOLD_ERROR) {
+    if (check_func(ep) && !(dist <= inner_search_param.min_distance + THRESHOLD_ERROR)) {
         top_candidates->Push(dist, ep);
         lower_bound = top_candidates->Top().first;
     }
