@@ -104,15 +104,27 @@ SIMQ-specific build parameters live under `index_param`. The common fields
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `dim` | int | — (required) | Dimension of each token vector. All tokens across all documents and queries share the same dimension. |
-| `base_io_type` | string | `"async_io"` | Storage backend for the original multi-vector data used during reranking. Supported values: `async_io`, `memory_io`, `block_memory_io`, `buffer_io`, `mmap_io`, `reader_io`. |
-| `base_file_path` | string | `"./default_file_path"` | File path used when `base_io_type` is a disk-backed type (e.g. `async_io`, `buffer_io`, `mmap_io`). The default is a placeholder; provide a real path for actual use. |
-| `init_cluster_ratio` | float | `0.2` | Fraction of token vectors sampled as initial cluster centers. Range: `(0, 1]`. Smaller values produce fewer, larger clusters; larger values produce more, finer-grained clusters. |
-| `max_cluster_size` | int | `64` | Maximum number of token vectors per cluster before a split is triggered. Must be > 1. |
-| `split_start_idx` | int | `32` | Position within the sorted cluster where the new cluster begins during a split. Typically set to half of `max_cluster_size`. Must be in `(1, max_cluster_size)`. |
-| `random_seed` | int | `42` | Random seed for shuffling during clustering. |
-| `coarse_k` | int | `8` | Default number of nearest clusters searched per query token during coarse search. Must be > 0. |
-| `rerank_k` | int | `100` | Default maximum number of candidate documents entering exact MaxSim reranking. Must be > 0. |
+| `dim` | int | — (required) | Dimension of each token vector. |
+| `base_io_type` | string | `"async_io"` | Storage backend for reranking multi-vector data. |
+| `base_file_path` | string | `"./default_file_path"` | File path for disk-backed IO types. |
+| `init_cluster_ratio` | float | `0.2` | Fraction of tokens sampled as initial cluster centers. |
+| `max_cluster_size` | int | `64` | Maximum token vectors per cluster before split. |
+| `split_start_idx` | int | `32` | Split position within an overflowing cluster. |
+| `random_seed` | int | `42` | Random seed for clustering shuffle. |
+| `coarse_k` | int | `8` | Default nearest clusters per query token at build time. |
+| `rerank_k` | int | `100` | Default max rerank candidates at build time. |
+
+- **`dim`** — shared across all documents and queries.
+- **`base_io_type`** — supported values: `async_io`, `memory_io`,
+  `block_memory_io`, `buffer_io`, `mmap_io`, `reader_io`.
+- **`base_file_path`** — the default is a placeholder; provide a real path
+  when using a disk-backed type (`async_io`, `buffer_io`, `mmap_io`).
+- **`init_cluster_ratio`** — range `(0, 1]`. Smaller values yield fewer,
+  larger clusters; larger values produce more, finer-grained clusters.
+- **`max_cluster_size`** — must be > 1.
+- **`split_start_idx`** — typically half of `max_cluster_size`.
+  Must be in `(1, max_cluster_size)`.
+- **`coarse_k`**, **`rerank_k`** — must be > 0.
 
 > **Choosing cluster parameters.** `init_cluster_ratio` and `max_cluster_size`
 > together control the number and size of clusters. A smaller
@@ -127,11 +139,15 @@ Search-time parameters live under the `simq` sub-object:
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `coarse_k` | int | *(index default)* | Number of nearest clusters searched per query token. Overrides the build-time `coarse_k`. Larger values increase the candidate pool and improve recall at the cost of latency. |
-| `rerank_k` | int | *(index default)* | Maximum number of candidate documents entering exact MaxSim reranking. Overrides the build-time `rerank_k`. Larger values improve recall at the cost of more disk reads and compute. |
+| `coarse_k` | int | *(index default)* | Nearest clusters per query token. |
+| `rerank_k` | int | *(index default)* | Max rerank candidates. |
 
-When omitted, the build-time defaults are used. Both values must be > 0 when
-explicitly set.
+- **`coarse_k`** — overrides the build-time value. Larger values increase
+  the candidate pool and improve recall at the cost of latency.
+- **`rerank_k`** — overrides the build-time value. Larger values improve
+  recall at the cost of more disk reads and compute.
+- When omitted, the build-time defaults are used. Both values must be > 0
+  when explicitly set.
 
 ```cpp
 auto result = index->KnnSearch(
@@ -172,7 +188,7 @@ for those).
 | Field | Type | Description |
 |-------|------|-------------|
 | `len_` | `uint32_t` | Number of token vectors in this document or query. |
-| `vectors_` | `float*` | Contiguous array of `len_ * dim` floats storing all token vectors. |
+| `vectors_` | `float*` | Contiguous array of `len_ * dim` floats |
 
 ## See also
 
