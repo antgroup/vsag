@@ -25,7 +25,10 @@ constexpr const char* DETERMINISTIC_ACCUMULATIVE_SKIP_STRATEGY = "deterministic_
 
 double
 get_retain_ratio(float valid_ratio, float skip_ratio) {
-    return static_cast<double>(1.0F - valid_ratio) * static_cast<double>(1.0F - skip_ratio);
+    if (valid_ratio == 1.0F) {
+        return 1.0;
+    }
+    return static_cast<double>(1.0F - valid_ratio) * static_cast<double>(skip_ratio);
 }
 
 class RandomFilterSearchSkipStrategy : public FilterSearchSkipStrategy {
@@ -36,7 +39,7 @@ public:
 
     bool
     ShouldVisit() override {
-        return generator_.NextFloat() >= visit_threshold_;
+        return generator_.NextFloat() > visit_threshold_;
     }
 
 private:
