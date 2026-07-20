@@ -23,6 +23,7 @@
 #include "attr/argparse.h"
 #include "attr/executor/executor.h"
 #include "datacell/flatten_interface.h"
+#include "flat_bucket_searcher.h"
 #include "gno_imi_partition.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/inner_search_param.h"
@@ -335,7 +336,8 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
 IVF::IVF(const IVFParameterPtr& param, const IndexCommonParam& common_param)
     : InnerIndexInterface(param, common_param),
       buckets_per_data_(param->buckets_per_data),
-      location_map_(common_param.allocator_.get()) {
+      location_map_(common_param.allocator_.get()),
+      bucket_searcher_(std::make_shared<FlatBucketSearcher>()) {
     this->bucket_ = BucketInterface::MakeInstance(param->bucket_param, common_param);
     if (this->bucket_ == nullptr) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "bucket init error");
@@ -1035,7 +1037,6 @@ IVF::search(const DatasetPtr& query,
     }
     auto computer = bucket_->FactoryComputer(query_data);
 
-    auto cur_heap_top = std::numeric_limits<float>::max();
     int64_t topk = param.topk;
     if constexpr (mode == RANGE_SEARCH) {
         topk = param.range_search_limit_size;
@@ -1054,7 +1055,6 @@ IVF::search(const DatasetPtr& query,
     }
 
     DistHeapPtr search_result = nullptr;
-    const auto& ft = param.is_inner_id_allowed;
 
     auto bucket_count = candidate_buckets.size();
     auto search_thread_count = param.parallel_search_thread_count;
@@ -1066,7 +1066,6 @@ IVF::search(const DatasetPtr& query,
     auto search_func = [&](int64_t thread_id) -> void {
         heaps[thread_id] = DistanceHeap::MakeInstanceBySize<true, false>(this->allocator_, topk);
         auto& heap = heaps[thread_id];
-        Vector<float> centroid(dim_, allocator_);
         Vector<float> dist(allocator_);
         uint64_t i = cur_bucket_num.fetch_add(1);
         for (; i < bucket_count; i = cur_bucket_num.fetch_add(1)) {
@@ -1079,53 +1078,16 @@ IVF::search(const DatasetPtr& query,
             if (bucket_id == -1) {
                 break;
             }
-            auto bucket_size = bucket_->GetBucketSize(bucket_id);
-            const auto* ids = bucket_->GetInnerIds(bucket_id);
-            if (bucket_size > dist.size()) {
-                dist.resize(bucket_size);
-            }
-
-            bucket_->ScanBucketById(dist.data(), computer, bucket_id);
-            Filter* attr_ft = nullptr;
-            if (param.executors.size() > thread_id and param.executors[thread_id] != nullptr) {
-                param.executors[thread_id]->Clear();
-                attr_ft = param.executors[thread_id]->Run(bucket_id);
-            }
-            for (int j = 0; j < bucket_size; ++j) {
-                auto origin_id = ids[j] / buckets_per_data_;
-                if (reasoning_ctx != nullptr) {
-                    reasoning_ctx->RecordVisit(origin_id, dist[j], 0);
-                }
-                if (attr_ft != nullptr and not attr_ft->CheckValid(j)) {
-                    if (reasoning_ctx != nullptr) {
-                        reasoning_ctx->RecordFilterReject(origin_id);
-                    }
-                    continue;
-                }
-                if (ft == nullptr or ft->CheckValid(origin_id)) {
-                    if constexpr (mode == KNN_SEARCH) {
-                        if (heap->Size() < topk or dist[j] < cur_heap_top) {
-                            heap->Push(dist[j], ids[j]);
-                        }
-                    } else if constexpr (mode == RANGE_SEARCH) {
-                        if (dist[j] <= param.radius + THRESHOLD_ERROR and dist[j] < cur_heap_top) {
-                            heap->Push(dist[j], ids[j]);
-                        }
-                    }
-                    if (heap->Size() > topk) {
-                        if (reasoning_ctx != nullptr) {
-                            reasoning_ctx->RecordEviction(heap->Top().second / buckets_per_data_,
-                                                          0);
-                        }
-                        heap->Pop();
-                    }
-                    if (not heap->Empty() and heap->Size() == topk) {
-                        cur_heap_top = heap->Top().first;
-                    }
-                } else if (reasoning_ctx != nullptr) {
-                    reasoning_ctx->RecordFilterReject(origin_id);
-                }
-            }
+            bucket_searcher_->Search(bucket_id,
+                                     bucket_,
+                                     computer,
+                                     param,
+                                     thread_id,
+                                     topk,
+                                     buckets_per_data_,
+                                     heap,
+                                     dist,
+                                     reasoning_ctx);
         }
     };
     std::vector<std::future<void>> futures;
