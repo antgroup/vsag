@@ -96,13 +96,27 @@ jobs:
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git fetch origin ${{ github.base_ref }} --depth=1
-          CHANGED=$(git diff --name-only origin/${{ github.base_ref }}..HEAD -- 'src/**/*.cpp' ':(exclude)src/**/*_test.cpp')
+          if ! CHANGED=$(git diff --name-only origin/${{ github.base_ref }}..HEAD -- 'src/**/*.cpp' ':(exclude)src/**/*_test.cpp'); then
+            echo "Failed to determine changed source files" >&2
+            exit 1
+          fi
           PATTERN=""
           if [ -n "$CHANGED" ]; then
-            PATTERN=$(echo "$CHANGED" | while IFS= read -r f; do
-              escaped=$(printf '%s' "$f" | sed 's/[][.\*^$()+?{|}]/\\&/g')
-              printf '%s$|' "$escaped"
-            done | sed 's/|$//')
+            if ! PATTERN=$(CHANGED="$CHANGED" python3 - <<'PY'
+          import os
+          import re
+
+          changed = os.environ["CHANGED"].splitlines()
+          print("|".join(f"{re.escape(path)}$" for path in changed))
+          PY
+            ); then
+              echo "Failed to build changed-source lint filter" >&2
+              exit 1
+            fi
+            if [ -z "$PATTERN" ]; then
+              echo "Changed source files were found, but the lint filter is empty" >&2
+              exit 1
+            fi
           fi
           echo "pattern=$PATTERN" >> "$GITHUB_OUTPUT"
       - name: Run Lint
