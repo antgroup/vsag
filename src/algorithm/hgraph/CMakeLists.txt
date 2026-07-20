@@ -3,6 +3,7 @@ set(HGRAPH_SRCS
     hgraph_build.cpp
     hgraph_fast_build.cpp
     hgraph_modify.cpp
+    hgraph_mci.cpp
     hgraph_parameter.cpp
     hgraph_param_mapping.cpp
     hgraph_search.cpp
