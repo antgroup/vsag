@@ -139,7 +139,7 @@ TEST_CASE("SINDI immutable Parameter", "[ut][SINDIParameter]") {
         REQUIRE(param->immutable == false);
     }
 
-    SECTION("deserialize-only") {
+    SECTION("serialized only when enabled") {
         SINDIDefaultParam dp;
         dp.immutable = true;
         auto param = std::make_shared<vsag::SINDIParameter>();
@@ -147,7 +147,8 @@ TEST_CASE("SINDI immutable Parameter", "[ut][SINDIParameter]") {
         REQUIRE(param->immutable == true);
 
         auto json = param->ToJson();
-        REQUIRE_FALSE(json.Contains(SPARSE_IMMUTABLE));
+        REQUIRE(json.Contains(SPARSE_IMMUTABLE));
+        REQUIRE(json[SPARSE_IMMUTABLE].GetBool());
     }
 }
 

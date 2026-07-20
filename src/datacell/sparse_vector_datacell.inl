@@ -17,9 +17,13 @@
 
 #include <fmt/format.h>
 
+#include <algorithm>
+#include <cstring>
 #include <limits>
 
+#include "rerank_io_stats.h"
 #include "sparse_vector_datacell.h"
+#include "vsag/options.h"
 
 namespace vsag {
 template <typename QuantTmpl, typename IOTmpl>
@@ -220,31 +224,110 @@ SparseVectorDataCell<QuantTmpl, IOTmpl>::GetCodesByIdsBatch(const InnerIdType* i
         return result;
     }
 
-    Vector<uint64_t> read_sizes(count, allocator);
-    Vector<uint64_t> read_offsets(count, allocator);
+    struct BatchLocation {
+        DocLocation location;
+        uint64_t result_index{0};
+    };
+
+    Vector<BatchLocation> locations(count, allocator);
+    std::shared_lock lock(mutex_);
 
     uint64_t total_size = 0;
-    {
-        std::shared_lock lock(mutex_);
-        for (InnerIdType i = 0; i < count; ++i) {
-            DocLocation location;
-            offset_io_->Read(sizeof(location),
-                             static_cast<uint64_t>(ids[i]) * sizeof(location),
-                             reinterpret_cast<uint8_t*>(&location));
-            CHECK_ARGUMENT(total_size <= std::numeric_limits<uint64_t>::max() - location.size,
-                           fmt::format("batch sparse codes size overflow: total {}, next {}",
-                                       total_size,
-                                       location.size));
-            result.in_buffer_offsets[i] = total_size;
-            result.sizes[i] = location.size;
-            read_sizes[i] = location.size;
-            read_offsets[i] = location.offset;
-            total_size += location.size;
-        }
+    for (InnerIdType i = 0; i < count; ++i) {
+        auto& batch_location = locations[i];
+        offset_io_->Read(sizeof(batch_location.location),
+                         static_cast<uint64_t>(ids[i]) * sizeof(batch_location.location),
+                         reinterpret_cast<uint8_t*>(&batch_location.location));
+        CHECK_ARGUMENT(
+            total_size <= std::numeric_limits<uint64_t>::max() - batch_location.location.size,
+            fmt::format("batch sparse codes size overflow: total {}, next {}",
+                        total_size,
+                        batch_location.location.size));
+        CHECK_ARGUMENT(batch_location.location.offset <=
+                           std::numeric_limits<uint64_t>::max() - batch_location.location.size,
+                       fmt::format("batch sparse codes location overflow: offset {}, size {}",
+                                   batch_location.location.offset,
+                                   batch_location.location.size));
+        batch_location.result_index = i;
+        result.in_buffer_offsets[i] = total_size;
+        result.sizes[i] = batch_location.location.size;
+        total_size += batch_location.location.size;
     }
 
     result.buffer.resize(total_size);
-    io_->MultiRead(result.buffer.data(), read_sizes.data(), read_offsets.data(), count);
+
+    // Physical payload order can differ from inner-id order when a rerank layout is enabled.
+    // Sort by the actual offsets so nearby payloads can always be coalesced.
+    std::sort(locations.begin(), locations.end(), [](const auto& lhs, const auto& rhs) {
+        if (lhs.location.offset != rhs.location.offset) {
+            return lhs.location.offset < rhs.location.offset;
+        }
+        return lhs.result_index < rhs.result_index;
+    });
+
+    const uint64_t merge_gap_limit = 1ULL << Options::Instance().direct_IO_object_align_bit();
+    constexpr uint64_t max_merged_io_len = 1ULL << 20;
+
+    struct MergedRange {
+        uint64_t offset{0};
+        uint64_t size{0};
+        uint64_t first_location{0};
+        uint64_t last_location{0};
+    };
+
+    Vector<MergedRange> ranges(allocator);
+    ranges.reserve(count);
+    for (uint64_t i = 0; i < static_cast<uint64_t>(count); ++i) {
+        const auto& location = locations[i].location;
+        const uint64_t location_end = location.offset + location.size;
+        if (not ranges.empty()) {
+            auto& range = ranges.back();
+            const uint64_t range_end = range.offset + range.size;
+            const uint64_t gap = location.offset > range_end ? location.offset - range_end : 0;
+            const uint64_t merged_end = std::max(range_end, location_end);
+            const uint64_t merged_size = merged_end - range.offset;
+            if (gap <= merge_gap_limit && merged_size <= max_merged_io_len) {
+                range.size = merged_size;
+                range.last_location = i;
+                continue;
+            }
+        }
+        ranges.push_back({location.offset, location.size, i, i});
+    }
+
+    const uint64_t range_count = ranges.size();
+    Vector<uint64_t> read_sizes(range_count, allocator);
+    Vector<uint64_t> read_offsets(range_count, allocator);
+    Vector<uint64_t> scratch_offsets(range_count, allocator);
+    uint64_t scratch_size = 0;
+    for (uint64_t i = 0; i < range_count; ++i) {
+        CHECK_ARGUMENT(scratch_size <= std::numeric_limits<uint64_t>::max() - ranges[i].size,
+                       fmt::format("merged sparse codes size overflow: total {}, next {}",
+                                   scratch_size,
+                                   ranges[i].size));
+        read_sizes[i] = ranges[i].size;
+        read_offsets[i] = ranges[i].offset;
+        scratch_offsets[i] = scratch_size;
+        scratch_size += ranges[i].size;
+    }
+
+    Vector<uint8_t> scratch(scratch_size, allocator);
+    RecordRerankIOStats(
+        total_size, read_sizes.data(), read_offsets.data(), static_cast<uint64_t>(range_count));
+    io_->MultiRead(scratch.data(), read_sizes.data(), read_offsets.data(), range_count);
+
+    for (uint64_t range_index = 0; range_index < range_count; ++range_index) {
+        const auto& range = ranges[range_index];
+        const auto* range_data = scratch.data() + scratch_offsets[range_index];
+        for (uint64_t location_index = range.first_location; location_index <= range.last_location;
+             ++location_index) {
+            const auto& batch_location = locations[location_index];
+            const uint64_t result_index = batch_location.result_index;
+            std::memcpy(result.buffer.data() + result.in_buffer_offsets[result_index],
+                        range_data + batch_location.location.offset - range.offset,
+                        batch_location.location.size);
+        }
+    }
     return result;
 }
 

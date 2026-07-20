@@ -25,6 +25,7 @@
 #include "storage/stream_writer.h"
 #include "utils/byte_buffer.h"
 #include "utils/function_exists_check.h"
+#include "vsag_exception.h"
 
 namespace vsag {
 
@@ -150,7 +151,10 @@ public:
     inline void
     Serialize(StreamWriter& writer) {
         StreamWriter::WriteObj(writer, this->size_);
-        ByteBuffer buffer(SERIALIZE_BUFFER_SIZE, this->allocator_);
+        if (this->size_ == 0) {
+            return;
+        }
+        ByteBuffer buffer(std::min(SERIALIZE_BUFFER_SIZE, this->size_), this->allocator_);
         uint64_t offset = 0;
         while (offset < this->size_) {
             auto cur_size = std::min(SERIALIZE_BUFFER_SIZE, this->size_ - offset);
@@ -169,13 +173,23 @@ public:
     Deserialize(StreamReader& reader) {
         uint64_t size = 0;
         StreamReader::ReadObj(reader, size);
-        ByteBuffer buffer(SERIALIZE_BUFFER_SIZE, this->allocator_);
-        uint64_t offset = 0;
+        CHECK_ARGUMENT(
+            reader.GetCursor() <= reader.Length() && size <= reader.Length() - reader.GetCursor(),
+            "serialized IO payload exceeds stream length");
         this->start_ = reader.GetCursor();
         if constexpr (SkipDeserialize) {
             reader.Seek(reader.GetCursor() + size);
-            this->Write(nullptr, size, offset);
+            this->size_ = size;
         } else {
+            if (size == 0) {
+                this->size_ = 0;
+                return;
+            }
+            if constexpr (has_ResizeImpl<IOTmpl>::value) {
+                this->Resize(size);
+            }
+            ByteBuffer buffer(std::min(SERIALIZE_BUFFER_SIZE, size), this->allocator_);
+            uint64_t offset = 0;
             while (offset < size) {
                 auto cur_size = std::min(SERIALIZE_BUFFER_SIZE, size - offset);
                 reader.Read(reinterpret_cast<char*>(buffer.data), cur_size);

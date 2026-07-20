@@ -114,16 +114,42 @@ Pyramid 支持按 tag 组织多棵子图：
 }
 ```
 
-## SINDI（稀疏向量）
+## SINDI / SINDI V2（稀疏向量）
 
 ```json
 {
-    "sindi": {
-        "top_k": 32,
-        "doc_prune_ratio": 0.1
+    "dtype": "sparse",
+    "metric_type": "ip",
+    "index_param": {
+        "term_id_limit": 1000000,
+        "window_size": 50000,
+        "doc_prune_ratio": 0.1,
+        "use_quantization": false,
+        "use_reorder": false,
+        "remap_term_ids": false,
+        "immutable": false
     }
 }
 ```
+
+工厂入口为 `sindi` 时使用 window-first 序列化；入口为 `sindi_v2` 时使用 term-first
+序列化。`immutable` 决定内存 DataCell 类型，但不改变入口选择的默认布局。SINDI V2
+还可在 `index_param` 中配置 `term_io` 和 `rerank_io`。
+
+查询参数放在与入口同名的对象中：
+
+```json
+{
+    "sindi_v2": {
+        "n_candidate": 100,
+        "query_prune_ratio": 0.0,
+        "term_prune_ratio": 0.0,
+        "use_term_lists_heap_insert": true
+    }
+}
+```
+
+完整说明见 [SINDI / SINDI V2](../indexes/sindi.md)。
 
 ## 运行期参数
 

@@ -15,31 +15,34 @@
 
 #pragma once
 
-#include "algorithm/disksindi/disksindi_parameter.h"
 #include "algorithm/inner_index_interface.h"
 #include "algorithm/sindi/term_id_mapper.h"
-#include "datacell/disk_sparse_term_list_datacell.h"
+#include "algorithm/sindi_v2/sindi_v2_parameter.h"
+#include "datacell/disk_sindi_term_datacell.h"
 #include "datacell/flatten_interface.h"
+#include "datacell/immutable_sindi_term_datacell.h"
+#include "datacell/mutable_sindi_term_datacell.h"
+#include "index_common_param.h"
 #include "vsag/allocator.h"
 
 namespace vsag {
 
-class DiskSINDI : public InnerIndexInterface {
+class SINDIV2 : public InnerIndexInterface {
 public:
     static ParamPtr
     CheckAndMappingExternalParam(const JsonType& external_param,
                                  const IndexCommonParam& common_param);
 
-    explicit DiskSINDI(const DiskSINDIParameterPtr& param, const IndexCommonParam& common_param);
+    explicit SINDIV2(const SINDIV2ParameterPtr& param, const IndexCommonParam& common_param);
 
-    DiskSINDI(const ParamPtr& param, const IndexCommonParam& common_param)
-        : DiskSINDI(std::dynamic_pointer_cast<DiskSINDIParameter>(param), common_param){};
+    SINDIV2(const ParamPtr& param, const IndexCommonParam& common_param)
+        : SINDIV2(std::dynamic_pointer_cast<SINDIV2Parameter>(param), common_param){};
 
-    ~DiskSINDI() override = default;
+    ~SINDIV2() override = default;
 
     std::string
     GetName() const override {
-        return "disksindi";
+        return "sindi_v2";
     }
 
     void
@@ -101,7 +104,7 @@ public:
 
     IndexType
     GetIndexType() const override {
-        return IndexType::DISKSINDI;
+        return IndexType::SINDI_V2;
     }
 
     int64_t
@@ -156,24 +159,33 @@ private:
                                   Vector<uint32_t>& tmp_ids,
                                   Vector<float>& tmp_vals) const;
 
+    std::vector<int64_t>
+    build_immutable(const DatasetPtr& base);
+
+    [[nodiscard]] MutableSindiTermDataCellPtr
+    get_mutable_term_datacell() const;
+
+    [[nodiscard]] uint32_t
+    get_term_dict_count() const;
+
+    void
+    serialize_term_layout(StreamWriter& writer) const;
+
 private:
     mutable std::shared_mutex global_mutex_;
 
     uint32_t term_id_limit_{0};
     uint32_t window_size_{0};
 
-    DiskSparseTermListDataCellInterfacePtr term_datacell_;
+    SindiTermDataCellPtr term_datacell_;
 
     int64_t cur_element_count_{0};
 
     bool use_reorder_{false};
-    bool use_quantization_{false};
+    SparseValueQuantizationType sparse_value_quant_type_{SparseValueQuantizationType::FP32};
     float doc_retain_ratio_{0};
 
     FlattenInterfacePtr rerank_flat_{nullptr};
-
-    bool deserialize_without_footer_{false};
-    bool deserialize_without_buffer_{false};
 
     QuantizationParamsPtr quantization_params_;
     uint32_t avg_doc_term_length_{100};
@@ -181,12 +193,13 @@ private:
     bool remap_term_ids_{false};
     std::shared_ptr<TermIdMapper> term_id_mapper_{nullptr};
 
+    bool immutable_enabled_{false};
+
     std::string rerank_layout_{"none"};
     uint32_t rerank_layout_top_terms_{16};
 
-    DiskSINDIManifest manifest_;
-    uint64_t serialized_base_offset_{0};
-    DiskSINDIParameterPtr param_;
+    SINDIV2ParameterPtr param_;
+    IndexCommonParam common_param_;
 
     bool is_deserialized_{false};
 };

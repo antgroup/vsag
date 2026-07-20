@@ -23,7 +23,7 @@ extern const char* const INDEX_HNSW;
 extern const char* const INDEX_FRESH_HNSW;
 extern const char* const INDEX_PYRAMID;
 extern const char* const INDEX_SINDI;
-extern const char* const INDEX_DISKSINDI;
+extern const char* const INDEX_SINDI_V2;
 extern const char* const INDEX_BRUTE_FORCE;
 extern const char* const INDEX_IVF;
 extern const char* const INDEX_WARP;

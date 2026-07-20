@@ -38,7 +38,7 @@ auto result = index->SearchWithRequest(req).value();
 > **可用性。** `Index::SearchWithRequest` 默认实现会返回 *不支持* 错误。目前 HGraph、IVF、
 > BruteForce、WARP 支持它；WARP 会路由到 BruteForce multi-vector 模式
 > （`src/algorithm/{hgraph,ivf,bruteforce}.cpp`）。对于尚未 override 的索引
-> （SINDI、DiskSINDI、Pyramid），请使用下文的旧版 `SearchParam` 路径。
+> （SINDI、SINDI V2、Pyramid），请使用下文的旧版 `SearchParam` 路径。
 
 ## 旧版 API —— `SearchParam::allocator`（已弃用）
 

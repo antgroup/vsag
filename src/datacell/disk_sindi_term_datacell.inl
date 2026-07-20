@@ -20,13 +20,13 @@ namespace vsag {
 template <typename IOTmpl>
 template <InnerSearchMode mode, InnerSearchType type>
 void
-DiskSparseTermListDataCell<IOTmpl>::insert_candidate_into_heap(uint32_t id,
-                                                               float& dist,
-                                                               float& cur_heap_top,
-                                                               MaxHeap& heap,
-                                                               uint32_t offset_id,
-                                                               float radius,
-                                                               const FilterPtr& filter) const {
+DiskSindiTermDataCell<IOTmpl>::insert_candidate_into_heap(uint32_t id,
+                                                          float& dist,
+                                                          float& cur_heap_top,
+                                                          MaxHeap& heap,
+                                                          uint32_t offset_id,
+                                                          float radius,
+                                                          const FilterPtr& filter) const {
     if constexpr (type == InnerSearchType::WITH_FILTER) {
 #if __cplusplus >= 202002L
         if (dist > cur_heap_top or not filter->CheckValid(id + offset_id)) [[likely]] {
@@ -60,13 +60,13 @@ DiskSparseTermListDataCell<IOTmpl>::insert_candidate_into_heap(uint32_t id,
 template <typename IOTmpl>
 template <InnerSearchType type>
 bool
-DiskSparseTermListDataCell<IOTmpl>::fill_heap_initial(uint32_t id,
-                                                      float& dist,
-                                                      float& cur_heap_top,
-                                                      MaxHeap& heap,
-                                                      uint32_t offset_id,
-                                                      uint32_t n_candidate,
-                                                      const FilterPtr& filter) const {
+DiskSindiTermDataCell<IOTmpl>::fill_heap_initial(uint32_t id,
+                                                 float& dist,
+                                                 float& cur_heap_top,
+                                                 MaxHeap& heap,
+                                                 uint32_t offset_id,
+                                                 uint32_t n_candidate,
+                                                 const FilterPtr& filter) const {
     if (dist < 0) {
         if constexpr (type == InnerSearchType::WITH_FILTER) {
             if (not filter->CheckValid(id + offset_id)) {
@@ -85,7 +85,7 @@ DiskSparseTermListDataCell<IOTmpl>::fill_heap_initial(uint32_t id,
 template <typename IOTmpl>
 template <InnerSearchMode mode, InnerSearchType type>
 void
-DiskSparseTermListDataCell<IOTmpl>::InsertHeapByWindow(
+DiskSindiTermDataCell<IOTmpl>::InsertHeapByWindow(
     float* dists,
     uint32_t window_id,
     const SparseTermComputerPtr& computer,
@@ -114,12 +114,11 @@ DiskSparseTermListDataCell<IOTmpl>::InsertHeapByWindow(
         if (window_id >= window_count_) {
             continue;
         }
-        uint32_t start = tb->window_offsets[window_id];
-        uint32_t end = tb->window_offsets[window_id + 1];
+        const auto [start, posting_count] = tb->GetPostingRange(window_id);
         uint32_t term_size =
-            static_cast<uint32_t>(static_cast<float>(end - start) * computer->term_retain_ratio_);
+            static_cast<uint32_t>(static_cast<float>(posting_count) * computer->term_retain_ratio_);
 
-        auto& one_term_ids = tb->ids;
+        const auto* one_term_ids = tb->IdsData();
         uint32_t i = start;
         if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
             if (heap.size() < n_candidate) {
@@ -146,11 +145,11 @@ DiskSparseTermListDataCell<IOTmpl>::InsertHeapByWindow(
 template <typename IOTmpl>
 template <InnerSearchMode mode, InnerSearchType type>
 void
-DiskSparseTermListDataCell<IOTmpl>::InsertHeapByDists(float* dists,
-                                                      uint32_t dists_size,
-                                                      MaxHeap& heap,
-                                                      const InnerSearchParam& param,
-                                                      uint32_t offset_id) const {
+DiskSindiTermDataCell<IOTmpl>::InsertHeapByDists(float* dists,
+                                                 uint32_t dists_size,
+                                                 MaxHeap& heap,
+                                                 const InnerSearchParam& param,
+                                                 uint32_t offset_id) const {
     float cur_heap_top = std::numeric_limits<float>::max();
     auto n_candidate = param.ef;
     auto radius = param.radius;

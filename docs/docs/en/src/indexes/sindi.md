@@ -4,10 +4,11 @@
 
 SINDI (**S**parse **IN**verted **D**ense **I**ndex) is VSAG's index for **sparse
 vectors** — the kind produced by BM25, SPLADE, and other learned-sparse encoders.
-Unlike the dense indexes (HGraph, IVF), SINDI operates directly on term/value
-pairs and is the only VSAG index that accepts `dtype: "sparse"`.
+Unlike the dense indexes (HGraph, IVF), the SINDI family operates directly on term/value
+pairs and is the only VSAG index family that accepts `dtype: "sparse"`.
 
 - Source: `src/algorithm/sindi/`
+- SINDI V2 source: `src/algorithm/sindi_v2/`
 - Example: [`examples/cpp/109_index_sindi.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/109_index_sindi.cpp)
 
 ## How it works
@@ -25,6 +26,44 @@ pairs and is the only VSAG index that accepts `dtype: "sparse"`.
 
 Distance is returned as `1 - inner_product` so results sort ascending as in the
 dense indexes.
+
+## `sindi` and `sindi_v2`
+
+Both entries use the same windowed inverted-list search model, build parameters,
+and distance definition. Their main difference is the serialized posting layout:
+
+| Factory entry | `immutable` | In-memory DataCell | Serialized layout |
+| --- | ---: | --- | --- |
+| `sindi` | `false` | mutable | mutable window-first |
+| `sindi` | `true` | immutable | immutable sparse window-first |
+| `sindi_v2` | `false` | mutable | term-first |
+| `sindi_v2` | `true` | immutable | term-first |
+
+- Use `sindi` when the complete index stays in memory and is saved/restored by window.
+- The SINDI V2 term-first layout can load postings per query term through
+  `reader_io`, `mmap_io`, `buffer_io`, or `async_io`. `term_io` changes where
+  deserialized postings reside, not the file format.
+- Immutable construction keeps only one mutable staging window at a time. It
+  compacts and appends that window as `ImmutableSINDIWindow`, releases the
+  staging memory, and then builds the next window.
+- `SetImmutable()` only changes the index lifecycle to read-only; it does not
+  convert a mutable DataCell into an immutable one.
+
+Each SINDI V2 term payload stores only non-empty windows:
+
+```text
+non_empty_window_count
+ordered {window_id, posting_count}[]
+local_doc_ids[]
+alignment padding
+encoded_values[]
+```
+
+At query time the sparse metadata is expanded once into dense `window_offsets`
+with `window_count + 1` entries. Window `i` uses the posting range
+`[window_offsets[i], window_offsets[i + 1])`. With `remap_term_ids`, the term
+dictionary contains `mapper.Size()` compact entries; without remapping, it ends
+at `max_active_term`.
 
 ## Quick start
 
@@ -70,13 +109,26 @@ and `metric_type` **must** be `"ip"`.
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `dim` | int | — (required) | Maximum number of non-zero elements per sparse vector. *Not* the vocabulary size. |
-| `term_id_limit` | int | `1000000` | Upper bound on term id values (≥ max term id + 1, up to 50 000 000). |
+| `term_id_limit` | int | `1000000` | Upper bound on term id values (≥ max term id + 1). The maximum is 50 000 000 for `sindi` and 10 000 000 for `sindi_v2`. |
 | `window_size` | int | `50000` | Documents per window (range: 10 000 – 60 000). |
 | `doc_prune_ratio` | float | `0.0` | Fraction of lowest-weight terms dropped per doc at build time (0.0 – 0.9). |
-| `use_quantization` | bool | `false` | Quantize stored term values to cut memory; when enabled, uses 8-bit scalar quantization (SQ8). |
+| `use_quantization` | bool / string | `false` | Use `true` for 8-bit scalar quantization (SQ8), or `"fp16"` for half-precision values. |
 | `use_reorder` | bool | `false` | Keep a high-precision flat copy and rescore results (~2× memory). |
 | `remap_term_ids` | bool | `false` | Remap term IDs before indexing; useful when term IDs are sparse or have large gaps. |
+| `immutable` | bool | `false` | Build a compact read-only DataCell; subsequent Add is unsupported. |
 | `avg_doc_term_length` | int | `100` | Hint for memory estimation only. |
+
+`sindi_v2` additionally accepts:
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `term_io` | object | `{"type": "reader_io"}` | Backend used when deserializing term-first postings. Supports `reader_io`, in-memory IO, and file-backed `mmap_io`, `buffer_io`, or `async_io`. File-backed IO requires `file_path`. |
+| `rerank_io` | object | `{"type": "block_memory_io"}` | Backend for rerank vectors when `use_reorder` is enabled. A missing file-backed `file_path` is derived as `<term_io.file_path>.rerank`. |
+| `rerank_layout` | string | `"none"` | Rerank-vector layout: `"none"` or `"top_terms_signature"`. The latter requires `use_reorder: true`. |
+| `rerank_layout_top_terms` | int | `16` | Positive number of leading terms used by `"top_terms_signature"`. |
+
+Search parameters must use a sub-object matching the factory entry: `{"sindi": {...}}`
+for `sindi`, or `{"sindi_v2": {...}}` for `sindi_v2`.
 
 > **`dim` vs `term_id_limit`.** For the sparse vector `{0:0.1, 2:0.5, 177:0.8}`,
 > `dim` is `3` (three non-zero entries) while `term_id_limit` must be ≥ `178`
@@ -85,21 +137,22 @@ and `metric_type` **must** be `"ip"`.
 
 ## Search parameters
 
-Search-time parameters live under the `sindi` sub-object:
+Search-time parameters live under the sub-object matching the factory entry:
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `n_candidate` | int | `0` | Candidate heap size. When `0`, defaults to `SPARSE_AMPLIFICATION_FACTOR · topk` (500×). If set, must satisfy `1 ≤ n_candidate ≤ SPARSE_AMPLIFICATION_FACTOR · topk`. |
 | `query_prune_ratio` | float | `0.0` | Fraction of lowest-weight query terms skipped (0.0 – 0.9). |
 | `term_prune_ratio` | float | `0.0` | Fraction of term-list entries skipped (0.0 – 0.9). |
+| `use_term_lists_heap_insert` | bool | `true` | `sindi_v2` only: choose the term-list heap-insertion path. |
 
 SINDI chooses the heap-insertion strategy automatically from the build-time
 `doc_prune_ratio` and search-time `query_prune_ratio`. With the current `0.1`
 threshold, SINDI uses the distance-array insertion path when both ratios are
 `<= 0.1`; if either ratio is greater than `0.1`, it uses term-list heap
 insertion. The legacy
-`use_term_lists_heap_insert` search parameter is ignored; configure pruning
-ratios instead.
+`use_term_lists_heap_insert` search parameter is ignored by `sindi`; configure pruning
+ratios instead. `sindi_v2` uses the explicit boolean setting.
 
 ```cpp
 auto result = index->KnnSearch(

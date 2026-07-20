@@ -15,13 +15,12 @@
 
 #pragma once
 
-#include <map>
 #include <mutex>
 #include <shared_mutex>
-#include <unordered_map>
 #include <vector>
 
 #include "container_types.h"
+#include "datacell/sindi_term_datacell.h"
 #include "impl/inner_search_param.h"
 #include "index_common_param.h"
 #include "io/basic_io.h"
@@ -37,36 +36,23 @@
 
 namespace vsag {
 
-struct DiskSINDIManifest {
-    uint64_t term_dict_offset{0};
-    uint64_t term_dict_size{0};
-    uint64_t posting_payload_offset{0};
-    uint64_t posting_payload_size{0};
-    uint64_t rerank_flat_offset{0};
-    uint64_t rerank_flat_size{0};
-    uint64_t label_table_offset{0};
-    uint64_t label_table_size{0};
-};
+using TermBuffer = SindiTermBuffer;
 
-struct DiskTermEntry {
-    uint64_t posting_payload_offset{0};
-    uint32_t posting_payload_size{0};
-    uint32_t term_num{0};
-};
-
-struct TermBuffer {
-    std::vector<uint32_t> window_offsets;
-    std::vector<uint16_t> ids;
-    std::vector<uint8_t> values;
-};
-
-using QueryTermBuffers = std::unordered_map<uint32_t, TermBuffer>;
-
-class DiskSparseTermListDataCellInterface {
+class DiskSindiTermDataCellInterface : public SindiTermDataCell {
 public:
-    virtual ~DiskSparseTermListDataCellInterface() = default;
+    virtual ~DiskSindiTermDataCellInterface() = default;
 
-    static std::shared_ptr<DiskSparseTermListDataCellInterface>
+    static std::shared_ptr<DiskSindiTermDataCellInterface>
+    MakeInstance(float doc_retain_ratio,
+                 uint32_t term_id_limit,
+                 Allocator* allocator,
+                 SparseValueQuantizationType sparse_value_quant_type,
+                 QuantizationParamsPtr quantization_params,
+                 uint32_t window_size,
+                 const IOParamPtr& io_param,
+                 const IndexCommonParam& common_param);
+
+    static std::shared_ptr<DiskSindiTermDataCellInterface>
     MakeInstance(float doc_retain_ratio,
                  uint32_t term_id_limit,
                  Allocator* allocator,
@@ -74,55 +60,46 @@ public:
                  QuantizationParamsPtr quantization_params,
                  uint32_t window_size,
                  const IOParamPtr& io_param,
-                 const IndexCommonParam& common_param);
+                 const IndexCommonParam& common_param) {
+        auto quantization_type =
+            use_quantization ? SparseValueQuantizationType::SQ8 : SparseValueQuantizationType::FP32;
+        return MakeInstance(doc_retain_ratio,
+                            term_id_limit,
+                            allocator,
+                            quantization_type,
+                            std::move(quantization_params),
+                            window_size,
+                            io_param,
+                            common_param);
+    }
 
     virtual void
-    InsertVector(const SparseVector& vector, uint32_t inner_id) = 0;
-
-    virtual void
-    FinalizeTermBuffers(uint32_t window_count) = 0;
-
-    virtual uint64_t
-    ComputePayloadSize() const = 0;
-
-    virtual void
-    WriteTermDictAndPayload(StreamWriter& writer) const = 0;
-
-    virtual void
-    Deserialize(StreamReader& reader, uint64_t term_dict_size, uint32_t window_count) = 0;
+    DeserializeTermLayout(StreamReader& reader, uint32_t window_count, uint64_t total_count) = 0;
 
     virtual void
     InitIO(const IOParamPtr& io_param) = 0;
 
     virtual void
-    WritePayloadToIO(uint64_t payload_base_offset) = 0;
-
-    virtual void
-    WritePayloadToIO(StreamReader& reader, uint64_t payload_offset, uint64_t payload_size) = 0;
-
-    virtual void
-    SetIO(const std::shared_ptr<Reader>& reader,
-          uint64_t payload_offset,
-          uint64_t payload_size) = 0;
-
-    virtual void
-    LoadQueryTerms(const Vector<uint32_t>& query_term_ids) = 0;
+    SetIO(const std::shared_ptr<Reader>& reader) = 0;
 
     virtual QueryTermBuffers
-    LoadQueryTermBuffers(const Vector<uint32_t>& query_term_ids) const = 0;
+    LoadQueryTermBuffers(const Vector<uint32_t>& query_term_ids) const override = 0;
 
     virtual uint32_t
-    GetWindowCount() const = 0;
+    GetWindowCount() const override = 0;
+
+    virtual uint32_t
+    GetTermDictCount() const override = 0;
 
     virtual uint64_t
-    GetMemoryUsage() const = 0;
+    GetMemoryUsage() const override = 0;
 
     virtual void
     QueryWindow(float* dists,
                 uint32_t window_id,
                 const SparseTermComputerPtr& computer,
                 bool use_term_lists_heap_insert,
-                const QueryTermBuffers& query_term_buffers) const = 0;
+                const QueryTermBuffers& query_term_buffers) const override = 0;
 
     virtual void
     InsertHeapByWindowKnn(float* dists,
@@ -142,75 +119,67 @@ public:
                          uint32_t offset_id,
                          bool with_filter) const = 0;
 
+    void
+    InsertHeapByWindow(float* dists,
+                       uint32_t window_id,
+                       const SparseTermComputerPtr& computer,
+                       MaxHeap& heap,
+                       const InnerSearchParam& param,
+                       uint32_t offset_id,
+                       InnerSearchMode mode,
+                       bool with_filter,
+                       const QueryTermBuffers& query_term_buffers) const override = 0;
+
+    void
+    InsertHeapByDists(float* dists,
+                      uint32_t dists_size,
+                      MaxHeap& heap,
+                      const InnerSearchParam& param,
+                      uint32_t offset_id,
+                      InnerSearchMode mode,
+                      bool with_filter) const override = 0;
+
     virtual void
-    GetSparseVector(uint32_t inner_id, SparseVector* data, Allocator* specified_allocator) = 0;
+    GetSparseVector(uint32_t inner_id,
+                    SparseVector* data,
+                    Allocator* specified_allocator) const override = 0;
 
     virtual float
     CalcDistanceByInnerId(const SparseTermComputerPtr& computer,
                           uint32_t base_id,
-                          const QueryTermBuffers& query_term_buffers) = 0;
+                          const QueryTermBuffers& query_term_buffers) const override = 0;
 };
 
-using DiskSparseTermListDataCellInterfacePtr = std::shared_ptr<DiskSparseTermListDataCellInterface>;
+using DiskSindiTermDataCellInterfacePtr = std::shared_ptr<DiskSindiTermDataCellInterface>;
 
 template <typename IOTmpl>
-class DiskSparseTermListDataCell : public DiskSparseTermListDataCellInterface {
+class DiskSindiTermDataCell : public DiskSindiTermDataCellInterface {
 public:
-    DiskSparseTermListDataCell(float doc_retain_ratio,
-                               uint32_t term_id_limit,
-                               Allocator* allocator,
-                               bool use_quantization,
-                               QuantizationParamsPtr quantization_params,
-                               uint32_t window_size,
-                               IOParamPtr io_param,
-                               const IndexCommonParam& common_param);
+    DiskSindiTermDataCell(float doc_retain_ratio,
+                          uint32_t term_id_limit,
+                          Allocator* allocator,
+                          SparseValueQuantizationType sparse_value_quant_type,
+                          QuantizationParamsPtr quantization_params,
+                          uint32_t window_size,
+                          IOParamPtr io_param,
+                          const IndexCommonParam& common_param);
 
     void
-    InsertVector(const SparseVector& vector, uint32_t inner_id) override;
+    SerializeTermLayout(StreamWriter& writer, uint32_t term_dict_count) const override;
 
     void
-    FinalizeTermBuffers(uint32_t window_count) override;
-
-    uint64_t
-    ComputePayloadSize() const override;
-
-    void
-    BuildTermDict(std::vector<DiskTermEntry>& term_dict, uint64_t payload_base_offset) const;
-
-    void
-    WritePayload(StreamWriter& writer) const;
-
-    void
-    WriteTermDictAndPayload(StreamWriter& writer) const override;
-
-    void
-    Deserialize(StreamReader& reader, uint64_t term_dict_size, uint32_t window_count) override;
+    DeserializeTermLayout(StreamReader& reader,
+                          uint32_t window_count,
+                          uint64_t total_count) override;
 
     void
     InitIO(const IOParamPtr& io_param) override;
 
     void
-    WritePayloadToIO(uint64_t payload_base_offset) override;
-
-    void
-    WritePayloadToIO(StreamReader& reader, uint64_t payload_offset, uint64_t payload_size) override;
-
-    void
-    SetIO(const std::shared_ptr<Reader>& reader,
-          uint64_t payload_offset,
-          uint64_t payload_size) override;
-
-    void
-    LoadQueryTerms(const Vector<uint32_t>& query_term_ids) override;
+    SetIO(const std::shared_ptr<Reader>& reader) override;
 
     QueryTermBuffers
     LoadQueryTermBuffers(const Vector<uint32_t>& query_term_ids) const override;
-
-    const TermBuffer*
-    GetTermBuffer(uint32_t term_id) const;
-
-    const TermBuffer*
-    GetTermBuffer(uint32_t term_id, const QueryTermBuffers& query_term_buffers) const;
 
     const TermBuffer*
     GetTermBufferNoLock(uint32_t term_id, const QueryTermBuffers& query_term_buffers) const;
@@ -218,6 +187,11 @@ public:
     uint32_t
     GetWindowCount() const override {
         return window_count_;
+    }
+
+    uint32_t
+    GetTermDictCount() const override {
+        return static_cast<uint32_t>(term_dict_.size());
     }
 
     uint64_t
@@ -248,6 +222,26 @@ public:
                          uint32_t offset_id,
                          bool with_filter) const override;
 
+    void
+    InsertHeapByWindow(float* dists,
+                       uint32_t window_id,
+                       const SparseTermComputerPtr& computer,
+                       MaxHeap& heap,
+                       const InnerSearchParam& param,
+                       uint32_t offset_id,
+                       InnerSearchMode mode,
+                       bool with_filter,
+                       const QueryTermBuffers& query_term_buffers) const override;
+
+    void
+    InsertHeapByDists(float* dists,
+                      uint32_t dists_size,
+                      MaxHeap& heap,
+                      const InnerSearchParam& param,
+                      uint32_t offset_id,
+                      InnerSearchMode mode,
+                      bool with_filter) const override;
+
     template <InnerSearchMode mode, InnerSearchType type>
     void
     InsertHeapByWindow(float* dists,
@@ -267,12 +261,14 @@ public:
                       uint32_t offset_id) const;
 
     void
-    GetSparseVector(uint32_t inner_id, SparseVector* data, Allocator* specified_allocator) override;
+    GetSparseVector(uint32_t inner_id,
+                    SparseVector* data,
+                    Allocator* specified_allocator) const override;
 
     float
     CalcDistanceByInnerId(const SparseTermComputerPtr& computer,
                           uint32_t base_id,
-                          const QueryTermBuffers& query_term_buffers) override;
+                          const QueryTermBuffers& query_term_buffers) const override;
 
 private:
     template <InnerSearchMode mode, InnerSearchType type>
@@ -296,36 +292,29 @@ private:
                       const FilterPtr& filter) const;
 
     void
-    DocPrune(Vector<std::pair<uint32_t, float>>& sorted_base) const;
-
-    void
-    Encode(float val, uint8_t* dst) const;
-
-    void
-    Decode(const uint8_t* src, uint64_t size, float* dst) const;
+    ValidateBoundLayout(uint64_t payload_size) const;
 
 private:
-    float doc_retain_ratio_{0};
     uint32_t term_id_limit_{0};
     Allocator* allocator_{nullptr};
-    bool use_quantization_{false};
+    SparseValueQuantizationType sparse_value_quant_type_{SparseValueQuantizationType::FP32};
     QuantizationParamsPtr quantization_params_;
     uint32_t window_size_{0};
     IOParamPtr io_param_{nullptr};
     IndexCommonParam common_param_;
     std::shared_ptr<BasicIO<IOTmpl>> io_{nullptr};
 
-    std::unordered_map<uint32_t, TermBuffer> term_buffers_;
+    mutable QueryTermBuffers term_buffers_;
     mutable std::shared_mutex term_buffers_mutex_;
-    std::map<uint32_t, std::vector<std::pair<uint32_t, float>>> build_buffers_;
     std::vector<DiskTermEntry> term_dict_;
     uint32_t window_count_{0};
     uint64_t total_count_{0};
+    uint64_t payload_size_{0};
 };
 
 template <typename IOTmpl>
-using DiskSparseTermListDataCellPtr = std::shared_ptr<DiskSparseTermListDataCell<IOTmpl>>;
+using DiskSindiTermDataCellPtr = std::shared_ptr<DiskSindiTermDataCell<IOTmpl>>;
 
 }  // namespace vsag
 
-#include "disk_sparse_term_list_datacell.inl"
+#include "disk_sindi_term_datacell.inl"

@@ -456,7 +456,7 @@ InnerIndexInterface::GetVectorByIds(const int64_t* ids,
 
     DatasetPtr vectors = Dataset::Make();
     if (GetIndexType() == IndexType::SPARSE || GetIndexType() == IndexType::SINDI ||
-        GetIndexType() == IndexType::DISKSINDI) {
+        GetIndexType() == IndexType::SINDI_V2) {
         auto* sparse_vectors =
             static_cast<SparseVector*>(allocator->Allocate(sizeof(SparseVector) * count));
         if (sparse_vectors == nullptr) {

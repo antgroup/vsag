@@ -13,6 +13,7 @@ The pages in this section cover the actively developed indexes:
 | `lazy_hgraph` | [LazyHGraph](lazy_hgraph.md) | Small-to-growing FP32 collections that start exact and later convert to HGraph |
 | `ivf` | [IVF](ivf.md) | Partition-based search, high-throughput batch queries, large corpora |
 | `sindi` | [SINDI](sindi.md) | Sparse vectors (BM25 / learned sparse) on inner-product |
+| `sindi_v2` | [SINDI V2](sindi.md) | SINDI with term-first persistence and per-query-term external IO |
 | `pyramid` | [Pyramid](pyramid.md) | Multi-tenant or tag-partitioned corpora with hierarchical paths |
 
 `brute_force` is also available as an exact-search baseline (see
@@ -25,11 +26,11 @@ All indexes share the same top-level build fields:
 | Field | Values | Notes |
 |-------|--------|-------|
 | `dim` | positive integer | Vector dimensionality; fixed after build |
-| `dtype` | `float32` / `float16` / `bfloat16` / `int8` / `sparse` | `sparse` is SINDI only |
-| `metric_type` | `l2` / `ip` / `cosine` | Must match at query time (SINDI is `ip` only) |
+| `dtype` | `float32` / `float16` / `bfloat16` / `int8` / `sparse` | `sparse` is for SINDI / SINDI V2 |
+| `metric_type` | `l2` / `ip` / `cosine` | Must match at query time (SINDI / SINDI V2 are `ip` only) |
 
 Index-specific build parameters live under the `index_param` sub-object; search-time
 parameters live under a sub-object named after the index (e.g. `hgraph`, `ivf`,
-`sindi`, `pyramid`). LazyHGraph also uses the `hgraph` search object after it
+`sindi`, `sindi_v2`, `pyramid`). LazyHGraph also uses the `hgraph` search object after it
 converts to graph phase. Concrete schemas are documented on each page and enumerated in
 [Index Parameters](../resources/index_parameters.md).
