@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "sparse_term_datacell.h"
+#include "mutable_sindi_term_datacell.h"
 
 #include <set>
 #include <sstream>
@@ -23,7 +23,62 @@
 
 using namespace vsag;
 
-TEST_CASE("SparseTermDatacell Basic Test", "[ut][SparseTermDatacell]") {
+namespace {
+
+void
+QueryFirstWindow(const MutableSindiTermDataCellPtr& data_cell,
+                 float* dists,
+                 const SparseTermComputerPtr& computer,
+                 Allocator* allocator) {
+    QueryTermBuffers query_term_buffers(allocator);
+    data_cell->QueryWindow(dists, 0, computer, false, query_term_buffers);
+}
+
+}  // namespace
+
+TEST_CASE("MutableSindiTermDataCell uses caller document id coordinates",
+          "[ut][MutableSindiTermDataCell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto data_cell =
+        std::make_shared<MutableSindiTermDataCell>(1.0F,
+                                                   16,
+                                                   4,
+                                                   allocator.get(),
+                                                   SparseValueQuantizationType::FP32,
+                                                   std::make_shared<QuantizationParams>());
+
+    uint32_t term_ids[] = {3};
+    float term_values[] = {1.0F};
+    SparseVector vector{1, term_ids, term_values};
+    data_cell->InsertVector(vector, 1);
+
+    REQUIRE(data_cell->GetWindowCount() == 1);
+    REQUIRE(data_cell->GetWindow(0).term_sizes_[3] == 1);
+    REQUIRE(data_cell->GetWindow(0).term_ids_[3]->front() == 1);
+    REQUIRE(data_cell->total_count_ == 2);
+
+    data_cell->InsertVector(vector, 5);
+    REQUIRE(data_cell->GetWindowCount() == 2);
+    REQUIRE(data_cell->GetWindow(1).term_ids_[3]->front() == 1);
+}
+
+TEST_CASE("MutableSindiTermDataCell resizes for retained terms after pruning",
+          "[ut][MutableSindiTermDataCell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto data_cell = std::make_shared<MutableSindiTermDataCell>(
+        0.5F, 2000, 100, allocator.get(), SparseValueQuantizationType::FP32, nullptr);
+
+    uint32_t term_ids[] = {1000, 3};
+    float term_values[] = {0.01F, 1.0F};
+    SparseVector vector{2, term_ids, term_values};
+    data_cell->InsertVector(vector, 0);
+
+    const auto& window = data_cell->GetWindow(0);
+    REQUIRE(window.term_capacity_ == 4);
+    REQUIRE(window.term_sizes_[3] == 1);
+}
+
+TEST_CASE("MutableSindiTermDataCell Basic Test", "[ut][MutableSindiTermDataCell]") {
     // prepare data
     auto count_base = 10;
     auto len_base = 10;
@@ -72,11 +127,12 @@ TEST_CASE("SparseTermDatacell Basic Test", "[ut][SparseTermDatacell]") {
 
     // disable quantization for this basic test
     std::shared_ptr<QuantizationParams> q_params = nullptr;
-    auto data_cell = std::make_shared<SparseTermDataCell>(doc_retain_ratio,
-                                                          DEFAULT_TERM_ID_LIMIT,
-                                                          allocator.get(),
-                                                          SparseValueQuantizationType::FP32,
-                                                          q_params);
+    auto data_cell = std::make_shared<MutableSindiTermDataCell>(doc_retain_ratio,
+                                                                DEFAULT_TERM_ID_LIMIT,
+                                                                DEFAULT_WINDOW_SIZE,
+                                                                allocator.get(),
+                                                                SparseValueQuantizationType::FP32,
+                                                                q_params);
     REQUIRE(std::abs(data_cell->doc_retain_ratio_ - doc_retain_ratio) < 1e-3);
 
     // test factory computer
@@ -92,22 +148,23 @@ TEST_CASE("SparseTermDatacell Basic Test", "[ut][SparseTermDatacell]") {
     for (auto i = 0; i < count_base; i++) {
         data_cell->InsertVector(sparse_vectors[i], i);
     }
-    REQUIRE(data_cell->term_capacity_ >= exp_id_size);
-    REQUIRE(data_cell->term_ids_.size() == data_cell->term_capacity_);
-    REQUIRE(data_cell->term_datas_.size() == data_cell->term_capacity_);
+    REQUIRE(data_cell->GetWindow(0).term_capacity_ >= exp_id_size);
+    REQUIRE(data_cell->GetWindow(0).term_ids_.size() == data_cell->GetWindow(0).term_capacity_);
+    REQUIRE(data_cell->GetWindow(0).term_datas_.size() == data_cell->GetWindow(0).term_capacity_);
     for (auto i = 0; i < exp_id_size; i++) {
         if (exp_size[i] == 0) {
-            REQUIRE(data_cell->term_ids_[i] == nullptr);
-            REQUIRE(data_cell->term_datas_[i] == nullptr);
+            REQUIRE(data_cell->GetWindow(0).term_ids_[i] == nullptr);
+            REQUIRE(data_cell->GetWindow(0).term_datas_[i] == nullptr);
         } else {
-            REQUIRE(data_cell->term_ids_[i]->size() == data_cell->term_sizes_[i]);
-            REQUIRE(data_cell->term_ids_[i]->size() == exp_size[i]);
-            REQUIRE(data_cell->term_datas_[i]->size() == exp_size[i] * sizeof(float));
+            REQUIRE(data_cell->GetWindow(0).term_ids_[i]->size() ==
+                    data_cell->GetWindow(0).term_sizes_[i]);
+            REQUIRE(data_cell->GetWindow(0).term_ids_[i]->size() == exp_size[i]);
+            REQUIRE(data_cell->GetWindow(0).term_datas_[i]->size() == exp_size[i] * sizeof(float));
         }
     }
-    for (auto i = exp_id_size; i < data_cell->term_capacity_; i++) {
-        REQUIRE(data_cell->term_ids_[i] == nullptr);
-        REQUIRE(data_cell->term_datas_[i] == nullptr);
+    for (auto i = exp_id_size; i < data_cell->GetWindow(0).term_capacity_; i++) {
+        REQUIRE(data_cell->GetWindow(0).term_ids_[i] == nullptr);
+        REQUIRE(data_cell->GetWindow(0).term_datas_[i] == nullptr);
     }
 
     // Calculate expected distances programmatically to match the test logic
@@ -133,17 +190,7 @@ TEST_CASE("SparseTermDatacell Basic Test", "[ut][SparseTermDatacell]") {
 
     SECTION("test query") {
         std::vector<float> dists(count_base, 0);
-        SparseEvaluationTracker evaluation_tracker(count_base, allocator.get());
-        const auto evaluated = data_cell->Query(dists.data(), computer, evaluation_tracker);
-        REQUIRE(evaluated == count_base);
-        for (auto i = 0; i < dists.size(); i++) {
-            REQUIRE(std::abs(dists[i] - exp_dists[i]) < 1e-3);
-        }
-        std::fill(dists.begin(), dists.end(), 0.0F);
-        REQUIRE(data_cell->Query(dists.data(), computer, evaluation_tracker) == count_base);
-
-        std::fill(dists.begin(), dists.end(), 0.0F);
-        data_cell->Query(dists.data(), computer);
+        QueryFirstWindow(data_cell, dists.data(), computer, allocator.get());
         for (auto i = 0; i < dists.size(); i++) {
             REQUIRE(std::abs(dists[i] - exp_dists[i]) < 1e-3);
         }
@@ -156,7 +203,7 @@ TEST_CASE("SparseTermDatacell Basic Test", "[ut][SparseTermDatacell]") {
         inner_param.ef = topk;
         MaxHeap heap(allocator.get());
         std::vector<float> dists(count_base, 0);
-        data_cell->Query(dists.data(), computer);
+        QueryFirstWindow(data_cell, dists.data(), computer, allocator.get());
 
         data_cell->InsertHeapByTermLists<KNN_SEARCH, PURE>(
             dists.data(), computer, heap, inner_param, 0);
@@ -176,7 +223,7 @@ TEST_CASE("SparseTermDatacell Basic Test", "[ut][SparseTermDatacell]") {
         }
 
         std::vector<float> dists2(count_base, 0);
-        data_cell->Query(dists2.data(), computer);
+        QueryFirstWindow(data_cell, dists2.data(), computer, allocator.get());
         MaxHeap heap2(allocator.get());
         data_cell->InsertHeapByDists<KNN_SEARCH, PURE>(
             dists2.data(), dists2.size(), heap2, inner_param, 0);
@@ -203,7 +250,7 @@ TEST_CASE("SparseTermDatacell Basic Test", "[ut][SparseTermDatacell]") {
         auto pos = count_base - range_topk - 1;  // note that we retrieval dist < dists[pos]
         InnerSearchParam inner_param;
         std::vector<float> dists(count_base, 0);
-        data_cell->Query(dists.data(), computer);
+        QueryFirstWindow(data_cell, dists.data(), computer, allocator.get());
         inner_param.radius = dists[pos];
         MaxHeap heap(allocator.get());
 
@@ -224,7 +271,7 @@ TEST_CASE("SparseTermDatacell Basic Test", "[ut][SparseTermDatacell]") {
         }
 
         std::vector<float> dists2(count_base, 0);
-        data_cell->Query(dists2.data(), computer);
+        QueryFirstWindow(data_cell, dists2.data(), computer, allocator.get());
         MaxHeap heap2(allocator.get());
         data_cell->InsertHeapByDists<RANGE_SEARCH, PURE>(
             dists2.data(), dists2.size(), heap2, inner_param, 0);
@@ -275,7 +322,7 @@ TEST_CASE("SparseTermDatacell Basic Test", "[ut][SparseTermDatacell]") {
     delete[] query_sv.vals_;
 }
 
-TEST_CASE("SparseTermDatacell Encode/Decode Test", "[ut][SparseTermDatacell]") {
+TEST_CASE("MutableSindiTermDataCell Encode/Decode Test", "[ut][MutableSindiTermDataCell]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
 
     // Prepare data
@@ -294,8 +341,12 @@ TEST_CASE("SparseTermDatacell Encode/Decode Test", "[ut][SparseTermDatacell]") {
     q_params->min_val = min_val;
     q_params->max_val = max_val;
     q_params->diff = max_val - min_val;
-    auto data_cell = std::make_shared<SparseTermDataCell>(
-        1.0f, DEFAULT_TERM_ID_LIMIT, allocator.get(), SparseValueQuantizationType::SQ8, q_params);
+    auto data_cell = std::make_shared<MutableSindiTermDataCell>(1.0f,
+                                                                DEFAULT_TERM_ID_LIMIT,
+                                                                DEFAULT_WINDOW_SIZE,
+                                                                allocator.get(),
+                                                                SparseValueQuantizationType::SQ8,
+                                                                q_params);
 
     // Insert vector (tests Encode)
     uint16_t base_id = 5;
@@ -324,144 +375,7 @@ TEST_CASE("SparseTermDatacell Encode/Decode Test", "[ut][SparseTermDatacell]") {
     allocator->Deallocate(retrieved_sv.vals_);
 }
 
-TEST_CASE("SparseTermDatacell Sorts Posting Lists By Value", "[ut][SparseTermDatacell]") {
-    auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    const auto quantization_type = GENERATE(SparseValueQuantizationType::FP32,
-                                            SparseValueQuantizationType::FP16,
-                                            SparseValueQuantizationType::SQ8);
-    auto quantization_params = std::make_shared<QuantizationParams>();
-    quantization_params->min_val = 0.0F;
-    quantization_params->max_val = 4.0F;
-    quantization_params->diff = 4.0F;
-    SparseTermDataCell data_cell(
-        1.0F, DEFAULT_TERM_ID_LIMIT, allocator.get(), quantization_type, quantization_params);
-
-    std::vector<uint16_t> base_ids = {0, 2, 1, 3};
-    std::vector<float> values = {1.0F, 3.0F, 3.0F, 2.0F};
-    uint32_t term = 7;
-    for (uint64_t i = 0; i < base_ids.size(); ++i) {
-        SparseVector vector{1, &term, &values[i]};
-        data_cell.InsertVector(vector, base_ids[i]);
-    }
-
-    data_cell.SortByValue();
-    // Sorting an already normalized posting list should preserve the same order.
-    data_cell.SortByValue();
-
-    REQUIRE(*data_cell.term_ids_[term] == Vector<uint16_t>({1, 2, 3, 0}, allocator.get()));
-    std::vector<float> sorted_values(values.size());
-    const auto* data = data_cell.term_datas_[term]->data();
-    if (quantization_type == SparseValueQuantizationType::SQ8) {
-        data_cell.Decode(data, values.size(), sorted_values.data());
-    } else if (quantization_type == SparseValueQuantizationType::FP16) {
-        for (uint64_t i = 0; i < values.size(); ++i) {
-            uint16_t value = 0;
-            std::memcpy(&value, data + i * sizeof(value), sizeof(value));
-            sorted_values[i] = generic::FP16ToFloat(value);
-        }
-    } else {
-        std::memcpy(sorted_values.data(), data, values.size() * sizeof(float));
-    }
-    REQUIRE(std::abs(sorted_values[0] - 3.0F) < 0.02F);
-    REQUIRE(std::abs(sorted_values[1] - 3.0F) < 0.02F);
-    REQUIRE(std::abs(sorted_values[2] - 2.0F) < 0.02F);
-    REQUIRE(std::abs(sorted_values[3] - 1.0F) < 0.02F);
-
-    float appended_value = 4.0F;
-    SparseVector appended_vector{1, &term, &appended_value};
-    data_cell.InsertVector(appended_vector, 4);
-    data_cell.SortByValue();
-    REQUIRE(*data_cell.term_ids_[term] == Vector<uint16_t>({4, 1, 2, 3, 0}, allocator.get()));
-
-    float query_value = 1.0F;
-    SparseVector query{1, &term, &query_value};
-    SINDISearchParameter search_params;
-    search_params.term_prune_ratio = 0.5F;
-    auto computer = std::make_shared<SparseTermComputer>(query, search_params, allocator.get());
-    std::vector<float> dists(5, 0.0F);
-    SparseEvaluationTracker evaluation_tracker(dists.size(), allocator.get());
-    REQUIRE(data_cell.Query(dists.data(), computer, evaluation_tracker) == 2);
-    REQUIRE(dists[0] == 0.0F);
-    REQUIRE(dists[1] < 0.0F);
-    REQUIRE(dists[2] == 0.0F);
-    REQUIRE(dists[3] == 0.0F);
-    REQUIRE(dists[4] < dists[1]);
-}
-
-TEST_CASE("SparseTermDatacell Sorts Positive Posting Values", "[ut][SparseTermDatacell]") {
-    auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    const auto quantization_type = GENERATE(SparseValueQuantizationType::FP32,
-                                            SparseValueQuantizationType::FP16,
-                                            SparseValueQuantizationType::SQ8);
-    auto quantization_params = std::make_shared<QuantizationParams>();
-    quantization_params->min_val = 1.0F;
-    quantization_params->max_val = 4.0F;
-    quantization_params->diff = 3.0F;
-    SparseTermDataCell data_cell(
-        1.0F, DEFAULT_TERM_ID_LIMIT, allocator.get(), quantization_type, quantization_params);
-
-    uint32_t term = 7;
-    std::array<float, 4> values = {1.0F, 4.0F, 3.0F, 2.0F};
-    for (uint16_t id = 0; id < values.size(); ++id) {
-        SparseVector vector{1, &term, &values[id]};
-        data_cell.InsertVector(vector, id);
-    }
-
-    data_cell.SortByValue();
-    REQUIRE(*data_cell.term_ids_[term] == Vector<uint16_t>({1, 2, 3, 0}, allocator.get()));
-}
-
-TEST_CASE("SparseTermDatacell Sorts Legacy Posting Lists On Deserialize",
-          "[ut][SparseTermDatacell]") {
-    auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    SparseTermDataCell source(
-        1.0F, DEFAULT_TERM_ID_LIMIT, allocator.get(), SparseValueQuantizationType::FP32, nullptr);
-
-    uint32_t term = 7;
-    std::vector<float> values = {1.0F, 4.0F};
-    for (uint16_t id = 0; id < values.size(); ++id) {
-        SparseVector vector{1, &term, &values[id]};
-        source.InsertVector(vector, id);
-    }
-
-    std::stringstream stream;
-    IOStreamWriter writer(stream);
-    source.Serialize(writer);
-
-    SparseTermDataCell restored(
-        1.0F, DEFAULT_TERM_ID_LIMIT, allocator.get(), SparseValueQuantizationType::FP32, nullptr);
-    IOStreamReader reader(stream);
-    restored.Deserialize(reader);
-
-    REQUIRE(*restored.term_ids_[term] == Vector<uint16_t>({1, 0}, allocator.get()));
-}
-
-TEST_CASE("SparseTermDatacell Trusts Versioned Posting Order", "[ut][SparseTermDatacell]") {
-    auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    SparseTermDataCell source(
-        1.0F, DEFAULT_TERM_ID_LIMIT, allocator.get(), SparseValueQuantizationType::FP32, nullptr);
-
-    uint32_t term = 7;
-    std::vector<float> values = {1.0F, 4.0F};
-    for (uint16_t id = 0; id < values.size(); ++id) {
-        SparseVector vector{1, &term, &values[id]};
-        source.InsertVector(vector, id);
-    }
-
-    std::stringstream stream;
-    IOStreamWriter writer(stream);
-    source.Serialize(writer);
-
-    SparseTermDataCell restored(
-        1.0F, DEFAULT_TERM_ID_LIMIT, allocator.get(), SparseValueQuantizationType::FP32, nullptr);
-    IOStreamReader reader(stream);
-    // Preserve insertion order to prove the version marker skips normalization.
-    restored.Deserialize(reader, true);
-
-    REQUIRE(*restored.term_ids_[term] == Vector<uint16_t>({0, 1}, allocator.get()));
-}
-
-TEST_CASE("SparseTermDatacell FP16 Roundtrip Test", "[ut][SparseTermDatacell]") {
+TEST_CASE("MutableSindiTermDataCell FP16 Roundtrip Test", "[ut][MutableSindiTermDataCell]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
 
     std::vector<uint32_t> ids = {1, 3, 7};
@@ -471,8 +385,12 @@ TEST_CASE("SparseTermDatacell FP16 Roundtrip Test", "[ut][SparseTermDatacell]") 
     sv.ids_ = ids.data();
     sv.vals_ = vals.data();
 
-    auto data_cell = std::make_shared<SparseTermDataCell>(
-        1.0F, DEFAULT_TERM_ID_LIMIT, allocator.get(), SparseValueQuantizationType::FP16, nullptr);
+    auto data_cell = std::make_shared<MutableSindiTermDataCell>(1.0F,
+                                                                DEFAULT_TERM_ID_LIMIT,
+                                                                DEFAULT_WINDOW_SIZE,
+                                                                allocator.get(),
+                                                                SparseValueQuantizationType::FP16,
+                                                                nullptr);
     uint16_t base_id = 2;
     data_cell->InsertVector(sv, base_id);
 
@@ -488,7 +406,7 @@ TEST_CASE("SparseTermDatacell FP16 Roundtrip Test", "[ut][SparseTermDatacell]") 
     auto computer = std::make_shared<SparseTermComputer>(query_sv, search_params, allocator.get());
 
     std::vector<float> dists(4, 0.0F);
-    data_cell->Query(dists.data(), computer);
+    QueryFirstWindow(data_cell, dists.data(), computer, allocator.get());
     REQUIRE(std::abs(dists[base_id] + 7.5F) < 1e-3F);
 
     REQUIRE(std::abs(data_cell->CalcDistanceByInnerId(computer, base_id) - (1.0F - 7.5F)) < 1e-3F);
@@ -505,10 +423,14 @@ TEST_CASE("SparseTermDatacell FP16 Roundtrip Test", "[ut][SparseTermDatacell]") 
     allocator->Deallocate(retrieved_sv.vals_);
 }
 
-TEST_CASE("SparseTermDatacell Compact Memory Usage", "[ut][SparseTermDatacell]") {
+TEST_CASE("MutableSindiTermDataCell Compact Memory Usage", "[ut][MutableSindiTermDataCell]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    auto data_cell = std::make_shared<SparseTermDataCell>(
-        1.0F, DEFAULT_TERM_ID_LIMIT, allocator.get(), SparseValueQuantizationType::FP32, nullptr);
+    auto data_cell = std::make_shared<MutableSindiTermDataCell>(1.0F,
+                                                                DEFAULT_TERM_ID_LIMIT,
+                                                                DEFAULT_WINDOW_SIZE,
+                                                                allocator.get(),
+                                                                SparseValueQuantizationType::FP32,
+                                                                nullptr);
 
     std::vector<uint32_t> ids = {1, 3, 5};
     std::vector<float> vals = {1.0F, 2.0F, 3.0F};
@@ -518,28 +440,33 @@ TEST_CASE("SparseTermDatacell Compact Memory Usage", "[ut][SparseTermDatacell]")
     sparse_vector.vals_ = vals.data();
     data_cell->InsertVector(sparse_vector, 0);
 
-    data_cell->term_ids_[1]->reserve(32);
-    data_cell->term_datas_[1]->reserve(128);
-    auto compact_capacity = data_cell->term_capacity_;
-    auto reserved_id_capacity = data_cell->term_ids_[1]->capacity();
-    auto reserved_data_capacity = data_cell->term_datas_[1]->capacity();
+    data_cell->GetWindow(0).term_ids_[1]->reserve(32);
+    data_cell->GetWindow(0).term_datas_[1]->reserve(128);
+    auto compact_capacity = data_cell->GetWindow(0).term_capacity_;
+    auto reserved_id_capacity = data_cell->GetWindow(0).term_ids_[1]->capacity();
+    auto reserved_data_capacity = data_cell->GetWindow(0).term_datas_[1]->capacity();
     data_cell->ResizeTermList(128);
 
     auto memory_with_reserved_capacity = data_cell->GetMemoryUsage();
-    REQUIRE(data_cell->term_capacity_ >= 128);
+    REQUIRE(data_cell->GetWindow(0).term_capacity_ >= 128);
 
     data_cell->Compact();
 
-    REQUIRE(data_cell->term_capacity_ == compact_capacity);
-    REQUIRE(data_cell->term_ids_[1]->capacity() <= reserved_id_capacity);
-    REQUIRE(data_cell->term_datas_[1]->capacity() <= reserved_data_capacity);
+    REQUIRE(data_cell->GetWindow(0).term_capacity_ == compact_capacity);
+    REQUIRE(data_cell->GetWindow(0).term_ids_[1]->capacity() <= reserved_id_capacity);
+    REQUIRE(data_cell->GetWindow(0).term_datas_[1]->capacity() <= reserved_data_capacity);
     REQUIRE(data_cell->GetMemoryUsage() < memory_with_reserved_capacity);
 }
 
-TEST_CASE("SparseTermDatacell Deserialize Compacts Capacity", "[ut][SparseTermDatacell]") {
+TEST_CASE("MutableSindiTermDataCell Deserialize Compacts Capacity",
+          "[ut][MutableSindiTermDataCell]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    auto data_cell = std::make_shared<SparseTermDataCell>(
-        1.0F, DEFAULT_TERM_ID_LIMIT, allocator.get(), SparseValueQuantizationType::FP32, nullptr);
+    auto data_cell = std::make_shared<MutableSindiTermDataCell>(1.0F,
+                                                                DEFAULT_TERM_ID_LIMIT,
+                                                                DEFAULT_WINDOW_SIZE,
+                                                                allocator.get(),
+                                                                SparseValueQuantizationType::FP32,
+                                                                nullptr);
 
     std::vector<uint32_t> ids = {1, 3, 5};
     std::vector<float> vals = {1.0F, 2.0F, 3.0F};
@@ -552,18 +479,23 @@ TEST_CASE("SparseTermDatacell Deserialize Compacts Capacity", "[ut][SparseTermDa
 
     std::stringstream ss;
     IOStreamWriter writer(ss);
-    data_cell->Serialize(writer);
+    data_cell->SerializeWindows(writer);
 
-    SparseTermDataCell restored(
-        1.0F, DEFAULT_TERM_ID_LIMIT, allocator.get(), SparseValueQuantizationType::FP32, nullptr);
+    MutableSindiTermDataCell restored(1.0F,
+                                      DEFAULT_TERM_ID_LIMIT,
+                                      DEFAULT_WINDOW_SIZE,
+                                      allocator.get(),
+                                      SparseValueQuantizationType::FP32,
+                                      nullptr);
     IOStreamReader reader(ss);
-    restored.Deserialize(reader);
+    restored.DeserializeWindows(reader, 1);
 
-    REQUIRE(restored.term_capacity_ == 6);
+    REQUIRE(restored.GetWindow(0).term_capacity_ == 6);
     REQUIRE(restored.GetMemoryUsage() < data_cell->GetMemoryUsage());
 }
 
-TEST_CASE("SparseTermDatacell Deserialize Clears Stale Posting Lists", "[ut][SparseTermDatacell]") {
+TEST_CASE("MutableSindiTermDataCell Deserialize Clears Stale Posting Lists",
+          "[ut][MutableSindiTermDataCell]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     auto make_sparse_vector = [](std::vector<uint32_t>& ids, std::vector<float>& vals) {
         SparseVector sparse_vector;
@@ -573,15 +505,23 @@ TEST_CASE("SparseTermDatacell Deserialize Clears Stale Posting Lists", "[ut][Spa
         return sparse_vector;
     };
 
-    SparseTermDataCell stale(
-        1.0F, DEFAULT_TERM_ID_LIMIT, allocator.get(), SparseValueQuantizationType::FP32, nullptr);
+    MutableSindiTermDataCell stale(1.0F,
+                                   DEFAULT_TERM_ID_LIMIT,
+                                   DEFAULT_WINDOW_SIZE,
+                                   allocator.get(),
+                                   SparseValueQuantizationType::FP32,
+                                   nullptr);
     std::vector<uint32_t> stale_ids = {9};
     std::vector<float> stale_vals = {9.0F};
     auto stale_vector = make_sparse_vector(stale_ids, stale_vals);
     stale.InsertVector(stale_vector, 42);
 
-    SparseTermDataCell source(
-        1.0F, DEFAULT_TERM_ID_LIMIT, allocator.get(), SparseValueQuantizationType::FP32, nullptr);
+    MutableSindiTermDataCell source(1.0F,
+                                    DEFAULT_TERM_ID_LIMIT,
+                                    DEFAULT_WINDOW_SIZE,
+                                    allocator.get(),
+                                    SparseValueQuantizationType::FP32,
+                                    nullptr);
     std::vector<uint32_t> ids = {1};
     std::vector<float> vals = {1.0F};
     auto sparse_vector = make_sparse_vector(ids, vals);
@@ -589,17 +529,17 @@ TEST_CASE("SparseTermDatacell Deserialize Clears Stale Posting Lists", "[ut][Spa
 
     std::stringstream ss;
     IOStreamWriter writer(ss);
-    source.Serialize(writer);
+    source.SerializeWindows(writer);
 
     IOStreamReader reader(ss);
-    stale.Deserialize(reader);
+    stale.DeserializeWindows(reader, 1);
 
     REQUIRE(stale.total_count_ == 1);
-    REQUIRE(stale.term_capacity_ == 2);
-    REQUIRE(stale.term_ids_.size() == 2);
+    REQUIRE(stale.GetWindow(0).term_capacity_ == 2);
+    REQUIRE(stale.GetWindow(0).term_ids_.size() == 2);
 }
 
-TEST_CASE("SparseTermDatacell Last Term Test", "[ut][SparseTermDatacell]") {
+TEST_CASE("MutableSindiTermDataCell Last Term Test", "[ut][MutableSindiTermDataCell]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
 
     auto make_sv = [](const std::vector<uint32_t>& ids, const std::vector<float>& vals) {
@@ -625,8 +565,13 @@ TEST_CASE("SparseTermDatacell Last Term Test", "[ut][SparseTermDatacell]") {
         q_params->min_val = 0.0f;
         q_params->max_val = 0.1f;
         q_params->diff = q_params->max_val - q_params->min_val;
-        auto data_cell = std::make_shared<SparseTermDataCell>(
-            1, DEFAULT_TERM_ID_LIMIT, allocator.get(), SparseValueQuantizationType::FP32, q_params);
+        auto data_cell =
+            std::make_shared<MutableSindiTermDataCell>(1,
+                                                       DEFAULT_TERM_ID_LIMIT,
+                                                       DEFAULT_WINDOW_SIZE,
+                                                       allocator.get(),
+                                                       SparseValueQuantizationType::FP32,
+                                                       q_params);
         data_cell->InsertVector(sv0, ids[0]);
         data_cell->InsertVector(sv1, ids[1]);
 
@@ -641,7 +586,7 @@ TEST_CASE("SparseTermDatacell Last Term Test", "[ut][SparseTermDatacell]") {
             std::make_shared<SparseTermComputer>(sv_query, search_params, allocator.get());
 
         std::vector<float> dists(2, 0);
-        data_cell->Query(dists.data(), computer);
+        QueryFirstWindow(data_cell, dists.data(), computer, allocator.get());
         REQUIRE(std::abs(dists[0] - (-0.1f)) < 1e-2f);
         REQUIRE(std::abs(dists[1] - (-0.1f)) < 1e-2f);
     }

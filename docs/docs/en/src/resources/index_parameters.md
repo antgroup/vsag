@@ -154,7 +154,7 @@ split base codes and retains original FP32 vectors for decode-only operations. S
 [Pyramid page](../indexes/pyramid.md#mrle-with-split-rabitq) for a complete configuration and
 storage/recall tradeoffs.
 
-## SINDI (sparse vectors)
+## SINDI / SINDI V2 (sparse vectors)
 
 ```json
 {
@@ -163,13 +163,35 @@ storage/recall tradeoffs.
     "dim": 1024,
     "index_param": {
         "term_id_limit": 30000,
-        "doc_prune_ratio": 0.1
+        "window_size": 50000,
+        "doc_prune_ratio": 0.1,
+        "use_quantization": false,
+        "use_reorder": false,
+        "remap_term_ids": false,
+        "immutable": false
     }
 }
 ```
 
-See the [SINDI page](../indexes/sindi.md) for `use_quantization`, immutable builds, and search
-parameters such as `n_candidate`.
+The `sindi` factory entry uses window-first serialization, while `sindi_v2`
+uses term-first serialization. `immutable` selects the in-memory DataCell type
+without changing the entry's default layout. SINDI V2 additionally accepts
+`term_io` and `rerank_io` in `index_param`.
+
+Put search parameters under an object matching the factory entry:
+
+```json
+{
+    "sindi_v2": {
+        "n_candidate": 100,
+        "query_prune_ratio": 0.0,
+        "term_prune_ratio": 0.0,
+        "use_term_lists_heap_insert": true
+    }
+}
+```
+
+See [SINDI / SINDI V2](../indexes/sindi.md) for the full behavior and layout matrix.
 
 ## Runtime Parameters
 

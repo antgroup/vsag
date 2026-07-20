@@ -11,6 +11,7 @@ index-specific options.
 | `hgraph` | Improved graph index with richer quantization options | [HGraph](../indexes/hgraph.md) | `examples/cpp/103_index_hgraph.cpp` |
 | `ivf` | Inverted file with quantization | [IVF](../indexes/ivf.md) | `examples/cpp/106_index_ivf.cpp` |
 | `sindi` | Sparse-vector index (e.g. BM25, SPLADE) | [SINDI](../indexes/sindi.md) | `examples/cpp/109_index_sindi.cpp` |
+| `sindi_v2` | SINDI with term-first persistence and external IO | [SINDI V2](../indexes/sindi.md) | — |
 | `pyramid` | Multi-tenant / tag-partitioned graph index | [Pyramid](../indexes/pyramid.md) | `examples/cpp/107_index_pyramid.cpp` |
 | `brute_force` | Exact exhaustive search; useful as baseline | — | `examples/cpp/105_index_brute_force.cpp` |
 

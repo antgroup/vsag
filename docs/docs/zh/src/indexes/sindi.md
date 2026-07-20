@@ -2,12 +2,13 @@
 
 ![SINDI：按窗口维护的每词项倒排表，只对查询非零词项对应的列表做遍历并累加进 n_candidate 候选堆](../figures/indexes/sindi-overview.svg)
 
-SINDI（**S**parse **IN**verted **D**ense **I**ndex）是 VSAG 面向 **稀疏向量** 的索引——
+SINDI（**S**parse **IN**verted **D**ense **I**ndex）系列是 VSAG 面向 **稀疏向量** 的索引——
 例如 BM25、SPLADE 以及其他学习稀疏（learned sparse）编码器产出的向量。与稠密索引
-（HGraph、IVF）不同，SINDI 直接在“词项-权重”对上工作，是 VSAG 中唯一接受
-`dtype: "sparse"` 的索引。
+（HGraph、IVF）不同，SINDI 系列直接在“词项-权重”对上工作，是 VSAG 中唯一接受
+`dtype: "sparse"` 的索引系列。
 
 - 源码：`src/algorithm/sindi/`
+- SINDI V2 源码：`src/algorithm/sindi_v2/`
 - 示例：[`examples/cpp/109_index_sindi.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/109_index_sindi.cpp)
 
 ## 工作原理
@@ -22,6 +23,41 @@ SINDI（**S**parse **IN**verted **D**ense **I**ndex）是 VSAG 面向 **稀疏�
    DMQ 正排以降低重排内存。
 
 返回的距离为 `1 - inner_product`，使结果与稠密索引一样按升序排序。
+
+## `sindi` 与 `sindi_v2`
+
+两个入口使用相同的窗口化倒排搜索模型、构建参数和距离定义，主要区别是序列化布局：
+
+| 工厂入口 | `immutable` | 内存 DataCell | 落盘布局 |
+| --- | ---: | --- | --- |
+| `sindi` | `false` | mutable | mutable window-first |
+| `sindi` | `true` | immutable | immutable sparse window-first |
+| `sindi_v2` | `false` | mutable | term-first |
+| `sindi_v2` | `true` | immutable | term-first |
+
+- `sindi` 适合索引整体驻留内存并按 window 顺序保存、恢复的场景。
+- `sindi_v2` 的 term-first 格式支持按查询词项从 `reader_io`、`mmap_io`、
+  `buffer_io` 或 `async_io` 读取 posting；`term_io` 只改变反序列化后的驻留位置，
+  不改变文件格式。
+- immutable 构建时只创建一个 mutable staging window；当前 window compact 并压入
+  `ImmutableSINDIWindow` 后立即释放，再构建下一个 window。
+- `SetImmutable()` 只把索引生命周期切换为只读，不会把 mutable DataCell 转换成
+  immutable DataCell。
+
+SINDI V2 的单 term payload 只保存非空 window：
+
+```text
+non_empty_window_count
+ordered {window_id, posting_count}[]
+local_doc_ids[]
+alignment padding
+encoded_values[]
+```
+
+查询读入后会一次性将稀疏 metadata 展开为长度为 `window_count + 1` 的 dense
+`window_offsets`；window `i` 的 posting 范围为
+`[window_offsets[i], window_offsets[i + 1])`。term dict 在开启 `remap_term_ids` 时写入
+`mapper.Size()` 个紧凑 term；未开启时只写到 `max_active_term`。
 
 ## 快速开始
 
@@ -67,16 +103,28 @@ auto result = index->KnnSearch(
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `dim` | int | —（必填） | 单条稀疏向量允许的最大非零项数量，**不是** 词表大小 |
-| `term_id_limit` | int | `1000000` | 词项 ID 的上界（应 ≥ 最大词项 ID + 1，最高 50 000 000） |
+| `term_id_limit` | int | `1000000` | 词项 ID 的上界（应 ≥ 最大词项 ID + 1）；`sindi` 最高 50 000 000，`sindi_v2` 最高 10 000 000 |
 | `window_size` | int | `50000` | 每个窗口容纳的文档数（取值范围 10 000 – 60 000） |
-| `doc_prune_ratio` | float | `0.0` | 构建阶段按文档丢弃权重最低词项的比例，取值范围为 `[0.0, 1.0)` |
+| `doc_prune_ratio` | float | `0.0` | 构建阶段按文档丢弃权重最低词项的比例（0.0 – 0.9） |
 | `use_quantization` | bool 或 string | `false` | `false` 存 FP32，`true` 存 SQ8，`"fp16"` 存 FP16 |
-| `use_reorder` | bool | `false` | 是否保留一份正排存储，在 SINDI 粗排后对候选做精排 |
+| `use_reorder` | bool | `false` | 是否保留一份高精度正排存储，在 SINDI 粗排后对候选做精排（FP32 时内存约翻倍） |
 | `rerank_type` | string | `"fp32"` | `use_reorder` 开启时使用的正排存储类型。`fp32` 保留精确值；`dmq8` 使用压缩的 8-bit DMQ 编码 |
 | `dmq_shared_codebook_threshold` | int | `1024` | `rerank_type: "dmq8"` 时，出现次数不超过该值的 term 共用一个 codebook；更高频的 term 保持独立 codebook。设为 `0` 可关闭共享 |
 | `remap_term_ids` | bool | `false` | 是否在建索引前重映射词项 ID，适用于词项 ID 很稀疏或存在大量空洞的词表 |
 | `avg_doc_term_length` | int | `100` | 仅用于内存估算 |
 | `immutable` | bool | `false` | 构建或加载紧凑的只读运行态；`Build()` 会逐窗口压缩以降低峰值内存，增量 `Add()` 会被拒绝 |
+
+`sindi_v2` 还支持：
+
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `term_io` | object | `{"type": "reader_io"}` | 反序列化 term-first posting 时使用的后端；支持 `reader_io`、内存 IO，以及 `mmap_io`、`buffer_io`、`async_io` 等文件后端。文件后端必须配置 `file_path` |
+| `rerank_io` | object | `{"type": "block_memory_io"}` | 开启 `use_reorder` 时保存精排向量的后端；文件后端未配置 `file_path` 时，默认使用 `<term_io.file_path>.rerank` |
+| `rerank_layout` | string | `"none"` | 精排向量布局，可选 `"none"` 或 `"top_terms_signature"`；后者要求 `use_reorder: true` |
+| `rerank_layout_top_terms` | int | `16` | `"top_terms_signature"` 使用的前导 term 数量，必须为正整数 |
+
+查询参数应放在与入口同名的子对象下：`sindi` 使用 `{"sindi": {...}}`，
+`sindi_v2` 使用 `{"sindi_v2": {...}}`。
 
 > **`dim` 与 `term_id_limit` 的区别。** 对于稀疏向量 `{0:0.1, 2:0.5, 177:0.8}`，
 > `dim` 为 `3`（三个非零项），而 `term_id_limit` 至少应为 `178`（最大词项 ID + 1）。
@@ -122,12 +170,10 @@ auto result = index->KnnSearch(
 `Add`、`GetSparseVectorByInnerId`、`CalcDistanceById` 与 `CalDistanceById`。
 不可变 SINDI 不支持流式序列化；需要流式格式时应保持索引可变，或使用匹配的旧版序列化接口。
 反序列化时，新建 SINDI 的 `immutable` 设置必须与存储格式一致。
-新索引会记录有序倒排链格式版本，加载时可跳过归一化排序；缺少该标记的旧索引仍保持兼容，
-并在加载时完成排序归一化。
 
 ## 检索参数
 
-检索参数放在 `sindi` 子对象下：
+检索参数放在与工厂入口同名的子对象下：
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
@@ -142,7 +188,8 @@ auto result = index->KnnSearch(
 SINDI 会根据构建阶段的 `doc_prune_ratio` 与检索阶段的 `query_prune_ratio`
 自动选择堆插入策略。按当前 `0.1` 阈值，当两个比例都 `<= 0.1` 时，SINDI 使用
 基于距离数组的入堆路径；只要任一比例大于 `0.1`，就使用基于 term-list 的入堆路径。
-旧版 `use_term_lists_heap_insert` 检索参数会被忽略；请改用剪枝比例控制该行为。
+`sindi` 会忽略旧版 `use_term_lists_heap_insert` 检索参数；请改用剪枝比例控制该行为。
+`sindi_v2` 则使用显式的布尔配置。
 
 ```cpp
 auto result = index->KnnSearch(

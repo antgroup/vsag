@@ -14,7 +14,7 @@
 
 
 add_subdirectory (sindi)
-add_subdirectory (disksindi)
+add_subdirectory (sindi_v2)
 add_subdirectory (hgraph)
 add_subdirectory (lazy_hgraph)
 add_subdirectory (bruteforce)
@@ -34,7 +34,7 @@ maybe_add_dependencies (algorithm antlr4)
 set (ALGORITHM_LIBS
         algorithm
         sindi
-        disksindi
+        sindi_v2
         hgraph
         lazy_hgraph
         bruteforce

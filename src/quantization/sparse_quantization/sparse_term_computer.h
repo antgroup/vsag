@@ -22,8 +22,8 @@
 #include <memory>
 #include <type_traits>
 
-#include "algorithm/disksindi/disksindi_parameter.h"
 #include "algorithm/sindi/sindi_parameter.h"
+#include "algorithm/sindi_v2/sindi_v2_parameter.h"
 #include "metric_type.h"
 #include "simd/fp16_simd.h"
 #include "simd/fp32_simd.h"
@@ -62,7 +62,7 @@ public:
     }
 
     explicit SparseTermComputer(const SparseVector& sparse_query,
-                                const DiskSINDISearchParameter& search_param,
+                                const SINDIV2SearchParameter& search_param,
                                 Allocator* allocator = nullptr)
         : sorted_query_(allocator),
           query_retain_ratio_(1.0F - search_param.query_prune_ratio),
