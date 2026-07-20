@@ -1519,7 +1519,8 @@ SINDI::Deserialize(StreamReader& reader) {
             throw;
         }
     }
-    CHECK_ARGUMENT(has_footer || not immutable_enabled_,
+    const bool valid_footer = not immutable_enabled_ or has_footer;
+    CHECK_ARGUMENT(valid_footer,
                    "cannot deserialize SINDI storage without immutable format metadata into "
                    "immutable runtime");
     auto* reader_ptr = &reader;
@@ -1644,7 +1645,7 @@ SINDI::compact_window_to_immutable(const SparseTermDataCell& term_list,
 }
 
 void
-SINDI::serialize_immutable_window(StreamWriter& writer, const ImmutableSINDIWindow& window) const {
+SINDI::serialize_immutable_window(StreamWriter& writer, const ImmutableSINDIWindow& window) {
     StreamWriter::WriteVector(writer, window.sorted_global_terms);
     StreamWriter::WriteVector(writer, window.offsets);
     StreamWriter::WriteVector(writer, window.id_payloads);
@@ -1657,8 +1658,9 @@ SINDI::deserialize_immutable_window(StreamReader& reader_ref, ImmutableSINDIWind
     const auto read_vector = [&reader_ref](auto& values, uint64_t max_size, const char* message) {
         uint64_t size = 0;
         StreamReader::ReadObj(reader_ref, size);
-        CHECK_ARGUMENT(size <= max_size && size <= static_cast<uint64_t>(values.max_size()),
-                       message);
+        const auto max_value_size = static_cast<uint64_t>(values.max_size());
+        const bool valid_size = size <= max_size and size <= max_value_size;
+        CHECK_ARGUMENT(valid_size, message);
         values.resize(size);
         reader_ref.Read(reinterpret_cast<char*>(values.data()),
                         size * sizeof(typename std::decay_t<decltype(values)>::value_type));
@@ -1672,9 +1674,10 @@ SINDI::deserialize_immutable_window(StreamReader& reader_ref, ImmutableSINDIWind
     StreamReader::ReadObj(reader_ref, offset_count);
     const auto max_offset_count = remap_term_ids_ ? static_cast<uint64_t>(term_id_limit_) + 1
                                                   : static_cast<uint64_t>(term_id_limit_) * 2 + 1;
-    CHECK_ARGUMENT(offset_count <= max_offset_count &&
-                       offset_count <= static_cast<uint64_t>(window.offsets.max_size()),
-                   "immutable SINDI offset count exceeds capacity bound");
+    const auto max_offset_capacity = static_cast<uint64_t>(window.offsets.max_size());
+    const bool valid_offset_count =
+        offset_count <= max_offset_count and offset_count <= max_offset_capacity;
+    CHECK_ARGUMENT(valid_offset_count, "immutable SINDI offset count exceeds capacity bound");
     if (remap_term_ids_) {
         CHECK_ARGUMENT(offset_count == static_cast<uint64_t>(window.sorted_global_terms.size()) + 1,
                        "immutable SINDI term and offset counts do not match");
@@ -1691,7 +1694,7 @@ SINDI::deserialize_immutable_window(StreamReader& reader_ref, ImmutableSINDIWind
         CHECK_ARGUMENT(
             std::adjacent_find(window.sorted_global_terms.begin(),
                                window.sorted_global_terms.end(),
-                               std::greater_equal<uint32_t>()) == window.sorted_global_terms.end(),
+                               std::greater_equal<>()) == window.sorted_global_terms.end(),
             "immutable SINDI remapped terms must be strictly increasing");
     } else {
         CHECK_ARGUMENT(window.sorted_global_terms.empty(),

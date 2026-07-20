@@ -258,8 +258,8 @@ private:
     void
     deserialize_immutable_window(StreamReader& reader_ref, ImmutableSINDIWindow& window) const;
 
-    void
-    serialize_immutable_window(StreamWriter& writer, const ImmutableSINDIWindow& window) const;
+    static void
+    serialize_immutable_window(StreamWriter& writer, const ImmutableSINDIWindow& window);
 
     void
     compact_window_to_immutable(const SparseTermDataCell& term_list,
