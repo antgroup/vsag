@@ -12,22 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-/**
- * @file unittest.h
- * @brief Entry point header for unit tests, includes core test utilities and catch2.
- */
-
 #pragma once
 
-#include <catch2/catch_template_test_macros.hpp>
-#include <catch2/catch_test_macros.hpp>
-#include <catch2/generators/catch_generators.hpp>
-#include <catch2/matchers/catch_matchers.hpp>
-#include <catch2/matchers/catch_matchers_string.hpp>
+#include <cstdint>
 
-#include "core/common.h"
-#include "core/random.h"
-#include "core/temp_dir.h"
-#include "core/types.h"
-#include "data/ground_truth.h"
-#include "data/vector_generator.h"
+namespace vsag {
+
+void
+RecordRerankIOStats(uint64_t payload_bytes,
+                    const uint64_t* sizes,
+                    const uint64_t* offsets,
+                    uint64_t count);
+
+}  // namespace vsag

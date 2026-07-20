@@ -12,6 +12,7 @@ VSAG 中所有检索能力都围绕 `Index` 接口展开。要使用某种索引
 | HGraph         | `hgraph`        | [HGraph](../indexes/hgraph.md)        | VSAG 自研图索引，支持多级量化和调优（详见 `examples/cpp/103_index_hgraph.cpp`） |
 | IVF            | `ivf`           | [IVF](../indexes/ivf.md)              | 倒排索引，适合大 `k` 和批量查询                     |
 | SINDI          | `sindi`         | [SINDI](../indexes/sindi.md)          | 稀疏向量上的倒排索引                                |
+| SINDI V2       | `sindi_v2`      | [SINDI V2](../indexes/sindi.md) | 支持 term-first 落盘和外部 IO 的稀疏倒排索引 |
 | Pyramid        | `pyramid`       | [Pyramid](../indexes/pyramid.md)      | 多层级 / 按路径分区的索引结构                       |
 | BruteForce     | `brute_force`   | —                                     | 暴力搜索，用作基准或小数据集                        |
 | GNO-IMI        | `gno_imi`       | —                                     | 基于 GNO-IMI 的倒排索引变体（作为 `ivf` 的 `partition_strategy_type`）|

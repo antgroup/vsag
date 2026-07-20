@@ -185,10 +185,7 @@ SINDIAnalyzer::get_pruned_sparse_vector_by_inner_id(InnerIdType inner_id,
     std::shared_lock rlock(sindi_->global_mutex_);
     Allocator* allocator =
         specified_allocator != nullptr ? specified_allocator : sindi_->allocator_;
-    auto cur_window = inner_id / sindi_->window_size_;
-    auto window_start_id = cur_window * sindi_->window_size_;
-    auto term_list = sindi_->window_term_list_[cur_window];
-    term_list->GetSparseVector(inner_id - window_start_id, data, allocator);
+    sindi_->term_datacell_->GetSparseVector(inner_id, data, allocator);
     if (sindi_->remap_term_ids_ && sindi_->term_id_mapper_) {
         for (uint32_t i = 0; i < data->len_; ++i) {
             data->ids_[i] = sindi_->term_id_mapper_->ReverseMap(data->ids_[i]);
@@ -225,16 +222,38 @@ SINDIAnalyzer::collect_coarse_candidates(const SparseVector& query,
     const bool use_term_lists_heap_insert = sindi_->UseTermListsHeapInsert(search_param);
 
     Vector<float> dists(sindi_->window_size_, 0.0F, sindi_->allocator_);
-    for (int64_t cur = 0; cur < static_cast<int64_t>(sindi_->window_term_list_.size()); ++cur) {
+    const QueryTermBuffers query_term_buffers(sindi_->allocator_);
+    for (int64_t cur = 0; cur < static_cast<int64_t>(sindi_->term_datacell_->GetWindowCount());
+         ++cur) {
         auto window_start_id = static_cast<uint32_t>(cur * sindi_->window_size_);
-        auto term_list = sindi_->window_term_list_[cur];
-        term_list->Query(dists.data(), computer);
+        std::fill(dists.begin(), dists.end(), 0.0F);
+        sindi_->term_datacell_->QueryWindow(dists.data(),
+                                            static_cast<uint32_t>(cur),
+                                            computer,
+                                            use_term_lists_heap_insert,
+                                            query_term_buffers);
         if (use_term_lists_heap_insert) {
-            term_list->InsertHeapByTermLists<KNN_SEARCH, PURE>(
-                dists.data(), computer, heap, inner_param, window_start_id);
+            sindi_->term_datacell_->InsertHeapByWindow(dists.data(),
+                                                       static_cast<uint32_t>(cur),
+                                                       computer,
+                                                       heap,
+                                                       inner_param,
+                                                       window_start_id,
+                                                       KNN_SEARCH,
+                                                       false,
+                                                       query_term_buffers);
         } else {
-            term_list->InsertHeapByDists<KNN_SEARCH, PURE>(
-                dists.data(), dists.size(), heap, inner_param, window_start_id);
+            const auto remaining = static_cast<uint64_t>(sindi_->cur_element_count_) -
+                                   static_cast<uint64_t>(window_start_id);
+            const auto window_document_count =
+                static_cast<uint32_t>(std::min<uint64_t>(sindi_->window_size_, remaining));
+            sindi_->term_datacell_->InsertHeapByDists(dists.data(),
+                                                      window_document_count,
+                                                      heap,
+                                                      inner_param,
+                                                      window_start_id,
+                                                      KNN_SEARCH,
+                                                      false);
         }
     }
 
@@ -255,6 +274,10 @@ SINDIAnalyzer::collect_doc_prune_candidates(const SparseVector& query,
     std::vector<std::pair<float, int64_t>> doc_prune_candidates;
     if (candidate_count <= 0 || query.len_ == 0) {
         return doc_prune_candidates;
+    }
+    if (sindi_->mutable_term_datacell_ == nullptr) {
+        rlock.unlock();
+        return this->collect_coarse_candidates(query, search_param, candidate_count);
     }
 
     SparseVector effective_query = query;
@@ -277,42 +300,41 @@ SINDIAnalyzer::collect_doc_prune_candidates(const SparseVector& query,
 
     Vector<float> dists(sindi_->window_size_, 0.0F, sindi_->allocator_);
 
-    for (int64_t cur = 0; cur < static_cast<int64_t>(sindi_->window_term_list_.size()); ++cur) {
+    for (int64_t cur = 0;
+         cur < static_cast<int64_t>(sindi_->mutable_term_datacell_->GetWindowCount());
+         ++cur) {
         auto window_start_id = static_cast<uint32_t>(cur * sindi_->window_size_);
-        auto term_list = sindi_->window_term_list_[cur];
-        if (term_list == nullptr) {
-            continue;
-        }
+        const auto& term_list = sindi_->mutable_term_datacell_->GetWindow(cur);
         std::fill(dists.begin(), dists.end(), 0.0F);
 
         while (computer->HasNextTerm()) {
             auto term_idx = computer->NextTermIter();
             auto term = computer->GetTerm(term_idx);
-            if (term >= term_list->term_sizes_.size() || term_list->term_sizes_[term] == 0) {
+            if (term >= term_list.term_sizes_.size() || term_list.term_sizes_[term] == 0) {
                 continue;
             }
-            auto term_size = static_cast<uint32_t>(
-                static_cast<float>(term_list->term_sizes_[term]) * computer->term_retain_ratio_);
+            auto term_size = static_cast<uint32_t>(static_cast<float>(term_list.term_sizes_[term]) *
+                                                   computer->term_retain_ratio_);
             if (term_size == 0) {
                 continue;
             }
 
-            if (is_sq8_value_quantization(term_list->sparse_value_quant_type_)) {
+            if (is_sq8_value_quantization(sindi_->sparse_value_quant_type_)) {
                 computer->ScanForAccumulateSQ8(term_idx,
-                                               term_list->term_ids_[term]->data(),
-                                               term_list->term_datas_[term]->data(),
+                                               term_list.term_ids_[term]->data(),
+                                               term_list.term_datas_[term]->data(),
                                                term_size,
                                                dists.data());
-            } else if (term_list->sparse_value_quant_type_ == SparseValueQuantizationType::FP16) {
+            } else if (sindi_->sparse_value_quant_type_ == SparseValueQuantizationType::FP16) {
                 computer->ScanForAccumulateFP16Bytes(term_idx,
-                                                     term_list->term_ids_[term]->data(),
-                                                     term_list->term_datas_[term]->data(),
+                                                     term_list.term_ids_[term]->data(),
+                                                     term_list.term_datas_[term]->data(),
                                                      term_size,
                                                      dists.data());
             } else {
                 computer->ScanForAccumulateFloatBytes(term_idx,
-                                                      term_list->term_ids_[term]->data(),
-                                                      term_list->term_datas_[term]->data(),
+                                                      term_list.term_ids_[term]->data(),
+                                                      term_list.term_datas_[term]->data(),
                                                       term_size,
                                                       dists.data());
             }
@@ -320,11 +342,19 @@ SINDIAnalyzer::collect_doc_prune_candidates(const SparseVector& query,
         computer->ResetTerm();
 
         if (use_term_lists_heap_insert) {
-            term_list->InsertHeapByTermLists<KNN_SEARCH, PURE>(
-                dists.data(), computer, heap, inner_param, window_start_id);
+            const QueryTermBuffers query_term_buffers(sindi_->allocator_);
+            sindi_->mutable_term_datacell_->InsertHeapByWindow(dists.data(),
+                                                               cur,
+                                                               computer,
+                                                               heap,
+                                                               inner_param,
+                                                               window_start_id,
+                                                               KNN_SEARCH,
+                                                               false,
+                                                               query_term_buffers);
         } else {
-            term_list->InsertHeapByDists<KNN_SEARCH, PURE>(
-                dists.data(), dists.size(), heap, inner_param, window_start_id);
+            sindi_->mutable_term_datacell_->InsertHeapByDists(
+                dists.data(), dists.size(), heap, inner_param, window_start_id, KNN_SEARCH, false);
         }
     }
 
@@ -721,22 +751,38 @@ JsonType
 SINDIAnalyzer::get_active_term_count_stats() const {
     std::vector<float> active_means;
     std::vector<float> active_counts;
-    active_means.reserve(sindi_->window_term_list_.size());
-    active_counts.reserve(sindi_->window_term_list_.size());
+    const auto window_count = sindi_->term_datacell_->GetWindowCount();
+    active_means.reserve(window_count);
+    active_counts.reserve(window_count);
 
-    for (const auto& window : sindi_->window_term_list_) {
-        if (window == nullptr) {
-            continue;
-        }
-        float active_count = 0.0F;
-        for (uint32_t term_size : window->term_sizes_) {
-            if (term_size > 0) {
-                active_count += 1.0F;
+    if (sindi_->immutable_term_datacell_ != nullptr) {
+        for (const auto& window : sindi_->immutable_term_datacell_->GetWindows()) {
+            float active_count = 0.0F;
+            for (uint64_t term = 0; term + 1 < window.offsets.size(); ++term) {
+                if (window.offsets[term] != window.offsets[term + 1]) {
+                    active_count += 1.0F;
+                }
             }
+            active_counts.push_back(active_count);
+            const auto denominator = static_cast<float>(
+                std::max<uint64_t>(1,
+                                   sindi_->remap_term_ids_ ? window.sorted_global_terms.size()
+                                                           : window.offsets.size() - 1));
+            active_means.push_back(active_count / denominator);
         }
-        active_counts.push_back(active_count);
-        auto denominator = static_cast<float>(std::max(1U, window->term_capacity_));
-        active_means.push_back(active_count / denominator);
+    } else {
+        for (uint32_t window_id = 0; window_id < window_count; ++window_id) {
+            const auto& window = sindi_->mutable_term_datacell_->GetWindow(window_id);
+            float active_count = 0.0F;
+            for (uint32_t term_size : window.term_sizes_) {
+                if (term_size > 0) {
+                    active_count += 1.0F;
+                }
+            }
+            active_counts.push_back(active_count);
+            auto denominator = static_cast<float>(std::max(1U, window.term_capacity_));
+            active_means.push_back(active_count / denominator);
+        }
     }
 
     JsonType stats;
@@ -860,11 +906,29 @@ SINDIAnalyzer::calculate_postings_scanned_stats(const DatasetPtr& query_dataset,
                 term = compact.value();
             }
             bool has_posting = false;
-            for (const auto& window : sindi_->window_term_list_) {
-                if (window != nullptr && term < window->term_sizes_.size() &&
-                    window->term_sizes_[term] > 0) {
-                    has_posting = true;
-                    break;
+            if (sindi_->immutable_term_datacell_ != nullptr) {
+                for (const auto& window : sindi_->immutable_term_datacell_->GetWindows()) {
+                    if (sindi_->remap_term_ids_) {
+                        has_posting = std::binary_search(window.sorted_global_terms.begin(),
+                                                         window.sorted_global_terms.end(),
+                                                         term);
+                    } else {
+                        has_posting = term + 1 < window.offsets.size() &&
+                                      window.offsets[term] != window.offsets[term + 1];
+                    }
+                    if (has_posting) {
+                        break;
+                    }
+                }
+            } else {
+                for (uint32_t window_id = 0;
+                     window_id < sindi_->mutable_term_datacell_->GetWindowCount();
+                     ++window_id) {
+                    const auto& window = sindi_->mutable_term_datacell_->GetWindow(window_id);
+                    if (term < window.term_sizes_.size() && window.term_sizes_[term] > 0) {
+                        has_posting = true;
+                        break;
+                    }
                 }
             }
             if (has_posting) {
@@ -954,13 +1018,23 @@ SINDIAnalyzer::get_base_search_stats(const std::string& search_param,
 JsonType
 SINDIAnalyzer::get_posting_length_distribution_stats() const {
     std::vector<float> posting_lengths;
-    for (const auto& window : sindi_->window_term_list_) {
-        if (window == nullptr) {
-            continue;
+    if (sindi_->immutable_term_datacell_ != nullptr) {
+        for (const auto& window : sindi_->immutable_term_datacell_->GetWindows()) {
+            for (uint64_t term = 0; term + 1 < window.offsets.size(); ++term) {
+                const auto term_size = window.offsets[term + 1] - window.offsets[term];
+                if (term_size > 0) {
+                    posting_lengths.push_back(static_cast<float>(term_size));
+                }
+            }
         }
-        for (uint32_t term_size : window->term_sizes_) {
-            if (term_size > 0) {
-                posting_lengths.push_back(static_cast<float>(term_size));
+    } else {
+        for (uint32_t window_id = 0; window_id < sindi_->mutable_term_datacell_->GetWindowCount();
+             ++window_id) {
+            const auto& window = sindi_->mutable_term_datacell_->GetWindow(window_id);
+            for (uint32_t term_size : window.term_sizes_) {
+                if (term_size > 0) {
+                    posting_lengths.push_back(static_cast<float>(term_size));
+                }
             }
         }
     }
@@ -1182,9 +1256,9 @@ SINDIAnalyzer::GetStats() {
 
     JsonType stats;
     stats["total_count"].SetUint64(static_cast<uint64_t>(sindi_->cur_element_count_));
-    const auto window_count = sindi_->immutable_data_ == nullptr
-                                  ? sindi_->window_term_list_.size()
-                                  : sindi_->immutable_data_->windows.size();
+    const auto window_count = sindi_->immutable_term_datacell_ == nullptr
+                                  ? sindi_->mutable_term_datacell_->GetWindowCount()
+                                  : sindi_->immutable_term_datacell_->GetWindows().size();
     stats["window_count"].SetUint64(static_cast<uint64_t>(window_count));
     stats["active_term_count"].SetJson(get_active_term_count_stats());
     stats["posting_length_distribution"].SetJson(get_posting_length_distribution_stats());

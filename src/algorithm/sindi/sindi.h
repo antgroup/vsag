@@ -20,33 +20,11 @@
 #include "algorithm/inner_index_interface.h"
 #include "algorithm/sindi/term_id_mapper.h"
 #include "datacell/flatten_interface.h"
-#include "datacell/sparse_term_datacell.h"
+#include "datacell/immutable_sindi_term_datacell.h"
+#include "datacell/mutable_sindi_term_datacell.h"
 #include "vsag/allocator.h"
 
 namespace vsag {
-
-struct ImmutableSINDIWindow {
-    explicit ImmutableSINDIWindow(Allocator* allocator)
-        : sorted_global_terms(allocator),
-          offsets(allocator),
-          id_payloads(allocator),
-          value_payloads(allocator) {
-    }
-
-    Vector<uint32_t> sorted_global_terms;
-    Vector<uint32_t> offsets;
-    Vector<uint16_t> id_payloads;
-    Vector<uint8_t> value_payloads;
-};
-
-struct ImmutableSINDIData {
-    explicit ImmutableSINDIData(Allocator* allocator) : windows(allocator) {
-    }
-
-    uint32_t value_code_size{0};
-    SparseValueQuantizationType sparse_value_quant_type{SparseValueQuantizationType::FP32};
-    Vector<ImmutableSINDIWindow> windows;
-};
 
 /**
  * @brief SINDI: Sparse INverted Index with windowed term lists.
@@ -68,8 +46,6 @@ struct ImmutableSINDIData {
  */
 class SINDI : public InnerIndexInterface {
 public:
-    using ImmutableMappedQueryTerms = Vector<std::pair<uint32_t, uint32_t>>;
-
     static ParamPtr
     CheckAndMappingExternalParam(const JsonType& external_param,
                                  const IndexCommonParam& common_param);
@@ -210,14 +186,6 @@ private:
                 bool use_term_lists_heap_insert,
                 const SparseVector* original_query = nullptr) const;
 
-    template <InnerSearchMode mode>
-    DatasetPtr
-    immutable_search_impl(const SparseTermComputerPtr& computer,
-                          const InnerSearchParam& inner_param,
-                          Allocator* allocator,
-                          bool use_term_lists_heap_insert,
-                          const SparseVector* original_query = nullptr) const;
-
     bool
     UseTermListsHeapInsert(const SINDISearchParameter& search_param) const;
 
@@ -261,65 +229,17 @@ private:
     void
     serialize_immutable_window(StreamWriter& writer, const ImmutableSINDIWindow& window) const;
 
-    void
-    compact_window_to_immutable(const SparseTermDataCell& term_list,
-                                ImmutableSINDIWindow& window) const;
+    std::vector<int64_t>
+    add(const DatasetPtr& base);
 
     std::vector<int64_t>
     build_immutable(const DatasetPtr& base);
 
-    std::optional<uint32_t>
-    get_immutable_local_term(const ImmutableSINDIWindow& window, uint32_t term) const;
+    void
+    create_immutable_staging();
 
     void
-    map_immutable_query_terms(const ImmutableSINDIWindow& window,
-                              const SparseTermComputerPtr& computer,
-                              ImmutableMappedQueryTerms& mapped_terms) const;
-
-    void
-    scan_immutable_window_by_mapped_terms(float* dists,
-                                          const ImmutableSINDIWindow& window,
-                                          const SparseTermComputerPtr& computer,
-                                          const ImmutableMappedQueryTerms& mapped_terms) const;
-
-    template <InnerSearchMode mode, InnerSearchType type>
-    void
-    immutable_insert_candidate_into_heap(uint32_t id,
-                                         float& dist,
-                                         float& cur_heap_top,
-                                         MaxHeap& heap,
-                                         uint32_t offset_id,
-                                         float radius,
-                                         int range_search_limit_size,
-                                         const FilterPtr& filter) const;
-
-    template <InnerSearchType type>
-    bool
-    immutable_fill_heap_initial(uint32_t id,
-                                float& dist,
-                                float& cur_heap_top,
-                                MaxHeap& heap,
-                                uint32_t offset_id,
-                                uint32_t n_candidate,
-                                const FilterPtr& filter) const;
-
-    template <InnerSearchMode mode, InnerSearchType type>
-    void
-    immutable_insert_heap_by_mapped_terms(float* dists,
-                                          const ImmutableSINDIWindow& window,
-                                          const SparseTermComputerPtr& computer,
-                                          const ImmutableMappedQueryTerms& mapped_terms,
-                                          MaxHeap& heap,
-                                          const InnerSearchParam& param,
-                                          uint32_t offset_id) const;
-
-    template <InnerSearchMode mode, InnerSearchType type>
-    void
-    immutable_insert_heap_by_dists(float* dists,
-                                   uint32_t dists_size,
-                                   MaxHeap& heap,
-                                   const InnerSearchParam& param,
-                                   uint32_t offset_id) const;
+    flush_immutable_staging();
 
     /// Recalculate and cache the memory-usage counter.
     void
@@ -349,7 +269,8 @@ private:
     uint32_t term_id_limit_{0};  // max number of distinct terms per window
     uint32_t window_size_{0};    // number of vectors per window
 
-    Vector<SparseTermDataCellPtr> window_term_list_;  // one inverted list per window
+    SindiTermDataCellPtr term_datacell_{nullptr};
+    MutableSindiTermDataCellPtr mutable_term_datacell_{nullptr};
 
     std::atomic<int64_t> cur_element_count_{0};  // total inserted vectors
     std::atomic<int64_t> delete_count_{0};       // soft-deleted vectors
@@ -373,7 +294,7 @@ private:
     std::shared_ptr<TermIdMapper> term_id_mapper_{nullptr};  // maps external->internal ids
 
     bool immutable_enabled_{false};
-    std::unique_ptr<ImmutableSINDIData> immutable_data_{nullptr};
+    ImmutableSindiTermDataCellPtr immutable_term_datacell_{nullptr};
 };
 
 }  // namespace vsag

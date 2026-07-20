@@ -14,8 +14,10 @@
 # limitations under the License.
 
 
-add_subdirectory (eval)
-add_subdirectory (check_compatibility)
-add_subdirectory (analyze_index)
-add_subdirectory (deserialize_only)
-add_subdirectory (visualize_index)
+set(SINDI_V2_SRCS
+        sindi_v2.cpp
+        sindi_v2_parameter.cpp
+)
+
+add_library(sindi_v2 OBJECT ${SINDI_V2_SRCS})
+target_link_libraries(sindi_v2 PRIVATE coverage_config vsag_src_common)
