@@ -42,7 +42,7 @@ public:
     virtual void
     Resize(uint32_t new_element_num) = 0;
 
-    virtual int64_t
+    virtual uint64_t
     GetMemoryUsage() = 0;
 };
 
@@ -65,7 +65,7 @@ public:
     void
     Resize(uint32_t new_element_num) override;
 
-    int64_t
+    uint64_t
     GetMemoryUsage() override;
 
 private:
@@ -96,7 +96,7 @@ public:
     Resize(uint32_t new_element_num) override {
     }
 
-    int64_t
+    uint64_t
     GetMemoryUsage() override {
         return 0;
     }

@@ -20,6 +20,7 @@ Apache 2.0 license.
 - **User Guide** — start here if you are new to VSAG: install, create an index, and run search.
 - **Indexes** — compare supported index types and look up their parameters.
 - **Advanced Features** — deep dives into specific search, serialization, memory, and hybrid-index capabilities.
+- **API Reference** — the C++ class, method, and type reference for the public headers in `include/vsag/`.
 - **Performance and Tuning** — best practices, `Tune`, benchmarks, and evaluation tooling.
 - **Developer Guide** — building from source, running tests, and contributing.
 - **Resources** — release notes, roadmap, community links, related projects, papers, and contributors.

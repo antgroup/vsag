@@ -50,6 +50,7 @@ init();
 #include "vsag/index_detail_info.h"
 #include "vsag/index_features.h"
 #include "vsag/iterator_context.h"
+#include "vsag/load_parameters.h"
 #include "vsag/logger.h"
 #include "vsag/options.h"
 #include "vsag/readerset.h"

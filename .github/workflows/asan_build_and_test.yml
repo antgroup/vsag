@@ -79,6 +79,51 @@ jobs:
           retention-days: 3
           overwrite: 'true'
 
+  build_asan_macos_arm64:
+    name: Asan Build macOS arm64
+    runs-on: macos-15
+    concurrency:
+      group: asan_build_macos-${{ github.sha }}
+      cancel-in-progress: false
+    steps:
+      - name: Free Disk Space
+        run: rm -rf "${RUNNER_TOOL_CACHE:-/Users/runner/hostedtoolcache}"
+      - uses: actions/checkout@v4
+      - name: Install Dependencies
+        run: bash ./scripts/deps/install_deps.sh
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: "1"
+      - name: Show Toolchain
+        run: |
+          clang++ --version
+          cmake --version
+      - name: Load Cache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          max-size: "2G"
+          save: true
+          key: build-macos-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
+      - name: Make Asan
+        run: export CMAKE_GENERATOR="Ninja" CMAKE_EXPORT_COMPILE_COMMANDS=ON; make asan VSAG_ENABLE_EXAMPLES=ON COMPILE_JOBS=3
+      - name: Clean
+        run: |
+          find ./build -type f -name "*.o" -exec rm -f {} +
+          find ./build -type f -name "*.cpp" -exec rm -f {} +
+          find ./build -type f -name "*.a" -exec rm -f {} +
+          find ./build -type d -name "*.dSYM" -prune -exec rm -rf {} +
+          rm -rf ./build/hdf5
+          rm -rf ./build/boost
+          rm -rf ./build/tools
+      - name: Save Test
+        uses: actions/upload-artifact@v5
+        with:
+          path: ./build
+          name: test_macos_arm64-${{ github.run_id }}
+          compression-level: 1
+          retention-days: 3
+          overwrite: 'true'
+
   test_asan_x86:
     name: Test X86
     needs: build_asan_x86
@@ -161,6 +206,45 @@ jobs:
           retention-days: 3
           overwrite: 'true'
 
+  test_asan_macos_arm64:
+    name: Test macOS arm64
+    needs: build_asan_macos_arm64
+    runs-on: macos-15
+    strategy:
+      matrix:
+        test_type: [ unittests, functests ]
+    concurrency:
+      group: test_asan_macos-${{ matrix.test_type }}-${{ github.sha }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Dependencies
+        run: bash ./scripts/deps/install_deps.sh
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: "1"
+      - name: Clean Env
+        run: rm -rf ./build
+      - name: Download Test
+        uses: actions/download-artifact@v5
+        with:
+          name: test_macos_arm64-${{ github.run_id }}
+          path: ./build
+      - name: Do Asan Test In ${{ matrix.test_type }}
+        env:
+          ASAN_OPTIONS: detect_container_overflow=0
+        run: |
+          chmod +x ./build/tests/${{ matrix.test_type }}
+          ./scripts/testing/test_parallel_by_name.sh ${{ matrix.test_type }}
+      - name: Upload Log
+        uses: actions/upload-artifact@v5
+        with:
+          path: ./log
+          name: log-macos-${{ matrix.test_type }}-${{ github.run_id }}
+          compression-level: 1
+          retention-days: 3
+          overwrite: 'true'
+
   test_example_x86:
     name: Test Example X86
     needs: build_asan_x86
@@ -236,7 +320,7 @@ jobs:
 
   clean_up:
     name: Clean Up
-    needs: [ test_asan_x86, test_asan_aarch64 ]
+    needs: [ test_asan_x86, test_asan_aarch64, test_asan_macos_arm64 ]
     runs-on: ubuntu-22.04
     steps:
       - name: Create Empty File
@@ -254,6 +338,14 @@ jobs:
         with:
           path: /tmp/clean_up
           name: test_aarch64-${{ github.run_id }}
+          compression-level: 1
+          retention-days: 3
+          overwrite: 'true'
+      - name: Overwrite Test Artifact macOS arm64
+        uses: actions/upload-artifact@v5
+        with:
+          path: /tmp/clean_up
+          name: test_macos_arm64-${{ github.run_id }}
           compression-level: 1
           retention-days: 3
           overwrite: 'true'

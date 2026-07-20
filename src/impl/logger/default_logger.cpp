@@ -17,16 +17,62 @@
 
 #include <unistd.h>
 
+#include <cctype>
 #include <chrono>
 #include <cstdlib>
 #include <ctime>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
+#include <string>
 
 namespace vsag {
 
 namespace {
+
+[[nodiscard]] bool
+parse_log_level(std::string_view value, Logger::Level& log_level) {
+    if (value.size() < 3 or value.size() > 8) {
+        return false;
+    }
+
+    std::string normalized;
+    normalized.reserve(value.size());
+    for (const auto ch : value) {
+        normalized.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+    }
+
+    if (normalized == "trace") {
+        log_level = Logger::Level::kTRACE;
+        return true;
+    }
+    if (normalized == "debug") {
+        log_level = Logger::Level::kDEBUG;
+        return true;
+    }
+    if (normalized == "info") {
+        log_level = Logger::Level::kINFO;
+        return true;
+    }
+    if (normalized == "warn" or normalized == "warning") {
+        log_level = Logger::Level::kWARN;
+        return true;
+    }
+    if (normalized == "error") {
+        log_level = Logger::Level::kERR;
+        return true;
+    }
+    if (normalized == "critical") {
+        log_level = Logger::Level::kCRITICAL;
+        return true;
+    }
+    if (normalized == "off") {
+        log_level = Logger::Level::kOFF;
+        return true;
+    }
+
+    return false;
+}
 
 [[nodiscard]] std::string
 format_timestamp() {
@@ -131,6 +177,14 @@ get_level_color(Logger::Level log_level) {
 }
 
 }  // namespace
+
+DefaultLogger::DefaultLogger() {
+    const auto* log_level_env = std::getenv("VSAG_LOG_LEVEL");
+    Logger::Level log_level = Logger::Level::kINFO;
+    if (log_level_env != nullptr and parse_log_level(log_level_env, log_level)) {
+        level_.store(static_cast<int>(log_level), std::memory_order_relaxed);
+    }
+}
 
 void
 DefaultLogger::SetLevel(Logger::Level log_level) {

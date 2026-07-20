@@ -259,6 +259,7 @@ ODescent::repair_no_in_edge() {
         auto& link = graph_[i].neighbors;
         int need_replace_loc = 0;
         while (in_edges_count[i] < min_in_degree &&
+               need_replace_loc < static_cast<int>(link.size()) &&
                need_replace_loc < odescent_param_->max_degree) {
             uint32_t need_replace_id = link[need_replace_loc].id;
             bool has_connect = false;
@@ -268,7 +269,15 @@ ODescent::repair_no_in_edge() {
                     break;
                 }
             }
-            if (replace_pos[need_replace_id] > 0 && not has_connect) {
+            if (replace_pos[need_replace_id] >=
+                static_cast<int>(graph_[need_replace_id].neighbors.size())) {
+                replace_pos[need_replace_id] =
+                    static_cast<int>(graph_[need_replace_id].neighbors.size()) - 1;
+            }
+            if (replace_pos[need_replace_id] > 0 &&
+                replace_pos[need_replace_id] <
+                    static_cast<int>(graph_[need_replace_id].neighbors.size()) &&
+                not has_connect) {
                 auto& replace_node =
                     graph_[need_replace_id].neighbors[replace_pos[need_replace_id]];
                 auto replace_id = replace_node.id;

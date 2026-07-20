@@ -203,6 +203,8 @@ Search-time parameters live under the `hgraph` sub-object:
 |-----------|------|---------|-------------|
 | `ef_search` | int | — (required) | Size of the search frontier. Larger = higher recall, slower query. |
 | `hops_limit` | int | unlimited | Hard cap on the number of hops the beam search performs before returning the current frontier. |
+| `skip_ratio` | float | `0.2` | Performance tuning parameter for filtered search. Controls the ratio of invalid points to skip, in range `[0.0, 1.0]`. `skip_ratio=0.2` means skip 20% of invalid points and only check 80%. Higher values improve performance but may reduce recall. Only applies to searches with filters. See [Filter Skip Strategy](#filter-skip-strategy-skip_ratio-and-skip_strategy) below. |
+| `skip_strategy` | string | `"deterministic_accumulative"` | Strategy for filter skipping. Options: `"random"` (random skipping) or `"deterministic_accumulative"` (deterministic cumulative skipping). See [Filter Skip Strategy](#filter-skip-strategy-skip_ratio-and-skip_strategy) below. |
 | `brute_force_threshold` | float | `0.0` | Selectivity-aware brute-force fallback. When `> 0` and the supplied filter's `ValidRatio()` is `≤ brute_force_threshold`, the search **bypasses the graph traversal entirely** and runs an exact scan over the valid ids using the best available flatten codes (see the section below). Must lie in `[0.0, 1.0]`; the default `0.0` disables the feature and preserves legacy behavior. |
 | `rabitq_one_bit_search` | bool | `false` | Enables the RaBitQ filter/lower-bound path. On an x+y split index it uses all x filter bits; see [RaBitQ x+y Split](../quantization/rabitq_split.md). |
 | `rabitq_error_rate` | float | index default | Positive lower-bound error multiplier for this search. It can be tuned without rebuilding the split index. |
@@ -262,8 +264,56 @@ Picking a value:
   is visited to check `CheckValid`). The benefit grows when graph search would
   otherwise need a much larger `ef_search` to recover recall.
 
-A runnable example is
-[`322_feature_hgraph_brute_force_threshold.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/322_feature_hgraph_brute_force_threshold.cpp).
+See
+[`322_feature_hgraph_brute_force_threshold.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/322_feature_hgraph_brute_force_threshold.cpp)
+for a runnable brute-force fallback example.
+
+### Filter Skip Strategy (skip_ratio and skip_strategy)
+
+When searching with a filter, HGraph needs to frequently call Filter::CheckValid() during graph traversal to verify whether each candidate point is valid. This check can be expensive (especially for complex filter logic). skip_ratio and skip_strategy provide a probabilistic optimization: they skip some filter checks to speed up the search, but may reduce recall.
+
+#### How It Works
+
+This is a probabilistic optimization strategy: we don't know in advance which points are valid, so we decide probabilistically whether to visit each point.
+
+- skip_ratio (default 0.2): Controls the aggressiveness of skipping filter checks. skip_ratio=0.2 means skip 20% of candidate checks and only check 80%. Higher values skip more, making search faster but potentially reducing recall.
+- skip_strategy (default "deterministic_accumulative"): Determines how skipping is distributed:
+  - "random": Random skipping. Each point is visited independently with probability `visit_ratio = valid_ratio + (1 - valid_ratio) * (1 - skip_ratio)`, so roughly a `1 - skip_ratio` fraction of invalid points are skipped.
+  - "deterministic_accumulative": Deterministic cumulative skipping. Emits visit decisions at fixed intervals so that the long-run visit ratio matches the target `visit_ratio`, with lower variance than the random strategy.
+
+The specific formula:
+- Let valid_ratio be the filter's global validity rate (from Filter::ValidRatio())
+- Probability of visiting each point = valid_ratio + (1 - valid_ratio) * (1 - skip_ratio)
+- In expectation, this targets skipping about skip_ratio of invalid candidate checks when Filter::ValidRatio() is accurate
+
+#### Usage Examples
+
+```cpp
+// Conservative setting: skip 10% of invalid candidate checks, suitable for high-recall
+// scenarios where latency is less critical
+auto params = R"({"hgraph": {"ef_search": 200, "skip_ratio": 0.1}})";
+auto result = index->KnnSearch(query, topk, params, my_filter).value();
+
+// Use random strategy
+auto params = R"({"hgraph": {"ef_search": 200, "skip_ratio": 0.2, "skip_strategy": "random"}})";
+auto result = index->KnnSearch(query, topk, params, my_filter).value();
+
+// Aggressive skipping: skip 50% of invalid candidate checks for lower latency
+auto params = R"({"hgraph": {"ef_search": 200, "skip_ratio": 0.5}})";
+auto result = index->KnnSearch(query, topk, params, my_filter).value();
+```
+
+#### Choosing Values
+
+- Default 0.2: Suitable for most scenarios, balancing performance and recall.
+- 0.1 or lower: Conservative setting, suitable for scenarios with high recall requirements where latency is less critical.
+- 0.5 or higher: Aggressive skipping, suitable for latency-sensitive scenarios where recall degradation is acceptable (e.g., real-time recommendation systems).
+- 0.0: Don't skip any points, equivalent to disabling this optimization (all points will be checked).
+
+Important notes:
+- Only applies to searches with filters. These parameters are ignored when no filter is present.
+- Performance optimization works better when Filter::ValidRatio() is accurately estimated.
+- Can be used together with brute_force_threshold: when the filter is very strict (ValidRatio is very small), brute_force_threshold will trigger brute-force fallback; otherwise, graph traversal + skip optimization is used.
 
 ## When to use HGraph
 

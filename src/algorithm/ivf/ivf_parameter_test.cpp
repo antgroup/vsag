@@ -15,9 +15,12 @@
 
 #include "ivf_parameter.h"
 
+#include <cmath>
 #include <numeric>
 
+#include "ivf.h"
 #include "parameter_test.h"
+#include "quantization/rabitq_quantization/rabitq_quantizer_parameter.h"
 #include "unittest.h"
 #include "utils/util_functions.h"
 
@@ -142,6 +145,37 @@ TEST_CASE("IVF Parameters Test", "[ut][IVFParameter]") {
     search_param = vsag::IVFSearchParameters::FromJson(param_str);
     REQUIRE(search_param.scan_buckets_count == 20);
     REQUIRE(search_param.first_order_scan_ratio == 0.1f);
+}
+
+TEST_CASE("IVF maps RabitQ external parameters", "[ut][IVFParameter]") {
+    auto external_param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "rabitq",
+        "rabitq_pca_dim": 32,
+        "rabitq_bits_per_dim_query": 32,
+        "rabitq_bits_per_dim_base": 4,
+        "rabitq_version": "standard",
+        "rabitq_error_rate": 1.25,
+        "rabitq_use_fht": true
+    })");
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 64;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+
+    auto param = vsag::IVF::CheckAndMappingExternalParam(external_param, common_param);
+    auto ivf_param = std::dynamic_pointer_cast<vsag::IVFParameter>(param);
+
+    REQUIRE(ivf_param != nullptr);
+    REQUIRE(ivf_param->bucket_param != nullptr);
+    auto rabitq_param = std::dynamic_pointer_cast<vsag::RaBitQuantizerParameter>(
+        ivf_param->bucket_param->quantizer_parameter);
+    REQUIRE(rabitq_param != nullptr);
+    REQUIRE(rabitq_param->pca_dim_ == 32);
+    REQUIRE(rabitq_param->num_bits_per_dim_query_ == 32);
+    REQUIRE(rabitq_param->num_bits_per_dim_base_ == 4);
+    REQUIRE(rabitq_param->rabitq_version_ == "standard");
+    REQUIRE(std::abs(rabitq_param->rabitq_error_rate_ - 1.25F) < 1e-5F);
+    REQUIRE(rabitq_param->use_fht_);
 }
 
 #define TEST_COMPATIBILITY_CASE(section_name, param_member, val1, val2, expect_compatible) \
@@ -271,4 +305,31 @@ TEST_CASE("SampleTrainingData Function Test", "[ut][sample_train_data]") {
     REQUIRE(result != normal_dataset);
     REQUIRE(result->GetNumElements() == 512);  // Should use min_train_size
     REQUIRE(result->GetDim() == large_dim);
+}
+
+TEST_CASE("IVF maps fast RaBitQ to base and precise quantizers", "[ut][IVFParameter]") {
+    auto param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "rabitq",
+        "precise_quantization_type": "rabitq",
+        "rabitq_bits_per_dim_base": 4,
+        "fast_encode_rabitq": false,
+        "fast_encode_rabitq_rounds": 10,
+        "use_reorder": true
+    })");
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    auto mapped = vsag::IVF::CheckAndMappingExternalParam(param, common_param);
+    auto typed_param = std::dynamic_pointer_cast<vsag::IVFParameter>(mapped);
+
+    REQUIRE(typed_param != nullptr);
+    REQUIRE(typed_param->bucket_param != nullptr);
+    REQUIRE(typed_param->precise_codes_param != nullptr);
+    const auto base_json = typed_param->bucket_param->ToJson();
+    const auto precise_json = typed_param->precise_codes_param->ToJson();
+    REQUIRE_FALSE(base_json["quantization_params"]["fast_encode_rabitq"].GetBool());
+    REQUIRE(base_json["quantization_params"]["fast_encode_rabitq_rounds"].GetInt() == 10);
+    REQUIRE_FALSE(precise_json["quantization_params"]["fast_encode_rabitq"].GetBool());
+    REQUIRE(precise_json["quantization_params"]["fast_encode_rabitq_rounds"].GetInt() == 10);
 }

@@ -90,7 +90,7 @@ public:
         return 0;
     }
 
-    int64_t
+    uint64_t
     GetMemoryUsage() const override {
         return 0;
     }
@@ -114,7 +114,7 @@ TEST_CASE("Test Simple Index", "[ft][simple_index]") {
     REQUIRE_FALSE(index->Remove(0).has_value());
     REQUIRE_FALSE(index->CheckFeature(IndexFeature::SUPPORT_ESTIMATE_MEMORY));
     REQUIRE_THROWS(index->EstimateMemory(1000));
-    REQUIRE_THROWS(index->GetEstimateBuildMemory(1000));
+    REQUIRE_THROWS(index->EstimateBuildMemory(1000));
     REQUIRE_FALSE(index->Feedback(dataset->query_, 10, "").has_value());
     REQUIRE_THROWS_MATCHES(index->GetStats(),
                            std::runtime_error,

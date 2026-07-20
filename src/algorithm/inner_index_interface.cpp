@@ -32,11 +32,25 @@
 #include "index_feature_list.h"
 #include "storage/empty_index_binary_set.h"
 #include "storage/serialization.h"
+#include "storage/tlv_section.h"
 #include "utils/slow_task_timer.h"
 #include "utils/util_functions.h"
 #include "vsag/allocator.h"
 
 namespace vsag {
+
+namespace {
+
+void
+read_streaming_section_end(StreamReader& reader) {
+    auto block_header = StreamBlockHeader::Read(reader);
+    if (!block_header.IsSectionEnd()) {
+        throw VsagException(ErrorType::INVALID_BINARY,
+                            "streaming serialization empty index missing section end");
+    }
+}
+
+}  // namespace
 
 InnerIndexInterface::InnerIndexInterface(const InnerIndexParameterPtr& index_param,
                                          const IndexCommonParam& common_param)
@@ -309,6 +323,20 @@ InnerIndexInterface::Serialize(std::ostream& out_stream) const {
 }
 
 void
+InnerIndexInterface::SerializeStreaming(std::ostream& out_stream) const {
+    std::string time_record_name = this->GetName() + " Streaming Serialize";
+    SlowTaskTimer t(time_record_name);
+
+    IOStreamWriter writer(out_stream);
+    auto metadata = this->collect_streaming_header();
+    StreamHeader::Write(writer, metadata);
+    if (!metadata->EmptyIndex()) {
+        this->serialize_streaming_body(writer);
+    }
+    StreamBlockHeader::WriteSectionEnd(writer);
+}
+
+void
 InnerIndexInterface::Deserialize(std::istream& in_stream) {
     std::string time_record_name = this->GetName() + " Deserialize";
     SlowTaskTimer t(time_record_name);
@@ -327,6 +355,73 @@ InnerIndexInterface::Deserialize(std::istream& in_stream) {
     } catch (const std::bad_alloc& e) {
         throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "failed to Deserialize: ", e.what());
     }
+}
+
+void
+InnerIndexInterface::DeserializeStreaming(std::istream& in_stream) {
+    std::string time_record_name = this->GetName() + " Streaming Deserialize";
+    SlowTaskTimer t(time_record_name);
+    try {
+        ForwardStreamReader reader(in_stream);
+        auto metadata = StreamHeader::Read(reader);
+        if (metadata->EmptyIndex()) {
+            read_streaming_section_end(reader);
+            return;
+        }
+        this->deserialize_streaming_body(reader, metadata);
+    } catch (const std::bad_alloc& e) {
+        throw VsagException(
+            ErrorType::NO_ENOUGH_MEMORY, "failed to streaming deserialize: ", e.what());
+    }
+}
+
+void
+InnerIndexInterface::LoadStreamingBody(StreamReader& reader,
+                                       const MetadataPtr& metadata,
+                                       const LoadParameters& parameters) {
+    std::string time_record_name = this->GetName() + " Streaming Load";
+    SlowTaskTimer t(time_record_name);
+    try {
+        if (metadata->EmptyIndex()) {
+            read_streaming_section_end(reader);
+            return;
+        }
+        this->load_streaming_body(reader, metadata, parameters);
+    } catch (const std::bad_alloc& e) {
+        throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "failed to streaming load: ", e.what());
+    }
+}
+
+MetadataPtr
+InnerIndexInterface::collect_streaming_header() const {
+    throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                        "Index doesn't support collecting streaming serialization header");
+}
+
+void
+InnerIndexInterface::serialize_streaming_body(StreamWriter& writer) const {
+    (void)writer;
+    throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                        "Index doesn't support streaming serialization body");
+}
+
+void
+InnerIndexInterface::deserialize_streaming_body(StreamReader& reader, const MetadataPtr& metadata) {
+    (void)reader;
+    (void)metadata;
+    throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                        "Index doesn't support streaming deserialization body");
+}
+
+void
+InnerIndexInterface::load_streaming_body(StreamReader& reader,
+                                         const MetadataPtr& metadata,
+                                         const LoadParameters& parameters) {
+    (void)reader;
+    (void)metadata;
+    (void)parameters;
+    throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                        "Index doesn't support streaming load body");
 }
 
 uint64_t

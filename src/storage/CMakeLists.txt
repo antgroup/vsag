@@ -19,6 +19,7 @@ set (STORAGE_SRC
   serialization.cpp
   stream_reader.cpp
   stream_writer.cpp
+  tlv_section.cpp
 )
 
 add_library (storage OBJECT ${STORAGE_SRC})

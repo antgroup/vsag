@@ -61,7 +61,7 @@ public:
 public:
     // required vars
     int64_t ef_search;
-    float skip_ratio{0.9};
+    float skip_ratio{0.1F};
     FilterSearchSkipStrategyType skip_strategy_type{
         FilterSearchSkipStrategyType::DETERMINISTIC_ACCUMULATIVE};
     bool use_conjugate_graph_search;

@@ -218,9 +218,9 @@ MultiVectorDataCell<QuantTmpl, IOTmpl>::Query(float* result_dists,
 }
 
 template <typename QuantTmpl, typename IOTmpl>
-int64_t
+uint64_t
 MultiVectorDataCell<QuantTmpl, IOTmpl>::GetMemoryUsage() const {
-    int64_t memory = sizeof(MultiVectorDataCell<QuantTmpl, IOTmpl>);
+    uint64_t memory = sizeof(MultiVectorDataCell<QuantTmpl, IOTmpl>);
     memory += this->offset_io_->size_;
     if (IOTmpl::InMemory) {
         memory += this->io_->GetMemoryUsage();

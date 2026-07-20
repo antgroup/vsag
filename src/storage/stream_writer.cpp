@@ -39,6 +39,12 @@ IOStreamWriter::Write(const char* data, uint64_t size) {
     bytes_written_ += size;
 }
 
+void
+CountingStreamWriter::Write(const char* data, uint64_t size) {
+    (void)data;
+    bytes_written_ += size;
+}
+
 WriteFuncStreamWriter::WriteFuncStreamWriter(
     std::function<void(uint64_t, uint64_t, void*)> writeFunc, uint64_t cursor)
     : writeFunc_(std::move(writeFunc)), cursor_(cursor) {

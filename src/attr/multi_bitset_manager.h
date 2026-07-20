@@ -122,7 +122,7 @@ public:
      * 
      * @return The current memory usage in bytes.
      */
-    int64_t
+    uint64_t
     GetMemoryUsage() const;
 
 private:

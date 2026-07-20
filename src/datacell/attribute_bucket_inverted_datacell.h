@@ -58,7 +58,7 @@ public:
     void
     GetAttribute(BucketIdType bucket_id, InnerIdType inner_id, AttributeSet* attr) override;
 
-    int64_t
+    uint64_t
     GetMemoryUsage() const override;
 
 private:

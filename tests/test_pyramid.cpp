@@ -13,15 +13,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <fmt/ranges.h>
+
 #include <algorithm>
 #include <array>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 #include <cmath>
+#include <cstring>
 #include <nlohmann/json.hpp>
 #include <set>
+#include <sstream>
 
 #include "functest.h"
+#include "storage/serialization_tags.h"
+#include "storage/streaming_serialization_test_utils.h"
 #include "test_index.h"
 #include "vsag/vsag.h"
 
@@ -32,6 +38,8 @@ struct PyramidParam {
     std::string graph_type = "nsw";
     bool use_reorder = false;
     bool support_duplicate = false;
+    uint64_t rabitq_bits_per_dim_base = 1;
+    bool fast_encode_rabitq = true;
 };
 
 namespace fixtures {
@@ -84,6 +92,9 @@ PyramidTestIndex::GeneratePyramidBuildParametersString(const std::string& metric
             "no_build_levels": [{}],
             "graph_type": "{}",
             "base_quantization_type": "{}",
+            "rabitq_bits_per_dim_base": {},
+            "fast_encode_rabitq": {},
+            "fast_encode_rabitq_rounds": 6,
             "precise_quantization_type": "{}",
             "use_reorder": {},
             "index_min_size": 28,
@@ -97,6 +108,8 @@ PyramidTestIndex::GeneratePyramidBuildParametersString(const std::string& metric
                                             fmt::join(param.no_build_levels, ","),
                                             param.graph_type,
                                             param.base_quantization_type,
+                                            param.rabitq_bits_per_dim_base,
+                                            param.fast_encode_rabitq,
                                             param.precise_quantization_type,
                                             param.use_reorder,
                                             param.support_duplicate);
@@ -170,6 +183,9 @@ RequireDistancesNearZero(const vsag::DatasetPtr& result, const std::set<int64_t>
     }
 }
 
+using vsag::test::EraseStreamingBlock;
+using vsag::test::InsertUnknownStreamingBlock;
+
 class BlockSizeLimitGuard {
 public:
     explicit BlockSizeLimitGuard(uint64_t block_size_limit)
@@ -229,6 +245,33 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
         TestRangeSearch(index, dataset, search_param, 0.94, 10, true);
         TestRangeSearch(index, dataset, search_param, 0.49, 5, true);
     }
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
+                             "Pyramid multi-bit RaBitQ fast encoding",
+                             "[ft][pyramid][rabitq]") {
+    constexpr int64_t dim = 64;
+    constexpr uint64_t count = 256;
+    const bool fast_encode = GENERATE(false, true);
+
+    PyramidParam pyramid_param;
+    pyramid_param.no_build_levels = {0, 1, 2};
+    pyramid_param.base_quantization_type = "rabitq";
+    pyramid_param.precise_quantization_type = "fp32";
+    pyramid_param.use_reorder = true;
+    pyramid_param.rabitq_bits_per_dim_base = 8;
+    pyramid_param.fast_encode_rabitq = fast_encode;
+
+    CAPTURE(fast_encode);
+    auto param = GeneratePyramidBuildParametersString("l2", dim, pyramid_param);
+    auto index = TestFactory("pyramid", param, true);
+    auto dataset = pool.GetDatasetAndCreate(dim, count, "l2", /*with_path=*/true);
+    TestBuildIndex(index, dataset, true);
+    auto query = fixtures::get_one_query(dataset->query_, 0);
+    auto result = index->KnnSearch(query, 5, GeneratePyramidSearchParametersString(100));
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() > 0);
+    REQUIRE(result.value()->GetDim() <= 5);
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
@@ -534,8 +577,73 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
             auto index2 = TestFactory(name, param, true);
             TestSerializeFile(index, index2, dataset, search_param, true);
         }
+        SECTION("streaming serialize/deserialize/load") {
+            auto index2 = TestFactory(name, param, true);
+            std::stringstream stream;
+            REQUIRE(index->SerializeStreaming(stream).has_value());
+            const auto bytes = stream.str();
+
+            std::stringstream deserialize_stream(bytes);
+            REQUIRE(index2->DeserializeStreaming(deserialize_stream).has_value());
+            TestKnnSearch(index2, dataset, search_param, 0.94, true);
+
+            std::stringstream load_stream(bytes);
+            auto loaded = vsag::Index::Load(load_stream, "{}");
+            REQUIRE(loaded.has_value());
+            TestKnnSearch(loaded.value(), dataset, search_param, 0.94, true);
+        }
     }
     vsag::Options::Instance().set_block_size_limit(origin_size);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
+                             "Pyramid streaming compatibility",
+                             "[ft][pyramid][serialization][streaming][compatibility]") {
+    BlockSizeLimitGuard block_size_limit_guard(1024 * 1024 * 2);
+    PyramidParam pyramid_param;
+    pyramid_param.no_build_levels = {0, 1, 2};
+    const auto param = GeneratePyramidBuildParametersString("l2", 16, pyramid_param);
+    auto index = TestFactory("pyramid", param, true);
+    auto dataset = pool.GetDatasetAndCreate(16, 200, "l2", /*with_path=*/true);
+    TestBuildIndex(index, dataset, true);
+
+    std::stringstream stream;
+    REQUIRE(index->SerializeStreaming(stream).has_value());
+    const auto bytes = stream.str();
+    const auto expected_count = dataset->base_->GetNumElements();
+
+    SECTION("skips unknown non-critical block") {
+        auto mutated = InsertUnknownStreamingBlock(bytes, false);
+        auto restored = TestFactory("pyramid", param, true);
+        std::stringstream deserialize_stream(mutated);
+        REQUIRE(restored->DeserializeStreaming(deserialize_stream).has_value());
+        REQUIRE(restored->GetNumElements() == expected_count);
+
+        std::stringstream load_stream(mutated);
+        auto loaded = vsag::Index::Load(load_stream, "{}");
+        REQUIRE(loaded.has_value());
+        REQUIRE(loaded.value()->GetNumElements() == expected_count);
+    }
+
+    SECTION("rejects unknown critical block") {
+        auto mutated = InsertUnknownStreamingBlock(bytes, true);
+        auto restored = TestFactory("pyramid", param, true);
+        std::stringstream deserialize_stream(mutated);
+        REQUIRE_FALSE(restored->DeserializeStreaming(deserialize_stream).has_value());
+
+        std::stringstream load_stream(mutated);
+        REQUIRE_FALSE(vsag::Index::Load(load_stream, "{}").has_value());
+    }
+
+    SECTION("rejects missing required block") {
+        auto mutated = EraseStreamingBlock(bytes, vsag::StreamSerializationTag::BASE_CODES);
+        auto restored = TestFactory("pyramid", param, true);
+        std::stringstream deserialize_stream(mutated);
+        REQUIRE_FALSE(restored->DeserializeStreaming(deserialize_stream).has_value());
+
+        std::stringstream load_stream(mutated);
+        REQUIRE_FALSE(vsag::Index::Load(load_stream, "{}").has_value());
+    }
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex, "Pyramid Clone", "[ft][clone][pyramid]") {
@@ -854,6 +962,30 @@ struct MultiHierarchyFixture {
                base_q + R"(",
                 "use_reorder": )" +
                reorder_str + precise + R"(,
+                "index_min_size": 0, "support_duplicate": false,
+                "hierarchies": [
+                    {"name": "site", "no_build_levels": [0]},
+                    {"name": "cat", "no_build_levels": [0, 1]}
+                ]
+            }
+        })";
+    }
+
+    static std::string
+    build_reorder_stats_param(const std::string& precise_file_path) {
+        return R"({
+            "dtype": "float32", "metric_type": "l2", "dim": 4,
+            "index_param": {
+                "max_degree": 32, "alpha": 1.2,
+                "graph_type": "nsw",
+                "graph_iter_turn": 15, "neighbor_sample_rate": 0.2,
+                "base_quantization_type": "rabitq",
+                "base_io_type": "memory_io",
+                "use_reorder": true,
+                "precise_quantization_type": "fp32",
+                "precise_io_type": "buffer_io",
+                "precise_file_path": ")" +
+               precise_file_path + R"(",
                 "index_min_size": 0, "support_duplicate": false,
                 "hierarchies": [
                     {"name": "site", "no_build_levels": [0]},
@@ -1391,6 +1523,36 @@ TEST_CASE("Multi-Hierarchy: Reorder with multi-hierarchy", "[ft][pyramid][multi_
     auto cat_tech = f.search_ids(index.value(), "cat", "tech");
     REQUIRE(cat_tech.count(100) == 1);
     REQUIRE(cat_tech.count(101) == 1);
+}
+
+TEST_CASE("Multi-Hierarchy: Reorder statistics include precise IO",
+          "[ft][pyramid][multi_hierarchy]") {
+    MultiHierarchyFixture f;
+    fixtures::TempDir temp_dir("pyramid_reorder_stats");
+    auto index = vsag::Factory::CreateIndex(
+        "pyramid", f.build_reorder_stats_param(temp_dir.GenerateRandomFile(false)));
+    REQUIRE(index.has_value());
+    REQUIRE(index.value()->Build(f.make_base()).has_value());
+
+    auto* qv = new float[4]{1.0f, 0.0f, 0.0f, 0.0f};
+    auto* qp = new std::string[1]{"www/news"};
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(4)->Float32Vectors(qv)->Paths("site", qp)->Owner(true);
+
+    std::string sp = R"({"pyramid": {"ef_search": 100, "hierarchies": ["site"]}})";
+    auto knn_result = index.value()->KnnSearch(query, 2, sp);
+    REQUIRE(knn_result.has_value());
+    auto knn_stats = knn_result.value()->GetStatistics({"io_cnt", "reorder_distance_count"});
+    REQUIRE(knn_stats.size() == 2);
+    REQUIRE(std::stoul(knn_stats[0]) > 0);
+    REQUIRE(std::stoul(knn_stats[1]) > 0);
+
+    auto range_result = index.value()->RangeSearch(query, 2.0f, sp);
+    REQUIRE(range_result.has_value());
+    auto range_stats = range_result.value()->GetStatistics({"io_cnt", "reorder_distance_count"});
+    REQUIRE(range_stats.size() == 2);
+    REQUIRE(std::stoul(range_stats[0]) > 0);
+    REQUIRE(std::stoul(range_stats[1]) > 0);
 }
 
 TEST_CASE("Multi-Hierarchy: Single hierarchy in hierarchies config",

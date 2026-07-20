@@ -24,8 +24,8 @@
 #include "common.h"
 #include "flatten_interface.h"
 #include "index_common_param.h"
-#include "io/basic_io.h"
-#include "io/memory_block_io.h"
+#include "io/common/basic_io.h"
+#include "io/memory_block_io/memory_block_io.h"
 #include "quantization/quantizer.h"
 #include "query_context.h"
 #include "utils/byte_buffer.h"
@@ -176,7 +176,7 @@ public:
         return common_param_;
     }
 
-    int64_t
+    uint64_t
     GetMemoryUsage() const override;
 
 public:
@@ -349,6 +349,11 @@ FlattenDataCell<QuantTmpl, IOTmpl>::query(float* result_dists,
             computer->ScanBatchDists(id_count, codes.data, result_dists);
             return;
         }
+
+        if (ctx != nullptr and ctx->stats != nullptr and id_count > 0) {
+            ctx->stats->io_cnt.fetch_add(static_cast<uint32_t>(id_count),
+                                         std::memory_order_relaxed);
+        }
     }
 
     memset(result_dists, 0, sizeof(float) * id_count);
@@ -502,9 +507,9 @@ FlattenDataCell<QuantTmpl, IOTmpl>::MergeOther(const FlattenInterfacePtr& other,
 }
 
 template <typename QuantTmpl, typename IOTmpl>
-int64_t
+uint64_t
 FlattenDataCell<QuantTmpl, IOTmpl>::GetMemoryUsage() const {
-    int64_t memory = sizeof(FlattenDataCell<QuantTmpl, IOTmpl>);
+    uint64_t memory = sizeof(FlattenDataCell<QuantTmpl, IOTmpl>);
     if (IOTmpl::InMemory) {
         memory += this->io_->GetMemoryUsage();
     }

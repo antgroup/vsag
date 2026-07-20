@@ -31,7 +31,7 @@
 #include "hash_types.h"
 #include "impl/runtime_parameter.h"
 #include "index_common_param_fwd.h"
-#include "io/reader_io.h"
+#include "io/reader_io/reader_io.h"
 #include "quantization/computer.h"
 #include "query_context.h"
 #include "storage/stream_reader.h"
@@ -164,7 +164,7 @@ public:
         throw VsagException(ErrorType::INTERNAL_ERROR,
                             "InitIO not implemented in FlattenInterface");
     }
-    virtual int64_t
+    virtual uint64_t
     GetMemoryUsage() const {
         return 0;
     }

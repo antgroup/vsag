@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -38,6 +37,25 @@ ToString(DataTypes t) noexcept {
             return DATATYPE_SPARSE;
         case DataTypes::DATA_TYPE_BF16:
             return DATATYPE_BFLOAT16;
+    }
+    return "unknown";
+}
+
+enum class RecordRepr {
+    DENSE = 0,
+    SPARSE = 1,
+    MULTI_VECTOR = 2,
+};
+
+constexpr const char*
+ToString(RecordRepr r) noexcept {
+    switch (r) {
+        case RecordRepr::DENSE:
+            return "dense";
+        case RecordRepr::SPARSE:
+            return "sparse";
+        case RecordRepr::MULTI_VECTOR:
+            return "multi_vector";
     }
     return "unknown";
 }

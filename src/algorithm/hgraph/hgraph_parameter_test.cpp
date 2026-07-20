@@ -286,6 +286,70 @@ TEST_CASE("HGraphSearchParameters parses brute_force_threshold",
     }
 }
 
+TEST_CASE("HGraphSearchParameters parses skip_ratio and skip_strategy",
+          "[ut][HGraphSearchParameters][skip_ratio]") {
+    SECTION("default values") {
+        auto params = vsag::HGraphSearchParameters::FromJson(R"({"hgraph": {"ef_search": 32}})");
+        REQUIRE(params.skip_ratio == 0.2F);
+        REQUIRE(params.skip_strategy_type ==
+                vsag::FilterSearchSkipStrategyType::DETERMINISTIC_ACCUMULATIVE);
+    }
+
+    SECTION("custom skip_ratio") {
+        auto params = vsag::HGraphSearchParameters::FromJson(
+            R"({"hgraph": {"ef_search": 32, "skip_ratio": 0.5}})");
+        REQUIRE(params.skip_ratio == 0.5F);
+    }
+
+    SECTION("custom skip_strategy") {
+        auto params = vsag::HGraphSearchParameters::FromJson(
+            R"({"hgraph": {"ef_search": 32, "skip_strategy": "deterministic_accumulative"}})");
+        REQUIRE(params.skip_strategy_type ==
+                vsag::FilterSearchSkipStrategyType::DETERMINISTIC_ACCUMULATIVE);
+    }
+
+    SECTION("both skip_ratio and skip_strategy") {
+        auto params = vsag::HGraphSearchParameters::FromJson(
+            R"(
+                {
+                    "hgraph": {
+                        "ef_search": 32,
+                        "skip_ratio": 0.3,
+                        "skip_strategy": "deterministic_accumulative"
+                    }
+                })");
+        REQUIRE(params.skip_ratio == 0.3F);
+        REQUIRE(params.skip_strategy_type ==
+                vsag::FilterSearchSkipStrategyType::DETERMINISTIC_ACCUMULATIVE);
+    }
+
+    SECTION("random skip_strategy") {
+        auto params = vsag::HGraphSearchParameters::FromJson(
+            R"({"hgraph": {"ef_search": 32, "skip_strategy": "random"}})");
+        REQUIRE(params.skip_strategy_type == vsag::FilterSearchSkipStrategyType::RANDOM);
+    }
+
+    SECTION("skip_ratio out of range - too high") {
+        REQUIRE_THROWS(vsag::HGraphSearchParameters::FromJson(
+            R"({"hgraph": {"ef_search": 32, "skip_ratio": 1.5}})"));
+    }
+
+    SECTION("skip_ratio out of range - negative") {
+        REQUIRE_THROWS(vsag::HGraphSearchParameters::FromJson(
+            R"({"hgraph": {"ef_search": 32, "skip_ratio": -0.1}})"));
+    }
+
+    SECTION("skip_strategy rejects unknown values") {
+        REQUIRE_THROWS(vsag::HGraphSearchParameters::FromJson(
+            R"({"hgraph": {"ef_search": 32, "skip_strategy": "unknown"}})"));
+    }
+
+    SECTION("skip_strategy rejects non-string values") {
+        REQUIRE_THROWS(vsag::HGraphSearchParameters::FromJson(
+            R"({"hgraph": {"ef_search": 32, "skip_strategy": 123}})"));
+    }
+}
+
 TEST_CASE("HGraph maps support_force_remove to inner parameter", "[ut][HGraphParameter]") {
     auto param = vsag::JsonType::Parse(R"({
         "base_quantization_type": "fp32",
@@ -340,7 +404,12 @@ TEST_CASE("HGraph maps RaBitQ x+y split params", "[ut][HGraphParameter]") {
     auto base_json = typed_param->base_codes_param->ToJson();
     REQUIRE(base_json["codes_type"].GetString() == std::string("rabitq_split"));
     REQUIRE(base_json["io_params"]["type"].GetString() == std::string("block_memory_io"));
-    REQUIRE(base_json["supplement_io_params"]["type"].GetString() == std::string("async_io"));
+#if HAVE_LIBAIO
+    const std::string expected_supplement_io_type = "async_io";
+#else
+    const std::string expected_supplement_io_type = "buffer_io";
+#endif
+    REQUIRE(base_json["supplement_io_params"]["type"].GetString() == expected_supplement_io_type);
     REQUIRE(base_json["supplement_io_params"]["file_path"].GetString() ==
             std::string("/tmp/vsag_rabitq_split_supplement"));
     REQUIRE(base_json["quantization_params"]["rabitq_version"].GetString() == std::string("split"));
@@ -469,4 +538,32 @@ TEST_CASE("HGraph mrle_dim validation rejects out-of-range values", "[ut][HGraph
         REQUIRE(qp.Contains(vsag::MRLE_DIM_KEY));
         REQUIRE(qp[vsag::MRLE_DIM_KEY].GetInt() == 0);
     }
+}
+
+TEST_CASE("HGraph maps fast RaBitQ to base and precise quantizers", "[ut][HGraphParameter]") {
+    auto param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "rabitq",
+        "precise_quantization_type": "rabitq",
+        "rabitq_bits_per_dim_base": 4,
+        "fast_encode_rabitq": false,
+        "fast_encode_rabitq_rounds": 9,
+        "use_reorder": true,
+        "reorder_source": "precise"
+    })");
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    auto mapped = vsag::HGraph::CheckAndMappingExternalParam(param, common_param);
+    auto typed_param = std::dynamic_pointer_cast<vsag::HGraphParameter>(mapped);
+
+    REQUIRE(typed_param != nullptr);
+    REQUIRE(typed_param->base_codes_param != nullptr);
+    REQUIRE(typed_param->precise_codes_param != nullptr);
+    const auto base_json = typed_param->base_codes_param->ToJson();
+    const auto precise_json = typed_param->precise_codes_param->ToJson();
+    REQUIRE_FALSE(base_json["quantization_params"]["fast_encode_rabitq"].GetBool());
+    REQUIRE(base_json["quantization_params"]["fast_encode_rabitq_rounds"].GetInt() == 9);
+    REQUIRE_FALSE(precise_json["quantization_params"]["fast_encode_rabitq"].GetBool());
+    REQUIRE(precise_json["quantization_params"]["fast_encode_rabitq_rounds"].GetInt() == 9);
 }

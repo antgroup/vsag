@@ -80,6 +80,13 @@ LazyHGraph 的构建参数可以放在顶层 `lazy_hgraph` 对象中（推荐，
 LazyHGraph 只支持 `dtype: "float32"`。搜索参数使用 `hgraph` 对象，例如
 `{"hgraph": {"ef_search": 100}}`。详见 [LazyHGraph 索引文档](../indexes/lazy_hgraph.md)。
 
+`hgraph` 搜索参数还接受以下 filter 相关参数：
+
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `skip_ratio` | float | `0.2` | 控制带 filter 搜索时跳过候选检查的比例，取值范围为 `[0.0, 1.0]`。值越大，跳过越激进，搜索越快但可能影响召回。 |
+| `skip_strategy` | string | `"deterministic_accumulative"` | 跳过策略。支持 `"random"` 和 `"deterministic_accumulative"`。 |
+
 ## IVF
 
 ```json

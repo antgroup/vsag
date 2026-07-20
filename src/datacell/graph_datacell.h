@@ -27,7 +27,7 @@
 #include "graph_interface_parameter.h"
 #include "impl/reverse_edge.h"
 #include "index_common_param.h"
-#include "io/basic_io.h"
+#include "io/common/basic_io.h"
 #include "vsag/constants.h"
 
 namespace vsag {
@@ -107,9 +107,9 @@ public:
     void
     MergeOther(GraphInterfacePtr other, uint64_t bias) override;
 
-    int64_t
+    uint64_t
     GetMemoryUsage() const override {
-        int64_t memory = sizeof(GraphDataCell) + node_versions_.size() * sizeof(uint8_t);
+        uint64_t memory = sizeof(GraphDataCell) + node_versions_.size() * sizeof(uint8_t);
         if (IOTmpl::InMemory) {
             memory += io_->GetMemoryUsage();
         }
@@ -352,7 +352,7 @@ template <typename IOTmpl>
 void
 GraphDataCell<IOTmpl>::DeleteNeighborsById(vsag::InnerIdType id) {
     if (is_support_delete_) {
-        if (id <= max_capacity_) {
+        if (id < max_capacity_) {
             if (node_versions_[id] + 1 == 0) {
                 throw VsagException(
                     ErrorType::INTERNAL_ERROR,
@@ -373,7 +373,7 @@ template <typename IOTmpl>
 void
 GraphDataCell<IOTmpl>::RecoverDeleteNeighborsById(vsag::InnerIdType id) {
     if (is_support_delete_) {
-        if (id <= max_capacity_) {
+        if (id < max_capacity_) {
             if (node_versions_[id] == 0) {
                 throw VsagException(ErrorType::INTERNAL_ERROR,
                                     "recover remove point too many times in GraphDatacell");

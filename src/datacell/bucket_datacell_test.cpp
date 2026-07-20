@@ -16,6 +16,7 @@
 #include "bucket_datacell.h"
 
 #include <algorithm>
+#include <cmath>
 #include <utility>
 
 #include "impl/allocator/default_allocator.h"
@@ -187,4 +188,62 @@ TEST_CASE("BucketDataCell Basic Test", "[ut][BucketDataCell] ") {
     common_param.metric_ = metric;
 
     TestBucketDataCell(param1, param2, common_param, quantizer_error.second);
+}
+
+TEST_CASE("BucketDataCell supports RabitQ", "[ut][BucketDataCell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr uint64_t dim = 64;
+    constexpr uint64_t base_count = 24;
+    constexpr BucketIdType bucket_count = 3;
+    auto vectors = fixtures::generate_vectors(base_count, dim);
+    auto queries = fixtures::generate_vectors(1, dim, 17);
+
+    constexpr const char* param_str = R"(
+        {
+            "io_params": {
+                "type": "memory_io"
+            },
+            "quantization_params": {
+                "type": "rabitq",
+                "rabitq_bits_per_dim_query": 32,
+                "rabitq_bits_per_dim_base": 1
+            },
+            "buckets_count": 3
+        }
+        )";
+
+    MetricType metrics[3] = {
+        MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_COSINE, MetricType::METRIC_TYPE_IP};
+    for (auto metric : metrics) {
+        auto param_json = JsonType::Parse(param_str);
+        auto param = std::make_shared<BucketDataCellParameter>();
+        param->FromJson(param_json);
+
+        IndexCommonParam common_param;
+        common_param.allocator_ = allocator;
+        common_param.dim_ = dim;
+        common_param.metric_ = metric;
+
+        auto bucket = BucketInterface::MakeInstance(param, common_param);
+        REQUIRE(bucket != nullptr);
+        REQUIRE(bucket->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_RABITQ);
+
+        bucket->Train(vectors.data(), base_count);
+        for (uint64_t i = 0; i < base_count; ++i) {
+            auto bucket_id = static_cast<BucketIdType>(i % bucket_count);
+            bucket->InsertVector(vectors.data() + i * dim, bucket_id, static_cast<InnerIdType>(i));
+        }
+
+        auto computer = bucket->FactoryComputer(queries.data());
+        for (BucketIdType bucket_id = 0; bucket_id < bucket_count; ++bucket_id) {
+            auto bucket_size = bucket->GetBucketSize(bucket_id);
+            std::vector<float> dists(bucket_size);
+            bucket->ScanBucketById(dists.data(), computer, bucket_id);
+            for (InnerIdType offset = 0; offset < bucket_size; ++offset) {
+                REQUIRE(std::isfinite(dists[offset]));
+                auto one_dist = bucket->QueryOneById(computer, bucket_id, offset);
+                REQUIRE(std::isfinite(one_dist));
+            }
+        }
+    }
 }

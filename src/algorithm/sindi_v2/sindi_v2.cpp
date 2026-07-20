@@ -31,7 +31,7 @@
 #include "impl/heap/standard_heap.h"
 #include "index_feature_list.h"
 #include "inner_string_params.h"
-#include "io/reader_io_parameter.h"
+#include "io/reader_io/reader_io_parameter.h"
 #include "quantization/sparse_quantization/sparse_quantizer.h"
 #include "quantization/sparse_quantization/sparse_quantizer_parameter.h"
 #include "storage/empty_index_binary_set.h"

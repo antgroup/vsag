@@ -54,10 +54,13 @@ MemmoveHeap<max_heap, fixed_size>::Push(float dist, InnerIdType id) {
                                     record,
                                     CompareType()) -
                    this->ordered_buffer_.begin();
-        if (cur_size_ < static_cast<int64_t>(ordered_buffer_.size())) {
-            ordered_buffer_[cur_size_] = record;
-        } else {
-            ordered_buffer_.push_back(record);
+        // Pop() only decrements cur_size_, so ordered_buffer_ may already hold a
+        // stale tail beyond cur_size_. Reuse that slot instead of emplace_back,
+        // which both bounds the buffer growth and keeps the upper_bound above
+        // (which searches only [begin, begin + cur_size_)) consistent with the
+        // memmove size below.
+        if (static_cast<int64_t>(ordered_buffer_.size()) <= cur_size_) {
+            ordered_buffer_.emplace_back(record);
         }
         // NOLINTNEXTLINE(bugprone-undefined-memory-manipulation)
         memmove(ordered_buffer_.data() + pos + 1,

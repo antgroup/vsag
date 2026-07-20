@@ -18,8 +18,8 @@
 #include <fmt/format.h>
 
 #include "inner_string_params.h"
-#include "io/memory_block_io_parameter.h"
-#include "io/reader_io_parameter.h"
+#include "io/memory_block_io/memory_block_io_parameter.h"
+#include "io/reader_io/reader_io_parameter.h"
 
 namespace {
 

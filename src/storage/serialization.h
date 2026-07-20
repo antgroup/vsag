@@ -21,6 +21,7 @@
 #include <iostream>
 #include <memory>
 #include <string>
+#include <string_view>
 
 #include "../typing.h"
 #include "impl/logger/logger.h"
@@ -32,6 +33,8 @@
 #include "vsag/constants.h"
 
 namespace vsag {
+
+constexpr uint64_t STREAM_HEADER_MAX_METADATA_LEN = 16ULL * 1024ULL * 1024ULL;
 
 // Metadata is using to describe how is the index create
 DEFINE_POINTER(Metadata);
@@ -128,6 +131,35 @@ private:
     JsonType metadata_;
 };
 
+struct StreamHeaderData {
+    MetadataPtr metadata;
+    std::string metadata_string;
+};
+
+class StreamHeader {
+public:
+    static MetadataPtr
+    Read(StreamReader& reader);
+
+    static StreamHeaderData
+    ReadRaw(StreamReader& reader);
+
+    static void
+    Write(StreamWriter& writer, const MetadataPtr& metadata);
+
+    static uint32_t
+    InitialChecksum();
+
+    static uint32_t
+    UpdateChecksum(uint32_t crc, std::string_view bytes);
+
+    static uint32_t
+    FinalizeChecksum(uint32_t crc);
+
+    static uint32_t
+    CalculateChecksum(std::string_view bytes);
+};
+
 // Footer is a wrapper of metadata, only used in all-in-one serialize format
 DEFINE_POINTER(Footer);
 class Footer {
@@ -156,7 +188,7 @@ public:
     virtual ~Footer() = default;
 
 private:
-    // TODO(wxyu): optimize performance
+    // Keep this byte-for-byte compatible with the legacy footer checksum.
     static uint32_t
     calculate_checksum(std::string_view bytes) {
         const uint32_t polynomial = 0xEDB88320;

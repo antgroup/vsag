@@ -724,6 +724,72 @@ RaBitQFloatThreeBitIPBatch4(const float* vector,
 }
 
 float
+RaBitQFloatTwoBitCenteredIP(const float* vector, const uint8_t* bits, uint64_t dim) {
+#if defined(ENABLE_AVX2)
+    return simd::RaBitQFloatTwoBitCenteredIPImpl<simd::RaBitQTraits<simd::AVX2_RaBitQ_Tag>>(
+        vector, bits, dim, &generic::RaBitQFloatTwoBitCenteredIP);
+#else
+    return generic::RaBitQFloatTwoBitCenteredIP(vector, bits, dim);
+#endif
+}
+
+void
+RaBitQFloatTwoBitCenteredIPBatch4(const float* vector,
+                                  const uint8_t* bits1,
+                                  const uint8_t* bits2,
+                                  const uint8_t* bits3,
+                                  const uint8_t* bits4,
+                                  uint64_t dim,
+                                  float* results) {
+#if defined(ENABLE_AVX2)
+    simd::RaBitQFloatTwoBitCenteredIPBatch4Impl<simd::RaBitQTraits<simd::AVX2_RaBitQ_Tag>>(
+        vector,
+        bits1,
+        bits2,
+        bits3,
+        bits4,
+        dim,
+        results,
+        &generic::RaBitQFloatTwoBitCenteredIPBatch4);
+#else
+    generic::RaBitQFloatTwoBitCenteredIPBatch4(vector, bits1, bits2, bits3, bits4, dim, results);
+#endif
+}
+
+float
+RaBitQFloatThreeBitCenteredIP(const float* vector, const uint8_t* bits, uint64_t dim) {
+#if defined(ENABLE_AVX2)
+    return simd::RaBitQFloatThreeBitCenteredIPImpl<simd::RaBitQTraits<simd::AVX2_RaBitQ_Tag>>(
+        vector, bits, dim, &generic::RaBitQFloatThreeBitCenteredIP);
+#else
+    return generic::RaBitQFloatThreeBitCenteredIP(vector, bits, dim);
+#endif
+}
+
+void
+RaBitQFloatThreeBitCenteredIPBatch4(const float* vector,
+                                    const uint8_t* bits1,
+                                    const uint8_t* bits2,
+                                    const uint8_t* bits3,
+                                    const uint8_t* bits4,
+                                    uint64_t dim,
+                                    float* results) {
+#if defined(ENABLE_AVX2)
+    simd::RaBitQFloatThreeBitCenteredIPBatch4Impl<simd::RaBitQTraits<simd::AVX2_RaBitQ_Tag>>(
+        vector,
+        bits1,
+        bits2,
+        bits3,
+        bits4,
+        dim,
+        results,
+        &generic::RaBitQFloatThreeBitCenteredIPBatch4);
+#else
+    generic::RaBitQFloatThreeBitCenteredIPBatch4(vector, bits1, bits2, bits3, bits4, dim, results);
+#endif
+}
+
+float
 RaBitQFloatThreeBitIPByLookup(const float* lookup,
                               const uint8_t* bits,
                               uint64_t dim,

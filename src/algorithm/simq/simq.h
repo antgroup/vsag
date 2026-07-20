@@ -96,7 +96,11 @@ private:
     build_rep_hgraph(const float* flat_vecs, int64_t dim);
 
     std::vector<std::pair<InnerIdType, float>>
-    coarse_search(const float* query_tokens, uint32_t query_token_count, int64_t coarse_k) const;
+    coarse_search(const float* query_tokens,
+                  uint32_t query_token_count,
+                  int64_t coarse_k,
+                  uint64_t* coarse_dist_cmp = nullptr,
+                  uint64_t* coarse_probe_count = nullptr) const;
 
     void
     serialize_rep_hgraph(StreamWriter& writer) const;

@@ -125,6 +125,15 @@ target_link_libraries (401_persistent_kv vsag)
 add_executable (402_persistent_streaming 402_persistent_streaming.cpp)
 target_link_libraries (402_persistent_streaming vsag)
 
+add_executable (403_persistent_streaming_load 403_persistent_streaming_load.cpp)
+target_link_libraries (403_persistent_streaming_load vsag)
+
+add_executable (404_persistent_streaming_load_hybrid 404_persistent_streaming_load_hybrid.cpp)
+target_link_libraries (404_persistent_streaming_load_hybrid vsag)
+
+add_executable (405_persistent_streaming_transfer 405_persistent_streaming_transfer.cpp)
+target_link_libraries (405_persistent_streaming_transfer vsag)
+
 add_executable (501_quantization_transform 501_quantization_transform.cpp)
 target_link_libraries (501_quantization_transform vsag)
 

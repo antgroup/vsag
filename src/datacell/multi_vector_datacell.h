@@ -16,8 +16,8 @@
 #pragma once
 
 #include "flatten_interface.h"
-#include "io/basic_io.h"
-#include "io/memory_block_io.h"
+#include "io/common/basic_io.h"
+#include "io/memory_block_io/memory_block_io.h"
 #include "quantization/multi_vector_computer.h"
 #include "vsag/dataset.h"
 
@@ -109,7 +109,7 @@ public:
     void
     Deserialize(lvalue_or_rvalue<StreamReader> reader) override;
 
-    int64_t
+    uint64_t
     GetMemoryUsage() const override;
 
 private:

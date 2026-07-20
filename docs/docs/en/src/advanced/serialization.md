@@ -1,7 +1,11 @@
 # Serialization
 
-VSAG indexes can be serialized and deserialized through several interfaces, supporting
-persistence, cross-process sharing, and distributed deployment.
+VSAG indexes can be serialized and deserialized through the existing serialization interfaces,
+supporting persistence, cross-process sharing, and distributed deployment.
+
+This page describes the existing serialization format used by `Serialize` and `Deserialize`. For
+the header-first streaming format introduced later, see [New Serialization](new_serialization.md).
+The two formats are not compatible with each other.
 
 ## Three Interfaces
 
@@ -31,7 +35,7 @@ scenarios.
 
 ### 2. File Streams (`std::ostream` / `std::istream`)
 
-The simplest option — serialize the whole index to a file or memory stream:
+The simplest option: serialize the whole index to a file or memory stream:
 
 ```cpp
 std::ofstream out("index.bin", std::ios::binary);
@@ -55,8 +59,9 @@ index->Serialize([&](const void* buf, uint64_t offset, uint64_t size) {
 
 - `Deserialize` requires an **empty** target index whose configuration (`dim`, `metric_type`, etc.)
   matches the one used at serialization time.
+- `Serialize`/`Deserialize` keep the existing footer-based format. The new `SerializeStreaming`
+  format is header-first and must be read with `DeserializeStreaming` or `Load`.
 - When upgrading across major versions, check the compatibility notes in the
   [release notes](../resources/release_notes.md).
-- References:
-  `examples/cpp/318_feature_tune.cpp`, `examples/cpp/401_persistent_kv.cpp`,
+- References: `examples/cpp/318_feature_tune.cpp`, `examples/cpp/401_persistent_kv.cpp`, and
   `examples/cpp/402_persistent_streaming.cpp`.

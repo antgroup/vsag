@@ -167,7 +167,7 @@ public:
     int64_t
     GetNumElements() const;
 
-    int64_t
+    uint64_t
     GetMemoryUsage() const;
 
 private:

@@ -53,7 +53,8 @@ ExternalProject_Add (
 )
 
 add_library (vsag_antlr4_runtime_headers INTERFACE)
-target_include_directories (vsag_antlr4_runtime_headers INTERFACE ${install_dir}/include/antlr4-runtime)
+target_include_directories (vsag_antlr4_runtime_headers SYSTEM INTERFACE
+    ${install_dir}/include/antlr4-runtime)
 
 if (NOT TARGET antlr4-runtime)
     add_library (antlr4-runtime STATIC IMPORTED GLOBAL)
@@ -62,11 +63,12 @@ endif ()
 add_dependencies (antlr4-runtime antlr4)
 
 add_library (vsag_antlr4_autogen_headers INTERFACE)
-target_include_directories (vsag_antlr4_autogen_headers INTERFACE
+target_include_directories (vsag_antlr4_autogen_headers SYSTEM INTERFACE
     ${install_dir}/include
     ${install_dir}/include/antlr4-autogen)
 
 file (GLOB ANTLR4_GEN_SRC "extern/antlr4/fc/*.cpp")
+list (FILTER ANTLR4_GEN_SRC EXCLUDE REGEX "FC(BaseListener|BaseVisitor|Listener|Visitor)\\.cpp$")
 add_library (antlr4-autogen STATIC ${ANTLR4_GEN_SRC})
 add_dependencies (antlr4-autogen antlr4)
 target_link_libraries (antlr4-autogen PUBLIC vsag_antlr4_runtime_headers vsag_antlr4_autogen_headers)

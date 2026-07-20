@@ -20,7 +20,7 @@
 #include "algorithm/inner_index_parameter.h"
 #include "algorithm/sindi/sindi_parameter.h"
 #include "index_common_param.h"
-#include "io/io_parameter.h"
+#include "io/common/io_parameter.h"
 #include "utils/pointer_define.h"
 
 namespace vsag {

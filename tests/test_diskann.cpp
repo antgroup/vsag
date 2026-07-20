@@ -20,6 +20,7 @@
 #include <iostream>
 #include <nlohmann/json.hpp>
 
+#include "fixtures/core/random.h"
 #include "functest.h"
 #include "test_index.h"
 #include "vsag/errors.h"
@@ -146,7 +147,54 @@ TEST_CASE_METHOD(fixtures::DiskANNTestIndex,
     }
 }
 
-TEST_CASE_METHOD(fixtures::DiskANNTestIndex, "diskann pq_dim test", "[ft][diskann]") {
+TEST_CASE_METHOD(fixtures::DiskANNTestIndex, "(PR) diskann pq_dim test", "[ft][diskann][pr]") {
+    const std::vector<int> dims = {736, 1536, 2048, 2560, 3072};
+    const std::vector<std::string> all_metric_types = {"l2", "ip", "cosine"};
+    auto metric_type = fixtures::RandomSelect(all_metric_types)[0];
+    INFO("Randomly selected metric_type for PR CI: " << metric_type);
+    const std::string name = "diskann";
+    constexpr auto build_parameter_json = R"(
+        {{
+            "dtype": "float32",
+            "metric_type": "{}",
+            "dim": {},
+            "diskann": {{
+                "max_degree": 16,
+                "ef_construction": 200,
+                "pq_dims": {},
+                "pq_sample_rate": 0.5,
+                "use_pq_search": true
+            }}
+        }}
+    )";
+    constexpr auto search_param_template = R"(
+        {{
+            "diskann": {{
+                "ef_search": {},
+                "io_limit": 400,
+                "beam_search": 4,
+                "use_reorder": true
+            }}
+        }}
+    )";
+    for (auto dim : dims) {
+        auto build_parameters_str = fmt::format(build_parameter_json, metric_type, dim, dim / 4);
+        auto search_param = fmt::format(search_param_template, dim / 4);
+        auto param = GenerateDiskANNBuildParametersString(metric_type, dim);
+        auto index = TestFactory(name, param, true);
+        auto dataset = pool.GetDatasetAndCreate(dim, base_count, metric_type);
+        TestBuildIndex(index, dataset, true);
+        TestKnnSearch(index, dataset, search_param, 0.95, true);
+        TestRangeSearch(index, dataset, search_param, 0.95, 10, true);
+        TestRangeSearch(index, dataset, search_param, 0.45, 5, true);
+        TestFilterSearch(index, dataset, search_param, 0.95, true);
+        REQUIRE(index->GetIndexType() == vsag::IndexType::DISKANN);
+    }
+}
+
+TEST_CASE_METHOD(fixtures::DiskANNTestIndex,
+                 "(Daily) diskann pq_dim test",
+                 "[ft][diskann][daily]") {
     const std::vector<int> dims = {736, 1536, 2048, 2560, 3072};
     auto metric_type = GENERATE("l2", "ip", "cosine");
     const std::string name = "diskann";

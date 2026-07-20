@@ -22,7 +22,7 @@
 
 #include "datacell/sindi_datacell_utils.h"
 #include "io/io_headers.h"
-#include "io/reader_io_parameter.h"
+#include "io/reader_io/reader_io_parameter.h"
 #include "simd/fp16_simd.h"
 #include "utils/byte_buffer.h"
 #include "utils/util_functions.h"

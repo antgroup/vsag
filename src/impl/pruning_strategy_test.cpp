@@ -27,7 +27,7 @@
 #include "impl/allocator/safe_allocator.h"
 #include "impl/heap/standard_heap.h"
 #include "index_common_param.h"
-#include "io/memory_io_parameter.h"
+#include "io/memory_io/memory_io_parameter.h"
 #include "quantization/fp32_quantizer_parameter.h"
 #include "typing.h"
 #include "unittest.h"

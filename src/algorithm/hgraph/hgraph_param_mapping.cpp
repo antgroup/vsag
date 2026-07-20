@@ -415,6 +415,38 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             },
         },
         {
+            FAST_ENCODE_RABITQ,
+            {
+                BASE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                FAST_ENCODE_RABITQ_KEY,
+            },
+        },
+        {
+            FAST_ENCODE_RABITQ,
+            {
+                PRECISE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                FAST_ENCODE_RABITQ_KEY,
+            },
+        },
+        {
+            FAST_ENCODE_RABITQ_ROUNDS,
+            {
+                BASE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                FAST_ENCODE_RABITQ_ROUNDS_KEY,
+            },
+        },
+        {
+            FAST_ENCODE_RABITQ_ROUNDS,
+            {
+                PRECISE_CODES_KEY,
+                QUANTIZATION_PARAMS_KEY,
+                FAST_ENCODE_RABITQ_ROUNDS_KEY,
+            },
+        },
+        {
             HGRAPH_SUPPORT_REMOVE,
             {GRAPH_KEY, GRAPH_SUPPORT_REMOVE},
         },
@@ -501,6 +533,8 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
                 "{RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY}": 32,
                 "{RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY}": 1,
                 "{RABITQ_QUANTIZATION_ERROR_RATE_KEY}": 1.9,
+                "{FAST_ENCODE_RABITQ_KEY}": true,
+                "{FAST_ENCODE_RABITQ_ROUNDS_KEY}": 6,
                 "{TQ_CHAIN_KEY}": "",
                 "mrle_dim": 0,
                 "nbits": 8,
@@ -517,6 +551,8 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             "{QUANTIZATION_PARAMS_KEY}": {
                 "{TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
                 "{SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE_KEY}": 0.05,
+                "{FAST_ENCODE_RABITQ_KEY}": true,
+                "{FAST_ENCODE_RABITQ_ROUNDS_KEY}": 6,
                 "{PCA_DIM_KEY}": 0,
                 "{PRODUCT_QUANTIZATION_DIM_KEY}": 1,
                 "{HOLD_MOLDS}": false

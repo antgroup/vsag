@@ -17,6 +17,7 @@
 - [LazyHGraph](indexes/lazy_hgraph.md)
 - [IVF](indexes/ivf.md)
 - [SINDI](indexes/sindi.md)
+- [SIMQ](indexes/simq.md)
 - [Pyramid](indexes/pyramid.md)
 - [BruteForce](indexes/brute_force.md)
 
@@ -50,6 +51,7 @@
 - [迭代式搜索](advanced/iterator_search.md)
 - [属性过滤（混合搜索）](advanced/attribute_filter.md)
 - [序列化格式](advanced/serialization.md)
+- [新序列化格式](advanced/new_serialization.md)
 - [内存管理](advanced/memory.md)
 - [搜索路径 Allocator](advanced/search_allocator.md)
 - [索引自省](advanced/introspection.md)
@@ -57,6 +59,17 @@
 - [图索引增强](advanced/enhance_graph.md)
 - [Extra Info（附加信息）](advanced/extra_info.md)
 - [索引生命周期管理](advanced/index_lifecycle.md)
+
+# API 参考
+
+- [总览](api/README.md)
+- [Factory 与 Engine](api/factory_engine.md)
+- [Index](api/index_class.md)
+- [Dataset](api/dataset.md)
+- [搜索请求与过滤器](api/search.md)
+- [序列化类型](api/serialization.md)
+- [资源管理](api/resource.md)
+- [辅助类型](api/types.md)
 
 # 性能与调优
 

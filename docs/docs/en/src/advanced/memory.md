@@ -58,12 +58,27 @@ if (index->CheckFeature(vsag::SUPPORT_ESTIMATE_MEMORY)) {
 
 See `examples/cpp/308_feature_estimate_memory.cpp` for a full run.
 
+### `EstimateBuildMemory(num_elements)`
+
+`Index::EstimateBuildMemory(num_elements)` returns the estimated memory (in bytes) required
+**during the build process** for `num_elements` vectors. Unlike `EstimateMemory`, which
+estimates the steady-state size of the final index, this accounts for temporary buffers and
+intermediate data structures that exist only while `Build` is running. The peak memory during
+build is typically higher than the post-build footprint:
+
+```cpp
+uint64_t peak = index->EstimateBuildMemory(1000000);  // bytes
+```
+
+Currently only DiskANN provides a non-trivial implementation; other index types throw
+an exception by default.
+
 ### `GetMemoryUsage()`
 
 `Index::GetMemoryUsage()` returns the **current** memory footprint of an index in bytes:
 
 ```cpp
-int64_t bytes = index->GetMemoryUsage();
+uint64_t bytes = index->GetMemoryUsage();
 ```
 
 Properties:
@@ -85,6 +100,26 @@ Properties:
 
 See `examples/cpp/319_feature_get_memory_usage.cpp` for a runnable example, including a helper
 that compares the interface value with the process resident size.
+
+### `GetMemoryUsageDetail()`
+
+`Index::GetMemoryUsageDetail()` returns a breakdown of the **current** memory usage by
+component:
+
+```cpp
+std::unordered_map<std::string, uint64_t> detail = index->GetMemoryUsageDetail();
+for (const auto& [component, bytes] : detail) {
+    std::cout << component << ": " << bytes << " bytes\n";
+}
+```
+
+The returned map keys are component names and values are memory in bytes. This is useful for
+understanding *where* the memory is going inside an index.
+
+Currently only HGraph provides a meaningful implementation, returning components such as
+`basic_flatten_codes`, `bottom_graph`, `route_graph`, `neighbors_mutex`, `pool`,
+`label_table`, `high_precise_codes`, `extra_infos`, and `raw_vector`. SINDI returns an empty
+map. Other index types throw an exception by default.
 
 ### Capability Flags
 

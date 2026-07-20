@@ -19,8 +19,8 @@
 #include <memory>
 
 #include "extra_info_interface.h"
-#include "io/basic_io.h"
-#include "io/memory_block_io.h"
+#include "io/common/basic_io.h"
+#include "io/memory_block_io/memory_block_io.h"
 #include "quantization/quantizer.h"
 #include "utils/byte_buffer.h"
 
@@ -80,7 +80,7 @@ public:
     void
     Deserialize(StreamReader& reader) override;
 
-    int64_t
+    uint64_t
     GetMemoryUsage() const override;
 
     void
@@ -185,9 +185,9 @@ ExtraInfoDataCell<IOTmpl>::Deserialize(StreamReader& reader) {
 }
 
 template <typename IOTmpl>
-int64_t
+uint64_t
 ExtraInfoDataCell<IOTmpl>::GetMemoryUsage() const {
-    int64_t memory = sizeof(ExtraInfoDataCell<IOTmpl>);
+    uint64_t memory = sizeof(ExtraInfoDataCell<IOTmpl>);
     if (IOTmpl::InMemory) {
         memory += this->io_->GetMemoryUsage();
     }

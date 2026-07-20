@@ -23,7 +23,7 @@
 #include "impl/allocator/safe_allocator.h"
 #include "index_common_param.h"
 #include "inner_string_params.h"
-#include "io/io_parameter.h"
+#include "io/common/io_parameter.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "unittest.h"

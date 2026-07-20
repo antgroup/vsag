@@ -63,6 +63,12 @@ public:
                                     "immutable index no support " operation_str)); \
     }
 
+#define CHECK_DESERIALIZE_EMPTY_INDEX                                                        \
+    if (GetNumElements() != 0) {                                                             \
+        return tl::unexpected(                                                               \
+            Error(ErrorType::INDEX_NOT_EMPTY, "failed to deserialize: index is not empty")); \
+    }
+
 #define CHECK_NONEMPTY_DATASET(dataset)     \
     if ((dataset)->GetNumElements() == 0) { \
         return std::vector<int64_t>();      \
@@ -159,17 +165,26 @@ public:
 
     tl::expected<void, Error>
     Deserialize(const BinarySet& binary_set) override {
+        CHECK_DESERIALIZE_EMPTY_INDEX;
         SAFE_CALL(this->inner_index_->Deserialize(binary_set));
     }
 
     tl::expected<void, Error>
     Deserialize(const ReaderSet& reader_set) override {
+        CHECK_DESERIALIZE_EMPTY_INDEX;
         SAFE_CALL(this->inner_index_->Deserialize(reader_set));
     }
 
     tl::expected<void, Error>
     Deserialize(std::istream& in_stream) override {
+        CHECK_DESERIALIZE_EMPTY_INDEX;
         SAFE_CALL(this->inner_index_->Deserialize(in_stream));
+    }
+
+    tl::expected<void, Error>
+    DeserializeStreaming(std::istream& in_stream) override {
+        CHECK_DESERIALIZE_EMPTY_INDEX;
+        SAFE_CALL(this->inner_index_->DeserializeStreaming(in_stream));
     }
 
     [[nodiscard]] uint64_t
@@ -223,9 +238,9 @@ public:
         SAFE_CALL(return this->inner_index_->GetDetailDataByName(name, info));
     }
 
-    [[nodiscard]] int64_t
-    GetEstimateBuildMemory(const int64_t num_elements) const override {
-        return this->inner_index_->GetEstimateBuildMemory(num_elements);
+    [[nodiscard]] uint64_t
+    EstimateBuildMemory(uint64_t num_elements) const override {
+        return this->inner_index_->EstimateBuildMemory(num_elements);
     }
 
     virtual tl::expected<void, Error>
@@ -238,12 +253,12 @@ public:
         return this->inner_index_->GetIndexType();
     }
 
-    [[nodiscard]] int64_t
+    [[nodiscard]] uint64_t
     GetMemoryUsage() const override {
         return this->inner_index_->GetMemoryUsage();
     }
 
-    [[nodiscard]] std::string
+    [[nodiscard]] std::unordered_map<std::string, uint64_t>
     GetMemoryUsageDetail() const override {
         return this->inner_index_->GetMemoryUsageDetail();
     }
@@ -431,6 +446,11 @@ public:
     tl::expected<void, Error>
     Serialize(std::ostream& out_stream) override {
         SAFE_CALL(this->inner_index_->Serialize(out_stream));
+    }
+
+    tl::expected<void, Error>
+    SerializeStreaming(std::ostream& out_stream) const override {
+        SAFE_CALL(this->inner_index_->SerializeStreaming(out_stream));
     }
 
     [[nodiscard]] tl::expected<DatasetPtr, Error>

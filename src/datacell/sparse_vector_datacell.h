@@ -18,8 +18,8 @@
 #include <limits>
 
 #include "flatten_interface.h"
-#include "io/basic_io.h"
-#include "io/memory_block_io.h"
+#include "io/common/basic_io.h"
+#include "io/memory_block_io/memory_block_io.h"
 #include "vsag/dataset.h"
 
 namespace vsag {
@@ -154,7 +154,7 @@ public:
         this->io_->InitIO(io_param);
     }
 
-    int64_t
+    uint64_t
     GetMemoryUsage() const override;
 
 private:

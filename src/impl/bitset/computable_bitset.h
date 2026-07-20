@@ -139,7 +139,7 @@ public:
      * 
      * @return The current memory usage in bytes.
      */
-    virtual int64_t
+    virtual uint64_t
     GetMemoryUsage() const = 0;
 };
 

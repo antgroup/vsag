@@ -17,9 +17,12 @@
 
 #include <fmt/format.h>
 
+#include <algorithm>
+#include <array>
 #include <cstdint>
 #include <fstream>
 #include <iostream>
+#include <limits>
 
 #include "footer.h"
 #include "impl/logger/logger.h"
@@ -27,6 +30,18 @@
 #include "vsag_exception.h"
 
 namespace vsag {
+
+void
+SkipForward(StreamReader& reader, uint64_t size) {
+    constexpr uint64_t buffer_size = 8192;
+    std::array<char, buffer_size> buffer{};
+    uint64_t remaining = size;
+    while (remaining > 0) {
+        uint64_t read_size = std::min<uint64_t>(remaining, buffer_size);
+        reader.Read(buffer.data(), read_size);
+        remaining -= read_size;
+    }
+}
 
 SliceStreamReader
 StreamReader::Slice(uint64_t begin, uint64_t length) {
@@ -62,7 +77,7 @@ ReadFuncStreamReader::ReadFuncStreamReader(std::function<void(uint64_t, uint64_t
 }
 
 ReadFuncStreamReader::~ReadFuncStreamReader() {
-    vsag::logger::info("ReadFuncStreamReader io count ({}) in deserialize process", io_count_);
+    vsag::logger::debug("ReadFuncStreamReader io count ({}) in deserialize process", io_count_);
 }
 
 void
@@ -101,6 +116,48 @@ IOStreamReader::IOStreamReader(std::istream& istream) : istream_(istream) {
 
 IOStreamReader::~IOStreamReader() {
     vsag::logger::info("IOStreamReader io count ({}) in deserialize process", io_count_);
+}
+
+void
+ForwardStreamReader::Read(char* data, uint64_t size) {
+    if (size == 0) {
+        return;
+    }
+    if (size > static_cast<uint64_t>(std::numeric_limits<std::streamsize>::max())) {
+        throw VsagException(ErrorType::READ_ERROR, "ForwardStreamReader read size is too large");
+    }
+    const auto stream_size = static_cast<std::streamsize>(size);
+    istream_.read(data, stream_size);
+    if (istream_.fail()) {
+        auto bytes_read = istream_.gcount();
+        throw vsag::VsagException(
+            vsag::ErrorType::READ_ERROR,
+            fmt::format(
+                "Attempted to read: {} bytes. Bytes read before failure: {}.", size, bytes_read));
+    }
+    cursor_ += size;
+    io_count_++;
+}
+
+void
+ForwardStreamReader::Seek(uint64_t cursor) {
+    (void)cursor;
+    throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                        "ForwardStreamReader does not support seek");
+}
+
+uint64_t
+ForwardStreamReader::GetCursor() const {
+    return cursor_;
+}
+
+uint64_t
+ForwardStreamReader::Length() {
+    throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                        "ForwardStreamReader does not support length");
+}
+
+ForwardStreamReader::ForwardStreamReader(std::istream& istream) : istream_(istream) {
 }
 
 uint64_t
@@ -219,6 +276,47 @@ SliceStreamReader::SliceStreamReader(StreamReader* reader, uint64_t length)
     : StreamReader(length), reader_impl_(reader) {
     begin_ = reader->GetCursor();
     // vsag::logger::trace("SliceReader [{}, {})", begin_, begin_ + length_);
+}
+
+void
+BoundedForwardReader::Read(char* data, uint64_t size) {
+    if (cursor_ > length_ || size > length_ - cursor_) {
+        throw vsag::VsagException(vsag::ErrorType::READ_ERROR,
+                                  "BoundedForwardReader: read exceeds block boundary");
+    }
+    reader_impl_->Read(data, size);
+    cursor_ += size;
+}
+
+void
+BoundedForwardReader::Seek(uint64_t cursor) {
+    (void)cursor;
+    throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                        "BoundedForwardReader does not support seek");
+}
+
+uint64_t
+BoundedForwardReader::GetCursor() const {
+    return cursor_;
+}
+
+uint64_t
+BoundedForwardReader::Length() {
+    return length_;
+}
+
+void
+BoundedForwardReader::SkipRemaining() {
+    if (cursor_ > length_) {
+        throw vsag::VsagException(vsag::ErrorType::READ_ERROR,
+                                  "BoundedForwardReader: cursor exceeds block boundary");
+    }
+    SkipForward(*reader_impl_, length_ - cursor_);
+    cursor_ = length_;
+}
+
+BoundedForwardReader::BoundedForwardReader(StreamReader* reader, uint64_t length)
+    : StreamReader(length), reader_impl_(reader) {
 }
 
 }  // namespace vsag

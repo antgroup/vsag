@@ -14,6 +14,7 @@ The pages in this section cover the actively developed indexes:
 | `ivf` | [IVF](ivf.md) | Partition-based search, high-throughput batch queries, large corpora |
 | `sindi` | [SINDI](sindi.md) | Sparse vectors (BM25 / learned sparse) on inner-product |
 | `sindi_v2` | [SINDI V2](sindi.md) | SINDI with term-first persistence and per-query-term external IO |
+| `simq` | [SIMQ](simq.md) | ColBERT-style multi-vector retrieval (MaxSim) |
 | `pyramid` | [Pyramid](pyramid.md) | Multi-tenant or tag-partitioned corpora with hierarchical paths |
 
 `brute_force` is also available as an exact-search baseline (see

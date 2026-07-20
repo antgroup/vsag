@@ -15,7 +15,7 @@
 
 #pragma once
 
-#include "io/io_parameter.h"
+#include "io/common/io_parameter.h"
 #include "parameter.h"
 #include "quantization/quantizer_parameter.h"
 

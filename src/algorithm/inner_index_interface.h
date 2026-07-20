@@ -17,6 +17,7 @@
 
 #include <atomic>
 #include <shared_mutex>
+#include <unordered_map>
 #include <vector>
 
 #include "container_types.h"
@@ -30,6 +31,7 @@
 #include "json_types.h"
 #include "metric_type.h"
 #include "parameter.h"
+#include "storage/serialization.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "type_helpers.h"
@@ -198,6 +200,14 @@ public:
     Deserialize(std::istream& in_stream);
 
     virtual void
+    DeserializeStreaming(std::istream& in_stream);
+
+    virtual void
+    LoadStreamingBody(StreamReader& reader,
+                      const MetadataPtr& metadata,
+                      const LoadParameters& parameters);
+
+    virtual void
     Deserialize(StreamReader& reader) = 0;
 
     [[nodiscard]] virtual uint64_t
@@ -253,10 +263,10 @@ public:
     virtual DetailDataPtr
     GetDetailDataByName(const std::string& name, IndexDetailInfo& info) const;
 
-    [[nodiscard]] virtual int64_t
-    GetEstimateBuildMemory(const int64_t num_elements) const {
+    [[nodiscard]] virtual uint64_t
+    EstimateBuildMemory(uint64_t num_elements) const {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                            "Index doesn't support GetEstimateBuildMemory");
+                            "Index doesn't support EstimateBuildMemory");
     }
 
     virtual void
@@ -265,15 +275,14 @@ public:
     [[nodiscard]] virtual IndexType
     GetIndexType() const = 0;
 
-    [[nodiscard]] virtual int64_t
+    [[nodiscard]] virtual uint64_t
     GetMemoryUsage() const {
         std::shared_lock lock(this->memory_usage_mutex_);
         return this->current_memory_usage_.load();
     }
 
-    [[nodiscard]] virtual std::string
+    [[nodiscard]] virtual std::unordered_map<std::string, uint64_t>
     GetMemoryUsageDetail() const {
-        // TODO(deming): implement func for every types of inner index
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                             "Index doesn't support GetMemoryUsageDetail");
     }
@@ -436,6 +445,9 @@ public:
     Serialize(std::ostream& out_stream) const;
 
     virtual void
+    SerializeStreaming(std::ostream& out_stream) const;
+
+    virtual void
     Serialize(const WriteFuncType& write_func) const;
 
     virtual void
@@ -494,6 +506,20 @@ public:
     }
 
 protected:
+    virtual MetadataPtr
+    collect_streaming_header() const;
+
+    virtual void
+    serialize_streaming_body(StreamWriter& writer) const;
+
+    virtual void
+    deserialize_streaming_body(StreamReader& reader, const MetadataPtr& metadata);
+
+    virtual void
+    load_streaming_body(StreamReader& reader,
+                        const MetadataPtr& metadata,
+                        const LoadParameters& parameters);
+
     void
     analyze_quantizer(JsonType& stats,
                       const float* data,
@@ -572,7 +598,7 @@ public:
 protected:
     std::atomic<uint64_t> total_count_{0};
 
-    std::atomic<int64_t> current_memory_usage_{0};
+    std::atomic<uint64_t> current_memory_usage_{0};
     mutable std::shared_mutex memory_usage_mutex_{};
 
     bool has_raw_vector_{false};

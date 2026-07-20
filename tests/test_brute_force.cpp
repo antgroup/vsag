@@ -15,10 +15,15 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
+#include <cstring>
 #include <limits>
+#include <sstream>
 
 #include "functest.h"
+#include "storage/serialization_tags.h"
+#include "storage/streaming_serialization_test_utils.h"
 #include "test_index.h"
+#include "vsag/constants.h"
 #include "vsag/options.h"
 #include "vsag/search_request.h"
 
@@ -158,6 +163,20 @@ BruteForceTestIndex::TestGeneral(const IndexPtr& index,
     TestCheckIdExist(index, dataset);
 }
 }  // namespace fixtures
+
+namespace {
+
+using vsag::test::InsertUnknownStreamingBlock;
+using vsag::test::SetStreamingBlockVersion;
+
+void
+RequireStreamTail(std::stringstream& stream, const std::string& expected_tail) {
+    std::string tail(expected_tail.size(), '\0');
+    stream.read(tail.data(), static_cast<std::streamsize>(tail.size()));
+    REQUIRE(tail == expected_tail);
+}
+
+}  // namespace
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::BruteForceTestIndex,
                              "BruteForce Factory Test With Exceptions",
@@ -459,9 +478,213 @@ TestBruteForceSerializeFile(const fixtures::BruteForceResourcePtr& resource) {
     }
 }
 
+static void
+TestBruteForceGetStreamingMetadataOnEmptyIndex() {
+    using namespace fixtures;
+    auto param = BruteForceTestIndex::GenerateBruteForceBuildParametersString("l2", 16, "fp32");
+    auto index = TestIndex::TestFactory(BruteForceTestIndex::name, param, true);
+
+    std::stringstream stream;
+    REQUIRE(index->SerializeStreaming(stream).has_value());
+
+    auto metadata_result = vsag::Index::GetStreamingMetadata(stream);
+    REQUIRE(metadata_result.has_value());
+    REQUIRE(metadata_result.value().metadata_json.find("\"_empty\":true") != std::string::npos);
+    REQUIRE(metadata_result.value().blocks.empty());
+}
+
+static void
+TestBruteForceSerializeStreaming() {
+    using namespace fixtures;
+    auto param = BruteForceTestIndex::GenerateBruteForceBuildParametersString("l2", 16, "fp32");
+    auto index = TestIndex::TestFactory(BruteForceTestIndex::name, param, true);
+    auto dataset = BruteForceTestIndex::pool.GetDatasetAndCreate(16, 100, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    std::stringstream stream;
+    auto serialize_result = index->SerializeStreaming(stream);
+    REQUIRE(serialize_result.has_value());
+    auto bytes = stream.str();
+    REQUIRE(bytes.substr(0, 8) == vsag::SERIAL_STREAM_MAGIC);
+
+    auto index2 = TestIndex::TestFactory(BruteForceTestIndex::name, param, true);
+    std::stringstream deserialize_stream(bytes);
+    auto deserialize_result = index2->DeserializeStreaming(deserialize_stream);
+    REQUIRE(deserialize_result.has_value());
+    REQUIRE(index2->GetNumElements() == index->GetNumElements());
+
+    std::stringstream load_stream(bytes);
+    auto load_result = vsag::Index::Load(load_stream, R"({"base_io_type": "memory_io"})");
+    REQUIRE(load_result.has_value());
+    auto index3 = load_result.value();
+    REQUIRE(index3->GetNumElements() == index->GetNumElements());
+
+    std::stringstream buffer_load_stream(bytes);
+    auto buffer_load_result =
+        vsag::Index::Load(buffer_load_stream, R"({"base_io_type": "buffer_io"})");
+    REQUIRE(buffer_load_result.has_value());
+    REQUIRE(buffer_load_result.value()->GetNumElements() == index->GetNumElements());
+
+    std::stringstream reader_load_stream(bytes);
+    auto reader_load_result =
+        vsag::Index::Load(reader_load_stream, R"({"base_io_type": "reader_io"})");
+    REQUIRE_FALSE(reader_load_result.has_value());
+
+    auto query = get_one_query(dataset->query_, 0);
+    auto result = index->KnnSearch(query, 10, search_param_tmp);
+    auto result2 = index2->KnnSearch(query, 10, search_param_tmp);
+    auto result3 = index3->KnnSearch(query, 10, search_param_tmp);
+    REQUIRE(result.has_value());
+    REQUIRE(result2.has_value());
+    REQUIRE(result3.has_value());
+    REQUIRE(result.value()->GetDim() == result2.value()->GetDim());
+    for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
+        REQUIRE(result.value()->GetIds()[i] == result2.value()->GetIds()[i]);
+        REQUIRE(result.value()->GetDistances()[i] == result2.value()->GetDistances()[i]);
+        REQUIRE(result.value()->GetIds()[i] == result3.value()->GetIds()[i]);
+        REQUIRE(result.value()->GetDistances()[i] == result3.value()->GetDistances()[i]);
+    }
+}
+
+TEST_CASE("BruteForce streaming compatibility",
+          "[ft][serialize][streaming][bruteforce][compatibility]") {
+    using namespace fixtures;
+    auto param = BruteForceTestIndex::GenerateBruteForceBuildParametersString("l2", 16, "fp32");
+    auto index = TestIndex::TestFactory(BruteForceTestIndex::name, param, true);
+    auto dataset = BruteForceTestIndex::pool.GetDatasetAndCreate(16, 100, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    std::stringstream stream;
+    REQUIRE(index->SerializeStreaming(stream).has_value());
+    const auto bytes = stream.str();
+
+    SECTION("skips unknown non-critical block") {
+        auto mutated = InsertUnknownStreamingBlock(bytes, false);
+        auto restored = TestIndex::TestFactory(BruteForceTestIndex::name, param, true);
+        std::stringstream deserialize_stream(mutated);
+        REQUIRE(restored->DeserializeStreaming(deserialize_stream).has_value());
+        REQUIRE(restored->GetNumElements() == index->GetNumElements());
+    }
+
+    SECTION("skips unknown non-critical block with unsupported version") {
+        auto mutated = InsertUnknownStreamingBlock(bytes, false, 99);
+        auto restored = TestIndex::TestFactory(BruteForceTestIndex::name, param, true);
+        std::stringstream deserialize_stream(mutated);
+        REQUIRE(restored->DeserializeStreaming(deserialize_stream).has_value());
+        REQUIRE(restored->GetNumElements() == index->GetNumElements());
+    }
+
+    SECTION("rejects unknown critical block") {
+        auto mutated = InsertUnknownStreamingBlock(bytes, true);
+        auto restored = TestIndex::TestFactory(BruteForceTestIndex::name, param, true);
+        std::stringstream deserialize_stream(mutated);
+        REQUIRE_FALSE(restored->DeserializeStreaming(deserialize_stream).has_value());
+    }
+
+    SECTION("rejects unsupported critical block version") {
+        auto mutated =
+            SetStreamingBlockVersion(bytes, vsag::StreamSerializationTag::BASE_CODES, 99);
+        auto restored = TestIndex::TestFactory(BruteForceTestIndex::name, param, true);
+        std::stringstream deserialize_stream(mutated);
+        REQUIRE_FALSE(restored->DeserializeStreaming(deserialize_stream).has_value());
+    }
+
+    SECTION("supports nested load memory policy") {
+        std::stringstream load_stream(bytes);
+        auto loaded = vsag::Index::Load(load_stream, R"({"load":{"base_codes":"memory"}})");
+        REQUIRE(loaded.has_value());
+        REQUIRE(loaded.value()->GetNumElements() == index->GetNumElements());
+    }
+
+    SECTION("rejects nested load reader policy for required base codes") {
+        std::stringstream load_stream(bytes);
+        REQUIRE_FALSE(
+            vsag::Index::Load(load_stream, R"({"load":{"base_codes":"reader"}})").has_value());
+    }
+
+    SECTION("rejects invalid streaming load JSON as invalid argument") {
+        std::stringstream load_stream(bytes);
+        auto loaded = vsag::Index::Load(load_stream, "{");
+        REQUIRE_FALSE(loaded.has_value());
+        REQUIRE(loaded.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    }
+
+    SECTION("rejects wrong streaming load policy type as invalid argument") {
+        std::stringstream load_stream(bytes);
+        auto loaded = vsag::Index::Load(load_stream, R"({"load":{"base_codes":false}})");
+        REQUIRE_FALSE(loaded.has_value());
+        REQUIRE(loaded.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    }
+}
+
+TEST_CASE("BruteForce streaming Load skips attribute filter state",
+          "[ft][serialize][streaming][bruteforce][compatibility]") {
+    using namespace fixtures;
+    auto param =
+        BruteForceTestIndex::GenerateBruteForceBuildParametersString("l2", 16, "fp32", true);
+    auto index = TestIndex::TestFactory(BruteForceTestIndex::name, param, true);
+    auto dataset = BruteForceTestIndex::pool.GetDatasetAndCreate(16, 100, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    std::stringstream stream;
+    REQUIRE(index->SerializeStreaming(stream).has_value());
+    std::stringstream load_stream(stream.str());
+    auto loaded = vsag::Index::Load(load_stream, R"({"load":{"use_attribute_filter":"skip"}})");
+    REQUIRE(loaded.has_value());
+    REQUIRE(loaded.value()->GetNumElements() == index->GetNumElements());
+
+    auto query = get_one_query(dataset->query_, 0);
+    auto search_result = loaded.value()->KnnSearch(query, 10, search_param_tmp);
+    REQUIRE(search_result.has_value());
+
+    vsag::SearchRequest request;
+    request.query_ = query;
+    request.topk_ = 10;
+    request.params_str_ = search_param_tmp;
+    request.enable_attribute_filter_ = true;
+    request.attribute_filter_str_ = R"(multi_in(term_0, "0", "|"))";
+    auto attr_search_result = loaded.value()->SearchWithRequest(request);
+    REQUIRE_FALSE(attr_search_result.has_value());
+    REQUIRE(attr_search_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+
+    auto remove_result = loaded.value()->Remove(dataset->base_->GetIds()[0]);
+    REQUIRE(remove_result.has_value());
+}
+
+TEST_CASE("BruteForce empty streaming index consumes section end",
+          "[ft][serialize][streaming][bruteforce][compatibility]") {
+    using namespace fixtures;
+    auto param = BruteForceTestIndex::GenerateBruteForceBuildParametersString("l2", 16, "fp32");
+    auto index = TestIndex::TestFactory(BruteForceTestIndex::name, param, true);
+    std::stringstream stream;
+    REQUIRE(index->SerializeStreaming(stream).has_value());
+    stream << "tail";
+    auto bytes = stream.str();
+
+    auto restored = TestIndex::TestFactory(BruteForceTestIndex::name, param, true);
+    std::stringstream deserialize_stream(bytes);
+    REQUIRE(restored->DeserializeStreaming(deserialize_stream).has_value());
+    RequireStreamTail(deserialize_stream, "tail");
+
+    std::stringstream load_stream(bytes);
+    auto loaded = vsag::Index::Load(load_stream, "{}");
+    REQUIRE(loaded.has_value());
+    RequireStreamTail(load_stream, "tail");
+}
+
 TEST_CASE("(PR) BruteForce Serialize File Test", "[ft][serialize][bruteforce][pr]") {
     auto resource = fixtures::BruteForceTestIndex::GetResource(true);
     TestBruteForceSerializeFile(resource);
+}
+
+TEST_CASE("(PR) BruteForce Streaming Metadata Empty Index Test",
+          "[ft][serialize][streaming][bruteforce][pr]") {
+    TestBruteForceGetStreamingMetadataOnEmptyIndex();
+}
+
+TEST_CASE("(PR) BruteForce Streaming Serialize Test",
+          "[ft][serialize][streaming][bruteforce][pr]") {
+    TestBruteForceSerializeStreaming();
 }
 
 TEST_CASE("(Daily) BruteForce Serialize File Test", "[ft][serialize][bruteforce][daily]") {

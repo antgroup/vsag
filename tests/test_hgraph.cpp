@@ -18,6 +18,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 #include <chrono>
+#include <cstring>
 #include <limits>
 #include <random>
 #include <sstream>
@@ -25,6 +26,8 @@
 
 #include "functest.h"
 #include "inner_string_params.h"
+#include "storage/serialization_tags.h"
+#include "storage/streaming_serialization_test_utils.h"
 #include "test_index.h"
 #include "typing.h"
 #include "vsag/filter.h"
@@ -325,10 +328,10 @@ HGraphTestIndex::TestGeneral(const TestIndex::IndexPtr& index,
 
 void
 HGraphTestIndex::TestMemoryUsageDetail(const IndexPtr& index) {
-    auto memory_detail = vsag::JsonType::Parse(index->GetMemoryUsageDetail());
-    REQUIRE(memory_detail.Contains("basic_flatten_codes"));
-    REQUIRE(memory_detail.Contains("bottom_graph"));
-    REQUIRE(memory_detail.Contains("route_graph"));
+    auto memory_detail = index->GetMemoryUsageDetail();
+    REQUIRE(memory_detail.count("basic_flatten_codes") > 0);
+    REQUIRE(memory_detail.count("bottom_graph") > 0);
+    REQUIRE(memory_detail.count("route_graph") > 0);
 }
 }  // namespace fixtures
 
@@ -405,6 +408,70 @@ ForEachHGraphCase(const fixtures::HGraphResourcePtr& resource, const Cases& test
                 fn(metric_type, dim, base_quantization_str, recall);
             }
         }
+    }
+}
+
+using vsag::test::EraseStreamingBlock;
+using vsag::test::InsertUnknownStreamingBlock;
+using vsag::test::SetStreamingBlockVersion;
+using vsag::test::SetStreamingMajorVersion;
+using vsag::test::SetStreamingMinorVersion;
+
+struct HGraphStreamingFixture {
+    std::string param;
+    fixtures::TestDatasetPtr dataset;
+    fixtures::TestIndex::IndexPtr index;
+    std::string bytes;
+};
+
+HGraphStreamingFixture
+MakeHGraphStreamingFixture(const std::string& quantization = "fp32") {
+    using namespace fixtures;
+    HGraphTestIndex::HGraphBuildParam build_param("l2", 16, quantization);
+    auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+    auto index = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+    auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(16, 100, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    std::stringstream stream;
+    auto serialize_result = index->SerializeStreaming(stream);
+    REQUIRE(serialize_result.has_value());
+    auto bytes = stream.str();
+    REQUIRE(bytes.substr(0, 8) == vsag::SERIAL_STREAM_MAGIC);
+    return HGraphStreamingFixture{param, dataset, index, bytes};
+}
+
+fixtures::TestIndex::IndexPtr
+DeserializeHGraphStreamingBytes(const std::string& param, const std::string& bytes) {
+    auto index = fixtures::TestIndex::TestFactory(fixtures::HGraphTestIndex::name, param, true);
+    std::stringstream stream(bytes);
+    auto result = index->DeserializeStreaming(stream);
+    REQUIRE(result.has_value());
+    return index;
+}
+
+void
+RequireHGraphStreamingDeserializeFails(const std::string& param, const std::string& bytes) {
+    auto index = fixtures::TestIndex::TestFactory(fixtures::HGraphTestIndex::name, param, true);
+    std::stringstream stream(bytes);
+    REQUIRE_FALSE(index->DeserializeStreaming(stream).has_value());
+}
+
+void
+RequireHGraphStreamingSearchMatches(const fixtures::TestIndex::IndexPtr& expected,
+                                    const fixtures::TestIndex::IndexPtr& actual,
+                                    const fixtures::TestDatasetPtr& dataset) {
+    auto query = fixtures::get_one_query(dataset->query_, 0);
+    auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
+    auto expected_result = expected->KnnSearch(query, 10, search_param);
+    auto actual_result = actual->KnnSearch(query, 10, search_param);
+    REQUIRE(expected_result.has_value());
+    REQUIRE(actual_result.has_value());
+    REQUIRE(expected_result.value()->GetDim() == actual_result.value()->GetDim());
+    for (int64_t i = 0; i < expected_result.value()->GetDim(); ++i) {
+        REQUIRE(expected_result.value()->GetIds()[i] == actual_result.value()->GetIds()[i]);
+        REQUIRE(expected_result.value()->GetDistances()[i] ==
+                actual_result.value()->GetDistances()[i]);
     }
 }
 
@@ -591,6 +658,37 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HGraphTestIndex,
         })";
         REQUIRE(TestFactory(name, param, true));
     }
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HGraphTestIndex,
+                             "HGraph parallel build drains worker exceptions",
+                             "[ft][hgraph][concurrent][pr]") {
+    auto param = R"(
+    {
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": 128,
+        "index_param": {
+            "base_quantization_type": "rabitq",
+            "rabitq_bits_per_dim_base": 3,
+            "use_reorder": true,
+            "precise_quantization_type": "fp32",
+            "build_by_base": true,
+            "max_degree": 26,
+            "ef_construction": 100,
+            "build_thread_count": 8
+        }
+    }
+    )";
+    auto index_result = vsag::Factory::CreateIndex(name, param);
+    REQUIRE(index_result.has_value());
+
+    auto dataset = pool.GetDatasetAndCreate(128, 1000, "l2");
+    auto build_result = index_result.value()->Build(dataset->base_);
+    REQUIRE_FALSE(build_result.has_value());
+    REQUIRE(build_result.error().type == vsag::ErrorType::INTERNAL_ERROR);
+    REQUIRE(build_result.error().message.find("building the index is not supported using RabbitQ "
+                                              "alone") != std::string::npos);
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::HGraphTestIndex, "HGraph GetStatus", "[ft][hgraph]") {
@@ -1081,8 +1179,8 @@ TEST_CASE("(PR) HGraph Reasoning Zero Overhead When Disabled", "[ft][hgraph][rea
         std::chrono::duration_cast<std::chrono::microseconds>(end_no_reasoning - start_no_reasoning)
             .count();
 
-    double ratio =
-        static_cast<double>(no_reasoning_us) / static_cast<double>(std::max(baseline_us, 1L));
+    const auto baseline_denominator = std::max(baseline_us, decltype(baseline_us){1});
+    double ratio = static_cast<double>(no_reasoning_us) / static_cast<double>(baseline_denominator);
     REQUIRE(ratio < 1.5);
 }
 
@@ -1216,6 +1314,117 @@ TestHGraphTune(const fixtures::HGraphTestIndexPtr& test_index,
 }
 
 HGRAPH_PR_DAILY_CASE("HGraph Tune", "[ft][search][hgraph]", TestHGraphTune)
+
+TEST_CASE("HGraph Tune uses available codes", "[ft][search][hgraph][tune_codes]") {
+    using namespace fixtures;
+
+    constexpr int64_t dim = 32;
+    constexpr int64_t base_count = 256;
+    auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(dim, base_count, "cosine");
+
+    auto make_parameters = [&](const std::string& quantization, bool store_raw = false) {
+        HGraphTestIndex::HGraphBuildParam build_param("cosine", dim, quantization);
+        build_param.thread_count = 1;
+        build_param.store_raw_vector = store_raw;
+        return HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+    };
+    auto make_index = [&](const std::string& quantization, bool store_raw = false) {
+        auto index =
+            TestIndex::TestFactory("hgraph", make_parameters(quantization, store_raw), true);
+        TestIndex::TestBuildIndex(index, dataset, true);
+        return index;
+    };
+    auto require_fp32_accuracy = [&](const TestIndex::IndexPtr& index) {
+        constexpr float tolerance = 2e-6F;
+        const auto* queries = dataset->query_->GetFloat32Vectors();
+        const auto* gt_ids = dataset->ground_truth_->GetIds();
+        const auto* gt_distances = dataset->ground_truth_->GetDistances();
+        for (int64_t i = 0; i < dataset->query_->GetNumElements(); ++i) {
+            for (int64_t j = 0; j < dataset->top_k; ++j) {
+                auto pos = i * dataset->top_k + j;
+                auto result = index->CalcDistanceById(queries + i * dim, gt_ids[pos]);
+                REQUIRE(result.has_value());
+                REQUIRE(std::abs(result.value() - gt_distances[pos]) < tolerance);
+            }
+        }
+    };
+
+    SECTION("separate raw codes") {
+        auto index = make_index("sq8,bf16", true);
+        auto result = index->Tune(make_parameters("fp32"), true);
+        REQUIRE(result.has_value());
+        REQUIRE(result.value());
+        require_fp32_accuracy(index);
+    }
+
+    SECTION("precise fp32 codes") {
+        auto index = make_index("bf16,fp32");
+        auto result = index->Tune(make_parameters("fp32"), true);
+        REQUIRE(result.has_value());
+        REQUIRE(result.value());
+        require_fp32_accuracy(index);
+    }
+
+    SECTION("base fp32 codes") {
+        auto index = make_index("fp32,bf16");
+        auto result = index->Tune(make_parameters("fp32,fp32"), true);
+        REQUIRE(result.has_value());
+        REQUIRE(result.value());
+        require_fp32_accuracy(index);
+    }
+
+    SECTION("unloaded precise codes") {
+        auto parsed = vsag::JsonType::Parse(make_parameters("fp32,fp32"));
+        parsed[vsag::INDEX_PARAM]["ignore_reorder"].SetBool(true);
+        auto parameters = parsed.Dump();
+
+        auto index = TestIndex::TestFactory("hgraph", parameters, true);
+        TestIndex::TestBuildIndex(index, dataset, true);
+        auto binary_set = index->Serialize();
+        REQUIRE(binary_set.has_value());
+
+        auto reloaded = TestIndex::TestFactory("hgraph", parameters, true);
+        auto deserialize_result = reloaded->Deserialize(binary_set.value());
+        REQUIRE(deserialize_result.has_value());
+
+        auto tune_result = reloaded->Tune(make_parameters("fp32,fp32"), true);
+        REQUIRE(tune_result.has_value());
+        REQUIRE(tune_result.value());
+        require_fp32_accuracy(reloaded);
+    }
+
+    SECTION("force-removed codes still cover active ids") {
+        auto parsed = vsag::JsonType::Parse(make_parameters("fp32"));
+        parsed[vsag::INDEX_PARAM]["support_force_remove"].SetBool(true);
+        auto parameters = parsed.Dump();
+
+        auto index = TestIndex::TestFactory("hgraph", parameters, true);
+        TestIndex::TestBuildIndex(index, dataset, true);
+
+        auto remove_result =
+            index->Remove(dataset->base_->GetIds()[0], vsag::RemoveMode::FORCE_REMOVE);
+        REQUIRE(remove_result.has_value());
+        REQUIRE(remove_result.value() == 1);
+
+        auto tune_result = index->Tune(make_parameters("bf16"), true);
+        REQUIRE(tune_result.has_value());
+        REQUIRE(tune_result.value());
+    }
+
+    SECTION("no usable codes") {
+        auto index = make_index("sq8,bf16");
+        auto result = index->Tune(make_parameters("bf16,bf16"));
+        REQUIRE(result.has_value());
+        REQUIRE_FALSE(result.value());
+    }
+
+    SECTION("no rebuild") {
+        auto index = make_index("sq8,bf16");
+        auto result = index->Tune(make_parameters("sq8"), true);
+        REQUIRE(result.has_value());
+        REQUIRE(result.value());
+    }
+}
 
 TEST_CASE("(PR) HGraph Tune with ignore_reorder", "[ft][search][hgraph][pr]") {
     using namespace fixtures;
@@ -1804,6 +2013,133 @@ TestHGraphSerialize(const fixtures::HGraphTestIndexPtr& test_index,
 HGRAPH_PR_DAILY_CASE("HGraph Serialize File",
                      "[ft][serialize][hgraph][serialization]",
                      TestHGraphSerialize)
+
+TEST_CASE("HGraph Serialize Streaming", "[ft][serialize][hgraph][streaming]") {
+    using namespace fixtures;
+    HGraphTestIndex::HGraphBuildParam build_param("l2", 16, "fp32");
+    auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+    auto index = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+    auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(16, 100, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    std::stringstream stream;
+    auto serialize_result = index->SerializeStreaming(stream);
+    REQUIRE(serialize_result.has_value());
+    auto bytes = stream.str();
+    REQUIRE(bytes.substr(0, 8) == vsag::SERIAL_STREAM_MAGIC);
+
+    auto index2 = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+    std::stringstream deserialize_stream(bytes);
+    auto deserialize_result = index2->DeserializeStreaming(deserialize_stream);
+    REQUIRE(deserialize_result.has_value());
+    REQUIRE(index2->GetNumElements() == index->GetNumElements());
+
+    std::stringstream load_stream(bytes);
+    auto load_result = vsag::Index::Load(load_stream, "{}");
+    REQUIRE(load_result.has_value());
+    auto index3 = load_result.value();
+    REQUIRE(index3->GetNumElements() == index->GetNumElements());
+
+    auto query = get_one_query(dataset->query_, 0);
+    auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
+    auto result = index->KnnSearch(query, 10, search_param);
+    auto result2 = index2->KnnSearch(query, 10, search_param);
+    auto result3 = index3->KnnSearch(query, 10, search_param);
+    REQUIRE(result.has_value());
+    REQUIRE(result2.has_value());
+    REQUIRE(result3.has_value());
+    REQUIRE(result.value()->GetDim() == result2.value()->GetDim());
+    REQUIRE(result.value()->GetDim() == result3.value()->GetDim());
+    for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
+        REQUIRE(result.value()->GetIds()[i] == result2.value()->GetIds()[i]);
+        REQUIRE(result.value()->GetDistances()[i] == result2.value()->GetDistances()[i]);
+        REQUIRE(result.value()->GetIds()[i] == result3.value()->GetIds()[i]);
+        REQUIRE(result.value()->GetDistances()[i] == result3.value()->GetDistances()[i]);
+    }
+}
+
+TEST_CASE("HGraph streaming Load applies IO parameters", "[ft][serialize][hgraph][streaming]") {
+    using namespace fixtures;
+    HGraphTestIndex::HGraphBuildParam build_param("l2", 128, "rabitq,sq8,block_memory_io,32,3");
+    build_param.graph_storage = "compressed";
+    build_param.thread_count = 1;
+    auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+    auto index = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+    auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(128, 200, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    std::stringstream stream;
+    REQUIRE(index->SerializeStreaming(stream).has_value());
+    auto bytes = stream.str();
+
+    auto precise_path = HGraphTestIndex::dir.GenerateRandomFile(false);
+    auto load_param =
+        fmt::format(R"({{"precise_io_type":"buffer_io","precise_file_path":"{}"}})", precise_path);
+    std::stringstream load_stream(bytes);
+    auto loaded = vsag::Index::Load(load_stream, load_param);
+    REQUIRE(loaded.has_value());
+    REQUIRE(loaded.value()->GetNumElements() == index->GetNumElements());
+
+    std::stringstream invalid_load_stream(bytes);
+    REQUIRE_FALSE(
+        vsag::Index::Load(invalid_load_stream, R"({"precise_io_type":"invalid_io"})").has_value());
+}
+
+TEST_CASE("HGraph streaming serialization compatibility",
+          "[ft][serialize][hgraph][streaming][compatibility]") {
+    SECTION("accepts newer minor version") {
+        auto fixture = MakeHGraphStreamingFixture();
+        auto bytes = SetStreamingMinorVersion(fixture.bytes, 7);
+        auto restored = DeserializeHGraphStreamingBytes(fixture.param, bytes);
+        RequireHGraphStreamingSearchMatches(fixture.index, restored, fixture.dataset);
+    }
+
+    SECTION("rejects unsupported major version") {
+        auto fixture = MakeHGraphStreamingFixture();
+        auto bytes = SetStreamingMajorVersion(fixture.bytes, 2);
+        RequireHGraphStreamingDeserializeFails(fixture.param, bytes);
+    }
+
+    SECTION("skips unknown non-critical block") {
+        auto fixture = MakeHGraphStreamingFixture();
+        auto bytes = InsertUnknownStreamingBlock(fixture.bytes, false);
+        auto restored = DeserializeHGraphStreamingBytes(fixture.param, bytes);
+        RequireHGraphStreamingSearchMatches(fixture.index, restored, fixture.dataset);
+    }
+
+    SECTION("skips unknown non-critical block with unsupported version") {
+        auto fixture = MakeHGraphStreamingFixture();
+        auto bytes = InsertUnknownStreamingBlock(fixture.bytes, false, 99);
+        auto restored = DeserializeHGraphStreamingBytes(fixture.param, bytes);
+        RequireHGraphStreamingSearchMatches(fixture.index, restored, fixture.dataset);
+    }
+
+    SECTION("rejects unknown critical block") {
+        auto fixture = MakeHGraphStreamingFixture();
+        auto bytes = InsertUnknownStreamingBlock(fixture.bytes, true);
+        RequireHGraphStreamingDeserializeFails(fixture.param, bytes);
+    }
+
+    SECTION("rejects unsupported critical block version") {
+        auto fixture = MakeHGraphStreamingFixture();
+        auto bytes =
+            SetStreamingBlockVersion(fixture.bytes, vsag::StreamSerializationTag::BASE_CODES, 99);
+        RequireHGraphStreamingDeserializeFails(fixture.param, bytes);
+    }
+
+    SECTION("rejects missing required block") {
+        auto fixture = MakeHGraphStreamingFixture();
+        auto bytes = EraseStreamingBlock(fixture.bytes, vsag::StreamSerializationTag::BOTTOM_GRAPH);
+        RequireHGraphStreamingDeserializeFails(fixture.param, bytes);
+    }
+
+    SECTION("rejects missing conditional high precision block") {
+        auto fixture = MakeHGraphStreamingFixture("sq8,fp32");
+        auto bytes =
+            EraseStreamingBlock(fixture.bytes, vsag::StreamSerializationTag::HIGH_PRECISION_CODES);
+        RequireHGraphStreamingDeserializeFails(fixture.param, bytes);
+    }
+}
 
 static void
 TestHGraphReaderIO(const fixtures::HGraphTestIndexPtr& test_index,

@@ -25,11 +25,11 @@
 #include "common.h"
 #include "flatten_interface.h"
 #include "inner_string_params.h"
-#include "io/async_io_parameter.h"
-#include "io/basic_io.h"
-#include "io/buffer_io_parameter.h"
-#include "io/io_parameter.h"
-#include "io/mmap_io_parameter.h"
+#include "io/async_io/async_io_parameter.h"
+#include "io/buffer_io/buffer_io_parameter.h"
+#include "io/common/basic_io.h"
+#include "io/common/io_parameter.h"
+#include "io/mmap_io/mmap_io_parameter.h"
 #include "quantization/rabitq_quantization/rabitq_quantizer.h"
 #include "query_context.h"
 #include "storage/stream_reader.h"
@@ -117,7 +117,7 @@ public:
         io_->Deserialize(reader);
     }
 
-    [[nodiscard]] int64_t
+    [[nodiscard]] uint64_t
     GetMemoryUsage() const {
         if constexpr (IOTmpl::InMemory) {
             return io_->GetMemoryUsage();
@@ -655,9 +655,9 @@ public:
         this->max_capacity_ = capacity;
     }
 
-    int64_t
+    uint64_t
     GetMemoryUsage() const override {
-        int64_t memory = sizeof(RaBitQSplitDataCell<metric, OneBitIOTmpl, SupplementIOTmpl>);
+        uint64_t memory = sizeof(RaBitQSplitDataCell<metric, OneBitIOTmpl, SupplementIOTmpl>);
         memory += this->x_bit_cell_->GetMemoryUsage();
         memory += this->supplement_cell_->GetMemoryUsage();
         memory += sizeof(RaBitQuantizer<metric>);

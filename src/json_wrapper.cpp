@@ -159,6 +159,11 @@ JsonWrapper::SetFloat(float value) {
 }
 
 void
+JsonWrapper::SetDouble(double value) {
+    (*json_) = value;
+}
+
+void
 JsonWrapper::SetBool(bool value) {
     (*json_) = value;
 }

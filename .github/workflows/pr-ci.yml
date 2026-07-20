@@ -125,6 +125,33 @@ jobs:
           retention-days: 1
           overwrite: 'true'
 
+  build-asan-macos-arm64:
+    name: ASan Build macOS arm64
+    needs: [changes, format]
+    if: needs.changes.outputs.cpp == 'true'
+    runs-on: macos-15
+    steps:
+      - name: Free Disk Space
+        run: rm -rf "${RUNNER_TOOL_CACHE:-/Users/runner/hostedtoolcache}"
+      - uses: actions/checkout@v4
+      - name: Install Dependencies
+        run: bash ./scripts/deps/install_deps.sh
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: "1"
+      - name: Show Toolchain
+        run: |
+          clang++ --version
+          cmake --version
+      - name: Load Cache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          max-size: "2G"
+          save: ${{ github.event_name != 'pull_request' }}
+          key: build-macos-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
+      - name: Make Asan
+        run: export CMAKE_GENERATOR="Ninja" CMAKE_EXPORT_COMPILE_COMMANDS=ON; make asan VSAG_ENABLE_EXAMPLES=ON COMPILE_JOBS=3
+
   build-python-x86:
     name: Python Build X86
     needs: [changes, format]
@@ -146,7 +173,10 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y python3-venv
-          export CMAKE_GENERATOR="Ninja"; make pyvsag
+          export CMAKE_GENERATOR="Ninja"
+          export VSAG_USE_SYSTEM_DEPS=AUTO
+          export CIBW_ENVIRONMENT="${CIBW_ENVIRONMENT:+$CIBW_ENVIRONMENT }VSAG_USE_SYSTEM_DEPS=AUTO"
+          make pyvsag
       - name: Save Wheel
         uses: actions/upload-artifact@v5
         with:

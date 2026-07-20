@@ -174,7 +174,7 @@ public:
         return index_->get_data_num();
     }
 
-    int64_t
+    uint64_t
     GetMemoryUsage() const override {
         if (status_ == MEMORY) {
             return index_->get_memory_usage() + disk_pq_compressed_vectors_.str().size() +
@@ -186,8 +186,8 @@ public:
         return 0;
     }
 
-    int64_t
-    GetEstimateBuildMemory(const int64_t num_elements) const override;
+    uint64_t
+    EstimateBuildMemory(uint64_t num_elements) const override;
 
     std::string
     GetStats() const override;

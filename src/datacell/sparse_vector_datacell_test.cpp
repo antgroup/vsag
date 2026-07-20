@@ -17,7 +17,7 @@
 #include "framework/test_thread_pool.h"
 #include "impl/allocator/safe_allocator.h"
 #include "index_common_param.h"
-#include "io/reader_io_parameter.h"
+#include "io/reader_io/reader_io_parameter.h"
 #include "quantization/sparse_quantization/sparse_quantizer_parameter.h"
 #include "storage/serialization_template_test.h"
 #include "unittest.h"

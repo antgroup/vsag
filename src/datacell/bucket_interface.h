@@ -119,7 +119,7 @@ public:
     virtual void
     Unpack(){};
 
-    [[nodiscard]] virtual int64_t
+    [[nodiscard]] virtual uint64_t
     GetMemoryUsage() const = 0;
 
 public:

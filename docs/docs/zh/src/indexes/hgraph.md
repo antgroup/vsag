@@ -190,6 +190,8 @@ base->NumElements(num_vectors)->Dim(dim)->Ids(ids)
 |------|------|--------|------|
 | `ef_search` | int | —（必填） | 搜索前沿候选集的大小，越大召回越高、查询越慢。 |
 | `hops_limit` | int | 不限 | beam search 在返回当前前沿前允许的最大跳数。 |
+| `skip_ratio` | float | `0.2` | 过滤场景下的性能调优参数。控制跳过无效点的比例，取值范围 `[0.0, 1.0]`。`skip_ratio=0.2` 表示跳过 20% 的无效点，只检查 80% 的无效点。值越大性能越好但召回率可能越低。仅在带 filter 的搜索中生效。详见下文[过滤跳过策略](#过滤跳过策略skip_ratio-与-skip_strategy)。 |
+| `skip_strategy` | string | `"deterministic_accumulative"` | 过滤跳过的策略。可选值：`"random"`（随机跳过）或 `"deterministic_accumulative"`（确定性累积跳过）。详见下文[过滤跳过策略](#过滤跳过策略skip_ratio-与-skip_strategy)。 |
 | `brute_force_threshold` | float | `0.0` | 选择率感知的暴搜回退开关。当取值 `> 0` 且当前 filter 的 `ValidRatio()` 小于等于 `brute_force_threshold` 时，搜索会**完全跳过图遍历**，直接在通过过滤的 id 上用最佳精度的 flatten 编码做一次暴力扫描（细节见下一节）。取值范围 `[0.0, 1.0]`；默认 `0.0` 表示关闭，保持原有行为。 |
 | `rabitq_one_bit_search` | bool | `false` | 启用 RaBitQ filter/lower-bound 路径；对 x+y split 索引会使用全部 x 个 filter bits，详见 [RaBitQ x+y Split](../quantization/rabitq_split.md)。 |
 | `rabitq_error_rate` | float | 索引默认值 | 本次搜索使用的正数 lower-bound 误差倍率；调整它不需要重建 split 索引。 |
@@ -242,6 +244,52 @@ auto result = index->KnnSearch(query, topk, params, my_filter).value();
 
 可运行示例：
 [`322_feature_hgraph_brute_force_threshold.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/322_feature_hgraph_brute_force_threshold.cpp)。
+
+### 过滤跳过策略（skip_ratio 与 skip_strategy）
+
+当搜索带有 filter 时，HGraph 在图遍历过程中需要频繁调用 Filter::CheckValid() 来验证每个候选点是否有效。这个检查可能很耗时（特别是复杂过滤逻辑）。skip_ratio 和 skip_strategy 提供了一种概率性优化：通过跳过部分 filter 检查来加速搜索，但可能降低召回率。
+
+#### 工作原理
+
+这是一个概率性优化策略：我们事先不知道哪些点是有效的，因此按概率决定是否访问每个点。
+
+- skip_ratio（默认 0.2）：控制跳过 filter 检查的激进程度。skip_ratio=0.2 表示跳过 20% 的无效点，只检查 80% 的无效点。值越大，跳过的越多，速度越快，但召回率可能越低。
+- skip_strategy（默认 "deterministic_accumulative"）：决定如何分配跳过：
+  - "random"：随机跳过。每个点被访问的概率为 `visit_ratio = valid_ratio + (1 - valid_ratio) * (1 - skip_ratio)`，大约跳过 `skip_ratio` 比例的无效点。
+  - "deterministic_accumulative"：确定性累积跳过。按固定间隔做出访问决策，使长期访问比例趋近于目标 `visit_ratio`，相比 random 策略方差更小。
+
+具体公式：
+- 设 valid_ratio 为 filter 的全局有效率（来自 Filter::ValidRatio()）
+- 每个点被访问的概率 = valid_ratio + (1 - valid_ratio) * (1 - skip_ratio)
+- 如果 Filter::ValidRatio() 估计准确，期望跳过约 skip_ratio 比例的无效候选检查
+
+#### 使用示例
+
+```cpp
+// 保守设置：跳过 10% 的无效候选检查，适合召回率要求高、延迟不那么关键的场景
+auto params = R"({"hgraph": {"ef_search": 200, "skip_ratio": 0.1}})";
+auto result = index->KnnSearch(query, topk, params, my_filter).value();
+
+// 使用随机策略
+auto params = R"({"hgraph": {"ef_search": 200, "skip_ratio": 0.2, "skip_strategy": "random"}})";
+auto result = index->KnnSearch(query, topk, params, my_filter).value();
+
+// 激进跳过：跳过 50% 的无效候选检查，以更低延迟为目标
+auto params = R"({"hgraph": {"ef_search": 200, "skip_ratio": 0.5}})";
+auto result = index->KnnSearch(query, topk, params, my_filter).value();
+```
+
+#### 取值建议
+
+- 默认 0.2：适合大多数场景，在性能和召回率之间取得平衡。
+- 0.1 或更低：保守设置，适合对召回率要求高、延迟不那么关键、可接受召回率下降的场景（如实时推荐系统）。
+- 0.5 或更高：激进跳过，适合对延迟敏感、可接受召回率下降的场景。
+- 0.0：不跳过任何点，等同于关闭此优化（所有点都会被检查）。
+
+注意事项：
+- 仅在带 filter 的搜索中生效。无 filter 时这些参数会被忽略。
+- 如果 Filter::ValidRatio() 估计准确，性能优化效果更好。
+- 与 brute_force_threshold 可同时使用：当 filter 非常严格（ValidRatio 很小）时，brute_force_threshold 会触发暴搜回退；否则使用图遍历 + skip 优化。
 
 ## 何时选择 HGraph
 

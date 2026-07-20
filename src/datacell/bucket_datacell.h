@@ -19,7 +19,7 @@
 
 #include "bucket_interface.h"
 #include "impl/inner_search_param.h"
-#include "io/io_array.h"
+#include "io/container/io_array.h"
 #include "quantization/product_quantization/pq_fastscan_quantizer.h"
 #include "simd/fp32_simd.h"
 #include "utils/byte_buffer.h"
@@ -117,9 +117,9 @@ public:
     void
     GetCodesById(BucketIdType bucket_id, InnerIdType offset_id, uint8_t* data) const override;
 
-    [[nodiscard]] int64_t
+    [[nodiscard]] uint64_t
     GetMemoryUsage() const override {
-        int64_t memory = sizeof(BucketDataCell);
+        uint64_t memory = sizeof(BucketDataCell);
         for (BucketIdType bucket_id = 0; bucket_id < this->bucket_count_; bucket_id++) {
             memory += this->datas_[bucket_id].GetMemoryUsage();
             memory += this->inner_ids_[bucket_id].size() * sizeof(InnerIdType);

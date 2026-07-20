@@ -85,6 +85,13 @@ LazyHGraph only supports `dtype: "float32"`. Search parameters use the `hgraph`
 object, for example `{"hgraph": {"ef_search": 100}}`. See the
 [LazyHGraph index page](../indexes/lazy_hgraph.md) for details.
 
+The `hgraph` search-param object also accepts the following filter-related parameters:
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `skip_ratio` | float | `0.2` | Controls the ratio of filtered-search candidate checks to skip, in range `[0.0, 1.0]`. Higher values mean more aggressive skipping, faster search, and potentially lower recall. |
+| `skip_strategy` | string | `"deterministic_accumulative"` | Skip strategy. Supports `"random"` and `"deterministic_accumulative"`. |
+
 ## IVF
 
 ```json

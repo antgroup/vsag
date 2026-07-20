@@ -14,6 +14,8 @@
 
 #pragma once
 
+#include <cstdint>
+
 namespace vsag {
 
 extern const char* const INDEX_HGRAPH;
@@ -73,6 +75,10 @@ extern const char* const PREFETCH_DEPTH_CODE;
 extern const char* const PARAMETER_DTYPE;
 extern const char* const PARAMETER_DIM;
 extern const char* const PARAMETER_METRIC_TYPE;
+extern const char* const PARAMETER_REPR;
+extern const char* const REPR_DENSE;
+extern const char* const REPR_SPARSE;
+extern const char* const REPR_MULTI_VECTOR;
 extern const char* const PARAMETER_USE_CONJUGATE_GRAPH;
 extern const char* const PARAMETER_USE_CONJUGATE_GRAPH_SEARCH;
 extern const char* const PARAMETER_USE_OLD_SERIAL_FORMAT;
@@ -124,6 +130,8 @@ extern const char* const PYRAMID_RABITQ_BITS_PER_DIM_BASE;
 extern const char* const PYRAMID_RABITQ_BITS_PER_DIM_QUERY;
 extern const char* const PYRAMID_RABITQ_PCA_DIM;
 extern const char* const PYRAMID_RABITQ_USE_FHT;
+extern const char* const PYRAMID_FAST_ENCODE_RABITQ;
+extern const char* const PYRAMID_FAST_ENCODE_RABITQ_ROUNDS;
 extern const char* const PYRAMID_BASE_IO_TYPE;
 extern const char* const PYRAMID_BASE_PQ_DIM;
 extern const char* const PYRAMID_BASE_FILE_PATH;
@@ -171,6 +179,8 @@ extern const char* const RABITQ_BITS_PER_DIM_PRECISE;
 extern const char* const RABITQ_BITS_PER_DIM_FILTER;
 extern const char* const RABITQ_ERROR_RATE;
 extern const char* const RABITQ_USE_FHT;
+extern const char* const FAST_ENCODE_RABITQ;
+extern const char* const FAST_ENCODE_RABITQ_ROUNDS;
 extern const char* const INDEX_TQ_CHAIN;
 extern const char* const INDEX_MRLE_DIM;
 
@@ -251,5 +261,9 @@ extern const char* const GNO_IMI_SECOND_ORDER_BUCKETS_COUNT;
 extern const char* const SERIAL_MAGIC_BEGIN;
 extern const char* const SERIAL_MAGIC_END;
 extern const char* const SERIAL_META_KEY;
+extern const char* const SERIAL_STREAM_MAGIC;
+extern const uint16_t SERIAL_STREAM_FORMAT_MAJOR;
+extern const uint16_t SERIAL_STREAM_FORMAT_MINOR;
+extern const uint32_t SERIAL_STREAM_SECTION_END;
 
 }  // namespace vsag
