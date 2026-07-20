@@ -91,14 +91,14 @@ for (int64_t i = 0; i < result_count; ++i) {
 
 ## 构建参数
 
-构建参数放在 `index_param` 下。`dtype` **必须** 为 `"float32"`，`metric_type` **必须**
-为 `"ip"`。
+SIMQ 专属构建参数放在 `index_param` 下。`dim`、`dtype`、`metric_type`
+是顶层字段。`dtype` **必须** 为 `"float32"`，`metric_type` **必须** 为 `"ip"`。
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `dim` | int | —（必填） | 每个 token 向量的维度。所有文档和查询中的所有 token 共享同一维度 |
-| `base_io_type` | string | —（必填） | 精排阶段使用的原始多向量数据存储后端。可选值：`async_io`、`memory_io`、`block_memory_io`、`buffer_io`、`mmap_io`、`reader_io` |
-| `base_file_path` | string | —（磁盘 IO 时必填） | 原始多向量数据的持久化文件路径。当 `base_io_type` 为 `async_io` 等磁盘类型时必须指定 |
+| `base_io_type` | string | `"async_io"` | 精排阶段使用的原始多向量数据存储后端。可选值：`async_io`、`memory_io`、`block_memory_io`、`buffer_io`、`mmap_io`、`reader_io` |
+| `base_file_path` | string | `"./default_file_path"` | 当 `base_io_type` 为磁盘类型（如 `async_io`、`buffer_io`、`mmap_io`）时使用的文件路径。默认值为占位符，实际使用时需提供真实路径 |
 | `init_cluster_ratio` | float | `0.2` | 用于初始聚类中心的 token 向量采样比例。取值范围 `(0, 1]`。值越小，簇越少越大；值越大，簇越多越细 |
 | `max_cluster_size` | int | `64` | 单个簇允许容纳的最大 token 向量数，超过后触发切分。必须 > 1 |
 | `split_start_idx` | int | `32` | 簇切分时新簇的起始位置。通常设为 `max_cluster_size` 的一半。取值范围 `(1, max_cluster_size)` |

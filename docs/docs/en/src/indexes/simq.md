@@ -98,14 +98,15 @@ for (int64_t i = 0; i < result_count; ++i) {
 
 ## Build parameters
 
-Build-time parameters live under `index_param`. `dtype` **must** be `"float32"`
-and `metric_type` **must** be `"ip"`.
+SIMQ-specific build parameters live under `index_param`. The common fields
+`dim`, `dtype`, and `metric_type` are top-level. `dtype` **must** be
+`"float32"` and `metric_type` **must** be `"ip"`.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `dim` | int | — (required) | Dimension of each token vector. All tokens across all documents and queries share the same dimension. |
-| `base_io_type` | string | — (required) | Storage backend for the original multi-vector data used during reranking. Supported values: `async_io`, `memory_io`, `block_memory_io`, `buffer_io`, `mmap_io`, `reader_io`. |
-| `base_file_path` | string | — (required for disk-backed IO) | File path where the original multi-vector data is persisted. Required when `base_io_type` is a disk-backed type such as `async_io`. |
+| `base_io_type` | string | `"async_io"` | Storage backend for the original multi-vector data used during reranking. Supported values: `async_io`, `memory_io`, `block_memory_io`, `buffer_io`, `mmap_io`, `reader_io`. |
+| `base_file_path` | string | `"./default_file_path"` | File path used when `base_io_type` is a disk-backed type (e.g. `async_io`, `buffer_io`, `mmap_io`). The default is a placeholder; provide a real path for actual use. |
 | `init_cluster_ratio` | float | `0.2` | Fraction of token vectors sampled as initial cluster centers. Range: `(0, 1]`. Smaller values produce fewer, larger clusters; larger values produce more, finer-grained clusters. |
 | `max_cluster_size` | int | `64` | Maximum number of token vectors per cluster before a split is triggered. Must be > 1. |
 | `split_start_idx` | int | `32` | Position within the sorted cluster where the new cluster begins during a split. Typically set to half of `max_cluster_size`. Must be in `(1, max_cluster_size)`. |
