@@ -13,6 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <algorithm>
 #include <atomic>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
@@ -276,6 +277,38 @@ HGraphTestIndex::GenerateHGraphBuildParametersString(const HGraphBuildParam& par
 bool
 HGraphTestIndex::IsRaBitQ(const std::string& quantization_str) {
     return (quantization_str.find(vsag::QUANTIZATION_TYPE_VALUE_RABITQ) != std::string::npos);
+}
+
+TEST_CASE("HGraph RangeSearch filters reranked distances", "[ft][hgraph][pr]") {
+    constexpr int64_t dim = 8;
+    constexpr int64_t count = 100;
+    std::vector<int64_t> ids(count);
+    std::vector<float> vectors(count * dim, 0.0F);
+    for (int64_t i = 0; i < count; ++i) {
+        ids[i] = i;
+        auto value = i == count - 1 ? 1.0F : (i == 0 ? 0.0F : 0.0015F);
+        std::fill(vectors.begin() + i * dim, vectors.begin() + (i + 1) * dim, value);
+    }
+
+    HGraphTestIndex::HGraphBuildParam build_param("l2", dim, "sq8_uniform,fp32");
+    auto parameters = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+    auto index = TestIndex::TestFactory(HGraphTestIndex::name, parameters, true);
+    auto base = vsag::Dataset::Make();
+    base->NumElements(count)
+        ->Dim(dim)
+        ->Ids(ids.data())
+        ->Float32Vectors(vectors.data())
+        ->Owner(false);
+    REQUIRE(index->Build(base).has_value());
+
+    std::vector<float> query_vector(dim, 0.0F);
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(dim)->Float32Vectors(query_vector.data())->Owner(false);
+    auto search_param = fmt::format(search_param_tmp, 1000, false);
+    auto result = index->RangeSearch(query, 0.0F, search_param, -1);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() == 1);
+    REQUIRE(result.value()->GetIds()[0] == 0);
 }
 
 void
