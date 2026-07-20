@@ -16,6 +16,7 @@
 #include "ivf.h"
 
 #include <atomic>
+#include <limits>
 #include <random>
 #include <set>
 
@@ -1349,6 +1350,9 @@ IVF::fill_location_map() {
         auto* ids = this->bucket_->GetInnerIds(i);
         auto bucket_size = this->bucket_->GetBucketSize(i);
         for (uint64_t j = 0; j < bucket_size; ++j) {
+            if (ids[j] == std::numeric_limits<InnerIdType>::max()) {
+                continue;
+            }
             if (ids[j] >= this->total_elements_ * buckets_per_data_) {
                 throw VsagException(ErrorType::INTERNAL_ERROR, "invalid inner_id");
             }

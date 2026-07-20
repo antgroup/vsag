@@ -52,7 +52,7 @@ FlatBucketSearcher::Search(BucketIdType bucket_id,
     }
 
     const auto& ft = param.is_inner_id_allowed;
-    const uint64_t topk_u = static_cast<uint64_t>(topk);
+    const auto topk_u = static_cast<uint64_t>(topk);
     auto cur_heap_top = std::numeric_limits<float>::max();
     if (not heap->Empty() and heap->Size() == topk_u) {
         cur_heap_top = heap->Top().first;
@@ -60,6 +60,9 @@ FlatBucketSearcher::Search(BucketIdType bucket_id,
 
     if (param.search_mode == KNN_SEARCH) {
         for (int64_t j = 0; j < bucket_size; ++j) {
+            if (ids[j] == std::numeric_limits<InnerIdType>::max()) {
+                continue;
+            }
             auto origin_id = ids[j] / buckets_per_data;
             if (reasoning_ctx != nullptr) {
                 reasoning_ctx->RecordVisit(origin_id, dist[j], 0);
@@ -89,6 +92,9 @@ FlatBucketSearcher::Search(BucketIdType bucket_id,
         }
     } else {  // RANGE_SEARCH
         for (int64_t j = 0; j < bucket_size; ++j) {
+            if (ids[j] == std::numeric_limits<InnerIdType>::max()) {
+                continue;
+            }
             auto origin_id = ids[j] / buckets_per_data;
             if (reasoning_ctx != nullptr) {
                 reasoning_ctx->RecordVisit(origin_id, dist[j], 0);

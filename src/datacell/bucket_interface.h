@@ -56,6 +56,17 @@ public:
     virtual InnerIdType
     InsertVector(const void* vector, BucketIdType bucket_id, InnerIdType inner_id) = 0;
 
+    // Fixed-offset inserts may create holes: GetBucketSize() includes reserved offsets and
+    // GetInnerIds() reports holes as InnerIdType::max(). Therefore inner_id must not be max.
+    virtual void
+    InsertVectorWithOffset(const void* vector,
+                           BucketIdType bucket_id,
+                           InnerIdType inner_id,
+                           InnerIdType offset_id) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "InsertVectorWithOffset not implemented");
+    }
+
     virtual InnerIdType*
     GetInnerIds(BucketIdType bucket_id) = 0;
 
