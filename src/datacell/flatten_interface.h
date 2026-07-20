@@ -219,6 +219,17 @@ public:
     virtual bool
     GetCodesById(InnerIdType id, uint8_t* codes) const = 0;
 
+    // Optional fast path for algorithms that can consume a contiguous FP32 matrix directly.
+    // Implementations return nullptr when data is quantized, external, block-backed, or otherwise
+    // unavailable as a single stable buffer; callers must fall back to Query/GetCodesById.
+    [[nodiscard]] virtual const float*
+    TryGetContiguousRawFloatData(uint64_t* row_stride = nullptr) {
+        if (row_stride != nullptr) {
+            *row_stride = 0;
+        }
+        return nullptr;
+    }
+
     [[nodiscard]] virtual InnerIdType
     TotalCount() const {
         std::shared_lock lock(mutex_);

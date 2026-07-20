@@ -151,6 +151,63 @@ HGraphParameter::FromJson(const JsonType& json) {
     if (json.Contains(HGRAPH_PERSIST_SOURCE_ID_KEY)) {
         this->persist_source_id = json[HGRAPH_PERSIST_SOURCE_ID_KEY].GetBool();
     }
+    const bool has_mci_parameter = json.Contains(HGRAPH_MCI_MCS) or
+                                   json.Contains(HGRAPH_MCI_CLIQUE_MAX) or
+                                   json.Contains(HGRAPH_MCI_ALPHA);
+    this->mci_parameters.enabled =
+        has_mci_parameter or (json.Contains(HGRAPH_USE_MCI) and json[HGRAPH_USE_MCI].GetBool());
+    if (this->mci_parameters.enabled) {
+        if (json.Contains(HGRAPH_MCI_MCS)) {
+            const auto mci_mcs = json[HGRAPH_MCI_MCS].GetInt();
+            CHECK_ARGUMENT(mci_mcs > 0, "hgraph mci_mcs must be positive");
+            this->mci_parameters.mcs = static_cast<uint64_t>(mci_mcs);
+        }
+        if (json.Contains(HGRAPH_MCI_CLIQUE_MAX)) {
+            const auto mci_clique_max = json[HGRAPH_MCI_CLIQUE_MAX].GetInt();
+            CHECK_ARGUMENT(mci_clique_max > 0, "hgraph mci_clique_max must be positive");
+            this->mci_parameters.clique_max = static_cast<uint64_t>(mci_clique_max);
+        }
+        if (json.Contains(HGRAPH_MCI_ALPHA)) {
+            this->mci_parameters.alpha = json[HGRAPH_MCI_ALPHA].GetFloat();
+        }
+        if (json.Contains(HGRAPH_MCI_KNNG_PATH_KEY)) {
+            this->mci_parameters.knng_path = json[HGRAPH_MCI_KNNG_PATH_KEY].GetString();
+        }
+        if (json.Contains(HGRAPH_MCI_INCREMENTAL_JOIN_RATIO_THRESHOLD_KEY)) {
+            this->mci_parameters.incremental_join_ratio_threshold =
+                json[HGRAPH_MCI_INCREMENTAL_JOIN_RATIO_THRESHOLD_KEY].GetFloat();
+        }
+        if (json.Contains(HGRAPH_MCI_INCREMENTAL_ADDED_MCT_KEY)) {
+            const auto incremental_added_mct = json[HGRAPH_MCI_INCREMENTAL_ADDED_MCT_KEY].GetInt();
+            CHECK_ARGUMENT(incremental_added_mct > 0,
+                           "hgraph mci_incremental_added_mct must be positive");
+            this->mci_parameters.incremental_added_mct =
+                static_cast<uint64_t>(incremental_added_mct);
+        }
+        if (json.Contains(HGRAPH_MCI_INCREMENTAL_CLIQUE_MAX_KEY)) {
+            const auto incremental_clique_max =
+                json[HGRAPH_MCI_INCREMENTAL_CLIQUE_MAX_KEY].GetInt();
+            CHECK_ARGUMENT(incremental_clique_max >= 2,
+                           "hgraph mci_incremental_clique_max must be >= 2");
+            this->mci_parameters.incremental_clique_max =
+                static_cast<uint64_t>(incremental_clique_max);
+        }
+        CHECK_ARGUMENT(this->mci_parameters.mcs > 0, "hgraph mci_mcs must be positive");
+        CHECK_ARGUMENT(this->mci_parameters.clique_max > 0,
+                       "hgraph mci_clique_max must be positive");
+        CHECK_ARGUMENT(this->mci_parameters.alpha >= 1.0F, "hgraph mci_alpha must be >= 1.0");
+        CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+            (this->mci_parameters.incremental_join_ratio_threshold >= 0.0F) and
+                (this->mci_parameters.incremental_join_ratio_threshold <= 1.0F),
+            "hgraph mci_incremental_join_ratio_threshold must be in range [0, 1]");
+        CHECK_ARGUMENT(this->mci_parameters.incremental_added_mct > 0,
+                       "hgraph mci_incremental_added_mct must be positive");
+        CHECK_ARGUMENT(this->mci_parameters.incremental_clique_max >= 2,
+                       "hgraph mci_incremental_clique_max must be >= 2");
+    }
+    CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+        not(this->mci_parameters.enabled and this->support_force_remove),
+        "hgraph mci does not support force remove");
 }
 
 JsonType
@@ -170,6 +227,21 @@ HGraphParameter::ToJson() const {
     json[DUPLICATE_DISTANCE_THRESHOLD].SetFloat(this->duplicate_distance_threshold);
     json[SUPPORT_FORCE_REMOVE].SetBool(this->support_force_remove);
     json[HGRAPH_PERSIST_SOURCE_ID_KEY].SetBool(this->persist_source_id);
+    if (this->mci_parameters.enabled) {
+        json[HGRAPH_USE_MCI].SetBool(true);
+        json[HGRAPH_MCI_MCS].SetInt(static_cast<int64_t>(this->mci_parameters.mcs));
+        json[HGRAPH_MCI_CLIQUE_MAX].SetInt(static_cast<int64_t>(this->mci_parameters.clique_max));
+        json[HGRAPH_MCI_ALPHA].SetFloat(this->mci_parameters.alpha);
+        json[HGRAPH_MCI_INCREMENTAL_JOIN_RATIO_THRESHOLD_KEY].SetFloat(
+            this->mci_parameters.incremental_join_ratio_threshold);
+        json[HGRAPH_MCI_INCREMENTAL_ADDED_MCT_KEY].SetInt(
+            static_cast<int64_t>(this->mci_parameters.incremental_added_mct));
+        json[HGRAPH_MCI_INCREMENTAL_CLIQUE_MAX_KEY].SetInt(
+            static_cast<int64_t>(this->mci_parameters.incremental_clique_max));
+        if (not this->mci_parameters.knng_path.empty()) {
+            json[HGRAPH_MCI_KNNG_PATH_KEY].SetString(this->mci_parameters.knng_path);
+        }
+    }
     json[TRAIN_SAMPLE_COUNT_KEY].SetInt(this->train_sample_count);
     return json;
 }
@@ -202,6 +274,13 @@ HGraphParameter::CheckCompatibility(const ParamPtr& other) const {
     CHECK_FIELD_EQ(*this, *p, deduplicate_storage);
     CHECK_FIELD_EQ(*this, *p, duplicate_distance_threshold);
     CHECK_FIELD_EQ(*this, *p, support_force_remove);
+    CHECK_FIELD_EQ(*this, *p, mci_parameters.enabled);
+    CHECK_FIELD_EQ(*this, *p, mci_parameters.mcs);
+    CHECK_FIELD_EQ(*this, *p, mci_parameters.clique_max);
+    CHECK_FIELD_EQ(*this, *p, mci_parameters.alpha);
+    CHECK_FIELD_EQ(*this, *p, mci_parameters.incremental_join_ratio_threshold);
+    CHECK_FIELD_EQ(*this, *p, mci_parameters.incremental_added_mct);
+    CHECK_FIELD_EQ(*this, *p, mci_parameters.incremental_clique_max);
     return true;
 }
 
@@ -232,6 +311,24 @@ HGraphSearchParameters::FromJson(const std::string& json_string) {
     if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_PARAMETER_RABITQ_ONE_BIT_SEARCH)) {
         obj.rabitq_one_bit_search =
             params[INDEX_TYPE_HGRAPH][HGRAPH_PARAMETER_RABITQ_ONE_BIT_SEARCH].GetBool();
+    }
+    if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_USE_MCI)) {
+        obj.use_mci = params[INDEX_TYPE_HGRAPH][HGRAPH_USE_MCI].GetBool();
+    }
+    CHECK_ARGUMENT(not params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_MCI_SEED_COUNT_KEY),
+                   "hgraph mci_seed_count is not supported; use mci_seed_ratio");
+    if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_MCI_SEED_RATIO)) {
+        obj.mci_seed_ratio = params[INDEX_TYPE_HGRAPH][HGRAPH_MCI_SEED_RATIO].GetFloat();
+        CHECK_ARGUMENT(std::isfinite(obj.mci_seed_ratio) and obj.mci_seed_ratio >= 0.0F,
+                       "hgraph mci_seed_ratio must be finite and non-negative");
+    }
+    if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_MCI_HGRAPH_VALID_RATIO_THRESHOLD)) {
+        obj.mci_hgraph_valid_ratio_threshold =
+            params[INDEX_TYPE_HGRAPH][HGRAPH_MCI_HGRAPH_VALID_RATIO_THRESHOLD].GetFloat();
+        CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+            (obj.mci_hgraph_valid_ratio_threshold >= 0.0F) and
+                (obj.mci_hgraph_valid_ratio_threshold <= 1.0F),
+            "hgraph mci hgraph_valid_ratio_threshold must be in range [0, 1]");
     }
     if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_PARAMETER_BRUTE_FORCE_THRESHOLD)) {
         obj.brute_force_threshold =

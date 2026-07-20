@@ -154,6 +154,9 @@ HGraph::Build(const DatasetPtr& data) {
         if (use_elp_optimizer_) {
             elp_optimize();
         }
+        if (this->mci_parameters_.enabled) {
+            this->build_mci_clique_index(ret.empty() ? data->GetFloat32Vectors() : nullptr);
+        }
         return ret;
     }
     std::vector<int64_t> ret;
@@ -165,6 +168,9 @@ HGraph::Build(const DatasetPtr& data) {
     if (use_elp_optimizer_) {
         elp_optimize();
     }
+    if (this->mci_parameters_.enabled and graph_type_ != GRAPH_TYPE_VALUE_NSW) {
+        this->build_mci_clique_index(ret.empty() ? data->GetFloat32Vectors() : nullptr);
+    }
     return ret;
 }
 
@@ -174,7 +180,7 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
 
     auto total = data->GetNumElements();
     const auto* labels = data->GetIds();
-    const auto* vectors = data->GetFloat32Vectors();
+    const auto* vectors = get_data(data);
     const auto* extra_infos = data->GetExtraInfos();
     const auto* source_id = data->GetSourceID();
     Vector<int64_t> valid_indices(allocator_);
@@ -228,12 +234,12 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
             this->label_table_->InsertSourceId(inner_id, source_id[i]);
         }
         if (not defer_persistent_codes) {
-            this->insert_persistent_codes(vectors + dim_ * i, inner_id);
+            this->insert_persistent_codes(get_data(data, i), inner_id);
         } else {
             deferred_code_ids.emplace_back(inner_id, i);
         }
         if (temporary_sq8_build_data != nullptr) {
-            temporary_sq8_build_data->InsertVector(vectors + dim_ * i, inner_id);
+            temporary_sq8_build_data->InsertVector(get_data(data, i), inner_id);
         }
         auto level = this->get_random_level() - 1;
         if (level >= 0) {
@@ -274,7 +280,7 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
         temporary_sq8_build_data.reset();
         this->Train(data);
         for (const auto& [inner_id, local_idx] : deferred_code_ids) {
-            this->insert_persistent_codes(vectors + dim_ * local_idx, inner_id);
+            this->insert_persistent_codes(get_data(data, local_idx), inner_id);
         }
     }
     return failed_ids;
@@ -282,6 +288,14 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
 
 std::vector<int64_t>
 HGraph::Add(const DatasetPtr& data) {
+    std::unique_lock<std::mutex> mci_add_lock(this->mci_add_mutex_, std::defer_lock);
+    if (this->mci_parameters_.enabled) {
+        mci_add_lock.lock();
+    }
+    const auto mci_start_total = this->total_count_.load();
+    const bool had_mci_clique_index = this->mci_parameters_.enabled and
+                                      this->mci_cliques_ != nullptr and
+                                      this->mci_cliques_->HasCliqueIndex(mci_start_total);
     std::shared_lock<std::shared_mutex> force_remove_rlock;
     if (this->support_force_remove()) {
         force_remove_rlock = std::shared_lock<std::shared_mutex>(this->force_remove_mutex_);
@@ -293,6 +307,24 @@ HGraph::Add(const DatasetPtr& data) {
     auto batch = this->prepare_add_batch(data);
     this->prepare_temporary_graph_read_codes(data, context, batch);
     this->insert_add_batch(data, context, batch);
+    if (this->mci_parameters_.enabled) {
+        if (had_mci_clique_index) {
+            logger::info("hgraph mci incremental add started, added={}", batch.rows.size());
+            for (const auto& row : batch.rows) {
+                this->incremental_update_mci_clique(row.inner_id, get_data(data, row.input_idx));
+            }
+            logger::info("hgraph mci incremental add finished, total={}",
+                         this->total_count_.load());
+        } else {
+            const float* vectors = nullptr;
+            if (mci_start_total == 0 and batch.failed_ids.empty() and
+                this->data_type_ == DataTypes::DATA_TYPE_FLOAT) {
+                vectors = data->GetFloat32Vectors();
+            }
+            this->build_mci_clique_index(vectors);
+        }
+        this->cal_memory_usage();
+    }
     return batch.failed_ids;
 }
 
@@ -479,6 +511,7 @@ HGraph::insert_persistent_codes(const void* data, InnerIdType inner_id) {
     if (not this->support_force_remove()) {
         add_lock = std::shared_lock<std::shared_mutex>(this->add_mutex_);
     }
+    std::unique_lock<std::shared_mutex> codes_lock(this->persistent_codes_mutex_);
     this->insert_persistent_codes_unlocked(data, inner_id);
 }
 

@@ -32,6 +32,17 @@ DEFINE_POINTER2(SparseGraphDatacellParam, SparseGraphDatacellParameter);
 DEFINE_POINTER(ODescentParameter);
 
 DEFINE_POINTER(HGraphParameter);
+
+struct HGraphMCIParameters {
+    bool enabled{false};
+    uint64_t mcs{200};
+    uint64_t clique_max{50};
+    float alpha{1.2F};
+    std::string knng_path{};
+    float incremental_join_ratio_threshold{0.6F};
+    uint64_t incremental_added_mct{3};
+    uint64_t incremental_clique_max{50};
+};
 class HGraphParameter : public InnerIndexParameter {
 public:
     explicit HGraphParameter(const JsonType& json);
@@ -70,6 +81,8 @@ public:
 
     bool persist_source_id{false};
 
+    HGraphMCIParameters mci_parameters{};
+
     DataTypes data_type{DataTypes::DATA_TYPE_FLOAT};
 
     std::string name;
@@ -86,6 +99,9 @@ public:
     bool use_reorder{false};
     bool use_extra_info_filter{false};
     bool rabitq_one_bit_search{false};
+    bool use_mci{true};
+    float mci_seed_ratio{0.1F};
+    float mci_hgraph_valid_ratio_threshold{0.05F};
     // If > 0 and the active filter's ValidRatio() <= brute_force_threshold,
     // the search bypasses the graph traversal and runs an exact scan over the
     // valid inner ids using the best available flatten codes. Default 0

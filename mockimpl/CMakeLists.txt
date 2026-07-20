@@ -45,6 +45,7 @@ add_custom_target (version_mockimpl
   ${CMAKE_COMMAND} -D SRC=${CMAKE_CURRENT_SOURCE_DIR}/vsag/version.h.in
                    -D DST=${CMAKE_CURRENT_SOURCE_DIR}/vsag/version.h
                    -D GIT_EXECUTABLE=${GIT_EXECUTABLE}
+                   -D GIT_SAFE_DIRECTORY=${PROJECT_SOURCE_DIR}
                    -P ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/GenerateVersionHeader.cmake
   )
 add_dependencies (vsag_mockimpl version_mockimpl)

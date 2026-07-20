@@ -273,6 +273,210 @@ TEST_CASE("HGraph rejects deduplicate_storage with force remove", "[ut][HGraphPa
     REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
 }
 
+TEST_CASE("HGraph maps flat MCI parameters", "[ut][HGraphParameter]") {
+    auto param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "base_io_type": "block_memory_io",
+        "precise_quantization_type": "fp32",
+        "precise_io_type": "block_memory_io",
+        "graph_io_type": "block_memory_io",
+        "graph_storage_type": "flat",
+        "graph_type": "nsw",
+        "max_degree": 32,
+        "ef_construction": 100,
+        "use_reorder": true,
+        "use_mci": false,
+        "mci_mcs": 8,
+        "mci_clique_max": 4,
+        "mci_alpha": 1.2,
+        "mci_incremental_join_ratio_threshold": 0.7,
+        "mci_incremental_added_mct": 2,
+        "mci_incremental_clique_max": 4
+    })");
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    auto hgraph_param = vsag::HGraph::CheckAndMappingExternalParam(param, common_param);
+    auto typed_param = std::dynamic_pointer_cast<vsag::HGraphParameter>(hgraph_param);
+
+    REQUIRE(typed_param != nullptr);
+    REQUIRE(typed_param->mci_parameters.enabled);
+    REQUIRE(typed_param->mci_parameters.mcs == 8);
+    REQUIRE(typed_param->mci_parameters.clique_max == 4);
+    REQUIRE(typed_param->mci_parameters.alpha == 1.2F);
+    REQUIRE(typed_param->mci_parameters.incremental_join_ratio_threshold == 0.7F);
+    REQUIRE(typed_param->mci_parameters.incremental_added_mct == 2);
+    REQUIRE(typed_param->mci_parameters.incremental_clique_max == 4);
+
+    auto json = typed_param->ToJson();
+    REQUIRE_FALSE(json.Contains("mci"));
+    REQUIRE(json["use_mci"].GetBool());
+    REQUIRE(json["mci_mcs"].GetInt() == 8);
+    REQUIRE(json["mci_clique_max"].GetInt() == 4);
+    REQUIRE(json["mci_alpha"].GetFloat() == 1.2F);
+}
+
+TEST_CASE("HGraph enables MCI from any public trigger", "[ut][HGraphParameter]") {
+    auto make_param = []() {
+        return vsag::JsonType::Parse(R"({
+            "base_quantization_type": "fp32",
+            "graph_type": "nsw",
+            "max_degree": 32,
+            "ef_construction": 100
+        })");
+    };
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+
+    auto is_mci_enabled = [&](const vsag::JsonType& param) {
+        auto mapped = vsag::HGraph::CheckAndMappingExternalParam(param, common_param);
+        auto typed = std::dynamic_pointer_cast<vsag::HGraphParameter>(mapped);
+        REQUIRE(typed != nullptr);
+        return typed->mci_parameters.enabled;
+    };
+
+    SECTION("disabled without a trigger") {
+        auto param = make_param();
+        param["use_mci"].SetBool(false);
+        REQUIRE_FALSE(is_mci_enabled(param));
+    }
+    SECTION("use_mci true") {
+        auto param = make_param();
+        param["use_mci"].SetBool(true);
+        REQUIRE(is_mci_enabled(param));
+    }
+    SECTION("nested parameters are rejected") {
+        auto param = make_param();
+        param["mci"].SetJson(vsag::JsonType::Parse(R"({"mcs": 8})"));
+        REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
+    }
+    SECTION("mci_mcs") {
+        auto param = make_param();
+        param["mci_mcs"].SetInt(8);
+        REQUIRE(is_mci_enabled(param));
+    }
+    SECTION("mci_clique_max") {
+        auto param = make_param();
+        param["mci_clique_max"].SetInt(4);
+        REQUIRE(is_mci_enabled(param));
+    }
+    SECTION("mci_alpha") {
+        auto param = make_param();
+        param["mci_alpha"].SetFloat(1.2F);
+        REQUIRE(is_mci_enabled(param));
+    }
+
+    SECTION("internal knng path is rejected") {
+        auto param = make_param();
+        param["mci_knng_path"].SetString("/build-host/graph.bin");
+        REQUIRE_THROWS(is_mci_enabled(param));
+    }
+}
+
+TEST_CASE("HGraph rejects MCI with force remove", "[ut][HGraphParameter]") {
+    auto param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "graph_type": "nsw",
+        "max_degree": 32,
+        "ef_construction": 100,
+        "support_force_remove": true,
+        "use_mci": true
+    })");
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
+}
+
+TEST_CASE("HGraph rejects invalid flat MCI parameters", "[ut][HGraphParameter]") {
+    auto make_param = []() {
+        return vsag::JsonType::Parse(R"({
+            "base_quantization_type": "fp32",
+            "base_io_type": "block_memory_io",
+            "precise_quantization_type": "fp32",
+            "precise_io_type": "block_memory_io",
+            "graph_io_type": "block_memory_io",
+            "graph_storage_type": "flat",
+            "graph_type": "odescent",
+            "max_degree": 32,
+            "ef_construction": 100,
+            "use_reorder": true,
+            "mci_mcs": 8,
+            "mci_clique_max": 4,
+            "mci_incremental_added_mct": 2,
+            "mci_incremental_clique_max": 4
+        })");
+    };
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+
+    SECTION("mci_mcs") {
+        auto param = make_param();
+        param["mci_mcs"].SetInt(-1);
+        REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
+    }
+    SECTION("mci_clique_max") {
+        auto param = make_param();
+        param["mci_clique_max"].SetInt(-1);
+        REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
+    }
+    SECTION("mci_incremental_added_mct") {
+        auto param = make_param();
+        param["mci_incremental_added_mct"].SetInt(-1);
+        REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
+    }
+    SECTION("mci_incremental_clique_max") {
+        auto param = make_param();
+        param["mci_incremental_clique_max"].SetInt(-1);
+        REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
+    }
+}
+
+TEST_CASE("HGraph Search Parameters parse MCI seed ratio", "[ut][HGraphParameter]") {
+    auto params = vsag::HGraphSearchParameters::FromJson(R"({
+        "hgraph": {
+            "ef_search": 200,
+            "use_mci": true,
+            "mci_seed_ratio": 0.25
+        }
+    })");
+
+    REQUIRE(params.use_mci);
+    REQUIRE(std::abs(params.mci_seed_ratio - 0.25F) < 1e-5F);
+
+    auto defaults = vsag::HGraphSearchParameters::FromJson(R"({
+        "hgraph": {
+            "ef_search": 200
+        }
+    })");
+    REQUIRE(defaults.mci_seed_ratio == 0.1F);
+    REQUIRE(defaults.mci_hgraph_valid_ratio_threshold == 0.05F);
+
+    REQUIRE_THROWS(vsag::HGraphSearchParameters::FromJson(R"({
+        "hgraph": {
+            "ef_search": 200,
+            "mci_seed_count": 64
+        }
+    })"));
+    auto unbounded = vsag::HGraphSearchParameters::FromJson(R"({
+        "hgraph": {
+            "ef_search": 200,
+            "mci_seed_ratio": 100.0
+        }
+    })");
+    REQUIRE(unbounded.mci_seed_ratio == 100.0F);
+
+    REQUIRE_THROWS(vsag::HGraphSearchParameters::FromJson(R"({
+        "hgraph": {
+            "ef_search": 200,
+            "mci_seed_ratio": -0.1
+        }
+    })"));
+}
+
 TEST_CASE("HGraph Search Parameters parse RaBitQ error rate", "[ut][HGraphParameter]") {
     auto params = vsag::HGraphSearchParameters::FromJson(R"({
         "hgraph": {
