@@ -14,10 +14,10 @@
 # limitations under the License.
 
 
-set(DISKSINDI_SRCS
-        disksindi.cpp
-        disksindi_parameter.cpp
+set(SINDI_V2_SRCS
+        sindi_v2.cpp
+        sindi_v2_parameter.cpp
 )
 
-add_library(disksindi OBJECT ${DISKSINDI_SRCS})
-target_link_libraries(disksindi PRIVATE coverage_config vsag_src_common)
+add_library(sindi_v2 OBJECT ${SINDI_V2_SRCS})
+target_link_libraries(sindi_v2 PRIVATE coverage_config vsag_src_common)

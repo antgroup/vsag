@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "disksindi_parameter.h"
+#include "sindi_v2_parameter.h"
 
 #include <fmt/format.h>
 
@@ -23,13 +23,13 @@
 
 namespace {
 
-constexpr const char* DISKSINDI_TERM_IO_KEY = "term_io";
-constexpr const char* DISKSINDI_RERANK_IO_KEY = "rerank_io";
-constexpr const char* DISKSINDI_RERANK_LAYOUT_KEY = "rerank_layout";
-constexpr const char* DISKSINDI_RERANK_LAYOUT_TOP_TERMS_KEY = "rerank_layout_top_terms";
-constexpr const char* DISKSINDI_USE_TERM_LISTS_HEAP_INSERT_KEY = "use_term_lists_heap_insert";
-constexpr const char* DISKSINDI_RERANK_LAYOUT_NONE = "none";
-constexpr const char* DISKSINDI_RERANK_LAYOUT_TOP_TERMS_SIGNATURE = "top_terms_signature";
+constexpr const char* SINDI_V2_TERM_IO_KEY = "term_io";
+constexpr const char* SINDI_V2_RERANK_IO_KEY = "rerank_io";
+constexpr const char* SINDI_V2_RERANK_LAYOUT_KEY = "rerank_layout";
+constexpr const char* SINDI_V2_RERANK_LAYOUT_TOP_TERMS_KEY = "rerank_layout_top_terms";
+constexpr const char* SINDI_V2_USE_TERM_LISTS_HEAP_INSERT_KEY = "use_term_lists_heap_insert";
+constexpr const char* SINDI_V2_RERANK_LAYOUT_NONE = "none";
+constexpr const char* SINDI_V2_RERANK_LAYOUT_TOP_TERMS_SIGNATURE = "top_terms_signature";
 
 }  // namespace
 
@@ -45,16 +45,16 @@ is_file_backed_io(const std::string& io_type_name) {
 
 JsonType
 get_rerank_io_json(const JsonType& json) {
-    auto rerank_io_json = json[DISKSINDI_RERANK_IO_KEY];
+    auto rerank_io_json = json[SINDI_V2_RERANK_IO_KEY];
     auto rerank_io_type = Parameter::TryToParseType(rerank_io_json);
     if (is_file_backed_io(rerank_io_type) && not rerank_io_json.Contains(IO_FILE_PATH_KEY)) {
         CHECK_ARGUMENT(
-            json.Contains(DISKSINDI_TERM_IO_KEY) &&
-                json[DISKSINDI_TERM_IO_KEY].Contains(IO_FILE_PATH_KEY),
+            json.Contains(SINDI_V2_TERM_IO_KEY) &&
+                json[SINDI_V2_TERM_IO_KEY].Contains(IO_FILE_PATH_KEY),
             fmt::format("rerank_io type {} requires file_path when term_io.file_path is absent",
                         rerank_io_type));
         rerank_io_json[IO_FILE_PATH_KEY].SetString(
-            json[DISKSINDI_TERM_IO_KEY][IO_FILE_PATH_KEY].GetString() + ".rerank");
+            json[SINDI_V2_TERM_IO_KEY][IO_FILE_PATH_KEY].GetString() + ".rerank");
     }
     return rerank_io_json;
 }
@@ -62,7 +62,7 @@ get_rerank_io_json(const JsonType& json) {
 }  // namespace
 
 void
-DiskSINDIParameter::FromJson(const JsonType& json) {
+SINDIV2Parameter::FromJson(const JsonType& json) {
     if (json.Contains(SPARSE_TERM_ID_LIMIT)) {
         term_id_limit = json[SPARSE_TERM_ID_LIMIT].GetInt();
 
@@ -87,11 +87,21 @@ DiskSINDIParameter::FromJson(const JsonType& json) {
         use_reorder = DEFAULT_USE_REORDER;
     }
 
+    sparse_value_quant_type = SparseValueQuantizationType::FP32;
     if (json.Contains(USE_QUANTIZATION)) {
-        use_quantization = json[USE_QUANTIZATION].GetBool();
-    } else {
-        use_quantization = false;
+        const auto quantization = json[USE_QUANTIZATION];
+        if (quantization.IsString()) {
+            CHECK_ARGUMENT(quantization.GetString() == QUANTIZATION_TYPE_VALUE_FP16,
+                           "use_quantization must be false, true, or fp16");
+            sparse_value_quant_type = SparseValueQuantizationType::FP16;
+        } else {
+            CHECK_ARGUMENT(quantization.IsBool(), "use_quantization must be false, true, or fp16");
+            if (quantization.GetBool()) {
+                sparse_value_quant_type = SparseValueQuantizationType::SQ8;
+            }
+        }
     }
+    use_quantization = sparse_value_quant_type != SparseValueQuantizationType::FP32;
 
     if (json.Contains(SPARSE_WINDOW_SIZE)) {
         window_size = json[SPARSE_WINDOW_SIZE].GetInt();
@@ -111,29 +121,25 @@ DiskSINDIParameter::FromJson(const JsonType& json) {
         avg_doc_term_length = DEFAULT_AVG_DOC_TERM_LENGTH;
     }
 
-    if (json.Contains(SPARSE_DESERIALIZE_WITHOUT_FOOTER)) {
-        deserialize_without_footer = json[SPARSE_DESERIALIZE_WITHOUT_FOOTER].GetBool();
-    }
-
-    if (json.Contains(SPARSE_DESERIALIZE_WITHOUT_BUFFER)) {
-        deserialize_without_buffer = json[SPARSE_DESERIALIZE_WITHOUT_BUFFER].GetBool();
-    }
-
     if (json.Contains(SPARSE_REMAP_TERM_IDS)) {
         remap_term_ids = json[SPARSE_REMAP_TERM_IDS].GetBool();
     }
 
-    if (json.Contains(DISKSINDI_RERANK_LAYOUT_KEY)) {
-        rerank_layout = json[DISKSINDI_RERANK_LAYOUT_KEY].GetString();
-        CHECK_ARGUMENT(rerank_layout == DISKSINDI_RERANK_LAYOUT_NONE ||
-                           rerank_layout == DISKSINDI_RERANK_LAYOUT_TOP_TERMS_SIGNATURE,
-                       fmt::format("unsupported DiskSINDI rerank_layout: {}", rerank_layout));
-    } else {
-        rerank_layout = DISKSINDI_RERANK_LAYOUT_NONE;
+    if (json.Contains(SPARSE_IMMUTABLE)) {
+        immutable = json[SPARSE_IMMUTABLE].GetBool();
     }
 
-    if (json.Contains(DISKSINDI_RERANK_LAYOUT_TOP_TERMS_KEY)) {
-        rerank_layout_top_terms = json[DISKSINDI_RERANK_LAYOUT_TOP_TERMS_KEY].GetInt();
+    if (json.Contains(SINDI_V2_RERANK_LAYOUT_KEY)) {
+        rerank_layout = json[SINDI_V2_RERANK_LAYOUT_KEY].GetString();
+        CHECK_ARGUMENT(rerank_layout == SINDI_V2_RERANK_LAYOUT_NONE ||
+                           rerank_layout == SINDI_V2_RERANK_LAYOUT_TOP_TERMS_SIGNATURE,
+                       fmt::format("unsupported SINDIV2 rerank_layout: {}", rerank_layout));
+    } else {
+        rerank_layout = SINDI_V2_RERANK_LAYOUT_NONE;
+    }
+
+    if (json.Contains(SINDI_V2_RERANK_LAYOUT_TOP_TERMS_KEY)) {
+        rerank_layout_top_terms = json[SINDI_V2_RERANK_LAYOUT_TOP_TERMS_KEY].GetInt();
         CHECK_ARGUMENT(rerank_layout_top_terms > 0,
                        fmt::format("rerank_layout_top_terms must be greater than 0, but now is {}",
                                    rerank_layout_top_terms));
@@ -141,19 +147,17 @@ DiskSINDIParameter::FromJson(const JsonType& json) {
         rerank_layout_top_terms = 16;
     }
 
-    CHECK_ARGUMENT(use_reorder || rerank_layout == DISKSINDI_RERANK_LAYOUT_NONE,
-                   "DiskSINDI rerank_layout requires use_reorder=true");
+    CHECK_ARGUMENT(use_reorder || rerank_layout == SINDI_V2_RERANK_LAYOUT_NONE,
+                   "SINDIV2 rerank_layout requires use_reorder=true");
 
-    if (json.Contains(DISKSINDI_TERM_IO_KEY)) {
-        term_io_parameter = IOParameter::GetIOParameterByJson(json[DISKSINDI_TERM_IO_KEY]);
+    if (json.Contains(SINDI_V2_TERM_IO_KEY)) {
+        term_io_parameter = IOParameter::GetIOParameterByJson(json[SINDI_V2_TERM_IO_KEY]);
         CHECK_ARGUMENT(term_io_parameter != nullptr, "invalid term_io parameter");
-        CHECK_ARGUMENT(term_io_parameter->GetTypeName() != IO_TYPE_VALUE_MEMORY_IO,
-                       "DiskSINDI term_io does not support memory_io");
     } else {
         term_io_parameter = std::make_shared<ReaderIOParameter>();
     }
 
-    if (json.Contains(DISKSINDI_RERANK_IO_KEY)) {
+    if (json.Contains(SINDI_V2_RERANK_IO_KEY)) {
         rerank_io_parameter = IOParameter::GetIOParameterByJson(get_rerank_io_json(json));
         CHECK_ARGUMENT(rerank_io_parameter != nullptr, "invalid rerank_io parameter");
         if (rerank_io_parameter->GetTypeName() == IO_TYPE_VALUE_MEMORY_IO) {
@@ -165,103 +169,113 @@ DiskSINDIParameter::FromJson(const JsonType& json) {
 }
 
 JsonType
-DiskSINDIParameter::ToJson() const {
+SINDIV2Parameter::ToJson() const {
     JsonType json;
     json[SPARSE_TERM_ID_LIMIT].SetInt(term_id_limit);
     json[SPARSE_DOC_PRUNE_RATIO].SetFloat(doc_prune_ratio);
     json[USE_REORDER_KEY].SetBool(use_reorder);
-    json[USE_QUANTIZATION].SetBool(use_quantization);
+    if (sparse_value_quant_type == SparseValueQuantizationType::FP16) {
+        json[USE_QUANTIZATION].SetString(QUANTIZATION_TYPE_VALUE_FP16);
+    } else {
+        json[USE_QUANTIZATION].SetBool(sparse_value_quant_type == SparseValueQuantizationType::SQ8);
+    }
     json[SPARSE_WINDOW_SIZE].SetInt(window_size);
     json[SPARSE_AVG_DOC_TERM_LENGTH].SetInt(avg_doc_term_length);
     json[SPARSE_REMAP_TERM_IDS].SetBool(remap_term_ids);
-    json[DISKSINDI_RERANK_LAYOUT_KEY].SetString(rerank_layout);
-    json[DISKSINDI_RERANK_LAYOUT_TOP_TERMS_KEY].SetInt(rerank_layout_top_terms);
+    if (immutable) {
+        json[SPARSE_IMMUTABLE].SetBool(true);
+    }
+    json[SINDI_V2_RERANK_LAYOUT_KEY].SetString(rerank_layout);
+    json[SINDI_V2_RERANK_LAYOUT_TOP_TERMS_KEY].SetInt(rerank_layout_top_terms);
     if (term_io_parameter != nullptr) {
-        json[DISKSINDI_TERM_IO_KEY].SetJson(term_io_parameter->ToJson());
+        json[SINDI_V2_TERM_IO_KEY].SetJson(term_io_parameter->ToJson());
     }
     if (rerank_io_parameter != nullptr) {
-        json[DISKSINDI_RERANK_IO_KEY].SetJson(rerank_io_parameter->ToJson());
+        json[SINDI_V2_RERANK_IO_KEY].SetJson(rerank_io_parameter->ToJson());
     }
     return json;
 }
 
 bool
-DiskSINDIParameter::CheckCompatibility(const vsag::ParamPtr& other) const {
-    auto disksindi_param = std::dynamic_pointer_cast<DiskSINDIParameter>(other);
-    if (disksindi_param == nullptr) {
+SINDIV2Parameter::CheckCompatibility(const vsag::ParamPtr& other) const {
+    auto sindi_v2_param = std::dynamic_pointer_cast<SINDIV2Parameter>(other);
+    if (sindi_v2_param == nullptr) {
         return false;
     }
-    if (this->term_id_limit != disksindi_param->term_id_limit) {
+    if (this->term_id_limit != sindi_v2_param->term_id_limit) {
         return false;
     }
-    if (this->window_size != disksindi_param->window_size) {
+    if (this->window_size != sindi_v2_param->window_size) {
         return false;
     }
-    if (this->doc_prune_ratio != disksindi_param->doc_prune_ratio) {
+    if (this->doc_prune_ratio != sindi_v2_param->doc_prune_ratio) {
         return false;
     }
-    if (this->use_reorder != disksindi_param->use_reorder) {
+    if (this->use_reorder != sindi_v2_param->use_reorder) {
         return false;
     }
-    if (this->use_quantization != disksindi_param->use_quantization) {
+    if (this->sparse_value_quant_type != sindi_v2_param->sparse_value_quant_type) {
         return false;
     }
-    if (this->avg_doc_term_length != disksindi_param->avg_doc_term_length) {
+    if (this->avg_doc_term_length != sindi_v2_param->avg_doc_term_length) {
         return false;
     }
-    if (this->remap_term_ids != disksindi_param->remap_term_ids) {
+    if (this->remap_term_ids != sindi_v2_param->remap_term_ids) {
         return false;
     }
-    if (this->rerank_layout != disksindi_param->rerank_layout) {
+    if (this->immutable != sindi_v2_param->immutable) {
         return false;
     }
-    if (this->rerank_layout_top_terms != disksindi_param->rerank_layout_top_terms) {
+    if (this->rerank_layout != sindi_v2_param->rerank_layout) {
+        return false;
+    }
+    if (this->rerank_layout_top_terms != sindi_v2_param->rerank_layout_top_terms) {
         return false;
     }
     return true;
 }
 
 void
-DiskSINDISearchParameter::FromJson(const JsonType& json) {
-    CHECK_ARGUMENT(json.Contains(INDEX_DISKSINDI),
-                   fmt::format("parameters must contains {}", INDEX_DISKSINDI));
-    if (json[INDEX_DISKSINDI].Contains(SPARSE_TERM_PRUNE_RATIO)) {
-        term_prune_ratio = json[INDEX_DISKSINDI][SPARSE_TERM_PRUNE_RATIO].GetFloat();
+SINDIV2SearchParameter::FromJson(const JsonType& json) {
+    CHECK_ARGUMENT(json.Contains(INDEX_SINDI_V2),
+                   fmt::format("parameters must contains {}", INDEX_SINDI_V2));
+    if (json[INDEX_SINDI_V2].Contains(SPARSE_TERM_PRUNE_RATIO)) {
+        term_prune_ratio = json[INDEX_SINDI_V2][SPARSE_TERM_PRUNE_RATIO].GetFloat();
         CHECK_ARGUMENT((0.0F <= term_prune_ratio and term_prune_ratio <= 0.9F),
                        fmt::format("term_prune_ratio must in [0, 0.9], got {}", term_prune_ratio));
     } else {
         term_prune_ratio = DEFAULT_TERM_PRUNE_RATIO;
     }
 
-    if (json[INDEX_DISKSINDI].Contains(SPARSE_QUERY_PRUNE_RATIO)) {
-        query_prune_ratio = json[INDEX_DISKSINDI][SPARSE_QUERY_PRUNE_RATIO].GetFloat();
+    if (json[INDEX_SINDI_V2].Contains(SPARSE_QUERY_PRUNE_RATIO)) {
+        query_prune_ratio = json[INDEX_SINDI_V2][SPARSE_QUERY_PRUNE_RATIO].GetFloat();
         CHECK_ARGUMENT(
             (0.0F <= query_prune_ratio and query_prune_ratio <= 0.9F),
             fmt::format("query_prune_ratio must in [0, 0.9], got {}", query_prune_ratio));
     } else {
         query_prune_ratio = DEFAULT_QUERY_PRUNE_RATIO;
     }
-    if (json[INDEX_DISKSINDI].Contains(SPARSE_N_CANDIDATE)) {
-        n_candidate = json[INDEX_DISKSINDI][SPARSE_N_CANDIDATE].GetInt();
+    if (json[INDEX_SINDI_V2].Contains(SPARSE_N_CANDIDATE)) {
+        n_candidate = json[INDEX_SINDI_V2][SPARSE_N_CANDIDATE].GetInt();
     } else {
         n_candidate = DEFAULT_N_CANDIDATE;
     }
 
-    if (json[INDEX_DISKSINDI].Contains(DISKSINDI_USE_TERM_LISTS_HEAP_INSERT_KEY)) {
+    if (json[INDEX_SINDI_V2].Contains(SINDI_V2_USE_TERM_LISTS_HEAP_INSERT_KEY)) {
         use_term_lists_heap_insert =
-            json[INDEX_DISKSINDI][DISKSINDI_USE_TERM_LISTS_HEAP_INSERT_KEY].GetBool();
+            json[INDEX_SINDI_V2][SINDI_V2_USE_TERM_LISTS_HEAP_INSERT_KEY].GetBool();
     } else {
         use_term_lists_heap_insert = true;
     }
 }
 JsonType
-DiskSINDISearchParameter::ToJson() const {
+SINDIV2SearchParameter::ToJson() const {
     JsonType json;
-    json[INDEX_DISKSINDI].SetJson(JsonType());
-    json[INDEX_DISKSINDI][SPARSE_QUERY_PRUNE_RATIO].SetFloat(query_prune_ratio);
-    json[INDEX_DISKSINDI][SPARSE_N_CANDIDATE].SetInt(n_candidate);
-    json[INDEX_DISKSINDI][SPARSE_TERM_PRUNE_RATIO].SetFloat(term_prune_ratio);
-    json[INDEX_DISKSINDI][DISKSINDI_USE_TERM_LISTS_HEAP_INSERT_KEY].SetBool(
+    json[INDEX_SINDI_V2].SetJson(JsonType());
+    json[INDEX_SINDI_V2][SPARSE_QUERY_PRUNE_RATIO].SetFloat(query_prune_ratio);
+    json[INDEX_SINDI_V2][SPARSE_N_CANDIDATE].SetInt(n_candidate);
+    json[INDEX_SINDI_V2][SPARSE_TERM_PRUNE_RATIO].SetFloat(term_prune_ratio);
+    json[INDEX_SINDI_V2][SINDI_V2_USE_TERM_LISTS_HEAP_INSERT_KEY].SetBool(
         use_term_lists_heap_insert);
     return json;
 }

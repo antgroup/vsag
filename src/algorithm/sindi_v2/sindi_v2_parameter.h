@@ -18,15 +18,16 @@
 #include <string>
 
 #include "algorithm/inner_index_parameter.h"
+#include "algorithm/sindi/sindi_parameter.h"
 #include "index_common_param.h"
 #include "io/io_parameter.h"
 #include "utils/pointer_define.h"
 
 namespace vsag {
 
-DEFINE_POINTER(DiskSINDIParameter);
+DEFINE_POINTER(SINDIV2Parameter);
 
-class DiskSINDIParameter : public InnerIndexParameter {
+class SINDIV2Parameter : public InnerIndexParameter {
 public:
     void
     FromJson(const JsonType& json) override;
@@ -37,7 +38,7 @@ public:
     bool
     CheckCompatibility(const vsag::ParamPtr& other) const override;
 
-    DiskSINDIParameter() = default;
+    SINDIV2Parameter() = default;
 
 public:
     // index
@@ -51,22 +52,23 @@ public:
 
     bool use_quantization{false};
 
+    SparseValueQuantizationType sparse_value_quant_type{SparseValueQuantizationType::FP32};
+
     bool remap_term_ids{false};
+
+    bool immutable{false};
 
     std::string rerank_layout{"none"};
 
     uint32_t rerank_layout_top_terms{16};
 
-    // temporal parameter
-    bool deserialize_without_footer{false};
-    bool deserialize_without_buffer{false};
     uint32_t avg_doc_term_length{100};
 
     IOParamPtr term_io_parameter{nullptr};
     IOParamPtr rerank_io_parameter{nullptr};
 };
 
-class DiskSINDISearchParameter : public Parameter {
+class SINDIV2SearchParameter : public Parameter {
 public:
     void
     FromJson(const JsonType& json) override;
@@ -74,7 +76,7 @@ public:
     JsonType
     ToJson() const override;
 
-    DiskSINDISearchParameter() = default;
+    SINDIV2SearchParameter() = default;
 
 public:
     // search
