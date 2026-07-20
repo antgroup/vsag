@@ -209,9 +209,10 @@ MultiVectorDataCell<QuantTmpl, IOTmpl>::Query(float* result_dists,
     // Step 1: Read all offsets (offset_io_ is MemoryBlockIO, in-memory, fast)
     std::vector<uint64_t> offsets(id_count);
     for (InnerIdType i = 0; i < id_count; ++i) {
-        offset_io_->Read(sizeof(uint64_t),
-                         static_cast<uint64_t>(idx[i]) * sizeof(uint64_t),
-                         reinterpret_cast<uint8_t*>(&offsets[i]));
+        bool ok = offset_io_->Read(sizeof(uint64_t),
+                                   static_cast<uint64_t>(idx[i]) * sizeof(uint64_t),
+                                   reinterpret_cast<uint8_t*>(&offsets[i]));
+        CHECK_ARGUMENT(ok, "MultiVectorDataCell: failed to read offset");
     }
 
     // Step 2: Batch read all token counts via MultiRead (async IO)

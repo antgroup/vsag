@@ -770,7 +770,8 @@ SIMQ::KnnSearch(const DatasetPtr& query,
                          computer,
                          batch_ids.data(),
                          static_cast<InnerIdType>(batch_ids.size()));
-        stats.dist_cmp += batch_ids.size();
+        stats.dist_cmp.fetch_add(static_cast<uint32_t>(batch_ids.size()),
+                                 std::memory_order_relaxed);
         for (uint64_t i = 0; i < batch_ids.size(); i++) {
             reranked.emplace_back(batch_dists[i], batch_ids[i]);
         }
