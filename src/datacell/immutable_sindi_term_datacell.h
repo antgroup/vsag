@@ -38,8 +38,6 @@ struct ImmutableSINDIWindow {
 /** Compact, read-only SINDI term index. */
 class ImmutableSindiTermDataCell : public SindiTermDataCell {
 public:
-    using MappedQueryTerms = Vector<std::pair<uint32_t, uint32_t>>;
-
     ImmutableSindiTermDataCell(uint32_t term_id_limit,
                                uint32_t window_size,
                                bool remap_term_ids,
@@ -81,7 +79,7 @@ public:
                 uint32_t window_id,
                 const SparseTermComputerPtr& computer,
                 bool use_term_lists_heap_insert,
-                const QueryTermBuffers& query_term_buffers) const override;
+                SindiQueryContext& query_context) const override;
 
     void
     InsertHeapByWindow(float* dists,
@@ -92,7 +90,7 @@ public:
                        uint32_t offset_id,
                        InnerSearchMode mode,
                        bool with_filter,
-                       const QueryTermBuffers& query_term_buffers) const override;
+                       const SindiQueryContext& query_context) const override;
 
     void
     InsertHeapByDists(float* dists,
@@ -166,6 +164,7 @@ private:
     uint32_t window_size_{0};
     bool remap_term_ids_{false};
     SparseValueQuantizationType sparse_value_quant_type_{SparseValueQuantizationType::FP32};
+    uint32_t value_code_size_{sizeof(float)};
     QuantizationParamsPtr quantization_params_;
     Allocator* allocator_{nullptr};
     Vector<ImmutableSINDIWindow> windows_;
