@@ -196,7 +196,8 @@ MutableSindiTermDataCell::QueryWindow(float* dists,
                                       uint32_t window_id,
                                       const SparseTermComputerPtr& computer,
                                       bool use_term_lists_heap_insert,
-                                      const QueryTermBuffers& query_term_buffers) const {
+                                      SindiQueryContext& query_context) const {
+    (void)query_context;
     CHECK_ARGUMENT(window_id < windows_.size(), "mutable SINDI window id out of range");
     const auto& window = windows_[window_id];
     while (computer->HasNextTerm()) {
@@ -249,7 +250,8 @@ MutableSindiTermDataCell::InsertHeapByWindow(float* dists,
                                              uint32_t offset_id,
                                              InnerSearchMode mode,
                                              bool with_filter,
-                                             const QueryTermBuffers& query_term_buffers) const {
+                                             const SindiQueryContext& query_context) const {
+    (void)query_context;
     CHECK_ARGUMENT(window_id < windows_.size(), "mutable SINDI window id out of range");
     const auto& window = windows_[window_id];
     if (mode == InnerSearchMode::KNN_SEARCH) {

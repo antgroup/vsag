@@ -103,14 +103,22 @@ TEST_CASE("ImmutableSindiTermDataCell term-first memory load uses exact capacity
         auto restored_computer =
             std::make_shared<SparseTermComputer>(query, search_parameter, allocator.get());
         QueryTermBuffers query_buffers(allocator.get());
+        SindiQueryContext source_context(allocator.get());
+        SindiQueryContext restored_context(allocator.get());
+        source_context.mapped_query_terms.reserve(query_terms.size());
+        restored_context.mapped_query_terms.reserve(query_terms.size());
+        const uint64_t source_mapped_capacity = source_context.mapped_query_terms.capacity();
+        const uint64_t restored_mapped_capacity = restored_context.mapped_query_terms.capacity();
 
         for (uint32_t window_id = 0; window_id < restored.GetWindowCount(); ++window_id) {
             std::vector<float> source_distances(window_size, 0.0F);
             std::vector<float> restored_distances(window_size, 0.0F);
             source.QueryWindow(
-                source_distances.data(), window_id, source_computer, false, query_buffers);
+                source_distances.data(), window_id, source_computer, false, source_context);
             restored.QueryWindow(
-                restored_distances.data(), window_id, restored_computer, false, query_buffers);
+                restored_distances.data(), window_id, restored_computer, false, restored_context);
+            REQUIRE(source_context.mapped_query_terms.capacity() == source_mapped_capacity);
+            REQUIRE(restored_context.mapped_query_terms.capacity() == restored_mapped_capacity);
             for (uint32_t local_id = 0; local_id < window_size; ++local_id) {
                 REQUIRE(std::abs(source_distances[local_id] - restored_distances[local_id]) <=
                         1e-6F);

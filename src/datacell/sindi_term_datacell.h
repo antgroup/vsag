@@ -84,6 +84,16 @@ struct SindiTermPostingView {
 };
 
 using QueryTermBuffers = UnorderedMap<uint32_t, SindiTermBuffer>;
+using MappedQueryTerms = Vector<std::pair<uint32_t, uint32_t>>;
+
+struct SindiQueryContext {
+    explicit SindiQueryContext(Allocator* allocator)
+        : query_term_buffers(allocator), mapped_query_terms(allocator) {
+    }
+
+    QueryTermBuffers query_term_buffers;
+    MappedQueryTerms mapped_query_terms;
+};
 
 /**
  * Search and term-first serialization contract shared by mutable, immutable and disk SINDI term
@@ -104,7 +114,7 @@ public:
                 uint32_t window_id,
                 const SparseTermComputerPtr& computer,
                 bool use_term_lists_heap_insert,
-                const QueryTermBuffers& query_term_buffers) const = 0;
+                SindiQueryContext& query_context) const = 0;
 
     virtual void
     InsertHeapByWindow(float* dists,
@@ -115,7 +125,7 @@ public:
                        uint32_t offset_id,
                        InnerSearchMode mode,
                        bool with_filter,
-                       const QueryTermBuffers& query_term_buffers) const = 0;
+                       const SindiQueryContext& query_context) const = 0;
 
     virtual void
     InsertHeapByDists(float* dists,

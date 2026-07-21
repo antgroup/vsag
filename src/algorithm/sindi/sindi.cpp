@@ -596,7 +596,7 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
     Vector<float> dists(window_size_, 0.0F, search_allocator);
     auto filter = inner_param.is_inner_id_allowed;
     const auto [min_window_id, max_window_id] = this->get_min_max_window_id(filter);
-    const QueryTermBuffers query_term_buffers(search_allocator);
+    SindiQueryContext query_context(search_allocator);
     for (auto cur = min_window_id; cur <= max_window_id; cur++) {
         const auto window_start_id = static_cast<uint32_t>(cur) * window_size_;
         // compute
@@ -604,7 +604,7 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
                                     static_cast<uint32_t>(cur),
                                     computer,
                                     use_term_lists_heap_insert,
-                                    query_term_buffers);
+                                    query_context);
 
         // insert heap
         if (use_term_lists_heap_insert) {
@@ -616,7 +616,7 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
                                                window_start_id,
                                                mode,
                                                inner_param.is_inner_id_allowed != nullptr,
-                                               query_term_buffers);
+                                               query_context);
         } else {
             const auto remaining_count =
                 static_cast<uint64_t>(cur_element_count_.load()) - window_start_id;

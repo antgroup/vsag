@@ -222,7 +222,7 @@ SINDIAnalyzer::collect_coarse_candidates(const SparseVector& query,
     const bool use_term_lists_heap_insert = sindi_->UseTermListsHeapInsert(search_param);
 
     Vector<float> dists(sindi_->window_size_, 0.0F, sindi_->allocator_);
-    const QueryTermBuffers query_term_buffers(sindi_->allocator_);
+    SindiQueryContext query_context(sindi_->allocator_);
     for (int64_t cur = 0; cur < static_cast<int64_t>(sindi_->term_datacell_->GetWindowCount());
          ++cur) {
         auto window_start_id = static_cast<uint32_t>(cur * sindi_->window_size_);
@@ -231,7 +231,7 @@ SINDIAnalyzer::collect_coarse_candidates(const SparseVector& query,
                                             static_cast<uint32_t>(cur),
                                             computer,
                                             use_term_lists_heap_insert,
-                                            query_term_buffers);
+                                            query_context);
         if (use_term_lists_heap_insert) {
             sindi_->term_datacell_->InsertHeapByWindow(dists.data(),
                                                        static_cast<uint32_t>(cur),
@@ -241,7 +241,7 @@ SINDIAnalyzer::collect_coarse_candidates(const SparseVector& query,
                                                        window_start_id,
                                                        KNN_SEARCH,
                                                        false,
-                                                       query_term_buffers);
+                                                       query_context);
         } else {
             const auto remaining = static_cast<uint64_t>(sindi_->cur_element_count_) -
                                    static_cast<uint64_t>(window_start_id);
@@ -342,7 +342,7 @@ SINDIAnalyzer::collect_doc_prune_candidates(const SparseVector& query,
         computer->ResetTerm();
 
         if (use_term_lists_heap_insert) {
-            const QueryTermBuffers query_term_buffers(sindi_->allocator_);
+            SindiQueryContext query_context(sindi_->allocator_);
             sindi_->mutable_term_datacell_->InsertHeapByWindow(dists.data(),
                                                                cur,
                                                                computer,
@@ -351,7 +351,7 @@ SINDIAnalyzer::collect_doc_prune_candidates(const SparseVector& query,
                                                                window_start_id,
                                                                KNN_SEARCH,
                                                                false,
-                                                               query_term_buffers);
+                                                               query_context);
         } else {
             sindi_->mutable_term_datacell_->InsertHeapByDists(
                 dists.data(), dists.size(), heap, inner_param, window_start_id, KNN_SEARCH, false);
