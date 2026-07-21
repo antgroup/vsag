@@ -32,7 +32,7 @@ make release
 
 ### Python
 
-先在 [PyPI](https://pypi.org/project/pyvsag/)确认可用的绑定版本，再安装对应的精确版本：
+先在 [PyPI](https://pypi.org/project/pyvsag/) 查看可用的绑定版本，再安装对应的精确版本：
 
 ```bash
 pip install pyvsag==X.Y.Z

@@ -2,8 +2,8 @@
      font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
   <title>VSAG 1.0 索引矩阵</title>
   <desc>
-    Pyramid 与 LazyHGraph 是组合或自适应索引。五个核心索引族分别是 BruteForce、
-    HGraph、IVF、SINDI 和 SIMQ。
+    Pyramid 与 LazyHGraph 是组合或自适应索引。
+    五个核心索引族分别是 BruteForce、HGraph、IVF、SINDI 和 SIMQ。
   </desc>
 
   <style>
