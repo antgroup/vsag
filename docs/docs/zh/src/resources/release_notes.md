@@ -32,11 +32,12 @@ make release
 
 ### Python
 
+先在 [PyPI](https://pypi.org/project/pyvsag/)确认可用的绑定版本，再安装对应的精确版本：
+
 ```bash
-pip install pyvsag
+pip install pyvsag==X.Y.Z
 ```
 
-固定 wheel 版本前，请先查看 [PyPI](https://pypi.org/project/pyvsag/)；
 绑定版本不一定与每个 C++ core tag 对应。
 仓库还包含 C 和 Node.js/TypeScript 绑定。
 各绑定的具体支持范围与打包状态，

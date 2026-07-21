@@ -31,14 +31,16 @@ make release
 
 ### Python
 
+Check [PyPI](https://pypi.org/project/pyvsag/) for an available binding version, then install that
+exact version:
+
 ```bash
-pip install pyvsag
+pip install pyvsag==X.Y.Z
 ```
 
-Check [PyPI](https://pypi.org/project/pyvsag/) before pinning a wheel version; binding releases
-may not match every core C++ tag. The repository also contains C and Node.js/TypeScript bindings.
-See the corresponding release series page and repository examples for their support and packaging
-state.
+Binding releases may not match every core C++ tag. The repository also contains C and
+Node.js/TypeScript bindings. See the corresponding release series page and repository examples for
+their support and packaging state.
 
 ## Upgrade Guidance
 
