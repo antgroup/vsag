@@ -142,7 +142,7 @@ private:
                 const InnerSearchParam& inner_param,
                 Allocator* allocator,
                 bool use_term_lists_heap_insert,
-                const QueryTermBuffers& query_term_buffers,
+                SindiQueryContext& query_context,
                 const SparseVector* original_query = nullptr) const;
 
     std::pair<int64_t, int64_t>

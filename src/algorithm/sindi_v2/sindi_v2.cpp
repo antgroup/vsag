@@ -640,17 +640,17 @@ SINDIV2::KnnSearch(const DatasetPtr& query,
         std::make_shared<SparseTermComputer>(effective_query, search_param, search_allocator);
     const SparseVector* rerank_query = (remap_term_ids_ && use_reorder_) ? &sparse_query : nullptr;
 
-    QueryTermBuffers query_term_buffers(search_allocator);
+    SindiQueryContext query_context(search_allocator);
     if (param_->term_io_parameter->GetTypeName() != IO_TYPE_VALUE_MEMORY_IO) {
         auto query_term_ids = collect_query_term_ids(computer, search_allocator);
-        query_term_buffers = term_datacell_->LoadQueryTermBuffers(query_term_ids);
+        query_context.query_term_buffers = term_datacell_->LoadQueryTermBuffers(query_term_ids);
     }
 
     return search_impl<KNN_SEARCH>(computer,
                                    inner_param,
                                    search_allocator,
                                    search_param.use_term_lists_heap_insert,
-                                   query_term_buffers,
+                                   query_context,
                                    rerank_query);
 }
 
@@ -660,7 +660,7 @@ SINDIV2::search_impl(const SparseTermComputerPtr& computer,
                      const InnerSearchParam& inner_param,
                      Allocator* allocator,
                      bool use_term_lists_heap_insert,
-                     const QueryTermBuffers& query_term_buffers,
+                     SindiQueryContext& query_context,
                      const SparseVector* original_query) const {
     MaxHeap heap(allocator);
     int64_t k = 0;
@@ -679,7 +679,7 @@ SINDIV2::search_impl(const SparseTermComputerPtr& computer,
                                     static_cast<uint32_t>(cur),
                                     computer,
                                     use_term_lists_heap_insert,
-                                    query_term_buffers);
+                                    query_context);
 
         if (use_term_lists_heap_insert) {
             term_datacell_->InsertHeapByWindow(dists.data(),
@@ -690,7 +690,7 @@ SINDIV2::search_impl(const SparseTermComputerPtr& computer,
                                                window_start_id,
                                                mode,
                                                inner_param.is_inner_id_allowed != nullptr,
-                                               query_term_buffers);
+                                               query_context);
         } else {
             uint32_t valid_window_size = 0;
             if (window_start_id < static_cast<uint64_t>(cur_element_count_)) {
@@ -866,14 +866,15 @@ SINDIV2::RangeSearch(const DatasetPtr& query,
     }
     auto computer = std::make_shared<SparseTermComputer>(sparse_query, search_param, allocator_);
     const auto query_term_ids = collect_query_term_ids(computer, allocator_);
-    const auto query_term_buffers = term_datacell_->LoadQueryTermBuffers(query_term_ids);
+    SindiQueryContext query_context(allocator_);
+    query_context.query_term_buffers = term_datacell_->LoadQueryTermBuffers(query_term_ids);
     const SparseVector* rerank_query =
         remap_term_ids_ && use_reorder_ ? &query->GetSparseVectors()[0] : nullptr;
     return search_impl<RANGE_SEARCH>(computer,
                                      inner_param,
                                      allocator_,
                                      search_param.use_term_lists_heap_insert,
-                                     query_term_buffers,
+                                     query_context,
                                      rerank_query);
 }
 

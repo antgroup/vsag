@@ -31,20 +31,23 @@ insert_candidate(uint32_t id,
                  float& dist,
                  float& heap_top,
                  MaxHeap& heap,
-                 const InnerSearchParam& param,
-                 uint32_t offset_id) {
+                 uint32_t offset_id,
+                 float radius,
+                 int range_search_limit_size,
+                 const FilterPtr& filter) {
     if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
-        if (param.range_search_limit_size == 0) {
+        if (range_search_limit_size == 0) {
             dist = 0;
             return;
         }
     }
-    if (dist > heap_top) {
-        dist = 0;
-        return;
-    }
     if constexpr (type == InnerSearchType::WITH_FILTER) {
-        if (not param.is_inner_id_allowed->CheckValid(id + offset_id)) {
+        if (__builtin_expect(dist > heap_top || not filter->CheckValid(id + offset_id), 1)) {
+            dist = 0;
+            return;
+        }
+    } else {
+        if (__builtin_expect(dist > heap_top, 1)) {
             dist = 0;
             return;
         }
@@ -54,14 +57,14 @@ insert_candidate(uint32_t id,
         heap.pop();
         heap_top = heap.top().first;
     } else {
-        if (param.range_search_limit_size > 0 &&
-            heap.size() > static_cast<uint32_t>(param.range_search_limit_size)) {
+        if (range_search_limit_size > 0 &&
+            heap.size() > static_cast<uint32_t>(range_search_limit_size)) {
             heap.pop();
         }
-        heap_top = param.range_search_limit_size > 0 &&
-                           heap.size() == static_cast<uint32_t>(param.range_search_limit_size)
+        heap_top = range_search_limit_size > 0 &&
+                           heap.size() == static_cast<uint32_t>(range_search_limit_size)
                        ? heap.top().first
-                       : param.radius - 1;
+                       : radius - 1;
     }
     dist = 0;
 }
@@ -72,13 +75,14 @@ fill_initial(uint32_t id,
              float& dist,
              float& heap_top,
              MaxHeap& heap,
-             const InnerSearchParam& param,
-             uint32_t offset_id) {
+             uint32_t offset_id,
+             uint32_t n_candidate,
+             const FilterPtr& filter) {
     if (dist >= 0) {
         return false;
     }
     if constexpr (type == InnerSearchType::WITH_FILTER) {
-        if (not param.is_inner_id_allowed->CheckValid(id + offset_id)) {
+        if (not filter->CheckValid(id + offset_id)) {
             dist = 0;
             return false;
         }
@@ -86,7 +90,7 @@ fill_initial(uint32_t id,
     heap.emplace(dist, id + offset_id);
     heap_top = heap.top().first;
     dist = 0;
-    return heap.size() == static_cast<uint32_t>(param.ef);
+    return heap.size() == n_candidate;
 }
 
 }  // namespace
@@ -102,6 +106,7 @@ ImmutableSindiTermDataCell::ImmutableSindiTermDataCell(
       window_size_(window_size),
       remap_term_ids_(remap_term_ids),
       sparse_value_quant_type_(sparse_value_quant_type),
+      value_code_size_(sindi_datacell_utils::GetValueCodeSize(sparse_value_quant_type)),
       quantization_params_(std::move(quantization_params)),
       allocator_(allocator),
       windows_(allocator) {
@@ -115,7 +120,7 @@ ImmutableSindiTermDataCell::Reserve(uint32_t window_count) {
 void
 ImmutableSindiTermDataCell::SerializeTermLayout(StreamWriter& writer,
                                                 uint32_t term_dict_count) const {
-    const auto value_code_size = sindi_datacell_utils::GetValueCodeSize(sparse_value_quant_type_);
+    const auto value_code_size = value_code_size_;
     const auto layout = sindi_datacell_utils::BuildTermLayout(
         term_dict_count, GetWindowCount(), value_code_size, this->CollectTermPostings());
     sindi_datacell_utils::SerializeTermLayout(writer, layout, value_code_size);
@@ -137,9 +142,7 @@ ImmutableSindiTermDataCell::GetTermPostingView(uint32_t term_id, uint32_t window
         return {};
     }
     return {window.id_payloads.data() + begin,
-            window.value_payloads.data() +
-                static_cast<uint64_t>(begin) *
-                    sindi_datacell_utils::GetValueCodeSize(sparse_value_quant_type_),
+            window.value_payloads.data() + static_cast<uint64_t>(begin) * value_code_size_,
             end - begin};
 }
 
@@ -256,22 +259,29 @@ ImmutableSindiTermDataCell::QueryWindow(float* dists,
                                         uint32_t window_id,
                                         const SparseTermComputerPtr& computer,
                                         bool use_term_lists_heap_insert,
-                                        const QueryTermBuffers& query_term_buffers) const {
+                                        SindiQueryContext& query_context) const {
     CHECK_ARGUMENT(window_id < windows_.size(), "immutable SINDI window id out of range");
     const auto& window = windows_[window_id];
-    MappedQueryTerms mapped_terms(allocator_);
+    auto& mapped_terms = query_context.mapped_query_terms;
     this->map_query_terms(window, computer, mapped_terms);
     for (uint32_t pos = 0; pos < mapped_terms.size(); ++pos) {
         const auto local_term = mapped_terms[pos].first;
         const auto query_term = mapped_terms[pos].second;
+        if (pos + 1 < mapped_terms.size()) {
+            const auto next_begin = window.offsets[mapped_terms[pos + 1].first];
+            __builtin_prefetch(window.id_payloads.data() + next_begin, 0, 3);
+            __builtin_prefetch(
+                window.value_payloads.data() + static_cast<uint64_t>(next_begin) * value_code_size_,
+                0,
+                3);
+        }
         const auto begin = window.offsets[local_term];
         const auto count =
             static_cast<uint32_t>(static_cast<float>(window.offsets[local_term + 1] - begin) *
                                   computer->term_retain_ratio_);
         const auto* ids = window.id_payloads.data() + begin;
-        const auto* values = window.value_payloads.data() +
-                             static_cast<uint64_t>(begin) *
-                                 sindi_datacell_utils::GetValueCodeSize(sparse_value_quant_type_);
+        const auto* values =
+            window.value_payloads.data() + static_cast<uint64_t>(begin) * value_code_size_;
         if (sparse_value_quant_type_ == SparseValueQuantizationType::SQ8) {
             computer->ScanForAccumulateSQ8(query_term, ids, values, count, dists);
         } else if (sparse_value_quant_type_ == SparseValueQuantizationType::FP16) {
@@ -292,8 +302,12 @@ ImmutableSindiTermDataCell::insert_heap_by_terms(float* dists,
                                                  MaxHeap& heap,
                                                  const InnerSearchParam& param,
                                                  uint32_t offset_id) const {
-    float heap_top = mode == InnerSearchMode::RANGE_SEARCH ? param.radius - 1
-                                                           : std::numeric_limits<float>::max();
+    const auto n_candidate = static_cast<uint32_t>(param.ef);
+    const auto radius = param.radius;
+    const auto range_search_limit_size = param.range_search_limit_size;
+    const auto& filter = param.is_inner_id_allowed;
+    float heap_top =
+        mode == InnerSearchMode::RANGE_SEARCH ? radius - 1 : std::numeric_limits<float>::max();
     for (const auto& mapped_term : mapped_terms) {
         const auto begin = window.offsets[mapped_term.first];
         const auto count = static_cast<uint32_t>(
@@ -302,16 +316,18 @@ ImmutableSindiTermDataCell::insert_heap_by_terms(float* dists,
         const auto* ids = window.id_payloads.data() + begin;
         uint32_t pos = 0;
         if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
-            while (pos < count && heap.size() < static_cast<uint32_t>(param.ef)) {
+            while (pos < count && heap.size() < n_candidate) {
                 const auto id = ids[pos++];
-                if (fill_initial<type>(id, dists[id], heap_top, heap, param, offset_id)) {
+                if (fill_initial<type>(
+                        id, dists[id], heap_top, heap, offset_id, n_candidate, filter)) {
                     break;
                 }
             }
         }
         for (; pos < count; ++pos) {
             const auto id = ids[pos];
-            insert_candidate<mode, type>(id, dists[id], heap_top, heap, param, offset_id);
+            insert_candidate<mode, type>(
+                id, dists[id], heap_top, heap, offset_id, radius, range_search_limit_size, filter);
         }
     }
 }
@@ -323,12 +339,16 @@ ImmutableSindiTermDataCell::insert_heap_by_dists(float* dists,
                                                  MaxHeap& heap,
                                                  const InnerSearchParam& param,
                                                  uint32_t offset_id) const {
-    float heap_top = mode == InnerSearchMode::RANGE_SEARCH ? param.radius - 1
-                                                           : std::numeric_limits<float>::max();
+    const auto n_candidate = static_cast<uint32_t>(param.ef);
+    const auto radius = param.radius;
+    const auto range_search_limit_size = param.range_search_limit_size;
+    const auto& filter = param.is_inner_id_allowed;
+    float heap_top =
+        mode == InnerSearchMode::RANGE_SEARCH ? radius - 1 : std::numeric_limits<float>::max();
     uint32_t id = 0;
     if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
-        while (id < dists_size && heap.size() < static_cast<uint32_t>(param.ef)) {
-            if (fill_initial<type>(id, dists[id], heap_top, heap, param, offset_id)) {
+        while (id < dists_size && heap.size() < n_candidate) {
+            if (fill_initial<type>(id, dists[id], heap_top, heap, offset_id, n_candidate, filter)) {
                 ++id;
                 break;
             }
@@ -336,7 +356,8 @@ ImmutableSindiTermDataCell::insert_heap_by_dists(float* dists,
         }
     }
     for (; id < dists_size; ++id) {
-        insert_candidate<mode, type>(id, dists[id], heap_top, heap, param, offset_id);
+        insert_candidate<mode, type>(
+            id, dists[id], heap_top, heap, offset_id, radius, range_search_limit_size, filter);
     }
 }
 
@@ -349,11 +370,10 @@ ImmutableSindiTermDataCell::InsertHeapByWindow(float* dists,
                                                uint32_t offset_id,
                                                InnerSearchMode mode,
                                                bool with_filter,
-                                               const QueryTermBuffers& query_term_buffers) const {
+                                               const SindiQueryContext& query_context) const {
     CHECK_ARGUMENT(window_id < windows_.size(), "immutable SINDI window id out of range");
     const auto& window = windows_[window_id];
-    MappedQueryTerms mapped_terms(allocator_);
-    this->map_query_terms(window, computer, mapped_terms);
+    const auto& mapped_terms = query_context.mapped_query_terms;
     if (mode == InnerSearchMode::KNN_SEARCH && with_filter) {
         this->insert_heap_by_terms<InnerSearchMode::KNN_SEARCH, InnerSearchType::WITH_FILTER>(
             dists, window, computer, mapped_terms, heap, param, offset_id);
@@ -416,9 +436,7 @@ ImmutableSindiTermDataCell::CalcDistanceByInnerId(
             continue;
         }
         const auto posting = static_cast<uint64_t>(found - window.id_payloads.begin());
-        const auto* encoded =
-            window.value_payloads.data() +
-            posting * sindi_datacell_utils::GetValueCodeSize(sparse_value_quant_type_);
+        const auto* encoded = window.value_payloads.data() + posting * value_code_size_;
         const auto value = sindi_datacell_utils::DecodeValue(
             encoded, sparse_value_quant_type_, quantization_params_.get());
         ip += computer->sorted_query_[query_term].second * value;
@@ -449,9 +467,7 @@ ImmutableSindiTermDataCell::GetSparseVector(uint32_t inner_id,
         }
         ids.push_back(remap_term_ids_ ? window.sorted_global_terms[local_term] : local_term);
         const auto posting = static_cast<uint64_t>(found - window.id_payloads.begin());
-        const auto* encoded =
-            window.value_payloads.data() +
-            posting * sindi_datacell_utils::GetValueCodeSize(sparse_value_quant_type_);
+        const auto* encoded = window.value_payloads.data() + posting * value_code_size_;
         const auto value = sindi_datacell_utils::DecodeValue(
             encoded, sparse_value_quant_type_, quantization_params_.get());
         values.push_back(value);
@@ -535,17 +551,13 @@ ImmutableSindiTermDataCell::DeserializeWindow(StreamReader& reader,
         window.id_payloads, posting_count, "immutable SINDI id payload count exceeds offsets");
     CHECK_ARGUMENT(window.id_payloads.size() == posting_count,
                    "immutable SINDI id payload size does not match offsets");
-    CHECK_ARGUMENT(
-        posting_count <= std::numeric_limits<uint64_t>::max() /
-                             sindi_datacell_utils::GetValueCodeSize(sparse_value_quant_type_),
-        "immutable SINDI value payload size overflows uint64_t");
+    CHECK_ARGUMENT(posting_count <= std::numeric_limits<uint64_t>::max() / value_code_size_,
+                   "immutable SINDI value payload size overflows uint64_t");
     read_vector(window.value_payloads,
-                posting_count * sindi_datacell_utils::GetValueCodeSize(sparse_value_quant_type_),
+                posting_count * value_code_size_,
                 "immutable SINDI value payload count exceeds offsets");
-    CHECK_ARGUMENT(
-        window.value_payloads.size() ==
-            posting_count * sindi_datacell_utils::GetValueCodeSize(sparse_value_quant_type_),
-        "immutable SINDI value payload size does not match offsets");
+    CHECK_ARGUMENT(window.value_payloads.size() == posting_count * value_code_size_,
+                   "immutable SINDI value payload size does not match offsets");
     for (const auto id : window.id_payloads) {
         CHECK_ARGUMENT(id < window_size_,
                        "immutable SINDI window-local doc id exceeds window size");
@@ -575,7 +587,7 @@ ImmutableSindiTermDataCell::DeserializeTermLayout(StreamReader& reader,
                    "SINDI V2 term payload exceeds stream length");
     const auto payload_start = reader.GetCursor();
     sindi_datacell_utils::ValidateTermDict(term_dict, term_payload_size);
-    const auto value_code_size = sindi_datacell_utils::GetValueCodeSize(sparse_value_quant_type_);
+    const auto value_code_size = value_code_size_;
 
     Vector<uint64_t> window_term_counts(window_count, 0, allocator_);
     Vector<uint32_t> window_posting_counts(window_count, 0, allocator_);

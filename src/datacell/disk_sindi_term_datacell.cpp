@@ -376,16 +376,16 @@ DiskSindiTermDataCell<IOTmpl>::InsertHeapByDistsKnn(float* dists,
 
 template <typename IOTmpl>
 void
-DiskSindiTermDataCell<IOTmpl>::InsertHeapByWindow(
-    float* dists,
-    uint32_t window_id,
-    const SparseTermComputerPtr& computer,
-    MaxHeap& heap,
-    const InnerSearchParam& param,
-    uint32_t offset_id,
-    InnerSearchMode mode,
-    bool with_filter,
-    const QueryTermBuffers& query_term_buffers) const {
+DiskSindiTermDataCell<IOTmpl>::InsertHeapByWindow(float* dists,
+                                                  uint32_t window_id,
+                                                  const SparseTermComputerPtr& computer,
+                                                  MaxHeap& heap,
+                                                  const InnerSearchParam& param,
+                                                  uint32_t offset_id,
+                                                  InnerSearchMode mode,
+                                                  bool with_filter,
+                                                  const SindiQueryContext& query_context) const {
+    const auto& query_term_buffers = query_context.query_term_buffers;
     if (mode == InnerSearchMode::KNN_SEARCH) {
         this->InsertHeapByWindowKnn(
             dists, window_id, computer, heap, param, offset_id, with_filter, query_term_buffers);
@@ -454,7 +454,8 @@ DiskSindiTermDataCell<IOTmpl>::QueryWindow(float* dists,
                                            uint32_t window_id,
                                            const SparseTermComputerPtr& computer,
                                            bool use_term_lists_heap_insert,
-                                           const QueryTermBuffers& query_term_buffers) const {
+                                           SindiQueryContext& query_context) const {
+    const auto& query_term_buffers = query_context.query_term_buffers;
     std::shared_lock lock(term_buffers_mutex_);
     while (computer->HasNextTerm()) {
         auto it = computer->NextTermIter();

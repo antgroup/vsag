@@ -88,7 +88,7 @@ public:
                 uint32_t window_id,
                 const SparseTermComputerPtr& computer,
                 bool use_term_lists_heap_insert,
-                const QueryTermBuffers& query_term_buffers) const override;
+                SindiQueryContext& query_context) const override;
 
     void
     InsertHeapByWindow(float* dists,
@@ -99,7 +99,7 @@ public:
                        uint32_t offset_id,
                        InnerSearchMode mode,
                        bool with_filter,
-                       const QueryTermBuffers& query_term_buffers) const override;
+                       const SindiQueryContext& query_context) const override;
 
     void
     InsertHeapByDists(float* dists,

@@ -1067,7 +1067,7 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
     auto selected_buckets =
         reasoning_ctx != nullptr ? std::make_unique<Vector<BucketIdType>>(search_allocator)
                                  : nullptr;
-    const QueryTermBuffers query_term_buffers(search_allocator);
+    SindiQueryContext query_context(search_allocator);
     for (auto cur = min_window_id; cur <= max_window_id; cur++) {
         const auto window_start_id = static_cast<uint32_t>(cur) * window_size_;
         // compute
@@ -1075,7 +1075,7 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
                                     static_cast<uint32_t>(cur),
                                     computer,
                                     use_term_lists_heap_insert,
-                                    query_term_buffers);
+                                    query_context);
 
         if (reasoning_ctx != nullptr) {
             selected_buckets->push_back(static_cast<BucketIdType>(cur));
@@ -1102,7 +1102,7 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
                                                window_start_id,
                                                mode,
                                                inner_param.is_inner_id_allowed != nullptr,
-                                               query_term_buffers);
+                                               query_context);
         } else {
             const auto remaining_count =
                 static_cast<uint64_t>(cur_element_count_.load()) - window_start_id;

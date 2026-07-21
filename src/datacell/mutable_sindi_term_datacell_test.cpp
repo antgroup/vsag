@@ -29,8 +29,8 @@ QueryFirstWindow(const MutableSindiTermDataCellPtr& data_cell,
                  float* dists,
                  const SparseTermComputerPtr& computer,
                  Allocator* allocator) {
-    QueryTermBuffers query_term_buffers(allocator);
-    data_cell->QueryWindow(dists, 0, computer, false, query_term_buffers);
+    SindiQueryContext query_context(allocator);
+    data_cell->QueryWindow(dists, 0, computer, false, query_context);
 }
 
 }  // namespace
