@@ -28,6 +28,19 @@
 
 namespace fixtures {
 
+class RejectExtraInfoFilter : public vsag::Filter {
+public:
+    bool
+    CheckValid(int64_t) const override {
+        return true;
+    }
+
+    bool
+    CheckValid(const char*) const override {
+        return false;
+    }
+};
+
 class HGraphTestResource {
 public:
     std::vector<int> dims;
@@ -1826,6 +1839,16 @@ TestHGraphWithExtraInfo(const fixtures::HGraphTestIndexPtr& test_index,
                 TestIndex::TestKnnSearch(index, dataset, search_param, recall, true);
                 TestIndex::TestKnnSearchIter(index, dataset, search_param, recall, true);
                 TestIndex::TestRangeSearch(index, dataset, search_param, recall, 10, true);
+                auto query = vsag::Dataset::Make();
+                query->NumElements(1)
+                    ->Dim(dim)
+                    ->Float32Vectors(dataset->query_->GetFloat32Vectors())
+                    ->Owner(false);
+                auto filter = std::make_shared<RejectExtraInfoFilter>();
+                auto result = index->RangeSearch(
+                    query, std::numeric_limits<float>::max(), search_ex_filter_param, filter);
+                REQUIRE(result.has_value());
+                REQUIRE(result.value()->GetDim() == 0);
                 TestIndex::TestGetExtraInfoById(index, dataset, extra_info_size);
                 TestIndex::TestKnnSearchExFilter(
                     index, dataset, search_ex_filter_param, recall, true);

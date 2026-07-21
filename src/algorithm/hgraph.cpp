@@ -524,9 +524,14 @@ HGraph::RangeSearch(const DatasetPtr& query,
                     const std::string& parameters,
                     const FilterPtr& filter,
                     int64_t limited_size) const {
-    std::shared_ptr<InnerIdWrapperFilter> ft = nullptr;
+    auto params = HGraphSearchParameters::FromJson(parameters);
+    FilterPtr ft = nullptr;
     if (filter != nullptr) {
-        ft = std::make_shared<InnerIdWrapperFilter>(filter, *this->label_table_);
+        if (params.use_extra_info_filter && this->extra_infos_ != nullptr) {
+            ft = std::make_shared<ExtraInfoWrapperFilter>(filter, this->extra_infos_);
+        } else {
+            ft = std::make_shared<InnerIdWrapperFilter>(filter, *this->label_table_);
+        }
     }
     int64_t query_dim = query->GetDim();
     if (data_type_ != DataTypes::DATA_TYPE_SPARSE) {
@@ -559,8 +564,6 @@ HGraph::RangeSearch(const DatasetPtr& query,
             raw_query, this->route_graphs_[i], this->basic_flatten_codes_, search_param);
         search_param.ep = result->Top().second;
     }
-
-    auto params = HGraphSearchParameters::FromJson(parameters);
 
     CHECK_ARGUMENT((1 <= params.ef_search) and (params.ef_search <= 1000),  // NOLINT
                    fmt::format("ef_search({}) must in range[1, 1000]", params.ef_search));
