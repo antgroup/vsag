@@ -579,6 +579,10 @@ HGraph::RangeSearch(const DatasetPtr& query,
         this->reorder(raw_query, this->high_precise_codes_, search_result, limited_size);
     }
 
+    while (not search_result->Empty() && search_result->Top().first > radius + THRESHOLD_ERROR) {
+        search_result->Pop();
+    }
+
     if (limited_size > 0) {
         while (search_result->Size() > limited_size) {
             search_result->Pop();
