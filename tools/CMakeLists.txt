@@ -17,5 +17,4 @@
 add_subdirectory (eval)
 add_subdirectory (check_compatibility)
 add_subdirectory (analyze_index)
-add_subdirectory (deserialize_only)
 add_subdirectory (visualize_index)

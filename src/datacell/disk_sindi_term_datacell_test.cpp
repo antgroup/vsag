@@ -53,8 +53,7 @@ TEST_CASE("DiskSindiTermDataCell restores payload io", "[ut][DiskSindiTermDataCe
     vector.ids_ = ids;
     vector.vals_ = vals;
     auto source =
-        std::make_shared<MutableSindiTermDataCell>(1.0F,
-                                                   term_id_limit,
+        std::make_shared<MutableSindiTermDataCell>(term_id_limit,
                                                    window_size,
                                                    common_param.allocator_.get(),
                                                    SparseValueQuantizationType::FP32,
@@ -78,8 +77,7 @@ TEST_CASE("DiskSindiTermDataCell restores payload io", "[ut][DiskSindiTermDataCe
     REQUIRE(writer.GetCursor() == payload_size_offset + sizeof(uint64_t) + payload_size);
     stream.seekg(0, std::ios::beg);
 
-    auto restored = DiskSindiTermDataCellInterface::MakeInstance(1.0F,
-                                                                 term_id_limit,
+    auto restored = DiskSindiTermDataCellInterface::MakeInstance(term_id_limit,
                                                                  common_param.allocator_.get(),
                                                                  false,
                                                                  nullptr,
@@ -108,6 +106,102 @@ TEST_CASE("DiskSindiTermDataCell restores payload io", "[ut][DiskSindiTermDataCe
     REQUIRE(restored_value == target_value);
 }
 
+#if HAVE_LIBAIO
+TEST_CASE("DiskSindiTermDataCell batch loads async term payloads", "[ut][DiskSindiTermDataCell]") {
+    fixtures::TempDir dir("disk_sindi_async_term_multiread");
+    constexpr uint32_t term_id_limit = 32;
+    constexpr uint32_t window_size = 4;
+
+    IndexCommonParam common_param;
+    common_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
+    auto io_param = IOParameter::GetIOParameterByJson(JsonType::Parse(
+        fmt::format(R"({{"type":"async_io","file_path":"{}"}})", dir.GenerateRandomFile(true))));
+
+    auto source =
+        std::make_shared<MutableSindiTermDataCell>(term_id_limit,
+                                                   window_size,
+                                                   common_param.allocator_.get(),
+                                                   SparseValueQuantizationType::FP32,
+                                                   std::make_shared<QuantizationParams>());
+    uint32_t first_ids[] = {2, 5};
+    float first_values[] = {1.25F, 0.5F};
+    SparseVector first{2, first_ids, first_values};
+    source->InsertVector(first, 1);
+
+    uint32_t second_ids[] = {2, 9};
+    float second_values[] = {2.5F, 3.0F};
+    SparseVector second{2, second_ids, second_values};
+    source->InsertVector(second, 6);
+
+    uint32_t third_ids[] = {5, 9};
+    float third_values[] = {4.0F, 5.0F};
+    SparseVector third{2, third_ids, third_values};
+    source->InsertVector(third, 10);
+    source->Finalize();
+
+    std::stringstream stream;
+    IOStreamWriter writer(stream);
+    source->SerializeTermLayout(writer, source->GetTermDictCount());
+    stream.seekg(0, std::ios::beg);
+
+    auto restored = DiskSindiTermDataCellInterface::MakeInstance(term_id_limit,
+                                                                 common_param.allocator_.get(),
+                                                                 false,
+                                                                 nullptr,
+                                                                 window_size,
+                                                                 io_param,
+                                                                 common_param);
+    IOStreamReader reader(stream);
+    restored->DeserializeTermLayout(reader, 3, 11);
+
+    Vector<uint32_t> query_terms(common_param.allocator_.get());
+    query_terms = {2, 5, 7, 9, term_id_limit + 1};
+    const auto buffers = restored->LoadQueryTermBuffers(query_terms);
+
+    REQUIRE(buffers.size() == 3);
+    REQUIRE(buffers.count(7) == 0);
+    REQUIRE(buffers.count(term_id_limit + 1) == 0);
+
+    const auto& term_two = buffers.at(2);
+    REQUIRE(term_two.window_offsets.size() == 4);
+    REQUIRE(term_two.window_offsets[0] == 0);
+    REQUIRE(term_two.window_offsets[1] == 1);
+    REQUIRE(term_two.window_offsets[2] == 2);
+    REQUIRE(term_two.window_offsets[3] == 2);
+    REQUIRE(term_two.IdsData()[0] == 1);
+    REQUIRE(term_two.IdsData()[1] == 2);
+
+    const auto& term_five = buffers.at(5);
+    REQUIRE(term_five.window_offsets.size() == 4);
+    REQUIRE(term_five.window_offsets[0] == 0);
+    REQUIRE(term_five.window_offsets[1] == 1);
+    REQUIRE(term_five.window_offsets[2] == 1);
+    REQUIRE(term_five.window_offsets[3] == 2);
+    REQUIRE(term_five.IdsData()[0] == 1);
+    REQUIRE(term_five.IdsData()[1] == 2);
+
+    const auto& term_nine = buffers.at(9);
+    REQUIRE(term_nine.window_offsets.size() == 4);
+    REQUIRE(term_nine.window_offsets[0] == 0);
+    REQUIRE(term_nine.window_offsets[1] == 0);
+    REQUIRE(term_nine.window_offsets[2] == 1);
+    REQUIRE(term_nine.window_offsets[3] == 2);
+    REQUIRE(term_nine.IdsData()[0] == 2);
+    REQUIRE(term_nine.IdsData()[1] == 2);
+
+    float values[2]{};
+    std::memcpy(values, term_two.ValuesData(), sizeof(values));
+    REQUIRE(values[0] == 1.25F);
+    REQUIRE(values[1] == 2.5F);
+    std::memcpy(values, term_five.ValuesData(), sizeof(values));
+    REQUIRE(values[0] == 0.5F);
+    REQUIRE(values[1] == 4.0F);
+    std::memcpy(values, term_nine.ValuesData(), sizeof(values));
+    REQUIRE(values[0] == 3.0F);
+    REQUIRE(values[1] == 5.0F);
+}
+#endif
+
 TEST_CASE("DiskSindiTermDataCell expands sparse window metadata", "[ut][DiskSindiTermDataCell]") {
     fixtures::TempDir dir("disk_sindi_sparse_window_metadata");
     constexpr uint32_t term_id_limit = 32;
@@ -119,8 +213,7 @@ TEST_CASE("DiskSindiTermDataCell expands sparse window metadata", "[ut][DiskSind
     auto io_param = IOParameter::GetIOParameterByJson(JsonType::Parse(
         fmt::format(R"({{"type":"mmap_io","file_path":"{}"}})", dir.GenerateRandomFile(true))));
     auto source =
-        std::make_shared<MutableSindiTermDataCell>(1.0F,
-                                                   term_id_limit,
+        std::make_shared<MutableSindiTermDataCell>(term_id_limit,
                                                    window_size,
                                                    common_param.allocator_.get(),
                                                    SparseValueQuantizationType::FP32,
@@ -169,8 +262,7 @@ TEST_CASE("DiskSindiTermDataCell expands sparse window metadata", "[ut][DiskSind
     REQUIRE(second.window_id == 2);
     REQUIRE(second.posting_count == 1);
 
-    auto restored = DiskSindiTermDataCellInterface::MakeInstance(1.0F,
-                                                                 term_id_limit,
+    auto restored = DiskSindiTermDataCellInterface::MakeInstance(term_id_limit,
                                                                  common_param.allocator_.get(),
                                                                  false,
                                                                  nullptr,
@@ -202,6 +294,6 @@ TEST_CASE("DiskSindiTermDataCell rejects memory io", "[ut][DiskSindiTermDataCell
 
     REQUIRE_THROWS_WITH(
         DiskSindiTermDataCellInterface::MakeInstance(
-            1.0F, 10, common_param.allocator_.get(), false, nullptr, 10000, io_param, common_param),
+            10, common_param.allocator_.get(), false, nullptr, 10000, io_param, common_param),
         Catch::Matchers::ContainsSubstring("unsupported SINDIV2 term io type"));
 }

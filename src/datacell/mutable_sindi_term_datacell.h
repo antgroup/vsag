@@ -42,14 +42,12 @@ struct MutableSINDIWindow {
 DEFINE_POINTER(MutableSindiTermDataCell);
 class MutableSindiTermDataCell : public SindiTermDataCell {
 public:
-    MutableSindiTermDataCell(float doc_retain_ratio,
-                             uint32_t term_id_limit,
+    MutableSindiTermDataCell(uint32_t term_id_limit,
                              uint32_t window_size,
                              Allocator* allocator,
                              SparseValueQuantizationType sparse_value_quant_type,
                              std::shared_ptr<QuantizationParams> quantization_params)
         : term_id_limit_(term_id_limit),
-          doc_retain_ratio_(doc_retain_ratio),
           allocator_(allocator),
           sparse_value_quant_type_(sparse_value_quant_type),
           quantization_params_(std::move(quantization_params)),
@@ -145,9 +143,6 @@ public:
                       MaxHeap& heap,
                       const InnerSearchParam& param,
                       uint32_t offset_id) const;
-
-    void
-    DocPrune(Vector<std::pair<uint32_t, float>>& sorted_base) const;
 
     // doc_id is interpreted in the coordinate space owned by this data cell.
     void
@@ -256,8 +251,6 @@ private:
 
 public:
     uint32_t term_id_limit_{0};
-
-    float doc_retain_ratio_{0};
 
     Allocator* const allocator_{nullptr};
 

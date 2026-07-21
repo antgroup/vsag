@@ -13,6 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#define VSAG_SINDI_V2_TEST_ACCESS
 #include "sindi_v2.h"
 
 #include <fmt/format.h>
@@ -30,6 +31,28 @@
 #include "unittest.h"
 
 using namespace vsag;
+
+namespace vsag {
+
+class SINDIV2TestAccess {
+public:
+    static uint32_t
+    MapperSize(const SINDIV2& index) {
+        return index.term_id_mapper_ == nullptr ? 0 : index.term_id_mapper_->Size();
+    }
+
+    static std::optional<uint32_t>
+    TryMap(const SINDIV2& index, uint32_t term) {
+        return index.term_id_mapper_->TryMap(term);
+    }
+
+    static QuantizationParams
+    QuantizationParamsValue(const SINDIV2& index) {
+        return *index.quantization_params_;
+    }
+};
+
+}  // namespace vsag
 
 namespace {
 
@@ -659,4 +682,114 @@ TEST_CASE("SINDIV2 empty index roundtrip", "[ut][SINDIV2]") {
     })";
     REQUIRE(loaded.KnnSearch(query, 1, search_param, nullptr)->GetDim() == 0);
     REQUIRE(loaded.RangeSearch(query, 1.0F, search_param, nullptr)->GetDim() == 0);
+}
+
+TEST_CASE("SINDIV2 immutable memory load keeps pruned remap dictionary consistent",
+          "[ut][SINDIV2]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    common_param.dim_ = 2;
+
+    uint32_t term_ids[] = {200, 100};
+    float term_values[] = {0.1F, 1.0F};
+    SparseVector sparse_vector{2, term_ids, term_values};
+    int64_t label = 7;
+    auto base = Dataset::Make();
+    base->NumElements(1)->SparseVectors(&sparse_vector)->Ids(&label)->Owner(false);
+
+    auto build_parameter = std::make_shared<SINDIV2Parameter>();
+    build_parameter->FromJson(JsonType::Parse(R"({
+        "term_id_limit": 16,
+        "window_size": 10000,
+        "doc_prune_ratio": 0.6,
+        "use_quantization": true,
+        "use_reorder": true,
+        "remap_term_ids": true,
+        "immutable": true,
+        "term_io": {"type": "memory_io"},
+        "rerank_io": {"type": "block_memory_io"}
+    })"));
+    SINDIV2 built(build_parameter, common_param);
+    REQUIRE(built.Build(base).empty());
+    REQUIRE(SINDIV2TestAccess::MapperSize(built) == 1);
+    REQUIRE(SINDIV2TestAccess::TryMap(built, 100).has_value());
+    REQUIRE_FALSE(SINDIV2TestAccess::TryMap(built, 200).has_value());
+    const auto quantization = SINDIV2TestAccess::QuantizationParamsValue(built);
+    REQUIRE(std::abs(quantization.min_val - 1.0F) < 1e-6F);
+    REQUIRE(std::abs(quantization.max_val - 1.0F) < 1e-6F);
+
+    std::stringstream stream;
+    IOStreamWriter writer(stream);
+    built.Serialize(writer);
+
+    fixtures::TempDir dir("sindi_v2_prune_before_remap");
+    const auto rerank_path = dir.GenerateRandomFile(false);
+    auto load_parameter = std::make_shared<SINDIV2Parameter>();
+    load_parameter->FromJson(JsonType::Parse(fmt::format(R"({{
+        "term_id_limit": 16,
+        "window_size": 10000,
+        "doc_prune_ratio": 0.6,
+        "use_quantization": true,
+        "use_reorder": true,
+        "remap_term_ids": true,
+        "immutable": true,
+        "term_io": {{"type": "memory_io"}},
+        "rerank_io": {{"type": "async_io", "file_path": "{}"}}
+    }})",
+                                                         rerank_path)));
+    SINDIV2 loaded(load_parameter, common_param);
+    stream.seekg(0, std::ios::beg);
+    REQUIRE_NOTHROW(loaded.Deserialize(stream));
+    REQUIRE(SINDIV2TestAccess::MapperSize(loaded) == 1);
+
+    float query_value = 1.0F;
+    uint32_t missing_term = 200;
+    SparseVector sparse_query{1, &missing_term, &query_value};
+    auto query = Dataset::Make();
+    query->NumElements(1)->SparseVectors(&sparse_query)->Owner(false);
+    REQUIRE(std::abs(loaded.CalcDistanceById(query, label, false) - 1.0F) < 1e-6F);
+
+    uint32_t retained_term = 100;
+    sparse_query.ids_ = &retained_term;
+    REQUIRE(std::abs(loaded.CalcDistanceById(query, label, false)) < 1e-6F);
+}
+
+TEST_CASE("SINDIV2 validates terms before document pruning", "[ut][SINDIV2]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    common_param.dim_ = 2;
+
+    uint32_t term_ids[] = {17, 3};
+    float term_values[] = {0.01F, 1.0F};
+    SparseVector sparse_vector{2, term_ids, term_values};
+    int64_t label = 7;
+    auto base = Dataset::Make();
+    base->NumElements(1)->SparseVectors(&sparse_vector)->Ids(&label)->Owner(false);
+
+    for (const bool immutable : {false, true}) {
+        DYNAMIC_SECTION("immutable=" << immutable) {
+            auto parameter = std::make_shared<SINDIV2Parameter>();
+            parameter->FromJson(JsonType::Parse(fmt::format(R"({{
+                "term_id_limit": 16,
+                "window_size": 10000,
+                "doc_prune_ratio": 0.6,
+                "use_quantization": false,
+                "use_reorder": false,
+                "remap_term_ids": false,
+                "immutable": {},
+                "term_io": {{"type": "memory_io"}},
+                "rerank_io": {{"type": "block_memory_io"}}
+            }})",
+                                                            immutable)));
+            SINDIV2 index(parameter, common_param);
+            const auto failed_ids = index.Build(base);
+            REQUIRE(failed_ids.size() == 1);
+            REQUIRE(failed_ids[0] == label);
+            REQUIRE(index.GetNumElements() == 0);
+        }
+    }
 }

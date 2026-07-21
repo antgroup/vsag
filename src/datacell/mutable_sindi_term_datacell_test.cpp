@@ -39,8 +39,7 @@ TEST_CASE("MutableSindiTermDataCell uses caller document id coordinates",
           "[ut][MutableSindiTermDataCell]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     auto data_cell =
-        std::make_shared<MutableSindiTermDataCell>(1.0F,
-                                                   16,
+        std::make_shared<MutableSindiTermDataCell>(16,
                                                    4,
                                                    allocator.get(),
                                                    SparseValueQuantizationType::FP32,
@@ -61,11 +60,11 @@ TEST_CASE("MutableSindiTermDataCell uses caller document id coordinates",
     REQUIRE(data_cell->GetWindow(1).term_ids_[3]->front() == 1);
 }
 
-TEST_CASE("MutableSindiTermDataCell resizes for retained terms after pruning",
+TEST_CASE("MutableSindiTermDataCell inserts every provided term",
           "[ut][MutableSindiTermDataCell]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     auto data_cell = std::make_shared<MutableSindiTermDataCell>(
-        0.5F, 2000, 100, allocator.get(), SparseValueQuantizationType::FP32, nullptr);
+        2000, 100, allocator.get(), SparseValueQuantizationType::FP32, nullptr);
 
     uint32_t term_ids[] = {1000, 3};
     float term_values[] = {0.01F, 1.0F};
@@ -73,7 +72,8 @@ TEST_CASE("MutableSindiTermDataCell resizes for retained terms after pruning",
     data_cell->InsertVector(vector, 0);
 
     const auto& window = data_cell->GetWindow(0);
-    REQUIRE(window.term_capacity_ == 4);
+    REQUIRE(window.term_capacity_ == 1001);
+    REQUIRE(window.term_sizes_[1000] == 1);
     REQUIRE(window.term_sizes_[3] == 1);
 }
 
@@ -120,20 +120,16 @@ TEST_CASE("MutableSindiTermDataCell Basic Test", "[ut][MutableSindiTermDataCell]
 
     // prepare data_cell
     float query_prune_ratio = 0.0;
-    float doc_retain_ratio = 0.5;
     float term_prune_ratio = 0.0;
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
 
     // disable quantization for this basic test
     std::shared_ptr<QuantizationParams> q_params = nullptr;
-    auto data_cell = std::make_shared<MutableSindiTermDataCell>(doc_retain_ratio,
-                                                                DEFAULT_TERM_ID_LIMIT,
+    auto data_cell = std::make_shared<MutableSindiTermDataCell>(DEFAULT_TERM_ID_LIMIT,
                                                                 DEFAULT_WINDOW_SIZE,
                                                                 allocator.get(),
                                                                 SparseValueQuantizationType::FP32,
                                                                 q_params);
-    REQUIRE(std::abs(data_cell->doc_retain_ratio_ - doc_retain_ratio) < 1e-3);
-
     // test factory computer
     SINDISearchParameter search_params;
     search_params.term_prune_ratio = term_prune_ratio;
@@ -143,7 +139,7 @@ TEST_CASE("MutableSindiTermDataCell Basic Test", "[ut][MutableSindiTermDataCell]
 
     // test insert
     auto exp_id_size = 19;
-    std::vector<uint32_t> exp_size = {0, 0, 0, 0, 0, 0, 0, 2, 3, 4, 4, 4, 4, 5, 5, 4, 3, 2, 1};
+    std::vector<uint32_t> exp_size = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1};
     for (auto i = 0; i < count_base; i++) {
         data_cell->InsertVector(sparse_vectors[i], i);
     }
@@ -169,18 +165,10 @@ TEST_CASE("MutableSindiTermDataCell Basic Test", "[ut][MutableSindiTermDataCell]
     // Calculate expected distances programmatically to match the test logic
     std::vector<float> exp_dists(count_base, 0.0f);
     for (int i = 0; i < count_base; ++i) {
-        // 1. Get the original vector and sort it
         const auto& vec = sparse_vectors[i];
-        Vector<std::pair<uint32_t, float>> sorted_base(allocator.get());
-        sort_sparse_vector(vec, sorted_base);
-
-        // 2. Call the actual DocPrune function
-        data_cell->DocPrune(sorted_base);
-
-        // 3. Simulate quantization and inner product calculation
         float total_dist = 0.0f;
-        for (const auto& pair : sorted_base) {
-            float val = pair.second;
+        for (uint32_t term = 0; term < vec.len_; ++term) {
+            float val = vec.vals_[term];
             float query_val = -1.0f;  // The computer uses -1.0 as query value
             total_dist += query_val * val;
         }
@@ -320,8 +308,7 @@ TEST_CASE("MutableSindiTermDataCell Encode/Decode Test", "[ut][MutableSindiTermD
     q_params->min_val = min_val;
     q_params->max_val = max_val;
     q_params->diff = max_val - min_val;
-    auto data_cell = std::make_shared<MutableSindiTermDataCell>(1.0f,
-                                                                DEFAULT_TERM_ID_LIMIT,
+    auto data_cell = std::make_shared<MutableSindiTermDataCell>(DEFAULT_TERM_ID_LIMIT,
                                                                 DEFAULT_WINDOW_SIZE,
                                                                 allocator.get(),
                                                                 SparseValueQuantizationType::SQ8,
@@ -364,8 +351,7 @@ TEST_CASE("MutableSindiTermDataCell FP16 Roundtrip Test", "[ut][MutableSindiTerm
     sv.ids_ = ids.data();
     sv.vals_ = vals.data();
 
-    auto data_cell = std::make_shared<MutableSindiTermDataCell>(1.0F,
-                                                                DEFAULT_TERM_ID_LIMIT,
+    auto data_cell = std::make_shared<MutableSindiTermDataCell>(DEFAULT_TERM_ID_LIMIT,
                                                                 DEFAULT_WINDOW_SIZE,
                                                                 allocator.get(),
                                                                 SparseValueQuantizationType::FP16,
@@ -404,8 +390,7 @@ TEST_CASE("MutableSindiTermDataCell FP16 Roundtrip Test", "[ut][MutableSindiTerm
 
 TEST_CASE("MutableSindiTermDataCell Compact Memory Usage", "[ut][MutableSindiTermDataCell]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    auto data_cell = std::make_shared<MutableSindiTermDataCell>(1.0F,
-                                                                DEFAULT_TERM_ID_LIMIT,
+    auto data_cell = std::make_shared<MutableSindiTermDataCell>(DEFAULT_TERM_ID_LIMIT,
                                                                 DEFAULT_WINDOW_SIZE,
                                                                 allocator.get(),
                                                                 SparseValueQuantizationType::FP32,
@@ -440,8 +425,7 @@ TEST_CASE("MutableSindiTermDataCell Compact Memory Usage", "[ut][MutableSindiTer
 TEST_CASE("MutableSindiTermDataCell Deserialize Compacts Capacity",
           "[ut][MutableSindiTermDataCell]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    auto data_cell = std::make_shared<MutableSindiTermDataCell>(1.0F,
-                                                                DEFAULT_TERM_ID_LIMIT,
+    auto data_cell = std::make_shared<MutableSindiTermDataCell>(DEFAULT_TERM_ID_LIMIT,
                                                                 DEFAULT_WINDOW_SIZE,
                                                                 allocator.get(),
                                                                 SparseValueQuantizationType::FP32,
@@ -460,8 +444,7 @@ TEST_CASE("MutableSindiTermDataCell Deserialize Compacts Capacity",
     IOStreamWriter writer(ss);
     data_cell->SerializeWindows(writer);
 
-    MutableSindiTermDataCell restored(1.0F,
-                                      DEFAULT_TERM_ID_LIMIT,
+    MutableSindiTermDataCell restored(DEFAULT_TERM_ID_LIMIT,
                                       DEFAULT_WINDOW_SIZE,
                                       allocator.get(),
                                       SparseValueQuantizationType::FP32,
@@ -484,8 +467,7 @@ TEST_CASE("MutableSindiTermDataCell Deserialize Clears Stale Posting Lists",
         return sparse_vector;
     };
 
-    MutableSindiTermDataCell stale(1.0F,
-                                   DEFAULT_TERM_ID_LIMIT,
+    MutableSindiTermDataCell stale(DEFAULT_TERM_ID_LIMIT,
                                    DEFAULT_WINDOW_SIZE,
                                    allocator.get(),
                                    SparseValueQuantizationType::FP32,
@@ -495,8 +477,7 @@ TEST_CASE("MutableSindiTermDataCell Deserialize Clears Stale Posting Lists",
     auto stale_vector = make_sparse_vector(stale_ids, stale_vals);
     stale.InsertVector(stale_vector, 42);
 
-    MutableSindiTermDataCell source(1.0F,
-                                    DEFAULT_TERM_ID_LIMIT,
+    MutableSindiTermDataCell source(DEFAULT_TERM_ID_LIMIT,
                                     DEFAULT_WINDOW_SIZE,
                                     allocator.get(),
                                     SparseValueQuantizationType::FP32,
@@ -545,8 +526,7 @@ TEST_CASE("MutableSindiTermDataCell Last Term Test", "[ut][MutableSindiTermDataC
         q_params->max_val = 0.1f;
         q_params->diff = q_params->max_val - q_params->min_val;
         auto data_cell =
-            std::make_shared<MutableSindiTermDataCell>(1,
-                                                       DEFAULT_TERM_ID_LIMIT,
+            std::make_shared<MutableSindiTermDataCell>(DEFAULT_TERM_ID_LIMIT,
                                                        DEFAULT_WINDOW_SIZE,
                                                        allocator.get(),
                                                        SparseValueQuantizationType::FP32,

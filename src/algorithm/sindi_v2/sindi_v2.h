@@ -136,6 +136,10 @@ public:
     SetIO(const std::shared_ptr<Reader> reader) override;
 
 private:
+#ifdef VSAG_SINDI_V2_TEST_ACCESS
+    friend class SINDIV2TestAccess;
+#endif
+
     template <InnerSearchMode mode>
     DatasetPtr
     search_impl(const SparseTermComputerPtr& computer,
@@ -150,6 +154,15 @@ private:
 
     void
     cal_memory_usage();
+
+    SparseVector
+    sort_and_prune_sparse_vector_for_build(const SparseVector& input,
+                                           Vector<std::pair<uint32_t, float>>& sorted_terms,
+                                           Vector<uint32_t>& pruned_ids,
+                                           Vector<float>& pruned_vals) const;
+
+    void
+    init_quantization_params_from_pruned_vectors(const DatasetPtr& base);
 
     SparseVector
     remap_sparse_vector_for_build(const SparseVector& input, Vector<uint32_t>& tmp_ids);

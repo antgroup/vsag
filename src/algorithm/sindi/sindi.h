@@ -241,6 +241,15 @@ private:
     void
     flush_immutable_staging();
 
+    SparseVector
+    sort_and_prune_sparse_vector_for_build(const SparseVector& input,
+                                           Vector<std::pair<uint32_t, float>>& sorted_terms,
+                                           Vector<uint32_t>& pruned_ids,
+                                           Vector<float>& pruned_vals) const;
+
+    void
+    init_quantization_params_from_pruned_vectors(const DatasetPtr& base);
+
     /// Recalculate and cache the memory-usage counter.
     void
     cal_memory_usage();

@@ -58,6 +58,21 @@ public:
                                ImmutableSINDIWindow& window) {
         index.deserialize_immutable_window(reader, window);
     }
+
+    static uint32_t
+    MapperSize(const SINDI& index) {
+        return index.term_id_mapper_ == nullptr ? 0 : index.term_id_mapper_->Size();
+    }
+
+    static std::optional<uint32_t>
+    TryMap(const SINDI& index, uint32_t term) {
+        return index.term_id_mapper_->TryMap(term);
+    }
+
+    static QuantizationParams
+    QuantizationParamsValue(const SINDI& index) {
+        return *index.quantization_params_;
+    }
 };
 
 }  // namespace vsag
@@ -1839,8 +1854,8 @@ TEST_CASE("SINDI Remap Memory Comparison - MD5 Vocabulary", "[ut][SINDI]") {
 
     // Simulate MD5 hash-based tokenizer: term IDs scattered across uint32 range
     // Actual unique terms ~5M, but raw IDs could be anywhere in [0, 2^32)
-    // Without remap: term_id_limit must be >= max_raw_id (impossible if > 10M)
-    // With remap: term_id_limit = 5M (fits within 10M limit)
+    // Without remap: term_id_limit must be >= max_raw_id (impossible if > 50M)
+    // With remap: term_id_limit = 5M (fits within the 50M limit)
 
     // We can't actually test with 5M terms (too slow in QEMU), so we use
     // a scaled-down version that demonstrates the same principle:
@@ -1963,5 +1978,94 @@ TEST_CASE("SINDI Remap Memory Comparison - MD5 Vocabulary", "[ut][SINDI]") {
     for (auto& item : sv_base) {
         delete[] item.vals_;
         delete[] item.ids_;
+    }
+}
+
+TEST_CASE("SINDI prunes before remapping and calibrates SQ8 from retained values", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    common_param.dim_ = 2;
+
+    uint32_t term_ids[] = {200, 100};
+    float term_values[] = {0.1F, 1.0F};
+    SparseVector sparse_vector{2, term_ids, term_values};
+    int64_t label = 7;
+    auto base = Dataset::Make();
+    base->NumElements(1)->SparseVectors(&sparse_vector)->Ids(&label)->Owner(false);
+
+    for (const bool immutable : {false, true}) {
+        DYNAMIC_SECTION("immutable=" << immutable) {
+            auto parameter = std::make_shared<SINDIParameter>();
+            parameter->FromJson(JsonType::Parse(fmt::format(R"({{
+                "term_id_limit": 16,
+                "window_size": 10000,
+                "doc_prune_ratio": 0.6,
+                "use_quantization": true,
+                "use_reorder": false,
+                "remap_term_ids": true,
+                "immutable": {}
+            }})",
+                                                            immutable)));
+            SINDI index(parameter, common_param);
+            REQUIRE(index.Build(base).empty());
+            REQUIRE(SINDITestAccess::MapperSize(index) == 1);
+            REQUIRE(SINDITestAccess::TryMap(index, 100).has_value());
+            REQUIRE_FALSE(SINDITestAccess::TryMap(index, 200).has_value());
+
+            const auto quantization = SINDITestAccess::QuantizationParamsValue(index);
+            REQUIRE(std::abs(quantization.min_val - 1.0F) < 1e-6F);
+            REQUIRE(std::abs(quantization.max_val - 1.0F) < 1e-6F);
+            REQUIRE(std::abs(quantization.diff - 1.0F) < 1e-6F);
+
+            uint32_t missing_term = 200;
+            float query_value = 1.0F;
+            SparseVector missing_query{1, &missing_term, &query_value};
+            auto query = Dataset::Make();
+            query->NumElements(1)->SparseVectors(&missing_query)->Owner(false);
+            REQUIRE(std::abs(index.CalcDistanceById(query, label, false) - 1.0F) < 1e-6F);
+
+            uint32_t retained_term = 100;
+            SparseVector retained_query{1, &retained_term, &query_value};
+            query->SparseVectors(&retained_query);
+            REQUIRE(std::abs(index.CalcDistanceById(query, label, false)) < 1e-6F);
+        }
+    }
+}
+
+TEST_CASE("SINDI validates terms before document pruning", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    common_param.dim_ = 2;
+
+    uint32_t term_ids[] = {17, 3};
+    float term_values[] = {0.01F, 1.0F};
+    SparseVector sparse_vector{2, term_ids, term_values};
+    int64_t label = 7;
+    auto base = Dataset::Make();
+    base->NumElements(1)->SparseVectors(&sparse_vector)->Ids(&label)->Owner(false);
+
+    for (const bool immutable : {false, true}) {
+        DYNAMIC_SECTION("immutable=" << immutable) {
+            auto parameter = std::make_shared<SINDIParameter>();
+            parameter->FromJson(JsonType::Parse(fmt::format(R"({{
+                "term_id_limit": 16,
+                "window_size": 10000,
+                "doc_prune_ratio": 0.6,
+                "use_quantization": false,
+                "use_reorder": false,
+                "remap_term_ids": false,
+                "immutable": {}
+            }})",
+                                                            immutable)));
+            SINDI index(parameter, common_param);
+            const auto failed_ids = index.Build(base);
+            REQUIRE(failed_ids.size() == 1);
+            REQUIRE(failed_ids[0] == label);
+            REQUIRE(index.GetNumElements() == 0);
+        }
     }
 }

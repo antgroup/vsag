@@ -19,6 +19,21 @@
 
 using namespace vsag;
 
+TEST_CASE("SINDIV2 term_id_limit upper bound", "[ut][SINDIV2Parameter]") {
+    auto valid_param = std::make_shared<SINDIV2Parameter>();
+    REQUIRE_NOTHROW(valid_param->FromJson(JsonType::Parse(R"({
+        "term_id_limit": 50000000,
+        "window_size": 50000
+    })")));
+    REQUIRE(valid_param->term_id_limit == 50'000'000);
+
+    auto invalid_param = std::make_shared<SINDIV2Parameter>();
+    REQUIRE_THROWS(invalid_param->FromJson(JsonType::Parse(R"({
+        "term_id_limit": 50000001,
+        "window_size": 50000
+    })")));
+}
+
 TEST_CASE("SINDIV2 default rerank io uses block memory io", "[ut][SINDIV2Parameter]") {
     auto param_str = R"({
         "term_id_limit": 30109,

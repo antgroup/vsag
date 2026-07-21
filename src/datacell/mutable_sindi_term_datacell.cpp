@@ -462,28 +462,6 @@ MutableSindiTermDataCell::InsertHeapByDists(float* dists,
 }
 
 void
-MutableSindiTermDataCell::DocPrune(Vector<std::pair<uint32_t, float>>& sorted_base) const {
-    // use this function when inserting
-    if (sorted_base.size() <= 1 || doc_retain_ratio_ == 1) {
-        return;
-    }
-    float total_mass = 0.0F;
-    for (const auto& pair : sorted_base) {
-        total_mass += pair.second;
-    }
-
-    float part_mass = total_mass * doc_retain_ratio_;
-    float temp_mass = 0.0F;
-    int pruned_doc_len = 0;
-
-    while (temp_mass < part_mass && pruned_doc_len < static_cast<int>(sorted_base.size())) {
-        temp_mass += sorted_base[pruned_doc_len++].second;
-    }
-
-    sorted_base.resize(pruned_doc_len);
-}
-
-void
 MutableSindiTermDataCell::InsertVector(const SparseVector& sparse_base, uint32_t doc_id) {
     CHECK_ARGUMENT(window_size_ > 0 && window_size_ <= std::numeric_limits<uint16_t>::max() + 1U,
                    "mutable SINDI window size is invalid");
@@ -494,35 +472,15 @@ MutableSindiTermDataCell::InsertVector(const SparseVector& sparse_base, uint32_t
     auto* window = &windows_[window_id];
     const auto window_local_id = static_cast<uint16_t>(doc_id % window_size_);
 
-    // Validate all input terms before pruning so invalid input is not silently accepted.
-    for (auto i = 0; i < sparse_base.len_; i++) {
-        if (sparse_base.ids_[i] > term_id_limit_) {
-            throw VsagException(
-                ErrorType::INVALID_ARGUMENT,
-                fmt::format("term id of sparse vector {} is greater than term id limit {}",
-                            sparse_base.ids_[i],
-                            term_id_limit_));
-        }
+    if (sparse_base.len_ > 0) {
+        const auto max_term =
+            *std::max_element(sparse_base.ids_, sparse_base.ids_ + sparse_base.len_);
+        this->ResizeTermList(*window, max_term + 1);
     }
 
-    Vector<std::pair<uint32_t, float>> sorted_base(allocator_);
-    sort_sparse_vector(sparse_base, sorted_base);
-
-    // doc prune
-    DocPrune(sorted_base);
-
-    if (not sorted_base.empty()) {
-        const auto max_term = std::max_element(
-            sorted_base.begin(), sorted_base.end(), [](const auto& lhs, const auto& rhs) {
-                return lhs.first < rhs.first;
-            });
-        this->ResizeTermList(*window, max_term->first + 1);
-    }
-
-    // insert vector
-    for (auto& item : sorted_base) {
-        auto term = item.first;
-        auto val = item.second;
+    for (uint32_t index = 0; index < sparse_base.len_; ++index) {
+        const auto term = sparse_base.ids_[index];
+        const auto val = sparse_base.vals_[index];
 
         if (window->term_sizes_[term] == 0) {
             window->term_ids_[term] = std::make_unique<Vector<uint16_t>>(allocator_);
