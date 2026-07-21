@@ -20,7 +20,7 @@
 #include "algorithm/inner_index_parameter.h"
 #include "algorithm/sindi/sindi_parameter.h"
 #include "index_common_param.h"
-#include "io/io_parameter.h"
+#include "io/common/io_parameter.h"
 #include "utils/pointer_define.h"
 
 namespace vsag {
@@ -55,6 +55,10 @@ public:
     SparseValueQuantizationType sparse_value_quant_type{SparseValueQuantizationType::FP32};
 
     bool remap_term_ids{false};
+
+    std::string rerank_type{SPARSE_RERANK_TYPE_FP32};
+
+    uint32_t dmq_shared_codebook_threshold{DEFAULT_SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD};
 
     bool immutable{false};
 

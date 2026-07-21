@@ -43,7 +43,7 @@ TEST_CASE("ImmutableSindiTermDataCell term-first memory load uses exact capacity
         quantization_params->diff = 2.0F;
 
         MutableSindiTermDataCell source(
-            1.0F, term_id_limit, window_size, allocator.get(), quantization, quantization_params);
+            term_id_limit, window_size, allocator.get(), quantization, quantization_params);
         std::vector<std::vector<uint32_t>> document_terms = {
             {1, 7}, {3}, {1, 5, 9}, {1, 5}, {7, 9}, {3, 9}, {5}};
         std::vector<std::vector<float>> document_values = {{0.25F, 1.25F},

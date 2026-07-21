@@ -101,17 +101,6 @@ MMapIO::MMapIO(std::string filename, Allocator* allocator)
                         saved_errno,
                         std::error_code(saved_errno, std::system_category()).message()));
     }
-
-    if (this->exist_file_) {
-        std::error_code ec;
-        this->size_ = std::filesystem::file_size(this->filepath_, ec);
-        if (ec) {
-            close(this->fd_);
-            throw VsagException(
-                ErrorType::INTERNAL_ERROR,
-                fmt::format("get file size {} failed: {}", this->filepath_, ec.message()));
-        }
-    }
     auto mmap_size = this->size_;
     if (this->size_ == 0) {
         mmap_size = DEFAULT_INIT_MMAP_SIZE;
@@ -139,7 +128,6 @@ MMapIO::MMapIO(std::string filename, Allocator* allocator)
                         std::error_code(saved_errno, std::system_category()).message()));
     }
     this->mapped_ptr_ = static_cast<uint8_t*>(addr);
-    this->mapped_size_ = mmap_size;
 }
 
 MMapIO::MMapIO(const MMapIOParamPtr& io_param, const IndexCommonParam& common_param)
@@ -164,7 +152,10 @@ MMapIO::~MMapIO() {
 void
 MMapIO::WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset) {
     auto new_size = size + offset;
-    auto old_size = this->mapped_size_;
+    auto old_size = this->size_;
+    if (old_size == 0) {
+        old_size = DEFAULT_INIT_MMAP_SIZE;
+    }
     if (new_size > old_size) {
         auto ret = IOSyscall::FTruncate(this->fd_, new_size);
         if (ret == -1) {
@@ -186,7 +177,6 @@ MMapIO::WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset) {
         }
         this->mapped_ptr_ = static_cast<uint8_t*>(new_addr);
 #endif
-        this->mapped_size_ = new_size;
     }
     this->size_ = std::max(this->size_, new_size);
     memcpy(this->mapped_ptr_ + offset, data, size);
@@ -195,7 +185,10 @@ MMapIO::WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset) {
 void
 MMapIO::ResizeImpl(uint64_t size) {
     auto new_size = size;
-    auto old_size = this->mapped_size_;
+    auto old_size = this->size_;
+    if (old_size == 0) {
+        old_size = DEFAULT_INIT_MMAP_SIZE;
+    }
     if (new_size > old_size) {
         auto ret = IOSyscall::FTruncate(this->fd_, new_size);
         if (ret == -1) {

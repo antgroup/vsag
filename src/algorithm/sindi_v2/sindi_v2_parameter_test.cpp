@@ -14,10 +14,28 @@
 
 #include "sindi_v2_parameter.h"
 
+#include <catch2/matchers/catch_matchers.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
+
 #include "inner_string_params.h"
 #include "unittest.h"
 
 using namespace vsag;
+
+TEST_CASE("SINDIV2 term_id_limit upper bound", "[ut][SINDIV2Parameter]") {
+    auto valid_param = std::make_shared<SINDIV2Parameter>();
+    REQUIRE_NOTHROW(valid_param->FromJson(JsonType::Parse(R"({
+        "term_id_limit": 50000000,
+        "window_size": 50000
+    })")));
+    REQUIRE(valid_param->term_id_limit == 50'000'000);
+
+    auto invalid_param = std::make_shared<SINDIV2Parameter>();
+    REQUIRE_THROWS(invalid_param->FromJson(JsonType::Parse(R"({
+        "term_id_limit": 50000001,
+        "window_size": 50000
+    })")));
+}
 
 TEST_CASE("SINDIV2 default rerank io uses block memory io", "[ut][SINDIV2Parameter]") {
     auto param_str = R"({
@@ -225,4 +243,52 @@ TEST_CASE("SINDIV2 rerank layout accepts only top terms signature", "[ut][SINDIV
             param->FromJson(unsupported),
             Catch::Matchers::ContainsSubstring("unsupported SINDIV2 rerank_layout"));
     }
+}
+
+TEST_CASE("SINDIV2 DMQ parameter validation and compatibility", "[ut][SINDIV2Parameter]") {
+    const auto dmq_json = JsonType::Parse(R"({
+        "term_id_limit": 30109,
+        "window_size": 60000,
+        "use_reorder": true,
+        "rerank_type": "dmq8",
+        "dmq_shared_codebook_threshold": 2048,
+        "term_io": {"type": "memory_io"},
+        "rerank_io": {"type": "block_memory_io"}
+    })");
+
+    auto parameter = std::make_shared<SINDIV2Parameter>();
+    REQUIRE_NOTHROW(parameter->FromJson(dmq_json));
+    REQUIRE(parameter->rerank_type == SPARSE_RERANK_TYPE_DMQ8);
+    REQUIRE(parameter->dmq_shared_codebook_threshold == 2048);
+    REQUIRE(parameter->ToJson()[SPARSE_RERANK_TYPE].GetString() == SPARSE_RERANK_TYPE_DMQ8);
+    REQUIRE(parameter->ToJson()[SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD].GetInt() == 2048);
+
+    auto restored = std::make_shared<SINDIV2Parameter>();
+    restored->FromJson(parameter->ToJson());
+    REQUIRE(parameter->CheckCompatibility(restored));
+
+    auto different_threshold = std::make_shared<SINDIV2Parameter>();
+    auto different_threshold_json = dmq_json;
+    different_threshold_json[SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD].SetInt(2049);
+    different_threshold->FromJson(different_threshold_json);
+    REQUIRE_FALSE(parameter->CheckCompatibility(different_threshold));
+
+    auto no_reorder_json = dmq_json;
+    no_reorder_json[USE_REORDER_KEY].SetBool(false);
+    REQUIRE_THROWS_WITH(
+        parameter->FromJson(no_reorder_json),
+        Catch::Matchers::ContainsSubstring("rerank_type=dmq8 requires use_reorder=true"));
+
+    auto incompatible_layout_json = dmq_json;
+    incompatible_layout_json["rerank_layout"].SetString("top_terms_signature");
+    REQUIRE_THROWS_WITH(
+        parameter->FromJson(incompatible_layout_json),
+        Catch::Matchers::ContainsSubstring("rerank_type=dmq8 requires rerank_layout=none"));
+
+    auto file_rerank_json = dmq_json;
+    file_rerank_json["rerank_io"].SetJson(
+        JsonType::Parse(R"({"type":"mmap_io","file_path":"/tmp/sindi_v2.dmq"})"));
+    REQUIRE_THROWS_WITH(
+        parameter->FromJson(file_rerank_json),
+        Catch::Matchers::ContainsSubstring("rerank_type=dmq8 only supports block_memory_io"));
 }

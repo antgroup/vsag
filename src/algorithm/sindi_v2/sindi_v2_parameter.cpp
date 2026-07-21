@@ -17,9 +17,11 @@
 
 #include <fmt/format.h>
 
+#include <limits>
+
 #include "inner_string_params.h"
-#include "io/memory_block_io_parameter.h"
-#include "io/reader_io_parameter.h"
+#include "io/memory_block_io/memory_block_io_parameter.h"
+#include "io/reader_io/reader_io_parameter.h"
 
 namespace {
 
@@ -67,8 +69,8 @@ SINDIV2Parameter::FromJson(const JsonType& json) {
         term_id_limit = json[SPARSE_TERM_ID_LIMIT].GetInt();
 
         CHECK_ARGUMENT(
-            (0 < term_id_limit and term_id_limit <= 10'000'000),
-            fmt::format("term_id_limit must in (0, 10'000'000], but now is {}", term_id_limit));
+            (0 < term_id_limit and term_id_limit <= 50'000'000),
+            fmt::format("term_id_limit must in (0, 50'000'000], but now is {}", term_id_limit));
     } else {
         term_id_limit = DEFAULT_TERM_ID_LIMIT;
     }
@@ -125,6 +127,36 @@ SINDIV2Parameter::FromJson(const JsonType& json) {
         remap_term_ids = json[SPARSE_REMAP_TERM_IDS].GetBool();
     }
 
+    if (json.Contains(SPARSE_RERANK_TYPE)) {
+        rerank_type = json[SPARSE_RERANK_TYPE].GetString();
+    } else {
+        rerank_type = SPARSE_RERANK_TYPE_FP32;
+    }
+    CHECK_ARGUMENT(rerank_type == SPARSE_RERANK_TYPE_FP32 || rerank_type == SPARSE_RERANK_TYPE_DMQ8,
+                   fmt::format("rerank_type must be fp32 or dmq8, got {}", rerank_type));
+    CHECK_ARGUMENT(use_reorder || rerank_type == SPARSE_RERANK_TYPE_FP32,
+                   "rerank_type=dmq8 requires use_reorder=true");
+
+    if (json.Contains(SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD)) {
+        const auto threshold_json = json[SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD];
+        CHECK_ARGUMENT(threshold_json.IsNumberInteger(),
+                       "dmq_shared_codebook_threshold must be an integer");
+        if (threshold_json.IsNumberUnsigned()) {
+            const auto threshold = threshold_json.GetUint64();
+            CHECK_ARGUMENT(threshold <= std::numeric_limits<uint32_t>::max(),
+                           "dmq_shared_codebook_threshold exceeds uint32 range");
+            dmq_shared_codebook_threshold = static_cast<uint32_t>(threshold);
+        } else {
+            const auto threshold = threshold_json.GetInt();
+            CHECK_ARGUMENT(threshold >= 0 && static_cast<uint64_t>(threshold) <=
+                                                 std::numeric_limits<uint32_t>::max(),
+                           "dmq_shared_codebook_threshold must be in uint32 range");
+            dmq_shared_codebook_threshold = static_cast<uint32_t>(threshold);
+        }
+    } else {
+        dmq_shared_codebook_threshold = DEFAULT_SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD;
+    }
+
     if (json.Contains(SPARSE_IMMUTABLE)) {
         immutable = json[SPARSE_IMMUTABLE].GetBool();
     }
@@ -149,6 +181,9 @@ SINDIV2Parameter::FromJson(const JsonType& json) {
 
     CHECK_ARGUMENT(use_reorder || rerank_layout == SINDI_V2_RERANK_LAYOUT_NONE,
                    "SINDIV2 rerank_layout requires use_reorder=true");
+    CHECK_ARGUMENT(
+        rerank_type != SPARSE_RERANK_TYPE_DMQ8 || rerank_layout == SINDI_V2_RERANK_LAYOUT_NONE,
+        "SINDIV2 rerank_type=dmq8 requires rerank_layout=none");
 
     if (json.Contains(SINDI_V2_TERM_IO_KEY)) {
         term_io_parameter = IOParameter::GetIOParameterByJson(json[SINDI_V2_TERM_IO_KEY]);
@@ -166,6 +201,9 @@ SINDIV2Parameter::FromJson(const JsonType& json) {
     } else {
         rerank_io_parameter = std::make_shared<MemoryBlockIOParameter>();
     }
+    CHECK_ARGUMENT(rerank_type != SPARSE_RERANK_TYPE_DMQ8 ||
+                       rerank_io_parameter->GetTypeName() == IO_TYPE_VALUE_BLOCK_MEMORY_IO,
+                   "SINDIV2 rerank_type=dmq8 only supports block_memory_io");
 }
 
 JsonType
@@ -182,6 +220,11 @@ SINDIV2Parameter::ToJson() const {
     json[SPARSE_WINDOW_SIZE].SetInt(window_size);
     json[SPARSE_AVG_DOC_TERM_LENGTH].SetInt(avg_doc_term_length);
     json[SPARSE_REMAP_TERM_IDS].SetBool(remap_term_ids);
+    json[SPARSE_RERANK_TYPE].SetString(rerank_type);
+    if (rerank_type == SPARSE_RERANK_TYPE_DMQ8) {
+        json[SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD].SetInt(
+            static_cast<int64_t>(dmq_shared_codebook_threshold));
+    }
     if (immutable) {
         json[SPARSE_IMMUTABLE].SetBool(true);
     }
@@ -221,6 +264,13 @@ SINDIV2Parameter::CheckCompatibility(const vsag::ParamPtr& other) const {
         return false;
     }
     if (this->remap_term_ids != sindi_v2_param->remap_term_ids) {
+        return false;
+    }
+    if (this->rerank_type != sindi_v2_param->rerank_type) {
+        return false;
+    }
+    if (this->rerank_type == SPARSE_RERANK_TYPE_DMQ8 &&
+        this->dmq_shared_codebook_threshold != sindi_v2_param->dmq_shared_codebook_threshold) {
         return false;
     }
     if (this->immutable != sindi_v2_param->immutable) {

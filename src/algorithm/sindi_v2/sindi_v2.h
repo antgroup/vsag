@@ -48,10 +48,8 @@ public:
     void
     InitFeatures() override;
 
-    std::string
-    GetMemoryUsageDetail() const override {
-        return "";
-    }
+    std::unordered_map<std::string, uint64_t>
+    GetMemoryUsageDetail() const override;
 
     std::string
     GetStats() const override;
@@ -124,7 +122,8 @@ public:
     CalDistanceById(const DatasetPtr& query,
                     const int64_t* ids,
                     int64_t count,
-                    bool calculate_precise_distance = true) const override;
+                    bool calculate_precise_distance = true,
+                    int64_t topk = -1) const override;
 
     std::pair<int64_t, int64_t>
     GetMinAndMaxId() const override;
@@ -136,6 +135,10 @@ public:
     SetIO(const std::shared_ptr<Reader> reader) override;
 
 private:
+#ifdef VSAG_SINDI_V2_TEST_ACCESS
+    friend class SINDIV2TestAccess;
+#endif
+
     template <InnerSearchMode mode>
     DatasetPtr
     search_impl(const SparseTermComputerPtr& computer,
@@ -150,6 +153,15 @@ private:
 
     void
     cal_memory_usage();
+
+    SparseVector
+    sort_and_prune_sparse_vector_for_build(const SparseVector& input,
+                                           Vector<std::pair<uint32_t, float>>& sorted_terms,
+                                           Vector<uint32_t>& pruned_ids,
+                                           Vector<float>& pruned_vals) const;
+
+    void
+    init_quantization_params_from_pruned_vectors(const DatasetPtr& base);
 
     SparseVector
     remap_sparse_vector_for_build(const SparseVector& input, Vector<uint32_t>& tmp_ids);
@@ -183,6 +195,8 @@ private:
 
     bool use_reorder_{false};
     SparseValueQuantizationType sparse_value_quant_type_{SparseValueQuantizationType::FP32};
+    std::string rerank_type_{SPARSE_RERANK_TYPE_FP32};
+    uint32_t dmq_shared_codebook_threshold_{DEFAULT_SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD};
     float doc_retain_ratio_{0};
 
     FlattenInterfacePtr rerank_flat_{nullptr};
