@@ -16,6 +16,7 @@
 #include "sindi.h"
 
 #include <cstring>
+#include <unordered_map>
 #include <vector>
 
 #include "algorithm/sparse_distance.h"
@@ -42,6 +43,36 @@ namespace {
 constexpr uint64_t TERM_ID_MAPPER_ENTRY_MEMORY_BYTES = 54;
 constexpr const char* SINDI_RERANK_FLAT_FORMAT_KEY = "sindi_rerank_flat_format";
 constexpr int64_t SINDI_RERANK_FLAT_FORMAT_DATACELL = 2;
+constexpr const char* SINDI_WINDOW_METADATA_FORMAT_KEY = "sindi_window_metadata_format";
+constexpr int64_t SINDI_WINDOW_METADATA_FORMAT_V1 = 1;
+constexpr uint64_t MAX_SERIALIZED_DATE_LENGTH = 10;
+
+struct SINDIDateGroup {
+    std::string date;
+    std::vector<int64_t> indices;
+};
+
+std::vector<SINDIDateGroup>
+group_dataset_by_date(const DatasetPtr& base) {
+    const auto data_num = base->GetNumElements();
+    const auto* dates = base->GetDates();
+    std::vector<SINDIDateGroup> groups;
+    groups.reserve(dates == nullptr ? 1 : static_cast<uint64_t>(data_num));
+    std::unordered_map<std::string, uint64_t> group_by_date;
+    group_by_date.reserve(dates == nullptr ? 1 : static_cast<uint64_t>(data_num));
+
+    for (int64_t i = 0; i < data_num; ++i) {
+        const std::string date = dates == nullptr ? "" : dates[i];
+        CHECK_ARGUMENT(IsValidSINDIDate(date),
+                       fmt::format("invalid SINDI date for document {}: {}", i, date));
+        auto [iter, inserted] = group_by_date.emplace(date, groups.size());
+        if (inserted) {
+            groups.push_back({date, {}});
+        }
+        groups[iter->second].indices.push_back(i);
+    }
+    return groups;
+}
 
 uint32_t
 sparse_value_code_size(SparseValueQuantizationType type) {
@@ -195,6 +226,7 @@ SINDI::SINDI(const SINDIParameterPtr& param, const IndexCommonParam& common_para
       doc_prune_ratio_(param->doc_prune_ratio),
       doc_retain_ratio_(1.0F - param->doc_prune_ratio),
       window_term_list_(common_param.allocator_.get()),
+      window_metadata_(common_param.allocator_.get()),
       deserialize_without_footer_(param->deserialize_without_footer),
       deserialize_without_buffer_(param->deserialize_without_buffer),
       quantization_params_(std::make_shared<QuantizationParams>()),
@@ -253,6 +285,7 @@ SINDI::Add(const DatasetPtr& base) {
     const auto* ids = base->GetIds();
     const auto* extra_info = base->GetExtraInfos();
     const auto extra_info_size = base->GetExtraInfoSize();
+    const auto date_groups = group_dataset_by_date(base);
 
     if (sparse_value_quant_type_ == SparseValueQuantizationType::SQ8 && cur_element_count_ == 0) {
         float min_val = std::numeric_limits<float>::max();
@@ -277,74 +310,71 @@ SINDI::Add(const DatasetPtr& base) {
         }
     }
 
-    // adjust window
-    int64_t final_add_window = align_up(cur_element_count_ + data_num, window_size_) / window_size_;
-    bool window_changed = false;
-    while (window_term_list_.size() < final_add_window) {
-        window_term_list_.emplace_back(
-            std::make_shared<SparseTermDataCell>(doc_retain_ratio_,
-                                                 term_id_limit_,
-                                                 allocator_,
-                                                 sparse_value_quant_type_,
-                                                 quantization_params_));
-        window_changed = true;
-    }
-
-    // add process
+    bool data_inserted = false;
     Vector<uint32_t> tmp_ids(allocator_);
-    for (uint32_t i = 0; i < data_num; ++i) {
-        auto cur_window = cur_element_count_ / window_size_;
-        auto window_start_id = cur_window * window_size_;
-        const auto& sparse_vector = sparse_vectors[i];
-        if (label_table_->CheckLabel(ids[i])) {
-            failed_ids.push_back(ids[i]);
-            logger::warn("id ({}) already exists", ids[i]);
-            continue;
-        }
-        if (sparse_vector.len_ <= 0) {
-            failed_ids.push_back(ids[i]);
-            logger::warn(
-                "sparse_vector.len_ ({}) is invalid for id ({})", sparse_vector.len_, ids[i]);
-            continue;
-        }
-
-        auto inner_id = static_cast<uint16_t>(cur_element_count_ - window_start_id);
-
-        try {
-            if (remap_term_ids_) {
-                auto remapped = remap_sparse_vector_for_build(sparse_vector, tmp_ids);
-                window_term_list_[cur_window]->InsertVector(remapped, inner_id);
-            } else {
-                window_term_list_[cur_window]->InsertVector(sparse_vector, inner_id);
+    for (const auto& group : date_groups) {
+        const auto previous_window_count = window_metadata_.size();
+        for (const auto i : group.indices) {
+            const auto& sparse_vector = sparse_vectors[i];
+            if (label_table_->CheckLabel(ids[i])) {
+                failed_ids.push_back(ids[i]);
+                logger::warn("id ({}) already exists", ids[i]);
+                continue;
             }
-        } catch (const std::runtime_error& e) {
-            failed_ids.push_back(ids[i]);
-            logger::warn("runtime error: {}", e.what());
-            continue;
-        } catch (const VsagException& e) {
-            failed_ids.push_back(ids[i]);
-            logger::warn("vsag exception: {}", e.what());
-            continue;
-        } catch (const std::bad_alloc& e) {
-            failed_ids.push_back(ids[i]);
-            logger::warn("memory allocation failed: {}", e.what());
-            continue;
+            if (sparse_vector.len_ <= 0) {
+                failed_ids.push_back(ids[i]);
+                logger::warn(
+                    "sparse_vector.len_ ({}) is invalid for id ({})", sparse_vector.len_, ids[i]);
+                continue;
+            }
+
+            if (window_metadata_.empty() or window_metadata_.back().date != group.date or
+                window_metadata_.back().doc_count == window_size_) {
+                create_mutable_window(group.date);
+            }
+            auto& metadata = window_metadata_.back();
+            const auto inner_id = static_cast<uint16_t>(metadata.doc_count);
+
+            try {
+                if (remap_term_ids_) {
+                    auto remapped = remap_sparse_vector_for_build(sparse_vector, tmp_ids);
+                    window_term_list_.back()->InsertVector(remapped, inner_id);
+                } else {
+                    window_term_list_.back()->InsertVector(sparse_vector, inner_id);
+                }
+            } catch (const std::runtime_error& e) {
+                failed_ids.push_back(ids[i]);
+                logger::warn("runtime error: {}", e.what());
+                continue;
+            } catch (const VsagException& e) {
+                failed_ids.push_back(ids[i]);
+                logger::warn("vsag exception: {}", e.what());
+                continue;
+            } catch (const std::bad_alloc& e) {
+                failed_ids.push_back(ids[i]);
+                logger::warn("memory allocation failed: {}", e.what());
+                continue;
+            }
+
+            label_table_->Insert(cur_element_count_, ids[i]);
+            if (extra_info_size > 0) {
+                extra_infos_->InsertExtraInfo(extra_info + i * extra_info_size, cur_element_count_);
+            }
+            metadata.doc_count++;
+            cur_element_count_++;
+            data_inserted = true;
+
+            if (use_reorder_) {
+                rerank_flat_->InsertVector(sparse_vectors + i, cur_element_count_ - 1);
+            }
         }
-
-        label_table_->Insert(cur_element_count_, ids[i]);  // todo(zxy): check id exists
-
-        if (extra_info_size > 0) {
-            extra_infos_->InsertExtraInfo(extra_info + i * extra_info_size, cur_element_count_);
-        }
-
-        cur_element_count_++;
-
-        // high precision part
-        if (use_reorder_) {
-            rerank_flat_->InsertVector(sparse_vectors + i, cur_element_count_ - 1);
+        if (window_metadata_.size() > previous_window_count and
+            window_metadata_.back().doc_count == 0) {
+            window_metadata_.pop_back();
+            window_term_list_.pop_back();
         }
     }
-    if (window_changed) {
+    if (data_inserted or not failed_ids.empty()) {
         this->cal_memory_usage();
     }
     return failed_ids;
@@ -381,6 +411,7 @@ SINDI::build_immutable(const DatasetPtr& base) {
     const auto* ids = base->GetIds();
     const auto* extra_info = base->GetExtraInfos();
     const auto extra_info_size = base->GetExtraInfoSize();
+    const auto date_groups = group_dataset_by_date(base);
 
     if (sparse_value_quant_type_ == SparseValueQuantizationType::SQ8 && cur_element_count_ == 0) {
         float min_val = std::numeric_limits<float>::max();
@@ -405,83 +436,91 @@ SINDI::build_immutable(const DatasetPtr& base) {
     immutable_data_->sparse_value_quant_type = sparse_value_quant_type_;
     immutable_data_->value_code_size = sparse_value_code_size(sparse_value_quant_type_);
     immutable_data_->windows.reserve(align_up(data_num, window_size_) / window_size_);
+    window_metadata_.clear();
 
     SparseTermDataCellPtr current_window = nullptr;
     Vector<uint32_t> tmp_ids(allocator_);
-    for (int64_t i = 0; i < data_num; ++i) {
-        if (current_window == nullptr) {
-            current_window = std::make_shared<SparseTermDataCell>(doc_retain_ratio_,
-                                                                  term_id_limit_,
-                                                                  allocator_,
-                                                                  sparse_value_quant_type_,
-                                                                  quantization_params_);
+    const auto flush_window = [this, &current_window]() {
+        if (current_window == nullptr or window_metadata_.empty() or
+            window_metadata_.back().doc_count == 0) {
+            return;
         }
-
-        const auto& sparse_vector = sparse_vectors[i];
-        if (label_table_->CheckLabel(ids[i])) {
-            failed_ids.push_back(ids[i]);
-            logger::warn("id ({}) already exists", ids[i]);
-            continue;
-        }
-        if (sparse_vector.len_ <= 0) {
-            failed_ids.push_back(ids[i]);
-            logger::warn(
-                "sparse_vector.len_ ({}) is invalid for id ({})", sparse_vector.len_, ids[i]);
-            continue;
-        }
-
-        const auto window_start_id =
-            static_cast<int64_t>(immutable_data_->windows.size()) * window_size_;
-        const auto window_inner_id = cur_element_count_ - window_start_id;
-        if (window_inner_id < 0 or window_inner_id > std::numeric_limits<uint16_t>::max()) {
-            throw VsagException(ErrorType::INVALID_ARGUMENT,
-                                "immutable SINDI window-local doc id overflows uint16_t");
-        }
-        auto inner_id = static_cast<uint16_t>(window_inner_id);
-
-        try {
-            if (remap_term_ids_) {
-                auto remapped = remap_sparse_vector_for_build(sparse_vector, tmp_ids);
-                current_window->InsertVector(remapped, inner_id);
-            } else {
-                current_window->InsertVector(sparse_vector, inner_id);
-            }
-        } catch (const std::runtime_error& e) {
-            failed_ids.push_back(ids[i]);
-            logger::warn("runtime error: {}", e.what());
-            continue;
-        } catch (const VsagException& e) {
-            failed_ids.push_back(ids[i]);
-            logger::warn("vsag exception: {}", e.what());
-            continue;
-        } catch (const std::bad_alloc& e) {
-            failed_ids.push_back(ids[i]);
-            logger::warn("memory allocation failed: {}", e.what());
-            continue;
-        }
-
-        label_table_->Insert(cur_element_count_, ids[i]);
-
-        if (extra_info_size > 0) {
-            extra_infos_->InsertExtraInfo(extra_info + i * extra_info_size, cur_element_count_);
-        }
-
-        cur_element_count_++;
-
-        if (use_reorder_) {
-            rerank_flat_->InsertVector(sparse_vectors + i, cur_element_count_ - 1);
-        }
-
-        if (cur_element_count_ % window_size_ == 0) {
-            immutable_data_->windows.emplace_back(allocator_);
-            compact_window_to_immutable(*current_window, immutable_data_->windows.back());
-            current_window.reset();
-        }
-    }
-
-    if (current_window != nullptr && current_window->total_count_ > 0) {
         immutable_data_->windows.emplace_back(allocator_);
         compact_window_to_immutable(*current_window, immutable_data_->windows.back());
+        current_window.reset();
+    };
+
+    for (const auto& group : date_groups) {
+        const auto previous_window_count = window_metadata_.size();
+        for (const auto i : group.indices) {
+            const auto& sparse_vector = sparse_vectors[i];
+            if (label_table_->CheckLabel(ids[i])) {
+                failed_ids.push_back(ids[i]);
+                logger::warn("id ({}) already exists", ids[i]);
+                continue;
+            }
+            if (sparse_vector.len_ <= 0) {
+                failed_ids.push_back(ids[i]);
+                logger::warn(
+                    "sparse_vector.len_ ({}) is invalid for id ({})", sparse_vector.len_, ids[i]);
+                continue;
+            }
+
+            if (current_window == nullptr) {
+                CHECK_ARGUMENT(cur_element_count_.load() <= std::numeric_limits<InnerIdType>::max(),
+                               "SINDI element count overflows inner id");
+                current_window = std::make_shared<SparseTermDataCell>(doc_retain_ratio_,
+                                                                      term_id_limit_,
+                                                                      allocator_,
+                                                                      sparse_value_quant_type_,
+                                                                      quantization_params_);
+                window_metadata_.push_back(
+                    {group.date, static_cast<InnerIdType>(cur_element_count_.load()), 0});
+            }
+            auto& metadata = window_metadata_.back();
+            const auto inner_id = static_cast<uint16_t>(metadata.doc_count);
+
+            try {
+                if (remap_term_ids_) {
+                    auto remapped = remap_sparse_vector_for_build(sparse_vector, tmp_ids);
+                    current_window->InsertVector(remapped, inner_id);
+                } else {
+                    current_window->InsertVector(sparse_vector, inner_id);
+                }
+            } catch (const std::runtime_error& e) {
+                failed_ids.push_back(ids[i]);
+                logger::warn("runtime error: {}", e.what());
+                continue;
+            } catch (const VsagException& e) {
+                failed_ids.push_back(ids[i]);
+                logger::warn("vsag exception: {}", e.what());
+                continue;
+            } catch (const std::bad_alloc& e) {
+                failed_ids.push_back(ids[i]);
+                logger::warn("memory allocation failed: {}", e.what());
+                continue;
+            }
+
+            label_table_->Insert(cur_element_count_, ids[i]);
+            if (extra_info_size > 0) {
+                extra_infos_->InsertExtraInfo(extra_info + i * extra_info_size, cur_element_count_);
+            }
+            metadata.doc_count++;
+            cur_element_count_++;
+
+            if (use_reorder_) {
+                rerank_flat_->InsertVector(sparse_vectors + i, cur_element_count_ - 1);
+            }
+            if (metadata.doc_count == window_size_) {
+                flush_window();
+            }
+        }
+        flush_window();
+        if (window_metadata_.size() > previous_window_count and
+            window_metadata_.back().doc_count == 0) {
+            window_metadata_.pop_back();
+            current_window.reset();
+        }
     }
     current_window.reset();
     window_term_list_.clear();
@@ -578,11 +617,19 @@ SINDI::KnnSearch(const DatasetPtr& query,
     auto computer = std::make_shared<SparseTermComputer>(effective_query, search_param, allocator_);
     const SparseVector* rerank_query = (remap_term_ids_ && use_reorder_) ? &sparse_query : nullptr;
     if (immutable_data_ != nullptr) {
-        return immutable_search_impl<KNN_SEARCH>(
-            computer, inner_param, allocator, UseTermListsHeapInsert(search_param), rerank_query);
+        return immutable_search_impl<KNN_SEARCH>(computer,
+                                                 inner_param,
+                                                 allocator,
+                                                 UseTermListsHeapInsert(search_param),
+                                                 search_param.date,
+                                                 rerank_query);
     }
-    return search_impl<KNN_SEARCH>(
-        computer, inner_param, allocator, UseTermListsHeapInsert(search_param), rerank_query);
+    return search_impl<KNN_SEARCH>(computer,
+                                   inner_param,
+                                   allocator,
+                                   UseTermListsHeapInsert(search_param),
+                                   search_param.date,
+                                   rerank_query);
 }
 
 std::optional<uint32_t>
@@ -839,6 +886,7 @@ SINDI::immutable_search_impl(const SparseTermComputerPtr& computer,
                              const InnerSearchParam& inner_param,
                              Allocator* allocator,
                              bool use_term_lists_heap_insert,
+                             const std::string& query_date,
                              const SparseVector* original_query) const {
     Allocator* search_allocator = allocator != nullptr ? allocator : allocator_;
     MaxHeap heap(search_allocator);
@@ -852,8 +900,12 @@ SINDI::immutable_search_impl(const SparseTermComputerPtr& computer,
     auto filter = inner_param.is_inner_id_allowed;
     const auto [min_window_id, max_window_id] = this->get_min_max_window_id(filter);
     for (auto cur = min_window_id; cur <= max_window_id; cur++) {
+        const auto& metadata = window_metadata_[static_cast<uint32_t>(cur)];
+        if (not SINDIDateMatches(metadata.date, query_date)) {
+            continue;
+        }
         const auto& window = immutable_data_->windows[static_cast<uint32_t>(cur)];
-        const auto window_start_id = static_cast<uint32_t>(cur) * window_size_;
+        const auto window_start_id = metadata.start_id;
         map_immutable_query_terms(window, computer, mapped_terms);
         std::fill(dists.begin(), dists.end(), 0.0F);
         scan_immutable_window_by_mapped_terms(dists.data(), window, computer, mapped_terms);
@@ -877,14 +929,12 @@ SINDI::immutable_search_impl(const SparseTermComputerPtr& computer,
                                                                   window_start_id);
             }
         } else {
-            const auto window_doc_count = static_cast<uint32_t>(std::min<int64_t>(
-                window_size_, cur_element_count_ - static_cast<int64_t>(window_start_id)));
             if (inner_param.is_inner_id_allowed) {
                 immutable_insert_heap_by_dists<mode, WITH_FILTER>(
-                    dists.data(), window_doc_count, heap, inner_param, window_start_id);
+                    dists.data(), metadata.doc_count, heap, inner_param, window_start_id);
             } else {
                 immutable_insert_heap_by_dists<mode, PURE>(
-                    dists.data(), window_doc_count, heap, inner_param, window_start_id);
+                    dists.data(), metadata.doc_count, heap, inner_param, window_start_id);
             }
         }
     }
@@ -951,6 +1001,7 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
                    const InnerSearchParam& inner_param,
                    Allocator* allocator,
                    bool use_term_lists_heap_insert,
+                   const std::string& query_date,
                    const SparseVector* original_query) const {
     // computer and heap
     MaxHeap heap(allocator);
@@ -965,7 +1016,11 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
     auto filter = inner_param.is_inner_id_allowed;
     const auto [min_window_id, max_window_id] = this->get_min_max_window_id(filter);
     for (auto cur = min_window_id; cur <= max_window_id; cur++) {
-        auto window_start_id = cur * window_size_;
+        const auto& metadata = window_metadata_[static_cast<uint32_t>(cur)];
+        if (not SINDIDateMatches(metadata.date, query_date)) {
+            continue;
+        }
+        auto window_start_id = metadata.start_id;
         auto term_list = this->window_term_list_[cur];
 
         // compute
@@ -983,10 +1038,10 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
         } else {
             if (inner_param.is_inner_id_allowed) {
                 term_list->InsertHeapByDists<mode, WITH_FILTER>(
-                    dists.data(), dists.size(), heap, inner_param, window_start_id);
+                    dists.data(), metadata.doc_count, heap, inner_param, window_start_id);
             } else {
                 term_list->InsertHeapByDists<mode, PURE>(
-                    dists.data(), dists.size(), heap, inner_param, window_start_id);
+                    dists.data(), metadata.doc_count, heap, inner_param, window_start_id);
             }
         }
     }
@@ -1096,11 +1151,19 @@ SINDI::RangeSearch(const DatasetPtr& query,
     auto computer = std::make_shared<SparseTermComputer>(effective_query, search_param, allocator_);
     const SparseVector* rerank_query = (remap_term_ids_ && use_reorder_) ? &sparse_query : nullptr;
     if (immutable_data_ != nullptr) {
-        return immutable_search_impl<RANGE_SEARCH>(
-            computer, inner_param, allocator_, UseTermListsHeapInsert(search_param), rerank_query);
+        return immutable_search_impl<RANGE_SEARCH>(computer,
+                                                   inner_param,
+                                                   allocator_,
+                                                   UseTermListsHeapInsert(search_param),
+                                                   search_param.date,
+                                                   rerank_query);
     }
-    return search_impl<RANGE_SEARCH>(
-        computer, inner_param, allocator_, UseTermListsHeapInsert(search_param), rerank_query);
+    return search_impl<RANGE_SEARCH>(computer,
+                                     inner_param,
+                                     allocator_,
+                                     UseTermListsHeapInsert(search_param),
+                                     search_param.date,
+                                     rerank_query);
 }
 
 bool
@@ -1129,6 +1192,10 @@ SINDI::cal_memory_usage() {
         for (auto& window : window_term_list_) {
             memory += window->GetMemoryUsage();
         }
+    }
+    memory += window_metadata_.size() * sizeof(SINDIWindowMetadata);
+    for (const auto& metadata : window_metadata_) {
+        memory += metadata.date.capacity();
     }
     memory += label_table_->GetMemoryUsage();
     if (this->rerank_flat_ != nullptr) {
@@ -1199,8 +1266,11 @@ SINDI::Serialize(StreamWriter& writer) const {
         term_id_mapper_->Serialize(writer);
     }
 
+    serialize_window_metadata(writer);
+
     JsonType jsonify_basic_info;
     jsonify_basic_info[INDEX_PARAM].SetString(this->create_param_ptr_->ToString());
+    jsonify_basic_info[SINDI_WINDOW_METADATA_FORMAT_KEY].SetInt(SINDI_WINDOW_METADATA_FORMAT_V1);
     if (use_reorder_) {
         jsonify_basic_info[SINDI_RERANK_FLAT_FORMAT_KEY].SetInt(SINDI_RERANK_FLAT_FORMAT_DATACELL);
     }
@@ -1252,6 +1322,11 @@ SINDI::collect_streaming_header() const {
                                      StreamSerializationBlockCurrentVersion(tag),
                                      StreamSerializationTagCritical(tag));
     }
+    auto window_metadata_tag = static_cast<uint32_t>(StreamSerializationTag::SINDI_WINDOW_METADATA);
+    AppendStreamingManifestBlock(manifest,
+                                 window_metadata_tag,
+                                 StreamSerializationBlockCurrentVersion(window_metadata_tag),
+                                 StreamSerializationTagCritical(window_metadata_tag));
     metadata->Set("block_manifest", manifest);
     metadata->SetEmptyIndex(this->GetNumElements() == 0);
     return metadata;
@@ -1305,6 +1380,11 @@ SINDI::serialize_streaming_body(StreamWriter& writer) const {
                 this->term_id_mapper_->Serialize(w);
             });
     }
+    auto window_metadata_tag = static_cast<uint32_t>(StreamSerializationTag::SINDI_WINDOW_METADATA);
+    WriteStreamingBlock(writer,
+                        window_metadata_tag,
+                        StreamSerializationTagCritical(window_metadata_tag),
+                        [this](StreamWriter& w) { this->serialize_window_metadata(w); });
 }
 
 void
@@ -1381,6 +1461,7 @@ SINDI::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) {
     bool loaded_label_table = false;
     bool loaded_rerank = false;
     bool loaded_term_mapper = false;
+    bool loaded_window_metadata = false;
 
     while (true) {
         auto block_header = StreamBlockHeader::Read(reader);
@@ -1440,6 +1521,12 @@ SINDI::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) {
                     loaded_term_mapper = true;
                 }
                 break;
+            case StreamSerializationTag::SINDI_WINDOW_METADATA:
+                ReadSeekableBlockPayload(block_reader, block_header, [this](StreamReader& block) {
+                    this->deserialize_window_metadata(block);
+                });
+                loaded_window_metadata = true;
+                break;
             default:
                 if (block_header.IsCritical()) {
                     throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
@@ -1469,6 +1556,13 @@ SINDI::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) {
         throw VsagException(ErrorType::READ_ERROR,
                             "SINDI streaming serialization term mapper block is missing");
     }
+    const auto window_count = static_cast<uint32_t>(
+        immutable_data_ != nullptr ? immutable_data_->windows.size() : window_term_list_.size());
+    if (loaded_window_metadata) {
+        validate_window_metadata(window_count);
+    } else {
+        infer_legacy_window_metadata(window_count);
+    }
     this->cal_memory_usage();
 }
 
@@ -1477,6 +1571,7 @@ SINDI::Deserialize(StreamReader& reader) {
     std::scoped_lock wlock(this->global_mutex_);
 
     bool has_datacell_rerank_format = false;
+    bool has_window_metadata_format = false;
     bool has_footer = false;
     if (not deserialize_without_footer_) {
         JsonType jsonify_basic_info;
@@ -1508,6 +1603,11 @@ SINDI::Deserialize(StreamReader& reader) {
                     has_datacell_rerank_format =
                         jsonify_basic_info[SINDI_RERANK_FLAT_FORMAT_KEY].GetInt() ==
                         SINDI_RERANK_FLAT_FORMAT_DATACELL;
+                }
+                if (jsonify_basic_info.Contains(SINDI_WINDOW_METADATA_FORMAT_KEY)) {
+                    has_window_metadata_format =
+                        jsonify_basic_info[SINDI_WINDOW_METADATA_FORMAT_KEY].GetInt() ==
+                        SINDI_WINDOW_METADATA_FORMAT_V1;
                 }
             } else {
                 logger::debug("SINDI footer not found, fallback to legacy deserialize path");
@@ -1586,6 +1686,13 @@ SINDI::Deserialize(StreamReader& reader) {
 
     if (remap_term_ids_ && term_id_mapper_) {
         term_id_mapper_->Deserialize(reader_ref);
+    }
+
+    if (has_window_metadata_format) {
+        deserialize_window_metadata(reader_ref);
+        validate_window_metadata(window_term_list_size);
+    } else {
+        infer_legacy_window_metadata(window_term_list_size);
     }
 
     this->cal_memory_usage();
@@ -1787,8 +1894,8 @@ SINDI::GetSparseVectorByInnerId(InnerIdType inner_id,
         return this->rerank_flat_->GetSparseVectorByInnerId(inner_id, data, specified_allocator);
     }
 
-    auto cur_window = inner_id / window_size_;
-    auto window_start_id = cur_window * window_size_;
+    auto cur_window = find_window_id(inner_id);
+    auto window_start_id = window_metadata_[cur_window].start_id;
     auto term_list = this->window_term_list_[cur_window];
 
     term_list->GetSparseVector(inner_id - window_start_id, data, specified_allocator);
@@ -1820,8 +1927,8 @@ SINDI::CalcDistanceById(const DatasetPtr& vector,
     }
 
     auto inner_id = this->label_table_->GetIdByLabel(id);
-    auto cur_window = inner_id / window_size_;
-    auto window_start_id = cur_window * window_size_;
+    auto cur_window = find_window_id(inner_id);
+    auto window_start_id = window_metadata_[cur_window].start_id;
     auto term_list = this->window_term_list_[cur_window];
 
     auto sparse_query = vector->GetSparseVectors()[0];
@@ -1950,9 +2057,10 @@ SINDI::InitFeatures() {
 std::pair<int64_t, int64_t>
 SINDI::get_min_max_window_id(const FilterPtr& filter) const {
     int64_t min_window_id = 0;
-    auto num_windows =
-        immutable_data_ != nullptr ? immutable_data_->windows.size() : window_term_list_.size();
-    auto max_window_id = static_cast<int64_t>(num_windows) - 1;
+    auto max_window_id = static_cast<int64_t>(window_metadata_.size()) - 1;
+    if (max_window_id < 0) {
+        return {0, -1};
+    }
 
     // get min and max window id
     if (filter) {
@@ -1971,14 +2079,128 @@ SINDI::get_min_max_window_id(const FilterPtr& filter) const {
             }
         }
         if (min_inner_id != INT64_MAX) {
-            min_window_id = min_inner_id / window_size_;
+            min_window_id = find_window_id(static_cast<InnerIdType>(min_inner_id));
         }
         if (max_inner_id != INT64_MIN) {
-            max_window_id = max_inner_id / window_size_;
+            max_window_id = find_window_id(static_cast<InnerIdType>(max_inner_id));
         }
     }
 
     return {min_window_id, max_window_id};
+}
+
+uint32_t
+SINDI::find_window_id(InnerIdType inner_id) const {
+    auto iter = std::upper_bound(
+        window_metadata_.begin(),
+        window_metadata_.end(),
+        inner_id,
+        [](InnerIdType id, const SINDIWindowMetadata& metadata) { return id < metadata.start_id; });
+    CHECK_ARGUMENT(iter != window_metadata_.begin(), "SINDI inner id precedes all windows");
+    --iter;
+    const auto end_id = static_cast<uint64_t>(iter->start_id) + iter->doc_count;
+    CHECK_ARGUMENT(inner_id < end_id, "SINDI inner id does not belong to a window");
+    return static_cast<uint32_t>(iter - window_metadata_.begin());
+}
+
+void
+SINDI::create_mutable_window(const std::string& date) {
+    CHECK_ARGUMENT(cur_element_count_.load() <= std::numeric_limits<InnerIdType>::max(),
+                   "SINDI element count overflows inner id");
+    auto window = std::make_shared<SparseTermDataCell>(doc_retain_ratio_,
+                                                       term_id_limit_,
+                                                       allocator_,
+                                                       sparse_value_quant_type_,
+                                                       quantization_params_);
+    window_term_list_.push_back(std::move(window));
+    try {
+        window_metadata_.push_back({date, static_cast<InnerIdType>(cur_element_count_.load()), 0});
+    } catch (...) {
+        window_term_list_.pop_back();
+        throw;
+    }
+}
+
+void
+SINDI::infer_legacy_window_metadata(uint32_t window_count) {
+    window_metadata_.clear();
+    window_metadata_.reserve(window_count);
+    const auto element_count = static_cast<uint64_t>(cur_element_count_.load());
+    for (uint32_t i = 0; i < window_count; ++i) {
+        const auto start_id = static_cast<uint64_t>(i) * window_size_;
+        CHECK_ARGUMENT(start_id <= std::numeric_limits<InnerIdType>::max(),
+                       "legacy SINDI window start id overflows inner id");
+        const auto doc_count =
+            start_id < element_count
+                ? static_cast<uint32_t>(std::min<uint64_t>(window_size_, element_count - start_id))
+                : 0;
+        window_metadata_.push_back({"", static_cast<InnerIdType>(start_id), doc_count});
+    }
+}
+
+void
+SINDI::validate_window_metadata(uint32_t window_count) const {
+    CHECK_ARGUMENT(window_metadata_.size() == window_count,
+                   "SINDI window metadata count does not match window count");
+    const auto element_count = static_cast<uint64_t>(cur_element_count_.load());
+    uint64_t expected_start_id = 0;
+    bool reached_empty_window = false;
+    for (const auto& metadata : window_metadata_) {
+        CHECK_ARGUMENT(IsValidSINDIDate(metadata.date),
+                       "SINDI window metadata contains an invalid date");
+        CHECK_ARGUMENT(metadata.doc_count <= window_size_,
+                       "SINDI window metadata document count exceeds window size");
+        if (metadata.doc_count == 0) {
+            reached_empty_window = true;
+            CHECK_ARGUMENT(
+                expected_start_id == element_count and metadata.start_id >= expected_start_id,
+                "SINDI empty window metadata has an invalid boundary");
+            continue;
+        }
+        CHECK_ARGUMENT(not reached_empty_window, "SINDI non-empty window follows an empty window");
+        CHECK_ARGUMENT(metadata.start_id == expected_start_id,
+                       "SINDI window metadata boundaries are not contiguous");
+        expected_start_id += metadata.doc_count;
+    }
+    CHECK_ARGUMENT(expected_start_id == element_count,
+                   "SINDI window metadata document count does not match element count");
+}
+
+void
+SINDI::serialize_window_metadata(StreamWriter& writer) const {
+    const auto window_count = static_cast<uint32_t>(window_metadata_.size());
+    StreamWriter::WriteObj(writer, window_count);
+    for (const auto& metadata : window_metadata_) {
+        StreamWriter::WriteString(writer, metadata.date);
+        StreamWriter::WriteObj(writer, metadata.start_id);
+        StreamWriter::WriteObj(writer, metadata.doc_count);
+    }
+}
+
+void
+SINDI::deserialize_window_metadata(StreamReader& reader) {
+    uint32_t window_count = 0;
+    StreamReader::ReadObj(reader, window_count);
+    const auto element_count = static_cast<uint64_t>(cur_element_count_.load());
+    CHECK_ARGUMENT(window_count <= element_count,
+                   "serialized SINDI window metadata count exceeds element count");
+    window_metadata_.clear();
+    window_metadata_.reserve(window_count);
+    for (uint32_t i = 0; i < window_count; ++i) {
+        uint64_t date_length = 0;
+        StreamReader::ReadObj(reader, date_length);
+        CHECK_ARGUMENT(date_length <= MAX_SERIALIZED_DATE_LENGTH,
+                       "serialized SINDI date exceeds maximum length");
+        std::string date(date_length, '\0');
+        if (date_length > 0) {
+            reader.Read(date.data(), date_length);
+        }
+        SINDIWindowMetadata metadata;
+        metadata.date = std::move(date);
+        StreamReader::ReadObj(reader, metadata.start_id);
+        StreamReader::ReadObj(reader, metadata.doc_count);
+        window_metadata_.push_back(std::move(metadata));
+    }
 }
 
 SparseVector

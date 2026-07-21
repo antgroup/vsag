@@ -25,6 +25,12 @@
 
 namespace vsag {
 
+struct SINDIWindowMetadata {
+    std::string date;
+    InnerIdType start_id{0};
+    uint32_t doc_count{0};
+};
+
 struct ImmutableSINDIWindow {
     explicit ImmutableSINDIWindow(Allocator* allocator)
         : sorted_global_terms(allocator),
@@ -208,6 +214,7 @@ private:
                 const InnerSearchParam& inner_param,
                 Allocator* allocator,
                 bool use_term_lists_heap_insert,
+                const std::string& query_date,
                 const SparseVector* original_query = nullptr) const;
 
     template <InnerSearchMode mode>
@@ -216,6 +223,7 @@ private:
                           const InnerSearchParam& inner_param,
                           Allocator* allocator,
                           bool use_term_lists_heap_insert,
+                          const std::string& query_date,
                           const SparseVector* original_query = nullptr) const;
 
     bool
@@ -231,6 +239,24 @@ private:
      */
     std::pair<int64_t, int64_t>
     get_min_max_window_id(const FilterPtr& filter) const;
+
+    uint32_t
+    find_window_id(InnerIdType inner_id) const;
+
+    void
+    create_mutable_window(const std::string& date);
+
+    void
+    infer_legacy_window_metadata(uint32_t window_count);
+
+    void
+    validate_window_metadata(uint32_t window_count) const;
+
+    void
+    serialize_window_metadata(StreamWriter& writer) const;
+
+    void
+    deserialize_window_metadata(StreamReader& reader);
 
     MetadataPtr
     collect_streaming_header() const override;
@@ -350,6 +376,7 @@ private:
     uint32_t window_size_{0};    // number of vectors per window
 
     Vector<SparseTermDataCellPtr> window_term_list_;  // one inverted list per window
+    Vector<SINDIWindowMetadata> window_metadata_;
 
     std::atomic<int64_t> cur_element_count_{0};  // total inserted vectors
     std::atomic<int64_t> delete_count_{0};       // soft-deleted vectors

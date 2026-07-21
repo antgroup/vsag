@@ -12,9 +12,11 @@ pairs and is the only VSAG index that accepts `dtype: "sparse"`.
 
 ## How it works
 
-1. **Window-based inverted lists.** Documents are grouped into fixed-size windows
-   (`window_size`). Within each window, an inverted list per term maps a term id
-   to the `(doc_id, value)` pairs that mention it.
+1. **Window-based inverted lists.** Documents are grouped into windows capped by
+   `window_size`. When date labels are supplied, each window contains one exact
+   date label; a label that exceeds `window_size` is split across multiple windows.
+   Within each window, an inverted list per term maps a term id to the
+   `(doc_id, value)` pairs that mention it.
 2. **Optional pruning and quantization.** During construction, `doc_prune_ratio`
    drops low-weight terms per document, and `use_quantization` compresses the term
    values to shrink memory further.
@@ -51,6 +53,7 @@ auto base = vsag::Dataset::Make();
 base->NumElements(n)
     ->SparseVectors(sparse_vectors)  // vsag::SparseVector*
     ->Ids(ids)
+    ->Dates(dates)                   // optional std::string[n]
     ->Owner(false);
 index->Build(base);
 
@@ -59,7 +62,7 @@ auto query = vsag::Dataset::Make();
 query->NumElements(1)->SparseVectors(&query_vec)->Owner(false);
 auto result = index->KnnSearch(
     query, /*topk=*/10,
-    R"({"sindi": {"n_candidate": 100}})").value();
+    R"({"sindi": {"n_candidate": 100, "date": "2026/07"}})").value();
 ```
 
 ## Build parameters
@@ -92,6 +95,7 @@ Search-time parameters live under the `sindi` sub-object:
 | `n_candidate` | int | `0` | Candidate heap size. When `0`, defaults to `SPARSE_AMPLIFICATION_FACTOR · topk` (500×). If set, must satisfy `1 ≤ n_candidate ≤ SPARSE_AMPLIFICATION_FACTOR · topk`. |
 | `query_prune_ratio` | float | `0.0` | Fraction of lowest-weight query terms skipped (0.0 – 0.9). |
 | `term_prune_ratio` | float | `0.0` | Fraction of term-list entries skipped (0.0 – 0.9). |
+| `date` | string | `""` | Optional date-window selector in `YYYY`, `YYYY/MM`, or `YYYY/MM/DD` form. |
 
 SINDI chooses the heap-insertion strategy automatically from the build-time
 `doc_prune_ratio` and search-time `query_prune_ratio`. With the current `0.1`
@@ -106,6 +110,26 @@ auto result = index->KnnSearch(
     query, topk,
     R"({"sindi": {"n_candidate": 200, "query_prune_ratio": 0.1}})").value();
 ```
+
+## Date-window filtering
+
+Attach one optional date label to each build or add document with
+`Dataset::Dates(const std::string*)`. Labels must use a canonical calendar form:
+`YYYY`, `YYYY/MM`, or `YYYY/MM/DD`, including two-digit months and days. Documents
+with the same exact label share windows; documents without a date (no dates array,
+or an empty string entry) share undated windows. Different granularities are
+different labels, so a `2026/05/17` document is stored only in a `2026/05/17`
+window, not also in a `2026/05` window.
+
+Pass the online query selector in the SINDI search parameters. A year selects its
+year, month, and day windows; a month selects its month and day windows; a day
+selects only that exact day. For example, `"date": "2026"` matches `2026`,
+`2026/05`, and `2026/05/17`. A missing or empty query date disables date
+filtering. A non-empty query date excludes undated windows.
+
+Date filtering first prunes the windows to search. Any ID filter, bitset, or
+`Filter` callback is then applied inside those windows, so the two filters have
+AND semantics. Both KNN and range search support the date selector.
 
 ## When to use SINDI
 

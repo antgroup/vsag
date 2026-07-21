@@ -115,6 +115,52 @@ TEST_CASE("SINDI Index Parameters Test", "[ut][SINDIParameter]") {
         legacy_search_param->ToJson()[INDEX_SINDI].Contains("use_term_lists_heap_insert"));
 }
 
+TEST_CASE("SINDI Date Parameter Test", "[ut][SINDIParameter][date]") {
+    SECTION("valid dates round trip") {
+        const std::string date = GENERATE("2026", "2026/07", "2024/02/29");
+        const auto parameters = fmt::format(R"({{"sindi": {{"date": "{}"}}}})", date);
+        SINDISearchParameter search_param;
+        search_param.FromJson(JsonType::Parse(parameters));
+        REQUIRE(search_param.date == date);
+        REQUIRE(search_param.ToJson()[INDEX_SINDI][SPARSE_DATE].GetString() == date);
+    }
+
+    SECTION("missing and empty dates disable filtering") {
+        SINDISearchParameter missing;
+        missing.FromJson(JsonType::Parse(R"({"sindi": {}})"));
+        REQUIRE(missing.date.empty());
+        REQUIRE_FALSE(missing.ToJson()[INDEX_SINDI].Contains(SPARSE_DATE));
+
+        SINDISearchParameter empty;
+        empty.FromJson(JsonType::Parse(R"({"sindi": {"date": ""}})"));
+        REQUIRE(empty.date.empty());
+        REQUIRE_FALSE(empty.ToJson()[INDEX_SINDI].Contains(SPARSE_DATE));
+    }
+
+    SECTION("invalid dates are rejected") {
+        const std::string date = GENERATE("26",
+                                          "0000",
+                                          "2026/7",
+                                          "2026/13",
+                                          "2026/04/31",
+                                          "2025/02/29",
+                                          "2026/07/21/01",
+                                          "abcd/ef/gh");
+        const auto parameters = fmt::format(R"({{"sindi": {{"date": "{}"}}}})", date);
+        SINDISearchParameter search_param;
+        REQUIRE_THROWS(search_param.FromJson(JsonType::Parse(parameters)));
+    }
+
+    SECTION("hierarchical matching respects component boundaries") {
+        REQUIRE(SINDIDateMatches("2026", "2026"));
+        REQUIRE(SINDIDateMatches("2026/07", "2026"));
+        REQUIRE(SINDIDateMatches("2026/07/21", "2026/07"));
+        REQUIRE_FALSE(SINDIDateMatches("2026", "2026/07"));
+        REQUIRE_FALSE(SINDIDateMatches("2026/08/01", "2026/07"));
+        REQUIRE_FALSE(SINDIDateMatches("20260/07", "2026"));
+    }
+}
+
 TEST_CASE("SINDI Index Parameters Compatibility Test", "[ut][SINDIParameter]") {
     TEST_COMPATIBILITY_CASE("use_reorder compatibility", use_reorder, true, false, false);
     TEST_COMPATIBILITY_CASE("value quantization compatibility",

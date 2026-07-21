@@ -34,6 +34,12 @@ enum class SparseValueQuantizationType {
 std::string
 SparseValueQuantizationTypeToString(SparseValueQuantizationType type);
 
+bool
+IsValidSINDIDate(const std::string& date);
+
+bool
+SINDIDateMatches(const std::string& window_date, const std::string& query_date);
+
 class SINDIParameter : public InnerIndexParameter {
 public:
     void
@@ -86,6 +92,7 @@ public:
     // data cell
     float query_prune_ratio{0};
     float term_prune_ratio{0};
+    std::string date;
 };
 
 }  // namespace vsag

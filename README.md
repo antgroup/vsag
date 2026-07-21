@@ -268,7 +268,8 @@ Thrive together in VSAG community with users and developers from all around the 
     phase physically remove vectors and shrink storage instead of leaving tombstones. Vector
     updates use the same public API in both flat and graph phases.
   - **IVF (Inverted File Index)**: Optimized for large-scale search (high `k`) and batch queries.
-  - **SINDI (Sparse Inverted Non-redundant Distance Index)**: Optimized sparse vector index.
+  - **SINDI (Sparse Inverted Non-redundant Distance Index)**: Optimized sparse vector index with
+    date-window filtering for online queries.
 
 - **Advanced Quantization Methods**
   - **RaBitQ (BQ)**: Extreme compression for minimal memory usage.

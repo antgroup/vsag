@@ -288,6 +288,7 @@ DatasetImpl::~DatasetImpl() {  // NOLINT
             release_paths(std::get<const std::string*>(value));
         }
     }
+    release_paths(DatasetImpl::GetDates());
     delete[] DatasetImpl::GetSourceID();
     if (DatasetImpl::GetAttributeSets() != nullptr) {
         const auto* attrsets = DatasetImpl::GetAttributeSets();
@@ -362,6 +363,10 @@ DatasetImpl::DeepCopy(Allocator* allocator) const {
                                                         static_cast<uint64_t>(num_elements)));
         }
     }
+    if (this->GetDates() != nullptr) {
+        copy_dataset->Dates(
+            allocate_and_copy_paths(this->GetDates(), static_cast<uint64_t>(num_elements)));
+    }
 
     if (this->GetSourceID() != nullptr) {
         auto* source_ids = new std::string[num_elements];
@@ -412,6 +417,10 @@ DatasetImpl::Append(const DatasetPtr& other) {
     if (other->GetExtraInfoSize() != this->GetExtraInfoSize()) {
         throw VsagException(ErrorType::INVALID_ARGUMENT,
                             "Cannot append datasets with different extra info sizes");
+    }
+    if ((this->GetDates() == nullptr) != (other->GetDates() == nullptr)) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "Cannot append datasets with inconsistent date labels");
     }
 
     auto old_num_elements = this->GetNumElements();
@@ -534,6 +543,11 @@ DatasetImpl::Append(const DatasetPtr& other) {
         this->Paths(hierarchy_name,
                     append_paths(std::get<const std::string*>(iter->second),
                                  other->GetPaths(hierarchy_name)));
+    }
+    // append date labels
+    if (auto iter = this->data_.find(DATASET_DATES); iter != this->data_.end()) {
+        auto* current_dates = std::get<const std::string*>(iter->second);
+        this->Dates(append_paths(current_dates, other->GetDates()));
     }
     for (const auto* paths : replaced_paths) {
         delete[] paths;

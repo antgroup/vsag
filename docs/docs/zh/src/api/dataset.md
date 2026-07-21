@@ -84,6 +84,7 @@ DatasetPtr DeepCopy(Allocator* allocator = nullptr) const;  // 独立副本
 | `ExtraInfoSize(int64_t)` | `GetExtraInfoSize()` | `int64_t` | 每个 extra-info 数据块的字节数。 |
 | `Paths(const std::string*)` | `GetPaths()` | `const std::string*` | 层级路径（Pyramid）。默认层级。 |
 | `Paths(const std::string& hierarchy, const std::string*)` | `GetPaths(const std::string& hierarchy)` | `const std::string*` | 命名层级的路径。 |
+| `Dates(const std::string*)` | `GetDates()` | `const std::string*` | 可选的逐元素 SINDI 日期标签（`YYYY`、`YYYY/MM` 或 `YYYY/MM/DD`）。 |
 | `SourceID(const std::string*)` | `GetSourceID()` | `const std::string*` | 可选的来源标识。 |
 
 见 [属性过滤（混合搜索）](../advanced/attribute_filter.md) 与

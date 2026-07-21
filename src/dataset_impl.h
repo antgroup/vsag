@@ -240,6 +240,20 @@ public:
     }
 
     DatasetPtr
+    Dates(const std::string* dates) override {
+        this->data_[DATASET_DATES] = dates;
+        return shared_from_this();
+    }
+
+    const std::string*
+    GetDates() const override {
+        if (auto iter = this->data_.find(DATASET_DATES); iter != this->data_.end()) {
+            return std::get<const std::string*>(iter->second);
+        }
+        return nullptr;
+    }
+
+    DatasetPtr
     ExtraInfos(const char* extra_info) override {
         this->data_[EXTRA_INFOS] = extra_info;
         return shared_from_this();
