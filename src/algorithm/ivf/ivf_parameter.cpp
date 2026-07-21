@@ -90,6 +90,11 @@ IVFSearchParameters::FromJson(const std::string& json_string) {
                                IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT));
     obj.scan_buckets_count = params[INDEX_TYPE_IVF][IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT].GetInt();
 
+    if (params[INDEX_TYPE_IVF].Contains(IVF_SEARCH_PARAM_DISABLE_BUCKET_SCAN)) {
+        obj.disable_bucket_scan =
+            params[INDEX_TYPE_IVF][IVF_SEARCH_PARAM_DISABLE_BUCKET_SCAN].GetBool();
+    }
+
     // set obj.first_order_scan_ratio
     if (params[INDEX_TYPE_IVF].Contains(GNO_IMI_SEARCH_PARAM_FIRST_ORDER_SCAN_RATIO)) {
         obj.first_order_scan_ratio =

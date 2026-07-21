@@ -181,6 +181,11 @@ private:
     InnerSearchParam
     create_search_param(const std::string& parameters, const FilterPtr& filter) const;
 
+    DatasetPtr
+    route_buckets_only(const DatasetPtr& query,
+                       const InnerSearchParam& param,
+                       QueryContext& ctx) const;
+
     /**
      * @brief Scan the selected buckets and return a distance heap.
      *

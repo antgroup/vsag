@@ -15,6 +15,7 @@
 
 #include "ivf.h"
 
+#include <algorithm>
 #include <atomic>
 #include <limits>
 #include <random>
@@ -36,6 +37,7 @@
 #include "inner_string_params.h"
 #include "ivf_nearest_partition.h"
 #include "query_context.h"
+#include "simd/normalize.h"
 #include "storage/serialization.h"
 #include "storage/serialization_tags.h"
 #include "storage/stream_reader.h"
@@ -45,6 +47,8 @@
 #include "vsag_exception.h"
 
 namespace vsag {
+
+static constexpr BucketIdType INVALID_BUCKET_ID = static_cast<BucketIdType>(-1);
 
 static constexpr const char* IVF_PARAMS_TEMPLATE =
     R"(
@@ -983,8 +987,13 @@ IVF::create_search_param(const std::string& parameters, const FilterPtr& filter)
     InnerSearchParam param;
     param.is_inner_id_allowed = this->create_search_filter(filter);
     auto search_param = IVFSearchParameters::FromJson(parameters);
-    param.scan_bucket_size = std::min(static_cast<BucketIdType>(search_param.scan_buckets_count),
-                                      bucket_->bucket_count_);
+    if (search_param.disable_bucket_scan) {
+        param.scan_bucket_size = static_cast<BucketIdType>(search_param.scan_buckets_count);
+    } else {
+        param.scan_bucket_size = std::min(
+            static_cast<BucketIdType>(search_param.scan_buckets_count), bucket_->bucket_count_);
+    }
+    param.disable_bucket_scan = search_param.disable_bucket_scan;
     param.factor = search_param.topk_factor;
     param.enable_reorder = search_param.enable_reorder;
     param.first_order_scan_ratio = search_param.first_order_scan_ratio;
@@ -994,6 +1003,75 @@ IVF::create_search_param(const std::string& parameters, const FilterPtr& filter)
         param.time_cost->SetThreshold(search_param.timeout_ms);
     }
     return param;
+}
+
+DatasetPtr
+IVF::route_buckets_only(const DatasetPtr& query,
+                        const InnerSearchParam& param,
+                        QueryContext& ctx) const {
+    const auto num_queries = query->GetNumElements();
+    const auto* query_data = query->GetFloat32Vectors();
+    const auto buckets_per_query = param.scan_bucket_size;
+    const auto candidate_buckets =
+        partition_strategy_->ClassifyDatasForSearch(query_data, num_queries, param, &ctx);
+
+    auto result = Dataset::Make();
+    if (num_queries == 0 || buckets_per_query == 0) {
+        return result->NumElements(0)->Dim(0);
+    }
+
+    auto* alloc = (ctx.alloc != nullptr) ? ctx.alloc : allocator_;
+    const auto total_slots = num_queries * buckets_per_query;
+    auto* ids = static_cast<int64_t*>(alloc->Allocate(sizeof(int64_t) * total_slots));
+    auto* distances = static_cast<float*>(alloc->Allocate(sizeof(float) * total_slots));
+    const auto dim = partition_strategy_->dim_;
+    const auto metric = partition_strategy_->metric_type_;
+
+    Vector<float> centroid(dim, allocator_);
+    Vector<float> norm_query(dim, allocator_);
+    Vector<float> norm_centroid(dim, allocator_);
+    for (int64_t q = 0; q < num_queries; ++q) {
+        const auto* query_vec = query_data + q * dim;
+        if (metric == MetricType::METRIC_TYPE_COSINE) {
+            Normalize(query_vec, norm_query.data(), dim);
+        }
+        for (int64_t b = 0; b < buckets_per_query; ++b) {
+            const auto idx = q * buckets_per_query + b;
+            const auto bucket_id = candidate_buckets[idx];
+            if (bucket_id == INVALID_BUCKET_ID) {
+                ids[idx] = -1;
+                distances[idx] = std::numeric_limits<float>::infinity();
+                continue;
+            }
+            partition_strategy_->GetCentroid(bucket_id, centroid);
+            float dist = 0.0F;
+            if (metric == MetricType::METRIC_TYPE_L2SQR) {
+                for (int64_t d = 0; d < dim; ++d) {
+                    auto diff = query_vec[d] - centroid[d];
+                    dist += diff * diff;
+                }
+            } else if (metric == MetricType::METRIC_TYPE_COSINE) {
+                Normalize(centroid.data(), norm_centroid.data(), dim);
+                for (int64_t d = 0; d < dim; ++d) {
+                    dist += norm_query[d] * norm_centroid[d];
+                }
+                dist = 1.0F - dist;
+            } else {
+                for (int64_t d = 0; d < dim; ++d) {
+                    dist += query_vec[d] * centroid[d];
+                }
+                dist = 1.0F - dist;
+            }
+            ids[idx] = static_cast<int64_t>(bucket_id);
+            distances[idx] = dist;
+        }
+    }
+
+    return result->NumElements(num_queries)
+        ->Dim(buckets_per_query)
+        ->Ids(ids)
+        ->Distances(distances)
+        ->Owner(true, alloc);
 }
 
 DatasetPtr
@@ -1076,7 +1154,7 @@ IVF::search(const DatasetPtr& query,
                 break;
             }
             auto bucket_id = candidate_buckets[i];
-            if (bucket_id == -1) {
+            if (bucket_id == INVALID_BUCKET_ID) {
                 break;
             }
             bucket_searcher_->Search(bucket_id,
@@ -1212,6 +1290,18 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
     auto param = this->create_search_param(request.params_str_, request.filter_);
 
     auto query = request.query_;
+    if (param.disable_bucket_scan) {
+        CHECK_ARGUMENT(query != nullptr, "query dataset cannot be null");
+        CHECK_ARGUMENT(query->GetNumElements() >= 1,
+                       "disable bucket scan requires at least one query");
+        CHECK_ARGUMENT(query->GetFloat32Vectors() != nullptr,
+                       "query float32 vectors cannot be null");
+        CHECK_ARGUMENT(query->GetDim() == this->dim_, "query dimension must match index dimension");
+        auto result = this->route_buckets_only(query, param, ctx);
+        result->Statistics(stats.Dump());
+        return result;
+    }
+
     if (request.enable_attribute_filter_ and this->attr_filter_index_ != nullptr) {
         auto& schema = this->attr_filter_index_->field_type_map_;
         auto expr = AstParse(request.attribute_filter_str_, &schema);

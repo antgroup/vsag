@@ -1575,6 +1575,116 @@ IVF_PR_DAILY_CASE("IVF GNO-IMI Build with Residual",
                   "[ft][build][ivf]",
                   TestIVFGNOIMIBuildWithResidual)
 
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
+                             "IVF Search Disable Bucket Scan",
+                             "[ft][search][ivf][pr]") {
+    constexpr auto dim = 32;
+    constexpr auto buckets_count = 10;
+    constexpr auto scan_buckets_count = 3;
+    auto dataset = IVFTestIndex::pool.GetDatasetAndCreate(dim, 200, "l2");
+    std::vector<float> query_vector(dataset->base_->GetFloat32Vectors(),
+                                    dataset->base_->GetFloat32Vectors() + dim);
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(dim)->Float32Vectors(query_vector.data())->Owner(false);
+
+    auto check_bucket_result = [](const vsag::DatasetPtr& result,
+                                  int64_t num_queries,
+                                  int64_t buckets_per_query,
+                                  int64_t max_bucket_id) {
+        REQUIRE(result->GetNumElements() == num_queries);
+        REQUIRE(result->GetDim() == buckets_per_query);
+        REQUIRE(result->GetDistances() != nullptr);
+        for (int64_t q = 0; q < num_queries; ++q) {
+            int valid = 0;
+            for (int64_t b = 0; b < buckets_per_query; ++b) {
+                auto idx = q * buckets_per_query + b;
+                auto id = result->GetIds()[idx];
+                if (id >= 0) {
+                    REQUIRE(id < max_bucket_id);
+                    REQUIRE(std::isfinite(result->GetDistances()[idx]));
+                    ++valid;
+                }
+            }
+            REQUIRE(valid > 0);
+        }
+    };
+
+    auto param = IVFTestIndex::GenerateIVFBuildParametersString("l2", dim, "fp32", buckets_count);
+    auto index = TestIndex::TestFactory(IVFTestIndex::name, param, true);
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    auto normal_result = index->KnnSearch(query, 1, R"({"ivf":{"scan_buckets_count":3}})");
+    REQUIRE(normal_result.has_value());
+    REQUIRE(normal_result.value()->GetDistances() != nullptr);
+
+    const auto route_params = R"({"ivf":{"scan_buckets_count":3,"disable_bucket_scan":true}})";
+    auto knn_result = index->KnnSearch(query, 1, route_params);
+    REQUIRE(knn_result.has_value());
+    check_bucket_result(knn_result.value(), 1, scan_buckets_count, buckets_count);
+
+    vsag::SearchRequest request;
+    request.query_ = query;
+    request.topk_ = 1;
+    request.params_str_ = route_params;
+    auto request_result = index->SearchWithRequest(request);
+    REQUIRE(request_result.has_value());
+    check_bucket_result(request_result.value(), 1, scan_buckets_count, buckets_count);
+
+    constexpr auto gno_imi_first_order_bucket_count = 4;
+    constexpr auto gno_imi_second_order_bucket_count = 4;
+    auto gno_imi_param = IVFTestIndex::GenerateGNOIMIBuildParametersString(
+        "l2", dim, "fp32", gno_imi_first_order_bucket_count, gno_imi_second_order_bucket_count);
+    auto gno_imi_index = TestIndex::TestFactory(IVFTestIndex::name, gno_imi_param, true);
+    TestIndex::TestBuildIndex(gno_imi_index, dataset, true);
+
+    constexpr auto gno_scan = 20;
+    request.params_str_ = R"({"ivf":{"scan_buckets_count":20,"disable_bucket_scan":true}})";
+    auto gno_imi_result = gno_imi_index->SearchWithRequest(request);
+    REQUIRE(gno_imi_result.has_value());
+    check_bucket_result(gno_imi_result.value(),
+                        1,
+                        gno_scan,
+                        gno_imi_first_order_bucket_count * gno_imi_second_order_bucket_count);
+
+    SECTION("batch queries") {
+        std::vector<float> batch(dim * 3);
+        std::memcpy(batch.data(), query_vector.data(), dim * sizeof(float));
+        std::memcpy(batch.data() + dim, query_vector.data(), dim * sizeof(float));
+        std::memcpy(batch.data() + 2 * dim, query_vector.data(), dim * sizeof(float));
+        auto batch_query = vsag::Dataset::Make();
+        batch_query->NumElements(3)->Dim(dim)->Float32Vectors(batch.data())->Owner(false);
+        vsag::SearchRequest batch_req;
+        batch_req.query_ = batch_query;
+        batch_req.topk_ = 1;
+        batch_req.params_str_ = route_params;
+        auto batch_result = index->SearchWithRequest(batch_req);
+        REQUIRE(batch_result.has_value());
+        check_bucket_result(batch_result.value(), 3, scan_buckets_count, buckets_count);
+    }
+
+    SECTION("reject zero queries") {
+        auto zero_query = vsag::Dataset::Make();
+        zero_query->NumElements(0)->Dim(dim)->Owner(false);
+        vsag::SearchRequest bad_request;
+        bad_request.query_ = zero_query;
+        bad_request.topk_ = 1;
+        bad_request.params_str_ = route_params;
+        auto bad_result = index->SearchWithRequest(bad_request);
+        REQUIRE_FALSE(bad_result.has_value());
+    }
+
+    SECTION("reject null float32 vectors") {
+        auto null_query = vsag::Dataset::Make();
+        null_query->NumElements(1)->Dim(dim)->Owner(false);
+        vsag::SearchRequest null_request;
+        null_request.query_ = null_query;
+        null_request.topk_ = 1;
+        null_request.params_str_ = route_params;
+        auto null_result = index->SearchWithRequest(null_request);
+        REQUIRE_FALSE(null_result.has_value());
+    }
+}
+
 // RejectAllFilter for testing empty results
 class RejectAllFilter : public vsag::Filter {
 public:

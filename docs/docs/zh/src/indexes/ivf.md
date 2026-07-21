@@ -94,7 +94,8 @@ auto result = index->KnnSearch(
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `scan_buckets_count` | int | —（必填） | 每次查询扫描的桶数，须 ≤ `buckets_count` |
+| `scan_buckets_count` | int | —（必填） | 每次查询扫描的桶数，须 ≤ `buckets_count`（`disable_bucket_scan` 为 true 时可更大，空槽位补 `-1`） |
+| `disable_bucket_scan` | bool | `false` | 返回桶 ID 及到桶中心距离，不扫描桶内向量。支持批量查询。 |
 | `factor` | float | `2.0` | 启用精排时，粗排阶段会预取 `factor * topk` 个候选再重打分 |
 | `enable_reorder` | bool | `true` | 即使索引构建时启用了 reorder，也可以在单次请求里设为 `false` 跳过最终精排 |
 | `parallelism` | int | `1` | 单次查询内扫描桶时使用的线程数 |
