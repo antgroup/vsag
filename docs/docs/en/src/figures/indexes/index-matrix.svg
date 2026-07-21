@@ -2,7 +2,7 @@
      font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
   <title>VSAG 1.0 index matrix</title>
   <desc>
-    Pyramid and LazyHGraph are composed or adaptive indexes above the five core index families:
+    Pyramid and LazyHGraph are composite or adaptive indexes. The five core index families are
     BruteForce, HGraph, IVF, SINDI, and SIMQ.
   </desc>
 
@@ -22,24 +22,24 @@
   <rect width="1000" height="520" fill="#ffffff"/>
   <text class="title" x="40" y="36">VSAG 1.0 index matrix</text>
   <text class="subtitle" x="40" y="58">
-    Composed and adaptive indexes build on a focused set of core retrieval families
+    Two composite or adaptive indexes, plus five core retrieval families
   </text>
 
   <rect class="group" x="40" y="82" width="920" height="154" rx="14"/>
-  <text class="group-label" x="60" y="108">COMPOSED / ADAPTIVE INDEXES</text>
+  <text class="group-label" x="60" y="108">COMPOSITE / ADAPTIVE INDEXES</text>
 
   <g transform="translate(80,126)">
     <rect class="card" width="380" height="82" rx="10"/>
     <text class="name" x="24" y="31">Pyramid</text>
     <text class="kind" x="24" y="52">PATH-PARTITIONED</text>
     <text class="detail" x="170" y="32">Multi-tenant and hierarchical retrieval</text>
-    <text class="detail" x="170" y="52">Named path-scoped sub-indexes</text>
+    <text class="detail" x="170" y="52">Named independent path trees</text>
   </g>
 
   <g transform="translate(540,126)">
     <rect class="card" width="380" height="82" rx="10"/>
     <text class="name" x="24" y="31">LazyHGraph</text>
-    <text class="kind" x="24" y="52">SELF-SCALING</text>
+    <text class="kind" x="24" y="52">ADAPTIVE</text>
     <text class="detail" x="170" y="32">Starts with exact BruteForce</text>
     <text class="detail" x="170" y="52">Transitions to HGraph at a threshold</text>
   </g>
