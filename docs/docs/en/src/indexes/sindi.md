@@ -111,7 +111,7 @@ and `metric_type` **must** be `"ip"`.
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `dim` | int | — (required) | Maximum number of non-zero elements per sparse vector. *Not* the vocabulary size. |
-| `term_id_limit` | int | `1000000` | Upper bound on term id values (≥ max term id + 1). The maximum is 50 000 000 for `sindi` and 10 000 000 for `sindi_v2`. |
+| `term_id_limit` | int | `1000000` | Upper bound on term id values (≥ max term id + 1). The maximum is 50 000 000 for both `sindi` and `sindi_v2`. |
 | `window_size` | int | `50000` | Documents per window (range: 10 000 – 60 000). |
 | `doc_prune_ratio` | float | `0.0` | Fraction of lowest-weight terms dropped per doc at build time (0.0 – 0.9). |
 | `use_quantization` | bool or string | `false` | `false` stores FP32 values, `true` stores SQ8 values, and `"fp16"` stores FP16 values. |
@@ -130,6 +130,9 @@ and `metric_type` **must** be `"ip"`.
 | `rerank_io` | object | `{"type": "block_memory_io"}` | Backend for rerank vectors when `use_reorder` is enabled. A missing file-backed `file_path` is derived as `<term_io.file_path>.rerank`. |
 | `rerank_layout` | string | `"none"` | Rerank-vector layout: `"none"` or `"top_terms_signature"`. The latter requires `use_reorder: true`. |
 | `rerank_layout_top_terms` | int | `16` | Positive number of leading terms used by `"top_terms_signature"`. |
+
+For SINDI V2, `rerank_type: "dmq8"` currently requires the default in-memory
+`block_memory_io` rerank backend and `rerank_layout: "none"`.
 
 Search parameters must use a sub-object matching the factory entry: `{"sindi": {...}}`
 for `sindi`, or `{"sindi_v2": {...}}` for `sindi_v2`.

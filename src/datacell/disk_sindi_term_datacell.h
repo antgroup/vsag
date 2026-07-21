@@ -23,8 +23,8 @@
 #include "datacell/sindi_term_datacell.h"
 #include "impl/inner_search_param.h"
 #include "index_common_param.h"
-#include "io/basic_io.h"
-#include "io/io_parameter.h"
+#include "io/common/basic_io.h"
+#include "io/common/io_parameter.h"
 #include "quantization/sparse_quantization/sparse_term_computer.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
@@ -43,8 +43,7 @@ public:
     virtual ~DiskSindiTermDataCellInterface() = default;
 
     static std::shared_ptr<DiskSindiTermDataCellInterface>
-    MakeInstance(float doc_retain_ratio,
-                 uint32_t term_id_limit,
+    MakeInstance(uint32_t term_id_limit,
                  Allocator* allocator,
                  SparseValueQuantizationType sparse_value_quant_type,
                  QuantizationParamsPtr quantization_params,
@@ -53,8 +52,7 @@ public:
                  const IndexCommonParam& common_param);
 
     static std::shared_ptr<DiskSindiTermDataCellInterface>
-    MakeInstance(float doc_retain_ratio,
-                 uint32_t term_id_limit,
+    MakeInstance(uint32_t term_id_limit,
                  Allocator* allocator,
                  bool use_quantization,
                  QuantizationParamsPtr quantization_params,
@@ -63,8 +61,7 @@ public:
                  const IndexCommonParam& common_param) {
         auto quantization_type =
             use_quantization ? SparseValueQuantizationType::SQ8 : SparseValueQuantizationType::FP32;
-        return MakeInstance(doc_retain_ratio,
-                            term_id_limit,
+        return MakeInstance(term_id_limit,
                             allocator,
                             quantization_type,
                             std::move(quantization_params),
@@ -155,8 +152,7 @@ using DiskSindiTermDataCellInterfacePtr = std::shared_ptr<DiskSindiTermDataCellI
 template <typename IOTmpl>
 class DiskSindiTermDataCell : public DiskSindiTermDataCellInterface {
 public:
-    DiskSindiTermDataCell(float doc_retain_ratio,
-                          uint32_t term_id_limit,
+    DiskSindiTermDataCell(uint32_t term_id_limit,
                           Allocator* allocator,
                           SparseValueQuantizationType sparse_value_quant_type,
                           QuantizationParamsPtr quantization_params,
