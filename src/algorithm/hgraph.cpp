@@ -531,8 +531,8 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
 
 bool
 HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
-    if (not this->index_feature_list_->CheckFeature(IndexFeature::SUPPORT_TUNE) or
-        not this->has_raw_vector_) {
+    std::scoped_lock lock(this->add_mutex_);
+    if (not this->index_feature_list_->CheckFeature(IndexFeature::SUPPORT_TUNE)) {
         return false;
     }
 
@@ -557,56 +557,70 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
     auto new_basic_code =
         FlattenInterface::MakeInstance(hgraph_parameter->base_codes_param, common_param);
     FlattenInterfacePtr new_precise_code;
-    if (inner_parameter->use_reorder) {
+    const bool new_use_reorder = inner_parameter->use_reorder;
+    if (new_use_reorder) {
         new_precise_code =
             FlattenInterface::MakeInstance(hgraph_parameter->precise_codes_param, common_param);
     }
 
-    std::scoped_lock lock(this->add_mutex_);
+    const auto current_count = total_count_.load(std::memory_order_acquire);
+    auto covers_active_ids = [current_count](const FlattenInterfacePtr& codes) {
+        return codes != nullptr and codes->TotalCount() >= current_count;
+    };
 
-    // check which code need to tune and update create_param_ptr_
+    // Check which codes need to be rebuilt.
     bool is_tune_base_code = false;
     bool is_tune_precise_code = false;
-    bool new_use_reorder = use_reorder_;
-    bool drop_precise_codes = false;
-    auto param = std::dynamic_pointer_cast<HGraphParameter>(create_param_ptr_);
+    const bool drop_precise_codes = not new_use_reorder;
     if (basic_flatten_codes_->GetQuantizerName() != new_basic_code->GetQuantizerName()) {
-        // [case 1] base_code is not same
         is_tune_base_code = true;
     }
-    if (use_reorder_ and inner_parameter->use_reorder and
-        this->high_precise_codes_->GetQuantizerName() != new_precise_code->GetQuantizerName()) {
-        // [case 2] precise code is not same
-        is_tune_precise_code = true;
-    }
-    if (not inner_parameter->use_reorder) {
-        // [case 3] drop precise_code
-        new_use_reorder = false;
-        drop_precise_codes = true;
-        param->precise_codes_param.reset();
-        is_tune_precise_code = false;
-    }
-    if (not new_use_reorder and inner_parameter->use_reorder) {
-        // [case 4] assign new precise_code
-        new_use_reorder = true;
+    if (new_use_reorder and
+        (not covers_active_ids(high_precise_codes_) or
+         high_precise_codes_->GetQuantizerName() != new_precise_code->GetQuantizerName())) {
         is_tune_precise_code = true;
     }
 
-    // update create_param_ptr_
-    if (is_tune_base_code) {
-        param->base_codes_param = hgraph_parameter->base_codes_param;
+    FlattenInterfacePtr tune_source;
+    if (is_tune_base_code or is_tune_precise_code) {
+        if (covers_active_ids(raw_vector_)) {
+            tune_source = raw_vector_;
+        } else if (covers_active_ids(high_precise_codes_) and
+                   high_precise_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
+            tune_source = high_precise_codes_;
+        } else if (covers_active_ids(basic_flatten_codes_) and
+                   basic_flatten_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
+            tune_source = basic_flatten_codes_;
+        } else {
+            return false;
+        }
     }
-    if (is_tune_precise_code) {
-        param->precise_codes_param = hgraph_parameter->precise_codes_param;
-    }
-    param->use_reorder = new_use_reorder;
 
-    // export train data and train new_basic_code
+    auto decode_tune_source = [&](InnerIdType inner_id, float* data) {
+        bool need_release = false;
+        const auto* buffer = tune_source->GetCodesById(inner_id, need_release);
+        if (buffer == nullptr) {
+            throw VsagException(ErrorType::INTERNAL_ERROR,
+                                fmt::format("failed to get vector by inner id {}", inner_id));
+        }
+        try {
+            tune_source->Decode(buffer, data);
+        } catch (...) {
+            if (need_release) {
+                tune_source->Release(buffer);
+            }
+            throw;
+        }
+        if (need_release) {
+            tune_source->Release(buffer);
+        }
+    };
+
     auto train_count = std::min(this->train_sample_count_, this->GetNumElements());
     Vector<float> train_data(train_count * dim_, 0, allocator_);
     if (is_tune_base_code or is_tune_precise_code) {
         for (InnerIdType i = 0; i < train_count; i++) {
-            this->GetVectorByInnerId(i, (train_data.data() + i * dim_));
+            decode_tune_source(i, train_data.data() + i * dim_);
         }
     }
 
@@ -619,8 +633,8 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
             new_code->Train(train_data.data(), train_count);
 
             Vector<float> insert_buffer(dim_, 0, allocator_);
-            for (int64_t i = 0; i < total_count_; ++i) {
-                GetVectorByInnerId(i, insert_buffer.data());
+            for (int64_t i = 0; i < current_count; ++i) {
+                decode_tune_source(i, insert_buffer.data());
                 new_code->InsertVector(static_cast<const void*>(insert_buffer.data()), i);
             }
             return new_code;
@@ -634,11 +648,19 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
     // preventing concurrent searches from accessing partially updated state.
     {
         std::scoped_lock<std::shared_mutex> wlock(this->global_mutex_);
+        auto param = std::dynamic_pointer_cast<HGraphParameter>(create_param_ptr_);
         basic_flatten_codes_ = new_basic;
         if (drop_precise_codes) {
             high_precise_codes_.reset();
+            param->precise_codes_param.reset();
         } else {
             high_precise_codes_ = new_precise;
+            if (is_tune_precise_code) {
+                param->precise_codes_param = hgraph_parameter->precise_codes_param;
+            }
+        }
+        if (is_tune_base_code) {
+            param->base_codes_param = hgraph_parameter->base_codes_param;
         }
         use_reorder_ = new_use_reorder;
         param->use_reorder = new_use_reorder;

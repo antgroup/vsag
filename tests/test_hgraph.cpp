@@ -997,6 +997,100 @@ TEST_CASE("(Daily) HGraph Tune", "[ft][hgraph][daily]") {
     TestHGraphTune(test_index, resource);
 }
 
+TEST_CASE("HGraph Tune uses available codes", "[ft][search][hgraph][tune_codes]") {
+    using namespace fixtures;
+
+    constexpr int64_t dim = 32;
+    constexpr int64_t base_count = 256;
+    auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(dim, base_count, "cosine");
+
+    auto make_parameters = [&](const std::string& quantization, bool store_raw = false) {
+        HGraphTestIndex::HGraphBuildParam build_param("cosine", dim, quantization);
+        build_param.thread_count = 1;
+        build_param.store_raw_vector = store_raw;
+        return HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+    };
+    auto make_index = [&](const std::string& quantization, bool store_raw = false) {
+        auto index =
+            TestIndex::TestFactory("hgraph", make_parameters(quantization, store_raw), true);
+        TestIndex::TestBuildIndex(index, dataset, true);
+        return index;
+    };
+    auto require_fp32_accuracy = [&](const TestIndex::IndexPtr& index) {
+        constexpr float tolerance = 2e-6F;
+        const auto* queries = dataset->query_->GetFloat32Vectors();
+        const auto* gt_ids = dataset->ground_truth_->GetIds();
+        const auto* gt_distances = dataset->ground_truth_->GetDistances();
+        for (int64_t i = 0; i < dataset->query_->GetNumElements(); ++i) {
+            for (int64_t j = 0; j < dataset->top_k; ++j) {
+                auto pos = i * dataset->top_k + j;
+                auto result = index->CalcDistanceById(queries + i * dim, gt_ids[pos]);
+                REQUIRE(result.has_value());
+                REQUIRE(std::abs(result.value() - gt_distances[pos]) < tolerance);
+            }
+        }
+    };
+
+    SECTION("separate raw codes") {
+        auto index = make_index("sq8,bf16", true);
+        auto result = index->Tune(make_parameters("fp32"), true);
+        REQUIRE(result.has_value());
+        REQUIRE(result.value());
+        require_fp32_accuracy(index);
+    }
+
+    SECTION("precise fp32 codes") {
+        auto index = make_index("bf16,fp32");
+        auto result = index->Tune(make_parameters("fp32"), true);
+        REQUIRE(result.has_value());
+        REQUIRE(result.value());
+        require_fp32_accuracy(index);
+    }
+
+    SECTION("base fp32 codes") {
+        auto index = make_index("fp32,bf16");
+        auto result = index->Tune(make_parameters("fp32,fp32"), true);
+        REQUIRE(result.has_value());
+        REQUIRE(result.value());
+        require_fp32_accuracy(index);
+    }
+
+    SECTION("unloaded precise codes") {
+        auto parsed = vsag::JsonType::Parse(make_parameters("fp32,fp32"));
+        parsed[vsag::INDEX_PARAM]["ignore_reorder"].SetBool(true);
+        auto parameters = parsed.Dump();
+
+        auto index = TestIndex::TestFactory("hgraph", parameters, true);
+        TestIndex::TestBuildIndex(index, dataset, true);
+        auto binary_set = index->Serialize();
+        REQUIRE(binary_set.has_value());
+
+        // ignore_reorder is a serialization-only option and is not persisted in 0.18.
+        auto reloaded = TestIndex::TestFactory("hgraph", make_parameters("fp32,fp32"), true);
+        auto deserialize_result = reloaded->Deserialize(binary_set.value());
+        REQUIRE(deserialize_result.has_value());
+
+        auto tune_result = reloaded->Tune(make_parameters("fp32,fp32"), true);
+        REQUIRE(tune_result.has_value());
+        REQUIRE(tune_result.value());
+        require_fp32_accuracy(reloaded);
+    }
+
+    SECTION("no usable codes") {
+        auto index = make_index("sq8,bf16");
+        auto result = index->Tune(make_parameters("bf16,bf16"));
+        REQUIRE(result.has_value());
+        REQUIRE_FALSE(result.value());
+    }
+
+    SECTION("no rebuild") {
+        auto index = make_index("sq8,bf16");
+        auto result = index->Tune(make_parameters("sq8"), true);
+        REQUIRE(result.has_value());
+        REQUIRE(result.value());
+    }
+}
+
 TEST_CASE("(PR) HGraph Tune with ignore_reorder", "[ft][hgraph][pr]") {
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
