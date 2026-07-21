@@ -35,6 +35,12 @@ struct TermLayout {
     uint64_t payload_size{0};
 };
 
+struct TermPayloadLayout {
+    uint64_t ids_offset{0};
+    uint64_t values_offset{0};
+    uint32_t posting_count{0};
+};
+
 [[nodiscard]] uint32_t
 GetValueCodeSize(SparseValueQuantizationType type);
 
@@ -74,6 +80,24 @@ ReadTermPayload(StreamReader& reader,
                 uint64_t total_count,
                 uint32_t value_code_size,
                 Allocator* allocator);
+
+[[nodiscard]] TermPayloadLayout
+ReadTermPayloadMetadata(StreamReader& reader,
+                        uint64_t payload_start,
+                        uint64_t payload_size,
+                        const DiskTermEntry& entry,
+                        uint32_t window_count,
+                        uint32_t value_code_size,
+                        Vector<TermWindowMeta>& metadata);
+
+void
+ReadTermPostingRange(StreamReader& reader,
+                     const TermPayloadLayout& layout,
+                     uint32_t posting_offset,
+                     uint32_t posting_count,
+                     uint32_t value_code_size,
+                     uint16_t* ids,
+                     uint8_t* values);
 
 [[nodiscard]] SindiTermBuffer
 ParseTermPayload(const uint8_t* payload,

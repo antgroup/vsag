@@ -399,5 +399,87 @@ ReadTermPayload(StreamReader& reader,
                             allocator);
 }
 
+TermPayloadLayout
+ReadTermPayloadMetadata(StreamReader& reader,
+                        uint64_t payload_start,
+                        uint64_t payload_size,
+                        const DiskTermEntry& entry,
+                        uint32_t window_count,
+                        uint32_t value_code_size,
+                        Vector<TermWindowMeta>& metadata) {
+    CHECK_ARGUMENT(entry.posting_count > 0 && entry.posting_payload_offset <= payload_size &&
+                       entry.posting_payload_size <= payload_size - entry.posting_payload_offset,
+                   "SINDI V2 term payload is out of range");
+    CHECK_ARGUMENT(entry.posting_payload_size >= sizeof(uint32_t),
+                   "SINDI V2 term payload is truncated");
+    CHECK_ARGUMENT(
+        payload_start <= std::numeric_limits<uint64_t>::max() - entry.posting_payload_offset,
+        "SINDI V2 term payload offset overflows uint64_t");
+
+    const auto term_payload_start = payload_start + entry.posting_payload_offset;
+    uint32_t non_empty_window_count = 0;
+    reader.PushSeek(term_payload_start);
+    StreamReader::ReadObj(reader, non_empty_window_count);
+    CHECK_ARGUMENT(non_empty_window_count > 0 && non_empty_window_count <= window_count,
+                   "invalid SINDI V2 non-empty window count");
+    const auto metadata_size =
+        static_cast<uint64_t>(non_empty_window_count) * sizeof(TermWindowMeta);
+    CHECK_ARGUMENT(metadata_size <= entry.posting_payload_size - sizeof(uint32_t),
+                   "invalid SINDI V2 non-empty window count");
+    metadata.resize(non_empty_window_count);
+    reader.Read(reinterpret_cast<char*>(metadata.data()), metadata_size);
+    reader.PopSeek();
+
+    const auto expected_payload_size =
+        GetTermPayloadSize(non_empty_window_count, entry.posting_count, value_code_size);
+    CHECK_ARGUMENT(expected_payload_size == entry.posting_payload_size,
+                   "SINDI V2 term values size is invalid");
+
+    uint32_t posting_count = 0;
+    uint32_t previous_window = std::numeric_limits<uint32_t>::max();
+    for (const auto& meta : metadata) {
+        CHECK_ARGUMENT(meta.posting_count > 0 && meta.window_id < window_count &&
+                           (previous_window == std::numeric_limits<uint32_t>::max() ||
+                            meta.window_id > previous_window),
+                       "invalid SINDI V2 term window metadata");
+        CHECK_ARGUMENT(posting_count <= entry.posting_count &&
+                           meta.posting_count <= entry.posting_count - posting_count,
+                       "SINDI V2 term posting count does not match term dictionary");
+        posting_count += meta.posting_count;
+        previous_window = meta.window_id;
+    }
+    CHECK_ARGUMENT(posting_count == entry.posting_count,
+                   "SINDI V2 term posting count does not match term dictionary");
+
+    const auto ids_offset = term_payload_start + sizeof(uint32_t) + metadata_size;
+    const auto values_offset = ids_offset +
+                               static_cast<uint64_t>(entry.posting_count) * sizeof(uint16_t) +
+                               GetIdsPadding(entry.posting_count);
+    return {ids_offset, values_offset, entry.posting_count};
+}
+
+void
+ReadTermPostingRange(StreamReader& reader,
+                     const TermPayloadLayout& layout,
+                     uint32_t posting_offset,
+                     uint32_t posting_count,
+                     uint32_t value_code_size,
+                     uint16_t* ids,
+                     uint8_t* values) {
+    CHECK_ARGUMENT(posting_count > 0 && posting_offset <= layout.posting_count &&
+                       posting_count <= layout.posting_count - posting_offset,
+                   "SINDI V2 term posting range is out of bounds");
+    CHECK_ARGUMENT(ids != nullptr && values != nullptr,
+                   "SINDI V2 term posting destination is null");
+
+    reader.PushSeek(layout.ids_offset + static_cast<uint64_t>(posting_offset) * sizeof(uint16_t));
+    reader.Read(reinterpret_cast<char*>(ids),
+                static_cast<uint64_t>(posting_count) * sizeof(uint16_t));
+    reader.Seek(layout.values_offset + static_cast<uint64_t>(posting_offset) * value_code_size);
+    reader.Read(reinterpret_cast<char*>(values),
+                static_cast<uint64_t>(posting_count) * value_code_size);
+    reader.PopSeek();
+}
+
 }  // namespace sindi_datacell_utils
 }  // namespace vsag

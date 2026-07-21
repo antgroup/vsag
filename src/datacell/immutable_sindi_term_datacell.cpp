@@ -577,51 +577,187 @@ ImmutableSindiTermDataCell::DeserializeTermLayout(StreamReader& reader,
     sindi_datacell_utils::ValidateTermDict(term_dict, term_payload_size);
     const auto value_code_size = sindi_datacell_utils::GetValueCodeSize(sparse_value_quant_type_);
 
-    Vector<ImmutableSINDIWindow> loaded(allocator_);
-    loaded.reserve(window_count);
-    for (uint32_t window = 0; window < window_count; ++window) {
-        loaded.emplace_back(allocator_);
-        loaded.back().offsets.push_back(0);
-    }
-    for (uint32_t term = 0; term < term_dict.size(); ++term) {
-        const auto& entry = term_dict[term];
+    Vector<uint64_t> window_term_counts(window_count, 0, allocator_);
+    Vector<uint32_t> window_posting_counts(window_count, 0, allocator_);
+    Vector<TermWindowMeta> metadata(allocator_);
+    uint64_t posting_scratch_size = 0;
+    for (const auto& entry : term_dict) {
         if (entry.posting_count == 0) {
-            if (not remap_term_ids_) {
-                for (auto& window : loaded) {
-                    window.offsets.push_back(window.offsets.back());
-                }
-            }
             continue;
         }
-        auto buffer = sindi_datacell_utils::ReadTermPayload(reader,
-                                                            payload_start,
-                                                            term_payload_size,
-                                                            entry,
-                                                            window_count,
-                                                            window_size_,
-                                                            total_count,
-                                                            value_code_size,
-                                                            allocator_);
+        [[maybe_unused]] const auto layout =
+            sindi_datacell_utils::ReadTermPayloadMetadata(reader,
+                                                          payload_start,
+                                                          term_payload_size,
+                                                          entry,
+                                                          window_count,
+                                                          value_code_size,
+                                                          metadata);
+        if (metadata.size() > 1) {
+            const auto posting_width = std::max<uint64_t>(sizeof(uint16_t), value_code_size);
+            posting_scratch_size = std::max(
+                posting_scratch_size, static_cast<uint64_t>(entry.posting_count) * posting_width);
+        }
+        for (const auto& meta : metadata) {
+            CHECK_ARGUMENT(
+                window_term_counts[meta.window_id] < std::numeric_limits<uint64_t>::max(),
+                "immutable SINDI window term count overflows uint64_t");
+            ++window_term_counts[meta.window_id];
+            CHECK_ARGUMENT(window_posting_counts[meta.window_id] <=
+                               std::numeric_limits<uint32_t>::max() - meta.posting_count,
+                           "immutable SINDI posting offset overflows uint32_t");
+            window_posting_counts[meta.window_id] += meta.posting_count;
+        }
+    }
 
-        for (uint32_t window_id = 0; window_id < window_count; ++window_id) {
-            auto& window = loaded[window_id];
-            const auto [begin, count] = buffer.GetPostingRange(window_id);
-            if (remap_term_ids_ && count != 0) {
-                window.sorted_global_terms.push_back(term);
+    Vector<ImmutableSINDIWindow> loaded(allocator_);
+    loaded.reserve(window_count);
+    for (uint32_t window_id = 0; window_id < window_count; ++window_id) {
+        loaded.emplace_back(allocator_);
+        auto& window = loaded.back();
+        const auto term_count = remap_term_ids_ ? window_term_counts[window_id] : term_dict.size();
+        CHECK_ARGUMENT(term_count < std::numeric_limits<uint64_t>::max(),
+                       "immutable SINDI offset count overflows uint64_t");
+        CHECK_ARGUMENT(term_count <= window.offsets.max_size() - 1,
+                       "immutable SINDI offset count exceeds vector capacity");
+        if (remap_term_ids_) {
+            CHECK_ARGUMENT(term_count <= window.sorted_global_terms.max_size(),
+                           "immutable SINDI remapped term count exceeds vector capacity");
+            window.sorted_global_terms.resize(term_count);
+        }
+        window.offsets.resize(term_count + 1);
+        window.offsets[0] = 0;
+        const auto posting_count = window_posting_counts[window_id];
+        CHECK_ARGUMENT(posting_count <= window.id_payloads.max_size(),
+                       "immutable SINDI id payload count exceeds vector capacity");
+        window.id_payloads.resize(posting_count);
+        CHECK_ARGUMENT(posting_count <= std::numeric_limits<uint64_t>::max() / value_code_size,
+                       "immutable SINDI value payload size overflows uint64_t");
+        const auto value_count = static_cast<uint64_t>(posting_count) * value_code_size;
+        CHECK_ARGUMENT(value_count <= window.value_payloads.max_size(),
+                       "immutable SINDI value payload count exceeds vector capacity");
+        window.value_payloads.resize(value_count);
+    }
+
+    Vector<uint8_t> posting_scratch(posting_scratch_size, allocator_);
+    Vector<uint64_t> window_term_cursors(window_count, 0, allocator_);
+    Vector<uint32_t> window_posting_cursors(window_count, 0, allocator_);
+    for (uint64_t term = 0; term < term_dict.size(); ++term) {
+        const auto& entry = term_dict[term];
+        if (entry.posting_count != 0) {
+            const auto layout = sindi_datacell_utils::ReadTermPayloadMetadata(reader,
+                                                                              payload_start,
+                                                                              term_payload_size,
+                                                                              entry,
+                                                                              window_count,
+                                                                              value_code_size,
+                                                                              metadata);
+            const auto validate_ids = [&](const TermWindowMeta& meta, uint32_t posting_offset) {
+                const auto window_id = meta.window_id;
+                const auto window_start = static_cast<uint64_t>(window_id) * window_size_;
+                const auto window_document_count = static_cast<uint32_t>(std::min<uint64_t>(
+                    window_size_, total_count > window_start ? total_count - window_start : 0));
+                const auto& window = loaded[window_id];
+                for (uint32_t posting = 0; posting < meta.posting_count; ++posting) {
+                    CHECK_ARGUMENT(
+                        window.id_payloads[posting_offset + posting] < window_document_count,
+                        "SINDI V2 posting id exceeds its window document count");
+                }
+            };
+            const auto complete_window = [&](const TermWindowMeta& meta) {
+                const auto window_id = meta.window_id;
+                auto& window = loaded[window_id];
+                window_posting_cursors[window_id] += meta.posting_count;
+                if (remap_term_ids_) {
+                    const auto term_offset = window_term_cursors[window_id];
+                    CHECK_ARGUMENT(term_offset < window.sorted_global_terms.size(),
+                                   "immutable SINDI term fill exceeds allocated terms");
+                    window.sorted_global_terms[term_offset] = static_cast<uint32_t>(term);
+                    ++window_term_cursors[window_id];
+                    window.offsets[term_offset + 1] = window_posting_cursors[window_id];
+                }
+            };
+
+            uint32_t source_posting_offset = 0;
+            if (metadata.size() == 1) {
+                const auto& meta = metadata.front();
+                const auto window_id = meta.window_id;
+                auto& window = loaded[window_id];
+                const auto posting_offset = window_posting_cursors[window_id];
+                CHECK_ARGUMENT(posting_offset <= window.id_payloads.size() &&
+                                   meta.posting_count <= window.id_payloads.size() - posting_offset,
+                               "immutable SINDI posting fill exceeds allocated payload");
+                sindi_datacell_utils::ReadTermPostingRange(
+                    reader,
+                    layout,
+                    0,
+                    meta.posting_count,
+                    value_code_size,
+                    window.id_payloads.data() + posting_offset,
+                    window.value_payloads.data() +
+                        static_cast<uint64_t>(posting_offset) * value_code_size);
+                validate_ids(meta, posting_offset);
+                complete_window(meta);
+                source_posting_offset = meta.posting_count;
+            } else {
+                const auto ids_size = static_cast<uint64_t>(entry.posting_count) * sizeof(uint16_t);
+                CHECK_ARGUMENT(ids_size <= posting_scratch.size(),
+                               "immutable SINDI id scratch buffer is too small");
+                reader.PushSeek(layout.ids_offset);
+                reader.Read(reinterpret_cast<char*>(posting_scratch.data()), ids_size);
+                reader.PopSeek();
+                for (const auto& meta : metadata) {
+                    const auto window_id = meta.window_id;
+                    auto& window = loaded[window_id];
+                    const auto posting_offset = window_posting_cursors[window_id];
+                    CHECK_ARGUMENT(
+                        posting_offset <= window.id_payloads.size() &&
+                            meta.posting_count <= window.id_payloads.size() - posting_offset,
+                        "immutable SINDI posting fill exceeds allocated payload");
+                    std::memcpy(window.id_payloads.data() + posting_offset,
+                                posting_scratch.data() +
+                                    static_cast<uint64_t>(source_posting_offset) * sizeof(uint16_t),
+                                static_cast<uint64_t>(meta.posting_count) * sizeof(uint16_t));
+                    validate_ids(meta, posting_offset);
+                    source_posting_offset += meta.posting_count;
+                }
+
+                const auto values_size =
+                    static_cast<uint64_t>(entry.posting_count) * value_code_size;
+                CHECK_ARGUMENT(values_size <= posting_scratch.size(),
+                               "immutable SINDI value scratch buffer is too small");
+                reader.PushSeek(layout.values_offset);
+                reader.Read(reinterpret_cast<char*>(posting_scratch.data()), values_size);
+                reader.PopSeek();
+                source_posting_offset = 0;
+                for (const auto& meta : metadata) {
+                    const auto window_id = meta.window_id;
+                    auto& window = loaded[window_id];
+                    const auto posting_offset = window_posting_cursors[window_id];
+                    std::memcpy(window.value_payloads.data() +
+                                    static_cast<uint64_t>(posting_offset) * value_code_size,
+                                posting_scratch.data() +
+                                    static_cast<uint64_t>(source_posting_offset) * value_code_size,
+                                static_cast<uint64_t>(meta.posting_count) * value_code_size);
+                    complete_window(meta);
+                    source_posting_offset += meta.posting_count;
+                }
             }
-            if (count != 0) {
-                window.id_payloads.insert(window.id_payloads.end(),
-                                          buffer.ids.begin() + begin,
-                                          buffer.ids.begin() + begin + count);
-                const auto value_begin = static_cast<uint64_t>(begin) * value_code_size;
-                const auto value_end = static_cast<uint64_t>(begin + count) * value_code_size;
-                window.value_payloads.insert(window.value_payloads.end(),
-                                             buffer.values.begin() + value_begin,
-                                             buffer.values.begin() + value_end);
+            CHECK_ARGUMENT(source_posting_offset == entry.posting_count,
+                           "SINDI V2 term posting count does not match term dictionary");
+        }
+        if (not remap_term_ids_) {
+            for (uint32_t window_id = 0; window_id < window_count; ++window_id) {
+                loaded[window_id].offsets[term + 1] = window_posting_cursors[window_id];
             }
-            if (not remap_term_ids_ || count != 0) {
-                window.offsets.push_back(static_cast<uint32_t>(window.id_payloads.size()));
-            }
+        }
+    }
+    for (uint32_t window_id = 0; window_id < window_count; ++window_id) {
+        CHECK_ARGUMENT(window_posting_cursors[window_id] == window_posting_counts[window_id],
+                       "immutable SINDI posting fill does not match allocated payload");
+        if (remap_term_ids_) {
+            CHECK_ARGUMENT(window_term_cursors[window_id] == window_term_counts[window_id],
+                           "immutable SINDI term fill does not match allocated terms");
         }
     }
     windows_.swap(loaded);
