@@ -12,13 +12,24 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 
+"""
+SINDI SQ8 (quantized posting-list) + DMQ8 reorder example.
+
+This example demonstrates how to build and search a SINDI index with:
+  - SQ8 quantization enabled for posting-list storage (use_quantization: true)
+  - DMQ8 reorder enabled for high-precision distance computation (rerank_type: "dmq8")
+
+The SQ8 posting-list quantization reduces memory footprint during the inverted-list phase,
+while DMQ8 reranking provides fast approximate distance computation with quantized codes.
+"""
+
 import numpy as np
 import json
-import sys
 import pyvsag
 
 
 def cal_recall(index, index_pointers, indices, values, ids, k, search_params):
+    """Calculate recall@k for the index."""
     correct = 0
     res_ids, res_dists = index.knn_search(
         index_pointers, indices, values, k, search_params
@@ -75,77 +86,84 @@ def convert_to_csr(vectors_with_metadata):
     )
 
 
-def sindi_test():
+def sindi_sq8_dmq8_reorder_test():
+    """
+    Build SINDI index with SQ8 posting-list quantization and DMQ8 reorder.
+
+    The configuration enables:
+      - "use_quantization": true  -> SQ8 quantization on posting values
+      - "use_reorder": true       -> Enable reranking phase
+      - "rerank_type": "dmq8"     -> Use the 8-bit DMQ backend for reranking
+    """
     # Sparse vectors in DICT format.
     vectors_in_dict = [
         {"id": 1001, "features": {0: 1.0, 3: 2.0}},
         {"id": 1002, "features": {1: 1.5, 2: 1.0, 4: 3.0}},
         {"id": 1003, "features": {0: 0.8, 1: 0.9, 2: 1.1}},
+        {"id": 1004, "features": {0: 1.2, 2: 0.5, 5: 2.5}},
+        {"id": 1005, "features": {1: 2.0, 3: 1.5, 4: 1.0}},
     ]
 
     index_pointers, indices, values, ids = convert_to_csr(vectors_in_dict)
 
-    # Sparse vectors in CSR (Compressed Sparse Row) format.
-    # This format is used to represent multiple sparse vectors efficiently.
-
-    # index_pointers: array of start/end positions in `indices` and `values` for each vector.
-    #   Shape: (batch_size + 1,)
-    #   Example: [0, 2, 5, 8] means:
-    #       Vector 0: uses values[0:2]   -> 2 non-zero elements
-    #       Vector 1: uses values[2:5]   -> 3 non-zero elements
-    #       Vector 2: uses values[5:8]   -> 3 non-zero elements
-    assert list(index_pointers) == [0, 2, 5, 8]
-
-    # indices: column indices (feature dimensions) of non-zero values.
-    #   These are the "internal feature IDs" (e.g., vocabulary indices).
-    #   Must be uint32 to match C++ interface requirements.
-    assert list(indices) == [0, 3, 1, 2, 4, 0, 1, 2]
-
-    # values: actual floating-point values of non-zero elements.
-    #   Corresponds to TF-IDF weights, counts, or other sparse features.
-    assert np.allclose(values, [1.0, 2.0, 1.5, 1.0, 3.0, 0.8, 0.9, 1.1])
-
-    # ids: user-defined identifiers (labels) for each vector.
-    #   Not used in computation; only for tracking results (e.g., mapping ANN results back to business entities).
-    #   Example: item IDs, user IDs, document IDs.
-    assert list(ids) == [1001, 1002, 1003]
-
-    # build index
+    # Build index with SQ8 + DMQ8 reorder configuration
     index_params = json.dumps(
         {
             "dtype": "sparse",
             "dim": 128,
             "metric_type": "ip",
             "index_param": {
+                "use_quantization": True,  # Enable SQ8 quantization on posting values
+                "use_reorder": True,       # Enable reranking phase
+                "rerank_type": "dmq8",     # Use the 8-bit DMQ backend
                 "doc_prune_ratio": 0.0,
-                "window_size": 100000,
-                "use_reorder": True,
-                "rerank_type": "fp32",
+                "window_size": 60000,
             },
         }
     )
+
     index = pyvsag.Index("sindi", index_params)
 
+    print("[build] Creating SINDI index with SQ8 + DMQ8 reorder configuration...")
     index.build(index_pointers=index_pointers, indices=indices, values=values, ids=ids)
+    print("[build] Index created successfully")
 
-    search_params = json.dumps({"sindi": {"query_prune_ratio": 0, "n_candidate": 3}})
-
-    # cal recall
-    print(
-        "[build] sindi recall:",
-        cal_recall(index, index_pointers, indices, values, ids, 1, search_params),
+    # Search with reorder parameters
+    search_params = json.dumps(
+        {
+            "sindi": {
+                "query_prune_ratio": 0.2,  # Prune 20% of least-relevant query terms
+                "term_prune_ratio": 0.1,   # Prune 10% of least-relevant terms from posting lists
+                "n_candidate": 10,         # Keep top 10 candidates after inverted phase for reranking
+            }
+        }
     )
-    filename = "./python_example_sindi.index"
+
+    recall = cal_recall(index, index_pointers, indices, values, ids, 1, search_params)
+    print(f"[search] SINDI SQ8 + DMQ8 recall@1: {recall:.4f}")
+
+    # Save and reload
+    filename = "./python_example_sindi_sq8_dmq8.index"
+    print(f"[save] Saving index to {filename}...")
     index.save(filename)
 
-    # deserialize and cal recall
+    # Deserialize and test again
+    print("[load] Loading index from disk...")
     index = pyvsag.Index("sindi", index_params)
     index.load(filename)
-    print(
-        "[deserialize] sindi recall:",
-        cal_recall(index, index_pointers, indices, values, ids, 1, search_params),
-    )
+
+    recall = cal_recall(index, index_pointers, indices, values, ids, 1, search_params)
+    print(f"[deserialize] SINDI SQ8 + DMQ8 recall@1: {recall:.4f}")
+
+    print("\nConfiguration summary:")
+    print("  - use_quantization: true  (SQ8 posting-list storage)")
+    print("  - use_reorder: true        (Enable reranking)")
+    print("  - rerank_type: dmq8        (8-bit DMQ backend)")
+    print("\nBenefits:")
+    print("  - Reduced memory footprint via SQ8 quantization")
+    print("  - Fast reranking with DMQ8 quantized codes")
+    print("  - Trade-off between memory and accuracy vs FP32 reranking")
 
 
 if __name__ == "__main__":
-    sindi_test()
+    sindi_sq8_dmq8_reorder_test()

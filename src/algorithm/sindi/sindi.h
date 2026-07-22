@@ -16,6 +16,7 @@
 #pragma once
 
 #include <optional>
+#include <string>
 
 #include "algorithm/inner_index_interface.h"
 #include "algorithm/sindi/term_id_mapper.h"
@@ -92,9 +93,7 @@ public:
     InitFeatures() override;
 
     std::unordered_map<std::string, uint64_t>
-    GetMemoryUsageDetail() const override {
-        return {};
-    }
+    GetMemoryUsageDetail() const override;
 
     std::string
     GetStats() const override;
@@ -359,9 +358,11 @@ private:
     float doc_prune_ratio_{0};   // ratio of docs pruned during build
     float doc_retain_ratio_{0};  // ratio of docs kept after pruning
 
-    FlattenInterfacePtr rerank_flat_{nullptr};  // re-rank back-end
+    FlattenInterfacePtr rerank_flat_{nullptr};  // re-rank datacell
 
     SparseValueQuantizationType sparse_value_quant_type_{SparseValueQuantizationType::FP32};
+
+    std::string rerank_type_{"fp32"};
 
     bool deserialize_without_footer_{false};  // backward-compat: old format lacks footer
     bool deserialize_without_buffer_{false};  // backward-compat: old format lacks buffer
