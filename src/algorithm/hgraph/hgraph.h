@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <future>
 #include <random>
 #include <shared_mutex>
 #include <string>
@@ -45,7 +46,9 @@
 #include "vsag/index_features.h"
 
 namespace vsag {
+class FlattenOptimizedBuildInterface;
 class IteratorFilterContext;
+class HGraphFastBuildGuard;
 
 /**
  * @brief HGraph: hierarchical navigable graph index.
@@ -61,6 +64,7 @@ public:
                                  const IndexCommonParam& common_param);
 
     friend class HGraphAnalyzer;
+    friend class HGraphFastBuildGuard;
 
 public:
     HGraph(const HGraphParameterPtr& param, const IndexCommonParam& common_param);
@@ -330,8 +334,7 @@ public:
                      InnerSearchParam& inner_search_param,
                      const VisitedListPtr& vt,
                      QueryContext* ctx,
-                     DistanceRecordVector* rabitq_lower_bound_candidates = nullptr,
-                     const ComputerInterfacePtr& preset_computer = nullptr) const;
+                     DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
 
     /// Overload that accepts an IteratorFilterContext for iterative search.
     template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH>
@@ -346,6 +349,18 @@ public:
                      DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
 
 private:
+    void
+    prepare_optimized_build_codes(const DatasetPtr& data,
+                                  const Vector<std::pair<InnerIdType, LabelType>>& inner_ids,
+                                  std::vector<std::future<void>>& futures);
+
+    DistHeapPtr
+    search_one_graph_for_optimized_build(const void* query,
+                                         const GraphInterfacePtr& graph,
+                                         const FlattenInterfacePtr& flatten,
+                                         InnerSearchParam& inner_search_param,
+                                         const ComputerInterfacePtr& computer) const;
+
     MetadataPtr
     collect_streaming_header() const override;
 
@@ -571,7 +586,8 @@ private:
 
 private:
     FlattenInterfacePtr basic_flatten_codes_{nullptr};  // coarse/quantized codes for graph search
-    FlattenInterfacePtr high_precise_codes_{nullptr};   // precise codes for reorder (optional)
+    std::shared_ptr<FlattenOptimizedBuildInterface> optimized_build_codes_{nullptr};
+    FlattenInterfacePtr high_precise_codes_{nullptr};  // precise codes for reorder (optional)
 
     Vector<GraphInterfacePtr> route_graphs_;   // upper-layer route graphs
     GraphInterfacePtr bottom_graph_{nullptr};  // base-level graph (all vectors)

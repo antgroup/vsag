@@ -77,8 +77,39 @@ BasicSearcher::Search(const GraphInterfacePtr& graph,
                       const InnerSearchParam& inner_search_param,
                       const LabelTablePtr& label_table,
                       QueryContext* ctx,
-                      DistanceRecordVector* rabitq_lower_bound_candidates,
-                      const ComputerInterfacePtr& preset_computer) const {
+                      DistanceRecordVector* rabitq_lower_bound_candidates) const {
+    if (inner_search_param.search_mode == KNN_SEARCH) {
+        return this->search_impl<KNN_SEARCH>(graph,
+                                             flatten,
+                                             vl,
+                                             query,
+                                             inner_search_param,
+                                             label_table,
+                                             ctx,
+                                             rabitq_lower_bound_candidates,
+                                             nullptr);
+    }
+    return this->search_impl<RANGE_SEARCH>(graph,
+                                           flatten,
+                                           vl,
+                                           query,
+                                           inner_search_param,
+                                           label_table,
+                                           ctx,
+                                           rabitq_lower_bound_candidates,
+                                           nullptr);
+}
+
+DistHeapPtr
+BasicSearcher::SearchWithPresetComputer(const GraphInterfacePtr& graph,
+                                        const FlattenInterfacePtr& flatten,
+                                        const VisitedListPtr& vl,
+                                        const void* query,
+                                        const InnerSearchParam& inner_search_param,
+                                        const LabelTablePtr& label_table,
+                                        QueryContext* ctx,
+                                        DistanceRecordVector* rabitq_lower_bound_candidates,
+                                        const ComputerInterfacePtr& preset_computer) const {
     if (inner_search_param.search_mode == KNN_SEARCH) {
         return this->search_impl<KNN_SEARCH>(graph,
                                              flatten,

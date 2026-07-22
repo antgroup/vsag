@@ -26,6 +26,7 @@
 #include "datacell/flatten_datacell_parameter.h"
 #include "dataset_impl.h"
 #include "hgraph.h"  // IWYU pragma: keep
+#include "hgraph_fast_build.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/logger/logger.h"
 #include "impl/odescent/odescent_graph_builder.h"
@@ -67,41 +68,6 @@ need_temporary_sq8_build_data(const FlattenInterfacePtr& basic_flatten_codes,
            basic_flatten_codes->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_RABITQ;
 }
 
-class OptimizedBuildGuard {
-public:
-    OptimizedBuildGuard(const FlattenInterfacePtr& codes,
-                        bool active,
-                        const std::shared_ptr<SafeThreadPool>& thread_pool,
-                        uint64_t thread_count)
-        : codes_(codes), thread_pool_(thread_pool), thread_count_(thread_count), active_(active) {
-    }
-
-    OptimizedBuildGuard(const OptimizedBuildGuard&) = delete;
-    OptimizedBuildGuard&
-    operator=(const OptimizedBuildGuard&) = delete;
-
-    ~OptimizedBuildGuard() {
-        if (active_) {
-            codes_->AbortOptimizedBuild();
-        }
-    }
-
-    void
-    Finalize() {
-        if (not active_) {
-            return;
-        }
-        codes_->FinalizeOptimizedBuild(thread_pool_, thread_count_);
-        active_ = false;
-    }
-
-private:
-    FlattenInterfacePtr codes_{nullptr};
-    std::shared_ptr<SafeThreadPool> thread_pool_{nullptr};
-    uint64_t thread_count_{1};
-    bool active_{false};
-};
-
 static void
 wait_all_futures(std::vector<std::future<void>>& futures) {
     std::exception_ptr first_exception = nullptr;
@@ -121,34 +87,6 @@ wait_all_futures(std::vector<std::future<void>>& futures) {
         std::rethrow_exception(first_exception);
     }
 }
-
-class FutureDrainGuard {
-public:
-    FutureDrainGuard(std::vector<std::future<void>>& futures, uint64_t capacity)
-        : futures_(futures) {
-        futures_.reserve(capacity);
-    }
-
-    FutureDrainGuard(const FutureDrainGuard&) = delete;
-    FutureDrainGuard&
-    operator=(const FutureDrainGuard&) = delete;
-
-    ~FutureDrainGuard() {
-        try {
-            wait_all_futures(futures_);
-        } catch (...) {
-        }
-    }
-
-    void
-    WaitAndClear() {
-        wait_all_futures(futures_);
-        futures_.clear();
-    }
-
-private:
-    std::vector<std::future<void>>& futures_;
-};
 
 void
 HGraph::Train(const DatasetPtr& base) {
@@ -186,13 +124,7 @@ HGraph::Build(const DatasetPtr& data) {
     }
 
     this->Train(data);
-
-    const bool build_uses_base_codes =
-        this->has_precise_reorder() ? this->build_by_base_ : this->raw_vector_ == nullptr;
-    const bool optimized_build =
-        build_uses_base_codes and this->basic_flatten_codes_->BeginOptimizedBuild();
-    OptimizedBuildGuard optimized_build_guard(
-        this->basic_flatten_codes_, optimized_build, this->thread_pool_, this->build_thread_count_);
+    HGraphFastBuildGuard fast_build_guard(*this);
 
     std::vector<int64_t> ret;
     if (graph_type_ == GRAPH_TYPE_VALUE_NSW) {
@@ -201,7 +133,7 @@ HGraph::Build(const DatasetPtr& data) {
         ret = this->build_by_odescent(data);
     }
 
-    optimized_build_guard.Finalize();
+    fast_build_guard.Finalize();
 
     if (use_elp_optimizer_) {
         elp_optimize();
@@ -240,7 +172,7 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
     this->resize(current_count + new_ids_count);
     this->total_count_ += new_ids_count;
     Vector<Vector<InnerIdType>> route_graph_ids(allocator_);
-    const bool optimized_build_active = this->basic_flatten_codes_->IsOptimizedBuildActive();
+    const bool optimized_build_active = this->optimized_build_codes_ != nullptr;
     const bool need_sq8_build_data =
         not optimized_build_active and
         need_temporary_sq8_build_data(this->basic_flatten_codes_, this->has_precise_reorder());
@@ -337,7 +269,7 @@ HGraph::Add(const DatasetPtr& data) {
     }
     CHECK_ARGUMENT(get_data(data) != nullptr, "base.float_vector is nullptr");
 
-    const bool optimized_build_active = this->basic_flatten_codes_->IsOptimizedBuildActive();
+    const bool optimized_build_active = this->optimized_build_codes_ != nullptr;
     const bool need_sq8_build_data =
         not optimized_build_active and
         need_temporary_sq8_build_data(this->basic_flatten_codes_, this->has_precise_reorder());
@@ -438,23 +370,12 @@ HGraph::Add(const DatasetPtr& data) {
             temporary_build_flatten_codes_->InsertVector(get_data(data, local_idx), inner_id);
         }
     }
-    FutureDrainGuard future_guard(futures,
-                                  use_parallel_add ? static_cast<uint64_t>(inner_ids.size()) : 0);
+    HGraphFastBuildTaskGuard future_guard(
+        futures,
+        optimized_build_active,
+        use_parallel_add ? static_cast<uint64_t>(inner_ids.size()) : 0);
     if (optimized_build_active) {
-        for (const auto& [inner_id, local_idx] : inner_ids) {
-            if (use_parallel_add) {
-                auto future =
-                    this->thread_pool_->GeneralEnqueue([this, data, inner_id, local_idx]() {
-                        this->insert_persistent_codes(get_data(data, local_idx), inner_id);
-                    });
-                futures.emplace_back(std::move(future));
-            } else {
-                this->insert_persistent_codes(get_data(data, local_idx), inner_id);
-            }
-        }
-        if (use_parallel_add) {
-            future_guard.WaitAndClear();
-        }
+        this->prepare_optimized_build_codes(data, inner_ids, futures);
     }
     for (auto& [inner_id, local_idx] : inner_ids) {
         int level;
@@ -476,7 +397,7 @@ HGraph::Add(const DatasetPtr& data) {
         }
     }
     if (use_parallel_add) {
-        future_guard.WaitAndClear();
+        wait_all_futures(futures);
     }
     if (defer_persistent_codes) {
         temporary_build_flatten_codes_.reset();
@@ -499,7 +420,7 @@ HGraph::Add(const DatasetPtr& data) {
             }
         }
         if (use_parallel_add) {
-            future_guard.WaitAndClear();
+            wait_all_futures(futures);
         }
     }
     return failed_ids;
@@ -578,19 +499,20 @@ HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
     }
 
     ComputerInterfacePtr build_computer = nullptr;
-    if (flatten_codes->IsOptimizedBuildActive()) {
-        build_computer = flatten_codes->FactoryComputerForBuild(data, inner_id);
+    if (this->optimized_build_codes_ != nullptr) {
+        build_computer = this->optimized_build_codes_->FactoryComputerForBuild(data, inner_id);
     }
+    auto search_for_build = [&](const GraphInterfacePtr& graph) -> DistHeapPtr {
+        if (build_computer != nullptr) {
+            return this->search_one_graph_for_optimized_build(
+                data, graph, flatten_codes, param, build_computer);
+        }
+        return this->search_one_graph(
+            data, graph, flatten_codes, param, (VisitedListPtr) nullptr, nullptr);
+    };
 
     for (auto j = this->route_graphs_.size() - 1; j > level; --j) {
-        result = search_one_graph(data,
-                                  route_graphs_[j],
-                                  flatten_codes,
-                                  param,
-                                  (VisitedListPtr) nullptr,
-                                  nullptr,
-                                  nullptr,
-                                  build_computer);
+        result = search_for_build(route_graphs_[j]);
         param.ep = result->Top().second;
     }
 
@@ -603,15 +525,7 @@ HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
     }
 
     if (bottom_graph_->TotalCount() != 0) {
-        result = search_one_graph(data,
-                                  this->bottom_graph_,
-                                  flatten_codes,
-                                  param,
-                                  // to specify which overloaded function to call
-                                  (VisitedListPtr) nullptr,
-                                  nullptr,
-                                  nullptr,
-                                  build_computer);
+        result = search_for_build(this->bottom_graph_);
         if (this->support_duplicate_ && param.duplicate_id >= 0) {
             std::unique_lock lock(this->label_lookup_mutex_);
             bottom_graph_->SetDuplicateId(static_cast<InnerIdType>(param.duplicate_id), inner_id);
@@ -640,15 +554,7 @@ HGraph::graph_add_one(const void* data, int level, InnerIdType inner_id) {
 
     for (int64_t j = 0; j <= level; ++j) {
         if (route_graphs_[j]->TotalCount() != 0) {
-            result = search_one_graph(data,
-                                      route_graphs_[j],
-                                      flatten_codes,
-                                      param,
-                                      // to specify which overloaded function to call
-                                      (VisitedListPtr) nullptr,
-                                      nullptr,
-                                      nullptr,
-                                      build_computer);
+            result = search_for_build(route_graphs_[j]);
             auto filtered_result = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
             while (not result->Empty()) {
                 auto [dist, id] = result->Top();

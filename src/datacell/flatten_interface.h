@@ -41,8 +41,6 @@ namespace vsag {
 
 DEFINE_POINTER(FlattenInterface);
 
-class SafeThreadPool;
-
 class FlattenInterface {
 public:
     FlattenInterface() = default;
@@ -94,31 +92,8 @@ public:
     virtual ComputerInterfacePtr
     FactoryComputer(const void* query) = 0;
 
-    virtual ComputerInterfacePtr
-    FactoryComputerForBuild(const void* query, InnerIdType) {
-        return FactoryComputer(query);
-    }
-
     virtual void
     Train(const void* data, uint64_t count) = 0;
-
-    virtual bool
-    BeginOptimizedBuild() {
-        return false;
-    }
-
-    virtual void
-    FinalizeOptimizedBuild(const std::shared_ptr<SafeThreadPool>& = nullptr, uint64_t = 1) {
-    }
-
-    virtual void
-    AbortOptimizedBuild() noexcept {
-    }
-
-    [[nodiscard]] virtual bool
-    IsOptimizedBuildActive() const {
-        return false;
-    }
 
     virtual void
     InsertVector(const void* vector, InnerIdType idx = std::numeric_limits<InnerIdType>::max()) = 0;

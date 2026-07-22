@@ -31,6 +31,7 @@
 #include <utility>
 
 #include "flatten_interface_test.h"
+#include "flatten_optimized_build_interface.h"
 #include "impl/allocator/default_allocator.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/thread_pool/safe_thread_pool.h"
@@ -612,6 +613,8 @@ TEST_CASE("RaBitQSplitDataCell optimized scalar-code build",
     common_param.metric_ = metric;
 
     auto flatten = FlattenInterface::MakeInstance(param, common_param);
+    auto optimized_build = std::dynamic_pointer_cast<FlattenOptimizedBuildInterface>(flatten);
+    REQUIRE(optimized_build != nullptr);
     flatten->Train(vectors.data(), count);
     std::vector<uint8_t> expected_codes(flatten->code_size_ * count);
     for (InnerIdType id = 0; id < count; ++id) {
@@ -620,15 +623,18 @@ TEST_CASE("RaBitQSplitDataCell optimized scalar-code build",
     }
 
     const uint64_t memory_before_build = flatten->GetMemoryUsage();
-    REQUIRE(flatten->BeginOptimizedBuild());
-    REQUIRE(flatten->IsOptimizedBuildActive());
+    auto finalize_pool = SafeThreadPool::FactoryDefaultThreadPool();
+    finalize_pool->SetPoolSize(4);
+    FlattenOptimizedBuildContext build_context{finalize_pool, 4};
+    REQUIRE(optimized_build->BeginOptimizedBuild(build_context));
+    REQUIRE(optimized_build->IsOptimizedBuildActive());
     flatten->ShrinkToFit(0);
     REQUIRE_THROWS(flatten->InsertVector(vectors.data()));
     REQUIRE(flatten->TotalCount() == 0);
     flatten->Resize(count);
     flatten->BatchInsertVector(vectors.data(), count);
     REQUIRE(std::isfinite(flatten->ComputePairVectors(0, 1)));
-    auto build_computer = flatten->FactoryComputerForBuild(vectors.data(), 0);
+    auto build_computer = optimized_build->FactoryComputerForBuild(vectors.data(), 0);
     std::vector<InnerIdType> build_ids(count);
     std::iota(build_ids.begin(), build_ids.end(), 0);
     std::vector<float> pair_dists(count);
@@ -665,10 +671,8 @@ TEST_CASE("RaBitQSplitDataCell optimized scalar-code build",
 
     const float build_pair_distance = flatten->ComputePairVectors(0, 2);
 
-    auto finalize_pool = SafeThreadPool::FactoryDefaultThreadPool();
-    finalize_pool->SetPoolSize(4);
-    flatten->FinalizeOptimizedBuild(finalize_pool, 4);
-    REQUIRE_FALSE(flatten->IsOptimizedBuildActive());
+    optimized_build->FinalizeOptimizedBuild();
+    REQUIRE_FALSE(optimized_build->IsOptimizedBuildActive());
     REQUIRE(std::abs(flatten->ComputePairVectors(0, 2) - build_pair_distance) <= 1e-5F);
     std::vector<float> split_dists(count);
     flatten->Query(split_dists.data(), computer, ids.data(), count);
@@ -684,10 +688,10 @@ TEST_CASE("RaBitQSplitDataCell optimized scalar-code build",
     const uint64_t memory_after_finalize = flatten->GetMemoryUsage();
     REQUIRE(memory_after_finalize >=
             static_cast<uint64_t>(flatten->max_capacity_) * flatten->code_size_);
-    REQUIRE(flatten->BeginOptimizedBuild());
+    REQUIRE(optimized_build->BeginOptimizedBuild(build_context));
     REQUIRE(flatten->GetMemoryUsage() > memory_after_finalize);
-    flatten->AbortOptimizedBuild();
-    REQUIRE_FALSE(flatten->IsOptimizedBuildActive());
+    optimized_build->AbortOptimizedBuild();
+    REQUIRE_FALSE(optimized_build->IsOptimizedBuildActive());
     REQUIRE(flatten->GetMemoryUsage() == memory_after_finalize);
 }
 
@@ -720,23 +724,26 @@ TEST_CASE("RaBitQSplitDataCell waits submitted finalize tasks after enqueue fail
     common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
 
     auto flatten = FlattenInterface::MakeInstance(param, common_param);
+    auto optimized_build = std::dynamic_pointer_cast<FlattenOptimizedBuildInterface>(flatten);
+    REQUIRE(optimized_build != nullptr);
     flatten->Train(vectors.data(), count);
-    REQUIRE(flatten->BeginOptimizedBuild());
+    auto rejecting_pool = std::make_shared<RejectSecondThreadPool>();
+    auto safe_pool = std::make_shared<SafeThreadPool>(rejecting_pool);
+    FlattenOptimizedBuildContext build_context{safe_pool, 4};
+    REQUIRE(optimized_build->BeginOptimizedBuild(build_context));
     flatten->Resize(count);
     flatten->BatchInsertVector(vectors.data(), count);
 
-    auto rejecting_pool = std::make_shared<RejectSecondThreadPool>();
-    auto safe_pool = std::make_shared<SafeThreadPool>(rejecting_pool);
     const auto begin = std::chrono::steady_clock::now();
-    REQUIRE_THROWS(flatten->FinalizeOptimizedBuild(safe_pool, 4));
+    REQUIRE_THROWS(optimized_build->FinalizeOptimizedBuild());
     const auto elapsed = std::chrono::steady_clock::now() - begin;
     REQUIRE(elapsed >= std::chrono::milliseconds(75));
     REQUIRE(rejecting_pool->TaskStarted());
     rejecting_pool->WaitUntilEmpty();
 
-    REQUIRE(flatten->IsOptimizedBuildActive());
-    flatten->AbortOptimizedBuild();
-    REQUIRE_FALSE(flatten->IsOptimizedBuildActive());
+    REQUIRE(optimized_build->IsOptimizedBuildActive());
+    optimized_build->AbortOptimizedBuild();
+    REQUIRE_FALSE(optimized_build->IsOptimizedBuildActive());
 }
 
 TEST_CASE("RaBitQSplitDataCell finalizes mmap storage serially",
@@ -783,15 +790,18 @@ TEST_CASE("RaBitQSplitDataCell finalizes mmap storage serially",
     common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
 
     auto flatten = FlattenInterface::MakeInstance(param, common_param);
+    auto optimized_build = std::dynamic_pointer_cast<FlattenOptimizedBuildInterface>(flatten);
+    REQUIRE(optimized_build != nullptr);
     flatten->Train(vectors.data(), count);
-    REQUIRE(flatten->BeginOptimizedBuild());
+    auto rejecting_pool = std::make_shared<RejectSecondThreadPool>();
+    auto safe_pool = std::make_shared<SafeThreadPool>(rejecting_pool);
+    FlattenOptimizedBuildContext build_context{safe_pool, 4};
+    REQUIRE(optimized_build->BeginOptimizedBuild(build_context));
     flatten->Resize(count);
     flatten->BatchInsertVector(vectors.data(), count);
 
-    auto rejecting_pool = std::make_shared<RejectSecondThreadPool>();
-    auto safe_pool = std::make_shared<SafeThreadPool>(rejecting_pool);
-    REQUIRE_NOTHROW(flatten->FinalizeOptimizedBuild(safe_pool, 4));
-    REQUIRE_FALSE(flatten->IsOptimizedBuildActive());
+    REQUIRE_NOTHROW(optimized_build->FinalizeOptimizedBuild());
+    REQUIRE_FALSE(optimized_build->IsOptimizedBuildActive());
     REQUIRE_FALSE(rejecting_pool->TaskStarted());
     REQUIRE(std::isfinite(flatten->ComputePairVectors(0, 1)));
 }

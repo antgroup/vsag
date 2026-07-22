@@ -28,6 +28,8 @@
 
 #include "common.h"
 #include "flatten_interface.h"
+#include "flatten_optimized_build_interface.h"
+#include "impl/thread_pool/safe_thread_pool.h"
 #include "inner_string_params.h"
 #include "io/async_io/async_io_parameter.h"
 #include "io/buffer_io/buffer_io_parameter.h"
@@ -139,7 +141,7 @@ private:
 };
 
 template <MetricType metric, typename OneBitIOTmpl, typename SupplementIOTmpl = OneBitIOTmpl>
-class RaBitQSplitDataCell : public FlattenInterface {
+class RaBitQSplitDataCell : public FlattenInterface, public FlattenOptimizedBuildInterface {
 public:
     class OptimizedBuildComputer final : public ComputerInterface {
     public:
@@ -487,7 +489,7 @@ public:
     }
 
     bool
-    BeginOptimizedBuild() override {
+    BeginOptimizedBuild(const FlattenOptimizedBuildContext& context) override {
         if (this->optimized_build_active_ or not this->quantizer_->SupportScalarCodeBuild()) {
             return false;
         }
@@ -503,13 +505,13 @@ public:
         this->optimized_build_scalar_codes_ = build_codes;
         this->optimized_build_code_sums_ = std::move(code_sums);
         this->optimized_build_record_size_ = this->quantizer_->GetScalarCodeSize();
+        this->optimized_build_context_ = context;
         this->optimized_build_active_ = true;
         return true;
     }
 
     void
-    FinalizeOptimizedBuild(const std::shared_ptr<SafeThreadPool>& thread_pool = nullptr,
-                           uint64_t thread_count = 1) override {
+    FinalizeOptimizedBuild() override {
         if (not this->optimized_build_active_) {
             return;
         }
@@ -549,8 +551,9 @@ public:
             }
         };
 
-        const uint64_t worker_count =
-            std::min<uint64_t>(thread_count, static_cast<uint64_t>(this->total_count_));
+        const auto& thread_pool = this->optimized_build_context_.thread_pool;
+        const uint64_t worker_count = std::min<uint64_t>(
+            this->optimized_build_context_.thread_count, static_cast<uint64_t>(this->total_count_));
         constexpr bool supports_parallel_finalize = not std::is_same_v<OneBitIOTmpl, MMapIO> and
                                                     not std::is_same_v<SupplementIOTmpl, MMapIO>;
         // MMapIO::WriteImpl updates its shared size_ even after Resize, so disjoint writes are not
@@ -603,6 +606,7 @@ public:
         this->optimized_build_scalar_codes_.reset();
         this->optimized_build_code_sums_.reset();
         this->optimized_build_record_size_ = 0;
+        this->optimized_build_context_ = {};
     }
 
     void
@@ -611,6 +615,7 @@ public:
         this->optimized_build_scalar_codes_.reset();
         this->optimized_build_code_sums_.reset();
         this->optimized_build_record_size_ = 0;
+        this->optimized_build_context_ = {};
     }
 
     [[nodiscard]] bool
@@ -948,6 +953,7 @@ public:
     std::shared_ptr<RaBitQSplitCodeStorage<SupplementIOTmpl>> supplement_cell_{nullptr};
     std::shared_ptr<RaBitQSplitCodeStorage<MemoryIO>> optimized_build_scalar_codes_{nullptr};
     std::unique_ptr<Vector<uint64_t>> optimized_build_code_sums_{nullptr};
+    FlattenOptimizedBuildContext optimized_build_context_{};
 
     Allocator* allocator_{nullptr};
     uint64_t one_bit_code_size_{0};
