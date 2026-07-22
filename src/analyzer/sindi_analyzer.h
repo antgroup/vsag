@@ -75,7 +75,8 @@ private:
     DatasetPtr
     calculate_ground_truth(const DatasetPtr& query_dataset,
                            int64_t topk,
-                           const DatasetPtr& base_dataset = nullptr) const;
+                           const DatasetPtr& base_dataset,
+                           const SINDISearchParameter& search_param) const;
 
     JsonType
     get_active_term_count_stats() const;

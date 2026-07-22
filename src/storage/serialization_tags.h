@@ -38,6 +38,7 @@ enum class StreamSerializationTag : uint32_t {
     SINDI_RERANK_INDEX = 12,
     SINDI_TERM_ID_MAPPER = 13,
     PYRAMID_HIERARCHIES = 14,
+    SINDI_WINDOW_METADATA = 15,
 };
 
 inline const char*
@@ -73,6 +74,8 @@ StreamSerializationTagName(uint32_t tag) {
             return "sindi_term_id_mapper";
         case StreamSerializationTag::PYRAMID_HIERARCHIES:
             return "pyramid_hierarchies";
+        case StreamSerializationTag::SINDI_WINDOW_METADATA:
+            return "sindi_window_metadata";
     }
     return "unknown";
 }
@@ -97,6 +100,7 @@ StreamSerializationTagCritical(uint32_t tag) {
         case StreamSerializationTag::ATTRIBUTE_FILTER:
         case StreamSerializationTag::EXTRA_INFO:
         case StreamSerializationTag::RAW_VECTOR:
+        case StreamSerializationTag::SINDI_WINDOW_METADATA:
             return false;
     }
     return false;
@@ -122,6 +126,7 @@ StreamSerializationBlockCurrentVersion(uint32_t tag) {
         case StreamSerializationTag::SINDI_RERANK_INDEX:
         case StreamSerializationTag::SINDI_TERM_ID_MAPPER:
         case StreamSerializationTag::PYRAMID_HIERARCHIES:
+        case StreamSerializationTag::SINDI_WINDOW_METADATA:
             return kStreamSerializationBlockVersionV1;
     }
     return kStreamSerializationBlockVersionV1;

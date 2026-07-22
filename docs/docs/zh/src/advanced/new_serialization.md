@@ -173,10 +173,12 @@ SINDI 按顺序写入以下 streaming blocks：
 | `label_table` | 外部 label 和 label remap | 是 |
 | `sindi_rerank_index` | rerank 开启时的可选 rerank flat index | 条件必需 |
 | `sindi_term_id_mapper` | 可选 term-id remap 表 | 条件必需 |
+| `sindi_window_metadata` | 窗口边界与日期标签 | 否（旧版 stream 中不存在） |
 
 `DeserializeStreaming` 会恢复完整的内存 SINDI 索引。`Index::Load` 可以直接从 streaming metadata
 创建 SINDI 索引对象，当前会把写出的 SINDI blocks 都加载到内存中。immutable SINDI runtime 暂不支持
 该 streaming 序列化路径。
+缺少 `sindi_window_metadata` 时，读取端会按旧版固定大小规则恢复为无日期窗口。
 
 ## Pyramid Blocks
 

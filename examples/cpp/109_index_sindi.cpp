@@ -33,6 +33,7 @@ main(int argc, char** argv) {
 
     std::vector<int64_t> ids(num_vectors);
     std::vector<vsag::SparseVector> sparse_vectors(num_vectors);
+    std::vector<std::string> dates(num_vectors, "2026/07/21");
 
     for (int64_t i = 0; i < num_vectors; ++i) {
         ids[i] = i;
@@ -56,6 +57,7 @@ main(int argc, char** argv) {
     base->NumElements(num_vectors)
         ->SparseVectors(sparse_vectors.data())
         ->Ids(ids.data())
+        ->Dates(dates.data())
         ->Owner(false);
 
     /******************* Create SINDI Index *****************/
@@ -123,11 +125,13 @@ main(int argc, char** argv) {
      *   - query_prune_ratio: Ratio of term pruning for the query (0 = no pruning).
      *   - n_candidate: Number of candidates for re-ranking. Must be greater than topK.
      *     This parameter is ignored if use_reorder is false in the build parameters.
+     *   - date: Optional date-window filter (YYYY, YYYY/MM, or YYYY/MM/DD).
      */
     auto sindi_search_parameters = R"({
         "sindi": {
             "query_prune_ratio": 0,
-            "n_candidate": 0
+            "n_candidate": 0,
+            "date": "2026/07"
         }
     })";
 

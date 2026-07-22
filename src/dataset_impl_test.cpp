@@ -531,6 +531,49 @@ TEST_CASE("Dataset Named Paths Test", "[ut][dataset]") {
     }
 }
 
+TEST_CASE("Dataset Date Labels Test", "[ut][dataset][date]") {
+    SECTION("setter getter and deep copy") {
+        std::string dates[3] = {"2026", "2026/07", ""};
+        auto dataset = vsag::Dataset::Make();
+        dataset->NumElements(3)->Dim(1)->Dates(dates)->Owner(false);
+
+        REQUIRE(dataset->GetDates() == dates);
+        REQUIRE(dataset->GetDates()[1] == "2026/07");
+
+        auto copy = dataset->DeepCopy();
+        REQUIRE(copy->GetDates() != dates);
+        REQUIRE(copy->GetDates()[0] == "2026");
+        REQUIRE(copy->GetDates()[1] == "2026/07");
+        REQUIRE(copy->GetDates()[2].empty());
+    }
+
+    SECTION("append preserves date labels") {
+        auto* dates = CopyPathArray({"2026", "2026/07"});
+        auto dataset = vsag::Dataset::Make();
+        dataset->NumElements(2)->Dim(1)->Dates(dates)->Owner(true);
+
+        auto* appended_dates = CopyPathArray({"2026/07/21"});
+        auto appended = vsag::Dataset::Make();
+        appended->NumElements(1)->Dim(1)->Dates(appended_dates)->Owner(true);
+
+        dataset->Append(appended);
+        REQUIRE(dataset->GetNumElements() == 3);
+        REQUIRE(dataset->GetDates()[0] == "2026");
+        REQUIRE(dataset->GetDates()[1] == "2026/07");
+        REQUIRE(dataset->GetDates()[2] == "2026/07/21");
+    }
+
+    SECTION("append rejects inconsistent date fields") {
+        auto with_dates = vsag::Dataset::Make();
+        with_dates->NumElements(1)->Dim(1)->Dates(CopyPathArray({"2026"}))->Owner(true);
+        auto without_dates = vsag::Dataset::Make();
+        without_dates->NumElements(1)->Dim(1)->Owner(true);
+
+        REQUIRE_THROWS(with_dates->Append(without_dates));
+        REQUIRE_THROWS(without_dates->Append(with_dates));
+    }
+}
+
 TEST_CASE("Dataset MultiVector Basic Test", "[ut][dataset]") {
     SECTION("MultiVectorDim default is 0") {
         auto dataset = vsag::Dataset::Make();

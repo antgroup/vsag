@@ -57,6 +57,26 @@ public:
                                ImmutableSINDIWindow& window) {
         index.deserialize_immutable_window(reader, window);
     }
+
+    static const Vector<SINDIWindowMetadata>&
+    WindowMetadata(const SINDI& index) {
+        return index.window_metadata_;
+    }
+
+    static void
+    SerializeLegacyMutable(const SINDI& index, StreamWriter& writer) {
+        REQUIRE_FALSE(index.use_reorder_);
+        REQUIRE_FALSE(index.remap_term_ids_);
+        REQUIRE(index.sparse_value_quant_type_ == SparseValueQuantizationType::FP32);
+        const auto element_count = index.cur_element_count_.load();
+        StreamWriter::WriteObj(writer, element_count);
+        const auto window_count = static_cast<uint32_t>(index.window_term_list_.size());
+        StreamWriter::WriteObj(writer, window_count);
+        for (const auto& window : index.window_term_list_) {
+            window->Serialize(writer);
+        }
+        index.label_table_->Serialize(writer);
+    }
 };
 
 }  // namespace vsag
@@ -104,6 +124,35 @@ private:
     std::vector<int64_t> valid_ids_;
     std::unordered_set<int64_t> valid_ids_set_;
 };
+
+namespace {
+
+std::set<int64_t>
+result_ids(const DatasetPtr& result) {
+    return std::set<int64_t>(result->GetIds(), result->GetIds() + result->GetDim());
+}
+
+SINDIParameterPtr
+create_date_test_param(bool immutable, uint32_t window_size) {
+    auto param = std::make_shared<SINDIParameter>();
+    param->term_id_limit = 10;
+    param->window_size = window_size;
+    param->doc_prune_ratio = 0.0F;
+    param->avg_doc_term_length = 1;
+    param->use_reorder = true;
+    param->immutable = immutable;
+    return param;
+}
+
+std::string
+date_search_params(const std::string& date = "") {
+    const auto date_field = date.empty() ? "" : fmt::format(R"(,"date":"{}")", date);
+    return fmt::format(
+        R"({{"sindi":{{"query_prune_ratio":0.0,"term_prune_ratio":0.0,"n_candidate":10{}}}}})",
+        date_field);
+}
+
+}  // namespace
 
 TEST_CASE("SINDI Heap Insert Strategy Test", "[ut][SINDI]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
@@ -244,10 +293,256 @@ TEST_CASE("SINDI streaming compatibility", "[ut][SINDI][streaming][compatibility
         REQUIRE_FALSE(Index::Load(load_stream, "{}").has_value());
     }
 
+    SECTION("loads legacy stream without optional window metadata") {
+        auto mutated = EraseStreamingBlock(bytes, StreamSerializationTag::SINDI_WINDOW_METADATA);
+        auto restored = std::make_unique<SINDI>(index_param, common_param);
+        std::stringstream deserialize_stream(mutated);
+        REQUIRE_NOTHROW(restored->DeserializeStreaming(deserialize_stream));
+        REQUIRE(restored->GetNumElements() == num_base);
+
+        auto query = Dataset::Make();
+        query->NumElements(1)->SparseVectors(sv_base.data())->Owner(false);
+        REQUIRE(restored->KnnSearch(query, 10, date_search_params(), nullptr)->GetDim() == 10);
+        REQUIRE(restored->KnnSearch(query, 10, date_search_params("2026"), nullptr)->GetDim() == 0);
+    }
+
     for (auto& item : sv_base) {
         delete[] item.vals_;
         delete[] item.ids_;
     }
+}
+
+TEST_CASE("SINDI Date Window Search Test", "[ut][SINDI][date]") {
+    const bool immutable = GENERATE(false, true);
+    CAPTURE(immutable);
+
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    common_param.dim_ = 2;
+
+    constexpr uint32_t num_base = 7;
+    uint32_t term_id = 1;
+    float term_value = 1.0F;
+    std::vector<SparseVector> vectors(num_base);
+    for (auto& vector : vectors) {
+        vector.len_ = 1;
+        vector.ids_ = &term_id;
+        vector.vals_ = &term_value;
+    }
+    std::array<int64_t, num_base> ids = {10, 11, 12, 13, 14, 15, 16};
+    std::array<std::string, num_base> dates = {
+        "2026/05/17", "2025", "2026/05/17", "2026/05", "", "2026/06/01", "2026/05/17"};
+    auto base = Dataset::Make();
+    base->NumElements(num_base)
+        ->SparseVectors(vectors.data())
+        ->Ids(ids.data())
+        ->Dates(dates.data())
+        ->Owner(false);
+
+    auto index = std::make_unique<SINDI>(create_date_test_param(immutable, 2), common_param);
+    REQUIRE(index->Build(base).empty());
+
+    const auto& metadata = SINDITestAccess::WindowMetadata(*index);
+    REQUIRE(metadata.size() == 6);
+    REQUIRE(metadata[0].date == "2026/05/17");
+    REQUIRE(metadata[0].start_id == 0);
+    REQUIRE(metadata[0].doc_count == 2);
+    REQUIRE(metadata[1].date == "2026/05/17");
+    REQUIRE(metadata[1].start_id == 2);
+    REQUIRE(metadata[1].doc_count == 1);
+    REQUIRE(metadata[2].date == "2025");
+    REQUIRE(metadata[3].date == "2026/05");
+    REQUIRE(metadata[4].date.empty());
+    REQUIRE(metadata[5].date == "2026/06/01");
+
+    auto query = Dataset::Make();
+    query->NumElements(1)->SparseVectors(vectors.data())->Owner(false);
+
+    REQUIRE(result_ids(index->KnnSearch(query, 10, date_search_params(), nullptr)) ==
+            std::set<int64_t>{10, 11, 12, 13, 14, 15, 16});
+    REQUIRE(result_ids(index->KnnSearch(query, 10, date_search_params("2026"), nullptr)) ==
+            std::set<int64_t>{10, 12, 13, 15, 16});
+    REQUIRE(result_ids(index->KnnSearch(query, 10, date_search_params("2026/05"), nullptr)) ==
+            std::set<int64_t>{10, 12, 13, 16});
+    REQUIRE(result_ids(index->KnnSearch(query, 10, date_search_params("2026/05/17"), nullptr)) ==
+            std::set<int64_t>{10, 12, 16});
+    REQUIRE(index->KnnSearch(query, 10, date_search_params("2024"), nullptr)->GetDim() == 0);
+
+    auto even_filter = std::make_shared<MockFilter>();
+    REQUIRE(result_ids(index->KnnSearch(query, 10, date_search_params("2026"), even_filter)) ==
+            std::set<int64_t>{10, 12, 16});
+    REQUIRE(result_ids(index->RangeSearch(query, 0.0F, date_search_params("2026/05"), nullptr)) ==
+            std::set<int64_t>{10, 12, 13, 16});
+}
+
+TEST_CASE("SINDI Date Add And Serialization Test", "[ut][SINDI][date]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    common_param.dim_ = 2;
+
+    uint32_t term_id = 1;
+    float term_value = 1.0F;
+    SparseVector vector;
+    vector.len_ = 1;
+    vector.ids_ = &term_id;
+    vector.vals_ = &term_value;
+
+    SECTION("incremental add only reuses the matching tail window") {
+        auto index = std::make_unique<SINDI>(create_date_test_param(false, 2), common_param);
+        const std::array<int64_t, 4> ids = {20, 21, 22, 23};
+        const std::array<std::string, 4> dates = {"2026", "2026", "2025", "2026"};
+        for (uint32_t i = 0; i < ids.size(); ++i) {
+            auto data = Dataset::Make();
+            data->NumElements(1)
+                ->SparseVectors(&vector)
+                ->Ids(ids.data() + i)
+                ->Dates(dates.data() + i)
+                ->Owner(false);
+            REQUIRE(index->Add(data).empty());
+        }
+
+        const auto& metadata = SINDITestAccess::WindowMetadata(*index);
+        REQUIRE(metadata.size() == 3);
+        REQUIRE(metadata[0].date == "2026");
+        REQUIRE(metadata[0].doc_count == 2);
+        REQUIRE(metadata[1].date == "2025");
+        REQUIRE(metadata[1].doc_count == 1);
+        REQUIRE(metadata[2].date == "2026");
+        REQUIRE(metadata[2].doc_count == 1);
+    }
+
+    SECTION("date metadata survives normal and streaming serialization") {
+        const bool immutable = GENERATE(false, true);
+        CAPTURE(immutable);
+        auto param = create_date_test_param(immutable, 10000);
+        auto source = std::make_unique<SINDI>(param, common_param);
+        std::array<int64_t, 3> ids = {30, 31, 32};
+        std::array<std::string, 3> dates = {"2026/05", "", "2025"};
+        std::array<SparseVector, 3> vectors = {vector, vector, vector};
+        auto base = Dataset::Make();
+        base->NumElements(3)
+            ->SparseVectors(vectors.data())
+            ->Ids(ids.data())
+            ->Dates(dates.data())
+            ->Owner(false);
+        REQUIRE(source->Build(base).empty());
+
+        auto restored = std::make_unique<SINDI>(param, common_param);
+        test_serializion(*source, *restored);
+        auto query = Dataset::Make();
+        query->NumElements(1)->SparseVectors(&vector)->Owner(false);
+        REQUIRE(result_ids(restored->KnnSearch(query, 10, date_search_params("2026"), nullptr)) ==
+                std::set<int64_t>{30});
+
+        if (not immutable) {
+            std::stringstream stream;
+            REQUIRE_NOTHROW(source->SerializeStreaming(stream));
+            auto streaming_restored = std::make_unique<SINDI>(param, common_param);
+            REQUIRE_NOTHROW(streaming_restored->DeserializeStreaming(stream));
+            REQUIRE(result_ids(streaming_restored->KnnSearch(
+                        query, 10, date_search_params("2025"), nullptr)) == std::set<int64_t>{32});
+        }
+    }
+
+    SECTION("invalid build date fails before inserting documents") {
+        auto index = std::make_unique<SINDI>(create_date_test_param(false, 2), common_param);
+        int64_t id = 40;
+        std::string date = "2026/5";
+        auto base = Dataset::Make();
+        base->NumElements(1)->SparseVectors(&vector)->Ids(&id)->Dates(&date)->Owner(false);
+        REQUIRE_THROWS(index->Build(base));
+        REQUIRE(index->GetNumElements() == 0);
+        REQUIRE(SINDITestAccess::WindowMetadata(*index).empty());
+    }
+
+    SECTION("legacy normal serialization restores undated windows") {
+        auto source_param = create_date_test_param(false, 10000);
+        source_param->use_reorder = false;
+        auto source = std::make_unique<SINDI>(source_param, common_param);
+        std::array<int64_t, 2> ids = {50, 51};
+        std::array<SparseVector, 2> vectors = {vector, vector};
+        auto base = Dataset::Make();
+        base->NumElements(2)->SparseVectors(vectors.data())->Ids(ids.data())->Owner(false);
+        REQUIRE(source->Build(base).empty());
+
+        std::stringstream stream;
+        IOStreamWriter writer(stream);
+        SINDITestAccess::SerializeLegacyMutable(*source, writer);
+
+        auto restored_param = create_date_test_param(false, 10000);
+        restored_param->use_reorder = false;
+        restored_param->deserialize_without_footer = true;
+        auto restored = std::make_unique<SINDI>(restored_param, common_param);
+        IOStreamReader reader(stream);
+        REQUIRE_NOTHROW(restored->Deserialize(reader));
+
+        auto query = Dataset::Make();
+        query->NumElements(1)->SparseVectors(&vector)->Owner(false);
+        REQUIRE(restored->KnnSearch(query, 10, date_search_params(), nullptr)->GetDim() == 2);
+        REQUIRE(restored->KnnSearch(query, 10, date_search_params("2026"), nullptr)->GetDim() == 0);
+    }
+}
+
+TEST_CASE("SINDI Date Quantization And Remap Test", "[ut][SINDI][date]") {
+    const auto configuration = GENERATE(std::make_tuple(SparseValueQuantizationType::SQ8, false),
+                                        std::make_tuple(SparseValueQuantizationType::FP32, true));
+    const auto quantization = std::get<0>(configuration);
+    const auto remap_term_ids = std::get<1>(configuration);
+    CAPTURE(static_cast<uint32_t>(quantization), remap_term_ids);
+
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    common_param.dim_ = 2;
+
+    auto param = create_date_test_param(false, 2);
+    param->use_reorder = false;
+    param->sparse_value_quant_type = quantization;
+    param->remap_term_ids = remap_term_ids;
+    auto index = std::make_unique<SINDI>(param, common_param);
+
+    uint32_t term_id = remap_term_ids ? 1000 : 1;
+    float term_value = 1.0F;
+    SparseVector vector;
+    vector.len_ = 1;
+    vector.ids_ = &term_id;
+    vector.vals_ = &term_value;
+    std::array<float, 3> base_values = {2.0F, 1.0F, 3.0F};
+    std::array<SparseVector, 3> vectors = {vector, vector, vector};
+    for (uint32_t i = 0; i < vectors.size(); ++i) {
+        vectors[i].vals_ = base_values.data() + i;
+    }
+    std::array<int64_t, 3> ids = {60, 61, 62};
+    std::array<std::string, 3> dates = {"2026", "2025", "2026"};
+    auto base = Dataset::Make();
+    base->NumElements(3)
+        ->SparseVectors(vectors.data())
+        ->Ids(ids.data())
+        ->Dates(dates.data())
+        ->Owner(false);
+    REQUIRE(index->Build(base).empty());
+
+    auto query = Dataset::Make();
+    query->NumElements(1)->SparseVectors(&vector)->Owner(false);
+    REQUIRE(result_ids(index->KnnSearch(query, 10, date_search_params("2026"), nullptr)) ==
+            std::set<int64_t>{60, 62});
+    REQUIRE(std::isfinite(index->CalcDistanceById(query, 61, false)));
+
+    SparseVector restored;
+    index->GetSparseVectorByInnerId(2, &restored, allocator.get());
+    REQUIRE(restored.len_ == 1);
+    REQUIRE(restored.ids_[0] == term_id);
+    allocator->Deallocate(restored.ids_);
+    allocator->Deallocate(restored.vals_);
+
+    REQUIRE(index->Remove({60}, RemoveMode::MARK_REMOVE) == 1);
+    REQUIRE(result_ids(index->KnnSearch(query, 10, date_search_params("2026"), nullptr)) ==
+            std::set<int64_t>{62});
 }
 
 TEST_CASE("SINDI Basic Test", "[ut][SINDI]") {

@@ -355,6 +355,23 @@ public:
     GetPaths(const std::string& hierarchy_name) const = 0;
 
     /**
+     * @brief Sets the date-label array for the dataset.
+     *
+     * @param dates Pointer to an array with one date label per element.
+     * @return DatasetPtr A shared pointer to the dataset with updated date labels.
+     */
+    virtual DatasetPtr
+    Dates(const std::string* dates) = 0;
+
+    /**
+     * @brief Retrieves the date-label array for the dataset.
+     *
+     * @return const std::string* Pointer to the date-label array, or nullptr when absent.
+     */
+    virtual const std::string*
+    GetDates() const = 0;
+
+    /**
      * @brief Sets the extra info for the dataset.
      *
      * @param paths Pointer to extra info.

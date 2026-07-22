@@ -85,6 +85,7 @@ For documents that hold several dense sub-vectors each:
 | `ExtraInfoSize(int64_t)` | `GetExtraInfoSize()` | `int64_t` | Bytes per extra-info blob. |
 | `Paths(const std::string*)` | `GetPaths()` | `const std::string*` | Hierarchy paths (Pyramid). Default hierarchy. |
 | `Paths(const std::string& hierarchy, const std::string*)` | `GetPaths(const std::string& hierarchy)` | `const std::string*` | Paths for a named hierarchy. |
+| `Dates(const std::string*)` | `GetDates()` | `const std::string*` | Optional per-element SINDI date labels (`YYYY`, `YYYY/MM`, or `YYYY/MM/DD`). |
 | `SourceID(const std::string*)` | `GetSourceID()` | `const std::string*` | Optional source identifier. |
 
 See [Attribute Filter (Hybrid Search)](../advanced/attribute_filter.md) and

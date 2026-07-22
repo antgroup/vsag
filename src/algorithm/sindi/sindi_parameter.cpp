@@ -20,6 +20,84 @@
 #include "utils/param_compat_macros.h"
 
 namespace vsag {
+
+namespace {
+
+bool
+is_ascii_digits(const std::string& value, uint64_t begin, uint64_t count) {
+    for (uint64_t i = begin; i < begin + count; ++i) {
+        if (value[i] < '0' or value[i] > '9') {
+            return false;
+        }
+    }
+    return true;
+}
+
+uint32_t
+parse_date_component(const std::string& value, uint64_t begin, uint64_t count) {
+    uint32_t result = 0;
+    for (uint64_t i = begin; i < begin + count; ++i) {
+        result = result * 10 + static_cast<uint32_t>(value[i] - '0');
+    }
+    return result;
+}
+
+}  // namespace
+
+bool
+IsValidSINDIDate(const std::string& date) {
+    if (date.empty()) {
+        return true;
+    }
+    if (date.size() != 4 and date.size() != 7 and date.size() != 10) {
+        return false;
+    }
+    if (not is_ascii_digits(date, 0, 4)) {
+        return false;
+    }
+    const auto year = parse_date_component(date, 0, 4);
+    if (year == 0) {
+        return false;
+    }
+    if (date.size() == 4) {
+        return true;
+    }
+    if (date[4] != '/' or not is_ascii_digits(date, 5, 2)) {
+        return false;
+    }
+    const auto month = parse_date_component(date, 5, 2);
+    if (month == 0 or month > 12) {
+        return false;
+    }
+    if (date.size() == 7) {
+        return true;
+    }
+    if (date[7] != '/' or not is_ascii_digits(date, 8, 2)) {
+        return false;
+    }
+    const auto day = parse_date_component(date, 8, 2);
+    constexpr uint32_t DAYS_PER_MONTH[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+    auto max_day = DAYS_PER_MONTH[month - 1];
+    const bool leap_year = year % 4 == 0 and (year % 100 != 0 or year % 400 == 0);
+    if (month == 2 and leap_year) {
+        max_day = 29;
+    }
+    return day > 0 and day <= max_day;
+}
+
+bool
+SINDIDateMatches(const std::string& window_date, const std::string& query_date) {
+    if (query_date.empty()) {
+        return true;
+    }
+    if (window_date == query_date) {
+        return true;
+    }
+    return window_date.size() > query_date.size() and
+           window_date.compare(0, query_date.size(), query_date) == 0 and
+           window_date[query_date.size()] == '/';
+}
+
 std::string
 SparseValueQuantizationTypeToString(SparseValueQuantizationType type) {
     switch (type) {
@@ -191,6 +269,12 @@ SINDISearchParameter::FromJson(const JsonType& json) {
     } else {
         n_candidate = DEFAULT_N_CANDIDATE;
     }
+    if (json[INDEX_SINDI].Contains(SPARSE_DATE)) {
+        date = json[INDEX_SINDI][SPARSE_DATE].GetString();
+        CHECK_ARGUMENT(IsValidSINDIDate(date), fmt::format("invalid SINDI date: {}", date));
+    } else {
+        date.clear();
+    }
 
     if (json[INDEX_SINDI].Contains(LEGACY_USE_TERM_LISTS_HEAP_INSERT_KEY)) {
         logger::warn(
@@ -206,6 +290,9 @@ SINDISearchParameter::ToJson() const {
     json[INDEX_SINDI][SPARSE_QUERY_PRUNE_RATIO].SetFloat(query_prune_ratio);
     json[INDEX_SINDI][SPARSE_N_CANDIDATE].SetInt(n_candidate);
     json[INDEX_SINDI][SPARSE_TERM_PRUNE_RATIO].SetFloat(term_prune_ratio);
+    if (not date.empty()) {
+        json[INDEX_SINDI][SPARSE_DATE].SetString(date);
+    }
     return json;
 }
 
