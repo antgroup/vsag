@@ -102,6 +102,7 @@ together when the directory is listed:
 | [`320_feature_extra_info.cpp`](320_feature_extra_info.cpp) | Attach per-vector extra info / payload. |
 | [`322_feature_hgraph_brute_force_threshold.cpp`](322_feature_hgraph_brute_force_threshold.cpp) | HGraph search-time `brute_force_threshold`: automatically switch to an exact scan under highly selective filters. |
 | [`324_feature_lazy_hgraph_extra_info.cpp`](324_feature_lazy_hgraph_extra_info.cpp) | LazyHGraph `extra_info` filtering across flat and graph phases. |
+| [`325_feature_compare_hgraph_pyramid_memory.cpp`](325_feature_compare_hgraph_pyramid_memory.cpp) | Compare HGraph with a nine-leaf Pyramid on the same 400 MiB vector dataset. |
 
 ### Persistence (`4xx`)
 

@@ -257,6 +257,23 @@ IndexNode::Serialize(StreamWriter& writer) const {
         item.second->Serialize(writer);
     }
 }
+
+uint64_t
+IndexNode::GetMemoryUsage() const {
+    std::shared_lock lock(mutex_);
+    uint64_t memory = sizeof(IndexNode) + ids_.capacity() * sizeof(InnerIdType);
+    memory +=
+        children_.bucket_count() * (sizeof(decltype(children_)::value_type) + sizeof(uint32_t));
+    for (const auto& [key, child] : children_) {
+        memory += key.capacity() + 1;
+        memory += child->GetMemoryUsage();
+    }
+    if (graph_ != nullptr) {
+        memory += graph_->GetMemoryUsage();
+    }
+    return memory;
+}
+
 void
 IndexNode::Init() {
     if (status_ == Status::NO_INDEX) {
@@ -316,6 +333,9 @@ Pyramid::build_by_odescent(const DatasetPtr& base) {
     base_codes_->BatchInsertVector(data_vectors, data_num);
     if (has_precise_reorder()) {
         precise_codes_->BatchInsertVector(data_vectors, data_num);
+    }
+    if (create_new_raw_vector_) {
+        raw_vector_->BatchInsertVector(data_vectors, data_num);
     }
     auto codes = has_precise_reorder() ? precise_codes_ : base_codes_;
 
@@ -589,6 +609,44 @@ Pyramid::GetNumberRemoved() const {
     return delete_count_.load();
 }
 
+uint64_t
+Pyramid::GetMemoryUsage() const {
+    auto detail = GetMemoryUsageDetail();
+    uint64_t memory = sizeof(Pyramid);
+    for (const auto& [name, usage] : detail) {
+        (void)name;
+        memory += usage;
+    }
+    return memory;
+}
+
+std::unordered_map<std::string, uint64_t>
+Pyramid::GetMemoryUsageDetail() const {
+    std::shared_lock lock(resize_mutex_);
+    std::unordered_map<std::string, uint64_t> memory_usage;
+    memory_usage["points_mutex"] = points_mutex_ == nullptr ? 0 : points_mutex_->GetMemoryUsage();
+    memory_usage["pool"] = pool_ == nullptr ? 0 : pool_->GetMemoryUsage();
+    memory_usage["label_table"] = label_table_ == nullptr ? 0 : label_table_->GetMemoryUsage();
+    memory_usage["base_codes"] = base_codes_ == nullptr ? 0 : base_codes_->GetMemoryUsage();
+    if (use_reorder_ && precise_codes_ != nullptr) {
+        memory_usage["precise_codes"] = precise_codes_->GetMemoryUsage();
+    }
+    if (create_new_raw_vector_ && raw_vector_ != nullptr) {
+        memory_usage["raw_vector"] = raw_vector_->GetMemoryUsage();
+    }
+
+    uint64_t hierarchy_memory = hierarchies_.bucket_count() *
+                                (sizeof(decltype(hierarchies_)::value_type) + sizeof(uint32_t));
+    for (const auto& [name, hierarchy] : hierarchies_) {
+        hierarchy_memory += name.capacity() + 1;
+        hierarchy_memory += sizeof(Hierarchy) + hierarchy->name.capacity() + 1;
+        hierarchy_memory += hierarchy->no_build_levels.capacity() * sizeof(int32_t);
+        hierarchy_memory += hierarchy->root->GetMemoryUsage();
+    }
+    memory_usage["hierarchies"] = hierarchy_memory;
+    return memory_usage;
+}
+
 uint32_t
 Pyramid::Remove(const std::vector<int64_t>& ids, RemoveMode mode) {
     if (mode != RemoveMode::MARK_REMOVE) {
@@ -606,6 +664,9 @@ Pyramid::Serialize(StreamWriter& writer) const {
     base_codes_->Serialize(writer);
     if (has_precise_reorder()) {
         precise_codes_->Serialize(writer);
+    }
+    if (create_new_raw_vector_) {
+        raw_vector_->Serialize(writer);
     }
 
     auto pyramid_param = std::dynamic_pointer_cast<PyramidParameters>(create_param_ptr_);
@@ -661,6 +722,13 @@ Pyramid::collect_streaming_header() const {
                                      StreamSerializationBlockCurrentVersion(tag),
                                      StreamSerializationTagCritical(tag));
     }
+    if (this->create_new_raw_vector_) {
+        auto tag = static_cast<uint32_t>(StreamSerializationTag::RAW_VECTOR);
+        AppendStreamingManifestBlock(manifest,
+                                     tag,
+                                     StreamSerializationBlockCurrentVersion(tag),
+                                     StreamSerializationTagCritical(tag));
+    }
     AppendStreamingManifestBlock(manifest,
                                  hierarchy_tag,
                                  StreamSerializationBlockCurrentVersion(hierarchy_tag),
@@ -704,6 +772,13 @@ Pyramid::serialize_streaming_body(StreamWriter& writer) const {
         WriteStreamingBlock(
             writer, tag, StreamSerializationTagCritical(tag), [this](StreamWriter& w) {
                 this->precise_codes_->Serialize(w);
+            });
+    }
+    if (this->create_new_raw_vector_) {
+        auto tag = static_cast<uint32_t>(StreamSerializationTag::RAW_VECTOR);
+        WriteStreamingBlock(
+            writer, tag, StreamSerializationTagCritical(tag), [this](StreamWriter& w) {
+                this->raw_vector_->Serialize(w);
             });
     }
     WriteStreamingBlock(writer,
@@ -770,6 +845,7 @@ Pyramid::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) 
     bool loaded_label_table = false;
     bool loaded_base_codes = false;
     bool loaded_precise_codes = false;
+    bool loaded_raw_vector = false;
     bool loaded_hierarchies = false;
 
     while (true) {
@@ -821,6 +897,15 @@ Pyramid::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) 
                     loaded_precise_codes = true;
                 }
                 break;
+            case StreamSerializationTag::RAW_VECTOR:
+                if (this->create_new_raw_vector_) {
+                    ReadSeekableBlockPayload(
+                        block_reader, block_header, [this](StreamReader& block) {
+                            this->raw_vector_->Deserialize(block);
+                        });
+                    loaded_raw_vector = true;
+                }
+                break;
             case StreamSerializationTag::PYRAMID_HIERARCHIES:
                 ReadSeekableBlockPayload(
                     block_reader, block_header, [this, &basic_info](StreamReader& block) {
@@ -854,6 +939,10 @@ Pyramid::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) 
         throw VsagException(ErrorType::READ_ERROR,
                             "Pyramid streaming serialization precise codes block is missing");
     }
+    if (this->create_new_raw_vector_ && !loaded_raw_vector) {
+        throw VsagException(ErrorType::READ_ERROR,
+                            "Pyramid streaming serialization raw vector block is missing");
+    }
 
     resize(max_capacity);
     this->current_memory_usage_ = static_cast<int64_t>(this->CalSerializeSize());
@@ -867,6 +956,17 @@ Pyramid::Deserialize(StreamReader& reader) {
         throw VsagException(ErrorType::READ_ERROR, "failed to read index footer");
     }
     auto max_capacity = basic_info["max_capacity"].GetInt();
+    if (basic_info.Contains(INDEX_PARAM)) {
+        auto index_param = std::make_shared<PyramidParameters>();
+        index_param->FromString(basic_info[INDEX_PARAM].GetString());
+        if (not this->create_param_ptr_->CheckCompatibility(index_param)) {
+            auto message = fmt::format("Pyramid index parameter not match, current: {}, new: {}",
+                                       this->create_param_ptr_->ToString(),
+                                       index_param->ToString());
+            logger::error(message);
+            throw VsagException(ErrorType::INVALID_ARGUMENT, message);
+        }
+    }
 
     BufferStreamReader buffer_reader(
         &reader, std::numeric_limits<uint64_t>::max(), this->allocator_);
@@ -877,6 +977,9 @@ Pyramid::Deserialize(StreamReader& reader) {
     base_codes_->Deserialize(buffer_reader);
     if (has_precise_reorder()) {
         precise_codes_->Deserialize(buffer_reader);
+    }
+    if (create_new_raw_vector_) {
+        raw_vector_->Deserialize(buffer_reader);
     }
     cur_element_count_ = base_codes_->TotalCount();
 
@@ -947,11 +1050,15 @@ Pyramid::Add(const DatasetPtr& base) {
         }
         bool base_storage_resized = false;
         bool precise_storage_resized = false;
+        bool raw_storage_resized = false;
         if (new_capacity > max_capacity_) {
             base_storage_resized = new_capacity > static_cast<int64_t>(base_codes_->max_capacity_);
             precise_storage_resized =
                 not has_precise_reorder() ||
                 new_capacity > static_cast<int64_t>(precise_codes_->max_capacity_);
+            raw_storage_resized =
+                not create_new_raw_vector_ ||
+                new_capacity > static_cast<int64_t>(raw_vector_->max_capacity_);
             resize(new_capacity);
         }
 
@@ -981,6 +1088,9 @@ Pyramid::Add(const DatasetPtr& base) {
                 if (has_precise_reorder()) {
                     precise_codes_->InsertVector(vector, inner_id);
                 }
+                if (create_new_raw_vector_) {
+                    raw_vector_->InsertVector(vector, inner_id);
+                }
             }
         };
         const auto supports_parallel_encode = [](const FlattenInterfacePtr& codes) {
@@ -993,7 +1103,8 @@ Pyramid::Add(const DatasetPtr& base) {
             local_cur_element_count == 0 && thread_pool_ != nullptr && build_thread_count_ > 1 &&
             data_biases.size() > 1 && supports_parallel_encode(base_codes_) &&
             (not has_precise_reorder() || supports_parallel_encode(precise_codes_)) &&
-            base_storage_resized && precise_storage_resized;
+            (not create_new_raw_vector_ || supports_parallel_encode(raw_vector_)) &&
+            base_storage_resized && precise_storage_resized && raw_storage_resized;
         if (use_parallel_encode) {
             const uint64_t worker_count =
                 std::min<uint64_t>(build_thread_count_, data_biases.size());
@@ -1058,6 +1169,9 @@ Pyramid::resize(int64_t new_max_capacity) {
     if (has_precise_reorder()) {
         precise_codes_->Resize(new_max_capacity);
     }
+    if (create_new_raw_vector_) {
+        raw_vector_->Resize(new_max_capacity);
+    }
     points_mutex_->Resize(new_max_capacity);
     max_capacity_ = new_max_capacity;
 }
@@ -1106,6 +1220,9 @@ Pyramid::InitFeatures() {
         IndexFeature::SUPPORT_EXPORT_MODEL,
         IndexFeature::SUPPORT_GET_MEMORY_USAGE,
     });
+    if (raw_vector_ != nullptr) {
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_RAW_VECTOR_BY_IDS);
+    }
 
     this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_DELETE_BY_ID);
 }
@@ -1168,6 +1285,18 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
                 "{HOLD_MOLDS}": false
             }
         },
+        "{STORE_RAW_VECTOR_KEY}": false,
+        "{RAW_VECTOR_KEY}": {
+            "{IO_PARAMS_KEY}": {
+                "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
+                "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
+            },
+            "{CODES_TYPE_KEY}": "flatten",
+            "{QUANTIZATION_PARAMS_KEY}": {
+                "{TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
+                "{HOLD_MOLDS}": true
+            }
+        },
         "{BUILD_THREAD_COUNT_KEY}": 1,
         "{EF_CONSTRUCTION_KEY}": 400,
         "{NO_BUILD_LEVELS}":[],
@@ -1219,6 +1348,11 @@ Pyramid::CheckAndMappingExternalParam(const JsonType& external_param,
          {BASE_CODES_KEY, QUANTIZATION_PARAMS_KEY, PRODUCT_QUANTIZATION_DIM_KEY}},
         {PYRAMID_BASE_FILE_PATH, {BASE_CODES_KEY, IO_PARAMS_KEY, IO_FILE_PATH_KEY}},
         {PYRAMID_PRECISE_FILE_PATH, {PRECISE_CODES_KEY, IO_PARAMS_KEY, IO_FILE_PATH_KEY}},
+        {STORE_RAW_VECTOR, {BASE_CODES_KEY, QUANTIZATION_PARAMS_KEY, HOLD_MOLDS}},
+        {STORE_RAW_VECTOR, {PRECISE_CODES_KEY, QUANTIZATION_PARAMS_KEY, HOLD_MOLDS}},
+        {STORE_RAW_VECTOR, {STORE_RAW_VECTOR_KEY}},
+        {RAW_VECTOR_IO_TYPE, {RAW_VECTOR_KEY, IO_PARAMS_KEY, TYPE_KEY}},
+        {RAW_VECTOR_FILE_PATH, {RAW_VECTOR_KEY, IO_PARAMS_KEY, IO_FILE_PATH_KEY}},
         {ODESCENT_PARAMETER_BUILD_BLOCK_SIZE, {GRAPH_KEY, ODESCENT_PARAMETER_BUILD_BLOCK_SIZE}},
         {ODESCENT_PARAMETER_MIN_IN_DEGREE, {GRAPH_KEY, ODESCENT_PARAMETER_MIN_IN_DEGREE}},
         {ODESCENT_PARAMETER_GRAPH_ITER_TURN, {GRAPH_KEY, ODESCENT_PARAMETER_GRAPH_ITER_TURN}},
@@ -1242,6 +1376,9 @@ Pyramid::Train(const DatasetPtr& base) {
     this->base_codes_->Train(base->GetFloat32Vectors(), base->GetNumElements());
     if (has_precise_reorder()) {
         this->precise_codes_->Train(base->GetFloat32Vectors(), base->GetNumElements());
+    }
+    if (create_new_raw_vector_) {
+        this->raw_vector_->Train(base->GetFloat32Vectors(), base->GetNumElements());
     }
 }
 std::vector<int64_t>
@@ -1585,6 +1722,9 @@ Pyramid::CalcDistanceById(const float* query, int64_t id, bool calculate_precise
     if (has_precise_reorder() && calculate_precise_distance) {
         flat = this->precise_codes_;
     }
+    if (raw_vector_ != nullptr && calculate_precise_distance) {
+        flat = this->raw_vector_;
+    }
     return InnerIndexInterface::calc_distance_by_id(query, id, flat);
 }
 
@@ -1607,6 +1747,9 @@ Pyramid::CalDistanceById(const float* query,
     if (has_precise_reorder() && calculate_precise_distance) {
         flat = this->precise_codes_;
     }
+    if (raw_vector_ != nullptr && calculate_precise_distance) {
+        flat = this->raw_vector_;
+    }
     std::vector<bool> validity;
     auto result = InnerIndexInterface::cal_distance_by_id(query, ids, count, flat, &validity);
     if (topk == -1) {
@@ -1619,11 +1762,52 @@ void
 Pyramid::GetVectorByInnerId(InnerIdType inner_id, float* data) const {
     std::shared_lock<std::shared_mutex> lock(resize_mutex_);
     auto codes = has_precise_reorder() ? precise_codes_ : base_codes_;
+    codes = raw_vector_ != nullptr ? raw_vector_ : codes;
     bool release = false;
     const auto* buffer = codes->GetCodesById(inner_id, release);
+    if (buffer == nullptr) {
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            fmt::format("failed to get vector by inner id {}", inner_id));
+    }
     codes->Decode(buffer, data);
     if (release) {
         codes->Release(buffer);
+    }
+}
+
+void
+Pyramid::check_and_init_raw_vector(const FlattenInterfaceParamPtr& raw_vector_param,
+                                   const IndexCommonParam& common_param) {
+    if (raw_vector_param == nullptr) {
+        return;
+    }
+
+    raw_vector_ = FlattenInterface::MakeInstance(raw_vector_param, common_param);
+    if (base_codes_->GetQuantizerName() != QUANTIZATION_TYPE_VALUE_FP32 &&
+        precise_codes_ == nullptr) {
+        create_new_raw_vector_ = true;
+        return;
+    }
+    if (base_codes_->GetQuantizerName() != QUANTIZATION_TYPE_VALUE_FP32 &&
+        precise_codes_ != nullptr &&
+        precise_codes_->GetQuantizerName() != QUANTIZATION_TYPE_VALUE_FP32) {
+        create_new_raw_vector_ = true;
+        return;
+    }
+
+    auto io_type_name = raw_vector_param->io_parameter->GetTypeName();
+    if (io_type_name != IO_TYPE_VALUE_BLOCK_MEMORY_IO && io_type_name != IO_TYPE_VALUE_MEMORY_IO) {
+        create_new_raw_vector_ = true;
+        return;
+    }
+
+    if (base_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
+        raw_vector_ = base_codes_;
+        return;
+    }
+    if (precise_codes_ != nullptr &&
+        precise_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
+        raw_vector_ = precise_codes_;
     }
 }
 

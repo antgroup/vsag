@@ -100,6 +100,9 @@ Build-time parameters live under `index_param`.
 | `fast_encode_rabitq_rounds` | int | `6` | Fast RaBitQ refinement rounds in `[1, 32]`. |
 | `base_io_type` / `precise_io_type` | string | `"block_memory_io"` | Base and reorder storage backends; `uring_io` is available in builds with liburing. |
 | `base_file_path` / `precise_file_path` | string | — | Required for disk-backed storage such as `buffer_io`, `async_io`, `uring_io`, or `mmap_io`. |
+| `store_raw_vector` | bool | `false` | Preserve an FP32 copy for `GetRawVectorByIds` and precise distance-by-id calculations. Pyramid reuses an existing in-memory FP32 base/reorder copy when possible; otherwise it creates separate raw-vector storage. |
+| `raw_vector_io_type` | string | `"block_memory_io"` | IO backend for separate raw-vector storage. |
+| `raw_vector_file_path` | string | `"./default_file_path"` | File path used by file-backed raw-vector IO. |
 | `index_min_size` | int | `0` | Minimum sub-index size; smaller groups fall back to scan. |
 | `support_duplicate` | bool | `false` | Allow duplicate ids. |
 | `build_thread_count` | int | `1` | Threads used for parallel build. |

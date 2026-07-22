@@ -95,6 +95,9 @@ auto result = index->KnnSearch(
 | `fast_encode_rabitq_rounds` | int | `6` | RaBitQ 快速编码的微调轮数，范围 `[1, 32]` |
 | `base_io_type` / `precise_io_type` | string | `"block_memory_io"` | 底层与精排存储后端；以 liburing 构建时可用 `uring_io` |
 | `base_file_path` / `precise_file_path` | string | — | `buffer_io`、`async_io`、`uring_io`、`mmap_io` 等磁盘存储必须设置 |
+| `store_raw_vector` | bool | `false` | 保留 FP32 向量，供 `GetRawVectorByIds` 和精确的按 ID 距离计算使用。若已有内存 FP32 base/reorder 副本，Pyramid 会直接复用；否则创建独立 raw-vector 存储。 |
+| `raw_vector_io_type` | string | `"block_memory_io"` | 独立 raw-vector 存储使用的 IO 后端 |
+| `raw_vector_file_path` | string | `"./default_file_path"` | 文件型 raw-vector IO 使用的文件路径 |
 | `index_min_size` | int | `0` | 子索引的最小规模；小于该值的分区会退化为线性扫描 |
 | `support_duplicate` | bool | `false` | 是否允许重复 ID |
 | `build_thread_count` | int | `1` | 构建阶段并发线程数 |

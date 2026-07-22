@@ -187,6 +187,7 @@ Pyramid 按顺序写入以下 streaming blocks：
 | `label_table` | 外部 label 和 label remap | 是 |
 | `base_codes` | 图搜索使用的 base flatten codes | 是 |
 | `high_precision_codes` | reorder 开启时的精排 codes | 条件必需 |
+| `raw_vector` | `store_raw_vector` 需要独立存储时的 FP32 向量 | 条件必需 |
 | `pyramid_hierarchies` | hierarchy 名称和 graph roots | 是 |
 
 `DeserializeStreaming` 会恢复完整的内存 Pyramid 索引。`Index::Load` 可以直接从 streaming metadata

@@ -15,13 +15,16 @@
 
 #include "pyramid.h"
 
+#include <array>
 #include <cmath>
 #include <numeric>
+#include <sstream>
 #include <vector>
 
 #include "impl/allocator/safe_allocator.h"
 #include "index_common_param.h"
 #include "unittest.h"
+#include "vsag/index.h"
 
 namespace {
 
@@ -248,4 +251,290 @@ TEST_CASE("Pyramid Build stores RaBitQ and SQ8 codes in parallel", "[ut][pyramid
             REQUIRE(std::abs(decoded[j] - vectors[inner_id * PYRAMID_TEST_DIM + j]) < 0.02F);
         }
     }
+}
+
+TEST_CASE("Pyramid stores and restores raw vectors", "[ut][pyramid][raw_vector]") {
+    constexpr int64_t dim = 4;
+    constexpr int64_t count = 3;
+    std::array<float, 12> vectors = {
+        0.0F,
+        0.0F,
+        0.0F,
+        0.0F,
+        0.123456F,
+        0.234567F,
+        0.345678F,
+        0.456789F,
+        1.0F,
+        1.0F,
+        1.0F,
+        1.0F,
+    };
+    std::array<int64_t, count> ids = {10, 11, 12};
+    std::array<std::string, count> paths = {"leaf", "leaf", "leaf"};
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = dim;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    common_param.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+    common_param.allocator_ = vsag::SafeAllocator::FactoryDefaultAllocator();
+
+    auto external_param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "sq8",
+        "store_raw_vector": true,
+        "max_degree": 4,
+        "ef_construction": 8,
+        "no_build_levels": [0, 1]
+    })");
+    auto param = vsag::Pyramid::CheckAndMappingExternalParam(external_param, common_param);
+    auto pyramid_param = std::dynamic_pointer_cast<vsag::PyramidParameters>(param);
+
+    REQUIRE(pyramid_param != nullptr);
+    REQUIRE(pyramid_param->store_raw_vector);
+    REQUIRE(pyramid_param->raw_vector_param != nullptr);
+    REQUIRE(pyramid_param->raw_vector_param->quantizer_parameter->GetTypeName() == "fp32");
+
+    auto dataset = vsag::Dataset::Make()
+                       ->NumElements(count)
+                       ->Dim(dim)
+                       ->Float32Vectors(vectors.data())
+                       ->Ids(ids.data())
+                       ->Paths(paths.data())
+                       ->Owner(false);
+    auto index = std::make_shared<vsag::Pyramid>(pyramid_param, common_param);
+    index->InitFeatures();
+    REQUIRE(index->CheckFeature(vsag::IndexFeature::SUPPORT_GET_RAW_VECTOR_BY_IDS));
+    REQUIRE(index->Build(dataset).empty());
+
+    std::array<float, dim> restored{};
+    index->GetVectorByInnerId(1, restored.data());
+    for (int64_t i = 0; i < dim; ++i) {
+        REQUIRE(restored[i] == vectors[dim + i]);
+    }
+    REQUIRE(index->CalcDistanceById(vectors.data() + dim, ids[1], true) == 0.0F);
+
+    auto binary_set = index->vsag::InnerIndexInterface::Serialize();
+    auto loaded = std::make_shared<vsag::Pyramid>(pyramid_param, common_param);
+    loaded->vsag::InnerIndexInterface::Deserialize(binary_set);
+    restored.fill(0.0F);
+    loaded->GetVectorByInnerId(1, restored.data());
+    for (int64_t i = 0; i < dim; ++i) {
+        REQUIRE(restored[i] == vectors[dim + i]);
+    }
+
+    std::stringstream streaming_buffer;
+    index->SerializeStreaming(streaming_buffer);
+    auto streaming_loaded = std::make_shared<vsag::Pyramid>(pyramid_param, common_param);
+    std::stringstream streaming_reader(streaming_buffer.str());
+    streaming_loaded->DeserializeStreaming(streaming_reader);
+    restored.fill(0.0F);
+    streaming_loaded->GetVectorByInnerId(1, restored.data());
+    for (int64_t i = 0; i < dim; ++i) {
+        REQUIRE(restored[i] == vectors[dim + i]);
+    }
+}
+
+TEST_CASE("Pyramid stores raw vectors during ODescent build", "[ut][pyramid][raw_vector]") {
+    constexpr int64_t dim = 4;
+    std::array<float, 8> vectors = {
+        0.123456F, 0.234567F, 0.345678F, 0.456789F, 1.0F, 1.0F, 1.0F, 1.0F};
+    std::array<int64_t, 2> ids = {10, 11};
+    std::array<std::string, 2> paths = {"leaf", "leaf"};
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = dim;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    common_param.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+    common_param.allocator_ = vsag::SafeAllocator::FactoryDefaultAllocator();
+
+    auto external_param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "sq8",
+        "store_raw_vector": true,
+        "graph_type": "odescent",
+        "max_degree": 4,
+        "no_build_levels": [0, 1]
+    })");
+    auto param = vsag::Pyramid::CheckAndMappingExternalParam(external_param, common_param);
+    auto index = std::make_shared<vsag::Pyramid>(param, common_param);
+    auto dataset = vsag::Dataset::Make()
+                       ->NumElements(2)
+                       ->Dim(dim)
+                       ->Float32Vectors(vectors.data())
+                       ->Ids(ids.data())
+                       ->Paths(paths.data())
+                       ->Owner(false);
+
+    REQUIRE(index->Build(dataset).empty());
+    std::array<float, dim> restored{};
+    index->GetVectorByInnerId(0, restored.data());
+    for (int64_t i = 0; i < dim; ++i) {
+        REQUIRE(restored[i] == vectors[i]);
+    }
+}
+
+TEST_CASE("Pyramid reuses FP32 codes as raw vectors", "[ut][pyramid][raw_vector]") {
+    constexpr int64_t dim = 4;
+    std::array<float, dim> vector = {0.123456F, 0.234567F, 0.345678F, 0.456789F};
+    std::array<int64_t, 1> ids = {10};
+    std::array<std::string, 1> paths = {"leaf"};
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = dim;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    common_param.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+    common_param.allocator_ = vsag::SafeAllocator::FactoryDefaultAllocator();
+
+    auto external_param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "use_reorder": true,
+        "precise_quantization_type": "sq8",
+        "store_raw_vector": true,
+        "max_degree": 4,
+        "ef_construction": 8,
+        "no_build_levels": [0, 1]
+    })");
+    auto param = vsag::Pyramid::CheckAndMappingExternalParam(external_param, common_param);
+    auto index = std::make_shared<vsag::Pyramid>(param, common_param);
+    auto dataset = vsag::Dataset::Make()
+                       ->NumElements(1)
+                       ->Dim(dim)
+                       ->Float32Vectors(vector.data())
+                       ->Ids(ids.data())
+                       ->Paths(paths.data())
+                       ->Owner(false);
+
+    REQUIRE(index->Build(dataset).empty());
+    std::array<float, dim> restored{};
+    index->GetVectorByInnerId(0, restored.data());
+    REQUIRE(restored == vector);
+}
+
+TEST_CASE("Pyramid streaming load preserves cosine raw vectors", "[ut][pyramid][raw_vector]") {
+    constexpr int64_t dim = 4;
+    std::array<float, 8> vectors = {1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F, 7.0F, 8.0F};
+    std::array<int64_t, 2> ids = {10, 11};
+    std::array<std::string, 2> paths = {"leaf", "leaf"};
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = dim;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    common_param.metric_ = vsag::MetricType::METRIC_TYPE_COSINE;
+    common_param.allocator_ = vsag::SafeAllocator::FactoryDefaultAllocator();
+
+    auto external_param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "store_raw_vector": true,
+        "max_degree": 4,
+        "ef_construction": 8,
+        "no_build_levels": [0, 1]
+    })");
+    auto param = vsag::Pyramid::CheckAndMappingExternalParam(external_param, common_param);
+    auto index = std::make_shared<vsag::Pyramid>(param, common_param);
+    auto dataset = vsag::Dataset::Make()
+                       ->NumElements(2)
+                       ->Dim(dim)
+                       ->Float32Vectors(vectors.data())
+                       ->Ids(ids.data())
+                       ->Paths(paths.data())
+                       ->Owner(false);
+
+    REQUIRE(index->Build(dataset).empty());
+    std::stringstream stream;
+    index->SerializeStreaming(stream);
+
+    std::stringstream load_stream(stream.str());
+    auto loaded = vsag::Index::Load(load_stream, "{}");
+    REQUIRE(loaded.has_value());
+    auto raw = loaded.value()->GetRawVectorByIds(ids.data(), 2);
+    REQUIRE(raw.has_value());
+    const auto* restored = raw.value()->GetFloat32Vectors();
+    for (int64_t i = 0; i < dim * 2; ++i) {
+        REQUIRE(restored[i] == vectors[i]);
+    }
+}
+
+TEST_CASE("Pyramid legacy deserialize validates raw vector config before reading",
+          "[ut][pyramid][raw_vector]") {
+    constexpr int64_t dim = 4;
+    std::array<float, dim> vector = {1.0F, 2.0F, 3.0F, 4.0F};
+    std::array<int64_t, 1> ids = {10};
+    std::array<std::string, 1> paths = {"leaf"};
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = dim;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    common_param.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+    common_param.allocator_ = vsag::SafeAllocator::FactoryDefaultAllocator();
+
+    auto stored_external_param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "sq8",
+        "store_raw_vector": true,
+        "max_degree": 4,
+        "ef_construction": 8,
+        "no_build_levels": [0, 1]
+    })");
+    auto stored_param =
+        vsag::Pyramid::CheckAndMappingExternalParam(stored_external_param, common_param);
+    auto stored = std::make_shared<vsag::Pyramid>(stored_param, common_param);
+    auto dataset = vsag::Dataset::Make()
+                       ->NumElements(1)
+                       ->Dim(dim)
+                       ->Float32Vectors(vector.data())
+                       ->Ids(ids.data())
+                       ->Paths(paths.data())
+                       ->Owner(false);
+    REQUIRE(stored->Build(dataset).empty());
+    auto binary_set = stored->vsag::InnerIndexInterface::Serialize();
+
+    auto target_external_param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "sq8",
+        "store_raw_vector": false,
+        "max_degree": 4,
+        "ef_construction": 8,
+        "no_build_levels": [0, 1]
+    })");
+    auto target_param =
+        vsag::Pyramid::CheckAndMappingExternalParam(target_external_param, common_param);
+    auto target = std::make_shared<vsag::Pyramid>(target_param, common_param);
+
+    REQUIRE_THROWS(target->vsag::InnerIndexInterface::Deserialize(binary_set));
+    REQUIRE(target->GetNumElements() == 0);
+}
+
+TEST_CASE("Pyramid reports live raw vector memory", "[ut][pyramid][raw_vector][memory]") {
+    constexpr int64_t dim = 4;
+    std::array<float, 8> vectors = {
+        0.123456F, 0.234567F, 0.345678F, 0.456789F, 1.0F, 2.0F, 3.0F, 4.0F};
+    std::array<int64_t, 2> ids = {10, 11};
+    std::array<std::string, 2> paths = {"leaf", "leaf"};
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = dim;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    common_param.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+    common_param.allocator_ = vsag::SafeAllocator::FactoryDefaultAllocator();
+
+    auto external_param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "sq8",
+        "store_raw_vector": true,
+        "max_degree": 4,
+        "ef_construction": 8,
+        "no_build_levels": [0, 1]
+    })");
+    auto param = vsag::Pyramid::CheckAndMappingExternalParam(external_param, common_param);
+    auto index = std::make_shared<vsag::Pyramid>(param, common_param);
+    auto dataset = vsag::Dataset::Make()
+                       ->NumElements(2)
+                       ->Dim(dim)
+                       ->Float32Vectors(vectors.data())
+                       ->Ids(ids.data())
+                       ->Paths(paths.data())
+                       ->Owner(false);
+
+    REQUIRE(index->Build(dataset).empty());
+    REQUIRE(index->GetMemoryUsage() > 0);
+    auto detail = index->GetMemoryUsageDetail();
+    REQUIRE(detail.at("base_codes") > 0);
+    REQUIRE(detail.at("raw_vector") >= sizeof(float) * dim * 2);
+    REQUIRE(index->GetMemoryUsage() >= detail.at("raw_vector"));
 }
