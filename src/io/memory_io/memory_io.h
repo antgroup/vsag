@@ -100,6 +100,9 @@ public:
     void
     ResizeImpl(uint64_t size);
 
+    void
+    ShrinkImpl(uint64_t size);
+
     /**
      * @brief Reads data from the memory buffer at a specified offset.
      *

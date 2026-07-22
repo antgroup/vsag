@@ -33,6 +33,23 @@ MemoryIO::ResizeImpl(uint64_t size) {
     this->size_ = size;
 }
 
+void
+MemoryIO::ShrinkImpl(uint64_t size) {
+    if (size >= this->size_) {
+        return;
+    }
+
+    auto buffer_size = std::max<uint64_t>(size, 1);
+    auto* new_buffer = static_cast<uint8_t*>(this->allocator_->Reallocate(buffer_, buffer_size));
+    if (new_buffer == nullptr) {
+        throw VsagException(ErrorType::NO_ENOUGH_MEMORY,
+                            "failed to shrink memory in MemoryIO, requested size: ",
+                            size);
+    }
+    buffer_ = new_buffer;
+    this->size_ = size;
+}
+
 bool
 MemoryIO::ReadImpl(uint64_t size, uint64_t offset, uint8_t* data) const {
     bool ret = check_valid_offset(size + offset);
