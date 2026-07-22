@@ -19,6 +19,8 @@
 #include "datacell/attribute_bucket_inverted_datacell.h"
 #include "datacell/bucket_datacell.h"
 #include "datacell/flatten_interface.h"
+#include "datacell/graph_interface.h"
+#include "datacell/graph_interface_parameter.h"
 #include "impl/heap/distance_heap.h"
 #include "impl/reorder/reorder.h"
 #include "impl/searcher/basic_searcher.h"
@@ -225,6 +227,9 @@ private:
     void
     fill_location_map();
 
+    void
+    build_bucket_graphs(const DatasetPtr& base);
+
     /**
      * @brief Decode the packed (bucket_id, local_inner_id) pair from
      *        location_map_[inner_id].
@@ -256,6 +261,10 @@ private:
 private:
     BucketInterfacePtr bucket_{nullptr};  // bucket storage (raw or attribute-aware)
     IVFBucketSearcherPtr bucket_searcher_{nullptr};
+    Vector<GraphInterfacePtr> bucket_graphs_;
+    GraphInterfaceParamPtr graph_param_{nullptr};
+    int64_t graph_build_threshold_{0};
+    IndexCommonParam common_param_;
 
     IVFPartitionStrategyPtr partition_strategy_{nullptr};  // centroid / partition logic
     BucketIdType buckets_per_data_;                        // buckets each vector is assigned to
