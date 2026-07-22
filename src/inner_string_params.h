@@ -199,6 +199,9 @@ const char* const SEARCH_PARALLELISM = "parallelism";
 const char* const SEARCH_MAX_TIME_COST_MS = "timeout_ms";
 const char* const SPARSE_N_CANDIDATE = "n_candidate";
 
+const char* const GRAPH_BUILD_THRESHOLD_KEY = "graph_build_threshold";
+const char* const IVF_SEARCH_PARAM_EF_SEARCH = "ef_search";
+
 const char* const DISKANN_SUPPORT_CALC_DISTANCE_BY_ID = "support_calc_distance_by_id";
 
 const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
@@ -300,6 +303,8 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"TQ_CHAIN_KEY", TQ_CHAIN_KEY},
     {"NO_BUILD_LEVELS", NO_BUILD_LEVELS},
     {"GRAPH_TYPE_KEY", GRAPH_TYPE_KEY},
-    {"SUPPORT_FORCE_REMOVE", SUPPORT_FORCE_REMOVE}};
+    {"SUPPORT_FORCE_REMOVE", SUPPORT_FORCE_REMOVE},
+    {"GRAPH_BUILD_THRESHOLD_KEY", GRAPH_BUILD_THRESHOLD_KEY},
+};
 
 }  // namespace vsag
