@@ -226,7 +226,7 @@ public:
      */
     uint64_t
     GetMemoryUsage() {
-        return sizeof(LabelTable) + label_table_.size() * sizeof(LabelType) +
+        return sizeof(LabelTable) + label_table_.capacity() * sizeof(LabelType) +
                label_remap_.GetMemoryUsage() + deleted_ids_.size() * sizeof(InnerIdType) * 2;
     }
 
@@ -365,7 +365,20 @@ public:
 
     void
     ShrinkToFit(InnerIdType capacity) {
-        label_table_.resize(capacity);
+        // Avoid a full-table copy for small removals; vector storage is still compacted by BruteForce.
+        if (capacity <= label_table_.capacity() / 2) {
+            try {
+                Vector<LabelType> compacted_labels(label_table_.begin(),
+                                                   label_table_.begin() + capacity,
+                                                   label_table_.get_allocator());
+                label_table_.swap(compacted_labels);
+            } catch (const std::bad_alloc&) {
+                // Deletion has already completed; retain capacity but remove stale labels.
+                label_table_.resize(capacity);
+            }
+        } else {
+            label_table_.resize(capacity);
+        }
         if (duplicate_tracker_ != nullptr) {
             duplicate_tracker_->Resize(capacity);
         }

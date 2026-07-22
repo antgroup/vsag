@@ -49,7 +49,11 @@ public:
 
     inline pointer
     allocate(uint64_type n, const_void_pointer hint = 0) {
-        return static_cast<pointer>(allocator_->Allocate(n * sizeof(value_type)));
+        auto* p = allocator_->Allocate(n * sizeof(value_type));
+        if (p == nullptr) {
+            throw std::bad_alloc();
+        }
+        return static_cast<pointer>(p);
     }
 
     inline void

@@ -8,7 +8,7 @@ approximation. Its main role is to be the **ground-truth baseline** that approxi
 (HGraph, IVF, …) are evaluated against, but it is also a reasonable production choice for small
 corpora or for workloads where 100% recall is mandatory.
 
-- Source: `src/algorithm/brute_force.{h,cpp}`
+- Source: `src/algorithm/bruteforce/bruteforce.{h,cpp}`
 - Example: [`examples/cpp/105_index_brute_force.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/105_index_brute_force.cpp)
 
 ## How it works
@@ -116,6 +116,37 @@ auto r3 = index->RangeSearch(query, radius, R"({"parallelism": 8})").value();
 
 For range search semantics, see [Range Search](../advanced/range_search.md).
 
+## Removing vectors
+
+BruteForce supports both `RemoveMode::MARK_REMOVE` and `RemoveMode::FORCE_REMOVE`; neither mode
+needs an HGraph-style `support_force_remove` setting.
+
+- `MARK_REMOVE` is the default. It records a tombstone, so the id is excluded from later searches
+  while its vector storage remains allocated. `GetNumElements()` excludes marked ids and
+  `GetNumberRemoved()` reports their count.
+- `FORCE_REMOVE` physically removes each requested vector. It moves the last internal slot into
+  the vacated slot when necessary and keeps the moved vector's external id intact. Successful
+  force removals do not add tombstones; pre-existing marked removals remain reflected by
+  `GetNumberRemoved()`.
+
+```cpp
+index->Remove(std::vector<int64_t>{id1, id2}, vsag::RemoveMode::MARK_REMOVE);
+index->Remove(std::vector<int64_t>{id3, id4}, vsag::RemoveMode::FORCE_REMOVE);
+```
+
+Physical removal is synchronous and more expensive than marking. It takes the index's exclusive
+global lock, so it waits for in-flight searches and prevents new searches while the swap-and-remove
+operation runs. Batch ids when possible and avoid force removal on latency-critical paths.
+
+By default, BruteForce uses `block_memory_io` for vector storage. After every successful
+force-removal batch, its logical size is reduced to the live entry count and trailing complete blocks
+are released; the final partial block remains allocated. The optional extra-information store follows
+the same block-granular behavior. To avoid repeated full-table copies, the label table reclaims its
+backing allocation when its live entry count falls to at most half of its current capacity.
+`GetMemoryUsage()` then reflects the compacted index. This is index allocation accounting,
+not a promise that the process allocator
+immediately returns memory to the operating system or that RSS drops.
+
 ## Capabilities
 
 BruteForce advertises the following capability flags (see `BruteForce::InitFeatures` in
@@ -127,7 +158,7 @@ BruteForce advertises the following capability flags (see `BruteForce::InitFeatu
 | `SUPPORT_ADD_FROM_EMPTY` | Available with non-training quantizers (`fp32`, `fp16`, `bf16`). |
 | `SUPPORT_KNN_SEARCH` / `SUPPORT_KNN_SEARCH_WITH_ID_FILTER` / `SUPPORT_SEARCH_CONCURRENT` | Standard top-k API and id-list filters, with concurrent search. |
 | `SUPPORT_RANGE_SEARCH` / `SUPPORT_RANGE_SEARCH_WITH_ID_FILTER` | Available with non-training quantizers (`fp32`, `fp16`, `bf16`). |
-| `SUPPORT_DELETE_BY_ID` / `SUPPORT_DELETE_CONCURRENT` | `Remove` by id is supported and concurrency-safe. |
+| `SUPPORT_DELETE_BY_ID` / `SUPPORT_DELETE_CONCURRENT` | `Remove` by id is supported. Searches and delete operations are synchronized; `FORCE_REMOVE` takes an exclusive lock. |
 | `SUPPORT_CAL_DISTANCE_BY_ID` | Distance lookup against stored vectors (non-training quantizers only). |
 | `SUPPORT_GET_RAW_VECTOR_BY_IDS` | Available only when `base_quantization_type` is `fp32` and either the metric is not `cosine` or the underlying quantizer holds molds (`hold_molds`). Quantized BruteForce indexes do **not** advertise this flag. |
 | `SUPPORT_CHECK_ID_EXIST` / `SUPPORT_CLONE` / `SUPPORT_ESTIMATE_MEMORY` / `SUPPORT_GET_MEMORY_USAGE` | Standard introspection and lifecycle. |
