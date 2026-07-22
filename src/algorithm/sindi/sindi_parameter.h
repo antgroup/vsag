@@ -63,6 +63,10 @@ public:
 
     bool immutable{false};
 
+    bool store_positions{false};
+
+    uint32_t max_positions_per_term{64};
+
     // temporal parameter
     bool deserialize_without_footer{false};
     bool deserialize_without_buffer{false};
@@ -80,12 +84,36 @@ public:
     SINDISearchParameter() = default;
 
 public:
+    struct ProximityBoostParameter {
+        // Weight of the proximity boost. Zero disables proximity scoring.
+        float weight{0.0f};
+
+        // Top N candidates participating in proximity scoring within a single window
+        uint32_t candidates{10000};
+
+        // true → all pairs C(n,2), false → adjacent-only pairs (n-1)
+        bool all_pairs{false};
+
+        // Whether out-of-order term pairs receive an additional penalty.
+        bool ordered{false};
+
+        // true=multiplicative, false=additive
+        bool boost_multiplicative{true};
+    };
+
     // search
     uint32_t n_candidate{0};
 
     // data cell
     float query_prune_ratio{0};
     float term_prune_ratio{0};
+
+    // proximity scoring
+    ProximityBoostParameter proximity_boost;
+
+    // phrase filter
+    std::vector<uint32_t> phrase_terms;
+    uint32_t phrase_slop{0};
 };
 
 }  // namespace vsag

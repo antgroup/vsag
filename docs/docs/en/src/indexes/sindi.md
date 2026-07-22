@@ -76,6 +76,8 @@ and `metric_type` **must** be `"ip"`.
 | `use_quantization` | bool | `false` | Quantize stored term values to cut memory; when enabled, uses 8-bit scalar quantization (SQ8). |
 | `use_reorder` | bool | `false` | Keep a high-precision flat copy and rescore results (~2× memory). |
 | `remap_term_ids` | bool | `false` | Remap term IDs before indexing; useful when term IDs are sparse or have large gaps. |
+| `store_positions` | bool | `false` | Store per-term positions extracted from each document's original token order. Required to use proximity scoring or the phrase filter at query time. Increases memory roughly proportional to document length. |
+| `max_positions_per_term` | int | `64` | Cap on stored positions per term per document (range: 1 – 256). Extra occurrences beyond the cap are dropped. Only relevant when `store_positions` is `true`. |
 | `avg_doc_term_length` | int | `100` | Hint for memory estimation only. |
 
 > **`dim` vs `term_id_limit`.** For the sparse vector `{0:0.1, 2:0.5, 177:0.8}`,
@@ -92,6 +94,14 @@ Search-time parameters live under the `sindi` sub-object:
 | `n_candidate` | int | `0` | Candidate heap size. When `0`, defaults to `SPARSE_AMPLIFICATION_FACTOR · topk` (500×). If set, must satisfy `1 ≤ n_candidate ≤ SPARSE_AMPLIFICATION_FACTOR · topk`. |
 | `query_prune_ratio` | float | `0.0` | Fraction of lowest-weight query terms skipped (0.0 – 0.9). |
 | `term_prune_ratio` | float | `0.0` | Fraction of term-list entries skipped (0.0 – 0.9). |
+| `proximity_boost` | object | — | Proximity-scoring options. Omit this object to use the defaults below. Requires an index built with `store_positions: true` when enabled. |
+| `proximity_boost.weight` | float | `0.0` | Weight of the proximity boost. `0.0` disables proximity scoring; a positive value enables it. |
+| `proximity_boost.candidates` | int | `10000` | Number of top cosine candidates re-ranked by proximity within each window. Only these candidates pay the proximity cost. |
+| `proximity_boost.all_pairs` | bool | `false` | `true` scores all `C(n,2)` query-term pairs; `false` scores only adjacent pairs `(i, i+1)` in query order. |
+| `proximity_boost.ordered` | bool | `false` | When `true`, out-of-order (reversed) term pairs are penalized (their distance is doubled), similar to Lucene's slop cost. |
+| `proximity_boost.boost_multiplicative` | bool | `true` | `true` multiplies the base cosine score by the proximity boost; `false` adds the boost. |
+| `phrase_terms` | int[] | `[]` | Term ids forming a phrase constraint. When non-empty, a candidate is kept only if these terms occur within `phrase_slop`. Requires `store_positions: true`. |
+| `phrase_slop` | int | `0` | Maximum allowed slop (edit distance in positions) for the phrase filter. `0` requires an exact, in-order phrase. |
 
 SINDI chooses the heap-insertion strategy automatically from the build-time
 `doc_prune_ratio` and search-time `query_prune_ratio`. With the current `0.1`
@@ -106,6 +116,84 @@ auto result = index->KnnSearch(
     query, topk,
     R"({"sindi": {"n_candidate": 200, "query_prune_ratio": 0.1}})").value();
 ```
+
+## Proximity scoring and phrase filter
+
+By default SINDI scores documents as a bag of words: two documents with the same
+term weights score identically regardless of where the terms appear. When term
+*position* matters — phrase-like queries, "these words should appear together" —
+SINDI can optionally boost documents whose query terms are close, or hard-filter
+documents that don't contain a phrase.
+
+Both features require positions to be stored at build time and the original
+tokenized document to be supplied per vector.
+
+1. **Build with `store_positions: true`.**
+2. **Supply the original token order** on each `SparseVector` via
+   `token_sequence_` / `token_seq_len_`. Unlike `ids_` (deduplicated and sorted),
+   `token_sequence_` preserves the raw tokenization order and duplicates, which
+   is what positions are extracted from.
+
+```cpp
+// Build side: enable position storage.
+std::string params = R"({
+    "dtype": "sparse",
+    "metric_type": "ip",
+    "dim": 1024,
+    "index_param": {
+        "term_id_limit": 30000,
+        "window_size": 50000,
+        "store_positions": true,
+        "max_positions_per_term": 64
+    }
+})";
+
+// Per document: keep the original tokenized term ids.
+vsag::SparseVector doc;
+doc.len_ = n_nonzero;           // deduplicated ids_/vals_ as usual
+doc.ids_ = ids;
+doc.vals_ = vals;
+doc.token_seq_len_ = seq_len;   // original token order, with duplicates
+doc.token_sequence_ = token_ids;
+```
+
+**Proximity boost.** Set `proximity_boost.weight > 0` to re-rank the top
+`proximity_boost.candidates` within each window (by cosine) using a pairwise
+`1/(min_dist + 1)` boost over query terms:
+
+```cpp
+auto result = index->KnnSearch(
+    query, topk,
+    R"({"sindi": {
+        "n_candidate": 200,
+        "proximity_boost": {
+            "weight": 0.3,
+            "candidates": 10000,
+            "all_pairs": false,
+            "ordered": false,
+            "boost_multiplicative": true
+        }
+    }})").value();
+```
+
+**Phrase filter.** Set `phrase_terms` (and optionally `phrase_slop`) to keep
+only candidates where those terms occur within the given slop. Slop uses
+Lucene's normalized-window semantics, so term order is encoded in the offsets
+(reversals cost extra slop); `phrase_slop: 0` requires an exact in-order phrase:
+
+```cpp
+auto result = index->KnnSearch(
+    query, topk,
+    R"({"sindi": {
+        "n_candidate": 200,
+        "phrase_terms": [12, 34, 56],
+        "phrase_slop": 1
+    }})").value();
+```
+
+Proximity and phrase can be combined in the same query. Per-candidate cost is
+`O(T² × P)` (T = present query terms, P = positions per term), paid only by the
+re-ranked candidates.
 
 ## When to use SINDI
 

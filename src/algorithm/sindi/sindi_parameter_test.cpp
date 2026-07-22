@@ -48,6 +48,8 @@ struct SINDIDefaultParam {
     int avg_doc_term_length = 100;
     bool remap_term_ids = false;
     bool immutable = false;
+    bool store_positions = false;
+    int max_positions_per_term = 64;
 };
 
 std::string
@@ -66,6 +68,8 @@ generate_sindi_param(const SINDIDefaultParam& param) {
     json[SPARSE_AVG_DOC_TERM_LENGTH].SetInt(param.avg_doc_term_length);
     json[SPARSE_REMAP_TERM_IDS].SetBool(param.remap_term_ids);
     json[SPARSE_IMMUTABLE].SetBool(param.immutable);
+    json[SPARSE_STORE_POSITIONS].SetBool(param.store_positions);
+    json[SPARSE_MAX_POSITIONS_PER_TERM].SetInt(param.max_positions_per_term);
     return json.Dump();
 }
 
@@ -84,6 +88,9 @@ TEST_CASE("SINDI Index Parameters Test", "[ut][SINDIParameter]") {
     REQUIRE(param->avg_doc_term_length == default_param.avg_doc_term_length);
     REQUIRE(param->remap_term_ids == default_param.remap_term_ids);
     REQUIRE(param->immutable == default_param.immutable);
+    REQUIRE(param->store_positions == default_param.store_positions);
+    REQUIRE(param->max_positions_per_term ==
+            static_cast<uint32_t>(default_param.max_positions_per_term));
 
     vsag::ParameterTest::TestToJson(param);
     REQUIRE_FALSE(param->ToJson().Contains(SPARSE_IMMUTABLE));
@@ -92,14 +99,48 @@ TEST_CASE("SINDI Index Parameters Test", "[ut][SINDIParameter]") {
         "sindi": {
             "query_prune_ratio": 0.2,
             "n_candidate": 20,
-            "term_prune_ratio": 0.1
+            "term_prune_ratio": 0.1,
+            "proximity_boost": {
+                "candidates": 5000,
+                "weight": 0.3,
+                "all_pairs": true,
+                "ordered": true,
+                "boost_multiplicative": false
+            },
+            "phrase_terms": [12, 34, 56],
+            "phrase_slop": 1
         }
     })";
     auto search_param = std::make_shared<vsag::SINDISearchParameter>();
     vsag::JsonType search_param_json = vsag::JsonType::Parse(search_param_str);
     search_param->FromJson(search_param_json);
+    REQUIRE(search_param->proximity_boost.candidates == 5000);
+    REQUIRE(std::abs(search_param->proximity_boost.weight - 0.3f) < 1e-6f);
+    REQUIRE(search_param->proximity_boost.all_pairs);
+    REQUIRE(search_param->proximity_boost.ordered == true);
+    REQUIRE(search_param->proximity_boost.boost_multiplicative == false);
+    const std::vector<uint32_t> expected_phrase_terms{12, 34, 56};
+    REQUIRE(search_param->phrase_terms == expected_phrase_terms);
+    REQUIRE(search_param->phrase_slop == 1);
+
     vsag::ParameterTest::TestToJson(search_param);
-    REQUIRE_FALSE(search_param->ToJson()[INDEX_SINDI].Contains("use_term_lists_heap_insert"));
+    auto serialized = search_param->ToJson();
+    auto serialized_sindi = serialized[INDEX_SINDI];
+    REQUIRE_FALSE(serialized_sindi.Contains("use_term_lists_heap_insert"));
+    REQUIRE_FALSE(serialized_sindi.Contains("proximity_weight"));
+
+    auto serialized_proximity = serialized_sindi[SPARSE_PROXIMITY_BOOST];
+    REQUIRE(serialized_proximity.IsObject());
+    REQUIRE(serialized_proximity[SPARSE_PROXIMITY_BOOST_CANDIDATES].GetInt() == 5000);
+    REQUIRE(std::abs(serialized_proximity[SPARSE_PROXIMITY_BOOST_WEIGHT].GetFloat() - 0.3f) <
+            1e-6f);
+    REQUIRE(serialized_proximity[SPARSE_PROXIMITY_BOOST_ALL_PAIRS].GetBool());
+    REQUIRE(serialized_proximity[SPARSE_PROXIMITY_BOOST_ORDERED].GetBool());
+    REQUIRE_FALSE(serialized_proximity[SPARSE_PROXIMITY_BOOST_MULTIPLICATIVE].GetBool());
+    const std::vector<int32_t> expected_serialized_phrase_terms{12, 34, 56};
+    REQUIRE(serialized_sindi[SPARSE_PHRASE_TERMS].GetVector() ==
+            expected_serialized_phrase_terms);
+    REQUIRE(serialized_sindi[SPARSE_PHRASE_SLOP].GetInt() == 1);
 
     auto legacy_search_param_str = R"({
         "sindi": {
@@ -113,6 +154,28 @@ TEST_CASE("SINDI Index Parameters Test", "[ut][SINDIParameter]") {
     legacy_search_param->FromJson(vsag::JsonType::Parse(legacy_search_param_str));
     REQUIRE_FALSE(
         legacy_search_param->ToJson()[INDEX_SINDI].Contains("use_term_lists_heap_insert"));
+}
+
+TEST_CASE("SINDI proximity boost parameters", "[ut][SINDIParameter]") {
+    SECTION("defaults preserve disabled proximity scoring") {
+        auto param = std::make_shared<vsag::SINDISearchParameter>();
+        param->FromString(R"({"sindi": {}})");
+
+        REQUIRE(std::abs(param->proximity_boost.weight) < 1e-6f);
+        REQUIRE(param->proximity_boost.candidates == 10000);
+        REQUIRE_FALSE(param->proximity_boost.all_pairs);
+        REQUIRE_FALSE(param->proximity_boost.ordered);
+        REQUIRE(param->proximity_boost.boost_multiplicative);
+    }
+
+    SECTION("requires an object and a positive candidate count") {
+        auto param = std::make_shared<vsag::SINDISearchParameter>();
+        REQUIRE_THROWS_AS(param->FromString(R"({"sindi": {"proximity_boost": 0.3}})"),
+                          vsag::VsagException);
+        REQUIRE_THROWS_AS(
+            param->FromString(R"({"sindi": {"proximity_boost": {"candidates": 0}}})"),
+            vsag::VsagException);
+    }
 }
 
 TEST_CASE("SINDI Index Parameters Compatibility Test", "[ut][SINDIParameter]") {
@@ -129,6 +192,9 @@ TEST_CASE("SINDI Index Parameters Compatibility Test", "[ut][SINDIParameter]") {
         "avg_doc_term_length compatibility", avg_doc_term_length, 100, 200, false);
     TEST_COMPATIBILITY_CASE("remap_term_ids compatibility", remap_term_ids, false, true, false);
     TEST_COMPATIBILITY_CASE("immutable compatibility", immutable, false, true, false);
+    TEST_COMPATIBILITY_CASE("store_positions compatibility", store_positions, false, true, false);
+    TEST_COMPATIBILITY_CASE(
+        "max_positions_per_term compatibility", max_positions_per_term, 64, 32, false);
 }
 
 TEST_CASE("SINDI immutable Parameter", "[ut][SINDIParameter]") {
@@ -236,5 +302,41 @@ TEST_CASE("SINDI remap_term_ids Parameter", "[ut][SINDIParameter]") {
         auto param2 = std::make_shared<vsag::SINDIParameter>();
         param2->FromJson(json2);
         REQUIRE(param2->remap_term_ids == true);
+    }
+}
+
+TEST_CASE("SINDI store_positions Parameter", "[ut][SINDIParameter]") {
+    SECTION("default is false when not specified") {
+        auto param_str = R"({"term_id_limit": 1000, "window_size": 50000})";
+        auto param = std::make_shared<vsag::SINDIParameter>();
+        param->FromJson(vsag::JsonType::Parse(param_str));
+        REQUIRE(param->store_positions == false);
+        REQUIRE(param->max_positions_per_term == 64);
+    }
+
+    SECTION("parse store_positions true") {
+        SINDIDefaultParam dp;
+        dp.store_positions = true;
+        dp.max_positions_per_term = 32;
+        auto param_str = generate_sindi_param(dp);
+        auto param = std::make_shared<vsag::SINDIParameter>();
+        param->FromString(param_str);
+        REQUIRE(param->store_positions == true);
+        REQUIRE(param->max_positions_per_term == 32);
+    }
+
+    SECTION("round-trip: FromJson -> ToJson -> FromJson") {
+        SINDIDefaultParam dp;
+        dp.store_positions = true;
+        dp.max_positions_per_term = 128;
+        auto param_str = generate_sindi_param(dp);
+        auto param1 = std::make_shared<vsag::SINDIParameter>();
+        param1->FromString(param_str);
+
+        auto json2 = param1->ToJson();
+        auto param2 = std::make_shared<vsag::SINDIParameter>();
+        param2->FromJson(json2);
+        REQUIRE(param2->store_positions == true);
+        REQUIRE(param2->max_positions_per_term == 128);
     }
 }

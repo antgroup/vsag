@@ -35,7 +35,9 @@ public:
                        uint32_t term_id_limit,
                        Allocator* allocator,
                        SparseValueQuantizationType sparse_value_quant_type,
-                       std::shared_ptr<QuantizationParams> quantization_params)
+                       std::shared_ptr<QuantizationParams> quantization_params,
+                       bool store_positions = false,
+                       uint32_t max_positions_per_term = 64)
         : doc_retain_ratio_(doc_retain_ratio),
           term_id_limit_(term_id_limit),
           allocator_(allocator),
@@ -43,9 +45,19 @@ public:
           term_datas_(allocator),
           term_sizes_(allocator),
           sparse_value_quant_type_(sparse_value_quant_type),
-          quantization_params_(std::move(quantization_params)) {
+          quantization_params_(std::move(quantization_params)),
+          store_positions_(store_positions),
+          max_positions_per_term_(max_positions_per_term),
+          term_pos_offsets_(allocator),
+          term_pos_pool_(allocator) {
     }
 
+    /**
+     * @brief Accumulate IP scores for the query.
+     *
+     * @param global_dists Distance array to accumulate IP scores
+     * @param computer SparseTermComputer for query processing
+     */
     void
     Query(float* global_dists, const SparseTermComputerPtr& computer) const;
 
@@ -90,6 +102,18 @@ public:
 
     void
     InsertVector(const SparseVector& sparse_base, uint16_t base_id);
+
+    // Get positions for a given term and doc posting index.
+    // Returns empty vector if positions are not stored or term/doc not found.
+    std::vector<uint16_t>
+    GetPositions(uint32_t term_id, uint32_t posting_index) const;
+
+    // Zero-copy view into the position pool for a given term and doc posting
+    // index. Returns {data, size} pointing into term_pos_pool_; the data is
+    // valid for read only as long as the pool is not mutated (i.e. during a
+    // query). Returns {nullptr, 0} if positions are not stored or not found.
+    std::pair<const uint16_t*, uint32_t>
+    GetPositionsView(uint32_t term_id, uint32_t posting_index) const;
 
     void
     ResizeTermList(InnerIdType new_term_capacity);
@@ -159,5 +183,13 @@ public:
     int64_t total_count_{0};
 
     std::shared_ptr<QuantizationParams> quantization_params_;
+
+    // Position storage (opt-in via store_positions_)
+    bool store_positions_{false};
+    uint32_t max_positions_per_term_{64};
+    // Per-term offset arrays: term_pos_offsets_[term][i] = start index in pool for posting i
+    Vector<std::unique_ptr<Vector<uint32_t>>> term_pos_offsets_;
+    // Per-term position pools: term_pos_pool_[term] = flat array of all positions for this term
+    Vector<std::unique_ptr<Vector<uint16_t>>> term_pos_pool_;
 };
 }  // namespace vsag

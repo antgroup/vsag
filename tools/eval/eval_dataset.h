@@ -245,6 +245,11 @@ public:
         }
     }
 
+    bool
+    HasTokenSequences() const {
+        return has_token_sequences_;
+    }
+
 private:
     using shape_t = std::pair<int64_t, int64_t>;
     static std::unordered_set<std::string>
@@ -324,6 +329,8 @@ protected:
     // sequence dataset is present.
     std::vector<uint64_t> train_token_seq_offsets_;
     std::vector<uint64_t> test_token_seq_offsets_;
+
+    bool has_token_sequences_{false};
 
     std::vector<vsag::MultiVector> multi_train_vectors_;
     std::vector<vsag::MultiVector> multi_test_vectors_;
