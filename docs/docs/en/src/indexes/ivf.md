@@ -64,37 +64,6 @@ auto result = index->KnnSearch(
     R"({"ivf": {"scan_buckets_count": 16}})").value();
 ```
 
-### Bucket-aligned precise codes
-
-For disk-backed precise reordering, enable the bucket layout while keeping the
-existing precise quantization and IO parameters:
-
-```cpp
-std::string params = R"({
-    "dtype": "float32",
-    "metric_type": "l2",
-    "dim": 128,
-    "index_param": {
-        "buckets_count": 256,
-        "buckets_per_data": 1,
-        "base_quantization_type": "sq8",
-        "partition_strategy_type": "ivf",
-        "ivf_train_type": "kmeans",
-
-        "use_reorder": true,
-        "precise_quantization_type": "fp32",
-        "precise_codes_layout": "bucket",
-        "precise_io_type": "buffer_io",
-        "precise_file_path": "/data/ivf-precise.bin"
-    }
-})";
-
-auto index = vsag::Factory::CreateIndex("ivf", params).value();
-```
-
-`precise_codes_layout` is the only new parameter in this example. Build and
-search use the same APIs and search parameters as the regular IVF quick start.
-
 ## Build parameters
 
 Build-time parameters live under `index_param`. See

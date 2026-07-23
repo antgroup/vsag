@@ -59,36 +59,6 @@ auto result = index->KnnSearch(
     R"({"ivf": {"scan_buckets_count": 16}})").value();
 ```
 
-### Bucket 对齐的精排 codes
-
-精排数据存储在磁盘上时，可以在复用现有精排量化与 IO 参数的基础上启用 bucket 布局：
-
-```cpp
-std::string params = R"({
-    "dtype": "float32",
-    "metric_type": "l2",
-    "dim": 128,
-    "index_param": {
-        "buckets_count": 256,
-        "buckets_per_data": 1,
-        "base_quantization_type": "sq8",
-        "partition_strategy_type": "ivf",
-        "ivf_train_type": "kmeans",
-
-        "use_reorder": true,
-        "precise_quantization_type": "fp32",
-        "precise_codes_layout": "bucket",
-        "precise_io_type": "buffer_io",
-        "precise_file_path": "/data/ivf-precise.bin"
-    }
-})";
-
-auto index = vsag::Factory::CreateIndex("ivf", params).value();
-```
-
-这个示例中唯一新增的参数是 `precise_codes_layout`。构建、查询接口及查询参数与普通 IVF
-快速开始示例完全相同。
-
 ## 构建参数
 
 构建参数放在 `index_param` 下。完整列表请见 [索引参数](../resources/index_parameters.md)。

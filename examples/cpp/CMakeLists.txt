@@ -162,3 +162,6 @@ target_link_libraries(406_feature_read_cache vsag)
 
 add_executable(407_feature_ivf_read_cache 407_feature_ivf_read_cache.cpp)
 target_link_libraries(407_feature_ivf_read_cache vsag)
+
+add_executable(326_feature_ivf_precise_bucket 326_feature_ivf_precise_bucket.cpp)
+target_link_libraries(326_feature_ivf_precise_bucket vsag)
