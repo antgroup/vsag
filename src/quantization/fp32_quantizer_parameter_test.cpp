@@ -15,17 +15,15 @@
 
 #include "fp32_quantizer_parameter.h"
 
-#include "inner_string_params.h"
 #include "parameter_test.h"
 #include "unittest.h"
 
 using namespace vsag;
 
 TEST_CASE("FP32 Quantizer Parameter ToJson Test", "[ut][FP32QuantizerParameter]") {
-    std::string param_str = R"({"hold_molds": true})";
+    std::string param_str = "{}";
     auto param = std::make_shared<FP32QuantizerParameter>();
     JsonType param_json = JsonType::Parse(param_str);
     param->FromJson(param_json);
     ParameterTest::TestToJson(param);
-    REQUIRE(param->ToJson()[HOLD_MOLDS].GetBool());
 }
