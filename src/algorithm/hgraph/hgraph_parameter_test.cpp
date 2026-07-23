@@ -231,6 +231,12 @@ TEST_CASE("HGraph Search Parameters parse RaBitQ error rate", "[ut][HGraphParame
     })"));
 }
 
+TEST_CASE("HGraph Search Parameters reject ef_search integer overflow",
+          "[ut][HGraphSearchParameters][ef_search]") {
+    REQUIRE_THROWS(vsag::HGraphSearchParameters::FromJson(
+        R"({"hgraph": {"ef_search": 9223372036854775808}})"));
+}
+
 TEST_CASE("HGraph maps label_remap_type to inner index parameter", "[ut][HGraphParameter]") {
     auto param = vsag::JsonType::Parse(R"({
         "base_quantization_type": "fp32",

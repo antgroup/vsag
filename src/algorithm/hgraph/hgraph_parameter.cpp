@@ -206,7 +206,14 @@ HGraphSearchParameters::FromJson(const std::string& json_string) {
         params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_PARAMETER_EF_RUNTIME),
         fmt::format(
             "parameters[{}] must contains {}", INDEX_TYPE_HGRAPH, HGRAPH_PARAMETER_EF_RUNTIME));
-    obj.ef_search = params[INDEX_TYPE_HGRAPH][HGRAPH_PARAMETER_EF_RUNTIME].GetInt();
+    const auto& ef_search_json = params[INDEX_TYPE_HGRAPH][HGRAPH_PARAMETER_EF_RUNTIME];
+    CHECK_ARGUMENT(ef_search_json.IsNumberInteger(), "ef_search must be an integer");
+    if (ef_search_json.IsNumberUnsigned()) {
+        CHECK_ARGUMENT(ef_search_json.GetUint64() <=
+                           static_cast<uint64_t>(std::numeric_limits<int64_t>::max()),
+                       "ef_search exceeds int64_t range");
+    }
+    obj.ef_search = ef_search_json.GetInt();
     if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_PARAMETER_HOPS_LIMIT)) {
         obj.hops_limit = params[INDEX_TYPE_HGRAPH][HGRAPH_PARAMETER_HOPS_LIMIT].GetInt();
     }
