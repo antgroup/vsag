@@ -36,7 +36,7 @@ jobs:
         # is what release artifacts depend on. PR CI / coverage / lint use the
         # system OpenBLAS for speed; this job is the one that keeps the
         # source-build path covered.
-        run: export CMAKE_GENERATOR="Ninja"; make asan COMPILE_JOBS=4 VSAG_ENABLE_EXAMPLES=ON
+        run: export CMAKE_GENERATOR="Ninja"; make asan COMPILE_JOBS=3 VSAG_ENABLE_EXAMPLES=ON
       - name: Clean
         run: find ./build -type f -name "*.o" -exec rm -f {} +
       - name: Save Test
@@ -71,7 +71,7 @@ jobs:
           save: false
           key: build-aarch-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
       - name: Make Asan
-        run: export CMAKE_GENERATOR="Ninja"; make asan VSAG_ENABLE_EXAMPLES=ON
+        run: export CMAKE_GENERATOR="Ninja"; make asan COMPILE_JOBS=3 VSAG_ENABLE_EXAMPLES=ON
       - name: Clean
         run: find ./build -type f -name "*.o" -exec rm -f {} +
       - name: Save Test
@@ -321,7 +321,7 @@ jobs:
           save: false
           key: build-tsan-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
       - name: Make Tsan
-        run: export CMAKE_GENERATOR="Ninja"; make tsan
+        run: export CMAKE_GENERATOR="Ninja"; make tsan COMPILE_JOBS=3
       - name: Clean
         run: find ./build -type f -name "*.o" -exec rm -f {} +
       - name: Save Test

@@ -67,6 +67,7 @@ auto result = index->KnnSearch(
 | `base_pq_dim` | int | `1` | PQ 子空间数（`pq` / `pqfs` 时必填） |
 | `build_thread_count` | int | `100` | 构建阶段并发线程数 |
 | `support_duplicate` | bool | `false` | 是否在插入时做重复 ID 检测 |
+| `deduplicate_storage` | bool | `false` | 让重复向量共享存储；需同时设置 `support_duplicate: true` |
 | `duplicate_distance_threshold` | float | `0.0` | 重复判定距离阈值。大于 `0` 时按最近候选的距离判重；等于 `0` 时退化为当前编码 `memcmp` 判重 |
 | `support_remove` | bool | `false` | 是否启用 mark-remove 恢复路径所需的图删除追踪元数据 |
 | `support_force_remove` | bool | `false` | 是否启用 `RemoveMode::FORCE_REMOVE` 及其额外同步 |
@@ -75,6 +76,23 @@ auto result = index->KnnSearch(
 | `base_io_type` / `precise_io_type` | string | `"block_memory_io"` | 存储后端（`memory_io`、`block_memory_io`、`buffer_io`、`async_io`、`mmap_io`） |
 | `base_file_path` / `precise_file_path` | string | — | 磁盘后端时的文件路径（使用 `mmap_io` / `async_io` / `buffer_io` 时必填） |
 | `hgraph_init_capacity` | int | `100` | 初始容量提示（不会限制最终规模） |
+
+### 向量存储去重
+
+同时设置 `support_duplicate: true` 和 `deduplicate_storage: true` 后，重复向量会共享
+同一个物理编码槽位，但仍保留各自的标签。该选项目前仅支持使用 `graph_type: "nsw"` 的
+稠密向量 HGraph 索引；独立的 HNSW 索引以及 `graph_type: "odescent"` 均不支持。
+
+启用存储去重后，暂不支持以下操作和配置：
+
+- 强制删除（`support_force_remove: true`）；
+- 调用 `ImportCache()` 后基于缓存加速构建；
+- `Merge`；
+- v0.14 旧版序列化格式。
+
+`UpdateVector` 仅支持尚未与其他重复组成员共享向量存储的 ID。
+
+当前序列化格式和 streaming serialization 均受支持。
 
 ## 支持的输入数据类型
 

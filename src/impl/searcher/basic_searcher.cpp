@@ -56,11 +56,8 @@ BasicSearcher::visit(const GraphInterfacePtr& graph,
         }
         if (not vl->Get(neighbors[i])) {
             vl->Set(neighbors[i]);
-            // Removed filter->CheckValid() to eliminate duplicate filter checking.
-            // Filter is applied at result-collection stage.
-            // ShouldVisit() probabilistically gates traversal to preserve graph connectivity.
             if (not filter || count_no_visited == 0 || skip_strategy == nullptr ||
-                skip_strategy->ShouldVisit()) {
+                skip_strategy->ShouldVisit() || filter->CheckValid(neighbors[i])) {
                 to_be_visited_id[count_no_visited] = neighbors[i];
                 count_no_visited++;
             }
@@ -574,9 +571,16 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
             if (min_distance <= inner_search_param.duplicate_distance_threshold) {
                 inner_search_param.duplicate_id = min_index;
             }
-        } else if (inner_search_param.duplicate_query_id < flatten->TotalCount() &&
-                   flatten->CompareVectors(inner_search_param.duplicate_query_id, min_index)) {
-            inner_search_param.duplicate_id = min_index;
+        } else {
+            const bool has_stored_query =
+                inner_search_param.duplicate_query_id < flatten->TotalCount();
+            const bool is_duplicate =
+                has_stored_query
+                    ? flatten->CompareVectors(inner_search_param.duplicate_query_id, min_index)
+                    : flatten->CompareRawVectorWithId(query, min_index);
+            if (is_duplicate) {
+                inner_search_param.duplicate_id = min_index;
+            }
         }
     }
 

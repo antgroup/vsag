@@ -62,11 +62,13 @@ const char* const IO_TYPE_VALUE_BUFFER_IO = "buffer_io";
 const char* const IO_TYPE_VALUE_MMAP_IO = "mmap_io";
 const char* const IO_TYPE_VALUE_READER_IO = "reader_io";
 const char* const IO_TYPE_VALUE_ASYNC_IO = "async_io";
+const char* const IO_TYPE_VALUE_URING_IO = "uring_io";
 const char* const IO_TYPE_VALUE_BLOCK_MEMORY_IO = "block_memory_io";
 const char* const BLOCK_IO_BLOCK_SIZE_KEY = "block_size";
 
 // IO param for file
 const char* const IO_FILE_PATH_KEY = "file_path";
+const char* const IO_DIRECT_READ_KEY = "direct_read";
 const char* const DEFAULT_FILE_PATH_VALUE = "./default_file_path";
 
 // quantization params key
@@ -175,6 +177,7 @@ const char* const GRAPH_SUPPORT_REMOVE = "support_remove";
 const char* const REMOVE_FLAG_BIT = "remove_flag_bit";
 const char* const HOLD_MOLDS = "hold_molds";
 const char* const SUPPORT_DUPLICATE = "support_duplicate";
+const char* const DEDUPLICATE_STORAGE = "deduplicate_storage";
 const char* const DUPLICATE_DISTANCE_THRESHOLD = "duplicate_distance_threshold";
 const char* const SUPPORT_FORCE_REMOVE = "support_force_remove";
 const char* const SUPPORT_AUTOTUNE = "support_autotune";
@@ -189,6 +192,7 @@ const char* const RABITQ_SPLIT_CODES = "rabitq_split";
 const char* const SPARSE_CODES = "sparse";
 
 const char* const IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT = "scan_buckets_count";
+const char* const IVF_SEARCH_PARAM_DISABLE_BUCKET_SCAN = "disable_bucket_scan";
 const char* const SEARCH_PARAM_FACTOR = "factor";
 const char* const SEARCH_PARAM_ENABLE_REORDER = "enable_reorder";
 const char* const SEARCH_PARALLELISM = "parallelism";
@@ -210,6 +214,7 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"BASE_CODES_KEY", BASE_CODES_KEY},
     {"PRECISE_CODES_KEY", PRECISE_CODES_KEY},
     {"HGRAPH_SUPPORT_DUPLICATE", HGRAPH_SUPPORT_DUPLICATE},
+    {"HGRAPH_DEDUPLICATE_STORAGE", HGRAPH_DEDUPLICATE_STORAGE},
     {"HGRAPH_DUPLICATE_DISTANCE_THRESHOLD", HGRAPH_DUPLICATE_DISTANCE_THRESHOLD},
     {"IO_TYPE_VALUE_MEMORY_IO", IO_TYPE_VALUE_MEMORY_IO},
     {"IO_TYPE_VALUE_BLOCK_MEMORY_IO", IO_TYPE_VALUE_BLOCK_MEMORY_IO},
@@ -241,6 +246,7 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"BUCKETS_COUNT_KEY", BUCKETS_COUNT_KEY},
     {"BUCKET_PARAMS_KEY", BUCKET_PARAMS_KEY},
     {"IO_FILE_PATH_KEY", IO_FILE_PATH_KEY},
+    {"IO_DIRECT_READ_KEY", IO_DIRECT_READ_KEY},
     {"DEFAULT_FILE_PATH_VALUE", DEFAULT_FILE_PATH_VALUE},
     {"PRECISE_CODES_KEY", PRECISE_CODES_KEY},
     {"USE_REORDER_KEY", USE_REORDER_KEY},
@@ -248,6 +254,7 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE_KEY", SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE_KEY},
     {"PCA_DIM_KEY", PCA_DIM_KEY},
     {"IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT", IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT},
+    {"IVF_SEARCH_PARAM_DISABLE_BUCKET_SCAN", IVF_SEARCH_PARAM_DISABLE_BUCKET_SCAN},
     {"GNO_IMI_FIRST_ORDER_BUCKETS_COUNT_KEY", GNO_IMI_FIRST_ORDER_BUCKETS_COUNT_KEY},
     {"GNO_IMI_SECOND_ORDER_BUCKETS_COUNT_KEY", GNO_IMI_SECOND_ORDER_BUCKETS_COUNT_KEY},
     {"BUCKETS_COUNT_KEY", BUCKETS_COUNT_KEY},
@@ -274,6 +281,7 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"GRAPH_SUPPORT_REMOVE", GRAPH_SUPPORT_REMOVE},
     {"REMOVE_FLAG_BIT", REMOVE_FLAG_BIT},
     {"SUPPORT_DUPLICATE", SUPPORT_DUPLICATE},
+    {"DEDUPLICATE_STORAGE", DEDUPLICATE_STORAGE},
     {"HOLD_MOLDS", HOLD_MOLDS},
     {"HGRAPH_PERSIST_SOURCE_ID_KEY", HGRAPH_PERSIST_SOURCE_ID_KEY},
     {"IVF_PARTITION_STRATEGY_TYPE_GNO_IMI", IVF_PARTITION_STRATEGY_TYPE_GNO_IMI},

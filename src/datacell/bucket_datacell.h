@@ -15,7 +15,10 @@
 
 #pragma once
 
+#include <algorithm>
+#include <limits>
 #include <shared_mutex>
+#include <type_traits>
 
 #include "bucket_interface.h"
 #include "impl/inner_search_param.h"
@@ -59,6 +62,12 @@ public:
 
     InnerIdType
     InsertVector(const void* vector, BucketIdType bucket_id, InnerIdType inner_id) override;
+
+    void
+    InsertVectorWithOffset(const void* vector,
+                           BucketIdType bucket_id,
+                           InnerIdType inner_id,
+                           InnerIdType offset_id) override;
 
     InnerIdType*
     GetInnerIds(BucketIdType bucket_id) override {
@@ -148,6 +157,12 @@ private:
                     const InnerIdType& offset_id);
 
     inline void
+    encode_vector(const void* vector, BucketIdType bucket_id, ByteBuffer& codes, float& res_score);
+
+    inline void
+    check_valid_bucket_capacity(uint64_t next_size, bool need_resize);
+
+    inline void
     package_fastscan();
 
     inline void
@@ -169,6 +184,16 @@ private:
     Vector<Vector<float>> residual_bias_;
 
     MetricType metric_{MetricType::METRIC_TYPE_L2SQR};
+
+    static constexpr InnerIdType EMPTY_INNER_ID = std::numeric_limits<InnerIdType>::max();
+
+    // Bound sparse fixed-offset metadata growth to reject accidental huge hole allocation.
+    static constexpr uint64_t MAX_BUCKET_ENTRIES =
+        std::min(static_cast<uint64_t>(std::numeric_limits<InnerIdType>::max()),
+                 static_cast<uint64_t>(1) << 30);
+
+    // Zero-fill holes in chunks to keep the temporary buffer bounded while avoiding tiny writes.
+    static constexpr uint64_t ZERO_FILL_BLOCK_ENTRIES = 1024;
 };
 
 template <typename QuantTmpl, typename IOTmpl>
@@ -207,7 +232,14 @@ BucketDataCell<QuantTmpl, IOTmpl>::query_one_by_id(
     std::shared_lock lock(this->bucket_mutexes_[bucket_id]);
     this->check_valid_bucket_id(bucket_id);
     if (offset_id >= this->bucket_sizes_[bucket_id]) {
-        throw VsagException(ErrorType::INTERNAL_ERROR, "invalid offset id for bucket");
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "invalid offset id for bucket");
+    }
+    if (this->inner_ids_[bucket_id][offset_id] == EMPTY_INNER_ID) {
+        throw VsagException(
+            ErrorType::INVALID_ARGUMENT,
+            fmt::format("visited empty offset in bucket: bucket_id={}, offset_id={}",
+                        bucket_id,
+                        offset_id));
     }
     float ret;
     bool need_release = false;
@@ -273,6 +305,11 @@ BucketDataCell<QuantTmpl, IOTmpl>::scan_bucket_by_id(float* result_dists,
             result_dists[i] -= ip_distance;
         }
     }
+    for (InnerIdType i = 0; i < offset; ++i) {
+        if (this->inner_ids_[bucket_id][i] == EMPTY_INNER_ID) {
+            result_dists[i] = std::numeric_limits<float>::max();
+        }
+    }
 }
 
 template <typename QuantTmpl, typename IOTmpl>
@@ -323,16 +360,15 @@ BucketDataCell<QuantTmpl, IOTmpl>::Train(const void* data, uint64_t count) {
 }
 
 template <typename QuantTmpl, typename IOTmpl>
-InnerIdType
-BucketDataCell<QuantTmpl, IOTmpl>::InsertVector(const void* vector,
-                                                BucketIdType bucket_id,
-                                                InnerIdType inner_id) {
-    check_valid_bucket_id(bucket_id);
-
+void
+BucketDataCell<QuantTmpl, IOTmpl>::encode_vector(const void* vector,
+                                                 BucketIdType bucket_id,
+                                                 ByteBuffer& codes,
+                                                 float& res_score) {
     Vector<float> centroid(this->quantizer_->GetDim(), this->allocator_);
     Vector<float> sub_data(this->quantizer_->GetDim(), this->allocator_);
     Vector<float> normalize_data(this->quantizer_->GetDim(), this->allocator_);
-    float res_score = 0.0F;
+    res_score = 0.0F;
     auto vector_ptr = static_cast<const float*>(vector);
     if (use_residual_) {
         strategy_->GetCentroid(bucket_id, centroid);
@@ -343,8 +379,6 @@ BucketDataCell<QuantTmpl, IOTmpl>::InsertVector(const void* vector,
         FP32Sub(vector_ptr, centroid.data(), sub_data.data(), quantizer_->GetDim());
         vector_ptr = sub_data.data();
     }
-    InnerIdType offset_id;
-    ByteBuffer codes(static_cast<uint64_t>(code_size_), this->allocator_);
     this->quantizer_->EncodeOne(static_cast<const float*>(vector_ptr), codes.data);
     if (use_residual_ && metric_ == MetricType::METRIC_TYPE_L2SQR) {
         this->quantizer_->DecodeOne(codes.data, normalize_data.data());
@@ -352,20 +386,129 @@ BucketDataCell<QuantTmpl, IOTmpl>::InsertVector(const void* vector,
             -2 * FP32ComputeIP(centroid.data(), normalize_data.data(), this->quantizer_->GetDim()) -
             FP32ComputeIP(centroid.data(), centroid.data(), this->quantizer_->GetDim());
     }
+}
+
+template <typename QuantTmpl, typename IOTmpl>
+void
+BucketDataCell<QuantTmpl, IOTmpl>::check_valid_bucket_capacity(uint64_t next_size,
+                                                               bool need_resize) {
+    if (need_resize && (next_size > MAX_BUCKET_ENTRIES ||
+                        next_size > std::numeric_limits<size_t>::max() / sizeof(InnerIdType) ||
+                        (use_residual_ && metric_ == MetricType::METRIC_TYPE_L2SQR &&
+                         next_size > std::numeric_limits<size_t>::max() / sizeof(float)) ||
+                        ZERO_FILL_BLOCK_ENTRIES > std::numeric_limits<uint64_t>::max() /
+                                                      static_cast<uint64_t>(code_size_))) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "invalid offset id for bucket: exceeds maximum bucket capacity");
+    }
+}
+
+template <typename QuantTmpl, typename IOTmpl>
+InnerIdType
+BucketDataCell<QuantTmpl, IOTmpl>::InsertVector(const void* vector,
+                                                BucketIdType bucket_id,
+                                                InnerIdType inner_id) {
+    check_valid_bucket_id(bucket_id);
+    if (inner_id == EMPTY_INNER_ID) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "invalid inner id for bucket");
+    }
+
+    InnerIdType offset_id;
+    float res_score = 0.0F;
+    ByteBuffer codes(static_cast<uint64_t>(code_size_), this->allocator_);
+    encode_vector(vector, bucket_id, codes, res_score);
     {
         std::unique_lock lock(this->bucket_mutexes_[bucket_id]);
         offset_id = this->bucket_sizes_[bucket_id];
-        this->datas_[bucket_id].Write(codes.data,
-                                      code_size_,
-                                      static_cast<uint64_t>(this->bucket_sizes_[bucket_id]) *
-                                          static_cast<uint64_t>(code_size_));
-        this->bucket_sizes_[bucket_id]++;
-        inner_ids_[bucket_id].emplace_back(inner_id);
-        if (use_residual_ && metric_ == MetricType::METRIC_TYPE_L2SQR) {
-            residual_bias_[bucket_id].emplace_back(res_score);
+        if (offset_id >= std::numeric_limits<InnerIdType>::max() ||
+            static_cast<uint64_t>(offset_id) >
+                std::numeric_limits<uint64_t>::max() / static_cast<uint64_t>(code_size_)) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT, "invalid offset id for bucket");
         }
+        auto next_size = static_cast<uint64_t>(offset_id) + 1;
+        check_valid_bucket_capacity(next_size, this->inner_ids_[bucket_id].size() < next_size);
+        this->datas_[bucket_id].Write(
+            codes.data,
+            code_size_,
+            static_cast<uint64_t>(offset_id) * static_cast<uint64_t>(code_size_));
+        if (this->inner_ids_[bucket_id].size() < next_size) {
+            this->inner_ids_[bucket_id].resize(next_size, EMPTY_INNER_ID);
+            if (use_residual_ && metric_ == MetricType::METRIC_TYPE_L2SQR) {
+                this->residual_bias_[bucket_id].resize(next_size, 0.0F);
+            }
+        }
+        inner_ids_[bucket_id][offset_id] = inner_id;
+        if (use_residual_ && metric_ == MetricType::METRIC_TYPE_L2SQR) {
+            residual_bias_[bucket_id][offset_id] = res_score;
+        }
+        this->bucket_sizes_[bucket_id] = static_cast<InnerIdType>(next_size);
     }
     return offset_id;
+}
+
+template <typename QuantTmpl, typename IOTmpl>
+void
+BucketDataCell<QuantTmpl, IOTmpl>::InsertVectorWithOffset(const void* vector,
+                                                          BucketIdType bucket_id,
+                                                          InnerIdType inner_id,
+                                                          InnerIdType offset_id) {
+    check_valid_bucket_id(bucket_id);
+    if (inner_id == EMPTY_INNER_ID) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "invalid inner id for bucket");
+    }
+    if constexpr (std::is_signed_v<InnerIdType>) {
+        if (offset_id < 0) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT, "invalid offset id for bucket");
+        }
+    }
+    if (offset_id >= std::numeric_limits<InnerIdType>::max() ||
+        static_cast<uint64_t>(offset_id) >
+            std::numeric_limits<uint64_t>::max() / static_cast<uint64_t>(code_size_)) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "invalid offset id for bucket");
+    }
+
+    float res_score = 0.0F;
+    ByteBuffer codes(static_cast<uint64_t>(code_size_), this->allocator_);
+    encode_vector(vector, bucket_id, codes, res_score);
+    {
+        std::unique_lock lock(this->bucket_mutexes_[bucket_id]);
+        auto next_size = static_cast<uint64_t>(offset_id) + 1;
+        auto need_resize = this->inner_ids_[bucket_id].size() < next_size;
+        check_valid_bucket_capacity(next_size, need_resize);
+        if (need_resize) {
+            this->inner_ids_[bucket_id].resize(next_size, EMPTY_INNER_ID);
+            if (use_residual_ && metric_ == MetricType::METRIC_TYPE_L2SQR) {
+                this->residual_bias_[bucket_id].resize(next_size, 0.0F);
+            }
+        }
+        if (offset_id > this->bucket_sizes_[bucket_id]) {
+            auto zero_fill_entries = std::min<uint64_t>(
+                static_cast<uint64_t>(offset_id - this->bucket_sizes_[bucket_id]),
+                ZERO_FILL_BLOCK_ENTRIES);
+            auto zero_fill_bytes = zero_fill_entries * static_cast<uint64_t>(code_size_);
+            ByteBuffer zero_codes(zero_fill_bytes, this->allocator_);
+            std::fill_n(zero_codes.data, zero_fill_bytes, 0);
+            for (auto hole_offset = this->bucket_sizes_[bucket_id]; hole_offset < offset_id;) {
+                auto fill_entries = std::min<uint64_t>(
+                    static_cast<uint64_t>(offset_id - hole_offset), ZERO_FILL_BLOCK_ENTRIES);
+                this->datas_[bucket_id].Write(
+                    zero_codes.data,
+                    fill_entries * static_cast<uint64_t>(code_size_),
+                    static_cast<uint64_t>(hole_offset) * static_cast<uint64_t>(code_size_));
+                hole_offset += static_cast<InnerIdType>(fill_entries);
+            }
+        }
+        this->datas_[bucket_id].Write(
+            codes.data,
+            code_size_,
+            static_cast<uint64_t>(offset_id) * static_cast<uint64_t>(code_size_));
+        this->inner_ids_[bucket_id][offset_id] = inner_id;
+        if (use_residual_ && metric_ == MetricType::METRIC_TYPE_L2SQR) {
+            this->residual_bias_[bucket_id][offset_id] = res_score;
+        }
+        this->bucket_sizes_[bucket_id] =
+            std::max(this->bucket_sizes_[bucket_id], static_cast<InnerIdType>(next_size));
+    }
 }
 
 template <typename QuantTmpl, typename IOTmpl>
@@ -487,7 +630,7 @@ BucketDataCell<QuantTmpl, IOTmpl>::MergeOther(const BucketInterfacePtr& other, I
         this->bucket_sizes_[i] += ptr->bucket_sizes_[i];
         this->inner_ids_[i].reserve(this->bucket_sizes_[i]);
         for (auto id : ptr->inner_ids_[i]) {
-            this->inner_ids_[i].emplace_back(id + bias);
+            this->inner_ids_[i].emplace_back(id == EMPTY_INNER_ID ? EMPTY_INNER_ID : id + bias);
         }
     }
 }

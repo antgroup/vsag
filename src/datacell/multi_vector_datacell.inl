@@ -202,18 +202,52 @@ MultiVectorDataCell<QuantTmpl, IOTmpl>::Query(float* result_dists,
     auto* mv_computer = dynamic_cast<MultiVectorComputer*>(computer.get());
     CHECK_ARGUMENT(mv_computer != nullptr, "computer is not a MultiVectorComputer");
 
+    if (id_count == 0) {
+        return;
+    }
+
+    // Step 1: Read all offsets (offset_io_ is MemoryBlockIO, in-memory, fast)
+    std::vector<uint64_t> offsets(id_count);
     for (InnerIdType i = 0; i < id_count; ++i) {
-        bool need_release = false;
-        const uint8_t* codes = this->GetCodesById(idx[i], need_release);
+        bool ok = offset_io_->Read(sizeof(uint64_t),
+                                   static_cast<uint64_t>(idx[i]) * sizeof(uint64_t),
+                                   reinterpret_cast<uint8_t*>(&offsets[i]));
+        CHECK_ARGUMENT(ok, "MultiVectorDataCell: failed to read offset");
+    }
 
-        uint32_t token_count = 0;
-        std::memcpy(&token_count, codes, sizeof(uint32_t));
+    // Step 2: Batch read all token counts via MultiRead (async IO)
+    std::vector<uint32_t> lens(id_count);
+    std::vector<uint64_t> len_sizes(id_count, sizeof(uint32_t));
+    if (!this->io_->MultiRead(reinterpret_cast<uint8_t*>(lens.data()),
+                              len_sizes.data(),
+                              offsets.data(),
+                              static_cast<uint64_t>(id_count))) {
+        throw VsagException(ErrorType::READ_ERROR,
+                            "MultiVectorDataCell: failed to read token counts");
+    }
 
-        mv_computer->ComputeDist(codes + sizeof(uint32_t), token_count, result_dists + i);
+    // Step 3: Batch read all data via MultiRead (async IO)
+    std::vector<uint64_t> data_sizes(id_count);
+    uint64_t total_size = 0;
+    for (InnerIdType i = 0; i < id_count; ++i) {
+        data_sizes[i] =
+            sizeof(uint32_t) + static_cast<uint64_t>(lens[i]) * multi_vector_dim_ * sizeof(float);
+        total_size += data_sizes[i];
+    }
+    ByteBuffer all_codes(total_size, this->allocator_);
+    if (!this->io_->MultiRead(
+            all_codes.data, data_sizes.data(), offsets.data(), static_cast<uint64_t>(id_count))) {
+        throw VsagException(ErrorType::READ_ERROR,
+                            "MultiVectorDataCell: failed to read token data");
+    }
 
-        if (need_release) {
-            this->Release(codes);
-        }
+    // Step 4: Compute MaxSim distances
+    uint64_t cursor = 0;
+    for (InnerIdType i = 0; i < id_count; ++i) {
+        uint32_t token_count = lens[i];
+        mv_computer->ComputeDist(
+            all_codes.data + cursor + sizeof(uint32_t), token_count, result_dists + i);
+        cursor += data_sizes[i];
     }
 }
 

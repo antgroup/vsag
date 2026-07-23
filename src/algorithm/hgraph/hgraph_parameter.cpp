@@ -129,11 +129,24 @@ HGraphParameter::FromJson(const JsonType& json) {
             this->bottom_graph_param->support_duplicate_ = this->support_duplicate;
         }
     }
+    if (json.Contains(DEDUPLICATE_STORAGE)) {
+        this->deduplicate_storage = json[DEDUPLICATE_STORAGE].GetBool();
+    }
+    if (this->deduplicate_storage && not this->support_duplicate) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "deduplicate_storage requires support_duplicate to be true");
+    }
     if (json.Contains(DUPLICATE_DISTANCE_THRESHOLD)) {
         this->duplicate_distance_threshold = json[DUPLICATE_DISTANCE_THRESHOLD].GetFloat();
     }
     if (json.Contains(SUPPORT_FORCE_REMOVE)) {
         this->support_force_remove = json[SUPPORT_FORCE_REMOVE].GetBool();
+    }
+    if (this->deduplicate_storage && this->support_force_remove) {
+        throw VsagException(
+            ErrorType::INVALID_ARGUMENT,
+            "deduplicate_storage does not support force remove because duplicate groups share "
+            "physical vector slots");
     }
     if (json.Contains(HGRAPH_PERSIST_SOURCE_ID_KEY)) {
         this->persist_source_id = json[HGRAPH_PERSIST_SOURCE_ID_KEY].GetBool();
@@ -153,6 +166,7 @@ HGraphParameter::ToJson() const {
     json[EF_CONSTRUCTION_KEY].SetUint64(this->ef_construction);
     json[ALPHA_KEY].SetFloat(this->alpha);
     json[SUPPORT_DUPLICATE].SetBool(this->support_duplicate);
+    json[DEDUPLICATE_STORAGE].SetBool(this->deduplicate_storage);
     json[DUPLICATE_DISTANCE_THRESHOLD].SetFloat(this->duplicate_distance_threshold);
     json[SUPPORT_FORCE_REMOVE].SetBool(this->support_force_remove);
     json[HGRAPH_PERSIST_SOURCE_ID_KEY].SetBool(this->persist_source_id);
@@ -185,6 +199,7 @@ HGraphParameter::CheckCompatibility(const ParamPtr& other) const {
     CHECK_SUB_PARAM(*this, *p, bottom_graph_param);
     CHECK_FIELD_EQ(*this, *p, use_attribute_filter);
     CHECK_FIELD_EQ(*this, *p, support_duplicate);
+    CHECK_FIELD_EQ(*this, *p, deduplicate_storage);
     CHECK_FIELD_EQ(*this, *p, duplicate_distance_threshold);
     CHECK_FIELD_EQ(*this, *p, support_force_remove);
     return true;

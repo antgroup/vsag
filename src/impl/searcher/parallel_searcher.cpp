@@ -66,11 +66,8 @@ ParallelSearcher::visit(const GraphInterfacePtr& graph,
             }
             if (not vl->Get(neighbors[i][j])) {
                 vl->Set(neighbors[i][j]);
-                // Removed filter->CheckValid() to eliminate duplicate filter checking.
-                // Filter is applied at result-collection stage.
-                // ShouldVisit() probabilistically gates traversal to preserve graph connectivity.
                 if (not filter || count_no_visited == 0 || skip_strategy == nullptr ||
-                    skip_strategy->ShouldVisit()) {
+                    skip_strategy->ShouldVisit() || filter->CheckValid(neighbors[i][j])) {
                     to_be_visited_id[count_no_visited] = neighbors[i][j];
                     count_no_visited++;
                 }

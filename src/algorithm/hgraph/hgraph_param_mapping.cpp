@@ -192,11 +192,27 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             },
         },
         {
+            HGRAPH_BASE_DIRECT_READ,
+            {
+                BASE_CODES_KEY,
+                IO_PARAMS_KEY,
+                IO_DIRECT_READ_KEY,
+            },
+        },
+        {
             HGRAPH_PRECISE_FILE_PATH,
             {
                 PRECISE_CODES_KEY,
                 IO_PARAMS_KEY,
                 IO_FILE_PATH_KEY,
+            },
+        },
+        {
+            HGRAPH_PRECISE_DIRECT_READ,
+            {
+                PRECISE_CODES_KEY,
+                IO_PARAMS_KEY,
+                IO_DIRECT_READ_KEY,
             },
         },
         {
@@ -467,6 +483,12 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             },
         },
         {
+            HGRAPH_DEDUPLICATE_STORAGE,
+            {
+                DEDUPLICATE_STORAGE,
+            },
+        },
+        {
             HGRAPH_DUPLICATE_DISTANCE_THRESHOLD,
             {
                 DUPLICATE_DISTANCE_THRESHOLD,
@@ -582,6 +604,7 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             "{ATTR_HAS_BUCKETS_KEY}": false
         },
         "{HGRAPH_SUPPORT_DUPLICATE}": false,
+        "{HGRAPH_DEDUPLICATE_STORAGE}": false,
         "{SUPPORT_FORCE_REMOVE}": false,
         "{HGRAPH_PERSIST_SOURCE_ID_KEY}": false,
         "{EF_CONSTRUCTION_KEY}": 400

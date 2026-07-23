@@ -23,6 +23,7 @@
 #include "impl/reorder/reorder.h"
 #include "impl/searcher/basic_searcher.h"
 #include "index_common_param.h"
+#include "ivf_bucket_searcher.h"
 #include "ivf_parameter.h"
 #include "ivf_partition_strategy.h"
 #include "query_context.h"
@@ -180,6 +181,11 @@ private:
     InnerSearchParam
     create_search_param(const std::string& parameters, const FilterPtr& filter) const;
 
+    DatasetPtr
+    route_buckets_only(const DatasetPtr& query,
+                       const InnerSearchParam& param,
+                       QueryContext& ctx) const;
+
     /**
      * @brief Scan the selected buckets and return a distance heap.
      *
@@ -249,6 +255,7 @@ private:
 
 private:
     BucketInterfacePtr bucket_{nullptr};  // bucket storage (raw or attribute-aware)
+    IVFBucketSearcherPtr bucket_searcher_{nullptr};
 
     IVFPartitionStrategyPtr partition_strategy_{nullptr};  // centroid / partition logic
     BucketIdType buckets_per_data_;                        // buckets each vector is assigned to

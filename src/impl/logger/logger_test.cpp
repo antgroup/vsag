@@ -15,10 +15,15 @@
 
 #include "logger.h"
 
+#include <algorithm>
+#include <regex>
+#include <string>
 #include <vector>
 
+#include "test_env.h"
 #include "unittest.h"
 #include "vsag/options.h"
+#include "vsag/vsag.h"
 namespace {
 
 class CollectLogger : public vsag::Logger {
@@ -62,6 +67,23 @@ public:
     std::vector<std::string> messages_;
 };
 
+class LoggerReplacer {
+public:
+    explicit LoggerReplacer(vsag::Logger* logger)
+        : origin_logger_(vsag::Options::Instance().logger()) {
+        vsag::Options::Instance().set_logger(logger);
+    }
+
+    ~LoggerReplacer() {
+        vsag::Options::Instance().set_logger(origin_logger_);
+    }
+
+private:
+    vsag::Logger* origin_logger_;
+};
+
+using vsag::test::ScopedEnv;
+
 }  // namespace
 
 TEST_CASE("Logger Test", "[ut][logger]") {
@@ -76,8 +98,7 @@ TEST_CASE("Logger Test", "[ut][logger]") {
 
 TEST_CASE("Logger Format Test", "[ut][logger]") {
     CollectLogger logger;
-    auto* origin_logger = vsag::Options::Instance().logger();
-    vsag::Options::Instance().set_logger(&logger);
+    LoggerReplacer logger_replacer(&logger);
 
     vsag::logger::set_level(vsag::logger::level::debug);
     vsag::logger::info("Welcome {}", "logger");
@@ -89,6 +110,40 @@ TEST_CASE("Logger Format Test", "[ut][logger]") {
     REQUIRE(logger.messages_[0] == "info:Welcome logger");
     REQUIRE(logger.messages_[1] == "warn:Easy padding in numbers like 00000012");
     REQUIRE(logger.messages_[2] == "critical:Support for int: 42; hex: 2a; oct: 52; bin: 101010");
+}
 
-    vsag::Options::Instance().set_logger(origin_logger);
+TEST_CASE("Init logs startup output by default", "[ut][logger]") {
+    ScopedEnv env("VSAG_SUPPRESS_INIT_BANNER");
+    CollectLogger logger;
+    LoggerReplacer logger_replacer(&logger);
+
+    REQUIRE(vsag::init());
+
+    auto startup_message =
+        std::find_if(logger.messages_.begin(), logger.messages_.end(), [](const auto& message) {
+            return message.find("info:\n====vsag start init====") != std::string::npos;
+        });
+    REQUIRE(startup_message != logger.messages_.end());
+    REQUIRE(std::regex_search(*startup_message,
+                              std::regex(R"(\ninstance spec: [0-9]+C([0-9]+|\?)G\n)")));
+    REQUIRE(startup_message->find("\ncpu sve >> ") != std::string::npos);
+}
+
+TEST_CASE("Init suppresses startup output when requested", "[ut][logger]") {
+    const std::vector<std::string> suppress_values{
+        "1", "on", "ON", "On", "oN", "true", "TRUE", "True", "TrUe"};
+
+    for (const auto& suppress_value : suppress_values) {
+        ScopedEnv env("VSAG_SUPPRESS_INIT_BANNER", suppress_value.c_str());
+        CollectLogger logger;
+        LoggerReplacer logger_replacer(&logger);
+
+        REQUIRE(vsag::init());
+
+        auto startup_message =
+            std::find_if(logger.messages_.begin(), logger.messages_.end(), [](const auto& message) {
+                return message.find("====vsag start init====") != std::string::npos;
+            });
+        REQUIRE(startup_message == logger.messages_.end());
+    }
 }

@@ -425,10 +425,17 @@ struct HGraphStreamingFixture {
 };
 
 HGraphStreamingFixture
-MakeHGraphStreamingFixture(const std::string& quantization = "fp32") {
+MakeHGraphStreamingFixture(const std::string& quantization = "fp32",
+                           bool deduplicate_storage = false) {
     using namespace fixtures;
     HGraphTestIndex::HGraphBuildParam build_param("l2", 16, quantization);
+    build_param.support_duplicate = deduplicate_storage;
     auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+    if (deduplicate_storage) {
+        auto param_json = vsag::JsonType::Parse(param);
+        param_json[vsag::INDEX_PARAM]["deduplicate_storage"].SetBool(true);
+        param = param_json.Dump();
+    }
     auto index = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
     auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(16, 100, "l2");
     TestIndex::TestBuildIndex(index, dataset, true);
@@ -438,7 +445,97 @@ MakeHGraphStreamingFixture(const std::string& quantization = "fp32") {
     REQUIRE(serialize_result.has_value());
     auto bytes = stream.str();
     REQUIRE(bytes.substr(0, 8) == vsag::SERIAL_STREAM_MAGIC);
+    auto blocks = vsag::test::ParseStreamingBlocks(bytes);
+    auto has_code_slot_map = std::any_of(blocks.begin(), blocks.end(), [](const auto& block) {
+        return block.tag == static_cast<uint32_t>(vsag::StreamSerializationTag::CODE_SLOT_MAP);
+    });
+    REQUIRE(has_code_slot_map == deduplicate_storage);
     return HGraphStreamingFixture{param, dataset, index, bytes};
+}
+
+TEST_CASE("HGraph deduplicated storage streaming serialization",
+          "[ft][serialize][hgraph][streaming][duplicate]") {
+    using namespace fixtures;
+    constexpr int64_t dim = 16;
+    HGraphTestIndex::HGraphBuildParam build_param("l2", dim, "fp32");
+    build_param.support_duplicate = true;
+    build_param.thread_count = 1;
+    auto param_json =
+        vsag::JsonType::Parse(HGraphTestIndex::GenerateHGraphBuildParametersString(build_param));
+    param_json[vsag::INDEX_PARAM]["deduplicate_storage"].SetBool(true);
+    auto param = param_json.Dump();
+
+    std::vector<float> base_vectors(static_cast<uint64_t>(dim * 3), 0.0F);
+    std::fill(base_vectors.begin() + dim, base_vectors.begin() + dim * 2, 1.0F);
+    std::copy(
+        base_vectors.begin() + dim, base_vectors.begin() + dim * 2, base_vectors.begin() + dim * 2);
+    std::vector<int64_t> base_ids = {10, 20, 30};
+    auto base = vsag::Dataset::Make();
+    base->NumElements(3)
+        ->Dim(dim)
+        ->Ids(base_ids.data())
+        ->Float32Vectors(base_vectors.data())
+        ->Owner(false);
+
+    auto index = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+    REQUIRE(index->Build(base).has_value());
+    REQUIRE(index->GetNumElements() == 3);
+
+    std::stringstream stream;
+    REQUIRE(index->SerializeStreaming(stream).has_value());
+    auto bytes = stream.str();
+    auto code_slot_map =
+        vsag::test::FindStreamingBlock(bytes, vsag::StreamSerializationTag::CODE_SLOT_MAP);
+    REQUIRE(code_slot_map.payload_size > 0);
+
+    auto verify_restored_index = [dim](const TestIndex::IndexPtr& restored) {
+        REQUIRE(restored->GetNumElements() == 3);
+        REQUIRE(restored->CheckIdExist(20));
+        REQUIRE(restored->CheckIdExist(30));
+
+        std::vector<float> unique_vector(static_cast<uint64_t>(dim), 2.0F);
+        std::vector<int64_t> unique_id = {40};
+        auto unique = vsag::Dataset::Make();
+        unique->NumElements(1)
+            ->Dim(dim)
+            ->Ids(unique_id.data())
+            ->Float32Vectors(unique_vector.data())
+            ->Owner(false);
+        REQUIRE(restored->Add(unique).has_value());
+
+        std::vector<int64_t> duplicate_id = {50};
+        auto duplicate = vsag::Dataset::Make();
+        duplicate->NumElements(1)
+            ->Dim(dim)
+            ->Ids(duplicate_id.data())
+            ->Float32Vectors(unique_vector.data())
+            ->Owner(false);
+        REQUIRE(restored->Add(duplicate).has_value());
+        REQUIRE(restored->GetNumElements() == 5);
+
+        auto distance = restored->CalcDistanceById(unique_vector.data(), duplicate_id[0]);
+        REQUIRE(distance.has_value());
+        REQUIRE(distance.value() == 0.0F);
+
+        auto search_param = fmt::format(fixtures::search_param_tmp, 32, false);
+        auto result = restored->KnnSearch(unique, 5, search_param);
+        REQUIRE(result.has_value());
+        auto* result_ids = result.value()->GetIds();
+        REQUIRE(std::find(result_ids, result_ids + result.value()->GetDim(), unique_id[0]) !=
+                result_ids + result.value()->GetDim());
+        REQUIRE(std::find(result_ids, result_ids + result.value()->GetDim(), duplicate_id[0]) !=
+                result_ids + result.value()->GetDim());
+    };
+
+    auto restored = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+    std::stringstream deserialize_stream(bytes);
+    REQUIRE(restored->DeserializeStreaming(deserialize_stream).has_value());
+    verify_restored_index(restored);
+
+    std::stringstream load_stream(bytes);
+    auto loaded = vsag::Index::Load(load_stream, "{}");
+    REQUIRE(loaded.has_value());
+    verify_restored_index(loaded.value());
 }
 
 fixtures::TestIndex::IndexPtr
@@ -1315,6 +1412,117 @@ TestHGraphTune(const fixtures::HGraphTestIndexPtr& test_index,
 
 HGRAPH_PR_DAILY_CASE("HGraph Tune", "[ft][search][hgraph]", TestHGraphTune)
 
+TEST_CASE("HGraph Tune uses available codes", "[ft][search][hgraph][tune_codes]") {
+    using namespace fixtures;
+
+    constexpr int64_t dim = 32;
+    constexpr int64_t base_count = 256;
+    auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(dim, base_count, "cosine");
+
+    auto make_parameters = [&](const std::string& quantization, bool store_raw = false) {
+        HGraphTestIndex::HGraphBuildParam build_param("cosine", dim, quantization);
+        build_param.thread_count = 1;
+        build_param.store_raw_vector = store_raw;
+        return HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+    };
+    auto make_index = [&](const std::string& quantization, bool store_raw = false) {
+        auto index =
+            TestIndex::TestFactory("hgraph", make_parameters(quantization, store_raw), true);
+        TestIndex::TestBuildIndex(index, dataset, true);
+        return index;
+    };
+    auto require_fp32_accuracy = [&](const TestIndex::IndexPtr& index) {
+        constexpr float tolerance = 2e-6F;
+        const auto* queries = dataset->query_->GetFloat32Vectors();
+        const auto* gt_ids = dataset->ground_truth_->GetIds();
+        const auto* gt_distances = dataset->ground_truth_->GetDistances();
+        for (int64_t i = 0; i < dataset->query_->GetNumElements(); ++i) {
+            for (int64_t j = 0; j < dataset->top_k; ++j) {
+                auto pos = i * dataset->top_k + j;
+                auto result = index->CalcDistanceById(queries + i * dim, gt_ids[pos]);
+                REQUIRE(result.has_value());
+                REQUIRE(std::abs(result.value() - gt_distances[pos]) < tolerance);
+            }
+        }
+    };
+
+    SECTION("separate raw codes") {
+        auto index = make_index("sq8,bf16", true);
+        auto result = index->Tune(make_parameters("fp32"), true);
+        REQUIRE(result.has_value());
+        REQUIRE(result.value());
+        require_fp32_accuracy(index);
+    }
+
+    SECTION("precise fp32 codes") {
+        auto index = make_index("bf16,fp32");
+        auto result = index->Tune(make_parameters("fp32"), true);
+        REQUIRE(result.has_value());
+        REQUIRE(result.value());
+        require_fp32_accuracy(index);
+    }
+
+    SECTION("base fp32 codes") {
+        auto index = make_index("fp32,bf16");
+        auto result = index->Tune(make_parameters("fp32,fp32"), true);
+        REQUIRE(result.has_value());
+        REQUIRE(result.value());
+        require_fp32_accuracy(index);
+    }
+
+    SECTION("unloaded precise codes") {
+        auto parsed = vsag::JsonType::Parse(make_parameters("fp32,fp32"));
+        parsed[vsag::INDEX_PARAM]["ignore_reorder"].SetBool(true);
+        auto parameters = parsed.Dump();
+
+        auto index = TestIndex::TestFactory("hgraph", parameters, true);
+        TestIndex::TestBuildIndex(index, dataset, true);
+        auto binary_set = index->Serialize();
+        REQUIRE(binary_set.has_value());
+
+        auto reloaded = TestIndex::TestFactory("hgraph", parameters, true);
+        auto deserialize_result = reloaded->Deserialize(binary_set.value());
+        REQUIRE(deserialize_result.has_value());
+
+        auto tune_result = reloaded->Tune(make_parameters("fp32,fp32"), true);
+        REQUIRE(tune_result.has_value());
+        REQUIRE(tune_result.value());
+        require_fp32_accuracy(reloaded);
+    }
+
+    SECTION("force-removed codes still cover active ids") {
+        auto parsed = vsag::JsonType::Parse(make_parameters("fp32"));
+        parsed[vsag::INDEX_PARAM]["support_force_remove"].SetBool(true);
+        auto parameters = parsed.Dump();
+
+        auto index = TestIndex::TestFactory("hgraph", parameters, true);
+        TestIndex::TestBuildIndex(index, dataset, true);
+
+        auto remove_result =
+            index->Remove(dataset->base_->GetIds()[0], vsag::RemoveMode::FORCE_REMOVE);
+        REQUIRE(remove_result.has_value());
+        REQUIRE(remove_result.value() == 1);
+
+        auto tune_result = index->Tune(make_parameters("bf16"), true);
+        REQUIRE(tune_result.has_value());
+        REQUIRE(tune_result.value());
+    }
+
+    SECTION("no usable codes") {
+        auto index = make_index("sq8,bf16");
+        auto result = index->Tune(make_parameters("bf16,bf16"));
+        REQUIRE(result.has_value());
+        REQUIRE_FALSE(result.value());
+    }
+
+    SECTION("no rebuild") {
+        auto index = make_index("sq8,bf16");
+        auto result = index->Tune(make_parameters("sq8"), true);
+        REQUIRE(result.has_value());
+        REQUIRE(result.value());
+    }
+}
+
 TEST_CASE("(PR) HGraph Tune with ignore_reorder", "[ft][search][hgraph][pr]") {
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
@@ -2026,6 +2234,29 @@ TEST_CASE("HGraph streaming serialization compatibility",
         auto fixture = MakeHGraphStreamingFixture("sq8,fp32");
         auto bytes =
             EraseStreamingBlock(fixture.bytes, vsag::StreamSerializationTag::HIGH_PRECISION_CODES);
+        RequireHGraphStreamingDeserializeFails(fixture.param, bytes);
+    }
+
+    SECTION("rejects missing deduplicated code slot map") {
+        auto fixture = MakeHGraphStreamingFixture("fp32", true);
+        auto bytes =
+            EraseStreamingBlock(fixture.bytes, vsag::StreamSerializationTag::CODE_SLOT_MAP);
+        RequireHGraphStreamingDeserializeFails(fixture.param, bytes);
+    }
+
+    SECTION("rejects a code slot map in a non-deduplicated stream") {
+        auto deduplicated = MakeHGraphStreamingFixture("fp32", true);
+        const auto map_block = vsag::test::FindStreamingBlock(
+            deduplicated.bytes, vsag::StreamSerializationTag::CODE_SLOT_MAP);
+        const auto map_bytes = deduplicated.bytes.substr(
+            static_cast<uint64_t>(map_block.header_offset),
+            static_cast<uint64_t>(vsag::test::STREAM_BLOCK_HEADER_SIZE + map_block.payload_size));
+
+        auto fixture = MakeHGraphStreamingFixture();
+        auto bytes = fixture.bytes;
+        const auto section_end =
+            vsag::test::FindStreamingBlock(bytes, vsag::StreamSerializationTag::SECTION_END);
+        bytes.insert(static_cast<uint64_t>(section_end.header_offset), map_bytes);
         RequireHGraphStreamingDeserializeFails(fixture.param, bytes);
     }
 }

@@ -92,6 +92,7 @@ public:
     void
     Deserialize(StreamReader& reader);
 
+    friend class Pyramid;
     friend class PyramidAnalyzer;
 
 public:

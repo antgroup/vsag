@@ -63,11 +63,12 @@ main(int argc, char** argv) {
      * build_params is the configuration for building a sparse index.
      *
      * - dtype: Must be set to "sparse", indicating the data type of the vectors.
-     * - dim: Dimensionality of the sparse vectors (must be >0, but does not affect the result).
+     * - dim: Maximum number of non-zero entries per sparse vector, not the vocabulary size.
      * - metric_type: Distance metric type, currently only "ip" (inner product) is supported.
      * - index_param: Parameters specific to sparse indexing:
-     *   - use_reorder: If true, enables full-precision re-ranking of results. This requires storing additional data.
-     *     When doc_prune_ratio is 0, use_reorder can be false while still maintaining full-precision results.
+     *   - use_reorder: If true, enables candidate re-ranking with an extra forward store.
+     *   - rerank_type: Forward-store type used by reorder. "fp32" keeps exact values, while
+     *     "dmq8" uses compressed 8-bit DMQ codes.
      *   - term_id_limit: Maximum term id (e.g., when term_id_limit = 10, then, term [15: 0.1] in sparse vector is not allowed)
      *   - doc_prune_ratio: Ratio of term pruning in documents (0 = no pruning).
      *   - window_size: Window size for table scanning. Related to L3 cache size; 100000 is an empirically optimal value.
@@ -78,6 +79,7 @@ main(int argc, char** argv) {
         "metric_type": "ip",
         "index_param": {
             "use_reorder": true,
+            "rerank_type": "fp32",
             "term_id_limit": 1000000,
             "doc_prune_ratio": 0.0,
             "window_size": 60000

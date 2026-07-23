@@ -148,3 +148,6 @@ target_link_libraries(323_index_hgraph_rabitq_split vsag)
 
 add_executable(324_feature_lazy_hgraph_extra_info 324_feature_lazy_hgraph_extra_info.cpp)
 target_link_libraries(324_feature_lazy_hgraph_extra_info vsag)
+
+add_executable(325_feature_uring_io 325_feature_uring_io.cpp)
+target_link_libraries(325_feature_uring_io vsag)

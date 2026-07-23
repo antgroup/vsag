@@ -88,7 +88,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
         if (this->support_force_remove()) {
             force_remove_rlock = std::shared_lock<std::shared_mutex>(this->force_remove_mutex_);
         }
-        shared_lock = std::shared_lock<std::shared_mutex>(this->global_mutex_);
+        shared_lock = this->acquire_global_read_lock();
     }
     k = std::min(k, GetNumElements());
 
@@ -401,7 +401,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         if (this->support_force_remove()) {
             force_remove_rlock = std::shared_lock<std::shared_mutex>(this->force_remove_mutex_);
         }
-        shared_lock = std::shared_lock<std::shared_mutex>(this->global_mutex_);
+        shared_lock = this->acquire_global_read_lock();
     }
     k = std::min(k, GetNumElements());
 

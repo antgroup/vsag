@@ -1,14 +1,17 @@
-# Roadmap
+# Roadmap 2025
+
+> This historical roadmap led to VSAG 1.0. `v1.0.0` was released on July 12, 2026.
+> See the [VSAG 1.0 Release Notes](release_notes/v1.0.md) for the delivered result.
 
 As AI capabilities keep advancing and strong open-source LLMs become widespread, demand for
 unstructured-data retrieval has exploded. Vector algorithms are the cornerstone of unstructured
 retrieval, and the VSAG community will keep investing in algorithmic research to help partners
 improve retrieval performance, reduce latency, and cut costs.
 
-In 2025 we plan to ship the first major release:
+The roadmap defined the first major release as follows:
 
-- VSAG 1.0 provides comprehensive support for both graph-based and inverted-index structures, as
-  well as in-memory and memory-plus-disk hybrid retrieval modes, delivering low memory cost and
+- VSAG 1.0 would provide comprehensive support for both graph-based and inverted-index structures,
+  as well as in-memory and memory-plus-disk hybrid retrieval modes, delivering low memory cost and
   outstanding search performance.
 
 Planned algorithms and features:

@@ -26,6 +26,7 @@ set (QUANTIZER_SRC
         product_quantization/pq_fastscan_quantizer.cpp
         product_quantization/product_quantizer.cpp
         rabitq_quantization/rabitq_quantizer.cpp
+        sparse_quantization/sparse_dmq_quantizer.cpp
         quantizer_parameter.cpp
         fp32_quantizer_parameter.cpp
         int8_quantizer_parameter.cpp

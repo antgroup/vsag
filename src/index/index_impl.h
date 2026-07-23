@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,6 +13,8 @@
 // limitations under the License.
 
 #pragma once
+
+#include <nlohmann/json.hpp>
 
 #include "algorithm/inner_index_interface.h"
 #include "common.h"
@@ -300,7 +301,9 @@ public:
               const std::string& parameters,
               BitsetPtr invalid = nullptr) const override {
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
-        CHECK_AND_RETURN_EMPTY_DATASET;
+        if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(parameters)) {
+            return DatasetImpl::MakeEmptyDataset();
+        }
         SAFE_CALL(return this->inner_index_->KnnSearch(query, k, parameters, invalid));
     }
 
@@ -310,7 +313,9 @@ public:
               const std::string& parameters,
               const std::function<bool(int64_t)>& filter) const override {
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
-        CHECK_AND_RETURN_EMPTY_DATASET;
+        if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(parameters)) {
+            return DatasetImpl::MakeEmptyDataset();
+        }
         SAFE_CALL(return this->inner_index_->KnnSearch(query, k, parameters, filter));
     }
 
@@ -320,14 +325,18 @@ public:
               const std::string& parameters,
               const FilterPtr& filter) const override {
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
-        CHECK_AND_RETURN_EMPTY_DATASET;
+        if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(parameters)) {
+            return DatasetImpl::MakeEmptyDataset();
+        }
         SAFE_CALL(return this->inner_index_->KnnSearch(query, k, parameters, filter));
     }
 
     tl::expected<DatasetPtr, Error>
     KnnSearch(const DatasetPtr& query, int64_t k, SearchParam& search_param) const override {
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
-        CHECK_AND_RETURN_EMPTY_DATASET;
+        if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(search_param.parameters)) {
+            return DatasetImpl::MakeEmptyDataset();
+        }
         if (search_param.is_iter_filter) {
             SAFE_CALL(return this->inner_index_->KnnSearch(query,
                                                            k,
@@ -350,7 +359,9 @@ public:
               IteratorContext*& iter_ctx,
               bool is_last_filter) const override {
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
-        CHECK_AND_RETURN_EMPTY_DATASET;
+        if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(parameters)) {
+            return DatasetImpl::MakeEmptyDataset();
+        }
         SAFE_CALL(return this->inner_index_->KnnSearch(
             query, k, parameters, filter, nullptr, iter_ctx, is_last_filter));
     }
@@ -387,7 +398,9 @@ public:
                 const std::string& parameters,
                 int64_t limited_size = -1) const override {
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
-        CHECK_AND_RETURN_EMPTY_DATASET;
+        if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(parameters)) {
+            return DatasetImpl::MakeEmptyDataset();
+        }
         SAFE_CALL(return this->inner_index_->RangeSearch(query, radius, parameters, limited_size));
     }
 
@@ -398,7 +411,9 @@ public:
                 BitsetPtr invalid,
                 int64_t limited_size = -1) const override {
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
-        CHECK_AND_RETURN_EMPTY_DATASET;
+        if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(parameters)) {
+            return DatasetImpl::MakeEmptyDataset();
+        }
         SAFE_CALL(return this->inner_index_->RangeSearch(
             query, radius, parameters, invalid, limited_size));
     }
@@ -410,7 +425,9 @@ public:
                 const std::function<bool(int64_t)>& filter,
                 int64_t limited_size = -1) const override {
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
-        CHECK_AND_RETURN_EMPTY_DATASET;
+        if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(parameters)) {
+            return DatasetImpl::MakeEmptyDataset();
+        }
         SAFE_CALL(return this->inner_index_->RangeSearch(
             query, radius, parameters, filter, limited_size));
     }
@@ -422,7 +439,9 @@ public:
                 const FilterPtr& filter,
                 int64_t limited_size = -1) const override {
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
-        CHECK_AND_RETURN_EMPTY_DATASET;
+        if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(parameters)) {
+            return DatasetImpl::MakeEmptyDataset();
+        }
         SAFE_CALL(return this->inner_index_->RangeSearch(
             query, radius, parameters, filter, limited_size));
     }
@@ -455,7 +474,9 @@ public:
 
     [[nodiscard]] tl::expected<DatasetPtr, Error>
     SearchWithRequest(const SearchRequest& request) const override {
-        CHECK_AND_RETURN_EMPTY_DATASET;
+        if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(request.params_str_)) {
+            return DatasetImpl::MakeEmptyDataset();
+        }
         SAFE_CALL(return this->inner_index_->SearchWithRequest(request));
     }
 
@@ -534,6 +555,21 @@ private:
     }
 
 private:
+    bool
+    ShouldSkipEmptyCheck(const std::string& params_str) const {
+        if (GetNumElements() != 0 || params_str.empty()) {
+            return false;
+        }
+        try {
+            auto params_json = nlohmann::json::parse(params_str);
+            return params_json.contains("ivf") &&
+                   params_json["ivf"].contains("disable_bucket_scan") &&
+                   params_json["ivf"]["disable_bucket_scan"].get<bool>();
+        } catch (...) {
+            return false;
+        }
+    }
+
     InnerIndexPtr inner_index_{nullptr};
     IndexCommonParam common_param_{};
 };

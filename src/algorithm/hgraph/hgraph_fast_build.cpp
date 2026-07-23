@@ -105,25 +105,25 @@ HGraphFastBuildTaskGuard::~HGraphFastBuildTaskGuard() {
 
 void
 HGraph::prepare_optimized_build_codes(const DatasetPtr& data,
-                                      const Vector<std::pair<InnerIdType, LabelType>>& inner_ids,
+                                      const Vector<AddRow>& rows,
                                       std::vector<std::future<void>>& futures) {
     if (this->optimized_build_codes_ == nullptr) {
         return;
     }
 
     if (this->thread_pool_ == nullptr) {
-        for (const auto& [inner_id, local_idx] : inner_ids) {
-            this->insert_persistent_codes(get_data(data, local_idx), inner_id);
+        for (const auto& row : rows) {
+            this->insert_persistent_codes(get_data(data, row.input_idx), row.inner_id);
         }
         return;
     }
 
-    for (const auto& inner_id_and_local_idx : inner_ids) {
-        const auto inner_id = inner_id_and_local_idx.first;
-        const auto local_idx = inner_id_and_local_idx.second;
+    for (const auto& row : rows) {
+        const auto inner_id = row.inner_id;
+        const auto input_idx = row.input_idx;
         futures.emplace_back(
-            this->thread_pool_->GeneralEnqueue([this, data, inner_id, local_idx]() {
-                this->insert_persistent_codes(get_data(data, local_idx), inner_id);
+            this->thread_pool_->GeneralEnqueue([this, data, inner_id, input_idx]() {
+                this->insert_persistent_codes(get_data(data, input_idx), inner_id);
             }));
     }
     wait_all_futures(futures);

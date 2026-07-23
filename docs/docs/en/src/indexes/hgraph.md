@@ -73,6 +73,7 @@ most users need; the exhaustive list is in [Index Parameters](../resources/index
 | `base_pq_dim` | int | `1` | Number of PQ subspaces. When using `pq` / `pqfs`, set this explicitly instead of relying on the default. |
 | `build_thread_count` | int | `100` | Threads used to parallelise build |
 | `support_duplicate` | bool | `false` | Enable duplicate-ID detection on insert |
+| `deduplicate_storage` | bool | `false` | Share vector storage between duplicates; requires `support_duplicate: true` |
 | `duplicate_distance_threshold` | float | `0.0` | Duplicate-detection distance threshold. When greater than `0`, deduplicate by the nearest candidate distance; when `0`, fall back to the current code `memcmp` check |
 | `support_remove` | bool | `false` | Enable graph delete-tracking metadata used by mark-remove recovery paths |
 | `support_force_remove` | bool | `false` | Enable `RemoveMode::FORCE_REMOVE` and its extra synchronization on the built index |
@@ -81,6 +82,26 @@ most users need; the exhaustive list is in [Index Parameters](../resources/index
 | `base_io_type` / `precise_io_type` | string | `"block_memory_io"` | Storage backend (`memory_io`, `block_memory_io`, `buffer_io`, `async_io`, `mmap_io`) |
 | `base_file_path` / `precise_file_path` | string | — | File path; required when the corresponding `*_io_type` is disk-backed (`buffer_io`, `async_io`, `mmap_io`) |
 | `hgraph_init_capacity` | int | `100` | Initial capacity hint (doesn't cap the final size) |
+
+### Deduplicating vector storage
+
+Set both `support_duplicate: true` and `deduplicate_storage: true` to let duplicate
+vectors share one physical code slot while retaining their individual labels. This option
+currently supports only dense-vector HGraph indexes using `graph_type: "nsw"`; it is not
+available for the separate HNSW index or for `graph_type: "odescent"`.
+
+The following operations and configurations are not supported while storage deduplication
+is enabled:
+
+- force removal (`support_force_remove: true`);
+- cache-assisted build after `ImportCache()`;
+- `Merge`;
+- legacy v0.14 serialization.
+
+`UpdateVector` is supported only for IDs whose vector storage is not shared with another
+duplicate-group member.
+
+Current serialization and streaming serialization are supported.
 
 ## Supported input data types
 

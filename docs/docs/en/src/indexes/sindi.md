@@ -21,7 +21,9 @@ pairs and is the only VSAG index that accepts `dtype: "sparse"`.
 3. **Scoring.** At query time, SINDI iterates the non-zero terms of the query,
    walks the corresponding inverted lists in each window, aggregates contributions
    into a max-heap of size `n_candidate`, and returns the top-k. When `use_reorder`
-   is enabled, the candidates are re-scored against a high-precision flat copy.
+   is enabled, the candidates are re-scored against a forward store. The default
+   forward store keeps fp32 values, while `rerank_type: "dmq8"` uses a compressed
+   DMQ store to reduce rerank memory.
 
 Distance is returned as `1 - inner_product` so results sort ascending as in the
 dense indexes.
@@ -74,7 +76,8 @@ and `metric_type` **must** be `"ip"`.
 | `window_size` | int | `50000` | Documents per window (range: 10 000 – 60 000). |
 | `doc_prune_ratio` | float | `0.0` | Fraction of lowest-weight terms dropped per doc at build time (0.0 – 0.9). |
 | `use_quantization` | bool | `false` | Quantize stored term values to cut memory; when enabled, uses 8-bit scalar quantization (SQ8). |
-| `use_reorder` | bool | `false` | Keep a high-precision flat copy and rescore results (~2× memory). |
+| `use_reorder` | bool | `false` | Keep a forward store and rescore candidates after coarse SINDI scoring. |
+| `rerank_type` | string | `"fp32"` | Forward-store type used when `use_reorder` is enabled. `fp32` keeps exact values; `dmq8` stores compressed 8-bit DMQ codes. |
 | `remap_term_ids` | bool | `false` | Remap term IDs before indexing; useful when term IDs are sparse or have large gaps. |
 | `avg_doc_term_length` | int | `100` | Hint for memory estimation only. |
 
@@ -113,11 +116,14 @@ auto result = index->KnnSearch(
 - Hybrid dense+sparse pipelines where SINDI handles the sparse leg in parallel with
   HGraph / IVF for dense embeddings.
 - Memory-constrained deployments of sparse corpora (`use_quantization: true`
-  roughly halves memory with a small recall loss; `use_reorder: true` trades
-  memory for recall).
+  roughly halves inverted-list memory with a small recall loss; `use_reorder:
+  true` trades forward-store memory for recall, and `rerank_type: "dmq8"` reduces
+  that forward-store overhead).
 
 SINDI does **not** accept dense vectors and supports only inner-product similarity.
 Range search and id-based filtering are supported; see the example for usage.
+When `rerank_type` is `dmq8`, codebooks are fixed by the initial build, so incremental
+`Add` after the model is established and `UpdateVector` are not supported.
 
 ## Practical guidance
 
@@ -143,7 +149,10 @@ Range search and id-based filtering are supported; see the example for usage.
      (`use_reorder: true`), and enable quantization to shrink inverted-list memory
      (`use_quantization: true`). This is a common balance between memory and
      recall.
-3. Very large sparse vocabularies. When term IDs are sparse within the `uint32`
+3. Pruned high-accuracy index with compressed reranking. Use the same pruning and
+     inverted-list quantization as above, but set `rerank_type: "dmq8"` together
+     with `use_reorder: true` to reduce forward-store memory.
+4. Very large sparse vocabularies. When term IDs are sparse within the `uint32`
      range, such as hash-based tokenizers, external vocabulary IDs, or vocabularies
      with large gaps, enable `remap_term_ids: true`. This avoids managing many
      empty posting lists and helps stay below the `term_id_limit` ceiling.

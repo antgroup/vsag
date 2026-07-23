@@ -101,7 +101,8 @@ Search-time parameters live under the `ivf` sub-object:
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `scan_buckets_count` | int | — (required) | Number of buckets probed per query. Must be ≤ `buckets_count`. |
+| `scan_buckets_count` | int | — (required) | Number of buckets probed per query. Must be ≤ `buckets_count` (except when `disable_bucket_scan` is true, where larger values are allowed and unavailable slots are padded with `-1`). |
+| `disable_bucket_scan` | bool | `false` | Return bucket IDs and distances. Supports batch queries. |
 | `factor` | float | `2.0` | With reordering enabled, pulls `factor * topk` coarse candidates before the precise rescore. |
 | `enable_reorder` | bool | `true` | Set to `false` to skip the final reorder stage for this request even when the index was built with reorder enabled. |
 | `parallelism` | int | `1` | Threads used to scan buckets in parallel for a single query. |

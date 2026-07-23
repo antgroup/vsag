@@ -385,6 +385,8 @@ TEST_CASE("BasicSearcher duplicate threshold keeps nearest owner",
 
     REQUIRE(run_search({0.12F, 0.0F}, 0.01F) == -1);
     REQUIRE(run_search({0.12F, 0.0F}, 0.02F) == 0);
+    REQUIRE(run_search({0.3F, 0.0F}, 0.0F) == 1);
+    REQUIRE(run_search({0.3F, 0.0F}, 0.0F, 0) == -1);
     REQUIRE(run_search({0.3F, 0.0F}, 0.0F, 1) == 1);
 }
 

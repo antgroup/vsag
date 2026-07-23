@@ -127,6 +127,16 @@ SINDIParameter::FromJson(const JsonType& json) {
         remap_term_ids = json[SPARSE_REMAP_TERM_IDS].GetBool();
     }
 
+    if (json.Contains(SPARSE_RERANK_TYPE)) {
+        rerank_type = json[SPARSE_RERANK_TYPE].GetString();
+    } else {
+        rerank_type = SPARSE_RERANK_TYPE_FP32;
+    }
+    CHECK_ARGUMENT(rerank_type == SPARSE_RERANK_TYPE_FP32 || rerank_type == SPARSE_RERANK_TYPE_DMQ8,
+                   fmt::format("rerank_type must be fp32 or dmq8, got {}", rerank_type));
+    CHECK_ARGUMENT(use_reorder || rerank_type == SPARSE_RERANK_TYPE_FP32,
+                   "rerank_type=dmq8 requires use_reorder=true");
+
     if (json.Contains(SPARSE_IMMUTABLE)) {
         immutable = json[SPARSE_IMMUTABLE].GetBool();
     }
@@ -149,6 +159,7 @@ SINDIParameter::ToJson() const {
     if (immutable) {
         json[SPARSE_IMMUTABLE].SetBool(true);
     }
+    json[SPARSE_RERANK_TYPE].SetString(rerank_type);
     return json;
 }
 
@@ -163,6 +174,7 @@ SINDIParameter::CheckCompatibility(const vsag::ParamPtr& other) const {
     CHECK_FIELD_EQ(*this, *p, avg_doc_term_length);
     CHECK_FIELD_EQ(*this, *p, remap_term_ids);
     CHECK_FIELD_EQ(*this, *p, immutable);
+    CHECK_FIELD_EQ(*this, *p, rerank_type);
     return true;
 }
 

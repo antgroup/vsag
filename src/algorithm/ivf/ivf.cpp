@@ -15,7 +15,9 @@
 
 #include "ivf.h"
 
+#include <algorithm>
 #include <atomic>
+#include <limits>
 #include <random>
 #include <set>
 
@@ -23,6 +25,7 @@
 #include "attr/argparse.h"
 #include "attr/executor/executor.h"
 #include "datacell/flatten_interface.h"
+#include "flat_bucket_searcher.h"
 #include "gno_imi_partition.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/inner_search_param.h"
@@ -34,6 +37,7 @@
 #include "inner_string_params.h"
 #include "ivf_nearest_partition.h"
 #include "query_context.h"
+#include "simd/normalize.h"
 #include "storage/serialization.h"
 #include "storage/serialization_tags.h"
 #include "storage/stream_reader.h"
@@ -43,6 +47,8 @@
 #include "vsag_exception.h"
 
 namespace vsag {
+
+static constexpr BucketIdType INVALID_BUCKET_ID = static_cast<BucketIdType>(-1);
 
 static constexpr const char* IVF_PARAMS_TEMPLATE =
     R"(
@@ -335,7 +341,8 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
 IVF::IVF(const IVFParameterPtr& param, const IndexCommonParam& common_param)
     : InnerIndexInterface(param, common_param),
       buckets_per_data_(param->buckets_per_data),
-      location_map_(common_param.allocator_.get()) {
+      location_map_(common_param.allocator_.get()),
+      bucket_searcher_(std::make_shared<FlatBucketSearcher>()) {
     this->bucket_ = BucketInterface::MakeInstance(param->bucket_param, common_param);
     if (this->bucket_ == nullptr) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "bucket init error");
@@ -980,8 +987,13 @@ IVF::create_search_param(const std::string& parameters, const FilterPtr& filter)
     InnerSearchParam param;
     param.is_inner_id_allowed = this->create_search_filter(filter);
     auto search_param = IVFSearchParameters::FromJson(parameters);
-    param.scan_bucket_size = std::min(static_cast<BucketIdType>(search_param.scan_buckets_count),
-                                      bucket_->bucket_count_);
+    if (search_param.disable_bucket_scan) {
+        param.scan_bucket_size = static_cast<BucketIdType>(search_param.scan_buckets_count);
+    } else {
+        param.scan_bucket_size = std::min(
+            static_cast<BucketIdType>(search_param.scan_buckets_count), bucket_->bucket_count_);
+    }
+    param.disable_bucket_scan = search_param.disable_bucket_scan;
     param.factor = search_param.topk_factor;
     param.enable_reorder = search_param.enable_reorder;
     param.first_order_scan_ratio = search_param.first_order_scan_ratio;
@@ -991,6 +1003,75 @@ IVF::create_search_param(const std::string& parameters, const FilterPtr& filter)
         param.time_cost->SetThreshold(search_param.timeout_ms);
     }
     return param;
+}
+
+DatasetPtr
+IVF::route_buckets_only(const DatasetPtr& query,
+                        const InnerSearchParam& param,
+                        QueryContext& ctx) const {
+    const auto num_queries = query->GetNumElements();
+    const auto* query_data = query->GetFloat32Vectors();
+    const auto buckets_per_query = param.scan_bucket_size;
+    const auto candidate_buckets =
+        partition_strategy_->ClassifyDatasForSearch(query_data, num_queries, param, &ctx);
+
+    auto result = Dataset::Make();
+    if (num_queries == 0 || buckets_per_query == 0) {
+        return result->NumElements(0)->Dim(0);
+    }
+
+    auto* alloc = (ctx.alloc != nullptr) ? ctx.alloc : allocator_;
+    const auto total_slots = num_queries * buckets_per_query;
+    auto* ids = static_cast<int64_t*>(alloc->Allocate(sizeof(int64_t) * total_slots));
+    auto* distances = static_cast<float*>(alloc->Allocate(sizeof(float) * total_slots));
+    const auto dim = partition_strategy_->dim_;
+    const auto metric = partition_strategy_->metric_type_;
+
+    Vector<float> centroid(dim, allocator_);
+    Vector<float> norm_query(dim, allocator_);
+    Vector<float> norm_centroid(dim, allocator_);
+    for (int64_t q = 0; q < num_queries; ++q) {
+        const auto* query_vec = query_data + q * dim;
+        if (metric == MetricType::METRIC_TYPE_COSINE) {
+            Normalize(query_vec, norm_query.data(), dim);
+        }
+        for (int64_t b = 0; b < buckets_per_query; ++b) {
+            const auto idx = q * buckets_per_query + b;
+            const auto bucket_id = candidate_buckets[idx];
+            if (bucket_id == INVALID_BUCKET_ID) {
+                ids[idx] = -1;
+                distances[idx] = std::numeric_limits<float>::infinity();
+                continue;
+            }
+            partition_strategy_->GetCentroid(bucket_id, centroid);
+            float dist = 0.0F;
+            if (metric == MetricType::METRIC_TYPE_L2SQR) {
+                for (int64_t d = 0; d < dim; ++d) {
+                    auto diff = query_vec[d] - centroid[d];
+                    dist += diff * diff;
+                }
+            } else if (metric == MetricType::METRIC_TYPE_COSINE) {
+                Normalize(centroid.data(), norm_centroid.data(), dim);
+                for (int64_t d = 0; d < dim; ++d) {
+                    dist += norm_query[d] * norm_centroid[d];
+                }
+                dist = 1.0F - dist;
+            } else {
+                for (int64_t d = 0; d < dim; ++d) {
+                    dist += query_vec[d] * centroid[d];
+                }
+                dist = 1.0F - dist;
+            }
+            ids[idx] = static_cast<int64_t>(bucket_id);
+            distances[idx] = dist;
+        }
+    }
+
+    return result->NumElements(num_queries)
+        ->Dim(buckets_per_query)
+        ->Ids(ids)
+        ->Distances(distances)
+        ->Owner(true, alloc);
 }
 
 DatasetPtr
@@ -1035,7 +1116,6 @@ IVF::search(const DatasetPtr& query,
     }
     auto computer = bucket_->FactoryComputer(query_data);
 
-    auto cur_heap_top = std::numeric_limits<float>::max();
     int64_t topk = param.topk;
     if constexpr (mode == RANGE_SEARCH) {
         topk = param.range_search_limit_size;
@@ -1054,7 +1134,6 @@ IVF::search(const DatasetPtr& query,
     }
 
     DistHeapPtr search_result = nullptr;
-    const auto& ft = param.is_inner_id_allowed;
 
     auto bucket_count = candidate_buckets.size();
     auto search_thread_count = param.parallel_search_thread_count;
@@ -1066,7 +1145,6 @@ IVF::search(const DatasetPtr& query,
     auto search_func = [&](int64_t thread_id) -> void {
         heaps[thread_id] = DistanceHeap::MakeInstanceBySize<true, false>(this->allocator_, topk);
         auto& heap = heaps[thread_id];
-        Vector<float> centroid(dim_, allocator_);
         Vector<float> dist(allocator_);
         uint64_t i = cur_bucket_num.fetch_add(1);
         for (; i < bucket_count; i = cur_bucket_num.fetch_add(1)) {
@@ -1076,56 +1154,19 @@ IVF::search(const DatasetPtr& query,
                 break;
             }
             auto bucket_id = candidate_buckets[i];
-            if (bucket_id == -1) {
+            if (bucket_id == INVALID_BUCKET_ID) {
                 break;
             }
-            auto bucket_size = bucket_->GetBucketSize(bucket_id);
-            const auto* ids = bucket_->GetInnerIds(bucket_id);
-            if (bucket_size > dist.size()) {
-                dist.resize(bucket_size);
-            }
-
-            bucket_->ScanBucketById(dist.data(), computer, bucket_id);
-            Filter* attr_ft = nullptr;
-            if (param.executors.size() > thread_id and param.executors[thread_id] != nullptr) {
-                param.executors[thread_id]->Clear();
-                attr_ft = param.executors[thread_id]->Run(bucket_id);
-            }
-            for (int j = 0; j < bucket_size; ++j) {
-                auto origin_id = ids[j] / buckets_per_data_;
-                if (reasoning_ctx != nullptr) {
-                    reasoning_ctx->RecordVisit(origin_id, dist[j], 0);
-                }
-                if (attr_ft != nullptr and not attr_ft->CheckValid(j)) {
-                    if (reasoning_ctx != nullptr) {
-                        reasoning_ctx->RecordFilterReject(origin_id);
-                    }
-                    continue;
-                }
-                if (ft == nullptr or ft->CheckValid(origin_id)) {
-                    if constexpr (mode == KNN_SEARCH) {
-                        if (heap->Size() < topk or dist[j] < cur_heap_top) {
-                            heap->Push(dist[j], ids[j]);
-                        }
-                    } else if constexpr (mode == RANGE_SEARCH) {
-                        if (dist[j] <= param.radius + THRESHOLD_ERROR and dist[j] < cur_heap_top) {
-                            heap->Push(dist[j], ids[j]);
-                        }
-                    }
-                    if (heap->Size() > topk) {
-                        if (reasoning_ctx != nullptr) {
-                            reasoning_ctx->RecordEviction(heap->Top().second / buckets_per_data_,
-                                                          0);
-                        }
-                        heap->Pop();
-                    }
-                    if (not heap->Empty() and heap->Size() == topk) {
-                        cur_heap_top = heap->Top().first;
-                    }
-                } else if (reasoning_ctx != nullptr) {
-                    reasoning_ctx->RecordFilterReject(origin_id);
-                }
-            }
+            bucket_searcher_->Search(bucket_id,
+                                     bucket_,
+                                     computer,
+                                     param,
+                                     thread_id,
+                                     topk,
+                                     buckets_per_data_,
+                                     heap,
+                                     dist,
+                                     reasoning_ctx);
         }
     };
     std::vector<std::future<void>> futures;
@@ -1249,6 +1290,18 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
     auto param = this->create_search_param(request.params_str_, request.filter_);
 
     auto query = request.query_;
+    if (param.disable_bucket_scan) {
+        CHECK_ARGUMENT(query != nullptr, "query dataset cannot be null");
+        CHECK_ARGUMENT(query->GetNumElements() >= 1,
+                       "disable bucket scan requires at least one query");
+        CHECK_ARGUMENT(query->GetFloat32Vectors() != nullptr,
+                       "query float32 vectors cannot be null");
+        CHECK_ARGUMENT(query->GetDim() == this->dim_, "query dimension must match index dimension");
+        auto result = this->route_buckets_only(query, param, ctx);
+        result->Statistics(stats.Dump());
+        return result;
+    }
+
     if (request.enable_attribute_filter_ and this->attr_filter_index_ != nullptr) {
         auto& schema = this->attr_filter_index_->field_type_map_;
         auto expr = AstParse(request.attribute_filter_str_, &schema);
@@ -1387,6 +1440,9 @@ IVF::fill_location_map() {
         auto* ids = this->bucket_->GetInnerIds(i);
         auto bucket_size = this->bucket_->GetBucketSize(i);
         for (uint64_t j = 0; j < bucket_size; ++j) {
+            if (ids[j] == std::numeric_limits<InnerIdType>::max()) {
+                continue;
+            }
             if (ids[j] >= this->total_elements_ * buckets_per_data_) {
                 throw VsagException(ErrorType::INTERNAL_ERROR, "invalid inner_id");
             }
