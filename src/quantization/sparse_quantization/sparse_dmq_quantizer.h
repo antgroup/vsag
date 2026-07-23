@@ -27,6 +27,7 @@ public:
     static constexpr uint32_t BITS = 8;
     static constexpr uint32_t CODEBOOK_SIZE = 1U << BITS;
     static constexpr uint32_t THRESHOLD_COUNT = CODEBOOK_SIZE - 1;
+    static constexpr uint32_t DEFAULT_SHARED_CODEBOOK_THRESHOLD = 1024;
 
     struct VectorFactors {
         float mean{0.0F};
@@ -44,7 +45,9 @@ public:
     };
     static_assert(sizeof(EncodedHeader) == 12, "DMQ encoded header layout must remain stable");
 
-    SparseDmqQuantizer(uint32_t term_id_limit, Allocator* allocator);
+    SparseDmqQuantizer(uint32_t term_id_limit,
+                       Allocator* allocator,
+                       uint32_t shared_codebook_threshold = DEFAULT_SHARED_CODEBOOK_THRESHOLD);
 
     bool
     TrainImpl(const float* data, uint64_t count);
@@ -93,6 +96,21 @@ public:
     [[nodiscard]] uint64_t
     GetMemoryUsage() const;
 
+    [[nodiscard]] uint32_t
+    GetIdBits() const {
+        return id_bits_;
+    }
+
+    [[nodiscard]] uint64_t
+    GetCodebookCount() const {
+        return codebooks_.size();
+    }
+
+    [[nodiscard]] uint32_t
+    GetSharedCodebookThreshold() const {
+        return shared_codebook_threshold_;
+    }
+
     void
     ExportModel(const SparseDmqQuantizer& other);
 
@@ -100,16 +118,19 @@ private:
     struct QueryData;
 
     [[nodiscard]] uint32_t
-    GetCodebookIndex(uint32_t term_id) const;
+    GetCompactId(uint32_t term_id) const;
+
+    [[nodiscard]] uint32_t
+    GetCodebookIndex(uint32_t compact_id) const;
 
     void
-    RebuildCodebookLookup();
+    RebuildCompactIdLookup();
 
     void
-    AddCodebookLookup(uint32_t term_id, uint32_t codebook_index);
+    AddCompactIdLookup(uint32_t term_id, uint32_t compact_id);
 
     static void
-    BuildCodebook(float* values, uint32_t length, Codebook* codebook);
+    BuildCodebook(float* values, uint64_t length, Codebook* codebook);
 
     [[nodiscard]] static uint8_t
     EncodeResidual(float residual, const Codebook& codebook);
@@ -118,11 +139,13 @@ private:
     DecodeValue(const VectorFactors& factors, const Codebook& codebook, uint8_t code);
 
 private:
-    Vector<uint32_t> codebook_term_ids_;
+    Vector<uint32_t> term_ids_;
     Vector<Codebook> codebooks_;
-    UnorderedMap<uint32_t, uint32_t> codebook_index_by_term_id_;
-    Vector<uint32_t> codebook_index_lookup_;
+    Vector<uint32_t> codebook_index_by_compact_id_;
+    UnorderedMap<uint32_t, uint32_t> compact_id_by_term_id_;
+    Vector<uint32_t> compact_id_lookup_;
     uint32_t id_bits_{32};
+    uint32_t shared_codebook_threshold_{DEFAULT_SHARED_CODEBOOK_THRESHOLD};
 };
 
 }  // namespace vsag

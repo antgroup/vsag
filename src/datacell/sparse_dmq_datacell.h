@@ -22,7 +22,10 @@ namespace vsag {
 
 class SparseDmqDataCell : public FlattenInterface {
 public:
-    SparseDmqDataCell(uint32_t term_id_limit, const IndexCommonParam& common_param);
+    SparseDmqDataCell(
+        uint32_t term_id_limit,
+        const IndexCommonParam& common_param,
+        uint32_t shared_codebook_threshold = SparseDmqQuantizer::DEFAULT_SHARED_CODEBOOK_THRESHOLD);
 
     void
     Query(float* result_dists,
