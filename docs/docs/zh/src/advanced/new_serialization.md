@@ -157,11 +157,13 @@ IVF 按顺序写入以下 streaming blocks：
 | `ivf_bucket` | 倒排列表使用的 bucket datacell 数据 | 是 |
 | `ivf_partition_strategy` | partition strategy 状态，例如已训练的中心点 | 是 |
 | `label_table` | 外部 label 和 label remap | 是 |
-| `high_precision_codes` | IVF reorder 开启时的 reorder codes | 条件必需 |
+| `high_precision_codes` | IVF reorder 使用 `flat` 布局时的精排 codes | 条件必需 |
+| `ivf_precise_bucket` | IVF reorder 使用 `bucket` 布局时按桶对齐的精排 codes | 条件必需 |
 | `attribute_filter` | 开启属性过滤时写入的可选属性过滤索引 | 条件必需 |
 
 `DeserializeStreaming` 会恢复完整的内存 IVF 索引。`Index::Load` 可以直接从 streaming metadata
-创建 IVF 索引对象，当前会把写出的 IVF blocks 都加载到内存中。
+创建 IVF 索引对象，当前会把写出的 IVF blocks 都加载到内存中。两种精排 codes block 互斥，
+由 `precise_codes_layout` 选择。
 
 ## SINDI Blocks
 

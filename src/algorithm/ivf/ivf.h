@@ -227,6 +227,13 @@ private:
             ReasoningContext* reasoning_ctx = nullptr,
             const std::optional<float>& distance_threshold = std::nullopt) const;
 
+    DistHeapPtr
+    reorder_with_precise_bucket(const DistHeapPtr& input,
+                                const float* query,
+                                int64_t topk,
+                                QueryContext& ctx,
+                                const std::optional<float>& distance_threshold) const;
+
     void
     AttachReasoningReport(const DatasetPtr& dataset_results, ReasoningContext* reasoning_ctx) const;
 
@@ -287,8 +294,9 @@ private:
     int64_t total_elements_{0};  // total inserted (incl. deleted)
     bool is_trained_{false};     // true after Train() succeeds
 
-    FlattenInterfacePtr reorder_codes_{nullptr};  // high-precision codes for reranking
-    ReorderInterfacePtr reorder_{nullptr};        // reordering engine
+    FlattenInterfacePtr reorder_codes_{nullptr};  // legacy high-precision flat codes
+    BucketInterfacePtr precise_bucket_{nullptr};  // high-precision codes mirroring basic buckets
+    ReorderInterfacePtr reorder_{nullptr};        // flat-code reordering engine
 
     std::shared_ptr<SafeThreadPool> thread_pool_{nullptr};  // for parallel bucket scans
 

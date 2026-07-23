@@ -15,6 +15,7 @@
 
 #include <cstring>
 #include <limits>
+#include <nlohmann/json.hpp>
 #include <sstream>
 
 #include "functest.h"
@@ -192,6 +193,42 @@ namespace {
 using vsag::test::EraseStreamingBlock;
 using vsag::test::InsertUnknownStreamingBlock;
 
+std::string
+GenerateBucketPreciseParameters(int buckets_per_data,
+                                const std::string& precise_io_type = "block_memory_io",
+                                const std::string& precise_file_path = "",
+                                int thread_count = 1) {
+    auto params = nlohmann::json::parse(IVFTestIndex::GenerateIVFBuildParametersString(
+        "l2", 16, "sq8,fp32", 16, "random", false, buckets_per_data, false, thread_count));
+    params["index_param"]["precise_codes_layout"] = "bucket";
+    params["index_param"]["precise_io_type"] = precise_io_type;
+    params["index_param"]["precise_file_path"] = precise_file_path;
+    return params.dump();
+}
+
+void
+CheckBucketPreciseIndex(const TestIndex::IndexPtr& index,
+                        const TestDatasetPtr& dataset,
+                        const std::string& search_param) {
+    constexpr int64_t query_id = 3;
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)
+        ->Dim(dataset->base_->GetDim())
+        ->Float32Vectors(dataset->base_->GetFloat32Vectors() + query_id * dataset->base_->GetDim())
+        ->Owner(false);
+
+    auto result = index->KnnSearch(query, 1, search_param);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() == 1);
+    REQUIRE(result.value()->GetIds()[0] == dataset->base_->GetIds()[query_id]);
+    REQUIRE(std::abs(result.value()->GetDistances()[0]) < 2e-6F);
+
+    auto distance =
+        index->CalcDistanceById(query->GetFloat32Vectors(), dataset->base_->GetIds()[query_id]);
+    REQUIRE(distance.has_value());
+    REQUIRE(std::abs(distance.value()) < 2e-6F);
+}
+
 }  // namespace
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex, "IVF GetStatus", "[ft][ivf]") {
@@ -311,7 +348,7 @@ TEST_CASE_PERSISTENT_FIXTURE(IVFTestIndex,
     auto origin_size = vsag::Options::Instance().block_size_limit();
     vsag::Options::Instance().set_block_size_limit(1024 * 1024 * 2);
 
-    auto param = IVFTestIndex::GenerateIVFBuildParametersString("l2", 16, "sq8", 32, "random");
+    auto param = IVFTestIndex::GenerateIVFBuildParametersString("l2", 16, "sq8,fp32", 32, "random");
     auto index = TestIndex::TestFactory(IVFTestIndex::name, param, true);
     auto dataset = IVFTestIndex::pool.GetDatasetAndCreate(16, 200, "l2");
     TestIndex::TestBuildIndex(index, dataset, true);
@@ -355,6 +392,96 @@ TEST_CASE_PERSISTENT_FIXTURE(IVFTestIndex,
     }
 
     vsag::Options::Instance().set_block_size_limit(origin_size);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(IVFTestIndex,
+                             "IVF bucket precise mirrors basic postings",
+                             "[ft][ivf][reorder][serialize][pr]") {
+    constexpr int64_t dim = 16;
+    constexpr int64_t base_count = 128;
+    constexpr int64_t buckets_count = 16;
+    const auto buckets_per_data = GENERATE(1, 2);
+    const auto precise_io_type = GENERATE("block_memory_io", "buffer_io");
+    INFO(fmt::format("buckets_per_data: {}", buckets_per_data));
+    INFO(fmt::format("precise_io_type: {}", precise_io_type));
+
+    const auto precise_file_path =
+        precise_io_type == std::string("buffer_io") ? dir.GenerateRandomFile(false) : std::string();
+    const auto params =
+        GenerateBucketPreciseParameters(buckets_per_data, precise_io_type, precise_file_path);
+    const auto search_param = fmt::format(search_param_tmp, buckets_count);
+    auto dataset = pool.GetDatasetAndCreate(dim, base_count, "l2");
+    auto index = TestFactory(name, params, true);
+
+    TestContinueAdd(index, dataset, true);
+    CheckBucketPreciseIndex(index, dataset, search_param);
+    TestCalcDistanceById(index, dataset, 2e-6F, true);
+    TestBatchCalcDistanceById(index, dataset, 2e-6F, true);
+
+    const auto restored_file_path =
+        precise_io_type == std::string("buffer_io") ? dir.GenerateRandomFile(false) : std::string();
+    const auto restored_params =
+        GenerateBucketPreciseParameters(buckets_per_data, precise_io_type, restored_file_path);
+    auto restored = TestFactory(name, restored_params, true);
+    TestSerializeBinarySet(index, restored, dataset, search_param, true);
+    CheckBucketPreciseIndex(restored, dataset, search_param);
+    TestCalcDistanceById(restored, dataset, 2e-6F, true);
+    TestBatchCalcDistanceById(restored, dataset, 2e-6F, true);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(IVFTestIndex,
+                             "IVF bucket precise streaming",
+                             "[ft][ivf][reorder][serialize][streaming][pr]") {
+    constexpr int64_t dim = 16;
+    constexpr int64_t base_count = 128;
+    constexpr int64_t buckets_count = 16;
+    const auto params = GenerateBucketPreciseParameters(2, "block_memory_io", "", 4);
+    const auto search_param = fmt::format(search_param_tmp, buckets_count);
+    auto dataset = pool.GetDatasetAndCreate(dim, base_count, "l2");
+    auto index = TestFactory(name, params, true);
+    TestBuildIndex(index, dataset, true);
+
+    std::stringstream stream;
+    REQUIRE(index->SerializeStreaming(stream).has_value());
+    const auto bytes = stream.str();
+
+    auto restored = TestFactory(name, params, true);
+    std::stringstream deserialize_stream(bytes);
+    REQUIRE(restored->DeserializeStreaming(deserialize_stream).has_value());
+    CheckBucketPreciseIndex(restored, dataset, search_param);
+    TestBatchCalcDistanceById(restored, dataset, 2e-6F, true);
+
+    std::stringstream load_stream(bytes);
+    auto loaded = vsag::Index::Load(load_stream, "{}");
+    REQUIRE(loaded.has_value());
+    CheckBucketPreciseIndex(loaded.value(), dataset, search_param);
+    TestBatchCalcDistanceById(loaded.value(), dataset, 2e-6F, true);
+
+    auto missing_precise =
+        EraseStreamingBlock(bytes, vsag::StreamSerializationTag::IVF_PRECISE_BUCKET);
+    auto invalid_restored = TestFactory(name, params, true);
+    std::stringstream missing_deserialize_stream(missing_precise);
+    REQUIRE_FALSE(invalid_restored->DeserializeStreaming(missing_deserialize_stream).has_value());
+    std::stringstream missing_load_stream(missing_precise);
+    REQUIRE_FALSE(vsag::Index::Load(missing_load_stream, "{}").has_value());
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(IVFTestIndex,
+                             "IVF bucket precise merge",
+                             "[ft][ivf][reorder][merge][pr]") {
+    constexpr int64_t dim = 16;
+    constexpr int64_t base_count = 128;
+    constexpr int64_t buckets_count = 16;
+    const auto params = GenerateBucketPreciseParameters(2);
+    const auto search_param = fmt::format(search_param_tmp, buckets_count);
+    auto dataset = pool.GetDatasetAndCreate(dim, base_count, "l2");
+    auto model = TestFactory(name, params, true);
+    REQUIRE(model->Train(dataset->base_).has_value());
+
+    auto merged = TestMergeIndexWithSameModel(model, dataset, 3, true);
+    CheckBucketPreciseIndex(merged, dataset, search_param);
+    TestCalcDistanceById(merged, dataset, 2e-6F, true);
+    TestBatchCalcDistanceById(merged, dataset, 2e-6F, true);
 }
 }  // namespace fixtures
 

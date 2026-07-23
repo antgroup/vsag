@@ -82,9 +82,16 @@ auto result = index->KnnSearch(
 | `fast_encode_rabitq_rounds` | int | `6` | CAQ 微调轮数，允许范围 `[1, 32]` |
 | `use_reorder` | bool | `false` | 是否保留高精度副本用于精排 |
 | `precise_quantization_type` | string | `"fp32"` | 精排量化类型（`use_reorder: true` 时使用） |
+| `precise_codes_layout` | string | `"flat"` | 精排 codes 的存储布局：`"flat"` 保持旧的一向量一码布局；`"bucket"` 为 basic 的每个 posting 在相同 bucket 和 offset 保存一份高精度 code |
 | `base_io_type` | string | `"memory_io"` | 粗排向量的存储后端；以 liburing 构建时支持 `uring_io` |
 | `precise_io_type` | string | `"block_memory_io"` | 精排向量的存储后端（`memory_io`、`block_memory_io`、`mmap_io`、`buffer_io`、`async_io`、`uring_io`、`reader_io`） |
 | `precise_file_path` | string | `""` | 当精排 IO 为磁盘后端时的文件路径 |
+
+`precise_codes_layout: "bucket"` 要求 `use_reorder: true`，支持 `memory_io`、
+`block_memory_io`、`mmap_io`、`buffer_io`、`async_io` 和 `uring_io`
+（需要构建环境支持 io_uring），不支持
+`reader_io` 和 `pqfs` 精排量化。当 `buckets_per_data` 大于 1 时，每个 basic posting
+都会保存一份高精度向量，从而保持完全相同的 bucket-offset 对齐，同时占用相应倍数的存储空间。
 
 `buckets_count` 的经验值一般为 `sqrt(N)` ~ `4 * sqrt(N)`，其中 `N` 是语料规模。
 

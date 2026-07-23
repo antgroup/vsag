@@ -26,6 +26,30 @@ void
 IVFParameter::FromJson(const JsonType& json) {
     InnerIndexParameter::FromJson(json);
 
+    this->precise_codes_layout = PRECISE_CODES_LAYOUT_VALUE_FLAT;
+    if (json.Contains(PRECISE_CODES_LAYOUT_KEY)) {
+        this->precise_codes_layout = json[PRECISE_CODES_LAYOUT_KEY].GetString();
+    }
+    CHECK_ARGUMENT(
+        this->precise_codes_layout == PRECISE_CODES_LAYOUT_VALUE_FLAT ||
+            this->precise_codes_layout == PRECISE_CODES_LAYOUT_VALUE_BUCKET,
+        fmt::format("invalid precise_codes_layout: {}, supported values are \"{}\" and \"{}\"",
+                    this->precise_codes_layout,
+                    PRECISE_CODES_LAYOUT_VALUE_FLAT,
+                    PRECISE_CODES_LAYOUT_VALUE_BUCKET));
+
+    if (this->precise_codes_layout == PRECISE_CODES_LAYOUT_VALUE_BUCKET) {
+        CHECK_ARGUMENT(this->use_reorder, "precise_codes_layout=bucket requires use_reorder=true");
+        CHECK_ARGUMENT(this->reorder_source == HGRAPH_REORDER_SOURCE_PRECISE,
+                       "precise_codes_layout=bucket requires reorder_source=precise");
+        CHECK_ARGUMENT(this->precise_codes_param != nullptr &&
+                           this->precise_codes_param->name == FLATTEN_DATA_CELL,
+                       "precise_codes_layout=bucket requires ordinary flatten precise_codes");
+        CHECK_ARGUMENT(this->precise_codes_param->quantizer_parameter->GetTypeName() !=
+                           QUANTIZATION_TYPE_VALUE_PQFS,
+                       "precise_codes_layout=bucket does not support pqfs precise quantization");
+    }
+
     if (json.Contains(BUCKET_PER_DATA_KEY)) {
         this->buckets_per_data = static_cast<BucketIdType>(json[BUCKET_PER_DATA_KEY].GetInt());
     }
@@ -77,6 +101,7 @@ IVFParameter::ToJson() const {
     json[BUCKET_PARAMS_KEY].SetJson(this->bucket_param->ToJson());
     json[IVF_PARTITION_STRATEGY_PARAMS_KEY].SetJson(
         this->ivf_partition_strategy_parameter->ToJson());
+    json[PRECISE_CODES_LAYOUT_KEY].SetString(this->precise_codes_layout);
     json[BUCKET_PER_DATA_KEY].SetInt(this->buckets_per_data);
     json[GRAPH_BUILD_THRESHOLD_KEY].SetInt(this->graph_build_threshold);
     return json;
@@ -87,6 +112,7 @@ IVFParameter::CheckCompatibility(const ParamPtr& other) const {
         return false;
     }
     PARAM_CAST_OR_RETURN(IVFParameter, p, other);
+    CHECK_FIELD_EQ(*this, *p, precise_codes_layout);
     CHECK_FIELD_EQ(*this, *p, buckets_per_data);
     CHECK_FIELD_EQ(*this, *p, graph_build_threshold);
     CHECK_SUB_PARAM(*this, *p, bucket_param);

@@ -32,6 +32,7 @@ struct IVFDefaultParam {
     bool use_reorder = true;
     std::string precise_codes_io_type = "block_memory_io";
     std::string precise_codes_quantization_type = "fp32";
+    std::string precise_codes_layout = "flat";
     std::string partition_strategy_type = "ivf";
     std::string ivf_train_type = "kmeans";
     int buckets_per_data = 1;
@@ -54,6 +55,7 @@ generate_ivf_param(const IVFDefaultParam& param) {
             "use_residual": {}
         }},
         "use_reorder": {},
+        "precise_codes_layout": "{}",
         "partition_strategy": {{
             "partition_strategy_type": "{}",
             "ivf_train_type": "{}",
@@ -79,6 +81,7 @@ generate_ivf_param(const IVFDefaultParam& param) {
                        param.buckets_count,
                        param.use_residual,
                        param.use_reorder,
+                       param.precise_codes_layout,
                        param.partition_strategy_type,
                        param.ivf_train_type,
                        param.precise_codes_io_type,
@@ -103,6 +106,7 @@ TEST_CASE("IVF Parameters Test", "[ut][IVFParameter]") {
     REQUIRE(param->use_reorder == true);
     REQUIRE(param->build_thread_count == 3);
     REQUIRE(param->precise_codes_param->quantizer_parameter->GetTypeName() == "fp32");
+    REQUIRE(param->precise_codes_layout == "flat");
     REQUIRE(param->train_sample_count == 65536L);
 
     index_param.ivf_train_type = "random";
@@ -145,6 +149,83 @@ TEST_CASE("IVF Parameters Test", "[ut][IVFParameter]") {
     search_param = vsag::IVFSearchParameters::FromJson(param_str);
     REQUIRE(search_param.scan_buckets_count == 20);
     REQUIRE(search_param.first_order_scan_ratio == 0.1f);
+}
+
+TEST_CASE("IVF precise codes layout parameter", "[ut][IVFParameter]") {
+    SECTION("missing layout defaults to flat") {
+        IVFDefaultParam index_param;
+        auto param_json = vsag::JsonType::Parse(generate_ivf_param(index_param));
+        param_json.Erase(vsag::PRECISE_CODES_LAYOUT_KEY);
+
+        auto param = std::make_shared<vsag::IVFParameter>();
+        param->FromJson(param_json);
+
+        REQUIRE(param->precise_codes_layout == vsag::PRECISE_CODES_LAYOUT_VALUE_FLAT);
+        REQUIRE(param->ToJson()[vsag::PRECISE_CODES_LAYOUT_KEY].GetString() ==
+                vsag::PRECISE_CODES_LAYOUT_VALUE_FLAT);
+    }
+
+    SECTION("bucket layout supports multiple postings per data") {
+        IVFDefaultParam index_param;
+        index_param.precise_codes_layout = "bucket";
+        index_param.buckets_per_data = 3;
+
+        auto param = std::make_shared<vsag::IVFParameter>();
+        param->FromString(generate_ivf_param(index_param));
+
+        REQUIRE(param->precise_codes_layout == vsag::PRECISE_CODES_LAYOUT_VALUE_BUCKET);
+        REQUIRE(param->buckets_per_data == 3);
+        vsag::ParameterTest::TestToJson(param);
+    }
+
+    SECTION("reject invalid layout") {
+        IVFDefaultParam index_param;
+        index_param.precise_codes_layout = "invalid";
+        auto param = std::make_shared<vsag::IVFParameter>();
+        REQUIRE_THROWS(param->FromString(generate_ivf_param(index_param)));
+    }
+
+    SECTION("bucket layout requires reorder") {
+        IVFDefaultParam index_param;
+        index_param.precise_codes_layout = "bucket";
+        index_param.use_reorder = false;
+        auto param = std::make_shared<vsag::IVFParameter>();
+        REQUIRE_THROWS(param->FromString(generate_ivf_param(index_param)));
+    }
+
+    SECTION("bucket layout requires precise reorder source") {
+        IVFDefaultParam index_param;
+        index_param.precise_codes_layout = "bucket";
+        auto param_json = vsag::JsonType::Parse(generate_ivf_param(index_param));
+        param_json[vsag::REORDER_SOURCE_KEY].SetString(vsag::HGRAPH_REORDER_SOURCE_BASE);
+
+        auto param = std::make_shared<vsag::IVFParameter>();
+        REQUIRE_THROWS(param->FromJson(param_json));
+    }
+
+    SECTION("bucket layout requires ordinary flatten precise codes") {
+        IVFDefaultParam index_param;
+        index_param.precise_codes_layout = "bucket";
+        auto param_json = vsag::JsonType::Parse(generate_ivf_param(index_param));
+        param_json[vsag::PRECISE_CODES_KEY][vsag::CODES_TYPE_KEY].SetString(
+            vsag::RABITQ_SPLIT_CODES);
+        param_json[vsag::PRECISE_CODES_KEY][vsag::QUANTIZATION_PARAMS_KEY][vsag::TYPE_KEY]
+            .SetString(vsag::QUANTIZATION_TYPE_VALUE_RABITQ);
+
+        auto param = std::make_shared<vsag::IVFParameter>();
+        REQUIRE_THROWS(param->FromJson(param_json));
+    }
+
+    SECTION("bucket layout rejects pqfs") {
+        IVFDefaultParam index_param;
+        index_param.precise_codes_layout = "bucket";
+        auto param_json = vsag::JsonType::Parse(generate_ivf_param(index_param));
+        param_json[vsag::PRECISE_CODES_KEY][vsag::QUANTIZATION_PARAMS_KEY][vsag::TYPE_KEY]
+            .SetString(vsag::QUANTIZATION_TYPE_VALUE_PQFS);
+
+        auto param = std::make_shared<vsag::IVFParameter>();
+        REQUIRE_THROWS(param->FromJson(param_json));
+    }
 }
 
 TEST_CASE("IVF maps RabitQ external parameters", "[ut][IVFParameter]") {
@@ -207,6 +288,20 @@ TEST_CASE("IVF Parameters CheckCompatibility", "[ut][IVFParameter][CheckCompatib
         REQUIRE_FALSE(param->CheckCompatibility(std::make_shared<vsag::EmptyParameter>()));
     }
 
+    SECTION("missing layout is compatible with explicit flat layout") {
+        IVFDefaultParam index_param;
+        auto legacy_json = vsag::JsonType::Parse(generate_ivf_param(index_param));
+        legacy_json.Erase(vsag::PRECISE_CODES_LAYOUT_KEY);
+
+        auto legacy_param = std::make_shared<vsag::IVFParameter>();
+        legacy_param->FromJson(legacy_json);
+        auto explicit_flat_param = std::make_shared<vsag::IVFParameter>();
+        explicit_flat_param->FromString(generate_ivf_param(index_param));
+
+        REQUIRE(legacy_param->CheckCompatibility(explicit_flat_param));
+        REQUIRE(explicit_flat_param->CheckCompatibility(legacy_param));
+    }
+
     TEST_COMPATIBILITY_CASE("ivf buckets_count", buckets_count, 3, 4, false);
     TEST_COMPATIBILITY_CASE(
         "ivf bucket io type", buckect_io_type, "block_memory_io", "memory_io", true);
@@ -224,6 +319,8 @@ TEST_CASE("IVF Parameters CheckCompatibility", "[ut][IVFParameter][CheckCompatib
     TEST_COMPATIBILITY_CASE(
         "ivf partition_strategy_type", partition_strategy_type, "ivf", "gno_imi", false);
     TEST_COMPATIBILITY_CASE("ivf ivf_train_type", ivf_train_type, "kmeans", "random", true);
+    TEST_COMPATIBILITY_CASE(
+        "ivf precise_codes_layout", precise_codes_layout, "flat", "bucket", false);
     TEST_COMPATIBILITY_CASE("ivf buckets_per_data", buckets_per_data, 3, 2, false);
     TEST_COMPATIBILITY_CASE("ivf use_attribute_filter", use_attribute_filter, true, false, false);
 }
