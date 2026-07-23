@@ -3164,6 +3164,15 @@ TEST_CASE("(PR) HGraph brute_force_threshold default is no-op",
         REQUIRE(std::abs(baseline.value()->GetDistances()[k] -
                          with_zero.value()->GetDistances()[k]) < 1e-6F);
     }
+
+    auto large_ef = index->KnnSearch(query, topk, R"({"hgraph": {"ef_search": 1001}})");
+    REQUIRE(large_ef.has_value());
+    REQUIRE(large_ef.value()->GetDim() == topk);
+
+    auto zero_ef = index->KnnSearch(query, topk, R"({"hgraph": {"ef_search": 0}})");
+    auto negative_ef = index->KnnSearch(query, topk, R"({"hgraph": {"ef_search": -1}})");
+    REQUIRE_FALSE(zero_ef.has_value());
+    REQUIRE_FALSE(negative_ef.has_value());
 }
 
 TEST_CASE("HGraph ExportCache + ImportCache + Build acceleration smoke test",

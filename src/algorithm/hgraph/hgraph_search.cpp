@@ -77,10 +77,9 @@ HGraph::KnnSearch(const DatasetPtr& query,
 
     auto params = HGraphSearchParameters::FromJson(parameters);
     ctx.rabitq_error_rate = params.rabitq_error_rate;
-    auto ef_search_threshold = std::max<int64_t>(AMPLIFICATION_FACTOR * k, 1000);
     CHECK_ARGUMENT(  // NOLINT
-        (1 <= params.ef_search) and (params.ef_search <= ef_search_threshold),
-        fmt::format("ef_search({}) must in range[1, {}]", params.ef_search, ef_search_threshold));
+        params.ef_search >= 1,
+        fmt::format("ef_search({}) must be at least 1", params.ef_search));
 
     std::shared_lock<std::shared_mutex> force_remove_rlock;
     std::shared_lock<std::shared_mutex> shared_lock;
@@ -390,10 +389,9 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     auto params = HGraphSearchParameters::FromJson(request.params_str_);
     ctx.rabitq_error_rate = params.rabitq_error_rate;
 
-    auto ef_search_threshold = std::max<int64_t>(AMPLIFICATION_FACTOR * k, 1000);
     CHECK_ARGUMENT(  // NOLINT
-        (1 <= params.ef_search) and (params.ef_search <= ef_search_threshold),
-        fmt::format("ef_search({}) must in range[1, {}]", params.ef_search, ef_search_threshold));
+        params.ef_search >= 1,
+        fmt::format("ef_search({}) must be at least 1", params.ef_search));
 
     std::shared_lock<std::shared_mutex> force_remove_rlock;
     std::shared_lock<std::shared_mutex> shared_lock;
@@ -500,7 +498,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         }
         search_param.parallel_search_thread_count = params.parallel_search_thread_count;
 
-        if (params.hops_limit <= static_cast<uint32_t>(params.ef_search)) {
+        if (static_cast<uint64_t>(params.hops_limit) <= static_cast<uint64_t>(params.ef_search)) {
             search_param.hops_limit = std::numeric_limits<uint32_t>::max();
             if (params.hops_limit != std::numeric_limits<uint32_t>::max()) {
                 logger::warn(fmt::format(
