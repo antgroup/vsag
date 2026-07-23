@@ -217,6 +217,14 @@ public:
         }
     }
 
+    bool
+    RemoveDuplicateId(InnerIdType duplicate_id) {
+        if (duplicate_tracker_) {
+            return duplicate_tracker_->RemoveDuplicateId(duplicate_id);
+        }
+        return false;
+    }
+
     std::vector<InnerIdType>
     GetDuplicateIds(InnerIdType id) const {
         if (duplicate_tracker_) {

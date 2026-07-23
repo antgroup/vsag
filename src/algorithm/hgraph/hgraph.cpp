@@ -613,6 +613,12 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
     void* new_base_vec = nullptr;
     uint64_t data_size = 0;
     get_vectors(data_type_, dim_, new_base, &new_base_vec, &data_size);
+    std::vector<InnerIdType> duplicate_ids;
+    bool was_duplicate_member = false;
+    if (this->support_duplicate_) {
+        duplicate_ids = this->bottom_graph_->GetDuplicateIds(inner_id);
+        was_duplicate_member = this->bottom_graph_->GetGroupId(inner_id) != inner_id;
+    }
 
     if (not force_update) {
         std::shared_lock label_lock(this->label_lookup_mutex_);
@@ -652,10 +658,32 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
 
     // note that only modify vector need to obtain unique lock
     // and the lock has been obtained inside datacell
-    auto codes = (has_precise_reorder()) ? high_precise_codes_ : basic_flatten_codes_;
     bool update_status = basic_flatten_codes_->UpdateVector(new_base_vec, inner_id);
     if (has_precise_reorder()) {
         update_status = update_status && high_precise_codes_->UpdateVector(new_base_vec, inner_id);
+    }
+    if (create_new_raw_vector_ && raw_vector_ != nullptr) {
+        update_status = update_status && raw_vector_->UpdateVector(new_base_vec, inner_id);
+    }
+    if (not update_status) {
+        return false;
+    }
+    if (was_duplicate_member) {
+        if (not this->bottom_graph_->RemoveDuplicateId(inner_id)) {
+            return false;
+        }
+        std::shared_lock rlock(this->global_mutex_);
+        this->graph_add_one(new_base_vec, -1, inner_id);
+    } else if (not duplicate_ids.empty()) {
+        for (const auto duplicate_id : duplicate_ids) {
+            Vector<int8_t> duplicate_data(data_size, allocator_);
+            GetVectorByInnerId(duplicate_id, (float*)duplicate_data.data());
+            if (not this->bottom_graph_->RemoveDuplicateId(duplicate_id)) {
+                return false;
+            }
+            std::shared_lock rlock(this->global_mutex_);
+            this->graph_add_one(duplicate_data.data(), -1, duplicate_id);
+        }
     }
     return update_status;
 }

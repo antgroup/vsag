@@ -79,6 +79,29 @@ TEST_CASE("SparseDuplicateTracker ignores duplicate reinsertion", "[ut][SparseDu
     REQUIRE(tracker.GetDuplicateIds(0) == std::vector<InnerIdType>{1});
 }
 
+TEST_CASE("SparseDuplicateTracker removes duplicate ids", "[ut][SparseDuplicateTracker]") {
+    auto allocator = std::make_shared<DefaultAllocator>();
+    SparseDuplicateTracker tracker(allocator.get());
+
+    tracker.SetDuplicateId(0, 1);
+    tracker.SetDuplicateId(0, 2);
+    tracker.SetDuplicateId(3, 4);
+
+    REQUIRE(tracker.RemoveDuplicateId(1));
+    REQUIRE(sorted_duplicates(tracker.GetDuplicateIds(0)) == std::vector<InnerIdType>{2});
+    REQUIRE(tracker.GetDuplicateIds(1).empty());
+    REQUIRE(tracker.GetGroupId(1) == 1);
+    REQUIRE(tracker.GetGroupId(2) == 0);
+
+    REQUIRE(tracker.RemoveDuplicateId(2));
+    REQUIRE(tracker.GetDuplicateIds(0).empty());
+    REQUIRE(tracker.GetGroupId(2) == 2);
+
+    REQUIRE(tracker.RemoveDuplicateId(4));
+    REQUIRE(tracker.GetDuplicateIds(3).empty());
+    REQUIRE_FALSE(tracker.RemoveDuplicateId(5));
+}
+
 TEST_CASE("SparseDuplicateTracker serialize and deserialize", "[ut][SparseDuplicateTracker]") {
     auto allocator = std::make_shared<DefaultAllocator>();
     SparseDuplicateTracker tracker(allocator.get());
