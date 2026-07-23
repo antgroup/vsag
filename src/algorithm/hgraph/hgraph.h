@@ -597,6 +597,7 @@ private:
     float alpha_{1.0};            // Relative Neighborhood Graph pruning coefficient
 
     std::shared_ptr<VisitedListPool> pool_{nullptr};  // pool of visited-lists for search
+    static constexpr uint64_t MAX_CACHED_VISITED_LIST_COUNT_PER_SUB_POOL = 1;
 
     mutable std::shared_mutex global_mutex_;        // guards total_count_, entry_point_id_
     mutable MutexArrayPtr neighbors_mutex_;         // per-node locks for neighbor lists

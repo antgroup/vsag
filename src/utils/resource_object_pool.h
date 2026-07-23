@@ -18,6 +18,7 @@
 #include <atomic>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -95,8 +96,22 @@ public:
     void
     ReturnOne(std::shared_ptr<T>& obj) {
         auto pool_id = obj->source_pool_id_;
-        std::lock_guard<std::mutex> lock(sub_pool_mutexes_[pool_id]);
-        pool_[pool_id]->emplace_back(obj);
+        {
+            std::lock_guard<std::mutex> lock(sub_pool_mutexes_[pool_id]);
+            if (pool_[pool_id]->size() < max_cached_object_count_per_sub_pool_) {
+                pool_[pool_id]->emplace_back(obj);
+                return;
+            }
+        }
+
+        auto object_memory_usage = obj->GetMemoryUsage();
+        obj.reset();
+        memory_usage_.fetch_sub(object_memory_usage, std::memory_order_relaxed);
+    }
+
+    void
+    SetMaxCachedObjectCountPerSubPool(uint64_t max_cached_object_count) {
+        max_cached_object_count_per_sub_pool_ = max_cached_object_count;
     }
 
     inline int64_t
@@ -119,6 +134,7 @@ private:
     uint64_t init_size_{0};
 
     std::atomic<int64_t> memory_usage_{0};
+    uint64_t max_cached_object_count_per_sub_pool_{std::numeric_limits<uint64_t>::max()};
 
     ConstructFuncType constructor_{nullptr};
     Allocator* allocator_{nullptr};

@@ -225,3 +225,22 @@ TEST_CASE("VisitedListPool Basic Test", "[ut][VisitedListPool]") {
         }
     }
 }
+
+TEST_CASE("VisitedListPool releases objects above the cache limit", "[ut][VisitedListPool]") {
+    auto allocator = std::make_shared<DefaultAllocator>();
+    auto pool = std::make_shared<VisitedListPool>(0, allocator.get(), 1000, allocator.get());
+    pool->SetMaxCachedObjectCountPerSubPool(1);
+    auto initial_memory_usage = pool->GetMemoryUsage();
+
+    std::vector<std::shared_ptr<VisitedList>> visited_lists;
+    for (uint64_t i = 0; i < 3; ++i) {
+        visited_lists.emplace_back(pool->TakeOne());
+    }
+    REQUIRE(pool->GetMemoryUsage() > initial_memory_usage);
+    auto object_memory_usage = visited_lists.front()->GetMemoryUsage();
+
+    for (auto& visited_list : visited_lists) {
+        pool->ReturnOne(visited_list);
+    }
+    REQUIRE(pool->GetMemoryUsage() == initial_memory_usage + object_memory_usage);
+}

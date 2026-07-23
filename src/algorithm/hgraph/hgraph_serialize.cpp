@@ -752,6 +752,7 @@ HGraph::read_streaming_body(StreamReader& reader,
     auto new_size = max_capacity_.load();
     this->neighbors_mutex_->Resize(new_size);
     pool_ = std::make_shared<VisitedListPool>(1, allocator_, new_size, allocator_);
+    pool_->SetMaxCachedObjectCountPerSubPool(MAX_CACHED_VISITED_LIST_COUNT_PER_SUB_POOL);
     this->total_count_ = this->basic_flatten_codes_->TotalCount();
     if (this->raw_vector_ != nullptr) {
         this->has_raw_vector_ = true;
@@ -786,6 +787,7 @@ HGraph::Deserialize(StreamReader& reader) {
         this->neighbors_mutex_->Resize(new_size);
 
         pool_ = std::make_shared<VisitedListPool>(1, allocator_, new_size, allocator_);
+        pool_->SetMaxCachedObjectCountPerSubPool(MAX_CACHED_VISITED_LIST_COUNT_PER_SUB_POOL);
 
         if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
             this->extra_infos_->Deserialize(reader);
@@ -826,6 +828,7 @@ HGraph::Deserialize(StreamReader& reader) {
         this->neighbors_mutex_->Resize(new_size);
 
         pool_ = std::make_shared<VisitedListPool>(1, allocator_, new_size, allocator_);
+        pool_->SetMaxCachedObjectCountPerSubPool(MAX_CACHED_VISITED_LIST_COUNT_PER_SUB_POOL);
 
         if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
             this->extra_infos_->Deserialize(buffer_reader);

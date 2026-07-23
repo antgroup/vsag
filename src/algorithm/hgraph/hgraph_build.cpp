@@ -574,6 +574,7 @@ HGraph::resize(uint64_t new_size) {
     if (cur_size < new_size_power_2) {
         this->neighbors_mutex_->Resize(new_size_power_2);
         pool_ = std::make_shared<VisitedListPool>(1, allocator_, new_size_power_2, allocator_);
+        pool_->SetMaxCachedObjectCountPerSubPool(MAX_CACHED_VISITED_LIST_COUNT_PER_SUB_POOL);
         this->label_table_->Resize(new_size_power_2);
         bottom_graph_->Resize(new_size_power_2);
         this->basic_flatten_codes_->Resize(new_size_power_2);
