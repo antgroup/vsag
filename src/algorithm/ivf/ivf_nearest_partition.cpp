@@ -174,7 +174,20 @@ IVFNearestPartition::GetCentroid(BucketIdType bucket_id, Vector<float>& centroid
 
 [[nodiscard]] uint64_t
 IVFNearestPartition::GetMemoryUsage() const {
-    return static_cast<uint64_t>(sizeof(IVFNearestPartition) +
-                                 this->route_index_ptr_->GetMemoryUsage());
+    uint64_t memory = sizeof(IVFNearestPartition);
+    if (this->route_index_ptr_ != nullptr) {
+        memory += this->route_index_ptr_->GetMemoryUsage();
+    }
+    return memory;
+}
+
+[[nodiscard]] uint64_t
+IVFNearestPartition::EstimateMemory(uint64_t num_elements) const {
+    (void)num_elements;
+    uint64_t memory = sizeof(IVFNearestPartition);
+    if (this->route_index_ptr_ != nullptr) {
+        memory += this->route_index_ptr_->EstimateMemory(bucket_count_);
+    }
+    return memory;
 }
 }  // namespace vsag

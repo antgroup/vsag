@@ -95,6 +95,16 @@ public:
         return 0;
     }
 
+    virtual uint64_t
+    EstimateMemory(uint64_t num_elements) const {
+        (void)num_elements;
+        auto memory = GetMemoryUsage();
+        if (memory <= 0) {
+            return 0;
+        }
+        return static_cast<uint64_t>(memory);
+    }
+
 public:
     bool is_trained_{false};
 
