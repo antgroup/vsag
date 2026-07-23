@@ -19,28 +19,28 @@
 namespace vsag {
 
 FlattenInterfacePtr
-MakeRaBitQSplitDataCellL2(const FlattenInterfaceParamPtr& param,
-                          const IndexCommonParam& common_param);
+make_ra_bit_q_split_data_cell_l2(const FlattenInterfaceParamPtr& param,
+                                 const IndexCommonParam& common_param);
 
 FlattenInterfacePtr
-MakeRaBitQSplitDataCellIP(const FlattenInterfaceParamPtr& param,
-                          const IndexCommonParam& common_param);
+make_ra_bit_q_split_data_cell_ip(const FlattenInterfaceParamPtr& param,
+                                 const IndexCommonParam& common_param);
 
 FlattenInterfacePtr
-MakeRaBitQSplitDataCellCosine(const FlattenInterfaceParamPtr& param,
-                              const IndexCommonParam& common_param);
+make_ra_bit_q_split_data_cell_cosine(const FlattenInterfaceParamPtr& param,
+                                     const IndexCommonParam& common_param);
 
 FlattenInterfacePtr
 MakeRaBitQSplitDataCell(const FlattenInterfaceParamPtr& param,
                         const IndexCommonParam& common_param) {
     if (common_param.metric_ == MetricType::METRIC_TYPE_L2SQR) {
-        return MakeRaBitQSplitDataCellL2(param, common_param);
+        return make_ra_bit_q_split_data_cell_l2(param, common_param);
     }
     if (common_param.metric_ == MetricType::METRIC_TYPE_IP) {
-        return MakeRaBitQSplitDataCellIP(param, common_param);
+        return make_ra_bit_q_split_data_cell_ip(param, common_param);
     }
     if (common_param.metric_ == MetricType::METRIC_TYPE_COSINE) {
-        return MakeRaBitQSplitDataCellCosine(param, common_param);
+        return make_ra_bit_q_split_data_cell_cosine(param, common_param);
     }
     return nullptr;
 }

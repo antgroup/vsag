@@ -17,8 +17,8 @@
 namespace vsag {
 
 FlattenInterfacePtr
-MakeRaBitQSplitDataCellCosine(const FlattenInterfaceParamPtr& param,
-                              const IndexCommonParam& common_param) {
+make_ra_bit_q_split_data_cell_cosine(const FlattenInterfaceParamPtr& param,
+                                     const IndexCommonParam& common_param) {
     return MakeRaBitQSplitDataCellForMetric<MetricType::METRIC_TYPE_COSINE>(param, common_param);
 }
 

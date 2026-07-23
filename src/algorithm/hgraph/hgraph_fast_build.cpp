@@ -24,7 +24,7 @@ namespace vsag {
 namespace {
 
 void
-WaitAllFutures(std::vector<std::future<void>>& futures) {
+wait_all_futures(std::vector<std::future<void>>& futures) {
     std::exception_ptr first_exception = nullptr;
     for (auto& future : futures) {
         if (not future.valid()) {
@@ -98,7 +98,7 @@ HGraphFastBuildTaskGuard::~HGraphFastBuildTaskGuard() {
         return;
     }
     try {
-        WaitAllFutures(futures_);
+        wait_all_futures(futures_);
     } catch (...) {
     }
 }
@@ -118,13 +118,15 @@ HGraph::prepare_optimized_build_codes(const DatasetPtr& data,
         return;
     }
 
-    for (const auto& [inner_id, local_idx] : inner_ids) {
+    for (const auto& inner_id_and_local_idx : inner_ids) {
+        const auto inner_id = inner_id_and_local_idx.first;
+        const auto local_idx = inner_id_and_local_idx.second;
         futures.emplace_back(
             this->thread_pool_->GeneralEnqueue([this, data, inner_id, local_idx]() {
                 this->insert_persistent_codes(get_data(data, local_idx), inner_id);
             }));
     }
-    WaitAllFutures(futures);
+    wait_all_futures(futures);
     futures.clear();
 }
 

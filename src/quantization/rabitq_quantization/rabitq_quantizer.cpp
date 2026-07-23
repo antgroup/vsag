@@ -399,7 +399,7 @@ RaBitQuantizer<metric>::RaBitQFloatSQIPBySplitCode(const float* query,
             filter_bits == 2 ? RaBitQFloatTwoBitCenteredIP(query, filter_code, this->dim_)
                              : RaBitQFloatThreeBitCenteredIP(query, filter_code, this->dim_);
         const float filter_center = 0.5F * static_cast<float>((1U << filter_bits) - 1U);
-        const float filter_scale = static_cast<float>(1U << supplement_bits);
+        const auto filter_scale = static_cast<float>(1U << supplement_bits);
         const float supplement_ip =
             RaBitQFloatSupplementCodeIP(query, supplement_code, this->dim_, supplement_bits);
         return filter_scale * (centered_filter_ip + filter_center * query_sum) + supplement_ip;
@@ -844,7 +844,7 @@ RaBitQuantizer<metric>::EncodeOneInternal(const float* data,
                 metadata_field(offset_low_bound_error_), &low_bound_error, sizeof(low_bound_error));
         }
         if (num_bits_per_dim_query_ != 32) {
-            const sum_type sum = static_cast<sum_type>(binary_sum);
+            const auto sum = static_cast<sum_type>(binary_sum);
             memcpy(metadata_field(offset_sum_), &sum, sizeof(sum));
         }
     }
@@ -1925,7 +1925,7 @@ RaBitQuantizer<metric>::ComputeScalarCodesDistance(const uint8_t* scalar_code1,
                                                    const uint8_t* scalar_code2,
                                                    uint64_t code_sum2) const {
     const uint64_t raw_dot = RaBitQCodeCodeIP(scalar_code1, scalar_code2, this->dim_);
-    const double max_code = static_cast<double>((1U << num_bits_per_dim_base_) - 1U);
+    const auto max_code = static_cast<double>((1U << num_bits_per_dim_base_) - 1U);
     const double centered_dot = static_cast<double>(raw_dot) -
                                 0.5 * max_code * static_cast<double>(code_sum1 + code_sum2) +
                                 0.25 * static_cast<double>(this->dim_) * max_code * max_code;
