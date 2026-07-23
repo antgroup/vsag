@@ -124,7 +124,7 @@ map_rabitq_split_param(const JsonType& external_json, JsonType& inner_json) {
 
 const static float RADIUS_EPSILON = 1.1F;
 constexpr const char* PYRAMID_RAW_VECTOR_SIZE = "raw_vector_size";
-constexpr uint64_t RAW_VECTOR_COPY_BUFFER_SIZE = 1024 * 1024;
+constexpr uint64_t RAW_VECTOR_COPY_BUFFER_SIZE = uint64_t{1024} * 1024;
 
 std::vector<std::string>
 split(const std::string& str, char delimiter) {
@@ -1812,7 +1812,9 @@ Pyramid::check_and_init_raw_vector(const FlattenInterfaceParamPtr& raw_vector_pa
 
     CHECK_ARGUMENT(raw_vector_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32,
                    "Pyramid raw vector storage must use fp32 quantization");
-    CHECK_ARGUMENT(metric_ != MetricType::METRIC_TYPE_COSINE || raw_vector_->HoldMolds(),
+    const bool valid_cosine_raw_vector =
+        metric_ != MetricType::METRIC_TYPE_COSINE || raw_vector_->HoldMolds();
+    CHECK_ARGUMENT(valid_cosine_raw_vector,
                    "Pyramid cosine raw vector storage must preserve vector molds");
     has_raw_vector_ = raw_vector_ != nullptr;
 }
