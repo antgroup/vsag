@@ -35,6 +35,7 @@
 #include "quantization/fp32_quantizer_parameter.h"
 #include "storage/empty_index_binary_set.h"
 #include "storage/serialization.h"
+#include "utils/search_threshold.h"
 #include "utils/slow_task_timer.h"
 #include "utils/timer.h"
 #include "vsag/constants.h"
@@ -554,7 +555,10 @@ DiskANN::knn_search(const DatasetPtr& query,
         }
 
         result->NumElements(query_num)->Dim(k)->Distances(distances.release())->Ids(ids.release());
-        return std::move(result);
+        auto threshold = ParseSearchThreshold(parameters);
+        CHECK_ARGUMENT(not threshold.has_value() or query_num == 1,
+                       "threshold filtering requires a single query");
+        return FilterDatasetByThreshold(result, threshold, nullptr);
     } catch (const std::invalid_argument& e) {
         LOG_ERROR_AND_RETURNS(ErrorType::INVALID_ARGUMENT,
                               "failed to perform knn_search(invalid argument): ",

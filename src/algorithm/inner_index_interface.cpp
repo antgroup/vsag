@@ -942,6 +942,17 @@ InnerIndexInterface::pack_knn_result(DistHeapPtr& heap, Allocator* allocator) co
     return std::move(dataset_results);
 }
 
+void
+InnerIndexInterface::filter_search_result_by_threshold(DistHeapPtr& result,
+                                                       const std::optional<float>& threshold) {
+    if (not threshold.has_value() or result == nullptr) {
+        return;
+    }
+    while (not result->Empty() and result->Top().first > threshold.value()) {
+        result->Pop();
+    }
+}
+
 DatasetPtr
 InnerIndexInterface::pack_knn_result_with_extra_info(DistHeapPtr& heap,
                                                      Allocator* allocator) const {

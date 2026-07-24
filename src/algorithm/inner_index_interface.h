@@ -578,6 +578,9 @@ protected:
     void
     validate_range_args(const DatasetPtr& query, float radius, int64_t limited_size) const;
 
+    static void
+    filter_search_result_by_threshold(DistHeapPtr& result, const std::optional<float>& threshold);
+
 public:
     LabelTablePtr label_table_{nullptr};
     mutable std::shared_mutex label_lookup_mutex_{};  // lock for label_lookup_ & labels_

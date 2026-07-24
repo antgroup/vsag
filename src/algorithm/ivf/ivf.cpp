@@ -43,6 +43,7 @@
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "storage/tlv_section.h"
+#include "utils/search_threshold.h"
 #include "utils/util_functions.h"
 #include "vsag_exception.h"
 
@@ -565,6 +566,7 @@ IVF::KnnSearch(const DatasetPtr& query,
     req.query_ = query;
     req.topk_ = k;
     req.params_str_ = parameters;
+    req.threshold_ = ParseSearchThreshold(parameters);
     if (filter != nullptr) {
         req.filter_ = filter;
     }
@@ -1282,6 +1284,7 @@ IVF::check_merge_illegal(const vsag::MergeUnit& unit) const {
 
 DatasetPtr
 IVF::SearchWithRequest(const SearchRequest& request) const {
+    ValidateSearchThreshold(request.threshold_);
     SearchStatistics stats;
     QueryContext ctx{.alloc = request.search_allocator_, .stats = &stats};
 
@@ -1383,18 +1386,23 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
             param.factor > 0.0F,
             fmt::format("factor must be positive when use_reorder is true, got {}", param.factor));
         param.topk = static_cast<int64_t>(param.factor * static_cast<float>(request.topk_));
+        if (request.threshold_.has_value()) {
+            param.topk = std::max(param.topk, request.topk_);
+        }
     }
     auto search_result = this->search<KNN_SEARCH>(query, param, ctx, reasoning_ctx.get());
     if (use_reorder_ and param.enable_reorder) {
-        auto result = reorder(request.topk_,
+        auto result = reorder(request.threshold_.has_value() ? param.topk : request.topk_,
                               search_result,
                               query->GetFloat32Vectors(),
                               param,
                               ctx,
                               reasoning_ctx.get());
+        result = FilterDatasetByThreshold(result, request.threshold_, ctx.alloc, request.topk_);
         result->Statistics(stats.Dump());
         return result;
     }
+    this->filter_search_result_by_threshold(search_result, request.threshold_);
     if (search_result == nullptr || search_result->Empty()) {
         auto dataset_results = DatasetImpl::MakeEmptyDataset();
         this->AttachReasoningReport(dataset_results, reasoning_ctx.get());

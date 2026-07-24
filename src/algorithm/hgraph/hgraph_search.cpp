@@ -21,6 +21,7 @@
 #include "impl/filter/iterator_filter.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/reasoning/search_reasoning.h"
+#include "utils/search_threshold.h"
 #include "utils/util_functions.h"
 
 namespace vsag {
@@ -52,6 +53,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
     req.topk_ = k;
     req.filter_ = filter;
     req.params_str_ = parameters;
+    req.threshold_ = ParseSearchThreshold(parameters);
     req.search_allocator_ = allocator;
     return this->SearchWithRequest(req);
 }
@@ -76,6 +78,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
     this->validate_knn_args(query, k);
 
     auto params = HGraphSearchParameters::FromJson(parameters);
+    const auto threshold = ParseSearchThreshold(parameters);
     ctx.rabitq_error_rate = params.rabitq_error_rate;
     CHECK_ARGUMENT(  // NOLINT
         params.ef_search >= 1,
@@ -185,6 +188,12 @@ HGraph::KnnSearch(const DatasetPtr& query,
     }
 
     while (search_result->Size() > k) {
+        auto curr = search_result->Top();
+        iter_filter_ctx->AddDiscardNode(curr.first, curr.second);
+        search_result->Pop();
+    }
+    while (threshold.has_value() and not search_result->Empty() and
+           search_result->Top().first > threshold.value()) {
         auto curr = search_result->Top();
         iter_filter_ctx->AddDiscardNode(curr.first, curr.second);
         search_result->Pop();
@@ -370,6 +379,7 @@ HGraph::RangeSearch(const DatasetPtr& query,
 
 [[nodiscard]] DatasetPtr
 HGraph::SearchWithRequest(const SearchRequest& request) const {
+    ValidateSearchThreshold(request.threshold_);
     SearchStatistics stats;
     QueryContext ctx{.alloc = this->allocator_, .stats = &stats};
     if (request.search_allocator_ != nullptr) {
@@ -584,6 +594,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     while (search_result->Size() > static_cast<uint64_t>(k)) {
         search_result->Pop();
     }
+    this->filter_search_result_by_threshold(search_result, request.threshold_);
 
     // return an empty dataset directly if searcher returns nothing
     if (search_result->Empty()) {

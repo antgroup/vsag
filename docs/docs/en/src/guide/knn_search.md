@@ -87,3 +87,25 @@ for (int64_t i = 0; i < result->GetDim(); ++i) {
 ```
 
 The result contains up to `k` neighbors sorted by ascending distance to the query.
+
+## Threshold Filtering
+
+KNN search accepts an optional top-level `threshold` in the JSON search parameters:
+
+```json
+{
+  "threshold": 4.0,
+  "hgraph": { "ef_search": 64 }
+}
+```
+
+When present, the result contains at most `k` neighbors and every returned distance is less than
+or equal to `threshold`. The boundary is inclusive, results remain sorted by ascending distance,
+and fewer than `k` results—or no results—may be returned. When omitted, KNN behavior is unchanged.
+The value uses the index metric's returned distance: squared L2 for `l2`, `1 - inner_product` for
+`ip`, and `1 - cosine_similarity` for `cosine`. Therefore negative thresholds can be meaningful
+for `ip`; the threshold must be a finite JSON number.
+
+The same option is available through `SearchRequest::threshold_`. It only limits KNN results; use
+`RangeSearch` and its `radius` argument for range-search requests. Existing index-specific search
+parameters can be supplied alongside `threshold`.

@@ -15,6 +15,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -56,6 +57,14 @@ public:
      *          Default value is 10, must be a positive integer.
      */
     int64_t topk_{10};
+
+    /**
+     * @brief Optional inclusive distance threshold for KNN search mode
+     * @details When set, at most topk_ results are returned and every returned
+     *          distance is less than or equal to this threshold. An unset value
+     *          preserves the default KNN behavior.
+     */
+    std::optional<float> threshold_{std::nullopt};
 
     /**
      * @brief Search radius for range-based search mode
