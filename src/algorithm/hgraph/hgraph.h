@@ -16,9 +16,9 @@
 #pragma once
 
 #include <atomic>
-#include <future>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <random>
 #include <shared_mutex>
 #include <string>
@@ -54,7 +54,7 @@
 
 namespace vsag {
 class FlattenOptimizedBuildInterface;
-class HGraphFastBuildGuard;
+class HGraphOptimizedBuildSession;
 class IteratorFilterContext;
 
 /**
@@ -71,7 +71,7 @@ public:
                                  const IndexCommonParam& common_param);
 
     friend class HGraphAnalyzer;
-    friend class HGraphFastBuildGuard;
+    friend class HGraphOptimizedBuildSession;
 
 public:
     HGraph(const HGraphParameterPtr& param, const IndexCommonParam& common_param);
@@ -429,17 +429,33 @@ private:
         std::vector<int64_t> failed_ids;
     };
 
+    std::optional<std::vector<int64_t>>
+    try_optimized_build(const DatasetPtr& data);
+
+    [[nodiscard]] bool
+    need_temporary_sq8_build_data_for_add() const;
+
+    DatasetPtr
+    prepare_train_data_for_add(const DatasetPtr& data);
+
     void
-    prepare_optimized_build_codes(const DatasetPtr& data,
-                                  const Vector<AddRow>& rows,
-                                  std::vector<std::future<void>>& futures);
+    train_codes_for_build_if_needed(const DatasetPtr& data);
+
+    void
+    prepare_build_codes(const DatasetPtr& data, const Vector<AddRow>& rows);
+
+    [[nodiscard]] bool
+    should_insert_codes_before_probe(bool use_dedup_storage) const;
+
+    ComputerInterfacePtr
+    make_build_computer(const void* query, InnerIdType inner_id) const;
 
     DistHeapPtr
-    search_one_graph_for_optimized_build(const void* query,
-                                         const GraphInterfacePtr& graph,
-                                         const FlattenInterfacePtr& flatten,
-                                         InnerSearchParam& inner_search_param,
-                                         const ComputerInterfacePtr& computer) const;
+    search_graph_for_build(const void* query,
+                           const GraphInterfacePtr& graph,
+                           const FlattenInterfacePtr& flatten,
+                           InnerSearchParam& inner_search_param,
+                           const ComputerInterfacePtr& computer) const;
 
     struct GraphAddProbeResult {
         DistHeapPtr neighbors{nullptr};

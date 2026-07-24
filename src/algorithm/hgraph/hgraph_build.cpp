@@ -158,8 +158,9 @@ HGraph::Build(const DatasetPtr& data) {
         return ret;
     }
 
-    this->Train(data);
-    HGraphFastBuildGuard fast_build_guard(*this);
+    if (auto optimized_result = this->try_optimized_build(data); optimized_result.has_value()) {
+        return std::move(optimized_result.value());
+    }
 
     std::vector<int64_t> ret;
     if (graph_type_ == GRAPH_TYPE_VALUE_NSW) {
@@ -167,8 +168,6 @@ HGraph::Build(const DatasetPtr& data) {
     } else {
         ret = this->build_by_odescent(data);
     }
-    fast_build_guard.Finalize();
-
     if (use_elp_optimizer_) {
         elp_optimize();
     }
@@ -221,7 +220,7 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
     }
     bool defer_persistent_codes = temporary_sq8_build_data != nullptr;
     if (not defer_persistent_codes) {
-        this->Train(data);
+        this->train_codes_for_build_if_needed(data);
     }
     Vector<std::pair<InnerIdType, int64_t>> deferred_code_ids(allocator_);
     for (InnerIdType cur_size = 0; cur_size < valid_indices.size(); ++cur_size) {
@@ -279,7 +278,7 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
     if (defer_persistent_codes) {
         build_data.reset();
         temporary_sq8_build_data.reset();
-        this->Train(data);
+        this->train_codes_for_build_if_needed(data);
         for (const auto& [inner_id, local_idx] : deferred_code_ids) {
             this->insert_persistent_codes(vectors + dim_ * local_idx, inner_id);
         }
@@ -316,11 +315,8 @@ HGraph::validate_add_data(const DatasetPtr& data) const {
 HGraph::AddContext
 HGraph::prepare_add_context(const DatasetPtr& data) {
     AddContext context;
-    const bool optimized_build_active = this->optimized_build_codes_ != nullptr;
     context.use_dedup_storage = this->using_dedup_storage();
-    context.need_temporary_sq8_build_data =
-        not optimized_build_active and
-        need_temporary_sq8_build_data(this->basic_flatten_codes_, this->has_precise_reorder());
+    context.need_temporary_sq8_build_data = this->need_temporary_sq8_build_data_for_add();
     context.use_parallel_add = this->thread_pool_ != nullptr;
 
     if (context.need_temporary_sq8_build_data and this->total_count_ != 0 and
@@ -334,15 +330,10 @@ HGraph::prepare_add_context(const DatasetPtr& data) {
     {
         std::scoped_lock lock(this->add_mutex_);
         if (this->total_count_ == 0) {
-            if (optimized_build_active) {
-                context.train_data = data;
-            } else {
-                context.train_data = this->sample_train_dataset(data);
-                this->train_codes_with_dataset(context.train_data);
-            }
+            context.first_empty_add = true;
+            context.train_data = this->prepare_train_data_for_add(data);
         }
     }
-    context.first_empty_add = context.train_data != nullptr;
     return context;
 }
 
@@ -442,14 +433,9 @@ HGraph::prepare_temporary_graph_read_codes(const DatasetPtr& data,
 void
 HGraph::insert_add_batch(const DatasetPtr& data, const AddContext& context, const AddBatch& batch) {
     std::vector<std::future<void>> futures;
-    const bool optimized_build_active = this->optimized_build_codes_ != nullptr;
-    HGraphFastBuildTaskGuard future_guard(
-        futures,
-        optimized_build_active,
-        context.use_parallel_add ? static_cast<uint64_t>(batch.rows.size()) : 0);
-    if (optimized_build_active) {
-        this->prepare_optimized_build_codes(data, batch.rows, futures);
-    }
+    HGraphBuildTaskGuard future_guard(
+        futures, context.use_parallel_add ? static_cast<uint64_t>(batch.rows.size()) : 0);
+    this->prepare_build_codes(data, batch.rows);
 
     const auto* extra_infos = data->GetExtraInfos();
     const auto* attr_sets = data->GetAttributeSets();
@@ -574,7 +560,7 @@ void
 HGraph::prepare_codes_before_probe_if_needed(const void* data,
                                              InnerIdType inner_id,
                                              const AddContext& context) {
-    if (not context.use_dedup_storage and this->optimized_build_codes_ == nullptr) {
+    if (this->should_insert_codes_before_probe(context.use_dedup_storage)) {
         this->insert_persistent_codes(data, inner_id);
     }
 }
@@ -693,21 +679,11 @@ HGraph::probe_graph_for_add(const void* data,
                             InnerSearchParam& param,
                             const FlattenInterfacePtr& flatten_codes) const {
     DistHeapPtr result = nullptr;
-    ComputerInterfacePtr build_computer = nullptr;
-    if (this->optimized_build_codes_ != nullptr) {
-        build_computer = this->optimized_build_codes_->FactoryComputerForBuild(data, inner_id);
-    }
-    auto search_for_build = [&](const GraphInterfacePtr& graph) -> DistHeapPtr {
-        if (build_computer != nullptr) {
-            return this->search_one_graph_for_optimized_build(
-                data, graph, flatten_codes, param, build_computer);
-        }
-        return search_one_graph(
-            data, graph, flatten_codes, param, (VisitedListPtr) nullptr, nullptr);
-    };
+    const auto build_computer = this->make_build_computer(data, inner_id);
 
     for (auto j = static_cast<int64_t>(this->route_graphs_.size()) - 1; j > level; --j) {
-        result = search_for_build(route_graphs_[j]);
+        result = this->search_graph_for_build(
+            data, route_graphs_[j], flatten_codes, param, build_computer);
         param.ep = result->Top().second;
     }
 
@@ -721,7 +697,8 @@ HGraph::probe_graph_for_add(const void* data,
     }
 
     if (bottom_graph_->TotalCount() != 0) {
-        result = search_for_build(this->bottom_graph_);
+        result = this->search_graph_for_build(
+            data, this->bottom_graph_, flatten_codes, param, build_computer);
         if (this->support_duplicate_ && param.duplicate_id >= 0) {
             return GraphAddProbeResult{nullptr, param.duplicate_id};
         }
@@ -763,22 +740,12 @@ HGraph::publish_unique_to_route_graphs(const void* data,
                                        InnerSearchParam& param,
                                        const FlattenInterfacePtr& flatten_codes) {
     DistHeapPtr result = nullptr;
-    ComputerInterfacePtr build_computer = nullptr;
-    if (this->optimized_build_codes_ != nullptr) {
-        build_computer = this->optimized_build_codes_->FactoryComputerForBuild(data, inner_id);
-    }
-    auto search_for_build = [&](const GraphInterfacePtr& graph) -> DistHeapPtr {
-        if (build_computer != nullptr) {
-            return this->search_one_graph_for_optimized_build(
-                data, graph, flatten_codes, param, build_computer);
-        }
-        return search_one_graph(
-            data, graph, flatten_codes, param, (VisitedListPtr) nullptr, nullptr);
-    };
+    const auto build_computer = this->make_build_computer(data, inner_id);
 
     for (int64_t j = 0; j <= level; ++j) {
         if (route_graphs_[j]->TotalCount() != 0) {
-            result = search_for_build(route_graphs_[j]);
+            result = this->search_graph_for_build(
+                data, route_graphs_[j], flatten_codes, param, build_computer);
             auto filtered_result = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
             while (not result->Empty()) {
                 auto [dist, id] = result->Top();

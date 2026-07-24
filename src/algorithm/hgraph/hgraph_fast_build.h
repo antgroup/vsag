@@ -24,39 +24,39 @@ namespace vsag {
 
 class HGraph;
 
-class HGraphFastBuildGuard {
+class HGraphOptimizedBuildSession {
 public:
-    explicit HGraphFastBuildGuard(HGraph& hgraph);
+    explicit HGraphOptimizedBuildSession(HGraph& hgraph);
 
-    HGraphFastBuildGuard(const HGraphFastBuildGuard&) = delete;
-    HGraphFastBuildGuard&
-    operator=(const HGraphFastBuildGuard&) = delete;
+    HGraphOptimizedBuildSession(const HGraphOptimizedBuildSession&) = delete;
+    HGraphOptimizedBuildSession&
+    operator=(const HGraphOptimizedBuildSession&) = delete;
 
-    ~HGraphFastBuildGuard();
+    ~HGraphOptimizedBuildSession();
+
+    [[nodiscard]] bool
+    Active() const;
 
     void
-    Finalize();
+    Commit();
 
 private:
     HGraph* hgraph_{nullptr};
     FlattenOptimizedBuildInterfacePtr optimized_build_codes_{nullptr};
 };
 
-class HGraphFastBuildTaskGuard {
+class HGraphBuildTaskGuard {
 public:
-    HGraphFastBuildTaskGuard(std::vector<std::future<void>>& futures,
-                             bool enabled,
-                             uint64_t capacity);
+    HGraphBuildTaskGuard(std::vector<std::future<void>>& futures, uint64_t capacity);
 
-    HGraphFastBuildTaskGuard(const HGraphFastBuildTaskGuard&) = delete;
-    HGraphFastBuildTaskGuard&
-    operator=(const HGraphFastBuildTaskGuard&) = delete;
+    HGraphBuildTaskGuard(const HGraphBuildTaskGuard&) = delete;
+    HGraphBuildTaskGuard&
+    operator=(const HGraphBuildTaskGuard&) = delete;
 
-    ~HGraphFastBuildTaskGuard();
+    ~HGraphBuildTaskGuard();
 
 private:
     std::vector<std::future<void>>& futures_;
-    bool enabled_{false};
 };
 
 }  // namespace vsag
