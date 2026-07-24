@@ -220,7 +220,7 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
     }
     bool defer_persistent_codes = temporary_sq8_build_data != nullptr;
     if (not defer_persistent_codes) {
-        this->train_codes_for_build_if_needed(data);
+        this->Train(data);
     }
     Vector<std::pair<InnerIdType, int64_t>> deferred_code_ids(allocator_);
     for (InnerIdType cur_size = 0; cur_size < valid_indices.size(); ++cur_size) {
@@ -278,7 +278,7 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
     if (defer_persistent_codes) {
         build_data.reset();
         temporary_sq8_build_data.reset();
-        this->train_codes_for_build_if_needed(data);
+        this->Train(data);
         for (const auto& [inner_id, local_idx] : deferred_code_ids) {
             this->insert_persistent_codes(vectors + dim_ * local_idx, inner_id);
         }

@@ -439,9 +439,6 @@ private:
     prepare_train_data_for_add(const DatasetPtr& data);
 
     void
-    train_codes_for_build_if_needed(const DatasetPtr& data);
-
-    void
     prepare_build_codes(const DatasetPtr& data, const Vector<AddRow>& rows);
 
     [[nodiscard]] bool

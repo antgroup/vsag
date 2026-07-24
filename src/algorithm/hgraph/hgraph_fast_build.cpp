@@ -116,9 +116,9 @@ HGraph::try_optimized_build(const DatasetPtr& data) {
         return std::nullopt;
     }
 
-    this->Train(data);
     std::vector<int64_t> result;
     if (graph_type_ == GRAPH_TYPE_VALUE_NSW) {
+        this->Train(data);
         result = this->Add(data);
     } else {
         result = this->build_by_odescent(data);
@@ -145,13 +145,6 @@ HGraph::prepare_train_data_for_add(const DatasetPtr& data) {
     auto train_data = this->sample_train_dataset(data);
     this->train_codes_with_dataset(train_data);
     return train_data;
-}
-
-void
-HGraph::train_codes_for_build_if_needed(const DatasetPtr& data) {
-    if (this->optimized_build_codes_ == nullptr) {
-        this->Train(data);
-    }
 }
 
 void
