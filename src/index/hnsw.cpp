@@ -38,6 +38,7 @@
 #include "storage/empty_index_binary_set.h"
 #include "storage/serialization.h"
 #include "storage/stream_writer.h"
+#include "utils/search_threshold.h"
 #include "utils/slow_task_timer.h"
 #include "utils/timer.h"
 #include "utils/util_functions.h"
@@ -345,7 +346,8 @@ HNSW::knn_search(const DatasetPtr& query,
             results.pop();
         }
 
-        return std::move(dataset_results);
+        return FilterDatasetByThreshold(
+            dataset_results, ParseSearchThreshold(parameters), search_allocator);
     } catch (const std::invalid_argument& e) {
         LOG_ERROR_AND_RETURNS(ErrorType::INVALID_ARGUMENT,
                               "failed to perform knn_search(invalid argument): ",

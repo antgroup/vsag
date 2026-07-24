@@ -33,6 +33,7 @@
 #include "storage/serialization.h"
 #include "storage/serialization_tags.h"
 #include "storage/tlv_section.h"
+#include "utils/search_threshold.h"
 #include "utils/util_functions.h"
 #include "vsag/allocator.h"
 #include "vsag/options.h"
@@ -591,6 +592,7 @@ SINDI::KnnSearch(const DatasetPtr& query,
     // search parameter
     SINDISearchParameter search_param;
     search_param.FromJson(JsonType::Parse(parameters));
+    const auto threshold = ParseSearchThreshold(parameters);
     CHECK_ARGUMENT(search_param.n_candidate <= SPARSE_AMPLIFICATION_FACTOR * k,
                    fmt::format("n_candidate ({}) should be less than {} * k ({})",
                                search_param.n_candidate,
@@ -614,12 +616,15 @@ SINDI::KnnSearch(const DatasetPtr& query,
 
     auto computer = std::make_shared<SparseTermComputer>(effective_query, search_param, allocator_);
     const SparseVector* rerank_query = (remap_term_ids_ && use_reorder_) ? &sparse_query : nullptr;
+    DatasetPtr result;
     if (immutable_data_ != nullptr) {
-        return immutable_search_impl<KNN_SEARCH>(
+        result = immutable_search_impl<KNN_SEARCH>(
+            computer, inner_param, allocator, UseTermListsHeapInsert(search_param), rerank_query);
+    } else {
+        result = search_impl<KNN_SEARCH>(
             computer, inner_param, allocator, UseTermListsHeapInsert(search_param), rerank_query);
     }
-    return search_impl<KNN_SEARCH>(
-        computer, inner_param, allocator, UseTermListsHeapInsert(search_param), rerank_query);
+    return FilterDatasetByThreshold(result, threshold, allocator);
 }
 
 std::optional<uint32_t>

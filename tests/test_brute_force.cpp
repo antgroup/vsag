@@ -15,14 +15,17 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <sstream>
+#include <unordered_set>
 
 #include "functest.h"
 #include "storage/serialization_tags.h"
 #include "storage/streaming_serialization_test_utils.h"
 #include "test_index.h"
+#include "utils/search_threshold.h"
 #include "vsag/constants.h"
 #include "vsag/options.h"
 #include "vsag/search_request.h"
@@ -1072,6 +1075,134 @@ TEST_CASE("(PR) BruteForce SearchWithRequest Reasoning", "[ft][bruteforce][reaso
     REQUIRE_FALSE(empty_result.value()->GetReasoning().empty());
     REQUIRE(empty_result.value()->GetReasoning().find("missed_targets") != std::string::npos);
     REQUIRE(empty_result.value()->GetReasoning().find("filter_rejected") != std::string::npos);
+}
+
+TEST_CASE("(PR) BruteForce KnnSearch threshold filtering", "[ft][bruteforce][threshold][pr]") {
+    using namespace fixtures;
+
+    auto param = BruteForceTestIndex::GenerateBruteForceBuildParametersString("l2", 1, "fp32");
+    auto index = TestIndex::TestFactory(BruteForceTestIndex::name, param, true);
+    auto base = vsag::Dataset::Make();
+    int64_t ids[] = {10, 11, 12, 13};
+    float vectors[] = {0.0F, 1.0F, 2.0F, 3.0F};
+    base->NumElements(4)->Dim(1)->Ids(ids)->Float32Vectors(vectors)->Owner(false);
+    REQUIRE(index->Build(base).has_value());
+
+    auto query = vsag::Dataset::Make();
+    float query_vector[] = {0.0F};
+    query->NumElements(1)->Dim(1)->Float32Vectors(query_vector)->Owner(false);
+
+    auto baseline = index->KnnSearch(query, 4, "{}").value();
+    auto no_threshold = index->KnnSearch(query, 4, R"({"threshold": 100.0})").value();
+    REQUIRE(no_threshold->GetDim() == baseline->GetDim());
+    for (int64_t i = 0; i < baseline->GetDim(); ++i) {
+        REQUIRE(no_threshold->GetIds()[i] == baseline->GetIds()[i]);
+        REQUIRE(no_threshold->GetDistances()[i] == baseline->GetDistances()[i]);
+    }
+
+    auto filtered = index->KnnSearch(query, 3, R"({"threshold": 4.0})").value();
+    REQUIRE(filtered->GetDim() == 3);
+    REQUIRE(filtered->GetIds()[0] == 10);
+    REQUIRE(filtered->GetIds()[1] == 11);
+    REQUIRE(filtered->GetIds()[2] == 12);
+    REQUIRE(filtered->GetDistances()[2] == 4.0F);
+
+    auto empty = index->KnnSearch(query, 3, R"({"threshold": -0.1})").value();
+    REQUIRE(empty->GetDim() == 0);
+
+    vsag::SearchRequest request;
+    request.query_ = query;
+    request.topk_ = 4;
+    request.threshold_ = 1.0F;
+    auto request_result = index->SearchWithRequest(request).value();
+    REQUIRE(request_result->GetDim() == 2);
+    REQUIRE(request_result->GetDistances()[0] <= request_result->GetDistances()[1]);
+    REQUIRE(request_result->GetDistances()[1] == 1.0F);
+
+    for (const auto threshold : {std::numeric_limits<float>::quiet_NaN(),
+                                 std::numeric_limits<float>::infinity(),
+                                 -std::numeric_limits<float>::infinity()}) {
+        request.threshold_ = threshold;
+        REQUIRE_FALSE(index->SearchWithRequest(request).has_value());
+    }
+
+    auto ip_param = BruteForceTestIndex::GenerateBruteForceBuildParametersString("ip", 1, "fp32");
+    auto ip_index = TestIndex::TestFactory(BruteForceTestIndex::name, ip_param, true);
+    float ip_vectors[] = {1.0F, 0.5F, 0.0F};
+    auto ip_base = vsag::Dataset::Make();
+    ip_base->NumElements(3)->Dim(1)->Ids(ids)->Float32Vectors(ip_vectors)->Owner(false);
+    REQUIRE(ip_index->Build(ip_base).has_value());
+    auto ip_query = vsag::Dataset::Make();
+    float ip_query_vector[] = {1.0F};
+    ip_query->NumElements(1)->Dim(1)->Float32Vectors(ip_query_vector)->Owner(false);
+    auto ip_filtered = ip_index->KnnSearch(ip_query, 3, R"({"threshold": 0.5})").value();
+    REQUIRE(ip_filtered->GetDim() == 2);
+    REQUIRE(ip_filtered->GetDistances()[0] == 0.0F);
+    REQUIRE(ip_filtered->GetDistances()[1] == 0.5F);
+}
+
+TEST_CASE("(PR) Threshold filtering preserves allocator ownership", "[ft][threshold][pr]") {
+    class TrackingAllocator : public vsag::Allocator {
+    public:
+        std::string
+        Name() override {
+            return "tracking";
+        }
+
+        void*
+        Allocate(uint64_t size) override {
+            auto* ptr = std::malloc(size);
+            allocated_.insert(ptr);
+            return ptr;
+        }
+
+        void
+        Deallocate(void* ptr) override {
+            if (ptr != nullptr) {
+                REQUIRE(allocated_.erase(ptr) == 1);
+                ++deallocated_count_;
+                std::free(ptr);
+            }
+        }
+
+        void*
+        Reallocate(void* ptr, uint64_t size) override {
+            allocated_.erase(ptr);
+            auto* result = std::realloc(ptr, size);
+            allocated_.insert(result);
+            return result;
+        }
+
+        std::unordered_set<void*> allocated_;
+        uint64_t deallocated_count_ = 0;
+    };
+
+    int64_t ids[] = {1, 2, 3};
+    float distances[] = {0.0F, 1.0F, 2.0F};
+    const char extra_info[] =
+        "aa"
+        "bb"
+        "cc";
+    auto input = vsag::Dataset::Make();
+    input->NumElements(1)
+        ->Dim(3)
+        ->Ids(ids)
+        ->Distances(distances)
+        ->ExtraInfoSize(2)
+        ->ExtraInfos(extra_info)
+        ->Owner(false);
+
+    TrackingAllocator allocator;
+    {
+        auto result = vsag::FilterDatasetByThreshold(input, 1.0F, &allocator);
+        REQUIRE(result->GetDim() == 2);
+        REQUIRE(result->GetIds()[0] == 1);
+        REQUIRE(result->GetIds()[1] == 2);
+        REQUIRE(std::memcmp(result->GetExtraInfos(), "aabb", 4) == 0);
+        REQUIRE(allocator.allocated_.size() == 3);
+    }
+    REQUIRE(allocator.allocated_.empty());
+    REQUIRE(allocator.deallocated_count_ == 3);
 }
 
 TEST_CASE("(PR) BruteForce Reasoning Found Verification", "[ft][bruteforce][reasoning][pr]") {

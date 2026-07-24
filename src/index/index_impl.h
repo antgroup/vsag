@@ -19,6 +19,7 @@
 #include "algorithm/inner_index_interface.h"
 #include "common.h"
 #include "index_common_param.h"
+#include "utils/search_threshold.h"
 #include "vsag/index.h"
 namespace vsag {
 
@@ -474,10 +475,10 @@ public:
 
     [[nodiscard]] tl::expected<DatasetPtr, Error>
     SearchWithRequest(const SearchRequest& request) const override {
-        if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(request.params_str_)) {
-            return DatasetImpl::MakeEmptyDataset();
-        }
-        SAFE_CALL(return this->inner_index_->SearchWithRequest(request));
+        SAFE_CALL(ValidateSearchThreshold(request.threshold_);
+                  if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(request.params_str_)) {
+                      return DatasetImpl::MakeEmptyDataset();
+                  } return this->inner_index_->SearchWithRequest(request));
     }
 
     tl::expected<void, Error>

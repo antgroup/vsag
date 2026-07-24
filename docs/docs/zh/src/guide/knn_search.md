@@ -92,6 +92,26 @@ BruteForce 索引支持用 Build 和 Add 方法写入数据，这里我们用 Ad
 
 搜索请求至多返回 k 个结果，这些结果按照最近邻和查询向量的距离升序排序。输出的结果类似于：
 
+## 按阈值过滤
+
+KNN 搜索参数支持在 JSON 顶层设置可选的 `threshold`：
+
+```json
+{
+  "threshold": 4.0,
+  "hgraph": { "ef_search": 64 }
+}
+```
+
+设置后，结果至多返回 `k` 个邻居，并且每个返回距离都小于或等于 `threshold`。
+边界值会被包含，结果仍按距离升序排列，因此可能返回少于 `k` 个结果，甚至没有结果。
+不设置该字段时，KNN 行为保持不变。阈值使用索引返回的距离语义：`l2` 为 L2 平方距离，
+`ip` 为 `1 - inner_product`，`cosine` 为 `1 - cosine_similarity`。因此 `ip` 可以使用负阈值；
+阈值必须是有限的 JSON 数字。
+
+通过统一请求接口时，也可以使用 `SearchRequest::threshold_`。该选项只限制 KNN 结果；
+范围搜索请使用 `RangeSearch` 及其 `radius` 参数。`threshold` 可以和现有索引专用搜索参数同时传入。
+
 ```bash
 results:
 6519: 13.855
@@ -105,4 +125,3 @@ results:
 8703: 16.1161
 5583: 16.1256
 ```
-

@@ -35,6 +35,7 @@
 #include "storage/serialization_tags.h"
 #include "storage/tlv_section.h"
 #include "typing.h"
+#include "utils/search_threshold.h"
 #include "utils/slow_task_timer.h"
 #include "utils/util_functions.h"
 namespace vsag {
@@ -356,6 +357,7 @@ BruteForce::KnnSearch(const DatasetPtr& query,
     req.query_ = query;
     req.topk_ = k;
     req.params_str_ = parameters;
+    req.threshold_ = ParseSearchThreshold(parameters);
     if (filter != nullptr) {
         req.filter_ = filter;
     }
@@ -364,6 +366,7 @@ BruteForce::KnnSearch(const DatasetPtr& query,
 
 DatasetPtr
 BruteForce::SearchWithRequest(const SearchRequest& request) const {
+    ValidateSearchThreshold(request.threshold_);
     std::shared_lock read_lock(this->global_mutex_);
 
     auto computer = this->make_search_computer(request.query_);
@@ -500,6 +503,10 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
         for (auto i = 1; i < parallel_count; ++i) {
             heap->Merge(*heaps[i]);
         }
+    }
+
+    if (not is_range) {
+        this->filter_search_result_by_threshold(heap, request.threshold_);
     }
 
     // Collect result inner IDs before pack_knn_result_with_extra_info consumes the heap,

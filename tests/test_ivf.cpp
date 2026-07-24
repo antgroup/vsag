@@ -1685,6 +1685,34 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
     }
 }
 
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
+                             "IVF reorder applies threshold to exact distances",
+                             "[ft][search][ivf][threshold][pr]") {
+    constexpr int64_t dim = 16;
+    auto param = IVFTestIndex::GenerateIVFBuildParametersString("l2", dim, "sq8,fp32", 10);
+    auto index = TestIndex::TestFactory(IVFTestIndex::name, param, true);
+    auto dataset = IVFTestIndex::pool.GetDatasetAndCreate(dim, 200, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)
+        ->Dim(dim)
+        ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+        ->Owner(false);
+    auto result = index->KnnSearch(
+        query, 2, R"({"ivf":{"scan_buckets_count":10,"factor":4.0},"threshold":0.0})");
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() >= 1);
+    REQUIRE(result.value()->GetDim() <= 2);
+    REQUIRE(result.value()->GetIds()[0] == dataset->base_->GetIds()[0]);
+    for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
+        REQUIRE(result.value()->GetDistances()[i] <= 0.0F);
+        if (i > 0) {
+            REQUIRE(result.value()->GetDistances()[i - 1] <= result.value()->GetDistances()[i]);
+        }
+    }
+}
+
 // RejectAllFilter for testing empty results
 class RejectAllFilter : public vsag::Filter {
 public:
