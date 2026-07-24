@@ -207,6 +207,7 @@ Pyramid writes these streaming blocks in order:
 | `label_table` | external labels and label remap | yes |
 | `base_codes` | base flatten codes used by graph search | yes |
 | `high_precision_codes` | precise reorder codes when reorder is enabled | conditional |
+| `raw_vector` | separate FP32 vectors when `store_raw_vector` requires dedicated storage | conditional |
 | `pyramid_hierarchies` | hierarchy names and graph roots | yes |
 
 `DeserializeStreaming` restores the full in-memory Pyramid index. `Index::Load` can create the

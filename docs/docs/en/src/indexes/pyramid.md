@@ -94,6 +94,9 @@ Build-time parameters live under `index_param`.
 | `no_build_levels` | int[] | `[]` | Tree levels that skip graph construction (0-indexed from the root). |
 | `use_reorder` | bool | `false` | Keep a high-precision copy for rescoring. |
 | `precise_quantization_type` | string | `"fp32"` | Quantizer for reordering. |
+| `store_raw_vector` | bool | `false` | Preserve an FP32 copy for `GetRawVectorByIds` and precise distance-by-id calculations. Pyramid reuses an existing in-memory FP32 base/reorder copy when possible; otherwise it creates separate raw-vector storage. |
+| `raw_vector_io_type` | string | `"block_memory_io"` | IO backend for separate raw-vector storage. |
+| `raw_vector_file_path` | string | `"./default_file_path"` | File path used by file-backed raw-vector IO. |
 | `index_min_size` | int | `0` | Minimum sub-index size; smaller groups fall back to scan. |
 | `support_duplicate` | bool | `false` | Allow duplicate ids. |
 | `build_thread_count` | int | `1` | Threads used for parallel build. |
