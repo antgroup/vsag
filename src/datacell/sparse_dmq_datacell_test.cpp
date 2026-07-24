@@ -15,6 +15,8 @@
 #include "sparse_dmq_datacell.h"
 
 #include <cmath>
+#include <cstring>
+#include <sstream>
 #include <vector>
 
 #include "impl/allocator/safe_allocator.h"
@@ -92,6 +94,32 @@ TEST_CASE("SparseDmqDataCell implements FlattenInterface", "[ut][SparseDmqDataCe
             restored_distances.data(), restored_computer, inner_ids.data(), inner_ids.size());
         REQUIRE(restored_distances == distances);
     }
+
+    SECTION("reject incompatible serialized version") {
+        std::stringstream stream;
+        IOStreamWriter writer(stream);
+        cell->Serialize(writer);
+        auto serialized = stream.str();
+        constexpr uint32_t old_version = 5;
+        std::memcpy(serialized.data() + sizeof(uint32_t), &old_version, sizeof(old_version));
+
+        std::stringstream old_stream(serialized);
+        IOStreamReader reader(old_stream);
+        auto restored = std::make_shared<SparseDmqDataCell>(1024, common_param);
+        REQUIRE_THROWS_AS(restored->Deserialize(reader), VsagException);
+    }
+}
+
+TEST_CASE("SparseDmqDataCell serializes an empty model", "[ut][SparseDmqDataCell]") {
+    IndexCommonParam common_param;
+    common_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    common_param.dim_ = 1024;
+
+    SparseDmqDataCell cell(1024, common_param, 7);
+    SparseDmqDataCell restored(1, common_param, 0);
+    REQUIRE_NOTHROW(test_serializion(cell, restored));
+    REQUIRE(restored.TotalCount() == 0);
 }
 
 }  // namespace vsag

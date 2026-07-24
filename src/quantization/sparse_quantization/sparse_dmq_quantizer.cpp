@@ -80,18 +80,33 @@ store_packed(uint8_t* bytes, uint64_t index, uint32_t bits, uint32_t value) {
     }
 }
 
-uint32_t
-load_packed(const uint8_t* bytes, uint64_t index, uint32_t bits) {
-    const uint64_t bit_offset = index * bits;
-    uint32_t result = 0;
-    for (uint32_t bit = 0; bit < bits; ++bit) {
-        const uint64_t target_bit = bit_offset + bit;
-        if ((bytes[target_bit / 8] & (1U << (target_bit % 8))) != 0) {
-            result |= 1U << bit;
-        }
+class PackedReader {
+public:
+    PackedReader(const uint8_t* bytes, uint32_t bits)
+        : cursor_(bytes),
+          bits_(bits),
+          mask_(bits == 32 ? std::numeric_limits<uint32_t>::max() : ((1U << bits) - 1U)) {
     }
-    return result;
-}
+
+    uint32_t
+    Read() {
+        while (available_bits_ < bits_) {
+            bit_buffer_ |= static_cast<uint64_t>(*cursor_++) << available_bits_;
+            available_bits_ += 8;
+        }
+        const uint32_t result = static_cast<uint32_t>(bit_buffer_) & mask_;
+        bit_buffer_ >>= bits_;
+        available_bits_ -= bits_;
+        return result;
+    }
+
+private:
+    const uint8_t* cursor_;
+    uint64_t bit_buffer_{0};
+    uint32_t available_bits_{0};
+    uint32_t bits_;
+    uint32_t mask_;
+};
 
 std::tuple<Vector<uint32_t>, Vector<float>>
 sort_sparse_vector(const SparseVector& vector, Allocator* allocator) {
@@ -401,8 +416,9 @@ SparseDmqQuantizer::DecodeOneImpl(const uint8_t* codes, float* data) const {
     vector->vals_ = static_cast<float*>(this->allocator_->Allocate(sizeof(float) * header.len));
     const auto* packed_ids = codes + sizeof(header);
     const auto* value_codes = packed_ids + get_packed_size(header.len, id_bits_);
+    PackedReader id_reader(packed_ids, id_bits_);
     for (uint32_t index = 0; index < header.len; ++index) {
-        const uint32_t compact_id = load_packed(packed_ids, index, id_bits_);
+        const uint32_t compact_id = id_reader.Read();
         CHECK_ARGUMENT(compact_id < term_ids_.size(),
                        fmt::format("invalid DMQ compact ID {}", compact_id));
         const uint32_t codebook_index = GetCodebookIndex(compact_id);
@@ -435,16 +451,27 @@ SparseDmqQuantizer::ComputeImpl(const uint8_t* codes1, const uint8_t* codes2) co
     const auto* right_ids = codes2 + sizeof(right);
     const auto* left_codes = left_ids + get_packed_size(left.len, id_bits_);
     const auto* right_codes = right_ids + get_packed_size(right.len, id_bits_);
+    if (left.len == 0 || right.len == 0) {
+        return 1.0F;
+    }
+    PackedReader left_reader(left_ids, id_bits_);
+    PackedReader right_reader(right_ids, id_bits_);
     uint32_t left_index = 0;
     uint32_t right_index = 0;
+    uint32_t left_id = left_reader.Read();
+    uint32_t right_id = right_reader.Read();
     float product = 0.0F;
     while (left_index < left.len && right_index < right.len) {
-        const uint32_t left_id = load_packed(left_ids, left_index, id_bits_);
-        const uint32_t right_id = load_packed(right_ids, right_index, id_bits_);
         if (left_id < right_id) {
             ++left_index;
+            if (left_index < left.len) {
+                left_id = left_reader.Read();
+            }
         } else if (left_id > right_id) {
             ++right_index;
+            if (right_index < right.len) {
+                right_id = right_reader.Read();
+            }
         } else {
             const uint32_t codebook_index = GetCodebookIndex(left_id);
             const auto& codebook = codebooks_[codebook_index];
@@ -452,6 +479,12 @@ SparseDmqQuantizer::ComputeImpl(const uint8_t* codes1, const uint8_t* codes2) co
                        DecodeValue(right.factors, codebook, right_codes[right_index]);
             ++left_index;
             ++right_index;
+            if (left_index < left.len) {
+                left_id = left_reader.Read();
+            }
+            if (right_index < right.len) {
+                right_id = right_reader.Read();
+            }
         }
     }
     return 1.0F - product;
@@ -509,8 +542,9 @@ SparseDmqQuantizer::ComputeDistImpl(Computer<SparseDmqQuantizer>& computer,
     float query_sum = 0.0F;
     float qualifier_product = 0.0F;
     uint32_t query_index = 0;
+    PackedReader id_reader(packed_ids, id_bits_);
     for (uint32_t base_index = 0; base_index < header.len; ++base_index) {
-        const uint32_t id = load_packed(packed_ids, base_index, id_bits_);
+        const uint32_t id = id_reader.Read();
         uint32_t matched = K_INVALID_INDEX;
         if (query.has_lookup) {
             if (id < query.term_to_index.size()) {
@@ -545,6 +579,7 @@ SparseDmqQuantizer::ReleaseComputerImpl(Computer<SparseDmqQuantizer>& computer) 
 
 void
 SparseDmqQuantizer::SerializeImpl(StreamWriter& writer) {
+    StreamWriter::WriteObj(writer, shared_codebook_threshold_);
     StreamWriter::WriteObj(writer, id_bits_);
     StreamWriter::WriteVector(writer, term_ids_);
     StreamWriter::WriteVector(writer, codebook_index_by_compact_id_);
@@ -553,13 +588,17 @@ SparseDmqQuantizer::SerializeImpl(StreamWriter& writer) {
 
 void
 SparseDmqQuantizer::DeserializeImpl(StreamReader& reader) {
+    StreamReader::ReadObj(reader, shared_codebook_threshold_);
     StreamReader::ReadObj(reader, id_bits_);
     StreamReader::ReadVector(reader, term_ids_);
     StreamReader::ReadVector(reader, codebook_index_by_compact_id_);
     StreamReader::ReadVector(reader, codebooks_);
     CHECK_ARGUMENT(term_ids_.size() == codebook_index_by_compact_id_.size(),
                    "serialized DMQ term and codebook mappings are inconsistent");
-    CHECK_ARGUMENT(id_bits_ == get_bits_for_value_count(term_ids_.size()),
+    CHECK_ARGUMENT(id_bits_ > 0 && id_bits_ <= 32,
+                   "serialized DMQ compact ID width is out of range");
+    const bool empty_untrained_model = not this->is_trained_ && term_ids_.empty();
+    CHECK_ARGUMENT(empty_untrained_model || id_bits_ == get_bits_for_value_count(term_ids_.size()),
                    "serialized DMQ compact ID width is inconsistent");
     CHECK_ARGUMENT(term_ids_.empty() == codebooks_.empty(),
                    "serialized DMQ term and codebook counts are inconsistent");
