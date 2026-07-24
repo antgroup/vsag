@@ -82,9 +82,11 @@ collect_heap_results(const DistHeapPtr& results, Allocator* allocator) {
 FlattenInterfacePtr
 create_rerank_flat(const IndexCommonParam& common_param,
                    const std::string& rerank_type,
-                   uint32_t term_id_limit) {
+                   uint32_t term_id_limit,
+                   uint32_t dmq_shared_codebook_threshold) {
     if (rerank_type == SPARSE_RERANK_TYPE_DMQ8) {
-        return std::make_shared<SparseDmqDataCell>(term_id_limit, common_param);
+        return std::make_shared<SparseDmqDataCell>(
+            term_id_limit, common_param, dmq_shared_codebook_threshold);
     }
     auto rerank_param = std::make_shared<SparseVectorDataCellParameter>();
     rerank_param->io_parameter = std::make_shared<MemoryBlockIOParameter>();
@@ -203,7 +205,8 @@ SINDI::SINDI(const SINDIParameterPtr& param, const IndexCommonParam& common_para
     if (use_reorder_) {
         uint32_t rerank_term_id_limit =
             remap_term_ids_ ? std::numeric_limits<uint32_t>::max() : term_id_limit_;
-        rerank_flat_ = create_rerank_flat(common_param, rerank_type_, rerank_term_id_limit);
+        rerank_flat_ = create_rerank_flat(
+            common_param, rerank_type_, rerank_term_id_limit, param->dmq_shared_codebook_threshold);
     }
 }
 

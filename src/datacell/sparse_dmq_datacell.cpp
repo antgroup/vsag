@@ -23,13 +23,16 @@ namespace vsag {
 namespace {
 
 constexpr uint32_t K_SPARSE_DMQ_DATACELL_MAGIC = 0x53444D51U;
-constexpr uint32_t K_SPARSE_DMQ_DATACELL_VERSION = 5;
+constexpr uint32_t K_SPARSE_DMQ_DATACELL_VERSION = 6;
 
 }  // namespace
 
-SparseDmqDataCell::SparseDmqDataCell(uint32_t term_id_limit, const IndexCommonParam& common_param)
+SparseDmqDataCell::SparseDmqDataCell(uint32_t term_id_limit,
+                                     const IndexCommonParam& common_param,
+                                     uint32_t shared_codebook_threshold)
     : allocator_(common_param.allocator_.get()),
-      quantizer_(std::make_shared<SparseDmqQuantizer>(term_id_limit, allocator_)),
+      quantizer_(std::make_shared<SparseDmqQuantizer>(
+          term_id_limit, allocator_, shared_codebook_threshold)),
       offsets_(allocator_),
       codes_(allocator_) {
     offsets_.push_back(0);
@@ -224,11 +227,11 @@ void
 SparseDmqDataCell::Deserialize(lvalue_or_rvalue<StreamReader> reader) {
     std::unique_lock lock(this->mutex_);
     uint32_t magic = 0;
-    uint32_t version = 0;
     StreamReader::ReadObj(reader, magic);
-    StreamReader::ReadObj(reader, version);
     CHECK_ARGUMENT(magic == K_SPARSE_DMQ_DATACELL_MAGIC,
                    "serialized DMQ datacell has invalid magic");
+    uint32_t version = 0;
+    StreamReader::ReadObj(reader, version);
     CHECK_ARGUMENT(version == K_SPARSE_DMQ_DATACELL_VERSION,
                    fmt::format("unsupported sparse DMQ datacell version {}", version));
     StreamReader::ReadObj(reader, this->total_count_);

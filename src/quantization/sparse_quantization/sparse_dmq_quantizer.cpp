@@ -46,6 +46,20 @@ get_bits_for_value_limit(uint32_t value_limit) {
     return bits;
 }
 
+uint32_t
+get_bits_for_value_count(uint64_t value_count) {
+    if (value_count <= 1) {
+        return 1;
+    }
+    uint64_t max_value = value_count - 1;
+    uint32_t bits = 0;
+    do {
+        ++bits;
+        max_value >>= 1;
+    } while (max_value > 0);
+    return bits;
+}
+
 uint64_t
 get_packed_size(uint64_t count, uint32_t bits) {
     return (count * bits + 7) / 8;
@@ -66,18 +80,33 @@ store_packed(uint8_t* bytes, uint64_t index, uint32_t bits, uint32_t value) {
     }
 }
 
-uint32_t
-load_packed(const uint8_t* bytes, uint64_t index, uint32_t bits) {
-    const uint64_t bit_offset = index * bits;
-    uint32_t result = 0;
-    for (uint32_t bit = 0; bit < bits; ++bit) {
-        const uint64_t target_bit = bit_offset + bit;
-        if ((bytes[target_bit / 8] & (1U << (target_bit % 8))) != 0) {
-            result |= 1U << bit;
-        }
+class PackedReader {
+public:
+    PackedReader(const uint8_t* bytes, uint32_t bits)
+        : cursor_(bytes),
+          bits_(bits),
+          mask_(bits == 32 ? std::numeric_limits<uint32_t>::max() : ((1U << bits) - 1U)) {
     }
-    return result;
-}
+
+    uint32_t
+    Read() {
+        while (available_bits_ < bits_) {
+            bit_buffer_ |= static_cast<uint64_t>(*cursor_++) << available_bits_;
+            available_bits_ += 8;
+        }
+        const uint32_t result = static_cast<uint32_t>(bit_buffer_) & mask_;
+        bit_buffer_ >>= bits_;
+        available_bits_ -= bits_;
+        return result;
+    }
+
+private:
+    const uint8_t* cursor_;
+    uint64_t bit_buffer_{0};
+    uint32_t available_bits_{0};
+    uint32_t bits_;
+    uint32_t mask_;
+};
 
 std::tuple<Vector<uint32_t>, Vector<float>>
 sort_sparse_vector(const SparseVector& vector, Allocator* allocator) {
@@ -109,13 +138,17 @@ struct SparseDmqQuantizer::QueryData {
     bool has_lookup{false};
 };
 
-SparseDmqQuantizer::SparseDmqQuantizer(uint32_t term_id_limit, Allocator* allocator)
+SparseDmqQuantizer::SparseDmqQuantizer(uint32_t term_id_limit,
+                                       Allocator* allocator,
+                                       uint32_t shared_codebook_threshold)
     : Quantizer<SparseDmqQuantizer>(0, allocator),
-      codebook_term_ids_(allocator),
+      term_ids_(allocator),
       codebooks_(allocator),
-      codebook_index_by_term_id_(allocator),
-      codebook_index_lookup_(allocator),
-      id_bits_(get_bits_for_value_limit(term_id_limit)) {
+      codebook_index_by_compact_id_(allocator),
+      compact_id_by_term_id_(allocator),
+      compact_id_lookup_(allocator),
+      id_bits_(get_bits_for_value_limit(term_id_limit)),
+      shared_codebook_threshold_(shared_codebook_threshold) {
     this->metric_ = MetricType::METRIC_TYPE_IP;
     this->code_size_ = 0;
 }
@@ -133,38 +166,53 @@ SparseDmqQuantizer::GetEncodedLength(const uint8_t* codes) {
 }
 
 uint32_t
-SparseDmqQuantizer::GetCodebookIndex(uint32_t term_id) const {
-    if (term_id < codebook_index_lookup_.size() &&
-        codebook_index_lookup_[term_id] != K_INVALID_INDEX) {
-        return codebook_index_lookup_[term_id];
+SparseDmqQuantizer::GetCompactId(uint32_t term_id) const {
+    if (term_id < compact_id_lookup_.size() && compact_id_lookup_[term_id] != K_INVALID_INDEX) {
+        return compact_id_lookup_[term_id];
     }
-    auto iterator = codebook_index_by_term_id_.find(term_id);
-    CHECK_ARGUMENT(iterator != codebook_index_by_term_id_.end(),
-                   fmt::format("missing DMQ codebook for term id {}", term_id));
+    auto iterator = compact_id_by_term_id_.find(term_id);
+    CHECK_ARGUMENT(iterator != compact_id_by_term_id_.end(),
+                   fmt::format("missing DMQ compact ID for term ID {}", term_id));
     return iterator->second;
 }
 
+uint32_t
+SparseDmqQuantizer::GetCodebookIndex(uint32_t compact_id) const {
+    CHECK_ARGUMENT(compact_id < codebook_index_by_compact_id_.size(),
+                   fmt::format("invalid DMQ compact ID {}", compact_id));
+    const uint32_t codebook_index = codebook_index_by_compact_id_[compact_id];
+    CHECK_ARGUMENT(codebook_index < codebooks_.size(),
+                   fmt::format("invalid DMQ codebook index {}", codebook_index));
+    return codebook_index;
+}
+
 void
-SparseDmqQuantizer::RebuildCodebookLookup() {
-    codebook_index_lookup_.clear();
-    for (uint32_t index = 0; index < codebook_term_ids_.size(); ++index) {
-        AddCodebookLookup(codebook_term_ids_[index], index);
+SparseDmqQuantizer::RebuildCompactIdLookup() {
+    compact_id_by_term_id_.clear();
+    compact_id_lookup_.clear();
+    for (uint32_t compact_id = 0; compact_id < term_ids_.size(); ++compact_id) {
+        const auto [iterator, inserted] =
+            compact_id_by_term_id_.emplace(term_ids_[compact_id], compact_id);
+        (void)iterator;
+        CHECK_ARGUMENT(inserted,
+                       fmt::format("duplicate serialized DMQ term ID {}", term_ids_[compact_id]));
+        AddCompactIdLookup(term_ids_[compact_id], compact_id);
     }
 }
 
 void
-SparseDmqQuantizer::AddCodebookLookup(uint32_t term_id, uint32_t codebook_index) {
+SparseDmqQuantizer::AddCompactIdLookup(uint32_t term_id, uint32_t compact_id) {
     if (term_id >= K_MAX_LOOKUP_VALUES) {
         return;
     }
-    if (term_id >= codebook_index_lookup_.size()) {
-        codebook_index_lookup_.resize(static_cast<uint64_t>(term_id) + 1, K_INVALID_INDEX);
+    if (term_id >= compact_id_lookup_.size()) {
+        compact_id_lookup_.resize(static_cast<uint64_t>(term_id) + 1, K_INVALID_INDEX);
     }
-    codebook_index_lookup_[term_id] = codebook_index;
+    compact_id_lookup_[term_id] = compact_id;
 }
 
 void
-SparseDmqQuantizer::BuildCodebook(float* values, uint32_t length, Codebook* codebook) {
+SparseDmqQuantizer::BuildCodebook(float* values, uint64_t length, Codebook* codebook) {
     codebook->thresholds.fill(0.0F);
     codebook->values.fill(0.0F);
     if (length == 0) {
@@ -173,14 +221,15 @@ SparseDmqQuantizer::BuildCodebook(float* values, uint32_t length, Codebook* code
     std::sort(values, values + length);
     double sum = 0.0;
     double square_sum = 0.0;
-    for (uint32_t index = 0; index < length; ++index) {
+    for (uint64_t index = 0; index < length; ++index) {
         sum += values[index];
         square_sum += static_cast<double>(values[index]) * values[index];
     }
     double total_weight = 0.0;
-    for (uint32_t index = 0; index < length; ++index) {
+    for (uint64_t index = 0; index < length; ++index) {
         const double value = values[index];
-        total_weight += value * value * length + square_sum - 2.0 * value * sum;
+        total_weight +=
+            value * value * static_cast<double>(length) + square_sum - 2.0 * value * sum;
     }
     if (total_weight <= K_MIN_DENOMINATOR) {
         codebook->thresholds.fill(values[0]);
@@ -189,9 +238,10 @@ SparseDmqQuantizer::BuildCodebook(float* values, uint32_t length, Codebook* code
     }
     uint32_t partition = 1;
     double current_weight = 0.0;
-    for (uint32_t index = 0; index < length && partition < CODEBOOK_SIZE * 2; ++index) {
+    for (uint64_t index = 0; index < length && partition < CODEBOOK_SIZE * 2; ++index) {
         const double value = values[index];
-        current_weight += value * value * length + square_sum - 2.0 * value * sum;
+        current_weight +=
+            value * value * static_cast<double>(length) + square_sum - 2.0 * value * sum;
         while (current_weight * (CODEBOOK_SIZE * 2) + 1e-7 >= total_weight * partition) {
             if (((partition - 1) & 1U) != 0U) {
                 codebook->thresholds[(partition - 1) / 2] = values[index];
@@ -233,7 +283,7 @@ SparseDmqQuantizer::TrainImpl(const float* data, uint64_t count) {
     Vector<float> means(count, this->allocator_);
     UnorderedMap<uint32_t, uint32_t> term_indexes(this->allocator_);
     Vector<uint32_t> term_ids(this->allocator_);
-    Vector<uint32_t> term_counts(this->allocator_);
+    Vector<uint64_t> term_counts(this->allocator_);
     for (uint64_t vector_index = 0; vector_index < count; ++vector_index) {
         double sum = 0.0;
         for (uint32_t index = 0; index < vectors[vector_index].len_; ++index) {
@@ -244,7 +294,7 @@ SparseDmqQuantizer::TrainImpl(const float* data, uint64_t count) {
                                   : static_cast<float>(sum / vectors[vector_index].len_);
         for (uint32_t index = 0; index < vectors[vector_index].len_; ++index) {
             const uint32_t term_id = vectors[vector_index].ids_[index];
-            if (codebook_index_by_term_id_.find(term_id) != codebook_index_by_term_id_.end()) {
+            if (compact_id_by_term_id_.find(term_id) != compact_id_by_term_id_.end()) {
                 continue;
             }
             auto [iterator, inserted] =
@@ -256,29 +306,70 @@ SparseDmqQuantizer::TrainImpl(const float* data, uint64_t count) {
             ++term_counts[iterator->second];
         }
     }
-    Vector<uint64_t> offsets(term_ids.size() + 1, 0, this->allocator_);
-    for (uint32_t index = 0; index < term_ids.size(); ++index) {
-        offsets[index + 1] = offsets[index] + term_counts[index];
+
+    CHECK_ARGUMENT(
+        term_ids_.empty() or term_ids.empty(),
+        "SparseDmqQuantizer does not support adding new terms after compact IDs are assigned");
+    Vector<uint32_t> sorted_term_indexes(term_ids.size(), this->allocator_);
+    std::iota(sorted_term_indexes.begin(), sorted_term_indexes.end(), 0);
+    std::sort(
+        sorted_term_indexes.begin(),
+        sorted_term_indexes.end(),
+        [&term_ids](uint32_t left, uint32_t right) { return term_ids[left] < term_ids[right]; });
+
+    bool has_shared_codebook = false;
+    for (const uint32_t term_index : sorted_term_indexes) {
+        if (term_counts[term_index] <= shared_codebook_threshold_) {
+            has_shared_codebook = true;
+            break;
+        }
+    }
+    uint32_t training_bucket_count = has_shared_codebook ? 1 : 0;
+    Vector<uint32_t> training_bucket_by_term(term_ids.size(), this->allocator_);
+    for (const uint32_t term_index : sorted_term_indexes) {
+        if (term_counts[term_index] <= shared_codebook_threshold_) {
+            training_bucket_by_term[term_index] = 0;
+        } else {
+            training_bucket_by_term[term_index] = training_bucket_count++;
+        }
+    }
+
+    Vector<uint64_t> bucket_counts(training_bucket_count, 0, this->allocator_);
+    for (uint32_t term_index = 0; term_index < term_ids.size(); ++term_index) {
+        bucket_counts[training_bucket_by_term[term_index]] += term_counts[term_index];
+    }
+    Vector<uint64_t> offsets(static_cast<uint64_t>(training_bucket_count) + 1, 0, this->allocator_);
+    for (uint32_t bucket = 0; bucket < training_bucket_count; ++bucket) {
+        offsets[bucket + 1] = offsets[bucket] + bucket_counts[bucket];
     }
     Vector<uint64_t> cursors(offsets.begin(), offsets.end(), this->allocator_);
     Vector<float> residuals(offsets.back(), this->allocator_);
     for (uint64_t vector_index = 0; vector_index < count; ++vector_index) {
         for (uint32_t index = 0; index < vectors[vector_index].len_; ++index) {
             auto iterator = term_indexes.find(vectors[vector_index].ids_[index]);
-            if (iterator != term_indexes.end()) {
-                residuals[cursors[iterator->second]++] =
-                    vectors[vector_index].vals_[index] - means[vector_index];
+            if (iterator == term_indexes.end()) {
+                continue;
             }
+            const uint32_t bucket = training_bucket_by_term[iterator->second];
+            residuals[cursors[bucket]++] = vectors[vector_index].vals_[index] - means[vector_index];
         }
     }
-    for (uint32_t index = 0; index < term_ids.size(); ++index) {
-        const auto codebook_index = static_cast<uint32_t>(codebooks_.size());
-        codebook_index_by_term_id_[term_ids[index]] = codebook_index;
-        codebook_term_ids_.push_back(term_ids[index]);
+
+    const auto first_codebook_index = static_cast<uint32_t>(codebooks_.size());
+    for (uint32_t bucket = 0; bucket < training_bucket_count; ++bucket) {
         codebooks_.emplace_back();
-        BuildCodebook(residuals.data() + offsets[index], term_counts[index], &codebooks_.back());
-        AddCodebookLookup(term_ids[index], codebook_index);
+        BuildCodebook(
+            residuals.data() + offsets[bucket], bucket_counts[bucket], &codebooks_.back());
     }
+    for (const uint32_t term_index : sorted_term_indexes) {
+        const auto compact_id = static_cast<uint32_t>(term_ids_.size());
+        const uint32_t codebook_index = first_codebook_index + training_bucket_by_term[term_index];
+        term_ids_.push_back(term_ids[term_index]);
+        codebook_index_by_compact_id_.push_back(codebook_index);
+        compact_id_by_term_id_[term_ids[term_index]] = compact_id;
+        AddCompactIdLookup(term_ids[term_index], compact_id);
+    }
+    id_bits_ = get_bits_for_value_count(term_ids_.size());
     this->is_trained_ = true;
     return true;
 }
@@ -298,8 +389,10 @@ SparseDmqQuantizer::EncodeOneImpl(const float* data, uint8_t* codes) const {
     double numerator = 0.0;
     double denominator = 0.0;
     for (uint32_t index = 0; index < vector.len_; ++index) {
-        store_packed(packed_ids, index, id_bits_, ids[index]);
-        const auto& codebook = codebooks_[GetCodebookIndex(ids[index])];
+        const uint32_t compact_id = GetCompactId(ids[index]);
+        const uint32_t codebook_index = GetCodebookIndex(compact_id);
+        store_packed(packed_ids, index, id_bits_, compact_id);
+        const auto& codebook = codebooks_[codebook_index];
         const float residual = values[index] - header.factors.mean;
         value_codes[index] = EncodeResidual(residual, codebook);
         numerator += static_cast<double>(residual) * residual;
@@ -323,10 +416,15 @@ SparseDmqQuantizer::DecodeOneImpl(const uint8_t* codes, float* data) const {
     vector->vals_ = static_cast<float*>(this->allocator_->Allocate(sizeof(float) * header.len));
     const auto* packed_ids = codes + sizeof(header);
     const auto* value_codes = packed_ids + get_packed_size(header.len, id_bits_);
+    PackedReader id_reader(packed_ids, id_bits_);
     for (uint32_t index = 0; index < header.len; ++index) {
-        vector->ids_[index] = load_packed(packed_ids, index, id_bits_);
-        vector->vals_[index] = DecodeValue(
-            header.factors, codebooks_[GetCodebookIndex(vector->ids_[index])], value_codes[index]);
+        const uint32_t compact_id = id_reader.Read();
+        CHECK_ARGUMENT(compact_id < term_ids_.size(),
+                       fmt::format("invalid DMQ compact ID {}", compact_id));
+        const uint32_t codebook_index = GetCodebookIndex(compact_id);
+        vector->ids_[index] = term_ids_[compact_id];
+        vector->vals_[index] =
+            DecodeValue(header.factors, codebooks_[codebook_index], value_codes[index]);
     }
     return true;
 }
@@ -353,22 +451,40 @@ SparseDmqQuantizer::ComputeImpl(const uint8_t* codes1, const uint8_t* codes2) co
     const auto* right_ids = codes2 + sizeof(right);
     const auto* left_codes = left_ids + get_packed_size(left.len, id_bits_);
     const auto* right_codes = right_ids + get_packed_size(right.len, id_bits_);
+    if (left.len == 0 || right.len == 0) {
+        return 1.0F;
+    }
+    PackedReader left_reader(left_ids, id_bits_);
+    PackedReader right_reader(right_ids, id_bits_);
     uint32_t left_index = 0;
     uint32_t right_index = 0;
+    uint32_t left_id = left_reader.Read();
+    uint32_t right_id = right_reader.Read();
     float product = 0.0F;
     while (left_index < left.len && right_index < right.len) {
-        const uint32_t left_id = load_packed(left_ids, left_index, id_bits_);
-        const uint32_t right_id = load_packed(right_ids, right_index, id_bits_);
         if (left_id < right_id) {
             ++left_index;
+            if (left_index < left.len) {
+                left_id = left_reader.Read();
+            }
         } else if (left_id > right_id) {
             ++right_index;
+            if (right_index < right.len) {
+                right_id = right_reader.Read();
+            }
         } else {
-            const auto& codebook = codebooks_[GetCodebookIndex(left_id)];
+            const uint32_t codebook_index = GetCodebookIndex(left_id);
+            const auto& codebook = codebooks_[codebook_index];
             product += DecodeValue(left.factors, codebook, left_codes[left_index]) *
                        DecodeValue(right.factors, codebook, right_codes[right_index]);
             ++left_index;
             ++right_index;
+            if (left_index < left.len) {
+                left_id = left_reader.Read();
+            }
+            if (right_index < right.len) {
+                right_id = right_reader.Read();
+            }
         }
     }
     return 1.0F - product;
@@ -381,8 +497,19 @@ SparseDmqQuantizer::ProcessQueryImpl(const float* query,
     auto* query_data = new (memory) QueryData(this->allocator_);
     auto [ids, values] =
         sort_sparse_vector(*reinterpret_cast<const SparseVector*>(query), this->allocator_);
-    query_data->ids = std::move(ids);
-    query_data->values = std::move(values);
+    Vector<uint32_t> compact_ids(this->allocator_);
+    Vector<float> matched_values(this->allocator_);
+    compact_ids.reserve(ids.size());
+    matched_values.reserve(values.size());
+    for (uint32_t index = 0; index < ids.size(); ++index) {
+        auto iterator = compact_id_by_term_id_.find(ids[index]);
+        if (iterator != compact_id_by_term_id_.end()) {
+            compact_ids.push_back(iterator->second);
+            matched_values.push_back(values[index]);
+        }
+    }
+    query_data->ids = std::move(compact_ids);
+    query_data->values = std::move(matched_values);
     if (!query_data->ids.empty() && query_data->ids.back() < K_MAX_LOOKUP_VALUES) {
         query_data->term_to_index.assign(query_data->ids.back() + 1, K_INVALID_INDEX);
         for (uint32_t index = 0; index < query_data->ids.size(); ++index) {
@@ -393,11 +520,8 @@ SparseDmqQuantizer::ProcessQueryImpl(const float* query,
     query_data->code_lut.resize(static_cast<uint64_t>(query_data->ids.size()) * CODEBOOK_SIZE,
                                 0.0F);
     for (uint32_t index = 0; index < query_data->ids.size(); ++index) {
-        auto iterator = codebook_index_by_term_id_.find(query_data->ids[index]);
-        if (iterator == codebook_index_by_term_id_.end()) {
-            continue;
-        }
-        const auto& codebook = codebooks_[iterator->second];
+        const uint32_t codebook_index = GetCodebookIndex(query_data->ids[index]);
+        const auto& codebook = codebooks_[codebook_index];
         for (uint32_t code = 0; code < CODEBOOK_SIZE; ++code) {
             query_data->code_lut[static_cast<uint64_t>(index) * CODEBOOK_SIZE + code] =
                 query_data->values[index] * codebook.values[code];
@@ -418,8 +542,9 @@ SparseDmqQuantizer::ComputeDistImpl(Computer<SparseDmqQuantizer>& computer,
     float query_sum = 0.0F;
     float qualifier_product = 0.0F;
     uint32_t query_index = 0;
+    PackedReader id_reader(packed_ids, id_bits_);
     for (uint32_t base_index = 0; base_index < header.len; ++base_index) {
-        const uint32_t id = load_packed(packed_ids, base_index, id_bits_);
+        const uint32_t id = id_reader.Read();
         uint32_t matched = K_INVALID_INDEX;
         if (query.has_lookup) {
             if (id < query.term_to_index.size()) {
@@ -454,25 +579,39 @@ SparseDmqQuantizer::ReleaseComputerImpl(Computer<SparseDmqQuantizer>& computer) 
 
 void
 SparseDmqQuantizer::SerializeImpl(StreamWriter& writer) {
+    StreamWriter::WriteObj(writer, shared_codebook_threshold_);
     StreamWriter::WriteObj(writer, id_bits_);
-    StreamWriter::WriteVector(writer, codebook_term_ids_);
+    StreamWriter::WriteVector(writer, term_ids_);
+    StreamWriter::WriteVector(writer, codebook_index_by_compact_id_);
     StreamWriter::WriteVector(writer, codebooks_);
 }
 
 void
 SparseDmqQuantizer::DeserializeImpl(StreamReader& reader) {
-    uint32_t serialized_id_bits = 0;
-    StreamReader::ReadObj(reader, serialized_id_bits);
-    CHECK_ARGUMENT(serialized_id_bits == id_bits_, "serialized DMQ id width does not match");
-    StreamReader::ReadVector(reader, codebook_term_ids_);
+    StreamReader::ReadObj(reader, shared_codebook_threshold_);
+    StreamReader::ReadObj(reader, id_bits_);
+    StreamReader::ReadVector(reader, term_ids_);
+    StreamReader::ReadVector(reader, codebook_index_by_compact_id_);
     StreamReader::ReadVector(reader, codebooks_);
-    CHECK_ARGUMENT(codebook_term_ids_.size() == codebooks_.size(),
-                   "serialized DMQ codebook metadata is inconsistent");
-    codebook_index_by_term_id_.clear();
-    for (uint32_t index = 0; index < codebook_term_ids_.size(); ++index) {
-        codebook_index_by_term_id_[codebook_term_ids_[index]] = index;
+    CHECK_ARGUMENT(term_ids_.size() == codebook_index_by_compact_id_.size(),
+                   "serialized DMQ term and codebook mappings are inconsistent");
+    CHECK_ARGUMENT(id_bits_ > 0 && id_bits_ <= 32,
+                   "serialized DMQ compact ID width is out of range");
+    const bool empty_untrained_model = not this->is_trained_ && term_ids_.empty();
+    CHECK_ARGUMENT(empty_untrained_model || id_bits_ == get_bits_for_value_count(term_ids_.size()),
+                   "serialized DMQ compact ID width is inconsistent");
+    CHECK_ARGUMENT(term_ids_.empty() == codebooks_.empty(),
+                   "serialized DMQ term and codebook counts are inconsistent");
+    for (uint32_t compact_id = 0; compact_id < term_ids_.size(); ++compact_id) {
+        CHECK_ARGUMENT(codebook_index_by_compact_id_[compact_id] < codebooks_.size(),
+                       fmt::format("invalid serialized DMQ codebook index {}",
+                                   codebook_index_by_compact_id_[compact_id]));
+        if (compact_id != 0) {
+            CHECK_ARGUMENT(term_ids_[compact_id - 1] < term_ids_[compact_id],
+                           "serialized DMQ term IDs are not strictly ordered");
+        }
     }
-    RebuildCodebookLookup();
+    RebuildCompactIdLookup();
 }
 
 std::string
@@ -482,19 +621,21 @@ SparseDmqQuantizer::NameImpl() {
 
 uint64_t
 SparseDmqQuantizer::GetMemoryUsage() const {
-    return sizeof(*this) + codebook_term_ids_.capacity() * sizeof(uint32_t) +
+    return sizeof(*this) + term_ids_.capacity() * sizeof(uint32_t) +
            codebooks_.capacity() * sizeof(Codebook) +
-           codebook_index_by_term_id_.size() * sizeof(std::pair<uint32_t, uint32_t>) +
-           codebook_index_lookup_.capacity() * sizeof(uint32_t);
+           codebook_index_by_compact_id_.capacity() * sizeof(uint32_t) +
+           compact_id_by_term_id_.size() * sizeof(std::pair<uint32_t, uint32_t>) +
+           compact_id_lookup_.capacity() * sizeof(uint32_t);
 }
 
 void
 SparseDmqQuantizer::ExportModel(const SparseDmqQuantizer& other) {
-    CHECK_ARGUMENT(id_bits_ == other.id_bits_, "DMQ export target id width mismatch");
-    codebook_term_ids_ = other.codebook_term_ids_;
+    id_bits_ = other.id_bits_;
+    shared_codebook_threshold_ = other.shared_codebook_threshold_;
+    term_ids_ = other.term_ids_;
     codebooks_ = other.codebooks_;
-    codebook_index_by_term_id_ = other.codebook_index_by_term_id_;
-    RebuildCodebookLookup();
+    codebook_index_by_compact_id_ = other.codebook_index_by_compact_id_;
+    RebuildCompactIdLookup();
     this->is_trained_ = other.is_trained_;
 }
 
