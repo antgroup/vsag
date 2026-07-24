@@ -33,6 +33,10 @@ set (IO_SRC
         memory_block_io/memory_block_io.cpp
         reader_io/reader_io.cpp
         reader_io/reader_io_parameter.cpp
+        cache_io/cache_io_parameter.cpp
+        cache_io/page_cache.cpp
+        cache_io/lru_page_cache.cpp
+        cache_io/sharded_lru_page_cache.cpp
 )
 
 add_library (io OBJECT ${IO_SRC})

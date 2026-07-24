@@ -191,14 +191,18 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
                 IO_FILE_PATH_KEY,
             },
         },
-        {
-            HGRAPH_BASE_DIRECT_READ,
-            {
-                BASE_CODES_KEY,
-                IO_PARAMS_KEY,
-                IO_DIRECT_READ_KEY,
-            },
-        },
+        {HGRAPH_BASE_DIRECT_READ,
+         {
+             BASE_CODES_KEY,
+             IO_PARAMS_KEY,
+             IO_DIRECT_READ_KEY,
+         }},
+        {HGRAPH_BASE_CACHE_TOTAL_SIZE,
+         {
+             BASE_CODES_KEY,
+             IO_PARAMS_KEY,
+             CACHE_IO_TOTAL_CACHE_SIZE_KEY,
+         }},
         {
             HGRAPH_PRECISE_FILE_PATH,
             {
@@ -207,14 +211,18 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
                 IO_FILE_PATH_KEY,
             },
         },
-        {
-            HGRAPH_PRECISE_DIRECT_READ,
-            {
-                PRECISE_CODES_KEY,
-                IO_PARAMS_KEY,
-                IO_DIRECT_READ_KEY,
-            },
-        },
+        {HGRAPH_PRECISE_DIRECT_READ,
+         {
+             PRECISE_CODES_KEY,
+             IO_PARAMS_KEY,
+             IO_DIRECT_READ_KEY,
+         }},
+        {HGRAPH_PRECISE_CACHE_TOTAL_SIZE,
+         {
+             PRECISE_CODES_KEY,
+             IO_PARAMS_KEY,
+             CACHE_IO_TOTAL_CACHE_SIZE_KEY,
+         }},
         {
             HGRAPH_PRECISE_QUANTIZATION_TYPE,
             {
@@ -237,6 +245,14 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
                 GRAPH_KEY,
                 IO_PARAMS_KEY,
                 IO_FILE_PATH_KEY,
+            },
+        },
+        {
+            HGRAPH_GRAPH_CACHE_TOTAL_SIZE,
+            {
+                GRAPH_KEY,
+                IO_PARAMS_KEY,
+                CACHE_IO_TOTAL_CACHE_SIZE_KEY,
             },
         },
         {
@@ -511,6 +527,46 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             HGRAPH_LABEL_REMAP_TYPE,
             {
                 LABEL_REMAP_TYPE_KEY,
+            },
+        },
+        {
+            HGRAPH_BASE_CACHE_INNER_IO_TYPE,
+            {
+                BASE_CODES_KEY,
+                IO_PARAMS_KEY,
+                CACHE_IO_INNER_IO_TYPE_KEY,
+            },
+        },
+        {
+            HGRAPH_PRECISE_CACHE_INNER_IO_TYPE,
+            {
+                PRECISE_CODES_KEY,
+                IO_PARAMS_KEY,
+                CACHE_IO_INNER_IO_TYPE_KEY,
+            },
+        },
+        {
+            HGRAPH_GRAPH_CACHE_INNER_IO_TYPE,
+            {
+                GRAPH_KEY,
+                IO_PARAMS_KEY,
+                CACHE_IO_INNER_IO_TYPE_KEY,
+            },
+        },
+        {
+            HGRAPH_RAW_VECTOR_CACHE_INNER_IO_TYPE,
+            {
+                RAW_VECTOR_KEY,
+                IO_PARAMS_KEY,
+                CACHE_IO_INNER_IO_TYPE_KEY,
+            },
+        },
+        {
+            HGRAPH_RAW_VECTOR_CACHE_TOTAL_SIZE,
+            {
+                RAW_VECTOR_KEY,
+                IO_PARAMS_KEY,
+                CACHE_IO_TOTAL_CACHE_SIZE_KEY,
             },
         }};
     const std::string hgraph_params_template =

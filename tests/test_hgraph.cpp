@@ -3846,3 +3846,49 @@ TEST_CASE("HGraph Concurrent Tune(disable_future_tuning=false) and CalDistanceBy
 
     REQUIRE(cal_count.load() > 0);
 }
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::HGraphTestIndex,
+                             "HGraph CacheIO With Async Backend",
+                             "[ft][hgraph][cacheio][pr]") {
+    auto resource = HGraphTestIndex::GetResource(true);
+    auto dim = 128;
+    std::string search_param = R"({"hgraph": {"ef_search": 200}})";
+
+    HGraphTestIndex::HGraphBuildParam build_param("l2", dim, "sq8,fp32");
+    build_param.graph_io_type = "block_memory_io";
+
+    auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+    auto index = TestIndex::TestFactory(name, param, true);
+    auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(dim, resource->base_count, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    auto precise_file_path = HGraphTestIndex::dir.GenerateRandomFile(false);
+    std::string cache_io_param = fmt::format(R"(
+    {{
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": {},
+        "index_param": {{
+            "use_reorder": true,
+            "base_quantization_type": "sq8",
+            "precise_quantization_type": "fp32",
+            "max_degree": 96,
+            "ef_construction": 500,
+            "base_pq_dim": {},
+            "base_io_type": "memory_io",
+            "precise_io_type": "cache_io",
+            "precise_cache_inner_io_type": "async_io",
+            "precise_file_path": "{}",
+            "precise_cache_total_size": 268435456,
+            "graph_io_type": "block_memory_io"
+        }}
+    }}
+    )",
+                                             dim,
+                                             dim,
+                                             precise_file_path);
+
+    auto cache_index = TestIndex::TestFactory(name, cache_io_param, true);
+    TestIndex::TestBuildIndex(cache_index, dataset, true);
+    HGraphTestIndex::TestGeneral(cache_index, dataset, search_param, 0.98f);
+}
