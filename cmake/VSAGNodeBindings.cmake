@@ -61,7 +61,7 @@ target_compile_definitions (vsag_node PRIVATE
     NODE_ADDON_API_DISABLE_DEPRECATED
     BUILDING_NODE_EXTENSION)
 
-target_compile_options (vsag_node PRIVATE -fopenmp)
+vsag_enable_openmp_private (vsag_node)
 target_link_libraries (vsag_node PRIVATE vsag)
 
 if (NOT APPLE)

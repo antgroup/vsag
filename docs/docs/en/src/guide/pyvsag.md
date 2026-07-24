@@ -9,6 +9,10 @@
 pip install pyvsag
 ```
 
+Prebuilt wheels are available for Linux (`manylinux2014`) and macOS. macOS wheels support
+macOS 11.0 or newer on both Apple Silicon (`arm64`) and Intel (`x86_64`) for CPython
+3.10-3.14.
+
 To build from source:
 
 ```bash

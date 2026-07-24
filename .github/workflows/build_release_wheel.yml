@@ -8,7 +8,9 @@ on:
         required: false
         type: string
       arch:
-        description: 'Architecture to build (x86_64 or aarch64). If empty, builds all.'
+        description: >-
+          Architecture to build (x86_64, aarch64, or arm64 for macOS).
+          If empty, builds all.
         required: false
         type: string
   release:
@@ -21,6 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       modern_matrix: ${{ steps.set-matrix.outputs.modern_matrix }}
+      macos_matrix: ${{ steps.set-matrix.outputs.macos_matrix }}
       legacy_matrix: ${{ steps.set-matrix.outputs.legacy_matrix }}
       py36_matrix: ${{ steps.set-matrix.outputs.py36_matrix }}
     steps:
@@ -51,6 +54,80 @@ jobs:
             {"python-version": "3.8", "arch": "aarch64", "runner": "ubuntu-22.04-arm", "cibw-build-id": "cp38-*"}
           ]'
 
+          # --- macOS: supported released Python versions only ---
+          full_macos_matrix='[
+            {
+              "python-version": "3.14",
+              "arch": "arm64",
+              "runner": "macos-15",
+              "deployment-target": "11.0",
+              "cibw-build-id": "cp314-*"
+            },
+            {
+              "python-version": "3.13",
+              "arch": "arm64",
+              "runner": "macos-15",
+              "deployment-target": "11.0",
+              "cibw-build-id": "cp313-*"
+            },
+            {
+              "python-version": "3.12",
+              "arch": "arm64",
+              "runner": "macos-15",
+              "deployment-target": "11.0",
+              "cibw-build-id": "cp312-*"
+            },
+            {
+              "python-version": "3.11",
+              "arch": "arm64",
+              "runner": "macos-15",
+              "deployment-target": "11.0",
+              "cibw-build-id": "cp311-*"
+            },
+            {
+              "python-version": "3.10",
+              "arch": "arm64",
+              "runner": "macos-15",
+              "deployment-target": "11.0",
+              "cibw-build-id": "cp310-*"
+            },
+            {
+              "python-version": "3.14",
+              "arch": "x86_64",
+              "runner": "macos-15-intel",
+              "deployment-target": "11.0",
+              "cibw-build-id": "cp314-*"
+            },
+            {
+              "python-version": "3.13",
+              "arch": "x86_64",
+              "runner": "macos-15-intel",
+              "deployment-target": "11.0",
+              "cibw-build-id": "cp313-*"
+            },
+            {
+              "python-version": "3.12",
+              "arch": "x86_64",
+              "runner": "macos-15-intel",
+              "deployment-target": "11.0",
+              "cibw-build-id": "cp312-*"
+            },
+            {
+              "python-version": "3.11",
+              "arch": "x86_64",
+              "runner": "macos-15-intel",
+              "deployment-target": "11.0",
+              "cibw-build-id": "cp311-*"
+            },
+            {
+              "python-version": "3.10",
+              "arch": "x86_64",
+              "runner": "macos-15-intel",
+              "deployment-target": "11.0",
+              "cibw-build-id": "cp310-*"
+            }
+          ]'
+
           # --- Legacy: Python 3.7 (cibuildwheel 2.x, since 3.x dropped <3.8) ---
           full_legacy_matrix='[
             {"python-version": "3.7", "arch": "x86_64", "runner": "ubuntu-latest", "cibw-build-id": "cp37-*"},
@@ -72,43 +149,81 @@ jobs:
             echo "$matrix_json" | jq -c "$expr"
           }
 
+          matrix_or_skip() {
+            local matrix_json="$1" runner="$2"
+            if [[ "$(echo "$matrix_json" | jq 'length')" == "0" ]]; then
+              jq -cn --arg runner "$runner" '[{
+                "skip": true,
+                "python-version": "skip",
+                "arch": "skip",
+                "runner": $runner,
+                "deployment-target": "11.0",
+                "cibw-build-id": "skip"
+              }]'
+            else
+              echo "$matrix_json"
+            fi
+          }
+
+          is_macos_supported_python() {
+            case "$1" in
+              "" | "3.10" | "3.11" | "3.12" | "3.13" | "3.14") return 0 ;;
+              *) return 1 ;;
+            esac
+          }
+
           if [[ "${{ github.event_name }}" != "workflow_dispatch" || ( -z "$py_ver" && -z "$arch" ) ]]; then
             echo "Running full matrix for all versions."
-            echo "modern_matrix=$(echo $full_modern_matrix | jq -c .)" >> $GITHUB_OUTPUT
-            echo "legacy_matrix=$(echo $full_legacy_matrix | jq -c .)" >> $GITHUB_OUTPUT
-            echo "py36_matrix=$(echo $full_py36_matrix | jq -c .)" >> $GITHUB_OUTPUT
+            modern_matrix="$(echo "$full_modern_matrix" | jq -c .)"
+            macos_matrix="$(echo "$full_macos_matrix" | jq -c .)"
+            legacy_matrix="$(echo "$full_legacy_matrix" | jq -c .)"
+            py36_matrix="$(echo "$full_py36_matrix" | jq -c .)"
+
+            echo "modern_matrix=$(matrix_or_skip "$modern_matrix" ubuntu-latest)" >> $GITHUB_OUTPUT
+            echo "macos_matrix=$(matrix_or_skip "$macos_matrix" macos-15)" >> $GITHUB_OUTPUT
+            echo "legacy_matrix=$(matrix_or_skip "$legacy_matrix" ubuntu-latest)" >> $GITHUB_OUTPUT
+            echo "py36_matrix=$(matrix_or_skip "$py36_matrix" ubuntu-latest)" >> $GITHUB_OUTPUT
           else
             echo "Filtering matrix based on inputs: python-version='${py_ver}', arch='${arch}'"
 
             # Modern matrix (3.8+)
             if [[ -z "$py_ver" || ( "$py_ver" != "3.6" && "$py_ver" != "3.7" ) ]]; then
-              echo "modern_matrix=$(filter_matrix "$full_modern_matrix" "$py_ver" "$arch")" >> $GITHUB_OUTPUT
+              modern_matrix="$(filter_matrix "$full_modern_matrix" "$py_ver" "$arch")"
             else
-              echo "modern_matrix=[]" >> $GITHUB_OUTPUT
+              modern_matrix="[]"
             fi
+            echo "modern_matrix=$(matrix_or_skip "$modern_matrix" ubuntu-latest)" >> $GITHUB_OUTPUT
+
+            # macOS matrix (supported released Python versions only)
+            if is_macos_supported_python "$py_ver"; then
+              macos_matrix="$(filter_matrix "$full_macos_matrix" "$py_ver" "$arch")"
+            else
+              macos_matrix="[]"
+            fi
+            echo "macos_matrix=$(matrix_or_skip "$macos_matrix" macos-15)" >> $GITHUB_OUTPUT
 
             # Legacy matrix (3.7)
             if [[ -z "$py_ver" || "$py_ver" == "3.7" ]]; then
-              echo "legacy_matrix=$(filter_matrix "$full_legacy_matrix" "$py_ver" "$arch")" >> $GITHUB_OUTPUT
+              legacy_matrix="$(filter_matrix "$full_legacy_matrix" "$py_ver" "$arch")"
             else
-              echo "legacy_matrix=[]" >> $GITHUB_OUTPUT
+              legacy_matrix="[]"
             fi
+            echo "legacy_matrix=$(matrix_or_skip "$legacy_matrix" ubuntu-latest)" >> $GITHUB_OUTPUT
 
             # Python 3.6 matrix
             if [[ -z "$py_ver" || "$py_ver" == "3.6" ]]; then
               filter_expression="."
               if [[ -n "$arch" ]]; then filter_expression+=" | map(select(.arch == \"$arch\"))"; fi
-              echo "py36_matrix=$(echo "$full_py36_matrix" | jq -c "$filter_expression")" >> $GITHUB_OUTPUT
+              py36_matrix="$(echo "$full_py36_matrix" | jq -c "$filter_expression")"
             else
-              echo "py36_matrix=[]" >> $GITHUB_OUTPUT
+              py36_matrix="[]"
             fi
+            echo "py36_matrix=$(matrix_or_skip "$py36_matrix" ubuntu-latest)" >> $GITHUB_OUTPUT
           fi
 
   build_wheels_modern:
     name: Build wheels for Python ${{ matrix.python-version }} on ${{ matrix.arch }}
     needs: setup-matrix
-    # Only run if the matrix is not empty
-    if: ${{ fromJson(needs.setup-matrix.outputs.modern_matrix) != '[]' }}
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -117,32 +232,88 @@ jobs:
         include: ${{ fromJson(needs.setup-matrix.outputs.modern_matrix) }}
 
     steps:
+      - name: Skip empty matrix
+        if: ${{ matrix.skip }}
+        run: echo "No modern Python wheels requested for this dispatch."
+
       - uses: actions/checkout@v4
+        if: ${{ !matrix.skip }}
         with:
           fetch-depth: 0
 
       - name: Prepare build environment
+        if: ${{ !matrix.skip }}
         run: bash ./scripts/python/prepare_python_build.sh ${{ matrix.python-version }}
 
       - name: Build wheels
+        if: ${{ !matrix.skip }}
         uses: pypa/cibuildwheel@v3.3.1
         with:
           package-dir: python
         env:
           CIBW_ARCHS: ${{ matrix.arch }}
           CIBW_BUILD: ${{ matrix.cibw-build-id }}
-          CIBW_TEST_COMMAND: "pip install numpy pytest && ls -alF /project/ && python /project/tests/python/run_test.py"
+          CIBW_TEST_COMMAND: >-
+            pip install "numpy==2.5.0; python_version >= '3.12'"
+            "numpy; python_version < '3.12'" pytest &&
+            ls -alF /project/ &&
+            python /project/tests/python/run_test.py
 
       - uses: actions/upload-artifact@v5
+        if: ${{ !matrix.skip }}
         with:
           name: wheels-${{ matrix.python-version }}-${{ matrix.arch }}
+          path: ./wheelhouse/*.whl
+          if-no-files-found: error
+
+  build_wheels_macos:
+    name: Build wheels for Python ${{ matrix.python-version }} on macOS ${{ matrix.arch }}
+    needs: setup-matrix
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.setup-matrix.outputs.macos_matrix) }}
+
+    steps:
+      - name: Skip empty matrix
+        if: ${{ matrix.skip }}
+        run: echo "No macOS wheels requested for this dispatch."
+
+      - uses: actions/checkout@v4
+        if: ${{ !matrix.skip }}
+        with:
+          fetch-depth: 0
+
+      - name: Prepare build environment
+        if: ${{ !matrix.skip }}
+        run: bash ./scripts/python/prepare_python_build.sh ${{ matrix.python-version }}
+
+      - name: Build wheels
+        if: ${{ !matrix.skip }}
+        uses: pypa/cibuildwheel@v3.3.1
+        with:
+          package-dir: python
+        env:
+          CIBW_ARCHS: ${{ matrix.arch }}
+          CIBW_BUILD: ${{ matrix.cibw-build-id }}
+          CIBW_TEST_COMMAND: >-
+            pip install "numpy==2.5.0; python_version >= '3.12'"
+            "numpy; python_version < '3.12'" pytest &&
+            python {project}/tests/python/run_test.py
+          MACOSX_DEPLOYMENT_TARGET: ${{ matrix.deployment-target }}
+          VSAG_USE_SYSTEM_DEPS: OFF
+
+      - uses: actions/upload-artifact@v5
+        if: ${{ !matrix.skip }}
+        with:
+          name: wheels-${{ matrix.python-version }}-macos-${{ matrix.arch }}
           path: ./wheelhouse/*.whl
           if-no-files-found: error
 
   build_wheels_legacy:
     name: Build wheels for Python ${{ matrix.python-version }} on ${{ matrix.arch }}
     needs: setup-matrix
-    if: ${{ fromJson(needs.setup-matrix.outputs.legacy_matrix) != '[]' }}
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -150,14 +321,21 @@ jobs:
         include: ${{ fromJson(needs.setup-matrix.outputs.legacy_matrix) }}
 
     steps:
+      - name: Skip empty matrix
+        if: ${{ matrix.skip }}
+        run: echo "No legacy Python wheels requested for this dispatch."
+
       - uses: actions/checkout@v4
+        if: ${{ !matrix.skip }}
         with:
           fetch-depth: 0
 
       - name: Prepare build environment
+        if: ${{ !matrix.skip }}
         run: bash ./scripts/python/prepare_python_build.sh ${{ matrix.python-version }}
 
       - name: Build wheels
+        if: ${{ !matrix.skip }}
         uses: pypa/cibuildwheel@v2.23.3
         with:
           package-dir: python
@@ -181,6 +359,7 @@ jobs:
             fi
 
       - uses: actions/upload-artifact@v5
+        if: ${{ !matrix.skip }}
         with:
           name: wheels-${{ matrix.python-version }}-${{ matrix.arch }}
           path: ./wheelhouse/*.whl
@@ -189,7 +368,6 @@ jobs:
   build_wheels_py36:
     name: Build wheels for Python 3.6 on ${{ matrix.arch }}
     needs: setup-matrix
-    if: ${{ fromJson(needs.setup-matrix.outputs.py36_matrix) != '[]' }}
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -197,14 +375,21 @@ jobs:
         include: ${{ fromJson(needs.setup-matrix.outputs.py36_matrix) }}
 
     steps:
+      - name: Skip empty matrix
+        if: ${{ matrix.skip }}
+        run: echo "No Python 3.6 wheels requested for this dispatch."
+
       - uses: actions/checkout@v4
+        if: ${{ !matrix.skip }}
         with:
           fetch-depth: 0
 
       - name: Prepare build environment for Python 3.6
+        if: ${{ !matrix.skip }}
         run: bash ./scripts/python/prepare_python_build.sh 3.6
 
       - name: Build wheels for Python 3.6
+        if: ${{ !matrix.skip }}
         uses: pypa/cibuildwheel@v2.11.4
         with:
           package-dir: python
@@ -228,6 +413,7 @@ jobs:
             fi
 
       - uses: actions/upload-artifact@v5
+        if: ${{ !matrix.skip }}
         with:
           name: wheels-3.6-${{ matrix.arch }}
           path: ./wheelhouse/*.whl
@@ -235,17 +421,34 @@ jobs:
 
   publish:
     name: Publish packages
-    needs: [build_wheels_modern, build_wheels_legacy, build_wheels_py36]
+    needs: [build_wheels_modern, build_wheels_macos, build_wheels_legacy, build_wheels_py36]
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'release' && github.event.action == 'published' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
+    if: ${{ always() }}
     steps:
+      - name: Check build results
+        if: >-
+          ${{
+            github.event_name == 'release' &&
+            github.event.action == 'published' &&
+            (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled'))
+          }}
+        run: |
+          echo "At least one wheel build failed or was cancelled."
+          exit 1
+
+      - name: Skip publish outside release events
+        if: ${{ github.event_name != 'release' || github.event.action != 'published' }}
+        run: echo "Publishing is only enabled for published release events."
+
       - uses: actions/download-artifact@v5
+        if: ${{ github.event_name == 'release' && github.event.action == 'published' }}
         with:
           path: dist
           merge-multiple: true
 
       - name: List distribution files
         id: list_files
+        if: ${{ github.event_name == 'release' && github.event.action == 'published' }}
         run: |
           if [ -z "$(ls -A dist)" ]; then
             echo "No build artifacts found. Skipping publish."
@@ -258,7 +461,7 @@ jobs:
 
       - name: Publish to PyPI
         if: steps.list_files.outputs.should_publish == 'true'
-        uses: pypa/gh-action-pypi-publish@v1
+        uses: pypa/gh-action-pypi-publish@release/v1
         with:
           password: ${{ secrets.PYPI_API_TOKEN }}
           verbose: true

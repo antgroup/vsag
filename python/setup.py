@@ -18,6 +18,10 @@ class CMakeBuild(build_ext):
         cfg = "Debug" if self.debug else "Release"
         mkl_static_link = os.environ.get("MKL_STATIC_LINK", "ON")
         use_system_deps = os.environ.get("VSAG_USE_SYSTEM_DEPS", "OFF").strip().upper() or "OFF"
+        jobs = os.environ.get("CMAKE_BUILD_PARALLEL_LEVEL", str(os.cpu_count() or 4))
+        release_flags = "-O3 -DNDEBUG"
+        if sys.platform != "darwin":
+            release_flags += " -s"
 
         cmake_args = [
             f"-DCMAKE_LIBRARY_OUTPUT_DIRECTORY={extdir}",
@@ -28,12 +32,24 @@ class CMakeBuild(build_ext):
             "-DENABLE_PYBINDS=ON",
             "-DENABLE_TESTS=OFF",
             f"-DMKL_STATIC_LINK={mkl_static_link}",
-            "-DCMAKE_CXX_FLAGS_RELEASE=-O3 -DNDEBUG -s",
+            f"-DNUM_BUILDING_JOBS={jobs}",
+            f"-DCMAKE_CXX_FLAGS_RELEASE={release_flags}",
         ]
+        if sys.platform == "darwin":
+            cmake_args.extend(
+                [
+                    "-DCMAKE_IGNORE_PREFIX_PATH=/usr/local;/opt/homebrew",
+                    "-DENABLE_LIBAIO=OFF",
+                    "-DENABLE_LIBCXX=ON",
+                    "-DENABLE_OPENMP=OFF",
+                    "-DENABLE_WERROR=OFF",
+                    "-DCMAKE_C_COMPILER=clang",
+                    "-DCMAKE_CXX_COMPILER=clang++",
+                ]
+            )
 
         build_args = []
         if self.compiler.compiler_type != "msvc":
-            jobs = os.environ.get("CMAKE_BUILD_PARALLEL_LEVEL", str(os.cpu_count() or 4))
             build_args += ["--", f"-j{jobs}"]
 
         env = os.environ.copy()

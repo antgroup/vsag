@@ -191,6 +191,27 @@ if (NOT OPENBLAS_FOUND)
     string (STRIP "${_openblas_c_flags}" _openblas_c_flags)
     string (STRIP "${_openblas_cxx_flags}" _openblas_cxx_flags)
 
+    if (APPLE)
+        if (VSAG_TARGET_PROCESSOR STREQUAL "x86_64" OR CMAKE_OSX_ARCHITECTURES STREQUAL "x86_64")
+            # macOS wheels must run on supported Intel Macs, not just on the CI
+            # host CPU. Avoid OpenBLAS dynamic dispatch there and build a
+            # conservative baseline kernel instead.
+            set (_openblas_arch_args TARGET=NEHALEM)
+        else ()
+            set (_openblas_arch_args DYNAMIC_ARCH=1)
+        endif ()
+        set (_openblas_build_args
+            libs netlib USE_THREAD=0 USE_LOCKING=1 ${_openblas_arch_args} NOFORTRAN=1 NO_LAPACKE=0
+            NO_SHARED=1)
+        set (_openblas_install_args
+            ${_openblas_arch_args} NOFORTRAN=1 NO_LAPACKE=0 NO_SHARED=1)
+    else ()
+        set (_openblas_build_args
+            USE_THREAD=0 USE_LOCKING=1 DYNAMIC_ARCH=1 NOFORTRAN=1)
+        set (_openblas_install_args
+            DYNAMIC_ARCH=1 NOFORTRAN=1)
+    endif ()
+
     ExternalProject_Add (
         ${name}
         URL ${openblas_urls}
@@ -209,9 +230,9 @@ if (NOT OPENBLAS_FOUND)
             OMP_NUM_THREADS=1
             PATH=/usr/lib/ccache:$ENV{PATH}
             LD_LIBRARY_PATH=/opt/alibaba-cloud-compiler/lib64/:$ENV{LD_LIBRARY_PATH}
-            make USE_THREAD=0 USE_LOCKING=1 DYNAMIC_ARCH=1 NOFORTRAN=1 -j${NUM_BUILDING_JOBS}
+            make ${_openblas_build_args} -j${NUM_BUILDING_JOBS}
         INSTALL_COMMAND
-            make DYNAMIC_ARCH=1 NOFORTRAN=1 PREFIX=${install_dir} install
+            make ${_openblas_install_args} PREFIX=${install_dir} install
         BUILD_IN_SOURCE 1
         LOG_CONFIGURE TRUE
         LOG_BUILD TRUE
