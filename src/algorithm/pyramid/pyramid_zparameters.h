@@ -100,6 +100,9 @@ public:
 public:
     uint64_t ef_search{100};
     uint64_t subindex_ef_search{50};
+    bool has_rabitq_one_bit_search{false};
+    bool rabitq_one_bit_search{false};
+    float rabitq_error_rate{std::numeric_limits<float>::quiet_NaN()};
     std::vector<std::string> hierarchies;
     HierarchyOp hierarchy_op{HierarchyOp::SINGLE};
 

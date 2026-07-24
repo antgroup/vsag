@@ -275,6 +275,44 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
+                             "Pyramid split RaBitQ builds with ODescent",
+                             "[ft][pyramid][rabitq]") {
+    constexpr int64_t dim = 64;
+    constexpr uint64_t count = 256;
+    constexpr auto parameter_temp = R"(
+    {{
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": {},
+        "index_param": {{
+            "max_degree": 32,
+            "ef_construction": 100,
+            "alpha": 1.2,
+            "graph_type": "odescent",
+            "graph_iter_turn": 3,
+            "neighbor_sample_rate": 0.2,
+            "no_build_levels": [0],
+            "base_quantization_type": "rabitq",
+            "rabitq_bits_per_dim_base": 3,
+            "precise_quantization_type": "rabitq",
+            "rabitq_bits_per_dim_precise": 5,
+            "use_reorder": true,
+            "index_min_size": 28
+        }}
+    }})";
+
+    auto index = TestFactory("pyramid", fmt::format(parameter_temp, dim), true);
+    auto dataset = pool.GetDatasetAndCreate(dim, count, "l2", /*with_path=*/true);
+    TestBuildIndex(index, dataset, true);
+
+    auto query = fixtures::get_one_query(dataset->query_, 0);
+    auto result = index->KnnSearch(query, 5, GeneratePyramidSearchParametersString(100));
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() > 0);
+    REQUIRE(result.value()->GetDim() <= 5);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "Pyramid Duplicate Path Semantics Same Path",
                              "[ft][build][pyramid]") {
     PyramidParam pyramid_param;

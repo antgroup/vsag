@@ -18,6 +18,10 @@
 #include <chrono>
 #include <ios>
 
+#include "datacell/flatten_datacell_parameter.h"
+#include "inner_string_params.h"
+#include "io/memory_io/memory_io_parameter.h"
+#include "quantization/scalar_quantization/scalar_quantizer_parameter.h"
 #include "simd/simd.h"
 #include "utils/linear_congruential_generator.h"
 
@@ -40,6 +44,7 @@ ODescent::Build(const Vector<InnerIdType>& ids_sequence, const GraphInterfacePtr
         graph_.emplace_back(allocator_);
         return true;
     }
+    this->prepare_build_flatten();
     Vector<std::mutex>(data_num_, allocator_).swap(points_lock_);
     Vector<UnorderedSet<uint32_t>> old_neighbors(allocator_);
     Vector<UnorderedSet<uint32_t>> new_neighbors(allocator_);
@@ -62,6 +67,25 @@ ODescent::Build(const Vector<InnerIdType>& ids_sequence, const GraphInterfacePtr
         }
     }
     return true;
+}
+
+void
+ODescent::prepare_build_flatten() {
+    if (this->build_flatten_interface_ != nullptr or this->build_vectors_ == nullptr or
+        this->build_vector_count_ <= 0 or
+        this->flatten_interface_->GetQuantizerName() != QUANTIZATION_TYPE_VALUE_RABITQ) {
+        return;
+    }
+
+    auto sq8_param = std::make_shared<FlattenDataCellParameter>();
+    sq8_param->quantizer_parameter = std::make_shared<ScalarQuantizerParameter<8>>();
+    sq8_param->io_parameter = std::make_shared<MemoryIOParameter>();
+
+    auto common_param = this->flatten_interface_->ExportCommonParam();
+    this->build_flatten_interface_ = FlattenInterface::MakeInstance(sq8_param, common_param);
+    this->build_flatten_interface_->Train(this->build_vectors_, this->build_vector_count_);
+    this->build_flatten_interface_->BatchInsertVector(this->build_vectors_,
+                                                      this->build_vector_count_);
 }
 
 void

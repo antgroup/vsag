@@ -1,7 +1,7 @@
 # RaBitQ
 
 `rabitq` 是 VSAG 的二值 / 低比特量化器。默认模式下每个坐标用 **1 比特**
-编码，给出所有内建量化器中最高的压缩率。在 HGraph 上，`x+y` split 模式把
+编码，给出所有内建量化器中最高的压缩率。在 HGraph 和 Pyramid 上，`x+y` split 模式把
 底库码拆成 `x` 个过滤 bit 和 `y` 个 supplement bit：图遍历只使用 filter code，
 重排 / full-distance 阶段只额外读取 supplement bits。
 
@@ -9,7 +9,7 @@
 
 > 实现：`src/quantization/rabitq_quantization/rabitq_quantizer.cpp`，
 > 参数文件 `rabitq_quantizer_parameter.cpp`。
-> HGraph split 的完整存储布局、lower bound 公式和 IO 模式见
+> split 的完整存储布局、lower bound 公式和 IO 模式见
 > [RaBitQ x+y Split](rabitq_split.md)。
 
 ## 何时使用
@@ -27,7 +27,7 @@
 
 - `rabitq_bits_per_dim_base = 1`：每向量 `ceil(dim / 8)` 字节。`dim = 768`
   时为 96 字节（对比 fp32 的 3072 → 小 32×）。
-- HGraph 上 `rabitq_bits_per_dim_base = x` 且
+- HGraph 或 Pyramid 上 `rabitq_bits_per_dim_base = x` 且
   `rabitq_bits_per_dim_precise = y`：split 模式约存储
   `(x + y) * dim / 8` 字节的 RaBitQ code。例如 `3+5` 约为每向量 `dim`
   字节。
@@ -38,9 +38,9 @@
 | --- | --- | --- | --- |
 | `pca_dim` | int | `0`（= 输入维度） | RaBitQ 内部可选的 PCA 预处理维度。`0` 表示不做 PCA 降维（`rabitq_quantizer_parameter.cpp:30-32`）。 |
 | `rabitq_bits_per_dim_query` | int | `32` | 搜索时**查询**的每维位数。允许值：`4` 或 `32`（`rabitq_quantizer_parameter.cpp:38-43`）。 |
-| `rabitq_bits_per_dim_base` | int | `1` | standard RaBitQ 下表示底库码每维位数；HGraph `x+y` split 下，这个外部 key 表示 `x`，即图遍历过滤阶段使用的 filter bits。范围 `[1, 8]`。 |
-| `rabitq_bits_per_dim_precise` | int | 未设置 | HGraph-only split 模式 key。和 `base_quantization_type: "rabitq"`、`precise_quantization_type: "rabitq"` 一起出现时表示 `y`，即重排 / full-distance 阶段读取的 supplement bits。要求 `x + y <= 8`。 |
-| `rabitq_error_rate` | float | `1.9` | HGraph split 搜索的默认 lower-bound 误差倍率；必须为有限正数，也可以在 `hgraph` 搜索参数中按次覆盖。 |
+| `rabitq_bits_per_dim_base` | int | `1` | standard RaBitQ 下表示底库码每维位数；HGraph/Pyramid `x+y` split 下，这个外部 key 表示 `x`，即图遍历过滤阶段使用的 filter bits。范围 `[1, 8]`。 |
+| `rabitq_bits_per_dim_precise` | int | 未设置 | HGraph/Pyramid split 模式 key。和 `base_quantization_type: "rabitq"`、`precise_quantization_type: "rabitq"` 一起出现时表示 `y`，即重排 / full-distance 阶段读取的 supplement bits。要求 `x + y <= 8`。 |
+| `rabitq_error_rate` | float | `1.9` | HGraph/Pyramid split 搜索的默认 lower-bound 误差倍率；必须为有限正数，也可以在 `hgraph` 或 `pyramid` 搜索参数中按次覆盖。 |
 | `use_fht` | bool | `false` | `true` 时在二值化前应用快速 Hadamard 变换旋转。以 O(dim log dim) 的廉价代价提升各向异性数据上的精度（`rabitq_quantizer_parameter.cpp:76-78`）。 |
 | `fast_encode_rabitq` | bool | `true` | 对大于 1 bit 的底库码启用基于 CAQ 的快速编码；设为 `false` 时使用原有精确编码。1 bit 编码会忽略此参数。 |
 | `fast_encode_rabitq_rounds` | int | `6` | CAQ 坐标微调轮数，范围 `[1, 32]`；每个坐标在每轮最多移动一级。 |
@@ -59,7 +59,7 @@
 `rabitq_bits_per_dim_precise`、`rabitq_error_rate`、`rabitq_use_fht`；IVF
 暴露 `rabitq_pca_dim`、`rabitq_bits_per_dim_query`、
 `rabitq_bits_per_dim_base`、`rabitq_version`、`rabitq_error_rate`、
-`rabitq_use_fht`；Pyramid 为底层量化器暴露 PCA、底库/查询位数和 FHT
+`rabitq_use_fht`；Pyramid 为底层量化器暴露 PCA、底库/查询位数、split precise 位数、误差倍率和 FHT
 相关 key。其中 `rabitq_use_fht` 是索引层对量化器内部 `use_fht` key
 的别名，会由索引层重写。
 
@@ -86,7 +86,7 @@
 ```
 
 切换到高精度的 `x+y` split 模式：把 base 和 precise 量化都设置为 RaBitQ，
-并提供 `rabitq_bits_per_dim_precise`。HGraph 会自动选择 split datacell。
+并提供 `rabitq_bits_per_dim_precise`。HGraph 和 Pyramid 会自动选择 split datacell。
 下面例子中，图遍历使用 `x = 3` 个 filter bits，重排只读取 `y = 5` 个
 supplement bits：
 
@@ -117,7 +117,7 @@ FHT 旋转是固定的（无需学习），因此不增加训练代价；PCA 预
   `use_reorder: true` + `precise_quantization_type: "fp32"` 是稳妥默认。
 - **先旋转。** 对未归一化数据，设 `rabitq_use_fht: true`，或在 `tq` 链路
   中包含 `rom` / `fht`。
-- **精度优先时用 split 模式。** HGraph `x+y` split 保留 `x` bit 快速
+- **精度优先时用 split 模式。** HGraph/Pyramid `x+y` split 保留 `x` bit 快速
   过滤路径，再添加 `y` 个 supplement bits 用于重排；相对纯 1 比特，使用
   更多总 bit 时召回明显更高。
 
