@@ -72,23 +72,31 @@ public:
             std::hash<std::thread::id>()(std::this_thread::get_id()) % kSubPoolCount};
         auto pool_id = prefer_pool_id_;
         while (true) {
-            if (sub_pool_mutexes_[pool_id].try_lock()) {
-                prefer_pool_id_ = pool_id;
-                if (pool_[pool_id]->empty()) {
-                    sub_pool_mutexes_[pool_id].unlock();
-                    auto obj = this->constructor_();
-                    obj->source_pool_id_ = pool_id;
-                    return obj;
+            uint64_t empty_pool_count = 0;
+            for (uint64_t i = 0; i < kSubPoolCount; ++i) {
+                if (sub_pool_mutexes_[pool_id].try_lock()) {
+                    if (pool_[pool_id]->empty()) {
+                        sub_pool_mutexes_[pool_id].unlock();
+                        ++empty_pool_count;
+                    } else {
+                        std::shared_ptr<T> obj = pool_[pool_id]->front();
+                        pool_[pool_id]->pop_front();
+                        sub_pool_mutexes_[pool_id].unlock();
+                        prefer_pool_id_ = pool_id;
+                        obj->source_pool_id_ = pool_id;
+                        obj->Reset();
+                        return obj;
+                    }
                 }
-                std::shared_ptr<T> obj = pool_[pool_id]->front();
-                pool_[pool_id]->pop_front();
-                sub_pool_mutexes_[pool_id].unlock();
-                obj->source_pool_id_ = pool_id;
-                obj->Reset();
+
+                ++pool_id;
+                pool_id %= kSubPoolCount;
+            }
+            if (empty_pool_count == kSubPoolCount) {
+                auto obj = this->constructor_();
+                obj->source_pool_id_ = prefer_pool_id_;
                 return obj;
             }
-            ++pool_id;
-            pool_id %= kSubPoolCount;
         }
     }
 

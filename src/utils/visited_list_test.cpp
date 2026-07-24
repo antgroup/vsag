@@ -225,3 +225,15 @@ TEST_CASE("VisitedListPool Basic Test", "[ut][VisitedListPool]") {
         }
     }
 }
+
+TEST_CASE("VisitedListPool reuses objects across sub-pools", "[ut][VisitedListPool]") {
+    auto allocator = std::make_shared<DefaultAllocator>();
+    auto pool = std::make_shared<VisitedListPool>(
+        VisitedListPool::kSubPoolCount, allocator.get(), 1000, allocator.get());
+    auto initial_memory_usage = pool->GetMemoryUsage();
+
+    auto first = pool->TakeOne();
+    auto second = pool->TakeOne();
+
+    REQUIRE(pool->GetMemoryUsage() == initial_memory_usage);
+}
