@@ -17,10 +17,12 @@
 
 #include <H5Cpp.h>
 
+#include <algorithm>
 #include <catch2/catch_test_macros.hpp>
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace {
@@ -30,7 +32,9 @@ using vsag::eval::EvalDataset;
 using vsag::eval::EvalDatasetPtr;
 
 EvalDatasetPtr
-BuildSparseDataset(bool with_token_sequences) {
+BuildSparseDataset(bool with_token_sequences,
+                   bool with_paths = false,
+                   bool test_only_paths = false) {
     // Build a tiny sparse dataset (3 train, 2 test) and optionally attach
     // the original tokenized term-id sequences.
     auto ds = std::make_shared<EvalDataset>();
@@ -106,6 +110,14 @@ BuildSparseDataset(bool with_token_sequences) {
         set_distances(float* ptr) {
             this->distances_.reset(ptr);
         }
+        std::unordered_map<std::string, std::vector<std::string>>&
+        train_paths() {
+            return this->train_paths_;
+        }
+        std::unordered_map<std::string, std::vector<std::string>>&
+        test_paths() {
+            return this->test_paths_;
+        }
     };
 
     auto shim = std::make_shared<ShimDataset>();
@@ -128,6 +140,12 @@ BuildSparseDataset(bool with_token_sequences) {
     shim->set_neighbors_shape(static_cast<int64_t>(shim->test().size()), kK);
     shim->set_neighbors(nb);
     shim->set_distances(dist);
+    if (with_paths) {
+        if (!test_only_paths) {
+            shim->train_paths()["site"] = {"root/a", "root/b", "root/c"};
+        }
+        shim->test_paths()["site"] = {"root/a", "root/c"};
+    }
 
     return shim;
 }
@@ -344,6 +362,48 @@ TEST_CASE("EvalDataset sparse round-trip writes record-offset indexes", "[ut][ev
     REQUIRE(loaded->GetSparseTestOffsets() == std::vector<uint64_t>{0, 20, 32});
     REQUIRE(loaded->GetTrainTokenSequenceOffsets() == std::vector<uint64_t>{0, 20, 32, 36});
     REQUIRE(loaded->GetTestTokenSequenceOffsets() == std::vector<uint64_t>{0, 8, 24});
+    std::remove(path.c_str());
+}
+
+TEST_CASE("EvalDataset round-trips Pyramid path datasets", "[ut][eval_dataset]") {
+    auto path = TempPath("paths_roundtrip");
+    {
+        auto ds = BuildSparseDataset(/*with_token_sequences=*/false, /*with_paths=*/true);
+        EvalDataset::Save(ds, path);
+    }
+
+    auto loaded = EvalDataset::Load(path);
+    REQUIRE(loaded->HasPaths());
+    const auto& hierarchies = loaded->GetHierarchyNames();
+    REQUIRE(std::find(hierarchies.begin(), hierarchies.end(), "site") != hierarchies.end());
+    const auto* train_paths = loaded->GetTrainPaths("site");
+    REQUIRE(train_paths != nullptr);
+    REQUIRE(train_paths[0] == "root/a");
+    REQUIRE(train_paths[2] == "root/c");
+    const auto* test_paths = loaded->GetTestPaths("site");
+    REQUIRE(test_paths != nullptr);
+    REQUIRE(test_paths[0] == "root/a");
+    REQUIRE(test_paths[1] == "root/c");
+    std::remove(path.c_str());
+}
+
+TEST_CASE("EvalDataset saves and loads test-only Pyramid paths", "[ut][eval_dataset]") {
+    auto path = TempPath("paths_test_only");
+    {
+        auto ds = BuildSparseDataset(
+            /*with_token_sequences=*/false, /*with_paths=*/true, /*test_only_paths=*/true);
+        EvalDataset::Save(ds, path);
+    }
+
+    auto loaded = EvalDataset::Load(path);
+    REQUIRE(loaded->HasPaths());
+    const auto& hierarchies = loaded->GetHierarchyNames();
+    REQUIRE(std::find(hierarchies.begin(), hierarchies.end(), "site") != hierarchies.end());
+    REQUIRE(loaded->GetTrainPaths("site") == nullptr);
+    const auto* test_paths = loaded->GetTestPaths("site");
+    REQUIRE(test_paths != nullptr);
+    REQUIRE(test_paths[0] == "root/a");
+    REQUIRE(test_paths[1] == "root/c");
     std::remove(path.c_str());
 }
 

@@ -68,6 +68,14 @@ BuildEvalCase::do_build() {
     } else {
         base->SparseVectors((const SparseVector*)this->dataset_ptr_->GetTrain());
     }
+    if (this->dataset_ptr_->HasPaths()) {
+        for (const auto& hname : this->dataset_ptr_->GetHierarchyNames()) {
+            const auto* paths = this->dataset_ptr_->GetTrainPaths(hname);
+            if (paths != nullptr) {
+                base->Paths(hname, paths);
+            }
+        }
+    }
     for (auto& monitor : monitors_) {
         monitor->Start();
     }
