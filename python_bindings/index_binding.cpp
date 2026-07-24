@@ -474,7 +474,7 @@ public:
     }
 
     py::array_t<float>
-    CalDistanceById(const py::array_t<float>& query, const py::array_t<int64_t>& ids) {
+    CalcDistancesById(const py::array_t<float>& query, const py::array_t<int64_t>& ids) {
         auto buf_query = query.request();
         auto buf_ids = ids.request();
 
@@ -490,7 +490,7 @@ public:
             dist_view(i) = -1.0F;
         }
 
-        auto result = index_->CalDistanceById(query.data(), ids.data(), count);
+        auto result = index_->CalcDistancesById(query.data(), ids.data(), count);
 
         if (result.has_value()) {
             const auto* dist_data = result.value()->GetDistances();
@@ -500,6 +500,11 @@ public:
         }
 
         return distances;
+    }
+
+    py::array_t<float>
+    CalDistanceById(const py::array_t<float>& query, const py::array_t<int64_t>& ids) {
+        return this->CalcDistancesById(query, ids);
     }
 
     void
@@ -758,8 +763,8 @@ bind_index(py::module_& module) {
          Returns:
              int: Number of vectors successfully removed from the index.
          )pbdoc")
-        .def("cal_distance_by_id",
-             &Index::CalDistanceById,
+        .def("calc_distances_by_id",
+             &Index::CalcDistancesById,
              py::arg("query"),
              py::arg("ids"),
              R"pbdoc(
@@ -771,5 +776,12 @@ bind_index(py::module_& module) {
 
          Returns:
              numpy.ndarray: Array of float32 distances corresponding to each ID.
+         )pbdoc")
+        .def("cal_distance_by_id",
+             &Index::CalDistanceById,
+             py::arg("query"),
+             py::arg("ids"),
+             R"pbdoc(
+         Deprecated alias for calc_distances_by_id.
          )pbdoc");
 }

@@ -364,7 +364,7 @@ TestIndex::TestGetRawVectorByIds(const IndexPtr& index,
 
                 // self distance
                 auto dists_res =
-                    index->CalDistanceById(single_dataset, dataset->base_->GetIds() + i, 1);
+                    index->CalcDistancesById(single_dataset, dataset->base_->GetIds() + i, 1);
                 REQUIRE(dists_res.has_value());
                 auto dist = dists_res.value()->GetDistances()[0];
 

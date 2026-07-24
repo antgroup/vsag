@@ -46,6 +46,7 @@ public:
                                InstanceMethod("getMemoryUsage", &VsagIndex::GetMemoryUsage),
                                InstanceMethod("checkIdExist", &VsagIndex::CheckIdExist),
                                InstanceMethod("getMinMaxId", &VsagIndex::GetMinMaxId),
+                               InstanceMethod("calcDistancesById", &VsagIndex::CalcDistancesById),
                                InstanceMethod("calDistanceById", &VsagIndex::CalDistanceById),
                            });
     }
@@ -349,7 +350,7 @@ private:
     }
 
     Napi::Value
-    CalDistanceById(const Napi::CallbackInfo& info) {
+    CalcDistancesById(const Napi::CallbackInfo& info) {
         Napi::Env env = info.Env();
 
         if (info.Length() < 2) {
@@ -367,7 +368,7 @@ private:
             distances[i] = -1.0F;
         }
 
-        auto result = index_->CalDistanceById(query.Data(), ids.Data(), count);
+        auto result = index_->CalcDistancesById(query.Data(), ids.Data(), count);
         if (result.has_value()) {
             const auto* dist_data = result.value()->GetDistances();
             for (int64_t i = 0; i < count; ++i) {
@@ -376,6 +377,11 @@ private:
         }
 
         return distances;
+    }
+
+    Napi::Value
+    CalDistanceById(const Napi::CallbackInfo& info) {
+        return this->CalcDistancesById(info);
     }
 
     std::shared_ptr<vsag::Index> index_;

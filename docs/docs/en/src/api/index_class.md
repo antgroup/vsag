@@ -219,8 +219,9 @@ error). See [Range Search](../advanced/range_search.md) and `examples/cpp/302_fe
 |--------|-----------|-------|
 | `CalcDistanceById` | `tl::expected<float, Error> CalcDistanceById(const float* vector, int64_t id, bool calculate_precise_distance = true) const` | Distance from a dense query to the stored vector `id`. |
 | `CalcDistanceById` | `tl::expected<float, Error> CalcDistanceById(const DatasetPtr& vector, int64_t id, bool calculate_precise_distance = true) const` | Same, accepting a `DatasetPtr` (works for sparse indexes such as SINDI). |
-| `CalDistanceById` | `tl::expected<DatasetPtr, Error> CalDistanceById(const float* query, const int64_t* ids, int64_t count, bool calculate_precise_distance = true) const` | Batch variant; `-1` in the result marks an invalid distance. |
-| `CalDistanceById` | `tl::expected<DatasetPtr, Error> CalDistanceById(const DatasetPtr& query, const int64_t* ids, int64_t count, bool calculate_precise_distance = true) const` | Batch variant accepting a `DatasetPtr` query. |
+| `CalcDistancesById` | `tl::expected<DatasetPtr, Error> CalcDistancesById(const float* query, const int64_t* ids, int64_t count, bool calculate_precise_distance = true) const` | Batch variant; `-1` in the result marks an invalid distance. |
+| `CalcDistancesById` | `tl::expected<DatasetPtr, Error> CalcDistancesById(const DatasetPtr& query, const int64_t* ids, int64_t count, bool calculate_precise_distance = true) const` | Batch variant accepting a `DatasetPtr` query. |
+| `CalDistanceById` (deprecated) | Same signatures as `CalcDistancesById` | Compatibility alias retained through the 1.1 migration window. |
 
 `calculate_precise_distance = true` may load full-precision vectors (possibly from disk) instead of
 quantized codes. See [Calculate Distance by ID](../advanced/calc_distance_by_id.md) and

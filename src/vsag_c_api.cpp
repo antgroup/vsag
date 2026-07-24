@@ -408,7 +408,7 @@ vsag_index_calculate_distance_by_ids(const vsag_index_t index,
         auto* vsag_index = static_cast<VsagIndex*>(index);
         if (vsag_index != nullptr) {
             auto dists2 =
-                vsag_index->index_->CalDistanceById(query, ids, static_cast<int64_t>(count));
+                vsag_index->index_->CalcDistancesById(query, ids, static_cast<int64_t>(count));
             if (dists2.has_value()) {
                 memcpy(dists, dists2.value()->GetDistances(), count * sizeof(float));
                 return success;

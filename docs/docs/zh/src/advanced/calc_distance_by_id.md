@@ -6,16 +6,13 @@
 接口分为两种形式：
 
 - `CalcDistanceById`  — 单个 ID，返回单个距离值。
-- `CalDistanceById`   — 一批 ID，返回一个包含距离数组的 `DatasetPtr`。
+- `CalcDistancesById` — 一批 ID，返回一个包含距离数组的 `DatasetPtr`。
 
 每种形式都有两个重载：一个接收 `const float*`（稠密向量），另一个接收 `DatasetPtr`
 （稠密或稀疏均可）。
 
-> **关于命名的说明。** 批量接口目前拼作 `CalDistanceById`（`Calc` 少了一个 `c`）。
-> 这是批量重载最初加入时遗留的拼写笔误，两个名字**并不表示语义差异**，区别仅在于
-> *单个 vs. 批量*。出于向后兼容当前仍保留这一拼写，预计未来某个版本会将其
-> **标记为弃用（deprecated）**，并改用拼写正确的新名（建议为
-> `CalcDistancesById`）。建议新代码通过一层薄封装来调用，方便后续迁移。跟踪请见
+> **迁移说明。** `CalDistanceById` 是批量接口的历史拼写。为兼容已有代码，1.1 迁移窗口内
+> 仍保留该弃用别名；新代码应使用 `CalcDistancesById`。两者语义完全相同。详情参见
 > [issue #2068](https://github.com/antgroup/vsag/issues/2068)。
 
 ## 接口概览
@@ -35,14 +32,14 @@ CalcDistanceById(const DatasetPtr& vector,
 
 // 批量 ID，稠密浮点指针
 tl::expected<DatasetPtr, Error>
-CalDistanceById(const float* query,
+CalcDistancesById(const float* query,
                 const int64_t* ids,
                 int64_t count,
                 bool calculate_precise_distance = true) const;
 
 // 批量 ID，DatasetPtr（稠密或稀疏）
 tl::expected<DatasetPtr, Error>
-CalDistanceById(const DatasetPtr& query,
+CalcDistancesById(const DatasetPtr& query,
                 const int64_t* ids,
                 int64_t count,
                 bool calculate_precise_distance = true) const;
@@ -82,7 +79,7 @@ if (d.has_value()) {
 
 // 3. 批量 ID 距离
 std::vector<int64_t> ids = { 1, 2, 3, 4, 5 };
-auto result = index->CalDistanceById(query_vector.data(), ids.data(), ids.size());
+auto result = index->CalcDistancesById(query_vector.data(), ids.data(), ids.size());
 if (result.has_value()) {
     const float* dists = result.value()->GetDistances();
     for (size_t i = 0; i < ids.size(); ++i) {

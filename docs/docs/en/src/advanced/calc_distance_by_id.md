@@ -8,20 +8,15 @@ pipelines on top of VSAG.
 Two flavors are provided:
 
 - `CalcDistanceById`  — single ID, returns one distance.
-- `CalDistanceById`   — batch of IDs, returns a `DatasetPtr` containing distances.
+- `CalcDistancesById` — batch of IDs, returns a `DatasetPtr` containing distances.
 
 Each flavor has two overloads: one taking a raw `const float*` (dense vectors) and one taking
 a `DatasetPtr` (works for both dense and sparse vectors).
 
-> **Note on naming.** The batch method is currently spelled `CalDistanceById`
-> (missing the `c` in `Calc`). This is a historical typo introduced when the
-> batch overload was first added; the two names do **not** indicate any
-> semantic difference beyond *single vs. batch*. The current spelling is
-> kept for backward compatibility and is expected to be **deprecated** in a
-> future release in favor of a correctly spelled name (proposed:
-> `CalcDistancesById`). New code is encouraged to centralize calls behind a
-> thin wrapper to ease the eventual migration. See
-> [issue #2068](https://github.com/antgroup/vsag/issues/2068) for tracking.
+> **Migration note.** `CalDistanceById` is the historical spelling of the batch method. It remains
+> available as a deprecated alias through the 1.1 migration window; new code should use
+> `CalcDistancesById`. The two names have identical semantics. See
+> [issue #2068](https://github.com/antgroup/vsag/issues/2068).
 
 ## API Overview
 
@@ -40,14 +35,14 @@ CalcDistanceById(const DatasetPtr& vector,
 
 // Batch, dense float pointer.
 tl::expected<DatasetPtr, Error>
-CalDistanceById(const float* query,
+CalcDistancesById(const float* query,
                 const int64_t* ids,
                 int64_t count,
                 bool calculate_precise_distance = true) const;
 
 // Batch, DatasetPtr (dense or sparse).
 tl::expected<DatasetPtr, Error>
-CalDistanceById(const DatasetPtr& query,
+CalcDistancesById(const DatasetPtr& query,
                 const int64_t* ids,
                 int64_t count,
                 bool calculate_precise_distance = true) const;
@@ -90,7 +85,7 @@ if (d.has_value()) {
 
 // 3. Batch IDs.
 std::vector<int64_t> ids = { 1, 2, 3, 4, 5 };
-auto result = index->CalDistanceById(query_vector.data(), ids.data(), ids.size());
+auto result = index->CalcDistancesById(query_vector.data(), ids.data(), ids.size());
 if (result.has_value()) {
     const float* dists = result.value()->GetDistances();
     for (size_t i = 0; i < ids.size(); ++i) {

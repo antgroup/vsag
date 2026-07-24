@@ -210,11 +210,19 @@ public:
     };
 
     virtual tl::expected<DatasetPtr, Error>
+    CalcDistancesById(const float* vector,
+                      const int64_t* ids,
+                      int64_t count,
+                      bool calculate_precise_distance = true) const override {
+        SAFE_CALL(return this->calc_distance_by_id(vector, ids, count));
+    };
+
+    virtual tl::expected<DatasetPtr, Error>
     CalDistanceById(const float* vector,
                     const int64_t* ids,
                     int64_t count,
                     bool calculate_precise_distance = true) const override {
-        SAFE_CALL(return this->calc_distance_by_id(vector, ids, count));
+        return this->CalcDistancesById(vector, ids, count, calculate_precise_distance);
     };
 
     virtual tl::expected<std::pair<int64_t, int64_t>, Error>

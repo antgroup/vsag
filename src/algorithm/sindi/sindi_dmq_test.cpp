@@ -180,7 +180,7 @@ TEST_CASE("SINDI DMQ Rerank DataCell Test", "[ut][SINDI]") {
     REQUIRE(index->CalcDistanceById(query, 999, true) == -1.0F);
 
     int64_t distance_ids[] = {10, 999};
-    auto distances = index->CalDistanceById(query, distance_ids, 2, true);
+    auto distances = index->CalcDistancesById(query, distance_ids, 2, true);
     REQUIRE(std::abs(distances->GetDistances()[0] - self_distance) < 1e-6F);
     REQUIRE(distances->GetDistances()[1] == -1.0F);
 

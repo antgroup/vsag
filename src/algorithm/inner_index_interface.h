@@ -167,6 +167,18 @@ public:
                     int64_t count,
                     bool calculate_precise_distance = true) const;
 
+    virtual DatasetPtr
+    CalcDistancesById(const float* query,
+                      const int64_t* ids,
+                      int64_t count,
+                      bool calculate_precise_distance = true) const;
+
+    virtual DatasetPtr
+    CalcDistancesById(const DatasetPtr& query,
+                      const int64_t* ids,
+                      int64_t count,
+                      bool calculate_precise_distance = true) const;
+
     virtual uint64_t
     CalSerializeSize() const;
 

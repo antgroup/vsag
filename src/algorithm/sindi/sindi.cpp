@@ -1923,10 +1923,10 @@ SINDI::CalcDistanceById(const DatasetPtr& vector,
 }
 
 DatasetPtr
-SINDI::CalDistanceById(const DatasetPtr& query,
-                       const int64_t* ids,
-                       int64_t count,
-                       bool calculate_precise_distance) const {
+SINDI::CalcDistancesById(const DatasetPtr& query,
+                         const int64_t* ids,
+                         int64_t count,
+                         bool calculate_precise_distance) const {
     if (use_reorder_ && calculate_precise_distance) {
         std::shared_lock rlock(this->global_mutex_);
         auto result = Dataset::Make();
@@ -1967,7 +1967,7 @@ SINDI::CalDistanceById(const DatasetPtr& query,
 
     // search
     CHECK_ARGUMENT(immutable_data_ == nullptr,
-                   "immutable SINDI runtime does not support CalDistanceById");
+                   "immutable SINDI runtime does not support CalcDistancesById");
     constexpr auto* search_param_fmt = R"(
     {{
         "sindi": {{
@@ -1987,6 +1987,14 @@ SINDI::CalDistanceById(const DatasetPtr& query,
     }
 
     return result;
+}
+
+DatasetPtr
+SINDI::CalDistanceById(const DatasetPtr& query,
+                       const int64_t* ids,
+                       int64_t count,
+                       bool calculate_precise_distance) const {
+    return this->CalcDistancesById(query, ids, count, calculate_precise_distance);
 }
 
 void
