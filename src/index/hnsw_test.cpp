@@ -15,6 +15,8 @@
 
 #include "hnsw.h"
 
+#include <array>
+#include <cstdint>
 #include <cstdlib>
 #include <memory>
 #include <new>
@@ -116,6 +118,19 @@ TEST_CASE("build with allocator", "[ut][hnsw]") {
         ->Owner(false);
     auto result = index->Build(dataset);
     REQUIRE(result.has_value());
+}
+
+TEST_CASE("hnsw unaligned link helpers", "[ut][hnsw]") {
+    std::array<uint8_t, sizeof(uint64_t) + 1> buffer{};
+    auto* unaligned_ptr = buffer.data() + 1;
+
+    constexpr uint64_t encoded_value = 0x0102030405060708ULL;
+    hnswlib::HierarchicalNSW::writeUnaligned<uint64_t>(unaligned_ptr, encoded_value);
+    REQUIRE(hnswlib::HierarchicalNSW::readUnaligned<uint64_t>(unaligned_ptr) == encoded_value);
+
+    constexpr InnerIdType neighbor_id = 12345;
+    hnswlib::HierarchicalNSW::writeUnaligned<InnerIdType>(unaligned_ptr, neighbor_id);
+    REQUIRE(hnswlib::HierarchicalNSW::readUnaligned<InnerIdType>(unaligned_ptr) == neighbor_id);
 }
 
 TEST_CASE("knn_search", "[ut][hnsw]") {
