@@ -19,7 +19,7 @@ namespace vsag {
 
 PointsMutex::PointsMutex(uint32_t element_num, Allocator* allocator)
     : allocator_(allocator), mutex_blocks_(allocator) {
-    this->Resize(element_num);
+    PointsMutex::Resize(element_num);
 }
 
 void

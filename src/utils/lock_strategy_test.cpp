@@ -76,6 +76,18 @@ TEST_CASE("LockStrategy Basic", "[ut][LockStrategy]") {
         REQUIRE(mutex_array.GetMemoryUsage() > 0);
     }
 
+    SECTION("points mutex initializes empty and resizes") {
+        PointsMutex mutex_array(0, allocator.get());
+        REQUIRE(mutex_array.GetMemoryUsage() == 0);
+
+        mutex_array.Resize(1);
+        const auto resized_memory = mutex_array.GetMemoryUsage();
+        REQUIRE(resized_memory > 0);
+
+        mutex_array.Resize(0);
+        REQUIRE(mutex_array.GetMemoryUsage() < resized_memory);
+    }
+
     SECTION("resize updates memory usage") {
         const auto block_size = PointsMutex::kMutexesPerBlock;
         PointsMutex mutex_array(block_size + 1, allocator.get());
