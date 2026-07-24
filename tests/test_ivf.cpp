@@ -904,6 +904,96 @@ TestIVFSearchDisableReorder(const fixtures::IVFResourcePtr& resource) {
 IVF_PR_DAILY_CASE("IVF Search Disable Reorder", "[ft][search][ivf]", TestIVFSearchDisableReorder)
 
 static void
+TestIVFMultiQueryKnnSearch(const fixtures::IVFResourcePtr& resource) {
+    using namespace fixtures;
+    const std::vector<std::pair<std::string, float>> test_cases = {{"fp32", 0.0F}};
+    ForEachIVFCase(
+        resource,
+        test_cases,
+        [resource](const auto& metric_type,
+                   auto dim,
+                   const auto& train_type,
+                   const auto& base_quantization_str,
+                   auto /* recall */) {
+            auto build_param = IVFTestIndex::GenerateIVFBuildParametersString(
+                metric_type, dim, base_quantization_str, 210, train_type);
+            auto index = TestIndex::TestFactory(IVFTestIndex::name, build_param, true);
+            auto dataset =
+                IVFTestIndex::pool.GetDatasetAndCreate(dim, resource->base_count, metric_type);
+            TestIndex::TestBuildIndex(index, dataset, true);
+
+            const int64_t query_count = 3;
+            const int64_t query_dim = dataset->query_->GetDim();
+            const int64_t k = dataset->base_->GetNumElements() + 1;
+            const float* source_queries = dataset->query_->GetFloat32Vectors();
+            std::vector<float> queries(query_count * query_dim);
+            for (int64_t q_idx = 0; q_idx < query_count; ++q_idx) {
+                std::copy_n(source_queries + q_idx * query_dim,
+                            query_dim,
+                            queries.data() + q_idx * query_dim);
+            }
+
+            auto multi_query = vsag::Dataset::Make();
+            multi_query->NumElements(query_count)
+                ->Dim(query_dim)
+                ->Float32Vectors(queries.data())
+                ->Owner(false);
+            const auto search_param = fmt::format(search_param_tmp, 210);
+            auto multi_result = index->KnnSearch(multi_query, k, search_param);
+            REQUIRE(multi_result.has_value());
+            REQUIRE(multi_result.value()->GetNumElements() == query_count);
+            REQUIRE(multi_result.value()->GetDim() == k);
+
+            const auto* multi_ids = multi_result.value()->GetIds();
+            const auto* multi_dists = multi_result.value()->GetDistances();
+            for (int64_t q_idx = 0; q_idx < query_count; ++q_idx) {
+                auto single_query = vsag::Dataset::Make();
+                single_query->NumElements(1)
+                    ->Dim(query_dim)
+                    ->Float32Vectors(queries.data() + q_idx * query_dim)
+                    ->Owner(false);
+                auto single_result = index->KnnSearch(single_query, k, search_param);
+                REQUIRE(single_result.has_value());
+
+                const int64_t single_count = single_result.value()->GetDim();
+                REQUIRE(single_count < k);
+                const int64_t offset = q_idx * k;
+                for (int64_t i = 0; i < single_count; ++i) {
+                    REQUIRE(multi_ids[offset + i] == single_result.value()->GetIds()[i]);
+                    REQUIRE(multi_dists[offset + i] == single_result.value()->GetDistances()[i]);
+                }
+                for (int64_t i = single_count; i < k; ++i) {
+                    REQUIRE(multi_ids[offset + i] == -1);
+                    REQUIRE(multi_dists[offset + i] == std::numeric_limits<float>::infinity());
+                }
+            }
+        });
+}
+
+IVF_PR_DAILY_CASE("IVF Multi-Query Knn Search", "[ft][search][ivf]", TestIVFMultiQueryKnnSearch)
+
+TEST_CASE("IVF Multi-Query Knn Search Empty Index", "[ft][search][ivf][pr]") {
+    constexpr int64_t dim = 16;
+    constexpr int64_t query_count = 2;
+    constexpr int64_t k = 3;
+    const auto build_param =
+        fixtures::IVFTestIndex::GenerateIVFBuildParametersString("l2", dim, "fp32", 8, "kmeans");
+    auto index = fixtures::TestIndex::TestFactory(fixtures::IVFTestIndex::name, build_param, true);
+    std::vector<float> queries(query_count * dim, 0.0F);
+    auto batch_query = vsag::Dataset::Make();
+    batch_query->NumElements(query_count)->Dim(dim)->Float32Vectors(queries.data())->Owner(false);
+
+    auto result = index->KnnSearch(batch_query, k, fmt::format(fixtures::search_param_tmp, 8));
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetNumElements() == query_count);
+    REQUIRE(result.value()->GetDim() == k);
+    for (int64_t i = 0; i < query_count * k; ++i) {
+        REQUIRE(result.value()->GetIds()[i] == -1);
+        REQUIRE(result.value()->GetDistances()[i] == std::numeric_limits<float>::infinity());
+    }
+}
+
+static void
 TestIVFBuildWithLargeK(const fixtures::IVFResourcePtr& resource) {
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();

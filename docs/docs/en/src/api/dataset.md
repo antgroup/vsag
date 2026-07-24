@@ -112,9 +112,11 @@ if (result.has_value()) {
 }
 ```
 
-For KNN, `GetNumElements()` is `1` and the ids/distances arrays have length `k`. For range search,
-the number of matches is reported through the result's dimension. See
-[k-Nearest Neighbor Search](../guide/knn_search.md).
+For single-query KNN, `GetNumElements()` is `1` and the ids/distances arrays have length `k`. HGraph
+and IVF batched KNN returns a row-major `GetNumElements() x GetDim()` matrix; slot `i` of row `q` is
+at `q * GetDim() + i`. Short rows are padded with `id == -1` and infinite distance, so `-1` is a
+reserved external label and cannot be used for indexed vectors. Range search supports one query only.
+See [k-Nearest Neighbor Search](../guide/knn_search.md).
 
 ## `SparseVector`
 

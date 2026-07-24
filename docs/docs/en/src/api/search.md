@@ -34,21 +34,12 @@ enum class SearchMode {
 
 | Field | Type | Default | Meaning |
 |-------|------|---------|---------|
-| `query_` | `DatasetPtr` | `nullptr` | The query. Exactly one query vector is allowed. |
+| `query_` | `DatasetPtr` | `nullptr` | The query. HGraph and IVF support contiguous multi-query KNN batches; range search supports one query only. |
 | `mode_` | `SearchMode` | `KNN_SEARCH` | KNN vs. range search. |
 | `topk_` | `int64_t` | `10` | Neighbors to return (KNN mode). Must be positive. |
 | `radius_` | `float` | `0.5` | Distance threshold (range mode). Non-negative. |
 | `limited_size_` | `int64_t` | `-1` | Cap on range results; `-1` means no limit. |
 | `params_str_` | `std::string` | `""` | Algorithm-specific search params as JSON (e.g. `ef_search`). |
-
-### IVF bucket routing
-
-IVF accepts `{"ivf":{"scan_buckets_count":N,"disable_bucket_scan":true}}` through
-`params_str_`. This routing-only mode returns the `N` selected bucket IDs per query in the
-result `Dataset` instead of vector labels. `NumElements()` equals the number of queries,
-`Dim()` equals `scan_buckets_count`, `GetIds()` contains bucket IDs (with `-1` for empty
-slots), and `GetDistances()` has distances to bucket centroids. No vector scan is performed,
-so filters, `topk`, range limits, reordering, and reasoning options are ignored.
 
 ### Filtering fields
 

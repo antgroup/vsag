@@ -50,6 +50,7 @@ public:
 
     void
     Insert(InnerIdType id, LabelType label) {
+        CHECK_ARGUMENT(label != -1, "label -1 is reserved for batch KNN padding");
         if (use_reverse_map_) {
             label_remap_.InsertOrAssign(label, id);
         }

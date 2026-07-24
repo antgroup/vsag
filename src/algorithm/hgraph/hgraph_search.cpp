@@ -91,6 +91,11 @@ HGraph::KnnSearch(const DatasetPtr& query,
     }
     k = std::min(k, GetNumElements());
 
+    // iterator-based KnnSearch tracks state across calls via IteratorContext,
+    // so it cannot be batched into a single multi-query invocation.
+    CHECK_ARGUMENT(query->GetNumElements() == 1,
+                   "iterator-based KnnSearch only supports single query (NumElements=1)");
+
     FilterPtr ft = this->create_search_filter(filter, params.use_extra_info_filter);
 
     if (iter_ctx == nullptr) {
@@ -194,7 +199,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
     if (search_result->Empty()) {
         return DatasetImpl::MakeEmptyDataset();
     }
-    auto count = static_cast<const int64_t>(search_result->Size());
+    const auto count = static_cast<int64_t>(search_result->Size());
     auto [dataset_results, dists, ids] = create_fast_dataset(count, ctx.alloc);
     char* extra_infos = nullptr;
     if (extra_info_size_ > 0) {
@@ -381,9 +386,17 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     auto k = request.topk_;
 
     if (is_range) {
+        // Range search remains single-query only (validate_range_args enforces NumElements==1).
         this->validate_range_args(query, request.radius_, request.limited_size_);
     } else {
-        this->validate_knn_args(query, k);
+        // KNN search supports multi-query batch: validate_knn_args enforces NumElements==1,
+        // so use inline checks that allow NumElements >= 1.
+        if (data_type_ != DataTypes::DATA_TYPE_SPARSE) {
+            CHECK_ARGUMENT(
+                query->GetDim() == dim_,
+                fmt::format("query.dim({}) must be equal to index.dim({})", query->GetDim(), dim_));
+        }
+        CHECK_ARGUMENT(k > 0, fmt::format("k({}) must be greater than 0", k));
     }
 
     auto params = HGraphSearchParameters::FromJson(request.params_str_);
@@ -402,6 +415,20 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         shared_lock = this->acquire_global_read_lock();
     }
     k = std::min(k, GetNumElements());
+
+    int64_t query_count = query->GetNumElements();
+    CHECK_ARGUMENT(query_count >= 1,
+                   fmt::format("query count({}) must be at least 1", query_count));
+    if (is_range) {
+        CHECK_ARGUMENT(query_count == 1, "range search only supports single query (NumElements=1)");
+    }
+    if (query_count > 1) {
+        // Reasoning context tracks per-call expected_labels_, not compatible with batching.
+        // Callers that need reasoning diagnostics should fall back to a per-call (single-query)
+        // loop themselves; the API explicitly errors out rather than silently dropping reasoning.
+        CHECK_ARGUMENT(request.expected_labels_.empty(),
+                       "reasoning (expected_labels_) is only supported for single-query search");
+    }
 
     // Setup reasoning context (KNN only)
     std::shared_ptr<ReasoningContext> reasoning_ctx;
@@ -429,6 +456,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         if (create_new_raw_vector_) {
             precise_flatten = this->raw_vector_;
         }
+
         auto computer = precise_flatten->FactoryComputer(query_vector);
         for (const auto& pair : label_to_inner_id) {
             float dist = 0.0F;
@@ -436,40 +464,60 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
             precise_flatten->Query(&dist, computer, &inner_id, 1);
             reasoning_ctx->SetTrueDistance(inner_id, dist);
         }
+
         ctx.reasoning_ctx = reasoning_ctx.get();
     }
 
-    InnerSearchParam search_param;
-    search_param.ep = this->entry_point_id_;
-    search_param.topk = 1;
-    search_param.ef = 1;
-    search_param.is_inner_id_allowed = nullptr;
-    search_param.enable_rabitq_one_bit_search = params.rabitq_one_bit_search;
-
-    if (search_param.ep == INVALID_ENTRY_POINT) {
+    if (this->entry_point_id_ == INVALID_ENTRY_POINT) {
+        if (query_count > 1) {
+            // Return batch-shaped empty result preserving documented layout.
+            CHECK_ARGUMENT(
+                query_count <= std::numeric_limits<int64_t>::max() / std::max(k, (int64_t)1),
+                fmt::format("query_count({}) * k({}) would overflow", query_count, k));
+            int64_t batch_count = query_count * k;
+            auto [empty_ds, empty_dists, empty_ids] = create_fast_dataset(batch_count, ctx.alloc);
+            std::fill_n(empty_dists, batch_count, std::numeric_limits<float>::infinity());
+            std::fill_n(empty_ids, batch_count, -1);
+            empty_ds->NumElements(query_count);
+            empty_ds->Dim(k);
+            empty_ds->Statistics(stats.Dump());
+            return empty_ds;
+        }
         return make_empty_dataset_with_stats();
-    }
-
-    auto vt = this->pool_->TakeOne();
-
-    const auto* raw_query = get_data(query);
-    for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
-        auto result = this->search_one_graph(
-            raw_query, this->route_graphs_[i], this->basic_flatten_codes_, search_param, vt, &ctx);
-        search_param.ep = result->Top().second;
     }
 
     FilterPtr ft = this->create_search_filter(request.filter_, params.use_extra_info_filter);
 
-    if (request.enable_attribute_filter_ and this->attr_filter_index_ != nullptr) {
-        auto& schema = this->attr_filter_index_->field_type_map_;
-        auto expr = AstParse(request.attribute_filter_str_, &schema);
-        auto executor = Executor::MakeInstance(this->allocator_, expr, this->attr_filter_index_);
-        executor->Init();
-        search_param.executors.emplace_back(executor);
-    }
-
     if (is_range) {
+        // ---- Range search: single-query path (delegated from HGraph::RangeSearch) ----
+        InnerSearchParam search_param;
+        search_param.ep = this->entry_point_id_;
+        search_param.topk = 1;
+        search_param.ef = 1;
+        search_param.is_inner_id_allowed = nullptr;
+        search_param.enable_rabitq_one_bit_search = params.rabitq_one_bit_search;
+
+        auto vt = this->pool_->TakeOne();
+        const auto* raw_query = get_data(query);
+        for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
+            auto result = this->search_one_graph(raw_query,
+                                                 this->route_graphs_[i],
+                                                 this->basic_flatten_codes_,
+                                                 search_param,
+                                                 vt,
+                                                 &ctx);
+            search_param.ep = result->Top().second;
+        }
+
+        if (request.enable_attribute_filter_ and this->attr_filter_index_ != nullptr) {
+            auto& schema = this->attr_filter_index_->field_type_map_;
+            auto expr = AstParse(request.attribute_filter_str_, &schema);
+            auto executor =
+                Executor::MakeInstance(this->allocator_, expr, this->attr_filter_index_);
+            executor->Init();
+            search_param.executors.emplace_back(executor);
+        }
+
         search_param.ef = std::max(params.ef_search, request.limited_size_);
         search_param.is_inner_id_allowed = ft;
         search_param.radius = request.radius_;
@@ -479,24 +527,8 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         search_param.parallel_search_thread_count = params.parallel_search_thread_count;
         search_param.enable_reorder = params.enable_reorder;
         search_param.enable_rabitq_one_bit_search = params.rabitq_one_bit_search;
-    } else {
-        search_param.ef = std::max(params.ef_search, k);
-        search_param.is_inner_id_allowed = ft;
-        search_param.topk = static_cast<int64_t>(search_param.ef);
-        if (params.topk_factor > 1.0F) {
-            search_param.topk =
-                std::min(search_param.topk,
-                         static_cast<int64_t>(static_cast<float>(k) * params.topk_factor));
-        }
-        search_param.enable_reorder = params.enable_reorder;
-        search_param.consider_duplicate = true;
-        search_param.enable_rabitq_one_bit_search = params.rabitq_one_bit_search;
-        if (params.enable_time_record) {
-            search_param.time_cost = std::make_shared<Timer>();
-            search_param.time_cost->SetThreshold(params.timeout_ms);
-            stats.is_timeout.store(false, std::memory_order_relaxed);
-        }
-        search_param.parallel_search_thread_count = params.parallel_search_thread_count;
+        search_param.skip_ratio = params.skip_ratio;
+        search_param.skip_strategy_type = params.skip_strategy_type;
 
         if (static_cast<uint64_t>(params.hops_limit) <= static_cast<uint64_t>(params.ef_search)) {
             search_param.hops_limit = std::numeric_limits<uint32_t>::max();
@@ -509,63 +541,52 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         } else {
             search_param.hops_limit = params.hops_limit;
         }
-    }
+        DistanceRecordVector rabitq_lower_bound_candidates(ctx.alloc);
+        auto* rabitq_lower_bound_candidates_ptr =
+            search_param.enable_rabitq_one_bit_search and use_reorder_ and
+                    search_param.enable_reorder and reorder_by_base_
+                ? &rabitq_lower_bound_candidates
+                : nullptr;
 
-    search_param.skip_ratio = params.skip_ratio;
-    search_param.skip_strategy_type = params.skip_strategy_type;
-
-    DistanceRecordVector rabitq_lower_bound_candidates(ctx.alloc);
-    auto* rabitq_lower_bound_candidates_ptr =
-        search_param.enable_rabitq_one_bit_search and use_reorder_ and
-                search_param.enable_reorder and reorder_by_base_
-            ? &rabitq_lower_bound_candidates
-            : nullptr;
-
-    DistHeapPtr search_result;
-    bool brute_force_used = false;
-    if (params.brute_force_threshold > 0.0F) {
-        float valid_ratio = ft != nullptr ? ft->ValidRatio() : 1.0F;
-        if (valid_ratio <= params.brute_force_threshold) {
-            if (is_range) {
+        DistHeapPtr search_result;
+        bool brute_force_used = false;
+        if (params.brute_force_threshold > 0.0F) {
+            float valid_ratio = ft != nullptr ? ft->ValidRatio() : 1.0F;
+            if (valid_ratio <= params.brute_force_threshold) {
                 search_result = this->brute_force_search<InnerSearchMode::RANGE_SEARCH>(
                     raw_query, ft, request.limited_size_, request.radius_, &ctx);
-            } else {
-                search_result = this->brute_force_search<InnerSearchMode::KNN_SEARCH>(
-                    raw_query, ft, k, 0.0F, &ctx);
+                brute_force_used = true;
             }
-            brute_force_used = true;
         }
-    }
-    if (not brute_force_used) {
-        search_result = this->search_one_graph(raw_query,
-                                               this->bottom_graph_,
-                                               this->basic_flatten_codes_,
-                                               search_param,
-                                               vt,
-                                               &ctx,
-                                               rabitq_lower_bound_candidates_ptr);
-    }
+        if (not brute_force_used) {
+            search_result = this->search_one_graph(raw_query,
+                                                   this->bottom_graph_,
+                                                   this->basic_flatten_codes_,
+                                                   search_param,
+                                                   vt,
+                                                   &ctx,
+                                                   rabitq_lower_bound_candidates_ptr);
+        }
+        this->pool_->ReturnOne(vt);
 
-    this->pool_->ReturnOne(vt);
+        if (not brute_force_used and use_reorder_ and search_param.enable_reorder) {
+            this->reorder(raw_query,
+                          this->get_reorder_codes(),
+                          search_result,
+                          request.limited_size_,
+                          nullptr,
+                          ctx,
+                          rabitq_lower_bound_candidates_ptr);
+        } else if (not brute_force_used and search_param.enable_reorder and
+                   params.rabitq_one_bit_search) {
+            this->reorder(raw_query,
+                          this->basic_flatten_codes_,
+                          search_result,
+                          request.limited_size_,
+                          nullptr,
+                          ctx);
+        }
 
-    // Reorder
-    if (not brute_force_used and use_reorder_ and search_param.enable_reorder) {
-        auto limit = is_range ? request.limited_size_ : k;
-        this->reorder(raw_query,
-                      this->get_reorder_codes(),
-                      search_result,
-                      limit,
-                      nullptr,
-                      ctx,
-                      rabitq_lower_bound_candidates_ptr);
-    } else if (not brute_force_used and search_param.enable_reorder and
-               params.rabitq_one_bit_search) {
-        auto limit = is_range ? request.limited_size_ : k;
-        this->reorder(raw_query, this->basic_flatten_codes_, search_result, limit, nullptr, ctx);
-    }
-
-    // Trim and pack results
-    if (is_range) {
         while (not search_result->Empty() and
                search_result->Top().first > request.radius_ + THRESHOLD_ERROR) {
             search_result->Pop();
@@ -575,53 +596,261 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
                 search_result->Pop();
             }
         }
+
         auto result = this->pack_knn_result_with_extra_info(search_result, ctx.alloc);
         result->Statistics(stats.Dump());
         return result;
     }
 
-    // KNN mode: trim by k
-    while (search_result->Size() > static_cast<uint64_t>(k)) {
-        search_result->Pop();
-    }
+    // ---- KNN search: multi-query batch path (PR #1685) ----
 
-    // return an empty dataset directly if searcher returns nothing
-    if (search_result->Empty()) {
-        auto dataset_result = DatasetImpl::MakeEmptyDataset();
-        dataset_result->Statistics(stats.Dump());
-        if (reasoning_ctx) {
-            reasoning_ctx->DiagnoseExpectedTargets();
-            dataset_result->Reasoning(reasoning_ctx->GenerateReport());
+    // Build a shared base search_param; per-query fields (ep) are set inside the loop.
+    InnerSearchParam base_search_param;
+    base_search_param.is_inner_id_allowed = ft;
+    base_search_param.ef = std::max(params.ef_search, k);
+    base_search_param.topk = static_cast<int64_t>(base_search_param.ef);
+    if (params.topk_factor > 1.0F) {
+        base_search_param.topk =
+            std::min(base_search_param.topk,
+                     static_cast<int64_t>(static_cast<float>(k) * params.topk_factor));
+    }
+    base_search_param.enable_reorder = params.enable_reorder;
+    base_search_param.consider_duplicate = true;
+    base_search_param.enable_rabitq_one_bit_search = params.rabitq_one_bit_search;
+    base_search_param.skip_ratio = params.skip_ratio;
+    base_search_param.skip_strategy_type = params.skip_strategy_type;
+    if (params.enable_time_record) {
+        base_search_param.time_cost = std::make_shared<Timer>();
+        base_search_param.time_cost->SetThreshold(params.timeout_ms);
+        stats.is_timeout.store(false, std::memory_order_relaxed);
+    }
+    base_search_param.parallel_search_thread_count = params.parallel_search_thread_count;
+
+    // hops_limit only takes effect when it's greater than ef_search
+    if (params.hops_limit <= static_cast<uint32_t>(params.ef_search)) {
+        base_search_param.hops_limit = std::numeric_limits<uint32_t>::max();
+        if (params.hops_limit != std::numeric_limits<uint32_t>::max()) {
+            logger::warn(
+                fmt::format("hops_limit({}) is not greater than ef_search({}), ignoring hops_limit",
+                            params.hops_limit,
+                            params.ef_search));
         }
-        return dataset_result;
+    } else {
+        base_search_param.hops_limit = params.hops_limit;
     }
-    auto count = static_cast<const int64_t>(search_result->Size());
 
-    Vector<InnerIdType> result_inner_ids(static_cast<size_t>(count), this->allocator_);
+    if (request.enable_attribute_filter_ and this->attr_filter_index_ != nullptr) {
+        auto& schema = this->attr_filter_index_->field_type_map_;
+        auto expr = AstParse(request.attribute_filter_str_, &schema);
+        auto executor = Executor::MakeInstance(this->allocator_, expr, this->attr_filter_index_);
+        executor->Init();
+        base_search_param.executors.emplace_back(executor);
+    }
 
-    auto [dataset_results, dists, ids] = create_fast_dataset(count, ctx.alloc);
+    // Single-query preserves the original "dim = actual result count" contract; multi-query
+    // uses a fixed query_count x k rectangular layout. Guard the multiplication against overflow.
+    int64_t total_result_count = 0;
+    if (query_count > 1) {
+        CHECK_ARGUMENT(
+            query_count <= std::numeric_limits<int64_t>::max() / k,
+            fmt::format("query_count({}) * k({}) would overflow int64_t", query_count, k));
+        total_result_count = query_count * k;
+    }
+    // Validate that byte-level allocations do not overflow size_t.
+    if (total_result_count > 0) {
+        constexpr auto k_id_size = sizeof(int64_t);
+        constexpr auto k_dist_size = sizeof(float);
+        CHECK_ARGUMENT(total_result_count <= std::numeric_limits<size_t>::max() / k_id_size,
+                       fmt::format("total_result_count({}) * sizeof(int64_t) would overflow size_t",
+                                   total_result_count));
+        CHECK_ARGUMENT(total_result_count <= std::numeric_limits<size_t>::max() / k_dist_size,
+                       fmt::format("total_result_count({}) * sizeof(float) would overflow size_t",
+                                   total_result_count));
+        if (extra_info_size_ > 0) {
+            constexpr auto k_extra_size = sizeof(char);
+            CHECK_ARGUMENT(
+                total_result_count <= std::numeric_limits<size_t>::max() /
+                                          (static_cast<int64_t>(extra_info_size_) * k_extra_size),
+                fmt::format("total_result_count({}) * extra_info_size({}) would overflow size_t",
+                            total_result_count,
+                            extra_info_size_));
+        }
+    }
+    auto [dataset_results, dists, ids] = create_fast_dataset(total_result_count, ctx.alloc);
     char* extra_infos = nullptr;
-    if (extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
-        extra_infos =
-            static_cast<char*>(ctx.alloc->Allocate(extra_info_size_ * search_result->Size()));
-        dataset_results->ExtraInfos(extra_infos)
-            ->ExtraInfoSize(static_cast<int64_t>(extra_info_size_));
+    if (query_count > 1 && extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
+        extra_infos = static_cast<char*>(ctx.alloc->Allocate(
+            static_cast<size_t>(extra_info_size_) * static_cast<size_t>(total_result_count)));
+        std::memset(extra_infos,
+                    0,
+                    static_cast<size_t>(static_cast<size_t>(extra_info_size_) *
+                                        static_cast<size_t>(total_result_count)));
+        dataset_results->ExtraInfos(extra_infos);
+        dataset_results->ExtraInfoSize(static_cast<int64_t>(extra_info_size_));
     }
-    for (int64_t j = count - 1; j >= 0; --j) {
-        const auto& top = search_result->Top();
-        dists[j] = top.first;
-        ids[j] = this->label_table_->GetLabelById(top.second);
-        result_inner_ids[j] = top.second;
-        if (extra_infos != nullptr) {
-            this->extra_infos_->GetExtraInfoById(top.second, extra_infos + extra_info_size_ * j);
+
+    // Pre-fill sentinels: ids = -1 (authoritative signal for "no result") and
+    // dists = +infinity (unambiguous for inner-product / cosine metrics that may produce
+    // negative distances). Callers MUST detect padding via ids[i] == -1 rather than by
+    // distance comparison.
+    std::fill_n(dists, total_result_count, std::numeric_limits<float>::infinity());
+    std::fill_n(ids, total_result_count, -1);
+
+    Vector<InnerIdType> last_result_inner_ids(this->allocator_);
+
+    auto vt = this->pool_->TakeOne();
+
+    // Hoist per-query search_param and rabitq candidate buffer out of the loop:
+    // the searcher only mutates `duplicate_id` (declared `mutable` on the const
+    // InnerSearchParam&) and callers only tweak `ep` per query, so a single instance
+    // reused across queries avoids copying the base_search_param (including its
+    // `executors` vector) on every iteration.
+    InnerSearchParam search_param = base_search_param;
+    DistanceRecordVector rabitq_lower_bound_candidates(ctx.alloc);
+    auto* rabitq_lower_bound_candidates_ptr =
+        search_param.enable_rabitq_one_bit_search and use_reorder_ and
+                search_param.enable_reorder and reorder_by_base_
+            ? &rabitq_lower_bound_candidates
+            : nullptr;
+
+    InnerSearchParam ep_search_param;
+    ep_search_param.ep = this->entry_point_id_;
+    ep_search_param.topk = 1;
+    ep_search_param.ef = 1;
+    ep_search_param.is_inner_id_allowed = nullptr;
+    ep_search_param.enable_rabitq_one_bit_search = params.rabitq_one_bit_search;
+
+    for (int64_t q_idx = 0; q_idx < query_count; ++q_idx) {
+        const auto* raw_query = get_data(query, q_idx);
+
+        // Reset per-query mutable state before each query.
+        search_param.duplicate_id = -1;
+        // Per-query entry point search through hierarchical graphs.
+        ep_search_param.ep = this->entry_point_id_;
+        rabitq_lower_bound_candidates.clear();
+
+        for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
+            auto result = this->search_one_graph(raw_query,
+                                                 this->route_graphs_[i],
+                                                 this->basic_flatten_codes_,
+                                                 ep_search_param,
+                                                 vt,
+                                                 &ctx);
+            ep_search_param.ep = result->Top().second;
         }
-        search_result->Pop();
+        search_param.ep = ep_search_param.ep;
+
+        DistHeapPtr search_result;
+        bool brute_force_used = false;
+        if (params.brute_force_threshold > 0.0F) {
+            float valid_ratio = ft != nullptr ? ft->ValidRatio() : 1.0F;
+            if (valid_ratio <= params.brute_force_threshold) {
+                search_result = this->brute_force_search<InnerSearchMode::KNN_SEARCH>(
+                    raw_query, ft, k, 0.0F, &ctx);
+                brute_force_used = true;
+            }
+        }
+        if (not brute_force_used) {
+            search_result = this->search_one_graph(raw_query,
+                                                   this->bottom_graph_,
+                                                   this->basic_flatten_codes_,
+                                                   search_param,
+                                                   vt,
+                                                   &ctx,
+                                                   rabitq_lower_bound_candidates_ptr);
+        }
+
+        if (not brute_force_used and use_reorder_ and search_param.enable_reorder) {
+            this->reorder(raw_query,
+                          this->get_reorder_codes(),
+                          search_result,
+                          k,
+                          nullptr,
+                          ctx,
+                          rabitq_lower_bound_candidates_ptr);
+        } else if (not brute_force_used and search_param.enable_reorder and
+                   params.rabitq_one_bit_search) {
+            this->reorder(raw_query, this->basic_flatten_codes_, search_result, k, nullptr, ctx);
+        }
+
+        while (search_result->Size() > k) {
+            search_result->Pop();
+        }
+
+        // Single-query preserves the original contract: an empty result returns an empty dataset.
+        if (query_count == 1 && search_result->Empty()) {
+            this->pool_->ReturnOne(vt);
+            auto dataset_result = DatasetImpl::MakeEmptyDataset();
+            dataset_result->Statistics(stats.Dump());
+            if (reasoning_ctx) {
+                reasoning_ctx->DiagnoseExpectedTargets();
+                dataset_result->Reasoning(reasoning_ctx->GenerateReport());
+            }
+            return dataset_result;
+        }
+
+        auto count = static_cast<int64_t>(search_result->Size());
+        if (reasoning_ctx) {
+            last_result_inner_ids.resize(static_cast<size_t>(count));
+        }
+
+        if (query_count == 1) {
+            // Single-query path may shrink the dataset to the actual neighbor count.
+            if (dataset_results->GetDim() != count) {
+                auto [single_results, single_dists, single_ids] =
+                    create_fast_dataset(count, ctx.alloc);
+                dataset_results = single_results;
+                dists = single_dists;
+                ids = single_ids;
+            }
+            if (extra_info_size_ > 0 && this->extra_infos_ != nullptr && count > 0) {
+                extra_infos = static_cast<char*>(ctx.alloc->Allocate(
+                    static_cast<size_t>(extra_info_size_) * static_cast<size_t>(count)));
+                dataset_results->ExtraInfos(extra_infos);
+                dataset_results->ExtraInfoSize(static_cast<int64_t>(extra_info_size_));
+            }
+            for (int64_t j = count - 1; j >= 0; --j) {
+                const auto& top = search_result->Top();
+                dists[j] = top.first;
+                ids[j] = this->label_table_->GetLabelById(top.second);
+                if (reasoning_ctx) {
+                    last_result_inner_ids[static_cast<size_t>(j)] = top.second;
+                }
+                if (extra_infos != nullptr) {
+                    this->extra_infos_->GetExtraInfoById(top.second,
+                                                         extra_infos + extra_info_size_ * j);
+                }
+                search_result->Pop();
+            }
+        } else {
+            int64_t offset = q_idx * k;
+            for (int64_t j = count - 1; j >= 0; --j) {
+                const auto& top = search_result->Top();
+                dists[offset + j] = top.first;
+                ids[offset + j] = this->label_table_->GetLabelById(top.second);
+                if (reasoning_ctx) {
+                    last_result_inner_ids[static_cast<size_t>(j)] = top.second;
+                }
+                if (extra_infos != nullptr) {
+                    this->extra_infos_->GetExtraInfoById(
+                        top.second, extra_infos + extra_info_size_ * (offset + j));
+                }
+                search_result->Pop();
+            }
+        }
+    }
+
+    this->pool_->ReturnOne(vt);
+
+    dataset_results->NumElements(query_count);
+    if (query_count > 1) {
+        dataset_results->Dim(k);
     }
     dataset_results->Statistics(stats.Dump());
 
-    // Generate reasoning report if reasoning context was created
+    // Generate reasoning report if reasoning context was created.
     if (reasoning_ctx) {
-        reasoning_ctx->MarkResult(result_inner_ids);
+        reasoning_ctx->MarkResult(last_result_inner_ids);
         reasoning_ctx->DiagnoseExpectedTargets();
         dataset_results->Reasoning(reasoning_ctx->GenerateReport());
     }
