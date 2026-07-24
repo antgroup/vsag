@@ -172,10 +172,8 @@ if (NOT OPENBLAS_FOUND)
     message (STATUS "Building OpenBLAS from source")
 
     set (openblas_urls
-        https://github.com/OpenMathLib/OpenBLAS/releases/download/v0.3.23/OpenBLAS-0.3.23.tar.gz
-        # this url is maintained by the vsag project, if it's broken, please try
-        #  the latest commit or contact the vsag project
-        https://vsagcache.oss-rg-china-mainland.aliyuncs.com/openblas/OpenBLAS-0.3.23.tar.gz
+        https://github.com/OpenMathLib/OpenBLAS/releases/download/v0.3.24/OpenBLAS-0.3.24.tar.gz
+        https://sourceforge.net/projects/openblas/files/v0.3.24/OpenBLAS-0.3.24.tar.gz/download
     )
     if (DEFINED ENV{VSAG_THIRDPARTY_OPENBLAS})
         message (STATUS "Using local path for openblas: $ENV{VSAG_THIRDPARTY_OPENBLAS}")
@@ -194,8 +192,8 @@ if (NOT OPENBLAS_FOUND)
     ExternalProject_Add (
         ${name}
         URL ${openblas_urls}
-        URL_HASH MD5=115634b39007de71eb7e75cf7591dfb2
-        DOWNLOAD_NAME OpenBLAS-v0.3.23.tar.gz
+        URL_HASH MD5=23599a30e4ce887590957d94896789c8
+        DOWNLOAD_NAME OpenBLAS-v0.3.24.tar.gz
         PREFIX ${CMAKE_CURRENT_BINARY_DIR}/${name}
         TMP_DIR ${BUILD_INFO_DIR}
         STAMP_DIR ${BUILD_INFO_DIR}
