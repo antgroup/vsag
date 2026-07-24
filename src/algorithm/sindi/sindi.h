@@ -364,6 +364,7 @@ private:
     SparseValueQuantizationType sparse_value_quant_type_{SparseValueQuantizationType::FP32};
 
     std::string rerank_type_{"fp32"};
+    uint32_t dmq_shared_codebook_threshold_{DEFAULT_SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD};
 
     bool deserialize_without_footer_{false};  // backward-compat: old format lacks footer
     bool deserialize_without_buffer_{false};  // backward-compat: old format lacks buffer

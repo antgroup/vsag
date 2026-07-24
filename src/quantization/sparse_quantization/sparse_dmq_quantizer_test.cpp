@@ -183,9 +183,10 @@ TEST_CASE("SparseDmqQuantizer shares low frequency codebooks", "[ut][SparseDmqQu
     REQUIRE(exported.GetCodebookCount() == 3);
     REQUIRE(exported.GetSharedCodebookThreshold() == 2);
 
-    SparseDmqQuantizer restored(10, allocator.get(), 2);
+    SparseDmqQuantizer restored(10, allocator.get(), 0);
     test_serializion(shared, restored);
     REQUIRE(restored.GetCodebookCount() == 3);
+    REQUIRE(restored.GetSharedCodebookThreshold() == 2);
     std::vector<uint8_t> codes(shared.GetEncodedSize(vectors[0]));
     REQUIRE(shared.EncodeOne(reinterpret_cast<const float*>(&vectors[0]), codes.data()));
     auto expected_computer = shared.FactoryComputer();
@@ -197,6 +198,17 @@ TEST_CASE("SparseDmqQuantizer shares low frequency codebooks", "[ut][SparseDmqQu
     expected_computer->ComputeDist(codes.data(), &expected_distance);
     restored_computer->ComputeDist(codes.data(), &restored_distance);
     REQUIRE(restored_distance == expected_distance);
+}
+
+TEST_CASE("SparseDmqQuantizer serializes empty model metadata", "[ut][SparseDmqQuantizer]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    SparseDmqQuantizer empty(1024, allocator.get(), 7);
+    SparseDmqQuantizer restored(1, allocator.get(), 0);
+
+    REQUIRE_NOTHROW(test_serializion(empty, restored));
+    REQUIRE(restored.GetIdBits() == empty.GetIdBits());
+    REQUIRE(restored.GetCodebookCount() == 0);
+    REQUIRE(restored.GetSharedCodebookThreshold() == 7);
 }
 
 }  // namespace vsag

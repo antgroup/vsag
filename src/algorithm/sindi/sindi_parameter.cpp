@@ -189,8 +189,10 @@ SINDIParameter::ToJson() const {
         json[SPARSE_IMMUTABLE].SetBool(true);
     }
     json[SPARSE_RERANK_TYPE].SetString(rerank_type);
-    json[SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD].SetInt(
-        static_cast<int64_t>(dmq_shared_codebook_threshold));
+    if (rerank_type == SPARSE_RERANK_TYPE_DMQ8) {
+        json[SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD].SetInt(
+            static_cast<int64_t>(dmq_shared_codebook_threshold));
+    }
     return json;
 }
 
@@ -206,7 +208,9 @@ SINDIParameter::CheckCompatibility(const vsag::ParamPtr& other) const {
     CHECK_FIELD_EQ(*this, *p, remap_term_ids);
     CHECK_FIELD_EQ(*this, *p, immutable);
     CHECK_FIELD_EQ(*this, *p, rerank_type);
-    CHECK_FIELD_EQ(*this, *p, dmq_shared_codebook_threshold);
+    if (rerank_type == SPARSE_RERANK_TYPE_DMQ8) {
+        CHECK_FIELD_EQ(*this, *p, dmq_shared_codebook_threshold);
+    }
     return true;
 }
 

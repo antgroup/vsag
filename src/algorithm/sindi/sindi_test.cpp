@@ -1631,6 +1631,42 @@ TEST_CASE("SINDI Remap UpdateVector Compatibility", "[ut][SINDI]") {
     }
 }
 
+TEST_CASE("SINDI DMQ EstimateMemory uses compact IDs and shared codebooks", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    common_param.dim_ = 100000;
+
+    constexpr uint32_t term_id_limit = 100000;
+    constexpr uint64_t num_elements = 1000;
+    auto estimate_memory = [&](bool remap_term_ids, uint32_t shared_codebook_threshold) {
+        auto parameter = std::make_shared<SINDIParameter>();
+        parameter->FromString(fmt::format(R"({{
+            "use_reorder": true,
+            "rerank_type": "dmq8",
+            "term_id_limit": {},
+            "window_size": 10000,
+            "avg_doc_term_length": 100,
+            "remap_term_ids": {},
+            "dmq_shared_codebook_threshold": {}
+        }})",
+                                          term_id_limit,
+                                          remap_term_ids,
+                                          shared_codebook_threshold));
+        return SINDI(parameter, common_param).EstimateMemory(num_elements);
+    };
+
+    const uint64_t shared_memory = estimate_memory(false, 1024);
+    const uint64_t unshared_memory = estimate_memory(false, 0);
+    REQUIRE(shared_memory * 10 < unshared_memory);
+
+    const uint64_t remapped_shared_memory = estimate_memory(true, 1024);
+    constexpr uint64_t term_id_mapper_entry_memory_bytes = 54;
+    REQUIRE(remapped_shared_memory - shared_memory ==
+            term_id_limit * term_id_mapper_entry_memory_bytes);
+}
+
 TEST_CASE("SINDI Remap Memory Comparison", "[ut][SINDI]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     IndexCommonParam common_param;
