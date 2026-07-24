@@ -12,25 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "hgraph_cache.h"
-
 #include <sstream>
 
+#include "algorithm/build_cache.h"
 #include "impl/allocator/safe_allocator.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "unittest.h"
 
-TEST_CASE("HGraphCache Serialize & Deserialize", "[ut][hgraph_cache]") {
+TEST_CASE("BuildCache Serialize & Deserialize", "[ut][build_cache]") {
     auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
 
     SECTION("empty cache") {
-        vsag::HGraphCache cache1(allocator.get());
+        vsag::BuildCache cache1(allocator.get());
         std::stringstream ss;
         vsag::IOStreamWriter writer(ss);
         cache1.Serialize(writer);
 
-        vsag::HGraphCache cache2(allocator.get());
+        vsag::BuildCache cache2(allocator.get());
         vsag::IOStreamReader reader(ss);
         cache2.Deserialize(reader);
 
@@ -39,7 +38,7 @@ TEST_CASE("HGraphCache Serialize & Deserialize", "[ut][hgraph_cache]") {
     }
 
     SECTION("cache with source_ids of different lengths") {
-        vsag::HGraphCache cache1(allocator.get());
+        vsag::BuildCache cache1(allocator.get());
         cache1.source_ids_.push_back("a");
         cache1.source_ids_.push_back("bb");
         cache1.source_ids_.push_back("ccc");
@@ -49,7 +48,7 @@ TEST_CASE("HGraphCache Serialize & Deserialize", "[ut][hgraph_cache]") {
         vsag::IOStreamWriter writer(ss);
         cache1.Serialize(writer);
 
-        vsag::HGraphCache cache2(allocator.get());
+        vsag::BuildCache cache2(allocator.get());
         vsag::IOStreamReader reader(ss);
         cache2.Deserialize(reader);
 
@@ -61,7 +60,7 @@ TEST_CASE("HGraphCache Serialize & Deserialize", "[ut][hgraph_cache]") {
     }
 
     SECTION("cache with neighbors") {
-        vsag::HGraphCache cache1(allocator.get());
+        vsag::BuildCache cache1(allocator.get());
         cache1.source_ids_.push_back("a");
         cache1.source_ids_.push_back("bb");
         cache1.source_ids_.push_back("ccc");
@@ -83,7 +82,7 @@ TEST_CASE("HGraphCache Serialize & Deserialize", "[ut][hgraph_cache]") {
         vsag::IOStreamWriter writer(ss);
         cache1.Serialize(writer);
 
-        vsag::HGraphCache cache2(allocator.get());
+        vsag::BuildCache cache2(allocator.get());
         vsag::IOStreamReader reader(ss);
         cache2.Deserialize(reader);
 
@@ -98,7 +97,7 @@ TEST_CASE("HGraphCache Serialize & Deserialize", "[ut][hgraph_cache]") {
     }
 
     SECTION("cache with both source_ids and neighbors") {
-        vsag::HGraphCache cache1(allocator.get());
+        vsag::BuildCache cache1(allocator.get());
         cache1.source_ids_.push_back("x");
         cache1.source_ids_.push_back("yy");
 
@@ -111,7 +110,7 @@ TEST_CASE("HGraphCache Serialize & Deserialize", "[ut][hgraph_cache]") {
         vsag::IOStreamWriter writer(ss);
         cache1.Serialize(writer);
 
-        vsag::HGraphCache cache2(allocator.get());
+        vsag::BuildCache cache2(allocator.get());
         vsag::IOStreamReader reader(ss);
         cache2.Deserialize(reader);
 
@@ -122,17 +121,17 @@ TEST_CASE("HGraphCache Serialize & Deserialize", "[ut][hgraph_cache]") {
     }
 }
 
-TEST_CASE("HGraphCache GetNeighbors", "[ut][hgraph_cache]") {
+TEST_CASE("BuildCache GetNeighbors", "[ut][build_cache]") {
     auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
 
     SECTION("source_id not found") {
-        vsag::HGraphCache cache(allocator.get());
+        vsag::BuildCache cache(allocator.get());
         auto result = cache.GetNeighbors("nonexistent");
         REQUIRE(result.empty());
     }
 
     SECTION("get neighbors for existing source_id") {
-        vsag::HGraphCache cache(allocator.get());
+        vsag::BuildCache cache(allocator.get());
         cache.source_ids_.push_back("a");
         cache.source_ids_.push_back("bb");
         cache.source_ids_.push_back("ccc");
@@ -151,7 +150,7 @@ TEST_CASE("HGraphCache GetNeighbors", "[ut][hgraph_cache]") {
     }
 
     SECTION("get neighbors after deserialize") {
-        vsag::HGraphCache cache1(allocator.get());
+        vsag::BuildCache cache1(allocator.get());
         cache1.source_ids_.push_back("key_a");
         cache1.source_ids_.push_back("key_bb");
         cache1.source_ids_.push_back("key_ccc");
@@ -166,7 +165,7 @@ TEST_CASE("HGraphCache GetNeighbors", "[ut][hgraph_cache]") {
         vsag::IOStreamWriter writer(ss);
         cache1.Serialize(writer);
 
-        vsag::HGraphCache cache2(allocator.get());
+        vsag::BuildCache cache2(allocator.get());
         vsag::IOStreamReader reader(ss);
         cache2.Deserialize(reader);
 

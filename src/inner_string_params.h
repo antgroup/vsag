@@ -49,6 +49,7 @@ const char* const HGRAPH_IGNORE_REORDER_KEY = "ignore_reorder";
 const char* const HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY = "build_by_base";
 const char* const HGRAPH_USE_REVERSE_EDGES_KEY = "use_reverse_edges";
 const char* const HGRAPH_PERSIST_SOURCE_ID_KEY = "persist_source_id";
+const char* const PYRAMID_PERSIST_SOURCE_ID_KEY = "persist_source_id";
 const char* const LABEL_REMAP_TYPE_VALUE_ROBIN = "robin";
 const char* const LABEL_REMAP_TYPE_VALUE_PG = "pg";
 const char* const GRAPH_KEY = "graph";
@@ -284,6 +285,7 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"DEDUPLICATE_STORAGE", DEDUPLICATE_STORAGE},
     {"HOLD_MOLDS", HOLD_MOLDS},
     {"HGRAPH_PERSIST_SOURCE_ID_KEY", HGRAPH_PERSIST_SOURCE_ID_KEY},
+    {"PYRAMID_PERSIST_SOURCE_ID_KEY", PYRAMID_PERSIST_SOURCE_ID_KEY},
     {"IVF_PARTITION_STRATEGY_TYPE_GNO_IMI", IVF_PARTITION_STRATEGY_TYPE_GNO_IMI},
     {"STORE_RAW_VECTOR_KEY", STORE_RAW_VECTOR_KEY},
     {"RAW_VECTOR_KEY", RAW_VECTOR_KEY},

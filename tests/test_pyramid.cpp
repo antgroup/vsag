@@ -13,6 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <fmt/format.h>
 #include <fmt/ranges.h>
 
 #include <algorithm>
@@ -21,6 +22,7 @@
 #include <catch2/generators/catch_generators.hpp>
 #include <cmath>
 #include <cstring>
+#include <memory>
 #include <nlohmann/json.hpp>
 #include <set>
 #include <sstream>
@@ -1637,4 +1639,324 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
             }
         }
     }
+}
+
+namespace {
+
+auto
+MakePyramidCacheDataset(int64_t count,
+                        int64_t dim,
+                        const std::vector<float>& vectors,
+                        const std::vector<int64_t>& ids,
+                        const std::vector<std::string>& paths,
+                        const std::vector<std::string>& source_ids) -> vsag::DatasetPtr {
+    REQUIRE(vectors.size() == static_cast<size_t>(count * dim));
+    REQUIRE(ids.size() == static_cast<size_t>(count));
+    REQUIRE(paths.size() == static_cast<size_t>(count));
+    REQUIRE(source_ids.size() == static_cast<size_t>(count));
+
+    auto dataset = vsag::Dataset::Make();
+    auto raw_vectors = std::make_unique<float[]>(count * dim);
+    auto raw_ids = std::make_unique<int64_t[]>(count);
+    auto raw_paths = std::make_unique<std::string[]>(count);
+    auto raw_source_ids = std::make_unique<std::string[]>(count);
+
+    std::copy(vectors.begin(), vectors.end(), raw_vectors.get());
+    std::copy(ids.begin(), ids.end(), raw_ids.get());
+    std::copy(paths.begin(), paths.end(), raw_paths.get());
+    std::copy(source_ids.begin(), source_ids.end(), raw_source_ids.get());
+
+    dataset->NumElements(count)
+        ->Dim(dim)
+        ->Float32Vectors(raw_vectors.get())
+        ->Ids(raw_ids.get())
+        ->Paths(raw_paths.get())
+        ->SourceID(raw_source_ids.get())
+        ->Owner(true);
+    raw_vectors.release();
+    raw_ids.release();
+    raw_paths.release();
+    raw_source_ids.release();
+    return dataset;
+}
+
+auto
+MakePyramidCacheQuery(int64_t dim, const std::vector<float>& query, const std::string& path)
+    -> vsag::DatasetPtr {
+    REQUIRE(query.size() == static_cast<size_t>(dim));
+    auto dataset = vsag::Dataset::Make();
+    auto raw_query_vec = std::make_unique<float[]>(dim);
+    std::copy(query.begin(), query.end(), raw_query_vec.get());
+    auto raw_paths = std::make_unique<std::string[]>(1);
+    raw_paths[0] = path;
+    dataset->NumElements(1)
+        ->Dim(dim)
+        ->Float32Vectors(raw_query_vec.get())
+        ->Paths(raw_paths.get())
+        ->Owner(true);
+    raw_query_vec.release();
+    raw_paths.release();
+    return dataset;
+}
+
+}  // namespace
+
+TEST_CASE("Pyramid ExportCache + ImportCache + Build acceleration smoke test",
+          "[ft][pyramid][cache][pr]") {
+    // End-to-end smoke test mirroring the HGraph cache test, adapted for the
+    // Pyramid tree-of-graphs structure: every inserted vector shares a single
+    // deep path so they all land in the same leaf IndexNode, which becomes a
+    // GRAPH that fulfill_cache() walks.
+    //   (1) Build a baseline Pyramid with N points carrying source_id.
+    //   (2) ExportCache to an in-memory stream.
+    //   (3) Fresh Pyramid, ImportCache, then Build the same dataset — Build
+    //       should automatically take the build_with_cache() warm-start path.
+    //   (4) Verify the warmed index is searchable and the first inserted
+    //       vector (query == vectors[0]) is returned with ~0 distance.
+    constexpr int64_t TEST_DIM = 32;
+    constexpr int64_t TEST_COUNT = 200;
+    constexpr int64_t TOPK = 10;
+
+    // params must include persist_source_id: true so ExportCache produces a
+    // usable cache after a Build that recorded source_ids.
+    const auto* param = R"(
+    {
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": 32,
+        "index_param": {
+            "base_quantization_type": "fp32",
+            "max_degree": 16,
+            "ef_construction": 50,
+            "no_build_levels": [0, 1, 2],
+            "index_min_size": 28,
+            "persist_source_id": true
+        }
+    }
+    )";
+
+    std::mt19937 rng(42);
+    std::uniform_real_distribution<float> dist(-1.0F, 1.0F);
+    std::vector<float> vectors(TEST_DIM * TEST_COUNT);
+    for (auto& v : vectors) {
+        v = dist(rng);
+    }
+    std::vector<int64_t> ids(TEST_COUNT);
+    for (int64_t i = 0; i < TEST_COUNT; ++i) {
+        ids[i] = i + 1;
+    }
+    // All vectors share a deep path so they all land in the same leaf
+    // IndexNode (depth 3 with no_build_levels=[0,1,2]), making that leaf
+    // exceed index_min_size and become a GRAPH that fulfill_cache() walks.
+    std::vector<std::string> paths(TEST_COUNT, "a/b/c");
+    std::vector<std::string> source_ids(TEST_COUNT);
+    for (int64_t i = 0; i < TEST_COUNT; ++i) {
+        source_ids[i] = fmt::format("pyr_sid_{}", i);
+    }
+
+    auto make_dataset = [&]() {
+        return MakePyramidCacheDataset(TEST_COUNT, TEST_DIM, vectors, ids, paths, source_ids);
+    };
+
+    // ---- (1) baseline build ----
+    auto baseline = vsag::Factory::CreateIndex("pyramid", param).value();
+    auto baseline_build = baseline->Build(make_dataset());
+    REQUIRE(baseline_build.has_value());
+    REQUIRE(baseline->GetNumElements() == TEST_COUNT);
+
+    // ---- (2) export cache ----
+    std::stringstream cache_buf;
+    auto export_result = baseline->ExportCache(cache_buf);
+    REQUIRE(export_result.has_value());
+    REQUIRE(cache_buf.tellp() > 0);
+
+    // ---- (3) fresh index, import cache, build again ----
+    cache_buf.seekg(0);
+    auto warmed = vsag::Factory::CreateIndex("pyramid", param).value();
+    auto import_result = warmed->ImportCache(cache_buf);
+    REQUIRE(import_result.has_value());
+    auto warmed_build = warmed->Build(make_dataset());
+    REQUIRE(warmed_build.has_value());
+    REQUIRE(warmed->GetNumElements() == TEST_COUNT);
+    std::vector<float> query_vec(TEST_DIM);
+    std::copy(vectors.begin(), vectors.begin() + TEST_DIM, query_vec.begin());
+    // Pyramid navigates by path; the query must reference the same leaf.
+    auto query = MakePyramidCacheQuery(TEST_DIM, query_vec, "a/b/c");
+
+    const auto* search_param = R"({"pyramid": {"ef_search": 50}})";
+    auto search_result = warmed->KnnSearch(query, TOPK, search_param);
+    REQUIRE(search_result.has_value());
+    auto knn = search_result.value();
+    REQUIRE(knn->GetNumElements() == 1);
+    REQUIRE(knn->GetDim() > 0);
+    REQUIRE(knn->GetDim() <= TOPK);
+    bool found_self = false;
+    for (int64_t i = 0; i < knn->GetDim(); ++i) {
+        if (knn->GetIds()[i] == ids[0]) {
+            found_self = true;
+            REQUIRE(knn->GetDistances()[i] < 1e-4F);
+            break;
+        }
+    }
+    REQUIRE(found_self);
+}
+
+TEST_CASE("Pyramid ExportCache + ImportCache + Build miss-only path", "[ft][pyramid][cache][pr]") {
+    // Force every node to take the *missed* branch of build_with_cache by
+    // using a disjoint source_id set on the warmed build. The expected
+    // hit-rate is 0 and missed_nodes equals the index size.
+    constexpr int64_t TEST_DIM = 32;
+    constexpr int64_t TEST_COUNT = 200;
+    constexpr int64_t TOPK = 10;
+
+    const auto* param = R"(
+    {
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": 32,
+        "index_param": {
+            "base_quantization_type": "fp32",
+            "max_degree": 16,
+            "ef_construction": 50,
+            "no_build_levels": [0, 1, 2],
+            "index_min_size": 28,
+            "persist_source_id": true
+        }
+    }
+    )";
+
+    std::mt19937 rng(7);
+    std::uniform_real_distribution<float> dist(-1.0F, 1.0F);
+    std::vector<float> vectors(TEST_DIM * TEST_COUNT);
+    for (auto& v : vectors) {
+        v = dist(rng);
+    }
+    std::vector<int64_t> ids(TEST_COUNT);
+    for (int64_t i = 0; i < TEST_COUNT; ++i) {
+        ids[i] = i + 1;
+    }
+    std::vector<std::string> paths(TEST_COUNT, "a/b/c");
+    std::vector<std::string> source_ids_a(TEST_COUNT);
+    std::vector<std::string> source_ids_b(TEST_COUNT);
+    for (int64_t i = 0; i < TEST_COUNT; ++i) {
+        source_ids_a[i] = fmt::format("pyr_A_{}", i);
+        source_ids_b[i] = fmt::format("pyr_B_{}", i);
+    }
+
+    auto make_dataset = [&](const std::vector<std::string>& sids) {
+        return MakePyramidCacheDataset(TEST_COUNT, TEST_DIM, vectors, ids, paths, sids);
+    };
+
+    // ---- (1) baseline build with source_id "pyr_A_*" ----
+    auto baseline = vsag::Factory::CreateIndex("pyramid", param).value();
+    auto baseline_build = baseline->Build(make_dataset(source_ids_a));
+    REQUIRE(baseline_build.has_value());
+    REQUIRE(baseline->GetNumElements() == TEST_COUNT);
+
+    // ---- (2) export cache (only contains "pyr_A_*" source_ids) ----
+    std::stringstream cache_buf;
+    auto export_result = baseline->ExportCache(cache_buf);
+    REQUIRE(export_result.has_value());
+    REQUIRE(cache_buf.tellp() > 0);
+
+    // ---- (3) fresh index, import cache, build with disjoint source_ids ----
+    cache_buf.seekg(0);
+    auto warmed = vsag::Factory::CreateIndex("pyramid", param).value();
+    auto import_result = warmed->ImportCache(cache_buf);
+    REQUIRE(import_result.has_value());
+    auto warmed_build = warmed->Build(make_dataset(source_ids_b));
+    REQUIRE(warmed_build.has_value());
+    REQUIRE(warmed->GetNumElements() == TEST_COUNT);
+
+    // ---- (4) baseline cache hit-rate must be 100% (full overlap) ----
+    auto baseline_stats_str = baseline->GetStats();
+    auto baseline_parsed = vsag::JsonType::Parse(baseline_stats_str);
+    // baseline was built cold -> skipped_reason
+    REQUIRE(baseline_parsed.Contains("build_cache_hit_rate"));
+    REQUIRE(baseline_parsed["build_cache_hit_rate"].Contains("skipped_reason"));
+
+    // warmed with disjoint source_ids -> 0 hit-rate, all missed
+    auto warmed_stats_str = warmed->GetStats();
+    INFO(warmed_stats_str);
+    auto warmed_parsed = vsag::JsonType::Parse(warmed_stats_str);
+    REQUIRE(warmed_parsed.Contains("build_cache_hit_rate"));
+    REQUIRE(warmed_parsed["build_cache_hit_rate"].GetFloat() == 0.0F);
+    REQUIRE(warmed_parsed["build_cache_missed_nodes"].GetInt() == TEST_COUNT);
+    REQUIRE(warmed_parsed["build_cache_hit_nodes"].GetInt() == 0);
+}
+
+TEST_CASE("Pyramid GetStats reports build cache hit-rate", "[ft][pyramid][cache][pr]") {
+    // Verify that the build-time warm-start hit-rate computed during
+    // build_with_cache() is surfaced through GetStats():
+    //   (1) A normal Build() (no imported cache) reports a skipped_reason.
+    //   (2) A Build() after ImportCache() reports a numeric hit-rate plus
+    //       the hit / missed node counts, and miss + hit equals the warm
+    //       build's vector count for this single-hierarchy setup.
+    constexpr int64_t TEST_DIM = 32;
+    constexpr int64_t TEST_COUNT = 200;
+
+    const auto* param = R"(
+    {
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": 32,
+        "index_param": {
+            "base_quantization_type": "fp32",
+            "max_degree": 16,
+            "ef_construction": 50,
+            "no_build_levels": [0, 1, 2],
+            "index_min_size": 28,
+            "persist_source_id": true
+        }
+    }
+    )";
+
+    std::mt19937 rng(42);
+    std::uniform_real_distribution<float> dist(-1.0F, 1.0F);
+    std::vector<float> vectors(TEST_DIM * TEST_COUNT);
+    for (auto& v : vectors) {
+        v = dist(rng);
+    }
+    std::vector<int64_t> ids(TEST_COUNT);
+    for (int64_t i = 0; i < TEST_COUNT; ++i) {
+        ids[i] = i + 1;
+    }
+    std::vector<std::string> paths(TEST_COUNT, "a/b/c");
+    std::vector<std::string> source_ids(TEST_COUNT);
+    for (int64_t i = 0; i < TEST_COUNT; ++i) {
+        source_ids[i] = fmt::format("pyr_stat_{}", i);
+    }
+    auto make_dataset = [&]() {
+        return MakePyramidCacheDataset(TEST_COUNT, TEST_DIM, vectors, ids, paths, source_ids);
+    };
+
+    // ---- (1) no cache -> skipped_reason in stats ----
+    auto no_cache = vsag::Factory::CreateIndex("pyramid", param).value();
+    auto cold_build = no_cache->Build(make_dataset());
+    REQUIRE(cold_build.has_value());
+    auto cold_stats_str = no_cache->GetStats();
+    auto cold_parsed = vsag::JsonType::Parse(cold_stats_str);
+    REQUIRE(cold_parsed.Contains("build_cache_hit_rate"));
+    REQUIRE(cold_parsed["build_cache_hit_rate"].Contains("skipped_reason"));
+
+    // ---- (2) with cache -> numeric hit-rate + hit/missed counts ----
+    std::stringstream cache_buf;
+    REQUIRE(no_cache->ExportCache(cache_buf).has_value());
+    cache_buf.seekg(0);
+    auto warmed = vsag::Factory::CreateIndex("pyramid", param).value();
+    REQUIRE(warmed->ImportCache(cache_buf).has_value());
+    REQUIRE(warmed->Build(make_dataset()).has_value());
+
+    auto warm_stats_str = warmed->GetStats();
+    INFO(warm_stats_str);
+    auto warm_parsed = vsag::JsonType::Parse(warm_stats_str);
+    REQUIRE(warm_parsed.Contains("build_cache_hit_rate"));
+    REQUIRE(warm_parsed.Contains("build_cache_hit_nodes"));
+    REQUIRE(warm_parsed.Contains("build_cache_missed_nodes"));
+    const float hit_rate = warm_parsed["build_cache_hit_rate"].GetFloat();
+    REQUIRE(hit_rate > 0.0F);
+    REQUIRE(hit_rate <= 1.0F);
+    const auto hit_nodes = warm_parsed["build_cache_hit_nodes"].GetInt();
+    const auto missed_nodes = warm_parsed["build_cache_missed_nodes"].GetInt();
+    REQUIRE(hit_nodes + missed_nodes == TEST_COUNT);
 }
