@@ -1826,3 +1826,268 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
     REQUIRE_FALSE(result.value()->GetReasoning().empty());
     REQUIRE(result.value()->GetReasoning().find("missed_targets") != std::string::npos);
 }
+
+// ============ Graph Bucket Searcher Tests ============
+
+static std::string
+GenerateIVFGraphBuildParametersString(const std::string& metric_type,
+                                      int64_t dim,
+                                      int buckets_count,
+                                      int64_t graph_build_threshold) {
+    constexpr auto parameter_temp = R"(
+    {{
+        "dtype": "float32",
+        "metric_type": "{}",
+        "dim": {},
+        "index_param": {{
+            "buckets_count": {},
+            "base_quantization_type": "fp32",
+            "ivf_train_type": "random",
+            "graph_build_threshold": {}
+        }}
+    }}
+    )";
+    return fmt::format(parameter_temp, metric_type, dim, buckets_count, graph_build_threshold);
+}
+
+static std::string
+GenerateIVFGraphSearchParametersString(int scan_buckets_count, int ef_search) {
+    constexpr auto search_param_template = R"(
+    {{
+        "ivf": {{
+            "scan_buckets_count": {},
+            "factor": 4.0,
+            "first_order_scan_ratio": 1.0,
+            "ef_search": {}
+        }}
+    }})";
+    return fmt::format(search_param_template, scan_buckets_count, ef_search);
+}
+
+TEST_CASE("IVF GraphBucketSearcher Basic", "[ft][ivf][graph]") {
+    auto dim = 32;
+    auto metric = "l2";
+    auto base_count = 2000;
+    auto buckets_count = 10;
+    auto threshold = 50;
+
+    auto build_param = GenerateIVFGraphBuildParametersString(metric, dim, buckets_count, threshold);
+    auto index = vsag::Factory::CreateIndex("ivf", build_param);
+    REQUIRE(index.has_value());
+
+    auto dataset = fixtures::IVFTestIndex::pool.GetDatasetAndCreate(dim, base_count, metric);
+    auto build_result = index.value()->Build(dataset->base_);
+    REQUIRE(build_result.has_value());
+
+    auto query = fixtures::get_one_query(dataset->query_, 0);
+    auto search_param = GenerateIVFGraphSearchParametersString(buckets_count, 100);
+    auto result = index.value()->KnnSearch(query, 10, search_param);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() == 10);
+}
+
+TEST_CASE("IVF GraphBucketSearcher Flat Fallback", "[ft][ivf][graph]") {
+    auto dim = 32;
+    auto metric = "l2";
+    auto base_count = 500;
+    auto buckets_count = 20;
+    auto threshold = 10000;  // higher than any bucket -> all flat fallback
+
+    auto build_param = GenerateIVFGraphBuildParametersString(metric, dim, buckets_count, threshold);
+    auto index = vsag::Factory::CreateIndex("ivf", build_param);
+    REQUIRE(index.has_value());
+
+    auto dataset = fixtures::IVFTestIndex::pool.GetDatasetAndCreate(dim, base_count, metric);
+    auto build_result = index.value()->Build(dataset->base_);
+    REQUIRE(build_result.has_value());
+
+    auto query = fixtures::get_one_query(dataset->query_, 0);
+    auto search_param = GenerateIVFGraphSearchParametersString(buckets_count, 100);
+    auto result = index.value()->KnnSearch(query, 10, search_param);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() > 0);
+}
+
+TEST_CASE("IVF GraphBucketSearcher Add After Build Falls Back To Flat", "[ft][ivf][graph]") {
+    constexpr int64_t dim = 32;
+    constexpr int64_t base_count = 100;
+    constexpr int64_t buckets_count = 1;
+    constexpr int64_t threshold = 30;
+
+    auto build_param = GenerateIVFGraphBuildParametersString("l2", dim, buckets_count, threshold);
+    auto index = vsag::Factory::CreateIndex("ivf", build_param);
+    REQUIRE(index.has_value());
+
+    auto dataset = fixtures::IVFTestIndex::pool.GetDatasetAndCreate(dim, base_count, "l2");
+    auto initial = vsag::Dataset::Make();
+    initial->Dim(dim)
+        ->Ids(dataset->base_->GetIds())
+        ->NumElements(base_count - 1)
+        ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+        ->Owner(false);
+    REQUIRE(index.value()->Build(initial).has_value());
+
+    auto added = vsag::Dataset::Make();
+    added->Dim(dim)
+        ->Ids(dataset->base_->GetIds() + base_count - 1)
+        ->NumElements(1)
+        ->Float32Vectors(dataset->base_->GetFloat32Vectors() + (base_count - 1) * dim)
+        ->Owner(false);
+    REQUIRE(index.value()->Add(added).has_value());
+
+    auto query = vsag::Dataset::Make();
+    query->Dim(dim)
+        ->NumElements(1)
+        ->Float32Vectors(dataset->base_->GetFloat32Vectors() + (base_count - 1) * dim)
+        ->Owner(false);
+    auto search_param = GenerateIVFGraphSearchParametersString(buckets_count, 100);
+    auto result = index.value()->KnnSearch(query, 1, search_param);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetIds()[0] == dataset->base_->GetIds()[base_count - 1]);
+}
+
+TEST_CASE("IVF GraphBucketSearcher Serialization", "[ft][ivf][graph][serialize]") {
+    auto dim = 32;
+    auto metric = "l2";
+    auto base_count = 1000;
+    auto buckets_count = 10;
+    auto threshold = 30;
+
+    auto build_param = GenerateIVFGraphBuildParametersString(metric, dim, buckets_count, threshold);
+    auto index = vsag::Factory::CreateIndex("ivf", build_param);
+    REQUIRE(index.has_value());
+
+    auto dataset = fixtures::IVFTestIndex::pool.GetDatasetAndCreate(dim, base_count, metric);
+    auto build_result = index.value()->Build(dataset->base_);
+    REQUIRE(build_result.has_value());
+
+    auto query = fixtures::get_one_query(dataset->query_, 0);
+    auto search_param = GenerateIVFGraphSearchParametersString(buckets_count, 100);
+    auto before = index.value()->KnnSearch(query, 10, search_param);
+    REQUIRE(before.has_value());
+
+    // Serialize
+    auto serial_result = index.value()->Serialize();
+    REQUIRE(serial_result.has_value());
+
+    // Deserialize
+    auto restored = vsag::Factory::CreateIndex("ivf", build_param);
+    REQUIRE(restored.has_value());
+    auto load_result = restored.value()->Deserialize(serial_result.value());
+    REQUIRE(load_result.has_value());
+
+    auto after = restored.value()->KnnSearch(query, 10, search_param);
+    REQUIRE(after.has_value());
+    REQUIRE(after.value()->GetDim() == before.value()->GetDim());
+    for (int64_t i = 0; i < before.value()->GetDim(); ++i) {
+        REQUIRE(before.value()->GetIds()[i] == after.value()->GetIds()[i]);
+    }
+}
+
+TEST_CASE("IVF GraphBucketSearcher Streaming Serialization", "[ft][ivf][graph][streaming]") {
+    struct BlockSizeLimitRestore {
+        uint64_t origin_size;
+        ~BlockSizeLimitRestore() {
+            vsag::Options::Instance().set_block_size_limit(origin_size);
+        }
+    };
+    BlockSizeLimitRestore block_size_limit_restore{vsag::Options::Instance().block_size_limit()};
+    vsag::Options::Instance().set_block_size_limit(1024 * 1024 * 2);
+
+    auto dim = 32;
+    auto metric = "l2";
+    auto base_count = 1000;
+    auto buckets_count = 10;
+    auto threshold = 30;
+
+    auto build_param = GenerateIVFGraphBuildParametersString(metric, dim, buckets_count, threshold);
+    auto index = vsag::Factory::CreateIndex("ivf", build_param);
+    REQUIRE(index.has_value());
+
+    auto dataset = fixtures::IVFTestIndex::pool.GetDatasetAndCreate(dim, base_count, metric);
+    auto build_result = index.value()->Build(dataset->base_);
+    REQUIRE(build_result.has_value());
+
+    auto query = fixtures::get_one_query(dataset->query_, 0);
+    auto search_param = GenerateIVFGraphSearchParametersString(buckets_count, 100);
+    auto before = index.value()->KnnSearch(query, 10, search_param);
+    REQUIRE(before.has_value());
+
+    // Streaming serialize
+    std::stringstream stream;
+    REQUIRE(index.value()->SerializeStreaming(stream).has_value());
+    const auto bytes = stream.str();
+
+    // Streaming deserialize
+    auto restored = vsag::Factory::CreateIndex("ivf", build_param);
+    REQUIRE(restored.has_value());
+    std::stringstream load_stream(bytes);
+    REQUIRE(restored.value()->DeserializeStreaming(load_stream).has_value());
+
+    auto after = restored.value()->KnnSearch(query, 10, search_param);
+    REQUIRE(after.has_value());
+    REQUIRE(after.value()->GetDim() == before.value()->GetDim());
+}
+
+TEST_CASE("IVF GraphBucketSearcher Range Search", "[ft][ivf][graph][range]") {
+    auto dim = 32;
+    auto metric = "l2";
+    auto base_count = 1000;
+    auto buckets_count = 10;
+    auto threshold = 30;
+
+    auto build_param = GenerateIVFGraphBuildParametersString(metric, dim, buckets_count, threshold);
+    auto index = vsag::Factory::CreateIndex("ivf", build_param);
+    REQUIRE(index.has_value());
+
+    auto dataset = fixtures::IVFTestIndex::pool.GetDatasetAndCreate(dim, base_count, metric);
+    auto build_result = index.value()->Build(dataset->base_);
+    REQUIRE(build_result.has_value());
+
+    auto query = fixtures::get_one_query(dataset->query_, 0);
+    auto search_param = GenerateIVFGraphSearchParametersString(buckets_count, 100);
+    auto result = index.value()->RangeSearch(query, 100.0f, search_param);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() > 0);
+}
+
+TEST_CASE("IVF GraphBucketSearcher Memory Usage", "[ft][ivf][graph][memory]") {
+    auto dim = 32;
+    auto metric = "l2";
+    auto base_count = 1000;
+    auto buckets_count = 10;
+    auto threshold = 30;
+
+    auto build_param = GenerateIVFGraphBuildParametersString(metric, dim, buckets_count, threshold);
+    auto index = vsag::Factory::CreateIndex("ivf", build_param);
+    REQUIRE(index.has_value());
+
+    auto dataset = fixtures::IVFTestIndex::pool.GetDatasetAndCreate(dim, base_count, metric);
+    auto build_result = index.value()->Build(dataset->base_);
+    REQUIRE(build_result.has_value());
+
+    auto memory_usage = index.value()->GetMemoryUsage();
+    REQUIRE(memory_usage > 0);
+}
+
+TEST_CASE("IVF GraphBucketSearcher Without Graph", "[ft][ivf][graph]") {
+    auto dim = 32;
+    auto metric = "l2";
+    auto base_count = 500;
+    auto buckets_count = 10;
+    auto threshold = 0;  // disabled
+
+    auto build_param = GenerateIVFGraphBuildParametersString(metric, dim, buckets_count, threshold);
+    auto index = vsag::Factory::CreateIndex("ivf", build_param);
+    REQUIRE(index.has_value());
+
+    auto dataset = fixtures::IVFTestIndex::pool.GetDatasetAndCreate(dim, base_count, metric);
+    auto build_result = index.value()->Build(dataset->base_);
+    REQUIRE(build_result.has_value());
+
+    auto query = fixtures::get_one_query(dataset->query_, 0);
+    auto search_param = GenerateIVFGraphSearchParametersString(buckets_count, 100);
+    auto result = index.value()->KnnSearch(query, 10, search_param);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() > 0);
+}

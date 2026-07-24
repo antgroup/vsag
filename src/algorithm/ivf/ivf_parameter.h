@@ -20,6 +20,7 @@
 #include "algorithm/inner_index_parameter.h"
 #include "datacell/bucket_datacell_parameter.h"
 #include "datacell/flatten_datacell_parameter.h"
+#include "datacell/graph_interface_parameter.h"
 #include "inner_string_params.h"
 #include "ivf_nearest_partition.h"
 #include "ivf_partition_strategy_parameter.h"
@@ -47,6 +48,8 @@ public:
     IVFPartitionStrategyParametersPtr ivf_partition_strategy_parameter{nullptr};
     BucketIdType buckets_per_data{1};
     int64_t train_sample_count{65536L};
+    GraphInterfaceParamPtr graph_param{nullptr};
+    int64_t graph_build_threshold{0};
 };
 
 class IVFSearchParameters : public IndexSearchParameter {
@@ -58,6 +61,7 @@ public:
     int64_t scan_buckets_count{30};
     bool disable_bucket_scan{false};
     float first_order_scan_ratio{1.0F};
+    int64_t ef_search{100};
 
 private:
     IVFSearchParameters() {

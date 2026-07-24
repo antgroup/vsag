@@ -30,7 +30,9 @@ add_executable (105_index_brute_force 105_index_brute_force.cpp)
 target_link_libraries (105_index_brute_force vsag)
 
 add_executable (106_index_ivf 106_index_ivf.cpp)
+add_executable (108_index_ivf_graph_bucket 108_index_ivf_graph_bucket.cpp)
 target_link_libraries (106_index_ivf vsag)
+target_link_libraries (108_index_ivf_graph_bucket vsag)
 
 add_executable (107_index_pyramid 107_index_pyramid.cpp)
 target_link_libraries (107_index_pyramid vsag)
