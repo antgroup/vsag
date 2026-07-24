@@ -27,7 +27,9 @@ class Allocator;
 DEFINE_POINTER(VisitedList);
 class VisitedList : public ResourceObject {
 public:
-    using VisitedListType = uint16_t;
+    using WordType = uint64_t;
+    using TagType = uint16_t;
+    static constexpr uint64_t kBitsPerWord = sizeof(WordType) * 8;
 
 public:
     explicit VisitedList(InnerIdType max_size, Allocator* allocator);
@@ -35,17 +37,27 @@ public:
 
     void
     Set(const InnerIdType& id) {
-        this->list_[id] = this->tag_;
+        const auto word_id = static_cast<uint64_t>(id) / kBitsPerWord;
+        const auto mask = WordType{1} << (static_cast<uint64_t>(id) % kBitsPerWord);
+        if (this->tags_[word_id] != this->tag_) {
+            this->tags_[word_id] = this->tag_;
+            this->words_[word_id] = mask;
+        } else {
+            this->words_[word_id] |= mask;
+        }
     }
 
     [[nodiscard]] bool
     Get(const InnerIdType& id) {
-        return this->list_[id] == this->tag_;
+        const auto word_id = static_cast<uint64_t>(id) / kBitsPerWord;
+        const auto mask = WordType{1} << (static_cast<uint64_t>(id) % kBitsPerWord);
+        return this->tags_[word_id] == this->tag_ and (this->words_[word_id] & mask) != 0;
     }
 
     void
     Prefetch(const InnerIdType& id) {
-        PrefetchLines(this->list_ + id, 64);
+        const auto word_id = static_cast<uint64_t>(id) / kBitsPerWord;
+        PrefetchLines(this->tags_ + word_id, 64);
     }
 
     void
@@ -53,17 +65,19 @@ public:
 
     uint64_t
     GetMemoryUsage() const override {
-        return sizeof(VisitedList) + sizeof(VisitedListType) * this->max_size_;
+        return sizeof(VisitedList) + this->word_count_ * (sizeof(WordType) + sizeof(TagType));
     }
 
 private:
     Allocator* const allocator_{nullptr};
 
-    VisitedListType* list_{nullptr};
+    WordType* words_{nullptr};
 
-    VisitedListType tag_{1};
+    TagType* tags_{nullptr};
 
-    const InnerIdType max_size_{0};
+    TagType tag_{1};
+
+    const uint64_t word_count_{0};
 };
 
 using VisitedListPool = ResourceObjectPool<VisitedList>;
