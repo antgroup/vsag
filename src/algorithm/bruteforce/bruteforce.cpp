@@ -17,6 +17,7 @@
 #include <atomic>
 #include <cstring>
 #include <mutex>
+#include <new>
 #include <optional>
 #include <tuple>
 
@@ -322,12 +323,15 @@ BruteForce::Remove(const std::vector<int64_t>& ids, RemoveMode mode) {
         }
 
         const auto last_inner_id = static_cast<InnerIdType>(current_total - 1);
+        Vector<float> data(allocator_);
+        if (inner_id < last_inner_id) {
+            data.resize(dim_);
+            GetVectorByInnerId(last_inner_id, data.data());
+        }
         bool was_mark_removed = this->label_table_->IsRemoved(inner_id);
         this->label_table_->ForceRemove(label, inner_id);
 
         if (inner_id < last_inner_id) {
-            Vector<float> data(dim_, allocator_);
-            GetVectorByInnerId(last_inner_id, data.data());
             this->inner_codes_->InsertVector(data.data(), inner_id);
             this->label_table_->Move(last_inner_id, inner_id);
             if (this->extra_infos_ != nullptr) {
@@ -1026,7 +1030,7 @@ static const std::string BRUTE_FORCE_PARAMS_TEMPLATE =
         "{USE_REORDER_KEY}": false,
         "{BASE_CODES_KEY}": {
             "{IO_PARAMS_KEY}": {
-                "{TYPE_KEY}": "{IO_TYPE_VALUE_MEMORY_IO}",
+                "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
                 "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
             },
             "{CODES_TYPE_KEY}": "flatten",
@@ -1075,7 +1079,7 @@ static const std::string WARP_PARAMS_TEMPLATE =
         "{USE_REORDER_KEY}": false,
         "{BASE_CODES_KEY}": {
             "{IO_PARAMS_KEY}": {
-                "{TYPE_KEY}": "{IO_TYPE_VALUE_MEMORY_IO}",
+                "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
                 "{IO_FILE_PATH_KEY}": "{DEFAULT_FILE_PATH_VALUE}"
             },
             "{CODES_TYPE_KEY}": "multi_vector",
@@ -1264,15 +1268,19 @@ BruteForce::resize(uint64_t new_size) {
 void
 BruteForce::shrink_to_fit() {
     auto total_count = this->total_count_.load();
-    auto current_capacity = this->max_capacity_.load();
-    if (total_count != 0 and total_count > current_capacity / 2) {
-        return;
-    }
-
-    this->inner_codes_->ShrinkToFit(total_count);
-    this->label_table_->ShrinkToFit(total_count);
-    if (this->extra_infos_ != nullptr) {
-        this->extra_infos_->ShrinkToFit(total_count);
+    try {
+        this->inner_codes_->ShrinkToFit(total_count);
+        this->label_table_->ShrinkToFit(total_count);
+        if (this->extra_infos_ != nullptr) {
+            this->extra_infos_->ShrinkToFit(total_count);
+        }
+    } catch (const VsagException& e) {
+        if (e.error_.type != ErrorType::NO_ENOUGH_MEMORY) {
+            throw;
+        }
+        // Deletion has already completed; compaction is best effort when memory is exhausted.
+    } catch (const std::bad_alloc&) {
+        // SafeAllocator reports failed storage shrinking as std::bad_alloc.
     }
     this->max_capacity_.store(total_count);
     this->cal_memory_usage();

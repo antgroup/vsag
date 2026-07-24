@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <new>
+
 #include "hgraph.h"  // IWYU pragma: keep
 #include "impl/pruning_strategy.h"
 #include "utils/util_functions.h"
@@ -36,7 +38,16 @@ HGraph::Remove(const std::vector<int64_t>& ids, RemoveMode mode) {
             delete_count += this->force_remove_one(id);
         }
         if (delete_count != 0) {
-            this->shrink_to_fit();
+            try {
+                this->shrink_to_fit();
+            } catch (const VsagException& e) {
+                if (e.error_.type != ErrorType::NO_ENOUGH_MEMORY) {
+                    throw;
+                }
+                // Deletion has already completed; compaction is best effort when memory is exhausted.
+            } catch (const std::bad_alloc&) {
+                // SafeAllocator reports failed storage shrinking as std::bad_alloc.
+            }
         }
         return delete_count;
     }

@@ -13,11 +13,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <atomic>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
+#include <mutex>
 #include <sstream>
+#include <thread>
+#include <unordered_map>
 
 #include "functest.h"
 #include "storage/serialization_tags.h"
@@ -26,6 +31,107 @@
 #include "vsag/constants.h"
 #include "vsag/options.h"
 #include "vsag/search_request.h"
+
+namespace {
+
+class TrackingAllocator : public vsag::Allocator {
+public:
+    std::string
+    Name() override {
+        return "TrackingAllocator";
+    }
+
+    void*
+    Allocate(uint64_t size) override {
+        std::scoped_lock lock(mutex_);
+        if (size > allocation_limit_ - allocated_bytes_) {
+            return nullptr;
+        }
+        auto* ptr = std::malloc(size);
+        if (ptr != nullptr) {
+            allocations_[ptr] = size;
+            allocated_bytes_ += size;
+        }
+        return ptr;
+    }
+
+    void
+    Deallocate(void* ptr) override {
+        if (ptr == nullptr) {
+            return;
+        }
+        {
+            std::scoped_lock lock(mutex_);
+            auto it = allocations_.find(ptr);
+            if (it == allocations_.end()) {
+                std::abort();
+            }
+            allocated_bytes_ -= it->second;
+            allocations_.erase(it);
+        }
+        std::free(ptr);
+    }
+
+    void*
+    Reallocate(void* ptr, uint64_t size) override {
+        if (ptr == nullptr) {
+            return Allocate(size);
+        }
+
+        std::scoped_lock lock(mutex_);
+        auto it = allocations_.find(ptr);
+        if (it == allocations_.end()) {
+            std::abort();
+        }
+        if (size > it->second && size - it->second > allocation_limit_ - allocated_bytes_) {
+            return nullptr;
+        }
+        auto* new_ptr = std::realloc(ptr, size);
+        if (new_ptr == nullptr) {
+            return nullptr;
+        }
+        allocated_bytes_ -= it->second;
+        allocations_.erase(it);
+        allocations_[new_ptr] = size;
+        allocated_bytes_ += size;
+        return new_ptr;
+    }
+
+    uint64_t
+    AllocatedBytes() const {
+        std::scoped_lock lock(mutex_);
+        return allocated_bytes_;
+    }
+
+    void
+    SetAllocationLimit(uint64_t limit) {
+        std::scoped_lock lock(mutex_);
+        allocation_limit_ = limit;
+    }
+
+private:
+    mutable std::mutex mutex_;
+    std::unordered_map<void*, uint64_t> allocations_;
+    uint64_t allocated_bytes_{0};
+    uint64_t allocation_limit_{std::numeric_limits<uint64_t>::max()};
+};
+
+class BlockSizeLimitGuard {
+public:
+    explicit BlockSizeLimitGuard(uint64_t block_size)
+        : original_block_size_(vsag::Options::Instance().block_size_limit()) {
+        vsag::Options::Instance().set_block_size_limit(block_size);
+    }
+
+    ~BlockSizeLimitGuard() {
+        vsag::Options::Instance().set_block_size_limit(original_block_size_);
+    }
+
+private:
+    uint64_t original_block_size_;
+};
+
+}  // namespace
 
 namespace fixtures {
 
@@ -960,6 +1066,112 @@ TEST_CASE("(PR) BruteForce RangeSearch After MarkRemove",
             }
         }
     }
+}
+
+TEST_CASE("(PR) BruteForce Force Remove Reclaims Storage",
+          "[ft][remove][memory][bruteforce][concurrent][pr]") {
+    constexpr int64_t dim = 4;
+    constexpr int64_t count = 32 * 1024;
+    BlockSizeLimitGuard block_size_guard(256 * 1024);
+    std::vector<int64_t> ids(count);
+    std::vector<float> vectors(count * dim);
+    for (int64_t i = 0; i < count; ++i) {
+        ids[i] = i;
+        for (int64_t j = 0; j < dim; ++j) {
+            vectors[i * dim + j] = static_cast<float>(i * dim + j);
+        }
+    }
+
+    auto base = vsag::Dataset::Make();
+    base->NumElements(count)
+        ->Dim(dim)
+        ->Ids(ids.data())
+        ->Float32Vectors(vectors.data())
+        ->Owner(false);
+    auto param =
+        fixtures::BruteForceTestIndex::GenerateBruteForceBuildParametersString("l2", dim, "fp32");
+    auto allocator = std::make_shared<TrackingAllocator>();
+    auto index_result =
+        vsag::Factory::CreateIndex(fixtures::BruteForceTestIndex::name, param, allocator.get());
+    REQUIRE(index_result.has_value());
+    auto index = index_result.value();
+    REQUIRE(index->Build(base).has_value());
+    auto allocated_bytes_before_remove = allocator->AllocatedBytes();
+    auto memory_before_remove = index->GetMemoryUsage();
+
+    allocator->SetAllocationLimit(allocator->AllocatedBytes());
+    auto oom_remove = index->Remove({ids.front()}, vsag::RemoveMode::FORCE_REMOVE);
+    REQUIRE(not oom_remove.has_value());
+    REQUIRE(index->GetNumElements() == count);
+    REQUIRE(index->CheckIdExist(ids.front()));
+    allocator->SetAllocationLimit(std::numeric_limits<uint64_t>::max());
+
+    std::vector<int64_t> initial_removed(ids.begin(), ids.begin() + count / 2);
+    auto remove_result = index->Remove(initial_removed, vsag::RemoveMode::FORCE_REMOVE);
+    REQUIRE(remove_result.has_value());
+    REQUIRE(remove_result.value() == initial_removed.size());
+    REQUIRE(index->GetNumElements() == count / 2);
+    REQUIRE(index->GetNumberRemoved() == 0);
+    REQUIRE(index->GetMemoryUsage() < memory_before_remove);
+    REQUIRE(allocator->AllocatedBytes() < allocated_bytes_before_remove);
+
+    std::vector<int64_t> add_ids{count};
+    std::vector<float> add_vectors(dim, static_cast<float>(count));
+    auto readd = vsag::Dataset::Make();
+    readd->NumElements(1)
+        ->Dim(dim)
+        ->Ids(add_ids.data())
+        ->Float32Vectors(add_vectors.data())
+        ->Owner(false);
+    auto added = index->Add(readd);
+    REQUIRE(added.has_value());
+    REQUIRE(added.value().empty());
+    REQUIRE(index->GetNumElements() == count / 2 + 1);
+    auto remove_readded = index->Remove(add_ids, vsag::RemoveMode::FORCE_REMOVE);
+    REQUIRE(remove_readded.has_value());
+    REQUIRE(remove_readded.value() == 1);
+
+    const int64_t retained_id = ids.back();
+    auto retained = index->GetDataByIds(&retained_id, 1);
+    REQUIRE(retained.has_value());
+    REQUIRE(retained.value()->GetNumElements() == 1);
+    REQUIRE(retained.value()->GetIds()[0] == retained_id);
+    REQUIRE(memcmp(retained.value()->GetFloat32Vectors(),
+                   vectors.data() + (count - 1) * dim,
+                   dim * sizeof(float)) == 0);
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)
+        ->Dim(dim)
+        ->Float32Vectors(vectors.data() + (count - 1) * dim)
+        ->Owner(false);
+    auto search_result = index->KnnSearch(query, 1, "");
+    REQUIRE(search_result.has_value());
+    REQUIRE(search_result.value()->GetIds()[0] == retained_id);
+
+    std::atomic<bool> start{false};
+    std::atomic<bool> search_failed{false};
+    std::thread search_thread([&] {
+        while (not start.load(std::memory_order_acquire)) {
+        }
+        for (int i = 0; i < 256; ++i) {
+            auto result = index->KnnSearch(query, 1, "");
+            if (not result.has_value() or result.value()->GetIds()[0] != retained_id) {
+                search_failed.store(true, std::memory_order_relaxed);
+                return;
+            }
+        }
+    });
+
+    start.store(true, std::memory_order_release);
+    std::vector<int64_t> concurrent_removed(ids.begin() + count / 2, ids.end() - 1);
+    auto concurrent_remove = index->Remove(concurrent_removed, vsag::RemoveMode::FORCE_REMOVE);
+    search_thread.join();
+    REQUIRE(concurrent_remove.has_value());
+    REQUIRE(concurrent_remove.value() == concurrent_removed.size());
+    REQUIRE(not search_failed.load(std::memory_order_relaxed));
+    REQUIRE(index->GetNumElements() == 1);
+    REQUIRE(index->GetNumberRemoved() == 0);
 }
 
 static void

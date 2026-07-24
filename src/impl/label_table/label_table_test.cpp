@@ -217,6 +217,15 @@ TEST_CASE("LabelTable Memory Management", "[ut][LabelTable]") {
         auto usage = label_table.GetMemoryUsage();
         REQUIRE(usage > 0);
     }
+
+    SECTION("GetMemoryUsage includes retained capacity") {
+        label_table.Resize(128);
+        auto usage_before_shrink = label_table.GetMemoryUsage();
+
+        label_table.ShrinkToFit(127);
+
+        REQUIRE(label_table.GetMemoryUsage() == usage_before_shrink);
+    }
 }
 
 TEST_CASE("LabelTable Filter Operations", "[ut][LabelTable]") {

@@ -83,6 +83,21 @@ index->Remove(std::vector<int64_t>{id1, id2, id3});
 
 可运行示例：`examples/cpp/303_feature_remove.cpp`。
 
+### BruteForce 删除
+
+BruteForce 也支持这两种模式，但它**不使用** HGraph 的 `support_force_remove` 配置。
+`MARK_REMOVE` 会写入墓碑并保留向量存储。`FORCE_REMOVE` 不需要额外配置：它会物理删除条目，必要时
+移动最后一个内部槽位，同时保持外部 id 不变。
+
+BruteForce 默认使用 `block_memory_io`。每个成功的物理删除批次都会将逻辑向量和可选额外信息存储收缩到
+存活条目数，并释放末尾完整的块；最后一个未填满的块会保留。标签表会在存活条目数不超过当前容量一半时
+回收底层分配，以避免反复复制整张表。`GetMemoryUsage()` 会反映紧凑后的索引分配量。这不保证进程分配器
+会立即将内存归还给操作系统，也不保证 RSS 降低。物理删除是同步操作，会获取 BruteForce 的全局独占锁：它会等待进行中的搜索，并在执行期间阻止新搜索；因此应批量传入 id，避免在延迟敏感路径上使用。
+
+```cpp
+index->Remove(std::vector<int64_t>{id1, id2}, vsag::RemoveMode::FORCE_REMOVE);
+```
+
 ## 更新向量与 id
 
 ### `UpdateVector`
