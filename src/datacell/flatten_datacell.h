@@ -20,12 +20,14 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <type_traits>
 
 #include "common.h"
 #include "flatten_interface.h"
 #include "index_common_param.h"
 #include "io/common/basic_io.h"
 #include "io/memory_block_io/memory_block_io.h"
+#include "io/memory_io/memory_io.h"
 #include "quantization/quantizer.h"
 #include "query_context.h"
 #include "utils/byte_buffer.h"
@@ -148,6 +150,24 @@ public:
 
     bool
     GetCodesById(InnerIdType id, uint8_t* codes) const override;
+
+    [[nodiscard]] const float*
+    TryGetContiguousRawFloatData(uint64_t* row_stride = nullptr) override {
+        if (row_stride != nullptr) {
+            *row_stride = 0;
+        }
+        if (this->GetQuantizerName() != QUANTIZATION_TYPE_VALUE_FP32) {
+            return nullptr;
+        }
+        if constexpr (std::is_same_v<IOTmpl, MemoryIO>) {
+            auto memory_io = std::static_pointer_cast<MemoryIO>(this->io_);
+            if (row_stride != nullptr) {
+                *row_stride = this->code_size_ / sizeof(float);
+            }
+            return reinterpret_cast<const float*>(memory_io->GetReadOnlyRawData());
+        }
+        return nullptr;
+    }
 
     void
     Serialize(StreamWriter& writer) override;

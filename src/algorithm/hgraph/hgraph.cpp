@@ -62,6 +62,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
       odescent_param_(hgraph_param->odescent_param),
       graph_type_(hgraph_param->graph_type),
       hierarchical_datacell_param_(hgraph_param->hierarchical_graph_param),
+      mci_parameters_(hgraph_param->mci_parameters),
       use_old_serial_format_(common_param.use_old_serial_format_) {
     this->support_duplicate_ = hgraph_param->support_duplicate;
     this->deduplicate_storage_ = hgraph_param->deduplicate_storage;
@@ -87,6 +88,10 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
             FlattenInterface::MakeInstance(hgraph_param->precise_codes_param, common_param);
     }
     this->searcher_ = std::make_shared<BasicSearcher>(common_param, neighbors_mutex_);
+    this->mci_searcher_ = std::make_shared<MCISearcher>(common_param);
+    if (this->mci_parameters_.enabled) {
+        this->mci_cliques_ = std::make_shared<CliqueDataCell>(common_param.allocator_.get());
+    }
 
     this->bottom_graph_ =
         GraphInterface::MakeInstance(hgraph_param->bottom_graph_param, common_param);
@@ -504,6 +509,9 @@ HGraph::Merge(const std::vector<MergeUnit>& merge_units) {
         sparse_odescent_builder.SaveGraph(graph);
         this->entry_point_id_ = ids.back();
     }
+    if (this->mci_parameters_.enabled) {
+        this->build_mci_clique_index();
+    }
 }
 
 void
@@ -581,6 +589,32 @@ HGraph::GetStats() const {
     } else {
         stats["build_cache_hit_rate"]["skipped_reason"].SetString(
             "index was not built from an imported cache");
+    }
+    if (this->mci_cliques_ != nullptr) {
+        const auto mci_stats = this->mci_cliques_->CollectStats(this->total_count_.load());
+        stats["mci_has_index"].SetBool(mci_stats.has_index);
+        stats["mci_total_nodes"].SetInt(static_cast<int64_t>(mci_stats.total_nodes));
+        stats["mci_covered_nodes"].SetInt(static_cast<int64_t>(mci_stats.covered_nodes));
+        stats["mci_covered_node_ratio"].SetFloat(static_cast<float>(mci_stats.covered_node_ratio));
+        stats["mci_base_clique_count"].SetInt(static_cast<int64_t>(mci_stats.base_clique_count));
+        stats["mci_delta_clique_count"].SetInt(static_cast<int64_t>(mci_stats.delta_clique_count));
+        stats["mci_total_clique_count"].SetInt(static_cast<int64_t>(mci_stats.total_clique_count));
+        stats["mci_base_membership_count"].SetInt(
+            static_cast<int64_t>(mci_stats.base_membership_count));
+        stats["mci_delta_extra_membership_count"].SetInt(
+            static_cast<int64_t>(mci_stats.delta_extra_membership_count));
+        stats["mci_delta_clique_membership_count"].SetInt(
+            static_cast<int64_t>(mci_stats.delta_clique_membership_count));
+        stats["mci_total_membership_count"].SetInt(
+            static_cast<int64_t>(mci_stats.total_membership_count));
+        stats["mci_avg_membership_per_node"].SetFloat(
+            static_cast<float>(mci_stats.avg_membership_per_node));
+        stats["mci_avg_clique_size"].SetFloat(static_cast<float>(mci_stats.avg_clique_size));
+        stats["mci_max_membership_per_node"].SetInt(
+            static_cast<int64_t>(mci_stats.max_membership_per_node));
+        stats["mci_max_clique_size"].SetInt(static_cast<int64_t>(mci_stats.max_clique_size));
+        stats["mci_memory_usage"].SetInt(
+            static_cast<int64_t>(this->mci_cliques_->GetMemoryUsage()));
     }
     return stats.Dump(4);
 }
@@ -724,6 +758,7 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
     if (this->using_dedup_storage() && !this->immutable_.load(std::memory_order_acquire)) {
         map_lock = this->acquire_global_read_lock();
     }
+    std::unique_lock<std::shared_mutex> codes_lock(this->persistent_codes_mutex_);
     bool update_status = basic_flatten_codes_->UpdateVector(new_base_vec, inner_id);
     if (has_precise_reorder()) {
         update_status = update_status && high_precise_codes_->UpdateVector(new_base_vec, inner_id);
@@ -769,6 +804,9 @@ HGraph::cal_memory_usage() {
 
     if (this->create_new_raw_vector_ and this->raw_vector_ != nullptr) {
         memory += raw_vector_->GetMemoryUsage();
+    }
+    if (this->mci_cliques_ != nullptr) {
+        memory += this->mci_cliques_->GetMemoryUsage();
     }
 
     std::unique_lock lock(this->memory_usage_mutex_);

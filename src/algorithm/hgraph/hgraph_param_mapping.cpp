@@ -91,6 +91,8 @@ map_rabitq_split_param(const JsonType& external_json, JsonType& inner_json) {
 
 JsonType
 HGraph::map_hgraph_param(const JsonType& hgraph_json) {
+    CHECK_ARGUMENT(not hgraph_json.Contains(HGRAPH_MCI_KEY),
+                   "nested hgraph mci parameters are not supported; use flat mci_* parameters");
     static const ConstParamMap external_mapping = {
         {
             HGRAPH_USE_REORDER,
@@ -512,6 +514,48 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             {
                 LABEL_REMAP_TYPE_KEY,
             },
+        },
+        {
+            HGRAPH_USE_MCI,
+            {
+                HGRAPH_USE_MCI,
+            },
+        },
+        {
+            HGRAPH_MCI_MCS,
+            {
+                HGRAPH_MCI_MCS,
+            },
+        },
+        {
+            HGRAPH_MCI_CLIQUE_MAX,
+            {
+                HGRAPH_MCI_CLIQUE_MAX,
+            },
+        },
+        {
+            HGRAPH_MCI_ALPHA,
+            {
+                HGRAPH_MCI_ALPHA,
+            },
+        },
+        {
+            HGRAPH_MCI_INCREMENTAL_JOIN_RATIO_THRESHOLD_KEY,
+            {
+                HGRAPH_MCI_INCREMENTAL_JOIN_RATIO_THRESHOLD_KEY,
+            },
+        },
+        {
+            HGRAPH_MCI_INCREMENTAL_ADDED_MCT_KEY,
+            {
+                HGRAPH_MCI_INCREMENTAL_ADDED_MCT_KEY,
+            },
+        },
+        {
+            HGRAPH_MCI_INCREMENTAL_CLIQUE_MAX_KEY,
+            {
+                HGRAPH_MCI_INCREMENTAL_CLIQUE_MAX_KEY,
+            },
         }};
     const std::string hgraph_params_template =
         R"(
@@ -614,7 +658,6 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
     auto inner_json = JsonType::Parse(str);
     mapping_external_param_to_inner(hgraph_json, external_mapping, inner_json);
     map_rabitq_split_param(hgraph_json, inner_json);
-
     return inner_json;
 }
 
