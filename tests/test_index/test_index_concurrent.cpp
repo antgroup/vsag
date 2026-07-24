@@ -247,7 +247,7 @@ TestIndex::TestConcurrentDestruct(TestIndex::IndexPtr& index,
                 return index->CalcDistanceById(base->GetFloat32Vectors(), *base->GetIds())
                     .has_value();
             case 10:
-                return index->CalDistanceById(base->GetFloat32Vectors(), base->GetIds(), 1)
+                return index->CalcDistancesById(base->GetFloat32Vectors(), base->GetIds(), 1)
                     .has_value();
             case 11:
                 return index->GetMinAndMaxId().has_value();

@@ -287,8 +287,8 @@ HGraphAnalyzer::calculate_quantization_result(
         }
         const auto* query = sample_datas.data() + static_cast<uint64_t>(i) * dim_;
         float sample_error = 0.0F;
-        auto base_result = hgraph_->CalDistanceById(query, result.data(), actual_topk, false);
-        auto precise_result = hgraph_->CalDistanceById(query, result.data(), actual_topk, true);
+        auto base_result = hgraph_->CalcDistancesById(query, result.data(), actual_topk, false);
+        auto precise_result = hgraph_->CalcDistancesById(query, result.data(), actual_topk, true);
         if (base_result == nullptr or precise_result == nullptr) {
             continue;
         }

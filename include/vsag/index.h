@@ -545,12 +545,15 @@ public:
     }
 
     /**
-     * @brief Calculate the distance between the query and the vector of the given ID for batch.
+     * @brief Calculate distances between the query and vectors of the given IDs.
+     *
+     * @deprecated Use CalcDistancesById instead. This alias will be retained through the 1.1
+     * release migration window.
      *
      * Suitable for dense vector indexes (HGraph, BruteForce, IVF, DiskANN, HNSW).
      * The query must be a contiguous float32 array. For sparse vector indexes
-      * (SINDI), this overload is not applicable; use
-     * CalDistanceById(DatasetPtr, const int64_t*, int64_t, bool) instead.
+     * (SINDI), this overload is not applicable; use
+     * CalcDistancesById(DatasetPtr, const int64_t*, int64_t, bool) instead.
      *
      * @param query is the embedding of query (float32 array for dense vectors).
      * @param ids is the unique identifier of the vector to be calculated in the index.
@@ -561,7 +564,8 @@ public:
      *        use quantized or approximate representations for faster computation.
      * @return result is valid distance of input ids. '-1' indicates an invalid distance.
      */
-    [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
+    [[deprecated(
+        "use CalcDistancesById instead")]] [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     CalDistanceById(const float* query,
                     const int64_t* ids,
                     int64_t count,
@@ -571,7 +575,10 @@ public:
     }
 
     /**
-     * @brief Calculate the distance between the query and the vector of the given ID for batch.
+     * @brief Calculate distances between the query and vectors of the given IDs.
+     *
+     * @deprecated Use CalcDistancesById instead. This alias will be retained through the 1.1
+     * release migration window.
      *
       * Suitable for sparse vector indexes (SINDI) where vectors
      * cannot be represented as a simple float pointer. The Dataset should
@@ -588,13 +595,66 @@ public:
      *        use quantized or approximate representations for faster computation.
      * @return result is valid distance of input ids. '-1' indicates an invalid distance.
      */
-    [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
+    [[deprecated(
+        "use CalcDistancesById instead")]] [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     CalDistanceById(const DatasetPtr& query,
                     const int64_t* ids,
                     int64_t count,
                     bool calculate_precise_distance = true) const {
         return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                                     "Index does not support get distance by id"));
+    }
+
+    /**
+     * @brief Calculate distances between a DatasetPtr query and vectors of the given IDs.
+     *
+     * The default implementation dispatches to the deprecated virtual alias so existing
+     * third-party Index implementations remain source-compatible.
+     */
+    [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
+    CalcDistancesById(const DatasetPtr& query,
+                      const int64_t* ids,
+                      int64_t count,
+                      bool calculate_precise_distance = true) const {
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#elif defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#endif
+        return this->CalDistanceById(query, ids, count, calculate_precise_distance);
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#elif defined(_MSC_VER)
+#pragma warning(pop)
+#endif
+    }
+
+    /**
+     * @brief Calculate distances between the query and vectors of the given IDs.
+     *
+     * The default implementation dispatches to the deprecated virtual alias so existing
+     * third-party Index implementations remain source-compatible.
+     */
+    [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
+    CalcDistancesById(const float* query,
+                      const int64_t* ids,
+                      int64_t count,
+                      bool calculate_precise_distance = true) const {
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#elif defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#endif
+        return this->CalDistanceById(query, ids, count, calculate_precise_distance);
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#elif defined(_MSC_VER)
+#pragma warning(pop)
+#endif
     }
 
     /**

@@ -96,6 +96,25 @@ public:
     }
 };
 
+class LegacyBatchIndex : public SimpleIndex {
+public:
+    tl::expected<DatasetPtr, Error>
+    CalDistanceById(const float* query,
+                    const int64_t* ids,
+                    int64_t count,
+                    bool calculate_precise_distance = true) const override {
+        return Dataset::Make()->Owner(false)->Distances(const_cast<float*>(query));
+    }
+};
+
+TEST_CASE("Correct batch API dispatches to a legacy override", "[ft][simple_index]") {
+    auto index = std::make_shared<LegacyBatchIndex>();
+    const float distance = 1.0F;
+    auto result = index->CalcDistancesById(&distance, nullptr, 1);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDistances() == &distance);
+}
+
 TEST_CASE("Test Simple Index", "[ft][simple_index]") {
     IndexPtr index = std::make_shared<SimpleIndex>();
     auto pool = std::make_shared<fixtures::TestDatasetPool>();
@@ -127,7 +146,7 @@ TEST_CASE("Test Simple Index", "[ft][simple_index]") {
     REQUIRE_FALSE(index->CalcDistanceById(dataset->base_->GetFloat32Vectors(), 1).has_value());
     REQUIRE_FALSE(index->CalcDistanceById(dataset->query_, 1).has_value());
     REQUIRE_FALSE(
-        index->CalDistanceById(dataset->base_->GetFloat32Vectors(), nullptr, 1).has_value());
+        index->CalcDistancesById(dataset->base_->GetFloat32Vectors(), nullptr, 1).has_value());
     REQUIRE_FALSE(index->GetMinAndMaxId().has_value());
     REQUIRE_FALSE(index->GetExtraInfoByIds(nullptr, 1, nullptr).has_value());
     REQUIRE_FALSE(index->UpdateExtraInfo(dataset->query_).has_value());

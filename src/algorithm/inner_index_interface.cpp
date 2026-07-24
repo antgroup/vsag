@@ -433,6 +433,14 @@ InnerIndexInterface::CalSerializeSize() const {
 }
 
 DatasetPtr
+InnerIndexInterface::CalcDistancesById(const float* query,
+                                       const int64_t* ids,
+                                       int64_t count,
+                                       bool calculate_precise_distance) const {
+    return this->CalDistanceById(query, ids, count, calculate_precise_distance);
+}
+
+DatasetPtr
 InnerIndexInterface::CalDistanceById(const float* query,
                                      const int64_t* ids,
                                      int64_t count,
@@ -455,6 +463,14 @@ InnerIndexInterface::CalDistanceById(const float* query,
         }
     }
     return result;
+}
+
+DatasetPtr
+InnerIndexInterface::CalcDistancesById(const DatasetPtr& query,
+                                       const int64_t* ids,
+                                       int64_t count,
+                                       bool calculate_precise_distance) const {
+    return this->CalDistanceById(query, ids, count, calculate_precise_distance);
 }
 
 DatasetPtr
@@ -788,8 +804,8 @@ InnerIndexInterface::analyze_quantizer(JsonType& stats,
             query->Owner(false)->NumElements(1)->Float32Vectors(query_data)->Dim(dim_);
             auto search_result = this->KnnSearch(query, topk, search_param, filter);
             this->use_reorder_ = true;
-            auto distance_result =
-                this->CalDistanceById(query_data, search_result->GetIds(), search_result->GetDim());
+            auto distance_result = this->CalcDistancesById(
+                query_data, search_result->GetIds(), search_result->GetDim());
             const auto* ground_distances = distance_result->GetDistances();
             const auto* approximate_distances = search_result->GetDistances();
             for (int64_t j = 0; j < topk; ++j) {

@@ -1331,16 +1331,24 @@ Pyramid::CalcDistanceById(const float* query, int64_t id, bool calculate_precise
 }
 
 DatasetPtr
-Pyramid::CalDistanceById(const float* query,
-                         const int64_t* ids,
-                         int64_t count,
-                         bool calculate_precise_distance) const {
+Pyramid::CalcDistancesById(const float* query,
+                           const int64_t* ids,
+                           int64_t count,
+                           bool calculate_precise_distance) const {
     std::shared_lock<std::shared_mutex> lock(resize_mutex_);
     auto flat = this->base_codes_;
     if (use_reorder_ && calculate_precise_distance) {
         flat = this->precise_codes_;
     }
     return InnerIndexInterface::cal_distance_by_id(query, ids, count, flat);
+}
+
+DatasetPtr
+Pyramid::CalDistanceById(const float* query,
+                         const int64_t* ids,
+                         int64_t count,
+                         bool calculate_precise_distance) const {
+    return this->CalcDistancesById(query, ids, count, calculate_precise_distance);
 }
 
 void

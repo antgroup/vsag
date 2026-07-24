@@ -592,17 +592,17 @@ PyramidAnalyzer::calculate_quantization_result(
         topk_labels.assign(result.begin(), result.begin() + result_size);
 
         auto base_result =
-            pyramid_->CalDistanceById(sample_datas.data() + static_cast<size_t>(i) * dim_,
-                                      topk_labels.data(),
-                                      static_cast<int64_t>(topk_labels.size()),
-                                      false);
+            pyramid_->CalcDistancesById(sample_datas.data() + static_cast<size_t>(i) * dim_,
+                                        topk_labels.data(),
+                                        static_cast<int64_t>(topk_labels.size()),
+                                        false);
         const auto* base_distance = base_result->GetDistances();
 
         auto precise_result =
-            pyramid_->CalDistanceById(sample_datas.data() + static_cast<size_t>(i) * dim_,
-                                      topk_labels.data(),
-                                      static_cast<int64_t>(topk_labels.size()),
-                                      true);
+            pyramid_->CalcDistancesById(sample_datas.data() + static_cast<size_t>(i) * dim_,
+                                        topk_labels.data(),
+                                        static_cast<int64_t>(topk_labels.size()),
+                                        true);
         const auto* precise_distance = precise_result->GetDistances();
 
         uint32_t inversion_count = 0;

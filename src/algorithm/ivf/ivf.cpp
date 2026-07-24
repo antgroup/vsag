@@ -1459,10 +1459,10 @@ IVF::GetAttributeSetByInnerId(InnerIdType inner_id, AttributeSet* attr) const {
 }
 
 DatasetPtr
-IVF::CalDistanceById(const float* query,
-                     const int64_t* ids,
-                     int64_t count,
-                     bool calculate_precise_distance) const {
+IVF::CalcDistancesById(const float* query,
+                       const int64_t* ids,
+                       int64_t count,
+                       bool calculate_precise_distance) const {
     if (this->use_reorder_ && calculate_precise_distance) {
         return this->cal_distance_by_id(query, ids, count, this->reorder_codes_);
     }
@@ -1486,6 +1486,14 @@ IVF::CalDistanceById(const float* query,
         distances[i] = this->bucket_->QueryOneById(computer, bucket_id, offset_id);
     }
     return result;
+}
+
+DatasetPtr
+IVF::CalDistanceById(const float* query,
+                     const int64_t* ids,
+                     int64_t count,
+                     bool calculate_precise_distance) const {
+    return this->CalcDistancesById(query, ids, count, calculate_precise_distance);
 }
 
 float

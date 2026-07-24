@@ -214,8 +214,9 @@ RangeSearch(const DatasetPtr& query, float radius, const std::string& parameters
 |------|------|------|
 | `CalcDistanceById` | `tl::expected<float, Error> CalcDistanceById(const float* vector, int64_t id, bool calculate_precise_distance = true) const` | 稠密查询到已存向量 `id` 的距离。 |
 | `CalcDistanceById` | `tl::expected<float, Error> CalcDistanceById(const DatasetPtr& vector, int64_t id, bool calculate_precise_distance = true) const` | 同上，接收 `DatasetPtr`（适用于 SINDI 等稀疏索引）。 |
-| `CalDistanceById` | `tl::expected<DatasetPtr, Error> CalDistanceById(const float* query, const int64_t* ids, int64_t count, bool calculate_precise_distance = true) const` | 批量版本；结果中的 `-1` 表示无效距离。 |
-| `CalDistanceById` | `tl::expected<DatasetPtr, Error> CalDistanceById(const DatasetPtr& query, const int64_t* ids, int64_t count, bool calculate_precise_distance = true) const` | 接收 `DatasetPtr` 查询的批量版本。 |
+| `CalcDistancesById` | `tl::expected<DatasetPtr, Error> CalcDistancesById(const float* query, const int64_t* ids, int64_t count, bool calculate_precise_distance = true) const` | 批量版本；结果中的 `-1` 表示无效距离。 |
+| `CalcDistancesById` | `tl::expected<DatasetPtr, Error> CalcDistancesById(const DatasetPtr& query, const int64_t* ids, int64_t count, bool calculate_precise_distance = true) const` | 接收 `DatasetPtr` 查询的批量版本。 |
+| `CalDistanceById`（已弃用） | 与 `CalcDistancesById` 相同 | 兼容别名保留至 1.1 迁移窗口结束。 |
 
 `calculate_precise_distance = true` 时可能会加载全精度向量（可能来自磁盘）而非量化编码。见
 [按 ID 计算距离](../advanced/calc_distance_by_id.md) 与

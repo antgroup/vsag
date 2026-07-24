@@ -69,12 +69,33 @@ TestIndex::TestBatchCalcDistanceById(const IndexPtr& index,
         auto query = get_one_query(queries, i);
         tl::expected<DatasetPtr, vsag::Error> result;
         if (is_sparse) {
-            result = index->CalDistanceById(query, gts->GetIds() + (i * gt_topK), gt_topK);
+            result = index->CalcDistancesById(query, gts->GetIds() + (i * gt_topK), gt_topK);
         } else {
-            result = index->CalDistanceById(
+            result = index->CalcDistancesById(
                 query->GetFloat32Vectors(), gts->GetIds() + (i * gt_topK), gt_topK);
-            REQUIRE_FALSE(
-                index->CalDistanceById(query, gts->GetIds() + (i * gt_topK), gt_topK).has_value());
+            REQUIRE_FALSE(index->CalcDistancesById(query, gts->GetIds() + (i * gt_topK), gt_topK)
+                              .has_value());
+        }
+        tl::expected<DatasetPtr, vsag::Error> legacy_result;
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+        if (is_sparse) {
+            legacy_result = index->CalDistanceById(query, gts->GetIds() + (i * gt_topK), gt_topK);
+        } else {
+            legacy_result = index->CalDistanceById(
+                query->GetFloat32Vectors(), gts->GetIds() + (i * gt_topK), gt_topK);
+        }
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
+        REQUIRE(legacy_result.has_value() == result.has_value());
+        if (result.has_value()) {
+            for (int64_t j = 0; j < gt_topK; ++j) {
+                REQUIRE(legacy_result.value()->GetDistances()[j] ==
+                        result.value()->GetDistances()[j]);
+            }
         }
         if (not expected_success) {
             return;
@@ -93,10 +114,10 @@ TestIndex::TestBatchCalcDistanceById(const IndexPtr& index,
         tl::expected<DatasetPtr, vsag::Error> result;
         queries->NumElements(1);
         if (is_sparse) {
-            result = index->CalDistanceById(queries, no_exist_ids.data(), test_num);
+            result = index->CalcDistancesById(queries, no_exist_ids.data(), test_num);
         } else {
-            result =
-                index->CalDistanceById(queries->GetFloat32Vectors(), no_exist_ids.data(), test_num);
+            result = index->CalcDistancesById(
+                queries->GetFloat32Vectors(), no_exist_ids.data(), test_num);
         }
         for (int i = 0; i < test_num; ++i) {
             fixtures::dist_t dist = result.value()->GetDistances()[i];
