@@ -17,6 +17,7 @@
 
 #include "compressed_graph_datacell.h"
 #include "graph_datacell.h"
+#include "io/cache_io/cache_io_parameter.h"
 #include "io/io_headers.h"
 #include "sparse_graph_datacell.h"
 
@@ -79,6 +80,52 @@ GraphInterface::MakeInstance(const GraphInterfaceParamPtr& graph_param,
             }
             if (io_string == IO_TYPE_VALUE_READER_IO) {
                 return std::make_shared<GraphDataCell<ReaderIO>>(graph_param, common_param);
+            }
+            if (io_string == IO_TYPE_VALUE_CACHE_IO) {
+                auto graph_dc_param =
+                    std::dynamic_pointer_cast<GraphDataCellParameter>(graph_param);
+                if (not graph_dc_param) {
+                    return nullptr;
+                }
+                auto cache_param =
+                    std::dynamic_pointer_cast<CacheIOParameter>(graph_dc_param->io_parameter_);
+                if (cache_param) {
+                    auto inner_type = cache_param->inner_io_type_;
+                    if (inner_type == IO_TYPE_VALUE_MMAP_IO) {
+                        return std::make_shared<GraphDataCell<CacheIO<MMapIO>>>(graph_param,
+                                                                                common_param);
+                    }
+                    if (inner_type == IO_TYPE_VALUE_BUFFER_IO) {
+                        return std::make_shared<GraphDataCell<CacheIO<BufferIO>>>(graph_param,
+                                                                                  common_param);
+                    }
+                    if (inner_type == IO_TYPE_VALUE_ASYNC_IO) {
+#if HAVE_LIBAIO
+                        return std::make_shared<GraphDataCell<CacheIO<AsyncIO>>>(graph_param,
+                                                                                 common_param);
+#else
+                        return std::make_shared<GraphDataCell<CacheIO<BufferIO>>>(graph_param,
+                                                                                  common_param);
+#endif
+                    }
+                    if (inner_type == IO_TYPE_VALUE_MEMORY_IO) {
+                        return std::make_shared<GraphDataCell<CacheIO<MemoryIO>>>(graph_param,
+                                                                                  common_param);
+                    }
+                    if (inner_type == IO_TYPE_VALUE_BLOCK_MEMORY_IO) {
+                        return std::make_shared<GraphDataCell<CacheIO<MemoryBlockIO>>>(
+                            graph_param, common_param);
+                    }
+                    if (inner_type == IO_TYPE_VALUE_READER_IO) {
+                        return std::make_shared<GraphDataCell<CacheIO<ReaderIO>>>(graph_param,
+                                                                                  common_param);
+                    }
+                    throw VsagException(
+                        ErrorType::INVALID_ARGUMENT,
+                        std::string("Unsupported CacheIO inner_io_type: ") + inner_type);
+                }
+                throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                    "CacheIO requires CacheIOParameter");
             }
             return nullptr;
     }

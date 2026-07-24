@@ -41,6 +41,7 @@ class NonContinuousIO : public BasicIO<NonContinuousIO<IOTmpl>> {
 public:
     /// Inherits InMemory property from the inner IO template type.
     static constexpr bool InMemory = IOTmpl::InMemory;
+    static constexpr bool UseNonContinuous = true;
 
     /// Indicates deserialization is required when loading.
     static constexpr bool SkipDeserialize = false;

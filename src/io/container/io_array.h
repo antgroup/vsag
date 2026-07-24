@@ -15,11 +15,25 @@
 
 #pragma once
 
+#include <type_traits>
+
 #include "io/noncontinuous_io/noncontinuous_allocator.h"
 #include "typing.h"
 
 namespace vsag {
 class Allocator;
+
+namespace detail {
+template <typename IOTmpl, typename = void>
+struct IOArrayUseNonContinuous {
+    static constexpr bool value = not IOTmpl::InMemory;
+};
+
+template <typename IOTmpl>
+struct IOArrayUseNonContinuous<IOTmpl, std::void_t<decltype(IOTmpl::UseNonContinuous)>> {
+    static constexpr bool value = IOTmpl::UseNonContinuous;
+};
+}  // namespace detail
 
 /**
  * @brief Container for managing multiple IO objects with delayed creation.
@@ -52,7 +66,7 @@ public:
         non_continuous_allocator_ = std::make_unique<NonContinuousAllocator>(allocator);
         using ArgsTuple = std::tuple<std::decay_t<Args>...>;
         ArgsTuple args_tuple(std::forward<Args>(args)...);
-        if constexpr (InMemory) {
+        if constexpr (not detail::IOArrayUseNonContinuous<IOTmpl>::value) {
             io_create_func_ = [args_tuple =
                                    std::move(args_tuple)]() mutable -> std::shared_ptr<IOTmpl> {
                 return std::apply(

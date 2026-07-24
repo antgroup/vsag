@@ -36,6 +36,10 @@ BufferIO::BufferIO(std::string filename, Allocator* allocator)
         throw VsagException(ErrorType::INTERNAL_ERROR,
                             fmt::format("open file {} error {}", this->filepath_, strerror(errno)));
     }
+    // Stat file to get size
+    if (this->exist_file_) {
+        this->size_ = std::filesystem::file_size(this->filepath_);
+    }
 }
 
 BufferIO::BufferIO(const BufferIOParameterPtr& io_param, const IndexCommonParam& common_param)

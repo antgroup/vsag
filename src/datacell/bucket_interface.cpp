@@ -15,7 +15,11 @@
 #include "bucket_interface.h"
 
 #include "bucket_interface_factory.h"
+#include "bucket_interface_factory_impl.h"
 #include "inner_string_params.h"
+#include "io/cache_io/cache_io.h"
+#include "io/cache_io/cache_io_parameter.h"
+#include "io/io_headers.h"
 
 namespace vsag {
 
@@ -43,6 +47,31 @@ BucketInterface::MakeInstance(const BucketDataCellParamPtr& param,
     }
     if (io_type_name == IO_TYPE_VALUE_BUFFER_IO) {
         return MakeBufferBucketDataCell(param, common_param);
+    }
+    if (io_type_name == IO_TYPE_VALUE_CACHE_IO) {
+        auto cache_param = std::dynamic_pointer_cast<CacheIOParameter>(param->io_parameter);
+        if (cache_param) {
+            auto inner_type = cache_param->inner_io_type_;
+            if (inner_type == IO_TYPE_VALUE_MMAP_IO) {
+                return MakeBucketDataCellInstance<NonContinuousIO<CacheIO<MMapIO>>>(param,
+                                                                                    common_param);
+            }
+            if (inner_type == IO_TYPE_VALUE_BUFFER_IO) {
+                return MakeBucketDataCellInstance<NonContinuousIO<CacheIO<BufferIO>>>(param,
+                                                                                      common_param);
+            }
+            if (inner_type == IO_TYPE_VALUE_ASYNC_IO) {
+#if HAVE_LIBAIO
+                return MakeBucketDataCellInstance<NonContinuousIO<CacheIO<AsyncIO>>>(param,
+                                                                                     common_param);
+#else
+                return MakeBucketDataCellInstance<NonContinuousIO<CacheIO<BufferIO>>>(param,
+                                                                                      common_param);
+#endif
+            }
+            throw VsagException(ErrorType::INVALID_ARGUMENT, "Unsupported CacheIO inner_io_type");
+        }
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "CacheIO requires CacheIOParameter");
     }
     return nullptr;
 }

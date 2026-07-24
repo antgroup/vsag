@@ -17,6 +17,7 @@
 #include "flatten_datacell.h"
 #include "index_common_param.h"
 #include "inner_string_params.h"
+#include "io/cache_io/cache_io_parameter.h"
 #include "io/io_headers.h"
 #include "multi_vector_datacell.h"
 #include "quantization/int8_quantizer.h"
@@ -305,6 +306,36 @@ FlattenInterface::MakeInstance(const FlattenInterfaceParamPtr& param,
     }
     if (io_type_name == IO_TYPE_VALUE_READER_IO) {
         return make_instance<ReaderIO>(param, common_param);
+    }
+    if (io_type_name == IO_TYPE_VALUE_CACHE_IO) {
+        auto cache_param = std::dynamic_pointer_cast<CacheIOParameter>(param->io_parameter);
+        if (cache_param) {
+            auto inner_type = cache_param->inner_io_type_;
+            if (inner_type == IO_TYPE_VALUE_MMAP_IO) {
+                return make_instance<CacheIO<MMapIO>>(param, common_param);
+            }
+            if (inner_type == IO_TYPE_VALUE_BUFFER_IO) {
+                return make_instance<CacheIO<BufferIO>>(param, common_param);
+            }
+            if (inner_type == IO_TYPE_VALUE_ASYNC_IO) {
+#if HAVE_LIBAIO
+                return make_instance<CacheIO<AsyncIO>>(param, common_param);
+#else
+                return make_instance<CacheIO<BufferIO>>(param, common_param);
+#endif
+            }
+            if (inner_type == IO_TYPE_VALUE_MEMORY_IO) {
+                return make_instance<CacheIO<MemoryIO>>(param, common_param);
+            }
+            if (inner_type == IO_TYPE_VALUE_BLOCK_MEMORY_IO) {
+                return make_instance<CacheIO<MemoryBlockIO>>(param, common_param);
+            }
+            if (inner_type == IO_TYPE_VALUE_READER_IO) {
+                return make_instance<CacheIO<ReaderIO>>(param, common_param);
+            }
+            throw VsagException(ErrorType::INVALID_ARGUMENT, "Unsupported CacheIO inner_io_type");
+        }
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "CacheIO requires CacheIOParameter");
     }
     return nullptr;
 }

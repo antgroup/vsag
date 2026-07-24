@@ -590,6 +590,49 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
+                             "IVF CacheIO With Async Backend",
+                             "[ft][ivf][cacheio][pr]") {
+    auto dim = 64;
+    auto precise_file_path = fixtures::IVFTestIndex::dir.GenerateRandomFile(false);
+    std::string param = fmt::format(R"(
+    {{
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": {},
+        "index_param": {{
+            "buckets_count": 32,
+            "base_quantization_type": "fp32",
+            "partition_strategy_type": "ivf",
+            "ivf_train_type": "random",
+            "train_sample_count": 512,
+            "use_reorder": true,
+            "precise_quantization_type": "fp32",
+            "base_io_type": "memory_io",
+            "precise_io_type": "cache_io",
+            "precise_cache_inner_io_type": "async_io",
+            "precise_file_path": "{}",
+            "precise_cache_total_size": 131072
+        }}
+    }}
+    )",
+                                    dim,
+                                    precise_file_path);
+
+    auto index = fixtures::TestIndex::TestFactory(fixtures::IVFTestIndex::name, param, true);
+    auto dataset = fixtures::IVFTestIndex::pool.GetDatasetAndCreate(dim, 512, "l2");
+    fixtures::TestIndex::TestBuildIndex(index, dataset, true);
+
+    auto serialize_result = index->Serialize();
+    REQUIRE(serialize_result.has_value());
+
+    auto restored = fixtures::TestIndex::TestFactory(fixtures::IVFTestIndex::name, param, true);
+    REQUIRE(restored->Deserialize(serialize_result.value()).has_value());
+
+    auto search_param = fmt::format(fixtures::search_param_tmp, 32);
+    fixtures::IVFTestIndex::TestGeneral(restored, dataset, search_param, 0.90F);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
                              "IVF RabitQ base quantization",
                              "[ft][ivf][rabitq]") {
     constexpr const char* params_template = R"(

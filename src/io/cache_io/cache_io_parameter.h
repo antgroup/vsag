@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,13 +14,33 @@
 
 #pragma once
 
-#include "io/async_io/async_io.h"
-#include "io/buffer_io/buffer_io.h"
-#include "io/cache_io/cache_io.h"
-#include "io/common/basic_io.h"
-#include "io/memory_block_io/memory_block_io.h"
-#include "io/memory_io/memory_io.h"
-#include "io/mmap_io/mmap_io.h"
-#include "io/noncontinuous_io/noncontinuous_io.h"
-#include "io/reader_io/reader_io.h"
-#include "io/uring_io/uring_io.h"
+#include <cstdint>
+#include <string>
+
+#include "io/common/io_parameter.h"
+#include "utils/pointer_define.h"
+
+namespace vsag {
+
+DEFINE_POINTER(CacheIOParameter);
+
+class CacheIOParameter : public IOParameter {
+public:
+    CacheIOParameter();
+
+    explicit CacheIOParameter(const JsonType& json);
+
+    void
+    FromJson(const JsonType& json) override;
+
+    JsonType
+    ToJson() const override;
+
+public:
+    uint64_t total_cache_size_{268435456};
+    std::string eviction_strategy_{"lru"};
+    std::string inner_io_type_;
+    JsonType original_json_;
+};
+
+}  // namespace vsag

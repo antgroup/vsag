@@ -35,6 +35,7 @@
 #include "index/index_impl.h"
 #include "index_feature_list.h"
 #include "inner_string_params.h"
+#include "io/cache_io/cache_io_parameter.h"
 #include "ivf_nearest_partition.h"
 #include "query_context.h"
 #include "simd/normalize.h"
@@ -136,6 +137,14 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
             },
         },
         {
+            IVF_BASE_CACHE_TOTAL_SIZE,
+            {
+                BUCKET_PARAMS_KEY,
+                IO_PARAMS_KEY,
+                CACHE_IO_TOTAL_CACHE_SIZE_KEY,
+            },
+        },
+        {
             IVF_PRECISE_QUANTIZATION_TYPE,
             {
                 PRECISE_CODES_KEY,
@@ -157,6 +166,14 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
                 PRECISE_CODES_KEY,
                 IO_PARAMS_KEY,
                 IO_FILE_PATH_KEY,
+            },
+        },
+        {
+            IVF_PRECISE_CACHE_TOTAL_SIZE,
+            {
+                PRECISE_CODES_KEY,
+                IO_PARAMS_KEY,
+                CACHE_IO_TOTAL_CACHE_SIZE_KEY,
             },
         },
         {
@@ -319,6 +336,22 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
             TRAIN_SAMPLE_COUNT_KEY,
             {
                 TRAIN_SAMPLE_COUNT_KEY,
+            },
+        },
+        {
+            IVF_BASE_CACHE_INNER_IO_TYPE,
+            {
+                BUCKET_PARAMS_KEY,
+                IO_PARAMS_KEY,
+                CACHE_IO_INNER_IO_TYPE_KEY,
+            },
+        },
+        {
+            IVF_PRECISE_CACHE_INNER_IO_TYPE,
+            {
+                PRECISE_CODES_KEY,
+                IO_PARAMS_KEY,
+                CACHE_IO_INNER_IO_TYPE_KEY,
             },
         },
     };
