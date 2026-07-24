@@ -926,6 +926,7 @@ HGraph::InitFeatures() {
     }
     if (have_fp32) {
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID);
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_BATCH_CALC_DISTANCE_BY_ID);
         if (metric_ != MetricType::METRIC_TYPE_COSINE || hold_molds) {
             this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_RAW_VECTOR_BY_IDS);
         }

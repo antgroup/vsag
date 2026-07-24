@@ -373,7 +373,8 @@ DatasetPtr
 HGraph::CalDistanceById(const float* query,
                         const int64_t* ids,
                         int64_t count,
-                        bool calculate_precise_distance) const {
+                        bool calculate_precise_distance,
+                        int64_t topk) const {
     FlattenInterfacePtr flat;
     std::shared_lock<std::shared_mutex> lock;
     if (!this->immutable_.load(std::memory_order_acquire)) {
@@ -389,7 +390,12 @@ HGraph::CalDistanceById(const float* query,
     if (lock.owns_lock() && not this->using_dedup_storage()) {
         lock.unlock();
     }
-    return InnerIndexInterface::cal_distance_by_id(query, ids, count, flat);
+    std::vector<bool> validity;
+    auto result = InnerIndexInterface::cal_distance_by_id(query, ids, count, flat, &validity);
+    if (topk == -1) {
+        return result;
+    }
+    return ApplyTopkWithValidity(result->GetDistances(), ids, count, 1, topk, validity, allocator_);
 }
 
 std::pair<int64_t, int64_t>

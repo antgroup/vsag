@@ -567,7 +567,15 @@ BruteForce::CalcDistanceById(const float* vector,
                              bool calculate_precise_distance) const {
     auto computer = this->inner_codes_->FactoryComputer(vector);
     float result = 0.0F;
-    InnerIdType inner_id = this->label_table_->GetIdByLabel(id);
+    InnerIdType inner_id = 0;
+    {
+        std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
+        auto [success, mapped_id] = this->label_table_->TryGetIdByLabel(id);
+        if (not success) {
+            return -1.0F;
+        }
+        inner_id = mapped_id;
+    }
     this->inner_codes_->Query(&result, computer, &inner_id, 1);
     return result;
 }
@@ -970,6 +978,7 @@ BruteForce::InitFeatures() {
                 {IndexFeature::SUPPORT_ADD_FROM_EMPTY,
                  IndexFeature::SUPPORT_RANGE_SEARCH,
                  IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID,
+                 IndexFeature::SUPPORT_BATCH_CALC_DISTANCE_BY_ID,
                  IndexFeature::SUPPORT_RANGE_SEARCH_WITH_ID_FILTER});
         }
         if (name == QUANTIZATION_TYPE_VALUE_FP32 and

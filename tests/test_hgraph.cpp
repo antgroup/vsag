@@ -319,6 +319,7 @@ HGraphTestIndex::TestGeneral(const TestIndex::IndexPtr& index,
     TestCalcDistanceById(index, dataset, 1e-5, expect_success);
     TestGetRawVectorByIds(index, dataset, expect_success);
     TestBatchCalcDistanceById(index, dataset, 1e-5, expect_success);
+    TestMultiQueryBatchCalcDistanceById(index, dataset, 1e-5, expect_success);
     TestSearchAllocator(index, dataset, search_param, recall, true);
     TestUpdateVector(index, dataset, search_param, false);
     TestUpdateId(index, dataset, search_param, true);
@@ -949,6 +950,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::HGraphTestIndex,
     TestCheckIdExist(index, dataset, false);
     TestCalcDistanceById(index, dataset, 2e-6, false);
     TestBatchCalcDistanceById(index, dataset, 2e-6, false);
+    TestMultiQueryBatchCalcDistanceById(index, dataset, 2e-6, false, false, true);
     TestKnnSearchExFilter(index, dataset, ex_search_param, recall, false);
     TestKnnSearchIter(index, dataset, ex_search_param, recall, false, true);
     // with ex info empty index
@@ -1871,6 +1873,7 @@ RunHGraphDuplicateChecks(const fixtures::HGraphTestIndexPtr& test_index,
                     TestIndex::TestCalcDistanceById(index, dataset);
                     TestIndex::TestGetRawVectorByIds(index, dataset);
                     TestIndex::TestBatchCalcDistanceById(index, dataset);
+                    TestIndex::TestMultiQueryBatchCalcDistanceById(index, dataset);
                     TestIndex::TestSearchAllocator(index, dataset, search_param, recall, true);
                 }
                 if (run_serialize_check) {

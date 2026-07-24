@@ -219,8 +219,8 @@ error). See [Range Search](../advanced/range_search.md) and `examples/cpp/302_fe
 |--------|-----------|-------|
 | `CalcDistanceById` | `tl::expected<float, Error> CalcDistanceById(const float* vector, int64_t id, bool calculate_precise_distance = true) const` | Distance from a dense query to the stored vector `id`. |
 | `CalcDistanceById` | `tl::expected<float, Error> CalcDistanceById(const DatasetPtr& vector, int64_t id, bool calculate_precise_distance = true) const` | Same, accepting a `DatasetPtr` (works for sparse indexes such as SINDI). |
-| `CalDistanceById` | `tl::expected<DatasetPtr, Error> CalDistanceById(const float* query, const int64_t* ids, int64_t count, bool calculate_precise_distance = true) const` | Batch variant; `-1` in the result marks an invalid distance. |
-| `CalDistanceById` | `tl::expected<DatasetPtr, Error> CalDistanceById(const DatasetPtr& query, const int64_t* ids, int64_t count, bool calculate_precise_distance = true) const` | Batch variant accepting a `DatasetPtr` query. |
+| `CalDistanceById` | `tl::expected<DatasetPtr, Error> CalDistanceById(const float* query, const int64_t* ids, int64_t count, bool calculate_precise_distance = true, int64_t topk = -1) const` | Batch variant; `topk > 0` returns sorted smallest distances with IDs, and invalid `-1` distances are ordered last. |
+| `CalDistanceById` | `tl::expected<DatasetPtr, Error> CalDistanceById(const DatasetPtr& query, const int64_t* ids, int64_t count, bool calculate_precise_distance = true, int64_t topk = -1) const` | DatasetPtr batch variant. For `query->GetNumElements() > 1`, indexes must advertise `SUPPORT_BATCH_CALC_DISTANCE_BY_ID`; `ids` contains `NumElements * count` row-major entries. With `topk > 0`, each query returns `min(topk, count)` sorted distances with matching IDs. |
 
 `calculate_precise_distance = true` may load full-precision vectors (possibly from disk) instead of
 quantized codes. See [Calculate Distance by ID](../advanced/calc_distance_by_id.md) and

@@ -213,8 +213,11 @@ public:
     CalDistanceById(const float* vector,
                     const int64_t* ids,
                     int64_t count,
-                    bool calculate_precise_distance = true) const override {
-        SAFE_CALL(return this->calc_distance_by_id(vector, ids, count));
+                    bool calculate_precise_distance = true,
+                    int64_t topk = -1) const override {
+        (void)calculate_precise_distance;
+        SAFE_CALL(CHECK_ARGUMENT(topk == -1, "HNSW does not support topk CalDistanceById");
+                  return this->calc_distance_by_id(vector, ids, count));
     };
 
     virtual tl::expected<std::pair<int64_t, int64_t>, Error>

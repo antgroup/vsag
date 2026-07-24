@@ -17,8 +17,13 @@
 
 #include <algorithm>
 #include <cstring>
+#include <limits>
+#include <memory>
+#include <numeric>
 #include <shared_mutex>
 #include <tuple>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "analyzer/analyzer.h"
@@ -1926,67 +1931,130 @@ DatasetPtr
 SINDI::CalDistanceById(const DatasetPtr& query,
                        const int64_t* ids,
                        int64_t count,
-                       bool calculate_precise_distance) const {
-    if (use_reorder_ && calculate_precise_distance) {
-        std::shared_lock rlock(this->global_mutex_);
-        auto result = Dataset::Make();
-        result->Owner(true, allocator_);
-        auto* distances = static_cast<float*>(allocator_->Allocate(sizeof(float) * count));
-        result->Distances(distances);
-        if (query == nullptr || query->GetNumElements() == 0 ||
-            query->GetSparseVectors() == nullptr) {
-            std::fill_n(distances, count, -1.0F);
-            return result;
-        }
-        auto computer = rerank_flat_->FactoryComputer(query->GetSparseVectors());
-        for (int64_t i = 0; i < count; i++) {
-            auto [success, inner_id] = this->label_table_->TryGetIdByLabel(ids[i]);
-            if (success) {
-                rerank_flat_->Query(distances + i, computer, &inner_id, 1);
-            } else {
-                distances[i] = -1.0F;
-            }
-        }
+                       bool calculate_precise_distance,
+                       int64_t topk) const {
+    const bool invalid_topk = topk != -1 && topk <= 0;
+    CHECK_ARGUMENT(not invalid_topk, "CalDistanceById topk must be -1 or positive");
+    CHECK_ARGUMENT(query != nullptr, "CalDistanceById query must not be null");
+    const int64_t num_queries = query->GetNumElements();
+    CHECK_ARGUMENT(count >= 0, "CalDistanceById count must be non-negative");
+    if (count > 0) {
+        CHECK_ARGUMENT(ids != nullptr, "CalDistanceById ids must not be null");
+    }
+    CHECK_ARGUMENT(num_queries > 0, "CalDistanceById query count must be positive");
+    CHECK_ARGUMENT(query->GetSparseVectors() != nullptr,
+                   "CalDistanceById query sparse vectors must not be null");
+    const auto count_size = static_cast<uint64_t>(count);
+    const auto num_queries_size = static_cast<uint64_t>(num_queries);
+    const auto max_distance_count = std::numeric_limits<uint64_t>::max() / sizeof(float);
+    const bool distance_count_overflows =
+        count_size != 0 && num_queries_size > max_distance_count / count_size;
+    CHECK_ARGUMENT(not distance_count_overflows, "CalDistanceById distance buffer size overflows");
+
+    auto result = Dataset::Make();
+    result->NumElements(num_queries)->Dim(count)->Owner(true, allocator_);
+    if (count == 0) {
         return result;
     }
-
-    // prepare result
-    auto result = Dataset::Make();
-    result->Owner(true, allocator_);
-    auto* distances = static_cast<float*>(allocator_->Allocate(sizeof(float) * count));
-    std::fill_n(distances, count, -1.0F);
+    auto* distances =
+        static_cast<float*>(allocator_->Allocate(sizeof(float) * num_queries_size * count_size));
+    CHECK_ARGUMENT(distances != nullptr, "Failed to allocate SINDI multi-query distance buffer");
     result->Distances(distances);
 
-    // assume count is small, otherwise we should use bitmap to construct filter function
-    std::unordered_map<int64_t, uint32_t> valid_ids;
-    for (auto i = 0; i < count; i++) {
-        valid_ids[ids[i]] = i;
-    }
-    auto filter = [&valid_ids](int64_t id) -> bool { return valid_ids.count(id) != 0; };
-    auto filter_ptr = std::make_shared<WhiteListFilter>(filter);
-
-    // search
+    std::shared_lock rlock(this->global_mutex_);
     CHECK_ARGUMENT(immutable_data_ == nullptr,
                    "immutable SINDI runtime does not support CalDistanceById");
-    constexpr auto* search_param_fmt = R"(
-    {{
-        "sindi": {{
-            "query_prune_ratio": 0,
-            "n_candidate": {}
-        }}
-    }}
-    )";
-    auto search_res =
-        this->KnnSearch(query, count, fmt::format(search_param_fmt, count), filter_ptr);
 
-    // flush results
-    for (auto i = 0; i < search_res->GetDim(); i++) {
-        float dist = search_res->GetDistances()[i];
-        int64_t id = search_res->GetIds()[i];
-        distances[valid_ids[id]] = dist;
+    Vector<int64_t> inner_ids(count, -1, allocator_);
+    std::unordered_map<int64_t, std::vector<int64_t>> window_positions;
+    Vector<float> window_dists(window_size_, 0.0, allocator_);
+    std::vector<bool> validity(num_queries_size * count_size, false);
+    auto calc_row =
+        [this, calculate_precise_distance, &inner_ids, &window_positions, &window_dists, &validity](
+            const SparseVector& sparse_query,
+            const int64_t* row_ids,
+            int64_t row_count,
+            float* row_distances,
+            uint64_t validity_offset) {
+            if (use_reorder_ && calculate_precise_distance) {
+                auto computer = rerank_flat_->FactoryComputer(&sparse_query);
+                for (int64_t i = 0; i < row_count; ++i) {
+                    auto [success, inner_id] = this->label_table_->TryGetIdByLabel(row_ids[i]);
+                    if (success) {
+                        validity[validity_offset + static_cast<uint64_t>(i)] = true;
+                        rerank_flat_->Query(row_distances + i, computer, &inner_id, 1);
+                    } else {
+                        row_distances[i] = -1.0F;
+                    }
+                }
+                return;
+            }
+
+            auto mapped_query = sparse_query;
+            Vector<uint32_t> tmp_ids(allocator_);
+            Vector<float> tmp_vals(allocator_);
+            if (remap_term_ids_) {
+                mapped_query = remap_sparse_vector_for_query(mapped_query, tmp_ids, tmp_vals);
+            }
+            window_positions.clear();
+            SINDISearchParameter search_param;
+            search_param.query_prune_ratio = 0;
+            search_param.term_prune_ratio = 0;
+            auto computer =
+                std::make_shared<SparseTermComputer>(mapped_query, search_param, allocator_);
+            for (int64_t i = 0; i < row_count; ++i) {
+                inner_ids[i] = -1;
+                auto [success, inner_id] = this->label_table_->TryGetIdByLabel(row_ids[i]);
+                if (success) {
+                    inner_ids[i] = inner_id;
+                    validity[validity_offset + static_cast<uint64_t>(i)] = true;
+                    window_positions[inner_id / window_size_].push_back(i);
+                } else {
+                    row_distances[i] = -1.0F;
+                }
+            }
+            // For SQ8, use CalcDistanceByInnerId to ensure decoded values are used
+            // (Query uses raw uint8 which gives different results)
+            if (this->sparse_value_quant_type_ == SparseValueQuantizationType::SQ8) {
+                for (int64_t i = 0; i < row_count; ++i) {
+                    if (inner_ids[i] < 0) {
+                        continue;
+                    }
+                    auto cur_window = inner_ids[i] / window_size_;
+                    auto window_start_id = cur_window * window_size_;
+                    auto term_list = this->window_term_list_[cur_window];
+                    auto inner_offset = static_cast<uint16_t>(inner_ids[i] - window_start_id);
+                    row_distances[i] = term_list->CalcDistanceByInnerId(computer, inner_offset);
+                }
+            } else {
+                for (const auto& [cur_window, positions] : window_positions) {
+                    auto window_start_id = cur_window * window_size_;
+                    auto term_list = this->window_term_list_[cur_window];
+                    std::fill(window_dists.data(), window_dists.data() + window_size_, 0.0F);
+                    term_list->Query(window_dists.data(), computer);
+                    for (const auto position : positions) {
+                        row_distances[position] =
+                            1.0F + window_dists[inner_ids[position] - window_start_id];
+                    }
+                }
+            }
+        };
+
+    for (int64_t q = 0; q < num_queries; ++q) {
+        const auto& sparse_query = query->GetSparseVectors()[q];
+        const int64_t* row_ids = ids + q * count;
+        auto* row = distances + q * count;
+        calc_row(sparse_query,
+                 row_ids,
+                 count,
+                 row,
+                 static_cast<uint64_t>(q) * static_cast<uint64_t>(count));
     }
 
-    return result;
+    if (topk == -1) {
+        return result;
+    }
+    return ApplyTopkWithValidity(distances, ids, count, num_queries, topk, validity, allocator_);
 }
 
 void
@@ -2023,6 +2091,9 @@ SINDI::InitFeatures() {
 
     // info
     this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID);
+    if (not immutable_enabled_) {
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_BATCH_CALC_DISTANCE_BY_ID);
+    }
     this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ESTIMATE_MEMORY);
     this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_RAW_VECTOR_BY_IDS);
 

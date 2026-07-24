@@ -300,6 +300,8 @@ IVFTestIndex::TestGeneral(const TestIndex::IndexPtr& index,
     TestRangeSearch(index, dataset, search_param, recall / 2.0, 5, true);
     TestFilterSearch(index, dataset, search_param, recall, true);
     TestCalcDistanceById(index, dataset, 2e-6, true);
+    TestMultiQueryBatchCalcDistanceById(
+        index, dataset, 2e-6, index->CheckFeature(vsag::SUPPORT_BATCH_CALC_DISTANCE_BY_ID));
     TestCheckIdExist(index, dataset);
 }
 
