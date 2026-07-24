@@ -48,6 +48,10 @@ IVFParameter::FromJson(const JsonType& json) {
         CHECK_ARGUMENT(this->precise_codes_param->quantizer_parameter->GetTypeName() !=
                            QUANTIZATION_TYPE_VALUE_PQFS,
                        "precise_codes_layout=bucket does not support pqfs precise quantization");
+        CHECK_ARGUMENT(
+            this->precise_codes_param->io_parameter == nullptr ||
+                this->precise_codes_param->io_parameter->GetTypeName() != IO_TYPE_VALUE_MMAP_IO,
+            "precise_codes_layout=bucket does not support mmap_io");
     }
 
     if (json.Contains(BUCKET_PER_DATA_KEY)) {
@@ -92,6 +96,17 @@ IVFParameter::FromJson(const JsonType& json) {
                 GraphStorageTypes::GRAPH_STORAGE_TYPE_VALUE_FLAT, graph_json);
         }
     }
+}
+
+bool
+IVFParameter::UsesDiskBackedPreciseBucket() const {
+    if (this->precise_codes_layout != PRECISE_CODES_LAYOUT_VALUE_BUCKET ||
+        this->precise_codes_param == nullptr ||
+        this->precise_codes_param->io_parameter == nullptr) {
+        return false;
+    }
+    const auto io_type = this->precise_codes_param->io_parameter->GetTypeName();
+    return io_type != IO_TYPE_VALUE_MEMORY_IO && io_type != IO_TYPE_VALUE_BLOCK_MEMORY_IO;
 }
 
 JsonType

@@ -23,6 +23,7 @@
 #include "quantization/rabitq_quantization/rabitq_quantizer_parameter.h"
 #include "unittest.h"
 #include "utils/util_functions.h"
+#include "vsag_exception.h"
 
 struct IVFDefaultParam {
     std::string buckect_io_type = "block_memory_io";
@@ -225,6 +226,23 @@ TEST_CASE("IVF precise codes layout parameter", "[ut][IVFParameter]") {
 
         auto param = std::make_shared<vsag::IVFParameter>();
         REQUIRE_THROWS(param->FromJson(param_json));
+    }
+
+    SECTION("bucket layout rejects mmap io") {
+        IVFDefaultParam index_param;
+        index_param.precise_codes_layout = "bucket";
+        index_param.precise_codes_io_type = "mmap_io";
+        auto param_json = vsag::JsonType::Parse(generate_ivf_param(index_param));
+        param_json[vsag::PRECISE_CODES_KEY][vsag::IO_PARAMS_KEY][vsag::IO_FILE_PATH_KEY].SetString(
+            "ivf_precise_mmap_test");
+
+        auto param = std::make_shared<vsag::IVFParameter>();
+        try {
+            param->FromJson(param_json);
+            FAIL("mmap_io should be rejected for bucket-aligned precise codes");
+        } catch (const vsag::VsagException& error) {
+            REQUIRE(error.error_.type == vsag::ErrorType::INVALID_ARGUMENT);
+        }
     }
 }
 

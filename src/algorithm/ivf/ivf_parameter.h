@@ -43,6 +43,9 @@ public:
     bool
     CheckCompatibility(const vsag::ParamPtr& other) const override;
 
+    [[nodiscard]] bool
+    UsesDiskBackedPreciseBucket() const;
+
 public:
     BucketDataCellParamPtr bucket_param{nullptr};
     IVFPartitionStrategyParametersPtr ivf_partition_strategy_parameter{nullptr};

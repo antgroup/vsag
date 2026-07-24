@@ -88,10 +88,14 @@ auto result = index->KnnSearch(
 | `precise_file_path` | string | `""` | 当精排 IO 为磁盘后端时的文件路径 |
 
 `precise_codes_layout: "bucket"` 要求 `use_reorder: true`，支持 `memory_io`、
-`block_memory_io`、`mmap_io`、`buffer_io`、`async_io` 和 `uring_io`
-（需要构建环境支持 io_uring），不支持
-`reader_io` 和 `pqfs` 精排量化。当 `buckets_per_data` 大于 1 时，每个 basic posting
+`block_memory_io`、`buffer_io`、`async_io` 和 `uring_io`
+（需要构建环境支持 io_uring），不支持 `mmap_io`、`reader_io` 和 `pqfs`
+精排量化。当 `buckets_per_data` 大于 1 时，每个 basic posting
 都会保存一份高精度向量，从而保持完全相同的 bucket-offset 对齐，同时占用相应倍数的存储空间。
+
+对于文件型 bucket 精排 codes，暂不支持 `Clone`、`ExportModel`、`Merge` 和静态
+`Index::Load`，因为这些操作目前无法为目标索引指定独立文件。若需从 streaming 数据恢复磁盘索引，
+请使用不同的 `precise_file_path` 创建目标 IVF，然后调用 `DeserializeStreaming`。
 
 `buckets_count` 的经验值一般为 `sqrt(N)` ~ `4 * sqrt(N)`，其中 `N` 是语料规模。
 

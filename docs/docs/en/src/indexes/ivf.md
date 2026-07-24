@@ -94,12 +94,17 @@ Build-time parameters live under `index_param`. See
 | `precise_file_path` | string | `""` | File path when the precise IO type is disk-backed |
 
 `precise_codes_layout: "bucket"` requires `use_reorder: true`. It supports
-`memory_io`, `block_memory_io`, `mmap_io`, `buffer_io`, `async_io`, and `uring_io`
-(when io_uring is available);
-`reader_io` and `pqfs` precise quantization are not supported. When
+`memory_io`, `block_memory_io`, `buffer_io`, `async_io`, and `uring_io`
+(when io_uring is available); `mmap_io`, `reader_io`, and `pqfs` precise
+quantization are not supported. When
 `buckets_per_data` is greater than one, the precise vector is duplicated for every
 basic posting, preserving exact bucket-offset alignment at the corresponding storage
 cost.
+
+For file-backed bucket-aligned precise codes, `Clone`, `ExportModel`, `Merge`, and static
+`Index::Load` are rejected because those operations cannot yet assign an independent target
+file. To restore a streaming index on disk, create the destination IVF with a different
+`precise_file_path` and call `DeserializeStreaming`.
 
 A rule of thumb for `buckets_count` is `sqrt(N)` to `4 * sqrt(N)` where `N` is the
 corpus size.

@@ -106,7 +106,20 @@ public:
     ExportModel(const IndexCommonParam& param) const override;
 
     [[nodiscard]] InnerIndexPtr
+    Clone(const IndexCommonParam& param) override {
+        if (this->disk_backed_precise_bucket_) {
+            throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                "Clone does not support disk-backed IVF precise buckets");
+        }
+        return InnerIndexInterface::Clone(param);
+    }
+
+    [[nodiscard]] InnerIndexPtr
     Fork(const IndexCommonParam& param) override {
+        if (this->disk_backed_precise_bucket_) {
+            throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                "Clone does not support disk-backed IVF precise buckets");
+        }
         return std::make_shared<IVF>(this->create_param_ptr_, param);
     }
 
@@ -297,6 +310,7 @@ private:
     FlattenInterfacePtr reorder_codes_{nullptr};  // legacy high-precision flat codes
     BucketInterfacePtr precise_bucket_{nullptr};  // high-precision codes mirroring basic buckets
     ReorderInterfacePtr reorder_{nullptr};        // flat-code reordering engine
+    bool disk_backed_precise_bucket_{false};
 
     std::shared_ptr<SafeThreadPool> thread_pool_{nullptr};  // for parallel bucket scans
 

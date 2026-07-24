@@ -184,7 +184,9 @@ IVF writes these streaming blocks in order:
 `DeserializeStreaming` restores the full in-memory IVF index. `Index::Load` can create the IVF
 index directly from streaming metadata and currently loads all emitted IVF blocks into memory.
 The two precise-code blocks are mutually exclusive and are selected by
-`precise_codes_layout`.
+`precise_codes_layout`. For file-backed bucket-aligned precise codes, create an IVF destination
+with an independent `precise_file_path` and use `DeserializeStreaming`; static `Index::Load` is
+rejected until it can accept an independent target path.
 
 ## SINDI Blocks
 

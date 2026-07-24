@@ -163,7 +163,9 @@ IVF 按顺序写入以下 streaming blocks：
 
 `DeserializeStreaming` 会恢复完整的内存 IVF 索引。`Index::Load` 可以直接从 streaming metadata
 创建 IVF 索引对象，当前会把写出的 IVF blocks 都加载到内存中。两种精排 codes block 互斥，
-由 `precise_codes_layout` 选择。
+由 `precise_codes_layout` 选择。对于文件型 bucket 精排 codes，请使用独立的
+`precise_file_path` 创建 IVF 目标对象并调用 `DeserializeStreaming`；在静态 `Index::Load`
+能够接收独立目标路径之前，该组合会被拒绝。
 
 ## SINDI Blocks
 

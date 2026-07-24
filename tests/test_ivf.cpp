@@ -14,6 +14,7 @@
 // limitations under the License.
 
 #include <cstring>
+#include <filesystem>
 #include <limits>
 #include <nlohmann/json.hpp>
 #include <sstream>
@@ -440,6 +441,7 @@ TEST_CASE_PERSISTENT_FIXTURE(IVFTestIndex,
     auto dataset = pool.GetDatasetAndCreate(dim, base_count, "l2");
     auto index = TestFactory(name, params, true);
     TestBuildIndex(index, dataset, true);
+    REQUIRE(index->ExportModel().has_value());
 
     std::stringstream stream;
     REQUIRE(index->SerializeStreaming(stream).has_value());
@@ -464,6 +466,87 @@ TEST_CASE_PERSISTENT_FIXTURE(IVFTestIndex,
     REQUIRE_FALSE(invalid_restored->DeserializeStreaming(missing_deserialize_stream).has_value());
     std::stringstream missing_load_stream(missing_precise);
     REQUIRE_FALSE(vsag::Index::Load(missing_load_stream, "{}").has_value());
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(IVFTestIndex,
+                             "IVF disk bucket precise rejects aliased ownership operations",
+                             "[ft][ivf][reorder][serialize][streaming][export][pr]") {
+    constexpr int64_t dim = 16;
+    constexpr int64_t base_count = 128;
+    const auto precise_file_path = dir.GenerateRandomFile(false);
+    const auto params = GenerateBucketPreciseParameters(1, "buffer_io", precise_file_path);
+    auto dataset = pool.GetDatasetAndCreate(dim, base_count, "l2");
+    auto index = TestFactory(name, params, true);
+    TestBuildIndex(index, dataset, true);
+    REQUIRE_FALSE(index->CheckFeature(vsag::SUPPORT_CLONE));
+    REQUIRE_FALSE(index->CheckFeature(vsag::SUPPORT_EXPORT_MODEL));
+    REQUIRE_FALSE(index->CheckFeature(vsag::SUPPORT_MERGE_INDEX));
+
+    SECTION("rejects export model") {
+        auto result = index->ExportModel();
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(result.error().type == vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION);
+    }
+
+    SECTION("rejects clone") {
+        auto result = index->Clone();
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(result.error().type == vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION);
+    }
+
+    SECTION("rejects merge") {
+        auto result = index->Merge({});
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(result.error().type == vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION);
+    }
+
+    SECTION("rejects streaming load") {
+        std::stringstream stream;
+        REQUIRE(index->SerializeStreaming(stream).has_value());
+        std::stringstream load_stream(stream.str());
+        auto result = vsag::Index::Load(load_stream, "{}");
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(result.error().type == vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION);
+    }
+
+    SECTION("rejects empty streaming load") {
+        const auto empty_file_path = dir.GenerateRandomFile(false);
+        const auto empty_params = GenerateBucketPreciseParameters(1, "buffer_io", empty_file_path);
+        auto empty_index = TestFactory(name, empty_params, true);
+        std::stringstream stream;
+        REQUIRE(empty_index->SerializeStreaming(stream).has_value());
+        std::stringstream load_stream(stream.str());
+        auto result = vsag::Index::Load(load_stream, "{}");
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(result.error().type == vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION);
+    }
+
+    SECTION("rejects mmap before creating the precise file") {
+        const auto mmap_file_path = dir.GenerateRandomFile(false);
+        const auto mmap_params = GenerateBucketPreciseParameters(1, "mmap_io", mmap_file_path);
+        auto result = vsag::Factory::CreateIndex(name, mmap_params);
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+        REQUIRE_FALSE(std::filesystem::exists(mmap_file_path));
+    }
+
+    SECTION("allows streaming deserialize into an independent precise file") {
+        std::stringstream stream;
+        REQUIRE(index->SerializeStreaming(stream).has_value());
+        const auto restored_file_path = dir.GenerateRandomFile(false);
+        const auto restored_params =
+            GenerateBucketPreciseParameters(1, "buffer_io", restored_file_path);
+        auto restored = TestFactory(name, restored_params, true);
+        std::stringstream deserialize_stream(stream.str());
+        REQUIRE(restored->DeserializeStreaming(deserialize_stream).has_value());
+        const auto search_param = fmt::format(search_param_tmp, 16);
+        CheckBucketPreciseIndex(restored, dataset, search_param);
+        TestBatchCalcDistanceById(restored, dataset, 2e-6F, true);
+    }
+
+    const auto search_param = fmt::format(search_param_tmp, 16);
+    CheckBucketPreciseIndex(index, dataset, search_param);
+    TestBatchCalcDistanceById(index, dataset, 2e-6F, true);
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(IVFTestIndex,
