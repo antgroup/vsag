@@ -27,6 +27,7 @@ jobs:
               - 'src/**'
               - 'include/**'
               - 'tests/**'
+              - 'tools/**'
               - 'CMakeLists.txt'
               - 'Makefile'
               - 'extern/**'
@@ -263,6 +264,8 @@ jobs:
           export LSAN_OPTIONS=suppressions=omp.supp
           chmod +x ./build/tests/functests
           ./scripts/testing/test_parallel_by_name.sh functests
+          chmod +x ./build/tests/eval_monitor_test
+          ./build/tests/eval_monitor_test -d yes
       - name: Upload Log
         uses: actions/upload-artifact@v5
         with:

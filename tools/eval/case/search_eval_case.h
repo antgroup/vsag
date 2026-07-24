@@ -23,6 +23,8 @@
 
 namespace vsag::eval {
 
+class LatencyMonitor;
+
 class SearchEvalCase : public EvalCase {
 public:
     SearchEvalCase(const std::string& dataset_path,
@@ -84,6 +86,8 @@ private:
 
 private:
     std::vector<MonitorPtr> monitors_{};
+
+    std::shared_ptr<LatencyMonitor> latency_monitor_{nullptr};
 
     SearchType search_type_{SearchType::KNN};
 

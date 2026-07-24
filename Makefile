@@ -67,6 +67,7 @@ test:                    ## Build and run unit tests.
 	cmake --build ${DEBUG_BUILD_DIR} --parallel ${COMPILE_JOBS}
 	./build/tests/unittests -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
 	./build/tests/functests -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
+	./build/tests/eval_monitor_test -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
 	./build/mockimpl/tests_mockimpl -d yes ${UT_FILTER} --allow-running-no-tests ${UT_SHARD}
 
 .PHONY: asan

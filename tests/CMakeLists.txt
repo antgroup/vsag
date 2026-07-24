@@ -60,6 +60,23 @@ endif()
 
 add_dependencies (unittests Catch2 vsag)
 
+add_executable (eval_monitor_test
+        ${PROJECT_SOURCE_DIR}/tools/eval/monitor/latency_monitor_test.cpp
+        ${PROJECT_SOURCE_DIR}/tools/eval/monitor/latency_monitor.cpp
+        ${PROJECT_SOURCE_DIR}/tools/eval/monitor/monitor.cpp
+)
+
+target_include_directories (eval_monitor_test PRIVATE
+        ${PROJECT_SOURCE_DIR}/tools/eval
+)
+
+target_link_libraries (eval_monitor_test PRIVATE
+        Catch2::Catch2WithMain
+        nlohmann_json::nlohmann_json
+)
+
+add_dependencies (eval_monitor_test Catch2)
+
 # function tests
 file (GLOB FUNCTION_TESTS "test_*.cpp")
 file (GLOB FUNCTION_TEST_INDEX_SOURCES "test_index/*.cpp")
