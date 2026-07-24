@@ -25,19 +25,27 @@ public:
     BuildSearchEvalCase(const std::string& dataset_path,
                         const std::string& index_path,
                         vsag::IndexPtr index,
-                        EvalConfig config)
-        : EvalCase(dataset_path, index_path, index) {
-        build_ = EvalCase::MakeInstance(config, "build");
-        search_ = EvalCase::MakeInstance(config, "search");
-        config_ = std::move(config);
+                        EvalConfig config,
+                        EvalDatasetPtr dataset = nullptr)
+        : EvalCase(dataset_path, index_path, nullptr, std::move(dataset)),
+          config_(std::move(config)) {
+        build_ = std::make_shared<BuildEvalCase>(
+            dataset_path_, index_path_, std::move(index), config_, dataset_ptr_);
     }
 
     ~BuildSearchEvalCase() override = default;
 
     JsonType
     Run() override {
-        auto build_result = build_->Run();
-        auto search_result = search_->Run();
+        auto build = std::move(build_);
+        if (build == nullptr) {
+            build = EvalCase::MakeInstance(config_, "build", dataset_ptr_);
+        }
+        auto build_result = build->Run();
+        build.reset();
+
+        auto search = EvalCase::MakeInstance(config_, "search", dataset_ptr_);
+        auto search_result = search->Run();
         return merge_results(build_result, search_result);
     }
 
@@ -50,9 +58,8 @@ private:
     }
 
 private:
-    EvalCasePtr build_;
-    EvalCasePtr search_;
     EvalConfig config_;
+    EvalCasePtr build_;
 };
 
 }  // namespace vsag::eval

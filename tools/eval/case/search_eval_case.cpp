@@ -26,6 +26,7 @@
 #include "../monitor/latency_monitor.h"
 #include "../monitor/memory_peak_monitor.h"
 #include "../monitor/recall_monitor.h"
+#include "search_pass_runner.h"
 #include "typing.h"
 #include "vsag/filter.h"
 #include "vsag_exception.h"
@@ -57,8 +58,10 @@ private:
 SearchEvalCase::SearchEvalCase(const std::string& dataset_path,
                                const std::string& index_path,
                                vsag::IndexPtr index,
-                               EvalConfig config)
-    : EvalCase(dataset_path, index_path, index), config_(std::move(config)) {
+                               EvalConfig config,
+                               EvalDatasetPtr dataset)
+    : EvalCase(dataset_path, index_path, std::move(index), std::move(dataset)),
+      config_(std::move(config)) {
     auto search_mode = config_.search_mode;
     if (search_mode == "knn") {
         this->search_type_ = SearchType::KNN;
@@ -93,7 +96,8 @@ SearchEvalCase::init_latency_monitor() {
         if (config_.enable_percent_latency) {
             latency_monitor->SetMetrics("percent_latency");
         }
-        this->monitors_.emplace_back(std::move(latency_monitor));
+        this->latency_monitor_ = latency_monitor;
+        this->monitors_.emplace_back(this->latency_monitor_);
     }
 }
 
@@ -115,8 +119,7 @@ SearchEvalCase::init_recall_monitor() {
 void
 SearchEvalCase::init_memory_monitor() {
     if (config_.enable_memory) {
-        auto memory_peak_monitor = std::make_shared<MemoryPeakMonitor>("search");
-        this->monitors_.emplace_back(std::move(memory_peak_monitor));
+        this->memory_monitor_ = std::make_shared<MemoryPeakMonitor>("search");
     }
 }
 
@@ -152,39 +155,46 @@ SearchEvalCase::deserialize(std::ifstream& infile) {
 
 void
 SearchEvalCase::do_knn_search() {
+    SearchPassRunner::Run(
+        this->monitors_,
+        this->latency_monitor_,
+        this->memory_monitor_,
+        [this](const MonitorPtr& monitor) { this->run_knn_search_pass(monitor.get(), false); },
+        [this]() { this->run_knn_search_pass(nullptr, true); });
+}
+
+void
+SearchEvalCase::run_knn_search_pass(Monitor* monitor, bool collect_statistics) {
     uint64_t topk = config_.top_k;
     auto query_count = this->dataset_ptr_->GetNumberOfQuery();
     this->logger_->Debug("query count is " + std::to_string(query_count));
     auto min_query = std::max(static_cast<uint64_t>(query_count), config_.search_query_count);
-    for (uint64_t monitor_id = 0; monitor_id < this->monitors_.size(); ++monitor_id) {
-        auto& monitor = this->monitors_[monitor_id];
-        const bool collect_statistics = monitor_id == 0;
-        monitor->Start();
 
-        omp_set_num_threads(config_.num_threads_searching);
+    omp_set_num_threads(config_.num_threads_searching);
 #pragma omp parallel for schedule(dynamic)
-        for (int64_t id = 0; id < min_query; ++id) {
-            auto i = id % query_count;
-            auto query = vsag::Dataset::Make();
-            query->NumElements(1)->Dim(this->dataset_ptr_->GetDim())->Owner(false);
-            const void* query_vector = this->dataset_ptr_->GetOneTest(i);
-            if (this->dataset_ptr_->GetVectorType() == DENSE_VECTORS) {
-                if (this->dataset_ptr_->GetTestDataType() == vsag::DATATYPE_FLOAT32) {
-                    query->Float32Vectors((const float*)query_vector);
-                } else if (this->dataset_ptr_->GetTestDataType() == vsag::DATATYPE_INT8) {
-                    query->Int8Vectors((const int8_t*)query_vector);
-                }
-            } else {
-                query->SparseVectors((const SparseVector*)query_vector);
+    for (int64_t id = 0; id < min_query; ++id) {
+        auto i = id % query_count;
+        auto query = vsag::Dataset::Make();
+        query->NumElements(1)->Dim(this->dataset_ptr_->GetDim())->Owner(false);
+        const void* query_vector = this->dataset_ptr_->GetOneTest(i);
+        if (this->dataset_ptr_->GetVectorType() == DENSE_VECTORS) {
+            if (this->dataset_ptr_->GetTestDataType() == vsag::DATATYPE_FLOAT32) {
+                query->Float32Vectors((const float*)query_vector);
+            } else if (this->dataset_ptr_->GetTestDataType() == vsag::DATATYPE_INT8) {
+                query->Int8Vectors((const int8_t*)query_vector);
             }
-            auto result = this->index_->KnnSearch(query, topk, config_.search_param);
-            if (not result.has_value()) {
-                std::cerr << "query error: " << result.error().message << std::endl;
-                exit(-1);
-            }
-            if (collect_statistics) {
-                this->record_statistics(result.value());
-            }
+        } else {
+            query->SparseVectors((const SparseVector*)query_vector);
+        }
+        auto result = this->index_->KnnSearch(query, topk, config_.search_param);
+        if (not result.has_value()) {
+            std::cerr << "query error: " << result.error().message << std::endl;
+            exit(-1);
+        }
+        if (collect_statistics) {
+            this->record_statistics(result.value());
+        }
+        if (monitor != nullptr) {
             const int64_t* neighbors = result.value()->GetIds();
             int64_t* ground_truth_neighbors = dataset_ptr_->GetNeighbors(i);
             auto record = std::make_tuple(neighbors,
@@ -194,7 +204,6 @@ SearchEvalCase::do_knn_search() {
                                           result.value()->GetDim());
             monitor->Record(&record);
         }
-        monitor->Stop();
     }
 }
 
@@ -204,6 +213,16 @@ SearchEvalCase::do_range_search() {
 
 void
 SearchEvalCase::do_knn_filter_search() {
+    SearchPassRunner::Run(
+        this->monitors_,
+        this->latency_monitor_,
+        this->memory_monitor_,
+        [this](const MonitorPtr& monitor) { this->run_knn_filter_search_pass(monitor.get()); },
+        []() {});
+}
+
+void
+SearchEvalCase::run_knn_filter_search_pass(Monitor* monitor) {
     uint64_t topk = config_.top_k;
     auto query_count = this->dataset_ptr_->GetNumberOfQuery();
     auto train_labels = this->dataset_ptr_->GetTrainLabels();
@@ -216,33 +235,32 @@ SearchEvalCase::do_knn_filter_search() {
     }
     this->logger_->Debug("query count is " + std::to_string(query_count));
     auto min_query = std::max<int64_t>(query_count, 10000);
-    for (auto& monitor : this->monitors_) {
-        monitor->Start();
-        for (int64_t id = 0; id < min_query; ++id) {
-            auto i = id % query_count;
-            auto query = vsag::Dataset::Make();
-            query->NumElements(1)->Dim(this->dataset_ptr_->GetDim())->Owner(false);
-            const void* query_vector = this->dataset_ptr_->GetOneTest(i);
-            if (this->dataset_ptr_->GetTestDataType() == vsag::DATATYPE_FLOAT32) {
-                query->Float32Vectors((const float*)query_vector);
-            } else if (this->dataset_ptr_->GetTestDataType() == vsag::DATATYPE_INT8) {
-                query->Int8Vectors((const int8_t*)query_vector);
-            }
-            auto test_label = test_labels[i];
-            auto filter = std::make_shared<FilterObj>(
-                train_labels, test_label, this->dataset_ptr_->GetValidRatio(test_label));
-            auto result = this->index_->KnnSearch(query, topk, config_.search_param, filter);
-            if (not result.has_value()) {
-                std::cerr << "query error: " << result.error().message << std::endl;
-                exit(-1);
-            }
+
+    for (int64_t id = 0; id < min_query; ++id) {
+        auto i = id % query_count;
+        auto query = vsag::Dataset::Make();
+        query->NumElements(1)->Dim(this->dataset_ptr_->GetDim())->Owner(false);
+        const void* query_vector = this->dataset_ptr_->GetOneTest(i);
+        if (this->dataset_ptr_->GetTestDataType() == vsag::DATATYPE_FLOAT32) {
+            query->Float32Vectors((const float*)query_vector);
+        } else if (this->dataset_ptr_->GetTestDataType() == vsag::DATATYPE_INT8) {
+            query->Int8Vectors((const int8_t*)query_vector);
+        }
+        auto test_label = test_labels[i];
+        auto filter = std::make_shared<FilterObj>(
+            train_labels, test_label, this->dataset_ptr_->GetValidRatio(test_label));
+        auto result = this->index_->KnnSearch(query, topk, config_.search_param, filter);
+        if (not result.has_value()) {
+            std::cerr << "query error: " << result.error().message << std::endl;
+            exit(-1);
+        }
+        if (monitor != nullptr) {
             const int64_t* neighbors = result.value()->GetIds();
             int64_t* ground_truth_neighbors = dataset_ptr_->GetNeighbors(i);
             auto record = std::make_tuple(
                 neighbors, ground_truth_neighbors, dataset_ptr_.get(), query_vector, topk);
             monitor->Record(&record);
         }
-        monitor->Stop();
     }
 }
 
@@ -257,11 +275,19 @@ SearchEvalCase::process_result() {
         const auto& one_result = monitor->GetResult();
         EvalCase::MergeJsonType(one_result, result);
     }
+    if (this->memory_monitor_ != nullptr) {
+        EvalCase::MergeJsonType(this->memory_monitor_->GetResult(), result);
+    }
     result["action"] = "search";
     result["search_mode"] = config_.search_mode;
     result["index_info"] = JsonType::parse(config_.build_param);
     result["search_param"] = config_.search_param;
     result["index"] = config_.index_name;
+    try {
+        result["index_memory(B)"] = this->index_->GetMemoryUsage();
+    } catch (const std::exception& e) {
+        logger_->Error(e.what());
+    }
     try {
         auto detail = this->index_->GetMemoryUsageDetail();
         for (const auto& [name, size] : detail) {

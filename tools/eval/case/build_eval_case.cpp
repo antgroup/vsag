@@ -16,6 +16,7 @@
 #include "./build_eval_case.h"
 
 #include <algorithm>
+#include <exception>
 #include <filesystem>
 #include <utility>
 
@@ -25,11 +26,54 @@
 
 namespace vsag::eval {
 
+namespace {
+
+class StartedMonitorGuard {
+public:
+    explicit StartedMonitorGuard(std::vector<MonitorPtr>& monitors) : monitors_(monitors) {
+    }
+
+    ~StartedMonitorGuard() {
+        while (stopped_monitor_count_ < started_monitor_count_) {
+            const auto monitor_id = started_monitor_count_ - stopped_monitor_count_ - 1;
+            ++stopped_monitor_count_;
+            try {
+                monitors_[monitor_id]->Stop();
+            } catch (...) {
+            }
+        }
+    }
+
+    void
+    StartAll() {
+        for (auto& monitor : monitors_) {
+            monitor->Start();
+            ++started_monitor_count_;
+        }
+    }
+
+    void
+    StopNext() {
+        const auto monitor_id = started_monitor_count_ - stopped_monitor_count_ - 1;
+        monitors_[monitor_id]->Stop();
+        ++stopped_monitor_count_;
+    }
+
+private:
+    std::vector<MonitorPtr>& monitors_;
+    uint64_t started_monitor_count_{0};
+    uint64_t stopped_monitor_count_{0};
+};
+
+}  // namespace
+
 BuildEvalCase::BuildEvalCase(const std::string& dataset_path,
                              const std::string& index_path,
                              vsag::IndexPtr index,
-                             EvalConfig config)
-    : EvalCase(dataset_path, index_path, index), config_(std::move(config)) {
+                             EvalConfig config,
+                             EvalDatasetPtr dataset)
+    : EvalCase(dataset_path, index_path, std::move(index), std::move(dataset)),
+      config_(std::move(config)) {
     this->init_monitors();
 }
 
@@ -68,16 +112,15 @@ BuildEvalCase::do_build() {
     } else {
         base->SparseVectors((const SparseVector*)this->dataset_ptr_->GetTrain());
     }
-    for (auto& monitor : monitors_) {
-        monitor->Start();
-    }
+    StartedMonitorGuard monitor_guard(monitors_);
+    monitor_guard.StartAll();
     auto build_index = index_->Build(base);
     if (not build_index.has_value()) {
         throw std::runtime_error(build_index.error().message);
     }
-    for (auto& monitor : monitors_) {
-        monitor->Record();
-        monitor->Stop();
+    for (auto monitor = monitors_.rbegin(); monitor != monitors_.rend(); ++monitor) {
+        (*monitor)->Record();
+        monitor_guard.StopNext();
     }
 }
 void
@@ -105,6 +148,11 @@ BuildEvalCase::process_result() {
     result["index_info"] = JsonType::parse(config_.build_param);
     result["action"] = "build";
     result["index"] = config_.index_name;
+    try {
+        result["index_memory(B)"] = this->index_->GetMemoryUsage();
+    } catch (const std::exception& e) {
+        logger_->Error(e.what());
+    }
     try {
         auto detail = this->index_->GetMemoryUsageDetail();
         for (const auto& [name, size] : detail) {

@@ -85,7 +85,45 @@ Note: under `global.exporters`, each entry is a **named** exporter (a YAML map),
 - **Efficiency**: QPS, TPS
 - **Quality**: average recall and quantile recall (P0/P10/P50/P90...)
 - **Latency**: average, P50/P95/P99
-- **Resource**: peak memory usage
+- **Resource**: sampled process RSS peak and index-owned memory usage
+
+## Memory Metrics
+
+Memory monitoring samples the process resident set size (RSS) every 5 ms while the measured phase
+is running. The human-readable `memory_peak(build)` and `memory_peak(search)` fields report the
+largest sampled RSS increase above the phase baseline, using 1024-based units. A sampled peak can
+miss an allocation that exists for less than one sampling interval.
+
+The phase boundaries are:
+
+- `build`: from immediately before `Index::Build()` until it returns. Dataset loading and index
+  serialization are outside the interval.
+- `search`: from immediately before the first measured query pass until that pass finishes. Index
+  deserialization is outside the interval. When a latency/QPS measurement pass is present, RSS
+  sampling runs alongside that existing first pass instead of adding a separate pass that would
+  pre-warm later measurements. If there is no latency pass, a memory-only pass runs before recall
+  so recall bookkeeping is not counted. KNN result statistics are collected afterward, outside
+  all memory and performance monitor intervals.
+
+JSON output also includes exact numeric fields for each `<phase>` (`build` or `search`):
+
+| Field | Meaning |
+| --- | --- |
+| `memory_rss_baseline_bytes(<phase>)` | Process RSS at the start of the phase |
+| `memory_rss_peak_bytes(<phase>)` | Largest process RSS sampled during the phase |
+| `memory_peak_delta_bytes(<phase>)` | Peak RSS minus baseline RSS, clamped at zero |
+| `memory_peak_sample_count(<phase>)` | Number of successful RSS samples |
+| `memory_peak_failed_sample_count(<phase>)` | Number of failed RSS samples |
+| `memory_peak_available(<phase>)` | Whether a valid baseline and sampler were available |
+| `memory_peak_error(<phase>)` | Sampling error, or an empty string on success |
+
+`index_memory(B)` reports memory owned by the index according to `Index::GetMemoryUsage()`, while
+`memory_detail(B)` contains the available component breakdown. These index-level values are
+separate from process RSS, which also includes the dataset, evaluator bookkeeping, allocator
+overhead, and other process state.
+
+On an unsupported platform or when the baseline cannot be read, the human-readable value is
+`N/A`, `memory_peak_available(<phase>)` is `false`, and the error field explains the failure.
 
 ## Search Modes
 

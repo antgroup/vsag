@@ -31,7 +31,9 @@ using EvalCasePtr = std::shared_ptr<EvalCase>;
 class EvalCase {
 public:
     static EvalCasePtr
-    MakeInstance(const EvalConfig& config, std::string type = "none");
+    MakeInstance(const EvalConfig& config,
+                 std::string type = "none",
+                 EvalDatasetPtr dataset = nullptr);
 
     static void
     MergeJsonType(const JsonType& input, JsonType& output) {
@@ -86,7 +88,10 @@ public:
     }
 
 public:
-    explicit EvalCase(std::string dataset_path, std::string index_path, vsag::IndexPtr index);
+    explicit EvalCase(std::string dataset_path,
+                      std::string index_path,
+                      vsag::IndexPtr index,
+                      EvalDatasetPtr dataset = nullptr);
 
     virtual ~EvalCase() = default;
 

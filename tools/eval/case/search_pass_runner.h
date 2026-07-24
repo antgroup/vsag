@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,40 +14,24 @@
 
 #pragma once
 
+#include <functional>
+#include <vector>
+
 #include "../monitor/monitor.h"
-#include "./eval_case.h"
 
 namespace vsag::eval {
 
-class BuildEvalCase : public EvalCase {
+class SearchPassRunner {
 public:
-    BuildEvalCase(const std::string& dataset_path,
-                  const std::string& index_path,
-                  vsag::IndexPtr index,
-                  EvalConfig config,
-                  EvalDatasetPtr dataset = nullptr);
+    using SearchPass = std::function<void(const MonitorPtr&)>;
+    using StatisticsPass = std::function<void()>;
 
-    ~BuildEvalCase() override = default;
-
-    JsonType
-    Run() override;
-
-private:
-    void
-    init_monitors();
-
-    void
-    do_build();
-
-    void
-    serialize();
-
-    JsonType
-    process_result();
-
-private:
-    std::vector<MonitorPtr> monitors_{};
-
-    EvalConfig config_;
+    static void
+    Run(const std::vector<MonitorPtr>& monitors,
+        const MonitorPtr& latency_monitor,
+        const MonitorPtr& memory_monitor,
+        const SearchPass& search_pass,
+        const StatisticsPass& statistics_pass);
 };
+
 }  // namespace vsag::eval
