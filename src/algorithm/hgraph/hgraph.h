@@ -435,9 +435,6 @@ private:
     [[nodiscard]] bool
     need_temporary_sq8_build_data_for_add() const;
 
-    DatasetPtr
-    prepare_train_data_for_add(const DatasetPtr& data);
-
     void
     prepare_build_codes(const DatasetPtr& data, const Vector<AddRow>& rows);
 

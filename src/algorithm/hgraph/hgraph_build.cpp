@@ -143,6 +143,7 @@ HGraph::Build(const DatasetPtr& data) {
     this->build_cache_hit_rate_ = -1.0F;
     this->build_cache_hit_nodes_ = 0;
     this->build_cache_missed_nodes_ = 0;
+    std::vector<int64_t> ret;
     if (this->has_loaded_cache()) {
         if (this->using_dedup_storage()) {
             throw VsagException(ErrorType::INVALID_ARGUMENT,
@@ -151,22 +152,16 @@ HGraph::Build(const DatasetPtr& data) {
         // A previously exported cache has been imported via ImportCache().
         // Take the accelerated build path that warm-starts neighbours from
         // the cache and refines them, instead of building from scratch.
-        auto ret = this->build_with_cache(data);
-        if (use_elp_optimizer_) {
-            elp_optimize();
-        }
-        return ret;
-    }
-
-    if (auto optimized_result = this->try_optimized_build(data); optimized_result.has_value()) {
-        return std::move(optimized_result.value());
-    }
-
-    std::vector<int64_t> ret;
-    if (graph_type_ == GRAPH_TYPE_VALUE_NSW) {
-        ret = this->Add(data);
+        ret = this->build_with_cache(data);
     } else {
-        ret = this->build_by_odescent(data);
+        auto optimized_result = this->try_optimized_build(data);
+        if (optimized_result.has_value()) {
+            ret = std::move(optimized_result.value());
+        } else if (graph_type_ == GRAPH_TYPE_VALUE_NSW) {
+            ret = this->Add(data);
+        } else {
+            ret = this->build_by_odescent(data);
+        }
     }
     if (use_elp_optimizer_) {
         elp_optimize();
@@ -330,10 +325,11 @@ HGraph::prepare_add_context(const DatasetPtr& data) {
     {
         std::scoped_lock lock(this->add_mutex_);
         if (this->total_count_ == 0) {
-            context.first_empty_add = true;
-            context.train_data = this->prepare_train_data_for_add(data);
+            context.train_data = this->sample_train_dataset(data);
+            this->train_codes_with_dataset(context.train_data);
         }
     }
+    context.first_empty_add = context.train_data != nullptr;
     return context;
 }
 

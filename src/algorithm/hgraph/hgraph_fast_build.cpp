@@ -118,16 +118,11 @@ HGraph::try_optimized_build(const DatasetPtr& data) {
 
     std::vector<int64_t> result;
     if (graph_type_ == GRAPH_TYPE_VALUE_NSW) {
-        this->Train(data);
         result = this->Add(data);
     } else {
         result = this->build_by_odescent(data);
     }
     session.Commit();
-
-    if (use_elp_optimizer_) {
-        elp_optimize();
-    }
     return result;
 }
 
@@ -135,16 +130,6 @@ bool
 HGraph::need_temporary_sq8_build_data_for_add() const {
     return this->optimized_build_codes_ == nullptr and not this->has_precise_reorder() and
            this->basic_flatten_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_RABITQ;
-}
-
-DatasetPtr
-HGraph::prepare_train_data_for_add(const DatasetPtr& data) {
-    if (this->optimized_build_codes_ != nullptr) {
-        return nullptr;
-    }
-    auto train_data = this->sample_train_dataset(data);
-    this->train_codes_with_dataset(train_data);
-    return train_data;
 }
 
 void
