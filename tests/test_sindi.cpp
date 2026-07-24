@@ -95,6 +95,19 @@ TestDatasetPool SINDITestIndex::pool{};
 
 }  // namespace fixtures
 
+// RejectAllFilter for testing
+class RejectAllFilter : public vsag::Filter {
+public:
+    bool
+    CheckValid(int64_t) const override {
+        return false;
+    }
+    bool
+    CheckValid(const char*) const override {
+        return false;
+    }
+};
+
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
                              "Invalid Build and Search Parameter",
                              "[ft][build][search][sindi]") {
@@ -368,4 +381,113 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Mark Remove", "[ft
             REQUIRE(search_result.value()->GetIds()[j] != ids[i]);
         }
     }
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
+                             "SINDI Reasoning Missed Target",
+                             "[ft][sindi][reasoning][pr]") {
+    fixtures::SINDIParam param;
+    auto build_param = fixtures::SINDITestIndex::GenerateBuildParameter(param);
+    auto index = TestFactory("sindi", build_param, true);
+    auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
+    TestBuildIndex(index, dataset, true);
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->SparseVectors(dataset->base_->GetSparseVectors())->Owner(false);
+
+    vsag::SearchRequest req;
+    req.topk_ = 5;
+    req.params_str_ = fixtures::SINDITestIndex::search_param;
+    req.query_ = query;
+    req.expected_labels_ = {99999999};
+
+    auto result = index->SearchWithRequest(req);
+    REQUIRE(result.has_value());
+    REQUIRE_FALSE(result.value()->GetReasoning().empty());
+    REQUIRE(result.value()->GetReasoning().find("missed_targets") != std::string::npos);
+    REQUIRE(result.value()->GetReasoning().find("bucket_selection") != std::string::npos);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
+                             "SINDI Reasoning Found Target",
+                             "[ft][sindi][reasoning][pr]") {
+    fixtures::SINDIParam param;
+    auto build_param = fixtures::SINDITestIndex::GenerateBuildParameter(param);
+    auto index = TestFactory("sindi", build_param, true);
+    auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
+    TestBuildIndex(index, dataset, true);
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->SparseVectors(dataset->base_->GetSparseVectors())->Owner(false);
+
+    vsag::SearchRequest req_no_reasoning;
+    req_no_reasoning.topk_ = 5;
+    req_no_reasoning.params_str_ = fixtures::SINDITestIndex::search_param;
+    req_no_reasoning.query_ = query;
+
+    auto result_no_reasoning = index->SearchWithRequest(req_no_reasoning);
+    REQUIRE(result_no_reasoning.has_value());
+    REQUIRE(result_no_reasoning.value()->GetNumElements() > 0);
+    REQUIRE(result_no_reasoning.value()->GetIds() != nullptr);
+
+    auto found_label = result_no_reasoning.value()->GetIds()[0];
+
+    vsag::SearchRequest req;
+    req.topk_ = 5;
+    req.params_str_ = fixtures::SINDITestIndex::search_param;
+    req.query_ = query;
+    req.expected_labels_ = {found_label};
+
+    auto result = index->SearchWithRequest(req);
+    REQUIRE(result.has_value());
+    REQUIRE_FALSE(result.value()->GetReasoning().empty());
+    REQUIRE(result.value()->GetReasoning().find("expected_analysis") != std::string::npos);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
+                             "SINDI Reasoning Empty Labels No Overhead",
+                             "[ft][sindi][reasoning][pr]") {
+    fixtures::SINDIParam param;
+    auto build_param = fixtures::SINDITestIndex::GenerateBuildParameter(param);
+    auto index = TestFactory("sindi", build_param, true);
+    auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
+    TestBuildIndex(index, dataset, true);
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->SparseVectors(dataset->base_->GetSparseVectors())->Owner(false);
+
+    vsag::SearchRequest req;
+    req.topk_ = 5;
+    req.params_str_ = fixtures::SINDITestIndex::search_param;
+    req.query_ = query;
+    req.expected_labels_ = {};
+
+    auto result = index->SearchWithRequest(req);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetReasoning().find("expected_analysis") == std::string::npos);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
+                             "SINDI Reasoning With Filter",
+                             "[ft][sindi][reasoning][pr]") {
+    fixtures::SINDIParam param;
+    auto build_param = fixtures::SINDITestIndex::GenerateBuildParameter(param);
+    auto index = TestFactory("sindi", build_param, true);
+    auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
+    TestBuildIndex(index, dataset, true);
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->SparseVectors(dataset->base_->GetSparseVectors())->Owner(false);
+
+    vsag::SearchRequest req;
+    req.topk_ = 5;
+    req.params_str_ = fixtures::SINDITestIndex::search_param;
+    req.query_ = query;
+    req.expected_labels_ = {dataset->base_->GetIds()[0]};
+    req.enable_filter_ = true;
+    req.filter_ = std::make_shared<RejectAllFilter>();
+
+    auto result = index->SearchWithRequest(req);
+    REQUIRE(result.has_value());
+    REQUIRE_FALSE(result.value()->GetReasoning().empty());
 }
