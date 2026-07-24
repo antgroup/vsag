@@ -1771,6 +1771,12 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
                 static_cast<float>(result.value()->GetIds()[i]));
     }
 
+    request.threshold_ = -1.0F;
+    auto threshold_result = index->SearchWithRequest(request);
+    REQUIRE(threshold_result.has_value());
+    REQUIRE(threshold_result.value()->GetDim() == 0);
+    request.threshold_.reset();
+
     request.mode_ = vsag::SearchMode::RANGE_SEARCH;
     auto range_result = index->SearchWithRequest(request);
     REQUIRE_FALSE(range_result.has_value());
@@ -1792,6 +1798,119 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
     auto parallel_result = index->SearchWithRequest(request);
     REQUIRE_FALSE(parallel_result.has_value());
     REQUIRE(parallel_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
+                             "IVF reorder applies threshold to exact distances",
+                             "[ft][search][ivf][threshold][pr]") {
+    constexpr int64_t dim = 16;
+    auto param = IVFTestIndex::GenerateIVFBuildParametersString("l2", dim, "sq8,fp32", 10);
+    auto index = TestIndex::TestFactory(IVFTestIndex::name, param, true);
+    auto dataset = IVFTestIndex::pool.GetDatasetAndCreate(dim, 200, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)
+        ->Dim(dim)
+        ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+        ->Owner(false);
+    auto result = index->KnnSearch(
+        query, 2, R"({"ivf":{"scan_buckets_count":10,"factor":4.0},"threshold":0.0})");
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() >= 1);
+    REQUIRE(result.value()->GetDim() <= 2);
+    REQUIRE(result.value()->GetIds()[0] == dataset->base_->GetIds()[0]);
+    for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
+        REQUIRE(result.value()->GetDistances()[i] <= 0.0F);
+        if (i > 0) {
+            REQUIRE(result.value()->GetDistances()[i - 1] <= result.value()->GetDistances()[i]);
+        }
+    }
+
+    vsag::SearchRequest reasoning_request;
+    reasoning_request.query_ = query;
+    reasoning_request.topk_ = 2;
+    reasoning_request.params_str_ = R"({"ivf":{"scan_buckets_count":10,"factor":4.0}})";
+    reasoning_request.threshold_ = -1.0F;
+    reasoning_request.expected_labels_ = {dataset->base_->GetIds()[0]};
+    auto reasoning_result = index->SearchWithRequest(reasoning_request);
+    REQUIRE(reasoning_result.has_value());
+    REQUIRE(reasoning_result.value()->GetDim() == 0);
+    REQUIRE(reasoning_result.value()->GetReasoning().find("0/1 expected labels found") !=
+            std::string::npos);
+
+    auto post_filter_baseline = index->KnnSearch(
+        query, 2, R"({"ivf":{"scan_buckets_count":10,"factor":4.0},"threshold":1e9})");
+    REQUIRE(post_filter_baseline.has_value());
+    REQUIRE(post_filter_baseline.value()->GetDim() == 2);
+    reasoning_request.threshold_ = 1e9F;
+    reasoning_request.expected_labels_ = {post_filter_baseline.value()->GetIds()[1]};
+    auto post_filter_reasoning = index->SearchWithRequest(reasoning_request);
+    REQUIRE(post_filter_reasoning.has_value());
+    REQUIRE(post_filter_reasoning.value()->GetReasoning().find("1/1 expected labels found") !=
+            std::string::npos);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
+                             "IVF threshold filters before top-k selection",
+                             "[ft][search][ivf][threshold][nonfinite][pr]") {
+    auto param = IVFTestIndex::GenerateIVFBuildParametersString("ip", 1, "fp32", 1, "random");
+    auto index = TestIndex::TestFactory(IVFTestIndex::name, param, true);
+    std::vector<float> vectors = {std::numeric_limits<float>::max(), 0.0F};
+    std::vector<int64_t> ids = {10, 20};
+    auto base = vsag::Dataset::Make();
+    base->NumElements(2)->Dim(1)->Ids(ids.data())->Float32Vectors(vectors.data())->Owner(false);
+    REQUIRE(index->Build(base).has_value());
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(1)->Float32Vectors(vectors.data())->Owner(false);
+    auto result = index->KnnSearch(query, 1, R"({"ivf":{"scan_buckets_count":1},"threshold":1.0})");
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() == 1);
+    REQUIRE(result.value()->GetIds()[0] == 20);
+    REQUIRE(result.value()->GetDistances()[0] == 1.0F);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
+                             "IVF reorder filters non-finite exact distances before selection",
+                             "[ft][search][ivf][reorder][threshold][nonfinite][pr]") {
+    auto param = IVFTestIndex::GenerateIVFBuildParametersString("ip", 1, "sq8,fp32", 1, "random");
+    auto index = TestIndex::TestFactory(IVFTestIndex::name, param, true);
+    std::vector<float> vectors = {std::numeric_limits<float>::max(), 0.0F};
+    std::vector<int64_t> ids = {10, 20};
+    auto base = vsag::Dataset::Make();
+    base->NumElements(2)->Dim(1)->Ids(ids.data())->Float32Vectors(vectors.data())->Owner(false);
+    REQUIRE(index->Build(base).has_value());
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(1)->Float32Vectors(vectors.data())->Owner(false);
+    auto result = index->KnnSearch(
+        query, 1, R"({"ivf":{"scan_buckets_count":1,"factor":2.0},"threshold":1.0})");
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() == 1);
+    REQUIRE(result.value()->GetIds()[0] == 20);
+    REQUIRE(result.value()->GetDistances()[0] == 1.0F);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
+                             "IVF reorder filters non-finite approximate distances before capping",
+                             "[ft][search][ivf][reorder][threshold][nonfinite][pr]") {
+    auto param = IVFTestIndex::GenerateIVFBuildParametersString("ip", 1, "fp32,fp32", 1, "random");
+    auto index = TestIndex::TestFactory(IVFTestIndex::name, param, true);
+    std::vector<float> vectors = {std::numeric_limits<float>::max(), 0.0F};
+    std::vector<int64_t> ids = {10, 20};
+    auto base = vsag::Dataset::Make();
+    base->NumElements(2)->Dim(1)->Ids(ids.data())->Float32Vectors(vectors.data())->Owner(false);
+    REQUIRE(index->Build(base).has_value());
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(1)->Float32Vectors(vectors.data())->Owner(false);
+    auto result = index->KnnSearch(
+        query, 1, R"({"ivf":{"scan_buckets_count":1,"factor":1.0},"threshold":1.0})");
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() == 1);
+    REQUIRE(result.value()->GetIds()[0] == 20);
+    REQUIRE(result.value()->GetDistances()[0] == 1.0F);
 }
 
 // RejectAllFilter for testing empty results
@@ -1993,6 +2112,26 @@ TEST_CASE("IVF GraphBucketSearcher Basic", "[ft][ivf][graph]") {
     auto result = index.value()->KnnSearch(query, 10, search_param);
     REQUIRE(result.has_value());
     REQUIRE(result.value()->GetDim() == 10);
+}
+
+TEST_CASE("IVF GraphBucketSearcher excludes non-finite threshold results",
+          "[ft][ivf][graph][threshold][nonfinite]") {
+    auto build_param = GenerateIVFGraphBuildParametersString("ip", 1, 1, 1);
+    auto index = vsag::Factory::CreateIndex("ivf", build_param).value();
+    std::vector<float> vectors = {std::numeric_limits<float>::max(), 0.0F};
+    std::vector<int64_t> ids = {10, 20};
+    auto base = vsag::Dataset::Make();
+    base->NumElements(2)->Dim(1)->Ids(ids.data())->Float32Vectors(vectors.data())->Owner(false);
+    REQUIRE(index->Build(base).has_value());
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(1)->Float32Vectors(vectors.data())->Owner(false);
+    auto result = index->KnnSearch(
+        query, 1, R"({"ivf":{"scan_buckets_count":1,"ef_search":2},"threshold":1.0})");
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() == 1);
+    REQUIRE(result.value()->GetIds()[0] == 20);
+    REQUIRE(result.value()->GetDistances()[0] == 1.0F);
 }
 
 TEST_CASE("IVF GraphBucketSearcher Flat Fallback", "[ft][ivf][graph]") {

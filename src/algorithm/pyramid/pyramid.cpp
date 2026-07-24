@@ -30,6 +30,7 @@
 #include "storage/serialization.h"
 #include "storage/serialization_tags.h"
 #include "storage/tlv_section.h"
+#include "utils/search_threshold.h"
 #include "utils/slow_task_timer.h"
 #include "utils/util_functions.h"
 namespace vsag {
@@ -261,6 +262,7 @@ Pyramid::KnnSearch(const DatasetPtr& query,
     SearchStatistics stats;
     QueryContext ctx{.stats = &stats};
 
+    const auto threshold = ParseSearchThreshold(parameters);
     auto parsed_param = PyramidSearchParameters::FromJson(parameters);
     CHECK_ARGUMENT(k > 0, fmt::format("k({}) must be greater than 0", k));
     CHECK_ARGUMENT(parsed_param.hierarchy_op == PyramidSearchParameters::HierarchyOp::SINGLE,
@@ -274,7 +276,9 @@ Pyramid::KnnSearch(const DatasetPtr& query,
     InnerSearchParam search_param;
     search_param.ef = std::max<uint64_t>(parsed_param.ef_search, static_cast<uint64_t>(k));
     search_param.radius = std::numeric_limits<float>::max();
-    search_param.topk = k;
+    search_param.topk = threshold.has_value() ? static_cast<int64_t>(search_param.ef) : k;
+    search_param.distance_threshold = threshold;
+    search_param.enable_reorder = use_reorder_;
     search_param.search_mode = KNN_SEARCH;
     search_param.parallel_search_thread_count = parsed_param.parallel_search_thread_count;
     if (this->support_duplicate_) {
@@ -296,7 +300,7 @@ Pyramid::KnnSearch(const DatasetPtr& query,
         parsed_param.hierarchies.empty() ? "" : parsed_param.hierarchies[0];
     auto result = this->search_impl(query, search_func, search_param, ctx, hierarchy_name);
     result->Statistics(stats.Dump());
-    return result;
+    return FilterDatasetByThreshold(result, threshold, allocator_, k);
 }
 
 DatasetPtr
@@ -1350,6 +1354,12 @@ Pyramid::search_node(const IndexNode* node,
         codes->Query(dists.data(), computer, ids_ptr, id_count, &ctx);
 
         for (int i = 0; i < id_count; ++i) {
+            if (search_param.distance_threshold.has_value() and
+                (not std::isfinite(dists[i]) ||
+                 (not search_param.enable_reorder and
+                  dists[i] > search_param.distance_threshold.value()))) {
+                continue;
+            }
             results->Push(dists[i], ids_ptr[i]);
             if (results->Size() > search_param.ef) {
                 results->Pop();

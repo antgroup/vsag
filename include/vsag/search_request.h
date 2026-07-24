@@ -16,6 +16,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -206,6 +207,14 @@ public:
      *          Default is empty (no reasoning enabled).
      */
     std::vector<int64_t> expected_labels_{};
+
+    /**
+     * @brief Optional inclusive distance threshold for KNN search mode
+     * @details When set, at most topk_ results are returned and every returned
+     *          distance is less than or equal to this threshold. An unset value
+     *          preserves the default KNN behavior.
+     */
+    std::optional<float> threshold_{std::nullopt};
 };
 
 }  // namespace vsag

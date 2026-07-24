@@ -31,10 +31,12 @@
 #include "inner_string_params.h"
 #include "metric_type.h"
 #include "query_context.h"
+#include "simq_utils.h"
 #include "storage/serialization.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "typing.h"
+#include "utils/search_threshold.h"
 #include "utils/util_functions.h"
 
 namespace vsag {
@@ -716,6 +718,7 @@ SIMQ::KnnSearch(const DatasetPtr& query,
                 const FilterPtr& filter) const {
     std::shared_lock lock(global_mutex_);
     SearchStatistics stats;
+    const auto threshold = ParseSearchThreshold(parameters);
 
     if (total_count_ == 0 || rep_hgraph_ == nullptr) {
         auto result = Dataset::Make();
@@ -776,15 +779,31 @@ SIMQ::KnnSearch(const DatasetPtr& query,
             reranked.emplace_back(batch_dists[i], batch_ids[i]);
         }
     }
-    std::sort(reranked.begin(), reranked.end(), [](const auto& a, const auto& b) {
-        return a.first < b.first;
-    });
+    std::sort(reranked.begin(), reranked.end(), simq_distance_less);
 
-    int64_t result_count = std::min(k, static_cast<int64_t>(reranked.size()));
+    int64_t result_count = 0;
+    for (const auto& [distance, _] : reranked) {
+        if (result_count >= k) {
+            break;
+        }
+        if (not threshold.has_value() or
+            (std::isfinite(distance) and distance <= threshold.value())) {
+            ++result_count;
+        }
+    }
     auto [result_ds, dists, ids] = create_fast_dataset(result_count, allocator_);
-    for (int64_t i = 0; i < result_count; ++i) {
-        dists[i] = reranked[i].first;
-        ids[i] = this->label_table_->GetLabelById(reranked[i].second);
+    int64_t result_index = 0;
+    for (const auto& [distance, inner_id] : reranked) {
+        if (result_index >= result_count) {
+            break;
+        }
+        if (threshold.has_value() and
+            (not std::isfinite(distance) or distance > threshold.value())) {
+            continue;
+        }
+        dists[result_index] = distance;
+        ids[result_index] = this->label_table_->GetLabelById(inner_id);
+        ++result_index;
     }
     result_ds->Statistics(dump_simq_statistics(stats,
                                                coarse_dist_cmp,
@@ -792,9 +811,9 @@ SIMQ::KnnSearch(const DatasetPtr& query,
                                                coarse_candidate_count,
                                                rerank_candidate_count,
                                                filtered_candidate_count,
-                                               static_cast<uint64_t>(result_count),
+                                               static_cast<uint64_t>(result_ds->GetDim()),
                                                false));
-    return std::move(result_ds);
+    return result_ds;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

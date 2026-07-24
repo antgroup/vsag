@@ -16,6 +16,7 @@
 #include "parallel_searcher.h"
 
 #include <atomic>
+#include <cmath>
 #include <future>
 #include <limits>
 #include <tuple>
@@ -24,6 +25,7 @@
 
 #include "datacell/flatten_interface.h"
 #include "impl/heap/standard_heap.h"
+#include "impl/searcher/searcher_utils.h"
 #include "utils/filter_search_skip_strategy.h"
 #include "utils/spsc_queue.h"
 
@@ -173,19 +175,34 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
     } else {
         flatten->Query(&dist, computer, &ep, 1, ctx);
     }
-    if (check_func(ep)) {
+    if (check_func(ep) and is_result_distance_eligible<mode>(dist, inner_search_param)) {
         top_candidates->Push(dist, ep);
-        lower_bound = top_candidates->Top().first;
+    }
+    if (not std::isfinite(dist) and inner_search_param.consider_duplicate and
+        is_result_distance_eligible<mode>(dist, inner_search_param)) {
+        for (const auto duplicate_id : graph->GetDuplicateIds(ep)) {
+            if (check_func(duplicate_id)) {
+                top_candidates->Push(dist, duplicate_id);
+            }
+        }
+        if constexpr (mode == KNN_SEARCH) {
+            while (top_candidates->Size() > ef) {
+                top_candidates->Pop();
+            }
+        }
     }
     if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
-        if (dist > inner_search_param.radius and not top_candidates->Empty()) {
+        while (dist > inner_search_param.radius and not top_candidates->Empty()) {
             top_candidates->Pop();
         }
+    }
+    if (not top_candidates->Empty()) {
+        lower_bound = top_candidates->Top().first;
     }
     if (dist < THRESHOLD_ERROR) {
         inner_search_param.duplicate_id = ep;
     }
-    candidate_set->Push(-dist, ep);
+    candidate_set->Push(traversal_priority(dist), ep);
     vl->Set(ep);
 
     auto num_threads = inner_search_param.parallel_search_thread_count - 1;
@@ -308,6 +325,33 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
         for (uint64_t i = 0; i < count_no_visited; i++) {
             dist = line_dists[i];
             const auto cur_id = to_be_visited_id[i];
+            if (not std::isfinite(dist)) {
+                auto push_result = [&](InnerIdType result_id) {
+                    if (not is_result_distance_eligible<mode>(dist, inner_search_param) or
+                        not check_func(result_id)) {
+                        return;
+                    }
+                    top_candidates->Push(dist, result_id);
+                    if constexpr (mode == KNN_SEARCH) {
+                        while (top_candidates->Size() > ef) {
+                            top_candidates->Pop();
+                        }
+                    } else if (dist > inner_search_param.radius) {
+                        top_candidates->Pop();
+                    }
+                };
+                push_result(cur_id);
+                if (inner_search_param.consider_duplicate) {
+                    for (const auto duplicate_id : graph->GetDuplicateIds(cur_id)) {
+                        push_result(duplicate_id);
+                    }
+                }
+                candidate_set->Push(traversal_priority(dist), cur_id);
+                if (not top_candidates->Empty()) {
+                    lower_bound = top_candidates->Top().first;
+                }
+                continue;
+            }
             if constexpr (mode == KNN_SEARCH) {
                 if (collect_rabitq_lower_bound and lower_bound_dists[i] < lower_bound and
                     check_func(cur_id)) {

@@ -517,3 +517,53 @@ TEST_CASE("BasicSearcher iterator drain path handles sign and lower_bound correc
 
     delete iter_ctx;
 }
+
+TEST_CASE("BasicSearcher traverses through a non-finite-distance bridge",
+          "[ut][BasicSearcher][nonfinite]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common;
+    common.dim_ = 1;
+    common.allocator_ = allocator;
+    common.metric_ = MetricType::METRIC_TYPE_L2SQR;
+
+    constexpr const char* param_temp = R"({{"type": "{}"}})";
+    auto quantizer_param = QuantizerParameter::GetQuantizerParameterByJson(
+        JsonType::Parse(fmt::format(param_temp, "fp32")));
+    auto io_param =
+        IOParameter::GetIOParameterByJson(JsonType::Parse(fmt::format(param_temp, "memory_io")));
+    auto flatten =
+        std::make_shared<FlattenDataCell<FP32Quantizer<MetricType::METRIC_TYPE_L2SQR>, MemoryIO>>(
+            quantizer_param, io_param, common);
+    flatten->SetQuantizer(
+        std::make_shared<FP32Quantizer<MetricType::METRIC_TYPE_L2SQR>>(1, allocator.get()));
+    flatten->SetIO(std::make_unique<MemoryIO>(allocator.get()));
+    const auto bridge_distance =
+        GENERATE(std::numeric_limits<float>::max(), std::numeric_limits<float>::quiet_NaN());
+    std::vector<float> vectors = {
+        10.0F, bridge_distance, bridge_distance, bridge_distance, bridge_distance, 1.0F};
+    std::vector<InnerIdType> ids = {0, 1, 2, 3, 4, 5};
+    flatten->Train(vectors.data(), ids.size());
+    flatten->BatchInsertVector(vectors.data(), ids.size(), ids.data());
+
+    auto graph = std::make_shared<MockGraphDataCell>(
+        std::vector<std::vector<InnerIdType>>{{1}, {2}, {3}, {4}, {5}, {}});
+    auto pool = std::make_shared<VisitedListPool>(1, allocator.get(), ids.size(), allocator.get());
+    InnerSearchParam param;
+    param.ep = 0;
+    param.ef = 2;
+    param.topk = 2;
+    float query = 0.0F;
+    auto vl = pool->TakeOne();
+    QueryContext* ctx = nullptr;
+    auto result =
+        BasicSearcher(common).Search(graph, flatten, vl, &query, param, LabelTablePtr{}, ctx);
+    pool->ReturnOne(vl);
+
+    REQUIRE(result->Size() <= param.ef);
+    bool found_target = false;
+    while (not result->Empty()) {
+        found_target = found_target or result->Top().second == 5;
+        result->Pop();
+    }
+    REQUIRE(found_target);
+}

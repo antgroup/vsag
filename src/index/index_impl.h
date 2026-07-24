@@ -19,6 +19,7 @@
 #include "algorithm/inner_index_interface.h"
 #include "common.h"
 #include "index_common_param.h"
+#include "utils/search_threshold.h"
 #include "vsag/index.h"
 namespace vsag {
 
@@ -302,6 +303,10 @@ public:
               int64_t k,
               const std::string& parameters,
               BitsetPtr invalid = nullptr) const override {
+        auto threshold_validation = ValidateThresholdParameters(parameters);
+        if (not threshold_validation.has_value()) {
+            return tl::unexpected(threshold_validation.error());
+        }
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
         if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(parameters)) {
             return DatasetImpl::MakeEmptyDataset();
@@ -314,6 +319,10 @@ public:
               int64_t k,
               const std::string& parameters,
               const std::function<bool(int64_t)>& filter) const override {
+        auto threshold_validation = ValidateThresholdParameters(parameters);
+        if (not threshold_validation.has_value()) {
+            return tl::unexpected(threshold_validation.error());
+        }
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
         if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(parameters)) {
             return DatasetImpl::MakeEmptyDataset();
@@ -326,6 +335,10 @@ public:
               int64_t k,
               const std::string& parameters,
               const FilterPtr& filter) const override {
+        auto threshold_validation = ValidateThresholdParameters(parameters);
+        if (not threshold_validation.has_value()) {
+            return tl::unexpected(threshold_validation.error());
+        }
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
         if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(parameters)) {
             return DatasetImpl::MakeEmptyDataset();
@@ -335,6 +348,10 @@ public:
 
     tl::expected<DatasetPtr, Error>
     KnnSearch(const DatasetPtr& query, int64_t k, SearchParam& search_param) const override {
+        auto threshold_validation = ValidateThresholdParameters(search_param.parameters);
+        if (not threshold_validation.has_value()) {
+            return tl::unexpected(threshold_validation.error());
+        }
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
         if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(search_param.parameters)) {
             return DatasetImpl::MakeEmptyDataset();
@@ -360,6 +377,10 @@ public:
               const FilterPtr& filter,
               IteratorContext*& iter_ctx,
               bool is_last_filter) const override {
+        auto threshold_validation = ValidateThresholdParameters(parameters);
+        if (not threshold_validation.has_value()) {
+            return tl::unexpected(threshold_validation.error());
+        }
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
         if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(parameters)) {
             return DatasetImpl::MakeEmptyDataset();
@@ -476,10 +497,10 @@ public:
 
     [[nodiscard]] tl::expected<DatasetPtr, Error>
     SearchWithRequest(const SearchRequest& request) const override {
-        if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(request.params_str_)) {
-            return DatasetImpl::MakeEmptyDataset();
-        }
-        SAFE_CALL(return this->inner_index_->SearchWithRequest(request));
+        SAFE_CALL(ValidateSearchThreshold(request.threshold_);
+                  if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(request.params_str_)) {
+                      return DatasetImpl::MakeEmptyDataset();
+                  } return this->inner_index_->SearchWithRequest(request));
     }
 
     tl::expected<void, Error>
@@ -557,6 +578,18 @@ private:
     }
 
 private:
+    tl::expected<void, Error>
+    ValidateThresholdParameters(const std::string& parameters) const {
+        try {
+            ParseSearchThreshold(parameters);
+            return {};
+        } catch (const VsagException& e) {
+            return tl::unexpected(e.error_);
+        } catch (const std::exception& e) {
+            return tl::unexpected(Error(ErrorType::UNKNOWN_ERROR, e.what()));
+        }
+    }
+
     bool
     ShouldSkipEmptyCheck(const std::string& params_str) const {
         if (GetNumElements() != 0 || params_str.empty()) {

@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,26 +14,23 @@
 
 #pragma once
 
-#include <optional>
+#include <cmath>
+#include <utility>
 
-#include "impl/heap/distance_heap.h"
-#include "utils/pointer_define.h"
+#include "typing.h"
 
 namespace vsag {
-class IteratorFilterContext;
 
-DEFINE_POINTER(ReorderInterface)
-
-class ReorderInterface {
-public:
-    virtual DistHeapPtr
-    Reorder(const DistHeapPtr& input,
-            const void* query,
-            int64_t topk,
-            QueryContext& ctx,
-            IteratorFilterContext* iter_ctx = nullptr,
-            const DistanceRecordVector* rabitq_lower_bound_candidates = nullptr,
-            const std::optional<float>& distance_threshold = std::nullopt) = 0;
-};
+inline bool
+simq_distance_less(const std::pair<float, InnerIdType>& lhs,
+                   const std::pair<float, InnerIdType>& rhs) {
+    if (std::isnan(lhs.first)) {
+        return false;
+    }
+    if (std::isnan(rhs.first)) {
+        return true;
+    }
+    return lhs.first < rhs.first;
+}
 
 }  // namespace vsag

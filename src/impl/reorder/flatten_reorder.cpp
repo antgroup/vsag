@@ -55,9 +55,23 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
                         int64_t topk,
                         QueryContext& ctx,
                         IteratorFilterContext* iter_ctx,
-                        const DistanceRecordVector* rabitq_lower_bound_candidates) {
+                        const DistanceRecordVector* rabitq_lower_bound_candidates,
+                        const std::optional<float>& distance_threshold) {
     // set query allocator
     Allocator* query_allocator = select_query_allocator(ctx.alloc, allocator_);
+    auto is_distance_eligible = [&distance_threshold](float distance) {
+        return not distance_threshold.has_value() or
+               (std::isfinite(distance) and distance <= distance_threshold.value());
+    };
+    auto consume_if_ineligible = [&](float distance, InnerIdType id) {
+        if (is_distance_eligible(distance)) {
+            return false;
+        }
+        if (iter_ctx != nullptr) {
+            iter_ctx->SetPoint(id);
+        }
+        return true;
+    };
     const uint64_t heap_candidate_size = input == nullptr ? 0 : input->Size();
     if (rabitq_lower_bound_candidates == nullptr) {
         topk = std::min(topk, static_cast<int64_t>(heap_candidate_size));
@@ -75,6 +89,9 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
             if (ctx.reasoning_ctx != nullptr) {
                 ctx.reasoning_ctx->RecordReorder(
                     candidate_result[i].second, candidate_result[i].first, dists[i]);
+            }
+            if (consume_if_ineligible(dists[i], candidate_result[i].second)) {
+                continue;
             }
             if (reorder_heap->Size() < topk || dists[i] < reorder_heap->Top().first) {
                 reorder_heap->Push(dists[i], candidate_result[i].second);
@@ -166,6 +183,9 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
                 ctx.reasoning_ctx->RecordReorder(
                     all_ids[i], lower_bounds[i], lower_bound_probe_dists[i]);
             }
+            if (consume_if_ineligible(lower_bound_probe_dists[i], all_ids[i])) {
+                continue;
+            }
             if (reorder_heap->Size() < topk or
                 lower_bound_probe_dists[i] < reorder_heap->Top().first) {
                 reorder_heap->Push(lower_bound_probe_dists[i], all_ids[i]);
@@ -212,7 +232,9 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
             const auto idx = order[i];
             ctx.reasoning_ctx->RecordReorder(ids[i], lower_bound_probe_dists[idx], dists[i]);
         }
-        reorder_heap->Push(dists[i], ids[i]);
+        if (not consume_if_ineligible(dists[i], ids[i])) {
+            reorder_heap->Push(dists[i], ids[i]);
+        }
     }
 
     uint64_t cursor = bootstrap_size;
@@ -222,11 +244,13 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
             break;
         }
 
-        const auto threshold = reorder_heap->Top().first;
+        const auto pruning_threshold = reorder_heap->Size() == topk
+                                           ? reorder_heap->Top().first
+                                           : std::numeric_limits<float>::max();
         uint64_t batch_count = 0;
         while (cursor < candidate_size && batch_count < batch_size) {
             const auto idx = order[cursor];
-            if (lower_bounds[idx] >= threshold) {
+            if (lower_bounds[idx] >= pruning_threshold) {
                 break;
             }
             ids[batch_count] = all_ids[idx];
@@ -249,7 +273,10 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
                 ctx.reasoning_ctx->RecordReorder(
                     ids[i], lower_bound_probe_dists[batch_indices[i]], dists[i]);
             }
-            if (dists[i] < reorder_heap->Top().first) {
+            if (consume_if_ineligible(dists[i], ids[i])) {
+                continue;
+            }
+            if (reorder_heap->Size() < topk or dists[i] < reorder_heap->Top().first) {
                 reorder_heap->Push(dists[i], ids[i]);
                 if (reorder_heap->Size() > topk) {
                     if (iter_ctx != nullptr) {

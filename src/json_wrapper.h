@@ -45,6 +45,9 @@ public:
     IsNumberUnsigned() const;
 
     bool
+    IsNumber() const;
+
+    bool
     IsString() const;
 
     bool

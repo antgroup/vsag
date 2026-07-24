@@ -24,6 +24,7 @@
 
 #include "impl/heap/search_candidate_queue.h"
 #include "impl/heap/standard_heap.h"
+#include "impl/searcher/searcher_utils.h"
 #include "index_common_param.h"
 #include "simd/fp32_simd.h"
 #include "vsag/filter.h"
@@ -123,7 +124,7 @@ search_precise_float_csr(const CliqueDataCellBaseView& view,
                          Allocator* allocator) {
     const auto candidate_limit =
         std::max<int64_t>(inner_search_param.topk, static_cast<int64_t>(inner_search_param.ef));
-    auto heap = DistanceHeap::MakeInstanceBySize<true, true>(allocator, candidate_limit);
+    auto result_heap = DistanceHeap::MakeInstanceBySize<true, true>(allocator, candidate_limit);
     thread_local MCIEpochMarks visited_nodes;
     thread_local MCIEpochMarks visited_cliques;
     SearchCandidateQueue candidates(allocator);
@@ -158,6 +159,9 @@ search_precise_float_csr(const CliqueDataCellBaseView& view,
             query, vector, dim, metric, cosine_query_inv_norm, cosine_hold_mold);
         ++dist_cmp;
         insert_candidate(dist, inner_id);
+        if (is_result_distance_eligible<KNN_SEARCH>(dist, inner_search_param)) {
+            result_heap->Push(dist, inner_id);
+        }
         return true;
     };
 
@@ -221,15 +225,11 @@ search_precise_float_csr(const CliqueDataCellBaseView& view,
         }
     }
 
-    for (uint64_t i = 0; i < candidates.Size(); ++i) {
-        const auto& candidate = candidates.Data()[i];
-        heap->Push(candidate.distance, candidate.inner_id);
-    }
     if (ctx != nullptr and ctx->stats != nullptr) {
         ctx->stats->dist_cmp.fetch_add(dist_cmp, std::memory_order_relaxed);
         ctx->stats->hops.fetch_add(hops, std::memory_order_relaxed);
     }
-    return heap;
+    return result_heap;
 }
 
 }  // namespace
@@ -328,6 +328,9 @@ MCISearcher::Search(const CliqueDataCellPtr& cliques,
         flatten->Query(&dist, computer, &inner_id, 1, ctx);
         ++dist_cmp;
         insert_candidate(dist, inner_id);
+        if (is_result_distance_eligible<KNN_SEARCH>(dist, inner_search_param)) {
+            heap->Push(dist, inner_id);
+        }
         return true;
     };
 
@@ -392,9 +395,6 @@ MCISearcher::Search(const CliqueDataCellPtr& cliques,
         }
     }
 
-    for (const auto& candidate : candidates) {
-        heap->Push(candidate.distance, candidate.inner_id);
-    }
     if (ctx != nullptr and ctx->stats != nullptr) {
         ctx->stats->dist_cmp.fetch_add(dist_cmp, std::memory_order_relaxed);
         ctx->stats->hops.fetch_add(hops, std::memory_order_relaxed);

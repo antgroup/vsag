@@ -1147,6 +1147,27 @@ InnerIndexInterface::pack_knn_result(DistHeapPtr& heap, Allocator* allocator) co
     return std::move(dataset_results);
 }
 
+void
+InnerIndexInterface::filter_search_result_by_threshold(DistHeapPtr& result,
+                                                       const std::optional<float>& threshold,
+                                                       Allocator* allocator) {
+    if (not threshold.has_value() or result == nullptr) {
+        return;
+    }
+    DistanceRecordVector valid_records(allocator);
+    valid_records.reserve(result->Size());
+    while (not result->Empty()) {
+        const auto record = result->Top();
+        result->Pop();
+        if (std::isfinite(record.first) and record.first <= threshold.value()) {
+            valid_records.push_back(record);
+        }
+    }
+    for (const auto& record : valid_records) {
+        result->Push(record);
+    }
+}
+
 DatasetPtr
 InnerIndexInterface::pack_knn_result_with_extra_info(DistHeapPtr& heap,
                                                      Allocator* allocator) const {

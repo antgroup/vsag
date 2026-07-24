@@ -224,7 +224,8 @@ private:
             const float* query,
             const InnerSearchParam& param,
             QueryContext& ctx,
-            ReasoningContext* reasoning_ctx = nullptr) const;
+            ReasoningContext* reasoning_ctx = nullptr,
+            const std::optional<float>& distance_threshold = std::nullopt) const;
 
     void
     AttachReasoningReport(const DatasetPtr& dataset_results, ReasoningContext* reasoning_ctx) const;

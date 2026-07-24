@@ -49,6 +49,7 @@
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "storage/tlv_section.h"
+#include "utils/search_threshold.h"
 #include "utils/util_functions.h"
 #include "utils/visited_list.h"
 #include "vsag_exception.h"
@@ -773,6 +774,7 @@ IVF::KnnSearch(const DatasetPtr& query,
     req.query_ = query;
     req.topk_ = k;
     req.params_str_ = parameters;
+    req.threshold_ = ParseSearchThreshold(parameters);
     if (filter != nullptr) {
         req.filter_ = filter;
     }
@@ -1455,11 +1457,11 @@ IVF::reorder(int64_t topk,
              const float* query,
              const InnerSearchParam& param,
              QueryContext& ctx,
-             ReasoningContext* reasoning_ctx) const {
-    auto reorder_heap = reorder_->Reorder(input, query, topk, ctx);
+             ReasoningContext* reasoning_ctx,
+             const std::optional<float>& distance_threshold) const {
+    auto reorder_heap =
+        reorder_->Reorder(input, query, topk, ctx, nullptr, nullptr, distance_threshold);
     auto dataset_results = this->pack_knn_result(reorder_heap, ctx.alloc);
-
-    this->AttachReasoningReport(dataset_results, reasoning_ctx);
 
     return dataset_results;
 }
@@ -1807,6 +1809,7 @@ IVF::check_merge_illegal(const vsag::MergeUnit& unit) const {
 
 DatasetPtr
 IVF::SearchWithRequest(const SearchRequest& request) const {
+    ValidateSearchThreshold(request.threshold_);
     SearchStatistics stats;
     QueryContext ctx{.alloc = request.search_allocator_, .stats = &stats};
 
@@ -1842,6 +1845,8 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
         CHECK_ARGUMENT(query->GetFloat32Vectors() != nullptr,
                        "query float32 vectors cannot be null");
         CHECK_ARGUMENT(query->GetDim() == this->dim_, "query dimension must match index dimension");
+        CHECK_ARGUMENT(not request.threshold_.has_value(),
+                       "threshold filtering is not supported with disable_bucket_scan");
         auto result = this->route_buckets_only(query, param, ctx);
         result->Statistics(stats.Dump());
         return result;
@@ -1861,6 +1866,8 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
         param.search_mode = KNN_SEARCH;
         param.topk = request.topk_;
         auto search_result = search_with_custom_distance(query, request, param, ctx);
+        filter_search_result_by_threshold(
+            search_result, request.threshold_, select_query_allocator(ctx.alloc, this->allocator_));
         if (search_result == nullptr || search_result->Empty()) {
             auto dataset_results = DatasetImpl::MakeEmptyDataset();
             dataset_results->Statistics(stats.Dump());
@@ -1925,6 +1932,7 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
             auto result = reorder(
                 k, search_result, query->GetFloat32Vectors(), param, ctx, reasoning_ctx.get());
             result->Statistics(stats.Dump());
+            this->AttachReasoningReport(result, reasoning_ctx.get());
             return result;
         }
         auto dataset_results = this->pack_knn_result(search_result, ctx.alloc);
@@ -1941,18 +1949,30 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
             param.factor > 0.0F,
             fmt::format("factor must be positive when use_reorder is true, got {}", param.factor));
         param.topk = static_cast<int64_t>(param.factor * static_cast<float>(request.topk_));
+        if (request.threshold_.has_value()) {
+            param.topk = std::max(param.topk, request.topk_);
+        }
     }
+    const bool reorder_enabled = use_reorder_ and param.enable_reorder;
+    // Reordered searches defer the finite bound to exact distances, but bucket selection still
+    // needs threshold-mode state so non-finite approximations cannot consume the rerank pool.
+    param.distance_threshold = request.threshold_;
     auto search_result = this->search<KNN_SEARCH>(query, param, ctx, reasoning_ctx.get());
-    if (use_reorder_ and param.enable_reorder) {
-        auto result = reorder(request.topk_,
+    if (reorder_enabled) {
+        auto result = reorder(request.threshold_.has_value() ? param.topk : request.topk_,
                               search_result,
                               query->GetFloat32Vectors(),
                               param,
                               ctx,
-                              reasoning_ctx.get());
+                              reasoning_ctx.get(),
+                              request.threshold_);
+        result = FilterDatasetByThreshold(result, request.threshold_, ctx.alloc, request.topk_);
+        AttachReasoningReport(result, reasoning_ctx.get());
         result->Statistics(stats.Dump());
         return result;
     }
+    filter_search_result_by_threshold(
+        search_result, request.threshold_, select_query_allocator(ctx.alloc, this->allocator_));
     if (search_result == nullptr || search_result->Empty()) {
         auto dataset_results = DatasetImpl::MakeEmptyDataset();
         this->AttachReasoningReport(dataset_results, reasoning_ctx.get());
@@ -1974,7 +1994,7 @@ IVF::AttachReasoningReport(const DatasetPtr& dataset_results,
     if (reasoning_ctx == nullptr) {
         return;
     }
-    auto count = dataset_results->GetNumElements();
+    auto count = dataset_results->GetDim();
     if (count > 0 and dataset_results->GetIds() != nullptr) {
         Vector<InnerIdType> result_inner_ids(static_cast<uint64_t>(count), this->allocator_);
         {

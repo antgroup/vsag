@@ -232,7 +232,8 @@ private:
                           ReasoningContext* reasoning_ctx = nullptr) const;
 
     bool
-    UseTermListsHeapInsert(const SINDISearchParameter& search_param) const;
+    UseTermListsHeapInsert(const SINDISearchParameter& search_param,
+                           const std::optional<float>& distance_threshold = std::nullopt) const;
 
 #ifdef VSAG_SINDI_TEST_ACCESS
     friend class SINDITestAccess;
@@ -302,9 +303,12 @@ private:
                                          float& cur_heap_top,
                                          MaxHeap& heap,
                                          uint32_t offset_id,
+                                         uint32_t n_candidate,
                                          float radius,
                                          int range_search_limit_size,
-                                         const FilterPtr& filter) const;
+                                         const FilterPtr& filter,
+                                         const std::optional<float>& threshold,
+                                         bool enable_reorder) const;
 
     template <InnerSearchType type>
     bool
@@ -314,7 +318,9 @@ private:
                                 MaxHeap& heap,
                                 uint32_t offset_id,
                                 uint32_t n_candidate,
-                                const FilterPtr& filter) const;
+                                const FilterPtr& filter,
+                                const std::optional<float>& threshold,
+                                bool enable_reorder) const;
 
     template <InnerSearchMode mode, InnerSearchType type>
     void

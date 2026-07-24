@@ -35,8 +35,10 @@ namespace vsag {
 class SINDITestAccess {
 public:
     static bool
-    UseTermListsHeapInsert(const SINDI& index, const SINDISearchParameter& search_param) {
-        return index.UseTermListsHeapInsert(search_param);
+    UseTermListsHeapInsert(const SINDI& index,
+                           const SINDISearchParameter& search_param,
+                           const std::optional<float>& distance_threshold = std::nullopt) {
+        return index.UseTermListsHeapInsert(search_param, distance_threshold);
     }
 
     static float
@@ -109,13 +111,15 @@ TEST_CASE("SINDI Heap Insert Strategy Test", "[ut][SINDI]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     IndexCommonParam common_param;
     common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
 
-    auto make_index = [&](float doc_prune_ratio) {
+    auto make_index = [&](float doc_prune_ratio, bool use_reorder = false) {
         auto param = std::make_shared<vsag::SINDIParameter>();
         param->term_id_limit = 30001;
         param->window_size = 10000;
         param->doc_prune_ratio = doc_prune_ratio;
         param->avg_doc_term_length = 100;
+        param->use_reorder = use_reorder;
         return SINDI(param, common_param);
     };
 
@@ -145,6 +149,16 @@ TEST_CASE("SINDI Heap Insert Strategy Test", "[ut][SINDI]") {
         REQUIRE(SINDITestAccess::UseTermListsHeapInsert(index, search_param) ==
                 (doc_prune_ratio > SINDITestAccess::TermListsHeapInsertPruneThreshold() ||
                  query_prune_ratio > SINDITestAccess::TermListsHeapInsertPruneThreshold()));
+    }
+
+    SECTION("retains term-list insertion only for safe KNN thresholds") {
+        auto search_param = make_search_param(0.2F);
+        auto non_reorder = make_index(0.0F);
+        REQUIRE(SINDITestAccess::UseTermListsHeapInsert(non_reorder, search_param, 0.5F));
+        REQUIRE_FALSE(SINDITestAccess::UseTermListsHeapInsert(non_reorder, search_param, 1.0F));
+
+        auto reorder = make_index(0.0F, true);
+        REQUIRE_FALSE(SINDITestAccess::UseTermListsHeapInsert(reorder, search_param, 0.5F));
     }
 }
 

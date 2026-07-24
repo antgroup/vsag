@@ -481,6 +481,38 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
         index->KnnSearch(query, topk, GeneratePyramidSearchParametersString(ef_search));
     REQUIRE(search_result.has_value());
     REQUIRE(search_result.value()->GetDim() == topk);
+
+    auto threshold_result =
+        index->KnnSearch(query, topk, R"({"threshold": 0.0, "pyramid": {"ef_search": 5}})");
+    REQUIRE(threshold_result.has_value());
+    REQUIRE(threshold_result.value()->GetDim() == 1);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
+                             "Pyramid threshold filters before flat-node pruning",
+                             "[ft][search][pyramid][threshold][nonfinite]") {
+    PyramidParam pyramid_param;
+    pyramid_param.no_build_levels = {};
+    const auto param = GeneratePyramidBuildParametersString("ip", 4, pyramid_param);
+    auto index = TestFactory("pyramid", param, true);
+
+    std::vector<std::array<float, 4>> vectors = {
+        {std::numeric_limits<float>::max(), 0.0F, 0.0F, 0.0F}, {0.0F, 0.0F, 0.0F, 0.0F}};
+    std::vector<int64_t> ids = {10, 20};
+    std::vector<std::string> paths = {"all", "all"};
+    REQUIRE(index->Build(MakeDenseDataset(vectors, ids, paths)).has_value());
+
+    std::array<float, 4> query_vector = {std::numeric_limits<float>::max(), 0.0F, 0.0F, 0.0F};
+    auto query = MakeSingleQuery(query_vector, "all");
+    auto ordinary = index->KnnSearch(query, 2, R"({"pyramid":{"ef_search":2}})");
+    REQUIRE(ordinary.has_value());
+    REQUIRE(ordinary.value()->GetDim() == 2);
+    CAPTURE(ordinary.value()->GetDistances()[0], ordinary.value()->GetDistances()[1]);
+    auto result = index->KnnSearch(query, 1, R"({"threshold":1.0,"pyramid":{"ef_search":1}})");
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() == 1);
+    REQUIRE(result.value()->GetIds()[0] == 20);
+    REQUIRE(result.value()->GetDistances()[0] == 1.0F);
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,

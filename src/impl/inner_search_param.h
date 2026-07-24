@@ -17,6 +17,7 @@
 
 #include <limits>
 #include <mutex>
+#include <optional>
 
 #include "typing.h"
 #include "utils/filter_search_skip_strategy.h"
@@ -60,6 +61,7 @@ public:
     float factor{2.0F};
     bool enable_reorder{true};
     float first_order_scan_ratio{1.0F};
+    std::optional<float> distance_threshold{std::nullopt};
     std::vector<ExecutorPtr> executors;
 
     // deal with duplicate ids

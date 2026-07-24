@@ -25,6 +25,7 @@
 #include <thread>
 
 #include "functest.h"
+#include "impl/filter/iterator_filter.h"
 #include "inner_string_params.h"
 #include "storage/serialization_tags.h"
 #include "storage/streaming_serialization_test_utils.h"
@@ -3369,6 +3370,293 @@ TEST_CASE("(PR) HGraph brute_force_threshold default is no-op",
     auto negative_ef = index->KnnSearch(query, topk, R"({"hgraph": {"ef_search": -1}})");
     REQUIRE_FALSE(zero_ef.has_value());
     REQUIRE_FALSE(negative_ef.has_value());
+}
+
+TEST_CASE("(PR) HGraph threshold iterator consumes rejected pages",
+          "[ft][hgraph][threshold][iterator][pr]") {
+    constexpr int64_t dim = 1;
+    constexpr int64_t base_count = 32;
+    std::string params = R"({
+        "dtype":"float32", "metric_type":"l2", "dim":1,
+        "index_param":{"base_quantization_type":"fp32","max_degree":16,
+        "ef_construction":64,"use_reorder":false}
+    })";
+    auto index = vsag::Factory::CreateIndex("hgraph", params).value();
+    std::vector<float> vectors(base_count);
+    std::vector<int64_t> ids(base_count);
+    for (int64_t i = 0; i < base_count; ++i) {
+        vectors[i] = static_cast<float>(i);
+        ids[i] = i;
+    }
+    auto base = vsag::Dataset::Make();
+    base->NumElements(base_count)
+        ->Dim(dim)
+        ->Ids(ids.data())
+        ->Float32Vectors(vectors.data())
+        ->Owner(false);
+    REQUIRE(index->Build(base).has_value());
+    auto query = vsag::Dataset::Make();
+    float query_value = 0.0F;
+    query->NumElements(1)->Dim(dim)->Float32Vectors(&query_value)->Owner(false);
+
+    vsag::IteratorContext* iter_ctx = nullptr;
+    const auto search_params = R"({"hgraph":{"ef_search":8},"threshold":-1.0})";
+    auto first =
+        index->KnnSearch(query, 1, search_params, vsag::FilterPtr(nullptr), iter_ctx, false);
+    REQUIRE(first.has_value());
+    REQUIRE(first.value()->GetDim() == 0);
+    auto* filter_ctx = static_cast<vsag::IteratorFilterContext*>(iter_ctx);
+    REQUIRE(filter_ctx->GetDiscardElementNum() == 0);
+    delete iter_ctx;
+}
+
+TEST_CASE("(PR) HGraph ignores non-finite entry distances",
+          "[ft][hgraph][threshold][nonfinite][pr]") {
+    const auto params = R"({
+        "dtype":"float32", "metric_type":"l2", "dim":1,
+        "index_param":{"base_quantization_type":"fp32","max_degree":16,
+        "ef_construction":32,"use_reorder":false}
+    })";
+    auto index = vsag::Factory::CreateIndex("hgraph", params).value();
+    std::vector<float> vectors = {0.0F, std::numeric_limits<float>::max()};
+    std::vector<int64_t> ids = {0, 1};
+    auto base = vsag::Dataset::Make();
+    base->NumElements(2)->Dim(1)->Ids(ids.data())->Float32Vectors(vectors.data())->Owner(false);
+    REQUIRE(index->Build(base).has_value());
+
+    float overflow_query_value = std::numeric_limits<float>::max();
+    auto overflow_query = vsag::Dataset::Make();
+    overflow_query->NumElements(1)->Dim(1)->Float32Vectors(&overflow_query_value)->Owner(false);
+    auto overflow_result = index->KnnSearch(overflow_query, 1, R"({"hgraph":{"ef_search":8}})");
+    REQUIRE(overflow_result.has_value());
+    REQUIRE(overflow_result.value()->GetDim() == 1);
+    REQUIRE(overflow_result.value()->GetIds()[0] == 1);
+    REQUIRE(overflow_result.value()->GetDistances()[0] == 0.0F);
+
+    float nan_query_value = std::numeric_limits<float>::quiet_NaN();
+    auto nan_query = vsag::Dataset::Make();
+    nan_query->NumElements(1)->Dim(1)->Float32Vectors(&nan_query_value)->Owner(false);
+    auto nan_result = index->KnnSearch(nan_query, 1, R"({"hgraph":{"ef_search":8}})");
+    REQUIRE(nan_result.has_value());
+    for (int64_t i = 0; i < nan_result.value()->GetDim(); ++i) {
+        REQUIRE(std::isfinite(nan_result.value()->GetDistances()[i]));
+    }
+}
+
+TEST_CASE("(PR) HGraph filters non-finite candidates before threshold selection",
+          "[ft][hgraph][threshold][nonfinite][pr]") {
+    const auto params = R"({
+        "dtype":"float32", "metric_type":"ip", "dim":1,
+        "index_param":{"base_quantization_type":"fp32","max_degree":16,
+        "ef_construction":32,"use_reorder":false}
+    })";
+    auto index = vsag::Factory::CreateIndex("hgraph", params).value();
+    std::vector<float> vectors = {std::numeric_limits<float>::max(), 0.0F};
+    std::vector<int64_t> ids = {10, 20};
+    auto base = vsag::Dataset::Make();
+    base->NumElements(2)->Dim(1)->Ids(ids.data())->Float32Vectors(vectors.data())->Owner(false);
+    REQUIRE(index->Build(base).has_value());
+
+    float query_value = std::numeric_limits<float>::max();
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(1)->Float32Vectors(&query_value)->Owner(false);
+    auto result = index->KnnSearch(query, 1, R"({"threshold":1.0,"hgraph":{"ef_search":1}})");
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() == 1);
+    REQUIRE(result.value()->GetIds()[0] == 20);
+    REQUIRE(result.value()->GetDistances()[0] == 1.0F);
+
+    auto brute_result = index->KnnSearch(
+        query, 1, R"({"threshold":1.0,"hgraph":{"ef_search":1,"brute_force_threshold":1.0}})");
+    REQUIRE(brute_result.has_value());
+    REQUIRE(brute_result.value()->GetDim() == 1);
+    REQUIRE(brute_result.value()->GetIds()[0] == 20);
+    REQUIRE(brute_result.value()->GetDistances()[0] == 1.0F);
+}
+
+TEST_CASE("(PR) HGraph continues below an unrankable route seed",
+          "[ft][hgraph][threshold][nonfinite][route][pr]") {
+    const auto params = R"({
+        "dtype":"float32", "metric_type":"ip", "dim":2,
+        "index_param":{"base_quantization_type":"fp32","max_degree":16,
+        "ef_construction":32,"use_reorder":false}
+    })";
+    auto index = vsag::Factory::CreateIndex("hgraph", params).value();
+    const auto max = std::numeric_limits<float>::max();
+    const auto min = std::numeric_limits<float>::min();
+    std::vector<float> vectors = {max, -max, 0.0F, min};
+    std::vector<int64_t> ids = {10, 20};
+    auto base = vsag::Dataset::Make();
+    base->NumElements(2)->Dim(2)->Ids(ids.data())->Float32Vectors(vectors.data())->Owner(false);
+    REQUIRE(index->Build(base).has_value());
+
+    std::vector<float> query_vector = {max, max};
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(2)->Float32Vectors(query_vector.data())->Owner(false);
+    const auto search_params = R"({"hgraph":{"ef_search":2},"threshold":0.0})";
+
+    auto result = index->KnnSearch(query, 1, search_params);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() == 1);
+    REQUIRE(result.value()->GetIds()[0] == 20);
+    REQUIRE(std::isfinite(result.value()->GetDistances()[0]));
+
+    vsag::IteratorContext* iter_ctx = nullptr;
+    auto iterator_result =
+        index->KnnSearch(query, 1, search_params, vsag::FilterPtr(nullptr), iter_ctx, false);
+    REQUIRE(iterator_result.has_value());
+    REQUIRE(iterator_result.value()->GetDim() == 1);
+    REQUIRE(iterator_result.value()->GetIds()[0] == 20);
+    REQUIRE(std::isfinite(iterator_result.value()->GetDistances()[0]));
+    delete iter_ctx;
+}
+
+TEST_CASE("(PR) HGraph iterator preserves infinity without threshold",
+          "[ft][hgraph][threshold][iterator][nonfinite][pr]") {
+    const auto params = R"({
+        "dtype":"float32", "metric_type":"ip", "dim":1,
+        "index_param":{"base_quantization_type":"fp32","max_degree":16,
+        "ef_construction":32,"use_reorder":false}
+    })";
+    auto index = vsag::Factory::CreateIndex("hgraph", params).value();
+    std::vector<float> vectors = {std::numeric_limits<float>::max(), 0.0F};
+    std::vector<int64_t> ids = {42, 43};
+    auto base = vsag::Dataset::Make();
+    base->NumElements(2)->Dim(1)->Ids(ids.data())->Float32Vectors(vectors.data())->Owner(false);
+    REQUIRE(index->Build(base).has_value());
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(1)->Float32Vectors(vectors.data())->Owner(false);
+    const auto search_params = R"({"hgraph":{"ef_search":8}})";
+
+    vsag::IteratorContext* iter_ctx = nullptr;
+    auto ordinary =
+        index->KnnSearch(query, 1, search_params, vsag::FilterPtr(nullptr), iter_ctx, false);
+    REQUIRE(ordinary.has_value());
+    REQUIRE(ordinary.value()->GetDim() == 1);
+    REQUIRE(ordinary.value()->GetIds()[0] == ids[0]);
+    REQUIRE(std::isinf(ordinary.value()->GetDistances()[0]));
+    REQUIRE(ordinary.value()->GetDistances()[0] < 0.0F);
+    delete iter_ctx;
+
+    for (const int64_t thread_count : {1, 2}) {
+        const auto params_with_threads = fmt::format(
+            R"({{"hgraph":{{"ef_search":8,"parallel_search_thread_count":{}}}}})", thread_count);
+        auto range = index->RangeSearch(query, 1.0F, params_with_threads);
+        REQUIRE(range.has_value());
+        REQUIRE(range.value()->GetDim() == 2);
+        REQUIRE(range.value()->GetIds()[0] == ids[0]);
+        REQUIRE(std::isinf(range.value()->GetDistances()[0]));
+        REQUIRE(range.value()->GetDistances()[0] < 0.0F);
+    }
+
+    iter_ctx = nullptr;
+    auto threshold = index->KnnSearch(query,
+                                      1,
+                                      R"({"hgraph":{"ef_search":1},"threshold":1.0})",
+                                      vsag::FilterPtr(nullptr),
+                                      iter_ctx,
+                                      false);
+    REQUIRE(threshold.has_value());
+    REQUIRE(threshold.value()->GetDim() == 1);
+    REQUIRE(threshold.value()->GetIds()[0] == ids[1]);
+    REQUIRE(threshold.value()->GetDistances()[0] == 1.0F);
+    delete iter_ctx;
+}
+
+TEST_CASE("HGraph build tolerates empty non-finite graph probes",
+          "[ft][hgraph][build][nonfinite]") {
+    const auto params = R"({
+        "dtype":"float32", "metric_type":"l2", "dim":64,
+        "index_param":{"base_quantization_type":"fp32","max_degree":16,
+        "ef_construction":32,"use_reorder":false}
+    })";
+    auto index = vsag::Factory::CreateIndex("hgraph", params).value();
+    constexpr int64_t count = 128;
+    std::vector<float> vectors(count * 64, std::numeric_limits<float>::quiet_NaN());
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 0);
+    auto base = vsag::Dataset::Make();
+    base->NumElements(count)
+        ->Dim(64)
+        ->Ids(ids.data())
+        ->Float32Vectors(vectors.data())
+        ->Owner(false);
+    REQUIRE(index->Build(base).has_value());
+
+    std::iota(ids.begin(), ids.end(), count);
+    REQUIRE(index->Add(base).has_value());
+
+    std::vector<float> query_vector(64, 0.0F);
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(64)->Float32Vectors(query_vector.data())->Owner(false);
+    for (uint64_t i = 0; i < 4; ++i) {
+        auto result = index->KnnSearch(query, 1, R"({"hgraph":{"ef_search":8}})");
+        REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetDim() == 0);
+    }
+}
+
+TEST_CASE("HGraph range reorder ignores KNN threshold", "[ft][hgraph][range][reorder][threshold]") {
+    const auto params = R"({
+        "dtype":"float32", "metric_type":"l2", "dim":1,
+        "index_param":{"base_quantization_type":"sq8","precise_quantization_type":"fp32",
+        "max_degree":16,"ef_construction":32,"use_reorder":true}
+    })";
+    auto index = vsag::Factory::CreateIndex("hgraph", params).value();
+    std::vector<float> vectors = {0.0F, 1.0F};
+    std::vector<int64_t> ids = {10, 20};
+    auto base = vsag::Dataset::Make();
+    base->NumElements(2)->Dim(1)->Ids(ids.data())->Float32Vectors(vectors.data())->Owner(false);
+    REQUIRE(index->Build(base).has_value());
+
+    const float query_vector = 0.0F;
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(1)->Float32Vectors(&query_vector)->Owner(false);
+    vsag::SearchRequest request;
+    request.mode_ = vsag::SearchMode::RANGE_SEARCH;
+    request.query_ = query;
+    request.radius_ = 1.0F;
+    request.limited_size_ = 2;
+    request.threshold_ = 0.0F;
+    request.params_str_ = R"({"hgraph":{"ef_search":8,"enable_reorder":true}})";
+
+    auto result = index->SearchWithRequest(request);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() == 2);
+}
+
+TEST_CASE("HGraph returns non-finite duplicate labels within ef",
+          "[ft][hgraph][duplicate][nonfinite]") {
+    const auto params = R"({
+        "dtype":"float32", "metric_type":"ip", "dim":1,
+        "index_param":{"base_quantization_type":"fp32","max_degree":16,
+        "ef_construction":32,"use_reorder":false,"support_duplicate":true,
+        "deduplicate_storage":true}
+    })";
+    auto index = vsag::Factory::CreateIndex("hgraph", params).value();
+    std::vector<float> vectors = {
+        0.0F, std::numeric_limits<float>::max(), std::numeric_limits<float>::max()};
+    std::vector<int64_t> ids = {10, 20, 30};
+    auto base = vsag::Dataset::Make();
+    base->NumElements(3)->Dim(1)->Ids(ids.data())->Float32Vectors(vectors.data())->Owner(false);
+    REQUIRE(index->Build(base).has_value());
+
+    const float query_vector = std::numeric_limits<float>::max();
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(1)->Float32Vectors(&query_vector)->Owner(false);
+    for (const int64_t thread_count : {1, 2}) {
+        const auto search_params = fmt::format(
+            R"({{"hgraph":{{"ef_search":2,"parallel_search_thread_count":{}}}}})", thread_count);
+        auto result = index->KnnSearch(query, 2, search_params);
+        REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetDim() == 2);
+        std::set<int64_t> result_ids(result.value()->GetIds(),
+                                     result.value()->GetIds() + result.value()->GetDim());
+        REQUIRE(result_ids == std::set<int64_t>{20, 30});
+        REQUIRE(std::isinf(result.value()->GetDistances()[0]));
+        REQUIRE(std::isinf(result.value()->GetDistances()[1]));
+    }
 }
 
 TEST_CASE("HGraph ExportCache + ImportCache + Build acceleration smoke test",

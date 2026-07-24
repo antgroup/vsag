@@ -715,7 +715,9 @@ HGraph::probe_graph_for_add(const void* data,
     for (auto j = static_cast<int64_t>(this->route_graphs_.size()) - 1; j > level; --j) {
         result = this->search_graph_for_build(
             data, route_graphs_[j], flatten_codes, param, build_computer);
-        param.ep = result->Top().second;
+        if (not result->Empty()) {
+            param.ep = result->Top().second;
+        }
     }
 
     param.ef = this->ef_construct_;
@@ -751,7 +753,7 @@ HGraph::publish_unique_to_bottom_graph(InnerIdType inner_id,
                                        const DistHeapPtr& neighbors,
                                        const FlattenInterfacePtr& flatten_codes) {
     LockGuard cur_lock(neighbors_mutex_, inner_id);
-    if (neighbors != nullptr) {
+    if (neighbors != nullptr and not neighbors->Empty()) {
         mutually_connect_new_element(inner_id,
                                      neighbors,
                                      this->bottom_graph_,
@@ -786,13 +788,17 @@ HGraph::publish_unique_to_route_graphs(const void* data,
                 }
             }
             LockGuard cur_lock(neighbors_mutex_, inner_id);
-            mutually_connect_new_element(inner_id,
-                                         filtered_result,
-                                         route_graphs_[j],
-                                         flatten_codes,
-                                         neighbors_mutex_,
-                                         allocator_,
-                                         alpha_);
+            if (not filtered_result->Empty()) {
+                mutually_connect_new_element(inner_id,
+                                             filtered_result,
+                                             route_graphs_[j],
+                                             flatten_codes,
+                                             neighbors_mutex_,
+                                             allocator_,
+                                             alpha_);
+            } else {
+                route_graphs_[j]->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
+            }
         } else {
             LockGuard cur_lock(neighbors_mutex_, inner_id);
             route_graphs_[j]->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));
@@ -1005,7 +1011,8 @@ HGraph::reorder(const void* query,
                 int64_t k,
                 IteratorFilterContext* iter_ctx,
                 QueryContext& ctx,
-                const DistanceRecordVector* rabitq_lower_bound_candidates) const {
+                const DistanceRecordVector* rabitq_lower_bound_candidates,
+                const std::optional<float>& distance_threshold) const {
     uint64_t size = candidate_heap->Size();
     if (k <= 0) {
         k = static_cast<int64_t>(size);
@@ -1019,7 +1026,8 @@ HGraph::reorder(const void* query,
                                               k,
                                               ctx,
                                               iter_ctx,
-                                              rabitq_lower_bound_candidates);
+                                              rabitq_lower_bound_candidates,
+                                              distance_threshold);
     candidate_heap = reorder_heap;
 }
 

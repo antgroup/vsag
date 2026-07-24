@@ -623,7 +623,8 @@ private:
                        const FilterPtr& filter,
                        int64_t topk,
                        float radius,
-                       QueryContext* ctx) const;
+                       QueryContext* ctx,
+                       const std::optional<float>& threshold = std::nullopt) const;
 
 private:
     /// Reorder the candidate heap using precise codes, updating in-place.
@@ -634,7 +635,8 @@ private:
             int64_t k,
             IteratorFilterContext* iter_ctx,
             QueryContext& ctx,
-            const DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
+            const DistanceRecordVector* rabitq_lower_bound_candidates = nullptr,
+            const std::optional<float>& distance_threshold = std::nullopt) const;
 
     /// Run ELP (Edge-Link Pruning) optimizer on the bottom graph.
     void

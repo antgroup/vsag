@@ -14,6 +14,7 @@
 
 #include "flat_bucket_searcher.h"
 
+#include <cmath>
 #include <limits>
 
 #include "attr/executor/executor.h"
@@ -66,6 +67,11 @@ FlatBucketSearcher::Search(BucketIdType bucket_id,
             auto origin_id = ids[j] / buckets_per_data;
             if (reasoning_ctx != nullptr) {
                 reasoning_ctx->RecordVisit(origin_id, dist[j], 0);
+            }
+            if (param.distance_threshold.has_value() and
+                (not std::isfinite(dist[j]) or
+                 (not param.enable_reorder and dist[j] > param.distance_threshold.value()))) {
+                continue;
             }
             if (attr_ft != nullptr and not attr_ft->CheckValid(j)) {
                 if (reasoning_ctx != nullptr) {

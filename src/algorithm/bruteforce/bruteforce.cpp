@@ -38,6 +38,7 @@
 #include "storage/serialization_tags.h"
 #include "storage/tlv_section.h"
 #include "typing.h"
+#include "utils/search_threshold.h"
 #include "utils/slow_task_timer.h"
 #include "utils/util_functions.h"
 namespace vsag {
@@ -359,6 +360,7 @@ BruteForce::KnnSearch(const DatasetPtr& query,
     req.query_ = query;
     req.topk_ = k;
     req.params_str_ = parameters;
+    req.threshold_ = ParseSearchThreshold(parameters);
     if (filter != nullptr) {
         req.filter_ = filter;
     }
@@ -367,6 +369,7 @@ BruteForce::KnnSearch(const DatasetPtr& query,
 
 DatasetPtr
 BruteForce::SearchWithRequest(const SearchRequest& request) const {
+    ValidateSearchThreshold(request.threshold_);
     std::shared_lock read_lock(this->global_mutex_);
 
     const bool use_custom_distance = request.distance_batch_func_ != nullptr;
@@ -529,7 +532,9 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
                     if (is_range and dist > radius) {
                         continue;
                     }
-                    cur_heap->Push(dist, i);
+                    if (is_range or not request.threshold_.has_value() or std::isfinite(dist)) {
+                        cur_heap->Push(dist, i);
+                    }
                 }
             } else {
                 if (reasoning != nullptr) {
@@ -578,6 +583,13 @@ BruteForce::SearchWithRequest(const SearchRequest& request) const {
         for (auto i = 1; i < parallel_count; ++i) {
             heap->Merge(*heaps[i]);
         }
+    }
+
+    if (not is_range) {
+        filter_search_result_by_threshold(
+            heap,
+            request.threshold_,
+            select_query_allocator(request.search_allocator_, this->allocator_));
     }
 
     // Collect result inner IDs before pack_knn_result_with_extra_info consumes the heap,

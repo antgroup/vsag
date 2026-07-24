@@ -126,8 +126,11 @@ private:
                                float& cur_heap_top,
                                MaxHeap& heap,
                                uint32_t offset_id,
+                               uint32_t n_candidate,
                                float radius,
-                               const FilterPtr& filter) const;
+                               const FilterPtr& filter,
+                               const std::optional<float>& threshold,
+                               bool enable_reorder) const;
 
     template <InnerSearchType type>
     bool
@@ -137,7 +140,9 @@ private:
                       MaxHeap& heap,
                       uint32_t offset_id,
                       uint32_t n_candidate,
-                      const FilterPtr& filter) const;
+                      const FilterPtr& filter,
+                      const std::optional<float>& threshold,
+                      bool enable_reorder) const;
 
 public:
     uint32_t term_id_limit_{0};

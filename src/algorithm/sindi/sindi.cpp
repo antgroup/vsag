@@ -39,6 +39,7 @@
 #include "storage/serialization.h"
 #include "storage/serialization_tags.h"
 #include "storage/tlv_section.h"
+#include "utils/search_threshold.h"
 #include "utils/util_functions.h"
 #include "vsag/allocator.h"
 #include "vsag/options.h"
@@ -601,6 +602,7 @@ SINDI::KnnSearch(const DatasetPtr& query,
     // search parameter
     SINDISearchParameter search_param;
     search_param.FromJson(JsonType::Parse(parameters));
+    const auto threshold = ParseSearchThreshold(parameters);
     CHECK_ARGUMENT(search_param.n_candidate <= SPARSE_AMPLIFICATION_FACTOR * k,
                    fmt::format("n_candidate ({}) should be less than {} * k ({})",
                                search_param.n_candidate,
@@ -608,7 +610,9 @@ SINDI::KnnSearch(const DatasetPtr& query,
                                k));
     InnerSearchParam inner_param;
     inner_param.ef = std::max(static_cast<int64_t>(search_param.n_candidate), k);
-    inner_param.topk = k;
+    inner_param.topk = threshold.has_value() ? static_cast<int64_t>(inner_param.ef) : k;
+    inner_param.distance_threshold = threshold;
+    inner_param.enable_reorder = use_reorder_;
 
     inner_param.is_inner_id_allowed = this->create_search_filter(filter);
 
@@ -624,12 +628,16 @@ SINDI::KnnSearch(const DatasetPtr& query,
 
     auto computer = std::make_shared<SparseTermComputer>(effective_query, search_param, allocator_);
     const SparseVector* rerank_query = (remap_term_ids_ && use_reorder_) ? &sparse_query : nullptr;
+    DatasetPtr result;
+    const bool use_term_lists_heap_insert = UseTermListsHeapInsert(search_param, threshold);
     if (immutable_data_ != nullptr) {
-        return immutable_search_impl<KNN_SEARCH>(
-            computer, inner_param, allocator, UseTermListsHeapInsert(search_param), rerank_query);
+        result = immutable_search_impl<KNN_SEARCH>(
+            computer, inner_param, allocator, use_term_lists_heap_insert, rerank_query);
+    } else {
+        result = search_impl<KNN_SEARCH>(
+            computer, inner_param, allocator, use_term_lists_heap_insert, rerank_query);
     }
-    return search_impl<KNN_SEARCH>(
-        computer, inner_param, allocator, UseTermListsHeapInsert(search_param), rerank_query);
+    return FilterDatasetByThreshold(result, threshold, allocator, k);
 }
 
 std::optional<uint32_t>
@@ -717,9 +725,18 @@ SINDI::immutable_insert_candidate_into_heap(uint32_t id,
                                             float& cur_heap_top,
                                             MaxHeap& heap,
                                             uint32_t offset_id,
+                                            uint32_t n_candidate,
                                             float radius,
                                             int range_search_limit_size,
-                                            const FilterPtr& filter) const {
+                                            const FilterPtr& filter,
+                                            const std::optional<float>& threshold,
+                                            bool enable_reorder) const {
+    if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
+        if (threshold.has_value() and
+            (not std::isfinite(dist) or (not enable_reorder and 1.0F + dist > threshold.value()))) {
+            return;
+        }
+    }
     if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
         if (range_search_limit_size == 0) {
             dist = 0;
@@ -748,8 +765,11 @@ SINDI::immutable_insert_candidate_into_heap(uint32_t id,
     }
     heap.emplace(dist, id + offset_id);
     if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
-        heap.pop();
-        cur_heap_top = heap.top().first;
+        if (heap.size() > n_candidate) {
+            heap.pop();
+        }
+        cur_heap_top =
+            heap.size() == n_candidate ? heap.top().first : std::numeric_limits<float>::max();
     }
     if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
         if (range_search_limit_size > 0 and
@@ -772,7 +792,13 @@ SINDI::immutable_fill_heap_initial(uint32_t id,
                                    MaxHeap& heap,
                                    uint32_t offset_id,
                                    uint32_t n_candidate,
-                                   const FilterPtr& filter) const {
+                                   const FilterPtr& filter,
+                                   const std::optional<float>& threshold,
+                                   bool enable_reorder) const {
+    if (threshold.has_value() and
+        (not std::isfinite(dist) or (not enable_reorder and 1.0F + dist > threshold.value()))) {
+        return false;
+    }
     if (dist < 0) {
         if constexpr (type == InnerSearchType::WITH_FILTER) {
             if (not filter->CheckValid(id + offset_id)) {
@@ -821,8 +847,15 @@ SINDI::immutable_insert_heap_by_mapped_terms(float* dists,
             if (heap.size() < n_candidate) {
                 for (; i < term_count; ++i) {
                     id = ids[i];
-                    if (immutable_fill_heap_initial<type>(
-                            id, dists[id], cur_heap_top, heap, offset_id, n_candidate, filter)) {
+                    if (immutable_fill_heap_initial<type>(id,
+                                                          dists[id],
+                                                          cur_heap_top,
+                                                          heap,
+                                                          offset_id,
+                                                          n_candidate,
+                                                          filter,
+                                                          param.distance_threshold,
+                                                          param.enable_reorder)) {
                         ++i;
                         break;
                     }
@@ -837,9 +870,12 @@ SINDI::immutable_insert_heap_by_mapped_terms(float* dists,
                                                              cur_heap_top,
                                                              heap,
                                                              offset_id,
+                                                             n_candidate,
                                                              radius,
                                                              range_search_limit_size,
-                                                             filter);
+                                                             filter,
+                                                             param.distance_threshold,
+                                                             param.enable_reorder);
         }
     }
 }
@@ -865,8 +901,15 @@ SINDI::immutable_insert_heap_by_dists(float* dists,
     if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
         if (heap.size() < n_candidate) {
             for (; id < dists_size; ++id) {
-                if (immutable_fill_heap_initial<type>(
-                        id, dists[id], cur_heap_top, heap, offset_id, n_candidate, filter)) {
+                if (immutable_fill_heap_initial<type>(id,
+                                                      dists[id],
+                                                      cur_heap_top,
+                                                      heap,
+                                                      offset_id,
+                                                      n_candidate,
+                                                      filter,
+                                                      param.distance_threshold,
+                                                      param.enable_reorder)) {
                     ++id;
                     break;
                 }
@@ -875,8 +918,17 @@ SINDI::immutable_insert_heap_by_dists(float* dists,
     }
 
     for (; id < dists_size; ++id) {
-        immutable_insert_candidate_into_heap<mode, type>(
-            id, dists[id], cur_heap_top, heap, offset_id, radius, range_search_limit_size, filter);
+        immutable_insert_candidate_into_heap<mode, type>(id,
+                                                         dists[id],
+                                                         cur_heap_top,
+                                                         heap,
+                                                         offset_id,
+                                                         n_candidate,
+                                                         radius,
+                                                         range_search_limit_size,
+                                                         filter,
+                                                         param.distance_threshold,
+                                                         param.enable_reorder);
     }
 }
 
@@ -910,7 +962,7 @@ SINDI::immutable_search_impl(const SparseTermComputerPtr& computer,
         scan_immutable_window_by_mapped_terms(dists.data(), window, computer, mapped_terms);
 
         if (reasoning_ctx != nullptr) {
-            selected_buckets->push_back(cur);
+            selected_buckets->push_back(static_cast<BucketIdType>(cur));
             auto doc_count = static_cast<uint32_t>(std::min<int64_t>(
                 window_size_, cur_element_count_ - static_cast<int64_t>(window_start_id)));
             for (uint32_t i = 0; i < doc_count; ++i) {
@@ -975,18 +1027,23 @@ SINDI::immutable_search_impl(const SparseTermComputerPtr& computer,
                     inner_id, 1.0F + heap.top().first, high_precise_distance);
             }
             if constexpr (mode == KNN_SEARCH) {
-                if (high_precise_distance < cur_heap_top or high_precise_heap->Size() < k) {
+                const bool eligible =
+                    not inner_param.distance_threshold.has_value() or
+                    (std::isfinite(high_precise_distance) and
+                     high_precise_distance <= inner_param.distance_threshold.value());
+                if (eligible and
+                    (high_precise_distance < cur_heap_top or high_precise_heap->Size() < k)) {
                     high_precise_heap->Push(high_precise_distance, label);
-                }
-                if (high_precise_heap->Size() > k) {
-                    if (reasoning_ctx != nullptr) {
-                        auto evicted_label = high_precise_heap->Top().second;
-                        auto evicted_inner_id = this->label_table_->GetIdByLabel(evicted_label);
-                        reasoning_ctx->RecordReorderEviction(evicted_inner_id, 0);
+                    if (high_precise_heap->Size() > k) {
+                        if (reasoning_ctx != nullptr) {
+                            auto evicted_label = high_precise_heap->Top().second;
+                            auto evicted_inner_id = this->label_table_->GetIdByLabel(evicted_label);
+                            reasoning_ctx->RecordReorderEviction(evicted_inner_id, 0);
+                        }
+                        high_precise_heap->Pop();
                     }
-                    high_precise_heap->Pop();
+                    cur_heap_top = high_precise_heap->Top().first;
                 }
-                cur_heap_top = high_precise_heap->Top().first;
             }
             if constexpr (mode == RANGE_SEARCH) {
                 if (high_precise_distance <= inner_param.radius) {
@@ -1059,7 +1116,7 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
         term_list->Query(dists.data(), computer);
 
         if (reasoning_ctx != nullptr) {
-            selected_buckets->push_back(cur);
+            selected_buckets->push_back(static_cast<BucketIdType>(cur));
             auto doc_count = static_cast<uint32_t>(std::min<int64_t>(
                 window_size_, cur_element_count_ - static_cast<int64_t>(window_start_id)));
             for (uint32_t i = 0; i < doc_count; ++i) {
@@ -1115,18 +1172,23 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
                     inner_id, 1.0F + heap.top().first, high_precise_distance);
             }
             if constexpr (mode == KNN_SEARCH) {
-                if (high_precise_distance < cur_heap_top or high_precise_heap->Size() < k) {
+                const bool eligible =
+                    not inner_param.distance_threshold.has_value() or
+                    (std::isfinite(high_precise_distance) and
+                     high_precise_distance <= inner_param.distance_threshold.value());
+                if (eligible and
+                    (high_precise_distance < cur_heap_top or high_precise_heap->Size() < k)) {
                     high_precise_heap->Push(high_precise_distance, label);
-                }
-                if (high_precise_heap->Size() > k) {
-                    if (reasoning_ctx != nullptr) {
-                        auto evicted_label = high_precise_heap->Top().second;
-                        auto evicted_inner_id = this->label_table_->GetIdByLabel(evicted_label);
-                        reasoning_ctx->RecordReorderEviction(evicted_inner_id, 0);
+                    if (high_precise_heap->Size() > k) {
+                        if (reasoning_ctx != nullptr) {
+                            auto evicted_label = high_precise_heap->Top().second;
+                            auto evicted_inner_id = this->label_table_->GetIdByLabel(evicted_label);
+                            reasoning_ctx->RecordReorderEviction(evicted_inner_id, 0);
+                        }
+                        high_precise_heap->Pop();
                     }
-                    high_precise_heap->Pop();
+                    cur_heap_top = high_precise_heap->Top().first;
                 }
-                cur_heap_top = high_precise_heap->Top().first;
             }
             if constexpr (mode == RANGE_SEARCH) {
                 if (high_precise_distance <= inner_param.radius) {
@@ -1355,12 +1417,19 @@ SINDI::AttachReasoningReport(const DatasetPtr& dataset_results,
 }
 
 bool
-SINDI::UseTermListsHeapInsert(const SINDISearchParameter& search_param) const {
+SINDI::UseTermListsHeapInsert(const SINDISearchParameter& search_param,
+                              const std::optional<float>& distance_threshold) const {
     // Low build-time doc pruning and low search-time query pruning keep the old
     // distance-array heap insertion path for accuracy. Once either side exceeds the
     // threshold, term-list heap insertion avoids scanning the whole window for heap updates.
-    return doc_prune_ratio_ > SINDI::K_TERM_LISTS_HEAP_INSERT_PRUNE_THRESHOLD ||
-           search_param.query_prune_ratio > SINDI::K_TERM_LISTS_HEAP_INSERT_PRUNE_THRESHOLD;
+    const bool term_lists_enabled =
+        doc_prune_ratio_ > SINDI::K_TERM_LISTS_HEAP_INSERT_PRUNE_THRESHOLD ||
+        search_param.query_prune_ratio > SINDI::K_TERM_LISTS_HEAP_INSERT_PRUNE_THRESHOLD;
+    if (not term_lists_enabled or not distance_threshold.has_value()) {
+        return term_lists_enabled;
+    }
+    // Posting lists omit zero-overlap documents, whose non-reorder distance is exactly 1.
+    return not use_reorder_ and distance_threshold.value() < 1.0F;
 }
 
 void
