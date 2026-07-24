@@ -202,6 +202,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
     TestGetMinAndMaxId(index, dataset, true);
     TestCalcDistanceById(index, dataset, 1e-4, true, true);
     TestBatchCalcDistanceById(index, dataset, 1e-4, true, true);
+    TestMultiQueryBatchCalcDistanceById(index, dataset, 1e-4, true, true);
     TestUpdateVectorSparse(index, dataset, true);
     TestUpdateId(index, dataset, search_param, true);
     TestEstimateMemory("sindi", build_param, dataset);

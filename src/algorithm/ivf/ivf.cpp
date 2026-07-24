@@ -426,6 +426,7 @@ IVF::InitFeatures() {
     }
     if (name == QUANTIZATION_TYPE_VALUE_FP32 or has_fp32) {
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID);
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_BATCH_CALC_DISTANCE_BY_ID);
     }
 
     if (name == QUANTIZATION_TYPE_VALUE_FP32 and
@@ -1462,30 +1463,56 @@ DatasetPtr
 IVF::CalDistanceById(const float* query,
                      const int64_t* ids,
                      int64_t count,
-                     bool calculate_precise_distance) const {
-    if (this->use_reorder_ && calculate_precise_distance) {
-        return this->cal_distance_by_id(query, ids, count, this->reorder_codes_);
+                     bool calculate_precise_distance,
+                     int64_t topk) const {
+    CHECK_ARGUMENT(count >= 0, "CalDistanceById count must be non-negative");
+    const bool invalid_topk = topk != -1 && topk <= 0;
+    CHECK_ARGUMENT(not invalid_topk, "CalDistanceById topk must be -1 or positive");
+    if (count > 0) {
+        CHECK_ARGUMENT(query != nullptr, "CalDistanceById query must not be null");
+        CHECK_ARGUMENT(ids != nullptr, "CalDistanceById ids must not be null");
     }
+    const int64_t result_count = (topk == -1) ? count : std::min(topk, count);
     auto result = Dataset::Make();
-    result->Owner(true, allocator_);
+    result->NumElements(1)->Dim(result_count)->Owner(true, allocator_);
+    if (count == 0) {
+        return result;
+    }
     auto* distances = static_cast<float*>(allocator_->Allocate(sizeof(float) * count));
     result->Distances(distances);
-    auto computer = this->bucket_->FactoryComputer(query);
-    for (int64_t i = 0; i < count; ++i) {
-        bool success = false;
-        InnerIdType inner_id = 0;
-        {
-            std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
-            std::tie(success, inner_id) = this->label_table_->TryGetIdByLabel(ids[i]);
+    Vector<InnerIdType> inner_ids(count, 0, allocator_);
+    std::vector<bool> validity(count, false);
+    {
+        std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
+        for (int64_t i = 0; i < count; ++i) {
+            auto [success, inner_id] = this->label_table_->TryGetIdByLabel(ids[i]);
+            if (success) {
+                inner_ids[i] = inner_id;
+                validity[i] = true;
+            }
         }
-        if (not success) {
-            distances[i] = -1;
-            continue;
-        }
-        auto [bucket_id, offset_id] = this->get_location(inner_id);
-        distances[i] = this->bucket_->QueryOneById(computer, bucket_id, offset_id);
     }
-    return result;
+    if (this->use_reorder_ && calculate_precise_distance) {
+        auto computer = this->reorder_codes_->FactoryComputer(query);
+        this->reorder_codes_->Query(distances, computer, inner_ids.data(), count);
+    } else {
+        auto computer = this->bucket_->FactoryComputer(query);
+        for (int64_t i = 0; i < count; ++i) {
+            if (validity[i]) {
+                auto [bucket_id, offset_id] = this->get_location(inner_ids[i]);
+                distances[i] = this->bucket_->QueryOneById(computer, bucket_id, offset_id);
+            }
+        }
+    }
+    for (int64_t i = 0; i < count; ++i) {
+        if (not validity[i]) {
+            distances[i] = -1.0F;
+        }
+    }
+    if (topk == -1) {
+        return result;
+    }
+    return ApplyTopkWithValidity(distances, ids, count, 1, topk, validity, allocator_);
 }
 
 float

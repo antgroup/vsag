@@ -75,8 +75,10 @@ public:
     CalDistanceById(const float* query,
                     const int64_t* ids,
                     int64_t count,
-                    bool calculate_precise_distance = true) const override {
-        SAFE_CALL(return this->cal_distance_by_id(query, ids, count, calculate_precise_distance));
+                    bool calculate_precise_distance = true,
+                    int64_t topk = -1) const override {
+        SAFE_CALL(CHECK_ARGUMENT(topk == -1, "DiskANN does not support topk CalDistanceById");
+                  return this->cal_distance_by_id(query, ids, count, calculate_precise_distance));
     }
 
     tl::expected<float, Error>

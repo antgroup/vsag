@@ -38,15 +38,19 @@ tl::expected<DatasetPtr, Error>
 CalDistanceById(const float* query,
                 const int64_t* ids,
                 int64_t count,
-                bool calculate_precise_distance = true) const;
+                bool calculate_precise_distance = true,
+                int64_t topk = -1) const;
 
 // 批量 ID，DatasetPtr（稠密或稀疏）
 tl::expected<DatasetPtr, Error>
 CalDistanceById(const DatasetPtr& query,
                 const int64_t* ids,
                 int64_t count,
-                bool calculate_precise_distance = true) const;
+                bool calculate_precise_distance = true,
+                int64_t topk = -1) const;
 ```
+对于 `NumElements() > 1` 的 `DatasetPtr` 查询，请先检查 `SUPPORT_BATCH_CALC_DISTANCE_BY_ID`。`count` 表示每个 query 的 ID 数，`ids` 需要包含 `NumElements() * count` 个 row-major ID，返回距离使用相同布局：`distances[q * count + j]` 对应 `ids[q * count + j]`。当 `topk > 0` 时，每个 query 返回按距离升序排列的 `min(topk, count)` 个结果，并同时返回对应 ID；无效 ID（距离为 `-1`）排在有效距离之后，仅在有效 ID 不足时才出现在结果中。
+
 
 声明位于
 [`include/vsag/index.h`](https://github.com/antgroup/vsag/blob/main/include/vsag/index.h)。
@@ -60,8 +64,11 @@ CalDistanceById(const DatasetPtr& query,
 ### 返回值含义
 
 - 单 ID 重载返回 `float` 距离值。
-- 批量重载返回 `DatasetPtr`，其 `GetDistances()` 数组长度为 `count`，与输入 `ids` 一一
-  对应。值为 **`-1`** 表示对应的 ID **无效**（如该 ID 不在索引中）。
+- `topk == -1` 时，批量重载返回 `DatasetPtr`，其 `GetDistances()` 数组长度为 `count`，
+  与输入 `ids` 一一对应，且不返回 ID。
+- `topk > 0` 时，批量重载每个 query 返回按距离升序排列的最小 `min(topk, count)` 个
+  距离，`GetIds()` 包含对应 ID。无效 ID（距离为 `-1`）排在有效距离之后，仅在有效 ID
+  不足时才出现在结果中。
 - 距离的语义由建索引时设置的 `metric_type`（IP / L2 / cosine）决定，参见
   [度量语义](../resources/metric_semantics.md)。
 

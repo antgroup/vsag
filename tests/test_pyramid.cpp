@@ -472,6 +472,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
         TestRangeSearch(index, dataset, search_param, 0.94, 10, true);
         TestRangeSearch(index, dataset, search_param, 0.49, 5, true);
         TestCalcDistanceById(index, dataset, 1e-5, true);
+        TestMultiQueryBatchCalcDistanceById(index, dataset, 1e-5, true);
     }
 }
 
@@ -499,6 +500,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
             TestFilterSearch(index, dataset, search_param, 0.94, true);
             TestRangeSearch(index, dataset, search_param, 0.94, 10, true);
             TestCalcDistanceById(index, dataset, 1e-5, true);
+            TestMultiQueryBatchCalcDistanceById(index, dataset, 1e-5, true);
         }
     }
 }
@@ -530,6 +532,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
             TestFilterSearch(index, dataset, search_param, 0.94, has_root);
             TestRangeSearch(index, dataset, search_param, 0.94, 10, has_root);
             TestCalcDistanceById(index, dataset, 1e-5, true);
+            TestMultiQueryBatchCalcDistanceById(index, dataset, 1e-5, true);
             dataset->query_->Paths(tmp_paths);
         }
     }
@@ -731,6 +734,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
         TestConcurrentAdd(index, dataset, true);
         TestConcurrentKnnSearch(index, dataset, search_param, 0.94, true);
         TestCalcDistanceById(index, dataset, 1e-5, true);
+        TestMultiQueryBatchCalcDistanceById(index, dataset, 1e-5, true);
     }
     for (auto& dim : dims) {
         auto param = GeneratePyramidBuildParametersString(metric_type, dim, pyramid_param);

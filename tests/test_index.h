@@ -218,6 +218,14 @@ public:
                               bool is_sparse = false);
 
     static void
+    TestMultiQueryBatchCalcDistanceById(const IndexPtr& index,
+                                        const TestDatasetPtr& dataset,
+                                        float error = 1e-5,
+                                        bool expected_success = true,
+                                        bool is_sparse = false,
+                                        bool expect_all_missing_on_failure = false);
+
+    static void
     TestGetMinAndMaxId(const IndexPtr& index,
                        const TestDatasetPtr& dataset,
                        bool expected_success = true);

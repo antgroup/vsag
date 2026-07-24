@@ -43,15 +43,19 @@ tl::expected<DatasetPtr, Error>
 CalDistanceById(const float* query,
                 const int64_t* ids,
                 int64_t count,
-                bool calculate_precise_distance = true) const;
+                bool calculate_precise_distance = true,
+                int64_t topk = -1) const;
 
 // Batch, DatasetPtr (dense or sparse).
 tl::expected<DatasetPtr, Error>
 CalDistanceById(const DatasetPtr& query,
                 const int64_t* ids,
                 int64_t count,
-                bool calculate_precise_distance = true) const;
+                bool calculate_precise_distance = true,
+                int64_t topk = -1) const;
 ```
+For `DatasetPtr` queries with `NumElements() > 1`, check `SUPPORT_BATCH_CALC_DISTANCE_BY_ID` first. `count` is the number of IDs per query, `ids` must contain `NumElements() * count` row-major IDs, and returned distances use the same layout: `distances[q * count + j]` corresponds to `ids[q * count + j]`. When `topk > 0`, each query returns `min(topk, count)` entries sorted by distance in ascending order, and the result also contains the corresponding IDs; invalid IDs (`-1` distances) are ordered after valid distances and only appear if there are not enough valid IDs.
+
 
 Declarations live in
 [`include/vsag/index.h`](https://github.com/antgroup/vsag/blob/main/include/vsag/index.h).
@@ -67,9 +71,11 @@ Declarations live in
 ### Return Semantics
 
 - The single-ID overload returns the distance as a `float`.
-- The batch overload returns a `DatasetPtr` whose `GetDistances()` array has `count` entries
-  aligned with the input `ids`. A value of **`-1`** in that array indicates an **invalid ID**
-  (e.g. the ID does not exist in the index).
+- With `topk == -1`, the batch overload returns a `DatasetPtr` whose `GetDistances()` array has
+  `count` entries aligned with the input `ids`, and it does not return IDs.
+- With `topk > 0`, the batch overload returns the smallest `min(topk, count)` distances per
+  query, sorted ascending, and `GetIds()` contains the corresponding IDs. Invalid IDs (`-1`
+  distances) are ordered after valid distances and only appear if there are not enough valid IDs.
 - The distance metric (IP / L2 / cosine) follows the `metric_type` chosen at index
   construction; see [Metric Semantics](../resources/metric_semantics.md).
 

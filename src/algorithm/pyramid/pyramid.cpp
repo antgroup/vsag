@@ -844,6 +844,7 @@ Pyramid::InitFeatures() {
 
     this->index_feature_list_->SetFeatures({
         IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID,
+        IndexFeature::SUPPORT_BATCH_CALC_DISTANCE_BY_ID,
     });
 
     // concurrency
@@ -1334,13 +1335,19 @@ DatasetPtr
 Pyramid::CalDistanceById(const float* query,
                          const int64_t* ids,
                          int64_t count,
-                         bool calculate_precise_distance) const {
+                         bool calculate_precise_distance,
+                         int64_t topk) const {
     std::shared_lock<std::shared_mutex> lock(resize_mutex_);
     auto flat = this->base_codes_;
     if (use_reorder_ && calculate_precise_distance) {
         flat = this->precise_codes_;
     }
-    return InnerIndexInterface::cal_distance_by_id(query, ids, count, flat);
+    std::vector<bool> validity;
+    auto result = InnerIndexInterface::cal_distance_by_id(query, ids, count, flat, &validity);
+    if (topk == -1) {
+        return result;
+    }
+    return ApplyTopkWithValidity(result->GetDistances(), ids, count, 1, topk, validity, allocator_);
 }
 
 void
