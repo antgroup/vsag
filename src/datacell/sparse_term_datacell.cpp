@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <limits>
 
 #include "simd/fp16_simd.h"
 #include "utils/util_functions.h"
@@ -144,14 +145,20 @@ SparseTermDataCell::InsertHeapByTermLists(float* dists,
     while (computer->HasNextTerm()) {
         auto it = computer->NextTermIter();
         auto term = computer->GetTerm(it);
-        if (term >= term_ids_.size()) {
+        if (term >= term_ids_.size() || term >= term_sizes_.size() || term_sizes_[term] == 0 ||
+            term_ids_[term] == nullptr) {
             continue;
         }
 
         uint32_t i = 0;
-        auto term_size = static_cast<uint32_t>(static_cast<float>(term_sizes_[term]) *
-                                               computer->term_retain_ratio_);
         auto& one_term_ids = *term_ids_[term];
+        auto max_term_size = static_cast<uint32_t>(std::min<uint64_t>(
+            one_term_ids.size(), static_cast<uint64_t>(std::numeric_limits<uint32_t>::max())));
+        auto retained_term_size =
+            static_cast<double>(term_sizes_[term]) * computer->term_retain_ratio_;
+        auto clamped_term_size =
+            std::clamp(retained_term_size, 0.0, static_cast<double>(max_term_size));
+        auto term_size = static_cast<uint32_t>(clamped_term_size);
         if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
             if (heap.size() < n_candidate) {
                 for (; i < term_size; i++) {
