@@ -95,6 +95,7 @@ public:
     float skip_ratio{0.2F};
     FilterSearchSkipStrategyType skip_strategy_type{
         FilterSearchSkipStrategyType::DETERMINISTIC_ACCUMULATIVE};
+    float min_distance{std::numeric_limits<float>::lowest()};
 
 private:
     HGraphSearchParameters() = default;

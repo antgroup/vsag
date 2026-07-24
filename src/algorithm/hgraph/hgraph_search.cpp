@@ -155,6 +155,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
         search_param.enable_rabitq_one_bit_search = params.rabitq_one_bit_search;
         search_param.skip_ratio = params.skip_ratio;
         search_param.skip_strategy_type = params.skip_strategy_type;
+        search_param.min_distance = params.min_distance;
 
         DistanceRecordVector rabitq_lower_bound_candidates(ctx.alloc);
         auto* rabitq_lower_bound_candidates_ptr =
@@ -481,6 +482,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         search_param.parallel_search_thread_count = params.parallel_search_thread_count;
         search_param.enable_reorder = params.enable_reorder;
         search_param.enable_rabitq_one_bit_search = params.rabitq_one_bit_search;
+        search_param.min_distance = params.min_distance;
     } else {
         search_param.ef = std::max(params.ef_search, k);
         search_param.is_inner_id_allowed = ft;
@@ -499,6 +501,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
             stats.is_timeout.store(false, std::memory_order_relaxed);
         }
         search_param.parallel_search_thread_count = params.parallel_search_thread_count;
+        search_param.min_distance = params.min_distance;
 
         if (params.hops_limit <= static_cast<uint32_t>(params.ef_search)) {
             search_param.hops_limit = std::numeric_limits<uint32_t>::max();

@@ -125,6 +125,9 @@ HnswSearchParameters::FromJson(const std::string& json_string) {
             params[index_name][HNSW_PARAMETER_SKIP_STRATEGY].GetString());
     }
 
+    if (params[index_name].Contains("min_distance")) {
+        obj.min_distance = params[index_name]["min_distance"].GetFloat();
+    }
     return obj;
 }
 
