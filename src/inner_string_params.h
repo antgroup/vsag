@@ -38,6 +38,9 @@ const char* const BUILD_THREAD_COUNT_KEY = "build_thread_count";
 const char* const LABEL_REMAP_TYPE_KEY = "label_remap_type";
 const char* const BASE_CODES_KEY = "base_codes";
 const char* const PRECISE_CODES_KEY = "precise_codes";
+const char* const PRECISE_CODES_LAYOUT_KEY = "precise_codes_layout";
+const char* const PRECISE_CODES_LAYOUT_VALUE_FLAT = "flat";
+const char* const PRECISE_CODES_LAYOUT_VALUE_BUCKET = "bucket";
 const char* const STORE_RAW_VECTOR_KEY = "store_raw_vector";
 const char* const RAW_VECTOR_KEY = "raw_vector";
 const char* const ATTR_HAS_BUCKETS_KEY = "has_buckets";
@@ -213,6 +216,9 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"GRAPH_KEY", GRAPH_KEY},
     {"BASE_CODES_KEY", BASE_CODES_KEY},
     {"PRECISE_CODES_KEY", PRECISE_CODES_KEY},
+    {"PRECISE_CODES_LAYOUT_KEY", PRECISE_CODES_LAYOUT_KEY},
+    {"PRECISE_CODES_LAYOUT_VALUE_FLAT", PRECISE_CODES_LAYOUT_VALUE_FLAT},
+    {"PRECISE_CODES_LAYOUT_VALUE_BUCKET", PRECISE_CODES_LAYOUT_VALUE_BUCKET},
     {"HGRAPH_SUPPORT_DUPLICATE", HGRAPH_SUPPORT_DUPLICATE},
     {"HGRAPH_DEDUPLICATE_STORAGE", HGRAPH_DEDUPLICATE_STORAGE},
     {"HGRAPH_DUPLICATE_DISTANCE_THRESHOLD", HGRAPH_DUPLICATE_DISTANCE_THRESHOLD},

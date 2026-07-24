@@ -253,6 +253,9 @@ extern const char* const IVF_BASE_FILE_PATH;
 extern const char* const IVF_PRECISE_QUANTIZATION_TYPE;
 extern const char* const IVF_PRECISE_IO_TYPE;
 extern const char* const IVF_PRECISE_FILE_PATH;
+extern const char* const IVF_PRECISE_CODES_LAYOUT;
+extern const char* const IVF_PRECISE_CODES_LAYOUT_FLAT;
+extern const char* const IVF_PRECISE_CODES_LAYOUT_BUCKET;
 extern const char* const USE_ATTRIBUTE_FILTER;
 extern const char* const IVF_THREAD_COUNT;
 

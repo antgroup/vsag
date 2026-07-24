@@ -97,7 +97,20 @@ public:
     ExportModel(const IndexCommonParam& param) const override;
 
     [[nodiscard]] InnerIndexPtr
+    Clone(const IndexCommonParam& param) override {
+        if (this->disk_backed_precise_bucket_) {
+            throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                "Clone does not support disk-backed IVF precise buckets");
+        }
+        return InnerIndexInterface::Clone(param);
+    }
+
+    [[nodiscard]] InnerIndexPtr
     Fork(const IndexCommonParam& param) override {
+        if (this->disk_backed_precise_bucket_) {
+            throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                "Clone does not support disk-backed IVF precise buckets");
+        }
         return std::make_shared<IVF>(this->create_param_ptr_, param);
     }
 
@@ -210,6 +223,12 @@ private:
             QueryContext& ctx,
             ReasoningContext* reasoning_ctx = nullptr) const;
 
+    DistHeapPtr
+    reorder_with_precise_bucket(const DistHeapPtr& input,
+                                const float* query,
+                                int64_t topk,
+                                QueryContext& ctx) const;
+
     void
     AttachReasoningReport(const DatasetPtr& dataset_results, ReasoningContext* reasoning_ctx) const;
 
@@ -263,8 +282,10 @@ private:
     int64_t total_elements_{0};  // total inserted (incl. deleted)
     bool is_trained_{false};     // true after Train() succeeds
 
-    FlattenInterfacePtr reorder_codes_{nullptr};  // high-precision codes for reranking
-    ReorderInterfacePtr reorder_{nullptr};        // reordering engine
+    FlattenInterfacePtr reorder_codes_{nullptr};  // legacy high-precision flat codes
+    BucketInterfacePtr precise_bucket_{nullptr};  // high-precision codes mirroring basic buckets
+    ReorderInterfacePtr reorder_{nullptr};        // flat-code reordering engine
+    bool disk_backed_precise_bucket_{false};
 
     std::shared_ptr<SafeThreadPool> thread_pool_{nullptr};  // for parallel bucket scans
 

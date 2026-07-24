@@ -245,7 +245,15 @@ create_streaming_index_from_metadata(const MetadataPtr& metadata,
         return create_streaming_index<HGraph, HGraphParameter>(index_param, common_param);
     }
     if (index_name == INDEX_IVF) {
-        return create_streaming_index<IVF, IVFParameter>(index_param, common_param);
+        auto param = std::make_shared<IVFParameter>();
+        param->FromJson(index_param);
+        if (param->UsesDiskBackedPreciseBucket()) {
+            throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                "Index::Load does not support disk-backed IVF precise buckets");
+        }
+        auto inner_index = std::make_shared<IVF>(param, common_param);
+        return streaming_index_load_target{
+            std::make_shared<IndexImpl<IVF>>(inner_index, common_param), inner_index};
     }
     if (index_name == INDEX_PYRAMID) {
         return create_streaming_index<Pyramid, PyramidParameters>(index_param, common_param);

@@ -151,3 +151,6 @@ target_link_libraries(324_feature_lazy_hgraph_extra_info vsag)
 
 add_executable(325_feature_uring_io 325_feature_uring_io.cpp)
 target_link_libraries(325_feature_uring_io vsag)
+
+add_executable(326_feature_ivf_precise_bucket 326_feature_ivf_precise_bucket.cpp)
+target_link_libraries(326_feature_ivf_precise_bucket vsag)

@@ -262,6 +262,9 @@ const char* const GNO_IMI_SECOND_ORDER_BUCKETS_COUNT = "second_order_buckets_cou
 const char* const IVF_PRECISE_QUANTIZATION_TYPE = "precise_quantization_type";
 const char* const IVF_PRECISE_IO_TYPE = "precise_io_type";
 const char* const IVF_PRECISE_FILE_PATH = "precise_file_path";
+const char* const IVF_PRECISE_CODES_LAYOUT = "precise_codes_layout";
+const char* const IVF_PRECISE_CODES_LAYOUT_FLAT = "flat";
+const char* const IVF_PRECISE_CODES_LAYOUT_BUCKET = "bucket";
 const char* const USE_ATTRIBUTE_FILTER = "use_attribute_filter";
 const char* const IVF_THREAD_COUNT = "thread_count";
 
