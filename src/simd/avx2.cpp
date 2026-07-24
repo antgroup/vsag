@@ -1008,6 +1008,21 @@ PQFastScanLookUp32(const uint8_t* RESTRICT lookup_table,
     for (uint64_t i = 0; i < 4; i++) {
         sum[i] = _mm256_setzero_si256();
     }
+    // Each 16-bit lane accumulates one lookup byte (<= 255) per iteration and
+    // would overflow after ~258 of them, so periodically drain the int16
+    // partials into the int32 result and reset the accumulators.
+    constexpr uint64_t kFlushInterval = 32;
+    uint64_t since_flush = 0;
+    auto flush = [&]() {
+        alignas(32) uint16_t temp[16];
+        for (int64_t idx = 0; idx < 4; idx++) {
+            _mm256_store_si256((__m256i*)(temp), sum[idx]);
+            for (int64_t j = 0; j < 8; j++) {
+                result[idx * 8 + j] += temp[j] + temp[j + 8];
+            }
+            sum[idx] = _mm256_setzero_si256();
+        }
+    };
     const auto sign4 = _mm256_set1_epi8(0x0F);
     const auto sign8 = _mm256_set1_epi16(0xFF);
     uint64_t i = 0;
@@ -1024,14 +1039,12 @@ PQFastScanLookUp32(const uint8_t* RESTRICT lookup_table,
         sum[1] = _mm256_add_epi16(sum[1], _mm256_srli_epi16(res1, 8));
         sum[2] = _mm256_add_epi16(sum[2], _mm256_and_si256(res2, sign8));
         sum[3] = _mm256_add_epi16(sum[3], _mm256_srli_epi16(res2, 8));
-    }
-    alignas(256) uint16_t temp[16];
-    for (int64_t idx = 0; idx < 4; idx++) {
-        _mm256_store_si256((__m256i*)(temp), sum[idx]);
-        for (int64_t j = 0; j < 8; j++) {
-            result[idx * 8 + j] += temp[j] + temp[j + 8];
+        if (++since_flush == kFlushInterval) {
+            flush();
+            since_flush = 0;
         }
     }
+    flush();
     if (pq_dim > i) {
         avx::PQFastScanLookUp32(lookup_table, codes, pq_dim - i, result);
     }
