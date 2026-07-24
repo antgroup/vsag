@@ -17,6 +17,7 @@
 #include <fmt/format.h>
 
 #include <future>
+#include <memory>
 
 #include "index_common_param.h"
 
@@ -91,11 +92,25 @@ ReaderIO::MultiReadImpl(uint8_t* datas,
                             "ReaderIO is not initialized, please call Init() first.");
     }
 
-    std::vector<uint64_t> real_offsets(count);
+    constexpr uint64_t stack_threshold = 128;
+    uint64_t local_buf[stack_threshold];
+    auto heap_deleter = [this](uint64_t* p) {
+        if (p != nullptr) {
+            allocator_->Deallocate(p);
+        }
+    };
+    std::unique_ptr<uint64_t, decltype(heap_deleter)> heap_buf(nullptr, heap_deleter);
+    uint64_t* real_offsets;
+    if (count <= stack_threshold) {
+        real_offsets = local_buf;
+    } else {
+        heap_buf.reset(static_cast<uint64_t*>(allocator_->Allocate(count * sizeof(uint64_t))));
+        real_offsets = heap_buf.get();
+    }
     for (uint64_t i = 0; i < count; ++i) {
         real_offsets[i] = start_ + offsets[i];
     }
-    return reader_->MultiRead(datas, sizes, real_offsets.data(), count);
+    return reader_->MultiRead(datas, sizes, real_offsets, count);
 }
 
 }  // namespace vsag
