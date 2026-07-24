@@ -5,7 +5,7 @@ can do, compute distances against existing vectors, and read back structured inf
 the built index without re-running a search:
 
 - **`CheckFeature(IndexFeature)`** — runtime capability discovery.
-- **`CalDistanceById(...)`** — distance from a query to specific stored ids.
+- **`CalcDistancesById(...)`** — distances from a query to specific stored ids.
 - **`GetIndexDetailInfos()` / `GetDetailDataByName(...)`** — structured per-index detail data.
 
 These APIs are read-only and safe to call concurrently with search.
@@ -33,9 +33,9 @@ enumeration.
 
 A runnable example is available at `examples/cpp/307_feature_check_features.cpp`.
 
-## Distances to Existing Ids — `CalDistanceById`
+## Distances to Existing Ids — `CalcDistancesById`
 
-`CalDistanceById` computes the distance between a query and one or more vectors that are
+`CalcDistancesById` computes the distance between a query and one or more vectors that are
 **already stored in the index**, without running a search. This is useful for re-ranking, A/B
 evaluation, ground-truth checks, or computing pairwise distances to a known shortlist.
 
@@ -43,12 +43,12 @@ Two overloads are provided:
 
 ```cpp
 // Dense vector indexes (HGraph, BruteForce, IVF)
-auto r = index->CalDistanceById(query_ptr, ids, count, /*calculate_precise_distance=*/true);
+auto r = index->CalcDistancesById(query_ptr, ids, count, /*calculate_precise_distance=*/true);
 
 // Sparse vector indexes (SINDI) — wrap the query in a Dataset
 auto query_ds = vsag::Dataset::Make();
 query_ds->NumElements(1)->SparseVectors(/* ... */);
-auto r = index->CalDistanceById(query_ds, ids, count, /*calculate_precise_distance=*/true);
+auto r = index->CalcDistancesById(query_ds, ids, count, /*calculate_precise_distance=*/true);
 ```
 
 The result `Dataset` holds `count` distances in `GetDistances()`. A value of `-1.0F` means the
@@ -126,7 +126,7 @@ at runtime. A runnable example is available at `examples/cpp/317_feature_get_det
 ## Notes and Limitations
 
 - `CheckFeature` is constant-time. Prefer it over `try` / `catch` around an unsupported call.
-- `CalDistanceById` requires the underlying index to retain enough information to recompute the
+- `CalcDistancesById` requires the underlying index to retain enough information to recompute the
   distance. For purely quantized indexes (no raw vectors retained), `calculate_precise_distance =
   true` may return the quantized distance instead.
 - `GetIndexDetailInfos` and `GetDetailDataByName` are read-only snapshots. The values returned

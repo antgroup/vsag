@@ -16,6 +16,14 @@
 
 namespace fixtures {
 
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#elif defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#endif
+
 void
 TestIndex::TestCalcDistanceById(const IndexPtr& index,
                                 const TestDatasetPtr& dataset,
@@ -112,10 +120,10 @@ TestIndex::TestBatchCalcDistanceById(const IndexPtr& index,
             auto query = get_one_query(queries, i);
             tl::expected<DatasetPtr, vsag::Error> result;
             if (is_sparse) {
-                result = index->CalDistanceById(
+                result = index->CalcDistancesById(
                     query, gts->GetIds() + (i * gt_topK), gt_topK, true, topk);
             } else {
-                result = index->CalDistanceById(
+                result = index->CalcDistancesById(
                     query->GetFloat32Vectors(), gts->GetIds() + (i * gt_topK), gt_topK, true, topk);
             }
             REQUIRE(result.has_value());
@@ -305,5 +313,11 @@ TestIndex::TestGetMinAndMaxId(const IndexPtr& index,
     REQUIRE(min_id == res_min_id);
     REQUIRE(max_id == res_max_id);
 }
+
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#elif defined(_MSC_VER)
+#pragma warning(pop)
+#endif
 
 }  // namespace fixtures

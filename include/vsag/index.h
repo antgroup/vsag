@@ -567,11 +567,12 @@ public:
      *        matching IDs. The result Dim is min(topk, count). Invalid IDs (missing labels) are
      *        ranked last and only appear if there are fewer than topk valid IDs.
      * @return result is valid distance of input ids. If topk == -1, Dim() is count and the
-     *         distance buffer contains count entries. If topk is positive, Dim() is
+    *         distance buffer contains count entries. If topk is positive, Dim() is
      *         min(topk, count), IDs are returned, and the distance/ID buffers contain Dim()
      *         entries. '-1' indicates an invalid distance.
      */
-    [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
+    [[deprecated(
+        "use CalcDistancesById instead")]] [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     CalDistanceById(const float* query,
                     const int64_t* ids,
                     int64_t count,
@@ -616,9 +617,10 @@ public:
      *         Dim() is count and the distance buffer contains NumElements() * count entries.
      *         When topk is positive, Dim() is min(topk, count), IDs are returned, and the
      *         distance/ID buffers contain NumElements() * Dim() entries in row-major layout.
-     *         '-1' indicates an invalid distance.
-     */
-    [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
+    *         '-1' indicates an invalid distance.
+    */
+    [[deprecated(
+        "use CalcDistancesById instead")]] [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     CalDistanceById(const DatasetPtr& query,
                     const int64_t* ids,
                     int64_t count,
@@ -1092,6 +1094,50 @@ public:
 
 public:
     virtual ~Index() = default;
+
+    // Keep this bridge nonvirtual: an old binary Index subclass has no corrected slot in its
+    // vtable. Dispatching through the pre-existing legacy virtuals keeps that ABI safe.
+    [[nodiscard]] tl::expected<DatasetPtr, Error>
+    CalcDistancesById(const float* query,
+                      const int64_t* ids,
+                      int64_t count,
+                      bool calculate_precise_distance = true,
+                      int64_t topk = -1) const {
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#elif defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#endif
+        return this->CalDistanceById(query, ids, count, calculate_precise_distance, topk);
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#elif defined(_MSC_VER)
+#pragma warning(pop)
+#endif
+    }
+
+    [[nodiscard]] tl::expected<DatasetPtr, Error>
+    CalcDistancesById(const DatasetPtr& query,
+                      const int64_t* ids,
+                      int64_t count,
+                      bool calculate_precise_distance = true,
+                      int64_t topk = -1) const {
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#elif defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4996)
+#endif
+        return this->CalDistanceById(query, ids, count, calculate_precise_distance, topk);
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#elif defined(_MSC_VER)
+#pragma warning(pop)
+#endif
+    }
 };
 
 /**

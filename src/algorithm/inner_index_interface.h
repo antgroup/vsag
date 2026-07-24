@@ -193,6 +193,20 @@ public:
                     bool calculate_precise_distance = true,
                     int64_t topk = -1) const;
 
+    // The public Index bridge accepts topk and dispatches to its legacy virtual overload. These
+    // internal corrected helpers intentionally retain the historical no-topk fast path.
+    virtual DatasetPtr
+    CalcDistancesById(const float* query,
+                      const int64_t* ids,
+                      int64_t count,
+                      bool calculate_precise_distance = true) const;
+
+    virtual DatasetPtr
+    CalcDistancesById(const DatasetPtr& query,
+                      const int64_t* ids,
+                      int64_t count,
+                      bool calculate_precise_distance = true) const;
+
     virtual uint64_t
     CalSerializeSize() const;
 

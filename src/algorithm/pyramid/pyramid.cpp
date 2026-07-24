@@ -1332,6 +1332,14 @@ Pyramid::CalcDistanceById(const float* query, int64_t id, bool calculate_precise
 }
 
 DatasetPtr
+Pyramid::CalcDistancesById(const float* query,
+                           const int64_t* ids,
+                           int64_t count,
+                           bool calculate_precise_distance) const {
+    return this->CalDistanceById(query, ids, count, calculate_precise_distance);
+}
+
+DatasetPtr
 Pyramid::CalDistanceById(const float* query,
                          const int64_t* ids,
                          int64_t count,

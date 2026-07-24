@@ -1460,6 +1460,14 @@ IVF::GetAttributeSetByInnerId(InnerIdType inner_id, AttributeSet* attr) const {
 }
 
 DatasetPtr
+IVF::CalcDistancesById(const float* query,
+                       const int64_t* ids,
+                       int64_t count,
+                       bool calculate_precise_distance) const {
+    return this->CalDistanceById(query, ids, count, calculate_precise_distance);
+}
+
+DatasetPtr
 IVF::CalDistanceById(const float* query,
                      const int64_t* ids,
                      int64_t count,

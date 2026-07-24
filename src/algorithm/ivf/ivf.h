@@ -80,6 +80,12 @@ public:
     Build(const DatasetPtr& base) override;
 
     DatasetPtr
+    CalcDistancesById(const float* query,
+                      const int64_t* ids,
+                      int64_t count,
+                      bool calculate_precise_distance = true) const override;
+
+    DatasetPtr
     CalDistanceById(const float* query,
                     const int64_t* ids,
                     int64_t count,
