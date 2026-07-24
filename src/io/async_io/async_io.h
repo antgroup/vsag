@@ -16,6 +16,9 @@
 #pragma once
 
 #if HAVE_LIBAIO
+#include <atomic>
+#include <mutex>
+
 #include "index_common_param.h"
 #include "io/async_io/aio_context.h"
 #include "io/async_io/async_io_parameter.h"
@@ -150,6 +153,15 @@ private:
 
     /// Flag indicating if file existed before opening; false means file will be removed on destruction.
     bool exist_file_{false};
+
+    /// Tracks whether unflushed writes exist; read paths check this to ensure O_DIRECT coherence.
+    mutable std::atomic<bool> dirty_{false};
+
+    /// Serializes fdatasync calls so concurrent readers don't race on the flush.
+    mutable std::mutex flush_mutex_;
+
+    void
+    flush_if_dirty() const;
 };
 
 }  // namespace vsag
