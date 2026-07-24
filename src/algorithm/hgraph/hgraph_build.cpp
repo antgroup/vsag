@@ -26,6 +26,7 @@
 #include "datacell/flatten_datacell_parameter.h"
 #include "dataset_impl.h"
 #include "hgraph.h"  // IWYU pragma: keep
+#include "hgraph_fast_build.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/logger/logger.h"
 #include "impl/odescent/odescent_graph_builder.h"
@@ -142,6 +143,7 @@ HGraph::Build(const DatasetPtr& data) {
     this->build_cache_hit_rate_ = -1.0F;
     this->build_cache_hit_nodes_ = 0;
     this->build_cache_missed_nodes_ = 0;
+    std::vector<int64_t> ret;
     if (this->has_loaded_cache()) {
         if (this->using_dedup_storage()) {
             throw VsagException(ErrorType::INVALID_ARGUMENT,
@@ -150,17 +152,16 @@ HGraph::Build(const DatasetPtr& data) {
         // A previously exported cache has been imported via ImportCache().
         // Take the accelerated build path that warm-starts neighbours from
         // the cache and refines them, instead of building from scratch.
-        auto ret = this->build_with_cache(data);
-        if (use_elp_optimizer_) {
-            elp_optimize();
-        }
-        return ret;
-    }
-    std::vector<int64_t> ret;
-    if (graph_type_ == GRAPH_TYPE_VALUE_NSW) {
-        ret = this->Add(data);
+        ret = this->build_with_cache(data);
     } else {
-        ret = this->build_by_odescent(data);
+        auto optimized_result = this->try_optimized_build(data);
+        if (optimized_result.has_value()) {
+            ret = std::move(optimized_result.value());
+        } else if (graph_type_ == GRAPH_TYPE_VALUE_NSW) {
+            ret = this->Add(data);
+        } else {
+            ret = this->build_by_odescent(data);
+        }
     }
     if (use_elp_optimizer_) {
         elp_optimize();
@@ -310,8 +311,7 @@ HGraph::AddContext
 HGraph::prepare_add_context(const DatasetPtr& data) {
     AddContext context;
     context.use_dedup_storage = this->using_dedup_storage();
-    context.need_temporary_sq8_build_data =
-        need_temporary_sq8_build_data(this->basic_flatten_codes_, this->has_precise_reorder());
+    context.need_temporary_sq8_build_data = this->need_temporary_sq8_build_data_for_add();
     context.use_parallel_add = this->thread_pool_ != nullptr;
 
     if (context.need_temporary_sq8_build_data and this->total_count_ != 0 and
@@ -429,6 +429,10 @@ HGraph::prepare_temporary_graph_read_codes(const DatasetPtr& data,
 void
 HGraph::insert_add_batch(const DatasetPtr& data, const AddContext& context, const AddBatch& batch) {
     std::vector<std::future<void>> futures;
+    HGraphBuildTaskGuard future_guard(
+        futures, context.use_parallel_add ? static_cast<uint64_t>(batch.rows.size()) : 0);
+    this->prepare_build_codes(data, batch.rows);
+
     const auto* extra_infos = data->GetExtraInfos();
     const auto* attr_sets = data->GetAttributeSets();
 
@@ -552,7 +556,7 @@ void
 HGraph::prepare_codes_before_probe_if_needed(const void* data,
                                              InnerIdType inner_id,
                                              const AddContext& context) {
-    if (not context.use_dedup_storage) {
+    if (this->should_insert_codes_before_probe(context.use_dedup_storage)) {
         this->insert_persistent_codes(data, inner_id);
     }
 }
@@ -671,10 +675,11 @@ HGraph::probe_graph_for_add(const void* data,
                             InnerSearchParam& param,
                             const FlattenInterfacePtr& flatten_codes) const {
     DistHeapPtr result = nullptr;
+    const auto build_computer = this->make_build_computer(data, inner_id);
 
     for (auto j = static_cast<int64_t>(this->route_graphs_.size()) - 1; j > level; --j) {
-        result = search_one_graph(
-            data, route_graphs_[j], flatten_codes, param, (VisitedListPtr) nullptr, nullptr);
+        result = this->search_graph_for_build(
+            data, route_graphs_[j], flatten_codes, param, build_computer);
         param.ep = result->Top().second;
     }
 
@@ -688,13 +693,8 @@ HGraph::probe_graph_for_add(const void* data,
     }
 
     if (bottom_graph_->TotalCount() != 0) {
-        result = search_one_graph(data,
-                                  this->bottom_graph_,
-                                  flatten_codes,
-                                  param,
-                                  // to specify which overloaded function to call
-                                  (VisitedListPtr) nullptr,
-                                  nullptr);
+        result = this->search_graph_for_build(
+            data, this->bottom_graph_, flatten_codes, param, build_computer);
         if (this->support_duplicate_ && param.duplicate_id >= 0) {
             return GraphAddProbeResult{nullptr, param.duplicate_id};
         }
@@ -736,15 +736,12 @@ HGraph::publish_unique_to_route_graphs(const void* data,
                                        InnerSearchParam& param,
                                        const FlattenInterfacePtr& flatten_codes) {
     DistHeapPtr result = nullptr;
+    const auto build_computer = this->make_build_computer(data, inner_id);
+
     for (int64_t j = 0; j <= level; ++j) {
         if (route_graphs_[j]->TotalCount() != 0) {
-            result = search_one_graph(data,
-                                      route_graphs_[j],
-                                      flatten_codes,
-                                      param,
-                                      // to specify which overloaded function to call
-                                      (VisitedListPtr) nullptr,
-                                      nullptr);
+            result = this->search_graph_for_build(
+                data, route_graphs_[j], flatten_codes, param, build_computer);
             auto filtered_result = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
             while (not result->Empty()) {
                 auto [dist, id] = result->Top();

@@ -18,6 +18,7 @@
 #include <atomic>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <random>
 #include <shared_mutex>
 #include <string>
@@ -52,6 +53,8 @@
 #include "vsag/index_features.h"
 
 namespace vsag {
+class FlattenOptimizedBuildInterface;
+class HGraphOptimizedBuildSession;
 class IteratorFilterContext;
 
 /**
@@ -68,6 +71,7 @@ public:
                                  const IndexCommonParam& common_param);
 
     friend class HGraphAnalyzer;
+    friend class HGraphOptimizedBuildSession;
 
 public:
     HGraph(const HGraphParameterPtr& param, const IndexCommonParam& common_param);
@@ -425,6 +429,28 @@ private:
         std::vector<int64_t> failed_ids;
     };
 
+    std::optional<std::vector<int64_t>>
+    try_optimized_build(const DatasetPtr& data);
+
+    [[nodiscard]] bool
+    need_temporary_sq8_build_data_for_add() const;
+
+    void
+    prepare_build_codes(const DatasetPtr& data, const Vector<AddRow>& rows);
+
+    [[nodiscard]] bool
+    should_insert_codes_before_probe(bool use_dedup_storage) const;
+
+    ComputerInterfacePtr
+    make_build_computer(const void* query, InnerIdType inner_id) const;
+
+    DistHeapPtr
+    search_graph_for_build(const void* query,
+                           const GraphInterfacePtr& graph,
+                           const FlattenInterfacePtr& flatten,
+                           InnerSearchParam& inner_search_param,
+                           const ComputerInterfacePtr& computer) const;
+
     struct GraphAddProbeResult {
         DistHeapPtr neighbors{nullptr};
         int64_t duplicate_id{-1};
@@ -744,7 +770,8 @@ private:
 
 private:
     FlattenInterfacePtr basic_flatten_codes_{nullptr};  // coarse/quantized codes for graph search
-    FlattenInterfacePtr high_precise_codes_{nullptr};   // precise codes for reorder (optional)
+    std::shared_ptr<FlattenOptimizedBuildInterface> optimized_build_codes_{nullptr};
+    FlattenInterfacePtr high_precise_codes_{nullptr};  // precise codes for reorder (optional)
     std::shared_ptr<CodeSlotMap> code_slot_map_{nullptr};
 
     Vector<GraphInterfacePtr> route_graphs_;   // upper-layer route graphs

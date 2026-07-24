@@ -17,18 +17,26 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
+#include <exception>
+#include <future>
 #include <limits>
 #include <memory>
 #include <mutex>
 #include <sstream>
+#include <type_traits>
 
 #include "common.h"
 #include "flatten_interface.h"
+#include "flatten_optimized_build_interface.h"
+#include "impl/thread_pool/safe_thread_pool.h"
 #include "inner_string_params.h"
 #include "io/async_io/async_io_parameter.h"
 #include "io/buffer_io/buffer_io_parameter.h"
 #include "io/common/basic_io.h"
 #include "io/common/io_parameter.h"
+#include "io/memory_io/memory_io.h"
+#include "io/memory_io/memory_io_parameter.h"
 #include "io/mmap_io/mmap_io_parameter.h"
 #include "quantization/rabitq_quantization/rabitq_quantizer.h"
 #include "query_context.h"
@@ -39,6 +47,8 @@
 #include "utils/timer.h"
 
 namespace vsag {
+
+class MMapIO;
 
 template <typename IOTmpl>
 class RaBitQSplitCodeStorage {
@@ -131,8 +141,18 @@ private:
 };
 
 template <MetricType metric, typename OneBitIOTmpl, typename SupplementIOTmpl = OneBitIOTmpl>
-class RaBitQSplitDataCell : public FlattenInterface {
+class RaBitQSplitDataCell : public FlattenInterface, public FlattenOptimizedBuildInterface {
 public:
+    class OptimizedBuildComputer final : public ComputerInterface {
+    public:
+        OptimizedBuildComputer(uint64_t record_size, Allocator* allocator)
+            : scalar_code_(record_size, allocator) {
+        }
+
+        ByteBuffer scalar_code_;
+        uint64_t code_sum_{0};
+    };
+
     RaBitQSplitDataCell() = default;
 
     explicit RaBitQSplitDataCell(const QuantizerParamPtr& quantization_param,
@@ -179,6 +199,10 @@ public:
           const InnerIdType* idx,
           InnerIdType id_count,
           QueryContext* ctx = nullptr) override {
+        if (this->optimized_build_active_) {
+            this->query_optimized_build_codes(result_dists, computer, idx, id_count);
+            return;
+        }
         auto* comp = static_cast<Computer<RaBitQuantizer<metric>>*>(computer.get());
         if constexpr (not OneBitIOTmpl::InMemory or not SupplementIOTmpl::InMemory) {
             if (id_count > 1) {
@@ -211,6 +235,10 @@ public:
                           const InnerIdType* idx,
                           InnerIdType id_count,
                           QueryContext* ctx = nullptr) override {
+        if (this->optimized_build_active_) {
+            this->query_optimized_build_codes(result_dists, computer, idx, id_count);
+            return;
+        }
         auto* comp = static_cast<Computer<RaBitQuantizer<metric>>*>(computer.get());
         if constexpr (not OneBitIOTmpl::InMemory or not SupplementIOTmpl::InMemory) {
             if (id_count > 1) {
@@ -246,6 +274,10 @@ public:
                             InnerIdType id_count,
                             float threshold,
                             QueryContext* ctx = nullptr) override {
+        if (this->optimized_build_active_) {
+            this->query_optimized_build_codes(result_dists, computer, idx, id_count);
+            return;
+        }
         auto* comp = static_cast<Computer<RaBitQuantizer<metric>>*>(computer.get());
         for (uint32_t i = 0; i < this->prefetch_stride_code_ and i < id_count; ++i) {
             this->prefetch_full_code(idx[i]);
@@ -301,6 +333,13 @@ public:
                                 const InnerIdType* idx,
                                 InnerIdType id_count,
                                 QueryContext* ctx = nullptr) override {
+        if (this->optimized_build_active_) {
+            this->query_optimized_build_codes(result_dists, computer, idx, id_count);
+            if (lower_bounds != nullptr) {
+                std::fill(lower_bounds, lower_bounds + id_count, std::numeric_limits<float>::max());
+            }
+            return;
+        }
         auto* comp = static_cast<Computer<RaBitQuantizer<metric>>*>(computer.get());
         this->add_filter_count(ctx, id_count);
         if constexpr (not OneBitIOTmpl::InMemory) {
@@ -427,11 +466,161 @@ public:
         return computer;
     }
 
+    ComputerInterfacePtr
+    FactoryComputerForBuild(const void* query, InnerIdType id) override {
+        if (this->optimized_build_active_) {
+            auto computer = std::make_shared<OptimizedBuildComputer>(
+                this->optimized_build_record_size_, this->allocator_);
+            if (not this->optimized_build_scalar_codes_->Read(id, computer->scalar_code_.data)) {
+                throw VsagException(ErrorType::INTERNAL_ERROR,
+                                    "failed to read scalar RaBitQ build query code");
+            }
+            computer->code_sum_ = (*this->optimized_build_code_sums_)[id];
+            return computer;
+        }
+        return this->FactoryComputer(query);
+    }
+
     void
     Train(const void* data, uint64_t count) override {
         if (this->quantizer_) {
             this->quantizer_->Train(static_cast<const float*>(data), count);
         }
+    }
+
+    bool
+    BeginOptimizedBuild(const FlattenOptimizedBuildContext& context) override {
+        if (this->optimized_build_active_ or not this->quantizer_->SupportScalarCodeBuild()) {
+            return false;
+        }
+        auto io_param = std::make_shared<MemoryIOParameter>();
+        auto build_codes =
+            std::make_shared<RaBitQSplitCodeStorage<MemoryIO>>(io_param, this->common_param_);
+        build_codes->SetCodeSize(this->quantizer_->GetScalarCodeSize());
+        auto code_sums = std::make_unique<Vector<uint64_t>>(this->allocator_);
+        if (this->max_capacity_ > 0) {
+            build_codes->Resize(this->max_capacity_);
+            code_sums->resize(this->max_capacity_, 0);
+        }
+        this->optimized_build_scalar_codes_ = build_codes;
+        this->optimized_build_code_sums_ = std::move(code_sums);
+        this->optimized_build_record_size_ = this->quantizer_->GetScalarCodeSize();
+        this->optimized_build_context_ = context;
+        this->optimized_build_active_ = true;
+        return true;
+    }
+
+    void
+    FinalizeOptimizedBuild() override {
+        if (not this->optimized_build_active_) {
+            return;
+        }
+
+        // Finalize workers write disjoint IDs, but the backing IO must already be fully sized so
+        // no worker enters a concurrent reallocation path.
+        const InnerIdType final_capacity = std::max(this->max_capacity_, this->total_count_);
+        this->x_bit_cell_->Resize(final_capacity);
+        this->supplement_cell_->Resize(final_capacity);
+        this->max_capacity_ = final_capacity;
+
+        auto finalize_range = [this](InnerIdType begin, InnerIdType end) {
+            ByteBuffer one_bit_code(this->one_bit_code_size_, allocator_);
+            ByteBuffer supplement_code(this->supplement_code_size_, allocator_);
+            for (InnerIdType id = begin; id < end; ++id) {
+                bool need_release = false;
+                const auto* scalar_code =
+                    this->optimized_build_scalar_codes_->Read(id, need_release);
+                if (scalar_code == nullptr) {
+                    throw VsagException(ErrorType::INTERNAL_ERROR,
+                                        "failed to read temporary scalar RaBitQ build code");
+                }
+                try {
+                    this->quantizer_->PackScalarCodeToSplitCode(
+                        scalar_code, one_bit_code.data, supplement_code.data);
+                    this->x_bit_cell_->Write(one_bit_code.data, id);
+                    this->supplement_cell_->Write(supplement_code.data, id);
+                } catch (...) {
+                    if (need_release) {
+                        this->optimized_build_scalar_codes_->Release(scalar_code);
+                    }
+                    throw;
+                }
+                if (need_release) {
+                    this->optimized_build_scalar_codes_->Release(scalar_code);
+                }
+            }
+        };
+
+        const auto& thread_pool = this->optimized_build_context_.thread_pool;
+        const uint64_t worker_count = std::min<uint64_t>(
+            this->optimized_build_context_.thread_count, static_cast<uint64_t>(this->total_count_));
+        constexpr bool supports_parallel_finalize = not std::is_same_v<OneBitIOTmpl, MMapIO> and
+                                                    not std::is_same_v<SupplementIOTmpl, MMapIO>;
+        // MMapIO::WriteImpl updates its shared size_ even after Resize, so disjoint writes are not
+        // thread-safe for that backend.
+        if (thread_pool != nullptr and worker_count > 1 and supports_parallel_finalize) {
+            const uint64_t block_size =
+                (static_cast<uint64_t>(this->total_count_) + worker_count - 1) / worker_count;
+            std::vector<std::future<void>> futures;
+            futures.reserve(worker_count);
+            auto wait_futures = [&futures]() {
+                std::exception_ptr first_exception = nullptr;
+                for (auto& future : futures) {
+                    if (not future.valid()) {
+                        continue;
+                    }
+                    try {
+                        future.get();
+                    } catch (...) {
+                        if (not first_exception) {
+                            first_exception = std::current_exception();
+                        }
+                    }
+                }
+                if (first_exception) {
+                    std::rethrow_exception(first_exception);
+                }
+            };
+            try {
+                for (uint64_t begin = 0; begin < this->total_count_; begin += block_size) {
+                    const uint64_t end = std::min<uint64_t>(begin + block_size, this->total_count_);
+                    futures.emplace_back(
+                        thread_pool->GeneralEnqueue(finalize_range,
+                                                    static_cast<InnerIdType>(begin),
+                                                    static_cast<InnerIdType>(end)));
+                }
+            } catch (...) {
+                const auto enqueue_exception = std::current_exception();
+                try {
+                    wait_futures();
+                } catch (...) {
+                }
+                std::rethrow_exception(enqueue_exception);
+            }
+            wait_futures();
+        } else {
+            finalize_range(0, this->total_count_);
+        }
+
+        this->optimized_build_active_ = false;
+        this->optimized_build_scalar_codes_.reset();
+        this->optimized_build_code_sums_.reset();
+        this->optimized_build_record_size_ = 0;
+        this->optimized_build_context_ = {};
+    }
+
+    void
+    AbortOptimizedBuild() noexcept override {
+        this->optimized_build_active_ = false;
+        this->optimized_build_scalar_codes_.reset();
+        this->optimized_build_code_sums_.reset();
+        this->optimized_build_record_size_ = 0;
+        this->optimized_build_context_ = {};
+    }
+
+    [[nodiscard]] bool
+    IsOptimizedBuildActive() const override {
+        return this->optimized_build_active_;
     }
 
     void
@@ -441,10 +630,14 @@ public:
             std::lock_guard lock(this->mutex_);
             if (idx == std::numeric_limits<InnerIdType>::max()) {
                 idx = this->total_count_;
-                ++this->total_count_;
-            } else {
-                this->total_count_ = std::max(this->total_count_, idx + 1);
             }
+            // Optimized-build workers write disjoint IDs without locking, so both temporary
+            // arrays must be fully sized before the workers start.
+            CHECK_ARGUMENT(
+                not this->optimized_build_active_ or
+                    static_cast<uint64_t>(idx) < this->optimized_build_code_sums_->size(),
+                "optimized RaBitQ build storage must be resized before inserting vectors");
+            this->total_count_ = std::max(this->total_count_, idx + 1);
         }
         this->write_encoded_vector(static_cast<const float*>(vector), idx);
     }
@@ -471,6 +664,45 @@ public:
 
     float
     ComputePairVectors(InnerIdType id1, InnerIdType id2) override {
+        if (this->optimized_build_active_) {
+            bool release1 = false;
+            bool release2 = false;
+            const auto* codes1 = this->optimized_build_scalar_codes_->Read(id1, release1);
+            const auto* codes2 = this->optimized_build_scalar_codes_->Read(id2, release2);
+            if (codes1 == nullptr or codes2 == nullptr) {
+                if (release1) {
+                    this->optimized_build_scalar_codes_->Release(codes1);
+                }
+                if (release2) {
+                    this->optimized_build_scalar_codes_->Release(codes2);
+                }
+                throw VsagException(ErrorType::INTERNAL_ERROR,
+                                    "failed to read temporary scalar RaBitQ build codes");
+            }
+            float distance = 0.0F;
+            try {
+                distance = this->quantizer_->ComputeScalarCodesDistance(
+                    codes1,
+                    (*optimized_build_code_sums_)[id1],
+                    codes2,
+                    (*optimized_build_code_sums_)[id2]);
+            } catch (...) {
+                if (release1) {
+                    this->optimized_build_scalar_codes_->Release(codes1);
+                }
+                if (release2) {
+                    this->optimized_build_scalar_codes_->Release(codes2);
+                }
+                throw;
+            }
+            if (release1) {
+                this->optimized_build_scalar_codes_->Release(codes1);
+            }
+            if (release2) {
+                this->optimized_build_scalar_codes_->Release(codes2);
+            }
+            return distance;
+        }
         ByteBuffer codes1(this->code_size_, allocator_);
         ByteBuffer codes2(this->code_size_, allocator_);
         this->GetCodesById(id1, codes1.data);
@@ -485,11 +717,19 @@ public:
         }
         this->x_bit_cell_->Resize(new_capacity);
         this->supplement_cell_->Resize(new_capacity);
+        if (this->optimized_build_active_) {
+            this->optimized_build_scalar_codes_->Resize(new_capacity);
+            this->optimized_build_code_sums_->resize(new_capacity, 0);
+        }
         this->max_capacity_ = new_capacity;
     }
 
     void
     Prefetch(InnerIdType id) override {
+        if (this->optimized_build_active_) {
+            this->optimized_build_scalar_codes_->Prefetch(id, this->optimized_build_record_size_);
+            return;
+        }
         this->prefetch_one_bit(id);
     }
 
@@ -563,6 +803,16 @@ public:
 
     [[nodiscard]] const uint8_t*
     GetCodesById(InnerIdType id, bool& need_release) const override {
+        if (this->optimized_build_active_) {
+            auto* codes = static_cast<uint8_t*>(allocator_->Allocate(this->code_size_));
+            if (not this->GetCodesById(id, codes)) {
+                allocator_->Deallocate(codes);
+                need_release = false;
+                return nullptr;
+            }
+            need_release = true;
+            return codes;
+        }
         auto* codes = static_cast<uint8_t*>(allocator_->Allocate(this->code_size_));
         this->GetCodesById(id, codes);
         need_release = true;
@@ -576,6 +826,18 @@ public:
 
     bool
     GetCodesById(InnerIdType id, uint8_t* codes) const override {
+        if (this->optimized_build_active_) {
+            bool need_release = false;
+            const auto* scalar_code = this->optimized_build_scalar_codes_->Read(id, need_release);
+            if (scalar_code == nullptr) {
+                return false;
+            }
+            this->quantizer_->PackScalarCode(scalar_code, codes);
+            if (need_release) {
+                this->optimized_build_scalar_codes_->Release(scalar_code);
+            }
+            return true;
+        }
         ByteBuffer one_bit(one_bit_code_size_, allocator_);
         ByteBuffer supplement(supplement_code_size_, allocator_);
         bool one_bit_ok = this->x_bit_cell_->Read(id, one_bit.data);
@@ -599,6 +861,8 @@ public:
 
     void
     Serialize(StreamWriter& writer) override {
+        CHECK_ARGUMENT(not this->optimized_build_active_,
+                       "cannot serialize RaBitQ split codes during optimized build");
         FlattenInterface::Serialize(writer);
         StreamWriter::WriteString(writer, this->supplement_io_type_);
         this->x_bit_cell_->Serialize(writer);
@@ -640,6 +904,13 @@ public:
 
     void
     Move(InnerIdType from, InnerIdType to) override {
+        if (this->optimized_build_active_) {
+            ByteBuffer build_record(this->optimized_build_record_size_, allocator_);
+            this->optimized_build_scalar_codes_->Read(from, build_record.data);
+            this->optimized_build_scalar_codes_->Write(build_record.data, to);
+            (*this->optimized_build_code_sums_)[to] = (*this->optimized_build_code_sums_)[from];
+            return;
+        }
         ByteBuffer one_bit(one_bit_code_size_, allocator_);
         ByteBuffer supplement(supplement_code_size_, allocator_);
         this->x_bit_cell_->Read(from, one_bit.data);
@@ -652,6 +923,11 @@ public:
     ShrinkToFit(InnerIdType capacity) override {
         this->x_bit_cell_->Shrink(capacity);
         this->supplement_cell_->Shrink(capacity);
+        if (this->optimized_build_active_) {
+            this->optimized_build_scalar_codes_->Shrink(capacity);
+            this->optimized_build_code_sums_->resize(capacity);
+            this->optimized_build_code_sums_->shrink_to_fit();
+        }
         this->max_capacity_ = capacity;
     }
 
@@ -660,6 +936,12 @@ public:
         uint64_t memory = sizeof(RaBitQSplitDataCell<metric, OneBitIOTmpl, SupplementIOTmpl>);
         memory += this->x_bit_cell_->GetMemoryUsage();
         memory += this->supplement_cell_->GetMemoryUsage();
+        if (this->optimized_build_scalar_codes_ != nullptr) {
+            memory += this->optimized_build_scalar_codes_->GetMemoryUsage();
+        }
+        if (this->optimized_build_code_sums_ != nullptr) {
+            memory += this->optimized_build_code_sums_->capacity() * sizeof(uint64_t);
+        }
         memory += sizeof(RaBitQuantizer<metric>);
         return memory;
     }
@@ -669,6 +951,9 @@ public:
     std::shared_ptr<RaBitQuantizer<metric>> quantizer_{nullptr};
     std::shared_ptr<RaBitQSplitCodeStorage<OneBitIOTmpl>> x_bit_cell_{nullptr};
     std::shared_ptr<RaBitQSplitCodeStorage<SupplementIOTmpl>> supplement_cell_{nullptr};
+    std::shared_ptr<RaBitQSplitCodeStorage<MemoryIO>> optimized_build_scalar_codes_{nullptr};
+    std::unique_ptr<Vector<uint64_t>> optimized_build_code_sums_{nullptr};
+    FlattenOptimizedBuildContext optimized_build_context_{};
 
     Allocator* allocator_{nullptr};
     uint64_t one_bit_code_size_{0};
@@ -682,6 +967,8 @@ public:
     // IOParameter subclass for `supplement_cell_` instead of feeding it the
     // mismatched one-bit IO parameter type.
     std::string supplement_io_type_{};
+    bool optimized_build_active_{false};
+    uint64_t optimized_build_record_size_{0};
 
 private:
     static IOParamPtr
@@ -768,13 +1055,97 @@ private:
 
     void
     write_encoded_vector(const float* vector, InnerIdType idx) {
+        if (this->optimized_build_active_) {
+            ByteBuffer scalar_code(this->optimized_build_record_size_, allocator_);
+            uint64_t code_sum = 0;
+            if (not this->quantizer_->EncodeOneToScalarCode(vector, scalar_code.data, code_sum)) {
+                throw VsagException(ErrorType::INTERNAL_ERROR,
+                                    "failed to encode temporary scalar RaBitQ build code");
+            }
+            (*this->optimized_build_code_sums_)[idx] = code_sum;
+            this->optimized_build_scalar_codes_->Write(scalar_code.data, idx);
+            return;
+        }
         ByteBuffer full_code(this->code_size_, allocator_);
+        this->quantizer_->EncodeOne(vector, full_code.data);
         ByteBuffer one_bit_code(one_bit_code_size_, allocator_);
         ByteBuffer supplement_code(supplement_code_size_, allocator_);
-        this->quantizer_->EncodeOne(vector, full_code.data);
         this->quantizer_->SplitCode(full_code.data, one_bit_code.data, supplement_code.data);
         this->x_bit_cell_->Write(one_bit_code.data, idx);
         this->supplement_cell_->Write(supplement_code.data, idx);
+    }
+
+    void
+    query_optimized_build_codes(float* result_dists,
+                                const ComputerInterfacePtr& computer,
+                                const InnerIdType* idx,
+                                InnerIdType id_count) const {
+        if (const auto* build_computer =
+                dynamic_cast<const OptimizedBuildComputer*>(computer.get());
+            build_computer != nullptr) {
+            this->query_optimized_build_code_pairs(result_dists,
+                                                   build_computer->scalar_code_.data,
+                                                   build_computer->code_sum_,
+                                                   idx,
+                                                   id_count);
+            return;
+        }
+        auto* comp = static_cast<Computer<RaBitQuantizer<metric>>*>(computer.get());
+        for (InnerIdType i = 0; i < id_count; ++i) {
+            bool need_release = false;
+            const auto* scalar_code =
+                this->optimized_build_scalar_codes_->Read(idx[i], need_release);
+            if (scalar_code == nullptr) {
+                throw VsagException(ErrorType::INTERNAL_ERROR,
+                                    "failed to read temporary scalar RaBitQ build code");
+            }
+            try {
+                this->quantizer_->ComputeDistWithScalarCode(*comp, scalar_code, result_dists + i);
+            } catch (...) {
+                if (need_release) {
+                    this->optimized_build_scalar_codes_->Release(scalar_code);
+                }
+                throw;
+            }
+            if (need_release) {
+                this->optimized_build_scalar_codes_->Release(scalar_code);
+            }
+        }
+    }
+
+    void
+    query_optimized_build_code_pairs(float* result_dists,
+                                     const uint8_t* query_code,
+                                     uint64_t query_sum,
+                                     const InnerIdType* idx,
+                                     InnerIdType id_count) const {
+        for (uint32_t i = 0; i < this->prefetch_stride_code_ and i < id_count; ++i) {
+            this->optimized_build_scalar_codes_->Prefetch(idx[i], this->prefetch_depth_code_ * 64);
+        }
+        for (InnerIdType i = 0; i < id_count; ++i) {
+            if (i + this->prefetch_stride_code_ < id_count) {
+                this->optimized_build_scalar_codes_->Prefetch(idx[i + this->prefetch_stride_code_],
+                                                              this->prefetch_depth_code_ * 64);
+            }
+            bool need_release = false;
+            const auto* base_code = this->optimized_build_scalar_codes_->Read(idx[i], need_release);
+            if (base_code == nullptr) {
+                throw VsagException(ErrorType::INTERNAL_ERROR,
+                                    "failed to read temporary scalar RaBitQ build code");
+            }
+            try {
+                result_dists[i] = this->quantizer_->ComputeScalarCodesDistance(
+                    query_code, query_sum, base_code, (*this->optimized_build_code_sums_)[idx[i]]);
+            } catch (...) {
+                if (need_release) {
+                    this->optimized_build_scalar_codes_->Release(base_code);
+                }
+                throw;
+            }
+            if (need_release) {
+                this->optimized_build_scalar_codes_->Release(base_code);
+            }
+        }
     }
 
     void

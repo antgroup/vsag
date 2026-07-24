@@ -72,6 +72,18 @@ the PCA, base/query bit, and FHT keys for its base quantizer. The
 `fast_encode_rabitq` and `fast_encode_rabitq_rounds` are available on HGraph,
 IVF, and Pyramid and are propagated to both base and precise RaBitQ quantizers.
 
+For a normal first HGraph build with split RaBitQ and `fast_encode_rabitq=true`,
+HGraph first encodes all vectors into one unsigned-byte scalar code per dimension, together
+with the standard RaBitQ metadata and a separate 8-byte code sum per vector. It waits for
+that parallel encoding phase before starting graph tasks. Those tasks use scalar SIMD kernels
+for code-code distances; the raw inner-product kernels are independent of the configured
+`x+y` bit count, while the quantizer still applies the matching quantization range and
+center. After construction, the scalar codes are packed
+once into bit planes and written to the persistent filter and supplement stores without
+rerunning PCA, ROM/FHT, or RaBitQ quantization. The temporary scalar records and code sums
+are released before `Build` returns. For an 8-bit total code the scalar and packed
+payloads have the same size; lower total bit counts trade extra build memory for faster
+graph-distance evaluation.
 
 ```json
 {

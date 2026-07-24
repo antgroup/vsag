@@ -24,7 +24,7 @@
 #include "quantization/quantizer_headers.h"
 #include "quantization/sparse_quantization/sparse_quantizer.h"
 #include "quantization/transform_quantization/transform_quantizer_parameter.h"
-#include "rabitq_split_datacell.h"
+#include "rabitq_split_datacell_factory.h"
 #include "sparse_vector_datacell.h"
 
 namespace vsag {
@@ -32,16 +32,6 @@ namespace vsag {
 IndexCommonParam
 FlattenInterface::ExportCommonParam() {
     throw VsagException(ErrorType::INTERNAL_ERROR, "ExportCommonParam is not implemented");
-}
-
-static IOParamPtr
-convert_io_param_type(const IOParamPtr& io_param, const std::string& type_name) {
-    if (io_param == nullptr) {
-        return nullptr;
-    }
-    auto json = io_param->ToJson();
-    json[TYPE_KEY].SetString(type_name);
-    return IOParameter::GetIOParameterByJson(json);
 }
 
 template <typename QuantTemp, typename IOTemp>
@@ -197,55 +187,7 @@ make_instance(const FlattenInterfaceParamPtr& param, const IndexCommonParam& com
                 throw VsagException(ErrorType::INVALID_ARGUMENT,
                                     "rabitq split data cell does not support transform quantizer");
             }
-            // Mixed-IO path: one-bit in memory + supplement on disk. Currently
-            // we only support (block_memory_io one-bit, async_io supplement).
-            // Any other custom combination falls back to homogeneous IO.
-            if (param->supplement_io_parameter != nullptr) {
-                const auto& supp_type = param->supplement_io_parameter->GetTypeName();
-                const auto& base_type = param->io_parameter->GetTypeName();
-                if (base_type == IO_TYPE_VALUE_BLOCK_MEMORY_IO and
-                    supp_type == IO_TYPE_VALUE_ASYNC_IO) {
-#if HAVE_LIBAIO
-                    return std::make_shared<RaBitQSplitDataCell<metric, MemoryBlockIO, AsyncIO>>(
-                        param->quantizer_parameter,
-                        param->io_parameter,
-                        param->supplement_io_parameter,
-                        common_param);
-#else
-                    auto buffer_supplement_io_param = convert_io_param_type(
-                        param->supplement_io_parameter, IO_TYPE_VALUE_BUFFER_IO);
-                    return std::make_shared<RaBitQSplitDataCell<metric, MemoryBlockIO, BufferIO>>(
-                        param->quantizer_parameter,
-                        param->io_parameter,
-                        buffer_supplement_io_param,
-                        common_param);
-#endif
-                }
-#if !HAVE_LIBAIO
-                if (base_type == IO_TYPE_VALUE_BLOCK_MEMORY_IO and
-                    supp_type == IO_TYPE_VALUE_BUFFER_IO) {
-                    return std::make_shared<RaBitQSplitDataCell<metric, MemoryBlockIO, BufferIO>>(
-                        param->quantizer_parameter,
-                        param->io_parameter,
-                        param->supplement_io_parameter,
-                        common_param);
-                }
-#endif
-                if (base_type != supp_type) {
-                    throw VsagException(
-                        ErrorType::INVALID_ARGUMENT,
-                        fmt::format("rabitq split data cell does not support hybrid IO "
-                                    "combination: one-bit={}, supplement={}. Supported "
-                                    "hybrid: one-bit=block_memory_io, supplement=async_io.",
-                                    base_type,
-                                    supp_type));
-                }
-            }
-            return std::make_shared<RaBitQSplitDataCell<metric, IOTemp, IOTemp>>(
-                param->quantizer_parameter,
-                param->io_parameter,
-                param->supplement_io_parameter,
-                common_param);
+            return MakeRaBitQSplitDataCell(param, common_param);
         }
         return make_instance_with_tq<RaBitQuantizer<metric>, IOTemp, metric>(
             param, common_param, is_transform_quantizer);

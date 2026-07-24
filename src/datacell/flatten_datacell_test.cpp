@@ -18,20 +18,85 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
+#include <future>
 #include <numeric>
 #include <sstream>
+#include <thread>
+#include <tuple>
 #include <utility>
 
 #include "flatten_interface_test.h"
+#include "flatten_optimized_build_interface.h"
 #include "impl/allocator/default_allocator.h"
 #include "impl/allocator/safe_allocator.h"
+#include "impl/thread_pool/safe_thread_pool.h"
 #include "index_common_param.h"
 #include "quantization/rabitq_quantization/rabitq_quantizer.h"
 #include "unittest.h"
 
 using namespace vsag;
+
+namespace {
+
+class RejectSecondThreadPool final : public ThreadPool {
+public:
+    ~RejectSecondThreadPool() override {
+        this->WaitUntilEmpty();
+    }
+
+    void
+    WaitUntilEmpty() override {
+        release_.store(true, std::memory_order_release);
+        if (worker_.joinable()) {
+            worker_.join();
+        }
+    }
+
+    void
+    SetQueueSizeLimit(uint64_t) override {
+    }
+
+    void
+    SetPoolSize(uint64_t) override {
+    }
+
+    std::future<void>
+    Enqueue(std::function<void(void)> task) override {
+        const uint64_t submission = submissions_.fetch_add(1, std::memory_order_relaxed);
+        if (submission > 0) {
+            release_.store(true, std::memory_order_release);
+            throw std::runtime_error("injected enqueue failure");
+        }
+
+        worker_ = std::thread([this, task = std::move(task)]() mutable {
+            while (not release_.load(std::memory_order_acquire)) {
+                std::this_thread::yield();
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            task_started_.store(true, std::memory_order_release);
+            task();
+        });
+        return {};
+    }
+
+    [[nodiscard]] bool
+    TaskStarted() const {
+        return task_started_.load(std::memory_order_acquire);
+    }
+
+private:
+    std::atomic<uint64_t> submissions_{0};
+    std::atomic<bool> release_{false};
+    std::atomic<bool> task_started_{false};
+    std::thread worker_{};
+};
+
+}  // namespace
 
 void
 TestFlattenDataCell(FlattenDataCellParamPtr& param,
@@ -507,4 +572,236 @@ TEST_CASE("RaBitQSplitDataCell hybrid IO (1bit in memory, supplement on disk)",
             }
         }
     }
+}
+
+TEST_CASE("RaBitQSplitDataCell optimized scalar-code build",
+          "[ut][RaBitQSplitDataCell][optimized_build]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr uint64_t dim = 64;
+    constexpr InnerIdType count = 24;
+    auto vectors = fixtures::generate_vectors(count, dim);
+    auto query = fixtures::generate_vectors(1, dim, 29);
+    auto metric = GENERATE(
+        MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_IP, MetricType::METRIC_TYPE_COSINE);
+
+    auto bits = GENERATE(std::make_tuple(8U, 3U), std::make_tuple(7U, 2U), std::make_tuple(5U, 4U));
+    constexpr const char* param_str = R"(
+        {
+            "codes_type": "rabitq_split",
+            "io_params": {
+                "type": "memory_io"
+            },
+            "quantization_params": {
+                "type": "rabitq",
+                "rabitq_version": "split",
+                "rabitq_bits_per_dim_query": 32,
+                "rabitq_bits_per_dim_base": 8,
+                "rabitq_bits_per_dim_filter": 3,
+                "fast_encode_rabitq": true
+            }
+        }
+        )";
+
+    auto param_json = JsonType::Parse(param_str);
+    param_json["quantization_params"]["rabitq_bits_per_dim_base"].SetInt(std::get<0>(bits));
+    param_json["quantization_params"]["rabitq_bits_per_dim_filter"].SetInt(std::get<1>(bits));
+    auto param = std::make_shared<FlattenDataCellParameter>();
+    param->FromJson(param_json);
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.dim_ = dim;
+    common_param.metric_ = metric;
+
+    auto flatten = FlattenInterface::MakeInstance(param, common_param);
+    auto optimized_build = std::dynamic_pointer_cast<FlattenOptimizedBuildInterface>(flatten);
+    REQUIRE(optimized_build != nullptr);
+    flatten->Train(vectors.data(), count);
+    std::vector<uint8_t> expected_codes(flatten->code_size_ * count);
+    for (InnerIdType id = 0; id < count; ++id) {
+        REQUIRE(flatten->Encode(vectors.data() + id * dim,
+                                expected_codes.data() + id * flatten->code_size_));
+    }
+
+    const uint64_t memory_before_build = flatten->GetMemoryUsage();
+    auto finalize_pool = SafeThreadPool::FactoryDefaultThreadPool();
+    finalize_pool->SetPoolSize(4);
+    FlattenOptimizedBuildContext build_context{finalize_pool, 4};
+    REQUIRE(optimized_build->BeginOptimizedBuild(build_context));
+    REQUIRE(optimized_build->IsOptimizedBuildActive());
+    flatten->ShrinkToFit(0);
+    REQUIRE_THROWS(flatten->InsertVector(vectors.data()));
+    REQUIRE(flatten->TotalCount() == 0);
+    flatten->Resize(count);
+    flatten->BatchInsertVector(vectors.data(), count);
+    REQUIRE(std::isfinite(flatten->ComputePairVectors(0, 1)));
+    auto build_computer = optimized_build->FactoryComputerForBuild(vectors.data(), 0);
+    std::vector<InnerIdType> build_ids(count);
+    std::iota(build_ids.begin(), build_ids.end(), 0);
+    std::vector<float> pair_dists(count);
+    flatten->Query(pair_dists.data(), build_computer, build_ids.data(), count);
+    for (InnerIdType id = 0; id < count; ++id) {
+        REQUIRE(std::abs(pair_dists[id] - flatten->ComputePairVectors(0, id)) <= 1e-6F);
+    }
+    flatten->Resize(count + 8);
+    flatten->Move(1, 2);
+    std::memcpy(expected_codes.data() + 2 * flatten->code_size_,
+                expected_codes.data() + flatten->code_size_,
+                flatten->code_size_);
+    REQUIRE(std::abs(flatten->ComputePairVectors(0, 2) - flatten->ComputePairVectors(0, 1)) <=
+            1e-6F);
+    flatten->ShrinkToFit(count);
+    flatten->Resize(count + 8);
+    REQUIRE(flatten->GetMemoryUsage() > memory_before_build);
+    REQUIRE_THROWS(flatten->CalcSerializeSize());
+
+    std::vector<InnerIdType> ids(count);
+    std::iota(ids.begin(), ids.end(), 0);
+    std::vector<float> build_dists(count);
+    auto computer = flatten->FactoryComputer(query.data());
+    flatten->Query(build_dists.data(), computer, ids.data(), count);
+    for (InnerIdType id = 0; id < count; ++id) {
+        bool need_release = false;
+        const auto* full_code = flatten->GetCodesById(id, need_release);
+        REQUIRE(need_release);
+        REQUIRE(std::memcmp(full_code,
+                            expected_codes.data() + id * flatten->code_size_,
+                            flatten->code_size_) == 0);
+        flatten->Release(full_code);
+    }
+
+    const float build_pair_distance = flatten->ComputePairVectors(0, 2);
+
+    optimized_build->FinalizeOptimizedBuild();
+    REQUIRE_FALSE(optimized_build->IsOptimizedBuildActive());
+    REQUIRE(std::abs(flatten->ComputePairVectors(0, 2) - build_pair_distance) <= 1e-5F);
+    std::vector<float> split_dists(count);
+    flatten->Query(split_dists.data(), computer, ids.data(), count);
+    for (InnerIdType id = 0; id < count; ++id) {
+        std::vector<uint8_t> merged_code(flatten->code_size_);
+        REQUIRE(flatten->GetCodesById(id, merged_code.data()));
+        REQUIRE(std::memcmp(merged_code.data(),
+                            expected_codes.data() + id * flatten->code_size_,
+                            flatten->code_size_) == 0);
+        REQUIRE(std::abs(split_dists[id] - build_dists[id]) <= 1e-4F);
+    }
+
+    const uint64_t memory_after_finalize = flatten->GetMemoryUsage();
+    REQUIRE(memory_after_finalize >=
+            static_cast<uint64_t>(flatten->max_capacity_) * flatten->code_size_);
+    REQUIRE(optimized_build->BeginOptimizedBuild(build_context));
+    REQUIRE(flatten->GetMemoryUsage() > memory_after_finalize);
+    optimized_build->AbortOptimizedBuild();
+    REQUIRE_FALSE(optimized_build->IsOptimizedBuildActive());
+    REQUIRE(flatten->GetMemoryUsage() == memory_after_finalize);
+}
+
+TEST_CASE("RaBitQSplitDataCell waits submitted finalize tasks after enqueue failure",
+          "[ut][RaBitQSplitDataCell][optimized_build]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr uint64_t dim = 64;
+    constexpr InnerIdType count = 16;
+    auto vectors = fixtures::generate_vectors(count, dim);
+    constexpr const char* param_str = R"(
+        {
+            "codes_type": "rabitq_split",
+            "io_params": { "type": "memory_io" },
+            "quantization_params": {
+                "type": "rabitq",
+                "rabitq_version": "split",
+                "rabitq_bits_per_dim_query": 32,
+                "rabitq_bits_per_dim_base": 8,
+                "rabitq_bits_per_dim_filter": 3,
+                "fast_encode_rabitq": true
+            }
+        }
+        )";
+
+    auto param = std::make_shared<FlattenDataCellParameter>();
+    param->FromJson(JsonType::Parse(param_str));
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.dim_ = dim;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+
+    auto flatten = FlattenInterface::MakeInstance(param, common_param);
+    auto optimized_build = std::dynamic_pointer_cast<FlattenOptimizedBuildInterface>(flatten);
+    REQUIRE(optimized_build != nullptr);
+    flatten->Train(vectors.data(), count);
+    auto rejecting_pool = std::make_shared<RejectSecondThreadPool>();
+    auto safe_pool = std::make_shared<SafeThreadPool>(rejecting_pool);
+    FlattenOptimizedBuildContext build_context{safe_pool, 4};
+    REQUIRE(optimized_build->BeginOptimizedBuild(build_context));
+    flatten->Resize(count);
+    flatten->BatchInsertVector(vectors.data(), count);
+
+    const auto begin = std::chrono::steady_clock::now();
+    REQUIRE_THROWS(optimized_build->FinalizeOptimizedBuild());
+    const auto elapsed = std::chrono::steady_clock::now() - begin;
+    REQUIRE(elapsed >= std::chrono::milliseconds(75));
+    REQUIRE(rejecting_pool->TaskStarted());
+    rejecting_pool->WaitUntilEmpty();
+
+    REQUIRE(optimized_build->IsOptimizedBuildActive());
+    optimized_build->AbortOptimizedBuild();
+    REQUIRE_FALSE(optimized_build->IsOptimizedBuildActive());
+}
+
+TEST_CASE("RaBitQSplitDataCell finalizes mmap storage serially",
+          "[ut][RaBitQSplitDataCell][optimized_build]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr uint64_t dim = 64;
+    constexpr InnerIdType count = 16;
+    auto vectors = fixtures::generate_vectors(count, dim);
+    const std::string tmp_prefix =
+        "/tmp/vsag_rabitq_split_mmap_finalize_ut_" + std::to_string(::getpid());
+    struct TempFileCleanup {
+        explicit TempFileCleanup(std::string prefix) : prefix_(std::move(prefix)) {
+            cleanup();
+        }
+        ~TempFileCleanup() {
+            cleanup();
+        }
+        void
+        cleanup() const {
+            std::remove((prefix_ + "_onebit").c_str());
+            std::remove((prefix_ + "_supplement").c_str());
+        }
+        std::string prefix_;
+    } cleanup(tmp_prefix);
+
+    const auto param_str = fmt::format(R"({{
+        "codes_type": "rabitq_split",
+        "io_params": {{ "type": "mmap_io", "file_path": "{}" }},
+        "quantization_params": {{
+            "type": "rabitq",
+            "rabitq_version": "split",
+            "rabitq_bits_per_dim_query": 32,
+            "rabitq_bits_per_dim_base": 8,
+            "rabitq_bits_per_dim_filter": 3,
+            "fast_encode_rabitq": true
+        }}
+    }})",
+                                       tmp_prefix);
+    auto param = std::make_shared<FlattenDataCellParameter>();
+    param->FromJson(JsonType::Parse(param_str));
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.dim_ = dim;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+
+    auto flatten = FlattenInterface::MakeInstance(param, common_param);
+    auto optimized_build = std::dynamic_pointer_cast<FlattenOptimizedBuildInterface>(flatten);
+    REQUIRE(optimized_build != nullptr);
+    flatten->Train(vectors.data(), count);
+    auto rejecting_pool = std::make_shared<RejectSecondThreadPool>();
+    auto safe_pool = std::make_shared<SafeThreadPool>(rejecting_pool);
+    FlattenOptimizedBuildContext build_context{safe_pool, 4};
+    REQUIRE(optimized_build->BeginOptimizedBuild(build_context));
+    flatten->Resize(count);
+    flatten->BatchInsertVector(vectors.data(), count);
+
+    REQUIRE_NOTHROW(optimized_build->FinalizeOptimizedBuild());
+    REQUIRE_FALSE(optimized_build->IsOptimizedBuildActive());
+    REQUIRE_FALSE(rejecting_pool->TaskStarted());
+    REQUIRE(std::isfinite(flatten->ComputePairVectors(0, 1)));
 }

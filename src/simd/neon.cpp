@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #include "simd/int8_simd.h"
+#include "simd/kernels/rabitq_pack.h"
 #if defined(ENABLE_NEON)
 #include <arm_neon.h>
 
@@ -713,6 +714,75 @@ extract_4_bits_to_mask(const uint8_t* bits, uint64_t bit_offset) {
                         (mask_bits & 0x8) ? 0xFFFFFFFF : 0};
 }
 #endif
+float
+RaBitQFloatSQIP(const float* vector, const uint8_t* codes, uint64_t dim) {
+#if defined(ENABLE_NEON)
+    return simd::RaBitQFloatScalarIPImpl<simd::SQ8Traits<simd::NEON_SQ8_Tag>>(
+        vector, codes, dim, &generic::RaBitQFloatSQIP);
+#else
+    return generic::RaBitQFloatSQIP(vector, codes, dim);
+#endif
+}
+
+uint64_t
+RaBitQCodeCodeIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t dim) {
+#if defined(ENABLE_NEON)
+    constexpr uint64_t kBytesPerIteration = 16;
+    constexpr uint64_t kIterationsPerBlock = 128;
+    uint64_t result = 0;
+    uint64_t i = 0;
+    while (i + kBytesPerIteration <= dim) {
+        uint32x4_t sum = vdupq_n_u32(0);
+        uint64_t iterations = 0;
+        for (; iterations < kIterationsPerBlock and i + kBytesPerIteration <= dim;
+             ++iterations, i += kBytesPerIteration) {
+            const uint8x16_t code1 = vld1q_u8(codes1 + i);
+            const uint8x16_t code2 = vld1q_u8(codes2 + i);
+            sum = vpadalq_u16(sum, vmull_u8(vget_low_u8(code1), vget_low_u8(code2)));
+            sum = vpadalq_u16(sum, vmull_high_u8(code1, code2));
+        }
+        result += static_cast<uint64_t>(vaddvq_u32(sum));
+    }
+    return result + generic::RaBitQCodeCodeIP(codes1 + i, codes2 + i, dim - i);
+#else
+    return generic::RaBitQCodeCodeIP(codes1, codes2, dim);
+#endif
+}
+void
+RaBitQPackScalarToSplitPlanes(const uint8_t* scalar_codes,
+                              uint8_t* filter_planes,
+                              uint8_t* supplement_planes,
+                              uint64_t dim,
+                              uint32_t total_bits,
+                              uint32_t filter_bits) {
+#if defined(ENABLE_NEON)
+    const uint64_t plane_bytes = (dim + 7) / 8;
+    const uint8_t weights_data[8] = {1, 2, 4, 8, 16, 32, 64, 128};
+    const uint8x8_t weights = vld1_u8(weights_data);
+    const uint8x8_t one = vdup_n_u8(1);
+    uint64_t d = 0;
+    for (; d + 8 <= dim; d += 8) {
+        const uint8x8_t values = vld1_u8(scalar_codes + d);
+        const uint64_t byte_index = d / 8;
+        for (uint32_t bit = 0; bit < total_bits; ++bit) {
+            const int8x8_t shift = vdup_n_s8(-static_cast<int8_t>(bit));
+            const uint8x8_t bits = vand_u8(vshl_u8(values, shift), one);
+            const uint16x4_t sum16 = vpaddl_u8(vmul_u8(bits, weights));
+            const uint32x2_t sum32 = vpaddl_u16(sum16);
+            const uint64x1_t sum64 = vpaddl_u32(sum32);
+            auto* plane = simd::RaBitQGetSplitPlane(
+                filter_planes, supplement_planes, plane_bytes, total_bits, filter_bits, bit);
+            plane[byte_index] = static_cast<uint8_t>(vget_lane_u64(sum64, 0));
+        }
+    }
+    simd::RaBitQPackScalarToSplitPlanesTail(
+        scalar_codes, filter_planes, supplement_planes, dim, total_bits, filter_bits, d);
+#else
+    generic::RaBitQPackScalarToSplitPlanes(
+        scalar_codes, filter_planes, supplement_planes, dim, total_bits, filter_bits);
+#endif
+}
+
 uint32_t
 RaBitQSQ4UBinaryIP(const uint8_t* codes, const uint8_t* bits, uint64_t dim) {
 #if defined(ENABLE_NEON)

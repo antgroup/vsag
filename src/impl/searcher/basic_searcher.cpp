@@ -83,7 +83,8 @@ BasicSearcher::Search(const GraphInterfacePtr& graph,
                                              inner_search_param,
                                              label_table,
                                              ctx,
-                                             rabitq_lower_bound_candidates);
+                                             rabitq_lower_bound_candidates,
+                                             nullptr);
     }
     return this->search_impl<RANGE_SEARCH>(graph,
                                            flatten,
@@ -92,7 +93,40 @@ BasicSearcher::Search(const GraphInterfacePtr& graph,
                                            inner_search_param,
                                            label_table,
                                            ctx,
-                                           rabitq_lower_bound_candidates);
+                                           rabitq_lower_bound_candidates,
+                                           nullptr);
+}
+
+DistHeapPtr
+BasicSearcher::SearchWithPresetComputer(const GraphInterfacePtr& graph,
+                                        const FlattenInterfacePtr& flatten,
+                                        const VisitedListPtr& vl,
+                                        const void* query,
+                                        const InnerSearchParam& inner_search_param,
+                                        const LabelTablePtr& label_table,
+                                        QueryContext* ctx,
+                                        DistanceRecordVector* rabitq_lower_bound_candidates,
+                                        const ComputerInterfacePtr& preset_computer) const {
+    if (inner_search_param.search_mode == KNN_SEARCH) {
+        return this->search_impl<KNN_SEARCH>(graph,
+                                             flatten,
+                                             vl,
+                                             query,
+                                             inner_search_param,
+                                             label_table,
+                                             ctx,
+                                             rabitq_lower_bound_candidates,
+                                             preset_computer);
+    }
+    return this->search_impl<RANGE_SEARCH>(graph,
+                                           flatten,
+                                           vl,
+                                           query,
+                                           inner_search_param,
+                                           label_table,
+                                           ctx,
+                                           rabitq_lower_bound_candidates,
+                                           preset_computer);
 }
 
 DistHeapPtr
@@ -323,7 +357,8 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                            const InnerSearchParam& inner_search_param,
                            const LabelTablePtr& label_table,
                            QueryContext* ctx,
-                           DistanceRecordVector* rabitq_lower_bound_candidates) const {
+                           DistanceRecordVector* rabitq_lower_bound_candidates,
+                           const ComputerInterfacePtr& preset_computer) const {
     // set customize query alloctor
     Allocator* alloc = select_query_allocator(ctx, allocator_);
 
@@ -334,7 +369,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
         return top_candidates;
     }
 
-    auto computer = flatten->FactoryComputer(query);
+    auto computer = preset_computer != nullptr ? preset_computer : flatten->FactoryComputer(query);
 
     auto is_id_allowed = inner_search_param.is_inner_id_allowed;
     auto ep = inner_search_param.ep;

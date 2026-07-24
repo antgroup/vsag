@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,23 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#pragma once
+#include "rabitq_split_datacell_factory_impl.h"
 
-#include "binary_op.h"
-#include "bit_op.h"
-#include "butterfly.h"
-#include "compute_batch4.h"
-#include "compute_ip.h"
-#include "compute_l2.h"
-#include "half_compute.h"
-#include "int8_compute.h"
-#include "normalize.h"
-#include "pq_distance.h"
-#include "rabitq_compute.h"
-#include "rabitq_scalar_compute.h"
-#include "reduce_add.h"
-#include "scalar_op.h"
-#include "sq4_compute.h"
-#include "sq4_uniform_compute.h"
-#include "sq8_compute.h"
-#include "sq8_uniform_compute.h"
+namespace vsag {
+
+FlattenInterfacePtr
+make_ra_bit_q_split_data_cell_l2(const FlattenInterfaceParamPtr& param,
+                                 const IndexCommonParam& common_param) {
+    return MakeRaBitQSplitDataCellForMetric<MetricType::METRIC_TYPE_L2SQR>(param, common_param);
+}
+
+}  // namespace vsag

@@ -153,7 +153,7 @@ public:
     PackIntoPlanes(const uint8_t* src, uint8_t* dst) const;
 
     float
-    RaBitQFloatSQIPByPlanes(const float* query, const uint8_t* planes) const;
+    RaBitQFloatSQIPByPlanes(const float* query, const uint8_t* planes, float query_sum) const;
 
     float
     RaBitQFloatSQIPBySplitCode(const float* query,
@@ -165,7 +165,8 @@ public:
                                const uint8_t* filter_code,
                                const uint8_t* supplement_code,
                                uint32_t filter_bits,
-                               uint32_t supplement_bits) const;
+                               uint32_t supplement_bits,
+                               float query_sum) const;
 
     [[nodiscard]] uint64_t
     StoredPlaneIndex(uint32_t logical_bit) const;
@@ -178,6 +179,39 @@ public:
 
     [[nodiscard]] bool
     SupportSplitCodeStorage() const;
+
+    [[nodiscard]] bool
+    SupportScalarCodeBuild() const {
+        return SupportSplitCodeStorage() and fast_encode_rabitq_ and num_bits_per_dim_base_ > 1;
+    }
+
+    [[nodiscard]] uint64_t
+    ScalarCodeMetaOffset() const;
+
+    [[nodiscard]] uint64_t
+    GetScalarCodeSize() const;
+
+    bool
+    EncodeOneToScalarCode(const float* data, uint8_t* scalar_code, uint64_t& code_sum) const;
+
+    void
+    PackScalarCode(const uint8_t* scalar_code, uint8_t* full_code) const;
+
+    void
+    PackScalarCodeToSplitCode(const uint8_t* scalar_code,
+                              uint8_t* one_bit_code,
+                              uint8_t* supplement_code) const;
+
+    void
+    ComputeDistWithScalarCode(Computer<RaBitQuantizer>& computer,
+                              const uint8_t* scalar_code,
+                              float* dist) const;
+
+    [[nodiscard]] float
+    ComputeScalarCodesDistance(const uint8_t* scalar_code1,
+                               uint64_t code_sum1,
+                               const uint8_t* scalar_code2,
+                               uint64_t code_sum2) const;
 
     [[nodiscard]] uint64_t
     GetOneBitCodeSize() const;
@@ -292,6 +326,15 @@ public:
     AlignCodeField(uint64_t size) const;
 
 private:
+    bool
+    EncodeOneInternal(const float* data,
+                      uint8_t* codes,
+                      uint8_t* scalar_code,
+                      uint64_t* code_sum) const;
+
+    uint64_t
+    UnpackScalarCode(const uint8_t* codes, uint8_t* scalar_code) const;
+
     [[nodiscard]] norm_type
     ComputeScalarCodeNorm(const uint8_t* scalar_codes,
                           uint32_t code_bits,

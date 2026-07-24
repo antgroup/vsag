@@ -66,6 +66,17 @@
 `fast_encode_rabitq` 和 `fast_encode_rabitq_rounds` 同时适用于 HGraph、IVF
 和 Pyramid，并会传播给 base 与 precise RaBitQ 量化器。
 
+对于启用 split RaBitQ 和 `fast_encode_rabitq=true` 的普通首次 HGraph
+构建时，HGraph 会先并行把所有向量编码为逐维一个无符号字节的
+scalar code，同时保存标准 RaBitQ metadata，并在独立数组中为每个
+向量保存 8 字节 code sum。编码完成后才启动构图任务，使用 scalar SIMD
+计算 code-code 距离。raw inner-product 内核不感知配置的 `x+y` 总位数，
+量化器仍会应用对应的量化范围和中心值。构图完成后，scalar code 只执行
+一次 bit-plane pack，并写入最终 filter 与 supplement 存储，不会重新执行
+PCA、ROM/FHT 或 RaBitQ 量化。scalar record 与 code-sum 数组都会在
+`Build` 返回前释放。总位数为 8 时，scalar 与 packed payload 大小相同；
+总位数更低时会以额外构建内存换取更快的构图距离计算。
+
 ```json
 {
     "dtype": "float32",
