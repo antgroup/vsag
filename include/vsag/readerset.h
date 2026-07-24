@@ -131,6 +131,20 @@ public:
      */
     [[nodiscard]] virtual uint64_t
     Size() const = 0;
+
+    /**
+     * @brief Returns memory owned by the reader, excluding the underlying data source.
+     *
+     * Reader implementations with resident caches should override this method so indexes that
+     * retain the reader can include that memory in their usage statistics. Overrides must be
+     * thread-safe because the method may be called concurrently with reads.
+     *
+     * @return Resident memory usage in bytes. The default implementation returns zero.
+     */
+    [[nodiscard]] virtual uint64_t
+    GetMemoryUsage() const {
+        return 0;
+    }
 };
 
 /**

@@ -2312,6 +2312,67 @@ TestHGraphReaderIO(const fixtures::HGraphTestIndexPtr& test_index,
 
 HGRAPH_PR_DAILY_CASE("HGraph Reader IO", "[ft][serialize][hgraph]", TestHGraphReaderIO)
 
+TEST_CASE("HGraph Reader Memory Usage", "[ft][memory][hgraph]") {
+    constexpr uint64_t reader_memory = 64ULL * 1024ULL * 1024ULL;
+    constexpr int64_t dim = 16;
+    constexpr int64_t count = 200;
+    const auto build_param = R"({
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": 16,
+        "index_param": {
+            "base_quantization_type": "sq8",
+            "precise_quantization_type": "fp32",
+            "use_reorder": true,
+            "max_degree": 16,
+            "ef_construction": 100
+        }
+    })";
+    const auto reader_param = R"({
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": 16,
+        "index_param": {
+            "base_quantization_type": "sq8",
+            "precise_quantization_type": "fp32",
+            "use_reorder": true,
+            "max_degree": 16,
+            "ef_construction": 100,
+            "base_io_type": "reader_io",
+            "precise_io_type": "reader_io",
+            "graph_io_type": "reader_io"
+        }
+    })";
+
+    auto dataset = fixtures::HGraphTestIndex::pool.GetDatasetAndCreate(dim, count, "l2");
+    auto source = fixtures::TestIndex::TestFactory("hgraph", build_param, true);
+    fixtures::TestIndex::TestBuildIndex(source, dataset, true);
+    auto binary_set = source->Serialize().value();
+
+    auto restored = fixtures::TestIndex::TestFactory("hgraph", reader_param, true);
+    vsag::ReaderSet readers;
+    readers.Set("hgraph",
+                std::make_shared<fixtures::TestReader>(binary_set.Get("hgraph"), reader_memory));
+    REQUIRE(restored->Deserialize(readers).has_value());
+
+    auto detail = restored->GetMemoryUsageDetail();
+    REQUIRE(detail.at("reader") == reader_memory);
+    auto mutable_memory = restored->GetMemoryUsage();
+    REQUIRE(restored->SetImmutable().has_value());
+    auto immutable_memory = restored->GetMemoryUsage();
+    REQUIRE(immutable_memory < mutable_memory);
+
+    detail = restored->GetMemoryUsageDetail();
+    REQUIRE(detail.at("neighbors_mutex") == 0);
+    REQUIRE(detail.at("reader") == reader_memory);
+    uint64_t detail_sum = 0;
+    for (const auto& [_, memory] : detail) {
+        detail_sum += memory;
+    }
+    REQUIRE(immutable_memory >= detail_sum);
+    REQUIRE(immutable_memory - detail_sum < 4096);
+}
+
 static void
 TestHGraphClone(const fixtures::HGraphTestIndexPtr& test_index,
                 const fixtures::HGraphResourcePtr& resource) {

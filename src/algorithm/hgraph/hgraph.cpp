@@ -538,6 +538,7 @@ HGraph::SetImmutable() {
     this->parallel_searcher_->SetMutexArray(empty_mutex);
     this->neighbors_mutex_ = empty_mutex;
     this->immutable_.store(true, std::memory_order_release);
+    this->cal_memory_usage();
 }
 
 void
@@ -549,6 +550,8 @@ HGraph::SetIO(const std::shared_ptr<Reader> reader) {
     }
     basic_flatten_codes_->InitIO(reader_param);
     bottom_graph_->InitIO(reader_param);
+    this->reader_ = reader;
+    this->precise_reader_.reset();
 }
 
 void
@@ -556,6 +559,7 @@ HGraph::SetPreciseCodesIO(const std::shared_ptr<Reader>& reader) {
     auto reader_param = std::make_shared<ReaderIOParameter>();
     reader_param->reader = reader;
     high_precise_codes_->InitIO(reader_param);
+    this->precise_reader_ = reader;
 }
 
 const static uint64_t QUERY_SAMPLE_SIZE = 10;
@@ -745,11 +749,25 @@ HGraph::GetAttributeSetByInnerId(InnerIdType inner_id, AttributeSet* attr) const
     this->attr_filter_index_->GetAttribute(0, inner_id, attr);
 }
 
+uint64_t
+HGraph::GetMemoryUsage() const {
+    auto memory = InnerIndexInterface::GetMemoryUsage();
+    if (this->pool_ != nullptr) {
+        memory += this->pool_->GetMemoryUsage();
+    }
+    if (this->reader_ != nullptr) {
+        memory += this->reader_->GetMemoryUsage();
+    }
+    if (this->precise_reader_ != nullptr && this->precise_reader_.get() != this->reader_.get()) {
+        memory += this->precise_reader_->GetMemoryUsage();
+    }
+    return memory;
+}
+
 void
 HGraph::cal_memory_usage() {
     auto memory = sizeof(HGraph);
     memory += this->neighbors_mutex_->GetMemoryUsage();
-    memory += this->pool_->GetMemoryUsage();
     memory += this->label_table_->GetMemoryUsage();
     memory += this->basic_flatten_codes_->GetMemoryUsage();
     if (this->code_slot_map_ != nullptr) {
@@ -770,7 +788,6 @@ HGraph::cal_memory_usage() {
     if (this->create_new_raw_vector_ and this->raw_vector_ != nullptr) {
         memory += raw_vector_->GetMemoryUsage();
     }
-
     std::unique_lock lock(this->memory_usage_mutex_);
     this->current_memory_usage_.store(memory);
 }
