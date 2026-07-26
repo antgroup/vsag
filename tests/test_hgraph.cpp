@@ -1237,24 +1237,13 @@ TEST_CASE("(PR) HGraph Reasoning Zero Overhead When Disabled", "[ft][hgraph][rea
         ->Float32Vectors(dataset->base_->GetFloat32Vectors())
         ->Owner(false);
 
-    constexpr int warmup_rounds = 20;
-    constexpr int measure_rounds = 100;
+    constexpr uint64_t warmup_rounds = 20;
+    constexpr uint64_t measure_rounds = 20;
+    constexpr uint64_t measure_samples = 7;
+    // CI runs this test beside six other functional-test processes. Alternating the order and
+    // taking the median prevents one scheduler interruption from looking like request overhead.
 
     std::string search_params = fmt::format(fixtures::search_param_tmp, 100, false);
-
-    for (int i = 0; i < warmup_rounds; ++i) {
-        index->KnnSearch(query, 10, search_params, vsag::BitsetPtr(nullptr));
-    }
-
-    auto start_baseline = std::chrono::steady_clock::now();
-    for (int i = 0; i < measure_rounds; ++i) {
-        auto r = index->KnnSearch(query, 10, search_params, vsag::BitsetPtr(nullptr));
-        REQUIRE(r.has_value());
-    }
-    auto end_baseline = std::chrono::steady_clock::now();
-    auto baseline_us =
-        std::chrono::duration_cast<std::chrono::microseconds>(end_baseline - start_baseline)
-            .count();
 
     vsag::SearchRequest req_no_reasoning;
     req_no_reasoning.topk_ = 10;
@@ -1262,23 +1251,43 @@ TEST_CASE("(PR) HGraph Reasoning Zero Overhead When Disabled", "[ft][hgraph][rea
     req_no_reasoning.query_ = query;
     req_no_reasoning.expected_labels_ = {};
 
-    for (int i = 0; i < warmup_rounds; ++i) {
+    for (uint64_t i = 0; i < warmup_rounds; ++i) {
+        index->KnnSearch(query, 10, search_params, vsag::BitsetPtr(nullptr));
         index->SearchWithRequest(req_no_reasoning);
     }
 
-    auto start_no_reasoning = std::chrono::steady_clock::now();
-    for (int i = 0; i < measure_rounds; ++i) {
-        auto r = index->SearchWithRequest(req_no_reasoning);
-        REQUIRE(r.has_value());
-    }
-    auto end_no_reasoning = std::chrono::steady_clock::now();
-    auto no_reasoning_us =
-        std::chrono::duration_cast<std::chrono::microseconds>(end_no_reasoning - start_no_reasoning)
-            .count();
+    auto measure = [&](const auto& search) {
+        auto start = std::chrono::steady_clock::now();
+        for (uint64_t i = 0; i < measure_rounds; ++i) {
+            auto result = search();
+            REQUIRE(result.has_value());
+        }
+        return std::chrono::steady_clock::now() - start;
+    };
+    auto baseline_search = [&] {
+        return index->KnnSearch(query, 10, search_params, vsag::BitsetPtr(nullptr));
+    };
+    auto no_reasoning_search = [&] { return index->SearchWithRequest(req_no_reasoning); };
 
-    const auto baseline_denominator = std::max(baseline_us, decltype(baseline_us){1});
-    double ratio = static_cast<double>(no_reasoning_us) / static_cast<double>(baseline_denominator);
-    REQUIRE(ratio < 1.5);
+    std::vector<double> ratios;
+    ratios.reserve(measure_samples);
+    for (uint64_t sample = 0; sample < measure_samples; ++sample) {
+        std::chrono::steady_clock::duration baseline_duration;
+        std::chrono::steady_clock::duration no_reasoning_duration;
+        if (sample % 2 == 0) {
+            baseline_duration = measure(baseline_search);
+            no_reasoning_duration = measure(no_reasoning_search);
+        } else {
+            no_reasoning_duration = measure(no_reasoning_search);
+            baseline_duration = measure(baseline_search);
+        }
+        ratios.push_back(static_cast<double>(no_reasoning_duration.count()) /
+                         static_cast<double>(std::max(baseline_duration.count(),
+                                                      decltype(baseline_duration.count()){1})));
+    }
+
+    std::sort(ratios.begin(), ratios.end());
+    REQUIRE(ratios[measure_samples / 2] < 1.5);
 }
 
 static void
