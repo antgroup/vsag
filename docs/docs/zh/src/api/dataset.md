@@ -54,7 +54,8 @@ DatasetPtr DeepCopy(Allocator* allocator = nullptr) const;  // 独立副本
 
 ## 向量负载
 
-一个 dataset 只携带一种向量表示，需与索引的 `dtype` 匹配：
+一个 dataset 只携带一种向量表示。需要同时根据索引的标量 `dtype` 与记录布局 `repr`
+选择对应的 payload setter：
 
 | Setter | Getter | 元素类型 | 配合使用 |
 |--------|--------|----------|----------|
@@ -64,6 +65,8 @@ DatasetPtr DeepCopy(Allocator* allocator = nullptr) const;  // 独立副本
 | `SparseVectors(const SparseVector*)` | `GetSparseVectors()` | [`SparseVector`](#sparsevector) | `dtype: sparse`（SINDI） |
 
 稠密向量按行主序排列：元素 `i` 的维度 `j` 位于 `vectors[i * dim + j]`。
+多向量数据集使用 `repr: multi_vector`，并配合标量 `dtype`（通常为 `float32`）及下文的
+多向量 payload。
 
 ### 多向量负载
 
@@ -84,10 +87,11 @@ DatasetPtr DeepCopy(Allocator* allocator = nullptr) const;  // 独立副本
 | `ExtraInfoSize(int64_t)` | `GetExtraInfoSize()` | `int64_t` | 每个 extra-info 数据块的字节数。 |
 | `Paths(const std::string*)` | `GetPaths()` | `const std::string*` | 层级路径（Pyramid）。默认层级。 |
 | `Paths(const std::string& hierarchy, const std::string*)` | `GetPaths(const std::string& hierarchy)` | `const std::string*` | 命名层级的路径。 |
-| `SourceID(const std::string*)` | `GetSourceID()` | `const std::string*` | 可选的来源标识。 |
+| `SourceID(const std::string*)` | `GetSourceID()` | `const std::string*` | 每个元素可选的稳定来源标识；HGraph 用它跨快照匹配构建缓存条目。 |
 
-见 [属性过滤（混合搜索）](../advanced/attribute_filter.md) 与
-[Extra Info（附加信息）](../advanced/extra_info.md)。
+见 [属性过滤（混合搜索）](../advanced/attribute_filter.md)、
+[Extra Info（附加信息）](../advanced/extra_info.md)与
+[HGraph 构建缓存](../advanced/build_cache.md)。
 
 ## 诊断负载
 

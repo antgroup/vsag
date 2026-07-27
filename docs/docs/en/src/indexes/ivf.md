@@ -88,8 +88,8 @@ Build-time parameters live under `index_param`. See
 | `fast_encode_rabitq_rounds` | int | `6` | CAQ adjustment rounds; allowed range is `[1, 32]` |
 | `use_reorder` | bool | `false` | Keep a high-precision copy and re-rank after the coarse scan |
 | `precise_quantization_type` | string | `"fp32"` | Quantizer used for reordering (with `use_reorder: true`) |
-| `base_io_type` | string | `"memory_io"` | Storage backend for coarse codes |
-| `precise_io_type` | string | `"block_memory_io"` | Storage backend for precise codes (`memory_io`, `block_memory_io`, `mmap_io`, `buffer_io`, `async_io`, `reader_io`) |
+| `base_io_type` | string | `"memory_io"` | Storage backend for coarse codes; supports `uring_io` when built with liburing |
+| `precise_io_type` | string | `"block_memory_io"` | Storage backend for precise codes (`memory_io`, `block_memory_io`, `mmap_io`, `buffer_io`, `async_io`, `uring_io`, `reader_io`) |
 | `precise_file_path` | string | `""` | File path when the precise IO type is disk-backed |
 
 A rule of thumb for `buckets_count` is `sqrt(N)` to `4 * sqrt(N)` where `N` is the

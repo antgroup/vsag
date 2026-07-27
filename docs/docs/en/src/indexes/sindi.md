@@ -16,8 +16,8 @@ pairs and is the only VSAG index that accepts `dtype: "sparse"`.
    (`window_size`). Within each window, an inverted list per term maps a term id
    to the `(doc_id, value)` pairs that mention it.
 2. **Optional pruning and quantization.** During construction, `doc_prune_ratio`
-   drops low-weight terms per document, and `use_quantization` compresses the term
-   values to shrink memory further.
+   drops low-weight terms per document. `use_quantization: true` stores SQ8 values,
+   while `use_quantization: "fp16"` stores half-precision values.
 3. **Scoring.** At query time, SINDI iterates the non-zero terms of the query,
    walks the corresponding inverted lists in each window, aggregates contributions
    into a max-heap of size `n_candidate`, and returns the top-k. When `use_reorder`
@@ -75,16 +75,62 @@ and `metric_type` **must** be `"ip"`.
 | `term_id_limit` | int | `1000000` | Upper bound on term id values (≥ max term id + 1, up to 50 000 000). |
 | `window_size` | int | `50000` | Documents per window (range: 10 000 – 60 000). |
 | `doc_prune_ratio` | float | `0.0` | Fraction of lowest-weight terms dropped per doc at build time (0.0 – 0.9). |
-| `use_quantization` | bool | `false` | Quantize stored term values to cut memory; when enabled, uses 8-bit scalar quantization (SQ8). |
+| `use_quantization` | bool or string | `false` | `false` stores FP32 values, `true` stores SQ8 values, and `"fp16"` stores FP16 values. |
 | `use_reorder` | bool | `false` | Keep a forward store and rescore candidates after coarse SINDI scoring. |
 | `rerank_type` | string | `"fp32"` | Forward-store type used when `use_reorder` is enabled. `fp32` keeps exact values; `dmq8` stores compressed 8-bit DMQ codes. |
 | `remap_term_ids` | bool | `false` | Remap term IDs before indexing; useful when term IDs are sparse or have large gaps. |
 | `avg_doc_term_length` | int | `100` | Hint for memory estimation only. |
+| `immutable` | bool | `false` | Build or load the compact read-only runtime. `Build()` compacts completed windows as it proceeds to reduce peak memory; incremental `Add()` is rejected. |
 
 > **`dim` vs `term_id_limit`.** For the sparse vector `{0:0.1, 2:0.5, 177:0.8}`,
 > `dim` is `3` (three non-zero entries) while `term_id_limit` must be ≥ `178`
 > (largest term id + 1). Sizing `term_id_limit` to your vocabulary is the most
 > common first-time mistake.
+
+### Sparse value formats
+
+`use_quantization` retains its legacy boolean behavior and also accepts one string value:
+
+| Value | Stored value format | Trade-off |
+| --- | --- | --- |
+| `false` | FP32 | Highest value precision and largest posting payload |
+| `true` | SQ8 | Smallest posting values; quantization range is learned during the initial build |
+| `"fp16"` | FP16 | Half the FP32 value bytes without SQ8 range calibration |
+
+Indexes built with `false` or `true` retain the legacy serialization representation. Older VSAG
+versions cannot parse a SINDI index that uses the new `"fp16"` value format; upgrade readers
+before deploying FP16 artifacts.
+
+### Immutable low-memory build
+
+Set `immutable: true` when the completed SINDI index is read-only:
+
+```json
+{
+    "dtype": "sparse",
+    "metric_type": "ip",
+    "dim": 1024,
+    "index_param": {
+        "term_id_limit": 30000,
+        "window_size": 50000,
+        "use_quantization": "fp16",
+        "remap_term_ids": true,
+        "immutable": true
+    }
+}
+```
+
+During `Build()`, each completed mutable window is compacted into an immutable payload and the
+temporary window is released before construction continues. In the Sparse4M FP16 measurement
+reported with this feature, peak build memory fell from 27.03 GB to 6.08 GB (77.51% lower), while
+build time increased from about 330 seconds to 599 seconds. Treat these figures as workload-specific
+evidence, not a capacity guarantee.
+
+The immutable runtime supports KNN and range search plus legacy `Serialize`/`Deserialize`.
+It rejects incremental `Add`, `GetSparseVectorByInnerId`, `CalcDistanceById`, and
+`CalDistanceById`. Streaming serialization is not supported for immutable SINDI; use the matching
+legacy serialization APIs or keep the index mutable when the streaming format is required.
+The serialized index must be loaded into a SINDI created with the same `immutable` setting.
 
 ## Search parameters
 
@@ -115,10 +161,12 @@ auto result = index->KnnSearch(
 - Sparse retrieval with BM25, SPLADE, uniCOIL, or similar learned-sparse encoders.
 - Hybrid dense+sparse pipelines where SINDI handles the sparse leg in parallel with
   HGraph / IVF for dense embeddings.
-- Memory-constrained deployments of sparse corpora (`use_quantization: true`
-  roughly halves inverted-list memory with a small recall loss; `use_reorder:
+- Memory-constrained deployments of sparse corpora (`use_quantization: true` selects SQ8,
+  while `"fp16"` halves FP32 value bytes; `use_reorder:
   true` trades forward-store memory for recall, and `rerank_type: "dmq8"` reduces
   that forward-store overhead).
+- Read-only snapshots that need lower peak build memory (`immutable: true`), accepting slower
+  construction and no incremental writes.
 
 SINDI does **not** accept dense vectors and supports only inner-product similarity.
 Range search and id-based filtering are supported; see the example for usage.
@@ -156,6 +204,9 @@ When `rerank_type` is `dmq8`, codebooks are fixed by the initial build, so incre
      range, such as hash-based tokenizers, external vocabulary IDs, or vocabularies
      with large gaps, enable `remap_term_ids: true`. This avoids managing many
      empty posting lists and helps stay below the `term_id_limit` ceiling.
+5. Read-only low-memory build. Add `immutable: true`, normally together with
+     `use_quantization: "fp16"` and `remap_term_ids: true`, when peak build memory matters more
+     than build speed and the finished index will not receive incremental writes.
 
 ## Mark remove
 

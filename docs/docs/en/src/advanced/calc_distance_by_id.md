@@ -54,7 +54,11 @@ CalDistanceById(const DatasetPtr& query,
                 bool calculate_precise_distance = true,
                 int64_t topk = -1) const;
 ```
-For `DatasetPtr` queries with `NumElements() > 1`, check `SUPPORT_BATCH_CALC_DISTANCE_BY_ID` first. `count` is the number of IDs per query, `ids` must contain `NumElements() * count` row-major IDs, and returned distances use the same layout: `distances[q * count + j]` corresponds to `ids[q * count + j]`. When `topk > 0`, each query returns `min(topk, count)` entries sorted by distance in ascending order, and the result also contains the corresponding IDs; invalid IDs (`-1` distances) are ordered after valid distances and only appear if there are not enough valid IDs.
+For `DatasetPtr` queries with `NumElements() > 1`, check
+`SUPPORT_BATCH_CALC_DISTANCE_BY_ID` first. `count` is the number of IDs per query, `ids` must
+contain `NumElements() * count` row-major IDs, and returned distances use the same layout. When
+`topk > 0`, each query returns `min(topk, count)` entries sorted by distance in ascending order,
+and the result also contains the corresponding IDs.
 
 
 Declarations live in
@@ -71,8 +75,9 @@ Declarations live in
 ### Return Semantics
 
 - The single-ID overload returns the distance as a `float`.
-- With `topk == -1`, the batch overload returns a `DatasetPtr` whose `GetDistances()` array has
-  `count` entries aligned with the input `ids`, and it does not return IDs.
+- With `topk == -1`, the raw-pointer batch overload returns one row with `count` distances. The
+  `DatasetPtr` overload returns `NumElements()` rows with `count` distances each. Both preserve
+  input order and do not return IDs.
 - With `topk > 0`, the batch overload returns the smallest `min(topk, count)` distances per
   query, sorted ascending, and `GetIds()` contains the corresponding IDs. Invalid IDs (`-1`
   distances) are ordered after valid distances and only appear if there are not enough valid IDs.
@@ -109,6 +114,45 @@ if (result.has_value()) {
 }
 ```
 
+## Multiple Queries
+
+The `DatasetPtr` batch overload accepts more than one query when the index advertises
+`SUPPORT_BATCH_CALC_DISTANCE_BY_ID`. Candidate IDs and outputs are row-major. For LazyHGraph, the
+call is delegated to the active internal index, so actual support can change after a phase
+transition even though the wrapper advertises the feature; handle a returned error:
+
+```cpp
+// Two dense queries and three candidate IDs per query.
+auto queries = vsag::Dataset::Make()
+                   ->NumElements(2)
+                   ->Dim(dim)
+                   ->Float32Vectors(query_vectors.data())
+                   ->Owner(false);
+std::vector<int64_t> candidate_ids = {
+    10, 11, 12,  // candidates for query 0
+    20, 21, 22   // candidates for query 1
+};
+
+if (index->CheckFeature(vsag::SUPPORT_BATCH_CALC_DISTANCE_BY_ID)) {
+    auto result = index->CalDistanceById(queries, candidate_ids.data(), 3, true, /*topk=*/2);
+    if (result.has_value()) {
+        auto batch = result.value();
+        // batch has NumElements() == 2 and Dim() == 2.
+        for (int64_t q = 0; q < batch->GetNumElements(); ++q) {
+            for (int64_t j = 0; j < batch->GetDim(); ++j) {
+                const int64_t offset = q * batch->GetDim() + j;
+                std::cout << batch->GetIds()[offset] << ": "
+                          << batch->GetDistances()[offset] << '\n';
+            }
+        }
+    }
+}
+```
+
+With `topk == -1`, `GetDim()` is `count` and position `q * count + j` corresponds to input ID
+`ids[q * count + j]`. With positive `topk`, the row stride is `GetDim()`, and each row contains
+the closest valid candidates followed by invalid IDs only when fewer than `topk` valid IDs exist.
+
 A runnable example is provided in
 [`examples/cpp/306_feature_calculate_distance_by_id.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/306_feature_calculate_distance_by_id.cpp).
 
@@ -127,13 +171,16 @@ auto d = index->CalcDistanceById(query, /*id=*/42);
 
 ## Support Matrix
 
-| Index type   | Dense overload (`const float*`) | DatasetPtr overload | Notes |
-|--------------|---------------------------------|---------------------|-------|
-| hgraph       | yes                             | yes                 | Honors `calculate_precise_distance`. |
-| ivf          | yes                             | yes (default loop)  | |
-| brute_force  | yes                             | yes (default loop)  | Always precise (no quantization). |
-| pyramid      | yes                             | yes (default loop)  | |
-| sindi        | no                              | yes                 | Sparse vectors only. |
+| Index type | Single-ID dense (`const float*`) | Single-ID DatasetPtr | Multi-query DatasetPtr batch | Notes |
+|------------|-----------------------------------|----------------------|------------------------------|-------|
+| hgraph | yes | yes | when the feature is advertised | Honors `calculate_precise_distance`. |
+| ivf | yes | yes | when the feature is advertised | Availability depends on retained precise storage. |
+| brute_force | yes | yes | when the feature is advertised | Dense single-vector indexes only. |
+| pyramid | yes | yes | yes | |
+| lazy_hgraph | yes | no | depends on the active internal index | DatasetPtr batch calls delegate to the active BruteForce/HGraph; availability can change after a phase transition. |
+| sindi | no | yes | yes | Sparse vectors only. |
+| hnsw | yes | no | no | Dense batch supports `topk == -1` only. |
+| diskann | yes | no | no | Dense batch supports `topk == -1` only. |
 
 Indexes that do not implement the API surface for a given overload return an
 `UNSUPPORTED_INDEX_OPERATION` error.

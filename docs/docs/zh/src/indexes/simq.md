@@ -109,10 +109,11 @@ SIMQ 专属构建参数放在 `index_param` 下。`dim`、`dtype`、`metric_type
 | `rerank_k` | int | `100` | 构建时进入精排的候选文档数量上限 |
 
 - **`dim`** — 所有文档和查询中的所有 token 共享同一维度
-- **`base_io_type`** — 可选值：`async_io`、`memory_io`、
-  `block_memory_io`、`buffer_io`、`mmap_io`、`reader_io`
+- **`base_io_type`** — 可选值：`async_io`、`uring_io`、`memory_io`、
+  `block_memory_io`、`buffer_io`、`mmap_io`、`reader_io`。原生 `uring_io`
+  需要以 liburing 构建，否则回退到 `buffer_io`
 - **`base_file_path`** — 默认值为占位符，使用磁盘类型（`async_io`、
-  `buffer_io`、`mmap_io`）时需提供真实路径
+  `uring_io`、`buffer_io`、`mmap_io`）时需提供真实路径
 - **`init_cluster_ratio`** — 取值范围 `(0, 1]`。值越小簇越少越大，
   值越大簇越多越细
 - **`max_cluster_size`** — 必须 > 1
@@ -145,6 +146,30 @@ auto result = index->KnnSearch(
     query, topk,
     R"({"simq": {"coarse_k": 600, "rerank_k": 5000}})").value();
 ```
+
+## 搜索统计
+
+`KnnSearch` 与 `RangeSearch` 会在返回的 dataset 上附带 JSON 统计对象。可以读取完整对象，
+也可以按 key 获取单项值：
+
+```cpp
+std::cout << result->GetStatistics() << '\n';
+auto values = result->GetStatistics(
+    {"simq_coarse_candidate_count", "simq_rerank_candidate_count"});
+```
+
+| Key | 含义 |
+|-----|------|
+| `dist_cmp` | 精排阶段执行的精确 MaxSim 距离计算次数 |
+| `simq_coarse_dist_cmp` | 代表图搜索执行的距离计算次数 |
+| `simq_coarse_probe_count` | 所有 query token 探测的代表簇数量 |
+| `simq_coarse_candidate_count` | 粗排产生且尚未应用 `rerank_k` 的唯一文档候选数 |
+| `simq_rerank_candidate_count` | 应用 `rerank_k` 后保留的候选数 |
+| `simq_filtered_candidate_count` | 被调用方 filter 排除的精排候选数 |
+| `simq_result_count` | 精排并应用 range/top-k 限制后最终返回的结果数 |
+| `simq_limited_size_applied` | `RangeSearch` 是否因 `limited_size` 截断结果 |
+
+这些计数器可以在调节召回和延迟时，区分候选池过窄、过滤、精排和输出上限各自的影响。
 
 ## 何时选择 SIMQ
 

@@ -285,6 +285,10 @@ and `examples/cpp/401_persistent_kv.cpp` / `402_persistent_streaming.cpp`.
 | `ExportCache` | `tl::expected<void, Error> ExportCache(std::ostream& out_stream) const` | Writes a build-time cache (e.g. graph neighbors) that can accelerate a later `Build`. |
 | `ImportCache` | `tl::expected<void, Error> ImportCache(std::istream& in_stream)` | Loads a previously exported cache; the next `Build` reuses it. |
 
+HGraph matches cache entries by `Dataset::SourceID`. Import into an empty compatible index before
+`Build()`; see [HGraph Build Cache](../advanced/build_cache.md) for the complete workflow,
+`persist_source_id`, and hit-rate diagnostics.
+
 ## Statistics & introspection
 
 Unless noted, these return values directly. **The methods marked "throws" raise

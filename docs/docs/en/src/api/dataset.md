@@ -55,7 +55,8 @@ DatasetPtr DeepCopy(Allocator* allocator = nullptr) const;  // independent copy
 
 ## Vector payloads
 
-A dataset carries exactly one vector representation, chosen to match the index's `dtype`:
+A dataset carries exactly one vector representation. Select the payload setter from both the
+index's scalar `dtype` and record-layout `repr`:
 
 | Setter | Getter | Element type | Use with |
 |--------|--------|--------------|----------|
@@ -65,6 +66,8 @@ A dataset carries exactly one vector representation, chosen to match the index's
 | `SparseVectors(const SparseVector*)` | `GetSparseVectors()` | [`SparseVector`](#sparsevector) | `dtype: sparse` (SINDI) |
 
 Dense vectors are laid out row-major: element `i`, dimension `j` lives at `vectors[i * dim + j]`.
+Multi-vector datasets use `repr: multi_vector` with a scalar `dtype`, normally `float32`, and the
+payload described below.
 
 ### Multi-vector payloads
 
@@ -85,10 +88,11 @@ For documents that hold several dense sub-vectors each:
 | `ExtraInfoSize(int64_t)` | `GetExtraInfoSize()` | `int64_t` | Bytes per extra-info blob. |
 | `Paths(const std::string*)` | `GetPaths()` | `const std::string*` | Hierarchy paths (Pyramid). Default hierarchy. |
 | `Paths(const std::string& hierarchy, const std::string*)` | `GetPaths(const std::string& hierarchy)` | `const std::string*` | Paths for a named hierarchy. |
-| `SourceID(const std::string*)` | `GetSourceID()` | `const std::string*` | Optional source identifier. |
+| `SourceID(const std::string*)` | `GetSourceID()` | `const std::string*` | Optional stable source identifier per element; HGraph uses it to match build-cache entries across snapshots. |
 
-See [Attribute Filter (Hybrid Search)](../advanced/attribute_filter.md) and
-[Extra Info](../advanced/extra_info.md).
+See [Attribute Filter (Hybrid Search)](../advanced/attribute_filter.md),
+[Extra Info](../advanced/extra_info.md), and
+[HGraph Build Cache](../advanced/build_cache.md).
 
 ## Diagnostics payloads
 

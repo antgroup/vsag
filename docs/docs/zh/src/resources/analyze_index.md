@@ -16,12 +16,16 @@ AnalyzeIndexBySearch(const SearchRequest& request);
 
 - **输入**：`SearchRequest`（查询数据集 + `topk` + 搜索参数 JSON）。
 - **输出**：JSON 字符串，包含基于查询的动态指标。
-- **支持的索引类型**：当前支持 `HGraph`、`IVF` 与 `SINDI`。`Pyramid` 仅通过 `GetStats()` 提供
-  静态分析，尚未 override `AnalyzeIndexBySearch`。未实现该接口的索引在调用时会抛出异常。
+- **支持的索引类型**：当前支持 `HGraph`、`IVF` 与 `SINDI`。未实现该接口的
+  索引在调用时会抛出异常。
 
 该接口与 `Index::GetStats()` 互为补充：后者无需查询数据，只输出索引的静态结构指标。
 对于基于图的索引，度分布、入口点质量、子索引召回率以及低召回热点节点等图健康度信息，
 通过 `GetStats()` 而非 `AnalyzeIndexBySearch` 输出。
+
+Pyramid 只通过 `GetStats()` 暴露其 analyzer，目前没有覆写
+`AnalyzeIndexBySearch`。因此对 Pyramid 索引调用该接口，或使用
+`analyze_index --query_path`，都会抛出 `UNSUPPORTED_INDEX_OPERATION`。
 
 ### `GetStats()` 输出的静态指标
 
@@ -45,6 +49,20 @@ AnalyzeIndexBySearch(const SearchRequest& request);
 | `quantization_inversion_count_rate` | 量化导致的距离顺序倒置比率 |
 | `build_cache_hit_rate` | 上一次 `Build()` 中从导入缓存完成 warm-start 的节点占比；当索引并非由 `ImportCache()` 导入的缓存构建时，输出 `skipped_reason` |
 | `build_cache_hit_nodes` / `build_cache_missed_nodes` | `build_cache_hit_rate` 背后的命中 / 未命中节点数（仅在索引由导入缓存构建时存在） |
+
+#### Pyramid 指标
+
+| 指标 | 含义 |
+| --- | --- |
+| `total_count` | 索引中的向量总数 |
+| `index_node_structure` | 路径树节点数、深度、逐层节点数及节点状态分布 |
+| `leaf_node_size_distribution` | 各叶节点向量数量的分布 |
+| `subindex_quality` | 各叶子 GRAPH/FLAT 子索引的状态与规模，以及图/暴搜数量和向量覆盖率 |
+| `recall_base` | 各图节点按规模加权的召回率；仅在采样和分析搜索参数可用时输出 |
+| `graph_node_count` / `total_graph_size` | 参与召回分析的图节点数量及总规模 |
+| `skipped_node_count` / `low_recall_nodes` | 未参与召回分析的节点数，以及低于召回阈值的节点详情 |
+| `duplicate_ratio` | 当前 hierarchy 内的重复向量比例 |
+| `hierarchy_count` / `hierarchies` | 多 hierarchy 数量及按名称组织的上述指标；单个匿名 hierarchy 直接在顶层输出 |
 
 #### SINDI 指标
 
@@ -116,9 +134,8 @@ SINDI 动态召回和距离质量指标需要真值集。可通过 `groundtruth_
 | `HGraph` | `quantization_inversion_count_rate_query` | 搜索阶段量化引起的距离顺序倒置率 |
 | `IVF` | `quantization_bias_ratio` | 搜索阶段观察到的量化偏差（仅在 `use_reorder_` 启用时输出） |
 | `IVF` | `quantization_inversion_count_rate` | 搜索阶段量化引起的距离顺序倒置率（仅在 `use_reorder_` 启用时输出） |
-
-如需度分布、入口点分析或子索引质量分布等图健康度信息，请查看 `GetStats()` 的 JSON 输出——
-`AnalyzeIndexBySearch` 仅关注查询驱动的动态信号。
+静态结构和健康度信息（包括度分布、入口点分析与 Pyramid 子索引质量）请查看
+`GetStats()` 的 JSON 输出。
 
 ## `analyze_index` 工具
 

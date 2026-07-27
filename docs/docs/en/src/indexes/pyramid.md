@@ -94,6 +94,10 @@ Build-time parameters live under `index_param`.
 | `no_build_levels` | int[] | `[]` | Tree levels that skip graph construction (0-indexed from the root). |
 | `use_reorder` | bool | `false` | Keep a high-precision copy for rescoring. |
 | `precise_quantization_type` | string | `"fp32"` | Quantizer for reordering. |
+| `fast_encode_rabitq` | bool | `true` | Use the fast multi-bit RaBitQ encoder for RaBitQ base or precise storage; set to `false` for the exact encoder. |
+| `fast_encode_rabitq_rounds` | int | `6` | Fast RaBitQ refinement rounds in `[1, 32]`. |
+| `base_io_type` / `precise_io_type` | string | `"block_memory_io"` | Base and reorder storage backends; `uring_io` is available in builds with liburing. |
+| `base_file_path` / `precise_file_path` | string | — | Required for disk-backed storage such as `buffer_io`, `async_io`, `uring_io`, or `mmap_io`. |
 | `index_min_size` | int | `0` | Minimum sub-index size; smaller groups fall back to scan. |
 | `support_duplicate` | bool | `false` | Allow duplicate ids. |
 | `build_thread_count` | int | `1` | Threads used for parallel build. |
@@ -249,6 +253,10 @@ new_index->Deserialize(binary_set);
 
 If you don't need path-based scoping, [HGraph](hgraph.md) is simpler and generally
 faster.
+
+Use [Index Analysis](../resources/analyze_index.md) to inspect Pyramid tree structure,
+per-subindex quality, sampled base recall, and duplicate ratios reported by `GetStats()`. Pyramid
+does not currently expose query-driven metrics through `AnalyzeIndexBySearch`.
 
 ## Mark remove
 

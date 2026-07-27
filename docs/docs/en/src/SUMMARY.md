@@ -7,6 +7,7 @@
 - [Installation](guide/installation.md)
 - [Creating an Index](guide/create_index.md)
 - [k-Nearest Neighbor Search](guide/knn_search.md)
+- [C API](guide/c_api.md)
 - [pyvsag](guide/pyvsag.md)
 
 # Indexes
@@ -46,6 +47,7 @@
 # Advanced Features
 
 - [Build and Train](advanced/build_and_train.md)
+- [HGraph Build Cache](advanced/build_cache.md)
 - [Range Search](advanced/range_search.md)
 - [Calculate Distance by ID](advanced/calc_distance_by_id.md)
 - [Filtered Search](advanced/filtered_search.md)

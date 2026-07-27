@@ -17,14 +17,17 @@ AnalyzeIndexBySearch(const SearchRequest& request);
 
 - **Input**: a `SearchRequest` (query dataset + `topk` + search parameter JSON).
 - **Output**: a JSON-formatted string containing dynamic, query-driven metrics.
-- **Supported indexes**: currently `HGraph`, `IVF`, and `SINDI`. `Pyramid` only supports static
-  analysis through `GetStats()` — it does not yet override `AnalyzeIndexBySearch`. Indexes that do
-  not implement this API will throw an exception when called.
+- **Supported indexes**: currently `HGraph`, `IVF`, and `SINDI`. Indexes that do not
+  implement this API will throw an exception when called.
 
 It is complementary to `Index::GetStats()`, which reports static structural properties of the
 index without needing query data. For graph-based indexes, additional graph-health details such
 as degree distribution, entry-point quality, sub-index recall and low-recall hot-spots are
 exposed through `GetStats()` rather than through `AnalyzeIndexBySearch`.
+
+Pyramid exposes its analyzer only through `GetStats()`. It does not currently override
+`AnalyzeIndexBySearch`, so calling that API—or using `analyze_index --query_path` with a Pyramid
+index—throws `UNSUPPORTED_INDEX_OPERATION`.
 
 ### Static metrics from `GetStats()`
 
@@ -48,6 +51,20 @@ exposed through `GetStats()` rather than through `AnalyzeIndexBySearch`.
 | `quantization_inversion_count_rate` | Rate of distance-order inversions caused by quantization |
 | `build_cache_hit_rate` | Fraction of nodes warm-started from an imported cache during the last `Build()`; emits a `skipped_reason` when the index was not built from a cache imported via `ImportCache()` |
 | `build_cache_hit_nodes` / `build_cache_missed_nodes` | Node counts behind `build_cache_hit_rate` (only present when the index was built from an imported cache) |
+
+#### Pyramid metrics
+
+| Metric | Meaning |
+| --- | --- |
+| `total_count` | Total number of vectors in the index |
+| `index_node_structure` | Path-tree node count, depth, nodes by level, and node-status distribution |
+| `leaf_node_size_distribution` | Distribution of vector counts across leaf nodes |
+| `subindex_quality` | Per-leaf GRAPH/FLAT status and size, plus graph/flat counts and vector coverage |
+| `recall_base` | Size-weighted recall across graph-backed nodes; present when sampling and analysis search parameters are available |
+| `graph_node_count` / `total_graph_size` | Number and combined size of graph-backed nodes included in recall analysis |
+| `skipped_node_count` / `low_recall_nodes` | Nodes excluded from recall analysis and details of nodes below the recall threshold |
+| `duplicate_ratio` | Duplicate-vector ratio within the hierarchy |
+| `hierarchy_count` / `hierarchies` | Multi-hierarchy count and a per-name object containing the metrics above; single unnamed hierarchies expose them at the top level |
 
 #### SINDI metrics
 
@@ -120,10 +137,8 @@ Quantization-related fields differ by index type — they are not unified across
 | `HGraph` | `quantization_inversion_count_rate_query` | Quantization-induced ordering errors during search |
 | `IVF` | `quantization_bias_ratio` | Quantization bias observed during search (only when `use_reorder_` is enabled) |
 | `IVF` | `quantization_inversion_count_rate` | Quantization-induced ordering errors during search (only when `use_reorder_` is enabled) |
-
-If you also need degree distribution, entry-point analysis or sub-index quality breakdown, look
-in the `GetStats()` JSON instead — `AnalyzeIndexBySearch` focuses on dynamic, query-driven
-signals.
+For static structure and health information, including degree distributions, entry-point
+analysis, and Pyramid subindex quality, use the `GetStats()` JSON.
 
 ## The `analyze_index` Tool
 

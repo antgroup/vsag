@@ -82,8 +82,8 @@ auto result = index->KnnSearch(
 | `fast_encode_rabitq_rounds` | int | `6` | CAQ 微调轮数，允许范围 `[1, 32]` |
 | `use_reorder` | bool | `false` | 是否保留高精度副本用于精排 |
 | `precise_quantization_type` | string | `"fp32"` | 精排量化类型（`use_reorder: true` 时使用） |
-| `base_io_type` | string | `"memory_io"` | 粗排向量的存储后端 |
-| `precise_io_type` | string | `"block_memory_io"` | 精排向量的存储后端（`memory_io`、`block_memory_io`、`mmap_io`、`buffer_io`、`async_io`、`reader_io`） |
+| `base_io_type` | string | `"memory_io"` | 粗排向量的存储后端；以 liburing 构建时支持 `uring_io` |
+| `precise_io_type` | string | `"block_memory_io"` | 精排向量的存储后端（`memory_io`、`block_memory_io`、`mmap_io`、`buffer_io`、`async_io`、`uring_io`、`reader_io`） |
 | `precise_file_path` | string | `""` | 当精排 IO 为磁盘后端时的文件路径 |
 
 `buckets_count` 的经验值一般为 `sqrt(N)` ~ `4 * sqrt(N)`，其中 `N` 是语料规模。

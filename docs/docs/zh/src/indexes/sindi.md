@@ -15,7 +15,7 @@ SINDI（**S**parse **IN**verted **D**ense **I**ndex）是 VSAG 面向 **稀疏�
 1. **基于窗口的倒排表。** 文档按固定窗口大小（`window_size`）分组，每个窗口独立维护一套
    倒排表——即“词项 → `(doc_id, value)` 列表”的映射。
 2. **可选的剪枝与量化。** 构建时可通过 `doc_prune_ratio` 按文档粒度丢弃权重最低的词项；
-   通过 `use_quantization` 压缩词项权重以进一步节省内存。
+   `use_quantization: true` 使用 SQ8，`use_quantization: "fp16"` 使用半精度值。
 3. **打分。** 检索时，SINDI 遍历查询向量的非零项，按窗口访问对应的倒排表，使用大小为
    `n_candidate` 的大顶堆聚合得分，最后取 top-k。启用 `use_reorder` 时，候选会在正排
    存储上重打分。默认正排存储保留 fp32 值；设置 `rerank_type: "dmq8"` 时使用压缩的
@@ -70,15 +70,57 @@ auto result = index->KnnSearch(
 | `term_id_limit` | int | `1000000` | 词项 ID 的上界（应 ≥ 最大词项 ID + 1，最高 50 000 000） |
 | `window_size` | int | `50000` | 每个窗口容纳的文档数（取值范围 10 000 – 60 000） |
 | `doc_prune_ratio` | float | `0.0` | 构建阶段按文档丢弃权重最低词项的比例（0.0 – 0.9） |
-| `use_quantization` | bool | `false` | 是否量化词项权重以降低内存；开启后使用 8-bit 标量量化（SQ8） |
+| `use_quantization` | bool 或 string | `false` | `false` 存 FP32，`true` 存 SQ8，`"fp16"` 存 FP16 |
 | `use_reorder` | bool | `false` | 是否保留一份正排存储，在 SINDI 粗排后对候选做精排 |
 | `rerank_type` | string | `"fp32"` | `use_reorder` 开启时使用的正排存储类型。`fp32` 保留精确值；`dmq8` 使用压缩的 8-bit DMQ 编码 |
 | `remap_term_ids` | bool | `false` | 是否在建索引前重映射词项 ID，适用于词项 ID 很稀疏或存在大量空洞的词表 |
 | `avg_doc_term_length` | int | `100` | 仅用于内存估算 |
+| `immutable` | bool | `false` | 构建或加载紧凑的只读运行态；`Build()` 会逐窗口压缩以降低峰值内存，增量 `Add()` 会被拒绝 |
 
 > **`dim` 与 `term_id_limit` 的区别。** 对于稀疏向量 `{0:0.1, 2:0.5, 177:0.8}`，
 > `dim` 为 `3`（三个非零项），而 `term_id_limit` 至少应为 `178`（最大词项 ID + 1）。
 > `term_id_limit` 要按词表大小估计，这是使用时最常见的坑。
+
+### 稀疏值格式
+
+`use_quantization` 保留原有 bool 行为，同时新增一个字符串取值：
+
+| 取值 | 存储格式 | 取舍 |
+| --- | --- | --- |
+| `false` | FP32 | 词项权重精度最高，posting payload 最大 |
+| `true` | SQ8 | 权重存储最小；首次构建时学习量化范围 |
+| `"fp16"` | FP16 | 权重字节数为 FP32 的一半，不需要 SQ8 范围校准 |
+
+使用 `false` 或 `true` 构建的索引仍保留旧版序列化表示。旧版本 VSAG 无法解析使用新
+`"fp16"` 格式的 SINDI 索引；部署 FP16 产物前应先升级读取端。
+
+### 不可变低内存构建
+
+完成后的 SINDI 只读时，可以设置 `immutable: true`：
+
+```json
+{
+    "dtype": "sparse",
+    "metric_type": "ip",
+    "dim": 1024,
+    "index_param": {
+        "term_id_limit": 30000,
+        "window_size": 50000,
+        "use_quantization": "fp16",
+        "remap_term_ids": true,
+        "immutable": true
+    }
+}
+```
+
+`Build()` 会把每个完成的可变窗口压缩成不可变 payload，并在继续构建前释放临时窗口。该功能
+提交时的 Sparse4M FP16 实测中，构建峰值内存从 27.03 GB 降到 6.08 GB（降低 77.51%），
+构建时间则从约 330 秒增加到 599 秒。这些数字是特定负载的实测证据，不是容量保证。
+
+不可变运行态支持 KNN、范围搜索以及旧版 `Serialize`/`Deserialize`。它不支持增量
+`Add`、`GetSparseVectorByInnerId`、`CalcDistanceById` 与 `CalDistanceById`。
+不可变 SINDI 不支持流式序列化；需要流式格式时应保持索引可变，或使用匹配的旧版序列化接口。
+反序列化时，新建 SINDI 的 `immutable` 设置必须与存储格式一致。
 
 ## 检索参数
 
@@ -105,8 +147,10 @@ auto result = index->KnnSearch(
 
 - 使用 BM25、SPLADE、uniCOIL 等学习稀疏编码器的稀疏检索场景。
 - 稠密 + 稀疏的混合检索管线：SINDI 负责稀疏一路，HGraph / IVF 负责稠密 embedding。
-- 稀疏语料的内存受限部署：`use_quantization: true` 大致能把倒排内存减半，略损召回；
+- 稀疏语料的内存受限部署：`use_quantization: true` 选择 SQ8，`"fp16"` 把 FP32
+  权重字节数减半；
   `use_reorder: true` 以正排内存换召回，`rerank_type: "dmq8"` 可降低这部分正排开销。
+- 需要降低构建峰值内存的只读快照：使用 `immutable: true`，接受更慢的构建和不能增量写入。
 
 SINDI **不支持** 稠密向量，只支持内积相似度。范围检索与基于 ID 的过滤均已支持，
 具体用法参见示例代码。
@@ -138,6 +182,9 @@ SINDI **不支持** 稠密向量，只支持内积相似度。范围检索与基
      分词器、外部词表 ID，或存在大量空白区间的词表，建议设置 `remap_term_ids: true`。
      这样可以避免管理大量空倒排列表带来的内存浪费，也能降低触达 `term_id_limit`
      上限的风险。
+5. 只读低内存构建。当构建峰值内存比构建速度更重要，且完成后不再增量写入时，增加
+     `immutable: true`，通常配合 `use_quantization: "fp16"` 与
+     `remap_term_ids: true` 使用。
 
 ## 标记删除
 

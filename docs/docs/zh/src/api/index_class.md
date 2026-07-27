@@ -279,6 +279,9 @@ RangeSearch(const DatasetPtr& query, float radius, const std::string& parameters
 | `ExportCache` | `tl::expected<void, Error> ExportCache(std::ostream& out_stream) const` | 写出构建期缓存（如图邻居），可加速后续的 `Build`。 |
 | `ImportCache` | `tl::expected<void, Error> ImportCache(std::istream& in_stream)` | 加载之前导出的缓存；下一次 `Build` 会复用它。 |
 
+HGraph 通过 `Dataset::SourceID` 匹配缓存条目。应在 `Build()` 前导入空的兼容索引；完整流程、
+`persist_source_id` 与命中率诊断见 [HGraph 构建缓存](../advanced/build_cache.md)。
+
 ## 统计与自省
 
 除非另有说明，这些方法直接返回值。**标注为“抛出”的方法在索引不支持时会抛出 `std::runtime_error`**

@@ -7,6 +7,7 @@
 - [安装](guide/installation.md)
 - [创建索引](guide/create_index.md)
 - [k-近邻搜索](guide/knn_search.md)
+- [C API](guide/c_api.md)
 - [pyvsag](guide/pyvsag.md)
 
 # 索引
@@ -46,6 +47,7 @@
 # 高级功能
 
 - [索引构建与训练](advanced/build_and_train.md)
+- [HGraph 构建缓存](advanced/build_cache.md)
 - [范围搜索](advanced/range_search.md)
 - [按 ID 计算距离](advanced/calc_distance_by_id.md)
 - [带过滤的搜索](advanced/filtered_search.md)
