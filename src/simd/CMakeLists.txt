@@ -104,8 +104,9 @@ target_compile_options (simd PRIVATE
     -fno-builtin-realloc
     -fno-builtin-free
     -funroll-loops)
-if (NOT APPLE)
+if (ENABLE_OPENMP AND NOT APPLE)
     target_compile_options (simd PRIVATE -fopenmp -fopenmp-simd)
+    target_compile_definitions (simd PRIVATE VSAG_ENABLE_OPENMP=1)
 endif ()
 
 function (simd_add_definitions flag_variable definition)

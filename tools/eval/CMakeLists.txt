@@ -31,8 +31,7 @@ set (eval_srcs
     eval_job.cpp)
 
 add_library (vsag_eval_common INTERFACE)
-target_compile_options (vsag_eval_common INTERFACE -fopenmp)
-target_link_options (vsag_eval_common INTERFACE -fopenmp)
+vsag_enable_openmp_interface (vsag_eval_common)
 target_link_libraries (vsag_eval_common INTERFACE
     pthread
     yaml-cpp

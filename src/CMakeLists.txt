@@ -71,16 +71,16 @@ set (VSAG_DEP_LIBS antlr4-autogen antlr4-runtime diskann simd io quantizer stora
 # files use during compilation. None of these targets appear in vsag's
 # public API headers, so they should not be propagated to install-side
 # consumers via the exported target file. They are still propagated to
-# in-tree consumers (examples, tests, tools) that include vsag headers
-# directly via add_subdirectory(), since some of those targets transitively
-# rely on, e.g., <nlohmann/json.hpp>. Wrapping the link in BUILD_INTERFACE
-# is what gives us both: PUBLIC propagation in-tree, no leakage on install.
+# in-tree consumers (examples, tests, tools) that include vsag headers directly
+# via add_subdirectory(), since some of those targets transitively rely on,
+# e.g., <nlohmann/json.hpp>. Link it directly for vsag's own compilation, then
+# expose it only through BUILD_INTERFACE so install-side exports do not leak it.
 target_link_libraries (vsag
-    PUBLIC $<BUILD_INTERFACE:vsag_src_common>
-    PRIVATE ${VSAG_DEP_LIBS} coverage_config)
+    PRIVATE vsag_src_common ${VSAG_DEP_LIBS} coverage_config
+    INTERFACE $<BUILD_INTERFACE:vsag_src_common>)
 target_link_libraries (vsag_static
-    PUBLIC $<BUILD_INTERFACE:vsag_src_common>
-    PRIVATE ${VSAG_DEP_LIBS} coverage_config)
+    PRIVATE vsag_src_common ${VSAG_DEP_LIBS} coverage_config
+    INTERFACE $<BUILD_INTERFACE:vsag_src_common>)
 
 if (TARGET vsag_openmp)
     foreach (_vsag_openmp_target IN ITEMS algorithm analyzer cluster factory hgraph odescent pyramid)

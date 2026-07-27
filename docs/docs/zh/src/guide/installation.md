@@ -1,8 +1,14 @@
 # 安装
 
-VSAG 是一个向量检索库，支持在 C++、Python 和 Node.js / TypeScript 程序中使用。VSAG 核心库使用 C++ 编写，由于依赖的部分第三方库是 Linux 特有的，当前 VSAG **仅支持在 Linux 系统上运行**。
+VSAG 是一个向量检索库，支持在 C++、Python 和 Node.js / TypeScript 程序中使用。
+VSAG 核心库使用 C++ 编写；从源代码构建 C++ 库时，当前主要支持 Linux 环境。
 
-如果使用的是 Python，可以从官方第三方包仓库 PyPI 下载，包名为 [`pyvsag`](https://pypi.org/project/pyvsag/)。`pyvsag` 的版本与源代码版本一一对应，版本功能可以直接参考 [GitHub 发布日志](https://github.com/antgroup/vsag/releases)。Python 包使用 manylinux2014 构建，可以在绝大部分 Linux 环境中运行。通过如下命令获得最新版本：
+如果使用的是 Python，可以从官方第三方包仓库 PyPI 下载，包名为
+[`pyvsag`](https://pypi.org/project/pyvsag/)。`pyvsag` 的版本与源代码版本一一对应，
+版本功能可以直接参考 [GitHub 发布日志](https://github.com/antgroup/vsag/releases)。
+Python 预编译包提供 Linux（`manylinux2014`）和 macOS wheel；macOS wheel 支持
+macOS 11.0 及以上的 Apple Silicon（`arm64`）和 Intel（`x86_64`）机器，覆盖
+CPython 3.10-3.14。通过如下命令获得最新版本：
 
 ```bash
 pip install pyvsag

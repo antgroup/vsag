@@ -1,9 +1,14 @@
 
 include (FetchContent)
 
-# suppress "stringop-overflow" warning which caused by a compiler bug in gcc 10 or earlier
+# Suppress GCC 10 or older stringop-overflow noise, but keep macOS bundled fmt
+# as a regular include so it wins over AppleClang's /usr/local/include search.
 # ref: https://github.com/fmtlib/fmt/issues/2708
-set (FMT_SYSTEM_HEADERS ON)
+if (APPLE)
+    set (FMT_SYSTEM_HEADERS OFF)
+else ()
+    set (FMT_SYSTEM_HEADERS ON)
+endif ()
 
 vsag_get_system_dep_policy (FMT _fmt_policy)
 set (FMT_FOUND FALSE)
@@ -89,5 +94,24 @@ FetchContent_Declare (
 FetchContent_GetProperties (fmt)
 if (NOT fmt_POPULATED)
     FetchContent_Populate (fmt)
+    include_directories (BEFORE "${fmt_SOURCE_DIR}/include")
     add_subdirectory (${fmt_SOURCE_DIR} ${fmt_BINARY_DIR} EXCLUDE_FROM_ALL)
+    if (NOT TARGET vsag_fmt_headers)
+        add_library (vsag_fmt_headers INTERFACE)
+        target_include_directories (vsag_fmt_headers BEFORE INTERFACE
+            $<BUILD_INTERFACE:${fmt_SOURCE_DIR}/include>)
+        if (CMAKE_CXX_COMPILER_ID MATCHES "^(AppleClang|Clang|GNU)$")
+            target_compile_options (vsag_fmt_headers
+                INTERFACE "$<$<COMPILE_LANGUAGE:CXX>:-I${fmt_SOURCE_DIR}/include>")
+        endif ()
+    endif ()
+    if (TARGET fmt)
+        target_include_directories (fmt BEFORE PUBLIC
+            $<BUILD_INTERFACE:${fmt_SOURCE_DIR}/include>)
+        if (CMAKE_CXX_COMPILER_ID MATCHES "^(AppleClang|Clang|GNU)$")
+            target_compile_options (fmt
+                PRIVATE "-iquote${fmt_SOURCE_DIR}/include"
+                INTERFACE "$<$<COMPILE_LANGUAGE:CXX>:-I${fmt_SOURCE_DIR}/include>")
+        endif ()
+    endif ()
 endif ()

@@ -48,6 +48,10 @@ See [Building](../development/building.md) for details.
 pip install pyvsag
 ```
 
+Prebuilt `pyvsag` wheels are published for Linux (`manylinux2014`) and macOS. The macOS
+wheels target macOS 11.0 or newer on both Apple Silicon (`arm64`) and Intel (`x86_64`)
+for the supported CPython 3.10-3.14 versions.
+
 ## Node.js / TypeScript
 
 ```bash
