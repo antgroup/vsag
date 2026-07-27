@@ -101,7 +101,9 @@ BucketInterfaceTest::BasicTest(int64_t dim, uint64_t base_count, float error) {
 }
 void
 BucketInterfaceTest::TestSerializeAndDeserialize(int64_t dim, const BucketInterfacePtr& other) {
+    other->backend_ = DistanceEvaluationBackend::UNKNOWN;
     test_serializion(*this->bucket_, *other);
+    REQUIRE(other->backend_ == SearchStatistics::BackendFromName(other->GetQuantizerName()));
 
     int64_t query_count = 100;
     auto queries = fixtures::generate_vectors(query_count, dim, random());

@@ -29,6 +29,7 @@ namespace vsag {
 
 DEFINE_POINTER(Filter);
 DEFINE_POINTER(Executor);
+struct QueryContext;
 
 enum InnerSearchMode { KNN_SEARCH = 1, RANGE_SEARCH = 2 };
 
@@ -64,6 +65,7 @@ public:
     std::optional<float> distance_threshold{std::nullopt};
     std::vector<ExecutorPtr> executors;
     std::vector<int64_t> bucket_ids;
+    QueryContext* query_context{nullptr};
 
     // deal with duplicate ids
     mutable int64_t duplicate_id{-1};

@@ -270,6 +270,12 @@ TEST_CASE("HGraph companion MCI incrementally updates cliques after Add", "[ut][
     REQUIRE(result.has_value());
     REQUIRE(result.value()->GetDim() > 0);
     REQUIRE(result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("mci")");
+    const auto search_statistics = vsag::JsonType::Parse(result.value()->GetStatistics());
+    REQUIRE(search_statistics["distance_evaluations_by_phase"]["approximate"].GetUint64() > 0);
+    REQUIRE(search_statistics["distance_evaluations"].GetUint64() ==
+            search_statistics["dist_cmp"].GetUint64());
+    REQUIRE(search_statistics["distance_evaluations_by_backend"]["fp32"].GetUint64() ==
+            search_statistics["distance_evaluations"].GetUint64());
     const auto expected_seed_count =
         static_cast<uint64_t>(std::ceil(std::sqrt(static_cast<double>(total)) * 0.5));
     REQUIRE(std::stoull(result.value()->GetStatistics({"mci_seed_count"})[0]) ==

@@ -25,6 +25,8 @@
 using namespace vsag;
 
 TEST_CASE("GNO-IMI Partition Basic Test", "[ut][GNOIMIPartition]") {
+    constexpr uint64_t first_order_bucket_count = 10;
+    constexpr uint64_t second_order_bucket_count = 10;
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     int64_t dim = 128;
     IndexCommonParam param;
@@ -53,6 +55,15 @@ TEST_CASE("GNO-IMI Partition Basic Test", "[ut][GNOIMIPartition]") {
     auto class_result = partition->ClassifyDatas(vec.data(), data_count, 1, nullptr);
     REQUIRE(class_result.size() == data_count);
 
+    SearchStatistics build_stats;
+    QueryContext build_ctx{.stats = &build_stats};
+    constexpr uint64_t build_query_count = 2;
+    partition->ClassifyDatas(vec.data(), build_query_count, 1, &build_ctx);
+    auto build_statistics = JsonType::Parse(build_stats.Dump());
+    REQUIRE(build_statistics["distance_evaluations_by_phase"]["routing"].GetUint64() ==
+            build_statistics["dist_cmp"].GetUint64() +
+                build_query_count * first_order_bucket_count);
+
     param_str = R"(
     {
         "ivf": {
@@ -66,6 +77,16 @@ TEST_CASE("GNO-IMI Partition Basic Test", "[ut][GNOIMIPartition]") {
     inner_search_param.first_order_scan_ratio = search_param.first_order_scan_ratio;
     REQUIRE(inner_search_param.scan_bucket_size == 1);
     REQUIRE(inner_search_param.first_order_scan_ratio == 0.1f);
+    SearchStatistics search_stats;
+    QueryContext search_ctx{.stats = &search_stats};
+    partition->ClassifyDatasForSearch(vec.data(), 1, inner_search_param, &search_ctx);
+    auto search_statistics = JsonType::Parse(search_stats.Dump());
+    const auto scanned_first_order_buckets = static_cast<uint64_t>(std::max(
+        std::floor(first_order_bucket_count * inner_search_param.first_order_scan_ratio), 1.0F));
+    const auto expected_search_evaluations =
+        first_order_bucket_count + scanned_first_order_buckets * second_order_bucket_count;
+    REQUIRE(search_statistics["distance_evaluations_by_phase"]["routing"].GetUint64() ==
+            expected_search_evaluations);
     uint64_t match_count = 0;
     for (int64_t i = 0; i < data_count; ++i) {
         auto query = Dataset::Make();

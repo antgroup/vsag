@@ -1065,6 +1065,27 @@ TEST_CASE("(PR) HGraph SearchWithRequest Reasoning", "[ft][hgraph][pr]") {
     REQUIRE(result.has_value());
     REQUIRE_FALSE(result.value()->GetReasoning().empty());
     REQUIRE(result.value()->GetReasoning().find("missed_targets") != std::string::npos);
+    auto statistics = vsag::JsonType::Parse(result.value()->GetStatistics());
+    REQUIRE(statistics["distance_evaluations_by_phase"]["routing"].GetUint64() > 0);
+    REQUIRE(statistics["distance_evaluations_by_phase"]["approximate"].GetUint64() > 0);
+    REQUIRE(statistics["distance_evaluations"].GetUint64() ==
+            statistics["distance_evaluations_by_phase"]["routing"].GetUint64() +
+                statistics["distance_evaluations_by_phase"]["approximate"].GetUint64() +
+                statistics["distance_evaluations_by_phase"]["rerank"].GetUint64());
+
+    vsag::IteratorContext* iter_ctx = nullptr;
+    auto iterator_result = index->KnnSearch(
+        query, 5, req.params_str_, std::make_shared<RejectAllFilter>(), iter_ctx, false);
+    REQUIRE(iterator_result.has_value());
+    REQUIRE(iterator_result.value()->GetDim() == 0);
+    auto iterator_statistics = vsag::JsonType::Parse(iterator_result.value()->GetStatistics());
+    REQUIRE(iterator_statistics["distance_evaluations"].GetUint64() > 0);
+    REQUIRE(iterator_statistics["distance_evaluations"].GetUint64() ==
+            iterator_statistics["distance_evaluations_by_phase"]["routing"].GetUint64() +
+                iterator_statistics["distance_evaluations_by_phase"]["approximate"].GetUint64() +
+                iterator_statistics["distance_evaluations_by_phase"]["rerank"].GetUint64());
+    REQUIRE(iterator_statistics["complete"].GetBool());
+    delete iter_ctx;
 
     req.enable_filter_ = true;
     req.filter_ = std::make_shared<RejectAllFilter>();
@@ -1318,6 +1339,11 @@ TEST_CASE("(PR) HGraph Custom Batch Distance", "[ft][hgraph][custom_distance][pr
     REQUIRE(result.has_value());
     REQUIRE(result.value()->GetDim() > 0);
     REQUIRE(max_batch_size <= request.distance_batch_size_);
+    auto statistics = vsag::JsonType::Parse(result.value()->GetStatistics());
+    REQUIRE(statistics["distance_evaluations"].GetUint64() > 0);
+    REQUIRE(statistics["distance_evaluations_by_backend"]["unknown"].GetUint64() ==
+            statistics["distance_evaluations"].GetUint64());
+    REQUIRE_FALSE(statistics["complete"].GetBool());
     for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
         REQUIRE(result.value()->GetDistances()[i] ==
                 static_cast<float>(result.value()->GetIds()[i]));

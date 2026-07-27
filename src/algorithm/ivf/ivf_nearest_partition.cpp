@@ -117,7 +117,13 @@ IVFNearestPartition::ClassifyDatas(const void* datas,
         std::scoped_lock lock(dist_cmp_reduce_mutex);
         // the return value of GetStatistics always has the same length as the input keys, and
         // atoi("") returns a `0`.
-        dist_cmp += std::atoi(search_result->GetStatistics({"dist_cmp"})[0].c_str());
+        auto route_stats = search_result->GetStatistics({"dist_cmp", "distance_evaluations"});
+        dist_cmp += std::atoi(route_stats[0].c_str());
+        if (ctx != nullptr and ctx->stats != nullptr and route_stats.size() > 1) {
+            ctx->stats->AddDistance(SearchStatistics::DistancePhase::ROUTING,
+                                    DistanceEvaluationBackend::FP32,
+                                    std::strtoull(route_stats[1].c_str(), nullptr, 10));
+        }
     };
     if (thread_pool_ == nullptr) {
         for (int64_t i = 0; i < count; ++i) {

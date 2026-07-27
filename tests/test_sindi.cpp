@@ -453,6 +453,24 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
     TestKnnSearch(index, dataset, search_param, 0.99, true);
     TestRangeSearch(index, dataset, search_param, 0.99, 10, true);
     TestFilterSearch(index, dataset, search_param, 0.99, true);
+
+    uint32_t unknown_term = 1'000'000;
+    float value = 1.0F;
+    vsag::SparseVector sparse_query{
+        .len_ = 1, .ids_ = &unknown_term, .vals_ = &value, .token_seq_len_ = 0};
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(16)->SparseVectors(&sparse_query)->Owner(false);
+    auto result = index->KnnSearch(query, 1, search_param);
+    REQUIRE(result.has_value());
+    auto statistics = vsag::JsonType::Parse(result.value()->GetStatistics());
+    REQUIRE(statistics["distance_evaluations"].GetUint64() == 0);
+    REQUIRE(statistics["complete"].GetBool());
+
+    auto range_result = index->RangeSearch(query, 1.0F, search_param, 10);
+    REQUIRE(range_result.has_value());
+    statistics = vsag::JsonType::Parse(range_result.value()->GetStatistics());
+    REQUIRE(statistics["distance_evaluations"].GetUint64() == 0);
+    REQUIRE(statistics["complete"].GetBool());
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Mark Remove", "[ft][remove][sindi]") {
@@ -557,6 +575,11 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
     REQUIRE(result.has_value());
     REQUIRE_FALSE(result.value()->GetReasoning().empty());
     REQUIRE(result.value()->GetReasoning().find("expected_analysis") != std::string::npos);
+    auto statistics = vsag::JsonType::Parse(result.value()->GetStatistics());
+    REQUIRE(statistics["distance_evaluations"].GetUint64() > 0);
+    REQUIRE(statistics["distance_evaluations"].GetUint64() ==
+            statistics["distance_evaluations_by_phase"]["approximate"].GetUint64() +
+                statistics["distance_evaluations_by_phase"]["rerank"].GetUint64());
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,

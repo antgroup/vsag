@@ -29,11 +29,16 @@
 namespace vsag {
 
 static DatasetPtr
-make_empty_dataset_with_stats() {
-    SearchStatistics stats;
+make_empty_dataset_with_stats(const SearchStatistics& stats) {
     auto dataset_result = DatasetImpl::MakeEmptyDataset();
     dataset_result->Statistics(stats.Dump());
     return dataset_result;
+}
+
+static DatasetPtr
+make_empty_dataset_with_stats() {
+    SearchStatistics stats;
+    return make_empty_dataset_with_stats(stats);
 }
 
 DatasetPtr
@@ -141,6 +146,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
                 return make_empty_dataset_with_stats();
             }
             if (iter_filter_ctx->IsFirstUsed()) {
+                ScopedDistancePhase routing_phase(ctx, DistanceEvaluationPhase::ROUTING);
                 for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
                     auto result = this->search_one_graph(query_data,
                                                          this->route_graphs_[i],
@@ -230,7 +236,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
             if (not iter_filter_ctx->Empty()) {
                 continue;
             }
-            return DatasetImpl::MakeEmptyDataset();
+            return make_empty_dataset_with_stats(stats);
         }
         auto count = static_cast<const int64_t>(search_result->Size());
         auto [dataset_results, dists, ids] = create_fast_dataset(count, ctx.alloc);
@@ -507,8 +513,10 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
                 const auto label = this->label_table_->GetLabelById(inner_id);
                 request.distance_batch_func_(&label, 1, &dist);
                 CHECK_ARGUMENT(std::isfinite(dist), "distance callback must return finite scores");
+                stats.AddDistance(SearchStatistics::DistancePhase::APPROXIMATE,
+                                  DistanceEvaluationBackend::UNKNOWN);
             } else {
-                precise_flatten->Query(&dist, computer, &inner_id, 1);
+                precise_flatten->Query(&dist, computer, &inner_id, 1, &ctx);
             }
             reasoning_ctx->SetTrueDistance(inner_id, dist);
         }
@@ -549,6 +557,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     auto& vt = vt_guard.visited_list;
 
     const auto* raw_query = use_custom_distance ? nullptr : get_data(query);
+    ctx.distance_phase = DistanceEvaluationPhase::ROUTING;
     for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
         auto result = this->search_one_graph(
             raw_query, this->route_graphs_[i], this->basic_flatten_codes_, search_param, vt, &ctx);
@@ -557,6 +566,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
             search_param.ep = result->Top().second;
         }
     }
+    ctx.distance_phase = DistanceEvaluationPhase::APPROXIMATE;
 
     FilterPtr ft = this->create_search_filter(request.filter_, params.use_extra_info_filter);
 

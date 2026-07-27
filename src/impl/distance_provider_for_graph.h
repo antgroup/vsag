@@ -136,6 +136,12 @@ public:
     [[nodiscard]] float
     QueryDistance(InnerIdType id, QueryContext* ctx = nullptr) const override;
 
+    void
+    BatchQueryDistance(float* distances,
+                       const InnerIdType* ids,
+                       InnerIdType count,
+                       QueryContext* ctx = nullptr) const override;
+
     [[nodiscard]] float
     PairwiseDistance(InnerIdType id1,
                      InnerIdType id2,

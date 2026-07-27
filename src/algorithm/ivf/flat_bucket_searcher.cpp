@@ -41,6 +41,12 @@ FlatBucketSearcher::Search(BucketIdType bucket_id,
     }
 
     bucket->ScanBucketById(dist.data(), computer, bucket_id);
+    if (param.query_context != nullptr and param.query_context->stats != nullptr and
+        bucket_size > 0) {
+        param.query_context->stats->AddDistance(SearchStatistics::DistancePhase::APPROXIMATE,
+                                                bucket->backend_,
+                                                static_cast<uint64_t>(bucket_size));
+    }
 
     Filter* attr_ft = nullptr;
     size_t tid = 0;

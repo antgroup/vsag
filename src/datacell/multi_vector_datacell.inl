@@ -34,6 +34,8 @@ MultiVectorDataCell<QuantTmpl, IOTmpl>::MultiVectorDataCell(
       multi_vector_dim_(static_cast<uint32_t>(common_param.dim_)),
       metric_(common_param.metric_) {
     this->quantizer_ = std::make_shared<QuantTmpl>(quantization_param, common_param);
+    this->backend_ =
+        QuantizerDistanceBackend<QuantTmpl>::Get(static_cast<const QuantTmpl&>(*this->quantizer_));
     this->io_ = std::make_shared<IOTmpl>(io_param, common_param);
     this->offset_io_ =
         std::make_shared<MemoryBlockIO>(Options::Instance().block_size_limit(), allocator_);
@@ -177,6 +179,8 @@ MultiVectorDataCell<QuantTmpl, IOTmpl>::Deserialize(lvalue_or_rvalue<StreamReade
     this->offset_io_->Deserialize(reader);
     this->io_->Deserialize(reader);
     this->quantizer_->Deserialize(reader);
+    this->backend_ =
+        QuantizerDistanceBackend<QuantTmpl>::Get(static_cast<const QuantTmpl&>(*this->quantizer_));
 }
 
 template <typename QuantTmpl, typename IOTmpl>
@@ -249,6 +253,8 @@ MultiVectorDataCell<QuantTmpl, IOTmpl>::Query(float* result_dists,
             all_codes.data + cursor + sizeof(uint32_t), token_count, result_dists + i);
         cursor += data_sizes[i];
     }
+    if (ctx != nullptr and ctx->stats != nullptr and ctx->track_distance_evaluations)
+        ctx->stats->AddDistance(ctx->distance_phase, backend_, id_count);
 }
 
 template <typename QuantTmpl, typename IOTmpl>

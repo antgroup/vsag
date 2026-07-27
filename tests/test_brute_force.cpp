@@ -222,6 +222,38 @@ const std::vector<std::pair<std::string, float>> BruteForceTestIndex::all_test_c
 
 constexpr static const char* search_param_tmp = "";
 
+TEST_CASE("BruteForce empty search exposes zero statistics", "[ut][bruteforce][statistics]") {
+    constexpr const char* params = R"({
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": 4,
+        "index_param": {"base_quantization_type": "fp32"}
+    })";
+    auto index = fixtures::TestIndex::TestFactory("brute_force", params, true);
+    auto query = vsag::Dataset::Make();
+    const float vector[] = {0.0F, 0.0F, 0.0F, 0.0F};
+    query->NumElements(1)->Dim(4)->Float32Vectors(vector)->Owner(false);
+    auto result = index->KnnSearch(query, 1, "");
+    REQUIRE(result.has_value());
+    auto stats = vsag::JsonType::Parse(result.value()->GetStatistics());
+    REQUIRE(stats["distance_evaluations"].GetUint64() == 0);
+    REQUIRE(stats["complete"].GetBool());
+
+    const float vectors[] = {
+        0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 2.0F, 0.0F, 0.0F, 0.0F};
+    const int64_t ids[] = {10, 11, 12};
+    auto base = vsag::Dataset::Make();
+    base->NumElements(3)->Dim(4)->Float32Vectors(vectors)->Ids(ids)->Owner(false);
+    REQUIRE(index->Build(base).has_value());
+
+    result = index->KnnSearch(query, 1, R"({"parallelism": 2})");
+    REQUIRE(result.has_value());
+    stats = vsag::JsonType::Parse(result.value()->GetStatistics());
+    REQUIRE(stats["distance_evaluations"].GetUint64() == 3);
+    REQUIRE(stats["distance_evaluations_by_phase"]["approximate"].GetUint64() == 3);
+    REQUIRE(stats["distance_evaluations_by_backend"]["fp32"].GetUint64() == 3);
+}
+
 BruteForceResourcePtr
 BruteForceTestIndex::GetResource(bool sample) {
     auto resource = std::make_shared<BruteForceTestResource>();
@@ -618,6 +650,14 @@ TestBruteForceSerializeStreaming() {
     auto dataset = BruteForceTestIndex::pool.GetDatasetAndCreate(16, 100, "l2");
     TestIndex::TestBuildIndex(index, dataset, true);
 
+    auto buffer_param = vsag::JsonType::Parse(param);
+    buffer_param["index_param"]["base_io_type"].SetString("buffer_io");
+    buffer_param["index_param"]["base_file_path"].SetString(
+        BruteForceTestIndex::dir.GenerateRandomFile(false));
+    auto buffer_index =
+        TestIndex::TestFactory(BruteForceTestIndex::name, buffer_param.Dump(), true);
+    TestIndex::TestBuildIndex(buffer_index, dataset, true);
+
     std::stringstream stream;
     auto serialize_result = index->SerializeStreaming(stream);
     REQUIRE(serialize_result.has_value());
@@ -651,9 +691,16 @@ TestBruteForceSerializeStreaming() {
     auto result = index->KnnSearch(query, 10, search_param_tmp);
     auto result2 = index2->KnnSearch(query, 10, search_param_tmp);
     auto result3 = index3->KnnSearch(query, 10, search_param_tmp);
+    auto buffer_result = buffer_index->KnnSearch(query, 10, R"({"parallelism": 2})");
     REQUIRE(result.has_value());
     REQUIRE(result2.has_value());
     REQUIRE(result3.has_value());
+    REQUIRE(buffer_result.has_value());
+    auto buffer_statistics = vsag::JsonType::Parse(buffer_result.value()->GetStatistics());
+    REQUIRE(buffer_statistics["io_cnt"].GetInt() == dataset->base_->GetNumElements());
+    REQUIRE(buffer_statistics["distance_evaluations"].GetUint64() ==
+            static_cast<uint64_t>(dataset->base_->GetNumElements()));
+    REQUIRE(buffer_statistics["complete"].GetBool());
     REQUIRE(result.value()->GetDim() == result2.value()->GetDim());
     for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
         REQUIRE(result.value()->GetIds()[i] == result2.value()->GetIds()[i]);
@@ -1783,6 +1830,11 @@ TEST_CASE("(PR) BruteForce Custom Batch Distance", "[ft][bruteforce][custom_dist
     REQUIRE(result.has_value());
     REQUIRE(max_batch_size == 3);
     REQUIRE(result.value()->GetDim() == 3);
+    auto statistics = vsag::JsonType::Parse(result.value()->GetStatistics());
+    REQUIRE(statistics["distance_evaluations"].GetUint64() == scored_ids.size());
+    REQUIRE(statistics["distance_evaluations_by_backend"]["unknown"].GetUint64() ==
+            scored_ids.size());
+    REQUIRE_FALSE(statistics["complete"].GetBool());
     for (const auto id : scored_ids) {
         REQUIRE(id % 2 == 0);
     }
@@ -1799,6 +1851,17 @@ TEST_CASE("(PR) BruteForce Custom Batch Distance", "[ft][bruteforce][custom_dist
         REQUIRE(result.value()->GetIds()[i] == expected_ids[i]);
         REQUIRE(result.value()->GetDistances()[i] == static_cast<float>(expected_ids[i]));
     }
+
+    scored_ids.clear();
+    request.filter_ = std::make_shared<RejectAllFilter>();
+    auto rejected_result = index->SearchWithRequest(request);
+    REQUIRE(rejected_result.has_value());
+    REQUIRE(rejected_result.value()->GetDim() == 0);
+    REQUIRE(scored_ids.empty());
+    statistics = vsag::JsonType::Parse(rejected_result.value()->GetStatistics());
+    REQUIRE(statistics["distance_evaluations"].GetUint64() == 0);
+    REQUIRE(statistics["distance_evaluations_by_backend"]["unknown"].GetUint64() == 0);
+    REQUIRE(statistics["complete"].GetBool());
 }
 
 TEST_CASE("(PR) BruteForce Custom Batch Distance Validation",

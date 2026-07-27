@@ -100,7 +100,8 @@ private:
                   uint32_t query_token_count,
                   int64_t coarse_k,
                   uint64_t* coarse_dist_cmp = nullptr,
-                  uint64_t* coarse_probe_count = nullptr) const;
+                  uint64_t* coarse_probe_count = nullptr,
+                  uint64_t* coarse_distance_evaluations = nullptr) const;
 
     void
     serialize_rep_hgraph(StreamWriter& writer) const;

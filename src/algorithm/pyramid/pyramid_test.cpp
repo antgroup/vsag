@@ -40,7 +40,8 @@ MakePyramidIndex(uint32_t index_min_size,
                  bool use_rabitq_with_sq8 = false,
                  bool split_rabitq = false,
                  bool use_mrle_split = false,
-                 bool use_mrle_fp32 = false) {
+                 bool use_mrle_fp32 = false,
+                 bool use_reorder = false) {
     PyramidTestIndex result;
     vsag::IndexCommonParam common_param;
     common_param.dim_ = PYRAMID_TEST_DIM;
@@ -86,13 +87,17 @@ MakePyramidIndex(uint32_t index_min_size,
     }
     external_param[vsag::PYRAMID_INDEX_MIN_SIZE].SetInt(index_min_size);
     external_param[vsag::PYRAMID_BUILD_THREAD_COUNT].SetUint64(build_thread_count);
+    external_param[vsag::PYRAMID_USE_REORDER].SetBool(use_rabitq_with_sq8 or split_rabitq or
+                                                      use_mrle_split or use_reorder);
     if (use_rabitq_with_sq8) {
         external_param[vsag::PYRAMID_BASE_QUANTIZATION_TYPE].SetString("rabitq");
         external_param[vsag::PYRAMID_PRECISE_QUANTIZATION_TYPE].SetString("sq8");
         external_param[vsag::PYRAMID_BASE_IO_TYPE].SetString("block_memory_io");
         external_param[vsag::PYRAMID_PRECISE_IO_TYPE].SetString("block_memory_io");
-        external_param[vsag::PYRAMID_USE_REORDER].SetBool(true);
         external_param[vsag::PYRAMID_RABITQ_BITS_PER_DIM_BASE].SetUint64(1);
+    } else if (use_reorder) {
+        external_param[vsag::PYRAMID_PRECISE_QUANTIZATION_TYPE].SetString(
+            vsag::QUANTIZATION_TYPE_VALUE_FP32);
     }
     auto param = vsag::Pyramid::CheckAndMappingExternalParam(external_param, common_param);
     result.index = std::make_shared<vsag::Pyramid>(param, common_param);
@@ -120,6 +125,20 @@ float
 GetPyramidDuplicateRatio(const std::shared_ptr<vsag::Pyramid>& index) {
     auto stats = vsag::JsonType::Parse(index->GetStats());
     return stats["duplicate_ratio"].GetFloat();
+}
+
+void
+RequirePyramidSearchStatistics(const vsag::DatasetPtr& result, uint64_t approximate) {
+    auto statistics = vsag::JsonType::Parse(result->GetStatistics());
+    REQUIRE(statistics["distance_evaluations_by_phase"]["approximate"].GetUint64() == approximate);
+    REQUIRE(statistics["distance_evaluations_by_phase"]["rerank"].GetUint64() > 0);
+    REQUIRE(statistics["distance_evaluations"].GetUint64() ==
+            statistics["distance_evaluations_by_phase"]["routing"].GetUint64() +
+                statistics["distance_evaluations_by_phase"]["approximate"].GetUint64() +
+                statistics["distance_evaluations_by_phase"]["rerank"].GetUint64());
+    REQUIRE(statistics["distance_evaluations_by_backend"]["fp32"].GetUint64() ==
+            statistics["distance_evaluations"].GetUint64());
+    REQUIRE(statistics["complete"].GetBool());
 }
 
 }  // namespace
@@ -338,4 +357,41 @@ TEST_CASE("Pyramid Build stores RaBitQ and SQ8 codes in parallel", "[ut][pyramid
             REQUIRE(std::abs(decoded[j] - vectors[inner_id * PYRAMID_TEST_DIM + j]) < 0.02F);
         }
     }
+}
+
+TEST_CASE("Pyramid reports statistics for flat and graph leaves", "[ut][pyramid][statistics]") {
+    auto test_index = MakePyramidIndex(3, 1, false, false, false, false, true);
+    const auto& index = test_index.index;
+    std::vector<float> vectors = {
+        0.0F,
+        0.0F,
+        0.0F,
+        0.0F,
+        1.0F,
+        1.0F,
+        1.0F,
+        1.0F,
+        2.0F,
+        2.0F,
+        2.0F,
+        2.0F,
+    };
+    std::vector<int64_t> ids = {100, 101, 102};
+    std::vector<std::string> paths(3, "tenant");
+    auto query = MakePyramidDataset(vectors.data(), nullptr, paths.data(), 1);
+    const auto parameters = R"({"pyramid":{"ef_search":10}})";
+
+    REQUIRE(index->Add(MakePyramidDataset(vectors.data(), ids.data(), paths.data(), 2)).empty());
+    auto flat_result = index->KnnSearch(query, 1, parameters, vsag::FilterPtr{});
+    RequirePyramidSearchStatistics(flat_result, 2);
+
+    REQUIRE(index
+                ->Add(MakePyramidDataset(
+                    vectors.data() + 2 * PYRAMID_TEST_DIM, ids.data() + 2, paths.data() + 2, 1))
+                .empty());
+    auto graph_result = index->KnnSearch(query, 1, parameters, vsag::FilterPtr{});
+    auto graph_statistics = vsag::JsonType::Parse(graph_result->GetStatistics());
+    REQUIRE(graph_statistics["distance_evaluations_by_phase"]["approximate"].GetUint64() > 0);
+    RequirePyramidSearchStatistics(
+        graph_result, graph_statistics["distance_evaluations_by_phase"]["approximate"].GetUint64());
 }

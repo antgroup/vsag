@@ -353,6 +353,38 @@ public:
     }
 
     py::tuple
+    KnnSearchWithStatistics(const py::array& vector, uint64_t k, const std::string& parameters) {
+        validate_dense_index_kind(dense_vector_kind_, "knn_search_with_statistics");
+        auto buf = validate_dense_array(vector, dense_vector_kind_, "vector");
+        auto query = vsag::Dataset::Make();
+        query->NumElements(1)->Dim(to_int64(static_cast<uint64_t>(buf.shape[0])))->Owner(false);
+        set_dense_vectors(query, buf, dense_vector_kind_);
+        uint64_t ids_shape[1]{k};
+        uint64_t ids_strides[1]{sizeof(int64_t)};
+        uint64_t dists_shape[1]{k};
+        uint64_t dists_strides[1]{sizeof(float)};
+        py::array_t<int64_t> ids(ids_shape, ids_strides);
+        py::array_t<float> dists(dists_shape, dists_strides);
+        auto ids_view = ids.mutable_unchecked<1>();
+        auto dists_view = dists.mutable_unchecked<1>();
+        for (uint64_t i = 0; i < k; ++i) {
+            ids_view(i) = -1;
+            dists_view(i) = -1.0F;
+        }
+        auto result = index_->KnnSearch(query, to_int64(k), parameters);
+        if (not result.has_value()) {
+            throw std::runtime_error(fmt::format("knn search failed: {}", result.error().message));
+        }
+        const auto statistics = result.value()->GetStatistics();
+        const auto count = static_cast<uint64_t>(result.value()->GetDim());
+        for (uint64_t i = 0; i < k && i < count; ++i) {
+            ids_view(i) = result.value()->GetIds()[i];
+            dists_view(i) = result.value()->GetDistances()[i];
+        }
+        return py::make_tuple(ids, dists, py::str(statistics));
+    }
+
+    py::tuple
     SparseKnnSearch(const py::array_t<uint32_t>& index_pointers,
                     const py::array_t<uint32_t>& indices,
                     const py::array_t<float>& values,
@@ -385,6 +417,43 @@ public:
         return py::make_tuple(res_ids, res_dists);
     }
 
+    py::tuple
+    SparseKnnSearchWithStatistics(const py::array_t<uint32_t>& index_pointers,
+                                  const py::array_t<uint32_t>& indices,
+                                  const py::array_t<float>& values,
+                                  uint32_t k,
+                                  const std::string& parameters) {
+        auto batch = build_sparse_vectors_from_csr(index_pointers, indices, values);
+        std::vector<uint32_t> shape{batch.num_elements, k};
+        py::array_t<int64_t> res_ids(shape);
+        py::array_t<float> res_dists(shape);
+        auto ids_view = res_ids.mutable_unchecked<2>();
+        auto dists_view = res_dists.mutable_unchecked<2>();
+        py::list statistics;
+
+        for (uint32_t i = 0; i < batch.num_elements; ++i) {
+            for (uint32_t j = 0; j < k; ++j) {
+                ids_view(i, j) = -1;
+                dists_view(i, j) = -1.0F;
+            }
+            auto query = vsag::Dataset::Make();
+            query->Owner(false)->NumElements(1)->SparseVectors(batch.sparse_vectors.data() + i);
+            auto result = index_->KnnSearch(query, k, parameters);
+            if (not result.has_value()) {
+                throw std::runtime_error(
+                    fmt::format("sparse knn search failed: {}", result.error().message));
+            }
+            const auto count = static_cast<uint64_t>(result.value()->GetDim());
+            for (uint32_t j = 0; j < k and j < count; ++j) {
+                ids_view(i, j) = result.value()->GetIds()[j];
+                dists_view(i, j) = result.value()->GetDistances()[j];
+            }
+            statistics.append(py::str(result.value()->GetStatistics()));
+        }
+
+        return py::make_tuple(res_ids, res_dists, statistics);
+    }
+
     py::object
     RangeSearch(py::array point, float threshold, std::string& parameters) {
         validate_dense_index_kind(dense_vector_kind_, "range_search");
@@ -411,6 +480,33 @@ public:
         }
 
         return py::make_tuple(labels, dists);
+    }
+
+    py::tuple
+    RangeSearchWithStatistics(const py::array& point,
+                              float threshold,
+                              const std::string& parameters) {
+        validate_dense_index_kind(dense_vector_kind_, "range_search_with_statistics");
+        auto buf = validate_dense_array(point, dense_vector_kind_, "point");
+        auto query = vsag::Dataset::Make();
+        query->NumElements(1)->Dim(to_int64(static_cast<uint64_t>(buf.shape[0])))->Owner(false);
+        set_dense_vectors(query, buf, dense_vector_kind_);
+
+        auto result = index_->RangeSearch(query, threshold, parameters);
+        if (not result.has_value()) {
+            throw std::runtime_error(
+                fmt::format("range search failed: {}", result.error().message));
+        }
+        const auto count = static_cast<py::ssize_t>(result.value()->GetDim());
+        py::array_t<int64_t> labels(count);
+        py::array_t<float> dists(count);
+        auto* labels_data = labels.mutable_data();
+        auto* dists_data = dists.mutable_data();
+        for (py::ssize_t i = 0; i < count; ++i) {
+            labels_data[i] = result.value()->GetIds()[i];
+            dists_data[i] = result.value()->GetDistances()[i];
+        }
+        return py::make_tuple(labels, dists, py::str(result.value()->GetStatistics()));
     }
 
     [[nodiscard]] int64_t
@@ -618,6 +714,21 @@ bind_index(py::module_& module) {
              - The query dtype must match the index dtype declared in the index parameters
              - Use numpy.uint16 raw-bit buffers for bfloat16 queries
          )pbdoc")
+        .def("knn_search_with_statistics",
+             &Index::KnnSearchWithStatistics,
+             py::arg("vector"),
+             py::arg("k"),
+             py::arg("parameters"),
+             "Dense k-nearest-neighbor search returning (ids, distances, statistics_json).")
+        .def("knn_search_with_statistics",
+             &Index::SparseKnnSearchWithStatistics,
+             py::arg("index_pointers"),
+             py::arg("indices"),
+             py::arg("values"),
+             py::arg("k"),
+             py::arg("parameters"),
+             "Sparse k-nearest-neighbor search returning "
+             "(ids, distances, statistics_json_per_query).")
         .def("knn_search",
              &Index::SparseKnnSearch,
              py::arg("index_pointers"),
@@ -661,6 +772,12 @@ bind_index(py::module_& module) {
              - The query dtype must match the index dtype declared in the index parameters
              - Use numpy.uint16 raw-bit buffers for bfloat16 queries
          )pbdoc")
+        .def("range_search_with_statistics",
+             &Index::RangeSearchWithStatistics,
+             py::arg("point"),
+             py::arg("threshold"),
+             py::arg("parameters"),
+             "Dense range search returning (ids, distances, statistics_json).")
         .def("save",
              &Index::Save,
              py::arg("filename"),

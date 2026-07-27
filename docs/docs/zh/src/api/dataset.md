@@ -151,3 +151,23 @@ struct MultiVector {
 - [Index](index_class.md) —— 消费并返回 dataset 的方法。
 - [搜索请求与过滤器](search.md) —— 把查询 dataset 包进 `SearchRequest`。
 - [辅助类型](types.md) —— `AttributeSet` 与属性值类型。
+
+## 单次搜索距离统计
+
+维护中的 HGraph、BruteForce、IVF、Pyramid、SINDI 和 SIMQ 搜索结果会在 `GetStatistics()` 中附加
+统计信息。一次逻辑 query-to-candidate 距离或边界评估计数一次；批量 `N` 个候选计为 `N`，
+重复评估每次计数，而距离调用之前被拒绝的候选、过滤检查、图边、预取、堆操作和跳过的下界不计数。
+下界与之后的精确重排分别计数。阶段为 `routing`、`approximate`、`rerank`，backend 是 `fp32`、
+`fp16`、`bf16`、`int8`、`sq8`、`sq4`、`pq`、`pq_fastscan`、`rabitq`、`binary`
+和稀疏表示族，不包含 ISA 或批量变体。
+
+`distance_evaluations` 等于阶段之和；已知 backend 之和等于总数。未知工作记入 `unknown` 并使
+`complete` 为 `false`。数值是无符号 64 位 JSON 整数，加法饱和。旧的 `dist_cmp` 与
+`reorder_distance_count` 保持兼容且含义不变。Python 保留 `(ids, distances)` 解包方式；可通过
+`knn_search_with_statistics` 显式获取统计信息：稠密重载返回一个统计 JSON 字符串，稀疏 CSR
+重载为每个查询返回一个字符串。`range_search_with_statistics` 返回范围搜索数组及一个统计
+JSON 字符串。C 保留
+`SearchResult_t` 布局，统计信息通过新增的显式访问方式提供：C 调用
+`vsag_search_result_enable_statistics()` 后获取统计信息，并用
+`vsag_search_result_destroy_statistics()` 释放；未选择统计的旧调用保留 `other_result` 所有权，
+不会产生统计分配。旧版 HNSW 和 DiskANN 不在此合约内。

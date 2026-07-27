@@ -15,6 +15,9 @@
 
 #pragma once
 
+#include <algorithm>
+#include <limits>
+
 #include "algorithm/sindi/sindi_parameter.h"
 #include "impl/searcher/basic_searcher.h"
 #include "quantization/sparse_quantization//sparse_term_computer.h"
@@ -25,6 +28,45 @@
 #include "vsag/dataset.h"
 
 namespace vsag {
+
+class SparseEvaluationTracker {
+public:
+    SparseEvaluationTracker(uint32_t capacity, Allocator* allocator)
+        : generations_(capacity, 0, allocator) {
+    }
+
+    void
+    BeginWindow() {
+        if (generation_ == std::numeric_limits<uint16_t>::max()) {
+            std::fill(generations_.begin(), generations_.end(), 0);
+            generation_ = 1;
+        } else {
+            ++generation_;
+        }
+        evaluated_ = 0;
+    }
+
+    void
+    Mark(const uint16_t* ids, uint32_t count) {
+        for (uint32_t i = 0; i < count; ++i) {
+            auto id = ids[i];
+            if (generations_[id] != generation_) {
+                generations_[id] = generation_;
+                ++evaluated_;
+            }
+        }
+    }
+
+    [[nodiscard]] uint64_t
+    Count() const {
+        return evaluated_;
+    }
+
+private:
+    Vector<uint16_t> generations_;
+    uint16_t generation_{0};
+    uint64_t evaluated_{0};
+};
 
 DEFINE_POINTER(SparseTermDataCell);
 class SparseTermDataCell {
@@ -48,6 +90,11 @@ public:
 
     void
     Query(float* global_dists, const SparseTermComputerPtr& computer) const;
+
+    uint64_t
+    Query(float* global_dists,
+          const SparseTermComputerPtr& computer,
+          SparseEvaluationTracker& evaluation_tracker) const;
 
     /**
      * @brief Insert candidates into heap by iterating through term lists
@@ -134,6 +181,11 @@ public:
     GetMemoryUsage() const;
 
 private:
+    void
+    query_impl(float* global_dists,
+               const SparseTermComputerPtr& computer,
+               SparseEvaluationTracker* evaluation_tracker) const;
+
     template <InnerSearchMode mode, InnerSearchType type>
     void
     insert_candidate_into_heap(uint32_t id,

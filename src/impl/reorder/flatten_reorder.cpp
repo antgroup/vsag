@@ -84,7 +84,10 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
             ids[i] = candidate_result[i].second;
         }
         add_reorder_distance_count(ctx, heap_candidate_size);
-        flatten_->Query(dists.data(), computer, ids.data(), heap_candidate_size, &ctx);
+        {
+            ScopedDistancePhase scoped(ctx, DistanceEvaluationPhase::RERANK);
+            flatten_->Query(dists.data(), computer, ids.data(), heap_candidate_size, &ctx);
+        }
         for (uint64_t i = 0; i < heap_candidate_size; ++i) {
             if (ctx.reasoning_ctx != nullptr) {
                 ctx.reasoning_ctx->RecordReorder(
@@ -138,6 +141,7 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
     const uint64_t heap_unique_size = candidate_size;
     if (heap_unique_size > 0) {
         add_reorder_lower_bound_probe_count(ctx, heap_unique_size);
+        ScopedDistancePhase scoped_phase(ctx, DistanceEvaluationPhase::RERANK);
         flatten_->QueryWithDistanceLowerBound(lower_bound_probe_dists.data(),
                                               lower_bounds.data(),
                                               computer,
@@ -176,8 +180,11 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
 
     if (not lower_bounds_available) {
         add_reorder_distance_count(ctx, candidate_size);
-        flatten_->Query(
-            lower_bound_probe_dists.data(), computer, all_ids.data(), candidate_size, &ctx);
+        {
+            ScopedDistancePhase scoped(ctx, DistanceEvaluationPhase::RERANK);
+            flatten_->Query(
+                lower_bound_probe_dists.data(), computer, all_ids.data(), candidate_size, &ctx);
+        }
         for (uint64_t i = 0; i < candidate_size; ++i) {
             if (ctx.reasoning_ctx != nullptr) {
                 ctx.reasoning_ctx->RecordReorder(
@@ -225,8 +232,11 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
                                                : std::numeric_limits<float>::max();
     }
     add_reorder_distance_count(ctx, bootstrap_size);
-    flatten_->QueryWithDistanceHint(
-        dists.data(), hint_dists.data(), computer, ids.data(), bootstrap_size, &ctx);
+    {
+        ScopedDistancePhase scoped(ctx, DistanceEvaluationPhase::RERANK);
+        flatten_->QueryWithDistanceHint(
+            dists.data(), hint_dists.data(), computer, ids.data(), bootstrap_size, &ctx);
+    }
     for (uint64_t i = 0; i < bootstrap_size; ++i) {
         if (ctx.reasoning_ctx != nullptr) {
             const auto idx = order[i];
@@ -266,8 +276,11 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
         }
 
         add_reorder_distance_count(ctx, batch_count);
-        flatten_->QueryWithDistanceHint(
-            dists.data(), hint_dists.data(), computer, ids.data(), batch_count, &ctx);
+        {
+            ScopedDistancePhase scoped(ctx, DistanceEvaluationPhase::RERANK);
+            flatten_->QueryWithDistanceHint(
+                dists.data(), hint_dists.data(), computer, ids.data(), batch_count, &ctx);
+        }
         for (uint64_t i = 0; i < batch_count; ++i) {
             if (ctx.reasoning_ctx != nullptr) {
                 ctx.reasoning_ctx->RecordReorder(

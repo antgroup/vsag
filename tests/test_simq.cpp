@@ -321,6 +321,50 @@ require_simq_search_stats(const vsag::DatasetPtr& result) {
     REQUIRE(stats.result_count == static_cast<uint64_t>(result->GetDim()));
 }
 
+TEST_CASE("SIMQ: one centroid counts nested HGraph entry point", "[simq][statistics]") {
+    TempFile tmp;
+    std::array<float, SIMQ_DIM> vector{};
+    vector[0] = 1.0F;
+    MultiVector base_mv{1, vector.data()};
+    int64_t id = 7;
+    auto base = Dataset::Make()
+                    ->NumElements(1)
+                    ->Dim(SIMQ_DIM)
+                    ->Ids(&id)
+                    ->MultiVectors(&base_mv)
+                    ->MultiVectorDim(SIMQ_DIM)
+                    ->Owner(false);
+
+    auto created = Factory::CreateIndex("simq", make_build_param(tmp.path, 1.0F, 4, 2, 1, 1));
+    REQUIRE(created.has_value());
+    auto index = created.value();
+    REQUIRE(index->Build(base).has_value());
+
+    auto query = Dataset::Make()
+                     ->NumElements(1)
+                     ->Dim(SIMQ_DIM)
+                     ->MultiVectors(&base_mv)
+                     ->MultiVectorDim(SIMQ_DIM)
+                     ->Owner(false);
+    auto require_statistics = [](const DatasetPtr& result) {
+        auto statistics = JsonType::Parse(result->GetStatistics());
+        REQUIRE(statistics["simq_coarse_dist_cmp"].GetUint64() == 1);
+        REQUIRE(statistics["distance_evaluations_by_phase"]["routing"].GetUint64() == 1);
+        REQUIRE(statistics["distance_evaluations_by_phase"]["rerank"].GetUint64() == 1);
+        REQUIRE(statistics["distance_evaluations"].GetUint64() == 2);
+        REQUIRE(statistics["distance_evaluations_by_backend"]["fp32"].GetUint64() == 2);
+        REQUIRE(statistics["complete"].GetBool());
+    };
+
+    auto searched = index->KnnSearch(query, 1, make_search_param(1, 1), FilterPtr{});
+    REQUIRE(searched.has_value());
+    require_statistics(searched.value());
+
+    auto ranged = index->RangeSearch(query, 1.0F, make_search_param(1, 1), FilterPtr{});
+    REQUIRE(ranged.has_value());
+    require_statistics(ranged.value());
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Test cases
 // ─────────────────────────────────────────────────────────────────────────────

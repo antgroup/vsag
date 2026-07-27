@@ -1441,6 +1441,10 @@ IVF::route_buckets_only(const DatasetPtr& query,
             }
             ids[idx] = static_cast<int64_t>(bucket_id);
             distances[idx] = dist;
+            if (ctx.stats != nullptr) {
+                ctx.stats->AddDistance(SearchStatistics::DistancePhase::ROUTING,
+                                       DistanceEvaluationBackend::FP32);
+            }
         }
     }
 
@@ -1675,6 +1679,11 @@ IVF::search_with_custom_distance(const DatasetPtr& query,
         }
         request.distance_batch_func_(
             candidate_labels.data(), candidate_labels.size(), scores.data());
+        if (ctx.stats != nullptr) {
+            ctx.stats->AddDistance(SearchStatistics::DistancePhase::APPROXIMATE,
+                                   DistanceEvaluationBackend::UNKNOWN,
+                                   candidate_ids.size());
+        }
         for (uint64_t i = 0; i < candidate_ids.size(); ++i) {
             CHECK_ARGUMENT(std::isfinite(scores[i]),
                            "custom query distance callback must return finite scores");
@@ -1843,6 +1852,7 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
                        "IVF custom query distance does not support parallel search");
         param.enable_reorder = false;
     }
+    param.query_context = &ctx;
 
     if (not request.bucket_ids_.empty()) {
         CHECK_ARGUMENT(request.bucket_ids_.size() == 1,
@@ -1944,6 +1954,10 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
         auto computer = this->bucket_->FactoryComputer(query_data);
         for (const auto& [inner_id, bucket_id, offset_id] : locations) {
             float dist = this->bucket_->QueryOneById(computer, bucket_id, offset_id);
+            if (ctx.stats != nullptr) {
+                ctx.stats->AddDistance(SearchStatistics::DistancePhase::APPROXIMATE,
+                                       this->bucket_->backend_);
+            }
             reasoning_ctx->SetTrueDistance(inner_id, dist);
         }
         ctx.reasoning_ctx = reasoning_ctx.get();

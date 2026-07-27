@@ -1767,6 +1767,11 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
     REQUIRE(result.value()->GetDim() == request.topk_);
     REQUIRE(largest_batch > 0);
     REQUIRE(largest_batch <= batch_size);
+    auto statistics = vsag::JsonType::Parse(result.value()->GetStatistics());
+    REQUIRE(statistics["distance_evaluations_by_phase"]["routing"].GetUint64() > 0);
+    REQUIRE(statistics["distance_evaluations_by_phase"]["approximate"].GetUint64() > 0);
+    REQUIRE(statistics["distance_evaluations_by_backend"]["unknown"].GetUint64() > 0);
+    REQUIRE_FALSE(statistics["complete"].GetBool());
     for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
         REQUIRE(result.value()->GetDistances()[i] ==
                 static_cast<float>(result.value()->GetIds()[i]));
@@ -2181,6 +2186,10 @@ TEST_CASE("IVF GraphBucketSearcher Basic", "[ft][ivf][graph]") {
     auto result = index.value()->KnnSearch(query, 10, search_param);
     REQUIRE(result.has_value());
     REQUIRE(result.value()->GetDim() == 10);
+    auto statistics = vsag::JsonType::Parse(result.value()->GetStatistics());
+    REQUIRE(statistics["distance_evaluations_by_phase"]["approximate"].GetUint64() > 0);
+    REQUIRE(statistics["distance_evaluations_by_backend"]["fp32"].GetUint64() >=
+            statistics["distance_evaluations_by_phase"]["approximate"].GetUint64());
 }
 
 TEST_CASE("IVF GraphBucketSearcher excludes non-finite threshold results",

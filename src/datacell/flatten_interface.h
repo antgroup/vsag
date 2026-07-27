@@ -295,6 +295,7 @@ public:
     uint32_t code_size_{0};
     uint32_t prefetch_stride_code_{1};
     uint32_t prefetch_depth_code_{1};
+    DistanceEvaluationBackend backend_{DistanceEvaluationBackend::UNKNOWN};
 };
 
 }  // namespace vsag

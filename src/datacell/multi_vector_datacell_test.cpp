@@ -259,20 +259,25 @@ TEST_CASE("MultiVectorDataCell Serialize/Deserialize round-trip", "[ut][MultiVec
     original->Serialize(writer);
 
     FlattenInterfacePtr restored = MakeMultiVectorDataCell(io_type, dim, allocator);
+    restored->backend_ = DistanceEvaluationBackend::UNKNOWN;
     IOStreamReader reader(ss);
     restored->Deserialize(reader);
 
     REQUIRE(restored->TotalCount() == original->TotalCount());
+    REQUIRE(restored->backend_ == DistanceEvaluationBackend::FP32);
 
     std::vector<float> dists_after(3, 0.0F);
+    SearchStatistics stats;
+    QueryContext ctx{.stats = &stats};
     {
         ComputerInterfacePtr computer = restored->FactoryComputer(&query_mv);
-        restored->Query(dists_after.data(),
-                        computer,
-                        idx.data(),
-                        static_cast<InnerIdType>(idx.size()),
-                        nullptr);
+        restored->Query(
+            dists_after.data(), computer, idx.data(), static_cast<InnerIdType>(idx.size()), &ctx);
     }
+
+    JsonType statistics = JsonType::Parse(stats.Dump());
+    REQUIRE(statistics["distance_evaluations_by_backend"]["fp32"].GetUint64() == 3);
+    REQUIRE(statistics["complete"].GetBool());
 
     for (uint64_t i = 0; i < 3; ++i) {
         REQUIRE(dists_before[i] == dists_after[i]);
