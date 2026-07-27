@@ -334,22 +334,13 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          for attempt in 1 2 3; do
-            if gh release download compatibility-indexes \
-              --repo antgroup/vsag \
-              --dir /tmp \
-              --pattern "*.index" \
-              --pattern "*.bin" \
-              --pattern "*.json" \
-              --clobber; then
-              break
-            fi
-            if [ "$attempt" -eq 3 ]; then
-              echo "Error: Failed to download compatibility indexes after 3 attempts" >&2
-              exit 1
-            fi
-            sleep $((attempt * 5))
-          done
+          gh release download compatibility-indexes \
+            --repo antgroup/vsag \
+            --dir /tmp \
+            --pattern "*.index" \
+            --pattern "*.bin" \
+            --pattern "*.json" \
+            || echo "Warning: Failed to download compatibility indexes"
       - uses: actions/checkout@v4
       - name: Clean Env
         run: rm -rf ./build
