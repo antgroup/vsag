@@ -434,6 +434,7 @@ TEST_CASE_PERSISTENT_FIXTURE(IVFTestIndex,
     CheckBucketPreciseIndex(index, dataset, search_param);
     TestCalcDistanceById(index, dataset, 2e-6F, true);
     TestBatchCalcDistanceById(index, dataset, 2e-6F, true);
+    TestMultiQueryBatchCalcDistanceById(index, dataset, 2e-6F, true);
 
     const auto restored_file_path =
         precise_io_type == std::string("buffer_io") ? dir.GenerateRandomFile(false) : std::string();
