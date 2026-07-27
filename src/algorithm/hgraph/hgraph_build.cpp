@@ -167,7 +167,7 @@ HGraph::Build(const DatasetPtr& data) {
         elp_optimize();
     }
     if (this->mci_parameters_.enabled and graph_type_ != GRAPH_TYPE_VALUE_NSW) {
-        this->build_mci_clique_index(ret.empty() ? data->GetFloat32Vectors() : nullptr);
+        this->build_mci_clique_index(ret.empty() ? this->get_data(data) : nullptr);
     }
     return ret;
 }
@@ -318,10 +318,9 @@ HGraph::Add(const DatasetPtr& data) {
             logger::info("hgraph mci incremental add finished, total={}",
                          this->total_count_.load());
         } else {
-            const float* vectors = nullptr;
-            if (mci_start_total == 0 and batch.failed_ids.empty() and
-                this->data_type_ == DataTypes::DATA_TYPE_FLOAT) {
-                vectors = data->GetFloat32Vectors();
+            const void* vectors = nullptr;
+            if (mci_start_total == 0 and batch.failed_ids.empty()) {
+                vectors = this->get_data(data);
             }
             this->build_mci_clique_index(vectors);
         }

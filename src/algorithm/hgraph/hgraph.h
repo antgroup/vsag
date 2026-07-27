@@ -806,13 +806,16 @@ private:
                    QueryContext* ctx) const;
 
     void
-    build_mci_clique_index(const float* vectors = nullptr);
+    build_mci_clique_index(const void* vectors = nullptr);
 
     void
     incremental_update_mci_clique(InnerIdType new_inner_id, const void* vector);
 
     [[nodiscard]] Vector<InnerIdType>
     find_mci_knn_for_new_node(InnerIdType new_inner_id, const void* vector) const;
+
+    [[nodiscard]] Vector<InnerIdType>
+    search_mci_knn(InnerIdType query_inner_id, const void* vector, uint64_t visible_total) const;
 
     bool
     try_join_mci_clique(InnerIdType new_inner_id, const Vector<InnerIdType>& knn_ids);
