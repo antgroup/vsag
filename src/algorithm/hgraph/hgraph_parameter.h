@@ -72,6 +72,7 @@ public:
     bool build_by_base{false};
 
     uint64_t ef_construction{400};
+    uint64_t resize_increase_count_bit{DEFAULT_RESIZE_INCREASE_COUNT_BIT};
     float alpha{1.0F};
 
     bool support_duplicate{false};

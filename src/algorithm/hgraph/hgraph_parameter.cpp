@@ -41,6 +41,24 @@ void
 HGraphParameter::FromJson(const JsonType& json) {
     InnerIndexParameter::FromJson(json);
 
+    if (json.Contains(RESIZE_INCREASE_COUNT_BIT)) {
+        CHECK_ARGUMENT(json[RESIZE_INCREASE_COUNT_BIT].IsNumberInteger(),
+                       "resize_increase_count_bit must be an integer (log2 of slot count)");
+        CHECK_ARGUMENT(json[RESIZE_INCREASE_COUNT_BIT].IsNumberUnsigned(),
+                       "resize_increase_count_bit must be in range [1, 31] (log2 of slot count)");
+        this->resize_increase_count_bit = json[RESIZE_INCREASE_COUNT_BIT].GetUint64();
+        CHECK_ARGUMENT(
+            this->resize_increase_count_bit >= MIN_RESIZE_INCREASE_COUNT_BIT,
+            fmt::format("resize_increase_count_bit must be in range [{}, {}] (log2 of slot count)",
+                        MIN_RESIZE_INCREASE_COUNT_BIT,
+                        MAX_RESIZE_INCREASE_COUNT_BIT));
+        CHECK_ARGUMENT(
+            this->resize_increase_count_bit <= MAX_RESIZE_INCREASE_COUNT_BIT,
+            fmt::format("resize_increase_count_bit must be in range [{}, {}] (log2 of slot count)",
+                        MIN_RESIZE_INCREASE_COUNT_BIT,
+                        MAX_RESIZE_INCREASE_COUNT_BIT));
+    }
+
     if (json.Contains(HGRAPH_USE_ELP_OPTIMIZER_KEY)) {
         this->use_elp_optimizer = json[HGRAPH_USE_ELP_OPTIMIZER_KEY].GetBool();
     }
@@ -221,6 +239,7 @@ HGraphParameter::ToJson() const {
     json[BASE_CODES_KEY].SetJson(this->base_codes_param->ToJson());
     json[GRAPH_KEY].SetJson(this->bottom_graph_param->ToJson());
     json[EF_CONSTRUCTION_KEY].SetUint64(this->ef_construction);
+    json[RESIZE_INCREASE_COUNT_BIT].SetUint64(this->resize_increase_count_bit);
     json[ALPHA_KEY].SetFloat(this->alpha);
     json[SUPPORT_DUPLICATE].SetBool(this->support_duplicate);
     json[DEDUPLICATE_STORAGE].SetBool(this->deduplicate_storage);

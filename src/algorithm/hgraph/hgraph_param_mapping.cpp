@@ -298,6 +298,12 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             },
         },
         {
+            RESIZE_INCREASE_COUNT_BIT,
+            {
+                RESIZE_INCREASE_COUNT_BIT,
+            },
+        },
+        {
             HGRAPH_GRAPH_TYPE,
             {
                 GRAPH_KEY,
@@ -565,6 +571,7 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
         "{HGRAPH_USE_ENV_OPTIMIZER}": false,
         "{HGRAPH_IGNORE_REORDER_KEY}": false,
         "{HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY}": false,
+        "{RESIZE_INCREASE_COUNT_BIT}": {DEFAULT_RESIZE_INCREASE_COUNT_BIT},
         "{HGRAPH_USE_ATTRIBUTE_FILTER_KEY}": false,
         "{GRAPH_KEY}": {
             "{IO_PARAMS_KEY}": {

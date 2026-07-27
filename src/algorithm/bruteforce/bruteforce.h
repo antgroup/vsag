@@ -243,7 +243,8 @@ private:
 
     std::atomic<uint64_t> delete_count_{0};  // number of soft-deleted vectors
 
-    uint64_t resize_increase_count_bit_{DEFAULT_RESIZE_BIT};  // log2 of capacity increment
+    uint64_t resize_increase_count_bit_{
+        DEFAULT_RESIZE_INCREASE_COUNT_BIT};  // log2 of capacity increment
 
     mutable std::shared_mutex global_mutex_;  // protects reads during resize
     mutable std::shared_mutex add_mutex_;     // serialises Add / Remove
@@ -251,7 +252,5 @@ private:
     std::atomic<InnerIdType> max_capacity_{0};  // allocated slot count
 
     bool is_multi_vector_{false};  // true ⇒ WARP / multi-vector mode
-
-    static constexpr uint64_t DEFAULT_RESIZE_BIT = 10;  // default increment = 1024
 };
 }  // namespace vsag

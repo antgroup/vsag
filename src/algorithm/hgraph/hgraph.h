@@ -646,7 +646,7 @@ private:
                               const IndexCommonParam& common_param,
                               bool is_create_new = true);
 
-    /// Compute resize_increase_count_bit_ and initialize reorder if enabled.
+    /// Initialize reorder if enabled.
     void
     init_resize_bit_and_reorder();
 
@@ -879,9 +879,8 @@ private:
     std::atomic<InnerIdType> max_capacity_{0};               // allocated storage capacity
     std::atomic<CodeSlotIdType> physical_code_capacity_{0};  // physical flatten slot capacity
 
-    uint64_t resize_increase_count_bit_{DEFAULT_RESIZE_BIT};  // log2(resize batch size)
-
-    static constexpr uint64_t DEFAULT_RESIZE_BIT = 10;  // default resize batch = 1024
+    uint64_t resize_increase_count_bit_{
+        DEFAULT_RESIZE_INCREASE_COUNT_BIT};  // log2(resize batch size)
 
     std::atomic<int64_t> delete_count_{0};  // number of force-removed vectors
 

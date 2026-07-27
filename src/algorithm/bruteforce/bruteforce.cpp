@@ -69,10 +69,7 @@ BruteForce::BruteForce(const BruteForceParameterPtr& param, const IndexCommonPar
     : InnerIndexInterface(param, common_param) {
     inner_codes_ = FlattenInterface::MakeInstance(param->base_codes_param, common_param);
     is_multi_vector_ = (param->base_codes_param->name == MULTI_VECTOR_DATA_CELL);
-    auto code_size = this->inner_codes_->code_size_;
-    auto increase_count = Options::Instance().block_size_limit() / std::max(code_size, 1U);
-    this->resize_increase_count_bit_ = std::max(
-        DEFAULT_RESIZE_BIT, static_cast<uint64_t>(log2(static_cast<double>(increase_count))));
+    this->resize_increase_count_bit_ = param->resize_increase_count_bit;
     this->use_attribute_filter_ = param->use_attribute_filter;
     this->has_raw_vector_ = !is_multi_vector_;
 }
@@ -798,6 +795,11 @@ BruteForce::read_streaming_body(StreamReader& reader,
             logger::error(message);
             throw VsagException(ErrorType::INVALID_ARGUMENT, message);
         }
+        auto effective_param = std::make_shared<BruteForceParameter>(
+            *std::static_pointer_cast<BruteForceParameter>(this->create_param_ptr_));
+        effective_param->resize_increase_count_bit = index_param->resize_increase_count_bit;
+        this->create_param_ptr_ = effective_param;
+        this->resize_increase_count_bit_ = index_param->resize_increase_count_bit;
     }
 
     dim_ = basic_info["dim"].GetInt();
@@ -927,6 +929,11 @@ BruteForce::Deserialize(StreamReader& reader) {
                 logger::error(message);
                 throw VsagException(ErrorType::INVALID_ARGUMENT, message);
             }
+            auto effective_param = std::make_shared<BruteForceParameter>(
+                *std::static_pointer_cast<BruteForceParameter>(this->create_param_ptr_));
+            effective_param->resize_increase_count_bit = index_param->resize_increase_count_bit;
+            this->create_param_ptr_ = effective_param;
+            this->resize_increase_count_bit_ = index_param->resize_increase_count_bit;
         }
         dim_ = basic_info["dim"].GetInt();
         total_count_.store(basic_info["total_count"].GetUint64());
@@ -1037,6 +1044,7 @@ static const std::string BRUTE_FORCE_PARAMS_TEMPLATE =
     {
         "{TYPE_KEY}": "{INDEX_BRUTE_FORCE}",
         "{USE_REORDER_KEY}": false,
+        "{RESIZE_INCREASE_COUNT_BIT}": {DEFAULT_RESIZE_INCREASE_COUNT_BIT},
         "{BASE_CODES_KEY}": {
             "{IO_PARAMS_KEY}": {
                 "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
@@ -1086,6 +1094,7 @@ static const std::string WARP_PARAMS_TEMPLATE =
     {
         "{TYPE_KEY}": "{INDEX_BRUTE_FORCE}",
         "{USE_REORDER_KEY}": false,
+        "{RESIZE_INCREASE_COUNT_BIT}": {DEFAULT_RESIZE_INCREASE_COUNT_BIT},
         "{BASE_CODES_KEY}": {
             "{IO_PARAMS_KEY}": {
                 "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
@@ -1115,6 +1124,12 @@ BruteForce::CheckAndMappingExternalParam(const JsonType& external_param,
         warp_external_param.Erase(WARP_MODE_MARKER);
 
         const ConstParamMap external_mapping = {
+            {
+                RESIZE_INCREASE_COUNT_BIT,
+                {
+                    RESIZE_INCREASE_COUNT_BIT,
+                },
+            },
             {
                 BRUTE_FORCE_BASE_QUANTIZATION_TYPE,
                 {
@@ -1156,6 +1171,12 @@ BruteForce::CheckAndMappingExternalParam(const JsonType& external_param,
     }
 
     const ConstParamMap external_mapping = {
+        {
+            RESIZE_INCREASE_COUNT_BIT,
+            {
+                RESIZE_INCREASE_COUNT_BIT,
+            },
+        },
         {
             BRUTE_FORCE_BASE_QUANTIZATION_TYPE,
             {

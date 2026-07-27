@@ -247,6 +247,9 @@ public:
 
     inline int64_t
     GetMemoryUsage() const {
+        if constexpr (has_GetMemoryUsageImpl<IOTmpl>::value) {
+            return cast().GetMemoryUsageImpl();
+        }
         return this->size_;
     }
 
@@ -356,5 +359,6 @@ private:
     GENERATE_HAS_MEMBER_FUNCTION(InitIOImpl, void, std::declval<const IOParamPtr&>())
     GENERATE_HAS_MEMBER_FUNCTION(ResizeImpl, void, std::declval<uint64_t>())
     GENERATE_HAS_MEMBER_FUNCTION(ShrinkImpl, void, std::declval<uint64_t>())
+    GENERATE_HAS_MEMBER_FUNCTION(GetMemoryUsageImpl, int64_t)
 };
 }  // namespace vsag

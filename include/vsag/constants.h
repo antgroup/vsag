@@ -18,6 +18,10 @@
 
 namespace vsag {
 
+constexpr uint64_t DEFAULT_RESIZE_INCREASE_COUNT_BIT = 10;
+constexpr uint64_t MIN_RESIZE_INCREASE_COUNT_BIT = 1;
+constexpr uint64_t MAX_RESIZE_INCREASE_COUNT_BIT = 31;
+
 extern const char* const INDEX_HGRAPH;
 extern const char* const INDEX_LAZY_HGRAPH;
 extern const char* const INDEX_DISKANN;
@@ -202,6 +206,7 @@ extern const char* const HGRAPH_GRAPH_MAX_DEGREE;
 extern const char* const HGRAPH_BUILD_EF_CONSTRUCTION;
 extern const char* const HGRAPH_BUILD_ALPHA;
 extern const char* const HGRAPH_INIT_CAPACITY;
+extern const char* const RESIZE_INCREASE_COUNT_BIT;
 extern const char* const HGRAPH_GRAPH_TYPE;
 extern const char* const HGRAPH_GRAPH_STORAGE_TYPE;
 extern const char* const HGRAPH_GRAPH_IO_TYPE;

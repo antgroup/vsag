@@ -100,6 +100,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
     }
     mult_ = 1 / log(1.0 * static_cast<double>(this->bottom_graph_->MaximumDegree()));
 
+    this->resize_increase_count_bit_ = hgraph_param->resize_increase_count_bit;
     init_resize_bit_and_reorder();
 
     this->parallel_searcher_ =
@@ -643,23 +644,10 @@ HGraph::GetStats() const {
 
 void
 HGraph::init_resize_bit_and_reorder() {
-    auto step_block_size = Options::Instance().block_size_limit();
-    auto block_size_per_vector = this->basic_flatten_codes_->code_size_;
-    block_size_per_vector =
-        std::max(block_size_per_vector,
-                 static_cast<uint32_t>(this->bottom_graph_->maximum_degree_ * sizeof(InnerIdType)));
     if (use_reorder_) {
         auto reorder_codes = this->get_reorder_codes();
-        block_size_per_vector = std::max(block_size_per_vector, reorder_codes->code_size_);
         reorder_ = std::make_shared<FlattenReorder>(reorder_codes, allocator_);
     }
-    if (this->extra_infos_ != nullptr) {
-        block_size_per_vector =
-            std::max<int64_t>(block_size_per_vector, static_cast<uint32_t>(this->extra_info_size_));
-    }
-    auto increase_count = step_block_size / block_size_per_vector;
-    this->resize_increase_count_bit_ = std::max(
-        DEFAULT_RESIZE_BIT, static_cast<uint64_t>(log2(static_cast<double>(increase_count))));
 }
 
 void

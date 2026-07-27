@@ -61,6 +61,7 @@ auto result = index->KnnSearch(query, /*topk=*/10, "{}").value();
 |------|------|--------|------|
 | `base_quantization_type` | string | `"fp32"` | `fp32`、`fp16`、`bf16`、`sq8`、`sq4`、`sq8_uniform`、`sq4_uniform`、`pq`、`pqfs`、`rabitq` —— 各量化器细节见[量化章节](../quantization/README.md) |
 | `use_attribute_filter` | bool | `false` | 启用属性过滤（参见 [属性过滤](../advanced/attribute_filter.md)） |
+| `resize_increase_count_bit` | int | `10` | 扩容批次 slot 数的 `log2`，取值范围为 `1` 到 `31`。`1` 表示每次按 2 个 slot 对齐，`10` 表示按 1024 个 slot 对齐。较小取值减少预分配，但可能增加重分配次数。 |
 
 > **关于 `store_raw_vector` 的说明。** `store_raw_vector` 字段会被共用的
 > `InnerIndexParameter` 解析，但 BruteForce **不会**根据它决定是否启用

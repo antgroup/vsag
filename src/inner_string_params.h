@@ -312,6 +312,8 @@ const std::unordered_map<std::string, std::string> DEFAULT_MAP = {
     {"GRAPH_TYPE_KEY", GRAPH_TYPE_KEY},
     {"SUPPORT_FORCE_REMOVE", SUPPORT_FORCE_REMOVE},
     {"GRAPH_BUILD_THRESHOLD_KEY", GRAPH_BUILD_THRESHOLD_KEY},
+    {"RESIZE_INCREASE_COUNT_BIT", "resize_increase_count_bit"},
+    {"DEFAULT_RESIZE_INCREASE_COUNT_BIT", "10"},
 };
 
 }  // namespace vsag

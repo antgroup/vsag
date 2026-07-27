@@ -269,6 +269,11 @@ HGraph::deserialize_basic_info(const JsonType& jsonify_basic_info) {
             logger::error(message);
             throw VsagException(ErrorType::INVALID_ARGUMENT, message);
         }
+        auto effective_param = std::make_shared<HGraphParameter>(
+            *std::static_pointer_cast<HGraphParameter>(this->create_param_ptr_));
+        effective_param->resize_increase_count_bit = index_param->resize_increase_count_bit;
+        this->create_param_ptr_ = effective_param;
+        this->resize_increase_count_bit_ = index_param->resize_increase_count_bit;
     }
 }
 

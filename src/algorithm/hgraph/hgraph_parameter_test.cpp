@@ -228,6 +228,33 @@ TEST_CASE("HGraph maps support_duplicate to graph parameter", "[ut][HGraphParame
     REQUIRE(typed_param->bottom_graph_param->support_duplicate_);
 }
 
+TEST_CASE("HGraph maps resize increase count bit", "[ut][HGraphParameter]") {
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+
+    auto default_param = std::dynamic_pointer_cast<vsag::HGraphParameter>(
+        vsag::HGraph::CheckAndMappingExternalParam(vsag::JsonType::Parse("{}"), common_param));
+    REQUIRE(default_param != nullptr);
+    REQUIRE(default_param->resize_increase_count_bit == vsag::DEFAULT_RESIZE_INCREASE_COUNT_BIT);
+
+    auto configured_param =
+        std::dynamic_pointer_cast<vsag::HGraphParameter>(vsag::HGraph::CheckAndMappingExternalParam(
+            vsag::JsonType::Parse(R"({"resize_increase_count_bit": 1})"), common_param));
+    REQUIRE(configured_param != nullptr);
+    REQUIRE(configured_param->resize_increase_count_bit == 1);
+    REQUIRE(configured_param->ToJson()[vsag::RESIZE_INCREASE_COUNT_BIT].GetUint64() == 1);
+
+    REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(
+        vsag::JsonType::Parse(R"({"resize_increase_count_bit": 0})"), common_param));
+    REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(
+        vsag::JsonType::Parse(R"({"resize_increase_count_bit": 32})"), common_param));
+    REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(
+        vsag::JsonType::Parse(R"({"resize_increase_count_bit": 1.5})"), common_param));
+    REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(
+        vsag::JsonType::Parse(R"({"resize_increase_count_bit": -1})"), common_param));
+}
+
 TEST_CASE("HGraph rejects deduplicate_storage without support_duplicate", "[ut][HGraphParameter]") {
     auto param = vsag::JsonType::Parse(R"({
         "base_quantization_type": "fp32",

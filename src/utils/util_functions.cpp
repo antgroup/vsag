@@ -16,9 +16,11 @@
 #include "util_functions.h"
 
 #include <iomanip>
+#include <limits>
 #include <nlohmann/json.hpp>
 #include <random>
 
+#include "common.h"
 #include "container_types.h"
 #include "dataset_impl.h"
 #include "impl/allocator/safe_allocator.h"
@@ -103,6 +105,8 @@ next_multiple_of_power_of_two(uint64_t x, uint64_t n) {
                             fmt::format("n is larger than 63, n is {}", n));
     }
     uint64_t y = uint64_t{1} << n;
+    CHECK_ARGUMENT(x <= std::numeric_limits<uint64_t>::max() - (y - 1),
+                   "next multiple of power of two exceeds uint64_t range");
     auto result = (x + y - 1) & ~(y - 1);
     return result;
 }
