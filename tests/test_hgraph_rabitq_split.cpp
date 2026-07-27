@@ -239,6 +239,31 @@ TEST_CASE("HGraph RaBitQ Split ODescent optimized build", "[ft][rabitq_split][hg
     TestIndex::TestKnnSearch(index, dataset, kSplitSearchParam, 0.1F, true);
 }
 
+TEST_CASE("HGraph RaBitQ Split validates dimension before optimized training",
+          "[ft][rabitq_split][hgraph]") {
+    using namespace fixtures;
+    constexpr int64_t dim = 64;
+    constexpr uint64_t base_count = 32;
+    const int64_t invalid_dim = GENERATE(dim - 1, dim + 1);
+
+    auto param =
+        HGraphRaBitQSplitTestIndex::GenerateBuildParam("l2", dim, "memory_io", "", 3, 5, true);
+    auto index = TestIndex::TestFactory(HGraphRaBitQSplitTestIndex::name, param, true);
+    auto invalid_dataset =
+        HGraphRaBitQSplitTestIndex::pool.GetDatasetAndCreate(invalid_dim, base_count, "l2");
+
+    auto invalid_result = index->Build(invalid_dataset->base_);
+    REQUIRE_FALSE(invalid_result.has_value());
+    REQUIRE(index->GetNumElements() == 0);
+
+    auto valid_dataset =
+        HGraphRaBitQSplitTestIndex::pool.GetDatasetAndCreate(dim, base_count, "l2");
+    auto valid_result = index->Build(valid_dataset->base_);
+    REQUIRE(valid_result.has_value());
+    REQUIRE(valid_result.value().empty());
+    REQUIRE(index->GetNumElements() == base_count);
+}
+
 TEST_CASE("HGraph RaBitQ Split drains accepted build tasks after enqueue failure",
           "[ft][rabitq_split][hgraph]") {
     using namespace fixtures;
