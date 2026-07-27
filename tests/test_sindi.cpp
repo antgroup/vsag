@@ -134,7 +134,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
     param.window_size = 10000;
     auto build_param = fixtures::SINDITestIndex::GenerateBuildParameter(param);
     auto index = TestFactory("sindi", build_param, true);
-    auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
+    auto dataset = pool.GetPositiveSparseDatasetAndCreate(base_count, 128, 0.8);
     REQUIRE(index->GetIndexType() == vsag::IndexType::SINDI);
     TestBuildIndex(index, dataset, true);
     {
@@ -202,7 +202,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
     param.use_reorder = GENERATE(true, false);
     auto build_param = fixtures::SINDITestIndex::GenerateBuildParameter(param);
     auto index = TestFactory("sindi", build_param, true);
-    auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
+    auto dataset = pool.GetPositiveSparseDatasetAndCreate(base_count, 128, 0.8);
     REQUIRE(index->GetIndexType() == vsag::IndexType::SINDI);
     TestContinueAdd(index, dataset, true);
     TestGetRawVectorByIds(index, dataset, true);
@@ -228,7 +228,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Analyze", "[ft][an
     param.sparse_value_quant_type = GENERATE("fp32", "sq8", "fp16");
     auto build_param = fixtures::SINDITestIndex::GenerateBuildParameter(param);
     auto index = TestFactory("sindi", build_param, true);
-    auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
+    auto dataset = pool.GetPositiveSparseDatasetAndCreate(base_count, 128, 0.8);
     REQUIRE(index->GetIndexType() == vsag::IndexType::SINDI);
     TestBuildIndex(index, dataset, true);
 
@@ -266,7 +266,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
     param.remap_term_ids = GENERATE(true, false);
     auto build_param = fixtures::SINDITestIndex::GenerateBuildParameter(param);
     auto index = TestFactory("sindi", build_param, true);
-    auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
+    auto dataset = pool.GetPositiveSparseDatasetAndCreate(base_count, 128, 0.8);
     REQUIRE(index->GetIndexType() == vsag::IndexType::SINDI);
     TestConcurrentAddSearch(index, dataset, search_param, 0.99, true);
 }
@@ -296,7 +296,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
         auto deserialize_index = index2->Deserialize(serialize_binary.value());
         REQUIRE(deserialize_index.has_value());
     }
-    auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
+    auto dataset = pool.GetPositiveSparseDatasetAndCreate(base_count, 128, 0.8);
     TestBuildIndex(index, dataset, true);
     SECTION("serialize/deserialize by binary") {
         auto index2 = TestFactory(name, build_param, true);
@@ -321,7 +321,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
     param.remap_term_ids = GENERATE(true, false);
     auto build_param = fixtures::SINDITestIndex::GenerateBuildParameter(param);
     auto index = TestFactory("sindi", build_param, true);
-    auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
+    auto dataset = pool.GetPositiveSparseDatasetAndCreate(base_count, 128, 0.8);
     TestDuplicateAdd(index, dataset);
 }
 
@@ -333,7 +333,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
     param.remap_term_ids = true;
     auto build_param = fixtures::SINDITestIndex::GenerateBuildParameter(param);
     auto index = TestFactory("sindi", build_param, true);
-    auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
+    auto dataset = pool.GetPositiveSparseDatasetAndCreate(base_count, 128, 0.8);
     REQUIRE(index->GetIndexType() == vsag::IndexType::SINDI);
     TestBuildIndex(index, dataset, true);
     TestKnnSearch(index, dataset, search_param, 0.99, true);
@@ -346,7 +346,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex, "SINDI Mark Remove", "[ft
     param.use_reorder = GENERATE(true, false);
     auto build_param = fixtures::SINDITestIndex::GenerateBuildParameter(param);
     auto index = TestFactory("sindi", build_param, true);
-    auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
+    auto dataset = pool.GetPositiveSparseDatasetAndCreate(base_count, 128, 0.8);
     REQUIRE(index->GetIndexType() == vsag::IndexType::SINDI);
     TestBuildIndex(index, dataset, true);
 

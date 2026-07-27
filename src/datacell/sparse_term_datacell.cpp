@@ -16,7 +16,10 @@
 #include "sparse_term_datacell.h"
 
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <cstring>
+#include <numeric>
 
 #include "simd/fp16_simd.h"
 #include "utils/util_functions.h"
@@ -24,8 +27,24 @@
 #include "vsag_exception.h"
 namespace vsag {
 
+uint32_t
+SparseTermDataCell::GetSparseValueCodeSize(SparseValueQuantizationType type) {
+    switch (type) {
+        case SparseValueQuantizationType::FP32:
+            return sizeof(float);
+        case SparseValueQuantizationType::SQ8:
+            return sizeof(uint8_t);
+        case SparseValueQuantizationType::FP16:
+            return sizeof(uint16_t);
+        default:
+            CHECK_ARGUMENT(false, "unknown sparse value quantization type");
+    }
+    return sizeof(float);
+}
+
 void
 SparseTermDataCell::Query(float* global_dists, const SparseTermComputerPtr& computer) const {
+    const auto value_code_size = GetSparseValueCodeSize(sparse_value_quant_type_);
     while (computer->HasNextTerm()) {
         auto it = computer->NextTermIter();
         auto term = computer->GetTerm(it);
@@ -41,18 +60,21 @@ SparseTermDataCell::Query(float* global_dists, const SparseTermComputerPtr& comp
             continue;
         }
 
-        auto term_size = static_cast<uint32_t>(static_cast<float>(term_sizes_[term]) *
-                                               computer->term_retain_ratio_);
+        const auto posting_count = term_sizes_[term];
+        auto term_count = posting_count;
+        if (term_sorted_sizes_[term] == posting_count) {
+            term_count = computer->GetTermScanCount(posting_count);
+        }
+        const auto* term_ids = term_ids_[term]->data();
+        const auto* term_data = term_datas_[term]->data();
 
         if (sparse_value_quant_type_ == SparseValueQuantizationType::SQ8) {
-            computer->ScanForAccumulateSQ8(
-                it, term_ids_[term]->data(), term_datas_[term]->data(), term_size, global_dists);
+            computer->ScanForAccumulateSQ8(it, term_ids, term_data, term_count, global_dists);
         } else if (sparse_value_quant_type_ == SparseValueQuantizationType::FP16) {
-            computer->ScanForAccumulateFP16Bytes(
-                it, term_ids_[term]->data(), term_datas_[term]->data(), term_size, global_dists);
+            computer->ScanForAccumulateFP16Bytes(it, term_ids, term_data, term_count, global_dists);
         } else {
             computer->ScanForAccumulateFloatBytes(
-                it, term_ids_[term]->data(), term_datas_[term]->data(), term_size, global_dists);
+                it, term_ids, term_data, term_count, global_dists);
         }
     }
     computer->ResetTerm();
@@ -148,13 +170,17 @@ SparseTermDataCell::InsertHeapByTermLists(float* dists,
             continue;
         }
 
+        const auto posting_count = term_sizes_[term];
+        auto term_count = posting_count;
+        if (term_sorted_sizes_[term] == posting_count) {
+            term_count = computer->GetTermScanCount(posting_count);
+        }
         uint32_t i = 0;
-        auto term_size = static_cast<uint32_t>(static_cast<float>(term_sizes_[term]) *
-                                               computer->term_retain_ratio_);
+        const auto term_end = term_count;
         auto& one_term_ids = *term_ids_[term];
         if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
             if (heap.size() < n_candidate) {
-                for (; i < term_size; i++) {
+                for (; i < term_end; i++) {
                     id = one_term_ids[i];
                     if (fill_heap_initial<type>(
                             id, dists[id], cur_heap_top, heap, offset_id, n_candidate, filter)) {
@@ -165,7 +191,7 @@ SparseTermDataCell::InsertHeapByTermLists(float* dists,
             }
         }
 
-        for (; i < term_size; i++) {
+        for (; i < term_end; i++) {
             id = one_term_ids[i];
             insert_candidate_into_heap<mode, type>(
                 id, dists[id], cur_heap_top, heap, offset_id, radius, filter);
@@ -263,6 +289,9 @@ SparseTermDataCell::InsertVector(const SparseVector& sparse_base, uint16_t base_
             term_ids_[term] = std::make_unique<Vector<uint16_t>>(allocator_);
             term_datas_[term] = std::make_unique<Vector<uint8_t>>(allocator_);
         }
+        if (term_sorted_sizes_[term] == term_sizes_[term]) {
+            dirty_terms_.push_back(term);
+        }
 
         term_ids_[term]->push_back(base_id);
 
@@ -288,6 +317,89 @@ SparseTermDataCell::InsertVector(const SparseVector& sparse_base, uint16_t base_
 }
 
 void
+SparseTermDataCell::SortByValue() {
+    const uint64_t value_code_size = GetSparseValueCodeSize(sparse_value_quant_type_);
+    Vector<uint32_t> order(allocator_);
+    Vector<float> values(allocator_);
+
+    for (const auto term : dirty_terms_) {
+        const auto term_size = term_sizes_[term];
+        const auto sorted_size = std::min(term_sorted_sizes_[term], term_size);
+        if (term_size == 0) {
+            term_sorted_sizes_[term] = term_size;
+            continue;
+        }
+
+        auto& ids = *term_ids_[term];
+        auto& data = *term_datas_[term];
+        order.resize(term_size);
+        std::iota(order.begin(), order.end(), 0);
+        values.resize(term_size);
+        if (sparse_value_quant_type_ == SparseValueQuantizationType::SQ8) {
+            for (uint32_t i = 0; i < term_size; ++i) {
+                values[i] = static_cast<float>(data[i]);
+            }
+        } else if (sparse_value_quant_type_ == SparseValueQuantizationType::FP16) {
+            for (uint32_t i = 0; i < term_size; ++i) {
+                uint16_t value = 0;
+                std::memcpy(&value,
+                            data.data() + static_cast<uint64_t>(i) * value_code_size,
+                            value_code_size);
+                values[i] = generic::FP16ToFloat(value);
+            }
+        } else {
+            for (uint32_t i = 0; i < term_size; ++i) {
+                std::memcpy(&values[i],
+                            data.data() + static_cast<uint64_t>(i) * value_code_size,
+                            value_code_size);
+            }
+        }
+        CHECK_ARGUMENT(
+            std::none_of(
+                values.begin(), values.end(), [](float value) { return std::isnan(value); }),
+            "SINDI posting values must not be NaN");
+        const auto compare = [&values, &ids](uint32_t left, uint32_t right) {
+            if (values[left] != values[right]) {
+                return values[left] > values[right];
+            }
+            return ids[left] < ids[right];
+        };
+        const auto sorted_end =
+            order.begin() + static_cast<Vector<uint32_t>::difference_type>(sorted_size);
+        std::sort(sorted_end, order.end(), compare);
+        std::inplace_merge(order.begin(), sorted_end, order.end(), compare);
+
+        for (uint32_t start = 0; start < term_size; ++start) {
+            if (order[start] == start) {
+                continue;
+            }
+
+            const auto saved_id = ids[start];
+            std::array<uint8_t, sizeof(float)> saved_data{};
+            std::memcpy(saved_data.data(), data.data() + start * value_code_size, value_code_size);
+
+            auto current = start;
+            while (order[current] != start) {
+                const auto source = order[current];
+                ids[current] = ids[source];
+                std::memcpy(data.data() + static_cast<uint64_t>(current) * value_code_size,
+                            data.data() + static_cast<uint64_t>(source) * value_code_size,
+                            value_code_size);
+                order[current] = current;
+                current = source;
+            }
+            ids[current] = saved_id;
+            std::memcpy(data.data() + static_cast<uint64_t>(current) * value_code_size,
+                        saved_data.data(),
+                        value_code_size);
+            order[current] = current;
+        }
+        term_sorted_sizes_[term] = term_size;
+    }
+    dirty_terms_.clear();
+}
+
+void
 SparseTermDataCell::ResizeTermList(InnerIdType new_term_capacity) {
     if (new_term_capacity <= term_capacity_) {
         return;
@@ -303,14 +415,17 @@ SparseTermDataCell::ResizeTermList(InnerIdType new_term_capacity) {
     Vector<std::unique_ptr<Vector<uint16_t>>> new_ids(new_capacity, allocator_);
     Vector<std::unique_ptr<Vector<uint8_t>>> new_datas(new_capacity, allocator_);
     Vector<uint32_t> new_sizes(new_capacity, 0, allocator_);
+    Vector<uint32_t> new_sorted_sizes(new_capacity, 0, allocator_);
 
     std::move(term_ids_.begin(), term_ids_.end(), new_ids.begin());
     std::move(term_datas_.begin(), term_datas_.end(), new_datas.begin());
     std::copy(term_sizes_.begin(), term_sizes_.end(), new_sizes.begin());
+    std::copy(term_sorted_sizes_.begin(), term_sorted_sizes_.end(), new_sorted_sizes.begin());
 
     term_ids_.swap(new_ids);
     term_datas_.swap(new_datas);
     term_sizes_.swap(new_sizes);
+    term_sorted_sizes_.swap(new_sorted_sizes);
     term_capacity_ = new_capacity;
 }
 
@@ -330,8 +445,10 @@ SparseTermDataCell::Compact() {
     Vector<std::unique_ptr<Vector<uint16_t>>> compact_ids(compact_term_capacity, allocator_);
     Vector<std::unique_ptr<Vector<uint8_t>>> compact_datas(compact_term_capacity, allocator_);
     Vector<uint32_t> compact_sizes(compact_term_capacity, 0, allocator_);
+    Vector<uint32_t> compact_sorted_sizes(compact_term_capacity, 0, allocator_);
     for (uint32_t i = 0; i < compact_term_capacity; ++i) {
         compact_sizes[i] = term_sizes_[i];
+        compact_sorted_sizes[i] = std::min(term_sorted_sizes_[i], term_sizes_[i]);
         if (term_sizes_[i] != 0) {
             CHECK_ARGUMENT(term_ids_[i] != nullptr && term_datas_[i] != nullptr,
                            "non-empty sparse term has null posting data");
@@ -345,6 +462,7 @@ SparseTermDataCell::Compact() {
     term_ids_.swap(compact_ids);
     term_datas_.swap(compact_datas);
     term_sizes_.swap(compact_sizes);
+    term_sorted_sizes_.swap(compact_sorted_sizes);
     term_capacity_ = compact_term_capacity;
 }
 
@@ -413,6 +531,8 @@ SparseTermDataCell::GetMemoryUsage() const {
     }
     memory += sizeof(QuantizationParams);
     memory += term_sizes_.capacity() * sizeof(uint32_t);
+    memory += term_sorted_sizes_.capacity() * sizeof(uint32_t);
+    memory += dirty_terms_.capacity() * sizeof(uint32_t);
     return static_cast<uint64_t>(memory);
 }
 
@@ -523,13 +643,18 @@ SparseTermDataCell::Deserialize(StreamReader& reader) {
         }
     }
     StreamReader::ReadVector(reader, term_sizes_);
+    term_sorted_sizes_.assign(term_capacity_, 0);
+    dirty_terms_.clear();
     for (uint64_t i = 0; i < term_ids_.size(); ++i) {
         if (i >= term_sizes_.size() || term_sizes_[i] == 0) {
             term_ids_[i].reset();
             term_datas_[i].reset();
+        } else {
+            dirty_terms_.push_back(static_cast<uint32_t>(i));
         }
     }
 
+    SortByValue();
     Compact();
 
     // Restore total_count_ from compacted deserialized data (not serialized for compatibility).

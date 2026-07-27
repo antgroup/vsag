@@ -16,6 +16,10 @@
 
 #include "sparse_vector_transform.h"
 
+#include <cmath>
+
+#include "common.h"
+
 namespace vsag {
 
 void
@@ -24,6 +28,7 @@ sort_sparse_vector(const SparseVector& sparse_vector,
     sorted_query.reserve(sparse_vector.len_);
 
     for (auto i = 0; i < sparse_vector.len_; i++) {
+        CHECK_ARGUMENT(sparse_vector.vals_[i] > 0.0F, "sparse vector values must be positive");
         sorted_query.emplace_back(sparse_vector.ids_[i], sparse_vector.vals_[i]);
     }
 

@@ -15,8 +15,11 @@
 
 #include "sparse_vector_transform.h"
 
+#include <limits>
+
 #include "impl/allocator/default_allocator.h"
 #include "unittest.h"
+#include "vsag_exception.h"
 
 using namespace vsag;
 
@@ -34,6 +37,16 @@ TEST_CASE("SparseVectorTransform Basic", "[ut][SparseVectorTransform]") {
         REQUIRE(sorted[0].first == 2);
         REQUIRE(sorted[1].first == 3);
         REQUIRE(sorted[2].first == 1);
+    }
+
+    SECTION("reject non-positive and NaN values") {
+        const auto invalid_value = GENERATE(-0.7F, 0.0F, std::numeric_limits<float>::quiet_NaN());
+        std::vector<uint32_t> ids{1, 2, 3};
+        std::vector<float> vals{1.2F, invalid_value, 0.5F};
+        SparseVector sparse{static_cast<uint32_t>(ids.size()), ids.data(), vals.data()};
+
+        Vector<std::pair<uint32_t, float>> sorted(allocator.get());
+        REQUIRE_THROWS_AS(sort_sparse_vector(sparse, sorted), VsagException);
     }
 
     SECTION("subset positive and negative cases") {

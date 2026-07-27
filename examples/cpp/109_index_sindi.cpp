@@ -123,12 +123,16 @@ main(int argc, char** argv) {
      *
      * - sindi: Parameters specific to sparse indexing search:
      *   - query_prune_ratio: Ratio of term pruning for the query (0 = no pruning).
+     *   - term_prune_ratio: Fraction of the lowest-value postings to skip.
+     *   - term_prune_threshold: Per-term posting budget across all index windows.
      *   - n_candidate: Number of candidates for re-ranking. Must be greater than topK.
      *     This parameter is ignored if use_reorder is false in the build parameters.
      */
     auto sindi_search_parameters = R"({
         "sindi": {
             "query_prune_ratio": 0,
+            "term_prune_ratio": 0.1,
+            "term_prune_threshold": 100000,
             "n_candidate": 0
         }
     })";

@@ -102,13 +102,19 @@ TEST_CASE("SINDI Index Parameters Test", "[ut][SINDIParameter]") {
         "sindi": {
             "query_prune_ratio": 0.2,
             "n_candidate": 20,
-            "term_prune_ratio": 0.1
+            "term_prune_ratio": 0.1,
+            "term_prune_threshold": 100
         }
     })";
     auto search_param = std::make_shared<vsag::SINDISearchParameter>();
     vsag::JsonType search_param_json = vsag::JsonType::Parse(search_param_str);
     search_param->FromJson(search_param_json);
+    REQUIRE(search_param->term_prune_ratio == 0.1F);
+    REQUIRE(search_param->term_prune_threshold == 100);
     vsag::ParameterTest::TestToJson(search_param);
+    REQUIRE(search_param->ToJson()[INDEX_SINDI].Contains("term_prune_ratio"));
+    REQUIRE(search_param->ToJson()[INDEX_SINDI].Contains("term_prune_threshold"));
+    REQUIRE_FALSE(search_param->ToJson()[INDEX_SINDI].Contains("term_prune"));
     REQUIRE_FALSE(search_param->ToJson()[INDEX_SINDI].Contains("use_term_lists_heap_insert"));
 
     auto legacy_search_param_str = R"({
@@ -123,6 +129,50 @@ TEST_CASE("SINDI Index Parameters Test", "[ut][SINDIParameter]") {
     legacy_search_param->FromJson(vsag::JsonType::Parse(legacy_search_param_str));
     REQUIRE_FALSE(
         legacy_search_param->ToJson()[INDEX_SINDI].Contains("use_term_lists_heap_insert"));
+}
+
+TEST_CASE("SINDI Term Prune Parameters", "[ut][SINDIParameter]") {
+    SECTION("uses independent defaults") {
+        SINDISearchParameter param;
+        param.FromJson(JsonType::Parse(R"({"sindi": {}})"));
+        REQUIRE(param.term_prune_ratio == DEFAULT_TERM_PRUNE_RATIO);
+        REQUIRE(param.term_prune_threshold == DEFAULT_TERM_PRUNE_THRESHOLD);
+    }
+
+    SECTION("accepts ratio without threshold") {
+        SINDISearchParameter param;
+        param.FromJson(JsonType::Parse(R"({"sindi": {"term_prune_ratio": 0.2}})"));
+        REQUIRE(param.term_prune_ratio == 0.2F);
+        REQUIRE(param.term_prune_threshold == DEFAULT_TERM_PRUNE_THRESHOLD);
+    }
+
+    SECTION("accepts threshold without ratio") {
+        SINDISearchParameter param;
+        param.FromJson(JsonType::Parse(R"({"sindi": {"term_prune_threshold": 0}})"));
+        REQUIRE(param.term_prune_ratio == DEFAULT_TERM_PRUNE_RATIO);
+        REQUIRE(param.term_prune_threshold == 0);
+    }
+
+    SECTION("accepts uint64 max threshold") {
+        SINDISearchParameter param;
+        param.FromJson(
+            JsonType::Parse(R"({"sindi": {"term_prune_threshold": 18446744073709551615}})"));
+        REQUIRE(param.term_prune_threshold == std::numeric_limits<uint64_t>::max());
+    }
+
+    SECTION("rejects invalid values") {
+        const std::vector<std::string> invalid_params = {
+            R"({"sindi": {"term_prune_ratio": -0.1}})",
+            R"({"sindi": {"term_prune_ratio": 0.91}})",
+            R"({"sindi": {"term_prune_threshold": -1}})",
+            R"({"sindi": {"term_prune_threshold": 1.5}})",
+            R"({"sindi": {"term_prune_threshold": 18446744073709551616}})",
+        };
+        for (const auto& invalid_param : invalid_params) {
+            SINDISearchParameter param;
+            REQUIRE_THROWS(param.FromJson(JsonType::Parse(invalid_param)));
+        }
+    }
 }
 
 TEST_CASE("SINDI Index Parameters Compatibility Test", "[ut][SINDIParameter]") {

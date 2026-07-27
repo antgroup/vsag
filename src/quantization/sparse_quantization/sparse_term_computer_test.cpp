@@ -119,3 +119,46 @@ TEST_CASE("SparseTermComputer Basic Test", "[ut][SparseTermComputer]") {
     delete[] query_sv.vals_;
     delete[] query_sv.ids_;
 }
+
+TEST_CASE("SparseTermComputer Term Scan Count", "[ut][SparseTermComputer]") {
+    uint32_t query_id = 1;
+    float query_value = 1.0F;
+    SparseVector query{1, &query_id, &query_value};
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+
+    SECTION("defaults retain the complete posting list") {
+        SINDISearchParameter search_params;
+        SparseTermComputer computer(
+            query, search_params, allocator.get(), std::numeric_limits<uint64_t>::max());
+        REQUIRE(computer.GetTermScanCount(10) == 10);
+    }
+
+    SECTION("ratio limits the posting list") {
+        SINDISearchParameter search_params;
+        search_params.term_prune_ratio = 0.3F;
+        SparseTermComputer computer(query, search_params, allocator.get(), 4);
+        REQUIRE(computer.GetTermScanCount(10) == 7);
+    }
+
+    SECTION("threshold is divided by total window count") {
+        SINDISearchParameter search_params;
+        search_params.term_prune_threshold = 10;
+        SparseTermComputer computer(query, search_params, allocator.get(), 4);
+        REQUIRE(computer.GetTermScanCount(10) == 2);
+    }
+
+    SECTION("ratio and threshold use the smaller limit") {
+        SINDISearchParameter search_params;
+        search_params.term_prune_ratio = 0.5F;
+        search_params.term_prune_threshold = 18;
+        SparseTermComputer computer(query, search_params, allocator.get(), 3);
+        REQUIRE(computer.GetTermScanCount(20) == 6);
+    }
+
+    SECTION("zero threshold disables the limit") {
+        SINDISearchParameter search_params;
+        search_params.term_prune_threshold = 0;
+        SparseTermComputer computer(query, search_params, allocator.get(), 2);
+        REQUIRE(computer.GetTermScanCount(10) == 10);
+    }
+}

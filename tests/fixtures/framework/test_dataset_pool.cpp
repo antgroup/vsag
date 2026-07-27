@@ -66,6 +66,19 @@ TestDatasetPool::GetSparseDatasetAndCreate(uint64_t count, uint64_t dim, float v
 }
 
 TestDatasetPtr
+TestDatasetPool::GetPositiveSparseDatasetAndCreate(uint64_t count,
+                                                   uint64_t dim,
+                                                   float valid_ratio) {
+    auto key = "positive_sparse_" + std::to_string(count) + "_" + std::to_string(dim) + "_" +
+               std::to_string(valid_ratio);
+    if (this->pool_.find(key) == this->pool_.end()) {
+        this->pool_[key] =
+            TestDataset::CreateTestDataset(dim, count, "l2", false, valid_ratio, "positive_sparse");
+    }
+    return this->pool_.at(key);
+}
+
+TestDatasetPtr
 TestDatasetPool::GetDuplicateDataset(uint64_t dim,
                                      uint64_t count,
                                      const std::string& metric_str,

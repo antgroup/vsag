@@ -269,6 +269,9 @@ private:
     deserialize_windows(StreamReader& reader_ref);
 
     void
+    trim_deserialized_trailing_windows();
+
+    void
     deserialize_immutable_window(StreamReader& reader_ref, ImmutableSINDIWindow& window) const;
 
     static void

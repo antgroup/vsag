@@ -23,6 +23,7 @@ namespace vsag {
 namespace {
 
 constexpr uint32_t K_SPARSE_DMQ_DATACELL_MAGIC = 0x53444D51U;
+// TODO: Reset the DMQ serialization version to 1 in a dedicated format change.
 constexpr uint32_t K_SPARSE_DMQ_DATACELL_VERSION = 6;
 
 }  // namespace
