@@ -123,7 +123,6 @@ make_hgraph_mci_params() {
             "max_degree": 16,
             "ef_construction": 80,
             "build_thread_count": 4,
-            "alpha": 1.2,
             "graph_iter_turn": 4,
             "neighbor_sample_rate": 0.2,
             "mci_mcs": 32,
