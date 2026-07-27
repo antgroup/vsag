@@ -27,6 +27,7 @@ jobs:
               - 'src/**'
               - 'include/**'
               - 'tests/**'
+              - 'tools/**'
               - 'CMakeLists.txt'
               - 'Makefile'
               - 'extern/**'
@@ -165,6 +166,8 @@ jobs:
           key: build-macos-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
       - name: Make Asan
         run: export CMAKE_GENERATOR="Ninja" CMAKE_EXPORT_COMPILE_COMMANDS=ON; make asan VSAG_ENABLE_EXAMPLES=ON COMPILE_JOBS=3
+      - name: Run Eval Tests
+        run: ./build/tests/unittests "[eval]"
 
   build-python-x86:
     name: Python Build X86

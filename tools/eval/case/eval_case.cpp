@@ -26,15 +26,23 @@
 
 namespace vsag::eval {
 
-EvalCase::EvalCase(std::string dataset_path, std::string index_path, vsag::IndexPtr index)
-    : dataset_path_(std::move(dataset_path)), index_path_(std::move(index_path)), index_(index) {
-    this->dataset_ptr_ = EvalDataset::Load(dataset_path_);
+EvalCase::EvalCase(std::string dataset_path,
+                   std::string index_path,
+                   vsag::IndexPtr index,
+                   EvalDatasetPtr dataset)
+    : dataset_path_(std::move(dataset_path)),
+      index_path_(std::move(index_path)),
+      dataset_ptr_(std::move(dataset)),
+      index_(std::move(index)) {
+    if (this->dataset_ptr_ == nullptr) {
+        this->dataset_ptr_ = EvalDataset::Load(dataset_path_);
+    }
     this->logger_ = vsag::Options::Instance().logger();
     this->basic_info_ = this->dataset_ptr_->GetInfo();
 }
 
 EvalCasePtr
-EvalCase::MakeInstance(const EvalConfig& config, std::string type) {
+EvalCase::MakeInstance(const EvalConfig& config, std::string type, EvalDatasetPtr dataset) {
     auto dataset_path = config.dataset_path;
     auto index_path = config.index_path;
     auto index_name = config.index_name;
@@ -48,14 +56,16 @@ EvalCase::MakeInstance(const EvalConfig& config, std::string type) {
     }
 
     if (type == "build") {
-        return std::make_shared<BuildEvalCase>(dataset_path, index_path, index.value(), config);
+        return std::make_shared<BuildEvalCase>(
+            dataset_path, index_path, index.value(), config, std::move(dataset));
     }
     if (type == "search") {
-        return std::make_shared<SearchEvalCase>(dataset_path, index_path, index.value(), config);
+        return std::make_shared<SearchEvalCase>(
+            dataset_path, index_path, index.value(), config, std::move(dataset));
     }
     if (type == "build,search") {
         return std::make_shared<BuildSearchEvalCase>(
-            dataset_path, index_path, index.value(), config);
+            dataset_path, index_path, index.value(), config, std::move(dataset));
     }
     return nullptr;
 }

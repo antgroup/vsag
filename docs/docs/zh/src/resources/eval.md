@@ -80,7 +80,42 @@ eval_case1:
 - **效率**：QPS、TPS
 - **效果**：平均召回率、分位召回率（P0/P10/P50/P90...）
 - **延迟**：平均延迟、P50/P95/P99 延迟
-- **资源**：峰值内存占用
+- **资源**：进程 RSS 采样峰值与索引自身内存占用
+
+## 内存指标
+
+内存监控在被测阶段运行期间每 5 ms 采样一次进程常驻集大小（RSS）。
+`memory_peak(build)` 和 `memory_peak(search)` 是便于阅读的兼容字段，表示相对于阶段
+基线的最大 RSS 采样增量，单位按 1024 进位。持续时间短于一个采样周期的瞬时分配可能
+不会被捕获。
+
+测量边界如下：
+
+- `build`：从调用 `Index::Build()` 前开始，到该调用返回为止；数据集加载和索引序列化
+  不在测量区间内。
+- `search`：从第一个被测查询批次开始前到该批次完成为止；索引反序列化不在测量区间内。
+  存在延迟/QPS 测量轮次时，RSS 采样与原有的第一个查询轮次同时运行，不再额外执行一个
+  会预热后续指标的内存轮次。没有延迟轮次时，内存专用轮次会先于召回率轮次执行，避免
+  把召回率统计开销计入 RSS。KNN 结果统计在此后独立采集，不属于内存或性能监控区间。
+
+JSON 输出还会为每个 `<phase>`（`build` 或 `search`）提供以下精确数值字段：
+
+| 字段 | 含义 |
+| --- | --- |
+| `memory_rss_baseline_bytes(<phase>)` | 阶段开始时的进程 RSS |
+| `memory_rss_peak_bytes(<phase>)` | 阶段内采样到的最大进程 RSS |
+| `memory_peak_delta_bytes(<phase>)` | 峰值 RSS 减去基线 RSS，最小为零 |
+| `memory_peak_sample_count(<phase>)` | 成功取得 RSS 的采样次数 |
+| `memory_peak_failed_sample_count(<phase>)` | RSS 采样失败次数 |
+| `memory_peak_available(<phase>)` | 是否取得有效基线并成功启动采样器 |
+| `memory_peak_error(<phase>)` | 采样错误；成功时为空字符串 |
+
+`index_memory(B)` 通过 `Index::GetMemoryUsage()` 报告索引自身占用，
+`memory_detail(B)` 则提供可用的组件明细。这些索引级指标与进程 RSS 分开：进程 RSS
+还会包含数据集、评估器自身开销、allocator 开销和进程中的其他状态。
+
+在不支持的平台或无法读取基线时，便于阅读的字段为 `N/A`，
+`memory_peak_available(<phase>)` 为 `false`，错误字段会说明失败原因。
 
 ## 搜索模式
 
