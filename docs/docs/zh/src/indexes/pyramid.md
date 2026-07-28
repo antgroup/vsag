@@ -89,9 +89,7 @@ auto result = index->KnnSearch(
 | `no_build_levels` | int[] | `[]` | 跳过构图的层级（从根节点开始的 0-based 下标） |
 | `use_reorder` | bool | `false` | 是否保留高精度副本用于精排 |
 | `precise_quantization_type` | string | `"fp32"` | 精排使用的量化类型。与 `rabitq_bits_per_dim_precise` 配合设为 `"rabitq"` 时，可启用从 base storage 重排的 RaBitQ x+y split。 |
-| `reorder_source` | string | `"precise"` | 从单独的 precise storage（`"precise"`）或 base storage（`"base"`）执行重排。RaBitQ split 会自动选择 `"base"`。 |
 | `rabitq_bits_per_dim_precise` | int | 未设置 | RaBitQ split 的 `y` bits。和 `base_quantization_type: "rabitq"`、`precise_quantization_type: "rabitq"` 一起设置时，Pyramid 使用 split storage；`rabitq_bits_per_dim_base` 仍表示 `x`，且 `x + y <= 8`。 |
-| `rabitq_error_rate` | float | 量化器默认值 | split RaBitQ 搜索使用的 lower-bound 误差倍率。 |
 | `fast_encode_rabitq` | bool | `true` | 对 RaBitQ 底层或精排存储使用多 bit 快速编码器；设为 `false` 使用精确编码器 |
 | `fast_encode_rabitq_rounds` | int | `6` | RaBitQ 快速编码的微调轮数，范围 `[1, 32]` |
 | `base_io_type` / `precise_io_type` | string | `"block_memory_io"` | 底层与精排存储后端；以 liburing 构建时可用 `uring_io` |
@@ -111,7 +109,6 @@ auto result = index->KnnSearch(
 | `subindex_ef_search` | int | `50` | 沿路径向下遍历中间子图时的候选集大小 |
 | `hierarchies` | string[] | `[]` | 指定检索哪个层级。空数组表示使用默认（匿名）层级。 |
 | `hierarchy_op` | string | `"single"` | 多层级结果合并方式：`single`（检索单个层级）、`union`、`intersection`。**注意：** `union` 和 `intersection` 尚未实现——设置后 `KnnSearch`/`RangeSearch` 会返回错误。 |
-| `rabitq_one_bit_search` | bool | split 索引默认值 | 覆盖 one-bit RaBitQ split 搜索路径。Pyramid 使用 split RaBitQ 构建后默认启用；传 `false` 可强制使用普通搜索路径。 |
 | `rabitq_error_rate` | float | 索引默认值 | 本次搜索使用的正数 lower-bound 误差倍率。 |
 
 ```cpp
