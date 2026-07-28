@@ -18,8 +18,10 @@ namespace vsag {
 
 FlattenInterfacePtr
 make_ra_bit_q_split_data_cell_ip(const FlattenInterfaceParamPtr& param,
-                                 const IndexCommonParam& common_param) {
-    return MakeRaBitQSplitDataCellForMetric<MetricType::METRIC_TYPE_IP>(param, common_param);
+                                 const IndexCommonParam& common_param,
+                                 bool is_transform_quantizer) {
+    return MakeRaBitQSplitDataCellForMetric<MetricType::METRIC_TYPE_IP>(
+        param, common_param, is_transform_quantizer);
 }
 
 }  // namespace vsag

@@ -225,10 +225,10 @@ Pyramid::build_by_odescent(const DatasetPtr& base) {
     std::memcpy(label_table_->label_table_.data(), data_ids, sizeof(LabelType) * data_num);
 
     base_codes_->BatchInsertVector(data_vectors, data_num);
-    if (use_reorder_) {
+    if (has_precise_codes()) {
         precise_codes_->BatchInsertVector(data_vectors, data_num);
     }
-    auto codes = use_reorder_ ? precise_codes_ : base_codes_;
+    auto codes = graph_codes();
 
     if (thread_pool_ != nullptr && hierarchies_.size() > 1) {
         Vector<std::future<void>> futures(allocator_);
@@ -435,7 +435,7 @@ void
 Pyramid::Serialize(StreamWriter& writer) const {
     label_table_->Serialize(writer);
     base_codes_->Serialize(writer);
-    if (use_reorder_) {
+    if (has_precise_codes()) {
         precise_codes_->Serialize(writer);
     }
 
@@ -485,7 +485,7 @@ Pyramid::collect_streaming_header() const {
                                  base_tag,
                                  StreamSerializationBlockCurrentVersion(base_tag),
                                  StreamSerializationTagCritical(base_tag));
-    if (this->use_reorder_) {
+    if (this->has_precise_codes()) {
         auto tag = static_cast<uint32_t>(StreamSerializationTag::HIGH_PRECISION_CODES);
         AppendStreamingManifestBlock(manifest,
                                      tag,
@@ -530,7 +530,7 @@ Pyramid::serialize_streaming_body(StreamWriter& writer) const {
         writer, base_tag, StreamSerializationTagCritical(base_tag), [this](StreamWriter& w) {
             this->base_codes_->Serialize(w);
         });
-    if (this->use_reorder_) {
+    if (this->has_precise_codes()) {
         auto tag = static_cast<uint32_t>(StreamSerializationTag::HIGH_PRECISION_CODES);
         WriteStreamingBlock(
             writer, tag, StreamSerializationTagCritical(tag), [this](StreamWriter& w) {
@@ -644,7 +644,7 @@ Pyramid::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) 
                 loaded_base_codes = true;
                 break;
             case StreamSerializationTag::HIGH_PRECISION_CODES:
-                if (this->use_reorder_) {
+                if (this->has_precise_codes()) {
                     ReadSeekableBlockPayload(
                         block_reader, block_header, [this](StreamReader& block) {
                             this->precise_codes_->Deserialize(block);
@@ -681,7 +681,7 @@ Pyramid::read_streaming_body(StreamReader& reader, const MetadataPtr& metadata) 
         throw VsagException(ErrorType::READ_ERROR,
                             "Pyramid streaming serialization required block is missing");
     }
-    if (this->use_reorder_ && !loaded_precise_codes) {
+    if (this->has_precise_codes() && !loaded_precise_codes) {
         throw VsagException(ErrorType::READ_ERROR,
                             "Pyramid streaming serialization precise codes block is missing");
     }
@@ -706,7 +706,7 @@ Pyramid::Deserialize(StreamReader& reader) {
     delete_count_.store(static_cast<int64_t>(label_table_->GetAllDeletedIds().size()),
                         std::memory_order_relaxed);
     base_codes_->Deserialize(buffer_reader);
-    if (use_reorder_) {
+    if (has_precise_codes()) {
         precise_codes_->Deserialize(buffer_reader);
     }
     cur_element_count_ = base_codes_->TotalCount();
@@ -746,7 +746,7 @@ Pyramid::ExportModel(const IndexCommonParam& param) const {
                             "Export model's pyramid reorder config mismatched");
     }
     this->base_codes_->ExportModel(index->base_codes_);
-    if (use_reorder_) {
+    if (has_precise_codes()) {
         if (index->precise_codes_ == nullptr) {
             throw VsagException(ErrorType::INTERNAL_ERROR,
                                 "Export model's pyramid precise codes is empty");
@@ -783,7 +783,7 @@ Pyramid::Add(const DatasetPtr& base) {
                 label_table_->Insert(valid_id_count + local_cur_element_count, data_ids[i]);
                 base_codes_->InsertVector(data_vectors + dim_ * i,
                                           valid_id_count + local_cur_element_count);
-                if (use_reorder_) {
+                if (has_precise_codes()) {
                     precise_codes_->InsertVector(data_vectors + dim_ * i,
                                                  valid_id_count + local_cur_element_count);
                 }
@@ -816,7 +816,7 @@ Pyramid::resize(int64_t new_max_capacity) {
     pool_ = std::make_unique<VisitedListPool>(1, allocator_, new_max_capacity, allocator_);
     label_table_->Resize(new_max_capacity);
     base_codes_->Resize(new_max_capacity);
-    if (use_reorder_) {
+    if (has_precise_codes()) {
         precise_codes_->Resize(new_max_capacity);
     }
     points_mutex_->Resize(new_max_capacity);
@@ -876,6 +876,7 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
     {
         "{TYPE_KEY}": "{INDEX_TYPE_PYRAMID}",
         "{USE_REORDER_KEY}": false,
+        "{REORDER_SOURCE_KEY}": "{HGRAPH_REORDER_SOURCE_PRECISE}",
         "{GRAPH_KEY}": {
             "{IO_PARAMS_KEY}": {
                 "{TYPE_KEY}": "{IO_TYPE_VALUE_BLOCK_MEMORY_IO}",
@@ -904,7 +905,11 @@ static const std::string HGRAPH_PARAMS_TEMPLATE =
                 "{TYPE_KEY}": "{QUANTIZATION_TYPE_VALUE_FP32}",
                 "{SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE_KEY}": 0.05,
                 "{PCA_DIM_KEY}": 0,
+                "{MRLE_DIM_KEY}": 0,
+                "{RABITQ_QUANTIZATION_VERSION_KEY}": "standard",
                 "{RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY}": 32,
+                "{RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY}": 1,
+                "{RABITQ_QUANTIZATION_BITS_PER_DIM_FILTER_KEY}": 1,
                 "{FAST_ENCODE_RABITQ_KEY}": true,
                 "{FAST_ENCODE_RABITQ_ROUNDS_KEY}": 6,
                 "{TQ_CHAIN_KEY}": "",
@@ -942,9 +947,14 @@ Pyramid::CheckAndMappingExternalParam(const JsonType& external_param,
     const ConstParamMap external_mapping = {
         {PYRAMID_EF_CONSTRUCTION, {EF_CONSTRUCTION_KEY}},
         {PYRAMID_USE_REORDER, {USE_REORDER_KEY}},
+        {HGRAPH_REORDER_SOURCE, {REORDER_SOURCE_KEY}},
         {PYRAMID_BASE_QUANTIZATION_TYPE, {BASE_CODES_KEY, QUANTIZATION_PARAMS_KEY, TYPE_KEY}},
+        {INDEX_TQ_CHAIN, {BASE_CODES_KEY, QUANTIZATION_PARAMS_KEY, TQ_CHAIN_KEY}},
+        {INDEX_MRLE_DIM, {BASE_CODES_KEY, QUANTIZATION_PARAMS_KEY, MRLE_DIM_KEY}},
         {PYRAMID_RABITQ_BITS_PER_DIM_BASE,
          {BASE_CODES_KEY, QUANTIZATION_PARAMS_KEY, RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY}},
+        {RABITQ_BITS_PER_DIM_PRECISE,
+         {PRECISE_CODES_KEY, QUANTIZATION_PARAMS_KEY, RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY}},
         {PYRAMID_RABITQ_BITS_PER_DIM_QUERY,
          {BASE_CODES_KEY, QUANTIZATION_PARAMS_KEY, RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY}},
         {PYRAMID_RABITQ_PCA_DIM, {BASE_CODES_KEY, QUANTIZATION_PARAMS_KEY, PCA_DIM_KEY}},
@@ -960,6 +970,9 @@ Pyramid::CheckAndMappingExternalParam(const JsonType& external_param,
         {PYRAMID_PRECISE_QUANTIZATION_TYPE, {PRECISE_CODES_KEY, QUANTIZATION_PARAMS_KEY, TYPE_KEY}},
         {PYRAMID_GRAPH_MAX_DEGREE, {GRAPH_KEY, GRAPH_PARAM_MAX_DEGREE_KEY}},
         {PYRAMID_BASE_IO_TYPE, {BASE_CODES_KEY, IO_PARAMS_KEY, TYPE_KEY}},
+        {HGRAPH_BASE_SUPPLEMENT_IO_TYPE, {BASE_CODES_KEY, SUPPLEMENT_IO_PARAMS_KEY, TYPE_KEY}},
+        {HGRAPH_BASE_SUPPLEMENT_FILE_PATH,
+         {BASE_CODES_KEY, SUPPLEMENT_IO_PARAMS_KEY, IO_FILE_PATH_KEY}},
         {PYRAMID_BUILD_ALPHA, {GRAPH_KEY, ODESCENT_PARAMETER_ALPHA}},
         {PYRAMID_GRAPH_TYPE, {GRAPH_KEY, GRAPH_TYPE_KEY}},
         {PYRAMID_GRAPH_STORAGE_TYPE, {GRAPH_KEY, GRAPH_STORAGE_TYPE_KEY}},
@@ -983,6 +996,8 @@ Pyramid::CheckAndMappingExternalParam(const JsonType& external_param,
     std::string str = format_map(HGRAPH_PARAMS_TEMPLATE, DEFAULT_MAP);
     auto inner_json = JsonType::Parse(str);
     mapping_external_param_to_inner(external_param, external_mapping, inner_json);
+    MapRaBitQSplitParam(external_param, inner_json);
+    ValidateMRLEDim(external_param, common_param.dim_);
     auto pyramid_params = std::make_shared<PyramidParameters>();
     pyramid_params->FromJson(inner_json);
     return pyramid_params;
@@ -991,7 +1006,7 @@ Pyramid::CheckAndMappingExternalParam(const JsonType& external_param,
 void
 Pyramid::Train(const DatasetPtr& base) {
     this->base_codes_->Train(base->GetFloat32Vectors(), base->GetNumElements());
-    if (use_reorder_) {
+    if (has_precise_codes()) {
         this->precise_codes_->Train(base->GetFloat32Vectors(), base->GetNumElements());
     }
 }
@@ -1058,7 +1073,7 @@ Pyramid::add_one_point(const Hierarchy& h,
         graph_node.ids_ = node->ids_;
         graph_node.Init();
 
-        auto codes = use_reorder_ ? precise_codes_ : base_codes_;
+        auto codes = graph_codes();
         Vector<float> decoded_vector(dim_, allocator_);
         for (const auto id : node->ids_) {
             bool need_release = false;
@@ -1091,7 +1106,7 @@ Pyramid::add_one_point(const Hierarchy& h,
             search_param.find_duplicate = true;
             search_param.duplicate_query_id = inner_id;
         }
-        auto codes = use_reorder_ ? precise_codes_ : base_codes_;
+        auto codes = graph_codes();
         bool update_entry_point;
         {
             std::scoped_lock<std::mutex> entry_point_lock(entry_point_mutex_);
@@ -1326,7 +1341,7 @@ Pyramid::CalcDistanceById(const float* query, int64_t id, bool calculate_precise
     std::shared_lock<std::shared_mutex> lock(resize_mutex_);
     auto flat = this->base_codes_;
     if (use_reorder_ && calculate_precise_distance) {
-        flat = this->precise_codes_;
+        flat = this->graph_codes();
     }
     return InnerIndexInterface::calc_distance_by_id(query, id, flat);
 }
@@ -1348,7 +1363,7 @@ Pyramid::CalDistanceById(const float* query,
     std::shared_lock<std::shared_mutex> lock(resize_mutex_);
     auto flat = this->base_codes_;
     if (use_reorder_ && calculate_precise_distance) {
-        flat = this->precise_codes_;
+        flat = this->graph_codes();
     }
     std::vector<bool> validity;
     auto result = InnerIndexInterface::cal_distance_by_id(query, ids, count, flat, &validity);
@@ -1361,7 +1376,7 @@ Pyramid::CalDistanceById(const float* query,
 void
 Pyramid::GetVectorByInnerId(InnerIdType inner_id, float* data) const {
     std::shared_lock<std::shared_mutex> lock(resize_mutex_);
-    auto codes = (use_reorder_) ? precise_codes_ : base_codes_;
+    auto codes = graph_codes();
     bool release = false;
     const auto* buffer = codes->GetCodesById(inner_id, release);
     codes->Decode(buffer, data);

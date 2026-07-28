@@ -37,6 +37,7 @@
 #include "impl/thread_pool/safe_thread_pool.h"
 #include "index_common_param.h"
 #include "quantization/rabitq_quantization/rabitq_quantizer.h"
+#include "quantization/transform_quantization/transform_quantizer.h"
 #include "unittest.h"
 
 using namespace vsag;
@@ -214,6 +215,81 @@ TEST_CASE("RaBitQSplitDataCell direct split compute", "[ut][RaBitQSplitDataCell]
         }
     }
 }
+TEST_CASE("RaBitQSplitDataCell supports MRLE transform quantizer",
+          "[ut][RaBitQSplitDataCell][MRLE]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr uint64_t dim = 64;
+    constexpr uint64_t mrle_dim = 32;
+    constexpr InnerIdType count = 24;
+    auto vectors = fixtures::generate_vectors(count, dim);
+    auto query = fixtures::generate_vectors(1, dim, 71);
+
+    auto param = std::make_shared<FlattenDataCellParameter>();
+    param->FromJson(JsonType::Parse(R"({
+        "codes_type": "rabitq_split",
+        "io_params": { "type": "memory_io" },
+        "quantization_params": {
+            "type": "tq",
+            "tq_chain": "mrle, rabitq",
+            "mrle_dim": 32,
+            "rabitq_version": "split",
+            "rabitq_bits_per_dim_query": 32,
+            "rabitq_bits_per_dim_base": 8,
+            "rabitq_bits_per_dim_filter": 3,
+            "fast_encode_rabitq": true
+        }
+    })"));
+
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.dim_ = dim;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+
+    auto flatten = FlattenInterface::MakeInstance(param, common_param);
+    REQUIRE(flatten->GetQuantizerName() == std::string("tq"));
+    flatten->Train(vectors.data(), count);
+    flatten->Resize(count);
+
+    auto optimized_build = std::dynamic_pointer_cast<FlattenOptimizedBuildInterface>(flatten);
+    REQUIRE(optimized_build != nullptr);
+    auto finalize_pool = SafeThreadPool::FactoryDefaultThreadPool();
+    finalize_pool->SetPoolSize(2);
+    FlattenOptimizedBuildContext build_context{finalize_pool, 2};
+    REQUIRE(optimized_build->BeginOptimizedBuild(build_context));
+    flatten->BatchInsertVector(vectors.data(), count);
+
+    std::vector<InnerIdType> ids(count);
+    std::iota(ids.begin(), ids.end(), 0);
+    std::vector<float> build_dists(count);
+    auto computer = flatten->FactoryComputer(query.data());
+    flatten->Query(build_dists.data(), computer, ids.data(), count);
+    optimized_build->FinalizeOptimizedBuild();
+
+    std::vector<float> split_dists(count);
+    flatten->Query(split_dists.data(), computer, ids.data(), count);
+    using QuantizerT = TransformQuantizer<RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR>,
+                                          MetricType::METRIC_TYPE_L2SQR>;
+    auto* transform_computer = static_cast<Computer<QuantizerT>*>(computer.get());
+    for (InnerIdType id = 0; id < count; ++id) {
+        bool need_release = false;
+        const auto* full_code = flatten->GetCodesById(id, need_release);
+        float merged_dist = 0.0F;
+        transform_computer->ComputeDist(full_code, &merged_dist);
+        if (need_release) {
+            flatten->Release(full_code);
+        }
+        REQUIRE(std::abs(build_dists[id] - split_dists[id]) <= 1e-4F);
+        REQUIRE(std::abs(split_dists[id] - merged_dist) <= 1e-5F);
+    }
+
+    auto invalid_json = param->ToJson();
+    invalid_json["quantization_params"]["tq_chain"].SetString("pca, rabitq");
+    invalid_json["quantization_params"]["pca_dim"].SetInt(mrle_dim);
+    auto invalid_param = std::make_shared<FlattenDataCellParameter>();
+    invalid_param->FromJson(invalid_json);
+    REQUIRE_THROWS(FlattenInterface::MakeInstance(invalid_param, common_param));
+}
+
 TEST_CASE("RaBitQSplitDataCell serialize and methods", "[ut][RaBitQSplitDataCell]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     constexpr uint64_t dim = 64;

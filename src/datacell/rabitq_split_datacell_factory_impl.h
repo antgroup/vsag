@@ -30,28 +30,29 @@ ConvertRaBitQSplitIOParamType(const IOParamPtr& io_param, const std::string& typ
     return IOParameter::GetIOParameterByJson(json);
 }
 
-template <MetricType metric, typename IOTmpl>
+template <MetricType metric, typename IOTmpl, typename QuantizerT>
 FlattenInterfacePtr
 MakeHomogeneousRaBitQSplitDataCell(const FlattenInterfaceParamPtr& param,
                                    const IndexCommonParam& common_param) {
-    return std::make_shared<RaBitQSplitDataCell<metric, IOTmpl, IOTmpl>>(
+    return std::make_shared<RaBitQSplitDataCell<metric, IOTmpl, IOTmpl, QuantizerT>>(
         param->quantizer_parameter,
         param->io_parameter,
         param->supplement_io_parameter,
         common_param);
 }
 
-template <MetricType metric>
+template <MetricType metric, typename QuantizerT>
 FlattenInterfacePtr
-MakeRaBitQSplitDataCellForMetric(const FlattenInterfaceParamPtr& param,
-                                 const IndexCommonParam& common_param) {
+MakeRaBitQSplitDataCellForMetricImpl(const FlattenInterfaceParamPtr& param,
+                                     const IndexCommonParam& common_param) {
     if (param->supplement_io_parameter != nullptr) {
         const auto& supplement_type = param->supplement_io_parameter->GetTypeName();
         const auto& base_type = param->io_parameter->GetTypeName();
         if (base_type == IO_TYPE_VALUE_BLOCK_MEMORY_IO and
             supplement_type == IO_TYPE_VALUE_ASYNC_IO) {
 #if HAVE_LIBAIO
-            return std::make_shared<RaBitQSplitDataCell<metric, MemoryBlockIO, AsyncIO>>(
+            return std::make_shared<
+                RaBitQSplitDataCell<metric, MemoryBlockIO, AsyncIO, QuantizerT>>(
                 param->quantizer_parameter,
                 param->io_parameter,
                 param->supplement_io_parameter,
@@ -59,7 +60,8 @@ MakeRaBitQSplitDataCellForMetric(const FlattenInterfaceParamPtr& param,
 #else
             auto buffer_supplement_io_param = ConvertRaBitQSplitIOParamType(
                 param->supplement_io_parameter, IO_TYPE_VALUE_BUFFER_IO);
-            return std::make_shared<RaBitQSplitDataCell<metric, MemoryBlockIO, BufferIO>>(
+            return std::make_shared<
+                RaBitQSplitDataCell<metric, MemoryBlockIO, BufferIO, QuantizerT>>(
                 param->quantizer_parameter,
                 param->io_parameter,
                 buffer_supplement_io_param,
@@ -69,7 +71,8 @@ MakeRaBitQSplitDataCellForMetric(const FlattenInterfaceParamPtr& param,
 #if !HAVE_LIBAIO
         if (base_type == IO_TYPE_VALUE_BLOCK_MEMORY_IO and
             supplement_type == IO_TYPE_VALUE_BUFFER_IO) {
-            return std::make_shared<RaBitQSplitDataCell<metric, MemoryBlockIO, BufferIO>>(
+            return std::make_shared<
+                RaBitQSplitDataCell<metric, MemoryBlockIO, BufferIO, QuantizerT>>(
                 param->quantizer_parameter,
                 param->io_parameter,
                 param->supplement_io_parameter,
@@ -88,24 +91,46 @@ MakeRaBitQSplitDataCellForMetric(const FlattenInterfaceParamPtr& param,
 
     const auto& io_type = param->io_parameter->GetTypeName();
     if (io_type == IO_TYPE_VALUE_BLOCK_MEMORY_IO) {
-        return MakeHomogeneousRaBitQSplitDataCell<metric, MemoryBlockIO>(param, common_param);
+        return MakeHomogeneousRaBitQSplitDataCell<metric, MemoryBlockIO, QuantizerT>(param,
+                                                                                     common_param);
     }
     if (io_type == IO_TYPE_VALUE_MEMORY_IO) {
-        return MakeHomogeneousRaBitQSplitDataCell<metric, MemoryIO>(param, common_param);
+        return MakeHomogeneousRaBitQSplitDataCell<metric, MemoryIO, QuantizerT>(param,
+                                                                                common_param);
     }
     if (io_type == IO_TYPE_VALUE_BUFFER_IO) {
-        return MakeHomogeneousRaBitQSplitDataCell<metric, BufferIO>(param, common_param);
+        return MakeHomogeneousRaBitQSplitDataCell<metric, BufferIO, QuantizerT>(param,
+                                                                                common_param);
     }
     if (io_type == IO_TYPE_VALUE_ASYNC_IO) {
-        return MakeHomogeneousRaBitQSplitDataCell<metric, AsyncIO>(param, common_param);
+        return MakeHomogeneousRaBitQSplitDataCell<metric, AsyncIO, QuantizerT>(param, common_param);
     }
     if (io_type == IO_TYPE_VALUE_MMAP_IO) {
-        return MakeHomogeneousRaBitQSplitDataCell<metric, MMapIO>(param, common_param);
+        return MakeHomogeneousRaBitQSplitDataCell<metric, MMapIO, QuantizerT>(param, common_param);
     }
     if (io_type == IO_TYPE_VALUE_READER_IO) {
-        return MakeHomogeneousRaBitQSplitDataCell<metric, ReaderIO>(param, common_param);
+        return MakeHomogeneousRaBitQSplitDataCell<metric, ReaderIO, QuantizerT>(param,
+                                                                                common_param);
     }
     return nullptr;
+}
+
+template <MetricType metric>
+FlattenInterfacePtr
+MakeRaBitQSplitDataCellForMetric(const FlattenInterfaceParamPtr& param,
+                                 const IndexCommonParam& common_param,
+                                 bool is_transform_quantizer) {
+    if (is_transform_quantizer) {
+        auto tq_param =
+            std::dynamic_pointer_cast<TransformQuantizerParameter>(param->quantizer_parameter);
+        CHECK_ARGUMENT(tq_param != nullptr and tq_param->tq_chain_.size() == 1 and
+                           tq_param->tq_chain_.front() == TRANSFORMER_TYPE_VALUE_MRLE,
+                       "rabitq split transform quantizer requires tq_chain=\"mrle, rabitq\"");
+        using QuantizerT = TransformQuantizer<RaBitQuantizer<metric>, metric>;
+        return MakeRaBitQSplitDataCellForMetricImpl<metric, QuantizerT>(param, common_param);
+    }
+    return MakeRaBitQSplitDataCellForMetricImpl<metric, RaBitQuantizer<metric>>(param,
+                                                                                common_param);
 }
 
 }  // namespace vsag

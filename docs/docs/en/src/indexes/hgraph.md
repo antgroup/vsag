@@ -71,7 +71,7 @@ most users need; the exhaustive list is in [Index Parameters](../resources/index
 | `use_reverse_edges` | bool | `false` | Track incoming neighbors for O(1) reverse-edge lookup. Roughly doubles edge storage and is unsupported with `graph_storage_type: "compressed"`. |
 | `label_remap_type` | string | `"pg"` | Label-to-inner-ID map implementation: `"pg"` or `"robin"`. Keep the same value when restoring or combining compatible indexes. |
 | `use_reorder` | bool | `false` | Keep a high-precision copy and re-rank after the coarse search |
-| `reorder_source` | string | `"precise"` | Reorder from `"precise"` codes or directly from `"base"` codes. RaBitQ x+y split sets `"base"` automatically. |
+| `reorder_source` | string | `"precise"` | Reorder from `"precise"` codes or directly from `"base"` codes. RaBitQ x+y split, including `tq_chain: "mrle, rabitq"`, sets `"base"` automatically. |
 | `precise_quantization_type` | string | `"fp32"` | Quantizer used for reordering (takes effect only with `use_reorder: true`) |
 | `base_pq_dim` | int | `1` | Number of PQ subspaces. When using `pq` / `pqfs`, set this explicitly instead of relying on the default. |
 | `mrle_dim` | int | `0` | Output dimension for an MRLE transform in `tq_chain`; allowed range `[0, dim]`, where `0` means the input dimension. |

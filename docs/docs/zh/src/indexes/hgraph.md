@@ -65,7 +65,7 @@ auto result = index->KnnSearch(
 | `use_reverse_edges` | bool | `false` | 跟踪入边，实现 O(1) 反向邻居查找；边存储约翻倍，且 `graph_storage_type: "compressed"` 不支持 |
 | `label_remap_type` | string | `"pg"` | label 到内部 ID 的 map 实现：`"pg"` 或 `"robin"`；恢复或组合兼容索引时应保持一致 |
 | `use_reorder` | bool | `false` | 是否额外保留一份高精度副本用于精排 |
-| `reorder_source` | string | `"precise"` | 从 `"precise"` 编码或直接从 `"base"` 编码重排；RaBitQ x+y split 会自动设置为 `"base"` |
+| `reorder_source` | string | `"precise"` | 从 `"precise"` 编码或直接从 `"base"` 编码重排；RaBitQ x+y split（包括 `tq_chain: "mrle, rabitq"`）会自动设置为 `"base"` |
 | `precise_quantization_type` | string | `"fp32"` | 精排使用的量化类型（仅在 `use_reorder: true` 时生效） |
 | `base_pq_dim` | int | `1` | PQ 子空间数（`pq` / `pqfs` 时必填） |
 | `mrle_dim` | int | `0` | `tq_chain` 中 MRLE 的输出维度，范围 `[0, dim]`；`0` 表示输入维度 |

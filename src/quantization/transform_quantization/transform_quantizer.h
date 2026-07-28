@@ -106,6 +106,14 @@ public:
         return QUANTIZATION_TYPE_VALUE_TQ;
     }
 
+    [[nodiscard]] uint64_t
+    GetTransformedDim() const {
+        return quantizer_->GetDim();
+    }
+
+    void
+    TransformBaseVector(const float* input, float* output) const;
+
 public:
     VectorTransformerPtr
     MakeTransformerInstance(std::string transform_str,
@@ -235,12 +243,11 @@ TransformQuantizer<QuantTmpl, metric>::TrainImpl(const float* data, uint64_t cou
     }
 
     // 2. execute transform on original data
-    Vector<float> transformed_data(this->dim_ * count, 0, this->allocator_);
-    Vector<uint8_t> tmp_codes(this->code_size_, 0, this->allocator_);
-    transformed_data.assign(data, data + count * this->dim_);
-    for (auto i = 0; i < count; i++) {
-        ExecuteChainTransform(
-            transformed_data.data() + i * this->dim_, base_meta_offsets_.data(), tmp_codes.data());
+    const uint64_t transformed_dim = this->GetTransformedDim();
+    Vector<float> transformed_data(transformed_dim * count, 0, this->allocator_);
+    for (uint64_t i = 0; i < count; ++i) {
+        this->TransformBaseVector(data + i * this->dim_,
+                                  transformed_data.data() + i * transformed_dim);
     }
 
     // 3. train quantizer based on transformed data
@@ -257,13 +264,23 @@ TransformQuantizer<QuantTmpl, metric>::ExecuteChainTransform(float* prev_data,
 
     for (uint32_t i = 0; i < this->transform_chain_.size(); i++) {
         auto vector_transformer = this->transform_chain_[i];
-        auto meta_offset = meta_offsets[i];
-
         auto meta = vector_transformer->Transform(prev_data, next_data.data());
-        meta->EncodeMeta(codes + meta_offset);
+        if (codes != nullptr) {
+            meta->EncodeMeta(codes + meta_offsets[i]);
+        }
 
         memcpy(prev_data, next_data.data(), this->dim_ * sizeof(float));
     }
+}
+
+template <typename QuantTmpl, MetricType metric>
+void
+TransformQuantizer<QuantTmpl, metric>::TransformBaseVector(const float* input,
+                                                           float* output) const {
+    Vector<float> data_buffer(this->dim_, 0, this->allocator_);
+    data_buffer.assign(input, input + this->dim_);
+    ExecuteChainTransform(data_buffer.data(), nullptr, nullptr);
+    memcpy(output, data_buffer.data(), this->GetTransformedDim() * sizeof(float));
 }
 
 template <typename QuantTmpl, MetricType metric>

@@ -275,6 +275,35 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
+                             "Pyramid MRLE RaBitQ Split",
+                             "[ft][pyramid][rabitq_split][MRLE]") {
+    constexpr int64_t dim = 64;
+    constexpr uint64_t count = 256;
+
+    PyramidParam pyramid_param;
+    pyramid_param.no_build_levels = {0, 1, 2};
+    pyramid_param.base_quantization_type = "tq";
+    pyramid_param.precise_quantization_type = "rabitq";
+    pyramid_param.use_reorder = true;
+    pyramid_param.rabitq_bits_per_dim_base = 3;
+
+    auto param_json =
+        vsag::JsonType::Parse(GeneratePyramidBuildParametersString("l2", dim, pyramid_param));
+    param_json["index_param"]["tq_chain"].SetString("mrle, rabitq");
+    param_json["index_param"]["mrle_dim"].SetInt(32);
+    param_json["index_param"]["rabitq_bits_per_dim_precise"].SetInt(5);
+
+    auto index = TestFactory("pyramid", param_json.Dump(), true);
+    auto dataset = pool.GetDatasetAndCreate(dim, count, "l2", /*with_path=*/true);
+    TestBuildIndex(index, dataset, true);
+    auto query = fixtures::get_one_query(dataset->query_, 0);
+    auto result = index->KnnSearch(query, 5, GeneratePyramidSearchParametersString(100));
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() > 0);
+    REQUIRE(result.value()->GetDim() <= 5);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "Pyramid Duplicate Path Semantics Same Path",
                              "[ft][build][pyramid]") {
     PyramidParam pyramid_param;

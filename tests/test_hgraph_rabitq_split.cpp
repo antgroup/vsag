@@ -221,6 +221,24 @@ TEST_CASE("HGraph RaBitQ Split Homogeneous IO", "[ft][rabitq_split][hgraph]") {
     TestIndex::TestKnnSearch(index, dataset, kSplitSearchParam, 0.1F, true);
 }
 
+TEST_CASE("HGraph MRLE RaBitQ Split", "[ft][rabitq_split][hgraph][MRLE]") {
+    using namespace fixtures;
+    constexpr int64_t dim = 128;
+    constexpr uint64_t base_count = 600;
+
+    auto param =
+        HGraphRaBitQSplitTestIndex::GenerateBuildParam("l2", dim, "memory_io", "", 3, 5, true);
+    auto param_json = vsag::JsonType::Parse(param);
+    param_json["index_param"]["base_quantization_type"].SetString("tq");
+    param_json["index_param"]["tq_chain"].SetString("mrle, rabitq");
+    param_json["index_param"]["mrle_dim"].SetInt(64);
+
+    auto index = TestIndex::TestFactory(HGraphRaBitQSplitTestIndex::name, param_json.Dump(), true);
+    auto dataset = HGraphRaBitQSplitTestIndex::pool.GetDatasetAndCreate(dim, base_count, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+    TestIndex::TestKnnSearch(index, dataset, kSplitSearchParam, 0.05F, true);
+}
+
 TEST_CASE("HGraph RaBitQ Split ODescent optimized build", "[ft][rabitq_split][hgraph][odescent]") {
     using namespace fixtures;
     constexpr int64_t dim = 128;

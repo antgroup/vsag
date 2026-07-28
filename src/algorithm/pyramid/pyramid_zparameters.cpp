@@ -176,7 +176,7 @@ PyramidParameters::FromJson(const JsonType& json) {
     }
 
     this->use_reorder = json[USE_REORDER_KEY].GetBool();
-    if (this->use_reorder) {
+    if (this->use_reorder and this->reorder_source != HGRAPH_REORDER_SOURCE_BASE) {
         this->precise_codes_param = CreateFlattenParam(json[PRECISE_CODES_KEY]);
     }
 
@@ -233,7 +233,7 @@ PyramidParameters::ToJson() const {
     json[USE_REORDER_KEY].SetBool(this->use_reorder);
     json[INDEX_MIN_SIZE].SetInt(index_min_size);
     json[SUPPORT_DUPLICATE].SetBool(support_duplicate);
-    if (this->use_reorder) {
+    if (this->use_reorder and this->reorder_source != HGRAPH_REORDER_SOURCE_BASE) {
         json[PRECISE_CODES_KEY].SetJson(precise_codes_param->ToJson());
     }
     if (this->has_hierarchies) {
@@ -292,7 +292,7 @@ PyramidParameters::CheckCompatibility(const ParamPtr& other) const {
         return false;
     }
     CHECK_FIELD_EQ(*this, *p, use_reorder);
-    if (this->use_reorder) {
+    if (this->use_reorder and this->reorder_source != HGRAPH_REORDER_SOURCE_BASE) {
         CHECK_SUB_PARAM(*this, *p, precise_codes_param);
     }
     CHECK_FIELD_EQ(*this, *p, index_min_size);

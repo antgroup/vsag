@@ -183,11 +183,7 @@ make_instance(const FlattenInterfaceParamPtr& param, const IndexCommonParam& com
     }
     if (actual_quant_type == QUANTIZATION_TYPE_VALUE_RABITQ) {
         if (param->name == RABITQ_SPLIT_DATA_CELL) {
-            if (is_transform_quantizer) {
-                throw VsagException(ErrorType::INVALID_ARGUMENT,
-                                    "rabitq split data cell does not support transform quantizer");
-            }
-            return MakeRaBitQSplitDataCell(param, common_param);
+            return MakeRaBitQSplitDataCell(param, common_param, is_transform_quantizer);
         }
         return make_instance_with_tq<RaBitQuantizer<metric>, IOTemp, metric>(
             param, common_param, is_transform_quantizer);

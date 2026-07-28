@@ -131,7 +131,8 @@ public:
           odescent_param_(pyramid_param->odescent_param),
           index_min_size_(pyramid_param->index_min_size),
           graph_type_(pyramid_param->graph_type),
-          support_duplicate_(pyramid_param->support_duplicate) {
+          support_duplicate_(pyramid_param->support_duplicate),
+          reorder_by_base_(pyramid_param->reorder_source == HGRAPH_REORDER_SOURCE_BASE) {
         base_codes_ = FlattenInterface::MakeInstance(pyramid_param->base_codes_param, common_param);
         if (pyramid_param->has_hierarchies) {
             for (const auto& h_param : pyramid_param->hierarchies) {
@@ -164,9 +165,13 @@ public:
         points_mutex_ = std::make_shared<PointsMutex>(max_capacity_, allocator_);
         searcher_ = std::make_unique<BasicSearcher>(common_param, points_mutex_);
         if (use_reorder_) {
-            precise_codes_ =
-                FlattenInterface::MakeInstance(pyramid_param->precise_codes_param, common_param);
-            reorder_ = std::make_shared<FlattenReorder>(precise_codes_, allocator_);
+            if (reorder_by_base_) {
+                reorder_ = std::make_shared<FlattenReorder>(base_codes_, allocator_);
+            } else {
+                precise_codes_ = FlattenInterface::MakeInstance(pyramid_param->precise_codes_param,
+                                                                common_param);
+                reorder_ = std::make_shared<FlattenReorder>(precise_codes_, allocator_);
+            }
         }
     }
 
@@ -362,6 +367,16 @@ private:
                 QueryContext& ctx,
                 uint64_t subindex_ef_search) const;
 
+    bool
+    has_precise_codes() const {
+        return use_reorder_ and not reorder_by_base_;
+    }
+
+    FlattenInterfacePtr
+    graph_codes() const {
+        return has_precise_codes() ? precise_codes_ : base_codes_;
+    }
+
 private:
     ODescentParameterPtr odescent_param_{nullptr};  // ODescent build parameters
     UnorderedMap<std::string, std::unique_ptr<Hierarchy>> hierarchies_;  // named hierarchies
@@ -375,6 +390,7 @@ private:
     int64_t cur_element_count_{0};                       // number of vectors currently stored
     std::atomic<int64_t> delete_count_{0};               // number of deleted vectors
     bool support_duplicate_{false};                      // whether to allow duplicate ids
+    bool reorder_by_base_{false};                        // reorder directly from base codes
 
     mutable std::shared_mutex resize_mutex_;        // guards resize operations
     std::mutex cur_element_count_mutex_;            // guards cur_element_count_ updates

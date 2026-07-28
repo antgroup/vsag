@@ -50,7 +50,7 @@ HGraph places its build parameters under the generic `index_param` key (see
 | `base_quantization_type` | `fp32` / `fp16` / `bf16` / `sq8` / `sq4` / `pq` | Quantization of the base storage — see the [Quantization chapter](../quantization/README.md) for all supported values |
 | `use_reverse_edges` | `false` | Track incoming neighbors for O(1) reverse-edge lookup; roughly doubles edge storage and is unsupported with compressed graph storage |
 | `label_remap_type` | `pg` | Label-map implementation: `pg` (default) or `robin` |
-| `reorder_source` | `precise` | Reorder from the `precise` store or directly from `base`; RaBitQ x+y split selects `base` automatically |
+| `reorder_source` | `precise` | Reorder from the `precise` store or directly from `base`; RaBitQ x+y split, including `tq_chain="mrle, rabitq"`, selects `base` automatically |
 | `persist_source_id` | `false` | Include HGraph source-ID metadata in serialization; useful when a restored index must later export a build cache |
 | `mrle_dim` | `0` | MRLE output dimension in `[0, dim]`; `0` means input dimension |
 | `fast_encode_rabitq` | `true` | Use fast multi-bit RaBitQ encoding; `false` restores the exact encoder |

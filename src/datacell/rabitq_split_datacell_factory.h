@@ -20,6 +20,7 @@ namespace vsag {
 
 FlattenInterfacePtr
 MakeRaBitQSplitDataCell(const FlattenInterfaceParamPtr& param,
-                        const IndexCommonParam& common_param);
+                        const IndexCommonParam& common_param,
+                        bool is_transform_quantizer);
 
 }  // namespace vsag
