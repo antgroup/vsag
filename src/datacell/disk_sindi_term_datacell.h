@@ -20,7 +20,7 @@
 #include <vector>
 
 #include "container_types.h"
-#include "datacell/sindi_term_datacell.h"
+#include "datacell/sindi_search_term_datacell.h"
 #include "impl/inner_search_param.h"
 #include "index_common_param.h"
 #include "io/common/basic_io.h"
@@ -38,7 +38,7 @@ namespace vsag {
 
 using TermBuffer = SindiTermBuffer;
 
-class DiskSindiTermDataCellInterface : public SindiTermDataCell {
+class DiskSindiTermDataCellInterface : public SindiSearchTermDataCell {
 public:
     virtual ~DiskSindiTermDataCellInterface() = default;
 
@@ -158,7 +158,7 @@ public:
                           QuantizationParamsPtr quantization_params,
                           uint32_t window_size,
                           IOParamPtr io_param,
-                          const IndexCommonParam& common_param);
+                          IndexCommonParam common_param);
 
     void
     SerializeTermLayout(StreamWriter& writer, uint32_t term_dict_count) const override;
@@ -300,8 +300,7 @@ private:
     IndexCommonParam common_param_;
     std::shared_ptr<BasicIO<IOTmpl>> io_{nullptr};
 
-    mutable QueryTermBuffers term_buffers_;
-    mutable std::shared_mutex term_buffers_mutex_;
+    mutable std::shared_mutex term_layout_mutex_;
     std::vector<DiskTermEntry> term_dict_;
     uint32_t window_count_{0};
     uint64_t total_count_{0};

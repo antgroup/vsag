@@ -14,7 +14,10 @@
 
 #include "immutable_sindi_term_datacell.h"
 
+#include <array>
 #include <cmath>
+#include <cstring>
+#include <limits>
 #include <sstream>
 #include <vector>
 
@@ -24,6 +27,62 @@
 #include "unittest.h"
 
 using namespace vsag;
+
+TEST_CASE("ImmutableSindiTermDataCell normalizes legacy posting order",
+          "[ut][SINDI][ImmutableSindiTermDataCell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto quantization_params = std::make_shared<QuantizationParams>();
+    MutableSindiTermDataCell mutable_data(
+        16, 8, allocator.get(), SparseValueQuantizationType::FP32, quantization_params);
+    uint32_t term = 3;
+    std::array<float, 2> values = {1.0F, 4.0F};
+    for (uint32_t document = 0; document < values.size(); ++document) {
+        SparseVector vector{1, &term, values.data() + document};
+        mutable_data.InsertVector(vector, document);
+    }
+
+    ImmutableSindiTermDataCell source(
+        16, 8, false, SparseValueQuantizationType::FP32, quantization_params, allocator.get());
+    source.AppendWindow(mutable_data.GetWindow(0));
+    std::stringstream stream;
+    IOStreamWriter writer(stream);
+    source.SerializeWindows(writer);
+
+    ImmutableSindiTermDataCell restored(
+        16, 8, false, SparseValueQuantizationType::FP32, quantization_params, allocator.get());
+    IOStreamReader reader(stream);
+    restored.DeserializeWindows(reader, 1);
+    const auto& window = restored.GetWindows().front();
+    REQUIRE(window.id_payloads == Vector<uint16_t>({1, 0}, allocator.get()));
+}
+
+TEST_CASE("ImmutableSindiTermDataCell trusts versioned posting order",
+          "[ut][SINDI][ImmutableSindiTermDataCell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto quantization_params = std::make_shared<QuantizationParams>();
+    MutableSindiTermDataCell mutable_data(
+        16, 8, allocator.get(), SparseValueQuantizationType::FP32, quantization_params);
+    uint32_t term = 3;
+    std::array<float, 2> values = {1.0F, 4.0F};
+    for (uint32_t document = 0; document < values.size(); ++document) {
+        SparseVector vector{1, &term, values.data() + document};
+        mutable_data.InsertVector(vector, document);
+    }
+
+    ImmutableSindiTermDataCell source(
+        16, 8, false, SparseValueQuantizationType::FP32, quantization_params, allocator.get());
+    source.AppendWindow(mutable_data.GetWindow(0));
+    std::stringstream stream;
+    IOStreamWriter writer(stream);
+    source.SerializeWindows(writer);
+
+    ImmutableSindiTermDataCell restored(
+        16, 8, false, SparseValueQuantizationType::FP32, quantization_params, allocator.get());
+    IOStreamReader reader(stream);
+    restored.DeserializeWindows(reader, 1, true);
+    const auto& window = restored.GetWindows().front();
+    REQUIRE(window.id_payloads == Vector<uint16_t>({0, 1}, allocator.get()));
+}
 
 TEST_CASE("ImmutableSindiTermDataCell term-first memory load uses exact capacity",
           "[ut][SINDIV2][ImmutableSindiTermDataCell]") {

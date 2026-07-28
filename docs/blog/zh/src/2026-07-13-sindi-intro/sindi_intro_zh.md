@@ -161,7 +161,7 @@ $ distance = 1 - inner\_product $
 >
 > 下半部分展示的是搜索期的两类剪枝。首先是 **`查询侧剪枝`**：查询向量里有 `t2:0.50`、`t7:0.31`、`t4:0.12`、`t9:0.07`。当 `query_prune_ratio = 25%` 时，4 个查询词项中保留权重最高的 3 个，所以 `t2`、`t7`、`t4` 被保留，低权重的 `t9` 本次搜索不再访问。
 >
-> 然后是 **`倒排列表侧剪枝`**：对于仍然被访问的 `t2` 和 `t7`，如果 `term_prune.ratio = 30%`，则每条按 value 降序排列的倒排列表只扫描前 `70%` posting。图中 `t2` 列表会扫描 `D3`、`D8`、`D1`，跳过后面的 `D6`；`t7` 列表会扫描 `D2`、`D3`、`D9`，跳过后面的 `D5`。三层剪枝叠加后，SINDI 同时减少了写入索引的词项、查询访问的列表数量和单条列表的扫描长度。
+> 然后是 **`倒排列表侧剪枝`**：对于仍然被访问的 `t2` 和 `t7`，如果 `term_prune_ratio = 30%`，则每条倒排列表只扫描前 `70%` posting。图中 `t2` 列表会扫描 `D3`、`D8`、`D1`，跳过后面的 `D6`；`t7` 列表会扫描 `D2`、`D3`、`D9`，跳过后面的 `D5`。三层剪枝叠加后，SINDI 同时减少了写入索引的词项、查询访问的列表数量和单条列表的扫描长度。
 
 [//]: # (25%=》0.25)
 
@@ -227,10 +227,8 @@ std::string sindi_search_parameters = R"({
     "sindi": {
         "n_candidate": 200,
         "query_prune_ratio": 0.0,
-        "term_prune": {
-            "ratio": 0.0,
-            "threshold": 0
-        }
+        "term_prune_ratio": 0.0,
+        "use_term_lists_heap_insert": true
     }
 })";
 
@@ -255,8 +253,8 @@ auto result = index->KnnSearch(query, 10, sindi_search_parameters).value();
 |  | `avg_doc_term_length` | `index_param` | 正整数，默认 `100` | 每篇文档平均非零词项数，仅用于内存估算，不改变索引构建和检索结果。 | 做 `EstimateMemory` 时按数据集统计值填写；普通构建可以不设置。 |
 | **可选（搜索）** | `n_candidate` | `sindi` | `[0, 500 * topk]`，默认 `0` | **`粗筛候选堆`** 大小；为 `0` 时实际候选规模至少为 `topk`，显式设置时不能超过 `500 * topk`。 | 开启重排时通常设为 `10 * topk` 到 `50 * topk` 起步；召回不足时调大，延迟过高时调小。 |
 |  | `query_prune_ratio` | `sindi` | `[0.0, 0.9]`，默认 `0.0` | 查询侧剪枝比例，搜索时丢弃查询向量中低权重的词项。 | 延迟敏感场景从 `0.1` 或 `0.2` 试起；高召回场景保持 `0.0`。 |
-|  | `term_prune.ratio` | `sindi` | `[0.0, 0.9]`，默认 `0.0` | 倒排列表侧比例剪枝，搜索时只扫描按存储 value 降序排列的链前缀。 | 存在超长倒排列表或高频 term 时尝试调高；如果召回下降明显，应降低该值或增大 `n_candidate`。 |
-|  | `term_prune.threshold` | `sindi` | 非负整数，默认 `0` | 单 term 在所有 window 的 posting 上限；单 window 上限为 `threshold / window_num`，`0` 表示不启用。 | 需要为超高频 term 设置绝对扫描预算时使用；可与 ratio 同时配置并取较小限制。 |
+|  | `term_prune_ratio` | `sindi` | `[0.0, 0.9]`，默认 `0.0` | 倒排列表侧剪枝比例，搜索时跳过列表中低权重的 posting。 | 存在超长倒排列表或高频 term 时尝试调高；如果召回下降明显，应降低该值或增大 `n_candidate`。 |
+|  | `use_term_lists_heap_insert` | `sindi` | `true` 或 `false`，默认 `true` | 是否按访问过的 term list 顺序插入候选堆，通常能减少无效堆操作。 | 一般保持默认 `true`；只有在做性能对比或排查时再切换验证。 |
 
 # 4、总结
 

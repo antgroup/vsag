@@ -143,7 +143,7 @@ TEST_CASE("SparseTermComputer Term Scan Count", "[ut][SparseTermComputer]") {
 
     SECTION("threshold is divided by total window count") {
         SINDISearchParameter search_params;
-        search_params.term_prune_threshold = 10;
+        search_params.term_retain_threshold = 10;
         SparseTermComputer computer(query, search_params, allocator.get(), 4);
         REQUIRE(computer.GetTermScanCount(10) == 2);
     }
@@ -151,15 +151,24 @@ TEST_CASE("SparseTermComputer Term Scan Count", "[ut][SparseTermComputer]") {
     SECTION("ratio and threshold use the smaller limit") {
         SINDISearchParameter search_params;
         search_params.term_prune_ratio = 0.5F;
-        search_params.term_prune_threshold = 18;
+        search_params.term_retain_threshold = 18;
         SparseTermComputer computer(query, search_params, allocator.get(), 3);
         REQUIRE(computer.GetTermScanCount(20) == 6);
     }
 
     SECTION("zero threshold disables the limit") {
         SINDISearchParameter search_params;
-        search_params.term_prune_threshold = 0;
+        search_params.term_retain_threshold = 0;
         SparseTermComputer computer(query, search_params, allocator.get(), 2);
         REQUIRE(computer.GetTermScanCount(10) == 10);
+    }
+
+    SECTION("non-empty posting lists retain at least one document") {
+        SINDISearchParameter search_params;
+        search_params.term_prune_ratio = 0.99F;
+        search_params.term_retain_threshold = 1;
+        SparseTermComputer computer(query, search_params, allocator.get(), 2);
+        REQUIRE(computer.GetTermScanCount(10) == 1);
+        REQUIRE(computer.GetTermScanCount(0) == 0);
     }
 }

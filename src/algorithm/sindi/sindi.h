@@ -28,29 +28,6 @@ namespace vsag {
 
 class ReasoningContext;
 
-struct ImmutableSINDIWindow {
-    explicit ImmutableSINDIWindow(Allocator* allocator)
-        : sorted_global_terms(allocator),
-          offsets(allocator),
-          id_payloads(allocator),
-          value_payloads(allocator) {
-    }
-
-    Vector<uint32_t> sorted_global_terms;
-    Vector<uint32_t> offsets;
-    Vector<uint16_t> id_payloads;
-    Vector<uint8_t> value_payloads;
-};
-
-struct ImmutableSINDIData {
-    explicit ImmutableSINDIData(Allocator* allocator) : windows(allocator) {
-    }
-
-    uint32_t value_code_size{0};
-    SparseValueQuantizationType sparse_value_quant_type{SparseValueQuantizationType::FP32};
-    Vector<ImmutableSINDIWindow> windows;
-};
-
 /**
  * @brief SINDI: Sparse INverted Index with windowed term lists.
  *
@@ -220,15 +197,6 @@ private:
                 const SparseVector* original_query = nullptr,
                 ReasoningContext* reasoning_ctx = nullptr) const;
 
-    template <InnerSearchMode mode>
-    DatasetPtr
-    immutable_search_impl(const SparseTermComputerPtr& computer,
-                          const InnerSearchParam& inner_param,
-                          Allocator* allocator,
-                          bool use_term_lists_heap_insert,
-                          const SparseVector* original_query = nullptr,
-                          ReasoningContext* reasoning_ctx = nullptr) const;
-
     bool
     UseTermListsHeapInsert(const SINDISearchParameter& search_param,
                            const std::optional<float>& distance_threshold = std::nullopt) const;
@@ -265,10 +233,15 @@ private:
     serialize_windows(StreamWriter& writer) const;
 
     void
-    deserialize_windows(StreamReader& reader_ref);
+    deserialize_windows(StreamReader& reader_ref, bool postings_sorted);
 
     void
-    deserialize_immutable_window(StreamReader& reader_ref, ImmutableSINDIWindow& window) const;
+    trim_deserialized_trailing_windows();
+
+    void
+    deserialize_immutable_window(StreamReader& reader_ref,
+                                 ImmutableSINDIWindow& window,
+                                 bool postings_sorted = false) const;
 
     void
     serialize_immutable_window(StreamWriter& writer, const ImmutableSINDIWindow& window) const;
@@ -278,12 +251,6 @@ private:
 
     std::vector<int64_t>
     build_immutable(const DatasetPtr& base);
-
-    void
-    create_immutable_staging();
-
-    void
-    flush_immutable_staging();
 
     void
     AttachReasoningReport(const DatasetPtr& dataset_results, ReasoningContext* reasoning_ctx) const;
@@ -296,6 +263,9 @@ private:
 
     void
     init_quantization_params_from_pruned_vectors(const DatasetPtr& base);
+
+    FlattenInterface*
+    get_rerank_datacell() const;
 
     /// Recalculate and cache the memory-usage counter.
     void
@@ -325,7 +295,8 @@ private:
     uint32_t term_id_limit_{0};  // max number of distinct terms per window
     uint32_t window_size_{0};    // number of vectors per window
 
-    SindiTermDataCellPtr term_datacell_{nullptr};
+    // Active search backend; aliases either the mutable or immutable concrete DataCell below.
+    SindiSearchTermDataCellPtr term_datacell_{nullptr};
     MutableSindiTermDataCellPtr mutable_term_datacell_{nullptr};
 
     std::atomic<int64_t> cur_element_count_{0};  // total inserted vectors
@@ -336,7 +307,7 @@ private:
     float doc_prune_ratio_{0};   // ratio of docs pruned during build
     float doc_retain_ratio_{0};  // ratio of docs kept after pruning
 
-    FlattenInterfacePtr rerank_flat_{nullptr};  // re-rank back-end
+    FlattenInterfacePtr rerank_flat_{nullptr};
 
     SparseValueQuantizationType sparse_value_quant_type_{SparseValueQuantizationType::FP32};
 
@@ -353,6 +324,7 @@ private:
     std::shared_ptr<TermIdMapper> term_id_mapper_{nullptr};  // maps external->internal ids
 
     bool immutable_enabled_{false};
+    bool immutable_build_started_{false};
     ImmutableSindiTermDataCellPtr immutable_term_datacell_{nullptr};
 };
 

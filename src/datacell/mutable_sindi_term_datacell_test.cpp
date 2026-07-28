@@ -120,6 +120,88 @@ TEST_CASE("MutableSindiTermDataCell sorts postings by stored value",
     }
 }
 
+TEST_CASE("MutableSindiTermDataCell prunes sorted postings", "[ut][MutableSindiTermDataCell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto quantization_params = std::make_shared<QuantizationParams>();
+    auto data_cell = std::make_shared<MutableSindiTermDataCell>(
+        16, 8, allocator.get(), SparseValueQuantizationType::FP32, quantization_params);
+
+    uint32_t term = 3;
+    std::array<float, 4> values = {1.0F, 3.0F, 2.0F, 4.0F};
+    for (uint32_t document = 0; document < 3; ++document) {
+        SparseVector vector{1, &term, values.data() + document};
+        data_cell->InsertVector(vector, document);
+    }
+    data_cell->SortByValue(0);
+    REQUIRE(data_cell->GetWindow(0).term_sorted_sizes_[term] == 3);
+
+    SparseVector appended{1, &term, values.data() + 3};
+    data_cell->InsertVector(appended, 3);
+    REQUIRE(data_cell->GetWindow(0).term_sorted_sizes_[term] == 3);
+    REQUIRE(data_cell->GetWindow(0).term_sizes_[term] == 4);
+
+    data_cell->SortByValue(0);
+    REQUIRE(data_cell->GetWindow(0).term_sorted_sizes_[term] == 4);
+
+    float query_value = 1.0F;
+    SparseVector query{1, &term, &query_value};
+    SINDISearchParameter search_parameter;
+    search_parameter.term_retain_threshold = 1;
+    auto computer = std::make_shared<SparseTermComputer>(query, search_parameter, allocator.get());
+    std::array<float, 4> sorted_distances{};
+    QueryFirstWindow(data_cell, sorted_distances.data(), computer, allocator.get());
+    REQUIRE(sorted_distances[3] == -4.0F);
+    REQUIRE(sorted_distances[0] == 0.0F);
+    REQUIRE(sorted_distances[1] == 0.0F);
+    REQUIRE(sorted_distances[2] == 0.0F);
+}
+
+TEST_CASE("MutableSindiTermDataCell normalizes legacy posting order on deserialize",
+          "[ut][MutableSindiTermDataCell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    MutableSindiTermDataCell source(
+        16, 8, allocator.get(), SparseValueQuantizationType::FP32, nullptr);
+    uint32_t term = 3;
+    std::array<float, 2> values = {1.0F, 4.0F};
+    for (uint32_t document = 0; document < values.size(); ++document) {
+        SparseVector vector{1, &term, values.data() + document};
+        source.InsertVector(vector, document);
+    }
+    std::stringstream stream;
+    IOStreamWriter writer(stream);
+    source.SerializeWindows(writer);
+
+    MutableSindiTermDataCell restored(
+        16, 8, allocator.get(), SparseValueQuantizationType::FP32, nullptr);
+    IOStreamReader reader(stream);
+    restored.DeserializeWindows(reader, 1);
+    REQUIRE(*restored.GetWindow(0).term_ids_[term] == Vector<uint16_t>({1, 0}, allocator.get()));
+    REQUIRE(restored.GetWindow(0).term_sorted_sizes_[term] == 2);
+}
+
+TEST_CASE("MutableSindiTermDataCell trusts versioned posting order on deserialize",
+          "[ut][MutableSindiTermDataCell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    MutableSindiTermDataCell source(
+        16, 8, allocator.get(), SparseValueQuantizationType::FP32, nullptr);
+    uint32_t term = 3;
+    std::array<float, 2> values = {1.0F, 4.0F};
+    for (uint32_t document = 0; document < values.size(); ++document) {
+        SparseVector vector{1, &term, values.data() + document};
+        source.InsertVector(vector, document);
+    }
+    std::stringstream stream;
+    IOStreamWriter writer(stream);
+    source.SerializeWindows(writer);
+
+    MutableSindiTermDataCell restored(
+        16, 8, allocator.get(), SparseValueQuantizationType::FP32, nullptr);
+    IOStreamReader reader(stream);
+    restored.DeserializeWindows(reader, 1, true);
+    REQUIRE(*restored.GetWindow(0).term_ids_[term] == Vector<uint16_t>({0, 1}, allocator.get()));
+    REQUIRE(restored.GetWindow(0).term_sorted_sizes_[term] == 2);
+}
+
 TEST_CASE("MutableSindiTermDataCell Basic Test", "[ut][MutableSindiTermDataCell]") {
     // prepare data
     auto count_base = 10;
@@ -143,7 +225,7 @@ TEST_CASE("MutableSindiTermDataCell Basic Test", "[ut][MutableSindiTermDataCell]
         // after_prune = [14:14, 15:15, 16:16, 17:17, 18:18]
         for (int d = 0; d < sparse_vectors[i].len_; d++) {
             sparse_vectors[i].ids_[d] = i + d;
-            sparse_vectors[i].vals_[d] = i + d;
+            sparse_vectors[i].vals_[d] = i + d + 1;
         }
     }
 
@@ -557,7 +639,7 @@ TEST_CASE("MutableSindiTermDataCell Last Term Test", "[ut][MutableSindiTermDataC
 
     {
         std::vector<uint32_t> ids0 = {1, 2};
-        std::vector<float> vals0 = {0.1f, 0.0f};
+        std::vector<float> vals0 = {0.1f, 0.01f};
         std::vector<uint32_t> ids1 = {1};
         std::vector<float> vals1 = {0.1f};
 

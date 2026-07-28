@@ -318,7 +318,8 @@ SINDIAnalyzer::collect_doc_prune_candidates(const SparseVector& query,
             if (term >= term_list.term_sizes_.size() || term_list.term_sizes_[term] == 0) {
                 continue;
             }
-            const auto term_size = computer->GetTermScanCount(term_list.term_sizes_[term]);
+            const auto posting_count = term_list.term_sizes_[term];
+            const auto term_size = computer->GetTermScanCount(posting_count);
             if (term_size == 0) {
                 continue;
             }
@@ -347,15 +348,17 @@ SINDIAnalyzer::collect_doc_prune_candidates(const SparseVector& query,
 
         if (use_term_lists_heap_insert) {
             SindiQueryContext query_context(sindi_->allocator_);
-            sindi_->mutable_term_datacell_->InsertHeapByWindow(dists.data(),
-                                                               cur,
-                                                               computer,
-                                                               heap,
-                                                               inner_param,
-                                                               window_start_id,
-                                                               KNN_SEARCH,
-                                                               false,
-                                                               query_context);
+            sindi_->mutable_term_datacell_
+                ->InsertHeapByWindow(  // NOLINT(readability-suspicious-call-argument)
+                    dists.data(),
+                    cur,
+                    computer,
+                    heap,
+                    inner_param,
+                    window_start_id,
+                    KNN_SEARCH,
+                    false,
+                    query_context);
         } else {
             sindi_->mutable_term_datacell_->InsertHeapByDists(
                 dists.data(), dists.size(), heap, inner_param, window_start_id, KNN_SEARCH, false);
@@ -1273,8 +1276,7 @@ SINDIAnalyzer::GetStats() {
 
     auto default_search_json = parse_sindi_search_json("default");
     default_search_json[INDEX_SINDI][SPARSE_QUERY_PRUNE_RATIO].SetFloat(0.0F);
-    default_search_json[INDEX_SINDI][SPARSE_TERM_PRUNE].SetJson(JsonType());
-    default_search_json[INDEX_SINDI][SPARSE_TERM_PRUNE][SPARSE_TERM_PRUNE_RATIO].SetFloat(0.0F);
+    default_search_json[INDEX_SINDI][SPARSE_TERM_PRUNE_RATIO].SetFloat(0.0F);
     default_search_json[INDEX_SINDI][SPARSE_N_CANDIDATE].SetInt(500);
     auto default_search_param = default_search_json.Dump();
 

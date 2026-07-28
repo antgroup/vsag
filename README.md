@@ -269,7 +269,7 @@ Thrive together in VSAG community with users and developers from all around the 
     updates use the same public API in both flat and graph phases.
   - **IVF (Inverted File Index)**: Optimized for large-scale search (high `k`) and batch queries.
   - **SINDI (Sparse Inverted Non-redundant Distance Index)**: Optimized sparse vector index.
-  - **SINDI V2**: SINDI with term-first persistence and per-query-term external IO.
+  - **SINDI_V2**: Optimized sparse vector index supporting both in-memory and disk-based I/O.
 
 - **Advanced Quantization Methods**
   - **RaBitQ (BQ)**: Extreme compression for minimal memory usage.

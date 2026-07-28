@@ -13,6 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <cmath>
+
 #include "datacell/sparse_vector_datacell_parameter.h"
 #include "framework/test_thread_pool.h"
 #include "impl/allocator/safe_allocator.h"
@@ -313,53 +315,7 @@ write_legacy_format(std::stringstream& legacy_stream,
 
 }  // namespace
 
-TEST_CASE("SparseDataCell Batch Codes Matches Single", "[ut][SparseDataCell]") {
-    auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    IndexCommonParam common_param;
-    common_param.allocator_ = allocator;
-    common_param.metric_ = MetricType::METRIC_TYPE_IP;
-
-    constexpr uint64_t dim = 100;
-    constexpr uint32_t base_count = 64;
-    auto data_cell = make_sparse_data_cell("block_memory_io", dim, common_param);
-    auto sparse_vectors = fixtures::GenerateSparseVectors(base_count, dim);
-    data_cell->Train(sparse_vectors.data(), base_count);
-    for (uint32_t i = 0; i < base_count; ++i) {
-        data_cell->InsertVector(sparse_vectors.data() + i, i);
-    }
-
-    const auto compare_batch_against_single = [&](const std::vector<InnerIdType>& ids) {
-        auto batch = data_cell->GetCodesByIdsBatch(
-            ids.data(), static_cast<InnerIdType>(ids.size()), allocator.get());
-        REQUIRE(batch.sizes.size() == ids.size());
-        REQUIRE(batch.in_buffer_offsets.size() == ids.size());
-        for (uint64_t i = 0; i < ids.size(); ++i) {
-            bool need_release = false;
-            const auto* expected = data_cell->GetCodesById(ids[i], need_release);
-            const auto* actual = batch.buffer.data() + batch.in_buffer_offsets[i];
-            REQUIRE(std::memcmp(actual, expected, batch.sizes[i]) == 0);
-            if (need_release) {
-                data_cell->Release(expected);
-            }
-        }
-    };
-
-    compare_batch_against_single({63, 2, 3, 2, 0, 40, 41, 1});
-    compare_batch_against_single({10});
-    compare_batch_against_single({0, 63});
-
-    auto empty = data_cell->GetCodesByIdsBatch(nullptr, 0, allocator.get());
-    REQUIRE(empty.buffer.empty());
-    REQUIRE(empty.sizes.empty());
-    REQUIRE(empty.in_buffer_offsets.empty());
-
-    for (auto& item : sparse_vectors) {
-        delete[] item.vals_;
-        delete[] item.ids_;
-    }
-}
-
-TEST_CASE("SparseDataCell Batch IO Merges Physical Neighbors", "[ut][SparseDataCell]") {
+TEST_CASE("SparseDataCell Query Merges Physical IO", "[ut][SparseDataCell]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     IndexCommonParam common_param;
     common_param.allocator_ = allocator;
@@ -386,40 +342,87 @@ TEST_CASE("SparseDataCell Batch IO Merges Physical Neighbors", "[ut][SparseDataC
     std::shared_ptr<CountingReader> counting_reader;
     auto loaded =
         load_sparse_data_cell_with_reader(source, vector_length, common_param, counting_reader);
+    auto computer = loaded->FactoryComputer(sparse_vectors.data());
+
+    const auto query = [&](const std::vector<InnerIdType>& ids) {
+        Vector<float> distances(ids.size(), allocator.get());
+        QueryContext context;
+        context.alloc = allocator.get();
+        loaded->Query(
+            distances.data(), computer, ids.data(), static_cast<InnerIdType>(ids.size()), &context);
+        for (const auto distance : distances) {
+            REQUIRE(distance == 1.0F - static_cast<float>(vector_length));
+        }
+    };
 
     SECTION("unordered contiguous payloads merge by physical offset") {
         const std::vector<InnerIdType> ids = {2, 1, 0};
         counting_reader->ResetCount();
-        auto batch = loaded->GetCodesByIdsBatch(ids.data(), ids.size(), allocator.get());
-        REQUIRE(batch.sizes.size() == ids.size());
+        query(ids);
         REQUIRE(counting_reader->GetAsyncReadCount() == 1);
     }
 
     SECTION("one MiB limit splits a large contiguous range") {
         const std::vector<InnerIdType> ids = {3, 2, 1, 0};
         counting_reader->ResetCount();
-        auto batch = loaded->GetCodesByIdsBatch(ids.data(), ids.size(), allocator.get());
-        REQUIRE(batch.sizes.size() == ids.size());
+        query(ids);
         REQUIRE(counting_reader->GetAsyncReadCount() == 2);
     }
 
     SECTION("a gap beyond the direct IO alignment is not merged") {
         const std::vector<InnerIdType> ids = {3, 0};
         counting_reader->ResetCount();
-        auto batch = loaded->GetCodesByIdsBatch(ids.data(), ids.size(), allocator.get());
-        REQUIRE(batch.sizes.size() == ids.size());
+        query(ids);
         REQUIRE(counting_reader->GetAsyncReadCount() == 2);
     }
 
     SECTION("duplicate ids share one physical read") {
         const std::vector<InnerIdType> ids = {0, 0};
         counting_reader->ResetCount();
-        auto batch = loaded->GetCodesByIdsBatch(ids.data(), ids.size(), allocator.get());
-        REQUIRE(batch.sizes.size() == ids.size());
+        query(ids);
         REQUIRE(counting_reader->GetAsyncReadCount() == 1);
-        REQUIRE(std::memcmp(batch.buffer.data() + batch.in_buffer_offsets[0],
-                            batch.buffer.data() + batch.in_buffer_offsets[1],
-                            batch.sizes[0]) == 0);
+    }
+}
+
+TEST_CASE("SparseDataCell MMap Query", "[ut][SparseDataCell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+
+    constexpr uint64_t dim = 100;
+    constexpr uint32_t base_count = 16;
+    fixtures::TempDir dir("sparse_datacell_mmap_query");
+    const auto file_path = dir.GenerateRandomFile(false);
+    const auto param_json = fmt::format(R"({{
+        "io_params": {{"type": "mmap_io", "file_path": "{}"}},
+        "quantization_params": {{"type": "sparse"}}
+    }})",
+                                        file_path);
+    auto param = std::make_shared<SparseVectorDataCellParameter>();
+    param->FromJson(JsonType::Parse(param_json));
+    common_param.dim_ = dim;
+    auto data_cell = FlattenInterface::MakeInstance(param, common_param);
+
+    auto sparse_vectors = fixtures::GenerateSparseVectors(base_count, dim);
+    data_cell->Train(sparse_vectors.data(), base_count);
+    for (uint32_t i = 0; i < base_count; ++i) {
+        data_cell->InsertVector(sparse_vectors.data() + i, i);
+    }
+
+    auto computer = data_cell->FactoryComputer(sparse_vectors.data());
+    const std::vector<InnerIdType> ids = {15, 2, 8, 0, 2};
+    std::vector<float> distances(ids.size());
+    data_cell->Query(distances.data(), computer, ids.data(), static_cast<InnerIdType>(ids.size()));
+    for (uint64_t i = 0; i < ids.size(); ++i) {
+        const auto expected =
+            fixtures::GetSparseDistance(sparse_vectors[0], sparse_vectors[ids[i]]);
+        REQUIRE(std::abs(distances[i] - expected) < 1e-5F);
+    }
+
+    for (auto& item : sparse_vectors) {
+        delete[] item.vals_;
+        delete[] item.ids_;
     }
 }
 

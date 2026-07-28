@@ -189,7 +189,8 @@ private:
     uint32_t term_id_limit_{0};
     uint32_t window_size_{0};
 
-    SindiTermDataCellPtr term_datacell_;
+    // Active search backend selected from mutable, immutable, or disk term storage.
+    SindiSearchTermDataCellPtr term_datacell_;
 
     int64_t cur_element_count_{0};
 
@@ -213,8 +214,6 @@ private:
 
     SINDIV2ParameterPtr param_;
     IndexCommonParam common_param_;
-
-    bool is_deserialized_{false};
 };
 
 }  // namespace vsag

@@ -93,7 +93,7 @@ DiskSindiTermDataCell<IOTmpl>::InsertHeapByWindow(
     const InnerSearchParam& param,
     uint32_t offset_id,
     const QueryTermBuffers& query_term_buffers) const {
-    std::shared_lock lock(term_buffers_mutex_);
+    std::shared_lock lock(term_layout_mutex_);
     uint32_t id = 0;
     float cur_heap_top = std::numeric_limits<float>::max();
     auto n_candidate = param.ef;
