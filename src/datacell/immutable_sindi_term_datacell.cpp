@@ -177,8 +177,7 @@ ImmutableSindiTermDataCell::GetTermDictCount() const {
         if (window.offsets.empty()) {
             continue;
         }
-        for (uint32_t term = static_cast<uint32_t>(window.offsets.size() - 1);
-             term > term_dict_count;
+        for (auto term = static_cast<uint32_t>(window.offsets.size() - 1); term > term_dict_count;
              --term) {
             if (window.offsets[term - 1] != window.offsets[term]) {
                 term_dict_count = term;
@@ -490,7 +489,7 @@ ImmutableSindiTermDataCell::GetMemoryUsage() const {
 
 void
 ImmutableSindiTermDataCell::SerializeWindow(StreamWriter& writer,
-                                            const ImmutableSINDIWindow& window) const {
+                                            const ImmutableSINDIWindow& window) {
     StreamWriter::WriteVector(writer, window.sorted_global_terms);
     StreamWriter::WriteVector(writer, window.offsets);
     StreamWriter::WriteVector(writer, window.id_payloads);
@@ -500,18 +499,20 @@ ImmutableSindiTermDataCell::SerializeWindow(StreamWriter& writer,
 void
 ImmutableSindiTermDataCell::SerializeWindows(StreamWriter& writer) const {
     for (const auto& window : windows_) {
-        this->SerializeWindow(writer, window);
+        ImmutableSindiTermDataCell::SerializeWindow(writer, window);
     }
 }
 
 void
 ImmutableSindiTermDataCell::DeserializeWindow(StreamReader& reader,
-                                              ImmutableSINDIWindow& window) const {
+                                              ImmutableSINDIWindow& window,
+                                              bool postings_sorted) const {
     const auto read_vector = [&reader](auto& values, uint64_t max_size, const char* message) {
         uint64_t size = 0;
         StreamReader::ReadObj(reader, size);
-        CHECK_ARGUMENT(size <= max_size && size <= static_cast<uint64_t>(values.max_size()),
-                       message);
+        CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+            size <= max_size && size <= static_cast<uint64_t>(values.max_size()),
+            message);
         values.resize(size);
         reader.Read(reinterpret_cast<char*>(values.data()),
                     size * sizeof(typename std::decay_t<decltype(values)>::value_type));
@@ -523,8 +524,9 @@ ImmutableSindiTermDataCell::DeserializeWindow(StreamReader& reader,
                 remap_term_ids_ ? static_cast<uint64_t>(term_id_limit_) + 1
                                 : static_cast<uint64_t>(term_id_limit_) * 2 + 1,
                 "immutable SINDI offset count exceeds capacity bound");
-    CHECK_ARGUMENT(not window.offsets.empty() && window.offsets.front() == 0,
-                   "immutable SINDI offsets must start at zero");
+    CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+        not window.offsets.empty() && window.offsets.front() == 0,
+        "immutable SINDI offsets must start at zero");
     CHECK_ARGUMENT(std::is_sorted(window.offsets.begin(), window.offsets.end()),
                    "immutable SINDI offsets must be sorted");
     if (remap_term_ids_) {
@@ -533,7 +535,7 @@ ImmutableSindiTermDataCell::DeserializeWindow(StreamReader& reader,
         CHECK_ARGUMENT(
             std::adjacent_find(window.sorted_global_terms.begin(),
                                window.sorted_global_terms.end(),
-                               std::greater_equal<uint32_t>()) == window.sorted_global_terms.end(),
+                               std::greater_equal<>()) == window.sorted_global_terms.end(),
             "immutable SINDI remapped terms must be strictly increasing");
     } else {
         CHECK_ARGUMENT(window.sorted_global_terms.empty(),
@@ -559,17 +561,46 @@ ImmutableSindiTermDataCell::DeserializeWindow(StreamReader& reader,
         CHECK_ARGUMENT(id < window_size_,
                        "immutable SINDI window-local doc id exceeds window size");
     }
+
+    if (not postings_sorted) {
+        Vector<uint32_t> order(allocator_);
+        Vector<uint16_t> sorted_ids(allocator_);
+        Vector<uint8_t> sorted_data(allocator_);
+        for (uint64_t term = 1; term < window.offsets.size(); ++term) {
+            const auto begin = window.offsets[term - 1];
+            const auto count = window.offsets[term] - begin;
+            sindi_datacell_utils::SortPostingListByValue(
+                window.id_payloads.data() + begin,
+                window.value_payloads.data() + static_cast<uint64_t>(begin) * value_code_size_,
+                count,
+                sparse_value_quant_type_,
+                order,
+                sorted_ids,
+                sorted_data);
+        }
+    }
 }
 
 void
-ImmutableSindiTermDataCell::DeserializeWindows(StreamReader& reader, uint32_t window_count) {
+ImmutableSindiTermDataCell::DeserializeWindows(StreamReader& reader,
+                                               uint32_t window_count,
+                                               bool postings_sorted) {
     Vector<ImmutableSINDIWindow> loaded(allocator_);
     loaded.reserve(window_count);
     for (uint32_t i = 0; i < window_count; ++i) {
         loaded.emplace_back(allocator_);
-        this->DeserializeWindow(reader, loaded.back());
+        this->DeserializeWindow(reader, loaded.back(), postings_sorted);
     }
     windows_.swap(loaded);
+}
+
+void
+ImmutableSindiTermDataCell::ResizeWindowCount(uint32_t window_count) {
+    CHECK_ARGUMENT(window_count <= windows_.size(),
+                   "cannot grow immutable SINDI windows while trimming serialized data");
+    const auto first_trailing =
+        windows_.begin() + static_cast<Vector<ImmutableSINDIWindow>::difference_type>(window_count);
+    windows_.erase(first_trailing, windows_.end());
 }
 
 void
@@ -579,9 +610,10 @@ ImmutableSindiTermDataCell::DeserializeTermLayout(StreamReader& reader,
     const auto term_dict = sindi_datacell_utils::DeserializeTermDictionary(reader, term_id_limit_);
     uint64_t term_payload_size = 0;
     StreamReader::ReadObj(reader, term_payload_size);
-    CHECK_ARGUMENT(reader.GetCursor() <= reader.Length() &&
-                       term_payload_size <= reader.Length() - reader.GetCursor(),
-                   "SINDI V2 term payload exceeds stream length");
+    CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+        reader.GetCursor() <= reader.Length() &&
+            term_payload_size <= reader.Length() - reader.GetCursor(),
+        "SINDI_V2 term payload exceeds stream length");
     const auto payload_start = reader.GetCursor();
     sindi_datacell_utils::ValidateTermDict(term_dict, term_payload_size);
     const auto value_code_size = value_code_size_;
@@ -670,7 +702,7 @@ ImmutableSindiTermDataCell::DeserializeTermLayout(StreamReader& reader,
                 for (uint32_t posting = 0; posting < meta.posting_count; ++posting) {
                     CHECK_ARGUMENT(
                         window.id_payloads[posting_offset + posting] < window_document_count,
-                        "SINDI V2 posting id exceeds its window document count");
+                        "SINDI_V2 posting id exceeds its window document count");
                 }
             };
             const auto complete_window = [&](const TermWindowMeta& meta) {
@@ -693,9 +725,10 @@ ImmutableSindiTermDataCell::DeserializeTermLayout(StreamReader& reader,
                 const auto window_id = meta.window_id;
                 auto& window = loaded[window_id];
                 const auto posting_offset = window_posting_cursors[window_id];
-                CHECK_ARGUMENT(posting_offset <= window.id_payloads.size() &&
-                                   meta.posting_count <= window.id_payloads.size() - posting_offset,
-                               "immutable SINDI posting fill exceeds allocated payload");
+                CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+                    posting_offset <= window.id_payloads.size() &&
+                        meta.posting_count <= window.id_payloads.size() - posting_offset,
+                    "immutable SINDI posting fill exceeds allocated payload");
                 sindi_datacell_utils::ReadTermPostingRange(
                     reader,
                     layout,
@@ -719,7 +752,7 @@ ImmutableSindiTermDataCell::DeserializeTermLayout(StreamReader& reader,
                     const auto window_id = meta.window_id;
                     auto& window = loaded[window_id];
                     const auto posting_offset = window_posting_cursors[window_id];
-                    CHECK_ARGUMENT(
+                    CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
                         posting_offset <= window.id_payloads.size() &&
                             meta.posting_count <= window.id_payloads.size() - posting_offset,
                         "immutable SINDI posting fill exceeds allocated payload");
@@ -753,7 +786,7 @@ ImmutableSindiTermDataCell::DeserializeTermLayout(StreamReader& reader,
                 }
             }
             CHECK_ARGUMENT(source_posting_offset == entry.posting_count,
-                           "SINDI V2 term posting count does not match term dictionary");
+                           "SINDI_V2 term posting count does not match term dictionary");
         }
         if (not remap_term_ids_) {
             for (uint32_t window_id = 0; window_id < window_count; ++window_id) {
@@ -767,6 +800,23 @@ ImmutableSindiTermDataCell::DeserializeTermLayout(StreamReader& reader,
         if (remap_term_ids_) {
             CHECK_ARGUMENT(window_term_cursors[window_id] == window_term_counts[window_id],
                            "immutable SINDI term fill does not match allocated terms");
+        }
+    }
+    Vector<uint32_t> order(allocator_);
+    Vector<uint16_t> sorted_ids(allocator_);
+    Vector<uint8_t> sorted_data(allocator_);
+    for (auto& window : loaded) {
+        for (uint64_t term = 1; term < window.offsets.size(); ++term) {
+            const auto begin = window.offsets[term - 1];
+            const auto count = window.offsets[term] - begin;
+            sindi_datacell_utils::SortPostingListByValue(
+                window.id_payloads.data() + begin,
+                window.value_payloads.data() + static_cast<uint64_t>(begin) * value_code_size,
+                count,
+                sparse_value_quant_type_,
+                order,
+                sorted_ids,
+                sorted_data);
         }
     }
     windows_.swap(loaded);

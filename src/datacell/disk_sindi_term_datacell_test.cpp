@@ -93,6 +93,7 @@ TEST_CASE("DiskSindiTermDataCell restores payload io", "[ut][DiskSindiTermDataCe
 
     Vector<uint32_t> query_terms(common_param.allocator_.get());
     query_terms.push_back(target_term_id);
+    const auto memory_usage_before_load = restored->GetMemoryUsage();
     auto query_term_buffers = restored->LoadQueryTermBuffers(query_terms);
 
     REQUIRE(query_term_buffers.size() == 1);
@@ -104,6 +105,18 @@ TEST_CASE("DiskSindiTermDataCell restores payload io", "[ut][DiskSindiTermDataCe
     REQUIRE(term_buffer.window_offsets.back() == 1);
     REQUIRE(term_buffer.IdsData()[0] == target_inner_id);
     REQUIRE(term_buffer.ValuesSize() == sizeof(float));
+    if (io_type == IO_TYPE_VALUE_MMAP_IO) {
+        REQUIRE(term_buffer.external_ids != nullptr);
+        REQUIRE(term_buffer.external_values != nullptr);
+        REQUIRE(restored->GetMemoryUsage() == memory_usage_before_load);
+        const auto reloaded_buffers = restored->LoadQueryTermBuffers(query_terms);
+        REQUIRE(reloaded_buffers.at(target_term_id).IdsData() == term_buffer.IdsData());
+        REQUIRE(reloaded_buffers.at(target_term_id).ValuesData() == term_buffer.ValuesData());
+        REQUIRE(restored->GetMemoryUsage() == memory_usage_before_load);
+    } else {
+        REQUIRE(term_buffer.external_ids == nullptr);
+        REQUIRE(term_buffer.external_values == nullptr);
+    }
     float restored_value = 0.0F;
     std::memcpy(&restored_value, term_buffer.ValuesData(), sizeof(float));
     REQUIRE(restored_value == target_value);
@@ -158,7 +171,7 @@ TEST_CASE("DiskSindiTermDataCell applies term prune without term-list heap inser
     float query_value = 1.0F;
     SparseVector query{1, &term, &query_value};
     SINDIV2SearchParameter search_parameter;
-    search_parameter.term_prune_threshold = 2;
+    search_parameter.term_retain_threshold = 2;
     auto computer = std::make_shared<SparseTermComputer>(
         query, search_parameter, common_param.allocator_.get(), 2);
 

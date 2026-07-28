@@ -17,7 +17,7 @@
 
 #include "algorithm/sindi/sindi_parameter.h"
 #include "datacell/sindi_datacell_utils.h"
-#include "datacell/sindi_term_datacell.h"
+#include "datacell/sindi_search_term_datacell.h"
 #include "impl/searcher/basic_searcher.h"
 #include "quantization/sparse_quantization/sparse_term_computer.h"
 #include "storage/stream_reader.h"
@@ -30,18 +30,29 @@ namespace vsag {
 
 struct MutableSINDIWindow {
     explicit MutableSINDIWindow(Allocator* allocator = nullptr)
-        : term_ids_(allocator), term_datas_(allocator), term_sizes_(allocator) {
+        : term_ids_(allocator),
+          term_datas_(allocator),
+          term_sizes_(allocator),
+          term_sorted_sizes_(allocator),
+          dirty_terms_(allocator) {
     }
 
     uint32_t term_capacity_{0};
     Vector<std::unique_ptr<Vector<uint16_t>>> term_ids_;
     Vector<std::unique_ptr<Vector<uint8_t>>> term_datas_;
     Vector<uint32_t> term_sizes_;
+    Vector<uint32_t> term_sorted_sizes_;
+    Vector<uint32_t> dirty_terms_;
 };
 
 DEFINE_POINTER(MutableSindiTermDataCell);
-class MutableSindiTermDataCell : public SindiTermDataCell {
+class MutableSindiTermDataCell : public SindiSearchTermDataCell {
 public:
+#if defined(VSAG_SINDI_TEST_ACCESS) || defined(VSAG_SINDI_V2_TEST_ACCESS)
+    friend class SINDITestAccess;
+    friend class SINDIV2TestAccess;
+#endif
+
     MutableSindiTermDataCell(uint32_t term_id_limit,
                              uint32_t window_size,
                              Allocator* allocator,
@@ -62,7 +73,7 @@ public:
     SerializeWindows(StreamWriter& writer) const;
 
     void
-    DeserializeWindows(StreamReader& reader, uint32_t window_count);
+    DeserializeWindows(StreamReader& reader, uint32_t window_count, bool postings_sorted = false);
 
     void
     SerializeTermLayout(StreamWriter& writer, uint32_t term_dict_count) const override;
@@ -152,6 +163,9 @@ public:
     SortByValue(uint32_t window_id);
 
     void
+    ResizeWindowCount(uint32_t window_count);
+
+    void
     ResizeTermList(InnerIdType new_term_capacity);
 
     void
@@ -198,7 +212,10 @@ private:
     CollectTermPostings() const;
 
     void
-    ResizeTermList(MutableSINDIWindow& window, InnerIdType new_term_capacity);
+    ResizeTermList(MutableSINDIWindow& window, InnerIdType new_term_capacity) const;
+
+    void
+    SortByValue(MutableSINDIWindow& window);
 
     void
     Compact(MutableSINDIWindow& window);
@@ -207,7 +224,7 @@ private:
     SerializeWindow(StreamWriter& writer, const MutableSINDIWindow& window) const;
 
     void
-    DeserializeWindow(StreamReader& reader, MutableSINDIWindow& window);
+    DeserializeWindow(StreamReader& reader, MutableSINDIWindow& window, bool postings_sorted);
 
     float
     CalcDistanceByInnerId(const MutableSINDIWindow& window,
@@ -220,8 +237,8 @@ private:
                     SparseVector* data,
                     Allocator* specified_allocator) const;
 
-    [[nodiscard]] uint64_t
-    GetWindowMemoryUsage(const MutableSINDIWindow& window) const;
+    [[nodiscard]] static uint64_t
+    GetWindowMemoryUsage(const MutableSINDIWindow& window);
 
     template <InnerSearchMode mode, InnerSearchType type>
     void

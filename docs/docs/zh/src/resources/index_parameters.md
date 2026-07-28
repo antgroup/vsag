@@ -146,7 +146,7 @@ MRLE 与 split RaBitQ 组合使用 `base_quantization_type: "tq"`、
 精排，并保留原始 FP32 向量供仅解码路径使用。完整配置及存储/召回权衡见
 [Pyramid 页面](../indexes/pyramid.md)。
 
-## SINDI / SINDI V2（稀疏向量）
+## SINDI（稀疏向量）
 
 ```json
 {
@@ -155,37 +155,39 @@ MRLE 与 split RaBitQ 组合使用 `base_quantization_type: "tq"`、
     "dim": 1024,
     "index_param": {
         "term_id_limit": 30000,
-        "window_size": 50000,
-        "doc_prune_ratio": 0.1,
-        "use_quantization": false,
-        "use_reorder": false,
-        "remap_term_ids": false,
-        "immutable": false
+        "doc_prune_ratio": 0.1
     }
 }
 ```
 
-工厂入口为 `sindi` 时使用 window-first 序列化；入口为 `sindi_v2` 时使用 term-first
-序列化。`immutable` 决定内存 DataCell 类型，但不改变入口选择的默认布局。SINDI V2
-还可在 `index_param` 中配置 `term_io` 和 `rerank_io`。
+`use_quantization`、不可变构建与 `n_candidate` 等搜索参数见
+[SINDI 页面](../indexes/sindi.md)。
 
-查询参数放在与入口同名的对象中：
+## SINDI_V2（稀疏向量）
+
+SINDI_V2 兼容 SINDI 的全部功能，并支持内存与磁盘 I/O。
 
 ```json
 {
-    "sindi_v2": {
-        "n_candidate": 100,
-        "query_prune_ratio": 0.0,
-        "term_prune": {
-            "ratio": 0.0,
-            "threshold": 0
+    "dtype": "sparse",
+    "metric_type": "ip",
+    "dim": 1024,
+    "index_param": {
+        "term_id_limit": 30000,
+        "use_reorder": true,
+        "term_io": {
+            "type": "async_io",
+            "file_path": "/path/to/sindi_v2.terms"
         },
-        "use_term_lists_heap_insert": true
+        "rerank_io": {
+            "type": "async_io",
+            "file_path": "/path/to/sindi_v2.rerank"
+        }
     }
 }
 ```
 
-完整说明见 [SINDI / SINDI V2](../indexes/sindi.md)。
+详情见 [SINDI_V2 页面](../indexes/sindi_v2.md)。
 
 ## 运行期参数
 

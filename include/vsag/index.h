@@ -500,7 +500,7 @@ public:
      *
      * Suitable for dense vector indexes such as HGraph, BruteForce, IVF, and Pyramid.
      * The query must be a contiguous float32 array with dimension matching the index.
-     * For sparse vector indexes (SINDI, SINDI V2), this overload is not applicable;
+     * For sparse vector indexes (SINDI, SINDI_V2), this overload is not applicable;
      * use CalcDistanceById(DatasetPtr, int64_t, bool) instead.
      *
      * @param vector The embedding of the query (float32 array for dense vectors).
@@ -523,7 +523,7 @@ public:
      * @brief Calculate the distance between the query and the vector of the given ID.
      *
      * Suitable for Dataset-backed query formats, especially sparse vector indexes
-     * (SINDI, SINDI V2) where vectors cannot be represented as a simple float pointer.
+     * (SINDI, SINDI_V2) where vectors cannot be represented as a simple float pointer.
      * Dense DatasetPtr batch queries are supported by the batch overload below
      * through Float32Vectors() when the index advertises the batch feature; for
      * this single-ID overload, dense callers should prefer the const float* API
@@ -551,7 +551,7 @@ public:
      * Suitable for dense vector indexes. HGraph, BruteForce, IVF, and Pyramid support top-k
      * output when they advertise the corresponding batch distance feature.
      * The query must be a contiguous float32 array. For sparse vector indexes
-     * (SINDI, SINDI V2), this overload is not applicable; use
+     * (SINDI, SINDI_V2), this overload is not applicable; use
      * CalDistanceById(DatasetPtr, const int64_t*, int64_t, bool) instead.
      *
      * @param query is the embedding of query (float32 array for dense vectors).
@@ -585,7 +585,7 @@ public:
      * @brief Calculate distances between query(queries) and vectors of given IDs for batch.
      *
      * Suitable for Dataset-backed batch query formats. Sparse vector indexes
-     * (SINDI, SINDI V2) use GetSparseVectors(). Dense vector indexes that advertise
+     * (SINDI, SINDI_V2) use GetSparseVectors(). Dense vector indexes that advertise
      * SUPPORT_BATCH_CALC_DISTANCE_BY_ID can use Float32Vectors() through the
      * default DatasetPtr batch implementation or an index-specific override.
      *

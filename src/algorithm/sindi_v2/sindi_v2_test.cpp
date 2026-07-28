@@ -55,6 +55,13 @@ public:
     QuantizationParamsValue(const SINDIV2& index) {
         return *index.quantization_params_;
     }
+
+    static bool
+    MutableTermIsSorted(const SINDIV2& index, uint32_t window, uint32_t term) {
+        const auto data_cell = index.get_mutable_term_datacell();
+        const auto& data = data_cell->GetWindow(window);
+        return data.term_sorted_sizes_[term] == data.term_sizes_[term];
+    }
 };
 
 }  // namespace vsag
@@ -121,8 +128,7 @@ create_sindi_v2_param(uint32_t term_id_limit,
 
 }  // namespace
 
-TEST_CASE("SINDIV2 term prune keeps highest stored values after build and incremental add",
-          "[ut][SINDIV2]") {
+TEST_CASE("SINDIV2 term prune keeps highest stored values after build", "[ut][SINDIV2]") {
     const auto immutable = GENERATE(false, true);
     const auto quantization = GENERATE(SparseValueQuantizationType::FP32,
                                        SparseValueQuantizationType::FP16,
@@ -155,24 +161,12 @@ TEST_CASE("SINDIV2 term prune keeps highest stored values after build and increm
             vectors[document] = SparseVector{1, &term, values.data() + document};
         }
 
-        if (immutable) {
-            auto base = Dataset::Make();
-            base->NumElements(vectors.size())
-                ->SparseVectors(vectors.data())
-                ->Ids(labels.data())
-                ->Owner(false);
-            REQUIRE(index.Build(base).empty());
-        } else {
-            auto first = Dataset::Make();
-            first->NumElements(2)->SparseVectors(vectors.data())->Ids(labels.data())->Owner(false);
-            REQUIRE(index.Build(first).empty());
-            auto second = Dataset::Make();
-            second->NumElements(2)
-                ->SparseVectors(vectors.data() + 2)
-                ->Ids(labels.data() + 2)
-                ->Owner(false);
-            REQUIRE(index.Add(second).empty());
-        }
+        auto base = Dataset::Make();
+        base->NumElements(vectors.size())
+            ->SparseVectors(vectors.data())
+            ->Ids(labels.data())
+            ->Owner(false);
+        REQUIRE(index.Build(base).empty());
 
         float query_value = 1.0F;
         SparseVector sparse_query{1, &term, &query_value};
@@ -181,10 +175,8 @@ TEST_CASE("SINDIV2 term prune keeps highest stored values after build and increm
         const std::string search_parameters = R"({
             "sindi_v2": {
                 "query_prune_ratio": 0.0,
-                "term_prune": {
-                    "ratio": 0.0,
-                    "threshold": 2
-                },
+                "term_prune_ratio": 0.0,
+                "term_retain_threshold": 2,
                 "n_candidate": 4,
                 "use_term_lists_heap_insert": false
             }
@@ -197,13 +189,65 @@ TEST_CASE("SINDIV2 term prune keeps highest stored values after build and increm
     }
 }
 
+TEST_CASE("SINDIV2 sorts incremental partial windows", "[ut][SINDIV2]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    common_param.dim_ = 1;
+
+    auto parameter = std::make_shared<SINDIV2Parameter>();
+    parameter->term_id_limit = 8;
+    parameter->window_size = 4;
+    parameter->doc_prune_ratio = 0.0F;
+    parameter->use_reorder = false;
+    parameter->term_io_parameter = std::make_shared<MemoryIOParameter>();
+    parameter->rerank_io_parameter = std::make_shared<MemoryBlockIOParameter>();
+
+    uint32_t term = 3;
+    std::array<float, 2> initial_values = {1.0F, 2.0F};
+    std::array<int64_t, 2> initial_labels = {10, 11};
+    std::array<SparseVector, 2> initial_vectors;
+    for (uint64_t i = 0; i < initial_vectors.size(); ++i) {
+        initial_vectors[i] = SparseVector{1, &term, initial_values.data() + i};
+    }
+    auto base = Dataset::Make();
+    base->NumElements(initial_vectors.size())
+        ->SparseVectors(initial_vectors.data())
+        ->Ids(initial_labels.data())
+        ->Owner(false);
+
+    SINDIV2 index(parameter, common_param);
+    REQUIRE(index.Build(base).empty());
+    REQUIRE(SINDIV2TestAccess::MutableTermIsSorted(index, 0, term));
+
+    float appended_value = 4.0F;
+    int64_t appended_label = 12;
+    SparseVector appended_vector{1, &term, &appended_value};
+    auto appended = Dataset::Make();
+    appended->NumElements(1)->SparseVectors(&appended_vector)->Ids(&appended_label)->Owner(false);
+    REQUIRE(index.Add(appended).empty());
+    REQUIRE(SINDIV2TestAccess::MutableTermIsSorted(index, 0, term));
+
+    float query_value = 1.0F;
+    SparseVector query_vector{1, &term, &query_value};
+    auto query = Dataset::Make();
+    query->NumElements(1)->SparseVectors(&query_vector)->Owner(false);
+    const auto search_parameters =
+        R"({"sindi_v2": {"n_candidate": 1, "term_retain_threshold": 1}})";
+    REQUIRE(index.KnnSearch(query, 1, search_parameters, nullptr)->GetIds()[0] == appended_label);
+
+    appended_value = 3.0F;
+    appended_label = 13;
+    REQUIRE(index.Add(appended).empty());
+    REQUIRE(SINDIV2TestAccess::MutableTermIsSorted(index, 0, term));
+}
+
 TEST_CASE("SINDIV2 Batch Rerank End-To-End", "[ut][SINDIV2]") {
-    // Phase A regression: the rerank path now batches IO through
-    // GetCodesByIdsBatch instead of issuing one Read per candidate. The
-    // returned (id, distance) pairs must remain identical to the single-id
-    // path. We verify that by checking that the top-k results are a sane
-    // permutation of the brute-force top-k (allowing ties due to identical
-    // distances when k is at the boundary).
+    // The rerank path batches distance calculation through SparseVectorDataCell::Query. The
+    // returned (id, distance) pairs must remain identical to the single-id path. We verify that by
+    // checking that the top-k results are a sane permutation of the brute-force top-k (allowing
+    // ties due to identical distances when k is at the boundary).
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     IndexCommonParam common_param;
     common_param.allocator_ = allocator;
@@ -219,7 +263,8 @@ TEST_CASE("SINDIV2 Batch Rerank End-To-End", "[ut][SINDIV2]") {
     std::vector<int64_t> ids(num_base);
     std::iota(ids.begin(), ids.end(), 0);
 
-    auto sv_base = fixtures::GenerateSparseVectors(num_base, max_dim, /*max_id=*/term_id_limit - 1);
+    auto sv_base = fixtures::GenerateSparseVectors(
+        num_base, max_dim, /*max_id=*/term_id_limit - 1, 0.1F, 1.0F);
     auto base = Dataset::Make();
     base->NumElements(num_base)->SparseVectors(sv_base.data())->Ids(ids.data())->Owner(false);
 
@@ -232,7 +277,7 @@ TEST_CASE("SINDIV2 Batch Rerank End-To-End", "[ut][SINDIV2]") {
     const std::string search_param = R"({
         "sindi_v2": {
             "query_prune_ratio": 0.0,
-            "term_prune": {"ratio": 0.0},
+            "term_prune_ratio": 0.0,
             "n_candidate": 100,
             "use_term_lists_heap_insert": false
         }
@@ -291,7 +336,8 @@ TEST_CASE("SINDIV2 Top Terms Rerank Layout End-To-End", "[ut][SINDIV2]") {
     std::vector<int64_t> ids(num_base);
     std::iota(ids.begin(), ids.end(), 0);
 
-    auto sv_base = fixtures::GenerateSparseVectors(num_base, max_dim, term_id_limit - 1);
+    auto sv_base =
+        fixtures::GenerateSparseVectors(num_base, max_dim, term_id_limit - 1, 0.1F, 1.0F);
     auto base = Dataset::Make();
     base->NumElements(num_base)->SparseVectors(sv_base.data())->Ids(ids.data())->Owner(false);
 
@@ -310,7 +356,7 @@ TEST_CASE("SINDIV2 Top Terms Rerank Layout End-To-End", "[ut][SINDIV2]") {
     const std::string search_param = R"({
         "sindi_v2": {
             "query_prune_ratio": 0.0,
-            "term_prune": {"ratio": 0.0},
+            "term_prune_ratio": 0.0,
             "n_candidate": 64,
             "use_term_lists_heap_insert": false
         }
@@ -331,10 +377,10 @@ TEST_CASE("SINDIV2 Top Terms Rerank Layout End-To-End", "[ut][SINDIV2]") {
 }
 
 TEST_CASE("SINDIV2 Sorted Batch Rerank End-To-End", "[ut][SINDIV2]") {
-    // The rerank path sorts candidate inner_ids before issuing batched IO.
-    // Returned (id, distance) pairs must remain identical to the brute-force
-    // truth. Each returned distance is cross-checked against CalcDistanceById to
-    // ensure the batched code path produces the same distance computation.
+    // SparseVectorDataCell::Query sorts candidate payloads by physical offset before issuing
+    // batched IO. Returned (id, distance) pairs must remain identical to the brute-force truth.
+    // Each returned distance is cross-checked against CalcDistanceById to ensure the Query path
+    // produces the same distance computation.
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     IndexCommonParam common_param;
     common_param.allocator_ = allocator;
@@ -350,7 +396,8 @@ TEST_CASE("SINDIV2 Sorted Batch Rerank End-To-End", "[ut][SINDIV2]") {
     std::vector<int64_t> ids(num_base);
     std::iota(ids.begin(), ids.end(), 0);
 
-    auto sv_base = fixtures::GenerateSparseVectors(num_base, max_dim, /*max_id=*/term_id_limit - 1);
+    auto sv_base = fixtures::GenerateSparseVectors(
+        num_base, max_dim, /*max_id=*/term_id_limit - 1, 0.1F, 1.0F);
     auto base = Dataset::Make();
     base->NumElements(num_base)->SparseVectors(sv_base.data())->Ids(ids.data())->Owner(false);
 
@@ -363,7 +410,7 @@ TEST_CASE("SINDIV2 Sorted Batch Rerank End-To-End", "[ut][SINDIV2]") {
     const std::string search_param = R"({
         "sindi_v2": {
             "query_prune_ratio": 0.0,
-            "term_prune": {"ratio": 0.0},
+            "term_prune_ratio": 0.0,
             "n_candidate": 200,
             "use_term_lists_heap_insert": false
         }
@@ -381,8 +428,8 @@ TEST_CASE("SINDIV2 Sorted Batch Rerank End-To-End", "[ut][SINDIV2]") {
             REQUIRE(result->GetDistances()[i] >= result->GetDistances()[i - 1] - 1e-5);
         }
 
-        // Cross-check each result distance against CalcDistanceById (which
-        // uses the single-id GetCodesById path, bypassing batched IO).
+        // Cross-check each result distance against CalcDistanceById, which uses the single-id
+        // GetCodesById path and therefore bypasses the batched Query path.
         for (int64_t i = 0; i < result->GetDim(); ++i) {
             auto precise_dist =
                 index->CalcDistanceById(query, result->GetIds()[i], /*precise=*/true);
@@ -423,7 +470,8 @@ TEST_CASE("SINDIV2 ReaderIO Rerank Uses Section Offset", "[ut][SINDIV2]") {
     std::vector<int64_t> ids(num_base);
     std::iota(ids.begin(), ids.end(), 0);
 
-    auto sv_base = fixtures::GenerateSparseVectors(num_base, max_dim, term_id_limit - 1);
+    auto sv_base =
+        fixtures::GenerateSparseVectors(num_base, max_dim, term_id_limit - 1, 0.1F, 1.0F);
     auto base = Dataset::Make();
     base->NumElements(num_base)->SparseVectors(sv_base.data())->Ids(ids.data())->Owner(false);
 
@@ -450,7 +498,7 @@ TEST_CASE("SINDIV2 ReaderIO Rerank Uses Section Offset", "[ut][SINDIV2]") {
     const std::string search_param = R"({
         "sindi_v2": {
             "query_prune_ratio": 0.0,
-            "term_prune": {"ratio": 0.0},
+            "term_prune_ratio": 0.0,
             "n_candidate": 64,
             "use_term_lists_heap_insert": false
         }
@@ -500,6 +548,66 @@ TEST_CASE("SINDIV2 istream deserialize parses footer once", "[ut][SINDIV2]") {
     REQUIRE(buffer.GetFooterBytesRead() == footer_size + footer_trailer_size);
 }
 
+TEST_CASE("SINDIV2 mutable memory index supports Add after Deserialize", "[ut][SINDIV2]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    common_param.dim_ = 8;
+
+    auto parameter = std::make_shared<SINDIV2Parameter>();
+    parameter->FromJson(JsonType::Parse(R"({
+        "term_id_limit": 8,
+        "window_size": 10000,
+        "use_reorder": true,
+        "term_io": {"type": "memory_io"},
+        "rerank_io": {"type": "block_memory_io"}
+    })"));
+
+    uint32_t base_term = 1;
+    float base_value = 1.0F;
+    int64_t base_label = 10;
+    SparseVector base_vector{1, &base_term, &base_value};
+    auto base = Dataset::Make();
+    base->NumElements(1)->SparseVectors(&base_vector)->Ids(&base_label)->Owner(false);
+
+    SINDIV2 built(parameter, common_param);
+    REQUIRE(built.Build(base).empty());
+
+    std::stringstream stream;
+    IOStreamWriter writer(stream);
+    built.Serialize(writer);
+
+    SINDIV2 loaded(parameter, common_param);
+    stream.seekg(0, std::ios::beg);
+    loaded.Deserialize(stream);
+
+    uint32_t added_term = 2;
+    float added_value = 2.0F;
+    int64_t added_label = 20;
+    SparseVector added_vector{1, &added_term, &added_value};
+    auto added = Dataset::Make();
+    added->NumElements(1)->SparseVectors(&added_vector)->Ids(&added_label)->Owner(false);
+    REQUIRE(loaded.Add(added).empty());
+    REQUIRE(loaded.GetNumElements() == 2);
+
+    auto query = Dataset::Make();
+    query->NumElements(1)->SparseVectors(&added_vector)->Owner(false);
+    const auto result = loaded.KnnSearch(query,
+                                         1,
+                                         R"({
+            "sindi_v2": {
+                "query_prune_ratio": 0.0,
+                "term_prune_ratio": 0.0,
+                "n_candidate": 2,
+                "use_term_lists_heap_insert": false
+            }
+        })",
+                                         nullptr);
+    REQUIRE(result->GetDim() == 1);
+    REQUIRE(result->GetIds()[0] == added_label);
+}
+
 TEST_CASE("SINDIV2 rejects corrupted term layout", "[ut][SINDIV2]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     IndexCommonParam common_param;
@@ -508,7 +616,7 @@ TEST_CASE("SINDIV2 rejects corrupted term layout", "[ut][SINDIV2]") {
     common_param.dim_ = 16;
 
     std::vector<int64_t> ids{0, 1};
-    auto vectors = fixtures::GenerateSparseVectors(2, 16, 127);
+    auto vectors = fixtures::GenerateSparseVectors(2, 16, 127, 0.1F, 1.0F);
     auto base = Dataset::Make();
     base->NumElements(2)->SparseVectors(vectors.data())->Ids(ids.data())->Owner(false);
 
@@ -593,7 +701,7 @@ TEST_CASE("SINDIV2 memory term layout mutable and immutable roundtrip", "[ut][SI
     const std::string search_param = R"({
         "sindi_v2": {
             "query_prune_ratio": 0.0,
-            "term_prune": {"ratio": 0.0},
+            "term_prune_ratio": 0.0,
             "n_candidate": 3,
             "use_term_lists_heap_insert": false
         }
@@ -751,7 +859,7 @@ TEST_CASE("SINDIV2 empty index roundtrip", "[ut][SINDIV2]") {
     const std::string search_param = R"({
         "sindi_v2": {
             "query_prune_ratio": 0.0,
-            "term_prune": {"ratio": 0.0},
+            "term_prune_ratio": 0.0,
             "n_candidate": 1,
             "use_term_lists_heap_insert": false
         }
@@ -878,7 +986,7 @@ TEST_CASE("SINDIV2 optimized DMQ and batch distance end-to-end", "[ut][SINDIV2]"
     common_param.dim_ = 16;
 
     uint32_t vector0_ids[] = {101, 104, 109};
-    float vector0_values[] = {0.0F, 0.5F, 1.0F};
+    float vector0_values[] = {0.1F, 0.5F, 1.0F};
     uint32_t vector1_ids[] = {101, 102, 104};
     float vector1_values[] = {1.0F, 0.25F, 0.5F};
     uint32_t vector2_ids[] = {105, 109};
@@ -922,7 +1030,7 @@ TEST_CASE("SINDIV2 optimized DMQ and batch distance end-to-end", "[ut][SINDIV2]"
             const std::string search_parameters = R"({
                 "sindi_v2": {
                     "query_prune_ratio": 0.0,
-                    "term_prune": {"ratio": 0.0},
+                    "term_prune_ratio": 0.0,
                     "n_candidate": 3,
                     "use_term_lists_heap_insert": false
                 }

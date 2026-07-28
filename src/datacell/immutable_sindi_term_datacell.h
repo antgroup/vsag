@@ -17,7 +17,7 @@
 #include <optional>
 
 #include "datacell/mutable_sindi_term_datacell.h"
-#include "datacell/sindi_term_datacell.h"
+#include "datacell/sindi_search_term_datacell.h"
 
 namespace vsag {
 
@@ -36,7 +36,7 @@ struct ImmutableSINDIWindow {
 };
 
 /** Compact, read-only SINDI term index. */
-class ImmutableSindiTermDataCell : public SindiTermDataCell {
+class ImmutableSindiTermDataCell : public SindiSearchTermDataCell {
 public:
     ImmutableSindiTermDataCell(uint32_t term_id_limit,
                                uint32_t window_size,
@@ -49,13 +49,16 @@ public:
     Reserve(uint32_t window_count);
 
     void
-    AppendWindow(const MutableSINDIWindow& window);
+    AppendWindow(const MutableSINDIWindow& term_list);
 
     void
     SerializeWindows(StreamWriter& writer) const;
 
     void
-    DeserializeWindows(StreamReader& reader, uint32_t window_count);
+    DeserializeWindows(StreamReader& reader, uint32_t window_count, bool postings_sorted = false);
+
+    void
+    ResizeWindowCount(uint32_t window_count);
 
     void
     SerializeTermLayout(StreamWriter& writer, uint32_t term_dict_count) const override;
@@ -68,11 +71,13 @@ public:
         return QueryTermBuffers(allocator_);
     }
 
-    void
-    SerializeWindow(StreamWriter& writer, const ImmutableSINDIWindow& window) const;
+    static void
+    SerializeWindow(StreamWriter& writer, const ImmutableSINDIWindow& window);
 
     void
-    DeserializeWindow(StreamReader& reader, ImmutableSINDIWindow& window) const;
+    DeserializeWindow(StreamReader& reader,
+                      ImmutableSINDIWindow& window,
+                      bool postings_sorted) const;
 
     void
     QueryWindow(float* dists,

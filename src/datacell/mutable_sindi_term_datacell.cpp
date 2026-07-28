@@ -16,12 +16,11 @@
 #include "mutable_sindi_term_datacell.h"
 
 #include <algorithm>
-#include <array>
 #include <cstring>
-#include <numeric>
 
 #include "datacell/sindi_datacell_utils.h"
 #include "simd/fp16_simd.h"
+#include "utils/sparse_vector_transform.h"
 #include "utils/util_functions.h"
 #include "vsag/allocator.h"
 #include "vsag_exception.h"
@@ -30,6 +29,7 @@ namespace vsag {
 void
 MutableSindiTermDataCell::Finalize() {
     for (auto& window : windows_) {
+        this->SortByValue(window);
         this->Compact(window);
     }
 }
@@ -42,12 +42,14 @@ MutableSindiTermDataCell::SerializeWindows(StreamWriter& writer) const {
 }
 
 void
-MutableSindiTermDataCell::DeserializeWindows(StreamReader& reader, uint32_t window_count) {
+MutableSindiTermDataCell::DeserializeWindows(StreamReader& reader,
+                                             uint32_t window_count,
+                                             bool postings_sorted) {
     Vector<MutableSINDIWindow> loaded(allocator_);
     loaded.reserve(window_count);
     for (uint32_t i = 0; i < window_count; ++i) {
         loaded.emplace_back(allocator_);
-        this->DeserializeWindow(reader, loaded.back());
+        this->DeserializeWindow(reader, loaded.back(), postings_sorted);
     }
     windows_.swap(loaded);
     total_count_ = 0;
@@ -62,6 +64,15 @@ MutableSindiTermDataCell::DeserializeWindows(StreamReader& reader, uint32_t wind
         total_count_ =
             std::max(total_count_, static_cast<int64_t>(i) * window_size_ + window_count);
     }
+}
+
+void
+MutableSindiTermDataCell::ResizeWindowCount(uint32_t window_count) {
+    CHECK_ARGUMENT(window_count <= windows_.size(),
+                   "cannot grow mutable SINDI windows while trimming serialized data");
+    windows_.resize(window_count);
+    total_count_ = std::min<int64_t>(
+        total_count_, static_cast<int64_t>(window_count) * static_cast<int64_t>(window_size_));
 }
 
 void
@@ -113,9 +124,10 @@ MutableSindiTermDataCell::DeserializeTermLayout(StreamReader& reader,
     const auto term_dict = sindi_datacell_utils::DeserializeTermDictionary(reader, term_id_limit_);
     uint64_t term_payload_size = 0;
     StreamReader::ReadObj(reader, term_payload_size);
-    CHECK_ARGUMENT(reader.GetCursor() <= reader.Length() &&
-                       term_payload_size <= reader.Length() - reader.GetCursor(),
-                   "SINDI V2 term payload exceeds stream length");
+    CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+        reader.GetCursor() <= reader.Length() &&
+            term_payload_size <= reader.Length() - reader.GetCursor(),
+        "SINDI_V2 term payload exceeds stream length");
     const auto payload_start = reader.GetCursor();
     const auto value_code_size = this->GetTermValueCodeSize();
     sindi_datacell_utils::ValidateTermDict(term_dict, term_payload_size);
@@ -154,13 +166,17 @@ MutableSindiTermDataCell::DeserializeTermLayout(StreamReader& reader,
                                            buffer.ids.begin() + begin + count);
             const auto value_begin = static_cast<uint64_t>(begin) * value_code_size;
             const auto value_end = static_cast<uint64_t>(begin + count) * value_code_size;
+            const auto data_begin = static_cast<Vector<uint8_t>::difference_type>(value_begin);
+            const auto data_end = static_cast<Vector<uint8_t>::difference_type>(value_end);
             target.term_datas_[term]->insert(target.term_datas_[term]->end(),
-                                             buffer.values.begin() + value_begin,
-                                             buffer.values.begin() + value_end);
+                                             buffer.values.begin() + data_begin,
+                                             buffer.values.begin() + data_end);
             target.term_sizes_[term] = count;
+            target.dirty_terms_.push_back(term);
         }
     }
     for (uint32_t window = 0; window < window_count; ++window) {
+        this->SortByValue(loaded[window]);
         this->Compact(loaded[window]);
     }
     windows_.swap(loaded);
@@ -218,7 +234,8 @@ MutableSindiTermDataCell::QueryWindow(float* dists,
             continue;
         }
 
-        const auto term_size = computer->GetTermScanCount(window.term_sizes_[term]);
+        const auto posting_count = window.term_sizes_[term];
+        const auto term_size = computer->GetTermScanCount(posting_count);
 
         if (sparse_value_quant_type_ == SparseValueQuantizationType::SQ8) {
             computer->ScanForAccumulateSQ8(it,
@@ -403,7 +420,8 @@ MutableSindiTermDataCell::InsertHeapByTermLists(const MutableSINDIWindow& window
         }
 
         uint32_t i = 0;
-        const auto term_size = computer->GetTermScanCount(window.term_sizes_[term]);
+        const auto posting_count = window.term_sizes_[term];
+        const auto term_size = computer->GetTermScanCount(posting_count);
         auto& one_term_ids = *window.term_ids_[term];
         if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
             if (heap.size() < n_candidate) {
@@ -464,8 +482,9 @@ MutableSindiTermDataCell::InsertHeapByDists(float* dists,
 
 void
 MutableSindiTermDataCell::InsertVector(const SparseVector& sparse_base, uint32_t doc_id) {
-    CHECK_ARGUMENT(window_size_ > 0 && window_size_ <= std::numeric_limits<uint16_t>::max() + 1U,
-                   "mutable SINDI window size is invalid");
+    CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+        window_size_ > 0 && window_size_ <= std::numeric_limits<uint16_t>::max() + 1U,
+        "mutable SINDI window size is invalid");
     const auto window_id = doc_id / window_size_;
     while (windows_.size() <= window_id) {
         windows_.emplace_back(allocator_);
@@ -487,6 +506,9 @@ MutableSindiTermDataCell::InsertVector(const SparseVector& sparse_base, uint32_t
             window->term_ids_[term] = std::make_unique<Vector<uint16_t>>(allocator_);
             window->term_datas_[term] = std::make_unique<Vector<uint8_t>>(allocator_);
         }
+        if (window->term_sorted_sizes_[term] == window->term_sizes_[term]) {
+            window->dirty_terms_.push_back(term);
+        }
 
         window->term_ids_[term]->push_back(window_local_id);
 
@@ -504,69 +526,34 @@ MutableSindiTermDataCell::InsertVector(const SparseVector& sparse_base, uint32_t
 void
 MutableSindiTermDataCell::SortByValue(uint32_t window_id) {
     CHECK_ARGUMENT(window_id < windows_.size(), "mutable SINDI window id out of range");
-    auto& window = windows_[window_id];
-    const uint64_t value_code_size =
-        sparse_value_quant_type_ == SparseValueQuantizationType::SQ8
-            ? sizeof(uint8_t)
-            : (sparse_value_quant_type_ == SparseValueQuantizationType::FP16 ? sizeof(uint16_t)
-                                                                             : sizeof(float));
-    Vector<uint32_t> order(allocator_);
+    this->SortByValue(windows_[window_id]);
+}
 
-    for (uint64_t term = 0; term < window.term_sizes_.size(); ++term) {
+void
+MutableSindiTermDataCell::SortByValue(MutableSINDIWindow& window) {
+    Vector<uint32_t> order(allocator_);
+    Vector<uint16_t> sorted_ids(allocator_);
+    Vector<uint8_t> sorted_data(allocator_);
+
+    for (const auto term : window.dirty_terms_) {
         const auto term_size = window.term_sizes_[term];
-        if (term_size <= 1) {
+        if (term_size == 0) {
+            window.term_sorted_sizes_[term] = 0;
             continue;
         }
 
         auto& ids = *window.term_ids_[term];
         auto& data = *window.term_datas_[term];
-        order.resize(term_size);
-        std::iota(order.begin(), order.end(), 0);
-        auto get_value_code = [&data, value_code_size](uint32_t index) {
-            uint32_t code = 0;
-            std::memcpy(&code,
-                        data.data() + static_cast<uint64_t>(index) * value_code_size,
-                        value_code_size);
-            return code;
-        };
-        std::sort(
-            order.begin(), order.end(), [&get_value_code, &ids](uint32_t left, uint32_t right) {
-                const auto left_code = get_value_code(left);
-                const auto right_code = get_value_code(right);
-                if (left_code != right_code) {
-                    // For non-negative values, FP32/FP16 codes preserve decoded-value order, and
-                    // SQ8 decoding is monotonic in the code.
-                    return left_code > right_code;
-                }
-                return ids[left] < ids[right];
-            });
-
-        for (uint32_t start = 0; start < term_size; ++start) {
-            if (order[start] == start) {
-                continue;
-            }
-
-            const auto saved_id = ids[start];
-            std::array<uint8_t, sizeof(float)> saved_data{};
-            std::memcpy(saved_data.data(), data.data() + start * value_code_size, value_code_size);
-
-            auto current = start;
-            while (order[current] != start) {
-                const auto source = order[current];
-                ids[current] = ids[source];
-                std::memcpy(data.data() + static_cast<uint64_t>(current) * value_code_size,
-                            data.data() + static_cast<uint64_t>(source) * value_code_size,
-                            value_code_size);
-                order[current] = current;
-                current = source;
-            }
-            ids[current] = saved_id;
-            std::memcpy(data.data() + static_cast<uint64_t>(current) * value_code_size,
-                        saved_data.data(),
-                        value_code_size);
-            order[current] = current;
-        }
+        sindi_datacell_utils::SortPostingListByValue(ids.data(),
+                                                     data.data(),
+                                                     term_size,
+                                                     sparse_value_quant_type_,
+                                                     order,
+                                                     sorted_ids,
+                                                     sorted_data);
+        window.term_sorted_sizes_[term] = term_size;
     }
+    window.dirty_terms_.clear();
 }
 
 void
@@ -576,7 +563,7 @@ MutableSindiTermDataCell::ResizeTermList(InnerIdType new_term_capacity) {
 
 void
 MutableSindiTermDataCell::ResizeTermList(MutableSINDIWindow& window,
-                                         InnerIdType new_term_capacity) {
+                                         InnerIdType new_term_capacity) const {
     if (new_term_capacity <= window.term_capacity_) {
         return;
     }
@@ -592,14 +579,19 @@ MutableSindiTermDataCell::ResizeTermList(MutableSINDIWindow& window,
     Vector<std::unique_ptr<Vector<uint16_t>>> new_ids(new_capacity, allocator_);
     Vector<std::unique_ptr<Vector<uint8_t>>> new_datas(new_capacity, allocator_);
     Vector<uint32_t> new_sizes(new_capacity, 0, allocator_);
+    Vector<uint32_t> new_sorted_sizes(new_capacity, 0, allocator_);
 
     std::move(window.term_ids_.begin(), window.term_ids_.end(), new_ids.begin());
     std::move(window.term_datas_.begin(), window.term_datas_.end(), new_datas.begin());
     std::copy(window.term_sizes_.begin(), window.term_sizes_.end(), new_sizes.begin());
+    std::copy(window.term_sorted_sizes_.begin(),
+              window.term_sorted_sizes_.end(),
+              new_sorted_sizes.begin());
 
     window.term_ids_.swap(new_ids);
     window.term_datas_.swap(new_datas);
     window.term_sizes_.swap(new_sizes);
+    window.term_sorted_sizes_.swap(new_sorted_sizes);
     window.term_capacity_ = new_capacity;
 }
 
@@ -625,8 +617,10 @@ MutableSindiTermDataCell::Compact(MutableSINDIWindow& window) {
     Vector<std::unique_ptr<Vector<uint16_t>>> compact_ids(compact_term_capacity, allocator_);
     Vector<std::unique_ptr<Vector<uint8_t>>> compact_datas(compact_term_capacity, allocator_);
     Vector<uint32_t> compact_sizes(compact_term_capacity, 0, allocator_);
+    Vector<uint32_t> compact_sorted_sizes(compact_term_capacity, 0, allocator_);
     for (uint32_t i = 0; i < compact_term_capacity; ++i) {
         compact_sizes[i] = window.term_sizes_[i];
+        compact_sorted_sizes[i] = std::min(window.term_sorted_sizes_[i], window.term_sizes_[i]);
         if (window.term_sizes_[i] != 0) {
             CHECK_ARGUMENT(window.term_ids_[i] != nullptr && window.term_datas_[i] != nullptr,
                            "non-empty sparse term has null posting data");
@@ -640,6 +634,13 @@ MutableSindiTermDataCell::Compact(MutableSINDIWindow& window) {
     window.term_ids_.swap(compact_ids);
     window.term_datas_.swap(compact_datas);
     window.term_sizes_.swap(compact_sizes);
+    window.term_sorted_sizes_.swap(compact_sorted_sizes);
+    window.dirty_terms_.erase(std::remove_if(window.dirty_terms_.begin(),
+                                             window.dirty_terms_.end(),
+                                             [compact_term_capacity](uint32_t term) {
+                                                 return term >= compact_term_capacity;
+                                             }),
+                              window.dirty_terms_.end());
     window.term_capacity_ = compact_term_capacity;
 }
 
@@ -715,14 +716,14 @@ MutableSindiTermDataCell::GetMemoryUsage() const {
     auto memory = sizeof(MutableSindiTermDataCell);
     memory += windows_.capacity() * sizeof(MutableSINDIWindow);
     for (const auto& window : windows_) {
-        memory += this->GetWindowMemoryUsage(window);
+        memory += MutableSindiTermDataCell::GetWindowMemoryUsage(window);
     }
     memory += sizeof(QuantizationParams);
     return static_cast<uint64_t>(memory);
 }
 
 uint64_t
-MutableSindiTermDataCell::GetWindowMemoryUsage(const MutableSINDIWindow& window) const {
+MutableSindiTermDataCell::GetWindowMemoryUsage(const MutableSINDIWindow& window) {
     uint64_t memory = 0;
     memory += window.term_ids_.capacity() * sizeof(std::unique_ptr<Vector<uint16_t>>);
     memory += window.term_datas_.capacity() * sizeof(std::unique_ptr<Vector<uint8_t>>);
@@ -739,6 +740,8 @@ MutableSindiTermDataCell::GetWindowMemoryUsage(const MutableSINDIWindow& window)
         }
     }
     memory += window.term_sizes_.capacity() * sizeof(uint32_t);
+    memory += window.term_sorted_sizes_.capacity() * sizeof(uint32_t);
+    memory += window.dirty_terms_.capacity() * sizeof(uint32_t);
     return memory;
 }
 
@@ -837,7 +840,9 @@ MutableSindiTermDataCell::SerializeWindow(StreamWriter& writer,
 }
 
 void
-MutableSindiTermDataCell::DeserializeWindow(StreamReader& reader, MutableSINDIWindow& window) {
+MutableSindiTermDataCell::DeserializeWindow(StreamReader& reader,
+                                            MutableSINDIWindow& window,
+                                            bool postings_sorted) {
     window = MutableSINDIWindow(allocator_);
     uint32_t term_capacity;
     StreamReader::ReadObj(reader, term_capacity);
@@ -863,13 +868,22 @@ MutableSindiTermDataCell::DeserializeWindow(StreamReader& reader, MutableSINDIWi
         }
     }
     StreamReader::ReadVector(reader, window.term_sizes_);
+    window.term_sorted_sizes_.assign(window.term_capacity_, 0);
+    window.dirty_terms_.clear();
     for (uint64_t i = 0; i < window.term_ids_.size(); ++i) {
         if (i >= window.term_sizes_.size() || window.term_sizes_[i] == 0) {
             window.term_ids_[i].reset();
             window.term_datas_[i].reset();
+        } else if (postings_sorted) {
+            window.term_sorted_sizes_[i] = window.term_sizes_[i];
+        } else {
+            window.dirty_terms_.push_back(static_cast<uint32_t>(i));
         }
     }
 
+    if (not postings_sorted) {
+        this->SortByValue(window);
+    }
     this->Compact(window);
 }
 

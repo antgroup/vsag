@@ -17,9 +17,12 @@
 
 #include <limits>
 
+#include "flatten_datacell.h"
 #include "flatten_interface.h"
+#include "inner_string_params.h"
 #include "io/common/basic_io.h"
 #include "io/memory_block_io/memory_block_io.h"
+#include "quantization/sparse_quantization/sparse_quantizer.h"
 #include "vsag/dataset.h"
 
 namespace vsag {
@@ -40,7 +43,7 @@ public:
           InnerIdType id_count,
           QueryContext* ctx = nullptr) override {
         auto comp = std::static_pointer_cast<Computer<QuantTmpl>>(computer);
-        this->query(result_dists, comp, idx, id_count);
+        this->query(result_dists, comp, idx, id_count, ctx);
         if (ctx != nullptr and ctx->stats != nullptr and ctx->track_distance_evaluations and
             id_count > 0)
             ctx->stats->AddDistance(ctx->distance_phase, backend_, id_count);
@@ -117,11 +120,6 @@ public:
     [[nodiscard]] const uint8_t*
     GetCodesById(InnerIdType id, bool& need_release) const override;
 
-    BatchCodesResult
-    GetCodesByIdsBatch(const InnerIdType* ids,
-                       InnerIdType count,
-                       Allocator* allocator) const override;
-
     void
     GetSparseVectorByInnerId(InnerIdType inner_id,
                              SparseVector* data,
@@ -161,11 +159,18 @@ public:
     GetMemoryUsage() const override;
 
 private:
+    enum class QueryIOStrategy : uint8_t {
+        DIRECT_READ,
+        SORTED_DIRECT_READ,
+        MULTI_READ,
+    };
+
     inline void
     query(float* result_dists,
           const std::shared_ptr<Computer<QuantTmpl>>& computer,
           const InnerIdType* idx,
-          InnerIdType id_count);
+          InnerIdType id_count,
+          QueryContext* ctx);
 
     ComputerInterfacePtr
     factory_computer(const float* query) {
@@ -208,6 +213,7 @@ private:
 
     std::shared_ptr<Quantizer<QuantTmpl>> quantizer_{nullptr};
     std::shared_ptr<BasicIO<IOTmpl>> io_{nullptr};
+    QueryIOStrategy query_io_strategy_{QueryIOStrategy::MULTI_READ};
 
     Allocator* const allocator_{nullptr};
     DistanceEvaluationBackend backend_{DistanceEvaluationBackend::UNKNOWN};

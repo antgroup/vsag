@@ -43,7 +43,7 @@ index falls back to the allocator that was attached to its owning `Resource`.
 > **Availability.** `Index::SearchWithRequest` has a default implementation that returns an
 > *unsupported* error. Only HGraph, IVF, BruteForce and WARP implement it today
 > (`src/algorithm/{hgraph,ivf,brute_force,warp}.cpp`). For indexes that do not yet override
-> `SearchWithRequest` (SINDI, SINDI V2 and Pyramid), use the legacy `SearchParam`
+> `SearchWithRequest` (SINDI, SINDI_V2 and Pyramid), use the legacy `SearchParam`
 > path described below.
 
 ## Legacy API — `SearchParam::allocator` *(deprecated)*

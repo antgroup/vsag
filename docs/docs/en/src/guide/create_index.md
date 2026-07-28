@@ -11,7 +11,7 @@ index-specific options.
 | `hgraph` | Improved graph index with richer quantization options | [HGraph](../indexes/hgraph.md) | `examples/cpp/103_index_hgraph.cpp` |
 | `ivf` | Inverted file with quantization | [IVF](../indexes/ivf.md) | `examples/cpp/106_index_ivf.cpp` |
 | `sindi` | Sparse-vector index (e.g. BM25, SPLADE) | [SINDI](../indexes/sindi.md) | `examples/cpp/109_index_sindi.cpp` |
-| `sindi_v2` | SINDI with term-first persistence and external IO | [SINDI V2](../indexes/sindi.md) | — |
+| `sindi_v2` | Sparse-vector index (e.g. BM25, SPLADE) supporting both in-memory and disk-based I/O | [SINDI_V2](../indexes/sindi_v2.md) | See below |
 | `pyramid` | Multi-tenant / tag-partitioned graph index | [Pyramid](../indexes/pyramid.md) | `examples/cpp/107_index_pyramid.cpp` |
 | `brute_force` | Exact exhaustive search; useful as baseline | — | `examples/cpp/105_index_brute_force.cpp` |
 
@@ -66,6 +66,31 @@ std::string params = R"(
 }
 )";
 auto index = vsag::Factory::CreateIndex("hgraph", params).value();
+```
+
+### SINDI_V2 with disk-based I/O
+
+```cpp
+std::string params = R"(
+{
+    "dim": 1024,
+    "dtype": "sparse",
+    "metric_type": "ip",
+    "index_param": {
+        "term_id_limit": 30000,
+        "use_reorder": true,
+        "term_io": {
+            "type": "async_io",
+            "file_path": "/path/to/sindi_v2.terms"
+        },
+        "rerank_io": {
+            "type": "async_io",
+            "file_path": "/path/to/sindi_v2.rerank"
+        }
+    }
+}
+)";
+auto index = vsag::Factory::CreateIndex("sindi_v2", params).value();
 ```
 
 See [Index Parameters](../resources/index_parameters.md) for the full reference.

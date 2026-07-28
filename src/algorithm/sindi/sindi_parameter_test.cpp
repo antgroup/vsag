@@ -125,10 +125,7 @@ TEST_CASE("SINDI Index Parameters Test", "[ut][SINDIParameter]") {
         "sindi": {
             "query_prune_ratio": 0.2,
             "n_candidate": 20,
-            "term_prune": {
-                "ratio": 0.1,
-                "threshold": 0
-            },
+            "term_prune_ratio": 0.1,
             "use_term_lists_heap_insert": false
         }
     })";
@@ -172,43 +169,64 @@ TEST_CASE("SINDI Term Prune Parameters", "[ut][SINDIParameter]") {
         SINDISearchParameter param;
         param.FromJson(JsonType::Parse(R"({"sindi": {}})"));
         REQUIRE(param.term_prune_ratio == DEFAULT_TERM_PRUNE_RATIO);
-        REQUIRE(param.term_prune_threshold == DEFAULT_TERM_PRUNE_THRESHOLD);
+        REQUIRE(param.term_retain_threshold == DEFAULT_TERM_RETAIN_THRESHOLD);
     }
 
     SECTION("accepts ratio without threshold") {
         SINDISearchParameter param;
-        param.FromJson(JsonType::Parse(R"({"sindi": {"term_prune": {"ratio": 0.2}}})"));
-        REQUIRE(param.term_prune_ratio == 0.2F);
-        REQUIRE(param.term_prune_threshold == DEFAULT_TERM_PRUNE_THRESHOLD);
+        param.FromJson(
+            JsonType::Parse(R"({"sindi": {"query_prune_ratio": 0.99, "term_prune_ratio": 0.99}})"));
+        REQUIRE(param.query_prune_ratio == 0.99F);
+        REQUIRE(param.term_prune_ratio == 0.99F);
+        REQUIRE(param.term_retain_threshold == DEFAULT_TERM_RETAIN_THRESHOLD);
     }
 
     SECTION("accepts threshold without ratio") {
         SINDISearchParameter param;
-        param.FromJson(JsonType::Parse(R"({"sindi": {"term_prune": {"threshold": 0}}})"));
+        param.FromJson(JsonType::Parse(R"({"sindi": {"term_retain_threshold": 0}})"));
         REQUIRE(param.term_prune_ratio == DEFAULT_TERM_PRUNE_RATIO);
-        REQUIRE(param.term_prune_threshold == 0);
+        REQUIRE(param.term_retain_threshold == 0);
     }
 
     SECTION("accepts uint64 max threshold") {
         SINDISearchParameter param;
         param.FromJson(
-            JsonType::Parse(R"({"sindi": {"term_prune": {"threshold": 18446744073709551615}}})"));
-        REQUIRE(param.term_prune_threshold == std::numeric_limits<uint64_t>::max());
+            JsonType::Parse(R"({"sindi": {"term_retain_threshold": 18446744073709551615}})"));
+        REQUIRE(param.term_retain_threshold == std::numeric_limits<uint64_t>::max());
+    }
+
+    SECTION("does not retain the old threshold key") {
+        SINDISearchParameter param;
+        param.FromJson(JsonType::Parse(R"({"sindi": {"term_prune_threshold": 10}})"));
+        REQUIRE(param.term_retain_threshold == DEFAULT_TERM_RETAIN_THRESHOLD);
+        REQUIRE_FALSE(param.ToJson()[INDEX_SINDI].Contains("term_prune_threshold"));
     }
 
     SECTION("rejects invalid values") {
         const std::vector<std::string> invalid_params = {
-            R"({"sindi": {"term_prune": 0.1}})",
-            R"({"sindi": {"term_prune": {"ratio": -0.1}}})",
-            R"({"sindi": {"term_prune": {"ratio": 0.91}}})",
-            R"({"sindi": {"term_prune": {"threshold": -1}}})",
-            R"({"sindi": {"term_prune": {"threshold": 1.5}}})",
-            R"({"sindi": {"term_prune": {"threshold": 18446744073709551616}}})",
+            R"({"sindi": {"term_prune_ratio": -0.1}})",
+            R"({"sindi": {"term_prune_ratio": 1.0}})",
+            R"({"sindi": {"query_prune_ratio": -0.1}})",
+            R"({"sindi": {"query_prune_ratio": 1.0}})",
+            R"({"sindi": {"term_retain_threshold": -1}})",
+            R"({"sindi": {"term_retain_threshold": 1.5}})",
+            R"({"sindi": {"term_retain_threshold": 18446744073709551616}})",
         };
         for (const auto& invalid_param : invalid_params) {
             SINDISearchParameter param;
             REQUIRE_THROWS(param.FromJson(JsonType::Parse(invalid_param)));
         }
+    }
+}
+
+TEST_CASE("SINDI Doc Prune Ratio Boundaries", "[ut][SINDIParameter]") {
+    SINDIParameter param;
+    REQUIRE_NOTHROW(param.FromJson(JsonType::Parse(R"({"doc_prune_ratio": 0.99})")));
+    REQUIRE(param.doc_prune_ratio == 0.99F);
+
+    for (const auto& invalid_param :
+         {R"({"doc_prune_ratio": -0.1})", R"({"doc_prune_ratio": 1.0})"}) {
+        REQUIRE_THROWS(param.FromJson(JsonType::Parse(invalid_param)));
     }
 }
 

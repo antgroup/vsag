@@ -24,7 +24,6 @@
 #include <sstream>
 #include <vector>
 
-#include "algorithm/sparse_distance.h"
 #include "datacell/sparse_dmq_datacell.h"
 #include "datacell/sparse_vector_datacell_parameter.h"
 #include "impl/filter/inner_id_wrapper_filter.h"
@@ -33,7 +32,6 @@
 #include "index_feature_list.h"
 #include "inner_string_params.h"
 #include "io/reader_io/reader_io_parameter.h"
-#include "quantization/sparse_quantization/sparse_quantizer.h"
 #include "quantization/sparse_quantization/sparse_quantizer_parameter.h"
 #include "storage/empty_index_binary_set.h"
 #include "storage/serialization.h"
@@ -108,57 +106,6 @@ private:
     uint64_t size_{0};
     std::mutex mutex_;
 };
-
-float
-compute_distance_from_codes(const uint8_t* codes,
-                            uint64_t codes_size,
-                            const Vector<uint32_t>& sorted_ids,
-                            const Vector<float>& sorted_vals) {
-    if (codes_size < sizeof(uint32_t)) {
-        throw VsagException(ErrorType::INVALID_ARGUMENT,
-                            "invalid SINDIV2 rerank code: missing length prefix");
-    }
-    auto len = *reinterpret_cast<const uint32_t*>(codes);
-    const auto expected_size = sizeof(uint32_t) + static_cast<uint64_t>(len) * sizeof(BufferEntry);
-    if (expected_size > codes_size) {
-        throw VsagException(
-            ErrorType::INVALID_ARGUMENT,
-            fmt::format(
-                "invalid SINDIV2 rerank code: length {} exceeds blob size {}", len, codes_size));
-    }
-    const auto* entries = reinterpret_cast<const BufferEntry*>(codes + sizeof(uint32_t));
-    float sum = 0.0F;
-    uint32_t i = 0;
-    uint32_t j = 0;
-    while (i < sorted_ids.size() && j < len) {
-        if (sorted_ids[i] < entries[j].id) {
-            i++;
-        } else if (sorted_ids[i] > entries[j].id) {
-            j++;
-        } else {
-            sum += sorted_vals[i] * entries[j].val;
-            i++;
-            j++;
-        }
-    }
-    return 1 - sum;
-}
-
-float
-cal_distance_by_id_unsafe(const FlattenInterfacePtr& flat,
-                          const Vector<uint32_t>& sorted_ids,
-                          const Vector<float>& sorted_vals,
-                          uint32_t inner_id) {
-    bool need_release = false;
-    const auto* codes = flat->GetCodesById(inner_id, need_release);
-    const auto len = *reinterpret_cast<const uint32_t*>(codes);
-    const auto codes_size = sizeof(uint32_t) + static_cast<uint64_t>(len) * sizeof(BufferEntry);
-    const auto distance = compute_distance_from_codes(codes, codes_size, sorted_ids, sorted_vals);
-    if (need_release) {
-        flat->Release(codes);
-    }
-    return distance;
-}
 
 DatasetPtr
 collect_results(const DistHeapPtr& results, Allocator* allocator) {
@@ -262,7 +209,7 @@ make_top_terms_signature_key(const SparseVector& vector, uint32_t top_terms) {
     return {signature.begin(), signature.end()};
 }
 
-struct RerankLayoutRecord {
+struct rerank_layout_record {
     const SparseVector* vector{nullptr};
     InnerIdType inner_id{0};
     std::vector<uint64_t> signature;
@@ -270,7 +217,7 @@ struct RerankLayoutRecord {
 
 void
 write_rerank_flat_with_layout(const FlattenInterfacePtr& rerank_flat,
-                              std::vector<RerankLayoutRecord>& records,
+                              std::vector<rerank_layout_record>& records,
                               uint32_t rerank_layout) {
     if (rerank_layout > 0) {
         for (auto& record : records) {
@@ -396,7 +343,7 @@ SINDIV2::sort_and_prune_sparse_vector_for_build(const SparseVector& input,
         return lhs.first < rhs.first;
     });
 
-    uint32_t retained_count = static_cast<uint32_t>(sorted_terms.size());
+    auto retained_count = static_cast<uint32_t>(sorted_terms.size());
     if (sorted_terms.size() > 1 && doc_retain_ratio_ != 1.0F) {
         float total_mass = 0.0F;
         for (const auto& [_, value] : sorted_terms) {
@@ -469,10 +416,6 @@ SINDIV2::Add(const DatasetPtr& base) {
                             "SINDIV2 DMQ rerank does not support incremental Add");
     }
 
-    if (is_deserialized_) {
-        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                            "SINDIV2 does not support Add after Deserialize");
-    }
     const auto mutable_term_datacell = this->get_mutable_term_datacell();
 
     std::vector<int64_t> failed_ids;
@@ -499,7 +442,7 @@ SINDIV2::Add(const DatasetPtr& base) {
     if (use_reorder_ && rerank_type_ == SPARSE_RERANK_TYPE_DMQ8) {
         dmq_rerank_vectors.reserve(data_num);
     }
-    std::vector<RerankLayoutRecord> rerank_layout_records;
+    std::vector<rerank_layout_record> rerank_layout_records;
     if (use_reorder_ && rerank_layout_ > 0) {
         rerank_layout_records.reserve(data_num);
     }
@@ -590,7 +533,6 @@ SINDIV2::Build(const DatasetPtr& base) {
 std::vector<int64_t>
 SINDIV2::build_immutable(const DatasetPtr& base) {
     std::scoped_lock wlock(this->global_mutex_);
-    CHECK_ARGUMENT(not is_deserialized_, "SINDIV2 does not support Build after Deserialize");
     const auto data_num = base->GetNumElements();
     CHECK_ARGUMENT(data_num > 0, "data_num is zero when build immutable SINDIV2");
     const auto* sparse_vectors = base->GetSparseVectors();
@@ -626,7 +568,7 @@ SINDIV2::build_immutable(const DatasetPtr& base) {
     if (use_reorder_ && rerank_type_ == SPARSE_RERANK_TYPE_DMQ8) {
         dmq_rerank_vectors.reserve(data_num);
     }
-    std::vector<RerankLayoutRecord> rerank_layout_records;
+    std::vector<rerank_layout_record> rerank_layout_records;
     if (use_reorder_ && rerank_layout_ > 0) {
         rerank_layout_records.reserve(data_num);
     }
@@ -838,9 +780,13 @@ SINDIV2::search_impl(const SparseTermComputerPtr& computer,
     // rerank
     if (use_reorder_) {
         float cur_heap_top = std::numeric_limits<float>::max();
-        auto candidate_size = heap.size();
+        const uint64_t candidate_size = heap.size();
         auto high_precise_heap = std::make_shared<StandardHeap<true, false>>(allocator, -1);
         const auto& rerank_query = original_query ? *original_query : computer->raw_query_;
+
+        if (candidate_size == 0) {
+            return collect_results(high_precise_heap, allocator);
+        }
 
         const auto insert_result = [&](InnerIdType inner_id, float high_precise_distance) {
             auto label = label_table_->GetLabelById(inner_id);
@@ -866,75 +812,24 @@ SINDIV2::search_impl(const SparseTermComputerPtr& computer,
             }
         };
 
-        if (rerank_type_ == SPARSE_RERANK_TYPE_DMQ8) {
-            auto rerank_computer = rerank_flat_->FactoryComputer(&rerank_query);
-            for (uint64_t index = 0; index < candidate_size; ++index) {
-                const auto inner_id = heap.top().second;
-                float high_precise_distance = 0.0F;
-                rerank_flat_->Query(&high_precise_distance, rerank_computer, &inner_id, 1);
-                insert_result(inner_id, high_precise_distance);
-                heap.pop();
-            }
-            return collect_results(high_precise_heap, allocator);
+        Vector<InnerIdType> candidate_ids(candidate_size, allocator);
+        for (uint64_t i = 0; i < candidate_size; ++i) {
+            candidate_ids[i] = heap.top().second;
+            heap.pop();
         }
 
-        auto [sorted_ids, sorted_vals] = sort_sparse_vector(rerank_query, allocator);
-        const auto rerank_io_type = param_->rerank_io_parameter->GetTypeName();
-        const bool memory_rerank = rerank_io_type == IO_TYPE_VALUE_MEMORY_IO ||
-                                   rerank_io_type == IO_TYPE_VALUE_BLOCK_MEMORY_IO;
-        if (rerank_io_type == IO_TYPE_VALUE_MMAP_IO) {
-            struct MMapCandidate {
-                InnerIdType inner_id{0};
-                const uint8_t* codes{nullptr};
-            };
-            Vector<MMapCandidate> candidates(allocator);
-            candidates.reserve(candidate_size);
-            for (uint64_t i = 0; i < candidate_size; ++i) {
-                bool need_release = false;
-                const auto inner_id = heap.top().second;
-                const auto* codes = rerank_flat_->GetCodesById(inner_id, need_release);
-                CHECK_ARGUMENT(codes != nullptr && not need_release,
-                               "failed to access mmap SINDI V2 rerank payload");
-                candidates.push_back({inner_id, codes});
-                heap.pop();
-            }
-            std::sort(candidates.begin(), candidates.end(), [](const auto& lhs, const auto& rhs) {
-                return reinterpret_cast<uintptr_t>(lhs.codes) <
-                       reinterpret_cast<uintptr_t>(rhs.codes);
-            });
-            for (const auto& candidate : candidates) {
-                const auto len = *reinterpret_cast<const uint32_t*>(candidate.codes);
-                const auto codes_size =
-                    sizeof(uint32_t) + static_cast<uint64_t>(len) * sizeof(BufferEntry);
-                const auto high_precise_distance = compute_distance_from_codes(
-                    candidate.codes, codes_size, sorted_ids, sorted_vals);
-                insert_result(candidate.inner_id, high_precise_distance);
-            }
-        } else if (memory_rerank) {
-            for (uint64_t i = 0; i < candidate_size; ++i) {
-                const auto inner_id = heap.top().second;
-                const auto high_precise_distance =
-                    cal_distance_by_id_unsafe(rerank_flat_, sorted_ids, sorted_vals, inner_id);
-                insert_result(inner_id, high_precise_distance);
-                heap.pop();
-            }
-        } else {
-            // File-backed asynchronous IO benefits from sorting and merging candidate reads.
-            Vector<InnerIdType> cand_ids(allocator);
-            cand_ids.resize(candidate_size);
-            for (int64_t i = static_cast<int64_t>(candidate_size) - 1; i >= 0; --i) {
-                cand_ids[i] = heap.top().second;
-                heap.pop();
-            }
-            std::sort(cand_ids.begin(), cand_ids.end());
-            auto batch = rerank_flat_->GetCodesByIdsBatch(
-                cand_ids.data(), static_cast<InnerIdType>(candidate_size), allocator);
-            for (uint64_t i = 0; i < candidate_size; ++i) {
-                const auto* codes = batch.buffer.data() + batch.in_buffer_offsets[i];
-                const auto high_precise_distance =
-                    compute_distance_from_codes(codes, batch.sizes[i], sorted_ids, sorted_vals);
-                insert_result(cand_ids[i], high_precise_distance);
-            }
+        auto rerank_dists = std::move(dists);
+        rerank_dists.resize(candidate_size);
+        auto rerank_computer = rerank_flat_->FactoryComputer(&rerank_query);
+        QueryContext rerank_context;
+        rerank_context.alloc = allocator;
+        rerank_flat_->Query(rerank_dists.data(),
+                            rerank_computer,
+                            candidate_ids.data(),
+                            static_cast<InnerIdType>(candidate_size),
+                            &rerank_context);
+        for (uint64_t i = 0; i < candidate_size; ++i) {
+            insert_result(candidate_ids[i], rerank_dists[i]);
         }
 
         return collect_results(high_precise_heap, allocator);
@@ -1050,7 +945,15 @@ SINDIV2::serialize_term_layout(StreamWriter& writer) const {
 
 void
 SINDIV2::Serialize(StreamWriter& writer) const {
-    std::shared_lock rlock(this->global_mutex_);
+    std::unique_lock lock(this->global_mutex_);
+
+    if (term_datacell_ != nullptr &&
+        std::dynamic_pointer_cast<MutableSindiTermDataCell>(term_datacell_) != nullptr) {
+        const auto mutable_datacell = this->get_mutable_term_datacell();
+        for (uint32_t window = 0; window < mutable_datacell->GetWindowCount(); ++window) {
+            mutable_datacell->SortByValue(window);
+        }
+    }
 
     StreamWriter::WriteObj(writer, cur_element_count_);
     if (sparse_value_quant_type_ == SparseValueQuantizationType::SQ8) {
@@ -1138,17 +1041,17 @@ SINDIV2::Deserialize(StreamReader& reader) {
 
     const auto serialized_base_offset = reader.GetCursor();
     auto footer = Footer::Parse(reader);
-    CHECK_ARGUMENT(footer != nullptr, "SINDI V2 footer is required");
+    CHECK_ARGUMENT(footer != nullptr, "SINDI_V2 footer is required");
     auto metadata = footer->GetMetadata();
     if (metadata->EmptyIndex()) {
         return;
     }
     JsonType jsonify_basic_info = metadata->Get("basic_info");
     CHECK_ARGUMENT(jsonify_basic_info.Contains(SINDI_V2_TERM_LAYOUT_VERSION_KEY),
-                   "SINDI V2 term layout version is missing");
+                   "SINDI_V2 term layout version is missing");
     CHECK_ARGUMENT(jsonify_basic_info[SINDI_V2_TERM_LAYOUT_VERSION_KEY].GetInt() ==
                        SINDI_V2_TERM_LAYOUT_VERSION,
-                   "unsupported SINDI V2 term layout version");
+                   "unsupported SINDI_V2 term layout version");
     CHECK_ARGUMENT(jsonify_basic_info.Contains(SINDI_V2_TERM_LAYOUT_KIND_KEY) &&
                        jsonify_basic_info[SINDI_V2_TERM_LAYOUT_KIND_KEY].GetString() ==
                            SINDI_V2_TERM_LAYOUT_KIND,
@@ -1157,7 +1060,7 @@ SINDIV2::Deserialize(StreamReader& reader) {
     SINDIV2ParameterPtr index_param = std::make_shared<SINDIV2Parameter>();
     index_param->FromString(param);
     if (not this->create_param_ptr_->CheckCompatibility(index_param)) {
-        auto message = fmt::format("SINDI V2 index parameter not match, current: {}, new: {}",
+        auto message = fmt::format("SINDI_V2 index parameter not match, current: {}, new: {}",
                                    this->create_param_ptr_->ToString(),
                                    index_param->ToString());
         logger::error(message);
@@ -1223,7 +1126,6 @@ SINDIV2::Deserialize(StreamReader& reader) {
                        "SINDIV2 remapped term dict count does not match mapper size");
     }
 
-    is_deserialized_ = true;
     this->cal_memory_usage();
 }
 
@@ -1352,7 +1254,9 @@ SINDIV2::CalDistanceById(const DatasetPtr& query,
                          int64_t count,
                          bool calculate_precise_distance,
                          int64_t topk) const {
-    CHECK_ARGUMENT(topk == -1 || topk > 0, "CalDistanceById topk must be -1 or positive");
+    CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+        topk == -1 || topk > 0,
+        "CalDistanceById topk must be -1 or positive");
     CHECK_ARGUMENT(query != nullptr, "CalDistanceById query must not be null");
     CHECK_ARGUMENT(count >= 0, "CalDistanceById count must be non-negative");
     if (count > 0) {
@@ -1365,8 +1269,9 @@ SINDIV2::CalDistanceById(const DatasetPtr& query,
     const auto count_size = static_cast<uint64_t>(count);
     const auto num_queries_size = static_cast<uint64_t>(num_queries);
     const auto max_distance_count = std::numeric_limits<uint64_t>::max() / sizeof(float);
-    CHECK_ARGUMENT(count_size == 0 || num_queries_size <= max_distance_count / count_size,
-                   "CalDistanceById distance buffer size overflows");
+    CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+        count_size == 0 || num_queries_size <= max_distance_count / count_size,
+        "CalDistanceById distance buffer size overflows");
 
     auto result = Dataset::Make();
     result->NumElements(num_queries)->Dim(count)->Owner(true, allocator_);
@@ -1528,7 +1433,7 @@ SINDIV2::remap_sparse_vector_for_build(const SparseVector& input, Vector<uint32_
     }
     std::sort(tmp_ids.begin(), tmp_ids.end());
     tmp_ids.erase(std::unique(tmp_ids.begin(), tmp_ids.end()), tmp_ids.end());
-    CHECK_ARGUMENT(
+    CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
         term_id_mapper_->Size() <= term_id_limit_ &&
             tmp_ids.size() <= static_cast<uint64_t>(term_id_limit_ - term_id_mapper_->Size()),
         fmt::format("term id mapper is full: mapper size ({}) + new terms ({}) exceeds "

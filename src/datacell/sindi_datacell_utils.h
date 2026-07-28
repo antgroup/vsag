@@ -17,7 +17,7 @@
 #include <vector>
 
 #include "algorithm/sindi/sindi_parameter.h"
-#include "datacell/sindi_term_datacell.h"
+#include "datacell/sindi_search_term_datacell.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 
@@ -54,6 +54,15 @@ EncodeValue(float value,
 DecodeValue(const uint8_t* source,
             SparseValueQuantizationType type,
             const QuantizationParams* quantization_params);
+
+void
+SortPostingListByValue(uint16_t* ids,
+                       uint8_t* data,
+                       uint32_t posting_count,
+                       SparseValueQuantizationType quantization_type,
+                       Vector<uint32_t>& order,
+                       Vector<uint16_t>& sorted_ids,
+                       Vector<uint8_t>& sorted_data);
 
 [[nodiscard]] uint64_t
 GetIdsPadding(uint64_t posting_count);

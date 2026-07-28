@@ -61,7 +61,7 @@ struct SmallDmqDataset {
 
     std::array<int64_t, 4> labels{10, 40, 20, 30};
     std::array<uint32_t, 3> ids0{};
-    std::array<float, 3> vals0{0.0F, 0.5F, 1.0F};
+    std::array<float, 3> vals0{0.1F, 0.5F, 1.0F};
     std::array<uint32_t, 3> ids1{};
     std::array<float, 3> vals1{1.0F, 0.25F, 0.5F};
     std::array<uint32_t, 2> ids2{};
@@ -92,7 +92,7 @@ CreateDmqParameter(bool immutable, bool remap_term_ids) {
 constexpr auto kDmqSearchParameters = R"({
     "sindi": {
         "query_prune_ratio": 0.0,
-        "term_prune": {"ratio": 0.0},
+        "term_prune_ratio": 0.0,
         "n_candidate": 3,
         "use_term_lists_heap_insert": false
     }
@@ -117,7 +117,7 @@ TEST_CASE("SINDI DMQ Rerank DataCell Test", "[ut][SINDI]") {
 
     std::vector<int64_t> ids = {10, 20, 30};
     uint32_t ids0[] = {1, 4, 9};
-    float vals0[] = {0.0F, 0.5F, 1.0F};
+    float vals0[] = {0.1F, 0.5F, 1.0F};
     uint32_t ids1[] = {1, 2, 4};
     float vals1[] = {1.0F, 0.25F, 0.5F};
     uint32_t ids2[] = {5, 9};
@@ -165,7 +165,7 @@ TEST_CASE("SINDI DMQ Rerank DataCell Test", "[ut][SINDI]") {
     std::string search_param_str = R"({
         "sindi": {
             "query_prune_ratio": 0.0,
-            "term_prune": {"ratio": 0.0},
+            "term_prune_ratio": 0.0,
             "n_candidate": 3,
             "use_term_lists_heap_insert": false
         }
@@ -202,7 +202,7 @@ TEST_CASE("SINDI DMQ Rerank Large Term ID Fallback Test", "[ut][SINDI]") {
 
     std::vector<int64_t> ids = {10, 20};
     uint32_t ids0[] = {1'100'001, 1'100'009};
-    float vals0[] = {0.0F, 1.0F};
+    float vals0[] = {0.1F, 1.0F};
     uint32_t ids1[] = {1'100'001, 1'100'010};
     float vals1[] = {0.5F, 0.25F};
     SparseVector sparse_vectors[2];
@@ -250,7 +250,7 @@ TEST_CASE("SINDI DMQ Rerank with Quantized Posting Test", "[ut][SINDI]") {
 
     std::vector<int64_t> ids = {10, 20, 30};
     uint32_t ids0[] = {1, 4, 9};
-    float vals0[] = {0.0F, 0.5F, 1.0F};
+    float vals0[] = {0.1F, 0.5F, 1.0F};
     uint32_t ids1[] = {1, 2, 4};
     float vals1[] = {1.0F, 0.25F, 0.5F};
     uint32_t ids2[] = {5, 9};
@@ -292,7 +292,7 @@ TEST_CASE("SINDI DMQ Rerank with Quantized Posting Test", "[ut][SINDI]") {
     std::string search_param_str = R"({
         "sindi": {
             "query_prune_ratio": 0.0,
-            "term_prune": {"ratio": 0.0},
+            "term_prune_ratio": 0.0,
             "n_candidate": 3,
             "use_term_lists_heap_insert": false
         }

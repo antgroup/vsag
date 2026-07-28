@@ -96,15 +96,15 @@ struct SindiQueryContext {
 };
 
 /**
- * Search and term-first serialization contract shared by mutable, immutable and disk SINDI term
- * data cells.
+ * Search contract shared by mutable, immutable, and disk SINDI term DataCells.
  *
- * Build and window-first serialization deliberately live on concrete data cells.
- * QueryTermBuffers is empty for memory data cells and query-scoped for disk data cells.
+ * This interface intentionally exposes only operations required by the search path and the shared
+ * term-first serialization path. Build and window-first serialization remain on concrete
+ * DataCells. QueryTermBuffers is empty for memory DataCells and query-scoped for disk DataCells.
  */
-class SindiTermDataCell {
+class SindiSearchTermDataCell {
 public:
-    virtual ~SindiTermDataCell() = default;
+    virtual ~SindiSearchTermDataCell() = default;
 
     virtual QueryTermBuffers
     LoadQueryTermBuffers(const Vector<uint32_t>& query_term_ids) const = 0;
@@ -159,6 +159,6 @@ public:
     SerializeTermLayout(StreamWriter& writer, uint32_t term_dict_count) const = 0;
 };
 
-DEFINE_POINTER(SindiTermDataCell);
+DEFINE_POINTER(SindiSearchTermDataCell);
 
 }  // namespace vsag
