@@ -100,10 +100,11 @@ TEST_CASE("SparseDmqDataCell implements FlattenInterface", "[ut][SparseDmqDataCe
         IOStreamWriter writer(stream);
         cell->Serialize(writer);
         auto serialized = stream.str();
-        constexpr uint32_t old_version = 5;
+        constexpr uint32_t unsupported_version = 2;
         constexpr uint64_t serialized_version_offset = sizeof(uint32_t);
-        std::memcpy(
-            serialized.data() + serialized_version_offset, &old_version, sizeof(old_version));
+        std::memcpy(serialized.data() + serialized_version_offset,
+                    &unsupported_version,
+                    sizeof(unsupported_version));
 
         std::stringstream old_stream(serialized);
         IOStreamReader reader(old_stream);

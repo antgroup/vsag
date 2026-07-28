@@ -44,7 +44,7 @@ public:
             {
                 "n_candidate": 20,
                 "query_prune_ratio": 0.0,
-                "term_prune_ratio": 0.0
+                "term_prune": {"ratio": 0.0}
             }
         })";
 
@@ -87,7 +87,7 @@ public:
             {{
                 "n_candidate": 20,
                 "query_prune_ratio": {},
-                "term_prune_ratio": 0.0
+                "term_prune": {{"ratio": 0.0}}
             }}
         }})";
         return fmt::format(search_param_template, query_prune_ratio);
@@ -116,9 +116,6 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
     SECTION("invalid doc_prune_ratio") {
         fixtures::SINDIParam param;
         param.doc_prune_ratio = 0.99;
-        REQUIRE_NOTHROW(
-            TestFactory("sindi", fixtures::SINDITestIndex::GenerateBuildParameter(param), true));
-        param.doc_prune_ratio = 1.0;
         REQUIRE_THROWS(
             TestFactory("sindi", fixtures::SINDITestIndex::GenerateBuildParameter(param), false));
         param.doc_prune_ratio = -0.1;
@@ -147,15 +144,15 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
             "sindi": {
                 "n_candidate": -1,
                 "query_prune_ratio": 0.0,
-                "term_prune_ratio": 0.0
+                "term_prune": {"ratio": 0.0}
             }
         })";
         TestKnnSearch(index, dataset, invalid_search_param, 0.99, false);
         invalid_search_param = R"({
             "sindi":{
                 "n_candidate": 10,
-                "query_prune_ratio": 1.0,
-                "term_prune_ratio": 0.0
+                "query_prune_ratio": 1.2,
+                "term_prune": {"ratio": 0.0}
             }
         })";
         TestKnnSearch(index, dataset, invalid_search_param, 0.99, false);
@@ -163,7 +160,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
             "sindi":{
                 "n_candidate": 10,
                 "query_prune_ratio": 0.0,
-                "term_prune_ratio": -0.1
+                "term_prune": {"ratio": -0.1}
             }
         })";
         TestKnnSearch(index, dataset, invalid_search_param, 0.99, false);

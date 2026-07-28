@@ -276,9 +276,7 @@ ImmutableSindiTermDataCell::QueryWindow(float* dists,
                 3);
         }
         const auto begin = window.offsets[local_term];
-        const auto count =
-            static_cast<uint32_t>(static_cast<float>(window.offsets[local_term + 1] - begin) *
-                                  computer->term_retain_ratio_);
+        const auto count = computer->GetTermScanCount(window.offsets[local_term + 1] - begin);
         const auto* ids = window.id_payloads.data() + begin;
         const auto* values =
             window.value_payloads.data() + static_cast<uint64_t>(begin) * value_code_size_;
@@ -310,9 +308,8 @@ ImmutableSindiTermDataCell::insert_heap_by_terms(float* dists,
         mode == InnerSearchMode::RANGE_SEARCH ? radius - 1 : std::numeric_limits<float>::max();
     for (const auto& mapped_term : mapped_terms) {
         const auto begin = window.offsets[mapped_term.first];
-        const auto count = static_cast<uint32_t>(
-            static_cast<float>(window.offsets[mapped_term.first + 1] - begin) *
-            computer->term_retain_ratio_);
+        const auto count =
+            computer->GetTermScanCount(window.offsets[mapped_term.first + 1] - begin);
         const auto* ids = window.id_payloads.data() + begin;
         uint32_t pos = 0;
         if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
@@ -430,7 +427,7 @@ ImmutableSindiTermDataCell::CalcDistanceByInnerId(
         }
         const auto begin = window.offsets[local_term.value()];
         const auto end = window.offsets[local_term.value() + 1];
-        const auto found = std::lower_bound(
+        const auto found = std::find(
             window.id_payloads.begin() + begin, window.id_payloads.begin() + end, local_id);
         if (found == window.id_payloads.begin() + end || *found != local_id) {
             continue;
@@ -460,7 +457,7 @@ ImmutableSindiTermDataCell::GetSparseVector(uint32_t inner_id,
     for (uint32_t local_term = 0; local_term < term_count; ++local_term) {
         const auto begin = window.offsets[local_term];
         const auto end = window.offsets[local_term + 1];
-        const auto found = std::lower_bound(
+        const auto found = std::find(
             window.id_payloads.begin() + begin, window.id_payloads.begin() + end, local_id);
         if (found == window.id_payloads.begin() + end || *found != local_id) {
             continue;

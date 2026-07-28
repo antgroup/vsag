@@ -170,7 +170,10 @@ Pyramid 构建参数同样放在 `index_param` 下：
     "sindi_v2": {
         "n_candidate": 100,
         "query_prune_ratio": 0.0,
-        "term_prune_ratio": 0.0,
+        "term_prune": {
+            "ratio": 0.0,
+            "threshold": 0
+        },
         "use_term_lists_heap_insert": true
     }
 }

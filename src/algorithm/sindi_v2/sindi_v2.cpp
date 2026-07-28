@@ -50,8 +50,6 @@ constexpr const char* SINDI_V2_TERM_LAYOUT_VERSION_KEY = "sindi_v2_term_layout_v
 constexpr int64_t SINDI_V2_TERM_LAYOUT_VERSION = 1;
 constexpr const char* SINDI_V2_TERM_LAYOUT_KIND_KEY = "sindi_v2_term_layout_kind";
 constexpr const char* SINDI_V2_TERM_LAYOUT_KIND = "term";
-constexpr const char* SINDI_V2_RERANK_LAYOUT_NONE = "none";
-constexpr const char* SINDI_V2_RERANK_LAYOUT_TOP_TERMS_SIGNATURE = "top_terms_signature";
 
 class BinaryReader : public Reader {
 public:
@@ -273,14 +271,10 @@ struct RerankLayoutRecord {
 void
 write_rerank_flat_with_layout(const FlattenInterfacePtr& rerank_flat,
                               std::vector<RerankLayoutRecord>& records,
-                              const std::string& rerank_layout,
-                              uint32_t rerank_layout_top_terms) {
-    if (rerank_layout != SINDI_V2_RERANK_LAYOUT_NONE) {
+                              uint32_t rerank_layout) {
+    if (rerank_layout > 0) {
         for (auto& record : records) {
-            if (rerank_layout == SINDI_V2_RERANK_LAYOUT_TOP_TERMS_SIGNATURE) {
-                record.signature =
-                    make_top_terms_signature_key(*record.vector, rerank_layout_top_terms);
-            }
+            record.signature = make_top_terms_signature_key(*record.vector, rerank_layout);
         }
         std::sort(records.begin(), records.end(), [](const auto& lhs, const auto& rhs) {
             if (lhs.signature != rhs.signature) {
@@ -319,7 +313,6 @@ SINDIV2::SINDIV2(const SINDIV2ParameterPtr& param, const IndexCommonParam& commo
       remap_term_ids_(param->remap_term_ids),
       immutable_enabled_(param->immutable),
       rerank_layout_(param->rerank_layout),
-      rerank_layout_top_terms_(param->rerank_layout_top_terms),
       param_(param),
       common_param_(common_param) {
     CHECK_ARGUMENT(window_size_ > 0, "window_size must be in (0, 65536]");
@@ -500,12 +493,14 @@ SINDIV2::Add(const DatasetPtr& base) {
     Vector<uint32_t> pruned_ids(allocator_);
     Vector<float> pruned_vals(allocator_);
     Vector<uint32_t> remapped_ids(allocator_);
+    const auto first_affected_window = cur_element_count_ / window_size_;
+    int64_t last_affected_window = -1;
     std::vector<SparseVector> dmq_rerank_vectors;
     if (use_reorder_ && rerank_type_ == SPARSE_RERANK_TYPE_DMQ8) {
         dmq_rerank_vectors.reserve(data_num);
     }
     std::vector<RerankLayoutRecord> rerank_layout_records;
-    if (use_reorder_ && rerank_layout_ != SINDI_V2_RERANK_LAYOUT_NONE) {
+    if (use_reorder_ && rerank_layout_ > 0) {
         rerank_layout_records.reserve(data_num);
     }
     for (uint32_t i = 0; i < data_num; ++i) {
@@ -554,13 +549,14 @@ SINDIV2::Add(const DatasetPtr& base) {
 
         if (use_reorder_ && rerank_type_ == SPARSE_RERANK_TYPE_DMQ8) {
             dmq_rerank_vectors.push_back(sparse_vectors[i]);
-        } else if (use_reorder_ && rerank_layout_ == SINDI_V2_RERANK_LAYOUT_NONE) {
+        } else if (use_reorder_ && rerank_layout_ == 0) {
             rerank_flat_->InsertVector(sparse_vectors + i, cur_element_count_);
         } else if (use_reorder_) {
             rerank_layout_records.push_back(
                 {sparse_vectors + i, static_cast<InnerIdType>(cur_element_count_), {}});
         }
 
+        last_affected_window = cur_element_count_ / window_size_;
         cur_element_count_++;
     }
 
@@ -568,11 +564,13 @@ SINDIV2::Add(const DatasetPtr& base) {
         rerank_flat_->BatchInsertVector(dmq_rerank_vectors.data(),
                                         static_cast<InnerIdType>(dmq_rerank_vectors.size()));
     }
-    if (use_reorder_ && rerank_layout_ != SINDI_V2_RERANK_LAYOUT_NONE) {
-        write_rerank_flat_with_layout(
-            rerank_flat_, rerank_layout_records, rerank_layout_, rerank_layout_top_terms_);
+    if (use_reorder_ && rerank_layout_ > 0) {
+        write_rerank_flat_with_layout(rerank_flat_, rerank_layout_records, rerank_layout_);
     }
 
+    for (int64_t window = first_affected_window; window <= last_affected_window; ++window) {
+        mutable_term_datacell->SortByValue(static_cast<uint32_t>(window));
+    }
     this->cal_memory_usage();
     return failed_ids;
 }
@@ -629,7 +627,7 @@ SINDIV2::build_immutable(const DatasetPtr& base) {
         dmq_rerank_vectors.reserve(data_num);
     }
     std::vector<RerankLayoutRecord> rerank_layout_records;
-    if (use_reorder_ && rerank_layout_ != SINDI_V2_RERANK_LAYOUT_NONE) {
+    if (use_reorder_ && rerank_layout_ > 0) {
         rerank_layout_records.reserve(data_num);
     }
     for (int64_t i = 0; i < data_num; ++i) {
@@ -670,7 +668,7 @@ SINDIV2::build_immutable(const DatasetPtr& base) {
         }
         if (use_reorder_ && rerank_type_ == SPARSE_RERANK_TYPE_DMQ8) {
             dmq_rerank_vectors.push_back(sparse_vectors[i]);
-        } else if (use_reorder_ && rerank_layout_ == SINDI_V2_RERANK_LAYOUT_NONE) {
+        } else if (use_reorder_ && rerank_layout_ == 0) {
             rerank_flat_->InsertVector(sparse_vectors + i, cur_element_count_);
         } else if (use_reorder_) {
             rerank_layout_records.push_back(
@@ -678,12 +676,14 @@ SINDIV2::build_immutable(const DatasetPtr& base) {
         }
         cur_element_count_++;
         if (cur_element_count_ % window_size_ == 0) {
+            staging->SortByValue(0);
             staging->Compact();
             immutable->AppendWindow(staging->GetWindow(0));
             staging.reset();
         }
     }
     if (staging != nullptr && staging->total_count_ > 0) {
+        staging->SortByValue(0);
         staging->Compact();
         immutable->AppendWindow(staging->GetWindow(0));
         staging.reset();
@@ -692,9 +692,8 @@ SINDIV2::build_immutable(const DatasetPtr& base) {
         rerank_flat_->BatchInsertVector(dmq_rerank_vectors.data(),
                                         static_cast<InnerIdType>(dmq_rerank_vectors.size()));
     }
-    if (use_reorder_ && rerank_layout_ != SINDI_V2_RERANK_LAYOUT_NONE) {
-        write_rerank_flat_with_layout(
-            rerank_flat_, rerank_layout_records, rerank_layout_, rerank_layout_top_terms_);
+    if (use_reorder_ && rerank_layout_ > 0) {
+        write_rerank_flat_with_layout(rerank_flat_, rerank_layout_records, rerank_layout_);
     }
     term_datacell_ = std::move(immutable);
     this->cal_memory_usage();
@@ -764,8 +763,8 @@ SINDIV2::KnnSearch(const DatasetPtr& query,
         }
     }
 
-    auto computer =
-        std::make_shared<SparseTermComputer>(effective_query, search_param, search_allocator);
+    auto computer = std::make_shared<SparseTermComputer>(
+        effective_query, search_param, search_allocator, term_datacell_->GetWindowCount());
     const SparseVector* rerank_query = (remap_term_ids_ && use_reorder_) ? &sparse_query : nullptr;
 
     SindiQueryContext query_context(search_allocator);
@@ -1004,7 +1003,8 @@ SINDIV2::RangeSearch(const DatasetPtr& query,
             return results;
         }
     }
-    auto computer = std::make_shared<SparseTermComputer>(sparse_query, search_param, allocator_);
+    auto computer = std::make_shared<SparseTermComputer>(
+        sparse_query, search_param, allocator_, term_datacell_->GetWindowCount());
     const auto query_term_ids = collect_query_term_ids(computer, allocator_);
     SindiQueryContext query_context(allocator_);
     query_context.query_term_buffers = term_datacell_->LoadQueryTermBuffers(query_term_ids);
@@ -1339,7 +1339,6 @@ SINDIV2::CalcDistanceById(const DatasetPtr& vector,
     }
     SINDIV2SearchParameter search_param;
     search_param.query_prune_ratio = 0;
-    search_param.term_prune_ratio = 0;
     auto computer = std::make_shared<SparseTermComputer>(sparse_query, search_param, allocator_);
     auto query_term_ids = collect_query_term_ids(computer, allocator_);
     auto query_term_buffers = term_datacell_->LoadQueryTermBuffers(query_term_ids);
@@ -1410,7 +1409,6 @@ SINDIV2::CalDistanceById(const DatasetPtr& query,
         }
         SINDIV2SearchParameter search_param;
         search_param.query_prune_ratio = 0;
-        search_param.term_prune_ratio = 0;
         auto computer =
             std::make_shared<SparseTermComputer>(mapped_query, search_param, allocator_);
         const auto query_term_ids = collect_query_term_ids(computer, allocator_);

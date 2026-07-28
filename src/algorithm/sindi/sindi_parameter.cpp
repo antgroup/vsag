@@ -73,8 +73,8 @@ SINDIParameter::FromJson(const JsonType& json) {
 
     if (json.Contains(SPARSE_DOC_PRUNE_RATIO)) {
         doc_prune_ratio = json[SPARSE_DOC_PRUNE_RATIO].GetFloat();
-        CHECK_ARGUMENT((0.0F <= doc_prune_ratio and doc_prune_ratio < 1.0F),
-                       fmt::format("doc_prune_ratio must be in [0, 1), got {}", doc_prune_ratio));
+        CHECK_ARGUMENT((0.0F <= doc_prune_ratio and doc_prune_ratio <= 0.9F),
+                       fmt::format("doc_prune_ratio must in [0, 0.9], got {}", doc_prune_ratio));
     } else {
         doc_prune_ratio = DEFAULT_DOC_PRUNE_RATIO;
     }
@@ -218,44 +218,50 @@ void
 SINDISearchParameter::FromJson(const JsonType& json) {
     CHECK_ARGUMENT(json.Contains(INDEX_SINDI),
                    fmt::format("parameters must contains {}", INDEX_SINDI));
+    const auto search_json = json[INDEX_SINDI];
 
     term_prune_ratio = DEFAULT_TERM_PRUNE_RATIO;
-    term_retain_threshold = DEFAULT_TERM_RETAIN_THRESHOLD;
-    if (json[INDEX_SINDI].Contains(SPARSE_TERM_PRUNE_RATIO)) {
-        term_prune_ratio = json[INDEX_SINDI][SPARSE_TERM_PRUNE_RATIO].GetFloat();
-        CHECK_ARGUMENT((0.0F <= term_prune_ratio and term_prune_ratio < 1.0F),
-                       fmt::format("term_prune_ratio must be in [0, 1), got {}", term_prune_ratio));
-    }
-    if (json[INDEX_SINDI].Contains(SPARSE_TERM_RETAIN_THRESHOLD)) {
-        const auto threshold_json = json[INDEX_SINDI][SPARSE_TERM_RETAIN_THRESHOLD];
-        CHECK_ARGUMENT(threshold_json.IsNumberInteger(),
-                       "term_retain_threshold must be a non-negative integer");
-        if (threshold_json.IsNumberUnsigned()) {
-            term_retain_threshold = threshold_json.GetUint64();
-        } else {
-            const auto threshold = threshold_json.GetInt();
+    term_prune_threshold = DEFAULT_TERM_PRUNE_THRESHOLD;
+    if (search_json.Contains(SPARSE_TERM_PRUNE)) {
+        const auto term_prune_json = search_json[SPARSE_TERM_PRUNE];
+        CHECK_ARGUMENT(term_prune_json.IsObject(), "term_prune must be an object");
+        if (term_prune_json.Contains(SPARSE_TERM_PRUNE_RATIO)) {
+            term_prune_ratio = term_prune_json[SPARSE_TERM_PRUNE_RATIO].GetFloat();
             CHECK_ARGUMENT(
-                threshold >= 0,
-                fmt::format("term_retain_threshold must be non-negative, got {}", threshold));
-            term_retain_threshold = static_cast<uint64_t>(threshold);
+                (0.0F <= term_prune_ratio and term_prune_ratio <= 0.9F),
+                fmt::format("term_prune.ratio must be in [0, 0.9], got {}", term_prune_ratio));
+        }
+        if (term_prune_json.Contains(SPARSE_TERM_PRUNE_THRESHOLD)) {
+            const auto threshold_json = term_prune_json[SPARSE_TERM_PRUNE_THRESHOLD];
+            CHECK_ARGUMENT(threshold_json.IsNumberInteger(),
+                           "term_prune.threshold must be a non-negative integer");
+            if (threshold_json.IsNumberUnsigned()) {
+                term_prune_threshold = threshold_json.GetUint64();
+            } else {
+                const auto threshold = threshold_json.GetInt();
+                CHECK_ARGUMENT(
+                    threshold >= 0,
+                    fmt::format("term_prune.threshold must be non-negative, got {}", threshold));
+                term_prune_threshold = static_cast<uint64_t>(threshold);
+            }
         }
     }
 
-    if (json[INDEX_SINDI].Contains(SPARSE_QUERY_PRUNE_RATIO)) {
-        query_prune_ratio = json[INDEX_SINDI][SPARSE_QUERY_PRUNE_RATIO].GetFloat();
+    if (search_json.Contains(SPARSE_QUERY_PRUNE_RATIO)) {
+        query_prune_ratio = search_json[SPARSE_QUERY_PRUNE_RATIO].GetFloat();
         CHECK_ARGUMENT(
-            (0.0F <= query_prune_ratio and query_prune_ratio < 1.0F),
-            fmt::format("query_prune_ratio must be in [0, 1), got {}", query_prune_ratio));
+            (0.0F <= query_prune_ratio and query_prune_ratio <= 0.9F),
+            fmt::format("query_prune_ratio must in [0, 0.9], got {}", query_prune_ratio));
     } else {
         query_prune_ratio = DEFAULT_QUERY_PRUNE_RATIO;
     }
-    if (json[INDEX_SINDI].Contains(SPARSE_N_CANDIDATE)) {
-        n_candidate = json[INDEX_SINDI][SPARSE_N_CANDIDATE].GetInt();
+    if (search_json.Contains(SPARSE_N_CANDIDATE)) {
+        n_candidate = search_json[SPARSE_N_CANDIDATE].GetInt();
     } else {
         n_candidate = DEFAULT_N_CANDIDATE;
     }
 
-    if (json[INDEX_SINDI].Contains(LEGACY_USE_TERM_LISTS_HEAP_INSERT_KEY)) {
+    if (search_json.Contains(LEGACY_USE_TERM_LISTS_HEAP_INSERT_KEY)) {
         logger::warn(
             "SINDI search parameter use_term_lists_heap_insert is ignored. "
             "Remove this key; heap insertion is derived from doc_prune_ratio "
@@ -268,8 +274,10 @@ SINDISearchParameter::ToJson() const {
     json[INDEX_SINDI].SetJson(JsonType());
     json[INDEX_SINDI][SPARSE_QUERY_PRUNE_RATIO].SetFloat(query_prune_ratio);
     json[INDEX_SINDI][SPARSE_N_CANDIDATE].SetInt(n_candidate);
-    json[INDEX_SINDI][SPARSE_TERM_PRUNE_RATIO].SetFloat(term_prune_ratio);
-    json[INDEX_SINDI][SPARSE_TERM_RETAIN_THRESHOLD].SetUint64(term_retain_threshold);
+    json[INDEX_SINDI][SPARSE_TERM_PRUNE].SetJson(JsonType());
+    json[INDEX_SINDI][SPARSE_TERM_PRUNE][SPARSE_TERM_PRUNE_RATIO].SetFloat(term_prune_ratio);
+    json[INDEX_SINDI][SPARSE_TERM_PRUNE][SPARSE_TERM_PRUNE_THRESHOLD].SetUint64(
+        term_prune_threshold);
     return json;
 }
 

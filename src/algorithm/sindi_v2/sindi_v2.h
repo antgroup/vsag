@@ -209,8 +209,7 @@ private:
 
     bool immutable_enabled_{false};
 
-    std::string rerank_layout_{"none"};
-    uint32_t rerank_layout_top_terms_{16};
+    uint32_t rerank_layout_{0};
 
     SINDIV2ParameterPtr param_;
     IndexCommonParam common_param_;

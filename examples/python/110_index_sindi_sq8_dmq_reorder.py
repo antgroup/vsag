@@ -133,8 +133,8 @@ def sindi_sq8_dmq8_reorder_test():
         {
             "sindi": {
                 "query_prune_ratio": 0.2,  # Prune 20% of least-relevant query terms
-                # Prune the lowest-value 10%, capped by the per-window share of 100,000 postings.
-                "term_prune_ratio": 0.1, "term_retain_threshold": 100000,
+                # Prune 10% of least-relevant terms from posting lists
+                "term_prune": {"ratio": 0.1},
                 "n_candidate": 10,         # Keep top 10 candidates after inverted phase for reranking
             }
         }

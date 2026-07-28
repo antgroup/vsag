@@ -16,7 +16,9 @@
 #include "mutable_sindi_term_datacell.h"
 
 #include <algorithm>
+#include <array>
 #include <cstring>
+#include <numeric>
 
 #include "datacell/sindi_datacell_utils.h"
 #include "simd/fp16_simd.h"
@@ -53,7 +55,8 @@ MutableSindiTermDataCell::DeserializeWindows(StreamReader& reader, uint32_t wind
         uint32_t window_count = 0;
         for (const auto& ids : windows_[i].term_ids_) {
             if (ids != nullptr && not ids->empty()) {
-                window_count = std::max(window_count, static_cast<uint32_t>(ids->back()) + 1);
+                const auto max_id = *std::max_element(ids->begin(), ids->end());
+                window_count = std::max(window_count, static_cast<uint32_t>(max_id) + 1);
             }
         }
         total_count_ =
@@ -215,8 +218,7 @@ MutableSindiTermDataCell::QueryWindow(float* dists,
             continue;
         }
 
-        auto term_size = static_cast<uint32_t>(static_cast<float>(window.term_sizes_[term]) *
-                                               computer->term_retain_ratio_);
+        const auto term_size = computer->GetTermScanCount(window.term_sizes_[term]);
 
         if (sparse_value_quant_type_ == SparseValueQuantizationType::SQ8) {
             computer->ScanForAccumulateSQ8(it,
@@ -401,8 +403,7 @@ MutableSindiTermDataCell::InsertHeapByTermLists(const MutableSINDIWindow& window
         }
 
         uint32_t i = 0;
-        auto term_size = static_cast<uint32_t>(static_cast<float>(window.term_sizes_[term]) *
-                                               computer->term_retain_ratio_);
+        const auto term_size = computer->GetTermScanCount(window.term_sizes_[term]);
         auto& one_term_ids = *window.term_ids_[term];
         if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
             if (heap.size() < n_candidate) {
@@ -498,6 +499,74 @@ MutableSindiTermDataCell::InsertVector(const SparseVector& sparse_base, uint32_t
         window->term_sizes_[term] += 1;
     }
     total_count_ = std::max(total_count_, static_cast<int64_t>(doc_id) + 1);
+}
+
+void
+MutableSindiTermDataCell::SortByValue(uint32_t window_id) {
+    CHECK_ARGUMENT(window_id < windows_.size(), "mutable SINDI window id out of range");
+    auto& window = windows_[window_id];
+    const uint64_t value_code_size =
+        sparse_value_quant_type_ == SparseValueQuantizationType::SQ8
+            ? sizeof(uint8_t)
+            : (sparse_value_quant_type_ == SparseValueQuantizationType::FP16 ? sizeof(uint16_t)
+                                                                             : sizeof(float));
+    Vector<uint32_t> order(allocator_);
+
+    for (uint64_t term = 0; term < window.term_sizes_.size(); ++term) {
+        const auto term_size = window.term_sizes_[term];
+        if (term_size <= 1) {
+            continue;
+        }
+
+        auto& ids = *window.term_ids_[term];
+        auto& data = *window.term_datas_[term];
+        order.resize(term_size);
+        std::iota(order.begin(), order.end(), 0);
+        auto get_value_code = [&data, value_code_size](uint32_t index) {
+            uint32_t code = 0;
+            std::memcpy(&code,
+                        data.data() + static_cast<uint64_t>(index) * value_code_size,
+                        value_code_size);
+            return code;
+        };
+        std::sort(
+            order.begin(), order.end(), [&get_value_code, &ids](uint32_t left, uint32_t right) {
+                const auto left_code = get_value_code(left);
+                const auto right_code = get_value_code(right);
+                if (left_code != right_code) {
+                    // For non-negative values, FP32/FP16 codes preserve decoded-value order, and
+                    // SQ8 decoding is monotonic in the code.
+                    return left_code > right_code;
+                }
+                return ids[left] < ids[right];
+            });
+
+        for (uint32_t start = 0; start < term_size; ++start) {
+            if (order[start] == start) {
+                continue;
+            }
+
+            const auto saved_id = ids[start];
+            std::array<uint8_t, sizeof(float)> saved_data{};
+            std::memcpy(saved_data.data(), data.data() + start * value_code_size, value_code_size);
+
+            auto current = start;
+            while (order[current] != start) {
+                const auto source = order[current];
+                ids[current] = ids[source];
+                std::memcpy(data.data() + static_cast<uint64_t>(current) * value_code_size,
+                            data.data() + static_cast<uint64_t>(source) * value_code_size,
+                            value_code_size);
+                order[current] = current;
+                current = source;
+            }
+            ids[current] = saved_id;
+            std::memcpy(data.data() + static_cast<uint64_t>(current) * value_code_size,
+                        saved_data.data(),
+                        value_code_size);
+            order[current] = current;
+        }
+    }
 }
 
 void

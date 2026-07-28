@@ -167,6 +167,78 @@ TEST_CASE("SINDI Heap Insert Strategy Test", "[ut][SINDI]") {
     }
 }
 
+TEST_CASE("SINDI term prune keeps highest stored values after build and incremental add",
+          "[ut][SINDI]") {
+    const auto immutable = GENERATE(false, true);
+    const auto quantization = GENERATE(SparseValueQuantizationType::FP32,
+                                       SparseValueQuantizationType::FP16,
+                                       SparseValueQuantizationType::SQ8);
+    DYNAMIC_SECTION("immutable=" << immutable
+                                 << ", quantization=" << static_cast<int>(quantization)) {
+        auto allocator = SafeAllocator::FactoryDefaultAllocator();
+        IndexCommonParam common_param;
+        common_param.allocator_ = allocator;
+        common_param.metric_ = MetricType::METRIC_TYPE_IP;
+        common_param.dim_ = 8;
+
+        auto parameter = std::make_shared<SINDIParameter>();
+        parameter->term_id_limit = 8;
+        parameter->window_size = 10000;
+        parameter->doc_prune_ratio = 0.0F;
+        parameter->use_reorder = false;
+        parameter->sparse_value_quant_type = quantization;
+        parameter->immutable = immutable;
+        SINDI index(parameter, common_param);
+
+        uint32_t term = 3;
+        std::array<float, 4> values = {1.0F, 3.0F, 2.0F, 3.0F};
+        std::array<int64_t, 4> labels = {10, 11, 12, 13};
+        std::array<SparseVector, 4> vectors;
+        for (uint32_t document = 0; document < vectors.size(); ++document) {
+            vectors[document] = SparseVector{1, &term, values.data() + document};
+        }
+
+        if (immutable) {
+            auto base = Dataset::Make();
+            base->NumElements(vectors.size())
+                ->SparseVectors(vectors.data())
+                ->Ids(labels.data())
+                ->Owner(false);
+            REQUIRE(index.Build(base).empty());
+        } else {
+            auto first = Dataset::Make();
+            first->NumElements(2)->SparseVectors(vectors.data())->Ids(labels.data())->Owner(false);
+            REQUIRE(index.Build(first).empty());
+            auto second = Dataset::Make();
+            second->NumElements(2)
+                ->SparseVectors(vectors.data() + 2)
+                ->Ids(labels.data() + 2)
+                ->Owner(false);
+            REQUIRE(index.Add(second).empty());
+        }
+
+        float query_value = 1.0F;
+        SparseVector sparse_query{1, &term, &query_value};
+        auto query = Dataset::Make();
+        query->NumElements(1)->SparseVectors(&sparse_query)->Owner(false);
+        const std::string search_parameters = R"({
+            "sindi": {
+                "query_prune_ratio": 0.0,
+                "term_prune": {
+                    "ratio": 0.0,
+                    "threshold": 2
+                },
+                "n_candidate": 4
+            }
+        })";
+        const auto result = index.KnnSearch(query, 4, search_parameters, nullptr);
+        REQUIRE(result->GetDim() == 2);
+        std::set<int64_t> result_labels(result->GetIds(),
+                                        result->GetIds() + static_cast<uint64_t>(result->GetDim()));
+        REQUIRE(result_labels == std::set<int64_t>{11, 13});
+    }
+}
+
 SINDIParameterPtr
 create_exact_sindi_param(uint32_t term_id_limit,
                          bool remap_term_ids = false,
@@ -175,7 +247,6 @@ create_exact_sindi_param(uint32_t term_id_limit,
         "use_reorder": false,
         "use_quantization": false,
         "doc_prune_ratio": 0.0,
-        "term_prune_ratio": 0.0,
         "window_size": 50000,
         "term_id_limit": {},
         "remap_term_ids": {},
@@ -250,7 +321,6 @@ TEST_CASE("SINDI Basic Test", "[ut][SINDI]") {
         "use_reorder": true,
         "use_quantization": false,
         "doc_prune_ratio": 0.0,
-        "term_prune_ratio": 0.0,
         "window_size": 10000,
         "term_id_limit": 30001,
         "avg_doc_term_length": 100
@@ -291,7 +361,7 @@ TEST_CASE("SINDI Basic Test", "[ut][SINDI]") {
     {
         "sindi": {
             "query_prune_ratio": 0.0,
-            "term_prune_ratio": 0.0,
+            "term_prune": {"ratio": 0.0},
             "n_candidate": 20
         }
     }
@@ -433,7 +503,6 @@ TEST_CASE("SINDI Quantization Test", "[ut][SINDI]") {
         "use_reorder": true,
         "use_quantization": true,
         "doc_prune_ratio": 0.0,
-        "term_prune_ratio": 0.0,
         "window_size": 10000,
         "term_id_limit": 30001,
         "avg_doc_term_length": 100
@@ -458,7 +527,7 @@ TEST_CASE("SINDI Quantization Test", "[ut][SINDI]") {
     {
         "sindi": {
             "query_prune_ratio": 0.0,
-            "term_prune_ratio": 0.0,
+            "term_prune": {"ratio": 0.0},
             "n_candidate": 20
         }
     }
@@ -590,7 +659,7 @@ TEST_CASE("SINDI Immutable Sparse Deserialize KNN Test", "[ut][SINDI]") {
     {{
         "sindi": {{
             "query_prune_ratio": 0.0,
-            "term_prune_ratio": 0.0,
+            "term_prune": {{"ratio": 0.0}},
             "n_candidate": 30,
             "use_term_lists_heap_insert": {}
         }}
@@ -913,7 +982,7 @@ TEST_CASE("SINDI Immutable Build Search And Serialize Test", "[ut][SINDI]") {
     {
         "sindi": {
             "query_prune_ratio": 0.0,
-            "term_prune_ratio": 0.0,
+            "term_prune": {"ratio": 0.0},
             "n_candidate": 40,
             "use_term_lists_heap_insert": true
         }
@@ -1030,7 +1099,7 @@ TEST_CASE("SINDI Remap Basic Test", "[ut][SINDI]") {
     {
         "sindi": {
             "query_prune_ratio": 0.0,
-            "term_prune_ratio": 0.0,
+            "term_prune": {"ratio": 0.0},
             "n_candidate": 20
         }
     }
@@ -1175,7 +1244,7 @@ TEST_CASE("SINDI Remap with Reorder Test", "[ut][SINDI]") {
     {
         "sindi": {
             "query_prune_ratio": 0.0,
-            "term_prune_ratio": 0.0,
+            "term_prune": {"ratio": 0.0},
             "n_candidate": 20
         }
     }
@@ -1320,7 +1389,7 @@ TEST_CASE("SINDI Remap with Quantization Test", "[ut][SINDI]") {
     {
         "sindi": {
             "query_prune_ratio": 0.0,
-            "term_prune_ratio": 0.0,
+            "term_prune": {"ratio": 0.0},
             "n_candidate": 20
         }
     }
@@ -1419,7 +1488,7 @@ TEST_CASE("SINDI Remap with Filter Test", "[ut][SINDI]") {
     {
         "sindi": {
             "query_prune_ratio": 0.0,
-            "term_prune_ratio": 0.0,
+            "term_prune": {"ratio": 0.0},
             "n_candidate": 20
         }
     }
@@ -1878,7 +1947,7 @@ TEST_CASE("SINDI Remap Memory Comparison - MD5 Vocabulary", "[ut][SINDI]") {
     {
         "sindi": {
             "query_prune_ratio": 0.0,
-            "term_prune_ratio": 0.0,
+            "term_prune": {"ratio": 0.0},
             "n_candidate": 20
         }
     }

@@ -26,10 +26,13 @@
 #include <cstring>
 #include <limits>
 #include <numeric>
+#include <set>
 #include <sstream>
 
 #include "impl/allocator/safe_allocator.h"
 #include "index_common_param.h"
+#include "io/memory_block_io/memory_block_io_parameter.h"
+#include "io/memory_io/memory_io_parameter.h"
 #include "unittest.h"
 
 using namespace vsag;
@@ -94,8 +97,7 @@ create_sindi_v2_param(uint32_t term_id_limit,
                       const std::string& term_path,
                       const std::string& term_io_type = "buffer_io",
                       const std::string& rerank_io_type = "memory_io",
-                      const std::string& rerank_layout = "none",
-                      uint32_t rerank_layout_top_terms = 16) {
+                      uint32_t rerank_layout = 0) {
     auto param_str = fmt::format(R"({{
         "term_id_limit": {},
         "window_size": 10000,
@@ -103,14 +105,12 @@ create_sindi_v2_param(uint32_t term_id_limit,
         "use_quantization": false,
         "use_reorder": true,
         "avg_doc_term_length": 100,
-        "rerank_layout": "{}",
-        "rerank_layout_top_terms": {},
+        "rerank_layout": {},
         "term_io": {{ "type": "{}", "file_path": "{}" }},
         "rerank_io": {{ "type": "{}" }}
     }})",
                                  term_id_limit,
                                  rerank_layout,
-                                 rerank_layout_top_terms,
                                  term_io_type,
                                  term_path,
                                  rerank_io_type);
@@ -120,6 +120,82 @@ create_sindi_v2_param(uint32_t term_id_limit,
 }
 
 }  // namespace
+
+TEST_CASE("SINDIV2 term prune keeps highest stored values after build and incremental add",
+          "[ut][SINDIV2]") {
+    const auto immutable = GENERATE(false, true);
+    const auto quantization = GENERATE(SparseValueQuantizationType::FP32,
+                                       SparseValueQuantizationType::FP16,
+                                       SparseValueQuantizationType::SQ8);
+    DYNAMIC_SECTION("immutable=" << immutable
+                                 << ", quantization=" << static_cast<int>(quantization)) {
+        auto allocator = SafeAllocator::FactoryDefaultAllocator();
+        IndexCommonParam common_param;
+        common_param.allocator_ = allocator;
+        common_param.metric_ = MetricType::METRIC_TYPE_IP;
+        common_param.dim_ = 8;
+
+        auto parameter = std::make_shared<SINDIV2Parameter>();
+        parameter->term_id_limit = 8;
+        parameter->window_size = 10000;
+        parameter->doc_prune_ratio = 0.0F;
+        parameter->use_reorder = false;
+        parameter->sparse_value_quant_type = quantization;
+        parameter->use_quantization = quantization != SparseValueQuantizationType::FP32;
+        parameter->immutable = immutable;
+        parameter->term_io_parameter = std::make_shared<MemoryIOParameter>();
+        parameter->rerank_io_parameter = std::make_shared<MemoryBlockIOParameter>();
+        SINDIV2 index(parameter, common_param);
+
+        uint32_t term = 3;
+        std::array<float, 4> values = {1.0F, 3.0F, 2.0F, 3.0F};
+        std::array<int64_t, 4> labels = {10, 11, 12, 13};
+        std::array<SparseVector, 4> vectors;
+        for (uint32_t document = 0; document < vectors.size(); ++document) {
+            vectors[document] = SparseVector{1, &term, values.data() + document};
+        }
+
+        if (immutable) {
+            auto base = Dataset::Make();
+            base->NumElements(vectors.size())
+                ->SparseVectors(vectors.data())
+                ->Ids(labels.data())
+                ->Owner(false);
+            REQUIRE(index.Build(base).empty());
+        } else {
+            auto first = Dataset::Make();
+            first->NumElements(2)->SparseVectors(vectors.data())->Ids(labels.data())->Owner(false);
+            REQUIRE(index.Build(first).empty());
+            auto second = Dataset::Make();
+            second->NumElements(2)
+                ->SparseVectors(vectors.data() + 2)
+                ->Ids(labels.data() + 2)
+                ->Owner(false);
+            REQUIRE(index.Add(second).empty());
+        }
+
+        float query_value = 1.0F;
+        SparseVector sparse_query{1, &term, &query_value};
+        auto query = Dataset::Make();
+        query->NumElements(1)->SparseVectors(&sparse_query)->Owner(false);
+        const std::string search_parameters = R"({
+            "sindi_v2": {
+                "query_prune_ratio": 0.0,
+                "term_prune": {
+                    "ratio": 0.0,
+                    "threshold": 2
+                },
+                "n_candidate": 4,
+                "use_term_lists_heap_insert": false
+            }
+        })";
+        const auto result = index.KnnSearch(query, 4, search_parameters, nullptr);
+        REQUIRE(result->GetDim() == 2);
+        std::set<int64_t> result_labels(result->GetIds(),
+                                        result->GetIds() + static_cast<uint64_t>(result->GetDim()));
+        REQUIRE(result_labels == std::set<int64_t>{11, 13});
+    }
+}
 
 TEST_CASE("SINDIV2 Batch Rerank End-To-End", "[ut][SINDIV2]") {
     // Phase A regression: the rerank path now batches IO through
@@ -156,7 +232,7 @@ TEST_CASE("SINDIV2 Batch Rerank End-To-End", "[ut][SINDIV2]") {
     const std::string search_param = R"({
         "sindi_v2": {
             "query_prune_ratio": 0.0,
-            "term_prune_ratio": 0.0,
+            "term_prune": {"ratio": 0.0},
             "n_candidate": 100,
             "use_term_lists_heap_insert": false
         }
@@ -225,8 +301,7 @@ TEST_CASE("SINDIV2 Top Terms Rerank Layout End-To-End", "[ut][SINDIV2]") {
                                        term_path,
                                        "buffer_io",
                                        "memory_io",
-                                       "top_terms_signature",
-                                       /*rerank_layout_top_terms=*/8);
+                                       /*rerank_layout=*/8);
     auto index = std::make_unique<SINDIV2>(param, common_param);
     REQUIRE(index->Build(base).empty());
 
@@ -235,7 +310,7 @@ TEST_CASE("SINDIV2 Top Terms Rerank Layout End-To-End", "[ut][SINDIV2]") {
     const std::string search_param = R"({
         "sindi_v2": {
             "query_prune_ratio": 0.0,
-            "term_prune_ratio": 0.0,
+            "term_prune": {"ratio": 0.0},
             "n_candidate": 64,
             "use_term_lists_heap_insert": false
         }
@@ -288,7 +363,7 @@ TEST_CASE("SINDIV2 Sorted Batch Rerank End-To-End", "[ut][SINDIV2]") {
     const std::string search_param = R"({
         "sindi_v2": {
             "query_prune_ratio": 0.0,
-            "term_prune_ratio": 0.0,
+            "term_prune": {"ratio": 0.0},
             "n_candidate": 200,
             "use_term_lists_heap_insert": false
         }
@@ -375,7 +450,7 @@ TEST_CASE("SINDIV2 ReaderIO Rerank Uses Section Offset", "[ut][SINDIV2]") {
     const std::string search_param = R"({
         "sindi_v2": {
             "query_prune_ratio": 0.0,
-            "term_prune_ratio": 0.0,
+            "term_prune": {"ratio": 0.0},
             "n_candidate": 64,
             "use_term_lists_heap_insert": false
         }
@@ -518,7 +593,7 @@ TEST_CASE("SINDIV2 memory term layout mutable and immutable roundtrip", "[ut][SI
     const std::string search_param = R"({
         "sindi_v2": {
             "query_prune_ratio": 0.0,
-            "term_prune_ratio": 0.0,
+            "term_prune": {"ratio": 0.0},
             "n_candidate": 3,
             "use_term_lists_heap_insert": false
         }
@@ -676,7 +751,7 @@ TEST_CASE("SINDIV2 empty index roundtrip", "[ut][SINDIV2]") {
     const std::string search_param = R"({
         "sindi_v2": {
             "query_prune_ratio": 0.0,
-            "term_prune_ratio": 0.0,
+            "term_prune": {"ratio": 0.0},
             "n_candidate": 1,
             "use_term_lists_heap_insert": false
         }
@@ -847,7 +922,7 @@ TEST_CASE("SINDIV2 optimized DMQ and batch distance end-to-end", "[ut][SINDIV2]"
             const std::string search_parameters = R"({
                 "sindi_v2": {
                     "query_prune_ratio": 0.0,
-                    "term_prune_ratio": 0.0,
+                    "term_prune": {"ratio": 0.0},
                     "n_candidate": 3,
                     "use_term_lists_heap_insert": false
                 }

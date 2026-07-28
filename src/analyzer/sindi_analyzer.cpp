@@ -217,8 +217,10 @@ SINDIAnalyzer::collect_coarse_candidates(const SparseVector& query,
     inner_param.ef = candidate_count;
     inner_param.topk = candidate_count;
     MaxHeap heap(sindi_->allocator_);
-    auto computer =
-        std::make_shared<SparseTermComputer>(effective_query, search_param, sindi_->allocator_);
+    auto computer = std::make_shared<SparseTermComputer>(effective_query,
+                                                         search_param,
+                                                         sindi_->allocator_,
+                                                         sindi_->term_datacell_->GetWindowCount());
     const bool use_term_lists_heap_insert = sindi_->UseTermListsHeapInsert(search_param);
 
     Vector<float> dists(sindi_->window_size_, 0.0F, sindi_->allocator_);
@@ -295,7 +297,10 @@ SINDIAnalyzer::collect_doc_prune_candidates(const SparseVector& query,
     inner_param.topk = candidate_count;
     MaxHeap heap(sindi_->allocator_);
     auto computer =
-        std::make_shared<SparseTermComputer>(effective_query, search_param, sindi_->allocator_);
+        std::make_shared<SparseTermComputer>(effective_query,
+                                             search_param,
+                                             sindi_->allocator_,
+                                             sindi_->mutable_term_datacell_->GetWindowCount());
     const bool use_term_lists_heap_insert = sindi_->UseTermListsHeapInsert(search_param);
 
     Vector<float> dists(sindi_->window_size_, 0.0F, sindi_->allocator_);
@@ -313,8 +318,7 @@ SINDIAnalyzer::collect_doc_prune_candidates(const SparseVector& query,
             if (term >= term_list.term_sizes_.size() || term_list.term_sizes_[term] == 0) {
                 continue;
             }
-            auto term_size = static_cast<uint32_t>(static_cast<float>(term_list.term_sizes_[term]) *
-                                                   computer->term_retain_ratio_);
+            const auto term_size = computer->GetTermScanCount(term_list.term_sizes_[term]);
             if (term_size == 0) {
                 continue;
             }
@@ -1269,7 +1273,8 @@ SINDIAnalyzer::GetStats() {
 
     auto default_search_json = parse_sindi_search_json("default");
     default_search_json[INDEX_SINDI][SPARSE_QUERY_PRUNE_RATIO].SetFloat(0.0F);
-    default_search_json[INDEX_SINDI][SPARSE_TERM_PRUNE_RATIO].SetFloat(0.0F);
+    default_search_json[INDEX_SINDI][SPARSE_TERM_PRUNE].SetJson(JsonType());
+    default_search_json[INDEX_SINDI][SPARSE_TERM_PRUNE][SPARSE_TERM_PRUNE_RATIO].SetFloat(0.0F);
     default_search_json[INDEX_SINDI][SPARSE_N_CANDIDATE].SetInt(500);
     auto default_search_param = default_search_json.Dump();
 

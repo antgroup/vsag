@@ -124,7 +124,7 @@
   <rect x="837" y="518" width="466" height="240" class="layer-index"/>
   <text x="1070" y="540" text-anchor="middle" class="subtitle">索引层面：倒排列表侧剪枝</text>
   <text x="1070" y="574" text-anchor="middle" class="small">
-    term_prune_ratio = 0.3，扫描 70% posting
+    term_prune.ratio = 0.3，扫描 70% posting
   </text>
   <rect x="866" y="588" width="404" height="132" class="panel"/>
   <g transform="translate(892,606)">

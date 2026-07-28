@@ -241,8 +241,7 @@ SINDI::GetStats() const {
     analyzer_param.topk = K_ANALYZE_DEFAULT_TOPK;
     analyzer_param.base_sample_size =
         std::min<uint64_t>(K_ANALYZE_BASE_SAMPLE_SIZE, cur_element_count_);
-    analyzer_param.search_params =
-        R"({"sindi": {"query_prune_ratio": 0, "term_prune_ratio": 0, "n_candidate": 500}})";
+    analyzer_param.search_params = R"({"sindi": {"query_prune_ratio": 0, "n_candidate": 500}})";
     auto analyzer = CreateAnalyzer(this, analyzer_param);
     JsonType stats = analyzer->GetStats();
     return stats.Dump(4);
@@ -388,6 +387,8 @@ SINDI::add(const DatasetPtr& base) {
     Vector<uint32_t> pruned_ids(allocator_);
     Vector<float> pruned_vals(allocator_);
     Vector<uint32_t> remapped_ids(allocator_);
+    const auto first_affected_window = cur_element_count_ / window_size_;
+    int64_t last_affected_window = -1;
     std::vector<SparseVector> rerank_vectors;
     if (use_reorder_) {
         rerank_vectors.reserve(data_num);
@@ -437,11 +438,15 @@ SINDI::add(const DatasetPtr& base) {
         if (use_reorder_) {
             rerank_vectors.push_back(sparse_vectors[i]);
         }
+        last_affected_window = cur_element_count_ / window_size_;
         cur_element_count_++;
     }
     if (not rerank_vectors.empty()) {
         rerank_flat_->BatchInsertVector(rerank_vectors.data(),
                                         static_cast<InnerIdType>(rerank_vectors.size()));
+    }
+    for (int64_t window = first_affected_window; window <= last_affected_window; ++window) {
+        mutable_term_datacell_->SortByValue(static_cast<uint32_t>(window));
     }
     return failed_ids;
 }
@@ -573,6 +578,7 @@ void
 SINDI::flush_immutable_staging() {
     CHECK_ARGUMENT(mutable_term_datacell_ != nullptr && immutable_term_datacell_ != nullptr,
                    "immutable SINDI staging is not initialized");
+    mutable_term_datacell_->SortByValue(0);
     mutable_term_datacell_->Compact();
     immutable_term_datacell_->AppendWindow(mutable_term_datacell_->GetWindow(0));
     mutable_term_datacell_.reset();
@@ -673,7 +679,8 @@ SINDI::KnnSearch(const DatasetPtr& query,
         }
     }
 
-    auto computer = std::make_shared<SparseTermComputer>(effective_query, search_param, allocator_);
+    auto computer = std::make_shared<SparseTermComputer>(
+        effective_query, search_param, allocator_, term_datacell_->GetWindowCount());
     const SparseVector* rerank_query = (remap_term_ids_ && use_reorder_) ? &sparse_query : nullptr;
     auto result = search_impl<KNN_SEARCH>(computer,
                                          inner_param,
@@ -1329,7 +1336,8 @@ SINDI::RangeSearch(const DatasetPtr& query,
         }
     }
 
-    auto computer = std::make_shared<SparseTermComputer>(effective_query, search_param, allocator_);
+    auto computer = std::make_shared<SparseTermComputer>(
+        effective_query, search_param, allocator_, term_datacell_->GetWindowCount());
     const SparseVector* rerank_query = (remap_term_ids_ && use_reorder_) ? &sparse_query : nullptr;
     return search_impl<RANGE_SEARCH>(
         computer, inner_param, allocator_, UseTermListsHeapInsert(search_param), rerank_query);
@@ -2112,7 +2120,6 @@ SINDI::CalcDistanceById(const DatasetPtr& vector,
     }
     SINDISearchParameter search_param;
     search_param.query_prune_ratio = 0;
-    search_param.term_prune_ratio = 0;
     auto computer = std::make_shared<SparseTermComputer>(sparse_query, search_param, allocator_);
     const QueryTermBuffers query_term_buffers(allocator_);
     return term_datacell_->CalcDistanceByInnerId(computer, inner_id, query_term_buffers);
@@ -2191,7 +2198,6 @@ SINDI::CalDistanceById(const DatasetPtr& query,
         }
         SINDISearchParameter search_param;
         search_param.query_prune_ratio = 0;
-        search_param.term_prune_ratio = 0;
         auto computer =
             std::make_shared<SparseTermComputer>(mapped_query, search_param, allocator_);
         const QueryTermBuffers query_term_buffers(allocator_);

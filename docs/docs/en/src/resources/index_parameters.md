@@ -178,7 +178,10 @@ Put search parameters under an object matching the factory entry:
     "sindi_v2": {
         "n_candidate": 100,
         "query_prune_ratio": 0.0,
-        "term_prune_ratio": 0.0,
+        "term_prune": {
+            "ratio": 0.0,
+            "threshold": 0
+        },
         "use_term_lists_heap_insert": true
     }
 }
