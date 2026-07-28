@@ -1166,7 +1166,7 @@ Pyramid::add_one_point(const Hierarchy& h,
         graph_node.ids_ = node->ids_;
         graph_node.Init();
 
-        auto codes = use_reorder_ ? precise_codes_ : base_codes_;
+        auto codes = has_precise_reorder() ? precise_codes_ : base_codes_;
         Vector<float> decoded_vector(dim_, allocator_);
         for (const auto id : node->ids_) {
             bool need_release = false;

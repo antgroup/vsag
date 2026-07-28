@@ -31,7 +31,7 @@ struct PyramidTestIndex {
 };
 
 PyramidTestIndex
-MakePyramidIndex(uint32_t index_min_size) {
+MakePyramidIndex(uint32_t index_min_size, bool split_rabitq = false) {
     PyramidTestIndex result;
     vsag::IndexCommonParam common_param;
     common_param.dim_ = PYRAMID_TEST_DIM;
@@ -50,6 +50,13 @@ MakePyramidIndex(uint32_t index_min_size) {
         "no_build_levels": [0],
         "index_min_size": 3
     })");
+    if (split_rabitq) {
+        external_param[vsag::PYRAMID_BASE_QUANTIZATION_TYPE].SetString("rabitq");
+        external_param[vsag::PYRAMID_PRECISE_QUANTIZATION_TYPE].SetString("rabitq");
+        external_param[vsag::PYRAMID_RABITQ_BITS_PER_DIM_BASE].SetInt(1);
+        external_param[vsag::PYRAMID_RABITQ_BITS_PER_DIM_PRECISE].SetInt(1);
+        external_param[vsag::PYRAMID_USE_REORDER].SetBool(true);
+    }
     external_param[vsag::PYRAMID_INDEX_MIN_SIZE].SetInt(index_min_size);
     auto param = vsag::Pyramid::CheckAndMappingExternalParam(external_param, common_param);
     result.index = std::make_shared<vsag::Pyramid>(param, common_param);
@@ -118,7 +125,10 @@ TEST_CASE("Split function tests", "[ut][pyramid]") {
 }
 
 TEST_CASE("Pyramid promotes flat node at index minimum size", "[ut][pyramid]") {
-    auto test_index = MakePyramidIndex(3);
+    const bool split_rabitq = GENERATE(false, true);
+    const bool build_all_at_once = GENERATE(false, true);
+    CAPTURE(split_rabitq, build_all_at_once);
+    auto test_index = MakePyramidIndex(3, split_rabitq);
     const auto& index = test_index.index;
     std::vector<float> vectors = {
         0.0F,
@@ -137,14 +147,20 @@ TEST_CASE("Pyramid promotes flat node at index minimum size", "[ut][pyramid]") {
     std::vector<int64_t> ids = {100, 101, 102};
     std::vector<std::string> paths(3, "tenant");
 
-    REQUIRE(index->Add(MakePyramidDataset(vectors.data(), ids.data(), paths.data(), 2)).empty());
-    REQUIRE(GetPyramidSubindexCount(index, "flat_subindexes") == 1);
-    REQUIRE(GetPyramidSubindexCount(index, "graph_subindexes") == 0);
+    if (build_all_at_once) {
+        REQUIRE(
+            index->Build(MakePyramidDataset(vectors.data(), ids.data(), paths.data(), 3)).empty());
+    } else {
+        REQUIRE(
+            index->Add(MakePyramidDataset(vectors.data(), ids.data(), paths.data(), 2)).empty());
+        REQUIRE(GetPyramidSubindexCount(index, "flat_subindexes") == 1);
+        REQUIRE(GetPyramidSubindexCount(index, "graph_subindexes") == 0);
 
-    REQUIRE(index
-                ->Add(MakePyramidDataset(
-                    vectors.data() + 2 * PYRAMID_TEST_DIM, ids.data() + 2, paths.data() + 2, 1))
-                .empty());
+        REQUIRE(index
+                    ->Add(MakePyramidDataset(
+                        vectors.data() + 2 * PYRAMID_TEST_DIM, ids.data() + 2, paths.data() + 2, 1))
+                    .empty());
+    }
     REQUIRE(GetPyramidSubindexCount(index, "flat_subindexes") == 0);
     REQUIRE(GetPyramidSubindexCount(index, "graph_subindexes") == 1);
     REQUIRE(GetPyramidSubindexCount(index, "total_vectors_in_graph") == 3);
